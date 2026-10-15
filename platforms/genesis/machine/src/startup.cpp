@@ -271,7 +271,7 @@ StartupResult execute_m68k_frontend_startup(const FrontendAnalysis &analysis, St
     } else if (ir.kind == M68kIrKind::write_move && decoded.source_ea.mode == M68kEaMode::data_register &&
                decoded.source_ea.reg == 0U && decoded.destination_ea.mode == M68kEaMode::absolute_long) {
       const auto effect = m68k_operation_effect(ir);
-      const auto address = decoded.destination_ea.absolute_address;
+      const auto address = m68k_data_access_ea_address(decoded.destination_ea);
       if (const auto misaligned = m68k_startup_absolute_operand_alignment(address)) {
         auto f=fail(misaligned==DirectFlowDiagnostic::effective_address_not_24bit?"effective_address_not_24bit":"odd_effective_address",ordinal,decoded,decoded.raw_bytes);f.effective_address=address;return f;
       }
@@ -362,7 +362,7 @@ StartupResult execute_m68k_frontend_startup(const FrontendAnalysis &analysis, St
     } else if (ir.kind == M68kIrKind::write_move && decoded.source_ea.mode == M68kEaMode::absolute_long &&
                decoded.destination_ea.mode == M68kEaMode::data_register && decoded.destination_ea.reg == 1U) {
       const auto effect = m68k_operation_effect(ir);
-      const auto address = decoded.source_ea.absolute_address;
+      const auto address = m68k_data_access_ea_address(decoded.source_ea);
       if (const auto misaligned = m68k_startup_absolute_operand_alignment(address)) {
         auto f=fail(misaligned==DirectFlowDiagnostic::effective_address_not_24bit?"effective_address_not_24bit":"odd_effective_address",ordinal,decoded,decoded.raw_bytes);f.effective_address=address;return f;
       }

@@ -1478,7 +1478,7 @@ class M68kStaticGraphWalker {
                                                                       const InstructionProvenance &provenance,
                                                                       bool value_discarded = false) {
     if (!m68k_is_statically_foldable_control_ea(ea)) return std::nullopt;
-    const auto address = m68k_canonical_ea_address(ea);
+    const auto address = m68k_data_access_ea_address(ea);
     if (const auto misaligned = m68k_startup_absolute_operand_alignment(address, width)) return *misaligned;
     const M68kCpuMemoryAccessRequest request{{TargetAddressSpace::m68k_program, address}, width, direction,
                                               provenance};

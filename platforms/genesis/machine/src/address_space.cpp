@@ -49,6 +49,12 @@ M68kGenesisDeviceRoutingResult m68k_route_genesis_device_access(const M68kMemory
       request.direction == M68kMemoryAccessDirection::read &&
       request.width == M68kMemoryAccessWidth::word)
     return M68kVdpRoutedRead{};
+  // The runtime's status-read shape (genesis_is_vdp_status_read_shape) also owns both BYTE lanes of the CONTROL
+  // port's status alias ($C00004/$C00005): BTST/TST-style polls of the status register are BYTE reads.
+  if (request.direction == M68kMemoryAccessDirection::read && request.width == M68kMemoryAccessWidth::byte &&
+      (request.address.value == UINT32_C(0x00C00004) || request.address.value == UINT32_C(0x00C00005) ||
+       (request.address.value >= UINT32_C(0x00C00008) && request.address.value <= UINT32_C(0x00C0000F))))
+    return M68kVdpRoutedRead{};
   // SEG-007-T113: write-direction mirror. A WORD or LONG store fully inside
   // the VDP register window is deferred to the runtime device gate
   // (genesis_route_access already lowers a LONG write as two WORD-write

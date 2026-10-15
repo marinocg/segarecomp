@@ -879,11 +879,11 @@ std::string emit_m68k_general_startup_runtime_c_with_policy_to(
       const bool source_read = fact.role == M68kStaticMemoryFactRole::source_read &&
           fact.direction == M68kMemoryAccessDirection::read &&
           move.source_ea.mode == M68kEaMode::absolute_long &&
-          fact.address.value == m68k_canonical_ea_address(move.source_ea);
+          fact.address.value == m68k_data_access_ea_address(move.source_ea);
       const bool destination_write = fact.role == M68kStaticMemoryFactRole::destination_write &&
           fact.direction == M68kMemoryAccessDirection::write &&
           move.destination_ea.mode == M68kEaMode::absolute_long &&
-          fact.address.value == m68k_canonical_ea_address(move.destination_ea);
+          fact.address.value == m68k_data_access_ea_address(move.destination_ea);
       if (!source_read && !destination_write)
         return "/* translation rejected: invalid C3 static memory fact */\n";
     }
@@ -1737,7 +1737,7 @@ bool valid_c4_static_memory_fact(
   }
   if (expected_ea == nullptr || !m68k_is_statically_foldable_control_ea(*expected_ea) ||
       fact.direction != expected_direction ||
-      fact.address.value != m68k_canonical_ea_address(*expected_ea))
+      fact.address.value != m68k_data_access_ea_address(*expected_ea))
     return false;
 
   const bool is_ram = m68k_startup_ram_range_in_range(
@@ -2574,7 +2574,7 @@ bool m68k_c4_lacks_runtime_routing(const M68kIrOperation &operation, const std::
       !m68k_is_statically_foldable_control_ea(operation.source_ea))
     return false;
   return m68k_frontier_region_class_name(
-             m68k_canonical_ea_address(operation.source_ea),
+             m68k_data_access_ea_address(operation.source_ea),
              static_cast<std::uint32_t>(operation.size), mapping_claims) ==
          "raw_cartridge_rom";
 }
@@ -3489,7 +3489,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     default: break;
     }
     if (expected_ea == nullptr || !m68k_is_statically_foldable_control_ea(*expected_ea) ||
-        fact.direction != expected_direction || fact.address.value != m68k_canonical_ea_address(*expected_ea) ||
+        fact.direction != expected_direction || fact.address.value != m68k_data_access_ea_address(*expected_ea) ||
         !facts.emplace(std::make_pair(fact.operation.source.address.value, fact.role), &fact).second)
       return "/* translation rejected: invalid C4 static memory fact */\n";
     const bool is_ram = m68k_startup_ram_range_in_range(fact.address.value, static_cast<std::uint32_t>(fact.width));
@@ -6001,7 +6001,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   // membership set as any other RTS in this program.
   const std::vector<std::uint32_t> immutable_rom_aot_runtime_return_targets(
       runtime_return_target_set.begin(), runtime_return_target_set.end());
-  // SEG-021-T041 / ADR 0048: push-then-RTS computed jump. From every admitted `MOVE.L <src>,-(A7)` identity a
+  // SEG-021-T041 / ADR 0048: push-then-RTS computed jump. From every admitted `MOVE.L <src>,-(A7)` (or `,(A7)`) identity a
   // bounded forward walk (both arms of direct conditional branches, direct BRA, at most
   // `computed_jump_window` instructions) follows admitted identities that neither touch the stack nor write A7
   // (complete register footprint, no stack effect, sequential or direct-branch PC effect). An admitted RTS
@@ -6015,7 +6015,11 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   for (const auto &[push_address, push_entry] : *aot_entries) {
     const auto &push_op = push_entry->operation;
     if (push_op.kind != M68kIrKind::write_move || push_op.size != M68kMemoryAccessWidth::long_word ||
-        push_op.destination_ea.mode != M68kEaMode::address_predec || push_op.destination_ea.reg != 7U)
+        (push_op.destination_ea.mode != M68kEaMode::address_predec &&
+         // `MOVE.L <src>,(A7)` rewrites the saved return address in place (the inline-data-argument idiom: advance the
+         // return address past data that follows the call, then RTS): the RTS that pops it is the same computed jump.
+         push_op.destination_ea.mode != M68kEaMode::address_indirect) ||
+        push_op.destination_ea.reg != 7U)
       continue;
     std::deque<std::pair<Address, unsigned>> walk;
     std::set<Address> visited;
@@ -6450,6 +6454,20 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
     const auto handler = partial.accepted_prefix.irq6_handler_entry->value;
     for (const auto &block : partial.accepted_prefix.static_blocks)
       if (block.id.entry.value == handler) { irq6_handler_hex = hex(handler, 8); break; }
+  }
+  // Immutable-ROM AOT: a handler whose body is not a retained static block (e.g. a `push.l abs; rts` trampoline that the
+  // static discovery cannot close) is still an ordinary compiled AOT entry at that exact cartridge address, so the
+  // CPU-owned interrupt entry can deliver to it. The membership test uses the same validated entry map the runtime emitter
+  // just emitted its compiled-entry dispatch table from (not the raw candidate collection), and excludes work-RAM thunk
+  // and execution-alias identities: an absent or non-cartridge handler keeps the runtime IRQ6 mechanism inert (fail-safe).
+  if (irq6_handler_hex.empty() && partial.accepted_prefix.irq6_handler_entry) {
+    const auto final_aot_entries = validated_immutable_rom_aot_entries(partial.accepted_prefix);
+    if (final_aot_entries) {
+      const auto handler = partial.accepted_prefix.irq6_handler_entry->value;
+      const auto found = final_aot_entries->find(handler);
+      if (found != final_aot_entries->end() && !found->second->execution_alias && !found->second->materialized_ram_thunk)
+        irq6_handler_hex = hex(handler, 8);
+    }
   }
   // ADR 0097 amendment: a work-RAM IRQ6 vector whose stub address carries a materialized, byte-guarded JMP thunk entry is an
   // ordinary compiled handler entry: the CPU-owned exception entry delivers the interrupt to the stub address and the stub

@@ -456,6 +456,11 @@ add_test(NAME genesis_immutable_rom_aot_jmp_an_relative_generated_test COMMAND $
 add_test(NAME genesis_immutable_rom_aot_jmp_an_indirect_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_jmp_an_indirect_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-059: absolute-long LEA/PEA/data ownership, in-place return rewrite and IRQ6 AOT trampoline, generated-native; compared with the
+# pinned Musashi core when SEGARECOMP_M68K_COMPAT_REPAIRS_MUSASHI_CHECKOUT (or the conformance checkout variable) is set.
+add_test(NAME genesis_compat_repairs_generated_differential_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_compat_repairs_generated_differential_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME m68k_indirect_control_musashi_differential_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_indirect_control_musashi_differential_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER})

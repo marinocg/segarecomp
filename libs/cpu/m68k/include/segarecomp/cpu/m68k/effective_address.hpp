@@ -77,4 +77,9 @@ namespace segarecomp {
 // `provenance.access_address`.
 [[nodiscard]] std::uint32_t m68k_canonical_ea_address(const M68kEffectiveAddress &ea) noexcept;
 
+// Bus-visible address of a statically-foldable DATA operand: m68k_canonical_ea_address plus the sign-extended top-half
+// absolute-long spelling ($FFFF8000 -> $FF8000). Never used for JMP/JSR control targets (separately pinned policy) nor for
+// LEA/PEA, whose calculated 32-bit value is `ea.absolute_address`.
+[[nodiscard]] std::uint32_t m68k_data_access_ea_address(const M68kEffectiveAddress &ea) noexcept;
+
 } // namespace segarecomp

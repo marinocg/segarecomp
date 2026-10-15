@@ -268,10 +268,10 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
       // Every non-constant absolute operand (linear memory or a device window -- the
       // wrapper's classification, opaque here) reaches the platform's runtime-routed access
       // owner; no compile-time literal, no static device model.
-      m68k_emit_routed_read(out, "UINT32_C(0x" + hex(m68k_canonical_ea_address(ea), 8) + ")", size,
+      m68k_emit_routed_read(out, "UINT32_C(0x" + hex(m68k_data_access_ea_address(ea), 8) + ")", size,
                             memory, result.expression, temp_ordinal, discarded);
     } else if (*memory.test_operand_access == M68kOperandAccess::linear_memory) {
-      const auto offset = (m68k_canonical_ea_address(ea) - memory.linear_memory_begin);
+      const auto offset = (m68k_data_access_ea_address(ea) - memory.linear_memory_begin);
       // Static addresses retain one literal RAM index per byte.  Besides
       // deterministic C, this keeps the fixed-profile TST presentation
       // artifact's established observable source shape without reviving a
@@ -371,12 +371,12 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
   case M68kEaMode::absolute_word:
   case M68kEaMode::absolute_long: {
     if (memory.runtime_routing) {
-      m68k_emit_routed_write(out, "UINT32_C(0x" + hex(m68k_canonical_ea_address(ea), 8) + ")", size,
+      m68k_emit_routed_write(out, "UINT32_C(0x" + hex(m68k_data_access_ea_address(ea), 8) + ")", size,
                              memory, value_expr, temp_ordinal);
       result.expression.clear();
       break;
     }
-    const auto offset = (m68k_canonical_ea_address(ea) - memory.linear_memory_begin);
+    const auto offset = (m68k_data_access_ea_address(ea) - memory.linear_memory_begin);
     std::ostringstream statement;
     m68k_emit_ram_write_stmts(statement, memory.ram_array, "UINT32_C(" + std::to_string(offset) + ")", value_expr,
                               size);
@@ -2919,7 +2919,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         };
         if (ea.mode == M68kEaMode::absolute_word || ea.mode == M68kEaMode::absolute_long ||
             ea.mode == M68kEaMode::pc_disp16) {
-          const auto base = m68k_canonical_ea_address(ea);
+          const auto base = m68k_data_access_ea_address(ea);
           for (std::size_t slot = 0; slot < order.size(); ++slot) {
             const auto address_expr =
                 "UINT32_C(0x" + hex(base + static_cast<std::uint32_t>(slot) * width, 8) + ")";
@@ -3039,7 +3039,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         }
       } else if (ea.mode == M68kEaMode::absolute_word || ea.mode == M68kEaMode::absolute_long ||
           ea.mode == M68kEaMode::pc_disp16) {
-        const auto base = (m68k_canonical_ea_address(ea) - memory->linear_memory_begin);
+        const auto base = (m68k_data_access_ea_address(ea) - memory->linear_memory_begin);
         for (std::size_t slot = 0; slot < order.size(); ++slot) {
           const bool rom_folded = have_resolved_reads &&
               memory->movem_transfer_access[slot] == M68kOperandAccess::resolved_constant;
