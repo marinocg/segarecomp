@@ -10,7 +10,8 @@ static const char *const scd_stop_names[SCD_STOP_CLASS_COUNT] = {
     "backup_ram_unsupported", "pcm_unsupported", "gate_array_register_unsupported", "vdp_access_unsupported", "vdp_dma_unsupported",
     "address_error", "entry_not_compiled", "return_target_not_compiled", "code_bytes_mismatch", "instruction_unsupported",
     "exception_vector_not_compiled", "exception_stack_invalid", "trace_unsupported", "interrupt_source_unsupported",
-    "cdc_destination_unsupported", "cdd_command_unsupported", "cd_read_audio_track", "cd_read_failed", "internal"};
+    "cdc_destination_unsupported", "cdd_command_unsupported", "cd_read_audio_track", "cd_read_failed", "internal", "image_unknown",
+    "image_bytes_mismatch", "image_partially_overwritten", "ambiguous_image", "image_entry_not_compiled", "stale_image_selection"};
 
 const char *scd_stop_class_name(ScdStopClass stop_class) {
   return (unsigned)stop_class < SCD_STOP_CLASS_COUNT ? scd_stop_names[stop_class] : "unknown";

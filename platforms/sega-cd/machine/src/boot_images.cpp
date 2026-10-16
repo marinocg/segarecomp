@@ -34,6 +34,7 @@ ProcessorImages make(Processor processor, const SegaCdBootDescriptor &descriptor
   image.verification = ImageVerification::byte_identity;
   out.images.images.push_back(std::move(image));
   out.entry_pc = base + descriptor.entry_offset;
+  out.roles.push_back(ImageRole{processor == Processor::main ? "boot_ip" : "boot_sp", false, {descriptor.entry_offset}});
   return out;
 }
 

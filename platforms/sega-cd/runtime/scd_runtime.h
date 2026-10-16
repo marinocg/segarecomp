@@ -76,6 +76,13 @@ typedef enum ScdStopClass {
   SCD_STOP_CD_READ_AUDIO_TRACK,
   SCD_STOP_CD_READ_FAILED,
   SCD_STOP_INTERNAL,
+  /* SEG-063-T001 (ADR 0127, ADR 0132): overlay selection among a group's candidate images. */
+  SCD_STOP_IMAGE_UNKNOWN,              /* the instruction at PC is no admitted candidate's: an unlisted module or other bytes */
+  SCD_STOP_IMAGE_BYTES_MISMATCH,       /* a candidate's instruction is at PC but its image holds bytes no admitted image explains */
+  SCD_STOP_IMAGE_PARTIALLY_OVERWRITTEN,/* the live extent is a mixture of admitted images: no one image is coherent */
+  SCD_STOP_AMBIGUOUS_IMAGE,            /* more than one overlapping candidate is fully live */
+  SCD_STOP_IMAGE_ENTRY_NOT_COMPILED,   /* the selected candidate has no compiled entry at PC */
+  SCD_STOP_STALE_IMAGE_SELECTION,      /* the selected image was overwritten and execution re-entered it outside a declared root */
   SCD_STOP_CLASS_COUNT
 } ScdStopClass;
 
@@ -171,6 +178,67 @@ typedef struct ScdProcessorProgram {
   uint32_t image_disc_offset;     /* byte offset of the image inside the 32 KiB system area */
   uint32_t image_length;
 } ScdProcessorProgram;
+
+/* SEG-063-T001 (ADR 0127, ADR 0132): the finite build-time overlay registry. A candidate is one mapping of one image of the processor's
+ * set; a group is a maximal run of overlapping candidates. The runtime compares live bytes with the candidate's granule digests
+ * (comparison of known images only) and then calls the candidate's own dispatcher; it never decodes guest bytes. */
+#define SCD_OVERLAY_GRANULE_SHIFT 6U
+#define SCD_OVERLAY_MAX_GROUPS 16U
+#define SCD_OVERLAY_MAX_CANDIDATES 16U
+#define SCD_OVERLAY_MAX_GRANULES 8192U
+#define SCD_OVERLAY_LOG 64U
+#define SCD_IMAGE_NO_ENTRY 2  /* a candidate dispatcher's result for an address without a compiled entry */
+
+typedef struct ScdOverlayCandidate {
+  uint32_t image_id;               /* ImageId (1-based) in the processor's ExecutableImageSet */
+  const char *name;                /* manifest module name, boot_ip or boot_sp */
+  uint32_t start;                  /* execution range [start, start + length) */
+  uint32_t length;
+  const uint64_t *granule_digests; /* per 64-byte granule of the range: first 8 bytes (big-endian) of SHA-256 of its bytes */
+  uint32_t granule_first;          /* start >> 6 */
+  uint32_t granule_count;
+  const uint32_t *entries;         /* sorted compiled instruction addresses of this candidate */
+  uint32_t entry_count;
+  const uint8_t *const *entry_bytes;   /* per entry: the instruction's verification bytes (NULL: a typed-stop entry) */
+  const uint8_t *entry_lengths;
+  const uint32_t *roots;           /* declared entry roots (sorted) */
+  uint32_t root_count;
+  ScdDispatchFunction dispatch;    /* this candidate's entries only; SCD_IMAGE_NO_ENTRY otherwise */
+} ScdOverlayCandidate;
+
+typedef struct ScdOverlayGroup {
+  uint32_t cpu;
+  uint32_t start;                  /* union of the candidates' ranges */
+  uint32_t end;
+  const ScdOverlayCandidate *candidates;  /* registry order */
+  uint32_t candidate_count;
+  uint32_t granule_first;
+  uint32_t granule_count;
+} ScdOverlayGroup;
+
+typedef struct ScdOverlayProgram {
+  const ScdOverlayGroup *groups;
+  uint32_t group_count;
+  const char *manifest_identity;   /* SHA-256 of the admitted module manifest */
+} ScdOverlayProgram;
+
+typedef struct ScdOverlayState {
+  int32_t selected;                /* candidate index, or -1 */
+  int32_t stale_from;              /* the candidate whose selection was invalidated by a write, until the next selection; or -1 */
+  uint8_t all_dirty;               /* the whole range may have changed (a bank, window or Word RAM ownership change) */
+  uint8_t any_dirty;
+  uint32_t dirty_lo, dirty_hi;     /* bounds (granule indices relative to the group) of the set bits */
+  uint8_t dirty[SCD_OVERLAY_MAX_GRANULES / 8U];
+  uint64_t selections;
+  uint64_t revalidations;
+  uint64_t invalidations;
+  uint64_t retired[SCD_OVERLAY_MAX_CANDIDATES];  /* instructions retired through each candidate's compiled entries */
+} ScdOverlayState;
+
+typedef struct ScdOverlayEvent {
+  uint64_t tick;
+  uint32_t cpu, group, candidate, pc, kind;  /* kind: 1 selected, 2 invalidated */
+} ScdOverlayEvent;
 
 typedef struct ScdProgram {
   ScdProcessorProgram processors[2];
@@ -271,7 +339,16 @@ typedef struct ScdMachine {
   uint64_t sub_waits;                     /* sub instructions abandoned to wait for DTACK */
   uint8_t sub_wait_request;               /* set by a sub access that must wait for DTACK (the instruction is retried) */
   uint64_t sub_interrupts_taken[8];
+  const ScdOverlayProgram *overlays;      /* NULL without disc-loaded modules (SEG-062 programs) */
+  ScdOverlayState overlay[SCD_OVERLAY_MAX_GROUPS];
+  ScdOverlayEvent overlay_log[SCD_OVERLAY_LOG];
+  uint32_t overlay_events;                /* total events (the log keeps the first SCD_OVERLAY_LOG) */
 } ScdMachine;
+
+/* Physical memories whose bytes may hold executable images (for write invalidation). */
+#define SCD_MEMORY_PRG 0U
+#define SCD_MEMORY_WORD 1U  /* offset in the 2M layout */
+#define SCD_MEMORY_WORK 2U
 
 /* --- generated-code ABI ---------------------------------------------------------------------------------------------------- */
 
@@ -288,6 +365,14 @@ int scd_rtr(ScdMachine *m, uint32_t cpu, uint32_t *restored_pc, uint32_t pc);
 void scd_enter_stop(ScdMachine *m, uint32_t cpu);
 int scd_fail(ScdMachine *m, uint32_t cpu, ScdStopClass stop_class, uint32_t pc, uint32_t detail);
 int scd_compiled(const ScdMachine *m, uint32_t cpu, uint32_t address);
+/* Side-effect-free view of executable RAM (work RAM, the PRG-RAM window, PRG RAM, owned Word RAM) for byte comparison, or NULL. */
+const uint8_t *scd_code_byte(const ScdMachine *m, uint32_t cpu, uint32_t address);
+/* Overlay selection for an address the per-PC dispatch does not own (scd_overlay.c). */
+int scd_overlay_dispatch(ScdMachine *m, uint32_t cpu);
+/* Write invalidation: `length` bytes at `offset` of `memory` changed; and: which memory a processor sees at an address changed. */
+void scd_overlay_note_write(ScdMachine *m, uint32_t memory, uint32_t offset, uint32_t length);
+void scd_overlay_note_view_change(ScdMachine *m);
+void scd_overlay_attach(ScdMachine *m, const ScdOverlayProgram *overlays);
 
 /* --- machine ---------------------------------------------------------------------------------------------------------------- */
 
@@ -328,6 +413,7 @@ void scd_devices_power_on(ScdMachine *m);
 
 /* Program driver: parses argv, opens the disc, runs, writes the report and the frame. */
 int scd_program_main(const ScdProgram *program, int argc, char **argv);
+int scd_program_main_overlays(const ScdProgram *program, const ScdOverlayProgram *overlays, int argc, char **argv);
 
 #ifdef __cplusplus
 }
