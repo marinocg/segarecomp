@@ -18,16 +18,21 @@ using namespace segarecomp::cpu::z80;
 
 enum Slot : unsigned { sA, sB, sC, sD, sE, sH, sL, sIX, sIY, sSP, kSlots };
 
+// Cause of an unknown value (attribution only; never changes a decision): 0 entry, 1 call return, 2 memory load, 3 opaque ALU result,
+// 4 widened, 5 cardinality overflow, 100+n unsupported effect of Mnemonic n.
+enum : std::uint16_t { kCauseEntry = 0, kCauseCall = 1, kCauseLoad = 2, kCauseOpaque = 3, kCauseWidened = 4, kCauseOverflow = 5, kCauseUnsupported = 100 };
 struct Val {
   bool top{true};
   std::vector<std::uint16_t> v;  // sorted unique when !top
+  std::uint16_t cause{kCauseEntry};
 };
 struct State {
   std::array<Val, kSlots> r;
 };
 
-Val top_val() { return {}; }
-Val singleton(std::uint16_t x) { return {false, {x}}; }
+std::string cause_name(std::uint16_t c);
+Val top_val(std::uint16_t cause = kCauseEntry) { Val t; t.cause = cause; return t; }
+Val singleton(std::uint16_t x) { Val t; t.top = false; t.v = {x}; return t; }
 
 class Analyzer {
  public:
@@ -49,8 +54,11 @@ class Analyzer {
   Val normalize(std::vector<std::uint16_t> v) const {
     std::sort(v.begin(), v.end());
     v.erase(std::unique(v.begin(), v.end()), v.end());
-    if (v.size() > lim_.max_values) return top_val();
-    return {false, std::move(v)};
+    if (v.size() > lim_.max_values) return top_val(kCauseOverflow);
+    Val t;
+    t.top = false;
+    t.v = std::move(v);
+    return t;
   }
   static unsigned slot_of(Reg r) {
     switch (r) {
@@ -69,7 +77,9 @@ class Analyzer {
     unsigned hi, lo;
     if (pair_of(r, hi, lo)) {
       const Val &h = s.r[hi], &l = s.r[lo];
-      if (h.top || l.top || h.v.size() * l.v.size() > lim_.max_values) return top_val();
+      if (h.top) return h;
+      if (l.top) return l;
+      if (h.v.size() * l.v.size() > lim_.max_values) return top_val(kCauseOverflow);
       std::vector<std::uint16_t> out;
       for (auto x : h.v)
         for (auto y : l.v) out.push_back(static_cast<std::uint16_t>((x << 8) | y));
@@ -80,7 +90,7 @@ class Analyzer {
   void write_reg(State& s, Reg r, const Val& v) const {
     unsigned hi, lo;
     if (pair_of(r, hi, lo)) {
-      if (v.top) { s.r[hi] = top_val(); s.r[lo] = top_val(); return; }
+      if (v.top) { s.r[hi] = v; s.r[lo] = v; return; }
       std::vector<std::uint16_t> h, l;
       for (auto x : v.v) { h.push_back(static_cast<std::uint16_t>(x >> 8)); l.push_back(static_cast<std::uint16_t>(x & 0xFF)); }
       s.r[hi] = normalize(h);
@@ -104,8 +114,8 @@ class Analyzer {
         for (auto& x : v.v) x = static_cast<std::uint16_t>((static_cast<std::int32_t>(x) + e.delta) & mask);
         return normalize(v.v);
       }
-      case ValueExpr::Kind::load:
-      case ValueExpr::Kind::opaque: return top_val();  // memory is not tracked: never guessed
+      case ValueExpr::Kind::load: return top_val(kCauseLoad);  // memory is not tracked: never guessed
+      case ValueExpr::Kind::opaque: return top_val(kCauseOpaque);
     }
     return top_val();
   }
@@ -116,7 +126,11 @@ class Analyzer {
     for (auto& x : v.v) x = static_cast<std::uint16_t>((static_cast<std::int32_t>(x) + a.offset) & 0xFFFF);
     return normalize(v.v);
   }
-  static State all_top() { return State{}; }
+  static State all_top(std::uint16_t cause = kCauseEntry) {
+    State s;
+    for (Val& v : s.r) v.cause = cause;
+    return s;
+  }
   static State reset_state() {
     State s;
     for (unsigned i : {unsigned(sA), unsigned(sB), unsigned(sC), unsigned(sD), unsigned(sE), unsigned(sH), unsigned(sL)}) s.r[i] = singleton(0xFF);
@@ -129,7 +143,7 @@ class Analyzer {
       Val& d = dst.r[i];
       const Val& x = src.r[i];
       if (d.top) continue;
-      if (x.top) { d = top_val(); changed = true; continue; }
+      if (x.top) { d = x; changed = true; continue; }
       std::vector<std::uint16_t> merged = d.v;
       merged.insert(merged.end(), x.v.begin(), x.v.end());
       Val nv = normalize(std::move(merged));
@@ -154,7 +168,7 @@ class Analyzer {
       return;
     }
     if (!join(it->second, s)) return;
-    if (++revisits_[pc] > lim_.max_revisits) it->second = all_top();  // widening: sound, absorbing
+    if (++revisits_[pc] > lim_.max_revisits) it->second = all_top(kCauseWidened);  // widening: sound, absorbing
     queue_.push_back(pc);
   }
 
@@ -173,7 +187,7 @@ class Analyzer {
         switch (d.mnemonic) {
           case Mnemonic::ret: case Mnemonic::reti: case Mnemonic::retn: break;           // no static successor
           case Mnemonic::jp: case Mnemonic::jr: case Mnemonic::djnz: case Mnemonic::call: case Mnemonic::rst: break;  // unresolved control
-          default: enqueue(next, all_top()); break;  // successor is the next start; every register becomes unknown
+          default: enqueue(next, all_top(static_cast<std::uint16_t>(kCauseUnsupported + static_cast<unsigned>(d.mnemonic)))); break;  // successor is the next start; every register becomes unknown
         }
         continue;
       }
@@ -182,7 +196,7 @@ class Analyzer {
         case ControlKind::fallthrough: enqueue(eff.fallthrough, out); break;
         case ControlKind::jump: enqueue(eff.target, out); break;
         case ControlKind::conditional_jump: enqueue(eff.target, out); enqueue(eff.fallthrough, out); break;
-        case ControlKind::call: enqueue(eff.target, out); enqueue(eff.fallthrough, all_top()); break;  // no summary
+        case ControlKind::call: enqueue(eff.target, out); enqueue(eff.fallthrough, all_top(kCauseCall)); break;  // no summary
         case ControlKind::return_: break;
         case ControlKind::conditional_return: enqueue(eff.fallthrough, out); break;
         case ControlKind::computed: {
@@ -341,6 +355,7 @@ Report Analyzer::run(const std::vector<Root>& roots) {
     if (!value.top) site.values = value.v;
     if (addr.top) {
       note_reason("store_address_unknown", false, false);
+      rep.incomplete_reasons["  address_cause:" + cause_name(addr.cause)]++;
       rep.store_addresses_complete = false;
       ++rep.unknown_address_stores;
       site.hits_reachable_code = true;  // may
@@ -353,6 +368,7 @@ Report Analyzer::run(const std::vector<Root>& roots) {
     }
     if (value.top) {
       ++rep.unknown_value_stores;
+      rep.incomplete_reasons["  value_cause:" + cause_name(value.cause)]++;
       if (site.hits_reachable_code) { note_reason("store_value_unknown_may_hit_code", false, false); rep.store_values_complete = false; }
     }
     rep.stores.push_back(site);
@@ -416,6 +432,21 @@ Report Analyzer::run(const std::vector<Root>& roots) {
       }
   }
   return rep;
+}
+
+std::string cause_name(std::uint16_t c) {
+  switch (c) {
+    case kCauseEntry: return "unknown_entry_or_reset_state";
+    case kCauseCall: return "call_return_continuation";
+    case kCauseLoad: return "memory_load";
+    case kCauseOpaque: return "alu_result_not_modelled";
+    case kCauseWidened: return "join_widened";
+    case kCauseOverflow: return "cardinality_bound";
+    default: break;
+  }
+  std::string m = mnemonic_name(static_cast<Mnemonic>(c - kCauseUnsupported));
+  std::transform(m.begin(), m.end(), m.begin(), [](char ch) { return static_cast<char>(ch | 0x20); });
+  return "unsupported_effect:" + m;
 }
 
 }  // namespace
