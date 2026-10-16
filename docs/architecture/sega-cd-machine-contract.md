@@ -222,6 +222,22 @@ The profile loader in the runtime reads IP and SP from the **external disc** thr
 start-up (after the disc identity check), exactly as a BIOS would; the generated program carries their bytes only as
 the byte-identity verification constants of compiled instructions (section 11).
 
+### 9a. Disc identity (ADR 0129)
+
+The disc identity is the lowercase hex SHA-256 of this normalized text (one line each, `\n` terminated, decimal numbers):
+
+```text
+segarecomp.disc.v1
+file <index> size <bytes> sha256 <hex> name <name as written in the CUE>      (one per FILE, in CUE order)
+track <number> <mode1_2048|mode1_2352|audio> file <index> offset <byte offset of INDEX 01> sector <2048|2352> pregap <sectors> lba <first LBA> count <sectors>
+total <sectors including pregaps>
+```
+
+LBAs are assigned in CUE order: each track starts after the previous track plus its own `PREGAP`; a track ends at the next
+`INDEX 01` of the same file or at the end of the file. Changing any byte of any file, any name, or the layout changes the
+identity. The generated program stores the per-file size and SHA-256 and the track table and refuses a disc whose files do
+not match at start-up.
+
 ## 10. Interrupts
 
 | level (sub) | source | implemented | tag |

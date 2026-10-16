@@ -64,4 +64,31 @@ std::string sha256_hex(std::span<const std::uint8_t> bytes) {
   return out;
 }
 
+void Sha256Stream::update(std::span<const std::uint8_t> bytes) {
+  total_bytes_ += bytes.size();
+  std::size_t offset = 0;
+  if (block_used_ != 0U) {
+    while (offset < bytes.size() && block_used_ < 64U) block_[block_used_++] = bytes[offset++];
+    if (block_used_ < 64U) return;
+    compress(state_, block_.data());
+    block_used_ = 0;
+  }
+  for (; offset + 64U <= bytes.size(); offset += 64U) compress(state_, bytes.data() + offset);
+  while (offset < bytes.size()) block_[block_used_++] = bytes[offset++];
+}
+
+std::string Sha256Stream::finish_hex() {
+  const std::uint64_t bits = total_bytes_ * 8U;
+  std::vector<std::uint8_t> tail(block_.begin(), block_.begin() + static_cast<std::ptrdiff_t>(block_used_));
+  tail.push_back(0x80U);
+  while (tail.size() % 64U != 56U) tail.push_back(0U);
+  for (int shift = 56; shift >= 0; shift -= 8) tail.push_back(static_cast<std::uint8_t>(bits >> shift));
+  for (std::size_t offset = 0; offset < tail.size(); offset += 64U) compress(state_, tail.data() + offset);
+  static constexpr char digits[] = "0123456789abcdef";
+  std::string out;
+  for (const auto word : state_)
+    for (int shift = 28; shift >= 0; shift -= 4) out.push_back(digits[(word >> shift) & 0xFU]);
+  return out;
+}
+
 } // namespace segarecomp
