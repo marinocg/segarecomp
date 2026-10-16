@@ -132,12 +132,9 @@ class Analyzer {
     return s;
   }
   static State reset_state() {
-    // Architectural reset defines only AF and SP (= $FFFF); every other register is undefined on hardware and stays unknown here even
-    // though the project's own runtime happens to initialise them: a static certificate must not depend on that choice.
-    State s;
-    s.r[sA] = singleton(0xFF);
-    s.r[sSP] = singleton(0xFFFF);
-    return s;
+    // The architecture defines only PC, I, R and the interrupt flags after reset (AF/SP = $FFFF is a common observation, not a guarantee, and
+    // the 68K can reset the Z80 without clearing registers): no register value is assumed, so a certificate never depends on one.
+    return all_top();
   }
   bool join(State& dst, const State& src) const {  // returns true when dst grew
     bool changed = false;

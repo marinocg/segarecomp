@@ -30,14 +30,14 @@ Limits (generic, not derived from any title; exceeding any yields UNKNOWN / inco
 | `max_revisits` | 4 | times a start's joined state may change before it is widened to unknown |
 | `max_steps` | 262,144 | total worklist transfer steps |
 
-Soundness rules: unknown or unsupported never becomes a guessed value; a result reports `reachability_complete`, `effects_complete` and
+Soundness rules: unknown or unsupported never becomes a guessed value; every reachable RET / RET cc / RETI / RETN is `return_target_unproven` (stack contents are not tracked); closure under mutation requires that no candidate changes ANY reachable start (an operand change can retarget control flow); the candidate list is capped at 4,096 and `budget_exceeded` is part of completeness; a result reports `reachability_complete`, `effects_complete` and
 `store_addresses_complete` separately and `candidate_set_complete` is their conjunction. After a CALL the continuation state is unknown
 (no interprocedural summary). Unsupported effect forms havoc all registers. Memory loads are unknown. Hardware interrupt pushes are
 modelled as stores at SP-2 when SP is finite and mark the result incomplete when it is not. Standing assumption (reported with every
 result, never hidden): interrupt handlers are analysed as separate roots with unknown entry state, and their register effects on the
 interrupted flow are NOT joined into it; therefore `candidate_set_complete` is reported false whenever an EI is reachable.
 
-Roots: the reset vector $0000 (reset state); $0038 (unknown state) is added when an EI is reachable; $0066 is NOT a root because the Genesis NMI is not connected (audio contract section 8) - a deliberate narrowing of the first draft's three-root list, recorded here. No root, address, value or form is supplied from any
+Roots: the reset vector $0000 (reset state); $0038 is added when an EI is reachable, with every register unknown except SP = the interrupted SP minus 2; $0066 is NOT a root because the Genesis NMI is not connected (audio contract section 8) - a deliberate narrowing of the first draft's three-root list, recorded here. No root, address, value or form is supplied from any
 title; the previously observed JR->RET mutation (ADR 0134) is a post-hoc comparison target only.
 
 Synthetic fixtures (project-authored): A constant replacement, B finite alternatives (two branches, and a join), C unknown address/value
@@ -79,8 +79,8 @@ Budgets: D0 limits unchanged; no inference budget is spent unless M0 passes.
 
 Two refinements were made before any real input was analysed and are part of the frozen D0: (a) the result also reports
 `closed_under_mutation` (first-order scope: a write that changes a reachable start can expose new code with further stores the analysis
-never saw); (b) reset state defines only A (= $FF) and SP (= $FFFF), every other register is unknown (initially all registers were
-seeded; corrected after review of soundness, real-image results identical). Cause attribution of unknown values was added for
+never saw); (b) NO register value is assumed after reset (initially every register, then A and SP, were seeded; the independent review rejected both as
+guessed values; real-image results identical). Cause attribution of unknown values was added for
 reporting only and changes no decision.
 
 ## Phase A - existing CPU-owned capability (libs/cpu/z80)
@@ -95,7 +95,7 @@ unknown; flags are not modelled. Smallest missing capability, from the attributi
 footprint for the currently unsupported forms** (which registers a form may write, and its store address expression, even when the value
 is opaque).
 
-## Phase B - synthetic proof (tests/z80_static_mutation_tests, 36 checks, all pass, incl. the two review regressions S1/S2)
+## Phase B - synthetic proof (tests/z80_static_mutation_tests, 38 checks, all pass, incl. the two review regressions S1/S2)
 
 A constant replacement: exact destination and value, original jr (2 B) vs modified ret (1 B) distinguished at a reachable start, both forms
 decode through the existing decoder; B two-branch RET/EXX and a join -> finite sets {C9, D9}, nothing guessed; C unknown value, unknown

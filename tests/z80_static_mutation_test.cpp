@@ -53,12 +53,23 @@ int main() {
     check(r.candidate_set_complete() && !r.closed_under_mutation(),
           "A: first-order set complete, but NOT closed under mutation (the mutated code may store further)");
   }
-  // ---- Reset state: only A/F and SP are defined; other registers are never guessed ----
+  // ---- Reset state: no register is assumed; A/F and SP are never guessed either ----
   {
     Image i = blank();
     put(i, 0x0000, {0x36, 0xC9, 0x18, 0xFE});  // LD (HL),C9 with HL undefined at reset
     const zm::Report r = run(i);
     check(r.stores.size() == 1 && r.stores[0].address == zm::Certainty::unknown && r.candidates.empty(), "R1: HL is undefined after reset -> UNKNOWN destination");
+  }
+  {
+    Image i = blank();  // F1 (second review): the value of A and the stack location after reset are not guessed
+    put(i, 0x0000, {0x21, 0x04, 0x00, 0x77, 0x18, 0xFE});  // LD HL,4 ; LD (HL),A ; JR $
+    const zm::Report r = run(i);
+    check(r.stores.size() == 1 && r.stores[0].value == zm::Certainty::unknown && !r.candidate_set_complete(), "R2: A is undefined after reset -> UNKNOWN value, incomplete");
+    Image j = blank();
+    put(j, 0x0000, {0xCD, 0x10, 0x00, 0x18, 0xFE});
+    put(j, 0x0010, {0x18, 0xFE});
+    const zm::Report q = run(j);
+    check(!q.store_addresses_complete && !q.candidate_set_complete(), "R3: the CALL push address depends on an undefined SP -> UNKNOWN, incomplete");
   }
   // ---- Fixture B1: two branches write different constant opcodes to the same location ----
   {
