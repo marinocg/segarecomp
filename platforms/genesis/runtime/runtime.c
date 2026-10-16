@@ -141,6 +141,15 @@ static int genesis_controller_io_access(GenesisDeviceState *devices, uint8_t pad
                                           GenesisAccessWidth width,
                                           GenesisAccessDirection direction, uint32_t *value) {
   size_t index;
+  /* SEG-068-T004: WORD access at the even address of a GPIO register pair reaches the register on the odd (lower) lane;
+     the even lane is discarded on writes and modeled as 0 on reads (project compatibility assumption). A CTRL3 WORD read
+     stays with its SEG-007-T038 selector below (same value). */
+  {
+    const int word_slot = segarecomp_genesis_controller_io_gpio_word_register_index(address, (uint32_t)width);
+    if (word_slot >= 0 && !(word_slot == 5 && direction == GENESIS_ACCESS_READ)) {
+      return genesis_controller_io_access(devices, pad1, pad2, region, address + 1U, GENESIS_ACCESS_BYTE, direction, value);
+    }
+  }
   if (direction == GENESIS_ACCESS_WRITE) {
     int slot = segarecomp_genesis_controller_io_gpio_register_index(address, (uint32_t)width);
     if (slot < 0) return 0;

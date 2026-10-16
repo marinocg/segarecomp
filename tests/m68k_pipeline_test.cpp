@@ -2284,7 +2284,10 @@ void tst_l_operand_resolution_matches_the_contracts_precedence() {
              routed_result->request.source_provenance->source.address.value == provenance.source.address.value,
          "the bounded Genesis routing seam forwards the original typed success request to the controller device");
   for (const auto request : {
-            segarecomp::M68kMemoryAccessRequest{controller_request.address, segarecomp::M68kMemoryAccessWidth::word,
+            // SEG-068-T004: a WORD read at the CTRL1 even address is now a covered routed shape (see the T004 test);
+            // the TxDATA1 pair's even address (serial registers: a different owner) is the retained WORD negative.
+            segarecomp::M68kMemoryAccessRequest{{segarecomp::TargetAddressSpace::m68k_program, UINT32_C(0x00A1000E)},
+                                                segarecomp::M68kMemoryAccessWidth::word,
                                                 segarecomp::M68kMemoryAccessDirection::read, provenance},
             segarecomp::M68kMemoryAccessRequest{controller_request.address, segarecomp::M68kMemoryAccessWidth::long_word,
                                                 segarecomp::M68kMemoryAccessDirection::write, provenance},
@@ -2313,7 +2316,7 @@ void tst_l_operand_resolution_matches_the_contracts_precedence() {
   }
 
   for (const auto request : {
-            segarecomp::M68kMemoryAccessRequest{{segarecomp::TargetAddressSpace::m68k_program, UINT32_C(0x00A10008)},
+            segarecomp::M68kMemoryAccessRequest{{segarecomp::TargetAddressSpace::m68k_program, UINT32_C(0x00A1000E)},
                                                 segarecomp::M68kMemoryAccessWidth::word,
                                                 segarecomp::M68kMemoryAccessDirection::read, provenance},
             segarecomp::M68kMemoryAccessRequest{{segarecomp::TargetAddressSpace::m68k_program, UINT32_C(0x00A10008)},
@@ -14513,19 +14516,19 @@ void general_startup_preserves_rejected_controller_io_access_shape() {
                    W::long_word, D::read, {ControllerIoAccessShapeMismatch::different_controller_io_register_shape},
                    "a disjoint in-region LONG read reports different_controller_io_register_shape alone through discovery");
 
-  // width with its unavoidable interval mismatch: a WORD read at the exact
-  // selector start (TST.W $00A10008).
-  expect_populated(0x00003300U, {0x4AU, 0x79U, 0x00U, 0xA1U, 0x00U, 0x08U}, "c1-width-with-interval", W::word,
+  // width with its interval mismatch: a WORD read at the TxDATA1 pair's even address (TST.W $00A1000E; serial
+  // registers are a different owner and stay fail-closed). SEG-068-T004: a WORD read at the CTRL1 pair's even
+  // address ($A10008) is now a covered GPIO shape, so it no longer serves as the retained negative.
+  expect_populated(0x00003300U, {0x4AU, 0x79U, 0x00U, 0xA1U, 0x00U, 0x0EU}, "c1-width-with-interval", W::word,
                    D::read,
-                   {ControllerIoAccessShapeMismatch::width, ControllerIoAccessShapeMismatch::partial_or_crossing_shape},
+                   {ControllerIoAccessShapeMismatch::width, ControllerIoAccessShapeMismatch::different_controller_io_register_shape},
                    "a WORD read at the selector start reports width with its unavoidable interval mismatch through discovery");
 
-  // A three-value set: a WORD write at the exact selector start
-  // (MOVE.W D0,$00A10008.L), combining width, direction, and
-  // partial_or_crossing_shape in the fixed declared order.
-  expect_populated(0x00003400U, {0x33U, 0xC0U, 0x00U, 0xA1U, 0x00U, 0x08U}, "c1-three-value-set", W::word, D::write,
+  // A three-value set: a WORD write at the TxDATA1 pair's even address (MOVE.W D0,$00A1000E.L), combining width,
+  // direction, and different_controller_io_register_shape in the fixed declared order.
+  expect_populated(0x00003400U, {0x33U, 0xC0U, 0x00U, 0xA1U, 0x00U, 0x0EU}, "c1-three-value-set", W::word, D::write,
                    {ControllerIoAccessShapeMismatch::width, ControllerIoAccessShapeMismatch::direction,
-                    ControllerIoAccessShapeMismatch::partial_or_crossing_shape},
+                    ControllerIoAccessShapeMismatch::different_controller_io_register_shape},
                    "a WORD write at the selector start reports width, direction, and partial_or_crossing_shape through discovery");
 
   // JSON serialization: the populated three-value case names its keys
@@ -14533,11 +14536,11 @@ void general_startup_preserves_rejected_controller_io_access_shape() {
   // fixed declared mismatch order, and nothing else changes.
   {
     const auto rejected = general_startup_ineligible_controller_io_rejection(
-        0x00003400U, {0x33U, 0xC0U, 0x00U, 0xA1U, 0x00U, 0x08U}, "c1-three-value-set-json");
+        0x00003400U, {0x33U, 0xC0U, 0x00U, 0xA1U, 0x00U, 0x0EU}, "c1-three-value-set-json");
     const segarecomp::FrontendResult wrapped = rejected;
     const auto json = segarecomp::format_m68k_frontend_result(wrapped);
     expect(json.find("\"frontier_access_shape\":{\"width\":\"word\",\"direction\":\"write\",\"mismatches\":"
-                     "[\"width\",\"direction\",\"partial_or_crossing_shape\"]}") != std::string::npos,
+                     "[\"width\",\"direction\",\"different_controller_io_register_shape\"],\"target_register_class\":\"tx_data\"}") != std::string::npos,
            "the serialized frontier_access_shape uses the documented key names and fixed mismatch order");
     expect(json == segarecomp::format_m68k_frontend_result(wrapped),
            "two independent invocations of the same scoped-case input produce byte-identical JSON");

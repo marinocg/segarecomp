@@ -177,4 +177,34 @@ segarecomp_genesis_controller_io_gpio_register_index(uint32_t address, uint32_t 
   }
 }
 
+/*
+ * SEG-068-T004: WORD access to the EVEN address of a GPIO register pair.
+ *
+ * Hardware fact (GTO1 pp. 72, 74, 75, as already cited by SEG-007-T017/T034/T121): each of the six GPIO registers
+ * supports BYTE and WORD access and, on a WORD access, only the LOWER byte is meaningful register data -- i.e. the
+ * register sits on the odd data lane and a WORD cycle at the even address (`register address - 1`) carries it in its low
+ * byte. Project compatibility assumption (NOT a hardware claim): the even (upper) lane is modeled as 0 on reads and is
+ * discarded on writes. The same assumption is already recorded for the Version register WORD read (`$A10000`) and the
+ * CTRL3 WORD read (SEG-007-T038).
+ *
+ * Returns the same 0..5 latch index as segarecomp_genesis_controller_io_gpio_register_index for a WORD-width access whose
+ * address is exactly the even address of a register pair, or -1 otherwise. LONG, odd-address WORD, serial registers and
+ * the Version register are never recognized here (they stay fail-closed / owned by their own selectors).
+ */
+static inline int
+segarecomp_genesis_controller_io_gpio_word_register_index(uint32_t address, uint32_t width) {
+  if (width != 2U) {
+    return -1;
+  }
+  switch (address) {
+    case UINT32_C(0x00A10002): return 0;
+    case UINT32_C(0x00A10004): return 1;
+    case UINT32_C(0x00A10006): return 2;
+    case UINT32_C(0x00A10008): return 3;
+    case UINT32_C(0x00A1000A): return 4;
+    case UINT32_C(0x00A1000C): return 5;
+    default: return -1;
+  }
+}
+
 #endif

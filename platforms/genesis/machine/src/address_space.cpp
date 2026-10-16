@@ -116,6 +116,15 @@ M68kGenesisDeviceRoutingResult m68k_route_genesis_device_access(const M68kMemory
       segarecomp_genesis_controller_io_gpio_register_index(
           request.address.value, static_cast<std::uint32_t>(request.width)) >= 0)
     return M68kDeviceRoutedAccess{request.direction};
+  // SEG-068-T004: WORD access at the even address of a GPIO register pair (register on the odd lane; GTO1 pp. 72/74/75).
+  // Read and write route to the same runtime owner (BYTE semantics on the odd lane; even lane 0/discarded is project
+  // policy). A CTRL3 WORD read stays with the SEG-007-T038 selector (same value, resolved statically below).
+  {
+    const int word_slot = segarecomp_genesis_controller_io_gpio_word_register_index(
+        request.address.value, static_cast<std::uint32_t>(request.width));
+    if (word_slot >= 0 && !(word_slot == 5 && request.direction == M68kMemoryAccessDirection::read))
+      return M68kDeviceRoutedAccess{request.direction};
+  }
   // SEG-007-T166: the controller-I/O DATA1/DATA2 three-button-pad BYTE-READ
   // selector family. Unlike the four fixed-constant selectors the fallback
   // table below folds statically, a DATA1/DATA2 BYTE read is a deterministic

@@ -278,11 +278,23 @@ int main() {
                                   static_cast<GenesisAccessDirection>(selector.direction),
                                   &rvalue, &wstop) == GENESIS_ACCESS_OK);
       assert(rvalue == success->value);
+    } else if (segarecomp_genesis_controller_io_gpio_word_register_index(
+                   selector.address, static_cast<std::uint32_t>(host_width(selector.width))) >= 0) {
+      // SEG-068-T004: the CTRL3 WORD read selector address ($A1000C) is also the even address of the CTRL3 register
+      // pair: a WORD write is an accepted latched store of the low byte (even lane discarded); its read is unchanged.
+      GenesisRuntime rw{};
+      GenesisRuntimeStop wstop{};
+      std::uint32_t wvalue = UINT32_C(0x1234A5C3);
+      assert(genesis_route_access(&rw, selector.address, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &wvalue,
+                                  &wstop) == GENESIS_ACCESS_OK);
+      assert(rw.devices.controller_io.ctrl[2] == 0xC3);
     } else {
       assert_failure(request_for(selector.address, host_width(selector.width),
                                  M68kMemoryAccessDirection::write), runtime);
     }
-    const auto wrong_width = static_cast<std::uint8_t>(selector.width == 1U ? 2U : 1U);
+    // A WORD read at the T020 LONG selector's address ($A10008) is now the covered CTRL1 even-address shape
+    // (SEG-068-T004), so the retained wrong-width negative for a LONG selector is BYTE.
+    const auto wrong_width = static_cast<std::uint8_t>(selector.width == 1U ? 2U : (selector.width == 4U ? 1U : 1U));
     assert_failure(request_for(selector.address, host_width(wrong_width),
                                M68kMemoryAccessDirection::read), runtime);
   }
