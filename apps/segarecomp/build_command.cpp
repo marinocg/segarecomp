@@ -940,6 +940,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   build.c_base = {options.cc};
   build.c_base.insert(build.c_base.end(), options.cc_args.begin(), options.cc_args.end());
   build.c_base.insert(build.c_base.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", opt, "-I", build.runtime.string(),
+                                           "-I", build.viewer.string(),
                                            "-I", (build.root / "libs" / "codegen" / "c11" / "include").string(),
                                            "-I", (build.psg / "include").string(), "-I", (build.ym / "include").string()});
   if (build.play)
@@ -982,6 +983,11 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND"});
   } else {
     add(final_only, build.runtime / "genesis_sound_hook.c", "hook-sound");
+    // SEG-068-T007: the sound hook delegates its run loop to the existing headless frame capture when SEGARECOMP_CAPTURE_DIR is
+    // set (one guest execution for frames and the sound summary), so the existing renderer/exporter/capture objects are linked.
+    add(final_only, build.runtime / "vdp_render.c", "vdp-render");
+    add(final_only, build.runtime / "frame_export.c", "frame-export");
+    add(final_only, build.viewer / "frame_capture.c", "frame-capture");
   }
   for (const auto &job : stable)
     if (!fs::is_regular_file(job.source, ec))

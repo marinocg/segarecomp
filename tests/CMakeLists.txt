@@ -1332,6 +1332,11 @@ add_test(NAME genesis_audio_equivalence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_equivalence_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})
 add_test(NAME genesis_audio_artifact_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_artifact_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-068-T007: headless compatibility driver (frame-keyed pad script + capture + sound summary from one guest execution).
+add_test(NAME genesis_compat_driver_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_compat_driver_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_compat_driver_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_compat_driver_test PROPERTY TIMEOUT 1500)
 set_property(TEST genesis_audio_mixer_test genesis_audio_pcm_test genesis_audio_equivalence_test genesis_audio_artifact_test APPEND PROPERTY LABELS full)
 set_property(TEST genesis_audio_mixer_test APPEND PROPERTY LABELS fast)
 set_property(TEST genesis_audio_artifact_test PROPERTY TIMEOUT 1500)
