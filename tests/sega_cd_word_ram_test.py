@@ -2,10 +2,12 @@
 """SEG-062-T004: Word RAM 2M/1M ownership, the Gate Array interrupt enables and the sub timer.
 
   * tests/tools/sega_cd_word_ram_table.c: the table of ownership transitions (2M main-owned, sub-owned, repeated and conflicting
-    requests, 1M bank views and swaps, mode switches), the timer and the interrupt-enable rules, driven through the runtime's
-    register paths against contract-derived expectations;
+    requests, the 1M DMNA request latch, 1M bank views and swaps, mode switches, CDC DMA halt/resume), SRES/SBRQ, the timer,
+    the interrupt-enable rules, the peripheral reset and the CDD play sequence, driven through the runtime's register paths
+    against contract-derived (GPGX where the references disagree) expectations;
   * generated-native fixtures: `wordram2m` (sub fills Word RAM after DMNA, returns it with RET, main verifies), `wordram1m` (both
-    processors use their bank at once, the sub swaps them), `timer` (five INT3 interrupts), `wordram_violation` (typed stop);
+    processors use their bank at once, the sub swaps them), `timer` (five INT3 interrupts), `wordram_wait` (the sub waits for
+    DTACK until main hands Word RAM over, GPGX), `wordram_violation` (main: ignored write, open-bus read stop);
     hand-derived results, the pinned-Musashi two-processor reference (Word RAM byte for byte) when configured, two runs and eight
     deadline partitions identical.
 
@@ -39,8 +41,8 @@ def main():
                         "-o", str(table)], check=True)
         out = subprocess.run([str(table)], capture_output=True, text=True, timeout=60)
         rows = [line for line in out.stdout.splitlines() if line.startswith(("ok", "FAIL"))]
-        check(out.returncode == 0 and len(rows) >= 40 and not any(r.startswith("FAIL") for r in rows),
-              "ownership / bank / timer / interrupt-enable table: %d rows" % len(rows))
+        check(out.returncode == 0 and len(rows) >= 60 and not any(r.startswith("FAIL") for r in rows),
+              "ownership / bank / DMA halt / SBRQ / timer / interrupt-enable / reset / CDD table: %d rows" % len(rows))
         for line in rows:
             if line.startswith("FAIL"):
                 print("      " + line)
@@ -87,8 +89,18 @@ def main():
                           report["ga"]["comstat"] == state["comstat"], fixture + ": Musashi reference agrees on RET/MODE/COMSTAT")
         disc, exe, expected, _ = builder.program("wordram_violation", "wordram_violation")
         code, report = common.run(exe, disc, 1000000)
-        check(code == 10 and report["stop"]["class"] == "wordram_not_owned" and report["stop"]["cpu"] == 0 and
-              report["stop"]["address"] == 0x200000, "main access to Word RAM owned by the sub: typed stop wordram_not_owned")
+        check(code == 10 and report["stop"]["class"] == "open_bus_read" and report["stop"]["cpu"] == 0 and
+              report["stop"]["address"] == 0x200000 and report["ignored_writes"] == 1,
+              "main and Word RAM owned by the sub: the write (through the $240000 mirror) is ignored, the read is open bus")
+
+        disc, exe, expected, _ = builder.program("wordram_wait", "wordram_wait")
+        code, report = common.run(exe, disc, 1000000)
+        check(code == 0 and common.result_words(report, 2) == expected["result_words"] and report["cpus"][1]["a"][3] == expected["sub_a3"] and
+              report["sub_waits"] == 1 and report["ga"]["sub_wait"] == 0,
+              "a sub access to 2M Word RAM before the handover waits for DTACK and is retried once main sets DMNA "
+              "(result %s, A3 advanced exactly once per store)" % [hex(w) for w in common.result_words(report, 2)])
+        same = [common.run(exe, disc, 1000000, *p)[1] == report for p in partitions]
+        check(all(same), "wordram_wait: identical under %d deadline partitions" % len(partitions))
     if failures:
         print("%d failure(s)" % len(failures))
         return 1

@@ -10,8 +10,10 @@ the main CPU programs CRAM, tiles and plane A -> the VDP frame is exported by th
   * the Word RAM payload, VRAM, CRAM and CDC block headers equal independently derived values (sector payload = oracle digest);
   * two runs and several deadline partitions give identical reports (frame, device log, digests), cooked and raw discs alike;
   * liveness: a disc with one changed data byte, rebuilt, renders a different frame; the old program refuses that disc at start-up;
-  * typed failures: out-of-range LBA, audio LBA, bad CDD checksum, unsupported DMA destination, CDC register outside the contract,
-    missing / truncated / altered disc files; an aborted DMA keeps its partial progress (no rollback, no EDT);
+  * typed failures: audio track reached (pregap, audio LBA, reading past the data track), unsupported DMA destination, missing /
+    truncated / altered disc files; an aborted DMA keeps its partial progress (no rollback, no EDT);
+  * defined (GPGX) results: playing past the disc ends in drive status END, the CDD checksum is never inspected, CTRL1 MODRQ is
+    accepted;
   * no data-sector byte sequence appears in the generated C.
 
 usage: sega_cd_disc_to_frame_test.py <segarecomp> <c-compiler> <source-root>
@@ -114,20 +116,33 @@ def main():
         check(code == 20 and refused.get("error") == "disc_file_missing", "a missing BIN is refused at start-up")
 
         negatives = [
-            ("lba_beyond", ["--cd-lba", "300"], "cd_read_out_of_range"),
-            ("lba_pregap", ["--cd-lba", "45"], "cd_read_out_of_range"),
+            ("lba_pregap", ["--cd-lba", "45"], "cd_read_audio_track"),
             ("lba_audio", ["--cd-lba", "200"], "cd_read_audio_track"),
-            ("bad_checksum", ["--bad-checksum"], "cdd_bad_checksum"),
             ("dma_prg_ram", ["--dma-dest", "5"], "cdc_destination_unsupported"),
             ("dma_host", ["--dma-dest", "3"], "cdc_destination_unsupported"),
-            ("cdc_ctrl1", ["--bad-cdc-register"], "cdc_register_unsupported"),
-            ("read_past_track", ["--cd-lba", "39"], "cd_read_out_of_range"),
+            ("read_past_track", ["--cd-lba", "39"], "cd_read_audio_track"),
         ]
         for name, options, stop in negatives:
             ndisc, nexe, _, _ = builder.program("neg_" + name, "cdframe", "cooked", *options)
             code, report = common.run(nexe, ndisc, BUDGET)
             check(code == 10 and report["stop"]["class"] == stop and report["stop"]["cpu"] == 1,
                   "%s: typed stop %s (got %s)" % (name, stop, report.get("stop", {}).get("class")))
+
+        # Defined GPGX results instead of stops.
+        ndisc, nexe, _, _ = builder.program("past_disc", "cdframe", "cooked", "--cd-lba", "300")
+        code, report = common.run(nexe, ndisc, 400000)
+        check(code == 11 and report["cdd"]["status"] == 0x0C and report["cdd"]["delivered"] == 0 and report["cdc"]["edt"] == 0,
+              "play past the last track: drive status END, no block delivered, the polling program ends on its budget (exit %d)" % code)
+        for name, options in (("checksum", ["--bad-checksum"]), ("modrq", ["--bad-cdc-register"])):
+            ndisc, nexe, _, _ = builder.program("variant_" + name, "cdframe", "cooked", *options)
+            code, report = common.run(nexe, ndisc, BUDGET)
+            check(code == 0 and report["frame_sha256"] == base["frame_sha256"] and report["digests"]["word_ram"] == base["digests"]["word_ram"],
+                  "%s variant: the same frame (exit %d)" % (name, code))
+            if name == "checksum":
+                check(report["cdd"]["tx"][8:] == [0, 0], "a wrong TX9 checksum is never inspected: the command word write clears TX8/TX9")
+            else:
+                check(report["cdc"]["ctrl1"] == 0x08 and report["cdc"]["stat2"] == 0x08,
+                      "CTRL1 MODRQ is accepted (STAT2 follows it); Mode 1 data blocks are unaffected")
 
         adisc, aexe, _, _ = builder.program("abort_dma", "cdframe", "cooked", "--abort-dma")
         code, report = common.run(aexe, adisc, BUDGET)

@@ -7,7 +7,8 @@
 **Purpose:** Genesis plus a second MC68000 (the sub CPU), the Gate Array, Word RAM and the CD drive/CDC data path.
 
 **Profile:** synthetic post-BIOS fixture profile only: project-authored discs, no BIOS executed or present, no
-commercial software.
+commercial software. Where the reference emulators disagree the runtime follows Genesis Plus GX (consulted, never copied;
+contract tag G, ADR 0128).
 
 **Code:** `machine/` (build time: boot images from `libs/media` disc ingestion, two-processor program emission over the
 generic M68K lowering, `segarecomp sega-cd inspect|emit`); `runtime/` (strict C11: scheduler, buses, Gate Array, Word RAM,

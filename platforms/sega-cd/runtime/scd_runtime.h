@@ -45,22 +45,21 @@ extern "C" {
 #define SCD_WORD_RAM_BYTES 0x40000U
 #define SCD_WORK_RAM_BYTES 0x10000U
 #define SCD_CDC_BUFFER_BYTES 0x4000U
+#define SCD_CDD_TOC_STATUS 0x09U   /* GPGX CD_TOC: drive stopped with a disc loaded */
+#define SCD_CDD_PLAY 0x01U
+#define SCD_CDD_SEEK 0x02U
+#define SCD_CDD_END 0x0CU
 
 typedef enum ScdStopClass {
   SCD_STOP_NONE = 0,
   SCD_STOP_UNMAPPED,
   SCD_STOP_BIOS_ABSENT,
-  SCD_STOP_PRG_RAM_WINDOW_WITHOUT_BUS,
-  SCD_STOP_WORDRAM_NOT_OWNED,
+  SCD_STOP_OPEN_BUS_READ,
   SCD_STOP_WORDRAM_CELL_IMAGE_UNSUPPORTED,
   SCD_STOP_WORDRAM_DOT_IMAGE_UNSUPPORTED,
-  SCD_STOP_WORDRAM_1M_DMNA_UNSUPPORTED,
-  SCD_STOP_WORDRAM_PRIORITY_MODE_UNSUPPORTED,
   SCD_STOP_BACKUP_RAM_UNSUPPORTED,
   SCD_STOP_PCM_UNSUPPORTED,
   SCD_STOP_GATE_ARRAY_REGISTER_UNSUPPORTED,
-  SCD_STOP_PERIPHERAL_RESET_UNSUPPORTED,
-  SCD_STOP_BUSREQ_WHILE_SUB_STOPPED_UNSUPPORTED,
   SCD_STOP_VDP_ACCESS_UNSUPPORTED,
   SCD_STOP_VDP_DMA_UNSUPPORTED,
   SCD_STOP_ADDRESS_ERROR,
@@ -73,11 +72,7 @@ typedef enum ScdStopClass {
   SCD_STOP_TRACE_UNSUPPORTED,
   SCD_STOP_INTERRUPT_SOURCE_UNSUPPORTED,
   SCD_STOP_CDC_DESTINATION_UNSUPPORTED,
-  SCD_STOP_CDC_DMA_DESTINATION_NOT_OWNED,
-  SCD_STOP_CDC_REGISTER_UNSUPPORTED,
-  SCD_STOP_CDD_BAD_CHECKSUM,
   SCD_STOP_CDD_COMMAND_UNSUPPORTED,
-  SCD_STOP_CD_READ_OUT_OF_RANGE,
   SCD_STOP_CD_READ_AUDIO_TRACK,
   SCD_STOP_CD_READ_FAILED,
   SCD_STOP_INTERNAL,
@@ -186,26 +181,43 @@ typedef struct ScdProgram {
 
 /* --- Gate Array / devices ------------------------------------------------------------------------------------------------ */
 
+/* Memory-mode register low byte (sub view $FF8003 bits 4-0; the main view masks PM1/PM0 and adds BK1/BK0). */
+#define SCD_MODE_RET 0x01U
+#define SCD_MODE_DMNA 0x02U
+#define SCD_MODE_1M 0x04U
+
 typedef struct ScdGateArray {
-  uint8_t sub_reset;        /* SRES = 0: sub held in reset */
-  uint8_t sub_busreq;       /* SBRQ readback */
+  uint8_t ctl;              /* $A12001 readback: bit 1 SBRQ, bit 0 SRES (1 = sub released from reset) */
+  uint8_t sub_halted;       /* the sub's /HALT input (SRES = 0 or SBRQ = 1) */
+  uint8_t sub_wait;         /* the sub waits for DTACK (2M Word RAM it does not own); main DMNA = 1 releases it */
+  uint8_t prg_window;       /* main $020000-$03FFFF mapped to PRG RAM (follows the SBRQ readback when the halt state changes) */
   uint8_t ifl2;             /* main -> sub level-2 request flag ($A12000 bit 0) */
-  uint8_t led;              /* sub $FF8000 */
+  uint8_t ien2_mirror;      /* $A12000 bit 7: IEN2 as last written to $FF8033 (kept across a peripheral reset) */
+  uint8_t led;              /* $FF8000 (also seen at $FF8006 and $A12006) */
   uint8_t write_protect;    /* WP, units of $200 bytes */
   uint8_t prg_bank;         /* BK1:BK0 */
-  uint8_t mode_1m;          /* MODE */
-  uint8_t ret;              /* RET */
-  uint8_t dmna;             /* DMNA */
+  uint8_t mode;             /* PM1 PM0 MODE DMNA RET (SCD_MODE_*) */
+  uint8_t dmna_int;         /* internal swap/return request latched by main DMNA writes */
   uint8_t main_flag;
   uint8_t sub_flag;
   uint16_t comcmd[8];
   uint16_t comstat[8];
-  uint8_t interrupt_enable; /* $FF8033 bits 1-6 */
+  uint8_t interrupt_enable; /* $FF8033 as written */
+  uint8_t reg32_hi;         /* $FF8032 (storage only) */
   uint8_t pending;          /* pending sub interrupt levels, bit n = level n */
   uint8_t timer_reload;     /* $FF8031 */
-  uint64_t timer_next;      /* tick of the next INT3, 0 = stopped */
-  uint8_t cdd_hock;         /* $FF8037 bit 2 */
+  uint64_t timer_next;      /* tick of the next timer expiry, 0 = stopped */
+  uint8_t cdd_ctrl_hi;      /* $FF8036 (1 = no audio track playing) */
+  uint8_t cdd_ctrl_lo;      /* $FF8037 (bit 2 HOCK) */
+  uint8_t scratch[0x98];    /* $FF8068-$FF80FF: register storage without function */
 } ScdGateArray;
+
+#define SCD_DMA_NONE 0U
+#define SCD_DMA_RUNNING 1U
+#define SCD_DMA_HALTED 2U
+#define SCD_DMA_TARGET_2M 1U
+#define SCD_DMA_TARGET_BANK0 2U
+#define SCD_DMA_TARGET_BANK1 3U
 
 typedef struct ScdCdc {
   uint8_t address;          /* $FF8005 */
@@ -213,27 +225,30 @@ typedef struct ScdCdc {
   uint8_t edt, dsr;         /* $FF8004 bits 7, 6 */
   uint16_t dma_address;     /* $FF800A */
   uint8_t ifstat, ifctrl, ctrl0, ctrl1;
+  uint8_t irq;              /* asserted CDC /INT sources (DTEI, DECI) */
   uint16_t dbc, dac, pt, wa;
-  uint8_t head[4];
+  uint8_t head[2][4];       /* [0] block header, [1] sub-header (selected by CTRL1 SHDREN) */
   uint8_t stat0, stat2, stat3;
-  uint8_t irq_line;         /* active CDC /INT sources (DTEI | DECI as in IFCTRL) */
-  /* DMA in flight */
-  uint8_t dma_active;
-  uint32_t dma_total;       /* bytes */
-  uint32_t dma_done;
-  uint64_t dma_start;       /* tick */
+  uint64_t decoder_end;     /* end tick of the decoder active period */
+  uint8_t dma_state;        /* SCD_DMA_*: the writer of a started transfer (none while the destination is invalid) */
+  uint8_t dma_target;       /* SCD_DMA_TARGET_*, latched when the writer is selected */
+  uint64_t dma_base;        /* tick from which the next bytes are counted */
+  uint32_t dma_total;       /* bytes requested by the last DTRG (report) */
+  uint32_t dma_done;        /* bytes moved since the last DTRG (report) */
   uint8_t buffer[SCD_CDC_BUFFER_BYTES + 2352];
 } ScdCdc;
 
 typedef struct ScdCdd {
-  uint8_t tx[10];
-  uint8_t rx[10];
-  uint8_t status;           /* drive status code */
-  uint8_t reading;          /* play in progress */
-  uint32_t lba;             /* next sector to deliver */
-  uint32_t latency;         /* ticks before the first delivery */
-  uint64_t next_tick;       /* tick of the next 75 Hz event */
-  uint64_t delivered;       /* sectors delivered */
+  uint8_t tx[10];           /* $FF8042-$FF804B as written */
+  uint8_t rx[10];           /* $FF8038-$FF8041 */
+  uint8_t status;           /* drive status */
+  uint8_t pending;          /* status taken when a play/seek starts on the next tick */
+  uint32_t latency;         /* ticks before the drive delivers */
+  int32_t lba;              /* current position (may be negative inside the lead-in) */
+  uint32_t index;           /* current track index (== track count: past the last track) */
+  uint64_t anchor;          /* origin of the 75 Hz grid (power-on, or the last peripheral reset) */
+  uint64_t next_tick;       /* next grid point to process while the drive is active */
+  uint64_t delivered;       /* data blocks read while playing */
 } ScdCdd;
 
 typedef struct ScdMachine {
@@ -252,6 +267,9 @@ typedef struct ScdMachine {
   uint64_t instruction_budget;            /* remaining; 0 = exhausted */
   uint64_t device_log;                    /* FNV-1a over every device register access and device event */
   uint64_t prg_write_protect_drops;       /* sub writes ignored by the write protect */
+  uint64_t ignored_writes;                /* writes with no effect (unused registers, unmapped Word RAM / PRG window, BIOS) */
+  uint64_t sub_waits;                     /* sub instructions abandoned to wait for DTACK */
+  uint8_t sub_wait_request;               /* set by a sub access that must wait for DTACK (the instruction is retried) */
   uint64_t sub_interrupts_taken[8];
 } ScdMachine;
 
@@ -296,7 +314,17 @@ void scd_vdp_release(ScdMachine *m);
 int scd_cd_observe(ScdMachine *m);
 int scd_cdc_sub_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 int scd_word_ram_access(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
-int scd_word_ram_dma_store(ScdMachine *m, uint32_t offset, uint16_t word);
+/* Word RAM ownership changes driven by the Gate Array (scd_word_ram.c). */
+int scd_word_ram_main_mode_write(ScdMachine *m, uint32_t value, uint32_t pc);
+int scd_word_ram_sub_mode_write(ScdMachine *m, uint32_t value, uint32_t pc);
+/* CDC DMA control shared with the Word RAM logic (scd_cd.c). */
+void scd_cdc_dma_halt_2m(ScdMachine *m);
+void scd_cdc_dma_resume_2m(ScdMachine *m);
+/* Peripheral reset (sub writes RES0 = 0) and CDD activity bookkeeping. */
+void scd_peripheral_reset(ScdMachine *m);
+int scd_cdd_active(const ScdMachine *m);
+void scd_cdd_refresh(ScdMachine *m, int was_active);
+void scd_devices_power_on(ScdMachine *m);
 
 /* Program driver: parses argv, opens the disc, runs, writes the report and the frame. */
 int scd_program_main(const ScdProgram *program, int argc, char **argv);

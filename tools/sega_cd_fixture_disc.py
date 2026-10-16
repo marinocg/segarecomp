@@ -14,9 +14,11 @@ Fixtures (the main program is the IP, mapped at $FF0000; the sub program is the 
   wordram1m   T004  1M mode: both CPUs use their bank at once, the sub swaps banks with RET
   timer       T004  sub counts five timer (INT3) interrupts, then stops the timer
   cdframe     T005  sub reads two data sectors through CDD/CDC and DMAs them into Word RAM; main programs the VDP from them
-  wordram_violation, comm_unmapped   negative fixtures (typed stops)
+  wordram_wait T004  the sub touches 2M Word RAM before main hands it over: it waits for DTACK and retries (GPGX)
+  wordram_violation, neg_*   negative fixtures (typed stops or defined GPGX results)
 Variants: `cooked` (MODE1/2048) and `raw` (MODE1/2352 with sync and header); options alter the cdframe sub program for
-negative runtime tests (bad CDD checksum, out-of-range or audio LBA, unsupported DMA destination) and one data byte (liveness).
+runtime tests (CDD checksum, CTRL1 MODRQ, LBA past the disc / in the audio track, unsupported DMA destination, DMA abort) and one
+data byte (liveness).
 
 Result block convention: the main program reports into work RAM at $FFC000 and writes $A5 at $FFC0FF last.
 
@@ -339,16 +341,18 @@ def fixture_comm(options):
     return ip, sp, {}, expected
 
 
-def fixture_comm_unmapped(options):
-    """Negative: the sub reads an address outside its map ($200000 is a main-side address)."""
+def fixture_open_bus(options):
+    """Negative: the sub writes and then reads $0C0000, unused in 2M mode (GPGX: the write is ignored, the read returns the
+    prefetched instruction word - open bus, the typed stop open_bus_read). The write goes through the 1 MiB mirror at $1C0000."""
     sub = Asm(SP_BASE)
-    sub.move("w", absl(0x200000), d(0))
+    sub.move("w", imm(0x1234), absl(0x1C0000))
+    sub.move("w", absl(0x0C0000), d(0))
     sub.stop(0x2700)
     main = Asm(IP_BASE)
     main_start_sub(main, SP_BASE)
     main.label("spin")
     main.bra("spin")
-    return main.assemble(), sub.assemble(), {}, {"stop": "unmapped", "cpu": "sub"}
+    return main.assemble(), sub.assemble(), {}, {"stop": "open_bus_read", "cpu": "sub", "ignored_writes": 1}
 
 
 def fixture_negative(kind):
@@ -358,17 +362,20 @@ def fixture_negative(kind):
         main = Asm(IP_BASE)
         expected = {}
         if kind == "ga_register":
+            sub.move("w", imm(1), absl(GA_SUB + 0x58))  # graphics (stamp) registers: not modelled
             sub.stop(0x2700)
-            main.move("w", imm(1), absl(GA_MAIN + 0x30))
+            main_start_sub(main, SP_BASE)
+            main.move("w", imm(1), absl(GA_MAIN + 0x30))  # unused main offset: the write is ignored (GPGX)
             main.stop(0x2700)
-            expected = {"stop": "gate_array_register_unsupported", "cpu": "main"}
+            expected = {"stop": "gate_array_register_unsupported", "cpu": "sub"}
         elif kind == "prg_window_nobus":
             sub.label("spin")
             sub.bra("spin")
             main_start_sub(main, SP_BASE)
-            main.move("w", absl(PRG_WINDOW + 0x100), d(0))
+            main.move("w", imm(0xBEEF), absl(PRG_WINDOW + 0x100))  # unmapped once the sub runs: ignored (GPGX)
+            main.move("w", absl(0x060100), d(0))  # the window's mirror at $060000: open bus
             main.stop(0x2700)
-            expected = {"stop": "prg_ram_window_without_bus", "cpu": "main"}
+            expected = {"stop": "open_bus_read", "cpu": "main", "ignored_writes": 1}
         elif kind == "ifl2_masked":
             sub.move("l", imm("handler"), absl(0x000068))
             sub.move_sr(0x2000)
@@ -434,9 +441,11 @@ def fixture_negative(kind):
             main.move("w", imm(200), d(7))
             main.label("delay")
             main.dbra(7, "delay")
-            main.move("b", imm(0x03), absl(GA_MAIN + 0x01))  # SBRQ while the sub is in STOP: unresolved (contract section 13)
-            main.stop(0x2700)
-            expected = {"stop": "busreq_while_sub_stopped_unsupported", "cpu": "main"}
+            main.move("b", imm(0x03), absl(GA_MAIN + 0x01))  # SBRQ while the sub is in STOP: SBRQ reads 0 (GPGX, V1)
+            main.move("b", absl(GA_MAIN + 0x01), absl(RESULT))
+            main.move("w", imm(0xBEEF), absl(PRG_WINDOW + 0x100))  # the window stays unmapped: ignored
+            main_finish(main)
+            expected = {"result_bytes": [0x01], "ignored_writes": 1}
         return main.assemble(), sub.assemble(), {}, expected
     return build
 
@@ -468,7 +477,8 @@ def fixture_wordram2m(options):
     wait_flag(main, GA_MAIN + 0x0F, 1, "w_ready")
     main.move("b", imm(0x02), absl(GA_MAIN + 0x03))  # DMNA = 1: give Word RAM to the sub
     if options.get("violation"):
-        main.move("w", absl(WORD_RAM_MAIN), d(0))  # negative: main reads Word RAM it no longer owns
+        main.move("w", imm(0x4321), absl(WORD_RAM_MAIN + 0x40002))  # Word RAM owned by the sub (mirror): ignored (GPGX)
+        main.move("w", absl(WORD_RAM_MAIN), d(0))  # negative: main reads Word RAM it no longer owns: open bus
     main.move("b", imm(0x01), absl(GA_MAIN + 0x0E))
     wait_flag(main, GA_MAIN + 0x0F, 2, "w_done")
     main.label("w_ret")
@@ -493,8 +503,35 @@ def fixture_wordram2m(options):
         xor ^= w
     expected = {"result_words": [xor, sum(words) & 0xFFFF, words[63]]}
     if options.get("violation"):
-        expected = {"stop": "wordram_not_owned", "cpu": "main"}
+        expected = {"stop": "open_bus_read", "cpu": "main", "ignored_writes": 1}
     return main.assemble(), sub.assemble(), {}, expected
+
+
+def fixture_wordram_wait(options):
+    """The sub writes 2M Word RAM before main hands it over: the sub waits for DTACK (GPGX s68k_pulse_wait) and its instruction is
+    retried once main sets DMNA. Main sees the value after the sub returns Word RAM."""
+    sub = Asm(SP_BASE)
+    sub.move("w", imm(0x00C0), d(4))
+    sub.lea(absl(WORD_RAM_SUB_2M + 0x100), 3)
+    sub.move("w", d(4), ("inc", 3))  # waits here (A3 must not advance twice)
+    sub.move("w", imm(0x5AA5), ("inc", 3))
+    sub.move("b", imm(0x01), absl(GA_SUB + 0x03))  # RET = 1
+    sub.move("b", imm(0x01), absl(GA_SUB + 0x0F))
+    sub.stop(0x2700)
+    main = Asm(IP_BASE)
+    main_start_sub(main, SP_BASE)
+    main.move("w", imm(300), d(7))
+    main.label("delay")
+    main.dbra(7, "delay")
+    main.move("b", imm(0x02), absl(GA_MAIN + 0x03))  # DMNA
+    wait_flag(main, GA_MAIN + 0x0F, 1, "w_done")
+    main.label("w_ret")
+    main.btst(0, absl(GA_MAIN + 0x03))
+    main.bcc("eq", "w_ret")
+    main.move("w", absl(WORD_RAM_MAIN + 0x100), absl(RESULT))
+    main.move("w", absl(WORD_RAM_MAIN + 0x102), absl(RESULT + 2))
+    main_finish(main)
+    return main.assemble(), sub.assemble(), {}, {"result_words": [0x00C0, 0x5AA5], "sub_a3": WORD_RAM_SUB_2M + 0x104}
 
 
 def fixture_wordram1m(options):
@@ -616,7 +653,7 @@ def fixture_cdframe(options):
     cdc_write(0x0F, 0x00)  # CDC reset
     cdc_write(0x01, 0x02)  # IFCTRL: DOUTEN
     cdc_write(0x0A, 0x84)  # CTRL0: DECEN | WRRQ
-    sub.move("b", imm(0x08 if options.get("bad_cdc_register") else 0x00), absl(GA_SUB + 0x07))  # CTRL1 (address 11)
+    sub.move("b", imm(0x08 if options.get("bad_cdc_register") else 0x00), absl(GA_SUB + 0x07))  # CTRL1 (address 11); MODRQ variant
     sub.move("b", imm(0x01), absl(GA_SUB + 0x0F))
     wait_flag(sub, GA_SUB + 0x0E, 1, "w_go")
     sub.label("w_own")
@@ -624,54 +661,56 @@ def fixture_cdframe(options):
     sub.bcc("ne", "w_own")
     for i, word in enumerate(play_words):
         sub.move("w", imm(word), absl(GA_SUB + 0x42 + 2 * i))  # the word write to $FF804A sends the command
-    sub.moveq(0, 6)
     sub.lea(absl(GA_SUB + 0x20), 2)
-    sub.label("next")
-    sub.label("w_valid")
-    sub.move("b", imm(0x0F), absl(GA_SUB + 0x05))  # STAT3
-    sub.move("b", absl(GA_SUB + 0x07), d(0))
-    sub.btst(7, d(0))
-    sub.bcc("ne", "w_valid")
-    sub.move("b", imm(0x04), absl(GA_SUB + 0x05))  # HEAD0..HEAD3, then PTL, PTH
-    for _ in range(2):
+    for k in range(2):
+        # The decoder also runs while the drive seeks (GPGX): blocks whose header is not the requested MSF are skipped.
+        msf = lba + k + 150
+        want = [(bcd(msf // 75 // 60) << 8) | bcd(msf // 75 % 60), (bcd(msf % 75) << 8) | 0x01]
+        sub.label("w_valid%d" % k)
+        sub.move("b", imm(0x0F), absl(GA_SUB + 0x05))  # STAT3
         sub.move("b", absl(GA_SUB + 0x07), d(0))
-        sub.lsl_w(8, 0)
-        sub.move("b", absl(GA_SUB + 0x07), d(0))
+        sub.btst(7, d(0))
+        sub.bcc("ne", "w_valid%d" % k)
+        sub.move("b", imm(0x04), absl(GA_SUB + 0x05))  # HEAD0..HEAD3, then PTL, PTH
+        for reg in (0, 5):
+            sub.move("b", absl(GA_SUB + 0x07), d(reg))
+            sub.lsl_w(8, reg)
+            sub.move("b", absl(GA_SUB + 0x07), d(reg))
+        sub.immop("cmp", "w", want[0], d(0))
+        sub.bcc("ne", "w_valid%d" % k)
+        sub.immop("cmp", "w", want[1], d(5))
+        sub.bcc("ne", "w_valid%d" % k)
         sub.move("w", d(0), ("inc", 2))
-    sub.moveq(0, 1)
-    sub.move("b", absl(GA_SUB + 0x07), d(1))
-    sub.moveq(0, 2)
-    sub.move("b", absl(GA_SUB + 0x07), d(2))
-    sub.lsl_w(8, 2)
-    sub.alu("or", "w", d(1), 2)
-    sub.quick("add", "w", 4, d(2))  # DAC = PT + 4 (skip the block header)
-    sub.move("b", imm(dma_dest), absl(GA_SUB + 0x04))  # destination (also resets $FF800A)
-    sub.move("w", d(6), d(3))
-    sub.lsl_w(8, 3)
-    sub.move("w", d(3), absl(GA_SUB + 0x0A))  # Word RAM offset k * 2048 (in 8-byte units)
-    sub.move("b", imm(0x02), absl(GA_SUB + 0x05))  # DBCL, DBCH, DACL, DACH, DTRG
-    sub.move("b", imm(0xFF), absl(GA_SUB + 0x07))
-    sub.move("b", imm(0x07), absl(GA_SUB + 0x07))
-    sub.move("b", d(2), absl(GA_SUB + 0x07))
-    sub.move("w", d(2), d(3))
-    sub.lsr_w(8, 3)
-    sub.move("b", d(3), absl(GA_SUB + 0x07))
-    sub.move("b", imm(0x00), absl(GA_SUB + 0x07))  # DTRG
-    if options.get("abort_dma"):
-        # Negative/partial-progress variant: let the DMA run for a few instructions, then clear DOUTEN (abort) and report EDT.
-        for _ in range(4):
-            sub.nop()
-        cdc_write(0x01, 0x00)
-        sub.move("b", absl(GA_SUB + 0x04), absl(GA_SUB + 0x2E))  # EDT/DSR/destination into COMSTAT7 (high byte)
-        sub.move("b", imm(0x01), absl(GA_SUB + 0x03))
-        sub.move("b", imm(0x02), absl(GA_SUB + 0x0F))
-        sub.stop(0x2700)
-    sub.label("w_edt")
-    sub.btst(7, absl(GA_SUB + 0x04))
-    sub.bcc("eq", "w_edt")
-    sub.quick("add", "w", 1, d(6))
-    sub.immop("cmp", "w", 2, d(6))
-    sub.bcc("ne", "next")
+        sub.move("w", d(5), ("inc", 2))
+        sub.moveq(0, 1)
+        sub.move("b", absl(GA_SUB + 0x07), d(1))
+        sub.moveq(0, 2)
+        sub.move("b", absl(GA_SUB + 0x07), d(2))
+        sub.lsl_w(8, 2)
+        sub.alu("or", "w", d(1), 2)
+        sub.quick("add", "w", 4, d(2))  # DAC = PT + 4 (skip the block header)
+        sub.move("b", imm(dma_dest), absl(GA_SUB + 0x04))  # destination (also resets $FF800A)
+        sub.move("w", imm(k << 8), absl(GA_SUB + 0x0A))  # Word RAM offset k * 2048 (in 8-byte units)
+        sub.move("b", imm(0x02), absl(GA_SUB + 0x05))  # DBCL, DBCH, DACL, DACH, DTRG
+        sub.move("b", imm(0xFF), absl(GA_SUB + 0x07))
+        sub.move("b", imm(0x07), absl(GA_SUB + 0x07))
+        sub.move("b", d(2), absl(GA_SUB + 0x07))
+        sub.move("w", d(2), d(3))
+        sub.lsr_w(8, 3)
+        sub.move("b", d(3), absl(GA_SUB + 0x07))
+        sub.move("b", imm(0x00), absl(GA_SUB + 0x07))  # DTRG
+        if options.get("abort_dma") and k == 0:
+            # Partial-progress variant: let the DMA run for a few instructions, then clear DOUTEN (abort) and report EDT.
+            for _ in range(4):
+                sub.nop()
+            cdc_write(0x01, 0x00)
+            sub.move("b", absl(GA_SUB + 0x04), absl(GA_SUB + 0x2E))  # EDT/DSR/destination into COMSTAT7 (high byte)
+            sub.move("b", imm(0x01), absl(GA_SUB + 0x03))
+            sub.move("b", imm(0x02), absl(GA_SUB + 0x0F))
+            sub.stop(0x2700)
+        sub.label("w_edt%d" % k)
+        sub.btst(7, absl(GA_SUB + 0x04))
+        sub.bcc("eq", "w_edt%d" % k)
     for i, word in enumerate(stop_words):
         sub.move("w", imm(word), absl(GA_SUB + 0x42 + 2 * i))
     sub.move("b", imm(0x01), absl(GA_SUB + 0x03))  # RET = 1: Word RAM back to main
@@ -726,7 +765,6 @@ def fixture_cdframe(options):
     headers = []
     for k in range(2):
         msf = DATA_LBA + k + 150
-        bcd = lambda v: ((v // 10) << 4) | (v % 10)  # noqa: E731
         headers += [(bcd(msf // 75 // 60) << 8) | bcd(msf // 75 % 60), (bcd(msf % 75) << 8) | 0x01]
     expected = {"result_words": headers, "data_sha256": hashlib.sha256(data).hexdigest(), "data_lba": DATA_LBA,
                 "data_sectors": 2, "palette_bytes": PALETTE_BYTES, "tile_bytes": TILE_BYTES, "name_rows": NAME_ROWS,
@@ -736,10 +774,11 @@ def fixture_cdframe(options):
 
 FIXTURES = {
     "comm": fixture_comm,
-    "comm_unmapped": fixture_comm_unmapped,
+    "neg_open_bus": fixture_open_bus,
     "wordram2m": fixture_wordram2m,
     "wordram_violation": lambda o: fixture_wordram2m(dict(o, violation=True)),
     "wordram1m": fixture_wordram1m,
+    "wordram_wait": fixture_wordram_wait,
     "timer": fixture_timer,
     "cdframe": fixture_cdframe,
 }

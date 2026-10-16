@@ -6,14 +6,11 @@
 #include <string.h>
 
 static const char *const scd_stop_names[SCD_STOP_CLASS_COUNT] = {
-    "none", "unmapped", "bios_absent", "prg_ram_window_without_bus", "wordram_not_owned", "wordram_cell_image_unsupported",
-    "wordram_dot_image_unsupported", "wordram_1m_dmna_unsupported", "wordram_priority_mode_unsupported", "backup_ram_unsupported",
-    "pcm_unsupported", "gate_array_register_unsupported", "peripheral_reset_unsupported", "busreq_while_sub_stopped_unsupported",
-    "vdp_access_unsupported", "vdp_dma_unsupported", "address_error", "entry_not_compiled", "return_target_not_compiled",
-    "code_bytes_mismatch", "instruction_unsupported", "exception_vector_not_compiled", "exception_stack_invalid",
-    "trace_unsupported", "interrupt_source_unsupported", "cdc_destination_unsupported", "cdc_dma_destination_not_owned",
-    "cdc_register_unsupported", "cdd_bad_checksum", "cdd_command_unsupported", "cd_read_out_of_range", "cd_read_audio_track",
-    "cd_read_failed", "internal"};
+    "none", "unmapped", "bios_absent", "open_bus_read", "wordram_cell_image_unsupported", "wordram_dot_image_unsupported",
+    "backup_ram_unsupported", "pcm_unsupported", "gate_array_register_unsupported", "vdp_access_unsupported", "vdp_dma_unsupported",
+    "address_error", "entry_not_compiled", "return_target_not_compiled", "code_bytes_mismatch", "instruction_unsupported",
+    "exception_vector_not_compiled", "exception_stack_invalid", "trace_unsupported", "interrupt_source_unsupported",
+    "cdc_destination_unsupported", "cdd_command_unsupported", "cd_read_audio_track", "cd_read_failed", "internal"};
 
 const char *scd_stop_class_name(ScdStopClass stop_class) {
   return (unsigned)stop_class < SCD_STOP_CLASS_COUNT ? scd_stop_names[stop_class] : "unknown";
@@ -67,41 +64,50 @@ static void scd_ram_put(uint8_t *ram, uint32_t offset, uint32_t width, uint32_t 
   }
 }
 
-static int scd_main_prg_window_open(const ScdMachine *m) { return m->ga.sub_reset || m->ga.sub_busreq; }
+/* An access with no hardware effect (GPGX "unused" areas): a write is dropped and logged; a read would return the processor's
+ * prefetched instruction word (open bus), which is not modelled - the typed stop open_bus_read. */
+static int scd_unused(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
+  if (!is_write) return scd_fail_access(m, cpu, SCD_STOP_OPEN_BUS_READ, pc, address, width, 0);
+  ++m->ignored_writes;
+  scd_log(m, 0x51U, address, *value);
+  return 0;
+}
 
 /* Side-effect-free view of plain RAM for code guards and exception frames: the byte at `address`, or NULL when the address is
- * not plain RAM of `cpu` (a device, an absent region, or Word RAM the processor does not own). */
+ * not plain RAM of `cpu` (a device, an absent region, or Word RAM). Mirrors follow the bus maps below. */
 static uint8_t *scd_ram_byte(ScdMachine *m, uint32_t cpu, uint32_t address) {
   address &= UINT32_C(0x00FFFFFF);
   if (cpu == SCD_MAIN) {
-    if (address >= UINT32_C(0x00FF0000)) return &m->work_ram[address - UINT32_C(0x00FF0000)];
-    if (address >= UINT32_C(0x00020000) && address < UINT32_C(0x00040000) && scd_main_prg_window_open(m))
-      return &m->prg_ram[(uint32_t)m->ga.prg_bank * UINT32_C(0x20000) + (address - UINT32_C(0x00020000))];
+    if (address >= UINT32_C(0x00E00000)) return &m->work_ram[address & 0xFFFFU];
+    if (address < UINT32_C(0x00200000) && (address & UINT32_C(0x3FFFF)) >= UINT32_C(0x20000) && m->ga.prg_window)
+      return &m->prg_ram[(uint32_t)m->ga.prg_bank * UINT32_C(0x20000) + (address & UINT32_C(0x1FFFF))];
     return NULL;
   }
-  if (address < SCD_PRG_RAM_BYTES) return &m->prg_ram[address];
+  if ((address & UINT32_C(0xFFFFF)) < SCD_PRG_RAM_BYTES) return &m->prg_ram[address & UINT32_C(0x7FFFF)];
   return NULL;
 }
 
-/* One byte- or word-wide bus cycle of the main processor (contract section 3). */
+/* One byte- or word-wide bus cycle of the main processor (contract section 3; mirrors as in GPGX scd_init). */
 static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
-  if (address < UINT32_C(0x00020000)) return scd_fail_access(m, SCD_MAIN, SCD_STOP_BIOS_ABSENT, pc, address, width, is_write);
-  if (address < UINT32_C(0x00040000)) {
+  if (address < UINT32_C(0x00200000)) { /* expansion port: 128 KiB BIOS + PRG-RAM window, mirrored every 256 KiB */
+    const uint32_t a = address & UINT32_C(0x3FFFF);
     uint32_t offset;
-    if (!scd_main_prg_window_open(m))
-      return scd_fail_access(m, SCD_MAIN, SCD_STOP_PRG_RAM_WINDOW_WITHOUT_BUS, pc, address, width, is_write);
-    offset = (uint32_t)m->ga.prg_bank * UINT32_C(0x20000) + (address - UINT32_C(0x00020000));
+    if (a < UINT32_C(0x20000)) {
+      if (is_write) return scd_unused(m, SCD_MAIN, address, width, 1, value, pc); /* ROM: the write has no effect */
+      return scd_fail_access(m, SCD_MAIN, SCD_STOP_BIOS_ABSENT, pc, address, width, 0);
+    }
+    if (!m->ga.prg_window) return scd_unused(m, SCD_MAIN, address, width, is_write, value, pc);
+    offset = (uint32_t)m->ga.prg_bank * UINT32_C(0x20000) + (a - UINT32_C(0x20000));
     if (is_write) scd_ram_put(m->prg_ram, offset, width, *value);
     else *value = scd_ram_get(m->prg_ram, offset, width);
     return 0;
   }
-  if (address >= UINT32_C(0x00200000) && address < UINT32_C(0x00240000))
-    return scd_word_ram_access(m, SCD_MAIN, address, width, is_write, value, pc);
-  if (address >= UINT32_C(0x00A12000) && address < UINT32_C(0x00A12040))
-    return scd_ga_main_access(m, address - UINT32_C(0x00A12000), width, is_write, value, pc);
+  if (address < UINT32_C(0x00400000)) return scd_word_ram_access(m, SCD_MAIN, address & UINT32_C(0x23FFFF), width, is_write, value, pc);
+  if (address >= UINT32_C(0x00A12000) && address < UINT32_C(0x00A12100))
+    return scd_ga_main_access(m, address & 0x3FU, width, is_write, value, pc);
   if (address >= UINT32_C(0x00C00000) && address < UINT32_C(0x00C00008)) return scd_vdp_access(m, address, width, is_write, value, pc);
-  if (address >= UINT32_C(0x00FF0000)) {
-    const uint32_t offset = address - UINT32_C(0x00FF0000);
+  if (address >= UINT32_C(0x00E00000)) { /* 64 KiB work RAM mirrored through $E00000-$FFFFFF */
+    const uint32_t offset = address & 0xFFFFU;
     if (is_write) scd_ram_put(m->work_ram, offset, width, *value);
     else *value = scd_ram_get(m->work_ram, offset, width);
     return 0;
@@ -109,30 +115,26 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
   return scd_fail_access(m, SCD_MAIN, SCD_STOP_UNMAPPED, pc, address, width, is_write);
 }
 
-/* One byte- or word-wide bus cycle of the sub processor (contract section 4). */
+/* One byte- or word-wide bus cycle of the sub processor (contract section 4): only A1-A19 decode, so the 1 MiB map repeats. */
 static int scd_sub_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
-  if (address < SCD_PRG_RAM_BYTES) {
+  const uint32_t a = address & UINT32_C(0xFFFFF);
+  if (a < SCD_PRG_RAM_BYTES) {
     if (is_write) {
-      if (address < (uint32_t)m->ga.write_protect * UINT32_C(0x200)) {
+      if (a < (uint32_t)m->ga.write_protect * UINT32_C(0x200)) {
         ++m->prg_write_protect_drops; /* contract section 4: the write is ignored (V2) */
         scd_log(m, 0x50U, address, *value);
         return 0;
       }
-      scd_ram_put(m->prg_ram, address, width, *value);
+      scd_ram_put(m->prg_ram, a, width, *value);
     } else {
-      *value = scd_ram_get(m->prg_ram, address, width);
+      *value = scd_ram_get(m->prg_ram, a, width);
     }
     return 0;
   }
-  if (address >= UINT32_C(0x00080000) && address < UINT32_C(0x000E0000))
-    return scd_word_ram_access(m, SCD_SUB, address, width, is_write, value, pc);
-  if (address >= UINT32_C(0x00FE0000) && address < UINT32_C(0x00FF0000))
-    return scd_fail_access(m, SCD_SUB, SCD_STOP_BACKUP_RAM_UNSUPPORTED, pc, address, width, is_write);
-  if (address >= UINT32_C(0x00FF0000) && address < UINT32_C(0x00FF8000))
-    return scd_fail_access(m, SCD_SUB, SCD_STOP_PCM_UNSUPPORTED, pc, address, width, is_write);
-  if (address >= UINT32_C(0x00FF8000) && address < UINT32_C(0x00FF8200))
-    return scd_ga_sub_access(m, address - UINT32_C(0x00FF8000), width, is_write, value, pc);
-  return scd_fail_access(m, SCD_SUB, SCD_STOP_UNMAPPED, pc, address, width, is_write);
+  if (a < UINT32_C(0xE0000)) return scd_word_ram_access(m, SCD_SUB, a, width, is_write, value, pc);
+  if (a < UINT32_C(0xF0000)) return scd_fail_access(m, SCD_SUB, SCD_STOP_BACKUP_RAM_UNSUPPORTED, pc, address, width, is_write);
+  if (!(a & 0x8000U)) return scd_fail_access(m, SCD_SUB, SCD_STOP_PCM_UNSUPPORTED, pc, address, width, is_write);
+  return scd_ga_sub_access(m, a & 0x1FFU, width, is_write, value, pc);
 }
 
 static int scd_bus(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
@@ -230,7 +232,9 @@ static int scd_hook_validate(void *context, uint32_t base, uint32_t length, Sega
     const uint32_t address = (base + i) & UINT32_C(0x00FFFFFF);
     if (scd_ram_byte(x->m, x->cpu, address) == NULL) return 0;
     /* A frame write into the sub's write-protected PRG RAM would be silently dropped: refuse it (fail closed). */
-    if (direction == SEGARECOMP_M68K_STACK_WRITE && x->cpu == SCD_SUB && address < (uint32_t)x->m->ga.write_protect * 0x200U) return 0;
+    if (direction == SEGARECOMP_M68K_STACK_WRITE && x->cpu == SCD_SUB &&
+        (address & UINT32_C(0xFFFFF)) < (uint32_t)x->m->ga.write_protect * 0x200U)
+      return 0;
   }
   return 1;
 }
@@ -256,7 +260,7 @@ static SegarecompM68kVectorResolution scd_hook_vector(void *context, uint32_t ve
     x->vector_failure = SCD_STOP_BIOS_ABSENT;
     return SEGARECOMP_M68K_VECTOR_NOT_INSTALLED;
   }
-  for (i = 0; i < 4U; ++i) value = (value << 8U) | x->m->prg_ram[vector * 4U + i];
+  for (i = 0; i < 4U; ++i) value = (value << 8U) | x->m->prg_ram[vector * 4U + i]; /* PRG RAM $000000-$0003FF */
   if (!scd_compiled(x->m, x->cpu, value & UINT32_C(0x00FFFFFF))) {
     x->vector_failure = SCD_STOP_EXCEPTION_VECTOR_NOT_COMPILED;
     return SEGARECOMP_M68K_VECTOR_UNREPRESENTABLE;
@@ -379,7 +383,7 @@ static int scd_sub_accept_interrupt(ScdMachine *m) {
 
 /* ---- scheduler ---------------------------------------------------------------------------------------------------------- */
 
-static int scd_sub_held(const ScdMachine *m) { return m->ga.sub_reset || m->ga.sub_busreq; }
+static int scd_sub_held(const ScdMachine *m) { return m->ga.sub_halted || m->ga.sub_wait; }
 
 /* The highest level any enabled sub source could still raise (for the STOP wake rule). */
 static uint32_t scd_sub_max_wake_level(const ScdMachine *m) {
@@ -443,6 +447,24 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
     }
     if (m->instruction_budget == 0U) return SCD_RUN_BUDGET;
     m->instruction_budget -= 1U;
+    if (cpu == SCD_SUB) {
+      /* A sub access to 2M Word RAM it does not own withholds DTACK: the instruction is abandoned with the processor's registers
+       * as they were before it (GPGX s68k_pulse_wait / s68k_clear_wait; memory written earlier in the instruction stays) and
+       * retried from its start once the main processor hands Word RAM over. */
+      const ScdCpu before = m->cpu[SCD_SUB];
+      if (m->program->processors[cpu].dispatch(m) != 0) {
+        if (m->stop.stop_class != SCD_STOP_NONE || !m->sub_wait_request) {
+          if (m->stop.stop_class == SCD_STOP_NONE) scd_fail(m, SCD_SUB, SCD_STOP_INTERNAL, m->cpu[SCD_SUB].pc, 0U);
+          return SCD_RUN_STOPPED;
+        }
+        m->cpu[SCD_SUB] = before;
+        m->sub_wait_request = 0U;
+        m->ga.sub_wait = 1U;
+        m->sub_waits += 1U;
+        scd_log(m, 0x14U, before.pc, 0U);
+      }
+      continue;
+    }
     if (m->program->processors[cpu].dispatch(m) != 0) return SCD_RUN_STOPPED;
   }
 }
@@ -481,13 +503,13 @@ int scd_machine_init(ScdMachine *m, const ScdProgram *program, ScdDisc *disc, ui
   }
   m->cpu[SCD_MAIN].cycle_ticks = SCD_MAIN_CYCLE_TICKS;
   m->cpu[SCD_SUB].cycle_ticks = SCD_SUB_CYCLE_TICKS;
-  /* Power-on Gate Array state (contract sections 5, 6): sub held in reset with the bus requested; main owns 2M Word RAM. */
-  m->ga.sub_reset = 1U;
-  m->ga.sub_busreq = 1U;
-  m->ga.ret = 1U;
-  m->cdc.ifstat = 0xFFU;
-  m->cdc.stat3 = 0x80U;
-  m->cdd.next_tick = SCD_CDD_TICK_TICKS;
+  /* Power-on Gate Array state (contract sections 5, 6; GPGX scd_reset(1)): the sub held in reset and halted with SBRQ reading 1, the
+   * PRG-RAM window mapped, 2M mode with main owning Word RAM. */
+  m->ga.ctl = 0x02U;
+  m->ga.sub_halted = 1U;
+  m->ga.prg_window = 1U;
+  m->ga.mode = SCD_MODE_RET;
+  scd_devices_power_on(m);
   return scd_vdp_init(m);
 }
 

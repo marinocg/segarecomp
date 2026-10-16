@@ -25,8 +25,8 @@
    next instruction). Loop: pick the runnable processor with the smallest `next` (tie: main); first process every
    device event with time `<=` that `next` in a fixed order (CDD tick, timer, CDC DMA progress); then sample and accept
    interrupts at the boundary (ADR 0043 acceptance); then execute exactly one generated instruction and add its
-   CPU-owned cycle count times the processor's period. A processor that is stopped (STOP), held in reset or bus-requested
-   is not runnable; when woken by an event at time `t` its `next` becomes `max(next, t)`. If no processor is runnable the
+   CPU-owned cycle count times the processor's period. A processor that is stopped (STOP), halted (reset or bus request)
+   or waiting for DTACK is not runnable; when woken by an event at time `t` its `next` becomes `max(next, t)`. If no processor is runnable the
    clock advances to the next device event; if there is none and no enabled source can wake a stopped processor the run
    ends `idle`. A deadline only bounds where the loop pauses: the sequence of decisions never depends on it, so any
    partition of a run into deadline slices yields identical state (tested).
@@ -37,6 +37,16 @@
    section 12).
 6. **Host concurrency is rejected**: no measurement shows a need, and determinism under slicing is the acceptance
    criterion.
+7. **Waiting for DTACK.** A sub access to 2M Word RAM owned by main withholds DTACK (contract section 4). The bus reports a
+   wait instead of a stop; the scheduler restores the sub's register record to its value before the instruction (memory
+   written earlier by that instruction stays, as in GPGX's `s68k_pulse_wait`), marks the sub waiting, and retries the
+   instruction from its start after main's `DMNA` = 1 at that write's tick. The generated code needs no change: an access
+   failure already abandons the instruction, and the snapshot is taken by the runtime around one dispatch.
+8. **Where the references disagree, follow Genesis Plus GX** (project decision, SEG-062 owner's instruction). Each such
+   item carries the tag G in the contract, names the disagreeing source and stays in contract section 13 with the
+   experiment that would settle it. GPGX is consulted only (non-commercial licence); nothing is copied. Behaviour GPGX
+   computes at emulation-slice boundaries is computed at its exact tick here (contract section 12), and where GPGX's
+   result depends on the disc image format the profile picks the cooked-image result so that format never changes state.
 
 ## Go/no-go criteria (falsifiable)
 

@@ -4,7 +4,8 @@ Audience: every SEG-062 implementer (T002-T005) and the planners of SEG-063/064/
 behaviour of the one supported Sega CD machine profile (the **synthetic post-BIOS fixture profile**), with a
 classification and at least one citation for every hardware claim. Later tasks implement it; they do not re-decide it.
 Anything still open is listed in section 13 with the experiment that resolves it and its owner. It is never guessed in
-code: until resolved, behaviour that depends on it stops with a typed error.
+code: where the references are silent, behaviour that depends on it stops with a typed error; where they **disagree**, the
+profile follows Genesis Plus GX (project decision, tag **G**) and section 13 keeps the item with its resolving experiment.
 
 Decisions: ADR 0126 (executable images per processor instance), ADR 0127 (overlay dispatch contract, design only),
 ADR 0128 (dual-CPU execution and scheduling), ADR 0129 (disc resources and the build-time/runtime media boundary),
@@ -22,7 +23,8 @@ Every claim carries one tag:
 | **V1** | verified fact from one source; not contradicted; the second check is listed in section 13 |
 | **C** | software convention of this project (the synthetic profile); not a hardware claim |
 | **T** | target-specific: true of the hardware, but owned by a BIOS or a title, not by the machine |
-| **U** | unresolved: sources disagree or are silent; the machine stops with a typed error when it is reached |
+| **G** | the references disagree; this profile follows GPGX (project decision recorded in ADR 0128). The disagreeing source is named and the item stays in section 13 until hardware evidence settles it |
+| **U** | unresolved: sources are silent; the machine stops with a typed error when it is reached |
 
 ## References
 
@@ -47,7 +49,7 @@ Every claim carries one tag:
 | boot | **synthetic post-BIOS fixture profile**: no BIOS byte is present or executed; the runtime establishes the documented post-load placement of IP and SP (section 9) and then runs generated code | C |
 | cartridge | none (mode 1 cartridge boot is out of scope) | C |
 | TV standard | NTSC timing for the main CPU (MCLK 53,693,175 Hz / 7) | V2 (GPGX `system_clock`, repository Genesis runtime) |
-| audio | none: PCM, CD-DA and the fader are typed stops | C |
+| audio | none: PCM and CD-DA playback are typed stops; fader writes have no modelled effect | C |
 | graphics ASIC | none: stamp/rotation registers are typed stops | C |
 | backup RAM | none: typed stop | C |
 
@@ -72,31 +74,41 @@ range). No floating point is used anywhere in timing.
 
 ## 3. Main CPU bus view (24-bit)
 
+"Ignored" writes have no effect (counted in the report as `ignored_writes`); an "open bus" read would return the processor's
+prefetched instruction word, which the profile does not model: it is the typed stop `open_bus_read`.
+
 | range | content | behaviour in this profile | tag |
 | --- | --- | --- | --- |
-| `$000000-$01FFFF` | Boot ROM (BIOS) | absent: every access is the typed stop `bios_absent` | V2 location (GPGX `scd_init`, MAME), C absence |
-| `$020000-$03FFFF` | 128 KiB window onto PRG RAM bank `BK1:BK0` (`$A12003` bits 7-6) | read/write **only while `SBRQ` reads 1** (sub bus requested or sub in reset); otherwise typed stop `prg_ram_window_without_bus` | window and bank: V2 (GPGX `scd.prg_ram + ((data & 0xc0) << 11)`, MAME `scd_4m_prgbank_ram_r`); bus gate: **U** (GPGX unmaps without BUSREQ, MAME does not gate) |
-| `$040000-$1FFFFF` | mirrors of the above | typed stop `unmapped` | U (mirroring not cross-checked) |
-| `$200000-$23FFFF` | Word RAM, 2M mode, when owned by main (`RET` = 1) | linear 256 KiB | V2 (GPGX, MAME) |
+| `$000000-$01FFFF` | Boot ROM (BIOS) | absent: a read is the typed stop `bios_absent`; a write is ignored (ROM) | V2 location (GPGX `scd_init`, MAME), C absence |
+| `$020000-$03FFFF` | 128 KiB window onto PRG RAM bank `BK1:BK0` (`$A12003` bits 7-6) | mapped while the window is open (below); otherwise reads are open bus and writes are ignored | window and bank: V2 (GPGX `scd.prg_ram + ((data & 0xc0) << 11)`, MAME `scd_4m_prgbank_ram_r`); gate: **G** (GPGX unmaps without `SBRQ`, MAME does not gate) |
+| `$040000-$1FFFFF` | the BIOS and the window repeat every 256 KiB | as above | **G** (GPGX `scd_init` "mirrored every 256KB"; MAME maps no mirror) |
+| `$200000-$23FFFF` | Word RAM, 2M mode, when owned by main (`RET` = 1) | linear 256 KiB; when the sub owns it: reads open bus, writes ignored | V2 mapping (GPGX, MAME); non-owner behaviour **G** (GPGX `m68k_read_bus_8`/`m68k_unused_8_w`) |
 | `$200000-$21FFFF` | Word RAM, 1M mode: the bank assigned to main | linear 128 KiB of one bank (section 6) | V2 |
 | `$220000-$23FFFF` | 1M-mode cell-image view | typed stop `wordram_cell_image_unsupported` | C (out of scope) |
-| `$A12000-$A1203F` | Gate Array, main side (section 5) | per register | V2 |
+| `$240000-$3FFFFF` | mirrors of `$200000-$23FFFF` | as above | **G** (GPGX "mirrored up to $3FFFFF") |
+| `$A12000-$A120FF` | Gate Array, main side (section 5); A1-A5 decode, `$A12040-$A120FF` mirror `$A12000-$A1203F` | per register | V2 registers; mirror **G** (GPGX "mirrored up to $A120FF") |
 | `$C00000-$C00007` | VDP data/control ports | composed Genesis VDP device (ADR 0128); VDP DMA enable is a typed stop | V2 (Genesis map) |
-| `$FF0000-$FFFFFF` | 64 KiB work RAM | linear | V2 |
+| `$E00000-$FFFFFF` | 64 KiB work RAM, repeated every 64 KiB | linear | V2 (Genesis map) |
 | anything else | | typed stop `unmapped` | C |
+
+**PRG-RAM window gate (G).** The window is mapped at power-on. On every write of `SRES`/`SBRQ` (`$A12001`) that changes the
+sub's halt state, the window becomes mapped exactly when `SBRQ` then reads 1; a write that leaves the halt state unchanged
+leaves the mapping alone (GPGX `ctrl_io_write_byte` case `0x01`).
 
 ## 4. Sub CPU bus view (24-bit)
 
-| range | content | behaviour | tag |
+Only A1-A19 decode: the 1 MiB map below repeats through the whole 16 MiB space (**G**: GPGX `scd_init` "mirrored every 1MB";
+MAME maps the first 1 MiB only).
+
+| range (mod 1 MiB) | content | behaviour | tag |
 | --- | --- | --- | --- |
-| `$000000-$07FFFF` | 512 KiB PRG RAM | read/write; writes below `WP * $200` are **ignored** (write protect) | V2 (GPGX `prg_ram_write_byte`: `address >= WP << 9`; MAME `m_write_boundary = data << 8` words) |
-| `$080000-$0BFFFF` | Word RAM 2M when owned by sub (`RET` = 0); 1M dot-image view in 1M mode | 2M: linear; dot image: typed stop `wordram_dot_image_unsupported` | V2 |
-| `$0C0000-$0DFFFF` | 1M mode: bank assigned to sub; 2M mode: nothing | 1M: linear 128 KiB; 2M: typed stop `unmapped` | V2 |
-| `$080000-$0BFFFF` while main owns 2M Word RAM | | real hardware withholds DTACK (the sub CPU hangs); modelled as typed stop `wordram_not_owned` | V2 (GPGX `s68k_lockup_*`; MAME silent) - the stop represents a hang |
-| `$FE0000-$FE3FFF` | backup RAM (odd bytes) | typed stop `backup_ram_unsupported` | C |
-| `$FF0000-$FF7FFF` | PCM | typed stop `pcm_unsupported` | C |
-| `$FF8000-$FF81FF` | Gate Array, sub side (section 5) | per register | V2 |
-| higher mirrors (`$100000+`) | | typed stop `unmapped` | U (GPGX mirrors every 1 MiB, MAME does not) |
+| `$00000-$7FFFF` | 512 KiB PRG RAM | read/write; writes below `WP * $200` are **ignored** (write protect) | V2 (GPGX `prg_ram_write_byte`: `address >= WP << 9`; MAME `m_write_boundary = data << 8` words) |
+| `$80000-$BFFFF` | Word RAM 2M when owned by sub (`RET` = 0); 1M dot-image view in 1M mode | 2M: linear; dot image: typed stop `wordram_dot_image_unsupported` | V2 |
+| `$80000-$BFFFF` while main owns 2M Word RAM | | DTACK is withheld: the sub **waits**; its instruction is abandoned with its registers as before it (bytes written earlier in the same instruction stay) and retried from its start when main writes `DMNA` = 1 in 2M mode. With no such write the machine ends `idle` with the sub waiting (the hang) | wait: V2 (GPGX `s68k_lockup_*`, MAME silent); retry semantics **G** (GPGX `s68k_pulse_wait` / `s68k_clear_wait`) |
+| `$C0000-$DFFFF` | 1M mode: bank assigned to sub; 2M mode: nothing | 1M: linear 128 KiB; 2M: reads open bus, writes ignored | V2 mapping; 2M behaviour **G** (GPGX `s68k_read_bus_8`) |
+| `$E0000-$EFFFF` | backup RAM (odd bytes) | typed stop `backup_ram_unsupported` | C |
+| `$F0000-$F7FFF` | PCM | typed stop `pcm_unsupported` | C |
+| `$F8000-$FFFFF` | Gate Array, sub side (section 5); A1-A8 decode (`$FF8000-$FF81FF` repeated) | per register | V2 registers; repetition G |
 
 The sub CPU's exception vectors live in PRG RAM `$000000-$0003FF` (the sub CPU's address 0), so the vector table is
 ordinary writable memory: the sub resets from `PRG[0..7]` and takes autovector `24 + level` through `PRG[$60 + 4 *
@@ -104,42 +116,60 @@ level]`. V2 (GPGX `s68k` reset/IRQ paths through `s68k.memory_map[0]`; MAME `seg
 
 ## 5. Gate Array registers implemented by this profile
 
-Byte addresses; main side `$A120xx`, sub side `$FF80xx`. A register or access not listed here is the typed stop
-`gate_array_register_unsupported` (it carries the side, address, width and direction).
+Byte addresses; main side `$A120xx`, sub side `$FF80xx`. Where GPGX and MAME disagree the table follows GPGX (**G**,
+`core/mem68k.c` `ctrl_io_*` for the main side, `core/cd_hw/scd.c` `scd_read_*`/`scd_write_*` for the sub side). General
+rules (G): a main write to a register without a main-writable function is **ignored**; main reads of `$A12030-$A1203F` are
+open bus; registers GPGX marks "!LDS and !UDS are ignored" (`$FF8002/3`, `$FF800E/F`, `$FF8030/1`, `$A1200E/F`) act on a
+byte write to either half; word-only sub registers (`$FF8008-$FF800D`) take a byte write as the byte duplicated into both
+halves; `$FF8068-$FF80FF` is plain storage. Registers of devices this profile does not model - the stopwatch (`$0C`), the
+font and graphics registers (`$FF804C-$FF8067`), the subcode buffer (`$FF8100-$FF81FF`), the CDC host-data port (`$08`
+words) and the H-INT vector (`$A12006` word, which reads and writes the BIOS ROM) - are typed stops
+(`gate_array_register_unsupported`, `cdc_destination_unsupported`, `bios_absent`) carrying the side, address, width and
+direction.
 
 | reg | main side | sub side | behaviour | tag |
 | --- | --- | --- | --- | --- |
-| `$00` (hi) | `IEN2` (bit 7, read), `IFL2` (bit 0: write 1 raises the sub level-2 request when `IEN2` = 1; otherwise dropped) | LED byte (write stored, read back) | | V2 (GPGX `mem68k.c` case 0x00, MAME `scd_a12000_halt_reset_w` `& 0x0100 && irq_mask & 0x04`) |
-| `$01` (lo) | `SBRQ` (bit 1), `SRES` (bit 0, 0 = reset asserted); `SRES` 0 -> 1 makes the sub take its reset exception from `PRG[0..7]`; setting `SBRQ` while the sub is in STOP is the typed stop `busreq_while_sub_stopped_unsupported` (U, section 13) | `RESET` status: reads 1; writing 0 resets the CD peripherals: typed stop | main: V2 (GPGX, MAME); power-on value `$02` (reset asserted, bus requested): V1 (GPGX `scd_reset` regs[0] = `0x0002`) |
-| `$02` (hi) | write-protect `WP` (main writes) | `WP` read-only (sub writes ignored) | | V2 (GPGX, MAME `segacd_sub_memory_mode_w_8_15` "no effect") |
-| `$03` (lo) | `BK1:BK0` (7-6), `MODE` (2, read), `DMNA` (1), `RET` (0) | `PM1:PM0` (4-3), `MODE` (2), `DMNA` (1, read), `RET` (0) | ownership state machine, section 6; `PM` != 0 is a typed stop | V2 for the 2M handoff and 1M swap (GPGX, MAME); details section 6 |
-| `$04` | `EDT`/`DSR` (7-6), `DD` (2-0) read | same, `DD` writable (CDC destination) | writing resets the DMA address register `$0A` | V2 destinations (GPGX `cdc_dma_init`, MAME `DMA_PRG 0x0500`, `DMA_WRAM 0x0700`); `$0A` reset on write: V1 (GPGX citing MCDV) |
-| `$05` | - | CDC register address (4 bits) | | V2 |
-| `$07` | - | CDC register data (section 7) | | V2 (GPGX `cdc_reg_w/r`; register map of the LC8951) |
-| `$0A` | - | CDC DMA destination address (bytes / 8 for Word RAM and PRG RAM) | | V2 (GPGX `<< 3`, MAME `<< 3`) |
-| `$0E` | main flag byte (write) | main flag byte (read) | a word write by main stores its **low** byte | V2 (GPGX "D8-D15 ignored", MAME "low bits take priority") |
-| `$0F` | sub flag byte (read) | sub flag byte (write) | | V2 |
-| `$10-$1F` | command words COMCMD0-7 (read/write) | read-only; a sub write is a typed stop | main side V2; sub-write behaviour **U** (GPGX ignores, MAME stores) |
-| `$20-$2F` | status words COMSTAT0-7 (read-only; a main write is a typed stop) | read/write | | V2 for the direction; main-write behaviour U |
-| `$30-$31` | - | timer (8 bits; 0 stops) | INT3 every `(N + 1) * 384` sub cycles while `IEN3` | rate V2; the `+ 1` is V1 (GPGX citing MCDV test "REG 8030 #7"; MAME uses `N * 384`) - see section 13 |
-| `$32-$33` | - | interrupt enables `IEN1`-`IEN6` (bits 1-6) | `IEN2` mirrors to main `$00` bit 7; clearing an enable drops nothing else except a pending level 1 | V2 (GPGX case 0x33, MAME `segacd_irq_mask_w`) |
-| `$36-$37` | - | CDD control: `HOCK` (bit 2 of `$37`) | | V1 (GPGX case 0x36) |
-| `$38-$41` | - | CDD status nibbles RS0-RS9 (read) | section 8 | V1 (GPGX `cdd_process`), layout V2 with MAME `segacd_cdd_rx_r` map |
-| `$42-$4B` | - | CDD command nibbles TX0-TX9 (write); a word write to `$4A` sends the command | section 8 | V1 (GPGX case 0x4a), map V2 (MAME `segacd_cdd_tx_w`) |
+| `$00` (hi) | `IEN2` view (bit 7), `IFL2` (bit 0: writing 1 raises the sub level-2 request when `IEN2` = 1, otherwise dropped; writing 0 does nothing) | LED byte (also read at `$FF8006`; a byte write to `$FF8006` stores it too) | | V2 (GPGX `mem68k.c` case 0x00, MAME `scd_a12000_halt_reset_w` `& 0x0100 && irq_mask & 0x04`); `$FF8006` G |
+| `$01` (lo) | `SBRQ` (bit 1), `SRES` (bit 0, 0 = reset/halt asserted). `SRES` 0 -> 1 makes the sub take its reset exception from `PRG[0..7]` (every stop level clears); `SBRQ` = 1 halts the sub; writing `SRES` = 0 halts it and reads back `$02`. `SBRQ` reads 0 when the sub is halted while in STOP | `RESET` status: reads 1; writing 0 is the **peripheral reset** (below) | main: V2 (GPGX, MAME); power-on value `$02`: V1 (GPGX `scd_reset`); the STOP readback rule and the peripheral reset: **G** (GPGX "verified on real hardware"; MAME no special case) |
+| `$02` (hi) | write-protect `WP` (main writes) | `WP` read-only (sub writes act as memory-mode writes, below) | | V2 (GPGX, MAME `segacd_sub_memory_mode_w_8_15` "no effect") |
+| `$03` (lo) | `BK1:BK0` (7-6), `MODE` (2, read), `DMNA` (1), `RET` (0) | `PM1:PM0` (4-3), `MODE` (2), `DMNA` (1, read), `RET` (0); a byte write to `$02` or `$03` is a memory-mode write, a word write to `$02` has no effect | ownership state machine, section 6; `PM` is stored and read by the sub only (it acts on graphics and dot-image writes, not modelled) | V2 for the 2M handoff and 1M swap (GPGX, MAME); the rest **G** (section 6) |
+| `$04` | `EDT`/`DSR`/`DD` (bits 7, 6, 2-0) read; low byte reads 0 | `EDT`/`DSR` (7-6), `DD` (2-0) writable (CDC destination) | a write clears `EDT`/`DSR`, re-selects the writer of a started transfer and resets the DMA address `$0A` | V2 destinations (GPGX `cdc_dma_init`, MAME `DMA_PRG 0x0500`, `DMA_WRAM 0x0700`); `$0A` reset: V1 (GPGX citing MCDV); re-selection G |
+| `$05` | reads 0 | CDC register address (4 bits) | | V2 |
+| `$06`-`$07` | `$06` byte reads the LED, `$07` reads 1 | `$07` byte / `$06` word: CDC register data (section 7) | | V2 (GPGX `cdc_reg_w/r`; register map of the LC8951); main bytes G |
+| `$08`-`$09` | bytes read `$FF` | bytes read `$FF` | the host-data register keeps its reset value; word accesses are the host data path (typed stop) | G |
+| `$0A` | DMA address (read) | CDC DMA destination address (bytes / 8 for Word RAM and PRG RAM); writable during a transfer | | V2 (GPGX `<< 3`, MAME `<< 3`); writes during a transfer G |
+| `$0E` | main flag byte (write either byte; a word write stores its low byte) | main flag byte (read) | | V2 (GPGX "D8-D15 ignored", MAME "low bits take priority") |
+| `$0F` | sub flag byte (read) | sub flag byte (write either byte, or the low byte of a word) | | V2 |
+| `$10-$1F` | command words COMCMD0-7 (read/write) | read-only; a sub write is ignored | main side V2; sub-write **G** (GPGX ignores, MAME stores) |
+| `$20-$2F` | status words COMSTAT0-7 (read-only; a main write is ignored) | read/write | | direction V2; main-write **G** |
+| `$30-$31` | - | timer: a write of `N` to either byte (or a word's low byte) starts it, `0` stops it; `$31` reads `N`, `$30` reads 0 | expiry every `(N + 1) * 384` sub cycles; level 3 only while `IEN3` | rate V2; the `+ 1` **G** (GPGX citing MCDV test "REG 8030 #7"; MAME uses `N * 384`) |
+| `$32-$33` | - | interrupt enables `IEN1`-`IEN6` (bits 1-6 of `$33`, stored as written; `$32` is plain storage) | `IEN2` mirrors to main `$00` bit 7; clearing `IEN1` drops a pending level 1, nothing else | V2 (GPGX case 0x33, MAME `segacd_irq_mask_w`) |
+| `$34-$35` | - | fader: writes act on CD-DA output only (not modelled); reads 0 | | G |
+| `$36-$37` | - | `$36`: 1 while no audio track plays; `$37`: CDD control, `HOCK` = bit 2 (a word write stores only `HOCK`) | | V1 (GPGX case 0x36) |
+| `$38-$41` | - | CDD status RS0-RS9 (read/write storage, set by the drive) | section 8 | V1 (GPGX `cdd_process`), layout V2 with MAME `segacd_cdd_rx_r` map |
+| `$42-$4B` | - | CDD command TX0-TX9 (bytes stored as written); the word write to `$4A` clears TX8/TX9 and sends the command | section 8 | V1 (GPGX case 0x4a), map V2 (MAME `segacd_cdd_tx_w`) |
+
+**Peripheral reset (G, GPGX `scd_reset(0)`).** A sub write with `RES0` = 0 (`$FF8001` byte, or a `$FF8000` word): `$FF8004`
+and every sub register from `$FF8030` up clear and take their defaults (`$0A` = `$FFFF`, `$36` = `$0100`, RS9 = `$0F`, TX0-TX9
+= `$FF`); the timer stops; pending interrupts clear; the CDD returns to its TOC state; the CDC resets; the 75 Hz drive clock
+restarts from the writing instruction. The communication registers, the memory mode, `WP`, the LED, the flags and the main-side
+`IFL2`/`IEN2` view are kept.
 
 ## 6. Word RAM ownership
 
-256 KiB. Two modes selected by `MODE` (written by the sub CPU, `$FF8003` bit 2).
+256 KiB. Two modes selected by `MODE` (written by the sub CPU, `$FF8003` bit 2). Besides the readable `DMNA` and `RET` bits
+the Gate Array keeps an internal **request latch** set by main `DMNA` writes (GPGX `scd.dmna`). Power-on: 2M, main owns,
+`RET` = 1, `DMNA` = 0, no request (V1 GPGX `scd_reset` regs[2] = `0x0001`).
 
-**2M mode** (single owner; power-on: main owns, `RET` = 1, `DMNA` = 0; V1 GPGX `scd_reset` regs[2] = `0x0001`):
+**2M mode** (single owner):
 
 | event | effect | tag |
 | --- | --- | --- |
-| main writes `DMNA` = 1 | ownership passes to the sub immediately; `RET` reads 0, `DMNA` reads 1 | V2 (GPGX `mem68k.c` "Word-RAM is assigned to SUB-CPU"; MAME `scd_rammode = 1`) |
+| main writes `DMNA` = 1 | ownership passes to the sub immediately; `RET` reads 0, `DMNA` reads 1; the request latches; a sub waiting for Word RAM resumes; a CDC DMA halted on main ownership continues | V2 handoff (GPGX `mem68k.c` "Word-RAM is assigned to SUB-CPU"; MAME `scd_rammode = 1`); the rest **G** |
 | main writes `DMNA` = 0 | no effect | V1 (GPGX "writing 0 to DMNA in 2M mode does nothing") |
-| sub writes `RET` = 1 | ownership returns to main; `RET` reads 1, `DMNA` reads 0 | V2 |
-| sub writes `RET` = 0 while sub owns | no effect | V2 |
-| non-owner access | main: typed stop `wordram_not_owned` (hardware: unmapped/open bus, value U); sub: typed stop `wordram_not_owned` (hardware: CPU hang) | V2 that the access does not complete; the stop is C |
+| sub writes `RET` = 1 while it owns | ownership returns to main; `RET` reads 1, `DMNA` reads 0; the request clears; a running CDC DMA into 2M Word RAM halts with its progress kept | V2 return; DMA halt **G** (GPGX halts, MAME keeps writing) |
+| sub writes `RET` = 0 or 1 while the owner stays the same | no effect | V2 |
+| non-owner access | main: reads open bus, writes ignored; sub: waits for DTACK (section 4) | V2 that the access does not complete; **G** for what happens |
 | repeated `DMNA` = 1 while the sub already owns | no further effect | V1 |
 
 **1M mode** (two 128 KiB banks, one per CPU, simultaneously accessible):
@@ -148,56 +178,75 @@ Byte addresses; main side `$A120xx`, sub side `$FF80xx`. A register or access no
 | --- | --- |
 | bank `b` word `i` is 2M-space word `2 i + b` (word interleave); switching modes preserves the bytes through this mapping | V2 (GPGX `word_ram_switch`, MAME `segacd_1meg_mode_word_read` `offset*2 (+1)`) |
 | the sub CPU sees its bank at `$0C0000-$0DFFFF`, the main CPU sees the other bank at `$200000-$21FFFF` | V2 |
-| a sub write of `RET` selects which bank each CPU gets; writing the opposite value swaps the banks | V2 (behaviour), **U** (which physical bank is called 0 for a given `RET`; GPGX: `RET` = 1 gives main bank 1). The fixtures observe only "the bank the sub wrote is the bank the main reads after the swap", which is invariant to that naming. |
-| main writes of `DMNA` in 1M mode (swap request semantics) | U - typed stop `wordram_1m_dmna_unsupported` |
-| `PM` priority modes | C: typed stop |
+| a sub write that changes `RET` (or switches 2M -> 1M) selects the banks - `RET` = 1 gives main bank 1, the sub bank 0 - and clears `DMNA`; `RET` = 1 also clears the request; a sub write that changes neither `RET` nor `MODE` only stores `PM` | swap V2; naming of the banks and the request handling **G** (GPGX case 0x03; MAME names no physical bank) |
+| main writes `DMNA` = 0: the `DMNA` bit sets (a swap is pending until the sub next changes `RET`); main writes `DMNA` = 1: only the request latches | **G** (GPGX `mem68k.c` "writing 0 to DMNA in 1M mode actually sets DMNA bit") |
+| 1M -> 2M: with a latched request and `RET` = 0 written, the sub keeps 2M Word RAM (`DMNA` = 1); otherwise `RET` is forced to 1 and main owns it | **G** (GPGX "RET bit set during 1M mode ?") |
+| `PM` priority modes | stored; they act only on graphics and dot-image writes (not modelled) | G |
 
 ## 7. CDC (LC8951) subset
 
-Registers through `$FF8005` (address, auto-incrementing except at 0) and `$FF8007` (data). Implemented:
+Registers through `$FF8005` (address, auto-incrementing except at 0) and `$FF8007` (data). The register file, the /INT
+logic and the decoder follow GPGX `cdc.c` (V1 where MAME's `lc89510_temp` agrees on names, **G** where it differs):
 
 | register (write / read) | behaviour | tag |
 | --- | --- | --- |
-| 1 `IFCTRL` / `IFSTAT` | `DOUTEN` (bit 1) enables data output, clearing it aborts a transfer (already transferred bytes stay); `DTEIEN` (6) and `DECIEN` (5) enable the CDC interrupt; `IFSTAT` bits are active-low (`DTEI` 6, `DECI` 5, `DTBSY` 3, `DTEN` 1) | V1 (GPGX `cdc_reg_w` case 1; LC8951 register names as used by GPGX and MAME's `lc89510_temp` map) |
+| 0 | not emulated: writes have no effect, reads `$FF` (no auto-increment) | G |
+| 1 `IFCTRL` / `IFSTAT` | `DOUTEN` (bit 1) enables data output, clearing it aborts a transfer (already transferred bytes stay); `DTEIEN` (6) and `DECIEN` (5) select the /INT sources; `IFSTAT` bits are active-low (`DTEI` 6, `DECI` 5, `DTBSY` 3, `DTEN` 1); a write or an `IFSTAT` read after the decoder active period clears `DECI` | V1 (GPGX `cdc_reg_w` case 1) |
 | 2-3 `DBCL/DBCH` | byte count minus one (12 bits) | V1 |
 | 4-5 `DACL/DACH` | buffer source address | V1 |
-| 6 `DTRG` | starts the transfer to the destination in `$FF8004` when `DOUTEN` | V1 |
+| 6 `DTRG` | when `DOUTEN`: starts a transfer (clears `EDT`/`DSR`, asserts `DTBSY`/`DTEN`) and selects its writer from `$FF8004` | V1 |
 | 7 `DTACK` | clears a pending transfer-end interrupt | V1 |
-| 8-9 `WAL/WAH`, 12-13 `PTL/PTH` | write/block pointers; decoded blocks advance both by 2352 | V1 |
-| 10 `CTRL0` | `DECEN` (7) decoder enable, `WRRQ` (2) buffer write | V1 |
-| 11 `CTRL1` | `SHDREN` and mode bits; only 0 is supported (Mode 1 data) | C |
-| read 4-7 `HEAD0-3` | the BCD minute, second, frame and mode of the last decoded block | V1, CDROM |
+| 8-9 `WAL/WAH`, 12-13 `PTL/PTH` | write/block pointers; every block written to the buffer advances both by 2352 | V1 |
+| 10 `CTRL0` | `DECEN` (7) decoder enable (`STAT0.CRCOK` follows it), `AUTORQ` (4), `WRRQ` (2) buffer write | V1 |
+| 11 `CTRL1` | `MODRQ` (3), `FORMRQ` (2), `SHDREN` (0: `HEAD0-3` read the sub-header) | G |
+| 14 | not emulated: writes have no effect | G |
+| read 4-7 `HEAD0-3` | header (or, with `SHDREN`, sub-header) of the last decoded block | V1, CDROM |
 | read 8-9 `PTL/PTH`, 10-11 `WAL/WAH` | pointers | V1 |
-| read 12 `STAT0` | `CRCOK` = decoder enable | V1 |
-| read 15 `STAT3` | `VALST` (bit 7) = 0 after a block was decoded; reading sets it back to 1 | V1 |
-| 15 (write) `RESET` | resets the CDC registers | V1 |
+| read 12 `STAT0`, 13 `STAT1` (0), 14 `STAT2` | `STAT2` = `MODRQ`/`FORMRQ` from `CTRL1`, or with `AUTORQ` `MODRQ` and the sub-header form bit | G |
+| read 15 `STAT3` | `VALST` (bit 7) = 0 after a block was decoded; reading sets it back to 1 and clears `DECI` | V1 |
+| 15 (write) `RESET` | resets the CDC registers (and clears a pending level 5) | V1 |
 
-Buffer: 16 KiB, addressed modulo `$4000`; a decoded Mode-1 block stores its 4-byte header at `PT` and the 2048 user bytes
-after it. **Transfer chain implemented: destination 7 (Word RAM)** in 2M mode while the sub owns Word RAM (or 1M
-mode into the sub's bank): 16-bit big-endian words from `DAC` to Word RAM offset `($FF800A) * 8`, `DAC` and the
-destination advance as data moves; `DBC + 1` bytes in all; at the end `EDT` (`$FF8004` bit 7) is set, `IFSTAT.DTEI`
-goes low and, with `DTEIEN` and `IEN5`, the sub takes level 5. V2 for addressing (GPGX `word_ram_2M_dma_w`, MAME
-`SegaCD_CDC_Do_DMA`); progress rate V1. Partial progress is real (DMA is not atomic): an abort leaves the bytes moved so
-far in Word RAM and no `EDT` (V1, GPGX `cdc_reg_w` `DOUTEN` clear). DMA into 2M Word RAM owned by main: **U** (GPGX
-halts until the sub owns it, MAME writes anyway): typed stop `cdc_dma_destination_not_owned`.
+**Decoder (G, GPGX `cdc_decoder_update`).** On every 75 Hz drive tick while `DECEN` is set - whether or not the drive is
+reading - the CDC decodes one block: `HEAD0-3` take the block header (BCD MSF and mode 1 for a data block read by the drive,
+four zero bytes otherwise), `VALST` goes low, `DECI` goes low for the decoder active period (66,750 sub cycles), and with
+`DECIEN` the CDC /INT requests level 5 unless a transfer-end interrupt is already asserted. With `WRRQ` the block goes to
+the buffer at the new `PT`: 4 header bytes, then for a Mode-1 block the 2048 user bytes; a block with header 0 takes the
+Mode-2 layout (with `MODRQ` two copies of the sub-header first), and its data are the 2048 user bytes of the drive's current
+LBA when that lies inside the data track. GPGX reads a raw image's sub-header and 2328 bytes there; this profile uses the
+cooked-image behaviour for both formats so that the image format never changes machine state (C). Writes past `$4000`
+wrap to the start of the 16 KiB buffer.
+
+**DMA.** Destination 7 (Word RAM): 16-bit big-endian words from `DAC` to Word RAM offset `($FF800A) * 8`; `DAC` and the
+destination advance as data moves; `DBC + 1` bytes in all (an odd last byte is not transferred); at the end `EDT`
+(`$FF8004` bit 7) is set, `DSR` clears, `IFSTAT.DTEI` goes low and with `DTEIEN` the /INT requests level 5. V2 for
+addressing (GPGX `word_ram_2M_dma_w`, MAME `SegaCD_CDC_Do_DMA`); rate V1. The writer is latched when it is selected (at
+`DTRG`, a `$FF8004` write, or a resume): in 1M mode the sub's bank at that moment; in 2M mode the 2M space, **halted**
+while main owns Word RAM (G: GPGX halts, MAME writes) and resumed from the handover tick by main's `DMNA` = 1. Words a
+writer moves while the other Word RAM mode is active are lost (G: GPGX's 2M and 1M buffers are only copied on a mode
+switch). Partial progress is real (DMA is not atomic): an abort leaves the bytes moved so far and no `EDT` (V1). A `$FF8004`
+write during a transfer re-selects its writer (an invalid destination leaves the transfer started with no writer).
 Destinations 2/3 (host read through `$A12008/$FF8008`), 4 (PCM) and 5 (PRG RAM) are typed stops
 `cdc_destination_unsupported` (eligible for later refinement; PRG RAM addressing is V2 and recorded for SEG-063).
 
 ## 8. CDD subset
 
+The drive follows GPGX `cdd_update`/`cdd_process` with its default "CD access latency" setting (V1 where only GPGX models
+it; **G** where MAME differs). Its 75 Hz clock is anchored at power-on (re-anchored by the peripheral reset); a tick with
+nothing to do (no `HOCK`, no command pending, no latency, not playing, `DECEN` clear) has no effect.
+
 | item | behaviour | tag |
 | --- | --- | --- |
-| command transfer | the sub writes TX0..TX9 (low nibbles of `$42..$4B`); the word write to `$4A` sends it | V1 (GPGX), map V2 (MAME) |
-| command checksum | TX9 = `~(TX0 + ... + TX8) & $F`; a mismatch is the typed stop `cdd_bad_checksum` (hardware response not modelled) | checksum rule V1 (GPGX status checksum, same formula for RS9); stop C |
+| power-on | status `TOC` (`$09`: stopped, disc loaded), LBA 0, RS0-RS8 = 0, RS9 = `$F`, TX0-TX9 = `$FF` | V1 (GPGX `scd_reset`, `cdd_reset`) |
+| command transfer | the sub writes TX0..TX9 (`$42..$4B`); the command is `TX0 & $F`; the word write to `$4A` clears TX8/TX9 and sends it - the command checksum is **never inspected** | G (GPGX; MAME validates) |
 | status checksum | RS9 = `~(RS0 + ... + RS8) & $F` | V1 |
-| command 0 (status) | RS0 = drive status | V1 |
-| command 1 (stop) | status `STOP`, decoding of further sectors ends | V1 |
-| command 3 (read/play) | TX2..TX7 = BCD MM:SS:FF; LBA = MSF - 150; status `SEEK` until the read starts; the first sector is delivered on the third 75 Hz tick after the command (two ticks of latency, GPGX default `cdd.latency = 2`), then one sector per tick | rule V1, latency C (deterministic model; real seek time not modelled) |
-| target LBA | must lie inside a data track of the build-time track table; otherwise typed stop `cd_read_out_of_range` or `cd_read_audio_track` | C (fail closed) |
-| sector delivery | each tick decodes the current LBA if `DECEN`: header `HEAD0-3` = BCD MSF of `LBA + 150` and mode 1; with `WRRQ` the block is written to the buffer | V1 + CDROM |
-| reading past the end of the data track | typed stop `cd_read_out_of_range` | C |
-| `HOCK` = 1 and `IEN4` | level-4 interrupt every tick | V1 |
-| other commands (TOC, seek, pause, scan, tray) | typed stop `cdd_command_unsupported` | C |
+| command 0 (status) | once the latency is at most 3 ticks: RS0 = drive status; while playing (or paused), RS1 selects RS2-RS8: `$F`/0 absolute time (RS1 becomes 0), 1 track-relative time, 2 track number; RS8 = 4 on a data track | V1 |
+| command 1 (stop) | status `TOC`, LBA 0, track 0; RS0 = 0, RS1 = `$F`, RS2-RS9 = 0; a pending play or the latency are kept | V1 |
+| command 3 (play) | RS0 = `SEEK`, RS1 = `$F`; on the **next tick** the play starts: target LBA = MSF(TX2..TX7 as written) - 150, latency = 12 ticks + `|target - LBA| * 120 / 270000`, status `PLAY` | G (GPGX default latency; MAME has no seek model) |
+| commands 5, B, E, F | unknown to the drive: RS0 = status | G |
+| other commands (TOC, seek, pause, resume, scan, tray) | typed stop `cdd_command_unsupported` | C |
+| each tick while latency > 0 | latency - 1, the decoder runs on a header-0 block (section 7) | G |
+| each tick while playing | a block of a data track is decoded with header = BCD MSF of `LBA + 150` and mode 1; LBA + 1; crossing the end of a track moves to the next track; reaching an audio track is the typed stop `cd_read_audio_track` (CD-DA playback is not modelled); past the last track the status becomes `END` (`$0C`) | V1 + CDROM; audio stop C |
+| `HOCK` | after the drive's tick, level 4 becomes pending (taken with `IEN4`) | V1 |
 
 ## 9. Synthetic post-BIOS fixture profile
 
@@ -242,11 +291,11 @@ not match at start-up.
 
 | level (sub) | source | implemented | tag |
 | --- | --- | --- | --- |
-| 1 | graphics completion | typed stop if enabled and raised (never raised: ASIC absent) | C |
+| 1 | graphics completion | typed stop if raised (never raised: ASIC absent) | C |
 | 2 | main `IFL2` | yes; acknowledging clears `IFL2` | V2 (GPGX `scd_68k_irq_ack`, MAME HOLD_LINE) |
 | 3 | timer | yes | V2 (rate), V1 (`+ 1`) |
 | 4 | CDD (`HOCK`) | yes | V1 |
-| 5 | CDC (`DTEI`/`DECI` falling edge of the CDC /INT with `IEN5`) | yes | V1 |
+| 5 | CDC (`DTEI`/`DECI` /INT edge with `IEN5`, section 7) | yes | V1 / G |
 | 6 | subcode | never raised | C |
 
 All sub interrupts are autovectored (vector `24 + level`); the handler is the long at `PRG[$60 + 4 * level]` and must be
@@ -264,31 +313,40 @@ stops with `bios_absent`.
   live bytes at its address are compared with the image bytes (comparison only; nothing is decoded). A mismatch is the
   typed stop `code_bytes_mismatch`.
 - Every run takes a finite `--instruction-budget`; exhaustion is the typed result `budget_exhausted`, not success.
-- Success is `idle`: both processors are stopped (or the sub is held) and no enabled source can wake either.
+- Success is `idle`: both processors are stopped (or the sub is halted or waiting for Word RAM) and no enabled source can
+  wake either.
 
 ## 12. Timing approximations (recorded deviations, not hardware proof)
 
 - A bus access takes effect at the start time of its instruction; there is no wait-state, refresh, DMA or Word-RAM
   contention modelling. Cross-CPU ordering is exact only at instruction granularity.
-- The CDD seek latency is the fixed two-tick model of section 8.
-- CDC decode/transfer interrupt edges follow GPGX's model; the decoder "active period" that clears `DECI`
-  automatically is not modelled (`DECI` clears on `STAT3` read or decoder disable).
-- `SBRQ` takes effect at the sub's next instruction boundary (the real acknowledge latency is not modelled).
+- GPGX evaluates the 75 Hz drive clock, DMA progress and DMA completion at its emulation-slice boundaries; this profile
+  evaluates them at their exact tick (DMA: 4 sub cycles per byte counted from the transfer's base tick, rounded up to whole
+  bytes and down to 8-byte groups; completion at the first tick where the whole count is reached). Every Gate Array CDC/DMA
+  access, Word RAM access and ownership change first brings a transfer up to its instruction's start tick.
+- The CDD seek latency is GPGX's default model (section 8), not measured drive behaviour.
+- `SBRQ` and the sub's wait for Word RAM take effect at instruction boundaries (the real acknowledge latency is not modelled).
 
 ## 13. Unresolved items
 
+Items marked **G** above are implemented as GPGX behaves; they stay here until hardware evidence confirms or corrects them.
+
 | item | why | experiment that resolves it | owner |
 | --- | --- | --- | --- |
-| main PRG-RAM window access while `SBRQ` = 0 | GPGX unmaps it, MAME allows it | hardware test (mcd-verificator class) or a third reference (BlastEm, MiSTer RTL) | SEG-064 |
-| timer period `N` vs `N + 1` counts | GPGX (citing MCDV) and MAME disagree | run MCDV "REG 8030 #7" or read MiSTer RTL | SEG-065 |
-| which 1M bank is "0" for a given `RET` | single source | MiSTer RTL / hardware test | SEG-065 |
-| sub writes to COMCMD and main writes to COMSTAT | GPGX ignores, MAME stores | hardware test | SEG-064 |
-| sub address mirrors above `$0FFFFF` | GPGX mirrors, MAME does not | hardware test | SEG-065 |
-| CDC DMA into 2M Word RAM owned by main | GPGX halts, MAME writes | hardware test | SEG-063 |
+| main PRG-RAM window access while `SBRQ` = 0 (G: unmapped) | GPGX unmaps it, MAME allows it | hardware test (mcd-verificator class) or a third reference (BlastEm, MiSTer RTL) | SEG-064 |
+| timer period `N` vs `N + 1` counts (G: `N + 1`) | GPGX (citing MCDV) and MAME disagree | run MCDV "REG 8030 #7" or read MiSTer RTL | SEG-065 |
+| which 1M bank is "0" for a given `RET` (G: `RET` = 1 gives main bank 1) | single source | MiSTer RTL / hardware test | SEG-065 |
+| sub writes to COMCMD and main writes to COMSTAT (G: ignored) | GPGX ignores, MAME stores | hardware test | SEG-064 |
+| address mirrors (main 256 KiB / Word RAM / Gate Array, sub 1 MiB) (G: mirrored) | GPGX mirrors, MAME does not | hardware test | SEG-065 |
+| CDC DMA into 2M Word RAM owned by main (G: halted until `DMNA`) | GPGX halts, MAME writes | hardware test | SEG-063 |
+| 1M `DMNA` request semantics and 1M -> 2M ownership (G) | GPGX models a request latch; MAME does not | hardware test (MCDV memory-mode tests) | SEG-065 |
+| `SBRQ` readback when the bus is requested while the sub is in STOP (G: reads 0) | GPGX: "verified on real hardware", MAME: no special case | hardware test | SEG-064 |
+| peripheral reset scope (G: GPGX `scd_reset(0)`) | GPGX itself marks it "TODO: figure what exactly is reset" | hardware test | SEG-064 |
+| open-bus read values | the prefetched instruction word; not modelled (typed stop `open_bus_read`) | prefetch model for the generated CPU | SEG-065 |
+| CDD seek latency, command checksum handling, decoder active period (G) | GPGX models them (latency is a configurable approximation); MAME differs | logic-analyser logs (MiSTer `mcd logs`) | SEG-065 |
+| decoding a non-data block from a raw image | GPGX's raw path differs from its cooked path; the profile uses the cooked behaviour (section 7) | hardware: what the CDC writes for a seek-time block | SEG-063 |
 | system-header longwords `$38/$3C/$40-$4C` | one primary source in reach of this cloud | read the Mega-CD Disc Format specification and the Sega CD BIOS manual directly | SEG-064 |
 | SP base `$6000`, IP base `$FF0000` | BIOS-owned facts | BIOS feasibility gate (ADR 0130) | SEG-064-T001 |
-| `SBRQ` readback when the bus is requested while the sub is in STOP | GPGX: reads 0 ("verified on real hardware"), MAME: no special case | hardware test | SEG-064 |
-| CDD seek latency, decoder active period | timing not modelled | logic-analyser logs (MiSTer `mcd logs`) | SEG-065 |
 | raw-sector EDC/ECC | not checked; sync and header are | decision: optional until a title needs it | SEG-063 |
 
 ## 14. What later milestones consume
