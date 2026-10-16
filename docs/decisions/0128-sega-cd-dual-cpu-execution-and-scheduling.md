@@ -18,7 +18,8 @@
    the Gate Array, the scheduler and the disc, and **composes** the Genesis VDP: a zero-initialised `GenesisRuntime`
    is held only as the VDP device host and main-CPU accesses to `$C00000-$C00007` are routed through the existing
    `genesis_route_access`; frames come from the existing `genesis_vdp_produce_frame` and PPM export. VDP DMA is a
-   typed stop (its source would be the wrong machine's memory). No universal CPU interface is introduced: the only
+   typed stop (its source would be the wrong machine's memory). Long main-CPU accesses to the VDP ports reach the device whole,
+   so its two-word control-port semantics are unchanged. No universal CPU interface is introduced: the only
    shared code is the CPU library, the emitter and the VDP device.
 3. **Scheduler.** Single-threaded, integer ticks (contract section 2). Each processor has a `next` time (start of its
    next instruction). Loop: pick the runnable processor with the smallest `next` (tie: main); first process every

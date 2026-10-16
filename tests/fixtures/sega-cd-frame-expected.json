@@ -1,0 +1,11 @@
+{
+ "cdframe": {
+  "data_sha256": "7c19026cc4914921ceffd43b4bb8ff604bde2671cd717ab76e486ff62005e5ac",
+  "frame_sha256": "7f4046851c4bf0dcd0ecb8705685f41964581c0b594cf99c4c1557e7178c81eb",
+  "height": 224,
+  "ppm_sha256": "a6961eff2c99c13eb62c706a806b8758d371966476bc1d2cc8659b5ebf8c07c8",
+  "width": 320
+ },
+ "note": "SEG-062-T005 project-authored expected frame of the cdframe fixture (seed 62); the pixels equal tests/sega_cd_frame_oracle.py's independent rendering",
+ "schema": 1
+}

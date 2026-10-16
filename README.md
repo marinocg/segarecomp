@@ -20,7 +20,9 @@ Experimental. Stated without exaggeration:
   gameplay compatibility is incomplete.
 - **Z80:** next after the current workspace work (SEG-008); not implemented yet.
 - **Master System / Game Gear:** planned.
-- **Sega CD / 32X / Saturn:** roadmap only; no code.
+- **Sega CD:** a synthetic-disc vertical slice (SEG-062): project-authored CUE/BIN discs, both MC68000 processors as generated
+  native C, the CD drive/CDC sector path into Word RAM and a Genesis VDP frame. No BIOS, no commercial disc support yet.
+- **32X / Saturn:** roadmap only; no code.
 
 See `platforms/README.md` for the per-platform map.
 

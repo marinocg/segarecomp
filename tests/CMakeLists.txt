@@ -1149,6 +1149,11 @@ set_property(TEST sega_cd_dual_cpu_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_word_ram_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_word_ram_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_word_ram_test APPEND PROPERTY LABELS full fast)
+# SEG-062-T005 (Checkpoint C): CDD/CDC sector delivery, CDC DMA into Word RAM, the main CPU and the Genesis VDP frame; liveness,
+# start-up disc identity and typed CD failures.
+add_test(NAME sega_cd_disc_to_frame_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_disc_to_frame_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_disc_to_frame_test APPEND PROPERTY LABELS full fast)
 add_executable(z80_executable_image_equivalence_test z80_executable_image_equivalence_test.cpp)
 target_link_libraries(z80_executable_image_equivalence_test PRIVATE segarecomp::machine_master_system segarecomp::machine_genesis_z80)
 segarecomp_enable_warnings(z80_executable_image_equivalence_test)

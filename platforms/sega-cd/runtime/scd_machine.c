@@ -139,9 +139,16 @@ static int scd_bus(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width
   return cpu == SCD_MAIN ? scd_main_bus(m, address, width, is_write, value, pc) : scd_sub_bus(m, address, width, is_write, value, pc);
 }
 
+/* The VDP device owns its 32-bit port semantics (a long control-port write is one two-word command): long main-CPU accesses to
+ * the VDP ports go to it whole instead of as two bus cycles. */
+static int scd_is_vdp_long(uint32_t cpu, uint32_t address, uint32_t width) {
+  return cpu == SCD_MAIN && width == 4U && address >= UINT32_C(0x00C00000) && address < UINT32_C(0x00C00008);
+}
+
 int scd_read(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint32_t *value, uint32_t pc) {
   address &= UINT32_C(0x00FFFFFF);
   if (width != 1U && (address & 1U) != 0U) return scd_fail_access(m, cpu, SCD_STOP_ADDRESS_ERROR, pc, address, width, 0);
+  if (scd_is_vdp_long(cpu, address, width)) return scd_vdp_access(m, address, 4U, 0, value, pc);
   if (width == 4U) {
     uint32_t high = 0U, low = 0U;
     if (scd_bus(m, cpu, address, 2U, 0, &high, pc) != 0) return 1;
@@ -155,6 +162,7 @@ int scd_read(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint
 int scd_write(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint32_t value, uint32_t pc) {
   address &= UINT32_C(0x00FFFFFF);
   if (width != 1U && (address & 1U) != 0U) return scd_fail_access(m, cpu, SCD_STOP_ADDRESS_ERROR, pc, address, width, 1);
+  if (scd_is_vdp_long(cpu, address, width)) return scd_vdp_access(m, address, 4U, 1, &value, pc);
   if (width == 4U) {
     uint32_t high = value >> 16U, low = value & 0xFFFFU;
     if (scd_bus(m, cpu, address, 2U, 1, &high, pc) != 0) return 1;
