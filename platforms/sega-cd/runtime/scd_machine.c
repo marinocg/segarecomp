@@ -380,7 +380,7 @@ static uint32_t scd_sub_max_wake_level(const ScdMachine *m) {
     if (!((m->ga.interrupt_enable >> level) & 1U)) continue;
     if ((m->ga.pending >> level) & 1U) best = level;
     else if (level == 2U && !m->cpu[SCD_MAIN].irq.stopped) best = level; /* main may still raise IFL2 */
-    else if (level != 2U && scd_devices_can_wake_sub(m)) best = level;
+    else if (level != 2U && scd_devices_can_raise(m, level)) best = level;
   }
   return best;
 }

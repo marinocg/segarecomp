@@ -457,7 +457,7 @@ def fixture_wordram2m(options):
     sub.move("w", imm(63), d(7))
     sub.label("fill")
     sub.move("w", d(0), ("inc", 0))
-    sub.immop("add", "w", 0x0101, d(0))
+    sub.immop("add", "w", 0x0103, d(0))
     sub.dbra(7, "fill")
     sub.move("b", imm(0x01), absl(GA_SUB + 0x03))  # RET = 1: return Word RAM to main
     sub.move("b", imm(0x02), absl(GA_SUB + 0x0F))
@@ -487,7 +487,7 @@ def fixture_wordram2m(options):
     main.move("w", d(1), absl(RESULT + 2))
     main.move("w", absl(WORD_RAM_MAIN + 126), absl(RESULT + 4))
     main_finish(main)
-    words = wordram_pattern(64, 0x5A5A, 0x0101)
+    words = wordram_pattern(64, 0x5A5A, 0x0103)
     xor = 0
     for w in words:
         xor ^= w
@@ -507,7 +507,7 @@ def fixture_wordram1m(options):
     sub.move("w", imm(31), d(7))
     sub.label("fill")
     sub.move("w", d(0), ("inc", 0))
-    sub.immop("add", "w", 0x0202, d(0))
+    sub.immop("add", "w", 0x0205, d(0))
     sub.dbra(7, "fill")
     sub.move("b", imm(0x05), absl(GA_SUB + 0x03))  # RET = 1: swap the banks
     sub.move("w", absl(WORD_RAM_SUB_1M), absl(GA_SUB + 0x20))  # the main CPU's marker is now in the sub's bank
@@ -533,7 +533,7 @@ def fixture_wordram1m(options):
     main.move("w", d(1), absl(RESULT + 2))
     main.move("w", absl(GA_MAIN + 0x20), absl(RESULT + 4))
     main_finish(main)
-    words = wordram_pattern(32, 0x1111, 0x0202)
+    words = wordram_pattern(32, 0x1111, 0x0205)
     xor = 0
     for w in words:
         xor ^= w
