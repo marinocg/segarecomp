@@ -64,8 +64,34 @@ static void digests(const uint8_t *bytes, uint64_t out[2]) {
 }
 
 static ScdOverlayCandidate sub_candidates[2], main_candidates[1], word_candidates[1];
-static ScdOverlayGroup groups[3];
-static ScdOverlayProgram overlays = {groups, 3U, "harness"};
+/* Overlap regressions: group 3 = A64 ($030000, 64 bytes) and B128 ($030000, 128 bytes, A's first 64 bytes); group 4 = A64 ($040000)
+ * and C ($040020, 64 bytes, its first half equal to A's second half) - C overlaps A without covering A's entry. */
+static ScdOverlayCandidate prefix_candidates[2], offset_candidates[2];
+static ScdOverlayGroup groups[5];
+static ScdOverlayProgram overlays = {groups, 5U, "harness"};
+static uint8_t image_c[64];
+static uint64_t dig_c[2];
+static const uint32_t entries_30000[] = {0x30000U};
+static const uint32_t entries_40000[] = {0x40000U};
+static const uint32_t entries_40020[] = {0x40020U};
+static int run_overlap(ScdMachine *m) {
+  const uint32_t pc = m->cpu[SCD_SUB].pc;
+  if (pc != 0x30000U && pc != 0x40000U && pc != 0x40020U) return SCD_IMAGE_NO_ENTRY;
+  ran_image = 9;
+  return 0;
+}
+
+static uint64_t digest_of(const uint8_t *bytes, uint32_t length) {
+  GenesisSha256 sha;
+  uint8_t d[32];
+  uint64_t out = 0U;
+  unsigned i;
+  genesis_sha256_init(&sha);
+  genesis_sha256_update(&sha, bytes, length);
+  genesis_sha256_final(&sha, d);
+  for (i = 0; i < 8U; ++i) out = (out << 8) | d[i];
+  return out;
+}
 static ScdMachine machine;
 
 static void candidate(ScdOverlayCandidate *c, uint32_t id, const char *name, uint32_t start, const uint64_t *d, const uint32_t *entries,
@@ -140,6 +166,20 @@ int main(void) {
   group(&groups[0], SCD_SUB, 0x20000U, sub_candidates, 2U);
   group(&groups[1], SCD_MAIN, 0x20000U, main_candidates, 1U);
   group(&groups[2], SCD_SUB, 0x80000U, word_candidates, 1U);
+  candidate(&prefix_candidates[0], 5U, "a64", 0x30000U, dig_a, entries_30000, 1U, entries_30000, run_overlap);
+  prefix_candidates[0].length = 64U;
+  prefix_candidates[0].granule_count = 1U;
+  candidate(&prefix_candidates[1], 6U, "b128", 0x30000U, dig_b, entries_30000, 1U, entries_30000, run_overlap);
+  group(&groups[3], SCD_SUB, 0x30000U, prefix_candidates, 2U);
+  for (i = 0; i < 64U; ++i) image_c[i] = (uint8_t)(i < 32U ? image_a[32U + i] : 0xC0U + i);
+  dig_c[0] = digest_of(image_c, 32U);       /* granule $1000: [$040020, $040040) */
+  dig_c[1] = digest_of(image_c + 32U, 32U); /* granule $1001: [$040040, $040060) */
+  candidate(&offset_candidates[0], 7U, "a64", 0x40000U, dig_a, entries_40000, 1U, entries_40000, run_overlap);
+  offset_candidates[0].length = 64U;
+  offset_candidates[0].granule_count = 1U;
+  candidate(&offset_candidates[1], 8U, "c", 0x40020U, dig_c, entries_40020, 1U, entries_40020, run_overlap);
+  offset_candidates[1].length = 64U;
+  group(&groups[4], SCD_SUB, 0x40000U, offset_candidates, 2U);
 
   /* --- sub PRG RAM group: selection by whole-image comparison, then the fast path --- */
   power_on(m);
@@ -215,6 +255,32 @@ int main(void) {
   for (i = 0; i < 1000U; ++i) scd_write(m, SCD_SUB, 0x010000U + 2U * i, 2U, i, 0U); /* stores elsewhere */
   check(!m->overlay[0].any_dirty && dispatch(m, SCD_SUB, 0x20002U) == 0 && m->overlay[0].revalidations == 0U,
         "1000 stores outside the image cost no revalidation");
+
+  /* --- a second overlapping candidate becoming live while the selection stays valid (ADR 0132 point 4) --- */
+  power_on(m);
+  memcpy(&m->prg_ram[0x30000], image_a, 64U); /* A64 live; B128's second granule is still zero: not live */
+  check(dispatch(m, SCD_SUB, 0x30000U) == 0 && ran_image == 9 && m->overlay[3].selected == 0 && m->overlay[3].retired[0] == 1U,
+        "prefix case: A64 alone is live and selected");
+  write_bytes(m, SCD_SUB, 0x030040U, image_b + 0x40U, 64U); /* B128's tail, outside A64's range, inside the group */
+  check(m->overlay[3].any_dirty && m->overlay[3].dirty_lo == 1U, "the stores outside A64 dirty the group's second granule");
+  check(dispatch(m, SCD_SUB, 0x30000U) != 0 && m->stop.stop_class == SCD_STOP_AMBIGUOUS_IMAGE && m->stop.address == 6U &&
+            ran_image == 0 && m->overlay[3].retired[0] == 1U && m->overlay[3].retired[1] == 0U,
+        "B128 became live over the selected A64: ambiguous_image, no further instruction retired");
+
+  power_on(m);
+  memcpy(&m->prg_ram[0x40000], image_a, 64U); /* A64 live; C's second half is still zero: not live */
+  check(dispatch(m, SCD_SUB, 0x40000U) == 0 && ran_image == 9 && m->overlay[4].selected == 0, "offset case: A64 selected");
+  write_bytes(m, SCD_SUB, 0x040040U, image_c + 32U, 32U); /* C's half beyond A64 */
+  check(dispatch(m, SCD_SUB, 0x40000U) != 0 && m->stop.stop_class == SCD_STOP_AMBIGUOUS_IMAGE && m->stop.address == 8U &&
+            ran_image == 0 && m->overlay[4].retired[0] == 1U,
+        "C became live overlapping A64 without covering the PC: ambiguous_image, no further instruction retired");
+
+  power_on(m);
+  memcpy(&m->prg_ram[0x30000], image_a, 64U);
+  dispatch(m, SCD_SUB, 0x30000U);
+  write_bytes(m, SCD_SUB, 0x030040U, image_a + 0x40U, 64U); /* data that makes no other candidate live */
+  check(dispatch(m, SCD_SUB, 0x30000U) == 0 && ran_image == 9 && m->overlay[3].selected == 0 && m->overlay[3].retired[0] == 2U,
+        "stores that leave every other candidate non-live keep the cached selection");
 
   printf("%s (%d failures)\n", failures == 0 ? "PASS" : "FAIL", failures);
   return failures == 0 ? 0 : 1;

@@ -14,8 +14,10 @@
  * from, an image that was replaced underneath is the typed stop stale_image_selection, never execution of the replacement's code.
  *
  * Typed stops (detail = the candidate's image id, or 0): image_unknown, image_bytes_mismatch, image_partially_overwritten,
- * ambiguous_image, image_entry_not_compiled, stale_image_selection. Cost bounds: O(written bytes x groups) to mark, O(dirty
- * granules) to revalidate, O(group bytes) for a fresh selection (bounded by SCD_OVERLAY_MAX_CANDIDATES candidates). */
+ * ambiguous_image, image_entry_not_compiled, stale_image_selection. A revalidation that keeps the selection also checks every
+ * other overlapping candidate the dirty granules touch, so a write that makes a second image live is ambiguous_image. Cost bounds:
+ * O(written bytes x groups) to mark, O(dirty granules) to revalidate (plus O(candidate bytes) for an overlapping candidate whose
+ * dirty granules all match), O(group bytes) for a fresh selection (bounded by SCD_OVERLAY_MAX_CANDIDATES candidates). */
 #include "scd_runtime.h"
 
 #include <string.h>
@@ -232,13 +234,52 @@ static int scd_overlay_classify(ScdMachine *m, uint32_t cpu, const ScdOverlayGro
   return scd_fail(m, cpu, SCD_STOP_IMAGE_UNKNOWN, pc, 0U);
 }
 
-/* Revalidate the selection over the dirty granules only (all of them after a view change). */
-static int scd_overlay_revalidate(const ScdMachine *m, const ScdOverlayGroup *group, ScdOverlayState *s) {
-  const ScdOverlayCandidate *c = &group->candidates[s->selected];
-  uint32_t bit;
+/* 1 when a dirty granule of the group (any granule after a view change) lies inside candidate `c`'s range. */
+static int scd_dirty_touches(const ScdOverlayGroup *group, const ScdOverlayState *s, const ScdOverlayCandidate *c) {
+  uint32_t g;
+  if (s->all_dirty) return 1;
+  for (g = c->granule_first; g < c->granule_first + c->granule_count; ++g) {
+    const uint32_t bit = g - group->granule_first;
+    if (bit >= s->dirty_lo && bit <= s->dirty_hi && ((s->dirty[bit >> 3] >> (bit & 7U)) & 1U)) return 1;
+  }
+  return 0;
+}
+
+/* 1 when every dirty granule of `c` matches (all granules after a view change): the cheap test before a full verification. */
+static int scd_dirty_granules_live(const ScdMachine *m, const ScdOverlayGroup *group, const ScdOverlayState *s,
+                                   const ScdOverlayCandidate *c) {
+  uint32_t g;
   if (s->all_dirty) return scd_candidate_live(m, group->cpu, c);
-  for (bit = s->dirty_lo; bit <= s->dirty_hi; ++bit)
-    if (((s->dirty[bit >> 3] >> (bit & 7U)) & 1U) && !scd_granule_live(m, group->cpu, c, group->granule_first + bit)) return 0;
+  for (g = c->granule_first; g < c->granule_first + c->granule_count; ++g) {
+    const uint32_t bit = g - group->granule_first;
+    if (bit >= s->dirty_lo && bit <= s->dirty_hi && ((s->dirty[bit >> 3] >> (bit & 7U)) & 1U) &&
+        !scd_granule_live(m, group->cpu, c, g))
+      return 0;
+  }
+  return 1;
+}
+
+/* Revalidate the selection over the dirty granules only (all of them after a view change). Returns 1 when the selection stays valid
+ * and unambiguous, 0 when it no longer matches, -1 when it matches but the writes made another candidate overlapping it live
+ * (ADR 0132 point 4; *other = that candidate). Only candidates the dirty granules touch are examined, and a candidate is verified
+ * in full only when all of its dirty granules already match. */
+static int scd_overlay_revalidate(const ScdMachine *m, const ScdOverlayGroup *group, const ScdOverlayState *s, int32_t *other) {
+  const ScdOverlayCandidate *c = &group->candidates[s->selected];
+  uint32_t bit, k;
+  if (s->all_dirty) {
+    if (!scd_candidate_live(m, group->cpu, c)) return 0;
+  } else {
+    for (bit = s->dirty_lo; bit <= s->dirty_hi; ++bit)
+      if (((s->dirty[bit >> 3] >> (bit & 7U)) & 1U) && !scd_granule_live(m, group->cpu, c, group->granule_first + bit)) return 0;
+  }
+  for (k = 0; k < group->candidate_count; ++k) {
+    const ScdOverlayCandidate *d = &group->candidates[k];
+    if ((int32_t)k == s->selected || !scd_overlaps(d, c) || !scd_dirty_touches(group, s, d)) continue;
+    if (scd_dirty_granules_live(m, group, s, d) && scd_candidate_live(m, group->cpu, d)) {
+      *other = (int32_t)k;
+      return -1;
+    }
+  }
   return 1;
 }
 
@@ -268,8 +309,12 @@ int scd_overlay_dispatch(ScdMachine *m, uint32_t cpu) {
   s = &m->overlay[g];
   if (scd_cd_observe(m) != 0) return 1; /* bring an in-flight CDC DMA up to this instruction before comparing Word RAM */
   if (s->selected >= 0 && s->any_dirty) {
+    int32_t other = -1;
+    int valid;
     s->revalidations += 1U;
-    if (!scd_overlay_revalidate(m, group, s)) {
+    valid = scd_overlay_revalidate(m, group, s, &other);
+    if (valid < 0) return scd_fail(m, cpu, SCD_STOP_AMBIGUOUS_IMAGE, pc, group->candidates[other].image_id);
+    if (!valid) {
       s->invalidations += 1U;
       scd_overlay_event(m, cpu, g, s->selected, pc, 2U);
       s->stale_from = s->selected;

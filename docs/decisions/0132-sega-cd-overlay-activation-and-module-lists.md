@@ -39,8 +39,10 @@ and how a module is admitted without trusting a filename.
    mark the granule they change in every group whose processor currently sees that byte; a change of what a processor sees
    (PRG-RAM bank or window, Word RAM owner or mode) marks whole groups. A selection whose group is dirty is revalidated, over the
    dirty granules only, before the group's next instruction; every observation first brings an in-flight CDC DMA up to the
-   instruction tick. Cost: O(written bytes x groups) to mark, O(dirty granules) to revalidate, O(group bytes) for a fresh
-   selection.
+   instruction tick. A revalidation that keeps the selection also re-applies point 4: every other candidate overlapping it
+   that a dirty granule touches is checked, first on its dirty granules and in full only if those all match; a newly live one is
+   `ambiguous_image`. Cost: O(written bytes x groups) to mark, O(dirty granules) to revalidate (plus O(candidate bytes) for an
+   overlapping candidate whose dirty granules all match), O(group bytes) for a fresh selection.
 6. **Re-entry after replacement.** When revalidation fails the group becomes stale; until the next successful selection it can
    be re-entered only at a **declared entry root** of the newly live candidate. While the group is stale, a return address,
    fall-through or computed jump into the replaced image is the typed stop `stale_image_selection`, and no instruction of the
