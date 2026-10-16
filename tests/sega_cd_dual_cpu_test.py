@@ -14,6 +14,7 @@ publishes it at $FFC000. Checked here:
 
 usage: sega_cd_dual_cpu_test.py <segarecomp> <c-compiler> <source-root>
 """
+import os
 import pathlib
 import re
 import subprocess
@@ -32,10 +33,6 @@ def check(ok, label):
     print(("ok    " if ok else "FAIL  ") + label)
     if not ok:
         failures.append(label)
-
-
-def strip_volatile(report):
-    return report
 
 
 def main():
@@ -62,7 +59,7 @@ def main():
         check(reports["cooked"]["cpus"] == reports["raw"]["cpus"] and reports["cooked"]["digests"] == reports["raw"]["digests"],
               "cooked and raw discs give the identical machine state")
 
-        disc, exe = tmp / "comm_cooked" / "disc", tmp / "comm_cooked" / "program"
+        disc, exe = tmp / "comm_cooked" / "disc", tmp / "comm_cooked" / ("program" + common.EXE)
         baseline = common.run(exe, disc, 100000)[1]
         check(common.run(exe, disc, 100000)[1] == baseline, "two process runs give identical reports")
         partitions = [["--slice-ticks", str(t)] for t in (1, 977, 2147727, 3500000, 1000000000)]
@@ -81,14 +78,19 @@ def main():
         check(main_perturbed["digests"] == baseline["digests"] and sub_perturbed["ga"] == baseline["ga"],
               "shared memory and Gate Array state are unaffected by private-register perturbation")
 
-        # Symbol hygiene of the generated program and the linked executable.
-        obj = pathlib.Path(str(exe) + ".o")
-        defined = subprocess.run(["nm", "-g", "--defined-only", str(obj)], capture_output=True, text=True, check=True).stdout.split()
-        check([s for s in defined if not re.fullmatch(r"[0-9a-fA-F]+|[A-Za-z]", s)] == ["main"],
-              "the generated translation unit exports only main (%s)" % defined[-3:])
-        everything = subprocess.run(["nm", str(exe)], capture_output=True, text=True, check=True).stdout
-        bad = sorted({line.split()[-1] for line in everything.splitlines() if FORBIDDEN_SYMBOLS.search(line.split()[-1] if line.split() else "")})
-        check(not bad, "no interpreter/decoder/JIT symbol in the linked program (%s)" % bad[:5])
+        # Symbol hygiene of the generated program and the linked executable (POSIX object formats; Apple prefixes '_').
+        if os.name == "nt":
+            print("skip  symbol hygiene: COFF symbol tables are not inspected on Windows hosts")
+        else:
+            obj = pathlib.Path(str(exe) + ".o")
+            listing = subprocess.run(["nm", "-g", str(obj)], capture_output=True, text=True, check=True).stdout
+            defined = sorted(line.split()[-1].lstrip("_") for line in listing.splitlines()
+                             if len(line.split()) == 3 and line.split()[1] not in ("U", "w", "v"))
+            check(defined == ["main"], "the generated translation unit exports only main (%s)" % defined[:5])
+            everything = subprocess.run(["nm", str(exe)], capture_output=True, text=True, check=True).stdout
+            names = {line.split()[-1] for line in everything.splitlines() if line.split()}
+            bad = sorted(name for name in names if FORBIDDEN_SYMBOLS.search(name))
+            check(not bad, "no interpreter/decoder/JIT symbol in the linked program (%s)" % bad[:5])
         source = (tmp / "comm_cooked" / "program.c").read_text()
         check("scd_no_linear_memory" not in source and "switch (m->cpu[0].pc)" in source,
               "generated C uses only routed accesses and selects compiled entries by PC")
@@ -135,7 +137,7 @@ def main():
         code, report = common.run(exe, disc, 100000)
         check(code == 0 and common.result_words(report, 2) == expected["result_words"] and report["prg_write_protect_drops"] == 1,
               "a sub write below the write-protect boundary is ignored (defined result)")
-        disc, exe = tmp / "comm_cooked" / "disc", tmp / "comm_cooked" / "program"
+        disc, exe = tmp / "comm_cooked" / "disc", tmp / "comm_cooked" / ("program" + common.EXE)
         code, report = common.run(exe, disc, 7)
         check(code == 11 and report["result"] == "budget_exhausted" and report["instructions"] == 7,
               "a finite instruction budget ends the run with a typed result")

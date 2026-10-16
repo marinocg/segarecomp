@@ -9,6 +9,17 @@
  * recording a typed stop in m->stop. Nothing here decodes guest instructions: computed control selects among the generated
  * program's compiled entries (ScdProgram tables), and RAM-resident code is checked by byte comparison only. */
 
+/* Windows host support, as in the Genesis runtime.h: this header is the first project include of every Sega CD runtime and generated
+ * translation unit, so it owns the CRT feature selection before any CRT header is seen. */
+#if defined(_WIN32)
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS 1
+#endif
+#ifndef _CRT_NONSTDC_NO_WARNINGS
+#define _CRT_NONSTDC_NO_WARNINGS 1
+#endif
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 
