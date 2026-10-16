@@ -98,7 +98,7 @@ static int genesis_is_device(uint32_t address) {
      write  = address, ACK, then data bytes each ACKed; a byte is committed on the 9th clock, the address wraps inside its page
      read   = address, ACK, then data bytes MSB first from the addressed cell; a master ACK (SDA low) advances the address
               (wrapping at 128), a master NACK (SDA high) ends the read until STOP
-   Write cycle time (~ms on silicon) and the factory contents are NOT modeled as hardware facts: writes are instantaneous and
+   The write-cycle duration (milliseconds on silicon) and the factory contents are NOT modeled as hardware facts: writes are instantaneous and
    the array is filled with 0xFF (project compatibility assumptions). Anything not described here is simply not a transition. */
 enum {
   GENESIS_EEPROM_PHASE_IDLE = 0,       /* no command (after STOP / power on) */
