@@ -209,7 +209,7 @@ void exception_entry_frame_is_correct() {
   check(result.kind == GENESIS_COMPLETE && checked, "handler was entered exactly once");
 }
 
-void user_mode_admission_is_rejected() {
+void user_mode_admission_with_odd_ssp_is_rejected() {
   GenesisRuntime r;
   prime(r);
   r.sr = 0x0000u;  // S = 0 (user mode), mask 0
@@ -222,8 +222,8 @@ void user_mode_admission_is_rejected() {
   check(result.kind == GENESIS_STOP &&
             result.stop.stop_class == GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT &&
             result.stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
-        "user-mode (S=0) admission fails closed");
-  check(r.pc == kOrdinaryPc && r.a[7] == kRamBegin + 0x8000u, "no CPU mutation on user-mode reject");
+        "user-mode (S=0) admission with an odd SSP fails closed");
+  check(r.pc == kOrdinaryPc && r.a[7] == kRamBegin + 0x8000u, "no CPU mutation on odd-SSP reject");
 }
 
 // A cartridge whose IRQ6 vector slot points into work RAM (a RAM jump stub) has no statically rooted handler. The
@@ -763,7 +763,7 @@ int main() {
   masked_irq_stays_pending_under_runner_resource_limit();
   mask_boundary_matches_level_6();
   exception_entry_frame_is_correct();
-  user_mode_admission_is_rejected();
+  user_mode_admission_with_odd_ssp_is_rejected();
   ram_resident_irq6_vector_fails_closed();
   stack_wrap_fails_closed_with_no_frame_write();
   zero_ssp_wraps_to_top_of_work_ram();
