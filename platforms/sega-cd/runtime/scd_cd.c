@@ -197,7 +197,7 @@ static int scd_cdc_register_write(ScdMachine *m, uint32_t value, uint32_t pc) {
       m->cdc.ifstat = (uint8_t)(m->cdc.ifstat | SCD_IFSTAT_DECI);
       previous = (uint8_t)(previous & ~SCD_IFSTAT_DECI);
     }
-    m->cdc.irq = (uint8_t)(~m->cdc.ifstat & value & (SCD_IFCTRL_DTEIEN | SCD_IFCTRL_DECIEN));
+    m->cdc.irq = (uint8_t)(~(uint32_t)m->cdc.ifstat & value & (SCD_IFCTRL_DTEIEN | SCD_IFCTRL_DECIEN));
     if (m->cdc.irq && !previous) scd_cdc_level5(m);
     if (!(value & SCD_IFCTRL_DOUTEN)) { /* data output disabled: any transfer is aborted; bytes already moved stay (V1) */
       if (m->cdc.dma_state != SCD_DMA_NONE || !(m->cdc.ifstat & SCD_IFSTAT_DTEN)) scd_log(m, 0x93U, m->cdc.dma_done, m->cdc.dbc);

@@ -162,6 +162,7 @@ Traversal traverse(const ProcessorImages &processor) {
 std::string emit_processor(unsigned cpu, const ProcessorImages &processor, const Traversal &traversal, ProcessorEmissionStats &stats) {
   const SegaCdM68kRuntimeCEmitter emitter(cpu);
   const std::string p = "scd_p" + std::to_string(cpu);
+  const std::string lookup_symbol = p + "_lookup"; /* outlives every emitter context that views it */
   const std::string k = std::to_string(cpu) + "U";
   std::ostringstream out;
   out << "/* ---- processor " << cpu << " (" << processor_name(processor.processor) << "): "
@@ -201,7 +202,7 @@ std::string emit_processor(unsigned cpu, const ProcessorImages &processor, const
       ctx.linear_memory_end = 0x01000000U;
       ctx.continuation = pc + op.provenance.length.value;
       ctx.test_operand_access = M68kOperandAccess::runtime_routed;
-      ctx.compiled_entry_lookup_symbol = p + "_lookup";
+      ctx.compiled_entry_lookup_symbol = lookup_symbol;
       if (op.kind == M68kIrKind::dbcc_loop) {
         slots += "  uint8_t m68k_dbcc_took_branch = 0U;\n";
         ctx.timing_dbcc_taken = "m68k_dbcc_took_branch";

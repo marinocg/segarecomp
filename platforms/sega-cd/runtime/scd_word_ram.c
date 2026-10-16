@@ -62,7 +62,7 @@ int scd_word_ram_sub_mode_write(ScdMachine *m, uint32_t value, uint32_t pc) {
       return 0;
     }
     if (current & SCD_MODE_1M) { /* 1M -> 2M */
-      value |= (uint32_t)(~m->ga.dmna_int & 1U);
+      value |= ~(uint32_t)m->ga.dmna_int & 1U;
       if (!(value & SCD_MODE_RET)) { /* a latched request: the sub keeps 2M Word RAM */
         m->ga.mode = (uint8_t)((value | SCD_MODE_DMNA) & 0x1FU);
         scd_log(m, 0x72U, value, m->ga.mode);
