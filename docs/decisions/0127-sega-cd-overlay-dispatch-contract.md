@@ -1,6 +1,6 @@
 # ADR 0127: Sega CD overlay dispatch contract (design only)
 
-- Status: Accepted as design (SEG-062-T001). Implemented by SEG-063-T001. Nothing here is implemented in SEG-062.
+- Status: Accepted as design (SEG-062-T001). Implemented by SEG-063-T001; the implemented rules and their refinements are ADR 0132.
 - Related: ADR 0126, ADR 0049/0122 (byte guards), `docs/architecture/sega-cd-machine-contract.md` sections 4, 7, 11.
 
 ## Context

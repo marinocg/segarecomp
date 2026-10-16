@@ -1,7 +1,8 @@
 # Sega CD
 
-**Status:** SEG-062 implemented (synthetic profile); contract in [docs/architecture/sega-cd-machine-contract.md](../../docs/architecture/sega-cd-machine-contract.md)
-(SEG-062). Decisions: ADR 0126 (executable images per processor instance), 0127 (overlay dispatch, design only), 0128
+**Status:** SEG-062 and SEG-063 (disc-loaded modules and overlays) implemented (synthetic profile); contract in [docs/architecture/sega-cd-machine-contract.md](../../docs/architecture/sega-cd-machine-contract.md)
+(SEG-062). Decisions: ADR 0126 (executable images per processor instance), 0127 (overlay dispatch) and 0132 (its implementation
+and module lists), 0133 (M3 transfer: evidence unavailable), 0128
 (dual-CPU execution and scheduling), 0129 (disc resources and media boundary), 0130 (BIOS profiles and gate), 0131 (ML reuse).
 
 **Purpose:** Genesis plus a second MC68000 (the sub CPU), the Gate Array, Word RAM and the CD drive/CDC data path.
@@ -11,8 +12,9 @@ commercial software. Where the reference emulators disagree the runtime follows 
 contract tag G, ADR 0128).
 
 **Code:** `machine/` (build time: boot images from `libs/media` disc ingestion, two-processor program emission over the
-generic M68K lowering, `segarecomp sega-cd inspect|emit`); `runtime/` (strict C11: scheduler, buses, Gate Array, Word RAM,
-timer, CDD/CDC, disc reader, driver). Fixtures: `tools/sega_cd_fixture_disc.py`. Tests: `tests/sega_cd_*`.
+generic M68K lowering, digest-checked module lists over `libs/media` ISO9660 lookup, `segarecomp sega-cd inspect|emit
+[--modules]`); `runtime/` (strict C11: scheduler, buses, Gate Array, Word RAM, timer, CDD/CDC, disc reader, overlay selection,
+driver). Fixtures: `tools/sega_cd_fixture_disc.py`. Tests: `tests/sega_cd_*`.
 
 **Reuse:** `libs/cpu/m68k` and the generic M68K emitter instantiated twice (one `ExecutableImageSet` and one
 `M68kRuntimeCEmitter` per processor instance, both `CpuVariant::mc68000`); the Genesis VDP device and frame export.

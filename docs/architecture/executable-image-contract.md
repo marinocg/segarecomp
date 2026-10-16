@@ -221,8 +221,8 @@ The final executable never sees it. Only generated tables derived from it reach 
 
     **Corrected.** The selector is a **set-level** flag, `ExecutableImageSet::platform_selector`, not a per-platform or per-image
     declaration. Intra-image overlap is always rejected; inter-image overlap is allowed only when the flag is set
-    (`overlapping_mappings`). SMS `sega` mapper sets and Genesis Z80 sets set it; the SMS `rom_only` set (one image) and the Genesis M68K
-    set do not (`validate_executable_image_set`; `image_set.cpp`, `z80_images.cpp` `executable_images`).
+    (`overlapping_mappings`). SMS `sega` mapper sets, Genesis Z80 sets and Sega CD sets with disc-loaded modules (ADR 0132) set it; the
+    SMS `rom_only` set (one image), the Genesis M68K set and Sega CD boot-only sets do not (`validate_executable_image_set`; `image_set.cpp`, `z80_images.cpp` `executable_images`).
 
 14. **Keeping structural self-modification unsupported without polluting the generic model.** The generic model knows only "live bytes
     may differ, so verification is required". What counts as structural, and what happens on a mismatch, are CPU/platform facts
