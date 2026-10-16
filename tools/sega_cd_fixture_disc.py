@@ -841,7 +841,7 @@ def build(fixture, out, variant="cooked", audio=True, **options):
         audio_bytes = bytes((i * 13 + 7) & 0xFF for i in range(AUDIO_SECTORS * 2352))
         (out / "track02.bin").write_bytes(audio_bytes)
         cue += 'FILE "track02.bin" BINARY\n  TRACK 02 AUDIO\n    PREGAP 00:02:00\n    INDEX 01 00:00:00\n'
-    (out / "disc.cue").write_text(cue)
+    (out / "disc.cue").write_text(cue, newline="\n")  # byte-identical on every host (no CRLF translation)
     expected = dict(expected, extents=extents, ip_size=len(ip), sp_size=len(sp), audio_first_lba=TRACK1_SECTORS + AUDIO_PREGAP,
                     track1_sectors=TRACK1_SECTORS)
     return expected
@@ -905,7 +905,7 @@ def main(argv=None):
         with tempfile.TemporaryDirectory() as tmp:
             now = manifest_now(pathlib.Path(tmp))
         if args.write_manifest:
-            MANIFEST.write_text(json.dumps(now, indent=1, sort_keys=True) + "\n")
+            MANIFEST.write_text(json.dumps(now, indent=1, sort_keys=True) + "\n", newline="\n")
             print("wrote", MANIFEST)
             return 0
         committed = json.loads(MANIFEST.read_text())
