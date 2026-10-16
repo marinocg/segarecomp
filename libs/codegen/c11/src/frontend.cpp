@@ -6012,8 +6012,34 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   // the real stack slot.
   constexpr unsigned computed_jump_window = 8U;
   std::set<Address> computed_jump_return_addresses;
-  for (const auto &[push_address, push_entry] : *aot_entries) {
-    const auto &push_op = push_entry->operation;
+  // SEG-068-T005 (ADR 0048 / ADR 0121 section 5, amended): the push seed and the stack-neutral identities between it and
+  // the RTS may be owned by the block route (the additive H-interrupt root emits its body there), while the RTS itself is
+  // an AOT-only identity. The first failed condition of the Krusty handler was exactly this: the walk abandoned its path at
+  // the first block-route-owned identity (the conditional branch), so the AOT-only RTS was never marked. The window now
+  // follows either owner's identity; the marked RTS must still be AOT-only (`ordinary_compiled_owners` does not contain
+  // it), so a statically reached RTS keeps its static return-frame authority exactly as ADR 0121 requires.
+  struct ComputedJumpIdentity { const M68kIrOperation *operation; Address next; };
+  std::map<Address, ComputedJumpIdentity> computed_jump_identities;
+  for (const auto &[address, entry] : *aot_entries) {
+    if (ordinary_compiled_owners.contains(address)) continue;
+    computed_jump_identities.emplace(address, ComputedJumpIdentity{&entry->operation,
+                                                                    address + entry->decoded.provenance.length.value});
+  }
+  std::set<Address> computed_jump_ordinary_addresses;
+  for (const auto &[address, owner] : ordinary_compiled_owners) {
+    const auto found_operation = operations.find(address);
+    const auto owner_block = blocks.find(owner);
+    if (found_operation == operations.end() || owner_block == blocks.end()) continue;
+    for (const auto &instruction : owner_block->second->instructions)
+      if (instruction.source.address.value == address) {
+        computed_jump_identities.emplace(address, ComputedJumpIdentity{found_operation->second,
+                                                                        address + instruction.length.value});
+        computed_jump_ordinary_addresses.insert(address);
+        break;
+      }
+  }
+  for (const auto &[push_address, push_identity] : computed_jump_identities) {
+    const auto &push_op = *push_identity.operation;
     if (push_op.kind != M68kIrKind::write_move || push_op.size != M68kMemoryAccessWidth::long_word ||
         (push_op.destination_ea.mode != M68kEaMode::address_predec &&
          // `MOVE.L <src>,(A7)` rewrites the saved return address in place (the inline-data-argument idiom: advance the
@@ -6023,28 +6049,28 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       continue;
     std::deque<std::pair<Address, unsigned>> walk;
     std::set<Address> visited;
-    walk.emplace_back(push_address + push_entry->decoded.provenance.length.value, 1U);
+    walk.emplace_back(push_identity.next, 1U);
     while (!walk.empty()) {
       const auto [address, depth] = walk.front();
       walk.pop_front();
       if (depth > computed_jump_window || !visited.insert(address).second) continue;
-      const auto found = aot_entries->find(address);
-      if (found == aot_entries->end() || ordinary_compiled_owners.contains(address)) continue;
-      const auto &op = found->second->operation;
+      const auto found = computed_jump_identities.find(address);
+      if (found == computed_jump_identities.end()) continue;
+      const auto &op = *found->second.operation;
       if (op.kind == M68kIrKind::return_from_subroutine) {
-        computed_jump_return_addresses.insert(address);
+        // Only an AOT-only RTS is marked (ADR 0121 section 5); a block-route RTS keeps its continuation authority.
+        if (!computed_jump_ordinary_addresses.contains(address)) computed_jump_return_addresses.insert(address);
         continue;
       }
       const auto effect = m68k_operation_effect(op);
       if (!effect.register_write_footprint_complete || (effect.address_register_write_mask & 0x80U) != 0U ||
           effect.stack != M68kStackEffectKind::none)
         continue;
-      const auto next = address + found->second->decoded.provenance.length.value;
       if (op.kind == M68kIrKind::general_branch) {
         walk.emplace_back(effect.direct_target, depth + 1U);
-        if (op.condition != M68kCondition::always) walk.emplace_back(next, depth + 1U);
+        if (op.condition != M68kCondition::always) walk.emplace_back(found->second.next, depth + 1U);
       } else if (effect.pc == M68kPcEffectKind::advance) {
-        walk.emplace_back(next, depth + 1U);
+        walk.emplace_back(found->second.next, depth + 1U);
       }
     }
   }

@@ -10069,7 +10069,15 @@ int emit_synthetic_aot_source(const char *base_hex, const char *image_hex) {
 // SEG-059: parameterized synthetic IRQ6 bridge emitter (`--emit-synthetic-irq6-aot-bridge <handler-hex> <code-hex>`): a 0x200-byte
 // MC68000 vector table (SSP $00FF8000, reset PC $200, level-6 autovector = <handler>) followed by project-authored code at $200
 // (cartridge ROM from $0), whole-image immutable-ROM AOT, emitted as the generated bridge program.
+int emit_synthetic_vector_aot_bridge(std::size_t vector_offset, const char *handler_hex, const char *code_hex);
 int emit_synthetic_irq6_aot_bridge(const char *handler_hex, const char *code_hex) {
+  return emit_synthetic_vector_aot_bridge(0x78U, handler_hex, code_hex);
+}
+// SEG-068-T005: the same synthetic bridge with the level-4 (H-interrupt, vector offset 0x70) autovector pointing at <handler>.
+int emit_synthetic_hint_aot_bridge(const char *handler_hex, const char *code_hex) {
+  return emit_synthetic_vector_aot_bridge(0x70U, handler_hex, code_hex);
+}
+int emit_synthetic_vector_aot_bridge(std::size_t vector_offset, const char *handler_hex, const char *code_hex) {
   using namespace segarecomp;
   const std::string text = code_hex;
   if (text.empty() || text.size() % 2U != 0U) return 2;
@@ -10080,7 +10088,7 @@ int emit_synthetic_irq6_aot_bridge(const char *handler_hex, const char *code_hex
   };
   be32(0x0U, 0x00FF8000U);
   be32(0x4U, 0x200U);
-  be32(0x78U, static_cast<std::uint32_t>(std::stoul(handler_hex, nullptr, 16)));
+  be32(vector_offset, static_cast<std::uint32_t>(std::stoul(handler_hex, nullptr, 16)));
   FrontendProgram program{};
   program.profile = M68kFrontendProfile::general_startup;
   program.image = {"synthetic/SEG-059/irq6-aot", img, img.size()};
@@ -31153,6 +31161,8 @@ int main(int argc, char **argv) {
     return emit_jmp_pc_indexed_word_aot_source();
   if (argc == 4 && std::string_view(argv[1]) == "--emit-synthetic-irq6-aot-bridge")
     return emit_synthetic_irq6_aot_bridge(argv[2], argv[3]);
+  if (argc == 4 && std::string_view(argv[1]) == "--emit-synthetic-hint-aot-bridge")
+    return emit_synthetic_hint_aot_bridge(argv[2], argv[3]);
   if (argc == 4 && std::string_view(argv[1]) == "--emit-synthetic-aot-source")
     return emit_synthetic_aot_source(argv[2], argv[3]);
   if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-an-indirect-aot")

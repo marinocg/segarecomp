@@ -358,6 +358,11 @@ add_test(NAME genesis_immutable_rom_aot_write_move_generated_test COMMAND ${Pyth
 add_test(NAME genesis_push_then_rts_computed_jump_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_push_then_rts_computed_jump_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-068-T005 / ADR 0048 + ADR 0121 section 5: push-then-RTS computed jump whose push and conditional branch are owned by
+# the H-interrupt root's block route while the RTS is an AOT-only identity (strict-C11 compile/execute proof).
+add_test(NAME genesis_hint_root_push_then_rts_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_hint_root_push_then_rts_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 # SEG-021-T041 / ADR 0049: immutable-copy alias (verbatim ROM-to-work-RAM copy executed at RAM-relative
 # semantics, guarded by a runtime byte-identity comparison; strict-C11 compile/execute proof).
 add_test(NAME genesis_pea_static_return_generated_test COMMAND ${Python3_EXECUTABLE}

@@ -62,3 +62,22 @@ commercial title's table dispatch (runtime-selected evidence, sanitized to this 
 - Tests: `genesis_push_then_rts_computed_jump_generated_test` (positive dispatch with SP and stack-slot checks,
   non-compiled value fails closed, stack-altering instruction between push and RTS and plain RTS unchanged, diamond window on both arms, ordinary JSR/RTS unchanged,
   deterministic output, strict C11).
+
+## Amendment (SEG-068-T005): the window crosses block-route-owned identities
+
+First failed condition of a commercial H-interrupt handler (`MOVE.L <RAM>,-(A7)`, a conditional branch, `RTS`):
+the push and the branch are owned by the block route (the additive H-interrupt root of SEG-055 emits its body
+there) while the `RTS` is an AOT-only identity (the discovery cut the root's body at the call-frame-less RTS). The
+bounded walk of Decision 1 started only from AOT-entry pushes and abandoned a path at the first identity owned by the
+block route, so the AOT-only RTS was never marked and its popped value was validated against the JSR-continuation set
+(`return_target_mismatch`) although it is a member of the compiled-entry set.
+
+Amended rule: the push seed and the stack-neutral identities of the window may be owned by either the block route or the
+AOT map (both decode from the same immutable image; the operation identity of an ordinary/AOT collision is already
+required to agree). The marked `RTS` must still be **AOT-only** (not an ordinary compiled owner), exactly as ADR 0121
+section 5 requires: a statically reached RTS keeps its static return-frame authority and is never re-authorized by this
+rule. Nothing else changes: the window size (8 identities), the A7/stack-effect exclusions, the compiled-entry
+membership check, the uncommitted RTS on mismatch and the soundness argument above all apply unchanged. Covered by
+`genesis_hint_root_push_then_rts_generated_test` (member dispatches with SP net unchanged; non-member stops
+`return_target_mismatch` with the RTS uncommitted; the zero arm never reaches the RTS; deterministic) in addition to the
+unchanged `genesis_push_then_rts_computed_jump_generated_test`.
