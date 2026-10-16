@@ -10,7 +10,8 @@ publishes it at $FFC000. Checked here:
   * independence: perturbing one processor's private registers changes only that processor's execution trace;
   * the generated program is strict C11, defines nothing but `main` and static generated functions, and links no interpreter or
     decoder symbol;
-  * every negative fixture ends in its typed stop (or its defined non-faulting hardware result), and a finite budget ends a run.
+  * every negative fixture ends in its typed stop (or its defined non-faulting hardware result, GPGX where references disagree),
+    and a finite budget ends a run.
 
 usage: sega_cd_dual_cpu_test.py <segarecomp> <c-compiler> <source-root>
 """
@@ -115,10 +116,9 @@ def main():
 
         # Negative fixtures.
         negatives = {
-            "comm_unmapped": ("unmapped", 1), "neg_ga_register": ("gate_array_register_unsupported", 0),
-            "neg_prg_window_nobus": ("prg_ram_window_without_bus", 0), "neg_handler_not_compiled": ("exception_vector_not_compiled", 1),
+            "neg_open_bus": ("open_bus_read", 1), "neg_ga_register": ("gate_array_register_unsupported", 1),
+            "neg_prg_window_nobus": ("open_bus_read", 0), "neg_handler_not_compiled": ("exception_vector_not_compiled", 1),
             "neg_entry_not_compiled": ("entry_not_compiled", 1), "neg_code_overwrite": ("code_bytes_mismatch", 1),
-            "neg_busreq_stopped": ("busreq_while_sub_stopped_unsupported", 0),
         }
         for fixture, (stop, cpu) in negatives.items():
             disc, exe, _, _ = builder.program(fixture, fixture)
@@ -128,6 +128,13 @@ def main():
                                                                     report.get("stop", {}).get("cpu")))
             again = common.run(exe, disc, 100000, "--slice-seed", "3")[1]
             check(again == report, fixture + ": the stop is identical under a sliced run")
+            if fixture in ("neg_open_bus", "neg_prg_window_nobus", "neg_ga_register"):
+                check(report["ignored_writes"] == 1, fixture + ": the preceding write to an unused location was ignored (GPGX)")
+        disc, exe, expected, _ = builder.program("neg_busreq_stopped", "neg_busreq_stopped")
+        code, report = common.run(exe, disc, 100000)
+        check(code == 0 and list(bytes.fromhex(report["result_block"])[:1]) == expected["result_bytes"] and
+              report["ga"]["prg_window"] == 0 and report["ga"]["sub_halted"] == 1 and report["ignored_writes"] == 1,
+              "SBRQ while the sub is in STOP: the sub halts, SBRQ reads 0 and the PRG-RAM window stays unmapped (GPGX)")
         disc, exe, expected, _ = builder.program("neg_ifl2_masked", "neg_ifl2_masked")
         code, report = common.run(exe, disc, 100000)
         block = bytes.fromhex(report["result_block"])

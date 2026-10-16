@@ -90,16 +90,21 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
     for (i = 0; i < 8U; ++i) fprintf(out, "%s%u", i ? "," : "", c->a[i]);
     fprintf(out, "]}");
   }
-  fprintf(out, "],\"ga\":{\"sub_reset\":%u,\"sub_busreq\":%u,\"ifl2\":%u,\"write_protect\":%u,\"prg_bank\":%u,\"mode_1m\":%u,\"ret\":%u,"
-               "\"dmna\":%u,\"main_flag\":%u,\"sub_flag\":%u,\"interrupt_enable\":%u,\"pending\":%u,\"comcmd\":[",
-          m->ga.sub_reset, m->ga.sub_busreq, m->ga.ifl2, m->ga.write_protect, m->ga.prg_bank, m->ga.mode_1m, m->ga.ret, m->ga.dmna,
-          m->ga.main_flag, m->ga.sub_flag, m->ga.interrupt_enable, m->ga.pending);
+  fprintf(out, "],\"ga\":{\"ctl\":%u,\"sub_halted\":%u,\"sub_wait\":%u,\"prg_window\":%u,\"ifl2\":%u,\"ien2_mirror\":%u,"
+               "\"write_protect\":%u,\"prg_bank\":%u,\"mode\":%u,\"mode_1m\":%u,\"ret\":%u,\"dmna\":%u,\"dmna_int\":%u,"
+               "\"main_flag\":%u,\"sub_flag\":%u,\"led\":%u,\"interrupt_enable\":%u,\"pending\":%u,\"timer_reload\":%u,"
+               "\"cdd_control\":%u,\"comcmd\":[",
+          m->ga.ctl, m->ga.sub_halted, m->ga.sub_wait, m->ga.prg_window, m->ga.ifl2, m->ga.ien2_mirror, m->ga.write_protect,
+          m->ga.prg_bank, m->ga.mode, (m->ga.mode >> 2) & 1U, m->ga.mode & 1U, (m->ga.mode >> 1) & 1U, m->ga.dmna_int, m->ga.main_flag,
+          m->ga.sub_flag, m->ga.led, m->ga.interrupt_enable, m->ga.pending, m->ga.timer_reload,
+          (unsigned)((m->ga.cdd_ctrl_hi << 8) | m->ga.cdd_ctrl_lo));
   for (i = 0; i < 8U; ++i) fprintf(out, "%s%u", i ? "," : "", m->ga.comcmd[i]);
   fprintf(out, "],\"comstat\":[");
   for (i = 0; i < 8U; ++i) fprintf(out, "%s%u", i ? "," : "", m->ga.comstat[i]);
   fprintf(out, "]},\"sub_interrupts_taken\":[");
   for (i = 0; i < 8U; ++i) fprintf(out, "%s%llu", i ? "," : "", (unsigned long long)m->sub_interrupts_taken[i]);
-  fprintf(out, "],\"prg_write_protect_drops\":%llu,\"device_log\":\"%016llx\",\"digests\":{", (unsigned long long)m->prg_write_protect_drops,
+  fprintf(out, "],\"prg_write_protect_drops\":%llu,\"ignored_writes\":%llu,\"sub_waits\":%llu,\"device_log\":\"%016llx\",\"digests\":{",
+          (unsigned long long)m->prg_write_protect_drops, (unsigned long long)m->ignored_writes, (unsigned long long)m->sub_waits,
           (unsigned long long)m->device_log);
   scd_sha_hex(m->prg_ram, sizeof m->prg_ram, digest);
   fprintf(out, "\"prg_ram\":\"%s\",", digest);
@@ -120,11 +125,20 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
   for (i = 0; i < GENESIS_VDP_REGISTER_COUNT; ++i) fprintf(out, "%s%u", i ? "," : "", host->devices.vdp.registers[i]);
   fprintf(out, "],\"cram_words\":\"");
   for (i = 0; i < GENESIS_VDP_CRAM_BYTES; ++i) fprintf(out, "%02x", host->devices.vdp.cram[i]);
-  fprintf(out, "\",\"cdc\":{\"edt\":%u,\"dma_active\":%u,\"dma_done\":%u,\"dma_total\":%u,\"pt\":%u,\"dac\":%u,\"dma_address\":%u}",
-          m->cdc.edt, m->cdc.dma_active, m->cdc.dma_done, m->cdc.dma_total, m->cdc.pt, m->cdc.dac, m->cdc.dma_address);
-  fprintf(out, ",\"cdd\":{\"status\":%u,\"lba\":%u,\"delivered\":%llu},\"frame_sha256\":%s%s%s,\"instructions\":%llu}\n", m->cdd.status,
-          m->cdd.lba, (unsigned long long)m->cdd.delivered, frame_sha ? "\"" : "", frame_sha ? frame_sha : "null", frame_sha ? "\"" : "",
-          (unsigned long long)(m->cpu[0].retired + m->cpu[1].retired));
+  fprintf(out, "\",\"cdc\":{\"edt\":%u,\"dsr\":%u,\"destination\":%u,\"dma_active\":%u,\"dma_state\":%u,\"dma_done\":%u,"
+               "\"dma_total\":%u,\"dbc\":%u,\"pt\":%u,\"wa\":%u,\"dac\":%u,\"dma_address\":%u,\"ifstat\":%u,\"ifctrl\":%u,"
+               "\"ctrl0\":%u,\"ctrl1\":%u,\"stat2\":%u,\"stat3\":%u,\"irq\":%u,\"head\":[%u,%u,%u,%u]}",
+          m->cdc.edt, m->cdc.dsr, m->cdc.destination, m->cdc.dma_state != SCD_DMA_NONE ? 1U : 0U, m->cdc.dma_state, m->cdc.dma_done,
+          m->cdc.dma_total, m->cdc.dbc, m->cdc.pt, m->cdc.wa, m->cdc.dac, m->cdc.dma_address, m->cdc.ifstat, m->cdc.ifctrl, m->cdc.ctrl0,
+          m->cdc.ctrl1, m->cdc.stat2, m->cdc.stat3, m->cdc.irq, m->cdc.head[0][0], m->cdc.head[0][1], m->cdc.head[0][2],
+          m->cdc.head[0][3]);
+  fprintf(out, ",\"cdd\":{\"status\":%u,\"lba\":%ld,\"index\":%u,\"latency\":%u,\"pending\":%u,\"delivered\":%llu,\"rx\":[",
+          m->cdd.status, (long)m->cdd.lba, m->cdd.index, m->cdd.latency, m->cdd.pending, (unsigned long long)m->cdd.delivered);
+  for (i = 0; i < 10U; ++i) fprintf(out, "%s%u", i ? "," : "", m->cdd.rx[i]);
+  fprintf(out, "],\"tx\":[");
+  for (i = 0; i < 10U; ++i) fprintf(out, "%s%u", i ? "," : "", m->cdd.tx[i]);
+  fprintf(out, "]},\"frame_sha256\":%s%s%s,\"instructions\":%llu}\n", frame_sha ? "\"" : "", frame_sha ? frame_sha : "null",
+          frame_sha ? "\"" : "", (unsigned long long)(m->cpu[0].retired + m->cpu[1].retired));
 }
 
 int scd_program_main(const ScdProgram *program, int argc, char **argv) {
