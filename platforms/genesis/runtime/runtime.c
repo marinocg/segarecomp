@@ -90,6 +90,77 @@ static int genesis_is_device(uint32_t address) {
    validation precedes the single store, so a rejected access mutates nothing
    (T042 SS3 / genesis_route_access's "on failure neither it nor the runtime is
    modified" contract). `*value` carries the caller's write value in. */
+/* ADR 0136: serial EEPROM, X24C01 profile (128 x 8 bits, 7-bit word address, R/W bit, 4-byte write page). The cartridge drives
+   SDA (D0, in and read-back) and SCL (D1) from BYTE writes to one location; the CPU's read of that location returns the SDA level
+   the device or the bus presents. Behaviour (sampled on SCL edges, MSB first, 9th clock = acknowledge):
+     START  = SDA falling while SCL is high  -> expect the 7-bit word address then the R/W bit
+     STOP   = SDA rising while SCL is high   -> idle
+     write  = address, ACK, then data bytes each ACKed; a byte is committed on the 9th clock, the address wraps inside its page
+     read   = address, ACK, then data bytes MSB first from the addressed cell; a master ACK (SDA low) advances the address
+              (wrapping at 128), a master NACK (SDA high) ends the read until STOP
+   The write-cycle duration (milliseconds on silicon) and the factory contents are NOT modeled as hardware facts: writes are instantaneous and
+   the array is filled with 0xFF (project compatibility assumptions). Anything not described here is simply not a transition. */
+enum {
+  GENESIS_EEPROM_PHASE_IDLE = 0,       /* no command (after STOP / power on) */
+  GENESIS_EEPROM_PHASE_WAIT_STOP = 1,  /* read ended by master NACK: ignore everything until STOP */
+  GENESIS_EEPROM_PHASE_ADDRESS = 2,    /* receiving the word address and the R/W bit */
+  GENESIS_EEPROM_PHASE_WRITE = 3,
+  GENESIS_EEPROM_PHASE_READ = 4
+};
+
+static uint8_t genesis_eeprom_sda_out(const GenesisSerialEepromState *e, const uint8_t *storage) {
+  if (e->phase == GENESIS_EEPROM_PHASE_READ) {
+    if (e->cycles < 9U) return (uint8_t)((storage[e->address & 0x7FU] >> (8U - e->cycles)) & 1U);
+  } else if (e->cycles == 9U && (e->phase == GENESIS_EEPROM_PHASE_ADDRESS || e->phase == GENESIS_EEPROM_PHASE_WRITE)) {
+    return 0U; /* acknowledge */
+  }
+  return e->sda;
+}
+
+static void genesis_eeprom_update(GenesisSerialEepromState *e, uint8_t *storage) {
+  const int scl_high = e->old_scl && e->scl;
+  if (scl_high && e->old_sda && !e->sda) { /* START (valid from any phase except while waiting for STOP) */
+    if (e->phase != GENESIS_EEPROM_PHASE_WAIT_STOP) {
+      e->cycles = 0U;
+      e->address = 0U;
+      e->phase = GENESIS_EEPROM_PHASE_ADDRESS;
+    }
+  } else if (scl_high && !e->old_sda && e->sda) { /* STOP */
+    e->phase = GENESIS_EEPROM_PHASE_IDLE;
+  } else if (e->phase >= GENESIS_EEPROM_PHASE_ADDRESS) {
+    if (e->old_scl && !e->scl) { /* SCL falling: advance the bit counter */
+      if (e->cycles < 9U) {
+        ++e->cycles;
+      } else {
+        e->cycles = 1U;
+        if (e->phase == GENESIS_EEPROM_PHASE_ADDRESS) {
+          e->phase = e->read ? GENESIS_EEPROM_PHASE_READ : GENESIS_EEPROM_PHASE_WRITE;
+          e->buffer = 0U;
+        }
+      }
+    } else if (!e->old_scl && e->scl) { /* SCL rising: sample SDA */
+      if (e->phase == GENESIS_EEPROM_PHASE_ADDRESS) {
+        if (e->cycles < 8U) e->address = (uint8_t)(e->address | (e->sda << (7U - e->cycles)));
+        else if (e->cycles == 8U) e->read = e->sda;
+      } else if (e->phase == GENESIS_EEPROM_PHASE_WRITE) {
+        if (e->cycles < 9U) {
+          e->buffer = (uint8_t)(e->buffer | (e->sda << (8U - e->cycles)));
+        } else {
+          const uint8_t page = (uint8_t)SEGARECOMP_GENESIS_CARTRIDGE_EEPROM_X24C01_PAGE_MASK;
+          storage[e->address & 0x7FU] = e->buffer;
+          e->buffer = 0U;
+          e->address = (uint8_t)((e->address & ~page) | ((e->address + 1U) & page));
+        }
+      } else if (e->phase == GENESIS_EEPROM_PHASE_READ && e->cycles == 9U) {
+        if (e->sda) e->phase = GENESIS_EEPROM_PHASE_WAIT_STOP; /* master NACK: end of read */
+        else e->address = (uint8_t)((e->address + 1U) & 0x7FU);
+      }
+    }
+  }
+  e->old_scl = e->scl;
+  e->old_sda = e->sda;
+}
+
 /* SEG-007-T166: the three-button-pad DATA1/DATA2 BYTE-read combinational
    function. Per pin, the returned bit is either the CTRL latch's own
    host-driven DATA-latch bit (CTRL bit set -- output/host-driven pin) or a
@@ -141,6 +212,15 @@ static int genesis_controller_io_access(GenesisDeviceState *devices, uint8_t pad
                                           GenesisAccessWidth width,
                                           GenesisAccessDirection direction, uint32_t *value) {
   size_t index;
+  /* SEG-068-T004: WORD access at the even address of a GPIO register pair reaches the register on the odd (lower) lane;
+     the even lane is discarded on writes and modeled as 0 on reads (project compatibility assumption). A CTRL3 WORD read
+     stays with its SEG-007-T038 selector below (same value). */
+  {
+    const int word_slot = segarecomp_genesis_controller_io_gpio_word_register_index(address, (uint32_t)width);
+    if (word_slot >= 0 && !(word_slot == 5 && direction == GENESIS_ACCESS_READ)) {
+      return genesis_controller_io_access(devices, pad1, pad2, region, address + 1U, GENESIS_ACCESS_BYTE, direction, value);
+    }
+  }
   if (direction == GENESIS_ACCESS_WRITE) {
     int slot = segarecomp_genesis_controller_io_gpio_register_index(address, (uint32_t)width);
     if (slot < 0) return 0;
@@ -559,6 +639,21 @@ static int genesis_vdp_control_port_write_word(GenesisDeviceState *devices, uint
     uint32_t addr_high2 = (uint32_t)(word & 3U);              /* A15,A14 */
     uint32_t addr_low14 = (uint32_t)(first & UINT32_C(0x3FFF)); /* A13-A0 */
     if (high_byte != 0U || reserved_bits != 0U) return 0; /* undocumented reserved bit set */
+    /* SEG-068-T009: a command whose CD5 is set while the DMA-enable bit (register #1 bit 4) is clear does not start a DMA: the
+       VDP updates its address and code registers and the command behaves as the ordinary address-set command of its write
+       target (Genesis Plus GX `vdp_ctrl_w`: "DMA must be enabled", and the data-port path masks the code to its low bits).
+       Only the documented write targets (VRAM 0x01, CRAM 0x03, VSRAM 0x05) are accepted this way; every other CD5-set code
+       (every DMA read/copy-family code) stays fail-closed, as before. */
+    if (cd5 != 0U && (devices->vdp.registers[1] & 0x10U) == 0U) {
+      const uint8_t plain_code = (uint8_t)(code & 0x1FU);
+      if (plain_code != 0x01U && plain_code != 0x03U && plain_code != 0x05U) return 0;
+      devices->vdp.addressed_pointer = (addr_high2 << 14) | addr_low14;
+      devices->vdp.data_port_transfer_code = plain_code;
+      devices->vdp.data_port_transfer_code_valid = 1U;
+      devices->vdp.control_port_awaiting_second_word = 0U;
+      devices->vdp.control_port_first_word = 0U;
+      return 1;
+    }
     if (cd5 != 0U) {
       /* SEG-007-T084: for memory-to-VDP DMA, register #23 bit 7 is clear
          and bits 6--0 are source A23--A17. Bit 7 set selects the separate
@@ -1565,6 +1660,25 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
                                           GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_LAYOUT);
           return GENESIS_ACCESS_FAIL;
         }
+        if (sram->kind == SEGARECOMP_GENESIS_CARTRIDGE_KIND_EEPROM_X24C01) {
+          /* ADR 0136: the declared odd byte location is the only EEPROM access: BYTE read (SDA on D0) and BYTE write (SDA D0,
+             SCL D1). Every other width or any access merely overlapping the location stops with the typed outcome. */
+          if (sram_class == SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_BYTE && runtime->cartridge_sram_storage != 0) {
+            GenesisSerialEepromState *eeprom = &runtime->cartridge_eeprom;
+            if (direction == GENESIS_ACCESS_READ) {
+              *value = (uint32_t)genesis_eeprom_sda_out(eeprom, runtime->cartridge_sram_storage) &
+                       SEGARECOMP_GENESIS_CARTRIDGE_EEPROM_SDA_BIT;
+            } else {
+              eeprom->sda = (uint8_t)((*value & SEGARECOMP_GENESIS_CARTRIDGE_EEPROM_SDA_BIT) != 0U);
+              eeprom->scl = (uint8_t)((*value & SEGARECOMP_GENESIS_CARTRIDGE_EEPROM_SCL_BIT) != 0U);
+              genesis_eeprom_update(eeprom, runtime->cartridge_sram_storage);
+            }
+            return GENESIS_ACCESS_OK;
+          }
+          *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS,
+                                          GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS);
+          return GENESIS_ACCESS_FAIL;
+        }
         if (sram_class == SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_BYTE && runtime->cartridge_sram_storage != 0 &&
             ((address - sram->start) >> 1U) < sram->storage_bytes) {
           const uint32_t sram_index = (address - sram->start) >> 1U;
@@ -1610,7 +1724,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
     return GENESIS_ACCESS_FAIL;
   }
   if (address == SEGARECOMP_GENESIS_MAPPER_SRAM_CONTROL_REGISTER && runtime->cartridge_sram != 0 &&
-      runtime->cartridge_sram->layout_supported) {
+      runtime->cartridge_sram->layout_supported && runtime->cartridge_sram->kind == SEGARECOMP_GENESIS_CARTRIDGE_KIND_SRAM) {
     /* ADR 0098: a cartridge with supported SRAM owns the mapper's SRAM control register (BYTE write, defined bits only). */
     if (direction == GENESIS_ACCESS_WRITE &&
         segarecomp_genesis_cartridge_sram_control_write_admitted((uint32_t)width, *value) != 0) {
@@ -3294,6 +3408,9 @@ void genesis_cartridge_sram_install(GenesisRuntime *runtime, const GenesisCartri
   runtime->cartridge_sram = config;
   runtime->cartridge_sram_storage = storage;
   runtime->cartridge_sram_control = 0U;
+  memset(&runtime->cartridge_eeprom, 0, sizeof(runtime->cartridge_eeprom));
+  runtime->cartridge_eeprom.sda = runtime->cartridge_eeprom.old_sda = 1U; /* open-drain lines idle high */
+  runtime->cartridge_eeprom.scl = runtime->cartridge_eeprom.old_scl = 1U;
   if (storage != 0)
     for (index = 0U; index < config->storage_bytes; ++index) storage[index] = SEGARECOMP_GENESIS_CARTRIDGE_SRAM_FILL;
 }

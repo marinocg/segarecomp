@@ -358,6 +358,11 @@ add_test(NAME genesis_immutable_rom_aot_write_move_generated_test COMMAND ${Pyth
 add_test(NAME genesis_push_then_rts_computed_jump_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_push_then_rts_computed_jump_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-068-T005 / ADR 0048 + ADR 0121 section 5: push-then-RTS computed jump whose push and conditional branch are owned by
+# the H-interrupt root's block route while the RTS is an AOT-only identity (strict-C11 compile/execute proof).
+add_test(NAME genesis_hint_root_push_then_rts_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_hint_root_push_then_rts_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 # SEG-021-T041 / ADR 0049: immutable-copy alias (verbatim ROM-to-work-RAM copy executed at RAM-relative
 # semantics, guarded by a runtime byte-identity comparison; strict-C11 compile/execute proof).
 add_test(NAME genesis_pea_static_return_generated_test COMMAND ${Python3_EXECUTABLE}
@@ -628,6 +633,10 @@ segarecomp_enable_warnings(genesis_cartridge_sram_test)
 add_test(NAME genesis_cartridge_sram_test COMMAND genesis_cartridge_sram_test)
 add_test(NAME genesis_cartridge_sram_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_cartridge_sram_generated_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-068-T006 / ADR 0136: header-declared serial EEPROM (X24C01 profile), generated-native protocol coverage.
+add_test(NAME genesis_cartridge_eeprom_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_cartridge_eeprom_generated_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_compat_repairs_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_compat_repairs_generated_test.py
@@ -1323,6 +1332,11 @@ add_test(NAME genesis_audio_equivalence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_equivalence_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})
 add_test(NAME genesis_audio_artifact_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_artifact_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-068-T007: headless compatibility driver (frame-keyed pad script + capture + sound summary from one guest execution).
+add_test(NAME genesis_compat_driver_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_compat_driver_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_compat_driver_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_compat_driver_test PROPERTY TIMEOUT 1500)
 set_property(TEST genesis_audio_mixer_test genesis_audio_pcm_test genesis_audio_equivalence_test genesis_audio_artifact_test APPEND PROPERTY LABELS full)
 set_property(TEST genesis_audio_mixer_test APPEND PROPERTY LABELS fast)
 set_property(TEST genesis_audio_artifact_test PROPERTY TIMEOUT 1500)

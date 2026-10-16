@@ -9,11 +9,18 @@
  * and the run summary carries the PCM aggregates (frame count, SHA-256 digest, clip counter, non-silence). Options, all optional and
  * validated (a malformed value exits 3 before the run): SEGARECOMP_AUDIO_PCM_OUT=<file> writes the canonical s16le stereo stream;
  * SEGARECOMP_AUDIO_RANGE=<first>:<count> adds the digest of that frame range. A failing PCM file never changes the digest or the guest.
+ *
+ * SEG-068-T007: when SEGARECOMP_CAPTURE_DIR is present the run loop is delegated to the existing headless frame capture
+ * (genesis_frame_capture_run_from_environment, platforms/genesis/viewer/frame_capture.c) instead of genesis_runtime_run, so one
+ * guest execution yields the captured frames (with the optional frame-keyed pad script SEGARECOMP_PAD_SCRIPT) AND the unchanged sound
+ * summary. The capture only observes already-current VDP state and applies a host pad mask between runner slices; the sound devices,
+ * the mixer and the SOUND_SUMMARY below are exactly those of the capture-free run.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "frame_capture.h"
 #include "genesis_sound.h"
 
 #define C(x) (unsigned long long)(x)
@@ -83,7 +90,8 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
       genesis_mixer_set_sink(mixer, pcm_sink, &g_pcm);
     }
   }
-  transfer = genesis_runtime_run(runtime, dispatch, dispatch_allowance);
+  transfer = genesis_frame_capture_requested() ? genesis_frame_capture_run_from_environment(runtime, dispatch, dispatch_allowance)
+                                               : genesis_runtime_run(runtime, dispatch, dispatch_allowance);
   genesis_sound_finish(runtime, transfer.kind == GENESIS_STOP);
   if (g_pcm.file != NULL && fflush(g_pcm.file) != 0) ++g_pcm.write_errors;
   /* Opt-in aggregate counters (counts only: never a byte, address or identity). */

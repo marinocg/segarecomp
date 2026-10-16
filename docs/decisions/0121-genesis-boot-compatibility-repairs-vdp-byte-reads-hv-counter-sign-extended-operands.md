@@ -57,7 +57,7 @@ was found with the ordinary stop diagnostics and none needs a new architecture:
    the following RTS pops; the bounded forward walk (at most 8 identities, both arms of direct branches, any identity that
    writes A7, touches the stack or is not fully classified ends the path) is unchanged. The RTS still reads the real stack
    slot and its target must be a member of the final compiled-entry lookup; every other RTS keeps the stricter JSR-continuation
-   validation. The mechanism only applies to RTS identities that are AOT-only (not reached by the static graph).
+   validation. The mechanism only applies to RTS identities that are AOT-only (not reached by the static graph). (SEG-068-T005 clarification: only the *marked RTS* must be AOT-only; the push seed and the stack-neutral window identities may be block-route-owned, see the ADR 0048 amendment.)
 
 ## Consequences
 No interpreter, runtime decoding or new ABI. Static discovery, JMP/JSR target policy and every unmodeled VDP shape are

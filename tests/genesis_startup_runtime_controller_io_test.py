@@ -63,9 +63,10 @@ int main(void) {
   assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
          stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_CONTROLLER_IO);
 
-  /* A write at the exact CTRL3 selector address remains fail-closed. */
+  /* SEG-068-T004: a WORD write at the CTRL3 selector address is the covered even-address WORD store (low byte latched);
+     a LONG write there remains fail-closed. */
   value = UINT32_C(0xFFFFFFFF);
-  assert(genesis_route_access(&runtime, UINT32_C(0x00A1000C), GENESIS_ACCESS_WORD,
+  assert(genesis_route_access(&runtime, UINT32_C(0x00A1000C), GENESIS_ACCESS_LONG,
                                GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
   assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
          stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_CONTROLLER_IO);
@@ -239,13 +240,13 @@ int main(void) {
     assert(value == UINT32_C(0x7F));
     assert(memcmp(&neg, &zeroed, sizeof(neg)) == 0);
     value = UINT32_C(0xFFFFFFFF);
-    assert(genesis_route_access(&neg, UINT32_C(0x00A10006), GENESIS_ACCESS_WORD,
+    assert(genesis_route_access(&neg, UINT32_C(0x00A1000E), GENESIS_ACCESS_WORD,
                                  GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
     assert(stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_CONTROLLER_IO &&
            value == UINT32_C(0xFFFFFFFF));
     /* A WORD read at DATA1 stays fail-closed (BYTE-only family). */
     value = UINT32_C(0xFFFFFFFF);
-    assert(genesis_route_access(&neg, UINT32_C(0x00A10002), GENESIS_ACCESS_WORD,
+    assert(genesis_route_access(&neg, UINT32_C(0x00A10010), GENESIS_ACCESS_WORD,
                                  GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
     assert(stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_CONTROLLER_IO &&
            value == UINT32_C(0xFFFFFFFF));
@@ -359,7 +360,7 @@ int main(void) {
     assert(value == UINT32_C(0));
     assert(memcmp(&neg, &neg_zero, sizeof(neg)) == 0);
     value = UINT32_C(0xFFFFFFFF);
-    assert(genesis_route_access(&neg, UINT32_C(0x00A10008), GENESIS_ACCESS_WORD,
+    assert(genesis_route_access(&neg, UINT32_C(0x00A10012), GENESIS_ACCESS_WORD,
                                  GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
     assert(memcmp(&neg, &neg_zero, sizeof(neg)) == 0);
     /* CTRL1/CTRL2 read back exactly what was last written; CTRL3 ($A1000D) keeps its fixed read-selector constant. */
@@ -376,6 +377,69 @@ int main(void) {
     assert(genesis_route_access(&neg, UINT32_C(0x00A1000B), GENESIS_ACCESS_BYTE,
                                  GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
     assert(value == UINT32_C(0x0F));
+  }
+
+  /* SEG-068-T004: WORD access at the even address of each GPIO register pair. Hardware fact (GTO1 pp. 72/74/75): the
+     register is the lower byte of the WORD; project assumption: the even lane is discarded on writes and 0 on reads. */
+  {
+    static const uint32_t even[6] = {0xA10002U, 0xA10004U, 0xA10006U, 0xA10008U, 0xA1000AU, 0xA1000CU};
+    GenesisRuntime w; GenesisRuntimeStop wstop; uint32_t wv; unsigned i;
+    memset(&w, 0, sizeof(w)); memset(&wstop, 0, sizeof(wstop));
+    for (i = 0U; i < 6U; ++i) {
+      wv = UINT32_C(0xFFFF0000) | (0x10U + i); /* upper lane / high bits must be discarded */
+      assert(genesis_route_access(&w, even[i], GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &wv, &wstop) == GENESIS_ACCESS_OK);
+    }
+    /* each write landed in exactly the odd-lane register of its pair */
+    for (i = 0U; i < 3U; ++i) assert(w.devices.controller_io.data[i] == 0x10U + i);
+    for (i = 0U; i < 3U; ++i) assert(w.devices.controller_io.ctrl[i] == 0x13U + i);
+    /* WORD write equals the BYTE write at the odd address (single owner): CTRL1 read back through both widths */
+    wv = UINT32_C(0xFFFFFF00) | 0x47U;
+    assert(genesis_route_access(&w, UINT32_C(0x00A10008), GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &wv, &wstop) == GENESIS_ACCESS_OK);
+    wv = UINT32_C(0xFFFFFFFF);
+    assert(genesis_route_access(&w, UINT32_C(0x00A10009), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &wv, &wstop) == GENESIS_ACCESS_OK);
+    assert(wv == 0x47U);
+    wv = UINT32_C(0xFFFFFFFF);
+    assert(genesis_route_access(&w, UINT32_C(0x00A10008), GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &wv, &wstop) == GENESIS_ACCESS_OK);
+    assert(wv == 0x47U); /* even lane 0, odd lane = register */
+    wv = UINT32_C(0xFFFFFFFF);
+    assert(genesis_route_access(&w, UINT32_C(0x00A1000A), GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &wv, &wstop) == GENESIS_ACCESS_OK);
+    assert(wv == 0x14U);
+    /* DATA ports read through the same pin model as their BYTE read (pad mask p1) */
+    {
+      uint32_t bv = 0U;
+      wv = 0xFFFFFFFFU;
+      assert(genesis_route_access(&w, UINT32_C(0x00A10003), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &bv, &wstop) == GENESIS_ACCESS_OK);
+      assert(genesis_route_access(&w, UINT32_C(0x00A10002), GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &wv, &wstop) == GENESIS_ACCESS_OK);
+      assert(wv == bv && (wv & 0xFF00U) == 0U);
+    }
+    /* CTRL3 WORD read keeps its SEG-007-T038 constant, the latch is never read back */
+    wv = UINT32_C(0xFFFFFFFF);
+    assert(genesis_route_access(&w, UINT32_C(0x00A1000C), GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &wv, &wstop) == GENESIS_ACCESS_OK);
+    assert(wv == 0U);
+    /* residual fail-closed set: LONG write/read to pairs (except the T020 LONG read), odd-address WORD, serial pairs,
+       Version WORD write, and a failed access mutates nothing */
+    {
+      GenesisRuntime before = w;
+      static const struct { uint32_t a; GenesisAccessWidth wd; GenesisAccessDirection d; } neg2[] = {
+        {0xA10002U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE},
+        {0xA10004U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ},
+        {0xA10008U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE},
+        {0xA1000EU, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE}, /* TxDATA1 pair: serial owner */
+        {0xA10010U, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE},
+        {0xA10012U, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE},
+        {0xA10000U, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE}, /* Version pair is read-only policy */
+      };
+      for (i = 0U; i < sizeof(neg2) / sizeof(neg2[0]); ++i) {
+        wv = UINT32_C(0xA5A5A5A5);
+        assert(genesis_route_access(&w, neg2[i].a, neg2[i].wd, neg2[i].d, &wv, &wstop) == GENESIS_ACCESS_FAIL);
+        assert(wstop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_CONTROLLER_IO);
+      }
+      /* odd-address WORD is rejected by the earlier effective-address stage */
+      wv = 0U;
+      assert(genesis_route_access(&w, UINT32_C(0x00A10003), GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &wv, &wstop) == GENESIS_ACCESS_FAIL);
+      assert(wstop.diagnostic_category == GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS);
+      assert(memcmp(&w.devices.controller_io, &before.devices.controller_io, sizeof(before.devices.controller_io)) == 0);
+    }
   }
   return 0;
 }

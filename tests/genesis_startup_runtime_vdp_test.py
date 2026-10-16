@@ -937,6 +937,28 @@ int main(void) {
       boundary-wrap compatibility policy for the selected destination
       progression -- an explicitly replaceable project policy, not a verified
       hardware claim. These fixtures are entirely synthetic runtime state. */
+   /* SEG-068-T009: a command word with CD5 set while the DMA-enable bit (register #1 bit 4) is clear starts no DMA; it is the
+      ordinary address-set command of its write target (LONG = first word 0x7C00 then second word 0x0083 -> VRAM write, pointer
+      0xFC00). A CD5-set code that is not a documented write target stays fail-closed, (the DMA-enabled arming path is covered
+      by the unchanged tests below). */
+   {
+     GenesisRuntime off = {0};
+     GenesisRuntime rejected = {0};
+     GenesisRuntimeStop dma_stop = {0};
+     uint32_t command = UINT32_C(0x7C000083);
+     assert(genesis_route_access(&off, UINT32_C(0x00C00004), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &command, &dma_stop) == GENESIS_ACCESS_OK);
+     assert(off.devices.vdp.dma.phase == GENESIS_VDP_DMA_IDLE && off.devices.vdp.control_port_awaiting_second_word == 0U);
+     assert(off.devices.vdp.addressed_pointer == UINT32_C(0xFC00) && off.devices.vdp.data_port_transfer_code == 0x01U &&
+            off.devices.vdp.data_port_transfer_code_valid == 1U);
+     command = UINT32_C(0x1234);
+     assert(genesis_route_access(&off, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &command, &dma_stop) == GENESIS_ACCESS_OK);
+     assert(off.devices.vdp.vram[UINT32_C(0xFC00)] == UINT8_C(0x12) && off.devices.vdp.vram[UINT32_C(0xFC01)] == UINT8_C(0x34));
+     command = UINT32_C(0x0000);  /* first word of a command whose second word is CD5 only: code 0x20 (a DMA family code, no write target) */
+     assert(genesis_route_access(&rejected, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &command, &dma_stop) == GENESIS_ACCESS_OK);
+     command = UINT32_C(0x0080);
+     assert(genesis_route_access(&rejected, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &command, &dma_stop) == GENESIS_ACCESS_FAIL);
+     assert(dma_stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
+   }
    {
      GenesisRuntime fill = {0};
      GenesisVdpState before;

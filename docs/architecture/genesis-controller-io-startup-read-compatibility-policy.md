@@ -1474,3 +1474,84 @@ Two shapes seen in a real cartridge's startup (one Moonwalker revision) were pre
 * **BYTE write to an even PSG-window address** (`$C00010/12/14/16`): accepted and discarded. Only the four odd addresses reach the PSG (unchanged); WORD/LONG writes and all reads still fail closed.
 
 Both are covered by `tests/genesis_hint_region_controller_test.cpp` and `tests/genesis_startup_runtime_psg_test.py`.
+
+---
+
+# Genesis controller-I/O GPIO-register pair WORD-access compatibility policy (SEG-068-T004)
+
+## Status and boundary
+
+An independent, bounded **project compatibility policy** (replacement process of the "Evidence replacement
+rule" above), not an authoritative hardware claim. It adds one selector family and changes no existing
+selector's result. Hardware facts and project assumptions are kept separate:
+
+| Provenance category | Retained claim | Source and limit |
+| --- | --- | --- |
+| **Publicly documented hardware fact** | Each of the six GPIO registers (DATA1..3 `$A10003/5/7`, CTRL1..3 `$A10009/B/D`) supports BYTE **and WORD** access and on a WORD access only the **lower byte** is meaningful register data, i.e. the register sits on the odd data lane and a WORD cycle at the even address (`register - 1`) delivers it in its low byte. | `GTO1` pp. 72, 74, 75 as already cited by SEG-007-T017/T034/T121 (restated, not re-derived; no new external source was consulted by this task). Does not establish the even lane's value, nor any LONG decomposition. |
+| **Project compatibility assumption** | The even (upper) lane reads as `0x00` and is discarded on writes. | Same assumption already recorded for the Version register WORD read (`$A10000`) and the CTRL3 WORD read (SEG-007-T038). Not a hardware claim. |
+| **Still unresolved** | The even lane's real bus value; LONG decomposition for DATA/CTRL pairs other than the T020 CTRL1/CTRL2 LONG read; the serial registers; timing/handshake. | Unchanged. |
+
+## Accepted selector set
+
+`(address, width, direction)` with `width = WORD` and `address` exactly one of
+`$A10002, $A10004, $A10006, $A10008, $A1000A, $A1000C` (shared recognizer
+`segarecomp_genesis_controller_io_gpio_word_register_index`), after the unchanged earlier
+`effective_address_not_24bit` / `odd_effective_address` stages:
+
+- **WORD write**: `register[n] = value & 0xFF` (identical to the T121 BYTE write at `address + 1`; upper byte discarded).
+- **WORD read**: `value = BYTE-read(address + 1)` with the even lane `0x00`. DATA1/DATA2/DATA3 keep their
+  T166 pin model, CTRL1/CTRL2 read back their latch, and the CTRL3 WORD read stays the unchanged
+  SEG-007-T038 constant (`0x0000`; the latch is never read back).
+
+Both directions are routed-device accesses (single owner: `genesis_route_access` -> `genesis_controller_io_access`);
+the access is **runtime-dependent** (not statically folded), because CTRL/DATA latch contents are CPU-written.
+
+## Residual fail-closed set (unchanged)
+
+LONG reads/writes of any pair (except the T020 CTRL1/CTRL2 LONG read at `$A10008`), LONG/WORD writes to
+the Version pair, every serial pair (S-CTRL, TxDATA, RxDATA) in any width, BYTE access at the even lane,
+and any partial/crossing shape. A rejected access mutates nothing.
+
+## Pinned-expectation revisions (consciously made)
+
+`m68k_pipeline_tests` (the retained WORD negatives moved from `$A10008` to the TxDATA1 pair's even address
+`$A1000E`; the frontier-shape serialization pins updated accordingly), `controller_io_policy_parity_tests`
+(the CTRL3 selector address now additionally accepts a WORD write; the wrong-width negative for the T020
+LONG selector is BYTE), `genesis_startup_runtime_controller_io_test` (the retained WORD negatives use serial
+pairs; new synthetic positive/negative block covering read/write, every register, even/odd, LONG and serial
+residuals, and no-mutation-on-failure).
+
+## Follow-up frontier attribution (attribution only)
+
+With the first stop (a WORD read of the CTRL1 pair's even address, reached in the startup preamble)
+removed, the same image no longer stops at run time: the build-time static walk, no longer cut by the
+fail-closed device access, reaches `JSR d16(An)` whose base register holds a generation-time constant
+(loaded by an absolute-short `LEA` earlier in the same block). `static_discovery.cpp` admits only the
+foldable control-EA set (`m68k_is_statically_foldable_control_ea`), the `pc_index8` finite-index producer
+(SEG-007-T124), pure `(An)` (SEG-007-T178) and `(d8,An,Xn)` (SEG-021-T011); **`d16(An)` is none of them**
+and takes the unchanged `reached_unresolved_direct_edge` rejection. Owner: M68K static-discovery
+control-EA admission (not the T026/T027/T028/T033/T034 runtime-owned control-transfer mechanisms and not
+SEG-043-T002 RTS containment, whose preconditions are never reached). Stop category: `reached_unresolved_direct_edge`,
+control-EA mode `address_displacement` with a provable constant base. This is a **genuinely unrepresented
+control-flow class** (a bounded extension of the T178 producer to the displacement form), not a regression of an
+existing mechanism. The previously described "unemitted RTS block" is a later frontier in the same image,
+not reachable until this one is resolved. Disposition: `needs_full_refinement` (one narrow successor).
+Note the observable change for this image: the build now stops at this documented build-time rejection
+instead of a run-time controller-I/O stop; no commercial address/byte is recorded here.
+
+---
+
+# Genesis VDP CONTROL-port command with CD5 set while DMA is disabled (SEG-068-T009)
+
+A bounded refinement of the SEG-007-T091 command-word owner (it narrows nothing else): a two-word address-set command whose second
+word sets CD5 while the DMA-enable bit (register #1 bit 4) is clear **starts no DMA**. It updates the VDP address and code registers
+and behaves as the ordinary address-set command of its write target.
+
+| Provenance category | Claim | Source and limit |
+| --- | --- | --- |
+| **Hardware/emulator-documented behaviour** | A DMA operation is only detected when the DMA-enable bit is set; with it clear the command word still updates the address and code registers and the data port then acts on the low code bits. | Genesis Plus GX `core/vdp_ctrl.c`, `vdp_ctrl_w` second-word handling ("Detect DMA operation (CD5 bit set) ... DMA must be enabled"). Emulator source, not a hardware measurement. |
+| **Project compatibility policy** | Only the documented write targets (VRAM `0x01`, CRAM `0x03`, VSRAM `0x05`, after masking CD5) are accepted this way; every other CD5-set code (DMA read/copy-family codes) stays fail-closed with `unsupported_device_region_vdp`. The DMA-enabled path is unchanged. | Deliberate narrow choice; an unknown combination is never guessed. |
+
+Reached by a LONG write whose second half is such a command after the title switched DMA off (classification only; no address or
+value is recorded). Tests: `genesis_startup_runtime_vdp_test` (DMA-disabled LONG command: no DMA armed, pointer and transfer code set,
+a following DATA-port WORD write lands; a CD5-set code without a write target is rejected).

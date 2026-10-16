@@ -397,7 +397,7 @@ def sound_smc_psg_driver():
                "patch:  nop\n        ld a,0x8A\n        ld (0x7F11),a\nloop:   jr loop\n")
 
 
-def build_sound(plan, programs, domestic_gate=False, region=b"U  "):
+def build_sound(plan, programs, domestic_gate=False, region=b"U  ", prelude=None):
     m = M68k()
     # Prologue: MOVEQ #0,D0 / BEQ.W real / RESET. The 68K translator's startup prefix admits only a handful of operations and
     # takes over the whole flow when no instruction it cannot model is reachable; the (never executed) RESET fallthrough is such an
@@ -406,6 +406,8 @@ def build_sound(plan, programs, domestic_gate=False, region=b"U  "):
     m.branch(0x67, "real")
     m.w(0x4E70)
     m.label("real")
+    if prelude is not None:
+        prelude(m)  # SEG-068-T007: optional extra 68K setup (e.g. VDP registers) ahead of the sound plan; None keeps every fixture byte-identical
     if domestic_gate:
         # A region-gated title: BTST #7,($A10001).L -- the overseas bit of the version register -- BNE gate_spin. An overseas console never
         # reaches the sound-driver upload (it spins, like a region lockout), a domestic one does. Used to prove that the build-time Z80

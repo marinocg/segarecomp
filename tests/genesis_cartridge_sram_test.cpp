@@ -73,7 +73,36 @@ int main() {
           "E0 16-bit SRAM is declared but unsupported");
   }
   // EEPROM and other extra memory is not SRAM.
-  check(status_of(image(0x1000, true, 0xE8, 0x40, 0x200001, 0x200001)) == Status::unsupported_type, "E8 40 EEPROM is unsupported");
+  // ADR 0136 (SEG-068-T006): the documented EEPROM header form `E8 40` with one odd byte location is the serial-EEPROM device
+  // class (Sega-board X24C01 profile); every other EEPROM form creates no device.
+  {
+    const auto parsed = parse_genesis_cartridge_sram_header(image(0x1000, true, 0xE8, 0x40, 0x200001, 0x200001));
+    check(parsed.status == Status::declared && parsed.descriptor &&
+              parsed.descriptor->kind == segarecomp::GenesisCartridgeExtraMemoryKind::serial_eeprom_x24c01 &&
+              parsed.descriptor->supported && parsed.descriptor->always_mapped && parsed.descriptor->odd_lane &&
+              parsed.descriptor->storage_bytes() == 128U,
+          "E8 40 single odd location is the supported X24C01 EEPROM class");
+    check(parsed.descriptor && segarecomp::genesis_cartridge_sram_access_supported(*parsed.descriptor, 0x200001U, 1U) &&
+              !segarecomp::genesis_cartridge_sram_access_supported(*parsed.descriptor, 0x200001U, 2U) &&
+              !segarecomp::genesis_cartridge_sram_access_supported(*parsed.descriptor, 0x200000U, 2U) &&
+              !segarecomp::genesis_cartridge_sram_access_supported(*parsed.descriptor, 0x200000U, 1U),
+          "only the BYTE access at the declared location is an EEPROM access");
+    const auto outside = parse_genesis_cartridge_sram_header(image(0x1000, true, 0xE8, 0x40, 0x200001, 0x200001));
+    check(outside.descriptor && segarecomp::genesis_cartridge_sram_touches(*outside.descriptor, 0x200000U, 2U) &&
+              !segarecomp::genesis_cartridge_sram_touches(*outside.descriptor, 0x200003U, 1U),
+          "a WORD access covering the location is an EEPROM access; a neighbouring byte is not");
+  }
+  {
+    // A ROM extending to or into the location: the ROM/device overlay is not established -> declared but unsupported.
+    const auto parsed = parse_genesis_cartridge_sram_header(image(0x300000, true, 0xE8, 0x40, 0x200001, 0x200001));
+    check(parsed.status == Status::declared && parsed.descriptor && !parsed.descriptor->supported &&
+              !parsed.descriptor->always_mapped,
+          "an EEPROM header over a ROM that reaches the location is declared but unsupported");
+  }
+  check(status_of(image(0x1000, true, 0xE8, 0x40, 0x200001, 0x200003)) == Status::unsupported_type, "an EEPROM span is unsupported");
+  check(status_of(image(0x1000, true, 0xF8, 0x40, 0x200001, 0x200001)) == Status::unsupported_type, "EEPROM with a non-E8 type byte is unsupported");
+  check(status_of(image(0x1000, true, 0xE8, 0x40, 0x200000, 0x200000)) == Status::unsupported_type, "an even EEPROM location is unsupported");
+  check(status_of(image(0x1000, true, 0xE8, 0x40, 0x1FFFFF, 0x1FFFFF)) == Status::unsupported_type, "an EEPROM location outside the window is unsupported");
   check(status_of(image(0x1000, true, 0xF8, 0x21, 0x200001, 0x203FFF)) == Status::malformed, "unknown second byte is malformed");
   // Malformed descriptors.
   check(status_of(image(0x1000, true, 0xF8, 0x20, 0x203FFF, 0x200001)) == Status::malformed, "start > end");

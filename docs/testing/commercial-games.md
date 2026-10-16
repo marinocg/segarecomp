@@ -115,3 +115,42 @@ complete alias coverage. The helper is temporary and explicit.
 `tests/restricted_files_test.py` verifies that Git tracks no path under `games/` and that representative
 Genesis `.md` and other filenames remain ignored. This catches accidental policy changes and forced
 additions when the required gates run.
+
+## Headless Compatibility Driver (SEG-068-T007)
+
+`tools/genesis_compat_driver.py` is the repeatable, SDL/X-free route for compatibility sweeps: it builds one game with the existing
+`segarecomp build`, runs the executable **once** with a deterministic frame-keyed pad script, captures chosen frames and reports the
+existing sound summary. It adds no renderer, exporter, audio summary or clock: frames come from the capture module
+(`platforms/genesis/viewer/frame_capture.c`, SEG-021-T031), the sound summary from the sound hook
+(`platforms/genesis/runtime/genesis_sound_hook.c`, SEG-032-T009), which delegates its run loop to the capture when
+`SEGARECOMP_CAPTURE_DIR` is set so both come from one guest execution. Host-side it only converts PPM to PNG, tiles a contact sheet and
+prints an aggregate-only report. Outputs go outside the repository or under an ignored directory (the default is `build/compat-driver`);
+the driver refuses an in-repository path that Git does not ignore, and frames are never committed.
+
+```sh
+python3 tools/genesis_compat_driver.py run \
+  --segarecomp build/dev/apps/segarecomp/segarecomp --cc "$CC" --cxx "$CXX" \
+  --rom "<authorized-local-rom>" --out-dir build/compat-driver \
+  --budget 400000000 --capture-first 60 --capture-count 8 --capture-stride 30 \
+  --pad-script 120:1:0x80,140:1:0 --png --contact-sheet
+```
+
+Every run needs a finite `--budget` (the program is never run unbounded) and has a wall-clock limit (`--run-timeout`). The report
+(`report.json`, also printed) carries only: result and stop classification, frames captured/published, dispatch count, pad entries
+applied, frame digests and the sound aggregates (non-silence, audio frames, digest). The capture observes only until its window is
+complete, so a late window (`--capture-first 3000 --capture-count 1`) classifies where a title ends (guest stop class, or budget exhausted,
+plus the frames reached). To record the eight-title baseline (`--reuse-build` skips rebuilding an output directory's earlier build):
+
+```sh
+python3 tools/genesis_compat_driver.py matrix --games build/matrix-games.json --out-dir build/compat-matrix \
+  --segarecomp build/dev/apps/segarecomp/segarecomp --cc "$CC" --cxx "$CXX" --budget 400000000 --capture-count 4
+# matrix-games.json (ignored, local): [{"label": "title-1", "rom": "<path>", "pad_script": "120:1:0x80"}, ...]
+```
+
+**Pad script.** `"<frame>:<player>:<mask>[,...]"`: a virtual frame number (guest time, `master_ticks / GENESIS_NTSC_MASTER_TICKS_PER_FRAME`),
+player 1 or 2 and the host mask (`GENESIS_PAD_*`: UP 1, DOWN 2, LEFT 4, RIGHT 8, B 16, C 32, A 64, START 128). Entries are applied through
+`genesis_runtime_set_pad1/2` **only between runner slices**, at the first slice boundary at or after the keyed frame; nothing else about the
+guest changes, so the same script and slice size reproduce identical frame and audio digests, a script that is never reached leaves the run
+byte-identical to no script, and nothing depends on host timing. The application point has slice granularity (`--capture-slice`
+dispatches, default 65536): a smaller slice applies it earlier within the keyed frame; frames before the key and steady frames after it
+are slice independent, the one frame in which the change lands is not. Use a small slice (for example 256) for frame-accurate input.

@@ -212,7 +212,9 @@ def main() -> None:
     assert stop(sanitized) == ("unsupported_device_access", "unsupported_cartridge_sram_layout"), sanitized
 
     # 6. Cartridges without a supported SRAM descriptor keep the PR #88 idle behaviour: $A130F1 accepts only bit 0 clear.
-    for label, header in (("no_descriptor", None), ("eeprom", (0xE8, 0x40, 0x200001, 0x200001))):
+    # (SEG-068-T006: the single-location E8/$40 form is now the supported EEPROM class, see
+    # genesis_cartridge_eeprom_generated_test.py; an EEPROM *span* remains unsupported and creates no device.)
+    for label, header in (("no_descriptor", None), ("eeprom_span", (0xE8, 0x40, 0x200001, 0x200003))):
       ok = build_rom(move_b_imm_abs(0x00, 0xA130F1) + LOOP, header=header)
       _, sanitized, _ = exercise(cli, compiler, root, work, label + "_idle", ok)
       assert sanitized["result"] == "runner_resource_limit", (label, sanitized)

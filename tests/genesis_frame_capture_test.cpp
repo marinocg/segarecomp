@@ -173,6 +173,117 @@ void invalid_arguments_are_rejected() {
         "mid-window I/O failure fails closed after the frames before it");
   check(!std::filesystem::exists(mid + "/frame-00000006.ppm"), "no frame is captured after an I/O failure");
 }
+
+// ---- SEG-068-T007: frame-keyed pad script ----
+uint64_t g_first_seen_dispatch = UINT64_MAX;
+uint64_t g_first_seen_frame = 0U;
+void reset_seen() { g_first_seen_dispatch = UINT64_MAX; g_first_seen_frame = 0U; }
+
+// The synthetic dispatch plus a pad echo: the host pad mask drives a visible colour, and the first dispatch that observes a
+// nonzero mask is recorded together with the virtual frame it ran in.
+GenesisControlTransfer pad_echo_dispatch(GenesisRuntime *runtime) {
+  if (runtime->pad1 != 0U && g_first_seen_dispatch == UINT64_MAX) {
+    g_first_seen_dispatch = runtime->d[0];
+    g_first_seen_frame = runtime->scheduler.master_ticks / GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
+  }
+  runtime->d[0] += 1U;
+  runtime->devices.vdp.cram[1] = static_cast<uint8_t>(((runtime->d[0] / 40000U) & 0x0EU) ^ (runtime->pad1 & 0x0EU));
+  return genesis_runtime_retire_m68k_instruction(runtime, 4U, runtime->pc);
+}
+
+void pad_script_applies_between_slices_at_the_keyed_frame() {
+  for (const uint32_t slice : {512U, 4096U}) {
+    const auto dir = fresh_dir("segarecomp-t068-pad-timing");
+    GenesisRuntime r;
+    setup(r);
+    reset_seen();
+    const GenesisPadScriptEntry script[] = {{3U, 1U, 0x06U}, {5U, 2U, 0x03U}, {6U, 1U, 0x00U}};
+    auto o = options_for(dir, 1U, 7U, 1U);
+    o.slice_dispatches = slice;
+    o.pad_script = script;
+    o.pad_script_count = 3U;
+    const auto result = genesis_frame_capture_run(&r, pad_echo_dispatch, &o, 10000000U);
+    check(result.outcome == GENESIS_FRAME_CAPTURE_WINDOW_COMPLETE && result.pad_entries_applied == 3U,
+          "every keyed entry is applied once the guest's virtual time reaches it");
+    check(g_first_seen_frame == 3U, "the mask is first observed in the keyed virtual frame (not before)");
+    check(g_first_seen_dispatch != UINT64_MAX && g_first_seen_dispatch % slice == 0U,
+          "the mask is applied only on a slice boundary (a multiple of the slice size)");
+    check(r.pad1 == 0x00U && r.pad2 == 0x03U, "last entry per player wins; players are independent");
+    // The earliest boundary at or after the keyed frame: the boundary one slice earlier is still before the key.
+    GenesisRuntime probe;
+    setup(probe);
+    const uint64_t key_ticks = 3ULL * GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
+    uint64_t dispatches = 0U;
+    while (probe.scheduler.master_ticks < key_ticks) {
+      const auto t = genesis_runtime_run(&probe, synthetic_dispatch, slice);
+      dispatches += t.runner_dispatch_count;
+    }
+    check(dispatches == g_first_seen_dispatch, "that slice boundary is the first one at or after the keyed frame");
+  }
+}
+
+void pad_script_is_deterministic_and_neutral_when_unreached() {
+  const auto a_dir = fresh_dir("segarecomp-t068-pad-det-a");
+  const auto b_dir = fresh_dir("segarecomp-t068-pad-det-b");
+  const GenesisPadScriptEntry script[] = {{2U, 1U, 0x0EU}, {4U, 1U, 0x00U}};
+  GenesisRuntime a, b;
+  setup(a);
+  setup(b);
+  auto oa = options_for(a_dir, 1U, 6U, 1U);
+  auto ob = options_for(b_dir, 1U, 6U, 1U);
+  oa.pad_script = ob.pad_script = script;
+  oa.pad_script_count = ob.pad_script_count = 2U;
+  const auto ra = genesis_frame_capture_run(&a, pad_echo_dispatch, &oa, 10000000U);
+  const auto rb = genesis_frame_capture_run(&b, pad_echo_dispatch, &ob, 10000000U);
+  check(ra.frames_captured == 6U && std::memcmp(ra.digests, rb.digests, sizeof(ra.digests)) == 0,
+        "the same script and slice size yield identical frame digests");
+  GenesisRuntime plain;
+  setup(plain);
+  const auto plain_dir = fresh_dir("segarecomp-t068-pad-plain");  // options keep a pointer: the string must outlive them
+  const auto oplain = options_for(plain_dir, 1U, 6U, 1U);
+  const auto rplain = genesis_frame_capture_run(&plain, pad_echo_dispatch, &oplain, 10000000U);
+  check(std::memcmp(ra.digests[0], rplain.digests[0], 32U) == 0, "frames before the first keyed entry equal the no-script run");
+  check(std::memcmp(ra.digests[2], rplain.digests[2], 32U) != 0, "a frame inside a pressed interval differs from the no-script run");
+  // An empty script and a script that is never reached are byte-identical to no script at all.
+  const GenesisPadScriptEntry unreached[] = {{1000000U, 1U, 0xFFU}};
+  GenesisRuntime late, none;
+  setup(late);
+  setup(none);
+  const auto late_dir = fresh_dir("segarecomp-t068-pad-late");
+  const auto none_dir = fresh_dir("segarecomp-t068-pad-none");
+  auto olate = options_for(late_dir, 1U, 4U, 1U);
+  olate.pad_script = unreached;
+  olate.pad_script_count = 1U;
+  const auto onone = options_for(none_dir, 1U, 4U, 1U);
+  const auto rlate = genesis_frame_capture_run(&late, pad_echo_dispatch, &olate, 10000000U);
+  const auto rnone = genesis_frame_capture_run(&none, pad_echo_dispatch, &onone, 10000000U);
+  late.live_frame_observer = nullptr;
+  check(rlate.pad_entries_applied == 0U && std::memcmp(&late, &none, sizeof(GenesisRuntime)) == 0 &&
+            std::memcmp(rlate.digests, rnone.digests, sizeof(rlate.digests)) == 0,
+        "a script that is never reached leaves the run byte-identical to no script");
+}
+
+void invalid_pad_scripts_are_rejected() {
+  const auto dir = fresh_dir("segarecomp-t068-pad-invalid");
+  GenesisRuntime r;
+  setup(r);
+  auto o = options_for(dir, 1U, 1U, 1U);
+  const GenesisPadScriptEntry unordered[] = {{5U, 1U, 1U}, {4U, 1U, 1U}};
+  o.pad_script = unordered;
+  o.pad_script_count = 2U;
+  check(genesis_frame_capture_run(&r, pad_echo_dispatch, &o, 1000U).outcome == GENESIS_FRAME_CAPTURE_INVALID_ARGUMENT,
+        "a script whose frames decrease is rejected");
+  const GenesisPadScriptEntry bad_player[] = {{1U, 3U, 1U}};
+  o.pad_script = bad_player;
+  o.pad_script_count = 1U;
+  check(genesis_frame_capture_run(&r, pad_echo_dispatch, &o, 1000U).outcome == GENESIS_FRAME_CAPTURE_INVALID_ARGUMENT,
+        "a player other than 1 or 2 is rejected");
+  o.pad_script = nullptr;
+  o.pad_script_count = 1U;
+  check(genesis_frame_capture_run(&r, pad_echo_dispatch, &o, 1000U).outcome == GENESIS_FRAME_CAPTURE_INVALID_ARGUMENT,
+        "a missing script with a nonzero count is rejected");
+  check(r.live_frame_observer == nullptr, "observer untouched after rejection");
+}
 }  // namespace
 
 int main() {
@@ -181,6 +292,9 @@ int main() {
   capture_is_deterministic();
   absent_frames_fail_closed();
   invalid_arguments_are_rejected();
+  pad_script_applies_between_slices_at_the_keyed_frame();
+  pad_script_is_deterministic_and_neutral_when_unreached();
+  invalid_pad_scripts_are_rejected();
   if (failures == 0) std::printf("genesis_frame_capture_tests: OK\n");
   return failures == 0 ? 0 : 1;
 }
