@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generated-native coverage for the header-declared serial EEPROM (ADR 0126, SEG-068-T006).
+"""Generated-native coverage for the header-declared serial EEPROM (ADR 0136, SEG-068-T006).
 
 Synthetic, project-authored images only (no commercial data).  Programs go through the production
 `emit-general-startup-bridge-c --reset-entry --immutable-rom-aot` route, are compiled as strict C11 and run with a finite

@@ -1,4 +1,4 @@
-# ADR 0126: Header-declared serial EEPROM (X24C01 profile)
+# ADR 0136: Header-declared serial EEPROM (X24C01 profile)
 
 - Status: Accepted.
 - Task: SEG-068-T006.

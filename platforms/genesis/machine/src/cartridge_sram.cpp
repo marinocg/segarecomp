@@ -25,7 +25,7 @@ GenesisCartridgeSramHeader parse_genesis_cartridge_sram_header(std::span<const s
   };
   // The second byte is $20 for SRAM/FRAM; $40 marks EEPROM.  Anything else is not a form this model knows.
   if (kind == UINT8_C(0x40)) {
-    // ADR 0126: the documented EEPROM header form is `'RA',$E8,$40` with one odd byte location (plutiedev "ROM header
+    // ADR 0136: the documented EEPROM header form is `'RA',$E8,$40` with one odd byte location (plutiedev "ROM header
     // reference"). Anything else (other type byte, a span, an even or out-of-window location) creates no device.
     const std::uint32_t eeprom_start = be32(image, header_offset + 4U);
     const std::uint32_t eeprom_end = be32(image, header_offset + 8U);

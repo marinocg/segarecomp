@@ -103,11 +103,11 @@ typedef struct GenesisCartridgeSramConfig {
   uint8_t lane_odd;       /* 1 = odd addresses, 0 = even addresses */
   uint8_t layout_supported; /* 0 = declared but unsupported (16-bit or EEPROM-like form): every access to the extent fails closed */
   uint8_t always_mapped;  /* the ROM ends at or below `start`: nothing lies beneath the SRAM, so $A130F1 bit 0 is irrelevant */
-  uint8_t kind;           /* SEGARECOMP_GENESIS_CARTRIDGE_KIND_SRAM (0, default) or ..._KIND_EEPROM_X24C01 (ADR 0126) */
+  uint8_t kind;           /* SEGARECOMP_GENESIS_CARTRIDGE_KIND_SRAM (0, default) or ..._KIND_EEPROM_X24C01 (ADR 0136) */
 } GenesisCartridgeSramConfig;
 
 /*
- * ADR 0126: serial EEPROM line/state-machine state (X24C01, mode 1: 7-bit word address + R/W bit). Zero-initialized by
+ * ADR 0136: serial EEPROM line/state-machine state (X24C01, mode 1: 7-bit word address + R/W bit). Zero-initialized by
  * genesis_cartridge_sram_install, which then sets both lines high (bus idle). In memory only; never persisted.
  */
 typedef struct GenesisSerialEepromState {
@@ -817,7 +817,7 @@ typedef struct GenesisRuntime {
   const GenesisCartridgeSramConfig *cartridge_sram;
   uint8_t *cartridge_sram_storage;
   uint8_t cartridge_sram_control;
-  GenesisSerialEepromState cartridge_eeprom; /* ADR 0126: only meaningful when cartridge_sram->kind is the EEPROM kind */
+  GenesisSerialEepromState cartridge_eeprom; /* ADR 0136: only meaningful when cartridge_sram->kind is the EEPROM kind */
   /* SEG-007-T081: zero-initialized identically to every other GenesisRuntime
      field (T042 SS8); see GenesisDeviceState above. */
   GenesisDeviceState devices;

@@ -15,7 +15,7 @@ namespace segarecomp {
 // runtime fails closed with a typed diagnostic on any access to it instead of treating it as ROM.
 enum class GenesisCartridgeExtraMemoryKind {
   sram,                   // ADR 0098: byte-lane SRAM
-  serial_eeprom_x24c01,   // ADR 0126: header-declared serial EEPROM, Sega-board X24C01 profile (project compatibility assumption)
+  serial_eeprom_x24c01,   // ADR 0136: header-declared serial EEPROM, Sega-board X24C01 profile (project compatibility assumption)
 };
 
 struct GenesisCartridgeSramDescriptor {

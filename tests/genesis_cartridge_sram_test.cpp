@@ -73,7 +73,7 @@ int main() {
           "E0 16-bit SRAM is declared but unsupported");
   }
   // EEPROM and other extra memory is not SRAM.
-  // ADR 0126 (SEG-068-T006): the documented EEPROM header form `E8 40` with one odd byte location is the serial-EEPROM device
+  // ADR 0136 (SEG-068-T006): the documented EEPROM header form `E8 40` with one odd byte location is the serial-EEPROM device
   // class (Sega-board X24C01 profile); every other EEPROM form creates no device.
   {
     const auto parsed = parse_genesis_cartridge_sram_header(image(0x1000, true, 0xE8, 0x40, 0x200001, 0x200001));

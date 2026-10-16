@@ -634,7 +634,7 @@ add_test(NAME genesis_cartridge_sram_test COMMAND genesis_cartridge_sram_test)
 add_test(NAME genesis_cartridge_sram_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_cartridge_sram_generated_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
-# SEG-068-T006 / ADR 0126: header-declared serial EEPROM (X24C01 profile), generated-native protocol coverage.
+# SEG-068-T006 / ADR 0136: header-declared serial EEPROM (X24C01 profile), generated-native protocol coverage.
 add_test(NAME genesis_cartridge_eeprom_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_cartridge_eeprom_generated_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

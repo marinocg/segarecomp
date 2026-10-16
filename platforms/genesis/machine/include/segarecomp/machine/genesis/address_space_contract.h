@@ -146,7 +146,7 @@ static inline int segarecomp_genesis_idle_control_register(uint32_t address) {
 #define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_CONTROL_PROTECT UINT32_C(0x02)   /* $A130F1 bit 1: writes to the SRAM are ignored */
 #define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_CONTROL_DEFINED UINT32_C(0x03)
 
-/* SEG-068-T006 / ADR 0126: header-declared serial EEPROM (type $E8, second byte $40, one odd byte location). The device class is
+/* SEG-068-T006 / ADR 0136: header-declared serial EEPROM (type $E8, second byte $40, one odd byte location). The device class is
  * the Sega-board X24C01 profile: 128 x 8 bits, SDA on D0 (input and read-back), SCL on D1, 4-byte page; the location is
  * accessed with BYTE reads and writes only. The profile is a project compatibility assumption (the header does not carry the
  * wiring). */

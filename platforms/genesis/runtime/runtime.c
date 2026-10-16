@@ -90,7 +90,7 @@ static int genesis_is_device(uint32_t address) {
    validation precedes the single store, so a rejected access mutates nothing
    (T042 SS3 / genesis_route_access's "on failure neither it nor the runtime is
    modified" contract). `*value` carries the caller's write value in. */
-/* ADR 0126: serial EEPROM, X24C01 profile (128 x 8 bits, 7-bit word address, R/W bit, 4-byte write page). The cartridge drives
+/* ADR 0136: serial EEPROM, X24C01 profile (128 x 8 bits, 7-bit word address, R/W bit, 4-byte write page). The cartridge drives
    SDA (D0, in and read-back) and SCL (D1) from BYTE writes to one location; the CPU's read of that location returns the SDA level
    the device or the bus presents. Behaviour (sampled on SCL edges, MSB first, 9th clock = acknowledge):
      START  = SDA falling while SCL is high  -> expect the 7-bit word address then the R/W bit
@@ -1646,7 +1646,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
           return GENESIS_ACCESS_FAIL;
         }
         if (sram->kind == SEGARECOMP_GENESIS_CARTRIDGE_KIND_EEPROM_X24C01) {
-          /* ADR 0126: the declared odd byte location is the only EEPROM access: BYTE read (SDA on D0) and BYTE write (SDA D0,
+          /* ADR 0136: the declared odd byte location is the only EEPROM access: BYTE read (SDA on D0) and BYTE write (SDA D0,
              SCL D1). Every other width or any access merely overlapping the location stops with the typed outcome. */
           if (sram_class == SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_BYTE && runtime->cartridge_sram_storage != 0) {
             GenesisSerialEepromState *eeprom = &runtime->cartridge_eeprom;
