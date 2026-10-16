@@ -1,5 +1,6 @@
 add_library(segarecomp_media
   src/disc.cpp
+  src/iso9660.cpp
   src/rom.cpp
   src/sha256.cpp
 )

@@ -137,11 +137,41 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
   for (i = 0; i < 10U; ++i) fprintf(out, "%s%u", i ? "," : "", m->cdd.rx[i]);
   fprintf(out, "],\"tx\":[");
   for (i = 0; i < 10U; ++i) fprintf(out, "%s%u", i ? "," : "", m->cdd.tx[i]);
-  fprintf(out, "]},\"frame_sha256\":%s%s%s,\"instructions\":%llu}\n", frame_sha ? "\"" : "", frame_sha ? frame_sha : "null",
+  fprintf(out, "]},\"frame_sha256\":%s%s%s,\"instructions\":%llu", frame_sha ? "\"" : "", frame_sha ? frame_sha : "null",
           frame_sha ? "\"" : "", (unsigned long long)(m->cpu[0].retired + m->cpu[1].retired));
+  if (m->overlays != NULL) { /* SEG-063: overlay activation (absent for programs without modules: their reports are unchanged) */
+    const ScdOverlayProgram *o = m->overlays;
+    unsigned g, c;
+    fprintf(out, ",\"overlays\":{\"manifest\":\"%s\",\"groups\":[", o->manifest_identity);
+    for (g = 0; g < o->group_count; ++g) {
+      const ScdOverlayGroup *group = &o->groups[g];
+      const ScdOverlayState *state = &m->overlay[g];
+      fprintf(out, "%s{\"cpu\":%u,\"start\":%u,\"end\":%u,\"selected\":%d,\"stale_from\":%d,\"selections\":%llu,"
+                   "\"revalidations\":%llu,\"invalidations\":%llu,\"candidates\":[",
+              g ? "," : "", group->cpu, group->start, group->end, state->selected, state->stale_from,
+              (unsigned long long)state->selections, (unsigned long long)state->revalidations, (unsigned long long)state->invalidations);
+      for (c = 0; c < group->candidate_count; ++c)
+        fprintf(out, "%s{\"name\":\"%s\",\"image_id\":%u,\"start\":%u,\"length\":%u,\"retired\":%llu}", c ? "," : "",
+                group->candidates[c].name, group->candidates[c].image_id, group->candidates[c].start, group->candidates[c].length,
+                (unsigned long long)state->retired[c]);
+      fprintf(out, "]}");
+    }
+    fprintf(out, "],\"event_count\":%u,\"events\":[", m->overlay_events);
+    for (i = 0; i < m->overlay_events && i < SCD_OVERLAY_LOG; ++i) {
+      const ScdOverlayEvent *e = &m->overlay_log[i];
+      const char *name = e->candidate < o->groups[e->group].candidate_count ? o->groups[e->group].candidates[e->candidate].name : "";
+      fprintf(out, "%s{\"tick\":%llu,\"cpu\":%u,\"group\":%u,\"candidate\":\"%s\",\"pc\":%u,\"kind\":\"%s\"}", i ? "," : "",
+              (unsigned long long)e->tick, e->cpu, e->group, name, e->pc, e->kind == 1U ? "selected" : "invalidated");
+    }
+    fprintf(out, "]}");
+  }
+  fprintf(out, "}\n");
 }
 
-int scd_program_main(const ScdProgram *program, int argc, char **argv) {
+int scd_program_main(const ScdProgram *program, int argc, char **argv) { return scd_program_main_overlays(program, NULL, argc, argv); }
+
+/* SEG-063: `overlays` is the generated overlay registry (NULL for programs without disc-loaded modules). */
+int scd_program_main_overlays(const ScdProgram *program, const ScdOverlayProgram *overlays, int argc, char **argv) {
   static ScdMachine machine;
   static GenesisFrameArtifact frame;
   ScdDisc disc = program->disc;
@@ -188,6 +218,7 @@ int scd_program_main(const ScdProgram *program, int argc, char **argv) {
     scd_disc_close(&disc);
     return 20;
   }
+  scd_overlay_attach(&machine, overlays);
   for (i = 0; i < set_count; ++i)
     if (!scd_apply_set(&machine, sets[i])) return 2;
   if (slice_ticks == 0U && !have_seed) {

@@ -14,6 +14,9 @@ Fixtures (the main program is the IP, mapped at $FF0000; the sub program is the 
   wordram1m   T004  1M mode: both CPUs use their bank at once, the sub swaps banks with RET
   timer       T004  sub counts five timer (INT3) interrupts, then stops the timer
   cdframe     T005  sub reads two data sectors through CDD/CDC and DMAs them into Word RAM; main programs the VDP from them
+  modules     SEG-063 Checkpoint D: an ISO9660 volume with module files; the sub loads module A by CDC DMA into Word RAM and runs
+                    it at $080000, copies it to PRG RAM $020000 and runs it there, then does the same with module B at the same
+                    addresses (--module-case selects a negative loader; --iso-defect corrupts one ISO9660 structure)
   wordram_wait T004  the sub touches 2M Word RAM before main hands it over: it waits for DTACK and retries (GPGX)
   wordram_violation, neg_*   negative fixtures (typed stops or defined GPGX results)
 Variants: `cooked` (MODE1/2048) and `raw` (MODE1/2352 with sync and header); options alter the cdframe sub program for
@@ -25,6 +28,7 @@ Result block convention: the main program reports into work RAM at $FFC000 and w
 usage:
   sega_cd_fixture_disc.py build --fixture NAME --out DIR [--variant cooked|raw] [--seed N] [--data-flip OFFSET]
                                 [--cd-lba LBA] [--dma-dest N] [--bad-checksum] [--abort-dma] [--bad-cdc-register] [--no-audio]
+                                [--module-case CASE] [--iso-defect DEFECT]
   sega_cd_fixture_disc.py describe --fixture NAME [options]   JSON: data LBA, expected values (used by tests)
   sega_cd_fixture_disc.py --check | --write-manifest
 """
@@ -219,6 +223,10 @@ class Asm:
 
     def nop(self):
         self.w(0x4E71)
+
+    def jsr(self, ea):  # JSR (An) or JSR abs.L
+        self.w(0x4E80 | self.ea_bits(ea))
+        self.ext(ea, "l")
 
     def assemble(self):
         for index, label, kind in self.fixups:
@@ -771,6 +779,306 @@ def fixture_cdframe(options):
                 "name_cols": NAME_COLS, "cdd_play_tx": play_tx}
     return main.assemble(), sub.assemble(), sectors, expected
 
+# modules (SEG-063-T001, Checkpoint D) --------------------------------------------------------------------------------------------
+# Track 1 carries a minimal ISO9660 volume after the system area: PVD (16), terminator (17), root directory (18), /OVL directory (19)
+# and one file per block. The sub program (the loader) reads module files by CDD/CDC into 2M Word RAM (CDC DMA) and runs them at
+# $080000, copies them into PRG RAM $020000 with CPU moves and runs them there. Every module executes at both addresses.
+ISO_PVD, ISO_TERMINATOR, ISO_ROOT, ISO_OVL = 16, 17, 18, 19
+MODULE_BLOCKS = {"README.TXT;1": 20, "MODA.BIN;1": 21, "MODB.BIN;1": 22, "MODC.BIN;1": 23, "MODA2.BIN;1": 24, "APFX.BIN;1": 25}
+MODULE_BYTES = 192            # three 64-byte granules
+MODULE_WORD_RAM = 0x080000    # sub 2M view (CDC DMA destination offset 0)
+MODULE_PRG = 0x020000         # PRG RAM copy destination
+MARK_A, MARK_B, MARK_A_AFTER, COUNT_A, COUNT_B = SUB_DATA + 0x20, SUB_DATA + 0x22, SUB_DATA + 0x24, SUB_DATA + 0x30, SUB_DATA + 0x32
+MODULE_CASES = ("checkpoint", "unknown", "mismatch", "partial", "missing_entry", "stale")
+ISO_DEFECTS = ("bad_identifier", "no_terminator", "duplicate_primary", "endian", "block_size", "volume_space", "xattr", "multi_extent",
+               "interleave", "associated", "cross_sector", "duplicate_name", "extent_range", "dot_record")
+
+
+def module_code(kind):
+    """Position-independent module images (no absolute self-reference): the same bytes run at $080000 and at $020000."""
+    m = Asm(0)
+    if kind != "c":
+        m.moveq(1, 0)                                 # identical first instruction in A, A' and B
+    if kind in ("a", "a2", "apfx"):
+        m.move("w", imm(0xAAAB if kind == "a2" else 0xAAAA), absl(MARK_A))
+        m.quick("add", "w", 1, absl(COUNT_A))
+        m.move("l", a(5), d(7))                       # loader service hook (0 = none)
+        m.bcc("eq", "skip")
+        m.jsr(("ind", 5))                             # stale case: the service loads B over this image, then returns here
+        m.label("skip")
+        m.move("w", imm(0xA1A1), absl(MARK_A_AFTER))
+        m.rts()
+        fill = 0xA0
+    elif kind == "b":
+        m.moveq(2, 1)
+        m.move("w", imm(0xBBBB), absl(MARK_B))
+        m.quick("add", "w", 1, absl(COUNT_B))
+        m.rts()
+        fill = 0xB0
+    else:  # "c": an unlisted module with its own first instruction
+        m.moveq(3, 0)
+        m.move("w", imm(0xCCCC), absl(MARK_A))
+        m.rts()
+        fill = 0xC0
+    code = m.assemble()
+    size = 64 if kind == "apfx" else MODULE_BYTES
+    body = bytearray(code + bytes(((fill + i) & 0xFF) for i in range(MODULE_BYTES - len(code))))
+    if kind == "apfx":
+        return bytes(module_code("a")[:64])
+    return bytes(body[:size])
+
+
+def iso_both32(v):
+    return struct.pack("<I", v) + struct.pack(">I", v)
+
+
+def iso_both16(v):
+    return struct.pack("<H", v) + struct.pack(">H", v)
+
+
+def iso_record(name, block, size, directory=False, flags_extra=0, xattr=0, unit=0):
+    n = len(name)
+    length = 33 + n + (1 if n % 2 == 0 else 0)
+    rec = bytearray(length)
+    rec[0] = length
+    rec[1] = xattr
+    rec[2:10] = iso_both32(block)
+    rec[10:18] = iso_both32(size)
+    rec[18:25] = bytes([126, 10, 16, 12, 0, 0, 0])  # 2026-10-16 12:00:00 GMT
+    rec[25] = (0x02 if directory else 0x00) | flags_extra
+    rec[26] = unit
+    rec[28:32] = iso_both16(1)
+    rec[32] = n
+    rec[33:33 + n] = name
+    return bytes(rec)
+
+
+def iso_volume(files, defect=None):
+    """{block: 2048 bytes} for the descriptor set and the two directories. `files` maps identifier -> (block, bytes)."""
+    sectors = {}
+    pvd = bytearray(2048)
+    pvd[0] = 1
+    pvd[1:6] = b"CD002" if defect == "bad_identifier" else b"CD001"
+    pvd[6] = 1
+    pvd[8:40] = b"SEGARECOMP".ljust(32)
+    pvd[40:72] = b"SEGARECOMP_MODULES".ljust(32)
+    space = 1000 if defect == "volume_space" else TRACK1_SECTORS
+    pvd[80:88] = iso_both32(space)
+    if defect == "endian":
+        pvd[84:88] = struct.pack(">I", space + 1)
+    pvd[120:124] = iso_both16(1)
+    pvd[124:128] = iso_both16(1)
+    pvd[128:132] = iso_both16(1024 if defect == "block_size" else 2048)
+    pvd[156:190] = iso_record(b"\x00", ISO_ROOT, 2048, directory=True)
+    pvd[190:318] = b" " * 128  # volume set identifier
+    pvd[881] = 1
+    sectors[ISO_PVD] = bytes(pvd)
+    term = bytearray(2048)
+    term[0] = 255
+    term[1:6] = b"CD001"
+    term[6] = 1
+    sectors[ISO_TERMINATOR] = bytes(pvd) if defect == "duplicate_primary" else bytes(term)
+    if defect == "no_terminator":
+        boot = bytearray(2048)
+        boot[0] = 0
+        boot[1:6] = b"CD001"
+        boot[6] = 1
+        for blk in range(ISO_TERMINATOR, ISO_PVD + 16):
+            sectors[blk] = bytes(boot)
+    root = bytearray()
+    root += iso_record(b"\x00", ISO_ROOT, 2048, directory=True)
+    root += iso_record(b"\x01", ISO_ROOT, 2048, directory=True)
+    root += iso_record(b"OVL", ISO_OVL, 2048, directory=True)
+    readme = files["README.TXT;1"]
+    root += iso_record(b"README.TXT;1", readme[0], len(readme[1]))
+    ovl = bytearray()
+    ovl += iso_record(b"\x00", ISO_ROOT if defect == "dot_record" else ISO_OVL, 2048, directory=True)
+    ovl += iso_record(b"\x01", ISO_ROOT, 2048, directory=True)
+    if defect == "cross_sector":  # empty filler files (odd-length names: record = 33 + n) so MODA.BIN;1 starts 20 bytes before the end
+        k = 0
+        while 2048 - 20 - len(ovl) > 0:
+            left = 2048 - 20 - len(ovl)
+            n = 199 if left - 33 > 199 + 34 else left - 33
+            assert n % 2 == 1 and n >= 5, n
+            ovl += iso_record(("F%03d" % k).encode() + b"X" * (n - 4), readme[0], 0)
+            k += 1
+        assert len(ovl) == 2048 - 20
+    for name in ("MODA.BIN;1", "MODB.BIN;1", "MODC.BIN;1", "MODA2.BIN;1", "APFX.BIN;1"):
+        block, data = files[name]
+        extra = dict()
+        if name == "MODA.BIN;1":
+            if defect == "xattr":
+                extra["xattr"] = 1
+            if defect == "multi_extent":
+                extra["flags_extra"] = 0x80
+            if defect == "associated":
+                extra["flags_extra"] = 0x04
+            if defect == "interleave":
+                extra["unit"] = 1
+            if defect == "extent_range":
+                block = 1000
+        ovl += iso_record(name.encode(), block, len(data), **extra)
+        if defect == "duplicate_name" and name == "MODA.BIN;1":
+            ovl += iso_record(name.encode(), files["MODB.BIN;1"][0], len(files["MODB.BIN;1"][1]))
+    if defect == "cross_sector":
+        ovl = ovl[:2048]
+    assert len(root) <= 2048 and len(ovl) <= 2048
+    sectors[ISO_ROOT] = bytes(root.ljust(2048, b"\x00"))
+    sectors[ISO_OVL] = bytes(ovl.ljust(2048, b"\x00"))
+    return sectors
+
+
+def module_files():
+    files = {"README.TXT;1": (MODULE_BLOCKS["README.TXT;1"], b"segarecomp synthetic Sega CD module disc (SEG-063)\n")}
+    for name, kind in (("MODA.BIN;1", "a"), ("MODB.BIN;1", "b"), ("MODC.BIN;1", "c"), ("MODA2.BIN;1", "a2"), ("APFX.BIN;1", "apfx")):
+        files[name] = (MODULE_BLOCKS[name], module_code(kind))
+    return files
+
+
+def fixture_modules(options):
+    case = options.get("module_case", "checkpoint")
+    assert case in MODULE_CASES, case
+    files = module_files()
+    stop_words, _ = cdd_words(1)
+    sub = Asm(SP_BASE)
+
+    def cdc_write(reg, value):
+        sub.move("b", imm(reg), absl(GA_SUB + 0x05))
+        sub.move("b", imm(value), absl(GA_SUB + 0x07))
+
+    sub.label("entry")
+    cdc_write(0x0F, 0x00)  # CDC reset
+    cdc_write(0x01, 0x02)  # IFCTRL: DOUTEN
+    cdc_write(0x0A, 0x84)  # CTRL0: DECEN | WRRQ
+    sub.move("b", imm(0x00), absl(GA_SUB + 0x07))  # CTRL1
+    sub.move("l", imm(0), a(5))  # no loader service for modules (MOVEA.L #0,A5)
+    sub.move("b", imm(0x01), absl(GA_SUB + 0x0F))
+    wait_flag(sub, GA_SUB + 0x0E, 1, "w_go")
+    sub.label("w_own")
+    sub.btst(0, absl(GA_SUB + 0x03))  # RET = 0: the sub owns 2M Word RAM
+    sub.bcc("ne", "w_own")
+
+    def load(name):
+        sub.bsr("load_" + name.split(".")[0].lower())
+
+    def run(address):
+        sub.jsr(absl(address))
+
+    def copy(count):
+        sub.move("w", imm(count // 2 - 1), d(7))
+        sub.bsr("copy")
+
+    if case == "checkpoint":
+        load("MODA.BIN;1"); run(MODULE_WORD_RAM); copy(MODULE_BYTES); run(MODULE_PRG)
+        load("MODB.BIN;1"); run(MODULE_WORD_RAM); copy(MODULE_BYTES); run(MODULE_PRG)
+    elif case == "unknown":
+        load("MODC.BIN;1"); copy(MODULE_BYTES); run(MODULE_PRG)
+    elif case == "mismatch":
+        load("MODA2.BIN;1"); run(MODULE_WORD_RAM)
+    elif case == "partial":
+        load("MODA.BIN;1"); copy(MODULE_BYTES); load("MODB.BIN;1"); copy(64); run(MODULE_PRG)
+    elif case == "missing_entry":
+        load("MODB.BIN;1")
+        sub.lea(absl(MODULE_WORD_RAM + 10), 0)  # an instruction boundary of A, inside B's second instruction
+        sub.jsr(("ind", 0))
+    elif case == "stale":
+        load("MODB.BIN;1")  # (also makes the service routine statically reachable)
+        load("MODA.BIN;1")
+        sub.lea(absl("load_modb"), 5)  # A calls the service, which loads B over A, and returns into A
+        run(MODULE_WORD_RAM)
+    sub.move("w", absl(COUNT_A), absl(GA_SUB + 0x20))
+    sub.move("w", absl(COUNT_B), absl(GA_SUB + 0x22))
+    sub.move("w", absl(MARK_A), absl(GA_SUB + 0x24))
+    sub.move("w", absl(MARK_B), absl(GA_SUB + 0x26))
+    sub.move("w", absl(MARK_A_AFTER), absl(GA_SUB + 0x28))
+    for i, word in enumerate(stop_words):
+        sub.move("w", imm(word), absl(GA_SUB + 0x42 + 2 * i))
+    sub.move("b", imm(0x01), absl(GA_SUB + 0x03))  # RET = 1: Word RAM back to main
+    sub.move("b", imm(0x02), absl(GA_SUB + 0x0F))
+    sub.stop(0x2700)
+
+    # copy: D7 + 1 words from Word RAM $080000 to PRG RAM $020000 (ordinary CPU stores)
+    sub.label("copy")
+    sub.lea(absl(MODULE_WORD_RAM), 0)
+    sub.lea(absl(MODULE_PRG), 1)
+    sub.label("copy_loop")
+    sub.move("w", ("inc", 0), ("inc", 1))
+    sub.dbra(7, "copy_loop")
+    sub.rts()
+
+    # one loader per module file: CDD play at the file's block, wait for its block header, CDC DMA 2048 bytes to Word RAM offset 0
+    used = {"checkpoint": ["MODA.BIN;1", "MODB.BIN;1"], "unknown": ["MODC.BIN;1"], "mismatch": ["MODA2.BIN;1"],
+            "partial": ["MODA.BIN;1", "MODB.BIN;1"], "missing_entry": ["MODB.BIN;1"], "stale": ["MODB.BIN;1", "MODA.BIN;1"]}[case]
+    for name in used:
+        lba = files[name][0]
+        tag = name.split(".")[0].lower()
+        play_words, _ = cdd_words(3, lba)
+        sub.label("load_" + tag)
+        for i, word in enumerate(play_words):
+            sub.move("w", imm(word), absl(GA_SUB + 0x42 + 2 * i))
+        msf = lba + 150
+        want = [(bcd(msf // 75 // 60) << 8) | bcd(msf // 75 % 60), (bcd(msf % 75) << 8) | 0x01]
+        sub.label("w_valid_" + tag)
+        sub.move("b", imm(0x0F), absl(GA_SUB + 0x05))  # STAT3
+        sub.move("b", absl(GA_SUB + 0x07), d(0))
+        sub.btst(7, d(0))
+        sub.bcc("ne", "w_valid_" + tag)
+        sub.move("b", imm(0x04), absl(GA_SUB + 0x05))  # HEAD0..HEAD3, PTL, PTH
+        for reg in (0, 5):
+            sub.move("b", absl(GA_SUB + 0x07), d(reg))
+            sub.lsl_w(8, reg)
+            sub.move("b", absl(GA_SUB + 0x07), d(reg))
+        sub.immop("cmp", "w", want[0], d(0))
+        sub.bcc("ne", "w_valid_" + tag)
+        sub.immop("cmp", "w", want[1], d(5))
+        sub.bcc("ne", "w_valid_" + tag)
+        sub.moveq(0, 1)
+        sub.move("b", absl(GA_SUB + 0x07), d(1))
+        sub.moveq(0, 2)
+        sub.move("b", absl(GA_SUB + 0x07), d(2))
+        sub.lsl_w(8, 2)
+        sub.alu("or", "w", d(1), 2)
+        sub.quick("add", "w", 4, d(2))  # DAC = PT + 4
+        sub.move("b", imm(7), absl(GA_SUB + 0x04))  # destination Word RAM
+        sub.move("w", imm(0), absl(GA_SUB + 0x0A))  # Word RAM offset 0
+        sub.move("b", imm(0x02), absl(GA_SUB + 0x05))  # DBCL, DBCH, DACL, DACH, DTRG
+        sub.move("b", imm(0xFF), absl(GA_SUB + 0x07))
+        sub.move("b", imm(0x07), absl(GA_SUB + 0x07))
+        sub.move("b", d(2), absl(GA_SUB + 0x07))
+        sub.move("w", d(2), d(3))
+        sub.lsr_w(8, 3)
+        sub.move("b", d(3), absl(GA_SUB + 0x07))
+        sub.move("b", imm(0x00), absl(GA_SUB + 0x07))  # DTRG
+        sub.label("w_edt_" + tag)
+        sub.btst(7, absl(GA_SUB + 0x04))
+        sub.bcc("eq", "w_edt_" + tag)
+        sub.rts()
+    sp = sub.assemble()
+
+    main = Asm(IP_BASE)
+    main_start_sub(main, SP_BASE)
+    wait_flag(main, GA_MAIN + 0x0F, 1, "w_ready")
+    main.move("b", imm(0x02), absl(GA_MAIN + 0x03))  # DMNA: Word RAM to the sub
+    main.move("b", imm(0x01), absl(GA_MAIN + 0x0E))
+    wait_flag(main, GA_MAIN + 0x0F, 2, "w_done")
+    main.lea(absl(RESULT), 3)
+    for reg in range(5):
+        main.move("w", absl(GA_MAIN + 0x20 + 2 * reg), ("inc", 3))
+    main_finish(main)
+
+    sectors = {blk: data for blk, data in iso_volume(files, options.get("iso_defect")).items()}
+    for name, (block, data) in files.items():
+        sectors[block] = data.ljust(2048, b"\x00")
+    modules = {name: {"block": block, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()} for name, (block, data) in files.items()}
+    expected = {"case": case, "files": modules, "module_bytes": MODULE_BYTES, "word_ram_base": MODULE_WORD_RAM, "prg_base": MODULE_PRG,
+                "missing_entry_offset": 10}
+    if case == "checkpoint":
+        expected["result_words"] = [2, 2, 0xAAAA, 0xBBBB, 0xA1A1]
+    else:
+        expected["stop"] = {"unknown": "image_unknown", "mismatch": "image_bytes_mismatch", "partial": "image_partially_overwritten",
+                            "missing_entry": "image_entry_not_compiled", "stale": "stale_image_selection"}[case]
+    return main.assemble(), sp, sectors, expected
+
 
 FIXTURES = {
     "comm": fixture_comm,
@@ -781,6 +1089,7 @@ FIXTURES = {
     "wordram_wait": fixture_wordram_wait,
     "timer": fixture_timer,
     "cdframe": fixture_cdframe,
+    "modules": fixture_modules,
 }
 for _kind in ("ga_register", "prg_window_nobus", "ifl2_masked", "handler_not_compiled", "entry_not_compiled", "code_overwrite",
               "write_protect", "busreq_stopped"):
@@ -880,6 +1189,10 @@ def options_from(args):
         options["abort_dma"] = True
     if args.bad_cdc_register:
         options["bad_cdc_register"] = True
+    if args.module_case is not None:
+        options["module_case"] = args.module_case
+    if args.iso_defect is not None:
+        options["iso_defect"] = args.iso_defect
     return options
 
 
@@ -898,6 +1211,8 @@ def main(argv=None):
     parser.add_argument("--abort-dma", action="store_true")
     parser.add_argument("--bad-cdc-register", action="store_true")
     parser.add_argument("--no-audio", action="store_true")
+    parser.add_argument("--module-case", choices=MODULE_CASES)
+    parser.add_argument("--iso-defect", choices=ISO_DEFECTS)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--write-manifest", action="store_true")
     args = parser.parse_args(argv)

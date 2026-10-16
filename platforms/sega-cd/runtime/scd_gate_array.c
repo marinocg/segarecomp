@@ -93,7 +93,13 @@ static void scd_ga_reset_control(ScdMachine *m, uint32_t value) {
   }
   if (sub->irq.stopped) m->ga.ctl = (uint8_t)(m->ga.ctl & ~2U); /* SBRQ reads 0 when the sub is halted in STOP (GPGX, V1) */
   after = (uint32_t)(sub->irq.stopped | (m->ga.sub_halted << 1) | (m->ga.sub_wait << 2));
-  if (after != before) m->ga.prg_window = (uint8_t)((m->ga.ctl >> 1) & 1U); /* the window follows SBRQ when the halt state changes */
+  if (after != before) { /* the window follows SBRQ when the halt state changes */
+    const uint8_t window = (uint8_t)((m->ga.ctl >> 1) & 1U);
+    if (window != m->ga.prg_window) {
+      m->ga.prg_window = window;
+      scd_overlay_note_view_change(m); /* SEG-063: main's view of $020000-$03FFFF changed */
+    }
+  }
   scd_log(m, 0x11U, value, (uint32_t)(m->ga.ctl | (m->ga.prg_window << 4)));
 }
 

@@ -31,10 +31,19 @@ inline constexpr std::uint32_t kPrgRamBytes = 0x00080000U;
 enum class BootImageError : std::uint8_t { none, boot_header, ip_outside_work_ram, sp_outside_prg_ram, image_validation };
 [[nodiscard]] const char *boot_image_error_name(BootImageError error) noexcept;
 
+// SEG-063-T001 (ADR 0132): the platform-owned role of each image of a processor's set (parallel to `images.images`). The generic
+// executable-image header carries no name and no entry roots; both are Sega CD producer facts used only by this machine's emission.
+struct ImageRole {
+  std::string name;                          // boot_ip, boot_sp, or the manifest module name ([a-z0-9_]+)
+  bool module = false;                       // a disc-loaded module (an overlay candidate, ADR 0127); false for IP/SP
+  std::vector<std::uint32_t> entry_offsets;  // declared entry roots, as image offsets (applied to every mapping that covers them)
+};
+
 struct ProcessorImages {
   Processor processor{Processor::main};
   ExecutableImageSet images;
   std::uint32_t entry_pc{};
+  std::vector<ImageRole> roles;  // one per image, same order
 };
 
 struct BootImages {

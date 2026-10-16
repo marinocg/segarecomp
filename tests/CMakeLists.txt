@@ -1134,6 +1134,12 @@ add_test(NAME sega_cd_executable_image_test COMMAND sega_cd_executable_image_tes
 add_test(NAME sega_cd_executable_image_mutation_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_executable_image_mutation_test.py ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_executable_image_test sega_cd_executable_image_mutation_test APPEND PROPERTY LABELS full fast)
+# SEG-063-T001 Checkpoint A (ADR 0132): several images per processor instance, overlapping PCs, per-candidate compiled entries.
+add_executable(sega_cd_overlay_emission_test sega_cd_overlay_emission_test.cpp)
+target_link_libraries(sega_cd_overlay_emission_test PRIVATE segarecomp::machine_sega_cd)
+segarecomp_enable_warnings(sega_cd_overlay_emission_test)
+add_test(NAME sega_cd_overlay_emission_test COMMAND sega_cd_overlay_emission_test)
+set_property(TEST sega_cd_overlay_emission_test APPEND PROPERTY LABELS full fast)
 # SEG-062-T002 (ADR 0129, Checkpoint A): CUE/BIN ingestion and IP/SP images against an independent reader; fixture reproducibility.
 add_test(NAME sega_cd_disc_ingestion_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_disc_ingestion_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR})
@@ -1154,6 +1160,14 @@ set_property(TEST sega_cd_word_ram_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_disc_to_frame_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_disc_to_frame_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_disc_to_frame_test APPEND PROPERTY LABELS full fast)
+# SEG-063-T001 Checkpoint B: bounded ISO9660 extent lookup against an independent oracle, digest-checked module admission.
+add_test(NAME sega_cd_modules_build_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_modules_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_modules_build_test APPEND PROPERTY LABELS full fast)
+# SEG-063-T001 Checkpoints C/D: overlay runtime harness; module A then module B at one address by CDC DMA and CPU copy; typed stops.
+add_test(NAME sega_cd_overlay_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_overlay_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_overlay_test APPEND PROPERTY LABELS full fast)
 add_executable(z80_executable_image_equivalence_test z80_executable_image_equivalence_test.cpp)
 target_link_libraries(z80_executable_image_equivalence_test PRIVATE segarecomp::machine_master_system segarecomp::machine_genesis_z80)
 segarecomp_enable_warnings(z80_executable_image_equivalence_test)

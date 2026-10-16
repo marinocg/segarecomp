@@ -7,7 +7,8 @@ Anything still open is listed in section 13 with the experiment that resolves it
 code: where the references are silent, behaviour that depends on it stops with a typed error; where they **disagree**, the
 profile follows Genesis Plus GX (project decision, tag **G**) and section 13 keeps the item with its resolving experiment.
 
-Decisions: ADR 0126 (executable images per processor instance), ADR 0127 (overlay dispatch contract, design only),
+Decisions: ADR 0126 (executable images per processor instance), ADR 0127 (overlay dispatch contract) and ADR 0132 (its
+implementation and the module lists, SEG-063),
 ADR 0128 (dual-CPU execution and scheduling), ADR 0129 (disc resources and the build-time/runtime media boundary),
 ADR 0130 (BIOS profiles and the SEG-064 go/no-go gate), ADR 0131 (ML reuse boundary). CPU semantics: the MC68000
 library contract (`docs/architecture/m68k-reuse-boundary.md`, ADR 0043) wins on anything CPU-owned. Generic image
@@ -308,7 +309,8 @@ stops with `bios_absent`.
 
 - Both processors execute only generated-native C compiled from their own `ExecutableImageSet` (ADR 0126).
 - A computed control transfer (`RTS`, `RTE`, `JMP (An)`, a reset or interrupt vector) selects among the processor's
-  compiled entries; an address without one is the typed stop `entry_not_compiled`.
+  compiled entries; an address without one is the typed stop `entry_not_compiled`. Inside an overlay group (section 15) the
+  address is necessary but not sufficient: the next dispatch selects the image.
 - Images mapped in writable memory carry `ImageVerification::byte_identity`: before a compiled instruction runs, the
   live bytes at its address are compared with the image bytes (comparison only; nothing is decoded). A mismatch is the
   typed stop `code_bytes_mismatch`.
@@ -338,19 +340,34 @@ Items marked **G** above are implemented as GPGX behaves; they stay here until h
 | which 1M bank is "0" for a given `RET` (G: `RET` = 1 gives main bank 1) | single source | MiSTer RTL / hardware test | SEG-065 |
 | sub writes to COMCMD and main writes to COMSTAT (G: ignored) | GPGX ignores, MAME stores | hardware test | SEG-064 |
 | address mirrors (main 256 KiB / Word RAM / Gate Array, sub 1 MiB) (G: mirrored) | GPGX mirrors, MAME does not | hardware test | SEG-065 |
-| CDC DMA into 2M Word RAM owned by main (G: halted until `DMNA`) | GPGX halts, MAME writes | hardware test | SEG-063 |
+| CDC DMA into 2M Word RAM owned by main (G: halted until `DMNA`) | GPGX halts, MAME writes | hardware test | SEG-063: not resolvable without hardware access; carried forward |
 | 1M `DMNA` request semantics and 1M -> 2M ownership (G) | GPGX models a request latch; MAME does not | hardware test (MCDV memory-mode tests) | SEG-065 |
 | `SBRQ` readback when the bus is requested while the sub is in STOP (G: reads 0) | GPGX: "verified on real hardware", MAME: no special case | hardware test | SEG-064 |
 | peripheral reset scope (G: GPGX `scd_reset(0)`) | GPGX itself marks it "TODO: figure what exactly is reset" | hardware test | SEG-064 |
 | open-bus read values | the prefetched instruction word; not modelled (typed stop `open_bus_read`) | prefetch model for the generated CPU | SEG-065 |
 | CDD seek latency, command checksum handling, decoder active period (G) | GPGX models them (latency is a configurable approximation); MAME differs | logic-analyser logs (MiSTer `mcd logs`) | SEG-065 |
-| decoding a non-data block from a raw image | GPGX's raw path differs from its cooked path; the profile uses the cooked behaviour (section 7) | hardware: what the CDC writes for a seek-time block | SEG-063 |
+| decoding a non-data block from a raw image | GPGX's raw path differs from its cooked path; the profile uses the cooked behaviour (section 7) | hardware: what the CDC writes for a seek-time block | SEG-063: not resolvable without hardware access; carried forward |
 | system-header longwords `$38/$3C/$40-$4C` | one primary source in reach of this cloud | read the Mega-CD Disc Format specification and the Sega CD BIOS manual directly | SEG-064 |
 | SP base `$6000`, IP base `$FF0000` | BIOS-owned facts | BIOS feasibility gate (ADR 0130) | SEG-064-T001 |
-| raw-sector EDC/ECC | not checked; sync and header are | decision: optional until a title needs it | SEG-063 |
+| raw-sector EDC/ECC | not checked; sync and header are | decision: optional until a title needs it | SEG-063: still optional (no fixture or title needs it); carried forward |
 
 ## 14. What later milestones consume
 
-- SEG-063 (modules and overlays) consumes sections 4, 6, 7 and ADR 0127; ISO9660 file lookup belongs there.
+- SEG-063 (modules and overlays) consumes sections 4, 6, 7 and ADR 0127; it adds section 15 and ADR 0132.
 - SEG-064 (authentic BIOS) consumes sections 3 (BIOS ROM), 9 and ADR 0130.
 - SEG-065 (graphics ASIC, PCM, CD-DA, viewer) consumes sections 5 (registers left as stops), 10 and 13.
+
+## 15. Disc-loaded modules and overlays (SEG-063, ADR 0132)
+
+| item | rule | tag |
+| --- | --- | --- |
+| admission | only an explicit module list (`segarecomp.sega_cd.modules.v1`): disc identity, ISO9660 path and/or track-1 extent (must agree), SHA-256, processor, execution bases, entry roots, `byte_identity` | C |
+| ISO9660 | build time only; one PVD in a terminated descriptor set from block 16, 2048-byte blocks, single-extent files; everything else a typed error (`libs/media/iso9660.hpp`) | V1 (ECMA-119) subset C |
+| executable regions | main: PRG-RAM window `$020000-$03FFFF`, Word RAM `$200000-$23FFFF`, work RAM `$FF0000-$FFFFFF`; sub: PRG RAM `$000000-$07FFFF`, 2M Word RAM `$080000-$0BFFFF`, 1M bank `$0C0000-$0DFFFF`; a mapping lies inside one | C (bus maps of sections 3-4) |
+| candidates and groups | one candidate per (image, mapping); overlapping candidates with a module form a group; at most 16 groups, 16 candidates per group | C |
+| selection | the one candidate covering PC whose whole range equals live memory (64-byte granule digests through the processor's current view); no other live candidate may overlap it | C (ADR 0127) |
+| invalidation | CPU stores, CDC DMA words and exception frames mark granules; PRG bank/window and Word RAM owner/mode changes mark whole groups; revalidation before the group's next instruction | C |
+| re-entry after replacement | until the next selection, only at a declared root, else `stale_image_selection`; afterwards the selected (verified) image's entries run | C |
+| typed stops | `image_unknown`, `image_bytes_mismatch`, `image_partially_overwritten`, `ambiguous_image`, `image_entry_not_compiled`, `stale_image_selection` | C |
+| code fetch from Word RAM the sub does not own | fails closed (no live candidate / `code_bytes_mismatch`); hardware would withhold DTACK | C (recorded deviation) |
+| CDC DMA into PRG RAM (destination 5) | still `cdc_destination_unsupported`; modules reach PRG RAM by CPU copies | C |

@@ -1,6 +1,7 @@
 #include "sega_cd_command.hpp"
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -9,7 +10,9 @@
 #include <string_view>
 
 #include "segarecomp/disc.hpp"
+#include "segarecomp/iso9660.hpp"
 #include "segarecomp/machine/sega_cd/boot_images.hpp"
+#include "segarecomp/machine/sega_cd/modules.hpp"
 #include "segarecomp/machine/sega_cd/program.hpp"
 #include "segarecomp/sha256.hpp"
 
@@ -23,7 +26,7 @@ std::string json_string(std::string_view text) {
     if (c == '"' || c == '\\') {
       out.push_back('\\');
       out.push_back(c);
-    } else if (static_cast<unsigned char>(c) < 0x20U) {
+    } else if (static_cast<unsigned char>(c) < 0x20U || static_cast<unsigned char>(c) >= 0x7FU) {  // ASCII-only JSON (disc bytes are untrusted)
       char buffer[8];
       std::snprintf(buffer, sizeof buffer, "\\u%04x", static_cast<unsigned>(static_cast<unsigned char>(c)));
       out += buffer;
@@ -53,14 +56,108 @@ std::string processor_json(const scd::ProcessorImages &p) {
   return out.str();
 }
 
+// SEG-063: read, parse and admit a module list. Returns the error JSON object (without the closing brace context) on failure.
+struct ModulesLoaded {
+  std::optional<scd::ModuleAdmission> admission;
+  std::string error_json;
+};
+
+ModulesLoaded load_modules(const std::string &path, const segarecomp::DiscImage &disc, scd::BootImages &images) {
+  ModulesLoaded out;
+  std::error_code ec;
+  const auto size = std::filesystem::file_size(path, ec);
+  std::ifstream in(path, std::ios::binary);
+  if (ec || !std::filesystem::is_regular_file(path, ec) || size > scd::kModuleManifestMaxBytes || !in) {
+    out.error_json = "{\"ok\":false,\"stage\":\"modules\",\"error\":\"manifest_unreadable\"}";
+    return out;
+  }
+  std::ostringstream text;
+  text << in.rdbuf();
+  const auto parsed = scd::parse_module_manifest(text.str());
+  if (!parsed.manifest) {
+    out.error_json = "{\"ok\":false,\"stage\":\"modules\",\"error\":\"" + std::string(scd::module_error_name(parsed.error)) +
+                     "\",\"line\":" + std::to_string(parsed.line) + "}";
+    return out;
+  }
+  auto admission = scd::admit_modules(disc, *parsed.manifest, images);
+  if (admission.error != scd::ModuleError::none) {
+    out.error_json = "{\"ok\":false,\"stage\":\"modules\",\"error\":\"" + std::string(scd::module_error_name(admission.error)) +
+                     "\",\"iso9660\":\"" + segarecomp::iso9660_error_name(admission.iso_error) + "\",\"validation\":\"" +
+                     std::string(segarecomp::image_validation_error_name(admission.validation)) + "\",\"module\":" +
+                     json_string(admission.module) + "}";
+    return out;
+  }
+  out.admission = std::move(admission);
+  return out;
+}
+
+std::string modules_json(const scd::ModuleAdmission &admission) {
+  std::ostringstream out;
+  out << "{\"identity\":\"" << admission.identity << "\",\"modules\":[";
+  for (std::size_t i = 0; i < admission.modules.size(); ++i) {
+    const auto &m = admission.modules[i];
+    out << (i ? "," : "") << "{\"name\":" << json_string(m.name) << ",\"processor\":\"" << scd::processor_name(m.processor)
+        << "\",\"path\":" << json_string(m.path) << ",\"block\":" << m.extent.block << ",\"size\":" << m.extent.size
+        << ",\"sha256\":\"" << m.sha256 << "\",\"image_id\":" << m.image_id << ",\"bases\":[";
+    for (std::size_t b = 0; b < m.bases.size(); ++b) out << (b ? "," : "") << m.bases[b];
+    out << "],\"entries\":[";
+    for (std::size_t e = 0; e < m.entries.size(); ++e) out << (e ? "," : "") << m.entries[e];
+    out << "]}";
+  }
+  out << "]}";
+  return out.str();
+}
+
+// The ISO9660 directory tree of track 1 (bounded depth and count), or the typed error.
+std::string iso_tree_json(const segarecomp::DiscImage &disc) {
+  if (disc.tracks().empty() || disc.tracks().front().type == segarecomp::DiscTrackType::audio)
+    return "{\"ok\":false,\"error\":\"read_failed\"}";
+  const auto read = segarecomp::iso9660_track_reader(disc, 0);
+  const auto volume = segarecomp::read_iso9660_volume(read, disc.tracks().front().sector_count);
+  if (!volume.volume) return std::string("{\"ok\":false,\"error\":\"") + segarecomp::iso9660_error_name(volume.error) + "\"}";
+  std::ostringstream out;
+  out << "{\"ok\":true,\"volume_id\":" << json_string(volume.volume->volume_id) << ",\"volume_space\":" << volume.volume->volume_space
+      << ",\"root\":{\"block\":" << volume.volume->root.block << ",\"size\":" << volume.volume->root.size << "},\"entries\":[";
+  struct Pending {
+    std::string path;
+    segarecomp::Iso9660Extent extent;
+    unsigned depth;
+  };
+  std::vector<Pending> work{{"", volume.volume->root, 0U}};
+  bool first = true;
+  std::size_t count = 0;
+  while (!work.empty()) {
+    const Pending dir = work.front();
+    work.erase(work.begin());
+    const auto listing = segarecomp::list_iso9660_directory(read, *volume.volume, dir.extent);
+    if (listing.error != segarecomp::Iso9660Error::none)
+      return std::string("{\"ok\":false,\"error\":\"") + segarecomp::iso9660_error_name(listing.error) + "\"}";
+    for (const auto &entry : listing.entries) {
+      if (++count > 1024U) return "{\"ok\":false,\"error\":\"too_many_entries\"}";
+      const std::string path = dir.path + "/" + entry.identifier;
+      out << (first ? "" : ",") << "{\"path\":" << json_string(path) << ",\"directory\":" << (entry.directory ? "true" : "false")
+          << ",\"block\":" << entry.extent.block << ",\"size\":" << entry.extent.size << "}";
+      first = false;
+      if (entry.directory) {
+        if (dir.depth + 1U >= segarecomp::kIso9660MaxDepth) return "{\"ok\":false,\"error\":\"path_invalid\"}";
+        work.push_back({path, entry.extent, dir.depth + 1U});
+      }
+    }
+  }
+  out << "]}";
+  return out.str();
+}
+
 int inspect(int argc, char **argv) {
-  std::optional<std::string> cue, expected;
-  bool sector_digests = false;
+  std::optional<std::string> cue, expected, modules;
+  bool sector_digests = false, iso_tree = false;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
     else if (arg == "--expect-identity" && i + 1 < argc) expected = argv[++i];
     else if (arg == "--sector-digests") sector_digests = true;
+    else if (arg == "--iso-tree") iso_tree = true;
+    else if (arg == "--modules" && i + 1 < argc) modules = argv[++i];
     else {
       std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
       return 2;
@@ -109,6 +206,7 @@ int inspect(int argc, char **argv) {
     }
     out << "}";
   }
+  if (iso_tree) out << ",\"iso9660\":" << iso_tree_json(disc);
   const auto produced = scd::produce_boot_images(disc);
   if (!produced.images) {
     out << ",\"boot\":{\"ok\":false,\"error\":\"" << scd::boot_image_error_name(produced.error) << "\",\"boot_error\":\""
@@ -117,7 +215,16 @@ int inspect(int argc, char **argv) {
     std::cout << out.str();
     return 4;
   }
-  const auto &images = *produced.images;
+  auto images = *produced.images;
+  if (modules) {
+    const auto loaded_modules = load_modules(*modules, disc, images);
+    if (!loaded_modules.admission) {
+      out << ",\"modules\":" << loaded_modules.error_json << "}\n";
+      std::cout << out.str();
+      return 5;
+    }
+    out << ",\"modules\":" << modules_json(*loaded_modules.admission);
+  }
   const auto &h = images.header;
   out << ",\"boot\":{\"ok\":true,\"system_id\":" << json_string(h.system_id) << ",\"volume_name\":" << json_string(h.volume_name)
       << ",\"system_name\":" << json_string(h.system_name) << ",\"hardware_id\":" << json_string(h.hardware_id)
@@ -129,12 +236,13 @@ int inspect(int argc, char **argv) {
 }
 
 int emit(int argc, char **argv) {
-  std::optional<std::string> cue, out_path, expected;
+  std::optional<std::string> cue, out_path, expected, modules;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
     else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
     else if (arg == "--expect-identity" && i + 1 < argc) expected = argv[++i];
+    else if (arg == "--modules" && i + 1 < argc) modules = argv[++i];
     else {
       std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
       return 2;
@@ -154,7 +262,21 @@ int emit(int argc, char **argv) {
     std::cout << "{\"ok\":false,\"stage\":\"boot\",\"error\":\"" << scd::boot_image_error_name(produced.error) << "\"}\n";
     return 4;
   }
-  const auto emission = scd::emit_sega_cd_program(*loaded.disc, *produced.images);
+  auto images = *produced.images;
+  std::optional<scd::ModuleAdmission> admission;
+  if (modules) {
+    auto loaded_modules = load_modules(*modules, *loaded.disc, images);
+    if (!loaded_modules.admission) {
+      std::cout << loaded_modules.error_json << "\n";
+      return 5;
+    }
+    admission = std::move(loaded_modules.admission);
+  }
+  const auto emission = scd::emit_sega_cd_program(*loaded.disc, images, admission ? std::string_view(admission->identity) : std::string_view());
+  if (emission.error != scd::EmissionError::none) {
+    std::cout << "{\"ok\":false,\"stage\":\"emit\",\"error\":\"" << scd::emission_error_name(emission.error) << "\"}\n";
+    return 6;
+  }
   std::ofstream file(*out_path, std::ios::binary);
   file << emission.c_source;
   if (!file.flush()) {
@@ -170,7 +292,18 @@ int emit(int argc, char **argv) {
            << ",\"unsupported\":" << s.unsupported << ",\"out_of_image_targets\":" << s.out_of_image_targets
            << ",\"vector_roots\":" << s.vector_roots << "}";
   }
-  report << "]}\n";
+  report << "],\"overlay_groups\":" << emission.overlay_groups << ",\"images\":[";
+  for (std::size_t i = 0; i < emission.images.size(); ++i) {
+    const auto &image = emission.images[i];
+    report << (i ? "," : "") << "{\"processor\":\"" << scd::processor_name(image.processor) << "\",\"image_id\":" << image.image_id
+           << ",\"name\":" << json_string(image.name) << ",\"producer\":\"" << image.producer << "\",\"mapping\":"
+           << image.mapping_index << ",\"start\":" << image.start << ",\"length\":" << image.length << ",\"roots\":" << image.roots
+           << ",\"compiled\":" << image.compiled << ",\"unsupported\":" << image.unsupported << ",\"out_of_image_targets\":"
+           << image.out_of_image_targets << ",\"overlay_group\":" << image.overlay_group << "}";
+  }
+  report << "]";
+  if (admission) report << ",\"modules\":" << modules_json(*admission);
+  report << "}\n";
   std::cout << report.str();
   return 0;
 }

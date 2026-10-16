@@ -58,18 +58,73 @@ class Builder:
         subprocess.run([self.cc, str(obj), *[str(o) for o in self.runtime_objects()], "-o", str(exe)], check=True)
         return obj
 
-    def program(self, name, fixture, variant="cooked", *extra):
-        """Build the disc, emit and compile; returns (disc dir, executable, describe dict, emit report)."""
+    def program(self, name, fixture, variant="cooked", *extra, manifest=None):
+        """Build the disc, emit and compile; returns (disc dir, executable, describe dict, emit report). `manifest`, when given, is
+        a function (disc directory) -> module-list text passed to `emit --modules` (SEG-063)."""
         directory = self.work / name
         if directory.exists():
             shutil.rmtree(directory)
         expected = build_disc(directory / "disc", fixture, variant, *extra)
-        code, report = self.emit(directory / "disc" / "disc.cue", directory / "program.c")
+        emit_extra = []
+        if manifest is not None:
+            (directory / "modules.txt").write_text(manifest(directory / "disc"), newline="\n")
+            emit_extra = ["--modules", str(directory / "modules.txt")]
+        code, report = self.emit(directory / "disc" / "disc.cue", directory / "program.c", *emit_extra)
         if code != 0:
             raise RuntimeError("emit failed: %s" % report)
         exe = directory / ("program" + EXE)
         self.compile(directory / "program.c", exe)
         return directory / "disc", exe, expected, report
+
+
+# --- SEG-063 module lists ---------------------------------------------------------------------------------------------------------
+
+def disc_facts(disc_dir):
+    """(disc identity, {ISO path: entry}) from the independent oracles (never from the C++ reader)."""
+    sys.path.insert(0, str(ROOT / "tests"))
+    import sega_cd_disc_oracle as oracle
+    import sega_cd_iso9660_oracle as iso
+    disc = oracle.read_disc(pathlib.Path(disc_dir) / "disc.cue")
+    first = disc["tracks"][0]["first_lba"]
+    tree = iso.tree(lambda block: disc["_user_block"](first + block))
+    return disc["identity"], {entry["path"]: entry for entry in tree["entries"]}, tree
+
+
+def module_list(identity, modules):
+    """Module-list text. Each module: dict(name, processor, path?, extent?=(block, size), sha256, bases, entries, verify?)."""
+    lines = ["segarecomp.sega_cd.modules.v1", "# synthetic fixture modules (SEG-063)", "disc " + identity]
+    for m in modules:
+        lines.append("module " + m["name"])
+        lines.append("processor " + m.get("processor", "sub"))
+        if m.get("path"):
+            lines.append("file " + m["path"])
+        if m.get("extent"):
+            lines.append("extent %d %d" % tuple(m["extent"]))
+        lines.append("sha256 " + m["sha256"])
+        for base in m["bases"]:
+            lines.append("map 0x%x" % base)
+        for entry in m["entries"]:
+            lines.append("entry 0x%x" % entry)
+        lines.append("verify " + m.get("verify", "byte_identity"))
+        lines.append("end")
+    return "\n".join(lines) + "\n"
+
+
+MODULE_BASES = (0x080000, 0x020000)
+
+
+def standard_modules(files, names=("MODA.BIN;1", "MODB.BIN;1"), bases=MODULE_BASES):
+    out = []
+    for name in names:
+        entry = files["/OVL/" + name]
+        out.append({"name": name.split(".")[0].lower(), "path": "/OVL/" + name, "sha256": entry["sha256"], "bases": list(bases),
+                    "entries": [0]})
+    return out
+
+
+def standard_manifest(disc_dir, names=("MODA.BIN;1", "MODB.BIN;1")):
+    identity, files, _ = disc_facts(disc_dir)
+    return module_list(identity, standard_modules(files, names))
 
 
 def run(exe, disc_dir, budget=2000000, *extra, frame=None):
