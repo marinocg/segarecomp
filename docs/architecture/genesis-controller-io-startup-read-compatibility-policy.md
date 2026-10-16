@@ -1538,3 +1538,20 @@ existing mechanism. The previously described "unemitted RTS block" is a later fr
 not reachable until this one is resolved. Disposition: `needs_full_refinement` (one narrow successor).
 Note the observable change for this image: the build now stops at this documented build-time rejection
 instead of a run-time controller-I/O stop; no commercial address/byte is recorded here.
+
+---
+
+# Genesis VDP CONTROL-port command with CD5 set while DMA is disabled (SEG-068-T009)
+
+A bounded refinement of the SEG-007-T091 command-word owner (it narrows nothing else): a two-word address-set command whose second
+word sets CD5 while the DMA-enable bit (register #1 bit 4) is clear **starts no DMA**. It updates the VDP address and code registers
+and behaves as the ordinary address-set command of its write target.
+
+| Provenance category | Claim | Source and limit |
+| --- | --- | --- |
+| **Hardware/emulator-documented behaviour** | A DMA operation is only detected when the DMA-enable bit is set; with it clear the command word still updates the address and code registers and the data port then acts on the low code bits. | Genesis Plus GX `core/vdp_ctrl.c`, `vdp_ctrl_w` second-word handling ("Detect DMA operation (CD5 bit set) ... DMA must be enabled"). Emulator source, not a hardware measurement. |
+| **Project compatibility policy** | Only the documented write targets (VRAM `0x01`, CRAM `0x03`, VSRAM `0x05`, after masking CD5) are accepted this way; every other CD5-set code (DMA read/copy-family codes) stays fail-closed with `unsupported_device_region_vdp`. The DMA-enabled path is unchanged. | Deliberate narrow choice; an unknown combination is never guessed. |
+
+Reached by a LONG write whose second half is such a command after the title switched DMA off (classification only; no address or
+value is recorded). Tests: `genesis_startup_runtime_vdp_test` (DMA-disabled LONG command: no DMA armed, pointer and transfer code set,
+a following DATA-port WORD write lands; a CD5-set code without a write target is rejected).

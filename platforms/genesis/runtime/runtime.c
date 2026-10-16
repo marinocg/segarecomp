@@ -639,6 +639,21 @@ static int genesis_vdp_control_port_write_word(GenesisDeviceState *devices, uint
     uint32_t addr_high2 = (uint32_t)(word & 3U);              /* A15,A14 */
     uint32_t addr_low14 = (uint32_t)(first & UINT32_C(0x3FFF)); /* A13-A0 */
     if (high_byte != 0U || reserved_bits != 0U) return 0; /* undocumented reserved bit set */
+    /* SEG-068-T009: a command whose CD5 is set while the DMA-enable bit (register #1 bit 4) is clear does not start a DMA: the
+       VDP updates its address and code registers and the command behaves as the ordinary address-set command of its write
+       target (Genesis Plus GX `vdp_ctrl_w`: "DMA must be enabled", and the data-port path masks the code to its low bits).
+       Only the documented write targets (VRAM 0x01, CRAM 0x03, VSRAM 0x05) are accepted this way; every other CD5-set code
+       (every DMA read/copy-family code) stays fail-closed, as before. */
+    if (cd5 != 0U && (devices->vdp.registers[1] & 0x10U) == 0U) {
+      const uint8_t plain_code = (uint8_t)(code & 0x1FU);
+      if (plain_code != 0x01U && plain_code != 0x03U && plain_code != 0x05U) return 0;
+      devices->vdp.addressed_pointer = (addr_high2 << 14) | addr_low14;
+      devices->vdp.data_port_transfer_code = plain_code;
+      devices->vdp.data_port_transfer_code_valid = 1U;
+      devices->vdp.control_port_awaiting_second_word = 0U;
+      devices->vdp.control_port_first_word = 0U;
+      return 1;
+    }
     if (cd5 != 0U) {
       /* SEG-007-T084: for memory-to-VDP DMA, register #23 bit 7 is clear
          and bits 6--0 are source A23--A17. Bit 7 set selects the separate
