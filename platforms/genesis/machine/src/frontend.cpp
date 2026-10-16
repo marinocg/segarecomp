@@ -2511,7 +2511,35 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
         const bool candidates_match = found->second.candidates.size() == set.candidates.size() &&
             std::equal(found->second.candidates.begin(), found->second.candidates.end(), set.candidates.begin(),
                        [](const M68kProgramAddress &a, const M68kProgramAddress &b) { return same(a, b); });
-        if (!candidates_match) { aggregation_conflict = true; }
+        if (!candidates_match) {
+          // SEG-068-T002 / ADR-0025 section 5a: two roots proved DIFFERENT finite sets for one source address. Each set is
+          // conditioned on its own root's walk (a root-entry constant index), so the disagreement is benign when both
+          // describe the same instruction and every candidate was independently decode-validated by its own root: the
+          // sorted, de-duplicated union (bounded by the existing 256-candidate cap) is the aggregate set. A different
+          // control EA / index register, or an over-bound union, stays a genuine fail-closed conflict.
+          constexpr std::size_t kMaxMergedCandidates = 256U;
+          auto &merged = found->second;
+          const bool same_site = same_ea(merged.control_ea, set.control_ea) &&
+              merged.index_values.index_register == set.index_values.index_register;
+          std::vector<M68kProgramAddress> unioned = merged.candidates;
+          unioned.insert(unioned.end(), set.candidates.begin(), set.candidates.end());
+          std::sort(unioned.begin(), unioned.end(), [](const M68kProgramAddress &a, const M68kProgramAddress &b) {
+            return less(a, b);
+          });
+          unioned.erase(std::unique(unioned.begin(), unioned.end(),
+                                    [](const M68kProgramAddress &a, const M68kProgramAddress &b) { return same(a, b); }),
+                        unioned.end());
+          std::vector<std::uint16_t> values = merged.index_values.values;
+          values.insert(values.end(), set.index_values.values.begin(), set.index_values.values.end());
+          std::sort(values.begin(), values.end());
+          values.erase(std::unique(values.begin(), values.end()), values.end());
+          if (!same_site || unioned.size() > kMaxMergedCandidates || values.size() > kMaxMergedCandidates) {
+            aggregation_conflict = true;
+          } else {
+            merged.candidates = std::move(unioned);
+            merged.index_values.values = std::move(values);
+          }
+        }
       }
     }
     for (const auto &set : discovery.unproven_indirect_control_ea_sets) {

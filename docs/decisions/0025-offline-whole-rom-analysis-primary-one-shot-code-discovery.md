@@ -158,6 +158,36 @@ a root that reached an `(An)` site without its `An` producer. A genuine
 Tier-1/Tier-1 candidate-set disagreement, and a Tier-2/Tier-2 control-EA
 disagreement, still fail closed unchanged.
 
+### 5a. Differing Tier-1 sets for one source address are unioned (SEG-068-T002 amendment)
+
+Section 5 left a Tier-1/Tier-1 candidate-set disagreement fatal. That rule is **amended**: when two roots each prove a
+finite Tier-1 set for the same source instruction and the sets differ, `merge_root_result` keeps the sorted,
+de-duplicated union (candidates and index values). The disagreement is expected, not contradictory, because every
+per-root proof is *root-conditioned*: `analyze_finite_index_values` joins the register state over the paths of that
+root's own walk only (e.g. the reset chain loads index 0, the IRQ6 chain loads index 2 before the same `JMP (d8,PC,Dn)`).
+Neither set claims to cover paths the other root contributes.
+
+Soundness of the union, against the actual consumers:
+
+1. **Each candidate was independently validated.** Every member was produced by its own root's `admit_target` decode
+   validation; a decoded-instruction mismatch between roots for any address stays fatal (`decoded_matches`).
+2. **The runtime check is not weakened.** The emitted dispatch routes only a computed target found in the candidate list
+   (`indirect_candidate_targets`) and the final compiled-entry lookup remains the membership authority; a target outside
+   the union stops with the existing typed unresolved-indirect stop. A candidate that the real program never takes is
+   inert, so a superset of the true target set cannot cause a wrong transfer.
+3. **Emitted-block closure covers the union.** Edges are already merged as the union over roots, so the codegen
+   invariant `reached_indirect_targets == candidates` holds for the union; every candidate must still be an emitted block
+   or typed frontier or the source becomes its `genesis_tier1_indirect_stop_*` pre-PC stop (no subset dispatch).
+4. **Tier-2 precedence is unchanged:** a root with no proof contributes only the weaker Tier-2 fact, which Tier-1 still
+   supersedes (section 5).
+5. **Determinism and bound:** candidates are sorted by `(space, value)` and index values numerically; the union is capped
+   at the existing 256-member per-site cap and exceeding it stays fail-closed (`startup_graph_mismatch`).
+
+Still fatal (unchanged): differing decoded bytes/provenance for any shared address; differing control EA or index
+register for one source address; a union above 256 candidates; a Tier-2/Tier-2 control-EA disagreement. Residual risk,
+shared with every single-root proof: a path from a root never discovered may reach the site with a value outside the
+union; that case fails closed at run time through item 2.
+
 ### 6. Canonical one-shot assisted route
 
 `tools/genesis_startup_bridge.py --one-shot` (commercial mode,

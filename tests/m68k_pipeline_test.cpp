@@ -13407,10 +13407,18 @@ void adr0021_cross_root_supersession_asynchronous_to_synchronous() {
     std::copy(tail.begin(), tail.end(), img.begin() + static_cast<std::ptrdiff_t>(base));
 
     const auto result = analyze_m68k_frontend(make_vectored_program(img, base));
-    const auto *rejected = std::get_if<FrontendRejected>(&result);
-    expect(rejected != nullptr && rejected->category == DirectFlowDiagnostic::startup_graph_mismatch,
-           "a genuine cross-root indirect-candidate-set contradiction (async vs. sync) still fails "
-           "closed with startup_graph_mismatch, unchanged");
+    // SEG-068-T002 / ADR-0025 section 5a: the two root-conditioned sets ({0,2} by the reset chain, {0,2,4,6} by the IRQ6
+    // chain that skips the first ANDI) are not a contradiction: the aggregate is their sorted union.
+    const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+    expect(partial != nullptr, "differing cross-root Tier-1 candidate sets (async vs. sync) are aggregated by union");
+    if (partial != nullptr) {
+      std::vector<std::uint32_t> got;
+      for (const auto &set : partial->accepted_prefix.indirect_target_ea_sets)
+        if (set.source_instruction.source.address.value == base + 4U)
+          for (const auto &c : set.candidates) got.push_back(c.value);
+      expect((got == std::vector<std::uint32_t>{base + 0x0AU, base + 0x0CU, base + 0x0EU, base + 0x10U}),
+             "the aggregate Tier-1 set of the shared JMP is the sorted union of both roots' sets");
+    }
   }
 }
 
@@ -13479,6 +13487,67 @@ void adr0021_cross_root_tier_exclusivity_violation_fails_closed() {
   for (const auto &set : prefix.unproven_indirect_control_ea_sets)
     expect(set.source_instruction.source.address.value != kJmp,
            "no weaker unproven Tier-2 fact for the shared JMP remains after Tier-1 supersession");
+}
+
+// SEG-068-T002 / ADR-0025 section 5a: two roots reach ONE shared JMP (d8,PC,D0.W) with different root-local constant
+// indices (reset: MOVEQ #idx_a,D0; IRQ6: MOVEQ #idx_b,D0). Each root proves a one-candidate Tier-1 set; the aggregate is
+// the sorted, de-duplicated union (previously a fatal Tier-1/Tier-1 disagreement). Identical sets stay unchanged.
+namespace seg068_t002 {
+constexpr std::uint32_t kEntry = 0x100U, kHandler = 0x110U, kJmp = 0x120U;
+inline segarecomp::FrontendProgram two_root_program(std::uint8_t reset_index, std::uint8_t irq_index) {
+  using namespace adr0021_test_support;
+  auto img = vectored_image(0x200U, kEntry, kHandler);
+  img[kEntry] = 0x70U; img[kEntry + 1U] = reset_index;           // MOVEQ #reset_index,D0
+  img[kEntry + 2U] = 0x60U; img[kEntry + 3U] = 0x1CU;            // BRA.s kJmp
+  img[kHandler] = 0x70U; img[kHandler + 1U] = irq_index;         // MOVEQ #irq_index,D0
+  img[kHandler + 2U] = 0x60U; img[kHandler + 3U] = 0x0CU;        // BRA.s kJmp
+  img[kJmp] = 0x4EU; img[kJmp + 1U] = 0xFBU;                     // JMP (6,PC,D0.W)
+  img[kJmp + 2U] = 0x00U; img[kJmp + 3U] = 0x06U;                // pc base 0x122 + 6 + D0
+  img[0x128U] = 0x4EU; img[0x129U] = 0x70U;                      // RESET
+  img[0x12AU] = 0x4EU; img[0x12BU] = 0x70U;                      // RESET
+  return make_vectored_program(img, kEntry);
+}
+inline std::vector<std::uint32_t> tier1_candidates(const segarecomp::FrontendResult &result, bool &unproven_left) {
+  std::vector<std::uint32_t> out;
+  unproven_left = false;
+  const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result);
+  if (partial == nullptr) return out;
+  for (const auto &set : partial->accepted_prefix.indirect_target_ea_sets)
+    if (set.source_instruction.source.address.value == kJmp)
+      for (const auto &c : set.candidates) out.push_back(c.value);
+  for (const auto &set : partial->accepted_prefix.unproven_indirect_control_ea_sets)
+    if (set.source_instruction.source.address.value == kJmp) unproven_left = true;
+  return out;
+}
+} // namespace seg068_t002
+
+void seg068_t002_differing_cross_root_tier1_sets_are_unioned_deterministically() {
+  using namespace segarecomp;
+  const auto program = seg068_t002::two_root_program(0U, 2U);
+  const auto first = analyze_m68k_frontend(program);
+  const auto second = analyze_m68k_frontend(program);
+  bool unproven = true;
+  const auto a = seg068_t002::tier1_candidates(first, unproven);
+  expect(std::get_if<FrontendPartialProgram>(&first) != nullptr,
+         "differing single-candidate Tier-1 sets from two roots are aggregated, not failed closed");
+  expect((a == std::vector<std::uint32_t>{0x128U, 0x12AU}) && !unproven,
+         "the aggregate is the sorted union of both root-conditioned sets");
+  bool unproven_b = true;
+  expect(seg068_t002::tier1_candidates(second, unproven_b) == a, "the union is identical across runs");
+  // Reversed root roles yield the same sorted union (order of merge does not matter).
+  bool unproven_c = true;
+  const auto swapped = seg068_t002::tier1_candidates(analyze_m68k_frontend(seg068_t002::two_root_program(2U, 0U)),
+                                                     unproven_c);
+  expect(swapped == a, "the union is independent of which root is merged first");
+}
+
+void seg068_t002_identical_cross_root_tier1_sets_are_unchanged() {
+  using namespace segarecomp;
+  bool unproven = true;
+  const auto same_sets = seg068_t002::tier1_candidates(
+      analyze_m68k_frontend(seg068_t002::two_root_program(2U, 2U)), unproven);
+  expect((same_sets == std::vector<std::uint32_t>{0x12AU}) && !unproven,
+         "identical cross-root Tier-1 sets remain the single shared set");
 }
 
 void general_startup_rejects_an_unrepresentable_mapping_name_at_a_cpu_frontier() {
@@ -16127,7 +16196,7 @@ void general_startup_an_indirect_site_with_a_proven_target_set_resolves_normally
                                 "open frontier by the widened cross-root guard");
 }
 
-// SEG-007-T144 adversarial-negative: supersession must not rescue a genuine
+// SEG-007-T144 adversarial test (outcome amended by SEG-068-T002: union, no longer a fatal contradiction): supersession must not rescue a genuine
 // cross-seed contradiction. The entry walk reaches a PC-indexed JMP after
 // ANDI.W #2,D0 and proves one finite candidate set; a runtime_confirmed seed
 // reaches the exact same JMP instruction after ANDI.W #6,D0 and proves a
@@ -16159,9 +16228,17 @@ void general_startup_does_not_supersede_a_genuine_cross_seed_contradiction() {
   program.runtime_confirmed_seeds = {{{}, 0x2030U}};
 
   const auto result = analyze_m68k_frontend(program);
-  const auto *rejected = std::get_if<FrontendRejected>(&result);
-  expect(rejected != nullptr && rejected->category == DirectFlowDiagnostic::startup_graph_mismatch,
-         "a genuine cross-seed indirect-candidate-set contradiction still fails closed with startup_graph_mismatch");
+  // SEG-068-T002 / ADR-0025 section 5a: root-conditioned sets {0,2} and {0,2,4,6} for one JMP are unioned, not rejected.
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "differing cross-seed Tier-1 candidate sets are aggregated by union");
+  if (partial != nullptr) {
+    std::vector<std::uint32_t> got;
+    for (const auto &set : partial->accepted_prefix.indirect_target_ea_sets)
+      if (set.source_instruction.source.address.value == 0x2004U)
+        for (const auto &c : set.candidates) got.push_back(c.value);
+    expect((got == std::vector<std::uint32_t>{0x200AU, 0x200CU, 0x200EU, 0x2010U}),
+           "the aggregate Tier-1 set of the shared JMP is the sorted union of both seeds' sets");
+  }
 }
 
 // SEG-007-T151 (ADR-0013 Decision §7 Phase B / ADR-0011 §4.1): a cross-seed
@@ -31654,6 +31731,8 @@ int main(int argc, char **argv) {
   adr0021_cross_root_supersession_synchronous_to_asynchronous();
   adr0021_cross_root_supersession_asynchronous_to_synchronous();
   adr0021_cross_root_tier_exclusivity_violation_fails_closed();
+  seg068_t002_differing_cross_root_tier1_sets_are_unioned_deterministically();
+  seg068_t002_identical_cross_root_tier1_sets_are_unchanged();
   general_startup_rejects_an_unrepresentable_mapping_name_at_a_cpu_frontier();
   general_startup_keeps_truncation_a_build_time_rejection_after_a_completed_block();
   general_startup_requires_a_completed_block_before_retaining_a_cpu_frontier();
