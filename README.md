@@ -77,8 +77,25 @@ Check the downloaded archive against `SHA256SUMS.txt`.
 1. Extract the archive and open **Segarecomp** (`Segarecomp.exe`,
    `Segarecomp.app` or `./Segarecomp`, depending on your platform).
 2. Drop a ROM into the window or select **Browse...**.
-3. Choose **Recompile & Play**. The first build can take several minutes for
-   larger images; cached builds are faster to launch.
+3. On the game's page, choose the build settings below, then select
+   **Recompile & Play**. The first build can take several minutes for larger
+   images; cached builds are faster to launch.
+
+**Recommended first try (based on maintainer testing):**
+
+- **Genesis / Mega Drive:** select **Optimized** under **Build mode**, then
+  enable **Experimental model**. This combination has worked well in the
+  maintainer's game tests. For headless builds, the corresponding options are
+  `--aot-policy optimized --aot-model gen2`.
+- **Master System:** select **Optimized** when the launcher offers it. This
+  mode is already experimental; the separate **Experimental model** checkbox
+  is Genesis-only. For headless builds, use `--aot-policy optimized`.
+
+**Compatibility** is still the launcher's default and remains the conservative
+fallback if an optimized build fails or a game behaves incorrectly. An Optimized
+request can also fall back to Compatibility automatically; Master System may
+restart in Compatibility for its supported unadmitted-code stop. These are
+recommendations for what to try first, not guarantees for every game.
 
 The packages include the compiler (a pinned Zig toolchain, used to compile generated
 C) and SDL3. **No ROMs are included**; use only software you are legally entitled
