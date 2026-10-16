@@ -137,7 +137,9 @@ python3 tools/genesis_compat_driver.py run \
 
 Every run needs a finite `--budget` (the program is never run unbounded) and has a wall-clock limit (`--run-timeout`). The report
 (`report.json`, also printed) carries only: result and stop classification, frames captured/published, dispatch count, pad entries
-applied, frame digests and the sound aggregates (non-silence, audio frames, digest). To record the eight-title baseline:
+applied, frame digests and the sound aggregates (non-silence, audio frames, digest). The capture observes only until its window is
+complete, so a late window (`--capture-first 3000 --capture-count 1`) classifies where a title ends (guest stop class, or budget exhausted,
+plus the frames reached). To record the eight-title baseline (`--reuse-build` skips rebuilding an output directory's earlier build):
 
 ```sh
 python3 tools/genesis_compat_driver.py matrix --games build/matrix-games.json --out-dir build/compat-matrix \

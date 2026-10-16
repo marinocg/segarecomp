@@ -20,6 +20,10 @@ Pad script (`--pad-script`): "<frame>:<player>:<mask>[,...]" with a virtual fram
 START 128). Entries are applied only between runner slices, at the first slice boundary at or after the keyed frame; see
 platforms/genesis/viewer/frame_capture.h for the exact rule. Example (hold START from frame 120, release at 140):
   --pad-script 120:1:0x80,140:1:0
+
+Classifying where a title ends: the capture observes only until its window is complete (it never raises the runner allowance), so a
+late window (for example `--capture-first 3000 --capture-count 1`) turns the run into a "how far does it get" probe: the capture
+outcome then reports a guest stop (with the stop classification and the frames reached) or an exhausted budget instead of frames.
 """
 from __future__ import annotations
 
@@ -143,7 +147,13 @@ def run_game(args) -> dict:
         raise DriverError(f"--capture-count must be 1..{MAX_FRAMES}")
     if args.budget <= 0:
         raise DriverError("--budget must be a positive instruction budget (a generated program is never run unbounded)")
-    executable = pathlib.Path(args.exe).resolve() if args.exe else build_game(args, out_dir)
+    existing = next(iter(sorted((out_dir / "build").glob("game*"))), None) if getattr(args, "reuse_build", False) else None
+    if args.exe:
+        executable = pathlib.Path(args.exe).resolve()
+    elif existing is not None and existing.is_file():
+        executable = existing  # --reuse-build: the previous build of this output directory (same ROM, same product revision)
+    else:
+        executable = build_game(args, out_dir)
     frames_dir = out_dir / "frames"
     if frames_dir.exists():
         for old in frames_dir.glob("frame-*.ppm"):
@@ -208,6 +218,7 @@ def add_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--capture-slice", type=int, default=65536, help="dispatches per runner slice (pad-script granularity)")
     parser.add_argument("--pad-script", default="")
     parser.add_argument("--pcm-out", default="")
+    parser.add_argument("--reuse-build", action="store_true", help="reuse <out-dir>/build/game from an earlier run instead of rebuilding")
     parser.add_argument("--png", action="store_true", help="also write a PNG next to every captured PPM")
     parser.add_argument("--contact-sheet", action="store_true")
     parser.add_argument("--columns", type=int, default=4)
@@ -247,11 +258,12 @@ def main(argv=None) -> int:
                 capture = report["capture"] or {}
                 rows.append({"label": game["label"], "build": "ok", "result": report["result"], "stop_class": report["stop_class"],
                              "diagnostic_category": report["diagnostic_category"],
+                             "capture_outcome": capture.get("outcome"),
                              "frames_captured": capture.get("frames_captured"), "frames_published": capture.get("frames_published"),
                              "non_silent": (report["sound"] or {}).get("non_silent")})
             except DriverError as error:
                 rows.append({"label": game["label"], "build": str(error), "result": None, "stop_class": None,
-                             "diagnostic_category": None, "frames_captured": None, "frames_published": None, "non_silent": None})
+                             "diagnostic_category": None, "capture_outcome": None, "frames_captured": None, "frames_published": None, "non_silent": None})
         print(json.dumps({"schema": 1, "rows": rows}, indent=2, sort_keys=True))
         return 0
     except DriverError as error:

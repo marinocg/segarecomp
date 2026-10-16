@@ -169,8 +169,8 @@ def main():
                                   "--budget", "2000000"])
         rows = json.loads(captured.getvalue())["rows"]
         check(status == 0 and [r["label"] for r in rows] == ["echo", "garbage"] and rows[0]["build"] == "ok" and rows[0]["frames_captured"] == 4 and
-              rows[1]["build"] != "ok" and set(rows[0]) == {"label", "build", "result", "stop_class", "diagnostic_category", "frames_captured",
-                                                           "frames_published", "non_silent"},
+              rows[1]["build"] != "ok" and set(rows[0]) == {"label", "build", "result", "stop_class", "diagnostic_category", "capture_outcome",
+                                                           "frames_captured", "frames_published", "non_silent"},
               "the matrix emitter prints sanitized rows (classifications and aggregates only) and records a build failure as a row")
 
         # One guest execution yields the captured frames AND the sound summary, equal to the capture-free run.
