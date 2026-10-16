@@ -1140,6 +1140,11 @@ add_test(NAME sega_cd_disc_ingestion_test COMMAND ${Python3_EXECUTABLE}
 add_test(NAME sega_cd_fixture_disc_manifest_test COMMAND ${Python3_EXECUTABLE}
   ${PROJECT_SOURCE_DIR}/tools/sega_cd_fixture_disc.py --check)
 set_property(TEST sega_cd_disc_ingestion_test sega_cd_fixture_disc_manifest_test APPEND PROPERTY LABELS full fast)
+# SEG-062-T003 (ADR 0128, Checkpoint B): two generated-native MC68000 processors; compared with the pinned Musashi two-processor
+# reference when SEGARECOMP_SEGA_CD_MUSASHI_CHECKOUT (or the conformance checkout variable) is set.
+add_test(NAME sega_cd_dual_cpu_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_dual_cpu_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_dual_cpu_test APPEND PROPERTY LABELS full fast)
 add_executable(z80_executable_image_equivalence_test z80_executable_image_equivalence_test.cpp)
 target_link_libraries(z80_executable_image_equivalence_test PRIVATE segarecomp::machine_master_system segarecomp::machine_genesis_z80)
 segarecomp_enable_warnings(z80_executable_image_equivalence_test)
