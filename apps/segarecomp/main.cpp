@@ -11,6 +11,7 @@
 #include "segarecomp/sha256.hpp"
 #include "segarecomp/machine/genesis/reachability_challenger.hpp"
 #include "build_command.hpp"
+#include "sega_cd_command.hpp"
 #include "segarecomp/machine/master_system/ml_region_z80_producer.hpp"
 #include "segarecomp/rom.hpp"
 
@@ -1248,5 +1249,6 @@ int run_cli(int argc, char **argv) {
 
 int main(int argc, char **argv) {
   if (argc >= 2 && std::string_view(argv[1]) == "build") return segarecomp_build_command(argc, argv);
+  if (argc >= 2 && std::string_view(argv[1]) == "sega-cd") return segarecomp_sega_cd_command(argc, argv);
   return run_cli(argc, argv);
 }

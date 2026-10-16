@@ -1134,6 +1134,12 @@ add_test(NAME sega_cd_executable_image_test COMMAND sega_cd_executable_image_tes
 add_test(NAME sega_cd_executable_image_mutation_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_executable_image_mutation_test.py ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_executable_image_test sega_cd_executable_image_mutation_test APPEND PROPERTY LABELS full fast)
+# SEG-062-T002 (ADR 0129, Checkpoint A): CUE/BIN ingestion and IP/SP images against an independent reader; fixture reproducibility.
+add_test(NAME sega_cd_disc_ingestion_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_disc_ingestion_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR})
+add_test(NAME sega_cd_fixture_disc_manifest_test COMMAND ${Python3_EXECUTABLE}
+  ${PROJECT_SOURCE_DIR}/tools/sega_cd_fixture_disc.py --check)
+set_property(TEST sega_cd_disc_ingestion_test sega_cd_fixture_disc_manifest_test APPEND PROPERTY LABELS full fast)
 add_executable(z80_executable_image_equivalence_test z80_executable_image_equivalence_test.cpp)
 target_link_libraries(z80_executable_image_equivalence_test PRIVATE segarecomp::machine_master_system segarecomp::machine_genesis_z80)
 segarecomp_enable_warnings(z80_executable_image_equivalence_test)
