@@ -554,8 +554,9 @@ std::string read_tail(const fs::path &path, std::size_t max_bytes) {
 
 // ---- BuildJob ----
 
-BuildJob::BuildJob(RomView rom, Layout layout)
+BuildJob::BuildJob(RomView rom, Layout layout, bool cancelled_at_start)
     : rom_(std::move(rom)), layout_(std::move(layout)), entry_(entry_dir(rom_, layout_)) {
+  cancel_.store(cancelled_at_start);
   thread_ = std::thread([this] { run(); });
 }
 
@@ -563,6 +564,23 @@ BuildJob::~BuildJob() { wait(); }
 
 void BuildJob::wait() {
   if (thread_.joinable()) thread_.join();
+}
+
+BuildOutcome BuildJob::outcome() const {
+  if (!finished_.load()) return BuildOutcome::running;
+  if (ok_.load()) return BuildOutcome::succeeded;
+  return cancelled_.load() ? BuildOutcome::cancelled : BuildOutcome::failed;
+}
+
+bool BuildJob::request_cancel() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (publishing_ || ok_.load()) return false;            // the build is already being published / published: it stands
+    if (finished_.load()) return cancelled_.load();         // already ended: idempotent for a cancel, refused for a failure
+    cancel_.store(true);
+  }
+  tree_.terminate();
+  return true;
 }
 
 std::string BuildJob::message() const {
@@ -577,11 +595,27 @@ void BuildJob::run() {
   };
   const auto finish = [this](bool ok) { ok_.store(ok); finished_.store(true); };
   std::error_code ec;
+  // A cancelled attempt owns exactly its `<entry>.partial` folder: remove it (a just-killed compiler may hold a file open for a moment on
+  // Windows, hence the short retries) and report `cancelled`. The completed entry, `.failed` diagnostics of an earlier attempt and the shared
+  // compiler cache are never touched.
+  const auto finish_cancelled = [&](const fs::path &partial_dir) {
+    std::error_code remove_ec;
+    for (int attempt = 0; attempt < 40; ++attempt) {
+      fs::remove_all(partial_dir, remove_ec);
+      if (!remove_ec && !fs::exists(partial_dir, remove_ec)) break;
+      SDL_Delay(50);
+    }
+    set_message("Build cancelled.");
+    cancelled_.store(true);
+    finish(false);
+  };
   // Build beside the final entry and publish by rename, so a crash never leaves a half-built entry "ready".
   const fs::path partial = entry_.parent_path() / (entry_.filename().string() + ".partial");
+  if (cancel_.load()) { set_message("Build cancelled."); cancelled_.store(true); finish(false); return; }  // before anything was touched
   fs::remove_all(partial, ec);
   fs::create_directories(partial.parent_path(), ec);
   if (ec) { set_message("Cannot create the Segarecomp cache folder."); finish(false); return; }
+  if (cancel_.load()) { finish_cancelled(partial); return; }  // cancelled before the build tool was started: it never spawns
 
   const bool sms = rom_.platform_id == "master-system";
   std::vector<std::string> args{utf8(layout_.cli), "build", "--rom", utf8(rom_.path), "--output", utf8(partial),
@@ -621,7 +655,14 @@ void BuildJob::run() {
   SDL_Process *process = SDL_CreateProcessWithProperties(props);
   SDL_DestroyProperties(props);
   SDL_DestroyEnvironment(environment);
-  if (!process) { set_message("Could not start the Segarecomp build tool."); finish(false); return; }
+  if (!process) {
+    if (cancel_.load()) { finish_cancelled(partial); return; }
+    set_message("Could not start the Segarecomp build tool.");
+    finish(false);
+    return;
+  }
+  tree_.attach(process);
+  if (cancel_.load()) tree_.terminate();  // a request that arrived while the process was being created
 
   std::string result_line = "";
   std::string pending;
@@ -641,7 +682,7 @@ void BuildJob::run() {
       result_line = at == std::string::npos ? "The build failed." : line.substr(at + 8);
     }
   };
-  while (output) {
+  while (output && !cancel_.load()) {
     const std::size_t got = SDL_ReadIO(output, buffer, sizeof(buffer));
     if (got == 0) {
       // A pipe with no data yet reports NOT_READY; only EOF/error ends the read loop.
@@ -656,11 +697,23 @@ void BuildJob::run() {
       pending.erase(0, nl + 1);
     }
   }
+  if (cancel_.load()) tree_.terminate();  // idempotent; also covers a cancel that ended the read loop
   int exit_code = -1;
   SDL_WaitProcess(process, true, &exit_code);
+  tree_.release();
   SDL_DestroyProcess(process);
 
-  const bool ok = exit_code == 0 && entry_ready(partial);
+  // The decision point. After it the build is published and a cancel request is refused; before it a request wins and nothing is published.
+  bool publish = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!cancel_.load()) {
+      publishing_ = true;  // decided: a later cancel request is refused (the outcome, success or failure, stands)
+      publish = exit_code == 0 && entry_ready(partial);
+    }
+  }
+  if (cancel_.load()) { finish_cancelled(partial); return; }
+  const bool ok = publish;
   if (ok) {
     std::ofstream meta(partial / "metadata.json", std::ios::binary);
     meta << "{\"rom_sha256\":\"" << rom_.sha256 << "\",\"title\":\"" << json_safe(rom_.title)

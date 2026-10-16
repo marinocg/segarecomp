@@ -43,7 +43,10 @@ file, the build cache or the product: no placeholder values.
   required"), *Needs rebuild* (made by another release or option set, or a build mode whose executable is not built yet; never started), *Build failed*, plus a *ROM missing* badge. Play is offered only for a build
   whose identity matches exactly.
 * **Build** shows the real `@stage` messages (analyze, generate, compile, link) and the tail of the build log. There is no percentage because the
-  build tool reports none, and no Cancel because killing a build mid-way is not safe (closing the window waits for it).
+  build tool reports none. **Cancel build** (Details, and the game's menu) stops the running build: the build tool and every compiler process it started are shut down, the
+  attempt's own `.partial` folder is removed, no *Build failed* state or `.failed` diagnostics are created, and an earlier completed build of the game stays playable. A cancel that
+  arrives after the build has been published or has failed is refused (that outcome stands). A *queued* game is removed with **Unqueue** / *Remove from build queue*; it has
+  started nothing. Closing the window still waits for a running build.
 
 ## Where data lives
 
@@ -210,4 +213,4 @@ python3 tools/launcher_visual_capture.py --launcher <staged-package>/Segarecomp 
 Remaining differences from the concepts, with reasons: long pages still scroll at the minimum size and below the Details configuration (provenance is
 secondary by design); there are no invented compatibility ratings, build percentages, storage figures or bundled commercial covers. Cover
 downloads happen only on an explicit request (see *Covers and metadata provider*). **SDL_GPU is not implemented**; SDL_Renderer remains the presenter.
-**Audio device selection is not implemented**. **Build cancellation is not implemented**; no Cancel button is offered and closing waits for the build.
+**Audio device selection is not implemented**. Cancelling a build is implemented (see *Build*); closing the window still waits for a running build.

@@ -5,6 +5,8 @@
 
 #include <SDL3/SDL.h>
 
+#include "process_tree.hpp"
+
 #include <atomic>
 #include <filesystem>
 #include <mutex>
@@ -165,18 +167,29 @@ struct RestartDecision { bool restart = false; RomView next; std::string notice;
 [[nodiscard]] std::string host_description();
 
 enum class StageState { pending, running, done };
+// How a finished BuildJob ended. `cancelled` is a deliberate user stop (SEG-069-T001): it is neither a failure nor a success, leaves no artifact of
+// the attempt behind and never replaces the previously completed entry.
+enum class BuildOutcome { running, succeeded, failed, cancelled };
 
 // One asynchronous `segarecomp build`; poll from the UI thread.
 class BuildJob {
 public:
   static constexpr int stage_count = 4;  // analyze, generate, compile, link
-  BuildJob(RomView rom, Layout layout);
+  // `cancelled_at_start` models a cancel acknowledged before the worker began: the job then ends `cancelled` without spawning or touching disk.
+  BuildJob(RomView rom, Layout layout, bool cancelled_at_start = false);
   ~BuildJob();
   BuildJob(const BuildJob &) = delete;
   BuildJob &operator=(const BuildJob &) = delete;
 
   [[nodiscard]] bool finished() const { return finished_.load(); }
   [[nodiscard]] bool succeeded() const { return ok_.load(); }
+  [[nodiscard]] BuildOutcome outcome() const;
+  // Asks the attempt to stop: terminates `segarecomp build` and everything it started, then removes this attempt's own `<entry>.partial`
+  // folder. Returns true when the request was accepted (the job ends as `cancelled`; call again freely: it is idempotent), false when it
+  // came too late because the finished build is already being published (or its failure recorded) or has ended (then the outcome is that of the build).
+  // The job reports finished() only after the work is quiescent and the cleanup is done.
+  bool request_cancel();
+  [[nodiscard]] bool cancel_requested() const { return cancel_.load(); }
   [[nodiscard]] StageState stage(int index) const { return static_cast<StageState>(stages_[index].load()); }
   [[nodiscard]] std::string message() const;
   [[nodiscard]] std::filesystem::path entry() const { return entry_; }
@@ -190,6 +203,10 @@ private:
   std::atomic<int> stages_[stage_count]{};
   std::atomic<bool> finished_{false};
   std::atomic<bool> ok_{false};
+  std::atomic<bool> cancel_{false};
+  std::atomic<bool> cancelled_{false};
+  bool publishing_ = false;  // guarded by mutex_: the point of no return after which a cancel request is refused
+  ProcessTree tree_;
   mutable std::mutex mutex_;
   std::string message_;
   std::thread thread_;

@@ -116,8 +116,14 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
     if (menu_item(ctx_, "m_play", "Play", nullptr, ctx_.icon("play"), mw, can_play(info))) play(id);
     if (menu_item(ctx_, "m_build", build_action_label(info).c_str(), nullptr, ctx_.icon("reset"), mw, can_build(*entry, info))) { notices_.erase(id); request_build(id); }
     if (is_queued(id) && menu_item(ctx_, "m_unqueue", "Remove from build queue", nullptr, ctx_.icon("trash"), mw)) dequeue_build(id);
+    if (is_building(id) && menu_item(ctx_, "m_cancel_build", is_stopping(id) ? "Stopping build..." : "Cancel build", nullptr, ctx_.icon("close"), mw, !is_stopping(id))) cancel_build(id);
     if (menu_item(ctx_, "m_fav", entry->favorite ? "Remove from favorites" : "Add to favorites", nullptr, ctx_.icon("star"), mw)) { entry->favorite = !entry->favorite; save_catalog(); }
     menu_separator(ctx_, mw);
+  }
+  if (!include_details) {
+    // Details' own menu: the same two stop affordances, because the Details actions row shows no Build button while a build runs.
+    if (is_queued(id) && menu_item(ctx_, "m_unqueue", "Remove from build queue", nullptr, ctx_.icon("trash"), mw)) dequeue_build(id);
+    if (is_building(id) && menu_item(ctx_, "m_cancel_build", is_stopping(id) ? "Stopping build..." : "Cancel build", nullptr, ctx_.icon("close"), mw, !is_stopping(id))) cancel_build(id);
   }
   if (menu_item(ctx_, "m_logs", show_log_ && !include_details ? "Hide build log" : "View build log", nullptr, ctx_.icon("file"), mw)) { if (include_details) open_details(id); show_log_ = include_details ? true : !show_log_; }
   if (menu_item(ctx_, "m_folder", "Open build folder", nullptr, ctx_.icon("folder"), mw, fs::is_directory(info.entry, ec))) SDL_OpenURL(("file://" + u8s(info.entry)).c_str());
@@ -240,6 +246,12 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
       sx += cw + ctx_.u(6.0F);
     }
     y += ctx_.u(8.0F) + ctx_.u(26.0F);
+    // SEG-069-T001: the visible, focusable way to stop the running build. Disabled (and relabelled) while the attempt shuts down.
+    ImGui::SetCursorScreenPos(ImVec2(x0, y));
+    const bool stopping = is_stopping(entry.id());
+    if (button(ctx_, "cancel_build", stopping ? "Stopping..." : "Cancel build", ImVec2(std::min(ctx_.u(180.0F), tw), bh), Style::secondary, !stopping, ctx_.icon("close"))) cancel_build(entry.id());
+    if (ImGui::IsItemHovered()) tooltip(ctx_, "Stop this build and discard its partial files. A previously built program is kept.");
+    y += bh;
   } else {
     const bool locate_primary = info.rom_missing && info.status != GameStatus::ready && !entry.rom_paths.empty();
     const float play_w = std::min(ctx_.u(150.0F), (tw - ctx_.u(16.0F)) * 0.36F), build_w = std::min(ctx_.u(148.0F), (tw - ctx_.u(16.0F)) * 0.36F), more_w = std::min(ctx_.u(96.0F), tw - play_w - build_w - ctx_.u(16.0F));
@@ -249,8 +261,11 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     if (ImGui::IsItemHovered() && !can_play(info) && !locate_primary) tooltip(ctx_, info.status == GameStatus::ready ? "Wait for the running game or build to finish." : "No executable matches the current build configuration yet.");
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     const bool prominent_build = info.status != GameStatus::ready;
-    if (button(ctx_, "build", is_queued(entry.id()) ? "Queued" : build_action_label(info).c_str(), ImVec2(build_w, bh), prominent_build && !locate_primary ? Style::primary : Style::secondary, can_build(entry, info), ctx_.icon("reset"))) { notices_.erase(entry.id()); request_build(entry.id()); }
-    if (ImGui::IsItemHovered()) tooltip(ctx_, info.status == GameStatus::ready ? "Recompile the native program with the current configuration." : "Recompile with the configuration below.");
+    if (is_queued(entry.id())) {
+      // SEG-069-T001: a queued game's build action is its way out of the queue (it owns no process or folder yet).
+      if (button(ctx_, "unqueue", "Unqueue", ImVec2(build_w, bh), Style::secondary, true, ctx_.icon("close"))) dequeue_build(entry.id());
+    } else if (button(ctx_, "build", build_action_label(info).c_str(), ImVec2(build_w, bh), prominent_build && !locate_primary ? Style::primary : Style::secondary, can_build(entry, info), ctx_.icon("reset"))) { notices_.erase(entry.id()); request_build(entry.id()); }
+    if (ImGui::IsItemHovered()) tooltip(ctx_, is_queued(entry.id()) ? "Remove this game from the build queue; nothing has been built yet." : info.status == GameStatus::ready ? "Recompile the native program with the current configuration." : "Recompile with the configuration below.");
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (button(ctx_, "more", "More", ImVec2(more_w, bh), Style::ghost, true, ctx_.icon("more"))) ImGui::OpenPopup("##details_more");
     if (ImGui::IsItemHovered()) tooltip(ctx_, "More: logs, build folder, storage, cover, remove");
@@ -696,7 +711,7 @@ void App::draw_details(float w, float h) {
     float ly = q.y + ctx_.u(9.0F);
     for (std::size_t i = first; i < lines.size(); ++i) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::text2, ImVec2(q.x + ctx_.u(10.0F), ly), lines[i].c_str()); ly += lh; }
     ImGui::Dummy(ImVec2(main_w, box_h + ctx_.u(12.0F)));
-    if (is_building) { paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, main_w, "The build reports stages, not a percentage, and cannot be cancelled safely; closing the launcher waits for it."); ImGui::Dummy(ImVec2(1, ctx_.u(10.0F))); }
+    if (is_building) { paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, main_w, "The build reports stages, not a percentage. Cancel build stops it and discards its partial files; closing the launcher waits for it."); ImGui::Dummy(ImVec2(1, ctx_.u(10.0F))); }
   }
   if (!rail) {  // narrow window: the storage card follows the configuration
     const ImVec2 p = ImGui::GetCursorScreenPos();

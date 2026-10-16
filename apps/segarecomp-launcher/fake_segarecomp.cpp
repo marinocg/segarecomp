@@ -7,8 +7,19 @@
 //   FAKE_BUILD_LOG=<file> one line is appended per `build`: "<requested policy>"
 //   FAKE_BUILD_FAIL=compatibility|optimized  that policy's build fails
 //   FAKE_OPT_FALLBACK=1   an Optimized request builds the broad program and reports a fallback
+//   FAKE_BUILD_HOLD=<hb>  (SEG-069-T001) the build never finishes by itself: it starts a grandchild (this binary as `--sleeper <hb>`) that appends one
+//                         byte to <hb> every 20 ms, writes <output>/hold_started and <hb>.started, and then idles. Cancel tests assert the whole tree stops.
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <thread>
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <spawn.h>
+extern char **environ;
+#endif
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -46,7 +57,31 @@ static std::string identity(const std::string &policy, const std::string &platfo
   return hex64("id|" + policy + "|" + platform + "|" + (policy == "optimized" ? g_model : std::string()));
 }
 
+static void start_sleeper(const std::string &self, const std::string &heartbeat) {
+#if defined(_WIN32)
+  std::string command = "\"" + self + "\" --sleeper \"" + heartbeat + "\"";
+  STARTUPINFOA startup{};
+  startup.cb = sizeof(startup);
+  PROCESS_INFORMATION info{};
+  if (CreateProcessA(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info)) {
+    CloseHandle(info.hProcess);
+    CloseHandle(info.hThread);
+  }
+#else
+  std::vector<char *> args{const_cast<char *>(self.c_str()), const_cast<char *>("--sleeper"), const_cast<char *>(heartbeat.c_str()), nullptr};
+  pid_t pid{};
+  posix_spawn(&pid, self.c_str(), nullptr, nullptr, args.data(), environ);
+#endif
+}
+
 int main(int argc, char **argv) {
+  if (argc > 2 && std::string(argv[1]) == "--sleeper") {
+    for (int i = 0; i < 3000; ++i) {  // at most a minute: a leaked sleeper ends by itself
+      std::ofstream(argv[2], std::ios::binary | std::ios::app) << 'x';
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return 0;
+  }
   g_model = shipped_model(argv[0]);
   const std::string command = argc > 1 ? argv[1] : "";
   std::vector<std::string> args(argv + 2, argv + argc);
@@ -68,6 +103,16 @@ int main(int argc, char **argv) {
     if (!env("FAKE_BUILD_LOG").empty()) std::ofstream(env("FAKE_BUILD_LOG"), std::ios::app) << policy << '\n';
     fs::create_directories(out);
     std::puts("@stage analyze begin\n@stage analyze done\n@stage generate begin\n@stage generate done");
+    if (!env("FAKE_BUILD_HOLD").empty()) {
+      std::puts("@stage compile begin");
+      std::fflush(stdout);
+      std::ofstream(out / "partial_object.o") << "work in progress";
+      start_sleeper(argv[0], env("FAKE_BUILD_HOLD"));
+      std::ofstream(out / "hold_started") << "1";
+      std::ofstream(env("FAKE_BUILD_HOLD") + ".started") << "1";  // outside the attempt's folder, for the GUI script's wait_file
+      for (int i = 0; i < 3000; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));  // cancelled long before this
+      return 1;
+    }
     if (env("FAKE_BUILD_FAIL") == policy) {
       std::puts("@result failed stage=compile message=The fake build failed on request.");
       return 1;

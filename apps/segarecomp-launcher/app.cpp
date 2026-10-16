@@ -656,7 +656,28 @@ bool App::start_build(const std::string &id, bool restart_after) {
 }
 
 void App::dequeue_build(const std::string &id) {
-  build_queue_.remove(id);
+  // A queued entry owns nothing yet (no process, no folder), so removing it touches nothing but the FIFO.
+  if (!build_queue_.remove(id)) return;
+  if (const LibraryEntry *e = catalog_.find_id(id)) toast("Removed from the build queue: " + e->title() + ".");
+  trace("build=dequeued");
+}
+
+void App::cancel_build(const std::string &id) {
+  if (!is_building(id) || job_->cancel_requested()) return;  // a second request while stopping is ignored
+  trace("build=cancel_requested");
+  if (job_->request_cancel()) {
+    // The cancelled attempt must not auto-continue into a play or a restart.
+    restart_pending_ = false;
+    job_restart_after_ = false;
+    toast("Stopping the build...");
+  } else {
+    toast("The build has just finished; it was not cancelled.");
+  }
+}
+
+void App::stop_or_dequeue_build(const std::string &id) {
+  if (is_building(id)) cancel_build(id);
+  else if (is_queued(id)) dequeue_build(id);
 }
 
 void App::request_build(const std::string &id) {
@@ -681,12 +702,33 @@ void App::finish_build() {
   const bool ok = job_->succeeded();
   const std::string message = job_->message();
   const fs::path entry_path = job_->entry();
+  const BuildOutcome outcome = job_->outcome();
   busy_.end_build(job_key_);
   const std::string id = job_id_;
   const bool restart = job_restart_after_;
   job_.reset();
   job_id_.clear();
   LibraryEntry *entry = catalog_.find_id(id);
+  if (outcome == BuildOutcome::cancelled) {
+    // Neither a success nor a failure: no failure record, no diagnostics, no restart/autoplay continuation; the game keeps its prior state.
+    restart_pending_ = false;
+    failures_.erase(id);
+    diagnostics_.erase(id);
+    last_build_outcome_ = "cancelled";
+    trace("build=cancelled");
+    request_status_refresh();
+    request_scan();
+    toast("Build cancelled.");
+    if (autoplay_) {
+      autoplay_pending_ = false;
+      trace("final=cancelled");
+      SDL_Event quit;
+      quit.type = SDL_EVENT_QUIT;
+      SDL_PushEvent(&quit);
+    }
+    return;
+  }
+  last_build_outcome_ = ok ? "ok" : "failed";
   if (ok) {
     if (entry != nullptr) {
       BuildRecord record;
@@ -1019,6 +1061,16 @@ void App::run_script() {
       e.button.y = script_mouse_.y;
       if (down) SDL_PushEvent(&e); else script_mouse_up_ = {frame_ + 3, e};
     }
+  } else if (cmd == "build") {  // request a build of the open game (starts now or joins the FIFO)
+    if (!detail_id_.empty()) request_build(detail_id_);
+  } else if (cmd == "cancel_build") {  // the Cancel build / Unqueue action for the open game
+    if (!detail_id_.empty()) stop_or_dequeue_build(detail_id_);
+  } else if (cmd == "wait_idle") {  // hold the script until no build is running or queued
+    if (job_ || !build_queue_.empty() || status_pending_) { --script_at_; script_wait_ = 2; }
+  } else if (cmd == "wait_file") {  // hold the script until a file exists (at most ~20 s of frames)
+    std::error_code ec;
+    if (!fs::exists(fs::path(arg), ec) && ++script_wait_file_frames_ < 1200) { --script_at_; script_wait_ = 1; }
+    else script_wait_file_frames_ = 0;
   } else if (cmd == "scroll_library") {
     library_scroll_ = static_cast<float>(std::atof(arg.c_str()));
     restore_library_scroll_ = true;
@@ -1057,6 +1109,11 @@ void App::run_script() {
     else if (key == "library_scroll") actual = std::to_string(static_cast<int>(std::lround(library_scroll_)));
     else if (key == "detail") actual = page_ == Page::details && catalog_.find_id(detail_id_) != nullptr ? catalog_.find_id(detail_id_)->title() : "-";
     else if (key == "nav_items") actual = nav_items_;
+    else if (key == "building") actual = !detail_id_.empty() && is_building(detail_id_) ? "1" : "0";
+    else if (key == "stopping") actual = !detail_id_.empty() && is_stopping(detail_id_) ? "1" : "0";
+    else if (key == "queued") actual = !detail_id_.empty() && is_queued(detail_id_) ? "1" : "0";
+    else if (key == "build_count") actual = std::to_string(build_count());
+    else if (key == "build_outcome") actual = last_build_outcome_;
     else if (key == "menu") actual = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) ? "1" : "0";
     trace(std::string("expect ") + (actual == value ? "ok " : "FAIL ") + arg + " actual=" + actual);
   } else if (cmd == "dump") {

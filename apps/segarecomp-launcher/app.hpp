@@ -147,6 +147,12 @@ private:
   // The user-facing way to build: starts now when idle, otherwise joins the FIFO queue (one build at a time; the UI stays usable).
   void request_build(const std::string &id);
   void dequeue_build(const std::string &id);
+  // SEG-069-T001: stops the running build of `id` (process tree shut down, this attempt's `.partial` removed, the earlier completed entry kept).
+  // The job stays "stopping" until it is quiescent; finish_build() then clears the build and the FIFO continues.
+  void cancel_build(const std::string &id);
+  // The one entry point of the Cancel/Remove affordances (button, menu, controller): cancels the running build or removes the queued one.
+  void stop_or_dequeue_build(const std::string &id);
+  [[nodiscard]] bool is_stopping(const std::string &id) const { return job_ && job_id_ == id && job_->cancel_requested(); }
   [[nodiscard]] bool is_building(const std::string &id) const { return job_ && job_id_ == id; }
   [[nodiscard]] bool is_queued(const std::string &id) const { return build_queue_.contains(id); }
   [[nodiscard]] int build_count() const { return (job_ ? 1 : 0) + static_cast<int>(build_queue_.size()); }
@@ -247,6 +253,8 @@ private:
   std::string job_id_, job_key_;
   RomView job_view_;
   bool job_restart_after_ = false;
+  std::string last_build_outcome_ = "none";  // none | ok | failed | cancelled (observed by the GUI automation script)
+  int script_wait_file_frames_ = 0;
   BuildQueue build_queue_;
   std::map<std::string, std::string> failures_;      // id -> message
   std::map<std::string, std::string> diagnostics_;   // id -> log text

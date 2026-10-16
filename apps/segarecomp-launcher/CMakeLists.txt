@@ -25,7 +25,7 @@ target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
 # The launcher's non-UI core (layout, cache identity, `segarecomp build` orchestration, status reading) is a separate target so its
 # policy/cache-identity contract is unit-testable without a window.
-add_library(segarecomp_launcher_core STATIC launcher_core.cpp json_lite.cpp library_catalog.cpp storage.cpp launcher_settings.cpp)
+add_library(segarecomp_launcher_core STATIC launcher_core.cpp process_tree.cpp json_lite.cpp library_catalog.cpp storage.cpp launcher_settings.cpp)
 target_include_directories(segarecomp_launcher_core PUBLIC .)
 target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media)
 # Linux only: the glibc the generated programs link against (release default 2.35 = the bundled SDL3's baseline; a developer who built SDL3 on a
@@ -99,6 +99,28 @@ if(BUILD_TESTING)
   add_test(NAME launcher_sms_policy_test COMMAND launcher_sms_policy_test $<TARGET_FILE:segarecomp>
     ${PROJECT_SOURCE_DIR}/platforms/master-system/runtime/sms_machine.h $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
   set_property(TEST launcher_sms_policy_test APPEND PROPERTY LABELS full fast)
+endif()
+
+# SEG-069-T001: BuildJob cancellation (process-tree shutdown, attempt-local cleanup, publish race) against the product double.
+add_executable(launcher_build_cancel_test launcher_build_cancel_test.cpp)
+target_link_libraries(launcher_build_cancel_test PRIVATE segarecomp_launcher_core)
+target_compile_features(launcher_build_cancel_test PRIVATE cxx_std_20)
+segarecomp_enable_warnings(launcher_build_cancel_test)
+if(BUILD_TESTING)
+  add_dependencies(launcher_build_cancel_test fake_segarecomp fake_game)
+  add_test(NAME launcher_build_cancel_test COMMAND launcher_build_cancel_test $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_build_cancel_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_build_cancel_test PROPERTY TIMEOUT 300)
+endif()
+
+if(BUILD_TESTING)
+  find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME launcher_build_cancel_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_build_cancel_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  add_dependencies(launcher_build_cancel_test segarecomp-launcher)
+  set_property(TEST launcher_build_cancel_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_build_cancel_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_build_cancel_gui_test PROPERTY TIMEOUT 300)
 endif()
 
 # SEG-058: covers, Libretro candidate naming and launcher settings.
