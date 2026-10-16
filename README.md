@@ -37,20 +37,35 @@ For the detailed pipeline, see [the architecture overview](docs/architecture/pip
 
 ## Project status
 
-**Experimental means experimental:** a supported CPU path or a successful fixture
-does not imply that arbitrary commercial games will compile, boot or be playable.
+segarecomp has **fully playable commercial games** on Genesis / Mega Drive and
+working Master System titles. Compatibility is not universal: games not listed
+below may reach gameplay, encounter unsupported behavior or fail to build.
 
 | Target | What exists today | Important limits |
 | --- | --- | --- |
-| **Genesis / Mega Drive** | Generated-native MC68000, Genesis runtime and video (VDP), device work and an optional SDL3 viewer. The **Sonic the Hedgehog 1 title-screen checkpoint** has been reached. | General-game and gameplay compatibility are incomplete; the title-screen milestone is not a claim that Sonic is fully playable. |
+| **Genesis / Mega Drive** | Generated-native MC68000, Genesis runtime and video (VDP), device work and an optional SDL3 viewer. Sonic 1 is beatable end-to-end; Sonic 2, Sonic 3 and Streets of Rage 1 and 3 are fully playable. Many more games reach gameplay. | Compatibility is still incomplete for other titles. |
 | **Z80 CPU** | Z80 decode/semantics and generated-C lowering components exist and are used by ongoing platform work. | CPU coverage, hardware integration and game compatibility remain experimental. |
-| **Master System** | Machine and generated-native Z80 paths, a C11 runtime, VDP/PSG/input components, headless fixtures and optional viewer support. | Early-stage system compatibility; mapper selection is explicit, and broad commercial-game support is not established. |
+| **Master System** | Generated-native Z80 path, C11 runtime, VDP/PSG/input components, headless support and optional viewer. Sonic 1 and 2, Wonder Boy III and Alex Kidd in Miracle World play well. | Compatibility varies by title; mapper selection is explicit. |
 | **Game Gear** | Planned platform work. | No general compatibility claim. |
 | **Sega CD** | A **synthetic post-BIOS** path using project-authored CUE/BIN discs, two generated-native MC68000 CPUs, CD/CDC and Word RAM behavior, a Genesis VDP frame, and disc-loaded modules/overlays. | Synthetic fixtures only: no authentic BIOS execution or commercial-disc compatibility claim. |
 | **32X / Saturn** | Roadmap targets. | No working platform implementation claimed. |
 
-See the [platform-by-platform documentation](platforms/README.md) for technical
-details. This table describes implementation capabilities, **not a game compatibility list**.
+### Known working games
+
+The following are concrete examples of games running through segarecomp, not
+just synthetic tests or title-screen demonstrations:
+
+- **Genesis / Mega Drive:** **Sonic the Hedgehog** is beatable from start
+  to finish. **Sonic the Hedgehog 2**, **Sonic the Hedgehog 3**,
+  **Streets of Rage** and **Streets of Rage 3** are fully playable.
+  Many additional titles reach gameplay.
+- **Master System:** **Sonic the Hedgehog**, **Sonic the Hedgehog 2**,
+  **Wonder Boy III: The Dragon's Trap** and **Alex Kidd in Miracle World**
+  run well.
+
+These examples do not imply universal compatibility across all games or ROM
+revisions. See the [platform-by-platform documentation](platforms/README.md)
+for architecture and development details.
 
 ## Download and try segarecomp
 
@@ -68,7 +83,9 @@ Check the downloaded archive against `SHA256SUMS.txt`.
 The packages include the compiler (a pinned Zig toolchain, used to compile generated
 C) and SDL3. **No ROMs are included**; use only software you are legally entitled
 to analyze. These are experimental builds: the launcher recognizes Genesis/Mega
-Drive and Master System images, but many games may fail to compile or run.
+Drive and Master System images. Several games already work well (see
+[Known working games](#known-working-games)), while others may reach gameplay,
+stop at unsupported behavior or fail to build.
 An image without compatibility metadata may be labelled **Compatibility unknown**;
 **Try anyway** is not a promise that it works.
 
@@ -203,11 +220,18 @@ For the complete design and validation contracts, see
 [the pipeline documentation](docs/architecture/pipeline.md) and
 [CONTRIBUTING.md](CONTRIBUTING.md) before making changes.
 
-### Optional Ghidra analysis
+### Optional Ghidra debugging
 
-A pinned, containerized headless Ghidra and Ghidra MCP bridge are available through
-`python3 tools/ghidra.py`. See [docs/testing/ghidra-analysis.md](docs/testing/ghidra-analysis.md); no ROMs or host directories are mounted
-unless explicitly placed in the ignored input directory.
+**Ghidra is optional developer tooling for debugging and investigating
+recompilation issues. It is not required to build segarecomp, recompile a game,
+or launch and play games.** Normal game execution does not use Ghidra.
+
+For developers investigating code discovery or other tricky failures, a pinned,
+containerized headless Ghidra and Ghidra MCP bridge are available through
+`python3 tools/ghidra.py`. See
+[docs/testing/ghidra-analysis.md](docs/testing/ghidra-analysis.md).
+No ROMs or host directories are mounted unless explicitly placed in the
+ignored input directory.
 
 ## Legal and ROM policy
 
