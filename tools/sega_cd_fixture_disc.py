@@ -351,6 +351,96 @@ def fixture_comm_unmapped(options):
     return main.assemble(), sub.assemble(), {}, {"stop": "unmapped", "cpu": "sub"}
 
 
+def fixture_negative(kind):
+    """SEG-062-T003 negative fixtures: each ends in one typed stop or one defined (non-faulting) hardware result."""
+    def build(options):
+        sub = Asm(SP_BASE)
+        main = Asm(IP_BASE)
+        expected = {}
+        if kind == "ga_register":
+            sub.stop(0x2700)
+            main.move("w", imm(1), absl(GA_MAIN + 0x30))
+            main.stop(0x2700)
+            expected = {"stop": "gate_array_register_unsupported", "cpu": "main"}
+        elif kind == "prg_window_nobus":
+            sub.label("spin")
+            sub.bra("spin")
+            main_start_sub(main, SP_BASE)
+            main.move("w", absl(PRG_WINDOW + 0x100), d(0))
+            main.stop(0x2700)
+            expected = {"stop": "prg_ram_window_without_bus", "cpu": "main"}
+        elif kind == "ifl2_masked":
+            sub.move("l", imm("handler"), absl(0x000068))
+            sub.move_sr(0x2000)
+            sub.move("b", imm(0x01), absl(GA_SUB + 0x0F))
+            sub.stop(0x2000)
+            sub.label("handler")
+            sub.move("b", imm(0x02), absl(GA_SUB + 0x0F))
+            sub.rte()
+            main_start_sub(main, SP_BASE)
+            wait_flag(main, GA_MAIN + 0x0F, 1, "w_ready")
+            main.move("b", imm(0x01), absl(GA_MAIN + 0x00))  # IFL2 with IEN2 = 0: dropped (V2)
+            main.move("b", absl(GA_MAIN + 0x00), absl(RESULT))
+            main.move("b", absl(GA_MAIN + 0x0F), absl(RESULT + 1))
+            main_finish(main)
+            expected = {"result_bytes": [0x00, 0x01], "sub_interrupts_taken_2": 0}
+        elif kind == "handler_not_compiled":
+            sub.move("l", imm(0x7000), absl(0x000068))  # not code of the SP image
+            sub.move("b", imm(0x04), absl(GA_SUB + 0x33))
+            sub.move_sr(0x2000)
+            sub.move("b", imm(0x01), absl(GA_SUB + 0x0F))
+            sub.stop(0x2000)
+            main_start_sub(main, SP_BASE)
+            wait_flag(main, GA_MAIN + 0x0F, 1, "w_ready")
+            main.move("b", imm(0x01), absl(GA_MAIN + 0x00))
+            main.label("spin")
+            main.bra("spin")
+            expected = {"stop": "exception_vector_not_compiled", "cpu": "sub"}
+        elif kind == "entry_not_compiled":
+            sub.move("l", imm(0x12345678), d(0))
+            sub.stop(0x2700)
+            main_start_sub(main, SP_BASE + 2)  # the middle of the first SP instruction
+            main.stop(0x2700)
+            expected = {"stop": "entry_not_compiled", "cpu": "sub"}
+        elif kind == "code_overwrite":
+            sub.move("w", imm(0x4E71), absl("victim"))
+            sub.label("victim")
+            sub.moveq(1, 0)
+            sub.stop(0x2700)
+            main_start_sub(main, SP_BASE)
+            main.stop(0x2700)
+            expected = {"stop": "code_bytes_mismatch", "cpu": "sub"}
+        elif kind == "write_protect":
+            sub.move("w", imm(0x1234), absl(0x001000))  # inside WP = $40 * $200: ignored (V2)
+            sub.move("w", absl(0x001000), absl(GA_SUB + 0x20))
+            sub.move("w", imm(0x5678), absl(0x009000))
+            sub.move("w", absl(0x009000), absl(GA_SUB + 0x22))
+            sub.move("b", imm(0x01), absl(GA_SUB + 0x0F))
+            sub.stop(0x2700)
+
+            def protect(m):
+                m.move("b", imm(0x40), absl(GA_MAIN + 0x02))
+            main_start_sub(main, SP_BASE, protect)
+            wait_flag(main, GA_MAIN + 0x0F, 1, "w_done")
+            main.move("w", absl(GA_MAIN + 0x20), absl(RESULT))
+            main.move("w", absl(GA_MAIN + 0x22), absl(RESULT + 2))
+            main_finish(main)
+            expected = {"result_words": [0x0000, 0x5678], "prg_write_protect_drops": 1}
+        elif kind == "busreq_stopped":
+            sub.move("b", imm(0x01), absl(GA_SUB + 0x0F))
+            sub.stop(0x2700)
+            main_start_sub(main, SP_BASE)
+            wait_flag(main, GA_MAIN + 0x0F, 1, "w_ready")
+            main.move("w", imm(200), d(7))
+            main.label("delay")
+            main.dbra(7, "delay")
+            main.move("b", imm(0x03), absl(GA_MAIN + 0x01))  # SBRQ while the sub is in STOP: unresolved (contract section 13)
+            main.stop(0x2700)
+            expected = {"stop": "busreq_while_sub_stopped_unsupported", "cpu": "main"}
+        return main.assemble(), sub.assemble(), {}, expected
+    return build
+
+
 def wordram_pattern(count, start, step):
     return [(start + i * step) & 0xFFFF for i in range(count)]
 
@@ -644,6 +734,9 @@ FIXTURES = {
     "timer": fixture_timer,
     "cdframe": fixture_cdframe,
 }
+for _kind in ("ga_register", "prg_window_nobus", "ifl2_masked", "handler_not_compiled", "entry_not_compiled", "code_overwrite",
+              "write_protect", "busreq_stopped"):
+    FIXTURES["neg_" + _kind] = fixture_negative(_kind)
 
 # ------------------------------------------------------------------------------------------------------------------------------
 # Disc image

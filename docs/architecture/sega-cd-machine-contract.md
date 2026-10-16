@@ -110,7 +110,7 @@ Byte addresses; main side `$A120xx`, sub side `$FF80xx`. A register or access no
 | reg | main side | sub side | behaviour | tag |
 | --- | --- | --- | --- | --- |
 | `$00` (hi) | `IEN2` (bit 7, read), `IFL2` (bit 0: write 1 raises the sub level-2 request when `IEN2` = 1; otherwise dropped) | LED byte (write stored, read back) | | V2 (GPGX `mem68k.c` case 0x00, MAME `scd_a12000_halt_reset_w` `& 0x0100 && irq_mask & 0x04`) |
-| `$01` (lo) | `SBRQ` (bit 1), `SRES` (bit 0, 0 = reset asserted) | `RESET` status: reads 1; writing 0 resets the CD peripherals: typed stop | main: V2 (GPGX, MAME); power-on value `$02` (reset asserted, bus requested): V1 (GPGX `scd_reset` regs[0] = `0x0002`) |
+| `$01` (lo) | `SBRQ` (bit 1), `SRES` (bit 0, 0 = reset asserted); `SRES` 0 -> 1 makes the sub take its reset exception from `PRG[0..7]`; setting `SBRQ` while the sub is in STOP is the typed stop `busreq_while_sub_stopped_unsupported` (U, section 13) | `RESET` status: reads 1; writing 0 resets the CD peripherals: typed stop | main: V2 (GPGX, MAME); power-on value `$02` (reset asserted, bus requested): V1 (GPGX `scd_reset` regs[0] = `0x0002`) |
 | `$02` (hi) | write-protect `WP` (main writes) | `WP` read-only (sub writes ignored) | | V2 (GPGX, MAME `segacd_sub_memory_mode_w_8_15` "no effect") |
 | `$03` (lo) | `BK1:BK0` (7-6), `MODE` (2, read), `DMNA` (1), `RET` (0) | `PM1:PM0` (4-3), `MODE` (2), `DMNA` (1, read), `RET` (0) | ownership state machine, section 6; `PM` != 0 is a typed stop | V2 for the 2M handoff and 1M swap (GPGX, MAME); details section 6 |
 | `$04` | `EDT`/`DSR` (7-6), `DD` (2-0) read | same, `DD` writable (CDC destination) | writing resets the DMA address register `$0A` | V2 destinations (GPGX `cdc_dma_init`, MAME `DMA_PRG 0x0500`, `DMA_WRAM 0x0700`); `$0A` reset on write: V1 (GPGX citing MCDV) |
@@ -287,6 +287,7 @@ stops with `bios_absent`.
 | CDC DMA into 2M Word RAM owned by main | GPGX halts, MAME writes | hardware test | SEG-063 |
 | system-header longwords `$38/$3C/$40-$4C` | one primary source in reach of this cloud | read the Mega-CD Disc Format specification and the Sega CD BIOS manual directly | SEG-064 |
 | SP base `$6000`, IP base `$FF0000` | BIOS-owned facts | BIOS feasibility gate (ADR 0130) | SEG-064-T001 |
+| `SBRQ` readback when the bus is requested while the sub is in STOP | GPGX: reads 0 ("verified on real hardware"), MAME: no special case | hardware test | SEG-064 |
 | CDD seek latency, decoder active period | timing not modelled | logic-analyser logs (MiSTer `mcd logs`) | SEG-065 |
 | raw-sector EDC/ECC | not checked; sync and header are | decision: optional until a title needs it | SEG-063 |
 

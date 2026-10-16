@@ -1,6 +1,7 @@
 #include "sega_cd_command.hpp"
 
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -9,6 +10,7 @@
 
 #include "segarecomp/disc.hpp"
 #include "segarecomp/machine/sega_cd/boot_images.hpp"
+#include "segarecomp/machine/sega_cd/program.hpp"
 #include "segarecomp/sha256.hpp"
 
 namespace {
@@ -126,10 +128,58 @@ int inspect(int argc, char **argv) {
   return 0;
 }
 
+int emit(int argc, char **argv) {
+  std::optional<std::string> cue, out_path, expected;
+  for (int i = 3; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
+    else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
+    else if (arg == "--expect-identity" && i + 1 < argc) expected = argv[++i];
+    else {
+      std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+      return 2;
+    }
+  }
+  if (!cue || !out_path) {
+    std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+    return 2;
+  }
+  const auto loaded = segarecomp::load_cue_disc(*cue, expected ? std::optional<std::string_view>(*expected) : std::nullopt);
+  if (!loaded.disc) {
+    std::cout << "{\"ok\":false,\"stage\":\"disc\",\"error\":\"" << segarecomp::disc_error_name(loaded.error) << "\"}\n";
+    return 3;
+  }
+  const auto produced = scd::produce_boot_images(*loaded.disc);
+  if (!produced.images) {
+    std::cout << "{\"ok\":false,\"stage\":\"boot\",\"error\":\"" << scd::boot_image_error_name(produced.error) << "\"}\n";
+    return 4;
+  }
+  const auto emission = scd::emit_sega_cd_program(*loaded.disc, *produced.images);
+  std::ofstream file(*out_path, std::ios::binary);
+  file << emission.c_source;
+  if (!file.flush()) {
+    std::cerr << "segarecomp: cannot write " << *out_path << "\n";
+    return 1;
+  }
+  std::ostringstream report;
+  report << "{\"ok\":true,\"disc_identity\":\"" << loaded.disc->identity() << "\",\"program_identity\":\""
+         << emission.program_identity << "\",\"processors\":[";
+  for (std::size_t i = 0; i < emission.stats.size(); ++i) {
+    const auto &s = emission.stats[i];
+    report << (i ? "," : "") << "{\"processor\":\"" << scd::processor_name(s.processor) << "\",\"compiled\":" << s.compiled
+           << ",\"unsupported\":" << s.unsupported << ",\"out_of_image_targets\":" << s.out_of_image_targets
+           << ",\"vector_roots\":" << s.vector_roots << "}";
+  }
+  report << "]}\n";
+  std::cout << report.str();
+  return 0;
+}
+
 }  // namespace
 
 int segarecomp_sega_cd_command(int argc, char **argv) {
   if (argc >= 3 && std::string_view(argv[2]) == "inspect") return inspect(argc, argv);
+  if (argc >= 3 && std::string_view(argv[2]) == "emit") return emit(argc, argv);
   std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
   return 2;
 }
