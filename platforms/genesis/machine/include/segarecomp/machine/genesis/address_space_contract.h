@@ -146,6 +146,17 @@ static inline int segarecomp_genesis_idle_control_register(uint32_t address) {
 #define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_CONTROL_PROTECT UINT32_C(0x02)   /* $A130F1 bit 1: writes to the SRAM are ignored */
 #define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_CONTROL_DEFINED UINT32_C(0x03)
 
+/* SEG-068-T006 / ADR 0126: header-declared serial EEPROM (type $E8, second byte $40, one odd byte location). The device class is
+ * the Sega-board X24C01 profile: 128 x 8 bits, SDA on D0 (input and read-back), SCL on D1, 4-byte page; the location is
+ * accessed with BYTE reads and writes only. The profile is a project compatibility assumption (the header does not carry the
+ * wiring). */
+#define SEGARECOMP_GENESIS_CARTRIDGE_KIND_SRAM UINT8_C(0)
+#define SEGARECOMP_GENESIS_CARTRIDGE_KIND_EEPROM_X24C01 UINT8_C(1)
+#define SEGARECOMP_GENESIS_CARTRIDGE_EEPROM_X24C01_BYTES UINT32_C(128)
+#define SEGARECOMP_GENESIS_CARTRIDGE_EEPROM_X24C01_PAGE_MASK UINT32_C(0x03)
+#define SEGARECOMP_GENESIS_CARTRIDGE_EEPROM_SDA_BIT UINT32_C(0x01) /* D0: SDA in and out */
+#define SEGARECOMP_GENESIS_CARTRIDGE_EEPROM_SCL_BIT UINT32_C(0x02) /* D1: SCL in */
+
 #define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_OUTSIDE 0  /* does not touch the extent: not this device's access */
 #define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_BYTE 1     /* BYTE on a lane address of the extent */
 #define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_REJECTED 2 /* touches the extent with an unsupported width or lane */

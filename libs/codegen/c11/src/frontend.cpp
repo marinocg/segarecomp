@@ -6468,7 +6468,8 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
     sink << "static const GenesisCartridgeSramConfig genesis_cartridge_sram_config = { UINT32_C(" << hex(cartridge_sram->start, 8)
          << "), UINT32_C(" << hex(cartridge_sram->end, 8) << "), UINT32_C(" << std::to_string(storage_bytes) << "), UINT8_C("
          << (cartridge_sram->odd_lane ? 1 : 0) << "), UINT8_C(" << (cartridge_sram->supported ? 1 : 0) << "), UINT8_C("
-         << (cartridge_sram->always_mapped ? 1 : 0) << ") };\n";
+         << (cartridge_sram->always_mapped ? 1 : 0) << "), UINT8_C("
+         << (cartridge_sram->kind == GenesisCartridgeExtraMemoryKind::serial_eeprom_x24c01 ? 1 : 0) << ") };\n";
     if (storage_bytes != 0U) sink << "static uint8_t genesis_cartridge_sram_storage[" << std::to_string(storage_bytes) << "];\n";
   }
   // SEG-007-T047 / ADR-0020 §6: emit the build-resolved IRQ6 autovector handler

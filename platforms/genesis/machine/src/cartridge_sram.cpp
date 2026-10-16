@@ -25,7 +25,27 @@ GenesisCartridgeSramHeader parse_genesis_cartridge_sram_header(std::span<const s
   };
   // The second byte is $20 for SRAM/FRAM; $40 marks EEPROM.  Anything else is not a form this model knows.
   if (kind == UINT8_C(0x40)) {
-    result.status = GenesisCartridgeSramHeaderStatus::unsupported_type;
+    // ADR 0126: the documented EEPROM header form is `'RA',$E8,$40` with one odd byte location (plutiedev "ROM header
+    // reference"). Anything else (other type byte, a span, an even or out-of-window location) creates no device.
+    const std::uint32_t eeprom_start = be32(image, header_offset + 4U);
+    const std::uint32_t eeprom_end = be32(image, header_offset + 8U);
+    if (type != 0xE8U || eeprom_start != eeprom_end || (eeprom_start & 1U) == 0U ||
+        eeprom_start < SEGARECOMP_GENESIS_CARTRIDGE_SRAM_WINDOW_BEGIN || eeprom_end >= SEGARECOMP_GENESIS_CARTRIDGE_SRAM_WINDOW_END) {
+      result.status = GenesisCartridgeSramHeaderStatus::unsupported_type;
+      return result;
+    }
+    GenesisCartridgeSramDescriptor eeprom;
+    eeprom.kind = GenesisCartridgeExtraMemoryKind::serial_eeprom_x24c01;
+    eeprom.start = eeprom_start;
+    eeprom.end = eeprom_end;
+    eeprom.odd_lane = true;
+    eeprom.battery_backed = true;
+    // The device sits over the cartridge window: with a ROM that extends to or into the location the overlay between ROM
+    // and device is not established, so the layout is declared but unsupported (typed fail-closed on any access).
+    eeprom.always_mapped = image.size() <= eeprom_start;
+    eeprom.supported = eeprom.always_mapped;
+    result.status = GenesisCartridgeSramHeaderStatus::declared;
+    result.descriptor = eeprom;
     return result;
   }
   if (kind != UINT8_C(0x20)) return malformed();
