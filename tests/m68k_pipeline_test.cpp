@@ -13541,6 +13541,110 @@ void seg068_t002_differing_cross_root_tier1_sets_are_unioned_deterministically()
   expect(swapped == a, "the union is independent of which root is merged first");
 }
 
+// Disjoint multi-candidate union ({0,2} from the reset chain, {4,6} from the IRQ6 chain, via a branch-join of two
+// MOVEQs per root), plus the runtime guard of the emitted dispatch: the proven array holds exactly the union.
+void seg068_t002_disjoint_multi_candidate_sets_union_and_emit_exact_runtime_guard() {
+  using namespace segarecomp;
+  using namespace adr0021_test_support;
+  constexpr std::uint32_t kEntry = 0x100U, kHandler = 0x110U, kJmp = 0x120U;
+  auto img = vectored_image(0x200U, kEntry, kHandler);
+  const std::uint8_t reset_chain[] = {0x70U, 0x00U, 0x66U, 0x02U, 0x70U, 0x02U, 0x60U, 0x18U};  // D0 in {0,2}, BRA.s kJmp
+  const std::uint8_t irq_chain[] = {0x70U, 0x04U, 0x66U, 0x02U, 0x70U, 0x06U, 0x60U, 0x08U};    // D0 in {4,6}, BRA.s kJmp
+  std::copy(std::begin(reset_chain), std::end(reset_chain), img.begin() + kEntry);
+  std::copy(std::begin(irq_chain), std::end(irq_chain), img.begin() + kHandler);
+  img[kJmp] = 0x4EU; img[kJmp + 1U] = 0xFBU; img[kJmp + 2U] = 0x00U; img[kJmp + 3U] = 0x06U;  // JMP (6,PC,D0.W)
+  for (std::uint32_t a = 0x128U; a <= 0x12EU; a += 2U) { img[a] = 0x4EU; img[a + 1U] = 0x70U; }  // RESET targets
+  const auto result = analyze_m68k_frontend(make_vectored_program(img, kEntry));
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "disjoint multi-candidate cross-root Tier-1 sets are aggregated");
+  if (partial == nullptr) return;
+  bool unproven = true;
+  expect((seg068_t002::tier1_candidates(result, unproven) == std::vector<std::uint32_t>{0x128U, 0x12AU, 0x12CU, 0x12EU}) &&
+             !unproven,
+         "the disjoint multi-candidate sets union in sorted order");
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto array = emitted.find("m68k_indirect_targets_00000120[] = {");
+  expect(array != std::string::npos &&
+             emitted.compare(array, emitted.find("};", array) - array + 2U,
+                             "m68k_indirect_targets_00000120[] = {UINT32_C(0x00000128), UINT32_C(0x0000012A), "
+                             "UINT32_C(0x0000012C), UINT32_C(0x0000012E)};") == 0,
+         "the emitted runtime guard array is exactly the final union");
+  expect(emitted.find("if (!m68k_indirect_target_member(m68k_indirect_targets_00000120") != std::string::npos,
+         "a computed target outside the final union reaches the typed unresolved-indirect stop");
+}
+
+// The pure aggregation rule: compatible-fact unions, cap overflow, incompatible control EA / index register /
+// provenance, and Tier-1 sets that are not derivable from their own metadata.
+segarecomp::M68kIndirectTargetEaSet seg068_t002_make_set(std::vector<std::uint16_t> indices, std::uint32_t pc_base = 0x1000U) {
+  using namespace segarecomp;
+  M68kIndirectTargetEaSet set{};
+  set.control_ea.mode = M68kEaMode::pc_index8;
+  set.control_ea.pc_base_address = pc_base;
+  set.control_ea.displacement = 6;
+  set.control_ea.index_reg = 0U;
+  set.index_values.index_register = DataRegister::d0;
+  set.index_values.values = std::move(indices);
+  for (const auto v : set.index_values.values)
+    set.candidates.push_back({TargetAddressSpace::m68k_program, pc_base + 6U + v});
+  return set;
+}
+
+void seg068_t002_merge_rule_negative_and_boundary_cases() {
+  using namespace segarecomp;
+  using Outcome = M68kTier1MergeOutcome;
+  auto base = seg068_t002_make_set({0U, 2U});
+  // Overlapping and disjoint unions.
+  auto overlap = base;
+  expect(merge_m68k_tier1_target_sets(overlap, seg068_t002_make_set({2U, 4U})) == Outcome::unioned &&
+             overlap.candidates.size() == 3U && overlap.index_values.values == std::vector<std::uint16_t>{0U, 2U, 4U},
+         "overlapping sets union without duplicates");
+  auto disjoint = base;
+  expect(merge_m68k_tier1_target_sets(disjoint, seg068_t002_make_set({4U, 6U, 8U})) == Outcome::unioned &&
+             disjoint.candidates.size() == 5U && disjoint.candidates.front().value < disjoint.candidates.back().value,
+         "disjoint sets union in sorted order");
+  auto same_set = base;
+  expect(merge_m68k_tier1_target_sets(same_set, base) == Outcome::unchanged && same_set.candidates.size() == base.candidates.size(),
+         "identical sets are unchanged");
+  auto subset = seg068_t002_make_set({0U, 2U, 4U});
+  expect(merge_m68k_tier1_target_sets(subset, base) == Outcome::unchanged && subset.candidates.size() == 3U,
+         "a subset contributes nothing");
+  // Cap: 256 + 1 distinct candidates is fatal; exactly 256 is allowed.
+  std::vector<std::uint16_t> low, high;
+  for (std::uint16_t i = 0; i < 128U; ++i) low.push_back(static_cast<std::uint16_t>(i * 2U));
+  for (std::uint16_t i = 0; i < 128U; ++i) high.push_back(static_cast<std::uint16_t>(0x400U + i * 2U));
+  auto at_cap = seg068_t002_make_set(low);
+  expect(merge_m68k_tier1_target_sets(at_cap, seg068_t002_make_set(high)) == Outcome::unioned &&
+             at_cap.candidates.size() == 256U, "a union of exactly 256 members is accepted");
+  auto over_cap = at_cap;
+  expect(merge_m68k_tier1_target_sets(over_cap, seg068_t002_make_set({0x800U})) == Outcome::conflict,
+         "a union above the existing 256-member cap fails closed");
+  // Incompatible facts conflict even when the candidate sets coincide.
+  auto other_displacement = base;
+  other_displacement.control_ea.displacement = 8;
+  expect(merge_m68k_tier1_target_sets(other_displacement, base) == Outcome::conflict,
+         "a different control EA conflicts");
+  auto other_register = base;
+  other_register.control_ea.index_reg = 1U;
+  other_register.index_values.index_register = DataRegister::d1;
+  expect(merge_m68k_tier1_target_sets(other_register, base) == Outcome::conflict,
+         "a different index register conflicts even with equal candidates");
+  auto other_mode = base;
+  other_mode.control_ea.mode = M68kEaMode::address_indirect;
+  other_mode.index_values.values.clear();
+  expect(merge_m68k_tier1_target_sets(other_mode, base) == Outcome::conflict, "a different EA mode conflicts");
+  // Inconsistent provenance: candidates not derivable from the set's own EA/index values, for the same index values.
+  auto forged = base;
+  forged.candidates[1].value += 2U;
+  expect(!m68k_tier1_target_set_coherent(forged) && merge_m68k_tier1_target_sets(forged, base) == Outcome::conflict,
+         "an underivable candidate list is incoherent and conflicts");
+  auto forged_incoming = seg068_t002_make_set({0U, 2U});
+  forged_incoming.candidates[0].value += 2U;
+  auto target = base;
+  expect(merge_m68k_tier1_target_sets(target, forged_incoming) == Outcome::conflict,
+         "equal index values yielding different candidates (an inconsistent equivalent proof) conflict");
+  expect(m68k_tier1_target_set_coherent(base), "a producer-shaped set is coherent");
+}
+
 void seg068_t002_identical_cross_root_tier1_sets_are_unchanged() {
   using namespace segarecomp;
   bool unproven = true;
@@ -31733,6 +31837,8 @@ int main(int argc, char **argv) {
   adr0021_cross_root_tier_exclusivity_violation_fails_closed();
   seg068_t002_differing_cross_root_tier1_sets_are_unioned_deterministically();
   seg068_t002_identical_cross_root_tier1_sets_are_unchanged();
+  seg068_t002_disjoint_multi_candidate_sets_union_and_emit_exact_runtime_guard();
+  seg068_t002_merge_rule_negative_and_boundary_cases();
   general_startup_rejects_an_unrepresentable_mapping_name_at_a_cpu_frontier();
   general_startup_keeps_truncation_a_build_time_rejection_after_a_completed_block();
   general_startup_requires_a_completed_block_before_retaining_a_cpu_frontier();

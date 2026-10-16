@@ -1244,6 +1244,12 @@ using StartupResult = std::variant<StartupExecution, StartupFailure>;
 [[nodiscard]] FrontendResult analyze_m68k_frontend(const FrontendProgram &program);
 [[nodiscard]] StaticCallReturnResult discover_m68k_static_call_return(const FrontendProgram &program, const M68kDecodedInstruction &call_decoded, const M68kDecodedInstruction &return_decoded);
 [[nodiscard]] FrontendResult discover_m68k_general_startup(const FrontendProgram &program);
+
+// SEG-068-T002 / ADR 0025 section 5a: cross-root aggregation of two proven Tier-1 target sets for one source address.
+enum class M68kTier1MergeOutcome { unchanged, unioned, conflict };
+[[nodiscard]] bool m68k_tier1_target_set_coherent(const M68kIndirectTargetEaSet &set);
+[[nodiscard]] M68kTier1MergeOutcome merge_m68k_tier1_target_sets(M68kIndirectTargetEaSet &into,
+                                                                 const M68kIndirectTargetEaSet &from);
 [[nodiscard]] std::string format_m68k_general_startup_result(const FrontendAnalysis &analysis);
 [[nodiscard]] std::string format_m68k_frontend_result(const FrontendResult &result);
 [[nodiscard]] FrontendVectorResult validate_and_execute_m68k_frontend_vector(const FrontendAnalysis &analysis, const FrontendOracleVector &vector, std::string_view expected_fixture_id, std::string_view expected_image_sha256);

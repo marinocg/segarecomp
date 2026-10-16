@@ -171,10 +171,11 @@ Soundness of the union, against the actual consumers:
 
 1. **Each candidate was independently validated.** Every member was produced by its own root's `admit_target` decode
    validation; a decoded-instruction mismatch between roots for any address stays fatal (`decoded_matches`).
-2. **The runtime check is not weakened.** The emitted dispatch routes only a computed target found in the candidate list
-   (`indirect_candidate_targets`) and the final compiled-entry lookup remains the membership authority; a target outside
-   the union stops with the existing typed unresolved-indirect stop. A candidate that the real program never takes is
-   inert, so a superset of the true target set cannot cause a wrong transfer.
+2. **The runtime check is not weakened.** The Tier-1 C4 dispatch emits the final candidate array and routes only a
+   computed target that is a member of it (`m68k_indirect_target_member`); any other target takes the existing typed
+   unresolved-indirect stop. The final compiled-entry lookup stays the membership authority for the shared-lookup
+   emission paths and is untouched. A candidate that the real program never takes is inert, so a superset of the true
+   target set cannot cause a wrong transfer.
 3. **Emitted-block closure covers the union.** Edges are already merged as the union over roots, so the codegen
    invariant `reached_indirect_targets == candidates` holds for the union; every candidate must still be an emitted block
    or typed frontier or the source becomes its `genesis_tier1_indirect_stop_*` pre-PC stop (no subset dispatch).
@@ -183,10 +184,18 @@ Soundness of the union, against the actual consumers:
 5. **Determinism and bound:** candidates are sorted by `(space, value)` and index values numerically; the union is capped
    at the existing 256-member per-site cap and exceeding it stays fail-closed (`startup_graph_mismatch`).
 
-Still fatal (unchanged): differing decoded bytes/provenance for any shared address; differing control EA or index
-register for one source address; a union above 256 candidates; a Tier-2/Tier-2 control-EA disagreement. Residual risk,
-shared with every single-root proof: a path from a root never discovered may reach the site with a value outside the
-union; that case fails closed at run time through item 2.
+Audit of the producers (`compute_indirect_target_set`, the post-stitch `pc_index8` proof): the candidate list is a pure
+function of the set's own metadata, `sorted-unique(pc_base + displacement + sext(index))`, and a pure `(An)` set carries
+no index values. Legitimate root-conditioned variation therefore always shows up as *different index values*. A set whose
+candidates are not derivable from its own control EA / index values, an index-register that disagrees with the EA, or
+equal index values yielding different candidates is an inconsistent fact for an equivalent proof context, and it is
+rejected (`m68k_tier1_target_set_coherent`); no new proof-provenance record is introduced.
+
+Still fatal (unchanged or newly explicit): differing decoded bytes/provenance for any shared address; differing control
+EA or index register for one source address, **checked even when the candidate sets coincide**; an incoherent set (above);
+a union above 256 candidates; a Tier-2/Tier-2 control-EA disagreement. Residual risk, shared with every single-root proof:
+a path from a root never discovered may reach the site with a value outside the union; that case fails closed at run time
+through item 2.
 
 ### 6. Canonical one-shot assisted route
 
