@@ -363,6 +363,10 @@ construction (later epochs are never looked up). The confirming run must reprodu
 (and `z80.sound_fault_epochs`/`z80.sound_fault_frame`), `@result ok ... genesis_audio=degraded z80_audio_outcome=structural_code_mismatch`; a supported title reports
 `genesis_audio = supported`. The images found before the fault are linked.
 
+Measured class (SEG-068-T003, ADR 0134): on the five faulting authorized workloads the structural mutation is the sound driver rewriting its own executable bytes
+(Z80-written; opcode and length change; before or after earlier executions), never an unseen image, an S1\* collision, a missed epoch or an operand-only change.
+Compiled structural variants were evaluated against a pre-registered bound and are **not** adopted; the fault isolation above remains the behaviour.
+
 Product status distinction: a title in this state is "game execution supported through the observed route; Genesis audio degraded / Z80 structural mutation
 unsupported", never "fully supported audio".
 
