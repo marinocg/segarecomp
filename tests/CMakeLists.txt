@@ -1160,6 +1160,10 @@ set_property(TEST sega_cd_word_ram_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_disc_to_frame_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_disc_to_frame_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_disc_to_frame_test APPEND PROPERTY LABELS full fast)
+# SEG-063-T001 Checkpoint B: bounded ISO9660 extent lookup against an independent oracle, digest-checked module admission.
+add_test(NAME sega_cd_modules_build_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_modules_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_modules_build_test APPEND PROPERTY LABELS full fast)
 add_executable(z80_executable_image_equivalence_test z80_executable_image_equivalence_test.cpp)
 target_link_libraries(z80_executable_image_equivalence_test PRIVATE segarecomp::machine_master_system segarecomp::machine_genesis_z80)
 segarecomp_enable_warnings(z80_executable_image_equivalence_test)
