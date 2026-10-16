@@ -26,7 +26,7 @@ std::string json_string(std::string_view text) {
     if (c == '"' || c == '\\') {
       out.push_back('\\');
       out.push_back(c);
-    } else if (static_cast<unsigned char>(c) < 0x20U) {
+    } else if (static_cast<unsigned char>(c) < 0x20U || static_cast<unsigned char>(c) >= 0x7FU) {  // ASCII-only JSON (disc bytes are untrusted)
       char buffer[8];
       std::snprintf(buffer, sizeof buffer, "\\u%04x", static_cast<unsigned>(static_cast<unsigned char>(c)));
       out += buffer;

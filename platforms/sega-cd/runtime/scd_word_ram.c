@@ -142,7 +142,7 @@ int scd_word_ram_access(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t 
       m->word_ram[offset] = (uint8_t)(*value >> 8);
       m->word_ram[offset + 1U] = (uint8_t)*value;
     }
-    scd_overlay_note_write(m, SCD_MEMORY_WORD, offset, width);
+    SCD_OVERLAY_NOTE_WRITE(m, SCD_MEMORY_WORD, offset, width);
   } else {
     *value = width == 1U ? m->word_ram[offset] : (uint32_t)((m->word_ram[offset] << 8) | m->word_ram[offset + 1U]);
   }

@@ -142,7 +142,7 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
     offset = (uint32_t)m->ga.prg_bank * UINT32_C(0x20000) + (a - UINT32_C(0x20000));
     if (is_write) {
       scd_ram_put(m->prg_ram, offset, width, *value);
-      scd_overlay_note_write(m, SCD_MEMORY_PRG, offset, width);
+      SCD_OVERLAY_NOTE_WRITE(m, SCD_MEMORY_PRG, offset, width);
     } else {
       *value = scd_ram_get(m->prg_ram, offset, width);
     }
@@ -156,7 +156,7 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
     const uint32_t offset = address & 0xFFFFU;
     if (is_write) {
       scd_ram_put(m->work_ram, offset, width, *value);
-      scd_overlay_note_write(m, SCD_MEMORY_WORK, offset, width);
+      SCD_OVERLAY_NOTE_WRITE(m, SCD_MEMORY_WORK, offset, width);
     } else {
       *value = scd_ram_get(m->work_ram, offset, width);
     }
@@ -176,7 +176,7 @@ static int scd_sub_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_w
         return 0;
       }
       scd_ram_put(m->prg_ram, a, width, *value);
-      scd_overlay_note_write(m, SCD_MEMORY_PRG, a, width);
+      SCD_OVERLAY_NOTE_WRITE(m, SCD_MEMORY_PRG, a, width);
     } else {
       *value = scd_ram_get(m->prg_ram, a, width);
     }
@@ -227,9 +227,10 @@ int scd_write(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uin
 
 int scd_code_guard(ScdMachine *m, uint32_t cpu, uint32_t address, const uint8_t *expected, uint32_t length) {
   uint32_t i;
-  if (scd_is_word_ram(cpu, address) && scd_cd_observe(m) != 0) return 1;
+  const int word_ram = scd_is_word_ram(cpu, address);
+  if (word_ram && scd_cd_observe(m) != 0) return 1;
   for (i = 0; i < length; ++i) {
-    const uint8_t *live = scd_code_byte(m, cpu, address + i);
+    const uint8_t *live = word_ram ? scd_code_byte(m, cpu, address + i) : scd_ram_byte(m, cpu, address + i);
     if (live == NULL || *live != expected[i]) return scd_fail(m, cpu, SCD_STOP_CODE_BYTES_MISMATCH, address, address + i);
   }
   return 0;
@@ -304,9 +305,9 @@ static void scd_hook_frame_write(void *context, uint32_t address, uint32_t size,
     if (byte != NULL) {
       *byte = (uint8_t)(value >> (8U * (size - 1U - i)));
       if (byte >= x->m->prg_ram && byte < x->m->prg_ram + SCD_PRG_RAM_BYTES)
-        scd_overlay_note_write(x->m, SCD_MEMORY_PRG, (uint32_t)(byte - x->m->prg_ram), 1U);
+        SCD_OVERLAY_NOTE_WRITE(x->m, SCD_MEMORY_PRG, (uint32_t)(byte - x->m->prg_ram), 1U);
       else if (byte >= x->m->work_ram && byte < x->m->work_ram + SCD_WORK_RAM_BYTES)
-        scd_overlay_note_write(x->m, SCD_MEMORY_WORK, (uint32_t)(byte - x->m->work_ram), 1U);
+        SCD_OVERLAY_NOTE_WRITE(x->m, SCD_MEMORY_WORK, (uint32_t)(byte - x->m->work_ram), 1U);
     }
   }
 }

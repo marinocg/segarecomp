@@ -42,9 +42,13 @@ and how a module is admitted without trusting a filename.
    instruction tick. Cost: O(written bytes x groups) to mark, O(dirty granules) to revalidate, O(group bytes) for a fresh
    selection.
 6. **Re-entry after replacement.** When revalidation fails the group becomes stale; until the next successful selection it can
-   be re-entered only at a **declared entry root** of the newly live candidate. A return address, fall-through or computed jump
-   into the replaced image is the typed stop `stale_image_selection`; no instruction of the replacement runs from it. No loader
-   completion event is assumed: DMA and copies are ordinary writes.
+   be re-entered only at a **declared entry root** of the newly live candidate. While the group is stale, a return address,
+   fall-through or computed jump into the replaced image is the typed stop `stale_image_selection`, and no instruction of the
+   replacement runs from it. The rule is bounded by that selection: once the replacement has been entered at a root, it is the
+   selected image, and a later transfer to any of its compiled entries runs it (the runtime keeps no per-return-address
+   provenance). What runs is then always the one whole-range-verified live image with its byte guards, never a mixture; a stale
+   return address that lands on a compiled entry of that image executes it, as the hardware would. No loader completion event is
+   assumed: DMA and copies are ordinary writes.
 7. **Typed failures** (stop detail = image id): `image_unknown` (the instruction at PC is no candidate's), `image_bytes_mismatch`
    (a known image's instruction is at PC but its range holds bytes no admitted image explains), `image_partially_overwritten`
    (every mismatching granule of that image is explained by another candidate over the same byte range: a mixture),

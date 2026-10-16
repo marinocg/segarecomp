@@ -367,7 +367,7 @@ Items marked **G** above are implemented as GPGX behaves; they stay here until h
 | candidates and groups | one candidate per (image, mapping); overlapping candidates with a module form a group; at most 16 groups, 16 candidates per group | C |
 | selection | the one candidate covering PC whose whole range equals live memory (64-byte granule digests through the processor's current view); no other live candidate may overlap it | C (ADR 0127) |
 | invalidation | CPU stores, CDC DMA words and exception frames mark granules; PRG bank/window and Word RAM owner/mode changes mark whole groups; revalidation before the group's next instruction | C |
-| re-entry after replacement | only at a declared root, else `stale_image_selection` | C |
+| re-entry after replacement | until the next selection, only at a declared root, else `stale_image_selection`; afterwards the selected (verified) image's entries run | C |
 | typed stops | `image_unknown`, `image_bytes_mismatch`, `image_partially_overwritten`, `ambiguous_image`, `image_entry_not_compiled`, `stale_image_selection` | C |
 | code fetch from Word RAM the sub does not own | fails closed (no live candidate / `code_bytes_mismatch`); hardware would withhold DTACK | C (recorded deviation) |
 | CDC DMA into PRG RAM (destination 5) | still `cdc_destination_unsupported`; modules reach PRG RAM by CPU copies | C |

@@ -372,6 +372,11 @@ int scd_overlay_dispatch(ScdMachine *m, uint32_t cpu);
 /* Write invalidation: `length` bytes at `offset` of `memory` changed; and: which memory a processor sees at an address changed. */
 void scd_overlay_note_write(ScdMachine *m, uint32_t memory, uint32_t offset, uint32_t length);
 void scd_overlay_note_view_change(ScdMachine *m);
+/* The write hook as the runtime calls it: free for programs without modules (no overlay registry attached). */
+#define SCD_OVERLAY_NOTE_WRITE(m, memory, offset, length) \
+  do { \
+    if ((m)->overlays != NULL) scd_overlay_note_write((m), (memory), (offset), (length)); \
+  } while (0)
 void scd_overlay_attach(ScdMachine *m, const ScdOverlayProgram *overlays);
 
 /* --- machine ---------------------------------------------------------------------------------------------------------------- */

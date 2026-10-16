@@ -3,11 +3,12 @@
  * Builds a machine in its power-on Gate Array state without a disc, attaches a hand-made registry whose candidate digests are
  * computed here with the runtime's own SHA-256 (the same rule the C++ emitter uses), and drives scd_overlay_dispatch through
  * ordinary bus writes (scd_write) of both processors. Candidate dispatchers are stubs that record which image ran. */
+#include "scd_runtime.h" /* first: it owns the Windows CRT feature selection */
+
 #include <stdio.h>
 #include <string.h>
 
 #include "runtime.h"
-#include "scd_runtime.h"
 
 static int failures;
 static int ran_image;

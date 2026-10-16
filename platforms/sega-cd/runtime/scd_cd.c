@@ -57,7 +57,7 @@ static void scd_cdc_dma_move(ScdMachine *m, uint32_t length) {
       const uint32_t at = to_2m ? dst : scd_bank_offset(m->cdc.dma_target == SCD_DMA_TARGET_BANK0 ? 0U : 1U, dst);
       m->word_ram[at] = m->cdc.buffer[src];
       m->word_ram[at + 1U] = m->cdc.buffer[src + 1U];
-      scd_overlay_note_write(m, SCD_MEMORY_WORD, at, 2U);
+      SCD_OVERLAY_NOTE_WRITE(m, SCD_MEMORY_WORD, at, 2U);
     }
     src = (src + 2U) & 0x3FFEU;
     dst = (dst + 2U) & mask;
