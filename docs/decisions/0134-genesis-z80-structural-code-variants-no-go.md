@@ -39,6 +39,8 @@ Distinctions, per the task:
   and **after earlier executions** (the alternation and the Lion King overlay). The modifying agent is the sound driver itself.
 - **Case D (shape-stable operand): excluded.** The differing byte is structural (the guard's structural bit) in all five; no immediate or
   displacement is involved. T012 is correct.
+- A plain restart (empty hold window) binds the previously bound image without a lookup; a Z80 self-modification followed by a restart is
+  the same mechanism and is caught by the same guard.
 - Not a new epoch: no `/RESET` or runnable transition accompanies any of these writes; ADR 0073 forbids deriving an epoch from a mismatch.
 
 ## Phase B - existing-mechanism evaluation
@@ -61,7 +63,9 @@ Outcome:
 
 1. **Bound B1 is exceeded** by the Aladdin / Earthworm Jim / Jurassic Park driver family (three forms at the first address: image
    form, return, exchange; the alternation continued for as long as it was re-run). That is three of the five workloads and the same
-   mechanism.
+   mechanism. The wording of B1 is ambiguous: counting only *executed* forms (the image form never ran, the driver patched it first) the
+   family has 2 and B1 would be met. The NO-GO therefore rests on outcomes 2-3 (closure and design), not on B1 alone; B1 is reported as
+   literally exceeded and is not reinterpreted after measurement.
 2. **Closure is not established and cannot be by the bounded pass.** The pass observes one new form per fault; it never executes
    an uncompiled form, and a window with no further change proves nothing about forms not yet reached. For the alternating family the
    observed set had not closed; for The Lion King a code overlay (different instruction lengths) recurs per epoch, so an unbounded
