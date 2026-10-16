@@ -259,6 +259,16 @@ int run_tests() {
     expect(save_launcher_settings(keep, file) && load_launcher_settings(file).keep_old_artifacts, "keep_old_artifacts round trips");
     spit(file, "{\"keep_old_artifacts\":\"yes\"}");
     expect(!load_launcher_settings(file).keep_old_artifacts, "a non-boolean keep_old_artifacts falls back to off");
+    // SEG-069-T003: the first-run intermediates question. A missing file is a new profile (not answered); a file written before the marker existed counts as answered.
+    expect(!load_launcher_settings(dir / "library" / "missing.json").intermediates_choice_made, "a missing settings file has not answered the first-run question");
+    spit(file, "{\"view\":\"grid\",\"cleanup_mode\":\"keep_last_n\"}");
+    expect(load_launcher_settings(file).intermediates_choice_made && load_launcher_settings(file).cleanup.mode == "keep_last_n", "a settings file without the marker counts as answered and keeps its mode");
+    LauncherSettings answered;
+    answered.cleanup.mode = "intermediates";
+    answered.intermediates_choice_made = true;
+    expect(save_launcher_settings(answered, file) && load_launcher_settings(file).intermediates_choice_made && load_launcher_settings(file).cleanup.mode == "intermediates", "the answer and its marker round trip");
+    LauncherSettings unanswered;
+    expect(save_launcher_settings(unanswered, file) && !load_launcher_settings(file).intermediates_choice_made, "an unanswered marker round trips as unanswered");
   }
   step("library view helpers");
   {  // box-art frame, region column, build queue (SEG-067)

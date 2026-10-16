@@ -132,6 +132,15 @@ if(BUILD_TESTING)
   set_property(TEST launcher_default_mode_test PROPERTY TIMEOUT 600)
 endif()
 
+# SEG-069-T003: the one-time first-run question about build intermediates (real window, virtual gamepad).
+if(BUILD_TESTING)
+  add_test(NAME launcher_first_run_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_first_run_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_first_run_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_first_run_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_first_run_test PROPERTY TIMEOUT 600)
+endif()
+
 # SEG-058: covers, Libretro candidate naming and launcher settings.
 add_executable(launcher_ui_support_test launcher_ui_support_test.cpp)
 target_link_libraries(launcher_ui_support_test PRIVATE segarecomp_launcher_core segarecomp_launcher_ui_support segarecomp_zlib)

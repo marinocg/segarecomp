@@ -18,6 +18,9 @@ struct LauncherSettings {
   bool keep_old_artifacts = false;      // a recompile deletes the game's older build folders unless this is on
   bool adopt_cache_on_start = true;     // read the product-owned cache folder once at start and adopt verifiable finished builds
   CleanupPolicy cleanup;
+  // SEG-069-T003: the one-time first-run question "keep or remove build intermediates" has been answered (its answer is `cleanup.mode`, the same
+  // policy Settings > Build & Runtime edits). A settings file written before this member existed counts as answered: an upgrading profile is never asked.
+  bool intermediates_choice_made = false;
   std::vector<std::string> preferred_regions = {"USA", "Europe", "Japan"};
   bool provider_opt_in = false;         // reserved: no provider is packaged, the toggle is shown disabled
 };

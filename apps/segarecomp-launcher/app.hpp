@@ -64,7 +64,7 @@ struct ImportItem {
 };
 
 struct Modal {
-  enum class Kind { none, message, plan, remove_entries, clear_library, restore_defaults } kind = Kind::none;
+  enum class Kind { none, message, plan, remove_entries, clear_library, restore_defaults, first_run_intermediates } kind = Kind::none;
   std::string title;
   std::vector<std::string> lines;
   Plan plan;
@@ -160,6 +160,9 @@ private:
   struct Badge { std::string label; ImU32 color; bool spinner; };
   [[nodiscard]] Badge badge_for(const LibraryEntry &entry, const StatusInfo &info) const;
   void finish_build();
+  // SEG-069-T003: records the first-run answer (Keep -> cleanup.mode "never", Remove -> "intermediates"); false (and nothing changed) when it cannot be saved.
+  bool apply_intermediates_choice(bool remove_after_build);
+  bool modal_focus_done_ = false;  // the first-run sheet puts keyboard/gamepad focus on its first choice once, when it opens
   // SEG-069-T002: the mode the game will really build as, for display: the stored intent, except a Master System game whose Optimized the product has
   // stated it does not offer (that is Compatibility). While the capability probe is pending the stored intent is shown.
   [[nodiscard]] std::string selected_mode_label(const LibraryEntry &entry) const;

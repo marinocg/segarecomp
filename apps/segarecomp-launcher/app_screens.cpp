@@ -635,7 +635,7 @@ void App::draw_library(float w, float h) {
 // ---------------------------------------------------------------- modal
 
 void App::draw_modal(float w, float h) {
-  if (modal_.kind == Modal::Kind::none) return;
+  if (modal_.kind == Modal::Kind::none) { modal_focus_done_ = false; return; }
   ImGui::SetNextWindowPos(ImVec2(0, 0));
   ImGui::SetNextWindowSize(ImVec2(w, h));
   ImGui::SetNextWindowFocus();
@@ -669,6 +669,12 @@ void App::draw_modal(float w, float h) {
   } else if (modal_.kind == Modal::Kind::clear_library) {
     subtitle = "Every game is removed from the library and the launcher forgets its history.";
     keeps = {"Build folders in the cache (use Storage to delete them)", "Your ROM files", "ROM copies extracted from ZIP archives"};
+  } else if (modal_.kind == Modal::Kind::first_run_intermediates) {
+    subtitle = "While building, Segarecomp creates intermediate files: generated C, object files and logs. They help with debugging but take disk space. Removing them after a successful build keeps the playable game and its essential metadata and diagnostics.";
+    keeps = {"Your ROM files (never touched)", "The playable game and its metadata after each build"};
+    notes = {"You can change this any time in Settings > Build & Runtime.", "Press Esc (or B on a controller) to decide later."};
+    if (!modal_.lines.empty()) for (const auto &l : modal_.lines) notes.push_back(l);
+    body.clear();
   } else if (modal_.kind == Modal::Kind::restore_defaults) {
     subtitle = "Launcher preferences (view, sort, compact mode, cleanup policy, region order) return to their defaults.";
     keeps = {"The library and builds", "Viewer controls and video settings"};
@@ -748,8 +754,14 @@ void App::draw_modal(float w, float h) {
   ImGui::EndChild();
   ImGui::PopStyleVar();
   const float bw = (inner - ctx_.u(12.0F)) * 0.5F, bh = ctx_.u(38.0F), by = b.y - ctx_.u(24.0F) - bh;
-  bool confirm = false, cancel = false;
-  if (modal_.kind != Modal::Kind::message) {
+  bool confirm = false, cancel = false, choose_keep = false, choose_remove = false;
+  if (modal_.kind == Modal::Kind::first_run_intermediates) {
+    ImGui::SetCursorScreenPos(ImVec2(lx, by));
+    choose_keep = button(ctx_, "mod_keep", "Keep intermediates", ImVec2(bw, bh), Style::primary);
+    if (!modal_focus_done_) { ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow()); ImGui::SetNavCursorVisible(true); modal_focus_done_ = true; }  // focus starts inside the sheet
+    ImGui::SetCursorScreenPos(ImVec2(lx + bw + ctx_.u(12.0F), by));
+    choose_remove = button(ctx_, "mod_remove", "Remove after builds", ImVec2(bw, bh), Style::secondary);
+  } else if (modal_.kind != Modal::Kind::message) {
     const char *confirm_label = is_plan ? "Remove Files" : (modal_.kind == Modal::Kind::restore_defaults ? "Restore" : "Remove");
     ImGui::SetCursorScreenPos(ImVec2(lx, by));
     cancel = button(ctx_, "mod_cancel", "Cancel", ImVec2(bw, bh), Style::secondary);
@@ -759,8 +771,18 @@ void App::draw_modal(float w, float h) {
     ImGui::SetCursorScreenPos(ImVec2(b.x - ctx_.u(24.0F) - ctx_.u(150.0F), by));
     cancel = button(ctx_, "mod_ok", "OK", ImVec2(ctx_.u(150.0F), bh), Style::primary);
   }
-  if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) cancel = true;
+  if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) cancel = true;  // Esc / East: back out
   ImGui::End();
+  if (modal_.kind == Modal::Kind::first_run_intermediates) {
+    if (choose_keep || choose_remove) {
+      if (apply_intermediates_choice(choose_remove)) { modal_ = Modal{}; toast(choose_remove ? "Intermediates will be removed after successful builds." : "Intermediates will be kept."); }
+      else { modal_.lines = {"Your choice could not be saved. Try again."}; toast("Settings could not be saved.", true); }
+    } else if (cancel) {
+      modal_ = Modal{};  // decide later: nothing is recorded, the question returns on the next start
+      trace("onboarding=intermediates_deferred");
+    }
+    return;
+  }
   if (confirm) {
     const Modal m = modal_;
     modal_ = Modal{};
@@ -788,6 +810,7 @@ void App::draw_modal(float w, float h) {
       toast("Library cleared (" + std::to_string(n) + " entries). Builds and ROMs were not touched.");
     } else if (m.kind == Modal::Kind::restore_defaults) {
       settings_ = default_launcher_settings();
+      settings_.intermediates_choice_made = true;  // restoring defaults never re-asks the one-time first-run question
       save_settings();
       toast("Launcher preferences restored.");
     }

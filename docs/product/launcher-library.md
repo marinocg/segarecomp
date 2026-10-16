@@ -98,6 +98,13 @@ refused while a build or game runs (one busy guard). Settings > Build & Runtime 
 remove intermediates, keep the newest N playable games (older ones are reduced to metadata only; favorites, running games and the game being built
 are excluded) or a soft limit that only reminds you. The default is *never*.
 
+**First run.** A genuinely new profile (no settings, library or viewer-settings file yet) is asked once, in a modal that is operable by keyboard and gamepad
+(focus starts on the first choice, Esc/East decides later), whether to **Keep intermediates** (policy *never*) or **Remove after builds** (policy *remove
+intermediates*). The choice writes the same cleanup policy Settings > Build & Runtime edits, together with a one-time `intermediates_choice_made` marker in
+`launcher-settings.json`; the marker is written only when the file was saved (a failed save keeps the question open). Existing profiles, including a
+settings file written before the marker existed, are never asked and keep their policy; restoring launcher defaults never re-asks. Scripted windows
+(GUI scripts, screenshots, autoplay) skip the question unless `SEGARECOMP_GUI_ONBOARDING=1` (new profiles) or `=always` (test seam) is set.
+
 ## Covers and metadata provider
 
 Covers are images (PNG or JPEG, up to 2 MiB and 2048 px, validated by content and fully decoded) copied into `library/covers/<sha256>.<ext>`.

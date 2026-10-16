@@ -132,6 +132,16 @@ void App::save_settings() {
   if (!save_launcher_settings(settings_, settings_file_)) toast("Settings could not be saved.", true);
 }
 
+bool App::apply_intermediates_choice(bool remove_after_build) {
+  LauncherSettings next = settings_;
+  next.cleanup.mode = remove_after_build ? "intermediates" : "never";
+  next.intermediates_choice_made = true;
+  if (!save_launcher_settings(next, settings_file_)) return false;  // nothing is claimed: the question stays open and can be retried
+  settings_ = next;
+  trace(std::string("onboarding=intermediates_chosen mode=") + settings_.cleanup.mode);
+  return true;
+}
+
 void App::viewer_settings_changed() {
   sv_settings_sanitize(&viewer_settings_);
   std::error_code ec;
@@ -1115,6 +1125,8 @@ void App::run_script() {
     else if (key == "library_scroll") actual = std::to_string(static_cast<int>(std::lround(library_scroll_)));
     else if (key == "detail") actual = page_ == Page::details && catalog_.find_id(detail_id_) != nullptr ? catalog_.find_id(detail_id_)->title() : "-";
     else if (key == "nav_items") actual = nav_items_;
+    else if (key == "cleanup_mode") actual = settings_.cleanup.mode;
+    else if (key == "intermediates_choice") actual = settings_.intermediates_choice_made ? "1" : "0";
     else if (key == "mode") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr ? selected_mode_label(*catalog_.find_id(detail_id_)) : "-";
     else if (key == "building") actual = !detail_id_.empty() && is_building(detail_id_) ? "1" : "0";
     else if (key == "stopping") actual = !detail_id_.empty() && is_stopping(detail_id_) ? "1" : "0";
@@ -1146,6 +1158,9 @@ int App::run() {
   init_ui();
   trace("startup=catalog");
   // Library: load the persistent catalog, then (once, read-only) adopt verifiable finished builds of the product-owned cache folder.
+  // SEG-069-T003: a genuinely new profile has no settings, library or viewer-settings file yet (checked before anything creates them).
+  std::error_code profile_ec;
+  bool fresh_profile = !fs::exists(settings_file_, profile_ec) && !fs::exists(catalog_.file(), profile_ec) && !fs::exists(viewer_settings_file_, profile_ec);
   catalog_.load();
   catalog_notice_ = catalog_.notice();
   settings_ = load_launcher_settings(settings_file_);
@@ -1156,6 +1171,26 @@ int App::run() {
     const auto records = [&] { std::size_t n = 0; for (const auto &e : catalog_.entries()) n += e.builds.size(); return n; };
     const std::size_t before = records();
     if (catalog_.migrate_cache(cache_dir_, now_seconds()) != 0 || records() != before) save_catalog();
+  }
+  if (!catalog_.entries().empty()) fresh_profile = false;  // adoption of an existing product cache means this is not a new installation
+  {
+    // The first-run question is interactive only: scripted/automated windows (GUI scripts, screenshots, autoplay) are never blocked by it unless a
+    // test asks for it explicitly with SEGARECOMP_GUI_ONBOARDING=1. Everything else counts as already answered, in memory, so a later settings
+    // save cannot turn an existing or automated profile into a "new" one.
+    const bool automated = SDL_getenv("SEGARECOMP_GUI_SCRIPT") != nullptr || SDL_getenv("SEGARECOMP_GUI_AUTOPLAY") != nullptr || SDL_getenv("SEGARECOMP_SHOT_PATH") != nullptr || SDL_getenv("SEGARECOMP_SHOT_ROM") != nullptr;
+    // SEGARECOMP_GUI_ONBOARDING=1 lets an automated window ask on a genuinely new profile; =always asks regardless of the profile (test seam).
+    const char *onboarding_env = SDL_getenv("SEGARECOMP_GUI_ONBOARDING");
+    const bool forced = onboarding_env != nullptr, always = forced && std::string(onboarding_env) == "always";
+    if (!settings_.intermediates_choice_made) {
+      if (always || (fresh_profile && (!automated || forced))) {
+        modal_ = Modal{};
+        modal_.kind = Modal::Kind::first_run_intermediates;
+        modal_.title = "Keep build intermediates?";
+        trace("onboarding=intermediates_shown");
+      } else {
+        settings_.intermediates_choice_made = true;
+      }
+    }
   }
   if (layout_.problem.empty()) sms_probe_ = std::async(std::launch::async, [lay = layout_] { return sms_optimized_available_blocking(lay); });
   if (!catalog_notice_.empty()) toast(catalog_notice_, true);

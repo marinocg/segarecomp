@@ -9,6 +9,7 @@
 //   FAKE_OPT_FALLBACK=1   an Optimized request builds the broad program and reports a fallback
 //   FAKE_BUILD_ARGS_LOG=<file>  (SEG-069-T002) one line is appended per `build`: its argument list from `--rom` on, space separated
 //   FAKE_IDENTITY_DELAY_MS=<n>  (SEG-069-T002) every `aot-policy-identity` answer is delayed (models a slow capability probe)
+//   FAKE_BUILD_INTERMEDIATES=1  (SEG-069-T003) a successful build also leaves `generated.c` and `obj/` (what the launcher's intermediates cleanup removes)
 //   FAKE_BUILD_HOLD=<hb>  (SEG-069-T001) the build never finishes by itself: it starts a grandchild (this binary as `--sleeper <hb>`) that appends one
 //                         byte to <hb> every 20 ms, writes <output>/hold_started and <hb>.started, and then idles. Cancel tests assert the whole tree stops.
 #include <chrono>
@@ -133,6 +134,11 @@ int main(int argc, char **argv) {
                                        << "\",\"fallback_class\":\"" << (fallback ? "producer_failed" : "none") << "\",\"model_family\":\""
                                        << (effective == "ml_region_z80" ? "sms_z80_d512hp" : "none") << "\",\"validator\":\"not_run\",\"selected_ppm\":650000,\"admitted_ppm\":650000"
                                        << ",\"policy_identity\":\"" << identity(policy, platform) << "\",\"identity\":\"" << hex64("b|" + out.string()) << "\"}}\n";
+    if (env("FAKE_BUILD_INTERMEDIATES") == "1") {
+      std::ofstream(out / "generated.c") << "/* synthetic */";
+      fs::create_directories(out / "obj");
+      std::ofstream(out / "obj" / "unit.o") << "synthetic object";
+    }
     std::ofstream(out / "policy.txt") << (fallback ? std::string("compatibility") : policy);  // the program that was really built
 #if defined(_WIN32)
     const char *suffix = ".exe";
