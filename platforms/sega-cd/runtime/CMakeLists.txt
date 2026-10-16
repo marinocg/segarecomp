@@ -8,6 +8,7 @@ add_library(segarecomp_runtime_sega_cd STATIC
   scd_gate_array.c
   scd_machine.c
   scd_main.c
+  scd_overlay.c
   scd_vdp.c
   scd_word_ram.c
 )

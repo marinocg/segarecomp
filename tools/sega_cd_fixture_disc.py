@@ -797,7 +797,8 @@ ISO_DEFECTS = ("bad_identifier", "no_terminator", "duplicate_primary", "endian",
 def module_code(kind):
     """Position-independent module images (no absolute self-reference): the same bytes run at $080000 and at $020000."""
     m = Asm(0)
-    m.moveq(1, 0)                                     # identical first instruction in A, A' and B
+    if kind != "c":
+        m.moveq(1, 0)                                 # identical first instruction in A, A' and B
     if kind in ("a", "a2", "apfx"):
         m.move("w", imm(0xAAAB if kind == "a2" else 0xAAAA), absl(MARK_A))
         m.quick("add", "w", 1, absl(COUNT_A))

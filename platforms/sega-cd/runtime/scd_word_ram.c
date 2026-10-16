@@ -20,6 +20,9 @@
 static uint32_t scd_bank_offset(uint32_t bank, uint32_t offset) { return (offset >> 1) * 4U + bank * 2U + (offset & 1U); }
 static uint32_t scd_main_bank(const ScdMachine *m) { return (m->ga.mode & SCD_MODE_RET) ? 1U : 0U; }
 
+static int scd_word_ram_main_mode_apply(ScdMachine *m, uint32_t value);
+static int scd_word_ram_sub_mode_apply(ScdMachine *m, uint32_t value);
+
 static void scd_word_ram_resume_sub(ScdMachine *m) {
   if (m->ga.sub_wait) {
     ScdCpu *sub = &m->cpu[SCD_SUB];
@@ -30,9 +33,18 @@ static void scd_word_ram_resume_sub(ScdMachine *m) {
 }
 
 int scd_word_ram_main_mode_write(ScdMachine *m, uint32_t value, uint32_t pc) {
+  const uint8_t mode_before = m->ga.mode, bank_before = m->ga.prg_bank;
+  int status;
   (void)pc;
   if (scd_cd_observe(m) != 0) return 1;
   m->ga.prg_bank = (uint8_t)((value >> 6) & 3U);
+  status = scd_word_ram_main_mode_apply(m, value);
+  /* SEG-063: which bytes a processor sees at an executable address changed (PRG bank, Word RAM owner): revalidate overlays. */
+  if (m->ga.prg_bank != bank_before || ((m->ga.mode ^ mode_before) & (SCD_MODE_1M | SCD_MODE_RET))) scd_overlay_note_view_change(m);
+  return status;
+}
+
+static int scd_word_ram_main_mode_apply(ScdMachine *m, uint32_t value) {
   if (m->ga.mode & SCD_MODE_1M) {
     if (value & 0x02U) m->ga.dmna_int = 1U; /* 1M: DMNA = 1 only latches the request */
     else m->ga.mode = (uint8_t)(m->ga.mode | SCD_MODE_DMNA); /* 1M: DMNA = 0 sets the DMNA bit */
@@ -50,9 +62,17 @@ int scd_word_ram_main_mode_write(ScdMachine *m, uint32_t value, uint32_t pc) {
 }
 
 int scd_word_ram_sub_mode_write(ScdMachine *m, uint32_t value, uint32_t pc) {
-  const uint32_t current = m->ga.mode;
+  const uint8_t mode_before = m->ga.mode;
+  int status;
   (void)pc;
   if (scd_cd_observe(m) != 0) return 1;
+  status = scd_word_ram_sub_mode_apply(m, value);
+  if ((m->ga.mode ^ mode_before) & (SCD_MODE_1M | SCD_MODE_RET)) scd_overlay_note_view_change(m);
+  return status;
+}
+
+static int scd_word_ram_sub_mode_apply(ScdMachine *m, uint32_t value) {
+  const uint32_t current = m->ga.mode;
   value &= 0x1FU;
   if ((value ^ current) & (SCD_MODE_1M | SCD_MODE_RET)) {
     if (value & SCD_MODE_1M) { /* 1M mode (from 2M, or a RET change in 1M): RET selects the banks, the swap completes at once */
@@ -122,6 +142,7 @@ int scd_word_ram_access(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t 
       m->word_ram[offset] = (uint8_t)(*value >> 8);
       m->word_ram[offset + 1U] = (uint8_t)*value;
     }
+    scd_overlay_note_write(m, SCD_MEMORY_WORD, offset, width);
   } else {
     *value = width == 1U ? m->word_ram[offset] : (uint32_t)((m->word_ram[offset] << 8) | m->word_ram[offset + 1U]);
   }

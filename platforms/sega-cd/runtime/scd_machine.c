@@ -88,6 +88,47 @@ static uint8_t *scd_ram_byte(ScdMachine *m, uint32_t cpu, uint32_t address) {
   return NULL;
 }
 
+/* SEG-063 (ADR 0132): side-effect-free view of every RAM that can hold executable bytes for `cpu` - scd_ram_byte plus Word RAM as
+ * its current owner sees it (2M: the owner's linear view; 1M: the processor's bank) - for byte comparison against known images.
+ * NULL where the processor sees no RAM (a device, an absent region, Word RAM it does not own, the 1M cell/dot-image views). */
+const uint8_t *scd_code_byte(const ScdMachine *m, uint32_t cpu, uint32_t address) {
+  address &= UINT32_C(0x00FFFFFF);
+  if (cpu == SCD_MAIN) {
+    if (address >= UINT32_C(0x00E00000)) return &m->work_ram[address & 0xFFFFU];
+    if (address < UINT32_C(0x00200000)) {
+      if ((address & UINT32_C(0x3FFFF)) >= UINT32_C(0x20000) && m->ga.prg_window)
+        return &m->prg_ram[(uint32_t)m->ga.prg_bank * UINT32_C(0x20000) + (address & UINT32_C(0x1FFFF))];
+      return NULL;
+    }
+    if (address < UINT32_C(0x00400000)) {
+      const uint32_t a = (address & UINT32_C(0x23FFFF)) - UINT32_C(0x00200000);
+      if (!(m->ga.mode & SCD_MODE_1M)) return (m->ga.mode & SCD_MODE_RET) ? &m->word_ram[a] : NULL;
+      if (a >= UINT32_C(0x20000)) return NULL;
+      return &m->word_ram[(a >> 1) * 4U + ((m->ga.mode & SCD_MODE_RET) ? 2U : 0U) + (a & 1U)];
+    }
+    return NULL;
+  }
+  {
+    const uint32_t a = address & UINT32_C(0xFFFFF);
+    if (a < SCD_PRG_RAM_BYTES) return &m->prg_ram[a];
+    if (a < UINT32_C(0xC0000)) return (m->ga.mode & (SCD_MODE_1M | SCD_MODE_RET)) ? NULL : &m->word_ram[a - UINT32_C(0x80000)];
+    if (a < UINT32_C(0xE0000)) {
+      const uint32_t o = a - UINT32_C(0xC0000);
+      if (!(m->ga.mode & SCD_MODE_1M)) return NULL;
+      return &m->word_ram[(o >> 1) * 4U + ((m->ga.mode & SCD_MODE_RET) ? 0U : 2U) + (o & 1U)];
+    }
+  }
+  return NULL;
+}
+
+/* 1 when `address` of `cpu` reads Word RAM (a code fetch there is a Word RAM observation point: the CDC DMA is brought up first). */
+static int scd_is_word_ram(uint32_t cpu, uint32_t address) {
+  address &= UINT32_C(0x00FFFFFF);
+  if (cpu == SCD_MAIN) return address >= UINT32_C(0x00200000) && address < UINT32_C(0x00400000);
+  address &= UINT32_C(0xFFFFF);
+  return address >= SCD_PRG_RAM_BYTES && address < UINT32_C(0xE0000);
+}
+
 /* One byte- or word-wide bus cycle of the main processor (contract section 3; mirrors as in GPGX scd_init). */
 static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
   if (address < UINT32_C(0x00200000)) { /* expansion port: 128 KiB BIOS + PRG-RAM window, mirrored every 256 KiB */
@@ -99,8 +140,12 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
     }
     if (!m->ga.prg_window) return scd_unused(m, SCD_MAIN, address, width, is_write, value, pc);
     offset = (uint32_t)m->ga.prg_bank * UINT32_C(0x20000) + (a - UINT32_C(0x20000));
-    if (is_write) scd_ram_put(m->prg_ram, offset, width, *value);
-    else *value = scd_ram_get(m->prg_ram, offset, width);
+    if (is_write) {
+      scd_ram_put(m->prg_ram, offset, width, *value);
+      scd_overlay_note_write(m, SCD_MEMORY_PRG, offset, width);
+    } else {
+      *value = scd_ram_get(m->prg_ram, offset, width);
+    }
     return 0;
   }
   if (address < UINT32_C(0x00400000)) return scd_word_ram_access(m, SCD_MAIN, address & UINT32_C(0x23FFFF), width, is_write, value, pc);
@@ -109,8 +154,12 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
   if (address >= UINT32_C(0x00C00000) && address < UINT32_C(0x00C00008)) return scd_vdp_access(m, address, width, is_write, value, pc);
   if (address >= UINT32_C(0x00E00000)) { /* 64 KiB work RAM mirrored through $E00000-$FFFFFF */
     const uint32_t offset = address & 0xFFFFU;
-    if (is_write) scd_ram_put(m->work_ram, offset, width, *value);
-    else *value = scd_ram_get(m->work_ram, offset, width);
+    if (is_write) {
+      scd_ram_put(m->work_ram, offset, width, *value);
+      scd_overlay_note_write(m, SCD_MEMORY_WORK, offset, width);
+    } else {
+      *value = scd_ram_get(m->work_ram, offset, width);
+    }
     return 0;
   }
   return scd_fail_access(m, SCD_MAIN, SCD_STOP_UNMAPPED, pc, address, width, is_write);
@@ -127,6 +176,7 @@ static int scd_sub_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_w
         return 0;
       }
       scd_ram_put(m->prg_ram, a, width, *value);
+      scd_overlay_note_write(m, SCD_MEMORY_PRG, a, width);
     } else {
       *value = scd_ram_get(m->prg_ram, a, width);
     }
@@ -177,8 +227,9 @@ int scd_write(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uin
 
 int scd_code_guard(ScdMachine *m, uint32_t cpu, uint32_t address, const uint8_t *expected, uint32_t length) {
   uint32_t i;
+  if (scd_is_word_ram(cpu, address) && scd_cd_observe(m) != 0) return 1;
   for (i = 0; i < length; ++i) {
-    const uint8_t *live = scd_ram_byte(m, cpu, address + i);
+    const uint8_t *live = scd_code_byte(m, cpu, address + i);
     if (live == NULL || *live != expected[i]) return scd_fail(m, cpu, SCD_STOP_CODE_BYTES_MISMATCH, address, address + i);
   }
   return 0;
@@ -250,7 +301,13 @@ static void scd_hook_frame_write(void *context, uint32_t address, uint32_t size,
   uint32_t i;
   for (i = 0; i < size; ++i) {
     uint8_t *byte = scd_ram_byte(x->m, x->cpu, address + i);
-    if (byte != NULL) *byte = (uint8_t)(value >> (8U * (size - 1U - i)));
+    if (byte != NULL) {
+      *byte = (uint8_t)(value >> (8U * (size - 1U - i)));
+      if (byte >= x->m->prg_ram && byte < x->m->prg_ram + SCD_PRG_RAM_BYTES)
+        scd_overlay_note_write(x->m, SCD_MEMORY_PRG, (uint32_t)(byte - x->m->prg_ram), 1U);
+      else if (byte >= x->m->work_ram && byte < x->m->work_ram + SCD_WORK_RAM_BYTES)
+        scd_overlay_note_write(x->m, SCD_MEMORY_WORK, (uint32_t)(byte - x->m->work_ram), 1U);
+    }
   }
 }
 
