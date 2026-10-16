@@ -123,6 +123,15 @@ if(BUILD_TESTING)
   set_property(TEST launcher_build_cancel_gui_test PROPERTY TIMEOUT 300)
 endif()
 
+# SEG-069-T002: Optimized is the default for new Genesis (gen2) and Master System games, with the product-stated SMS capability gate.
+if(BUILD_TESTING)
+  add_test(NAME launcher_default_mode_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_default_mode_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_default_mode_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_default_mode_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_default_mode_test PROPERTY TIMEOUT 600)
+endif()
+
 # SEG-058: covers, Libretro candidate naming and launcher settings.
 add_executable(launcher_ui_support_test launcher_ui_support_test.cpp)
 target_link_libraries(launcher_ui_support_test PRIVATE segarecomp_launcher_core segarecomp_launcher_ui_support segarecomp_zlib)

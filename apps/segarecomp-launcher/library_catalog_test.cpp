@@ -191,6 +191,57 @@ int main() {
     expect(e.rom_path_unknown && e.rom_paths.empty() && e.current_build_key == key32('2') && e.title() == "Old Game", "adopted without an invented ROM path, bound to its build key");
     expect(c.migrate_cache(cache, 2000) == 0 && c.entries().size() == 1 && c.entries()[0].builds.size() == 1, "migration is idempotent");
   }
+  {  // SEG-069-T002: Optimized is the default for both platforms; stored selections are honoured; legacy Genesis v1 becomes gen2
+    const fs::path defaults = dir / "defaults" / "library.json";
+    Catalog c(defaults);
+    c.load();
+    c.import_rom(rom("genesis", 'd', "/roms/d.md"), 1);
+    c.import_rom(rom("master-system", 'e', "/roms/e.sms"), 1);
+    const LibraryEntry *genesis_entry = c.find("genesis", digest('d')), *sms_entry = c.find("master-system", digest('e'));
+    expect(genesis_entry->aot_policy == "optimized" && genesis_entry->aot_model == "gen2", "a new Genesis game defaults to Optimized (gen2)");
+    expect(sms_entry->aot_policy == "optimized" && sms_entry->aot_model == "v1", "a new Master System game defaults to Optimized and never carries a Genesis model");
+    const RomView genesis_view = view_from_entry(*genesis_entry);
+    expect(genesis_view.aot_policy == "optimized" && genesis_view.aot_model == "gen2", "the Genesis build request is Optimized + gen2");
+    expect(!genesis_view.optimized() || genesis_view.optimized_gen2(), "Genesis Optimized is the gen2 request");
+    RomView compat_rom = rom("genesis", 'f', "/roms/f.md");
+    c.import_rom(compat_rom, 1);
+    expect(c.find("genesis", digest('f'))->aot_policy == "optimized", "the RomView's own (headless) policy never leaks into the library default");
+    c.find("genesis", digest('d'))->aot_policy = "compatibility";   // an explicit selection
+    c.import_rom(rom("master-system", '9', "/roms/9.sms"), 1);
+    c.find("master-system", digest('9'))->aot_policy = "compatibility";
+    expect(c.save(), "defaults save");
+    Catalog back(defaults);
+    back.load();
+    const LibraryEntry *g = back.find("genesis", digest('d'));
+    const LibraryEntry *m = back.find("master-system", digest('e'));
+    const LibraryEntry *mc = back.find("master-system", digest('9'));
+    expect(g != nullptr && g->aot_policy == "compatibility", "an explicit Compatibility selection survives a round trip");
+    expect(m != nullptr && m->aot_policy == "optimized" && m->aot_model == "v1", "the SMS Optimized intent survives a round trip (it is not rewritten while the capability is unknown)");
+    expect(mc != nullptr && mc->aot_policy == "compatibility", "an explicit SMS Compatibility selection survives a round trip");
+
+    // Legacy records.
+    const auto legacy = [&](const std::string &platform, char sha, const std::string &policy_member) {
+      return "{\"platform\":\"" + platform + "\",\"sha256\":\"" + digest(sha) + "\",\"detected_title\":\"Legacy\"" + policy_member + "}";
+    };
+    spit(defaults, "{\"schema\":1,\"games\":[" +
+                       legacy("genesis", '1', ",\"aot_policy\":\"optimized\",\"aot_model\":\"v1\"") + "," +
+                       legacy("genesis", '2', ",\"aot_policy\":\"optimized\",\"aot_model\":\"gen2\"") + "," +
+                       legacy("genesis", '3', ",\"aot_policy\":\"compatibility\",\"aot_model\":\"v1\"") + "," +
+                       legacy("genesis", '4', "") + "," +
+                       legacy("master-system", '5', ",\"aot_policy\":\"compatibility\"") + "," +
+                       legacy("master-system", '6', ",\"aot_policy\":\"optimized\",\"aot_model\":\"gen2\"") + "]}");
+    Catalog old(defaults);
+    old.load();
+    const auto pick = [&](const std::string &platform, char sha) { return old.find(platform, digest(sha)); };
+    expect(pick("genesis", '1') && pick("genesis", '1')->aot_policy == "optimized" && pick("genesis", '1')->aot_model == "gen2", "legacy Optimized/v1 takes the new Optimized (gen2) meaning");
+    expect(pick("genesis", '2') && pick("genesis", '2')->aot_policy == "optimized" && pick("genesis", '2')->aot_model == "gen2", "legacy Optimized/gen2 is unchanged");
+    expect(pick("genesis", '3') && pick("genesis", '3')->aot_policy == "compatibility", "legacy Compatibility is preserved");
+    expect(pick("genesis", '4') && pick("genesis", '4')->aot_policy == "optimized", "a record without a stored selection takes the default");
+    expect(pick("master-system", '5') && pick("master-system", '5')->aot_policy == "compatibility", "legacy SMS Compatibility is preserved");
+    expect(pick("master-system", '6') && pick("master-system", '6')->aot_model == "v1", "a Genesis model never reaches a Master System entry");
+    const RomView legacy_view = view_from_entry(*pick("genesis", '1'));
+    expect(legacy_view.aot_model == "gen2", "the legacy v1 selection builds gen2");
+  }
   fs::remove_all(dir);
   if (failures != 0) return 1;
   std::cout << "library_catalog_test: ok\n";

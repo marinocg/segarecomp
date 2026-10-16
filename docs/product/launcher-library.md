@@ -30,8 +30,11 @@ file, the build cache or the product: no placeholder values.
   favorite, platform, build state and ROM link health, one sentence of what matters now, and the two dominant actions **Play** (only for an executable whose
   identity matches the configuration exactly) and **Build / Recompile / Rebuild / Try again** (a missing ROM makes **Locate ROM** the primary action instead).
   Rarer actions are in **More**: build log, open build folder, manage storage, change/remove cover, find cover online, copy SHA-256, locate ROM and (set
-  apart) remove from library. The **Build Configuration** card follows: **Build mode** (Compatibility | Optimized; for Genesis an **Experimental model** checkbox appears right under the Optimized tile while
-  Optimized is selected) and, for Genesis, the **console region**
+  apart) remove from library. The **Build Configuration** card follows: **Build mode** (Compatibility | Optimized; **Optimized is the default** for newly imported Genesis and Master System games: Genesis Optimized is the
+  former Optimized + Experimental model request (`--aot-policy optimized --aot-model gen2`), and there is no model checkbox; Master System Optimized is its own
+  product policy, offered only when the product states it is available, otherwise the game builds as Compatibility and the card says so, without rewriting the
+  stored Optimized intent. An explicit Compatibility selection is kept, and a legacy Optimized/v1 Genesis record takes the new gen2 meaning and needs a rebuild)
+  and, for Genesis, the **console region**
   (USA NTSC | Japan NTSC | Europe PAL, applied at launch, never a rebuild; PAL still runs on the 60 Hz schedule), or for Master System the **cartridge
   mapper** (nothing preselected, never guessed; a sidecar manifest declares it) and the one console profile. A state line says what the executable on disk
   actually is (from `status.json`: effective policy and any Optimized fallback), whether the selection matches it, and when a mode switch left the other

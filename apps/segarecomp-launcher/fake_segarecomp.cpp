@@ -7,6 +7,8 @@
 //   FAKE_BUILD_LOG=<file> one line is appended per `build`: "<requested policy>"
 //   FAKE_BUILD_FAIL=compatibility|optimized  that policy's build fails
 //   FAKE_OPT_FALLBACK=1   an Optimized request builds the broad program and reports a fallback
+//   FAKE_BUILD_ARGS_LOG=<file>  (SEG-069-T002) one line is appended per `build`: its argument list from `--rom` on, space separated
+//   FAKE_IDENTITY_DELAY_MS=<n>  (SEG-069-T002) every `aot-policy-identity` answer is delayed (models a slow capability probe)
 //   FAKE_BUILD_HOLD=<hb>  (SEG-069-T001) the build never finishes by itself: it starts a grandchild (this binary as `--sleeper <hb>`) that appends one
 //                         byte to <hb> every 20 ms, writes <output>/hold_started and <hb>.started, and then idles. Cancel tests assert the whole tree stops.
 #include <chrono>
@@ -91,6 +93,7 @@ int main(int argc, char **argv) {
     return std::string();
   };
   if (command == "aot-policy-identity") {
+    if (!env("FAKE_IDENTITY_DELAY_MS").empty()) std::this_thread::sleep_for(std::chrono::milliseconds(std::atoi(env("FAKE_IDENTITY_DELAY_MS").c_str())));
     const std::string policy = option("--aot-policy"), platform = option("--platform").empty() ? "genesis" : option("--platform");
     if (platform == "master-system" && policy == "optimized" && env("FAKE_SMS_OPTIMIZED", "1") == "0") return 3;
     std::printf("policy_identity=%s requested=%s\n", identity(policy, platform).c_str(), policy.c_str());
@@ -100,6 +103,11 @@ int main(int argc, char **argv) {
     const std::string policy = option("--aot-policy").empty() ? "compatibility" : option("--aot-policy");
     const fs::path out = option("--output");
     const std::string platform = option("--mapper").empty() && option("--mapper-manifest").empty() ? "genesis" : "master-system";
+    if (!env("FAKE_BUILD_ARGS_LOG").empty()) {
+      std::ofstream line(env("FAKE_BUILD_ARGS_LOG"), std::ios::app);
+      for (const auto &arg : args) line << arg << ' ';
+      line << '\n';
+    }
     if (!env("FAKE_BUILD_LOG").empty()) std::ofstream(env("FAKE_BUILD_LOG"), std::ios::app) << policy << '\n';
     fs::create_directories(out);
     std::puts("@stage analyze begin\n@stage analyze done\n@stage generate begin\n@stage generate done");

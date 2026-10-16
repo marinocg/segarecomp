@@ -218,7 +218,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
   {
     std::string line;
     ImU32 color = col::text2;
-    const std::string mode = entry.aot_policy == "optimized" ? "Optimized" : "Compatibility";
+    const std::string mode = selected_mode_label(entry);
     const bool mapper_needed = entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty();
     if (is_running) { line = running_label(game_report_, restarted_this_play_); color = col::ok; }
     else if (is_building) { line = "Recompiling with " + mode + ". This can take several minutes the first time."; color = col::warn; }
@@ -278,6 +278,12 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
 }
 
 // ---------------------------------------------------------------- B. build configuration
+
+std::string App::selected_mode_label(const LibraryEntry &entry) const {
+  if (entry.aot_policy != "optimized") return "Compatibility";
+  if (entry.platform_id == "master-system" && !sms_probe_.valid() && !sms_optimized_available_) return "Compatibility";
+  return "Optimized";
+}
 
 float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float w) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -347,36 +353,29 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     ImGui::SetCursorScreenPos(ImVec2(cx, y));
     int sel = entry.aot_policy == "optimized" && probe.supports_optimized() ? 1 : 0;
     const bool optimized_offered = probe.supports_optimized();
-    const std::string compat_desc = "Broad, conservative recompilation. The default.";
-    const std::string opt_desc = !optimized_offered ? "Not offered by this product build for Master System."
-                                 : (sms ? "Experimental: may restart in Compatibility."
-                                        : "Selective AOT policy; may fall back to Compatibility.");
+    const std::string compat_desc = "Broad, conservative recompilation.";
+    const std::string opt_desc = !optimized_offered ? (sms_probe_.valid() ? "Checking Master System availability..." : "Not offered by this product build for Master System.")
+                                 : (sms ? "The default. Selective policy; may restart in Compatibility."
+                                        : "The default. Selective AOT policy; may fall back to Compatibility.");
     ImGui::BeginDisabled(busy_now);
     if (option_tiles(ctx_, "mode", {"Compatibility", "Optimized"}, {compat_desc, opt_desc}, &sel, ctl_w, tile_h, {true, optimized_offered})) {
       entry.aot_policy = sel == 1 ? "optimized" : "compatibility";
-      if (sel == 0) entry.aot_model = "v1";
+      entry.aot_model = sms ? "v1" : "gen2";
       changed = true;
     }
     ImGui::EndDisabled();
     y += tile_h + ctx_.u(8.0F);
-    // Genesis Optimized: the experimental model is part of the Optimized choice, so it sits right under the Optimized tile while Optimized is
-    // selected (never hidden in the Advanced section).
-    if (!sms && entry.aot_policy == "optimized" && probe.supports_optimized()) {
-      const float tile_w = std::floor((ctl_w - ctx_.u(8.0F)) / 2.0F), ox = cx + tile_w + ctx_.u(8.0F);
-      ImGui::SetCursorScreenPos(ImVec2(ox, y - ctx_.u(2.0F)));
-      bool experimental = entry.aot_model == "gen2";
-      ImGui::BeginDisabled(busy_now);
-      if (checkbox(ctx_, "model_exp", "Experimental model", &experimental)) { entry.aot_model = experimental ? "gen2" : "v1"; changed = true; }
-      ImGui::EndDisabled();
-      if (ImGui::IsItemHovered()) tooltip(ctx_, "The experimental Optimized model family: may admit different code and may fall back to Compatibility. Changes the build.");
-      if (ImGui::IsItemFocused()) focus_label_ = "Experimental model";
-      y += ctx_.u(30.0F);
+    // SEG-069-T002: no model choice is offered. Genesis Optimized is the former old Optimized + gen2 request, with no extra control.
+    if (sms && entry.aot_policy == "optimized") {
+      ImGui::SetCursorScreenPos(ImVec2(cx, y - ctx_.u(2.0F)));
+      if (sms_probe_.valid()) y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, ctl_w, "Checking whether this product build offers Optimized for Master System...") + ctx_.u(4.0F);
+      else if (!optimized_offered) y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::warn, ctl_w, "Optimized is the default, but this product build does not offer it for Master System, so this game builds as Compatibility.") + ctx_.u(4.0F);
     }
   }
   // what the executable actually is, versus what is selected
   {
-    const std::string selected = entry.aot_policy == "optimized" ? "Optimized" : "Compatibility";
-    const std::string other = entry.aot_policy == "optimized" ? "Compatibility" : "Optimized";
+    const std::string selected = selected_mode_label(entry);
+    const std::string other = selected == "Optimized" ? "Compatibility" : "Optimized";
     std::string text;
     ImU32 color = col::text2;
     const char *icon = "info";
@@ -456,10 +455,10 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
         y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner, "Default off. For games whose raster / H-interrupt effects fail otherwise: the build stops on a RAM-resident H-interrupt vector to derive its alias. Builds may take longer. It changes the build.") + ctx_.u(4.0F);
       }
       ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, "Build mode, the experimental model, H-interrupt discovery and the mapper are part of the build identity: changing them needs a new build, and the previous executable is kept until Storage cleans it. Region applies at launch.") + ctx_.u(4.0F);
+      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, "Build mode, H-interrupt discovery and the mapper are part of the build identity: changing them needs a new build, and the previous executable is kept until Storage cleans it. Region applies at launch.") + ctx_.u(4.0F);
     }
   }
-  if (entry.aot_policy == "optimized" && rom_policy_identity_cached(layout_, probe).empty() && !status_pending_) {
+  if (probe.optimized() && rom_policy_identity_cached(layout_, probe).empty() && !status_pending_) {
     ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
     y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::err, inner, "Optimized cannot verify the build tool identity: saved Optimized builds are not reused.");
   }
@@ -469,7 +468,7 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
   dl->AddRectFilled(ImVec2(a.x + ctx_.u(1.0F), a.y + ctx_.u(2.0F)), ImVec2(a.x + ctx_.u(4.0F), a.y + h - ctx_.u(2.0F)), col::btn_top, ctx_.u(2.0F));
   {
     const bool ready = info.status == GameStatus::ready;
-    const std::string sel = entry.aot_policy == "optimized" ? "Optimized" : "Compatibility";
+    const std::string sel = selected_mode_label(entry);
     state_dot_text(ctx_, dl, ImVec2(a.x + w - pad, a.y + ctx_.u(13.0F)), ready ? sel + " - up to date" : sel + " - build required", ready ? col::ok : col::warn, w * 0.5F);
   }
   dl->ChannelsMerge();
@@ -540,8 +539,7 @@ void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) 
   else row("Build version", info.status == GameStatus::ready ? "unknown (adopted build)" : "no current build", col::text2, std::string("This release: Segarecomp ") + SEGARECOMP_LAUNCHER_VERSION + ", zig " + SEGARECOMP_ZIG_VERSION);
   {
     std::string identity = info.key.empty() ? std::string("-") : info.key.substr(0, 16) + "...";
-    std::string detail = std::string(entry.aot_policy == "optimized" ? "Optimized" : "Compatibility") + " selected";
-    if (entry.platform_id == "genesis" && entry.aot_policy == "optimized") detail += entry.aot_model == "gen2" ? ", experimental model" : ", standard model";
+    std::string detail = selected_mode_label(entry) + " selected";
     if (entry.platform_id == "genesis") detail += entry.hint_alias_discovery ? ", H-int discovery on" : ", H-int discovery off";
     if (entry.platform_id == "master-system") detail += ", mapper " + (entry.mapper.empty() ? (entry.mapper_manifest_sha256.empty() ? std::string("undeclared") : std::string("from manifest")) : entry.mapper);
     std::error_code ec;

@@ -421,7 +421,7 @@ void App::draw_settings(float full_w, float h) {
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Compatibility, Optimized, the Genesis region, the Master System mapper and H-interrupt discovery are chosen per game on its page (they are part of what a build is). Toolchain: bundled Zig " SEGARECOMP_ZIG_VERSION ".");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Master System Optimized");
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), sms_optimized_available_ ? col::ok : col::dim, w - lw, sms_optimized_available_ ? "Offered by this product build (experimental)." : "Not offered by this product build.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), sms_optimized_available_ ? col::ok : col::dim, w - lw, sms_optimized_available_ ? "Offered by this product build. It is the default for Master System games." : (sms_probe_.valid() ? "Checking..." : "Not offered by this product build: Master System games build as Compatibility."));
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     row_label("Recompiling");
     if (toggle(ctx_, "keep_old", "Keep old build artifacts when a game is recompiled", &settings_.keep_old_artifacts, ctx_.u(420.0F))) save = true;

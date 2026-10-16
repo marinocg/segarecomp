@@ -160,6 +160,9 @@ private:
   struct Badge { std::string label; ImU32 color; bool spinner; };
   [[nodiscard]] Badge badge_for(const LibraryEntry &entry, const StatusInfo &info) const;
   void finish_build();
+  // SEG-069-T002: the mode the game will really build as, for display: the stored intent, except a Master System game whose Optimized the product has
+  // stated it does not offer (that is Compatibility). While the capability probe is pending the stored intent is shown.
+  [[nodiscard]] std::string selected_mode_label(const LibraryEntry &entry) const;
   bool launch(const std::string &id, bool restarted);
   void finish_run();
   void run_plan(const Plan &plan);

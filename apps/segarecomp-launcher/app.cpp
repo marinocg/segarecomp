@@ -67,7 +67,7 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
     if (!mapper_needed && view.supports_optimized()) {
       RomView other = view;
       other.aot_policy = view.optimized() ? "compatibility" : "optimized";
-      if (other.aot_policy == "compatibility") other.aot_model = "v1";
+      other.aot_model = other.aot_policy == "optimized" && other.platform_id == "genesis" ? "gen2" : "v1";
       info.other_mode_supported = true;
       info.other_mode_ready = entry_ready_for(entry_dir(other, layout), other, layout);
     }
@@ -635,9 +635,15 @@ bool App::start_build(const std::string &id, bool restart_after) {
   }
   // stored per-game options, then product-stated availability
   view.title = entry->title();
+  // SEG-069-T002: a Master System game whose stored intent is Optimized must not be built as Compatibility only because the asynchronous
+  // capability probe has not answered yet: wait for the product's statement (the worker is already running it; the result is memoized).
+  if (view.platform_id == "master-system" && entry->aot_policy == "optimized" && sms_probe_.valid()) {
+    sms_optimized_available_ = sms_probe_.get();
+    request_status_refresh();
+  }
   view.sms_optimized_available = sms_optimized_available_;
   if (view.platform_id == "master-system") { if (!entry->mapper.empty()) view.mapper = entry->mapper; if (view.sms_optimized_available) view.aot_policy = entry->aot_policy; }
-  if (view.supports_optimized() && view.platform_id == "genesis") { view.aot_policy = entry->aot_policy; view.aot_model = entry->aot_model; }
+  if (view.supports_optimized() && view.platform_id == "genesis") { view.aot_policy = entry->aot_policy; view.aot_model = "gen2"; }  // Genesis Optimized is always the gen2 model
   if (view.supports_hint_alias_discovery()) view.hint_alias_discovery = entry->hint_alias_discovery;
   if (view.supports_region()) view.region = entry->region;
   if (view.needs_mapper()) { show_message("Declare the cartridge mapper", {"The Master System header never identifies the mapper, so it is not guessed.", "Choose Sega mapper or ROM only (32 KiB) in the game's build options."}); return false; }
@@ -1109,6 +1115,7 @@ void App::run_script() {
     else if (key == "library_scroll") actual = std::to_string(static_cast<int>(std::lround(library_scroll_)));
     else if (key == "detail") actual = page_ == Page::details && catalog_.find_id(detail_id_) != nullptr ? catalog_.find_id(detail_id_)->title() : "-";
     else if (key == "nav_items") actual = nav_items_;
+    else if (key == "mode") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr ? selected_mode_label(*catalog_.find_id(detail_id_)) : "-";
     else if (key == "building") actual = !detail_id_.empty() && is_building(detail_id_) ? "1" : "0";
     else if (key == "stopping") actual = !detail_id_.empty() && is_stopping(detail_id_) ? "1" : "0";
     else if (key == "queued") actual = !detail_id_.empty() && is_queued(detail_id_) ? "1" : "0";
