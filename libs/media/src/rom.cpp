@@ -213,7 +213,7 @@ RomInfo inspect_rom(std::span<const std::uint8_t> bytes) {
 
 const char *platform_name(Platform platform) noexcept { switch (platform) {
 case Platform::genesis: return "Genesis / Mega Drive"; case Platform::master_system: return "Master System";
-case Platform::game_gear: return "Game Gear"; case Platform::unknown: return "Unknown"; } return "Unknown"; }
+case Platform::game_gear: return "Game Gear"; case Platform::sega_cd: return "Sega CD"; case Platform::unknown: return "Unknown"; } return "Unknown"; }
 const char *outcome_name(ClassificationOutcome outcome) noexcept { switch (outcome) {
 case ClassificationOutcome::recognized: return "recognized"; case ClassificationOutcome::rejected: return "rejected";
 case ClassificationOutcome::unrecognized: return "unrecognized"; } return "unrecognized"; }

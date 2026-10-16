@@ -12,7 +12,8 @@
 
 namespace segarecomp {
 
-enum class Platform { unknown, genesis, master_system, game_gear };
+// SEG-062-T002: sega_cd is recognized only by disc ingestion (disc.hpp); inspect_rom never classifies a ROM as sega_cd.
+enum class Platform { unknown, genesis, master_system, game_gear, sega_cd };
 enum class ClassificationOutcome { recognized, rejected, unrecognized };
 enum class Diagnostic {
   recognized_genesis,

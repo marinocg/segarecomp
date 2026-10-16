@@ -19,6 +19,10 @@ FORBIDDEN = [
     "genesis", "mega", "sms", "master_system", "z80", "m68k", "mc68000", "68000", "68k", "epoch", "signature", "activation",
     "hold_window", "mapper", "slot", "bank", "mirror", "cartridge", "rom", "ram", "vdp", "ImageKind", "live_bytes", "live_guard",
     "PassRunner", "CodeImage", "CodeWindow", "uint16_t", "8192", "0x2000", "0x4000", "0xFFFF",
+    # SEG-062-T001 (ADR 0126): disc, BIOS, Word RAM and Sega CD vocabulary never enters the generic header.
+    "disc", "disk", "cue", "sector", "lba", "msf", "track", "toc", "iso9660", "bios", "boot", "word_ram", "wordram", "prg",
+    "prg_ram", "sega", "segacd", "sega_cd", "mega_cd", "megacd", "cdc", "cdd", "gate_array", "subcpu", "maincpu", "processor",
+    "overlay", "loader", "dma", "2048", "2352",
 ]
 ALLOWED_INCLUDES = {"segarecomp/core/address.hpp"}
 
@@ -96,6 +100,8 @@ def main():
           "self-check: 0xFFFF is matched as a whole literal only")
     check(scan("enum Kind { RomImage, z80_window };") == ["z80"] and scan("ImageKind k;") == ["ImageKind"],
           "self-check: '_' separates words; identifiers are case-insensitive whole words")
+    check(scan("struct DiscSector;") == [] and scan("int disc_lba; WordRam *word_ram;") == ["disc", "lba", "ram", "word_ram", "wordram"],
+          "self-check: SEG-062 disc / Word RAM vocabulary is detected as whole words")
     with tempfile.TemporaryDirectory() as tmp:
         planted = pathlib.Path(tmp) / "executable_image.hpp"
         planted.write_text(text.replace("namespace segarecomp {", "namespace segarecomp {\ninline constexpr int kZ80Bank = 0;\n"

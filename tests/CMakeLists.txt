@@ -1126,6 +1126,34 @@ segarecomp_enable_warnings(executable_image_test)
 add_test(NAME executable_image_test COMMAND executable_image_test)
 add_test(NAME executable_image_forbidden_identifiers_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/executable_image_forbidden_identifiers_test.py ${PROJECT_SOURCE_DIR})
+# SEG-062-T001 (ADR 0126): Sega CD executable cases on the unchanged generic set, and a mutated-validator control.
+add_executable(sega_cd_executable_image_test sega_cd_executable_image_test.cpp)
+target_link_libraries(sega_cd_executable_image_test PRIVATE segarecomp::recompiler)
+segarecomp_enable_warnings(sega_cd_executable_image_test)
+add_test(NAME sega_cd_executable_image_test COMMAND sega_cd_executable_image_test)
+add_test(NAME sega_cd_executable_image_mutation_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_executable_image_mutation_test.py ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_executable_image_test sega_cd_executable_image_mutation_test APPEND PROPERTY LABELS full fast)
+# SEG-062-T002 (ADR 0129, Checkpoint A): CUE/BIN ingestion and IP/SP images against an independent reader; fixture reproducibility.
+add_test(NAME sega_cd_disc_ingestion_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_disc_ingestion_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR})
+add_test(NAME sega_cd_fixture_disc_manifest_test COMMAND ${Python3_EXECUTABLE}
+  ${PROJECT_SOURCE_DIR}/tools/sega_cd_fixture_disc.py --check)
+set_property(TEST sega_cd_disc_ingestion_test sega_cd_fixture_disc_manifest_test APPEND PROPERTY LABELS full fast)
+# SEG-062-T003 (ADR 0128, Checkpoint B): two generated-native MC68000 processors; compared with the pinned Musashi two-processor
+# reference when SEGARECOMP_SEGA_CD_MUSASHI_CHECKOUT (or the conformance checkout variable) is set.
+add_test(NAME sega_cd_dual_cpu_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_dual_cpu_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_dual_cpu_test APPEND PROPERTY LABELS full fast)
+# SEG-062-T004: Word RAM 2M/1M ownership, interrupt enables and the sub timer (table + generated-native fixtures).
+add_test(NAME sega_cd_word_ram_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_word_ram_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_word_ram_test APPEND PROPERTY LABELS full fast)
+# SEG-062-T005 (Checkpoint C): CDD/CDC sector delivery, CDC DMA into Word RAM, the main CPU and the Genesis VDP frame; liveness,
+# start-up disc identity and typed CD failures.
+add_test(NAME sega_cd_disc_to_frame_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_disc_to_frame_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_disc_to_frame_test APPEND PROPERTY LABELS full fast)
 add_executable(z80_executable_image_equivalence_test z80_executable_image_equivalence_test.cpp)
 target_link_libraries(z80_executable_image_equivalence_test PRIVATE segarecomp::machine_master_system segarecomp::machine_genesis_z80)
 segarecomp_enable_warnings(z80_executable_image_equivalence_test)
