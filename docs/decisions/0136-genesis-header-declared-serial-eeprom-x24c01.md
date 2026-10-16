@@ -28,9 +28,18 @@ public document derives either from the header. The class selection below is a *
 `$200000-$3FFFFF` (`start == end`, odd) creates a serial-EEPROM device with the **Sega-board X24C01 profile**: 128 x 8 bits,
 7-bit word address + R/W, 4-byte write page, SDA = D0 (input and read-back), SCL = D1. This is the GPGX default and is the only profile
 this model implements. Every other EEPROM form (another type byte, a span, an even or out-of-window location) creates no device and
-keeps the pre-existing fail-closed outcomes. A cartridge wired differently is misidentified by this rule and will see a device that
-never acknowledges its lines; this residual is accepted and documented, not detectable from the header.
+keeps the pre-existing fail-closed outcomes. Header metadata establishes an EEPROM declaration and a location, not the physical chip or its wiring; the X24C01/Sega-board choice
+is a deliberate project compatibility assumption, not a proved hardware fact.
 
+**GPGX precedent (verified against `core/cart_hw/eeprom_i2c.c`, `eeprom_i2c_init`).** For a game absent from its database, GPGX treats a
+header-detected extra memory as a serial EEPROM when `rom[0x1B2] == 0xE8` **or** `end - start < 2`, and then "assume[s] SEGA mapper as
+default" with `EEPROM_X24C01` (`mapper_i2c_sega_init`). segarecomp deliberately supports a *narrower* shape than that fallback: type byte
+`$E8` **and** second byte `$40` **and** exactly one odd in-window location; GPGX's other trigger (any type with a span under two bytes)
+and every other EEPROM form stay unsupported and fail closed. No title name, checksum, product code or ROM address is consulted.
+
+**Limitation (not detected).** A cartridge whose EEPROM is wired as another board profile (for example the EA, Acclaim or Codemasters
+boards) satisfying this header shape is misidentified. Such a cartridge is **not** reliably detected or rejected: the model simply
+applies the Sega-board lines, so the guest may observe a device that does not respond as its board would. This residual is accepted.
 **Accesses.** The only EEPROM accesses are a BYTE read (bit 0 = SDA the device or bus presents; other bits 0) and a BYTE write
 (bit 0 = SDA, bit 1 = SCL, others ignored) at exactly the declared location. Any WORD/LONG access covering the location stops with
 `unsupported_device_access` / `unsupported_cartridge_sram_access` (the outcome class is shared with ADR 0098); an odd-address

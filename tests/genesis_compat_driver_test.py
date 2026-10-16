@@ -127,7 +127,21 @@ def main():
               "frames before the key and steady frames after it are identical for slice sizes 64, 128 and 256")
 
         # A malformed or unordered script is rejected before the run (exit 3), and by the host driver before building anything.
-        for bad in ("abc", "4:3:1", "4:1:256", "4:1", "5:1:1,4:1:1"):
+        # Mask grammar: unprefixed decimal (leading zeroes are decimal, "010" is 10 not octal 8), 0x-hex, 0..255.
+        check([driver.parse_mask(t) for t in ("08", "008", "010", "255", "0x80", "0XfF", "0")] == [8, 8, 10, 255, 128, 255, 0],
+              "the host parser reads decimal (with leading zeroes) and 0x-hex masks")
+        for good in ("4:1:08", "4:1:008", "4:1:0x00", "4:2:255", "4:1:0XFF"):
+            try:
+                driver.validate_pad_script(good)
+                check(True, "host driver accepts %r" % good)
+            except driver.DriverError:
+                check(False, "host driver accepts %r" % good)
+        # Generated side agrees: leading-zero decimal 010 == 10 == 0x0A, observed through the echo ROM's picture.
+        pics = {m: drive(exe, tmp / ("m" + m.replace("x", "")), "2:1:" + m, count=5)["capture"]["frame_digests"][4] for m in ("1", "01", "001", "0x01", "010", "10", "0x0A", "08", "8", "0x08")}
+        check(pics["1"] == pics["01"] == pics["001"] == pics["0x01"] and pics["010"] == pics["10"] == pics["0x0A"] and pics["08"] == pics["8"] == pics["0x08"]
+              and len({pics["1"], pics["10"], pics["8"]}) == 3,
+              "the generated parser agrees: leading-zero decimals equal their decimal value (no octal), 0x masks are hexadecimal")
+        for bad in ("abc", "4:3:1", "4:1:256", "4:1", "5:1:1,4:1:1", "4:1:0x", "4:1:0xG", "4:1:-1", "4:1:1.5", "4:1:0256", "4:1:0x100"):
             done = subprocess.run([str(exe), "--instruction-budget", "1000"], capture_output=True, text=True, timeout=60,
                                   env={"PATH": "/usr/bin:/bin", "SEGARECOMP_CAPTURE_DIR": str(tmp), "SEGARECOMP_CAPTURE_FIRST": "1",
                                        "SEGARECOMP_CAPTURE_COUNT": "1", "SEGARECOMP_PAD_SCRIPT": bad})

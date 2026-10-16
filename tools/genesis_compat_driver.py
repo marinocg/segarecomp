@@ -39,11 +39,18 @@ import zlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MAX_FRAMES = 64
-SCRIPT_ENTRY = re.compile(r"^[0-9]+:[12]:(0[xX][0-9a-fA-F]+|[0-9]+)$")
+SCRIPT_ENTRY = re.compile(r"^[0-9]+:[12]:(0[xX][0-9a-fA-F]+|[0-9]+)$")  # hex needs digits; "0x" alone is malformed
 
 
 class DriverError(Exception):
     pass
+
+
+def parse_mask(text: str) -> int:
+    """Documented grammar: unprefixed = decimal (leading zeroes allowed, never octal), 0x/0X = hexadecimal."""
+    if text[:2] in ("0x", "0X"):
+        return int(text[2:], 16)
+    return int(text, 10)
 
 
 def validate_pad_script(text: str) -> str:
@@ -55,7 +62,7 @@ def validate_pad_script(text: str) -> str:
         if not SCRIPT_ENTRY.match(entry):
             raise DriverError(f"malformed pad-script entry {entry!r} (expected <frame>:<1|2>:<mask>)")
         frame, _, mask = entry.split(":")
-        if int(mask, 0) > 255:
+        if parse_mask(mask) > 255:
             raise DriverError(f"pad mask above 255 in {entry!r}")
         if int(frame) < previous:
             raise DriverError("pad-script frames must be non-decreasing")

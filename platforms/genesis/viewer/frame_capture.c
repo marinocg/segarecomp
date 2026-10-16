@@ -196,7 +196,14 @@ static int genesis_pad_script_parse(const char *text, GenesisPadScriptEntry *out
     cursor = end + 1;
     if (*cursor < '0' || *cursor > '9') return -1;
     errno = 0;
-    mask = strtoull(cursor, &end, 0); /* base 0: decimal or 0x-hex */
+    /* Documented grammar: unprefixed = decimal (so "08" is 8, never octal), 0x/0X = hexadecimal. */
+    if (cursor[0] == '0' && (cursor[1] == 'x' || cursor[1] == 'X')) {
+      const char *digits = cursor + 2;
+      if (!((*digits >= '0' && *digits <= '9') || (*digits >= 'a' && *digits <= 'f') || (*digits >= 'A' && *digits <= 'F'))) return -1;
+      mask = strtoull(digits, &end, 16);
+    } else {
+      mask = strtoull(cursor, &end, 10);
+    }
     if (errno != 0 || end == cursor || mask > 255U) return -1;
     cursor = end;
     if (*cursor == ',') ++cursor;
