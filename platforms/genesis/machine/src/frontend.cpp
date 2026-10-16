@@ -1481,6 +1481,51 @@ std::optional<GenesisFrontierClass> classify_frontier(const FrontendRejected &di
 
 } // namespace
 
+bool m68k_tier1_target_set_coherent(const M68kIndirectTargetEaSet &set) {
+  // A Tier-1 set is a pure function of its own metadata: both producers compute sorted-unique(pc_base + displacement +
+  // sext(index)) for a `pc_index8` site, and a pure `(An)` site carries no index values.
+  if (set.control_ea.mode != M68kEaMode::pc_index8) return set.index_values.values.empty() && !set.candidates.empty();
+  if (static_cast<unsigned>(set.index_values.index_register) != static_cast<unsigned>(set.control_ea.index_reg)) return false;
+  std::vector<std::uint32_t> derived;
+  for (const auto low_word : set.index_values.values) {
+    const auto raw = static_cast<std::int64_t>(set.control_ea.pc_base_address) +
+        static_cast<std::int64_t>(set.control_ea.displacement) +
+        static_cast<std::int64_t>(static_cast<std::int16_t>(low_word));
+    if (raw < 0 || raw > static_cast<std::int64_t>(UINT32_C(0x00FFFFFF))) return false;
+    derived.push_back(static_cast<std::uint32_t>(raw));
+  }
+  std::sort(derived.begin(), derived.end());
+  derived.erase(std::unique(derived.begin(), derived.end()), derived.end());
+  return !derived.empty() && derived.size() == set.candidates.size() &&
+      std::equal(derived.begin(), derived.end(), set.candidates.begin(), [](std::uint32_t v, const M68kProgramAddress &c) {
+        return c.space == TargetAddressSpace::m68k_program && c.value == v;
+      });
+}
+
+M68kTier1MergeOutcome merge_m68k_tier1_target_sets(M68kIndirectTargetEaSet &into, const M68kIndirectTargetEaSet &from) {
+  constexpr std::size_t kMaxMergedCandidates = 256U;  // the existing per-site finite-value cap
+  // Compatibility of the facts is independent of whether the candidate sets coincide.
+  if (!same_ea(into.control_ea, from.control_ea) || into.index_values.index_register != from.index_values.index_register ||
+      !m68k_tier1_target_set_coherent(into) || !m68k_tier1_target_set_coherent(from))
+    return M68kTier1MergeOutcome::conflict;
+  std::vector<M68kProgramAddress> unioned = into.candidates;
+  unioned.insert(unioned.end(), from.candidates.begin(), from.candidates.end());
+  std::sort(unioned.begin(), unioned.end(), [](const M68kProgramAddress &a, const M68kProgramAddress &b) { return less(a, b); });
+  unioned.erase(std::unique(unioned.begin(), unioned.end(),
+                            [](const M68kProgramAddress &a, const M68kProgramAddress &b) { return same(a, b); }),
+                unioned.end());
+  if (unioned.size() == into.candidates.size()) return M68kTier1MergeOutcome::unchanged;
+  std::vector<std::uint16_t> values = into.index_values.values;
+  values.insert(values.end(), from.index_values.values.begin(), from.index_values.values.end());
+  std::sort(values.begin(), values.end());
+  values.erase(std::unique(values.begin(), values.end()), values.end());
+  if (unioned.size() > kMaxMergedCandidates || values.size() > kMaxMergedCandidates) return M68kTier1MergeOutcome::conflict;
+  into.candidates = std::move(unioned);
+  into.index_values.values = std::move(values);
+  return M68kTier1MergeOutcome::unioned;
+}
+
+
 std::vector<GenesisLogicalTableDescriptorHint> parse_genesis_external_hints(std::string_view json_text,
                                                                              std::string_view expected_rom_sha256) {
   std::vector<GenesisLogicalTableDescriptorHint> out;
@@ -2503,15 +2548,15 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
             std::remove(unproven_indirect_order.begin(), unproven_indirect_order.end(), key),
             unproven_indirect_order.end());
       }
+      // SEG-068-T002 / ADR-0025 section 5a: coherence, site compatibility and the bounded union live in the pure
+      // `merge_m68k_tier1_target_sets` (unit-tested directly).
+      if (!m68k_tier1_target_set_coherent(set)) aggregation_conflict = true;
       const auto found = indirect_by_source.find(key);
       if (found == indirect_by_source.end()) {
         indirect_by_source.emplace(key, set);
         indirect_order.push_back(key);
-      } else {
-        const bool candidates_match = found->second.candidates.size() == set.candidates.size() &&
-            std::equal(found->second.candidates.begin(), found->second.candidates.end(), set.candidates.begin(),
-                       [](const M68kProgramAddress &a, const M68kProgramAddress &b) { return same(a, b); });
-        if (!candidates_match) { aggregation_conflict = true; }
+      } else if (merge_m68k_tier1_target_sets(found->second, set) == M68kTier1MergeOutcome::conflict) {
+        aggregation_conflict = true;
       }
     }
     for (const auto &set : discovery.unproven_indirect_control_ea_sets) {
