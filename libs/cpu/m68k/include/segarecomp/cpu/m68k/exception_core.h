@@ -124,7 +124,10 @@ static inline SegarecompM68kExceptionStatus segarecomp_m68k_exception_enter(
   saved_sr = *cpu->sr;
   was_supervisor = (saved_sr & SEGARECOMP_M68K_SR_SUPERVISOR) != 0U;
   ssp = was_supervisor ? *cpu->active_sp : *cpu->inactive_sp;
-  if (ssp < SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES || (ssp & 1U) != 0U) return SEGARECOMP_M68K_EXCEPTION_STACK_INVALID;
+  /* An SSP below the frame size wraps modulo 2^32 exactly like the 68000's address arithmetic (a game may run with SSP = 0
+     until it loads its own stack: the frame then lands at the top of the 24-bit bus); the machine hook decides whether the
+     wrapped extent is acceptable. */
+  if ((ssp & 1U) != 0U) return SEGARECOMP_M68K_EXCEPTION_STACK_INVALID;
   frame_base = ssp - SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES;
   if (!hooks->validate_stack_extent(hooks->context, frame_base, SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES,
                                     SEGARECOMP_M68K_STACK_WRITE))
@@ -161,8 +164,7 @@ static inline SegarecompM68kExceptionStatus segarecomp_m68k_exception_return(
   uint16_t restored_sr;
   if (!segarecomp_m68k_binding_valid(hooks, cpu)) return SEGARECOMP_M68K_EXCEPTION_BAD_BINDING;
   sp = *cpu->active_sp;
-  if ((sp & 1U) != 0U || sp > UINT32_MAX - SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES ||
-      !hooks->validate_stack_extent(hooks->context, sp, SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES,
+  if ((sp & 1U) != 0U || !hooks->validate_stack_extent(hooks->context, sp, SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES,
                                     SEGARECOMP_M68K_STACK_READ))
     return SEGARECOMP_M68K_EXCEPTION_STACK_INVALID;
   if (!hooks->stack_read(hooks->context, sp, 2U, &saved_sr)) return SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED;
@@ -197,8 +199,7 @@ static inline SegarecompM68kExceptionStatus segarecomp_m68k_return_restore_ccr(
   uint32_t saved_pc = 0U;
   if (!segarecomp_m68k_binding_valid(hooks, cpu)) return SEGARECOMP_M68K_EXCEPTION_BAD_BINDING;
   sp = *cpu->active_sp;
-  if ((sp & 1U) != 0U || sp > UINT32_MAX - SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES ||
-      !hooks->validate_stack_extent(hooks->context, sp, SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES,
+  if ((sp & 1U) != 0U || !hooks->validate_stack_extent(hooks->context, sp, SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES,
                                     SEGARECOMP_M68K_STACK_READ))
     return SEGARECOMP_M68K_EXCEPTION_STACK_INVALID;
   if (!hooks->stack_read(hooks->context, sp, 2U, &saved_ccr)) return SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED;

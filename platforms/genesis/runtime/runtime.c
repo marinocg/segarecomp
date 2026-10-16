@@ -2347,8 +2347,7 @@ static int genesis_m68k_validate_stack_extent(void *context, uint32_t base, uint
   (void)direction;
   /* Even base (the core also checks it) and the whole extent in work RAM: the
      precondition of the non-fallible frame_write guarantee above. */
-  return (base & 1U) == 0U && base <= UINT32_MAX - length &&
-         genesis_is_work_ram(base & UINT32_C(0x00FFFFFF), length);
+  return (base & 1U) == 0U && genesis_is_work_ram(base & UINT32_C(0x00FFFFFF), length);
 }
 
 static int genesis_m68k_stack_read(void *context, uint32_t address, uint32_t size, uint32_t *value) {

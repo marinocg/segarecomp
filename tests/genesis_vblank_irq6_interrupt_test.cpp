@@ -213,6 +213,7 @@ void user_mode_admission_is_rejected() {
   GenesisRuntime r;
   prime(r);
   r.sr = 0x0000u;  // S = 0 (user mode), mask 0
+  r.usp = 1u;      // the inactive stack is the SSP in user mode: an odd SSP cannot hold a frame (an SSP of 0 now wraps, see below)
   g_step = [&](GenesisRuntime *rt) -> GenesisControlTransfer {
     (void)rt;
     return continue_at(kOrdinaryPc);
@@ -270,6 +271,34 @@ void stack_wrap_fails_closed_with_no_frame_write() {
   bool untouched = true;
   for (uint32_t i = 0; i < 8; ++i) untouched = untouched && (r.work_ram[i] == 0xAAu);
   check(untouched, "no partial frame byte written on failed validation");
+}
+
+// A game may run with SSP = 0 (reset vector 0) until it loads its own stack: the 68000's address arithmetic wraps, so the
+// IRQ6 frame lands at the top of the 24-bit bus (work RAM $FFFFFA-$FFFFFF) and the RTE restores it exactly.
+void zero_ssp_wraps_to_top_of_work_ram() {
+  GenesisRuntime r;
+  prime(r);
+  r.a[7] = 0u;
+  bool entered = false;
+  uint32_t restored_pc = 0;
+  g_step = [&](GenesisRuntime *rt) -> GenesisControlTransfer {
+    if (rt->pc == kHandler) {
+      entered = true;
+      check(rt->a[7] == 0xFFFFFFFAu, "frame base wrapped modulo 2^32");
+      uint32_t restored = 0;
+      GenesisRuntimeStop s{};
+      check(genesis_exception_return(rt, &restored, &s) == 1, "RTE from the wrapped frame succeeds");
+      restored_pc = restored;
+      GenesisControlTransfer t{};
+      t.kind = GENESIS_COMPLETE;
+      return t;
+    }
+    return continue_at(kOrdinaryPc);
+  };
+  const auto result = genesis_runtime_run(&r, trampoline, 4096u);
+  check(result.kind == GENESIS_COMPLETE && entered, "SSP = 0 admission enters the handler instead of stopping");
+  check(restored_pc == kOrdinaryPc && r.a[7] == 0u, "RTE restores PC and the wrapped SSP back to 0");
+  check(ram_byte(r, 0x00FFFFFCu) == 0u && ram_byte(r, 0x00FFFFFFu) != 0xAAu, "frame occupies the top six bytes of work RAM");
 }
 
 // ---------------------------------------------------------------------------
@@ -737,6 +766,7 @@ int main() {
   user_mode_admission_is_rejected();
   ram_resident_irq6_vector_fails_closed();
   stack_wrap_fails_closed_with_no_frame_write();
+  zero_ssp_wraps_to_top_of_work_ram();
   rte_atomic_restore_and_failure();
   high_alias_stack_entry_and_returns();
   high_alias_synchronous_entry_and_rte();
