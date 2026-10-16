@@ -37,7 +37,7 @@ modelled as stores at SP-2 when SP is finite and mark the result incomplete when
 result, never hidden): interrupt handlers are analysed as separate roots with unknown entry state, and their register effects on the
 interrupted flow are NOT joined into it; therefore `candidate_set_complete` is reported false whenever an EI is reachable.
 
-Roots: the hardware vectors $0000 (reset state), $0038 and $0066 (unknown state). No root, address, value or form is supplied from any
+Roots: the reset vector $0000 (reset state); $0038 (unknown state) is added when an EI is reachable; $0066 is NOT a root because the Genesis NMI is not connected (audio contract section 8) - a deliberate narrowing of the first draft's three-root list, recorded here. No root, address, value or form is supplied from any
 title; the previously observed JR->RET mutation (ADR 0134) is a post-hoc comparison target only.
 
 Synthetic fixtures (project-authored): A constant replacement, B finite alternatives (two branches, and a join), C unknown address/value
@@ -95,7 +95,7 @@ unknown; flags are not modelled. Smallest missing capability, from the attributi
 footprint for the currently unsupported forms** (which registers a form may write, and its store address expression, even when the value
 is opaque).
 
-## Phase B - synthetic proof (tests/z80_static_mutation_tests, 34 checks, all pass)
+## Phase B - synthetic proof (tests/z80_static_mutation_tests, 36 checks, all pass, incl. the two review regressions S1/S2)
 
 A constant replacement: exact destination and value, original jr (2 B) vs modified ret (1 B) distinguished at a reachable start, both forms
 decode through the existing decoder; B two-branch RET/EXX and a join -> finite sets {C9, D9}, nothing guessed; C unknown value, unknown
@@ -110,7 +110,7 @@ reachable start (fixture A).
 
 | Image (lineage) | reachable starts | instruction stores (addr exact / unknown) | candidates (structural / payload-only) | observed mutation recovered | complete |
 | --- | --- | --- | --- | --- | --- |
-| Sega-family driver image shared byte-identically by Aladdin, Earthworm Jim, Jurassic Park | 2,512 | 498 (89 / 409) | 11 (9 / 2) | **yes**: exact destination with exact values for both observed forms (return and exchange-register-set) | no |
+| Sega-family driver image shared byte-identically by Aladdin, Earthworm Jim, Jurassic Park | 2,512 | 498 (89 / 409) | 11 (9 / 2) | **yes**: exact destination with exact values for both observed forms (return and exchange-register-set) | no (RET targets unproven) |
 | Krusty's Super Fun House (same family, different build, 34% window overlap) | 2,432 | 485 (85 / 400) | 11 (9 / 2) | **yes** (same two forms at its own offset) | no |
 | The Lion King (unrelated) | 36 | 9 | 0 | no (reachability stops at CALL cc / RST / block copy) | no |
 | Sonic 1 epoch (control, no mutation observed) | 104 | 19 | 0 | n/a | no |
@@ -155,8 +155,11 @@ Sega standard, GEMS, SMPS variants, Z80 loaders in M68K sources).
 - Mutation proof: **STATIC_MUTATION_PROOF_FEASIBLE** for *existence* of exact-valued code writes (blind recovery of the observed mutation on
   the two real driver images, deterministic, 0.07 s, existing CPU-owned decode/effect only); **NOT** feasible as a *complete/closed* proof
   today: completeness is blocked by the unsupported-form footprint and by interprocedural continuation (STATIC_PROOF_TOO_COMPLEX is not claimed:
-  the missing piece is small and CPU-owned for 62% of the unknowns). No unsound certificate was found by the author; the independent
-  review below could change this.
+  the missing piece is small and CPU-owned for 62% of the unknowns). The independent adversarial review found TWO unsound-certificate
+  cases in the first revision (S1: a supported RET has no followed successor yet reachability was reported complete; S2: closure ignored
+  payload-only changes although an operand write can retarget control flow). Both were fixed in this PR (every reachable RET/RET cc/RETI/RETN is
+  `return_target_unproven` -> reachability incomplete; closure requires that no candidate changes ANY reachable start) and are regression
+  tests S1/S2. No real image was ever certified complete.
 - Image producer: **IMAGE_PRODUCER_BLOCKED** for guest-free construction in general (Sonic 1 requires decompression; the Lion King loader is
   not analysed); a static exact-copy route is plausible for the Sega-family images and is SEG-054 territory.
 - ML: **CORPUS_BLOCKER; reject production ML**; D0 suffices for everything it can certify.

@@ -65,6 +65,7 @@ struct Candidate {
   unsigned changed_starts{};         // total number of such starts
   unsigned structural_changed_starts{};  // of those, not payload_only
   unsigned reachable_structural_changed_starts{};
+  unsigned reachable_changed_starts{};  // any change (payload included) to a start of the reachable set
   bool structural() const;           // some change is not payload_only
 };
 
@@ -83,7 +84,7 @@ struct Report {
   bool closed_under_mutation() const {
     if (!candidate_set_complete()) return false;
     for (const Candidate& c : candidates)
-      if (c.reachable_structural_changed_starts != 0) return false;
+      if (c.reachable_changed_starts != 0) return false;  // an operand change can retarget control flow or alter later values/addresses
     return true;
   }
   std::map<std::string, unsigned> incomplete_reasons;  // reason -> number of reachable instructions / events
@@ -94,7 +95,7 @@ struct Report {
   unsigned unknown_value_stores{};
 };
 
-// `ram`: exactly kRamBytes. Roots default to the hardware vectors (reset $0000 with reset state, $0038 and $0066 unknown).
+// `ram`: exactly kRamBytes. `hardware_roots()` is the reset vector only; the INT vector $0038 is added when an EI is reachable.
 Report analyze(const std::vector<std::uint8_t>& ram, const std::vector<Root>& roots, const Limits& limits = {});
 std::vector<Root> hardware_roots();  // reset only: NMI is not connected on the Genesis (contract section 8); the INT vector is added when an EI is reachable
 

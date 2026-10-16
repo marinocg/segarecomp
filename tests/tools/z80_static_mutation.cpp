@@ -230,11 +230,11 @@ class Analyzer {
   }
 
   std::vector<StartChange> changes_for(const std::vector<std::uint8_t>& modified, const std::set<std::uint16_t>& reach,
-                                       unsigned& total, unsigned& structural, unsigned& reach_structural) const {
+                                       unsigned& total, unsigned& structural, unsigned& reach_structural, unsigned& reach_any) const {
     const TableFetch t = make_table(modified);
     const std::vector<StartClassification> mod = classify_all(t);
     std::vector<StartChange> out;
-    total = structural = reach_structural = 0;
+    total = structural = reach_structural = reach_any = 0;
     for (std::uint32_t q = 0; q < kCodeWindow; ++q) {
       const StartClassification &o = classes_[q], &m = mod[q];
       if (o == m) continue;
@@ -255,6 +255,7 @@ class Analyzer {
         c.kind = od ? ChangeKind::becomes_undecodable : ChangeKind::becomes_decodable;
       }
       ++total;
+      if (c.reachable_start) ++reach_any;
       if (c.kind != ChangeKind::payload_only) {
         ++structural;
         if (c.reachable_start) ++reach_structural;
@@ -335,7 +336,7 @@ Report Analyzer::run(const std::vector<Root>& roots) {
       std::string m = mnemonic_name(d.mnemonic);
       std::transform(m.begin(), m.end(), m.begin(), [](char c) { return static_cast<char>(c | 0x20); });
       switch (d.mnemonic) {
-        case Mnemonic::ret: case Mnemonic::reti: case Mnemonic::retn: note_reason("unsupported_effect:" + m, false, true); break;
+        case Mnemonic::ret: case Mnemonic::reti: case Mnemonic::retn: note_reason("unsupported_effect:" + m, true, true); break;
         case Mnemonic::jp: case Mnemonic::jr: case Mnemonic::djnz: case Mnemonic::call: case Mnemonic::rst:
           note_reason("unsupported_control:" + m, true, true);
           break;
@@ -345,6 +346,9 @@ Report Analyzer::run(const std::vector<Root>& roots) {
       continue;
     }
     if (eff.control == ControlKind::computed && read_reg(in, eff.computed_base).top) note_reason("unresolved_indirect_jump", true, false);
+    // A RET (or RET cc) goes to whatever the stack slot holds. Without a proof that the slot is the CALL push (stack contents are not
+    // tracked), its target is unproven and the analysis never followed it: reachability cannot be called complete.
+    if (eff.control == ControlKind::return_ || eff.control == ControlKind::conditional_return) note_reason("return_target_unproven", true, false);
     if (!eff.store) continue;
     StoreSite site;
     site.pc = pc;
@@ -429,7 +433,7 @@ Report Analyzer::run(const std::vector<Root>& roots) {
         c.destination = a;
         c.value = v;
         c.width = s.width;
-        c.changes = changes_for(mod, reach, c.changed_starts, c.structural_changed_starts, c.reachable_structural_changed_starts);
+        c.changes = changes_for(mod, reach, c.changed_starts, c.structural_changed_starts, c.reachable_structural_changed_starts, c.reachable_changed_starts);
         rep.candidates.push_back(std::move(c));
       }
   }

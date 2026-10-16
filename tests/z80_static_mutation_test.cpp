@@ -237,6 +237,23 @@ int main() {
           "G2: a proven computed jump is followed (store found; dest not code -> no candidate)");
   }
   {
+    Image i = blank();  // S1 (independent review): a forged return slot sends RET to code the analysis never followed
+    put(i, 0x0000, {0x31, 0x00, 0x01, 0x21, 0x20, 0x00, 0x22, 0x00, 0x01, 0xC9});  // LD SP,0100 ; LD HL,0020 ; LD (0100),HL ; RET
+    put(i, 0x0020, {0x3E, 0x00, 0x32, 0x00, 0x00, 0x18, 0x00});                      // LD A,0 ; LD (0000),A ; JR +0
+    const zm::Report r = run(i);
+    check(!r.reachability_complete && !r.candidate_set_complete() && !r.closed_under_mutation() && has_reason(r, "return_target_unproven"),
+          "S1: an unproven RET target makes reachability, completeness and closure false");
+  }
+  {
+    Image i = blank();  // S2 (independent review): an operand-only write retargets a JP to code with another code store
+    put(i, 0x0000, {0x3E, 0x20, 0x32, 0x06, 0x00, 0xC3, 0x10, 0x00});  // LD A,20 ; LD (0006),A ; JP 0010 (operand byte patched to 20)
+    put(i, 0x0010, {0x18, 0xFE});
+    put(i, 0x0020, {0x3E, 0x00, 0x32, 0x00, 0x00, 0x18, 0xFE});
+    const zm::Report r = run(i);
+    check(find(r, 0x0006, 0x20) != nullptr && r.candidate_set_complete() && !r.closed_under_mutation(),
+          "S2: a payload-only change to a reachable start (JP target) is NOT closed under mutation");
+  }
+  {
     Image i = blank();
     put(i, 0x0000, {0x21, 0x10, 0x00, 0x36, 0xC9, 0xC3, 0x10, 0x00});
     put(i, 0x0010, {0x18, 0xFE});
