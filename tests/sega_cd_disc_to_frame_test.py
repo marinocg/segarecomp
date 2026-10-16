@@ -85,7 +85,7 @@ def main():
               {k: v for k, v in reports["raw"].items() if k not in ("program_identity", "disc_identity")},
               "cooked and raw discs give identical machine state, device log and frame")
 
-        disc, exe = tmp / "cdframe_cooked" / "disc", tmp / "cdframe_cooked" / "program"
+        disc, exe = tmp / "cdframe_cooked" / "disc", tmp / "cdframe_cooked" / ("program" + common.EXE)
         base = reports["cooked"]
         check(common.run(exe, disc, BUDGET)[1] == base, "two process runs give identical reports")
         partitions = [["--slice-ticks", "999983"], ["--slice-ticks", "357954500000"], ["--slice-ticks", "15034089"],

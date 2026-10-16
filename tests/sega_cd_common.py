@@ -20,6 +20,7 @@ MUSASHI_PIN = "313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd"
 MUSASHI_ENVS = ("SEGARECOMP_SEGA_CD_MUSASHI_CHECKOUT", "SEGARECOMP_M68K_CONFORMANCE_MUSASHI_CHECKOUT",
                 "SEGARECOMP_M68K_MULS_WORD_MUSASHI_CHECKOUT")
 RUN_TIMEOUT = 120
+EXE = ".exe" if os.name == "nt" else ""
 
 
 def build_disc(directory, fixture, variant="cooked", *extra):
@@ -66,7 +67,7 @@ class Builder:
         code, report = self.emit(directory / "disc" / "disc.cue", directory / "program.c")
         if code != 0:
             raise RuntimeError("emit failed: %s" % report)
-        exe = directory / "program"
+        exe = directory / ("program" + EXE)
         self.compile(directory / "program.c", exe)
         return directory / "disc", exe, expected, report
 
@@ -104,7 +105,7 @@ def build_reference(checkout, cc, work):
     subprocess.run([cc, "-std=c11", str(checkout / "m68kmake.c"), "-o", str(work / "m68kmake")], check=True)
     shutil.copyfile(checkout / "m68k_in.c", work / "m68k_in.c")
     subprocess.run([str(work / "m68kmake")], cwd=work, check=True, capture_output=True)
-    exe = work / "sega_cd_reference"
+    exe = work / ("sega_cd_reference" + EXE)
     subprocess.run([cc, "-std=c11", "-O1", "-w", "-DM68K_EMULATE_INT_ACK=M68K_OPT_ON", "-DM68K_INT_ACK_CALLBACK(A)=0",
                     "-I", str(work), "-I", str(checkout), "-I", str(checkout / "softfloat"),
                     str(ROOT / "tests" / "tools" / "sega_cd_musashi_reference.c"), str(checkout / "m68kcpu.c"), str(work / "m68kops.c"),

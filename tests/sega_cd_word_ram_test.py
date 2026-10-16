@@ -33,7 +33,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="scd-wordram-") as tmp:
         tmp = pathlib.Path(tmp)
         builder = common.Builder(SEGARECOMP, CC, tmp)
-        table = tmp / "word_ram_table"
+        table = tmp / ("word_ram_table" + common.EXE)
         subprocess.run([CC, *common.CFLAGS, "-I", str(common.SCD_RUNTIME), "-I", str(common.GENESIS_RUNTIME),
                         str(ROOT / "tests" / "tools" / "sega_cd_word_ram_table.c"), *[str(o) for o in builder.runtime_objects()],
                         "-o", str(table)], check=True)
