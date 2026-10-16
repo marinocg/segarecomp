@@ -1053,6 +1053,7 @@ target_include_directories(z80_static_mutation_tests PRIVATE ${CMAKE_CURRENT_SOU
 target_link_libraries(z80_static_mutation_tests PRIVATE z80_static_mutation)
 segarecomp_enable_warnings(z80_static_mutation_tests)
 add_test(NAME z80_static_mutation_tests COMMAND z80_static_mutation_tests)
+set_property(TEST z80_static_mutation_tests APPEND PROPERTY LABELS full fast)
 add_executable(z80_static_mutation_cli tools/z80_static_mutation_cli.cpp)
 target_link_libraries(z80_static_mutation_cli PRIVATE z80_static_mutation)
 segarecomp_enable_warnings(z80_static_mutation_cli)
