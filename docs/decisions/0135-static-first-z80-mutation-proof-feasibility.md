@@ -95,7 +95,7 @@ unknown; flags are not modelled. Smallest missing capability, from the attributi
 footprint for the currently unsupported forms** (which registers a form may write, and its store address expression, even when the value
 is opaque).
 
-## Phase B - synthetic proof (tests/z80_static_mutation_tests, 33 checks, all pass)
+## Phase B - synthetic proof (tests/z80_static_mutation_tests, 34 checks, all pass)
 
 A constant replacement: exact destination and value, original jr (2 B) vs modified ret (1 B) distinguished at a reachable start, both forms
 decode through the existing decoder; B two-branch RET/EXX and a join -> finite sets {C9, D9}, nothing guessed; C unknown value, unknown
