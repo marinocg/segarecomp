@@ -96,6 +96,9 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom);
 // build folders (`games/`, `zig-cache/`) that cache maintenance is allowed to touch. SEGARECOMP_LIBRARY_DIR overrides it.
 [[nodiscard]] std::filesystem::path library_root();
 [[nodiscard]] RomView inspect_rom_file(const std::filesystem::path &path, const Layout &layout);
+// SEG-069-T005: the version of the host interface a generated program relies on (environment/arguments the launcher passes, the SDL3 major version, the
+// package layout). Recorded in a finished build's metadata.json; bump it only when a change would stop an already-built program from running (older_build.hpp).
+inline constexpr int runtime_contract = 1;
 // The Master System baseline profile the launcher builds for (mirrors the machine library's one profile name).
 inline constexpr const char *sms_profile = "sms2_ntsc_export";
 [[nodiscard]] std::filesystem::path entry_dir(const RomView &rom, const Layout &layout);
@@ -215,8 +218,10 @@ private:
 // The launched native game; its output goes to <entry>/run.log.
 class GameRun {
 public:
+  // `bind_installed_runtime`: also point the loader at the installed SDL3 (an earlier release's program was linked with the library folder of ITS
+  // installation as run-time search path, which may no longer exist). Used only for such older builds.
   GameRun(const RomView &rom, const Layout &layout, const std::filesystem::path &entry,
-          const std::vector<std::string> &extra_args = {});
+          const std::vector<std::string> &extra_args = {}, bool bind_installed_runtime = false);
   ~GameRun();
   GameRun(const GameRun &) = delete;
   GameRun &operator=(const GameRun &) = delete;

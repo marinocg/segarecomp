@@ -393,7 +393,7 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   const float pad = ctx_.u(8.0F);
   const float cw = w - 2 * pad, chh = cw / kCoverAspect;
   const ImVec2 ca(x + pad, y + pad), cb(x + pad + cw, y + pad + chh);
-  draw_cover(dl, entry, ca, cb, ctx_.u(4.0F), info.status == GameStatus::ready ? IM_COL32_WHITE : rgba(196, 204, 228));
+  draw_cover(dl, entry, ca, cb, ctx_.u(4.0F), info.runnable() ? IM_COL32_WHITE : rgba(196, 204, 228));
   if (entry.favorite || pointer_over || focused) {
     const float fs_ = ctx_.u(24.0F);
     ImGui::SetCursorScreenPos(ImVec2(cb.x - fs_ - ctx_.u(5.0F), ca.y + ctx_.u(5.0F)));
@@ -434,7 +434,7 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   const std::string act_shown = ellipsize(ctx_.regular, spx, std::max(0.0F, cw - ctx_.u(19.0F) - where_w - ctx_.u(8.0F)), act);
   draw_text(dl, ctx_.regular, spx, col::info, ImVec2(ca.x + ctx_.u(19.0F), ty), where.c_str());
   draw_text(dl, ctx_.regular, spx, col::dim, ImVec2(cb.x - text_width(ctx_.regular, spx, act_shown.c_str()), ty), act_shown.c_str());
-  if (info.status == GameStatus::ready && !select_mode_ && (pointer_over || focused)) {
+  if (info.runnable() && !select_mode_ && (pointer_over || focused)) {
     const float ps = ctx_.u(40.0F);
     ImGui::SetCursorScreenPos(ImVec2(ca.x + (cw - ps) * 0.5F, ca.y + (chh - ps) * 0.5F));
     play_rects_[entry.id()] = ImRect(ImGui::GetCursorScreenPos(), ImVec2(ImGui::GetCursorScreenPos().x + ps, ImGui::GetCursorScreenPos().y + ps));
@@ -473,7 +473,7 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   draw_cover(dl, entry, ImVec2(x, a.y + pad), ImVec2(x + tw, a.y + pad + th), ctx_.u(3.0F));
   x += tw + pad * 1.6F;
   const float px = ctx_.u(14.0F), spx = ctx_.u(11.5F);
-  const float actions_w = ctx_.u(info.status == GameStatus::ready && !select_mode_ ? 74.0F : 40.0F);
+  const float actions_w = ctx_.u(info.runnable() && !select_mode_ ? 74.0F : 40.0F);
   const bool wide_row = w > ctx_.u(640.0F);
   const float title_w = std::max(ctx_.u(120.0F), w * (wide_row ? 0.32F : 0.38F));
   draw_text(dl, ctx_.bold, px, col::text, ImVec2(x, a.y + h * 0.5F - px * 1.1F), ellipsize(ctx_.bold, px, title_w - (entry.favorite ? ctx_.u(20.0F) : 0.0F), entry.title()).c_str());
@@ -500,7 +500,7 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
     if (icon_button(ctx_, "details", ctx_.icon("info"), ps2, false, true, "Details")) open_details(entry.id());
     bx -= ps2 + ctx_.u(6.0F);
   }
-  if (info.status == GameStatus::ready && !select_mode_) {
+  if (info.runnable() && !select_mode_) {
     ImGui::SetCursorScreenPos(ImVec2(bx, a.y + (h - ps2) * 0.5F));
     if (icon_button(ctx_, "play", ctx_.icon("play"), ps2, true, can_play(info), "Play")) play(entry.id());
   }

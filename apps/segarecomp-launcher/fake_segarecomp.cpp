@@ -129,7 +129,7 @@ int main(int argc, char **argv) {
     const bool fallback = policy == "optimized" && env("FAKE_OPT_FALLBACK") == "1";
     const std::string effective = policy == "optimized" && !fallback ? (platform == "master-system" ? "ml_region_z80" : "ml_region") : "broad";
     std::ofstream(out / "status.json") << "{\"status\":\"ok\",\"stage\":\"done\",\"aot_policy\":{\"requested\":\"" << policy << "\",\"requested_model\":\""
-                                       << (policy == "optimized" ? (platform == "master-system" ? "d512hp" : "v1") : "none") << "\",\"effective\":\"" << effective
+                                       << (policy == "optimized" ? (platform == "master-system" ? "d512hp" : (option("--aot-model").empty() ? "v1" : option("--aot-model"))) : "none") << "\",\"effective\":\"" << effective
                                        << "\",\"fallback\":" << (fallback ? "true" : "false") << ",\"reason\":\"" << (fallback ? "inference" : "none")
                                        << "\",\"fallback_class\":\"" << (fallback ? "producer_failed" : "none") << "\",\"model_family\":\""
                                        << (effective == "ml_region_z80" ? "sms_z80_d512hp" : "none") << "\",\"validator\":\"not_run\",\"selected_ppm\":650000,\"admitted_ppm\":650000"

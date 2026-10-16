@@ -43,8 +43,20 @@ file, the build cache or the product: no placeholder values.
   log. A **storage** rail shows the game's measured footprint (native executable, generated C, objects, logs, metadata, other build files) with *Clean
   intermediates* and *Manage storage*; for a metadata-only game it says the history is kept and a new build is needed to play.
 * **Status** is computed from the build identity, never from a title: *Ready*, *Not built*, *Metadata only* (you removed the build on purpose; "rebuild
-  required"), *Needs rebuild* (made by another release or option set, or a build mode whose executable is not built yet; never started), *Build failed*, plus a *ROM missing* badge. Play is offered only for a build
-  whose identity matches exactly.
+  required"), *Needs rebuild* (made by another release or option set, or a build mode whose executable is not built yet; never started), *Build failed*, plus a *ROM missing* badge. Play is offered for a build
+  whose identity matches exactly, and for one more case: *Playable (older build)* (below).
+* **Playing a build from an earlier release.** Updating Segarecomp changes the build identity (the product tool, release and install path are part of it), which
+  used to force a recompile before anything could be played. The exact identity is still what decides whether generated output may be *reused* by a new build,
+  but a finished executable can additionally be *played* when the launcher can establish from the build's own records that it still runs here: a real build
+  folder inside the cache with an executable and a successful `status.json`; `metadata.json` that names this library ROM (SHA-256), the platform, this operating
+  system and processor and, for Master System, the same declared mapper and profile; a complete recorded policy for the *same mode* (Compatibility/Optimized) the
+  game requests now (an Optimized build keeps being reported with its own model, e.g. v1, never relabelled as the new gen2); an H-interrupt discovery setting that
+  matches; an installed SDL3 library; and the host-interface marker `runtime_contract` (recorded by every new build; bumped only when a change would stop an
+  already built program from running). Builds made before the marker existed are accepted only from the explicitly listed release (`0.5.0`); a version number
+  alone proves nothing. Everything else fails closed: the game shows *Needs rebuild* with the reason. A playable earlier build shows *Playable (older build)*,
+  keeps **Play** as the main action, shows what it actually is, and **Recompile** is an independent action that is never queued automatically. A cancelled or
+  failed recompile, or a moved ROM file, leaves the earlier build playable. A voluntary recompile builds into the current identity with the usual atomic
+  publication; afterwards the usual "keep old build artifacts" setting decides whether the earlier folder is removed. ADR 0138 records the rules.
 * **Build** shows the real `@stage` messages (analyze, generate, compile, link) and the tail of the build log. There is no percentage because the
   build tool reports none. **Cancel build** (Details, and the game's menu) stops the running build: the build tool and every compiler process it started are shut down, the
   attempt's own `.partial` folder is removed, no *Build failed* state or `.failed` diagnostics are created, and an earlier completed build of the game stays playable. A cancel that

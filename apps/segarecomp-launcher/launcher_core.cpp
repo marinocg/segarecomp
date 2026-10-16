@@ -722,6 +722,8 @@ void BuildJob::run() {
     if (sms)
       meta << "\"profile\":\"" << sms_profile << "\",\"mapper\":\"" << json_safe(rom_.mapper) << "\",\"mapper_declaration\":\""
            << (rom_.mapper.empty() ? "manifest" : "option") << "\",";
+    // SEG-069-T005: what a later release needs to decide that this program can still be played (see older_build.hpp).
+    meta << "\"runtime_contract\":" << runtime_contract << ",\"hint_alias_discovery\":" << (rom_.supports_hint_alias_discovery() && rom_.hint_alias_discovery ? "true" : "false") << ",";
     meta << "\"host\":\"" << host_description() << "\",\"toolchain\":\"zig " SEGARECOMP_ZIG_VERSION "\",\"rom_path\":\"referenced, not copied\"}\n";
     meta.close();
     fs::remove_all(entry_, ec);
@@ -740,7 +742,7 @@ void BuildJob::run() {
 
 // ---- GameRun ----
 
-GameRun::GameRun(const RomView &rom, const Layout &layout, const fs::path &entry, const std::vector<std::string> &extra_args) {
+GameRun::GameRun(const RomView &rom, const Layout &layout, const fs::path &entry, const std::vector<std::string> &extra_args, bool bind_installed_runtime) {
   const std::string exe = utf8(entry_executable(entry));
   std::vector<const char *> argv{exe.c_str()};
   for (const auto &arg : extra_args) argv.push_back(arg.c_str());
@@ -753,8 +755,18 @@ GameRun::GameRun(const RomView &rom, const Layout &layout, const fs::path &entry
   const std::string path = utf8(layout.sdl_lib) + ";" + (old_path ? old_path : "");
   SDL_SetEnvironmentVariable(environment, "PATH", path.c_str(), true);
 #else
-  (void)layout;
+  if (bind_installed_runtime) {
+#if defined(__APPLE__)
+    const char *variable = "DYLD_FALLBACK_LIBRARY_PATH";
+#else
+    const char *variable = "LD_LIBRARY_PATH";
 #endif
+    const char *old_value = SDL_getenv(variable);
+    const std::string search = utf8(layout.sdl_lib) + (old_value != nullptr && *old_value != '\0' ? std::string(":") + old_value : std::string());
+    SDL_SetEnvironmentVariable(environment, variable, search.c_str(), true);
+  }
+#endif
+  (void)bind_installed_runtime;
   SDL_IOStream *log = SDL_IOFromFile(utf8(entry / "run.log").c_str(), "wb");
   SDL_PropertiesID props = SDL_CreateProperties();
   SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());

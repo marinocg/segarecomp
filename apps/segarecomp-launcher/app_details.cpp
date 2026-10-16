@@ -76,6 +76,7 @@ std::string App::build_action_label(const StatusInfo &info) const {
     case GameStatus::metadata_only: return "Rebuild";
     case GameStatus::failed: return "Try again";
     case GameStatus::stale: return "Recompile";
+    case GameStatus::playable_older: return "Recompile";
     case GameStatus::not_built: return "Build";
   }
   return "Build";
@@ -86,7 +87,7 @@ bool App::can_build(const LibraryEntry &entry, const StatusInfo &info) const {
   return !game_ && !is_building(entry.id()) && !is_queued(entry.id()) && !info.rom_missing && !mapper_needed;
 }
 
-bool App::can_play(const StatusInfo &info) const { return info.status == GameStatus::ready && !game_ && !maintenance_running_ && !(job_ && job_key_ == info.key); }
+bool App::can_play(const StatusInfo &info) const { return info.runnable() && !game_ && !maintenance_running_ && !(job_ && job_key_ == info.key); }
 
 void App::play(const std::string &id) {
   trace("play=requested title=" + (catalog_.find_id(id) != nullptr ? catalog_.find_id(id)->title() : std::string("?")));
@@ -223,7 +224,9 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     if (is_running) { line = running_label(game_report_, restarted_this_play_); color = col::ok; }
     else if (is_building) { line = "Recompiling with " + mode + ". This can take several minutes the first time."; color = col::warn; }
     else if (mapper_needed) { line = "Declare the cartridge mapper below before building."; color = col::warn; }
-    else if (info.rom_missing && info.status != GameStatus::ready) { line = "The ROM is not at its recorded location. Locate it to build."; color = col::warn; }
+    else if (info.status == GameStatus::playable_older) { line = "Playable: an earlier release built this game. Recompile is recommended, not required."; color = col::warn; }
+    else if (info.older.playable) { line = "The last build did not finish, but an earlier build is still playable."; color = col::warn; }
+    else if (info.rom_missing && !info.runnable()) { line = "The ROM is not at its recorded location. Locate it to build."; color = col::warn; }
     else if (info.status == GameStatus::ready) { line = "Ready to play. Last played " + fmt_relative(entry.last_played_at, std::time(nullptr)) + "."; color = col::text2; }
     else if (info.status == GameStatus::metadata_only) { line = "Build removed on purpose: history kept, a new build is needed to play."; color = col::info; }
     else if (info.status == GameStatus::failed) { line = "The last build failed. See the build log, then try again."; color = col::err; }
@@ -260,7 +263,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     } else if (button(ctx_, "play", is_running ? "Playing" : "Play", ImVec2(play_w, bh), Style::primary, can_play(info), ctx_.icon("play"))) play(entry.id());
     if (ImGui::IsItemHovered() && !can_play(info) && !locate_primary) tooltip(ctx_, info.status == GameStatus::ready ? "Wait for the running game or build to finish." : "No executable matches the current build configuration yet.");
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
-    const bool prominent_build = info.status != GameStatus::ready;
+    const bool prominent_build = info.status != GameStatus::ready && !info.older.playable;  // Play stays the dominant action while an earlier build is playable
     if (is_queued(entry.id())) {
       // SEG-069-T001: a queued game's build action is its way out of the queue (it owns no process or folder yet).
       if (button(ctx_, "unqueue", "Unqueue", ImVec2(build_w, bh), Style::secondary, true, ctx_.icon("close"))) dequeue_build(entry.id());
@@ -278,6 +281,14 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
 }
 
 // ---------------------------------------------------------------- B. build configuration
+
+// SEG-069-T005: one line naming exactly what an earlier release's executable is (its own recorded mode and model, never the current selection).
+static std::string older_build_description(const OlderBuild &older) {
+  std::string text = older.mode == "optimized" ? "Optimized" : "Compatibility";
+  if (older.mode == "optimized" && !older.model.empty()) text += older.model == "v1" ? " (v1 model)" : " (" + older.model + " model)";
+  text += older.version.empty() ? ", built by an earlier release" : ", built by Segarecomp " + older.version;
+  return text;
+}
 
 std::string App::selected_mode_label(const LibraryEntry &entry) const {
   if (entry.aot_policy != "optimized") return "Compatibility";
@@ -382,10 +393,16 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     if (job_ && job_id_ == entry.id()) { text = "Building the " + selected + " executable..."; color = col::warn; icon = "reset"; }
     else if (info.status == GameStatus::ready && info.policy.present && info.policy.fallback) { text = "Optimized was requested; this executable fell back to Compatibility (see Build provenance)."; color = col::warn; icon = "warning"; }
     else if (info.status == GameStatus::ready) { text = "Executable built as " + (info.policy.present ? std::string(effective_mode(info.policy) == "optimized" ? "Optimized" : "Compatibility") : selected) + ": matches this selection, ready to play."; color = col::ok; icon = "check"; }
+    else if (info.status == GameStatus::playable_older) { text = "Playing an earlier build: " + older_build_description(info.older) + ". It keeps its own settings; Recompile applies this release and the " + selected + " selection."; color = col::warn; icon = "warning"; }
+    else if (info.older.playable) { text = "An earlier build is still playable (" + older_build_description(info.older) + "). The " + selected + " build can be retried with Recompile."; color = col::warn; icon = "warning"; }
     else if (info.other_mode_ready) { text = "No " + selected + " executable yet. Your " + other + " build is kept: switch back to play it, or Build."; color = col::warn; icon = "warning"; }
     else if (info.status == GameStatus::metadata_only) { text = "No executable (metadata only). Build to play with " + selected + "."; color = col::info; }
     else if (info.status == GameStatus::failed) { text = "The last " + selected + " build failed. Check the build log, then try again."; color = col::err; icon = "warning"; }
-    else if (info.status == GameStatus::stale) { text = "The stored build does not match this release or configuration. Recompile to apply " + selected + "."; color = col::warn; icon = "warning"; }
+    else if (info.status == GameStatus::stale) {
+      text = "Rebuild required: the stored build does not match this release or configuration" + (info.older.candidate_seen ? " and the earlier build cannot be played because " + info.older.reason : std::string()) + ". Recompile to apply " + selected + ".";
+      color = col::warn;
+      icon = "warning";
+    }
     else { text = "Not built yet. Build creates the " + selected + " executable."; }
     ImGui::SetCursorScreenPos(ImVec2(cx, y));
     const auto lines = wrap(ctx_.regular, ctx_.u(12.0F), ctl_w - ctx_.u(26.0F), text);
@@ -469,7 +486,7 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
   {
     const bool ready = info.status == GameStatus::ready;
     const std::string sel = selected_mode_label(entry);
-    state_dot_text(ctx_, dl, ImVec2(a.x + w - pad, a.y + ctx_.u(13.0F)), ready ? sel + " - up to date" : sel + " - build required", ready ? col::ok : col::warn, w * 0.5F);
+    state_dot_text(ctx_, dl, ImVec2(a.x + w - pad, a.y + ctx_.u(13.0F)), ready ? sel + " - up to date" : (info.older.playable ? sel + " - recompile recommended" : sel + " - build required"), ready ? col::ok : col::warn, w * 0.5F);
   }
   dl->ChannelsMerge();
   if (changed) { save_catalog(); request_status_refresh(); }
@@ -554,6 +571,12 @@ void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) 
       ImGui::SetCursorScreenPos(ImVec2(a.x + pad + lw, y));
       y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, vw, (info.policy.fallback ? "Optimized was requested but this game was built as Compatibility (the broad, conservative program).\n" : std::string()) + policy_details(info.policy)) + ctx_.u(6.0F);
     }
+  }
+  if (info.older.playable) {
+    // The build that Play will start: it keeps its own recorded mode and model; nothing here is relabelled as the current selection.
+    row("Playable build", older_build_description(info.older), col::warn, "From an earlier release; its recorded settings are shown, not the current selection. Recompile to use this release.");
+  } else if (info.status == GameStatus::stale && info.older.candidate_seen) {
+    row("Earlier build", "cannot be played", col::warn, "Rebuild required: " + info.older.reason + ".");
   }
   row("Last run status", entry.last_played_at > 0 ? std::string(run_label(entry.last_run)) : "never played", entry.last_run == "failed" ? col::err : col::text);
   row("Diagnostics", info.compat_known ? "Experimental analysis metadata for this ROM ships with this release." : "No ROM-specific analysis metadata ships with this release.", col::text2,

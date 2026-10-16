@@ -64,6 +64,12 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
     } else {
       info.status = GameStatus::not_built;
     }
+    // SEG-069-T005: no ready build of the CURRENT identity. An executable an earlier release built may still be playable; this is a separate,
+    // fail-closed question (older_build.hpp) and never relaxes the exact identity check above.
+    if (!mapper_needed && !e.archived && info.status != GameStatus::ready && !e.builds.empty()) {
+      info.older = find_playable_older_build(e, info.key, view.optimized() ? "optimized" : "compatibility", layout, cache_root() / "games");
+      if (info.older.playable && info.status == GameStatus::stale) info.status = GameStatus::playable_older;
+    }
     if (!mapper_needed && view.supports_optimized()) {
       RomView other = view;
       other.aot_policy = view.optimized() ? "compatibility" : "optimized";
@@ -284,6 +290,7 @@ std::string App::status_label(const StatusInfo &info) const {
     case GameStatus::ready: return "Ready";
     case GameStatus::metadata_only: return "Metadata only";
     case GameStatus::stale: return "Needs rebuild";
+    case GameStatus::playable_older: return "Playable (older build)";
     case GameStatus::failed: return "Build failed";
     case GameStatus::not_built: return "Not built";
   }
@@ -295,6 +302,7 @@ ImU32 App::status_color(const StatusInfo &info) const {
     case GameStatus::ready: return ui::col::ok;
     case GameStatus::failed: return ui::col::err;
     case GameStatus::stale: return ui::col::warn;
+    case GameStatus::playable_older: return ui::col::warn;
     case GameStatus::metadata_only: return ui::col::info;
     case GameStatus::not_built: return ui::col::text2;
   }
@@ -709,7 +717,7 @@ void App::request_build(const std::string &id) {
 App::Badge App::badge_for(const LibraryEntry &entry, const StatusInfo &info) const {
   if (is_building(entry.id())) return {"Building", ui::col::warn, true};
   if (is_queued(entry.id())) return {"Queued", ui::col::info, false};
-  if (info.rom_missing && info.status != GameStatus::ready) return {"ROM missing", ui::col::warn, false};
+  if (info.rom_missing && !info.runnable()) return {"ROM missing", ui::col::warn, false};
   return {status_label(info), status_color(info), false};
 }
 
@@ -780,17 +788,26 @@ bool App::launch(const std::string &id, bool restarted) {
   if (entry == nullptr || game_) return false;
   RomView view = view_for(*entry);
   if (const std::string refusal = launch_refusal(view); !refusal.empty()) { failures_[id] = refusal; diagnostics_[id] = refusal; return false; }
-  const fs::path dir = entry_dir(view, layout_);
+  fs::path dir = entry_dir(view, layout_);
+  bool older_build = false;
   if (!entry_ready_for(dir, view, layout_)) {
-    // Never start an executable that does not match the entry's current identity (stale, foreign or removed).
-    show_message("This build cannot be played", {"The stored build no longer matches this game's current identity (a different release, option set or a removed build).", "Recompile the game to play it."});
-    request_status_refresh();
-    return false;
+    // Never start an executable that does not match the entry's current identity (stale, foreign or removed) -- except an earlier release's build that
+    // is verified playable RIGHT NOW (not from the possibly outdated status list): it runs exactly as recorded, never relabelled as the current request.
+    const OlderBuild older = find_playable_older_build(*entry, u8s(dir.filename()), view.optimized() ? "optimized" : "compatibility", layout_, cache_root() / "games");
+    if (!older.playable) {
+      show_message("This build cannot be played", {"The stored build no longer matches this game's current identity (a different release, option set or a removed build).",
+                                                   older.candidate_seen ? "An earlier build cannot be used: " + older.reason + "." : std::string("There is no earlier build to fall back on."), "Recompile the game to play it."});
+      request_status_refresh();
+      return false;
+    }
+    dir = older.dir;
+    older_build = true;
+    trace("run=older_build version=" + (older.version.empty() ? std::string("unknown") : older.version) + " mode=" + older.mode);
   }
   const std::string key = u8s(dir.filename());
   if (!busy_.try_begin_run(key)) { toast("Cleanup is running; try again in a moment.", true); return false; }
   sv_diag_yield_exclusive_devices(diag_);  // a libusb-driven controller can be opened by one process only: free it for the game
-  game_ = std::make_unique<GameRun>(view, layout_, dir);
+  game_ = std::make_unique<GameRun>(view, layout_, dir, std::vector<std::string>{}, older_build);
   if (!game_->started()) {
     sv_diag_reclaim_exclusive_devices(diag_);
     busy_.end_run(key);
@@ -802,6 +819,7 @@ bool App::launch(const std::string &id, bool restarted) {
   }
   game_id_ = id;
   game_key_ = key;
+  game_dir_ = dir;
   game_view_ = view;
   game_report_ = read_policy_report(dir);
   restarted_this_play_ = restarted;
@@ -842,7 +860,7 @@ void App::finish_run() {
     return;
   }
   failures_[id] = "The game stopped unexpectedly.";
-  diagnostics_[id] = read_tail(entry_executable(entry_dir(view_for(*entry), layout_)).parent_path() / "run.log", 24000);
+  diagnostics_[id] = read_tail((game_dir_.empty() ? entry_dir(view_for(*entry), layout_) : game_dir_) / "run.log", 24000);
   trace("state=failed reason=game_stopped_unexpectedly");
   request_status_refresh();
 }
@@ -1079,6 +1097,10 @@ void App::run_script() {
     }
   } else if (cmd == "build") {  // request a build of the open game (starts now or joins the FIFO)
     if (!detail_id_.empty()) request_build(detail_id_);
+  } else if (cmd == "play") {  // the Play action of the open game (does nothing when it cannot be played)
+    if (!detail_id_.empty() && can_play(status_of(detail_id_))) play(detail_id_);
+  } else if (cmd == "wait_play_end") {  // hold the script until no game is running
+    if (game_) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "cancel_build") {  // the Cancel build / Unqueue action for the open game
     if (!detail_id_.empty()) stop_or_dequeue_build(detail_id_);
   } else if (cmd == "wait_idle") {  // hold the script until no build is running or queued
@@ -1125,6 +1147,9 @@ void App::run_script() {
     else if (key == "library_scroll") actual = std::to_string(static_cast<int>(std::lround(library_scroll_)));
     else if (key == "detail") actual = page_ == Page::details && catalog_.find_id(detail_id_) != nullptr ? catalog_.find_id(detail_id_)->title() : "-";
     else if (key == "nav_items") actual = nav_items_;
+    else if (key == "status") actual = !detail_id_.empty() ? status_label(status_of(detail_id_)) : "-";
+    else if (key == "can_play") actual = !detail_id_.empty() && can_play(status_of(detail_id_)) ? "1" : "0";
+    else if (key == "playing") actual = game_ != nullptr ? "1" : "0";
     else if (key == "cleanup_mode") actual = settings_.cleanup.mode;
     else if (key == "intermediates_choice") actual = settings_.intermediates_choice_made ? "1" : "0";
     else if (key == "mode") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr ? selected_mode_label(*catalog_.find_id(detail_id_)) : "-";

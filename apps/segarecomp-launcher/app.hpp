@@ -6,6 +6,7 @@
 #include "launcher_core.hpp"
 #include "launcher_settings.hpp"
 #include "library_catalog.hpp"
+#include "older_build.hpp"
 #include "library_view.hpp"
 #include "storage.hpp"
 #include "ui_kit.hpp"
@@ -33,7 +34,8 @@ extern "C" {
 
 namespace launcher {
 
-enum class GameStatus { not_built, ready, metadata_only, stale, failed };
+// `playable_older`: the current identity has no build, but an executable built by an earlier release is verifiably playable (older_build.hpp).
+enum class GameStatus { not_built, ready, metadata_only, stale, failed, playable_older };
 enum class Page { library, details, import_page, storage, settings };
 
 struct StatusInfo {
@@ -53,6 +55,9 @@ struct StatusInfo {
   // that build is still on disk and valid, switching back makes the game playable again without recompiling.
   bool other_mode_supported = false;
   bool other_mode_ready = false;
+  // SEG-069-T005: what an earlier release's build of this game is (evaluated only when the current identity has no ready build).
+  OlderBuild older;
+  [[nodiscard]] bool runnable() const { return status == GameStatus::ready || older.playable; }
 };
 
 struct ImportItem {
@@ -267,6 +272,7 @@ private:
   std::map<std::string, std::string> notices_;       // id -> restart notice
   std::unique_ptr<GameRun> game_;
   std::string game_id_, game_key_;
+  std::filesystem::path game_dir_;  // the build folder of the running game (an earlier release's folder for an older build)
   RomView game_view_;
   PolicyReport game_report_;
   bool restarted_this_play_ = false;

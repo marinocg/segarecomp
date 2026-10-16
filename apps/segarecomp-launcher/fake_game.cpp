@@ -6,6 +6,7 @@
 #include <string>
 
 int main(int, char **argv) {
+  if (const char *log = std::getenv("FAKE_GAME_LOG")) std::ofstream(log, std::ios::app) << argv[0] << '\n';  // SEG-069-T005: which executable was started
   std::string policy;
   std::ifstream(std::filesystem::path(argv[0]).parent_path() / "policy.txt") >> policy;
   const char *code = std::getenv(policy == "optimized" ? "FAKE_OPT_EXIT" : "FAKE_COMPAT_EXIT");
