@@ -16,7 +16,7 @@ SEG-018 (workspace productization, current).
 | [Genesis / Mega Drive](genesis/README.md) | yes | Generated-native MC68000; Genesis machine/runtime/video; controller I/O, VDP, YM2612, PSG and Z80-bus device behavior as currently implemented; Sonic 1 title-screen checkpoint (SEG-007) | Generated-native Z80 CPU semantic path (SEG-008); first in-game frame (SEG-011) | `libs/cpu/m68k`, `libs/device/sega/genesis` |
 | [Master System](master-system/README.md) | no | none | SEG-009 | future Z80 CPU + SMS device libraries |
 | [Game Gear](game-gear/README.md) | no | none | SEG-010 (Master System family specialization) | shares Master System libraries |
-| [Sega CD](sega-cd/README.md) | no | none | future / not yet refined | `libs/cpu/m68k`, `libs/device/sega/genesis` |
+| [Sega CD](sega-cd/README.md) | no | none | refined; contract in docs/architecture (SEG-062) | `libs/cpu/m68k`, `libs/device/sega/genesis` |
 | [32X](32x/README.md) | no | none | future / not yet refined | Genesis libraries + future SH-2 library |
 | [Saturn](saturn/README.md) | no | none | future / not yet refined (after SH-2 foundations) | future SH-2 library |
 

@@ -1126,6 +1126,14 @@ segarecomp_enable_warnings(executable_image_test)
 add_test(NAME executable_image_test COMMAND executable_image_test)
 add_test(NAME executable_image_forbidden_identifiers_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/executable_image_forbidden_identifiers_test.py ${PROJECT_SOURCE_DIR})
+# SEG-062-T001 (ADR 0126): Sega CD executable cases on the unchanged generic set, and a mutated-validator control.
+add_executable(sega_cd_executable_image_test sega_cd_executable_image_test.cpp)
+target_link_libraries(sega_cd_executable_image_test PRIVATE segarecomp::recompiler)
+segarecomp_enable_warnings(sega_cd_executable_image_test)
+add_test(NAME sega_cd_executable_image_test COMMAND sega_cd_executable_image_test)
+add_test(NAME sega_cd_executable_image_mutation_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_executable_image_mutation_test.py ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_executable_image_test sega_cd_executable_image_mutation_test APPEND PROPERTY LABELS full fast)
 add_executable(z80_executable_image_equivalence_test z80_executable_image_equivalence_test.cpp)
 target_link_libraries(z80_executable_image_equivalence_test PRIVATE segarecomp::machine_master_system segarecomp::machine_genesis_z80)
 segarecomp_enable_warnings(z80_executable_image_equivalence_test)
