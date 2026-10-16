@@ -281,6 +281,8 @@ int scd_devices_can_raise(const ScdMachine *m, uint32_t level);
 int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 int scd_vdp_init(ScdMachine *m);
 void scd_vdp_release(ScdMachine *m);
+/* Bring an in-flight CDC DMA up to the current instruction tick (every Word RAM / CDC observation point). */
+int scd_cd_observe(ScdMachine *m);
 int scd_cdc_sub_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 int scd_word_ram_access(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 int scd_word_ram_dma_store(ScdMachine *m, uint32_t offset, uint16_t word);

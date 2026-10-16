@@ -10,6 +10,7 @@ static uint32_t scd_bank_offset(uint32_t bank, uint32_t offset) { return (offset
 static uint32_t scd_main_bank(const ScdMachine *m) { return m->ga.ret ? 1U : 0U; }
 
 int scd_word_ram_main_mode_write(ScdMachine *m, uint32_t value, uint32_t pc) {
+  if (scd_cd_observe(m) != 0) return 1;
   m->ga.prg_bank = (uint8_t)((value >> 6) & 3U);
   if (m->ga.mode_1m) return scd_fail(m, SCD_MAIN, SCD_STOP_WORDRAM_1M_DMNA_UNSUPPORTED, pc, value); /* U: 1M swap requests */
   if (value & 0x02U) { /* DMNA = 1 in 2M mode: Word RAM passes to the sub at once (V2); repeated requests change nothing */
@@ -22,6 +23,7 @@ int scd_word_ram_main_mode_write(ScdMachine *m, uint32_t value, uint32_t pc) {
 
 int scd_word_ram_sub_mode_write(ScdMachine *m, uint32_t value, uint32_t pc) {
   const uint32_t ret = value & 1U;
+  if (scd_cd_observe(m) != 0) return 1;
   if (value & 0x18U) return scd_fail(m, SCD_SUB, SCD_STOP_WORDRAM_PRIORITY_MODE_UNSUPPORTED, pc, value);
   if (value & 0x04U) { /* 1M mode: RET selects the banks; the switch and every swap complete at once (V2) */
     m->ga.mode_1m = 1U;
@@ -50,6 +52,7 @@ int scd_word_ram_sub_mode_write(ScdMachine *m, uint32_t value, uint32_t pc) {
 
 int scd_word_ram_access(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
   uint32_t offset;
+  if (scd_cd_observe(m) != 0) return 1; /* an in-flight CDC DMA is brought up to this instruction first */
   if (cpu == SCD_MAIN) {
     if (!m->ga.mode_1m) {
       if (!m->ga.ret) return scd_fail(m, cpu, SCD_STOP_WORDRAM_NOT_OWNED, pc, address);

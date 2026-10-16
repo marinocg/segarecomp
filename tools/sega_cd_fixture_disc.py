@@ -22,7 +22,7 @@ Result block convention: the main program reports into work RAM at $FFC000 and w
 
 usage:
   sega_cd_fixture_disc.py build --fixture NAME --out DIR [--variant cooked|raw] [--seed N] [--data-flip OFFSET]
-                                [--cd-lba LBA] [--dma-dest N] [--bad-checksum] [--no-audio]
+                                [--cd-lba LBA] [--dma-dest N] [--bad-checksum] [--abort-dma] [--bad-cdc-register] [--no-audio]
   sega_cd_fixture_disc.py describe --fixture NAME [options]   JSON: data LBA, expected values (used by tests)
   sega_cd_fixture_disc.py --check | --write-manifest
 """
@@ -616,7 +616,7 @@ def fixture_cdframe(options):
     cdc_write(0x0F, 0x00)  # CDC reset
     cdc_write(0x01, 0x02)  # IFCTRL: DOUTEN
     cdc_write(0x0A, 0x84)  # CTRL0: DECEN | WRRQ
-    sub.move("b", imm(0x00), absl(GA_SUB + 0x07))  # CTRL1 = 0 (auto-incremented address 11)
+    sub.move("b", imm(0x08 if options.get("bad_cdc_register") else 0x00), absl(GA_SUB + 0x07))  # CTRL1 (address 11)
     sub.move("b", imm(0x01), absl(GA_SUB + 0x0F))
     wait_flag(sub, GA_SUB + 0x0E, 1, "w_go")
     sub.label("w_own")
@@ -657,6 +657,15 @@ def fixture_cdframe(options):
     sub.lsr_w(8, 3)
     sub.move("b", d(3), absl(GA_SUB + 0x07))
     sub.move("b", imm(0x00), absl(GA_SUB + 0x07))  # DTRG
+    if options.get("abort_dma"):
+        # Negative/partial-progress variant: let the DMA run for a few instructions, then clear DOUTEN (abort) and report EDT.
+        for _ in range(4):
+            sub.nop()
+        cdc_write(0x01, 0x00)
+        sub.move("b", absl(GA_SUB + 0x04), absl(GA_SUB + 0x2E))  # EDT/DSR/destination into COMSTAT7 (high byte)
+        sub.move("b", imm(0x01), absl(GA_SUB + 0x03))
+        sub.move("b", imm(0x02), absl(GA_SUB + 0x0F))
+        sub.stop(0x2700)
     sub.label("w_edt")
     sub.btst(7, absl(GA_SUB + 0x04))
     sub.bcc("eq", "w_edt")
@@ -828,6 +837,10 @@ def options_from(args):
         options["dma_dest"] = args.dma_dest
     if args.bad_checksum:
         options["bad_checksum"] = True
+    if args.abort_dma:
+        options["abort_dma"] = True
+    if args.bad_cdc_register:
+        options["bad_cdc_register"] = True
     return options
 
 
@@ -843,6 +856,8 @@ def main(argv=None):
     parser.add_argument("--cd-lba", type=int)
     parser.add_argument("--dma-dest", type=int)
     parser.add_argument("--bad-checksum", action="store_true")
+    parser.add_argument("--abort-dma", action="store_true")
+    parser.add_argument("--bad-cdc-register", action="store_true")
     parser.add_argument("--no-audio", action="store_true")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--write-manifest", action="store_true")

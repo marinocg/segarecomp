@@ -2,6 +2,7 @@
 # Genesis runtime only for the VDP device, frame export and the C SHA-256. This target compiles the sources under the project
 # warning set; generated programs compile the same sources next to their own translation unit.
 add_library(segarecomp_runtime_sega_cd STATIC
+  scd_cd.c
   scd_devices.c
   scd_disc.c
   scd_gate_array.c

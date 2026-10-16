@@ -120,7 +120,9 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
   for (i = 0; i < GENESIS_VDP_REGISTER_COUNT; ++i) fprintf(out, "%s%u", i ? "," : "", host->devices.vdp.registers[i]);
   fprintf(out, "],\"cram_words\":\"");
   for (i = 0; i < GENESIS_VDP_CRAM_BYTES; ++i) fprintf(out, "%02x", host->devices.vdp.cram[i]);
-  fprintf(out, "\",\"cdd\":{\"status\":%u,\"lba\":%u,\"delivered\":%llu},\"frame_sha256\":%s%s%s,\"instructions\":%llu}\n", m->cdd.status,
+  fprintf(out, "\",\"cdc\":{\"edt\":%u,\"dma_active\":%u,\"dma_done\":%u,\"dma_total\":%u,\"pt\":%u,\"dac\":%u,\"dma_address\":%u}",
+          m->cdc.edt, m->cdc.dma_active, m->cdc.dma_done, m->cdc.dma_total, m->cdc.pt, m->cdc.dac, m->cdc.dma_address);
+  fprintf(out, ",\"cdd\":{\"status\":%u,\"lba\":%u,\"delivered\":%llu},\"frame_sha256\":%s%s%s,\"instructions\":%llu}\n", m->cdd.status,
           m->cdd.lba, (unsigned long long)m->cdd.delivered, frame_sha ? "\"" : "", frame_sha ? frame_sha : "null", frame_sha ? "\"" : "",
           (unsigned long long)(m->cpu[0].retired + m->cpu[1].retired));
 }
