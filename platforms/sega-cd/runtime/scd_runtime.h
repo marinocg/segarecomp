@@ -276,7 +276,8 @@ void scd_update_sub_interrupt(ScdMachine *m);
 void scd_raise_sub_level(ScdMachine *m, uint32_t level);
 void scd_devices_advance(ScdMachine *m, uint64_t until);
 uint64_t scd_devices_next_event(const ScdMachine *m);
-int scd_devices_can_wake_sub(const ScdMachine *m);
+/* 1 when a device can still raise sub interrupt `level` without processor action (the STOP wake rule). */
+int scd_devices_can_raise(const ScdMachine *m, uint32_t level);
 int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 int scd_vdp_init(ScdMachine *m);
 void scd_vdp_release(ScdMachine *m);
