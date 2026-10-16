@@ -132,9 +132,11 @@ class Analyzer {
     return s;
   }
   static State reset_state() {
+    // Architectural reset defines only AF and SP (= $FFFF); every other register is undefined on hardware and stays unknown here even
+    // though the project's own runtime happens to initialise them: a static certificate must not depend on that choice.
     State s;
-    for (unsigned i : {unsigned(sA), unsigned(sB), unsigned(sC), unsigned(sD), unsigned(sE), unsigned(sH), unsigned(sL)}) s.r[i] = singleton(0xFF);
-    s.r[sIX] = s.r[sIY] = s.r[sSP] = singleton(0xFFFF);
+    s.r[sA] = singleton(0xFF);
+    s.r[sSP] = singleton(0xFFFF);
     return s;
   }
   bool join(State& dst, const State& src) const {  // returns true when dst grew

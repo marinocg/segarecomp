@@ -72,3 +72,100 @@ certificates under adversarial review; (3) deterministic inference; (4) no new M
 Prediction accuracy alone never qualifies. If ML finds a valid candidate the verifier cannot certify, the exact missing proof capability is
 recorded and the verifier is not weakened.
 Budgets: D0 limits unchanged; no inference budget is spent unless M0 passes.
+
+---
+
+# RESULTS (appended after the pre-registration above; limits and rules unchanged)
+
+Two refinements were made before any real input was analysed and are part of the frozen D0: (a) the result also reports
+`closed_under_mutation` (first-order scope: a write that changes a reachable start can expose new code with further stores the analysis
+never saw); (b) reset state defines only A (= $FF) and SP (= $FFFF), every other register is unknown (initially all registers were
+seeded; corrected after review of soundness, real-image results identical). Cause attribution of unknown values was added for
+reporting only and changes no decision.
+
+## Phase A - existing CPU-owned capability (libs/cpu/z80)
+
+`decode_at` / `classify_all` give an exact per-start classification with logical length and prefix accounting; applying a candidate byte
+to a copy of the image and re-classifying yields, with no new decoder, the original and modified forms of every overlapping start. `project_effect`
+gives: register writes (constant, copy, +constant, load, opaque), at most one memory store with an absolute or register-relative
+address and a value expression, and control successors (jump, conditional, call, return, computed). Not described (reported unsupported,
+never guessed): EX/EXX, PUSH/POP, every ED and CB space form (block transfers, shifts/rotates, BIT/RES/SET, 16-bit ADC/SBC), 16-bit ADD,
+memory read-modify-write, CALL cc, RST, RETI/RETN, EI/DI/IM, HALT, undocumented index-half forms; ALU results are opaque; memory loads are
+unknown; flags are not modelled. Smallest missing capability, from the attribution below: a **CPU-owned register/memory write
+footprint for the currently unsupported forms** (which registers a form may write, and its store address expression, even when the value
+is opaque).
+
+## Phase B - synthetic proof (tests/z80_static_mutation_tests, 33 checks, all pass)
+
+A constant replacement: exact destination and value, original jr (2 B) vs modified ret (1 B) distinguished at a reachable start, both forms
+decode through the existing decoder; B two-branch RET/EXX and a join -> finite sets {C9, D9}, nothing guessed; C unknown value, unknown
+(memory-loaded) address and a loop-incremented pointer -> UNKNOWN, incomplete; D shorter (3->1), longer via a written prefix (1->4) and
+operand-only (payload_only; unreachable overlapping starts may differ and are reported as such); E PUSH/EXX/CALL cc unsupported -> UNKNOWN,
+incomplete; adversarial: callee write with caller constants, stack push into code as a width-2 candidate, self-overwrite, step budget,
+EI with unknown SP (hardware push destination UNKNOWN), unresolved and resolved computed jumps, mirror aliasing, undefined reset
+registers, determinism, wrong image size. A first-order complete set is explicitly NOT closed under mutation when a candidate changes a
+reachable start (fixture A).
+
+## Phase C - known images (label: known_image_from_prior_execution; analyzer given only the 8 KiB image and the reset root)
+
+| Image (lineage) | reachable starts | instruction stores (addr exact / unknown) | candidates (structural / payload-only) | observed mutation recovered | complete |
+| --- | --- | --- | --- | --- | --- |
+| Sega-family driver image shared byte-identically by Aladdin, Earthworm Jim, Jurassic Park | 2,512 | 498 (89 / 409) | 11 (9 / 2) | **yes**: exact destination with exact values for both observed forms (return and exchange-register-set) | no |
+| Krusty's Super Fun House (same family, different build, 34% window overlap) | 2,432 | 485 (85 / 400) | 11 (9 / 2) | **yes** (same two forms at its own offset) | no |
+| The Lion King (unrelated) | 36 | 9 | 0 | no (reachability stops at CALL cc / RST / block copy) | no |
+| Sonic 1 epoch (control, no mutation observed) | 104 | 19 | 0 | n/a | no |
+
+The previously observed mutation was a post-hoc comparison target only. The analysis recovered it blind, from the image and the reset
+vector. It also lists additional exact write sites the observation pass never reached (a write that turns the jump's operand into
+exchange-AF, and one more exact code-byte site); whether they execute is not claimed (flags are not modelled, both branch edges are taken).
+Cost per image: 0.07 s wall / 0.07 s CPU, 14 MB peak RSS, byte-identical output on repeat runs (6/6 images).
+
+Why `candidate_set_complete` is false everywhere (cause attribution of the ~400 unknown store addresses): 36% a call-return continuation
+(no interprocedural summary), ~62% an unsupported-effect form that havocs the state (BIT, 16-bit ADD, PUSH, POP, LD ED/CB forms, shifts,
+NEG/CPL, EXX, LDIR, ...), the rest memory loads and one widened join. Plus EI reachable, so interrupt handler register effects are
+unverified. Consequently the proven fact is **existence of exact-valued code writes**, not the **complete** mutation set; a complete set
+(needed before any compiled-variant selection) is not established for any real image.
+
+## Phase D - image extraction, separate from mutation proof
+
+Uploaded images were compared with the ROM (aggregates only). The 38-byte boot stub is a verbatim ROM extent in every title. The 8 KiB driver
+image of the Sega-family titles is reassembled entirely from 2-10 exact ROM byte segments with zero uncovered bytes (Lion King: 4 segments, 16
+bytes uncovered); Sonic 1's driver is compressed (107 of 7,095 windows match). So for the Sega-family images a **static M68K copy
+certification** (exact ROM-to-RAM copies) is a plausible static_proof route (ADR 0077) - that is SEG-054's M68K scope, not done here - while
+Sonic 1 would need a decompression proof. SEG-041-T003 recovered Sonic 1's image by executing the decompressor concretely; that is not a
+no-execution proof. The deterministic D0' scan of the ROM for Z80-window immediates (M2 baseline) yields 34-345 sites per title (noisy: ROM data
+bytes match) and lies within 256 bytes of the source-pointer immediate in the Sega-family titles that have a unique pointer; Lion King's
+loader has no such pointer and Sonic 1's source is compressed.
+
+## ML arm (M0 gate evaluated against the pre-registration)
+
+Lineages available with any label: 3 (the Sega-family image [4 titles], The Lion King, Sonic 1). Lineages with a positive recovered by D0: 1.
+Required: >= 6 independent lineages, >= 3 positive, >= 2 positive held out. M0 FAILS -> **CORPUS_BLOCKER**; no model was trained and none was run
+(no zero-shot run either: no existing model targets this task, and the SMS D512HP CNN is not assumed suitable). Nevertheless the information
+argument is decisive for M1: D0's remaining unknowns are unknown addresses/values caused by missing CPU footprints and missing
+interprocedural summaries; a ranker can reorder candidates but cannot supply an address or value, and the verifier must not accept one.
+Additional certified cases from M1 = 0 by construction; D0 already costs 0.07 s per image, so there is no cost to reduce. For M2, D0' (simple
+deterministic search) already localises the loader neighbourhood where a pointer exists, and the labels needed to train a loader-routine ranker
+(a handful of lineages, each with one loader) cannot support a held-out comparison. Recommendation: retain D0, reject production ML, and if
+ML is revisited, first acquire >= 6 independent lineages with source-derived mutation / loader truth (public sound-driver disassemblies:
+Sega standard, GEMS, SMPS variants, Z80 loaders in M68K sources).
+
+## Verdicts
+
+- Mutation proof: **STATIC_MUTATION_PROOF_FEASIBLE** for *existence* of exact-valued code writes (blind recovery of the observed mutation on
+  the two real driver images, deterministic, 0.07 s, existing CPU-owned decode/effect only); **NOT** feasible as a *complete/closed* proof
+  today: completeness is blocked by the unsupported-form footprint and by interprocedural continuation (STATIC_PROOF_TOO_COMPLEX is not claimed:
+  the missing piece is small and CPU-owned for 62% of the unknowns). No unsound certificate was found by the author; the independent
+  review below could change this.
+- Image producer: **IMAGE_PRODUCER_BLOCKED** for guest-free construction in general (Sonic 1 requires decompression; the Lion King loader is
+  not analysed); a static exact-copy route is plausible for the Sega-family images and is SEG-054 territory.
+- ML: **CORPUS_BLOCKER; reject production ML**; D0 suffices for everything it can certify.
+- Compiled-variant selection still needs, beyond ADR 0134: a complete closed candidate set, one decode per address / selection before
+  effects, interrupt-handler register-effect proof, and second-order closure (mutated code re-analysed).
+
+## Single minimal next step
+
+Add a CPU-owned write footprint to `project_effect` for the currently unsupported forms (registers possibly written; store address
+expression even with an opaque value), validated against the pinned independent Z80 oracle, then re-run D0 once with the unchanged limits to
+see how far `store_addresses_complete` moves. (Not done here: it is a CPU-semantic extension that this spike must not make merely to improve a
+real workload.)

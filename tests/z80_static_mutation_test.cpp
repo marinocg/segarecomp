@@ -53,6 +53,13 @@ int main() {
     check(r.candidate_set_complete() && !r.closed_under_mutation(),
           "A: first-order set complete, but NOT closed under mutation (the mutated code may store further)");
   }
+  // ---- Reset state: only A/F and SP are defined; other registers are never guessed ----
+  {
+    Image i = blank();
+    put(i, 0x0000, {0x36, 0xC9, 0x18, 0xFE});  // LD (HL),C9 with HL undefined at reset
+    const zm::Report r = run(i);
+    check(r.stores.size() == 1 && r.stores[0].address == zm::Certainty::unknown && r.candidates.empty(), "R1: HL is undefined after reset -> UNKNOWN destination");
+  }
   // ---- Fixture B1: two branches write different constant opcodes to the same location ----
   {
     Image i = blank();
