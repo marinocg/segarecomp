@@ -40,6 +40,7 @@ extern "C" {
 #define SCD_CDD_TICK_TICKS UINT64_C(357954500000)
 #define SCD_TIMER_UNIT_SUB_CYCLES UINT64_C(384)
 #define SCD_DMA_SUB_CYCLES_PER_BYTE UINT64_C(4)
+#define SCD_STOPWATCH_UNIT_TICKS (SCD_TIMER_UNIT_SUB_CYCLES * SCD_SUB_CYCLE_TICKS) /* 384 sub cycles = 30.72 us per count */
 
 #define SCD_PRG_RAM_BYTES 0x80000U
 #define SCD_WORD_RAM_BYTES 0x40000U
@@ -89,6 +90,8 @@ typedef enum ScdStopClass {
   /* SEG-064-T003: main-side Genesis devices of the BIOS-image profile. */
   SCD_STOP_MAIN_DEVICE_UNSUPPORTED,    /* a main access to the I/O, Z80 or sound area outside the modelled shapes, or one that would
                                           observe the unmodelled Z80 execution */
+  /* SEG-064-T004: the BIOS-image profile's accepted boundary (a deliberate end, not a failure). */
+  SCD_STOP_APPLICATION_HANDOFF,        /* the main processor is about to execute its first instruction at the documented IP entry */
   SCD_STOP_CLASS_COUNT
 } ScdStopClass;
 
@@ -260,6 +263,7 @@ typedef struct ScdAuthentic {
   uint32_t bios_size;
   const ScdMaterializedIdentity *sub_images;
   uint32_t sub_image_count;
+  uint32_t ip_entry;              /* SEG-064-T004: the documented IP entry (main work RAM; contract section 9); 0 = no handoff boundary */
 } ScdAuthentic;
 
 typedef struct ScdProgram {
@@ -300,6 +304,10 @@ typedef struct ScdGateArray {
   uint8_t cdd_ctrl_hi;      /* $FF8036 (1 = no audio track playing) */
   uint8_t cdd_ctrl_lo;      /* $FF8037 (bit 2 HOCK) */
   uint8_t scratch[0x98];    /* $FF8068-$FF80FF: register storage without function */
+  /* SEG-064-T004: the $FF800C stopwatch is a free-running 12-bit count of 384-sub-cycle units on a grid anchored at `origin` (power-on,
+   * or the last peripheral reset); the register reads the count minus `base`, the count at the last write (which clears it). */
+  uint64_t stopwatch_origin;
+  uint32_t stopwatch_base;
 } ScdGateArray;
 
 #define SCD_DMA_NONE 0U
@@ -320,6 +328,7 @@ typedef struct ScdCdc {
   uint8_t head[2][4];       /* [0] block header, [1] sub-header (selected by CTRL1 SHDREN) */
   uint8_t stat0, stat2, stat3;
   uint64_t decoder_end;     /* end tick of the decoder active period */
+  uint16_t host_word;       /* $FF8008/$A12008: the CDC host-data register (reset value $FFFF; SEG-064-T004) */
   uint8_t dma_state;        /* SCD_DMA_*: the writer of a started transfer (none while the destination is invalid) */
   uint8_t dma_target;       /* SCD_DMA_TARGET_*, latched when the writer is selected */
   uint64_t dma_base;        /* tick from which the next bytes are counted */
@@ -340,6 +349,31 @@ typedef struct ScdCdd {
   uint64_t next_tick;       /* next grid point to process while the drive is active */
   uint64_t delivered;       /* data blocks read while playing */
 } ScdCdd;
+
+/* SEG-064-T004: the RF5C164 PCM chip's host-visible write state (scd_pcm.c): register storage and the 64 KiB wave RAM, with no audio
+ * generation. Reads that would observe a running channel or the unverified RAM read path are typed stops. */
+typedef struct ScdPcm {
+  uint8_t env[8], pan[8], st[8];
+  uint16_t fd[8], ls[8];
+  uint8_t index;            /* CTRL: selected channel (0-7) */
+  uint8_t bank;             /* CTRL: wave RAM bank (0-15, 4 KiB each) */
+  uint8_t enabled;          /* CTRL bit 7 */
+  uint8_t onoff;            /* ON/OFF register as written (a set bit turns the channel off) */
+  uint8_t ram[0x10000];
+} ScdPcm;
+
+/* SEG-064-T004: the graphics ASIC (scd_gfx.c): the host-visible registers, the parameters latched at the start, and the progress. */
+typedef struct ScdGfx {
+  uint8_t busy;
+  uint8_t ctl;                 /* $FF8058 bits 2-0 */
+  uint16_t map_base, cell_v, buffer_origin, offset, h_dots, v_lines, trace_base; /* $5A, $5C, $5E, $60, $62, $64, $66 as written */
+  uint32_t trace_ptr, map_ptr, dot_mask, buffer_offset, buffer_start;
+  uint8_t stamp_shift, map_shift;
+  uint8_t lines_left;          /* lines not yet rendered (the live $FF8064 low byte) */
+  uint64_t base;               /* tick from which the next line's cost is counted */
+  uint64_t line_ticks;
+  uint64_t operations, lines_rendered;
+} ScdGfx;
 
 typedef struct ScdMachine {
   ScdCpu cpu[2];
@@ -384,6 +418,12 @@ typedef struct ScdMachine {
   uint16_t hint_vector;                   /* $A12006: the low word of the main level-4 autovector (BIOS ROM $72) */
   uint64_t vdp_frames;                    /* vertical-blank onsets processed */
   uint64_t main_interrupts_taken[8];
+  /* SEG-064-T004 */
+  ScdPcm pcm;
+  ScdGfx gfx;
+  void *access_trace;                     /* SEG-064-T004 diagnostic (--access-trace): run-length-coded sub Gate Array accesses, or NULL */
+  void *event_log;                        /* SEG-064-T004 diagnostic (--event-log): "<vblank count> <event>" lines, or NULL */
+  void *coverage;                         /* SEG-064-T004 diagnostic (--coverage): executed instruction starts per processor, or NULL */
 } ScdMachine;
 
 /* Physical memories whose bytes may hold executable images (for write invalidation). */
@@ -461,9 +501,30 @@ uint32_t scd_main_wake_level(const ScdMachine *m);
 void scd_main_interrupt_acknowledge(ScdMachine *m, uint32_t level);
 int scd_open_bus(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint32_t *value, uint32_t pc);
 void scd_vdp_release(ScdMachine *m);
+/* SEG-064-T004: a word read of the CDC host-data register by the main (cpu_access 2) or sub (3) processor; *word is the value read. */
+void scd_cdc_host_read(ScdMachine *m, uint32_t cpu_access, uint32_t *word);
 /* Bring an in-flight CDC DMA up to the current instruction tick (every Word RAM / CDC observation point). */
 int scd_cd_observe(ScdMachine *m);
 int scd_cdc_sub_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
+/* SEG-064-T004 diagnostics: executed-instruction-start coverage (scd_coverage.c). Enabled only by the program driver's --coverage flag. */
+int scd_event_open(ScdMachine *m, const char *path);
+void scd_event(ScdMachine *m, const char *kind, uint32_t detail);
+void scd_event_close(ScdMachine *m);
+int scd_trace_open(ScdMachine *m, const char *path);
+void scd_trace_ga(ScdMachine *m, uint32_t cpu, uint32_t offset, uint32_t width, int is_write, uint32_t value);
+void scd_trace_close(ScdMachine *m);
+int scd_coverage_enable(ScdMachine *m);
+void scd_coverage_note(ScdMachine *m, uint32_t cpu, uint32_t pc);
+int scd_coverage_write(const ScdMachine *m, const char *path);
+void scd_coverage_release(ScdMachine *m);
+/* SEG-064-T004: the graphics ASIC (scd_gfx.c). */
+int scd_gfx_register_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
+void scd_gfx_sync(ScdMachine *m, uint64_t now);
+uint64_t scd_gfx_next_event(const ScdMachine *m);
+int scd_gfx_can_raise(const ScdMachine *m);
+void scd_gfx_reset(ScdMachine *m);
+/* SEG-064-T004: the sub's PCM area ($FF0000-$FF7FFF; offset within it). */
+int scd_pcm_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 int scd_word_ram_access(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 /* Word RAM ownership changes driven by the Gate Array (scd_word_ram.c). */
 int scd_word_ram_main_mode_write(ScdMachine *m, uint32_t value, uint32_t pc);

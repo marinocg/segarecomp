@@ -1,5 +1,7 @@
 #include "segarecomp/machine/sega_cd/bios_profile.hpp"
 
+#include "segarecomp/machine/sega_cd/boot_images.hpp"
+
 #include <algorithm>
 #include <map>
 #include <set>
@@ -485,7 +487,8 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
     out << "};\n";
   }
   out << "static const ScdAuthentic scd_bios_profile = {\"" << inputs.bios.sha256 << "\", " << rom.size() << "U, "
-      << (epoch_images.empty() ? "NULL" : "scd_sub_images") << ", " << epoch_images.size() << "U};\n"
+      << (epoch_images.empty() ? "NULL" : "scd_sub_images") << ", " << epoch_images.size() << "U, UINT32_C(0x" << hex(kIpBase)
+      << ")};\n"
       << "static const ScdProgram scd_program = {\n  {{scd_p0_entries, " << result.entries[0] << "U, scd_p0_dispatch, UINT32_C(0x"
       << hex(inputs.bios.reset_pc) << "), 0U, 0U, 0U},\n   {scd_p1_entries, " << result.entries[1] << "U, scd_p1_dispatch, 0U, 0U, 0U, 0U}},\n"
       << "  {scd_disc_files, " << disc.files().size() << "U, scd_disc_tracks, " << disc.tracks().size() << "U, \"" << disc.identity()

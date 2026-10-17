@@ -370,7 +370,7 @@ def fixture_negative(kind):
         main = Asm(IP_BASE)
         expected = {}
         if kind == "ga_register":
-            sub.move("w", imm(1), absl(GA_SUB + 0x58))  # graphics (stamp) registers: not modelled
+            sub.move("w", imm(1), absl(GA_SUB + 0x4C))  # font data registers: not modelled
             sub.stop(0x2700)
             main_start_sub(main, SP_BASE)
             main.move("w", imm(1), absl(GA_MAIN + 0x30))  # unused main offset: the write is ignored (GPGX)

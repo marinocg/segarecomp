@@ -66,8 +66,9 @@ static void scd_cdc_dma_move(ScdMachine *m, uint32_t length) {
   m->cdc.dma_done += words << 1;
 }
 
-static void scd_cdc_dma_finish(ScdMachine *m) {
-  m->cdc.dma_state = SCD_DMA_NONE;
+/* The end of a transfer, common to the DMA writers and the host reads (GPGX): the byte counter resets, !DTBSY and !DTEN clear and the
+ * transfer-end interrupt is requested (level 5 on the /INT falling edge with IEN5), then EDT is set. */
+static void scd_cdc_transfer_end(ScdMachine *m) {
   m->cdc.dbc = 0xFFFFU;
   m->cdc.ifstat = (uint8_t)((m->cdc.ifstat | SCD_IFSTAT_DTBSY | SCD_IFSTAT_DTEN) & ~SCD_IFSTAT_DTEI);
   if (m->cdc.ifctrl & SCD_IFCTRL_DTEIEN) {
@@ -79,6 +80,11 @@ static void scd_cdc_dma_finish(ScdMachine *m) {
     m->cdc.irq = (uint8_t)(m->cdc.irq | SCD_IFSTAT_DTEI);
   }
   m->cdc.edt = 1U;
+}
+
+static void scd_cdc_dma_finish(ScdMachine *m) {
+  m->cdc.dma_state = SCD_DMA_NONE;
+  scd_cdc_transfer_end(m);
   m->cdc.dsr = 0U;
   scd_log(m, 0x92U, m->cdc.dma_done, m->cdc.dac);
 }
@@ -102,6 +108,26 @@ static void scd_cdc_dma_sync(ScdMachine *m, uint64_t now) {
   }
 }
 
+/* Host-read destinations (2: main, 3: sub; GPGX cdc_dma_init / cdc_host_r): the next word of the CDC buffer at DAC goes into the host-data
+ * register, DAC advances by 2 and DBC drops by 2; the transfer ends when DBC goes negative. */
+static void scd_cdc_host_fetch(ScdMachine *m) {
+  const uint32_t at = m->cdc.dac & 0x3FFEU;
+  m->cdc.host_word = (uint16_t)(((uint32_t)m->cdc.buffer[at] << 8) | m->cdc.buffer[at + 1U]);
+  m->cdc.dac = (uint16_t)(m->cdc.dac + 2U);
+  m->cdc.dbc = (uint16_t)(m->cdc.dbc - 2U);
+  if ((int16_t)m->cdc.dbc < 0) scd_cdc_transfer_end(m);
+  scd_log(m, 0x99U, m->cdc.host_word, m->cdc.dac);
+}
+
+void scd_cdc_host_read(ScdMachine *m, uint32_t cpu_access, uint32_t *word) {
+  scd_cdc_dma_sync(m, m->now);
+  *word = m->cdc.host_word;
+  if (m->cdc.dsr && m->cdc.destination == cpu_access) { /* a host transfer is started for this processor */
+    if (m->cdc.edt) m->cdc.dsr = 0U;
+    else scd_cdc_host_fetch(m);
+  }
+}
+
 static uint64_t scd_cdc_dma_completion(const ScdMachine *m) {
   const uint64_t rounded = ((uint64_t)m->cdc.dbc + 1U + 7U) & ~(uint64_t)7U;
   return m->cdc.dma_base + (rounded - 1U) * scd_dma_byte_ticks() + 1U;
@@ -109,6 +135,7 @@ static uint64_t scd_cdc_dma_completion(const ScdMachine *m) {
 
 int scd_cd_observe(ScdMachine *m) {
   scd_cdc_dma_sync(m, m->now);
+  scd_gfx_sync(m, m->now); /* SEG-064-T004: the graphics ASIC works in Word RAM too */
   return m->stop.stop_class != SCD_STOP_NONE;
 }
 
@@ -118,7 +145,10 @@ static int scd_cdc_dma_init(ScdMachine *m, uint32_t pc) {
   m->cdc.dma_state = SCD_DMA_NONE;
   switch (m->cdc.destination) {
   case 2:
-  case 3: /* main / sub host reads through $A12008 / $FF8008 */
+  case 3: /* main / sub host reads through $A12008 / $FF8008: the first word is available at once (DSR) */
+    m->cdc.dsr = 1U;
+    scd_cdc_host_fetch(m);
+    break;
   case 4: /* PCM RAM */
   case 5: /* PRG RAM */
     return scd_fail(m, SCD_SUB, SCD_STOP_CDC_DESTINATION_UNSUPPORTED, pc, m->cdc.destination);
@@ -219,8 +249,8 @@ static int scd_cdc_register_write(ScdMachine *m, uint32_t value, uint32_t pc) {
       m->cdc.dsr = 0U;
       m->cdc.dma_total = (uint32_t)m->cdc.dbc + 1U;
       m->cdc.dma_done = 0U;
+      m->cdc.dma_base = m->now; /* GPGX cycles[0]: the transfer start (a host transfer's end compares it with the decoder period) */
       if (scd_cdc_dma_init(m, pc) != 0) return 1;
-      m->cdc.dma_base = m->now;
       scd_log(m, 0x91U, m->cdc.dma_total, m->cdc.dac);
     }
     break;
@@ -335,11 +365,17 @@ int scd_cdc_sub_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_wr
     return 0;
   case 0x08:
   case 0x09:
-    if (!is_write && width == 1U) {
-      *value = 0xFFU; /* the host-data register keeps its reset value */
+    if (!is_write && width == 1U) { /* a byte read does not advance the transfer (GPGX default-register read) */
+      *value = offset == 0x08U ? (uint32_t)(m->cdc.host_word >> 8) : (uint32_t)(m->cdc.host_word & 0xFFU);
       return 0;
     }
-    return scd_fail(m, SCD_SUB, SCD_STOP_CDC_DESTINATION_UNSUPPORTED, pc, 0xFF8008U); /* host data path */
+    if (width == 2U && offset == 0x08U) { /* a word read advances the host transfer; a word write performs the same read (GPGX) */
+      uint32_t word;
+      scd_cdc_host_read(m, 3U, &word);
+      if (!is_write) *value = word;
+      return 0;
+    }
+    return scd_fail(m, SCD_SUB, SCD_STOP_CDC_DESTINATION_UNSUPPORTED, pc, 0xFF8008U); /* a byte write to the host-data register */
   case 0x0A:
   case 0x0B:
     if (is_write) {
@@ -444,6 +480,7 @@ static void scd_cdd_register_defaults(ScdMachine *m) {
   m->ga.cdd_ctrl_hi = 0x01U;
   m->ga.cdd_ctrl_lo = 0x00U;
   m->cdc.dma_address = 0xFFFFU;
+  m->cdc.host_word = 0xFFFFU;
 }
 
 void scd_devices_power_on(ScdMachine *m) {
@@ -452,6 +489,8 @@ void scd_devices_power_on(ScdMachine *m) {
   scd_cdc_reset(m);
   m->cdd.anchor = 0U;
   m->cdd.next_tick = SCD_CDD_TICK_TICKS;
+  m->ga.stopwatch_origin = 0U;
+  m->ga.stopwatch_base = 0U;
 }
 
 /* RES0 = 0 from the sub (GPGX scd_reset(0)): the sub-side registers from $FF8030 up and $FF8004 clear and take their defaults,
@@ -470,8 +509,11 @@ void scd_peripheral_reset(ScdMachine *m) {
   m->ga.pending = 0U;
   m->cdd.anchor = m->now;
   m->cdd.next_tick = m->now + SCD_CDD_TICK_TICKS;
+  m->ga.stopwatch_origin = m->now; /* GPGX scd_reset: the stopwatch counter clears and its grid restarts */
+  m->ga.stopwatch_base = 0U;
   scd_cdd_reset(m);
   scd_cdc_reset(m);
+  scd_gfx_reset(m); /* the register file above $FF8030 clears: a running operation is abandoned */
   scd_log(m, 0x13U, 0U, 0U);
 }
 
@@ -542,13 +584,86 @@ static int scd_cdd_command(ScdMachine *m, uint32_t pc) {
     m->cdd.rx[9] = (uint8_t)(~(SCD_CDD_SEEK + 0x0FU) & 0x0FU);
     m->cdd.pending = SCD_CDD_PLAY;
     return 0;
+  case 0x2: { /* report TOC information (SEG-064-T004; GPGX cdd_process case 2): RS1 echoes the request code */
+    const uint32_t request = m->cdd.tx[3];
+    const uint32_t count = m->disc->track_count;
+    m->cdd.rx[0] = m->cdd.status;
+    m->cdd.rx[1] = (uint8_t)request;
+    switch (request) {
+    case 0x0: /* current absolute time */
+      m->cdd.rx[1] = 0x00U;
+      if (scd_cdd_put_time(m, (uint32_t)(m->cdd.lba + 150))) return scd_fail(m, SCD_SUB, SCD_STOP_CDD_COMMAND_UNSUPPORTED, pc, 0x100U);
+      m->cdd.rx[8] = scd_cdd_track_flags(m);
+      break;
+    case 0x1: { /* current track-relative time */
+      const int64_t start = m->cdd.index < count ? (int64_t)m->disc->tracks[m->cdd.index].first_lba : 0;
+      const int64_t distance = (int64_t)m->cdd.lba - start;
+      if (scd_cdd_put_time(m, (uint32_t)(distance < 0 ? -distance : distance)))
+        return scd_fail(m, SCD_SUB, SCD_STOP_CDD_COMMAND_UNSUPPORTED, pc, 0x101U);
+      m->cdd.rx[8] = scd_cdd_track_flags(m);
+      break;
+    }
+    case 0x2: /* current track number */
+      m->cdd.rx[2] = (uint8_t)(m->cdd.index < count ? (m->cdd.index + 1U) / 10U : 0x0AU);
+      m->cdd.rx[3] = (uint8_t)(m->cdd.index < count ? (m->cdd.index + 1U) % 10U : 0x0AU);
+      memset(&m->cdd.rx[4], 0, 5U);
+      break;
+    case 0x3: /* total length */
+      if (count == 0U || scd_cdd_put_time(m, scd_track_end(m, count - 1U) + 150U))
+        return scd_fail(m, SCD_SUB, SCD_STOP_CDD_COMMAND_UNSUPPORTED, pc, 0x103U);
+      m->cdd.rx[8] = 0U;
+      break;
+    case 0x4: /* first and last track numbers */
+      m->cdd.rx[2] = 0U;
+      m->cdd.rx[3] = 1U;
+      m->cdd.rx[4] = (uint8_t)(count / 10U);
+      m->cdd.rx[5] = (uint8_t)(count % 10U);
+      m->cdd.rx[6] = 0U;
+      m->cdd.rx[7] = 0U;
+      m->cdd.rx[8] = 0U;
+      break;
+    case 0x5: { /* start time of track TX4 * 10 + TX5 (the lead-out for count + 1) */
+      const uint32_t track = (uint32_t)m->cdd.tx[4] * 10U + m->cdd.tx[5];
+      const uint32_t start = track >= 1U && track <= count ? m->disc->tracks[track - 1U].first_lba : scd_track_end(m, count - 1U);
+      if (track < 1U || track > count + 1U || count == 0U || scd_cdd_put_time(m, start + 150U))
+        return scd_fail(m, SCD_SUB, SCD_STOP_CDD_COMMAND_UNSUPPORTED, pc, 0x105U);
+      if (track <= count && m->disc->tracks[track - 1U].type != 2U) m->cdd.rx[6] = (uint8_t)(m->cdd.rx[6] | 0x08U); /* data track */
+      m->cdd.rx[8] = (uint8_t)(track % 10U);
+      break;
+    }
+    case 0x6: /* latest error information: none */
+      memset(&m->cdd.rx[2], 0, 7U);
+      break;
+    default: /* an invalid request code: nothing is updated and no checksum is computed */
+      return 0;
+    }
+    break;
+  }
+  case 0x4: /* seek: like play, the drive pauses at the target (SEG-064-T004; GPGX case 4) */
+    memset(m->cdd.rx, 0, sizeof m->cdd.rx);
+    m->cdd.rx[0] = SCD_CDD_SEEK;
+    m->cdd.rx[1] = 0x0FU;
+    m->cdd.rx[9] = (uint8_t)(~(SCD_CDD_SEEK + 0x0FU) & 0x0FU);
+    m->cdd.pending = SCD_CDD_PAUSE;
+    return 0;
+  case 0x6: /* pause: RS1-RS8 unchanged */
+    m->ga.cdd_ctrl_hi = 0x01U;
+    m->cdd.status = m->cdd.rx[0] = SCD_CDD_PAUSE;
+    break;
+  case 0x7: /* resume: RS1-RS8 unchanged */
+    m->cdd.status = m->cdd.rx[0] = SCD_CDD_PLAY;
+    break;
+  case 0xA: /* N-track jump control (sent before seek or play): the drive pauses, RS1-RS8 unchanged */
+    m->ga.cdd_ctrl_hi = 0x01U;
+    m->cdd.status = m->cdd.rx[0] = SCD_CDD_PAUSE;
+    break;
   case 0x5:
   case 0xB:
   case 0xE:
   case 0xF: /* commands the drive does not know: only RS0 is refreshed */
     m->cdd.rx[0] = m->cdd.status;
     break;
-  default: /* TOC, seek, pause, resume, scan, tray: real commands this profile does not model */
+  default: /* scan and tray: real commands this profile does not model */
     return scd_fail(m, SCD_SUB, SCD_STOP_CDD_COMMAND_UNSUPPORTED, pc, command);
   }
   scd_cdd_checksum(m);
@@ -642,6 +757,7 @@ void scd_timer_event(ScdMachine *m);
 uint64_t scd_devices_next_event(const ScdMachine *m) {
   uint64_t next = scd_timer_next_event(m);
   if (scd_vdp_next_event(m) < next) next = scd_vdp_next_event(m); /* SEG-064-T003: vertical-blank onset (BIOS-image profile) */
+  if (scd_gfx_next_event(m) < next) next = scd_gfx_next_event(m);  /* SEG-064-T004: graphics operation end */
   if (scd_cdd_active(m) && m->cdd.next_tick < next) next = m->cdd.next_tick;
   if (m->cdc.dma_state == SCD_DMA_RUNNING) {
     const uint64_t done = scd_cdc_dma_completion(m);
@@ -658,10 +774,12 @@ void scd_devices_advance(ScdMachine *m, uint64_t until) {
   }
   if (scd_timer_next_event(m) <= until) scd_timer_event(m);
   scd_cdc_dma_sync(m, until);
+  scd_gfx_sync(m, until);
   if (scd_vdp_next_event(m) <= until) scd_vdp_event(m);
 }
 
 int scd_devices_can_raise(const ScdMachine *m, uint32_t level) {
+  if (level == 1U) return scd_gfx_can_raise(m);
   if (level == 3U) return scd_timer_next_event(m) != UINT64_MAX;
   if (level == 4U) return (m->ga.cdd_ctrl_lo & 0x04U) != 0U;
   if (level == 5U)

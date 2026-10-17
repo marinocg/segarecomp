@@ -19,11 +19,13 @@ observes in a result block, then builds a small sub program in PRG RAM and relea
   +$20 BIOS $70 read through the main bus ($FFFF: the H-INT default vector's high word)
   +$22..+$25 MOVE.L $400100,D0 on the empty cartridge slot: the next instruction word twice (GPGX open bus)
   +$26 TST.B-style byte read $400001: the low byte of the next instruction word
+  +$28 VRAM words $1300-$1306 after a 68K->VDP DMA from 2M Word RAM owned by main (SEG-064-T004; checksum)
   +$FF $A5 when main reached the epoch
 The sub program writes COMSTAT0 = $C0DE and stops.
 
 Negatives (main d7): 1 an open-bus read by a MOVE whose destination still has extension words (prefetch not established); 2 a Z80
-RAM read after the Z80 has been runnable; 3 a 68K->VDP DMA from Word RAM; 4 the H-interrupt enabled (line counter not modelled: stops at the write); 8 the same by a long write that also clears it again; 9 a
+RAM read after the Z80 has been runnable; 3 a 68K->VDP DMA from the PRG-RAM window; 10 a 68K->VDP DMA from Word RAM after DMNA handed
+it to the sub; 4 the H-interrupt enabled (line counter not modelled: stops at the write); 8 the same by a long write that also clears it again; 9 a
 control word 101x xxxx (GPGX: a register write; the device host: a command word) is not modelled;
 5 a VDP copy DMA (not modelled by the device); 6 one byte of the sub image corrupted before the release; 7 the image copied into
 PRG-RAM bank 1 (the wrong mapping) - both stop at the epoch before the sub retires anything.
@@ -57,6 +59,8 @@ SUB_SSP = 0x2000
 SUB_ENTRY = 0x0100
 GA_SUB = 0xFF8000
 DMA_WORDS = (0x1357, 0x2468, 0x9ABC, 0xDEF0)
+WORD_RAM = 0x200100
+WORD_DMA_WORDS = (0x0A1B, 0x2C3D, 0x4E5F, 0x6071)
 ROM_DMA_WORDS = (0x0F1E, 0x2D3C, 0x4B5A, 0x6978)
 
 
@@ -155,7 +159,12 @@ def main_program(sub_len, layout):
     vram_checksum(m, 0x1000, len(DMA_WORDS), 0x14)
     dma_from(m, DMA_ROM, len(ROM_DMA_WORDS), 0x1100)
     vram_checksum(m, 0x1100, len(ROM_DMA_WORDS), 0x16)
-    negative(m, 3, lambda n: dma_from(n, 0x200000, 4, 0x1200))
+    for i, word in enumerate(WORD_DMA_WORDS):             # SEG-064-T004: 2M Word RAM owned by main is plain memory for the DMA
+        m.move("w", F.imm(word), F.absl(WORD_RAM + 2 * i))
+    dma_from(m, WORD_RAM, len(WORD_DMA_WORDS), 0x1300)
+    vram_checksum(m, 0x1300, len(WORD_DMA_WORDS), 0x28)
+    negative(m, 3, lambda n: dma_from(n, WINDOW, 4, 0x1200))   # the PRG-RAM window (Sega CD DMA timing differs): not modelled
+    negative(m, 10, lambda n: (n.move("b", F.imm(0x02), F.absl(GA + 0x03)), dma_from(n, 0x200000, 4, 0x1200)))  # DMNA: Word RAM is the sub's
     negative(m, 5, lambda n: (vdp_reg(n, 23, 0xC0), vdp_cmd(n, 0x000000C0)))  # VRAM copy
     # ---- vertical blank: poll the status flag ----
     m.label("vb_wait")
@@ -263,7 +272,7 @@ def expected(rom, sub, layout):
     result = {
         "0": 0x80, "2": 0x8080, "4": 0x40, "6": 0x7F, "8": 0x33,
         "10": ((free_next >> 8) | 0x01) << 8, "12": ((held_next >> 8) & 0xFE) << 8,
-        "14": 0xC35A, "16": 0x5A5A, "18": 0, "20": be(sum(DMA_WORDS), 2), "22": be(sum(ROM_DMA_WORDS), 2), "24": 1, "26": 3,
+        "14": 0xC35A, "16": 0x5A5A, "18": 0, "20": be(sum(DMA_WORDS), 2), "22": be(sum(ROM_DMA_WORDS), 2), "40": be(sum(WORD_DMA_WORDS), 2), "24": 1, "26": 3,
         "28": 0x1234, "30": 0x1234, "32": 0xFFFF, "34": cart_next, "36": cart_next, "38": (byte_next & 0xFF) << 8,
     }
     padded = sub.ljust((len(sub) + 0xFF) & ~0xFF, b"\0")
@@ -273,7 +282,7 @@ def expected(rom, sub, layout):
         "sub_image_length": len(padded), "sub_image_sha256": hashlib.sha256(padded).hexdigest(),
         "sub_comstat0": 0xC0DE, "thunk": THUNK,
         "negatives": {
-            "main:d7=1": ["open_bus_read", 0], "main:d7=2": ["main_device_unsupported", 0], "main:d7=3": ["vdp_dma_unsupported", 0],
+            "main:d7=1": ["open_bus_read", 0], "main:d7=2": ["main_device_unsupported", 0], "main:d7=3": ["vdp_dma_unsupported", 0], "main:d7=10": ["vdp_dma_unsupported", 0],
             "main:d7=4": ["interrupt_source_unsupported", 0], "main:d7=8": ["interrupt_source_unsupported", 0],
             "main:d7=9": ["vdp_access_unsupported", 0], "main:d7=5": ["vdp_access_unsupported", 0],
             "main:d7=6": ["materialized_image_unverified", 1], "main:d7=7": ["materialized_image_unverified", 1],
