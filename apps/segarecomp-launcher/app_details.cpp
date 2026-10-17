@@ -168,7 +168,9 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     dl->AddRect(a, b, col::glow, ctx_.u(5.0F), 0, std::max(1.0F, ctx_.u(1.5F)));
     const float bs = ctx_.u(26.0F);
     ImGui::SetCursorScreenPos(ImVec2(b.x - bs - ctx_.u(5.0F), b.y - bs - ctx_.u(5.0F)));
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);  // pointer shortcut over the cover art; a controller changes the cover from the game's menu (Change cover...)
     if (icon_button(ctx_, "cover_change", ctx_.icon("edit"), bs, false, true, "Change cover (local image)")) browse_cover(entry.id());
+    ImGui::PopItemFlag();
   }
   const float x0 = top.x + cover_w + ctx_.u(18.0F), tw = w - cover_w - ctx_.u(18.0F);
   float y = top.y;
@@ -252,7 +254,9 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     // SEG-069-T001: the visible, focusable way to stop the running build. Disabled (and relabelled) while the attempt shuts down.
     ImGui::SetCursorScreenPos(ImVec2(x0, y));
     const bool stopping = is_stopping(entry.id());
-    if (button(ctx_, "cancel_build", stopping ? "Stopping..." : "Cancel build", ImVec2(std::min(ctx_.u(180.0F), tw), bh), Style::secondary, !stopping, ctx_.icon("close"))) cancel_build(entry.id());
+    const bool cancel_pressed = button(ctx_, "cancel_build", stopping ? "Stopping..." : "Cancel build", ImVec2(std::min(ctx_.u(180.0F), tw), bh), Style::secondary, !stopping, ctx_.icon("close"));
+    take_details_focus("cancel_build");
+    if (cancel_pressed) { details_refocus_ = ImGui::IsItemFocused() ? "build" : std::string(); details_refocus_ttl_ = 30; cancel_build(entry.id()); }
     if (ImGui::IsItemHovered()) tooltip(ctx_, "Stop this build and discard its partial files. A previously built program is kept.");
     y += bh;
   } else {
@@ -266,8 +270,14 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     const bool prominent_build = info.status != GameStatus::ready && !info.older.playable;  // Play stays the dominant action while an earlier build is playable
     if (is_queued(entry.id())) {
       // SEG-069-T001: a queued game's build action is its way out of the queue (it owns no process or folder yet).
-      if (button(ctx_, "unqueue", "Unqueue", ImVec2(build_w, bh), Style::secondary, true, ctx_.icon("close"))) dequeue_build(entry.id());
-    } else if (button(ctx_, "build", build_action_label(info).c_str(), ImVec2(build_w, bh), prominent_build && !locate_primary ? Style::primary : Style::secondary, can_build(entry, info), ctx_.icon("reset"))) { notices_.erase(entry.id()); request_build(entry.id()); }
+      const bool unqueue_pressed = button(ctx_, "unqueue", "Unqueue", ImVec2(build_w, bh), Style::secondary, true, ctx_.icon("close"));
+      take_details_focus("unqueue");
+      if (unqueue_pressed) { details_refocus_ = ImGui::IsItemFocused() ? "build" : std::string(); details_refocus_ttl_ = 30; dequeue_build(entry.id()); }
+    } else {
+      const bool build_pressed = button(ctx_, "build", build_action_label(info).c_str(), ImVec2(build_w, bh), prominent_build && !locate_primary ? Style::primary : Style::secondary, can_build(entry, info), ctx_.icon("reset"));
+      take_details_focus("build");
+      if (build_pressed) { details_refocus_ = ImGui::IsItemFocused() ? "after_build" : std::string(); details_refocus_ttl_ = 30; notices_.erase(entry.id()); request_build(entry.id()); }
+    }
     if (ImGui::IsItemHovered()) tooltip(ctx_, is_queued(entry.id()) ? "Remove this game from the build queue; nothing has been built yet." : info.status == GameStatus::ready ? "Recompile the native program with the current configuration." : "Recompile with the configuration below.");
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (button(ctx_, "more", "More", ImVec2(more_w, bh), Style::ghost, true, ctx_.icon("more"))) ImGui::OpenPopup("##details_more");
@@ -278,6 +288,18 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
   }
   ImGui::SetCursorScreenPos(ImVec2(top.x, std::max(top.y + cover_h, y) + ctx_.u(14.0F)));
   ImGui::Dummy(ImVec2(w, 0.0F));
+}
+
+void App::take_details_focus(const char *id) {
+  if (details_refocus_.empty()) return;
+  if (--details_refocus_ttl_ <= 0) { details_refocus_.clear(); return; }
+  const bool mine = details_refocus_ == id || (details_refocus_ == "after_build" && (std::string(id) == "cancel_build" || std::string(id) == "unqueue"));
+  if (!mine) return;
+  ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+  ImGuiContext &g = *ImGui::GetCurrentContext();
+  g.NavCursorVisible = true;
+  g.NavHighlightItemUnderNav = true;
+  details_refocus_.clear();
 }
 
 // ---------------------------------------------------------------- B. build configuration

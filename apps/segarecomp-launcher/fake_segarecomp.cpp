@@ -119,7 +119,8 @@ int main(int argc, char **argv) {
       start_sleeper(argv[0], env("FAKE_BUILD_HOLD"));
       std::ofstream(out / "hold_started") << "1";
       std::ofstream(env("FAKE_BUILD_HOLD") + ".started") << "1";  // outside the attempt's folder, for the GUI script's wait_file
-      for (int i = 0; i < 3000; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(20));  // cancelled long before this
+      const int hold_ms = env("FAKE_HOLD_MS").empty() ? 60000 : std::atoi(env("FAKE_HOLD_MS").c_str());  // cancelled long before this
+      for (int waited = 0; waited < hold_ms; waited += 20) std::this_thread::sleep_for(std::chrono::milliseconds(20));
       return 1;
     }
     if (env("FAKE_BUILD_FAIL") == policy) {

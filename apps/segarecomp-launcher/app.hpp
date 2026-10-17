@@ -3,6 +3,7 @@
 // The launcher window: library, import, game details, storage and settings. Thin orchestration over launcher_core, library_catalog,
 // storage and covers; it owns no recompilation logic and never deletes anything except through storage.hpp's validated plans.
 
+#include "file_picker.hpp"
 #include "launcher_core.hpp"
 #include "launcher_settings.hpp"
 #include "library_catalog.hpp"
@@ -115,6 +116,28 @@ private:
   [[nodiscard]] SvPadState input_state() const;
   [[nodiscard]] std::string input_report() const;
   void draw_modal(float w, float h);
+  // ---- SEG-069-T004: the built-in controller-operable file picker (file_picker.hpp). The native OS dialog stays the default for mouse and keyboard. ----
+  struct PickerState {
+    bool open = false;
+    std::string purpose, key, title;           // import | locate | cover
+    bool multi = false;
+    std::vector<std::string> extensions;
+    std::vector<PickerRoot> roots;
+    std::filesystem::path root, dir;           // root empty: the list of roots is shown
+    PickerListing listing;
+    std::set<std::string> chosen;              // UTF-8 paths of files ticked (import only)
+    int page = 0;
+    bool focus_first = false;                  // focus the first row after the list changed
+    std::string message;
+  };
+  PickerState picker_;
+  [[nodiscard]] bool use_builtin_picker() const;
+  void open_picker(const std::string &purpose, const std::string &key);
+  void picker_set_dir(const std::filesystem::path &root, const std::filesystem::path &dir);
+  void picker_finish(bool accept);
+  void draw_file_picker(float w, float h);
+  void draw_gamepad_hints(float w, float h);
+  bool gamepad_is_last_input() const;
   void draw_toasts(float w, float h);
   // ---- data / actions ----
   [[nodiscard]] static long long now_seconds();
@@ -167,6 +190,19 @@ private:
   void finish_build();
   // SEG-069-T003: records the first-run answer (Keep -> cleanup.mode "never", Remove -> "intermediates"); false (and nothing changed) when it cannot be saved.
   bool apply_intermediates_choice(bool remove_after_build);
+  // SEG-069-T004: D-pad hops between the sidebar and the page (see ui::ZoneEntry).
+  ui::ZoneEntry content_entry_;                  // where Right from the sidebar lands (the first game card on the library page, else the page's first control)
+  ui::ZoneEntry card_entry_;                     // first game card/row submitted this frame
+  ui::ZoneEntry settings_tab_entry_[6];          // the Settings tab column (Right enters the body, Left from the body returns to the current tab)
+  ui::ZoneEntry settings_body_entry_;
+  ImGuiWindow *settings_body_window_ = nullptr;
+  bool settings_narrow_ = false;
+  ImGuiID left_pending_id_ = 0;                  // nav id when Left was pressed in the page; unchanged next frame means ImGui found nothing to the left
+  bool left_pending_ = false;
+  // SEG-069-T004: a sheet (modal or picker) returns keyboard/gamepad focus to the control that opened it.
+  struct FocusMemory { ImGuiID id = 0; ImGuiWindow *window = nullptr; ImRect rel; bool armed = false; };
+  FocusMemory modal_return_;
+  void remember_focus_for_sheet(bool sheet_open);
   bool modal_focus_done_ = false;  // the first-run sheet puts keyboard/gamepad focus on its first choice once, when it opens
   // SEG-069-T002: the mode the game will really build as, for display: the stored intent, except a Master System game whose Optimized the product has
   // stated it does not offer (that is Compatibility). While the capability probe is pending the stored intent is shown.
@@ -328,6 +364,13 @@ private:
   bool shot_modal_done_ = false;
   bool nav_reset_ = true;  // put keyboard/gamepad focus on the active sidebar entry (start-up and page changes)
   std::string nav_items_;    // the primary navigation entries drawn this frame (script `expect nav_items=`)
+  // SEG-069-T004: keyboard/gamepad focus follows the build controls on Details. Build -> Cancel build or Unqueue (the same place), and either -> Build again,
+  // instead of the focused item vanishing and ImGui's spatial scoring picking a neighbour.
+  std::string details_refocus_;                  // "" | "after_build" | "build"
+  int details_refocus_ttl_ = 0;                  // frames the request stays valid (a refused build must not leave it pending)
+  void take_details_focus(const char *id);
+  int seek_left_ = -1;       // script `pad_seek`: presses left (-1 idle)
+  bool seek_pressed_ = false;
   std::string focus_label_;  // the sidebar entry holding keyboard/gamepad focus (script `expect focus=`)
   void run_script();
   [[nodiscard]] const char *page_name() const;

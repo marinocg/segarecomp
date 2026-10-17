@@ -1,5 +1,7 @@
 #include "app.hpp"
 
+#include <sstream>
+
 #include "cover_download.hpp"
 #include "covers.hpp"
 #include "pixel_assets.hpp"
@@ -432,16 +434,19 @@ void App::poll_maintenance() {
 // ---------------------------------------------------------------- import
 
 void App::browse_import() {
+  if (use_builtin_picker()) { open_picker("import", ""); return; }
   static const SDL_DialogFileFilter filters[] = {{"ROMs and zipped ROMs", "md;bin;gen;smd;sms;zip"}, {"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"Master System ROMs", "sms"}, {"Zipped ROMs", "zip"}, {"All files", "*"}};
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "import", ""}, window_, filters, 5, nullptr, true);
 }
 
 void App::browse_locate(const std::string &id) {
+  if (use_builtin_picker()) { open_picker("locate", id); return; }
   static const SDL_DialogFileFilter filters[] = {{"ROMs", "md;bin;gen;smd;sms;zip"}, {"All files", "*"}};
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "locate", id}, window_, filters, 2, nullptr, false);
 }
 
 void App::browse_cover(const std::string &id) {
+  if (use_builtin_picker()) { open_picker("cover", id); return; }
   static const SDL_DialogFileFilter filters[] = {{"Images (PNG, JPEG)", "png;jpg;jpeg"}};
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "cover", id}, window_, filters, 1, nullptr, false);
 }
@@ -889,6 +894,8 @@ void App::update_jobs() {
     { std::lock_guard<std::mutex> lock(dialog_mutex_); events.swap(dialog_events_); }
     for (auto &e : events) {
       if (!e.error.empty() && e.paths.empty()) {
+        // No native chooser is available (no portal under WSL, a minimal desktop): the built-in picker does the same job.
+        if (e.purpose == "import" || e.purpose == "locate" || e.purpose == "cover") { toast("The system file chooser is not available; using the built-in picker."); open_picker(e.purpose, e.key); continue; }
         show_message("The file picker could not be opened", {"SDL: " + e.error, "On Linux this usually means no file-chooser service (XDG Desktop Portal) is available - common under WSL/WSLg.", "Drop the file onto this window instead."});
         continue;
       }
@@ -979,6 +986,16 @@ const char *App::page_name() const {
     case Page::settings: return "settings";
   }
   return "?";
+}
+
+// Test seam: the screen rectangle of the item that has navigation focus ("x,y,w,h", window units), "-" when none.
+static std::string nav_rect_text() {
+  const ImGuiContext &g = *ImGui::GetCurrentContext();
+  if (g.NavWindow == nullptr || g.NavId == 0) return "-";
+  const ImRect r = g.NavWindow->NavRectRel[g.NavLayer];
+  char buffer[96];
+  std::snprintf(buffer, sizeof(buffer), "%d,%d,%d,%d", static_cast<int>(g.NavWindow->Pos.x + r.Min.x), static_cast<int>(g.NavWindow->Pos.y + r.Min.y), static_cast<int>(r.GetWidth()), static_cast<int>(r.GetHeight()));
+  return buffer;
 }
 
 // One command per few frames. Commands: `key <Tab|Return|Escape|Down|Up|Left|Right|Space|F>` (F with Ctrl), `text <string>`, `frames <n>`,
@@ -1097,6 +1114,37 @@ void App::run_script() {
     }
   } else if (cmd == "build") {  // request a build of the open game (starts now or joins the FIFO)
     if (!detail_id_.empty()) request_build(detail_id_);
+  } else if (cmd == "pad_seek" && script_joy_ != nullptr) {
+    // pad_seek <focus-id-or-label> <dpad_down|dpad_up|dpad_left|dpad_right> [max presses]: press that D-pad direction until the control is focused. Real virtual-
+    // gamepad button events only; it proves a control is reachable in that direction, and records `expect ok|FAIL seek=<target>`.
+    std::istringstream words(arg);
+    std::string target, dir;
+    int limit = 40;
+    words >> target >> dir >> limit;
+    const std::string have_id = ui::focus_id, have_label = focus_label_;
+    const bool here = have_id == target || have_label == target;
+    static const std::pair<const char *, int> dirs[] = {{"dpad_down", SDL_GAMEPAD_BUTTON_DPAD_DOWN}, {"dpad_up", SDL_GAMEPAD_BUTTON_DPAD_UP}, {"dpad_left", SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {"dpad_right", SDL_GAMEPAD_BUTTON_DPAD_RIGHT}};
+    int button = -1;
+    for (const auto &d : dirs) if (dir == d.first) button = d.second;
+    if (seek_left_ < 0) seek_left_ = limit;
+    if (seek_pressed_) {  // release what the previous step pressed, then look again
+      for (const auto &d : dirs) SDL_SetJoystickVirtualButton(script_joy_, d.second, false);
+      seek_pressed_ = false;
+      --script_at_;
+      script_wait_ = 3;
+    } else if (here) {
+      trace("expect ok seek=" + target + " presses=" + std::to_string(limit - seek_left_));
+      seek_left_ = -1;
+    } else if (seek_left_ == 0 || button < 0) {
+      trace("expect FAIL seek=" + target + " actual=" + (have_id.empty() ? have_label : have_id));
+      seek_left_ = -1;
+    } else {
+      SDL_SetJoystickVirtualButton(script_joy_, button, true);
+      --seek_left_;
+      seek_pressed_ = true;
+      --script_at_;
+      script_wait_ = 2;
+    }
   } else if (cmd == "play") {  // the Play action of the open game (does nothing when it cannot be played)
     if (!detail_id_.empty() && can_play(status_of(detail_id_))) play(detail_id_);
   } else if (cmd == "wait_play_end") {  // hold the script until no game is running
@@ -1134,6 +1182,7 @@ void App::run_script() {
     if (key == "page") actual = page_name();
     else if (key == "visible") actual = std::to_string(visible_entries().size());
     else if (key == "focus") actual = focus_label_;
+    else if (key == "focus_id") actual = ui::focus_id;
     else if (key == "modal") actual = modal_.kind == Modal::Kind::none ? "0" : "1";
     else if (key == "input_state") actual = sv_pad_state_code(input_state());
     else if (key == "pad_count") actual = std::to_string(sv_diag_count(diag_));
@@ -1150,6 +1199,13 @@ void App::run_script() {
     else if (key == "status") actual = !detail_id_.empty() ? status_label(status_of(detail_id_)) : "-";
     else if (key == "can_play") actual = !detail_id_.empty() && can_play(status_of(detail_id_)) ? "1" : "0";
     else if (key == "playing") actual = game_ != nullptr ? "1" : "0";
+    else if (key == "hints") actual = gamepad_is_last_input() && modal_.kind == Modal::Kind::none && !picker_.open ? "1" : "0";
+    else if (key == "want_text") actual = ImGui::GetIO().WantTextInput ? "1" : "0";
+    else if (key == "settings_tab") actual = std::to_string(settings_tab_);
+    else if (key == "picker") actual = picker_.open ? "1" : "0";
+    else if (key == "picker_chosen") actual = std::to_string(picker_.chosen.size());
+    else if (key == "picker_level") actual = !picker_.open ? "-" : (picker_.root.empty() ? "locations" : (picker_.dir == picker_.root ? "root" : "sub"));
+    else if (key == "library_size") actual = std::to_string(catalog_.entries().size());
     else if (key == "cleanup_mode") actual = settings_.cleanup.mode;
     else if (key == "intermediates_choice") actual = settings_.intermediates_choice_made ? "1" : "0";
     else if (key == "mode") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr ? selected_mode_label(*catalog_.find_id(detail_id_)) : "-";
@@ -1163,11 +1219,11 @@ void App::run_script() {
   } else if (cmd == "dump") {
     const ImGuiContext &g = *ImGui::GetCurrentContext();
     trace(std::string("dump nav_window=") + (g.NavWindow != nullptr ? g.NavWindow->Name : "-") + " nav_id=" + std::to_string(g.NavId) + " nav_active=" + std::to_string(g.NavCursorVisible ? 1 : 0) +
-          " want_text=" + std::to_string(ImGui::GetIO().WantTextInput ? 1 : 0) + " focus=" + focus_label_);
+          " want_text=" + std::to_string(ImGui::GetIO().WantTextInput ? 1 : 0) + " focus=" + focus_label_ + " focus_id=" + ui::focus_id + " nav_rect=" + nav_rect_text());
   } else if (cmd == "dump") {
     const ImGuiContext &g = *ImGui::GetCurrentContext();
     trace(std::string("dump nav_window=") + (g.NavWindow != nullptr ? g.NavWindow->Name : "-") + " nav_id=" + std::to_string(g.NavId) + " nav_cursor=" + std::to_string(g.NavCursorVisible ? 1 : 0) +
-          " want_text=" + std::to_string(ImGui::GetIO().WantTextInput ? 1 : 0) + " focus=" + focus_label_);
+          " want_text=" + std::to_string(ImGui::GetIO().WantTextInput ? 1 : 0) + " focus=" + focus_label_ + " focus_id=" + ui::focus_id + " nav_rect=" + nav_rect_text());
   } else if (cmd == "quit") {
     SDL_Event quit;
     quit.type = SDL_EVENT_QUIT;

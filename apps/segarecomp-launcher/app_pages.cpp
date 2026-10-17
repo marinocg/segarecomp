@@ -142,7 +142,9 @@ void App::draw_storage(float w, float h) {
   const ImVec2 top = ImGui::GetCursorScreenPos();
   // ---- table ----
   const float rh = ctx_.u(42.0F), hh = ctx_.u(28.0F);
-  const float table_h = hh + std::min(static_cast<float>(games.size()) * (rh + ctx_.u(4.0F)) + ctx_.u(6.0F), std::max(ctx_.u(130.0F), h * 0.40F));
+  // SEG-069-T004: the rows are part of the page (no nested scroller): ImGui's directional navigation is scored per window, and a child window made D-pad Down skip
+  // the row checkboxes. A long library simply makes the page longer, which the page's own scrolling handles.
+  const float table_h = hh + std::max(ctx_.u(90.0F), static_cast<float>(games.size()) * (rh + ctx_.u(4.0F)) + ctx_.u(6.0F));
   card(ctx_, dl, top, ImVec2(top.x + tw, top.y + table_h), false, false, rgba(7, 17, 40));
   {
     const float x0 = top.x + ctx_.u(40.0F), name_w = std::max(ctx_.u(130.0F), tw * 0.34F);
@@ -156,8 +158,6 @@ void App::draw_storage(float w, float h) {
     for (int i = 0; i < (compact_table ? 2 : 4); ++i) if (cols[i] + ctx_.u(60.0F) < top.x + tw) draw_text(dl, ctx_.bold, hpx, col::text2, ImVec2(cols[i], top.y + ctx_.u(8.0F)), heads[i]);
     dl->AddRectFilled(ImVec2(top.x + 1, top.y + hh), ImVec2(top.x + tw - 1, top.y + hh + 1), rgba(34, 70, 140));
     ImGui::SetCursorScreenPos(ImVec2(top.x, top.y + hh + ctx_.u(3.0F)));
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, rgba(0, 0, 0, 0));
-    ImGui::BeginChild("##storage_table", ImVec2(tw, table_h - hh - ctx_.u(4.0F)), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
     ImDrawList *cl = ImGui::GetWindowDrawList();
     for (const LibraryEntry *e : games) {
       const ImVec2 a = ImGui::GetCursorScreenPos();
@@ -188,8 +188,6 @@ void App::draw_storage(float w, float h) {
       ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + rh + ctx_.u(4.0F)));
       ImGui::Dummy(ImVec2(tw, 1));
     }
-    ImGui::EndChild();
-    ImGui::PopStyleColor();
   }
   ImGui::SetCursorScreenPos(ImVec2(top.x, top.y + table_h + ctx_.u(2.0F)));
   float side_bottom = top.y;
@@ -260,6 +258,7 @@ void App::draw_storage(float w, float h) {
     const bool pressed = ui::nav_button("##a", ImVec2(aw, ah));
     if (!act.enabled) ImGui::EndDisabled();
     const bool hov = ImGui::IsItemHovered() && act.enabled, foc = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+    if (ImGui::IsItemFocused()) ui::focus_id = std::string("act:") + act.id;
     ImGui::PopID();
     const ImVec2 b(a.x + aw, a.y + ah);
     const bool danger = act.style == Style::danger;
@@ -300,6 +299,8 @@ void App::draw_settings(float full_w, float h) {
       ImGui::PushID(i);
       const bool pressed = ui::nav_button("##tab", ImVec2(tabs_w, ctx_.u(34.0F)));
       const bool hov = ImGui::IsItemHovered(), foc = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible, on = settings_tab_ == i;
+      if (ImGui::IsItemFocused()) ui::focus_id = "tab#" + std::to_string(i);
+      settings_tab_entry_[i] = ui::ZoneEntry{ImGui::GetItemID(), ImGui::GetCurrentWindow(), ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax())};
       ImGui::PopID();
       const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
       dl->AddRectFilled(a, b, on ? rgba(52, 128, 238) : (hov ? col::panel_hover : rgba(10, 24, 56)), ctx_.u(5.0F));
@@ -317,7 +318,12 @@ void App::draw_settings(float full_w, float h) {
   const float sec_pad = carded ? ctx_.u(16.0F) : 0.0F;
   const float w = w_outer - 2 * sec_pad;
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-  ImGui::BeginChild("##settings_body", ImVec2(w_outer + ctx_.u(18.0F), std::max(ctx_.u(120.0F), ImGui::GetContentRegionAvail().y)), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+  // SEG-069-T004: the tab column and the body are navigated by explicit hops (Right from a tab enters the body, Left at its left edge returns to the tab):
+  // ImGui scores a move from the parent into a child clipped, which skips the body's controls. The page-level entry stays the first tab.
+  const ui::ZoneEntry outer_first = ui::zone_first;
+  ui::zone_first = ui::ZoneEntry{};
+  ImGui::BeginChild("##settings_body", ImVec2(w_outer + ctx_.u(18.0F), std::max(ctx_.u(120.0F), ImGui::GetContentRegionAvail().y)), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
+  settings_body_window_ = ImGui::GetCurrentWindow();
   if (SDL_getenv("SEGARECOMP_SHOT_SCROLL")) ImGui::SetScrollY(ImGui::GetScrollMaxY());  // review aid, never a persisted preference
   dl = ImGui::GetWindowDrawList();
   ImVec2 sec_origin(0, 0);
@@ -526,6 +532,10 @@ void App::draw_settings(float full_w, float h) {
   }
   section_end();
   ImGui::EndChild();
+  settings_body_entry_ = ui::zone_first;   // where Right from a tab lands: the body's first control
+  ui::zone_first = outer_first;
+  settings_narrow_ = narrow;
+  if (narrow) for (auto &tab : settings_tab_entry_) tab = outer_first;  // the section drop-down is the "tab" of the narrow layout (Down enters the body, Up returns)
   ImGui::PopStyleVar();
   if (save) save_settings();
   ImGui::Dummy(ImVec2(w, ctx_.u(12.0F)));

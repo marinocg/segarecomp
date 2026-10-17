@@ -91,6 +91,9 @@ const char *plan_category(const PlanItem &item) {
 void App::draw_topbar(float, float, float, float) {}
 
 void App::draw() {
+  // The focus labels describe the CURRENT frame only (an item sets them while it holds focus): a control without a label can then never leave a stale one.
+  ui::focus_id.clear();
+  focus_label_.clear();
   int ww = 0, wh = 0;
   SDL_GetWindowSize(window_, &ww, &wh);
   win_w_ = static_cast<float>(ww);
@@ -146,7 +149,10 @@ void App::draw() {
   ImGui::PushStyleColor(ImGuiCol_ChildBg, rgba(0, 0, 0, 0));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ctx_.u(18.0F), ctx_.u(14.0F)));
   ImGui::SetCursorScreenPos(ImVec2(cx, cy));
-  ImGui::BeginChild("##content", ImVec2(cw, ch), ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoBackground);
+  ui::zone_capture = true;
+  ui::zone_first = ui::ZoneEntry{};
+  card_entry_ = ui::ZoneEntry{};
+  ImGui::BeginChild("##content", ImVec2(cw, ch), ImGuiChildFlags_AlwaysUseWindowPadding | ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
   if (SDL_getenv("SEGARECOMP_SHOT_SCROLL") && page_ != Page::settings) ImGui::SetScrollY(ImGui::GetScrollMaxY());  // review aid: lower part of a long page
   const float inner_w = cw - ctx_.u(36.0F) - ctx_.u(8.0F);
   switch (page_) {
@@ -157,12 +163,18 @@ void App::draw() {
     case Page::settings: draw_settings(inner_w, ch); break;
   }
   ImGui::EndChild();
+  ui::zone_capture = false;
+  content_entry_ = card_entry_.id != 0 ? card_entry_ : ui::zone_first;
   ImGui::PopStyleVar();
   ImGui::PopStyleColor();
+  draw_gamepad_hints(win_w_, win_h_);
   ImGui::End();
+  // A press that closes a sheet (Esc / East) is that sheet's: it must not also take the page back in the same frame.
+  const bool sheet_was_open = modal_.kind != Modal::Kind::none || picker_.open;
   draw_modal(win_w_, win_h_);
+  draw_file_picker(win_w_, win_h_);
   draw_toasts(win_w_, win_h_);
-  if (modal_.kind == Modal::Kind::none && !ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) {
+  if (!sheet_was_open && modal_.kind == Modal::Kind::none && !picker_.open && !ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) {
     if (page_ == Page::details) close_details();
     else if (page_ != Page::library) go(Page::library);
   }
@@ -254,6 +266,59 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     ImGui::GetCurrentWindow()->NavRectRel[ImGuiNavLayer_Main] = relative;
   }
   nav_reset_ = false;
+  // ---- D-pad hops between the sidebar and the page (SEG-069-T004) ----
+  {
+    ImGuiContext &g = *ImGui::GetCurrentContext();
+    const auto focus_item = [&](ImGuiID id, ImGuiWindow *window, ImRect screen_rect) {
+      ImGui::NavMoveRequestCancel();
+      ImGui::SetFocusID(id, window);
+      g.NavCursorVisible = true;
+      g.NavHighlightItemUnderNav = true;
+      ImRect relative = screen_rect;
+      relative.Translate(ImVec2(-window->Pos.x, -window->Pos.y));
+      window->NavRectRel[ImGuiNavLayer_Main] = relative;
+    };
+    bool in_sidebar = false;
+    int highlighted_index = 0;
+    for (int i = 0; i < kNav; ++i) {
+      if (g.NavId == nav_ids[i]) in_sidebar = true;
+      if (items[i].page == highlighted) highlighted_index = i;
+    }
+    const bool free_to_hop = modal_.kind == Modal::Kind::none && !picker_.open && !ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) && g.NavId != 0 && nav_target < 0;
+    const bool right = ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight);
+    const bool left = ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft);
+    const bool down = ImGui::IsKeyPressed(ImGuiKey_DownArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown);
+    const bool up = ImGui::IsKeyPressed(ImGuiKey_UpArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp);
+    const bool back = ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false);
+    bool on_tab = false;
+    if (page_ == Page::settings)
+      for (const auto &tab : settings_tab_entry_) if (tab.id != 0 && g.NavId == tab.id) on_tab = true;
+    const bool in_settings_body = page_ == Page::settings && settings_body_window_ != nullptr && g.NavWindow == settings_body_window_;
+    if (free_to_hop && in_sidebar && right && content_entry_.id != 0) {
+      focus_item(content_entry_.id, content_entry_.window, content_entry_.rect);
+      left_pending_ = false;
+    } else if (free_to_hop && on_tab && (settings_narrow_ ? down : right) && settings_body_entry_.id != 0) {
+      focus_item(settings_body_entry_.id, settings_body_entry_.window, settings_body_entry_.rect);
+      left_pending_ = false;
+    } else if (free_to_hop && in_settings_body) {
+      const bool stuck_left = left_pending_ && g.NavId == left_pending_id_;
+      const ui::ZoneEntry &tab = settings_tab_entry_[std::clamp(settings_tab_, 0, 5)];
+      bool hopped = false;
+      if (settings_narrow_ && up && g.NavId == settings_body_entry_.id && tab.id != 0) { focus_item(tab.id, tab.window, tab.rect); hopped = true; }   // Up from the body's first control: the drop-down
+      else if (stuck_left && tab.id != 0) { focus_item(tab.id, tab.window, tab.rect); hopped = true; }
+      left_pending_ = !hopped && (settings_narrow_ ? up : left);
+      left_pending_id_ = g.NavId;
+    } else if (free_to_hop && !in_sidebar) {
+      // Left in the page that moves nothing (the focus is unchanged one frame later) leaves it for the sidebar; East on the library page does the same.
+      const bool stuck_left = left_pending_ && g.NavId == left_pending_id_;
+      const bool hopped = stuck_left || (back && page_ == Page::library);
+      if (hopped) focus_item(nav_ids[highlighted_index], ImGui::GetCurrentWindow(), nav_rects[highlighted_index]);
+      left_pending_ = left && !hopped;
+      left_pending_id_ = g.NavId;
+    } else {
+      left_pending_ = false;
+    }
+  }
   const float px = ctx_.u(12.0F);
   float by = y + h - pad;
   if (wide) {
@@ -285,7 +350,9 @@ void App::draw_sidebar(float x, float y, float w, float h) {
       progress_bar(ctx_, dl, ImVec2(x + pad, by + px + ctx_.u(6.0F)), ImVec2(x + pad + (w - 2 * pad - ctx_.u(34.0F)), by + px + ctx_.u(12.0F)), static_cast<float>(used), low ? col::err : col::btn_top);
     }
     ImGui::SetCursorScreenPos(ImVec2(x + w - pad - ctx_.u(28.0F), by - ctx_.u(2.0F)));
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);  // pointer shortcut; Settings > Storage has the same action for a controller
     if (icon_button(ctx_, "open_cache", ctx_.icon("folder"), ctx_.u(28.0F), false, true, "Open the cache folder")) SDL_OpenURL(("file://" + u8s(cache_dir_)).c_str());
+    ImGui::PopItemFlag();
     if (ImGui::IsItemFocused()) focus_label_ = "Cache folder";
     char version[64];
     std::snprintf(version, sizeof version, "v%s", SEGARECOMP_LAUNCHER_VERSION);
@@ -356,6 +423,7 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   ImGui::PushID(entry.id().c_str());
   ImGui::SetNextItemAllowOverlap();
   const bool pressed = ui::nav_button("##card", ImVec2(w, h));
+  if (card_entry_.id == 0) card_entry_ = ui::ZoneEntry{ImGui::GetItemID(), ImGui::GetCurrentWindow(), ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax())};
   card_focus_bookkeeping(entry.id(), return_focus_id_, focus_card_request_);
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
   if (ImGui::IsItemFocused()) focus_label_ = "card:" + entry.title();
@@ -398,9 +466,13 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
     const float fs_ = ctx_.u(24.0F);
     ImGui::SetCursorScreenPos(ImVec2(cb.x - fs_ - ctx_.u(5.0F), ca.y + ctx_.u(5.0F)));
     fav_rects_[entry.id()] = ImRect(ImGui::GetCursorScreenPos(), ImVec2(ImGui::GetCursorScreenPos().x + fs_, ImGui::GetCursorScreenPos().y + fs_));
+    // The pointer shortcuts drawn over a card (favorite, Play) are not navigation targets: a controller reaches them through the card's menu (North), so
+    // D-pad Up/Down moves between cards and the toolbar instead of stopping on a button of the card itself.
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
     if (icon_button(ctx_, "fav", ctx_.icon("star"), fs_, entry.favorite, true, entry.favorite ? "Remove from favorites" : "Add to favorites")) {
       if (LibraryEntry *e = catalog_.find_id(entry.id())) { e->favorite = !e->favorite; save_catalog(); }
     }
+    ImGui::PopItemFlag();
   }
   if (select_mode_) {
     bool on = selected;
@@ -438,7 +510,9 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
     const float ps = ctx_.u(40.0F);
     ImGui::SetCursorScreenPos(ImVec2(ca.x + (cw - ps) * 0.5F, ca.y + (chh - ps) * 0.5F));
     play_rects_[entry.id()] = ImRect(ImGui::GetCursorScreenPos(), ImVec2(ImGui::GetCursorScreenPos().x + ps, ImGui::GetCursorScreenPos().y + ps));
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);  // pointer shortcut: a controller plays through Details or the card's menu
     if (icon_button(ctx_, "play", ctx_.icon("play"), ps, true, can_play(info), "Play")) play(entry.id());
+    ImGui::PopItemFlag();
   }
   ImGui::PopID();
   if (pressed) {
@@ -455,6 +529,7 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   ImGui::PushID(entry.id().c_str());
   ImGui::SetNextItemAllowOverlap();
   const bool pressed = ui::nav_button("##row", ImVec2(w, h));
+  if (card_entry_.id == 0) card_entry_ = ui::ZoneEntry{ImGui::GetItemID(), ImGui::GetCurrentWindow(), ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax())};
   card_focus_bookkeeping(entry.id(), return_focus_id_, focus_card_request_);
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
   if (ImGui::IsItemFocused()) focus_label_ = "card:" + entry.title();
@@ -497,12 +572,16 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   float bx = b.x - pad - ps2;
   if (!select_mode_) {
     ImGui::SetCursorScreenPos(ImVec2(bx, a.y + (h - ps2) * 0.5F));
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);  // the row itself opens Details
     if (icon_button(ctx_, "details", ctx_.icon("info"), ps2, false, true, "Details")) open_details(entry.id());
+    ImGui::PopItemFlag();
     bx -= ps2 + ctx_.u(6.0F);
   }
   if (info.runnable() && !select_mode_) {
     ImGui::SetCursorScreenPos(ImVec2(bx, a.y + (h - ps2) * 0.5F));
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
     if (icon_button(ctx_, "play", ctx_.icon("play"), ps2, true, can_play(info), "Play")) play(entry.id());
+    ImGui::PopItemFlag();
   }
   ImGui::PopID();
   ImGui::SetCursorScreenPos(ImVec2(a.x, b.y + ctx_.u(6.0F)));
@@ -521,6 +600,15 @@ void App::draw_library(float w, float h) {
     draw_import_body(w, h);
     return;
   }
+  // SEG-069-T004: the search row, the filters and the game grid live in ONE scrolling child. ImGui's directional navigation is scored per window, and a
+  // header in the parent window next to a flattened child made D-pad Down skip the grid (it preferred the sidebar). In one window every control and card is a
+  // candidate of every move, so the toolbar and the grid are reachable with the D-pad alone.
+  const float child_h = std::max(ImGui::GetWindowPos().y + ImGui::GetWindowHeight() - ImGui::GetCursorScreenPos().y - ctx_.u(30.0F), ctx_.u(120.0F));
+  const float content_left = ImGui::GetCursorScreenPos().x;
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, rgba(0, 0, 0, 0));
+  ImGui::BeginChild("##games", ImVec2(w + ctx_.u(10.0F), child_h), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
+  if (restore_library_scroll_) { ImGui::SetScrollY(library_scroll_); restore_library_scroll_ = false; }
+  else library_scroll_ = ImGui::GetScrollY();
   const float bh = ctx_.u(34.0F);
   const bool narrow = w < ctx_.u(640.0F);
   const auto view_tools = [&] {
@@ -553,7 +641,8 @@ void App::draw_library(float w, float h) {
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (dropdown(ctx_, "so", {"Last Played", "Title", "Last Built", "Date Added", "Size"}, &sort, dw)) { settings_.sort = sort_ids[sort]; save_settings(); }
     if (!narrow) {
-      ImGui::SameLine(std::max(ImGui::GetCursorPosX() + ctx_.u(8.0F), w - tools + ctx_.u(18.0F)), 0.0F);
+      ImGui::SameLine(0.0F, ctx_.u(8.0F));
+      ImGui::SetCursorScreenPos(ImVec2(std::max(ImGui::GetCursorScreenPos().x, content_left + w - tools), ImGui::GetCursorScreenPos().y));
       view_tools();
     }
   }
@@ -580,13 +669,12 @@ void App::draw_library(float w, float h) {
   }
   ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
   const auto visible = visible_entries();
-  if (visible.empty()) { paragraph(ctx_, ctx_.regular, ctx_.u(13.0F), col::text2, w, "No game matches the search and filters."); return; }
-  const ImVec2 start = ImGui::GetCursorScreenPos();
-  const float avail_h = ImGui::GetWindowPos().y + ImGui::GetWindowHeight() - start.y - ctx_.u(30.0F);
-  ImGui::PushStyleColor(ImGuiCol_ChildBg, rgba(0, 0, 0, 0));
-  ImGui::BeginChild("##games", ImVec2(w + ctx_.u(10.0F), std::max(avail_h, ctx_.u(120.0F))), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
-  if (restore_library_scroll_) { ImGui::SetScrollY(library_scroll_); restore_library_scroll_ = false; }
-  else library_scroll_ = ImGui::GetScrollY();
+  if (visible.empty()) {
+    paragraph(ctx_, ctx_.regular, ctx_.u(13.0F), col::text2, w, "No game matches the search and filters.");
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+    return;
+  }
   if (settings_.view == "list") {
     const float row_h = ctx_.u(settings_.compact ? 48.0F : 60.0F);
     ImGuiListClipper clipper;
@@ -634,7 +722,28 @@ void App::draw_library(float w, float h) {
 
 // ---------------------------------------------------------------- modal
 
+// Called once per frame before a sheet is drawn: remembers the focused control when a sheet opens and puts focus back when the last sheet has closed.
+void App::remember_focus_for_sheet(bool sheet_open) {
+  ImGuiContext &g = *ImGui::GetCurrentContext();
+  if (sheet_open && !modal_return_.armed) {
+    if (g.NavId != 0 && g.NavWindow != nullptr && g.NavWindow->ID != ImGui::GetID("##modal") && g.NavWindow->ID != ImGui::GetID("##picker")) {
+      modal_return_ = FocusMemory{g.NavId, g.NavWindow, g.NavWindow->NavRectRel[ImGuiNavLayer_Main], true};
+    } else {
+      modal_return_.armed = true;  // nothing to return to
+    }
+  } else if (!sheet_open && modal_return_.armed) {
+    if (modal_return_.id != 0 && modal_return_.window != nullptr) {
+      ImGui::SetFocusID(modal_return_.id, modal_return_.window);
+      modal_return_.window->NavRectRel[ImGuiNavLayer_Main] = modal_return_.rel;
+      g.NavCursorVisible = true;
+      g.NavHighlightItemUnderNav = true;
+    }
+    modal_return_ = FocusMemory{};
+  }
+}
+
 void App::draw_modal(float w, float h) {
+  remember_focus_for_sheet(modal_.kind != Modal::Kind::none || picker_.open);
   if (modal_.kind == Modal::Kind::none) { modal_focus_done_ = false; return; }
   ImGui::SetNextWindowPos(ImVec2(0, 0));
   ImGui::SetNextWindowSize(ImVec2(w, h));

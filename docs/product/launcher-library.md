@@ -172,6 +172,14 @@ Environment variables the launcher sets for the game: `SEGARECOMP_LAUNCHED`, `SE
 and (Genesis) `SEGARECOMP_GENESIS_REGION`. Unchanged: `SEGARECOMP_VIEWER_UNTHROTTLED`, `SEGARECOMP_VIEWER_SLICE`, `SEGARECOMP_VIEWER_MUTE`, the Master System
 `--viewer-*` options including `--viewer-record`.
 
+## Operating the launcher with a gamepad only
+
+Every ordinary journey (first-run setup, import, browse, game page, build / cancel / queue, play, Storage, Settings) can be completed with an SDL gamepad and no mouse
+or keyboard: D-pad/stick move focus, **A** activates, **B** goes back, **Y** opens the focused game's menu, D-pad Right/Left hop between the sidebar and the page, and a
+hint line shows these buttons while a controller is the last input device. Importing or locating a ROM and choosing a cover use a built-in, root-confined file picker
+when a controller was the last input device (the native OS dialog stays for mouse and keyboard, and is the fallback's alternative when no system chooser exists).
+Details, the automated journeys and a manual smoke walk are in `docs/testing/launcher-gamepad-navigation.md`; ADR 0139 records the decisions.
+
 ## Controller input
 
 See `docs/testing/input-diagnostics.md` for the A-F diagnostic states, the Switch 2 Pro Controller findings (SDL's driver is USB-only and needs libusb; Bluetooth is unsupported by SDL 3.4; real-device support is NOT VERIFIED) and the manual validation procedure.

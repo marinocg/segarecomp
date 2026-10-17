@@ -131,10 +131,10 @@ jobs:
           cmake -S . -B build/sdl3 -G Ninja -DCMAKE_BUILD_TYPE=Debug \
             -DSEGARECOMP_WARNINGS_AS_ERRORS=ON -DSEGARECOMP_ENABLE_SDL3_VIEWER=ON -DSEGARECOMP_BUILD_LAUNCHER=ON -DBUILD_TESTING=ON $hint
       - name: Build the SDL3 viewer targets (Genesis, Master System) and the consumer launcher
-        run: cmake --build build/sdl3 --target segarecomp_viewer_genesis_sdl3 segarecomp_viewer_master_system_sdl3 segarecomp_viewer_master_system_main_check segarecomp-launcher launcher_policy_test launcher_sms_policy_test library_catalog_test storage_test launcher_ui_support_test launcher_build_cancel_test older_build_test sv_host_test sv_viewer_core_test sv_input_diag_test fake_segarecomp fake_game segarecomp
+        run: cmake --build build/sdl3 --target segarecomp_viewer_genesis_sdl3 segarecomp_viewer_master_system_sdl3 segarecomp_viewer_master_system_main_check segarecomp-launcher launcher_policy_test launcher_sms_policy_test library_catalog_test storage_test launcher_ui_support_test launcher_build_cancel_test older_build_test file_picker_test sv_host_test sv_viewer_core_test sv_input_diag_test fake_segarecomp fake_game segarecomp
       - name: Run the launcher AOT-policy test and the SEG-058 library, storage and viewer-host tests (CTest; dummy video driver, no packaging dependency)
         shell: bash
         run: |
           # SDL3 runtime libraries from vcpkg must be findable by the test binary on Windows (a plain test step, never POST_BUILD).
           for d in "$VCPKG_INSTALLATION_ROOT"/installed/*/bin; do [ -d "$d" ] && export PATH="$d:$PATH"; done
-          ctest --test-dir build/sdl3 -R '^(launcher_(sms_)?policy_test|launcher_build_cancel(_gui)?_test|launcher_default_mode_test|launcher_first_run_test|older_build_test|library_catalog_test|storage_test|launcher_ui_support_test|sv_host_test|sv_viewer_core_test|sv_input_diag_test|launcher_gui_navigation_test|launcher_input_diagnostics_test|viewer_foundation_layout_test|ci_shard_guard_test)$' --no-tests=error --output-on-failure
+          ctest --test-dir build/sdl3 -R '^(launcher_(sms_)?policy_test|launcher_build_cancel(_gui)?_test|launcher_default_mode_test|launcher_first_run_test|older_build_test|file_picker_test|launcher_gamepad_journey_test|library_catalog_test|storage_test|launcher_ui_support_test|sv_host_test|sv_viewer_core_test|sv_input_diag_test|launcher_gui_navigation_test|launcher_input_diagnostics_test|viewer_foundation_layout_test|ci_shard_guard_test)$' --no-tests=error --output-on-failure
