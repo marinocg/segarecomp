@@ -8,7 +8,12 @@
  * runtime's earliest-first clock scheduler - so agreement on the final state shows the fixtures' results do not depend on it.
  * No timer, CDC or VDP is modelled; a fixture that touches them makes the reference exit with status 3.
  *
+ * SEG-064-T002 (ADR 0142): a ROM mode for the BIOS-image profile's synthetic proof. The image is mapped read-only at main $000000,
+ * the main processor takes Musashi's own reset from it, and the sub stays held until the image releases it; the reference knows
+ * nothing about executable images, admission or selection - it simply interprets the bytes.
+ *
  * usage: sega_cd_musashi_reference <system-area.bin> <ip-offset> <ip-size> <ip-entry> <sp-offset> <sp-size> <sp-entry> <out-dir>
+ *        sega_cd_musashi_reference --rom <image.bin> <out-dir>
  * Writes <out-dir>/state.json and the raw memories prg_ram.bin, work_ram.bin, word_ram.bin (2M layout). */
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,7 +22,8 @@
 #include "m68k.h"
 #include "m68kcpu.h"
 
-static unsigned char area[0x8000], prg[0x80000], work[0x10000], word2m[0x40000];
+static unsigned char area[0x8000], prg[0x80000], work[0x10000], word2m[0x40000], rom[0x20000];
+static size_t rom_size; /* 0 outside ROM mode */
 static unsigned current; /* 0 main, 1 sub */
 static int sub_reset = 1, sub_busreq = 1, ifl2, ien, pending, wp, bank, mode1m, ret = 1, dmna;
 static unsigned main_flag, sub_flag, cmd[8], stat_[8];
@@ -40,6 +46,11 @@ static void byte_ref(unsigned address, int write, unsigned char **cell) {
   address &= 0xFFFFFF;
   *cell = NULL;
   if (current == 0U) {
+    if (rom_size != 0U && address < rom_size) {
+      if (write) fail("rom write", address);
+      else *cell = &rom[address];
+      return;
+    }
     if (address >= 0xFF0000) *cell = &work[address - 0xFF0000];
     else if (address >= 0x020000 && address < 0x040000) {
       if (!(sub_reset || sub_busreq)) fail("prg window without bus", address);
@@ -245,17 +256,20 @@ int main(int argc, char **argv) {
   long steps = 0;
   int stopped[2] = {0, 0};
   char path[4096];
-  if (argc != 9) return 2;
+  const char *out_dir;
+  const int rom_mode = argc == 4 && strcmp(argv[1], "--rom") == 0;
+  if (argc != 9 && !rom_mode) return 2;
   sub_context = calloc(1, m68k_context_size());
   main_context = calloc(1, m68k_context_size());
   if (sub_context == NULL || main_context == NULL) return 2;
-  f = fopen(argv[1], "rb");
-  if (!f || fread(area, 1, sizeof area, f) != sizeof area) return 2;
+  f = fopen(argv[rom_mode ? 2 : 1], "rb");
+  if (!f) return 2;
+  if (rom_mode) {
+    rom_size = fread(rom, 1, sizeof rom, f);
+    if (rom_size < 8U) return 2;
+  } else if (fread(area, 1, sizeof area, f) != sizeof area) return 2;
   fclose(f);
-  ip_off = (unsigned)strtoul(argv[2], 0, 0); ip_size = (unsigned)strtoul(argv[3], 0, 0); ip_entry = (unsigned)strtoul(argv[4], 0, 0);
-  sp_off = (unsigned)strtoul(argv[5], 0, 0); sp_size = (unsigned)strtoul(argv[6], 0, 0); sp_entry = (unsigned)strtoul(argv[7], 0, 0);
-  memcpy(work, area + ip_off, ip_size);
-  memcpy(prg + 0x6000, area + sp_off, sp_size);
+  out_dir = argv[rom_mode ? 3 : 8];
   m68k_init();
   m68k_set_cpu_type(M68K_CPU_TYPE_68000);
   m68k_set_int_ack_callback(ack);
@@ -263,13 +277,24 @@ int main(int argc, char **argv) {
   m68k_pulse_reset();
   m68k_get_context(sub_context);
   current = 0;
-  m68k_pulse_reset();
-  m68k_set_reg(M68K_REG_SR, 0x2700);
-  m68k_set_reg(M68K_REG_A7, 0xFFFE00);
-  m68k_set_reg(M68K_REG_PC, 0xFF0000 + ip_entry);
-  m68k_get_context(main_context);
-  in_setup = 0;
-  (void)sp_entry;
+  if (rom_mode) {
+    in_setup = 0;
+    m68k_pulse_reset(); /* SSP from $000000, PC from $000004 of the image */
+    m68k_get_context(main_context);
+    (void)ip_off; (void)ip_size; (void)ip_entry; (void)sp_off; (void)sp_size; (void)sp_entry;
+  } else {
+    ip_off = (unsigned)strtoul(argv[2], 0, 0); ip_size = (unsigned)strtoul(argv[3], 0, 0); ip_entry = (unsigned)strtoul(argv[4], 0, 0);
+    sp_off = (unsigned)strtoul(argv[5], 0, 0); sp_size = (unsigned)strtoul(argv[6], 0, 0); sp_entry = (unsigned)strtoul(argv[7], 0, 0);
+    memcpy(work, area + ip_off, ip_size);
+    memcpy(prg + 0x6000, area + sp_off, sp_size);
+    m68k_pulse_reset();
+    m68k_set_reg(M68K_REG_SR, 0x2700);
+    m68k_set_reg(M68K_REG_A7, 0xFFFE00);
+    m68k_set_reg(M68K_REG_PC, 0xFF0000 + ip_entry);
+    m68k_get_context(main_context);
+    in_setup = 0;
+    (void)sp_entry;
+  }
   for (steps = 0; steps < 2000000 && !failed; ++steps) {
     int ran = 0;
     for (k = 0; k < 2U; ++k) {
@@ -298,7 +323,7 @@ int main(int argc, char **argv) {
     }
   }
   if (failed) return 3;
-  snprintf(path, sizeof path, "%s/state.json", argv[8]);
+  snprintf(path, sizeof path, "%s/state.json", out_dir);
   f = fopen(path, "w");
   if (!f) return 4;
   fprintf(f, "{\"steps\":%ld,\"cpus\":[", steps);
@@ -315,8 +340,8 @@ int main(int argc, char **argv) {
   for (i = 0; i < 8; ++i) fprintf(f, "%s%u", i ? "," : "", stat_[i]);
   fprintf(f, "],\"main_flag\":%u,\"sub_flag\":%u,\"ret\":%d,\"mode_1m\":%d}\n", main_flag, sub_flag, ret, mode1m);
   fclose(f);
-  dump(argv[8], "prg_ram.bin", prg, sizeof prg);
-  dump(argv[8], "work_ram.bin", work, sizeof work);
-  dump(argv[8], "word_ram.bin", word2m, sizeof word2m);
+  dump(out_dir, "prg_ram.bin", prg, sizeof prg);
+  dump(out_dir, "work_ram.bin", work, sizeof work);
+  dump(out_dir, "word_ram.bin", word2m, sizeof word2m);
   return 0;
 }
