@@ -204,8 +204,15 @@ def _asm68k_tokens(src: str):
     return parts
 
 
-def _collect_asm68k(listing: str):
-    """SN 68k 2.53 dialect -> (rows, gap_tokens, data_spans); see the module docstring for the extent rules."""
+ALIGN_ROWS = frozenset("even cnop align".split())
+
+
+def _collect_asm68k(listing: str, align_post_pc: bool = False):
+    """SN 68k 2.53 dialect -> (rows, gap_tokens, data_spans); see the module docstring for the extent rules.
+
+    `align_post_pc` (SEG-063-T003, opt-in): this listing prints a byte-emitting `even`/`cnop`/`align` row at the PC AFTER the
+    alignment, so its pad bytes occupy [address - length, address); they also end a preceding truncated data row there. Without the
+    option such a row is placed at its printed address (the SEG-048 behaviour); a wrong choice is caught by the coverage accounting."""
     rows = []
     gap_tokens: dict[int, set[str]] = {}
     macros: dict[str, list[str]] = {}
@@ -224,13 +231,17 @@ def _collect_asm68k(listing: str):
         previous = line
         seen = True
         addr = int(line[:8], 16)
+        field = line[9:33].rstrip()
+        if align_post_pc and field and HEX.fullmatch(field) and not field.startswith("="):
+            pad_tokens = _asm68k_tokens(line[35:])
+            if pad_tokens and pad_tokens[0].lower().split(".")[0] in ALIGN_ROWS:
+                addr -= len(field.replace(" ", "")) // 2
         addrs.append(addr)
         if pending is not None and addr > pending[0]:
             if addr - pending[0] < len(pending[1]):
                 _fail("data_extent_unknown")
             pending[4] = addr - pending[0]
             pending = None
-        field = line[9:33].rstrip()
         truncated = line[33:34] == "+"
         src = line[35:]
         if field.startswith("="):
@@ -301,8 +312,28 @@ def _collect_asm68k(listing: str):
     return rows, gap_tokens, spans
 
 
-def parse_listing(listing: str, rom: bytes, dialect: str = "as", placeholder_fill: bool = False, max_entries: int | None = None):
-    """Returns (instruction_starts, summary). Raises SourceMapError."""
+def _rebase(rows, gap_tokens, spans, image_base: int):
+    """SEG-063-T003: a disc-loaded module is assembled at its execution address (`org`), not at image offset 0. Every listing address
+    becomes an image offset (address - image_base). A row below the base that emits bytes is outside the image (`row_outside_rom`);
+    one that emits nothing is dropped, as are directive marks below the base. Emitted starts are image offsets."""
+    if image_base == 0:
+        return rows, gap_tokens, spans
+    kept = []
+    for row in rows:
+        if row[0] < image_base:
+            if row[2] == "Z" or (len(row[1]) == 0 and row[4] == 0):
+                continue
+            _fail("row_outside_rom")
+        row[0] -= image_base
+        kept.append(row)
+    gap_tokens = {addr - image_base: tokens for addr, tokens in gap_tokens.items() if addr >= image_base}
+    spans = [(begin - image_base, end - image_base) for begin, end in spans if begin >= image_base]
+    return kept, gap_tokens, spans
+
+
+def parse_listing(listing: str, rom: bytes, dialect: str = "as", placeholder_fill: bool = False, max_entries: int | None = None,
+                  image_base: int = 0, align_post_pc: bool = False):
+    """Returns (instruction_starts, summary). Raises SourceMapError. Starts are image offsets (listing address - image_base)."""
     if len(listing) > MAX_LISTING_BYTES:
         _fail("listing_too_large")
     if len(rom) == 0 or len(rom) > MAX_ROM_BYTES or len(rom) % 2:
@@ -312,10 +343,11 @@ def parse_listing(listing: str, rom: bytes, dialect: str = "as", placeholder_fil
         rows, gap_tokens = _collect_as(listing)
         exact = True
     elif dialect == "asm68k":
-        rows, gap_tokens, spans = _collect_asm68k(listing)
+        rows, gap_tokens, spans = _collect_asm68k(listing, align_post_pc)
         exact = False  # the listing shows first-pass placeholder operands/data; opcode words and final addresses are still checked
     else:
         _fail("unknown_dialect")
+    rows, gap_tokens, spans = _rebase(rows, gap_tokens, spans, image_base)
     return _account(rows, gap_tokens, rom, exact, spans, placeholder_fill, max_entries)
 
 
@@ -427,13 +459,14 @@ def format_universe(starts, rom_sha256: str, producer: str, source_revision: str
 
 def extract(listing: str, rom: bytes, source_revision: str, expect_source_revision: str | None,
             producer: str = "s1disasm-listing-v1", source_config: str = "none", expect_rom_sha256: str | None = None,
-            dialect: str = "as", placeholder_fill: bool = False, max_entries: int | None = None):
+            dialect: str = "as", placeholder_fill: bool = False, max_entries: int | None = None, image_base: int = 0,
+            align_post_pc: bool = False):
     rom_sha256 = hashlib.sha256(rom).hexdigest()
     if expect_rom_sha256 is not None and expect_rom_sha256 != rom_sha256:
         _fail("rom_hash_mismatch")
     if expect_source_revision is not None and expect_source_revision != source_revision:
         _fail("source_revision_mismatch")
-    starts, summary = parse_listing(listing, rom, dialect, placeholder_fill, max_entries)
+    starts, summary = parse_listing(listing, rom, dialect, placeholder_fill, max_entries, image_base, align_post_pc)
     return format_universe(starts, rom_sha256, producer, source_revision, source_config), summary
 
 
@@ -450,6 +483,10 @@ def main(argv=None) -> int:
     parser.add_argument("--dialect", choices=("as", "asm68k"), default="as")
     parser.add_argument("--max-entries", type=int, default=None,
                         help="upper bound on instruction starts (default: the 65,536 island bound; evaluation-only truth of larger images raises it)")
+    parser.add_argument("--image-base", type=lambda text: int(text, 0), default=0,
+                        help="execution address the listing assembles image offset 0 at (a disc module's `org`); starts are image offsets")
+    parser.add_argument("--align-post-pc", action="store_true",
+                        help="asm68k: byte-emitting even/cnop/align rows print the PC after the alignment (their pad precedes it)")
     parser.add_argument("--placeholder-fill", action="store_true",
                         help="a data row that is a single uniform 00/FF fill may differ from the ROM (p2bin -z compression placeholder)")
     args = parser.parse_args(argv)
@@ -460,7 +497,7 @@ def main(argv=None) -> int:
                 _fail("source_revision_mismatch")
         rom = open(args.rom, "rb").read(MAX_ROM_BYTES + 1)
         listing = open(args.listing, "rb").read(MAX_LISTING_BYTES + 1).decode("ascii", errors="replace")
-        text, summary = extract(listing, rom, args.source_revision, None, args.producer, args.source_config, args.expect_rom_sha256, args.dialect, args.placeholder_fill, args.max_entries)
+        text, summary = extract(listing, rom, args.source_revision, None, args.producer, args.source_config, args.expect_rom_sha256, args.dialect, args.placeholder_fill, args.max_entries, args.image_base, args.align_post_pc)
     except SourceMapError as error:
         print(json.dumps({"schema": "segarecomp.m68k_source_universe.error.v1", "error": error.code, "count": error.count}))
         return 1
