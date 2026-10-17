@@ -14,7 +14,7 @@ observes in a result block, then builds a small sub program in PRG RAM and relea
   +$10 VRAM word at $0100 after a VRAM fill of $5Axx over $0000-$03FF ($5A5A)    +$12 the status DMA bit after the fill (0)
   +$14 VRAM words $1000-$1006 after a 68K->VRAM DMA from work RAM (checksum)      +$16 same from the BIOS image at $0F00 (checksum)
   +$18 vertical-blank flag observed by polling the status register (1)
-  +$1A frames counted by the level-6 handler, entered through a work-RAM JMP (xxx).L thunk at $FFFD06 (3)
+  +$1A frames counted by the level-6 handler, entered through a work-RAM JMP (xxx).L thunk at $FFF900 (3)
   +$1C H-INT vector register read back ($A12006, $1234)     +$1E BIOS $72 read through the main bus ($1234)
   +$20 BIOS $70 read through the main bus (the image's own word)
   +$22..+$25 MOVE.L $400100,D0 on the empty cartridge slot: the next instruction word twice (GPGX open bus)
@@ -45,7 +45,7 @@ VINT_HANDLER = 0x0C40
 SUB_SRC = 0x0D00
 DMA_ROM = 0x0F00
 RESULT = 0xFFC000
-THUNK = 0xFFFD06
+THUNK = 0xFFF900
 FRAMES = 0xFFC080
 DMA_RAM = 0xFF8000
 GA = 0xA12000
@@ -161,7 +161,7 @@ def main_program(sub_len, layout):
     m.btst(3, F.absl(VDP_CTRL + 1))
     m.bcc("eq", "vb_wait")
     m.move("w", F.imm(1), F.absl(RESULT + 0x18))
-    # ---- level 6 through a RAM thunk: JMP (VINT_HANDLER).L at $FFFD06 (the vector names the thunk) ----
+    # ---- level 6 through a RAM thunk: JMP (VINT_HANDLER).L at $FFF900 (the vector names the thunk) ----
     m.move("w", F.imm(0x4EF9), F.absl(THUNK))
     m.move("l", F.imm(VINT_HANDLER), F.absl(THUNK + 2))
     m.clr("w", F.absl(FRAMES))
