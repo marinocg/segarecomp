@@ -102,6 +102,7 @@ void App::draw_import_body(float w, float h) {
 // ---------------------------------------------------------------- storage
 
 void App::draw_storage(float w, float h) {
+  (void)h;  // the table is part of the page now (no height-capped child)
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const bool maintenance = maintenance_running_ || busy_.any_activity();
   {
