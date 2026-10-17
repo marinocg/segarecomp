@@ -279,12 +279,17 @@ The disc identity is the lowercase hex SHA-256 of this normalized text (one line
 ```text
 segarecomp.disc.v1
 file <index> size <bytes> sha256 <hex> name <name as written in the CUE>      (one per FILE, in CUE order)
-track <number> <mode1_2048|mode1_2352|audio> file <index> offset <byte offset of INDEX 01> sector <2048|2352> pregap <sectors> lba <first LBA> count <sectors>
+track <number> <mode1_2048|mode1_2352|audio> file <index> offset <byte offset of INDEX 01> sector <2048|2352> pregap <sectors> lba <first LBA> count <sectors>[ index0 <sectors>]
 total <sectors including pregaps>
 ```
 
-LBAs are assigned in CUE order: each track starts after the previous track plus its own `PREGAP`; a track ends at the next
-`INDEX 01` of the same file or at the end of the file. Changing any byte of any file, any name, or the layout changes the
+LBAs are assigned in CUE order: each track starts after the previous track plus its own `PREGAP` (not stored in the file)
+plus its own stored `INDEX 00` pregap (SEG-063-T003: the file sectors from `INDEX 00` to `INDEX 01`); a track's program area
+ends where the next track of the same file begins (its `INDEX 00` when present, else its `INDEX 01`) or at the end of the
+file. Stored pregap sectors are addressable disc time but belong to no track's readable area. ` index0 <sectors>` is written
+only when non-zero, so the identity of every disc without a stored pregap is unchanged. `INDEX 00` must precede `INDEX 01`
+once, is exclusive with `PREGAP` (`pregap_conflict`), is not supported on track 1 (no addressable time before LBA 0), and
+ordering errors are `index_order`; `INDEX 02` and later remain `cue_unsupported`. Changing any byte of any file, any name, or the layout changes the
 identity. The generated program stores the per-file size and SHA-256 and the track table and refuses a disc whose files do
 not match at start-up.
 

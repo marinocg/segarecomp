@@ -25,6 +25,8 @@ const char *disc_error_name(DiscError error) noexcept {
   case DiscError::mixed_sector_sizes: return "mixed_sector_sizes";
   case DiscError::track_numbering: return "track_numbering";
   case DiscError::track_layout: return "track_layout";
+  case DiscError::index_order: return "index_order";
+  case DiscError::pregap_conflict: return "pregap_conflict";
   case DiscError::disc_too_large: return "disc_too_large";
   case DiscError::raw_sync: return "raw_sync";
   case DiscError::raw_header: return "raw_header";
@@ -63,8 +65,9 @@ std::uint8_t bcd(std::uint32_t value) { return static_cast<std::uint8_t>(((value
 struct CueTrack {
   unsigned number{};
   DiscTrackType type{};
+  std::optional<std::uint32_t> index00;  // in-file pregap start (file-relative frames)
   std::optional<std::uint32_t> index01;
-  std::uint32_t pregap{};
+  std::optional<std::uint32_t> pregap;   // PREGAP (not stored in the file)
   std::size_t line{};
 };
 
@@ -185,17 +188,28 @@ struct DiscLoader {
         const auto index = parse_digits(tokens[1], 2);
         const auto time = parse_time(tokens[2]);
         if (!index || !time) return fail(DiscError::cue_syntax, at);
-        if (*index != 1U) return fail(DiscError::cue_unsupported, at);
+        if (*index > 1U) return fail(DiscError::cue_unsupported, at);
         auto &track = files.back().tracks.back();
-        if (track.index01) return fail(DiscError::cue_syntax, at);
-        track.index01 = *time;
+        if (*index == 0U) {
+          // INDEX 00 is the start of an in-file pregap: it must precede the track's INDEX 01, once, and is exclusive with PREGAP.
+          // Track 1 has no addressable pregap (its INDEX 01 is LBA 0), so an in-file pregap there is outside the subset.
+          if (track.index00 || track.index01) return fail(DiscError::index_order, at);
+          if (track.pregap) return fail(DiscError::pregap_conflict, at);
+          if (track.number == 1U) return fail(DiscError::cue_unsupported, at);
+          track.index00 = *time;
+        } else {
+          if (track.index01) return fail(DiscError::index_order, at);
+          if (track.index00 && *track.index00 > *time) return fail(DiscError::index_order, at);
+          track.index01 = *time;
+        }
       } else if (keyword == "PREGAP") {
         if (tokens.size() != 2) return fail(DiscError::cue_syntax, at);
         if (files.empty() || files.back().tracks.empty()) return fail(DiscError::cue_syntax, at);
         auto &track = files.back().tracks.back();
         const auto time = parse_time(tokens[1]);
         if (!time) return fail(DiscError::cue_syntax, at);
-        if (track.index01 || track.pregap != 0U) return fail(DiscError::cue_syntax, at);
+        if (track.index01 || track.pregap) return fail(DiscError::cue_syntax, at);
+        if (track.index00) return fail(DiscError::pregap_conflict, at);
         track.pregap = *time;
       } else {
         return fail(DiscError::cue_unsupported, at);
@@ -228,15 +242,19 @@ struct DiscLoader {
         const std::string at = "track " + std::to_string(track.number);
         if (track.number != expected_number || !track.index01) return fail(DiscError::track_numbering, at);
         ++expected_number;
-        if (t == 0 && *track.index01 != 0U) return fail(DiscError::track_layout, at);
+        // The track occupies file sectors [start, end): start is its INDEX 00 when present (the in-file pregap) else its INDEX 01;
+        // end is the next track's start in the same file, so a track never absorbs the following track's indexed pregap.
+        const std::uint32_t start = track.index00 ? *track.index00 : *track.index01;
+        if (t == 0 && start != 0U) return fail(DiscError::track_layout, at);
         if (*track.index01 >= file_sectors) return fail(DiscError::file_truncated, at);
         std::uint64_t end = file_sectors;
         if (t + 1 < cue_file.tracks.size()) {
           const auto &next = cue_file.tracks[t + 1];
           if (!next.index01) return fail(DiscError::track_numbering, "track " + std::to_string(next.number));
-          if (*next.index01 <= *track.index01) return fail(DiscError::track_layout, at);
-          if (*next.index01 > file_sectors) return fail(DiscError::file_truncated, at);
-          end = *next.index01;
+          const std::uint32_t next_start = next.index00 ? *next.index00 : *next.index01;
+          if (next_start <= *track.index01) return fail(DiscError::track_layout, at);
+          if (next_start > file_sectors || *next.index01 > file_sectors) return fail(DiscError::file_truncated, at);
+          end = next_start;
         }
         DiscTrack out;
         out.number = track.number;
@@ -244,8 +262,10 @@ struct DiscLoader {
         out.file_index = static_cast<std::uint32_t>(f);
         out.sector_size = sector_size;
         out.file_offset = static_cast<std::uint64_t>(*track.index01) * sector_size;
-        out.pregap = track.pregap;
-        lba += track.pregap;
+        out.pregap = track.pregap.value_or(0U);
+        out.index0_sectors = *track.index01 - start;
+        lba += out.pregap;
+        lba += out.index0_sectors;  // the indexed pregap is addressable disc space (its sectors are in the file, not a track's data)
         out.first_lba = static_cast<std::uint32_t>(std::min<std::uint64_t>(lba, kDiscMaxSectors + 1U));
         out.sector_count = static_cast<std::uint32_t>(std::min<std::uint64_t>(end - *track.index01, kDiscMaxSectors + 1U));
         lba += end - *track.index01;
@@ -299,10 +319,14 @@ struct DiscLoader {
     for (std::size_t f = 0; f < disc.files_.size(); ++f)
       table << "file " << f << " size " << disc.files_[f].size << " sha256 " << disc.files_[f].sha256 << " name " << disc.files_[f].name
             << "\n";
-    for (const auto &track : disc.tracks_)
+    for (const auto &track : disc.tracks_) {
       table << "track " << track.number << ' ' << disc_track_type_name(track.type) << " file " << track.file_index << " offset "
             << track.file_offset << " sector " << track.sector_size << " pregap " << track.pregap << " lba " << track.first_lba
-            << " count " << track.sector_count << "\n";
+            << " count " << track.sector_count;
+      // SEG-063-T003: only a track with an in-file INDEX 00 pregap carries the field, so every INDEX 01-only disc keeps its identity.
+      if (track.index0_sectors != 0U) table << " index0 " << track.index0_sectors;
+      table << "\n";
+    }
     table << "total " << disc.total_sectors_ << "\n";
     disc.table_ = table.str();
     disc.identity_ = sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(disc.table_.data()), disc.table_.size()));

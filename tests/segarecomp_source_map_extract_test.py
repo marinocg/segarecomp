@@ -419,5 +419,51 @@ class Asm68kAndAdapters(unittest.TestCase):
         self.assertEqual(ex.extract(listing, rom, REV, None, dialect="asm68k"), ex.extract(listing, rom, REV, None, dialect="asm68k"))
 
 
+class ModuleListings(unittest.TestCase):
+    """SEG-063-T003: disc-module listings assembled at their execution address, and SN 68k alignment rows printed after the pad."""
+
+    BASE = 0x10000
+
+    def module(self):
+        # image: nop; dc.b 'ABC' (truncated: the next printed PC is past the pad); even (pad 00 printed AT the post-alignment PC); rts
+        rom = bytes.fromhex("4E71") + b"ABCDEFGHIJK" + b"\x00" + bytes.fromhex("4E75")
+        lines = [a68(0, "", "; header"), a68(self.BASE, "4E71", "Start:\tnop"),
+                 a68(self.BASE + 2, "4142 4344 4546 4748 494A", "\tdc.b 'ABCDEFGHIJK'", trunc=True),
+                 a68(self.BASE + 14, "00", "\teven"), a68(self.BASE + 14, "4E75", "\trts")]
+        return "\n".join(lines) + "\n", rom
+
+    def test_image_base_maps_listing_addresses_to_image_offsets(self):
+        listing, rom = self.module()
+        text, summary = ex.extract(listing, rom, REV, None, dialect="asm68k", image_base=self.BASE, align_post_pc=True)
+        self.assertEqual(summary["instruction_starts"], 2)
+        self.assertEqual(text.splitlines()[6:8], ["00000000", "0000000e"])  # image offsets, not execution addresses
+        with self.assertRaises(ex.SourceMapError) as ctx:  # without the base every row lies outside the image
+            ex.extract(listing, rom, REV, None, dialect="asm68k", align_post_pc=True)
+        self.assertEqual(ctx.exception.code, "row_outside_rom")
+        below = listing.replace(a68(0, "", "; header"), a68(self.BASE - 2, "4E71", "\tnop"))
+        with self.assertRaises(ex.SourceMapError) as ctx:  # a byte-emitting row below the base is outside the image
+            ex.extract(below, rom, REV, None, dialect="asm68k", image_base=self.BASE, align_post_pc=True)
+        self.assertEqual(ctx.exception.code, "row_outside_rom")
+
+    def test_bad_image_base_and_dialect_mismatch_are_typed(self):
+        listing, rom = self.module()
+        for base, code in ((-2, "bad_image_base"), (self.BASE + 1, "bad_image_base")):
+            with self.assertRaises(ex.SourceMapError) as ctx:
+                ex.extract(listing, rom, REV, None, dialect="asm68k", image_base=base, align_post_pc=True)
+            self.assertEqual(ctx.exception.code, code)
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract(listing, rom, REV, None, dialect="as", align_post_pc=True)
+        self.assertEqual(ctx.exception.code, "option_needs_asm68k")
+
+    def test_align_post_pc_is_opt_in_and_still_accounted(self):
+        listing, rom = self.module()
+        with self.assertRaises(ex.SourceMapError) as ctx:  # the SEG-048 placement puts the pad on the rts: an overlap, never a guess
+            ex.extract(listing, rom, REV, None, dialect="asm68k", image_base=self.BASE)
+        self.assertEqual(ctx.exception.code, "overlapping_rows")
+        moved = listing.replace(a68(self.BASE + 14, "4E75", "\trts"), a68(self.BASE + 16, "4E75", "\trts"))
+        with self.assertRaises(ex.SourceMapError):  # a listing whose rts really follows the pad does not fit this image
+            ex.extract(moved, rom + b"\x00\x00", REV, None, dialect="asm68k", image_base=self.BASE, align_post_pc=True)
+
+
 if __name__ == "__main__":
     unittest.main()

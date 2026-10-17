@@ -8,6 +8,11 @@ raises on anything else; it is never used to accept discs, only to compute expec
 
 The normalized identity text follows ADR 0129 / docs/architecture/sega-cd-machine-contract.md section 9a.
 
+SEG-063-T003 (CUE sheet semantics): `INDEX 00 mm:ss:ff` opens a track's pregap whose sectors are stored in the BIN; `INDEX 01`
+opens the track's program area; `PREGAP` declares a gap that is NOT stored in the BIN. On the disc a pregap is addressable time
+between the previous track's last sector and this track's first program sector, so every pregap sector (stored or generated)
+advances the LBA counter, and the previous track's data stops where this track's pregap begins.
+
 usage (module): read_disc(cue_path) -> dict ; command line: sega_cd_disc_oracle.py <disc.cue> [--sector-digests] -> JSON
 """
 import hashlib
@@ -42,11 +47,11 @@ def read_disc(cue_path, sector_digests=False):
             continue
         m = re.match(r"TRACK\s+(\d\d)\s+(MODE1/2048|MODE1/2352|AUDIO)$", line)
         if m:
-            entries[-1]["tracks"].append({"number": int(m.group(1)), "mode": m.group(2), "index": None, "pregap": 0})
+            entries[-1]["tracks"].append({"number": int(m.group(1)), "mode": m.group(2), "index": None, "index0": None, "pregap": 0})
             continue
-        m = re.match(r"INDEX\s+01\s+(\d\d:\d\d:\d\d)$", line)
+        m = re.match(r"INDEX\s+(00|01)\s+(\d\d:\d\d:\d\d)$", line)
         if m:
-            entries[-1]["tracks"][-1]["index"] = _time_to_frames(m.group(1))
+            entries[-1]["tracks"][-1]["index" if m.group(1) == "01" else "index0"] = _time_to_frames(m.group(2))
             continue
         m = re.match(r"PREGAP\s+(\d\d:\d\d:\d\d)$", line)
         if m:
@@ -61,12 +66,16 @@ def read_disc(cue_path, sector_digests=False):
         files.append({"name": entry["name"], "size": len(data), "sha256": hashlib.sha256(data).hexdigest(), "data": data})
         size = 2048 if entry["tracks"][0]["mode"] == "MODE1/2048" else 2352
         count_in_file = len(data) // size
+        def begins(track):  # first BIN sector the track owns: its stored pregap if it has one, else its program area
+            return track["index"] if track["index0"] is None else track["index0"]
+
         for k, track in enumerate(entry["tracks"]):
-            following = entry["tracks"][k + 1]["index"] if k + 1 < len(entry["tracks"]) else count_in_file
-            position += track["pregap"]
+            following = begins(entry["tracks"][k + 1]) if k + 1 < len(entry["tracks"]) else count_in_file
+            stored_gap = track["index"] - begins(track)
+            position += track["pregap"] + stored_gap
             kind = {"MODE1/2048": "mode1_2048", "MODE1/2352": "mode1_2352", "AUDIO": "audio"}[track["mode"]]
             tracks.append({"number": track["number"], "type": kind, "file": file_number, "file_offset": track["index"] * size,
-                           "sector_size": size, "pregap": track["pregap"], "first_lba": position,
+                           "sector_size": size, "pregap": track["pregap"], "index0": stored_gap, "first_lba": position,
                            "sector_count": following - track["index"]})
             position += following - track["index"]
 
@@ -90,6 +99,8 @@ def read_disc(cue_path, sector_digests=False):
     for t in tracks:
         table += "track %d %s file %d offset %d sector %d pregap %d lba %d count %d\n" % (
             t["number"], t["type"], t["file"], t["file_offset"], t["sector_size"], t["pregap"], t["first_lba"], t["sector_count"])
+        if t["index0"]:
+            table = table[:-1] + " index0 %d\n" % t["index0"]
     table += "total %d\n" % position
 
     system = b"".join(user_block(tracks[0]["first_lba"] + i) for i in range(16))

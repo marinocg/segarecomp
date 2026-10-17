@@ -16,7 +16,7 @@ only strict-C11 runtime sources; `segarecomp_runtime_genesis` never links C++ an
    the byte-identity constants of compiled instructions, which compiled code already is a function of.) Save data, if
    ever supported, is stored separately; CHD is deferred; there is no virtual filesystem and no asset bundle.
 2. **One CUE parser, in C++.** `libs/media` `DiscImage` parses the supported CUE subset (`FILE ... BINARY`, `TRACK nn
-   MODE1/2048 | MODE1/2352 | AUDIO`, `INDEX 01`, `PREGAP`), resolves files strictly inside the CUE directory and
+   MODE1/2048 | MODE1/2352 | AUDIO`, `INDEX 01`, `PREGAP`; `INDEX 00` stored pregaps since SEG-063-T003, contract section 9a), resolves files strictly inside the CUE directory and
    produces a normalized track table: per track `{number, type, file index, file byte offset, sector size, first LBA,
    sector count}`.
 3. **The table reaches the runtime as constant data in the generated program** (a `static const` array emitted next to
