@@ -122,9 +122,10 @@ Byte addresses; main side `$A120xx`, sub side `$FF80xx`. Where GPGX and MAME dis
 rules (G): a main write to a register without a main-writable function is **ignored**; main reads of `$A12030-$A1203F` are
 open bus; registers GPGX marks "!LDS and !UDS are ignored" (`$FF8002/3`, `$FF800E/F`, `$FF8030/1`, `$A1200E/F`) act on a
 byte write to either half; word-only sub registers (`$FF8008-$FF800D`) take a byte write as the byte duplicated into both
-halves; `$FF8068-$FF80FF` is plain storage. Registers of devices this profile does not model - the stopwatch (`$0C`), the
-font and graphics registers (`$FF804C-$FF8067`), the subcode buffer (`$FF8100-$FF81FF`), the CDC host-data port (`$08`
-words) and the H-INT vector (`$A12006` word, which reads and writes the BIOS ROM; implemented by the BIOS-image profile, section 16) -
+halves; `$FF8068-$FF80FF` is plain storage. Registers of devices this profile does not model - the font registers
+(`$FF804C-$FF8057`) and the subcode buffer (`$FF8100-$FF81FF`) - are typed stops; the stopwatch (`$0C`), the graphics ASIC
+(`$FF8058-$FF8066`), the CDC host-data port (`$08` words) and the PCM area are implemented by SEG-064-T004 (section 17), and the H-INT
+vector (`$A12006` word, which reads and writes the BIOS ROM) by the BIOS-image profile (section 16). Unmodelled shapes
 are typed stops
 (`gate_array_register_unsupported`, `cdc_destination_unsupported`, `bios_absent`) carrying the side, address, width and
 direction.
@@ -138,7 +139,8 @@ direction.
 | `$04` | `EDT`/`DSR`/`DD` (bits 7, 6, 2-0) read; low byte reads 0 | `EDT`/`DSR` (7-6), `DD` (2-0) writable (CDC destination) | a write clears `EDT`/`DSR`, re-selects the writer of a started transfer and resets the DMA address `$0A` | V2 destinations (GPGX `cdc_dma_init`, MAME `DMA_PRG 0x0500`, `DMA_WRAM 0x0700`); `$0A` reset: V1 (GPGX citing MCDV); re-selection G |
 | `$05` | reads 0 | CDC register address (4 bits) | | V2 |
 | `$06`-`$07` | `$06` byte reads the LED, `$07` reads 1 | `$07` byte / `$06` word: CDC register data (section 7) | | V2 (GPGX `cdc_reg_w/r`; register map of the LC8951); main bytes G |
-| `$08`-`$09` | bytes read `$FF` | bytes read `$FF` | the host-data register keeps its reset value; word accesses are the host data path (typed stop) | G |
+| `$08`-`$09` | bytes read the host-data register's halves; a word read is the host data path | same; a word read or write is the host data path (section 7) | byte reads do not advance a transfer; a byte write is a typed stop `cdc_destination_unsupported`; the register resets to `$FFFF` | G (GPGX `ctrl_io_read_word`/`scd_read_word` case 8: `cdc_host_r`); SEG-064-T004 |
+| `$0C` | - (main side: typed stop) | stopwatch, word access only (section 17) | a free-running 12-bit count, one per 384 sub cycles; any word write clears it | G (GPGX itself marks the width "(word access only ?)"); SEG-064-T004 |
 | `$0A` | DMA address (read) | CDC DMA destination address (bytes / 8 for Word RAM and PRG RAM); writable during a transfer | | V2 (GPGX `<< 3`, MAME `<< 3`); writes during a transfer G |
 | `$0E` | main flag byte (write either byte; a word write stores its low byte) | main flag byte (read) | | V2 (GPGX "D8-D15 ignored", MAME "low bits take priority") |
 | `$0F` | sub flag byte (read) | sub flag byte (write either byte, or the low byte of a word) | | V2 |
@@ -149,6 +151,7 @@ direction.
 | `$34-$35` | - | fader: writes act on CD-DA output only (not modelled); reads 0 | | G |
 | `$36-$37` | - | `$36`: 1 while no audio track plays; `$37`: CDD control, `HOCK` = bit 2 (a word write stores only `HOCK`) | | V1 (GPGX case 0x36) |
 | `$38-$41` | - | CDD status RS0-RS9 (read/write storage, set by the drive) | section 8 | V1 (GPGX `cdd_process`), layout V2 with MAME `segacd_cdd_rx_r` map |
+| `$58-$66` | - | graphics ASIC (section 17): `$58` control (read: busy in bit 15), `$5A-$64` parameters, `$66` trace base (the write starts an operation) | word access only; byte accesses and parameter reads are typed stops | G (GPGX `gfx.c`); SEG-064-T004 |
 | `$42-$4B` | - | CDD command TX0-TX9 (bytes stored as written); the word write to `$4A` clears TX8/TX9 and sends the command | section 8 | V1 (GPGX case 0x4a), map V2 (MAME `segacd_cdd_tx_w`) |
 
 **Peripheral reset (G, GPGX `scd_reset(0)`).** A sub write with `RES0` = 0 (`$FF8001` byte, or a `$FF8000` word): `$FF8004`
@@ -227,8 +230,16 @@ while main owns Word RAM (G: GPGX halts, MAME writes) and resumed from the hando
 writer moves while the other Word RAM mode is active are lost (G: GPGX's 2M and 1M buffers are only copied on a mode
 switch). Partial progress is real (DMA is not atomic): an abort leaves the bytes moved so far and no `EDT` (V1). A `$FF8004`
 write during a transfer re-selects its writer (an invalid destination leaves the transfer started with no writer).
-Destinations 2/3 (host read through `$A12008/$FF8008`), 4 (PCM) and 5 (PRG RAM) are typed stops
-`cdc_destination_unsupported` (eligible for later refinement; PRG RAM addressing is V2 and recorded for SEG-063).
+**Host reads (SEG-064-T004; destinations 2 = main through `$A12008`, 3 = sub through `$FF8008`; G, GPGX `cdc_dma_init`/`cdc_host_r`).**
+At `DTRG` (or a destination write while a transfer is started) the first word of the buffer at `DAC` is loaded into the host-data
+register at once, `DSR` is set, `DAC` advances by 2 and `DBC` drops by 2. A word read of `$FF8008` (sub) or `$A12008` (main) by the
+processor the destination names returns the register and, unless `EDT` is set, loads the next word the same way; when `DBC` goes negative
+the transfer ends exactly as a DMA transfer does (`DBC` = `$FFFF`, `!DTBSY`/`!DTEN` high, `DTEI` active, level 5 on the /INT edge with
+`IEN5`) and `EDT` is set while `DSR` stays; the next read clears `DSR`. A read by the other processor, a byte read, or a read after
+`DSR` fell returns the register and moves nothing. A word write to `$FF8008` performs the same read (GPGX: "also read on write"). A byte
+write is a typed stop. Destinations 4 (PCM RAM) and 5 (PRG RAM) stay typed stops `cdc_destination_unsupported` (PRG RAM addressing is V2
+and recorded for SEG-063). Transfers carry no duration (the data is available at once; the reference's own sub-read timing is "not
+immediately available", GPGX comment).
 
 ## 8. CDD subset
 
@@ -245,7 +256,10 @@ nothing to do (no `HOCK`, no command pending, no latency, not playing, `DECEN` c
 | command 1 (stop) | status `TOC`, LBA 0, track 0; RS0 = 0, RS1 = `$F`, RS2-RS9 = 0; a pending play or the latency are kept | V1 |
 | command 3 (play) | RS0 = `SEEK`, RS1 = `$F`; on the **next tick** the play starts: target LBA = MSF(TX2..TX7 as written) - 150, latency = 12 ticks + `|target - LBA| * 120 / 270000`, status `PLAY` | G (GPGX default latency; MAME has no seek model) |
 | commands 5, B, E, F | unknown to the drive: RS0 = status | G |
-| other commands (TOC, seek, pause, resume, scan, tray) | typed stop `cdd_command_unsupported` | C |
+| command 2 (TOC; SEG-064-T004) | RS0 = drive status, RS1 = the request code TX3; RS2-RS7 the BCD digits of a time, RS8 a flag or number: 0 current absolute time (`LBA + 150`, RS8 = 4 on a data track), 1 track-relative time, 2 current track number (`$0A0A` past the last), 3 total length (end of the last track + 150), 4 first and last track (`$0001`, last), 5 start of track `TX4 * 10 + TX5` (+ 150; RS6 bit 3 on a data track; RS8 the low digit; the lead-out for last + 1, other numbers a typed stop `cdd_command_unsupported`), 6 error (none); an invalid request code changes nothing and computes no checksum | G (GPGX `cdd_process` case 2) |
+| command 4 (seek) | like play (RS0 = `SEEK`, RS1 = `$F`), but the pending status is `PAUSE`: the next tick moves to the target and the drive pauses | G (GPGX case 4) |
+| commands 6, 7, A (pause, resume, N-track jump) | `PAUSE` (6, A: no audio playing, `$36` high = 1) / `PLAY` (7) in RS0 and the status; RS1-RS8 unchanged; the checksum is recomputed | G (GPGX cases 6, 7, 0xA) |
+| other commands (scan, tray) | typed stop `cdd_command_unsupported` | C |
 | each tick while latency > 0 | latency - 1, the decoder runs on a header-0 block (section 7) | G |
 | each tick while playing | a block of a data track is decoded with header = BCD MSF of `LBA + 150` and mode 1; LBA + 1; crossing the end of a track moves to the next track; reaching an audio track is the typed stop `cd_read_audio_track` (CD-DA playback is not modelled); past the last track the status becomes `END` (`$0C`) | V1 + CDROM; audio stop C |
 | `HOCK` | after the drive's tick, level 4 becomes pending (taken with `IEN4`) | V1 |
@@ -298,12 +312,12 @@ not match at start-up.
 
 | level (sub) | source | implemented | tag |
 | --- | --- | --- | --- |
-| 1 | graphics completion | typed stop if raised (never raised: ASIC absent) | C |
+| 1 | graphics completion (SEG-064-T004) | yes: raised at the end of an operation only with `IEN1` (section 17); cleared at acceptance | G (GPGX `gfx_update`) |
 | 2 | main `IFL2` | yes; acknowledging clears `IFL2` | V2 (GPGX `scd_68k_irq_ack`, MAME HOLD_LINE) |
 | 3 | timer | yes | V2 (rate), V1 (`+ 1`) |
 | 4 | CDD (`HOCK`) | yes | V1 |
 | 5 | CDC (`DTEI`/`DECI` /INT edge with `IEN5`, section 7) | yes | V1 / G |
-| 6 | subcode | never raised | C |
+| 6 | subcode | never raised; a request is the typed stop `interrupt_source_unsupported` | C |
 
 All sub interrupts are autovectored (vector `24 + level`); the handler is the long at `PRG[$60 + 4 * level]` and must be
 a compiled entry of the sub's image set, otherwise the acceptance stops with `interrupt_handler_not_compiled`.
@@ -334,6 +348,13 @@ stops with `bios_absent`. The BIOS-image profile wires the VDP's level 6 (sectio
   access, Word RAM access and ownership change first brings a transfer up to its instruction's start tick.
 - The CDD seek latency is GPGX's default model (section 8), not measured drive behaviour.
 - `SBRQ` and the sub's wait for Word RAM take effect at instruction boundaries (the real acknowledge latency is not modelled).
+- Graphics ASIC (SEG-064-T004): a line is rendered whole as soon as it starts (GPGX `ceil`), at the first observation point (a Word RAM
+  access, an ownership change, the end) rather than progressively; the Word RAM access contention of the ASIC and the sub is not modelled.
+- GPGX stops a CPU that polls a Gate Array register in a tight loop after three reads until the register is written (its idle-skip
+  optimization); the reference's execution counts of such loops are therefore not comparable with a full-rate execution, which this
+  runtime performs (SEG-064-T004: observed as 20x-1600x differences in a handful of poll loops, with identical resulting state).
+- The CDD 75 Hz clock ticks at its exact instant; GPGX processes it at line boundaries (SEG-064-T004: the reference had processed one tick
+  more at the same main instruction).
 - BIOS-image profile (SEG-064-T003): VDP DMA has no duration - a fill or 68K->VDP transfer completes at its arming write, so a guest
   poll for DMA completion iterates once (the reference's fill takes time: observed as the only per-address execution-count difference
   up to the sub release, ADR 0143). The vertical-blank onset is the Genesis runtime's NTSC schedule from machine time 0.
@@ -356,7 +377,9 @@ Items marked **G** above are implemented as GPGX behaves; they stay here until h
 | open-bus read values | the prefetched instruction word; not modelled in the synthetic profile (typed stop `open_bus_read`); the BIOS-image profile uses GPGX's model where the prefetch position is exact (section 16), V1 (GPGX; hardware bus capacitance agrees for the cases used) | hardware test of open-bus reads (empty slot, BUSACK unused bits) | SEG-065 |
 | H-INT vector register `$A12006` (BIOS-image profile: the boot ROM's `$72` word) | GPGX writes the ROM copy's `$72` word; one source in reach | MAME `megacd.cpp` H-INT vector handling or a hardware test | SEG-064 |
 | VDP vertical-interrupt pending rule (G: pending at every onset, requested while IE0, cleared by the acknowledge) | GPGX `vint_pending`; the repository Genesis runtime raises it only while IE0 is set | hardware test (enable IE0 inside VBlank) | SEG-064 |
-| VDP DMA duration and the Word-RAM/PRG DMA source (BIOS-image profile: no duration; Word RAM/PRG sources a typed stop) | GPGX models both (Word RAM transfers lag one word) | MiSTer logs / GPGX `vdp_dma_68k` comparison | SEG-064 |
+| VDP DMA duration and the Word-RAM/PRG DMA source (BIOS-image profile: no duration; 2M Word RAM owned by main is read as plain memory since SEG-064-T004; 1M, sub-owned and PRG-window sources a typed stop) | GPGX models both (Word RAM transfers lag one word) | MiSTer logs / GPGX `vdp_dma_68k` comparison | SEG-064: the authentic boot path reaches the handoff with identical state without a duration; carried forward |
+| stopwatch byte accesses and byte-write semantics (G: typed stop) | GPGX: "(word access only ?)" and its byte path is an artefact of its register file | hardware test | SEG-065 |
+| graphics ASIC: 1M Word RAM operation, byte accesses, parameter reads, the font registers (typed stops); line cost `3 * (4 + 2W + ((W + off + 3) >> 2))` sub cycles (G) | one source (GPGX `gfx.c`; its comment cites MiSTer logs) | MiSTer logs / hardware test | SEG-065 |
 | CDD seek latency, command checksum handling, decoder active period (G) | GPGX models them (latency is a configurable approximation); MAME differs | logic-analyser logs (MiSTer `mcd logs`) | SEG-065 |
 | decoding a non-data block from a raw image | GPGX's raw path differs from its cooked path; the profile uses the cooked behaviour (section 7) | hardware: what the CDC writes for a seek-time block | SEG-063: not resolvable without hardware access; carried forward |
 | system-header longwords `$38/$3C/$40-$4C` | one primary source in reach of this cloud | read the Mega-CD Disc Format specification and the Sega CD BIOS manual directly | SEG-064 |
@@ -397,6 +420,9 @@ synthetic post-BIOS profile.
 | images | the BIOS image (`immutable_input`, unguarded), declared verbatim ROM copies (`static_proof`), sub runnable-epoch images (`bounded_build_time_materialization`); each admitted by broad AOT over every aligned start; RAM images verified per instruction | C (ADR 0142) |
 | sub runnable epoch | the sub's first runnable transition after a reset (`SRES` 0 -> 1 with `SBRQ` = 0, or `SBRQ` 1 -> 0 after such a reset); live PRG RAM `[0, E)` (E: last non-zero byte rounded up to 256) must equal an admitted epoch image, else `materialized_image_unverified` before the sub retires anything; the sub's reset exception (vector fetch) is taken there, from the verified bytes | rule C; the fetch timing U (GPGX fetches at the `SRES` write; differs only when the reset is released with the bus requested) |
 | overlapping RAM images | per-PC variants, one per distinct instruction; a variant runs only when all its bytes are live; else `code_bytes_mismatch` | C |
+| disc images (SEG-064-T004) | `--disc-image main\|sub:<track-1 byte offset>:<base>:<length>`: an extent of the verified disc's track 1 (cooked 2048-byte blocks; the 32 KiB system area is offsets 0-$7FFF) read at build time through the disc reader and mapped at `<base>` of the processor's RAM (main work RAM or sub PRG RAM) as an `immutable_input` image with per-instruction byte identity; at most 4; the extents are part of the program identity (bytes digested), so another disc or another declaration is another program; an extent the program never finds in RAM never runs | C (authority: the disc identity is verified at start-up and every instruction's bytes are compared before it runs; ADR 0144) |
+| application entry (SEG-064-T004) | `--application-entry <address>`: the first main-processor instruction start at that address (24-bit) ends the run with the typed stop `application_handoff` before the instruction runs; the entry is part of the program identity; absent (0) = no boundary. It is a build input, never a runtime constant: the authentic US Model 1 boot area is entered at its base by the BIOS, runs a three-instruction region stub that calls the BIOS and branches to the application IP after the $584-byte US security block (ADR 0141), so the IP entry of that arrangement is base + $584 | C; the $584 offset V1 (SEG-064-T001 reference) |
+| 24-bit program counter | the generated dispatch masks the processor's pc to 24 bits (the 68000 address bus): a jump through a sign-extended address such as `$FFFFxxxx` selects the compiled entry at `$00FFxxxx` | V2 (UM68K) |
 | operand templates | `JMP (xxx).W/.L` admitted from a build-pass RAM frontier: opcode word guarded, operand read live, destination an even compiled entry of the processor, else `entry_not_compiled` | C |
 | main Genesis devices (SEG-064-T003, ADR 0143) | `$A00000-$A0FFFF` Z80 RAM, `$A10000-$A1001F` I/O, `$A11100`/`$A11200` Z80 BUSREQ/RESET, `$C00000-$C0001F` VDP (PSG at `$C00011`, HV counter) are the Genesis runtime device host's, its master clock = machine time / 500,000 ticks; version register bit 5 (DISK) reads 0; an I/O word read returns the register byte on both lanes; BUSACK's other bits are open bus; unsupported shapes stop `main_device_unsupported` | version bit V2 (GTO1, GPGX `io_reset`); BUSACK bits V1 (GPGX); routing C |
 | Z80 | never executed: BUSREQ/RESET and RAM writes only; once the Z80 has been runnable, a main read of the Z80 area stops `main_device_unsupported`; what a running Z80 would do through its 68000 bank window is not modelled (recorded deviation) | C |
@@ -405,4 +431,42 @@ synthetic post-BIOS profile.
 | H-INT vector `$A12006` | word register (initial `$FFFF`): written by main, read back; the level-4 autovector is `$FFFF:<register>`; reads of BIOS `$70`/`$71` return `$FFFF` and of `$72`/`$73` the register | V1 (GPGX `scd_reset`, `mem68k.c`; section 13) |
 | open bus | a main read nothing answers (empty cartridge slot `$400000-$7FFFFF`, unused areas) returns the instruction-stream word at the prefetch position (byte by A0; both halves of a long), stated per generated instruction where exact; otherwise, for the sub and in the synthetic profile `open_bus_read`; empty-slot writes are ignored | V1 (GPGX `m68k_read_bus_8/16`, section 13) |
 | exception into uncompiled RAM | the handler is entered and the dispatch stops `entry_not_compiled` at its PC (a build-pass RAM frontier, ADR 0142 decision 7) | C (ADR 0143 decision 9) |
-| not modelled in this profile yet | sub-side boot hardware, the H-interrupt line counter, Z80 execution, Word-RAM VDP DMA, everything after the sub epoch that ADR 0141 inventories; gate G-A | - |
+| sub-side boot hardware (SEG-064-T004) | the stopwatch, PCM write state, graphics ASIC with its level-1 interrupt, the CDD TOC/seek/pause/resume/jump commands and the CDC host-data transfer (sections 7, 8 and 17); 2M Word RAM owned by main as a VDP DMA source | G; C for the routing |
+| not modelled in this profile yet | the H-interrupt line counter, Z80 execution, 1M/sub-owned Word RAM VDP DMA, PCM sound and register reads, the font registers, CD-DA, everything after the application handoff | - |
+
+## 17. Sub-side boot hardware (SEG-064-T004, ADR 0144)
+
+The devices the authentic BIOS reaches between the sub's runnable epoch and the application handoff. All are shared by both
+profiles. Sources: Genesis Plus GX (`core/cd_hw/scd.c`, `gfx.c`, `pcm.c`, `cdd.c`, `cdc.c`), consulted only; expectations in the tests are
+derived by hand (`tests/tools/sega_cd_subside_table.c`, the `subside` fixture) and, for the graphics operation, from an independent
+geometric oracle.
+
+**Stopwatch (`$FF800C`, word access).** A free-running 12-bit count of 384-sub-cycle units (30.72 us) on a grid anchored at power-on or at
+the last peripheral reset; a read returns `(units since the anchor - units at the last write) & $FFF`; any word write of any value clears
+the count and keeps the grid phase (G, GPGX `scd_write_word` case `$0C`: `scd.stopwatch += ticks * RATIO`). Byte accesses and word
+accesses at `$FF800D` are typed stops `gate_array_register_unsupported`. A read observes the machine time of its instruction (section 12).
+
+**PCM (`$FF0000-$FF7FFF`).** The area is decoded on /LDS only: a byte write at an odd address, or the low byte of a word write, reaches
+the chip at `(address >> 1) & $1FFF` (an even-address byte write is an unused-area write: dropped, counted). Chip offsets `$0-$8` are the
+registers (`ENV`, `PAN`, `FD` low/high, `LS` low/high, `ST` per channel; `CTRL` at 7: bit 6 selects the channel (bits 2-0), otherwise the
+wave RAM bank (bits 3-0), bit 7 the chip enable; `ON/OFF` at 8); other offsets below `$1000` are ignored; `$1000-$1FFF` is the selected
+4 KiB bank of the 64 KiB wave RAM. State is stored only; no sound is generated. Every read (channel address pointers need running
+channels; the RAM read path is unverified) is the typed stop `pcm_unsupported` (G, GPGX `pcm_write`).
+
+**Graphics ASIC (`$FF8058-$FF8066`, word access, 2M Word RAM only).** `$58` control (bit 0 map repeat; bits 2-1 size: 0 = 16x16-dot stamps in a 16x16-stamp map (256x256 dots), 1 = 32x32-dot stamps, 8x8-stamp map (256x256 dots), 2 = 16x16-dot stamps, 256x256-stamp map (4096x4096 dots), 3 = 32x32-dot stamps, 128x128-stamp map (4096x4096 dots); bit 15 reads busy); `$5A` stamp map base (words, `<< 2`
+masked by the map size); `$5C` image buffer height in cells - 1 (bits 4-0); `$5E` image buffer start (`<< 3` dots, bits 18-6) and `$60`
+horizontal dot offset (bits 5-0); `$62` image width in dots (bits 8-0); `$64` height in lines (low byte, counting down); `$66` trace
+base (`<< 2`): the write starts the operation. Per line the ASIC reads four trace words (start x, start y in 13.3, steps in 5.11), then
+for each dot samples the stamp map at the position (a map entry holds the stamp number in bits 10-0 and HFLIP/ROLL1/ROLL0 in bits 15-13,
+applied in that order; stamp 0 is not used and draws 0; outside the map the dot is 0 unless the map repeats), reads the stamp's 4-bit
+pixel (a stamp's four/sixteen 8x8 cells are stored column-major, pixels row-major, two per byte, the left in the high nibble), combines
+it with the buffer dot by the priority mode (`PM1:PM0` of `$FF8003`: 0 replace, 1 underwrite, 2 overwrite, 3 keep) and writes it; the
+image buffer is cells of 64 dots in columns of `(height + 1)` cells. The operation takes `3 * (4 + 2W + ((W + off + 3) >> 2))` sub cycles
+per line (W the width, off the dot offset; 3 cycles per Word RAM access: GPGX counts sub time in units of 4 per cycle), runs only while
+the sub owns 2M Word RAM (it halts, with its clock following the machine, while main owns it, and resumes from the hand-over), is brought
+up to date at every observation point (a Word RAM access, an ownership change, a register access) and ends `max(lines - 1, 0) * line + 1`
+ticks after its base with the busy bit clear and, with `IEN1` set, sub level 1 pending (acknowledged at acceptance). Starting in 1M mode,
+byte accesses, reads of the parameter registers and the font registers are typed stops. The peripheral reset abandons a running operation.
+
+**Handoff boundary.** In the BIOS-image profile the run ends at the application entry named at build time (section 16) with
+`application_handoff`.

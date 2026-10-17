@@ -118,6 +118,37 @@ static uint32_t oracle_pixel(uint16_t map[16][16], int64_t x, int64_t y, int rep
   return (entry & 0x7FFU) == 1U ? (uint32_t)stamp16[v][u] : 0U;
 }
 
+/* 32x32-dot stamps (control size 1): a stamp is 16 cells in column-major order (cell = cy + 4 * cx); bits 1-0 of the stamp number are
+ * ignored, so a stamp number n holds its bitmap at n & ~3. The map is 8x8 stamps (256x256 dots). */
+static uint8_t stamp32[32][32];
+
+static void store_stamp32(uint32_t number, uint8_t bitmap[32][32]) {
+  uint32_t x, y;
+  for (y = 0; y < 32U; ++y)
+    for (x = 0; x < 32U; ++x) {
+      const uint32_t index = (number << 8) | (((y / 8U) + 4U * (x / 8U)) << 6) | ((y % 8U) * 8U + (x % 8U));
+      uint8_t *byte = &m->word_ram[index >> 1];
+      if (index & 1U) *byte = (uint8_t)((*byte & 0xF0U) | (bitmap[y][x] & 0x0FU));
+      else *byte = (uint8_t)((*byte & 0x0FU) | ((bitmap[y][x] & 0x0FU) << 4));
+    }
+}
+
+static uint32_t oracle_pixel32(uint16_t map[8][8], int64_t x, int64_t y, int repeat) {
+  int64_t dx = x >> 11, dy = y >> 11;
+  uint32_t entry, u, v, t, bits;
+  if (repeat) { dx &= 255; dy &= 255; }
+  else if (dx < 0 || dy < 0 || dx > 255 || dy > 255) return 0U;
+  entry = map[dy >> 5][dx >> 5];
+  if ((entry & 0x7FCU) == 0U) return 0U; /* bits 1-0 of the number are ignored; the number 0 draws nothing */
+  u = (uint32_t)(dx & 31);
+  v = (uint32_t)(dy & 31);
+  bits = (entry >> 13) & 7U;
+  if (bits & 4U) u = 31U - u;
+  if (bits & 2U) { u = 31U - u; v = 31U - v; }
+  if (bits & 1U) { t = u; u = 31U - v; v = t; }
+  return (entry & 0x7FCU) == 4U ? (uint32_t)stamp32[v][u] : 0U;
+}
+
 static uint32_t buffer_pixel(uint32_t start_dots, uint32_t cells_tall, uint32_t x, uint32_t y) {
   const uint32_t index = start_dots + (x / 8U) * cells_tall * 64U + (y / 8U) * 64U + (y % 8U) * 8U + (x % 8U);
   const uint8_t byte = m->word_ram[(index >> 1) & 0x3FFFFU];
@@ -349,6 +380,53 @@ int main(void) {
           row(same && m->gfx.busy == 0U && m->gfx.operations == 1U && nonzero != 0U, label);
         }
       }
+    }
+
+    /* -- 32x32-dot stamps against the oracle: the stamp number's bits 1-0 are ignored (an entry of 5 draws stamp 4) -- */
+    {
+      static const struct { const char *label; uint32_t entry_bits; int repeat; int32_t start; } cases32[] = {
+          {"32x32 stamps: identity, entry number 5 reads stamp 4 (bits 1-0 ignored)", 0U, 0, 0},
+          {"32x32 stamps: half turn and flip (entry bits 6)", 6U, 0, 0},
+          {"32x32 stamps: quarter turn, repeated map, start left of it", 1U, 1, -48 * 8},
+      };
+      uint32_t c;
+      for (c = 0; c < sizeof cases32 / sizeof cases32[0]; ++c) {
+        uint16_t map8[8][8];
+        int same = 1;
+        uint32_t px, py, bad = 0U, nonzero = 0U;
+        for (y = 0; y < 32U; ++y)
+          for (x = 0; x < 32U; ++x) stamp32[y][x] = (uint8_t)(((x * 7U + y * 3U) % 15U) + 1U);
+        for (y = 0; y < 8U; ++y)
+          for (x = 0; x < 8U; ++x) map8[y][x] = (uint16_t)(5U | (cases32[c].entry_bits << 13));
+        fresh();
+        m->ga.mode = 0U;
+        store_stamp32(4U, stamp32);
+        for (y = 0; y < 8U; ++y)
+          for (x = 0; x < 8U; ++x) {
+            m->word_ram[0x20000U + 2U * (y * 8U + x)] = (uint8_t)(map8[y][x] >> 8);
+            m->word_ram[0x20000U + 2U * (y * 8U + x) + 1U] = (uint8_t)map8[y][x];
+          }
+        for (i = 0; i < 40U; ++i) put_trace_line(0x30000U, i, (uint32_t)cases32[c].start & 0xFFFFU, (uint32_t)(cases32[c].start + (int32_t)i * 8) & 0xFFFFU, 0x0800, 0);
+        m->now = 5000U;
+        gfx_registers((cases32[c].repeat ? 0x0001U : 0x0000U) | 0x0002U, 0x8000U, 4U, BUFFER_ORIGIN_REG, 0U, 40U, 40U); /* 5 cells tall */
+        sub_write(0x66U, 2U, 0xC000U);
+        run_devices_until(5000U + 40U * 3U * (4U + 80U + ((40U + 3U) >> 2)) * SCD_SUB_CYCLE_TICKS + 10U);
+        for (py = 0; py < 40U; ++py)
+          for (px = 0; px < 40U; ++px) {
+            const int64_t xpos = (int64_t)cases32[c].start * 256 + (int64_t)px * 0x0800;
+            const int64_t ypos = (int64_t)(cases32[c].start + (int32_t)py * 8) * 256;
+            const uint32_t expected = oracle_pixel32(map8, xpos, ypos, cases32[c].repeat);
+            if (buffer_pixel(BUFFER_DOTS, 5U, px, py) != expected) { same = 0; ++bad; }
+            if (expected) ++nonzero;
+          }
+        {
+          char label[240];
+          snprintf(label, sizeof label, "graphics oracle: %s (%u of 1600 dots drawn, %u mismatching)", cases32[c].label, nonzero, bad);
+          row(same && nonzero != 0U && m->gfx.operations == 1U, label);
+        }
+      }
+      for (y = 0; y < 16U; ++y)
+        for (x = 0; x < 16U; ++x) stamp16[y][x] = (uint8_t)(((x * 3U + y * 5U) % 15U) + 1U);
     }
 
     /* -- literal hand-derived: a half-turn map entry puts the stamp's opposite corner first; stamp 0 draws nothing -- */
