@@ -4,7 +4,7 @@
   M68K corpus with independent instruction-start labels is available to the project. This is not evidence for or against
   transfer. No model, budget or admission rule changes; the frozen Genesis gen2 M3 (+B35) is not applied to Sega CD images.
 - Related: ADR 0131 (ML reuse boundary and evidence gate), ADR 0103 (model lifecycle), ADR 0124 (evidence-unavailable precedent),
-  ADR 0132.
+  ADR 0132. Follow-up run on a user-supplied disc: ADR 0140 (SEG-063-T003).
 
 ## Pre-registration (fixed before any result)
 

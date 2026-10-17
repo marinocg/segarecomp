@@ -1,7 +1,10 @@
-# ADR 0136: SEG-063-T003 frozen M3 transfer on source-backed Sonic CD modules
+# ADR 0140: SEG-063-T003 frozen M3 transfer on source-backed Sonic CD modules
 
-- Status: **Pre-registered** (this section is committed before any benchmark result is computed; results are appended below it
-  without editing it).
+- Status: Accepted. **Outcome: `EVIDENCE_UNAVAILABLE`** (missing prerequisite: a measured compile-size/time problem the transfer
+  would address). Finding: the frozen M3 does not keep complete recall at B35 on Sega CD modules (`C outside R = 306` in 3 of 36
+  modules), so it is not adopted; static traversal stays the only Sega CD discovery and no retraining design is specified.
+- The pre-registration below was committed in `bbaa61e` (as ADR 0136, renumbered to 0140 for a number collision with no text
+  change) before any benchmark result was computed; the results are appended after it.
 - Related: ADR 0133 (the benchmark question, closed outcomes and retraining gate this record runs), ADR 0131 (ML reuse boundary),
   ADR 0132 (module lists), ADR 0099 (source-backed label method), ADR 0100/0101/0102/0109 (frozen gen2 M3 + B35), ADR 0103.
 
@@ -26,3 +29,59 @@ below are recorded.
 | gates | **G_recall**: `C outside R = 0` on every module of the subset. **G_select**: `R/image <= 0.60` on every module of at least 8 cells. **P** (cost problem): some module's one-module baseline program exceeds 32 MiB of generated C or 120 s of native compile |
 | outcomes | `TRANSFER_ADEQUATE` iff G_recall and G_select. `TRANSFER_INADEQUATE_RETRAIN_JUSTIFIED` iff not (G_recall and G_select) and P; then a retraining design is specified, never run. If not (G_recall and G_select) and not P, retraining is not justified and the record closes `EVIDENCE_UNAVAILABLE` naming the missing prerequisite "a measured compile-size/time problem the transfer would address" (ADR 0133: the benchmark matters only then), with the transfer failure stated as the finding. An empty subset closes `EVIDENCE_UNAVAILABLE` naming the failed prerequisite |
 | not decided here | adoption (ADR 0131 point 3) additionally needs recall improvement over static traversal and a measured zero count of behaviour-changing false admissions through a Sega CD R-admission path; no such path exists (ADR 0131/0133: static traversal is the only Sega CD discovery) and building one is out of scope, so the M3 arm's admitted set, its behaviour-changing false admissions and its compile size/time are **not measurable** here and are not claimed. Static traversal and deterministic admission stay the correctness authority; the default build output is unchanged |
+
+## Results (two full passes; every non-timing figure identical between them)
+
+Inputs and source identity:
+
+| item | result |
+|---|---|
+| disc | the original CUE loads (35 tracks, 34 audio tracks with stored `INDEX 00` pregaps; identical output of two inspections); ISO9660 resolves 131 root files; boot IP/SP produced |
+| source build | 44 of 44 built disc files byte-identical to the disc (the bundled toolchain, `REGION=1`; one file additionally needs the project's own Z80 driver step); the built SP equals the disc's SP extent up to its zero padding; the built IP differs from the disc's IP extent (boot image, outside the module subset) |
+| labels | 37 matched files yield a label universe, each extracted twice with identical digests (the remaining matched file is data only and its build step writes no listing); 96,276 instruction starts in the admitted subset |
+| exclusions (typed) | `size_invalid` x6 (sub-CPU PCM drivers of odd byte size; the label tool rejects the same images as `rom_size`); `mapping_outside_executable_ram` x1 (a copy MMD whose header precedes Work RAM) |
+| subset | 36 modules, 36 distinct digests. main 24: 6 in-place Word RAM programs (>= 128 KiB), 18 Work RAM copy programs (4-32 KiB); sub 12: 3 PCM drivers (>= 128 KiB), 9 programs (5 < 4 KiB, 2 4-32 KiB, 1 32-128 KiB, 1 >= 128 KiB) |
+| parity | the recomputed B35 selection equals the native command's `selected_cells_sha256` on all 36; every declared root is a labelled start |
+
+Static traversal (baseline) and the R stage:
+
+| group | modules | labels | static recall | `C outside R` (modules) | `C outside ML` (modules) | static misses recovered by `R` | `R/image` max (>= 8 cells) |
+|---|---|---|---|---|---|---|---|
+| all | 36 | 96,276 | 0.127 | **306 (3)** | 821 (7) | 83,716 of 84,022 | 0.397 |
+| main | 24 | 89,465 | 0.098 | 306 (3) | 547 (3) | 80,421 of 80,727 | 0.397 |
+| sub | 12 | 6,811 | 0.516 | 0 | 274 (4) | 3,295 of 3,295 | 0.381 |
+| main Word RAM in place | 6 | 73,596 | 0.012 | 0 | 0 | all | 0.350 |
+| main Work RAM copy | 18 | 15,869 | 0.494 | 306 (3) | 547 (3) | 7,725 of 8,031 | 0.397 |
+| sub PCM driver | 3 | 1,974 | 0.739 | 0 | 0 | all | 0.351 |
+| sub program | 9 | 4,837 | 0.426 | 0 | 274 (4) | all | 0.381 |
+
+- Every module has static misses (their causes were not classified here); no statically reached start is outside the labels (an independent corroboration of the labels in
+  the other direction), and no reached instruction is unsupported.
+- Diagnostics, not selections (32 modules of >= 8 cells): FRF mean 0.21, median 0.18, worst 0.95. Of the 3 failing modules, 2
+  hold code in 42-44 % of their cells, above the 35 % budget, with the code cells ranked first (FRF within 0.02 of the code-cell
+  fraction): a budget-bound miss; 1 is a ranking miss (one code cell ranked at 0.95). 31 of 32 modules have FRF <= 0.60.
+- Candidate false admissions inside `R` (even offsets the CPU-owned decoder accepts and that are not labels): 287,921, of which
+  53,011 lie inside a labelled instruction. A precision signal of an `R`-wide admission, not a behaviour claim (no Sega CD
+  `R`-admission path exists; see "not decided here").
+
+Build cost of the baseline (one-module programs, `cc -O1`, median of 3): at most 1.09 MiB of generated C (boot-only program
+13 KiB), at most 2.7 s of native compile (boot-only 0.03 s) and at most 5.9 s of emission, of which about 5.7 s is the boot-only
+route itself (disc identity hashing). P is false by two orders of magnitude.
+
+Gates: G_recall **fails** (306 in 3 modules), G_select passes, P false. By the pre-registered table the outcome is
+`EVIDENCE_UNAVAILABLE`, missing prerequisite "a measured compile-size/time problem the transfer would address"; retraining is not
+justified and no design is specified. The default build output is unchanged.
+
+Typed admission findings on the real disc (recorded, not fixed here): beyond the exclusions above, one list holding every admitted
+module is `too_many_modules` (36 > 32), and the 18 copy programs sharing one Work RAM address are `too_many_candidates` for one
+overlay group (> 16); the 6 in-place Word RAM programs sharing `$200000` emit as one overlay group. A copy MMD is executed without
+its 256-byte header, so its whole-file mapping at `origin - $100` (the source's own assembly address) cannot become live at run time
+under whole-range liveness; that needs a sub-range mapping in the list (ADR 0132 "a later list refinement"). The benchmark is
+build-time only and is unaffected.
+
+Instrument note: a first aggregation used a symbol pattern that missed upper-case hexadecimal function names; it disagreed with
+the emitter's own per-image counts and was discarded before interpretation. The measured runs assert that the parsed reached set
+equals the emitter's compiled plus unsupported count for every module.
+
+Limitations: one title (Sonic engine lineage shared with the M3 training title Sonic 1); files are variants of a few programs, so
+per-module counts are not independent samples; the `R`-stage is the only measured model stage.
