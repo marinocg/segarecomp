@@ -30,8 +30,11 @@ file, the build cache or the product: no placeholder values.
   favorite, platform, build state and ROM link health, one sentence of what matters now, and the two dominant actions **Play** (only for an executable whose
   identity matches the configuration exactly) and **Build / Recompile / Rebuild / Try again** (a missing ROM makes **Locate ROM** the primary action instead).
   Rarer actions are in **More**: build log, open build folder, manage storage, change/remove cover, find cover online, copy SHA-256, locate ROM and (set
-  apart) remove from library. The **Build Configuration** card follows: **Build mode** (Compatibility | Optimized; for Genesis an **Experimental model** checkbox appears right under the Optimized tile while
-  Optimized is selected) and, for Genesis, the **console region**
+  apart) remove from library. The **Build Configuration** card follows: **Build mode** (Compatibility | Optimized; **Optimized is the default** for newly imported Genesis and Master System games: Genesis Optimized is the
+  former Optimized + Experimental model request (`--aot-policy optimized --aot-model gen2`), and there is no model checkbox; Master System Optimized is its own
+  product policy, offered only when the product states it is available, otherwise the game builds as Compatibility and the card says so, without rewriting the
+  stored Optimized intent. An explicit Compatibility selection is kept, and a legacy Optimized/v1 Genesis record takes the new gen2 meaning and needs a rebuild)
+  and, for Genesis, the **console region**
   (USA NTSC | Japan NTSC | Europe PAL, applied at launch, never a rebuild; PAL still runs on the 60 Hz schedule), or for Master System the **cartridge
   mapper** (nothing preselected, never guessed; a sidecar manifest declares it) and the one console profile. A state line says what the executable on disk
   actually is (from `status.json`: effective policy and any Optimized fallback), whether the selection matches it, and when a mode switch left the other
@@ -40,10 +43,25 @@ file, the build cache or the product: no placeholder values.
   log. A **storage** rail shows the game's measured footprint (native executable, generated C, objects, logs, metadata, other build files) with *Clean
   intermediates* and *Manage storage*; for a metadata-only game it says the history is kept and a new build is needed to play.
 * **Status** is computed from the build identity, never from a title: *Ready*, *Not built*, *Metadata only* (you removed the build on purpose; "rebuild
-  required"), *Needs rebuild* (made by another release or option set, or a build mode whose executable is not built yet; never started), *Build failed*, plus a *ROM missing* badge. Play is offered only for a build
-  whose identity matches exactly.
+  required"), *Needs rebuild* (made by another release or option set, or a build mode whose executable is not built yet; never started), *Build failed*, plus a *ROM missing* badge. Play is offered for a build
+  whose identity matches exactly, and for one more case: *Playable (older build)* (below).
+* **Playing a build from an earlier release.** Updating Segarecomp changes the build identity (the product tool, release and install path are part of it), which
+  used to force a recompile before anything could be played. The exact identity is still what decides whether generated output may be *reused* by a new build,
+  but a finished executable can additionally be *played* when the launcher can establish from the build's own records that it still runs here: a real build
+  folder inside the cache with an executable and a successful `status.json`; `metadata.json` that names this library ROM (SHA-256), the platform, this operating
+  system and processor and, for Master System, the same declared mapper and profile; a complete recorded policy for the *same mode* (Compatibility/Optimized) the
+  game requests now (an Optimized build keeps being reported with its own model, e.g. v1, never relabelled as the new gen2); an H-interrupt discovery setting that
+  matches; an installed SDL3 library; and the host-interface marker `runtime_contract` (recorded by every new build; bumped only when a change would stop an
+  already built program from running). Builds made before the marker existed are accepted only from the explicitly listed release (`0.5.0`); a version number
+  alone proves nothing. Everything else fails closed: the game shows *Needs rebuild* with the reason. A playable earlier build shows *Playable (older build)*,
+  keeps **Play** as the main action, shows what it actually is, and **Recompile** is an independent action that is never queued automatically. A cancelled or
+  failed recompile, or a moved ROM file, leaves the earlier build playable. A voluntary recompile builds into the current identity with the usual atomic
+  publication; afterwards the usual "keep old build artifacts" setting decides whether the earlier folder is removed. ADR 0138 records the rules.
 * **Build** shows the real `@stage` messages (analyze, generate, compile, link) and the tail of the build log. There is no percentage because the
-  build tool reports none, and no Cancel because killing a build mid-way is not safe (closing the window waits for it).
+  build tool reports none. **Cancel build** (Details, and the game's menu) stops the running build: the build tool and every compiler process it started are shut down, the
+  attempt's own `.partial` folder is removed, no *Build failed* state or `.failed` diagnostics are created, and an earlier completed build of the game stays playable. A cancel that
+  arrives after the build has been published or has failed is refused (that outcome stands). A *queued* game is removed with **Unqueue** / *Remove from build queue*; it has
+  started nothing. Closing the window still waits for a running build.
 
 ## Where data lives
 
@@ -91,6 +109,13 @@ Never touched: original ROMs, ROM copies extracted from ZIP archives (`library/r
 refused while a build or game runs (one busy guard). Settings > Build & Runtime offers an **automatic policy** after a successful build: never,
 remove intermediates, keep the newest N playable games (older ones are reduced to metadata only; favorites, running games and the game being built
 are excluded) or a soft limit that only reminds you. The default is *never*.
+
+**First run.** A genuinely new profile (no settings, library or viewer-settings file yet) is asked once, in a modal that is operable by keyboard and gamepad
+(focus starts on the first choice, Esc/East decides later), whether to **Keep intermediates** (policy *never*) or **Remove after builds** (policy *remove
+intermediates*). The choice writes the same cleanup policy Settings > Build & Runtime edits, together with a one-time `intermediates_choice_made` marker in
+`launcher-settings.json`; the marker is written only when the file was saved (a failed save keeps the question open). Existing profiles, including a
+settings file written before the marker existed, are never asked and keep their policy; restoring launcher defaults never re-asks. Scripted windows
+(GUI scripts, screenshots, autoplay) skip the question unless `SEGARECOMP_GUI_ONBOARDING=1` (new profiles) or `=always` (test seam) is set.
 
 ## Covers and metadata provider
 
@@ -146,6 +171,14 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
 Environment variables the launcher sets for the game: `SEGARECOMP_LAUNCHED`, `SEGARECOMP_VIEWER_SETTINGS`, `SEGARECOMP_ROM_SHA256`, `SEGARECOMP_GAME_TITLE`,
 and (Genesis) `SEGARECOMP_GENESIS_REGION`. Unchanged: `SEGARECOMP_VIEWER_UNTHROTTLED`, `SEGARECOMP_VIEWER_SLICE`, `SEGARECOMP_VIEWER_MUTE`, the Master System
 `--viewer-*` options including `--viewer-record`.
+
+## Operating the launcher with a gamepad only
+
+Every ordinary journey (first-run setup, import, browse, game page, build / cancel / queue, play, Storage, Settings) can be completed with an SDL gamepad and no mouse
+or keyboard: D-pad/stick move focus, **A** activates, **B** goes back, **Y** opens the focused game's menu, D-pad Right/Left hop between the sidebar and the page, and a
+hint line shows these buttons while a controller is the last input device. Importing or locating a ROM and choosing a cover use a built-in, root-confined file picker
+when a controller was the last input device (the native OS dialog stays for mouse and keyboard, and is the fallback's alternative when no system chooser exists).
+Details, the automated journeys and a manual smoke walk are in `docs/testing/launcher-gamepad-navigation.md`; ADR 0139 records the decisions.
 
 ## Controller input
 
@@ -210,4 +243,4 @@ python3 tools/launcher_visual_capture.py --launcher <staged-package>/Segarecomp 
 Remaining differences from the concepts, with reasons: long pages still scroll at the minimum size and below the Details configuration (provenance is
 secondary by design); there are no invented compatibility ratings, build percentages, storage figures or bundled commercial covers. Cover
 downloads happen only on an explicit request (see *Covers and metadata provider*). **SDL_GPU is not implemented**; SDL_Renderer remains the presenter.
-**Audio device selection is not implemented**. **Build cancellation is not implemented**; no Cancel button is offered and closing waits for the build.
+**Audio device selection is not implemented**. Cancelling a build is implemented (see *Build*); closing the window still waits for a running build.

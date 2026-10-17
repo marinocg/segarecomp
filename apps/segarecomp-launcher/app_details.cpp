@@ -76,6 +76,7 @@ std::string App::build_action_label(const StatusInfo &info) const {
     case GameStatus::metadata_only: return "Rebuild";
     case GameStatus::failed: return "Try again";
     case GameStatus::stale: return "Recompile";
+    case GameStatus::playable_older: return "Recompile";
     case GameStatus::not_built: return "Build";
   }
   return "Build";
@@ -86,7 +87,7 @@ bool App::can_build(const LibraryEntry &entry, const StatusInfo &info) const {
   return !game_ && !is_building(entry.id()) && !is_queued(entry.id()) && !info.rom_missing && !mapper_needed;
 }
 
-bool App::can_play(const StatusInfo &info) const { return info.status == GameStatus::ready && !game_ && !maintenance_running_ && !(job_ && job_key_ == info.key); }
+bool App::can_play(const StatusInfo &info) const { return info.runnable() && !game_ && !maintenance_running_ && !(job_ && job_key_ == info.key); }
 
 void App::play(const std::string &id) {
   trace("play=requested title=" + (catalog_.find_id(id) != nullptr ? catalog_.find_id(id)->title() : std::string("?")));
@@ -116,8 +117,14 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
     if (menu_item(ctx_, "m_play", "Play", nullptr, ctx_.icon("play"), mw, can_play(info))) play(id);
     if (menu_item(ctx_, "m_build", build_action_label(info).c_str(), nullptr, ctx_.icon("reset"), mw, can_build(*entry, info))) { notices_.erase(id); request_build(id); }
     if (is_queued(id) && menu_item(ctx_, "m_unqueue", "Remove from build queue", nullptr, ctx_.icon("trash"), mw)) dequeue_build(id);
+    if (is_building(id) && menu_item(ctx_, "m_cancel_build", is_stopping(id) ? "Stopping build..." : "Cancel build", nullptr, ctx_.icon("close"), mw, !is_stopping(id))) cancel_build(id);
     if (menu_item(ctx_, "m_fav", entry->favorite ? "Remove from favorites" : "Add to favorites", nullptr, ctx_.icon("star"), mw)) { entry->favorite = !entry->favorite; save_catalog(); }
     menu_separator(ctx_, mw);
+  }
+  if (!include_details) {
+    // Details' own menu: the same two stop affordances, because the Details actions row shows no Build button while a build runs.
+    if (is_queued(id) && menu_item(ctx_, "m_unqueue", "Remove from build queue", nullptr, ctx_.icon("trash"), mw)) dequeue_build(id);
+    if (is_building(id) && menu_item(ctx_, "m_cancel_build", is_stopping(id) ? "Stopping build..." : "Cancel build", nullptr, ctx_.icon("close"), mw, !is_stopping(id))) cancel_build(id);
   }
   if (menu_item(ctx_, "m_logs", show_log_ && !include_details ? "Hide build log" : "View build log", nullptr, ctx_.icon("file"), mw)) { if (include_details) open_details(id); show_log_ = include_details ? true : !show_log_; }
   if (menu_item(ctx_, "m_folder", "Open build folder", nullptr, ctx_.icon("folder"), mw, fs::is_directory(info.entry, ec))) SDL_OpenURL(("file://" + u8s(info.entry)).c_str());
@@ -161,7 +168,9 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     dl->AddRect(a, b, col::glow, ctx_.u(5.0F), 0, std::max(1.0F, ctx_.u(1.5F)));
     const float bs = ctx_.u(26.0F);
     ImGui::SetCursorScreenPos(ImVec2(b.x - bs - ctx_.u(5.0F), b.y - bs - ctx_.u(5.0F)));
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);  // pointer shortcut over the cover art; a controller changes the cover from the game's menu (Change cover...)
     if (icon_button(ctx_, "cover_change", ctx_.icon("edit"), bs, false, true, "Change cover (local image)")) browse_cover(entry.id());
+    ImGui::PopItemFlag();
   }
   const float x0 = top.x + cover_w + ctx_.u(18.0F), tw = w - cover_w - ctx_.u(18.0F);
   float y = top.y;
@@ -212,12 +221,14 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
   {
     std::string line;
     ImU32 color = col::text2;
-    const std::string mode = entry.aot_policy == "optimized" ? "Optimized" : "Compatibility";
+    const std::string mode = selected_mode_label(entry);
     const bool mapper_needed = entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty();
     if (is_running) { line = running_label(game_report_, restarted_this_play_); color = col::ok; }
     else if (is_building) { line = "Recompiling with " + mode + ". This can take several minutes the first time."; color = col::warn; }
     else if (mapper_needed) { line = "Declare the cartridge mapper below before building."; color = col::warn; }
-    else if (info.rom_missing && info.status != GameStatus::ready) { line = "The ROM is not at its recorded location. Locate it to build."; color = col::warn; }
+    else if (info.status == GameStatus::playable_older) { line = "Playable: an earlier release built this game. Recompile is recommended, not required."; color = col::warn; }
+    else if (info.older.playable) { line = "The last build did not finish, but an earlier build is still playable."; color = col::warn; }
+    else if (info.rom_missing && !info.runnable()) { line = "The ROM is not at its recorded location. Locate it to build."; color = col::warn; }
     else if (info.status == GameStatus::ready) { line = "Ready to play. Last played " + fmt_relative(entry.last_played_at, std::time(nullptr)) + "."; color = col::text2; }
     else if (info.status == GameStatus::metadata_only) { line = "Build removed on purpose: history kept, a new build is needed to play."; color = col::info; }
     else if (info.status == GameStatus::failed) { line = "The last build failed. See the build log, then try again."; color = col::err; }
@@ -239,18 +250,35 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
       stage_chip(ctx_, dl, ImVec2(sx, y + ctx_.u(8.0F)), names[i], job_->stage(i), &cw);
       sx += cw + ctx_.u(6.0F);
     }
-    y += ctx_.u(8.0F) + ctx_.u(26.0F);
+    y += ctx_.u(8.0F) + ctx_.u(26.0F) + ctx_.u(10.0F);  // clear gap below the stage chips
+    // SEG-069-T001: the visible, focusable way to stop the running build. Disabled (and relabelled) while the attempt shuts down.
+    ImGui::SetCursorScreenPos(ImVec2(x0, y));
+    const bool stopping = is_stopping(entry.id());
+    const bool cancel_pressed = button(ctx_, "cancel_build", stopping ? "Stopping..." : "Cancel build", ImVec2(std::min(ctx_.u(180.0F), tw), bh), Style::secondary, !stopping, ctx_.icon("close"));
+    take_details_focus("cancel_build");
+    if (cancel_pressed) { details_refocus_ = ImGui::IsItemFocused() ? "build" : std::string(); details_refocus_ttl_ = 30; cancel_build(entry.id()); }
+    if (ImGui::IsItemHovered()) tooltip(ctx_, "Stop this build and discard its partial files. A previously built program is kept.");
+    y += bh;
   } else {
-    const bool locate_primary = info.rom_missing && info.status != GameStatus::ready && !entry.rom_paths.empty();
+    const bool locate_primary = info.rom_missing && !info.runnable() && !entry.rom_paths.empty();  // a playable build needs no ROM: Play stays primary
     const float play_w = std::min(ctx_.u(150.0F), (tw - ctx_.u(16.0F)) * 0.36F), build_w = std::min(ctx_.u(148.0F), (tw - ctx_.u(16.0F)) * 0.36F), more_w = std::min(ctx_.u(96.0F), tw - play_w - build_w - ctx_.u(16.0F));
     if (locate_primary) {
       if (button(ctx_, "locate", "Locate ROM...", ImVec2(play_w, bh), Style::primary, true, ctx_.icon("folder"))) browse_locate(entry.id());
     } else if (button(ctx_, "play", is_running ? "Playing" : "Play", ImVec2(play_w, bh), Style::primary, can_play(info), ctx_.icon("play"))) play(entry.id());
     if (ImGui::IsItemHovered() && !can_play(info) && !locate_primary) tooltip(ctx_, info.status == GameStatus::ready ? "Wait for the running game or build to finish." : "No executable matches the current build configuration yet.");
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
-    const bool prominent_build = info.status != GameStatus::ready;
-    if (button(ctx_, "build", is_queued(entry.id()) ? "Queued" : build_action_label(info).c_str(), ImVec2(build_w, bh), prominent_build && !locate_primary ? Style::primary : Style::secondary, can_build(entry, info), ctx_.icon("reset"))) { notices_.erase(entry.id()); request_build(entry.id()); }
-    if (ImGui::IsItemHovered()) tooltip(ctx_, info.status == GameStatus::ready ? "Recompile the native program with the current configuration." : "Recompile with the configuration below.");
+    const bool prominent_build = info.status != GameStatus::ready && !info.older.playable;  // Play stays the dominant action while an earlier build is playable
+    if (is_queued(entry.id())) {
+      // SEG-069-T001: a queued game's build action is its way out of the queue (it owns no process or folder yet).
+      const bool unqueue_pressed = button(ctx_, "unqueue", "Unqueue", ImVec2(build_w, bh), Style::secondary, true, ctx_.icon("close"));
+      take_details_focus("unqueue");
+      if (unqueue_pressed) { details_refocus_ = ImGui::IsItemFocused() ? "build" : std::string(); details_refocus_ttl_ = 30; dequeue_build(entry.id()); }
+    } else {
+      const bool build_pressed = button(ctx_, "build", build_action_label(info).c_str(), ImVec2(build_w, bh), prominent_build && !locate_primary ? Style::primary : Style::secondary, can_build(entry, info), ctx_.icon("reset"));
+      take_details_focus("build");
+      if (build_pressed) { details_refocus_ = ImGui::IsItemFocused() ? "after_build" : std::string(); details_refocus_ttl_ = 30; notices_.erase(entry.id()); request_build(entry.id()); }
+    }
+    if (ImGui::IsItemHovered()) tooltip(ctx_, is_queued(entry.id()) ? "Remove this game from the build queue; nothing has been built yet." : info.status == GameStatus::ready ? "Recompile the native program with the current configuration." : "Recompile with the configuration below.");
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (button(ctx_, "more", "More", ImVec2(more_w, bh), Style::ghost, true, ctx_.icon("more"))) ImGui::OpenPopup("##details_more");
     if (ImGui::IsItemHovered()) tooltip(ctx_, "More: logs, build folder, storage, cover, remove");
@@ -262,7 +290,33 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
   ImGui::Dummy(ImVec2(w, 0.0F));
 }
 
+void App::take_details_focus(const char *id) {
+  if (details_refocus_.empty()) return;
+  if (--details_refocus_ttl_ <= 0) { details_refocus_.clear(); return; }
+  const bool mine = details_refocus_ == id || (details_refocus_ == "after_build" && (std::string(id) == "cancel_build" || std::string(id) == "unqueue"));
+  if (!mine) return;
+  ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+  ImGuiContext &g = *ImGui::GetCurrentContext();
+  g.NavCursorVisible = true;
+  g.NavHighlightItemUnderNav = true;
+  details_refocus_.clear();
+}
+
 // ---------------------------------------------------------------- B. build configuration
+
+// SEG-069-T005: one line naming exactly what an earlier release's executable is (its own recorded mode and model, never the current selection).
+static std::string older_build_description(const OlderBuild &older) {
+  std::string text = older.mode == "optimized" ? "Optimized" : "Compatibility";
+  if (older.mode == "optimized" && !older.model.empty()) text += older.model == "v1" ? " (v1 model)" : " (" + older.model + " model)";
+  text += older.version.empty() ? ", built by an earlier release" : ", built by Segarecomp " + older.version;
+  return text;
+}
+
+std::string App::selected_mode_label(const LibraryEntry &entry) const {
+  if (entry.aot_policy != "optimized") return "Compatibility";
+  if (entry.platform_id == "master-system" && !sms_probe_.valid() && !sms_optimized_available_) return "Compatibility";
+  return "Optimized";
+}
 
 float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float w) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -332,46 +386,45 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     ImGui::SetCursorScreenPos(ImVec2(cx, y));
     int sel = entry.aot_policy == "optimized" && probe.supports_optimized() ? 1 : 0;
     const bool optimized_offered = probe.supports_optimized();
-    const std::string compat_desc = "Broad, conservative recompilation. The default.";
-    const std::string opt_desc = !optimized_offered ? "Not offered by this product build for Master System."
-                                 : (sms ? "Experimental: may restart in Compatibility."
-                                        : "Selective AOT policy; may fall back to Compatibility.");
+    const std::string compat_desc = "Broad, conservative recompilation.";
+    const std::string opt_desc = !optimized_offered ? (sms_probe_.valid() ? "Checking Master System availability..." : "Not offered by this product build for Master System.")
+                                 : (sms ? "The default. Selective policy; may restart in Compatibility."
+                                        : "The default. Selective AOT policy; may fall back to Compatibility.");
     ImGui::BeginDisabled(busy_now);
     if (option_tiles(ctx_, "mode", {"Compatibility", "Optimized"}, {compat_desc, opt_desc}, &sel, ctl_w, tile_h, {true, optimized_offered})) {
       entry.aot_policy = sel == 1 ? "optimized" : "compatibility";
-      if (sel == 0) entry.aot_model = "v1";
+      entry.aot_model = sms ? "v1" : "gen2";
       changed = true;
     }
     ImGui::EndDisabled();
     y += tile_h + ctx_.u(8.0F);
-    // Genesis Optimized: the experimental model is part of the Optimized choice, so it sits right under the Optimized tile while Optimized is
-    // selected (never hidden in the Advanced section).
-    if (!sms && entry.aot_policy == "optimized" && probe.supports_optimized()) {
-      const float tile_w = std::floor((ctl_w - ctx_.u(8.0F)) / 2.0F), ox = cx + tile_w + ctx_.u(8.0F);
-      ImGui::SetCursorScreenPos(ImVec2(ox, y - ctx_.u(2.0F)));
-      bool experimental = entry.aot_model == "gen2";
-      ImGui::BeginDisabled(busy_now);
-      if (checkbox(ctx_, "model_exp", "Experimental model", &experimental)) { entry.aot_model = experimental ? "gen2" : "v1"; changed = true; }
-      ImGui::EndDisabled();
-      if (ImGui::IsItemHovered()) tooltip(ctx_, "The experimental Optimized model family: may admit different code and may fall back to Compatibility. Changes the build.");
-      if (ImGui::IsItemFocused()) focus_label_ = "Experimental model";
-      y += ctx_.u(30.0F);
+    // SEG-069-T002: no model choice is offered. Genesis Optimized is the former old Optimized + gen2 request, with no extra control.
+    if (sms && entry.aot_policy == "optimized") {
+      ImGui::SetCursorScreenPos(ImVec2(cx, y - ctx_.u(2.0F)));
+      if (sms_probe_.valid()) y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, ctl_w, "Checking whether this product build offers Optimized for Master System...") + ctx_.u(4.0F);
+      else if (!optimized_offered) y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::warn, ctl_w, "Optimized is the default, but this product build does not offer it for Master System, so this game builds as Compatibility.") + ctx_.u(4.0F);
     }
   }
   // what the executable actually is, versus what is selected
   {
-    const std::string selected = entry.aot_policy == "optimized" ? "Optimized" : "Compatibility";
-    const std::string other = entry.aot_policy == "optimized" ? "Compatibility" : "Optimized";
+    const std::string selected = selected_mode_label(entry);
+    const std::string other = selected == "Optimized" ? "Compatibility" : "Optimized";
     std::string text;
     ImU32 color = col::text2;
     const char *icon = "info";
     if (job_ && job_id_ == entry.id()) { text = "Building the " + selected + " executable..."; color = col::warn; icon = "reset"; }
     else if (info.status == GameStatus::ready && info.policy.present && info.policy.fallback) { text = "Optimized was requested; this executable fell back to Compatibility (see Build provenance)."; color = col::warn; icon = "warning"; }
     else if (info.status == GameStatus::ready) { text = "Executable built as " + (info.policy.present ? std::string(effective_mode(info.policy) == "optimized" ? "Optimized" : "Compatibility") : selected) + ": matches this selection, ready to play."; color = col::ok; icon = "check"; }
+    else if (info.status == GameStatus::playable_older) { text = "Playing an earlier build: " + older_build_description(info.older) + ". It keeps its own settings; Recompile applies this release and the " + selected + " selection."; color = col::warn; icon = "warning"; }
+    else if (info.older.playable) { text = "An earlier build is still playable (" + older_build_description(info.older) + "). The " + selected + " build can be retried with Recompile."; color = col::warn; icon = "warning"; }
     else if (info.other_mode_ready) { text = "No " + selected + " executable yet. Your " + other + " build is kept: switch back to play it, or Build."; color = col::warn; icon = "warning"; }
     else if (info.status == GameStatus::metadata_only) { text = "No executable (metadata only). Build to play with " + selected + "."; color = col::info; }
     else if (info.status == GameStatus::failed) { text = "The last " + selected + " build failed. Check the build log, then try again."; color = col::err; icon = "warning"; }
-    else if (info.status == GameStatus::stale) { text = "The stored build does not match this release or configuration. Recompile to apply " + selected + "."; color = col::warn; icon = "warning"; }
+    else if (info.status == GameStatus::stale) {
+      text = "Rebuild required: the stored build does not match this release or configuration" + (info.older.candidate_seen ? " and the earlier build cannot be played because " + info.older.reason : std::string()) + ". Recompile to apply " + selected + ".";
+      color = col::warn;
+      icon = "warning";
+    }
     else { text = "Not built yet. Build creates the " + selected + " executable."; }
     ImGui::SetCursorScreenPos(ImVec2(cx, y));
     const auto lines = wrap(ctx_.regular, ctx_.u(12.0F), ctl_w - ctx_.u(26.0F), text);
@@ -441,10 +494,10 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
         y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner, "Default off. For games whose raster / H-interrupt effects fail otherwise: the build stops on a RAM-resident H-interrupt vector to derive its alias. Builds may take longer. It changes the build.") + ctx_.u(4.0F);
       }
       ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, "Build mode, the experimental model, H-interrupt discovery and the mapper are part of the build identity: changing them needs a new build, and the previous executable is kept until Storage cleans it. Region applies at launch.") + ctx_.u(4.0F);
+      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, "Build mode, H-interrupt discovery and the mapper are part of the build identity: changing them needs a new build, and the previous executable is kept until Storage cleans it. Region applies at launch.") + ctx_.u(4.0F);
     }
   }
-  if (entry.aot_policy == "optimized" && rom_policy_identity_cached(layout_, probe).empty() && !status_pending_) {
+  if (probe.optimized() && rom_policy_identity_cached(layout_, probe).empty() && !status_pending_) {
     ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
     y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::err, inner, "Optimized cannot verify the build tool identity: saved Optimized builds are not reused.");
   }
@@ -454,8 +507,8 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
   dl->AddRectFilled(ImVec2(a.x + ctx_.u(1.0F), a.y + ctx_.u(2.0F)), ImVec2(a.x + ctx_.u(4.0F), a.y + h - ctx_.u(2.0F)), col::btn_top, ctx_.u(2.0F));
   {
     const bool ready = info.status == GameStatus::ready;
-    const std::string sel = entry.aot_policy == "optimized" ? "Optimized" : "Compatibility";
-    state_dot_text(ctx_, dl, ImVec2(a.x + w - pad, a.y + ctx_.u(13.0F)), ready ? sel + " - up to date" : sel + " - build required", ready ? col::ok : col::warn, w * 0.5F);
+    const std::string sel = selected_mode_label(entry);
+    state_dot_text(ctx_, dl, ImVec2(a.x + w - pad, a.y + ctx_.u(13.0F)), ready ? sel + " - up to date" : (info.older.playable ? sel + " - recompile recommended" : sel + " - build required"), ready ? col::ok : col::warn, w * 0.5F);
   }
   dl->ChannelsMerge();
   if (changed) { save_catalog(); request_status_refresh(); }
@@ -525,8 +578,7 @@ void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) 
   else row("Build version", info.status == GameStatus::ready ? "unknown (adopted build)" : "no current build", col::text2, std::string("This release: Segarecomp ") + SEGARECOMP_LAUNCHER_VERSION + ", zig " + SEGARECOMP_ZIG_VERSION);
   {
     std::string identity = info.key.empty() ? std::string("-") : info.key.substr(0, 16) + "...";
-    std::string detail = std::string(entry.aot_policy == "optimized" ? "Optimized" : "Compatibility") + " selected";
-    if (entry.platform_id == "genesis" && entry.aot_policy == "optimized") detail += entry.aot_model == "gen2" ? ", experimental model" : ", standard model";
+    std::string detail = selected_mode_label(entry) + " selected";
     if (entry.platform_id == "genesis") detail += entry.hint_alias_discovery ? ", H-int discovery on" : ", H-int discovery off";
     if (entry.platform_id == "master-system") detail += ", mapper " + (entry.mapper.empty() ? (entry.mapper_manifest_sha256.empty() ? std::string("undeclared") : std::string("from manifest")) : entry.mapper);
     std::error_code ec;
@@ -541,6 +593,12 @@ void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) 
       ImGui::SetCursorScreenPos(ImVec2(a.x + pad + lw, y));
       y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, vw, (info.policy.fallback ? "Optimized was requested but this game was built as Compatibility (the broad, conservative program).\n" : std::string()) + policy_details(info.policy)) + ctx_.u(6.0F);
     }
+  }
+  if (info.older.playable) {
+    // The build that Play will start: it keeps its own recorded mode and model; nothing here is relabelled as the current selection.
+    row("Playable build", older_build_description(info.older), col::warn, "From an earlier release; its recorded settings are shown, not the current selection. Recompile to use this release.");
+  } else if (info.status == GameStatus::stale && info.older.candidate_seen) {
+    row("Earlier build", "cannot be played", col::warn, "Rebuild required: " + info.older.reason + ".");
   }
   row("Last run status", entry.last_played_at > 0 ? std::string(run_label(entry.last_run)) : "never played", entry.last_run == "failed" ? col::err : col::text);
   row("Diagnostics", info.compat_known ? "Experimental analysis metadata for this ROM ships with this release." : "No ROM-specific analysis metadata ships with this release.", col::text2,
@@ -696,7 +754,7 @@ void App::draw_details(float w, float h) {
     float ly = q.y + ctx_.u(9.0F);
     for (std::size_t i = first; i < lines.size(); ++i) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::text2, ImVec2(q.x + ctx_.u(10.0F), ly), lines[i].c_str()); ly += lh; }
     ImGui::Dummy(ImVec2(main_w, box_h + ctx_.u(12.0F)));
-    if (is_building) { paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, main_w, "The build reports stages, not a percentage, and cannot be cancelled safely; closing the launcher waits for it."); ImGui::Dummy(ImVec2(1, ctx_.u(10.0F))); }
+    if (is_building) { paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, main_w, "The build reports stages, not a percentage. Cancel build stops it and discards its partial files; closing the launcher waits for it."); ImGui::Dummy(ImVec2(1, ctx_.u(10.0F))); }
   }
   if (!rail) {  // narrow window: the storage card follows the configuration
     const ImVec2 p = ImGui::GetCursorScreenPos();

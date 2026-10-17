@@ -8,6 +8,26 @@
 
 namespace ui {
 
+std::string focus_id;
+bool zone_capture = false;
+ZoneEntry zone_first;
+
+bool nav_button(const char *id, ImVec2 size) {
+  const bool pressed = ImGui::InvisibleButton(id, size, ImGuiButtonFlags_EnableNav);
+  if (zone_capture && zone_first.id == 0 && !(ImGui::GetItemFlags() & ImGuiItemFlags_Disabled)) {
+    zone_first.id = ImGui::GetItemID();
+    zone_first.window = ImGui::GetCurrentWindow();
+    zone_first.rect = ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+  }
+  return pressed;
+}
+namespace {
+// Test seam (not a user feature): which control currently has keyboard/gamepad focus, by the id the widget was created with.
+void note_focus(const char *id, int index = -1) {
+  if (ImGui::IsItemFocused()) focus_id = index < 0 ? std::string(id) : std::string(id) + "#" + std::to_string(index);
+}
+} // namespace
+
 ImFont *bold_font = nullptr;
 
 SDL_Texture *Ctx::asset(const std::string &relative) {
@@ -121,6 +141,7 @@ bool button(Ctx &ctx, const char *id, const char *label, ImVec2 size, Style styl
   const bool pressed = ui::nav_button("##b", size);
   if (!enabled) ImGui::EndDisabled();
   const bool hovered = ImGui::IsItemHovered() && enabled, active = ImGui::IsItemActive() && enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+  note_focus(id);
   ImGui::PopID();
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
@@ -153,6 +174,7 @@ bool icon_button(Ctx &ctx, const char *id, SDL_Texture *icon, float size, bool a
   const bool pressed = ui::nav_button("##i", ImVec2(size, size));
   if (!enabled) ImGui::EndDisabled();
   const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+  note_focus(id);
   ImGui::PopID();
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
@@ -172,6 +194,7 @@ bool chip(Ctx &ctx, const char *id, const char *label, bool active, float height
   ImGui::PushID(id);
   const bool pressed = ui::nav_button("##c", ImVec2(w, h));
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+  note_focus(id);
   ImGui::PopID();
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
@@ -192,6 +215,7 @@ bool checkbox(Ctx &ctx, const char *id, const char *label, bool *value, bool ena
   const bool pressed = ui::nav_button("##k", ImVec2(w, std::max(box + ctx.u(4.0F), measured.y + ctx.u(4.0F))));
   if (!enabled) ImGui::EndDisabled();
   const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+  note_focus(id);
   ImGui::PopID();
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetItemRectMin();
@@ -215,6 +239,7 @@ bool toggle(Ctx &ctx, const char *id, const char *label, bool *value, float widt
   const bool pressed = ui::nav_button("##t", ImVec2(width, std::max(ctx.u(26.0F), text_h + ctx.u(8.0F))));
   if (!enabled) ImGui::EndDisabled();
   const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+  note_focus(id);
   ImGui::PopID();
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
@@ -234,6 +259,7 @@ bool dropdown(Ctx &ctx, const char *id, const std::vector<std::string> &items, i
   const float h = ctx.u(32.0F), px = ctx.u(13.0F);
   const bool pressed = ui::nav_button("##d", ImVec2(width, h));
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+  note_focus(id);
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
   dl->AddRectFilled(a, b, col::field, ctx.u(5.0F));
@@ -285,6 +311,7 @@ bool segmented(Ctx &ctx, const char *id, const std::vector<std::string> &items, 
     ImGui::PushID(static_cast<int>(i));
     const bool pressed = ui::nav_button("##s", ImVec2(w, ctx.u(28.0F)));
     const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible, on = static_cast<int>(i) == *selected;
+    note_focus(id, static_cast<int>(i));
     ImGui::PopID();
     ImDrawList *dl = ImGui::GetWindowDrawList();
     const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
@@ -316,6 +343,7 @@ bool option_tiles(Ctx &ctx, const char *id, const std::vector<std::string> &titl
     const bool pressed = ui::nav_button("##tile", ImVec2(tw, height));
     if (!on_enabled) ImGui::EndDisabled();
     const bool hovered = ImGui::IsItemHovered() && on_enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+    note_focus(id, static_cast<int>(i));
     ImGui::PopID();
     const bool on = static_cast<int>(i) == *selected;
     ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -391,6 +419,7 @@ bool menu_item(Ctx &ctx, const char *id, const char *label, const char *hint, SD
   const bool pressed = ui::nav_button("##mi", ImVec2(width, h));
   if (!enabled) ImGui::EndDisabled();
   const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+  note_focus(id);
   ImGui::PopID();
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
@@ -426,6 +455,7 @@ bool input_text(Ctx &ctx, const char *id, char *buffer, std::size_t capacity, fl
   ImGui::SetNextItemWidth(width);
   const bool changed = hint != nullptr ? ImGui::InputTextWithHint("##t", hint, buffer, capacity) : ImGui::InputText("##t", buffer, capacity);
   if (active != nullptr) *active = ImGui::IsItemActive();
+  note_focus(id);
   icon_image(ImGui::GetWindowDrawList(), ctx.icon("search"), ImVec2(p.x + ctx.u(10.0F), p.y + ctx.u(8.0F)), ctx.u(16.0F), rgba(150, 175, 220));
   ImGui::PopFont();
   ImGui::PopStyleVar(3);

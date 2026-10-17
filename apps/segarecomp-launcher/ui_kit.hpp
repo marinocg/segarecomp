@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 
 #include "imgui.h"
+#include "imgui_internal.h"  // ImGuiWindow, ImRect
 
 #include <map>
 #include <string>
@@ -26,7 +27,16 @@ const ImU32 focus = rgba(140, 224, 255), selected = rgba(57, 124, 219), inactive
 }
 
 // ImGui 1.92's InvisibleButton opts OUT of keyboard/gamepad navigation unless asked: every launcher control is reachable with Tab/arrows/D-pad.
-inline bool nav_button(const char *id, ImVec2 size) { return ImGui::InvisibleButton(id, size, ImGuiButtonFlags_EnableNav); }
+bool nav_button(const char *id, ImVec2 size);
+// SEG-069-T004: "zone" bookkeeping for D-pad hops between the sidebar and the page. While `zone_capture` is on, the first enabled nav_button submitted is
+// remembered (id, window and screen rectangle) so the sidebar can move focus into the page with D-pad Right even though ImGui's directional scoring does not
+// cross from a parent window into its (flattened) child reliably.
+struct ZoneEntry { ImGuiID id = 0; ImGuiWindow *window = nullptr; ImRect rect; };
+extern bool zone_capture;
+extern ZoneEntry zone_first;
+
+// The id of the control that has keyboard/gamepad focus (the widget's own id, "#n" for the n-th tile/segment); empty before any focus. Read by the GUI test script.
+extern std::string focus_id;
 
 struct Ctx {
   ImFont *regular = nullptr, *bold = nullptr;  // body text: the scalable embedded font; `bold` draws it twice for weight

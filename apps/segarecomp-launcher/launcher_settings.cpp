@@ -28,6 +28,7 @@ LauncherSettings load_launcher_settings(const fs::path &file) {
   s.compact = root->flag("compact");
   s.adopt_cache_on_start = root->flag("adopt_cache_on_start", true);
   s.keep_old_artifacts = root->flag("keep_old_artifacts", false);
+  s.intermediates_choice_made = root->flag("intermediates_choice_made", true);  // an existing file without the member predates the question
   const std::string mode = root->str("cleanup_mode");
   for (const char *known : {"never", "intermediates", "keep_last_n", "soft_limit"})
     if (mode == known) s.cleanup.mode = mode;
@@ -50,6 +51,7 @@ bool save_launcher_settings(const LauncherSettings &s, const fs::path &file) {
   root.set("compact", json::Value::make_bool(s.compact));
   root.set("adopt_cache_on_start", json::Value::make_bool(s.adopt_cache_on_start));
   root.set("keep_old_artifacts", json::Value::make_bool(s.keep_old_artifacts));
+  root.set("intermediates_choice_made", json::Value::make_bool(s.intermediates_choice_made));
   root.set("cleanup_mode", json::Value::make_string(s.cleanup.mode));
   root.set("keep_last_n", json::Value::make_int(s.cleanup.keep_last_n));
   root.set("soft_limit_mb", json::Value::make_int(s.cleanup.soft_limit_mb));

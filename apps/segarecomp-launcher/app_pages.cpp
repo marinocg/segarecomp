@@ -142,6 +142,8 @@ void App::draw_storage(float w, float h) {
   const ImVec2 top = ImGui::GetCursorScreenPos();
   // ---- table ----
   const float rh = ctx_.u(42.0F), hh = ctx_.u(28.0F);
+  // The table keeps its height cap and scrolls inside; explicit D-pad hops (header checkbox <-> rows <-> action buttons) cover the child boundary, which ImGui's
+  // directional scoring skips (SEG-069-T004).
   const float table_h = hh + std::min(static_cast<float>(games.size()) * (rh + ctx_.u(4.0F)) + ctx_.u(6.0F), std::max(ctx_.u(130.0F), h * 0.40F));
   card(ctx_, dl, top, ImVec2(top.x + tw, top.y + table_h), false, false, rgba(7, 17, 40));
   {
@@ -150,6 +152,9 @@ void App::draw_storage(float w, float h) {
     bool all = !games.empty() && std::all_of(games.begin(), games.end(), [&](const LibraryEntry *e) { return storage_selected_.count(e->id()) != 0; });
     ImGui::SetCursorScreenPos(ImVec2(top.x + ctx_.u(10.0F), top.y + ctx_.u(4.0F)));
     if (checkbox(ctx_, "st_all", "", &all)) { if (all) for (const auto *e : games) storage_selected_.insert(e->id()); else storage_selected_.clear(); }
+    storage_header_ = ui::ZoneEntry{ImGui::GetItemID(), ImGui::GetCurrentWindow(), ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax())};
+    storage_first_row_ = ui::ZoneEntry{};
+    storage_last_row_ = ui::ZoneEntry{};
     const float hpx = ctx_.u(11.5F);
     draw_text(dl, ctx_.bold, hpx, col::text2, ImVec2(x0, top.y + ctx_.u(8.0F)), "Game");
     const char *heads[] = {"Total Size", compact_table ? "Status" : "Executable", "Intermediate", "Status"};
@@ -157,7 +162,7 @@ void App::draw_storage(float w, float h) {
     dl->AddRectFilled(ImVec2(top.x + 1, top.y + hh), ImVec2(top.x + tw - 1, top.y + hh + 1), rgba(34, 70, 140));
     ImGui::SetCursorScreenPos(ImVec2(top.x, top.y + hh + ctx_.u(3.0F)));
     ImGui::PushStyleColor(ImGuiCol_ChildBg, rgba(0, 0, 0, 0));
-    ImGui::BeginChild("##storage_table", ImVec2(tw, table_h - hh - ctx_.u(4.0F)), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    ImGui::BeginChild("##storage_table", ImVec2(tw, table_h - hh - ctx_.u(4.0F)), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
     ImDrawList *cl = ImGui::GetWindowDrawList();
     for (const LibraryEntry *e : games) {
       const ImVec2 a = ImGui::GetCursorScreenPos();
@@ -170,6 +175,11 @@ void App::draw_storage(float w, float h) {
       ImGui::PushID(e->id().c_str());
       ImGui::SetCursorScreenPos(ImVec2(a.x + ctx_.u(12.0F), a.y + (rh - ctx_.u(22.0F)) * 0.5F));
       if (checkbox(ctx_, "sel", "", &on)) { if (on) storage_selected_.insert(e->id()); else storage_selected_.erase(e->id()); }
+      {
+        const ui::ZoneEntry row{ImGui::GetItemID(), ImGui::GetCurrentWindow(), ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax())};
+        if (storage_first_row_.id == 0) storage_first_row_ = row;
+        storage_last_row_ = row;
+      }
       ImGui::PopID();
       draw_cover(cl, *e, ImVec2(x0 - top.x + a.x - ctx_.u(6.0F), a.y + ctx_.u(4.0F)), ImVec2(x0 - top.x + a.x + ctx_.u(28.0F), a.y + rh - ctx_.u(4.0F)), ctx_.u(3.0F));
       const float nx = x0 - top.x + a.x + ctx_.u(34.0F);
@@ -258,8 +268,10 @@ void App::draw_storage(float w, float h) {
     ImGui::PushID(act.id);
     if (!act.enabled) ImGui::BeginDisabled();
     const bool pressed = ui::nav_button("##a", ImVec2(aw, ah));
+    if (i == 0) storage_after_ = ui::ZoneEntry{ImGui::GetItemID(), ImGui::GetCurrentWindow(), ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax())};
     if (!act.enabled) ImGui::EndDisabled();
     const bool hov = ImGui::IsItemHovered() && act.enabled, foc = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+    if (ImGui::IsItemFocused()) ui::focus_id = std::string("act:") + act.id;
     ImGui::PopID();
     const ImVec2 b(a.x + aw, a.y + ah);
     const bool danger = act.style == Style::danger;
@@ -300,6 +312,8 @@ void App::draw_settings(float full_w, float h) {
       ImGui::PushID(i);
       const bool pressed = ui::nav_button("##tab", ImVec2(tabs_w, ctx_.u(34.0F)));
       const bool hov = ImGui::IsItemHovered(), foc = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible, on = settings_tab_ == i;
+      if (ImGui::IsItemFocused()) ui::focus_id = "tab#" + std::to_string(i);
+      settings_tab_entry_[i] = ui::ZoneEntry{ImGui::GetItemID(), ImGui::GetCurrentWindow(), ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax())};
       ImGui::PopID();
       const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
       dl->AddRectFilled(a, b, on ? rgba(52, 128, 238) : (hov ? col::panel_hover : rgba(10, 24, 56)), ctx_.u(5.0F));
@@ -317,7 +331,12 @@ void App::draw_settings(float full_w, float h) {
   const float sec_pad = carded ? ctx_.u(16.0F) : 0.0F;
   const float w = w_outer - 2 * sec_pad;
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-  ImGui::BeginChild("##settings_body", ImVec2(w_outer + ctx_.u(18.0F), std::max(ctx_.u(120.0F), ImGui::GetContentRegionAvail().y)), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+  // SEG-069-T004: the tab column and the body are navigated by explicit hops (Right from a tab enters the body, Left at its left edge returns to the tab):
+  // ImGui scores a move from the parent into a child clipped, which skips the body's controls. The page-level entry stays the first tab.
+  const ui::ZoneEntry outer_first = ui::zone_first;
+  ui::zone_first = ui::ZoneEntry{};
+  ImGui::BeginChild("##settings_body", ImVec2(w_outer + ctx_.u(18.0F), std::max(ctx_.u(120.0F), ImGui::GetContentRegionAvail().y)), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
+  settings_body_window_ = ImGui::GetCurrentWindow();
   if (SDL_getenv("SEGARECOMP_SHOT_SCROLL")) ImGui::SetScrollY(ImGui::GetScrollMaxY());  // review aid, never a persisted preference
   dl = ImGui::GetWindowDrawList();
   ImVec2 sec_origin(0, 0);
@@ -421,7 +440,7 @@ void App::draw_settings(float full_w, float h) {
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Compatibility, Optimized, the Genesis region, the Master System mapper and H-interrupt discovery are chosen per game on its page (they are part of what a build is). Toolchain: bundled Zig " SEGARECOMP_ZIG_VERSION ".");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Master System Optimized");
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), sms_optimized_available_ ? col::ok : col::dim, w - lw, sms_optimized_available_ ? "Offered by this product build (experimental)." : "Not offered by this product build.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), sms_optimized_available_ ? col::ok : col::dim, w - lw, sms_optimized_available_ ? "Offered by this product build. It is the default for Master System games." : (sms_probe_.valid() ? "Checking..." : "Not offered by this product build: Master System games build as Compatibility."));
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     row_label("Recompiling");
     if (toggle(ctx_, "keep_old", "Keep old build artifacts when a game is recompiled", &settings_.keep_old_artifacts, ctx_.u(420.0F))) save = true;
@@ -526,6 +545,10 @@ void App::draw_settings(float full_w, float h) {
   }
   section_end();
   ImGui::EndChild();
+  settings_body_entry_ = ui::zone_first;   // where Right from a tab lands: the body's first control
+  ui::zone_first = outer_first;
+  settings_narrow_ = narrow;
+  if (narrow) for (auto &tab : settings_tab_entry_) tab = outer_first;  // the section drop-down is the "tab" of the narrow layout (Down enters the body, Up returns)
   ImGui::PopStyleVar();
   if (save) save_settings();
   ImGui::Dummy(ImVec2(w, ctx_.u(12.0F)));

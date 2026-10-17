@@ -22,6 +22,12 @@ authority order is exact map > validated ML proposal > broad fallback and the ad
 (`docs/architecture/admission-authority-and-model-lifecycle-contract.md`, ADR 0103). `segarecomp aot-policy-identity --aot-policy <p> [--aot-model <m>]` prints the
 ROM-independent policy identity a consumer should key its cache on.
 
+### Launcher default (SEG-069-T002)
+
+The packaged launcher (not the `segarecomp build` CLI, whose default stays `compatibility`) selects Optimized for newly imported Genesis games, passing
+`--aot-policy optimized --aot-model gen2` (the former Optimized + Experimental model request, with the same cache identity), and Optimized for newly
+imported Master System games, passing `--aot-policy optimized` only when `aot-policy-identity --platform master-system` reports it available. See ADR 0137.
+
 ## Machine-readable status
 
 Every successful build writes `status.json` with an always-present `aot_policy` member (no parsing of human text):

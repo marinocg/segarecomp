@@ -30,8 +30,11 @@ struct LibraryEntry {
   // Last-used per-game build options (the identity-relevant ones are re-derived through entry_dir()).
   std::string mapper;           // Master System: declared mapper ("" until declared)
   std::string mapper_manifest_sha256;
-  std::string aot_policy = "compatibility";
-  std::string aot_model = "v1";
+  // SEG-069-T002: Optimized is the launcher default for both platforms (the intent is kept even while the Master System capability is still
+  // unknown or unsupported: availability is resolved separately and never rewrites this field). Genesis Optimized means the former
+  // Optimized + Experimental model (gen2); the model is not a user choice any more. Compatibility is an explicit selection.
+  std::string aot_policy = "optimized";
+  std::string aot_model = "gen2";
   bool hint_alias_discovery = false;
   std::string region = "usa";   // Genesis run-time region
   std::string cover;            // file name inside the covers directory; "" shows the generic placeholder

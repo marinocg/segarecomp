@@ -89,8 +89,13 @@ bool entry_from_json(const json::Value &v, LibraryEntry &e) {
   if (e.mapper != "sega" && e.mapper != "rom_only") e.mapper.clear();
   e.mapper_manifest_sha256 = v.str("mapper_manifest_sha256");
   if (!is_hex_digest(e.mapper_manifest_sha256, 64)) e.mapper_manifest_sha256.clear();
-  e.aot_policy = v.str("aot_policy") == "optimized" ? "optimized" : "compatibility";
-  e.aot_model = v.str("aot_model") == "gen2" ? "gen2" : "v1";
+  // A stored selection is honoured (an explicit Compatibility stays Compatibility); only a record without the member takes the default.
+  if (v.get("aot_policy") != nullptr) e.aot_policy = v.str("aot_policy") == "optimized" ? "optimized" : "compatibility";
+  else e.aot_policy = "optimized";
+  // SEG-069-T002: the Genesis Optimized model is always gen2 now (it is meaningless for Compatibility and for Master System). A legacy
+  // Optimized/v1 selection takes the new meaning: its v1 build has a different cache identity, so it is shown as needing a rebuild instead of being
+  // reused, while a legacy Optimized/gen2 build keeps its identity.
+  e.aot_model = e.platform_id == "genesis" ? "gen2" : "v1";
   e.hint_alias_discovery = v.flag("hint_alias_discovery");
   const std::string region = v.str("region");
   e.region = region == "japan" || region == "europe" ? region : "usa";
@@ -240,6 +245,8 @@ Catalog::ImportResult Catalog::import_rom(const RomView &rom, long long now) {
     fresh.detected_title = clamp_text(rom.title, 200);
     fresh.added_at = now;
     fresh.region = rom.region;
+    fresh.aot_policy = "optimized";  // the launcher default for both platforms; Master System availability is resolved separately
+    fresh.aot_model = rom.platform_id == "genesis" ? "gen2" : "v1";
     fresh.mapper = rom.mapper;
     fresh.mapper_manifest_sha256 = rom.mapper_manifest_sha256;
     entries_.push_back(std::move(fresh));
@@ -320,6 +327,7 @@ std::size_t Catalog::migrate_cache(const fs::path &cache_root, long long now) {
       fresh.platform_id = platform;
       fresh.sha256 = sha;
       fresh.detected_title = clamp_text(meta->str("title", "Unknown game"), 200);
+      fresh.aot_model = platform == "genesis" ? "gen2" : "v1";
       fresh.rom_path_unknown = true;  // older metadata only says "referenced, not copied": a path is never invented
       fresh.added_at = now;
       fresh.mapper = meta->str("mapper") == "sega" || meta->str("mapper") == "rom_only" ? meta->str("mapper") : std::string();
@@ -352,7 +360,7 @@ RomView view_from_entry(const LibraryEntry &entry) {
   view.mapper = entry.mapper;
   view.mapper_manifest_sha256 = entry.mapper_manifest_sha256;
   view.aot_policy = entry.aot_policy;
-  view.aot_model = entry.aot_model;
+  view.aot_model = entry.platform_id == "genesis" && entry.aot_policy == "optimized" ? "gen2" : entry.aot_model;  // Genesis Optimized is always gen2
   view.hint_alias_discovery = entry.hint_alias_discovery && entry.platform_id == "genesis";
   view.region = entry.region;
   // The experimental SMS Optimized policy is only valid when the product states it; a stored request is honoured by the caller.

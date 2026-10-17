@@ -83,16 +83,18 @@ Check the downloaded archive against `SHA256SUMS.txt`.
 
 **Recommended first try (based on maintainer testing):**
 
-- **Genesis / Mega Drive:** select **Optimized** under **Build mode**, then
-  enable **Experimental model**. This combination has worked well in the
-  maintainer's game tests. For headless builds, the corresponding options are
-  `--aot-policy optimized --aot-model gen2`.
-- **Master System:** select **Optimized** when the launcher offers it. This
-  mode is already experimental; the separate **Experimental model** checkbox
-  is Genesis-only. For headless builds, use `--aot-policy optimized`.
+- **Genesis / Mega Drive:** **Optimized** is the launcher's default **Build
+  mode** for new games (it uses the model that earlier versions offered as
+  *Experimental model*; there is no separate checkbox any more). It has worked
+  well in the maintainer's game tests. For headless builds, the corresponding
+  options are `--aot-policy optimized --aot-model gen2`.
+- **Master System:** **Optimized** is also the default when the launcher's
+  bundled product offers it (otherwise the game builds as Compatibility). This
+  mode is still experimental. For headless builds, use `--aot-policy optimized`.
 
-**Compatibility** is still the launcher's default and remains the conservative
-fallback if an optimized build fails or a game behaves incorrectly. An Optimized
+**Compatibility** is an explicit choice under **Build mode** and remains the
+conservative fallback if an optimized build fails or a game behaves incorrectly.
+The `segarecomp build` command-line default is unchanged (Compatibility). An Optimized
 request can also fall back to Compatibility automatically; Master System may
 restart in Compatibility for its supported unadmitted-code stop. These are
 recommendations for what to try first, not guarantees for every game.

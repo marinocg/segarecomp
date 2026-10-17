@@ -25,7 +25,7 @@ target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
 # The launcher's non-UI core (layout, cache identity, `segarecomp build` orchestration, status reading) is a separate target so its
 # policy/cache-identity contract is unit-testable without a window.
-add_library(segarecomp_launcher_core STATIC launcher_core.cpp json_lite.cpp library_catalog.cpp storage.cpp launcher_settings.cpp)
+add_library(segarecomp_launcher_core STATIC launcher_core.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp storage.cpp launcher_settings.cpp)
 target_include_directories(segarecomp_launcher_core PUBLIC .)
 target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media)
 # Linux only: the glibc the generated programs link against (release default 2.35 = the bundled SDL3's baseline; a developer who built SDL3 on a
@@ -47,7 +47,7 @@ target_compile_definitions(segarecomp_launcher_ui_support PUBLIC
   SEGARECOMP_LAUNCHER_SOURCE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 segarecomp_enable_warnings(segarecomp_launcher_ui_support)
 
-add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_screens.cpp app_pages.cpp app_details.cpp app_input.cpp app_art.cpp ui_kit.cpp)
+add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_picker.cpp app_screens.cpp app_pages.cpp app_details.cpp app_input.cpp app_art.cpp ui_kit.cpp)
 if(WIN32)
   # The executable's own icon (Explorer, taskbar, shortcuts): a resource script embedding packaging/windows/Segarecomp.ico, when a resource compiler exists.
   include(CheckLanguage)
@@ -99,6 +99,92 @@ if(BUILD_TESTING)
   add_test(NAME launcher_sms_policy_test COMMAND launcher_sms_policy_test $<TARGET_FILE:segarecomp>
     ${PROJECT_SOURCE_DIR}/platforms/master-system/runtime/sms_machine.h $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
   set_property(TEST launcher_sms_policy_test APPEND PROPERTY LABELS full fast)
+endif()
+
+# SEG-069-T001: BuildJob cancellation (process-tree shutdown, attempt-local cleanup, publish race) against the product double.
+add_executable(launcher_build_cancel_test launcher_build_cancel_test.cpp)
+target_link_libraries(launcher_build_cancel_test PRIVATE segarecomp_launcher_core)
+target_compile_features(launcher_build_cancel_test PRIVATE cxx_std_20)
+segarecomp_enable_warnings(launcher_build_cancel_test)
+if(BUILD_TESTING)
+  add_dependencies(launcher_build_cancel_test fake_segarecomp fake_game)
+  add_test(NAME launcher_build_cancel_test COMMAND launcher_build_cancel_test $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_build_cancel_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_build_cancel_test PROPERTY TIMEOUT 300)
+endif()
+
+if(BUILD_TESTING)
+  find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME launcher_build_cancel_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_build_cancel_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  add_dependencies(launcher_build_cancel_test segarecomp-launcher)
+  set_property(TEST launcher_build_cancel_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_build_cancel_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_build_cancel_gui_test PROPERTY TIMEOUT 300)
+endif()
+
+# SEG-069-T002: Optimized is the default for new Genesis (gen2) and Master System games, with the product-stated SMS capability gate.
+if(BUILD_TESTING)
+  add_test(NAME launcher_default_mode_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_default_mode_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_default_mode_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_default_mode_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_default_mode_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-069-T003: the one-time first-run question about build intermediates (real window, virtual gamepad).
+if(BUILD_TESTING)
+  add_test(NAME launcher_first_run_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_first_run_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_first_run_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_first_run_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_first_run_test PROPERTY TIMEOUT 600)
+endif()
+
+# SEG-069-T005: the playability predicate for builds of an earlier release (fail-closed, separate from the exact reuse identity).
+add_executable(older_build_test older_build_test.cpp)
+target_link_libraries(older_build_test PRIVATE segarecomp_launcher_core)
+target_compile_features(older_build_test PRIVATE cxx_std_20)
+segarecomp_enable_warnings(older_build_test)
+if(BUILD_TESTING)
+  add_test(NAME older_build_test COMMAND older_build_test)
+  set_property(TEST older_build_test APPEND PROPERTY LABELS full fast)
+endif()
+
+if(BUILD_TESTING)
+  add_test(NAME launcher_older_build_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_older_build_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_older_build_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_older_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_older_build_test PROPERTY TIMEOUT 900)
+endif()
+
+# SEG-069-T004: the controller-operable file picker's model (root confinement, filtering, symlink refusal).
+add_executable(file_picker_test file_picker_test.cpp)
+target_link_libraries(file_picker_test PRIVATE segarecomp_launcher_core)
+target_compile_features(file_picker_test PRIVATE cxx_std_20)
+segarecomp_enable_warnings(file_picker_test)
+if(BUILD_TESTING)
+  add_test(NAME file_picker_test COMMAND file_picker_test)
+  set_property(TEST file_picker_test APPEND PROPERTY LABELS full fast)
+endif()
+
+# SEG-069-T004: the launcher's ordinary journeys with a virtual gamepad only (no mouse event), at 1080x740 and 720x520, on the real window.
+if(BUILD_TESTING)
+  # One test per journey and window size: they are independent, slow on some hosts, and `ctest -j` runs them side by side.
+  foreach(journey first_run import library build older_build settings storage hotplug)
+    foreach(size wide:1080x740 narrow:720x520)
+      string(REPLACE ":" ";" size_parts ${size})
+      list(GET size_parts 0 size_name)
+      list(GET size_parts 1 size_px)
+      set(t launcher_gamepad_journey_${journey}_${size_name}_test)
+      add_test(NAME ${t} COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_gamepad_journey_test.py
+        $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game> ${size_px} ${journey})
+      set_property(TEST ${t} APPEND PROPERTY LABELS full fast)
+      set_property(TEST ${t} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+      set_property(TEST ${t} PROPERTY TIMEOUT 900)
+    endforeach()
+  endforeach()
 endif()
 
 # SEG-058: covers, Libretro candidate naming and launcher settings.

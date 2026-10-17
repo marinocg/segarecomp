@@ -1,5 +1,7 @@
 #include "app.hpp"
 
+#include <sstream>
+
 #include "cover_download.hpp"
 #include "covers.hpp"
 #include "pixel_assets.hpp"
@@ -64,10 +66,16 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
     } else {
       info.status = GameStatus::not_built;
     }
+    // SEG-069-T005: no ready build of the CURRENT identity. An executable an earlier release built may still be playable; this is a separate,
+    // fail-closed question (older_build.hpp) and never relaxes the exact identity check above.
+    if (!mapper_needed && !e.archived && info.status != GameStatus::ready && !e.builds.empty()) {
+      info.older = find_playable_older_build(e, info.key, view.optimized() ? "optimized" : "compatibility", layout, cache_root() / "games");
+      if (info.older.playable && info.status == GameStatus::stale) info.status = GameStatus::playable_older;
+    }
     if (!mapper_needed && view.supports_optimized()) {
       RomView other = view;
       other.aot_policy = view.optimized() ? "compatibility" : "optimized";
-      if (other.aot_policy == "compatibility") other.aot_model = "v1";
+      other.aot_model = other.aot_policy == "optimized" && other.platform_id == "genesis" ? "gen2" : "v1";
       info.other_mode_supported = true;
       info.other_mode_ready = entry_ready_for(entry_dir(other, layout), other, layout);
     }
@@ -130,6 +138,16 @@ void App::save_catalog() {
 
 void App::save_settings() {
   if (!save_launcher_settings(settings_, settings_file_)) toast("Settings could not be saved.", true);
+}
+
+bool App::apply_intermediates_choice(bool remove_after_build) {
+  LauncherSettings next = settings_;
+  next.cleanup.mode = remove_after_build ? "intermediates" : "never";
+  next.intermediates_choice_made = true;
+  if (!save_launcher_settings(next, settings_file_)) return false;  // nothing is claimed: the question stays open and can be retried
+  settings_ = next;
+  trace(std::string("onboarding=intermediates_chosen mode=") + settings_.cleanup.mode);
+  return true;
 }
 
 void App::viewer_settings_changed() {
@@ -274,7 +292,8 @@ std::string App::status_label(const StatusInfo &info) const {
     case GameStatus::ready: return "Ready";
     case GameStatus::metadata_only: return "Metadata only";
     case GameStatus::stale: return "Needs rebuild";
-    case GameStatus::failed: return "Build failed";
+    case GameStatus::playable_older: return "Playable (older build)";
+    case GameStatus::failed: return info.older.playable ? "Playable (older build)" : "Build failed";
     case GameStatus::not_built: return "Not built";
   }
   return {};
@@ -285,6 +304,7 @@ ImU32 App::status_color(const StatusInfo &info) const {
     case GameStatus::ready: return ui::col::ok;
     case GameStatus::failed: return ui::col::err;
     case GameStatus::stale: return ui::col::warn;
+    case GameStatus::playable_older: return ui::col::warn;
     case GameStatus::metadata_only: return ui::col::info;
     case GameStatus::not_built: return ui::col::text2;
   }
@@ -414,16 +434,19 @@ void App::poll_maintenance() {
 // ---------------------------------------------------------------- import
 
 void App::browse_import() {
+  if (use_builtin_picker()) { open_picker("import", ""); return; }
   static const SDL_DialogFileFilter filters[] = {{"ROMs and zipped ROMs", "md;bin;gen;smd;sms;zip"}, {"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"Master System ROMs", "sms"}, {"Zipped ROMs", "zip"}, {"All files", "*"}};
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "import", ""}, window_, filters, 5, nullptr, true);
 }
 
 void App::browse_locate(const std::string &id) {
+  if (use_builtin_picker()) { open_picker("locate", id); return; }
   static const SDL_DialogFileFilter filters[] = {{"ROMs", "md;bin;gen;smd;sms;zip"}, {"All files", "*"}};
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "locate", id}, window_, filters, 2, nullptr, false);
 }
 
 void App::browse_cover(const std::string &id) {
+  if (use_builtin_picker()) { open_picker("cover", id); return; }
   static const SDL_DialogFileFilter filters[] = {{"Images (PNG, JPEG)", "png;jpg;jpeg"}};
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "cover", id}, window_, filters, 1, nullptr, false);
 }
@@ -635,9 +658,15 @@ bool App::start_build(const std::string &id, bool restart_after) {
   }
   // stored per-game options, then product-stated availability
   view.title = entry->title();
+  // SEG-069-T002: a Master System game whose stored intent is Optimized must not be built as Compatibility only because the asynchronous
+  // capability probe has not answered yet: wait for the product's statement (the worker is already running it; the result is memoized).
+  if (view.platform_id == "master-system" && entry->aot_policy == "optimized" && sms_probe_.valid()) {
+    sms_optimized_available_ = sms_probe_.get();
+    request_status_refresh();
+  }
   view.sms_optimized_available = sms_optimized_available_;
   if (view.platform_id == "master-system") { if (!entry->mapper.empty()) view.mapper = entry->mapper; if (view.sms_optimized_available) view.aot_policy = entry->aot_policy; }
-  if (view.supports_optimized() && view.platform_id == "genesis") { view.aot_policy = entry->aot_policy; view.aot_model = entry->aot_model; }
+  if (view.supports_optimized() && view.platform_id == "genesis") { view.aot_policy = entry->aot_policy; view.aot_model = "gen2"; }  // Genesis Optimized is always the gen2 model
   if (view.supports_hint_alias_discovery()) view.hint_alias_discovery = entry->hint_alias_discovery;
   if (view.supports_region()) view.region = entry->region;
   if (view.needs_mapper()) { show_message("Declare the cartridge mapper", {"The Master System header never identifies the mapper, so it is not guessed.", "Choose Sega mapper or ROM only (32 KiB) in the game's build options."}); return false; }
@@ -656,7 +685,28 @@ bool App::start_build(const std::string &id, bool restart_after) {
 }
 
 void App::dequeue_build(const std::string &id) {
-  build_queue_.remove(id);
+  // A queued entry owns nothing yet (no process, no folder), so removing it touches nothing but the FIFO.
+  if (!build_queue_.remove(id)) return;
+  if (const LibraryEntry *e = catalog_.find_id(id)) toast("Removed from the build queue: " + e->title() + ".");
+  trace("build=dequeued");
+}
+
+void App::cancel_build(const std::string &id) {
+  if (!is_building(id) || job_->cancel_requested()) return;  // a second request while stopping is ignored
+  trace("build=cancel_requested");
+  if (job_->request_cancel()) {
+    // The cancelled attempt must not auto-continue into a play or a restart.
+    restart_pending_ = false;
+    job_restart_after_ = false;
+    toast("Stopping the build...");
+  } else {
+    toast("The build has just finished; it was not cancelled.");
+  }
+}
+
+void App::stop_or_dequeue_build(const std::string &id) {
+  if (is_building(id)) cancel_build(id);
+  else if (is_queued(id)) dequeue_build(id);
 }
 
 void App::request_build(const std::string &id) {
@@ -672,7 +722,7 @@ void App::request_build(const std::string &id) {
 App::Badge App::badge_for(const LibraryEntry &entry, const StatusInfo &info) const {
   if (is_building(entry.id())) return {"Building", ui::col::warn, true};
   if (is_queued(entry.id())) return {"Queued", ui::col::info, false};
-  if (info.rom_missing && info.status != GameStatus::ready) return {"ROM missing", ui::col::warn, false};
+  if (info.rom_missing && !info.runnable()) return {"ROM missing", ui::col::warn, false};
   return {status_label(info), status_color(info), false};
 }
 
@@ -681,12 +731,33 @@ void App::finish_build() {
   const bool ok = job_->succeeded();
   const std::string message = job_->message();
   const fs::path entry_path = job_->entry();
+  const BuildOutcome outcome = job_->outcome();
   busy_.end_build(job_key_);
   const std::string id = job_id_;
   const bool restart = job_restart_after_;
   job_.reset();
   job_id_.clear();
   LibraryEntry *entry = catalog_.find_id(id);
+  if (outcome == BuildOutcome::cancelled) {
+    // Neither a success nor a failure: no failure record, no diagnostics, no restart/autoplay continuation; the game keeps its prior state.
+    restart_pending_ = false;
+    failures_.erase(id);
+    diagnostics_.erase(id);
+    last_build_outcome_ = "cancelled";
+    trace("build=cancelled");
+    request_status_refresh();
+    request_scan();
+    toast("Build cancelled.");
+    if (autoplay_) {
+      autoplay_pending_ = false;
+      trace("final=cancelled");
+      SDL_Event quit;
+      quit.type = SDL_EVENT_QUIT;
+      SDL_PushEvent(&quit);
+    }
+    return;
+  }
+  last_build_outcome_ = ok ? "ok" : "failed";
   if (ok) {
     if (entry != nullptr) {
       BuildRecord record;
@@ -722,17 +793,26 @@ bool App::launch(const std::string &id, bool restarted) {
   if (entry == nullptr || game_) return false;
   RomView view = view_for(*entry);
   if (const std::string refusal = launch_refusal(view); !refusal.empty()) { failures_[id] = refusal; diagnostics_[id] = refusal; return false; }
-  const fs::path dir = entry_dir(view, layout_);
+  fs::path dir = entry_dir(view, layout_);
+  bool older_build = false;
   if (!entry_ready_for(dir, view, layout_)) {
-    // Never start an executable that does not match the entry's current identity (stale, foreign or removed).
-    show_message("This build cannot be played", {"The stored build no longer matches this game's current identity (a different release, option set or a removed build).", "Recompile the game to play it."});
-    request_status_refresh();
-    return false;
+    // Never start an executable that does not match the entry's current identity (stale, foreign or removed) -- except an earlier release's build that
+    // is verified playable RIGHT NOW (not from the possibly outdated status list): it runs exactly as recorded, never relabelled as the current request.
+    const OlderBuild older = find_playable_older_build(*entry, u8s(dir.filename()), view.optimized() ? "optimized" : "compatibility", layout_, cache_root() / "games");
+    if (!older.playable) {
+      show_message("This build cannot be played", {"The stored build no longer matches this game's current identity (a different release, option set or a removed build).",
+                                                   older.candidate_seen ? "An earlier build cannot be used: " + older.reason + "." : std::string("There is no earlier build to fall back on."), "Recompile the game to play it."});
+      request_status_refresh();
+      return false;
+    }
+    dir = older.dir;
+    older_build = true;
+    trace("run=older_build version=" + (older.version.empty() ? std::string("unknown") : older.version) + " mode=" + older.mode);
   }
   const std::string key = u8s(dir.filename());
   if (!busy_.try_begin_run(key)) { toast("Cleanup is running; try again in a moment.", true); return false; }
   sv_diag_yield_exclusive_devices(diag_);  // a libusb-driven controller can be opened by one process only: free it for the game
-  game_ = std::make_unique<GameRun>(view, layout_, dir);
+  game_ = std::make_unique<GameRun>(view, layout_, dir, std::vector<std::string>{}, older_build);
   if (!game_->started()) {
     sv_diag_reclaim_exclusive_devices(diag_);
     busy_.end_run(key);
@@ -744,6 +824,7 @@ bool App::launch(const std::string &id, bool restarted) {
   }
   game_id_ = id;
   game_key_ = key;
+  game_dir_ = dir;
   game_view_ = view;
   game_report_ = read_policy_report(dir);
   restarted_this_play_ = restarted;
@@ -784,7 +865,7 @@ void App::finish_run() {
     return;
   }
   failures_[id] = "The game stopped unexpectedly.";
-  diagnostics_[id] = read_tail(entry_executable(entry_dir(view_for(*entry), layout_)).parent_path() / "run.log", 24000);
+  diagnostics_[id] = read_tail((game_dir_.empty() ? entry_dir(view_for(*entry), layout_) : game_dir_) / "run.log", 24000);
   trace("state=failed reason=game_stopped_unexpectedly");
   request_status_refresh();
 }
@@ -813,6 +894,8 @@ void App::update_jobs() {
     { std::lock_guard<std::mutex> lock(dialog_mutex_); events.swap(dialog_events_); }
     for (auto &e : events) {
       if (!e.error.empty() && e.paths.empty()) {
+        // No native chooser is available (no portal under WSL, a minimal desktop): the built-in picker does the same job.
+        if (e.purpose == "import" || e.purpose == "locate" || e.purpose == "cover") { toast("The system file chooser is not available; using the built-in picker."); open_picker(e.purpose, e.key); continue; }
         show_message("The file picker could not be opened", {"SDL: " + e.error, "On Linux this usually means no file-chooser service (XDG Desktop Portal) is available - common under WSL/WSLg.", "Drop the file onto this window instead."});
         continue;
       }
@@ -903,6 +986,16 @@ const char *App::page_name() const {
     case Page::settings: return "settings";
   }
   return "?";
+}
+
+// Test seam: the screen rectangle of the item that has navigation focus ("x,y,w,h", window units), "-" when none.
+static std::string nav_rect_text() {
+  const ImGuiContext &g = *ImGui::GetCurrentContext();
+  if (g.NavWindow == nullptr || g.NavId == 0) return "-";
+  const ImRect r = g.NavWindow->NavRectRel[g.NavLayer];
+  char buffer[96];
+  std::snprintf(buffer, sizeof(buffer), "%d,%d,%d,%d", static_cast<int>(g.NavWindow->Pos.x + r.Min.x), static_cast<int>(g.NavWindow->Pos.y + r.Min.y), static_cast<int>(r.GetWidth()), static_cast<int>(r.GetHeight()));
+  return buffer;
 }
 
 // One command per few frames. Commands: `key <Tab|Return|Escape|Down|Up|Left|Right|Space|F>` (F with Ctrl), `text <string>`, `frames <n>`,
@@ -1019,6 +1112,51 @@ void App::run_script() {
       e.button.y = script_mouse_.y;
       if (down) SDL_PushEvent(&e); else script_mouse_up_ = {frame_ + 3, e};
     }
+  } else if (cmd == "build") {  // request a build of the open game (starts now or joins the FIFO)
+    if (!detail_id_.empty()) request_build(detail_id_);
+  } else if (cmd == "pad_seek" && script_joy_ != nullptr) {
+    // pad_seek <focus-id-or-label> <dpad_down|dpad_up|dpad_left|dpad_right> [max presses]: press that D-pad direction until the control is focused. Real virtual-
+    // gamepad button events only; it proves a control is reachable in that direction, and records `expect ok|FAIL seek=<target>`.
+    std::istringstream words(arg);
+    std::string target, dir;
+    int limit = 40;
+    words >> target >> dir >> limit;
+    const std::string have_id = ui::focus_id, have_label = focus_label_;
+    const bool here = have_id == target || have_label == target;
+    static const std::pair<const char *, int> dirs[] = {{"dpad_down", SDL_GAMEPAD_BUTTON_DPAD_DOWN}, {"dpad_up", SDL_GAMEPAD_BUTTON_DPAD_UP}, {"dpad_left", SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {"dpad_right", SDL_GAMEPAD_BUTTON_DPAD_RIGHT}};
+    int button = -1;
+    for (const auto &d : dirs) if (dir == d.first) button = d.second;
+    if (seek_left_ < 0) seek_left_ = limit;
+    if (seek_pressed_) {  // release what the previous step pressed, then look again
+      for (const auto &d : dirs) SDL_SetJoystickVirtualButton(script_joy_, d.second, false);
+      seek_pressed_ = false;
+      --script_at_;
+      script_wait_ = 3;
+    } else if (here) {
+      trace("expect ok seek=" + target + " presses=" + std::to_string(limit - seek_left_));
+      seek_left_ = -1;
+    } else if (seek_left_ == 0 || button < 0) {
+      trace("expect FAIL seek=" + target + " actual=" + (have_id.empty() ? have_label : have_id));
+      seek_left_ = -1;
+    } else {
+      SDL_SetJoystickVirtualButton(script_joy_, button, true);
+      --seek_left_;
+      seek_pressed_ = true;
+      --script_at_;
+      script_wait_ = 2;
+    }
+  } else if (cmd == "play") {  // the Play action of the open game (does nothing when it cannot be played)
+    if (!detail_id_.empty() && can_play(status_of(detail_id_))) play(detail_id_);
+  } else if (cmd == "wait_play_end") {  // hold the script until no game is running
+    if (game_) { --script_at_; script_wait_ = 2; }
+  } else if (cmd == "cancel_build") {  // the Cancel build / Unqueue action for the open game
+    if (!detail_id_.empty()) stop_or_dequeue_build(detail_id_);
+  } else if (cmd == "wait_idle") {  // hold the script until no build is running or queued
+    if (job_ || !build_queue_.empty() || status_pending_) { --script_at_; script_wait_ = 2; }
+  } else if (cmd == "wait_file") {  // hold the script until a file exists (at most ~20 s of frames)
+    std::error_code ec;
+    if (!fs::exists(fs::path(arg), ec) && ++script_wait_file_frames_ < 1200) { --script_at_; script_wait_ = 1; }
+    else script_wait_file_frames_ = 0;
   } else if (cmd == "scroll_library") {
     library_scroll_ = static_cast<float>(std::atof(arg.c_str()));
     restore_library_scroll_ = true;
@@ -1044,6 +1182,7 @@ void App::run_script() {
     if (key == "page") actual = page_name();
     else if (key == "visible") actual = std::to_string(visible_entries().size());
     else if (key == "focus") actual = focus_label_;
+    else if (key == "focus_id") actual = ui::focus_id;
     else if (key == "modal") actual = modal_.kind == Modal::Kind::none ? "0" : "1";
     else if (key == "input_state") actual = sv_pad_state_code(input_state());
     else if (key == "pad_count") actual = std::to_string(sv_diag_count(diag_));
@@ -1057,16 +1196,34 @@ void App::run_script() {
     else if (key == "library_scroll") actual = std::to_string(static_cast<int>(std::lround(library_scroll_)));
     else if (key == "detail") actual = page_ == Page::details && catalog_.find_id(detail_id_) != nullptr ? catalog_.find_id(detail_id_)->title() : "-";
     else if (key == "nav_items") actual = nav_items_;
+    else if (key == "status") actual = !detail_id_.empty() ? status_label(status_of(detail_id_)) : "-";
+    else if (key == "can_play") actual = !detail_id_.empty() && can_play(status_of(detail_id_)) ? "1" : "0";
+    else if (key == "playing") actual = game_ != nullptr ? "1" : "0";
+    else if (key == "hints") actual = gamepad_is_last_input() && modal_.kind == Modal::Kind::none && !picker_.open ? "1" : "0";
+    else if (key == "want_text") actual = ImGui::GetIO().WantTextInput ? "1" : "0";
+    else if (key == "settings_tab") actual = std::to_string(settings_tab_);
+    else if (key == "picker") actual = picker_.open ? "1" : "0";
+    else if (key == "picker_chosen") actual = std::to_string(picker_.chosen.size());
+    else if (key == "picker_level") actual = !picker_.open ? "-" : (picker_.root.empty() ? "locations" : (picker_.dir == picker_.root ? "root" : "sub"));
+    else if (key == "library_size") actual = std::to_string(catalog_.entries().size());
+    else if (key == "cleanup_mode") actual = settings_.cleanup.mode;
+    else if (key == "intermediates_choice") actual = settings_.intermediates_choice_made ? "1" : "0";
+    else if (key == "mode") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr ? selected_mode_label(*catalog_.find_id(detail_id_)) : "-";
+    else if (key == "building") actual = !detail_id_.empty() && is_building(detail_id_) ? "1" : "0";
+    else if (key == "stopping") actual = !detail_id_.empty() && is_stopping(detail_id_) ? "1" : "0";
+    else if (key == "queued") actual = !detail_id_.empty() && is_queued(detail_id_) ? "1" : "0";
+    else if (key == "build_count") actual = std::to_string(build_count());
+    else if (key == "build_outcome") actual = last_build_outcome_;
     else if (key == "menu") actual = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) ? "1" : "0";
     trace(std::string("expect ") + (actual == value ? "ok " : "FAIL ") + arg + " actual=" + actual);
   } else if (cmd == "dump") {
     const ImGuiContext &g = *ImGui::GetCurrentContext();
     trace(std::string("dump nav_window=") + (g.NavWindow != nullptr ? g.NavWindow->Name : "-") + " nav_id=" + std::to_string(g.NavId) + " nav_active=" + std::to_string(g.NavCursorVisible ? 1 : 0) +
-          " want_text=" + std::to_string(ImGui::GetIO().WantTextInput ? 1 : 0) + " focus=" + focus_label_);
+          " want_text=" + std::to_string(ImGui::GetIO().WantTextInput ? 1 : 0) + " focus=" + focus_label_ + " focus_id=" + ui::focus_id + " nav_rect=" + nav_rect_text());
   } else if (cmd == "dump") {
     const ImGuiContext &g = *ImGui::GetCurrentContext();
     trace(std::string("dump nav_window=") + (g.NavWindow != nullptr ? g.NavWindow->Name : "-") + " nav_id=" + std::to_string(g.NavId) + " nav_cursor=" + std::to_string(g.NavCursorVisible ? 1 : 0) +
-          " want_text=" + std::to_string(ImGui::GetIO().WantTextInput ? 1 : 0) + " focus=" + focus_label_);
+          " want_text=" + std::to_string(ImGui::GetIO().WantTextInput ? 1 : 0) + " focus=" + focus_label_ + " focus_id=" + ui::focus_id + " nav_rect=" + nav_rect_text());
   } else if (cmd == "quit") {
     SDL_Event quit;
     quit.type = SDL_EVENT_QUIT;
@@ -1082,6 +1239,9 @@ int App::run() {
   init_ui();
   trace("startup=catalog");
   // Library: load the persistent catalog, then (once, read-only) adopt verifiable finished builds of the product-owned cache folder.
+  // SEG-069-T003: a genuinely new profile has no settings, library or viewer-settings file yet (checked before anything creates them).
+  std::error_code profile_ec;
+  bool fresh_profile = !fs::exists(settings_file_, profile_ec) && !fs::exists(catalog_.file(), profile_ec) && !fs::exists(viewer_settings_file_, profile_ec);
   catalog_.load();
   catalog_notice_ = catalog_.notice();
   settings_ = load_launcher_settings(settings_file_);
@@ -1092,6 +1252,26 @@ int App::run() {
     const auto records = [&] { std::size_t n = 0; for (const auto &e : catalog_.entries()) n += e.builds.size(); return n; };
     const std::size_t before = records();
     if (catalog_.migrate_cache(cache_dir_, now_seconds()) != 0 || records() != before) save_catalog();
+  }
+  if (!catalog_.entries().empty()) fresh_profile = false;  // adoption of an existing product cache means this is not a new installation
+  {
+    // The first-run question is interactive only: scripted/automated windows (GUI scripts, screenshots, autoplay) are never blocked by it unless a
+    // test asks for it explicitly with SEGARECOMP_GUI_ONBOARDING=1. Everything else counts as already answered, in memory, so a later settings
+    // save cannot turn an existing or automated profile into a "new" one.
+    const bool automated = SDL_getenv("SEGARECOMP_GUI_SCRIPT") != nullptr || SDL_getenv("SEGARECOMP_GUI_AUTOPLAY") != nullptr || SDL_getenv("SEGARECOMP_SHOT_PATH") != nullptr || SDL_getenv("SEGARECOMP_SHOT_ROM") != nullptr;
+    // SEGARECOMP_GUI_ONBOARDING=1 lets an automated window ask on a genuinely new profile; =always asks regardless of the profile (test seam).
+    const char *onboarding_env = SDL_getenv("SEGARECOMP_GUI_ONBOARDING");
+    const bool forced = onboarding_env != nullptr, always = forced && std::string(onboarding_env) == "always";
+    if (!settings_.intermediates_choice_made) {
+      if (always || (fresh_profile && (!automated || forced))) {
+        modal_ = Modal{};
+        modal_.kind = Modal::Kind::first_run_intermediates;
+        modal_.title = "Keep build intermediates?";
+        trace("onboarding=intermediates_shown");
+      } else {
+        settings_.intermediates_choice_made = true;
+      }
+    }
   }
   if (layout_.problem.empty()) sms_probe_ = std::async(std::launch::async, [lay = layout_] { return sms_optimized_available_blocking(lay); });
   if (!catalog_notice_.empty()) toast(catalog_notice_, true);
