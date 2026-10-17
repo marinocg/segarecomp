@@ -115,7 +115,7 @@ class Driver:
         self.work.mkdir(parents=True, exist_ok=True)
         self.objects_dir = self.work / "objects"
         self.objects_dir.mkdir(exist_ok=True)
-        self.cflags = CFLAGS + (args.cflags.split() if args.cflags else [])
+        self.cflags = CFLAGS + self.reproducible_flags(args.cc) + (args.cflags.split() if args.cflags else [])
         self.window = args.partition_window
         self.jobs = max(1, args.jobs)
         self.bios_bytes = None
@@ -130,6 +130,20 @@ class Driver:
         self.peak_emit_kb = 0
         self.lock = threading.Lock()
         self.key_base = self.object_key_base()
+
+    @staticmethod
+    def reproducible_flags(cc):
+        """Clang targeting COFF stamps a time into every object unless asked not to (`/Brepro`); the flag is used only where the
+        compiler accepts it under the strict flags (gcc rejects it, ELF/Mach-O clang ignores it without a warning or rejects it)."""
+        flag = "-mno-incremental-linker-compatible"
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = pathlib.Path(tmp) / "probe.c"
+            probe.write_text("int segarecomp_probe(void);\nint segarecomp_probe(void) { return 0; }\n")
+            try:
+                out = run([cc, *CFLAGS, flag, "-c", "probe.c", "-o", "probe.o"], 60, cwd=tmp)
+            except BuildFailure:
+                return []
+            return [flag] if out.returncode == 0 else []
 
     # ---- the object cache ----
     def object_key_base(self):

@@ -153,8 +153,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check(flag.get("ok") and flag["round_metrics"][0]["rebuilt"] == flag["round_metrics"][0]["units"],
           "a changed compiler flag rebuilds every unit")
     cold = drive(tmp / "w1-reverse", cue, bios, copy_spec, "--partition-window", window, "--jobs", 1, "--reverse-compile-order")
-    check(cold.get("ok") and cold.get("link_inputs") == s1["link_inputs"],
-          "a cold build in reverse order with one job links byte-identical objects in the same order")
+    differing = [i for i, (a, b) in enumerate(zip(cold.get("link_inputs", []), s1["link_inputs"])) if a != b]
+    check(cold.get("ok") and len(cold["link_inputs"]) == len(s1["link_inputs"]) and not differing,
+          "a cold build in reverse order with one job links byte-identical objects in the same order (differing inputs %s of %d)"
+          % (differing, len(s1["link_inputs"])))
     if cold.get("ok"):
         check(run_program(pathlib.Path(cold["program"]), disc, bios) == run_program(exes[1], disc, bios),
               "the reverse-order cold build runs identically")
