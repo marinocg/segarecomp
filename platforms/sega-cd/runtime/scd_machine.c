@@ -140,9 +140,12 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
       /* SEG-064-T002 (ADR 0142): the verified BIOS image, when the profile maps one; past its end (or without one) bios_absent. */
       if (m->bios != NULL && a + width <= m->bios_size) {
         *value = scd_ram_get(m->bios, a, width);
-        /* SEG-064-T003: the level-4 vector's low word reads the H-INT vector register ($A12006; contract section 16). */
-        if (a == 0x72U || a == 0x73U)
-          *value = width == 2U ? m->hint_vector : (a == 0x72U ? (uint32_t)(m->hint_vector >> 8) : (uint32_t)(m->hint_vector & 0xFFU));
+        /* SEG-064-T003: the level-4 vector reads $FFFF:<H-INT vector register> (GPGX scd_reset writes $FFFF over the boot ROM's $70
+         * word and $A12006 owns its $72 word; contract section 16). */
+        if (a >= 0x70U && a < 0x74U) {
+          const uint32_t word = a < 0x72U ? 0xFFFFU : m->hint_vector;
+          *value = width == 2U ? word : ((a & 1U) ? (word & 0xFFU) : (word >> 8));
+        }
         return 0;
       }
       return scd_fail_access(m, SCD_MAIN, SCD_STOP_BIOS_ABSENT, pc, address, width, 0);
@@ -358,7 +361,7 @@ static SegarecompM68kVectorResolution scd_hook_vector(void *context, uint32_t ve
       return SEGARECOMP_M68K_VECTOR_NOT_INSTALLED;
     }
     for (i = 0; i < 4U; ++i) value = (value << 8U) | x->m->bios[vector * 4U + i]; /* SEG-064-T002: the image's vector table */
-    if (vector == 28U) value = (value & UINT32_C(0xFFFF0000)) | x->m->hint_vector; /* SEG-064-T003: level 4 low word = $A12006 */
+    if (vector == 28U) value = UINT32_C(0xFFFF0000) | x->m->hint_vector; /* SEG-064-T003: level 4 = $FFFF:$A12006 (GPGX) */
     if (!scd_compiled(x->m, x->cpu, value & UINT32_C(0x00FFFFFF)) && !scd_ram_handler(x->m, x->cpu, value)) {
       x->vector_failure = SCD_STOP_EXCEPTION_VECTOR_NOT_COMPILED;
       return SEGARECOMP_M68K_VECTOR_UNREPRESENTABLE;
@@ -674,7 +677,7 @@ int scd_machine_init_bios(ScdMachine *m, const ScdProgram *program, const ScdAut
   m->cpu[SCD_MAIN].cycle_ticks = SCD_MAIN_CYCLE_TICKS;
   m->cpu[SCD_SUB].cycle_ticks = SCD_SUB_CYCLE_TICKS;
   m->cpu[SCD_MAIN].next = UINT64_C(40) * SCD_MAIN_CYCLE_TICKS; /* MC68000 reset exception processing: 40 clocks (UM68K) */
-  m->hint_vector = bios_size >= 0x74U ? (uint16_t)((bios[0x72] << 8) | bios[0x73]) : 0U; /* GPGX: the register is the ROM's word */
+  m->hint_vector = 0xFFFFU; /* GPGX scd_reset(1): "H-INT default vector" - the boot ROM's $70 and $72 words read $FFFF */
   m->ga.ctl = 0x02U;
   m->ga.sub_halted = 1U;
   m->ga.prg_window = 1U;

@@ -11,9 +11,12 @@ On the project-authored synthetic BIOS-like image (tools/sega_cd_bios_fixture.py
     dispatch unit; a changed compiler flag rebuilds every unit; a cold build in reverse compile order with one job links a byte-identical
     program.
 usage: sega_cd_bios_partition_test.py <segarecomp> <cc> <project root>"""
+import argparse
+import importlib.util
 import json
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -146,6 +149,29 @@ with tempfile.TemporaryDirectory() as tmp:
     cold = drive(tmp / "w1-reverse", cue, bios, copy_spec, "--partition-window", window, "--jobs", 1, "--reverse-compile-order")
     check(cold.get("ok") and pathlib.Path(cold["program"]).read_bytes() == exes[1].read_bytes(),
           "a cold build in reverse order with one job links a byte-identical program")
+
+    # ---- the object key covers headers reached through relative includes outside the runtime directories ----
+    tree = tmp / "tree"
+    for part in ("tools", "platforms", "libs"):
+        shutil.copytree(ROOT / part, tree / part, ignore=shutil.ignore_patterns("__pycache__"))
+    spec = importlib.util.spec_from_file_location("copied_driver", tree / "tools" / "sega_cd_bios_build.py")
+    copied = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(copied)
+
+    def key():
+        args = argparse.Namespace(work=str(tmp / "keywork"), cflags="", partition_window=0, jobs=1, bios=str(bios), cc=CC)
+        return copied.Driver(args).key_base
+    base_key = key()
+    with open(tree / "libs" / "cpu" / "m68k" / "include" / "segarecomp" / "cpu" / "m68k" / "timing_core.h", "a") as f:
+        f.write("\n/* cache probe */\n")
+    core_key = key()
+    with open(tree / "libs" / "device" / "sega" / "genesis" / "include" / "segarecomp" / "device" / "sega" / "genesis" /
+              "controller_io_contract.h", "a") as f:
+        f.write("\n/* cache probe */\n")
+    device_key = key()
+    (tree / "platforms" / "sega-cd" / "README.cache-probe").write_text("not a dependency\n")
+    check(base_key != core_key != device_key and key() == device_key,
+          "the object key changes with a CPU-core or device-contract header outside the runtime directories, not with an unrelated file")
 
 if failures:
     print("%d failure(s)" % len(failures))

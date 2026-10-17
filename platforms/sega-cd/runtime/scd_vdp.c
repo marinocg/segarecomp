@@ -8,8 +8,10 @@
  * access the host's master clock is set to the machine time (one master clock = 500,000 ticks), so the VDP status and HV counter
  * are the Genesis runtime's projections of the executed schedule. The vertical-blank onset is a machine device event; the VDP's
  * vertical interrupt is the main processor's level-6 request (GPGX `vint_pending`: set at every onset, requested while register #1
- * IE0 is set, cleared by the acknowledge). The Z80 never executes here: once it has been runnable, any main read that could observe
- * its execution (Z80 RAM, YM2612) is the typed stop main_device_unsupported. */
+ * IE0 is set, cleared by the acknowledge). The Z80 never executes here: once it has been runnable, any main read of the Z80 area (its
+ * RAM, YM2612) is the typed stop main_device_unsupported. What a running Z80 would do on the 68000 side through its bank window (work
+ * RAM, VDP/PSG writes) is not modelled and cannot be detected here: a recorded deviation (contract sections 12 and 16). Setting the
+ * H-interrupt enable is a typed stop at the write (the line counter is not modelled). */
 #include "scd_runtime.h"
 
 #include <stdlib.h>
@@ -85,6 +87,26 @@ static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t sec
   return 0;
 }
 
+/* 1 when a control-port write (a word, or a long as two words high first) contains a register-#0 write with IE1 set. A word written while
+ * the VDP awaits a command's second word is that second word; otherwise a word of the form 10xx xxxx is a register write and any other
+ * word is the first word of a two-word command. */
+static int scd_vdp_sets_ie1(int awaiting, uint32_t width, uint32_t value) {
+  const uint32_t words[2] = {width == 4U ? value >> 16 : value & 0xFFFFU, value & 0xFFFFU};
+  uint32_t i;
+  for (i = 0; i < (width == 4U ? 2U : 1U); ++i) {
+    if (awaiting) {
+      awaiting = 0;
+      continue;
+    }
+    if ((words[i] & 0xC000U) == 0x8000U) {
+      if ((words[i] & 0xFF10U) == 0x8010U) return 1;
+    } else {
+      awaiting = 1;
+    }
+  }
+  return 0;
+}
+
 int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
   GenesisRuntime *host = scd_host(m);
   GenesisRuntimeStop stop = {0};
@@ -93,6 +115,10 @@ int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write
   if (m->bios != NULL) {
     if (is_write && (address & ~3U) == 0xC00004U && width != 1U) {
       const int awaiting = host->devices.vdp.control_port_awaiting_second_word != 0U;
+      /* The H-interrupt: register #0 IE1 (bit 4) would let the line counter (not modelled; GPGX latches it on active lines whether or
+       * not IE1 is set) request level 4. Setting it is the typed stop interrupt_source_unsupported at the write, before any line. */
+      if (scd_vdp_sets_ie1(awaiting, width, *value))
+        return scd_fail_access(m, SCD_MAIN, SCD_STOP_INTERRUPT_SOURCE_UNSUPPORTED, pc, address, width, 1);
       uint32_t second = UINT32_MAX;
       if (width == 2U && awaiting) second = *value & 0xFFFFU;
       else if (width == 4U && awaiting) second = *value >> 16;
@@ -131,9 +157,9 @@ static int scd_prefetch_word(const ScdMachine *m, uint32_t *word) {
   hi = scd_stream_byte(m, at);
   lo = scd_stream_byte(m, at + 1U);
   if (hi == NULL || lo == NULL) return 0;
-  /* The level-4 vector word (BIOS ROM $72) reads the H-INT vector register (contract section 16). */
-  if (at < UINT32_C(0x00200000) && (at & UINT32_C(0x3FFFF)) == 0x72U) {
-    *word = m->hint_vector;
+  /* The level-4 vector words of the BIOS ROM read $FFFF and the H-INT vector register (contract section 16). */
+  if (at < UINT32_C(0x00200000) && ((at & UINT32_C(0x3FFFF)) == 0x70U || (at & UINT32_C(0x3FFFF)) == 0x72U)) {
+    *word = (at & UINT32_C(0x3FFFF)) == 0x70U ? 0xFFFFU : m->hint_vector;
     return 1;
   }
   *word = ((uint32_t)*hi << 8) | *lo;
@@ -163,9 +189,16 @@ int scd_main_device_access(ScdMachine *m, uint32_t address, uint32_t width, int 
     return scd_fail_access(m, SCD_MAIN, SCD_STOP_MAIN_DEVICE_UNSUPPORTED, pc, address, width, 0); /* would observe the Z80 */
   /* Version register: a Mega-CD is attached, so bit 5 (DISK, "expansion unit") reads 0 (GTO1 I/O section; GPGX io_reset sets it only
    * when system_hw != SYSTEM_MCD). The region bits are the host's configured profile, as on the Genesis. */
-  if (!is_write && ((address == UINT32_C(0x00A10001) && width == 1U) || (address == UINT32_C(0x00A10000) && width == 2U))) {
+  if (!is_write && address == UINT32_C(0x00A10001) && width == 1U) {
     *value = segarecomp_genesis_region_version_value(host->region_profile) & 0xDFU;
     scd_log(m, 0x46U, address, *value);
+    return 0;
+  }
+  /* GPGX ctrl_io_read_word: a word read of an I/O register returns its byte on both lanes. */
+  if (!is_write && width == 2U && address >= UINT32_C(0x00A10000) && address < UINT32_C(0x00A10020)) {
+    uint32_t byte = 0U;
+    if (scd_main_device_access(m, address + 1U, 1U, 0, &byte, pc) != 0) return 1;
+    *value = (byte << 8) | byte;
     return 0;
   }
   /* Z80 BUSACK: the bit (D0 for a byte at $A11100, D8 for the word) reads 0 iff the bus is granted; GPGX returns the remaining bits
@@ -200,8 +233,6 @@ void scd_vdp_event(ScdMachine *m) {
   m->vint_pending = 1U;
   host->devices.vdp.status_register = (uint16_t)(host->devices.vdp.status_register | 0x0080U); /* F: vertical interrupt occurred */
   scd_log(m, 0x90U, (uint32_t)m->vdp_frames, host->devices.vdp.registers[1]);
-  /* The H-interrupt (register #0 IE1) needs the line counter, which this profile does not model yet. */
-  if (host->devices.vdp.registers[0] & 0x10U) scd_fail(m, 2U, SCD_STOP_INTERRUPT_SOURCE_UNSUPPORTED, m->cpu[SCD_MAIN].pc, 4U);
 }
 
 uint32_t scd_main_request_level(const ScdMachine *m) {

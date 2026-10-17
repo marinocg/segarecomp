@@ -5,7 +5,7 @@ Every byte is written here with the fixture encoder of tools/sega_cd_fixture_dis
 The main program exercises, in order, the main-side devices an authentic BIOS reaches before the sub reset release, stores what it
 observes in a result block, then builds a small sub program in PRG RAM and releases the sub (the runnable epoch):
 
-  +$00 version byte $A10001 (USA NTSC, Mega-CD attached: MODE 1, VMOD 0, DISK 0, VER 0 = $80)    +$02 version word $A10000 ($0080)
+  +$00 version byte $A10001 (USA NTSC, Mega-CD attached: MODE 1, VMOD 0, DISK 0, VER 0 = $80)    +$02 version word $A10000 ($8080: the byte on both lanes)
   +$04 CTRL1 read back after writing $40                    +$06 DATA1 with TH = 1 (3-button pad, nothing pressed: $7F)
   +$08 DATA1 with TH = 0 ($33: Start/A and Down/Up released, bits 3-2 low)
   +$0A BUSACK byte while the bus is not requested (D0 = 1, D7-D1 = the prefetch: the high byte of the next instruction word)
@@ -16,14 +16,14 @@ observes in a result block, then builds a small sub program in PRG RAM and relea
   +$18 vertical-blank flag observed by polling the status register (1)
   +$1A frames counted by the level-6 handler, entered through a work-RAM JMP (xxx).L thunk at $FFF900 (3)
   +$1C H-INT vector register read back ($A12006, $1234)     +$1E BIOS $72 read through the main bus ($1234)
-  +$20 BIOS $70 read through the main bus (the image's own word)
+  +$20 BIOS $70 read through the main bus ($FFFF: the H-INT default vector's high word)
   +$22..+$25 MOVE.L $400100,D0 on the empty cartridge slot: the next instruction word twice (GPGX open bus)
   +$26 TST.B-style byte read $400001: the low byte of the next instruction word
   +$FF $A5 when main reached the epoch
 The sub program writes COMSTAT0 = $C0DE and stops.
 
 Negatives (main d7): 1 an open-bus read by a MOVE whose destination still has extension words (prefetch not established); 2 a Z80
-RAM read after the Z80 has been runnable; 3 a 68K->VDP DMA from Word RAM; 4 the H-interrupt enabled (line counter not modelled);
+RAM read after the Z80 has been runnable; 3 a 68K->VDP DMA from Word RAM; 4 the H-interrupt enabled (line counter not modelled: stops at the write); 8 the same by a long write that also clears it again;
 5 a VDP copy DMA (not modelled by the device); 6 one byte of the sub image corrupted before the release; 7 the image copied into
 PRG-RAM bank 1 (the wrong mapping) - both stop at the epoch before the sub retires anything.
 usage: sega_cd_bios_hw_fixture.py build --out DIR   ->   DIR/bios.bin and DIR/expected.json (stdout: the expected JSON)
@@ -166,6 +166,7 @@ def main_program(sub_len, layout):
     m.move("l", F.imm(VINT_HANDLER), F.absl(THUNK + 2))
     m.clr("w", F.absl(FRAMES))
     negative(m, 4, lambda n: vdp_reg(n, 0, 0x14))         # IE1: the H-interrupt
+    negative(m, 8, lambda n: vdp_cmd(n, 0x80148004))      # IE1 set and cleared again by one long write (two register writes)
     vdp_reg(m, 1, 0x34)                                   # IE0
     m.move_sr(0x2000)
     m.label("frames")
@@ -258,10 +259,10 @@ def expected(rom, sub, layout):
     cart_next = word_at(rom, layout["cart_long_next"])
     byte_next = word_at(rom, layout["cart_byte_next"])
     result = {
-        "0": 0x80, "2": 0x0080, "4": 0x40, "6": 0x7F, "8": 0x33,
+        "0": 0x80, "2": 0x8080, "4": 0x40, "6": 0x7F, "8": 0x33,
         "10": ((free_next >> 8) | 0x01) << 8, "12": ((held_next >> 8) & 0xFE) << 8,
         "14": 0xC35A, "16": 0x5A5A, "18": 0, "20": be(sum(DMA_WORDS), 2), "22": be(sum(ROM_DMA_WORDS), 2), "24": 1, "26": 3,
-        "28": 0x1234, "30": 0x1234, "32": word_at(rom, 0x70), "34": cart_next, "36": cart_next, "38": (byte_next & 0xFF) << 8,
+        "28": 0x1234, "30": 0x1234, "32": 0xFFFF, "34": cart_next, "36": cart_next, "38": (byte_next & 0xFF) << 8,
     }
     padded = sub.ljust((len(sub) + 0xFF) & ~0xFF, b"\0")
     return {
@@ -271,7 +272,7 @@ def expected(rom, sub, layout):
         "sub_comstat0": 0xC0DE, "thunk": THUNK,
         "negatives": {
             "main:d7=1": ["open_bus_read", 0], "main:d7=2": ["main_device_unsupported", 0], "main:d7=3": ["vdp_dma_unsupported", 0],
-            "main:d7=4": ["interrupt_source_unsupported", 2], "main:d7=5": ["vdp_access_unsupported", 0],
+            "main:d7=4": ["interrupt_source_unsupported", 0], "main:d7=8": ["interrupt_source_unsupported", 0], "main:d7=5": ["vdp_access_unsupported", 0],
             "main:d7=6": ["materialized_image_unverified", 1], "main:d7=7": ["materialized_image_unverified", 1],
         },
     }

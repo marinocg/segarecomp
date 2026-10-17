@@ -25,8 +25,10 @@ including the H-INT vector register, the PRG-RAM window, the empty cartridge slo
    unit's text depends only on its own window, never on the program identity, so it is unchanged by an admission elsewhere. W = 0 is the
    single unit. Partitioning is not part of the program identity. Measured choice: **W = 8 KiB** (below).
 2. **Content-addressed object reuse.** `tools/sega_cd_bios_build.py` compiles each unit (and each runtime source) to an object keyed by
-   the SHA-256 of a cache version, the compiler's identity (`--version`, `-dumpmachine`, resolved path), the flags, every header of the
-   two runtime include directories (name and content), and the unit's name and text; units compile in parallel from a private
+   the SHA-256 of a cache version, the compiler's identity (`--version`, `-dumpmachine`, resolved path), the flags, the content of every
+   file the compiler reports as a dependency (`-M`) of a probe unit including the runtime ABI header and of every runtime source -
+   which reaches the CPU-owned exception/timing cores and the Genesis device contracts outside the runtime directories - and the
+   unit's name and text; units compile in parallel from a private
    directory under their bare name (no host path enters an object) and link in the emitter's order. An unchanged unit is reused; a
    changed unit, flag, compiler or header rebuilds what depends on it; the shared unit rebuilds when its tables change.
 3. **One admission per pass (kept).** A pass ends at its first stop: an epoch capture or a RAM frontier is a fail-closed stop and nothing
@@ -37,20 +39,24 @@ including the H-INT vector register, the PRG-RAM window, the empty cartridge slo
    and the whole VDP window are served by the existing Genesis runtime device host (no second VDP, no second I/O model). Before every
    access the host's master clock is set to the machine time (500,000 ticks per master clock), so the VDP status flags and HV counter
    are the Genesis runtime's projections of the executed schedule. Device facts the Mega-CD changes are applied here: the version
-   register's DISK bit (bit 5) reads 0 (expansion unit attached; GTO1 I/O section, GPGX `io_reset`), BUSACK's unused bits are open bus
-   (GPGX `mem68k.c`).
+   register's DISK bit (bit 5) reads 0 (expansion unit attached; GTO1 I/O section, GPGX `io_reset`), a word read of an I/O register
+   returns its byte on both lanes (GPGX `ctrl_io_read_word`), BUSACK's unused bits are open bus (GPGX `mem68k.c`).
 5. **The Z80 is not executed.** The BIOS's Z80 work before the epoch is a write-only RAM upload plus bus/reset control; nothing the main
    processor observes before the epoch depends on Z80 execution. Once the Z80 has been runnable (reset released, bus not requested), any
-   main read of the Z80 area is the typed stop `main_device_unsupported` - never a value invented for unmodelled execution.
+   main read of the Z80 area is the typed stop `main_device_unsupported`. What a running Z80 would do through its 68000 bank window
+   (work RAM, VDP/PSG writes) is not modelled and not detectable here: a recorded deviation (for the authentic epoch, main work RAM
+   matched the reference in every byte).
 6. **VDP DMA.** Fill is the Genesis device's VRAM fill. A 68K->VDP transfer is fed from the Sega CD memory: the BIOS image is the host's
    read-only region and main work RAM is mirrored into the host before the arming command; a source in Word RAM or the PRG-RAM window
    (whose Sega CD DMA timing differs) is the typed stop `vdp_dma_unsupported`; copy stays fail-closed in the device. Transfers complete
    at the arming write (no DMA duration: contract section 12).
 7. **Main interrupts.** The vertical-blank onset is a machine device event every frame. Following GPGX, the VDP's vertical interrupt
    becomes pending at every onset and requests level 6 while register #1 IE0 is set; the acknowledge clears it (and status F). The main
-   processor accepts it through the CPU-owned exception core with the BIOS image's vectors; the level-4 vector's low word is the H-INT
-   vector register `$A12006` (GPGX writes the boot ROM's `$72` word; reads of `$72` return it). Enabling the H-interrupt (register #0
-   IE1) is the typed stop `interrupt_source_unsupported` at the next onset: the line counter is not modelled.
+   processor accepts it through the CPU-owned exception core with the BIOS image's vectors; the level-4 vector is `$FFFF` : the H-INT
+   vector register `$A12006` (GPGX `scd_reset` writes `$FFFF` over the boot ROM's `$70` and `$72` words and `$A12006` owns `$72`; reads
+   of `$70-$73` return them; the register starts at `$FFFF`). Writing register #0 with IE1 (the H-interrupt) set is the typed stop
+   `interrupt_source_unsupported` at that write: GPGX latches the line counter on active lines whatever IE1 says, and the counter is
+   not modelled.
 8. **Open bus (GPGX model, exact cases only).** A main read nothing answers - the empty cartridge slot `$400000-$7FFFFF`, unused areas -
    returns the instruction-stream word at the processor's prefetch position, its byte selected by A0 (GPGX `m68k_read_bus_8/16`: the
    word at the CPU's PC after the extension words consumed before the operand read; for a long read both halves). The emitter states
@@ -99,8 +105,14 @@ sub-side Gate Array register this profile does not model (the stopwatch) a few i
 next step there is the BIOS's level-6 work-RAM thunk (an operand-template frontier of decision 9). Both are SEG-064 sub-side/boot work,
 outside this task.
 
+**Independent review (correction cycle 1).** The adversarial validator contested three points, each corrected in this PR and tested:
+the object key missed headers included from outside the runtime directories (now the compiler's dependency set; a copied-tree test
+edits such headers); the H-interrupt enable was only checked at the frame onset (now a stop at the enabling write, also inside a long
+write); the H-INT default vector followed the image instead of GPGX's `$FFFF` (now `$FFFF` for `$70` and `$72`). Re-run after the
+corrections: same authentic result (extent, bytes, zero tail), 15/15 identical determinism runs.
+
 **Recorded deviations.** VDP DMA has no duration (fills and transfers complete at the arming write); a poll for completion therefore
-iterates once - the only per-address count difference observed. The Z80 is never executed (decision 5). The open-bus model is GPGX's
+iterates once - the only per-address count difference observed. The Z80 is never executed and its bank-window effects are not modelled (decision 5). The open-bus model is GPGX's
 (the reference) and applies only where the prefetch position is exact (decision 8). The H-interrupt line counter is not modelled.
 
 ## Consequences

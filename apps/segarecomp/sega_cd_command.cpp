@@ -348,6 +348,8 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     }
     return true;
   };
+  for (const auto &unit : emission.units)
+    if (std::filesystem::path(out_path).filename() == unit.name) return bad("emit", "out_path_names_a_unit");
   if (!write_text(out_path, emission.c_source)) return 1;
   std::size_t unit_bytes = 0;
   for (const auto &unit : emission.units) {

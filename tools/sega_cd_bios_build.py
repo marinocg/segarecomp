@@ -17,8 +17,8 @@ stopped pass cannot produce; the per-round cost is instead bounded by incrementa
 
   - the emitter partitions the program into deterministic processor/PC-window translation units (`--partition-window`) plus one
     shared dispatch unit; a unit's text depends only on its own window's images, variants and templates;
-  - every object is cached under the SHA-256 of (cache version, compiler identity, flags, every runtime header the units can
-    include, the unit's name and text): an unchanged unit is reused across rounds and builds, a changed unit or any changed input of
+  - every object is cached under the SHA-256 of (cache version, compiler identity, flags, the content of every file the compiler
+    reports as a dependency of the runtime ABI header and of the runtime sources, the unit's name and text): an unchanged unit is reused across rounds and builds, a changed unit or any changed input of
     its key is rebuilt, and the shared dispatch unit (entry tables, program identity) is rebuilt only when its text changes;
   - units compile in parallel; the link order is the emitter's unit order, never the host's completion or directory order.
 
@@ -54,7 +54,7 @@ MAX_TEMPLATES = 64
 MAX_ROUNDS = 1 + MAX_EPOCHS + MAX_TEMPLATES  # ADR 0142 decision 8
 TEMPLATE_OPCODES = ("4ef8", "4ef9")           # JMP (xxx).W / JMP (xxx).L: the only proposed shapes
 DEFAULT_WINDOW = 0x2000                       # measured (ADR 0142 "Result (SEG-064-T003)"); 0 = one translation unit
-CACHE_VERSION = "segarecomp.sega_cd_bios_build.objects.v1"
+CACHE_VERSION = "segarecomp.sega_cd_bios_build.objects.v2"
 EXE = ".exe" if os.name == "nt" else ""
 
 
@@ -133,18 +133,37 @@ class Driver:
 
     # ---- the object cache ----
     def object_key_base(self):
-        """Everything except the unit's own name and text that can change an object: compiler identity, flags and every header the
-        generated units and the runtime can include (both runtime include directories, by name and content)."""
+        """Everything except the unit's own name and text that can change an object: compiler identity, flags, and the content of every
+        file the compiler reports as a dependency (`-M`, system headers included) of a probe unit that includes the runtime ABI header
+        (what every generated unit includes) and of every runtime source - so headers reached through relative paths outside the
+        runtime directories (the CPU-owned exception/timing cores, the Genesis device contracts) are part of the key."""
         version = run([self.args.cc, "--version"], 60)
         machine = run([self.args.cc, "-dumpmachine"], 60)
         if version.returncode != 0:
             raise BuildFailure("compiler_unavailable", version.stderr[-500:])
         resolved = shutil.which(self.args.cc) or self.args.cc
-        headers = []
-        for directory in (SCD_RUNTIME, GENESIS_RUNTIME):
-            for header in sorted(directory.glob("*.h")):
-                headers += [directory.name + "/" + header.name, header.read_bytes()]
-        return sha256_text(CACHE_VERSION, resolved, version.stdout, machine.stdout, json.dumps(self.cflags), *headers)
+        dependencies = set()
+        with tempfile.TemporaryDirectory(dir=self.objects_dir) as tmp:
+            probe = pathlib.Path(tmp) / "probe.c"
+            probe.write_text('#include <stddef.h>\n#include <stdint.h>\n#include "scd_runtime.h"\n')
+            for source in [probe] + self.runtime_sources():
+                out = run([self.args.cc, *self.cflags, "-I", SCD_RUNTIME.resolve(), "-I", GENESIS_RUNTIME.resolve(), "-M", source], 120)
+                if out.returncode != 0:
+                    raise BuildFailure("dependency_scan_failed", out.stderr[-1000:])
+                text = out.stdout.replace("\\\n", " ").replace("\\ ", "\0")
+                for token in text.split(":", 1)[1].split():
+                    path = pathlib.Path(token.replace("\0", " ")).resolve()
+                    if path != probe.resolve():
+                        dependencies.add(path)
+        files = []
+        for path in sorted(dependencies):
+            files += [str(path.relative_to(ROOT)) if ROOT in path.parents else str(path), path.read_bytes()]
+        self.dependency_count = len(dependencies)
+        return sha256_text(CACHE_VERSION, resolved, version.stdout, machine.stdout, json.dumps(self.cflags), *files)
+
+    @staticmethod
+    def runtime_sources():
+        return sorted(SCD_RUNTIME.glob("*.c")) + [GENESIS_RUNTIME / n for n in ("runtime.c", "vdp_render.c", "frame_export.c")]
 
     def object_for(self, name, text, include_dirs):
         """Compile one source text (or reuse its cached object). Returns (object path, rebuilt?)."""
@@ -179,8 +198,7 @@ class Driver:
 
     def runtime_objects(self):
         if self.runtime is None:
-            sources = sorted(SCD_RUNTIME.glob("*.c")) + [GENESIS_RUNTIME / n for n in ("runtime.c", "vdp_render.c", "frame_export.c")]
-            items = [(s.parent.parent.name + "_" + s.name, s.read_bytes(), (SCD_RUNTIME, GENESIS_RUNTIME)) for s in sources]
+            items = [(s.parent.parent.name + "_" + s.name, s.read_bytes(), (SCD_RUNTIME, GENESIS_RUNTIME)) for s in self.runtime_sources()]
             self.runtime, _ = self.compile_all(items)
         return self.runtime
 
