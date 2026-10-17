@@ -90,7 +90,7 @@ prefetched instruction word, which the profile does not model: it is the typed s
 | `$A12000-$A120FF` | Gate Array, main side (section 5); A1-A5 decode, `$A12040-$A120FF` mirror `$A12000-$A1203F` | per register | V2 registers; mirror **G** (GPGX "mirrored up to $A120FF") |
 | `$C00000-$C00007` | VDP data/control ports | composed Genesis VDP device (ADR 0128); VDP DMA enable is a typed stop | V2 (Genesis map) |
 | `$E00000-$FFFFFF` | 64 KiB work RAM, repeated every 64 KiB | linear | V2 (Genesis map) |
-| anything else | | typed stop `unmapped` | C |
+| anything else | | typed stop `unmapped` (the BIOS-image profile maps more: section 16) | C |
 
 **PRG-RAM window gate (G).** The window is mapped at power-on. On every write of `SRES`/`SBRQ` (`$A12001`) that changes the
 sub's halt state, the window becomes mapped exactly when `SBRQ` then reads 1; a write that leaves the halt state unchanged
@@ -124,7 +124,8 @@ open bus; registers GPGX marks "!LDS and !UDS are ignored" (`$FF8002/3`, `$FF800
 byte write to either half; word-only sub registers (`$FF8008-$FF800D`) take a byte write as the byte duplicated into both
 halves; `$FF8068-$FF80FF` is plain storage. Registers of devices this profile does not model - the stopwatch (`$0C`), the
 font and graphics registers (`$FF804C-$FF8067`), the subcode buffer (`$FF8100-$FF81FF`), the CDC host-data port (`$08`
-words) and the H-INT vector (`$A12006` word, which reads and writes the BIOS ROM) - are typed stops
+words) and the H-INT vector (`$A12006` word, which reads and writes the BIOS ROM; implemented by the BIOS-image profile, section 16) -
+are typed stops
 (`gate_array_register_unsupported`, `cdc_destination_unsupported`, `bios_absent`) carrying the side, address, width and
 direction.
 
@@ -308,7 +309,7 @@ All sub interrupts are autovectored (vector `24 + level`); the handler is the lo
 a compiled entry of the sub's image set, otherwise the acceptance stops with `interrupt_handler_not_compiled`.
 Acceptance and the exception frame are the CPU-owned rules of ADR 0043 (`exception_core.h`). Main CPU interrupts
 (VDP, external) are not wired in this profile: the main vectors live in the absent BIOS ROM, so any main exception
-stops with `bios_absent`.
+stops with `bios_absent`. The BIOS-image profile wires the VDP's level 6 (section 16).
 
 ## 11. Execution and verification rules
 
@@ -333,6 +334,9 @@ stops with `bios_absent`.
   access, Word RAM access and ownership change first brings a transfer up to its instruction's start tick.
 - The CDD seek latency is GPGX's default model (section 8), not measured drive behaviour.
 - `SBRQ` and the sub's wait for Word RAM take effect at instruction boundaries (the real acknowledge latency is not modelled).
+- BIOS-image profile (SEG-064-T003): VDP DMA has no duration - a fill or 68K->VDP transfer completes at its arming write, so a guest
+  poll for DMA completion iterates once (the reference's fill takes time: observed as the only per-address execution-count difference
+  up to the sub release, ADR 0143). The vertical-blank onset is the Genesis runtime's NTSC schedule from machine time 0.
 
 ## 13. Unresolved items
 
@@ -349,7 +353,10 @@ Items marked **G** above are implemented as GPGX behaves; they stay here until h
 | 1M `DMNA` request semantics and 1M -> 2M ownership (G) | GPGX models a request latch; MAME does not | hardware test (MCDV memory-mode tests) | SEG-065 |
 | `SBRQ` readback when the bus is requested while the sub is in STOP (G: reads 0) | GPGX: "verified on real hardware", MAME: no special case | hardware test | SEG-064 |
 | peripheral reset scope (G: GPGX `scd_reset(0)`) | GPGX itself marks it "TODO: figure what exactly is reset" | hardware test | SEG-064 |
-| open-bus read values | the prefetched instruction word; not modelled (typed stop `open_bus_read`) | prefetch model for the generated CPU | SEG-065 |
+| open-bus read values | the prefetched instruction word; not modelled in the synthetic profile (typed stop `open_bus_read`); the BIOS-image profile uses GPGX's model where the prefetch position is exact (section 16), V1 (GPGX; hardware bus capacitance agrees for the cases used) | hardware test of open-bus reads (empty slot, BUSACK unused bits) | SEG-065 |
+| H-INT vector register `$A12006` (BIOS-image profile: the boot ROM's `$72` word) | GPGX writes the ROM copy's `$72` word; one source in reach | MAME `megacd.cpp` H-INT vector handling or a hardware test | SEG-064 |
+| VDP vertical-interrupt pending rule (G: pending at every onset, requested while IE0, cleared by the acknowledge) | GPGX `vint_pending`; the repository Genesis runtime raises it only while IE0 is set | hardware test (enable IE0 inside VBlank) | SEG-064 |
+| VDP DMA duration and the Word-RAM/PRG DMA source (BIOS-image profile: no duration; Word RAM/PRG sources a typed stop) | GPGX models both (Word RAM transfers lag one word) | MiSTer logs / GPGX `vdp_dma_68k` comparison | SEG-064 |
 | CDD seek latency, command checksum handling, decoder active period (G) | GPGX models them (latency is a configurable approximation); MAME differs | logic-analyser logs (MiSTer `mcd logs`) | SEG-065 |
 | decoding a non-data block from a raw image | GPGX's raw path differs from its cooked path; the profile uses the cooked behaviour (section 7) | hardware: what the CDC writes for a seek-time block | SEG-063: not resolvable without hardware access; carried forward |
 | system-header longwords `$38/$3C/$40-$4C` | one primary source in reach of this cloud | read the Mega-CD Disc Format specification and the Sega CD BIOS manual directly | SEG-064 |
@@ -379,7 +386,8 @@ Items marked **G** above are implemented as GPGX behaves; they stay here until h
 
 ## 16. BIOS-image profile (SEG-064-T002, ADR 0130 Amendment 1, ADR 0142)
 
-A second, explicitly selected profile used so far only by the synthetic mechanism proof. It changes nothing in sections 1-15 for the
+A second, explicitly selected profile: the synthetic mechanism proof (SEG-064-T002) and, with a locally held BIOS, the authentic main
+BIOS up to the sub runnable epoch (SEG-064-T003, ADR 0143). It changes nothing in sections 1-15 for the
 synthetic post-BIOS profile.
 
 | item | rule | tag |
@@ -390,4 +398,11 @@ synthetic post-BIOS profile.
 | sub runnable epoch | the sub's first runnable transition after a reset (`SRES` 0 -> 1 with `SBRQ` = 0, or `SBRQ` 1 -> 0 after such a reset); live PRG RAM `[0, E)` (E: last non-zero byte rounded up to 256) must equal an admitted epoch image, else `materialized_image_unverified` before the sub retires anything; the sub's reset exception (vector fetch) is taken there, from the verified bytes | rule C; the fetch timing U (GPGX fetches at the `SRES` write; differs only when the reset is released with the bus requested) |
 | overlapping RAM images | per-PC variants, one per distinct instruction; a variant runs only when all its bytes are live; else `code_bytes_mismatch` | C |
 | operand templates | `JMP (xxx).W/.L` admitted from a build-pass RAM frontier: opcode word guarded, operand read live, destination an even compiled entry of the processor, else `entry_not_compiled` | C |
-| not modelled in this profile yet | every device behaviour an authentic BIOS boot needs beyond sections 5-8 (ADR 0141 inventory); gate G-A | - |
+| main Genesis devices (SEG-064-T003, ADR 0143) | `$A00000-$A0FFFF` Z80 RAM, `$A10000-$A1001F` I/O, `$A11100`/`$A11200` Z80 BUSREQ/RESET, `$C00000-$C0001F` VDP (PSG at `$C00011`, HV counter) are the Genesis runtime device host's, its master clock = machine time / 500,000 ticks; version register bit 5 (DISK) reads 0; an I/O word read returns the register byte on both lanes; BUSACK's other bits are open bus; unsupported shapes stop `main_device_unsupported` | version bit V2 (GTO1, GPGX `io_reset`); BUSACK bits V1 (GPGX); routing C |
+| Z80 | never executed: BUSREQ/RESET and RAM writes only; once the Z80 has been runnable, a main read of the Z80 area stops `main_device_unsupported`; what a running Z80 would do through its 68000 bank window is not modelled (recorded deviation) | C |
+| VDP DMA | fill: the device's; 68K->VDP from the BIOS image or main work RAM (the host is fed from the Sega CD memory); Word RAM / PRG-window sources `vdp_dma_unsupported`; copy fail-closed; no duration (section 12) | sources V2 (GPGX, MAME); duration deviation C |
+| main interrupts | vertical-blank onset every frame (device event); VDP level 6 pending at every onset, requested while register #1 IE0 is set, cleared (with status F) by the acknowledge; accepted through the BIOS vectors (CPU-owned exception core); a register #0 write setting IE1 (H-interrupt) stops `interrupt_source_unsupported` at that write | pending rule G (section 13); acceptance V2 (UM68K) |
+| H-INT vector `$A12006` | word register (initial `$FFFF`): written by main, read back; the level-4 autovector is `$FFFF:<register>`; reads of BIOS `$70`/`$71` return `$FFFF` and of `$72`/`$73` the register | V1 (GPGX `scd_reset`, `mem68k.c`; section 13) |
+| open bus | a main read nothing answers (empty cartridge slot `$400000-$7FFFFF`, unused areas) returns the instruction-stream word at the prefetch position (byte by A0; both halves of a long), stated per generated instruction where exact; otherwise, for the sub and in the synthetic profile `open_bus_read`; empty-slot writes are ignored | V1 (GPGX `m68k_read_bus_8/16`, section 13) |
+| exception into uncompiled RAM | the handler is entered and the dispatch stops `entry_not_compiled` at its PC (a build-pass RAM frontier, ADR 0142 decision 7) | C (ADR 0143 decision 9) |
+| not modelled in this profile yet | sub-side boot hardware, the H-interrupt line counter, Z80 execution, Word-RAM VDP DMA, everything after the sub epoch that ADR 0141 inventories; gate G-A | - |

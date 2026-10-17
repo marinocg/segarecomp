@@ -1,6 +1,9 @@
 # ADR 0142: Sega CD verified broad AOT with bounded executable-image materialization
 
 - Status: Accepted (operator-approved prospective amendment of ADR 0130, SEG-064-T002). Mechanism-gate outcome: see "Result" below.
+- Later (SEG-064-T003, ADR 0143): BIOS-scale emission (translation units, object reuse) and the main-side boot hardware; first G-A
+  evidence - the generated-native authentic main BIOS reproduces the reference's sub epoch image. Decisions 1-8 here are unchanged;
+  ADR 0143 decision 9 adds exception entry as a source of the decision-7 RAM frontier.
 - Related: ADR 0130 (Amendment 1), ADR 0141 (the historical `NO_GO`, unchanged), ADR 0076 (image authorities), ADR 0073 (bounded
   build-time materialization), ADR 0097 #10 (materialized RAM `JMP` thunks), ADR 0049 (byte-identity guards), ADR 0126-0132
   (Sega CD images, dispatch, scheduling, overlays and module lists).

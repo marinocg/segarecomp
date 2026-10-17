@@ -33,7 +33,7 @@ inline constexpr std::uint32_t kMaxEpochImages = 4U;          // ADR 0142 decisi
 inline constexpr std::uint32_t kMaxOperandTemplates = 64U;
 inline constexpr std::uint32_t kMaxCopyImages = 8U;
 inline constexpr std::uint32_t kEpochGranule = 0x100U;        // snapshot length granule (scd_prg_snapshot_length)
-inline constexpr const char *kSegaCdBiosGeneratorVersion = "segarecomp.sega_cd.bios_profile.v1";
+inline constexpr const char *kSegaCdBiosGeneratorVersion = "segarecomp.sega_cd.bios_profile.v2";
 
 enum class BiosError : std::uint8_t { none, size_invalid, header_invalid, reset_vector_invalid };
 [[nodiscard]] const char *bios_error_name(BiosError error) noexcept;
@@ -84,6 +84,7 @@ enum class BiosProfileError : std::uint8_t {
   epoch_invalid,          // empty, longer than PRG RAM, not a whole snapshot (granule / trailing zero rule) or too many
   template_invalid,       // not exactly one JMP (xxx).W/.L at an even RAM address of its processor, duplicate, or too many
   image_validation,
+  partition_invalid,      // a partition window that is not a power of two in [kMinPartitionWindow, kMaxPartitionWindow]
 };
 [[nodiscard]] const char *bios_profile_error_name(BiosProfileError error) noexcept;
 
@@ -97,8 +98,33 @@ struct BiosProfileImageStats {
   std::uint32_t rejected{};   // aligned starts the CPU owner does not decode, lift or lower (no entry)
 };
 
+// SEG-064-T003: deterministic translation-unit partitioning. A window of 0 emits the single translation unit of SEG-064-T002
+// (byte-identical). A non-zero window (a power of two in [kMinPartitionWindow, kMaxPartitionWindow]) emits one unit per processor
+// and non-empty PC window [k * window, (k + 1) * window): every compiled variant, operand template and live-byte selection chain whose
+// PC lies in the window, plus that window's PC switch. `c_source` is then the shared dispatch unit (entry tables, the compiled-entry
+// lookups, the per-processor window switch, the disc tables and the program). A unit's text depends only on the images, variants and
+// templates of its own window - never on the program identity or on other windows - so an unchanged unit stays byte-identical across
+// admissions and its object can be reused. Partitioning changes no behaviour and is not part of the program identity.
+inline constexpr std::uint32_t kMinPartitionWindow = 0x100U;
+inline constexpr std::uint32_t kMaxPartitionWindow = 0x01000000U;
+
+struct BiosProfileEmitOptions {
+  std::uint32_t partition_window{};
+};
+
+struct BiosProfileUnit {
+  std::string name;            // p<cpu>_<first PC, 6 hex digits>.c
+  unsigned cpu{};
+  std::uint32_t first_pc{};    // the window's first PC
+  std::uint32_t functions{};   // instruction functions (variants and templates) in the unit
+  std::string c_source;
+};
+
+[[nodiscard]] bool valid_partition_window(std::uint32_t window) noexcept;
+
 struct BiosProfileEmission {
   std::string c_source;
+  std::vector<BiosProfileUnit> units;  // empty for a single translation unit; otherwise in (cpu, first_pc) order
   std::string program_identity;
   std::vector<BiosProfileImageStats> images;
   std::uint32_t functions{};
@@ -114,6 +140,7 @@ struct BiosProfileEmission {
 // The identity of the program for `inputs` with only its first `admissions` admissions (the provenance chain's links).
 [[nodiscard]] std::string bios_profile_identity(const DiscImage &disc, const BiosProfileInputs &inputs, std::size_t admissions);
 
-[[nodiscard]] BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosProfileInputs &inputs);
+[[nodiscard]] BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosProfileInputs &inputs,
+                                                            const BiosProfileEmitOptions &options = {});
 
 }  // namespace segarecomp::machine::sega_cd

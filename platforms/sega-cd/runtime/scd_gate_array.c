@@ -178,7 +178,10 @@ int scd_ga_main_access(ScdMachine *m, uint32_t index, uint32_t width, int is_wri
     uint32_t high = 0U, low = 0U;
     if (width == 1U) return scd_ga_main_read_byte(m, index, value, pc);
     switch (index) {
-    case 0x06: return scd_ga_stop(m, SCD_MAIN, SCD_STOP_BIOS_ABSENT, 0xA12006U, 2U, 0, pc); /* H-INT vector: BIOS ROM word */
+    case 0x06: /* H-INT vector: the BIOS ROM's level-4 vector low word (SEG-064-T003: the BIOS-image profile's register) */
+      if (m->bios == NULL) return scd_ga_stop(m, SCD_MAIN, SCD_STOP_BIOS_ABSENT, 0xA12006U, 2U, 0, pc);
+      *value = m->hint_vector;
+      return 0;
     case 0x08: return scd_ga_stop(m, SCD_MAIN, SCD_STOP_CDC_DESTINATION_UNSUPPORTED, 0xA12008U, 2U, 0, pc); /* host data */
     case 0x04:
       if (scd_ga_main_read_byte(m, 0x04U, &high, pc) != 0) return 1;
@@ -216,7 +219,11 @@ int scd_ga_main_access(ScdMachine *m, uint32_t index, uint32_t width, int is_wri
     return 0;
   case 0x03: return width == 1U ? scd_word_ram_main_mode_write(m, *value & 0xFFU, pc) : 0;
   case 0x06:
-    if (width == 2U) return scd_ga_stop(m, SCD_MAIN, SCD_STOP_BIOS_ABSENT, 0xA12006U, 2U, 1, pc); /* H-INT vector */
+    if (width == 2U) { /* H-INT vector (word access; GPGX writes the boot ROM's $72 word, which the level-4 autovector reads) */
+      if (m->bios == NULL) return scd_ga_stop(m, SCD_MAIN, SCD_STOP_BIOS_ABSENT, 0xA12006U, 2U, 1, pc);
+      m->hint_vector = (uint16_t)*value;
+      return 0;
+    }
     break;
   case 0x08:
     if (width == 2U) return scd_ga_stop(m, SCD_MAIN, SCD_STOP_CDC_DESTINATION_UNSUPPORTED, 0xA12008U, 2U, 1, pc);
