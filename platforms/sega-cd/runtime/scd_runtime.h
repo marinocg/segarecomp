@@ -83,6 +83,9 @@ typedef enum ScdStopClass {
   SCD_STOP_AMBIGUOUS_IMAGE,            /* more than one overlapping candidate is fully live */
   SCD_STOP_IMAGE_ENTRY_NOT_COMPILED,   /* the selected candidate has no compiled entry at PC */
   SCD_STOP_STALE_IMAGE_SELECTION,      /* the selected image was overwritten and execution re-entered it outside a declared root */
+  /* SEG-064-T002 (ADR 0142): the BIOS-image profile. */
+  SCD_STOP_MATERIALIZED_IMAGE_UNVERIFIED, /* at the sub runnable epoch, live PRG RAM equals no admitted materialized image */
+  SCD_STOP_MATERIALIZATION_CAPTURED,   /* build pass only: an unknown epoch image or a RAM frontier was written for admission */
   SCD_STOP_CLASS_COUNT
 } ScdStopClass;
 
@@ -240,6 +243,20 @@ typedef struct ScdOverlayEvent {
   uint32_t cpu, group, candidate, pc, kind;  /* kind: 1 selected, 2 invalidated */
 } ScdOverlayEvent;
 
+/* SEG-064-T002 (ADR 0142): the BIOS-image profile's build-time facts. A materialized sub image is identified by the length and
+ * SHA-256 of PRG RAM [0, length) at the sub runnable epoch (length: end of the last non-zero byte, rounded up to 256 bytes). */
+typedef struct ScdMaterializedIdentity {
+  uint32_t length;
+  const char *sha256;             /* lowercase hex */
+} ScdMaterializedIdentity;
+
+typedef struct ScdAuthentic {
+  const char *bios_sha256;        /* the BIOS image the program was compiled from (lowercase hex) */
+  uint32_t bios_size;
+  const ScdMaterializedIdentity *sub_images;
+  uint32_t sub_image_count;
+} ScdAuthentic;
+
 typedef struct ScdProgram {
   ScdProcessorProgram processors[2];
   ScdDisc disc;
@@ -343,6 +360,18 @@ typedef struct ScdMachine {
   ScdOverlayState overlay[SCD_OVERLAY_MAX_GROUPS];
   ScdOverlayEvent overlay_log[SCD_OVERLAY_LOG];
   uint32_t overlay_events;                /* total events (the log keeps the first SCD_OVERLAY_LOG) */
+  /* SEG-064-T002 (ADR 0142): BIOS-image profile state (all zero for the synthetic profile). */
+  const ScdAuthentic *authentic;          /* the program's BIOS-image profile facts, or NULL */
+  const uint8_t *bios;                    /* the verified BIOS image mapped at main $000000, or NULL */
+  uint32_t bios_size;
+  uint8_t sub_pristine;                   /* the sub has been reset and has not yet become runnable */
+  uint8_t materialize;                    /* build pass: capture unknown epochs and RAM frontiers instead of stopping */
+  uint32_t epochs;                        /* sub runnable epochs verified */
+  int32_t epoch_image;                    /* index of the materialized image the last epoch matched, or -1 */
+  uint64_t epoch_tick;                    /* tick of the last verified epoch */
+  uint32_t capture_kind;                  /* 1 epoch snapshot, 2 RAM frontier (build pass) */
+  uint32_t capture_length;                /* epoch snapshot length */
+  uint8_t capture_bytes[8];               /* frontier live bytes */
 } ScdMachine;
 
 /* Physical memories whose bytes may hold executable images (for write invalidation). */
@@ -365,6 +394,8 @@ int scd_rtr(ScdMachine *m, uint32_t cpu, uint32_t *restored_pc, uint32_t pc);
 void scd_enter_stop(ScdMachine *m, uint32_t cpu);
 int scd_fail(ScdMachine *m, uint32_t cpu, ScdStopClass stop_class, uint32_t pc, uint32_t detail);
 int scd_compiled(const ScdMachine *m, uint32_t cpu, uint32_t address);
+/* SEG-064-T002 (ADR 0142): 1 when the live bytes at `address` equal `expected` (comparison only; never a stop). */
+int scd_code_matches(ScdMachine *m, uint32_t cpu, uint32_t address, const uint8_t *expected, uint32_t length);
 /* Side-effect-free view of executable RAM (work RAM, the PRG-RAM window, PRG RAM, owned Word RAM) for byte comparison, or NULL. */
 const uint8_t *scd_code_byte(const ScdMachine *m, uint32_t cpu, uint32_t address);
 /* Overlay selection for an address the per-PC dispatch does not own (scd_overlay.c). */
@@ -383,6 +414,14 @@ void scd_overlay_attach(ScdMachine *m, const ScdOverlayProgram *overlays);
 
 /* Establish the synthetic post-BIOS profile (contract section 9): IP and SP loaded from the disc's system area. */
 int scd_machine_init(ScdMachine *m, const ScdProgram *program, ScdDisc *disc, uint64_t instruction_budget);
+/* SEG-064-T002 (ADR 0142): the BIOS-image profile: `bios` (already verified against program->authentic) is mapped at main $000000,
+ * the main processor resets from its vectors, the sub is held in reset; nothing is placed from the disc. */
+int scd_machine_init_bios(ScdMachine *m, const ScdProgram *program, const ScdAuthentic *authentic, ScdDisc *disc, const uint8_t *bios,
+                          uint32_t bios_size, uint64_t instruction_budget);
+/* The sub's first runnable transition after a reset (ADR 0142 decision 3): verify live PRG RAM against the admitted images. */
+int scd_sub_runnable_epoch(ScdMachine *m, uint32_t pc);
+/* Length of the materialization snapshot of PRG RAM (end of the last non-zero byte, rounded up to 256). */
+uint32_t scd_prg_snapshot_length(const ScdMachine *m);
 ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline);
 uint64_t scd_machine_time(const ScdMachine *m);
 void scd_machine_release(ScdMachine *m);
@@ -419,6 +458,8 @@ void scd_devices_power_on(ScdMachine *m);
 /* Program driver: parses argv, opens the disc, runs, writes the report and the frame. */
 int scd_program_main(const ScdProgram *program, int argc, char **argv);
 int scd_program_main_overlays(const ScdProgram *program, const ScdOverlayProgram *overlays, int argc, char **argv);
+/* SEG-064-T002 (ADR 0142): the BIOS-image profile's driver: additionally --bios <image> (required) and --materialize-dir <dir>. */
+int scd_program_main_bios(const ScdProgram *program, const ScdAuthentic *authentic, int argc, char **argv);
 
 #ifdef __cplusplus
 }

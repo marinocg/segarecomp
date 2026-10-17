@@ -15,85 +15,13 @@
 #include "segarecomp/cpu/m68k/timing.hpp"
 #include "segarecomp/sha256.hpp"
 
+#include "emit_shared.hpp"
+
 namespace segarecomp::machine::sega_cd {
 namespace {
 
-std::string hex(std::uint32_t value, int width = 8) {
-  char text[16];
-  std::snprintf(text, sizeof text, "%0*X", width, static_cast<unsigned>(value));
-  return text;
-}
-
-std::string width_of(M68kMemoryAccessWidth size) {
-  return size == M68kMemoryAccessWidth::byte ? "1U" : size == M68kMemoryAccessWidth::word ? "2U" : "4U";
-}
-
-// The Sega CD routed-access protocol text for one processor instance (ADR 0128). The CPU lowering decides when an access, guard,
-// exception or return is needed and owns all MC68000 semantics; this text only names the Sega CD runtime ABI (scd_runtime.h).
-// Every failure returns 1 after the runtime recorded the typed stop; nothing is committed by the failing statement.
-class SegaCdM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
- public:
-  explicit SegaCdM68kRuntimeCEmitter(unsigned cpu) : k_(std::to_string(cpu) + "U"), lookup_("scd_p" + std::to_string(cpu) + "_lookup") {}
-
-  std::string instruction_source(const M68kIrOperation &op) const override {
-    return "UINT32_C(0x" + hex(op.provenance.source.address.value) + ")";
-  }
-  std::string_view default_provenance_helper() const override { return "scd_unused_provenance"; }
-
-  std::string routed_read(const M68kMemoryEmissionContext &ctx, std::string_view addr, std::string_view value, std::string_view,
-                          M68kMemoryAccessWidth size) const override {
-    return "uint32_t " + std::string(value) + " = UINT32_C(0); if (scd_read(m, " + k_ + ", " + std::string(addr) + ", " +
-           width_of(size) + ", &" + std::string(value) + ", " + std::string(ctx.runtime_source) + ") != 0) return 1;\n";
-  }
-  std::string routed_write(const M68kMemoryEmissionContext &ctx, std::string_view addr, std::string_view, M68kMemoryAccessWidth size,
-                           std::string_view value) const override {
-    return "if (scd_write(m, " + k_ + ", " + std::string(addr) + ", " + width_of(size) + ", (uint32_t)(" + std::string(value) +
-           "), " + std::string(ctx.runtime_source) + ") != 0) return 1;";
-  }
-  std::string return_pop_guard(const M68kMemoryEmissionContext &ctx, std::string_view a7) const override {
-    return "{ uint32_t m68k_observed_return = UINT32_C(0); if (scd_read(m, " + k_ + ", " + std::string(a7) +
-           ", 4U, &m68k_observed_return, " + std::string(ctx.runtime_source) + ") != 0) return 1; if (" + lookup_ +
-           "(m68k_observed_return) == NULL) return scd_fail(m, " + k_ + ", SCD_STOP_RETURN_TARGET_NOT_COMPILED, " +
-           std::string(ctx.runtime_source) + ", m68k_observed_return); ";
-  }
-  std::string unresolved_indirect_stop(const M68kMemoryEmissionContext &ctx) const override {
-    return "return scd_fail(m, " + k_ + ", SCD_STOP_ENTRY_NOT_COMPILED, " + std::string(ctx.runtime_source) + ", 0U);\n";
-  }
-  std::string call_push_guard(const M68kMemoryEmissionContext &ctx, std::string_view a7, bool) const override {
-    return "{ uint32_t m68k_continuation = UINT32_C(0x" + hex(ctx.continuation) + "); { const uint32_t m68k_new_a7 = " +
-           std::string(a7) + " - UINT32_C(4); if (scd_write(m, " + k_ + ", m68k_new_a7, 4U, m68k_continuation, " +
-           std::string(ctx.runtime_source) + ") != 0) return 1;\n";
-  }
-  std::string divide_by_zero(const M68kMemoryEmissionContext &ctx, std::uint32_t next_pc, std::uint32_t entry_cycles) const override {
-    return "return scd_raise(m, " + k_ + ", 5U, UINT32_C(0x" + hex(next_pc) + "), UINT32_C(" + std::to_string(entry_cycles) + "), " +
-           std::string(ctx.runtime_source) + "); } ";
-  }
-  std::string exception_return(const M68kMemoryEmissionContext &ctx) const override {
-    return "{ uint32_t m68k_rte_pc = UINT32_C(0); if (scd_rte(m, " + k_ + ", &m68k_rte_pc, " + std::string(ctx.runtime_source) +
-           ") != 0) return 1; ";
-  }
-  std::string privilege_violation(const M68kMemoryEmissionContext &ctx, std::uint32_t fault_pc, std::uint32_t entry_cycles) const override {
-    return "{ return scd_raise(m, " + k_ + ", 8U, UINT32_C(0x" + hex(fault_pc) + "), UINT32_C(" + std::to_string(entry_cycles) + "), " +
-           std::string(ctx.runtime_source) + "); }";
-  }
-  std::string trace_deferred_stop(const M68kMemoryEmissionContext &ctx) const override {
-    return "{ return scd_fail(m, " + k_ + ", SCD_STOP_TRACE_UNSUPPORTED, " + std::string(ctx.runtime_source) + ", 0U); }";
-  }
-  std::string software_exception(const M68kMemoryEmissionContext &ctx, std::uint32_t vector, std::uint32_t stacked_pc,
-                                 std::uint32_t entry_cycles) const override {
-    return "{ return scd_raise(m, " + k_ + ", UINT32_C(" + std::to_string(vector) + "), UINT32_C(0x" + hex(stacked_pc) + "), UINT32_C(" +
-           std::to_string(entry_cycles) + "), " + std::string(ctx.runtime_source) + "); }";
-  }
-  std::string condition_code_return(const M68kMemoryEmissionContext &ctx) const override {
-    return "{ uint32_t m68k_rtr_pc = UINT32_C(0); if (scd_rtr(m, " + k_ + ", &m68k_rtr_pc, " + std::string(ctx.runtime_source) +
-           ") != 0) return 1; ";
-  }
-  std::string stopped_state(const M68kMemoryEmissionContext &) const override { return "scd_enter_stop(m, " + k_ + ");\n"; }
-
- private:
-  std::string k_;
-  std::string lookup_;
-};
+using detail::hex;
+using detail::SegaCdM68kRuntimeCEmitter;
 
 struct Reached {
   std::uint32_t pc{};
@@ -183,48 +111,9 @@ void emit_unit_functions(std::ostringstream &out, unsigned cpu, const SegaCdM68k
   const std::string k = std::to_string(cpu) + "U";
   for (const auto &[pc, reached] : unit.traversal.instructions) {
     const std::string fn = unit.prefix + "i_" + hex(pc);
-    std::optional<std::string> timing;
-    std::string body;
-    std::string slots;
-    if (reached.operation) {
-      const auto &op = *reached.operation;
-      timing = m68k_timing_c_expression(op);
-      M68kMemoryEmissionContext ctx;
-      ctx.runtime_routing = true;
-      ctx.runtime_object = "m";
-      ctx.runtime_emitter = &emitter;
-      ctx.ram_array = "scd_no_linear_memory";  // any non-routed access would fail to compile: fail closed at build time
-      ctx.address_registers = "cpu->a";
-      ctx.user_stack_pointer = "cpu->usp";
-      ctx.frame_ids_array = "scd_no_frames";
-      ctx.frame_continuations_array = "scd_no_frames";
-      ctx.frame_depth = "scd_no_frames";
-      ctx.program_counter = "pc";
-      ctx.linear_memory_begin = 0U;
-      ctx.linear_memory_end = 0x01000000U;
-      ctx.continuation = pc + op.provenance.length.value;
-      ctx.test_operand_access = M68kOperandAccess::runtime_routed;
-      ctx.compiled_entry_lookup_symbol = lookup_symbol;
-      if (op.kind == M68kIrKind::dbcc_loop) {
-        slots += "  uint8_t m68k_dbcc_took_branch = 0U;\n";
-        ctx.timing_dbcc_taken = "m68k_dbcc_took_branch";
-      }
-      if (op.kind == M68kIrKind::set_conditional && op.destination_ea.mode == M68kEaMode::data_register) {
-        slots += "  uint8_t m68k_scc_true = 0U;\n";
-        ctx.timing_scc_true = "m68k_scc_true";
-      }
-      if (op.kind == M68kIrKind::multiply_signed_word || op.kind == M68kIrKind::multiply_unsigned_word) {
-        slots += "  uint16_t m68k_timing_mul_source = UINT16_C(0);\n";
-        ctx.timing_mul_source = "m68k_timing_mul_source";
-      }
-      if (op.kind == M68kIrKind::divide_signed_word || op.kind == M68kIrKind::divide_unsigned_word) {
-        slots += "  uint32_t m68k_timing_div_dividend = UINT32_C(0); uint16_t m68k_timing_div_divisor = UINT16_C(0);\n";
-        ctx.timing_div_dividend = "m68k_timing_div_dividend";
-        ctx.timing_div_divisor = "m68k_timing_div_divisor";
-      }
-      body = emit_m68k_operation_c(op, "cpu->d", "cpu->sr", "  ", &ctx);
-    }
-    const bool compiled = reached.operation && timing && body.find_first_not_of(" \n") != std::string::npos;
+    detail::LoweredInstruction lowered;
+    if (reached.operation) lowered = detail::lower_instruction(*reached.operation, pc, emitter, lookup_symbol);
+    const bool compiled = reached.operation && lowered.compiled;
     if (!compiled) {
       ++stats.unsupported;
       ++image_stats.unsupported;
@@ -244,8 +133,8 @@ void emit_unit_functions(std::ostringstream &out, unsigned cpu, const SegaCdM68k
         << "  uint32_t pc = cpu->pc;\n"
         << "  if (scd_code_guard(m, " << k << ", UINT32_C(0x" << hex(pc) << "), " << fn << "_bytes, " << raw.size()
         << "U) != 0) return 1;\n"
-        << slots << body << "  cpu->pc = pc;\n"
-        << "  return scd_retire(m, " << k << ", (uint32_t)(" << *timing << "));\n}\n";
+        << lowered.slots << lowered.body << "  cpu->pc = pc;\n"
+        << "  return scd_retire(m, " << k << ", (uint32_t)(" << lowered.timing << "));\n}\n";
   }
 }
 
