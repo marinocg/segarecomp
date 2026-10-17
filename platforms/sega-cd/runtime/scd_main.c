@@ -133,6 +133,14 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
           m->cdc.dma_total, m->cdc.dbc, m->cdc.pt, m->cdc.wa, m->cdc.dac, m->cdc.dma_address, m->cdc.ifstat, m->cdc.ifctrl, m->cdc.ctrl0,
           m->cdc.ctrl1, m->cdc.stat2, m->cdc.stat3, m->cdc.irq, m->cdc.head[0][0], m->cdc.head[0][1], m->cdc.head[0][2],
           m->cdc.head[0][3]);
+  /* SEG-064-T004: the sub-side devices of the boot path (stopwatch, graphics ASIC, PCM write state, CDC host register). */
+  fprintf(out, ",\"sub_devices\":{\"stopwatch\":{\"origin\":%llu,\"base\":%u},\"gfx\":{\"busy\":%u,\"ctl\":%u,\"lines_left\":%u,"
+               "\"operations\":%llu,\"lines_rendered\":%llu},\"pcm\":{\"index\":%u,\"bank\":%u,\"enabled\":%u,\"onoff\":%u,\"ram\":\"",
+          (unsigned long long)m->ga.stopwatch_origin, m->ga.stopwatch_base, m->gfx.busy, m->gfx.ctl, m->gfx.lines_left,
+          (unsigned long long)m->gfx.operations, (unsigned long long)m->gfx.lines_rendered, m->pcm.index, m->pcm.bank, m->pcm.enabled,
+          m->pcm.onoff);
+  scd_sha_hex(m->pcm.ram, sizeof m->pcm.ram, digest);
+  fprintf(out, "%s\"},\"cdc_host_word\":%u}", digest, m->cdc.host_word);
   fprintf(out, ",\"cdd\":{\"status\":%u,\"lba\":%ld,\"index\":%u,\"latency\":%u,\"pending\":%u,\"delivered\":%llu,\"rx\":[",
           m->cdd.status, (long)m->cdd.lba, m->cdd.index, m->cdd.latency, m->cdd.pending, (unsigned long long)m->cdd.delivered);
   for (i = 0; i < 10U; ++i) fprintf(out, "%s%u", i ? "," : "", m->cdd.rx[i]);

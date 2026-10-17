@@ -147,7 +147,7 @@ int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write
     return scd_fail(m, SCD_MAIN, SCD_STOP_VDP_DMA_UNSUPPORTED, pc, *value);
   if (genesis_route_access(host, address, scd_genesis_width(width), is_write ? GENESIS_ACCESS_WRITE : GENESIS_ACCESS_READ, &routed,
                            &stop) != GENESIS_ACCESS_OK)
-    return scd_fail(m, SCD_MAIN, SCD_STOP_VDP_ACCESS_UNSUPPORTED, pc, address);
+    return scd_fail_access(m, SCD_MAIN, SCD_STOP_VDP_ACCESS_UNSUPPORTED, pc, address, width, is_write); /* SEG-064-T004: with its width and direction */
   if (!is_write) *value = routed;
   if (m->bios != NULL && !is_write) scd_log(m, 0x42U, address, routed); /* the observed value is part of the device history */
   return 0;

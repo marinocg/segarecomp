@@ -13,6 +13,8 @@ Fixtures (the main program is the IP, mapped at $FF0000; the sub program is the 
   wordram2m   T004  sub fills 2M Word RAM after DMNA, returns it with RET; main checks the pattern
   wordram1m   T004  1M mode: both CPUs use their bank at once, the sub swaps banks with RET
   timer       T004  sub counts five timer (INT3) interrupts, then stops the timer
+  subside     SEG-064-T004  the stopwatch on the CPU (hand-derived cycle counts, rollover) and the level-1 (graphics completion) interrupt:
+                    disabled, accepted, masked, and simultaneous with level 2
   cdframe     T005  sub reads two data sectors through CDD/CDC and DMAs them into Word RAM; main programs the VDP from them
   modules     SEG-063 Checkpoint D: an ISO9660 volume with module files; the sub loads module A by CDC DMA into Word RAM and runs
                     it at $080000, copies it to PRG RAM $020000 and runs it there, then does the same with module B at the same
@@ -616,6 +618,135 @@ def fixture_timer(options):
     return main.assemble(), sub.assemble(), {}, {"result_words": [5]}
 
 
+# subside (SEG-064-T004) -----------------------------------------------------------------------------------------------------
+# The stopwatch and the graphics-completion interrupt (level 1) on the CPU. Expected values come from a hand-written MC68000 cycle table
+# (MC68000 User's Manual, instruction execution times), not from the runtime's timing core.
+CYCLES = {"move_b_imm_abs": 20, "move_w_abs_dn": 16, "move_w_imm_dn": 8, "move_w_dn_abs": 16}
+
+
+def dbra_cycles(n):
+    """DBRA with the counter at n: n taken branches of 10 cycles and the final fall-through of 14."""
+    return 10 * n + 14
+
+
+def fixture_subside(options):
+    sub = Asm(SP_BASE)
+    model = []  # (kind, value) in program order, for the expected stopwatch values
+    # negative cases (sub:a6 = k selects one; 0 = none): each ends in one typed stop at a known instruction with a known retirement count
+    negatives = {}
+    sub.move("l", a(6), d(7))
+    negative_cases = [
+        (1, "gate_array_register_unsupported", 0xFF800D, 1, 0, "stopwatch byte read", lambda: sub.move("b", absl(GA_SUB + 0x0D), d(0))),
+        (2, "gate_array_register_unsupported", 0xFF800C, 1, 1, "stopwatch byte write", lambda: sub.move("b", imm(1), absl(GA_SUB + 0x0C))),
+        (3, "pcm_unsupported", 0xFF0021, 1, 0, "PCM register read", lambda: sub.move("b", absl(0xFF0021), d(0))),
+        (4, "gate_array_register_unsupported", 0xFF805A, 1, 1, "graphics byte write", lambda: sub.move("b", imm(1), absl(GA_SUB + 0x5A))),
+        (5, "gate_array_register_unsupported", 0xFF805A, 2, 0, "graphics parameter read", lambda: sub.move("w", absl(GA_SUB + 0x5A), d(0))),
+        (6, "cdc_destination_unsupported", 0xFF8008, 0, 0, "CDC host-data byte write", lambda: sub.move("b", imm(1), absl(GA_SUB + 0x08))),
+        (7, "gate_array_register_unsupported", 0xFF8066, 2, 1, "graphics start in 1M Word RAM mode", lambda: sub.move("w", imm(0xC000), absl(GA_SUB + 0x66))),
+        (8, "cdd_command_unsupported", 0x105, 0, 0, "CDD TOC of track 0", lambda: sub.move("w", imm(0), absl(GA_SUB + 0x4A))),
+    ]
+    for k, stop_class, address, width, write, label, fault in negative_cases:
+        sub.immop("cmp", "w", k, d(7))
+        sub.bcc("ne", "neg%d" % k)
+        pre = 0
+        if k == 7:
+            sub.move("b", imm(0x04), absl(GA_SUB + 0x03))   # MODE = 1M
+            pre = 1
+        if k == 8:
+            for reg, value in ((0x42, 0x0200), (0x44, 0x0005), (0x46, 0x0000), (0x48, 0x0000)):
+                sub.move("w", imm(value), absl(GA_SUB + reg))
+            pre = 4
+        negatives[str(k)] = {"class": stop_class, "pc": sub.pc, "address": address, "width": width, "write": write,
+                             "retired": 1 + 2 * k + pre, "label": label}
+        fault()
+        sub.label("neg%d" % k)
+    # vectors for levels 1 and 2 (autovectors 25 and 26) and the work counters
+    sub.move("l", imm("int1"), absl(0x000064))
+    sub.move("l", imm("int2"), absl(0x000068))
+    for off in (0, 2, 4, 6):
+        sub.clr("w", absl(SUB_DATA + off))
+    # --- stopwatch ---
+    sub.move("b", imm(0x00), absl(GA_SUB + 0x01))   # RES0 = 0: the peripheral reset restarts the stopwatch grid at this instruction
+    t = CYCLES["move_b_imm_abs"]
+    sub.move("w", absl(GA_SUB + 0x0C), d(0)); r0 = t // 384; t += CYCLES["move_w_abs_dn"]
+    sub.move("w", imm(99), d(1)); t += CYCLES["move_w_imm_dn"]
+    sub.label("a"); sub.dbra(1, "a"); t += dbra_cycles(99)
+    sub.move("w", absl(GA_SUB + 0x0C), d(2)); r2 = t // 384; t += CYCLES["move_w_abs_dn"]
+    sub.move("w", absl(GA_SUB + 0x0C), d(3)); r3 = t // 384; t += CYCLES["move_w_abs_dn"]
+    sub.move("w", d(2), absl(GA_SUB + 0x0C)); base = t // 384; t += CYCLES["move_w_dn_abs"]   # any word write clears the count
+    sub.move("w", absl(GA_SUB + 0x0C), d(4)); r4 = t // 384 - base; t += CYCLES["move_w_abs_dn"]
+    sub.move("w", imm(5), d(1)); t += CYCLES["move_w_imm_dn"]
+    sub.label("b"); sub.dbra(1, "b"); t += dbra_cycles(5)
+    sub.move("w", absl(GA_SUB + 0x0C), d(6)); r6 = t // 384 - base; t += CYCLES["move_w_abs_dn"]
+    # three passes of 65535 iterations: more than 4096 stopwatch units, so the 12-bit count has rolled over
+    sub.move("w", imm(2), d(7)); t += CYCLES["move_w_imm_dn"]
+    sub.label("outer")
+    sub.move("w", imm(65534), d(1)); t += 3 * CYCLES["move_w_imm_dn"]
+    sub.label("inner"); sub.dbra(1, "inner")
+    sub.dbra(7, "outer")
+    t += 3 * dbra_cycles(65534) + 2 * 10 + 14 - 2 * CYCLES["move_w_imm_dn"] * 0
+    sub.move("w", absl(GA_SUB + 0x0C), d(5)); r5 = ((t // 384) - base) & 0xFFF
+    # --- level 1 (graphics completion) on the CPU ---
+    sub.bra("after_start")
+    sub.label("gfx_start")                            # a tiny operation: 8 dots x 2 lines = 2 * 66 sub cycles
+    for reg, value in ((0x58, 0), (0x5A, 0), (0x5C, 0), (0x5E, 0x1000), (0x60, 0), (0x62, 8), (0x64, 2), (0x66, 0xC000)):
+        sub.move("w", imm(value), absl(GA_SUB + reg))
+    sub.rts()
+    sub.label("after_start")
+    sub.move("b", imm(0x00), absl(GA_SUB + 0x33))     # phase 1: IEN1 = 0
+    sub.bsr("gfx_start")
+    sub.move("w", imm(40), d(1)); sub.label("p1"); sub.dbra(1, "p1")
+    sub.move("w", absl(SUB_DATA), absl(GA_SUB + 0x20))      # COMSTAT0: interrupts taken (0)
+    sub.move("w", absl(GA_SUB + 0x58), absl(GA_SUB + 0x22))  # COMSTAT1: busy/control read (0: finished)
+    sub.move("b", imm(0x02), absl(GA_SUB + 0x33))     # phase 2: IEN1, mask 0: taken at the end of the operation
+    sub.move_sr(0x2000)
+    sub.bsr("gfx_start")
+    sub.stop(0x2000)
+    sub.move("w", absl(SUB_DATA), absl(GA_SUB + 0x24))      # COMSTAT2: 1
+    sub.move_sr(0x2100)                               # phase 3: mask 1 hides level 1
+    sub.bsr("gfx_start")
+    sub.move("w", imm(40), d(1)); sub.label("p3"); sub.dbra(1, "p3")
+    sub.move("w", absl(SUB_DATA), absl(GA_SUB + 0x26))      # COMSTAT3: still 1 (pending, masked)
+    sub.move_sr(0x2000)
+    sub.nop()
+    sub.move("w", absl(SUB_DATA), absl(GA_SUB + 0x28))      # COMSTAT4: 2 (taken at the first boundary after the unmask)
+    sub.move("b", imm(0x06), absl(GA_SUB + 0x33))     # phase 4: IEN1 and IEN2, all levels masked
+    sub.move_sr(0x2700)
+    sub.bsr("gfx_start")
+    sub.move("w", imm(40), d(1)); sub.label("p4"); sub.dbra(1, "p4")
+    sub.move("b", imm(0x01), absl(GA_SUB + 0x0F))     # main: raise IFL2 now
+    sub.label("wait_main"); sub.tst("b", absl(GA_SUB + 0x0E)); sub.bcc("eq", "wait_main")
+    sub.move_sr(0x2000)                               # unmask: level 2 (higher) first, then level 1
+    sub.nop()
+    sub.nop()
+    sub.move("w", absl(SUB_DATA + 4), absl(GA_SUB + 0x2A))  # COMSTAT5: order slot of the level-1 handler
+    sub.move("w", absl(SUB_DATA + 6), absl(GA_SUB + 0x2C))  # COMSTAT6: order slot of the level-2 handler
+    sub.move("w", absl(SUB_DATA), absl(GA_SUB + 0x2E))      # COMSTAT7: level-1 interrupts in all
+    sub.move("b", imm(0x02), absl(GA_SUB + 0x0F))
+    sub.stop(0x2700)
+    sub.label("int1")
+    sub.quick("add", "w", 1, absl(SUB_DATA))
+    sub.quick("add", "w", 1, absl(SUB_DATA + 2))
+    sub.move("w", absl(SUB_DATA + 2), absl(SUB_DATA + 4))
+    sub.rte()
+    sub.label("int2")
+    sub.quick("add", "w", 1, absl(SUB_DATA + 2))
+    sub.move("w", absl(SUB_DATA + 2), absl(SUB_DATA + 6))
+    sub.rte()
+
+    main = Asm(IP_BASE)
+    main.move("b", imm(0x02), absl(GA_MAIN + 0x03))   # DMNA: Word RAM to the sub (the ASIC works in 2M Word RAM the sub owns)
+    main_start_sub(main, SP_BASE)
+    wait_flag(main, GA_MAIN + 0x0F, 1, "w_ready")
+    main.move("b", imm(0x01), absl(GA_MAIN + 0x00))   # IFL2
+    main.move("b", imm(0x01), absl(GA_MAIN + 0x0E))   # main flag: the sub may unmask
+    wait_flag(main, GA_MAIN + 0x0F, 2, "w_done")
+    main_finish(main)
+    expected = {"stopwatch_d": {"d0": r0, "d2": r2, "d3": r3, "d4": r4, "d5": r5, "d6": r6},
+                "comstat": [0, 0, 1, 1, 2, 4, 3, 3], "interrupts": {"1": 3, "2": 1}, "negatives": negatives}
+    return main.assemble(), sub.assemble(), {}, expected
+
+
 # cdframe ---------------------------------------------------------------------------------------------------------------------
 PALETTE_BYTES = 32
 TILE_COUNT = 16
@@ -1088,6 +1219,7 @@ FIXTURES = {
     "wordram1m": fixture_wordram1m,
     "wordram_wait": fixture_wordram_wait,
     "timer": fixture_timer,
+    "subside": fixture_subside,
     "cdframe": fixture_cdframe,
     "modules": fixture_modules,
 }

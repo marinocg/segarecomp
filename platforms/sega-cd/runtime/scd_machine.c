@@ -587,7 +587,7 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
       if (taken > 0) continue;
     }
     /* SEG-064-T004: the BIOS-image profile ends at the application handoff - before the first instruction of the IP runs. */
-    if (cpu == SCD_MAIN && m->authentic != NULL && m->authentic->ip_entry != 0U && m->cpu[SCD_MAIN].pc == m->authentic->ip_entry) {
+    if (cpu == SCD_MAIN && m->authentic != NULL && m->authentic->ip_entry != 0U && (m->cpu[SCD_MAIN].pc & UINT32_C(0x00FFFFFF)) == m->authentic->ip_entry) {
       scd_fail(m, SCD_MAIN, SCD_STOP_APPLICATION_HANDOFF, m->cpu[SCD_MAIN].pc, m->cpu[SCD_MAIN].pc);
       return SCD_RUN_STOPPED;
     }

@@ -587,6 +587,7 @@ static int scd_cdd_command(ScdMachine *m, uint32_t pc) {
   case 0x2: { /* report TOC information (SEG-064-T004; GPGX cdd_process case 2): RS1 echoes the request code */
     const uint32_t request = m->cdd.tx[3];
     const uint32_t count = m->disc->track_count;
+    if (request > 6U) return 0; /* an invalid request code: nothing is updated and no checksum is computed */
     m->cdd.rx[0] = m->cdd.status;
     m->cdd.rx[1] = (uint8_t)request;
     switch (request) {
@@ -634,8 +635,7 @@ static int scd_cdd_command(ScdMachine *m, uint32_t pc) {
     case 0x6: /* latest error information: none */
       memset(&m->cdd.rx[2], 0, 7U);
       break;
-    default: /* an invalid request code: nothing is updated and no checksum is computed */
-      return 0;
+    default: break;
     }
     break;
   }

@@ -88,6 +88,31 @@ with tempfile.TemporaryDirectory() as tmp:
             check(neg.get("cpus", [{}, {}])[1].get("retired") == 0, "%s: the sub retired nothing" % spec)
         else:
             check(neg.get("bios_profile", {}).get("epochs") == 0, "%s: stopped before the epoch" % spec)
+        # SEG-064-T004: the stop is at the faulting instruction (inside the negative's own instructions), with the access it makes, and
+        # that instruction did not retire (the processor's pc is still there)
+        want = expected["negative_details"].get(spec)
+        if want is not None:
+            check(want["range"][0] <= stop.get("pc", -1) < want["range"][1] and stop.get("address") == want["address"] and
+                  stop.get("width") == want["width"] and stop.get("write") == want["write"],
+                  "%s: stop at pc in [$%X, $%X), address $%X, width %d, %s (got %s)" % (
+                      spec, want["range"][0], want["range"][1], want["address"], want["width"], "write" if want["write"] else "read", stop))
+            check(neg["cpus"][0]["pc"] == stop.get("pc"), "%s: the faulting instruction did not retire (the main pc is still at it)" % spec)
+
+    # ---- the application handoff (SEG-064-T004): the call to the IP entry ends the run before its first instruction ----
+    code, handoff = run_program(exe, disc, bios, "--set", expected["handoff"])
+    stop = handoff.get("stop", {})
+    check(code == 10 and handoff.get("result") == "stopped" and stop.get("class") == "application_handoff" and stop.get("cpu") == 0 and
+          stop.get("pc") == 0xFF0000 and stop.get("address") == 0xFF0000,
+          "handoff: the call to the IP entry stops application_handoff at pc = address = $FF0000 (%s)" % stop)
+    check(handoff["cpus"][0]["pc"] == 0xFF0000 and handoff["bios_profile"]["epochs"] == 1 and handoff["ga"]["comstat"][0] == expected["sub_comstat0"],
+          "handoff: after the verified epoch; the sub ran from the verified image; the main pc is the entry (nothing there ran)")
+    block = bytes.fromhex(handoff["result_block"])
+    check(block[0xFF] == 0xA5, "handoff: main completed its boot work (the epoch marker) before the transfer")
+    check(abs(handoff["cpus"][0]["retired"] - report["cpus"][0]["retired"]) <= 4 and handoff["cpus"][0]["retired"] > 0,
+          "handoff: the main processor retired the normal run's instructions to within the final compare/call (none at the entry)")
+    check(run_program(exe, disc, bios, "--set", expected["handoff"])[1] == handoff, "handoff: repeat run identical")
+    for seed in range(8):
+        check(run_program(exe, disc, bios, "--set", expected["handoff"], "--slice-seed", seed)[1] == handoff, "handoff: deadline partition seed %d identical" % seed)
 
     # ---- a different image is refused before any instruction ----
     other = tmp / "other.bin"
