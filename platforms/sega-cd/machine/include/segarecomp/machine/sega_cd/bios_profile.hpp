@@ -6,6 +6,8 @@
 // Images and their authorities (ADR 0076):
 //   - the BIOS image itself: `immutable_input`, mapped at main $000000, verification none (ROM);
 //   - copy images: `static_proof`, a verbatim copy of a ROM span declared by an explicit descriptor, checked against the ROM;
+//   - disc images (SEG-064-T004): `immutable_input`, an extent of the external disc's track 1 that is placed in a processor's RAM
+//     (the disc's identity is verified at start-up, so the bytes are immutable inputs; verification is per instruction, byte identity);
 //   - epoch images: `bounded_build_time_materialization`, the PRG RAM observed at the sub runnable epoch by a build pass;
 //   - operand templates: `bounded_build_time_materialization` (a build-pass RAM frontier), verification `structural`.
 // Every image is admitted by broad AOT (each aligned start the CPU owner decodes, lifts and lowers is a compiled entry; admission
@@ -32,6 +34,7 @@ inline constexpr std::uint32_t kBiosMinimumBytes = 0x200U;    // vector table + 
 inline constexpr std::uint32_t kMaxEpochImages = 4U;          // ADR 0142 decision 8
 inline constexpr std::uint32_t kMaxOperandTemplates = 64U;
 inline constexpr std::uint32_t kMaxCopyImages = 8U;
+inline constexpr std::uint32_t kMaxDiscImages = 4U;            // SEG-064-T004
 inline constexpr std::uint32_t kEpochGranule = 0x100U;        // snapshot length granule (scd_prg_snapshot_length)
 inline constexpr const char *kSegaCdBiosGeneratorVersion = "segarecomp.sega_cd.bios_profile.v2";
 
@@ -61,6 +64,17 @@ struct CopyImage {
   std::uint32_t length{};
 };
 
+// SEG-064-T004: a disc extent that is placed in a processor's RAM (the boot area in main work RAM, entered by the BIOS at its base; the
+// disc's SP in sub PRG RAM, replacing transient BIOS code; a module the SP loads). Any extent of the verified disc is an immutable input;
+// soundness is the per-instruction byte guard, so an extent the program never finds in RAM simply never runs.
+struct DiscImageSpec {
+  Processor processor{Processor::main};
+  std::uint32_t track_offset{};  // byte offset in the logical user data of track 1 (the 32 KiB system area is offsets 0-0x7FFF)
+  std::uint32_t base{};          // execution base (main work RAM for the IP side, sub PRG RAM for the SP side or a loaded module)
+  std::uint32_t length{};
+  std::vector<std::uint8_t> bytes;  // the extent as read from the verified disc at build time (length bytes)
+};
+
 enum class AdmissionKind : std::uint8_t { epoch, operand_template };
 
 struct Admission {
@@ -74,12 +88,15 @@ struct Admission {
 struct BiosProfileInputs {
   BiosImage bios;
   std::vector<CopyImage> copies;
+  std::vector<DiscImageSpec> disc_images;     // SEG-064-T004
+  std::uint32_t application_entry{};          // SEG-064-T004: the main address whose first execution ends the run (0 = none)
   std::vector<Admission> admissions;  // in admission order
 };
 
 enum class BiosProfileError : std::uint8_t {
   none,
   copy_invalid,           // descriptor outside the ROM or the processor's RAM, odd, empty, or too many
+  disc_image_invalid,     // SEG-064-T004: extent outside the system area or main work RAM, odd, empty, no system area, or too many
   provenance_mismatch,    // an admission's pass identity is not the identity of the program before it
   epoch_invalid,          // empty, longer than PRG RAM, not a whole snapshot (granule / trailing zero rule) or too many
   template_invalid,       // not exactly one JMP (xxx).W/.L at an even RAM address of its processor, duplicate, or too many

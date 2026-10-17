@@ -1,7 +1,5 @@
 #include "segarecomp/machine/sega_cd/bios_profile.hpp"
 
-#include "segarecomp/machine/sega_cd/boot_images.hpp"
-
 #include <algorithm>
 #include <map>
 #include <set>
@@ -124,6 +122,10 @@ std::string identity_text(const DiscImage &disc, const BiosProfileInputs &inputs
   t << kSegaCdBiosGeneratorVersion << "\ndisc " << disc.identity() << "\nbios " << inputs.bios.sha256 << "\n";
   for (const auto &c : inputs.copies)
     t << "copy " << processor_name(c.processor) << " " << c.base << " " << c.rom_offset << " " << c.length << "\n";
+  for (const auto &d : inputs.disc_images)  // SEG-064-T004: the extent's coordinates and a digest of its bytes (a different disc is a different program)
+    t << "discimage " << processor_name(d.processor) << " " << d.track_offset << " " << d.base << " " << d.length << " " << sha256_hex(d.bytes)
+      << "\n";
+  if (inputs.application_entry != 0U) t << "entry " << inputs.application_entry << "\n";
   for (std::size_t i = 0; i < admissions && i < inputs.admissions.size(); ++i) {
     const auto &a = inputs.admissions[i];
     if (a.kind == AdmissionKind::epoch)
@@ -150,6 +152,7 @@ const char *bios_profile_error_name(BiosProfileError error) noexcept {
   switch (error) {
   case BiosProfileError::none: return "none";
   case BiosProfileError::copy_invalid: return "copy_invalid";
+  case BiosProfileError::disc_image_invalid: return "disc_image_invalid";
   case BiosProfileError::provenance_mismatch: return "provenance_mismatch";
   case BiosProfileError::epoch_invalid: return "epoch_invalid";
   case BiosProfileError::template_invalid: return "template_invalid";
@@ -213,6 +216,13 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
     images.push_back(Image{c.processor, "copy" + std::to_string(i), ImageAuthority::static_proof, true, c.base,
                            std::vector<std::uint8_t>(rom.begin() + c.rom_offset, rom.begin() + c.rom_offset + c.length)});
   }
+  if (inputs.disc_images.size() > kMaxDiscImages) return fail(BiosProfileError::disc_image_invalid, kMaxDiscImages);
+  for (std::size_t i = 0; i < inputs.disc_images.size(); ++i) {
+    const auto &d = inputs.disc_images[i];
+    if (((d.base | d.length) & 1U) != 0U || d.length == 0U || d.bytes.size() != d.length || !ram_of(d.processor, d.base, d.length))
+      return fail(BiosProfileError::disc_image_invalid, i);
+    images.push_back(Image{d.processor, "disc" + std::to_string(i), ImageAuthority::immutable_input, true, d.base, d.bytes});
+  }
   std::vector<Template> templates;
   std::uint32_t epochs = 0;
   for (std::size_t i = 0; i < inputs.admissions.size(); ++i) {
@@ -247,6 +257,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
       e.mappings = {ImageMapping{image.base, 0U, static_cast<std::uint32_t>(image.bytes.size())}};
       e.provenance.authority = image.authority;
       e.provenance.producer = image.name == "bios" ? "sega_cd.bios_image"
+                              : image.name.rfind("disc", 0) == 0 ? "sega_cd.boot_area"
                               : image.authority == ImageAuthority::static_proof ? "sega_cd.bios_copy"
                                                                                 : "sega_cd.sub_epoch";
       e.verification = image.guarded ? ImageVerification::byte_identity : ImageVerification::none;
@@ -438,6 +449,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
       const std::string p = "scd_p" + std::to_string(cpu);
       if (it != units.end()) out << it->second.variants << it->second.templates << it->second.chains;
       dispatch += "static int " + p + "_dispatch(ScdMachine *m) {\n  (void)" + p + "_lookup; /* referenced by computed control */\n" +
+                  "  m->cpu[" + std::to_string(cpu) + "].pc &= UINT32_C(0x00FFFFFF); /* the 68000 address bus is 24 bits (SEG-064-T004) */\n" +
                   "  switch (m->cpu[" + std::to_string(cpu) + "].pc) {\n" + (it != units.end() ? it->second.cases : std::string()) +
                   default_stop(cpu);
     }
@@ -464,7 +476,8 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
     for (const auto &[key, u] : units) out << "int " << unit_name(key.first, key.second) << "(ScdMachine *m);\n";
     for (unsigned cpu = 0; cpu < 2U; ++cpu) {
       const std::string p = "scd_p" + std::to_string(cpu);
-      out << "static int " << p << "_dispatch(ScdMachine *m) {\n  switch (m->cpu[" << cpu << "].pc / UINT32_C(0x" << hex(window) << ")) {\n";
+      out << "static int " << p << "_dispatch(ScdMachine *m) {\n  m->cpu[" << cpu << "].pc &= UINT32_C(0x00FFFFFF); /* 24-bit address bus */\n"
+          << "  switch (m->cpu[" << cpu << "].pc / UINT32_C(0x" << hex(window) << ")) {\n";
       for (const auto &[key, u] : units)
         if (key.first == cpu) out << "  case UINT32_C(0x" << hex(key.second) << "): return " << unit_name(cpu, key.second) << "(m);\n";
       out << default_stop(cpu);
@@ -487,8 +500,8 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
     out << "};\n";
   }
   out << "static const ScdAuthentic scd_bios_profile = {\"" << inputs.bios.sha256 << "\", " << rom.size() << "U, "
-      << (epoch_images.empty() ? "NULL" : "scd_sub_images") << ", " << epoch_images.size() << "U, UINT32_C(0x" << hex(kIpBase)
-      << ")};\n"
+      << (epoch_images.empty() ? "NULL" : "scd_sub_images") << ", " << epoch_images.size() << "U, UINT32_C(0x"
+      << hex(inputs.application_entry) << ")};\n"
       << "static const ScdProgram scd_program = {\n  {{scd_p0_entries, " << result.entries[0] << "U, scd_p0_dispatch, UINT32_C(0x"
       << hex(inputs.bios.reset_pc) << "), 0U, 0U, 0U},\n   {scd_p1_entries, " << result.entries[1] << "U, scd_p1_dispatch, 0U, 0U, 0U, 0U}},\n"
       << "  {scd_disc_files, " << disc.files().size() << "U, scd_disc_tracks, " << disc.tracks().size() << "U, \"" << disc.identity()

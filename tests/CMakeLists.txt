@@ -1183,6 +1183,9 @@ set_property(TEST sega_cd_word_ram_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_subside_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_subside_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_subside_test APPEND PROPERTY LABELS full fast)
+add_test(NAME sega_cd_bios_bootarea_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_bios_bootarea_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_bios_bootarea_test APPEND PROPERTY LABELS full fast)
 # SEG-062-T005 (Checkpoint C): CDD/CDC sector delivery, CDC DMA into Word RAM, the main CPU and the Genesis VDP frame; liveness,
 # start-up disc identity and typed CD failures.
 add_test(NAME sega_cd_disc_to_frame_test COMMAND ${Python3_EXECUTABLE}

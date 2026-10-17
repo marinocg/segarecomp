@@ -49,7 +49,7 @@ with tempfile.TemporaryDirectory() as tmp:
                                          text=True).stdout)
     bios = fx / "bios.bin"
     built = subprocess.run([sys.executable, str(DRIVER), "--segarecomp", SEGARECOMP, "--cc", CC, "--cue", str(disc / "disc.cue"),
-                            "--bios", str(bios), "--work", str(tmp / "work")], capture_output=True, text=True, timeout=1800)
+                            "--bios", str(bios), "--work", str(tmp / "work"), "--application-entry", "0xFF0000"], capture_output=True, text=True, timeout=1800)
     summary = json.loads(built.stdout) if built.stdout.strip() else {}
     check(built.returncode == 0 and summary.get("ok"), "materialization fixed point: %s" % built.stdout[-800:])
     if not summary.get("ok"):

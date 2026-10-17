@@ -13,6 +13,7 @@ Fixtures (the main program is the IP, mapped at $FF0000; the sub program is the 
   wordram2m   T004  sub fills 2M Word RAM after DMNA, returns it with RET; main checks the pattern
   wordram1m   T004  1M mode: both CPUs use their bank at once, the sub swaps banks with RET
   timer       T004  sub counts five timer (INT3) interrupts, then stops the timer
+  bootarea    SEG-064-T004  a tiny IP (marker, branch to the application entry) and SP (marker, flag) that a test BIOS places in RAM
   subside     SEG-064-T004  the stopwatch on the CPU (hand-derived cycle counts, rollover) and the level-1 (graphics completion) interrupt:
                     disabled, accepted, masked, and simultaneous with level 2
   cdframe     T005  sub reads two data sectors through CDD/CDC and DMAs them into Word RAM; main programs the VDP from them
@@ -618,6 +619,31 @@ def fixture_timer(options):
     return main.assemble(), sub.assemble(), {}, {"result_words": [5]}
 
 
+# bootarea (SEG-064-T004) ---------------------------------------------------------------------------------------------------
+# A project-authored IP and SP for the BIOS-image profile's disc-extent images: the IP runs from main work RAM $FF0000 (marker, then a
+# branch to the application entry), the SP from sub PRG RAM $6000 (marker, flag). A test BIOS places the disc bytes there.
+BOOTAREA_IP_MARKER = 0x600D
+BOOTAREA_SP_MARKER = 0x2222
+
+
+def fixture_bootarea(options):
+    ip = Asm(IP_BASE)
+    ip.move("w", imm(BOOTAREA_IP_MARKER), absl(RESULT + 0x40))
+    ip.bra("app")
+    ip.nop()
+    ip.label("app")                                   # the application entry (the first instruction after the boot stub)
+    ip.move("w", imm(0xBEEF), absl(RESULT + 0x42))
+    ip.stop(0x2700)
+    sp = Asm(SP_BASE)
+    sp.move("w", imm(BOOTAREA_SP_MARKER), absl(GA_SUB + 0x22))   # COMSTAT1
+    sp.move("b", imm(0x02), absl(GA_SUB + 0x0F))
+    sp.stop(0x2700)
+    main = Asm(IP_BASE)                               # unused by the BIOS-image tests (the test BIOS enters the IP itself)
+    main.stop(0x2700)
+    return ip.assemble(), sp.assemble(), {}, {"application_entry": ip.labels["app"], "ip_marker": BOOTAREA_IP_MARKER,
+                                              "sp_marker": BOOTAREA_SP_MARKER}
+
+
 # subside (SEG-064-T004) -----------------------------------------------------------------------------------------------------
 # The stopwatch and the graphics-completion interrupt (level 1) on the CPU. Expected values come from a hand-written MC68000 cycle table
 # (MC68000 User's Manual, instruction execution times), not from the runtime's timing core.
@@ -1220,6 +1246,7 @@ FIXTURES = {
     "wordram_wait": fixture_wordram_wait,
     "timer": fixture_timer,
     "subside": fixture_subside,
+    "bootarea": fixture_bootarea,
     "cdframe": fixture_cdframe,
     "modules": fixture_modules,
 }
