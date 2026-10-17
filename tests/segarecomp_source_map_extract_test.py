@@ -445,6 +445,16 @@ class ModuleListings(unittest.TestCase):
             ex.extract(below, rom, REV, None, dialect="asm68k", image_base=self.BASE, align_post_pc=True)
         self.assertEqual(ctx.exception.code, "row_outside_rom")
 
+    def test_bad_image_base_and_dialect_mismatch_are_typed(self):
+        listing, rom = self.module()
+        for base, code in ((-2, "bad_image_base"), (self.BASE + 1, "bad_image_base")):
+            with self.assertRaises(ex.SourceMapError) as ctx:
+                ex.extract(listing, rom, REV, None, dialect="asm68k", image_base=base, align_post_pc=True)
+            self.assertEqual(ctx.exception.code, code)
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract(listing, rom, REV, None, dialect="as", align_post_pc=True)
+        self.assertEqual(ctx.exception.code, "option_needs_asm68k")
+
     def test_align_post_pc_is_opt_in_and_still_accounted(self):
         listing, rom = self.module()
         with self.assertRaises(ex.SourceMapError) as ctx:  # the SEG-048 placement puts the pad on the rts: an overlap, never a guess

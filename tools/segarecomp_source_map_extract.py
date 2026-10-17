@@ -336,6 +336,10 @@ def parse_listing(listing: str, rom: bytes, dialect: str = "as", placeholder_fil
     """Returns (instruction_starts, summary). Raises SourceMapError. Starts are image offsets (listing address - image_base)."""
     if len(listing) > MAX_LISTING_BYTES:
         _fail("listing_too_large")
+    if image_base < 0 or image_base & 1 or image_base > 0xFFFFFFFF:
+        _fail("bad_image_base")
+    if align_post_pc and dialect != "asm68k":
+        _fail("option_needs_asm68k")
     if len(rom) == 0 or len(rom) > MAX_ROM_BYTES or len(rom) % 2:
         _fail("rom_size")
     spans = []

@@ -38,7 +38,7 @@ Inputs and source identity:
 |---|---|
 | disc | the original CUE loads (35 tracks, 34 audio tracks with stored `INDEX 00` pregaps; identical output of two inspections); ISO9660 resolves 131 root files; boot IP/SP produced |
 | source build | 44 of 44 built disc files byte-identical to the disc (the bundled toolchain, `REGION=1`; one file additionally needs the project's own Z80 driver step); the built SP equals the disc's SP extent up to its zero padding; the built IP differs from the disc's IP extent (boot image, outside the module subset) |
-| labels | 37 matched files yield a label universe, each extracted twice with identical digests (the remaining matched file is data only and its build step writes no listing); 96,276 instruction starts in the admitted subset |
+| labels | of the 44 matched files, 37 yield a label universe, each extracted twice with identical digests; 6 are rejected by the label tool (`rom_size`, odd byte size) and 1 is data only (its build step writes no listing); 96,276 instruction starts in the admitted subset |
 | exclusions (typed) | `size_invalid` x6 (sub-CPU PCM drivers of odd byte size; the label tool rejects the same images as `rom_size`); `mapping_outside_executable_ram` x1 (a copy MMD whose header precedes Work RAM) |
 | subset | 36 modules, 36 distinct digests. main 24: 6 in-place Word RAM programs (>= 128 KiB), 18 Work RAM copy programs (4-32 KiB); sub 12: 3 PCM drivers (>= 128 KiB), 9 programs (5 < 4 KiB, 2 4-32 KiB, 1 32-128 KiB, 1 >= 128 KiB) |
 | parity | the recomputed B35 selection equals the native command's `selected_cells_sha256` on all 36; every declared root is a labelled start |
@@ -55,9 +55,10 @@ Static traversal (baseline) and the R stage:
 | sub PCM driver | 3 | 1,974 | 0.739 | 0 | 0 | all | 0.351 |
 | sub program | 9 | 4,837 | 0.426 | 0 | 274 (4) | all | 0.381 |
 
-- Every module has static misses (their causes were not classified here); no statically reached start is outside the labels (an independent corroboration of the labels in
+- 35 of 36 modules have static misses (their causes were not classified here; 16 statically resolved targets fall outside the
+  admitted images); no statically reached start is outside the labels (an independent corroboration of the labels in
   the other direction), and no reached instruction is unsupported.
-- Diagnostics, not selections (32 modules of >= 8 cells): FRF mean 0.21, median 0.18, worst 0.95. Of the 3 failing modules, 2
+- Diagnostics, not selections (32 modules of >= 8 cells; computed by the local aggregation from the same logits and labels): FRF mean 0.21, median 0.18, worst 0.95. Of the 3 failing modules, 2
   hold code in 42-44 % of their cells, above the 35 % budget, with the code cells ranked first (FRF within 0.02 of the code-cell
   fraction): a budget-bound miss; 1 is a ranking miss (one code cell ranked at 0.95). 31 of 32 modules have FRF <= 0.60.
 - Candidate false admissions inside `R` (even offsets the CPU-owned decoder accepts and that are not labels): 287,921, of which
