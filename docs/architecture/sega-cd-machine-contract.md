@@ -376,3 +376,18 @@ Items marked **G** above are implemented as GPGX behaves; they stay here until h
 | typed stops | `image_unknown`, `image_bytes_mismatch`, `image_partially_overwritten`, `ambiguous_image`, `image_entry_not_compiled`, `stale_image_selection` | C |
 | code fetch from Word RAM the sub does not own | fails closed (no live candidate / `code_bytes_mismatch`); hardware would withhold DTACK | C (recorded deviation) |
 | CDC DMA into PRG RAM (destination 5) | still `cdc_destination_unsupported`; modules reach PRG RAM by CPU copies | C |
+
+## 16. BIOS-image profile (SEG-064-T002, ADR 0130 Amendment 1, ADR 0142)
+
+A second, explicitly selected profile used so far only by the synthetic mechanism proof. It changes nothing in sections 1-15 for the
+synthetic post-BIOS profile.
+
+| item | rule | tag |
+| --- | --- | --- |
+| selection | `segarecomp sega-cd emit --bios <image>`; the program requires `--bios <image>` at run time and refuses a missing, wrong-size or different image (SHA-256) before any instruction (`bios_refused`) | C |
+| BIOS image | at most 128 KiB, mapped read-only at main `$000000` (the section 3 256 KiB mirroring applies); a read past its end is `bios_absent`; main resets from its `$000000`/`$000004` vectors and takes every exception vector from it | location V2 (section 3); C otherwise |
+| images | the BIOS image (`immutable_input`, unguarded), declared verbatim ROM copies (`static_proof`), sub runnable-epoch images (`bounded_build_time_materialization`); each admitted by broad AOT over every aligned start; RAM images verified per instruction | C (ADR 0142) |
+| sub runnable epoch | the sub's first runnable transition after a reset (`SRES` 0 -> 1 with `SBRQ` = 0, or `SBRQ` 1 -> 0 after such a reset); live PRG RAM `[0, E)` (E: last non-zero byte rounded up to 256) must equal an admitted epoch image, else `materialized_image_unverified` before the sub retires anything; the sub's reset exception (vector fetch) is taken there, from the verified bytes | rule C; the fetch timing U (GPGX fetches at the `SRES` write; differs only when the reset is released with the bus requested) |
+| overlapping RAM images | per-PC variants, one per distinct instruction; a variant runs only when all its bytes are live; else `code_bytes_mismatch` | C |
+| operand templates | `JMP (xxx).W/.L` admitted from a build-pass RAM frontier: opcode word guarded, operand read live, destination an even compiled entry of the processor, else `entry_not_compiled` | C |
+| not modelled in this profile yet | every device behaviour an authentic BIOS boot needs beyond sections 5-8 (ADR 0141 inventory); gate G-A | - |
