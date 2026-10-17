@@ -185,7 +185,7 @@ int inspect(int argc, char **argv) {
     const auto &track = disc.tracks()[t];
     out << (t ? "," : "") << "{\"number\":" << track.number << ",\"type\":\"" << segarecomp::disc_track_type_name(track.type)
         << "\",\"file\":" << track.file_index << ",\"file_offset\":" << track.file_offset << ",\"sector_size\":" << track.sector_size
-        << ",\"pregap\":" << track.pregap << ",\"first_lba\":" << track.first_lba << ",\"sector_count\":" << track.sector_count << "}";
+        << ",\"pregap\":" << track.pregap << ",\"index0\":" << track.index0_sectors << ",\"first_lba\":" << track.first_lba << ",\"sector_count\":" << track.sector_count << "}";
   }
   out << "]";
   if (sector_digests) {

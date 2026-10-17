@@ -84,6 +84,118 @@ def expect_error(cue, error, label, stage="disc"):
     check(ok, "reject %s -> %s (got %d %s)" % (label, error, code, out.strip()[:160]))
 
 
+def frames(sectors):
+    return "%02d:%02d:%02d" % (sectors // 4500, sectors // 75 % 60, sectors % 75)
+
+
+def raw_mode1(lba, fill):
+    msf = lba + 150
+    bcd = lambda v: ((v // 10) << 4) | (v % 10)  # noqa: E731
+    return oracle.SYNC + bytes([bcd(msf // 4500), bcd(msf // 75 % 60), bcd(msf % 75), 1]) + bytes([fill]) * 2048 + bytes(288)
+
+
+def audio(sectors, seed):
+    return bytes((i * 7 + seed) & 0xFF for i in range(sectors * 2352))
+
+
+def index00_cases(tmp, raw):
+    """SEG-063-T003: INDEX 00 (in-file pregap) next to INDEX 01 and PREGAP. Every expected layout below is a hand-derived literal
+    (CUE sheet semantics: a stored pregap is addressable disc time before INDEX 01, owned by no track's program area, and the
+    previous track ends where it begins), checked against the C++ reader AND the independent oracle."""
+    data = (raw / "track01.bin").read_bytes()
+    D = len(data) // 2352
+    check(D == 40, "INDEX 00 base: the raw fixture data track has 40 sectors")
+    head = 'FILE "%s" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n'
+
+    def disc(name, files, cue):
+        directory = tmp / ("idx_" + name)
+        directory.mkdir()
+        for file_name, blob in files.items():
+            (directory / file_name).write_bytes(blob)
+        (directory / "disc.cue").write_text(cue)
+        return directory / "disc.cue"
+
+    def layout(cue, label, tracks, total):
+        got = compare(cue, label)
+        if not got:
+            return None
+        want = [{"number": n, "type": t, "file": f, "file_offset": o, "sector_size": 2352, "pregap": p, "index0": g, "first_lba": l,
+                 "sector_count": c} for n, t, f, o, p, g, l, c in tracks]
+        check(got["tracks"] == want, label + ": track table equals the hand-derived layout")
+        check(got["total_sectors"] == total, label + ": total %d sectors including every pregap" % total)
+        readable = sorted(int(k) for k in got["sector_sha256"])
+        check(readable == [l + s for n, t, f, o, p, g, l, c in tracks if t != "audio" for s in range(c)],
+              label + ": exactly the data tracks' program sectors are readable (no pregap sector)")
+        return got
+
+    # 1. Two tracks in one BIN, INDEX 01 only (unchanged behaviour).
+    a = layout(disc("one_bin", {"disc.bin": data + audio(75, 1)}, head % "disc.bin" + "  TRACK 02 AUDIO\n    INDEX 01 %s\n" % frames(D)),
+               "one BIN, INDEX 01 only", [(1, "mode1_2352", 0, 0, 0, 0, 0, 40), (2, "audio", 0, 40 * 2352, 0, 0, 40, 75)], 115)
+    # 2. One BIN, audio tracks with stored INDEX 00 pregaps (the redump layout): data 40 | gap 30 | audio 50 | gap 10 | audio 20.
+    one_bin = data + audio(30, 2) + audio(50, 3) + audio(10, 4) + audio(20, 5)
+    b_cue = head % "disc.bin" + ("  TRACK 02 AUDIO\n    INDEX 00 00:00:40\n    INDEX 01 00:00:70\n"
+                                 "  TRACK 03 AUDIO\n    INDEX 00 00:01:45\n    INDEX 01 00:01:55\n")
+    b = layout(disc("one_bin_index0", {"disc.bin": one_bin}, b_cue), "one BIN, INDEX 00 pregaps",
+               [(1, "mode1_2352", 0, 0, 0, 0, 0, 40), (2, "audio", 0, 70 * 2352, 0, 30, 70, 50),
+                (3, "audio", 0, 130 * 2352, 0, 10, 130, 20)], 150)
+    # 3. Separate BINs, each audio track with a stored pregap at the start of its own file.
+    c = layout(disc("multi_index0", {"t1.bin": data, "t2.bin": audio(150 + 40, 6), "t3.bin": audio(75 + 30, 7)},
+                    head % "t1.bin" + 'FILE "t2.bin" BINARY\n  TRACK 02 AUDIO\n    INDEX 00 00:00:00\n    INDEX 01 00:02:00\n'
+                    'FILE "t3.bin" BINARY\n  TRACK 03 AUDIO\n    INDEX 00 00:00:00\n    INDEX 01 00:01:00\n'),
+               "separate BINs, INDEX 00 pregaps",
+               [(1, "mode1_2352", 0, 0, 0, 0, 0, 40), (2, "audio", 1, 150 * 2352, 0, 150, 190, 40),
+                (3, "audio", 2, 75 * 2352, 0, 75, 305, 30)], 335)
+    # 4. A synthetic PREGAP (not stored) in a separate BIN.
+    layout(disc("multi_pregap", {"t1.bin": data, "t2.bin": audio(75, 8)},
+                head % "t1.bin" + 'FILE "t2.bin" BINARY\n  TRACK 02 AUDIO\n    PREGAP 00:02:00\n    INDEX 01 00:00:00\n'),
+           "separate BINs, PREGAP", [(1, "mode1_2352", 0, 0, 0, 0, 0, 40), (2, "audio", 1, 0, 150, 0, 190, 75)], 265)
+    # 5. A raw MODE1 track after a stored pregap: its sector headers carry the LBAs after the gap (data 40 | gap 20 | data 10).
+    gap_data = data + audio(20, 9) + b"".join(raw_mode1(60 + s, s) for s in range(10))
+    e_cue = head % "disc.bin" + "  TRACK 02 MODE1/2352\n    INDEX 00 00:00:40\n    INDEX 01 00:00:60\n"
+    layout(disc("raw_after_gap", {"disc.bin": gap_data}, e_cue), "raw MODE1 track after a stored pregap",
+           [(1, "mode1_2352", 0, 0, 0, 0, 0, 40), (2, "mode1_2352", 0, 60 * 2352, 0, 20, 60, 10)], 70)
+    wrong = data + audio(20, 9) + b"".join(raw_mode1(40 + s, s) for s in range(10))
+    expect_error(disc("raw_headers_ignore_gap", {"disc.bin": wrong}, e_cue), "raw_header",
+                 "raw headers numbered as if the stored pregap took no disc time")
+    # 6. Identity: a zero-length INDEX 00 is no pregap; a stored pregap is part of the layout identity.
+    zero = disc("zero_gap", {"disc.bin": data + audio(75, 1)},
+                head % "disc.bin" + "  TRACK 02 AUDIO\n    INDEX 00 %s\n    INDEX 01 %s\n" % (frames(D), frames(D)))
+    code, out = inspect(zero)
+    check(a is not None and code == 0 and json.loads(out)["identity"] == a["identity"],
+          "a zero-length INDEX 00 keeps the INDEX 01-only identity")
+    check(None not in (a, b, c) and len({a["identity"], b["identity"], c["identity"]}) == 3, "stored pregaps change the identity")
+
+    # 7. Malformed index combinations and boundaries (all on the one-BIN layout of case 2).
+    def bad(name, cue, error, label):
+        expect_error(disc("neg_" + name, {"disc.bin": one_bin}, cue), error, label)
+
+    t2 = "  TRACK 02 AUDIO\n"
+    rest = "  TRACK 03 AUDIO\n    INDEX 01 00:01:55\n"
+    bad("dup00", head % "disc.bin" + t2 + "    INDEX 00 00:00:40\n    INDEX 00 00:00:41\n    INDEX 01 00:00:70\n" + rest,
+        "index_order", "duplicate INDEX 00")
+    bad("dup01", head % "disc.bin" + t2 + "    INDEX 01 00:00:40\n    INDEX 01 00:00:70\n" + rest, "index_order", "duplicate INDEX 01")
+    bad("late00", head % "disc.bin" + t2 + "    INDEX 01 00:00:70\n    INDEX 00 00:00:40\n" + rest, "index_order",
+        "INDEX 00 after INDEX 01")
+    bad("after01", head % "disc.bin" + t2 + "    INDEX 00 00:00:71\n    INDEX 01 00:00:70\n" + rest, "index_order",
+        "INDEX 00 later than INDEX 01")
+    bad("pregap_then00", head % "disc.bin" + t2 + "    PREGAP 00:02:00\n    INDEX 00 00:00:40\n    INDEX 01 00:00:70\n" + rest,
+        "pregap_conflict", "PREGAP and INDEX 00 on one track")
+    bad("00_then_pregap", head % "disc.bin" + t2 + "    INDEX 00 00:00:40\n    PREGAP 00:02:00\n    INDEX 01 00:00:70\n" + rest,
+        "pregap_conflict", "INDEX 00 and then PREGAP on one track")
+    bad("beyond", head % "disc.bin" + t2 + "    INDEX 00 00:02:10\n    INDEX 01 00:02:20\n", "file_truncated",
+        "INDEX 00 / INDEX 01 beyond the end of the BIN")
+    bad("into_prev", head % "disc.bin" + t2 + "    INDEX 00 00:00:00\n    INDEX 01 00:00:70\n" + rest, "track_layout",
+        "INDEX 00 overlapping the previous track's program area")
+    bad("no01", head % "disc.bin" + t2 + "    INDEX 00 00:00:40\n" + rest, "track_numbering", "INDEX 00 without INDEX 01")
+    expect_error(disc("file_gap", {"t1.bin": data, "t2.bin": audio(190, 6)},
+                      head % "t1.bin" + 'FILE "t2.bin" BINARY\n  TRACK 02 AUDIO\n    INDEX 00 00:00:10\n    INDEX 01 00:02:00\n'),
+                 "track_layout", "a separate BIN whose first INDEX 00 is not at its start")
+    expect_error(disc("mixed", {"disc.bin": data[:2048 * 40] + audio(10, 1)},
+                      'FILE "disc.bin" BINARY\n  TRACK 01 MODE1/2048\n    INDEX 01 00:00:00\n'
+                      "  TRACK 02 AUDIO\n    INDEX 00 00:00:30\n    INDEX 01 00:00:35\n"),
+                 "mixed_sector_sizes", "cooked data and audio in one BIN")
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="scd-ingest-") as tmp:
         tmp = pathlib.Path(tmp)
@@ -172,7 +284,8 @@ def main():
                      "overlapping tracks in one file")
         expect_error(with_cue("numbering", one.replace("TRACK 01", "TRACK 02")), "track_numbering", "tracks not numbered from 1")
         expect_error(with_cue("mode2", one.replace("MODE1/2048", "MODE2/2352")), "cue_unsupported", "MODE2 track")
-        expect_error(with_cue("index0", one.replace("INDEX 01", "INDEX 00")), "cue_unsupported", "INDEX 00")
+        expect_error(with_cue("index0", one.replace("INDEX 01", "INDEX 00")), "cue_unsupported", "INDEX 00 on track 1")
+        expect_error(with_cue("index2", one + "    INDEX 02 00:00:10\n"), "cue_unsupported", "INDEX 02")
         expect_error(with_cue("wave", one.replace("BINARY", "WAVE")), "cue_unsupported", "WAVE file type")
         expect_error(with_cue("syntax", one.replace('"track01.bin"', '"track01.bin')), "cue_syntax", "unterminated quote")
         expect_error(with_cue("time", one.replace("00:00:00", "00:61:00")), "cue_syntax", "seconds out of range")
@@ -222,6 +335,8 @@ def main():
         (d / "a.bin").write_bytes(bytes(2352 * 20))
         (d / "disc.cue").write_text('FILE "a.bin" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n')
         expect_error(d / "disc.cue", "first_track_not_data", "audio first track", "boot")
+
+        index00_cases(tmp, raw)
 
     if failures:
         print("%d failure(s)" % len(failures))

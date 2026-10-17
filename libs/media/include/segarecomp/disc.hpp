@@ -3,7 +3,7 @@
 // SEG-062-T002 (ADR 0129): build-time CUE/BIN disc ingestion and the Sega CD system-area header.
 //
 // The one CUE parser of the project. It accepts a strict subset (FILE "name" BINARY; TRACK nn MODE1/2048 | MODE1/2352 | AUDIO;
-// INDEX 01; PREGAP; REM/TITLE/PERFORMER/CATALOG/FLAGS ignored), resolves files strictly inside the CUE's directory, verifies the
+// INDEX 00 (an in-file pregap, SEG-063-T003); INDEX 01; PREGAP; REM/TITLE/PERFORMER/CATALOG/FLAGS ignored), resolves files strictly inside the CUE's directory, verifies the
 // sync pattern and header of every raw data sector, and yields a normalized track table plus a content identity: the SHA-256 of
 // every referenced file and the SHA-256 of the normalized table text (which includes the file digests). Every failure is a typed
 // DiscError; a failed load never returns a partial disc. Reads are bounds-checked and return only Mode-1 user data.
@@ -33,7 +33,7 @@ enum class DiscError : std::uint8_t {
   none,
   cue_unreadable,          // missing, not a regular file, or larger than kCueMaxBytes
   cue_syntax,              // malformed line, bad quoting, bad number or time
-  cue_unsupported,         // a directive or mode outside the supported subset (INDEX 00, POSTGAP, MODE2, WAVE, ...)
+  cue_unsupported,         // a directive or mode outside the supported subset (INDEX 02+, POSTGAP, MODE2, WAVE, INDEX 00 on track 1, ...)
   file_missing,            // a TRACK before any FILE, or a FILE with no TRACK
   file_ambiguous,          // the same file named twice
   path_unsafe,             // absolute path, separator, '..', drive letter, symlink, or resolution outside the CUE directory
@@ -43,6 +43,8 @@ enum class DiscError : std::uint8_t {
   mixed_sector_sizes,      // tracks of different sector sizes in one file
   track_numbering,         // tracks not numbered 1, 2, 3, ... or a track without INDEX 01
   track_layout,            // overlapping or gapped INDEX positions, or a track with no sectors
+  index_order,             // a repeated INDEX, INDEX 00 after INDEX 01, or INDEX 00 later than its INDEX 01 (SEG-063-T003)
+  pregap_conflict,         // one track declares both PREGAP and INDEX 00 (SEG-063-T003)
   disc_too_large,          // more than kDiscMaxSectors
   raw_sync,                // a raw data sector without the 12-byte sync pattern
   raw_header,              // a raw data sector whose header MSF or mode disagrees with its LBA
@@ -69,6 +71,10 @@ struct DiscTrack {
   std::uint32_t sector_size{};
   std::uint64_t file_offset{};  // byte offset of the track's INDEX 01 sector in its file
   std::uint32_t pregap{};       // PREGAP sectors (not stored in the file) before first_lba
+  // SEG-063-T003: INDEX 00 pregap sectors stored in the file immediately before file_offset (INDEX 01 - INDEX 00). They occupy
+  // the LBAs [first_lba - index0_sectors, first_lba), belong to no track's readable area and are never part of the previous
+  // track. Zero for a track without INDEX 00.
+  std::uint32_t index0_sectors{};
   std::uint32_t first_lba{};
   std::uint32_t sector_count{};
 };
