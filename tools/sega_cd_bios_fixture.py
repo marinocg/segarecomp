@@ -9,8 +9,9 @@ exercises the four mechanisms of the BIOS-image profile:
      with code; negative transfers (main d6 = 1..4): an odd target, an address past the image, an undecodable word, and the sub's code
      through main's PRG-RAM window (the wrong processor / memory view);
   B  a transformed RAM image: main writes the sub program into PRG RAM through the window, each word XORed with a key (not a verbatim
-     copy), then releases the sub (SRES 1, SBRQ 0: the runnable epoch); negatives (main d5): 1 releases after half the copy
-     (incomplete), 2 corrupts one code word after the copy (wrong materialization);
+     copy), then releases the sub (SRES 1, SBRQ 0: the runnable epoch); variants (main d5): 3 arms the reset with the bus requested
+     and starts the sub by the SBRQ release, 4 later resets it, writes the image again and releases it (two epochs); negatives (main d5): 1 releases after
+     half the copy (incomplete), 2 corrupts one code word after the copy (wrong materialization);
   C  resident and transient ranges: the sub image holds resident code, mutable data the sub keeps writing, and a transient routine T1
      at $0480; main later halts the sub (SBRQ) and copies T2 - a verbatim ROM span, an independently admitted copy image - over it;
      T1 and T2 share their first instruction (one deduplicated variant) and differ after it (two variants selected by live bytes);
@@ -39,7 +40,7 @@ import sega_cd_fixture_disc as F  # noqa: E402  (the shared project-authored MC6
 
 ROM_SIZE = 0x0E00
 MAIN = 0x0200
-MAIN_FAULT = 0x0400
+MAIN_FAULT = 0x0420
 HIDDEN = 0x0440
 DEST1 = 0x0460
 DEST2 = 0x0480
@@ -187,6 +188,10 @@ def main_program(sub_len):
         m.w(value)
     m.label("after_data")
     # B: transformed copy of the sub image into PRG RAM (bank 0) through the window, then the runnable epoch
+    m.immop("cmp", "w", 3, F.d(5))                        # d5 >= 3: arm the reset with the bus still requested (SRES 1, SBRQ 1)
+    m.bcc("lt", "nohold")
+    m.move("b", F.imm(0x03), F.absl(GA + 0x01))
+    m.label("nohold")
     m.move("l", F.imm(SUB_SRC), F.a(0))
     m.move("l", F.imm(WINDOW), F.a(1))
     m.move("w", F.imm(sub_len // 2 - 1), F.d(0))
@@ -206,7 +211,26 @@ def main_program(sub_len):
     # D, main side: a JMP (xxx).L thunk in work RAM built before the epoch
     m.move("w", F.imm(0x4EF9), F.absl(THUNK_MAIN))
     m.move("l", F.imm(DEST1), F.absl(THUNK_MAIN + 2))
-    m.move("b", F.imm(0x01), F.absl(GA + 0x01))           # SRES 1, SBRQ 0: the sub runnable epoch
+    m.move("b", F.imm(0x01), F.absl(GA + 0x01))           # SRES 1, SBRQ 0: the sub runnable epoch (d5 >= 3: by the SBRQ release)
+    m.immop("cmp", "w", 4, F.d(5))                        # d5 = 4: once the sub has run, reset it, write the image again,
+    m.bcc("ne", "one_epoch")                              # clear its stack page and release it: a second verified epoch
+    F.wait_flag(m, GA + 0x0F, 0x01, "wait_first_run")
+    m.move("b", F.imm(0x00), F.absl(GA + 0x01))           # SRES 0: reset and halt (the window maps)
+    m.move("l", F.imm(SUB_SRC), F.a(0))
+    m.move("l", F.imm(WINDOW), F.a(1))
+    m.move("w", F.imm(sub_len // 2 - 1), F.d(0))
+    m.label("copy_again")
+    m.move("w", ("inc", 0), F.d(1))
+    m.immop("eor", "w", KEY, F.d(1))
+    m.move("w", F.d(1), ("inc", 1))
+    m.dbra(0, "copy_again")
+    m.move("l", F.imm(WINDOW + SUB_SSP - 0x100), F.a(1))
+    m.move("w", F.imm(0x3F), F.d(0))
+    m.label("clear_stack")
+    m.clr("l", ("inc", 1))
+    m.dbra(0, "clear_stack")
+    m.move("b", F.imm(0x01), F.absl(GA + 0x01))           # SRES 1, SBRQ 0: the second epoch
+    m.label("one_epoch")
     m.jsr(F.absl(THUNK_MAIN))
     m.move("l", F.imm(DEST2), F.absl(THUNK_MAIN + 2))
     m.jsr(F.absl(THUNK_MAIN))
@@ -292,6 +316,7 @@ def expected(rom, sub, t2):
         "thunks": {"main": THUNK_MAIN, "sub": THUNK_SUB},
         "result": {"0": 0x1111, "2": 0xD001, "4": 0xD002, "6": 2, "32": 0x7202, "34": 0x5D01, "36": 0x5D02, "48": 0xAAAE},
         "sub_comstat": [0x7202, 0x5D01, 0x5D02, 0, 0xAAAE, 0, 0, 0],
+        "positive_variants": {"main:d5=3": 1, "main:d5=4": 2},  # same results; verified epochs
         "negatives": {
             "main:d6=1": ["entry_not_compiled", 0, None], "main:d6=2": ["entry_not_compiled", 0, None],
             "main:d6=3": ["entry_not_compiled", 0, None], "main:d6=4": ["entry_not_compiled", 0, None],

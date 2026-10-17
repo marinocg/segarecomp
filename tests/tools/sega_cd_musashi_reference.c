@@ -299,6 +299,14 @@ int main(int argc, char **argv) {
     int ran = 0;
     for (k = 0; k < 2U; ++k) {
       if (k == 1U && (sub_reset || sub_busreq)) continue;
+      if (k == 1U && rom_size != 0U && reset_pending) { /* ROM mode: the reset exception before the sub's first step */
+        current = 1;
+        m68k_set_context(sub_context);
+        m68k_pulse_reset();
+        m68k_get_context(sub_context);
+        reset_pending = 0;
+        stopped[1] = 0;
+      }
       current = k;
       m68k_set_context(k ? sub_context : main_context);
       m68k_set_irq(k ? (unsigned)sub_level() : 0U);
@@ -308,7 +316,7 @@ int main(int argc, char **argv) {
       ran = 1;
     }
     if (!ran) break;
-    if (reset_pending) {
+    if (reset_pending && rom_size == 0U) { /* ROM mode takes it before the sub's first step instead (ADR 0142 decision 3) */
       current = 1;
       m68k_set_context(sub_context);
       m68k_pulse_reset(); /* SSP from PRG $0, PC from PRG $4 */

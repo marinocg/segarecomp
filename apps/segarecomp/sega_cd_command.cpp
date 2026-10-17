@@ -295,9 +295,12 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     inputs.copies.push_back(scd::CopyImage{*proc, *base, *off, *len});
   }
   for (const auto &text : admits) {
-    const auto f = split(text, ':');
+    auto f = split(text, ':');
     scd::Admission a;
-    if (f.size() == 3U && f[0] == "epoch") {
+    if (f.size() >= 3U && f[0] == "epoch") {  // the snapshot path is the remainder (it may contain ':')
+      const auto second = text.find(':', text.find(':') + 1U);
+      f.resize(3U);
+      f[2] = text.substr(second + 1U);
       const auto bytes = read_file(f[2], scd::kPrgRamBytes);
       if (!bytes) return bad("admit", "snapshot_unreadable");
       a.kind = scd::AdmissionKind::epoch;

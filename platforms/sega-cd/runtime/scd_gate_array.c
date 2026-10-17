@@ -61,7 +61,15 @@ static void scd_ga_reset_control(ScdMachine *m, uint32_t value, uint32_t pc) {
   const uint32_t before = (uint32_t)(sub->irq.stopped | (m->ga.sub_halted << 1) | (m->ga.sub_wait << 2));
   uint32_t after;
   if (value & 1U) {
-    if (!(m->ga.ctl & 1U)) {
+    if (!(m->ga.ctl & 1U) && m->bios != NULL) {
+      /* SEG-064-T002 (ADR 0142 decision 3): in the BIOS-image profile the reset is armed here and the sub's reset exception - its
+       * vector fetch is a bus cycle the sub cannot make while SBRQ grants the bus to main - is taken at the first runnable
+       * transition, from the PRG RAM verified there (scd_sub_runnable_epoch). */
+      m->sub_pristine = 1U;
+      sub->irq.stopped = 0U;
+      m->ga.sub_wait = 0U;
+      scd_log(m, 0x10U, 0U, 0U);
+    } else if (!(m->ga.ctl & 1U)) {
       /* SRES 0 -> 1: the sub takes its reset exception from PRG RAM $000000 (SSP) and $000004 (PC) (contract section 4); every
        * stop level (STOP, halt, DTACK wait) clears. */
       uint32_t i, ssp = 0U, entry = 0U;
@@ -79,7 +87,6 @@ static void scd_ga_reset_control(ScdMachine *m, uint32_t value, uint32_t pc) {
       if (sub->next < m->now) sub->next = m->now;
       sub->next += UINT64_C(40) * sub->cycle_ticks; /* MC68000 reset exception processing: 40 clocks (UM68K) */
       scd_log(m, 0x10U, ssp, entry);
-      if (m->bios != NULL) m->sub_pristine = 1U; /* SEG-064-T002: a reset was taken; the next runnable transition is an epoch */
     }
     if (value & 2U) {
       m->ga.sub_halted = 1U;

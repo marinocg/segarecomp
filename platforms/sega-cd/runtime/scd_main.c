@@ -220,8 +220,10 @@ static int scd_capture(ScdMachine *m, const ScdProgram *program, const char *dir
             m->capture_length, (unsigned long long)m->now);
     return fclose(f) == 0;
   }
+  /* A frontier is only a dispatch that found no compiled variant for the live bytes at the processor's PC (the stop's detail is that
+   * PC): an uncompiled computed or template destination (detail = the destination) is an ordinary stop, never a new admission. */
   if ((m->stop.stop_class == SCD_STOP_ENTRY_NOT_COMPILED || m->stop.stop_class == SCD_STOP_CODE_BYTES_MISMATCH) &&
-      m->stop.cpu < 2U && m->stop.pc == m->cpu[m->stop.cpu].pc) {
+      m->stop.cpu < 2U && m->stop.pc == m->cpu[m->stop.cpu].pc && m->stop.address == m->stop.pc) {
     uint32_t i;
     for (i = 0; i < 8U; ++i) {
       const uint8_t *b = scd_code_byte(m, m->stop.cpu, m->stop.pc + i);

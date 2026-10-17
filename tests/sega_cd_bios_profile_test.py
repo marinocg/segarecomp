@@ -121,6 +121,13 @@ with tempfile.TemporaryDirectory() as tmp:
         check(run_program(exe, disc, bios, "--slice-seed", seed)[1] == report, "deadline partition seed %d identical" % seed)
     check(run_program(exe, disc, bios, "--slice-ticks", 1000003)[1] == report, "fixed deadline slicing identical")
 
+    # ---- the SBRQ-release epoch path and repeated resets (two epochs) ----
+    for spec, epochs in expected["positive_variants"].items():
+        code, alt = run_program(exe, disc, bios, "--set", spec)
+        check(code == 0 and alt.get("result_block") == report["result_block"] and alt["ga"]["comstat"] == report["ga"]["comstat"],
+              "variant %s reaches the same results (%s)" % (spec, alt.get("stop")))
+        check(alt.get("bios_profile", {}).get("epochs") == epochs, "variant %s verified %s epoch(s)" % (spec, epochs))
+
     # ---- negatives: typed stops before an instruction from the invalid image retires ----
     for spec, (cls, cpu, pc) in expected["negatives"].items():
         code, neg = run_program(exe, disc, bios, "--set", spec)
@@ -131,6 +138,14 @@ with tempfile.TemporaryDirectory() as tmp:
             check(neg["cpus"][cpu]["pc"] == stop["pc"] or cls == "materialized_image_unverified", "%s: the stopped instruction did not retire" % spec)
             if cls == "materialized_image_unverified":
                 check(neg["cpus"][1]["retired"] == 0, "%s: the sub retired nothing from the unverified image" % spec)
+
+    # ---- a build pass never re-proposes an admitted template: an uncompiled destination is an ordinary stop ----
+    for spec in ("main:d4=1", "main:d4=2"):
+        pass_dir = tmp / ("pass-" + spec.replace(":", "-").replace("=", "-"))
+        pass_dir.mkdir()
+        code, neg = run_program(exe, disc, bios, "--set", spec, "--materialize-dir", pass_dir)
+        check(code == 10 and neg["stop"]["class"] == "entry_not_compiled" and not (pass_dir / "capture.json").exists(),
+              "%s in a build pass: typed stop, no frontier capture" % spec)
 
     # ---- instruction budget ----
     code, short = run_program(exe, disc, bios, budget=500)

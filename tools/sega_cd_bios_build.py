@@ -139,7 +139,9 @@ class Driver:
                                      "sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest()}
                 history.append(entry)
                 continue
-            if capture is not None and capture["kind"] == "frontier" and capture["bytes"][:4] in TEMPLATE_OPCODES:
+            proposed = {(a.split(":")[2], int(a.split(":")[3], 0)) for a in admits if a.startswith("template:")}
+            if (capture is not None and capture["kind"] == "frontier" and capture["bytes"][:4] in TEMPLATE_OPCODES and
+                    ("main" if capture["cpu"] == 0 else "sub", capture["pc"]) not in proposed):
                 templates += 1
                 if templates > MAX_TEMPLATES:
                     raise BuildFailure("template_bound_exceeded")
