@@ -146,6 +146,8 @@ def main():
             ("a bad syntax", ["--disc-image", "main:512"], 7),
             ("too many images", ["--disc-image", "main:512:0xFF0000:26"] * 5, 6),
             ("a zero application entry", ["--application-entry", "0"], 2),
+            ("an odd application entry", ["--application-entry", "0xFF0001"], 2),
+            ("an application entry past 24 bits", ["--application-entry", "0x1000000"], 2),
         ):
             code, report = emit(disc, bios, *extra)
             check(code == status and (code == 2 or report.get("ok") is False), "%s is refused (exit %d, %s)" % (label, code, report.get("error")))

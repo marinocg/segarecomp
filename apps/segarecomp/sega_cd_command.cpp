@@ -426,8 +426,8 @@ int emit(int argc, char **argv) {
     else if (arg == "--disc-image" && i + 1 < argc) disc_images.emplace_back(argv[++i]);
     else if (arg == "--application-entry" && i + 1 < argc && !application_entry) {
       application_entry = parse_u32(argv[++i]);
-      if (!application_entry || *application_entry == 0U) {
-        std::cerr << "segarecomp: --application-entry must be a non-zero address\n";
+      if (!application_entry || *application_entry == 0U || *application_entry > 0x00FFFFFFU || (*application_entry & 1U) != 0U) {
+        std::cerr << "segarecomp: --application-entry must be a non-zero even 24-bit address\n";
         return 2;
       }
     } else if (arg == "--admit" && i + 1 < argc) admits.emplace_back(argv[++i]);

@@ -625,9 +625,10 @@ static int scd_cdd_command(ScdMachine *m, uint32_t pc) {
       break;
     case 0x5: { /* start time of track TX4 * 10 + TX5 (the lead-out for count + 1) */
       const uint32_t track = (uint32_t)m->cdd.tx[4] * 10U + m->cdd.tx[5];
-      const uint32_t start = track >= 1U && track <= count ? m->disc->tracks[track - 1U].first_lba : scd_track_end(m, count - 1U);
-      if (track < 1U || track > count + 1U || count == 0U || scd_cdd_put_time(m, start + 150U))
-        return scd_fail(m, SCD_SUB, SCD_STOP_CDD_COMMAND_UNSUPPORTED, pc, 0x105U);
+      uint32_t start;
+      if (count == 0U || track < 1U || track > count + 1U) return scd_fail(m, SCD_SUB, SCD_STOP_CDD_COMMAND_UNSUPPORTED, pc, 0x105U);
+      start = track <= count ? m->disc->tracks[track - 1U].first_lba : scd_track_end(m, count - 1U);
+      if (scd_cdd_put_time(m, start + 150U)) return scd_fail(m, SCD_SUB, SCD_STOP_CDD_COMMAND_UNSUPPORTED, pc, 0x105U);
       if (track <= count && m->disc->tracks[track - 1U].type != 2U) m->cdd.rx[6] = (uint8_t)(m->cdd.rx[6] | 0x08U); /* data track */
       m->cdd.rx[8] = (uint8_t)(track % 10U);
       break;
