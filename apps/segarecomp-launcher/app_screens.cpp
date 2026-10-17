@@ -294,7 +294,16 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     if (page_ == Page::settings)
       for (const auto &tab : settings_tab_entry_) if (tab.id != 0 && g.NavId == tab.id) on_tab = true;
     const bool in_settings_body = page_ == Page::settings && settings_body_window_ != nullptr && g.NavWindow == settings_body_window_;
-    if (free_to_hop && in_sidebar && right && content_entry_.id != 0) {
+    const bool on_storage = page_ == Page::storage && free_to_hop && !in_sidebar;
+    if (on_storage && down && g.NavId == storage_header_.id && storage_first_row_.id != 0) {
+      focus_item(storage_first_row_.id, storage_first_row_.window, storage_first_row_.rect);
+    } else if (on_storage && up && g.NavId == storage_first_row_.id && storage_header_.id != 0) {
+      focus_item(storage_header_.id, storage_header_.window, storage_header_.rect);
+    } else if (on_storage && down && g.NavId == storage_last_row_.id && storage_after_.id != 0) {
+      focus_item(storage_after_.id, storage_after_.window, storage_after_.rect);
+    } else if (on_storage && up && g.NavId == storage_after_.id && storage_last_row_.id != 0) {
+      focus_item(storage_last_row_.id, storage_last_row_.window, storage_last_row_.rect);
+    } else if (free_to_hop && in_sidebar && right && content_entry_.id != 0) {
       focus_item(content_entry_.id, content_entry_.window, content_entry_.rect);
       left_pending_ = false;
     } else if (free_to_hop && on_tab && (settings_narrow_ ? down : right) && settings_body_entry_.id != 0) {

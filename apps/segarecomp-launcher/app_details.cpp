@@ -250,7 +250,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
       stage_chip(ctx_, dl, ImVec2(sx, y + ctx_.u(8.0F)), names[i], job_->stage(i), &cw);
       sx += cw + ctx_.u(6.0F);
     }
-    y += ctx_.u(8.0F) + ctx_.u(26.0F);
+    y += ctx_.u(8.0F) + ctx_.u(26.0F) + ctx_.u(10.0F);  // clear gap below the stage chips
     // SEG-069-T001: the visible, focusable way to stop the running build. Disabled (and relabelled) while the attempt shuts down.
     ImGui::SetCursorScreenPos(ImVec2(x0, y));
     const bool stopping = is_stopping(entry.id());

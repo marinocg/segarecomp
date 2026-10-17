@@ -203,7 +203,7 @@ def build_journey(r, tmp, exe, fake_cli, fake_game, size):
     script += seek("unqueue", "dpad_down", 10) + press("south") + expect(queued=0, build_count=1)
     script += press("east") + seek("card:game0", "dpad_left", 3) + press("south") + press("dpad_right")
     script += seek("cancel_build", "dpad_down", 12) + press("south") + ["wait_idle", "frames 20"] + expect(build_count=0, build_outcome="cancelled") + ["quit"]
-    r.check("build/cancel/queue", p.run(script, {"FAKE_BUILD_HOLD": str(hold), "FAKE_HOLD_MS": "20000"}, size), 21)
+    r.check("build/cancel/queue", p.run(script, {"FAKE_BUILD_HOLD": str(hold), "FAKE_HOLD_MS": "240000"}, size), 21)
     left = [x for x in p.cache.rglob("*") if x.name.endswith((".partial", ".failed"))] if p.cache.exists() else []
     r.expect(not left, f"cancelled builds leave nothing behind: {left}")
 

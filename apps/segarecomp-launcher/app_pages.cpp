@@ -102,7 +102,6 @@ void App::draw_import_body(float w, float h) {
 // ---------------------------------------------------------------- storage
 
 void App::draw_storage(float w, float h) {
-  (void)h;  // the table is part of the page now (no height-capped child)
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const bool maintenance = maintenance_running_ || busy_.any_activity();
   {
@@ -143,9 +142,9 @@ void App::draw_storage(float w, float h) {
   const ImVec2 top = ImGui::GetCursorScreenPos();
   // ---- table ----
   const float rh = ctx_.u(42.0F), hh = ctx_.u(28.0F);
-  // SEG-069-T004: the rows are part of the page (no nested scroller): ImGui's directional navigation is scored per window, and a child window made D-pad Down skip
-  // the row checkboxes. A long library simply makes the page longer, which the page's own scrolling handles.
-  const float table_h = hh + std::max(ctx_.u(90.0F), static_cast<float>(games.size()) * (rh + ctx_.u(4.0F)) + ctx_.u(6.0F));
+  // The table keeps its height cap and scrolls inside; explicit D-pad hops (header checkbox <-> rows <-> action buttons) cover the child boundary, which ImGui's
+  // directional scoring skips (SEG-069-T004).
+  const float table_h = hh + std::min(static_cast<float>(games.size()) * (rh + ctx_.u(4.0F)) + ctx_.u(6.0F), std::max(ctx_.u(130.0F), h * 0.40F));
   card(ctx_, dl, top, ImVec2(top.x + tw, top.y + table_h), false, false, rgba(7, 17, 40));
   {
     const float x0 = top.x + ctx_.u(40.0F), name_w = std::max(ctx_.u(130.0F), tw * 0.34F);
@@ -153,12 +152,17 @@ void App::draw_storage(float w, float h) {
     bool all = !games.empty() && std::all_of(games.begin(), games.end(), [&](const LibraryEntry *e) { return storage_selected_.count(e->id()) != 0; });
     ImGui::SetCursorScreenPos(ImVec2(top.x + ctx_.u(10.0F), top.y + ctx_.u(4.0F)));
     if (checkbox(ctx_, "st_all", "", &all)) { if (all) for (const auto *e : games) storage_selected_.insert(e->id()); else storage_selected_.clear(); }
+    storage_header_ = ui::ZoneEntry{ImGui::GetItemID(), ImGui::GetCurrentWindow(), ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax())};
+    storage_first_row_ = ui::ZoneEntry{};
+    storage_last_row_ = ui::ZoneEntry{};
     const float hpx = ctx_.u(11.5F);
     draw_text(dl, ctx_.bold, hpx, col::text2, ImVec2(x0, top.y + ctx_.u(8.0F)), "Game");
     const char *heads[] = {"Total Size", compact_table ? "Status" : "Executable", "Intermediate", "Status"};
     for (int i = 0; i < (compact_table ? 2 : 4); ++i) if (cols[i] + ctx_.u(60.0F) < top.x + tw) draw_text(dl, ctx_.bold, hpx, col::text2, ImVec2(cols[i], top.y + ctx_.u(8.0F)), heads[i]);
     dl->AddRectFilled(ImVec2(top.x + 1, top.y + hh), ImVec2(top.x + tw - 1, top.y + hh + 1), rgba(34, 70, 140));
     ImGui::SetCursorScreenPos(ImVec2(top.x, top.y + hh + ctx_.u(3.0F)));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, rgba(0, 0, 0, 0));
+    ImGui::BeginChild("##storage_table", ImVec2(tw, table_h - hh - ctx_.u(4.0F)), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
     ImDrawList *cl = ImGui::GetWindowDrawList();
     for (const LibraryEntry *e : games) {
       const ImVec2 a = ImGui::GetCursorScreenPos();
@@ -171,6 +175,11 @@ void App::draw_storage(float w, float h) {
       ImGui::PushID(e->id().c_str());
       ImGui::SetCursorScreenPos(ImVec2(a.x + ctx_.u(12.0F), a.y + (rh - ctx_.u(22.0F)) * 0.5F));
       if (checkbox(ctx_, "sel", "", &on)) { if (on) storage_selected_.insert(e->id()); else storage_selected_.erase(e->id()); }
+      {
+        const ui::ZoneEntry row{ImGui::GetItemID(), ImGui::GetCurrentWindow(), ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax())};
+        if (storage_first_row_.id == 0) storage_first_row_ = row;
+        storage_last_row_ = row;
+      }
       ImGui::PopID();
       draw_cover(cl, *e, ImVec2(x0 - top.x + a.x - ctx_.u(6.0F), a.y + ctx_.u(4.0F)), ImVec2(x0 - top.x + a.x + ctx_.u(28.0F), a.y + rh - ctx_.u(4.0F)), ctx_.u(3.0F));
       const float nx = x0 - top.x + a.x + ctx_.u(34.0F);
@@ -189,6 +198,8 @@ void App::draw_storage(float w, float h) {
       ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + rh + ctx_.u(4.0F)));
       ImGui::Dummy(ImVec2(tw, 1));
     }
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
   }
   ImGui::SetCursorScreenPos(ImVec2(top.x, top.y + table_h + ctx_.u(2.0F)));
   float side_bottom = top.y;
@@ -257,6 +268,7 @@ void App::draw_storage(float w, float h) {
     ImGui::PushID(act.id);
     if (!act.enabled) ImGui::BeginDisabled();
     const bool pressed = ui::nav_button("##a", ImVec2(aw, ah));
+    if (i == 0) storage_after_ = ui::ZoneEntry{ImGui::GetItemID(), ImGui::GetCurrentWindow(), ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax())};
     if (!act.enabled) ImGui::EndDisabled();
     const bool hov = ImGui::IsItemHovered() && act.enabled, foc = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
     if (ImGui::IsItemFocused()) ui::focus_id = std::string("act:") + act.id;

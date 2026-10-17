@@ -195,6 +195,7 @@ private:
   ui::ZoneEntry card_entry_;                     // first game card/row submitted this frame
   ui::ZoneEntry settings_tab_entry_[6];          // the Settings tab column (Right enters the body, Left from the body returns to the current tab)
   ui::ZoneEntry settings_body_entry_;
+  ui::ZoneEntry storage_header_, storage_first_row_, storage_last_row_, storage_after_;  // Storage: header checkbox, first/last row checkbox, first action button
   ImGuiWindow *settings_body_window_ = nullptr;
   bool settings_narrow_ = false;
   ImGuiID left_pending_id_ = 0;                  // nav id when Left was pressed in the page; unchanged next frame means ImGui found nothing to the left

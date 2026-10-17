@@ -171,11 +171,16 @@ endif()
 
 # SEG-069-T004: the launcher's ordinary journeys with a virtual gamepad only (no mouse event), at 1080x740 and 720x520, on the real window.
 if(BUILD_TESTING)
+  # One test per window size (they are independent and slow on some hosts): wide 1080x740 and narrow 720x520.
   add_test(NAME launcher_gamepad_journey_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_gamepad_journey_test.py
-    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
-  set_property(TEST launcher_gamepad_journey_test APPEND PROPERTY LABELS full fast)
-  set_property(TEST launcher_gamepad_journey_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
-  set_property(TEST launcher_gamepad_journey_test PROPERTY TIMEOUT 1500)
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game> 1080x740)
+  add_test(NAME launcher_gamepad_journey_narrow_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_gamepad_journey_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game> 720x520)
+  foreach(t launcher_gamepad_journey_test launcher_gamepad_journey_narrow_test)
+    set_property(TEST ${t} APPEND PROPERTY LABELS full fast)
+    set_property(TEST ${t} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+    set_property(TEST ${t} PROPERTY TIMEOUT 2400)
+  endforeach()
 endif()
 
 # SEG-058: covers, Libretro candidate naming and launcher settings.
