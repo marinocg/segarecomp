@@ -35,6 +35,7 @@ long long process_id(SDL_Process *process) {
 struct ProcessTree::Impl {
   std::mutex mutex;
   HANDLE job = nullptr;
+  SDL_Process *process = nullptr;  // fallback target when the child could not be put into a job
   bool terminated = false;
 };
 
@@ -47,6 +48,7 @@ ProcessTree::~ProcessTree() {
 
 void ProcessTree::attach(SDL_Process *process) {
   std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->process = process;
   const long long pid = process_id(process);
   if (pid == 0 || impl_->job != nullptr) return;
   HANDLE job = CreateJobObjectW(nullptr, nullptr);
@@ -68,8 +70,10 @@ void ProcessTree::attach(SDL_Process *process) {
 void ProcessTree::terminate() {
   std::lock_guard<std::mutex> lock(impl_->mutex);
   if (impl_->terminated) return;
-  impl_->terminated = true;
   if (impl_->job != nullptr) TerminateJobObject(impl_->job, 1);
+  else if (impl_->process != nullptr) SDL_KillProcess(impl_->process, true);  // no job (not assignable): at least the direct child
+  else return;                                                               // before attach: a later terminate() after attach still acts
+  impl_->terminated = true;
 }
 
 void ProcessTree::release() {

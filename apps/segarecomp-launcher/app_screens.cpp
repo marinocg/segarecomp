@@ -887,7 +887,7 @@ void App::draw_modal(float w, float h) {
       if (apply_intermediates_choice(choose_remove)) { modal_ = Modal{}; toast(choose_remove ? "Intermediates will be removed after successful builds." : "Intermediates will be kept."); }
       else { modal_.lines = {"Your choice could not be saved. Try again."}; toast("Settings could not be saved.", true); }
     } else if (cancel) {
-      modal_ = Modal{};  // decide later: nothing is recorded, the question returns on the next start
+      modal_ = Modal{};  // decide later: nothing is recorded; the question is asked again at the next start unless a setting or the library was saved meanwhile (then the profile is no longer new)
       trace("onboarding=intermediates_deferred");
     }
     return;

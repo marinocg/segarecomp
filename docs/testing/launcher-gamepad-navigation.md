@@ -45,7 +45,7 @@ picker is also used when no system file chooser exists, for example under WSL). 
 ## Manual smoke walk (a real controller, once per release)
 
 1. Start with a fresh profile (`SEGARECOMP_LIBRARY_DIR` / `SEGARECOMP_CACHE_DIR` pointing at empty folders) and a controller connected; do not touch the mouse.
-2. First-run sheet: D-pad between the two choices, **A** to confirm; relaunch: it does not return. Repeat with **B**: it returns next start.
+2. First-run sheet: D-pad between the two choices, **A** to confirm; relaunch: it does not return. Repeat with **B** and quit without importing or changing anything: it is asked again next start (once anything has been saved the profile is no longer new, so it is not asked again).
 3. Library is empty: D-pad to **Browse for ROMs...**, **A**. In the picker choose a location, open the folder holding your own legally owned ROMs, tick two files with **A**,
    move to **Import (2)**, **A**. Try **B** repeatedly: it goes up, to the locations, then closes without importing.
 4. Open a game with **A**. **Right** from the sidebar enters the page; move to **Build**, **A**; focus lands on **Cancel build**; **A** cancels. Build again, go **B** back, open a

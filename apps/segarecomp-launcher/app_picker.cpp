@@ -52,6 +52,7 @@ void App::open_picker(const std::string &purpose, const std::string &key) {
 }
 
 void App::picker_set_dir(const fs::path &root, const fs::path &dir) {
+  if (root != picker_.root) picker_.chosen.clear();  // a tick belongs to the location it was made in
   picker_.root = root;
   picker_.dir = dir;
   picker_.page = 0;
