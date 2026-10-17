@@ -59,8 +59,17 @@ std::string evaluate(const LibraryEntry &entry, const std::string &requested_pol
   if (meta->str("host") != host_description()) return "it was built for a different operating system or processor (" + meta->str("host", "unknown") + ")";
   if (entry.platform_id == "master-system") {
     if (meta->str("profile") != sms_profile) return "it was built for a different Master System profile";
-    if (meta->str("mapper_declaration") != "option" || entry.mapper.empty() || meta->str("mapper") != entry.mapper)
-      return "its cartridge mapper declaration cannot be matched to this game's";
+    const std::string declaration = meta->str("mapper_declaration");
+    if (declaration == "option") {
+      if (entry.mapper.empty() || meta->str("mapper") != entry.mapper) return "its cartridge mapper declaration cannot be matched to this game's";
+    } else if (declaration == "manifest") {
+      // A sidecar manifest is verified by its content digest, recorded by builds since the marker existed; without it nothing ties the build to this manifest.
+      const std::string recorded = meta->str("mapper_manifest_sha256");
+      if (!entry.mapper.empty() || entry.mapper_manifest_sha256.empty() || recorded.empty() || recorded != entry.mapper_manifest_sha256)
+        return "its sidecar mapper manifest cannot be matched to this game's";
+    } else {
+      return "its cartridge mapper declaration is not recorded";
+    }
   }
   // The one build option the metadata may not record in older builds: a build made with H-interrupt discovery changes the generated program.
   const bool want_hint = entry.hint_alias_discovery && entry.platform_id == "genesis";

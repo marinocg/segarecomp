@@ -166,6 +166,23 @@ int main(int argc, char **argv) {
     set_env("FAKE_BUILD_HOLD", "");
   }
 
+  // ---- 2b. a descendant that exists before anything else (the build tool starts it immediately) is stopped too ----
+  {
+    fs::remove_all(cache);
+    fs::create_directories(cache);
+    const fs::path early = dir / "heartbeat-early";
+    set_env("FAKE_BUILD_HOLD", heartbeat.string());
+    set_env("FAKE_SPAWN_FIRST", early.string());
+    BuildJob job(rom, layout);
+    expect(wait_until([&] { return fs::exists(partial / "hold_started") && file_size_or_zero(early) > 3; }, 20000), "2b) the early descendant is beating");
+    expect(job.request_cancel() && wait_finished(job) && job.outcome() == BuildOutcome::cancelled, "2b) cancelled");
+    const auto a = file_size_or_zero(early);
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    expect(a == file_size_or_zero(early), "2b) the early descendant is stopped as well");
+    set_env("FAKE_SPAWN_FIRST", "");
+    set_env("FAKE_BUILD_HOLD", "");
+  }
+
   // ---- 3. a cancel that comes after the build was published is refused; the success stands ----
   {
     fs::remove_all(cache);

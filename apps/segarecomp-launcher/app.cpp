@@ -293,7 +293,7 @@ std::string App::status_label(const StatusInfo &info) const {
     case GameStatus::metadata_only: return "Metadata only";
     case GameStatus::stale: return "Needs rebuild";
     case GameStatus::playable_older: return "Playable (older build)";
-    case GameStatus::failed: return "Build failed";
+    case GameStatus::failed: return info.older.playable ? "Playable (older build)" : "Build failed";
     case GameStatus::not_built: return "Not built";
   }
   return {};

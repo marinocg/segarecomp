@@ -721,7 +721,7 @@ void BuildJob::run() {
          << (sms ? "master-system" : "genesis") << "\",";
     if (sms)
       meta << "\"profile\":\"" << sms_profile << "\",\"mapper\":\"" << json_safe(rom_.mapper) << "\",\"mapper_declaration\":\""
-           << (rom_.mapper.empty() ? "manifest" : "option") << "\",";
+           << (rom_.mapper.empty() ? "manifest" : "option") << "\",\"mapper_manifest_sha256\":\"" << (rom_.mapper.empty() ? rom_.mapper_manifest_sha256 : std::string()) << "\",";
     // SEG-069-T005: what a later release needs to decide that this program can still be played (see older_build.hpp).
     meta << "\"runtime_contract\":" << runtime_contract << ",\"hint_alias_discovery\":" << (rom_.supports_hint_alias_discovery() && rom_.hint_alias_discovery ? "true" : "false") << ",";
     meta << "\"host\":\"" << host_description() << "\",\"toolchain\":\"zig " SEGARECOMP_ZIG_VERSION "\",\"rom_path\":\"referenced, not copied\"}\n";

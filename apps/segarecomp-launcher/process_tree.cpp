@@ -8,6 +8,11 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <tlhelp32.h>
+
+#include <set>
+#include <utility>
+#include <vector>
 #else
 #include <signal.h>
 #include <sys/types.h>
@@ -38,6 +43,27 @@ struct ProcessTree::Impl {
   SDL_Process *process = nullptr;  // fallback target when the child could not be put into a job
   bool terminated = false;
 };
+
+namespace {
+// Children that existed before the job assignment (or any child when no job could be used) are found from the parent links of a process snapshot and terminated.
+void terminate_descendants(DWORD root) {
+  HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snapshot == INVALID_HANDLE_VALUE) return;
+  std::vector<std::pair<DWORD, DWORD>> table;  // pid, parent pid
+  PROCESSENTRY32W entry{};
+  entry.dwSize = sizeof(entry);
+  if (Process32FirstW(snapshot, &entry)) do table.emplace_back(entry.th32ProcessID, entry.th32ParentProcessID); while (Process32NextW(snapshot, &entry));
+  CloseHandle(snapshot);
+  std::set<DWORD> found;
+  for (bool grew = true; grew;) {
+    grew = false;
+    for (const auto &[pid, parent] : table)
+      if ((parent == root || found.count(parent) != 0) && pid != root && found.insert(pid).second) grew = true;
+  }
+  for (const DWORD pid : found)
+    if (HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pid)) { TerminateProcess(h, 1); CloseHandle(h); }
+}
+} // namespace
 
 ProcessTree::ProcessTree() : impl_(std::make_unique<Impl>()) {}
 
@@ -70,9 +96,11 @@ void ProcessTree::attach(SDL_Process *process) {
 void ProcessTree::terminate() {
   std::lock_guard<std::mutex> lock(impl_->mutex);
   if (impl_->terminated) return;
+  if (impl_->process == nullptr && impl_->job == nullptr) return;  // before attach: a later terminate() after attach still acts
+  // Descendants first (while the root still links them), including any started before the job assignment; then the job; then the root itself.
+  if (const long long pid = process_id(impl_->process); pid > 0) terminate_descendants(static_cast<DWORD>(pid));
   if (impl_->job != nullptr) TerminateJobObject(impl_->job, 1);
-  else if (impl_->process != nullptr) SDL_KillProcess(impl_->process, true);  // no job (not assignable): at least the direct child
-  else return;                                                               // before attach: a later terminate() after attach still acts
+  if (impl_->process != nullptr) SDL_KillProcess(impl_->process, true);
   impl_->terminated = true;
 }
 

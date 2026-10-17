@@ -111,6 +111,7 @@ int main(int argc, char **argv) {
     }
     if (!env("FAKE_BUILD_LOG").empty()) std::ofstream(env("FAKE_BUILD_LOG"), std::ios::app) << policy << '\n';
     fs::create_directories(out);
+    if (!env("FAKE_SPAWN_FIRST").empty()) start_sleeper(argv[0], env("FAKE_SPAWN_FIRST"));  // a descendant that exists before anything else happens
     std::puts("@stage analyze begin\n@stage analyze done\n@stage generate begin\n@stage generate done");
     if (!env("FAKE_BUILD_HOLD").empty()) {
       std::puts("@stage compile begin");

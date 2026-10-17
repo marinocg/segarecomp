@@ -214,6 +214,14 @@ def older_build_journey(r, tmp, exe, fake_cli, fake_game, size):
     p.run(setup, None, size)                                       # a build of "this release" ...
     with open(p.package / "bin" / ("segarecomp" + EXE_SUFFIX), "ab") as f:  # ... then the product is updated
         f.write(b"\0release-update")
+    # the original ROM has moved: the verified earlier build still plays, and Play (not Locate ROM) is the button
+    (p.dir / "game0.md").rename(p.dir / "moved.md")
+    script = START + press("dpad_down") + seek("card:game0", "dpad_right", 3) + press("south") + press("dpad_right")
+    script += seek("play", "dpad_down", 6) + press("south") + ["frames 20", "wait_play_end", "frames 6"] + ["quit"]
+    moved = p.run(script, None, size)
+    r.check("older build, ROM moved", moved, 2)
+    r.expect(any(l.startswith("run=older_build") for l in moved), f"Play with the ROM moved did not start the earlier build: {moved!r}")
+    (p.dir / "moved.md").rename(p.dir / "game0.md")
     script = START + press("dpad_down") + seek("card:game0", "dpad_right", 3) + press("south") + press("dpad_right")
     script += expect(page="details", status="Playable (older build)", can_play=1)
     script += seek("play", "dpad_down", 6) + press("south") + ["frames 20", "wait_play_end", "frames 6"]             # Play: the OLD executable

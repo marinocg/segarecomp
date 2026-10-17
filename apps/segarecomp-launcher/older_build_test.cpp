@@ -196,7 +196,13 @@ int main() {
     make(games, build(key32('3'), [&](Build &b) { b.platform = "master-system"; b.extra = "\"profile\":\"" + std::string(sms_profile) + "\",\"mapper\":\"\",\"mapper_declaration\":\"manifest\","; }));
     LibraryEntry m = entry_with({key32('3')}, "master-system");
     m.mapper_manifest_sha256 = digest('9');
-    expect(!find_playable_older_build(m, current, "compatibility", layout, games).playable, "a manifest-declared mapper cannot be verified and is refused");
+    expect(!find_playable_older_build(m, current, "compatibility", layout, games).playable, "a manifest-declared build without a recorded digest is refused");
+    make(games, build(key32('4'), [&](Build &b) { b.platform = "master-system"; b.version = "9.9.9"; b.contract = "1"; b.extra = "\"profile\":\"" + std::string(sms_profile) + "\",\"mapper\":\"\",\"mapper_declaration\":\"manifest\",\"mapper_manifest_sha256\":\"" + digest('9') + "\","; }));
+    LibraryEntry same = entry_with({key32('4')}, "master-system");
+    same.mapper_manifest_sha256 = digest('9');
+    expect(find_playable_older_build(same, current, "compatibility", layout, games).playable, "a manifest-declared build whose recorded digest matches is playable");
+    same.mapper_manifest_sha256 = digest('8');
+    expect(!find_playable_older_build(same, current, "compatibility", layout, games).playable, "a different manifest digest is refused");
   }
   {  // the installed SDL3 runtime is a required dependency
     make(games, build(key32('1')));

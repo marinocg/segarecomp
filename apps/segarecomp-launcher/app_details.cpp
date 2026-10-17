@@ -260,7 +260,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     if (ImGui::IsItemHovered()) tooltip(ctx_, "Stop this build and discard its partial files. A previously built program is kept.");
     y += bh;
   } else {
-    const bool locate_primary = info.rom_missing && info.status != GameStatus::ready && !entry.rom_paths.empty();
+    const bool locate_primary = info.rom_missing && !info.runnable() && !entry.rom_paths.empty();  // a playable build needs no ROM: Play stays primary
     const float play_w = std::min(ctx_.u(150.0F), (tw - ctx_.u(16.0F)) * 0.36F), build_w = std::min(ctx_.u(148.0F), (tw - ctx_.u(16.0F)) * 0.36F), more_w = std::min(ctx_.u(96.0F), tw - play_w - build_w - ctx_.u(16.0F));
     if (locate_primary) {
       if (button(ctx_, "locate", "Locate ROM...", ImVec2(play_w, bh), Style::primary, true, ctx_.icon("folder"))) browse_locate(entry.id());
