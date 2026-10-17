@@ -353,7 +353,7 @@ Items marked **G** above are implemented as GPGX behaves; they stay here until h
 | CDD seek latency, command checksum handling, decoder active period (G) | GPGX models them (latency is a configurable approximation); MAME differs | logic-analyser logs (MiSTer `mcd logs`) | SEG-065 |
 | decoding a non-data block from a raw image | GPGX's raw path differs from its cooked path; the profile uses the cooked behaviour (section 7) | hardware: what the CDC writes for a seek-time block | SEG-063: not resolvable without hardware access; carried forward |
 | system-header longwords `$38/$3C/$40-$4C` | one primary source in reach of this cloud | read the Mega-CD Disc Format specification and the Sega CD BIOS manual directly | SEG-064 |
-| SP base `$6000`, IP base `$FF0000` | BIOS-owned facts | BIOS feasibility gate (ADR 0130) | SEG-064-T001 |
+| SP base `$6000`, IP base `$FF0000` | BIOS-owned facts | SEG-064-T001 (ADR 0141): with an authentic US Model 1 BIOS in the independent reference, the disc boot area from `$200` (security block first, then the IP) is placed at main `$FF0000` and entered there, the application IP following the `$584`-byte US security block; the SP module is placed at sub `$6000` and entered through its module jump table. V1 (one reference); the authentic profile does not hard-code either, the BIOS performs the placement | SEG-064 (authentic profile verifies against the reference) |
 | raw-sector EDC/ECC | not checked; sync and header are | decision: optional until a title needs it | SEG-063: still optional (no fixture or title needs it); carried forward |
 
 ## 14. What later milestones consume
