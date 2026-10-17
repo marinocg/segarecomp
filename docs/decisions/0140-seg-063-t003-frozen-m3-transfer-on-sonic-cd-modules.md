@@ -86,3 +86,56 @@ equals the emitter's compiled plus unsupported count for every module.
 
 Limitations: one title (Sonic engine lineage shared with the M3 training title Sonic 1); files are variants of a few programs, so
 per-module counts are not independent samples; the `R`-stage is the only measured model stage.
+
+## Post-hoc exploratory addendum (not part of the pre-registered result)
+
+**POST-HOC EXPLORATORY.** Added after this ADR was accepted, to explain the 306 misses. It changes neither the pre-registration,
+the gates, the results above nor the outcome; the text above is unchanged (its first 12081 bytes have SHA-256
+`c019907da1978d373eb983b2e2261a3b26a1c097c038876253734a38c402ddd4`). Nothing here measures or claims behaviour-changing false admissions. Inputs are the saved artifacts of the two
+recorded passes (frozen-model logits, source-backed labels, static seeds re-read from the saved generated C under the same
+consistency assertion); nothing was re-assembled or re-scored by the native route, and no threshold was chosen from these figures.
+
+Budget replay (same cell ranking and tie-break, `N = ceil(cells * B / 100)`, `R` = selected cells union seed cells; the B35 row
+reproduces the recorded result):
+
+| budget | `C outside R` | modules | mean `R/image` |
+|---|---|---|---|
+| B35 (recorded) | 306 | 3 | 0.43 |
+| B40 | 169 | 3 | 0.47 |
+| B45 | 2 | 1 | 0.51 |
+| B50 | 2 | 1 | 0.56 |
+| B60 | 2 | 1 | 0.65 |
+
+Every miss at every budget is in the main-CPU Work RAM copy class; the in-place Word RAM, PCM driver and sub-CPU program classes
+have none at any tested budget.
+
+The three failing modules:
+
+| module | missing code cells | missing starts | code-cell share of the image | missing-cell rank percentiles | instruction-byte occupancy of missing cells | smallest clearing budget tested |
+|---|---|---|---|---|---|---|
+| 1 | 8 | 241 | 0.44 | 0.37-0.43 | 0.84 (mean) | B45 |
+| 2 | 1 | 2 | 0.19 | 0.94 | 0.06 (8 of 128 bytes) | none up to B60 |
+| 3 | 2 | 63 | 0.42 | 0.37-0.40 | 0.88 (mean) | B45 |
+
+- Modules 1 and 3 are budget-bound: they hold more code cells than B35 can select, and their missed cells rank just below the cut.
+- Module 2 holds one genuinely low-ranked code cell. Two instruction starts lie in its last 8 bytes and begin a routine whose body
+  fills the next cell (ranked at percentile 0.17, selected); the rest of the cell is data.
+
+Checks of that cell, each independent of the model:
+
+- **Labels.** Both starts are instruction rows of the listing, their opcode words equal the module bytes, and the CPU decoder
+  accepts both as ordinary instructions.
+- **Coordinates.** The image base equals the header origin minus `$100` (the source's own assembly address), and the cell grid
+  is aligned to the execution origin (the 256-byte header is a multiple of 128).
+- **Extents.** Both instructions end inside the image.
+- **Model input.** The context built by the Python research representation (`seg049-gen2-repr-v1`) holds the cell's own bytes
+  at words 224-287, and no edge reflection is involved.
+- **Independent evaluation.** The research PyTorch float32 evaluation of the frozen model, with its own Python context and
+  reflection, agrees with the native logits on all 36 modules (maximum absolute logit difference 1.5e-5, within the documented
+  1e-4 tolerance) and gives identical B35 selections on all 36. The cell ranks at percentile 0.939 under both.
+
+Classification: a budget limitation (2 modules) and a genuine cell-granularity ranking limitation (1 cell); no generic
+preprocessing or coordinate defect was found, so no correction was tested beyond that one explanation. The model, B35 and the
+admission rule stay unchanged. This does not change the decision: no compile-size/time problem exists (at most 1.09 MiB of
+generated C and 2.7 s of native compile per module program), so a larger budget or an M3 admission path has no use here.
+Per-cell, per-address and score data stay in ignored local storage; only these aggregates are recorded.
