@@ -190,7 +190,7 @@ with tempfile.TemporaryDirectory() as tmp:
         code, result = emit(disc / "disc.cue", path, tmp / "x.c")
         check(code == 7 and result.get("error") == error, "emission refusal %s -> %s" % (error, result))
     admits = summary["admissions"]
-    snapshot = admits[0].split(":")[2]
+    snapshot = admits[0].split(":", 2)[2]  # the path is the remainder (Windows drive letters contain ":")
     bad = [
         (["--copy-image", "main:0x480:0xc00:0x48"], "copy_invalid"),  # main has no RAM there: the wrong memory view
         (["--copy-image", copy_spec, "--admit", "epoch:%s:%s" % ("0" * 64, snapshot)], "provenance_mismatch"),
