@@ -641,6 +641,7 @@ void scd_timer_event(ScdMachine *m);
 
 uint64_t scd_devices_next_event(const ScdMachine *m) {
   uint64_t next = scd_timer_next_event(m);
+  if (scd_vdp_next_event(m) < next) next = scd_vdp_next_event(m); /* SEG-064-T003: vertical-blank onset (BIOS-image profile) */
   if (scd_cdd_active(m) && m->cdd.next_tick < next) next = m->cdd.next_tick;
   if (m->cdc.dma_state == SCD_DMA_RUNNING) {
     const uint64_t done = scd_cdc_dma_completion(m);
@@ -649,7 +650,7 @@ uint64_t scd_devices_next_event(const ScdMachine *m) {
   return next;
 }
 
-/* Process every device event due at exactly `until`, in the fixed order: CDD tick, timer, CDC DMA. */
+/* Process every device event due at exactly `until`, in the fixed order: CDD tick, timer, CDC DMA, vertical-blank onset. */
 void scd_devices_advance(ScdMachine *m, uint64_t until) {
   if (scd_cdd_active(m) && m->cdd.next_tick <= until) {
     m->cdd.next_tick += SCD_CDD_TICK_TICKS;
@@ -657,6 +658,7 @@ void scd_devices_advance(ScdMachine *m, uint64_t until) {
   }
   if (scd_timer_next_event(m) <= until) scd_timer_event(m);
   scd_cdc_dma_sync(m, until);
+  if (scd_vdp_next_event(m) <= until) scd_vdp_event(m);
 }
 
 int scd_devices_can_raise(const ScdMachine *m, uint32_t level) {

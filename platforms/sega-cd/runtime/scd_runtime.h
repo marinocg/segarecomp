@@ -86,6 +86,9 @@ typedef enum ScdStopClass {
   /* SEG-064-T002 (ADR 0142): the BIOS-image profile. */
   SCD_STOP_MATERIALIZED_IMAGE_UNVERIFIED, /* at the sub runnable epoch, live PRG RAM equals no admitted materialized image */
   SCD_STOP_MATERIALIZATION_CAPTURED,   /* build pass only: an unknown epoch image or a RAM frontier was written for admission */
+  /* SEG-064-T003: main-side Genesis devices of the BIOS-image profile. */
+  SCD_STOP_MAIN_DEVICE_UNSUPPORTED,    /* a main access to the I/O, Z80 or sound area outside the modelled shapes, or one that would
+                                          observe the unmodelled Z80 execution */
   SCD_STOP_CLASS_COUNT
 } ScdStopClass;
 
@@ -120,6 +123,8 @@ typedef struct ScdCpu {
   uint64_t retired;
   uint64_t cycles;
   uint64_t trace;         /* FNV-1a over (pc, registers, sr) after every retirement: per-processor execution trace digest */
+  uint32_t prefetch;      /* SEG-064-T003 (BIOS-image profile): instruction-stream address of the word the processor's prefetch holds
+                             while the current instruction reads its operands (set by the generated instruction; 0 = not established) */
 } ScdCpu;
 
 /* Build-time disc table (ADR 0129): emitted as constant data by the generated program. */
@@ -372,6 +377,13 @@ typedef struct ScdMachine {
   uint32_t capture_kind;                  /* 1 epoch snapshot, 2 RAM frontier (build pass) */
   uint32_t capture_length;                /* epoch snapshot length */
   uint8_t capture_bytes[8];               /* frontier live bytes */
+  /* SEG-064-T003: main-side devices of the BIOS-image profile (scd_vdp.c). */
+  uint64_t vdp_onset;                     /* tick of the next VDP vertical-blank onset */
+  uint8_t vint_pending;                   /* the VDP vertical interrupt is pending (requests level 6 while register #1 IE0 is set) */
+  uint8_t z80_ran;                        /* the Z80 has been runnable (reset released, bus not requested): its RAM is not modelled */
+  uint16_t hint_vector;                   /* $A12006: the low word of the main level-4 autovector (BIOS ROM $72) */
+  uint64_t vdp_frames;                    /* vertical-blank onsets processed */
+  uint64_t main_interrupts_taken[8];
 } ScdMachine;
 
 /* Physical memories whose bytes may hold executable images (for write invalidation). */
@@ -393,6 +405,7 @@ int scd_rte(ScdMachine *m, uint32_t cpu, uint32_t *restored_pc, uint32_t pc);
 int scd_rtr(ScdMachine *m, uint32_t cpu, uint32_t *restored_pc, uint32_t pc);
 void scd_enter_stop(ScdMachine *m, uint32_t cpu);
 int scd_fail(ScdMachine *m, uint32_t cpu, ScdStopClass stop_class, uint32_t pc, uint32_t detail);
+int scd_fail_access(ScdMachine *m, uint32_t cpu, ScdStopClass stop_class, uint32_t pc, uint32_t address, uint32_t width, int is_write);
 int scd_compiled(const ScdMachine *m, uint32_t cpu, uint32_t address);
 /* SEG-064-T002 (ADR 0142): 1 when the live bytes at `address` equal `expected` (comparison only; never a stop). */
 int scd_code_matches(ScdMachine *m, uint32_t cpu, uint32_t address, const uint8_t *expected, uint32_t length);
@@ -438,6 +451,15 @@ uint64_t scd_devices_next_event(const ScdMachine *m);
 int scd_devices_can_raise(const ScdMachine *m, uint32_t level);
 int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 int scd_vdp_init(ScdMachine *m);
+/* SEG-064-T003 (BIOS-image profile): the main processor's Genesis devices besides the VDP ports, the vertical-blank event, the main
+ * interrupt request level and its acknowledge, and the open-bus value. */
+int scd_main_device_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
+uint64_t scd_vdp_next_event(const ScdMachine *m);
+void scd_vdp_event(ScdMachine *m);
+uint32_t scd_main_request_level(const ScdMachine *m);
+uint32_t scd_main_wake_level(const ScdMachine *m);
+void scd_main_interrupt_acknowledge(ScdMachine *m, uint32_t level);
+int scd_open_bus(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint32_t *value, uint32_t pc);
 void scd_vdp_release(ScdMachine *m);
 /* Bring an in-flight CDC DMA up to the current instruction tick (every Word RAM / CDC observation point). */
 int scd_cd_observe(ScdMachine *m);

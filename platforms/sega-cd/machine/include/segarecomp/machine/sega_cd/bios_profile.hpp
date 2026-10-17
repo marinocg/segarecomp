@@ -33,7 +33,7 @@ inline constexpr std::uint32_t kMaxEpochImages = 4U;          // ADR 0142 decisi
 inline constexpr std::uint32_t kMaxOperandTemplates = 64U;
 inline constexpr std::uint32_t kMaxCopyImages = 8U;
 inline constexpr std::uint32_t kEpochGranule = 0x100U;        // snapshot length granule (scd_prg_snapshot_length)
-inline constexpr const char *kSegaCdBiosGeneratorVersion = "segarecomp.sega_cd.bios_profile.v1";
+inline constexpr const char *kSegaCdBiosGeneratorVersion = "segarecomp.sega_cd.bios_profile.v2";
 
 enum class BiosError : std::uint8_t { none, size_invalid, header_invalid, reset_vector_invalid };
 [[nodiscard]] const char *bios_error_name(BiosError error) noexcept;

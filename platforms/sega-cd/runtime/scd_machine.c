@@ -12,7 +12,7 @@ static const char *const scd_stop_names[SCD_STOP_CLASS_COUNT] = {
     "exception_vector_not_compiled", "exception_stack_invalid", "trace_unsupported", "interrupt_source_unsupported",
     "cdc_destination_unsupported", "cdd_command_unsupported", "cd_read_audio_track", "cd_read_failed", "internal", "image_unknown",
     "image_bytes_mismatch", "image_partially_overwritten", "ambiguous_image", "image_entry_not_compiled", "stale_image_selection",
-    "materialized_image_unverified", "materialization_captured"};
+    "materialized_image_unverified", "materialization_captured", "main_device_unsupported"};
 
 const char *scd_stop_class_name(ScdStopClass stop_class) {
   return (unsigned)stop_class < SCD_STOP_CLASS_COUNT ? scd_stop_names[stop_class] : "unknown";
@@ -33,8 +33,7 @@ void scd_log(ScdMachine *m, uint32_t kind, uint32_t address, uint32_t value) {
   scd_fnv(&m->device_log, value);
 }
 
-static int scd_fail_access(ScdMachine *m, uint32_t cpu, ScdStopClass stop_class, uint32_t pc, uint32_t address, uint32_t width,
-                           int is_write) {
+int scd_fail_access(ScdMachine *m, uint32_t cpu, ScdStopClass stop_class, uint32_t pc, uint32_t address, uint32_t width, int is_write) {
   if (m->stop.stop_class == SCD_STOP_NONE) {
     m->stop.stop_class = stop_class;
     m->stop.cpu = cpu;
@@ -66,10 +65,11 @@ static void scd_ram_put(uint8_t *ram, uint32_t offset, uint32_t width, uint32_t 
   }
 }
 
-/* An access with no hardware effect (GPGX "unused" areas): a write is dropped and logged; a read would return the processor's
- * prefetched instruction word (open bus), which is not modelled - the typed stop open_bus_read. */
+/* An access with no hardware effect (GPGX "unused" areas): a write is dropped and logged; a read returns the processor's prefetched
+ * instruction word (open bus): modelled for the main processor of the BIOS-image profile where the prefetch position is established
+ * (scd_open_bus, SEG-064-T003), otherwise the typed stop open_bus_read. */
 static int scd_unused(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
-  if (!is_write) return scd_fail_access(m, cpu, SCD_STOP_OPEN_BUS_READ, pc, address, width, 0);
+  if (!is_write) return scd_open_bus(m, cpu, address, width, value, pc);
   ++m->ignored_writes;
   scd_log(m, 0x51U, address, *value);
   return 0;
@@ -140,6 +140,9 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
       /* SEG-064-T002 (ADR 0142): the verified BIOS image, when the profile maps one; past its end (or without one) bios_absent. */
       if (m->bios != NULL && a + width <= m->bios_size) {
         *value = scd_ram_get(m->bios, a, width);
+        /* SEG-064-T003: the level-4 vector's low word reads the H-INT vector register ($A12006; contract section 16). */
+        if (a == 0x72U || a == 0x73U)
+          *value = width == 2U ? m->hint_vector : (a == 0x72U ? (uint32_t)(m->hint_vector >> 8) : (uint32_t)(m->hint_vector & 0xFFU));
         return 0;
       }
       return scd_fail_access(m, SCD_MAIN, SCD_STOP_BIOS_ABSENT, pc, address, width, 0);
@@ -158,6 +161,14 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
   if (address >= UINT32_C(0x00A12000) && address < UINT32_C(0x00A12100))
     return scd_ga_main_access(m, address & 0x3FU, width, is_write, value, pc);
   if (address >= UINT32_C(0x00C00000) && address < UINT32_C(0x00C00008)) return scd_vdp_access(m, address, width, is_write, value, pc);
+  if (m->bios != NULL) { /* SEG-064-T003: the main processor's other Genesis devices and the empty cartridge slot (section 16) */
+    if (address >= UINT32_C(0x00C00008) && address < UINT32_C(0x00C00020)) return scd_vdp_access(m, address, width, is_write, value, pc);
+    if (address < UINT32_C(0x00A10000) || (address >= UINT32_C(0x00A10000) && address < UINT32_C(0x00A10020)) ||
+        (address & ~UINT32_C(1)) == UINT32_C(0x00A11100) || (address & ~UINT32_C(1)) == UINT32_C(0x00A11200)) {
+      if (address >= UINT32_C(0x00A00000)) return scd_main_device_access(m, address, width, is_write, value, pc);
+    }
+    if (address >= UINT32_C(0x00400000) && address < UINT32_C(0x00800000)) return scd_unused(m, SCD_MAIN, address, width, is_write, value, pc);
+  }
   if (address >= UINT32_C(0x00E00000)) { /* 64 KiB work RAM mirrored through $E00000-$FFFFFF */
     const uint32_t offset = address & 0xFFFFU;
     if (is_write) {
@@ -329,6 +340,15 @@ static void scd_hook_frame_write(void *context, uint32_t address, uint32_t size,
   }
 }
 
+/* SEG-064-T003 (BIOS-image profile): an exception handler in the processor's RAM that has no compiled entry is entered like any other;
+ * the dispatch at that PC then fails closed before anything there runs (entry_not_compiled at the PC itself), which a build pass
+ * reports as a RAM frontier (ADR 0142 decision 7) - exactly as a direct jump to that address would. The synthetic profile keeps the
+ * stop at the vector (exception_vector_not_compiled). */
+static int scd_ram_handler(const ScdMachine *m, uint32_t cpu, uint32_t handler) {
+  handler &= UINT32_C(0x00FFFFFF);
+  return m->bios != NULL && (handler & 1U) == 0U && scd_code_byte(m, cpu, handler) != NULL && scd_code_byte(m, cpu, handler + 1U) != NULL;
+}
+
 static SegarecompM68kVectorResolution scd_hook_vector(void *context, uint32_t vector, uint32_t *handler) {
   ScdExceptionContext *x = (ScdExceptionContext *)context;
   uint32_t i, value = 0U;
@@ -338,7 +358,8 @@ static SegarecompM68kVectorResolution scd_hook_vector(void *context, uint32_t ve
       return SEGARECOMP_M68K_VECTOR_NOT_INSTALLED;
     }
     for (i = 0; i < 4U; ++i) value = (value << 8U) | x->m->bios[vector * 4U + i]; /* SEG-064-T002: the image's vector table */
-    if (!scd_compiled(x->m, x->cpu, value & UINT32_C(0x00FFFFFF))) {
+    if (vector == 28U) value = (value & UINT32_C(0xFFFF0000)) | x->m->hint_vector; /* SEG-064-T003: level 4 low word = $A12006 */
+    if (!scd_compiled(x->m, x->cpu, value & UINT32_C(0x00FFFFFF)) && !scd_ram_handler(x->m, x->cpu, value)) {
       x->vector_failure = SCD_STOP_EXCEPTION_VECTOR_NOT_COMPILED;
       return SEGARECOMP_M68K_VECTOR_UNREPRESENTABLE;
     }
@@ -346,7 +367,7 @@ static SegarecompM68kVectorResolution scd_hook_vector(void *context, uint32_t ve
     return SEGARECOMP_M68K_VECTOR_HANDLER;
   }
   for (i = 0; i < 4U; ++i) value = (value << 8U) | x->m->prg_ram[vector * 4U + i]; /* PRG RAM $000000-$0003FF */
-  if (!scd_compiled(x->m, x->cpu, value & UINT32_C(0x00FFFFFF))) {
+  if (!scd_compiled(x->m, x->cpu, value & UINT32_C(0x00FFFFFF)) && !scd_ram_handler(x->m, x->cpu, value)) {
     x->vector_failure = SCD_STOP_EXCEPTION_VECTOR_NOT_COMPILED;
     return SEGARECOMP_M68K_VECTOR_UNREPRESENTABLE;
   }
@@ -466,6 +487,31 @@ static int scd_sub_accept_interrupt(ScdMachine *m) {
   return 1;
 }
 
+/* SEG-064-T003 (BIOS-image profile): accept a recognized main interrupt (the VDP's level 6) at this boundary, autovectored through the
+ * BIOS image's vector table. Returns 1 when an interrupt was taken, 0 when none, -1 on a stop. */
+static int scd_main_accept_interrupt(ScdMachine *m) {
+  ScdCpu *c = &m->cpu[SCD_MAIN];
+  uint32_t level, handler = 0U;
+  ScdExceptionContext x = {m, SCD_MAIN, c->pc, SCD_STOP_NONE};
+  SegarecompM68kMachineHooks hooks = scd_hooks(&x);
+  SegarecompM68kCpuBinding binding = scd_binding(c);
+  SegarecompM68kExceptionStatus status;
+  if (m->bios == NULL) return 0;
+  segarecomp_m68k_interrupt_sample(&c->irq, scd_main_request_level(m));
+  level = segarecomp_m68k_interrupt_recognized_level(&c->irq, c->sr);
+  if (level == 0U) return 0;
+  status = segarecomp_m68k_interrupt_enter(&hooks, &binding, &c->irq, level,
+                                           segarecomp_m68k_interrupt_vector(SEGARECOMP_M68K_INTERRUPT_ACK_AUTOVECTOR, level, 0U), c->pc,
+                                           &handler);
+  if (scd_exception_status(m, SCD_MAIN, status, &x, c->pc, 24U + level) != 0) return -1;
+  scd_main_interrupt_acknowledge(m, level);
+  m->main_interrupts_taken[level] += 1U;
+  scd_log(m, 0x62U, level, handler);
+  c->pc = handler;
+  scd_retire(m, SCD_MAIN, segarecomp_m68k_exception_entry_cycles(24U + level));
+  return 1;
+}
+
 /* ---- scheduler ---------------------------------------------------------------------------------------------------------- */
 
 static int scd_sub_held(const ScdMachine *m) { return m->ga.sub_halted || m->ga.sub_wait; }
@@ -487,6 +533,11 @@ static uint64_t scd_cpu_ready(ScdMachine *m, uint32_t cpu) {
   ScdCpu *c = &m->cpu[cpu];
   if (cpu == SCD_SUB && scd_sub_held(m)) return UINT64_MAX;
   if (!c->irq.stopped) return c->next;
+  if (cpu == SCD_MAIN) {
+    const uint32_t level = scd_main_request_level(m);
+    const uint32_t mask = (uint32_t)((c->sr & SEGARECOMP_M68K_SR_INTERRUPT_MASK) >> 8U);
+    if (level > mask || level == 7U) return c->next > m->now ? c->next : m->now;
+  }
   if (cpu == SCD_SUB) {
     const uint32_t level = scd_sub_request_level(m);
     const uint32_t mask = (uint32_t)((c->sr & SEGARECOMP_M68K_SR_INTERRUPT_MASK) >> 8U);
@@ -499,6 +550,7 @@ static int scd_machine_idle(const ScdMachine *m) {
   const ScdCpu *main = &m->cpu[SCD_MAIN];
   const ScdCpu *sub = &m->cpu[SCD_SUB];
   if (!main->irq.stopped) return 0;
+  if (segarecomp_m68k_stop_wake_possible(&main->irq, scd_main_wake_level(m), main->sr)) return 0; /* the VDP can still wake it */
   if (scd_sub_held(m)) return 1;
   if (!sub->irq.stopped) return 0;
   return !segarecomp_m68k_stop_wake_possible(&sub->irq, scd_sub_max_wake_level(m), sub->sr);
@@ -525,8 +577,8 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
     if (ready >= deadline) return SCD_RUN_DEADLINE;
     m->now = ready;
     m->cpu[cpu].next = ready;
-    if (cpu == SCD_SUB) {
-      const int taken = scd_sub_accept_interrupt(m);
+    {
+      const int taken = cpu == SCD_SUB ? scd_sub_accept_interrupt(m) : scd_main_accept_interrupt(m);
       if (taken < 0) return SCD_RUN_STOPPED;
       if (taken > 0) continue;
     }
@@ -622,6 +674,7 @@ int scd_machine_init_bios(ScdMachine *m, const ScdProgram *program, const ScdAut
   m->cpu[SCD_MAIN].cycle_ticks = SCD_MAIN_CYCLE_TICKS;
   m->cpu[SCD_SUB].cycle_ticks = SCD_SUB_CYCLE_TICKS;
   m->cpu[SCD_MAIN].next = UINT64_C(40) * SCD_MAIN_CYCLE_TICKS; /* MC68000 reset exception processing: 40 clocks (UM68K) */
+  m->hint_vector = bios_size >= 0x74U ? (uint16_t)((bios[0x72] << 8) | bios[0x73]) : 0U; /* GPGX: the register is the ROM's word */
   m->ga.ctl = 0x02U;
   m->ga.sub_halted = 1U;
   m->ga.prg_window = 1U;

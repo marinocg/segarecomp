@@ -93,7 +93,29 @@ struct Variant {
   std::vector<std::uint8_t> raw;
   bool guarded = false;
   detail::LoweredInstruction lowered;
+  std::uint32_t prefetch{};
 };
+
+// SEG-064-T003: the instruction-stream address the processor's prefetch holds while this instruction reads its operands - the value an
+// open-bus read returns (GPGX m68k_read_bus_8/16 read the word at the CPU's program counter, which has consumed every extension word
+// fetched before the operand read). For every instruction whose operand reads follow all of its extension words that is the address
+// after the instruction. A MOVE reading a memory source before fetching the destination's extension words would see a word inside
+// the instruction: not established (0), so such an open-bus read stays the typed stop. Determined from the decoded shape at build time.
+bool has_extension(M68kEaMode mode) {
+  return mode == M68kEaMode::address_disp16 || mode == M68kEaMode::address_index8 || mode == M68kEaMode::absolute_word ||
+         mode == M68kEaMode::absolute_long || mode == M68kEaMode::pc_disp16 || mode == M68kEaMode::pc_index8 ||
+         mode == M68kEaMode::immediate;
+}
+bool reads_memory(M68kEaMode mode) {
+  return mode != M68kEaMode::unused && mode != M68kEaMode::data_register && mode != M68kEaMode::address_register &&
+         mode != M68kEaMode::immediate;
+}
+std::uint32_t prefetch_position(const M68kDecodedInstruction &d, std::uint32_t pc) {
+  if ((d.kind == M68kInstructionKind::move || d.kind == M68kInstructionKind::movea) && reads_memory(d.source_ea.mode) &&
+      has_extension(d.destination_ea.mode))
+    return 0U;
+  return pc + static_cast<std::uint32_t>(d.raw_bytes.size());
+}
 
 std::string identity_text(const DiscImage &disc, const BiosProfileInputs &inputs, std::size_t admissions) {
   std::ostringstream t;
@@ -265,7 +287,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
             const bool duplicate = std::any_of(list.begin(), list.end(), [&](const Variant &v) { return v.raw == d->raw_bytes; });
             if (duplicate) ++result.deduplicated;
             else list.push_back(Variant{index, "scd_p" + std::to_string(cpu) + "_i" + std::to_string(index) + "_" + hex(pc, 6), d->raw_bytes,
-                                        image.guarded, std::move(lowered)});
+                                        image.guarded, std::move(lowered), prefetch_position(*d, pc)});
             ok = true;
           }
         }
@@ -328,7 +350,8 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
           for (std::size_t i = 0; i < v.raw.size(); ++i) functions << (i ? ", " : "") << "0x" << hex(v.raw[i], 2);
           functions << "};\n";
         }
-        functions << "static int " << v.name << "(ScdMachine *m) {\n  ScdCpu *const cpu = &m->cpu[" << cpu << "];\n  uint32_t pc = cpu->pc;\n";
+        functions << "static int " << v.name << "(ScdMachine *m) {\n  ScdCpu *const cpu = &m->cpu[" << cpu << "];\n  uint32_t pc = cpu->pc;\n"
+                  << "  cpu->prefetch = UINT32_C(0x" << hex(v.prefetch) << ");\n";
         if (v.guarded)
           functions << "  if (scd_code_guard(m, " << k << ", UINT32_C(0x" << hex(pc) << "), " << v.name << "_bytes, " << v.raw.size()
                     << "U) != 0) return 1;\n";
@@ -348,7 +371,8 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
       const std::uint32_t operand = address + 2U;
       functions << "static const uint8_t " << name << "_opcode[] = {0x" << hex(t->raw[0], 2) << ", 0x" << hex(t->raw[1], 2) << "};\n"
                 << "static int " << name << "(ScdMachine *m) {\n  ScdCpu *const cpu = &m->cpu[" << cpu << "];\n"
-                << "  uint32_t target = UINT32_C(0);\n"
+                << "  uint32_t target = UINT32_C(0);\n  cpu->prefetch = UINT32_C(0x" << hex(address + static_cast<std::uint32_t>(t->raw.size()))
+                << ");\n"
                 << "  if (scd_code_guard(m, " << k << ", UINT32_C(0x" << hex(address) << "), " << name << "_opcode, 2U) != 0) return 1;\n"
                 << "  if (scd_read(m, " << k << ", UINT32_C(0x" << hex(operand) << "), " << (t->long_operand ? "4U" : "2U")
                 << ", &target, UINT32_C(0x" << hex(address) << ")) != 0) return 1;\n"
