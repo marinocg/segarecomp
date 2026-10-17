@@ -1192,6 +1192,10 @@ set_property(TEST sega_cd_modules_build_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_bios_profile_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_bios_profile_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_bios_profile_test APPEND PROPERTY LABELS full fast)
+# SEG-064-T003: BIOS-image profile translation-unit partitioning and incremental object reuse (synthetic image).
+add_test(NAME sega_cd_bios_partition_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_bios_partition_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_bios_partition_test APPEND PROPERTY LABELS full)
 
 add_test(NAME sega_cd_overlay_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_overlay_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
