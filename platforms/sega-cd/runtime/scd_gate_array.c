@@ -56,12 +56,20 @@ static void scd_word_put(uint16_t *word, uint32_t offset, uint32_t width, uint32
 }
 
 /* The SRES/SBRQ write ($A12001, or the low byte of a word write to $A12000), GPGX ctrl_io_write_byte case 0x01. */
-static void scd_ga_reset_control(ScdMachine *m, uint32_t value) {
+static void scd_ga_reset_control(ScdMachine *m, uint32_t value, uint32_t pc) {
   ScdCpu *sub = &m->cpu[SCD_SUB];
   const uint32_t before = (uint32_t)(sub->irq.stopped | (m->ga.sub_halted << 1) | (m->ga.sub_wait << 2));
   uint32_t after;
   if (value & 1U) {
-    if (!(m->ga.ctl & 1U)) {
+    if (!(m->ga.ctl & 1U) && m->bios != NULL) {
+      /* SEG-064-T002 (ADR 0142 decision 3): in the BIOS-image profile the reset is armed here and the sub's reset exception - its
+       * vector fetch is a bus cycle the sub cannot make while SBRQ grants the bus to main - is taken at the first runnable
+       * transition, from the PRG RAM verified there (scd_sub_runnable_epoch). */
+      m->sub_pristine = 1U;
+      sub->irq.stopped = 0U;
+      m->ga.sub_wait = 0U;
+      scd_log(m, 0x10U, 0U, 0U);
+    } else if (!(m->ga.ctl & 1U)) {
       /* SRES 0 -> 1: the sub takes its reset exception from PRG RAM $000000 (SSP) and $000004 (PC) (contract section 4); every
        * stop level (STOP, halt, DTACK wait) clears. */
       uint32_t i, ssp = 0U, entry = 0U;
@@ -101,6 +109,9 @@ static void scd_ga_reset_control(ScdMachine *m, uint32_t value) {
     }
   }
   scd_log(m, 0x11U, value, (uint32_t)(m->ga.ctl | (m->ga.prg_window << 4)));
+  /* SEG-064-T002 (ADR 0142 decision 3/4): the sub's first runnable transition after its reset is the materialization epoch. The
+   * BIOS-image profile only; it may record a typed stop (the caller fails the writing instruction). */
+  if (m->bios != NULL && m->sub_pristine && !m->ga.sub_halted) (void)scd_sub_runnable_epoch(m, pc);
 }
 
 static void scd_ga_ifl2(ScdMachine *m) {
@@ -186,15 +197,16 @@ int scd_ga_main_access(ScdMachine *m, uint32_t index, uint32_t width, int is_wri
   switch (index) {
   case 0x00:
     if (width == 2U) {
-      scd_ga_reset_control(m, *value & 0x03U); /* reset/halt first, then IFL2 (GPGX order) */
+      scd_ga_reset_control(m, *value & 0x03U, pc); /* reset/halt first, then IFL2 (GPGX order) */
+      if (m->stop.stop_class != SCD_STOP_NONE) return 1;
       if (*value & 0x0100U) scd_ga_ifl2(m);
     } else if (*value & 0x01U) {
       scd_ga_ifl2(m); /* writing 0 does nothing */
     }
     return 0;
   case 0x01:
-    if (width == 1U) scd_ga_reset_control(m, *value & 0x03U);
-    return 0;
+    if (width == 1U) scd_ga_reset_control(m, *value & 0x03U, pc);
+    return m->stop.stop_class != SCD_STOP_NONE ? 1 : 0;
   case 0x02:
     if (width == 2U) {
       m->ga.write_protect = (uint8_t)(*value >> 8);

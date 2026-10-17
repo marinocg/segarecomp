@@ -71,6 +71,7 @@ static int scd_apply_set(ScdMachine *m, const char *spec) {
 }
 
 static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *program, ScdRunResult result, const char *frame_sha) {
+  const ScdAuthentic *authentic = m->authentic;
   char digest[65];
   unsigned k, i;
   const GenesisRuntime *host = (const GenesisRuntime *)m->vdp_host;
@@ -139,6 +140,9 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
   for (i = 0; i < 10U; ++i) fprintf(out, "%s%u", i ? "," : "", m->cdd.tx[i]);
   fprintf(out, "]},\"frame_sha256\":%s%s%s,\"instructions\":%llu", frame_sha ? "\"" : "", frame_sha ? frame_sha : "null",
           frame_sha ? "\"" : "", (unsigned long long)(m->cpu[0].retired + m->cpu[1].retired));
+  if (authentic != NULL) /* SEG-064-T002: BIOS-image profile (absent for synthetic programs: their reports are unchanged) */
+    fprintf(out, ",\"bios_profile\":{\"epochs\":%u,\"epoch_image\":%d,\"epoch_tick\":%llu,\"sub_pristine\":%u}", m->epochs,
+            m->epoch_image, (unsigned long long)m->epoch_tick, m->sub_pristine);
   if (m->overlays != NULL) { /* SEG-063: overlay activation (absent for programs without modules: their reports are unchanged) */
     const ScdOverlayProgram *o = m->overlays;
     unsigned g, c;
@@ -170,12 +174,95 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
 
 int scd_program_main(const ScdProgram *program, int argc, char **argv) { return scd_program_main_overlays(program, NULL, argc, argv); }
 
+/* SEG-064-T002 (ADR 0142 decision 1): read the separately supplied BIOS and refuse it unless it is the image the program was compiled
+ * from. Returns NULL with `error` set; the bytes are kept for the whole run. */
+static const uint8_t *scd_load_bios(const ScdAuthentic *a, const char *path, const char **error) {
+  static uint8_t image[0x20000U + 1U];
+  char digest[65];
+  size_t n;
+  FILE *f;
+  if (path == NULL || (f = fopen(path, "rb")) == NULL) {
+    *error = "bios_missing";
+    return NULL;
+  }
+  n = fread(image, 1U, sizeof image, f);
+  fclose(f);
+  if (n != a->bios_size || n > 0x20000U) {
+    *error = "bios_size_invalid";
+    return NULL;
+  }
+  scd_sha_hex(image, n, digest);
+  if (strcmp(digest, a->bios_sha256) != 0) {
+    *error = "bios_identity_mismatch";
+    return NULL;
+  }
+  return image;
+}
+
+static void scd_hex(FILE *out, const uint8_t *bytes, uint32_t length) {
+  uint32_t i;
+  for (i = 0; i < length; ++i) fprintf(out, "%02x", bytes[i]);
+}
+
+/* Build pass (ADR 0142 decisions 3 and 7): an unknown epoch image is written to <dir>/epoch.bin; a stop at a RAM PC with no compiled
+ * variant for its live bytes is reported as a frontier. Both carry the identity of this program (the provenance chain). */
+static int scd_capture(ScdMachine *m, const ScdProgram *program, const char *dir) {
+  char path[4096];
+  FILE *f;
+  if (m->stop.stop_class == SCD_STOP_MATERIALIZATION_CAPTURED && m->capture_kind == 1U) {
+    snprintf(path, sizeof path, "%s/epoch.bin", dir);
+    f = fopen(path, "wb");
+    if (f == NULL || fwrite(m->prg_ram, 1U, m->capture_length, f) != m->capture_length || fclose(f) != 0) return 0;
+    snprintf(path, sizeof path, "%s/capture.json", dir);
+    f = fopen(path, "w");
+    if (f == NULL) return 0;
+    fprintf(f, "{\"kind\":\"epoch\",\"pass_identity\":\"%s\",\"length\":%u,\"tick\":%llu}\n", program->program_identity,
+            m->capture_length, (unsigned long long)m->now);
+    return fclose(f) == 0;
+  }
+  /* A frontier is a stop at the processor's PC where no compiled variant matched the live bytes: a code-byte mismatch there, or the
+   * dispatch default (entry_not_compiled whose detail is that PC). An uncompiled computed or template destination (entry_not_compiled
+   * whose detail is the destination) is an ordinary stop, never a new admission. */
+  if (m->stop.cpu < 2U && m->stop.pc == m->cpu[m->stop.cpu].pc &&
+      (m->stop.stop_class == SCD_STOP_CODE_BYTES_MISMATCH ||
+       (m->stop.stop_class == SCD_STOP_ENTRY_NOT_COMPILED && m->stop.address == m->stop.pc))) {
+    uint32_t i;
+    for (i = 0; i < 8U; ++i) {
+      const uint8_t *b = scd_code_byte(m, m->stop.cpu, m->stop.pc + i);
+      if (b == NULL) return 1; /* not RAM: an ordinary stop, nothing to capture */
+      m->capture_bytes[i] = *b;
+    }
+    m->capture_kind = 2U;
+    snprintf(path, sizeof path, "%s/capture.json", dir);
+    f = fopen(path, "w");
+    if (f == NULL) return 0;
+    fprintf(f, "{\"kind\":\"frontier\",\"pass_identity\":\"%s\",\"cpu\":%u,\"pc\":%u,\"bytes\":\"", program->program_identity,
+            m->stop.cpu, m->stop.pc);
+    scd_hex(f, m->capture_bytes, 8U);
+    fprintf(f, "\"}\n");
+    return fclose(f) == 0;
+  }
+  return 1;
+}
+
 /* SEG-063: `overlays` is the generated overlay registry (NULL for programs without disc-loaded modules). */
+static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *overlays, const ScdAuthentic *authentic, int argc,
+                           char **argv);
+
 int scd_program_main_overlays(const ScdProgram *program, const ScdOverlayProgram *overlays, int argc, char **argv) {
+  return scd_program_run(program, overlays, NULL, argc, argv);
+}
+
+int scd_program_main_bios(const ScdProgram *program, const ScdAuthentic *authentic, int argc, char **argv) {
+  return authentic == NULL ? 2 : scd_program_run(program, NULL, authentic, argc, argv);
+}
+
+static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *overlays, const ScdAuthentic *authentic, int argc,
+                           char **argv) {
   static ScdMachine machine;
   static GenesisFrameArtifact frame;
   ScdDisc disc = program->disc;
-  const char *disc_dir = NULL, *report_path = NULL, *frame_path = NULL;
+  const char *disc_dir = NULL, *report_path = NULL, *frame_path = NULL, *bios_path = NULL, *materialize_dir = NULL;
   const char *sets[16];
   unsigned set_count = 0, i;
   uint64_t budget = 0U, slice_ticks = 0U, slice_seed = 0U;
@@ -199,6 +286,8 @@ int scd_program_main_overlays(const ScdProgram *program, const ScdOverlayProgram
       if (!scd_parse_u64(value, &slice_seed)) return 2;
       have_seed = 1;
     } else if (strcmp(flag, "--set") == 0 && set_count < 16U) sets[set_count++] = value;
+    else if (authentic != NULL && strcmp(flag, "--bios") == 0) bios_path = value;           /* SEG-064-T002 */
+    else if (authentic != NULL && strcmp(flag, "--materialize-dir") == 0) materialize_dir = value;
     else return 2;
   }
   if (disc_dir == NULL || budget == 0U) {
@@ -213,7 +302,20 @@ int scd_program_main_overlays(const ScdProgram *program, const ScdOverlayProgram
       return 20;
     }
   }
-  if (scd_machine_init(&machine, program, &disc, budget) != 0) {
+  if (authentic != NULL) { /* SEG-064-T002: refuse a missing or different BIOS before any guest instruction */
+    const char *error = NULL;
+    const uint8_t *bios = scd_load_bios(authentic, bios_path, &error);
+    if (bios == NULL) {
+      printf("{\"result\":\"bios_refused\",\"error\":\"%s\",\"bios_sha256\":\"%s\"}\n", error, authentic->bios_sha256);
+      scd_disc_close(&disc);
+      return 21;
+    }
+    if (scd_machine_init_bios(&machine, program, authentic, &disc, bios, authentic->bios_size, budget) != 0) {
+      scd_disc_close(&disc);
+      return 1;
+    }
+    machine.materialize = materialize_dir != NULL ? 1U : 0U;
+  } else if (scd_machine_init(&machine, program, &disc, budget) != 0) {
     printf("{\"result\":\"disc_refused\",\"error\":\"system_area\",\"disc_identity\":\"%s\"}\n", program->disc.identity);
     scd_disc_close(&disc);
     return 20;
@@ -248,6 +350,7 @@ int scd_program_main_overlays(const ScdProgram *program, const ScdOverlayProgram
       }
     }
   }
+  if (materialize_dir != NULL && result == SCD_RUN_STOPPED && !scd_capture(&machine, program, materialize_dir)) return 1;
   report = report_path != NULL ? fopen(report_path, "w") : stdout;
   if (report == NULL) return 1;
   scd_write_report(report, &machine, program, result, frame_digest);

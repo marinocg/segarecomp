@@ -11,7 +11,8 @@ static const char *const scd_stop_names[SCD_STOP_CLASS_COUNT] = {
     "address_error", "entry_not_compiled", "return_target_not_compiled", "code_bytes_mismatch", "instruction_unsupported",
     "exception_vector_not_compiled", "exception_stack_invalid", "trace_unsupported", "interrupt_source_unsupported",
     "cdc_destination_unsupported", "cdd_command_unsupported", "cd_read_audio_track", "cd_read_failed", "internal", "image_unknown",
-    "image_bytes_mismatch", "image_partially_overwritten", "ambiguous_image", "image_entry_not_compiled", "stale_image_selection"};
+    "image_bytes_mismatch", "image_partially_overwritten", "ambiguous_image", "image_entry_not_compiled", "stale_image_selection",
+    "materialized_image_unverified", "materialization_captured"};
 
 const char *scd_stop_class_name(ScdStopClass stop_class) {
   return (unsigned)stop_class < SCD_STOP_CLASS_COUNT ? scd_stop_names[stop_class] : "unknown";
@@ -136,6 +137,11 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
     uint32_t offset;
     if (a < UINT32_C(0x20000)) {
       if (is_write) return scd_unused(m, SCD_MAIN, address, width, 1, value, pc); /* ROM: the write has no effect */
+      /* SEG-064-T002 (ADR 0142): the verified BIOS image, when the profile maps one; past its end (or without one) bios_absent. */
+      if (m->bios != NULL && a + width <= m->bios_size) {
+        *value = scd_ram_get(m->bios, a, width);
+        return 0;
+      }
       return scd_fail_access(m, SCD_MAIN, SCD_STOP_BIOS_ABSENT, pc, address, width, 0);
     }
     if (!m->ga.prg_window) return scd_unused(m, SCD_MAIN, address, width, is_write, value, pc);
@@ -236,6 +242,17 @@ int scd_code_guard(ScdMachine *m, uint32_t cpu, uint32_t address, const uint8_t 
   return 0;
 }
 
+int scd_code_matches(ScdMachine *m, uint32_t cpu, uint32_t address, const uint8_t *expected, uint32_t length) {
+  uint32_t i;
+  const int word_ram = scd_is_word_ram(cpu, address);
+  if (word_ram && scd_cd_observe(m) != 0) return 0;
+  for (i = 0; i < length; ++i) {
+    const uint8_t *live = word_ram ? scd_code_byte(m, cpu, address + i) : scd_ram_byte(m, cpu, address + i);
+    if (live == NULL || *live != expected[i]) return 0;
+  }
+  return 1;
+}
+
 int scd_compiled(const ScdMachine *m, uint32_t cpu, uint32_t address) {
   const ScdProcessorProgram *program = &m->program->processors[cpu];
   size_t lo = 0U, hi = program->entry_count;
@@ -315,9 +332,18 @@ static void scd_hook_frame_write(void *context, uint32_t address, uint32_t size,
 static SegarecompM68kVectorResolution scd_hook_vector(void *context, uint32_t vector, uint32_t *handler) {
   ScdExceptionContext *x = (ScdExceptionContext *)context;
   uint32_t i, value = 0U;
-  if (x->cpu == SCD_MAIN) { /* the main vectors live in the absent BIOS ROM (contract section 10) */
-    x->vector_failure = SCD_STOP_BIOS_ABSENT;
-    return SEGARECOMP_M68K_VECTOR_NOT_INSTALLED;
+  if (x->cpu == SCD_MAIN) {
+    if (x->m->bios == NULL || vector * 4U + 4U > x->m->bios_size) { /* the main vectors live in the (absent) BIOS ROM (section 10) */
+      x->vector_failure = SCD_STOP_BIOS_ABSENT;
+      return SEGARECOMP_M68K_VECTOR_NOT_INSTALLED;
+    }
+    for (i = 0; i < 4U; ++i) value = (value << 8U) | x->m->bios[vector * 4U + i]; /* SEG-064-T002: the image's vector table */
+    if (!scd_compiled(x->m, x->cpu, value & UINT32_C(0x00FFFFFF))) {
+      x->vector_failure = SCD_STOP_EXCEPTION_VECTOR_NOT_COMPILED;
+      return SEGARECOMP_M68K_VECTOR_UNREPRESENTABLE;
+    }
+    *handler = value & UINT32_C(0x00FFFFFF);
+    return SEGARECOMP_M68K_VECTOR_HANDLER;
   }
   for (i = 0; i < 4U; ++i) value = (value << 8U) | x->m->prg_ram[vector * 4U + i]; /* PRG RAM $000000-$0003FF */
   if (!scd_compiled(x->m, x->cpu, value & UINT32_C(0x00FFFFFF))) {
@@ -564,6 +590,38 @@ int scd_machine_init(ScdMachine *m, const ScdProgram *program, ScdDisc *disc, ui
   m->cpu[SCD_SUB].cycle_ticks = SCD_SUB_CYCLE_TICKS;
   /* Power-on Gate Array state (contract sections 5, 6; GPGX scd_reset(1)): the sub held in reset and halted with SBRQ reading 1, the
    * PRG-RAM window mapped, 2M mode with main owning Word RAM. */
+  m->ga.ctl = 0x02U;
+  m->ga.sub_halted = 1U;
+  m->ga.prg_window = 1U;
+  m->ga.mode = SCD_MODE_RET;
+  scd_devices_power_on(m);
+  return scd_vdp_init(m);
+}
+
+/* SEG-064-T002 (ADR 0142 decision 1): the BIOS-image profile. Nothing is placed from the disc: the main processor takes its reset
+ * exception from the image's vectors (SSP at $000000, PC at $000004); the sub is held in reset with the bus requested (power-on Gate
+ * Array state, as above) until the main program releases it. */
+int scd_machine_init_bios(ScdMachine *m, const ScdProgram *program, const ScdAuthentic *authentic, ScdDisc *disc, const uint8_t *bios,
+                          uint32_t bios_size, uint64_t instruction_budget) {
+  uint32_t k;
+  if (bios == NULL || bios_size < 8U) return 1;
+  memset(m, 0, sizeof *m);
+  m->program = program;
+  m->authentic = authentic;
+  m->disc = disc;
+  m->bios = bios;
+  m->bios_size = bios_size;
+  m->epoch_image = -1;
+  m->instruction_budget = instruction_budget;
+  m->device_log = UINT64_C(0xCBF29CE484222325);
+  for (k = 0; k < 2U; ++k) m->cpu[k].trace = UINT64_C(0xCBF29CE484222325);
+  m->cpu[SCD_MAIN].a[7] = ((uint32_t)bios[0] << 24) | ((uint32_t)bios[1] << 16) | ((uint32_t)bios[2] << 8) | bios[3];
+  m->cpu[SCD_MAIN].pc = (((uint32_t)bios[4] << 24) | ((uint32_t)bios[5] << 16) | ((uint32_t)bios[6] << 8) | bios[7]) & UINT32_C(0x00FFFFFF);
+  m->cpu[SCD_MAIN].sr = UINT16_C(0x2700);
+  m->cpu[SCD_SUB].sr = UINT16_C(0x2700);
+  m->cpu[SCD_MAIN].cycle_ticks = SCD_MAIN_CYCLE_TICKS;
+  m->cpu[SCD_SUB].cycle_ticks = SCD_SUB_CYCLE_TICKS;
+  m->cpu[SCD_MAIN].next = UINT64_C(40) * SCD_MAIN_CYCLE_TICKS; /* MC68000 reset exception processing: 40 clocks (UM68K) */
   m->ga.ctl = 0x02U;
   m->ga.sub_halted = 1U;
   m->ga.prg_window = 1U;

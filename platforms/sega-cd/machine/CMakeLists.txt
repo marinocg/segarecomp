@@ -4,6 +4,8 @@ add_library(segarecomp_machine_sega_cd
   src/boot_images.cpp
   src/modules.cpp
   src/program.cpp
+  src/emit_shared.cpp
+  src/bios_profile.cpp
 )
 add_library(segarecomp::machine_sega_cd ALIAS segarecomp_machine_sega_cd)
 target_link_libraries(segarecomp_machine_sega_cd PUBLIC segarecomp::media segarecomp::recompiler segarecomp::codegen_c11_m68k)
