@@ -58,7 +58,7 @@ class Case:
         self.lib = self.dir / "lib"
         self.args_log = self.dir / "args.txt"
         self.env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software", SEGARECOMP_CACHE_DIR=str(self.dir / "cache"),
-                        SEGARECOMP_LIBRARY_DIR=str(self.lib), SEGARECOMP_HOME=str(package), SEGARECOMP_NO_COVER_FETCH="1", FAKE_GAME_BIN=fake_game,
+                        SEGARECOMP_LIBRARY_DIR=str(self.lib), SEGARECOMP_HOME=str(package), SEGARECOMP_NO_COVER_FETCH="1", SEGARECOMP_SHOT_SIZE="720x520", FAKE_GAME_BIN=fake_game,
                         FAKE_BUILD_ARGS_LOG=str(self.args_log))
 
     def import_rom(self, path):

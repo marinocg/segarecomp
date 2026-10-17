@@ -47,7 +47,7 @@ class Profile:
         self.lib = self.dir / "lib"
         self.cache = self.dir / "cache"
         self.env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software", SEGARECOMP_CACHE_DIR=str(self.cache),
-                        SEGARECOMP_LIBRARY_DIR=str(self.lib), SEGARECOMP_HOME=str(package), SEGARECOMP_NO_COVER_FETCH="1", FAKE_GAME_BIN=fake_game,
+                        SEGARECOMP_LIBRARY_DIR=str(self.lib), SEGARECOMP_HOME=str(package), SEGARECOMP_NO_COVER_FETCH="1", SEGARECOMP_SHOT_SIZE="720x520", FAKE_GAME_BIN=fake_game,
                         FAKE_BUILD_INTERMEDIATES="1")
 
     @property
@@ -149,7 +149,7 @@ def main():
             p = Profile(tmp, name, exe, fake_cli, fake_game)
             p.add_game()
             script = ["pad_attach", "frames 20", "expect modal=1"] + choose + ["pad south down", "pad south up", "frames 8", "expect modal=0",
-                      "focus_card 0", "frames 4", "key Return", "frames 8", "build", "wait_idle", "frames 240", "expect build_outcome=ok", "quit"]
+                      "focus_card 0", "frames 4", "key Return", "frames 8", "build", "wait_idle", "frames 120", "expect build_outcome=ok", "quit"]
             trace = p.run(script)
             check_trace(name, trace, 3)
             if not (p.cache / "games").exists():

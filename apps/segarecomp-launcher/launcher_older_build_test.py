@@ -47,7 +47,7 @@ class Profile:
         self.cache = self.dir / "cache"
         self.game_log = self.dir / "game.log"
         self.env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software", SEGARECOMP_CACHE_DIR=str(self.cache),
-                        SEGARECOMP_LIBRARY_DIR=str(self.lib), SEGARECOMP_HOME=str(self.package), SEGARECOMP_NO_COVER_FETCH="1", FAKE_GAME_BIN=fake_game,
+                        SEGARECOMP_LIBRARY_DIR=str(self.lib), SEGARECOMP_HOME=str(self.package), SEGARECOMP_NO_COVER_FETCH="1", SEGARECOMP_SHOT_SIZE="720x520", FAKE_GAME_BIN=fake_game,
                         FAKE_GAME_LOG=str(self.game_log))
         self.rom = self.dir / "g.md"
         genesis_rom(self.rom)

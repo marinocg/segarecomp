@@ -48,7 +48,7 @@ def main():
         cache = tmp / "cache"
         heartbeat = tmp / "heartbeat"
         env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software", SEGARECOMP_CACHE_DIR=str(cache),
-                   SEGARECOMP_HOME=str(package), SEGARECOMP_NO_COVER_FETCH="1", FAKE_GAME_BIN=fake_game)
+                   SEGARECOMP_HOME=str(package), SEGARECOMP_NO_COVER_FETCH="1", SEGARECOMP_SHOT_SIZE="720x520", FAKE_GAME_BIN=fake_game)
         for index, title in enumerate(("Alpha Cancel Test", "Beta Cancel Test")):
             rom = tmp / (title + ".md")
             genesis_rom(rom, index)

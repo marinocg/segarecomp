@@ -42,6 +42,13 @@ picker is also used when no system file chooser exists, for example under WSL). 
   hot-plug and the hint bar. `pad_seek <control> <direction>` presses real virtual-gamepad D-pad buttons until the control has focus, which is how reachability is asserted.
 * `launcher_gui_navigation_test.py`, `launcher_input_diagnostics_test.py`: keyboard, mouse overlay buttons and the input diagnostics are unchanged.
 
+### What CI runs
+
+To keep the SDL3 job under its time budget CI runs the quick launcher suites and the **narrow (720x520)** controller journeys (one ctest each, in parallel with `-j 4`).
+The slower, redundant ones (`launcher_gamepad_journey_*_wide_test`, `launcher_first_run_test`, `launcher_older_build_test`; the journeys cover the same flows) are registered
+with the `full`/`fast` labels and run locally: `ctest --test-dir build/sdl3 -j 4 -R 'launcher_gamepad_journey|launcher_first_run_test|launcher_older_build_test'`
+(about 3 minutes on a desktop Linux machine).
+
 ## Manual smoke walk (a real controller, once per release)
 
 1. Start with a fresh profile (`SEGARECOMP_LIBRARY_DIR` / `SEGARECOMP_CACHE_DIR` pointing at empty folders) and a controller connected; do not touch the mouse.

@@ -287,14 +287,20 @@ JOURNEYS = [first_run, import_journey, library_journey, build_journey, older_bui
 
 def main():
     exe, fake_cli, fake_game = sys.argv[1:4]
-    sizes = sys.argv[4:] or ["1080x740", "720x520"]
+    extra = sys.argv[4:]
+    sizes = [a for a in extra if "x" in a and a[0].isdigit()] or ["1080x740", "720x520"]
+    wanted = [a for a in extra if a not in sizes]          # journey names (function names without the _journey suffix); default: all
+    journeys = [j for j in JOURNEYS if not wanted or j.__name__.replace("_journey", "") in wanted]
+    if wanted and len(journeys) != len(wanted):
+        print(f"unknown journey in {wanted}")
+        return 2
     r = Runner()
     with tempfile.TemporaryDirectory() as d:
         tmp = pathlib.Path(d)
         for size in sizes:
             sub = tmp / size
             sub.mkdir()
-            for journey in JOURNEYS:
+            for journey in journeys:
                 journey(r, sub, exe, fake_cli, fake_game, size)
     if r.failures:
         print("\n".join(r.failures))
