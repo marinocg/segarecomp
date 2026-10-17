@@ -65,14 +65,15 @@ with tempfile.TemporaryDirectory() as tmp:
     if not summary.get("ok"):
         sys.exit(1)
     kinds = [h.get("admitted", {}).get("kind") for h in summary["history"]]
-    check(kinds == ["epoch", "operand_template", "operand_template", None], "admission order %s" % kinds)
+    check(kinds == ["epoch", "operand_template", "operand_template", "operand_template", None], "admission order %s" % kinds)
     epoch = summary["history"][0]["admitted"]
     check(epoch["length"] == expected["sub_image_length"] and epoch["sha256"] == expected["sub_image_sha256"],
           "materialized image equals the fixture's own pre-transform image")
     templates = {(h["admitted"]["cpu"], h["admitted"]["pc"]) for h in summary["history"] if h.get("admitted", {}).get("kind") == "operand_template"}
-    check(templates == {("main", expected["thunks"]["main"]), ("sub", expected["thunks"]["sub"])}, "templates at the two thunks")
+    check(templates == {("main", expected["thunks"]["main"]), ("sub", expected["thunks"]["sub"]), ("sub", expected["thunks"]["sub_in_image"])},
+          "templates at the three thunks (one already inside the materialized image)")
     emitted = summary["emit"]
-    check(emitted["templates"] == 2 and emitted["deduplicated"] >= 1 and emitted["processors"][1]["variant_pcs"] >= 1,
+    check(emitted["templates"] == 3 and emitted["deduplicated"] >= 1 and emitted["processors"][1]["variant_pcs"] >= 1,
           "overlapping images: deduplicated identical variants and live-byte variant PCs (%s)" % emitted)
     authorities = {i["name"]: i["authority"] for i in emitted["images"]}
     check(authorities == {"bios": "immutable_input", "copy0": "static_proof", "epoch0": "bounded_build_time_materialization"},
@@ -103,6 +104,15 @@ with tempfile.TemporaryDirectory() as tmp:
         ref_dir.mkdir()
         r = subprocess.run([str(ref_exe), "--rom", str(bios), str(ref_dir)], capture_output=True, text=True, timeout=common.RUN_TIMEOUT)
         check(r.returncode == 0, "reference ran: %s" % r.stderr[-300:])
+        for spec in expected["positive_variants"]:  # the SBRQ-release epoch and the repeated reset, independently
+            vdir = tmp / ("ref-" + spec.replace(":", "-").replace("=", "-"))
+            vdir.mkdir()
+            rv = subprocess.run([str(ref_exe), "--rom", str(bios), str(vdir), spec], capture_output=True, text=True, timeout=common.RUN_TIMEOUT)
+            _, ours = run_program(exe, disc, bios, "--set", spec)
+            check(rv.returncode == 0 and json.loads((vdir / "state.json").read_text())["comstat"] == ours["ga"]["comstat"] and
+                  hashlib.sha256((vdir / "prg_ram.bin").read_bytes()).hexdigest() == ours["digests"]["prg_ram"] and
+                  hashlib.sha256((vdir / "work_ram.bin").read_bytes()).hexdigest() == ours["digests"]["work_ram"],
+                  "reference agrees on variant %s" % spec)
         if r.returncode == 0:
             state = json.loads((ref_dir / "state.json").read_text())
             work = (ref_dir / "work_ram.bin").read_bytes()
@@ -124,9 +134,10 @@ with tempfile.TemporaryDirectory() as tmp:
     # ---- the SBRQ-release epoch path and repeated resets (two epochs) ----
     for spec, epochs in expected["positive_variants"].items():
         code, alt = run_program(exe, disc, bios, "--set", spec)
-        check(code == 0 and alt.get("result_block") == report["result_block"] and alt["ga"]["comstat"] == report["ga"]["comstat"],
-              "variant %s reaches the same results (%s)" % (spec, alt.get("stop")))
-        check(alt.get("bios_profile", {}).get("epochs") == epochs, "variant %s verified %s epoch(s)" % (spec, epochs))
+        check(code == 0 and alt.get("result_block")[:0x20 * 2] == report["result_block"][:0x20 * 2] and
+              alt["ga"]["comstat"][:6] == report["ga"]["comstat"][:6], "variant %s reaches the same results (%s)" % (spec, alt.get("stop")))
+        check(alt.get("bios_profile", {}).get("epochs") == epochs and alt["ga"]["comstat"][6] == epochs,
+              "variant %s: %s verified epoch(s), each one a reset entry of the sub (COMSTAT6)" % (spec, epochs))
 
     # ---- negatives: typed stops before an instruction from the invalid image retires ----
     for spec, (cls, cpu, pc) in expected["negatives"].items():

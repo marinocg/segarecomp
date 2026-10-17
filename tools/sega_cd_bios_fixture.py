@@ -63,6 +63,8 @@ SDEST1 = 0x0200
 SDEST2 = 0x0220
 SUB_DATA = 0x0300
 THUNK_SUB = 0x0400
+THUNK_SUB2 = 0x0440
+SDEST3 = 0x0230
 T1 = 0x0480
 T1_STALE = 0x04C0
 T2_LEN = 0x48             # T2 covers T1..T1+$47: its last instruction would cross T1+$48, so a return to T1_STALE+6 meets mixed bytes
@@ -86,6 +88,7 @@ def sub_image():
         s.lw(SUB_FAULT)
     # resident code
     assert s.pc == SUB_RESIDENT
+    s.quick("add", "w", 1, F.absl(GA_SUB + 0x2C))         # COMSTAT6: counts reset entries (the Gate Array keeps it across resets)
     s.move("w", F.imm(0x0001), F.absl(SUB_DATA))          # mutable data next to code
     s.quick("add", "w", 1, F.absl(SUB_DATA + 2))
     s.jsr(F.absl(T1))                                     # transient T1 (writes COMSTAT0 = $7101)
@@ -96,6 +99,9 @@ def sub_image():
     s.jsr(F.absl(THUNK_SUB))
     s.move("l", F.imm(SDEST2), F.absl(THUNK_SUB + 2))
     s.jsr(F.absl(THUNK_SUB))
+    s.jsr(F.absl(THUNK_SUB2))                             # a thunk already in the materialized image (an exact variant) ...
+    s.move("l", F.imm(SDEST3), F.absl(THUNK_SUB2 + 2))    # ... whose operand is then rewritten: an operand template
+    s.jsr(F.absl(THUNK_SUB2))
     s.quick("add", "w", 1, F.absl(SUB_DATA + 2))
     s.immop("cmp", "w", 1, F.d(3))
     s.bcc("ne", "no_mutation")
@@ -125,6 +131,10 @@ def sub_image():
         s.nop()
     s.move("w", F.imm(0x5D02), F.absl(GA_SUB + 0x24))
     s.rts()
+    while s.pc < SDEST3:
+        s.nop()
+    s.move("w", F.imm(0x5D03), F.absl(GA_SUB + 0x2A))     # COMSTAT5
+    s.rts()
     while s.pc < SUB_FAULT:
         s.nop()
     s.move("w", F.imm(0xDEAD), F.absl(GA_SUB + 0x2E))
@@ -140,6 +150,10 @@ def sub_image():
         s.nop()
     for _ in range(0x40):                                 # mutable data, initially non-zero (part of the materialized image)
         s.w(0xAAAA)
+    while s.pc < THUNK_SUB2:
+        s.w(0)
+    s.w(0x4EF9)                                           # JMP (SDEST1).L, present at the epoch
+    s.lw(SDEST1)
     while s.pc < T1:
         s.w(0)
     # T1 (transient)
@@ -313,10 +327,10 @@ def expected(rom, sub, t2):
         "reset_pc": MAIN, "reset_ssp": 0x00FFFE00,
         "sub_image_length": (len(sub) + 0xFF) & ~0xFF, "sub_image_sha256": hashlib.sha256(sub.ljust((len(sub) + 0xFF) & ~0xFF, b"\0")).hexdigest(),
         "copy_image": {"processor": "sub", "base": T1, "rom_offset": T2_SRC, "length": len(t2)},
-        "thunks": {"main": THUNK_MAIN, "sub": THUNK_SUB},
+        "thunks": {"main": THUNK_MAIN, "sub": THUNK_SUB, "sub_in_image": THUNK_SUB2},
         "result": {"0": 0x1111, "2": 0xD001, "4": 0xD002, "6": 2, "32": 0x7202, "34": 0x5D01, "36": 0x5D02, "48": 0xAAAE},
-        "sub_comstat": [0x7202, 0x5D01, 0x5D02, 0, 0xAAAE, 0, 0, 0],
-        "positive_variants": {"main:d5=3": 1, "main:d5=4": 2},  # same results; verified epochs
+        "sub_comstat": [0x7202, 0x5D01, 0x5D02, 0, 0xAAAE, 0x5D03, 1, 0],
+        "positive_variants": {"main:d5=3": 1, "main:d5=4": 2},  # verified epochs = reset entries (COMSTAT6)
         "negatives": {
             "main:d6=1": ["entry_not_compiled", 0, None], "main:d6=2": ["entry_not_compiled", 0, None],
             "main:d6=3": ["entry_not_compiled", 0, None], "main:d6=4": ["entry_not_compiled", 0, None],

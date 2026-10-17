@@ -13,7 +13,7 @@
  * nothing about executable images, admission or selection - it simply interprets the bytes.
  *
  * usage: sega_cd_musashi_reference <system-area.bin> <ip-offset> <ip-size> <ip-entry> <sp-offset> <sp-size> <sp-entry> <out-dir>
- *        sega_cd_musashi_reference --rom <image.bin> <out-dir>
+ *        sega_cd_musashi_reference --rom <image.bin> <out-dir> [main|sub:dN=VALUE]...
  * Writes <out-dir>/state.json and the raw memories prg_ram.bin, work_ram.bin, word_ram.bin (2M layout). */
 #include <stdio.h>
 #include <stdlib.h>
@@ -257,7 +257,7 @@ int main(int argc, char **argv) {
   int stopped[2] = {0, 0};
   char path[4096];
   const char *out_dir;
-  const int rom_mode = argc == 4 && strcmp(argv[1], "--rom") == 0;
+  const int rom_mode = argc >= 4 && strcmp(argv[1], "--rom") == 0;
   if (argc != 9 && !rom_mode) return 2;
   sub_context = calloc(1, m68k_context_size());
   main_context = calloc(1, m68k_context_size());
@@ -281,6 +281,17 @@ int main(int argc, char **argv) {
     in_setup = 0;
     m68k_pulse_reset(); /* SSP from $000000, PC from $000004 of the image */
     m68k_get_context(main_context);
+    for (i = 4; i < (unsigned)argc; ++i) { /* data-register settings (the runtime's --set), applied before any instruction */
+      const char *spec = argv[i];
+      const int sub = strncmp(spec, "sub:d", 5) == 0;
+      const char *reg = sub ? spec + 5 : (strncmp(spec, "main:d", 6) == 0 ? spec + 6 : NULL);
+      if (reg == NULL || reg[0] < '0' || reg[0] > '7' || reg[1] != '=') return 2;
+      current = sub ? 1U : 0U;
+      m68k_set_context(sub ? sub_context : main_context);
+      m68k_set_reg((m68k_register_t)(M68K_REG_D0 + (reg[0] - '0')), (unsigned)strtoul(reg + 2, 0, 0));
+      m68k_get_context(sub ? sub_context : main_context);
+    }
+    current = 0;
     (void)ip_off; (void)ip_size; (void)ip_entry; (void)sp_off; (void)sp_size; (void)sp_entry;
   } else {
     ip_off = (unsigned)strtoul(argv[2], 0, 0); ip_size = (unsigned)strtoul(argv[3], 0, 0); ip_entry = (unsigned)strtoul(argv[4], 0, 0);
