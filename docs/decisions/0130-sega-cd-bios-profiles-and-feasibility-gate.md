@@ -27,3 +27,19 @@ Answer each with evidence from a user-supplied BIOS:
 3. *Native services*: if a routine cannot be compiled (self-modifying, timing loop on unmodelled hardware), a narrow
    native implementation is allowed only behind a typed boundary with an independent oracle; more than three such
    routines is NO-GO for the authentic profile (fall back to synthetic + documented service shims as a separate decision).
+
+## Amendment 1 (2026-10-17, operator-approved, prospective)
+
+The gate above is unchanged and remains the record against which SEG-064-T001 was decided: ADR 0141 classified it `NO_GO`
+(root-driven static discoverability at most 59.5 % of the executed BIOS code). That result is historical and is not reclassified.
+
+The operator explicitly approved a **separate, forward-looking alternative** for the authentic profile: *verified broad AOT with
+bounded executable-image materialization* (ADR 0142). It replaces root-driven discovery as the admission strategy for an
+authentic BIOS only under ADR 0142's invariants and its own gates:
+
+- **G-M (mechanism)**: a synthetic, project-authored generated-native proof of the four mechanisms (immutable broad AOT,
+  transformed RAM image materialized at the sub reset-release epoch, resident/transient ranges with mutable data, mutable jump
+  targets). Outcome `MECHANISM_PROVEN`, `MECHANISM_PARTIALLY_PROVEN` or `MECHANISM_NOT_VIABLE`.
+- **G-A (authentic GO)**: required before any authentic BIOS boot is claimed, and only after G-M is `MECHANISM_PROVEN` (ADR 0142).
+
+Points 1 (two profiles) and 2 (legal-input rule) are unchanged. Native services remain limited by point 3 of the original gate.

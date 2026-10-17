@@ -3,6 +3,8 @@
 - Status: Accepted (SEG-064-T001). **Outcome: `NO_GO`** under ADR 0130 as written. SEG-064 is deferred; Checkpoint E is not
   claimed. A candidate architecture that the evidence supports is recorded below as a **proposal requiring an explicit, human-approved
   amendment of ADR 0130**; it is not adopted by this record.
+- Later (2026-10-17): the operator approved that amendment prospectively (ADR 0130 Amendment 1, ADR 0142). This record's `NO_GO`
+  under the original criteria is unchanged.
 - Related: ADR 0130 (the frozen gate and its three outcomes, unchanged), ADR 0126/0127/0128/0132 (Sega CD images, dispatch,
   scheduling, overlays), ADR 0076 (M68K image authorities), ADR 0073 (bounded build-time materialization), ADR 0097 #10
   (materialized work-RAM `JMP` thunks).
