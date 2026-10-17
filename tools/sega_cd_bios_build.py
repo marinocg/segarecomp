@@ -260,7 +260,10 @@ class Driver:
         items.append(("program.c", c_path.read_bytes(), inc))
         objects, rebuilt = self.compile_all(items)
         compiled = time.monotonic()
-        out = run([self.args.cc, *objects, *self.runtime_objects(), "-o", exe], 600)
+        inputs = [*objects, *self.runtime_objects()]
+        # The link inputs in link order: equal digests mean an equal program on every host (a Windows PE link also stamps a time).
+        self.link_inputs = [hashlib.sha256(pathlib.Path(o).read_bytes()).hexdigest() for o in inputs]
+        out = run([self.args.cc, *inputs, "-o", exe], 600)
         if out.returncode != 0:
             raise BuildFailure("program_link_failed", out.stderr[-2000:])
         seconds = round(time.monotonic() - started, 3)
@@ -335,7 +338,8 @@ class Driver:
                     "program_identity": emitted["program_identity"], "program": str(exe), "c_bytes": emitted["c_bytes"],
                     "emit": emitted, "compile_seconds": self.compile_seconds, "outcome": self.outcome(report),
                     "partition_window": self.window, "round_metrics": self.rounds, "peak_compile_kb": self.peak_compile_kb,
-                    "peak_emit_kb": self.peak_emit_kb, "total_seconds": round(time.monotonic() - started, 3)}
+                    "peak_emit_kb": self.peak_emit_kb, "total_seconds": round(time.monotonic() - started, 3),
+                    "link_inputs": self.link_inputs}
         raise BuildFailure("round_bound_exceeded")
 
 

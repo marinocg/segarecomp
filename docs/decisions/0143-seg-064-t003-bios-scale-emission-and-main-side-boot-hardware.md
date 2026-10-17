@@ -80,7 +80,8 @@ including the H-INT vector register, the PRG-RAM window, the empty cartridge slo
 at most 4.3 MB, plus the shared unit); emission 7-8 s and 356 MB peak. Cold fixed point: round 0 compiles 17 units in 24 s, round 1
 rebuilds 17 (16 new sub units and the shared unit) and reuses 16 in 53 s; **2 rounds + confirming run, 98 s in total; peak
 compiler resident set 376 MB per process**. A warm rebuild compiles nothing (21 s, emission and the passes); the executable is
-byte-identical to an independent build with another job count. Synthetic proof (2,427 functions): about 1 s per incremental round.
+byte-identical to an independent build with another job count (Linux; a Windows PE link stamps a time, so there the link inputs -
+object bytes in link order, reported by the driver - and the program's behaviour are what must be identical). Synthetic proof (2,427 functions): about 1 s per incremental round.
 
 **Main-side hardware reached and implemented**, each forced by the runtime-selected frontier of the generated main BIOS (in order: an
 I/O control-port read, then VDP DMA enable; the rest followed in the same batch from the same evidence): I/O version/controller ports,

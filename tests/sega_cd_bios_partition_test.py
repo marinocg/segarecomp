@@ -14,6 +14,7 @@ usage: sega_cd_bios_partition_test.py <segarecomp> <cc> <project root>"""
 import argparse
 import importlib.util
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -57,6 +58,9 @@ def run_program(exe, disc, bios, *extra):
     return out.returncode, (json.loads(out.stdout) if out.stdout.strip() else {})
 
 
+# A Windows PE link stamps a time into the executable: there the build-order property is checked on the link inputs (object bytes in
+# link order) and on the program's behaviour; elsewhere the executable must also be byte-identical.
+REPRODUCIBLE_LINK = os.name != "nt"
 DEFINITION = re.compile(r"^static int (scd_p[01]_(?:i\d+|t|v)_[0-9A-F_]+)\(ScdMachine \*m\) \{$", re.M)
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -142,13 +146,21 @@ with tempfile.TemporaryDirectory() as tmp:
           "a template round was observed")
     warm = drive(tmp / "w1", cue, bios, copy_spec, "--partition-window", window)
     check(warm.get("ok") and all(r["rebuilt"] == 0 for r in warm["round_metrics"]), "a warm rebuild compiles nothing")
-    check(pathlib.Path(warm["program"]).read_bytes() == exes[1].read_bytes(), "warm rebuild links the same program")
+    check(warm.get("link_inputs") == s1["link_inputs"], "warm rebuild links the same objects in the same order")
+    if REPRODUCIBLE_LINK:
+        check(pathlib.Path(warm["program"]).read_bytes() == exes[1].read_bytes(), "warm rebuild links a byte-identical program")
     flag = drive(tmp / "w1", cue, bios, copy_spec, "--partition-window", window, "--cflags=-DSEGARECOMP_T003_CACHE_PROBE=1")
     check(flag.get("ok") and flag["round_metrics"][0]["rebuilt"] == flag["round_metrics"][0]["units"],
           "a changed compiler flag rebuilds every unit")
     cold = drive(tmp / "w1-reverse", cue, bios, copy_spec, "--partition-window", window, "--jobs", 1, "--reverse-compile-order")
-    check(cold.get("ok") and pathlib.Path(cold["program"]).read_bytes() == exes[1].read_bytes(),
-          "a cold build in reverse order with one job links a byte-identical program")
+    check(cold.get("ok") and cold.get("link_inputs") == s1["link_inputs"],
+          "a cold build in reverse order with one job links byte-identical objects in the same order")
+    if cold.get("ok"):
+        check(run_program(pathlib.Path(cold["program"]), disc, bios) == run_program(exes[1], disc, bios),
+              "the reverse-order cold build runs identically")
+        if REPRODUCIBLE_LINK:
+            check(pathlib.Path(cold["program"]).read_bytes() == exes[1].read_bytes(),
+                  "a cold build in reverse order with one job links a byte-identical program")
 
     # ---- the object key covers headers reached through relative includes outside the runtime directories ----
     tree = tmp / "tree"
