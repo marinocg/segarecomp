@@ -87,9 +87,11 @@ static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t sec
   return 0;
 }
 
-/* 1 when a control-port write (a word, or a long as two words high first) contains a register-#0 write with IE1 set. A word written while
- * the VDP awaits a command's second word is that second word; otherwise a word of the form 10xx xxxx is a register write and any other
- * word is the first word of a two-word command. */
+/* Classifies a control-port write (a word, or a long as two words high first): 1 when it contains a register-#0 write with IE1 set, 2
+ * when it contains a word of the form 101x xxxx outside a pending command - a register write for GPGX (vdp_68k_ctrl_w decodes
+ * (w & $C000) == $8000, register (w >> 8) & $1F) but the first word of a command for the Genesis device host: the two disagree, so it is
+ * not modelled - and 0 otherwise. A word written while the VDP awaits a command's second word is that second word; otherwise a word
+ * 10xx xxxx is a register write and any other word is the first word of a two-word command. */
 static int scd_vdp_sets_ie1(int awaiting, uint32_t width, uint32_t value) {
   const uint32_t words[2] = {width == 4U ? value >> 16 : value & 0xFFFFU, value & 0xFFFFU};
   uint32_t i;
@@ -99,6 +101,7 @@ static int scd_vdp_sets_ie1(int awaiting, uint32_t width, uint32_t value) {
       continue;
     }
     if ((words[i] & 0xC000U) == 0x8000U) {
+      if ((words[i] & 0xE000U) == 0xA000U) return 2;
       if ((words[i] & 0xFF10U) == 0x8010U) return 1;
     } else {
       awaiting = 1;
@@ -117,8 +120,9 @@ int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write
       const int awaiting = host->devices.vdp.control_port_awaiting_second_word != 0U;
       /* The H-interrupt: register #0 IE1 (bit 4) would let the line counter (not modelled; GPGX latches it on active lines whether or
        * not IE1 is set) request level 4. Setting it is the typed stop interrupt_source_unsupported at the write, before any line. */
-      if (scd_vdp_sets_ie1(awaiting, width, *value))
-        return scd_fail_access(m, SCD_MAIN, SCD_STOP_INTERRUPT_SOURCE_UNSUPPORTED, pc, address, width, 1);
+      const int shape = scd_vdp_sets_ie1(awaiting, width, *value);
+      if (shape == 1) return scd_fail_access(m, SCD_MAIN, SCD_STOP_INTERRUPT_SOURCE_UNSUPPORTED, pc, address, width, 1);
+      if (shape == 2) return scd_fail_access(m, SCD_MAIN, SCD_STOP_VDP_ACCESS_UNSUPPORTED, pc, address, width, 1);
       uint32_t second = UINT32_MAX;
       if (width == 2U && awaiting) second = *value & 0xFFFFU;
       else if (width == 4U && awaiting) second = *value >> 16;

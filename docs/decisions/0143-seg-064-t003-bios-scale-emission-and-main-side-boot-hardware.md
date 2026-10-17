@@ -56,7 +56,8 @@ including the H-INT vector register, the PRG-RAM window, the empty cartridge slo
    vector register `$A12006` (GPGX `scd_reset` writes `$FFFF` over the boot ROM's `$70` and `$72` words and `$A12006` owns `$72`; reads
    of `$70-$73` return them; the register starts at `$FFFF`). Writing register #0 with IE1 (the H-interrupt) set is the typed stop
    `interrupt_source_unsupported` at that write: GPGX latches the line counter on active lines whatever IE1 says, and the counter is
-   not modelled.
+   not modelled. A control word `101x xxxx` outside a pending command (a register write for GPGX, a command word for the Genesis
+   device host) is the typed stop `vdp_access_unsupported` (correction cycle 2).
 8. **Open bus (GPGX model, exact cases only).** A main read nothing answers - the empty cartridge slot `$400000-$7FFFFF`, unused areas -
    returns the instruction-stream word at the processor's prefetch position, its byte selected by A0 (GPGX `m68k_read_bus_8/16`: the
    word at the CPU's PC after the extension words consumed before the operand read; for a long read both halves). The emitter states

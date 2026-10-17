@@ -23,7 +23,8 @@ observes in a result block, then builds a small sub program in PRG RAM and relea
 The sub program writes COMSTAT0 = $C0DE and stops.
 
 Negatives (main d7): 1 an open-bus read by a MOVE whose destination still has extension words (prefetch not established); 2 a Z80
-RAM read after the Z80 has been runnable; 3 a 68K->VDP DMA from Word RAM; 4 the H-interrupt enabled (line counter not modelled: stops at the write); 8 the same by a long write that also clears it again;
+RAM read after the Z80 has been runnable; 3 a 68K->VDP DMA from Word RAM; 4 the H-interrupt enabled (line counter not modelled: stops at the write); 8 the same by a long write that also clears it again; 9 a
+control word 101x xxxx (GPGX: a register write; the device host: a command word) is not modelled;
 5 a VDP copy DMA (not modelled by the device); 6 one byte of the sub image corrupted before the release; 7 the image copied into
 PRG-RAM bank 1 (the wrong mapping) - both stop at the epoch before the sub retires anything.
 usage: sega_cd_bios_hw_fixture.py build --out DIR   ->   DIR/bios.bin and DIR/expected.json (stdout: the expected JSON)
@@ -167,6 +168,7 @@ def main_program(sub_len, layout):
     m.clr("w", F.absl(FRAMES))
     negative(m, 4, lambda n: vdp_reg(n, 0, 0x14))         # IE1: the H-interrupt
     negative(m, 8, lambda n: vdp_cmd(n, 0x80148004))      # IE1 set and cleared again by one long write (two register writes)
+    negative(m, 9, lambda n: n.move("w", F.imm(0xA014), F.absl(VDP_CTRL)))  # 101x: a register write for GPGX, a command for the host
     vdp_reg(m, 1, 0x34)                                   # IE0
     m.move_sr(0x2000)
     m.label("frames")
@@ -272,7 +274,8 @@ def expected(rom, sub, layout):
         "sub_comstat0": 0xC0DE, "thunk": THUNK,
         "negatives": {
             "main:d7=1": ["open_bus_read", 0], "main:d7=2": ["main_device_unsupported", 0], "main:d7=3": ["vdp_dma_unsupported", 0],
-            "main:d7=4": ["interrupt_source_unsupported", 0], "main:d7=8": ["interrupt_source_unsupported", 0], "main:d7=5": ["vdp_access_unsupported", 0],
+            "main:d7=4": ["interrupt_source_unsupported", 0], "main:d7=8": ["interrupt_source_unsupported", 0],
+            "main:d7=9": ["vdp_access_unsupported", 0], "main:d7=5": ["vdp_access_unsupported", 0],
             "main:d7=6": ["materialized_image_unverified", 1], "main:d7=7": ["materialized_image_unverified", 1],
         },
     }
