@@ -3,9 +3,9 @@
  * (optionally in deadline slices: the result must not depend on them), and writes a JSON report and, on request, the VDP frame.
  *
  *   program --disc-dir DIR --instruction-budget N [--report FILE] [--frame FILE.ppm] [--slice-ticks T | --slice-seed S]
- *           [--set main|sub:dN|aN=VALUE]...
+ *           [--set main|sub:dN|aN=VALUE]... [--until-tick T]
  *
- * Exit status: 0 idle (success), 10 typed stop, 11 budget exhausted, 20 disc refused at start-up, 2 usage. */
+ * Exit status: 0 idle (success), 10 typed stop, 11 budget exhausted or deadline (read `result`), 20 disc refused at start-up, 2 usage. */
 #include "scd_runtime.h"
 
 #include <errno.h>
@@ -149,8 +149,13 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
   fprintf(out, "]},\"frame_sha256\":%s%s%s,\"instructions\":%llu", frame_sha ? "\"" : "", frame_sha ? frame_sha : "null",
           frame_sha ? "\"" : "", (unsigned long long)(m->cpu[0].retired + m->cpu[1].retired));
   if (authentic != NULL) /* SEG-064-T002: BIOS-image profile (absent for synthetic programs: their reports are unchanged) */
-    fprintf(out, ",\"bios_profile\":{\"epochs\":%u,\"epoch_image\":%d,\"epoch_tick\":%llu,\"sub_pristine\":%u}", m->epochs,
-            m->epoch_image, (unsigned long long)m->epoch_tick, m->sub_pristine);
+    fprintf(out, ",\"bios_profile\":{\"epochs\":%u,\"epoch_image\":%d,\"epoch_tick\":%llu,\"sub_pristine\":%u,\"vblank_onsets\":%llu}", m->epochs,
+            m->epoch_image, (unsigned long long)m->epoch_tick, m->sub_pristine, (unsigned long long)m->vdp_frames);
+  if (authentic != NULL) { /* SEG-064-T005: per-level interrupt acceptances of the main processor (the sub's are reported above) */
+    fprintf(out, ",\"main_interrupts_taken\":[");
+    for (i = 0; i < 8U; ++i) fprintf(out, "%s%llu", i ? "," : "", (unsigned long long)m->main_interrupts_taken[i]);
+    fprintf(out, "]");
+  }
   if (m->overlays != NULL) { /* SEG-063: overlay activation (absent for programs without modules: their reports are unchanged) */
     const ScdOverlayProgram *o = m->overlays;
     unsigned g, c;
@@ -309,7 +314,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   const char *sets[16];
   const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *event_path = NULL;
   unsigned set_count = 0, i;
-  uint64_t budget = 0U, slice_ticks = 0U, slice_seed = 0U;
+  uint64_t budget = 0U, slice_ticks = 0U, slice_seed = 0U, until_tick = UINT64_MAX;
   int have_seed = 0;
   ScdRunResult result;
   char frame_sha[65];
@@ -330,7 +335,9 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
       if (!scd_parse_u64(value, &slice_seed)) return 2;
       have_seed = 1;
     } else if (strcmp(flag, "--set") == 0 && set_count < 16U) sets[set_count++] = value;
-    else if (strcmp(flag, "--dump-dir") == 0) dump_dir = value;           /* SEG-064-T004 diagnostics (local only) */
+    else if (strcmp(flag, "--until-tick") == 0) { /* SEG-064-T005: end the run at a machine-time instant (result `deadline`) */
+      if (!scd_parse_u64(value, &until_tick) || until_tick == 0U) return 2;
+    } else if (strcmp(flag, "--dump-dir") == 0) dump_dir = value;           /* SEG-064-T004 diagnostics (local only) */
     else if (strcmp(flag, "--coverage") == 0) coverage_path = value;
     else if (strcmp(flag, "--access-trace") == 0) trace_path = value;
     else if (strcmp(flag, "--event-log") == 0) event_path = value;
@@ -375,7 +382,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   for (i = 0; i < set_count; ++i)
     if (!scd_apply_set(&machine, sets[i])) return 2;
   if (slice_ticks == 0U && !have_seed) {
-    result = scd_machine_run(&machine, UINT64_MAX);
+    result = scd_machine_run(&machine, until_tick);
   } else {
     uint64_t deadline = 0U, state = slice_seed * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
     do {
@@ -386,8 +393,9 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
         step += 1U;
       }
       deadline = deadline > UINT64_MAX - step ? UINT64_MAX : deadline + step;
+      if (deadline > until_tick) deadline = until_tick;
       result = scd_machine_run(&machine, deadline);
-    } while (result == SCD_RUN_DEADLINE);
+    } while (result == SCD_RUN_DEADLINE && deadline < until_tick);
   }
   {
     const GenesisRuntime *host = (const GenesisRuntime *)machine.vdp_host;

@@ -15,15 +15,37 @@ typedef struct ScdCoverageEntry {
 
 #define SCD_COVERAGE_SLOTS (1U << 21)
 
+/* SEG-064-T005: the distinct control-flow edges (a processor's consecutive instruction starts) - the same relation the private
+ * reference records - so the BIOS-service call/return classes of an interval can be compared (written to "<coverage path>.edges"). */
+#define SCD_EDGE_SLOTS (1U << 22)
+static uint64_t *scd_edges;
+static uint32_t scd_edge_count, scd_edge_last[2] = {UINT32_MAX, UINT32_MAX};
+
 int scd_coverage_enable(ScdMachine *m) {
   m->coverage = calloc(SCD_COVERAGE_SLOTS, sizeof(ScdCoverageEntry));
-  return m->coverage == NULL;
+  scd_edges = calloc(SCD_EDGE_SLOTS, sizeof *scd_edges);
+  scd_edge_count = 0U;
+  scd_edge_last[0] = scd_edge_last[1] = UINT32_MAX;
+  return m->coverage == NULL || scd_edges == NULL;
 }
 
 void scd_coverage_note(ScdMachine *m, uint32_t cpu, uint32_t pc) {
   ScdCoverageEntry *table = (ScdCoverageEntry *)m->coverage;
   const uint32_t key = ((cpu << 24) | (pc & UINT32_C(0x00FFFFFF))) + 1U;
   uint32_t slot = (key * UINT32_C(0x9E3779B1)) >> 11, probes;
+  if (scd_edges != NULL) {
+    const uint32_t to = pc & UINT32_C(0x00FFFFFF);
+    if (scd_edge_last[cpu] != UINT32_MAX && scd_edge_count < SCD_EDGE_SLOTS / 2U) {
+      const uint64_t edge = ((uint64_t)(cpu + 1U) << 56) | ((uint64_t)scd_edge_last[cpu] << 28) | to;
+      uint32_t at = (uint32_t)((edge * UINT64_C(0x9E3779B97F4A7C15)) >> 42) & (SCD_EDGE_SLOTS - 1U);
+      while (scd_edges[at] != 0U && scd_edges[at] != edge) at = (at + 1U) & (SCD_EDGE_SLOTS - 1U);
+      if (scd_edges[at] == 0U) {
+        scd_edges[at] = edge;
+        ++scd_edge_count;
+      }
+    }
+    scd_edge_last[cpu] = to;
+  }
   for (probes = 0U; probes < SCD_COVERAGE_SLOTS; ++probes) { /* bounded: a full table drops the note (diagnostic only) */
     ScdCoverageEntry *e = &table[slot & (SCD_COVERAGE_SLOTS - 1U)];
     if (e->key == key) {
@@ -66,12 +88,26 @@ int scd_coverage_write(const ScdMachine *m, const char *path) {
     fprintf(f, "%u %06X %u %llu\n", (list[i].key - 1U) >> 24, (list[i].key - 1U) & UINT32_C(0x00FFFFFF), list[i].count,
             (unsigned long long)list[i].first);
   free(list);
-  return fclose(f) != 0;
+  if (fclose(f) != 0) return 1;
+  if (scd_edges != NULL) {
+    char edge_path[1024];
+    uint32_t at;
+    snprintf(edge_path, sizeof edge_path, "%s.edges", path);
+    f = fopen(edge_path, "w");
+    if (f == NULL) return 1;
+    for (at = 0U; at < SCD_EDGE_SLOTS; ++at)
+      if (scd_edges[at] != 0U)
+        fprintf(f, "%u %06X %06X\n", (unsigned)(scd_edges[at] >> 56) - 1U, (unsigned)(scd_edges[at] >> 28) & 0xFFFFFFU, (unsigned)(scd_edges[at] & 0xFFFFFFFU));
+    return fclose(f) != 0;
+  }
+  return 0;
 }
 
 void scd_coverage_release(ScdMachine *m) {
   free(m->coverage);
   m->coverage = NULL;
+  free(scd_edges);
+  scd_edges = NULL;
 }
 
 /* The sub Gate Array access trace: "<R|W><width> <offset hex> <value hex>" with consecutive identical accesses coded as " xN". */
