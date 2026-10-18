@@ -61,6 +61,13 @@ with tempfile.TemporaryDirectory() as tmp:
           admitted[1]["sha256"] == expected["sub_image_sha256"], "the epoch image equals the fixture's sub image")
     check(admitted[2:] == [None] and summary["rounds"] == 3, "two admissions, then the candidate (%s)" % admitted)
     exe = pathlib.Path(summary["program"])
+    # SEG-064-T004: an operand template (the level-6 thunk) is a possible application entry: its opcode-guarded function must also return in
+    # verify-only mode before it reads its operand, retires or moves the pc
+    import re
+    source = "".join(path.read_text() for path in sorted((tmp / "work" / "src").glob("*.c")))
+    templates = re.findall(r"static int scd_p\d_t_[0-9A-F]+\(ScdMachine \*m\) \{.*?\n\}\n", source, re.S)
+    check(len(templates) >= 1 and all("if (m->verify_only) return 0;" in t and t.index("scd_code_guard") < t.index("verify_only") < t.index("scd_read(")
+                                       for t in templates), "every operand template verifies its opcode guard and returns in verify-only mode before its operand read (%d)" % len(templates))
 
     code, report = run_program(exe, disc, bios)
     check(code == 0 and report.get("result") == "idle", "positive run idle (%s)" % report.get("stop"))

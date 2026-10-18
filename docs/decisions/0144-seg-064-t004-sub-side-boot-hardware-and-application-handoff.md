@@ -58,7 +58,10 @@ reached them (executed evidence first), batching each family.
    an operand template's opcode guard) - and returns before the instruction body. Nothing is decoded or compiled at run time and
    nothing retires, is written or changes (the processor's pc and prefetch are restored). A pc with no compiled entry is the typed
    stop `entry_not_compiled`, live bytes that match no admitted variant `code_bytes_mismatch`; only after a successful verification
-   does the run end with `application_handoff`, before the instruction runs. The verification path is emitted only for programs that
+   does the run end with `application_handoff`, before the instruction runs. Two precisions: for an operand template only the opcode word
+   is verified (its operand and destination are read live at execution, so a bad target is a later `entry_not_compiled`); and a guard
+   on a Word RAM entry first synchronizes the CDC transfer and the graphics operation to the current instant, exactly as normal
+   execution would, so the device state is that of the observation at that instant (the fixtures use work-RAM entries). The verification path is emitted only for programs that
    declare an entry (other programs' generated code is unchanged). The entry is a build input in the program identity, never a runtime
    constant, and 0 disables it. The reference defines the application IP as following the disc's security block (contract section 13);
    for the authentic US disc the entry is the boot area's base plus the $584-byte security block. *Correction recorded:* the first
