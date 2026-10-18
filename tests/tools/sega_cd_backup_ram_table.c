@@ -24,7 +24,8 @@ static void fresh(int present) {
   unsigned i;
   memset(m, 0, sizeof *m);
   m->cpu[SCD_SUB].cycle_ticks = SCD_SUB_CYCLE_TICKS;
-  for (i = 0; i < SCD_BACKUP_RAM_BYTES; ++i) image[i] = (uint8_t)(i * 7U + 3U);
+  /* not periodic in 256 or 4096 cells: a wrong cell mask (A1-A12 only, or A1-A8) reads a different value */
+  for (i = 0; i < SCD_BACKUP_RAM_BYTES; ++i) image[i] = (uint8_t)((i * 7U + 3U) ^ ((i >> 8) * 0x1DU));
   if (present && scd_backup_ram_install(m, image, sizeof image) != 0) row(0, "install");
 }
 
@@ -75,6 +76,7 @@ int main(void) {
   /* present: reads */
   fresh(1);
   row(bus_read(0xFE0001U, 1U, &v) == 0 && v == image[0], "odd byte $FE0001 reads cell 0");
+  row(image[0x1FFF] != image[0x0FFF] && image[0x1000] != image[0] && image[0x100] != image[0], "the fixture distinguishes cells $1FFF/$0FFF, $1000/0, $100/0");
   row(bus_read(0xFE0003U, 1U, &v) == 0 && v == image[1], "odd byte $FE0003 reads cell 1");
   row(bus_read(0xFE3FFFU, 1U, &v) == 0 && v == image[0x1FFF], "odd byte $FE3FFF reads the last cell");
   row(bus_read(0xFE4001U, 1U, &v) == 0 && v == image[0], "$FE4001 mirrors cell 0 (16 KiB repetition)");

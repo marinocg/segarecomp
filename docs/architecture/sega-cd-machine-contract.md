@@ -361,8 +361,11 @@ stops with `bios_absent`. The BIOS-image profile wires the VDP's level 6 (sectio
   GPGX's slot model (`vdp_dma_update`): per line 16 (H32) / 18 (H40) access slots in the active display and 166 / 204 while blanked
   (vertical blank or display disabled), a VRAM word taking two slots, a CRAM/VSRAM word one with 161 / 198 on a blanked line; the
   frame starts at the vertical-blank onset, its blank window lasts 37 lines, an active-display transfer runs to the end of its line and
-  resumes at each line start; the arming instruction completes (its own cycles) after the transfer; afterwards the length registers
-  are 0 and #21-#22 have advanced by the length (16-bit). The data itself is not spread over the lines (a frame rendered while a
+  resumes at each line start; the destination class is GPGX's (a code with CD2 or CD1 set moves a word per slot, otherwise a word per
+  two slots). The arming instruction's own cycles follow the transfer when it ends inside its first window; a transfer spanning several
+  windows re-anchors the processor at its end (GPGX sets the 68K clock to the end again at the next line start), so the next
+  instruction starts exactly there. Afterwards the length registers are 0 and #21-#22 have advanced by the length (16-bit); the low
+  word of a long control-port write whose high word started the transfer reaches the VDP after that update (GPGX `cached_write`). The data itself is not spread over the lines (a frame rendered while a
   transfer is still in progress would differ: reported by the frame capture as `vram_display_changes`, 0 in every compared frame).
   The vertical-blank onset is the Genesis runtime's NTSC schedule from machine time 0.
 

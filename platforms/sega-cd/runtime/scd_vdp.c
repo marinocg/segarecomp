@@ -62,6 +62,7 @@ int scd_vdp_init(ScdMachine *m) {
   m->vdp_host = h;
   m->vdp_onset = SCD_ONSET_TICKS;
   if (h == NULL) return 1;
+  h->capture_line = -1; /* SEG-065-T003: no line sampling until a requested frame begins */
   if (m->bios != NULL) {
     h->regions[0].begin = 0U;
     h->regions[0].end = m->bios_size;
@@ -108,7 +109,8 @@ static GenesisAccessWidth scd_genesis_width(uint32_t width) {
  * blanked line then loses its refresh slots (161 / 198). The frame starts at the vertical-blank onset; the blank window lasts until
  * the start of the frame's last line (37 lines); in the active part a transfer runs to the end of the current line and resumes at
  * each line start. Integer arithmetic in master clocks, exactly as GPGX. */
-static uint64_t scd_vdp_dma_end(const ScdMachine *m, const GenesisRuntime *host, uint64_t start, uint32_t words, int to_vram) {
+static uint64_t scd_vdp_dma_end(const ScdMachine *m, const GenesisRuntime *host, uint64_t start, uint32_t words, int to_vram,
+                                uint32_t *windows) {
   static const uint32_t timing[2][2] = {{16U, 18U}, {166U, 204U}};
   const uint32_t line = GENESIS_NTSC_MASTER_TICKS_PER_LINE, frame_lines = GENESIS_NTSC_LINES_PER_FRAME;
   const uint32_t blank_lines = GENESIS_NTSC_LINES_PER_FRAME - GENESIS_NTSC_VBLANK_ONSET_LINE - 1U; /* 37 */
@@ -117,6 +119,7 @@ static uint64_t scd_vdp_dma_end(const ScdMachine *m, const GenesisRuntime *host,
   const uint64_t frame_start = m->vdp_onset - SCD_FRAME_TICKS; /* the last onset: GPGX's frame origin */
   uint64_t cyc = (start - frame_start) / SCD_MASTER_TICK_TICKS, frames = 0U;
   uint32_t remaining = words;
+  *windows = 0U;
   for (;;) {
     const uint32_t l = (uint32_t)(cyc / line);
     const int vblank = l < blank_lines;
@@ -127,6 +130,7 @@ static uint64_t scd_vdp_dma_end(const ScdMachine *m, const GenesisRuntime *host,
     else if (!to_vram && rate == 204U) rate = 198U;
     window_end = vblank ? (uint64_t)blank_lines * line : (uint64_t)(l + 1U) * line;
     cap = ((window_end - cyc) * rate) / line;
+    *windows += 1U;
     if (remaining < cap) {
       cyc += ((uint64_t)remaining * line) / rate;
       break;
@@ -165,8 +169,11 @@ static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t fir
   scd_log(m, 0x43U, source, length);
   { /* SEG-065-T002: the main processor waits for the transfer (destination code CD3-CD0: 0001 VRAM, 0011 CRAM, 0101 VSRAM) */
     const uint32_t code = (((uint32_t)first >> 14) & 3U) | (((uint32_t)second >> 2) & 0x3CU);
-    const uint64_t end = scd_vdp_dma_end(m, host, m->now, length, (code & 0x0FU) == 0x01U);
+    uint32_t windows = 0U;
+    /* GPGX's class: a code with CD2 or CD1 set (CRAM, VSRAM) transfers a word per slot, otherwise (VRAM) a word per two slots */
+    const uint64_t end = scd_vdp_dma_end(m, host, m->now, length, (code & 0x06U) == 0U, &windows);
     m->main_dma_until = end;
+    m->main_dma_multi = windows > 1U ? 1U : 0U;
     ((ScdVdpHost *)m->vdp_host)->dma_armed = 1U;
     m->vdp_dma_count += 1U;
     m->vdp_dma_stall_ticks += end - m->now;
@@ -198,6 +205,20 @@ static int scd_vdp_sets_ie1(int awaiting, uint32_t width, uint32_t value) {
   return 0;
 }
 
+/* SEG-065-T002: after a 68K->VDP DMA the length registers are 0 and the source registers #21-#22 have advanced by the length (16-bit,
+ * register #23 unchanged) - GPGX vdp_dma_update "DMA source address registers are incremented during DMA". */
+static void scd_vdp_dma_registers_done(GenesisRuntime *host) {
+  uint16_t *r = host->devices.vdp.registers;
+  uint32_t end;
+  if (!((ScdVdpHost *)host)->dma_armed) return;
+  end = ((uint32_t)(r[21] & 0xFFU) | ((uint32_t)(r[22] & 0xFFU) << 8)) + ((uint32_t)(r[19] & 0xFFU) | ((uint32_t)(r[20] & 0xFFU) << 8));
+  r[21] = (uint16_t)(end & 0xFFU);
+  r[22] = (uint16_t)((end >> 8) & 0xFFU);
+  r[19] = 0U;
+  r[20] = 0U;
+  ((ScdVdpHost *)host)->dma_armed = 0U;
+}
+
 int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
   GenesisRuntime *host = scd_host(m);
   GenesisRuntimeStop stop = {0};
@@ -224,21 +245,22 @@ int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write
              ((width == 2U && scd_vdp_enables_dma(*value)) ||
               (width == 4U && (scd_vdp_enables_dma(*value >> 16) || scd_vdp_enables_dma(*value & 0xFFFFU)))))
     return scd_fail(m, SCD_MAIN, SCD_STOP_VDP_DMA_UNSUPPORTED, pc, *value);
+  if (((ScdVdpHost *)host)->dma_armed && width == 4U && host->devices.vdp.control_port_awaiting_second_word) {
+    /* SEG-065-T002: the high word of a long write completed a command that started a 68K->VDP DMA; the processor is frozen, so the
+     * low word reaches the VDP after the transfer and its register update (GPGX caches it: `cached_write`). */
+    uint32_t high = *value >> 16, low = *value & 0xFFFFU;
+    if (genesis_route_access(host, address, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &high, &stop) != GENESIS_ACCESS_OK)
+      return scd_fail_access(m, SCD_MAIN, SCD_STOP_VDP_ACCESS_UNSUPPORTED, pc, address, width, is_write);
+    scd_vdp_dma_registers_done(host);
+    if (genesis_route_access(host, address, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &low, &stop) != GENESIS_ACCESS_OK)
+      return scd_fail_access(m, SCD_MAIN, SCD_STOP_VDP_ACCESS_UNSUPPORTED, pc, address, width, is_write);
+    return 0;
+  }
   if (genesis_route_access(host, address, scd_genesis_width(width), is_write ? GENESIS_ACCESS_WRITE : GENESIS_ACCESS_READ, &routed,
                            &stop) != GENESIS_ACCESS_OK)
     return scd_fail_access(m, SCD_MAIN, SCD_STOP_VDP_ACCESS_UNSUPPORTED, pc, address, width, is_write); /* SEG-064-T004: with its width and direction */
   if (!is_write) *value = routed;
-  if (((ScdVdpHost *)host)->dma_armed) {
-    /* SEG-065-T002: after a 68K->VDP DMA the length registers are 0 and the source registers #21-#22 have advanced by the length
-     * (16-bit, register #23 unchanged) - GPGX vdp_dma_update "DMA source address registers are incremented during DMA" */
-    uint16_t *r = host->devices.vdp.registers;
-    const uint32_t end = ((uint32_t)(r[21] & 0xFFU) | ((uint32_t)(r[22] & 0xFFU) << 8)) + ((uint32_t)(r[19] & 0xFFU) | ((uint32_t)(r[20] & 0xFFU) << 8));
-    r[21] = (uint16_t)(end & 0xFFU);
-    r[22] = (uint16_t)((end >> 8) & 0xFFU);
-    r[19] = 0U;
-    r[20] = 0U;
-    ((ScdVdpHost *)host)->dma_armed = 0U;
-  }
+  scd_vdp_dma_registers_done(host);
   if (m->bios != NULL && !is_write) scd_log(m, 0x42U, address, routed); /* the observed value is part of the device history */
   return 0;
 }
@@ -472,6 +494,12 @@ void scd_vdp_capture_report(const ScdMachine *m, FILE *out) {
             c->vram_display_changes, c->status == 1U ? "\"" : "", c->status == 1U ? c->sha256 : "null", c->status == 1U ? "\"" : "");
   }
   fprintf(out, "]");
+}
+
+/* SEG-065-T003: 1 when the event due at `until` is a capture line sample (an observer instant, not a device event). */
+int scd_vdp_capture_line_due(const ScdMachine *m, uint64_t until) {
+  const ScdVdpHost *h = (const ScdVdpHost *)m->vdp_host;
+  return m->bios != NULL && h != NULL && h->capture_line >= 0 && h->capture_line_tick <= until && h->capture_line_tick < m->vdp_onset;
 }
 
 uint64_t scd_vdp_next_event(const ScdMachine *m) {

@@ -432,6 +432,7 @@ typedef struct ScdMachine {
   /* SEG-065-T002 (ADR 0147, BIOS-image profile): a 68K->VDP DMA freezes the main processor until the transfer ends (GPGX
    * vdp_dma_update: m68k.cycles = dma_endCycles); the instruction that armed it then completes from that tick. */
   uint64_t main_dma_until;                /* 0, or the tick at which the armed DMA ends */
+  uint8_t main_dma_multi;                 /* the transfer spans more than one slot window (GPGX re-anchors at its end) */
   uint64_t vdp_dma_count, vdp_dma_stall_ticks;
   uint8_t backup_ram_present;
   uint8_t backup_ram[SCD_BACKUP_RAM_BYTES];
@@ -513,6 +514,7 @@ int scd_main_device_access(ScdMachine *m, uint32_t address, uint32_t width, int 
  * profile, at most 8) into `dir`: the per-line VDP state is sampled at each active line's start and rendered by the existing renderer. */
 int scd_vdp_capture_request(ScdMachine *m, uint64_t onset, const char *dir);
 void scd_vdp_capture_report(const ScdMachine *m, FILE *out);
+int scd_vdp_capture_line_due(const ScdMachine *m, uint64_t until);
 uint64_t scd_vdp_next_event(const ScdMachine *m);
 void scd_vdp_event(ScdMachine *m);
 uint32_t scd_main_request_level(const ScdMachine *m);

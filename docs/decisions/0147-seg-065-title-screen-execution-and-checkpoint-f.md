@@ -46,10 +46,12 @@ backup RAM, and the frames completed at application entry + 420, + 480 (primary)
 5. **Frame capture, reusing the renderer.** `--capture-onset N` (up to 8) with `--capture-dir` samples the VDP register file, CRAM
    and VSRAM at the start of every active line of the frame whose display ends at vertical-blank onset N, renders it with the
    existing `genesis_vdp_produce_frame_raster`, and writes the ADR 0146 canonical frame plus VDP, CPU and RAM state (local
-   diagnostics). It is an observer only: line instants are extra device-event boundaries, no guest state changes, and the result is
-   identical under deadline partitions. Shadow/highlight and the palette-select mode are refused (`vdp_state_unsupported`) because
+   diagnostics). It is an observer only: a line instant at which no device event is due brings nothing up to date (the graphics ASIC
+   and CDC transfers are synced lazily, so an extra sync point would otherwise make the run depend on the capture set), no guest state
+   changes, and the result is identical under deadline partitions and capture sets. Shadow/highlight and the palette-select mode are refused (`vdp_state_unsupported`) because
    the renderer does not model them; neither occurs in the compared frames. No second video pipeline exists.
-6. **Frame alignment.** GPGX's frame begins at the vertical-blank onset; the N-th onset after the application entry closes the
+6. **Frame alignment.** (Resolution: the title holds some frames for two or three video frames, so an exact match fixes the offset
+   within [0, +1] frames; the pre-registered rule - equality at the primary frame, time-aligned - is met exactly.) GPGX's frame begins at the vertical-blank onset; the N-th onset after the application entry closes the
    display of the reference frame "entry + N" (the entry lies in the active display on both sides: line 112 and line 110). The
    compared onsets are therefore the generated program's (onsets at the entry) + 420 / 480 / 540.
 7. **The Z80 is still not executed.** Nothing in the run reads the Z80 area after the Z80 became runnable (that read is a typed stop

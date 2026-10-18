@@ -325,9 +325,18 @@ int scd_retire(ScdMachine *m, uint32_t cpu, uint32_t cycles) {
   ScdCpu *c = &m->cpu[cpu];
   c->cycles += cycles;
   c->retired += 1U;
-  if (cpu == SCD_MAIN && m->main_dma_until != 0U) { /* SEG-065-T002: frozen by the DMA it armed, then its own cycles */
+  if (cpu == SCD_MAIN && m->main_dma_until != 0U) {
+    /* SEG-065-T002: frozen by the DMA it armed. GPGX sets the 68K's clock to the end of the transfer's first slot window during the
+     * instruction and adds the instruction's cycles after it; a transfer that continues into later windows sets the clock to its
+     * end again at the next line start, so the instruction's own cycles are absorbed: the next instruction starts at the DMA end. */
+    const int multi = m->main_dma_multi != 0U;
     if (m->main_dma_until > c->next) c->next = m->main_dma_until;
     m->main_dma_until = 0U;
+    m->main_dma_multi = 0U;
+    if (multi) {
+      scd_trace(c);
+      return 0;
+    }
   }
   c->next += (uint64_t)cycles * c->cycle_ticks;
   scd_trace(c);

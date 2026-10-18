@@ -141,6 +141,43 @@ int main(void) {
         "the source advance wraps at 16 bits: $FFF0 + $20 -> #21/#22 = $0010, #23 unchanged ($10)");
   }
 
+  /* a transfer spanning several slot windows: GPGX re-anchors the 68K at the transfer's end at the next line start, so the arming
+   * instruction's own cycles are absorbed (the next instruction starts exactly at the end) */
+  fresh(0x54U, 0x00U);
+  w = dma_at(48U * LINE, 100U, 0x40000080U);
+  m->cpu[SCD_MAIN].next = m->now;
+  scd_retire(m, SCD_MAIN, 20U);
+  row(w == 42750U && m->cpu[SCD_MAIN].next == m->now + 42750U * MASTER && m->main_dma_until == 0U && m->main_dma_multi == 0U,
+      "retire after a multi-window transfer (13 windows): the next instruction starts exactly at the DMA end (20 cycles absorbed)");
+  scd_retire(m, SCD_MAIN, 4U);
+  row(m->cpu[SCD_MAIN].next == m->now + 42750U * MASTER + 4U * SCD_MAIN_CYCLE_TICKS, "the following instruction runs normally");
+
+  /* H40 is register #12 bit 0 (GPGX `reg[12] & 1`); H40 CRAM while blanked loses its refresh slots (198) */
+  fresh(0x54U, 0x80U); /* RS0 only: the slot rate follows bit 0 = H32 */
+  w = dma_at(0U, 100U, 0x40000080U);
+  row(w == 4120U, "register #12 = $80 (bit 0 clear): H32 slot rate (4120)");
+  fresh(0x54U, 0x01U);
+  w = dma_at(0U, 64U, 0xC0000080U);
+  snprintf(label, sizeof label, "H40 CRAM 64 words at the onset: 198 slots -> 64 * 3420 / 198 = 1105 (got %llu)", (unsigned long long)w);
+  row(w == 1105U, label);
+
+  /* a long control-port write whose high word starts the DMA: its low word reaches the VDP after the transfer and its register
+   * update (GPGX `cached_write`) - here a register #19 write */
+  fresh(0x54U, 0x00U);
+  vdp(2U, 0x9364U);
+  vdp(2U, 0x9400U);
+  vdp(2U, 0x9500U);
+  vdp(2U, 0x9680U);
+  vdp(2U, 0x977FU);
+  m->now = m->vdp_onset - FRAME;
+  vdp(2U, 0x4000U);
+  vdp(4U, 0x00809312U);
+  {
+    const uint16_t *r = ((const GenesisRuntime *)m->vdp_host)->devices.vdp.registers;
+    row(m->vdp_dma_count == 1U && r[19] == 0x12U && r[20] == 0U && r[21] == 0x64U && r[22] == 0x80U,
+        "long write: DMA of 100 words, then the low word's register write: #19 = $12, #21/#22 = $8064");
+  }
+
   /* a VRAM fill (register #23 bit 7 set, bit 6 clear) does not hold the processor */
   fresh(0x54U, 0x00U);
   vdp(2U, 0x9310U);
