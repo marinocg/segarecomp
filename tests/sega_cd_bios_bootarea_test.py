@@ -50,15 +50,21 @@ def build(tmp, name, disc, bios, extra):
     return json.loads(out.stdout) if out.stdout.strip() else {"ok": False}
 
 
+EMIT_OUT = None  # a temporary output path (set in main); the emitter always writes its program
+
+
 def emit(disc, bios, *extra):
-    out = subprocess.run([SEGARECOMP, "sega-cd", "emit", "--cue", str(disc / "disc.cue"), "--bios", str(bios), "--out", "/dev/null", *extra],
+    out = subprocess.run([SEGARECOMP, "sega-cd", "emit", "--cue", str(disc / "disc.cue"), "--bios", str(bios), "--out", str(EMIT_OUT), *extra],
                          capture_output=True, text=True, timeout=300)
     return out.returncode, (json.loads(out.stdout) if out.stdout.strip() else {})
 
 
 def main():
+    global EMIT_OUT
     with tempfile.TemporaryDirectory(prefix="scd-bootarea-") as tmp:
         tmp = pathlib.Path(tmp)
+        EMIT_OUT = tmp / "emit" / "program.c"
+        EMIT_OUT.parent.mkdir()
         disc = tmp / "disc"
         described = common.build_disc(disc, "bootarea")
         track = (disc / "track01.bin").read_bytes()
