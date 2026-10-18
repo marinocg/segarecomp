@@ -56,7 +56,7 @@ together, every BIOS-derived instruction a compiled, byte-verified entry, and do
    runnable, stops a main read of the Z80 area (`main_device_unsupported`) instead of answering. To establish that nothing the main or
    sub processor can observe depends on the running Z80 in the interval, the reference was instrumented (locally) to count the Z80's bus
    activity: between the handoff and the end of the interval the Z80 made accesses only to its own RAM and to the YM2612 and **none to
-   the 68000 bus window, the bank register or the VDP/PSG window** (the reference main processor in the interval writes 6,871 bytes of Z80 RAM, makes 9 BUSREQ/RESET writes and 3 BUSACK reads, and never reads Z80 RAM or the YM2612; the Z80 therefore receives only main's writes, returns nothing the 68000 can read, takes no 68000 bus cycles and starts no DMA or interrupt on either side). The Z80 and the sound are therefore not part of the claim, and this independence is established for this interval only (not in general); a later
+   the 68000 bus window, the bank register or the VDP/PSG window** (the reference main processor in the interval writes 6,871 bytes of Z80 RAM, makes 9 BUSREQ/RESET writes and 3 BUSACK reads, and never reads Z80 RAM or the YM2612; the Z80 therefore receives only main's writes, returns nothing the 68000 can read, takes no 68000 bus cycles and starts no DMA or interrupt on either side; real-hardware 68000 wait states against a running Z80 are modelled by neither side). The Z80 and the sound are therefore not part of the claim, and this independence is established for this interval only (not in general); a later
    interval in which the application talks to the driver needs a Z80 integration (a separate, generated-native design), not a shim.
 
 ## Result (SEG-064-T005)
@@ -91,10 +91,10 @@ retired in it; `vblank_onsets` 1,197 at the entry, 1,257 at the end).
 600 frames - the application owns the main processor (its vertical-blank vector is a work-RAM thunk to application code, 59 executions in
 the interval). The six work-RAM-to-BIOS control-flow edges seen over the whole run were all executed before the handoff.
 Sub (control-flow audit, corrected in the final verification; the first report counted interrupt entries and every transfer as calls):
-strict `JSR`/`BSR` transfers from SP or module code into the BIOS image are 10 call sites with 2 BIOS entry points; 7 sites and both
+strict `JSR`/`BSR` transfers from SP or module code (the 10 call sites that have a recorded site-to-target control-flow edge) go to 2 slots, which are 2 of the 6 executed jump-table thunks below (so the two counts overlap: the 150 call executions are part of the 370 thunk executions); 7 sites and both
 entry points execute in the interval (150 call executions), and every one of the 10 sites has a recorded `RTS` return edge to its fall-through
-address (instruction bytes read from the admitted images, not from sampled memory). Separately, the mutable sub jump table (10
-`JMP abs.L` thunks, operand templates) is executed through the BIOS interrupt dispatch: 6 thunks, 370 executions in the interval (3 of
+address (instruction bytes read from the admitted images, not from sampled memory). The mutable sub jump table (10
+`JMP abs.L` thunks, operand templates) is executed in the interval through those calls and the BIOS interrupt dispatch: 6 thunks, 370 executions (3 of
 the 6 are interrupt-vector thunks), with 3,837 SP, 80,712 module and 892,334 BIOS-epoch instruction executions.
 
 **Coverage metric audit.** A coverage note is made when the dispatch is entered for an instruction start (after the budget check and
@@ -128,6 +128,7 @@ ordinary missing compiled executable authority of the same family as decision 3,
   dispatch, a RAM-resident routine admitted as a disc extent, a BIOS service reached through a mutable work-RAM thunk and its return, the
   typed failures (uncompiled thunk target, corrupted live byte, missing/wrong extent), `--until-tick` and the deterministic partitions
   (`sega_cd_bios_posthandoff_test`).
+- *Pass basis*: the pre-registered 60-frame interval with no typed stop, identical executed-start sets, the classified differences at the 11 pre-registered time-aligned checkpoints and the four reference-trace semantic events; the quarter-frame "70,794th host word" equality is post-hoc corroboration only.
 - *Authentic BIOS boot claim* (local only): the authentic main and sub BIOS run from reset to the application entry (ADR 0144, repeated and
   unchanged in this task), and then, together with the authentic application, through a 60-frame interval with every BIOS-derived
   instruction start a compiled, byte-guard-verified entry of an admitted image, the executed sets and the register files at the semantic
