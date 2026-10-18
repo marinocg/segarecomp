@@ -88,7 +88,7 @@ prefetched instruction word, which the profile does not model: it is the typed s
 | `$220000-$23FFFF` | 1M-mode cell-image view | typed stop `wordram_cell_image_unsupported` | C (out of scope) |
 | `$240000-$3FFFFF` | mirrors of `$200000-$23FFFF` | as above | **G** (GPGX "mirrored up to $3FFFFF") |
 | `$A12000-$A120FF` | Gate Array, main side (section 5); A1-A5 decode, `$A12040-$A120FF` mirror `$A12000-$A1203F` | per register | V2 registers; mirror **G** (GPGX "mirrored up to $A120FF") |
-| `$C00000-$C00007` | VDP data/control ports | composed Genesis VDP device (ADR 0128); VDP DMA enable is a typed stop | V2 (Genesis map) |
+| `$C00000-$C00007` | VDP data/control ports | composed Genesis VDP device (ADR 0128); synthetic profile: VDP DMA enable is a typed stop; BIOS-image profile: section 12 | V2 (Genesis map) |
 | `$E00000-$FFFFFF` | 64 KiB work RAM, repeated every 64 KiB | linear | V2 (Genesis map) |
 | anything else | | typed stop `unmapped` (the BIOS-image profile maps more: section 16) | C |
 
@@ -355,9 +355,16 @@ stops with `bios_absent`. The BIOS-image profile wires the VDP's level 6 (sectio
   runtime performs (SEG-064-T004: observed as 20x-1600x differences in a handful of poll loops, with identical resulting state).
 - The CDD 75 Hz clock ticks at its exact instant; GPGX processes it at line boundaries (SEG-064-T004: the reference had processed one tick
   more at the same main instruction).
-- BIOS-image profile (SEG-064-T003): VDP DMA has no duration - a fill or 68K->VDP transfer completes at its arming write, so a guest
-  poll for DMA completion iterates once (the reference's fill takes time: observed as the only per-address execution-count difference
-  up to the sub release, ADR 0143). The vertical-blank onset is the Genesis runtime's NTSC schedule from machine time 0.
+- BIOS-image profile: a VDP fill has no duration (SEG-064-T003) - a guest poll for fill completion iterates once (the reference's fill
+  takes time: observed as the only per-address execution-count difference up to the sub release, ADR 0143). A 68K->VDP transfer
+  (SEG-065-T002, ADR 0147) writes its data at the arming write but **freezes the main processor** for the transfer's duration by
+  GPGX's slot model (`vdp_dma_update`): per line 16 (H32) / 18 (H40) access slots in the active display and 166 / 204 while blanked
+  (vertical blank or display disabled), a VRAM word taking two slots, a CRAM/VSRAM word one with 161 / 198 on a blanked line; the
+  frame starts at the vertical-blank onset, its blank window lasts 37 lines, an active-display transfer runs to the end of its line and
+  resumes at each line start; the arming instruction completes (its own cycles) after the transfer; afterwards the length registers
+  are 0 and #21-#22 have advanced by the length (16-bit). The data itself is not spread over the lines (a frame rendered while a
+  transfer is still in progress would differ: reported by the frame capture as `vram_display_changes`, 0 in every compared frame).
+  The vertical-blank onset is the Genesis runtime's NTSC schedule from machine time 0.
 
 ## 13. Unresolved items
 
@@ -378,7 +385,7 @@ Items marked **G** above are implemented as GPGX behaves; they stay here until h
 | open-bus read values | the prefetched instruction word; not modelled in the synthetic profile (typed stop `open_bus_read`); the BIOS-image profile uses GPGX's model where the prefetch position is exact (section 16), V1 (GPGX; hardware bus capacitance agrees for the cases used) | hardware test of open-bus reads (empty slot, BUSACK unused bits) | SEG-065 |
 | H-INT vector register `$A12006` (BIOS-image profile: the boot ROM's `$72` word) | GPGX writes the ROM copy's `$72` word; one source in reach | MAME `megacd.cpp` H-INT vector handling or a hardware test | SEG-064 |
 | VDP vertical-interrupt pending rule (G: pending at every onset, requested while IE0, cleared by the acknowledge) | GPGX `vint_pending`; the repository Genesis runtime raises it only while IE0 is set | hardware test (enable IE0 inside VBlank) | SEG-064 |
-| VDP DMA duration and the Word-RAM/PRG DMA source (BIOS-image profile: no duration; 2M Word RAM owned by main is read as plain memory since SEG-064-T004; 1M, sub-owned and PRG-window sources a typed stop) | GPGX models both (Word RAM transfers lag one word) | MiSTer logs / GPGX `vdp_dma_68k` comparison | SEG-064: the authentic boot path reaches the handoff with identical state without a duration; carried forward |
+| VDP DMA duration and the Word-RAM/PRG DMA source (BIOS-image profile: 68K->VDP transfers freeze main by GPGX's slot model since SEG-065-T002, fill without duration, data written at once; 2M Word RAM owned by main is read as plain memory since SEG-064-T004; 1M, sub-owned and PRG-window sources a typed stop) | one source for the slot counts (GPGX `vdp_ctrl.c`, its table cites hardware measurements); GPGX lags Word RAM transfers one word | MiSTer logs / hardware test | SEG-065-T002: the duration is causally observable (the title animation cadence); with it the compared title frames are identical to the reference |
 | stopwatch byte accesses and byte-write semantics (G: typed stop) | GPGX: "(word access only ?)" and its byte path is an artefact of its register file | hardware test | SEG-065 |
 | graphics ASIC: 1M Word RAM operation, byte accesses, parameter reads, the font registers (typed stops); line cost `3 * (4 + 2W + ((W + off + 3) >> 2))` sub cycles (G) | one source (GPGX `gfx.c`; its comment cites MiSTer logs) | MiSTer logs / hardware test | SEG-065 |
 | CDD seek latency, command checksum handling, decoder active period (G) | GPGX models them (latency is a configurable approximation); MAME differs | logic-analyser logs (MiSTer `mcd logs`) | SEG-065 |
