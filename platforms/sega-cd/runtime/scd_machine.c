@@ -185,6 +185,38 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
   return scd_fail_access(m, SCD_MAIN, SCD_STOP_UNMAPPED, pc, address, width, is_write);
 }
 
+/* SEG-065-T002 (ADR 0147, contract section 4): the 8 KiB internal backup RAM on the odd byte lane of $E0000-$EFFFF (mod 1 MiB),
+ * mirrored every 16 KiB of address (A1-A13 select the byte). An odd byte reads/writes the cell; an even byte reads $FF and its
+ * write is ignored; a word reads $FF00 | cell and a word write stores its low byte (GPGX `bram_read_byte`/`bram_read_word`/
+ * `bram_write_byte`/`bram_write_word`; the RAM is an 8-bit part on D0-D7, Sega "Mega-CD Hardware Manual" sub memory map
+ * "BACKUP RAM ... odd addresses"). Without the machine input the access stays the typed stop. */
+int scd_backup_ram_install(ScdMachine *m, const uint8_t *bytes, size_t length) {
+  if (bytes == NULL || length != SCD_BACKUP_RAM_BYTES) return -1;
+  memcpy(m->backup_ram, bytes, SCD_BACKUP_RAM_BYTES);
+  m->backup_ram_present = 1U;
+  return 0;
+}
+
+static int scd_backup_ram_access(ScdMachine *m, uint32_t a, uint32_t width, int is_write, uint32_t *value, uint32_t pc,
+                                 uint32_t address) {
+  const uint32_t cell = (a >> 1) & (SCD_BACKUP_RAM_BYTES - 1U);
+  if (!m->backup_ram_present) return scd_fail_access(m, SCD_SUB, SCD_STOP_BACKUP_RAM_UNSUPPORTED, pc, address, width, is_write);
+  if (is_write) {
+    ++m->backup_ram_writes;
+    if (width == 2U || (a & 1U) != 0U) {
+      m->backup_ram[cell] = (uint8_t)(*value & 0xFFU);
+      scd_log(m, 0xC0U, address, *value & 0xFFU); /* SEG-065-T002: backup RAM cell write */
+    } else {
+      ++m->ignored_writes;
+    }
+  } else {
+    ++m->backup_ram_reads;
+    if (width == 2U) *value = 0xFF00U | m->backup_ram[cell];
+    else *value = (a & 1U) != 0U ? m->backup_ram[cell] : 0xFFU;
+  }
+  return 0;
+}
+
 /* One byte- or word-wide bus cycle of the sub processor (contract section 4): only A1-A19 decode, so the 1 MiB map repeats. */
 static int scd_sub_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
   const uint32_t a = address & UINT32_C(0xFFFFF);
@@ -203,7 +235,7 @@ static int scd_sub_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_w
     return 0;
   }
   if (a < UINT32_C(0xE0000)) return scd_word_ram_access(m, SCD_SUB, a, width, is_write, value, pc);
-  if (a < UINT32_C(0xF0000)) return scd_fail_access(m, SCD_SUB, SCD_STOP_BACKUP_RAM_UNSUPPORTED, pc, address, width, is_write);
+  if (a < UINT32_C(0xF0000)) return scd_backup_ram_access(m, a, width, is_write, value, pc, address);
   if (!(a & 0x8000U)) return scd_pcm_access(m, a & 0x7FFFU, width, is_write, value, pc);
   return scd_ga_sub_access(m, a & 0x1FFU, width, is_write, value, pc);
 }
@@ -293,6 +325,19 @@ int scd_retire(ScdMachine *m, uint32_t cpu, uint32_t cycles) {
   ScdCpu *c = &m->cpu[cpu];
   c->cycles += cycles;
   c->retired += 1U;
+  if (cpu == SCD_MAIN && m->main_dma_until != 0U) {
+    /* SEG-065-T002: frozen by the DMA it armed. GPGX sets the 68K's clock to the end of the transfer's first slot window during the
+     * instruction and adds the instruction's cycles after it; a transfer that continues into later windows sets the clock to its
+     * end again at the next line start, so the instruction's own cycles are absorbed: the next instruction starts at the DMA end. */
+    const int multi = m->main_dma_multi != 0U;
+    if (m->main_dma_until > c->next) c->next = m->main_dma_until;
+    m->main_dma_until = 0U;
+    m->main_dma_multi = 0U;
+    if (multi) {
+      scd_trace(c);
+      return 0;
+    }
+  }
   c->next += (uint64_t)cycles * c->cycle_ticks;
   scd_trace(c);
   return 0;

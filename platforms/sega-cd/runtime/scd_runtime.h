@@ -22,6 +22,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "../../../libs/cpu/m68k/include/segarecomp/cpu/m68k/exception_core.h"
 #include "../../../libs/cpu/m68k/include/segarecomp/cpu/m68k/timing_core.h"
@@ -46,6 +47,7 @@ extern "C" {
 #define SCD_WORD_RAM_BYTES 0x40000U
 #define SCD_WORK_RAM_BYTES 0x10000U
 #define SCD_CDC_BUFFER_BYTES 0x4000U
+#define SCD_BACKUP_RAM_BYTES 0x2000U   /* SEG-065-T002: 8 KiB internal backup RAM (sub $FE0000-$FEFFFF, odd bytes, mirrored) */
 #define SCD_CDD_TOC_STATUS 0x09U   /* GPGX CD_TOC: drive stopped with a disc loaded */
 #define SCD_CDD_PLAY 0x01U
 #define SCD_CDD_SEEK 0x02U
@@ -425,6 +427,16 @@ typedef struct ScdMachine {
   void *event_log;                        /* SEG-064-T004 diagnostic (--event-log): "<vblank count> <event>" lines, or NULL */
   uint8_t verify_only;                    /* SEG-064-T004: the generated variants verify their bytes and return (the handoff entry check) */
   void *coverage;                         /* SEG-064-T004 diagnostic (--coverage): executed instruction starts per processor, or NULL */
+  /* SEG-065-T002 (ADR 0147): the internal backup RAM is a machine input. Absent (the default), every access is the typed stop
+   * backup_ram_unsupported; present (--backup-ram), sub accesses read and write these bytes (contract section 4). */
+  /* SEG-065-T002 (ADR 0147, BIOS-image profile): a 68K->VDP DMA freezes the main processor until the transfer ends (GPGX
+   * vdp_dma_update: m68k.cycles = dma_endCycles); the instruction that armed it then completes from that tick. */
+  uint64_t main_dma_until;                /* 0, or the tick at which the armed DMA ends */
+  uint8_t main_dma_multi;                 /* the transfer spans more than one slot window (GPGX re-anchors at its end) */
+  uint64_t vdp_dma_count, vdp_dma_stall_ticks;
+  uint8_t backup_ram_present;
+  uint8_t backup_ram[SCD_BACKUP_RAM_BYTES];
+  uint64_t backup_ram_reads, backup_ram_writes;
 } ScdMachine;
 
 /* Physical memories whose bytes may hold executable images (for write invalidation). */
@@ -480,6 +492,9 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline);
 uint64_t scd_machine_time(const ScdMachine *m);
 void scd_machine_release(ScdMachine *m);
 
+/* SEG-065-T002: install the backup RAM machine input (exactly SCD_BACKUP_RAM_BYTES bytes); 0 on success, -1 on a wrong length. */
+int scd_backup_ram_install(ScdMachine *m, const uint8_t *bytes, size_t length);
+
 /* Device internals shared between runtime translation units. */
 void scd_log(ScdMachine *m, uint32_t kind, uint32_t address, uint32_t value);
 int scd_ga_main_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
@@ -495,6 +510,11 @@ int scd_vdp_init(ScdMachine *m);
 /* SEG-064-T003 (BIOS-image profile): the main processor's Genesis devices besides the VDP ports, the vertical-blank event, the main
  * interrupt request level and its acknowledge, and the open-bus value. */
 int scd_main_device_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
+/* SEG-065-T003 (ADR 0147): capture the frame whose active display ends at vertical-blank onset number `onset` (>= 2, BIOS-image
+ * profile, at most 8) into `dir`: the per-line VDP state is sampled at each active line's start and rendered by the existing renderer. */
+int scd_vdp_capture_request(ScdMachine *m, uint64_t onset, const char *dir);
+void scd_vdp_capture_report(const ScdMachine *m, FILE *out);
+int scd_vdp_capture_line_due(const ScdMachine *m, uint64_t until);
 uint64_t scd_vdp_next_event(const ScdMachine *m);
 void scd_vdp_event(ScdMachine *m);
 uint32_t scd_main_request_level(const ScdMachine *m);

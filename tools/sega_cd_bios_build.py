@@ -29,7 +29,7 @@ copied to disk.
 
 usage: sega_cd_bios_build.py --segarecomp EXE --cc CC --cue DISC --bios IMAGE|- --work DIR [--copy-image SPEC]... [--disc-image SPEC]...
                              [--application-entry ADDRESS]
-                             [--budget N] [--until-tick T] [--pass-set SPEC]... [--timeout S] [--cflags "..."] [--partition-window BYTES] [--jobs N]
+                             [--budget N] [--until-tick T] [--backup-ram FILE] [--pass-set SPEC]... [--timeout S] [--cflags "..."] [--partition-window BYTES] [--jobs N]
 prints the build summary JSON; exit 0 on a confirmed build, 1 on a typed build failure, 2 on usage errors.
 """
 import argparse
@@ -296,6 +296,8 @@ class Driver:
         pass_dir.mkdir(parents=True)
         with self.bios() as (bios, fds):
             until = ["--until-tick", str(self.args.until_tick)] if self.args.until_tick else []  # SEG-064-T005: a machine-time end
+            if self.args.backup_ram:  # SEG-065-T002: the backup RAM machine input of every pass
+                until += ["--backup-ram", self.args.backup_ram]
             for spec in self.args.pass_set or []:   # SEG-064-T005: register presets of the build pass (project-authored fixtures select a case this way)
                 until += ["--set", spec]
             out = run([exe, "--disc-dir", pathlib.Path(self.args.cue).parent, "--bios", bios, "--instruction-budget", str(self.args.budget),
@@ -378,6 +380,7 @@ def main(argv=None):
     parser.add_argument("--budget", type=int, default=5_000_000)
     parser.add_argument("--pass-set", action="append", help="main|sub:dN|aN=VALUE: a register preset of every build pass (fixture case selection)")
     parser.add_argument("--until-tick", type=int, default=0, help="end every pass at this machine-time instant (typed result deadline); 0 = none")
+    parser.add_argument("--backup-ram", help="an 8 KiB internal backup RAM image given to every pass (SEG-065-T002); default: none")
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--cflags", default="")
     parser.add_argument("--partition-window", type=lambda v: int(v, 0), default=DEFAULT_WINDOW)

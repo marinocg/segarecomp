@@ -52,7 +52,7 @@ Every claim carries one tag:
 | TV standard | NTSC timing for the main CPU (MCLK 53,693,175 Hz / 7) | V2 (GPGX `system_clock`, repository Genesis runtime) |
 | audio | none: PCM and CD-DA playback are typed stops; fader writes have no modelled effect | C |
 | graphics ASIC | none: stamp/rotation registers are typed stops | C |
-| backup RAM | none: typed stop | C |
+| backup RAM | a machine input (`--backup-ram FILE`, exactly 8 KiB; SEG-065-T002, ADR 0147); without it: typed stop | C (input), V2 (access shape) |
 
 ## 2. Processor instances and clocks
 
@@ -88,7 +88,7 @@ prefetched instruction word, which the profile does not model: it is the typed s
 | `$220000-$23FFFF` | 1M-mode cell-image view | typed stop `wordram_cell_image_unsupported` | C (out of scope) |
 | `$240000-$3FFFFF` | mirrors of `$200000-$23FFFF` | as above | **G** (GPGX "mirrored up to $3FFFFF") |
 | `$A12000-$A120FF` | Gate Array, main side (section 5); A1-A5 decode, `$A12040-$A120FF` mirror `$A12000-$A1203F` | per register | V2 registers; mirror **G** (GPGX "mirrored up to $A120FF") |
-| `$C00000-$C00007` | VDP data/control ports | composed Genesis VDP device (ADR 0128); VDP DMA enable is a typed stop | V2 (Genesis map) |
+| `$C00000-$C00007` | VDP data/control ports | composed Genesis VDP device (ADR 0128); synthetic profile: VDP DMA enable is a typed stop; BIOS-image profile: section 12 | V2 (Genesis map) |
 | `$E00000-$FFFFFF` | 64 KiB work RAM, repeated every 64 KiB | linear | V2 (Genesis map) |
 | anything else | | typed stop `unmapped` (the BIOS-image profile maps more: section 16) | C |
 
@@ -107,7 +107,7 @@ MAME maps the first 1 MiB only).
 | `$80000-$BFFFF` | Word RAM 2M when owned by sub (`RET` = 0); 1M dot-image view in 1M mode | 2M: linear; dot image: typed stop `wordram_dot_image_unsupported` | V2 |
 | `$80000-$BFFFF` while main owns 2M Word RAM | | DTACK is withheld: the sub **waits**; its instruction is abandoned with its registers as before it (bytes written earlier in the same instruction stay) and retried from its start when main writes `DMNA` = 1 in 2M mode. With no such write the machine ends `idle` with the sub waiting (the hang) | wait: V2 (GPGX `s68k_lockup_*`, MAME silent); retry semantics **G** (GPGX `s68k_pulse_wait` / `s68k_clear_wait`) |
 | `$C0000-$DFFFF` | 1M mode: bank assigned to sub; 2M mode: nothing | 1M: linear 128 KiB; 2M: reads open bus, writes ignored | V2 mapping; 2M behaviour **G** (GPGX `s68k_read_bus_8`) |
-| `$E0000-$EFFFF` | backup RAM (odd bytes) | typed stop `backup_ram_unsupported` | C |
+| `$E0000-$EFFFF` | 8 KiB internal backup RAM on the odd byte lane, repeated every 16 KiB of address (cell = A1-A13) | with the machine input: odd byte reads/writes the cell, even byte reads `$FF` and its write is ignored, a word reads `$FF00 \| cell` and its write stores the low byte, a long is two words; without it: typed stop `backup_ram_unsupported` | access V2 (GPGX `bram_read_byte/word`, `bram_write_byte/word`: `scd.bram[(address >> 1) & 0x1fff]`); presence C |
 | `$F0000-$F7FFF` | PCM | typed stop `pcm_unsupported` | C |
 | `$F8000-$FFFFF` | Gate Array, sub side (section 5); A1-A8 decode (`$FF8000-$FF81FF` repeated) | per register | V2 registers; repetition G |
 
@@ -261,7 +261,7 @@ nothing to do (no `HOCK`, no command pending, no latency, not playing, `DECEN` c
 | commands 6, 7, A (pause, resume, N-track jump) | `PAUSE` (6, A: no audio playing, `$36` high = 1) / `PLAY` (7) in RS0 and the status; RS1-RS8 unchanged; the checksum is recomputed | G (GPGX cases 6, 7, 0xA) |
 | other commands (scan, tray) | typed stop `cdd_command_unsupported` | C |
 | each tick while latency > 0 | latency - 1, the decoder runs on a header-0 block (section 7) | G |
-| each tick while playing | a block of a data track is decoded with header = BCD MSF of `LBA + 150` and mode 1; LBA + 1; crossing the end of a track moves to the next track; reaching an audio track is the typed stop `cd_read_audio_track` (CD-DA playback is not modelled); past the last track the status becomes `END` (`$0C`) | V1 + CDROM; audio stop C |
+| each tick while playing | a block of a data track is decoded with header = BCD MSF of `LBA + 150` and mode 1; LBA + 1; crossing the end of a track moves to the next track; reaching an audio track is, in the synthetic profile, the typed stop `cd_read_audio_track`; in the BIOS-image profile (SEG-065-T002) an audio-track block is played as drive state: from the track start the CDD control high byte reads `$00` (audio playing), the decoder runs without a sector, LBA + 1 (the audio output itself is not modelled); past the last track the status becomes `END` (`$0C`) | V1 + CDROM (GPGX `cdd_update`); synthetic audio stop C |
 | `HOCK` | after the drive's tick, level 4 becomes pending (taken with `IEN4`) | V1 |
 
 ## 9. Synthetic post-BIOS fixture profile
@@ -355,9 +355,22 @@ stops with `bios_absent`. The BIOS-image profile wires the VDP's level 6 (sectio
   runtime performs (SEG-064-T004: observed as 20x-1600x differences in a handful of poll loops, with identical resulting state).
 - The CDD 75 Hz clock ticks at its exact instant; GPGX processes it at line boundaries (SEG-064-T004: the reference had processed one tick
   more at the same main instruction).
-- BIOS-image profile (SEG-064-T003): VDP DMA has no duration - a fill or 68K->VDP transfer completes at its arming write, so a guest
-  poll for DMA completion iterates once (the reference's fill takes time: observed as the only per-address execution-count difference
-  up to the sub release, ADR 0143). The vertical-blank onset is the Genesis runtime's NTSC schedule from machine time 0.
+- BIOS-image profile: a VDP fill has no duration (SEG-064-T003) - a guest poll for fill completion iterates once (the reference's fill
+  takes time: observed as the only per-address execution-count difference up to the sub release, ADR 0143). A 68K->VDP transfer
+  (SEG-065-T002, ADR 0147) writes its data at the arming write but **freezes the main processor** for the transfer's duration by
+  GPGX's slot model (`vdp_dma_update`): per line 16 (H32) / 18 (H40) access slots in the active display and 166 / 204 while blanked
+  (vertical blank or display disabled), a VRAM word taking two slots, a CRAM/VSRAM word one with 161 / 198 on a blanked line; the
+  frame starts at the vertical-blank onset, its blank window lasts 37 lines, an active-display transfer runs to the end of its line and
+  resumes at each line start; the destination class is GPGX's (a code with CD2 or CD1 set moves a word per slot, otherwise a word per
+  two slots). The arming instruction's own cycles follow the transfer when it ends inside its first window; a transfer spanning several
+  windows re-anchors the processor at its end (GPGX sets the 68K clock to the end again at the next line start), so the next
+  instruction starts exactly there. Afterwards the length registers are 0 and #21-#22 have advanced by the length (16-bit); the low
+  word of a long control-port write whose high word started the transfer reaches the VDP after that update (GPGX `cached_write`). The data itself is not spread over the lines, so a frame displayed while a
+  transfer is still in progress could differ from hardware. The frame capture's `vram_display_changes` is an endpoint comparison only
+  (VRAM at the start of active display against VRAM at the vertical-blank onset, byte for byte; it is not a VRAM-write trace and does
+  not count writes that restore the original byte or changes that do not survive to the onset); it was 0 at every compared frame, where
+  the canonical frames independently equal the reference.
+  The vertical-blank onset is the Genesis runtime's NTSC schedule from machine time 0.
 
 ## 13. Unresolved items
 
@@ -378,7 +391,7 @@ Items marked **G** above are implemented as GPGX behaves; they stay here until h
 | open-bus read values | the prefetched instruction word; not modelled in the synthetic profile (typed stop `open_bus_read`); the BIOS-image profile uses GPGX's model where the prefetch position is exact (section 16), V1 (GPGX; hardware bus capacitance agrees for the cases used) | hardware test of open-bus reads (empty slot, BUSACK unused bits) | SEG-065 |
 | H-INT vector register `$A12006` (BIOS-image profile: the boot ROM's `$72` word) | GPGX writes the ROM copy's `$72` word; one source in reach | MAME `megacd.cpp` H-INT vector handling or a hardware test | SEG-064 |
 | VDP vertical-interrupt pending rule (G: pending at every onset, requested while IE0, cleared by the acknowledge) | GPGX `vint_pending`; the repository Genesis runtime raises it only while IE0 is set | hardware test (enable IE0 inside VBlank) | SEG-064 |
-| VDP DMA duration and the Word-RAM/PRG DMA source (BIOS-image profile: no duration; 2M Word RAM owned by main is read as plain memory since SEG-064-T004; 1M, sub-owned and PRG-window sources a typed stop) | GPGX models both (Word RAM transfers lag one word) | MiSTer logs / GPGX `vdp_dma_68k` comparison | SEG-064: the authentic boot path reaches the handoff with identical state without a duration; carried forward |
+| VDP DMA duration and the Word-RAM/PRG DMA source (BIOS-image profile: 68K->VDP transfers freeze main by GPGX's slot model since SEG-065-T002, fill without duration, data written at once; 2M Word RAM owned by main is read as plain memory since SEG-064-T004; 1M, sub-owned and PRG-window sources a typed stop) | one source for the slot counts (GPGX `vdp_ctrl.c`, its table cites hardware measurements); GPGX lags Word RAM transfers one word | MiSTer logs / hardware test | SEG-065-T002: the duration is causally observable (the title animation cadence); with it the compared title frames are identical to the reference |
 | stopwatch byte accesses and byte-write semantics (G: typed stop) | GPGX: "(word access only ?)" and its byte path is an artefact of its register file | hardware test | SEG-065 |
 | graphics ASIC: 1M Word RAM operation, byte accesses, parameter reads, the font registers (typed stops); line cost `3 * (4 + 2W + ((W + off + 3) >> 2))` sub cycles (G) | one source (GPGX `gfx.c`; its comment cites MiSTer logs) | MiSTer logs / hardware test | SEG-065 |
 | CDD seek latency, command checksum handling, decoder active period (G) | GPGX models them (latency is a configurable approximation); MAME differs | logic-analyser logs (MiSTer `mcd logs`) | SEG-065 |
