@@ -325,6 +325,10 @@ int scd_retire(ScdMachine *m, uint32_t cpu, uint32_t cycles) {
   ScdCpu *c = &m->cpu[cpu];
   c->cycles += cycles;
   c->retired += 1U;
+  if (cpu == SCD_MAIN && m->main_dma_until != 0U) { /* SEG-065-T002: frozen by the DMA it armed, then its own cycles */
+    if (m->main_dma_until > c->next) c->next = m->main_dma_until;
+    m->main_dma_until = 0U;
+  }
   c->next += (uint64_t)cycles * c->cycle_ticks;
   scd_trace(c);
   return 0;

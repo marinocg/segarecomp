@@ -4,6 +4,7 @@
  *
  *   program --disc-dir DIR --instruction-budget N [--report FILE] [--frame FILE.ppm] [--slice-ticks T | --slice-seed S]
  *           [--set main|sub:dN|aN=VALUE]... [--until-tick T] [--backup-ram FILE]
+ *           [--capture-onset N]... --capture-dir DIR   (BIOS-image profile; SEG-065-T003)
  *
  * Exit status: 0 idle (success), 10 typed stop, 11 budget exhausted or deadline (read `result`), 20 disc refused at start-up, 22 backup RAM input refused, 2 usage. */
 #include "scd_runtime.h"
@@ -156,6 +157,10 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
     for (i = 0; i < 8U; ++i) fprintf(out, "%s%llu", i ? "," : "", (unsigned long long)m->main_interrupts_taken[i]);
     fprintf(out, "]");
   }
+  scd_vdp_capture_report(m, out); /* SEG-065-T003: absent without --capture-onset */
+  if (m->vdp_dma_count != 0U) /* SEG-065-T002: 68K->VDP DMA transfers and the main processor's total wait (absent without one) */
+    fprintf(out, ",\"vdp_dma\":{\"count\":%llu,\"stall_ticks\":%llu}", (unsigned long long)m->vdp_dma_count,
+            (unsigned long long)m->vdp_dma_stall_ticks);
   if (m->backup_ram_present) { /* SEG-065-T002: the backup RAM machine input (absent without --backup-ram: reports unchanged) */
     scd_sha_hex(m->backup_ram, sizeof m->backup_ram, digest);
     fprintf(out, ",\"backup_ram\":{\"reads\":%llu,\"writes\":%llu,\"sha256\":\"%s\"}", (unsigned long long)m->backup_ram_reads,
@@ -330,6 +335,9 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   ScdDisc disc = program->disc;
   const char *disc_dir = NULL, *report_path = NULL, *frame_path = NULL, *bios_path = NULL, *materialize_dir = NULL;
   const char *sets[16];
+  const char *capture_dir = NULL;
+  uint64_t capture_onsets[8];
+  unsigned capture_count = 0U;
   const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *event_path = NULL, *backup_ram_path = NULL;
   unsigned set_count = 0, i;
   uint64_t budget = 0U, slice_ticks = 0U, slice_seed = 0U, until_tick = UINT64_MAX;
@@ -355,7 +363,11 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     } else if (strcmp(flag, "--set") == 0 && set_count < 16U) sets[set_count++] = value;
     else if (strcmp(flag, "--until-tick") == 0) { /* SEG-064-T005: end the run at a machine-time instant (result `deadline`) */
       if (!scd_parse_u64(value, &until_tick) || until_tick == 0U) return 2;
-    } else if (strcmp(flag, "--backup-ram") == 0) backup_ram_path = value; /* SEG-065-T002: the backup RAM machine input */
+    } else if (strcmp(flag, "--capture-onset") == 0) { /* SEG-065-T003: frame capture at a vertical-blank onset count */
+      if (capture_count >= 8U || !scd_parse_u64(value, &capture_onsets[capture_count]) || capture_onsets[capture_count] < 2U) return 2;
+      capture_count += 1U;
+    } else if (strcmp(flag, "--capture-dir") == 0) capture_dir = value;
+    else if (strcmp(flag, "--backup-ram") == 0) backup_ram_path = value; /* SEG-065-T002: the backup RAM machine input */
     else if (strcmp(flag, "--dump-dir") == 0) dump_dir = value;           /* SEG-064-T004 diagnostics (local only) */
     else if (strcmp(flag, "--coverage") == 0) coverage_path = value;
     else if (strcmp(flag, "--access-trace") == 0) trace_path = value;
@@ -402,6 +414,9 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
       return 22;
     }
   }
+  if ((capture_count != 0U) != (capture_dir != NULL) || (capture_count != 0U && authentic == NULL)) return 2;
+  for (i = 0; i < capture_count; ++i)
+    if (scd_vdp_capture_request(&machine, capture_onsets[i], capture_dir) != 0) return 2;
   scd_overlay_attach(&machine, overlays);
   if (coverage_path != NULL && scd_coverage_enable(&machine) != 0) return 1;
   if (trace_path != NULL && scd_trace_open(&machine, trace_path) != 0) return 1;
