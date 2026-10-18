@@ -158,6 +158,16 @@ def main():
         rejected("B (corrupted entry opcode)", 15, exe, "code_bytes_mismatch", entry, entry)
         rejected("C (corrupted address extension word)", 16, exe, "code_bytes_mismatch", entry, entry + 5)
         rejected("C2 (corrupted immediate extension word: bytes of neither variant)", 17, exe, "code_bytes_mismatch", entry, entry + 2)
+        # B/C with a single compiled variant at the entry (no selection chain: the per-instruction byte guard alone must reject)
+        single = build(tmp, "w_single", disc, bios, ip_image + sp_image + ["--application-entry", hex(entry)])
+        check(single.get("ok") is True, "B/C single variant: the program with one variant at the entry builds")
+        if single.get("ok"):
+            check(single["emit"]["processors"][0]["variant_pcs"] == 0, "B/C single variant: the entry pc has exactly one compiled variant")
+            code, ok = case_run(single["program"], 12)
+            check(code == 10 and ok["stop"]["class"] == "application_handoff" and ok["stop"]["pc"] == entry, "B/C single variant: the valid entry is accepted")
+            for label, case, where in (("opcode", 15, 0), ("address extension", 16, 5), ("immediate extension", 17, 2)):
+                rejected("B/C single variant (corrupted %s)" % label, case, single["program"], "code_bytes_mismatch", entry + where, entry + where)
+
         # D: a configured pc nothing is compiled at; the run reaches it by a jump
         nc = build(tmp, "w_nc", disc, bios, images + ["--application-entry", "0xFF0100"])
         check(nc.get("ok") is True, "D: the program with an uncompiled application entry builds")
