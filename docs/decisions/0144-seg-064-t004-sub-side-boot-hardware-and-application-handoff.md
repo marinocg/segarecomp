@@ -71,7 +71,7 @@ PCM writes; graphics start; CDD TOC; VDP DMA from Word RAM; CDC host read; the e
 replacing transient code (decision 8); a module the SP loads (decision 8); the application entry (decision 9).
 
 **Authentic run** (authorized US Model 1 class BIOS and Sonic CD (USA) disc, local only, no input; official driver, cold, gcc -O1 strict
-C11, 8 jobs): epoch + 12 operand templates (2 main, 10 sub), **14 rounds + the confirming run, 528 s**; 151,712 instruction functions,
+C11, 8 jobs): epoch + 12 operand templates (2 main, 10 sub), **14 rounds + the confirming run, 537 s**; 151,712 instruction functions,
 144 MB of C in 37 translation units; peak compiler resident set 579 MB, emission 439 MB. Images: BIOS 61,869 compiled starts; disc boot
 area 16,081; disc SP 14,331; disc module 1,994; sub epoch 64,628. The run ends in the typed stop `application_handoff` with the main
 processor at the application entry after about 1,198 video frames of machine time.
@@ -83,6 +83,7 @@ processor at the application entry after about 1,198 video frames of machine tim
 | main work RAM | 28 of 65,536 bytes differ, none in the disc boot area |
 | PRG RAM | 44 of 524,288 bytes differ, none in the SP image |
 | Word RAM | identical |
+| PCM chip: 8 channels' registers, channel/bank/enable/on-off state and the 64 KiB wave RAM | identical |
 | executed instruction starts, main | 1,531 vs 1,532: the same set (the reference's count includes the entry instruction itself, which this run stops before) |
 | executed instruction starts, sub | 3,479 vs 3,479: the same set |
 | sub-side and main-side Gate Array access classes (register, width, direction; 86 classes) | 67 classes have equal totals (every graphics, CDC host-data, timer and mode transaction); the other 19 are the polled registers (below) and the CDD command exchange (1,413 vs 1,416: the reference reaches the entry about four frames later) |
