@@ -197,6 +197,8 @@ def main():
         if six.get("ok"):
             code, f = case(six["program"], 20)
             check(code == 0 and word(f, 0x4A) == 0x5E0A and word(f, 0x46) == 0x5678, "six extents: the same post-handoff behaviour")
+        sixteen = emit(tmp, disc, bios, *(ip_image + sp_image + copy_image * 14))
+        check(sixteen[0] == 0, "exactly sixteen extents are accepted (exit %d)" % sixteen[0])
         code, report = emit(tmp, disc, bios, *(images + extra_images * 6))
         check(code != 0, "more than sixteen extents are refused (exit %d)" % code)
 
@@ -221,13 +223,14 @@ def main():
         for line in pathlib.Path(str(cov) + ".edges").read_text().splitlines():
             cpu, source, target = line.split()
             edges.add((int(cpu), int(source, 16), int(target, 16)))
+        check(g == a, "a --coverage run's report equals the plain run's (the diagnostics change nothing)")
         calls = {t for (cpu, s, t) in edges if cpu == 0 and s == THUNK}
         check(calls == {SERVICE_A}, "the edges record the thunk -> BIOS service A call (targets %s)" % sorted(map(hex, calls)))
         returns = {t for (cpu, s, t) in edges if cpu == 0 and SERVICE_A <= s < SERVICE_A + 16 and t >= 0xFF1000}
         check(len(returns) == 1, "... and the service's return into the routine")
         into_routine = {s for (cpu, s, t) in edges if cpu == 0 and t == ROUTINE}
         check(len(into_routine) == 1, "... and the IP's call of the RAM-resident routine")
-        check("vblank_onsets" in g["bios_profile"] and g["bios_profile"]["vblank_onsets"] >= 0, "the report carries the vertical-blank onset count")
+        check("vblank_onsets" in g["bios_profile"] and g["bios_profile"]["vblank_onsets"] == g["ticks"] // 448020000000, "the report carries the vertical-blank onset count")
 
         # ---- determinism ----
         check(case(exe, 20)[1] == a, "a repeat of case 20 is identical")

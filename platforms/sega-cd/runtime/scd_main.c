@@ -5,7 +5,7 @@
  *   program --disc-dir DIR --instruction-budget N [--report FILE] [--frame FILE.ppm] [--slice-ticks T | --slice-seed S]
  *           [--set main|sub:dN|aN=VALUE]... [--until-tick T]
  *
- * Exit status: 0 idle (success), 10 typed stop, 11 budget exhausted, 20 disc refused at start-up, 2 usage. */
+ * Exit status: 0 idle (success), 10 typed stop, 11 budget exhausted or deadline (read `result`), 20 disc refused at start-up, 2 usage. */
 #include "scd_runtime.h"
 
 #include <errno.h>
