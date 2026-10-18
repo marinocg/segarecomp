@@ -95,8 +95,8 @@ def main():
         check(handoff["cpus"][0]["pc"] == entry, "case 12: the main pc is at the entry (nothing there retired)")
 
         code, stale = run(exe, disc, bios, "--set", "main:d7=14", "--set", "sub:a6=14")
-        check(stale["ga"]["comstat"][1] == 0x1111 and stale["stop"]["class"] == "application_handoff",
-              "case 14: without the SP placed, the stale epoch variant runs ($1111): the variants are selected by live bytes")
+        check(stale["ga"]["comstat"][1] == 0x1111 and stale["stop"]["class"] == "application_handoff" and stale["stop"]["pc"] == entry,
+              "case 14: without the SP placed, the stale epoch variant runs ($1111): the variants are selected by live bytes; the IP is entered through $FFFF0000 (24-bit pc) (%s %s)" % (stale["ga"]["comstat"][1], stale["stop"]))
 
         code, corrupt = run(exe, disc, bios, "--set", "main:d7=13", "--set", "sub:a6=13")
         stop = corrupt.get("stop", {})

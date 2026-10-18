@@ -691,6 +691,8 @@ def fixture_subside(options):
     sub.move("l", imm("int2"), absl(0x000068))
     for off in (0, 2, 4, 6):
         sub.clr("w", absl(SUB_DATA + off))
+    sub.immop("cmp", "w", 9, d(7))                    # case 9: the level-1 STOP wake with the main processor stopped
+    sub.bcc("eq", "wake9")
     # --- stopwatch ---
     sub.move("b", imm(0x00), absl(GA_SUB + 0x01))   # RES0 = 0: the peripheral reset restarts the stopwatch grid at this instruction
     t = CYCLES["move_b_imm_abs"]
@@ -750,6 +752,14 @@ def fixture_subside(options):
     sub.move("w", absl(SUB_DATA), absl(GA_SUB + 0x2E))      # COMSTAT7: level-1 interrupts in all
     sub.move("b", imm(0x02), absl(GA_SUB + 0x0F))
     sub.stop(0x2700)
+    sub.label("wake9")                                # the sub alone can wake itself: the scheduler must not call the machine idle
+    sub.move("b", imm(0x02), absl(GA_SUB + 0x33))
+    sub.move_sr(0x2000)
+    sub.bsr("gfx_start")
+    sub.stop(0x2000)
+    sub.move("w", absl(SUB_DATA), absl(GA_SUB + 0x20))
+    sub.move("b", imm(0x02), absl(GA_SUB + 0x0F))
+    sub.stop(0x2700)
     sub.label("int1")
     sub.quick("add", "w", 1, absl(SUB_DATA))
     sub.quick("add", "w", 1, absl(SUB_DATA + 2))
@@ -763,13 +773,18 @@ def fixture_subside(options):
     main = Asm(IP_BASE)
     main.move("b", imm(0x02), absl(GA_MAIN + 0x03))   # DMNA: Word RAM to the sub (the ASIC works in 2M Word RAM the sub owns)
     main_start_sub(main, SP_BASE)
+    main.immop("cmp", "w", 9, d(7))                   # case 9: the main processor stops for good; only the graphics interrupt can wake the sub
+    main.bcc("ne", "not9")
+    main.stop(0x2700)
+    main.label("not9")
     wait_flag(main, GA_MAIN + 0x0F, 1, "w_ready")
     main.move("b", imm(0x01), absl(GA_MAIN + 0x00))   # IFL2
     main.move("b", imm(0x01), absl(GA_MAIN + 0x0E))   # main flag: the sub may unmask
     wait_flag(main, GA_MAIN + 0x0F, 2, "w_done")
     main_finish(main)
     expected = {"stopwatch_d": {"d0": r0, "d2": r2, "d3": r3, "d4": r4, "d5": r5, "d6": r6},
-                "comstat": [0, 0, 1, 1, 2, 4, 3, 3], "interrupts": {"1": 3, "2": 1}, "negatives": negatives}
+                "comstat": [0, 0, 1, 1, 2, 4, 3, 3], "interrupts": {"1": 3, "2": 1}, "negatives": negatives,
+                "wake": {"comstat0": 1, "sub_flag": 2, "level1": 1}}
     return main.assemble(), sub.assemble(), {}, expected
 
 

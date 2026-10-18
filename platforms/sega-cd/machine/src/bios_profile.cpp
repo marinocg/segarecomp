@@ -81,6 +81,7 @@ std::optional<Template> decode_template(const Admission &a) {
 struct Image {
   Processor processor{};
   std::string name;
+  std::string extent;  // SEG-064-T004: a disc image's coordinates (provenance evidence)
   ImageAuthority authority{};
   bool guarded = false;
   std::uint32_t base{};
@@ -206,14 +207,14 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
 
   // ---- images, in a fixed order: bios, copies, epochs ----
   std::vector<Image> images;
-  images.push_back(Image{Processor::main, "bios", ImageAuthority::immutable_input, false, 0U, rom});
+  images.push_back(Image{Processor::main, "bios", std::string(), ImageAuthority::immutable_input, false, 0U, rom});
   if (inputs.copies.size() > kMaxCopyImages) return fail(BiosProfileError::copy_invalid, kMaxCopyImages);
   for (std::size_t i = 0; i < inputs.copies.size(); ++i) {
     const auto &c = inputs.copies[i];
     if (((c.base | c.rom_offset | c.length) & 1U) != 0U || static_cast<std::uint64_t>(c.rom_offset) + c.length > rom.size() ||
         !ram_of(c.processor, c.base, c.length))
       return fail(BiosProfileError::copy_invalid, i);
-    images.push_back(Image{c.processor, "copy" + std::to_string(i), ImageAuthority::static_proof, true, c.base,
+    images.push_back(Image{c.processor, "copy" + std::to_string(i), std::string(), ImageAuthority::static_proof, true, c.base,
                            std::vector<std::uint8_t>(rom.begin() + c.rom_offset, rom.begin() + c.rom_offset + c.length)});
   }
   if (inputs.disc_images.size() > kMaxDiscImages) return fail(BiosProfileError::disc_image_invalid, kMaxDiscImages);
@@ -221,7 +222,8 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
     const auto &d = inputs.disc_images[i];
     if (((d.base | d.length) & 1U) != 0U || d.length == 0U || d.bytes.size() != d.length || !ram_of(d.processor, d.base, d.length))
       return fail(BiosProfileError::disc_image_invalid, i);
-    images.push_back(Image{d.processor, "disc" + std::to_string(i), ImageAuthority::immutable_input, true, d.base, d.bytes});
+    images.push_back(Image{d.processor, "disc" + std::to_string(i), "track:1 byte:" + std::to_string(d.track_offset) + " length:" + std::to_string(d.length),
+                           ImageAuthority::immutable_input, true, d.base, d.bytes});
   }
   std::vector<Template> templates;
   std::uint32_t epochs = 0;
@@ -233,7 +235,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
       if (n == 0U || n > kPrgRamBytes || n % kEpochGranule != 0U || ++epochs > kMaxEpochImages ||
           std::all_of(a.bytes.end() - kEpochGranule, a.bytes.end(), [](std::uint8_t b) { return b == 0U; }))
         return fail(BiosProfileError::epoch_invalid, i);
-      images.push_back(Image{Processor::sub, "epoch" + std::to_string(epochs - 1U), ImageAuthority::bounded_build_time_materialization, true,
+      images.push_back(Image{Processor::sub, "epoch" + std::to_string(epochs - 1U), std::string(), ImageAuthority::bounded_build_time_materialization, true,
                              0U, a.bytes});
     } else {
       auto t = decode_template(a);
@@ -257,9 +259,10 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
       e.mappings = {ImageMapping{image.base, 0U, static_cast<std::uint32_t>(image.bytes.size())}};
       e.provenance.authority = image.authority;
       e.provenance.producer = image.name == "bios" ? "sega_cd.bios_image"
-                              : image.name.rfind("disc", 0) == 0 ? "sega_cd.boot_area"
+                              : image.name.rfind("disc", 0) == 0 ? "sega_cd.disc_extent"
                               : image.authority == ImageAuthority::static_proof ? "sega_cd.bios_copy"
                                                                                 : "sega_cd.sub_epoch";
+      if (!image.extent.empty()) e.provenance.evidence = {{"disc.extent", image.extent}};
       e.verification = image.guarded ? ImageVerification::byte_identity : ImageVerification::none;
       set.images.push_back(std::move(e));
     }
@@ -344,7 +347,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
       out << "};\nconst uint32_t *" << p << "_lookup(uint32_t pc);\nconst uint32_t *" << p << "_lookup(uint32_t pc) {\n";
     else
       out << "};\nstatic const uint32_t *" << p << "_lookup(uint32_t pc) {\n";
-    out << "  size_t lo = 0U, hi = " << entries.size() << "U;\n"
+    out << "  size_t lo = 0U, hi = " << entries.size() << "U;\n  pc &= UINT32_C(0x00FFFFFF); /* the 68000 address bus is 24 bits (SEG-064-T004) */\n"
         << "  while (lo < hi) { const size_t mid = lo + (hi - lo) / 2U; if (" << p << "_entries[mid] == pc) return &" << p
         << "_entries[mid]; if (" << p << "_entries[mid] < pc) lo = mid + 1U; else hi = mid; }\n  return NULL;\n}\n";
   }

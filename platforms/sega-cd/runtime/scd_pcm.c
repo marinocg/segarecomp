@@ -11,6 +11,16 @@
  * selected channel at the time of the write. */
 #include "scd_runtime.h"
 
+#include <string.h>
+
+/* GPGX scd_reset() ends with pcm_reset() for the power-on and the peripheral reset alike: the chip clears with the external wave RAM, the
+ * default bank and channel 0 are selected and every channel's panning is $FF. */
+void scd_pcm_reset(ScdMachine *m) {
+  uint32_t c;
+  memset(&m->pcm, 0, sizeof m->pcm);
+  for (c = 0; c < 8U; ++c) m->pcm.pan[c] = 0xFFU;
+}
+
 static int scd_pcm_unsupported(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t pc) {
   return scd_fail_access(m, SCD_SUB, SCD_STOP_PCM_UNSUPPORTED, pc, 0xFF0000U + offset, width, is_write);
 }

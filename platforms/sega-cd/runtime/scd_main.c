@@ -268,8 +268,22 @@ static int scd_dump_file(const char *dir, const char *name, const uint8_t *data,
   return fclose(f) != 0;
 }
 
+static int scd_dump_pcm_registers(const ScdMachine *m, const char *dir) {
+  char path[4096];
+  FILE *f;
+  unsigned c;
+  snprintf(path, sizeof path, "%s/pcm.txt", dir);
+  f = fopen(path, "w");
+  if (f == NULL) return 1;
+  fprintf(f, "index %u bank %u enabled %u onoff %02X\n", m->pcm.index, m->pcm.bank, m->pcm.enabled, m->pcm.onoff);
+  for (c = 0; c < 8U; ++c)
+    fprintf(f, "ch %u env %02X pan %02X st %02X fd %04X ls %04X\n", c, m->pcm.env[c], m->pcm.pan[c], m->pcm.st[c], m->pcm.fd[c], m->pcm.ls[c]);
+  return fclose(f) != 0;
+}
+
 static int scd_dump_state(const ScdMachine *m, const char *dir) {
-  return scd_dump_file(dir, "work_ram.bin", m->work_ram, sizeof m->work_ram) || scd_dump_file(dir, "prg_ram.bin", m->prg_ram, sizeof m->prg_ram) ||
+  return scd_dump_pcm_registers(m, dir) ||
+         scd_dump_file(dir, "work_ram.bin", m->work_ram, sizeof m->work_ram) || scd_dump_file(dir, "prg_ram.bin", m->prg_ram, sizeof m->prg_ram) ||
          scd_dump_file(dir, "word_ram_2m.bin", m->word_ram, sizeof m->word_ram) || scd_dump_file(dir, "pcm_ram.bin", m->pcm.ram, sizeof m->pcm.ram) ||
          scd_dump_file(dir, "cdc_buffer.bin", m->cdc.buffer, SCD_CDC_BUFFER_BYTES);
 }

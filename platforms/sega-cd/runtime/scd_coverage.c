@@ -23,8 +23,8 @@ int scd_coverage_enable(ScdMachine *m) {
 void scd_coverage_note(ScdMachine *m, uint32_t cpu, uint32_t pc) {
   ScdCoverageEntry *table = (ScdCoverageEntry *)m->coverage;
   const uint32_t key = ((cpu << 24) | (pc & UINT32_C(0x00FFFFFF))) + 1U;
-  uint32_t slot = (key * UINT32_C(0x9E3779B1)) >> 11;
-  for (;;) {
+  uint32_t slot = (key * UINT32_C(0x9E3779B1)) >> 11, probes;
+  for (probes = 0U; probes < SCD_COVERAGE_SLOTS; ++probes) { /* bounded: a full table drops the note (diagnostic only) */
     ScdCoverageEntry *e = &table[slot & (SCD_COVERAGE_SLOTS - 1U)];
     if (e->key == key) {
       ++e->count;

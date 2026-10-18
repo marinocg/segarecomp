@@ -208,7 +208,7 @@ int scd_gfx_register_access(ScdMachine *m, uint32_t offset, uint32_t width, int 
   case 0x5E: g->buffer_origin = (uint16_t)*value; return 0;
   case 0x60: g->offset = (uint16_t)*value; return 0;
   case 0x62: g->h_dots = (uint16_t)*value; return 0;
-  case 0x64: g->v_lines = (uint16_t)*value; return 0;
+  case 0x64: g->v_lines = (uint16_t)*value; if (g->busy) g->lines_left = (uint8_t)(*value & 0xFFU); return 0; /* the live line counter (GPGX) */
   case 0x66: g->trace_base = (uint16_t)*value; return scd_gfx_start(m, *value & 0xFFFFU, pc);
   default: break;
   }

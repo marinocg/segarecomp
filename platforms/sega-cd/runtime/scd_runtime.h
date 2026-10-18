@@ -524,6 +524,7 @@ uint64_t scd_gfx_next_event(const ScdMachine *m);
 int scd_gfx_can_raise(const ScdMachine *m);
 void scd_gfx_reset(ScdMachine *m);
 /* SEG-064-T004: the sub's PCM area ($FF0000-$FF7FFF; offset within it). */
+void scd_pcm_reset(ScdMachine *m);
 int scd_pcm_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 int scd_word_ram_access(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 /* Word RAM ownership changes driven by the Gate Array (scd_word_ram.c). */

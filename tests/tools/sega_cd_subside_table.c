@@ -247,8 +247,8 @@ int main(void) {
   row(bus_write(0xFF000FU, 1U, 0xC3U) == 0 && m->pcm.index == 3U && m->pcm.enabled == 1U,
       "PCM: CTRL ($FF000F, offset 7) with bit 6 selects channel 3; bit 7 enables the chip");
   row(bus_write(0xFF0001U, 1U, 0x7FU) == 0 && bus_write(0xFF0003U, 1U, 0x55U) == 0 && m->pcm.env[3] == 0x7FU && m->pcm.pan[3] == 0x55U &&
-          m->pcm.env[0] == 0U && m->pcm.pan[0] == 0U,
-      "PCM: ENV and PAN go to the selected channel only");
+          m->pcm.env[0] == 0U && m->pcm.pan[0] == 0xFFU,
+      "PCM: ENV and PAN go to the selected channel only (channel 0 keeps its reset values)");
   row(bus_write(0xFF0005U, 1U, 0x34U) == 0 && bus_write(0xFF0007U, 1U, 0x12U) == 0 && m->pcm.fd[3] == 0x1234U, "PCM: FD low then high form 0x1234");
   row(bus_write(0xFF0009U, 1U, 0xCDU) == 0 && bus_write(0xFF000BU, 1U, 0xABU) == 0 && m->pcm.ls[3] == 0xABCDU, "PCM: LS low then high form 0xABCD");
   row(bus_write(0xFF000DU, 1U, 0x20U) == 0 && m->pcm.st[3] == 0x20U, "PCM: ST holds the start page");
@@ -279,6 +279,24 @@ int main(void) {
             m->stop.width == 1U && m->stop.is_write == 0U,
         "PCM: a wave RAM read stops typed with the sub, pc, address, width and direction");
     m->stop.stop_class = SCD_STOP_NONE;
+  }
+
+  /* GPGX scd_reset() ends with pcm_reset(): power-on and peripheral reset clear the chip and the wave RAM, select channel 0 and bank 0,
+   * and set every channel's panning to $FF */
+  fresh();
+  {
+    uint32_t c, all_ff = 1U;
+    for (c = 0; c < 8U; ++c) all_ff &= (uint32_t)(m->pcm.pan[c] == 0xFFU);
+    row(all_ff && m->pcm.index == 0U && m->pcm.bank == 0U && m->pcm.enabled == 0U && m->pcm.onoff == 0U, "PCM: the power-on state (panning $FF, channel 0, bank 0, chip disabled)");
+    bus_write(0xFF000FU, 1U, 0xC3U); bus_write(0xFF0001U, 1U, 0x11U); bus_write(0xFF0003U, 1U, 0x22U); bus_write(0xFF0011U, 1U, 0x7EU); bus_write(0xFF2001U, 1U, 0x77U);
+    bus_write(0xFF000FU, 1U, 0x05U);
+    row(m->pcm.env[3] == 0x11U && m->pcm.ram[0] == 0x77U && m->pcm.bank == 5U, "PCM: state set before the reset");
+    m->now = 12345U;
+    row(sub_write(0x01U, 1U, 0x00U) == 0, "PCM: RES0 = 0 ...");
+    all_ff = 1U;
+    for (c = 0; c < 8U; ++c) all_ff &= (uint32_t)(m->pcm.pan[c] == 0xFFU && m->pcm.env[c] == 0U && m->pcm.fd[c] == 0U && m->pcm.ls[c] == 0U && m->pcm.st[c] == 0U);
+    row(all_ff && m->pcm.index == 0U && m->pcm.bank == 0U && m->pcm.enabled == 0U && m->pcm.onoff == 0U && m->pcm.ram[0] == 0U,
+        "... resets the PCM chip, clears its wave RAM, selects channel 0 and bank 0 and sets every panning to $FF (GPGX pcm_reset)");
   }
 
   /* ================================= graphics ASIC ================================= */
@@ -468,30 +486,37 @@ int main(void) {
           {2U, 0x5U, 0x0U, 0x5U, "overwrite: a zero new nibble leaves the old one"},
           {3U, 0x5U, 0x9U, 0x5U, "mode 3 (invalid) keeps the buffer"},
       };
-      uint32_t r;
-      for (r = 0; r < sizeof rows / sizeof rows[0]; ++r) {
-        uint8_t one[16][16];
-        uint16_t one_map[16][16];
-        memset(one, 0, sizeof one);
-        one[0][0] = (uint8_t)rows[r].incoming;
-        fresh();
-        m->ga.mode = (uint8_t)(rows[r].pm << 3); /* 2M, sub-owned, priority mode PM1:PM0 */
-        store_stamp16(1U, one);
-        memset(one_map, 0, sizeof one_map);
-        one_map[0][0] = 1U;
-        put_map_entries(0x20000U, one_map);
-        m->word_ram[BUFFER_DOTS >> 1] = (uint8_t)(rows[r].existing << 4);
-        put_trace_line(0x30000U, 0U, 0U, 0U, 0x0800, 0);
-        m->now = 100U;
-        gfx_registers(0x0000U, 0x8000U, 1U, BUFFER_ORIGIN_REG, 0U, 1U, 1U);
-        sub_write(0x66U, 2U, 0xC000U);
-        run_devices_until(100U + 30U * SCD_SUB_CYCLE_TICKS);
-        {
-          char label[160];
-          snprintf(label, sizeof label, "graphics priority: %s (got %X)", rows[r].label, (unsigned)(m->word_ram[BUFFER_DOTS >> 1] >> 4));
-          row((uint32_t)(m->word_ram[BUFFER_DOTS >> 1] >> 4) == rows[r].expected, label);
+      uint32_t r, odd;
+      for (odd = 0; odd < 2U; ++odd)
+        for (r = 0; r < sizeof rows / sizeof rows[0]; ++r) {
+          uint8_t one[16][16];
+          uint16_t one_map[16][16];
+          uint8_t result, kept;
+          memset(one, 0, sizeof one);
+          one[0][0] = (uint8_t)rows[r].incoming;
+          fresh();
+          m->ga.mode = (uint8_t)(rows[r].pm << 3); /* 2M, sub-owned, priority mode PM1:PM0 */
+          store_stamp16(1U, one);
+          memset(one_map, 0, sizeof one_map);
+          one_map[0][0] = 1U;
+          put_map_entries(0x20000U, one_map);
+          /* the buffer dot is the high nibble of the first byte (even dot) or the low nibble (odd dot, horizontal offset 1); the other nibble holds a marker */
+          m->word_ram[BUFFER_DOTS >> 1] = odd ? (uint8_t)(0xB0U | rows[r].existing) : (uint8_t)((rows[r].existing << 4) | 0x6U);
+          put_trace_line(0x30000U, 0U, 0U, 0U, 0x0800, 0);
+          m->now = 100U;
+          gfx_registers(0x0000U, 0x8000U, 1U, BUFFER_ORIGIN_REG, odd, 1U, 1U);
+          sub_write(0x66U, 2U, 0xC000U);
+          run_devices_until(100U + 30U * SCD_SUB_CYCLE_TICKS);
+          result = odd ? (uint8_t)(m->word_ram[BUFFER_DOTS >> 1] & 0x0FU) : (uint8_t)(m->word_ram[BUFFER_DOTS >> 1] >> 4);
+          kept = odd ? (uint8_t)(m->word_ram[BUFFER_DOTS >> 1] >> 4) : (uint8_t)(m->word_ram[BUFFER_DOTS >> 1] & 0x0FU);
+          {
+            char label[200];
+            snprintf(label, sizeof label, "graphics priority (%s dot): %s (got %X, neighbour %X)", odd ? "odd" : "even", rows[r].label, (unsigned)result, (unsigned)kept);
+            row((uint32_t)result == rows[r].expected && kept == (odd ? 0xBU : 0x6U), label);
+          }
         }
-      }
+      for (y = 0; y < 16U; ++y)
+        for (x = 0; x < 16U; ++x) stamp16[y][x] = (uint8_t)(((x * 3U + y * 5U) % 15U) + 1U);
     }
 
     /* -- control bits -- */
@@ -544,6 +569,19 @@ int main(void) {
     row(scd_devices_can_raise(m, 1U) == 0, "graphics level 1: an idle ASIC cannot raise it (the STOP wake rule)");
     sub_write(0x33U, 1U, 0x00U);
     row((m->ga.pending & 0x02U) == 0U, "graphics level 1: disabling IEN1 drops a pending request");
+
+    /* -- $FF8064 is the live line counter: a write while the operation runs changes the remaining lines (GPGX) -- */
+    fresh();
+    m->ga.mode = 0U;
+    m->now = 50U;
+    gfx_registers(0, 0x8000U, 1U, BUFFER_ORIGIN_REG, 0, 8U, 100U);
+    sub_write(0x66U, 2U, 0xC000U);
+    m->now = 50U + 10U * 3U * (4U + 16U + ((8U + 3U) >> 2)) * SCD_SUB_CYCLE_TICKS;
+    scd_gfx_sync(m, m->now);
+    row(m->gfx.lines_left == 90U, "graphics: after 10 lines of 100 the counter reads 90 remaining");
+    row(sub_write(0x64U, 2U, 3U) == 0 && m->gfx.lines_left == 3U, "graphics: a write of $FF8064 while running sets the remaining lines (the live counter)");
+    run_devices_until(m->now + 3U * 3U * (4U + 16U + ((8U + 3U) >> 2)) * SCD_SUB_CYCLE_TICKS);
+    row(m->gfx.busy == 0U && m->gfx.lines_rendered == 13U, "graphics: ... and the operation ends after those lines (13 rendered in all)");
 
     /* -- unsupported shapes: typed, nothing mutated -- */
     fresh();
@@ -650,9 +688,11 @@ int main(void) {
       "CDD status: PAUSE with the absolute time 0:03:25 (LBA 100 + 150 = 250 blocks), audio track flag 0");
   CDD_TX(7U, 0U, 0U, 0U, 0U, 0U, 0U, 0U);
   row(m->cdd.status == SCD_CDD_PLAY && m->cdd.rx[0] == SCD_CDD_PLAY && m->cdd.rx[5] == 3U, "CDD resume: PLAY, RS1-RS8 unchanged");
+  m->ga.cdd_ctrl_hi = 0U; /* audio playing */
   CDD_TX(6U, 0U, 0U, 0U, 0U, 0U, 0U, 0U);
   row(m->cdd.status == 0x04U && m->cdd.rx[0] == 0x04U && m->ga.cdd_ctrl_hi == 1U && m->cdd.rx[5] == 3U, "CDD pause: PAUSE, no audio playing (control high byte 1), RS1-RS8 unchanged");
   CDD_TX(7U, 0U, 0U, 0U, 0U, 0U, 0U, 0U);
+  m->ga.cdd_ctrl_hi = 0U; /* audio playing */
   CDD_TX(10U, 0U, 0U, 0U, 0U, 0U, 0U, 0U);
   row(m->cdd.status == 0x04U && m->cdd.rx[0] == 0x04U && m->ga.cdd_ctrl_hi == 1U, "CDD N-track jump: the drive pauses, RS1-RS8 unchanged");
   {
@@ -703,6 +743,17 @@ int main(void) {
       r = dest == 3U ? sub_read(0x08U, 2U) : (main_read_word(0x08U, &mw), mw);
       row(r == 0xEEFFU && m->cdc.dac == 0x0106U, "CDC host: later reads return the last word and move nothing");
     }
+    /* level 5 is requested only on the /INT falling edge: with the /INT already asserted (a transfer-end interrupt pending) no new request */
+    fresh();
+    m->now = 9U;
+    sub_write(0x33U, 1U, 0x20U);
+    memcpy(&m->cdc.buffer[0x100], data, 6U);
+    CDC_REG(1U, 0x42U); CDC_REG(2U, 3U); CDC_REG(3U, 0U); CDC_REG(4U, 0x00U); CDC_REG(5U, 0x01U);
+    sub_write(0x04U, 1U, 3U);
+    CDC_REG(6U, 0U);
+    m->cdc.irq = 0x40U; /* DTEI already asserted */
+    (void)sub_read(0x08U, 2U);
+    row(m->cdc.edt == 1U && (m->ga.pending & 0x20U) == 0U, "CDC host: with /INT already asserted the transfer end raises no new level 5 (falling edge only)");
     /* the wrong processor does not advance a transfer */
     fresh();
     m->now = 5U;

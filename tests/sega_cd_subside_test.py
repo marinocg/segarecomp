@@ -75,6 +75,12 @@ def main():
                   dev["pcm"]["onoff"] == 0 and dev["pcm"]["enabled"] == 0,
                   "%s: the stopwatch, graphics and PCM state are untouched" % want["label"])
             check(common.run(exe, disc, 6000000, "--set", "sub:a6=" + case, "--slice-seed", "5")[1] == neg, "%s: the stop is identical under a sliced run" % want["label"])
+        # the STOP wake rule: with the main processor stopped for good, a sub waiting in STOP for the graphics interrupt is not idle
+        wcode, wake = common.run(exe, disc, 6000000, "--set", "main:d7=9", "--set", "sub:a6=9")
+        check(wcode == 0 and wake["result"] == "idle" and wake["ga"]["comstat"][0] == expected["wake"]["comstat0"] and
+              wake["ga"]["sub_flag"] == expected["wake"]["sub_flag"] and wake["sub_interrupts_taken"][1] == expected["wake"]["level1"],
+              "level-1 STOP wake: the sub resumes when the graphics operation ends, although the main processor is stopped (and the run then ends idle)")
+        check(common.run(exe, disc, 6000000, "--set", "main:d7=9", "--set", "sub:a6=9", "--slice-seed", "9")[1] == wake, "level-1 STOP wake: identical under a sliced run")
         baseline = report
         check(common.run(exe, disc, 6000000)[1] == baseline, "subside: two process runs give identical reports")
         partitions = [["--slice-ticks", str(t)] for t in (100000000, 777777777, 50000000000)]

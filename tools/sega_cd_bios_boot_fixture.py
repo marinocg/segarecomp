@@ -11,7 +11,8 @@ Cases (main d7 selects, the sub's a6 mirrors it):
   12  the boot: the SP replaces the stale code at $6000 and the sub enters it (COMSTAT1 = the SP's marker), then main places the IP and
       calls it: the IP writes its marker and branches to the application entry
   13  as 12, but one byte of the IP is corrupted after it was placed: no compiled variant matches, the typed stop code_bytes_mismatch
-  14  as 12, but the SP is never placed: the sub enters the stale epoch code (COMSTAT1 = $1111) - the epoch variant still runs
+  14  as 12, but the SP is never placed: the sub enters the stale epoch code (COMSTAT1 = $1111) - the epoch variant still runs - and the
+      IP is entered through a sign-extended register ($FFFF0000), which the 24-bit program counter must select as $FF0000
 usage: sega_cd_bios_boot_fixture.py build --out DIR --boot-ip FILE --boot-sp FILE  ->  DIR/bios.bin, DIR/expected.json (stdout)
 """
 import argparse
@@ -96,7 +97,11 @@ def main_program(sub_len, stale_len, ip_len, sp_len):
         copy_words(m, IP_SRC, 0xFF0000, ip_len, "copy_ip%d" % case)
         if case == 13:
             m.move("b", F.imm(0xFF), F.absl(0xFF0003))  # corrupt the low byte of the first instruction's immediate
-        m.jsr(F.absl(0xFF0000))
+        if case == 14:                                  # through a sign-extended register: the 24-bit program counter selects the same entry
+            m.move("l", F.imm(0xFFFF0000), F.a(2))
+            m.jsr(("ind", 2))
+        else:
+            m.jsr(F.absl(0xFF0000))
         m.label("not%d" % case)
     m.stop(0x2700)
     code = m.assemble()

@@ -491,6 +491,7 @@ void scd_devices_power_on(ScdMachine *m) {
   m->cdd.next_tick = SCD_CDD_TICK_TICKS;
   m->ga.stopwatch_origin = 0U;
   m->ga.stopwatch_base = 0U;
+  scd_pcm_reset(m);
 }
 
 /* RES0 = 0 from the sub (GPGX scd_reset(0)): the sub-side registers from $FF8030 up and $FF8004 clear and take their defaults,
@@ -514,6 +515,7 @@ void scd_peripheral_reset(ScdMachine *m) {
   scd_cdd_reset(m);
   scd_cdc_reset(m);
   scd_gfx_reset(m); /* the register file above $FF8030 clears: a running operation is abandoned */
+  scd_pcm_reset(m); /* GPGX scd_reset() ends with pcm_reset() */
   scd_log(m, 0x13U, 0U, 0U);
 }
 

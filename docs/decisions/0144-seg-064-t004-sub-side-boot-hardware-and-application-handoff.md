@@ -23,13 +23,15 @@ reached them (executed evidence first), batching each family.
    reset; a word write of any value clears the count and keeps the phase; byte accesses are typed stops (GPGX flags the width itself as
    uncertain). Contract section 17.
 2. **PCM write state.** The RF5C164's registers and 64 KiB wave RAM are stored (an odd-address byte write or the low byte of a word
-   write reaches the chip; the channel and bank selects follow `CTRL`); no sound is generated and every read is the typed stop
-   `pcm_unsupported`. The authentic boot path only writes.
+   write reaches the chip; the channel and bank selects follow `CTRL`); the power-on and the peripheral reset clear them as GPGX's
+   `pcm_reset` does; no sound is generated and every read is the typed stop `pcm_unsupported`. The authentic boot path only writes; the
+   register file and the whole wave RAM at the handoff are compared with the reference (below).
 3. **Graphics ASIC.** The stamp renderer of GPGX `gfx.c` for 2M Word RAM, with its line cost (3 sub cycles per Word RAM access), halting
    while main owns Word RAM, observation-point synchronization and a completion event raising sub level 1 with `IEN1`. It is tested
    against an independent geometric oracle (logical stamp bitmaps, sampled through the trace vectors, written into the cell-column image
    buffer) for identity, magnification, rotations, flips, rolls, repetition, clipping, all four priority modes, 16x16 and 32x32 stamps.
-   1M mode, byte accesses and parameter reads stay typed stops. *Lesson recorded:* the first implementation took the reference's
+   1M mode, byte accesses and parameter reads stay typed stops. Two documented deviations from GPGX: `$58` stores only the three
+   control bits (bit 15 is the read-only busy flag), while a `$64` write during an operation sets the remaining lines (the live counter). *Lesson recorded:* the first implementation took the reference's
    `4 * 3` as 12 sub cycles per access; the reference counts sub time in units of 4 per cycle (so 3 cycles). The error was invisible to
    the register-level tests and was found by the end-to-end comparison (the reference ran four times as many operations per frame).
 4. **CDD commands.** TOC (request codes 0-6), seek, pause, resume and N-track jump, from GPGX `cdd_process`; scan and tray stay typed
@@ -88,7 +90,7 @@ processor at the application entry after about 1,198 video frames of machine tim
 
 The residual differing bytes are confined to BIOS data variables (command/status message queues and counters). The reference's boot
 reaches the application IP about four frames (0.3 %) after this run and had processed three more 75 Hz CDD exchanges when its main
-processor reached the entry, which is the only structural difference. At the boot area's base (three instructions before the
+processor reached the entry, which is the only structural difference. At the boot area's base (a few instructions before the
 application entry) the states had matched in the same way: every register of both processors, all work RAM, Word RAM and an identical
 executed set on both processors, with 51 differing PRG RAM bytes of the same kind.
 
@@ -97,7 +99,11 @@ loop after three reads until the register is written (an idle-skip optimization)
 20x-1600x more often here, with identical resulting state; its VDP DMA takes time (a completion poll iterates thousands of times, here
 once). Both are recorded deviations (contract section 12), not defects of either side.
 
-**Independent review.** See the pull request (adversarial validator outcome, fast gate, focused suites).
+**Independent review.** The adversarial validator returned PASS on `8e6ceaa` (fast gate 121/121 plus the focused suites; the authentic
+comparison reproduced independently; 31 runtime mutations each failed a test) with one major finding - the peripheral reset did not
+reset the PCM state - and minor ones (seven mutations no test noticed, provenance labelling of the disc extents, a diagnostics bound,
+parsing and entry-range checks). All were corrected in one cycle with a test each; the corrected program was rebuilt cold and the
+comparison repeated (below).
 
 **Not claimed.** BIOS services executed after the handoff, the Z80, the H-interrupt line counter, CD-DA, 1M Word RAM graphics,
 Sonic CD progress, SEG-064 completion, Checkpoint E.
