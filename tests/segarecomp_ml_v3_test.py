@@ -158,5 +158,38 @@ class Selection(unittest.TestCase):
         self.assertEqual(v3.classify(**(kw | {"dev_complete_exists": False})), "RECALL_FAILED")
 
 
+class Unseal(unittest.TestCase):
+    def test_refuses_without_frozen_record_and_twice(self):
+        import tempfile, pathlib, json
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = pathlib.Path(tmp) / "unsealed.json"
+            with self.assertRaises(SystemExit):
+                v3.unseal_once(marker, pathlib.Path(tmp) / "missing.frozen.json")
+            self.assertFalse(marker.exists())
+            frozen = pathlib.Path(tmp) / "f.json"
+            frozen.write_text(json.dumps({"configuration": "M3_FROZEN", "policy": "B35"}))
+            fake = lambda path: json.loads(pathlib.Path(path).read_text())  # noqa: E731  (commit check replaced for the unit test)
+            rec = v3.unseal_once(marker, frozen, verify=fake)
+            self.assertEqual(rec["policy"], "B35")
+            self.assertTrue(marker.exists())
+            with self.assertRaises(SystemExit):
+                v3.unseal_once(marker, frozen, verify=fake)
+
+    def test_frozen_record_must_exist(self):
+        import pathlib
+        with self.assertRaises(SystemExit):
+            v3.verify_frozen_committed(pathlib.Path("/nonexistent/segarecomp_ml_v3.frozen.json"))
+
+    def test_seal_check_flags_sealed_truth_outside_store(self):
+        import tempfile, pathlib
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / "truth"
+            root.mkdir()
+            (root / "d05.cls").write_bytes(b"I")
+            self.assertEqual(v3.seal_check([root]), [])
+            (root / "e03.cls").write_bytes(b"I")
+            self.assertEqual(len(v3.seal_check([root])), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

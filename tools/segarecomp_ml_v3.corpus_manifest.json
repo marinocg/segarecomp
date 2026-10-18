@@ -469,5 +469,116 @@
   "over_threshold": {}
  },
  "plan_sha256": "48da926fe0729680fa966f8272148662a66f7a09becc9b7de59046a4c45e4e36",
- "schema": "segarecomp.ml_v3_corpus_manifest.v1"
+ "schema": "segarecomp.ml_v3_corpus_manifest.v1",
+ "sealed": {
+  "entries": [
+   {
+    "broad_aot": "accepted",
+    "decoder_audit": "pass",
+    "image_bytes": 2097152,
+    "image_sha1": "8f6eb584ed9487b8504fbc21d86783f58e6c9cd6",
+    "image_sha256": "5613637d267cf8d0bf3ff1e396d7929526cd5221cb8af06349528c8bedced1a0",
+    "label_rule": "listing semantics",
+    "lineage": "E01",
+    "opaque_classes_sha256": "41a39efe9258ecb318320df9457a39b106ed7465115eff3b24c8f3e253eb634a",
+    "opaque_starts_artifact_sha256": "158a6dc025c6a9b3cc84df3b9985f1398c5b4b64641b68537697ed01b69198aa",
+    "qualification": "QUALIFIED",
+    "raw_shingle_containment_in_development": {
+     "lineage": "D01",
+     "max_containment_in_dev": 0.0035
+    },
+    "source_revision": "4f3d7e852aed6edd7a869afe6c252813c4acf316",
+    "toolchain": "repository make init (bundled Linux AS Bld 212); listing build with -xx -L"
+   },
+   {
+    "lineage": "E02",
+    "qualification": "UNQUALIFIED",
+    "reason": "no exact rebuild: pinned US build differs in 1,263,943 bytes; closest pinned variant BETA differs by one header byte at 0x1F0",
+    "source_revision": "fb8a9c6c64ec27c05acea75f9556c928d2b9f081"
+   },
+   {
+    "broad_aot": "accepted",
+    "decoder_audit": "pass",
+    "image_bytes": 1048576,
+    "image_sha1": "28b904000b2863b6760531807760b571f1a5fc1d",
+    "image_sha256": "bc08b0188fb715ae469806843a8418d4937d2098b66d04227668865b3d4d5baa",
+    "label_rule": "listing semantics",
+    "lineage": "E03",
+    "opaque_classes_sha256": "f1612157e30d1aa50c8c57934c4eb23dac64e77d9406bb62397c4e9ee7d56b22",
+    "opaque_starts_artifact_sha256": "59cf5a289d2fb31372aa78b89ca885d6343563eb65e9048b38b29d4ee3c44963",
+    "qualification": "QUALIFIED",
+    "raw_shingle_containment_in_development": {
+     "lineage": "D01",
+     "max_containment_in_dev": 0.0054
+    },
+    "source_revision": "5856daef633cd7162acdf9ddf1a56fa81aedc65b",
+    "toolchain": "documented split.py + bundled Linux asl/s2p2bin; -L listing"
+   },
+   {
+    "lineage": "E04",
+    "qualification": "UNQUALIFIED",
+    "reason": "partial reconstruction: documented pipeline (Windows Python 2.7 + KENS DLLs, AS Bld 228) yields 512 KiB differing from the 1,280 KiB REV01 image",
+    "source_revision": "90f7be9961c78ca4df2deede0790789aea944f6e"
+   },
+   {
+    "broad_aot": "accepted",
+    "decoder_audit": "pass",
+    "image_bytes": 1048576,
+    "image_sha1": "24bf6342b98c09775089c9f39cfb2f6fbe7806f7",
+    "image_sha256": "d64c3c6c8439e5e5fb899122025321bb3f33c7d343facfc21b93f0c62ca2dc16",
+    "label_rule": "IDA rule: instruction rows only; all other bytes U",
+    "lineage": "E05",
+    "opaque_classes_sha256": "9d4345b4da7e204c19c51de08843d9e27d17dc552085fbeb02611977a2ebbbb2",
+    "opaque_starts_artifact_sha256": "ab31e383d4b1294d2cc7923c1a58ae885000b3f00efde5c3ca308530c40bf54d",
+    "qualification": "QUALIFIED",
+    "raw_shingle_containment_in_development": {
+     "lineage": "D01",
+     "max_containment_in_dev": 0.007
+    },
+    "source_revision": "d835779e55a36fa204edfa34c1a332d9e3836f6c",
+    "toolchain": "ASM68K (SN 68k 2.53, the pinned SF1DISASM copy) under Wine, build.bat options; macro-expanded listing /m (output unchanged)"
+   },
+   {
+    "broad_aot": "effective_address_not_24bit",
+    "decoder_audit": "pass",
+    "image_bytes": 131072,
+    "image_sha1": "04a48580d2008410087e875865d6bc0e8fcf2c1d",
+    "image_sha256": "0cdb580a87c88e6f81248253f8a2a549d41ded5632344c656b8b5ff8e06caff6",
+    "label_rule": "SGDK application code; SDK/runtime U",
+    "lineage": "E06",
+    "opaque_classes_sha256": "4c169c1f4d88f7f00ad54ec8338f3f4c189575ad1c7d38ac3b06f9cb8d0cce07",
+    "opaque_starts_artifact_sha256": null,
+    "qualification": "QUALIFIED",
+    "raw_shingle_containment_in_development": {
+     "lineage": "D12",
+     "max_containment_in_dev": 0.6603
+    },
+    "source_revision": "eb7dc3044f9d2f76047f3b3573971bf86575ca52",
+    "toolchain": "project procedure: make -f /sgdk/makefile.gen in the pinned SGDK image (digest b0bb8a71...); genesis/tank-battle only"
+   },
+   {
+    "broad_aot": "effective_address_not_24bit",
+    "decoder_audit": "pass",
+    "image_bytes": 1179648,
+    "image_sha1": "fbcbc8585394b3701f380ff9d07ffd307afec3ca",
+    "image_sha256": "c0cb13ec99d9cbe6b9cb033a1cdaff3c6a21c16366655a5cc10f5d46e5d13ae9",
+    "label_rule": "SGDK application code; SDK/runtime U",
+    "lineage": "E07",
+    "opaque_classes_sha256": "1514e859a843957025862be11490cfffa3434b370b539e0f54051e8e39259268",
+    "opaque_starts_artifact_sha256": null,
+    "qualification": "QUALIFIED",
+    "raw_shingle_containment_in_development": {
+     "lineage": "D12",
+     "max_containment_in_dev": 0.0476
+    },
+    "source_revision": "0bdba1e0ea3d7a2e2166f1dde9636a72722c333a",
+    "toolchain": "project procedure: tools/gen_*.py + resample_wavs.py on the host, make GDK=/sgdk -f Makefile release in the pinned SGDK image"
+   }
+  ],
+  "full_gate_preclassification": "CORPUS_INSUFFICIENT",
+  "qualified": 5,
+  "required": 7,
+  "store": "private sealed/ only; training/selection tooling refuses it; one-shot unseal requires the committed frozen record",
+  "tmss": "TMSS_DIAGNOSTIC_UNAVAILABLE (no authorized firmware input; reconstruction from public source forbidden)"
+ }
 }

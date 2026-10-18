@@ -3,9 +3,9 @@
 - Status: Accepted. Results record for SEG-072-T001 (development corpus) and SEG-072-T002 (sealed corpus and TMSS), appended after the
   frozen pre-registration (ADR 0151, plan digest `48da926fe0729680fa966f8272148662a66f7a09becc9b7de59046a4c45e4e36`). No model was fitted,
   scored or benchmarked before this record and the sealed binding were committed.
-- Classification (T001): **development 11 of 12 qualified.** The pre-registered development minimum (12) is not met, so the generalization
-  evidence is incomplete; qualified-entry results are reported separately and no model may be promoted on this cohort (ADR 0151). The
-  sealed section is appended by T002.
+- Classification: **development 11 of 12 qualified, sealed 5 of 7 qualified, TMSS `TMSS_DIAGNOSTIC_UNAVAILABLE`.** The pre-registered
+  minimums (12 / 7) are not met, so the generalization evidence is incomplete and the full sealed gate is pre-classified
+  `CORPUS_INSUFFICIENT`; qualified-entry results are reported separately and no model may be promoted on this cohort (ADR 0151).
 - Machine-readable identities and aggregates: `tools/segarecomp_ml_v3.corpus_manifest.json` (digests and counts only).
 
 ## Development corpus (T001)
@@ -75,6 +75,32 @@ merge. Folds: leave-one-lineage-out over the 11 qualified lineages.
 - Erratum to ADR 0151 `labels.historical_titles`: under the v3 cell rule a cell holding only continuation bytes of an instruction started in the
   previous cell (plus data) is masked, where gen2 labelled it negative: s1 2, sk 4, sf1 2 cells. The frozen-M3 reproduction uses the unchanged
   gen2 labels; M3-R simply gives these 8 cells no loss.
+
+## Sealed corpus and TMSS (T002)
+
+Built into the private `sealed/` store only; extraction summaries were written to private files and only status and digests were displayed.
+Binding (`corpus_manifest.json` `sealed`): source revision, toolchain, image SHA-256/SHA-1, opaque start and class digests. Decoder audit:
+pass/fail only (all pass).
+
+| lineage | result |
+|---|---|
+| E01 Alien Soldier (JP) | **QUALIFIED**: `make init` reproduces the canonical image (SHA-1 `8f6eb584…`), listing build identical; extraction deterministic |
+| E02 Landstalker (US) | **UNQUALIFIED**: the pinned US build differs from the local image in 1,263,943 bytes; the closest pinned variant (BETA) differs by one header byte at `0x1F0` - not an exact rebuild (brief: no qualification on code equivalence) |
+| E03 Kid Chameleon | **QUALIFIED**: documented split + `asl` build byte-identical to the local image |
+| E04 QuackShot | **UNQUALIFIED**: the documented pipeline (Windows Python 2.7 + KENS DLLs under Wine; AS Bld 228 - Bld 89 lacks `-maxerrors`, Bld 212's `p2bin` cannot take the extension-less name `assemble.py` passes) yields a 512 KiB image differing from the operator's 1,280 KiB REV01 image in size and 494,904 bytes: a partial reconstruction |
+| E05 Sonic Spinball | **QUALIFIED**: ASM68K 2.53 build byte-identical; macro-expanded listing (`/m`, output unchanged); IDA rule: only instruction rows are labels, all other bytes `U` (the 24 FIXME rows are `dc.l`/`dc.w`) |
+| E06 Tank Battle | **QUALIFIED**: the project's documented SGDK-image build, three identical builds |
+| E07 The Weave | **QUALIFIED**: the project's codegen + SGDK-image Makefile build, three identical builds |
+| TMSS | **`TMSS_DIAGNOSTIC_UNAVAILABLE`**: no authorized TMSS firmware input exists locally; building it from public source would reconstruct commercial binary data |
+
+Raw-byte 12-byte shingle containment (no sealed labels): E01 0.004, E03 0.005, E05 0.007, E07 0.048, **E06 0.660 in D12** - shared SGDK 2.x
+runtime bytes; reported as correlated (no replacement); SDK bytes are `U` in sealed scoring, and application-code independence is measured
+after unsealing. Broad AOT rejects E06 and E07 (`effective_address_not_24bit`). Disclosures carried: historical ROM-only exposure of Alien
+Soldier (another regional image) and Landstalker; Spinball's Sonic ecosystem; E06/E07 share the SGDK/GCC ecosystem (cross-project, not
+cross-compiler-family, evidence).
+
+Barrier: sealed truth exists only under `sealed/`; `segarecomp_ml_v3.py` refuses sealed ids and that path for development/training work
+(tested); the unseal path requires the committed frozen record (T005).
 
 ## Extractor adapters added (strictly additive; every earlier digest reproduces)
 

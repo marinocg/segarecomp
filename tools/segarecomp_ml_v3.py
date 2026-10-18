@@ -547,6 +547,19 @@ def verify_frozen_committed(frozen_path=FROZEN_PATH) -> dict:
     return rec
 
 
+def unseal_once(marker_path, frozen_path=FROZEN_PATH, verify=verify_frozen_committed) -> dict:
+    """The one-shot sealed gate: the committed frozen record must verify and no previous unseal marker may exist; the marker is written
+    BEFORE any sealed truth is read, so an interrupted run can never be repeated silently."""
+    marker = pathlib.Path(marker_path)
+    if marker.exists():
+        raise SystemExit("sealed corpus already opened once (marker present): refusing a second evaluation")
+    rec = verify(frozen_path)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps({"frozen_record_sha256": sha256_bytes(pathlib.Path(frozen_path).read_bytes()),
+                                  "configuration": rec["configuration"], "policy": rec["policy"]}, sort_keys=True))
+    return rec
+
+
 # --------------------------------------------------------------------------------------------------------------------------- CLI
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
