@@ -1,6 +1,9 @@
 #include "sega_cd_command.hpp"
 
 #include <cstdio>
+#include <algorithm>
+#include <cctype>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -254,7 +257,7 @@ std::optional<std::vector<std::uint8_t>> read_file(const std::string &path, std:
 }
 
 std::optional<std::uint32_t> parse_u32(const std::string &text) {
-  if (text.empty() || text.size() > 12U) return std::nullopt;
+  if (text.empty() || text.size() > 12U || !std::isdigit(static_cast<unsigned char>(text.front()))) return std::nullopt;
   try {
     std::size_t used = 0;
     const unsigned long value = std::stoul(text, &used, 0);
@@ -281,7 +284,8 @@ std::optional<scd::Processor> parse_processor(const std::string &text) {
 
 // SEG-064-T002 (ADR 0142): the BIOS-image profile emission. Returns the process status.
 int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios_path, const std::vector<std::string> &copies,
-                      const std::vector<std::string> &admits, const std::string &out_path, std::uint32_t partition_window) {
+                      const std::vector<std::string> &admits, const std::vector<std::string> &disc_images,
+                      std::optional<std::uint32_t> application_entry, const std::string &out_path, std::uint32_t partition_window) {
   const auto bad = [](const std::string &stage, const std::string &error) {
     std::cout << "{\"ok\":false,\"stage\":\"" << stage << "\",\"error\":\"" << error << "\"}\n";
     return 7;
@@ -301,6 +305,33 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     if (!proc || !base || !off || !len) return bad("copy", "copy_syntax");
     inputs.copies.push_back(scd::CopyImage{*proc, *base, *off, *len});
   }
+  for (const auto &text : disc_images) {  // main|sub:<track-1 byte offset>:<base>:<length> (SEG-064-T004)
+    const auto f = split(text, ':');
+    const auto proc = f.size() == 4U ? parse_processor(f[0]) : std::nullopt;
+    const auto off = f.size() == 4U ? parse_u32(f[1]) : std::nullopt;
+    const auto base = f.size() == 4U ? parse_u32(f[2]) : std::nullopt;
+    const auto len = f.size() == 4U ? parse_u32(f[3]) : std::nullopt;
+    if (!proc || !off || !base || !len || *len == 0U || *len > 0x80000U) return bad("disc_image", "disc_image_syntax");
+    // The extent is read through the verified disc reader from the logical user data of track 1 (cooked 2048-byte blocks).
+    if (disc.tracks().empty() || disc.tracks().front().type == segarecomp::DiscTrackType::audio) return bad("disc_image", "first_track_not_data");
+    const auto &first = disc.tracks().front();
+    const std::uint64_t end = static_cast<std::uint64_t>(*off) + *len;
+    if ((end + segarecomp::kDiscUserBytes - 1U) / segarecomp::kDiscUserBytes > first.sector_count) return bad("disc_image", "disc_image_outside_track");
+    scd::DiscImageSpec spec{*proc, *off, *base, *len, {}};
+    spec.bytes.reserve(*len);
+    std::array<std::uint8_t, segarecomp::kDiscUserBytes> block{};
+    for (std::uint32_t at = *off; at < end;) {
+      const std::uint32_t lba = first.first_lba + at / segarecomp::kDiscUserBytes;
+      if (disc.read_user_data(lba, std::span<std::uint8_t, segarecomp::kDiscUserBytes>(block)) != segarecomp::DiscError::none)
+        return bad("disc_image", "disc_image_unreadable");
+      const std::uint32_t inside = at % segarecomp::kDiscUserBytes;
+      const std::uint32_t take = static_cast<std::uint32_t>(std::min<std::uint64_t>(segarecomp::kDiscUserBytes - inside, end - at));
+      spec.bytes.insert(spec.bytes.end(), block.begin() + inside, block.begin() + inside + take);
+      at += take;
+    }
+    inputs.disc_images.push_back(std::move(spec));
+  }
+  if (application_entry) inputs.application_entry = *application_entry;
   for (const auto &text : admits) {
     auto f = split(text, ':');
     scd::Admission a;
@@ -383,8 +414,8 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
 
 int emit(int argc, char **argv) {
   std::optional<std::string> cue, out_path, expected, modules, bios;
-  std::vector<std::string> copies, admits;
-  std::optional<std::uint32_t> partition_window;
+  std::vector<std::string> copies, admits, disc_images;
+  std::optional<std::uint32_t> partition_window, application_entry;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
@@ -393,7 +424,14 @@ int emit(int argc, char **argv) {
     else if (arg == "--modules" && i + 1 < argc) modules = argv[++i];
     else if (arg == "--bios" && i + 1 < argc) bios = argv[++i];
     else if (arg == "--copy-image" && i + 1 < argc) copies.emplace_back(argv[++i]);
-    else if (arg == "--admit" && i + 1 < argc) admits.emplace_back(argv[++i]);
+    else if (arg == "--disc-image" && i + 1 < argc) disc_images.emplace_back(argv[++i]);
+    else if (arg == "--application-entry" && i + 1 < argc && !application_entry) {
+      application_entry = parse_u32(argv[++i]);
+      if (!application_entry || *application_entry < 0x00200000U || *application_entry > 0x00FFFFFFU || (*application_entry & 1U) != 0U) {
+        std::cerr << "segarecomp: --application-entry must be an even address in $200000-$FFFFFF (Word RAM or work RAM)\n";
+        return 2;
+      }
+    } else if (arg == "--admit" && i + 1 < argc) admits.emplace_back(argv[++i]);
     else if (arg == "--partition-window" && i + 1 < argc && !partition_window) {
       partition_window = parse_u32(argv[++i]);
       if (!partition_window || !scd::valid_partition_window(*partition_window)) {
@@ -405,7 +443,7 @@ int emit(int argc, char **argv) {
       return 2;
     }
   }
-  if (!cue || !out_path || (!bios && (!copies.empty() || !admits.empty() || partition_window)) || (bios && modules)) {
+  if (!cue || !out_path || (!bios && (!copies.empty() || !admits.empty() || !disc_images.empty() || application_entry || partition_window)) || (bios && modules)) {
     std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
     return 2;
   }
@@ -414,7 +452,7 @@ int emit(int argc, char **argv) {
     std::cout << "{\"ok\":false,\"stage\":\"disc\",\"error\":\"" << segarecomp::disc_error_name(loaded.error) << "\"}\n";
     return 3;
   }
-  if (bios) return emit_bios_profile(*loaded.disc, *bios, copies, admits, *out_path, partition_window.value_or(0U));
+  if (bios) return emit_bios_profile(*loaded.disc, *bios, copies, admits, disc_images, application_entry, *out_path, partition_window.value_or(0U));
   const auto produced = scd::produce_boot_images(*loaded.disc);
   if (!produced.images) {
     std::cout << "{\"ok\":false,\"stage\":\"boot\",\"error\":\"" << scd::boot_image_error_name(produced.error) << "\"}\n";

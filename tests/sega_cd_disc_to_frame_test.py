@@ -119,7 +119,7 @@ def main():
             ("lba_pregap", ["--cd-lba", "45"], "cd_read_audio_track"),
             ("lba_audio", ["--cd-lba", "200"], "cd_read_audio_track"),
             ("dma_prg_ram", ["--dma-dest", "5"], "cdc_destination_unsupported"),
-            ("dma_host", ["--dma-dest", "3"], "cdc_destination_unsupported"),
+            ("dma_pcm", ["--dma-dest", "4"], "cdc_destination_unsupported"),  # destinations 2/3 (host reads) are SEG-064-T004
             ("read_past_track", ["--cd-lba", "39"], "cd_read_audio_track"),
         ]
         for name, options, stop in negatives:

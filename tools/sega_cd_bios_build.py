@@ -27,7 +27,8 @@ C, objects and snapshots stay in --work (keep it in ignored storage when the ima
 from standard input and streams it to every emit and run through an anonymous pipe (POSIX), so a locally held image need not be
 copied to disk.
 
-usage: sega_cd_bios_build.py --segarecomp EXE --cc CC --cue DISC --bios IMAGE|- --work DIR [--copy-image SPEC]...
+usage: sega_cd_bios_build.py --segarecomp EXE --cc CC --cue DISC --bios IMAGE|- --work DIR [--copy-image SPEC]... [--disc-image SPEC]...
+                             [--application-entry ADDRESS]
                              [--budget N] [--timeout S] [--cflags "..."] [--partition-window BYTES] [--jobs N]
 prints the build summary JSON; exit 0 on a confirmed build, 1 on a typed build failure, 2 on usage errors.
 """
@@ -252,6 +253,10 @@ class Driver:
             cmd = [self.args.segarecomp, "sega-cd", "emit", "--cue", self.args.cue, "--bios", bios, "--out", c_path]
             for spec in self.args.copy_image or []:
                 cmd += ["--copy-image", spec]
+            for spec in self.args.disc_image or []:
+                cmd += ["--disc-image", spec]
+            if self.args.application_entry:
+                cmd += ["--application-entry", self.args.application_entry]
             for spec in admits:
                 cmd += ["--admit", spec]
             if self.window:
@@ -365,6 +370,8 @@ def main(argv=None):
     parser.add_argument("--bios", required=True, help="the BIOS image, or - to read it once from standard input (streamed by pipe)")
     parser.add_argument("--work", required=True)
     parser.add_argument("--copy-image", action="append")
+    parser.add_argument("--disc-image", action="append", help="main|sub:<system-area offset>:<base>:<length>: a disc extent the BIOS places in work RAM (SEG-064-T004)")
+    parser.add_argument("--application-entry", help="the main address whose first execution ends the run (typed stop application_handoff)")
     parser.add_argument("--budget", type=int, default=5_000_000)
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--cflags", default="")

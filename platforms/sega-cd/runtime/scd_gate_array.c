@@ -6,7 +6,7 @@
  *   - "!LDS/!UDS ignored" registers ($FF8002/3, $FF800E/F, $FF8030/1, $A1200E/F) act on a byte write to either half;
  *   - word-only sub registers ($FF8008-$FF800D) take a byte write as the byte duplicated into both halves;
  *   - RES0 = 0 is the peripheral reset (scd_peripheral_reset); SBRQ reads 0 when the sub is halted in STOP.
- * Devices this profile does not model (stopwatch, fader output, font, graphics, subcode, CDC host data, the BIOS H-INT vector)
+ * Devices this profile does not model (fader output, font, graphics, subcode, CDC host data, the BIOS H-INT vector)
  * remain typed stops carrying the side, offset, width and direction. */
 #include "scd_runtime.h"
 
@@ -148,7 +148,7 @@ static int scd_ga_main_read_byte(ScdMachine *m, uint32_t index, uint32_t *value,
   case 0x06: *value = m->ga.led; return 0;
   case 0x07: *value = 1U; return 0;
   case 0x08:
-  case 0x09: *value = 0xFFU; return 0; /* the CDC host-data register keeps its reset value: the host path is not modelled */
+  case 0x09: *value = index == 0x08U ? (uint32_t)(m->cdc.host_word >> 8) : (uint32_t)(m->cdc.host_word & 0xFFU); return 0; /* a byte read: no side effect */
   case 0x0A:
   case 0x0B: {
     uint32_t word;
@@ -172,7 +172,15 @@ static int scd_ga_main_read_byte(ScdMachine *m, uint32_t index, uint32_t *value,
   return scd_ga_unsupported(m, SCD_MAIN, 0xA12000U, index, 1U, 0, pc); /* $0C/$0D: stopwatch */
 }
 
+static int scd_ga_main_access_inner(ScdMachine *m, uint32_t index, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
+
 int scd_ga_main_access(ScdMachine *m, uint32_t index, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
+  const int result = scd_ga_main_access_inner(m, index, width, is_write, value, pc);
+  if (result == 0 && m->access_trace != NULL) scd_trace_ga(m, SCD_MAIN, index, width, is_write, *value);
+  return result;
+}
+
+static int scd_ga_main_access_inner(ScdMachine *m, uint32_t index, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
   scd_log(m, is_write ? 0x21U : 0x20U, index, is_write ? *value : 0U);
   if (!is_write) {
     uint32_t high = 0U, low = 0U;
@@ -182,7 +190,7 @@ int scd_ga_main_access(ScdMachine *m, uint32_t index, uint32_t width, int is_wri
       if (m->bios == NULL) return scd_ga_stop(m, SCD_MAIN, SCD_STOP_BIOS_ABSENT, 0xA12006U, 2U, 0, pc);
       *value = m->hint_vector;
       return 0;
-    case 0x08: return scd_ga_stop(m, SCD_MAIN, SCD_STOP_CDC_DESTINATION_UNSUPPORTED, 0xA12008U, 2U, 0, pc); /* host data */
+    case 0x08: scd_cdc_host_read(m, 2U, value); return 0; /* SEG-064-T004: host data (GPGX ctrl_io_read_word case 0x08) */
     case 0x04:
       if (scd_ga_main_read_byte(m, 0x04U, &high, pc) != 0) return 1;
       *value = high << 8; /* the low byte (CDC register address) reads 0 */
@@ -244,9 +252,25 @@ int scd_ga_main_access(ScdMachine *m, uint32_t index, uint32_t width, int is_wri
 
 /* ---- sub side ------------------------------------------------------------------------------------------------------------- */
 
-/* Offsets of devices the profile does not model: stopwatch $0C, font $4C-$57, graphics $58-$67, subcode $100-$1FF. */
-static int scd_ga_sub_unmodelled(uint32_t offset) {
-  return offset == 0x0CU || offset == 0x0DU || (offset >= 0x4CU && offset < 0x68U) || offset >= 0x100U;
+/* Offsets of devices the profile does not model: font $4C-$57, subcode $100-$1FF. */
+static int scd_ga_sub_unmodelled(uint32_t offset) { return (offset >= 0x4CU && offset < 0x58U) || offset == 0x67U || offset >= 0x100U; }
+
+/* SEG-064-T004: the stopwatch ($FF800C, GPGX scd_read_word/scd_write_word case 0x0c; GPGX flags the width "(word access only ?)", so a
+ * byte access is not modelled and stops typed). 12 bits, one count per 384 sub cycles (TIMERS_SCYCLES_RATIO) on a free-running grid;
+ * a write of any value clears the count and keeps the grid phase; the peripheral reset re-anchors the grid. */
+static uint32_t scd_stopwatch_count(const ScdMachine *m) {
+  return (uint32_t)((m->now - m->ga.stopwatch_origin) / SCD_STOPWATCH_UNIT_TICKS);
+}
+
+static int scd_stopwatch_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
+  if (width != 2U || offset != 0x0CU) return scd_ga_unsupported(m, SCD_SUB, 0xFF8000U, offset, width, is_write, pc);
+  if (is_write) {
+    m->ga.stopwatch_base = scd_stopwatch_count(m);
+    scd_log(m, 0x38U, 0U, m->ga.stopwatch_base);
+  } else {
+    *value = (scd_stopwatch_count(m) - m->ga.stopwatch_base) & 0x0FFFU;
+  }
+  return 0;
 }
 
 static int scd_ga_sub_read_byte(ScdMachine *m, uint32_t offset, uint32_t *value, uint32_t pc) {
@@ -314,11 +338,13 @@ int scd_cdc_sub_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_wr
 static int scd_ga_sub_access_inner(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
   int plain;
   if (scd_ga_sub_unmodelled(offset)) return scd_ga_unsupported(m, SCD_SUB, 0xFF8000U, offset, width, is_write, pc);
+  if (offset == 0x0CU || offset == 0x0DU) return scd_stopwatch_access(m, offset, width, is_write, value, pc);
   if (offset == 0x06U && width == 1U) { /* $FF8006 byte: the LED register as GPGX keeps it ($FF8007 is the CDC data port) */
     if (is_write) m->ga.led = (uint8_t)*value;
     else *value = m->ga.led;
     return 0;
   }
+  if (offset >= 0x58U && offset < 0x67U) return scd_gfx_register_access(m, offset, width, is_write, value, pc);
   if (offset >= 0x04U && offset < 0x0CU) return scd_cdc_sub_access(m, offset, width, is_write, value, pc);
   if (offset == 0x30U || offset == 0x31U) return scd_timer_access(m, offset, width, is_write, value, pc);
   if (offset >= 0x36U && offset < 0x4CU) return scd_cdd_register_access(m, offset, width, is_write, value, pc);
@@ -381,6 +407,7 @@ int scd_ga_sub_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_wri
   int result;
   scd_log(m, is_write ? 0x31U : 0x30U, offset, is_write ? *value : 0U);
   result = scd_ga_sub_access_inner(m, offset, width, is_write, value, pc);
+  if (result == 0 && m->access_trace != NULL) scd_trace_ga(m, SCD_SUB, offset, width, is_write, *value);
   scd_cdd_refresh(m, was_active);
   return result;
 }

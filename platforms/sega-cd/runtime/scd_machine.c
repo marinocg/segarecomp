@@ -12,7 +12,7 @@ static const char *const scd_stop_names[SCD_STOP_CLASS_COUNT] = {
     "exception_vector_not_compiled", "exception_stack_invalid", "trace_unsupported", "interrupt_source_unsupported",
     "cdc_destination_unsupported", "cdd_command_unsupported", "cd_read_audio_track", "cd_read_failed", "internal", "image_unknown",
     "image_bytes_mismatch", "image_partially_overwritten", "ambiguous_image", "image_entry_not_compiled", "stale_image_selection",
-    "materialized_image_unverified", "materialization_captured", "main_device_unsupported"};
+    "materialized_image_unverified", "materialization_captured", "main_device_unsupported", "application_handoff"};
 
 const char *scd_stop_class_name(ScdStopClass stop_class) {
   return (unsigned)stop_class < SCD_STOP_CLASS_COUNT ? scd_stop_names[stop_class] : "unknown";
@@ -204,7 +204,7 @@ static int scd_sub_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_w
   }
   if (a < UINT32_C(0xE0000)) return scd_word_ram_access(m, SCD_SUB, a, width, is_write, value, pc);
   if (a < UINT32_C(0xF0000)) return scd_fail_access(m, SCD_SUB, SCD_STOP_BACKUP_RAM_UNSUPPORTED, pc, address, width, is_write);
-  if (!(a & 0x8000U)) return scd_fail_access(m, SCD_SUB, SCD_STOP_PCM_UNSUPPORTED, pc, address, width, is_write);
+  if (!(a & 0x8000U)) return scd_pcm_access(m, a & 0x7FFFU, width, is_write, value, pc);
   return scd_ga_sub_access(m, a & 0x1FFU, width, is_write, value, pc);
 }
 
@@ -472,7 +472,7 @@ static int scd_sub_accept_interrupt(ScdMachine *m) {
   segarecomp_m68k_interrupt_sample(&c->irq, scd_sub_request_level(m));
   level = segarecomp_m68k_interrupt_recognized_level(&c->irq, c->sr);
   if (level == 0U) return 0;
-  if (level == 1U || level == 6U || level == 7U) {
+  if (level == 6U || level == 7U) {
     scd_fail(m, SCD_SUB, SCD_STOP_INTERRUPT_SOURCE_UNSUPPORTED, c->pc, level);
     return -1;
   }
@@ -485,6 +485,7 @@ static int scd_sub_accept_interrupt(ScdMachine *m) {
   if (level == 2U) m->ga.ifl2 = 0U;
   m->sub_interrupts_taken[level] += 1U;
   scd_log(m, 0x61U, level, handler);
+  if (m->event_log != NULL) scd_event(m, "sub_irq", level);
   c->pc = handler;
   scd_retire(m, SCD_SUB, segarecomp_m68k_exception_entry_cycles(24U + level));
   return 1;
@@ -522,7 +523,7 @@ static int scd_sub_held(const ScdMachine *m) { return m->ga.sub_halted || m->ga.
 /* The highest level any enabled sub source could still raise (for the STOP wake rule). */
 static uint32_t scd_sub_max_wake_level(const ScdMachine *m) {
   uint32_t level, best = 0U;
-  for (level = 2U; level <= 5U; ++level) {
+  for (level = 1U; level <= 5U; ++level) {
     if (!((m->ga.interrupt_enable >> level) & 1U)) continue;
     if ((m->ga.pending >> level) & 1U) best = level;
     else if (level == 2U && !m->cpu[SCD_MAIN].irq.stopped) best = level; /* main may still raise IFL2 */
@@ -585,8 +586,30 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
       if (taken < 0) return SCD_RUN_STOPPED;
       if (taken > 0) continue;
     }
+    /* SEG-064-T004: the BIOS-image profile ends at the application handoff - before the first instruction of the IP runs - but only if
+     * that instruction could run: the generated dispatch is called in verify-only mode, which performs the normal compiled-entry lookup
+     * and variant selection by live bytes (exact bytes of the whole instruction) and returns before the instruction body. A missing
+     * entry or a byte mismatch is its typed stop (entry_not_compiled, code_bytes_mismatch); nothing retires, writes or changes; the
+     * processor's pc and prefetch are restored. */
+    if (cpu == SCD_MAIN && m->authentic != NULL && m->authentic->ip_entry != 0U && (m->cpu[SCD_MAIN].pc & UINT32_C(0x00FFFFFF)) == m->authentic->ip_entry) {
+      ScdCpu *const c = &m->cpu[SCD_MAIN];
+      const uint32_t saved_pc = c->pc, saved_prefetch = c->prefetch;
+      int failed;
+      m->verify_only = 1U;
+      failed = m->program->processors[SCD_MAIN].dispatch(m);
+      m->verify_only = 0U;
+      c->pc = saved_pc;
+      c->prefetch = saved_prefetch;
+      if (failed != 0) {
+        if (m->stop.stop_class == SCD_STOP_NONE) scd_fail(m, SCD_MAIN, SCD_STOP_INTERNAL, saved_pc, saved_pc);
+        return SCD_RUN_STOPPED;
+      }
+      scd_fail(m, SCD_MAIN, SCD_STOP_APPLICATION_HANDOFF, saved_pc, saved_pc);
+      return SCD_RUN_STOPPED;
+    }
     if (m->instruction_budget == 0U) return SCD_RUN_BUDGET;
     m->instruction_budget -= 1U;
+    if (m->coverage != NULL) scd_coverage_note(m, cpu, m->cpu[cpu].pc);
     if (cpu == SCD_SUB) {
       /* A sub access to 2M Word RAM it does not own withholds DTACK: the instruction is abandoned with the processor's registers
        * as they were before it (GPGX s68k_pulse_wait / s68k_clear_wait; memory written earlier in the instruction stays) and

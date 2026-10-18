@@ -19,11 +19,15 @@ observes in a result block, then builds a small sub program in PRG RAM and relea
   +$20 BIOS $70 read through the main bus ($FFFF: the H-INT default vector's high word)
   +$22..+$25 MOVE.L $400100,D0 on the empty cartridge slot: the next instruction word twice (GPGX open bus)
   +$26 TST.B-style byte read $400001: the low byte of the next instruction word
+  +$28 VRAM words $1300-$1306 after a 68K->VDP DMA from 2M Word RAM owned by main (SEG-064-T004; checksum)
   +$FF $A5 when main reached the epoch
 The sub program writes COMSTAT0 = $C0DE and stops.
 
+Handoff (main d7 = 11): after the epoch the main program calls the documented IP entry ($FF0000): the run ends with the typed stop
+application_handoff before any instruction there runs (SEG-064-T004).
 Negatives (main d7): 1 an open-bus read by a MOVE whose destination still has extension words (prefetch not established); 2 a Z80
-RAM read after the Z80 has been runnable; 3 a 68K->VDP DMA from Word RAM; 4 the H-interrupt enabled (line counter not modelled: stops at the write); 8 the same by a long write that also clears it again; 9 a
+RAM read after the Z80 has been runnable; 3 a 68K->VDP DMA from the PRG-RAM window; 10 a 68K->VDP DMA from Word RAM after DMNA handed
+it to the sub; 4 the H-interrupt enabled (line counter not modelled: stops at the write); 8 the same by a long write that also clears it again; 9 a
 control word 101x xxxx (GPGX: a register write; the device host: a command word) is not modelled;
 5 a VDP copy DMA (not modelled by the device); 6 one byte of the sub image corrupted before the release; 7 the image copied into
 PRG-RAM bank 1 (the wrong mapping) - both stop at the epoch before the sub retires anything.
@@ -45,6 +49,7 @@ FAULT = 0x0C00
 VINT_HANDLER = 0x0C40
 SUB_SRC = 0x0D00
 DMA_ROM = 0x0F00
+ENTRY_ROM = 0x0F80  # two NOPs: the code the handoff case places at the application entry $FF0000 (a verbatim ROM copy image)
 RESULT = 0xFFC000
 THUNK = 0xFFF900
 FRAMES = 0xFFC080
@@ -57,6 +62,8 @@ SUB_SSP = 0x2000
 SUB_ENTRY = 0x0100
 GA_SUB = 0xFF8000
 DMA_WORDS = (0x1357, 0x2468, 0x9ABC, 0xDEF0)
+WORD_RAM = 0x200100
+WORD_DMA_WORDS = (0x0A1B, 0x2C3D, 0x4E5F, 0x6071)
 ROM_DMA_WORDS = (0x0F1E, 0x2D3C, 0x4B5A, 0x6978)
 
 
@@ -88,10 +95,15 @@ def dma_from(m, source, words, vram):
     vdp_cmd(m, 0x40000080 | ((vram & 0x3FFF) << 16) | (vram >> 14))
 
 
+NEG_RANGES = {}  # case -> [first, end) of the instructions its body emits (the faulting instruction lies inside)
+
+
 def negative(m, case, body):
     m.immop("cmp", "w", case, F.d(7))
     m.bcc("ne", "neg%d" % case)
+    start = m.pc
     body(m)
+    NEG_RANGES[case] = [start, m.pc]
     m.label("neg%d" % case)
 
 
@@ -155,7 +167,12 @@ def main_program(sub_len, layout):
     vram_checksum(m, 0x1000, len(DMA_WORDS), 0x14)
     dma_from(m, DMA_ROM, len(ROM_DMA_WORDS), 0x1100)
     vram_checksum(m, 0x1100, len(ROM_DMA_WORDS), 0x16)
-    negative(m, 3, lambda n: dma_from(n, 0x200000, 4, 0x1200))
+    for i, word in enumerate(WORD_DMA_WORDS):             # SEG-064-T004: 2M Word RAM owned by main is plain memory for the DMA
+        m.move("w", F.imm(word), F.absl(WORD_RAM + 2 * i))
+    dma_from(m, WORD_RAM, len(WORD_DMA_WORDS), 0x1300)
+    vram_checksum(m, 0x1300, len(WORD_DMA_WORDS), 0x28)
+    negative(m, 3, lambda n: dma_from(n, WINDOW, 4, 0x1200))   # the PRG-RAM window (Sega CD DMA timing differs): not modelled
+    negative(m, 10, lambda n: (n.move("b", F.imm(0x02), F.absl(GA + 0x03)), dma_from(n, 0x200000, 4, 0x1200)))  # DMNA: Word RAM is the sub's
     negative(m, 5, lambda n: (vdp_reg(n, 23, 0xC0), vdp_cmd(n, 0x000000C0)))  # VRAM copy
     # ---- vertical blank: poll the status flag ----
     m.label("vb_wait")
@@ -204,6 +221,9 @@ def main_program(sub_len, layout):
     m.move("b", F.imm(0xA5), F.absl(RESULT + 0xFF))
     m.move("b", F.imm(0x01), F.absl(GA + 0x01))           # SRES 1, SBRQ 0
     F.wait_flag(m, GA + 0x0F, 0x01, "wait_sub")
+    # SEG-064-T004: the transfer to the application entry is the handoff, but only to an entry that is compiled and whose live bytes match
+    # the declared copy image: the main program places the two NOPs at $FF0000 and calls them
+    negative(m, 11, lambda n: (n.move("l", F.imm(0x4E714E71), F.absl(0xFF0000)), n.jsr(F.absl(0xFF0000))))
     m.stop(0x2700)
     code = m.assemble()
     assert MAIN + len(code) <= FAULT, hex(MAIN + len(code))
@@ -246,6 +266,7 @@ def build():
     rom[SUB_SRC:SUB_SRC + len(sub)] = sub
     for i, word in enumerate(ROM_DMA_WORDS):
         struct.pack_into(">H", rom, DMA_ROM + 2 * i, word)
+    struct.pack_into(">I", rom, ENTRY_ROM, 0x4E714E71)
     return bytes(rom), sub, layout
 
 
@@ -263,7 +284,7 @@ def expected(rom, sub, layout):
     result = {
         "0": 0x80, "2": 0x8080, "4": 0x40, "6": 0x7F, "8": 0x33,
         "10": ((free_next >> 8) | 0x01) << 8, "12": ((held_next >> 8) & 0xFE) << 8,
-        "14": 0xC35A, "16": 0x5A5A, "18": 0, "20": be(sum(DMA_WORDS), 2), "22": be(sum(ROM_DMA_WORDS), 2), "24": 1, "26": 3,
+        "14": 0xC35A, "16": 0x5A5A, "18": 0, "20": be(sum(DMA_WORDS), 2), "22": be(sum(ROM_DMA_WORDS), 2), "40": be(sum(WORD_DMA_WORDS), 2), "24": 1, "26": 3,
         "28": 0x1234, "30": 0x1234, "32": 0xFFFF, "34": cart_next, "36": cart_next, "38": (byte_next & 0xFF) << 8,
     }
     padded = sub.ljust((len(sub) + 0xFF) & ~0xFF, b"\0")
@@ -271,9 +292,19 @@ def expected(rom, sub, layout):
         "rom_size": len(rom), "rom_sha256": hashlib.sha256(rom).hexdigest(),
         "result_words": result,
         "sub_image_length": len(padded), "sub_image_sha256": hashlib.sha256(padded).hexdigest(),
-        "sub_comstat0": 0xC0DE, "thunk": THUNK,
+        "sub_comstat0": 0xC0DE, "thunk": THUNK, "handoff": "main:d7=11", "handoff_copy": "main:0xFF0000:0x%X:4" % ENTRY_ROM,
+        "negative_details": {   # spec -> (stop address, width, write) of the faulting access, derived from the access it makes
+            "main:d7=1": {"range": NEG_RANGES[1], "address": 0x400100, "width": 2, "write": 0},    # MOVE.L from the empty slot: the first word read
+            "main:d7=2": {"range": NEG_RANGES[2], "address": 0xA00000, "width": 1, "write": 0},    # MOVE.B from Z80 RAM after it ran
+            "main:d7=3": {"range": NEG_RANGES[3], "address": WINDOW, "width": 0, "write": 0},      # the DMA source (detail) in the PRG-RAM window
+            "main:d7=10": {"range": NEG_RANGES[10], "address": 0x200000, "width": 0, "write": 0},  # ... in Word RAM handed to the sub
+            "main:d7=4": {"range": NEG_RANGES[4], "address": VDP_CTRL, "width": 2, "write": 1},    # register #0 write with IE1
+            "main:d7=8": {"range": NEG_RANGES[8], "address": VDP_CTRL, "width": 4, "write": 1},    # the same inside a long write
+            "main:d7=9": {"range": NEG_RANGES[9], "address": VDP_CTRL, "width": 2, "write": 1},    # a 101x control word
+            "main:d7=5": {"range": NEG_RANGES[5], "address": VDP_CTRL, "width": 4, "write": 1},    # the copy-DMA command (long control write)
+        },
         "negatives": {
-            "main:d7=1": ["open_bus_read", 0], "main:d7=2": ["main_device_unsupported", 0], "main:d7=3": ["vdp_dma_unsupported", 0],
+            "main:d7=1": ["open_bus_read", 0], "main:d7=2": ["main_device_unsupported", 0], "main:d7=3": ["vdp_dma_unsupported", 0], "main:d7=10": ["vdp_dma_unsupported", 0],
             "main:d7=4": ["interrupt_source_unsupported", 0], "main:d7=8": ["interrupt_source_unsupported", 0],
             "main:d7=9": ["vdp_access_unsupported", 0], "main:d7=5": ["vdp_access_unsupported", 0],
             "main:d7=6": ["materialized_image_unverified", 1], "main:d7=7": ["materialized_image_unverified", 1],

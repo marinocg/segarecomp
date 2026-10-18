@@ -1,5 +1,33 @@
 {
  "fixtures": {
+  "bootarea/cooked": {
+   "disc.cue": {
+    "sha256": "c9f9fb7a2e4f822fbde6cbec755276c27ef58b8463ab00492bb5ef89e2b74a8b",
+    "size": 155
+   },
+   "track01.bin": {
+    "sha256": "c11f6eefa1342a819570654269d3c24de7c3f6a716cfdec5c84a65ccf5c246b5",
+    "size": 81920
+   },
+   "track02.bin": {
+    "sha256": "70eed6a39b2a89208d0eca36a263607330e75d90f84782e219815a6f2308e97c",
+    "size": 176400
+   }
+  },
+  "bootarea/raw": {
+   "disc.cue": {
+    "sha256": "5fa3a4651cb2fc4ac46764ab064ea52156716992c3601ace906f1d4173aac667",
+    "size": 155
+   },
+   "track01.bin": {
+    "sha256": "be3770e1964d53c7b92dc766015ab196c31c9fcfae5bad8bb02ed9d63eff58fb",
+    "size": 94080
+   },
+   "track02.bin": {
+    "sha256": "70eed6a39b2a89208d0eca36a263607330e75d90f84782e219815a6f2308e97c",
+    "size": 176400
+   }
+  },
   "cdframe/cooked": {
    "disc.cue": {
     "sha256": "c9f9fb7a2e4f822fbde6cbec755276c27ef58b8463ab00492bb5ef89e2b74a8b",
@@ -174,7 +202,7 @@
     "size": 155
    },
    "track01.bin": {
-    "sha256": "37cb2ceaa8f80bec0eee6dc00cc09f3efafe1c25d04818534e6c4afb397fa495",
+    "sha256": "87f427c9e82b0f9eac546baef61272194e9bca7ab4bd94688965497d41555c60",
     "size": 81920
    },
    "track02.bin": {
@@ -188,7 +216,7 @@
     "size": 155
    },
    "track01.bin": {
-    "sha256": "0e5e99aafc693b2c7d9dc7c31dbb4f3c9dfb9b01a165af4a32bcbee0302a09fc",
+    "sha256": "b678afc56c5741cb52afcba2f52c7e7f60cec2fcf9c093a5641f1294df2048e9",
     "size": 94080
    },
    "track02.bin": {
@@ -329,6 +357,34 @@
    },
    "track01.bin": {
     "sha256": "804fcfac927b60fa2c334c6760ccae0ade8713f7836e013845fb805fe4134e93",
+    "size": 94080
+   },
+   "track02.bin": {
+    "sha256": "70eed6a39b2a89208d0eca36a263607330e75d90f84782e219815a6f2308e97c",
+    "size": 176400
+   }
+  },
+  "subside/cooked": {
+   "disc.cue": {
+    "sha256": "c9f9fb7a2e4f822fbde6cbec755276c27ef58b8463ab00492bb5ef89e2b74a8b",
+    "size": 155
+   },
+   "track01.bin": {
+    "sha256": "365042c5005b827d27519340b5a307199e079b226e90056b5e1b03c189e65a34",
+    "size": 81920
+   },
+   "track02.bin": {
+    "sha256": "70eed6a39b2a89208d0eca36a263607330e75d90f84782e219815a6f2308e97c",
+    "size": 176400
+   }
+  },
+  "subside/raw": {
+   "disc.cue": {
+    "sha256": "5fa3a4651cb2fc4ac46764ab064ea52156716992c3601ace906f1d4173aac667",
+    "size": 155
+   },
+   "track01.bin": {
+    "sha256": "a7845217ecbf5bf7b41f5827c07a239a1b298ffbb368869abce3da9c5d225393",
     "size": 94080
    },
    "track02.bin": {

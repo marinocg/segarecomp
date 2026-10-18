@@ -27,7 +27,7 @@
 /* The device host and, for the BIOS-image profile, the BIOS image as the host's read-only region (a 68K->VDP DMA source). */
 typedef struct ScdVdpHost {
   GenesisRuntime host; /* first member: m->vdp_host points at it */
-  GenesisOwnedCartridgeRegion bios;
+  GenesisOwnedCartridgeRegion regions[2]; /* [0] the BIOS image; [1] 2M Word RAM as the main processor sees it (SEG-064-T004) */
 } ScdVdpHost;
 
 int scd_vdp_init(ScdMachine *m) {
@@ -36,11 +36,15 @@ int scd_vdp_init(ScdMachine *m) {
   m->vdp_onset = SCD_ONSET_TICKS;
   if (h == NULL) return 1;
   if (m->bios != NULL) {
-    h->bios.begin = 0U;
-    h->bios.end = m->bios_size;
-    h->bios.data = m->bios;
-    h->bios.length = m->bios_size;
-    h->host.owned_regions = &h->bios;
+    h->regions[0].begin = 0U;
+    h->regions[0].end = m->bios_size;
+    h->regions[0].data = m->bios;
+    h->regions[0].length = m->bios_size;
+    h->regions[1].begin = UINT32_C(0x00200000);
+    h->regions[1].end = UINT32_C(0x00200000) + SCD_WORD_RAM_BYTES;
+    h->regions[1].data = m->word_ram;
+    h->regions[1].length = SCD_WORD_RAM_BYTES;
+    h->host.owned_regions = h->regions;
     h->host.owned_region_count = 1U;
   }
   return 0;
@@ -67,8 +71,9 @@ static GenesisAccessWidth scd_genesis_width(uint32_t width) {
 /* SEG-064-T003 (BIOS-image profile): the control-port word `second`, written while the VDP awaits the second word of a command, arms a
  * 68K->VDP DMA when its CD5 is set, DMA is enabled (register #1 bit 4) and register #23 selects the memory family (bit 7 clear) - the
  * host's own arming rule. The host then reads the source through its own memory map, so the source must first be made the Sega CD's:
- * the BIOS image is the host's read-only region and main work RAM is mirrored into the host's work RAM. Any other source (Word RAM and
- * the PRG-RAM window, whose Sega CD DMA timing differs) is the typed stop vdp_dma_unsupported. Fill is the host's VRAM fill; copy
+ * the BIOS image is the host's read-only region and main work RAM is mirrored into the host's work RAM. 2M Word RAM owned by main is a second
+ * read-only region (SEG-064-T004). Any other source (1M or unowned Word RAM and the PRG-RAM window, whose Sega CD DMA timing differs) is the
+ * typed stop vdp_dma_unsupported. Fill is the host's VRAM fill; copy
  * stays fail-closed in the host. */
 static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t second, uint32_t pc) {
   const uint16_t *r = host->devices.vdp.registers;
@@ -78,8 +83,15 @@ static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t sec
   if (length == 0U) length = 0x10000U;
   source = ((uint32_t)(r[23] & 0x7FU) << 17) | ((uint32_t)(r[22] & 0xFFU) << 9) | ((uint32_t)(r[21] & 0xFFU) << 1);
   end = source + 2U * length;
+  host->owned_region_count = 1U;
   if (source >= UINT32_C(0x00FF0000) && end <= UINT32_C(0x01000000)) {
     memcpy(host->work_ram, m->work_ram, sizeof host->work_ram);
+  } else if (source >= UINT32_C(0x00200000) && end <= UINT32_C(0x00200000) + SCD_WORD_RAM_BYTES && !(m->ga.mode & SCD_MODE_1M) &&
+             (m->ga.mode & SCD_MODE_RET)) {
+    /* SEG-064-T004: 2M Word RAM owned by main is plain memory for the bus (GPGX reads it through the ordinary word-RAM map); a graphics
+     * operation or CDC transfer in flight is brought up to this instant first. */
+    if (scd_cd_observe(m) != 0) return 1;
+    host->owned_region_count = 2U;
   } else if (!(end <= m->bios_size)) {
     return scd_fail(m, SCD_MAIN, SCD_STOP_VDP_DMA_UNSUPPORTED, pc, source);
   }
@@ -135,7 +147,7 @@ int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write
     return scd_fail(m, SCD_MAIN, SCD_STOP_VDP_DMA_UNSUPPORTED, pc, *value);
   if (genesis_route_access(host, address, scd_genesis_width(width), is_write ? GENESIS_ACCESS_WRITE : GENESIS_ACCESS_READ, &routed,
                            &stop) != GENESIS_ACCESS_OK)
-    return scd_fail(m, SCD_MAIN, SCD_STOP_VDP_ACCESS_UNSUPPORTED, pc, address);
+    return scd_fail_access(m, SCD_MAIN, SCD_STOP_VDP_ACCESS_UNSUPPORTED, pc, address, width, is_write); /* SEG-064-T004: with its width and direction */
   if (!is_write) *value = routed;
   if (m->bios != NULL && !is_write) scd_log(m, 0x42U, address, routed); /* the observed value is part of the device history */
   return 0;

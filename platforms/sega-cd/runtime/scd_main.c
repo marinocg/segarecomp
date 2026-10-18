@@ -133,6 +133,14 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
           m->cdc.dma_total, m->cdc.dbc, m->cdc.pt, m->cdc.wa, m->cdc.dac, m->cdc.dma_address, m->cdc.ifstat, m->cdc.ifctrl, m->cdc.ctrl0,
           m->cdc.ctrl1, m->cdc.stat2, m->cdc.stat3, m->cdc.irq, m->cdc.head[0][0], m->cdc.head[0][1], m->cdc.head[0][2],
           m->cdc.head[0][3]);
+  /* SEG-064-T004: the sub-side devices of the boot path (stopwatch, graphics ASIC, PCM write state, CDC host register). */
+  fprintf(out, ",\"sub_devices\":{\"stopwatch\":{\"origin\":%llu,\"base\":%u},\"gfx\":{\"busy\":%u,\"ctl\":%u,\"lines_left\":%u,"
+               "\"operations\":%llu,\"lines_rendered\":%llu},\"pcm\":{\"index\":%u,\"bank\":%u,\"enabled\":%u,\"onoff\":%u,\"ram\":\"",
+          (unsigned long long)m->ga.stopwatch_origin, m->ga.stopwatch_base, m->gfx.busy, m->gfx.ctl, m->gfx.lines_left,
+          (unsigned long long)m->gfx.operations, (unsigned long long)m->gfx.lines_rendered, m->pcm.index, m->pcm.bank, m->pcm.enabled,
+          m->pcm.onoff);
+  scd_sha_hex(m->pcm.ram, sizeof m->pcm.ram, digest);
+  fprintf(out, "%s\"},\"cdc_host_word\":%u}", digest, m->cdc.host_word);
   fprintf(out, ",\"cdd\":{\"status\":%u,\"lba\":%ld,\"index\":%u,\"latency\":%u,\"pending\":%u,\"delivered\":%llu,\"rx\":[",
           m->cdd.status, (long)m->cdd.lba, m->cdd.index, m->cdd.latency, m->cdd.pending, (unsigned long long)m->cdd.delivered);
   for (i = 0; i < 10U; ++i) fprintf(out, "%s%u", i ? "," : "", m->cdd.rx[i]);
@@ -245,6 +253,41 @@ static int scd_capture(ScdMachine *m, const ScdProgram *program, const char *dir
   return 1;
 }
 
+/* SEG-064-T004 diagnostic: the RAM images of the stopped machine, for comparison with a reference (local only; main work RAM, PRG RAM,
+ * Word RAM in the 2M layout, PCM wave RAM and the CDC buffer). */
+static int scd_dump_file(const char *dir, const char *name, const uint8_t *data, size_t length) {
+  char path[4096];
+  FILE *f;
+  snprintf(path, sizeof path, "%s/%s", dir, name);
+  f = fopen(path, "wb");
+  if (f == NULL) return 1;
+  if (fwrite(data, 1U, length, f) != length) {
+    fclose(f);
+    return 1;
+  }
+  return fclose(f) != 0;
+}
+
+static int scd_dump_pcm_registers(const ScdMachine *m, const char *dir) {
+  char path[4096];
+  FILE *f;
+  unsigned c;
+  snprintf(path, sizeof path, "%s/pcm.txt", dir);
+  f = fopen(path, "w");
+  if (f == NULL) return 1;
+  fprintf(f, "index %u bank %u enabled %u onoff %02X\n", m->pcm.index, m->pcm.bank, m->pcm.enabled, m->pcm.onoff);
+  for (c = 0; c < 8U; ++c)
+    fprintf(f, "ch %u env %02X pan %02X st %02X fd %04X ls %04X\n", c, m->pcm.env[c], m->pcm.pan[c], m->pcm.st[c], m->pcm.fd[c], m->pcm.ls[c]);
+  return fclose(f) != 0;
+}
+
+static int scd_dump_state(const ScdMachine *m, const char *dir) {
+  return scd_dump_pcm_registers(m, dir) ||
+         scd_dump_file(dir, "work_ram.bin", m->work_ram, sizeof m->work_ram) || scd_dump_file(dir, "prg_ram.bin", m->prg_ram, sizeof m->prg_ram) ||
+         scd_dump_file(dir, "word_ram_2m.bin", m->word_ram, sizeof m->word_ram) || scd_dump_file(dir, "pcm_ram.bin", m->pcm.ram, sizeof m->pcm.ram) ||
+         scd_dump_file(dir, "cdc_buffer.bin", m->cdc.buffer, SCD_CDC_BUFFER_BYTES);
+}
+
 /* SEG-063: `overlays` is the generated overlay registry (NULL for programs without disc-loaded modules). */
 static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *overlays, const ScdAuthentic *authentic, int argc,
                            char **argv);
@@ -264,6 +307,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   ScdDisc disc = program->disc;
   const char *disc_dir = NULL, *report_path = NULL, *frame_path = NULL, *bios_path = NULL, *materialize_dir = NULL;
   const char *sets[16];
+  const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *event_path = NULL;
   unsigned set_count = 0, i;
   uint64_t budget = 0U, slice_ticks = 0U, slice_seed = 0U;
   int have_seed = 0;
@@ -286,6 +330,10 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
       if (!scd_parse_u64(value, &slice_seed)) return 2;
       have_seed = 1;
     } else if (strcmp(flag, "--set") == 0 && set_count < 16U) sets[set_count++] = value;
+    else if (strcmp(flag, "--dump-dir") == 0) dump_dir = value;           /* SEG-064-T004 diagnostics (local only) */
+    else if (strcmp(flag, "--coverage") == 0) coverage_path = value;
+    else if (strcmp(flag, "--access-trace") == 0) trace_path = value;
+    else if (strcmp(flag, "--event-log") == 0) event_path = value;
     else if (authentic != NULL && strcmp(flag, "--bios") == 0) bios_path = value;           /* SEG-064-T002 */
     else if (authentic != NULL && strcmp(flag, "--materialize-dir") == 0) materialize_dir = value;
     else return 2;
@@ -321,6 +369,9 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     return 20;
   }
   scd_overlay_attach(&machine, overlays);
+  if (coverage_path != NULL && scd_coverage_enable(&machine) != 0) return 1;
+  if (trace_path != NULL && scd_trace_open(&machine, trace_path) != 0) return 1;
+  if (event_path != NULL && scd_event_open(&machine, event_path) != 0) return 1;
   for (i = 0; i < set_count; ++i)
     if (!scd_apply_set(&machine, sets[i])) return 2;
   if (slice_ticks == 0U && !have_seed) {
@@ -350,11 +401,16 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
       }
     }
   }
+  if (coverage_path != NULL && scd_coverage_write(&machine, coverage_path) != 0) return 1;
+  if (dump_dir != NULL && scd_dump_state(&machine, dump_dir) != 0) return 1;
   if (materialize_dir != NULL && result == SCD_RUN_STOPPED && !scd_capture(&machine, program, materialize_dir)) return 1;
   report = report_path != NULL ? fopen(report_path, "w") : stdout;
   if (report == NULL) return 1;
   scd_write_report(report, &machine, program, result, frame_digest);
   if (report != stdout && fclose(report) != 0) return 1;
+  scd_trace_close(&machine);
+  scd_event_close(&machine);
+  scd_coverage_release(&machine);
   scd_machine_release(&machine);
   scd_disc_close(&disc);
   return result == SCD_RUN_IDLE ? 0 : result == SCD_RUN_STOPPED ? 10 : 11;

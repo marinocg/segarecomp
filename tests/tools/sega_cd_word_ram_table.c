@@ -281,8 +281,8 @@ int main(void) {
   {
     uint32_t r = 0U;
     row(clear_stop(scd_ga_main_access(m, 0x30U, 2U, 0, &r, 0U)) == SCD_STOP_OPEN_BUS_READ, "a main read of $A12030 is open bus");
-    row(clear_stop(scd_ga_sub_access(m, 0x58U, 2U, 1, &r, 0U)) == SCD_STOP_GATE_ARRAY_REGISTER_UNSUPPORTED,
-        "graphics registers ($FF8058): typed stop gate_array_register_unsupported");
+    row(clear_stop(scd_ga_sub_access(m, 0x4CU, 2U, 1, &r, 0U)) == SCD_STOP_GATE_ARRAY_REGISTER_UNSUPPORTED,
+        "font registers ($FF804C): typed stop gate_array_register_unsupported");
   }
   row(sub_write_byte(0x20, 0x77) == 0 && sub_write_byte(0x31, 5U) == 0 && sub_write_byte(0x37, 0x04U) == 0 && m->ga.timer_next != 0U,
       "set up COMSTAT, the timer and HOCK");
