@@ -586,9 +586,25 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
       if (taken < 0) return SCD_RUN_STOPPED;
       if (taken > 0) continue;
     }
-    /* SEG-064-T004: the BIOS-image profile ends at the application handoff - before the first instruction of the IP runs. */
+    /* SEG-064-T004: the BIOS-image profile ends at the application handoff - before the first instruction of the IP runs - but only if
+     * that instruction could run: the generated dispatch is called in verify-only mode, which performs the normal compiled-entry lookup
+     * and variant selection by live bytes (exact bytes of the whole instruction) and returns before the instruction body. A missing
+     * entry or a byte mismatch is its typed stop (entry_not_compiled, code_bytes_mismatch); nothing retires, writes or changes; the
+     * processor's pc and prefetch are restored. */
     if (cpu == SCD_MAIN && m->authentic != NULL && m->authentic->ip_entry != 0U && (m->cpu[SCD_MAIN].pc & UINT32_C(0x00FFFFFF)) == m->authentic->ip_entry) {
-      scd_fail(m, SCD_MAIN, SCD_STOP_APPLICATION_HANDOFF, m->cpu[SCD_MAIN].pc, m->cpu[SCD_MAIN].pc);
+      ScdCpu *const c = &m->cpu[SCD_MAIN];
+      const uint32_t saved_pc = c->pc, saved_prefetch = c->prefetch;
+      int failed;
+      m->verify_only = 1U;
+      failed = m->program->processors[SCD_MAIN].dispatch(m);
+      m->verify_only = 0U;
+      c->pc = saved_pc;
+      c->prefetch = saved_prefetch;
+      if (failed != 0) {
+        if (m->stop.stop_class == SCD_STOP_NONE) scd_fail(m, SCD_MAIN, SCD_STOP_INTERNAL, saved_pc, saved_pc);
+        return SCD_RUN_STOPPED;
+      }
+      scd_fail(m, SCD_MAIN, SCD_STOP_APPLICATION_HANDOFF, saved_pc, saved_pc);
       return SCD_RUN_STOPPED;
     }
     if (m->instruction_budget == 0U) return SCD_RUN_BUDGET;

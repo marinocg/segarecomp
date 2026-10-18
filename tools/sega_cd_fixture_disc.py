@@ -624,24 +624,28 @@ def fixture_timer(options):
 # branch to the application entry), the SP from sub PRG RAM $6000 (marker, flag). A test BIOS places the disc bytes there.
 BOOTAREA_IP_MARKER = 0x600D
 BOOTAREA_SP_MARKER = 0x2222
+ALT_IP_LBA = 26  # an alternate IP image (data sector)
 
 
 def fixture_bootarea(options):
-    ip = Asm(IP_BASE)
-    ip.move("w", imm(BOOTAREA_IP_MARKER), absl(RESULT + 0x40))
-    ip.bra("app")
-    ip.nop()
-    ip.label("app")                                   # the application entry (the first instruction after the boot stub)
-    ip.move("w", imm(0xBEEF), absl(RESULT + 0x42))
-    ip.stop(0x2700)
+    def make_ip(marker):
+        ip = Asm(IP_BASE)
+        ip.move("w", imm(BOOTAREA_IP_MARKER), absl(RESULT + 0x40))
+        ip.bra("app")
+        ip.nop()
+        ip.label("app")                               # the application entry (the first instruction after the boot stub)
+        ip.move("w", imm(marker), absl(RESULT + 0x42))   # opcode, immediate and a two-word address: extension words to corrupt
+        ip.stop(0x2700)
+        return ip
+    ip, alt = make_ip(0xBEEF), make_ip(0xCAFE)         # the alternate differs only in the entry instruction: two variants at that pc
     sp = Asm(SP_BASE)
     sp.move("w", imm(BOOTAREA_SP_MARKER), absl(GA_SUB + 0x22))   # COMSTAT1
     sp.move("b", imm(0x02), absl(GA_SUB + 0x0F))
     sp.stop(0x2700)
-    main = Asm(IP_BASE)                               # unused by the BIOS-image tests (the test BIOS enters the IP itself)
-    main.stop(0x2700)
-    return ip.assemble(), sp.assemble(), {}, {"application_entry": ip.labels["app"], "ip_marker": BOOTAREA_IP_MARKER,
-                                              "sp_marker": BOOTAREA_SP_MARKER}
+    alt_bytes = alt.assemble()
+    return ip.assemble(), sp.assemble(), {ALT_IP_LBA: alt_bytes.ljust(2048, b"\0")}, {
+        "application_entry": ip.labels["app"], "ip_marker": BOOTAREA_IP_MARKER, "sp_marker": BOOTAREA_SP_MARKER,
+        "alt_lba": ALT_IP_LBA, "alt_size": len(alt_bytes), "entry_marker": 0xBEEF, "alt_entry_marker": 0xCAFE}
 
 
 # subside (SEG-064-T004) -----------------------------------------------------------------------------------------------------

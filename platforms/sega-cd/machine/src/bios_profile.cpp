@@ -371,6 +371,8 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
         if (v.guarded)
           functions << "  if (scd_code_guard(m, " << k << ", UINT32_C(0x" << hex(pc) << "), " << v.name << "_bytes, " << v.raw.size()
                     << "U) != 0) return 1;\n";
+        // SEG-064-T004: with an application entry the same selection and byte guard can run without the instruction body (verify only)
+        if (inputs.application_entry != 0U) functions << "  if (m->verify_only) return 0;\n";
         functions << v.lowered.slots << v.lowered.body << "  cpu->pc = pc;\n  return scd_retire(m, " << k << ", (uint32_t)("
                   << v.lowered.timing << "));\n}\n";
         ++result.functions;
@@ -390,6 +392,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
                 << "  uint32_t target = UINT32_C(0);\n  cpu->prefetch = UINT32_C(0x" << hex(address + static_cast<std::uint32_t>(t->raw.size()))
                 << ");\n"
                 << "  if (scd_code_guard(m, " << k << ", UINT32_C(0x" << hex(address) << "), " << name << "_opcode, 2U) != 0) return 1;\n"
+                << (inputs.application_entry != 0U ? "  if (m->verify_only) return 0;\n" : "")
                 << "  if (scd_read(m, " << k << ", UINT32_C(0x" << hex(operand) << "), " << (t->long_operand ? "4U" : "2U")
                 << ", &target, UINT32_C(0x" << hex(address) << ")) != 0) return 1;\n"
                 << (t->long_operand ? "  target &= UINT32_C(0x00FFFFFF);\n"

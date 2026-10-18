@@ -11,9 +11,13 @@ Cases (main d7 selects, the sub's a6 mirrors it):
   12  the boot: the SP replaces the stale code at $6000 and the sub enters it (COMSTAT1 = the SP's marker), then main places the IP and
       calls it: the IP writes its marker and branches to the application entry
   13  as 12, but one byte of the IP is corrupted after it was placed: no compiled variant matches, the typed stop code_bytes_mismatch
+  15-17  as 12, but one live byte of the application-entry instruction is corrupted after the IP was placed: its opcode (15), a byte of
+      its address extension (16), a byte of its immediate (17) - the handoff must not be reported (typed byte-verification stop)
+  18  as 12 with the alternate IP, whose entry instruction is a second compiled variant at the same pc
+  19  as 12, then a jump to a pc nothing is compiled at (the program is built with that pc as its application entry)
   14  as 12, but the SP is never placed: the sub enters the stale epoch code (COMSTAT1 = $1111) - the epoch variant still runs - and the
       IP is entered through a sign-extended register ($FFFF0000), which the 24-bit program counter must select as $FF0000
-usage: sega_cd_bios_boot_fixture.py build --out DIR --boot-ip FILE --boot-sp FILE  ->  DIR/bios.bin, DIR/expected.json (stdout)
+usage: sega_cd_bios_boot_fixture.py build --out DIR --boot-ip FILE --boot-sp FILE --boot-ip-alt FILE --entry ADDRESS  ->  DIR/bios.bin, DIR/expected.json (stdout)
 """
 import argparse
 import hashlib
@@ -32,6 +36,7 @@ SUB_SRC = 0x0D00
 STALE_SRC = 0x0E40
 IP_SRC = 0x1000
 SP_SRC = 0x1800
+ALT_SRC = 0x1400
 RESULT = 0xFFC000
 GA = 0xA12000
 WINDOW = 0x020000
@@ -78,30 +83,46 @@ def copy_words(m, source, destination, byte_length, label):
     m.dbra(0, label)
 
 
-def main_program(sub_len, stale_len, ip_len, sp_len):
+# Cases (main d7 / sub a6): (place the SP, IP source, corrupt offset from the entry or from $FF0000 (None: no corruption), jump)
+#   jump: "abs" = JSR $FF0000, "sext" = through $FFFF0000, an int = JSR to that address
+ENTRY = {"value": 0}
+CASES = {
+    12: (True, "ip", None, "abs"),            # the boot: the application entry is reached, compiled and byte-verified
+    13: (True, "ip", ("base", 3), "abs"),     # one IP byte corrupted before the entry: a mismatch in the first instruction
+    14: (False, "ip", None, "sext"),          # the stale epoch code runs; the IP is entered through a sign-extended register
+    15: (True, "ip", ("entry", 0), "abs"),    # the entry instruction's opcode byte corrupted
+    16: (True, "ip", ("entry", 5), "abs"),    # a byte of the entry instruction's address extension corrupted
+    17: (True, "ip", ("entry", 2), "abs"),    # a byte of its immediate extension corrupted: bytes of neither variant
+    18: (True, "alt", None, "abs"),           # the alternate IP (a second compiled variant at the entry): accepted
+    19: (True, "ip", None, 0xFF0100),         # a jump to a pc where nothing is compiled (the entry is configured there)
+}
+
+
+def main_program(sub_len, stale_len, ip_len, sp_len, alt_len):
     m = F.Asm(MAIN)
     copy_words(m, SUB_SRC, WINDOW, sub_len, "copy_sub")
     copy_words(m, STALE_SRC, WINDOW + 0x6000, stale_len, "copy_stale")
     m.move("b", F.imm(0x01), F.absl(GA + 0x01))         # SRES = 1, SBRQ = 0: the sub's runnable epoch
     F.wait_flag(m, GA + 0x0F, 0x01, "wait_sub")
-    for case in (12, 13, 14):
+    for case, (place_sp, source, corrupt, jump) in CASES.items():
         m.immop("cmp", "w", case, F.d(7))
         m.bcc("ne", "not%d" % case)
-        if case != 14:                                  # place the disc SP over the stale code (the bus is requested around the copy)
+        if place_sp:                                    # place the disc SP over the stale code (the bus is requested around the copy)
             m.move("b", F.imm(0x03), F.absl(GA + 0x01))
             copy_words(m, SP_SRC, WINDOW + 0x6000, sp_len, "copy_sp%d" % case)
             m.move("b", F.imm(0x01), F.absl(GA + 0x01))
         m.move("b", F.imm(0x00), F.absl(GA + 0x0F))     # (the sub flag is rewritten by the SP / stale code with 2)
         m.move("b", F.imm(0x01), F.absl(GA + 0x0E))     # the go: the sub enters $6000
         F.wait_flag(m, GA + 0x0F, 0x02, "wait_sp%d" % case)
-        copy_words(m, IP_SRC, 0xFF0000, ip_len, "copy_ip%d" % case)
-        if case == 13:
-            m.move("b", F.imm(0xFF), F.absl(0xFF0003))  # corrupt the low byte of the first instruction's immediate
-        if case == 14:                                  # through a sign-extended register: the 24-bit program counter selects the same entry
+        copy_words(m, ALT_SRC if source == "alt" else IP_SRC, 0xFF0000, alt_len if source == "alt" else ip_len, "copy_ip%d" % case)
+        if corrupt is not None:                         # one live byte differs from every admitted variant
+            where = (0xFF0000 if corrupt[0] == "base" else ENTRY["value"]) + corrupt[1]
+            m.move("b", F.imm(0x5A), F.absl(where))   # $5A is no byte of any admitted variant at these offsets
+        if jump == "sext":                              # through a sign-extended register: the 24-bit program counter selects the same entry
             m.move("l", F.imm(0xFFFF0000), F.a(2))
             m.jsr(("ind", 2))
         else:
-            m.jsr(F.absl(0xFF0000))
+            m.jsr(F.absl(0xFF0000 if jump == "abs" else jump))
         m.label("not%d" % case)
     m.stop(0x2700)
     code = m.assemble()
@@ -109,16 +130,16 @@ def main_program(sub_len, stale_len, ip_len, sp_len):
     return code
 
 
-def build(ip, sp):
+def build(ip, sp, alt):
     sub = sub_program()
     stale = stale_code()
-    assert len(sp) % 2 == 0 and len(ip) % 2 == 0 and len(sub) % 2 == 0 and len(stale) % 2 == 0
+    assert len(alt) % 2 == 0 and ALT_SRC + len(alt) <= SP_SRC and len(sp) % 2 == 0 and len(ip) % 2 == 0 and len(sub) % 2 == 0 and len(stale) % 2 == 0
     rom = bytearray(ROM_SIZE)
     struct.pack_into(">II", rom, 0, 0x00FFFE00, MAIN)
     for v in range(2, 64):
         struct.pack_into(">I", rom, 4 * v, FAULT)
     rom[0x100:0x120] = b"SEGA BIOS-IMAGE BOOT FIXTURE T04"
-    main = main_program(len(sub), len(stale), len(ip), len(sp))
+    main = main_program(len(sub), len(stale), len(ip), len(sp), len(alt))
     rom[MAIN:MAIN + len(main)] = main
     fault = F.Asm(FAULT)
     fault.move("w", F.imm(0xDEAD), F.absl(RESULT + 0xF0))
@@ -129,6 +150,7 @@ def build(ip, sp):
     rom[STALE_SRC:STALE_SRC + len(stale)] = stale
     rom[IP_SRC:IP_SRC + len(ip)] = ip
     rom[SP_SRC:SP_SRC + len(sp)] = sp
+    rom[ALT_SRC:ALT_SRC + len(alt)] = alt
     return bytes(rom), sub, stale
 
 
@@ -138,8 +160,11 @@ def main(argv=None):
     parser.add_argument("--out", type=pathlib.Path, required=True)
     parser.add_argument("--boot-ip", type=pathlib.Path, required=True)
     parser.add_argument("--boot-sp", type=pathlib.Path, required=True)
+    parser.add_argument("--boot-ip-alt", type=pathlib.Path, required=True)
+    parser.add_argument("--entry", type=lambda v: int(v, 0), required=True, help="the application entry (cases 15-17 corrupt bytes of its instruction)")
     args = parser.parse_args(argv)
-    rom, sub, stale = build(args.boot_ip.read_bytes(), args.boot_sp.read_bytes())
+    ENTRY["value"] = args.entry
+    rom, sub, stale = build(args.boot_ip.read_bytes(), args.boot_sp.read_bytes(), args.boot_ip_alt.read_bytes())
     padded = bytearray(sub)
     image = bytearray(0x6000 + len(stale))
     image[0:len(sub)] = sub
