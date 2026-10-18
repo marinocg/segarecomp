@@ -151,6 +151,11 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
   if (authentic != NULL) /* SEG-064-T002: BIOS-image profile (absent for synthetic programs: their reports are unchanged) */
     fprintf(out, ",\"bios_profile\":{\"epochs\":%u,\"epoch_image\":%d,\"epoch_tick\":%llu,\"sub_pristine\":%u,\"vblank_onsets\":%llu}", m->epochs,
             m->epoch_image, (unsigned long long)m->epoch_tick, m->sub_pristine, (unsigned long long)m->vdp_frames);
+  if (authentic != NULL) { /* SEG-064-T005: per-level interrupt acceptances of the main processor (the sub's are reported above) */
+    fprintf(out, ",\"main_interrupts_taken\":[");
+    for (i = 0; i < 8U; ++i) fprintf(out, "%s%llu", i ? "," : "", (unsigned long long)m->main_interrupts_taken[i]);
+    fprintf(out, "]");
+  }
   if (m->overlays != NULL) { /* SEG-063: overlay activation (absent for programs without modules: their reports are unchanged) */
     const ScdOverlayProgram *o = m->overlays;
     unsigned g, c;

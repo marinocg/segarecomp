@@ -224,6 +224,13 @@ def main():
             cpu, source, target = line.split()
             edges.add((int(cpu), int(source, 16), int(target, 16)))
         check(g == a, "a --coverage run's report equals the plain run's (the diagnostics change nothing)")
+        notes = [0, 0]
+        for line in pathlib.Path(cov).read_text().splitlines():
+            cpu, _, count, _ = line.split()
+            notes[int(cpu)] += int(count)
+        taken = [sum(g["main_interrupts_taken"]), sum(g["sub_interrupts_taken"])]
+        check(g["sub_waits"] == 0 and all(notes[i] == g["cpus"][i]["retired"] - taken[i] for i in (0, 1)),
+              "every coverage note is a retired instruction: notes == retired - interrupt acceptances on both processors, no abandoned retries (%s %s)" % (notes, taken))
         calls = {t for (cpu, s, t) in edges if cpu == 0 and s == THUNK}
         check(calls == {SERVICE_A}, "the edges record the thunk -> BIOS service A call (targets %s)" % sorted(map(hex, calls)))
         returns = {t for (cpu, s, t) in edges if cpu == 0 and SERVICE_A <= s < SERVICE_A + 16 and t >= 0xFF1000}
