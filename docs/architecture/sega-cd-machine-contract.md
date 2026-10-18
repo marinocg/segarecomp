@@ -365,8 +365,11 @@ stops with `bios_absent`. The BIOS-image profile wires the VDP's level 6 (sectio
   two slots). The arming instruction's own cycles follow the transfer when it ends inside its first window; a transfer spanning several
   windows re-anchors the processor at its end (GPGX sets the 68K clock to the end again at the next line start), so the next
   instruction starts exactly there. Afterwards the length registers are 0 and #21-#22 have advanced by the length (16-bit); the low
-  word of a long control-port write whose high word started the transfer reaches the VDP after that update (GPGX `cached_write`). The data itself is not spread over the lines (a frame rendered while a
-  transfer is still in progress would differ: reported by the frame capture as `vram_display_changes`, 0 in every compared frame).
+  word of a long control-port write whose high word started the transfer reaches the VDP after that update (GPGX `cached_write`). The data itself is not spread over the lines, so a frame displayed while a
+  transfer is still in progress could differ from hardware. The frame capture's `vram_display_changes` is an endpoint comparison only
+  (VRAM at the start of active display against VRAM at the vertical-blank onset, byte for byte; it is not a VRAM-write trace and does
+  not count writes that restore the original byte or changes that do not survive to the onset); it was 0 at every compared frame, where
+  the canonical frames independently equal the reference.
   The vertical-blank onset is the Genesis runtime's NTSC schedule from machine time 0.
 
 ## 13. Unresolved items

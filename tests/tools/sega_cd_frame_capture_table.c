@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
   port(0xC00000U, 2U, 0x0E00U); /* just before line 100 begins */
   run_until(3U * FRAME);
   row(strstr(report(), "\"onset\":3,\"status\":\"written\",\"width\":256,\"height\":224,\"vram_display_changes\":0") != NULL,
-      "report: onset 3 written, 256 x 224, no VRAM change during the display");
+      "report: onset 3 written, 256 x 224, VRAM at the start of display and at the onset byte-identical (endpoint comparison)");
   if (load("canon", 3U, canon, sizeof canon, &n)) {
     int rows_ok = 1;
     unsigned y, x;

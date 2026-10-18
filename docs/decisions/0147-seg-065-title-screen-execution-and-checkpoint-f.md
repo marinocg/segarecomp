@@ -41,8 +41,11 @@ backup RAM, and the frames completed at application entry + 420, + 480 (primary)
    animation loop ran the generated program advanced the animation about 30 % faster (the reference holds frames while the main
    processor waits for its per-frame transfers). The transfer now freezes the main processor for GPGX's slot-model duration
    (contract section 12) and the length/source registers update after it. With this single change every compared frame is identical
-   and time-aligned. A fill still has no duration; the data of a transfer is still written at once (`vram_display_changes` reports a
-   frame captured while a transfer was in progress; it was 0 in every compared frame).
+   and time-aligned. A fill still has no duration; the data of a transfer is still written at once. The capture's `vram_display_changes` is an
+   endpoint comparison, not a VRAM-write trace: it counts the bytes that differ between VRAM at the start of active display and VRAM
+   at the vertical-blank onset, and it was 0 at every compared frame. It does not establish that no VRAM write occurred during the
+   display (a write restoring the original byte, or a change not surviving to the onset, is invisible to it); the frame equality
+   below rests on the canonical comparison with the reference, not on this diagnostic.
 5. **Frame capture, reusing the renderer.** `--capture-onset N` (up to 8) with `--capture-dir` samples the VDP register file, CRAM
    and VSRAM at the start of every active line of the frame whose display ends at vertical-blank onset N, renders it with the
    existing `genesis_vdp_produce_frame_raster`, and writes the ADR 0146 canonical frame plus VDP, CPU and RAM state (local
@@ -75,7 +78,7 @@ them), 1,312 graphics-ASIC operations, 1,768 backup-RAM reads and 1,584 writes, 
 | sub registers | only the pc differs, inside its polling loop |
 | main registers | the stack pointer and SR equal; the pc is inside the same short loop on both sides (iteration phase), so its counters and pointers differ |
 | work RAM / PRG RAM | 81-160 bytes in that loop's destination buffer and the stack residue below the stack pointer / 128-138 bytes in the BIOS status area and the sub stack: the classes ADR 0145 already recorded; none is read by the frame |
-| VRAM written while a compared frame was displayed | 0 bytes (`vram_display_changes`) |
+| VRAM at the start of active display against VRAM at the vertical-blank onset (endpoint comparison, `vram_display_changes`; not a write trace) | byte-identical (0 differing bytes) at all three frames; the canonical frames independently match the reference |
 | the frames before the title loop (entry + 200 ... 370, 8 samples) | identical and time-aligned, with and without the DMA duration |
 | without the DMA duration (decision 4) | frames from entry + 380 on run ahead (about +18 frames at + 420, +36 at + 480): the cause, not tuned around |
 | determinism | one outcome (report, three canonical frames and every state dump) over 2 repeats, 12 seeded deadline partitions and 2 fixed slices (16 runs); the end-of-run report is identical with no capture and with eight other captures (two of them still sampling at the end) |

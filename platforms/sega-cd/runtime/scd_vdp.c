@@ -35,7 +35,10 @@ typedef struct ScdFrameCapture {
   uint64_t onset;          /* 1-based onset count (m->vdp_frames after the onset event) */
   uint32_t status;         /* 0 pending, 1 written, 2 unsupported VDP state, 3 render failed, 4 output failed, 5 incomplete lines */
   uint32_t lines;          /* active lines captured */
-  uint32_t vram_display_changes; /* VRAM bytes that differ between the start of line 0 and the onset */
+  /* Endpoint comparison only: the number of VRAM bytes that differ between the snapshot taken when line 0 begins and VRAM at the
+   * vertical-blank onset. Zero means those two images are byte-identical; it is not a write trace (writes that restore the original
+   * byte, or transient changes that do not survive to the onset, are not counted). The name is kept for report compatibility. */
+  uint32_t vram_display_changes;
   uint16_t width, height;
   char sha256[65];         /* digest of the canonical frame file */
 } ScdFrameCapture;
