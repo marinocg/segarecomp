@@ -84,8 +84,10 @@ def main():
         expected = json.loads(subprocess.run([sys.executable, str(FIXTURE), "build", "--out", str(fx)], check=True, capture_output=True,
                                              text=True).stdout)
         bios = fx / "bios.bin"
+        (tmp / "empty-build.txt").write_text(HEADER)   # the build driver hands the script to every pass (SEG-070-T002)
         built = subprocess.run([sys.executable, str(DRIVER), "--segarecomp", SEGARECOMP, "--cc", CC, "--cue", str(disc / "disc.cue"),
-                                "--bios", str(bios), "--work", str(tmp / "work")], capture_output=True, text=True, timeout=1800)
+                                "--bios", str(bios), "--work", str(tmp / "work"), "--input-script", str(tmp / "empty-build.txt")],
+                               capture_output=True, text=True, timeout=1800)
         summary = json.loads(built.stdout) if built.stdout.strip() else {}
         check(built.returncode == 0 and summary.get("ok"), "the fixture builds (materialization fixed point): %s" % built.stdout[-400:])
         if not summary.get("ok"):
