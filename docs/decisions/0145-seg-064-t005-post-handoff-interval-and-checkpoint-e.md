@@ -56,7 +56,7 @@ together, every BIOS-derived instruction a compiled, byte-verified entry, and do
    runnable, stops a main read of the Z80 area (`main_device_unsupported`) instead of answering. To establish that nothing the main or
    sub processor can observe depends on the running Z80 in the interval, the reference was instrumented (locally) to count the Z80's bus
    activity: between the handoff and the end of the interval the Z80 made accesses only to its own RAM and to the YM2612 and **none to
-   the 68000 bus window, the bank register or the VDP/PSG window**. The Z80 and the sound are therefore not part of the claim; a later
+   the 68000 bus window, the bank register or the VDP/PSG window** (the reference main processor in the interval writes 6,871 bytes of Z80 RAM, makes 9 BUSREQ/RESET writes and 3 BUSACK reads, and never reads Z80 RAM or the YM2612; the Z80 therefore receives only main's writes, returns nothing the 68000 can read, takes no 68000 bus cycles and starts no DMA or interrupt on either side). The Z80 and the sound are therefore not part of the claim, and this independence is established for this interval only (not in general); a later
    interval in which the application talks to the driver needs a Z80 integration (a separate, generated-native design), not a shim.
 
 ## Result (SEG-064-T005)
@@ -83,14 +83,29 @@ retired in it; `vblank_onsets` 1,197 at the entry, 1,257 at the end).
 | sub-side CDC host-data word streams (70,794 words) | **identical word for word** (ours reads 1,026 more by the end of the interval - the same 0.6 frame) |
 | work RAM / PRG RAM | 27-28 bytes (all in the main stack frame area) / 28-100 bytes (BIOS CD-status and message data, current-position fields sampled at different instants, and the sub stack): classified below |
 | Z80 bus activity in the interval (reference) | RAM 12,688 reads / 9,858 writes; YM2612 70,691 reads / 158 writes; **no** 68000-window, bank-register or VDP/PSG access |
+| four further semantic boundaries taken from the reference trace (the first main execution of: the copied routine, each of two loaded modules' entries, and an address inside the second module) | Word RAM and PCM identical at all four; main registers equal at three (at the first one only A0, the `LEA` high byte above); work RAM 27-28 bytes, PRG RAM 44-115 bytes; sub registers differ only while it is inside an interrupt handler or polling loop |
+| file-name working buffer | the same three file names are processed in the same order by both (lookup instants within one frame, ours one counter step ahead at the end) |
 | determinism | one report/device-log/two-trace-digest outcome over 2 repeats, 12 seeded deadline partitions and 2 fixed slices (16 runs) |
 
 **BIOS-service classes in the interval.** Main: no BIOS instruction executes after the handoff, in the interval or in the reference's next
 600 frames - the application owns the main processor (its vertical-blank vector is a work-RAM thunk to application code, 59 executions in
 the interval). The six work-RAM-to-BIOS control-flow edges seen over the whole run were all executed before the handoff.
-Sub: 12 BIOS entry points are reachable from SP/module code over the whole run; 6 are invoked in the interval, 370 invocations
-(entry-instruction executions, an upper bound), through the mutable sub jump table (10 operand templates) and the BIOS interrupt
-handlers (3,837 SP and 80,712 module instruction executions, 892,334 BIOS-epoch ones).
+Sub (control-flow audit, corrected in the final verification; the first report counted interrupt entries and every transfer as calls):
+strict `JSR`/`BSR` transfers from SP or module code into the BIOS image are 10 call sites with 2 BIOS entry points; 7 sites and both
+entry points execute in the interval (150 call executions), and every one of the 10 sites has a recorded `RTS` return edge to its fall-through
+address (instruction bytes read from the admitted images, not from sampled memory). Separately, the mutable sub jump table (10
+`JMP abs.L` thunks, operand templates) is executed through the BIOS interrupt dispatch: 6 thunks, 370 executions in the interval (3 of
+the 6 are interrupt-vector thunks), with 3,837 SP, 80,712 module and 892,334 BIOS-epoch instruction executions.
+
+**Coverage metric audit.** A coverage note is made when the dispatch is entered for an instruction start (after the budget check and
+before the body). Failed byte guards, uncompiled entries and abandoned Word RAM retries would be noted without retiring, but each ends the
+run with a typed stop or (retries) is counted in `sub_waits`; interrupt acceptances retire without a note. The identity
+`notes == retired - interrupt acceptances` (per processor) therefore holds exactly when no attempted start failed to retire: in the
+accepted run main 14,225,489 = 14,226,637 - 1,148, sub 16,843,284 = 16,847,294 - 4,010 (the sub acceptances equal `sub_interrupts_taken`),
+`sub_waits` 0, result `deadline` with no typed stop - every noted start retired, so the executed-start metric is a retired-start set. The
+identity is asserted by the post-handoff fixture test and the report carries `main_interrupts_taken`. Control-flow edges are
+consecutive-start relations: an interrupt acceptance appears as an edge from the interrupted start to the handler and an `RTE` as an edge to
+the interrupted pc; they are classified as such and never counted as calls or service returns.
 
 **Classification of the differences** (none unexamined): (a) exact equality - the executed sets, the main register file at the event,
 the sub register file at the event, the Gate Array command/status registers, the CDC host-data streams, the PCM chip, the Word RAM at the
@@ -98,7 +113,7 @@ event; (b) independently justified asynchronous differences - the pc inside a ti
 that polls a Gate Array register after three reads), the instants at which interrupts are taken (all 274 differing control-flow edges
 are interrupt entries and `RTE` returns, plus 4 conditional-branch directions of polling loops), the position of an in-flight CD sector
 (one sector, the data stream identical), CD current-position fields sampled at different instants, stack residue below the stack
-pointers, the CDD exchange cadence (ADR 0144); (c) material differences requiring correction - **none found**; (d) evidence
+pointers, the CDD exchange cadence (ADR 0144), and the ASCII file-name/sector-counter working buffer just above the SP image (ours and the reference process the same file-name sequence in the same order; ours is up to one sector ahead at some instants and one behind at others); (b2) a model difference with no effect inside the interval - the high byte of a PC-relative address computed after the entry through a sign-extended address: the reference keeps `$FFFFxxxx` in the PC and in a `LEA (d16,PC)` result, the generated dispatch masks the pc to 24 bits (decision 10 of ADR 0144); it is the only differing register at the first instruction of the copied routine, is overwritten before any later checkpoint, and the value is used only as a bus address (24 bits); the hardware behaviour of the PC's upper byte is not established and is an open item (contract section 13); (c) material differences requiring correction - **none found**; (d) evidence
 unavailable - the Z80's and the sound's internal state (not modelled; no 68000-observable effect in the interval, above).
 
 **Latest runtime-selected frontier (outside the accepted interval).** 3.3 frames after the end of the interval the main processor enters

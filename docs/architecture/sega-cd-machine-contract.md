@@ -365,6 +365,7 @@ Items marked **G** above are implemented as GPGX behaves; they stay here until h
 
 | item | why | experiment that resolves it | owner |
 | --- | --- | --- | --- |
+| upper byte of the 68000 program counter after a jump through a sign-extended address (the reference keeps `$FFxxxxxx`, so `LEA (d16,PC)` yields it; the generated dispatch masks to 24 bits, ADR 0144 decision 10): no effect found in the SEG-064-T005 interval (the value is only used as a bus address) | the real silicon behaviour is not established | a hardware test (store `LEA (d16,PC)` after a sign-extended `JSR`) | SEG-065 |
 | main PRG-RAM window access while `SBRQ` = 0 (G: unmapped) | GPGX unmaps it, MAME allows it | hardware test (mcd-verificator class) or a third reference (BlastEm, MiSTer RTL) | SEG-064 |
 | timer period `N` vs `N + 1` counts (G: `N + 1`) | GPGX (citing MCDV) and MAME disagree | run MCDV "REG 8030 #7" or read MiSTer RTL | SEG-065 |
 | which 1M bank is "0" for a given `RET` (G: `RET` = 1 gives main bank 1) | single source | MiSTer RTL / hardware test | SEG-065 |
