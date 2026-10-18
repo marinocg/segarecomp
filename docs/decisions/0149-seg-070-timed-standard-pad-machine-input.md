@@ -43,8 +43,7 @@ tick-exact; that is not reused.
    interrupt acceptance at or after that tick. Events of one tick apply in file order. An access observes the pad state in force at
    its instruction's start tick, like every other device register in this machine (section 12 of the contract). Because transitions
    are device events at absolute ticks, the outcome cannot depend on how a run is partitioned into deadlines; the capture observer
-   instant also treats a due pad event as a device event (by construction: a due input event is among the events that keep a sample
-   from being the only action at its instant).
+   instant also treats a due pad event as a device event (by code reading; no test combines the capture observer with a script).
 6. **Observation.** Byte reads of the data ports `$A10003`/`$A10005` (a word read reaches the odd byte) are counted per port and, with
    `--input-log`, logged (tick, vertical-blank onsets processed, port, value; bounded at 65,536, the overflow counted). The report's
    `input` object carries the event and applied counts, the pad masks at the end, the read counts, the logged count and an FNV digest

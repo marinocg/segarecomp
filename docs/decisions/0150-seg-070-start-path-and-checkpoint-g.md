@@ -34,7 +34,7 @@ generated-native input existed. ADR 0149 added the timed standard-pad machine in
    reads START is a TH-low read of data port 1 returning `$13`; four polls read START (onset intervals 481, 482, 484, 485 after the
    entry; the reference: 480, 482, 483, 485), and every data-port read of the whole run returns one of `$33`, `$7F` (released) or
    `$13`. The poll sequence (port, value, in order) of the whole run is identical to the reference's up to a phase of the application's
-   poll cadence, see 5.
+   poll cadence, see 4.
 
 ## Result
 
@@ -52,14 +52,14 @@ generated-native input existed. ADR 0149 added the timed standard-pad machine in
 | work RAM / PRG RAM | 20 / 138 bytes differ at 510 / 540 / 600 (162 / 129 at 480): the classes of ADR 0145 / 0147 (the loop's destination buffer and stack residue below the stack pointer; the BIOS status area and the sub stack); none is read by the frame |
 | executed instruction starts, reset to entry + 600 | **main 3,053 = 3,053, sub 4,953 = 4,953, no start on either side only** (with START and without: 3,053 / 2,933 on the main side, both equal to their references) |
 | compiled-entry and executable-image verification | every start is a compiled, byte-verified entry; no extent, template or admission was added |
-| controller observations | 3,468 data-port reads against the reference's 3,458; value histogram identical in its three values (4 START reads each); the START polls are one frame late at two of the four (see 5) |
+| controller observations | 3,468 data-port reads against the reference's 3,458; value histogram identical in its three values (4 START reads each); the START polls are one frame late at two of the four (see decision 4) |
 | determinism | one outcome (report, five canonical frames, every state dump, the read log digest and the coverage) over 2 repeats, 12 seeded deadline partitions and 3 fixed slices (17 runs); the reference: two runs identical in every frame, state dump, controller log and instruction-start set |
 | Checkpoint F (no input) | the frames at the three Checkpoint F onsets of a run without START: canonical frame, VDP state, both CPUs' registers, work, PRG and Word RAM **byte-identical to the SEG-065 final run's captures** (the report differs only in its end instant) |
 | Checkpoint E | see the next section |
 
 **Classified asynchronous differences (ADR 0148 decision 8).**
 
-5. *Poll-cadence phase.* The application polls the pads about twice in three video frames, not locked to the vertical-blank onset. In
+4. *Poll-cadence phase.* The application polls the pads about twice in three video frames, not locked to the vertical-blank onset. In
    the generated run the polls lie in a different frame of the three-frame cycle than in the reference: before the press as well (the
    same comparison of a run without START: 167 of 974 onset intervals differ), so it is independent of the input. It is the CD-sector
    phase class ADR 0145 recorded (the application entry is not a whole number of 75 Hz periods from the reference's; the title's own
@@ -70,7 +70,7 @@ generated-native input existed. ADR 0149 added the timed standard-pad machine in
    frames from there on are identical. The pre-registered frames lie after that convergence; the intermediate reveal is therefore
    **not** claimed time-aligned, and this one-frame poll-phase class is the first timing approximation a later time-sensitive
    checkpoint will meet.
-6. *Run end.* The state dumps were taken at the same onset instants; the polling-loop pc classes are those of ADR 0145 / 0147.
+5. *Run end.* The state dumps were taken at the same onset instants; the polling-loop pc classes are those of ADR 0145 / 0147.
 
 ## Checkpoint E regression under the new runtime
 
@@ -87,9 +87,9 @@ one-sector lead - the ADR 0145 / 0147 values. Synthetic profile and every SEG-06
 ## Observation beyond the checkpoint (not claimed)
 
 A second START (held 6 frames from entry + 600), tried only to observe, in the reference: the title fades to black (about entry +
-620-650), stays black for about 420 frames (loading) and then Palmtree Panic act 1 appears (about entry + 1,070). Generated-native
+620-650), stays black for about 420 frames (loading) and then the first level appears (about entry + 1,070). Generated-native
 (same schedule): the fade starts, its frames at entry + 610 / 620 differ from the reference's (the poll-phase class above), the black
-frames at entry + 630 / 640 / 700 / 900 equal the reference's, and at entry + 957 frames the main processor enters a further module
+frames at entry + 630 / 640 / 700 / 900 equal the reference's, and at about entry + 957 frames the main processor enters a further module
 with no compiled authority: the typed stop `entry_not_compiled` (the earliest remaining frontier; a disc extent of the established
 kind is the expected authority, found by the content-aware check; no gameplay or loading claim is made).
 
