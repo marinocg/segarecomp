@@ -1,0 +1,473 @@
+{
+ "data_boundary": "identities, digests and aggregate counts only",
+ "development": [
+  {
+   "aggregate": {
+    "cells": 51295,
+    "masked_cells": 7,
+    "negative_cells": 41605,
+    "positive_cells": 9683,
+    "starts": 288508
+   },
+   "image_records": [
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 24180
+     },
+     "broad_aot": "accepted",
+     "cells": 4096,
+     "classes_sha256": "07c8aa7ed1a013b1a94b0047503d4559a3a6a33d01cebcc617b32f9db4666197",
+     "id": "s1",
+     "image_bytes": 524288,
+     "image_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+     "masked_cells": 2,
+     "positive_cells": 820,
+     "provenance": "s1disasm 7ebe4b3d Revision0, ADR 0099 truth digest fd21b96b",
+     "starts": 24180
+    },
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 48733
+     },
+     "broad_aot": "accepted",
+     "cells": 8192,
+     "classes_sha256": "50bca5d8b91a1dbebff1f094338163b62ffe1f2a5418e96222b6c6b11121959f",
+     "id": "s2",
+     "image_bytes": 1048576,
+     "image_sha256": "193bc4064ce0daf27ea9e908ed246d87ec576cc294833badebb590b6ad8e8f6b",
+     "masked_cells": 0,
+     "positive_cells": 1658,
+     "provenance": "s2disasm 4ef457c1 gameRevision1 (REV01) byte-identical",
+     "starts": 48733
+    },
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 119319
+     },
+     "broad_aot": "accepted",
+     "cells": 16384,
+     "classes_sha256": "a2954ff2e37c2f30b37d3a5e3eeba89edcaae4d5715f27c6214e62a4eb7e5992",
+     "id": "sk",
+     "image_bytes": 2097152,
+     "image_sha256": "6e12e6b33c26ebfcd0be433251d21cf6284eafe9f71b027bda3767ae59affec1",
+     "masked_cells": 4,
+     "positive_cells": 4073,
+     "provenance": "skdisasm 044fa467 SK, ADR 0099 truth digest 76be1ccc",
+     "starts": 119319
+    }
+   ],
+   "images": 39,
+   "lineage": "D01",
+   "qualification": "QUALIFIED",
+   "sonic_cd_modules": {
+    "audit_anomalies": 0,
+    "by_class": {
+     "main_wordram_inplace": 6,
+     "main_workram_copy": 18,
+     "sub_pcm_driver": 3,
+     "sub_program": 9
+    },
+    "classes_digest_of_digests": "7598cb04ac4c442d1c9767d40b05b207645d82cb143858f68eff5cb63b6cb86b",
+    "modules": 36,
+    "starts": 96276
+   }
+  },
+  {
+   "aggregate": {
+    "cells": 1024,
+    "masked_cells": 0,
+    "negative_cells": 844,
+    "positive_cells": 180,
+    "starts": 5707
+   },
+   "image_records": [
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 5707
+     },
+     "broad_aot": "accepted",
+     "cells": 1024,
+     "classes_sha256": "2e0e3f040a34f9c668cc6cb6afb9d701833e378c1c5a2b56e1917efd37469889",
+     "id": "flicky",
+     "image_bytes": 131072,
+     "image_sha256": "4df1a91e08376ae773a6eb8e5abe310f94ca39d8f81583b91a9477fedcb68c11",
+     "masked_cells": 0,
+     "positive_cells": 180,
+     "provenance": "flicky_src d9a0d479, ADR 0099 truth digest 33916a8e",
+     "starts": 5707
+    }
+   ],
+   "images": 1,
+   "lineage": "D02",
+   "qualification": "QUALIFIED"
+  },
+  {
+   "aggregate": {
+    "cells": 28672,
+    "masked_cells": 2,
+    "negative_cells": 25842,
+    "positive_cells": 2828,
+    "starts": 93367
+   },
+   "image_records": [
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 44740
+     },
+     "broad_aot": "accepted",
+     "cells": 12288,
+     "classes_sha256": "89115fcd4ff05db4892d024a6a826455907adb280673f0d454020de8b0522d52",
+     "id": "sf1",
+     "image_bytes": 1572864,
+     "image_sha256": "6c43b41b60ae8147945b4420caeb5eb266e1dd57a0d125b7496fa8fb6fde522d",
+     "masked_cells": 2,
+     "positive_cells": 1310,
+     "provenance": "SF1DISASM 1f466bf0 rebuilt under Wine, truth digest 7f5289dc",
+     "starts": 44740
+    },
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 48627
+     },
+     "broad_aot": "accepted",
+     "cells": 16384,
+     "classes_sha256": "11555dd115f0ea92850395ae965dfffb22eca7556137fcd94faab714866c188b",
+     "id": "sf2",
+     "image_bytes": 2097152,
+     "image_sha256": "9adf662d09881f58ec37d174ab01e87a7fcfb24700b5f84b26c0cd4f351509e9",
+     "masked_cells": 0,
+     "positive_cells": 1518,
+     "provenance": "SF2DISASM 77e5d643 VANILLA_BUILD rebuilt under Wine, byte-identical",
+     "starts": 48627
+    }
+   ],
+   "images": 2,
+   "lineage": "D03",
+   "qualification": "QUALIFIED"
+  },
+  {
+   "aggregate": {
+    "cells": 6144,
+    "masked_cells": 0,
+    "negative_cells": 5579,
+    "positive_cells": 565,
+    "starts": 19261
+   },
+   "image_records": [
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 19261
+     },
+     "broad_aot": "accepted",
+     "cells": 6144,
+     "classes_sha256": "c10b058f357e291d09a7c08c757341b9e8a49b17f6a298ca2883dab8b637b6d7",
+     "id": "ps2",
+     "image_bytes": 786432,
+     "image_sha256": "a0bd97f5aaa67301923ccc367511606bd3471ea9542919165311d4a23a2b696b",
+     "masked_cells": 0,
+     "positive_cells": 565,
+     "provenance": "ps2disasm c23877b8 rev2 asw Bld 89 under Wine, truth digest 87174c56",
+     "starts": 19261
+    }
+   ],
+   "images": 1,
+   "lineage": "D04",
+   "qualification": "QUALIFIED"
+  },
+  {
+   "aggregate": {
+    "cells": 1024,
+    "masked_cells": 284,
+    "negative_cells": 651,
+    "positive_cells": 89,
+    "starts": 3388
+   },
+   "image_records": [
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 3388
+     },
+     "broad_aot": "accepted",
+     "cells": 1024,
+     "classes_sha256": "f39506ac5cc315ab9cc627890a91cbd2aaaa679bbd4346e6b6a0898370f3bb0c",
+     "id": "d05",
+     "image_bytes": 131072,
+     "image_sha256": "01b8970a6c997d492815cd39d96985c9dbefe020e6ca59872ffbde9b98e8e654",
+     "masked_cells": 284,
+     "positive_cells": 89,
+     "project_revision": "931008f890292afec936699821ed0d5de705b2df",
+     "provenance": "SGDK reproducible build",
+     "reproducible_builds": 3,
+     "starts": 3388,
+     "subdir": null,
+     "toolchain": "SGDK v1.62 bundled Windows toolchain (GCC 6.3) under Wine; build byte-identical to the author-committed out/rom.bin"
+    }
+   ],
+   "images": 1,
+   "lineage": "D05",
+   "qualification": "QUALIFIED"
+  },
+  {
+   "aggregate": {
+    "cells": 3072,
+    "masked_cells": 561,
+    "negative_cells": 2297,
+    "positive_cells": 214,
+    "starts": 6750
+   },
+   "image_records": [
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 6750
+     },
+     "broad_aot": "accepted",
+     "cells": 3072,
+     "classes_sha256": "ab9237d97eaca442fcf3f864a712a0dc60bef8a294be00dc4a7e359e17810b4e",
+     "id": "d06",
+     "image_bytes": 393216,
+     "image_sha256": "c335ba9898a67fecccc415c0d00f9ad6d09c63fe584e638f7cbbf3a7c1c34cbf",
+     "masked_cells": 561,
+     "positive_cells": 214,
+     "project_revision": "6169fb4af2c1c5fb27ea59b5a98997a022b34843",
+     "provenance": "SGDK reproducible build",
+     "reproducible_builds": 3,
+     "starts": 6750,
+     "subdir": null,
+     "toolchain": "SGDK v1.41 bundled Windows toolchain under Wine"
+    }
+   ],
+   "images": 1,
+   "lineage": "D06",
+   "qualification": "QUALIFIED"
+  },
+  {
+   "aggregate": {
+    "cells": 2048,
+    "masked_cells": 407,
+    "negative_cells": 974,
+    "positive_cells": 667,
+    "starts": 25246
+   },
+   "image_records": [
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 25246
+     },
+     "broad_aot": "accepted",
+     "cells": 2048,
+     "classes_sha256": "12ee34dbe6d3a5e2da9740a19493859519b32dd9ebf6091a764a43e0c419d685",
+     "id": "d07",
+     "image_bytes": 262144,
+     "image_sha256": "d998d87aed4fdd6ffa4c06551d2d92423b6617873ef59e426e747150a35a2aab",
+     "masked_cells": 407,
+     "positive_cells": 667,
+     "project_revision": "89adfdd66853746fa9db9105104314ac58021791",
+     "provenance": "SGDK reproducible build",
+     "reproducible_builds": 3,
+     "starts": 25246,
+     "subdir": "240psuite/Genesis/240p",
+     "toolchain": "SGDK_1_11_Suite fork ea1e49d1 (GCC 3.4.6, non-LTO) under Wine; analysis objdump from SGDK v1.41; final cosmetic mv unavailable (accepted: ROM complete before it)"
+    }
+   ],
+   "images": 1,
+   "lineage": "D07",
+   "qualification": "QUALIFIED"
+  },
+  {
+   "lineage": "D08",
+   "qualification": "UNQUALIFIED",
+   "reason": "build inputs missing at the pinned revision: only C sources/headers are tracked (no res/ resource definitions; car.c includes a generated sprite.h that cannot be produced)"
+  },
+  {
+   "aggregate": {
+    "cells": 1024,
+    "masked_cells": 552,
+    "negative_cells": 448,
+    "positive_cells": 24,
+    "starts": 742
+   },
+   "image_records": [
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 742
+     },
+     "broad_aot": "accepted",
+     "cells": 1024,
+     "classes_sha256": "0dbb55b447f9744e1fd34d86f47ece5dd60d541a4d287035bb6ee9302e48e4e4",
+     "id": "d09",
+     "image_bytes": 131072,
+     "image_sha256": "d5a26cae67ad7b113f73ceba604d33d5b1649eedd157293275cea915b31f0536",
+     "masked_cells": 552,
+     "positive_cells": 24,
+     "project_revision": "1064468a42553fb851abe536c314457269a762fa",
+     "provenance": "SGDK reproducible build",
+     "reproducible_builds": 3,
+     "starts": 742,
+     "subdir": null,
+     "toolchain": "SGDK 1.34 bundled Windows toolchain under Wine"
+    }
+   ],
+   "images": 1,
+   "lineage": "D09",
+   "qualification": "QUALIFIED"
+  },
+  {
+   "aggregate": {
+    "cells": 3072,
+    "masked_cells": 514,
+    "negative_cells": 2275,
+    "positive_cells": 283,
+    "starts": 10592
+   },
+   "image_records": [
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 10592
+     },
+     "broad_aot": "effective_address_not_24bit",
+     "cells": 3072,
+     "classes_sha256": "feff37e25dbaebaeeefbf66b0e0f5028d1865dd026dbf2dbc26585979bff5b4f",
+     "id": "d10",
+     "image_bytes": 393216,
+     "image_sha256": "5a21ad79dc62d68f09520013237e63464e1759c44fdd571669afe585c9551b88",
+     "masked_cells": 514,
+     "positive_cells": 283,
+     "project_revision": "7895531e68cbc46169d3b33379856c7023790039",
+     "provenance": "SGDK reproducible build",
+     "reproducible_builds": 3,
+     "starts": 10592,
+     "subdir": null,
+     "toolchain": "SGDK v1.90 bundled Windows toolchain under Wine"
+    }
+   ],
+   "images": 1,
+   "lineage": "D10",
+   "qualification": "QUALIFIED"
+  },
+  {
+   "aggregate": {
+    "cells": 2048,
+    "masked_cells": 587,
+    "negative_cells": 1282,
+    "positive_cells": 179,
+    "starts": 6343
+   },
+   "image_records": [
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 6343
+     },
+     "broad_aot": "effective_address_not_24bit",
+     "cells": 2048,
+     "classes_sha256": "c4d614b2d85f18d15169e2f82ffc488efe181e61e53704bafc19bde9f9445535",
+     "id": "d11",
+     "image_bytes": 262144,
+     "image_sha256": "bd5510c70a1976a4094359dc4916ddce64599af7e81363803b7961f63beb8bff",
+     "masked_cells": 587,
+     "positive_cells": 179,
+     "project_revision": "8fd19587eb8513611a98059bf6914c69a9c91e83",
+     "provenance": "SGDK reproducible build",
+     "reproducible_builds": 3,
+     "starts": 6343,
+     "subdir": null,
+     "toolchain": "SGDK v1.70 bundled Windows toolchain under Wine"
+    }
+   ],
+   "images": 1,
+   "lineage": "D11",
+   "qualification": "QUALIFIED"
+  },
+  {
+   "aggregate": {
+    "cells": 2048,
+    "masked_cells": 329,
+    "negative_cells": 1407,
+    "positive_cells": 312,
+    "starts": 11010
+   },
+   "image_records": [
+    {
+     "audit": {
+      "length_mismatch": 0,
+      "not_ordinary_decode": 0,
+      "odd_starts": 0,
+      "starts": 11010
+     },
+     "broad_aot": "effective_address_not_24bit",
+     "cells": 2048,
+     "classes_sha256": "bf4b4f9ea6af9ee6188e2537a615262025acc1ca2611be5e70568b736d1f5160",
+     "id": "d12",
+     "image_bytes": 262144,
+     "image_sha256": "03c832fb83b0548b739386c809721ef08238b1cc776b051b51c5df930c5754f2",
+     "masked_cells": 329,
+     "positive_cells": 312,
+     "project_revision": "2e8c98862d8c1282e890786e7117152d1ebe072a",
+     "provenance": "SGDK reproducible build",
+     "reproducible_builds": 3,
+     "starts": 11010,
+     "subdir": "streeter/04_drive",
+     "toolchain": "SGDK v2.11 tree in the pinned SGDK image (GCC 13.2.0); program streeter/04_drive"
+    }
+   ],
+   "images": 1,
+   "lineage": "D12",
+   "qualification": "QUALIFIED"
+  }
+ ],
+ "development_qualified": 11,
+ "development_required": 12,
+ "folds": "leave-one-lineage-out over the 11 qualified development lineages (D01 = s1, sk, 36 Sonic CD modules, s2; D03 = sf1, sf2)",
+ "independence": {
+  "max_pair": [
+   "D01~D02",
+   {
+    "containment_x_in_y": 0.0006597401110538669,
+    "containment_y_in_x": 0.025914891224914274
+   }
+  ],
+  "merges": [],
+  "method": "12-byte shingle containment of labelled application-code runs (threshold 0.30)",
+  "over_threshold": {}
+ },
+ "plan_sha256": "48da926fe0729680fa966f8272148662a66f7a09becc9b7de59046a4c45e4e36",
+ "schema": "segarecomp.ml_v3_corpus_manifest.v1"
+}

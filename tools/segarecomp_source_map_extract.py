@@ -62,7 +62,7 @@ CONT = re.compile(r"^\s+([0-9A-F]+) : (.*)$")
 HEX = re.compile(r"(?:[0-9A-F]{2}(?:[0-9A-F]{2})?(?: |$))+")
 SHA = re.compile(r"[0-9a-f]{64}")
 REV = re.compile(r"[0-9a-f]{40}")
-LABEL = re.compile(r"^[A-Za-z_.@][\w.@]*:(.*)$")
+LABEL = re.compile(r"^[A-Za-z_.@?][\w.@?]*:(.*)$")  # SEG-072: ASM68K/IDA labels may contain `?`
 TOKEN = re.compile(r"[A-Za-z0-9._+-]{1,64}")
 
 
@@ -79,6 +79,9 @@ def _fail(code: str, count: int = 0):
     raise SourceMapError(code, count)
 
 
+ANON_LABEL = re.compile(r"^(?:[+-]+|/)$")  # SEG-072: AS temporary (nameless) labels `-`, `--`, `+`, `++`, `/` written without a colon
+
+
 def _tokens(src: str) -> list[str]:
     text = src.split(";", 1)[0].strip()
     parts = text.split()
@@ -86,6 +89,8 @@ def _tokens(src: str) -> list[str]:
         label = LABEL.match(parts[0])
         if label:  # `label:` or `label:directive`
             parts = ([label.group(1)] if label.group(1) else []) + parts[1:]
+        elif len(parts) >= 2 and ANON_LABEL.match(parts[0]) and src[:1] not in (" ", "\t"):
+            parts = parts[1:]  # an unindented nameless label never is a mnemonic
     return parts
 
 
@@ -141,9 +146,9 @@ def _collect_as(listing: str):
                 mode = stack.pop()
                 continue
             if first == "cpu":
-                if len(tokens) != 2 or tokens[1].lower() not in ("68000", "z80"):
+                if len(tokens) != 2 or tokens[1].lower() not in ("68000", "z80", "z80undoc"):
                     _fail("unknown_cpu")
-                mode = "z80" if tokens[1].lower() == "z80" else "68000"
+                mode = "z80" if tokens[1].lower() in ("z80", "z80undoc") else "68000"  # SEG-072: Z80UNDOC is Z80 code
                 continue
             if first.lstrip("!") != "org":
                 anchor = addr
@@ -166,6 +171,8 @@ def _collect_as(listing: str):
                 gap_tokens.setdefault(addr, set()).add(first)
             continue
         cont = CONT.match(line.rstrip())
+        if cont and last is not None and last[2] == "Z":
+            continue  # SEG-072: continuation of a Z80 row (never accounted; explained by its `save` block) - wider Z80 byte fields
         if cont and last is not None:
             field = cont.group(2)[:20].rstrip()
             if field and HEX.fullmatch(field):
@@ -205,6 +212,29 @@ def _asm68k_tokens(src: str):
 
 
 ALIGN_ROWS = frozenset("even cnop align".split())
+
+
+def _literal(text: str):
+    text = text.strip()
+    if re.fullmatch(r"\$[0-9A-Fa-f]+", text):
+        return int(text[1:], 16)
+    if re.fullmatch(r"\d+", text):
+        return int(text)
+    return None
+
+
+def _dcb_literal(tokens):
+    """Bytes of `dcb.b|w|l count,value` when both operands are numeric literals (else None)."""
+    if len(tokens) < 2:
+        return None
+    size = {"b": 1, "w": 2, "l": 4}.get(tokens[0].lower().split(".")[1] if "." in tokens[0] else "w")
+    ops = "".join(tokens[1:]).split(",")
+    if size is None or len(ops) != 2:
+        return None
+    count, value = _literal(ops[0]), _literal(ops[1])
+    if count is None or value is None or count <= 0 or count > (1 << 24) or value >= (1 << (8 * size)):
+        return None
+    return value.to_bytes(size, "big") * count
 
 
 def _collect_asm68k(listing: str, align_post_pc: bool = False):
@@ -284,6 +314,12 @@ def _collect_asm68k(listing: str, align_post_pc: bool = False):
                 row[4] = 0
             rows.append(row)
         else:
+            literal = _dcb_literal(tokens) if base == "dcb" else None
+            if literal is not None:
+                # SEG-072: a `dcb.<size> count,value` row with literal operands that lists no bytes is an explicit data block; its
+                # computed bytes become a data row that must equal the ROM exactly (checked in the accounting, whatever the dialect).
+                rows.append([addr, bytearray(literal), "D", "dcb!", len(literal)])
+                continue
             if base in GAP:
                 gap_tokens.setdefault(addr, set()).add(base)
             if base:
@@ -385,6 +421,8 @@ def _account(rows, gap_tokens, rom: bytes, exact: bool, data_spans=(), placehold
             starts.add(addr)
             counts["I"] += length
         else:
+            if base == "dcb!" and bytes(data) != rom[addr:end]:
+                _fail("data_differs_from_rom")
             if exact and bytes(data) != rom[addr:end]:
                 # opt-in: a data row that is ONE uniform 00/FF fill is a reserved-space placeholder that p2bin post-processing (`-z` compression of a
                 # sound driver) replaces; it stays DATA, so nothing is ever claimed about its ROM bytes.
@@ -444,8 +482,21 @@ def _account(rows, gap_tokens, rom: bytes, exact: bool, data_spans=(), placehold
         _fail("universe_too_large")
     return sorted(starts), {
         "instruction_starts": len(starts), "instruction_bytes": counts["I"], "data_bytes": counts["D"],
-        "other_bytes": uncovered, "operand_overlays": overlays,
+        "other_bytes": uncovered, "operand_overlays": overlays, "_cover": bytes(cover),
     }
+
+
+def byte_classes(starts, cover: bytes) -> bytes:
+    """SEG-072 (ADR 0151): per-byte class string of an accepted extraction: b'I' instruction start, b'c' other bytes of a listed
+    instruction (including an operand byte the source overwrites with a data fixup), b'D' every other byte (data rows and the
+    explained binary-include / padding / Z80 gaps). Derived only from the fail-closed accounting above; adds no authority."""
+    out = bytearray(b"D" * len(cover))
+    for position, state in enumerate(cover):
+        if state in (1, 3, 4):
+            out[position] = ord("c")
+    for address in starts:
+        out[address] = ord("I")
+    return bytes(out)
 
 
 def format_universe(starts, rom_sha256: str, producer: str, source_revision: str, source_config: str) -> str:
@@ -493,6 +544,7 @@ def main(argv=None) -> int:
                         help="asm68k: byte-emitting even/cnop/align rows print the PC after the alignment (their pad precedes it)")
     parser.add_argument("--placeholder-fill", action="store_true",
                         help="a data row that is a single uniform 00/FF fill may differ from the ROM (p2bin -z compression placeholder)")
+    parser.add_argument("--classes-output", help="SEG-072: also write the per-byte class string (I/c/D) of the accepted extraction")
     args = parser.parse_args(argv)
     try:
         if args.source_dir:
@@ -510,6 +562,11 @@ def main(argv=None) -> int:
         return 1
     with open(args.output, "w", encoding="ascii", newline="\n") as sink:
         sink.write(text)
+    if args.classes_output:
+        starts = [int(line, 16) for line in text.splitlines() if re.fullmatch(r"[0-9a-f]{8}", line)]
+        with open(args.classes_output, "wb") as sink:
+            sink.write(byte_classes(starts, summary["_cover"]))
+    summary = {key: value for key, value in summary.items() if not key.startswith("_")}
     print(json.dumps({"schema": "segarecomp.m68k_source_universe.summary.v1", **summary}, sort_keys=True))
     return 0
 

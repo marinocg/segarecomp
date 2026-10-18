@@ -77,3 +77,6 @@ set_property(TEST segarecomp_m68k_adaptive_budget_test APPEND PROPERTY LABELS fu
 add_test(NAME segarecomp_ml_v3_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_v3_test.py)
 set_property(TEST segarecomp_ml_v3_test APPEND PROPERTY LABELS full fast)
+add_test(NAME segarecomp_ml_v3_sgdk_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_v3_sgdk_test.py)
+set_property(TEST segarecomp_ml_v3_sgdk_test APPEND PROPERTY LABELS full fast)

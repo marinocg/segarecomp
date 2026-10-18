@@ -465,5 +465,72 @@ class ModuleListings(unittest.TestCase):
             ex.extract(moved, rom + b"\x00\x00", REV, None, dialect="asm68k", image_base=self.BASE, align_post_pc=True)
 
 
+class Seg072Adapters(unittest.TestCase):
+    """SEG-072 (ADR 0152): strictly additive dialect adapters and the per-byte class output; synthetic listings only."""
+
+    def test_byte_classes(self):
+        f = good()
+        f.directive(24, "\tbinclude\t\"tail.bin\"")
+        listing, rom = f.build()
+        starts, summary = ex.parse_listing(listing, rom)
+        cls = ex.byte_classes(starts, summary["_cover"])
+        self.assertEqual(cls[0:1], b"I")
+        self.assertEqual(cls[2:6], b"Iccc")
+        self.assertEqual(cls[6:16], b"D" * 10)      # data row + binary include
+        self.assertEqual(cls[16:18], b"Ic")
+        self.assertEqual(cls[18:20], b"DD")          # Z80 block and the gap it explains are data for the MC68000
+        self.assertEqual(cls[20:24], b"Iccc")
+        self.assertEqual(len(cls), len(rom))
+
+    def test_classes_output_cli_and_private_summary_key(self):
+        f = good()
+        f.directive(24, "\tbinclude\t\"tail.bin\"")
+        listing, rom = f.build()
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, data in (("l", listing.encode()), ("r", rom)):
+                with open(os.path.join(tmp, name), "wb") as h:
+                    h.write(data)
+            out = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(ex.__file__), "segarecomp_source_map_extract.py"), "--listing",
+                                  os.path.join(tmp, "l"), "--rom", os.path.join(tmp, "r"), "--output", os.path.join(tmp, "u"), "--source-revision",
+                                  REV, "--classes-output", os.path.join(tmp, "c")], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, out.stdout)
+            self.assertNotIn("_cover", out.stdout)
+            self.assertEqual(open(os.path.join(tmp, "c"), "rb").read().count(b"I"), 4)
+
+    def test_anonymous_labels_and_z80undoc(self):
+        rom = bytearray(16)
+        rom[0:2] = bytes.fromhex("4E71")
+        rom[2:4] = bytes.fromhex("60FC")
+        rom[4:8] = bytes([1, 2, 3, 4])
+        rom[8:10] = bytes.fromhex("4E75")
+        lines = [row(1, 0, "4E71", "-\tnop"), row(2, 2, "60FC", "+\tbra.s\t-"), row(3, 4, "", "\tsave"), row(4, 4, "", "\tCPU Z80UNDOC"),
+                 row(5, 4, "01020304", "\tdb 1,2,3,4"), f"{'':>13}{8:>5X} : 05 06 07 08 09 0A 0B 0C", row(6, 8, "", "\trestore"),
+                 row(7, 8, "4E75", "\trts"), row(8, 10, "", "\tbinclude \"t\"")]
+        text, summary = ex.extract("\n".join(lines) + "\n", bytes(rom), REV, None)
+        self.assertEqual(summary["instruction_starts"], 3)  # nameless labels stripped; Z80UNDOC continuation not accounted
+
+    def test_question_mark_labels(self):
+        rom = bytearray(8)
+        rom[0:2] = bytes.fromhex("4E75")
+        rom[2:6] = b"ab?\0"
+        lines = [a68(0, "4E75", "\trts"), a68(2, "6162 3F00", "aWhat?:dc.b 'ab?',0"), a68(6, "", "\tincbin \"x\"")]
+        text, summary = ex.extract("\n".join(lines) + "\n", bytes(rom), REV, None, dialect="asm68k")
+        self.assertEqual(summary["data_bytes"], 4)
+
+    def test_dcb_literal_block_must_equal_rom(self):
+        rom = bytearray(16)
+        rom[0:2] = bytes.fromhex("4E75")
+        rom[2:10] = bytes.fromhex("1111111111111111")
+        rom[10:12] = bytes.fromhex("4E75")
+        lines = [a68(0, "4E75", "\trts"), a68(2, "", "\tdcb.l\t2,$11111111"), a68(10, "4E75", "\trts"), a68(12, "", "\tincbin \"x\"")]
+        text, summary = ex.extract("\n".join(lines) + "\n", bytes(rom), REV, None, dialect="asm68k")
+        self.assertEqual(summary["data_bytes"], 8)
+        rom[5] = 0x12
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract("\n".join(lines) + "\n", bytes(rom), REV, None, dialect="asm68k")
+        self.assertEqual(ctx.exception.code, "data_differs_from_rom")
+        self.assertIsNone(ex._dcb_literal(["dcb.w", "N,$0"]))  # symbolic count: not an explicit block
+
+
 if __name__ == "__main__":
     unittest.main()
