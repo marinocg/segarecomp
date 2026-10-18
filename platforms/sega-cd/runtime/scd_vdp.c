@@ -416,7 +416,7 @@ static void scd_capture_frame(ScdMachine *m, ScdFrameCapture *c) {
     GenesisSha256 sha;
     uint8_t digest[32];
     genesis_sha256_init(&sha);
-    genesis_sha256_update(&sha, canonical, n);
+    genesis_sha256_update(&sha, canonical, (uint32_t)n); /* n <= 4 + 2 * 320 * 448 */
     genesis_sha256_final(&sha, digest);
     for (i = 0; i < 32U; ++i) snprintf(c->sha256 + 2U * i, 3U, "%02x", digest[i]);
   }

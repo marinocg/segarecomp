@@ -98,7 +98,8 @@ int main(void) {
   row(bus_read(0xFE0021U, 1U, &v) == 0 && v == 0x77U, "and reads back at $FE0021");
   row(m->backup_ram_writes == 6U, "6 bus writes counted (the ignored even byte included, a long is two)");
   {
-    unsigned i, others = 1;
+    unsigned i;
+    int others = 1;
     for (i = 0; i < SCD_BACKUP_RAM_BYTES; ++i)
       if (i != 8U && i != 10U && i != 12U && i != 13U && i != 16U && m->backup_ram[i] != image[i]) others = 0;
     row(others, "no other cell changed");
