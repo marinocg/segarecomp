@@ -754,4 +754,7 @@ int scd_machine_init_bios(ScdMachine *m, const ScdProgram *program, const ScdAut
   return scd_vdp_init(m);
 }
 
-void scd_machine_release(ScdMachine *m) { scd_vdp_release(m); }
+void scd_machine_release(ScdMachine *m) {
+  scd_input_release(m);
+  scd_vdp_release(m);
+}

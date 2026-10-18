@@ -437,6 +437,9 @@ typedef struct ScdMachine {
   uint8_t backup_ram_present;
   uint8_t backup_ram[SCD_BACKUP_RAM_BYTES];
   uint64_t backup_ram_reads, backup_ram_writes;
+  /* SEG-070-T002 (ADR 0149): the optional timed standard-pad machine input (--input-script), or NULL: then no pad event exists and
+   * every behaviour and report is that of SEG-065. */
+  struct ScdInput *input;
 } ScdMachine;
 
 /* Physical memories whose bytes may hold executable images (for write invalidation). */
@@ -494,6 +497,47 @@ void scd_machine_release(ScdMachine *m);
 
 /* SEG-065-T002: install the backup RAM machine input (exactly SCD_BACKUP_RAM_BYTES bytes); 0 on success, -1 on a wrong length. */
 int scd_backup_ram_install(ScdMachine *m, const uint8_t *bytes, size_t length);
+
+/* --- SEG-070-T002 (ADR 0149): timed standard-pad machine input (scd_input.c) ------------------------------------------------- */
+
+#define SCD_INPUT_MAX_EVENTS 4096U
+#define SCD_INPUT_MAX_SCRIPT_BYTES 65536U
+#define SCD_INPUT_MAX_LINE 256U
+#define SCD_INPUT_LOG_MAX 65536U
+typedef struct ScdInputEvent {
+  uint64_t tick;  /* absolute machine tick since reset (500,000 ticks per master clock) */
+  uint8_t port;   /* 1 or 2 */
+  uint8_t press;  /* 1 press, 0 release */
+  uint8_t mask;   /* GENESIS_PAD_* bits */
+} ScdInputEvent;
+typedef struct ScdInputRead {
+  uint64_t tick;   /* machine time of the reading instruction */
+  uint64_t onset;  /* vertical-blank onsets processed before it */
+  uint8_t port;
+  uint8_t value;
+} ScdInputRead;
+typedef struct ScdInput {
+  ScdInputEvent *events;
+  size_t count, next;
+  uint8_t pad[2];                    /* the state applied so far, per port */
+  ScdInputRead *log;                 /* data-port reads, in order (bounded; NULL when not logging) */
+  size_t log_count, log_dropped;
+  uint64_t reads[2];
+} ScdInput;
+/* Parse and validate a script (`error` receives the refusal class and `line` its 1-based line); `events` has room for
+ * SCD_INPUT_MAX_EVENTS. Returns 0 on success. Nothing is applied. */
+int scd_input_parse(const char *text, size_t length, ScdInputEvent *events, size_t *count, const char **error, unsigned *line);
+/* Install a script into the machine (0 on success, otherwise the refusal class in *error); `log` enables the read log. */
+int scd_input_install(ScdMachine *m, const char *text, size_t length, int log, const char **error, unsigned *line);
+uint64_t scd_input_next_event(const ScdMachine *m);
+/* Apply every event due at or before `until`, in script order. */
+void scd_input_advance(ScdMachine *m, uint64_t until);
+void scd_input_note_read(ScdMachine *m, uint32_t port, uint32_t value);
+void scd_input_report(const ScdMachine *m, FILE *out);
+int scd_input_write_log(const ScdMachine *m, const char *path);
+void scd_input_release(ScdMachine *m);
+/* The device host's pad mask for a port (scd_vdp.c owns the Genesis runtime). */
+void scd_vdp_set_pad(ScdMachine *m, uint32_t port, uint8_t mask);
 
 /* Device internals shared between runtime translation units. */
 void scd_log(ScdMachine *m, uint32_t kind, uint32_t address, uint32_t value);

@@ -5,8 +5,9 @@
  *   program --disc-dir DIR --instruction-budget N [--report FILE] [--frame FILE.ppm] [--slice-ticks T | --slice-seed S]
  *           [--set main|sub:dN|aN=VALUE]... [--until-tick T] [--backup-ram FILE]
  *           [--capture-onset N]... --capture-dir DIR   (BIOS-image profile; SEG-065-T003)
+ *           [--input-script FILE [--input-log FILE]]   (BIOS-image profile; SEG-070-T002, ADR 0149)
  *
- * Exit status: 0 idle (success), 10 typed stop, 11 budget exhausted or deadline (read `result`), 20 disc refused at start-up, 22 backup RAM input refused, 2 usage. */
+ * Exit status: 0 idle (success), 10 typed stop, 11 budget exhausted or deadline (read `result`), 20 disc refused at start-up, 22 backup RAM input refused, 23 input script refused, 2 usage. */
 #include "scd_runtime.h"
 
 #include <errno.h>
@@ -166,6 +167,7 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
     fprintf(out, ",\"backup_ram\":{\"reads\":%llu,\"writes\":%llu,\"sha256\":\"%s\"}", (unsigned long long)m->backup_ram_reads,
             (unsigned long long)m->backup_ram_writes, digest);
   }
+  scd_input_report(m, out); /* SEG-070-T002: absent without --input-script (reports unchanged) */
   if (m->overlays != NULL) { /* SEG-063: overlay activation (absent for programs without modules: their reports are unchanged) */
     const ScdOverlayProgram *o = m->overlays;
     unsigned g, c;
@@ -316,6 +318,32 @@ static const char *scd_load_backup_ram(ScdMachine *m, const char *path) {
   return scd_backup_ram_install(m, bytes, n) == 0 ? NULL : "length";
 }
 
+/* SEG-070-T002 (ADR 0149): read, validate and install the input script before any guest instruction; a refusal is typed. */
+static int scd_load_input_script(ScdMachine *m, const char *path, int log, int bios_profile) {
+  static char text[SCD_INPUT_MAX_SCRIPT_BYTES + 1U];
+  const char *error = NULL;
+  unsigned line = 0U;
+  size_t n = 0U;
+  FILE *f = fopen(path, "rb");
+  if (!bios_profile) {
+    if (f != NULL) fclose(f);
+    printf("{\"result\":\"input_refused\",\"error\":\"unsupported_profile\",\"line\":0}\n");
+    return 23;
+  }
+  if (f == NULL) {
+    printf("{\"result\":\"input_refused\",\"error\":\"unreadable\",\"line\":0}\n");
+    return 23;
+  }
+  n = fread(text, 1U, sizeof text, f);
+  if (ferror(f)) n = sizeof text;
+  fclose(f);
+  if (scd_input_install(m, text, n, log, &error, &line) != 0) {
+    printf("{\"result\":\"input_refused\",\"error\":\"%s\",\"line\":%u}\n", error, line);
+    return 23;
+  }
+  return 0;
+}
+
 /* SEG-063: `overlays` is the generated overlay registry (NULL for programs without disc-loaded modules). */
 static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *overlays, const ScdAuthentic *authentic, int argc,
                            char **argv);
@@ -339,6 +367,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   uint64_t capture_onsets[8];
   unsigned capture_count = 0U;
   const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *event_path = NULL, *backup_ram_path = NULL;
+  const char *input_script_path = NULL, *input_log_path = NULL;
   unsigned set_count = 0, i;
   uint64_t budget = 0U, slice_ticks = 0U, slice_seed = 0U, until_tick = UINT64_MAX;
   int have_seed = 0;
@@ -368,6 +397,8 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
       capture_count += 1U;
     } else if (strcmp(flag, "--capture-dir") == 0) capture_dir = value;
     else if (strcmp(flag, "--backup-ram") == 0) backup_ram_path = value; /* SEG-065-T002: the backup RAM machine input */
+    else if (strcmp(flag, "--input-script") == 0) input_script_path = value; /* SEG-070-T002: the timed pad machine input */
+    else if (strcmp(flag, "--input-log") == 0) input_log_path = value;       /* its read log (local diagnostic) */
     else if (strcmp(flag, "--dump-dir") == 0) dump_dir = value;           /* SEG-064-T004 diagnostics (local only) */
     else if (strcmp(flag, "--coverage") == 0) coverage_path = value;
     else if (strcmp(flag, "--access-trace") == 0) trace_path = value;
@@ -414,6 +445,15 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
       return 22;
     }
   }
+  if (input_log_path != NULL && input_script_path == NULL) return 2;
+  if (input_script_path != NULL) {
+    const int refused = scd_load_input_script(&machine, input_script_path, input_log_path != NULL, authentic != NULL);
+    if (refused != 0) {
+      scd_machine_release(&machine);
+      scd_disc_close(&disc);
+      return refused;
+    }
+  }
   if ((capture_count != 0U) != (capture_dir != NULL) || (capture_count != 0U && authentic == NULL)) return 2;
   for (i = 0; i < capture_count; ++i)
     if (scd_vdp_capture_request(&machine, capture_onsets[i], capture_dir) != 0) return 2;
@@ -453,6 +493,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   }
   if (coverage_path != NULL && scd_coverage_write(&machine, coverage_path) != 0) return 1;
   if (dump_dir != NULL && scd_dump_state(&machine, dump_dir) != 0) return 1;
+  if (input_log_path != NULL && scd_input_write_log(&machine, input_log_path) != 0) return 1;
   if (materialize_dir != NULL && result == SCD_RUN_STOPPED && !scd_capture(&machine, program, materialize_dir)) return 1;
   report = report_path != NULL ? fopen(report_path, "w") : stdout;
   if (report == NULL) return 1;
