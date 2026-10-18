@@ -122,6 +122,25 @@ int main(void) {
   row(m->cpu[SCD_MAIN].next == m->now + (4120U * MASTER) + 12U * SCD_MAIN_CYCLE_TICKS, "the next instruction is not delayed again");
   row(m->vdp_dma_count == 1U && m->vdp_dma_stall_ticks == 4120U * MASTER, "count 1, stall total 4120 master clocks");
 
+  /* after the transfer: length registers 0, source #21-#22 advanced by the length (16-bit), #23 unchanged */
+  {
+    const uint16_t *r = ((const GenesisRuntime *)m->vdp_host)->devices.vdp.registers;
+    row(r[19] == 0U && r[20] == 0U && r[21] == 0x64U && r[22] == 0x80U && r[23] == 0x7FU,
+        "registers after 100 words from $7F8000 (word address): #19/#20 = 0, #21/#22 = $8064, #23 = $7F");
+    fresh(0x54U, 0x00U);
+    m->ga.mode = SCD_MODE_RET; /* 2M Word RAM owned by main: a valid source window crossing a 64 Ki-word boundary */
+    vdp(2U, 0x9320U);
+    vdp(2U, 0x9400U);
+    vdp(2U, 0x95F0U);
+    vdp(2U, 0x96FFU);
+    vdp(2U, 0x9710U); /* $21FFE0 >> 1 = $10FFF0: #23 = $10, #22 = $FF, #21 = $F0 */
+    m->now = m->vdp_onset - FRAME;
+    vdp(4U, 0x40000080U);
+    r = ((const GenesisRuntime *)m->vdp_host)->devices.vdp.registers;
+    row(m->vdp_dma_count == 1U && r[19] == 0U && r[20] == 0U && r[21] == 0x10U && r[22] == 0x00U && r[23] == 0x10U,
+        "the source advance wraps at 16 bits: $FFF0 + $20 -> #21/#22 = $0010, #23 unchanged ($10)");
+  }
+
   /* a VRAM fill (register #23 bit 7 set, bit 6 clear) does not hold the processor */
   fresh(0x54U, 0x00U);
   vdp(2U, 0x9310U);

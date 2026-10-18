@@ -54,6 +54,7 @@ typedef struct ScdVdpHost {
   GenesisRasterFrameState raster;
   uint8_t vram_line0[GENESIS_VDP_VRAM_BYTES];
   GenesisFrameArtifact frame;
+  uint8_t dma_armed;           /* SEG-065-T002: the access being routed performs a 68K->VDP DMA */
 } ScdVdpHost;
 
 int scd_vdp_init(ScdMachine *m) {
@@ -166,6 +167,7 @@ static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t fir
     const uint32_t code = (((uint32_t)first >> 14) & 3U) | (((uint32_t)second >> 2) & 0x3CU);
     const uint64_t end = scd_vdp_dma_end(m, host, m->now, length, (code & 0x0FU) == 0x01U);
     m->main_dma_until = end;
+    ((ScdVdpHost *)m->vdp_host)->dma_armed = 1U;
     m->vdp_dma_count += 1U;
     m->vdp_dma_stall_ticks += end - m->now;
     scd_log(m, 0x48U, (uint32_t)((end - m->now) / SCD_MASTER_TICK_TICKS), code); /* SEG-065-T002: DMA duration */
@@ -226,6 +228,17 @@ int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write
                            &stop) != GENESIS_ACCESS_OK)
     return scd_fail_access(m, SCD_MAIN, SCD_STOP_VDP_ACCESS_UNSUPPORTED, pc, address, width, is_write); /* SEG-064-T004: with its width and direction */
   if (!is_write) *value = routed;
+  if (((ScdVdpHost *)host)->dma_armed) {
+    /* SEG-065-T002: after a 68K->VDP DMA the length registers are 0 and the source registers #21-#22 have advanced by the length
+     * (16-bit, register #23 unchanged) - GPGX vdp_dma_update "DMA source address registers are incremented during DMA" */
+    uint16_t *r = host->devices.vdp.registers;
+    const uint32_t end = ((uint32_t)(r[21] & 0xFFU) | ((uint32_t)(r[22] & 0xFFU) << 8)) + ((uint32_t)(r[19] & 0xFFU) | ((uint32_t)(r[20] & 0xFFU) << 8));
+    r[21] = (uint16_t)(end & 0xFFU);
+    r[22] = (uint16_t)((end >> 8) & 0xFFU);
+    r[19] = 0U;
+    r[20] = 0U;
+    ((ScdVdpHost *)host)->dma_armed = 0U;
+  }
   if (m->bios != NULL && !is_write) scd_log(m, 0x42U, address, routed); /* the observed value is part of the device history */
   return 0;
 }
