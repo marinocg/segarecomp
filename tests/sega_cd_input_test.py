@@ -72,7 +72,7 @@ def main():
         onset = 224 * 3420 * 500_000
         frame = 262 * 3420 * 500_000
         want = "segarecomp-input-script 1\n%d 1 press START\n%d 1 release START\n" % (onset + 1676 * frame, onset + 1682 * frame)
-        check(frame == 448_020_000_000 and onset == 382_968_000_000 and text == want,
+        check(frame == 448_020_000_000 and onset == 383_040_000_000 and text == want,
               "the onset-schedule author: press at onset 1677, release at onset 1683 (%s)" % text.replace("\n", " | "))
         check(subprocess.run([sys.executable, str(tool), "onset", "--base-onsets", "0", "--press", "0", "--hold", "6"],
                              capture_output=True).returncode == 2, "the author refuses an onset number below 1")
