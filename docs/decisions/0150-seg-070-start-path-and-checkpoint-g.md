@@ -90,8 +90,13 @@ A second START (held 6 frames from entry + 600), tried only to observe, in the r
 620-650), stays black for about 420 frames (loading) and then the first level appears (about entry + 1,070). Generated-native
 (same schedule): the fade starts, its frames at entry + 610 / 620 differ from the reference's (the poll-phase class above), the black
 frames at entry + 630 / 640 / 700 / 900 equal the reference's, and at about entry + 957 frames the main processor enters a further module
-with no compiled authority: the typed stop `entry_not_compiled` (the earliest remaining frontier; a disc extent of the established
-kind is the expected authority, found by the content-aware check; no gameplay or loading claim is made).
+whose entry has no compiled authority: the typed stop `entry_not_compiled` at a main-processor JSR whose target lies in 2M Word RAM
+(code the sub loaded from the disc by CDC transfer and that the main processor executes in place; extent images are mapped only into
+work RAM and PRG RAM today). The reference's content-aware check also shows the sub then runs code from a PRG-RAM bank window region
+whose source file is ambiguous from the fetched words alone. This is the earliest remaining frontier: Word RAM-resident executable
+authority for the main processor plus the stage's sub bank. The reference, with RIGHT held for 300 frames once the first level is
+playable, moves the player through the level (a local observation); the generated program cannot reach that point, so no gameplay claim
+or generated-native observation exists.
 
 ## Consequences
 
