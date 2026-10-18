@@ -779,6 +779,66 @@ int main(void) {
         "CDC: the PCM RAM destination (4) stays a typed stop at DTRG and starts nothing");
   }
 
+  /* SEG-065-T002 (ADR 0147): CD-DA play in the BIOS-image profile (GPGX cdd_update, audio track) - play from 0:04:35 (LBA 185, in the
+   * pregap before audio track 2 at LBA 190): no stop; "audio playing" (control high byte $00) only from the track start; the position
+   * advances one block per tick with no CD-ROM block delivered; past the last track the next tick reports END. The synthetic profile
+   * keeps the typed stop cd_read_audio_track (SEG-062, unchanged). */
+  {
+    static const uint8_t bios_marker[4] = {0U, 0U, 0U, 0U};
+    int n, stopped = 0;
+    uint64_t delivered;
+    fresh();
+    m->bios = bios_marker; /* only the profile selector matters here */
+    m->vdp_onset = UINT64_MAX; /* no VDP host in this table: no vertical-blank events */
+    m->now = 0U;
+    sub_write(0x37U, 1U, 0x04U);
+    CDD_TX(3U, 0U, 0U, 0U, 0U, 4U, 3U, 5U);
+    row(w == 0U && m->cdd.pending == SCD_CDD_PLAY, "CD-DA: play 0:04:35 is accepted (PLAY pending)");
+    next_cdd_tick();
+    row(m->cdd.lba == 185 && m->cdd.index == 1U && m->cdd.status == SCD_CDD_PLAY && m->ga.cdd_ctrl_hi == 1U,
+        "CD-DA: the next tick moves to LBA 185 in track 2's index (its pregap), PLAY, not yet audio playing");
+    for (n = 0; n < 100 && m->cdd.latency > 0U; ++n) next_cdd_tick();
+    delivered = m->cdd.delivered;
+    for (n = 0; n < 5; ++n) {
+      next_cdd_tick();
+      stopped |= m->stop.stop_class != SCD_STOP_NONE;
+    }
+    row(!stopped && m->cdd.lba == 190 && m->ga.cdd_ctrl_hi == 1U, "CD-DA: five pregap blocks played (LBA 190), no stop, still not audio playing");
+    next_cdd_tick();
+    row(m->stop.stop_class == SCD_STOP_NONE && m->cdd.lba == 191 && m->ga.cdd_ctrl_hi == 0U,
+        "CD-DA: the block at the track start sets audio playing (control high byte $00), LBA 191");
+    CDD_TX(0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U);
+    row(m->cdd.rx[0] == SCD_CDD_PLAY && m->cdd.rx[1] == 0U && m->cdd.rx[2] == 0U && m->cdd.rx[3] == 0U && m->cdd.rx[4] == 0U &&
+            m->cdd.rx[5] == 4U && m->cdd.rx[6] == 4U && m->cdd.rx[7] == 1U && m->cdd.rx[8] == 0U,
+        "CD-DA: status reports PLAY at 0:04:41 (LBA 191 + 150), audio flag 0");
+    for (n = 0; n < 73; ++n) next_cdd_tick();
+    row(m->stop.stop_class == SCD_STOP_NONE && m->cdd.lba == 264 && m->cdd.index == 1U && m->ga.cdd_ctrl_hi == 0U,
+        "CD-DA: 73 more blocks (LBA 264, the last of track 2), still playing");
+    next_cdd_tick();
+    row(m->cdd.lba == 265 && m->cdd.index == 2U && m->ga.cdd_ctrl_hi == 1U && m->cdd.status == SCD_CDD_PLAY,
+        "CD-DA: the last block leaves the last track (index 2), not audio playing");
+    next_cdd_tick();
+    row(m->cdd.status == SCD_CDD_END && m->stop.stop_class == SCD_STOP_NONE, "CD-DA: the next tick reports END");
+    row(m->cdd.delivered == delivered, "CD-DA: no CD-ROM block was delivered to the decoder while playing audio");
+    m->bios = NULL;
+
+    fresh(); /* the synthetic profile: unchanged */
+    m->now = 0U;
+    sub_write(0x37U, 1U, 0x04U);
+    CDD_TX(3U, 0U, 0U, 0U, 0U, 4U, 3U, 5U);
+    next_cdd_tick();
+    for (n = 0; n < 100 && m->cdd.latency > 0U; ++n) next_cdd_tick();
+    {
+      const uint64_t t = m->cdd.next_tick;
+      int status;
+      m->now = t;
+      scd_devices_advance(m, t);
+      status = (int)m->stop.stop_class;
+      m->stop.stop_class = SCD_STOP_NONE;
+      row(status == SCD_STOP_CD_READ_AUDIO_TRACK, "CD-DA: the synthetic profile still stops with cd_read_audio_track");
+    }
+  }
+
   free(m);
   printf("%d failure(s)\n", failures);
   return failures != 0;

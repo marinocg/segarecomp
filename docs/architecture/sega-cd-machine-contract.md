@@ -261,7 +261,7 @@ nothing to do (no `HOCK`, no command pending, no latency, not playing, `DECEN` c
 | commands 6, 7, A (pause, resume, N-track jump) | `PAUSE` (6, A: no audio playing, `$36` high = 1) / `PLAY` (7) in RS0 and the status; RS1-RS8 unchanged; the checksum is recomputed | G (GPGX cases 6, 7, 0xA) |
 | other commands (scan, tray) | typed stop `cdd_command_unsupported` | C |
 | each tick while latency > 0 | latency - 1, the decoder runs on a header-0 block (section 7) | G |
-| each tick while playing | a block of a data track is decoded with header = BCD MSF of `LBA + 150` and mode 1; LBA + 1; crossing the end of a track moves to the next track; reaching an audio track is the typed stop `cd_read_audio_track` (CD-DA playback is not modelled); past the last track the status becomes `END` (`$0C`) | V1 + CDROM; audio stop C |
+| each tick while playing | a block of a data track is decoded with header = BCD MSF of `LBA + 150` and mode 1; LBA + 1; crossing the end of a track moves to the next track; reaching an audio track is, in the synthetic profile, the typed stop `cd_read_audio_track`; in the BIOS-image profile (SEG-065-T002) an audio-track block is played as drive state: from the track start the CDD control high byte reads `$00` (audio playing), the decoder runs without a sector, LBA + 1 (the audio output itself is not modelled); past the last track the status becomes `END` (`$0C`) | V1 + CDROM (GPGX `cdd_update`); synthetic audio stop C |
 | `HOCK` | after the drive's tick, level 4 becomes pending (taken with `IEN4`) | V1 |
 
 ## 9. Synthetic post-BIOS fixture profile

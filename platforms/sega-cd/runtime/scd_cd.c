@@ -712,9 +712,17 @@ static int scd_cdd_tick(ScdMachine *m) {
       m->cdd.status = SCD_CDD_END; /* past the last track; a pending command waits for the next tick */
       goto hock;
     }
-    if (m->disc->tracks[m->cdd.index].type == 2U) /* CD-DA playback (audio output) is not modelled */
+    if (m->disc->tracks[m->cdd.index].type == 2U && m->bios == NULL) /* synthetic profile: data only (SEG-062, unchanged) */
       return scd_fail(m, SCD_SUB, SCD_STOP_CD_READ_AUDIO_TRACK, 0U, (uint32_t)m->cdd.lba);
-    {
+    if (m->disc->tracks[m->cdd.index].type == 2U) {
+      /* SEG-065-T002 (ADR 0147, BIOS-image profile): CD-DA play as the drive state the processors observe (GPGX cdd_update, audio track): from the
+       * track's start the drive reports "audio playing" (CDD control high byte $00), the decoder runs without a sector (audio is no
+       * CD-ROM data), and the position advances one sector per 75 Hz tick. The audio output itself (samples, DAC, fader) is not
+       * modelled and nothing the generated program can read depends on it in this machine. */
+      if (m->cdd.lba >= (int32_t)m->disc->tracks[m->cdd.index].first_lba) m->ga.cdd_ctrl_hi = 0x00U;
+      scd_log(m, 0xA3U, (uint32_t)m->cdd.lba, m->cdd.index);
+      if (scd_cdc_decode(m, no_header) != 0) return 1;
+    } else {
       const uint32_t msf = (uint32_t)(m->cdd.lba + 150);
       uint8_t header[4];
       header[0] = scd_bcd(msf / 75U / 60U);
@@ -723,8 +731,8 @@ static int scd_cdd_tick(ScdMachine *m) {
       header[3] = 0x01U; /* Mode 1 */
       scd_log(m, 0xA1U, (uint32_t)m->cdd.lba, msf);
       if (scd_cdc_decode(m, header) != 0) return 1;
+      m->cdd.delivered += 1U;
     }
-    m->cdd.delivered += 1U;
     m->cdd.lba += 1;
     if (m->cdd.lba >= (int32_t)scd_track_end(m, m->cdd.index)) {
       m->cdd.index += 1U; /* on into the next track */
