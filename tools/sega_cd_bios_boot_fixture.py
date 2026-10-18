@@ -15,6 +15,10 @@ Cases (main d7 selects, the sub's a6 mirrors it):
       its address extension (16), a byte of its immediate (17) - the handoff must not be reported (typed byte-verification stop)
   18  as 12 with the alternate IP, whose entry instruction is a second compiled variant at the same pc
   19  as 12, then a jump to a pc nothing is compiled at (the program is built with that pc as its application entry)
+  20-23 (SEG-064-T005, the post-handoff application): as 12, but the BIOS first fills a work-RAM jump-table thunk ($FFFD00: JMP abs.L) the way
+      the authentic BIOS does - 20: to service A (a BIOS routine: marker $5E0A, RTS), 21: to an address where nothing is compiled, 22: to
+      service B (marker $5E0B), 23: as 20 - so that the application (a disc IP that copies a routine to RAM and calls the thunk) can call
+      a BIOS service through a mutable table and return
   14  as 12, but the SP is never placed: the sub enters the stale epoch code (COMSTAT1 = $1111) - the epoch variant still runs - and the
       IP is entered through a sign-extended register ($FFFF0000), which the 24-bit program counter must select as $FF0000
 usage: sega_cd_bios_boot_fixture.py build --out DIR --boot-ip FILE --boot-sp FILE --boot-ip-alt FILE --entry ADDRESS  ->  DIR/bios.bin, DIR/expected.json (stdout)
@@ -44,6 +48,11 @@ SUB_SSP = 0x2000
 SUB_ENTRY = 0x0100
 GA_SUB = 0xFF8000
 STALE_MARKER = 0x1111
+SERVICE_A = 0x1C00          # SEG-064-T005: BIOS services reached through the work-RAM jump-table thunk
+SERVICE_B = 0x1C20
+THUNK = 0xFFFD00
+BAD_TARGET = 0xFFFF00       # work RAM where no instruction is compiled
+SERVICE_MARKER = RESULT + 0x4A
 
 
 def stale_code():
@@ -74,6 +83,13 @@ def sub_program():
     return s.assemble()
 
 
+def service(base, marker):
+    s = F.Asm(base)
+    s.move("w", F.imm(marker), F.absl(SERVICE_MARKER))
+    s.rts()
+    return s.assemble()
+
+
 def copy_words(m, source, destination, byte_length, label):
     m.move("l", F.imm(source), F.a(0))
     m.move("l", F.imm(destination), F.a(1))
@@ -95,6 +111,10 @@ CASES = {
     17: (True, "ip", ("entry", 2), "abs"),    # a byte of its immediate extension corrupted: bytes of neither variant
     18: (True, "alt", None, "abs"),           # the alternate IP (a second compiled variant at the entry): accepted
     19: (True, "ip", None, 0xFF0100),         # a jump to a pc where nothing is compiled (the entry is configured there)
+    20: (True, "ip", None, "abs", SERVICE_A),   # SEG-064-T005: the thunk reaches service A
+    21: (True, "ip", None, "abs", BAD_TARGET),  # ... a target where nothing is compiled
+    22: (True, "ip", None, "abs", SERVICE_B),   # ... service B (the table is mutable)
+    23: (True, "ip", None, "abs", SERVICE_A),   # ... as 20 (the IP corrupts its own copied routine)
 }
 
 
@@ -104,13 +124,16 @@ def main_program(sub_len, stale_len, ip_len, sp_len, alt_len):
     copy_words(m, STALE_SRC, WINDOW + 0x6000, stale_len, "copy_stale")
     m.move("b", F.imm(0x01), F.absl(GA + 0x01))         # SRES = 1, SBRQ = 0: the sub's runnable epoch
     F.wait_flag(m, GA + 0x0F, 0x01, "wait_sub")
-    for case, (place_sp, source, corrupt, jump) in CASES.items():
+    for case, (place_sp, source, corrupt, jump, *thunk) in CASES.items():
         m.immop("cmp", "w", case, F.d(7))
         m.bcc("ne", "not%d" % case)
         if place_sp:                                    # place the disc SP over the stale code (the bus is requested around the copy)
             m.move("b", F.imm(0x03), F.absl(GA + 0x01))
             copy_words(m, SP_SRC, WINDOW + 0x6000, sp_len, "copy_sp%d" % case)
             m.move("b", F.imm(0x01), F.absl(GA + 0x01))
+        if thunk:                                       # the BIOS-filled jump-table thunk: JMP (xxx).L target
+            m.move("w", F.imm(0x4EF9), F.absl(THUNK))
+            m.move("l", F.imm(thunk[0]), F.absl(THUNK + 2))
         m.move("b", F.imm(0x00), F.absl(GA + 0x0F))     # (the sub flag is rewritten by the SP / stale code with 2)
         m.move("b", F.imm(0x01), F.absl(GA + 0x0E))     # the go: the sub enters $6000
         F.wait_flag(m, GA + 0x0F, 0x02, "wait_sp%d" % case)
@@ -151,6 +174,10 @@ def build(ip, sp, alt):
     rom[IP_SRC:IP_SRC + len(ip)] = ip
     rom[SP_SRC:SP_SRC + len(sp)] = sp
     rom[ALT_SRC:ALT_SRC + len(alt)] = alt
+    for base, marker in ((SERVICE_A, 0x5E0A), (SERVICE_B, 0x5E0B)):
+        code = service(base, marker)
+        assert base + len(code) <= ROM_SIZE and SP_SRC + len(sp) <= SERVICE_A
+        rom[base:base + len(code)] = code
     return bytes(rom), sub, stale
 
 

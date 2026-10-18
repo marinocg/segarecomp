@@ -34,7 +34,7 @@ inline constexpr std::uint32_t kBiosMinimumBytes = 0x200U;    // vector table + 
 inline constexpr std::uint32_t kMaxEpochImages = 4U;          // ADR 0142 decision 8
 inline constexpr std::uint32_t kMaxOperandTemplates = 64U;
 inline constexpr std::uint32_t kMaxCopyImages = 8U;
-inline constexpr std::uint32_t kMaxDiscImages = 4U;            // SEG-064-T004
+inline constexpr std::uint32_t kMaxDiscImages = 16U;           // SEG-064-T004
 inline constexpr std::uint32_t kEpochGranule = 0x100U;        // snapshot length granule (scd_prg_snapshot_length)
 inline constexpr const char *kSegaCdBiosGeneratorVersion = "segarecomp.sega_cd.bios_profile.v2";
 
