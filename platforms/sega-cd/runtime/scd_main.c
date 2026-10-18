@@ -3,9 +3,9 @@
  * (optionally in deadline slices: the result must not depend on them), and writes a JSON report and, on request, the VDP frame.
  *
  *   program --disc-dir DIR --instruction-budget N [--report FILE] [--frame FILE.ppm] [--slice-ticks T | --slice-seed S]
- *           [--set main|sub:dN|aN=VALUE]... [--until-tick T]
+ *           [--set main|sub:dN|aN=VALUE]... [--until-tick T] [--backup-ram FILE]
  *
- * Exit status: 0 idle (success), 10 typed stop, 11 budget exhausted or deadline (read `result`), 20 disc refused at start-up, 2 usage. */
+ * Exit status: 0 idle (success), 10 typed stop, 11 budget exhausted or deadline (read `result`), 20 disc refused at start-up, 22 backup RAM input refused, 2 usage. */
 #include "scd_runtime.h"
 
 #include <errno.h>
@@ -156,6 +156,11 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
     for (i = 0; i < 8U; ++i) fprintf(out, "%s%llu", i ? "," : "", (unsigned long long)m->main_interrupts_taken[i]);
     fprintf(out, "]");
   }
+  if (m->backup_ram_present) { /* SEG-065-T002: the backup RAM machine input (absent without --backup-ram: reports unchanged) */
+    scd_sha_hex(m->backup_ram, sizeof m->backup_ram, digest);
+    fprintf(out, ",\"backup_ram\":{\"reads\":%llu,\"writes\":%llu,\"sha256\":\"%s\"}", (unsigned long long)m->backup_ram_reads,
+            (unsigned long long)m->backup_ram_writes, digest);
+  }
   if (m->overlays != NULL) { /* SEG-063: overlay activation (absent for programs without modules: their reports are unchanged) */
     const ScdOverlayProgram *o = m->overlays;
     unsigned g, c;
@@ -290,7 +295,20 @@ static int scd_dump_state(const ScdMachine *m, const char *dir) {
   return scd_dump_pcm_registers(m, dir) ||
          scd_dump_file(dir, "work_ram.bin", m->work_ram, sizeof m->work_ram) || scd_dump_file(dir, "prg_ram.bin", m->prg_ram, sizeof m->prg_ram) ||
          scd_dump_file(dir, "word_ram_2m.bin", m->word_ram, sizeof m->word_ram) || scd_dump_file(dir, "pcm_ram.bin", m->pcm.ram, sizeof m->pcm.ram) ||
-         scd_dump_file(dir, "cdc_buffer.bin", m->cdc.buffer, SCD_CDC_BUFFER_BYTES);
+         scd_dump_file(dir, "cdc_buffer.bin", m->cdc.buffer, SCD_CDC_BUFFER_BYTES) ||
+         (m->backup_ram_present && scd_dump_file(dir, "backup_ram.bin", m->backup_ram, sizeof m->backup_ram));
+}
+
+/* SEG-065-T002: read the backup RAM machine input; exactly SCD_BACKUP_RAM_BYTES bytes, anything else is refused. */
+static const char *scd_load_backup_ram(ScdMachine *m, const char *path) {
+  static uint8_t bytes[SCD_BACKUP_RAM_BYTES + 1U];
+  size_t n;
+  FILE *f = fopen(path, "rb");
+  if (f == NULL) return "unreadable";
+  n = fread(bytes, 1U, sizeof bytes, f);
+  if (ferror(f)) n = 0U;
+  fclose(f);
+  return scd_backup_ram_install(m, bytes, n) == 0 ? NULL : "length";
 }
 
 /* SEG-063: `overlays` is the generated overlay registry (NULL for programs without disc-loaded modules). */
@@ -312,7 +330,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   ScdDisc disc = program->disc;
   const char *disc_dir = NULL, *report_path = NULL, *frame_path = NULL, *bios_path = NULL, *materialize_dir = NULL;
   const char *sets[16];
-  const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *event_path = NULL;
+  const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *event_path = NULL, *backup_ram_path = NULL;
   unsigned set_count = 0, i;
   uint64_t budget = 0U, slice_ticks = 0U, slice_seed = 0U, until_tick = UINT64_MAX;
   int have_seed = 0;
@@ -337,7 +355,8 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     } else if (strcmp(flag, "--set") == 0 && set_count < 16U) sets[set_count++] = value;
     else if (strcmp(flag, "--until-tick") == 0) { /* SEG-064-T005: end the run at a machine-time instant (result `deadline`) */
       if (!scd_parse_u64(value, &until_tick) || until_tick == 0U) return 2;
-    } else if (strcmp(flag, "--dump-dir") == 0) dump_dir = value;           /* SEG-064-T004 diagnostics (local only) */
+    } else if (strcmp(flag, "--backup-ram") == 0) backup_ram_path = value; /* SEG-065-T002: the backup RAM machine input */
+    else if (strcmp(flag, "--dump-dir") == 0) dump_dir = value;           /* SEG-064-T004 diagnostics (local only) */
     else if (strcmp(flag, "--coverage") == 0) coverage_path = value;
     else if (strcmp(flag, "--access-trace") == 0) trace_path = value;
     else if (strcmp(flag, "--event-log") == 0) event_path = value;
@@ -374,6 +393,14 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     printf("{\"result\":\"disc_refused\",\"error\":\"system_area\",\"disc_identity\":\"%s\"}\n", program->disc.identity);
     scd_disc_close(&disc);
     return 20;
+  }
+  if (backup_ram_path != NULL) {
+    const char *error = scd_load_backup_ram(&machine, backup_ram_path);
+    if (error != NULL) {
+      printf("{\"result\":\"backup_ram_refused\",\"error\":\"%s\"}\n", error);
+      scd_disc_close(&disc);
+      return 22;
+    }
   }
   scd_overlay_attach(&machine, overlays);
   if (coverage_path != NULL && scd_coverage_enable(&machine) != 0) return 1;

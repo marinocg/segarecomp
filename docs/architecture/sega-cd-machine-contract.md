@@ -52,7 +52,7 @@ Every claim carries one tag:
 | TV standard | NTSC timing for the main CPU (MCLK 53,693,175 Hz / 7) | V2 (GPGX `system_clock`, repository Genesis runtime) |
 | audio | none: PCM and CD-DA playback are typed stops; fader writes have no modelled effect | C |
 | graphics ASIC | none: stamp/rotation registers are typed stops | C |
-| backup RAM | none: typed stop | C |
+| backup RAM | a machine input (`--backup-ram FILE`, exactly 8 KiB; SEG-065-T002, ADR 0147); without it: typed stop | C (input), V2 (access shape) |
 
 ## 2. Processor instances and clocks
 
@@ -107,7 +107,7 @@ MAME maps the first 1 MiB only).
 | `$80000-$BFFFF` | Word RAM 2M when owned by sub (`RET` = 0); 1M dot-image view in 1M mode | 2M: linear; dot image: typed stop `wordram_dot_image_unsupported` | V2 |
 | `$80000-$BFFFF` while main owns 2M Word RAM | | DTACK is withheld: the sub **waits**; its instruction is abandoned with its registers as before it (bytes written earlier in the same instruction stay) and retried from its start when main writes `DMNA` = 1 in 2M mode. With no such write the machine ends `idle` with the sub waiting (the hang) | wait: V2 (GPGX `s68k_lockup_*`, MAME silent); retry semantics **G** (GPGX `s68k_pulse_wait` / `s68k_clear_wait`) |
 | `$C0000-$DFFFF` | 1M mode: bank assigned to sub; 2M mode: nothing | 1M: linear 128 KiB; 2M: reads open bus, writes ignored | V2 mapping; 2M behaviour **G** (GPGX `s68k_read_bus_8`) |
-| `$E0000-$EFFFF` | backup RAM (odd bytes) | typed stop `backup_ram_unsupported` | C |
+| `$E0000-$EFFFF` | 8 KiB internal backup RAM on the odd byte lane, repeated every 16 KiB of address (cell = A1-A13) | with the machine input: odd byte reads/writes the cell, even byte reads `$FF` and its write is ignored, a word reads `$FF00 \| cell` and its write stores the low byte, a long is two words; without it: typed stop `backup_ram_unsupported` | access V2 (GPGX `bram_read_byte/word`, `bram_write_byte/word`: `scd.bram[(address >> 1) & 0x1fff]`); presence C |
 | `$F0000-$F7FFF` | PCM | typed stop `pcm_unsupported` | C |
 | `$F8000-$FFFFF` | Gate Array, sub side (section 5); A1-A8 decode (`$FF8000-$FF81FF` repeated) | per register | V2 registers; repetition G |
 
