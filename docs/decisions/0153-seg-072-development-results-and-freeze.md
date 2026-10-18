@@ -64,3 +64,28 @@ Economics (broad vs M3_FROZEN+B35 explicit admission plan, 120 frames, explicit 
 -38.5% mean (Flicky -51%, D05 -14%, D09 -36%, D06 -31%, Sonic 1 -61%), bridge CPU -40.7%, bridge wall -46.4%; outcome, frame count, final
 state, coverage and frame-stream digests equal to broad on all five. The broad-AOT route rejects D10-D12, E06 and E07
 (`effective_address_not_24bit`): no generated-native comparison exists for them.
+
+## T004 - adaptive versus fixed budgets on frozen-M3 out-of-fold predictions
+
+Policies exactly as pre-registered (ADR 0151): fixed B35/B45/B50/B60 and the single ADAPT policy (`e` = fraction of cells with probability
+>= 0.5; margin = max over the OTHER lineages' images of (residual FRF - e) + 0.05; budget ceil_to_0.01(e + margin); abstain to broad above
+0.60); broad AOT as the reference (retained 1.0). Identical folds, seeds, rounding and recall accounting for every policy.
+
+| policy (M3_FROZEN) | complete | missed starts | mean retained (lineage mean) |
+|---|---|---|---|
+| B35 | no | 8,066 | 0.357 |
+| B45 | no | 637 | 0.456 |
+| B50 | no | 2 | 0.505 |
+| B60 | no | 2 | 0.604 |
+| ADAPT | no | 2 | 0.947 (15 of 50 images abstain) |
+| broad AOT | yes | 0 | 1.000 |
+
+ADAPT behaviour: the residual-minus-density excess is dominated by one record (the Sonic CD Work RAM copy module with residual FRF 0.949), so
+every lineage other than D01 inherits a margin of 0.826 and abstains entirely; D01's own margin, fitted without that module, is 0.153, which
+gives 35 of its 39 images budgets of 0.28-0.54 and still misses the module's fragment (2 starts). The label-free density estimate does not
+predict the residual tail: images with e from 0.011 to 1.0 occur, and the hard fragment sits in an image whose e is far below its residual
+FRF. Neural confidence did not bound full recall.
+
+**T004 classification: adaptive budgets are not justified for frozen M3** (ADAPT is neither complete nor cheaper than fixed budgets that miss
+the same fragment, and its abstentions retain ~95%). No fixed budget is complete either; the smallest fixed budget that would cover every
+development image is 0.95 (descriptive only - not a policy). The ADAPT definition is reused unchanged for every T005 candidate.
