@@ -50,10 +50,22 @@ reached them (executed evidence first), batching each family.
    `code_bytes_mismatch` before the instruction. This is the "one more admitted image" ADR 0142 anticipated for the disc SP over
    transient BIOS code, and it covers the disc's boot area (entered by the BIOS at its base in main work RAM) and an SP-loaded module.
    The extents are build inputs found by local analysis of the executed frontier; they are not recorded here.
-9. **Application entry** (`--application-entry <address>`): the first main-processor instruction start at that address ends the run with
-   the typed stop `application_handoff` before it runs. It is a build input in the program identity, never a runtime constant, and 0
-   disables it. The reference defines the application IP as following the disc's security block (contract section 13); for the authentic
-   US disc the entry is the boot area's base plus the $584-byte security block.
+9. **Application entry** (`--application-entry <address>`, an even address in Word RAM or work RAM): `application_handoff` is reported
+   only if the next main-processor instruction could genuinely execute through an existing native entry. When the main processor is
+   about to start an instruction at the entry, the generated dispatch is called in *verify-only* mode: it performs the normal
+   compiled-entry lookup and the normal variant selection by live bytes - the exact bytes of the whole instruction, extension words
+   included, against every admitted variant at that pc (the per-instruction byte guard, the selection chain for overlapping variants,
+   an operand template's opcode guard) - and returns before the instruction body. Nothing is decoded or compiled at run time and
+   nothing retires, is written or changes (the processor's pc and prefetch are restored). A pc with no compiled entry is the typed
+   stop `entry_not_compiled`, live bytes that match no admitted variant `code_bytes_mismatch`; only after a successful verification
+   does the run end with `application_handoff`, before the instruction runs. The verification path is emitted only for programs that
+   declare an entry (other programs' generated code is unchanged). The entry is a build input in the program identity, never a runtime
+   constant, and 0 disables it. The reference defines the application IP as following the disc's security block (contract section 13);
+   for the authentic US disc the entry is the boot area's base plus the $584-byte security block. *Correction recorded:* the first
+   implementation compared only the pc with the entry, so an uncompiled or corrupted instruction at the boundary was reported as a
+   handoff; the verification above closes that gap (tests: valid entry, corrupted opcode, corrupted extension words, uncompiled entry,
+   overlapping variants in either declaration order, a single-variant entry; each rejection leaves exactly the state of a plain
+   instruction-budget stop at the same boundary).
 10. **24-bit program counter.** The generated per-processor dispatch masks the pc to 24 bits (the 68000 address bus). A jump through a
     sign-extended address selected no entry before; the authentic BIOS enters the disc's boot area that way.
 11. **Local diagnostics** (`--dump-dir`, `--coverage`, `--access-trace`, `--event-log`): RAM images, executed instruction starts, run-length
