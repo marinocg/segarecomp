@@ -62,7 +62,7 @@ backup RAM, and the frames completed at application entry + 420, + 480 (primary)
 **Checkpoint F: `TIME_ALIGNED` (ADR 0146 decision 7).**
 
 **Authentic build** (authorized US Model 1 class BIOS, Sonic CD (USA) disc, formatted empty backup RAM, no input; official driver,
-cold, gcc -O1 strict C11, 12 jobs): the epoch + 13 operand templates, 14 rounds + the confirming run, 950 s; 178,005 instruction
+cold, gcc -O1 strict C11, 12 jobs): the epoch + 13 operand templates, 14 rounds + the confirming run, 1,046 s; 178,005 instruction
 functions, 176 MB of C in 39 translation units; peak compiler resident set 922 MB, emission 546 MB. The program runs from reset to
 application entry + 541 frames with **no typed stop** (result `deadline`): 1,846 68K->VDP transfers (the main processor waits for
 them), 1,312 graphics-ASIC operations, 1,768 backup-RAM reads and 1,584 writes, the title's audio track playing as drive state.
@@ -72,13 +72,13 @@ them), 1,312 graphics-ASIC operations, 1,768 backup-RAM reads and 1,584 writes, 
 | canonical frame (256 x 224, digest and dimensions) | **identical at all three**, time-aligned (offset 0) |
 | VDP registers 0-23, CRAM, VSRAM, VRAM (64 KiB) | identical at all three |
 | Word RAM (256 KiB) | identical at all three |
-| sub registers | equal at entry + 420; at + 480 / + 540 only the pc differs, inside its polling loop |
+| sub registers | only the pc differs, inside its polling loop |
 | main registers | the stack pointer and SR equal; the pc is inside the same short loop on both sides (iteration phase), so its counters and pointers differ |
-| work RAM / PRG RAM | 83-162 bytes in that loop's destination buffer and the stack residue below the stack pointer / 129-138 bytes in the BIOS status area and the sub stack: the classes ADR 0145 already recorded; none is read by the frame |
+| work RAM / PRG RAM | 81-160 bytes in that loop's destination buffer and the stack residue below the stack pointer / 128-138 bytes in the BIOS status area and the sub stack: the classes ADR 0145 already recorded; none is read by the frame |
 | VRAM written while a compared frame was displayed | 0 bytes (`vram_display_changes`) |
 | the frames before the title loop (entry + 200 ... 370, 8 samples) | identical and time-aligned, with and without the DMA duration |
 | without the DMA duration (decision 4) | frames from entry + 380 on run ahead (about +18 frames at + 420, +36 at + 480): the cause, not tuned around |
-| determinism | one outcome (report, three canonical frames and every state dump) over 2 repeats, 12 seeded deadline partitions and 2 fixed slices (16 runs) |
+| determinism | one outcome (report, three canonical frames and every state dump) over 2 repeats, 12 seeded deadline partitions and 2 fixed slices (16 runs); the end-of-run report is identical with no capture and with eight other captures (two of them still sampling at the end) |
 | reference reproducibility | two reference captures identical at every selected frame |
 
 **Earlier proofs, re-verified under the new runtime.** T004 handoff regression (the stop-enabled program, its three original extents,
