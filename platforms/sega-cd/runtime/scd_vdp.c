@@ -93,6 +93,14 @@ static GenesisRuntime *scd_host(ScdMachine *m) {
   return host;
 }
 
+/* SEG-070-T002: a machine-input pad transition reaches the Genesis controller pin model through the host's pad masks. */
+void scd_vdp_set_pad(ScdMachine *m, uint32_t port, uint8_t mask) {
+  GenesisRuntime *host = (GenesisRuntime *)m->vdp_host;
+  if (host == NULL) return;
+  if (port == 1U) genesis_runtime_set_pad1(host, mask);
+  else if (port == 2U) genesis_runtime_set_pad2(host, mask);
+}
+
 static int scd_vdp_enables_dma(uint32_t word) { return (word & 0xFF00U) == 0x8100U && (word & 0x10U) != 0U; }
 
 static GenesisAccessWidth scd_genesis_width(uint32_t width) {
@@ -349,6 +357,9 @@ int scd_main_device_access(ScdMachine *m, uint32_t address, uint32_t width, int 
   else {
     *value = routed;
     scd_log(m, 0x46U, address, routed);
+    /* SEG-070-T002: observation of a controller data-port byte read (a word read arrives here as its odd-address byte) */
+    if (m->input != NULL && width == 1U && (address == UINT32_C(0x00A10003) || address == UINT32_C(0x00A10005)))
+      scd_input_note_read(m, address == UINT32_C(0x00A10003) ? 1U : 2U, routed & 0xFFU);
   }
   return 0;
 }

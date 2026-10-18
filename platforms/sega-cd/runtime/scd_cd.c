@@ -767,6 +767,7 @@ void scd_timer_event(ScdMachine *m);
 
 uint64_t scd_devices_next_event(const ScdMachine *m) {
   uint64_t next = scd_timer_next_event(m);
+  if (scd_input_next_event(m) < next) next = scd_input_next_event(m); /* SEG-070-T002: a pad transition (machine input) */
   if (scd_vdp_next_event(m) < next) next = scd_vdp_next_event(m); /* SEG-064-T003: vertical-blank onset (BIOS-image profile) */
   if (scd_gfx_next_event(m) < next) next = scd_gfx_next_event(m);  /* SEG-064-T004: graphics operation end */
   if (scd_cdd_active(m) && m->cdd.next_tick < next) next = m->cdd.next_tick;
@@ -777,13 +778,15 @@ uint64_t scd_devices_next_event(const ScdMachine *m) {
   return next;
 }
 
-/* Process every device event due at exactly `until`, in the fixed order: CDD tick, timer, CDC DMA, vertical-blank onset. */
+/* Process every device event due at exactly `until`, in the fixed order: pad transitions (SEG-070-T002), CDD tick, timer, CDC DMA,
+ * vertical-blank onset. */
 void scd_devices_advance(ScdMachine *m, uint64_t until) {
   if (scd_vdp_capture_line_due(m, until)) {
     /* SEG-065-T003: a capture line sample is an observer instant: when no device event is due at it, nothing else is brought up to
      * date (the graphics ASIC and CDC transfers are synced lazily; an extra sync point would make the run depend on the capture set) */
     uint64_t other = scd_timer_next_event(m);
     if (m->bios != NULL && m->vdp_onset < other) other = m->vdp_onset;
+    if (scd_input_next_event(m) < other) other = scd_input_next_event(m);
     if (scd_gfx_next_event(m) < other) other = scd_gfx_next_event(m);
     if (scd_cdd_active(m) && m->cdd.next_tick < other) other = m->cdd.next_tick;
     if (m->cdc.dma_state == SCD_DMA_RUNNING && scd_cdc_dma_completion(m) < other) other = scd_cdc_dma_completion(m);
@@ -792,6 +795,7 @@ void scd_devices_advance(ScdMachine *m, uint64_t until) {
       return;
     }
   }
+  scd_input_advance(m, until);
   if (scd_cdd_active(m) && m->cdd.next_tick <= until) {
     m->cdd.next_tick += SCD_CDD_TICK_TICKS;
     if (scd_cdd_tick(m) != 0) return;

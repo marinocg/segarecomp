@@ -1198,6 +1198,9 @@ set_property(TEST sega_cd_backup_ram_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_vdp_dma_timing_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_vdp_dma_timing_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_vdp_dma_timing_test APPEND PROPERTY LABELS full fast)
+add_test(NAME sega_cd_input_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_input_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_input_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_frame_capture_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_frame_capture_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_frame_capture_test APPEND PROPERTY LABELS full fast)
