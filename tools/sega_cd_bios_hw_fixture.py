@@ -49,6 +49,7 @@ FAULT = 0x0C00
 VINT_HANDLER = 0x0C40
 SUB_SRC = 0x0D00
 DMA_ROM = 0x0F00
+ENTRY_ROM = 0x0F80  # two NOPs: the code the handoff case places at the application entry $FF0000 (a verbatim ROM copy image)
 RESULT = 0xFFC000
 THUNK = 0xFFF900
 FRAMES = 0xFFC080
@@ -220,7 +221,9 @@ def main_program(sub_len, layout):
     m.move("b", F.imm(0xA5), F.absl(RESULT + 0xFF))
     m.move("b", F.imm(0x01), F.absl(GA + 0x01))           # SRES 1, SBRQ 0
     F.wait_flag(m, GA + 0x0F, 0x01, "wait_sub")
-    negative(m, 11, lambda n: n.jsr(F.absl(0xFF0000)))   # SEG-064-T004: the transfer to the IP entry is the application handoff
+    # SEG-064-T004: the transfer to the application entry is the handoff, but only to an entry that is compiled and whose live bytes match
+    # the declared copy image: the main program places the two NOPs at $FF0000 and calls them
+    negative(m, 11, lambda n: (n.move("l", F.imm(0x4E714E71), F.absl(0xFF0000)), n.jsr(F.absl(0xFF0000))))
     m.stop(0x2700)
     code = m.assemble()
     assert MAIN + len(code) <= FAULT, hex(MAIN + len(code))
@@ -263,6 +266,7 @@ def build():
     rom[SUB_SRC:SUB_SRC + len(sub)] = sub
     for i, word in enumerate(ROM_DMA_WORDS):
         struct.pack_into(">H", rom, DMA_ROM + 2 * i, word)
+    struct.pack_into(">I", rom, ENTRY_ROM, 0x4E714E71)
     return bytes(rom), sub, layout
 
 
@@ -288,7 +292,7 @@ def expected(rom, sub, layout):
         "rom_size": len(rom), "rom_sha256": hashlib.sha256(rom).hexdigest(),
         "result_words": result,
         "sub_image_length": len(padded), "sub_image_sha256": hashlib.sha256(padded).hexdigest(),
-        "sub_comstat0": 0xC0DE, "thunk": THUNK, "handoff": "main:d7=11",
+        "sub_comstat0": 0xC0DE, "thunk": THUNK, "handoff": "main:d7=11", "handoff_copy": "main:0xFF0000:0x%X:4" % ENTRY_ROM,
         "negative_details": {   # spec -> (stop address, width, write) of the faulting access, derived from the access it makes
             "main:d7=1": {"range": NEG_RANGES[1], "address": 0x400100, "width": 2, "write": 0},    # MOVE.L from the empty slot: the first word read
             "main:d7=2": {"range": NEG_RANGES[2], "address": 0xA00000, "width": 1, "write": 0},    # MOVE.B from Z80 RAM after it ran
