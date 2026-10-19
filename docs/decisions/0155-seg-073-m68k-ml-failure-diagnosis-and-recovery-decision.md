@@ -62,7 +62,10 @@ classified from evidence that **never uses a model score**:
   whole-ROM analysis (ADR 0025 recipe), which produced 8,312 code-entry candidates for E05.
 - **Evidenced reference:** an IDA `CODE XREF` whose origin lies in another block that is itself supported by a root or a Ghidra candidate.
   References from unsupported blocks don't count, because branch-like words inside a table refer only to each other. Origins resolve
-  through the listing's own label definitions: all 4,455 E05 code xrefs resolve, 0 are unresolved.
+  through the listing's own label definitions. The parser reads the first origin of each of the 4,455 `CODE XREF` comments (0 unresolved).
+  About 1,100 further origins sit on IDA continuation lines and are not parsed. Independent review added them: one block moves from
+  plausible to corroborated (97/42,175 vs 96/41,957), and no `DATA_EVIDENCE`, unresolved or missed-cell result changes. Parse the
+  continuation lines before reusing this screen (section 8).
 - **Flank-data signature:** the histogram intersection between the high-byte distribution of the block's instruction words and that of the
   labelled data words within 512 bytes on each side. Data that was read as code keeps the neighbouring table's signature.
 
