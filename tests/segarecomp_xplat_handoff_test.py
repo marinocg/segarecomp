@@ -76,7 +76,19 @@ def test_store_and_verify():
     with tempfile.TemporaryDirectory() as td:
         td = pathlib.Path(td)
         store, mpath, digest, entries, stats = make_store(td)
-        check(stats["dedup"] == 1 and stats["hardlink"] + stats["copy"] == 2, "content-addressed dedup of identical files")
+        check(stats["dedup"] == 1 and stats["copy"] == 2, "content-addressed dedup of identical files")
+        obj0 = h.cas_path(store, entries[0]["sha256"])
+        check(obj0.stat().st_ino != pathlib.Path(entries[0]["origin"]).stat().st_ino, "store objects are independent copies, not hardlinks")
+        # an in-place write to a live file (truncate + write on the same inode) never reaches the preserved object
+        with open(entries[1]["origin"], "r+b") as f:
+            f.write(b"LISTING")
+        check(h.verify_manifest(mpath)["verdict"] == "PASS", "in-place rewrite of the live cache leaves the store intact")
+        check(h.verify_manifest(mpath, check_origin=True)["origin_drift"] == 1, "the live rewrite is reported as origin drift")
+        # re-snapshot over an existing corrupted object replaces it instead of keeping it
+        os.chmod(obj0, 0o644)
+        obj0.write_bytes(b"\xff" * 200)
+        check(h.put(store, pathlib.Path(entries[0]["origin"]), entries[0]["sha256"]) == "replaced", "corrupted object replaced on re-store")
+        check(h.verify_manifest(mpath)["verdict"] == "PASS", "replaced object verifies")
         check(mpath.with_suffix(".sha256").read_text().split()[0] == digest == sha(mpath.read_bytes()), "manifest identity recorded")
         ok = h.verify_manifest(mpath)
         check(ok["verdict"] == "PASS" and ok["verified_files"] == 3 and ok["verified_bytes"] == 408, "clean store verifies physically")
@@ -90,15 +102,18 @@ def test_store_and_verify():
         dest = td / "restored"
         n = h.restore(mpath, dest)
         check(n == 3 and (dest / entries[1]["logical"]).read_bytes() == b"listing\n", "restore materializes the logical tree")
+        (dest / entries[1]["logical"]).write_bytes(b"rebuilt\n")
+        check(h.verify_manifest(mpath)["verdict"] == "PASS", "writing a restored (copied) file leaves the store intact")
         try:
             h.restore(mpath, dest)
             check(False, "restore into a non-empty directory refused")
         except h.HandoffError:
             pass
-        # corruption: same size, different bytes (objects are hardlinks: write a new inode to model on-disk corruption)
+        # corruption of the object itself (in place, same inode, same size)
         obj = h.cas_path(store, entries[1]["sha256"])
-        obj.unlink()
-        obj.write_bytes(b"listinG\n")
+        os.chmod(obj, 0o644)
+        with open(obj, "r+b") as f:
+            f.write(b"L")
         bad = h.verify_manifest(mpath)
         check(bad["verdict"] == "FAIL" and any("bytes changed" in p for p in bad["problems"]), "byte corruption detected")
         obj.write_bytes(b"listing")
@@ -107,6 +122,14 @@ def test_store_and_verify():
         check(any("object missing" in p for p in h.verify_manifest(mpath)["problems"]), "missing object detected")
         check(h.verify_fresh(mpath)["verdict"] == "FAIL", "fresh process also fails on a missing object")
         obj.write_bytes(b"listing\n")
+        # the manifest digest must be present and may be bound to an independently recorded value
+        check(h.verify_manifest(mpath, expect_sha256=digest)["verdict"] == "PASS", "expected manifest digest accepted")
+        check(any("expected" in p for p in h.verify_manifest(mpath, expect_sha256="0" * 64)["problems"]), "unexpected manifest digest refused")
+        sums = mpath.with_suffix(".sha256")
+        saved_sums = sums.read_text()
+        sums.unlink()
+        check(any(".sha256 file missing" in p for p in h.verify_manifest(mpath)["problems"]), "missing digest file fails")
+        sums.write_text(saved_sums)
         # manifest tampering is detected by its own digest file
         man = json.loads(mpath.read_bytes())
         man["entries"][0]["note"] = "edited"
@@ -120,7 +143,7 @@ def test_store_and_verify():
         man["entries"][0]["origin"] = "/x/a.bin"
         man["entries"][0]["status"] = "PRESENT_BUT_CHANGED"
         h.write_manifest(store, "t", man)
-        check(any("recorded status" in p for p in h.verify_manifest(mpath)["problems"]), "recorded changed artifact fails verify")
+        check(any("recorded required problem" in p for p in h.verify_manifest(mpath)["problems"]), "recorded changed artifact fails verify")
 
 
 def test_symlinks():
@@ -227,6 +250,32 @@ def test_audit_builds_and_sources():
         check(ss["seg075/q/src/HelloAmi/a.s"]["status"] == "PRESENT_BUT_CHANGED", "modified checkout file detected")
 
 
+def test_cross_run():
+    """A needed listing/object that differs between the two runs is a problem; a by-product difference is recorded, never verified."""
+    st, basis = h.verify_build_file("out/x.lst", "1", {}, set(), True, "a", {"out/x.lst": "2"}, True, needed=True)
+    check((st, basis) == ("PRESENT_BUT_CHANGED", "cross_run_differs"), "needed file differing across runs is changed")
+    st, basis = h.verify_build_file("gen.h", "1", {}, set(), True, "a", {"gen.h": "2"}, True, needed=False)
+    check((st, basis) == ("PRESENT_UNVERIFIED", "cross_run_differs"), "by-product difference is recorded, not verified")
+    check(h.verify_build_file("out/x.lst", "1", {}, set(), True, "a", {"out/x.lst": "1"}, True, True)[0] == "PRESENT_AND_VERIFIED",
+          "identical across runs verifies")
+    check(h.verify_build_file("o", "1", {"o": "1"}, set(), False, "b", {"o": "1"}, True, True)[1] == "cross_run_identical",
+          "run b is not checked against the record unless T001 recorded identical runs")
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        cache, commit = make_cache(td)
+        plan = fake_plan(commit)
+        (cache / "build" / "HelloAmi" / "units" / "a" / "out" / "HelloAmi.lst").write_bytes(b"00:00000000 4E71\t1: nop\n")
+        (cache / "build" / "HelloAmi" / "units" / "a" / "out" / "scratch.tmp").write_text("1")
+        (cache / "build" / "HelloAmi" / "units" / "b" / "out" / "scratch.tmp").write_text("2")
+        es = by_logical(h.audit_builds(q, plan, cache, td / "cache"))
+        lst = es["seg075/q/build/HelloAmi/units/a/out/HelloAmi.lst"]
+        check(lst["status"] == "PRESENT_BUT_CHANGED" and lst["required"], "corrupted needed listing (one run) is a required problem")
+        tmp = es["seg075/q/build/HelloAmi/units/a/out/scratch.tmp"]
+        check(not tmp["required"] and tmp.get("verified") == "PRESENT_UNVERIFIED", "differing by-product kept, not required, not verified")
+        check("seg075/q/build/HelloAmi/units/a/out/HelloAmi.lst" in h.summarize(list(es.values()))["required_problems"],
+              "summary reports the needed-listing problem")
+
+
 def test_audit_control():
     with tempfile.TemporaryDirectory() as td:
         td = pathlib.Path(td)
@@ -277,7 +326,7 @@ def test_receipt_is_sanitized():
 
 
 def main():
-    for t in (test_classify, test_store_and_verify, test_symlinks, test_audit_builds_and_sources, test_audit_control, test_add_refuses_worktree,
+    for t in (test_classify, test_store_and_verify, test_symlinks, test_audit_builds_and_sources, test_cross_run, test_audit_control, test_add_refuses_worktree,
               test_receipt_is_sanitized):
         t()
     if FAILURES:

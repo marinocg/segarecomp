@@ -9,12 +9,12 @@ The T001 `segarecomp_xplat_qualify.py verify` compares *recorded* manifest evide
             SHA-256, git blob identity, product Dockerfile/helper text, recorded image id) and classify each required artifact:
               PRESENT_AND_VERIFIED, PRESENT_BUT_CHANGED, REPRODUCIBLE_BUT_NOT_PRESERVED, MISSING_REBUILD_REQUIRED,
               MISSING_UNRECOVERABLE, NOT_REQUIRED_FOR_SUCCESSOR
-            then hardlink every preserved file into a content-addressed store and write a private manifest plus a sanitized receipt
+            then store an independent read-only copy of every preserved file in a content-addressed store and write a private manifest plus a sanitized receipt
   add       snapshot further private research trees (T002 corpus, T003 snapshot, T004/T005 models, ...) into the same store
   verify    rehash every manifest entry's content-addressed object (physical bytes, not saved JSON), check sizes, image-archive identities
             and the absence of any dependency on a task worktree; run it from a fresh process (`--fresh-process` re-executes itself
             isolated: `python3 -I`, cwd `/`, minimal environment)
-  restore   materialize a manifest's logical tree from the store (hardlinks) into an empty directory
+  restore   materialize a manifest's logical tree from the store (independent copies; --hardlink for read-only inspection) into an empty directory
 
 Durable (committed) output is the sanitized receipt only: counts, bytes, classes, verification bases, manifest identity and the verified
 storage path. Third-party sources, binaries, listings, labels and weights stay in the private store (git-ignored harness `.cache/`).
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import fnmatch
 import hashlib
 import json
 import os
@@ -38,7 +39,10 @@ STATUSES = ("PRESENT_AND_VERIFIED", "PRESENT_BUT_CHANGED", "REPRODUCIBLE_BUT_NOT
             "MISSING_UNRECOVERABLE", "NOT_REQUIRED_FOR_SUCCESSOR")
 # How a PRESENT file was verified, strongest first. `baseline` = no earlier independent digest exists: the snapshot digest is the first
 # integrity record (future drift is detected, past correctness is not claimed).
-BASES = ("t001_record", "plan_sha256", "git_blob", "product_text", "cross_run_identical", "image_id", "external_manifest", "baseline")
+BASES = ("t001_record", "t001_record_code", "plan_sha256", "plan_commit", "git_blob", "product_text", "cross_run_identical", "image_id", "external_manifest",
+         "baseline", "cross_run_differs")
+# A required entry with one of these statuses is a problem for both `audit` and `verify` (one list, one verdict).
+PROBLEM_STATUSES = ("PRESENT_BUT_CHANGED", "MISSING_REBUILD_REQUIRED", "MISSING_UNRECOVERABLE")
 # Candidates whose artifacts the SEG-075 successors consume (T001 ADR 0159 "usable without review" + the toolchain demos used only to
 # validate extraction). Everything else is preserved but NOT_REQUIRED_FOR_SUCCESSOR.
 REQUIRED_CANDIDATES = ("BattleIsleEditor", "amiga-realtime3d", "HelloAmi", "toslibc", "emutos", "space-invaders", "neogeosdk",
@@ -133,10 +137,13 @@ def classify_missing(recoverable: bool) -> str:
 
 
 def entry(logical: str, group: str, required: bool, status: str, basis: str | None, path: pathlib.Path | None = None,
-          sha256: str | None = None, size: int | None = None, note: str | None = None) -> dict:
+          sha256: str | None = None, size: int | None = None, note: str | None = None, verified: str | None = None) -> dict:
+    """`status` is the successor-facing class; `verified` keeps the underlying verification result of a not-required file."""
     e = {"logical": logical, "group": group, "required": required, "status": status}
     if basis:
         e["basis"] = basis
+    if verified is not None and verified != status:
+        e["verified"] = verified
     if sha256 is not None:
         e["sha256"], e["size"] = sha256, size
     if path is not None:
@@ -196,17 +203,16 @@ def audit_sources(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path
             ok = expect is not None and expect[1] == actual_blob and checkout_ok
             sha = sha256_file(p)
             status = "PRESENT_AND_VERIFIED" if ok else "PRESENT_BUT_CHANGED"
-            if not required:
-                status = "NOT_REQUIRED_FOR_SUCCESSOR"
-            out.append(entry(str(p.relative_to(cache_parent)), group, required, status, "git_blob", p, sha, p.stat().st_size))
+            out.append(entry(str(p.relative_to(cache_parent)), group, required, status if required else "NOT_REQUIRED_FOR_SUCCESSOR",
+                             "git_blob", p, sha, p.stat().st_size, verified=status))
             files += 1
         missing = [p for p, (mode, _b) in index.items() if mode != "120000" and mode != "160000" and not (src / p).is_file()]
         for p in missing:
             out.append(entry(f"seg075/q/src/{cid}/{p}", group, required, classify_missing(True) if required else "NOT_REQUIRED_FOR_SUCCESSOR",
                              "git_blob", note="tracked file missing from the checkout"))
+        ident_status = "PRESENT_AND_VERIFIED" if checkout_ok else "PRESENT_BUT_CHANGED"
         out.append(entry(f"seg075/q/src/{cid}/.git#HEAD", "t001.source_identity", required,
-                         ("PRESENT_AND_VERIFIED" if checkout_ok else "PRESENT_BUT_CHANGED") if required else "NOT_REQUIRED_FOR_SUCCESSOR",
-                         "plan_sha256", note=f"head {'== pin' if head == c['commit'] else '!= pin'}; {'clean' if not dirty else 'modified'}; "
+                         ident_status if required else "NOT_REQUIRED_FOR_SUCCESSOR", "plan_commit", verified=ident_status, note=f"head {'== pin' if head == c['commit'] else '!= pin'}; {'clean' if not dirty else 'modified'}; "
                          f"{files} files"))
     return out
 
@@ -224,6 +230,7 @@ def audit_builds(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path)
         for r in c["recipes"]:
             rr = by_name.get(r["name"], {})
             recorded = {o["path"]: o["sha256"] for o in rr.get("outputs", [])}
+            recorded_code = {o["path"]: o["code_sha256"] for o in rr.get("outputs", []) if "code_sha256" in o}
             identical_runs = rr.get("byte_identical_runs", False)
             volatile = set(rr.get("volatile_outputs", {}))
             base = cache / "build" / cid / r["name"]
@@ -240,21 +247,21 @@ def audit_builds(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path)
                     out.append(entry(f"seg075/q/build/{cid}/{r['name']}/{run}", group, required, st, None, note="run directory missing"))
                     continue
                 other = hashes.get("b" if run == "a" else "a", {})
+                needs = SUCCESSOR_NEEDS.get(cid, {}).get(r["name"], [])
                 for rel, sha in sorted(hashes[run].items()):
                     p = d / rel
-                    if rel in recorded and rel not in volatile and (run == "a" or identical_runs):
-                        status, basis = classify_present(sha, recorded[rel], "t001_record")
-                    elif rel in other and len(runs) == 2:
-                        status, basis = classify_present(sha, other[rel], "cross_run_identical")
-                        if status == "PRESENT_BUT_CHANGED":
-                            # A run-to-run difference of a non-declared file is a determinism observation, not corruption; T001 declared
-                            # only its outputs deterministic. Keep the file, record the difference.
-                            status, basis = "PRESENT_AND_VERIFIED", "baseline"
+                    # A build file is required only when it is a declared output or a successor intermediate (listing/object/map);
+                    # other build by-products are preserved but not required.
+                    file_required = required and (rel in recorded or any(fnmatch.fnmatch(rel, pat) for pat in needs))
+                    if rel in recorded_code and rel not in volatile and run == "b" and not identical_runs:
+                        # T001 declared these runs deterministic by the loadable-code digest (a PRG's symbol table may differ)
+                        status, basis = classify_present(q.code_digest(p.read_bytes()), recorded_code[rel], "t001_record_code")
                     else:
-                        status, basis = "PRESENT_AND_VERIFIED", "baseline"
-                    if not required:
-                        status = "NOT_REQUIRED_FOR_SUCCESSOR"
-                    out.append(entry(str(p.relative_to(cache_parent)), group, required, status, basis, p, sha, p.stat().st_size))
+                        status, basis = verify_build_file(rel, sha, recorded, volatile, identical_runs, run, other, len(runs) == 2,
+                                                          file_required)
+                    out.append(entry(str(p.relative_to(cache_parent)), group, file_required,
+                                     status if file_required else "NOT_REQUIRED_FOR_SUCCESSOR", basis, p, sha, p.stat().st_size,
+                                     verified=status))
                 for rel in sorted(set(recorded) - set(hashes[run])):
                     if run == "a" or identical_runs:
                         st = classify_missing(True) if required else "NOT_REQUIRED_FOR_SUCCESSOR"
@@ -273,6 +280,21 @@ def audit_builds(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path)
             out.append(entry(f"seg075/q/build/{cid}#assembler-listings", "t002.truth_listing", True, "REPRODUCIBLE_BUT_NOT_PRESERVED", None,
                              note=NOT_PRESERVED[cid]))
     return out
+
+
+def verify_build_file(rel: str, sha: str, recorded: dict, volatile: set, identical_runs: bool, run: str, other: dict, two_runs: bool,
+                      needed: bool) -> tuple[str, str]:
+    """(status, basis) of one build file (pure; unit-tested). A declared output is checked against the T001 record (run b only when
+    T001 recorded the runs byte-identical); any other file against the other run. A run-to-run difference gets its own basis
+    `cross_run_differs`: it is PRESENT_BUT_CHANGED for a file a successor needs (a needed listing/object/map must be reproducible),
+    and only recorded (never counted as verified) for other by-products."""
+    if rel in recorded and rel not in volatile and (run == "a" or identical_runs):
+        return classify_present(sha, recorded[rel], "t001_record")
+    if rel in other and two_runs:
+        if other[rel] == sha:
+            return "PRESENT_AND_VERIFIED", "cross_run_identical"
+        return ("PRESENT_BUT_CHANGED" if needed else "PRESENT_UNVERIFIED"), "cross_run_differs"
+    return "PRESENT_AND_VERIFIED", "baseline"
 
 
 def audit_control(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path, product_root: pathlib.Path) -> list[dict]:
@@ -400,28 +422,37 @@ def cas_path(store: pathlib.Path, sha: str) -> pathlib.Path:
 
 
 def put(store: pathlib.Path, src: pathlib.Path, sha: str) -> str:
-    """Hardlink (else copy) a verified file into the content-addressed store; returns how it was stored."""
+    """Store an independent read-only COPY of a verified file (content-addressed; returns how it was stored).
+
+    A hardlink would share the live file's inode, so any in-place rewrite of the live cache (the T001 tool rewrites records, helpers and
+    logs with write_text) would silently destroy the preserved evidence. An existing object is re-hashed before it is reused: a corrupted
+    object is replaced from a verified source, never kept."""
+    import shutil
     dst = cas_path(store, sha)
     if dst.exists():
-        return "dedup"
+        if dst.is_file() and sha256_file(dst) == sha:
+            return "dedup"
+        os.chmod(dst, 0o644)
+        dst.unlink()
+        how = "replaced"
+    else:
+        how = "copy"
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(".tmp")
-    try:
-        os.link(src, tmp)
-        how = "hardlink"
-    except OSError:
-        import shutil
-        shutil.copyfile(src, tmp)
-        how = "copy"
+    if tmp.exists():
+        os.chmod(tmp, 0o644)
+        tmp.unlink()
+    shutil.copyfile(src, tmp)
     if sha256_file(tmp) != sha:
         tmp.unlink()
         raise HandoffError(f"{src}: changed while being stored")
+    os.chmod(tmp, 0o444)
     tmp.replace(dst)
     return how
 
 
 def snapshot(entries: list[dict], store: pathlib.Path) -> dict:
-    stats = {"hardlink": 0, "copy": 0, "dedup": 0}
+    stats = {"copy": 0, "dedup": 0, "replaced": 0}
     for e in entries:
         if "sha256" in e and "origin" in e:
             stats[put(store, pathlib.Path(e["origin"]), e["sha256"])] += 1
@@ -439,35 +470,47 @@ def write_manifest(store: pathlib.Path, label: str, body: dict) -> tuple[pathlib
     return path, digest
 
 
+def required_problems(entries: list[dict]) -> list[str]:
+    return sorted(e["logical"] for e in entries if e["required"] and e["status"] in PROBLEM_STATUSES)
+
+
 def summarize(entries: list[dict]) -> dict:
     by_status: dict[str, int] = {}
     by_group: dict[str, dict[str, int]] = {}
     by_basis: dict[str, int] = {}
+    unrequired_verified: dict[str, int] = {}
     files = size = 0
     for e in entries:
         by_status[e["status"]] = by_status.get(e["status"], 0) + 1
         g = by_group.setdefault(e["group"], {})
         g[e["status"]] = g.get(e["status"], 0) + 1
+        if not e["required"] and "sha256" in e:
+            v = e.get("verified", e["status"])
+            unrequired_verified[v] = unrequired_verified.get(v, 0) + 1
         if "sha256" in e:
             files += 1
             size += e["size"]
             by_basis[e.get("basis", "baseline")] = by_basis.get(e.get("basis", "baseline"), 0) + 1
-    required_problems = sorted(e["logical"] for e in entries if e["required"] and e["status"] in
-                               ("PRESENT_BUT_CHANGED", "MISSING_REBUILD_REQUIRED", "MISSING_UNRECOVERABLE"))
     return {"entries": len(entries), "physical_files": files, "physical_bytes": size, "by_status": dict(sorted(by_status.items())),
             "by_basis": dict(sorted(by_basis.items())), "by_group": {k: dict(sorted(v.items())) for k, v in sorted(by_group.items())},
-            "required_problems": required_problems}
+            "not_required_underlying": dict(sorted(unrequired_verified.items())), "required_problems": required_problems(entries)}
 
 
 # --------------------------------------------------------------------------------------------------------------------- verify
-def verify_manifest(manifest_path: pathlib.Path, check_origin: bool = False) -> dict:
-    """Physical verification: every entry's content-addressed object exists, has the recorded size and rehashes to the recorded digest."""
+def verify_manifest(manifest_path: pathlib.Path, check_origin: bool = False, expect_sha256: str | None = None) -> dict:
+    """Physical verification: every entry's content-addressed object exists, has the recorded size and rehashes to the recorded digest.
+    The manifest itself must match its .sha256 file (a missing file fails) and, when given, the independently recorded digest (the
+    committed receipt's `manifest_sha256`), so a manifest rewritten together with its digest file is caught."""
     raw = manifest_path.read_bytes()
     sums = manifest_path.with_suffix(".sha256")
     identity = hashlib.sha256(raw).hexdigest()
     problems = []
-    if sums.is_file() and sums.read_text().split()[0] != identity:
+    if not sums.is_file():
+        problems.append("manifest .sha256 file missing")
+    elif sums.read_text().split()[0] != identity:
         problems.append("manifest digest differs from its .sha256 file")
+    if expect_sha256 is not None and expect_sha256 != identity:
+        problems.append("manifest digest differs from the expected (receipt) digest")
     man = json.loads(raw)
     if man.get("schema") != SCHEMA:
         raise HandoffError("unexpected manifest schema")
@@ -493,7 +536,7 @@ def verify_manifest(manifest_path: pathlib.Path, check_origin: bool = False) -> 
         size += e["size"]
         if check_origin and "origin" in e:
             o = pathlib.Path(e["origin"])
-            if not o.is_file() or (o.stat().st_ino != p.stat().st_ino and sha256_file(o) != e["sha256"]):
+            if not o.is_file() or sha256_file(o) != e["sha256"]:
                 drift += 1
     for img in man.get("image_archives", []):
         p = cas_path(store, img["sha256"])
@@ -504,9 +547,8 @@ def verify_manifest(manifest_path: pathlib.Path, check_origin: bool = False) -> 
                     problems.append(f"image archive: {tag} id {ids.get(tag)} != {want}")
         else:
             problems.append("image archive object missing")
-    for e in man["entries"]:
-        if e["required"] and e["status"] in ("PRESENT_BUT_CHANGED", "MISSING_UNRECOVERABLE"):
-            problems.append(f"{e['logical']}: recorded status {e['status']}")
+    for logical in required_problems(man["entries"]):
+        problems.append(f"{logical}: recorded required problem")
     res = {"manifest": str(manifest_path), "manifest_sha256": identity, "verified_files": files, "verified_bytes": size,
            "problems": problems, "verdict": "PASS" if not problems else "FAIL"}
     if check_origin:
@@ -514,11 +556,15 @@ def verify_manifest(manifest_path: pathlib.Path, check_origin: bool = False) -> 
     return res
 
 
-def verify_fresh(manifest_path: pathlib.Path) -> dict:
+def verify_fresh(manifest_path: pathlib.Path, check_origin: bool = False, expect_sha256: str | None = None) -> dict:
     """Re-run `verify` in an isolated fresh interpreter (no inherited state, cwd `/`, minimal environment)."""
     env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": os.environ.get("HOME", "/root"), "LANG": "C.UTF-8"}
-    r = subprocess.run([sys.executable, "-I", str(pathlib.Path(__file__).resolve()), "verify", "--manifest", str(manifest_path.resolve())],
-                       cwd="/", env=env, capture_output=True, text=True)
+    cmd = [sys.executable, "-I", str(pathlib.Path(__file__).resolve()), "verify", "--manifest", str(manifest_path.resolve())]
+    if check_origin:
+        cmd.append("--check-origin")
+    if expect_sha256:
+        cmd += ["--expect-sha256", expect_sha256]
+    r = subprocess.run(cmd, cwd="/", env=env, capture_output=True, text=True)
     try:
         res = json.loads(r.stdout)
     except json.JSONDecodeError as exc:
@@ -527,7 +573,10 @@ def verify_fresh(manifest_path: pathlib.Path) -> dict:
     return res
 
 
-def restore(manifest_path: pathlib.Path, dest: pathlib.Path) -> int:
+def restore(manifest_path: pathlib.Path, dest: pathlib.Path, hardlink: bool = False) -> int:
+    """Materialize the logical tree. Default: independent writable copies (a restored cache may be rebuilt without touching the store);
+    `hardlink=True` only for read-only inspection."""
+    import shutil
     man = json.loads(manifest_path.read_bytes())
     store = manifest_path.resolve().parent.parent
     if dest.exists() and any(dest.iterdir()):
@@ -538,7 +587,10 @@ def restore(manifest_path: pathlib.Path, dest: pathlib.Path) -> int:
             continue
         target = dest / e["logical"]
         target.parent.mkdir(parents=True, exist_ok=True)
-        os.link(cas_path(store, e["sha256"]), target)
+        if hardlink:
+            os.link(cas_path(store, e["sha256"]), target)
+        else:
+            shutil.copyfile(cas_path(store, e["sha256"]), target)
         n += 1
     return n
 
@@ -547,7 +599,7 @@ def restore(manifest_path: pathlib.Path, dest: pathlib.Path) -> int:
 def receipt_of(label: str, summary: dict, manifest_digest: str, store: pathlib.Path, verification: dict, extra: dict) -> dict:
     harness = store.parent.parent
     return {"schema": RECEIPT_SCHEMA, "label": label, "manifest_sha256": manifest_digest,
-            "storage": {"store": f"<HARNESS_ROOT>/{store.relative_to(harness)}", "physical_path_verified": str(store),
+            "storage": {"store": f"<HARNESS_ROOT>/{store.relative_to(harness)}", "physical_path_verified": store.is_dir(),
                         "layout": "cas/sha256/<2>/<sha256> + manifests/<label>.json (git-ignored)"},
             "summary": {k: v for k, v in summary.items() if k != "required_problems"},
             "required_problems": len(summary["required_problems"]),
@@ -580,6 +632,10 @@ def cmd_audit(a) -> int:
     if archive is not None:
         sha = sha256_file(archive)
         put(store, archive, sha)
+        if archive.stat().st_ino != cas_path(store, sha).stat().st_ino:
+            # the convenience path inside the store shares the read-only CAS object (both are store-owned; no live file involved)
+            archive.unlink()
+            os.link(cas_path(store, sha), archive)
         image_archives.append({"sha256": sha, "size": archive.stat().st_size, "images": image_archive_ids(archive)})
         entries.append(entry("handoff/images/segarecomp-xplat-toolchains.tar", "t001.toolchain_image_archive", True, "PRESENT_AND_VERIFIED",
                              "image_id", archive, sha, archive.stat().st_size))
@@ -677,11 +733,14 @@ def main(argv=None) -> int:
     v.add_argument("--manifest", required=True)
     v.add_argument("--fresh-process", action="store_true")
     v.add_argument("--check-origin", action="store_true")
+    v.add_argument("--expect-sha256", help="the independently recorded manifest digest (e.g. a committed receipt's manifest_sha256)")
+    v.add_argument("--receipt", help="read the expected manifest digest from this committed receipt")
     v.set_defaults(func=lambda x: _verify_cli(x))
     r = sub.add_parser("restore")
     r.add_argument("--manifest", required=True)
     r.add_argument("--to", required=True)
-    r.set_defaults(func=lambda x: print(json.dumps({"restored_files": restore(pathlib.Path(x.manifest), pathlib.Path(x.to))})) or 0)
+    r.add_argument("--hardlink", action="store_true", help="read-only inspection only: share inodes with the store")
+    r.set_defaults(func=lambda x: print(json.dumps({"restored_files": restore(pathlib.Path(x.manifest), pathlib.Path(x.to), x.hardlink)})) or 0)
     args = ap.parse_args(argv)
     try:
         return args.func(args)
@@ -692,7 +751,10 @@ def main(argv=None) -> int:
 
 def _verify_cli(x) -> int:
     m = pathlib.Path(x.manifest)
-    res = verify_fresh(m) if x.fresh_process else verify_manifest(m, x.check_origin)
+    exp = x.expect_sha256
+    if x.receipt:
+        exp = json.loads(pathlib.Path(x.receipt).read_text())["manifest_sha256"]
+    res = verify_fresh(m, x.check_origin, exp) if x.fresh_process else verify_manifest(m, x.check_origin, exp)
     print(json.dumps(res, indent=1))
     return 0 if res["verdict"] == "PASS" else 1
 

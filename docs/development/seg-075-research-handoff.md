@@ -13,9 +13,9 @@ under the harness checkout and is never committed. The committed receipts contai
 | toolchain image archive | `.cache/seg075-handoff/images/segarecomp-xplat-toolchains.tar` (also a store object) |
 | SEG-072 bundle (consumed read-only) | `.cache/seg072-handoff/` (see `seg-072-research-handoff.md`) |
 
-The store holds hardlinks of the live files: no second copy of the cache is made. Store objects are addressed by content, so a later edit of
-a live file creates a new inode there and leaves the stored object intact. An in-place write (`>>`, `truncate`) to a live file changes the
-shared inode; that case is detected by `verify`, not prevented.
+The store holds independent read-only copies (content-addressed, deduplicated), never hardlinks of the live cache. The T001 tool rewrites
+records, helpers and logs in place, so a hardlinked store would lose its evidence on the next rebuild. Never open a store object for writing;
+`verify` detects it, but cannot recover the original.
 
 ## Verify (fresh process, any worktree of the product repository)
 
@@ -24,7 +24,8 @@ python3 tools/segarecomp_xplat_handoff.py verify --fresh-process \
     --manifest <HARNESS>/.cache/seg075-handoff/manifests/<label>.json
 ```
 
-It must print `"verdict": "PASS"`. It rehashes every store object (physical bytes, not saved JSON). It checks sizes, the manifest digest,
+Add `--receipt tools/segarecomp_xplat_handoff.<label>_receipt.json` to bind the manifest to the digest committed in the product. It
+must print `"verdict": "PASS"`. It rehashes every store object (physical bytes, not saved JSON). It checks sizes, the manifest digest,
 the image-archive identities, and that no entry depends on a task worktree. `--check-origin` additionally reports whether the live origin
 files still match. The T001 recorded-evidence check is separate:
 
@@ -36,7 +37,8 @@ python3 tools/segarecomp_xplat_qualify.py identity --cache <HARNESS>/.cache/seg0
 ## Restore
 
 - Files: `python3 tools/segarecomp_xplat_handoff.py restore --manifest <...>.json --to <empty dir>`. This materializes the logical tree
-  (paths relative to the harness `.cache/`) as hardlinks; a restored `seg075/q` can be passed as `--cache`.
+  (paths relative to the harness `.cache/`) as independent copies; a restored `seg075/q` can be passed as `--cache` and rebuilt. Use
+  `--hardlink` only for read-only inspection.
 - Toolchain images: `docker load -i <HARNESS>/.cache/seg075-handoff/images/segarecomp-xplat-toolchains.tar` restores
   `segarecomp-xplat/tc-{gnu,elf,vbcc,a68k,mint}:1` with their recorded image ids.
 - Rebuilding toolchains from the committed Dockerfiles is a fallback only. tc-gnu and tc-mint depend on floating package versions (ADR 0160,

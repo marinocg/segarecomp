@@ -368,6 +368,18 @@ def test_identity_v2():
     a68k = next(c for c in plan["candidates"] if c["id"] == "BattleIsleEditor")
     chain = q.recipe_identity_v2(plan, a68k, a68k["recipes"][0], q.ROOT, None, ids)
     check(chain["toolchain"]["base"]["base"]["dockerfile_sha256"] is not None, "tc-a68k binds tc-vbcc and tc-gnu Dockerfiles")
+    # context-candidate image (tc-mint): the candidate's own Dockerfile contents are bound through the cache
+    emu = next(c for c in plan["candidates"] if c["id"] == "emutos")
+    with tempfile.TemporaryDirectory() as td:
+        cache = pathlib.Path(td)
+        ctx = cache / "src" / plan["toolchains"]["tc-mint"]["context_candidate"]
+        ctx.mkdir(parents=True)
+        (ctx / "Dockerfile").write_text("FROM ubuntu:24.04\n")
+        m1 = q.recipe_identity_v2(plan, emu, emu["recipes"][0], q.ROOT, cache, ids)
+        check(m1["toolchain"]["context_candidate"]["dockerfile_sha256"] is not None, "context Dockerfile hashed from the cache")
+        (ctx / "Dockerfile").write_text("FROM ubuntu:24.04\nRUN true\n")
+        m2 = q.recipe_identity_v2(plan, emu, emu["recipes"][0], q.ROOT, cache, ids)
+        check(m2["sha256"] != m1["sha256"] and m2["v1_recipe_sha256"] == m1["v1_recipe_sha256"], "context Dockerfile drift moves v2 only")
     # embedded helper drift
     helpers = dict(q.HELPERS, **{"bin/date": q.DATE_SHIM + "\n"})
     check(q.recipe_identity_v2(plan, cand, recipe, q.ROOT, None, ids, helpers)["sha256"] != base["sha256"], "helper drift moves v2")
