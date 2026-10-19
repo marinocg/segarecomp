@@ -832,6 +832,203 @@ def cmd_aggregate(a) -> int:
     return 0
 
 
+# ===================================================================================================================== SEG-074-T002
+T002_VARIANTS = ("base", "a", "b", "ab")
+T002_STRATEGIES = ("BROAD", "INC")
+# ADR 0158 section 1.7 thresholds (pre-registered; applied unchanged).
+T002_THRESHOLDS = {
+    "a": {"broad_cpu_mean": 0.95, "inc_cpu_mean": 0.97, "best_lineage": None, "lineage_max": 1.03, "image_max": 1.05, "c_bytes_mean": 0.95,
+          "rss_mean": 1.10, "throughput_min": 0.97},
+    "b": {"broad_cpu_mean": 0.97, "inc_cpu_mean": 0.97, "best_lineage": 0.85, "lineage_max": 1.03, "image_max": 1.05, "c_bytes_mean": None,
+          "rss_mean": 1.10, "throughput_min": 0.97},
+}
+T002_COMBINED_TOLERANCE = 0.02
+T002_SAME_KEYS = ("outcome", "frames", "final_state", "coverage", "frame_stream")
+
+
+def t002_cost(rec: dict, key: str) -> float | None:
+    if key == "cpu":
+        return rec.get("total_cpu")
+    if key == "c":
+        return rec.get("generated_bytes")
+    if key == "rss":
+        return rec.get("peak_compiler_rss_kib")
+    if key == "thr":  # throughput ratio is base_cpu / variant_cpu, so the cost is the bounded-run CPU
+        return (rec.get("perf") or {}).get("cpu_median")
+    return None
+
+
+def t002_ratios(images: dict, variant: str, strategy: str, key: str) -> dict:
+    """{image: variant cost / base cost} over measured images where both builds exist."""
+    out = {}
+    for iid, per in images.items():
+        base, var = per.get("base", {}).get(strategy), per.get(variant, {}).get(strategy)
+        if not base or not var:
+            continue
+        x, y = t002_cost(var, key), t002_cost(base, key)
+        if x is not None and y:
+            out[iid] = x / y
+    return out
+
+
+def t002_lineage(ratios: dict) -> dict:
+    acc: dict[str, list[float]] = {}
+    for iid, r in ratios.items():
+        acc.setdefault(GATE_IMAGES[iid], []).append(r)
+    return {L: sum(v) / len(v) for L, v in sorted(acc.items())}
+
+
+def t002_mean(d: dict) -> float | None:
+    return sum(d.values()) / len(d) if d else None
+
+
+def t002_evaluate(images: dict) -> dict:
+    out: dict = {"variants": {}}
+    for variant in T002_VARIANTS[1:]:
+        v: dict = {"strategies": {}}
+        for strat in T002_STRATEGIES:
+            cpu = t002_ratios(images, variant, strat, "cpu")
+            row = {"images": len(cpu), "cpu_image_ratio": {k: round(x, 4) for k, x in sorted(cpu.items())}}
+            for tag, key in (("cpu", "cpu"), ("c_bytes", "c"), ("rss", "rss")):
+                lin = t002_lineage(t002_ratios(images, variant, strat, key))
+                row[tag + "_lineage"] = {L: round(x, 4) for L, x in lin.items()}
+                row[tag + "_mean"] = None if not lin else round(t002_mean(lin), 4)
+            thr = {k: 1.0 / x for k, x in t002_ratios(images, variant, strat, "thr").items() if x}
+            lin = t002_lineage(thr)
+            row["throughput_lineage"] = {L: round(x, 4) for L, x in lin.items()}
+            row["throughput_mean"] = None if not lin else round(t002_mean(lin), 4)
+            v["strategies"][strat] = row
+        out["variants"][variant] = v
+    for variant, thr in T002_THRESHOLDS.items():
+        v = out["variants"][variant]
+        s = v["strategies"]
+        checks = {}
+        def le(name, value, bound):
+            checks[name] = None if (value is None or bound is None) else bool(value <= bound)
+        le("broad_cpu_mean", s["BROAD"]["cpu_mean"], thr["broad_cpu_mean"])
+        le("inc_cpu_mean", s["INC"]["cpu_mean"], thr["inc_cpu_mean"])
+        lineage_all = [x for st in T002_STRATEGIES for x in s[st]["cpu_lineage"].values()]
+        image_all = [x for st in T002_STRATEGIES for x in s[st]["cpu_image_ratio"].values()]
+        le("lineage_max", max(lineage_all) if lineage_all else None, thr["lineage_max"])
+        le("image_max", max(image_all) if image_all else None, thr["image_max"])
+        if thr["best_lineage"] is not None:
+            le("best_lineage", min(lineage_all) if lineage_all else None, thr["best_lineage"])
+        if thr["c_bytes_mean"] is not None:
+            for st in T002_STRATEGIES:
+                le("c_bytes_mean_" + st.lower(), s[st]["c_bytes_mean"], thr["c_bytes_mean"])
+        for st in T002_STRATEGIES:
+            le("rss_mean_" + st.lower(), s[st]["rss_mean"], thr["rss_mean"])
+            checks["throughput_" + st.lower()] = (None if s[st]["throughput_mean"] is None
+                                                  else bool(s[st]["throughput_mean"] >= thr["throughput_min"]))
+        v["checks"] = checks
+        v["measured_lineages"] = sorted({L for st in T002_STRATEGIES for L in s[st]["cpu_lineage"]})
+        v["pass"] = bool(checks) and all(c is True for c in checks.values())
+    ab = out["variants"]["ab"]
+    combined = {}
+    for st in T002_STRATEGIES:
+        singles = [out["variants"][x]["strategies"][st]["cpu_mean"] for x in ("a", "b")]
+        both = ab["strategies"][st]["cpu_mean"]
+        combined[st.lower()] = None if None in singles or both is None else bool(both <= min(singles) + T002_COMBINED_TOLERANCE)
+    ab["combined_non_additivity_ok"] = combined
+    # The combined build must itself respect the no-regression conditions of section 1.7.
+    thr = T002_THRESHOLDS["b"]
+    lineage_all = [x for st in T002_STRATEGIES for x in ab["strategies"][st]["cpu_lineage"].values()]
+    image_all = [x for st in T002_STRATEGIES for x in ab["strategies"][st]["cpu_image_ratio"].values()]
+    ab_checks = {"lineage_max": bool(lineage_all) and max(lineage_all) <= thr["lineage_max"],
+                 "image_max": bool(image_all) and max(image_all) <= thr["image_max"]}
+    for st in T002_STRATEGIES:
+        ab_checks["rss_mean_" + st.lower()] = (ab["strategies"][st]["rss_mean"] or 9.0) <= thr["rss_mean"]
+        ab_checks["throughput_" + st.lower()] = (ab["strategies"][st]["throughput_mean"] or 0.0) >= thr["throughput_min"]
+    ab["checks"] = ab_checks
+    ab["pass"] = bool(out["variants"]["a"]["pass"] and out["variants"]["b"]["pass"] and all(c is True for c in combined.values())
+                      and all(ab_checks.values()))
+    return out
+
+
+def t002_equivalence(images: dict) -> dict:
+    """Cross-variant checks against base: runtime digests, bounded-run output digests, admission and compiled-entry set."""
+    res: dict = {"runtime_equal": {}, "perf_output_equal": {}, "compiled_entry_rows_equal": {}, "admission_equal": {}, "deterministic_perf": {}}
+    for variant in T002_VARIANTS[1:]:
+        for key in res:
+            res[key][variant] = {"checked": 0, "equal": 0}
+        for iid, per in images.items():
+            for strat in T002_STRATEGIES:
+                base, var = per.get("base", {}).get(strat), per.get(variant, {}).get(strat)
+                if not base or not var:
+                    continue
+                def tally(name, ok):
+                    res[name][variant]["checked"] += 1
+                    res[name][variant]["equal"] += 1 if ok else 0
+                if base.get("runtime", {}).get("ok") and var.get("runtime", {}).get("ok"):
+                    tally("runtime_equal", all(base["runtime"].get(k) == var["runtime"].get(k) for k in T002_SAME_KEYS))
+                bp, vp = base.get("perf") or {}, var.get("perf") or {}
+                if bp.get("output_digest") and vp.get("output_digest"):
+                    tally("perf_output_equal", bp["output_digest"] == vp["output_digest"] and vp["output_digest"] != "NONDETERMINISTIC")
+                    tally("deterministic_perf", "NONDETERMINISTIC" not in (bp["output_digest"], vp["output_digest"]))
+                bc, vc = base.get("counts", {}), var.get("counts", {})
+                if bc and vc:
+                    tally("compiled_entry_rows_equal", bc.get("compiled_entry_rows") == vc.get("compiled_entry_rows"))
+                tally("admission_equal", base.get("admission") == var.get("admission"))
+    return res
+
+
+def t002_noise(work: pathlib.Path) -> dict:
+    """Spread of repeated BASE builds (ADR 0158 1.7): (max - min) / mean of total CPU per image and strategy."""
+    out = {}
+    for iid in ("flicky", "d05"):
+        for strat in T002_STRATEGIES:
+            vals = []
+            for name in ("base", "base_r2", "base_r3"):
+                p = work / iid / (name + ".json")
+                if p.exists():
+                    rec = json.loads(p.read_text()).get("strategies", {}).get(strat)
+                    if rec and "total_cpu" in rec:
+                        vals.append(rec["total_cpu"])
+            if len(vals) >= 2:
+                out[f"{iid}.{strat}"] = {"samples": [round(x, 2) for x in vals], "spread": round((max(vals) - min(vals)) / (sum(vals) / len(vals)), 4)}
+    return out
+
+
+def cmd_t002_aggregate(a) -> int:
+    work = pathlib.Path(a.work).resolve()
+    images: dict = {}
+    for iid in GATE_IMAGES:
+        for variant in T002_VARIANTS:
+            p = work / iid / (variant + ".json")
+            if not p.exists():
+                continue
+            rec = json.loads(p.read_text())
+            if rec.get("status") != "measured":
+                continue
+            images.setdefault(iid, {})[variant] = rec["strategies"]
+    evaluation = t002_evaluate(images)
+    record = {"schema": SCHEMA, "adr": "0158 (pre-registration section 1; results and decision below it)",
+              "thresholds": {"a": T002_THRESHOLDS["a"], "b": T002_THRESHOLDS["b"], "combined_tolerance": T002_COMBINED_TOLERANCE},
+              "evaluation": evaluation, "equivalence": t002_equivalence(images), "noise": t002_noise(work), "images": {}}
+    for iid, per in sorted(images.items()):
+        row = {"lineage": GATE_IMAGES[iid], "variants": {}}
+        for variant, strategies in per.items():
+            row["variants"][variant] = {}
+            for name, s in strategies.items():
+                keep = {k: s.get(k) for k in ("accepted", "reason", "emit_cpu", "emit_wall", "compile_cpu", "compile_wall", "link_cpu", "link_wall",
+                                              "total_cpu", "total_wall", "generated_bytes", "object_bytes", "executable_bytes",
+                                              "peak_compiler_rss_kib", "emit_rss_kib", "tu_count", "family_cpu") if k in s}
+                if "counts" in s:
+                    keep["counts"] = {k: s["counts"][k] for k in ("entry_segments", "aot_owner_functions", "aot_shared_helpers", "dispatch_cases",
+                                                                  "compiled_entry_rows", "block_functions")}
+                if "cache" in s:
+                    keep["cache"] = s["cache"]
+                if "perf" in s:
+                    keep["perf"] = {k: s["perf"].get(k) for k in ("budget", "cpu_median", "cpu_samples", "rc")}
+                if "runtime" in s:
+                    keep["runtime"] = {k: s["runtime"].get(k) for k in ("ok", "outcome", "frames")}
+                row["variants"][variant][name] = keep
+        record["images"][iid] = row
+    pathlib.Path(a.out).write_text(json.dumps(public(record), indent=1, sort_keys=True) + "\n")
+    print(json.dumps({v: {"pass": d["pass"], "checks": d["checks"] if "checks" in d else None} for v, d in evaluation["variants"].items()}, indent=1))
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -878,6 +1075,10 @@ def main(argv=None) -> int:
     g.add_argument("--diag-repr", help="diag-repr output (non-gating)")
     g.add_argument("--density", help="density output (non-gating)")
     g.set_defaults(fn=cmd_aggregate)
+    t = sub.add_parser("t002-aggregate")
+    t.add_argument("--work", required=True)
+    t.add_argument("--out", required=True)
+    t.set_defaults(fn=cmd_t002_aggregate)
     a = p.parse_args(argv)
     EMIT_FLAGS[:] = list(getattr(a, "emit_flag", []) or [])
     global PERF_BUDGET
