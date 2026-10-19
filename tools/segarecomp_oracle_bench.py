@@ -64,6 +64,8 @@ G1_MIN_ACCEPTED = 6    # ORACLE_INSTR validator-accepted on at least this many l
 G2_RHO = 0.20          # representation headroom
 OPT_FLAGS = {"O2": ["-O2"], "O0": ["-O0"]}
 BASE_FLAGS = ["-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic"]
+# SEG-074-T002 / ADR 0158: opt-in emitter switches applied to every emission and runtime build of a run (set by --emit-flag).
+EMIT_FLAGS: list = []
 RUNTIME_KEYS = ("outcome", "frames", "final_state", "coverage", "frame_stream")
 
 
@@ -404,7 +406,7 @@ def emit(cli: str, rom: pathlib.Path, sha: str, extra: list, out: pathlib.Path) 
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     shard = out / "generated"
-    r = run_timed([cli, "emit-general-startup-bridge-c", "--rom", str(rom), "--reset-entry", "--rom-sha256", sha, "--immutable-rom-aot"] + extra +
+    r = run_timed([cli, "emit-general-startup-bridge-c", "--rom", str(rom), "--reset-entry", "--rom-sha256", sha, "--immutable-rom-aot"] + extra + EMIT_FLAGS +
                   ["--generated-c-output", str(out / "bridge.generated.c"), "--generated-c-shard-dir", str(shard)])
     if r["rc"] != 0:
         raise RuntimeError("emission failed: " + r["stderr"][-1500:])
@@ -427,6 +429,8 @@ def runtime_check(cli: str, rom: pathlib.Path, extra: list, out: pathlib.Path, f
     cmd = [sys.executable, str(ROOT / "tools/genesis_startup_bridge.py"), "--segarecomp", cli, "--rom", str(rom), "--mode", "commercial",
            "--immutable-rom-aot", "--execution-coverage", str(frames), "--coverage-epoch-frames", str(frames), "--coverage-no-render",
            "--instruction-budget", str(budget), "--out-dir", str(out), "--cc", cc, "--build-profile", "quick"] + extra
+    for flag in EMIT_FLAGS:
+        cmd += ["--emitter-flag", flag]
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     line = next((ln for ln in done.stderr.splitlines() if ln.startswith("COVERAGE_SUMMARY ")), None)
     rec: dict = {"ok": line is not None, "instruction_budget": budget}
@@ -814,6 +818,8 @@ def main(argv=None) -> int:
         sp.add_argument("--timeout", type=int, default=3600)
         sp.add_argument("--work", required=True)
         sp.add_argument("--no-cache", action="store_true")
+        sp.add_argument("--emit-flag", action="append", default=[], choices=["--shared-return-targets", "--aot-operand-sharing"],
+                        help="SEG-074-T002: opt-in emitter switch applied to every emission (repeatable); the result name should record the variant")
     f = sub.add_parser("fixture")
     common(f)
     f.set_defaults(fn=cmd_fixture)
@@ -845,6 +851,7 @@ def main(argv=None) -> int:
     g.add_argument("--density", help="density output (non-gating)")
     g.set_defaults(fn=cmd_aggregate)
     a = p.parse_args(argv)
+    EMIT_FLAGS[:] = list(getattr(a, "emit_flag", []) or [])
     return a.fn(a)
 
 

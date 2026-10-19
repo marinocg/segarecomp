@@ -1529,6 +1529,8 @@ ALIAS_INCOMPLETE_TERMINATIONS = (ALIAS_TERMINATION_MAX_ROUNDS, ALIAS_TERMINATION
                                  ALIAS_TERMINATION_RAM_THUNK_MISMATCH)
 ALIAS_MAX_ROUNDS_ENV = "SEGARECOMP_TEST_ALIAS_MAX_ROUNDS"  # test-only override of GENESIS_ALIAS_MAX_ROUNDS
 GENESIS_EXIT_ALIAS_PREPARATION_INCOMPLETE = 11
+# SEG-074-T002 / ADR 0158: opt-in emitter compaction switches the bridge may forward (all default off).
+EMITTER_OPT_IN_FLAGS = ("--shared-return-targets", "--aot-operand-sharing")
 
 
 def alias_max_rounds() -> int:
@@ -2120,6 +2122,9 @@ def main() -> int:
     parser.add_argument("--ml-gen2-admission", action="store_true",
                         help="SEG-049 (ADR 0103): the experimental gen2 (M3 + B35) producer for the FINAL emission "
                              "(--immutable-rom-aot-ml-gen2-admission). Mutually exclusive with --admission-plan and --ml-admission; requires --immutable-rom-aot")
+    parser.add_argument("--emitter-flag", action="append", default=[], choices=EMITTER_OPT_IN_FLAGS,
+                        help="SEG-074-T002 / ADR 0158: forward an opt-in generated-C compaction switch to the emitter "
+                             "(repeatable; default off; never changes admission or the Compatibility/optimized defaults)")
     parser.add_argument("--provenance-diagnostics", action="store_true",
                         help="SEG-020-T002: opt in to the generated provenance lookup; the table is "
                              "extracted to <out-dir>/provenance-diagnostics.c (ephemeral, not for commit)")
@@ -2267,6 +2272,8 @@ def main() -> int:
         emitter_command += ["--immutable-rom-aot"]
     if args.provenance_diagnostics:
         emitter_command += ["--provenance-diagnostics"]
+    for flag in dict.fromkeys(args.emitter_flag):
+        emitter_command += [flag]
     if args.discover_copy_aliases:
         if not args.immutable_rom_aot:
             sys.stderr.write("--discover-copy-aliases requires --immutable-rom-aot\n")

@@ -47,7 +47,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n  segarecomp ml-gen2-cell-logits --rom <image> --output <path>\n  segarecomp ml-gen2-probe-report --synthetic\n  segarecomp aot-policy-identity --aot-policy <compatibility|optimized> [--aot-model <v1|gen2>] [--platform <genesis|master-system>]\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--ml-gen2-region-proposal-output <path> [--ml-gen2-logits-output <path>]] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path> [--region-proposal-closure <prune|close>]] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission | --immutable-rom-aot-ml-gen2-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--ml-gen2-region-proposal-output <path> [--ml-gen2-logits-output <path>]] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path> [--region-proposal-closure <prune|close>]] [--legacy-aot-entries] [--shared-return-targets] [--aot-operand-sharing] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission | --immutable-rom-aot-ml-gen2-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp classify-ram-jump-thunk <execution-hex8> <hex-bytes>\n"
@@ -160,6 +160,8 @@ int run_cli(int argc, char **argv) {
       // SEG-036-T002: the compact direct-entry representation of helper-backed AOT entries is the default for sharded
       // output; --legacy-aot-entries selects the previous owner/wrapper form (differential evidence and bisection).
       bool aot_direct_entries = true;
+      bool shared_return_targets = false;
+      bool aot_operand_sharing = false;
       for (int index = 4; index < argc;) {
         const std::string_view option = argv[index];
         if (option == "--reset-entry") {
@@ -260,6 +262,14 @@ int run_cli(int argc, char **argv) {
           if (generated_c_shard_dir || index + 1 >= argc) { print_usage(std::cerr); return 2; }
           generated_c_shard_dir = argv[index + 1];
           index += 2;
+        } else if (option == "--aot-operand-sharing") {
+          if (aot_operand_sharing) { print_usage(std::cerr); return 2; }
+          aot_operand_sharing = true;
+          ++index;
+        } else if (option == "--shared-return-targets") {
+          if (shared_return_targets) { print_usage(std::cerr); return 2; }
+          shared_return_targets = true;
+          ++index;
         } else if (option == "--legacy-aot-entries") {
           if (!aot_direct_entries) { print_usage(std::cerr); return 2; }
           aot_direct_entries = false;
@@ -668,6 +678,8 @@ int run_cli(int argc, char **argv) {
       // deterministic function of the accepted program size, so small programs keep the historical
       // one-file artifact and one giant TU is never produced for a large one.
       const segarecomp::ImmutableRomAotDirectEntriesScope direct_entries_scope(aot_direct_entries);
+      const segarecomp::GeneratedCSharedReturnTargetsScope shared_return_targets_scope(shared_return_targets);
+      const segarecomp::ImmutableRomAotOperandSharingScope aot_operand_sharing_scope(aot_operand_sharing);
       std::size_t program_units = 0U;
       if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result))
         program_units = segarecomp::generated_program_unit_count(*partial);

@@ -4,6 +4,7 @@
 #include "segarecomp/codegen/c11/translation_units.hpp"
 #include "segarecomp/cpu/m68k/timing.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <deque>
 #include <functional>
@@ -46,6 +47,10 @@ struct ExecutionHistoryHooksScope {
 thread_local bool g_aot_body_factoring = true;
 // SEG-036-T002: see ImmutableRomAotDirectEntriesScope (genesis_frontend.hpp).
 thread_local bool g_aot_direct_entries = true;
+// SEG-074-T002 / ADR 0158 (opt-in, default off): see GeneratedCSharedReturnTargetsScope (genesis_frontend.hpp).
+thread_local bool g_shared_return_targets = false;
+// SEG-074-T002 / ADR 0158 (opt-in, default off): see ImmutableRomAotOperandSharingScope (genesis_frontend.hpp).
+thread_local bool g_aot_operand_sharing = false;
 const char *history_transfer_kind(M68kIrKind kind) {
   switch (kind) {
   case M68kIrKind::branch_ne_short: case M68kIrKind::branch_always_short: case M68kIrKind::general_branch:
@@ -733,6 +738,70 @@ enum class M68kGeneralStartupBlockEmissionPolicy {
 };
 std::optional<std::map<Address, const FrontendAnalysis::ImmutableRomAotEntry *>>
 validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis);
+// SEG-074-T002 / ADR 0158: operand-parameterized sharing of single-use AOT bodies. A "constant" is exactly one
+// `UINT8_C/UINT16_C/UINT32_C(<hex or decimal digits>)` token of the generated body text.
+struct AotOperandLiteral {
+  std::size_t begin{};
+  std::size_t end{};
+  unsigned width{};  // 8, 16 or 32
+};
+std::vector<AotOperandLiteral> aot_operand_literals(const std::string &text) {
+  std::vector<AotOperandLiteral> found;
+  for (std::size_t at = text.find("INT"); at != std::string::npos; at = text.find("INT", at + 3U)) {
+    if (at == 0U || text[at - 1U] != 'U') continue;
+    const std::size_t begin = at - 1U;
+    if (begin != 0U) {
+      const char before = text[begin - 1U];
+      if (std::isalnum(static_cast<unsigned char>(before)) != 0 || before == '_') continue;
+    }
+    unsigned width = 0U;
+    std::size_t cursor = at + 3U;
+    if (text.compare(cursor, 1U, "8") == 0) { width = 8U; cursor += 1U; }
+    else if (text.compare(cursor, 2U, "16") == 0) { width = 16U; cursor += 2U; }
+    else if (text.compare(cursor, 2U, "32") == 0) { width = 32U; cursor += 2U; }
+    else continue;
+    if (text.compare(cursor, 3U, "_C(") != 0) continue;
+    cursor += 3U;
+    const std::size_t digits = cursor;
+    if (text.compare(cursor, 2U, "0x") == 0) {
+      cursor += 2U;
+      const std::size_t first = cursor;
+      while (cursor < text.size() && std::isxdigit(static_cast<unsigned char>(text[cursor])) != 0) ++cursor;
+      if (cursor == first) continue;
+    } else {
+      while (cursor < text.size() && std::isdigit(static_cast<unsigned char>(text[cursor])) != 0) ++cursor;
+      if (cursor == digits) continue;
+    }
+    if (cursor >= text.size() || text[cursor] != ')') continue;
+    ++cursor;
+    // Conservative constant-expression guard: a constant that is an array size or subscript is never parameterized.
+    std::size_t prior = begin;
+    while (prior != 0U && text[prior - 1U] == ' ') --prior;
+    if (prior != 0U && text[prior - 1U] == '[') continue;
+    if (cursor < text.size() && text[cursor] == ']') continue;
+    found.push_back({begin, cursor, width});
+  }
+  return found;
+}
+struct AotHash128 {
+  std::uint64_t a = UINT64_C(0xcbf29ce484222325);
+  std::uint64_t b = UINT64_C(0x9e3779b97f4a7c15);
+  bool operator==(const AotHash128 &other) const { return a == other.a && b == other.b; }
+  void mix(std::string_view bytes) {
+    for (const char ch : bytes) {
+      const auto c = static_cast<unsigned char>(ch);
+      a = (a ^ c) * UINT64_C(0x100000001b3);
+      b = (b + c + UINT64_C(0x632be59bd9b4e019)) * UINT64_C(0xff51afd7ed558ccd);
+      b ^= b >> 29U;
+    }
+    a ^= UINT64_C(0xff);  // item separator
+    b += UINT64_C(0x1f);
+  }
+};
+struct AotHash128Hasher {
+  std::size_t operator()(const AotHash128 &h) const { return static_cast<std::size_t>(h.a ^ (h.b * UINT64_C(0x9e3779b97f4a7c15))); }
+};
+
 // SEG-022-T011: opt-in exact factoring of one immutable-ROM AOT body (bridge route only).
 struct AotBodyFactoring {
   // Group A: a failed routed access returns through the generated `genesis_routed_failure_stop`.
@@ -749,6 +818,8 @@ struct AotBodyFactoring {
   // push onto the stack; its popped value is a computed jump target validated against the final compiled-entry
   // lookup rather than the JSR-continuation set. Meaningful only with the shared compiled-entry lookup.
   bool computed_jump_return = false;
+  // SEG-074-T002 / ADR 0158: see M68kMemoryEmissionContext::return_target_member_symbol.
+  std::string_view return_target_member_symbol{};
 };
 std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotEntry &entry,
                                          const std::vector<std::uint32_t> &runtime_return_targets,
@@ -2214,6 +2285,7 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   // compiled-entry table.
   if (use_shared_compiled_entry_lookup) memory.compiled_entry_lookup_symbol = "genesis_compiled_entry_lookup";
   memory.return_target_is_computed_jump = factoring.computed_jump_return && use_shared_compiled_entry_lookup;
+  memory.return_target_member_symbol = factoring.return_target_member_symbol;
   // SEG-021-T005: an isolated AOT candidate has no whole-program absolute-
   // operand fact; absolute and d16(PC) source reads take the runtime-routed
   // read (never a folded constant).
@@ -4706,6 +4778,29 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     if (emitted_code_addresses.contains(pea_ea.absolute_address))
       runtime_return_target_set.insert(pea_ea.absolute_address);
   }
+  // SEG-074-T002 / ADR 0158 (opt-in): the whole-program return-target set is emitted ONCE as a sorted table plus a
+  // binary-search membership function; every RTS (ordinary block and AOT body) then tests `!member(popped)` instead of
+  // spelling the whole set as an inline `!=` chain. The set is the unchanged `runtime_return_target_set`; the stop,
+  // its diagnostic and its evaluation point are unchanged.
+  const bool shared_return_targets = g_shared_return_targets && !runtime_return_target_set.empty();
+  constexpr std::string_view return_target_member_symbol = "genesis_return_target_member";
+  if (shared_return_targets) {
+    ShardUnitScope unit(out, "entries", 1U, "int genesis_return_target_member(uint32_t value)");
+    std::ostringstream table;
+    table << "static const uint32_t genesis_return_targets[] = {";
+    std::size_t column = 0U;
+    for (const auto target : runtime_return_target_set) {
+      table << (column == 0U ? "\n" : (column % 8U == 0U ? ",\n" : ", ")) << "0x" << std::uppercase << std::hex
+            << std::setw(8) << std::setfill('0') << static_cast<std::uint32_t>(target) << "u";
+      ++column;
+    }
+    out << table.str();
+    out << "\n};\nstatic int genesis_return_target_member(uint32_t value) {\n"
+        << "  size_t low = 0U;\n  size_t high = sizeof(genesis_return_targets) / sizeof(genesis_return_targets[0]);\n"
+        << "  while (low < high) {\n    const size_t middle = low + (high - low) / 2U;\n"
+        << "    if (genesis_return_targets[middle] == value) return 1;\n"
+        << "    if (genesis_return_targets[middle] < value) low = middle + 1U; else high = middle;\n  }\n  return 0;\n}\n";
+  }
   for (const auto &block : partial.accepted_prefix.static_blocks) {
     const auto &terminal = block.instructions.back();
     const auto terminal_operation = operations.at(terminal.source.address.value);
@@ -5954,6 +6049,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         // target is selected statically here.
         const std::vector<std::uint32_t> return_target_values(runtime_return_target_set.begin(), runtime_return_target_set.end());
         routed.runtime_return_targets = return_target_values;
+        if (shared_return_targets) routed.return_target_member_symbol = return_target_member_symbol;
         if (routed.runtime_return_targets.empty()) return "/* translation rejected: invalid C4 static return edge */\n";
         out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
         break;
@@ -6124,6 +6220,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   if (factor_aot_bodies) for (const auto pc : aot_order) {
     AotBodyFactoring factoring{true, aot_source_symbol};
     factoring.computed_jump_return = computed_jump_return_addresses.contains(pc);
+    if (shared_return_targets) factoring.return_target_member_symbol = return_target_member_symbol;
     auto inner = emit_immutable_rom_aot_body(*aot_entries->at(pc), immutable_rom_aot_runtime_return_targets,
                                              aot_unrepresented_exact_pcs[pc], {}, true, {}, factoring);
     if (inner.starts_with("/* translation rejected"))
@@ -6157,6 +6254,131 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       ++aot_body_uses[slot->second];
       aot_entry_body[index] = slot->second;
     }
+  // SEG-074-T002 / ADR 0158 group D (opt-in): operand-parameterized sharing. A body that is STILL single-use after
+  // groups A-C is grouped with other such bodies that are identical except for exactly one constant of the form
+  // `UINT8_C/UINT16_C/UINT32_C(n)`. The shared helper takes that constant as an ordinary `uint8_t/uint16_t/uint32_t`
+  // parameter (`genesis_aot_operand`); `UINTn_C(c)` has the integer-promoted type of `uint_leastn_t` (C11 7.20.4), and a
+  // parameter of type `uintn_t` promotes identically in every use. Every member is verified by exact text equality of
+  // its body with the helper body once its own constant is restored, so a hash collision can only cost sharing. Bodies
+  // containing `case `, `static ` or `switch (` are never rewritten; constants used as array sizes/subscripts are never
+  // chosen. Hole selection is greedy by group size then ascending first member, a pure function of the ascending AOT
+  // address order, so output stays deterministic. The helper is reached from the entry's owner case (never a direct
+  // entry): the operand is not part of the compact direct-entry tables.
+  constexpr std::string_view aot_operand_symbol = "genesis_aot_operand";
+  std::vector<std::string> aot_entry_operand(aot_order.size());  // the restored constant spelling, or empty
+  std::vector<unsigned> aot_body_operand_width;                  // per body id: 0 = no operand parameter
+  if (factor_aot_bodies && g_aot_operand_sharing) {
+    struct Candidate {
+      std::size_t entry;
+      std::vector<AotOperandLiteral> literals;
+      std::vector<AotHash128> gap;      // hash of the text between constants (size literals + 1)
+      std::vector<AotHash128> constant; // hash of each constant's spelling
+    };
+    constexpr std::size_t max_constants = 96U;
+    std::vector<Candidate> candidates;
+    for (std::size_t index = 0; index < aot_order.size(); ++index) {
+      const auto id = aot_entry_body[index];
+      if (aot_body_uses[id] != 1U) continue;
+      const std::string &text = *aot_body_text[id];
+      if (text.find("case ") != std::string::npos || text.find("static ") != std::string::npos ||
+          text.find("switch (") != std::string::npos || text.find(aot_operand_symbol) != std::string::npos)
+        continue;
+      auto literals = aot_operand_literals(text);
+      if (literals.empty() || literals.size() > max_constants) continue;
+      Candidate candidate{index, std::move(literals), {}, {}};
+      std::size_t cursor = 0U;
+      for (const auto &literal : candidate.literals) {
+        AotHash128 gap;
+        gap.mix(std::string_view(text).substr(cursor, literal.begin - cursor));
+        candidate.gap.push_back(gap);
+        AotHash128 constant;
+        constant.mix(std::string_view(text).substr(literal.begin, literal.end - literal.begin));
+        candidate.constant.push_back(constant);
+        cursor = literal.end;
+      }
+      AotHash128 tail;
+      tail.mix(std::string_view(text).substr(cursor));
+      candidate.gap.push_back(tail);
+      candidates.push_back(std::move(candidate));
+    }
+    const auto combine = [](const Candidate &candidate, std::size_t hole, bool all_holes) {
+      AotHash128 key;
+      for (std::size_t item = 0; item <= candidate.literals.size(); ++item) {
+        key.mix(std::string_view(reinterpret_cast<const char *>(&candidate.gap[item]), sizeof(AotHash128)));
+        if (item == candidate.literals.size()) break;
+        if (all_holes || item == hole) {
+          const char marker[2] = {'#', static_cast<char>(candidate.literals[item].width)};
+          key.mix(std::string_view(marker, 2U));
+        } else {
+          key.mix(std::string_view(reinterpret_cast<const char *>(&candidate.constant[item]), sizeof(AotHash128)));
+        }
+      }
+      return key;
+    };
+    // Pass 1: skeleton groups (every constant masked). A candidate alone in its skeleton cannot share.
+    std::unordered_map<AotHash128, std::vector<std::size_t>, AotHash128Hasher> skeletons;
+    for (std::size_t c = 0; c < candidates.size(); ++c) skeletons[combine(candidates[c], 0U, true)].push_back(c);
+    // Pass 2: per-hole keys among skeleton-sharing candidates.
+    std::unordered_map<AotHash128, std::vector<std::pair<std::size_t, std::size_t>>, AotHash128Hasher> holes;
+    for (const auto &[skeleton, members] : skeletons) {
+      (void)skeleton;
+      if (members.size() < 2U) continue;
+      for (const auto c : members)
+        for (std::size_t hole = 0; hole < candidates[c].literals.size(); ++hole)
+          holes[combine(candidates[c], hole, false)].emplace_back(c, hole);
+    }
+    std::vector<const std::vector<std::pair<std::size_t, std::size_t>> *> groups;
+    for (const auto &[key, members] : holes) {
+      (void)key;
+      if (members.size() >= 2U) groups.push_back(&members);
+    }
+    // Members are appended in ascending candidate order (candidates are built in ascending entry order).
+    std::sort(groups.begin(), groups.end(), [](const auto *left, const auto *right) {
+      if (left->size() != right->size()) return left->size() > right->size();
+      return left->front() < right->front();
+    });
+    std::vector<bool> taken(candidates.size(), false);
+    for (const auto *group : groups) {
+      std::vector<std::pair<std::size_t, std::size_t>> free;
+      for (const auto &member : *group)
+        if (!taken[member.first]) free.push_back(member);
+      if (free.size() < 2U) continue;
+      const auto &first = candidates[free.front().first];
+      const auto &first_literal = first.literals[free.front().second];
+      std::string helper_text = *aot_body_text[aot_entry_body[first.entry]];
+      helper_text.replace(first_literal.begin, first_literal.end - first_literal.begin, aot_operand_symbol);
+      std::vector<std::pair<std::size_t, std::size_t>> verified;
+      for (const auto &member : free) {
+        const auto &candidate = candidates[member.first];
+        const auto &literal = candidate.literals[member.second];
+        if (literal.width != first_literal.width) continue;
+        std::string restored = *aot_body_text[aot_entry_body[candidate.entry]];
+        restored.replace(literal.begin, literal.end - literal.begin, aot_operand_symbol);
+        if (restored == helper_text) verified.push_back(member);
+      }
+      if (verified.size() < 2U) continue;
+      const auto [slot, inserted] =
+          aot_body_ids.try_emplace(std::move(helper_text), static_cast<std::uint32_t>(aot_body_text.size()));
+      if (inserted) {
+        aot_body_text.push_back(&slot->first);
+        aot_body_uses.push_back(0U);
+      }
+      if (aot_body_operand_width.size() < aot_body_text.size()) aot_body_operand_width.resize(aot_body_text.size(), 0U);
+      if (!inserted && aot_body_operand_width[slot->second] != first_literal.width) continue;  // same text, other type
+      aot_body_operand_width[slot->second] = first_literal.width;
+      for (const auto &member : verified) {
+        const auto &candidate = candidates[member.first];
+        const auto &literal = candidate.literals[member.second];
+        const auto old_id = aot_entry_body[candidate.entry];
+        aot_entry_operand[candidate.entry] = aot_body_text[old_id]->substr(literal.begin, literal.end - literal.begin);
+        aot_body_uses[old_id] = 0U;
+        ++aot_body_uses[slot->second];
+        aot_entry_body[candidate.entry] = slot->second;
+        taken[member.first] = true;
+      }
+    }
+  }
+  aot_body_operand_width.resize(aot_body_text.size(), 0U);
   // Helper names follow body-id order: exact bodies in first-use (ascending address) order, then group-C
   // own-PC bodies in the order they were re-keyed (also ascending address). Both orders are deterministic.
   std::vector<std::string> aot_body_helper(aot_body_text.size());
@@ -6170,10 +6392,20 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     aot_body_helper[id] = name.str();
     const bool uses_source = aot_body_text[id]->find(aot_source_symbol) != std::string::npos;
     const bool uses_pc = aot_body_text[id]->find(aot_pc_symbol) != std::string::npos;
+    const unsigned operand_width = aot_body_operand_width[id];
+    // SEG-074-T002: an operand-parameterized helper is reached only from its owner case with an explicit extra
+    // argument, so it never joins the uniform direct-entry signature.
+    const std::string operand_parameter =
+        operand_width == 0U ? std::string()
+                            : ", uint" + std::to_string(operand_width) + "_t " + std::string(aot_operand_symbol);
     // SEG-036-T002: a direct-entry build calls every helper through one uniform signature (runtime, provenance row,
     // own PC); a parameter the exact body does not use is explicitly discarded. The body text is unchanged.
     const auto declaration =
-        direct_entries
+        operand_width != 0U
+            ? "GenesisControlTransfer " + aot_body_helper[id] + "(GenesisRuntime *runtime" +
+                  (uses_source ? ", const GenesisInstructionProvenance *" + std::string(aot_source_symbol) : std::string()) +
+                  (uses_pc ? ", uint32_t " + std::string(aot_pc_symbol) : std::string()) + operand_parameter + ")"
+        : direct_entries
             ? "GenesisControlTransfer " + aot_body_helper[id] + "(GenesisRuntime *runtime, const GenesisInstructionProvenance *" +
                   std::string(aot_source_symbol) + ", uint32_t " + std::string(aot_pc_symbol) + ")"
             : "GenesisControlTransfer " + aot_body_helper[id] + "(GenesisRuntime *runtime" +
@@ -6182,8 +6414,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
                   (uses_pc ? ", uint32_t " + std::string(aot_pc_symbol) : std::string()) + ")";
     ShardUnitScope unit(out, "shared", aot_helper_count, declaration);
     out << "static " << declaration << " {\n";
-    if (direct_entries && !uses_source) out << "  (void)" << aot_source_symbol << ";\n";
-    if (direct_entries && !uses_pc) out << "  (void)" << aot_pc_symbol << ";\n";
+    if (direct_entries && operand_width == 0U && !uses_source) out << "  (void)" << aot_source_symbol << ";\n";
+    if (direct_entries && operand_width == 0U && !uses_pc) out << "  (void)" << aot_pc_symbol << ";\n";
     out << *aot_body_text[id] << "}\n";
     ++aot_helper_count;
   }
@@ -6196,6 +6428,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       AotBodyFactoring unfactored{};
       unfactored.bare_block = true;
       unfactored.computed_jump_return = computed_jump_return_addresses.contains(pc);
+      if (shared_return_targets) unfactored.return_target_member_symbol = return_target_member_symbol;
       return emit_immutable_rom_aot_body(*aot_entries->at(pc), immutable_rom_aot_runtime_return_targets,
                                          aot_unrepresented_exact_pcs[pc], {}, true, {}, unfactored);
     }
@@ -6208,7 +6441,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     std::string result;
     if (!aot_body_helper[id].empty()) {
       result = "{ return " + aot_body_helper[id] + "(runtime" + (uses_source ? ", " + source : std::string()) +
-               (uses_pc ? ", " + own_pc_literal(pc) : std::string()) + "); }\n";
+               (uses_pc ? ", " + own_pc_literal(pc) : std::string()) +
+               (aot_body_operand_width[id] != 0U ? ", " + aot_entry_operand[index] : std::string()) + "); }\n";
     } else {
       // A single-use body is emitted exactly as before group C (its own PC literal restored).
       result = "{\n";
@@ -6242,7 +6476,9 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       pending.clear();
     };
     for (std::size_t index = 0; index < aot_order.size(); ++index) {
-      if (direct_entries && !aot_body_helper[aot_entry_body[index]].empty()) continue;  // a direct entry has no owner
+      if (direct_entries && !aot_body_helper[aot_entry_body[index]].empty() &&
+          aot_body_operand_width[aot_entry_body[index]] == 0U)
+        continue;  // a direct entry has no owner
       pending.push_back(index);
       if (pending.size() >= aot_owner_max_entries) flush_owner();
     }
@@ -6273,7 +6509,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
           return "/* translation rejected: compiled entry lacks generated body */\n";
         const auto index = static_cast<std::size_t>(order - aot_order.begin());
         const auto id = aot_entry_body[index];
-        if (!aot_body_helper[id].empty()) {
+        if (!aot_body_helper[id].empty() && aot_body_operand_width[id] == 0U) {
           const auto &provenance = aot_entries->at(address)->operation.provenance;
           const bool uses_source = aot_body_text[id]->find(aot_source_symbol) != std::string::npos;
           std::string row = "0ULL";
@@ -6762,5 +6998,15 @@ ImmutableRomAotDirectEntriesScope::ImmutableRomAotDirectEntriesScope(bool enable
   g_aot_direct_entries = enabled;
 }
 ImmutableRomAotDirectEntriesScope::~ImmutableRomAotDirectEntriesScope() { g_aot_direct_entries = previous_; }
+
+GeneratedCSharedReturnTargetsScope::GeneratedCSharedReturnTargetsScope(bool enabled) : previous_(g_shared_return_targets) {
+  g_shared_return_targets = enabled;
+}
+GeneratedCSharedReturnTargetsScope::~GeneratedCSharedReturnTargetsScope() { g_shared_return_targets = previous_; }
+
+ImmutableRomAotOperandSharingScope::ImmutableRomAotOperandSharingScope(bool enabled) : previous_(g_aot_operand_sharing) {
+  g_aot_operand_sharing = enabled;
+}
+ImmutableRomAotOperandSharingScope::~ImmutableRomAotOperandSharingScope() { g_aot_operand_sharing = previous_; }
 
 } // namespace segarecomp

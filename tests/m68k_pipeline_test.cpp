@@ -7931,6 +7931,111 @@ FrontendProgram program_with(const std::vector<std::uint8_t> &image) {
 }
 }  // namespace aot_factoring_fixture
 
+// SEG-074-T002 / ADR 0158: project-authored fixture for the opt-in generated-C compaction switches. One image:
+//  - a startup block `JSR $2008.L; JSR (A0)` and a statically discovered callee block `MOVEQ #5,D0; RTS` (an ordinary
+//    block that validates its popped return against the whole-program return-target set),
+//  - an AOT region of operand-variant instruction families (each family appears with several operand values, so
+//    bodies that differ in exactly one constant exist for immediates of byte/word/long width, absolute word/long
+//    addresses including device windows, d16(An), d16(PC), (d8,An,Xn), quick data, bit numbers, shift counts,
+//    branch displacements, vectors and legal overlapping interpretations whose extension word decodes as an
+//    instruction), and several AOT-only RTS/BSR/JSR shapes.
+namespace compact_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x2000U;
+using Bytes = std::vector<std::uint8_t>;
+void append(Bytes &out, std::initializer_list<std::uint8_t> head, const std::vector<Bytes> &tails) {
+  for (const auto &tail : tails) {
+    out.insert(out.end(), head.begin(), head.end());
+    out.insert(out.end(), tail.begin(), tail.end());
+  }
+}
+Bytes make_image() {
+  Bytes image{0x4EU, 0xB9U, 0x00U, 0x00U, 0x20U, 0x08U, 0x4EU, 0x90U,  // JSR $00002008.L; JSR (A0) (unresolved frontier)
+              0x70U, 0x05U, 0x4EU, 0x75U};                              // callee block: MOVEQ #5,D0; RTS
+  const std::vector<Bytes> b8 = {{0x00U}, {0x01U}, {0x7FU}, {0x80U}, {0xFFU}};
+  const std::vector<Bytes> w16 = {{0x00U, 0x00U}, {0x00U, 0x01U}, {0x12U, 0x34U}, {0x7FU, 0xFFU},
+                                  {0x80U, 0x00U}, {0xFFU, 0xFFU}, {0x4EU, 0x71U}, {0x4EU, 0x75U}};
+  const std::vector<Bytes> l32 = {{0x00U, 0x00U, 0x00U, 0x00U}, {0x00U, 0x00U, 0x7FU, 0xFFU}, {0x12U, 0x34U, 0x56U, 0x78U},
+                                  {0x7FU, 0xFFU, 0xFFU, 0xFFU}, {0x80U, 0x00U, 0x00U, 0x00U}, {0xFFU, 0xFFU, 0xFFU, 0xFFU}};
+  const std::vector<Bytes> abs_l = {{0x00U, 0x00U, 0x21U, 0x00U}, {0x00U, 0xFFU, 0x01U, 0x00U}, {0x00U, 0xFFU, 0x01U, 0x01U},
+                                    {0x00U, 0xA1U, 0x00U, 0x03U}, {0x00U, 0xC0U, 0x00U, 0x04U}, {0x00U, 0xC0U, 0x00U, 0x00U},
+                                    {0x00U, 0x00U, 0x00U, 0x02U}, {0x01U, 0x00U, 0x21U, 0x00U}};
+  const std::vector<Bytes> abs_w = {{0x01U, 0x00U}, {0x21U, 0x00U}, {0xFFU, 0x00U}, {0x80U, 0x00U}, {0x7FU, 0xFEU}};
+  const std::vector<Bytes> disp = {{0x00U, 0x04U}, {0x00U, 0x01U}, {0x7FU, 0xFFU}, {0x80U, 0x00U}, {0xFFU, 0xFEU}, {0xFFU, 0xF0U}};
+  const std::vector<Bytes> ext8 = {{0x00U}, {0x04U}, {0x7FU}, {0x80U}, {0xFEU}};
+  append(image, {0x12U, 0x3CU, 0x00U}, b8);                       // MOVE.B #imm,D1
+  append(image, {0x34U, 0x3CU}, w16);                             // MOVE.W #imm,D2 (extension words 4E71 / 4E75 overlap)
+  append(image, {0x26U, 0x3CU}, l32);                             // MOVE.L #imm,D3
+  append(image, {0x06U, 0x01U, 0x00U}, b8);                       // ADDI.B #imm,D1
+  append(image, {0x06U, 0x42U}, w16);                             // ADDI.W #imm,D2
+  append(image, {0x06U, 0x83U}, l32);                             // ADDI.L #imm,D3
+  append(image, {0x04U, 0x44U}, w16);                             // SUBI.W #imm,D4
+  append(image, {0x0CU, 0x01U, 0x00U}, b8);                       // CMPI.B #imm,D1
+  append(image, {0x0CU, 0x42U}, w16);                             // CMPI.W #imm,D2
+  append(image, {0x0CU, 0x83U}, l32);                             // CMPI.L #imm,D3
+  append(image, {0x02U, 0x45U}, w16);                             // ANDI.W #imm,D5
+  append(image, {0x00U, 0x45U}, w16);                             // ORI.W #imm,D5
+  append(image, {0x0AU, 0x86U}, l32);                             // EORI.L #imm,D6
+  append(image, {0x30U, 0x38U}, abs_w);                           // MOVE.W abs.W,D0
+  append(image, {0x22U, 0x39U}, abs_l);                           // MOVE.L abs.L,D1
+  append(image, {0x11U, 0xC0U}, abs_w);                           // MOVE.B D0,abs.W
+  append(image, {0x33U, 0xC1U}, abs_l);                           // MOVE.W D1,abs.L
+  append(image, {0x41U, 0xF9U}, abs_l);                           // LEA abs.L,A0
+  append(image, {0x43U, 0xF8U}, abs_w);                           // LEA abs.W,A1
+  append(image, {0x45U, 0xE9U}, disp);                            // LEA d16(A1),A2
+  append(image, {0x30U, 0x2BU}, disp);                            // MOVE.W d16(A3),D0
+  append(image, {0x29U, 0x40U}, disp);                            // MOVE.L D0,d16(A4)
+  append(image, {0x30U, 0x3AU}, disp);                            // MOVE.W d16(PC),D0
+  append(image, {0x41U, 0xFAU}, disp);                            // LEA d16(PC),A0
+  append(image, {0x30U, 0x30U, 0x10U}, ext8);                     // MOVE.W (d8,A0,D1.W),D0
+  append(image, {0x30U, 0xFCU}, w16);                             // MOVE.W #imm,(A0)+
+  append(image, {0x23U, 0xFCU}, l32);                             // MOVE.L #imm,-(A1) (long immediate to predecrement)
+  append(image, {0x14U, 0xFCU, 0x00U}, b8);                       // MOVE.B #imm,(A2)+
+  append(image, {}, {{0x52U, 0x40U}, {0x54U, 0x40U}, {0x58U, 0x40U}, {0x50U, 0x40U}});  // ADDQ.W #n,D0
+  append(image, {}, {{0x53U, 0x81U}, {0x55U, 0x81U}, {0x59U, 0x81U}, {0x51U, 0x81U}});  // SUBQ.L #n,D1
+  append(image, {}, {{0x52U, 0x9AU}, {0x54U, 0x9AU}, {0x58U, 0x9AU}});                  // ADDQ.L #n,(A2)+
+  append(image, {}, {{0x53U, 0x63U}, {0x55U, 0x63U}, {0x57U, 0x63U}, {0x59U, 0x63U}});  // SUBQ.W #n,-(A3)
+  append(image, {0x70U}, b8);                                     // MOVEQ #n,D0
+  append(image, {0x72U}, b8);                                     // MOVEQ #n,D1
+  append(image, {0x08U, 0x01U, 0x00U}, {{0x00U}, {0x03U}, {0x07U}, {0x1FU}});  // BTST #n,D1
+  append(image, {0x08U, 0xC2U, 0x00U}, {{0x00U}, {0x03U}, {0x07U}, {0x1FU}});  // BSET #n,D2
+  append(image, {0x08U, 0x90U, 0x00U}, {{0x00U}, {0x03U}, {0x07U}});           // BCLR #n,(A0)
+  append(image, {}, {{0xE3U, 0x40U}, {0xE5U, 0x40U}, {0xE9U, 0x40U}, {0xE1U, 0x40U}});  // ASL.W #n,D0
+  append(image, {}, {{0xE2U, 0x89U}, {0xE4U, 0x89U}, {0xE6U, 0x89U}, {0xE8U, 0x89U}});  // LSR.L #n,D1
+  append(image, {0x66U}, {{0x02U}, {0x04U}, {0x06U}, {0x7EU}, {0xFEU}});                // BNE.S
+  append(image, {0x67U}, {{0x02U}, {0x04U}, {0x06U}, {0x7EU}, {0xFEU}});                // BEQ.S
+  append(image, {0x60U}, {{0x02U}, {0x04U}, {0x06U}, {0x7EU}});                         // BRA.S
+  append(image, {0x61U}, {{0x02U}, {0x04U}, {0x06U}, {0x7EU}});                         // BSR.S
+  append(image, {0x66U, 0x00U}, disp);                            // BNE.W
+  append(image, {0x51U, 0xC8U}, disp);                            // DBF D0,disp
+  append(image, {}, {{0x4EU, 0x40U}, {0x4EU, 0x41U}, {0x4EU, 0x42U}, {0x4EU, 0x43U}});  // TRAP #n
+  append(image, {0xC0U, 0xFCU}, w16);                             // MULU.W #imm,D0
+  append(image, {0xC3U, 0xFCU}, w16);                             // MULS.W #imm,D1
+  append(image, {0x84U, 0xFCU}, w16);                             // DIVU.W #imm,D2 (zero divisor present)
+  append(image, {0xB0U, 0xFCU}, w16);                             // CMPA.W #imm,A0
+  append(image, {0xD3U, 0xFCU}, l32);                             // ADDA.L #imm,A1
+  append(image, {0x24U, 0x7CU}, l32);                             // MOVEA.L #imm,A2
+  append(image, {0x36U, 0x7CU}, w16);                             // MOVEA.W #imm,A3
+  append(image, {0x02U, 0x3CU, 0x00U}, b8);                       // ANDI #imm,CCR
+  append(image, {0x44U, 0xFCU, 0x00U}, b8);                       // MOVE #imm,CCR
+  append(image, {0x00U, 0x7CU}, w16);                             // ORI #imm,SR (privileged)
+  append(image, {0x46U, 0xFCU}, w16);                             // MOVE #imm,SR (privileged)
+  // AOT-only return shapes: RTS validated against the return-target set, a long push followed by RTS.
+  image.insert(image.end(), {0x4EU, 0x75U, 0x4EU, 0x75U, 0x2FU, 0x3CU, 0x00U, 0x00U, 0x20U, 0x08U, 0x4EU, 0x75U});
+  if (image.size() % 2U != 0U) image.push_back(0x4EU);
+  return image;
+}
+FrontendProgram program_with(const Bytes &image) {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-074-T002/compact-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base},
+                             {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace compact_fixture
+
 // SEG-021-T011: representative immutable-ROM AOT fixture for PEA. Reuses
 // negate_disp16_aot_fixture's own filler prefix verbatim (unrelated static
 // discovery noise, proving AOT admission needs no CFG reachability from the
@@ -9863,6 +9968,32 @@ int emit_aot_factoring(bool factored, const char *directory, bool direct = false
   if (partial == nullptr) return 5;
   ImmutableRomAotBodyFactoringScope factoring(factored);
   ImmutableRomAotDirectEntriesScope direct_entries(direct);
+  if (directory == nullptr) {
+    const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, '0'));
+    if (emitted.starts_with("/* translation rejected:")) return 6;
+    std::cout << emitted;
+    return 0;
+  }
+  TranslationUnitSharder sharder{directory, "bridge_generated", genesis_bridge_translation_unit_families()};
+  const auto rejection = emit_m68k_general_startup_bridge_c_to(sharder.stream(), *partial, std::string(64U, '0'));
+  if (!rejection.empty()) { std::cerr << rejection; return 6; }
+  return sharder.finish().empty() ? 0 : 7;
+}
+
+// SEG-074-T002 / ADR 0158: the compact fixture emitted with the opt-in switches selected by `form` (reference = both off):
+// `compact-ref`, `compact-operand`, `compact-returns`, `compact-both`; sharded into <dir> (direct entries on, as production)
+// or as the single-file form on stdout.
+int emit_compact_fixture(std::string_view form, const char *directory) {
+  using namespace segarecomp;
+  using namespace compact_fixture;
+  const auto image = make_image();
+  auto program = program_with(image);
+  if (!apply_genesis_immutable_rom_aot_range(program, base + 12U, static_cast<std::uint32_t>(base + image.size()))) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const ImmutableRomAotOperandSharingScope operand(form == "compact-operand" || form == "compact-both");
+  const GeneratedCSharedReturnTargetsScope returns(form == "compact-returns" || form == "compact-both");
   if (directory == nullptr) {
     const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, '0'));
     if (emitted.starts_with("/* translation rejected:")) return 6;
@@ -31112,6 +31243,10 @@ int main(int argc, char **argv) {
        std::string_view(argv[2]) == "direct"))
     return emit_aot_factoring(std::string_view(argv[2]) != "unfactored", argc == 4 ? argv[3] : nullptr,
                               std::string_view(argv[2]) == "direct");
+  if ((argc == 3 || argc == 4) && std::string_view(argv[1]) == "--emit-compact-fixture" &&
+      (std::string_view(argv[2]) == "compact-ref" || std::string_view(argv[2]) == "compact-operand" ||
+       std::string_view(argv[2]) == "compact-returns" || std::string_view(argv[2]) == "compact-both"))
+    return emit_compact_fixture(argv[2], argc == 4 ? argv[3] : nullptr);
   if (argc == 2 && std::string_view(argv[1]) == "--emit-aot-owner-single")
     return emit_aot_owner_single_source();
   if (argc == 3 && std::string_view(argv[1]) == "--emit-aot-owner-shards")
