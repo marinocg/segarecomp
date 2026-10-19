@@ -1,7 +1,8 @@
 # ADR 0158: SEG-074-T002 generated-C factoring, block compilation efficiency and decision
 
-- Status: Accepted. **Decision: `G2_COMBINED_OPTIMIZATION_ACCEPTED`, as two opt-in switches that stay off by default** (section 5). Section 1 (pre-registration) was frozen: committed and pushed before any emitter change. Sections 2 onward (results and the
-  final decision) are appended in later commits; section 1 is not edited afterwards except for typos that do not change meaning.
+- Status: Accepted. **Decision: `G2_COMBINED_OPTIMIZATION_ACCEPTED`, as two opt-in switches that stay off by default** (section 5).
+  Section 1 (pre-registration) was frozen: committed and pushed before any emitter change; sections 2-6 (results and decision) were appended
+  afterwards and section 1 was not edited.
 - Task: SEG-074-T002, the single consolidated implementation issue after full refinement (ADR 0157 selected **G2**). One product branch, one PR.
 - Scope: generated-C representation and compilation efficiency of the existing Genesis M68K generated-native path. No change to admission,
   the ML model/weights/budgets, the validator, discovery semantics, the runtime, Sega CD BIOS materialization, or the user-facing defaults
