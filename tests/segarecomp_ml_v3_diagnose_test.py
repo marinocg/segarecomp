@@ -107,7 +107,9 @@ class BundleResolution(unittest.TestCase):
         roots = dg.Bundle(b).original_roots()
         self.assertEqual(roots, ["/orig/.cache/seg048", "/orig/.cache/seg049", "/orig/.cache/seg072"])
         opened = ["/orig/.cache/seg072/data/d09/meta.json", "/orig/.cache/seg072-handoff/payload/x", "/orig/.cache/seg049/venv/lib/x.py"]
-        self.assertEqual(dg.forbidden_opens(opened, roots, allow=["/orig/.cache/seg049/venv"]), ["/orig/.cache/seg072/data/d09/meta.json"])
+        self.assertEqual(dg.forbidden_opens(opened, roots, allow=["/orig/.cache/seg049/venv"]), [dg._norm("/orig/.cache/seg072/data/d09/meta.json")])
+        self.assertTrue(dg._under("/orig/.cache/seg072", "/orig/.cache/seg072/"))
+        self.assertFalse(dg._under("/orig/.cache/seg072-handoff/x", "/orig/.cache/seg072"))
 
     def test_parse_rebase(self):
         self.assertEqual(dg.parse_rebase(["/a=/b"]), {"/a": "/b"})

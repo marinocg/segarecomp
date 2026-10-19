@@ -156,18 +156,23 @@ class Bundle:
         return sorted(roots)
 
 
-def _under(path: str, root: str) -> bool:
-    return path == root.rstrip("/") or path.startswith(root.rstrip("/") + "/")
+def _norm(path) -> str:
+    """Platform-normalized absolute path (drive, separators and case on Windows) so prefix checks compare like with like."""
+    return os.path.normcase(os.path.abspath(os.fsdecode(path)))
+
+
+def _under(path, root) -> bool:
+    p, r = _norm(path), _norm(root).rstrip(os.sep)
+    return p == r or p.startswith(r + os.sep)
 
 
 def forbidden_opens(paths, roots, allow=()) -> list[str]:
-    """Opened paths that fall inside any forbidden root (directory-prefix semantics), except those under an allowed root (the running
-    interpreter's own environment, which is software, not a research artifact)."""
+    """Opened paths (platform-normalized) that fall inside any forbidden root (directory-prefix semantics), except those under an allowed
+    root (the running interpreter's own environment, which is software, not a research artifact)."""
     out = []
     for p in paths:
-        s = os.path.abspath(str(p))
-        if any(_under(s, r) for r in roots) and not any(_under(s, a) for a in allow):
-            out.append(s)
+        if any(_under(p, r) for r in roots) and not any(_under(p, a) for a in allow):
+            out.append(_norm(p))
     return sorted(set(out))
 
 
