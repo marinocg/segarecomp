@@ -256,12 +256,12 @@ def m4_window(np, im, start, central):
     idx = np.arange(start - m, start + central + m)
     ok = (idx >= 0) & (idx < n)
     cl = np.clip(idx, 0, max(0, n - 1))
-    hi = np.where(ok, im.hi[cl], 256)
-    lo = np.where(ok, im.lo[cl], 256)
-    tok = np.where(ok[:, None], im.tokens[cl], np.array([TOKEN_CARD[f] for f in TOKEN_FIELDS], dtype=np.int64)[None, :])
+    hi = np.where(ok, im.hi[cl].astype(np.int64), 256)
+    lo = np.where(ok, im.lo[cl].astype(np.int64), 256)
+    tok = np.where(ok[:, None], im.tokens[cl].astype(np.int64), np.array([TOKEN_CARD[f] for f in TOKEN_FIELDS], dtype=np.int64)[None, :])
     cidx = np.arange(start, start + central)
     cok = (cidx >= 0) & (cidx < n)
-    y = np.where(cok, im.wlabels[np.clip(cidx, 0, max(0, n - 1))], -1)
+    y = np.where(cok, im.wlabels[np.clip(cidx, 0, max(0, n - 1))].astype(np.int64), -1)
     return hi.astype(np.int64), lo.astype(np.int64), tok.astype(np.int64), y.astype(np.int64)
 
 
@@ -449,6 +449,97 @@ def cmd_bench(a) -> int:
     return 0
 
 
+class ExternalImage(Image):
+    """An image outside the development registry (used ONLY by the one-shot sealed evaluation after the freeze)."""
+
+    def __init__(self, image_path, tokens_path, classes_path, seeds, iid, lineage):
+        np = np_()
+        self.id, self.lineage, self.kind = iid, lineage, "genesis_rom"
+        self.rom = pathlib.Path(image_path).read_bytes()
+        self.size = len(self.rom)
+        self.classes = pathlib.Path(classes_path).read_bytes()
+        self.n_words = self.size // 2
+        self.tokens = np.frombuffer(pathlib.Path(tokens_path).read_bytes(), dtype=np.uint8).reshape(self.n_words, len(TOKEN_FIELDS))
+        arr = np.frombuffer(self.rom[:self.n_words * 2], dtype=np.uint8).reshape(self.n_words, 2)
+        self.hi, self.lo = arr[:, 0], arr[:, 1]
+        self.labels = np.array(v3.cell_labels(self.classes), dtype=np.int8)
+        self.n_cells = len(self.labels)
+        self.wlabels = np.array(v3.word_labels(self.classes), dtype=np.int8)
+        self.seeds = set(seeds)
+        self.starts = v3.starts_of(self.classes)
+        self._padded = None
+
+
+FINAL = ROOT / "final"
+
+
+def cmd_fit_final(a) -> int:
+    """Refit the selected configuration on ALL qualified development lineages (same recipe/seeds) and persist private weights + digest."""
+    import hashlib
+    import torch
+    v3.verify_plan()
+    imgs = load_images(qualified_lineages())
+    FINAL.mkdir(parents=True, exist_ok=True)
+    digests = {}
+    if a.model == "M3R":
+        model = train_m3r(imgs, lambda m: print(f"[final M3R] {m}", flush=True))
+        path = FINAL / "M3R.pt"
+        torch.save(model.state_dict(), path)
+        digests["M3R"] = hashlib.sha256(b"".join(t.detach().numpy().tobytes() for t in model.state_dict().values())).hexdigest()
+    elif a.model == "M4":
+        torch.set_num_threads(M4["threads"])
+        torch.use_deterministic_algorithms(True)
+        for seed in M4["seeds"]:
+            model = fit_m4(imgs, seed, torch.device("cpu"), log=lambda m: print(f"[final M4 s{seed}] {m}", flush=True))
+            path = FINAL / f"M4.s{seed}.pt"
+            torch.save(model.state_dict(), path)
+            digests[f"M4.s{seed}"] = hashlib.sha256(b"".join(t.detach().numpy().tobytes() for t in model.state_dict().values())).hexdigest()
+    elif a.model == "M1":
+        import pickle
+        clf = fit_m1(imgs)
+        path = FINAL / "M1.pkl"
+        path.write_bytes(pickle.dumps(clf))
+        digests["M1"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    else:
+        raise SystemExit("unknown model")
+    (FINAL / f"{a.model}.digests.json").write_text(json.dumps(digests, indent=1, sort_keys=True))
+    print(json.dumps(digests))
+    return 0
+
+
+def final_scorer(configuration: str):
+    """Returns f(image) -> (cell scores, cell bytes) for the frozen configuration's final (all-development) model."""
+    import torch
+    np = np_()
+    if configuration == "M3_FROZEN":
+        model = frozen_m3_model()
+        return lambda im: (score_m3(model, im), 128)
+    if configuration == "M3_R":
+        import segarecomp_ml_region_gen2_train as tr
+        model = tr.build_model(True)
+        model.load_state_dict(torch.load(FINAL / "M3R.pt"))
+        model.eval()
+        return lambda im: (score_m3(model, im), 128)
+    if configuration == "M1_HGB":
+        import pickle
+        clf = pickle.loads((FINAL / "M1.pkl").read_bytes())
+        return lambda im: (score_m1(clf, im), 128)
+    if configuration.startswith("M4_DENSE"):
+        cell = int(configuration.split("@")[1])
+        models = []
+        for seed in M4["seeds"]:
+            m = build_m4(torch)
+            m.load_state_dict(torch.load(FINAL / f"M4.s{seed}.pt"))
+            m.eval()
+            models.append(m)
+
+        def f(im):
+            wl = np.mean([infer_m4(m, im) for m in models], axis=0).astype(np.float32)
+            return cell_max(wl, im.size, cell), cell
+        return f
+    raise SystemExit("unknown configuration")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -461,6 +552,9 @@ def main() -> int:
     k.add_argument("--seed", type=int, default=1)
     k.add_argument("--device", default="cpu")
     k.set_defaults(func=cmd_fit_fold)
+    ff = sub.add_parser("fit-final")
+    ff.add_argument("--model", required=True, choices=["M3R", "M1", "M4"])
+    ff.set_defaults(func=cmd_fit_final)
     b = sub.add_parser("bench")
     b.add_argument("--device", default="cpu")
     b.add_argument("--threads", type=int, default=2)

@@ -389,6 +389,128 @@ def cmd_econ(a) -> int:
     return 0
 
 
+SEALED_PATHS = {  # private inputs of the qualified sealed entries (identities are verified against the committed manifest)
+    "E01": ("games/Alien Soldier (Japan).md", "sealed/truth/e01.1.cls"), "E03": ("games/Kid Chameleon (JUE) [!].bin", "sealed/truth/e03.1.cls"),
+    "E05": ("games/Sonic Spinball (USA).md", "sealed/truth/e05.1.cls"), "E06": ("@sealed/hb/e06/inst/out/rom.bin", "sealed/truth/e06.cls"),
+    "E07": ("@sealed/hb/e07/inst/out/rom.bin", "sealed/truth/e07.cls")}
+GAMES = pathlib.Path(os.environ.get("SEG072_GAMES", "/root/dev/segarecomp-harness/segarecomp/games"))
+
+
+def evaluate_external(im, scorer, policy, margin, seeds_addr, tokens_path, broad_aot) -> dict:
+    """Per-image sealed metrics (shared by the one-shot sealed run and its development rehearsal)."""
+    import time
+    image_bytes = im.rom
+    t0 = time.process_time()
+    scores, cell = scorer(im)
+    infer_cpu = time.process_time() - t0
+    scores2, _ = scorer(im)
+    deterministic = hashlib.sha256(scores.tobytes()).hexdigest() == hashlib.sha256(scores2.tobytes()).hexdigest()
+    s = [float(x) for x in scores]
+    probs = [sigmoid(x) for x in s]
+    cls = im.classes
+    labels = v3.cell_labels(cls, cell)
+    starts = v3.starts_of(cls)
+    seeds = {x // cell for x in seeds_addr if 0 <= x < len(image_bytes)}
+    r = v3.policy_region(policy, s, probs, seeds, margin)
+    region = r["region"]
+    rbytes = sum(min((c + 1) * cell, len(image_bytes)) - c * cell for c in region)
+    tok = np_().frombuffer(pathlib.Path(tokens_path).read_bytes(), dtype=np_().uint8).reshape(-1, 8)
+    fa = 0
+    for c in region:
+        for off in range(c * cell, min((c + 1) * cell, len(image_bytes)) - 1, 2):
+            if cls[off] not in (ord("U"), ord("I")) and tok[off // 2, 0] == 2:
+                fa += 1
+    return {"qualification": "QUALIFIED", "starts_labelled": len(starts), "starts_missed": v3.misses(starts, region, cell), "retained": rbytes / len(image_bytes),
+            "abstained": r["abstained"], "budget": r["budget"], "frf": v3.frf(s, labels)["frf"], "residual_frf": v3.residual_frf(s, labels, seeds),
+            "false_admission_candidates": fa, "inference_cpu_seconds": infer_cpu, "deterministic": deterministic, "broad_aot": broad_aot,
+            "_region": sorted(region), "_cell": cell}
+
+
+def cmd_rehearse(a) -> int:
+    """Dry run of the sealed per-image code on DEVELOPMENT images with a given configuration (no marker, no sealed data)."""
+    import segarecomp_ml_v3_train as tr
+    reg = registry()
+    scorer = tr.final_scorer(a.config) if a.config == "M3_FROZEN" or (tr.FINAL / "M3R.pt").exists() else None
+    if scorer is None:
+        raise SystemExit("no final model available for this configuration")
+    for iid in a.images:
+        m = reg[iid]
+        im = tr.Image(pathlib.Path(m["dir"]))
+        row = evaluate_external(im, scorer, a.policy, a.margin, seed_addresses(m), pathlib.Path(m["dir"]) / "tokens.bin", m.get("broad_aot"))
+        print(iid, json.dumps(public(row)))
+    return 0
+
+
+def cmd_sealed(a) -> int:
+    """ONE-SHOT sealed evaluation of the committed frozen configuration and policy (ADR 0151 `sealed`)."""
+    import time
+    import segarecomp_ml_v3_train as tr
+    v3.verify_plan()
+    rec = v3.unseal_once(ROOT / "sealed" / "UNSEALED.marker.json")  # refuses without the committed frozen record, or a second time
+    config, policy, margin = rec["configuration"], rec["policy"], rec.get("adaptive_margin")
+    manifest = json.loads((HERE / "segarecomp_ml_v3.corpus_manifest.json").read_text())["sealed"]
+    scorer = tr.final_scorer(config)
+    out = {}
+    for e in manifest["entries"]:
+        L = e["lineage"]
+        if e["qualification"] != "QUALIFIED":
+            out[L] = {"qualification": "UNQUALIFIED"}
+            continue
+        img_rel, cls_rel = SEALED_PATHS[L]
+        img = (ROOT / img_rel[1:]) if img_rel.startswith("@") else GAMES / img_rel.split("/", 1)[1]
+        cls_path = ROOT / cls_rel
+        data = ROOT / "sealed" / "data" / L.lower()
+        image_bytes = img.read_bytes()
+        if hashlib.sha256(image_bytes).hexdigest() != e["image_sha256"] or hashlib.sha256(cls_path.read_bytes()).hexdigest() != e["opaque_classes_sha256"]:
+            raise SystemExit(f"{L}: sealed identity mismatch")
+        seeds_addr = [int(t, 16) for t in (data / "d.txt").read_text().split()] if (data / "d.txt").exists() else []
+        im = tr.ExternalImage(img, data / "tokens.bin", cls_path, [x // 128 for x in seeds_addr if x < len(image_bytes)], L, L)
+        row = evaluate_external(im, scorer, policy, margin, seeds_addr, data / "tokens.bin", e["broad_aot"])
+        out[L] = row
+        print(L, json.dumps(public(row)), flush=True)
+    priv = {"frozen": rec, "lineages": out}
+    (RESULTS / "sealed.private.json").write_text(json.dumps(priv))
+    pub = {"configuration": config, "policy": policy, "lineages": public(out),
+           "zero_miss_gate": all(v.get("starts_missed", 0) == 0 for v in out.values() if v.get("qualification") == "QUALIFIED"),
+           "qualified": sum(1 for v in out.values() if v.get("qualification") == "QUALIFIED")}
+    (RESULTS / "sealed.json").write_text(json.dumps(pub, indent=1, sort_keys=True))
+    print(json.dumps({k: v for k, v in pub.items() if k != "lineages"}))
+    return 0
+
+
+def cmd_freeze(a) -> int:
+    """Write tools/segarecomp_ml_v3.frozen.json from the development selection (before any sealed truth is opened)."""
+    import platform
+    v3.verify_plan()
+    sel = json.loads((RESULTS / "selection.json").read_text())
+    config, policy = sel["selected"].split("+")
+    res = json.loads((RESULTS / f"table.{config}.json").read_text())
+    margin = None
+    if policy == "ADAPT":
+        margin = v3.fit_adaptive_margin([(r["residual_frf"], r["density_e"]) for r in res["records"]])
+    final = ROOT / "final"
+    if config == "M3_FROZEN":
+        weights = {"production_model_sha256": hashlib.sha256((HERE / "segarecomp_ml_region_gen2.model.json").read_bytes()).hexdigest()}
+    else:
+        model = {"M3_R": "M3R", "M1_HGB": "M1"}.get(config, "M4")
+        weights = json.loads((final / f"{model}.digests.json").read_text())
+    hw = json.loads((RESULTS / "hardware.json").read_text())
+    import numpy
+    import sklearn
+    import torch
+    rec = {"status": "FROZEN", "plan_sha256": v3.DIGEST_PATH.read_text().strip(), "configuration": config, "policy": policy, "adaptive_margin": margin,
+           "selection_rule": sel["rule"], "incumbent_retained": sel["incumbent_retained"],
+           "selection_table_sha256": hashlib.sha256(json.dumps(sel["table"], sort_keys=True).encode()).hexdigest(),
+           "final_weights": weights, "training_backend": {"selected": hw["selected"], "improvement_estimate": hw["improvement"], "rule": hw["rule"]},
+           "environment": {"python": platform.python_version(), "numpy": numpy.__version__, "scikit_learn": sklearn.__version__,
+                           "torch": torch.__version__, "device": "cpu", "precision": "float32", "deterministic_algorithms": True,
+                           "threads": {"M3_R": 4, "M4_DENSE": 2, "M3_FROZEN": "n/a (inference only)"}},
+           "sealed_store": "private sealed/; opened once by `segarecomp_ml_v3_eval.py sealed` after this record is committed"}
+    v3.FROZEN_PATH.write_text(json.dumps(rec, indent=1, sort_keys=True) + "\n")
+    print(json.dumps(rec, sort_keys=True))
+    return 0
+
+
 def cmd_select(a) -> int:
     v3.verify_plan()
     table = {}
@@ -430,6 +552,16 @@ def main() -> int:
     e.add_argument("--frames", type=int, default=120)
     e.add_argument("--work", required=True)
     e.set_defaults(func=cmd_econ)
+    fz = sub.add_parser("freeze")
+    fz.set_defaults(func=cmd_freeze)
+    rh = sub.add_parser("rehearse")
+    rh.add_argument("--config", required=True)
+    rh.add_argument("--policy", required=True)
+    rh.add_argument("--margin", type=float)
+    rh.add_argument("--images", nargs="+", required=True)
+    rh.set_defaults(func=cmd_rehearse)
+    se = sub.add_parser("sealed")
+    se.set_defaults(func=cmd_sealed)
     d = sub.add_parser("diagnose")
     d.add_argument("--config", required=True)
     d.add_argument("--policy", required=True)

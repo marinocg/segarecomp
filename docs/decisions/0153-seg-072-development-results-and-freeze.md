@@ -89,3 +89,50 @@ FRF. Neural confidence did not bound full recall.
 **T004 classification: adaptive budgets are not justified for frozen M3** (ADAPT is neither complete nor cheaper than fixed budgets that miss
 the same fragment, and its abstentions retain ~95%). No fixed budget is complete either; the smallest fixed budget that would cover every
 development image is 0.95 (descriptive only - not a policy). The ADAPT definition is reused unchanged for every T005 candidate.
+
+## T005 - training backend, candidate comparison and freeze
+
+### Training backend (pre-registered benchmark)
+
+Final M4-Dense architecture (52,901 parameters per network) and batch, all 50 development images, warm-up 50 steps + a 500-step epoch, 3
+repeats. CPU: the actual farm (8 concurrent 2-thread processes): median 217 ms/step per process (194-241; one probe digest across all 24 runs).
+ROCm (PyTorch 2.6.0+rocm6.4.2, Radeon RX 9070 XT `gfx1201`, WSL2; the PyTorch 2.13+rocm7.2 environment sees no device): median 30 ms/step
+(24-30), peak 41 MB VRAM, the three repeats reproduce identical outputs. Data loading ~1 ms per batch on both. Estimated M4-Dense
+cross-validation (33 fits x 4000 steps): CPU farm 4,344 s vs ROCm (one GPU process) 3,958 s - **8.9% improvement < 25%: parallel CPU
+selected**. Frozen environment: Python 3.13.14, numpy 2.5.3, scikit-learn 1.9.1, torch 2.14.1 CPU, float32,
+`torch.use_deterministic_algorithms(True)`, threads M3-R 4 / M4-Dense 2. Every candidate was trained on the same backend.
+
+### Development comparison (11 lineages, 50 images, leave-one-lineage-out)
+
+Missed labelled starts / mean retained fraction (lineage mean; seeds and integer rounding included). Worst-lineage FRF is 1.0 for every
+configuration (all-positive tiny Sonic CD modules), so it never separates candidates.
+
+| configuration | B35 | B45 | B50 | B60 | ADAPT |
+|---|---|---|---|---|---|
+| M3_FROZEN | 8,066 / 0.357 | 637 / 0.456 | 2 / 0.505 | 2 / 0.604 | 2 / 0.947 |
+| M1-HGB | 7,929 / 0.357 | 537 / 0.456 | 1 / 0.505 | 1 / 0.604 | 1 / 0.949 |
+| **M3-R** | 8,121 / 0.357 | 435 / 0.456 | **0 / 0.505** | 0 / 0.604 | 32 / 0.585 |
+| M4-Dense@128 | 5,603 / 0.357 | 511 / 0.456 | 2 / 0.505 | 1 / 0.604 | 7 / 0.923 |
+| M4-Dense@64 | 5,530 / 0.357 | 460 / 0.455 | **0 / 0.505** | 0 / 0.604 | 69 / 0.870 |
+
+Complete pairs: M3-R + B50/B60 and M4-Dense@64 + B50/B60. Structural closure (unchanged prune + validator, 11 broad-accepted Genesis images):
+all accepted with C outside K = 0 for M3-R B50 (mean K/U 0.437), M3-R B60 (0.514), M4-Dense@64 B50 (0.475), B60 (0.562); D07 is now accepted
+(rejected under M3_FROZEN B35). At B35 every model misses D07's dense code (density/budget failure: 194-248 missed cells, coverage ~0.96);
+M3-R/M4-Dense remove the Sonic CD fragment that defeats M3_FROZEN and M1-HGB at B50/B60 (D01 residual FRF 0.443-0.448 vs 0.949/0.815);
+M4-Dense@128 and @64 are weakest on Shining Force (D03 max FRF 0.608 / 0.477). ADAPT is never complete: with expanded-corpus models the
+density estimate under-predicts the residual tail on D03 (M3-R 32 misses) while abstaining on most homebrew.
+
+### Selection (frozen rule)
+
+1 complete: {M3-R+B50, M3-R+B60, M4-Dense@64+B50, M4-Dense@64+B60}; 2 worst-lineage FRF: all 1.0 (tie); 3 mean retained: tie set {M3-R+B50
+(0.5048), M4-Dense@64+B50 (0.5047)}; 4 mean K/U: M3-R 0.437 vs M4-Dense 0.475 (> 0.02 apart) -> **M3-R + B50**. Incumbent check: M3_FROZEN+B35
+is incomplete (8,066 misses), so the complete alternative replaces it (rule `selection_order`, not `incumbent_retained`).
+
+### Freeze
+
+`tools/segarecomp_ml_v3.frozen.json` (committed in this checkpoint, before any sealed truth is opened): configuration **M3-R**, policy **B50**,
+no adaptive margin; final refit on all 11 development lineages with the unchanged M3 recipe (seed 49, 30 epochs, 4 threads, 574 s); weights digest
+`20bfa46f0ec2e4278d75fb5880381f55f58fe204a23577dfabcd5d60b5f6f005`, reproduced bit for bit by a second independent refit; CPU backend and
+the environment above; the selection-table digest binds the development evidence. From this commit on no model, policy, threshold, rounding,
+seed or label rule may change; the sealed corpus is opened once by `segarecomp_ml_v3_eval.py sealed` (marker written before any sealed truth is
+read).

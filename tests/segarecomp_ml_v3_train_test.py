@@ -34,6 +34,32 @@ class Eval(unittest.TestCase):
         self.assertEqual(agg["D01"]["max_frf"], 0.3)
 
 
+@unittest.skipUnless(HAVE_TORCH and importlib.util.find_spec("sklearn") is not None, "private research environment only")
+class FreezeHandoff(unittest.TestCase):
+    def test_frozen_record_has_every_key_the_sealed_gate_needs(self):
+        import json
+        import pathlib
+        import tempfile
+        import segarecomp_ml_v3 as v3
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "results").mkdir()
+            (root / "results" / "selection.json").write_text(json.dumps({"selected": "M3_FROZEN+B50", "rule": "selection_order", "incumbent_retained": False,
+                                                                          "table": {}}))
+            (root / "results" / "table.M3_FROZEN.json").write_text(json.dumps({"records": [{"residual_frf": 0.2, "density_e": 0.1}]}))
+            (root / "results" / "hardware.json").write_text(json.dumps({"selected": "CPU", "improvement": 0.09, "rule": ">= 25%"}))
+            old = (ev.RESULTS, ev.ROOT, v3.FROZEN_PATH)
+            ev.RESULTS, ev.ROOT, v3.FROZEN_PATH = root / "results", root, root / "frozen.json"
+            try:
+                ev.cmd_freeze(None)
+                rec = json.loads((root / "frozen.json").read_text())
+            finally:
+                ev.RESULTS, ev.ROOT, v3.FROZEN_PATH = old
+        for key in ("configuration", "policy", "environment", "plan_sha256", "status"):
+            self.assertIn(key, rec)
+        self.assertEqual((rec["status"], rec["configuration"], rec["policy"]), ("FROZEN", "M3_FROZEN", "B50"))
+
+
 @unittest.skipUnless(HAVE_TORCH, "numpy/torch not installed (private research environment)")
 class Dense(unittest.TestCase):
     def test_cell_max(self):
