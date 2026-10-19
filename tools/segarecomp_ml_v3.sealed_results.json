@@ -162,6 +162,251 @@
    }
   }
  },
+ "posthoc_m4_dense_user_requested": {
+  "note": "descriptive only, after the decision; does not change RECALL_FAILED",
+  "results": {
+   "M4_DENSE@128+B35+E01": {
+    "frf": 0.1827392578125,
+    "retained": 0.35003662109375,
+    "starts_labelled": 72444,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B35+E03": {
+    "frf": 0.1312255859375,
+    "retained": 0.35009765625,
+    "starts_labelled": 33508,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B35+E05": {
+    "frf": 0.9840087890625,
+    "retained": 0.35009765625,
+    "starts_labelled": 49140,
+    "starts_missed": 171
+   },
+   "M4_DENSE@128+B35+E06": {
+    "frf": 0.3173828125,
+    "retained": 0.3505859375,
+    "starts_labelled": 2784,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B35+E07": {
+    "frf": 0.1222873263888889,
+    "retained": 0.3500434027777778,
+    "starts_labelled": 24952,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B45+E01": {
+    "frf": 0.1827392578125,
+    "retained": 0.45001220703125,
+    "starts_labelled": 72444,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B45+E03": {
+    "frf": 0.1312255859375,
+    "retained": 0.4500732421875,
+    "starts_labelled": 33508,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B45+E05": {
+    "frf": 0.9840087890625,
+    "retained": 0.4500732421875,
+    "starts_labelled": 49140,
+    "starts_missed": 171
+   },
+   "M4_DENSE@128+B45+E06": {
+    "frf": 0.3173828125,
+    "retained": 0.4501953125,
+    "starts_labelled": 2784,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B45+E07": {
+    "frf": 0.1222873263888889,
+    "retained": 0.4500868055555556,
+    "starts_labelled": 24952,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B50+E01": {
+    "frf": 0.1827392578125,
+    "retained": 0.5,
+    "starts_labelled": 72444,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B50+E03": {
+    "frf": 0.1312255859375,
+    "retained": 0.5,
+    "starts_labelled": 33508,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B50+E05": {
+    "frf": 0.9840087890625,
+    "retained": 0.5,
+    "starts_labelled": 49140,
+    "starts_missed": 134
+   },
+   "M4_DENSE@128+B50+E06": {
+    "frf": 0.3173828125,
+    "retained": 0.5,
+    "starts_labelled": 2784,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B50+E07": {
+    "frf": 0.1222873263888889,
+    "retained": 0.5,
+    "starts_labelled": 24952,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B60+E01": {
+    "frf": 0.1827392578125,
+    "retained": 0.60003662109375,
+    "starts_labelled": 72444,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B60+E03": {
+    "frf": 0.1312255859375,
+    "retained": 0.60009765625,
+    "starts_labelled": 33508,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B60+E05": {
+    "frf": 0.9840087890625,
+    "retained": 0.60009765625,
+    "starts_labelled": 49140,
+    "starts_missed": 134
+   },
+   "M4_DENSE@128+B60+E06": {
+    "frf": 0.3173828125,
+    "retained": 0.6005859375,
+    "starts_labelled": 2784,
+    "starts_missed": 0
+   },
+   "M4_DENSE@128+B60+E07": {
+    "frf": 0.1222873263888889,
+    "retained": 0.6000434027777778,
+    "starts_labelled": 24952,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B35+E01": {
+    "frf": 0.1748046875,
+    "retained": 0.350006103515625,
+    "starts_labelled": 72444,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B35+E03": {
+    "frf": 0.12640380859375,
+    "retained": 0.35003662109375,
+    "starts_labelled": 33508,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B35+E05": {
+    "frf": 0.97454833984375,
+    "retained": 0.35003662109375,
+    "starts_labelled": 49140,
+    "starts_missed": 171
+   },
+   "M4_DENSE@64+B35+E06": {
+    "frf": 0.31787109375,
+    "retained": 0.35009765625,
+    "starts_labelled": 2784,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B35+E07": {
+    "frf": 0.12223307291666667,
+    "retained": 0.3500434027777778,
+    "starts_labelled": 24952,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B45+E01": {
+    "frf": 0.1748046875,
+    "retained": 0.45001220703125,
+    "starts_labelled": 72444,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B45+E03": {
+    "frf": 0.12640380859375,
+    "retained": 0.45001220703125,
+    "starts_labelled": 33508,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B45+E05": {
+    "frf": 0.97454833984375,
+    "retained": 0.45001220703125,
+    "starts_labelled": 49140,
+    "starts_missed": 143
+   },
+   "M4_DENSE@64+B45+E06": {
+    "frf": 0.31787109375,
+    "retained": 0.4501953125,
+    "starts_labelled": 2784,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B45+E07": {
+    "frf": 0.12223307291666667,
+    "retained": 0.4500325520833333,
+    "starts_labelled": 24952,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B50+E01": {
+    "frf": 0.1748046875,
+    "retained": 0.5,
+    "starts_labelled": 72444,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B50+E03": {
+    "frf": 0.12640380859375,
+    "retained": 0.5,
+    "starts_labelled": 33508,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B50+E05": {
+    "frf": 0.97454833984375,
+    "retained": 0.5,
+    "starts_labelled": 49140,
+    "starts_missed": 134
+   },
+   "M4_DENSE@64+B50+E06": {
+    "frf": 0.31787109375,
+    "retained": 0.5,
+    "starts_labelled": 2784,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B50+E07": {
+    "frf": 0.12223307291666667,
+    "retained": 0.5,
+    "starts_labelled": 24952,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B60+E01": {
+    "frf": 0.1748046875,
+    "retained": 0.600006103515625,
+    "starts_labelled": 72444,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B60+E03": {
+    "frf": 0.12640380859375,
+    "retained": 0.60003662109375,
+    "starts_labelled": 33508,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B60+E05": {
+    "frf": 0.97454833984375,
+    "retained": 0.60003662109375,
+    "starts_labelled": 49140,
+    "starts_missed": 134
+   },
+   "M4_DENSE@64+B60+E06": {
+    "frf": 0.31787109375,
+    "retained": 0.60009765625,
+    "starts_labelled": 2784,
+    "starts_missed": 0
+   },
+   "M4_DENSE@64+B60+E07": {
+    "frf": 0.12223307291666667,
+    "retained": 0.6000434027777778,
+    "starts_labelled": 24952,
+    "starts_missed": 0
+   }
+  }
+ },
  "schema": "segarecomp.ml_v3_sealed_results.v1",
  "sealed": {
   "configuration": "M3_R",

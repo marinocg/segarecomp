@@ -113,3 +113,23 @@ Local gate on `5ec7a43` (unchanged code since; this commit is docs-only): `agent
 `segarecomp_ml_v3|segarecomp_source_map_extract|segarecomp_ml_region` (all inside the fast preset). Full/extended gates are CI's.
 
 **Final classification confirmed: `RECALL_FAILED`.**
+
+## Post-hoc addendum: M4-Dense on the sealed games (user-requested, after the decision)
+
+Requested by the user after the one-shot run and the T007 review. **Descriptive only; it does not change the frozen classification
+(`RECALL_FAILED`) or any frozen artifact.** The M4-Dense final ensemble (seeds 1-3, refitted on all 11 development lineages with the unchanged
+recipe; weight digests `2ccb4fee…`, `ed8a54c8…`, `0a0c0309…`) was scored on the five qualified sealed images using the same per-image metric
+code as the sealed run (`evaluate_external`); the one-shot marker and frozen record were not touched. Labelled starts missed (FRF in brackets):
+
+| sealed lineage | M3-R + B50 (frozen) | M4-Dense@64 B35 / B45 / B50 / B60 | M4-Dense@128 B35 / B45 / B50 / B60 |
+|---|---|---|---|
+| E01 Alien Soldier | 0 (0.151) | 0 / 0 / 0 / 0 (0.175) | 0 / 0 / 0 / 0 (0.183) |
+| E03 Kid Chameleon | 0 (0.130) | 0 / 0 / 0 / 0 (0.126) | 0 / 0 / 0 / 0 (0.131) |
+| E05 Sonic Spinball | **40** (0.748) | **171 / 143 / 134 / 134** (0.975) | **171 / 171 / 134 / 134** (0.984) |
+| E06 Tank Battle | 0 (0.343) | 0 / 0 / 0 / 0 (0.318) | 0 / 0 / 0 / 0 (0.317) |
+| E07 The Weave | 0 (0.125) | 0 / 0 / 0 / 0 (0.122) | 0 / 0 / 0 / 0 (0.122) |
+
+Reading: M4-Dense would also have failed the zero-miss gate, more severely than the frozen M3-R (full recall on Spinball would need ~98% of
+the image versus ~75%); on the other four lineages it is marginally better (complete even at B35). This is consistent with the development-based
+choice of the simpler M3-R. The other candidates (frozen M3 recall, M1-HGB) were not evaluated on the sealed games. Same E05 label caveat (IDA-derived
+rows) applies to both models.
