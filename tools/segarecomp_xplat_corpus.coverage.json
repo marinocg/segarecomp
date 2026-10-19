@@ -1,6 +1,6 @@
 {
  "adr": "0160",
- "corpus_manifest_sha256": "cc2a49188fef970050175a66533ba9e15d5cb92e55fc09d12fdb666d1728126e",
+ "corpus_manifest_sha256": "d2956dbf3eb11e000bc8fb4fb83b98d548488469b6b0adb912363691c00accb5",
  "excluded_units": {
   "HelloAmi": "HelloAmi.adf/BootWB1x.adf: disk-image containers that embed the other units (duplicated content)"
  },

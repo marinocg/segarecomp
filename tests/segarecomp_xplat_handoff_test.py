@@ -308,6 +308,16 @@ def struct_pack_prg(t, d, b, s):
     return struct.pack(">IIIIIIH", t, d, b, s, 0, 0, 0)
 
 
+def test_truth_listing_resolution():
+    es = [h.entry("seg075/q/build/toslibc#assembler-listings", "t002.truth_listing", True, "REPRODUCIBLE_BUT_NOT_PRESERVED", None),
+          h.entry("seg075/q/build/emutos#assembler-listings", "t002.truth_listing", True, "REPRODUCIBLE_BUT_NOT_PRESERVED", None),
+          h.entry("seg075/t002/truth/toslibc/lib+examples/lib/a.o.lst", "t002.truth", True, "PRESENT_AND_VERIFIED", "baseline", None, "1" * 64, 3)]
+    h.resolve_truth_listings(es)
+    check(es[0]["status"] == "PRESENT_AND_VERIFIED" and es[0]["listings"] == 1 and len(es[0]["listings_sha256"]) == 64,
+          "a program with preserved listings is resolved with count and digest")
+    check(es[1]["status"] == "REPRODUCIBLE_BUT_NOT_PRESERVED", "a program without listings in the snapshot stays unresolved")
+
+
 def test_audit_control():
     with tempfile.TemporaryDirectory() as td:
         td = pathlib.Path(td)
@@ -358,7 +368,7 @@ def test_receipt_is_sanitized():
 
 
 def main():
-    for t in (test_classify, test_store_and_verify, test_symlinks, test_audit_builds_and_sources, test_cross_run, test_record_code_basis, test_audit_control, test_add_refuses_worktree,
+    for t in (test_classify, test_store_and_verify, test_symlinks, test_audit_builds_and_sources, test_cross_run, test_record_code_basis, test_truth_listing_resolution, test_audit_control, test_add_refuses_worktree,
               test_receipt_is_sanitized):
         t()
     if FAILURES:

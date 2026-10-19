@@ -312,6 +312,58 @@ def test_end_to_end(cli: str | None):
     check(out[0] == out[1], "extraction is deterministic (classes, tokens, typed counts)")
 
 
+def test_review_rules():
+    # ROM load address from the link map's output .text section
+    m = "Memory Configuration\n\n.text           0x0000000000fa0000    0x1f894\n .text          0x0000000000fa0000      0x158 obj/startup.o\n"
+    check(xc.map_text_base(m) == 0xFA0000, "ROM base read from the link map")
+    check(raises(xc.map_text_base, "no sections\n"), "a map without .text is rejected")
+    rom = bytearray(64)
+    rom[4:8] = (0xFA0010).to_bytes(4, "big")
+    check(xc.rom_entry(bytes(rom), 0xFA0000) == 0x10 and xc.rom_entry(bytes(rom), 0xFC0000) is None, "reset vector -> image offset")
+    # GNU as: a data directive with operands but no listed bytes is byte lag
+    lag = ("   1               \t\t.text\n   2 0000 4E75      \t\trts\n   3 0002           \t\t.long 5\n   4 0002 0000 0005 \t\tnop\n")
+    t5 = xc.Typed()
+    check(xc.section_labels(rows_of(lag, "gas"), bytes.fromhex("4E7500000005"), bytearray(6), "gas", t5, "s") is None
+          and t5.counts.get("LISTING_BYTE_LAG"), "data row without listed bytes rejects the section")
+    nolag = "   1               \t\t.text\n   2 0000 4E75      \t\trts\n   3 0002           \t\t.zero 0\n"
+    check(xc.section_labels(rows_of(nolag, "gas"), bytes.fromhex("4E75"), bytearray(2), "gas", xc.Typed(), "s") is not None,
+          "a zero-size data directive is not lag")
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        # relist selection: the scrubbed re-assembly's listing is used only when its object is byte-identical
+        obj = b"\x7fELF\x01\x02\x01" + b"\0" * 11 + b"\x00\x04" + b"\0" * 40
+        for name, relist in (("same.o", obj), ("diff.o", obj[:-1] + b"\x01")):
+            (td / name).write_bytes(obj)
+            (td / (name + ".relist.o")).write_bytes(relist)
+            (td / (name + ".lst")).write_text("")
+            (td / (name + ".relist.lst")).write_text("")
+        units = {u["object"]: u["listing"] for u in xc._units({"units": "objects:*.o"}, td)}
+        check(units == {"diff.o": "diff.o.lst", "same.o": "same.o.relist.lst"}, "relist listing only for a byte-identical re-assembly")
+        # seeds: an entry root becomes a seed only where the listing labels an instruction start
+        spec = {"cid": "HelloAmi", "recipe": "units", "unit": "u", "syntax": "vasm", "root": "t001"}
+        im = {"name": "hunk0", "image": b"\0" * 256, "relocs": [], "entry": 0}
+        m1 = xc.write_sample(td / "c", "xp/HelloAmi/units/a#hunk0", spec, im, b"D" * 256, b"\0" * 1024, None, {})
+        m2 = xc.write_sample(td / "c", "xp/HelloAmi/units/b#hunk0", spec, im, b"Ic" + b"D" * 254, b"\0" * 1024, None, {})
+        check(m1["seed_cells"] == 0 and m2["seed_cells"] == 1, "entry on data is not a seed; entry on an instruction start is")
+    # direct vasm mapping: listing section 1 is hunk 1 even when hunk 0 (BSS) is not an image
+    code = bytes.fromhex("22004E75")
+    exe = L(0x3F3, 0, 2, 0, 1, 4, 1) + L(0x3EB, 4) + L(0x3F2) + L(0x3E9, 1) + code + L(0x3F2)
+    lst = ('Sections:\n00: "BSS" (0-10)\n01: "CODE" (0-4)\n\n\nSource: "t.s"\n'
+           "01:00000000 2200            \t     1: \tmove.l\td0,d1\n01:00000002 4E75            \t     2: \trts\n")
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        (td / "out").mkdir()
+        (td / "out" / "t").write_bytes(exe)
+        (td / "out" / "t.lst").write_text(lst)
+        images = xc.final_images({"final": {"kind": "hunk-exe", "path": "out/t"}}, td)
+        check(len(images) == 1 and images[0]["hunk"] == 1, "BSS hunk is not an image; the code hunk keeps its hunk index")
+        names, rows = fm.parse_vasm_listing(lst)
+        by_hunk = {im["hunk"]: k for k, im in enumerate(images)}
+        secs = [({"data": images[by_hunk[h]]["image"]} if h in by_hunk else {"data": b""}) for h in range(max(by_hunk) + 1)]
+        mapped = xc.rows_by_section(names, rows, "vasm", "direct", secs)
+        check(set(mapped) == {1} and secs[1]["data"] == code, "listing section 1 maps to hunk 1 (not image 0)")
+
+
 def test_committed_coverage():
     p = ROOT / "tools" / "segarecomp_xplat_corpus.coverage.json"
     if not p.is_file():
@@ -327,7 +379,7 @@ def test_committed_coverage():
 def main():
     cli = sys.argv[1] if len(sys.argv) > 1 else None
     for t in (test_prg, test_hunks, test_elf, test_aout, test_vasm_listing, test_a68k_listing, test_gas_listing, test_section_labels,
-              test_place, test_decoder_rules, test_committed_coverage):
+              test_place, test_decoder_rules, test_review_rules, test_committed_coverage):
         t()
     test_end_to_end(cli)
     if FAILURES:

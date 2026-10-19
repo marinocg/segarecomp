@@ -146,12 +146,22 @@ Labels come only from assembler/compiler listings that provably describe the qua
   image it produces is byte-identical to T001 run `a`. All seven truth runs were accepted (EmuTOS 4 configurations, toslibc, neogeosdk,
   space-invaders), so their listings describe the qualified objects.
 - **GNU as listings need one more step.** GNU as loses its byte-to-line attribution after GCC's `#APP`/`#NO_APP` inline-assembly scrubbing
-  toggles: bytes are printed one or more lines late. In EmuTOS this affected 73 of 188 objects. The wrapper therefore keeps GCC's
+  toggles: bytes are printed one or more lines late. In EmuTOS rom-192 this affected the 63 of 188 objects that contain `#APP`
+  blocks (71 of 195 in rom-256). The wrapper therefore keeps GCC's
   assembly and re-assembles a copy with only those two marker lines removed. That listing is used only when the re-assembled object is
   byte-identical to the real one, which held for all 188 EmuTOS objects and every toslibc/neogeosdk object.
 - **Residual desynchronization fails closed.** Bytes listed on a statement that cannot emit them (non-zero bytes on a directive or label
-  line), or an instruction line without bytes, rejects the whole section to `U` (`LISTING_BYTE_LAG`). Zero fill on a section-changing
-  directive is the m68k even-size section padding and is `U` (`SECTION_PADDING`).
+  line), or an instruction or data row listed at an offset without bytes, rejects the whole section to `U` (`LISTING_BYTE_LAG`). Zero fill
+  on a section-changing directive is the m68k even-size section padding and is `U` (`SECTION_PADDING`).
+- **Known limit, closed by an independent oracle.** Statements listed without an offset cannot be used as lag evidence. Macro-definition
+  bodies and false conditional-assembly branches are listed that way legitimately; a trial of that stricter rule rejected 240 correct
+  EmuTOS sections. A same-length lag confined to emitting rows would therefore pass the detector. The C2 review closed this for the
+  committed corpus with an independent oracle: every kept GCC/.S input was re-assembled in the pristine toolchain image with a label
+  before every statement, accepted only when sections and relocations were byte-identical, and statement offsets were read from the
+  symbol table, not from a listing. Result: all 208,244 EmuTOS, 93,317 neogeosdk and 14,086 toslibc `I` starts were confirmed, with zero
+  false `I`, zero bad `c` and zero `D` on instruction bytes (21 toslibc starts inside `crt0` macro calls are not resolvable by that
+  oracle and are decoder-accepted). The oracle scripts are preserved in the handoff store (group `t002.review_oracle`). A future
+  re-extraction must re-run them.
 
 ## 6. C2: from listing rows to per-byte labels
 
@@ -196,15 +206,20 @@ The HelloAmi disk images (`.adf`) embed the other units and are excluded. Each s
 labels) and `spans.json` (typed findings).
 
 Seeds are only independently established executable roots: the container entry (PRG and first CODE hunk offset 0, the EmuTOS reset
-vector, the ELF entry). Object-only units have none. Symbol tables never create labels or seeds.
+vector, the ELF entry). Each counts only where the listing labels an instruction start; for example HelloAmi's icon (`.info`) units and
+the bootblock's `DOS` header get none. The EmuTOS ROM load address comes from each build's own link map (`.text`): 0xFC0000 for rom-192
+and amiga-rom, 0xE00000 for rom-256, 0xFA0000 for cart (no reset vector, no seed). The Neo Geo seed is the ELF entry, which is the start
+of `.text`; it is labelled `I`, but the cartridge's own vectors are the true roots. Object-only units have none. Symbol tables never
+create labels or seeds.
 
 `meta.json` records platform, toolchain, workload class, CPU variant, truth provenance, digests and a provisional lineage (the candidate).
 T003 assigns the real lineage groups. The unchanged SEG-072 loader (`segarecomp_ml_v3_train.Image`) loads all 54 samples (12,155
 128-byte cells, 9,648 positive).
 
-Extraction is deterministic. A second run into a different directory reproduces the corpus manifest digest
-(`cc2a49188fef970050175a66533ba9e15d5cb92e55fc09d12fdb666d1728126e`) and every data file byte for byte. The end-to-end test repeats this
-on a fixture.
+Extraction is deterministic. A second run into a different directory reproduces the corpus manifest digest (schema v2, covering image,
+classes, tokens, seeds and base address: `d2956dbf3eb11e000bc8fb4fb83b98d548488469b6b0adb912363691c00accb5`) and every `.bin`/`.json`
+data file byte for byte. The one exception is `meta.json`'s absolute image path (the SEG-072 loader opens it), which names the output
+directory. The end-to-end test repeats this on a fixture.
 
 ## 8. C2: coverage (`tools/segarecomp_xplat_corpus.coverage.json`, aggregates only)
 
@@ -235,10 +250,31 @@ The partial, object-only space-invaders build is extracted per object text segme
 
 - Private outputs live in `<HARNESS_ROOT>/.cache/seg075/t002/`: `truth/` (truth runs with listings, kept assembly, relist proofs) and
   `corpus/` (54 samples + `MANIFEST.json`).
-- The handoff store manifest `c2-t002-corpus` extends `c1-t001-audit` with these trees and the exact decoder binary. Its receipt is
+- The handoff store manifest `c2-t002-corpus` extends `c1-t001-audit` with these trees, the exact decoder binary, the review oracle
+  scripts and the private restore scripts. Its receipt is
   `tools/segarecomp_xplat_handoff.c2_receipt.json` (fresh-process verify PASS, 0 required problems). The four C1
   `REPRODUCIBLE_BUT_NOT_PRESERVED` truth-listing entries are now preserved.
 - The samples are dense in code: 79% of labelled cells are positive. Many images are smaller than M3-R's 32-cell (4 KB) training segment,
   so only images of at least 4 KB contribute M3-R training segments. This is a T003 design input.
 - The raw numbers above are instruction starts, not independent diversity. EmuTOS's four configurations, BattleIsleEditor's six editors
   and amiga-realtime3d's nine incremental programs are each one lineage. T003 groups and deduplicates them.
+
+## 10. C2 review and environment events
+
+- **C2 review of `9a03e84`: PASS WITH FINDINGS.** No label was falsified.
+  - The independent oracle results are in section 5. Seeded vasm/A68K sampling agreed on 982/982 `I` starts and 50/50 `D` rows.
+  - All 360,616 `I` starts in the 54 samples are ordinary base-68000 decodes of the listed length.
+  - No hand-encoded non-base instruction was left as `D`.
+  - Its findings were fixed: ROM bases from the link maps, seeds only on labelled instruction starts, data rows with an offset and no
+    bytes treated as lag, truth-listing resolution backed by per-program listing counts and digests, direct vasm sections mapped by hunk
+    index, a visible marker when spans are truncated, seeds and base address in the manifest digest, and new tests.
+  - None of these fixes changes an `I`/`c`/`D`/`U` byte: the coverage fractions are identical.
+- **Harness cache.** During this delivery the harness cache lost several unrelated directories, among them `seg048`/`seg049`, which hold
+  SEG-072's gen2 historical scores, token caches and research virtualenv.
+  - `seg048`/`seg049` were restored as copies from the SEG-072 bundle payload.
+  - The research virtualenv was rebuilt at its documented path with the recorded versions: Python 3.13.14, numpy 2.5.3,
+    scikit-learn 1.9.1, torch 2.14.1+cu130 run on CPU.
+  - The 36 Sonic CD modules of SEG-072 lineage D01 (the SEG-063 cache was missing) were re-extracted from the operator's disc image as
+    ISO 9660 files of track 1, and each equals the SHA-256 the SEG-072 bundle recorded.
+  - The SEG-072 handoff verifier then passes in the rebuilt environment: 758 bundled files and 46 external inputs intact, reference
+    inference of frozen M3, M3-R and M4-Dense bit for bit.

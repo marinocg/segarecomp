@@ -443,6 +443,8 @@ def parse_gas_listing(text: str) -> tuple[list[str], list[Row]]:
                 continue
             ms = _GAS_SRC.match(ln)
             if ms:
+                # statements listed without an offset are not rows: macro-definition bodies and false conditional-assembly branches
+                # are listed that way legitimately, so their absence of bytes is not evidence of byte lag
                 ncur, prev = _gas_section(_strip_gas_label(_strip_expansion(ms.group(2))), cur, stack, prev)
                 cur = ncur
         if cur not in order:

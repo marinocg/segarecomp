@@ -34,6 +34,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -49,6 +50,7 @@ TOKEN_FIELDS = 8
 # control classes of the decode token (hybrid_admission.cpp): 2 direct jump, 4 dynamic jump, 6 return are terminators
 TERMINATING_CONTROL = (2, 4, 6)
 MIN_PLACE_BYTES = 8
+SPAN_CAP = 20000  # spans.json keeps at most this many typed spans per program; the overflow is counted as SPANS_TRUNCATED
 
 # ------------------------------------------------------------------------------------------------------------------ truth recipes
 # Assembler wrapper installed inside the ephemeral container (never persisted): every invocation that writes `-o X` also writes the
@@ -142,8 +144,11 @@ class Typed:
 
     def add(self, kind: str, n: int = 1, span: dict | None = None):
         self.counts[kind] = self.counts.get(kind, 0) + n
-        if span is not None and len(self.spans) < 20000:
-            self.spans.append({"kind": kind, **span})
+        if span is not None:
+            if len(self.spans) < SPAN_CAP:
+                self.spans.append({"kind": kind, **span})
+            else:
+                self.counts["SPANS_TRUNCATED"] = self.counts.get("SPANS_TRUNCATED", 0) + 1
 
 
 def section_labels(rows: list, data: bytes, mask: bytearray, syntax: str, typed: Typed, section: str) -> tuple[bytearray, list[dict]] | None:
@@ -157,11 +162,14 @@ def section_labels(rows: list, data: bytes, mask: bytearray, syntax: str, typed:
             # zero fill listed on a section-changing / allocation directive: the outgoing section's even-size padding (m68k GNU as)
             typed.add("SECTION_PADDING", len(r.shown))
             kind = "align"
-        if syntax == "gas" and ((kind == "other" and r.shown) or (kind == "insn" and not r.shown)):
+        if syntax == "gas" and ((kind == "other" and r.shown) or (kind == "insn" and not r.shown)
+                                or (kind == "data" and not r.shown and _ops.strip() and not _zero_size_data(mnem, _ops))):
             # GNU as listed bytes on a statement that cannot emit them, or none on an instruction: its byte-to-line attribution is
             # out of step here (seen in inline asm / hand-written .S), so no row of this section can be trusted
             typed.add("LISTING_BYTE_LAG", span={"section": section, "offset": r.offset})
             return None
+        if r.offset < 0:
+            continue  # offset-less GNU as statement: only used by the lag check above
         if r.shown or kind in ("data", "align"):
             emit.append((r.offset, r, kind, mnem))
     emit.sort(key=lambda x: (x[0], 0 if x[1].shown else 1))
@@ -398,6 +406,21 @@ def final_images(spec: dict, root: pathlib.Path) -> list[dict]:
     raise fm.FormatError(f"unknown final kind {f['kind']}")
 
 
+def map_text_base(map_text: str) -> int:
+    """Load address of the output .text section from a GNU ld map (pure; unit-tested)."""
+    for ln in map_text.splitlines():
+        m = re.match(r"^\.text\s+0x([0-9a-fA-F]+)\s+0x[0-9a-fA-F]+", ln)
+        if m:
+            return int(m.group(1), 16)
+    raise fm.FormatError("link map has no output .text section")
+
+
+def _zero_size_data(mnem: str, ops: str) -> bool:
+    """A data directive that legitimately emits nothing (e.g. `.zero 0`, `.skip 0`, `.ascii ""`)."""
+    o = ops.strip()
+    return o in ("0", '""') or (mnem.lower() in (".zero", ".skip", ".space") and o.split(",")[0].strip() == "0")
+
+
 def rom_entry(img: bytes, rom_base: int) -> int | None:
     """Reset PC of an EmuTOS ROM image (vector at offset 4) as an image offset, when it points into the image."""
     if len(img) < 8:
@@ -529,7 +552,9 @@ def _extract(spec: dict, root: pathlib.Path, cli: str, out: pathlib.Path, scratc
     else:
         images = final_images(spec, root)
     if spec["final"]["kind"] == "raw-rom":
-        base = 0xE00000 if spec["recipe"] == "cart" else (0xF80000 if spec["recipe"] == "amiga-rom" else (0xFC0000 if len(images[0]["image"]) <= 0x30000 else 0xE00000))
+        # the ROM's load address is the link map's .text address (the build's own record); the reset vector at image offset 4 is the
+        # entry root only when it points into the image (a cartridge image has no reset vector)
+        base = map_text_base((root / "emutos.map").read_text(encoding="latin-1"))
         images[0]["entry"] = rom_entry(images[0]["image"], base) if spec["recipe"] != "cart" else None
         images[0]["base_address"] = base
     cls = [bytearray(b"U" * len(im["image"])) for im in images]
@@ -550,8 +575,13 @@ def _extract(spec: dict, root: pathlib.Path, cli: str, out: pathlib.Path, scratc
             if spec["final"]["kind"] == "object-text":
                 secs = [s if i == 0 else dict(s, data=b"") for i, s in enumerate(secs)]  # object-only programs: the text segment
         else:  # vasm wrote the executable directly: listing section i IS hunk i
-            okind, secs = "direct", [{"name": im["name"], "data": im["image"], "relocs": im["relocs"], "size": len(im["image"]), "direct": k}
-                                     for k, im in enumerate(images)]
+            # listing section i IS hunk i (vasm numbers sections in hunk order); map by hunk index, never by the position in the
+            # loadable-image list (BSS/empty hunks are not images)
+            by_hunk = {im["hunk"]: k for k, im in enumerate(images)}
+            nh = max(by_hunk) + 1 if by_hunk else 0
+            okind, secs = "direct", [({"name": images[by_hunk[h]]["name"], "data": images[by_hunk[h]]["image"], "relocs": images[by_hunk[h]]["relocs"],
+                                       "size": len(images[by_hunk[h]]["image"]), "direct": by_hunk[h]} if h in by_hunk
+                                      else {"name": f"hunk{h}", "data": b"", "relocs": [], "size": 0}) for h in range(nh)]
         by_sec = rows_by_section(names, rows, spec["syntax"], okind, secs)
         for si, srows in sorted(by_sec.items()):
             if si < 0 or si >= len(secs):
@@ -613,7 +643,9 @@ def write_sample(out: pathlib.Path, sid: str, spec: dict, im: dict, classes: byt
     (d / "image.bin").write_bytes(image)
     (d / "classes.bin").write_bytes(classes)
     (d / "tokens.bin").write_bytes(tokens)
-    seeds = sorted({im["entry"] // CELL_BYTES}) if im.get("entry") is not None else []
+    # an entry root is a seed only when the listing labels an instruction start there (a CODE hunk of icon data is not executable)
+    entry = im.get("entry")
+    seeds = sorted({entry // CELL_BYTES}) if entry is not None and 0 <= entry < len(classes) and classes[entry] == ord("I") else []
     (d / "seeds.json").write_text(json.dumps(seeds))
     (d / "relocs.json").write_text(json.dumps([list(r) for r in im["relocs"]]))
     au = v3d.audit(classes, tokens)
@@ -623,7 +655,8 @@ def write_sample(out: pathlib.Path, sid: str, spec: dict, im: dict, classes: byt
             "workload": WORKLOAD[spec["cid"]], "cpu_variant": "MC68000",
             "truth": {"t001": "listing of the qualified run a", "truth": "listing-instrumented truth run, objects byte-identical to run a"}[spec["root"]],
             "syntax": spec["syntax"], "image": str((d / "image.bin").resolve()), "sha256": sha256(image), "size": len(image),
-            "classes_sha256": sha256(classes), "tokens_sha256": sha256(tokens), "seed_cells": len(seeds), "seeds_source": "container entry",
+            "classes_sha256": sha256(classes), "tokens_sha256": sha256(tokens), "seeds_sha256": sha256(json.dumps(seeds).encode()),
+            "seed_cells": len(seeds), "seeds_source": "container entry, only where the listing labels an instruction start",
             "relocations": len(im["relocs"]), "audit": au, "bytes": counts, "base_address": im.get("base_address"),
             "hunk_type": im.get("hunk_type"), "provenance": "authored"}
     if typed is not None:
@@ -660,8 +693,9 @@ def cmd_extract(a) -> int:
             print(json.dumps({"id": m["id"], "size": m["size"], "bytes": m["bytes"], "audit": m["audit"], "typed": m.get("typed", {}),
                               "placement": m.get("placement")}), flush=True)
     shutil.rmtree(scratch, ignore_errors=True)
-    manifest = {"schema": "segarecomp.xplat_corpus.manifest.v1", "samples": [{k: m[k] for k in ("id", "sha256", "classes_sha256", "tokens_sha256",
-                                                                                              "size")} for m in sorted(all_meta, key=lambda m: m["id"])]}
+    manifest = {"schema": "segarecomp.xplat_corpus.manifest.v2", "samples": [{k: m[k] for k in ("id", "sha256", "classes_sha256", "tokens_sha256",
+                                                                                              "seeds_sha256", "size", "base_address")}
+                                                                             for m in sorted(all_meta, key=lambda m: m["id"])]}
     data = (json.dumps(manifest, indent=1, sort_keys=True) + "\n").encode()
     (out / "MANIFEST.json").write_bytes(data)
     print(json.dumps({"samples": len(all_meta), "manifest_sha256": sha256(data)}))
