@@ -1,6 +1,6 @@
 {
  "label": "c2-t002-corpus",
- "manifest_sha256": "1c9ce3d80e2745de85edf31e186a7fe9f48681deae20d0fb542f00512e5f8a4a",
+ "manifest_sha256": "ac9b246c543c67faa14c6e679ff524e07826abf43caefd2c6b17b20c4bdec620",
  "required_problems": 0,
  "schema": "segarecomp.xplat_handoff.receipt.v1",
  "storage": {
@@ -10,7 +10,7 @@
  },
  "summary": {
   "by_basis": {
-   "baseline": 11126,
+   "baseline": 11127,
    "cross_run_differs": 44,
    "cross_run_identical": 13914,
    "git_blob": 5750,
@@ -72,7 +72,7 @@
     "PRESENT_AND_VERIFIED": 5
    },
    "t002.restore_scripts": {
-    "PRESENT_AND_VERIFIED": 5
+    "PRESENT_AND_VERIFIED": 6
    },
    "t002.review_oracle": {
     "PRESENT_AND_VERIFIED": 9
@@ -86,15 +86,15 @@
   },
   "by_status": {
    "NOT_REQUIRED_FOR_SUCCESSOR": 16522,
-   "PRESENT_AND_VERIFIED": 14916
+   "PRESENT_AND_VERIFIED": 14917
   },
-  "entries": 31438,
+  "entries": 31439,
   "not_required_underlying": {
    "PRESENT_AND_VERIFIED": 16457,
    "PRESENT_UNVERIFIED": 44
   },
-  "physical_bytes": 4538884535,
-  "physical_files": 31398
+  "physical_bytes": 4538886865,
+  "physical_files": 31399
  },
  "verification": {
   "fresh_process": {
@@ -104,7 +104,7 @@
   },
   "problems": 0,
   "verdict": "PASS",
-  "verified_bytes": 4538884535,
-  "verified_files": 31398
+  "verified_bytes": 4538886865,
+  "verified_files": 31399
  }
 }

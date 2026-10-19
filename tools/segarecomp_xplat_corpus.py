@@ -168,8 +168,6 @@ def section_labels(rows: list, data: bytes, mask: bytearray, syntax: str, typed:
             # out of step here (seen in inline asm / hand-written .S), so no row of this section can be trusted
             typed.add("LISTING_BYTE_LAG", span={"section": section, "offset": r.offset})
             return None
-        if r.offset < 0:
-            continue  # offset-less GNU as statement: only used by the lag check above
         if r.shown or kind in ("data", "align"):
             emit.append((r.offset, r, kind, mnem))
     emit.sort(key=lambda x: (x[0], 0 if x[1].shown else 1))
