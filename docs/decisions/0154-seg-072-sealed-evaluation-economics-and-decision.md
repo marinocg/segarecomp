@@ -2,8 +2,8 @@
 
 - Status: Accepted. **Final classification: `RECALL_FAILED`** (ADR 0151 precedence: a confidently labelled sealed start outside R). Secondary
   facts, recorded and not hidden under the primary class: the corpus minimums were not met (`CORPUS_INSUFFICIENT` for the full gate:
-  development 11/12, sealed 5/7) and the frozen pair fails the economics gate against the incumbent. Independent adversarial review: T007
-  (appended below).
+  development 11/12, sealed 5/7) and the frozen pair fails the economics gate against the incumbent. Independent adversarial review (T007): PASS WITH
+  FINDINGS, concurs (appended below).
 - Scope: offline research only. **No production change**: production gen2 M3 + B35, Optimized v1, the structural prune, the validator, the
   launcher defaults and the Sega CD admission policy are unchanged. No model weights trained on private inputs are published.
 - Inputs: frozen record `tools/segarecomp_ml_v3.frozen.json` (committed in `3f7d08b`, ADR 0153); sealed binding ADR 0152. Aggregates:
@@ -41,6 +41,9 @@ instruction budget, clang): outcome, frame count, final-state, coverage and fram
 incumbent on E01, E03 and E05 - including E05, whose short trace does not reach the missed code. Runtime-equivalent short traces are not
 evidence of static recall.
 
+E06 application-code independence (promised in ADR 0152, measured after unsealing): 12-byte shingle containment of E06's labelled code in
+D12 is 0.006 (D12's in E06 0.001), far below 0.30 - the 0.660 raw-byte correlation is the shared SGDK runtime.
+
 TMSS: `TMSS_DIAGNOSTIC_UNAVAILABLE` (no authorized firmware input; ADR 0152). No firmware claim is made; no claim about authentic Sega CD BIOS
 optimization follows from game or homebrew results.
 
@@ -51,7 +54,7 @@ optimization follows from game or homebrew results.
 | image | generated C vs broad | bridge CPU vs broad | generated C vs incumbent M3+B35 | bridge CPU vs incumbent |
 |---|---|---|---|---|
 | E01 | -58.6% | -61.7% | -22.1% | -28.8% |
-| E03 | -41.4% | -42.6% | +33.9% | +36.1% |
+| E03 | -41.4% | -42.6% | +33.9% | +36.0% |
 | E05 | -43.1% | -43.7% | +34.1% | +32.1% |
 | mean | **-47.7%** | **-49.3%** | **+15.3%** | **+13.1%** |
 
@@ -70,7 +73,7 @@ generated-C or compile-time reduction can be measured or claimed for Sega CD.
 **Broad materialized M68K images**: not comparable - no existing safe admission contract admits partial ML proposals for materialized
 images, and none was added (brief).
 
-## Decision (pending T007 review concurrence)
+## Decision
 
 | criterion (ADR 0151 precedence) | result |
 |---|---|
@@ -91,3 +94,22 @@ the unconditional fallback. What this means and does not mean:
 - No production integration, model replacement, launcher default change or Sega CD admission-policy change follows. Any further attempt needs a
   new pre-registered protocol with fresh sealed lineages (E05 and the other four are now exposed), and should treat small mixed code/data
   fragments and dense-code images explicitly.
+
+## Independent adversarial review (T007)
+
+A fresh adversarial-validator session (no edit rights) attacked pre-registration integrity, ordering, selection, the sealed result, truth
+soundness, privacy and production scope. **Verdict: PASS WITH FINDINGS, no blocker or major; concurs with `RECALL_FAILED` and with "no
+production change".** Independently reproduced: plan untouched since C1 (`verify` OK); sealed binding before any model output; freeze commit
+before the unseal marker, frozen record byte-identical; the development pair table from the private scores (M3-R B50 0 / 0.5048, M4-Dense@64 B50
+0 / 0.5047, M3_FROZEN B35 8,066 / 0.3569, and others) and `select_pair` -> M3-R+B50; the selection-table digest equals the frozen record; 5/5
+historical digests; E05 40 missed starts in 2 cells (both truth copies), 0 on E01/E03/E06/E07; SGDK truth re-run for D05/D06 and extractor re-run
+for s1/sk reproduce their digests; committed data aggregate-only; only tools/, tests/, docs/decisions/ changed. Findings (minor/notes) and
+dispositions: extractor adapters not all strictly additive and `extract()` carries `_cover` - ADR 0152 corrected; retained fraction in bytes vs
+cells (<= 1e-4) and residual-FRF wording - ADR 0153 notes; E06 app-code independence now reported (above); combined T001-T007 PR follows the
+SEG-065/SEG-070 combined-branch precedent (the fast gate runs under the branch-owner ID T001); thin selection margin, sealed truth existing before
+the freeze (digest-bound, tooling-refused; process trust), private default paths in tools (as in the gen2 trainer) - accepted as notes.
+
+Local gate on `5ec7a43` (unchanged code since; this commit is docs-only): `agent-verify: PASS tier=fast`, 129/129 tests, focused
+`segarecomp_ml_v3|segarecomp_source_map_extract|segarecomp_ml_region` (all inside the fast preset). Full/extended gates are CI's.
+
+**Final classification confirmed: `RECALL_FAILED`.**

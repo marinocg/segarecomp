@@ -99,7 +99,7 @@ repeats. CPU: the actual farm (8 concurrent 2-thread processes): median 217 ms/s
 ROCm (PyTorch 2.6.0+rocm6.4.2, Radeon RX 9070 XT `gfx1201`, WSL2; the PyTorch 2.13+rocm7.2 environment sees no device): median 30 ms/step
 (24-30), peak 41 MB VRAM, the three repeats reproduce identical outputs. Data loading ~1 ms per batch on both. Estimated M4-Dense
 cross-validation (33 fits x 4000 steps): CPU farm 4,344 s vs ROCm (one GPU process) 3,958 s - **8.9% improvement < 25%: parallel CPU
-selected**. Frozen environment: Python 3.13.14, numpy 2.5.3, scikit-learn 1.9.1, torch 2.14.1 CPU, float32,
+selected**. Frozen environment: Python 3.13.14, numpy 2.5.3, scikit-learn 1.9.1, torch 2.14.1 (the `+cu130` wheel, run on CPU only), float32,
 `torch.use_deterministic_algorithms(True)`, threads M3-R 4 / M4-Dense 2. Every candidate was trained on the same backend.
 
 ### Development comparison (11 lineages, 50 images, leave-one-lineage-out)
@@ -136,3 +136,13 @@ no adaptive margin; final refit on all 11 development lineages with the unchange
 the environment above; the selection-table digest binds the development evidence. From this commit on no model, policy, threshold, rounding,
 seed or label rule may change; the sealed corpus is opened once by `segarecomp_ml_v3_eval.py sealed` (marker written before any sealed truth is
 read).
+
+### Review notes (T007, no change to any frozen result)
+
+- Retained fraction is computed in bytes (|R| bytes / image bytes) where ADR 0151 states |R| / cells; they differ only by the short last cell
+  (at most ~1e-4 here) and change no selection or tie set.
+- `residual_frf` counts seed cells that appear in the ranked prefix; ADR 0151's "seeds excluded from the count" is ambiguous on this. It only
+  enters the ADAPT margin, which was never complete or selected.
+- The selection margin is thin: worst-lineage FRF is degenerate and mean retained ties, so step 4 (K/U 0.437 vs 0.475) decided between M3-R and
+  M4-Dense@64; within the tie band M3-R would also win as the simpler model.
+- The historical reproduction overwrote the private gen2 fold files in place; the claim rests on the plan-committed digests.

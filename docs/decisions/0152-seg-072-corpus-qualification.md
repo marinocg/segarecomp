@@ -102,8 +102,10 @@ cross-compiler-family, evidence).
 Barrier: sealed truth exists only under `sealed/`; `segarecomp_ml_v3.py` refuses sealed ids and that path for development/training work
 (tested); the unseal path requires the committed frozen record (T005).
 
-## Extractor adapters added (strictly additive; every earlier digest reproduces)
+## Extractor adapters added (every earlier digest reproduces)
 
 AS: unindented nameless labels (`-`, `+`, `--`, `/`); `CPU Z80UNDOC` is Z80 code; continuation lines of Z80 rows are not accounted.
 ASM68K: labels may contain `?`; a byte-less `dcb.<size> count,value` row with literal operands becomes a computed data row that must equal the
-ROM. All 7 disassembly titles, the 36 Sonic CD modules and the ADR 0099 digests were re-extracted with the final extractor: identical.
+ROM. Correction (T007 review): the adapters are not all strictly additive - the AS/`?`/Z80 adapters accept listings that previously
+failed closed, while the `dcb` adapter is stricter (a byte-less literal `dcb` row whose bytes differ from the ROM now fails instead of passing as a
+gap); the library `extract()` summary also carries the private `_cover` bytes (only the CLI strips it). All 7 disassembly titles, the 36 Sonic CD modules and the ADR 0099 digests were re-extracted with the final extractor: identical.
