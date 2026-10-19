@@ -102,3 +102,8 @@ set_property(TEST segarecomp_oracle_bench_fixture_test PROPERTY SKIP_RETURN_CODE
 add_test(NAME segarecomp_xplat_qualify_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_qualify_test.py)
 set_property(TEST segarecomp_xplat_qualify_test APPEND PROPERTY LABELS full fast)
+# SEG-075 C1 (ADR 0160): physical private-artifact audit, content-addressed store, verification (corruption/truncation/loss, worktree
+# dependency, fresh isolated process), restore and the T001 audit classes, on synthetic data (git, no network or Docker).
+add_test(NAME segarecomp_xplat_handoff_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_handoff_test.py)
+set_property(TEST segarecomp_xplat_handoff_test APPEND PROPERTY LABELS full fast)

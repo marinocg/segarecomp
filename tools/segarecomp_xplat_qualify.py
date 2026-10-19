@@ -10,7 +10,11 @@
               see different wall-clock dates through a `date` wrapper (neither the real date), and every output is scanned for the
               real build day, which catches dates the wrapper cannot control (a compiler's __DATE__). Record the outcome, output digests/sizes/executable format, determinism, author-binary comparisons,
               the source CPU-variant scan and the archive pilot counts in a private record
-  verify      check that freshly built records reproduce the committed manifest (identities, classes, outcomes, code digests)
+  verify      check that freshly built records reproduce a manifest (identities, classes, outcomes, code digests); the manifest is
+              --manifest (default: the committed one); --out is rejected. This compares RECORDED evidence only: the physical private
+              files are checked by tools/segarecomp_xplat_handoff.py (SEG-075 C1)
+  identity    write (or --check) the versioned v2 recipe identity (ADR 0160): the frozen v1 digest plus Dockerfile contents, embedded
+              helper scripts and the recorded image ids. The v1 digests and T001 records are never rewritten
   report      combine the plan and the records into the sanitized manifest. It fails when any executed evidence contradicts the
               plan's declared expectation: a recipe declared to succeed fails, an expected failure does not reproduce its signature,
               or a declared author comparison is not byte-identical
@@ -446,6 +450,72 @@ def recipe_digest(plan: dict, cand: dict, recipe: dict) -> str:
     return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
 
 
+IDENTITY_V2_SCHEMA = "segarecomp.xplat_qualify.recipe_identity.v2"
+IDENTITY_V2 = ROOT / "tools" / "segarecomp_xplat_qualify.identity_v2.json"
+HELPERS = {"ci_alias.py": CI_ALIAS, "asts_pilot.py": ASTS_PILOT, "bin/date": DATE_SHIM}
+
+
+def toolchain_definition_v2(plan: dict, tid: str, product_root: pathlib.Path, cache: pathlib.Path | None, image_ids: dict) -> dict:
+    """SEG-075 C1 (ADR 0160): the toolchain inputs v1 did not bind - Dockerfile CONTENTS (the committed file, or the candidate's own
+    Dockerfile for a context-candidate image), the base chain, and the actual image id recorded when the image was built."""
+    tc = plan["toolchains"][tid]
+    d = {"inputs": tc.get("inputs"), "image_id": image_ids.get(tid, {}).get("image_id")}
+    if "dockerfile" in tc:
+        d["dockerfile_sha256"] = hashlib.sha256((product_root / tc["dockerfile"]).read_bytes()).hexdigest()
+    else:
+        cand = next(c for c in plan["candidates"] if c["id"] == tc["context_candidate"])
+        df = (cache / "src" / cand["id"] / "Dockerfile") if cache else None
+        d["context_candidate"] = {"id": cand["id"], "commit": cand["commit"],
+                                  "dockerfile_sha256": hashlib.sha256(df.read_bytes()).hexdigest() if df and df.is_file() else None}
+    if tc.get("base"):
+        d["base"] = toolchain_definition_v2(plan, tc["base"], product_root, cache, image_ids)
+    return d
+
+
+def recipe_identity_v2(plan: dict, cand: dict, recipe: dict, product_root: pathlib.Path = ROOT, cache: pathlib.Path | None = None,
+                       image_ids: dict | None = None, helpers: dict | None = None) -> dict:
+    """Versioned v2 identity of one recipe (pure given its inputs; unit-tested). It keeps the frozen v1 digest unchanged and adds the
+    Dockerfile contents, the embedded helper scripts and the actual image identity. A v1 digest is never recomputed with v2 inputs."""
+    helpers = HELPERS if helpers is None else helpers
+    image_ids = image_ids or {}
+    body = {"v1_recipe_sha256": recipe_digest(plan, cand, recipe),
+            "toolchain": toolchain_definition_v2(plan, recipe["toolchain"], product_root, cache, image_ids),
+            "helpers_sha256": {k: hashlib.sha256(v.encode()).hexdigest() for k, v in sorted(helpers.items())}}
+    return {"schema": IDENTITY_V2_SCHEMA, "sha256": hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest(), **body}
+
+
+def identity_document(plan: dict, cache: pathlib.Path | None, image_ids: dict) -> dict:
+    """Sanitized v2 identity of every recipe (identities only), bound to the frozen v1 digests."""
+    rows = {}
+    for c in plan["candidates"]:
+        for r in c["recipes"]:
+            ident = recipe_identity_v2(plan, c, r, ROOT, cache, image_ids)
+            rows[f"{c['id']}/{r['name']}"] = {"v1_recipe_sha256": ident["v1_recipe_sha256"], "v2_identity_sha256": ident["sha256"],
+                                              "toolchain": r["toolchain"]}
+    return {"schema": IDENTITY_V2_SCHEMA, "task": "SEG-075-T002 (C1)", "adr": "0160",
+            "note": "v1 recipe digests are the frozen T001 values (ADR 0159) and are not rewritten; v2 additionally binds Dockerfile contents, "
+                    "embedded helpers and image ids, and was introduced after T001 (T001 did not use it)",
+            "helpers_sha256": {k: hashlib.sha256(v.encode()).hexdigest() for k, v in sorted(HELPERS.items())},
+            "image_ids": {t: v.get("image_id") for t, v in sorted(image_ids.items())},
+            "recipes": rows}
+
+
+def compare_identity(committed: dict, fresh: dict) -> list[str]:
+    """Drift between two v2 identity documents (pure; unit-tested)."""
+    diffs = []
+    for k in ("helpers_sha256", "image_ids"):
+        if committed.get(k) != fresh.get(k):
+            diffs.append(f"{k} differs")
+    a, b = committed.get("recipes", {}), fresh.get("recipes", {})
+    for key in sorted(set(a) | set(b)):
+        if key not in a or key not in b:
+            diffs.append(f"{key}: present in only one identity document")
+        elif a[key] != b[key]:
+            diffs.append(f"{key}: " + ", ".join(f for f in ("v1_recipe_sha256", "v2_identity_sha256", "toolchain") if a[key].get(f) != b[key].get(f))
+                         + " differs")
+    return diffs
+
+
 def evaluate_recipe(recipe: dict, a: dict, b: dict | None) -> dict:
     """Outcome of one recipe from its two runs (pure; unit-tested)."""
     expect = recipe.get("expect", "success")
@@ -638,13 +708,21 @@ def report(plan: dict, cache: pathlib.Path, out: pathlib.Path) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=("fetch", "toolchains", "build", "report", "verify", "validate"))
+    ap.add_argument("command", choices=("fetch", "toolchains", "build", "report", "verify", "validate", "identity"))
     ap.add_argument("--cache", type=pathlib.Path, help="private ignored cache directory")
     ap.add_argument("--only", action="append", help="restrict to candidate id (repeatable)")
     ap.add_argument("--plan", type=pathlib.Path, default=PLAN)
-    ap.add_argument("--out", type=pathlib.Path, default=MANIFEST)
+    ap.add_argument("--out", type=pathlib.Path, default=None,
+                    help="report: manifest output path (default: the committed manifest); identity: v2 identity output path")
+    ap.add_argument("--manifest", type=pathlib.Path, default=None,
+                    help="verify: the manifest the rebuilt records must reproduce (default: the committed manifest)")
+    ap.add_argument("--check", action="store_true", help="identity: compare with the committed v2 identity instead of writing")
     args = ap.parse_args(argv)
     try:
+        if args.command == "verify" and args.out is not None:
+            raise QualifyError("verify reads --manifest; --out is an output path of report/identity and is not accepted by verify")
+        if args.command != "verify" and args.manifest is not None:
+            raise QualifyError("--manifest is accepted by verify only")
         plan = load_plan(args.plan)
         if args.command == "validate":
             print(f"plan OK: {len(plan['candidates'])} candidates, {len(plan['toolchains'])} toolchains")
@@ -661,9 +739,24 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "build":
             build(plan, cache, only)
         elif args.command == "verify":
-            return verify(plan, cache, MANIFEST)
+            committed = args.manifest or MANIFEST
+            if not committed.is_file():
+                raise QualifyError(f"verify: manifest {committed} does not exist")
+            return verify(plan, cache, committed)
+        elif args.command == "identity":
+            ids = json.loads((cache / "toolchains.json").read_text(encoding="utf-8")) if (cache / "toolchains.json").exists() else {}
+            doc = identity_document(plan, cache, ids)
+            target = args.out or IDENTITY_V2
+            if args.check:
+                diffs = compare_identity(json.loads(target.read_text(encoding="utf-8")), doc)
+                for d in diffs:
+                    print("DRIFT:", d)
+                print("identity:", "PASS" if not diffs else f"FAIL ({len(diffs)})")
+                return 1 if diffs else 0
+            target.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+            print(f"identity: {len(doc['recipes'])} recipes -> {target}")
         else:
-            return report(plan, cache, args.out)
+            return report(plan, cache, args.out or MANIFEST)
         return 0
     except QualifyError as exc:
         print(f"error: {exc}", file=sys.stderr)
