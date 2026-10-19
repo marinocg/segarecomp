@@ -47,7 +47,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n  segarecomp ml-gen2-cell-logits --rom <image> --output <path>\n  segarecomp ml-gen2-probe-report --synthetic\n  segarecomp aot-policy-identity --aot-policy <compatibility|optimized> [--aot-model <v1|gen2>] [--platform <genesis|master-system>]\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--ml-gen2-region-proposal-output <path> [--ml-gen2-logits-output <path>]] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission | --immutable-rom-aot-ml-gen2-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--ml-gen2-region-proposal-output <path> [--ml-gen2-logits-output <path>]] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path> [--region-proposal-closure <prune|close>]] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission | --immutable-rom-aot-ml-gen2-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp classify-ram-jump-thunk <execution-hex8> <hex-bytes>\n"
@@ -144,6 +144,11 @@ int run_cli(int argc, char **argv) {
       std::optional<std::string_view> ml_gen2_region_proposal_output;
       std::optional<std::string_view> ml_gen2_logits_output;
       std::optional<std::string_view> region_plan_output;
+      // SEG-074-T001 (ADR 0156): REPORT-ONLY closure direction of the region proposal: `prune` (default; the SEG-045 greatest closed
+      // subset) or `close` (the least closed superset including every mandatory root, a diagnostic-oracle measurement aid). Either way the
+      // product is an ordinary hybrid plan that the unchanged validator must accept; nothing is generated.
+      segarecomp::GenesisRegionAdmissionClosure region_closure = segarecomp::GenesisRegionAdmissionClosure::prune;
+      bool region_closure_given = false;
       // SEG-022-T002: stream the generated C to this file (fail-closed: written as `<path>.partial`
       // and atomically renamed only on complete success; removed on any failure).
       std::optional<std::string_view> generated_c_output;
@@ -234,6 +239,14 @@ int run_cli(int argc, char **argv) {
         } else if (option == "--region-admission-plan-output") {
           if (region_plan_output || index + 1 >= argc) { print_usage(std::cerr); return 2; }
           region_plan_output = argv[index + 1];
+          index += 2;
+        } else if (option == "--region-proposal-closure") {
+          if (region_closure_given || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          const std::string_view mode = argv[index + 1];
+          if (mode == "prune") region_closure = segarecomp::GenesisRegionAdmissionClosure::prune;
+          else if (mode == "close") region_closure = segarecomp::GenesisRegionAdmissionClosure::close;
+          else { print_usage(std::cerr); return 2; }
+          region_closure_given = true;
           index += 2;
         } else if (option == "--immutable-aot-address-report") {
           if (immutable_aot_address_report || index + 1 >= argc) { print_usage(std::cerr); return 2; }
@@ -566,6 +579,10 @@ int run_cli(int argc, char **argv) {
                   << " ml_only_regions_sha256=" << digest_of(segarecomp::format_genesis_executable_regions(*proposal.ml_only)) << '\n';
         return 0;
       }
+      if (region_closure_given && !region_proposal_path) {
+        std::cerr << "segarecomp: --region-proposal-closure requires --immutable-aot-region-proposal\n";
+        return 2;
+      }
       if (region_proposal_path.has_value() != region_plan_output.has_value() ||
           (region_proposal_path && (!immutable_rom_aot || immutable_rom_aot_admission))) {
         std::cerr << "segarecomp: region proposal requires --immutable-rom-aot, the plan output, and excludes --immutable-rom-aot-admission\n";
@@ -588,7 +605,10 @@ int run_cli(int argc, char **argv) {
         else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result)) entries = &accepted->immutable_rom_aot_entries;
         if (entries == nullptr) { std::cerr << "segarecomp: region proposal: no broad analysis result\n"; return 3; }
         segarecomp::GenesisRegionPruneResult pruned;
-        const auto plan = segarecomp::plan_genesis_region_admission(*program, digest_value, *entries, *proposal, pruned);
+        segarecomp::GenesisRegionCloseCounts close_counts;
+        const auto plan = segarecomp::plan_genesis_region_admission(*program, digest_value, *entries, *proposal, pruned,
+                                                                    segarecomp::genesis_region_prune_default_max_rounds, region_closure,
+                                                                    &close_counts);
         if (!plan) {
           std::cerr << "segarecomp: region proposal REJECTED: " << pruned.failure.value_or("unknown") << (pruned.failure_class.empty() ? "" : " class=" + pruned.failure_class) << " universe=" << pruned.universe_count
                     << " k0=" << pruned.k0_count << " rounds=" << pruned.rounds << '\n';
@@ -603,9 +623,15 @@ int run_cli(int argc, char **argv) {
         std::ofstream sink{std::string(*region_plan_output), std::ios::binary};
         sink << segarecomp::format_genesis_hybrid_admission_plan(*plan);
         if (!sink) { std::cerr << "segarecomp: cannot write region admission plan\n"; return 2; }
-        std::cerr << "segarecomp: region prune: universe=" << pruned.universe_count << " k0=" << pruned.k0_count
-                  << " k=" << pruned.admitted.size() << " pruned=" << pruned.pruned_count << " rounds=" << pruned.rounds
-                  << " validator=accepted ranges=" << plan->ranges.size() << '\n';
+        if (region_closure == segarecomp::GenesisRegionAdmissionClosure::close)
+          std::cerr << "segarecomp: region close: universe=" << pruned.universe_count << " k0=" << pruned.k0_count
+                    << " k=" << pruned.admitted.size() << " added=" << close_counts.added_count
+                    << " roots_added=" << close_counts.root_added_count << " rounds=" << pruned.rounds
+                    << " validator=accepted ranges=" << plan->ranges.size() << '\n';
+        else
+          std::cerr << "segarecomp: region prune: universe=" << pruned.universe_count << " k0=" << pruned.k0_count
+                    << " k=" << pruned.admitted.size() << " pruned=" << pruned.pruned_count << " rounds=" << pruned.rounds
+                    << " validator=accepted ranges=" << plan->ranges.size() << '\n';
         return 0;
       }
       if (immutable_rom_aot) {

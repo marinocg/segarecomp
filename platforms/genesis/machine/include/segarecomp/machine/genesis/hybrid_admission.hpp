@@ -153,12 +153,34 @@ struct GenesisRegionPruneResult {
     const std::vector<FrontendProgram::ImmutableRomAotRange> &regions,
     std::size_t max_rounds = genesis_region_prune_default_max_rounds);
 
-// Builds the ordinary hybrid plan for the pruned `K` (aliases and universe fingerprint of this emission). Nullopt plan => see
-// `result.failure`.
+// SEG-074-T001 (ADR 0156): REPORT-ONLY least structurally closed SUPERSET of an externally proposed region, the dual of the prune
+// above. `K0 = U ∩ R` (the same ADR 0111 alias rule); `K` is the least subset of `U` that contains `K0`, every machine root that is a
+// broad identity and every ADR 0049 materialized identity, and is closed under exactly the validator's structural obligations (fixed
+// control successors and stacked call continuations that are themselves broad identities). Closure only adds broad identities
+// (`K0 ⊆ K ⊆ U`): it never invents an address outside the broad universe, never follows a dynamic transfer, and the least fixed point is
+// unique (independent of iteration order). It exists to measure a diagnostic oracle (a source-backed start set plus the entries the
+// execution model independently demands); it is not a producer of executable authority. `pruned_count` is 0; `added_count` = |K \ K0|
+// and `root_added_count` counts the mandatory roots/materialized identities absent from K0. A resource cap (rounds) is exhausted =>
+// REJECTED. The product is an ordinary hybrid plan that the unchanged validator must accept.
+enum class GenesisRegionAdmissionClosure : std::uint8_t { prune, close };
+
+struct GenesisRegionCloseCounts {
+  std::size_t added_count{};       // |K \ K0|
+  std::size_t root_added_count{};  // mandatory roots / materialized identities that were outside K0
+};
+
+[[nodiscard]] GenesisRegionPruneResult close_genesis_region_admission(
+    const FrontendProgram &program, const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
+    const std::vector<FrontendProgram::ImmutableRomAotRange> &regions, GenesisRegionCloseCounts *counts = nullptr,
+    std::size_t max_rounds = genesis_region_prune_default_max_rounds);
+
+// Builds the ordinary hybrid plan for the pruned (or, with `closure == close`, closed) `K` (aliases and universe fingerprint of this
+// emission). Nullopt plan => see `result.failure`.
 [[nodiscard]] std::optional<GenesisHybridAdmissionPlan> plan_genesis_region_admission(
     const FrontendProgram &program, std::string_view rom_sha256, const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
     const GenesisExecutableRegionProposal &proposal, GenesisRegionPruneResult &result,
-    std::size_t max_rounds = genesis_region_prune_default_max_rounds);
+    std::size_t max_rounds = genesis_region_prune_default_max_rounds,
+    GenesisRegionAdmissionClosure closure = GenesisRegionAdmissionClosure::prune, GenesisRegionCloseCounts *counts = nullptr);
 
 // SEG-046 (ADR 0095): REPORT-ONLY generic per-window structure features of the broad identities `U`, for an offline ML region-proposal
 // experiment. Every column is derived solely from the MC68000-owned decoder/IR/control-successor projection of the immutable ROM

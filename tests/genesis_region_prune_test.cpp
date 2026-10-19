@@ -15,6 +15,7 @@
 
 #include "segarecomp/cpu/m68k/control_successors.hpp"
 #include "segarecomp/machine/genesis/hybrid_admission.hpp"
+#include "segarecomp/machine/genesis/reachability_challenger.hpp"
 
 namespace {
 
@@ -426,6 +427,147 @@ void alias_source_mapping() {
          "a plan from the alias-less emission is refused for the alias emission");
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------------
+// SEG-074-T001 (ADR 0156): REPORT-ONLY least closed SUPERSET (`close`). Properties: K0 ⊆ K ⊆ U; every machine root and materialized identity
+// is in K; K is closed under exactly the validator's obligations; K equals an independent naive least fixed point; the result is order
+// independent; prune(R) ⊆ close(R); overlapping identities are neither invented nor dropped; the cap rejects; the UNCHANGED validator accepts.
+std::vector<std::uint32_t> close_reference(const Program &p, const Ranges &regions) {
+  const auto universe = addresses(p.entries);
+  std::set<std::uint32_t> keep;
+  for (const auto pc : universe)
+    if (in_region_of(p.entries, regions, pc)) keep.insert(pc);
+  for (const auto &entry : p.entries)
+    if (entry.execution_alias) keep.insert(address_of(entry));
+  for (const auto root : genesis_reachability_roots(p.program).roots)
+    if (has(universe, root & 0xFFFFFFU)) keep.insert(root & 0xFFFFFFU);
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (const auto &entry : p.entries) {
+      if (!keep.contains(address_of(entry))) continue;
+      const auto control = m68k_control_successors(entry.operation);
+      std::vector<std::uint32_t> targets;
+      for (const auto &successor : control.successors) targets.push_back(successor.target & 0xFFFFFFU);
+      if (control.stacked == M68kStackedContinuationKind::call_continuation) targets.push_back(control.stacked_address & 0xFFFFFFU);
+      for (const auto target : targets)
+        if (has(universe, target) && keep.insert(target).second) changed = true;
+    }
+  }
+  return {keep.begin(), keep.end()};
+}
+
+GenesisRegionPruneResult run_close(const Program &p, const Ranges &regions, const std::string &label,
+                                   std::size_t cap = genesis_region_prune_default_max_rounds) {
+  GenesisRegionCloseCounts counts;
+  const auto result = close_genesis_region_admission(p.program, p.entries, regions, &counts, cap);
+  const auto universe = addresses(p.entries);
+  expect(result.failure == std::optional<std::string>("malformed_region") || result.universe_count == universe.size(), label + ": |U|");
+  expect(std::is_sorted(result.admitted.begin(), result.admitted.end()), label + ": K sorted");
+  if (result.failure) {
+    expect(result.admitted.empty(), label + ": a rejected proposal exposes no K");
+    return result;
+  }
+  for (const auto pc : result.admitted) expect(has(universe, pc), label + ": K ⊆ U (nothing invented)");
+  for (const auto pc : universe)
+    if (in_region_of(p.entries, regions, pc)) expect(has(result.admitted, pc), label + ": K0 ⊆ K");
+  expect(result.pruned_count == 0U, label + ": closure never prunes");
+  expect(result.admitted.size() == result.k0_count + counts.added_count, label + ": |K| = |K0| + added");
+  expect(counts.root_added_count <= counts.added_count, label + ": roots_added <= added");
+  expect(result.admitted == close_reference(p, regions), label + ": equals the naive least fixed point");
+  const auto pruned = prune_genesis_region_admission(p.program, p.entries, regions);
+  for (const auto pc : pruned.admitted) expect(has(result.admitted, pc), label + ": prune(R) ⊆ close(R)");
+  GenesisRegionPruneResult again;
+  GenesisRegionCloseCounts again_counts;
+  const auto plan = plan_genesis_region_admission(p.program, sha, p.entries, GenesisExecutableRegionProposal{sha, regions}, again, cap,
+                                                  GenesisRegionAdmissionClosure::close, &again_counts);
+  expect(plan.has_value() && again.admitted == result.admitted && again_counts.added_count == counts.added_count, label + ": plan produced");
+  if (plan) {
+    auto entries = p.entries;
+    const auto failure = apply_genesis_hybrid_admission(p.program, sha, *plan, entries);
+    expect(!failure, label + ": production validator accepts: " + failure.value_or(""));
+    expect(addresses(entries) == result.admitted, label + ": validator keeps exactly K");
+    GenesisRegionPruneResult third;
+    const auto repeat = plan_genesis_region_admission(p.program, sha, p.entries, GenesisExecutableRegionProposal{sha, regions}, third, cap,
+                                                      GenesisRegionAdmissionClosure::close);
+    expect(repeat && format_genesis_hybrid_admission_plan(*repeat) == format_genesis_hybrid_admission_plan(*plan), label + ": deterministic plan text");
+  }
+  return result;
+}
+
+void least_closed_superset() {
+  auto image = skeleton();
+  // A labelled-data-like chain: BRA.S -> BRA.S -> BRA.W (fixed edges the closure must follow if the start is proposed).
+  image.words(0x420U, {0x600EU});
+  image.words(0x430U, {0x600EU});
+  image.words(0x440U, {0x6000U, 0x0400U});
+  image.words(0x842U, {0x4E75U});
+  const auto p = build(image);
+  const auto universe = addresses(p.entries);
+  for (const auto pc : {0x200U, 0x202U, 0x204U, 0x206U, 0x300U, 0x400U, 0x402U, 0x842U}) expect(has(universe, pc), "close fixture: identity " + std::to_string(pc));
+
+  // (1) An instruction-start proposal holding only the reset start: the execution model demands the call target, the call continuation and
+  // the IRQ root; closure adds exactly those (and their fixed flow), never the overlapping operand-word identities of the JSR.
+  const auto reset_only = run_close(p, r({{0x200U, 0x202U}}), "close-reset-only");
+  expect(!reset_only.failure, "close: accepted");
+  for (const auto pc : {0x200U, 0x206U, 0x300U, 0x302U, 0x400U, 0x402U}) expect(has(reset_only.admitted, pc), "close: demanded entry admitted");
+  expect(!has(reset_only.admitted, 0x202U) && !has(reset_only.admitted, 0x204U), "close: overlapping operand identities are not invented");
+  expect(!has(reset_only.admitted, 0x420U), "close: an unproposed, unreferenced identity is not admitted");
+  expect(reset_only.k0_count == 1U, "close: K0 is the proposal");
+
+  // (2) Legal overlap preserved: proposing the operand-word identity keeps both interpretations.
+  const auto overlap = run_close(p, r({{0x200U, 0x204U}}), "close-overlap");
+  expect(has(overlap.admitted, 0x200U) && has(overlap.admitted, 0x202U), "close: a proposed overlapping identity is kept with the outer one");
+
+  // (3) A proposed start whose fixed edge leaves the proposal is completed (prune would drop it): the chain and its far target are admitted.
+  const auto chain = run_close(p, r({{0x200U, 0x202U}, {0x420U, 0x422U}}), "close-chain");
+  for (const auto pc : {0x420U, 0x430U, 0x440U, 0x842U}) expect(has(chain.admitted, pc), "close: fixed edges are followed transitively");
+  expect(chain.rounds >= 4U, "close: waves chain through the successors");
+  const auto pruned_chain = prune_genesis_region_admission(p.program, p.entries, r({{0x200U, 0x202U}, {0x420U, 0x422U}}));
+  expect(pruned_chain.failure.has_value(), "prune of the same instruction-start proposal rejects (the reason closure exists)");
+
+  // (4) Cap exhaustion rejects, never broadens; a malformed region rejects.
+  const auto capped = run_close(p, r({{0x200U, 0x202U}, {0x420U, 0x422U}}), "close-cap", 2U);
+  expect(capped.failure == std::optional<std::string>("region_close_cap_exhausted"), "close: cap exhaustion rejects");
+  const auto malformed = close_genesis_region_admission(p.program, p.entries, r({{0x201U, 0x300U}}));
+  expect(malformed.failure == std::optional<std::string>("malformed_region"), "close: odd region rejected");
+
+  // (5) Materialized identities are mandatory roots: added even when the proposal omits them; the validator then accepts.
+  auto alias_image = skeleton();
+  alias_image.words(0x600U, {0x4E71U, 0x4E75U});
+  const auto a = build(alias_image, true);
+  const auto with_alias = run_close(a, r({{0x200U, 0x202U}}), "close-alias");
+  expect(!with_alias.failure && has(with_alias.admitted, 0xFF0000U), "close: a materialized identity outside R is added");
+
+  // (6) Order independence and randomised agreement with the naive least fixed point.
+  auto reversed = p;
+  std::reverse(reversed.entries.begin(), reversed.entries.end());
+  expect(close_genesis_region_admission(p.program, reversed.entries, r({{0x200U, 0x202U}, {0x420U, 0x422U}})).admitted == chain.admitted,
+         "close: reversed identity order => same K");
+  std::uint32_t state = 0x9E3779B9U;
+  const auto next = [&]() {
+    state = state * 1664525U + 1013904223U;
+    return state >> 8U;
+  };
+  const std::uint16_t palette[] = {0x6002U, 0x6004U, 0x60FAU, 0x60FEU, 0x6702U, 0x66F8U, 0x4E71U, 0x4E75U, 0x0000U, 0x5240U, 0x6100U, 0x4EB9U, 0x6000U};
+  for (int round = 0; round < 24; ++round) {
+    auto random = skeleton();
+    for (std::uint32_t at = 0x208U; at + 6U < 0x700U; at += 2U) {
+      if (at >= 0x300U && at < 0x304U) continue;
+      if (at >= 0x400U && at < 0x404U) continue;
+      const auto pick = next();
+      if (pick % 3U == 0U) random.words(at, {palette[pick % 13U]});
+      if (palette[pick % 13U] == 0x6000U || palette[pick % 13U] == 0x6100U || palette[pick % 13U] == 0x4EB9U) random.words(at + 2U, {static_cast<std::uint16_t>((next() % 0x700U) & ~1U)});
+    }
+    const auto rp = build(random);
+    Ranges starts;
+    for (std::uint32_t at = 0x200U; at < 0x700U; at += 2U)
+      if (next() % 5U == 0U) {
+        if (!starts.empty() && starts.back().end_address == at) starts.back().end_address = at + 2U;  // adjacent ranges must be merged
+        else starts.push_back({at, at + 2U});
+      }
+    run_close(rp, starts, "close-random-" + std::to_string(round));
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -435,6 +577,7 @@ int main() {
   materialized_identity();
   alias_source_mapping();
   order_independence_and_properties();
+  least_closed_superset();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";
     return EXIT_FAILURE;
