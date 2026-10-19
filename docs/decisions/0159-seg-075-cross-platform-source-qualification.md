@@ -22,7 +22,8 @@ is checked out (section 4); it is never copied. Further nominations must be adde
 Every build runs in an offline container (`--network none`) on a fresh copy of the pinned source. Before building, `build` re-verifies
 that the cached checkout is exactly the pinned commit with no tracked modification and records the observed commit; `report` treats a record
 built from any other commit as a contradiction. The build tree is the clean checkout: untracked and ignored files are refused. Every
-record also carries a hash of the exact recipe, candidate pin and toolchain definition that produced it, and `report`/`verify` flag a plan
+record also carries a hash of the exact recipe, the candidate pin and the plan's toolchain entry (Dockerfile path and pinned inputs;
+not the Dockerfile contents, the embedded helper scripts or the image ID) that produced it, and `report`/`verify` flag a plan
 recipe without a record, a record without a plan recipe, and any hash mismatch. Each successful recipe runs twice. A `date` wrapper shows
 the two runs different wall-clock dates (2029 and 2031, neither the real date), so dates taken through `date` are caught as
 nondeterminism. A wrapper cannot change a compiler's `__DATE__` or a program's own `time()`/`systime()`, so every output is also scanned
@@ -62,9 +63,10 @@ pinned tarballs are supplied from the private cache. Output reproducibility is m
 
 Classes per candidate (`class`; `technical` is the build/label outcome before the licence rule). Output counts are per successful recipe
 run. Every successful recipe was run twice. Its code digests (a TOS PRG's every byte except its symbol table, otherwise every byte) are
-identical between the runs. The exceptions are two declared volatile outputs, which embed the compiler's `__DATE__`: GODLIB `PROFILER.C`'s
-object and miniupnp's `listacsi.tos`. No undeclared clock leak was found. The runs are byte-identical too, except that the two
-mintlib-linked toolkit demos differ inside their PRG symbol tables.
+identical between the runs. The exceptions are two declared volatile outputs, which embed the compiler's `__DATE__`/`__TIME__`: GODLIB
+`PROFILER.C`'s object and miniupnp's `listacsi.tos`. No undeclared clock leak was found in the four scanned encodings. The runs are
+byte-identical too, except in two places: the two mintlib-linked toolkit demos differ inside their PRG symbol tables, and GODLIB's
+volatile object differs by its `__TIME__`.
 
 | tier | candidate | platform | class | technical | executed evidence |
 |---|---|---|---|---|---|
