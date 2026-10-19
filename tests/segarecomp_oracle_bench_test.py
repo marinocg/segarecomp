@@ -63,6 +63,8 @@ def image(lineage, broad, inc, region, instr, **kw):
 def gate():
     dep = b.deployed({"accepted": False, "plan_cpu": 3.0}, {"total_cpu": 100.0, "generated_bytes": 1000})
     check(dep == {"cpu": 103.0, "generated_bytes": 1000, "fallback": True}, "a rejected plan is deployed as broad plus the attempt")
+    own = b.deployed({"accepted": False, "total_cpu": 104.0, "generated_bytes": 1000, "plan_cpu": 0.0}, {"total_cpu": 100.0, "generated_bytes": 1000})
+    check(own == {"cpu": 104.0, "generated_bytes": 1000, "fallback": True}, "a route that fell back inside its own build is charged its measured build")
     # Eight lineages, strong instruction-level gain everywhere -> G1.
     imgs = {iid: image(L, (100, 1000), (60, 600), (50, 500), (20, 200)) for iid, L in b.GATE_IMAGES.items()}
     g = b.evaluate_gate(imgs)
@@ -136,6 +138,19 @@ def counters():
     check(pub == {"a": 1.2346, "n": [{"y": 2}]}, f"public() strips private keys and paths: {pub}")
 
 
+def privacy_guard():
+    import segarecomp_ml_v3_diagnose as dg
+    try:
+        dg.require_private_dir(ROOT / "tools")
+        check(False, "a tracked directory must be refused as private output")
+    except SystemExit:
+        pass
+    build = ROOT / "build"
+    build.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=build, prefix="oracle-privacy-") as tmp:
+        dg.require_private_dir(pathlib.Path(tmp) / "work")  # an ignored directory is accepted
+
+
 def end_to_end(cli, cc):
     if not hasattr(os, "wait4"):
         print("SKIP: end-to-end measurement needs POSIX wait4")
@@ -180,6 +195,7 @@ def main():
     proposals()
     gate()
     counters()
+    privacy_guard()
     rc = 0
     if len(sys.argv) == 3:
         rc = end_to_end(sys.argv[1], sys.argv[2])

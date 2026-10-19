@@ -647,7 +647,7 @@
    "per_lineage": false
   },
   "g_c": 0.1542,
-  "h": 0.3413,
+  "h": 0.3424,
   "lineages": [
    "D01",
    "D02",
@@ -1419,7 +1419,7 @@
      },
      "deployed": {
       "c_vs_broad": 1.0,
-      "cpu_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0128,
       "fallback": true
      },
      "emit_cpu": 2.3825,

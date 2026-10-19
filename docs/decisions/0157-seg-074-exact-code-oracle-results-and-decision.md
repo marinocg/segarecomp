@@ -25,8 +25,12 @@
   - one image at a time on a 16-core, 15 GB host.
 - **CPU accounting:** per-process user + system time from `wait4`.
 - **Bounded runs:** 120 frames, instruction budget 12,000,000, `quick` profile, wall timeout.
-- **Instrumentation:** the per-TU-family CPU breakdown and the non-gating diagnostics were added to the tool after the pre-registration
-  commit (`b61a187`). They change no gate input.
+- **Instrumentation:** ADR 0156 was committed in `5cb36dc` and the tooling in `b61a187`, both before any oracle measurement. The per-TU-family
+  CPU breakdown and the non-gating diagnostics were added to the tool afterwards (the measurement ran on that working copy, committed in the
+  results commit). They change no gate input.
+- **Correction after independent review:** the first aggregation charged `INC`'s D07 fallback as broad (101.6 CPU-s). It is now charged
+  its own measured build (102.9 CPU-s), which already contains the rejected attempt, as ADR 0156 requires. `h` moves from 0.3413 to
+  0.3424; no gate condition changes.
 - **Commands:**
 
 ```sh
@@ -96,7 +100,7 @@ Cache-assisted rebuild (production content-addressed object cache, same strategy
 |---|---|---|---|
 | `g` = 1 - mean_L(ORACLE_INSTR / ORACLE_REGION), CPU | **0.176** | >= 0.20 | no |
 | `g_c`, generated C | **0.154** | >= 0.20 | no |
-| `h` = 1 - mean_L(ORACLE_INSTR / INC deployed), CPU | **0.341** | >= 0.30 | yes |
+| `h` = 1 - mean_L(ORACLE_INSTR / INC deployed), CPU | **0.342** | >= 0.30 | yes |
 | lineages with instruction-vs-region gain >= 0.10 | **4 / 8** (D01 0.36, D02 0.32, D03 0.14, D04 0.35; D05 0.06, D06 0.08, D07 0.09, D09 -0.01) | >= 5 | no |
 | lineages whose `ORACLE_INSTR` is accepted | 8 / 8 | >= 6 | yes |
 | runtime blocker | none (11/11 equal) | - | - |
@@ -109,10 +113,10 @@ Cache-assisted rebuild (production content-addressed object cache, same strategy
 | question | comparison | commercial D01-D04 | SGDK D05-D09 | all 8 |
 |---|---|---|---|---|
 | A: ML ranking error (same granularity) | ORACLE_REGION / INC | **0.47** | 1.03 | 0.75 |
-| B: coarse granularity | ORACLE_INSTR / ORACLE_REGION | **0.71** | 0.94 | 0.82 |
+| B: coarse granularity | ORACLE_INSTR / ORACLE_REGION | **0.70** | 0.94 | 0.82 |
 | deployed incumbent vs broad | INC / BROAD | 0.50 | 0.82 | 0.66 |
 | floor vs broad | ORACLE_INSTR / BROAD | 0.17 | 0.78 | 0.48 |
-| research pair | M3RB50 / INC | 1.22 | 0.79 | 1.01 |
+| research pair | M3RB50 / INC | 1.22 | 0.79 | 1.00 |
 
 - **A (ranking) and B (granularity) are both large on fully source-labelled commercial images.**
   - A perfect 128-byte region is about half the incumbent's cost.
@@ -125,8 +129,9 @@ Cache-assisted rebuild (production content-addressed object cache, same strategy
   - The non-gating diagnostic below shows that this caution is necessary, not conservative.
 - **C (closure) therefore matters only through unknown bytes.** Its cost is the cost of not knowing.
 - **D (representation and compiler behaviour) bounds the floor:**
-  - On Shining Force the precise-discovery `block` TUs, which every strategy emits, take **0.70** of the `ORACLE_INSTR` build CPU
-    (`ORACLE_REGION` 0.62). They are 20.5 MB of C in 463 functions, the largest about 400 KB. Sonic 1 has 2.8 MB.
+  - On D03 the precise-discovery `block` TUs, which every strategy emits, take a lineage mean of **0.70** of the `ORACLE_INSTR` build CPU
+    (`ORACLE_REGION` 0.62): 0.82 / 0.75 on Shining Force and 0.58 / 0.48 on Shining Force II. Shining Force's blocks are 20.5 MB of C
+    in 463 functions, the largest about 400 KB. Sonic 1 has 2.8 MB.
   - Admission precision cannot touch that cost. It is why D03's instruction-vs-region gain is only 0.14.
 - **`rho`:** a quarter of the generated C sits in per-identity entry segments that duplicate another segment once literals are normalized.
 
@@ -163,7 +168,7 @@ Cache-assisted rebuild (production content-addressed object cache, same strategy
 **G2.** Two reasons:
 
 - **Instruction-level admission does not clear the pre-registered bar.** Its benefit is real on fully labelled commercial code: about
-  -29% vs a perfect region, and -67% vs the deployed incumbent. Across the lineages, however, it is limited:
+  -30% vs a perfect region, and -67% vs the deployed incumbent. Across the lineages, however, it is limited:
   - by unknown bytes, which cannot safely be excluded;
   - by precise-discovery block code, which admission cannot reach.
 - **About a quarter of the generated C is factorable residual entry code.**
@@ -178,7 +183,7 @@ this task's baselines on the same 11 images, with no fine-grained admission laye
    - require deterministic output.
 2. **Precise-discovery block representation:**
    - bound or split very large `genesis_block_*` functions, and/or share their per-instruction bodies with the AOT shared helpers;
-   - target the D03 hotspot (62-70% of oracle-build CPU), with runtime equivalence vs the current build.
+   - target the D03 hotspot (lineage mean 62-70% of oracle-build CPU), with runtime equivalence vs the current build.
 
 Both apply to broad, incumbent and any future admission strategy alike, so they help the default Compatibility path too.
 
@@ -201,3 +206,5 @@ Facts recorded for later refinement:
   reach.
 - **Single host, single compiler:** CPU time is robust to scheduling; wall time is descriptive.
 - **`rho`'s normalization** collapses every hexadecimal literal. Its realizable part depends on the operand-parameter design (diagnostic 2).
+  The segment splitter ends a segment at the first column-0 `}`. That equals ADR 0156's "next label or end of owner" for the emitter's
+  multi-line owner bodies; a one-line owner entry would merge neighbours.

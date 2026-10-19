@@ -231,6 +231,8 @@ def deployed(strategy_rec: dict, broad_rec: dict) -> dict:
     """The deployed cost of a strategy: its own build when accepted, else the broad build plus the cost of the rejected attempt."""
     if strategy_rec.get("accepted"):
         return {"cpu": strategy_rec["total_cpu"], "generated_bytes": strategy_rec["generated_bytes"], "fallback": False}
+    if "total_cpu" in strategy_rec:  # a route that fell back inside its own build (INC): its measured build already contains the attempt
+        return {"cpu": strategy_rec["total_cpu"], "generated_bytes": strategy_rec["generated_bytes"], "fallback": True}
     return {"cpu": broad_rec["total_cpu"] + strategy_rec.get("plan_cpu", 0.0), "generated_bytes": broad_rec["generated_bytes"], "fallback": True}
 
 
@@ -300,11 +302,11 @@ def evaluate_gate(per_image: dict) -> dict:
 
 
 # ================================================================================================================ process measurement
-def run_timed(cmd, cwd=None, timeout=None, stdout=subprocess.DEVNULL) -> dict:
-    """Run one process; wall, user+system CPU and peak RSS from wait4 (children of children are not part of a single compiler process)."""
+def run_timed(cmd, cwd=None, stdout=subprocess.DEVNULL) -> dict:
+    """Run one build-time process (CLI or compiler; never a generated program - those go through the startup bridge with an explicit
+    instruction budget and wall timeout); wall, user+system CPU and peak RSS from wait4. `ru_maxrss` is KiB on Linux (bytes on macOS)."""
     t0 = time.monotonic()
     proc = subprocess.Popen(cmd, cwd=cwd, stdout=stdout, stderr=subprocess.PIPE)
-    deadline = None if timeout is None else t0 + timeout
     err = b""
     try:
         err = proc.stderr.read() if proc.stderr else b""
@@ -317,8 +319,6 @@ def run_timed(cmd, cwd=None, timeout=None, stdout=subprocess.DEVNULL) -> dict:
             break
     proc.returncode = os.waitstatus_to_exitcode(status)
     wall = time.monotonic() - t0
-    if deadline is not None and time.monotonic() > deadline:
-        raise TimeoutError(" ".join(map(str, cmd[:2])))
     return {"rc": proc.returncode, "wall": wall, "cpu": ru.ru_utime + ru.ru_stime, "rss_kib": ru.ru_maxrss, "stderr": err.decode(errors="replace")}
 
 
