@@ -72,3 +72,15 @@ instead, check `sha256sum -c seg072-handoff-bundle-v1.tar.sha256`, extract it an
 | toolchains, public sources, Wine prefix, JRE, Python 2.7, SGDK trees | public pinned inputs, not bundled | minutes to rebuild (ADR 0152 procedures) |
 | sealed build trees (split/assembly working copies) | commercial-derived, not bundled; sealed truth and tokens are | ~15 min to rebuild from the pinned sources and operator images |
 | research virtualenv | not bundled (5.5 GB); package set recorded | `pip install` of the recorded versions |
+
+## SEG-073 diagnosis tooling
+
+`tools/segarecomp_ml_v3_diagnose.py` (ADR 0155) consumes this bundle without retraining. Its subcommands are:
+
+- `smoke`: a relocation smoke test. It resolves images through the manifest, can rebase external paths with `--rebase OLD=NEW`, and uses an
+  audit hook to prove the original working roots are not opened.
+- `infer`: regenerates the sealed per-cell scores by inference with the preserved weights.
+- `analyze`: label credibility, model complementarity, training exposure, diagnostic metrics, and the rank-fusion / structural-expansion
+  experiments.
+
+Archived `meta.json` paths are never rewritten.
