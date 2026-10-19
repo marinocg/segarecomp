@@ -83,3 +83,6 @@ set_property(TEST segarecomp_ml_v3_sgdk_test APPEND PROPERTY LABELS full fast)
 add_test(NAME segarecomp_ml_v3_train_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_v3_train_test.py)
 set_property(TEST segarecomp_ml_v3_train_test APPEND PROPERTY LABELS full fast)
+add_test(NAME segarecomp_ml_v3_diagnose_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_v3_diagnose_test.py)
+set_property(TEST segarecomp_ml_v3_diagnose_test APPEND PROPERTY LABELS full fast)
