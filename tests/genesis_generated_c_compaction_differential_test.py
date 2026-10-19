@@ -28,22 +28,69 @@ run = base.run
 
 EXTRA_SEED = r'''
   if (scenario >= 5U) {
-    static const uint32_t returns[3] = { %(ret_first)s, %(ret_first)s + 2U, %(ret_last)s };
+    static const uint32_t returns[] = { %(values)s };
     const uint32_t value = returns[scenario - 5U];
     const size_t at = (size_t)(r->a[7] & UINT32_C(0x00FFFFFF)) - UINT32_C(0x00FF0000);
     r->work_ram[at] = (uint8_t)(value >> 24); r->work_ram[at + 1U] = (uint8_t)(value >> 16);
     r->work_ram[at + 2U] = (uint8_t)(value >> 8); r->work_ram[at + 3U] = (uint8_t)value;
   }
 '''
-HARNESS = base.HARNESS.replace("scenario < 5U", "scenario < 8U").replace(
-    "  if (scenario >= 3U) {\n    r->privilege_violation_handler_present", EXTRA_SEED + "  if (scenario >= 3U) {\n    r->privilege_violation_handler_present", 1)
-assert "scenario < 8U" in HARNESS and "returns[3]" in HARNESS
+
+
+PROBE_ENTRY = r'''
+static const uint32_t probe_entries[] = { %(probe_entries)s };
+static int probe_entry(uint32_t pc) {
+  size_t i;
+  for (i = 0; i < sizeof probe_entries / sizeof probe_entries[0]; ++i) if (probe_entries[i] == pc) return 1;
+  return 0;
+}
+'''
+
+
+def probe_entries_of(reference_single):
+    """Entries that can execute an RTS: every address of a block whose body validates a return, and every AOT entry that
+    is (or calls) a body doing so, read from the reference single-file text."""
+    text = reference_single
+    entries = set()
+    for m in re.finditer(r"^(?:static )?GenesisControlTransfer genesis_block_[0-9A-F]{8}\(GenesisRuntime \*runtime\) \{\n(.*?)\n\}\n", text, re.S | re.M):
+        if "RETURN_TARGET_MISMATCH" in m.group(1):
+            entries |= {int(a, 16) for a in re.findall(r"case UINT32_C\(0x([0-9A-F]{8})\)", m.group(1))}
+    helpers = {m.group(1) for m in re.finditer(r"GenesisControlTransfer (genesis_aot_shared_\d{5})\([^)]*\) \{\n(.*?)\n\}\n", text, re.S)
+               if "RETURN_TARGET_MISMATCH" in m.group(2)}
+    for m in re.finditer(r"genesis_aot_(?:entry_)?([0-9A-F]{8})\b[^\n]*?\{(.*?)(?=\ngenesis_aot_entry_|\nstatic GenesisControlTransfer genesis_aot_|\Z)", text, re.S):
+        body = m.group(2)
+        if "RETURN_TARGET_MISMATCH" in body or any(h + "(" in body for h in helpers):
+            entries.add(int(m.group(1), 16))
+    return sorted(entries)
+
+
+def probe_values(targets):
+    """Every member, both neighbours of every member, and out-of-range/odd values: the binary search is probed everywhere."""
+    values = []
+    for t in targets:
+        values += [t, t + 1, (t - 1) & 0xFFFFFFFF, t + 2]
+    values += [0, 1, 0xFFFFFFFF, targets[0] - 2, targets[-1] + 2, targets[len(targets) // 2]]
+    return list(dict.fromkeys(values))
+
+
+def make_harness(values):
+    text = base.HARNESS.replace("scenario < 5U", "scenario < %dU" % (5 + len(values))).replace(
+        "  if (scenario >= 3U) {\n    r->privilege_violation_handler_present", EXTRA_SEED + "  if (scenario >= 3U) {\n    r->privilege_violation_handler_present", 1)
+    assert "returns[]" in text
+    anchor = "      GenesisControlTransfer t;\n"
+    assert anchor in text and "int main(void) {" in text
+    text = text.replace(anchor, anchor + "      if (scenario >= 5U && !probe_entry(entries[e])) continue;\n", 1)
+    text = text.replace("int main(void) {", PROBE_ENTRY + "int main(void) {", 1)
+    return text.replace("%(values)s", ", ".join("UINT32_C(0x%08X)" % v for v in values))
+
+
+PROBES = []
 
 
 def build_and_run(compiler, runtime, sources, include_dir, header, entries, tmp, tag, rets, opt="-O0"):
-    (tmp / f"{tag}_harness.c").write_text(HARNESS % {
+    (tmp / f"{tag}_harness.c").write_text(make_harness(probe_values(rets)) % {
         "header": header, "entries": ", ".join("UINT32_C(0x%08X)" % a for a in entries),
-        "ret_first": "UINT32_C(0x%08X)" % rets[0], "ret_last": "UINT32_C(0x%08X)" % rets[-1]})
+        "probe_entries": ", ".join("UINT32_C(0x%08X)" % a for a in PROBES)})
     flags = ["-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", opt, "-I", str(runtime), "-I", str(include_dir)]
     objects = []
     for index, source in enumerate(list(sources) + [tmp / f"{tag}_harness.c", runtime / "runtime.c"]):
@@ -94,6 +141,8 @@ def main():
             entries_of[form] = base.entry_addresses("".join((tmp / f"{form}_a" / n).read_text() for n in units if "_entries_" in n))
             singles[form] = run(pipeline, "--emit-compact-fixture", form).stdout
             assert singles[form] == run(pipeline, "--emit-compact-fixture", form).stdout, f"{form}: single-file emission deterministic"
+        PROBES[:] = probe_entries_of(singles["compact-ref"])
+        assert len(PROBES) >= 3, PROBES
         ref_targets = chain_targets(texts["compact-ref"])
         assert len(ref_targets) >= 3, ref_targets
         rets = ref_targets
@@ -207,8 +256,38 @@ def main():
         for tag, transform in (("operand_arg", wrong_operand),):
             mutant_run(tag, "compact-operand", transform, single=True)
         mutant_run("operand_arg_sharded", "compact-operand", wrong_operand)
-        mutant_run("drop_target", "compact-returns", drop_first_target, single=True)
+        def drop_nth(n):
+            def transform(text):
+                m = re.search(r"(genesis_return_targets\[\] = \{\n)(.*?)(\n\};)", text, re.S)
+                items = re.findall(r"0x[0-9A-F]{8}u", m.group(2))
+                del items[n if n >= 0 else len(items) + n]
+                return text[:m.start(2)] + ", ".join(items) + text[m.end(2):]
+            return transform
+
+        table_size = len(rets)
+        mutant_run("drop_first_target", "compact-returns", drop_first_target, single=True)
+        mutant_run("drop_median_target", "compact-returns", drop_nth(table_size // 2), single=True)
+        mutant_run("drop_last_target", "compact-returns", drop_nth(-1), single=True)
         mutant_run("accept_all", "compact-returns", accept_all, single=True)
+
+        # Per-helper operand mutants: perturbing the constants passed to ONE operand helper must be observable, for
+        # (almost) every helper - an operand that no scenario can observe would be a coverage hole.
+        single_both = singles["compact-operand"]
+        names = sorted(set(re.findall(r"(genesis_aot_shared_\d{5})\(GenesisRuntime \*runtime[^)]*genesis_aot_operand\)", single_both)))
+        sample = names[::max(1, len(names) // 6)][:6]
+        detected = 0
+        for name in sample:
+            def one_helper(text, name=name):
+                return re.sub(r"(" + name + r"\(runtime[^\n]*?, UINT(?:8|16|32)_C\(0x[0-9A-F]*)([0-9A-F])\)\); \}",
+                              lambda m: m.group(1) + "0123456789ABCDEF"[int(m.group(2), 16) ^ 1] + ")); }", text)
+            target = tmp / f"mutant_{name}_single.c"
+            mutated = one_helper(single_both)
+            assert mutated != single_both, name  # every operand helper has an explicit-constant call site
+            target.write_text(mutated)
+            out = build_and_run(compiler, runtime, [target], tmp, "runtime.h", entries_of["compact-operand"], tmp,
+                                f"mutant_{name}", rets)
+            detected += out != reference
+        assert detected * 4 >= len(sample) * 3, f"per-helper operand mutants detected {detected}/{len(sample)}"
     print("genesis_generated_c_compaction_differential_test: OK")
 
 

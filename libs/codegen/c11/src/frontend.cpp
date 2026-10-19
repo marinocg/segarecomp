@@ -773,6 +773,13 @@ std::vector<AotOperandLiteral> aot_operand_literals(const std::string &text) {
       if (cursor == digits) continue;
     }
     if (cursor >= text.size() || text[cursor] != ')') continue;
+    {
+      // The constant must fit the parameter type (never truncate silently).
+      const bool hex = text.compare(digits, 2U, "0x") == 0;
+      const std::size_t count = cursor - digits - (hex ? 2U : 0U);
+      if (hex ? count > width / 4U : count > 10U) continue;
+      if (!hex && std::stoull(text.substr(digits, count)) > (width == 32U ? 0xFFFFFFFFULL : (1ULL << width) - 1ULL)) continue;
+    }
     ++cursor;
     // Conservative constant-expression guard: a constant that is an array size or subscript is never parameterized.
     std::size_t prior = begin;
@@ -6281,7 +6288,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       if (aot_body_uses[id] != 1U) continue;
       const std::string &text = *aot_body_text[id];
       if (text.find("case ") != std::string::npos || text.find("static ") != std::string::npos ||
-          text.find("switch (") != std::string::npos || text.find(aot_operand_symbol) != std::string::npos)
+          text.find("switch (") != std::string::npos || text.find(aot_operand_symbol) != std::string::npos ||
+          text.find("GenesisInstructionProvenance)") != std::string::npos)
         continue;
       auto literals = aot_operand_literals(text);
       if (literals.empty() || literals.size() > max_constants) continue;
@@ -6349,6 +6357,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       helper_text.replace(first_literal.begin, first_literal.end - first_literal.begin, aot_operand_symbol);
       std::vector<std::pair<std::size_t, std::size_t>> verified;
       for (const auto &member : free) {
+        if (!verified.empty() && verified.back().first == member.first) continue;  // one hole per candidate
         const auto &candidate = candidates[member.first];
         const auto &literal = candidate.literals[member.second];
         if (literal.width != first_literal.width) continue;

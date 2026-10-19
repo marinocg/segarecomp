@@ -853,6 +853,13 @@ def t002_cost(rec: dict, key: str) -> float | None:
         return rec.get("generated_bytes")
     if key == "rss":
         return rec.get("peak_compiler_rss_kib")
+    if key in ("emit_cpu", "compile_cpu", "compile_wall", "link_cpu", "link_wall", "total_wall", "object_bytes", "executable_bytes", "emit_rss_kib"):
+        return rec.get(key)
+    if key == "cache_warm":
+        c = rec.get("cache") or {}
+        return c.get("warm_wall") or c.get("rebuild_wall")
+    if key == "functions":
+        return (rec.get("counts") or {}).get("aot_shared_helpers")
     if key == "thr":  # throughput ratio is base_cpu / variant_cpu, so the cost is the bounded-run CPU
         return (rec.get("perf") or {}).get("cpu_median")
     return None
@@ -940,6 +947,7 @@ def t002_evaluate(images: dict) -> dict:
         ab_checks["rss_mean_" + st.lower()] = (ab["strategies"][st]["rss_mean"] or 9.0) <= thr["rss_mean"]
         ab_checks["throughput_" + st.lower()] = (ab["strategies"][st]["throughput_mean"] or 0.0) >= thr["throughput_min"]
     ab["checks"] = ab_checks
+    ab["measured_lineages"] = sorted({L for st in T002_STRATEGIES for L in ab["strategies"][st]["cpu_lineage"]})
     ab["pass"] = bool(out["variants"]["a"]["pass"] and out["variants"]["b"]["pass"] and all(c is True for c in combined.values())
                       and all(ab_checks.values()))
     return out
@@ -970,6 +978,21 @@ def t002_equivalence(images: dict) -> dict:
                     tally("compiled_entry_rows_equal", bc.get("compiled_entry_rows") == vc.get("compiled_entry_rows"))
                 tally("admission_equal", base.get("admission") == var.get("admission"))
     return res
+
+
+def t002_secondary(images: dict) -> dict:
+    """Lineage-mean variant/base ratios of the remaining pre-registered metrics (descriptive; not adoption thresholds)."""
+    keys = ("emit_cpu", "compile_cpu", "compile_wall", "link_cpu", "link_wall", "total_wall", "object_bytes", "executable_bytes", "emit_rss_kib",
+            "cache_warm", "functions")
+    out: dict = {}
+    for variant in T002_VARIANTS[1:]:
+        for strat in T002_STRATEGIES:
+            row = {}
+            for key in keys:
+                lin = t002_lineage(t002_ratios(images, variant, strat, key))
+                row[key] = None if not lin else round(t002_mean(lin), 4)
+            out.setdefault(variant, {})[strat] = row
+    return out
 
 
 def t002_noise(work: pathlib.Path) -> dict:
@@ -1004,7 +1027,7 @@ def cmd_t002_aggregate(a) -> int:
     evaluation = t002_evaluate(images)
     record = {"schema": SCHEMA, "adr": "0158 (pre-registration section 1; results and decision below it)",
               "thresholds": {"a": T002_THRESHOLDS["a"], "b": T002_THRESHOLDS["b"], "combined_tolerance": T002_COMBINED_TOLERANCE},
-              "evaluation": evaluation, "equivalence": t002_equivalence(images), "noise": t002_noise(work), "images": {}}
+              "evaluation": evaluation, "secondary_lineage_mean_ratios": t002_secondary(images), "equivalence": t002_equivalence(images), "noise": t002_noise(work), "images": {}}
     for iid, per in sorted(images.items()):
         row = {"lineage": GATE_IMAGES[iid], "variants": {}}
         for variant, strategies in per.items():
