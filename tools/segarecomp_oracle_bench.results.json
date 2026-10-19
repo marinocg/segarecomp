@@ -1,0 +1,4254 @@
+{
+ "adr": "0156 (pre-registration) / 0157 (results)",
+ "diagnostics": {
+  "density": {
+   "d05": {
+    "broad_aot": "accepted",
+    "bytes": 131072,
+    "cells": 1024,
+    "data_bytes": 83707,
+    "decodable_positions_in_oracle_region": 19386,
+    "instruction_bytes": 11198,
+    "kind": "genesis_rom",
+    "labelled_starts": 3388,
+    "lineage": "D05",
+    "masked_cells": 284,
+    "negative_cells": 651,
+    "oracle_instr_fraction_of_decodable": 0.3536,
+    "oracle_instr_positions": 21472,
+    "oracle_region_cells": 373,
+    "oracle_region_fraction": 0.3643,
+    "ordinary_decodable_positions": 60720,
+    "positive_cells": 89,
+    "seed_cells": 27,
+    "unknown_bytes": 36167
+   },
+   "d06": {
+    "broad_aot": "accepted",
+    "bytes": 393216,
+    "cells": 3072,
+    "data_bytes": 294357,
+    "decodable_positions_in_oracle_region": 38332,
+    "instruction_bytes": 26678,
+    "kind": "genesis_rom",
+    "labelled_starts": 6750,
+    "lineage": "D06",
+    "masked_cells": 561,
+    "negative_cells": 2297,
+    "oracle_instr_fraction_of_decodable": 0.3137,
+    "oracle_instr_positions": 42841,
+    "oracle_region_cells": 775,
+    "oracle_region_fraction": 0.2523,
+    "ordinary_decodable_positions": 136572,
+    "positive_cells": 214,
+    "seed_cells": 23,
+    "unknown_bytes": 72181
+   },
+   "d07": {
+    "broad_aot": "accepted",
+    "bytes": 262144,
+    "cells": 2048,
+    "data_bytes": 125401,
+    "decodable_positions_in_oracle_region": 58331,
+    "instruction_bytes": 84868,
+    "kind": "genesis_rom",
+    "labelled_starts": 25246,
+    "lineage": "D07",
+    "masked_cells": 407,
+    "negative_cells": 974,
+    "oracle_instr_fraction_of_decodable": 0.484,
+    "oracle_instr_positions": 51184,
+    "oracle_region_cells": 1074,
+    "oracle_region_fraction": 0.5244,
+    "ordinary_decodable_positions": 105747,
+    "positive_cells": 667,
+    "seed_cells": 28,
+    "unknown_bytes": 51875
+   },
+   "d09": {
+    "broad_aot": "accepted",
+    "bytes": 131072,
+    "cells": 1024,
+    "data_bytes": 57619,
+    "decodable_positions_in_oracle_region": 28250,
+    "instruction_bytes": 2874,
+    "kind": "genesis_rom",
+    "labelled_starts": 742,
+    "lineage": "D09",
+    "masked_cells": 552,
+    "negative_cells": 448,
+    "oracle_instr_fraction_of_decodable": 0.6339,
+    "oracle_instr_positions": 36032,
+    "oracle_region_cells": 576,
+    "oracle_region_fraction": 0.5625,
+    "ordinary_decodable_positions": 56842,
+    "positive_cells": 24,
+    "seed_cells": 27,
+    "unknown_bytes": 70579
+   },
+   "d10": {
+    "broad_aot": "effective_address_not_24bit",
+    "bytes": 393216,
+    "cells": 3072,
+    "data_bytes": 292000,
+    "decodable_positions_in_oracle_region": 40152,
+    "instruction_bytes": 35710,
+    "kind": "genesis_rom",
+    "labelled_starts": 10592,
+    "lineage": "D10",
+    "masked_cells": 514,
+    "negative_cells": 2275,
+    "oracle_instr_fraction_of_decodable": 0.3299,
+    "oracle_instr_positions": 43347,
+    "oracle_region_cells": 797,
+    "oracle_region_fraction": 0.2594,
+    "ordinary_decodable_positions": 131390,
+    "positive_cells": 283,
+    "seed_cells": 0,
+    "unknown_bytes": 65506
+   },
+   "d11": {
+    "broad_aot": "effective_address_not_24bit",
+    "bytes": 262144,
+    "cells": 2048,
+    "data_bytes": 165135,
+    "decodable_positions_in_oracle_region": 39219,
+    "instruction_bytes": 22360,
+    "kind": "genesis_rom",
+    "labelled_starts": 6343,
+    "lineage": "D11",
+    "masked_cells": 587,
+    "negative_cells": 1282,
+    "oracle_instr_fraction_of_decodable": 0.4141,
+    "oracle_instr_positions": 43668,
+    "oracle_region_cells": 766,
+    "oracle_region_fraction": 0.374,
+    "ordinary_decodable_positions": 105444,
+    "positive_cells": 179,
+    "seed_cells": 0,
+    "unknown_bytes": 74649
+   },
+   "d12": {
+    "broad_aot": "effective_address_not_24bit",
+    "bytes": 262144,
+    "cells": 2048,
+    "data_bytes": 180973,
+    "decodable_positions_in_oracle_region": 31958,
+    "instruction_bytes": 39698,
+    "kind": "genesis_rom",
+    "labelled_starts": 11010,
+    "lineage": "D12",
+    "masked_cells": 329,
+    "negative_cells": 1407,
+    "oracle_instr_fraction_of_decodable": 0.3251,
+    "oracle_instr_positions": 31747,
+    "oracle_region_cells": 641,
+    "oracle_region_fraction": 0.313,
+    "ordinary_decodable_positions": 97647,
+    "positive_cells": 312,
+    "seed_cells": 0,
+    "unknown_bytes": 41473
+   },
+   "flicky": {
+    "broad_aot": "accepted",
+    "bytes": 131072,
+    "cells": 1024,
+    "data_bytes": 111486,
+    "decodable_positions_in_oracle_region": 9541,
+    "instruction_bytes": 19586,
+    "kind": "genesis_rom",
+    "labelled_starts": 5707,
+    "lineage": "D02",
+    "masked_cells": 0,
+    "negative_cells": 844,
+    "oracle_instr_fraction_of_decodable": 0.2778,
+    "oracle_instr_positions": 5707,
+    "oracle_region_cells": 180,
+    "oracle_region_fraction": 0.1758,
+    "ordinary_decodable_positions": 20542,
+    "positive_cells": 180,
+    "seed_cells": 11,
+    "unknown_bytes": 0
+   },
+   "ps2": {
+    "broad_aot": "accepted",
+    "bytes": 786432,
+    "cells": 6144,
+    "data_bytes": 716858,
+    "decodable_positions_in_oracle_region": 31432,
+    "instruction_bytes": 69574,
+    "kind": "genesis_rom",
+    "labelled_starts": 19261,
+    "lineage": "D04",
+    "masked_cells": 0,
+    "negative_cells": 5579,
+    "oracle_instr_fraction_of_decodable": 0.0705,
+    "oracle_instr_positions": 19261,
+    "oracle_region_cells": 565,
+    "oracle_region_fraction": 0.092,
+    "ordinary_decodable_positions": 273068,
+    "positive_cells": 565,
+    "seed_cells": 45,
+    "unknown_bytes": 0
+   },
+   "s1": {
+    "broad_aot": "accepted",
+    "bytes": 524288,
+    "cells": 4096,
+    "data_bytes": 434138,
+    "decodable_positions_in_oracle_region": 42581,
+    "instruction_bytes": 90150,
+    "kind": "genesis_rom",
+    "labelled_starts": 24180,
+    "lineage": "D01",
+    "masked_cells": 2,
+    "negative_cells": 3274,
+    "oracle_instr_fraction_of_decodable": 0.1391,
+    "oracle_instr_positions": 24180,
+    "oracle_region_cells": 822,
+    "oracle_region_fraction": 0.2007,
+    "ordinary_decodable_positions": 173831,
+    "positive_cells": 820,
+    "seed_cells": 58,
+    "unknown_bytes": 0
+   },
+   "s2": {
+    "broad_aot": "accepted",
+    "bytes": 1048576,
+    "cells": 8192,
+    "data_bytes": 865354,
+    "decodable_positions_in_oracle_region": 86875,
+    "instruction_bytes": 183222,
+    "kind": "genesis_rom",
+    "labelled_starts": 48733,
+    "lineage": "D01",
+    "masked_cells": 0,
+    "negative_cells": 6534,
+    "oracle_instr_fraction_of_decodable": 0.1388,
+    "oracle_instr_positions": 48733,
+    "oracle_region_cells": 1658,
+    "oracle_region_fraction": 0.2024,
+    "ordinary_decodable_positions": 351049,
+    "positive_cells": 1658,
+    "seed_cells": 38,
+    "unknown_bytes": 0
+   },
+   "scd_modules": {
+    "bytes": 2894798,
+    "cells": 22623,
+    "data_bytes": 2537598,
+    "decodable_positions_in_oracle_region": 164239,
+    "instruction_bytes": 357200,
+    "kind": "scd_module (aggregate)",
+    "labelled_starts": 96276,
+    "lineage": "D01",
+    "masked_cells": 1,
+    "modules": 36,
+    "negative_cells": 19490,
+    "oracle_instr_fraction_of_decodable": 0.0941,
+    "oracle_instr_positions": 96276,
+    "oracle_region_cells": 3133,
+    "oracle_region_fraction": 0.1385,
+    "ordinary_decodable_positions": 1022902,
+    "positive_cells": 3132,
+    "seed_cells": 518,
+    "unknown_bytes": 0
+   },
+   "sf1": {
+    "broad_aot": "accepted",
+    "bytes": 1572864,
+    "cells": 12288,
+    "data_bytes": 1417424,
+    "decodable_positions_in_oracle_region": 70009,
+    "instruction_bytes": 155440,
+    "kind": "genesis_rom",
+    "labelled_starts": 44740,
+    "lineage": "D03",
+    "masked_cells": 2,
+    "negative_cells": 10976,
+    "oracle_instr_fraction_of_decodable": 0.0915,
+    "oracle_instr_positions": 44740,
+    "oracle_region_cells": 1312,
+    "oracle_region_fraction": 0.1068,
+    "ordinary_decodable_positions": 488910,
+    "positive_cells": 1310,
+    "seed_cells": 75,
+    "unknown_bytes": 0
+   },
+   "sf2": {
+    "broad_aot": "accepted",
+    "bytes": 2097152,
+    "cells": 16384,
+    "data_bytes": 1934916,
+    "decodable_positions_in_oracle_region": 80206,
+    "instruction_bytes": 162236,
+    "kind": "genesis_rom",
+    "labelled_starts": 48627,
+    "lineage": "D03",
+    "masked_cells": 0,
+    "negative_cells": 14866,
+    "oracle_instr_fraction_of_decodable": 0.0665,
+    "oracle_instr_positions": 48627,
+    "oracle_region_cells": 1518,
+    "oracle_region_fraction": 0.0927,
+    "ordinary_decodable_positions": 731172,
+    "positive_cells": 1518,
+    "seed_cells": 58,
+    "unknown_bytes": 0
+   },
+   "sk": {
+    "broad_aot": "accepted",
+    "bytes": 2097152,
+    "cells": 16384,
+    "data_bytes": 1625094,
+    "decodable_positions_in_oracle_region": 216453,
+    "instruction_bytes": 472058,
+    "kind": "genesis_rom",
+    "labelled_starts": 119319,
+    "lineage": "D01",
+    "masked_cells": 4,
+    "negative_cells": 12307,
+    "oracle_instr_fraction_of_decodable": 0.1704,
+    "oracle_instr_positions": 119319,
+    "oracle_region_cells": 4077,
+    "oracle_region_fraction": 0.2488,
+    "ordinary_decodable_positions": 700067,
+    "positive_cells": 4073,
+    "seed_cells": 17,
+    "unknown_bytes": 0
+   }
+  },
+  "instr_labelled_only": {
+   "d05": {
+    "broad_runtime": {
+     "frames": 9,
+     "outcome": "guest_stop"
+    },
+    "c_vs_broad": 0.4489,
+    "cpu_vs_broad": 0.4683,
+    "k": 7867,
+    "runtime": {
+     "frames": 9,
+     "outcome": "guest_stop"
+    },
+    "runtime_equal": true,
+    "stats": {
+     "added": "4479",
+     "k": "7867",
+     "k0": "3388",
+     "ranges": "3940",
+     "roots_added": "9",
+     "rounds": "378",
+     "universe": "65160"
+    }
+   },
+   "d06": {
+    "broad_runtime": {
+     "frames": 120,
+     "outcome": "frames_reached"
+    },
+    "c_vs_broad": 0.241,
+    "cpu_vs_broad": 0.2041,
+    "k": 10917,
+    "runtime": {
+     "frames": 7,
+     "outcome": "guest_stop"
+    },
+    "runtime_equal": false,
+    "stats": {
+     "added": "4167",
+     "k": "10917",
+     "k0": "6750",
+     "ranges": "6150",
+     "roots_added": "9",
+     "rounds": "247",
+     "universe": "193648"
+    }
+   },
+   "d07": {
+    "broad_runtime": {
+     "frames": 2,
+     "outcome": "guest_stop"
+    },
+    "c_vs_broad": 0.3792,
+    "cpu_vs_broad": 0.364,
+    "k": 28578,
+    "runtime": {
+     "frames": 2,
+     "outcome": "guest_stop"
+    },
+    "runtime_equal": true,
+    "stats": {
+     "added": "3332",
+     "k": "28578",
+     "k0": "25246",
+     "ranges": "13463",
+     "roots_added": "9",
+     "rounds": "172",
+     "universe": "128385"
+    }
+   },
+   "d09": {
+    "broad_runtime": {
+     "frames": 120,
+     "outcome": "frames_reached"
+    },
+    "c_vs_broad": 0.2046,
+    "cpu_vs_broad": 0.1784,
+    "k": 3061,
+    "runtime": {
+     "frames": 7,
+     "outcome": "guest_stop"
+    },
+    "runtime_equal": false,
+    "stats": {
+     "added": "2319",
+     "k": "3061",
+     "k0": "742",
+     "ranges": "1640",
+     "roots_added": "9",
+     "rounds": "237",
+     "universe": "64509"
+    }
+   }
+  },
+  "note": "non-gating attribution diagnostics; never part of the ADR 0156 gate",
+  "representation": {
+   "d05": {
+    "block": {
+     "cpu": 1.4411,
+     "functions": 100,
+     "largest_function_lines": 275,
+     "top1_tu_share": 0.407,
+     "top5_tu_share": 0.9576,
+     "tus": 6
+    },
+    "lineage": "D05",
+    "rho": 0.1833,
+    "rho_by_operand_literals": {
+     "0": 0.014,
+     "1": 0.1372,
+     "2": 0.0163,
+     "3+": 0.0158
+    },
+    "rho_pc_only": 0.014,
+    "strategy": "ORACLE_REGION"
+   },
+   "d06": {
+    "block": {
+     "cpu": 1.898,
+     "functions": 84,
+     "largest_function_lines": 230,
+     "top1_tu_share": 0.3328,
+     "top5_tu_share": 0.9058,
+     "tus": 7
+    },
+    "lineage": "D06",
+    "rho": 0.1855,
+    "rho_by_operand_literals": {
+     "0": 0.0278,
+     "1": 0.1238,
+     "2": 0.0173,
+     "3+": 0.0166
+    },
+    "rho_pc_only": 0.0278,
+    "strategy": "ORACLE_REGION"
+   },
+   "d07": {
+    "block": {
+     "cpu": 27.602,
+     "functions": 100,
+     "largest_function_lines": 223,
+     "top1_tu_share": 0.2542,
+     "top5_tu_share": 0.9227,
+     "tus": 8
+    },
+    "lineage": "D07",
+    "rho": 0.3824,
+    "rho_by_operand_literals": {
+     "0": 0.0845,
+     "1": 0.1896,
+     "2": 0.0288,
+     "3+": 0.0795
+    },
+    "rho_pc_only": 0.0845,
+    "strategy": "ORACLE_REGION"
+   },
+   "d09": {
+    "block": {
+     "cpu": 1.1398,
+     "functions": 70,
+     "largest_function_lines": 270,
+     "top1_tu_share": 0.2535,
+     "top5_tu_share": 0.9522,
+     "tus": 6
+    },
+    "lineage": "D09",
+    "rho": 0.1856,
+    "rho_by_operand_literals": {
+     "0": 0.0307,
+     "1": 0.1056,
+     "2": 0.0235,
+     "3+": 0.0257
+    },
+    "rho_pc_only": 0.0307,
+    "strategy": "ORACLE_REGION"
+   },
+   "flicky": {
+    "block": {
+     "cpu": 1.4566,
+     "functions": 99,
+     "largest_function_lines": 127,
+     "top1_tu_share": 0.3639,
+     "top5_tu_share": 1.0,
+     "tus": 5
+    },
+    "lineage": "D02",
+    "rho": 0.2616,
+    "rho_by_operand_literals": {
+     "0": 0.0048,
+     "1": 0.1873,
+     "2": 0.0256,
+     "3+": 0.0439
+    },
+    "rho_pc_only": 0.0048,
+    "strategy": "ORACLE_REGION"
+   },
+   "ps2": {
+    "block": {
+     "cpu": 4.6591,
+     "functions": 231,
+     "largest_function_lines": 190,
+     "top1_tu_share": 0.2816,
+     "top5_tu_share": 0.9523,
+     "tus": 7
+    },
+    "lineage": "D04",
+    "rho": 0.2141,
+    "rho_by_operand_literals": {
+     "0": 0.006,
+     "1": 0.148,
+     "2": 0.0465,
+     "3+": 0.0136
+    },
+    "rho_pc_only": 0.006,
+    "strategy": "ORACLE_REGION"
+   },
+   "s1": {
+    "block": {
+     "cpu": 7.8838,
+     "functions": 276,
+     "largest_function_lines": 657,
+     "top1_tu_share": 0.2997,
+     "top5_tu_share": 0.8547,
+     "tus": 8
+    },
+    "lineage": "D01",
+    "rho": 0.2586,
+    "rho_by_operand_literals": {
+     "0": 0.0121,
+     "1": 0.1786,
+     "2": 0.0421,
+     "3+": 0.0258
+    },
+    "rho_pc_only": 0.0121,
+    "strategy": "ORACLE_REGION"
+   },
+   "s2": {
+    "block": {
+     "cpu": 8.8353,
+     "functions": 193,
+     "largest_function_lines": 670,
+     "top1_tu_share": 0.5926,
+     "top5_tu_share": 0.9578,
+     "tus": 8
+    },
+    "lineage": "D01",
+    "rho": 0.2913,
+    "rho_by_operand_literals": {
+     "0": 0.0153,
+     "1": 0.198,
+     "2": 0.0461,
+     "3+": 0.0318
+    },
+    "rho_pc_only": 0.0153,
+    "strategy": "ORACLE_REGION"
+   },
+   "sf1": {
+    "block": {
+     "cpu": 233.9949,
+     "functions": 463,
+     "largest_function_lines": 187,
+     "top1_tu_share": 0.2889,
+     "top5_tu_share": 0.8527,
+     "tus": 8
+    },
+    "lineage": "D03",
+    "rho": 0.2594,
+    "rho_by_operand_literals": {
+     "0": 0.0358,
+     "1": 0.1981,
+     "2": 0.0147,
+     "3+": 0.0108
+    },
+    "rho_pc_only": 0.0358,
+    "strategy": "ORACLE_REGION"
+   },
+   "sf2": {
+    "block": {
+     "cpu": 71.269,
+     "functions": 331,
+     "largest_function_lines": 174,
+     "top1_tu_share": 0.3302,
+     "top5_tu_share": 0.9921,
+     "tus": 8
+    },
+    "lineage": "D03",
+    "rho": 0.2667,
+    "rho_by_operand_literals": {
+     "0": 0.0457,
+     "1": 0.1854,
+     "2": 0.0217,
+     "3+": 0.0139
+    },
+    "rho_pc_only": 0.0457,
+    "strategy": "ORACLE_REGION"
+   },
+   "sk": {
+    "block": {
+     "cpu": 35.8882,
+     "functions": 103,
+     "largest_function_lines": 132,
+     "top1_tu_share": 0.4026,
+     "top5_tu_share": 1.0,
+     "tus": 4
+    },
+    "lineage": "D01",
+    "rho": 0.3404,
+    "rho_by_operand_literals": {
+     "0": 0.0167,
+     "1": 0.249,
+     "2": 0.0333,
+     "3+": 0.0414
+    },
+    "rho_pc_only": 0.0167,
+    "strategy": "ORACLE_REGION"
+   }
+  }
+ },
+ "gate": {
+  "decision": "G2",
+  "g": 0.1759,
+  "g1_conditions": {
+   "accepted": true,
+   "g": false,
+   "g_c": false,
+   "h": true,
+   "per_lineage": false
+  },
+  "g_c": 0.1542,
+  "h": 0.3424,
+  "lineages": [
+   "D01",
+   "D02",
+   "D03",
+   "D04",
+   "D05",
+   "D06",
+   "D07",
+   "D09"
+  ],
+  "lineages_gain_ge_threshold": 4,
+  "oracle_instr_accepted_lineages": 8,
+  "per_lineage_instr_vs_region_gain": {
+   "D01": 0.3618,
+   "D02": 0.3236,
+   "D03": 0.1446,
+   "D04": 0.3512,
+   "D05": 0.0596,
+   "D06": 0.0839,
+   "D07": 0.092,
+   "D09": -0.01
+  },
+  "rho": 0.2465,
+  "rho_lineage": {
+   "D01": 0.2968,
+   "D02": 0.2616,
+   "D03": 0.2631,
+   "D04": 0.2141,
+   "D05": 0.1833,
+   "D06": 0.1855,
+   "D07": 0.3824,
+   "D09": 0.1856
+  },
+  "runtime_blocker": false,
+  "runtime_equal": {
+   "ORACLE_INSTR": "11/11",
+   "ORACLE_REGION": "11/11"
+  }
+ },
+ "images": {
+  "d05": {
+   "labelled_starts": 3388,
+   "labelled_starts_in_universe": 3388,
+   "lineage": "D05",
+   "rom_bytes": 131072,
+   "status": "measured",
+   "strategies": {
+    "BROAD": {
+     "accepted": true,
+     "aot_identities": 65160,
+     "cache": {
+      "failed": false,
+      "hits": 56,
+      "keyed_units": 56,
+      "misses": 0,
+      "populate_key_wall": 1.6718,
+      "warm_wall": 0.4697
+     },
+     "compile_cpu": 21.0987,
+     "compile_wall": 5.2093,
+     "counts": {
+      "aot_owner_functions": 84,
+      "aot_shared_helpers": 4642,
+      "block_functions": 200,
+      "compiled_entry_rows": 65160,
+      "dispatch_cases": 5704,
+      "entry_segments": 5347,
+      "rho": 0.1689
+     },
+     "deployed": {
+      "c_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0,
+      "fallback": false
+     },
+     "emit_cpu": 0.6653,
+     "executable_bytes": 3137704,
+     "family_cpu": {
+      "aot": 11.6873,
+      "block": 1.6492,
+      "entries": 0.2354,
+      "main": 0.2311,
+      "meta": 0.0752,
+      "runtime": 0.6726,
+      "shared": 6.4365,
+      "stop": 0.1116
+     },
+     "generated_bytes": 16276574,
+     "link_cpu": 0.0444,
+     "object_bytes": 4871056,
+     "peak_compiler_rss_kib": 127468,
+     "plan_cpu": 0.0,
+     "runtime": {
+      "frames": 9,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "total_cpu": 21.8085,
+     "total_wall": 5.8746,
+     "tu_count": 55
+    },
+    "INC": {
+     "accepted": true,
+     "aot_identities": 21966,
+     "broad_pcs_not_executed": 0,
+     "cache": {
+      "failed": false,
+      "hits": 55,
+      "keyed_units": 55,
+      "misses": 0,
+      "populate_key_wall": 1.5757,
+      "warm_wall": 0.4493
+     },
+     "compile_cpu": 18.7379,
+     "compile_wall": 4.6988,
+     "counts": {
+      "aot_owner_functions": 78,
+      "aot_shared_helpers": 4502,
+      "block_functions": 200,
+      "compiled_entry_rows": 21966,
+      "dispatch_cases": 5266,
+      "entry_segments": 4909,
+      "rho": 0.195
+     },
+     "deployed": {
+      "c_vs_broad": 0.8602,
+      "cpu_vs_broad": 0.8912,
+      "fallback": false
+     },
+     "emit_cpu": 0.6524,
+     "executable_bytes": 2376344,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 9.9831,
+      "block": 1.5582,
+      "entries": 0.13,
+      "main": 0.2301,
+      "meta": 0.0743,
+      "runtime": 0.7004,
+      "shared": 5.9357,
+      "stop": 0.1262
+     },
+     "generated_bytes": 14001533,
+     "k": 21966,
+     "link_cpu": 0.0457,
+     "object_bytes": 3999432,
+     "peak_compiler_rss_kib": 123260,
+     "plan_cpu": 0.0,
+     "reason": "none",
+     "runtime": {
+      "frames": 9,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "total_cpu": 19.436,
+     "total_wall": 5.3516,
+     "tu_count": 54
+    },
+    "M3RB50": {
+     "accepted": true,
+     "aot_identities": 21285,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 54,
+      "keyed_units": 54,
+      "misses": 0,
+      "populate_key_wall": 1.5539,
+      "warm_wall": 0.4285
+     },
+     "compile_cpu": 17.2325,
+     "compile_wall": 4.3483,
+     "counts": {
+      "aot_owner_functions": 70,
+      "aot_shared_helpers": 4428,
+      "block_functions": 200,
+      "compiled_entry_rows": 21285,
+      "dispatch_cases": 4828,
+      "entry_segments": 4471,
+      "rho": 0.1973
+     },
+     "deployed": {
+      "c_vs_broad": 0.8042,
+      "cpu_vs_broad": 0.8132,
+      "fallback": false
+     },
+     "emit_cpu": 0.3036,
+     "executable_bytes": 2243088,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 8.9693,
+      "block": 1.5075,
+      "entries": 0.1565,
+      "main": 0.2288,
+      "meta": 0.0831,
+      "runtime": 0.6717,
+      "shared": 5.5043,
+      "stop": 0.1114
+     },
+     "generated_bytes": 13089934,
+     "k": 21285,
+     "link_cpu": 0.0432,
+     "object_bytes": 3792608,
+     "peak_compiler_rss_kib": 119040,
+     "plan_cpu": 0.1548,
+     "reason": "",
+     "runtime": {
+      "frames": 9,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "21285",
+      "k0": "32589",
+      "pruned": "11304",
+      "ranges": "159",
+      "rounds": "5472",
+      "universe": "65160"
+     },
+     "total_cpu": 17.7341,
+     "total_wall": 4.8201,
+     "tu_count": 53
+    },
+    "ORACLE_INSTR": {
+     "accepted": true,
+     "aot_identities": 62015,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 52,
+      "keyed_units": 52,
+      "misses": 0,
+      "populate_key_wall": 1.5477,
+      "warm_wall": 0.4111
+     },
+     "compile_cpu": 18.5769,
+     "compile_wall": 4.661,
+     "counts": {
+      "aot_owner_functions": 78,
+      "aot_shared_helpers": 4292,
+      "block_functions": 200,
+      "compiled_entry_rows": 62015,
+      "dispatch_cases": 5337,
+      "entry_segments": 4980,
+      "rho": 0.1624
+     },
+     "deployed": {
+      "c_vs_broad": 0.9264,
+      "cpu_vs_broad": 0.8868,
+      "fallback": false
+     },
+     "emit_cpu": 0.5422,
+     "executable_bytes": 2919888,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 10.342,
+      "block": 1.5544,
+      "entries": 0.2044,
+      "main": 0.2329,
+      "meta": 0.0751,
+      "runtime": 0.6748,
+      "shared": 5.3835,
+      "stop": 0.1099
+     },
+     "generated_bytes": 15078628,
+     "k": 62015,
+     "link_cpu": 0.0445,
+     "object_bytes": 4534208,
+     "peak_compiler_rss_kib": 128044,
+     "plan_cpu": 0.1757,
+     "reason": "",
+     "runtime": {
+      "frames": 9,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "added": "40820",
+      "k": "62015",
+      "k0": "21195",
+      "ranges": "1728",
+      "roots_added": "0",
+      "rounds": "19501",
+      "universe": "65160"
+     },
+     "total_cpu": 19.3393,
+     "total_wall": 5.3747,
+     "tu_count": 51
+    },
+    "ORACLE_REGION": {
+     "accepted": true,
+     "aot_identities": 23463,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 56,
+      "keyed_units": 56,
+      "misses": 0,
+      "populate_key_wall": 1.6485,
+      "warm_wall": 0.4643
+     },
+     "compile_cpu": 20.0278,
+     "compile_wall": 4.9912,
+     "counts": {
+      "aot_owner_functions": 84,
+      "aot_shared_helpers": 4600,
+      "block_functions": 200,
+      "compiled_entry_rows": 23463,
+      "dispatch_cases": 5666,
+      "entry_segments": 5309,
+      "rho": 0.1833
+     },
+     "deployed": {
+      "c_vs_broad": 0.9158,
+      "cpu_vs_broad": 0.943,
+      "fallback": false
+     },
+     "emit_cpu": 0.3256,
+     "executable_bytes": 2534608,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 11.2313,
+      "block": 1.593,
+      "entries": 0.1247,
+      "main": 0.2315,
+      "meta": 0.0717,
+      "runtime": 0.6861,
+      "shared": 5.964,
+      "stop": 0.1255
+     },
+     "generated_bytes": 14906530,
+     "k": 23463,
+     "link_cpu": 0.0476,
+     "object_bytes": 4258040,
+     "peak_compiler_rss_kib": 122004,
+     "plan_cpu": 0.1644,
+     "reason": "",
+     "runtime": {
+      "frames": 9,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "23463",
+      "k0": "23539",
+      "pruned": "76",
+      "ranges": "6",
+      "rounds": "29",
+      "universe": "65160"
+     },
+     "total_cpu": 20.5653,
+     "total_wall": 5.4958,
+     "tu_count": 55
+    }
+   },
+   "universe": 65160
+  },
+  "d06": {
+   "labelled_starts": 6750,
+   "labelled_starts_in_universe": 6750,
+   "lineage": "D06",
+   "rom_bytes": 393216,
+   "status": "measured",
+   "strategies": {
+    "BROAD": {
+     "accepted": true,
+     "aot_identities": 193648,
+     "cache": {
+      "failed": false,
+      "hits": 60,
+      "keyed_units": 60,
+      "misses": 0,
+      "populate_key_wall": 2.5473,
+      "warm_wall": 0.7206
+     },
+     "compile_cpu": 67.7072,
+     "compile_wall": 15.641,
+     "counts": {
+      "aot_owner_functions": 268,
+      "aot_shared_helpers": 13700,
+      "block_functions": 168,
+      "compiled_entry_rows": 193648,
+      "dispatch_cases": 17414,
+      "entry_segments": 17112,
+      "rho": 0.2122
+     },
+     "deployed": {
+      "c_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0,
+      "fallback": false
+     },
+     "emit_cpu": 1.772,
+     "executable_bytes": 10052304,
+     "family_cpu": {
+      "aot": 43.4431,
+      "block": 2.6651,
+      "entries": 0.8356,
+      "main": 0.5561,
+      "meta": 0.0972,
+      "runtime": 0.8523,
+      "shared": 19.1395,
+      "stop": 0.1183
+     },
+     "generated_bytes": 54376418,
+     "link_cpu": 0.0793,
+     "object_bytes": 15458872,
+     "peak_compiler_rss_kib": 186456,
+     "plan_cpu": 0.0,
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "total_cpu": 69.5585,
+     "total_wall": 17.3496,
+     "tu_count": 59
+    },
+    "INC": {
+     "accepted": true,
+     "aot_identities": 65728,
+     "broad_pcs_not_executed": 0,
+     "cache": {
+      "failed": false,
+      "hits": 60,
+      "keyed_units": 60,
+      "misses": 0,
+      "populate_key_wall": 2.2131,
+      "warm_wall": 0.5778
+     },
+     "compile_cpu": 47.0681,
+     "compile_wall": 11.0225,
+     "counts": {
+      "aot_owner_functions": 198,
+      "aot_shared_helpers": 10190,
+      "block_functions": 168,
+      "compiled_entry_rows": 65728,
+      "dispatch_cases": 12921,
+      "entry_segments": 12619,
+      "rho": 0.1973
+     },
+     "deployed": {
+      "c_vs_broad": 0.6901,
+      "cpu_vs_broad": 0.7072,
+      "fallback": false
+     },
+     "emit_cpu": 2.0615,
+     "executable_bytes": 6192056,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 29.6523,
+      "block": 2.1275,
+      "entries": 0.4154,
+      "main": 0.5472,
+      "meta": 0.0886,
+      "runtime": 0.687,
+      "shared": 13.4405,
+      "stop": 0.1095
+     },
+     "generated_bytes": 37523930,
+     "k": 65728,
+     "link_cpu": 0.0622,
+     "object_bytes": 10097064,
+     "peak_compiler_rss_kib": 155616,
+     "plan_cpu": 0.0,
+     "reason": "none",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "total_cpu": 49.1918,
+     "total_wall": 12.983,
+     "tu_count": 59
+    },
+    "M3RB50": {
+     "accepted": true,
+     "aot_identities": 46220,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 59,
+      "keyed_units": 59,
+      "misses": 0,
+      "populate_key_wall": 2.0298,
+      "warm_wall": 0.5568
+     },
+     "compile_cpu": 36.0958,
+     "compile_wall": 8.6697,
+     "counts": {
+      "aot_owner_functions": 158,
+      "aot_shared_helpers": 8090,
+      "block_functions": 168,
+      "compiled_entry_rows": 46220,
+      "dispatch_cases": 10386,
+      "entry_segments": 10084,
+      "rho": 0.1866
+     },
+     "deployed": {
+      "c_vs_broad": 0.5544,
+      "cpu_vs_broad": 0.5371,
+      "fallback": false
+     },
+     "emit_cpu": 0.7551,
+     "executable_bytes": 4869808,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 21.9941,
+      "block": 2.0762,
+      "entries": 0.2278,
+      "main": 0.5613,
+      "meta": 0.0835,
+      "runtime": 0.6775,
+      "shared": 10.3731,
+      "stop": 0.1023
+     },
+     "generated_bytes": 30143587,
+     "k": 46220,
+     "link_cpu": 0.0581,
+     "object_bytes": 8149944,
+     "peak_compiler_rss_kib": 155212,
+     "plan_cpu": 0.452,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "46220",
+      "k0": "97387",
+      "pruned": "51167",
+      "ranges": "390",
+      "rounds": "24768",
+      "universe": "193648"
+     },
+     "total_cpu": 37.3609,
+     "total_wall": 9.8424,
+     "tu_count": 58
+    },
+    "ORACLE_INSTR": {
+     "accepted": true,
+     "aot_identities": 92072,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 59,
+      "keyed_units": 59,
+      "misses": 0,
+      "populate_key_wall": 1.9934,
+      "warm_wall": 0.5462
+     },
+     "compile_cpu": 32.884,
+     "compile_wall": 7.92,
+     "counts": {
+      "aot_owner_functions": 140,
+      "aot_shared_helpers": 7514,
+      "block_functions": 168,
+      "compiled_entry_rows": 92072,
+      "dispatch_cases": 9178,
+      "entry_segments": 8876,
+      "rho": 0.1742
+     },
+     "deployed": {
+      "c_vs_broad": 0.5312,
+      "cpu_vs_broad": 0.4951,
+      "fallback": false
+     },
+     "emit_cpu": 1.0176,
+     "executable_bytes": 5129656,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 19.376,
+      "block": 2.009,
+      "entries": 0.4595,
+      "main": 0.5389,
+      "meta": 0.0807,
+      "runtime": 0.677,
+      "shared": 9.6414,
+      "stop": 0.1014
+     },
+     "generated_bytes": 28887470,
+     "k": 92072,
+     "link_cpu": 0.058,
+     "object_bytes": 8116624,
+     "peak_compiler_rss_kib": 154688,
+     "plan_cpu": 0.4803,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "added": "50060",
+      "k": "92072",
+      "k0": "42012",
+      "ranges": "4008",
+      "roots_added": "0",
+      "rounds": "25023",
+      "universe": "193648"
+     },
+     "total_cpu": 34.4399,
+     "total_wall": 9.3581,
+     "tu_count": 58
+    },
+    "ORACLE_REGION": {
+     "accepted": true,
+     "aot_identities": 48526,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 57,
+      "keyed_units": 57,
+      "misses": 0,
+      "populate_key_wall": 1.9556,
+      "warm_wall": 0.5395
+     },
+     "compile_cpu": 36.3282,
+     "compile_wall": 8.6654,
+     "counts": {
+      "aot_owner_functions": 148,
+      "aot_shared_helpers": 8248,
+      "block_functions": 168,
+      "compiled_entry_rows": 48526,
+      "dispatch_cases": 9647,
+      "entry_segments": 9345,
+      "rho": 0.1855
+     },
+     "deployed": {
+      "c_vs_broad": 0.5378,
+      "cpu_vs_broad": 0.5405,
+      "fallback": false
+     },
+     "emit_cpu": 0.7673,
+     "executable_bytes": 4791472,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 21.518,
+      "block": 2.0631,
+      "entries": 0.2805,
+      "main": 0.5691,
+      "meta": 0.0847,
+      "runtime": 0.6742,
+      "shared": 11.034,
+      "stop": 0.1046
+     },
+     "generated_bytes": 29242588,
+     "k": 48526,
+     "link_cpu": 0.0551,
+     "object_bytes": 7992208,
+     "peak_compiler_rss_kib": 154996,
+     "plan_cpu": 0.4438,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "48526",
+      "k0": "48620",
+      "pruned": "94",
+      "ranges": "11",
+      "rounds": "36",
+      "universe": "193648"
+     },
+     "total_cpu": 37.5944,
+     "total_wall": 9.8411,
+     "tu_count": 56
+    }
+   },
+   "universe": 193648
+  },
+  "d07": {
+   "labelled_starts": 25246,
+   "labelled_starts_in_universe": 25246,
+   "lineage": "D07",
+   "rom_bytes": 262144,
+   "status": "measured",
+   "strategies": {
+    "BROAD": {
+     "accepted": true,
+     "aot_identities": 128385,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 2.4738,
+      "warm_wall": 0.6668
+     },
+     "compile_cpu": 99.8547,
+     "compile_wall": 23.265,
+     "counts": {
+      "aot_owner_functions": 332,
+      "aot_shared_helpers": 10598,
+      "block_functions": 200,
+      "compiled_entry_rows": 128385,
+      "dispatch_cases": 21516,
+      "entry_segments": 21214,
+      "rho": 0.3504
+     },
+     "deployed": {
+      "c_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0,
+      "fallback": false
+     },
+     "emit_cpu": 1.6981,
+     "executable_bytes": 10175568,
+     "family_cpu": {
+      "aot": 47.3353,
+      "block": 34.5585,
+      "entries": 0.4029,
+      "main": 0.406,
+      "meta": 0.0911,
+      "runtime": 0.7095,
+      "shared": 16.2328,
+      "stop": 0.1186
+     },
+     "generated_bytes": 54909701,
+     "link_cpu": 0.0843,
+     "object_bytes": 17742648,
+     "peak_compiler_rss_kib": 156744,
+     "plan_cpu": 0.0,
+     "runtime": {
+      "frames": 2,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "total_cpu": 101.637,
+     "total_wall": 24.9097,
+     "tu_count": 60
+    },
+    "INC": {
+     "accepted": false,
+     "aot_identities": 128385,
+     "broad_pcs_not_executed": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 2.4901,
+      "warm_wall": 0.6945
+     },
+     "compile_cpu": 100.4698,
+     "compile_wall": 23.3951,
+     "counts": {
+      "aot_owner_functions": 332,
+      "aot_shared_helpers": 10598,
+      "block_functions": 200,
+      "compiled_entry_rows": 128385,
+      "dispatch_cases": 21516,
+      "entry_segments": 21214,
+      "rho": 0.3504
+     },
+     "deployed": {
+      "c_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0128,
+      "fallback": true
+     },
+     "emit_cpu": 2.3825,
+     "executable_bytes": 10175568,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 47.1276,
+      "block": 34.8312,
+      "entries": 0.4188,
+      "main": 0.4017,
+      "meta": 0.0913,
+      "runtime": 0.677,
+      "shared": 16.8036,
+      "stop": 0.1187
+     },
+     "generated_bytes": 54909701,
+     "link_cpu": 0.0874,
+     "object_bytes": 17742648,
+     "peak_compiler_rss_kib": 156728,
+     "plan_cpu": 0.0,
+     "reason": "prune_rejected",
+     "runtime": {
+      "frames": 2,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "total_cpu": 102.9398,
+     "total_wall": 25.6702,
+     "tu_count": 60
+    },
+    "M3RB50": {
+     "accepted": true,
+     "aot_identities": 60305,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 2.0836,
+      "warm_wall": 0.5618
+     },
+     "compile_cpu": 58.6358,
+     "compile_wall": 13.7815,
+     "counts": {
+      "aot_owner_functions": 194,
+      "aot_shared_helpers": 7098,
+      "block_functions": 200,
+      "compiled_entry_rows": 60305,
+      "dispatch_cases": 12656,
+      "entry_segments": 12354,
+      "rho": 0.3248
+     },
+     "deployed": {
+      "c_vs_broad": 0.6163,
+      "cpu_vs_broad": 0.5912,
+      "fallback": false
+     },
+     "emit_cpu": 1.085,
+     "executable_bytes": 6223664,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 25.6477,
+      "block": 21.2585,
+      "entries": 0.2277,
+      "main": 0.4592,
+      "meta": 0.0822,
+      "runtime": 0.7328,
+      "shared": 10.1195,
+      "stop": 0.1082
+     },
+     "generated_bytes": 33841657,
+     "k": 60305,
+     "link_cpu": 0.0657,
+     "object_bytes": 10970440,
+     "peak_compiler_rss_kib": 138240,
+     "plan_cpu": 0.3019,
+     "reason": "",
+     "runtime": {
+      "frames": 2,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "60305",
+      "k0": "65097",
+      "pruned": "4792",
+      "ranges": "105",
+      "rounds": "1491",
+      "universe": "128385"
+     },
+     "total_cpu": 60.0885,
+     "total_wall": 15.1253,
+     "tu_count": 60
+    },
+    "ORACLE_INSTR": {
+     "accepted": true,
+     "aot_identities": 52500,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 2.0892,
+      "warm_wall": 0.5648
+     },
+     "compile_cpu": 71.0716,
+     "compile_wall": 16.6229,
+     "counts": {
+      "aot_owner_functions": 222,
+      "aot_shared_helpers": 6116,
+      "block_functions": 200,
+      "compiled_entry_rows": 52500,
+      "dispatch_cases": 14423,
+      "entry_segments": 14121,
+      "rho": 0.4009
+     },
+     "deployed": {
+      "c_vs_broad": 0.6437,
+      "cpu_vs_broad": 0.7133,
+      "fallback": false
+     },
+     "emit_cpu": 1.0488,
+     "executable_bytes": 6347520,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 28.3401,
+      "block": 31.5294,
+      "entries": 0.2105,
+      "main": 0.3876,
+      "meta": 0.0789,
+      "runtime": 0.6962,
+      "shared": 9.7232,
+      "stop": 0.1058
+     },
+     "generated_bytes": 35346443,
+     "k": 52500,
+     "link_cpu": 0.0663,
+     "object_bytes": 11492848,
+     "peak_compiler_rss_kib": 145612,
+     "plan_cpu": 0.3154,
+     "reason": "",
+     "runtime": {
+      "frames": 2,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "added": "1923",
+      "k": "52500",
+      "k0": "50577",
+      "ranges": "12365",
+      "roots_added": "0",
+      "rounds": "558",
+      "universe": "128385"
+     },
+     "total_cpu": 72.5021,
+     "total_wall": 17.9484,
+     "tu_count": 60
+    },
+    "ORACLE_REGION": {
+     "accepted": true,
+     "aot_identities": 67136,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 2.2006,
+      "warm_wall": 0.6084
+     },
+     "compile_cpu": 78.3031,
+     "compile_wall": 18.3373,
+     "counts": {
+      "aot_owner_functions": 246,
+      "aot_shared_helpers": 7672,
+      "block_functions": 200,
+      "compiled_entry_rows": 67136,
+      "dispatch_cases": 15971,
+      "entry_segments": 15669,
+      "rho": 0.3824
+     },
+     "deployed": {
+      "c_vs_broad": 0.7359,
+      "cpu_vs_broad": 0.7856,
+      "fallback": false
+     },
+     "emit_cpu": 1.171,
+     "executable_bytes": 7316192,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 33.7743,
+      "block": 30.7289,
+      "entries": 0.2776,
+      "main": 0.5599,
+      "meta": 0.0847,
+      "runtime": 0.6728,
+      "shared": 12.0545,
+      "stop": 0.1503
+     },
+     "generated_bytes": 40405814,
+     "k": 67136,
+     "link_cpu": 0.0711,
+     "object_bytes": 13094216,
+     "peak_compiler_rss_kib": 145484,
+     "plan_cpu": 0.3041,
+     "reason": "",
+     "runtime": {
+      "frames": 2,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "67136",
+      "k0": "67872",
+      "pruned": "736",
+      "ranges": "120",
+      "rounds": "65",
+      "universe": "128385"
+     },
+     "total_cpu": 79.8493,
+     "total_wall": 19.768,
+     "tu_count": 60
+    }
+   },
+   "universe": 128385
+  },
+  "d09": {
+   "labelled_starts": 742,
+   "labelled_starts_in_universe": 742,
+   "lineage": "D09",
+   "rom_bytes": 131072,
+   "status": "measured",
+   "strategies": {
+    "BROAD": {
+     "accepted": true,
+     "aot_identities": 64509,
+     "cache": {
+      "failed": false,
+      "hits": 58,
+      "keyed_units": 58,
+      "misses": 0,
+      "populate_key_wall": 1.8335,
+      "warm_wall": 0.4975
+     },
+     "compile_cpu": 29.2649,
+     "compile_wall": 7.1381,
+     "counts": {
+      "aot_owner_functions": 122,
+      "aot_shared_helpers": 5802,
+      "block_functions": 140,
+      "compiled_entry_rows": 64509,
+      "dispatch_cases": 8087,
+      "entry_segments": 7783,
+      "rho": 0.1798
+     },
+     "deployed": {
+      "c_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0,
+      "fallback": false
+     },
+     "emit_cpu": 0.5782,
+     "executable_bytes": 3993032,
+     "family_cpu": {
+      "aot": 19.0141,
+      "block": 1.2736,
+      "entries": 0.2221,
+      "main": 0.2293,
+      "meta": 0.1346,
+      "runtime": 0.6724,
+      "shared": 7.619,
+      "stop": 0.0997
+     },
+     "generated_bytes": 22192670,
+     "link_cpu": 0.0524,
+     "object_bytes": 6237736,
+     "peak_compiler_rss_kib": 127412,
+     "plan_cpu": 0.0,
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "total_cpu": 29.8955,
+     "total_wall": 7.729,
+     "tu_count": 57
+    },
+    "INC": {
+     "accepted": true,
+     "aot_identities": 21986,
+     "broad_pcs_not_executed": 0,
+     "cache": {
+      "failed": false,
+      "hits": 55,
+      "keyed_units": 55,
+      "misses": 0,
+      "populate_key_wall": 1.5849,
+      "warm_wall": 0.429
+     },
+     "compile_cpu": 19.2959,
+     "compile_wall": 4.8371,
+     "counts": {
+      "aot_owner_functions": 82,
+      "aot_shared_helpers": 4286,
+      "block_functions": 140,
+      "compiled_entry_rows": 21986,
+      "dispatch_cases": 5453,
+      "entry_segments": 5149,
+      "rho": 0.1878
+     },
+     "deployed": {
+      "c_vs_broad": 0.6415,
+      "cpu_vs_broad": 0.675,
+      "fallback": false
+     },
+     "emit_cpu": 0.8355,
+     "executable_bytes": 2402104,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 11.0725,
+      "block": 1.153,
+      "entries": 0.1193,
+      "main": 0.226,
+      "meta": 0.0735,
+      "runtime": 0.6827,
+      "shared": 5.8748,
+      "stop": 0.0941
+     },
+     "generated_bytes": 14236399,
+     "k": 21986,
+     "link_cpu": 0.0487,
+     "object_bytes": 4012728,
+     "peak_compiler_rss_kib": 131136,
+     "plan_cpu": 0.0,
+     "reason": "none",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "total_cpu": 20.18,
+     "total_wall": 5.6596,
+     "tu_count": 54
+    },
+    "M3RB50": {
+     "accepted": true,
+     "aot_identities": 21045,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 53,
+      "keyed_units": 53,
+      "misses": 0,
+      "populate_key_wall": 1.5131,
+      "warm_wall": 0.4168
+     },
+     "compile_cpu": 17.9138,
+     "compile_wall": 4.4728,
+     "counts": {
+      "aot_owner_functions": 78,
+      "aot_shared_helpers": 4116,
+      "block_functions": 140,
+      "compiled_entry_rows": 21045,
+      "dispatch_cases": 5198,
+      "entry_segments": 4894,
+      "rho": 0.185
+     },
+     "deployed": {
+      "c_vs_broad": 0.6125,
+      "cpu_vs_broad": 0.6158,
+      "fallback": false
+     },
+     "emit_cpu": 0.3024,
+     "executable_bytes": 2274912,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 10.2275,
+      "block": 1.1629,
+      "entries": 0.1196,
+      "main": 0.2283,
+      "meta": 0.0821,
+      "runtime": 0.6863,
+      "shared": 5.3097,
+      "stop": 0.0973
+     },
+     "generated_bytes": 13592035,
+     "k": 21045,
+     "link_cpu": 0.0448,
+     "object_bytes": 3778512,
+     "peak_compiler_rss_kib": 130328,
+     "plan_cpu": 0.1485,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "21045",
+      "k0": "32513",
+      "pruned": "11468",
+      "ranges": "56",
+      "rounds": "5408",
+      "universe": "64509"
+     },
+     "total_cpu": 18.4095,
+     "total_wall": 4.9399,
+     "tu_count": 52
+    },
+    "ORACLE_INSTR": {
+     "accepted": true,
+     "aot_identities": 63305,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 58,
+      "keyed_units": 58,
+      "misses": 0,
+      "populate_key_wall": 1.8095,
+      "warm_wall": 0.4848
+     },
+     "compile_cpu": 29.9896,
+     "compile_wall": 7.2642,
+     "counts": {
+      "aot_owner_functions": 120,
+      "aot_shared_helpers": 5720,
+      "block_functions": 140,
+      "compiled_entry_rows": 63305,
+      "dispatch_cases": 7958,
+      "entry_segments": 7654,
+      "rho": 0.1764
+     },
+     "deployed": {
+      "c_vs_broad": 0.9833,
+      "cpu_vs_broad": 1.0308,
+      "fallback": false
+     },
+     "emit_cpu": 0.6068,
+     "executable_bytes": 3929560,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 19.438,
+      "block": 1.2268,
+      "entries": 0.2166,
+      "main": 0.2341,
+      "meta": 0.0763,
+      "runtime": 0.6778,
+      "shared": 8.0146,
+      "stop": 0.1054
+     },
+     "generated_bytes": 21821254,
+     "k": 63305,
+     "link_cpu": 0.0515,
+     "object_bytes": 6183552,
+     "peak_compiler_rss_kib": 129868,
+     "plan_cpu": 0.1673,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "added": "28267",
+      "k": "63305",
+      "k0": "35038",
+      "ranges": "434",
+      "roots_added": "0",
+      "rounds": "14023",
+      "universe": "64509"
+     },
+     "total_cpu": 30.8153,
+     "total_wall": 8.0355,
+     "tu_count": 57
+    },
+    "ORACLE_REGION": {
+     "accepted": true,
+     "aot_identities": 35783,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 58,
+      "keyed_units": 58,
+      "misses": 0,
+      "populate_key_wall": 1.8075,
+      "warm_wall": 0.4799
+     },
+     "compile_cpu": 29.878,
+     "compile_wall": 7.2881,
+     "counts": {
+      "aot_owner_functions": 122,
+      "aot_shared_helpers": 5796,
+      "block_functions": 140,
+      "compiled_entry_rows": 35783,
+      "dispatch_cases": 8035,
+      "entry_segments": 7731,
+      "rho": 0.1856
+     },
+     "deployed": {
+      "c_vs_broad": 0.9568,
+      "cpu_vs_broad": 1.0206,
+      "fallback": false
+     },
+     "emit_cpu": 0.4285,
+     "executable_bytes": 3575096,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 19.3258,
+      "block": 1.258,
+      "entries": 0.1792,
+      "main": 0.231,
+      "meta": 0.0789,
+      "runtime": 0.7292,
+      "shared": 7.9559,
+      "stop": 0.1201
+     },
+     "generated_bytes": 21234245,
+     "k": 35783,
+     "link_cpu": 0.0532,
+     "object_bytes": 5811128,
+     "peak_compiler_rss_kib": 123812,
+     "plan_cpu": 0.1511,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "35783",
+      "k0": "35853",
+      "pruned": "70",
+      "ranges": "13",
+      "rounds": "26",
+      "universe": "64509"
+     },
+     "total_cpu": 30.5108,
+     "total_wall": 7.8807,
+     "tu_count": 57
+    }
+   },
+   "universe": 64509
+  },
+  "flicky": {
+   "labelled_starts": 5707,
+   "labelled_starts_in_universe": 5707,
+   "lineage": "D02",
+   "rom_bytes": 131072,
+   "status": "measured",
+   "strategies": {
+    "BROAD": {
+     "accepted": true,
+     "aot_identities": 64352,
+     "cache": {
+      "failed": false,
+      "hits": 57,
+      "keyed_units": 57,
+      "misses": 0,
+      "populate_key_wall": 1.8004,
+      "warm_wall": 0.5009
+     },
+     "compile_cpu": 35.7736,
+     "compile_wall": 8.6095,
+     "counts": {
+      "aot_owner_functions": 160,
+      "aot_shared_helpers": 4786,
+      "block_functions": 198,
+      "compiled_entry_rows": 64352,
+      "dispatch_cases": 10409,
+      "entry_segments": 10183,
+      "rho": 0.2045
+     },
+     "deployed": {
+      "c_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0,
+      "fallback": false
+     },
+     "emit_cpu": 0.6683,
+     "executable_bytes": 4465168,
+     "family_cpu": {
+      "aot": 26.1626,
+      "block": 1.587,
+      "entries": 0.2394,
+      "main": 0.2492,
+      "meta": 0.0728,
+      "runtime": 0.6707,
+      "shared": 6.7417,
+      "stop": 0.0502
+     },
+     "generated_bytes": 26617514,
+     "link_cpu": 0.0546,
+     "object_bytes": 7010912,
+     "peak_compiler_rss_kib": 137876,
+     "plan_cpu": 0.0,
+     "runtime": {
+      "frames": 26,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "total_cpu": 36.4965,
+     "total_wall": 9.2845,
+     "tu_count": 56
+    },
+    "INC": {
+     "accepted": true,
+     "aot_identities": 22274,
+     "broad_pcs_not_executed": 0,
+     "cache": {
+      "failed": false,
+      "hits": 54,
+      "keyed_units": 54,
+      "misses": 0,
+      "populate_key_wall": 1.5836,
+      "warm_wall": 0.4138
+     },
+     "compile_cpu": 23.7189,
+     "compile_wall": 5.8492,
+     "counts": {
+      "aot_owner_functions": 112,
+      "aot_shared_helpers": 3376,
+      "block_functions": 198,
+      "compiled_entry_rows": 22274,
+      "dispatch_cases": 7373,
+      "entry_segments": 7147,
+      "rho": 0.2227
+     },
+     "deployed": {
+      "c_vs_broad": 0.6642,
+      "cpu_vs_broad": 0.6698,
+      "fallback": false
+     },
+     "emit_cpu": 0.6782,
+     "executable_bytes": 2823544,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 16.6396,
+      "block": 1.4703,
+      "entries": 0.1168,
+      "main": 0.2252,
+      "meta": 0.0695,
+      "runtime": 0.6704,
+      "shared": 4.479,
+      "stop": 0.0482
+     },
+     "generated_bytes": 17680251,
+     "k": 22274,
+     "link_cpu": 0.0467,
+     "object_bytes": 4768408,
+     "peak_compiler_rss_kib": 131228,
+     "plan_cpu": 0.0,
+     "reason": "none",
+     "runtime": {
+      "frames": 26,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "total_cpu": 24.4438,
+     "total_wall": 6.5269,
+     "tu_count": 53
+    },
+    "M3RB50": {
+     "accepted": true,
+     "aot_identities": 32198,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 52,
+      "keyed_units": 52,
+      "misses": 0,
+      "populate_key_wall": 1.5014,
+      "warm_wall": 0.4227
+     },
+     "compile_cpu": 20.9604,
+     "compile_wall": 5.2138,
+     "counts": {
+      "aot_owner_functions": 98,
+      "aot_shared_helpers": 2996,
+      "block_functions": 198,
+      "compiled_entry_rows": 32198,
+      "dispatch_cases": 6470,
+      "entry_segments": 6244,
+      "rho": 0.2226
+     },
+     "deployed": {
+      "c_vs_broad": 0.6077,
+      "cpu_vs_broad": 0.5899,
+      "fallback": false
+     },
+     "emit_cpu": 0.3854,
+     "executable_bytes": 2658040,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 14.1708,
+      "block": 1.453,
+      "entries": 0.1398,
+      "main": 0.3177,
+      "meta": 0.0708,
+      "runtime": 0.6778,
+      "shared": 4.0846,
+      "stop": 0.046
+     },
+     "generated_bytes": 16174615,
+     "k": 32198,
+     "link_cpu": 0.0448,
+     "object_bytes": 4424496,
+     "peak_compiler_rss_kib": 131544,
+     "plan_cpu": 0.1399,
+     "reason": "",
+     "runtime": {
+      "frames": 26,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "32198",
+      "k0": "32274",
+      "pruned": "76",
+      "ranges": "56",
+      "rounds": "9",
+      "universe": "64352"
+     },
+     "total_cpu": 21.5304,
+     "total_wall": 5.7494,
+     "tu_count": 51
+    },
+    "ORACLE_INSTR": {
+     "accepted": true,
+     "aot_identities": 5707,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 37,
+      "keyed_units": 37,
+      "misses": 0,
+      "populate_key_wall": 0.979,
+      "warm_wall": 0.2858
+     },
+     "compile_cpu": 9.2587,
+     "compile_wall": 2.5689,
+     "counts": {
+      "aot_owner_functions": 42,
+      "aot_shared_helpers": 1242,
+      "block_functions": 198,
+      "compiled_entry_rows": 5707,
+      "dispatch_cases": 2855,
+      "entry_segments": 2629,
+      "rho": 0.2847
+     },
+     "deployed": {
+      "c_vs_broad": 0.2698,
+      "cpu_vs_broad": 0.2641,
+      "fallback": false
+     },
+     "emit_cpu": 0.1941,
+     "executable_bytes": 1170824,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 4.9202,
+      "block": 1.3781,
+      "entries": 0.0819,
+      "main": 0.2153,
+      "meta": 0.0682,
+      "runtime": 0.6942,
+      "shared": 1.8589,
+      "stop": 0.0419
+     },
+     "generated_bytes": 7181518,
+     "k": 5707,
+     "link_cpu": 0.0396,
+     "object_bytes": 2228384,
+     "peak_compiler_rss_kib": 117032,
+     "plan_cpu": 0.147,
+     "reason": "",
+     "runtime": {
+      "frames": 26,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "added": "0",
+      "k": "5707",
+      "k0": "5707",
+      "ranges": "3175",
+      "roots_added": "0",
+      "rounds": "1",
+      "universe": "64352"
+     },
+     "total_cpu": 9.6394,
+     "total_wall": 2.9296,
+     "tu_count": 36
+    },
+    "ORACLE_REGION": {
+     "accepted": true,
+     "aot_identities": 11275,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 49,
+      "keyed_units": 49,
+      "misses": 0,
+      "populate_key_wall": 1.3316,
+      "warm_wall": 0.3948
+     },
+     "compile_cpu": 13.8408,
+     "compile_wall": 3.6055,
+     "counts": {
+      "aot_owner_functions": 66,
+      "aot_shared_helpers": 2264,
+      "block_functions": 198,
+      "compiled_entry_rows": 11275,
+      "dispatch_cases": 4336,
+      "entry_segments": 4110,
+      "rho": 0.2616
+     },
+     "deployed": {
+      "c_vs_broad": 0.4064,
+      "cpu_vs_broad": 0.3905,
+      "fallback": false
+     },
+     "emit_cpu": 0.2368,
+     "executable_bytes": 1721384,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 8.3125,
+      "block": 1.3536,
+      "entries": 0.0831,
+      "main": 0.2192,
+      "meta": 0.0668,
+      "runtime": 0.6717,
+      "shared": 3.0898,
+      "stop": 0.0443
+     },
+     "generated_bytes": 10816040,
+     "k": 11275,
+     "link_cpu": 0.0415,
+     "object_bytes": 2993176,
+     "peak_compiler_rss_kib": 117424,
+     "plan_cpu": 0.1329,
+     "reason": "",
+     "runtime": {
+      "frames": 26,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "11275",
+      "k0": "11354",
+      "pruned": "79",
+      "ranges": "57",
+      "rounds": "22",
+      "universe": "64352"
+     },
+     "total_cpu": 14.252,
+     "total_wall": 3.9923,
+     "tu_count": 48
+    }
+   },
+   "universe": 64352
+  },
+  "ps2": {
+   "labelled_starts": 19261,
+   "labelled_starts_in_universe": 19261,
+   "lineage": "D04",
+   "rom_bytes": 786432,
+   "status": "measured",
+   "strategies": {
+    "BROAD": {
+     "accepted": true,
+     "aot_identities": 367930,
+     "cache": {
+      "failed": false,
+      "hits": 60,
+      "keyed_units": 60,
+      "misses": 0,
+      "populate_key_wall": 5.5327,
+      "warm_wall": 1.5752
+     },
+     "compile_cpu": 314.6316,
+     "compile_wall": 72.2838,
+     "counts": {
+      "aot_owner_functions": 1292,
+      "aot_shared_helpers": 38436,
+      "block_functions": 462,
+      "compiled_entry_rows": 367930,
+      "dispatch_cases": 83191,
+      "entry_segments": 82675,
+      "rho": 0.3523
+     },
+     "deployed": {
+      "c_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0,
+      "fallback": false
+     },
+     "emit_cpu": 4.9657,
+     "executable_bytes": 37631000,
+     "family_cpu": {
+      "aot": 240.659,
+      "block": 9.1761,
+      "entries": 1.2156,
+      "main": 1.2673,
+      "meta": 0.2017,
+      "runtime": 0.6799,
+      "shared": 61.0415,
+      "stop": 0.3906
+     },
+     "generated_bytes": 221299609,
+     "link_cpu": 0.2016,
+     "object_bytes": 63102992,
+     "peak_compiler_rss_kib": 280104,
+     "plan_cpu": 0.0,
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "total_cpu": 319.799,
+     "total_wall": 77.0336,
+     "tu_count": 59
+    },
+    "INC": {
+     "accepted": true,
+     "aot_identities": 123574,
+     "broad_pcs_not_executed": 0,
+     "cache": {
+      "failed": false,
+      "hits": 60,
+      "keyed_units": 60,
+      "misses": 0,
+      "populate_key_wall": 3.3989,
+      "warm_wall": 0.9418
+     },
+     "compile_cpu": 135.0707,
+     "compile_wall": 31.2916,
+     "counts": {
+      "aot_owner_functions": 578,
+      "aot_shared_helpers": 17990,
+      "block_functions": 462,
+      "compiled_entry_rows": 123574,
+      "dispatch_cases": 37456,
+      "entry_segments": 36940,
+      "rho": 0.2965
+     },
+     "deployed": {
+      "c_vs_broad": 0.4549,
+      "cpu_vs_broad": 0.4376,
+      "fallback": false
+     },
+     "emit_cpu": 4.7619,
+     "executable_bytes": 16399632,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 98.3885,
+      "block": 6.675,
+      "entries": 0.5862,
+      "main": 1.0717,
+      "meta": 0.1126,
+      "runtime": 0.6981,
+      "shared": 27.3923,
+      "stop": 0.1463
+     },
+     "generated_bytes": 100668435,
+     "k": 123574,
+     "link_cpu": 0.1116,
+     "object_bytes": 27655984,
+     "peak_compiler_rss_kib": 219424,
+     "plan_cpu": 0.0,
+     "reason": "none",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "total_cpu": 139.9442,
+     "total_wall": 35.7705,
+     "tu_count": 59
+    },
+    "M3RB50": {
+     "accepted": true,
+     "aot_identities": 176321,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 60,
+      "keyed_units": 60,
+      "misses": 0,
+      "populate_key_wall": 3.9791,
+      "warm_wall": 1.1276
+     },
+     "compile_cpu": 185.2574,
+     "compile_wall": 42.8455,
+     "counts": {
+      "aot_owner_functions": 764,
+      "aot_shared_helpers": 23808,
+      "block_functions": 462,
+      "compiled_entry_rows": 176321,
+      "dispatch_cases": 49350,
+      "entry_segments": 48834,
+      "rho": 0.3159
+     },
+     "deployed": {
+      "c_vs_broad": 0.5975,
+      "cpu_vs_broad": 0.5917,
+      "fallback": false
+     },
+     "emit_cpu": 2.8213,
+     "executable_bytes": 21908352,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 138.367,
+      "block": 7.1265,
+      "entries": 0.6623,
+      "main": 1.0671,
+      "meta": 0.1275,
+      "runtime": 0.683,
+      "shared": 37.0608,
+      "stop": 0.1631
+     },
+     "generated_bytes": 132233711,
+     "k": 176321,
+     "link_cpu": 0.1358,
+     "object_bytes": 36840176,
+     "peak_compiler_rss_kib": 238424,
+     "plan_cpu": 0.9969,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "176321",
+      "k0": "184735",
+      "pruned": "8414",
+      "ranges": "2008",
+      "rounds": "266",
+      "universe": "367930"
+     },
+     "total_cpu": 189.2115,
+     "total_wall": 46.4849,
+     "tu_count": 59
+    },
+    "ORACLE_INSTR": {
+     "accepted": true,
+     "aot_identities": 19261,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 57,
+      "keyed_units": 57,
+      "misses": 0,
+      "populate_key_wall": 1.8739,
+      "warm_wall": 0.5047
+     },
+     "compile_cpu": 22.4347,
+     "compile_wall": 5.5849,
+     "counts": {
+      "aot_owner_functions": 116,
+      "aot_shared_helpers": 3568,
+      "block_functions": 462,
+      "compiled_entry_rows": 19263,
+      "dispatch_cases": 7820,
+      "entry_segments": 7304,
+      "rho": 0.2171
+     },
+     "deployed": {
+      "c_vs_broad": 0.1142,
+      "cpu_vs_broad": 0.0774,
+      "fallback": false
+     },
+     "emit_cpu": 1.3223,
+     "executable_bytes": 3459320,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 10.5636,
+      "block": 4.8603,
+      "entries": 0.1124,
+      "main": 1.3548,
+      "meta": 0.0756,
+      "runtime": 0.6757,
+      "shared": 4.6841,
+      "stop": 0.1082
+     },
+     "generated_bytes": 25270349,
+     "k": 19261,
+     "link_cpu": 0.0521,
+     "object_bytes": 6313296,
+     "peak_compiler_rss_kib": 212928,
+     "plan_cpu": 0.9343,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "added": "0",
+      "k": "19261",
+      "k0": "19261",
+      "ranges": "11280",
+      "roots_added": "0",
+      "rounds": "1",
+      "universe": "367930"
+     },
+     "total_cpu": 24.7434,
+     "total_wall": 7.7142,
+     "tu_count": 56
+    },
+    "ORACLE_REGION": {
+     "accepted": true,
+     "aot_identities": 35554,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 60,
+      "keyed_units": 60,
+      "misses": 0,
+      "populate_key_wall": 2.1103,
+      "warm_wall": 0.575
+     },
+     "compile_cpu": 35.8105,
+     "compile_wall": 8.6169,
+     "counts": {
+      "aot_owner_functions": 164,
+      "aot_shared_helpers": 6022,
+      "block_functions": 462,
+      "compiled_entry_rows": 35554,
+      "dispatch_cases": 10955,
+      "entry_segments": 10439,
+      "rho": 0.2141
+     },
+     "deployed": {
+      "c_vs_broad": 0.1528,
+      "cpu_vs_broad": 0.1193,
+      "fallback": false
+     },
+     "emit_cpu": 1.3603,
+     "executable_bytes": 4893120,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 19.2497,
+      "block": 6.1385,
+      "entries": 0.1694,
+      "main": 1.1972,
+      "meta": 0.081,
+      "runtime": 0.7451,
+      "shared": 8.1131,
+      "stop": 0.1165
+     },
+     "generated_bytes": 33807148,
+     "k": 35554,
+     "link_cpu": 0.0574,
+     "object_bytes": 8362360,
+     "peak_compiler_rss_kib": 214556,
+     "plan_cpu": 0.9086,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "35554",
+      "k0": "35622",
+      "pruned": "68",
+      "ranges": "21",
+      "rounds": "10",
+      "universe": "367930"
+     },
+     "total_cpu": 38.1367,
+     "total_wall": 10.7629,
+     "tu_count": 59
+    }
+   },
+   "universe": 367930
+  },
+  "s1": {
+   "labelled_starts": 24180,
+   "labelled_starts_in_universe": 24180,
+   "lineage": "D01",
+   "rom_bytes": 524288,
+   "status": "measured",
+   "strategies": {
+    "BROAD": {
+     "accepted": true,
+     "aot_identities": 246293,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 4.9399,
+      "warm_wall": 1.4824
+     },
+     "compile_cpu": 270.6605,
+     "compile_wall": 62.7137,
+     "counts": {
+      "aot_owner_functions": 1004,
+      "aot_shared_helpers": 37958,
+      "block_functions": 552,
+      "compiled_entry_rows": 246293,
+      "dispatch_cases": 64858,
+      "entry_segments": 64171,
+      "rho": 0.3123
+     },
+     "deployed": {
+      "c_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0,
+      "fallback": false
+     },
+     "emit_cpu": 3.4005,
+     "executable_bytes": 30668072,
+     "family_cpu": {
+      "aot": 192.4875,
+      "block": 14.2524,
+      "entries": 0.9364,
+      "main": 0.7956,
+      "meta": 0.1811,
+      "runtime": 0.703,
+      "shared": 61.0916,
+      "stop": 0.213
+     },
+     "generated_bytes": 177954042,
+     "link_cpu": 0.1794,
+     "object_bytes": 51490752,
+     "peak_compiler_rss_kib": 246764,
+     "plan_cpu": 0.0,
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "total_cpu": 274.2404,
+     "total_wall": 66.0095,
+     "tu_count": 60
+    },
+    "INC": {
+     "accepted": true,
+     "aot_identities": 86654,
+     "broad_pcs_not_executed": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 2.8262,
+      "warm_wall": 0.779
+     },
+     "compile_cpu": 99.5715,
+     "compile_wall": 23.1624,
+     "counts": {
+      "aot_owner_functions": 408,
+      "aot_shared_helpers": 13410,
+      "block_functions": 552,
+      "compiled_entry_rows": 86654,
+      "dispatch_cases": 26764,
+      "entry_segments": 26077,
+      "rho": 0.2475
+     },
+     "deployed": {
+      "c_vs_broad": 0.393,
+      "cpu_vs_broad": 0.3754,
+      "fallback": false
+     },
+     "emit_cpu": 3.2738,
+     "executable_bytes": 11649216,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 68.0008,
+      "block": 9.4173,
+      "entries": 0.379,
+      "main": 0.8766,
+      "meta": 0.104,
+      "runtime": 0.6833,
+      "shared": 19.9636,
+      "stop": 0.1469
+     },
+     "generated_bytes": 69939179,
+     "k": 86654,
+     "link_cpu": 0.0945,
+     "object_bytes": 20240656,
+     "peak_compiler_rss_kib": 178656,
+     "plan_cpu": 0.0,
+     "reason": "none",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "total_cpu": 102.9397,
+     "total_wall": 26.2588,
+     "tu_count": 60
+    },
+    "M3RB50": {
+     "accepted": true,
+     "aot_identities": 122746,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 3.4322,
+      "warm_wall": 0.9802
+     },
+     "compile_cpu": 148.2744,
+     "compile_wall": 34.3494,
+     "counts": {
+      "aot_owner_functions": 596,
+      "aot_shared_helpers": 19930,
+      "block_functions": 552,
+      "compiled_entry_rows": 122746,
+      "dispatch_cases": 38787,
+      "entry_segments": 38100,
+      "rho": 0.2619
+     },
+     "deployed": {
+      "c_vs_broad": 0.5693,
+      "cpu_vs_broad": 0.5509,
+      "fallback": false
+     },
+     "emit_cpu": 2.0968,
+     "executable_bytes": 16937568,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 104.3723,
+      "block": 11.2515,
+      "entries": 0.6094,
+      "main": 0.8442,
+      "meta": 0.1218,
+      "runtime": 0.6843,
+      "shared": 30.2271,
+      "stop": 0.1638
+     },
+     "generated_bytes": 101304719,
+     "k": 122746,
+     "link_cpu": 0.1131,
+     "object_bytes": 28854176,
+     "peak_compiler_rss_kib": 188120,
+     "plan_cpu": 0.6013,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "122746",
+      "k0": "125195",
+      "pruned": "2449",
+      "ranges": "974",
+      "rounds": "37",
+      "universe": "246293"
+     },
+     "total_cpu": 151.0856,
+     "total_wall": 36.9411,
+     "tu_count": 60
+    },
+    "ORACLE_INSTR": {
+     "accepted": true,
+     "aot_identities": 24180,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 1.9858,
+      "warm_wall": 0.5702
+     },
+     "compile_cpu": 31.694,
+     "compile_wall": 7.6958,
+     "counts": {
+      "aot_owner_functions": 134,
+      "aot_shared_helpers": 4936,
+      "block_functions": 552,
+      "compiled_entry_rows": 24180,
+      "dispatch_cases": 9222,
+      "entry_segments": 8535,
+      "rho": 0.2555
+     },
+     "deployed": {
+      "c_vs_broad": 0.1457,
+      "cpu_vs_broad": 0.1212,
+      "fallback": false
+     },
+     "emit_cpu": 0.9104,
+     "executable_bytes": 4171616,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 14.9522,
+      "block": 7.8076,
+      "entries": 0.1353,
+      "main": 0.8247,
+      "meta": 0.0804,
+      "runtime": 0.7454,
+      "shared": 7.0246,
+      "stop": 0.1238
+     },
+     "generated_bytes": 25919243,
+     "k": 24180,
+     "link_cpu": 0.0568,
+     "object_bytes": 7958768,
+     "peak_compiler_rss_kib": 172356,
+     "plan_cpu": 0.5649,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "added": "0",
+      "k": "24180",
+      "k0": "24180",
+      "ranges": "15119",
+      "roots_added": "0",
+      "rounds": "1",
+      "universe": "246293"
+     },
+     "total_cpu": 33.2261,
+     "total_wall": 9.1141,
+     "tu_count": 60
+    },
+    "ORACLE_REGION": {
+     "accepted": true,
+     "aot_identities": 51397,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 2.2812,
+      "warm_wall": 0.6285
+     },
+     "compile_cpu": 49.5795,
+     "compile_wall": 11.6751,
+     "counts": {
+      "aot_owner_functions": 210,
+      "aot_shared_helpers": 8672,
+      "block_functions": 552,
+      "compiled_entry_rows": 51397,
+      "dispatch_cases": 14090,
+      "entry_segments": 13403,
+      "rho": 0.2586
+     },
+     "deployed": {
+      "c_vs_broad": 0.223,
+      "cpu_vs_broad": 0.1875,
+      "fallback": false
+     },
+     "emit_cpu": 1.2187,
+     "executable_bytes": 6554808,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 27.0678,
+      "block": 8.516,
+      "entries": 0.3217,
+      "main": 0.7406,
+      "meta": 0.0901,
+      "runtime": 0.6887,
+      "shared": 11.9559,
+      "stop": 0.1988
+     },
+     "generated_bytes": 39674933,
+     "k": 51397,
+     "link_cpu": 0.0685,
+     "object_bytes": 11867128,
+     "peak_compiler_rss_kib": 172768,
+     "plan_cpu": 0.5565,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "51397",
+      "k0": "51661",
+      "pruned": "264",
+      "ranges": "90",
+      "rounds": "32",
+      "universe": "246293"
+     },
+     "total_cpu": 51.4232,
+     "total_wall": 13.3798,
+     "tu_count": 60
+    }
+   },
+   "universe": 246293
+  },
+  "s2": {
+   "labelled_starts": 48733,
+   "labelled_starts_in_universe": 48733,
+   "lineage": "D01",
+   "rom_bytes": 1048576,
+   "status": "measured",
+   "strategies": {
+    "BROAD": {
+     "accepted": true,
+     "aot_identities": 496309,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 7.2918,
+      "warm_wall": 2.1609
+     },
+     "compile_cpu": 456.6956,
+     "compile_wall": 106.2701,
+     "counts": {
+      "aot_owner_functions": 1734,
+      "aot_shared_helpers": 58720,
+      "block_functions": 386,
+      "compiled_entry_rows": 496309,
+      "dispatch_cases": 111373,
+      "entry_segments": 110900,
+      "rho": 0.3624
+     },
+     "deployed": {
+      "c_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0,
+      "fallback": false
+     },
+     "emit_cpu": 7.2461,
+     "executable_bytes": 51775176,
+     "family_cpu": {
+      "aot": 339.3491,
+      "block": 16.2764,
+      "entries": 1.787,
+      "main": 1.8303,
+      "meta": 0.2368,
+      "runtime": 0.739,
+      "shared": 96.1483,
+      "stop": 0.3285
+     },
+     "generated_bytes": 302320879,
+     "link_cpu": 0.287,
+     "object_bytes": 87335776,
+     "peak_compiler_rss_kib": 370232,
+     "plan_cpu": 0.0,
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "total_cpu": 464.2286,
+     "total_wall": 113.1861,
+     "tu_count": 60
+    },
+    "INC": {
+     "accepted": true,
+     "aot_identities": 172670,
+     "broad_pcs_not_executed": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 3.859,
+      "warm_wall": 1.1302
+     },
+     "compile_cpu": 166.666,
+     "compile_wall": 38.7184,
+     "counts": {
+      "aot_owner_functions": 692,
+      "aot_shared_helpers": 24886,
+      "block_functions": 386,
+      "compiled_entry_rows": 172670,
+      "dispatch_cases": 44719,
+      "entry_segments": 44246,
+      "rho": 0.2787
+     },
+     "deployed": {
+      "c_vs_broad": 0.3985,
+      "cpu_vs_broad": 0.3747,
+      "fallback": false
+     },
+     "emit_cpu": 7.1722,
+     "executable_bytes": 19587352,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 115.4538,
+      "block": 10.7949,
+      "entries": 0.7836,
+      "main": 1.5704,
+      "meta": 0.1648,
+      "runtime": 0.8478,
+      "shared": 36.9087,
+      "stop": 0.142
+     },
+     "generated_bytes": 120484727,
+     "k": 172670,
+     "link_cpu": 0.1255,
+     "object_bytes": 33049592,
+     "peak_compiler_rss_kib": 272624,
+     "plan_cpu": 0.0,
+     "reason": "none",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "total_cpu": 173.9637,
+     "total_wall": 45.4223,
+     "tu_count": 60
+    },
+    "M3RB50": {
+     "accepted": true,
+     "aot_identities": 243746,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 4.98,
+      "warm_wall": 1.4201
+     },
+     "compile_cpu": 254.2949,
+     "compile_wall": 59.4718,
+     "counts": {
+      "aot_owner_functions": 990,
+      "aot_shared_helpers": 36894,
+      "block_functions": 386,
+      "compiled_entry_rows": 243746,
+      "dispatch_cases": 63810,
+      "entry_segments": 63337,
+      "rho": 0.3
+     },
+     "deployed": {
+      "c_vs_broad": 0.5744,
+      "cpu_vs_broad": 0.5601,
+      "fallback": false
+     },
+     "emit_cpu": 4.3922,
+     "executable_bytes": 28973480,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 178.1245,
+      "block": 14.3259,
+      "entries": 1.0261,
+      "main": 1.4228,
+      "meta": 0.2025,
+      "runtime": 0.846,
+      "shared": 58.1706,
+      "stop": 0.1766
+     },
+     "generated_bytes": 173650205,
+     "k": 243746,
+     "link_cpu": 0.178,
+     "object_bytes": 49095432,
+     "peak_compiler_rss_kib": 272624,
+     "plan_cpu": 1.1516,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "243746",
+      "k0": "251392",
+      "pruned": "7646",
+      "ranges": "1758",
+      "rounds": "135",
+      "universe": "496309"
+     },
+     "total_cpu": 260.0167,
+     "total_wall": 64.7291,
+     "tu_count": 60
+    },
+    "ORACLE_INSTR": {
+     "accepted": true,
+     "aot_identities": 48733,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 2.438,
+      "warm_wall": 0.6864
+     },
+     "compile_cpu": 51.3236,
+     "compile_wall": 12.0744,
+     "counts": {
+      "aot_owner_functions": 254,
+      "aot_shared_helpers": 9084,
+      "block_functions": 386,
+      "compiled_entry_rows": 48736,
+      "dispatch_cases": 16644,
+      "entry_segments": 16171,
+      "rho": 0.2926
+     },
+     "deployed": {
+      "c_vs_broad": 0.1525,
+      "cpu_vs_broad": 0.1176,
+      "fallback": false
+     },
+     "emit_cpu": 2.099,
+     "executable_bytes": 6761304,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 26.3414,
+      "block": 9.6491,
+      "entries": 0.2189,
+      "main": 1.3859,
+      "meta": 0.0884,
+      "runtime": 0.7011,
+      "shared": 12.7975,
+      "stop": 0.1413
+     },
+     "generated_bytes": 46091760,
+     "k": 48733,
+     "link_cpu": 0.0702,
+     "object_bytes": 12154232,
+     "peak_compiler_rss_kib": 272624,
+     "plan_cpu": 1.1215,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "added": "0",
+      "k": "48733",
+      "k0": "48733",
+      "ranges": "31064",
+      "roots_added": "0",
+      "rounds": "1",
+      "universe": "496309"
+     },
+     "total_cpu": 54.6144,
+     "total_wall": 15.104,
+     "tu_count": 60
+    },
+    "ORACLE_REGION": {
+     "accepted": true,
+     "aot_identities": 103940,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 2.9797,
+      "warm_wall": 0.8777
+     },
+     "compile_cpu": 85.8017,
+     "compile_wall": 19.9892,
+     "counts": {
+      "aot_owner_functions": 390,
+      "aot_shared_helpers": 15730,
+      "block_functions": 386,
+      "compiled_entry_rows": 103940,
+      "dispatch_cases": 25363,
+      "entry_segments": 24890,
+      "rho": 0.2913
+     },
+     "deployed": {
+      "c_vs_broad": 0.2341,
+      "cpu_vs_broad": 0.1935,
+      "fallback": false
+     },
+     "emit_cpu": 2.8086,
+     "executable_bytes": 11146664,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 50.8479,
+      "block": 10.0959,
+      "entries": 0.3951,
+      "main": 1.4068,
+      "meta": 0.112,
+      "runtime": 0.6769,
+      "shared": 22.1317,
+      "stop": 0.1353
+     },
+     "generated_bytes": 70770978,
+     "k": 103940,
+     "link_cpu": 0.0903,
+     "object_bytes": 19217160,
+     "peak_compiler_rss_kib": 272624,
+     "plan_cpu": 1.1053,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "103940",
+      "k0": "104559",
+      "pruned": "619",
+      "ranges": "257",
+      "rounds": "29",
+      "universe": "496309"
+     },
+     "total_cpu": 89.8059,
+     "total_wall": 23.6779,
+     "tu_count": 60
+    }
+   },
+   "universe": 496309
+  },
+  "sf1": {
+   "labelled_starts": 44740,
+   "labelled_starts_in_universe": 44740,
+   "lineage": "D03",
+   "rom_bytes": 1572864,
+   "status": "measured",
+   "strategies": {
+    "BROAD": {
+     "accepted": true,
+     "aot_identities": 735560,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 10.0219,
+      "warm_wall": 2.9959
+     },
+     "compile_cpu": 1145.9197,
+     "compile_wall": 264.1421,
+     "counts": {
+      "aot_owner_functions": 2658,
+      "aot_shared_helpers": 66298,
+      "block_functions": 926,
+      "compiled_entry_rows": 735560,
+      "dispatch_cases": 171131,
+      "entry_segments": 170015,
+      "rho": 0.4117
+     },
+     "deployed": {
+      "c_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0,
+      "fallback": false
+     },
+     "emit_cpu": 12.5388,
+     "executable_bytes": 91392960,
+     "family_cpu": {
+      "aot": 567.7286,
+      "block": 450.665,
+      "entries": 2.6779,
+      "main": 2.1658,
+      "meta": 0.2568,
+      "runtime": 0.7034,
+      "shared": 121.4055,
+      "stop": 0.3167
+     },
+     "generated_bytes": 488525419,
+     "link_cpu": 0.5491,
+     "object_bytes": 194707328,
+     "peak_compiler_rss_kib": 455892,
+     "plan_cpu": 0.0,
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "total_cpu": 1159.0076,
+     "total_wall": 276.1542,
+     "tu_count": 60
+    },
+    "INC": {
+     "accepted": true,
+     "aot_identities": 253872,
+     "broad_pcs_not_executed": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 5.9199,
+      "warm_wall": 1.7025
+     },
+     "compile_cpu": 616.6605,
+     "compile_wall": 141.6174,
+     "counts": {
+      "aot_owner_functions": 1142,
+      "aot_shared_helpers": 39240,
+      "block_functions": 926,
+      "compiled_entry_rows": 253872,
+      "dispatch_cases": 74079,
+      "entry_segments": 72963,
+      "rho": 0.3084
+     },
+     "deployed": {
+      "c_vs_broad": 0.4689,
+      "cpu_vs_broad": 0.5429,
+      "fallback": false
+     },
+     "emit_cpu": 12.1917,
+     "executable_bytes": 45261584,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 220.3781,
+      "block": 320.9988,
+      "entries": 1.0999,
+      "main": 2.4897,
+      "meta": 0.2137,
+      "runtime": 0.6905,
+      "shared": 70.546,
+      "stop": 0.2436
+     },
+     "generated_bytes": 229071675,
+     "k": 253872,
+     "link_cpu": 0.3593,
+     "object_bytes": 118248744,
+     "peak_compiler_rss_kib": 372296,
+     "plan_cpu": 0.0,
+     "reason": "none",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "total_cpu": 629.2114,
+     "total_wall": 153.1355,
+     "tu_count": 60
+    },
+    "M3RB50": {
+     "accepted": true,
+     "aot_identities": 363503,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 6.9005,
+      "warm_wall": 2.0154
+     },
+     "compile_cpu": 689.106,
+     "compile_wall": 159.4714,
+     "counts": {
+      "aot_owner_functions": 1436,
+      "aot_shared_helpers": 48042,
+      "block_functions": 926,
+      "compiled_entry_rows": 363503,
+      "dispatch_cases": 92895,
+      "entry_segments": 91779,
+      "rho": 0.3356
+     },
+     "deployed": {
+      "c_vs_broad": 0.5802,
+      "cpu_vs_broad": 0.6031,
+      "fallback": false
+     },
+     "emit_cpu": 7.6961,
+     "executable_bytes": 55249008,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 285.9254,
+      "block": 315.95,
+      "entries": 1.2862,
+      "main": 2.2569,
+      "meta": 0.2066,
+      "runtime": 0.6955,
+      "shared": 82.5158,
+      "stop": 0.2697
+     },
+     "generated_bytes": 283433669,
+     "k": 363503,
+     "link_cpu": 0.4078,
+     "object_bytes": 135082496,
+     "peak_compiler_rss_kib": 379400,
+     "plan_cpu": 1.8399,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "363503",
+      "k0": "372016",
+      "pruned": "8513",
+      "ranges": "3378",
+      "rounds": "365",
+      "universe": "735560"
+     },
+     "total_cpu": 699.0498,
+     "total_wall": 168.6028,
+     "tu_count": 60
+    },
+    "ORACLE_INSTR": {
+     "accepted": true,
+     "aot_identities": 44741,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 2.9422,
+      "warm_wall": 0.8392
+     },
+     "compile_cpu": 310.826,
+     "compile_wall": 76.8382,
+     "counts": {
+      "aot_owner_functions": 296,
+      "aot_shared_helpers": 6442,
+      "block_functions": 926,
+      "compiled_entry_rows": 44743,
+      "dispatch_cases": 20050,
+      "entry_segments": 18934,
+      "rho": 0.2647
+     },
+     "deployed": {
+      "c_vs_broad": 0.1557,
+      "cpu_vs_broad": 0.2737,
+      "fallback": false
+     },
+     "emit_cpu": 4.429,
+     "executable_bytes": 18095480,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 34.2628,
+      "block": 260.8343,
+      "entries": 0.197,
+      "main": 2.0153,
+      "meta": 0.142,
+      "runtime": 0.7206,
+      "shared": 12.4928,
+      "stop": 0.1612
+     },
+     "generated_bytes": 76084852,
+     "k": 44741,
+     "link_cpu": 0.2355,
+     "object_bytes": 74622816,
+     "peak_compiler_rss_kib": 372296,
+     "plan_cpu": 1.7515,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "added": "1",
+      "k": "44741",
+      "k0": "44740",
+      "ranges": "24779",
+      "roots_added": "0",
+      "rounds": "2",
+      "universe": "735560"
+     },
+     "total_cpu": 317.242,
+     "total_wall": 82.7331,
+     "tu_count": 60
+    },
+    "ORACLE_REGION": {
+     "accepted": true,
+     "aot_identities": 82346,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 3.3747,
+      "warm_wall": 0.9464
+     },
+     "compile_cpu": 338.6896,
+     "compile_wall": 81.0795,
+     "counts": {
+      "aot_owner_functions": 402,
+      "aot_shared_helpers": 10980,
+      "block_functions": 926,
+      "compiled_entry_rows": 82346,
+      "dispatch_cases": 26762,
+      "entry_segments": 25646,
+      "rho": 0.2594
+     },
+     "deployed": {
+      "c_vs_broad": 0.1922,
+      "cpu_vs_broad": 0.2981,
+      "fallback": false
+     },
+     "emit_cpu": 4.848,
+     "executable_bytes": 21162536,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 53.711,
+      "block": 260.007,
+      "entries": 0.3121,
+      "main": 2.129,
+      "meta": 0.107,
+      "runtime": 0.6883,
+      "shared": 21.5591,
+      "stop": 0.176
+     },
+     "generated_bytes": 93907642,
+     "k": 82346,
+     "link_cpu": 0.2476,
+     "object_bytes": 78831008,
+     "peak_compiler_rss_kib": 372296,
+     "plan_cpu": 1.7304,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "82346",
+      "k0": "82928",
+      "pruned": "582",
+      "ranges": "130",
+      "rounds": "64",
+      "universe": "735560"
+     },
+     "total_cpu": 345.5156,
+     "total_wall": 87.3493,
+     "tu_count": 60
+    }
+   },
+   "universe": 735560
+  },
+  "sf2": {
+   "labelled_starts": 48627,
+   "labelled_starts_in_universe": 48627,
+   "lineage": "D03",
+   "rom_bytes": 2097152,
+   "status": "measured",
+   "strategies": {
+    "BROAD": {
+     "accepted": true,
+     "aot_identities": 991544,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 11.4559,
+      "warm_wall": 3.4972
+     },
+     "compile_cpu": 991.482,
+     "compile_wall": 229.0771,
+     "counts": {
+      "aot_owner_functions": 3256,
+      "aot_shared_helpers": 79474,
+      "block_functions": 662,
+      "compiled_entry_rows": 991544,
+      "dispatch_cases": 209138,
+      "entry_segments": 208314,
+      "rho": 0.4138
+     },
+     "deployed": {
+      "c_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0,
+      "fallback": false
+     },
+     "emit_cpu": 15.5287,
+     "executable_bytes": 98993256,
+     "family_cpu": {
+      "aot": 662.4151,
+      "block": 180.5609,
+      "entries": 3.3867,
+      "main": 3.0804,
+      "meta": 0.2944,
+      "runtime": 0.7646,
+      "shared": 140.646,
+      "stop": 0.334
+     },
+     "generated_bytes": 566837474,
+     "link_cpu": 0.5113,
+     "object_bytes": 174550272,
+     "peak_compiler_rss_kib": 548208,
+     "plan_cpu": 0.0,
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "total_cpu": 1007.522,
+     "total_wall": 243.7927,
+     "tu_count": 60
+    },
+    "INC": {
+     "accepted": true,
+     "aot_identities": 338175,
+     "broad_pcs_not_executed": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 6.4322,
+      "warm_wall": 1.8044
+     },
+     "compile_cpu": 449.2293,
+     "compile_wall": 104.2047,
+     "counts": {
+      "aot_owner_functions": 1370,
+      "aot_shared_helpers": 44726,
+      "block_functions": 662,
+      "compiled_entry_rows": 338175,
+      "dispatch_cases": 88457,
+      "entry_segments": 87633,
+      "rho": 0.322
+     },
+     "deployed": {
+      "c_vs_broad": 0.4495,
+      "cpu_vs_broad": 0.4606,
+      "fallback": false
+     },
+     "emit_cpu": 14.6267,
+     "executable_bytes": 43325896,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 252.8221,
+      "block": 116.6037,
+      "entries": 1.3197,
+      "main": 3.1034,
+      "meta": 0.1947,
+      "runtime": 0.9164,
+      "shared": 73.8306,
+      "stop": 0.4385
+     },
+     "generated_bytes": 254812700,
+     "k": 338175,
+     "link_cpu": 0.2565,
+     "object_bytes": 80203896,
+     "peak_compiler_rss_kib": 545148,
+     "plan_cpu": 0.0,
+     "reason": "none",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "total_cpu": 464.1125,
+     "total_wall": 117.8645,
+     "tu_count": 60
+    },
+    "M3RB50": {
+     "accepted": true,
+     "aot_identities": 482371,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 7.706,
+      "warm_wall": 2.2399
+     },
+     "compile_cpu": 561.1563,
+     "compile_wall": 129.225,
+     "counts": {
+      "aot_owner_functions": 1792,
+      "aot_shared_helpers": 56834,
+      "block_functions": 662,
+      "compiled_entry_rows": 482371,
+      "dispatch_cases": 115498,
+      "entry_segments": 114674,
+      "rho": 0.3499
+     },
+     "deployed": {
+      "c_vs_broad": 0.5823,
+      "cpu_vs_broad": 0.569,
+      "fallback": false
+     },
+     "emit_cpu": 9.3689,
+     "executable_bytes": 56825672,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 344.7636,
+      "block": 116.032,
+      "entries": 1.8075,
+      "main": 3.0639,
+      "meta": 0.2269,
+      "runtime": 0.678,
+      "shared": 94.3098,
+      "stop": 0.2747
+     },
+     "generated_bytes": 330069600,
+     "k": 482371,
+     "link_cpu": 0.3243,
+     "object_bytes": 102979224,
+     "peak_compiler_rss_kib": 545148,
+     "plan_cpu": 2.4118,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "482371",
+      "k0": "499627",
+      "pruned": "17256",
+      "ranges": "5307",
+      "rounds": "425",
+      "universe": "991544"
+     },
+     "total_cpu": 573.2613,
+     "total_wall": 140.3336,
+     "tu_count": 60
+    },
+    "ORACLE_INSTR": {
+     "accepted": true,
+     "aot_identities": 48636,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 2.9974,
+      "warm_wall": 0.9468
+     },
+     "compile_cpu": 130.8391,
+     "compile_wall": 32.2552,
+     "counts": {
+      "aot_owner_functions": 314,
+      "aot_shared_helpers": 8014,
+      "block_functions": 662,
+      "compiled_entry_rows": 48640,
+      "dispatch_cases": 20797,
+      "entry_segments": 19973,
+      "rho": 0.2881
+     },
+     "deployed": {
+      "c_vs_broad": 0.1348,
+      "cpu_vs_broad": 0.1364,
+      "fallback": false
+     },
+     "emit_cpu": 4.2241,
+     "executable_bytes": 11303696,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 33.9966,
+      "block": 79.6197,
+      "entries": 0.2122,
+      "main": 3.3692,
+      "meta": 0.0915,
+      "runtime": 0.7268,
+      "shared": 12.6814,
+      "stop": 0.1417
+     },
+     "generated_bytes": 76386762,
+     "k": 48636,
+     "link_cpu": 0.1102,
+     "object_bytes": 27232160,
+     "peak_compiler_rss_kib": 545148,
+     "plan_cpu": 2.2199,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "added": "9",
+      "k": "48636",
+      "k0": "48627",
+      "ranges": "28712",
+      "roots_added": "0",
+      "rounds": "5",
+      "universe": "991544"
+     },
+     "total_cpu": 137.3933,
+     "total_wall": 38.2755,
+     "tu_count": 60
+    },
+    "ORACLE_REGION": {
+     "accepted": true,
+     "aot_identities": 94213,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 61,
+      "keyed_units": 61,
+      "misses": 0,
+      "populate_key_wall": 3.4669,
+      "warm_wall": 0.9641
+     },
+     "compile_cpu": 165.5529,
+     "compile_wall": 38.1641,
+     "counts": {
+      "aot_owner_functions": 440,
+      "aot_shared_helpers": 13950,
+      "block_functions": 662,
+      "compiled_entry_rows": 94213,
+      "dispatch_cases": 28959,
+      "entry_segments": 28135,
+      "rho": 0.2667
+     },
+     "deployed": {
+      "c_vs_broad": 0.1695,
+      "cpu_vs_broad": 0.1721,
+      "fallback": false
+     },
+     "emit_cpu": 5.416,
+     "executable_bytes": 15159760,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 56.278,
+      "block": 83.0042,
+      "entries": 0.6246,
+      "main": 2.7272,
+      "meta": 0.1489,
+      "runtime": 0.6873,
+      "shared": 21.8932,
+      "stop": 0.1894
+     },
+     "generated_bytes": 96075373,
+     "k": 94213,
+     "link_cpu": 0.1388,
+     "object_bytes": 32916144,
+     "peak_compiler_rss_kib": 545148,
+     "plan_cpu": 2.2402,
+     "reason": "",
+     "runtime": {
+      "frames": 120,
+      "ok": true,
+      "outcome": "frames_reached"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "94213",
+      "k0": "95487",
+      "pruned": "1274",
+      "ranges": "506",
+      "rounds": "32",
+      "universe": "991544"
+     },
+     "total_cpu": 173.3479,
+     "total_wall": 45.3248,
+     "tu_count": 60
+    }
+   },
+   "universe": 991544
+  },
+  "sk": {
+   "labelled_starts": 119319,
+   "labelled_starts_in_universe": 119319,
+   "lineage": "D01",
+   "rom_bytes": 2097152,
+   "status": "measured",
+   "strategies": {
+    "BROAD": {
+     "accepted": true,
+     "aot_identities": 989195,
+     "cache": {
+      "failed": false,
+      "hits": 57,
+      "keyed_units": 57,
+      "misses": 0,
+      "populate_key_wall": 10.6526,
+      "warm_wall": 3.1547
+     },
+     "compile_cpu": 780.7543,
+     "compile_wall": 183.2294,
+     "counts": {
+      "aot_owner_functions": 2986,
+      "aot_shared_helpers": 83730,
+      "block_functions": 206,
+      "compiled_entry_rows": 989195,
+      "dispatch_cases": 191306,
+      "entry_segments": 191048,
+      "rho": 0.3953
+     },
+     "deployed": {
+      "c_vs_broad": 1.0,
+      "cpu_vs_broad": 1.0,
+      "fallback": false
+     },
+     "emit_cpu": 19.4292,
+     "executable_bytes": 87117408,
+     "family_cpu": {
+      "aot": 573.5998,
+      "block": 55.1952,
+      "entries": 3.6731,
+      "main": 2.9764,
+      "meta": 0.2928,
+      "runtime": 0.6935,
+      "shared": 144.0295,
+      "stop": 0.2939
+     },
+     "generated_bytes": 510292577,
+     "link_cpu": 0.4466,
+     "object_bytes": 146939008,
+     "peak_compiler_rss_kib": 551944,
+     "plan_cpu": 0.0,
+     "runtime": {
+      "frames": 9,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "total_cpu": 800.6301,
+     "total_wall": 201.4603,
+     "tu_count": 56
+    },
+    "INC": {
+     "accepted": true,
+     "aot_identities": 351182,
+     "broad_pcs_not_executed": 0,
+     "cache": {
+      "failed": false,
+      "hits": 57,
+      "keyed_units": 57,
+      "misses": 0,
+      "populate_key_wall": 5.5866,
+      "warm_wall": 1.6251
+     },
+     "compile_cpu": 317.1658,
+     "compile_wall": 73.4979,
+     "counts": {
+      "aot_owner_functions": 1262,
+      "aot_shared_helpers": 42680,
+      "block_functions": 206,
+      "compiled_entry_rows": 351182,
+      "dispatch_cases": 80914,
+      "entry_segments": 80656,
+      "rho": 0.3313
+     },
+     "deployed": {
+      "c_vs_broad": 0.4162,
+      "cpu_vs_broad": 0.4202,
+      "fallback": false
+     },
+     "emit_cpu": 19.0558,
+     "executable_bytes": 34596712,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 194.2455,
+      "block": 45.1413,
+      "entries": 1.5912,
+      "main": 2.8191,
+      "meta": 0.1967,
+      "runtime": 0.7306,
+      "shared": 72.2747,
+      "stop": 0.1667
+     },
+     "generated_bytes": 212366816,
+     "k": 351182,
+     "link_cpu": 0.2052,
+     "object_bytes": 59668544,
+     "peak_compiler_rss_kib": 542868,
+     "plan_cpu": 0.0,
+     "reason": "none",
+     "runtime": {
+      "frames": 9,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "total_cpu": 336.4268,
+     "total_wall": 91.1674,
+     "tu_count": 56
+    },
+    "M3RB50": {
+     "accepted": true,
+     "aot_identities": 494060,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 57,
+      "keyed_units": 57,
+      "misses": 0,
+      "populate_key_wall": 7.2645,
+      "warm_wall": 2.1106
+     },
+     "compile_cpu": 466.9191,
+     "compile_wall": 108.8517,
+     "counts": {
+      "aot_owner_functions": 1810,
+      "aot_shared_helpers": 59212,
+      "block_functions": 206,
+      "compiled_entry_rows": 494060,
+      "dispatch_cases": 115983,
+      "entry_segments": 115725,
+      "rho": 0.355
+     },
+     "deployed": {
+      "c_vs_broad": 0.6006,
+      "cpu_vs_broad": 0.6032,
+      "fallback": false
+     },
+     "emit_cpu": 13.3301,
+     "executable_bytes": 51001336,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 313.0407,
+      "block": 49.0658,
+      "entries": 1.808,
+      "main": 2.8268,
+      "meta": 0.2277,
+      "runtime": 0.699,
+      "shared": 99.0415,
+      "stop": 0.2096
+     },
+     "generated_bytes": 306496258,
+     "k": 494060,
+     "link_cpu": 0.2849,
+     "object_bytes": 87480248,
+     "peak_compiler_rss_kib": 542868,
+     "plan_cpu": 2.3731,
+     "reason": "",
+     "runtime": {
+      "frames": 9,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "494060",
+      "k0": "503093",
+      "pruned": "9033",
+      "ranges": "2887",
+      "rounds": "263",
+      "universe": "989195"
+     },
+     "total_cpu": 482.9072,
+     "total_wall": 123.5196,
+     "tu_count": 56
+    },
+    "ORACLE_INSTR": {
+     "accepted": true,
+     "aot_identities": 119319,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 57,
+      "keyed_units": 57,
+      "misses": 0,
+      "populate_key_wall": 3.4278,
+      "warm_wall": 1.0044
+     },
+     "compile_cpu": 140.9556,
+     "compile_wall": 32.747,
+     "counts": {
+      "aot_owner_functions": 632,
+      "aot_shared_helpers": 17318,
+      "block_functions": 206,
+      "compiled_entry_rows": 119319,
+      "dispatch_cases": 40631,
+      "entry_segments": 40373,
+      "rho": 0.3605
+     },
+     "deployed": {
+      "c_vs_broad": 0.194,
+      "cpu_vs_broad": 0.1898,
+      "fallback": false
+     },
+     "emit_cpu": 8.5844,
+     "executable_bytes": 14515624,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 64.0801,
+      "block": 42.1844,
+      "entries": 0.4471,
+      "main": 2.9545,
+      "meta": 0.1092,
+      "runtime": 0.6883,
+      "shared": 30.3937,
+      "stop": 0.0983
+     },
+     "generated_bytes": 99022184,
+     "k": 119319,
+     "link_cpu": 0.1094,
+     "object_bytes": 26689800,
+     "peak_compiler_rss_kib": 542868,
+     "plan_cpu": 2.3051,
+     "reason": "",
+     "runtime": {
+      "frames": 9,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "added": "0",
+      "k": "119319",
+      "k0": "119319",
+      "ranges": "79409",
+      "roots_added": "0",
+      "rounds": "1",
+      "universe": "989195"
+     },
+     "total_cpu": 151.9545,
+     "total_wall": 42.8397,
+     "tu_count": 56
+    },
+    "ORACLE_REGION": {
+     "accepted": true,
+     "aot_identities": 256003,
+     "broad_pcs_not_executed": 0,
+     "c_outside_k": 0,
+     "cache": {
+      "failed": false,
+      "hits": 57,
+      "keyed_units": 57,
+      "misses": 0,
+      "populate_key_wall": 4.5113,
+      "warm_wall": 1.2906
+     },
+     "compile_cpu": 216.6676,
+     "compile_wall": 49.8318,
+     "counts": {
+      "aot_owner_functions": 906,
+      "aot_shared_helpers": 31674,
+      "block_functions": 206,
+      "compiled_entry_rows": 256003,
+      "dispatch_cases": 58228,
+      "entry_segments": 57970,
+      "rho": 0.3404
+     },
+     "deployed": {
+      "c_vs_broad": 0.3003,
+      "cpu_vs_broad": 0.2874,
+      "fallback": false
+     },
+     "emit_cpu": 11.0516,
+     "executable_bytes": 24332288,
+     "executed_pcs_outside_broad": 0,
+     "family_cpu": {
+      "aot": 117.5373,
+      "block": 40.4061,
+      "entries": 0.8855,
+      "main": 2.9278,
+      "meta": 0.1494,
+      "runtime": 0.9578,
+      "shared": 53.6662,
+      "stop": 0.1376
+     },
+     "generated_bytes": 153247521,
+     "k": 256003,
+     "link_cpu": 0.1601,
+     "object_bytes": 42590944,
+     "peak_compiler_rss_kib": 542868,
+     "plan_cpu": 2.2597,
+     "reason": "",
+     "runtime": {
+      "frames": 9,
+      "ok": true,
+      "outcome": "guest_stop"
+     },
+     "runtime_equal": true,
+     "stats": {
+      "k": "256003",
+      "k0": "256641",
+      "pruned": "638",
+      "ranges": "295",
+      "rounds": "26",
+      "universe": "989195"
+     },
+     "total_cpu": 230.1389,
+     "total_wall": 62.1928,
+     "tu_count": 56
+    }
+   },
+   "universe": 989195
+  }
+ },
+ "schema": "segarecomp.oracle_bench.v1",
+ "thresholds": {
+  "g": 0.2,
+  "g_c": 0.2,
+  "h": 0.3,
+  "min_accepted_lineages": 6,
+  "min_lineages": 5,
+  "per_lineage": 0.1,
+  "rho": 0.2
+ }
+}

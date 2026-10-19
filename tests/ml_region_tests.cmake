@@ -86,3 +86,13 @@ set_property(TEST segarecomp_ml_v3_train_test APPEND PROPERTY LABELS full fast)
 add_test(NAME segarecomp_ml_v3_diagnose_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_v3_diagnose_test.py)
 set_property(TEST segarecomp_ml_v3_diagnose_test APPEND PROPERTY LABELS full fast)
+# SEG-074-T001 (ADR 0156/0157): exact-code oracle compilation-cost benchmark. Pure helpers and the pre-registered gate on synthetic data; the
+# end-to-end variant runs the project-authored exact-map fixture through the CLI (report-only `close` producer, unchanged validator), strict-C11
+# compilation and a bounded generated-native run (POSIX only: per-process wait4 accounting; skipped elsewhere).
+add_test(NAME segarecomp_oracle_bench_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_oracle_bench_test.py)
+set_property(TEST segarecomp_oracle_bench_test APPEND PROPERTY LABELS full fast)
+add_test(NAME segarecomp_oracle_bench_fixture_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_oracle_bench_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER})
+set_property(TEST segarecomp_oracle_bench_fixture_test APPEND PROPERTY LABELS full fast)
+set_property(TEST segarecomp_oracle_bench_fixture_test PROPERTY SKIP_RETURN_CODE 77)

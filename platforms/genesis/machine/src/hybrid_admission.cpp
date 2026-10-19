@@ -354,9 +354,76 @@ GenesisRegionPruneResult prune_genesis_region_admission(const FrontendProgram &p
   return result;
 }
 
+GenesisRegionPruneResult close_genesis_region_admission(const FrontendProgram &program,
+                                                        const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
+                                                        const std::vector<FrontendProgram::ImmutableRomAotRange> &regions,
+                                                        GenesisRegionCloseCounts *counts, std::size_t max_rounds) {
+  GenesisRegionPruneResult result;
+  GenesisRegionCloseCounts local;
+  if (counts == nullptr) counts = &local;
+  *counts = {};
+  const auto reject = [&](const char *reason) {
+    result.admitted.clear();
+    result.failure = reason;
+    return result;
+  };
+  for (std::size_t i = 0; i < regions.size(); ++i) {
+    const auto &range = regions[i];
+    if (range.begin_address >= range.end_address || (range.begin_address & 1U) != 0U || (range.end_address & 1U) != 0U ||
+        (i > 0U && range.begin_address <= regions[i - 1U].end_address))
+      return reject("malformed_region");
+  }
+  // U by execution address (first identity wins, exactly as the validator's `broad` map and the prune).
+  std::map<std::uint32_t, const FrontendAnalysis::ImmutableRomAotEntry *> broad;
+  for (const auto &entry : entries) broad.emplace(entry_address(entry), &entry);
+  result.universe_count = broad.size();
+  const auto in_region = [&](std::uint32_t address, const FrontendAnalysis::ImmutableRomAotEntry &entry) {
+    if (genesis_hybrid_admission_contains(regions, address)) return true;
+    return entry.execution_alias && !entry.materialized_ram_thunk && genesis_hybrid_admission_contains(regions, entry.alias_source_address & bus_mask);
+  };
+  std::set<std::uint32_t> admitted;
+  std::vector<std::uint32_t> wave;
+  for (const auto &[address, entry] : broad)
+    if (in_region(address, *entry)) {
+      admitted.insert(address);
+      wave.push_back(address);
+    }
+  result.k0_count = admitted.size();
+  const auto add_mandatory = [&](std::uint32_t address) {
+    if (!broad.contains(address) || admitted.contains(address)) return;
+    admitted.insert(address);
+    wave.push_back(address);
+    ++counts->root_added_count;
+  };
+  // Mandatory identities the validator requires regardless of the proposal: every ADR 0049 materialized identity and every machine root.
+  for (const auto &[address, entry] : broad)
+    if (entry->execution_alias) add_mandatory(address);
+  for (const auto root : genesis_reachability_roots(program).roots) add_mandatory(root & bus_mask);
+  // Least fixed point under the validator's structural obligations (breadth-first waves; each identity is expanded once).
+  while (!wave.empty()) {
+    if (++result.rounds > max_rounds) return reject("region_close_cap_exhausted");
+    std::vector<std::uint32_t> next;
+    for (const auto address : wave) {
+      const auto control = m68k_control_successors(broad.at(address)->operation);
+      std::vector<std::uint32_t> targets;
+      for (const auto &successor : control.successors) targets.push_back(successor.target & bus_mask);
+      if (control.stacked == M68kStackedContinuationKind::call_continuation) targets.push_back(control.stacked_address & bus_mask);
+      for (const auto target : targets)
+        if (broad.contains(target) && admitted.insert(target).second) next.push_back(target);
+    }
+    std::sort(next.begin(), next.end());
+    wave = std::move(next);
+  }
+  result.admitted.assign(admitted.begin(), admitted.end());
+  counts->added_count = result.admitted.size() - result.k0_count;
+  if (result.admitted.empty()) return reject("empty_admission");
+  return result;
+}
+
 std::optional<GenesisHybridAdmissionPlan> plan_genesis_region_admission(
     const FrontendProgram &program, std::string_view rom_sha256, const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
-    const GenesisExecutableRegionProposal &proposal, GenesisRegionPruneResult &result, std::size_t max_rounds) {
+    const GenesisExecutableRegionProposal &proposal, GenesisRegionPruneResult &result, std::size_t max_rounds,
+    GenesisRegionAdmissionClosure closure, GenesisRegionCloseCounts *counts) {
   if (!program.immutable_rom_aot_enabled) {
     result = {};
     result.failure = "broad_aot_not_enabled";
@@ -367,7 +434,9 @@ std::optional<GenesisHybridAdmissionPlan> plan_genesis_region_admission(
     result.failure = "rom_sha256_mismatch";
     return std::nullopt;
   }
-  result = prune_genesis_region_admission(program, entries, proposal.ranges, max_rounds);
+  result = closure == GenesisRegionAdmissionClosure::close
+               ? close_genesis_region_admission(program, entries, proposal.ranges, counts, max_rounds)
+               : prune_genesis_region_admission(program, entries, proposal.ranges, max_rounds);
   if (result.failure) return std::nullopt;
   std::vector<std::uint32_t> universe;
   universe.reserve(entries.size());

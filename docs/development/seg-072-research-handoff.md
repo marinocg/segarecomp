@@ -84,3 +84,10 @@ instead, check `sha256sum -c seg072-handoff-bundle-v1.tar.sha256`, extract it an
   experiments.
 
 Archived `meta.json` paths are never rewritten.
+
+## SEG-074 exact-code oracle benchmark
+
+`tools/segarecomp_oracle_bench.py` (ADR 0156 pre-registration, ADR 0157 results) reuses this bundle read-only through the same
+manifest-bound resolver. It compiles real generated C for broad AOT, the deployed incumbent, the saved M3-R + B50 regions, a source-backed
+region oracle and a source-backed instruction-start oracle. Its private per-image work files, including plans and generated C, must stay in an
+ignored directory. The committed record `tools/segarecomp_oracle_bench.results.json` is aggregate-only.

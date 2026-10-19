@@ -38,6 +38,7 @@ set(SEGARECOMP_CI_TEST_COSTS
   sega_cd_dual_cpu_test=150 genesis_cartridge_sram_generated_test=145  # measured on the Linux GCC shard runner (PR #128 runs 39210640179, 39214882993); unlisted they
   # defaulted to 3 s and could land in one shard together, where contention pushed a dual-CPU partition run past its 120 s timeout
   segarecomp_ml_v3_test=1 segarecomp_ml_v3_sgdk_test=1 segarecomp_ml_v3_train_test=1 segarecomp_ml_v3_diagnose_test=1
+  segarecomp_oracle_bench_test=1 segarecomp_oracle_bench_fixture_test=15
   launcher_input_diagnostics_test=25 launcher_sms_policy_test=20 launcher_gui_navigation_test=12)  # SDL3 viewer/launcher suites (only registered when SDL3 is enabled)  # RUN_SERIAL: sonic_startup_inventory_adapter_failure_test runs alone, so it occupies all four cores
 
 # The guard runs inside the shard it is assigned to (it only lists tests, so it is cheap) and must exist before the partition below.
