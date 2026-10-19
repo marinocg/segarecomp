@@ -175,10 +175,10 @@
      "output_count": 2,
      "outputs": [
       {
-       "code_sha256": "5487b6eeba9aff7542d5475c4fb6473921b25a9d9219d0196147a92da4f2fc04",
+       "code_sha256": "ff823068d343582765da3dba576fa11c4662524cf89f707b3d88f4ccbee18283",
        "format": "raw",
        "path": "etos192us.img",
-       "sha256": "5487b6eeba9aff7542d5475c4fb6473921b25a9d9219d0196147a92da4f2fc04",
+       "sha256": "ff823068d343582765da3dba576fa11c4662524cf89f707b3d88f4ccbee18283",
        "size": 196608
       },
       {
@@ -189,7 +189,9 @@
        "size": 115466
       }
      ],
-     "toolchain": "tc-mint"
+     "recipe_sha256": "440a4b78a552f69f89275168c47b7074a3b6ff783bcb8fbb27e53e151d3385b0",
+     "toolchain": "tc-mint",
+     "undeclared_clock_leaks": []
     },
     {
      "byte_identical_runs": true,
@@ -205,10 +207,10 @@
      "output_count": 2,
      "outputs": [
       {
-       "code_sha256": "79d12179dfec8edc57138d1397c5b982c894f333d61565be471463440ef2eca7",
+       "code_sha256": "7cde373a5fceddc2470619651fe97f0acd3175d0d968f77e92369d59c0137312",
        "format": "raw",
        "path": "etos256us.img",
-       "sha256": "79d12179dfec8edc57138d1397c5b982c894f333d61565be471463440ef2eca7",
+       "sha256": "7cde373a5fceddc2470619651fe97f0acd3175d0d968f77e92369d59c0137312",
        "size": 262144
       },
       {
@@ -219,7 +221,9 @@
        "size": 127769
       }
      ],
-     "toolchain": "tc-mint"
+     "recipe_sha256": "7316e6a1332471f7265115f94bcc3005af58369d02919d7ce4fca1c493be9041",
+     "toolchain": "tc-mint",
+     "undeclared_clock_leaks": []
     },
     {
      "byte_identical_runs": true,
@@ -235,10 +239,10 @@
      "output_count": 2,
      "outputs": [
       {
-       "code_sha256": "de79fdf6b6ff5c04d13e2c1e5fdda99860e7894e8b4349c4dba50bb2516fccef",
+       "code_sha256": "73cd7beb8c6b789274cf972173bf4fc2b738b5d57fa81aa1e201eb6e39544f98",
        "format": "raw",
        "path": "etoscart.img",
-       "sha256": "de79fdf6b6ff5c04d13e2c1e5fdda99860e7894e8b4349c4dba50bb2516fccef",
+       "sha256": "73cd7beb8c6b789274cf972173bf4fc2b738b5d57fa81aa1e201eb6e39544f98",
        "size": 131072
       },
       {
@@ -249,7 +253,9 @@
        "size": 79982
       }
      ],
-     "toolchain": "tc-mint"
+     "recipe_sha256": "df13aa6f9234f5254dcecef2248c59f12a19694f35c2a7e6ce8b57537b2402f2",
+     "toolchain": "tc-mint",
+     "undeclared_clock_leaks": []
     },
     {
      "byte_identical_runs": true,
@@ -265,10 +271,10 @@
      "output_count": 2,
      "outputs": [
       {
-       "code_sha256": "4aa1bee3d57cf3c8b4084dd136253476b63271763ba2ddc44919fac1e1afa576",
+       "code_sha256": "e9fb92e925e0658af9ec9f0bcf8038820d89b8333c0a43b2bd4dfd6628e66b8e",
        "format": "raw",
        "path": "emutos-amiga.rom",
-       "sha256": "4aa1bee3d57cf3c8b4084dd136253476b63271763ba2ddc44919fac1e1afa576",
+       "sha256": "e9fb92e925e0658af9ec9f0bcf8038820d89b8333c0a43b2bd4dfd6628e66b8e",
        "size": 262144
       },
       {
@@ -279,10 +285,12 @@
        "size": 124346
       }
      ],
-     "toolchain": "tc-mint"
+     "recipe_sha256": "adcba033f4ae4ed7b5b60c46c4dd8d23d401eac86d55772e3a7ad33d23456ed4",
+     "toolchain": "tc-mint",
+     "undeclared_clock_leaks": []
     }
    ],
-   "cpu_variant_source_files": 7
+   "cpu_variant_source_files": 4
   },
   {
    "id": "toslibc",
@@ -314,62 +322,65 @@
      "output_count": 7,
      "outputs": [
       {
-       "code_sha256": "880615afdcb65c136e2a1119bfe1d1d4983198bef9dc3144ac42002ceb78b0e4",
+       "code_sha256": "d2e6166244fd959acb4c3fdf9d23b86c4389f540d88bc16bb3e4ec4eb20a08d8",
        "format": "tos-prg",
        "path": "example/ALERT.PRG",
        "sha256": "42c936208a4294ba280a5e3a9025a26cfc992747bfbc8907f6c418cc3b99792b",
        "size": 6288
       },
       {
-       "code_sha256": "b6a0187be8112ca8f8e86891a2331e94e96502d438a8a304e731832cf128cf48",
+       "code_sha256": "c21e50375ecf5722ddf4225ed0feb7001ffa0e0099d6142f26320107a6d170ec",
        "format": "tos-prg",
        "path": "example/COOKIE.TOS",
        "sha256": "7e8f8a6913d6ec754692167319f4d46d0edc52de150fb2a9463ee4b7b6744c33",
        "size": 7269
       },
       {
-       "code_sha256": "b0ed27ae814ab7908bb2225fbc8927d35d43621f81a802b2af623e8c88dcb31d",
+       "code_sha256": "3f72fe8843f2b83183c7b7ad65753abafd359cb75e50cb855f363f6c274920c0",
        "format": "tos-prg",
        "path": "example/DESK.ACC",
        "sha256": "cad878a785b73527235dfcff8fca825f20008d28fd132719f0edeac6a5c04fdd",
        "size": 6577
       },
       {
-       "code_sha256": "b23d7755ad64244e23ece237d595710d4edd309a8add105c6d6a41571e84515c",
+       "code_sha256": "53b2015e8cf5c3d5424f7f815752f7928dc1d2537e3bd18deaf96308670a23e1",
        "format": "tos-prg",
        "path": "example/HELLO.TOS",
        "sha256": "7056aeeebdbb077410583ae87525dc0dccffe673683b66f68ac5622e8ffd1405",
        "size": 6804
       },
       {
-       "code_sha256": "1c73e9abcb5bfa659ed9bea19cf4e75d986edfcdbfc001908dd09e815b2e1869",
+       "code_sha256": "82c68ef36c3ae1c573d832a8c8628a08b275eee0d002a818363695f1bc7d5976",
        "format": "tos-prg",
        "path": "example/WINDOW.PRG",
        "sha256": "b62dffc98a5402689110f0add4b5b72b2fad60b6defb7fb361be3388fdfacc6f",
        "size": 5417
       },
       {
-       "code_sha256": "77c5d5cc84cf2b33503cd8e5aa8ac590bdab95b27813f248a7db76e3ed9e60b0",
+       "code_sha256": "5521a2ecea2b6ca67dd6f3592d1ea7fedb1f28bd8eb405bbb0523328ac477ea7",
        "format": "tos-prg",
        "path": "example/XBRA.PRG",
        "sha256": "409b023ec5f17d1d09b0d9e06c51f84912c4c0eef77aa00e7f7fe3d0a1848a0e",
        "size": 7614
       },
       {
-       "code_sha256": "2bd5683f3d4a802bc9b810ebbe853439b803435ad18c19899d5771999ca7b063",
+       "code_sha256": "50341c3eebe1cad67968e6dff7a6646aeab22e7277cf271b9e81028564d86765",
        "format": "tos-prg",
        "path": "test/SUITE.TOS",
        "sha256": "10c90888bfc370c400d0c634ceb3c126ac30bfdf64ccaf6d160a9378de38b674",
        "size": 16870
       }
      ],
-     "toolchain": "tc-elf"
+     "recipe_sha256": "db03757734a3fe7a0153413c040d80196c98ac0a9898e9634edf4f40036fff92",
+     "toolchain": "tc-elf",
+     "undeclared_clock_leaks": []
     },
     {
      "expect": "failure",
      "matches_expectation": true,
      "name": "linux-gnu-gcc-rejected",
      "observed": "failure",
+     "recipe_sha256": "e18bd9c33fb47794dfa0faf1a91e7a8ed49f7ff69f6ed8c9d4c95187ecba34fd",
      "toolchain": "tc-gnu"
     }
    ]
@@ -405,42 +416,44 @@
      "output_count": 5,
      "outputs": [
       {
-       "code_sha256": "f7d82c15d1ee9fc413846494e74e411a3535c04cdcba0ba3ea8818467c4b8074",
+       "code_sha256": "037647424c22e07a36ea34c59ed30394b9d96697a5e2cf2ea921ed966f4d7519",
        "format": "tos-prg",
        "path": "demo/ASM/build/hello.tos",
        "sha256": "38586187e8d6df81c7a52b029e7acdf4633864811cf9d801a6802a759df4f9f5",
        "size": 300
       },
       {
-       "code_sha256": "75223b88d0a1b3efac9018435b23650cf638be2afd363ea5ee061dc38a2796dd",
+       "code_sha256": "8d88f2cf99f3676a9006d247d2a30ed4bc8e75d44283fc05942cc04aec8c0a61",
        "format": "tos-prg",
        "path": "demo/C/obj/hello_bb.tos",
-       "sha256": "fbebbfe2c8cc0ef3bffca3c4414d36931a08e8fe5aa8998a1349d7658718833e",
+       "sha256": "b41c186049fa392e051fc4fce249d0c030fe1c26a963b56629eb0171cd692149",
        "size": 131757
       },
       {
-       "code_sha256": "7c470c688391899038c57af67a679139d7db4e18d8125c27876459f290522e52",
+       "code_sha256": "642f7fb993b1adcc71a4f247d3c25770e4432d24b6f9c9cfd1e9ccb8fdfbce5c",
        "format": "tos-prg",
        "path": "demo/C/obj/hello_ge.prg",
-       "sha256": "0885521d5991a02af36069b1ce3ab4c974bf657fbf89a0ae23201f32dc241166",
+       "sha256": "c37e7ea9921d5df602092bbb11c2ab4b6b42e06f4dd6c87d21576c438f4c0b1b",
        "size": 132752
       },
       {
-       "code_sha256": "697de1834dfd379824aefeb3d751969037ba4be05cb595bf2006f37ba1288695",
+       "code_sha256": "f51075132921bd8eb0cf8d9f6d29e237b952de57b993714d69c073cd27a6a093",
        "format": "tos-prg",
        "path": "demo/C_ASM/build/test.tos",
        "sha256": "f51075132921bd8eb0cf8d9f6d29e237b952de57b993714d69c073cd27a6a093",
        "size": 12643
       },
       {
-       "code_sha256": "d848cad3bd7b4547819a6a8f8856fe7a40538f238dd843d740a7b823238a812d",
+       "code_sha256": "f08b6e8fd5e372054aaa79bc5dbf41eb82029692e96e87ac80d2554fe2616713",
        "format": "tos-prg",
        "path": "demo/C_LIBCMINI/out/main.tos",
        "sha256": "f08b6e8fd5e372054aaa79bc5dbf41eb82029692e96e87ac80d2554fe2616713",
        "size": 11617
       }
      ],
-     "toolchain": "tc-mint"
+     "recipe_sha256": "005192f80f3d2d7c177ac6547945264b86c2999078a341b5442b3e1dafd8d6e2",
+     "toolchain": "tc-mint",
+     "undeclared_clock_leaks": []
     }
    ]
   },
@@ -610,13 +623,16 @@
        "size": 263
       }
      ],
-     "toolchain": "tc-vbcc"
+     "recipe_sha256": "7d0bc26a1cda2bb6711e789abf164ae466595d955ee72a41299d85b1cd497c45",
+     "toolchain": "tc-vbcc",
+     "undeclared_clock_leaks": []
     },
     {
      "expect": "failure",
      "matches_expectation": true,
      "name": "link-vbcc",
      "observed": "failure",
+     "recipe_sha256": "b9e1b1e7d01536bdc7dbb2b2e6927b6ebe644b69faa88e6fea9ffde5f2a8f5b6",
      "toolchain": "tc-vbcc"
     }
    ]
@@ -651,105 +667,107 @@
      "output_count": 14,
      "outputs": [
       {
-       "code_sha256": "6ca1ddaf7fa707cd3e9e2465573bedc1938e8358dd41dc0a4886aabc333782d6",
+       "code_sha256": "c9121e09896b80e908cb97ba82b530d647c658487977cf924f41cb6889161331",
        "format": "tos-prg",
        "path": "out/tut02.tos",
        "sha256": "c9121e09896b80e908cb97ba82b530d647c658487977cf924f41cb6889161331",
        "size": 80
       },
       {
-       "code_sha256": "0cb73eae235d822803a0b2de3a3e6bd6533c6266015351aa363d64b1d7887154",
+       "code_sha256": "6201f3ee75d4c08e3c32a29d8ab5e98343cfddf6e817cd50370f529d4ee01895",
        "format": "tos-prg",
        "path": "out/tut03.tos",
        "sha256": "6201f3ee75d4c08e3c32a29d8ab5e98343cfddf6e817cd50370f529d4ee01895",
        "size": 118
       },
       {
-       "code_sha256": "1377511d41b781f2b86e57e477010cd0d3b15a3f36c2a907b0d8a4aec6c77348",
+       "code_sha256": "2fde11fc9f3f8e57d73a91c6ba5dd51adf87a19e3fc1db256b6e7e86ab4cac18",
        "format": "tos-prg",
        "path": "out/tut04.tos",
        "sha256": "2fde11fc9f3f8e57d73a91c6ba5dd51adf87a19e3fc1db256b6e7e86ab4cac18",
        "size": 116
       },
       {
-       "code_sha256": "ab67415b8739b85f9cb2116672165b6a2adfb17aa77e0b221ff7b4788a96cd50",
+       "code_sha256": "28eb105855c16e9cbd822b622bbb0dac81213234441d583341726315fec8133b",
        "format": "tos-prg",
        "path": "out/tut05.tos",
        "sha256": "28eb105855c16e9cbd822b622bbb0dac81213234441d583341726315fec8133b",
        "size": 414
       },
       {
-       "code_sha256": "628b3eef1d663e98b1ae9c0368415338588256d8cbd62c526868894827f3b3aa",
+       "code_sha256": "f4339276c4260b95454eb02fb8cbfee25214eebc840dbd16fd67d7311dfe0038",
        "format": "tos-prg",
        "path": "out/tut06.tos",
        "sha256": "f4339276c4260b95454eb02fb8cbfee25214eebc840dbd16fd67d7311dfe0038",
        "size": 32312
       },
       {
-       "code_sha256": "62a13233c87b1972653c587f42a64c61ec86fd5b378b6ee9312aca678b14bfab",
+       "code_sha256": "d8f644d6de15ed6811297d69c9759ea50d6619fdc437b334f563d94226dd4e91",
        "format": "tos-prg",
        "path": "out/tut07.tos",
        "sha256": "d8f644d6de15ed6811297d69c9759ea50d6619fdc437b334f563d94226dd4e91",
        "size": 32835
       },
       {
-       "code_sha256": "f6680b1903058ee84092245525a11f1b0402f6d299d3191e63683ed33bd9f9e0",
+       "code_sha256": "58956810d5498e20456a1cb4e00ada0ee3271eb949014c4be7a6e43381eda7c9",
        "format": "tos-prg",
        "path": "out/tut08.tos",
        "sha256": "58956810d5498e20456a1cb4e00ada0ee3271eb949014c4be7a6e43381eda7c9",
        "size": 32970
       },
       {
-       "code_sha256": "ddaacd6bee400dff19e22d4181c424a746eea76b7cdd5895296ba47617ad8708",
+       "code_sha256": "4e195cb70fe8d4a244d1cd0ba75868882d5907020fec6adfa18dc4e6e282ca89",
        "format": "tos-prg",
        "path": "out/tut09.tos",
        "sha256": "4e195cb70fe8d4a244d1cd0ba75868882d5907020fec6adfa18dc4e6e282ca89",
        "size": 45443
       },
       {
-       "code_sha256": "d1b80ae59efc0af99631033ebf4cee8997649bf69cc66fa88980ecfd55995eb4",
+       "code_sha256": "74cded2028712af665cc307879fdb7522df02d18b04faf5f49666752000e5c46",
        "format": "tos-prg",
        "path": "out/tut10.tos",
        "sha256": "74cded2028712af665cc307879fdb7522df02d18b04faf5f49666752000e5c46",
        "size": 425
       },
       {
-       "code_sha256": "bed6bf4d0942be17f760aa17e05412b7fa5de8f55defce1cdee04631f79e8824",
+       "code_sha256": "d4caaffc80895c124d337cc35280b33c4c6544e0348b1bc70677e50e0b4aec0c",
        "format": "tos-prg",
        "path": "out/tut11.tos",
        "sha256": "d4caaffc80895c124d337cc35280b33c4c6544e0348b1bc70677e50e0b4aec0c",
        "size": 65255
       },
       {
-       "code_sha256": "054f24811bb71cb1d5e8bd17f26a1a040cafe4a9c401075bceba06ab2adb9de3",
+       "code_sha256": "ec998a8f39e22c9555a0f6efa118f965f4ee6bc5c54f6064d58a4740a02706bf",
        "format": "tos-prg",
        "path": "out/tut12.tos",
        "sha256": "ec998a8f39e22c9555a0f6efa118f965f4ee6bc5c54f6064d58a4740a02706bf",
        "size": 65503
       },
       {
-       "code_sha256": "c0fc482ee159e8eaf95690da345996cbfdb6dee36c03165cd03bab48f6b075a0",
+       "code_sha256": "8c91ee69513b5944fccfba731d370201ab0dfecf18d823fee4ce02cf1185490d",
        "format": "tos-prg",
        "path": "out/tut13.tos",
        "sha256": "8c91ee69513b5944fccfba731d370201ab0dfecf18d823fee4ce02cf1185490d",
        "size": 10980
       },
       {
-       "code_sha256": "dbdcf42539fe11af8821db5ae775dcea48aadafd2ea4dfe1f72febf842739bd7",
+       "code_sha256": "2057afc8aae7e509a9ce855b31714f42efc9de15644f9c6716ee0d2f4e4b4b03",
        "format": "tos-prg",
        "path": "out/tut14.tos",
        "sha256": "2057afc8aae7e509a9ce855b31714f42efc9de15644f9c6716ee0d2f4e4b4b03",
        "size": 50190
       },
       {
-       "code_sha256": "d17609920a5e00fa450bdc03011c7d260ab9179a13798690063144e9a93aa11d",
+       "code_sha256": "61a1d016ef4d28db99ea9819a2d1346db95cec12062e7790de2b0a86666bc1ed",
        "format": "tos-prg",
        "path": "out/tut15.tos",
        "sha256": "61a1d016ef4d28db99ea9819a2d1346db95cec12062e7790de2b0a86666bc1ed",
        "size": 33053
       }
      ],
-     "toolchain": "tc-gnu"
+     "recipe_sha256": "60ad168234a0ce19a1f165f105f05ba774f79da64a15cddcca2643a59df26202",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
     }
    ]
   },
@@ -784,56 +802,56 @@
      "output_count": 10,
      "outputs": [
       {
-       "code_sha256": "e8ba6e6f63024fae947ab5cee3e3bb7b43db4e805b8c4425e4c4b57a12a5c235",
+       "code_sha256": "9e2abee1287414c2c194a2fa257fc7062d9eea278d964a8ae24e75989d1f17cc",
        "format": "tos-prg",
        "path": "steauply/steauply.ttp",
        "sha256": "e527ce2ff259dc7922f38b3fd4fce7f352e1b470dff748623c67e1c0e7b0d943",
        "size": 2824
       },
       {
-       "code_sha256": "6f107054ef34f8c325ff23a9f209df8f19b0403cf46848bd1f2c0dfb76bb22b3",
+       "code_sha256": "c9b190e49e5d2274b5b5eca7291912fbce3d7ee9347dcd99a6eb958496dde193",
        "format": "tos-prg",
        "path": "steauply/steauply_int.ttp",
        "sha256": "41ffeff15b7334f23bfe3cb3b6373ec2226c2e8d37dd385702eb6bac52903dc7",
        "size": 3118
       },
       {
-       "code_sha256": "380f75ba6aec963ad4365eb2b54b34bf3e54cc1ab8515e25d544c62f977fd91a",
+       "code_sha256": "b9585c67aa1d1de8bf366e6a3780dabb68b6557effae7b0e13bd544e5ab85840",
        "format": "tos-prg",
        "path": "intro/border.tos",
        "sha256": "326054ef430267c40a35121484c8ffb40d97e194c19bea7f45da6de01dea9657",
        "size": 886
       },
       {
-       "code_sha256": "e842e6800de0439c199c331a2567f0e573c7b89bbf22705d4583c2327577b200",
+       "code_sha256": "32ddb86e2ceb3f7031e57867a77083a0335063bd4547cbef59cd78bec05a1614",
        "format": "tos-prg",
        "path": "intro/hblvbl.tos",
        "sha256": "77b7cfd832b8e3546d47d494585e78f3dec3c5072f8062d5aea6a279b3389250",
        "size": 645
       },
       {
-       "code_sha256": "51455c2f089f256f642cbecb2fac57d0c78cec3563f0b43640196551f1435273",
+       "code_sha256": "7f517fea52e11abae06a1b81d93db6fe0379be061812fec2f5078d623ba2255c",
        "format": "tos-prg",
        "path": "intro/rotozoom.tos",
        "sha256": "65c793017d43a7be46eb2765f244623a310dd4f8d32c328ca56a425705f2e717",
        "size": 5294
       },
       {
-       "code_sha256": "09cebd8e9ee8582160da7c178e78efb0328b8ca651e266e304faba6a9934e9fe",
+       "code_sha256": "4d4b7abbbc3d826f68fde703b5996cc1ee93fe57083202bf33cec3d3fe9d20b3",
        "format": "tos-prg",
        "path": "intro/starf.tos",
        "sha256": "a56c3b6e1427bcdf522e5f481aff0a05d4a5f42d7510098eb122c80772f1e783",
        "size": 1068
       },
       {
-       "code_sha256": "b094dffac8abab8a0dd64efe5f76881f7a0be11d2899ead69e29e42c093357e9",
+       "code_sha256": "cf41ededf372e874cc819e0c8edf0e1004a66c15c2cbbb3822b902c8204248f1",
        "format": "tos-prg",
        "path": "intro/tosfont.tos",
        "sha256": "e46b09261093a104f1eb0f29069b048993b83fcf7f096f2229035d2d981bd206",
        "size": 834
       },
       {
-       "code_sha256": "5028fa7e95de284880c877b9594793e9105d423b039ab2c0c09207c5a730f587",
+       "code_sha256": "b1bfc99b4ae2472bdbe1b062d6e5c7226d05ef99143c3d8823f562f028ed8544",
        "format": "tos-prg",
        "path": "show_iff/show_iff.ttp",
        "sha256": "64675992af0a5fd4ce415622dc687bc46933f7b7b70b9ff2a4e04154a2ede1ba",
@@ -854,7 +872,9 @@
        "size": 320
       }
      ],
-     "toolchain": "tc-gnu"
+     "recipe_sha256": "ccfddf3f85699861d4229ad68a96ac265bd2e74e26c3ea9941c511d4b2749478",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
     },
     {
      "byte_identical_runs": true,
@@ -870,20 +890,26 @@
      "output_count": 1,
      "outputs": [
       {
-       "code_sha256": "3ebc14d7fcfa8a075ad9f32fbfb07b4cef1371ee69f2cbe99aff6ceb780076d8",
+       "code_sha256": "3c7df6ec5436de194d87414572fcc2deedc362dfaf251310e8a8d1e7b263b796",
        "format": "tos-prg",
        "path": "listacsi/listacsi.tos",
        "sha256": "3c7df6ec5436de194d87414572fcc2deedc362dfaf251310e8a8d1e7b263b796",
        "size": 2362
       }
      ],
-     "toolchain": "tc-mint"
+     "recipe_sha256": "e35f9ddb6573e6ca4e44472dee2d371cea6710494a59f6e734613eb4af0a335e",
+     "toolchain": "tc-mint",
+     "undeclared_clock_leaks": [],
+     "volatile_outputs": {
+      "listacsi/listacsi.tos": "listacsi/main.c embeds the compiler's __DATE__"
+     }
     },
     {
      "expect": "failure",
      "matches_expectation": true,
      "name": "the_80s",
      "observed": "failure",
+     "recipe_sha256": "5943590dbe7101b163a02d4f580d5f9979f96a469d1164409dee4cb7b857f3a2",
      "toolchain": "tc-gnu"
     }
    ]
@@ -915,6 +941,7 @@
      "matches_expectation": true,
      "name": "main",
      "observed": "failure",
+     "recipe_sha256": "142bc28e43fd0a94c5d241cc17cf46e9b9635e29d176d817d1fbebd12f0c09e3",
      "toolchain": "tc-gnu"
     }
    ]
@@ -943,6 +970,7 @@
      "matches_expectation": true,
      "name": "main",
      "observed": "failure",
+     "recipe_sha256": "079c9bdb128bf2d6c16e05ee1e1102f5c9fdadb77ec725b08490a8e5931767fb",
      "toolchain": "tc-gnu"
     }
    ]
@@ -988,13 +1016,16 @@
        "size": 192
       }
      ],
-     "toolchain": "tc-gnu"
+     "recipe_sha256": "064365ed6cefcf7949be1876cfd2941ac20489bb19bb7847959b30eec422c348",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
     },
     {
      "expect": "failure",
      "matches_expectation": true,
      "name": "main",
      "observed": "failure",
+     "recipe_sha256": "3da437bd0269275e27338ae22ee4a542b67d17ccf06c8af9520f3821bbd889c4",
      "toolchain": "tc-gnu"
     }
    ]
@@ -1092,7 +1123,9 @@
        "size": 17264
       }
      ],
-     "toolchain": "tc-gnu"
+     "recipe_sha256": "66e74bcc60a4b9fa348a04429df600985ed710a9e15c4a54fc6ab261beae4f3a",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
     }
    ]
   },
@@ -1798,10 +1831,10 @@
        "size": 1151
       },
       {
-       "code_sha256": "d1a14198e7108ea58b3697b5a515ad0fd2165662030ffeb4d80da5c4b4c54599",
+       "code_sha256": "eb73ba0beb1b9ce78385d1becb59c920ef25fbe499510803e79296bc31baa44d",
        "format": "aout",
        "path": "out/__PROFILER_PROFILER_C.o",
-       "sha256": "d1a14198e7108ea58b3697b5a515ad0fd2165662030ffeb4d80da5c4b4c54599",
+       "sha256": "eb73ba0beb1b9ce78385d1becb59c920ef25fbe499510803e79296bc31baa44d",
        "size": 3616
       },
       {
@@ -1966,7 +1999,9 @@
        "size": 7644
       }
      ],
+     "recipe_sha256": "45cd018e3b2b21091e367404926bf9c634b53a0b2d9a5bd6b5c45d3d16a8cc73",
      "toolchain": "tc-vbcc",
+     "undeclared_clock_leaks": [],
      "volatile_outputs": {
       "out/__PROFILER_PROFILER_C.o": "PROFILER.C embeds __DATE__/__TIME__"
      }
@@ -1976,6 +2011,7 @@
      "matches_expectation": true,
      "name": "pasm-modules",
      "observed": "failure",
+     "recipe_sha256": "885dcc31beeb686d0fe90db18308ceec6f94508a67785fdf0ac99477c96de6cf",
      "toolchain": "tc-gnu"
     }
    ]
@@ -2025,7 +2061,9 @@
       "DIFFERENT": 5,
       "TEXT_DATA_IDENTICAL": 1
      },
-     "toolchain": "tc-gnu"
+     "recipe_sha256": "f94970eab8695df808e6ae169db2207fd8c8029e2b639304386f9b8fcc9521c6",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
     }
    ]
   },
@@ -2103,13 +2141,16 @@
        "size": 27088
       }
      ],
-     "toolchain": "tc-a68k"
+     "recipe_sha256": "08f8fb922ce0e26557b34fb171a1b8759175907ec483b20f3b74e987df489ddd",
+     "toolchain": "tc-a68k",
+     "undeclared_clock_leaks": []
     },
     {
      "expect": "failure",
      "matches_expectation": true,
      "name": "vasm-rejects-a68k-dialect",
      "observed": "failure",
+     "recipe_sha256": "6cbc64e6a5c23c02498456c56e9786fd7f8715c70c5b972c80463fb924809135",
      "toolchain": "tc-gnu"
     }
    ]
@@ -2143,6 +2184,7 @@
      "matches_expectation": true,
      "name": "game",
      "observed": "failure",
+     "recipe_sha256": "ff085e46c0bcc043754f8dc36feebde3b884fcbdf4e51f49c13635507fce4e6d",
      "toolchain": "tc-gnu"
     }
    ]
@@ -2159,7 +2201,7 @@
    "licence_status": "undeclared",
    "class": "LICENSING_REVIEW_REQUIRED",
    "technical_class": "PARTIALLY_QUALIFIED",
-   "rationale": "A line-by-line 68k transcode of the commercial arcade Z80 program, with graphics extracted from the arcade ROMs committed as C data, so the code derives from commercial code. Technically the core transcoded modules assemble with GNU as (-m68000, register-prefix-optional); the Amiga main module needs generated sound/graphics includes, and vbr.68k is deliberately 68010+. No licence declared.",
+   "rationale": "A line-by-line 68k transcode of the commercial arcade Z80 program, with graphics extracted from the arcade ROMs committed as C data, so the code derives from commercial code. Technically the core transcoded modules assemble with GNU as (-m68000, register-prefix-optional); the Amiga main module needs generated sound/graphics includes, and vbr.68k is deliberately 68010+. No licence declared. No licence decision can admit it: as commercial-derived code it is excluded from clean truth by provenance; the class records only that its own repository licence is also unresolved.",
    "label_evidence": "GNU as listings (if admitted after review)",
    "lineage_hypothesis": "jotd666 author lineage (with xevious/mpatrol/pacman500/scramble500)",
    "recipes": [
@@ -2226,7 +2268,9 @@
        "size": 22612
       }
      ],
-     "toolchain": "tc-gnu"
+     "recipe_sha256": "7c3ddac05564d38efd48389f5a9e41bae453b8630c6b6543d4dfde454da2ea91",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
     }
    ]
   },
@@ -2242,7 +2286,7 @@
    "licence_status": "undeclared",
    "class": "LICENSING_REVIEW_REQUIRED",
    "technical_class": "NOT_ATTEMPTED",
-   "rationale": "Same family as galaga: by its README, the core is a line-by-line transcode of the reverse-engineered commercial arcade ROMs, with ROM-extracted graphics. Build not attempted beyond triage because licensing review precedes any use.",
+   "rationale": "Same family as galaga: by its README, the core is a line-by-line transcode of the reverse-engineered commercial arcade ROMs, with ROM-extracted graphics. Build not attempted beyond triage because licensing review precedes any use. No licence decision can admit it: as commercial-derived code it is excluded from clean truth by provenance; the class records only that its own repository licence is also unresolved.",
    "label_evidence": "n/a until reviewed",
    "lineage_hypothesis": "jotd666/tcdev lineage",
    "recipes": []
@@ -2259,7 +2303,7 @@
    "licence_status": "undeclared",
    "class": "LICENSING_REVIEW_REQUIRED",
    "technical_class": "NOT_ATTEMPTED",
-   "rationale": "Same family as galaga: an arcade transcode with ROM-extracted graphics. Licensing review precedes any use.",
+   "rationale": "Same family as galaga: an arcade transcode with ROM-extracted graphics. Licensing review precedes any use. No licence decision can admit it: as commercial-derived code it is excluded from clean truth by provenance; the class records only that its own repository licence is also unresolved.",
    "label_evidence": "n/a until reviewed",
    "lineage_hypothesis": "jotd666 lineage",
    "recipes": []
@@ -2293,6 +2337,7 @@
      "matches_expectation": true,
      "name": "build",
      "observed": "failure",
+     "recipe_sha256": "c275e2b0f1b954a84cd1dc5845018d07d0e9aca8466b933262a7d8ca7444f4b8",
      "toolchain": "tc-gnu"
     }
    ]
@@ -2327,14 +2372,16 @@
      "output_count": 1,
      "outputs": [
       {
-       "code_sha256": "a61493806196e91f390d26bc2a8252712e17f1335985451ee92535cf766765f3",
+       "code_sha256": "41a2f5f661bf7add726142ccfb13b9d86c8cbff15f5b71dceffe0793902d989d",
        "format": "tos-prg",
        "path": "out/MAIN.PRG",
        "sha256": "41a2f5f661bf7add726142ccfb13b9d86c8cbff15f5b71dceffe0793902d989d",
        "size": 267131
       }
      ],
-     "toolchain": "tc-gnu"
+     "recipe_sha256": "562da8f183dca73a88ef0ab26808d2fc4cd44724bea36fef05cf9cdf1ea281fb",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
     }
    ]
   },
@@ -2821,7 +2868,9 @@
        "size": 6288
       }
      ],
-     "toolchain": "tc-elf"
+     "recipe_sha256": "57e8841730e131dc245458e69615ba244f9c99f69c62dd69a6f0f2b03aea7f31",
+     "toolchain": "tc-elf",
+     "undeclared_clock_leaks": []
     }
    ]
   },
@@ -2862,7 +2911,9 @@
        "size": 2624
       }
      ],
-     "toolchain": "tc-elf"
+     "recipe_sha256": "22292a893cbd4ed7970cf5107b17b6040da32094a589e3efd320f09c692fdb24",
+     "toolchain": "tc-elf",
+     "undeclared_clock_leaks": []
     }
    ]
   },
@@ -2924,7 +2975,9 @@
        "size": 352
       }
      ],
-     "toolchain": "tc-gnu"
+     "recipe_sha256": "608ea730cbae79eee92fe45dee2c20bb3325a1e17e5ff484ebddd6d27173dd89",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
     }
    ]
   },
@@ -2965,7 +3018,9 @@
        "size": 724
       }
      ],
-     "toolchain": "tc-gnu"
+     "recipe_sha256": "ff9d3463db58f867f27baf482c2c75810b2edbfa4760746695d0796ba2f1a76e",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
     }
    ]
   }

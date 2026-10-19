@@ -7,7 +7,8 @@
               tools/segarecomp_xplat_toolchains/*.Dockerfile; record the observed tool versions and image identities
   build       run every recipe of the frozen plan twice, each time in a fresh copy of the pinned source inside an offline container
               (--network none), after re-verifying that the cached checkout is exactly the pinned commit and unmodified. The two runs
-              see different wall-clock dates through a `date` wrapper, so date-dependent output is caught. Record the outcome, output digests/sizes/executable format, determinism, author-binary comparisons,
+              see different wall-clock dates through a `date` wrapper (neither the real date), and every output is scanned for the
+              real build day, which catches dates the wrapper cannot control (a compiler's __DATE__). Record the outcome, output digests/sizes/executable format, determinism, author-binary comparisons,
               the source CPU-variant scan and the archive pilot counts in a private record
   verify      check that freshly built records reproduce the committed manifest (identities, classes, outcomes, code digests)
   report      combine the plan and the records into the sanitized manifest. It fails when any executed evidence contradicts the
@@ -23,6 +24,7 @@ private cache, which must be outside the product repository or git-ignored. No c
 from __future__ import annotations
 
 import argparse
+import datetime
 import fnmatch
 import glob
 import hashlib
@@ -51,8 +53,9 @@ _MNEM = (r"movec|moves|pmove|pflush\w*|ptest\w*|cinv[lpa]|cpush[lpa]|cas2?|chk2|
          r"unpk|extb|trap(?:t|f|hi|ls|cc|cs|ne|eq|vc|vs|pl|mi|ge|lt|gt|le)|(?:mul|div)[su]\.l|divs?l|f(?:move|add|sub|mul|div|cmp|sqrt|tst|"
          r"save|restore|b\w\w?|s\w\w?|db\w\w?)")
 CPU_VARIANT_RE = re.compile(
-    r"^[^;*\n]*?(?:^|[\s:])(?:\.(?:chip|arch|cpu)\s+\S*680[1-6]0|\.?machine\s+680[1-6]0|opt\s+[^;\n]*\bp=680[1-6]0|"
-    r"(?:" + _MNEM + r")(?:\.[bwlsdxp])?(?=\s|$)(?!\s*=)|bra\.l\b|b\w\w\.l\b|move(?:\.w)?\s+ccr\s*,)"
+    r"^(?:[A-Za-z_.$][\w.$]*:|[A-Za-z_.$][\w.$]*(?=[ \t]))?[ \t]+(?:\.(?:chip|arch|cpu)\s+\S*680[1-6]0|\.?machine\s+680[1-6]0|"
+    r"opt\s+[^;\n]*\bp=680[1-6]0|(?:" + _MNEM + r"|link\.l|chk\.l)(?:\.[bwlsdxp])?(?=\s|$)(?!\s*=)|bra\.l\b|b\w\w\.l\b|"
+    r"move(?:\.w)?\s+ccr\s*,)"
     r"|^[^;*\n]*?(?:\(\s*\[|\.[wl]\s*\*\s*[248]\s*[),])",
     re.IGNORECASE | re.MULTILINE)
 SOURCE_EXTS = (".s", ".asm", ".68k", ".i", ".inc")
@@ -69,10 +72,25 @@ for dp, dns, fns in os.walk(sys.argv[1], topdown=True):
 # `date` wrapper: each run fixes the wall-clock date seen by build scripts, and the two runs use dates years apart, so date-dependent
 # output shows up as nondeterminism. A recipe may pin XPLAT_DATE itself (then its output must be reproducible on any day).
 DATE_SHIM = '''#!/bin/sh
+for a in "$@"; do case "$a" in -d|-d*|--date|--date=*|-r|-r*|--reference|--reference=*|-f|-f*|--file|--file=*) exec /bin/date "$@";; esac; done
 if [ -n "$XPLAT_DATE" ]; then exec /bin/date -u -d "$XPLAT_DATE" "$@"; fi
 exec /bin/date "$@"
 '''
-RUN_DATES = {"a": "2026-10-19 12:00:00 UTC", "b": "2031-03-04 07:30:00 UTC"}
+# Neither run date is the real date, so a date that reaches an output without passing through the wrapper (a compiler's __DATE__, awk
+# systime(), time()) appears as the real build day and is caught by clock_leaks().
+RUN_DATES = {"a": "2029-06-01 12:00:00 UTC", "b": "2031-03-04 07:30:00 UTC"}
+
+
+def date_patterns(day: datetime.date) -> list[bytes]:
+    """Encodings of one calendar day as build tools embed it: C __DATE__ ("Oct 19 2026", "Oct  9 2026"), YYYYMMDD, YYYY-MM-DD, DD.MM.YYYY."""
+    mon = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")[day.month - 1]
+    return [f"{mon} {day.day:2d} {day.year}".encode(), f"{day:%Y%m%d}".encode(), f"{day:%Y-%m-%d}".encode(), f"{day:%d.%m.%Y}".encode()]
+
+
+def clock_leaks(outputs: dict[str, bytes], days: list[datetime.date]) -> list[str]:
+    """Outputs containing any of the real build days: a clock source the date wrapper did not control (pure; unit-tested)."""
+    pats = [pat for d in days for pat in date_patterns(d)]
+    return sorted(path for path, data in outputs.items() if any(pat in data for pat in pats))
 
 ASTS_PILOT = r'''import collections, os, shutil, struct, subprocess, sys
 # Assemble each pilot subproject's single source with vasm (-devpac) and compare with the subproject's shipped TOS executable.
@@ -224,10 +242,12 @@ def probe_format(data: bytes) -> dict:
 
 
 def code_digest(data: bytes) -> str:
-    """Digest of the loadable image: a TOS PRG's text+data segments (its symbol table may carry build-time symbols); else every byte."""
+    """Digest of everything loadable: for a TOS PRG every byte except the symbol table (header sizes and flags, text, data and the
+    relocation table are covered; symbols may carry build-time names); otherwise every byte."""
     fmt = probe_format(data)
     if fmt["format"] == "tos-prg":
-        return hashlib.sha256(data[28:28 + fmt["text"] + fmt["data"]]).hexdigest()
+        start = 28 + fmt["text"] + fmt["data"]
+        return hashlib.sha256(data[:start] + data[start + fmt["symbols"]:]).hexdigest()
     return hashlib.sha256(data).hexdigest()
 
 
@@ -390,11 +410,13 @@ def _run_recipe(cache: pathlib.Path, cand: dict, recipe: dict, run: str) -> dict
         rc, log = 124, "TIMEOUT"
     (work.parent / f"{run}.log").write_text(log, encoding="utf-8")
     outputs = []
+    raw: dict[str, bytes] = {}
     for pattern in recipe.get("outputs", []):
         for f in sorted(glob.glob(str(work / pattern))):
             p = pathlib.Path(f)
             if p.is_file() and not p.is_symlink():
                 data = p.read_bytes()
+                raw[str(p.relative_to(work))] = data
                 outputs.append({"path": str(p.relative_to(work)), "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
                                 "code_sha256": code_digest(data), **probe_format(data)})
     compares = []
@@ -406,7 +428,22 @@ def _run_recipe(cache: pathlib.Path, cand: dict, recipe: dict, run: str) -> dict
         for line in (work / "pilot.result.tsv").read_text().splitlines():
             k, v = line.split("\t")
             pilot[k] = int(v)
-    return {"rc": rc, "log": log, "outputs": outputs, "author_compare": compares, "pilot": pilot}
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    days = sorted({today, datetime.date.today(), today - datetime.timedelta(days=1)})
+    return {"rc": rc, "log": log, "outputs": outputs, "author_compare": compares, "pilot": pilot, "clock_leaks": clock_leaks(raw, days)}
+
+
+RECIPE_KEYS = ("name", "toolchain", "script", "outputs", "expect", "failure_signature", "min_outputs", "volatile_outputs", "author_compare")
+
+
+def recipe_digest(plan: dict, cand: dict, recipe: dict) -> str:
+    """Binds a record to the exact recipe, candidate pin, mount/shim and toolchain definition that produced it."""
+    tc = plan["toolchains"][recipe["toolchain"]]
+    body = {"commit": cand["commit"], "mount": cand.get("mount"), "shim": cand.get("shim"), "pilot": cand.get("pilot"),
+            "recipe": {k: recipe.get(k) for k in RECIPE_KEYS},
+            "toolchain": {k: tc.get(k) for k in ("dockerfile", "inputs", "base", "context_candidate")},
+            "run_dates": RUN_DATES}
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
 
 
 def evaluate_recipe(recipe: dict, a: dict, b: dict | None) -> dict:
@@ -439,6 +476,8 @@ def evaluate_recipe(recipe: dict, a: dict, b: dict | None) -> dict:
            "outputs": [{k: o[k] for k in ("path", "size", "sha256", "code_sha256", "format") if k in o} for o in a["outputs"]]}
     if volatile:
         res["volatile_outputs"] = volatile
+    leaks = sorted(set(a.get("clock_leaks", [])) | set((b or {}).get("clock_leaks", [])))
+    res["undeclared_clock_leaks"] = [x for x in leaks if x not in volatile]
     if a["author_compare"]:
         res["author_identical"] = sum(1 for c in a["author_compare"] if c["identical"])
         res["author_compared"] = len(a["author_compare"])
@@ -450,7 +489,7 @@ def evaluate_recipe(recipe: dict, a: dict, b: dict | None) -> dict:
 def observed_source(src: pathlib.Path, pinned: str) -> str:
     """The cached checkout must be exactly the pinned commit with no tracked modification; returns the observed HEAD."""
     head = _git("rev-parse", "HEAD", cwd=src).strip()
-    dirty = _git("status", "--porcelain", "--untracked-files=no", cwd=src).strip()
+    dirty = _git("status", "--porcelain", "--ignored", "--untracked-files=all", cwd=src).strip()
     if head != pinned or dirty:
         raise QualifyError(f"{src.name}: cached source is {head}{' (modified)' if dirty else ''}, plan pins {pinned}")
     return head
@@ -467,6 +506,7 @@ def build(plan: dict, cache: pathlib.Path, only: set[str] | None) -> None:
             a = _run_recipe(cache, c, r, "a")
             b = _run_recipe(cache, c, r, "b") if r.get("expect", "success") == "success" else None
             res = evaluate_recipe(r, a, b)
+            res["recipe_sha256"] = recipe_digest(plan, c, r)
             recs.append(res)
             print(f"build {c['id']}/{r['name']}: expect={res['expect']} observed={res['observed']} ok={res['matches_expectation']}"
                   + (f" deterministic={res.get('deterministic')} outputs={res.get('output_count')}" if res["expect"] == "success" else ""))
@@ -490,7 +530,18 @@ def make_manifest(plan: dict, records: dict[str, dict], toolchain_ids: dict) -> 
         rec = rec or {"recipes": []}
         if "commit" in rec and rec["commit"] != c["commit"]:
             contradictions.append(f"{c['id']}: built from {rec['commit']}, plan pins {c['commit']}")
+        planned = {r["name"]: recipe_digest(plan, c, r) for r in c["recipes"]}
+        got = {r["name"]: r.get("recipe_sha256") for r in rec["recipes"]}
+        for name in sorted(set(planned) - set(got)):
+            contradictions.append(f"{c['id']}/{name}: plan recipe has no build record")
+        for name in sorted(set(got) - set(planned)):
+            contradictions.append(f"{c['id']}/{name}: record of a recipe not in the plan")
+        for name in sorted(set(got) & set(planned)):
+            if got[name] != planned[name]:
+                contradictions.append(f"{c['id']}/{name}: record was built from a different recipe/toolchain definition")
         for r in rec["recipes"]:
+            if r.get("undeclared_clock_leaks"):
+                contradictions.append(f"{c['id']}/{r['name']}: outputs embed the real build date: {', '.join(r['undeclared_clock_leaks'])}")
             if not r["matches_expectation"]:
                 contradictions.append(f"{c['id']}/{r['name']}: expected {r['expect']}, observed {r['observed']}")
             elif r["expect"] == "success" and not r.get("deterministic", False):
@@ -545,6 +596,8 @@ def compare_manifests(committed: dict, fresh: dict) -> list[str]:
             if x is None or y is None:
                 diffs.append(f"{cid}/{name}: recipe present in only one manifest")
                 continue
+            if x.get("recipe_sha256") != y.get("recipe_sha256"):
+                diffs.append(f"{cid}/{name}: recipe definition differs")
             if x.get("observed") != y.get("observed"):
                 diffs.append(f"{cid}/{name}: outcome {x.get('observed')} != {y.get('observed')}")
             vol = set(x.get("volatile_outputs", {}))

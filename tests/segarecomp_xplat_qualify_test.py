@@ -8,6 +8,7 @@ signature, author comparisons must be byte-identical, determinism) and the contr
 """
 
 import copy
+import datetime
 import json
 import os
 import pathlib
@@ -107,12 +108,19 @@ def test_probe():
     check(q.probe_format(b"\x4e\x71\x4e\x75")["format"] == "raw", "raw fallback")
     sym1 = prg + b"SYM1"
     sym2 = prg + b"SYM2"
-    check(q.code_digest(sym1) == q.code_digest(sym2), "TOS code digest ignores the symbol table")
+    check(q.code_digest(sym1) != q.code_digest(sym2), "bytes after an empty symbol table are relocations, covered")
     check(q.code_digest(prg) != q.code_digest(prg[:28] + b"\x4e\x71" + prg[30:]), "TOS code digest covers text")
     check(q.code_digest(b"abc") != q.code_digest(b"abd"), "raw code digest covers every byte")
     data_changed = bytearray(prg)
     data_changed[28 + 8] ^= 0xFF
     check(q.code_digest(prg) != q.code_digest(bytes(data_changed)), "TOS code digest covers the data segment")
+    bss = bytearray(prg)
+    bss[13] ^= 0x10
+    check(q.code_digest(prg) != q.code_digest(bytes(bss)), "TOS code digest covers header sizes (bss)")
+    with_syms = b"\x60\x1a" + struct.pack(">IIII", 2, 0, 0, 4) + b"\0" * 10 + b"\x4e\x75" + b"SYMS"
+    reloc_a, reloc_b = with_syms + b"\0\0\0\x02\0", with_syms + b"\0\0\0\x04\0"
+    check(q.code_digest(reloc_a) != q.code_digest(reloc_b), "TOS code digest covers the relocation table")
+    check(q.code_digest(with_syms[:-4] + b"XXXX" + b"\0") == q.code_digest(with_syms[:-4] + b"YYYY" + b"\0"), "symbols excluded")
 
 
 def test_cpu_scan():
@@ -127,7 +135,8 @@ def test_cpu_scan():
     positives = ["\tmuls.l d0,d1", "\tdivu.l d2,d3", "\textb.l d0", "\tmove.w (a0,d0.w*2),d1", "\tmove.l ([4,a0]),d0", "\tbra.l far",
                  "\tbkpt #0", "\tmove.w ccr,d0", "\tpack d0,d1,#0", "\ttrapne", "\topt p=68020", "lbl:\tmovec vbr,d0", "\t.chip 68030",
                  "\tfmove.x fp0,fp1", "\tcas.l d0,d1,(a0)", "\tbne.l x"]
-    negatives = ["cas = 1", "faddress\tdc.l 0", "\tmove.l d0,d1 ; moves the bytes", "* 68030 users should", "fsubmit:\trts",
+    positives += ["\tlink.l a6,#-8", "\tchk.l d0,d1", "lbl\tmovec vbr,d0"]
+    negatives = ["\tbsr fsub", "\tjsr cas", "\tdc.l fbuf", "\tlink a6,#-8", "\tchk.w d0,d1", "cas = 1", "faddress\tdc.l 0", "\tmove.l d0,d1 ; moves the bytes", "* 68030 users should", "fsubmit:\trts",
                  "\tmove.w d0,ccr", "\tmuls.w d0,d1", "\tbra.w x", "\tlea (a0,d0.w),a1", "\tdbra d0,loop", "\tmulu.w #2*4,d0",
                  "\tmove.l d0,d1 ; (a0,d0.w*2)", "fbase:\tdc.w 1"]
     for line in positives:
@@ -188,12 +197,24 @@ def test_pin_check():
         head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
         check(q.observed_source(repo, head) == head, "pinned clean checkout accepted")
         check(raises(q.observed_source, repo, "0" * 40), "different commit refused")
+        (repo / "zzz.asm").write_text("\tnop\n")
+        check(raises(q.observed_source, repo, head), "untracked file refused")
+        (repo / "zzz.asm").unlink()
         (repo / "a.s").write_text("\tnop\n")
         check(raises(q.observed_source, repo, head), "modified checkout refused")
 
 
 def test_date_shim():
     check("XPLAT_DATE" in q.DATE_SHIM and q.RUN_DATES["a"][:4] != q.RUN_DATES["b"][:4], "the two runs see different years")
+    check("--reference" in q.DATE_SHIM and "-d|" in q.DATE_SHIM, "explicit date sources are never overridden")
+    day = datetime.date(2026, 10, 9)
+    pats = q.date_patterns(day)
+    check(b"Oct  9 2026" in pats and b"20261009" in pats and b"2026-10-09" in pats, "C __DATE__ and numeric encodings")
+    outs = {"a.tos": b"\0\0Oct  9 2026\0", "b.tos": b"\x4e\x75", "c.img": b"x20261009y"}
+    check(q.clock_leaks(outs, [day]) == ["a.tos", "c.img"], "embedded real build dates detected")
+    check(q.clock_leaks(outs, [datetime.date(2029, 6, 1)]) == [], "wrapper dates are not leaks")
+    run_days = [datetime.datetime.strptime(v[:10], "%Y-%m-%d").date() for v in q.RUN_DATES.values()]
+    check(datetime.date.today() not in run_days, "no run date equals the real date")
 
 
 def _run(rc, log, outputs, compares=()):
@@ -203,6 +224,11 @@ def _run(rc, log, outputs, compares=()):
 def test_evaluate():
     out = [{"path": "out/a.tos", "size": 10, "sha256": "1" * 64, "format": "tos-prg"}]
     r = {"name": "x", "toolchain": "tc-gnu", "script": "", "outputs": ["out/*.tos"]}
+    leaky = _run(0, "", out)
+    leaky["clock_leaks"] = ["out/a.tos"]
+    check(q.evaluate_recipe(r, leaky, _run(0, "", out))["undeclared_clock_leaks"] == ["out/a.tos"], "clock leak reported")
+    check(q.evaluate_recipe(dict(r, volatile_outputs={"out/a.tos": "date"}), leaky, _run(0, "", out))["undeclared_clock_leaks"] == [],
+          "declared volatile leak accepted")
     res = q.evaluate_recipe(r, _run(0, "", out), _run(0, "", out))
     check(res["matches_expectation"] and res["deterministic"] and res["formats"] == {"tos-prg": 1}, "success recipe")
     other = [dict(out[0], sha256="2" * 64)]
@@ -234,7 +260,8 @@ def test_manifest():
         recs = []
         for r in c["recipes"]:
             recs.append({"name": r["name"], "toolchain": r["toolchain"], "expect": r.get("expect", "success"),
-                         "observed": r.get("expect", "success"), "matches_expectation": True, "deterministic": True})
+                         "observed": r.get("expect", "success"), "matches_expectation": True, "deterministic": True,
+                         "recipe_sha256": q.recipe_digest(plan, c, r)})
         records[c["id"]] = {"id": c["id"], "recipes": recs}
     m = q.make_manifest(plan, records, {})
     check(m["summary"]["contradictions"] == [], "consistent records give no contradiction")
@@ -269,6 +296,26 @@ def test_manifest():
     o2["candidates"][0]["recipes"][0]["volatile_outputs"] = {"x": "date"}
     o1["candidates"][0]["recipes"][0]["volatile_outputs"] = {"x": "date"}
     check(q.compare_manifests(o1, o2) == [], "declared volatile output ignored")
+    hello = records["HelloAmi"]["recipes"]
+    saved = copy.deepcopy(hello)
+    hello[0]["recipe_sha256"] = "0" * 64
+    check(any("different recipe" in x for x in q.make_manifest(plan, records, {})["summary"]["contradictions"]), "recipe drift")
+    hello.append(dict(saved[0], name="never-planned"))
+    check(any("not in the plan" in x for x in q.make_manifest(plan, records, {})["summary"]["contradictions"]), "unplanned record")
+    records["HelloAmi"]["recipes"] = []
+    check(any("HelloAmi/units: plan recipe has no build record" == x for x in q.make_manifest(plan, records, {})["summary"]["contradictions"]),
+          "missing recipe record")
+    records["HelloAmi"]["recipes"] = saved
+    leak = copy.deepcopy(records)
+    leak["HelloAmi"]["recipes"][0]["undeclared_clock_leaks"] = ["out/HelloAmi"]
+    check(any("real build date" in x for x in q.make_manifest(plan, leak, {})["summary"]["contradictions"]), "clock leak contradiction")
+    # provenance filter holds even when the plan bypasses validate_plan
+    rogue = copy.deepcopy(plan)
+    g = next(c for c in rogue["candidates"] if c["id"] == "galaga")
+    g.update({"class": "QUALIFIED", "licence_status": "declared"})
+    rrec = copy.deepcopy(records)
+    rrec["galaga"]["recipes"] = [dict(x, recipe_sha256=q.recipe_digest(rogue, g, r)) for x, r in zip(rrec["galaga"]["recipes"], g["recipes"])]
+    check("galaga" not in q.make_manifest(rogue, rrec, {})["summary"]["usable_without_review"], "usable set requires authored provenance")
     del records["emutos"]
     check(any(x.startswith("emutos:") for x in q.make_manifest(plan, records, {})["summary"]["contradictions"]), "missing record reported")
 

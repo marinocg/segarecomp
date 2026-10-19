@@ -21,9 +21,15 @@ is checked out (section 4); it is never copied. Further nominations must be adde
 
 Every build runs in an offline container (`--network none`) on a fresh copy of the pinned source. Before building, `build` re-verifies
 that the cached checkout is exactly the pinned commit with no tracked modification and records the observed commit; `report` treats a record
-built from any other commit as a contradiction. Each successful recipe runs twice, and a `date` wrapper shows the two runs different
-wall-clock dates (2026 and 2031), so date-dependent output is caught as nondeterminism. EmuTOS stamps its build date into the image header,
-so its recipes pin the date the build sees: its image digests are then reproducible on any day. `verify` checks that freshly built records
+built from any other commit as a contradiction. The build tree is the clean checkout: untracked and ignored files are refused. Every
+record also carries a hash of the exact recipe, candidate pin and toolchain definition that produced it, and `report`/`verify` flag a plan
+recipe without a record, a record without a plan recipe, and any hash mismatch. Each successful recipe runs twice. A `date` wrapper shows
+the two runs different wall-clock dates (2029 and 2031, neither the real date), so dates taken through `date` are caught as
+nondeterminism. A wrapper cannot change a compiler's `__DATE__` or a program's own `time()`/`systime()`, so every output is also scanned
+for the real build day in the usual encodings (`__DATE__`, `YYYYMMDD`, `YYYY-MM-DD`, `DD.MM.YYYY`). Such a clock leak is a contradiction
+unless the output is declared volatile with its reason; volatile outputs are excluded from digest comparison. EmuTOS stamps its build
+date into the image header through `date`, so its recipes pin the date the build sees (2026-01-01): its image digests are then
+reproducible on any day. `verify` checks that freshly built records
 reproduce the committed manifest (identities, classes, outcomes, code digests).
 
 | id | toolchain | provenance |
@@ -55,9 +61,10 @@ pinned tarballs are supplied from the private cache. Output reproducibility is m
 ## 3. Results
 
 Classes per candidate (`class`; `technical` is the build/label outcome before the licence rule). Output counts are per successful recipe
-run. Every successful recipe was run twice. Its code digests (a TOS PRG's text+data, otherwise every byte) are identical between the
-runs, with one exception: a declared `__DATE__`/`__TIME__` object (GODLIB `PROFILER.C`). The runs are byte-identical too, except that
-the two mintlib-linked toolkit demos differ inside their PRG symbol tables.
+run. Every successful recipe was run twice. Its code digests (a TOS PRG's every byte except its symbol table, otherwise every byte) are
+identical between the runs. The exceptions are two declared volatile outputs, which embed the compiler's `__DATE__`: GODLIB `PROFILER.C`'s
+object and miniupnp's `listacsi.tos`. No undeclared clock leak was found. The runs are byte-identical too, except that the two
+mintlib-linked toolkit demos differ inside their PRG symbol tables.
 
 | tier | candidate | platform | class | technical | executed evidence |
 |---|---|---|---|---|---|
@@ -115,7 +122,9 @@ Notes on the classes:
   lineage.
 - **LICENSING_REVIEW_REQUIRED** marks candidates that are technically usable but declare no licence (perihelion, miniupnp AtariST, GODLIB,
   amiga-vasm-template, x68000dev, the archive). It also marks the jotd666 arcade ports (galaga, xevious, mpatrol), whose 68k code is a
-  line-by-line transcode of commercial arcade Z80 programs with ROM-extracted graphics: commercial-derived regardless of buildability. An
+  line-by-line transcode of commercial arcade Z80 programs with ROM-extracted graphics: commercial-derived regardless of buildability. For
+  them the class records only that their repository licence is unresolved; no licence decision can admit them, because their
+  `commercial-derived` provenance excludes them from clean truth. An
   undeclared licence is never treated as permissive. The plan validator forbids a technically usable, undeclared-licence candidate from
   carrying any other class.
 - **BUILD_BLOCKED:** pacman500 and scramble500 need AmigaOS assembler includes, the author's private `lvo/*.i` tree and WHDLoad developer
@@ -150,7 +159,8 @@ licence) and its own lineage identity (author directory). The pilot is evidence 
 ## 5. Gate, operator inputs and recommendation for T002
 
 **Gate decision: PASSED_WITH_LIMITS.** Programs that are usable without operator review, have a declared licence, are reproducibly
-built and have checkable label evidence exist on both target platforms, from five distinct toolchain families:
+built and have checkable label evidence exist on both target platforms, from four distinct assembler/compiler families (GCC in two
+generations, vbcc, vasm, A68K; the GNU assembler is counted with GCC):
 
 - Atari ST: toslibc example applications (m68k-elf GCC 13.3, C); space-invaders (vbcc 0.9g C + vasm, object level); EmuTOS firmware
   (MiNT GCC 4.6.4 C + GNU assembly, 4 configurations).
@@ -168,7 +178,8 @@ The limits, which T003 must carry:
 - No qualified Genesis-independent game lineage with large embedded tables exists yet. The strongest assembly sources (BattleIsleEditor,
   realtime3d) are an application and demo-style programs.
 - EmuTOS needs CPU-variant region typing before use.
-- Nine technically usable candidates wait for licence review.
+- Six authored, technically usable candidates wait for a licence decision (perihelion, miniupnp AtariST, GODLIB, Atari_ST_Sources,
+  x68000dev, amiga-vasm-template). The three commercial-derived ports in the same class are not candidates for any licence route.
 
 T004-T006 must be re-gated against the corpus that T002/T003 actually produce.
 

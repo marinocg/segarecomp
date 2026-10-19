@@ -106,7 +106,7 @@
         {
           "name": "rom-192",
           "toolchain": "tc-mint",
-          "script": "export XPLAT_DATE='2026-10-19 00:00:00 UTC'; make 192 UNIQUE=us -j8",
+          "script": "export XPLAT_DATE='2026-01-01 00:00:00 UTC'; make 192 UNIQUE=us -j8",
           "outputs": [
             "etos192us.img",
             "emutos.map"
@@ -115,7 +115,7 @@
         {
           "name": "rom-256",
           "toolchain": "tc-mint",
-          "script": "export XPLAT_DATE='2026-10-19 00:00:00 UTC'; make 256 UNIQUE=us -j8",
+          "script": "export XPLAT_DATE='2026-01-01 00:00:00 UTC'; make 256 UNIQUE=us -j8",
           "outputs": [
             "etos256us.img",
             "emutos.map"
@@ -124,7 +124,7 @@
         {
           "name": "cart",
           "toolchain": "tc-mint",
-          "script": "export XPLAT_DATE='2026-10-19 00:00:00 UTC'; make cart UNIQUE=us -j8",
+          "script": "export XPLAT_DATE='2026-01-01 00:00:00 UTC'; make cart UNIQUE=us -j8",
           "outputs": [
             "etoscart.img",
             "emutos.map"
@@ -133,7 +133,7 @@
         {
           "name": "amiga-rom",
           "toolchain": "tc-mint",
-          "script": "export XPLAT_DATE='2026-10-19 00:00:00 UTC'; make amiga UNIQUE=us -j8",
+          "script": "export XPLAT_DATE='2026-01-01 00:00:00 UTC'; make amiga UNIQUE=us -j8",
           "outputs": [
             "emutos-amiga.rom",
             "emutos.map"
@@ -271,7 +271,8 @@
           "script": "mkdir -p out; cd src; for s in tut*.s; do n=${s%.s}; [ $n = tut03lib ] && continue; vasmm68k_mot -quiet -devpac -spaces -m68000 -no-fpu -Ftos -L ../out/$n.lst -o ../out/$n.tos $s || exit 1; done",
           "outputs": [
             "out/*.tos"
-          ]
+          ],
+          "min_outputs": 14
         }
       ]
     },
@@ -300,7 +301,8 @@
             "intro/*.tos",
             "show_iff/*.ttp",
             "bootsector/*.bin"
-          ]
+          ],
+          "min_outputs": 10
         },
         {
           "name": "listacsi",
@@ -308,7 +310,10 @@
           "script": "make -C listacsi",
           "outputs": [
             "listacsi/listacsi.tos"
-          ]
+          ],
+          "volatile_outputs": {
+            "listacsi/listacsi.tos": "listacsi/main.c embeds the compiler's __DATE__"
+          }
         },
         {
           "name": "the_80s",
@@ -437,7 +442,8 @@
           "script": "mkdir -p out; for i in 01 02 03 04 05 06 07 08 09; do vasmm68k_mot -quiet -m68000 -Fhunkexe -nosym -I include -L out/P$i.lst -o out/Program_$i src/Program_$i.s || exit 1; done",
           "outputs": [
             "out/Program_*"
-          ]
+          ],
+          "min_outputs": 9
         }
       ]
     },
@@ -621,7 +627,7 @@
       "licence_status": "undeclared",
       "class": "LICENSING_REVIEW_REQUIRED",
       "technical_class": "PARTIALLY_QUALIFIED",
-      "rationale": "A line-by-line 68k transcode of the commercial arcade Z80 program, with graphics extracted from the arcade ROMs committed as C data, so the code derives from commercial code. Technically the core transcoded modules assemble with GNU as (-m68000, register-prefix-optional); the Amiga main module needs generated sound/graphics includes, and vbr.68k is deliberately 68010+. No licence declared.",
+      "rationale": "A line-by-line 68k transcode of the commercial arcade Z80 program, with graphics extracted from the arcade ROMs committed as C data, so the code derives from commercial code. Technically the core transcoded modules assemble with GNU as (-m68000, register-prefix-optional); the Amiga main module needs generated sound/graphics includes, and vbr.68k is deliberately 68010+. No licence declared. No licence decision can admit it: as commercial-derived code it is excluded from clean truth by provenance; the class records only that its own repository licence is also unresolved.",
       "label_evidence": "GNU as listings (if admitted after review)",
       "lineage_hypothesis": "jotd666 author lineage (with xevious/mpatrol/pacman500/scramble500)",
       "recipes": [
@@ -648,7 +654,7 @@
       "licence_status": "undeclared",
       "class": "LICENSING_REVIEW_REQUIRED",
       "technical_class": "NOT_ATTEMPTED",
-      "rationale": "Same family as galaga: by its README, the core is a line-by-line transcode of the reverse-engineered commercial arcade ROMs, with ROM-extracted graphics. Build not attempted beyond triage because licensing review precedes any use.",
+      "rationale": "Same family as galaga: by its README, the core is a line-by-line transcode of the reverse-engineered commercial arcade ROMs, with ROM-extracted graphics. Build not attempted beyond triage because licensing review precedes any use. No licence decision can admit it: as commercial-derived code it is excluded from clean truth by provenance; the class records only that its own repository licence is also unresolved.",
       "label_evidence": "n/a until reviewed",
       "lineage_hypothesis": "jotd666/tcdev lineage",
       "recipes": []
@@ -665,7 +671,7 @@
       "licence_status": "undeclared",
       "class": "LICENSING_REVIEW_REQUIRED",
       "technical_class": "NOT_ATTEMPTED",
-      "rationale": "Same family as galaga: an arcade transcode with ROM-extracted graphics. Licensing review precedes any use.",
+      "rationale": "Same family as galaga: an arcade transcode with ROM-extracted graphics. Licensing review precedes any use. No licence decision can admit it: as commercial-derived code it is excluded from clean truth by provenance; the class records only that its own repository licence is also unresolved.",
       "label_evidence": "n/a until reviewed",
       "lineage_hypothesis": "jotd666 lineage",
       "recipes": []
