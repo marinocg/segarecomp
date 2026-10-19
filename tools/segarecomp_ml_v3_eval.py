@@ -511,6 +511,60 @@ def cmd_freeze(a) -> int:
     return 0
 
 
+def cmd_sealed_post(a) -> int:
+    """After the one-shot run: structural closure of the frozen pair's sealed proposals and generated-native economics (broad vs frozen pair
+    vs the incumbent native gen2 route) on the broad-accepted sealed images. Uses only the stored frozen regions; nothing is refitted."""
+    import segarecomp_ml_region_v2 as v2
+    v3.verify_plan()
+    if not (ROOT / "sealed" / "UNSEALED.marker.json").exists():
+        raise SystemExit("sealed post-processing needs the completed one-shot run")
+    priv = json.loads((RESULTS / "sealed.private.json").read_text())
+    manifest = {e["lineage"]: e for e in json.loads((HERE / "segarecomp_ml_v3.corpus_manifest.json").read_text())["sealed"]["entries"]}
+    work = pathlib.Path(a.work).resolve()
+    import subprocess
+    if subprocess.run(["git", "check-ignore", "-q", "--", str(work)], cwd=str(HERE.parent)).returncode != 0:
+        raise SystemExit("--work must be an ignored directory inside the product checkout")
+    runner = v2.PruneRunner(a.cli, str(ROOT / "prune-sealed"))
+    out = {}
+    for L in a.lineages:
+        row = priv["lineages"][L]
+        e = manifest[L]
+        img_rel, cls_rel = SEALED_PATHS[L]
+        img = (ROOT / img_rel[1:]) if img_rel.startswith("@") else GAMES / img_rel.split("/", 1)[1]
+        m = {"image": str(img), "sha256": e["image_sha256"], "size": e["image_bytes"]}
+        data = ROOT / "sealed" / "data" / L.lower()
+
+        class T:
+            pass
+        t = T()
+        t.sha, t.rom_path = m["sha256"], m["image"]
+        t.universe = sorted(int(x, 16) for x in (data / "u.txt").read_text().split())
+        regions = regions_text(m["sha256"], m["size"], row["_region"], row["_cell"])
+        stats = runner.run(t, regions)
+        starts = v3.starts_of((ROOT / cls_rel).read_bytes())
+        rec = {}
+        if stats.get("returncode") == 0 and stats.get("validator") == "accepted" and "ranges" in stats:
+            k = v2.admitted_set(t.universe, stats["ranges"])
+            rec["kstage"] = {"validator": "accepted", "k_over_u": len(k) / len(t.universe), "post_validator_entries": len(k), "universe": len(t.universe),
+                             "c_outside_k": sum(1 for x in starts if x not in k)}
+        else:
+            rec["kstage"] = {"validator": "rejected", "reason": stats.get("reason", "")}
+        b = bridge(a.cli, m, work / "broad" / L / "run", a.frames, [])
+        res = {"broad": b}
+        if rec["kstage"]["validator"] == "accepted":
+            plan = make_plan(a.cli, m, regions, work / "frozen" / L / "plan")
+            res["frozen_pair"] = bridge(a.cli, m, work / "frozen" / L / "run", a.frames, ["--admission-plan", plan["plan"]]) if plan["accepted"] else None
+        res["incumbent_m3_b35"] = bridge(a.cli, m, work / "incumbent" / L / "run", a.frames, ["--ml-gen2-admission"])
+        keys = ("outcome", "frames", "final_state", "coverage", "frame_stream")
+        rec["economics"] = {name: ({k: v[k] for k in ("wall_seconds", "cpu_seconds", "peak_rss_kib", "generated_bytes", "outcome", "frames")} if v else None)
+                            for name, v in res.items()}
+        rec["equal_to_broad"] = {name: all(v.get(k) == b.get(k) for k in keys) for name, v in res.items() if v and name != "broad"}
+        out[L] = rec
+        print(L, json.dumps(rec), flush=True)
+    (RESULTS / "sealed.post.json").write_text(json.dumps(out, indent=1, sort_keys=True))
+    return 0
+
+
 def cmd_select(a) -> int:
     v3.verify_plan()
     table = {}
@@ -560,6 +614,12 @@ def main() -> int:
     rh.add_argument("--margin", type=float)
     rh.add_argument("--images", nargs="+", required=True)
     rh.set_defaults(func=cmd_rehearse)
+    sp = sub.add_parser("sealed-post")
+    sp.add_argument("--cli", required=True)
+    sp.add_argument("--lineages", nargs="+", required=True)
+    sp.add_argument("--frames", type=int, default=120)
+    sp.add_argument("--work", required=True)
+    sp.set_defaults(func=cmd_sealed_post)
     se = sub.add_parser("sealed")
     se.set_defaults(func=cmd_sealed)
     d = sub.add_parser("diagnose")
