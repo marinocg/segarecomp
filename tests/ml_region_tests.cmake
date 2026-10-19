@@ -107,3 +107,9 @@ set_property(TEST segarecomp_xplat_qualify_test APPEND PROPERTY LABELS full fast
 add_test(NAME segarecomp_xplat_handoff_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_handoff_test.py)
 set_property(TEST segarecomp_xplat_handoff_test APPEND PROPERTY LABELS full fast)
+# SEG-075-T002 (ADR 0160): cross-platform container/listing adapters and label extraction on synthetic fixtures (PRG/hunk/ELF/a.out,
+# vasm/A68K/GNU as listings, relocation masking, placement, decoder typing); the end-to-end case runs the real CPU-owned decoder on
+# 68020 forms that must stay out of the base-68000 labels.
+add_test(NAME segarecomp_xplat_corpus_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_corpus_test.py $<TARGET_FILE:segarecomp>)
+set_property(TEST segarecomp_xplat_corpus_test APPEND PROPERTY LABELS full fast)

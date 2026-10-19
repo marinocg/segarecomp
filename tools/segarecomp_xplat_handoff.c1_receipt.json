@@ -4,7 +4,7 @@
   "images": 5
  },
  "label": "c1-t001-audit",
- "manifest_sha256": "e8407bbdbfd46b8626ca087e483ad89d45dcf78c8ea516c756b7b8f8f825bdf1",
+ "manifest_sha256": "6a0acfb9fc22ed3487dd7dbb051ae38e906004f4343948fd2398b48f25e845ad",
  "required_problems": 0,
  "schema": "segarecomp.xplat_handoff.receipt.v1",
  "storage": {
@@ -29,12 +29,12 @@
     "PRESENT_AND_VERIFIED": 2
    },
    "t001.build.a": {
-    "NOT_REQUIRED_FOR_SUCCESSOR": 7401,
-    "PRESENT_AND_VERIFIED": 965
+    "NOT_REQUIRED_FOR_SUCCESSOR": 7389,
+    "PRESENT_AND_VERIFIED": 977
    },
    "t001.build.b": {
-    "NOT_REQUIRED_FOR_SUCCESSOR": 6288,
-    "PRESENT_AND_VERIFIED": 965
+    "NOT_REQUIRED_FOR_SUCCESSOR": 6276,
+    "PRESENT_AND_VERIFIED": 977
    },
    "t001.dockerfile": {
     "PRESENT_AND_VERIFIED": 4
@@ -74,14 +74,13 @@
    }
   },
   "by_status": {
-   "NOT_REQUIRED_FOR_SUCCESSOR": 16546,
-   "PRESENT_AND_VERIFIED": 4953,
+   "NOT_REQUIRED_FOR_SUCCESSOR": 16522,
+   "PRESENT_AND_VERIFIED": 4977,
    "REPRODUCIBLE_BUT_NOT_PRESERVED": 4
   },
   "entries": 21503,
   "not_required_underlying": {
-   "NOT_REQUIRED_FOR_SUCCESSOR": 27,
-   "PRESENT_AND_VERIFIED": 16454,
+   "PRESENT_AND_VERIFIED": 16457,
    "PRESENT_UNVERIFIED": 44
   },
   "physical_bytes": 3924105211,

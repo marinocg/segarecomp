@@ -1,6 +1,7 @@
 # ADR 0160: SEG-075-T002 private-artifact handoff, reproducibility identity and cross-platform label extraction
 
-- Status: Accepted (C1 section). The C2 extraction section is added at checkpoint C2.
+- Status: Accepted. C1 (sections 1-4): private-artifact handoff and v2 identity. C2 (sections 5-9): canonical cross-platform corpus,
+  54 samples from 7 programs, every qualified T001 program extracted or typed.
 - Task: SEG-075-T002, the first task of the combined SEG-075 product PR (T002-T006, checkpoints C1-C7, harness full refinement of
   2026-10-19). SEG-074 records, contracts and compiled-code optimizations, the SEG-072/073 frozen records and the T001 frozen plan, records
   and manifest are unchanged.
@@ -132,3 +133,112 @@ Two successful runs prove run-to-run determinism on this machine. They do not pr
 
 The durable recovery path for every toolchain is the preserved image archive. Rebuilding from Dockerfiles is a fallback with the
 reproducibility limits above, not a guarantee.
+
+## 5. C2: where the labels come from
+
+Labels come only from assembler/compiler listings that provably describe the qualified binaries:
+
+- **Assembler programs (BattleIsleEditor A68K, amiga-realtime3d and HelloAmi vasm).** The listings of the qualified T001 run `a` are used
+  directly. Their objects and executables are the T001-recorded outputs.
+- **Compiler programs (toslibc and neogeosdk GCC 13.3, EmuTOS GCC 4.6.4 MiNT, space-invaders vbcc).** T001 never produced listings for
+  these. `segarecomp_xplat_corpus.py truth` reruns each qualified recipe in a fresh copy of the pinned source, inside the same preserved
+  offline image, with the assembler wrapped to also write a listing. A truth run is accepted only if every M68K object and every final
+  image it produces is byte-identical to T001 run `a`. All seven truth runs were accepted (EmuTOS 4 configurations, toslibc, neogeosdk,
+  space-invaders), so their listings describe the qualified objects.
+- **GNU as listings need one more step.** GNU as loses its byte-to-line attribution after GCC's `#APP`/`#NO_APP` inline-assembly scrubbing
+  toggles: bytes are printed one or more lines late. In EmuTOS this affected 73 of 188 objects. The wrapper therefore keeps GCC's
+  assembly and re-assembles a copy with only those two marker lines removed. That listing is used only when the re-assembled object is
+  byte-identical to the real one, which held for all 188 EmuTOS objects and every toslibc/neogeosdk object.
+- **Residual desynchronization fails closed.** Bytes listed on a statement that cannot emit them (non-zero bytes on a directive or label
+  line), or an instruction line without bytes, rejects the whole section to `U` (`LISTING_BYTE_LAG`). Zero fill on a section-changing
+  directive is the m68k even-size section padding and is `U` (`SECTION_PADDING`).
+
+## 6. C2: from listing rows to per-byte labels
+
+1. **Row extents.** A row's extent is the distance to the next emitting row in its section. Its listed bytes must equal the assembled
+   section bytes outside relocation fields (`LISTING_OBJECT_DISAGREE`, overlapping or out-of-section rows reject the section). A68K lists
+   at most 12 bytes per row, so long data rows are compared as a prefix. An instruction row is labelled for exactly its listed bytes. A
+   following unlisted gap is `U` (`UNLISTED_GAP`, e.g. vasm `cnop` padding).
+2. **Placement.** An assembled section is placed in the final image only where its non-relocated bytes match at exactly one even position
+   (anchored on its longest unmasked run, at least 8 unmasked bytes). Otherwise it is `PLACEMENT_AMBIGUOUS`, `SECTION_NOT_IN_IMAGE` (not
+   linked), `SECTION_TOO_SHORT_TO_PLACE` or `PLACEMENT_OVERLAP`, and stays `U`. Without a separate object (vasm `-Fhunkexe`), listing
+   section i is hunk i. Relocated fields are masked, so placement and labels are relocation-invariant (tested). Bytes not covered by a
+   placed section (libgcc, ambiguous, unlisted) stay `U`.
+3. **Row classes.** Instruction rows become `I` + `c`, data rows `D`, alignment/padding/macro/other emitting rows `U`.
+4. **Decoder check (base MC68000).** Every placed `I` row is checked with the CPU-owned decoder (`segarecomp m68k-decode-token-report`,
+   decoder sources of product `main` unchanged). It must decode as an ordinary instruction, or as the intended `ILLEGAL` form, of exactly
+   the listed length. Otherwise it is typed `DECODER_REJECTED` / `EXCEPTION_FORM` / `LENGTH_MISMATCH` / `ODD_START` and becomes `U`. The
+   MC68000's maximum instruction length is 5 words, so the token length is exact.
+5. **Fall-through.** A data row reached by fall-through from a non-terminating instruction, and every contiguous data row after it up to
+   the next instruction, becomes `U` (`DATA_AFTER_FALLTHROUGH`): inline arguments or encoded instructions.
+6. **Encoded 68010+ opcodes.** A data row in an instruction-bearing section whose first word is a 68010+/coprocessor opcode (MOVEC, MOVES,
+   RTD, BKPT, line-F coprocessor ids 0-3) becomes `U` (`D_ROW_ENCODED_NON_BASE_OPCODE`).
+
+Rules 5 and 6 are how EmuTOS's guarded 68010+/68030/68040 code is filtered. It is written with cpp macros that emit `dc.l` words
+(`MOVEC_*`, `PMOVE_*`), so it never appears as instruction rows. Source-text scanning (the T001 heuristic) plays no part.
+
+What remains, as a disclosed upper bound: other data rows in instruction-bearing sections whose first word is not an ordinary decode stay
+`D` (`D_ROW_NON_BASE_WORD_IN_CODE_SECTION`, e.g. 10,104 rows in EmuTOS, overwhelmingly tables and strings). An encoded non-base instruction
+reachable only by a jump, and not starting with one of the listed opcode words, could hide among them. No such case is known.
+
+## 7. C2: canonical samples
+
+There is one sample per loadable image:
+
+- PRG text+data;
+- each Amiga hunk;
+- a raw EmuTOS ROM;
+- the Neo Geo ELF load image;
+- the text segment of each object of the object-only space-invaders build.
+
+The HelloAmi disk images (`.adf`) embed the other units and are excluded. Each sample has the SEG-072 registry layout (`image.bin`,
+`classes.bin`, `tokens.bin`, `seeds.json`, `meta.json` with an `audit`), plus `relocs.json` (relocation fields as evidence, never
+labels) and `spans.json` (typed findings).
+
+Seeds are only independently established executable roots: the container entry (PRG and first CODE hunk offset 0, the EmuTOS reset
+vector, the ELF entry). Object-only units have none. Symbol tables never create labels or seeds.
+
+`meta.json` records platform, toolchain, workload class, CPU variant, truth provenance, digests and a provisional lineage (the candidate).
+T003 assigns the real lineage groups. The unchanged SEG-072 loader (`segarecomp_ml_v3_train.Image`) loads all 54 samples (12,155
+128-byte cells, 9,648 positive).
+
+Extraction is deterministic. A second run into a different directory reproduces the corpus manifest digest
+(`cc2a49188fef970050175a66533ba9e15d5cb92e55fc09d12fdb666d1728126e`) and every data file byte for byte. The end-to-end test repeats this
+on a fixture.
+
+## 8. C2: coverage (`tools/segarecomp_xplat_corpus.coverage.json`, aggregates only)
+
+| program | platform | toolchain | samples | bytes | starts | I+c | D | U | decoder agreement |
+|---|---|---|---|---|---|---|---|---|---|
+| BattleIsleEditor | Amiga | A68K 2.71 + vlink | 12 | 143,172 | 28,521 | 58.5% | 41.5% | 0.05% | 100% |
+| amiga-realtime3d | Amiga | vasm 2.0f | 9 | 96,028 | 13,126 | 42.8% | 57.2% | 0.01% | 99.98% |
+| HelloAmi | Amiga | vasm 2.0f | 4 | 1,944 | 82 | 12.4% | 87.7% | 0% | 100% |
+| toslibc | Atari ST | GCC 13.3 | 7 | 49,880 | 14,086 | 88.8% | 6.2% | 5.1% | 100% |
+| space-invaders | Atari ST | vbcc 0.9g + vasm | 17 | 11,956 | 3,240 | 84.1% | 14.1% | 1.8% | 99.36% |
+| EmuTOS (4 configurations) | Atari ST + Amiga | GCC 4.6.4 MiNT | 4 | 851,968 | 208,244 | 79.0% | 16.8% | 4.2% | 99.96% |
+| neogeosdk | Neo Geo | GCC 13.3 | 1 | 397,971 | 93,317 | 87.0% | 12.9% | 0.14% | 100% |
+
+Decoder disagreements are typed and labelled `U`:
+
+- vasm rewrote 2-register `MOVEM.L` into two `MOVE.L` (one listing row, two instructions): `LENGTH_MISMATCH` in amiga-realtime3d and
+  space-invaders;
+- residual hand-written `.S` rows in EmuTOS;
+- `RESET`, a legal MC68000 instruction the current decoder rejects in the token report (8 rows in EmuTOS). This is a decoder support
+  gap, reported here and not patched (decoder changes are out of scope).
+
+No 68020 instruction row was found in any qualified program; EmuTOS's non-base code is the encoded-word case of section 6.
+
+The partial, object-only space-invaders build is extracted per object text segment (17 units, no seeds, link-blocked as in T001). Its
+`.data` segments are not samples. toslibc's library sections that an example does not link are `SECTION_NOT_IN_IMAGE` (expected).
+
+## 9. C2: private artifacts and limits
+
+- Private outputs live in `<HARNESS_ROOT>/.cache/seg075/t002/`: `truth/` (truth runs with listings, kept assembly, relist proofs) and
+  `corpus/` (54 samples + `MANIFEST.json`).
+- The handoff store manifest `c2-t002-corpus` extends `c1-t001-audit` with these trees and the exact decoder binary. Its receipt is
+  `tools/segarecomp_xplat_handoff.c2_receipt.json` (fresh-process verify PASS, 0 required problems). The four C1
+  `REPRODUCIBLE_BUT_NOT_PRESERVED` truth-listing entries are now preserved.
+- The samples are dense in code: 79% of labelled cells are positive. Many images are smaller than M3-R's 32-cell (4 KB) training segment,
+  so only images of at least 4 KB contribute M3-R training segments. This is a T003 design input.
+- The raw numbers above are instruction starts, not independent diversity. EmuTOS's four configurations, BattleIsleEditor's six editors
+  and amiga-realtime3d's nine incremental programs are each one lineage. T003 groups and deduplicates them.

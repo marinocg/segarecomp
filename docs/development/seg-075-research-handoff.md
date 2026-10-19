@@ -44,10 +44,19 @@ python3 tools/segarecomp_xplat_qualify.py identity --cache <HARNESS>/.cache/seg0
 - Rebuilding toolchains from the committed Dockerfiles is a fallback only. tc-gnu and tc-mint depend on floating package versions (ADR 0160,
   section 4).
 
+## T002 corpus (no re-extraction needed)
+
+`<HARNESS>/.cache/seg075/t002/corpus/` holds 54 canonical samples in the SEG-072 registry layout. Load them with the unchanged
+`segarecomp_ml_v3_train.Image(<sample dir>)`; `tools/segarecomp_xplat_corpus.py load --corpus <dir>` checks all of them. To reproduce:
+`segarecomp_xplat_corpus.py truth --cache <q> --out <truth>` (about 2 minutes, needs the toolchain images), then `extract --cache <q> --truth
+<truth> --cli <segarecomp binary> --out <corpus>`. The result must reproduce the corpus manifest digest recorded in
+`tools/segarecomp_xplat_corpus.coverage.json`.
+
 ## Manifests
 
 | label | content |
 |---|---|
 | `c1-t001-audit` | C1 audit of the T001 cache: checkouts, both runs of every recipe, records, toolchain inputs, Dockerfiles, helpers, image archive |
+| `c2-t002-corpus` | `c1-t001-audit` + T002 truth runs (`seg075/t002/truth`), canonical corpus (`seg075/t002/corpus`, 54 samples), decoder CLI binary |
 
 Later checkpoints add labels (T002 corpus, T003 snapshot, T004/T005 models, final C7 handoff); see the receipts committed under `tools/`.

@@ -1,0 +1,306 @@
+{
+ "adr": "0160",
+ "corpus_manifest_sha256": "cc2a49188fef970050175a66533ba9e15d5cb92e55fc09d12fdb666d1728126e",
+ "excluded_units": {
+  "HelloAmi": "HelloAmi.adf/BootWB1x.adf: disk-image containers that embed the other units (duplicated content)"
+ },
+ "platforms": {
+  "amiga": {
+   "bytes": 241144,
+   "programs": 3,
+   "starts": 41729
+  },
+  "atari-st": {
+   "bytes": 61836,
+   "programs": 2,
+   "starts": 17326
+  },
+  "atari-st+amiga": {
+   "bytes": 851968,
+   "programs": 1,
+   "starts": 208244
+  },
+  "neo-geo": {
+   "bytes": 397971,
+   "programs": 1,
+   "starts": 93317
+  }
+ },
+ "programs": {
+  "BattleIsleEditor": {
+   "D": 59408,
+   "U": 72,
+   "bytes": 143172,
+   "c": 55171,
+   "decode_agreement": 1.0,
+   "decode_checked": 28521,
+   "decode_ok": 28521,
+   "fractions": {
+    "D": 0.4149,
+    "I": 0.1992,
+    "U": 0.0005,
+    "c": 0.3853
+   },
+   "placement": {
+    "ambiguous": 0,
+    "missing_listing": 0,
+    "overlap": 0,
+    "placed": 12,
+    "rejected_listing": 0,
+    "sections": 12,
+    "too_short": 0,
+    "units": 6,
+    "unplaced": 0
+   },
+   "platform": "amiga",
+   "samples": 12,
+   "starts": 28521,
+   "toolchain": "A68K 2.71 + vlink 0.18a",
+   "typed": {
+    "ALIGN_OR_OTHER_ROW": 36,
+    "BASE_68000_INSTRUCTION": 28521,
+    "D_ROW_ENCODED_NON_BASE_OPCODE": 4,
+    "D_ROW_NON_BASE_WORD_IN_CODE_SECTION": 286
+   },
+   "workload": "application"
+  },
+  "HelloAmi": {
+   "D": 1704,
+   "U": 0,
+   "bytes": 1944,
+   "c": 158,
+   "decode_agreement": 1.0,
+   "decode_checked": 82,
+   "decode_ok": 82,
+   "fractions": {
+    "D": 0.8765,
+    "I": 0.0422,
+    "U": 0.0,
+    "c": 0.0813
+   },
+   "placement": {
+    "ambiguous": 0,
+    "missing_listing": 0,
+    "overlap": 0,
+    "placed": 4,
+    "rejected_listing": 0,
+    "sections": 4,
+    "too_short": 0,
+    "units": 4,
+    "unplaced": 0
+   },
+   "platform": "amiga",
+   "samples": 4,
+   "starts": 82,
+   "toolchain": "vasm 2.0f",
+   "typed": {
+    "BASE_68000_INSTRUCTION": 82,
+    "D_ROW_NON_BASE_WORD_IN_CODE_SECTION": 2
+   },
+   "workload": "hello-world+bootblock"
+  },
+  "amiga-realtime3d": {
+   "D": 54940,
+   "U": 10,
+   "bytes": 96028,
+   "c": 27952,
+   "decode_agreement": 0.999848,
+   "decode_checked": 13128,
+   "decode_ok": 13126,
+   "fractions": {
+    "D": 0.5721,
+    "I": 0.1367,
+    "U": 0.0001,
+    "c": 0.2911
+   },
+   "placement": {
+    "ambiguous": 0,
+    "missing_listing": 0,
+    "overlap": 0,
+    "placed": 9,
+    "rejected_listing": 0,
+    "sections": 9,
+    "too_short": 0,
+    "units": 9,
+    "unplaced": 0
+   },
+   "platform": "amiga",
+   "samples": 9,
+   "starts": 13126,
+   "toolchain": "vasm 2.0f",
+   "typed": {
+    "BASE_68000_INSTRUCTION": 13126,
+    "D_ROW_NON_BASE_WORD_IN_CODE_SECTION": 212,
+    "LENGTH_MISMATCH": 2,
+    "UNLISTED_GAP": 2
+   },
+   "workload": "demo/tutorial"
+  },
+  "emutos": {
+   "D": 143184,
+   "U": 35854,
+   "bytes": 851968,
+   "c": 464686,
+   "decode_agreement": 0.999606,
+   "decode_checked": 208326,
+   "decode_ok": 208244,
+   "fractions": {
+    "D": 0.1681,
+    "I": 0.2444,
+    "U": 0.0421,
+    "c": 0.5454
+   },
+   "placement": {
+    "ambiguous": 0,
+    "missing_listing": 0,
+    "overlap": 0,
+    "placed": 546,
+    "rejected_listing": 0,
+    "sections": 610,
+    "too_short": 4,
+    "units": 716,
+    "unplaced": 60
+   },
+   "platform": "atari-st+amiga",
+   "samples": 4,
+   "starts": 208244,
+   "toolchain": "m68k-atari-mint GCC 4.6.4 + binutils 2.30",
+   "typed": {
+    "ALIGN_OR_OTHER_ROW": 904,
+    "BASE_68000_INSTRUCTION": 208244,
+    "DATA_AFTER_FALLTHROUGH": 1436,
+    "DECODER_REJECTED": 8,
+    "D_ROW_ENCODED_NON_BASE_OPCODE": 117,
+    "D_ROW_NON_BASE_WORD_IN_CODE_SECTION": 10104,
+    "ENCODED_NON_BASE_WORD_AFTER_FALLTHROUGH": 254,
+    "LENGTH_MISMATCH": 74,
+    "ROWS_IN_UNLOADED_SECTION": 214,
+    "SECTION_NOT_IN_IMAGE": 60,
+    "SECTION_PADDING": 181,
+    "SECTION_TOO_SHORT_TO_PLACE": 4
+   },
+   "workload": "firmware"
+  },
+  "neogeosdk": {
+   "D": 51269,
+   "U": 562,
+   "bytes": 397971,
+   "c": 252823,
+   "decode_agreement": 1.0,
+   "decode_checked": 93317,
+   "decode_ok": 93317,
+   "fractions": {
+    "D": 0.1288,
+    "I": 0.2345,
+    "U": 0.0014,
+    "c": 0.6353
+   },
+   "placement": {
+    "ambiguous": 4,
+    "missing_listing": 5,
+    "overlap": 1,
+    "placed": 85,
+    "rejected_listing": 0,
+    "sections": 99,
+    "too_short": 4,
+    "units": 60,
+    "unplaced": 5
+   },
+   "platform": "neo-geo",
+   "samples": 1,
+   "starts": 93317,
+   "toolchain": "m68k-elf GCC 13.3.0 + binutils 2.42",
+   "typed": {
+    "ALIGN_OR_OTHER_ROW": 9,
+    "BASE_68000_INSTRUCTION": 93317,
+    "D_ROW_NON_BASE_WORD_IN_CODE_SECTION": 297,
+    "MISSING_LISTING": 5,
+    "PLACEMENT_AMBIGUOUS": 4,
+    "PLACEMENT_OVERLAP": 1,
+    "SECTION_NOT_IN_IMAGE": 5,
+    "SECTION_TOO_SHORT_TO_PLACE": 4
+   },
+   "workload": "sdk+game"
+  },
+  "space-invaders": {
+   "D": 1684,
+   "U": 212,
+   "bytes": 11956,
+   "c": 6820,
+   "decode_agreement": 0.99356,
+   "decode_checked": 3261,
+   "decode_ok": 3240,
+   "fractions": {
+    "D": 0.1408,
+    "I": 0.271,
+    "U": 0.0177,
+    "c": 0.5704
+   },
+   "placement": {
+    "ambiguous": 0,
+    "missing_listing": 0,
+    "overlap": 0,
+    "placed": 17,
+    "rejected_listing": 0,
+    "sections": 17,
+    "too_short": 0,
+    "units": 17,
+    "unplaced": 0
+   },
+   "platform": "atari-st",
+   "samples": 17,
+   "starts": 3240,
+   "toolchain": "vbcc 0.9g + vasm 2.0f",
+   "typed": {
+    "BASE_68000_INSTRUCTION": 3240,
+    "D_ROW_NON_BASE_WORD_IN_CODE_SECTION": 131,
+    "LENGTH_MISMATCH": 21,
+    "UNLISTED_GAP": 128
+   },
+   "workload": "game"
+  },
+  "toslibc": {
+   "D": 3084,
+   "U": 2518,
+   "bytes": 49880,
+   "c": 30192,
+   "decode_agreement": 1.0,
+   "decode_checked": 14086,
+   "decode_ok": 14086,
+   "fractions": {
+    "D": 0.0618,
+    "I": 0.2824,
+    "U": 0.0505,
+    "c": 0.6053
+   },
+   "placement": {
+    "ambiguous": 4,
+    "missing_listing": 0,
+    "overlap": 2,
+    "placed": 215,
+    "rejected_listing": 0,
+    "sections": 1715,
+    "too_short": 133,
+    "units": 616,
+    "unplaced": 1361
+   },
+   "platform": "atari-st",
+   "samples": 7,
+   "starts": 14086,
+   "toolchain": "m68k-elf GCC 13.3.0 + binutils 2.42",
+   "typed": {
+    "BASE_68000_INSTRUCTION": 14086,
+    "D_ROW_NON_BASE_WORD_IN_CODE_SECTION": 331,
+    "PLACEMENT_AMBIGUOUS": 4,
+    "PLACEMENT_OVERLAP": 2,
+    "ROWS_IN_UNLOADED_SECTION": 602,
+    "SECTION_NOT_IN_IMAGE": 1361,
+    "SECTION_TOO_SHORT_TO_PLACE": 133
+   },
+   "workload": "application+runtime-library"
+  }
+ },
+ "samples": 54,
+ "schema": "segarecomp.xplat_corpus.coverage.v1",
+ "task": "SEG-075-T002"
+}

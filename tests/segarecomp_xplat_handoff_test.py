@@ -89,6 +89,11 @@ def test_store_and_verify():
         obj0.write_bytes(b"\xff" * 200)
         check(h.put(store, pathlib.Path(entries[0]["origin"]), entries[0]["sha256"]) == "replaced", "corrupted object replaced on re-store")
         check(h.verify_manifest(mpath)["verdict"] == "PASS", "replaced object verifies")
+        os.chmod(obj0, 0o644)
+        obj0.unlink()
+        os.link(entries[0]["origin"], obj0)
+        check(h.put(store, pathlib.Path(entries[0]["origin"]), entries[0]["sha256"]) == "replaced", "an object sharing the live inode is replaced")
+        check(obj0.stat().st_nlink == 1, "replaced object is independent")
         check(mpath.with_suffix(".sha256").read_text().split()[0] == digest == sha(mpath.read_bytes()), "manifest identity recorded")
         ok = h.verify_manifest(mpath)
         check(ok["verdict"] == "PASS" and ok["verified_files"] == 3 and ok["verified_bytes"] == 408, "clean store verifies physically")
@@ -276,6 +281,33 @@ def test_cross_run():
               "summary reports the needed-listing problem")
 
 
+def test_record_code_basis():
+    """Run b of an output T001 recorded deterministic only by loadable-code digest is checked against that digest."""
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        cache, commit = make_cache(td)
+        plan = fake_plan(commit)
+        prg_a = b"\x60\x1a" + struct_pack_prg(4, 0, 0, 4) + b"\x4e\x75\x4e\x71" + b"SYMA" + b"\0\0\0\0"
+        prg_b = prg_a[:-8] + b"SYMB" + b"\0\0\0\0"
+        rec = json.loads((cache / "records" / "HelloAmi.json").read_text())
+        rec["recipes"][0]["byte_identical_runs"] = False
+        rec["recipes"][0]["outputs"].append({"path": "out/x.prg", "sha256": sha(prg_a), "code_sha256": q.code_digest(prg_a)})
+        (cache / "records" / "HelloAmi.json").write_text(json.dumps(rec))
+        (cache / "build" / "HelloAmi" / "units" / "a" / "out" / "x.prg").write_bytes(prg_a)
+        (cache / "build" / "HelloAmi" / "units" / "b" / "out" / "x.prg").write_bytes(prg_b)
+        es = by_logical(h.audit_builds(q, plan, cache, td / "cache"))
+        b = es["seg075/q/build/HelloAmi/units/b/out/x.prg"]
+        check(b["status"] == "PRESENT_AND_VERIFIED" and b["basis"] == "t001_record_code", "symbol-only run-b difference verified by code digest")
+        (cache / "build" / "HelloAmi" / "units" / "b" / "out" / "x.prg").write_bytes(prg_b.replace(b"\x4e\x71", b"\x4e\x70"))
+        es = by_logical(h.audit_builds(q, plan, cache, td / "cache"))
+        check(es["seg075/q/build/HelloAmi/units/b/out/x.prg"]["status"] == "PRESENT_BUT_CHANGED", "changed run-b code detected")
+
+
+def struct_pack_prg(t, d, b, s):
+    import struct
+    return struct.pack(">IIIIIIH", t, d, b, s, 0, 0, 0)
+
+
 def test_audit_control():
     with tempfile.TemporaryDirectory() as td:
         td = pathlib.Path(td)
@@ -326,7 +358,7 @@ def test_receipt_is_sanitized():
 
 
 def main():
-    for t in (test_classify, test_store_and_verify, test_symlinks, test_audit_builds_and_sources, test_cross_run, test_audit_control, test_add_refuses_worktree,
+    for t in (test_classify, test_store_and_verify, test_symlinks, test_audit_builds_and_sources, test_cross_run, test_record_code_basis, test_audit_control, test_add_refuses_worktree,
               test_receipt_is_sanitized):
         t()
     if FAILURES:
