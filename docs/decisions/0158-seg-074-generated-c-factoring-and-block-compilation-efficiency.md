@@ -183,8 +183,11 @@ only pair above 1); AB 0.402 (Shining Force INC) to 0.915 (D05 BROAD). The large
 
 All pass: A (BROAD 0.891 <= 0.95, INC 0.900 <= 0.97, generated C .883/.873 <= 0.95, RSS <= 1.10, throughput >= 0.97, lineage max <= 1.03,
 image max <= 1.05); B (0.899 <= 0.97, 0.883 <= 0.97, best lineage 0.609 <= 0.85, other bounds); AB (0.793 / 0.780, each <= min(A, B) + 0.02, i.e. A
-and B are close to additive). The combined result is not an artefact of one workload: D03 and D07 carry the B gain, but A is 0.85-0.94 on every
-image and AB passes on all 8 lineages.
+and B are close to additive). The combined result is not an artefact of one workload, but the two gains have different shapes: **B is concentrated** on images with a
+large return-target set (D03, D07; the other six lineages average about 0.97, within noise, with no regression beyond it), while **A is broad**
+(about 10-11% lineage mean, below BASE in all 22 image-strategy pairs, robust on medium and large images; its per-image effect on the two
+smallest images is within the BASE noise below). AB passes on all 8 lineages. The non-additivity check only rules out AB being worse than
+the better single variant; the gains are in fact nearly additive (1 - (0.109 + 0.101) = 0.79 against 0.793 measured).
 
 ### Noise and limits of the evidence
 
@@ -193,6 +196,8 @@ image and AB passes on all 8 lineages.
   images is noise-level**. The decision statistic is the lineage mean over 22 image-strategy pairs, where A is lower than BASE in all 22 and
   corroborated by deterministic quantities (generated C -12%/-13%, executable size -5%, object size -2%); but a single small image does not
   demonstrate A on its own.
+- The peak-compiler-RSS criterion does not discriminate (it is dominated by a fixed runtime TU on the smaller lineages) and is not cited as evidence.
+- Equivalence is short-trace equivalence (120-frame and 60M-instruction bounded runs), never full-game equivalence.
 - Single host, single compiler (clang 18.1.3 `-O2`); CPU time, wall descriptive. The pre-existing short broad reference (Flicky 26 frames, S&K 9,
   D05 9, D07 2) bounds the runtime evidence on those images to the prefix.
 - Throughput ratios are within noise of 1.0 (A does not slow the bounded runs, as expected: the helpers are ordinary calls).
@@ -204,7 +209,7 @@ image and AB passes on all 8 lineages.
 **`G2_COMBINED_OPTIMIZATION_ACCEPTED`**, integrated as two **opt-in** switches (`--aot-operand-sharing`, `--shared-return-targets`) that stay
 off by default. Both individually and together meet every pre-registered economic and correctness condition: a lineage-mean total build CPU
 reduction of 10-11% for operand sharing (all 8 lineages), 10-12% for the shared return-target table (60%+ on the large precise-discovery
-lineages D03 and D07), and 21-22% combined, with identical observable behaviour on the synthetic differential, the 11-image bounded runs and the
+lineages D03 and D07), and 21-22% combined, with identical observable behaviour (short-trace equivalence) on the synthetic differential, the 11-image bounded runs and the
 bounded executable runs.
 
 - Making either switch the default (a transparent internal replacement, which would not need a user-visible mode) is **not** done here: it
