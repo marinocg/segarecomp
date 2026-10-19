@@ -1,0 +1,3028 @@
+{
+ "schema": "segarecomp.xplat_qualify.manifest.v1",
+ "task": "SEG-075-T001",
+ "adr": "docs/decisions/0159-seg-075-cross-platform-source-qualification.md",
+ "frozen": "2026-10-19",
+ "toolchains": {
+  "tc-gnu": {
+   "description": "Ubuntu 24.04 binutils-m68k-linux-gnu 2.42 (assembler only: its gcc always emits 68020, GCC bug 98627) + vasm 2.0f + vlink 0.18a",
+   "inputs": [
+    {
+     "name": "vasm.tar.gz",
+     "url": "http://sun.hasenbraten.de/vasm/release/vasm.tar.gz",
+     "sha256": "c84b2de1cbb87831795fe64a85c5d9a7002a766e3a7c30b0a2d7d5e99d878f49"
+    },
+    {
+     "name": "vlink.tar.gz",
+     "url": "http://sun.hasenbraten.de/vlink/release/vlink.tar.gz",
+     "sha256": "8d151cdd30a4feb575a364e68810c2bc300fe1a7c074dbbee6fd1175a6c5bfae"
+    }
+   ],
+   "image_id": "sha256:175a3aba35bcc4801c2b5680fadeef3dc38993bdce45b470dd0810066b7626e3",
+   "versions": [
+    "binutils-m68k-linux-gnu\t2.42-4ubuntu2.10",
+    "GNU assembler (GNU Binutils for Ubuntu) 2.42",
+    "vasm 2.0f (c) in 2002-2026 Volker Barthelmann",
+    "vlink V0.18a (c)1997-2025 by Frank Wille"
+   ]
+  },
+  "tc-elf": {
+   "description": "bare-metal m68k-elf binutils 2.42 + GCC 13.3.0 (C only, --with-cpu=68000), built from GNU release tarballs",
+   "inputs": [
+    {
+     "name": "binutils-2.42.tar.xz",
+     "url": "https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.xz",
+     "sha256": "f6e4d41fd5fc778b06b7891457b3620da5ecea1006c6a4a41ae998109f85a800"
+    },
+    {
+     "name": "gcc-13.3.0.tar.xz",
+     "url": "https://ftp.gnu.org/gnu/gcc/gcc-13.3.0/gcc-13.3.0.tar.xz",
+     "sha256": "0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083"
+    }
+   ],
+   "image_id": "sha256:c052c9a836fa15c2a41c23c79f39fd3b6d388b872b1c4344b2020490fdd35eb6",
+   "versions": [
+    "m68k-elf-gcc (GCC) 13.3.0",
+    "GNU assembler (GNU Binutils) 2.42"
+   ]
+  },
+  "tc-vbcc": {
+   "description": "vbcc 0.9g (m68k and 16-bit-int m68ks backends) + m68k-atari target 2019-10-04 + unix config; vasm/vlink from tc-gnu",
+   "inputs": [
+    {
+     "name": "vbcc0_9g.tar.gz",
+     "url": "http://phoenix.owl.de/tags/vbcc0_9g.tar.gz",
+     "sha256": "49848aec62b756d495a47010774710fb3e8b2d16e7272675386398bd4823f972"
+    },
+    {
+     "name": "vbcc_target_m68k-atari.lha",
+     "url": "http://phoenix.owl.de/vbcc/2019-10-04/vbcc_target_m68k-atari.lha",
+     "sha256": "c626869c771227e0a27adfc809e3843c582c099831208d3d9f01e1aedbe690e9"
+    },
+    {
+     "name": "vbcc_unix_config.tar",
+     "url": "http://phoenix.owl.de/vbcc/2019-10-04/vbcc_unix_config.tar",
+     "sha256": "d8563016adefd3ef84b7a1e33e6a552feb978c16b5f63ec917861d72a531574e"
+    }
+   ],
+   "image_id": "sha256:96e371fb92a25a27a0340ff0095616808823039cdd2858de9217f3dc3e853c8b",
+   "versions": [
+    "vbcc V0.9g (c) in 1995-2019 by Volker Barthelmann",
+    "vbcc code-generator for m68k/ColdFire V1.13 (c) in 1995-2019 by Volker Barthelmann",
+    "vasm 2.0f (c) in 2002-2026 Volker Barthelmann"
+   ]
+  },
+  "tc-a68k": {
+   "description": "A68K 2.71 (Charlie Gibbs, 1991, public domain) built from its C source (Aminet dev/asm/A68kGibbs.lha); vlink from tc-gnu",
+   "inputs": [
+    {
+     "name": "A68kGibbs.lha",
+     "url": "https://aminet.net/dev/asm/A68kGibbs.lha",
+     "sha256": "bc04d9b8c19a9d9500a3bc457bc5f596392326446c24312f5fc51e18791b5a32"
+    }
+   ],
+   "image_id": "sha256:e5f89973f5319b2215f19d79bd09f7d068f4e4c7d0ff861f8e4faa03dc386b0c",
+   "versions": [
+    "68000 Assembler - version 2.71 (April 16, 1991)"
+   ]
+  },
+  "tc-mint": {
+   "description": "the pinned sidecartridge/atarist-toolkit-docker Dockerfile as-is (m68k-atari-mint GCC 4.6.4 / binutils 2.30 from the vriviere PPA). Its upstream inputs (PPA packages, vasm/vlink/agtools 'latest') are NOT pinned by the candidate: versions are recorded from the built image, reproducibility is observed, not guaranteed",
+   "image_id": "sha256:fe8bd94e56953677a72ca7c2abf5719e6c7be4acdd85036700628d6341486368",
+   "versions": [
+    "m68k-atari-mint-gcc (GCC) 4.6.4 (MiNT 20251014)",
+    "GNU assembler (GNU Binutils for MiNT 20180703) 2.30",
+    "vasm 2.0f (c) in 2002-2026 Volker Barthelmann"
+   ]
+  }
+ },
+ "summary": {
+  "candidates": 24,
+  "by_class": {
+   "ASSET_DEPENDENCY_UNAVAILABLE": 3,
+   "BUILD_BLOCKED": 3,
+   "LABEL_TRUTH_INSUFFICIENT": 1,
+   "LICENSING_REVIEW_REQUIRED": 9,
+   "PARTIALLY_QUALIFIED": 3,
+   "QUALIFIED": 5
+  },
+  "by_platform": {
+   "amiga": {
+    "ASSET_DEPENDENCY_UNAVAILABLE": 2,
+    "BUILD_BLOCKED": 3,
+    "LICENSING_REVIEW_REQUIRED": 3,
+    "QUALIFIED": 3
+   },
+   "amiga+neo-geo": {
+    "LICENSING_REVIEW_REQUIRED": 1
+   },
+   "atari-st": {
+    "ASSET_DEPENDENCY_UNAVAILABLE": 1,
+    "LABEL_TRUTH_INSUFFICIENT": 1,
+    "LICENSING_REVIEW_REQUIRED": 4,
+    "PARTIALLY_QUALIFIED": 1,
+    "QUALIFIED": 2
+   },
+   "atari-st+amiga": {
+    "PARTIALLY_QUALIFIED": 1
+   },
+   "neo-geo": {
+    "PARTIALLY_QUALIFIED": 1
+   },
+   "x68000": {
+    "LICENSING_REVIEW_REQUIRED": 1
+   }
+  },
+  "usable_without_review": [
+   "BattleIsleEditor",
+   "HelloAmi",
+   "amiga-realtime3d",
+   "emutos",
+   "neogeosdk",
+   "space-invaders",
+   "toslibc"
+  ],
+  "contradictions": []
+ },
+ "candidates": [
+  {
+   "id": "emutos",
+   "tier": "A",
+   "repo": "emutos/emutos",
+   "commit": "02c2db75fc875265c1449efea014450466cf20b7",
+   "platform": "atari-st+amiga",
+   "workload": "firmware",
+   "provenance": "authored",
+   "licence": "GPL-2.0 (doc/license.txt)",
+   "licence_status": "declared",
+   "class": "PARTIALLY_QUALIFIED",
+   "technical_class": "PARTIALLY_QUALIFIED",
+   "rationale": "Every original-68000 target (192, 256, 128 KB cartridge, Amiga 256 KB ROM) builds with m68k-atari-mint GCC 4.6.4; 68030/68040/ColdFire/Vampire machine targets are excluded. The base-68000 images still contain runtime-guarded 68010+/68030/68040 instruction spans (CPU/MMU/cache detection in bios/processor.S, bios/68040_pmmu.S, bios/startup.S, util/bootram.S) that T002 must type as CPU-variant regions, never label as base-68000 code. The build stamps the current date into the image header, so the recipes pin the date seen by the build (XPLAT_DATE) to make the image digests reproducible on any day. The cpu_variant_source_files count is a tree-wide mnemonic heuristic, not evidence: it includes the ColdFire-only file and misses hand-encoded (dc.w) instructions.",
+   "label_evidence": "compiler assembly (-save-temps) + assembler listings + emutos.map link map (T002)",
+   "lineage_hypothesis": "one firmware lineage (EmuTOS project); the four targets are configurations, not independent programs",
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "raw": 2
+     },
+     "matches_expectation": true,
+     "name": "rom-192",
+     "observed": "success",
+     "output_bytes": 312074,
+     "output_count": 2,
+     "outputs": [
+      {
+       "code_sha256": "ff823068d343582765da3dba576fa11c4662524cf89f707b3d88f4ccbee18283",
+       "format": "raw",
+       "path": "etos192us.img",
+       "sha256": "ff823068d343582765da3dba576fa11c4662524cf89f707b3d88f4ccbee18283",
+       "size": 196608
+      },
+      {
+       "code_sha256": "203de6095cef30c70863123c4976ff26384ca498e06a9ab6f471ea389769cec7",
+       "format": "raw",
+       "path": "emutos.map",
+       "sha256": "203de6095cef30c70863123c4976ff26384ca498e06a9ab6f471ea389769cec7",
+       "size": 115466
+      }
+     ],
+     "recipe_sha256": "440a4b78a552f69f89275168c47b7074a3b6ff783bcb8fbb27e53e151d3385b0",
+     "toolchain": "tc-mint",
+     "undeclared_clock_leaks": []
+    },
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "raw": 2
+     },
+     "matches_expectation": true,
+     "name": "rom-256",
+     "observed": "success",
+     "output_bytes": 389913,
+     "output_count": 2,
+     "outputs": [
+      {
+       "code_sha256": "7cde373a5fceddc2470619651fe97f0acd3175d0d968f77e92369d59c0137312",
+       "format": "raw",
+       "path": "etos256us.img",
+       "sha256": "7cde373a5fceddc2470619651fe97f0acd3175d0d968f77e92369d59c0137312",
+       "size": 262144
+      },
+      {
+       "code_sha256": "ebb03ed3234a916395fe4827be20629dd59dbbc7d7866c6ccd6ae531c8df909d",
+       "format": "raw",
+       "path": "emutos.map",
+       "sha256": "ebb03ed3234a916395fe4827be20629dd59dbbc7d7866c6ccd6ae531c8df909d",
+       "size": 127769
+      }
+     ],
+     "recipe_sha256": "7316e6a1332471f7265115f94bcc3005af58369d02919d7ce4fca1c493be9041",
+     "toolchain": "tc-mint",
+     "undeclared_clock_leaks": []
+    },
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "raw": 2
+     },
+     "matches_expectation": true,
+     "name": "cart",
+     "observed": "success",
+     "output_bytes": 211054,
+     "output_count": 2,
+     "outputs": [
+      {
+       "code_sha256": "73cd7beb8c6b789274cf972173bf4fc2b738b5d57fa81aa1e201eb6e39544f98",
+       "format": "raw",
+       "path": "etoscart.img",
+       "sha256": "73cd7beb8c6b789274cf972173bf4fc2b738b5d57fa81aa1e201eb6e39544f98",
+       "size": 131072
+      },
+      {
+       "code_sha256": "6dc56c20baeca5029ee5dab7556296ecce1e27aad7174fea780ab00b601cfed5",
+       "format": "raw",
+       "path": "emutos.map",
+       "sha256": "6dc56c20baeca5029ee5dab7556296ecce1e27aad7174fea780ab00b601cfed5",
+       "size": 79982
+      }
+     ],
+     "recipe_sha256": "df13aa6f9234f5254dcecef2248c59f12a19694f35c2a7e6ce8b57537b2402f2",
+     "toolchain": "tc-mint",
+     "undeclared_clock_leaks": []
+    },
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "raw": 2
+     },
+     "matches_expectation": true,
+     "name": "amiga-rom",
+     "observed": "success",
+     "output_bytes": 386490,
+     "output_count": 2,
+     "outputs": [
+      {
+       "code_sha256": "e9fb92e925e0658af9ec9f0bcf8038820d89b8333c0a43b2bd4dfd6628e66b8e",
+       "format": "raw",
+       "path": "emutos-amiga.rom",
+       "sha256": "e9fb92e925e0658af9ec9f0bcf8038820d89b8333c0a43b2bd4dfd6628e66b8e",
+       "size": 262144
+      },
+      {
+       "code_sha256": "f2fbd132aac46dfb4453f87e3d4731df5272dfa3f1df809d4b74dc0133657dff",
+       "format": "raw",
+       "path": "emutos.map",
+       "sha256": "f2fbd132aac46dfb4453f87e3d4731df5272dfa3f1df809d4b74dc0133657dff",
+       "size": 124346
+      }
+     ],
+     "recipe_sha256": "adcba033f4ae4ed7b5b60c46c4dd8d23d401eac86d55772e3a7ad33d23456ed4",
+     "toolchain": "tc-mint",
+     "undeclared_clock_leaks": []
+    }
+   ],
+   "cpu_variant_source_files": 4
+  },
+  {
+   "id": "toslibc",
+   "tier": "A",
+   "repo": "frno7/toslibc",
+   "commit": "162a2fb429879654e55dedd5b3abd14cece32e11",
+   "platform": "atari-st",
+   "workload": "application+runtime-library",
+   "provenance": "authored",
+   "licence": "GPL-2.0 / LGPL-2.1 / MIT (licence/)",
+   "licence_status": "declared",
+   "class": "QUALIFIED",
+   "technical_class": "QUALIFIED",
+   "rationale": "The library, six example applications and the test suite build with bare-metal m68k-elf GCC 13.3.0; toslibc's own compiler guard rejects m68k-linux-gnu-gcc, which always emits 68020 code (GCC bug 98627). Application code must be separated from the shared C runtime (T003).",
+   "label_evidence": "pre-conversion ELF objects with relocations + compiler assembly (T002)",
+   "lineage_hypothesis": "one runtime-library lineage plus small example programs by the same author; not one game lineage",
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "tos-prg": 7
+     },
+     "matches_expectation": true,
+     "name": "lib+examples",
+     "observed": "success",
+     "output_bytes": 56839,
+     "output_count": 7,
+     "outputs": [
+      {
+       "code_sha256": "d2e6166244fd959acb4c3fdf9d23b86c4389f540d88bc16bb3e4ec4eb20a08d8",
+       "format": "tos-prg",
+       "path": "example/ALERT.PRG",
+       "sha256": "42c936208a4294ba280a5e3a9025a26cfc992747bfbc8907f6c418cc3b99792b",
+       "size": 6288
+      },
+      {
+       "code_sha256": "c21e50375ecf5722ddf4225ed0feb7001ffa0e0099d6142f26320107a6d170ec",
+       "format": "tos-prg",
+       "path": "example/COOKIE.TOS",
+       "sha256": "7e8f8a6913d6ec754692167319f4d46d0edc52de150fb2a9463ee4b7b6744c33",
+       "size": 7269
+      },
+      {
+       "code_sha256": "3f72fe8843f2b83183c7b7ad65753abafd359cb75e50cb855f363f6c274920c0",
+       "format": "tos-prg",
+       "path": "example/DESK.ACC",
+       "sha256": "cad878a785b73527235dfcff8fca825f20008d28fd132719f0edeac6a5c04fdd",
+       "size": 6577
+      },
+      {
+       "code_sha256": "53b2015e8cf5c3d5424f7f815752f7928dc1d2537e3bd18deaf96308670a23e1",
+       "format": "tos-prg",
+       "path": "example/HELLO.TOS",
+       "sha256": "7056aeeebdbb077410583ae87525dc0dccffe673683b66f68ac5622e8ffd1405",
+       "size": 6804
+      },
+      {
+       "code_sha256": "82c68ef36c3ae1c573d832a8c8628a08b275eee0d002a818363695f1bc7d5976",
+       "format": "tos-prg",
+       "path": "example/WINDOW.PRG",
+       "sha256": "b62dffc98a5402689110f0add4b5b72b2fad60b6defb7fb361be3388fdfacc6f",
+       "size": 5417
+      },
+      {
+       "code_sha256": "5521a2ecea2b6ca67dd6f3592d1ea7fedb1f28bd8eb405bbb0523328ac477ea7",
+       "format": "tos-prg",
+       "path": "example/XBRA.PRG",
+       "sha256": "409b023ec5f17d1d09b0d9e06c51f84912c4c0eef77aa00e7f7fe3d0a1848a0e",
+       "size": 7614
+      },
+      {
+       "code_sha256": "50341c3eebe1cad67968e6dff7a6646aeab22e7277cf271b9e81028564d86765",
+       "format": "tos-prg",
+       "path": "test/SUITE.TOS",
+       "sha256": "10c90888bfc370c400d0c634ceb3c126ac30bfdf64ccaf6d160a9378de38b674",
+       "size": 16870
+      }
+     ],
+     "recipe_sha256": "db03757734a3fe7a0153413c040d80196c98ac0a9898e9634edf4f40036fff92",
+     "toolchain": "tc-elf",
+     "undeclared_clock_leaks": []
+    },
+    {
+     "expect": "failure",
+     "matches_expectation": true,
+     "name": "linux-gnu-gcc-rejected",
+     "observed": "failure",
+     "recipe_sha256": "e18bd9c33fb47794dfa0faf1a91e7a8ed49f7ff69f6ed8c9d4c95187ecba34fd",
+     "toolchain": "tc-gnu"
+    }
+   ]
+  },
+  {
+   "id": "atarist-toolkit-docker",
+   "tier": "A",
+   "repo": "sidecartridge/atarist-toolkit-docker",
+   "commit": "ee2c9ec442a11a6bfd03fc42a14a96ac477e8de6",
+   "platform": "atari-st",
+   "workload": "infrastructure",
+   "provenance": "authored",
+   "licence": "AGPL/GPL-3.0 text (LICENSE)",
+   "licence_status": "declared",
+   "class": "QUALIFIED",
+   "technical_class": "QUALIFIED",
+   "rationale": "The pinned Dockerfile builds (it is toolchain tc-mint) and its four demos (ASM, C, C+ASM, C+libcmini) build. Infrastructure, not a labelled-program lineage; upstream inputs are unpinned (recorded versions only). Because tc-mint is unpinned upstream, the EmuTOS, listacsi and toolkit-demo results do not meet the pinned-inputs criterion; their reproducibility is observed (two runs, recorded versions) only.",
+   "label_evidence": "n/a (toolchain); demos only for extraction validation",
+   "lineage_hypothesis": "not a lineage",
+   "role": "toolchain-infrastructure",
+   "recipes": [
+    {
+     "byte_identical_runs": false,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "tos-prg": 5
+     },
+     "matches_expectation": true,
+     "name": "demos",
+     "observed": "success",
+     "output_bytes": 289069,
+     "output_count": 5,
+     "outputs": [
+      {
+       "code_sha256": "037647424c22e07a36ea34c59ed30394b9d96697a5e2cf2ea921ed966f4d7519",
+       "format": "tos-prg",
+       "path": "demo/ASM/build/hello.tos",
+       "sha256": "38586187e8d6df81c7a52b029e7acdf4633864811cf9d801a6802a759df4f9f5",
+       "size": 300
+      },
+      {
+       "code_sha256": "8d88f2cf99f3676a9006d247d2a30ed4bc8e75d44283fc05942cc04aec8c0a61",
+       "format": "tos-prg",
+       "path": "demo/C/obj/hello_bb.tos",
+       "sha256": "b41c186049fa392e051fc4fce249d0c030fe1c26a963b56629eb0171cd692149",
+       "size": 131757
+      },
+      {
+       "code_sha256": "642f7fb993b1adcc71a4f247d3c25770e4432d24b6f9c9cfd1e9ccb8fdfbce5c",
+       "format": "tos-prg",
+       "path": "demo/C/obj/hello_ge.prg",
+       "sha256": "c37e7ea9921d5df602092bbb11c2ab4b6b42e06f4dd6c87d21576c438f4c0b1b",
+       "size": 132752
+      },
+      {
+       "code_sha256": "f51075132921bd8eb0cf8d9f6d29e237b952de57b993714d69c073cd27a6a093",
+       "format": "tos-prg",
+       "path": "demo/C_ASM/build/test.tos",
+       "sha256": "f51075132921bd8eb0cf8d9f6d29e237b952de57b993714d69c073cd27a6a093",
+       "size": 12643
+      },
+      {
+       "code_sha256": "f08b6e8fd5e372054aaa79bc5dbf41eb82029692e96e87ac80d2554fe2616713",
+       "format": "tos-prg",
+       "path": "demo/C_LIBCMINI/out/main.tos",
+       "sha256": "f08b6e8fd5e372054aaa79bc5dbf41eb82029692e96e87ac80d2554fe2616713",
+       "size": 11617
+      }
+     ],
+     "recipe_sha256": "005192f80f3d2d7c177ac6547945264b86c2999078a341b5442b3e1dafd8d6e2",
+     "toolchain": "tc-mint",
+     "undeclared_clock_leaks": []
+    }
+   ]
+  },
+  {
+   "id": "space-invaders",
+   "tier": "A",
+   "repo": "awave1/space-invaders",
+   "commit": "26a049d6d655758bc684a3cb261935b548089777",
+   "platform": "atari-st",
+   "workload": "game",
+   "provenance": "authored",
+   "licence": "MIT",
+   "licence_status": "declared",
+   "class": "PARTIALLY_QUALIFIED",
+   "technical_class": "PARTIALLY_QUALIFIED",
+   "rationale": "The authentic toolchain (course cc68x compiler and gen assembler) is not publicly reproducible. Under declared substitutes every C and assembly module compiles (vbcc 0.9g +tos16, vasm), but no executable links: a header defines initialised globals in every unit (psg.h) and the program relies on the cc68x runtime's gemdos binding. Object-level evidence only; not a historical rebuild.",
+   "label_evidence": "vbcc emitted assembly + vasm listings at object level (T002)",
+   "lineage_hypothesis": "one student-game lineage (two authors), C + assembly",
+   "prerequisites": [
+    "cc68x / gen toolchain and its TOS runtime library (not publicly distributed)"
+   ],
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "aout": 19
+     },
+     "matches_expectation": true,
+     "name": "objects-vbcc",
+     "observed": "success",
+     "output_bytes": 60186,
+     "output_count": 19,
+     "outputs": [
+      {
+       "code_sha256": "bc311eb932daabe150cae9a3b4065207e85532993d87d924bde3639b9bab2d46",
+       "format": "aout",
+       "path": "out/clear_s.o",
+       "sha256": "bc311eb932daabe150cae9a3b4065207e85532993d87d924bde3639b9bab2d46",
+       "size": 287
+      },
+      {
+       "code_sha256": "c83d7a41cd0b4b4ea1e04d7abd9ec3e39b55c1b9c0b77d9ea050f084f744742e",
+       "format": "aout",
+       "path": "out/effects.o",
+       "sha256": "c83d7a41cd0b4b4ea1e04d7abd9ec3e39b55c1b9c0b77d9ea050f084f744742e",
+       "size": 471
+      },
+      {
+       "code_sha256": "845bf088ec88a7c8cd64f6b4fe59e2b863ec0427dbf29a8d458c79ffaac6d755",
+       "format": "aout",
+       "path": "out/event.o",
+       "sha256": "845bf088ec88a7c8cd64f6b4fe59e2b863ec0427dbf29a8d458c79ffaac6d755",
+       "size": 2452
+      },
+      {
+       "code_sha256": "937284fc49dd97844d2acf9043cf7ca552ea933891ab041df6ee5a963cf63fc9",
+       "format": "aout",
+       "path": "out/font.o",
+       "sha256": "937284fc49dd97844d2acf9043cf7ca552ea933891ab041df6ee5a963cf63fc9",
+       "size": 814
+      },
+      {
+       "code_sha256": "70e6d4ff90560c3083188c2a338b52f74957616d68a00e8e6279fcb91e63950a",
+       "format": "aout",
+       "path": "out/game.o",
+       "sha256": "70e6d4ff90560c3083188c2a338b52f74957616d68a00e8e6279fcb91e63950a",
+       "size": 3267
+      },
+      {
+       "code_sha256": "706889ab85a8241eccf2a09d0cafa03d11ac037ef5894ed58cc9115258e0e4ee",
+       "format": "aout",
+       "path": "out/ikbd_s.o",
+       "sha256": "706889ab85a8241eccf2a09d0cafa03d11ac037ef5894ed58cc9115258e0e4ee",
+       "size": 104
+      },
+      {
+       "code_sha256": "c1b875f0e2e5ed94a25e4fb38b88535eba5d848f3d535f04123b46d01f10ef4c",
+       "format": "aout",
+       "path": "out/isr.o",
+       "sha256": "c1b875f0e2e5ed94a25e4fb38b88535eba5d848f3d535f04123b46d01f10ef4c",
+       "size": 3570
+      },
+      {
+       "code_sha256": "78ca1d351ce839d08c03e2eb40e451d7608977193d94f6cd06604c16958f33a6",
+       "format": "aout",
+       "path": "out/menu.o",
+       "sha256": "78ca1d351ce839d08c03e2eb40e451d7608977193d94f6cd06604c16958f33a6",
+       "size": 2232
+      },
+      {
+       "code_sha256": "6fc19de91f1c34666f770465bd00f56ff271de55a63e24321ebef515e8e24986",
+       "format": "aout",
+       "path": "out/model.o",
+       "sha256": "6fc19de91f1c34666f770465bd00f56ff271de55a63e24321ebef515e8e24986",
+       "size": 3887
+      },
+      {
+       "code_sha256": "c18cfb6357fae074bde287d774f93b8a1944ef835a3c7117bf6df11698c9831c",
+       "format": "aout",
+       "path": "out/music.o",
+       "sha256": "c18cfb6357fae074bde287d774f93b8a1944ef835a3c7117bf6df11698c9831c",
+       "size": 1272
+      },
+      {
+       "code_sha256": "131c00c8354dcd1d3c4e4029f4e0f78908370607cb2890183daa2120de1b3de9",
+       "format": "aout",
+       "path": "out/psg.o",
+       "sha256": "131c00c8354dcd1d3c4e4029f4e0f78908370607cb2890183daa2120de1b3de9",
+       "size": 2118
+      },
+      {
+       "code_sha256": "d9464fa846dbbda36b6ff9dd2ced02de83d10d2f6557eda07910d1838a119821",
+       "format": "aout",
+       "path": "out/raster.o",
+       "sha256": "d9464fa846dbbda36b6ff9dd2ced02de83d10d2f6557eda07910d1838a119821",
+       "size": 3027
+      },
+      {
+       "code_sha256": "a24f6cc3a0274129d9095aec5015288843154093702ccb071b960ae1e8ee3d0d",
+       "format": "aout",
+       "path": "out/render.o",
+       "sha256": "a24f6cc3a0274129d9095aec5015288843154093702ccb071b960ae1e8ee3d0d",
+       "size": 3094
+      },
+      {
+       "code_sha256": "2b741b98d3f021d0abda3b560bcfd793e952b679f7d6d4e0a83309fca38f5cb0",
+       "format": "aout",
+       "path": "out/spaceinv.o",
+       "sha256": "2b741b98d3f021d0abda3b560bcfd793e952b679f7d6d4e0a83309fca38f5cb0",
+       "size": 480
+      },
+      {
+       "code_sha256": "7495b5aa9c43367861851e4d1dcfdd28b1363f73b6441e2001ba527e014f7db6",
+       "format": "aout",
+       "path": "out/splash.o",
+       "sha256": "7495b5aa9c43367861851e4d1dcfdd28b1363f73b6441e2001ba527e014f7db6",
+       "size": 32063
+      },
+      {
+       "code_sha256": "3b6090a7ac72381917a9f5aaa3c4c7108e98e815acc7868ba6a0877199b78a2d",
+       "format": "aout",
+       "path": "out/sprites.o",
+       "sha256": "3b6090a7ac72381917a9f5aaa3c4c7108e98e815acc7868ba6a0877199b78a2d",
+       "size": 532
+      },
+      {
+       "code_sha256": "d54279a712064e776cd54c9c7adb4a2935c8fe85cc65623ab03aab8cc3a88776",
+       "format": "aout",
+       "path": "out/super_s.o",
+       "sha256": "d54279a712064e776cd54c9c7adb4a2935c8fe85cc65623ab03aab8cc3a88776",
+       "size": 151
+      },
+      {
+       "code_sha256": "a9a031851e76143e5630a132a200224c19f7a75e6a72c5147cfacbaa37819549",
+       "format": "aout",
+       "path": "out/vbl_s.o",
+       "sha256": "a9a031851e76143e5630a132a200224c19f7a75e6a72c5147cfacbaa37819549",
+       "size": 102
+      },
+      {
+       "code_sha256": "173819f63702e52341f92e0a0deaa78d736378040a69dc5b6a396f0ec0841d88",
+       "format": "aout",
+       "path": "out/video_s.o",
+       "sha256": "173819f63702e52341f92e0a0deaa78d736378040a69dc5b6a396f0ec0841d88",
+       "size": 263
+      }
+     ],
+     "recipe_sha256": "7d0bc26a1cda2bb6711e789abf164ae466595d955ee72a41299d85b1cd497c45",
+     "toolchain": "tc-vbcc",
+     "undeclared_clock_leaks": []
+    },
+    {
+     "expect": "failure",
+     "matches_expectation": true,
+     "name": "link-vbcc",
+     "observed": "failure",
+     "recipe_sha256": "b9e1b1e7d01536bdc7dbb2b2e6927b6ebe644b69faa88e6fea9ffde5f2a8f5b6",
+     "toolchain": "tc-vbcc"
+    }
+   ]
+  },
+  {
+   "id": "perihelion-m68k-tutorials",
+   "tier": "A",
+   "repo": "nguillaumin/perihelion-m68k-tutorials",
+   "commit": "ee7b7a7cf4a090d1cc462e0c8fe0df35afe1a1a3",
+   "platform": "atari-st",
+   "workload": "tutorial",
+   "provenance": "authored",
+   "licence": "none declared",
+   "licence_status": "undeclared",
+   "class": "LICENSING_REVIEW_REQUIRED",
+   "technical_class": "QUALIFIED",
+   "rationale": "All 14 DevPac-syntax tutorials assemble with vasm (-devpac -spaces -m68000 -Ftos) with listings. Short fragments with large incbin pictures/music (some apparently third-party). No licence is declared, so use for training needs operator review; not to be over-weighted.",
+   "label_evidence": "vasm listing rows (T002)",
+   "lineage_hypothesis": "one tutorial lineage; tutorials share initlib.s",
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "tos-prg": 14
+     },
+     "matches_expectation": true,
+     "name": "tutorials",
+     "observed": "success",
+     "output_bytes": 369694,
+     "output_count": 14,
+     "outputs": [
+      {
+       "code_sha256": "c9121e09896b80e908cb97ba82b530d647c658487977cf924f41cb6889161331",
+       "format": "tos-prg",
+       "path": "out/tut02.tos",
+       "sha256": "c9121e09896b80e908cb97ba82b530d647c658487977cf924f41cb6889161331",
+       "size": 80
+      },
+      {
+       "code_sha256": "6201f3ee75d4c08e3c32a29d8ab5e98343cfddf6e817cd50370f529d4ee01895",
+       "format": "tos-prg",
+       "path": "out/tut03.tos",
+       "sha256": "6201f3ee75d4c08e3c32a29d8ab5e98343cfddf6e817cd50370f529d4ee01895",
+       "size": 118
+      },
+      {
+       "code_sha256": "2fde11fc9f3f8e57d73a91c6ba5dd51adf87a19e3fc1db256b6e7e86ab4cac18",
+       "format": "tos-prg",
+       "path": "out/tut04.tos",
+       "sha256": "2fde11fc9f3f8e57d73a91c6ba5dd51adf87a19e3fc1db256b6e7e86ab4cac18",
+       "size": 116
+      },
+      {
+       "code_sha256": "28eb105855c16e9cbd822b622bbb0dac81213234441d583341726315fec8133b",
+       "format": "tos-prg",
+       "path": "out/tut05.tos",
+       "sha256": "28eb105855c16e9cbd822b622bbb0dac81213234441d583341726315fec8133b",
+       "size": 414
+      },
+      {
+       "code_sha256": "f4339276c4260b95454eb02fb8cbfee25214eebc840dbd16fd67d7311dfe0038",
+       "format": "tos-prg",
+       "path": "out/tut06.tos",
+       "sha256": "f4339276c4260b95454eb02fb8cbfee25214eebc840dbd16fd67d7311dfe0038",
+       "size": 32312
+      },
+      {
+       "code_sha256": "d8f644d6de15ed6811297d69c9759ea50d6619fdc437b334f563d94226dd4e91",
+       "format": "tos-prg",
+       "path": "out/tut07.tos",
+       "sha256": "d8f644d6de15ed6811297d69c9759ea50d6619fdc437b334f563d94226dd4e91",
+       "size": 32835
+      },
+      {
+       "code_sha256": "58956810d5498e20456a1cb4e00ada0ee3271eb949014c4be7a6e43381eda7c9",
+       "format": "tos-prg",
+       "path": "out/tut08.tos",
+       "sha256": "58956810d5498e20456a1cb4e00ada0ee3271eb949014c4be7a6e43381eda7c9",
+       "size": 32970
+      },
+      {
+       "code_sha256": "4e195cb70fe8d4a244d1cd0ba75868882d5907020fec6adfa18dc4e6e282ca89",
+       "format": "tos-prg",
+       "path": "out/tut09.tos",
+       "sha256": "4e195cb70fe8d4a244d1cd0ba75868882d5907020fec6adfa18dc4e6e282ca89",
+       "size": 45443
+      },
+      {
+       "code_sha256": "74cded2028712af665cc307879fdb7522df02d18b04faf5f49666752000e5c46",
+       "format": "tos-prg",
+       "path": "out/tut10.tos",
+       "sha256": "74cded2028712af665cc307879fdb7522df02d18b04faf5f49666752000e5c46",
+       "size": 425
+      },
+      {
+       "code_sha256": "d4caaffc80895c124d337cc35280b33c4c6544e0348b1bc70677e50e0b4aec0c",
+       "format": "tos-prg",
+       "path": "out/tut11.tos",
+       "sha256": "d4caaffc80895c124d337cc35280b33c4c6544e0348b1bc70677e50e0b4aec0c",
+       "size": 65255
+      },
+      {
+       "code_sha256": "ec998a8f39e22c9555a0f6efa118f965f4ee6bc5c54f6064d58a4740a02706bf",
+       "format": "tos-prg",
+       "path": "out/tut12.tos",
+       "sha256": "ec998a8f39e22c9555a0f6efa118f965f4ee6bc5c54f6064d58a4740a02706bf",
+       "size": 65503
+      },
+      {
+       "code_sha256": "8c91ee69513b5944fccfba731d370201ab0dfecf18d823fee4ce02cf1185490d",
+       "format": "tos-prg",
+       "path": "out/tut13.tos",
+       "sha256": "8c91ee69513b5944fccfba731d370201ab0dfecf18d823fee4ce02cf1185490d",
+       "size": 10980
+      },
+      {
+       "code_sha256": "2057afc8aae7e509a9ce855b31714f42efc9de15644f9c6716ee0d2f4e4b4b03",
+       "format": "tos-prg",
+       "path": "out/tut14.tos",
+       "sha256": "2057afc8aae7e509a9ce855b31714f42efc9de15644f9c6716ee0d2f4e4b4b03",
+       "size": 50190
+      },
+      {
+       "code_sha256": "61a1d016ef4d28db99ea9819a2d1346db95cec12062e7790de2b0a86666bc1ed",
+       "format": "tos-prg",
+       "path": "out/tut15.tos",
+       "sha256": "61a1d016ef4d28db99ea9819a2d1346db95cec12062e7790de2b0a86666bc1ed",
+       "size": 33053
+      }
+     ],
+     "recipe_sha256": "60ad168234a0ce19a1f165f105f05ba774f79da64a15cddcca2643a59df26202",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
+    }
+   ]
+  },
+  {
+   "id": "AtariST",
+   "tier": "A",
+   "repo": "miniupnp/AtariST",
+   "commit": "894b7279984ca712102cca748bca78b6cbb95e53",
+   "platform": "atari-st",
+   "workload": "demo+utility",
+   "provenance": "authored",
+   "licence": "none declared",
+   "licence_status": "undeclared",
+   "class": "LICENSING_REVIEW_REQUIRED",
+   "technical_class": "PARTIALLY_QUALIFIED",
+   "rationale": "Ten vasm -Ftos programs (intro effects, players, viewer, boot sectors) and listacsi (m68k-atari-mint GCC) build. the_80s fails under vasm 2.0f (local-label resolution), PLAY_VBL needs a missing helper tool, CosmosExMediaPlayer needs a ym_digit directory absent from the tree; show_gif (vbcc + GCC) and its ngiflib submodule (4c9b31ccb1b8857ba27dafc24a44709659f64308) were not attempted. Programs are small. No licence declared.",
+   "label_evidence": "vasm listing rows; GCC assembly + objects for listacsi (T002)",
+   "lineage_hypothesis": "one author lineage across assembly and C toolchains",
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "raw": 2,
+      "tos-prg": 8
+     },
+     "matches_expectation": true,
+     "name": "vasm-programs",
+     "observed": "success",
+     "output_bytes": 16209,
+     "output_count": 10,
+     "outputs": [
+      {
+       "code_sha256": "9e2abee1287414c2c194a2fa257fc7062d9eea278d964a8ae24e75989d1f17cc",
+       "format": "tos-prg",
+       "path": "steauply/steauply.ttp",
+       "sha256": "e527ce2ff259dc7922f38b3fd4fce7f352e1b470dff748623c67e1c0e7b0d943",
+       "size": 2824
+      },
+      {
+       "code_sha256": "c9b190e49e5d2274b5b5eca7291912fbce3d7ee9347dcd99a6eb958496dde193",
+       "format": "tos-prg",
+       "path": "steauply/steauply_int.ttp",
+       "sha256": "41ffeff15b7334f23bfe3cb3b6373ec2226c2e8d37dd385702eb6bac52903dc7",
+       "size": 3118
+      },
+      {
+       "code_sha256": "b9585c67aa1d1de8bf366e6a3780dabb68b6557effae7b0e13bd544e5ab85840",
+       "format": "tos-prg",
+       "path": "intro/border.tos",
+       "sha256": "326054ef430267c40a35121484c8ffb40d97e194c19bea7f45da6de01dea9657",
+       "size": 886
+      },
+      {
+       "code_sha256": "32ddb86e2ceb3f7031e57867a77083a0335063bd4547cbef59cd78bec05a1614",
+       "format": "tos-prg",
+       "path": "intro/hblvbl.tos",
+       "sha256": "77b7cfd832b8e3546d47d494585e78f3dec3c5072f8062d5aea6a279b3389250",
+       "size": 645
+      },
+      {
+       "code_sha256": "7f517fea52e11abae06a1b81d93db6fe0379be061812fec2f5078d623ba2255c",
+       "format": "tos-prg",
+       "path": "intro/rotozoom.tos",
+       "sha256": "65c793017d43a7be46eb2765f244623a310dd4f8d32c328ca56a425705f2e717",
+       "size": 5294
+      },
+      {
+       "code_sha256": "4d4b7abbbc3d826f68fde703b5996cc1ee93fe57083202bf33cec3d3fe9d20b3",
+       "format": "tos-prg",
+       "path": "intro/starf.tos",
+       "sha256": "a56c3b6e1427bcdf522e5f481aff0a05d4a5f42d7510098eb122c80772f1e783",
+       "size": 1068
+      },
+      {
+       "code_sha256": "cf41ededf372e874cc819e0c8edf0e1004a66c15c2cbbb3822b902c8204248f1",
+       "format": "tos-prg",
+       "path": "intro/tosfont.tos",
+       "sha256": "e46b09261093a104f1eb0f29069b048993b83fcf7f096f2229035d2d981bd206",
+       "size": 834
+      },
+      {
+       "code_sha256": "b1bfc99b4ae2472bdbe1b062d6e5c7226d05ef99143c3d8823f562f028ed8544",
+       "format": "tos-prg",
+       "path": "show_iff/show_iff.ttp",
+       "sha256": "64675992af0a5fd4ce415622dc687bc46933f7b7b70b9ff2a4e04154a2ede1ba",
+       "size": 1183
+      },
+      {
+       "code_sha256": "eb7ad4d32761e0501d2bc176bfbdf4be72ec981664ba463b008b320608954681",
+       "format": "raw",
+       "path": "bootsector/bs1.bin",
+       "sha256": "eb7ad4d32761e0501d2bc176bfbdf4be72ec981664ba463b008b320608954681",
+       "size": 37
+      },
+      {
+       "code_sha256": "e64a90a659f8c279672413a544afa437f5c5552835e0994190db098dc72c6bc3",
+       "format": "raw",
+       "path": "bootsector/detect.bin",
+       "sha256": "e64a90a659f8c279672413a544afa437f5c5552835e0994190db098dc72c6bc3",
+       "size": 320
+      }
+     ],
+     "recipe_sha256": "ccfddf3f85699861d4229ad68a96ac265bd2e74e26c3ea9941c511d4b2749478",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
+    },
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "tos-prg": 1
+     },
+     "matches_expectation": true,
+     "name": "listacsi",
+     "observed": "success",
+     "output_bytes": 2362,
+     "output_count": 1,
+     "outputs": [
+      {
+       "code_sha256": "3c7df6ec5436de194d87414572fcc2deedc362dfaf251310e8a8d1e7b263b796",
+       "format": "tos-prg",
+       "path": "listacsi/listacsi.tos",
+       "sha256": "3c7df6ec5436de194d87414572fcc2deedc362dfaf251310e8a8d1e7b263b796",
+       "size": 2362
+      }
+     ],
+     "recipe_sha256": "e35f9ddb6573e6ca4e44472dee2d371cea6710494a59f6e734613eb4af0a335e",
+     "toolchain": "tc-mint",
+     "undeclared_clock_leaks": [],
+     "volatile_outputs": {
+      "listacsi/listacsi.tos": "listacsi/main.c embeds the compiler's __DATE__"
+     }
+    },
+    {
+     "expect": "failure",
+     "matches_expectation": true,
+     "name": "the_80s",
+     "observed": "failure",
+     "recipe_sha256": "5943590dbe7101b163a02d4f580d5f9979f96a469d1164409dee4cb7b857f3a2",
+     "toolchain": "tc-gnu"
+    }
+   ]
+  },
+  {
+   "id": "pacman500",
+   "tier": "A",
+   "repo": "jotd666/pacman500",
+   "commit": "3b8d970c2700af4275ce53549ceb234e2f7046f0",
+   "platform": "amiga",
+   "workload": "game",
+   "provenance": "commercial-derived",
+   "licence": "none declared",
+   "licence_status": "undeclared",
+   "class": "BUILD_BLOCKED",
+   "technical_class": "BUILD_BLOCKED",
+   "rationale": "pacman.s requires AmigaOS assembler includes (exec/, dos/, graphics/, intuition/, hardware/ *.i), lvo/*.i library-offset includes from the author's private include tree (amiga39_JFF_OS) and WHDLoad developer includes (whdload.i, whdmacros.i), none in the repository. Sprites/sounds are generated by the author's bitplanelib Python tools from ripped arcade graphics. No licence is declared and the bundled graphics are arcade rips: licensing review is also required. Provenance: by the author's own description this is a 1:1 port of the commercial arcade game by the author family of the galaga/xevious/mpatrol transcodes (not yet inspected for transcoded code); it is treated as commercial-derived and can never become clean truth through supplying the missing includes alone.",
+   "label_evidence": "vasm listing rows once buildable",
+   "lineage_hypothesis": "jotd666 author lineage shared with scramble500/galaga/xevious/mpatrol (common infrastructure, ptplayer by phx)",
+   "prerequisites": [
+    "AmigaOS NDK assembler includes (e.g. Hyperion NDK 3.2 R4 on Aminet dev/misc; no licence statement - operator decision)",
+    "lvo/*.i include set matching the author's tree",
+    "WHDLoad developer includes",
+    "jotd666 bitplanelib (public, amiga68ktools) + Pillow + sox for asset conversion"
+   ],
+   "recipes": [
+    {
+     "expect": "failure",
+     "matches_expectation": true,
+     "name": "main",
+     "observed": "failure",
+     "recipe_sha256": "142bc28e43fd0a94c5d241cc17cf46e9b9635e29d176d817d1fbebd12f0c09e3",
+     "toolchain": "tc-gnu"
+    }
+   ]
+  },
+  {
+   "id": "scramble500",
+   "tier": "A",
+   "repo": "jotd666/scramble500",
+   "commit": "40d9a1212b53734441617e350dfdd50f88531eff",
+   "platform": "amiga",
+   "workload": "game",
+   "provenance": "commercial-derived",
+   "licence": "none declared",
+   "licence_status": "undeclared",
+   "class": "BUILD_BLOCKED",
+   "technical_class": "BUILD_BLOCKED",
+   "rationale": "Same prerequisites as pacman500 (AmigaOS/lvo/WHDLoad includes, bitplanelib asset conversion; arcade-ripped graphics; no declared licence). Provenance: by the author's own description this is a 1:1 port of the commercial arcade game by the author family of the galaga/xevious/mpatrol transcodes, and the repository commits a Z80-mnemonic disassembly listing of the arcade program (scramble_arcade.asm); it is treated as commercial-derived and can never become clean truth through supplying the missing includes alone.",
+   "label_evidence": "vasm listing rows once buildable",
+   "lineage_hypothesis": "jotd666 author lineage (see pacman500)",
+   "prerequisites": [
+    "as pacman500"
+   ],
+   "recipes": [
+    {
+     "expect": "failure",
+     "matches_expectation": true,
+     "name": "main",
+     "observed": "failure",
+     "recipe_sha256": "079c9bdb128bf2d6c16e05ee1e1102f5c9fdadb77ec725b08490a8e5931767fb",
+     "toolchain": "tc-gnu"
+    }
+   ]
+  },
+  {
+   "id": "amiga_asmdev_workflow",
+   "tier": "A",
+   "repo": "neildavis/amiga_asmdev_workflow",
+   "commit": "21be8c826fa7899515033c32677c7bf401d4990e",
+   "platform": "amiga",
+   "workload": "demo",
+   "provenance": "authored",
+   "licence": "MIT-style (LICENSE)",
+   "licence_status": "declared",
+   "class": "BUILD_BLOCKED",
+   "technical_class": "BUILD_BLOCKED",
+   "rationale": "Only the ZX0 decompressor module assembles; main/copper/bobs/sprites incbin raw images and include palettes generated from the repository's own XCF files by a GIMP batch script and compressed by salvador (ZX0). The asset toolchain (GIMP, salvador) is not provisioned in T001. Not a commercial dependency.",
+   "label_evidence": "vasm listing rows once buildable",
+   "lineage_hypothesis": "one small demo lineage",
+   "prerequisites": [
+    "GIMP batch conversion of assets/*.xcf (scripts/convert_assets_to_raw.sh)",
+    "salvador ZX0 compressor"
+   ],
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "amiga-hunk-object": 1
+     },
+     "matches_expectation": true,
+     "name": "unzx0",
+     "observed": "success",
+     "output_bytes": 192,
+     "output_count": 1,
+     "outputs": [
+      {
+       "code_sha256": "7618df7348e3741109a1597e87f41e0e96d614ef14fe5cc91b2365b226df3c71",
+       "format": "amiga-hunk-object",
+       "path": "out/unzx0.o",
+       "sha256": "7618df7348e3741109a1597e87f41e0e96d614ef14fe5cc91b2365b226df3c71",
+       "size": 192
+      }
+     ],
+     "recipe_sha256": "064365ed6cefcf7949be1876cfd2941ac20489bb19bb7847959b30eec422c348",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
+    },
+    {
+     "expect": "failure",
+     "matches_expectation": true,
+     "name": "main",
+     "observed": "failure",
+     "recipe_sha256": "3da437bd0269275e27338ae22ee4a542b67d17ccf06c8af9520f3821bbd889c4",
+     "toolchain": "tc-gnu"
+    }
+   ]
+  },
+  {
+   "id": "amiga-realtime3d",
+   "tier": "A",
+   "repo": "johangardhage/amiga-realtime3d",
+   "commit": "f7f9f5b56ea588daf3bfe45006e94f68c8408179",
+   "platform": "amiga",
+   "workload": "demo/tutorial",
+   "provenance": "authored",
+   "licence": "CC BY-SA 4.0",
+   "licence_status": "declared",
+   "class": "QUALIFIED",
+   "technical_class": "QUALIFIED",
+   "rationale": "All nine programs assemble with vasm (-m68000 -Fhunkexe) with listings; self-contained includes. CC BY-SA 4.0: redistribution of derived datasets/models needs review.",
+   "label_evidence": "vasm listing rows (T002)",
+   "lineage_hypothesis": "one author lineage; the nine programs share an incremental code base",
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "amiga-hunk-exe": 9
+     },
+     "matches_expectation": true,
+     "name": "programs",
+     "observed": "success",
+     "output_bytes": 98324,
+     "output_count": 9,
+     "outputs": [
+      {
+       "code_sha256": "80051e308b638eb95e816eb7a81da005b5f325eaeb6ce10894f2aaa7fe3b9b8e",
+       "format": "amiga-hunk-exe",
+       "path": "out/Program_01",
+       "sha256": "80051e308b638eb95e816eb7a81da005b5f325eaeb6ce10894f2aaa7fe3b9b8e",
+       "size": 4236
+      },
+      {
+       "code_sha256": "f80e78f02755971fa4b4321a92d47f27b6670446c5f2c480b42dc820db0d5b76",
+       "format": "amiga-hunk-exe",
+       "path": "out/Program_02",
+       "sha256": "f80e78f02755971fa4b4321a92d47f27b6670446c5f2c480b42dc820db0d5b76",
+       "size": 5200
+      },
+      {
+       "code_sha256": "604e879ba4bba576fef588b186bdeb1c35896c23d1c6728770edfd77f6c01f7d",
+       "format": "amiga-hunk-exe",
+       "path": "out/Program_03",
+       "sha256": "604e879ba4bba576fef588b186bdeb1c35896c23d1c6728770edfd77f6c01f7d",
+       "size": 6996
+      },
+      {
+       "code_sha256": "b76e68e27e00b7d1f394f1c40be3f0d45457e314a24b5ae2630be530f2c3db19",
+       "format": "amiga-hunk-exe",
+       "path": "out/Program_04",
+       "sha256": "b76e68e27e00b7d1f394f1c40be3f0d45457e314a24b5ae2630be530f2c3db19",
+       "size": 11172
+      },
+      {
+       "code_sha256": "05037aa67b31a9c73a7fa1f21ebe42f36db9fe69e635c7cc59ab43d944f3226e",
+       "format": "amiga-hunk-exe",
+       "path": "out/Program_05",
+       "sha256": "05037aa67b31a9c73a7fa1f21ebe42f36db9fe69e635c7cc59ab43d944f3226e",
+       "size": 10260
+      },
+      {
+       "code_sha256": "0dff5eff704d56c71120106e0922d8bad24b0d42398d5bdf9ca1ca762abf0209",
+       "format": "amiga-hunk-exe",
+       "path": "out/Program_06",
+       "sha256": "0dff5eff704d56c71120106e0922d8bad24b0d42398d5bdf9ca1ca762abf0209",
+       "size": 12548
+      },
+      {
+       "code_sha256": "9133d190e7f303b036ed57848fe49f8e87e0154bdb14f93de568a6c6ab71c77b",
+       "format": "amiga-hunk-exe",
+       "path": "out/Program_07",
+       "sha256": "9133d190e7f303b036ed57848fe49f8e87e0154bdb14f93de568a6c6ab71c77b",
+       "size": 13464
+      },
+      {
+       "code_sha256": "48ff035f3952935789b53319c5902f8d8c22d1779d775c454d290f94cc0d6f2a",
+       "format": "amiga-hunk-exe",
+       "path": "out/Program_08",
+       "sha256": "48ff035f3952935789b53319c5902f8d8c22d1779d775c454d290f94cc0d6f2a",
+       "size": 17184
+      },
+      {
+       "code_sha256": "2e378aaee4af969f0b30949e34c6a00dbdce10b4c60291019e2fcc3831946feb",
+       "format": "amiga-hunk-exe",
+       "path": "out/Program_09",
+       "sha256": "2e378aaee4af969f0b30949e34c6a00dbdce10b4c60291019e2fcc3831946feb",
+       "size": 17264
+      }
+     ],
+     "recipe_sha256": "66e74bcc60a4b9fa348a04429df600985ed710a9e15c4a54fc6ab261beae4f3a",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
+    }
+   ]
+  },
+  {
+   "id": "GODLIB",
+   "tier": "A",
+   "repo": "ReservoirGods/GODLIB",
+   "commit": "ae600aae192f35c8fe8a7e8164ec0e4caaa7e6e9",
+   "platform": "atari-st",
+   "workload": "game-library",
+   "provenance": "authored",
+   "licence": "none declared",
+   "licence_status": "undeclared",
+   "class": "LICENSING_REVIEW_REQUIRED",
+   "technical_class": "PARTIALLY_QUALIFIED",
+   "rationale": "A library, not a program: no authored executable target. With the toolchain declared by its ST makefile (vbcc 0.9g, 16-bit int) and an environment-only case-insensitive header shim, 120 C modules compile. 7 fail on Windows backslash include paths. The assembly modules use Pure C PASM directives (export/import) that vasm rejects, and two use FPU instructions. No licence declared.",
+   "label_evidence": "vbcc emitted assembly at object level (T002)",
+   "lineage_hypothesis": "Reservoir Gods library lineage; would contaminate any program built on it",
+   "recipes": [
+    {
+     "byte_identical_runs": false,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "aout": 120
+     },
+     "matches_expectation": true,
+     "name": "c-objects",
+     "observed": "success",
+     "output_bytes": 562583,
+     "output_count": 120,
+     "outputs": [
+      {
+       "code_sha256": "34814647db45b2abb79d7383f77e15443275699b20fb3fc4646128d4d3e0caa7",
+       "format": "aout",
+       "path": "out/__ACHIEVE_ACH_MAIN_C.o",
+       "sha256": "34814647db45b2abb79d7383f77e15443275699b20fb3fc4646128d4d3e0caa7",
+       "size": 12745
+      },
+      {
+       "code_sha256": "a495abad0fae092576c8ddb1ae930c719e383929efc93512e20688a8edfdc9d5",
+       "format": "aout",
+       "path": "out/__ACHIEVE_ACH_SHOW_C.o",
+       "sha256": "a495abad0fae092576c8ddb1ae930c719e383929efc93512e20688a8edfdc9d5",
+       "size": 6544
+      },
+      {
+       "code_sha256": "65c41f21f50e9cc7e7189f8de100cd70c2067b819e9b8615a57e1beba0669a8d",
+       "format": "aout",
+       "path": "out/__ACHIEVE_ACH_SIGN_C.o",
+       "sha256": "65c41f21f50e9cc7e7189f8de100cd70c2067b819e9b8615a57e1beba0669a8d",
+       "size": 10796
+      },
+      {
+       "code_sha256": "2882bdeee34fd5761cbbcbcc0a42bd5012a4aad40c4cadf56e111ec5cfb6974b",
+       "format": "aout",
+       "path": "out/__ACHIEVE_ACH_UNLK_C.o",
+       "sha256": "2882bdeee34fd5761cbbcbcc0a42bd5012a4aad40c4cadf56e111ec5cfb6974b",
+       "size": 2520
+      },
+      {
+       "code_sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "format": "aout",
+       "path": "out/__ASSERT_ASSERT_C.o",
+       "sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "size": 32
+      },
+      {
+       "code_sha256": "93cd5ddde8dbb7e095cee60438f46294f87983cc7502883f6551b729ba2bcb48",
+       "format": "aout",
+       "path": "out/__ASSET_ASSET_C.o",
+       "sha256": "93cd5ddde8dbb7e095cee60438f46294f87983cc7502883f6551b729ba2bcb48",
+       "size": 1071
+      },
+      {
+       "code_sha256": "a32e1c6a55fdba3a37de8c65fc76310f25062ddcc6bcc1d9e9a620dd86a86dfe",
+       "format": "aout",
+       "path": "out/__ASSET_CONTEXT_C.o",
+       "sha256": "a32e1c6a55fdba3a37de8c65fc76310f25062ddcc6bcc1d9e9a620dd86a86dfe",
+       "size": 1610
+      },
+      {
+       "code_sha256": "8a51bc25ec1ea46dae7840bc214aa478ec88843056071180d4c3ff1b54054b93",
+       "format": "aout",
+       "path": "out/__ASSET_PACKAGE_C.o",
+       "sha256": "8a51bc25ec1ea46dae7840bc214aa478ec88843056071180d4c3ff1b54054b93",
+       "size": 3433
+      },
+      {
+       "code_sha256": "fdf04d15ea46d94cda7e92a9c2bcc52d7e2041bece2e561b3f9bf9ad28c38bbf",
+       "format": "aout",
+       "path": "out/__ASSET_PKG_DIR_C.o",
+       "sha256": "fdf04d15ea46d94cda7e92a9c2bcc52d7e2041bece2e561b3f9bf9ad28c38bbf",
+       "size": 2160
+      },
+      {
+       "code_sha256": "3763d0c398358db77cb8c6660e67f0155c5e38699eed1367788bd4dbd4c80c30",
+       "format": "aout",
+       "path": "out/__ASSET_PKG_LNK_C.o",
+       "sha256": "3763d0c398358db77cb8c6660e67f0155c5e38699eed1367788bd4dbd4c80c30",
+       "size": 1535
+      },
+      {
+       "code_sha256": "9c9cf74d62b16c5cd20ea75b32f6fa5894b0abbfff41f32f6e444226adef3207",
+       "format": "aout",
+       "path": "out/__ASSET_RELOCATE_C.o",
+       "sha256": "9c9cf74d62b16c5cd20ea75b32f6fa5894b0abbfff41f32f6e444226adef3207",
+       "size": 1247
+      },
+      {
+       "code_sha256": "d3b833336a578225bb84ba2ff9fb780be7c15fbeebedb1f59b5aaba732c287e1",
+       "format": "aout",
+       "path": "out/__AUDIO_AMIXER_C.o",
+       "sha256": "d3b833336a578225bb84ba2ff9fb780be7c15fbeebedb1f59b5aaba732c287e1",
+       "size": 70565
+      },
+      {
+       "code_sha256": "57188ab93140fd3a4a8394eb0be43a148fbe0c7c06abc262ec38c5a04687e850",
+       "format": "aout",
+       "path": "out/__AUDIO_AMIX_BLD_C.o",
+       "sha256": "57188ab93140fd3a4a8394eb0be43a148fbe0c7c06abc262ec38c5a04687e850",
+       "size": 2175
+      },
+      {
+       "code_sha256": "9784c54c84b29c69bcdac4a2ee65cc24985ce1bc266005a357f34ad1e4a6ade8",
+       "format": "aout",
+       "path": "out/__AUDIO_AUDIO_C.o",
+       "sha256": "9784c54c84b29c69bcdac4a2ee65cc24985ce1bc266005a357f34ad1e4a6ade8",
+       "size": 3415
+      },
+      {
+       "code_sha256": "10c1e329439aa71519b29522b424ede339f18b9ac1f33715e68954b21f02d253",
+       "format": "aout",
+       "path": "out/__AUDIO_REL_SPL_C.o",
+       "sha256": "10c1e329439aa71519b29522b424ede339f18b9ac1f33715e68954b21f02d253",
+       "size": 705
+      },
+      {
+       "code_sha256": "626e0045ac744d4ee8bb035acee63e56767d1a046605033afb4c71cf7d44144a",
+       "format": "aout",
+       "path": "out/__AUDIO_SSD_C.o",
+       "sha256": "626e0045ac744d4ee8bb035acee63e56767d1a046605033afb4c71cf7d44144a",
+       "size": 9868
+      },
+      {
+       "code_sha256": "0e7e816aec2f5140baa9e0faf8534efeba754e65dd6198b732578b07c09f1ba4",
+       "format": "aout",
+       "path": "out/__BASE_BASE_C.o",
+       "sha256": "0e7e816aec2f5140baa9e0faf8534efeba754e65dd6198b732578b07c09f1ba4",
+       "size": 2281
+      },
+      {
+       "code_sha256": "b85046f48d6ace3d2e394cf7fb84da85fbfb6dfd745d8eb3110c1b6043048cce",
+       "format": "aout",
+       "path": "out/__BLITTER_BLITTER_C.o",
+       "sha256": "b85046f48d6ace3d2e394cf7fb84da85fbfb6dfd745d8eb3110c1b6043048cce",
+       "size": 5462
+      },
+      {
+       "code_sha256": "3281beb8ed3996c0ca8f82e3aac6a00a6440a83ccb0c460b353a9c2e13307fa6",
+       "format": "aout",
+       "path": "out/__CHECKSUM_CHECKSUM_C.o",
+       "sha256": "3281beb8ed3996c0ca8f82e3aac6a00a6440a83ccb0c460b353a9c2e13307fa6",
+       "size": 630
+      },
+      {
+       "code_sha256": "28e32815f7b136b8e13f9fa3b64b6fa9f3ac56cde4ca4b80606212e4c2eab65d",
+       "format": "aout",
+       "path": "out/__CHUNKY_CHUNKY_C.o",
+       "sha256": "28e32815f7b136b8e13f9fa3b64b6fa9f3ac56cde4ca4b80606212e4c2eab65d",
+       "size": 4464
+      },
+      {
+       "code_sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "format": "aout",
+       "path": "out/__CLI_CLI_C.o",
+       "sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "size": 32
+      },
+      {
+       "code_sha256": "f79612540c9ebfd1a3a756b8b093510eff618d2af378c480b3ec90a3f09c4778",
+       "format": "aout",
+       "path": "out/__CLOCK_CLOCK_C.o",
+       "sha256": "f79612540c9ebfd1a3a756b8b093510eff618d2af378c480b3ec90a3f09c4778",
+       "size": 2548
+      },
+      {
+       "code_sha256": "543fee7f7253f0f11a2a1e13295b0d04f52b2b91e9ff506e91a70f8d98530da7",
+       "format": "aout",
+       "path": "out/__COOKIE_COOKIE_C.o",
+       "sha256": "543fee7f7253f0f11a2a1e13295b0d04f52b2b91e9ff506e91a70f8d98530da7",
+       "size": 570
+      },
+      {
+       "code_sha256": "00d2c2b521871ef7b9a294ad2912dbe0377dd6020fa75b699006050d0000290b",
+       "format": "aout",
+       "path": "out/__CUTSCENE_CUTPARSE_C.o",
+       "sha256": "00d2c2b521871ef7b9a294ad2912dbe0377dd6020fa75b699006050d0000290b",
+       "size": 11803
+      },
+      {
+       "code_sha256": "e1b1d2498874765bf35ffd75bcee24755f21c38a63ba8b0e739dccf938844684",
+       "format": "aout",
+       "path": "out/__CUTSCENE_CUTSCENE_C.o",
+       "sha256": "e1b1d2498874765bf35ffd75bcee24755f21c38a63ba8b0e739dccf938844684",
+       "size": 8113
+      },
+      {
+       "code_sha256": "b77b7691cbf8ae7d02288437d418264c44cd6a9f64487ae48303c48bfd7b1d03",
+       "format": "aout",
+       "path": "out/__CUTSCENE_CUT_SYS_C.o",
+       "sha256": "b77b7691cbf8ae7d02288437d418264c44cd6a9f64487ae48303c48bfd7b1d03",
+       "size": 7171
+      },
+      {
+       "code_sha256": "569a97cef6e94a145db694c1f93b03b9912577870e0ede782c88499871107a39",
+       "format": "aout",
+       "path": "out/__CUTSCENE_REL_CUT_C.o",
+       "sha256": "569a97cef6e94a145db694c1f93b03b9912577870e0ede782c88499871107a39",
+       "size": 1270
+      },
+      {
+       "code_sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "format": "aout",
+       "path": "out/__DEBUGLOG_DEBUGLOG_C.o",
+       "sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "size": 32
+      },
+      {
+       "code_sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "format": "aout",
+       "path": "out/__DEBUG_DEBUG_C.o",
+       "sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "size": 32
+      },
+      {
+       "code_sha256": "367f7487111d0b4160de529065f0f0d00331a14ca12a2b64d754a0aab8ab372c",
+       "format": "aout",
+       "path": "out/__DRIVE_DRIVE_C.o",
+       "sha256": "367f7487111d0b4160de529065f0f0d00331a14ca12a2b64d754a0aab8ab372c",
+       "size": 1019
+      },
+      {
+       "code_sha256": "6f79ad300e7501b647ed3b7a711e6833cf7ad87185578f70b1a6ac504dad4cc1",
+       "format": "aout",
+       "path": "out/__ELFHASH_ELFHASH_C.o",
+       "sha256": "6f79ad300e7501b647ed3b7a711e6833cf7ad87185578f70b1a6ac504dad4cc1",
+       "size": 222
+      },
+      {
+       "code_sha256": "d0212b9d9e64a8d1f7b4bc54b089d829c155b086f0a132206d5d62a176c87f2d",
+       "format": "aout",
+       "path": "out/__ENCRYPT_ENCRYPT_C.o",
+       "sha256": "d0212b9d9e64a8d1f7b4bc54b089d829c155b086f0a132206d5d62a176c87f2d",
+       "size": 396
+      },
+      {
+       "code_sha256": "48094b02b6e53663b10e53282c9ea8cf86bca1679cd4dd7915e46d4c24ac23d2",
+       "format": "aout",
+       "path": "out/__EXCEPT_EXCEPT_C.o",
+       "sha256": "48094b02b6e53663b10e53282c9ea8cf86bca1679cd4dd7915e46d4c24ac23d2",
+       "size": 5222
+      },
+      {
+       "code_sha256": "6fe911e571098e203ee489929d8df85b73c117d0c60e1262c9d1a60a837fb95c",
+       "format": "aout",
+       "path": "out/__FADE_FADE_C.o",
+       "sha256": "6fe911e571098e203ee489929d8df85b73c117d0c60e1262c9d1a60a837fb95c",
+       "size": 3105
+      },
+      {
+       "code_sha256": "eacd9c9a9b1a072552de2e5a957579ae90785ccd11069f78a2baf3a983bd0e0e",
+       "format": "aout",
+       "path": "out/__FADE_FADE_GOD_C.o",
+       "sha256": "eacd9c9a9b1a072552de2e5a957579ae90785ccd11069f78a2baf3a983bd0e0e",
+       "size": 1815
+      },
+      {
+       "code_sha256": "eb43ece64d073bd1974416742736dafbe49821ee58e5f35109d3b0286a08a184",
+       "format": "aout",
+       "path": "out/__FE_FEDPARSE_C.o",
+       "sha256": "eb43ece64d073bd1974416742736dafbe49821ee58e5f35109d3b0286a08a184",
+       "size": 21373
+      },
+      {
+       "code_sha256": "bb4d281405a0e401b67ae0a1c4d23f89a73182097071f7caa4bc9ca5d9019277",
+       "format": "aout",
+       "path": "out/__FE_FED_C.o",
+       "sha256": "bb4d281405a0e401b67ae0a1c4d23f89a73182097071f7caa4bc9ca5d9019277",
+       "size": 27744
+      },
+      {
+       "code_sha256": "f36e5a37e2235bd02b1a17196c73b66b6826c2cc8ce18db4877c5933c2e164e8",
+       "format": "aout",
+       "path": "out/__FE_REL_FED_C.o",
+       "sha256": "f36e5a37e2235bd02b1a17196c73b66b6826c2cc8ce18db4877c5933c2e164e8",
+       "size": 719
+      },
+      {
+       "code_sha256": "dc90c403040dc9bf1619d633206afe6d2bce38ad0f1dcb6c87440d4ee415ae11",
+       "format": "aout",
+       "path": "out/__FE_R_FED_C.o",
+       "sha256": "dc90c403040dc9bf1619d633206afe6d2bce38ad0f1dcb6c87440d4ee415ae11",
+       "size": 6781
+      },
+      {
+       "code_sha256": "778f17f574c54bd7c9f320ce7e987d719e058a5bc61fc729dc2adf8500b7b608",
+       "format": "aout",
+       "path": "out/__FILE_FILE_C.o",
+       "sha256": "778f17f574c54bd7c9f320ce7e987d719e058a5bc61fc729dc2adf8500b7b608",
+       "size": 6340
+      },
+      {
+       "code_sha256": "c5faf65cd5c401b5632cf3efa0ccacc03a4bba43f55ab9a84e3107f7dbad1a13",
+       "format": "aout",
+       "path": "out/__FILE_FILE_PTN_C.o",
+       "sha256": "c5faf65cd5c401b5632cf3efa0ccacc03a4bba43f55ab9a84e3107f7dbad1a13",
+       "size": 1078
+      },
+      {
+       "code_sha256": "7faf7ac47bd80860b888bd255ea29a3ff10cb7a4ca9ecedbc4ab19041e33e7df",
+       "format": "aout",
+       "path": "out/__FONT8X8_FONT8X8_C.o",
+       "sha256": "7faf7ac47bd80860b888bd255ea29a3ff10cb7a4ca9ecedbc4ab19041e33e7df",
+       "size": 351
+      },
+      {
+       "code_sha256": "47b38072a7e3404911206970564895db9712a5da1658862e7ed878d3e44f1db7",
+       "format": "aout",
+       "path": "out/__FONT8X8_FONTDATA_C.o",
+       "sha256": "47b38072a7e3404911206970564895db9712a5da1658862e7ed878d3e44f1db7",
+       "size": 12602
+      },
+      {
+       "code_sha256": "b4a2a0b5dd9539273d0ba5c923d5e879be7e47f4bb2d873dc8733de26d6dc77a",
+       "format": "aout",
+       "path": "out/__FONT_FONT_C.o",
+       "sha256": "b4a2a0b5dd9539273d0ba5c923d5e879be7e47f4bb2d873dc8733de26d6dc77a",
+       "size": 4155
+      },
+      {
+       "code_sha256": "dd9d4b50f5117fda785c0df7b8fe808dbfa7a695cd73f4f8f5918e18af2615df",
+       "format": "aout",
+       "path": "out/__FONT_REL_BFB_C.o",
+       "sha256": "dd9d4b50f5117fda785c0df7b8fe808dbfa7a695cd73f4f8f5918e18af2615df",
+       "size": 524
+      },
+      {
+       "code_sha256": "f3e46f8411f61faf31956330337255e0d9e171a6216fd1ee37168c4f235a71b5",
+       "format": "aout",
+       "path": "out/__GEMDOS_GEMDOS_C.o",
+       "sha256": "f3e46f8411f61faf31956330337255e0d9e171a6216fd1ee37168c4f235a71b5",
+       "size": 7222
+      },
+      {
+       "code_sha256": "24fdc6f29cdfbeab5ceece2e4a3b9048cb5a663713714926ca4414a2ed1e583a",
+       "format": "aout",
+       "path": "out/__GRAPHIC_GRAPHIC_C.o",
+       "sha256": "24fdc6f29cdfbeab5ceece2e4a3b9048cb5a663713714926ca4414a2ed1e583a",
+       "size": 4574
+      },
+      {
+       "code_sha256": "4c878f7e6c05f77a648bc7561d41a09018c5cd0cd3e895bffb87dcc3663c81a9",
+       "format": "aout",
+       "path": "out/__GRAPHIC_GRF_16_C.o",
+       "sha256": "4c878f7e6c05f77a648bc7561d41a09018c5cd0cd3e895bffb87dcc3663c81a9",
+       "size": 3112
+      },
+      {
+       "code_sha256": "0fe9a4913443958f6f3ae621905f01074e685a78a28bf1b3c3cb99249d07caad",
+       "format": "aout",
+       "path": "out/__GRAPHIC_GRF_4_C.o",
+       "sha256": "0fe9a4913443958f6f3ae621905f01074e685a78a28bf1b3c3cb99249d07caad",
+       "size": 5235
+      },
+      {
+       "code_sha256": "7602e2cd31f54baefbfc3bd7e716737a9c7b2c5f5507e3cc0b70b90bf3733035",
+       "format": "aout",
+       "path": "out/__GUI_GUIDATA_C.o",
+       "sha256": "7602e2cd31f54baefbfc3bd7e716737a9c7b2c5f5507e3cc0b70b90bf3733035",
+       "size": 28314
+      },
+      {
+       "code_sha256": "5bb7e68e170a11a378528a97f5f5b491e2b981d9f4f01a8a093219427b06e8a1",
+       "format": "aout",
+       "path": "out/__GUI_GUIEDIT_C.o",
+       "sha256": "5bb7e68e170a11a378528a97f5f5b491e2b981d9f4f01a8a093219427b06e8a1",
+       "size": 1568
+      },
+      {
+       "code_sha256": "63ddbab55295dfead4fa9c7349a0d45d1e7c190cad2f2bfb3070f057c07f6209",
+       "format": "aout",
+       "path": "out/__GUI_GUIFS_C.o",
+       "sha256": "63ddbab55295dfead4fa9c7349a0d45d1e7c190cad2f2bfb3070f057c07f6209",
+       "size": 8410
+      },
+      {
+       "code_sha256": "583e91fae54b9e0492bcaa82a0108b464efe81426ba2c2d20cce8e244f30ffe9",
+       "format": "aout",
+       "path": "out/__GUI_GUIPARSE_C.o",
+       "sha256": "583e91fae54b9e0492bcaa82a0108b464efe81426ba2c2d20cce8e244f30ffe9",
+       "size": 17589
+      },
+      {
+       "code_sha256": "fa3d8a2770e05acedd1aaf77af014fc055d3489aa9fc4996625f6b9c57bfcc8c",
+       "format": "aout",
+       "path": "out/__GUI_GUI_C.o",
+       "sha256": "fa3d8a2770e05acedd1aaf77af014fc055d3489aa9fc4996625f6b9c57bfcc8c",
+       "size": 18830
+      },
+      {
+       "code_sha256": "a033bf79e6e2290a36db1fbc082874e192bf4a12698ea3437cdd166181aaf8ff",
+       "format": "aout",
+       "path": "out/__GUI_R_GUI_C.o",
+       "sha256": "a033bf79e6e2290a36db1fbc082874e192bf4a12698ea3437cdd166181aaf8ff",
+       "size": 6504
+      },
+      {
+       "code_sha256": "f2dbdd2fc78883aabe5cfa9b7c07283e6d52e4cc88d0bd5e25b2e101792c3e2d",
+       "format": "aout",
+       "path": "out/__HASHLIST_HASHLIST_C.o",
+       "sha256": "f2dbdd2fc78883aabe5cfa9b7c07283e6d52e4cc88d0bd5e25b2e101792c3e2d",
+       "size": 1118
+      },
+      {
+       "code_sha256": "9e4e790cfd150ea8d81ee0a6b73625ec25622fbc8de97a94e752ef49e28d7e59",
+       "format": "aout",
+       "path": "out/__HASHTREE_HASHTREE_C.o",
+       "sha256": "9e4e790cfd150ea8d81ee0a6b73625ec25622fbc8de97a94e752ef49e28d7e59",
+       "size": 2817
+      },
+      {
+       "code_sha256": "0cf1c92192a1be140b18585e9ff1ad99cc50eb028ae5f62c9be0983984f15d71",
+       "format": "aout",
+       "path": "out/__IKBD_IKBD_C.o",
+       "sha256": "0cf1c92192a1be140b18585e9ff1ad99cc50eb028ae5f62c9be0983984f15d71",
+       "size": 4465
+      },
+      {
+       "code_sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "format": "aout",
+       "path": "out/__IKBD_IKBD_DI_C.o",
+       "sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "size": 32
+      },
+      {
+       "code_sha256": "68cc8ebef593a01d5e9d959abd6c650ca3590607624483f9b56efa797cec8434",
+       "format": "aout",
+       "path": "out/__INPUT_INPUT_C.o",
+       "sha256": "68cc8ebef593a01d5e9d959abd6c650ca3590607624483f9b56efa797cec8434",
+       "size": 8405
+      },
+      {
+       "code_sha256": "c982a9da91baecb0d9f6c3b958c2800a31a0b86485b1b033b696d96eac743c09",
+       "format": "aout",
+       "path": "out/__KERNEL_KERNEL_C.o",
+       "sha256": "c982a9da91baecb0d9f6c3b958c2800a31a0b86485b1b033b696d96eac743c09",
+       "size": 9636
+      },
+      {
+       "code_sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "format": "aout",
+       "path": "out/__LINEA_LINEA_C.o",
+       "sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "size": 32
+      },
+      {
+       "code_sha256": "c351d289e6df613fb16f89685171c6fcbe773c87a78538a5f03633ffd610a8cf",
+       "format": "aout",
+       "path": "out/__LINKFILE_LINKFILE_C.o",
+       "sha256": "c351d289e6df613fb16f89685171c6fcbe773c87a78538a5f03633ffd610a8cf",
+       "size": 10633
+      },
+      {
+       "code_sha256": "98f29313faf800f828723504add3d661a9b31e164b07a9544fd2dcee7f2cdaf3",
+       "format": "aout",
+       "path": "out/__MAIN_GOD_MAIN_C.o",
+       "sha256": "98f29313faf800f828723504add3d661a9b31e164b07a9544fd2dcee7f2cdaf3",
+       "size": 204
+      },
+      {
+       "code_sha256": "185089a26227c5033b8f091133fe186336e70984a788c7ee803b0937f40668bd",
+       "format": "aout",
+       "path": "out/__MEMORY_HEAP_C.o",
+       "sha256": "185089a26227c5033b8f091133fe186336e70984a788c7ee803b0937f40668bd",
+       "size": 946
+      },
+      {
+       "code_sha256": "d05533c97a27b1fdefc2523c8b2139358c6075e9c9b68d654c03086e571b145b",
+       "format": "aout",
+       "path": "out/__MFP_MFP_C.o",
+       "sha256": "d05533c97a27b1fdefc2523c8b2139358c6075e9c9b68d654c03086e571b145b",
+       "size": 538
+      },
+      {
+       "code_sha256": "d1d5454395b840e62c9d2dd4a5fe9cb09b0f1ad764256c9406cf264d21ad3120",
+       "format": "aout",
+       "path": "out/__MUSIC_PINKNOTE_C.o",
+       "sha256": "d1d5454395b840e62c9d2dd4a5fe9cb09b0f1ad764256c9406cf264d21ad3120",
+       "size": 2148
+      },
+      {
+       "code_sha256": "4878eccaf84aafdfadc723861074e78bd59f5fb0f970cf056ca47fb29852848b",
+       "format": "aout",
+       "path": "out/__MUSIC_SND_C.o",
+       "sha256": "4878eccaf84aafdfadc723861074e78bd59f5fb0f970cf056ca47fb29852848b",
+       "size": 1805
+      },
+      {
+       "code_sha256": "c1041db54133a3dd045c24aeb7e915aeecd98768948440243f17db72802b42c9",
+       "format": "aout",
+       "path": "out/__PACKER_ARI_DEC_C.o",
+       "sha256": "c1041db54133a3dd045c24aeb7e915aeecd98768948440243f17db72802b42c9",
+       "size": 1014
+      },
+      {
+       "code_sha256": "081aa92ee83dbedfeec8735c370caf85dc3f8594b7f14a2e3985d3b888564319",
+       "format": "aout",
+       "path": "out/__PACKER_ARI_ENC_C.o",
+       "sha256": "081aa92ee83dbedfeec8735c370caf85dc3f8594b7f14a2e3985d3b888564319",
+       "size": 1516
+      },
+      {
+       "code_sha256": "8e62303b6d8434fb7c224c08c1b6f2f6654a1380ff4b1bb8e7e125fd4dcbb5bd",
+       "format": "aout",
+       "path": "out/__PACKER_BWT_DEC_C.o",
+       "sha256": "8e62303b6d8434fb7c224c08c1b6f2f6654a1380ff4b1bb8e7e125fd4dcbb5bd",
+       "size": 904
+      },
+      {
+       "code_sha256": "ff7cb33fa3bb308853472ef147bbff10cdaa816f41d8a8f04699f18aec1c8774",
+       "format": "aout",
+       "path": "out/__PACKER_BWT_ENC_C.o",
+       "sha256": "ff7cb33fa3bb308853472ef147bbff10cdaa816f41d8a8f04699f18aec1c8774",
+       "size": 1226
+      },
+      {
+       "code_sha256": "a14b913b417d6169b63944003edec1a7f497678cfc809e1fc9008dcf406c7dc4",
+       "format": "aout",
+       "path": "out/__PACKER_GODPACKP_C.o",
+       "sha256": "a14b913b417d6169b63944003edec1a7f497678cfc809e1fc9008dcf406c7dc4",
+       "size": 332
+      },
+      {
+       "code_sha256": "599832aed079d1f450ccdf89cda9d90053c38848e4d1381ee18ad5f784cedf8e",
+       "format": "aout",
+       "path": "out/__PACKER_GODPACK_C.o",
+       "sha256": "599832aed079d1f450ccdf89cda9d90053c38848e4d1381ee18ad5f784cedf8e",
+       "size": 2302
+      },
+      {
+       "code_sha256": "55ad6f298da095182c54987a30f119c5fb067359400413d98fa8897a94483f57",
+       "format": "aout",
+       "path": "out/__PACKER_LZ77BDEC_C.o",
+       "sha256": "55ad6f298da095182c54987a30f119c5fb067359400413d98fa8897a94483f57",
+       "size": 580
+      },
+      {
+       "code_sha256": "56e08fff823442caa9873d019899c2e6694a695bea26bedfbf70a8bd3bba4bd3",
+       "format": "aout",
+       "path": "out/__PACKER_LZ77BENC_C.o",
+       "sha256": "56e08fff823442caa9873d019899c2e6694a695bea26bedfbf70a8bd3bba4bd3",
+       "size": 2491
+      },
+      {
+       "code_sha256": "6316e94c76d68f15912ba89a0e50daee14d35e58774fe2793371dc0b859fb15f",
+       "format": "aout",
+       "path": "out/__PACKER_LZ77_DEC_C.o",
+       "sha256": "6316e94c76d68f15912ba89a0e50daee14d35e58774fe2793371dc0b859fb15f",
+       "size": 654
+      },
+      {
+       "code_sha256": "6269b430c5507baa72ccade4c5f373d8f2e9b96d0f7ad2da2fd810994891fb13",
+       "format": "aout",
+       "path": "out/__PACKER_LZ77_ENC_C.o",
+       "sha256": "6269b430c5507baa72ccade4c5f373d8f2e9b96d0f7ad2da2fd810994891fb13",
+       "size": 3039
+      },
+      {
+       "code_sha256": "7b99f607b3003c55ab093c9b0dda32ab352bcc24daf4f949b9fefae6191fc598",
+       "format": "aout",
+       "path": "out/__PACKER_MTF_DEC_C.o",
+       "sha256": "7b99f607b3003c55ab093c9b0dda32ab352bcc24daf4f949b9fefae6191fc598",
+       "size": 260
+      },
+      {
+       "code_sha256": "1dd2676f919261edd9bcacc637219afb1debdc33129c2780b65253a5cee3fb84",
+       "format": "aout",
+       "path": "out/__PACKER_MTF_ENC_C.o",
+       "sha256": "1dd2676f919261edd9bcacc637219afb1debdc33129c2780b65253a5cee3fb84",
+       "size": 304
+      },
+      {
+       "code_sha256": "af3751145900157fbcb12b8b4888c6d6b3c4ff494f5b962278e3ef1b36522371",
+       "format": "aout",
+       "path": "out/__PACKER_PACKER_C.o",
+       "sha256": "af3751145900157fbcb12b8b4888c6d6b3c4ff494f5b962278e3ef1b36522371",
+       "size": 1430
+      },
+      {
+       "code_sha256": "3ff730ef56307110668cbc44c4dccc3c9a5511bbbb32da6b8c8c23fa390647e9",
+       "format": "aout",
+       "path": "out/__PACKER_RLE_C.o",
+       "sha256": "3ff730ef56307110668cbc44c4dccc3c9a5511bbbb32da6b8c8c23fa390647e9",
+       "size": 884
+      },
+      {
+       "code_sha256": "133e867db73d51cc2ef9c580c99ba6967e9f21385fa265ce0f97f410347bfbaf",
+       "format": "aout",
+       "path": "out/__PICTYPES_ART_C.o",
+       "sha256": "133e867db73d51cc2ef9c580c99ba6967e9f21385fa265ce0f97f410347bfbaf",
+       "size": 617
+      },
+      {
+       "code_sha256": "9c517295e3f3d063ff340159e89a4bc685ddb0022aa9d10fabeff4ba54736f42",
+       "format": "aout",
+       "path": "out/__PICTYPES_CANVASIC_C.o",
+       "sha256": "9c517295e3f3d063ff340159e89a4bc685ddb0022aa9d10fabeff4ba54736f42",
+       "size": 4374
+      },
+      {
+       "code_sha256": "9bda48a3388f20d194670927c8f5a4c316e1c4a5cf66d7a824033ff568d2466c",
+       "format": "aout",
+       "path": "out/__PICTYPES_CANVAS_C.o",
+       "sha256": "9bda48a3388f20d194670927c8f5a4c316e1c4a5cf66d7a824033ff568d2466c",
+       "size": 2890
+      },
+      {
+       "code_sha256": "90b79f3fe20fb4daf1fddec86e3a9f1f50c52c0fff731384717b0df276a66c53",
+       "format": "aout",
+       "path": "out/__PICTYPES_COLQUANT_C.o",
+       "sha256": "90b79f3fe20fb4daf1fddec86e3a9f1f50c52c0fff731384717b0df276a66c53",
+       "size": 6427
+      },
+      {
+       "code_sha256": "fb3b7191960a515fe8ae839ca25898cd982aa86ffa976c728611a6833da3c86d",
+       "format": "aout",
+       "path": "out/__PICTYPES_DEGAS_C.o",
+       "sha256": "fb3b7191960a515fe8ae839ca25898cd982aa86ffa976c728611a6833da3c86d",
+       "size": 4526
+      },
+      {
+       "code_sha256": "960fd0cbcf58452301c87f2c36cfb8e59b97070be840ce1794c01c6dfe986d95",
+       "format": "aout",
+       "path": "out/__PICTYPES_GFX_C.o",
+       "sha256": "960fd0cbcf58452301c87f2c36cfb8e59b97070be840ce1794c01c6dfe986d95",
+       "size": 1013
+      },
+      {
+       "code_sha256": "1be436cea9dca466b3573cdd37a1885cc66e57e893b0d33d7f08e3c4b001f7b4",
+       "format": "aout",
+       "path": "out/__PICTYPES_GIF_C.o",
+       "sha256": "1be436cea9dca466b3573cdd37a1885cc66e57e893b0d33d7f08e3c4b001f7b4",
+       "size": 3913
+      },
+      {
+       "code_sha256": "8452c02d1fe3acba8c35a4d38905d3a606e9b15ace6e82fcac636545aced9f63",
+       "format": "aout",
+       "path": "out/__PICTYPES_GOD_C.o",
+       "sha256": "8452c02d1fe3acba8c35a4d38905d3a606e9b15ace6e82fcac636545aced9f63",
+       "size": 461
+      },
+      {
+       "code_sha256": "65c0741995a2c5e1171330ea76ff104462902017ac2e249112364c99614c6186",
+       "format": "aout",
+       "path": "out/__PICTYPES_GSM_C.o",
+       "sha256": "65c0741995a2c5e1171330ea76ff104462902017ac2e249112364c99614c6186",
+       "size": 158
+      },
+      {
+       "code_sha256": "712f4e355c51a037ab79f60ecefa6fa32972b97973f0fa7eeb793639be64d5a5",
+       "format": "aout",
+       "path": "out/__PICTYPES_NEO_C.o",
+       "sha256": "712f4e355c51a037ab79f60ecefa6fa32972b97973f0fa7eeb793639be64d5a5",
+       "size": 641
+      },
+      {
+       "code_sha256": "4dbb15d0b2329a751227cf26cf5db4e9ea62ef9659e44ece4f5225780f6cc059",
+       "format": "aout",
+       "path": "out/__PICTYPES_OCTTREE_C.o",
+       "sha256": "4dbb15d0b2329a751227cf26cf5db4e9ea62ef9659e44ece4f5225780f6cc059",
+       "size": 3090
+      },
+      {
+       "code_sha256": "673adbfc1ceb328733dddbd97e4808ec46fb98e42fbbafe7e5f8acfdabba5dbd",
+       "format": "aout",
+       "path": "out/__PICTYPES_REL_GSM_C.o",
+       "sha256": "673adbfc1ceb328733dddbd97e4808ec46fb98e42fbbafe7e5f8acfdabba5dbd",
+       "size": 522
+      },
+      {
+       "code_sha256": "6bbea7bd5bae726499a7544cc4dc72ae86e7ad2dcdf061584177a80cce0443f3",
+       "format": "aout",
+       "path": "out/__PICTYPES_TGA_C.o",
+       "sha256": "6bbea7bd5bae726499a7544cc4dc72ae86e7ad2dcdf061584177a80cce0443f3",
+       "size": 3481
+      },
+      {
+       "code_sha256": "f984898252e0cd01dee58084546533a45901638b3f38b5ae9a1cd459bb81c71a",
+       "format": "aout",
+       "path": "out/__PLATFORM_PLATFORM_C.o",
+       "sha256": "f984898252e0cd01dee58084546533a45901638b3f38b5ae9a1cd459bb81c71a",
+       "size": 1151
+      },
+      {
+       "code_sha256": "eb73ba0beb1b9ce78385d1becb59c920ef25fbe499510803e79296bc31baa44d",
+       "format": "aout",
+       "path": "out/__PROFILER_PROFILER_C.o",
+       "sha256": "eb73ba0beb1b9ce78385d1becb59c920ef25fbe499510803e79296bc31baa44d",
+       "size": 3616
+      },
+      {
+       "code_sha256": "79aa2de1882c4d57172c1bc5df6821ad13f9ec74d0752fe0c5630b8c9f0dedda",
+       "format": "aout",
+       "path": "out/__PROFILER_PROFILE_C.o",
+       "sha256": "79aa2de1882c4d57172c1bc5df6821ad13f9ec74d0752fe0c5630b8c9f0dedda",
+       "size": 304
+      },
+      {
+       "code_sha256": "50ab23e454e3719f5acbe1d365c9271201eaa6482ca803f366c23801c9c6a774",
+       "format": "aout",
+       "path": "out/__PROGRAM_PROGRAM_C.o",
+       "sha256": "50ab23e454e3719f5acbe1d365c9271201eaa6482ca803f366c23801c9c6a774",
+       "size": 2197
+      },
+      {
+       "code_sha256": "1b4d6124f90f463d756aac68e15e5f65a7e79189ce296320727e19e02bc7fa44",
+       "format": "aout",
+       "path": "out/__RANDOM_RANDOM_C.o",
+       "sha256": "1b4d6124f90f463d756aac68e15e5f65a7e79189ce296320727e19e02bc7fa44",
+       "size": 1098
+      },
+      {
+       "code_sha256": "15146e9a5c0e17476cac1001ff2f19b78f753280e34706bdefa7f741512c90c3",
+       "format": "aout",
+       "path": "out/__REGISTRY_REGISTRY_C.o",
+       "sha256": "15146e9a5c0e17476cac1001ff2f19b78f753280e34706bdefa7f741512c90c3",
+       "size": 7190
+      },
+      {
+       "code_sha256": "c8aa0226c55f72d38fa5202c52f430c9647948e820ef4ed5dac2c0a896ef14d8",
+       "format": "aout",
+       "path": "out/__SCREEN_SCREEN_C.o",
+       "sha256": "c8aa0226c55f72d38fa5202c52f430c9647948e820ef4ed5dac2c0a896ef14d8",
+       "size": 2108
+      },
+      {
+       "code_sha256": "1eff7816be62875d5c7b5c2cac5e7156000265f20b12d0294488ce63a2c842ff",
+       "format": "aout",
+       "path": "out/__SCRNGRAB_SCRNGRAB_C.o",
+       "sha256": "1eff7816be62875d5c7b5c2cac5e7156000265f20b12d0294488ce63a2c842ff",
+       "size": 1404
+      },
+      {
+       "code_sha256": "0afe7adb013c0ce363e954e55bee0dbc5e7b199b768a136e32ae2d4d22379266",
+       "format": "aout",
+       "path": "out/__SPRITE_ASPRITE_C.o",
+       "sha256": "0afe7adb013c0ce363e954e55bee0dbc5e7b199b768a136e32ae2d4d22379266",
+       "size": 5051
+      },
+      {
+       "code_sha256": "d25862bd7871258ad7840a52ba5a53790487140d8fdcbe78e5717840da93b7c3",
+       "format": "aout",
+       "path": "out/__SPRITE_REL_ASB_C.o",
+       "sha256": "d25862bd7871258ad7840a52ba5a53790487140d8fdcbe78e5717840da93b7c3",
+       "size": 544
+      },
+      {
+       "code_sha256": "0048b0230b134d5b6d0909d56c39f383eb2297cfdbe06719b55619bc0b168096",
+       "format": "aout",
+       "path": "out/__SPRITE_REL_BSB_C.o",
+       "sha256": "0048b0230b134d5b6d0909d56c39f383eb2297cfdbe06719b55619bc0b168096",
+       "size": 538
+      },
+      {
+       "code_sha256": "952e93eaa0beaed3bf9055fe044395686eaf4b0d270dd83a859d9aa01f274a80",
+       "format": "aout",
+       "path": "out/__SPRITE_REL_RSB_C.o",
+       "sha256": "952e93eaa0beaed3bf9055fe044395686eaf4b0d270dd83a859d9aa01f274a80",
+       "size": 544
+      },
+      {
+       "code_sha256": "5987b3f2270fcc80b9e6a2ce059b3c2312323de7c54364fceaa99c4f89a527e3",
+       "format": "aout",
+       "path": "out/__SPRITE_RSPRITE_C.o",
+       "sha256": "5987b3f2270fcc80b9e6a2ce059b3c2312323de7c54364fceaa99c4f89a527e3",
+       "size": 2213
+      },
+      {
+       "code_sha256": "c13d8a33323916b1dc0115c142b463312d48118306756ca5e8e939a9acac6281",
+       "format": "aout",
+       "path": "out/__SPRITE_SPRITE_C.o",
+       "sha256": "c13d8a33323916b1dc0115c142b463312d48118306756ca5e8e939a9acac6281",
+       "size": 10010
+      },
+      {
+       "code_sha256": "03b0a0fc51bc5339bb42ecb47713d5062dd201089bf7b3b706bc5e59e4ee7c9e",
+       "format": "aout",
+       "path": "out/__STRING_STRING_C.o",
+       "sha256": "03b0a0fc51bc5339bb42ecb47713d5062dd201089bf7b3b706bc5e59e4ee7c9e",
+       "size": 5568
+      },
+      {
+       "code_sha256": "25bc41ce51c0afb8993d87608703f9c07cdb385ebd46c41f8df011310e811873",
+       "format": "aout",
+       "path": "out/__STRING_STRLIST_C.o",
+       "sha256": "25bc41ce51c0afb8993d87608703f9c07cdb385ebd46c41f8df011310e811873",
+       "size": 1413
+      },
+      {
+       "code_sha256": "f0efd86ee1adce9e9a9c3e7cad1cd87efc7109c14eed37fa5a85a37c9d3b7143",
+       "format": "aout",
+       "path": "out/__STRING_STRPATH_C.o",
+       "sha256": "f0efd86ee1adce9e9a9c3e7cad1cd87efc7109c14eed37fa5a85a37c9d3b7143",
+       "size": 3458
+      },
+      {
+       "code_sha256": "f58ee407dae257dcb727b8a0452cda4352a018216cbd9e9fc55d4e22fa4c988f",
+       "format": "aout",
+       "path": "out/__SYSTEM_SYSTEM_C.o",
+       "sha256": "f58ee407dae257dcb727b8a0452cda4352a018216cbd9e9fc55d4e22fa4c988f",
+       "size": 10707
+      },
+      {
+       "code_sha256": "7c18d408956fffbde73a2f3aba5a9ff3ad4005a37d22f11d667a4828dc16f660",
+       "format": "aout",
+       "path": "out/__TOKENISE_TOKENISE_C.o",
+       "sha256": "7c18d408956fffbde73a2f3aba5a9ff3ad4005a37d22f11d667a4828dc16f660",
+       "size": 21997
+      },
+      {
+       "code_sha256": "35f9ad5129de2c996d79f2ea751483b3685d4a810d92a4359a8ad57985a3d9d5",
+       "format": "aout",
+       "path": "out/__VBL_VBL_C.o",
+       "sha256": "35f9ad5129de2c996d79f2ea751483b3685d4a810d92a4359a8ad57985a3d9d5",
+       "size": 1483
+      },
+      {
+       "code_sha256": "2a17ccc308f56985409a172e055629ba2bdaa88e4452ab87f9ea4f76f80394d3",
+       "format": "aout",
+       "path": "out/__VIDEO_VIDEL_C.o",
+       "sha256": "2a17ccc308f56985409a172e055629ba2bdaa88e4452ab87f9ea4f76f80394d3",
+       "size": 1068
+      },
+      {
+       "code_sha256": "cf195c33f4e83560bd07750d9d6672223e014e95879c614078b384612a5b7bf1",
+       "format": "aout",
+       "path": "out/__VIDEO_VIDEO_C.o",
+       "sha256": "cf195c33f4e83560bd07750d9d6672223e014e95879c614078b384612a5b7bf1",
+       "size": 6403
+      },
+      {
+       "code_sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "format": "aout",
+       "path": "out/__VIDEO_VID_D3D_C.o",
+       "sha256": "b27b947834a5f580a4954a82d6a394adf978e543c0dc6d987a92d0e2c018a2f6",
+       "size": 32
+      },
+      {
+       "code_sha256": "eaa1dc2dae855c22f657d42f0b022de73a9453ef817ea739890dc870b7dbc568",
+       "format": "aout",
+       "path": "out/__VIDEO_VID_IMG_C.o",
+       "sha256": "eaa1dc2dae855c22f657d42f0b022de73a9453ef817ea739890dc870b7dbc568",
+       "size": 3381
+      },
+      {
+       "code_sha256": "910ed0ebab4c94cbb95c1854a2235eae474e33a737a5c6d5e71dd370362c38ea",
+       "format": "aout",
+       "path": "out/__XBIOS_XBIOS_C.o",
+       "sha256": "910ed0ebab4c94cbb95c1854a2235eae474e33a737a5c6d5e71dd370362c38ea",
+       "size": 7644
+      }
+     ],
+     "recipe_sha256": "45cd018e3b2b21091e367404926bf9c634b53a0b2d9a5bd6b5c45d3d16a8cc73",
+     "toolchain": "tc-vbcc",
+     "undeclared_clock_leaks": [],
+     "volatile_outputs": {
+      "out/__PROFILER_PROFILER_C.o": "PROFILER.C embeds __DATE__/__TIME__"
+     }
+    },
+    {
+     "expect": "failure",
+     "matches_expectation": true,
+     "name": "pasm-modules",
+     "observed": "failure",
+     "recipe_sha256": "885dcc31beeb686d0fe90db18308ceec6f94508a67785fdf0ac99477c96de6cf",
+     "toolchain": "tc-gnu"
+    }
+   ]
+  },
+  {
+   "id": "Atari_ST_Sources",
+   "tier": "B",
+   "repo": "ggnkua/Atari_ST_Sources",
+   "commit": "63e0a458f522f4cd47e7941d02e693ad776fe0af",
+   "platform": "atari-st",
+   "workload": "archive",
+   "provenance": "authored",
+   "licence": "per-subproject, mostly undeclared",
+   "licence_status": "undeclared",
+   "class": "LICENSING_REVIEW_REQUIRED",
+   "technical_class": "PARTIALLY_QUALIFIED",
+   "rationale": "An archive of independent historical programs, never copied wholesale. A seeded pilot of 40 single-source ASM subprojects that ship one executable, assembled with vasm -devpac against the shipped executable, measures the qualification yield. Each subproject needs its own qualification and licence review. Large C sub-archives (Sozobon, Pure C/Lattice projects) are nominations for later work.",
+   "label_evidence": "vasm listing rows for reproduced subprojects; shipped executables give byte-level corroboration",
+   "lineage_hypothesis": "many independent author lineages; group by author directory",
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "raw": 1
+     },
+     "matches_expectation": true,
+     "name": "asm-pilot",
+     "observed": "success",
+     "output_bytes": 132,
+     "output_count": 1,
+     "outputs": [
+      {
+       "code_sha256": "10c3a33779d3106dbee84c65d6880627f98541da34d953e209f1ab5322f3f74a",
+       "format": "raw",
+       "path": "pilot.result.tsv",
+       "sha256": "10c3a33779d3106dbee84c65d6880627f98541da34d953e209f1ab5322f3f74a",
+       "size": 132
+      }
+     ],
+     "pilot": {
+      "ASSEMBLY_FAILED_CPU": 4,
+      "ASSEMBLY_FAILED_MISSING_INPUT": 12,
+      "ASSEMBLY_FAILED_SYNTAX": 15,
+      "BYTE_IDENTICAL": 3,
+      "DIFFERENT": 5,
+      "TEXT_DATA_IDENTICAL": 1
+     },
+     "recipe_sha256": "f94970eab8695df808e6ae169db2207fd8c8029e2b639304386f9b8fcc9521c6",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
+    }
+   ]
+  },
+  {
+   "id": "BattleIsleEditor",
+   "tier": "B",
+   "repo": "reinersmann/BattleIsleEditor",
+   "commit": "c56f82cf246939375139eb34b2d8c6108998e3e2",
+   "platform": "amiga",
+   "workload": "application",
+   "provenance": "authored",
+   "licence": "GPL-3.0",
+   "licence_status": "declared",
+   "class": "QUALIFIED",
+   "technical_class": "QUALIFIED",
+   "rationale": "The author's own toolchain (A68K 2.71, rebuilt from source) plus vlink (in place of BLINK) reproduces all six committed author executables byte for byte. These are authentic original 1990s application programs, not reconstructions.",
+   "label_evidence": "A68K listing rows, corroborated by byte identity with the author's binaries (T002)",
+   "lineage_hypothesis": "one author lineage; the six editors are variants sharing most code",
+   "recipes": [
+    {
+     "author_compared": 6,
+     "author_identical": 6,
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "amiga-hunk-exe": 6
+     },
+     "matches_expectation": true,
+     "name": "editors",
+     "observed": "success",
+     "output_bytes": 150812,
+     "output_count": 6,
+     "outputs": [
+      {
+       "code_sha256": "94b75528dcec47fb9ee3f448625bd46725a77494af055a73c355f24b679f855b",
+       "format": "amiga-hunk-exe",
+       "path": "out/BIEd16",
+       "sha256": "94b75528dcec47fb9ee3f448625bd46725a77494af055a73c355f24b679f855b",
+       "size": 23884
+      },
+      {
+       "code_sha256": "edbcecd11587d66567ce66b24622ad594d7fadb21ff48f8c42f644c9731a7d18",
+       "format": "amiga-hunk-exe",
+       "path": "out/BIEdDD112",
+       "sha256": "edbcecd11587d66567ce66b24622ad594d7fadb21ff48f8c42f644c9731a7d18",
+       "size": 24092
+      },
+      {
+       "code_sha256": "d2d3ef24e03104de696789f15ec2277dfc04015955c5f4c99a49039f0cc3a567",
+       "format": "amiga-hunk-exe",
+       "path": "out/BIEdDD211",
+       "sha256": "d2d3ef24e03104de696789f15ec2277dfc04015955c5f4c99a49039f0cc3a567",
+       "size": 24332
+      },
+      {
+       "code_sha256": "bae2be72378d5d9be2d884f96dfb9e19d28ad7f707037123f0bcb2425d836f24",
+       "format": "amiga-hunk-exe",
+       "path": "out/BIEdDD211_512K",
+       "sha256": "bae2be72378d5d9be2d884f96dfb9e19d28ad7f707037123f0bcb2425d836f24",
+       "size": 24576
+      },
+      {
+       "code_sha256": "c3740ebd7e0231ecfd4341eb5379a519ce642d8c63400fc637ab220a09aeb089",
+       "format": "amiga-hunk-exe",
+       "path": "out/HLEd12",
+       "sha256": "c3740ebd7e0231ecfd4341eb5379a519ce642d8c63400fc637ab220a09aeb089",
+       "size": 26840
+      },
+      {
+       "code_sha256": "9622f0925cbdf126c67489e40275d6eb91353cc41f87af2dad9e2a417894c490",
+       "format": "amiga-hunk-exe",
+       "path": "out/HLEd12_512K",
+       "sha256": "9622f0925cbdf126c67489e40275d6eb91353cc41f87af2dad9e2a417894c490",
+       "size": 27088
+      }
+     ],
+     "recipe_sha256": "08f8fb922ce0e26557b34fb171a1b8759175907ec483b20f3b74e987df489ddd",
+     "toolchain": "tc-a68k",
+     "undeclared_clock_leaks": []
+    },
+    {
+     "expect": "failure",
+     "matches_expectation": true,
+     "name": "vasm-rejects-a68k-dialect",
+     "observed": "failure",
+     "recipe_sha256": "6cbc64e6a5c23c02498456c56e9786fd7f8715c70c5b972c80463fb924809135",
+     "toolchain": "tc-gnu"
+    }
+   ]
+  },
+  {
+   "id": "AmiGalaga",
+   "tier": "B",
+   "repo": "mwulffn/AmiGalaga",
+   "commit": "be410baa1371f0268fca4e02c0fb17393b667458",
+   "platform": "amiga",
+   "workload": "game",
+   "provenance": "authored",
+   "licence": "MIT",
+   "licence_status": "declared",
+   "class": "ASSET_DEPENDENCY_UNAVAILABLE",
+   "technical_class": "ASSET_DEPENDENCY_UNAVAILABLE",
+   "rationale": "The build reads graphics and sounds from the user's own copy of the arcade ROM set (galaga.zip). Not acquired.",
+   "label_evidence": "vasm listing rows if the operator supplies the ROM set",
+   "lineage_hypothesis": "independent author lineage",
+   "operator_inputs": [
+    {
+     "material": "Galaga arcade ROM set (MAME 'galaga.zip')",
+     "platform": "arcade (Namco Galaga)",
+     "use": "label qualification (build input)",
+     "alternative": "none in this repository"
+    }
+   ],
+   "recipes": [
+    {
+     "expect": "failure",
+     "matches_expectation": true,
+     "name": "game",
+     "observed": "failure",
+     "recipe_sha256": "ff085e46c0bcc043754f8dc36feebde3b884fcbdf4e51f49c13635507fce4e6d",
+     "toolchain": "tc-gnu"
+    }
+   ]
+  },
+  {
+   "id": "galaga",
+   "tier": "B",
+   "repo": "jotd666/galaga",
+   "commit": "a362336a232c9478d18d65c9b7c9f1679b61f28d",
+   "platform": "amiga",
+   "workload": "game",
+   "provenance": "commercial-derived",
+   "licence": "none declared",
+   "licence_status": "undeclared",
+   "class": "LICENSING_REVIEW_REQUIRED",
+   "technical_class": "PARTIALLY_QUALIFIED",
+   "rationale": "A line-by-line 68k transcode of the commercial arcade Z80 program, with graphics extracted from the arcade ROMs committed as C data, so the code derives from commercial code. Technically the core transcoded modules assemble with GNU as (-m68000, register-prefix-optional); the Amiga main module needs generated sound/graphics includes, and vbr.68k is deliberately 68010+. No licence declared. No licence decision can admit it: as commercial-derived code it is excluded from clean truth by provenance; the class records only that its own repository licence is also unresolved.",
+   "label_evidence": "GNU as listings (if admitted after review)",
+   "lineage_hypothesis": "jotd666 author lineage (with xevious/mpatrol/pacman500/scramble500)",
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "elf-m68k-relocatable": 7
+     },
+     "matches_expectation": true,
+     "name": "core-modules",
+     "observed": "success",
+     "output_bytes": 125204,
+     "output_count": 7,
+     "outputs": [
+      {
+       "code_sha256": "1cf2d09f1698c0827b9768ea0834b585f59b424759599e1903830abbe08cb398",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ReadJoypad.o",
+       "sha256": "1cf2d09f1698c0827b9768ea0834b585f59b424759599e1903830abbe08cb398",
+       "size": 8388
+      },
+      {
+       "code_sha256": "47a40efe34af56dca8ac487dac8948f037e8e210769dbb30b012a2b818c90bcd",
+       "format": "elf-m68k-relocatable",
+       "path": "out/galaga.o",
+       "sha256": "47a40efe34af56dca8ac487dac8948f037e8e210769dbb30b012a2b818c90bcd",
+       "size": 55888
+      },
+      {
+       "code_sha256": "1288cea0af82441042c5cb515f525fab35982703c5f6ef0c192cd70ec672229a",
+       "format": "elf-m68k-relocatable",
+       "path": "out/galaga_ram.o",
+       "sha256": "1288cea0af82441042c5cb515f525fab35982703c5f6ef0c192cd70ec672229a",
+       "size": 9256
+      },
+      {
+       "code_sha256": "fe3cee9233d27f4ebfb8f6b9b44807139bae773a6bfe4f8e18473731536ca3d0",
+       "format": "elf-m68k-relocatable",
+       "path": "out/galaga_shared.o",
+       "sha256": "fe3cee9233d27f4ebfb8f6b9b44807139bae773a6bfe4f8e18473731536ca3d0",
+       "size": 5548
+      },
+      {
+       "code_sha256": "f49952b5cb08c260e6da6ff15638891a33176599c951bd51ce6740cbe929be61",
+       "format": "elf-m68k-relocatable",
+       "path": "out/galaga_sub.o",
+       "sha256": "f49952b5cb08c260e6da6ff15638891a33176599c951bd51ce6740cbe929be61",
+       "size": 18888
+      },
+      {
+       "code_sha256": "a4e60e059ca57bf0dbab07c48ef9dae7bbf4dda0ddb692a2526c6091e627b592",
+       "format": "elf-m68k-relocatable",
+       "path": "out/galaga_sub_rom.o",
+       "sha256": "a4e60e059ca57bf0dbab07c48ef9dae7bbf4dda0ddb692a2526c6091e627b592",
+       "size": 4624
+      },
+      {
+       "code_sha256": "7d85fdf31ca203e78f006d678e0ad7cbf0ed20402a05924bcf32d5fb76a7a84c",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ptplayer.o",
+       "sha256": "7d85fdf31ca203e78f006d678e0ad7cbf0ed20402a05924bcf32d5fb76a7a84c",
+       "size": 22612
+      }
+     ],
+     "recipe_sha256": "7c3ddac05564d38efd48389f5a9e41bae453b8630c6b6543d4dfde454da2ea91",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
+    }
+   ]
+  },
+  {
+   "id": "xevious",
+   "tier": "B",
+   "repo": "jotd666/xevious",
+   "commit": "f4e86ebcb6f693895d691ef3823bf6d83511e9bd",
+   "platform": "amiga+neo-geo",
+   "workload": "game",
+   "provenance": "commercial-derived",
+   "licence": "none declared",
+   "licence_status": "undeclared",
+   "class": "LICENSING_REVIEW_REQUIRED",
+   "technical_class": "NOT_ATTEMPTED",
+   "rationale": "Same family as galaga: by its README, the core is a line-by-line transcode of the reverse-engineered commercial arcade ROMs, with ROM-extracted graphics. Build not attempted beyond triage because licensing review precedes any use. No licence decision can admit it: as commercial-derived code it is excluded from clean truth by provenance; the class records only that its own repository licence is also unresolved.",
+   "label_evidence": "n/a until reviewed",
+   "lineage_hypothesis": "jotd666/tcdev lineage",
+   "recipes": []
+  },
+  {
+   "id": "mpatrol",
+   "tier": "B",
+   "repo": "jotd666/mpatrol",
+   "commit": "c132e117009ead3f90af5e48324ff39110b1e8da",
+   "platform": "amiga",
+   "workload": "game",
+   "provenance": "commercial-derived",
+   "licence": "none declared",
+   "licence_status": "undeclared",
+   "class": "LICENSING_REVIEW_REQUIRED",
+   "technical_class": "NOT_ATTEMPTED",
+   "rationale": "Same family as galaga: an arcade transcode with ROM-extracted graphics. Licensing review precedes any use. No licence decision can admit it: as commercial-derived code it is excluded from clean truth by provenance; the class records only that its own repository licence is also unresolved.",
+   "label_evidence": "n/a until reviewed",
+   "lineage_hypothesis": "jotd666 lineage",
+   "recipes": []
+  },
+  {
+   "id": "amiga-boing",
+   "tier": "B",
+   "repo": "mbackschat/amiga-boing",
+   "commit": "fdf1e8c40cc10162b6d09783b0d5589a45691348",
+   "platform": "amiga",
+   "workload": "demo",
+   "provenance": "reconstruction",
+   "licence": "none declared",
+   "licence_status": "undeclared",
+   "class": "ASSET_DEPENDENCY_UNAVAILABLE",
+   "technical_class": "ASSET_DEPENDENCY_UNAVAILABLE",
+   "rationale": "Reconstructed from a disassembly of the Commodore sample. The build needs a private submodule holding Amiga 1.3 NDK headers and a Kickstart 1.3 ROM, neither redistributable and neither acquired. Diagnostic/hard-negative value only even if supplied.",
+   "label_evidence": "reconstructed listing: diagnostic only",
+   "lineage_hypothesis": "reconstruction, not an authored lineage",
+   "operator_inputs": [
+    {
+     "material": "Amiga 1.3 NDK assembler headers + Kickstart 1.3 (r34.5) ROM",
+     "platform": "Amiga",
+     "use": "build input (headers) / runtime (ROM)",
+     "alternative": "amiga-realtime3d, BattleIsleEditor are self-contained"
+    }
+   ],
+   "recipes": [
+    {
+     "expect": "failure",
+     "matches_expectation": true,
+     "name": "build",
+     "observed": "failure",
+     "recipe_sha256": "c275e2b0f1b954a84cd1dc5845018d07d0e9aca8466b933262a7d8ca7444f4b8",
+     "toolchain": "tc-gnu"
+    }
+   ]
+  },
+  {
+   "id": "monomental",
+   "tier": "B",
+   "repo": "theseniordads/monomental",
+   "commit": "5073815403c5a35a71a60ef4ba40bb7830069bfc",
+   "platform": "atari-st",
+   "workload": "demo",
+   "provenance": "reconstruction",
+   "licence": "none declared",
+   "licence_status": "undeclared",
+   "class": "LABEL_TRUTH_INSUFFICIENT",
+   "technical_class": "LABEL_TRUTH_INSUFFICIENT",
+   "rationale": "MAIN.S assembles with vasm (-devpac, case-insensitive alias shim). The source is the authors' own reverse-engineering of a binary whose original source is lost, so instruction/data labels are not independent truth. Diagnostic and hard-negative material only. Shipped builds are packed, so no byte comparison.",
+   "label_evidence": "reconstructed listing: diagnostic only",
+   "lineage_hypothesis": "reconstruction",
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "tos-prg": 1
+     },
+     "matches_expectation": true,
+     "name": "main",
+     "observed": "success",
+     "output_bytes": 267131,
+     "output_count": 1,
+     "outputs": [
+      {
+       "code_sha256": "41a2f5f661bf7add726142ccfb13b9d86c8cbff15f5b71dceffe0793902d989d",
+       "format": "tos-prg",
+       "path": "out/MAIN.PRG",
+       "sha256": "41a2f5f661bf7add726142ccfb13b9d86c8cbff15f5b71dceffe0793902d989d",
+       "size": 267131
+      }
+     ],
+     "recipe_sha256": "562da8f183dca73a88ef0ab26808d2fc4cd44724bea36fef05cf9cdf1ea281fb",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
+    }
+   ]
+  },
+  {
+   "id": "atari_reverse",
+   "tier": "B",
+   "repo": "geogeo28/atari_reverse",
+   "commit": "c1b35bfebb9f0466698f7cf211ecb04a22b0a8b1",
+   "platform": "atari-st",
+   "workload": "reconstruction",
+   "provenance": "reconstruction",
+   "licence": "GPL-2.0",
+   "licence_status": "declared",
+   "class": "ASSET_DEPENDENCY_UNAVAILABLE",
+   "technical_class": "ASSET_DEPENDENCY_UNAVAILABLE",
+   "rationale": "C reconstructions verified against original commercial game executables that the repository deliberately does not ship (no PRG, data or disk image). Use requires operator-held originals. Diagnostic only: reconstructed C is not authored 68000 source.",
+   "label_evidence": "diagnostic only",
+   "lineage_hypothesis": "reconstruction",
+   "operator_inputs": [
+    {
+     "material": "original Atari ST game executables named by the repository (e.g. Buggy Boy, Joust)",
+     "platform": "Atari ST",
+     "use": "diagnostic only",
+     "alternative": "not needed for corpus qualification"
+    }
+   ],
+   "recipes": []
+  },
+  {
+   "id": "neogeosdk",
+   "tier": "C",
+   "repo": "eaglesoftware777/neogeosdk",
+   "commit": "9e05d4268e880f84ab25181ceab565a1b3d418f5",
+   "platform": "neo-geo",
+   "workload": "sdk+games",
+   "provenance": "authored",
+   "licence": "MIT",
+   "licence_status": "declared",
+   "class": "PARTIALLY_QUALIFIED",
+   "technical_class": "PARTIALLY_QUALIFIED",
+   "rationale": "The bundled demo game compiles (60 objects) and links into a statically linked m68k ELF executable (out/game) with m68k-elf GCC 13.3 substituted for the SDK's crosstool-ng GCC; only srec_cat ROM packaging is absent. BIOS is needed only for runtime. The bundled games share one engine and author: one SDK lineage, not six.",
+   "label_evidence": "ELF objects + linked ELF executable (T002)",
+   "lineage_hypothesis": "one SDK/engine lineage",
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "elf-m68k-executable": 1,
+      "elf-m68k-relocatable": 60
+     },
+     "matches_expectation": true,
+     "name": "demo-compile-link",
+     "observed": "success",
+     "output_bytes": 1322572,
+     "output_count": 61,
+     "outputs": [
+      {
+       "code_sha256": "1bf04cba45560044db78811040dda5f4bc0c7ccea51563484f5e68a3640a9175",
+       "format": "elf-m68k-executable",
+       "path": "out/game",
+       "sha256": "1bf04cba45560044db78811040dda5f4bc0c7ccea51563484f5e68a3640a9175",
+       "size": 456992
+      },
+      {
+       "code_sha256": "3dbde204edfb74e49f467b8059e50914f572a9703733c68eca324a70115f3297",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo0.o",
+       "sha256": "3dbde204edfb74e49f467b8059e50914f572a9703733c68eca324a70115f3297",
+       "size": 14964
+      },
+      {
+       "code_sha256": "16c4167d4d37821b1c3eeab567fde508050acb4484be86659ec6669645812fc0",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_2d_engine0.o",
+       "sha256": "16c4167d4d37821b1c3eeab567fde508050acb4484be86659ec6669645812fc0",
+       "size": 11116
+      },
+      {
+       "code_sha256": "c73a399c0da3b6518ad1f81caa9a9f90c8251a1f662ea6ef0fbfdaec63470f5f",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_3d0.o",
+       "sha256": "c73a399c0da3b6518ad1f81caa9a9f90c8251a1f662ea6ef0fbfdaec63470f5f",
+       "size": 4356
+      },
+      {
+       "code_sha256": "afa8d0f97c9eea34d42f08eb629ad8059da248e66bab25d2e1de9c893b26d45e",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_camera0.o",
+       "sha256": "afa8d0f97c9eea34d42f08eb629ad8059da248e66bab25d2e1de9c893b26d45e",
+       "size": 7480
+      },
+      {
+       "code_sha256": "932eeddcecfab6ffd3bee953e2957cea67935ebe08bb1889f7c44d7d8eb65960",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_combat0.o",
+       "sha256": "932eeddcecfab6ffd3bee953e2957cea67935ebe08bb1889f7c44d7d8eb65960",
+       "size": 15532
+      },
+      {
+       "code_sha256": "03bb19e80fce1f0c5b9054d176442ab9d5fc1c025cc596ba97b44b055844acd0",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_depth0.o",
+       "sha256": "03bb19e80fce1f0c5b9054d176442ab9d5fc1c025cc596ba97b44b055844acd0",
+       "size": 8728
+      },
+      {
+       "code_sha256": "7bfaa14dbb6d8de1581ed106e4505380aeed121dcc497e4de70a4076dedf6d71",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_fix0.o",
+       "sha256": "7bfaa14dbb6d8de1581ed106e4505380aeed121dcc497e4de70a4076dedf6d71",
+       "size": 7660
+      },
+      {
+       "code_sha256": "44a45b2421262c665f650267ca5f46f839cf5c21bf44b5c41fc418af4ac41cfe",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_intro0.o",
+       "sha256": "44a45b2421262c665f650267ca5f46f839cf5c21bf44b5c41fc418af4ac41cfe",
+       "size": 6860
+      },
+      {
+       "code_sha256": "464d7d043d7ff0f96403725d04d0ea10e478815f2758e42de5789488cea283a3",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_palette0.o",
+       "sha256": "464d7d043d7ff0f96403725d04d0ea10e478815f2758e42de5789488cea283a3",
+       "size": 3636
+      },
+      {
+       "code_sha256": "c09a88e9353d156347216a83f02daabfb1e823059d99d8dd206582dd7d39e6e2",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_particles0.o",
+       "sha256": "c09a88e9353d156347216a83f02daabfb1e823059d99d8dd206582dd7d39e6e2",
+       "size": 4204
+      },
+      {
+       "code_sha256": "e3e5636b7a1a59fb411ba0650cf92f25bc410b57c56c2bc6c0fa2344d9910a95",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_render0.o",
+       "sha256": "e3e5636b7a1a59fb411ba0650cf92f25bc410b57c56c2bc6c0fa2344d9910a95",
+       "size": 5128
+      },
+      {
+       "code_sha256": "25e0328402963bb8d6d70fa70a91f66282b6087ac6838657978303d6af9b56e4",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_screen0.o",
+       "sha256": "25e0328402963bb8d6d70fa70a91f66282b6087ac6838657978303d6af9b56e4",
+       "size": 3064
+      },
+      {
+       "code_sha256": "f53eadb58d501bbc659d15d802b83f90e199102d70ec2a6c9a37fcfeadd9060a",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_sound0.o",
+       "sha256": "f53eadb58d501bbc659d15d802b83f90e199102d70ec2a6c9a37fcfeadd9060a",
+       "size": 5904
+      },
+      {
+       "code_sha256": "d23a3a72ef4124e5c85bb5b3e1d218ed0881918cadceaf7a34cfecb3a2b10177",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_sprites0.o",
+       "sha256": "d23a3a72ef4124e5c85bb5b3e1d218ed0881918cadceaf7a34cfecb3a2b10177",
+       "size": 13496
+      },
+      {
+       "code_sha256": "8b27c9108334f8f93ec5ea5fd31e8e6b548598499b7d2f8b2bd0d60b72943262",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_stress0.o",
+       "sha256": "8b27c9108334f8f93ec5ea5fd31e8e6b548598499b7d2f8b2bd0d60b72943262",
+       "size": 10168
+      },
+      {
+       "code_sha256": "edf9b14e39419b6934d0096d8ab3142e00a1b8c103dee3458605fd14b511665b",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_title0.o",
+       "sha256": "edf9b14e39419b6934d0096d8ab3142e00a1b8c103dee3458605fd14b511665b",
+       "size": 8184
+      },
+      {
+       "code_sha256": "c91db274431bfcde65e507534d1bcf1a020aacadd05b7d89e793ebbf7cdf56fe",
+       "format": "elf-m68k-relocatable",
+       "path": "out/demo_unified0.o",
+       "sha256": "c91db274431bfcde65e507534d1bcf1a020aacadd05b7d89e793ebbf7cdf56fe",
+       "size": 96648
+      },
+      {
+       "code_sha256": "56e6c22b9eb8d632e39246855cb90a64cbf07d2ffe3d2414ac898c8e0c596590",
+       "format": "elf-m68k-relocatable",
+       "path": "out/eyecatcher.o",
+       "sha256": "56e6c22b9eb8d632e39246855cb90a64cbf07d2ffe3d2414ac898c8e0c596590",
+       "size": 1940
+      },
+      {
+       "code_sha256": "f378f856007fae6e5b575225603656f07fd0d6ec7eb45a3adbd106b017a85678",
+       "format": "elf-m68k-relocatable",
+       "path": "out/eyecatcher0.o",
+       "sha256": "f378f856007fae6e5b575225603656f07fd0d6ec7eb45a3adbd106b017a85678",
+       "size": 2212
+      },
+      {
+       "code_sha256": "9da9e16c5780916437c03bb4d05f4276ed83f9b856d4395075ede3fc4d31d289",
+       "format": "elf-m68k-relocatable",
+       "path": "out/main.o",
+       "sha256": "9da9e16c5780916437c03bb4d05f4276ed83f9b856d4395075ede3fc4d31d289",
+       "size": 233952
+      },
+      {
+       "code_sha256": "fe24607429e10e31d28384aa024051b507d744e10d9b095d5f9180af2c08940a",
+       "format": "elf-m68k-relocatable",
+       "path": "out/main0.o",
+       "sha256": "fe24607429e10e31d28384aa024051b507d744e10d9b095d5f9180af2c08940a",
+       "size": 234220
+      },
+      {
+       "code_sha256": "b6e16edc12594823b3e448d93e09fcf02d1403599d6c6c17091dacefd54d075c",
+       "format": "elf-m68k-relocatable",
+       "path": "out/neogeo.o",
+       "sha256": "b6e16edc12594823b3e448d93e09fcf02d1403599d6c6c17091dacefd54d075c",
+       "size": 6208
+      },
+      {
+       "code_sha256": "13018b321b319bfd356872791b013fa7232b03fbc01528a2efec17bc1cbe9568",
+       "format": "elf-m68k-relocatable",
+       "path": "out/neogeo0.o",
+       "sha256": "13018b321b319bfd356872791b013fa7232b03fbc01528a2efec17bc1cbe9568",
+       "size": 6476
+      },
+      {
+       "code_sha256": "ac06781bba7594672d298b90c6b9c13bd960a90c86f6900a9e571d972ce7b431",
+       "format": "elf-m68k-relocatable",
+       "path": "out/neogeolib.o",
+       "sha256": "ac06781bba7594672d298b90c6b9c13bd960a90c86f6900a9e571d972ce7b431",
+       "size": 14088
+      },
+      {
+       "code_sha256": "77cae1e040106c51b3f01675e7f5f951c187dd90248a91452b8433f932eabc23",
+       "format": "elf-m68k-relocatable",
+       "path": "out/neogeolib0.o",
+       "sha256": "77cae1e040106c51b3f01675e7f5f951c187dd90248a91452b8433f932eabc23",
+       "size": 14452
+      },
+      {
+       "code_sha256": "7c94e12db94fbee068da619a6c29f848a1dfb1fef99009fba2cf1050058df2b4",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_actions0.o",
+       "sha256": "7c94e12db94fbee068da619a6c29f848a1dfb1fef99009fba2cf1050058df2b4",
+       "size": 2548
+      },
+      {
+       "code_sha256": "944dc6908291a9c9367ede9158944c26768519a4b2f5d5c8b4f1641c6b5f7450",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_art_asset0.o",
+       "sha256": "944dc6908291a9c9367ede9158944c26768519a4b2f5d5c8b4f1641c6b5f7450",
+       "size": 956
+      },
+      {
+       "code_sha256": "2e6d4baac9a92253fdc8ae97d252af9c4cbd968ec5283d559b3dbdd6f7a5a9d4",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_bg0.o",
+       "sha256": "2e6d4baac9a92253fdc8ae97d252af9c4cbd968ec5283d559b3dbdd6f7a5a9d4",
+       "size": 3060
+      },
+      {
+       "code_sha256": "ea91449829f1d12838b3cfd79451e6234c86e2d6fb6ad5dd57f02b02f07752c0",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_border_constraints0.o",
+       "sha256": "ea91449829f1d12838b3cfd79451e6234c86e2d6fb6ad5dd57f02b02f07752c0",
+       "size": 1688
+      },
+      {
+       "code_sha256": "e27a544c34bccffe380d6b5f8f14ada03c9d8b9997e53ff4ce84b680f42dd649",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_camera0.o",
+       "sha256": "e27a544c34bccffe380d6b5f8f14ada03c9d8b9997e53ff4ce84b680f42dd649",
+       "size": 3888
+      },
+      {
+       "code_sha256": "2c9c1475d6431cd4962a5dc834b2c318b3295fdfb88fe47ef2f9e5336988041b",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_chars0.o",
+       "sha256": "2c9c1475d6431cd4962a5dc834b2c318b3295fdfb88fe47ef2f9e5336988041b",
+       "size": 12500
+      },
+      {
+       "code_sha256": "8e1bb2b05d78812320a541cd3e80394f1a8e2ec509ed6d51f0315f430de284d7",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_debug0.o",
+       "sha256": "8e1bb2b05d78812320a541cd3e80394f1a8e2ec509ed6d51f0315f430de284d7",
+       "size": 908
+      },
+      {
+       "code_sha256": "1251e0a56ef374af8377e5455efcc2fd864e73cf877ff346a14763eec194ee33",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_defs0.o",
+       "sha256": "1251e0a56ef374af8377e5455efcc2fd864e73cf877ff346a14763eec194ee33",
+       "size": 812
+      },
+      {
+       "code_sha256": "f5e3ea68e5d10f41610fdb658e248f7446103453c64aa408eee6286ed3bf37bd",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_demo_advanced0.o",
+       "sha256": "f5e3ea68e5d10f41610fdb658e248f7446103453c64aa408eee6286ed3bf37bd",
+       "size": 5948
+      },
+      {
+       "code_sha256": "ba57f78f967fb80dae5af1edffb82f695aa38a49103df5c785e2c9a14d52cf3a",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_depthfx0.o",
+       "sha256": "ba57f78f967fb80dae5af1edffb82f695aa38a49103df5c785e2c9a14d52cf3a",
+       "size": 2552
+      },
+      {
+       "code_sha256": "efaf1f27a1001ece2e898d582684175765f0950fc7175e1d70c1624ead531823",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_feedback0.o",
+       "sha256": "efaf1f27a1001ece2e898d582684175765f0950fc7175e1d70c1624ead531823",
+       "size": 2708
+      },
+      {
+       "code_sha256": "82b075337485597d23fe2ee0dd123cb438b6c5003dc5af6b416d3825e816a78d",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_fix0.o",
+       "sha256": "82b075337485597d23fe2ee0dd123cb438b6c5003dc5af6b416d3825e816a78d",
+       "size": 3588
+      },
+      {
+       "code_sha256": "9520666ffced7c1ec9b26ce3f3b59fe5bea3e463f5c1b616017be72b6771d688",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_fix_sdk0.o",
+       "sha256": "9520666ffced7c1ec9b26ce3f3b59fe5bea3e463f5c1b616017be72b6771d688",
+       "size": 7488
+      },
+      {
+       "code_sha256": "e658e0255a26b62d18445024a90bd707e7ea2412bdf102518503e3358a8fe2d1",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_fixed0.o",
+       "sha256": "e658e0255a26b62d18445024a90bd707e7ea2412bdf102518503e3358a8fe2d1",
+       "size": 2068
+      },
+      {
+       "code_sha256": "916fd2e5db86bc27eeb9769c9e0e9496059640035a3f68ff3eb2369123751623",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_game_events0.o",
+       "sha256": "916fd2e5db86bc27eeb9769c9e0e9496059640035a3f68ff3eb2369123751623",
+       "size": 1888
+      },
+      {
+       "code_sha256": "f1cfc8f006cc9f8c8828db5988152900fec394322102829e93662280ee2d0cf1",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_game_interupt0.o",
+       "sha256": "f1cfc8f006cc9f8c8828db5988152900fec394322102829e93662280ee2d0cf1",
+       "size": 3532
+      },
+      {
+       "code_sha256": "1ffdd4a236145c2a36ccf1fa57376f0c21ea9f66260d22e81956f56c4240982d",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_game_time0.o",
+       "sha256": "1ffdd4a236145c2a36ccf1fa57376f0c21ea9f66260d22e81956f56c4240982d",
+       "size": 1700
+      },
+      {
+       "code_sha256": "cecbe8d11899fddc8a5692abe27f229f8804c7ef348e011e51efad0922c47b95",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_joystick0.o",
+       "sha256": "cecbe8d11899fddc8a5692abe27f229f8804c7ef348e011e51efad0922c47b95",
+       "size": 7424
+      },
+      {
+       "code_sha256": "ae0b10c688406ac5a910f5cd8a0c8e9827686fcaff5317fc44019400cc454f40",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_level0.o",
+       "sha256": "ae0b10c688406ac5a910f5cd8a0c8e9827686fcaff5317fc44019400cc454f40",
+       "size": 4664
+      },
+      {
+       "code_sha256": "f0adb7dcfd85e821469f4e38347f0e152be5febfef921a91552e14d1922d4e4a",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_npcs0.o",
+       "sha256": "f0adb7dcfd85e821469f4e38347f0e152be5febfef921a91552e14d1922d4e4a",
+       "size": 2828
+      },
+      {
+       "code_sha256": "81cdc34aff68406ef969a408d905bcaaa88f64d12f69fc05c331abc06d4c117d",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_palette_assets0.o",
+       "sha256": "81cdc34aff68406ef969a408d905bcaaa88f64d12f69fc05c331abc06d4c117d",
+       "size": 788
+      },
+      {
+       "code_sha256": "1e65ec1d4cf68b152d8ba71f492a6e369e9380189ad85fc305d1403f1076176b",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_palette_fx0.o",
+       "sha256": "1e65ec1d4cf68b152d8ba71f492a6e369e9380189ad85fc305d1403f1076176b",
+       "size": 7416
+      },
+      {
+       "code_sha256": "a8ef5a2fe9278c5761baa63aacc3ad274a8639a8cd4e12fabd2f028c7783b201",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_particles0.o",
+       "sha256": "a8ef5a2fe9278c5761baa63aacc3ad274a8639a8cd4e12fabd2f028c7783b201",
+       "size": 5252
+      },
+      {
+       "code_sha256": "15e7817cf060a7a45cd846d467721389ff55eb2964de7cba2026a60bcb8a43ad",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_physics0.o",
+       "sha256": "15e7817cf060a7a45cd846d467721389ff55eb2964de7cba2026a60bcb8a43ad",
+       "size": 5156
+      },
+      {
+       "code_sha256": "9ebea97792badcc84a2b6395f63d9ef3717269f8762ac0961e9f0598a16694b1",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_progress0.o",
+       "sha256": "9ebea97792badcc84a2b6395f63d9ef3717269f8762ac0961e9f0598a16694b1",
+       "size": 2660
+      },
+      {
+       "code_sha256": "560cda590142c1f03e0255c8ff83c87bae949f3571291ce78be20a75a11838c5",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_properties0.o",
+       "sha256": "560cda590142c1f03e0255c8ff83c87bae949f3571291ce78be20a75a11838c5",
+       "size": 1384
+      },
+      {
+       "code_sha256": "d04175f34da488338f7d86797e4af667eb08bbe32ccf5926e2657a3e29d97705",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_render_queue0.o",
+       "sha256": "d04175f34da488338f7d86797e4af667eb08bbe32ccf5926e2657a3e29d97705",
+       "size": 2416
+      },
+      {
+       "code_sha256": "45d56186e3f64ab93c7f41799b0a0c50d467b89e5b5e0f8642110cd62c282ea8",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_scene0.o",
+       "sha256": "45d56186e3f64ab93c7f41799b0a0c50d467b89e5b5e0f8642110cd62c282ea8",
+       "size": 1460
+      },
+      {
+       "code_sha256": "57c488b2bfca8d915f274c9420ca34df4bd72da8a2bcb4dcb99926b0c6450405",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_sprite_group0.o",
+       "sha256": "57c488b2bfca8d915f274c9420ca34df4bd72da8a2bcb4dcb99926b0c6450405",
+       "size": 6688
+      },
+      {
+       "code_sha256": "b5015bf13383e649ebdaf527c8e23c0c790485b88ed5bea72b351ff7dafa597c",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_sprite_window0.o",
+       "sha256": "b5015bf13383e649ebdaf527c8e23c0c790485b88ed5bea72b351ff7dafa597c",
+       "size": 1908
+      },
+      {
+       "code_sha256": "30e9c0519edaa906e89a80245681fe3bb7af6a3272e1139c05f1c6f57a696d76",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_status0.o",
+       "sha256": "30e9c0519edaa906e89a80245681fe3bb7af6a3272e1139c05f1c6f57a696d76",
+       "size": 1176
+      },
+      {
+       "code_sha256": "6e4fa58f101f33ecd9d2daee2b9a0c008fc01f8afff69cc5e339466da4bbb602",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_timers0.o",
+       "sha256": "6e4fa58f101f33ecd9d2daee2b9a0c008fc01f8afff69cc5e339466da4bbb602",
+       "size": 2276
+      },
+      {
+       "code_sha256": "4be25774a060459c53ccdfc85c063f04b401f83ab6ff09986dc9eb131792744c",
+       "format": "elf-m68k-relocatable",
+       "path": "out/ng_vram0.o",
+       "sha256": "4be25774a060459c53ccdfc85c063f04b401f83ab6ff09986dc9eb131792744c",
+       "size": 1272
+      },
+      {
+       "code_sha256": "f88834ced4fe826bf55fa3152834a9b9ab539875869af37338dd28c526a60a22",
+       "format": "elf-m68k-relocatable",
+       "path": "out/user.o",
+       "sha256": "f88834ced4fe826bf55fa3152834a9b9ab539875869af37338dd28c526a60a22",
+       "size": 6016
+      },
+      {
+       "code_sha256": "034d9d9439aa72d9d4fa3a9125828c35fd7c7ade6cc712a898ce19691418195d",
+       "format": "elf-m68k-relocatable",
+       "path": "out/user0.o",
+       "sha256": "034d9d9439aa72d9d4fa3a9125828c35fd7c7ade6cc712a898ce19691418195d",
+       "size": 6288
+      }
+     ],
+     "recipe_sha256": "57e8841730e131dc245458e69615ba244f9c99f69c62dd69a6f0f2b03aea7f31",
+     "toolchain": "tc-elf",
+     "undeclared_clock_leaks": []
+    }
+   ]
+  },
+  {
+   "id": "x68000dev",
+   "tier": "C",
+   "repo": "Armitage64/x68000dev",
+   "commit": "4cc02e9060a90f91a31c6b13d6d9e830a367b828",
+   "platform": "x68000",
+   "workload": "hello-world",
+   "provenance": "authored",
+   "licence": "'provided as-is for educational purposes'",
+   "licence_status": "undeclared",
+   "class": "LICENSING_REVIEW_REQUIRED",
+   "technical_class": "PARTIALLY_QUALIFIED",
+   "rationale": "The referenced assembly program (src/helloa.s) is absent from the tree. The C hello world builds only with m68k-elf GCC, because the project's m68k-linux-gnu-gcc emits 68020 code. Hello-world sized: a diversity/extraction probe, not a training lineage.",
+   "label_evidence": "ELF object",
+   "lineage_hypothesis": "probe only",
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "elf-m68k-executable": 1
+     },
+     "matches_expectation": true,
+     "name": "helloc",
+     "observed": "success",
+     "output_bytes": 2624,
+     "output_count": 1,
+     "outputs": [
+      {
+       "code_sha256": "d802069597d94cf7a9a18e7a1a83b09b183c7436efb238c14d52662d0bb732b6",
+       "format": "elf-m68k-executable",
+       "path": "build/bin/helloc.elf",
+       "sha256": "d802069597d94cf7a9a18e7a1a83b09b183c7436efb238c14d52662d0bb732b6",
+       "size": 2624
+      }
+     ],
+     "recipe_sha256": "22292a893cbd4ed7970cf5107b17b6040da32094a589e3efd320f09c692fdb24",
+     "toolchain": "tc-elf",
+     "undeclared_clock_leaks": []
+    }
+   ]
+  },
+  {
+   "id": "HelloAmi",
+   "tier": "C",
+   "repo": "nicodex/HelloAmi",
+   "commit": "6dae73b6968cc2caaea356b7a35b0ae1dd78fe09",
+   "platform": "amiga",
+   "workload": "hello-world+bootblock",
+   "provenance": "authored",
+   "licence": "MIT",
+   "licence_status": "declared",
+   "class": "QUALIFIED",
+   "technical_class": "QUALIFIED",
+   "rationale": "All assembly units assemble with vasm. The program is tiny; the disk-image units embed a reimplemented Workbench startup library. Diversity/extraction probe.",
+   "label_evidence": "vasm listing rows",
+   "lineage_hypothesis": "one small author lineage",
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "amiga-hunk-exe": 4
+     },
+     "matches_expectation": true,
+     "name": "units",
+     "observed": "success",
+     "output_bytes": 2088,
+     "output_count": 4,
+     "outputs": [
+      {
+       "code_sha256": "826d98fbcae710038965fb94e5366acf8bbf4af1ab11a61c3e2aad5945c32dab",
+       "format": "amiga-hunk-exe",
+       "path": "out/HelloAmi",
+       "sha256": "826d98fbcae710038965fb94e5366acf8bbf4af1ab11a61c3e2aad5945c32dab",
+       "size": 244
+      },
+      {
+       "code_sha256": "eafc881e2b128e52fd8c19f1cc7d1660a82121d2298a15cc32864b2cf87574fe",
+       "format": "amiga-hunk-exe",
+       "path": "out/BBlock0x.bb",
+       "sha256": "eafc881e2b128e52fd8c19f1cc7d1660a82121d2298a15cc32864b2cf87574fe",
+       "size": 1060
+      },
+      {
+       "code_sha256": "218377e529112cb86821fd7d940985293f6bc8fb2d488f1fd27de8bcb237b410",
+       "format": "amiga-hunk-exe",
+       "path": "out/Disk.info",
+       "sha256": "218377e529112cb86821fd7d940985293f6bc8fb2d488f1fd27de8bcb237b410",
+       "size": 432
+      },
+      {
+       "code_sha256": "a2cd162b8ecea26d27369a220d2b0944beb4ba55ec47155b873a4cbe491c110a",
+       "format": "amiga-hunk-exe",
+       "path": "out/HelloAmi.info",
+       "sha256": "a2cd162b8ecea26d27369a220d2b0944beb4ba55ec47155b873a4cbe491c110a",
+       "size": 352
+      }
+     ],
+     "recipe_sha256": "608ea730cbae79eee92fe45dee2c20bb3325a1e17e5ff484ebddd6d27173dd89",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
+    }
+   ]
+  },
+  {
+   "id": "amiga-vasm-template",
+   "tier": "C",
+   "repo": "devpack/amiga-vasm-template",
+   "commit": "f62b09831d4f6d501bd17704a863558ecd92f086",
+   "platform": "amiga",
+   "workload": "template",
+   "provenance": "authored",
+   "licence": "none declared",
+   "licence_status": "undeclared",
+   "class": "LICENSING_REVIEW_REQUIRED",
+   "technical_class": "QUALIFIED",
+   "rationale": "A one-file template that assembles and links with vasm/vlink. Template, not a lineage; no licence declared.",
+   "label_evidence": "vasm listing rows",
+   "lineage_hypothesis": "not a lineage",
+   "recipes": [
+    {
+     "byte_identical_runs": true,
+     "deterministic": true,
+     "expect": "success",
+     "formats": {
+      "amiga-hunk-exe": 1
+     },
+     "matches_expectation": true,
+     "name": "test",
+     "observed": "success",
+     "output_bytes": 724,
+     "output_count": 1,
+     "outputs": [
+      {
+       "code_sha256": "b923b2182932941e439d64a86eda04120ce88624c27c7b7eace8f828d2980190",
+       "format": "amiga-hunk-exe",
+       "path": "test",
+       "sha256": "b923b2182932941e439d64a86eda04120ce88624c27c7b7eace8f828d2980190",
+       "size": 724
+      }
+     ],
+     "recipe_sha256": "ff9d3463db58f867f27baf482c2c75810b2edbfa4760746695d0796ba2f1a76e",
+     "toolchain": "tc-gnu",
+     "undeclared_clock_leaks": []
+    }
+   ]
+  }
+ ]
+}

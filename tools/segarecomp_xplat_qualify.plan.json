@@ -1,0 +1,874 @@
+{
+  "schema": "segarecomp.xplat_qualify.plan.v1",
+  "task": "SEG-075-T001",
+  "adr": "docs/decisions/0159-seg-075-cross-platform-source-qualification.md",
+  "frozen": "2026-10-19",
+  "classes": [
+    "QUALIFIED",
+    "PARTIALLY_QUALIFIED",
+    "BUILD_BLOCKED",
+    "LABEL_TRUTH_INSUFFICIENT",
+    "CPU_VARIANT_UNSUPPORTED",
+    "ASSET_DEPENDENCY_UNAVAILABLE",
+    "LICENSING_REVIEW_REQUIRED"
+  ],
+  "base_image": "ubuntu@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac",
+  "toolchains": {
+    "tc-gnu": {
+      "description": "Ubuntu 24.04 binutils-m68k-linux-gnu 2.42 (assembler only: its gcc always emits 68020, GCC bug 98627) + vasm 2.0f + vlink 0.18a",
+      "dockerfile": "tools/segarecomp_xplat_toolchains/tc-gnu.Dockerfile",
+      "inputs": [
+        {
+          "name": "vasm.tar.gz",
+          "url": "http://sun.hasenbraten.de/vasm/release/vasm.tar.gz",
+          "sha256": "c84b2de1cbb87831795fe64a85c5d9a7002a766e3a7c30b0a2d7d5e99d878f49"
+        },
+        {
+          "name": "vlink.tar.gz",
+          "url": "http://sun.hasenbraten.de/vlink/release/vlink.tar.gz",
+          "sha256": "8d151cdd30a4feb575a364e68810c2bc300fe1a7c074dbbee6fd1175a6c5bfae"
+        }
+      ]
+    },
+    "tc-elf": {
+      "description": "bare-metal m68k-elf binutils 2.42 + GCC 13.3.0 (C only, --with-cpu=68000), built from GNU release tarballs",
+      "dockerfile": "tools/segarecomp_xplat_toolchains/tc-elf.Dockerfile",
+      "base": "tc-gnu",
+      "inputs": [
+        {
+          "name": "binutils-2.42.tar.xz",
+          "url": "https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.xz",
+          "sha256": "f6e4d41fd5fc778b06b7891457b3620da5ecea1006c6a4a41ae998109f85a800"
+        },
+        {
+          "name": "gcc-13.3.0.tar.xz",
+          "url": "https://ftp.gnu.org/gnu/gcc/gcc-13.3.0/gcc-13.3.0.tar.xz",
+          "sha256": "0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083"
+        }
+      ]
+    },
+    "tc-vbcc": {
+      "description": "vbcc 0.9g (m68k and 16-bit-int m68ks backends) + m68k-atari target 2019-10-04 + unix config; vasm/vlink from tc-gnu",
+      "dockerfile": "tools/segarecomp_xplat_toolchains/tc-vbcc.Dockerfile",
+      "base": "tc-gnu",
+      "inputs": [
+        {
+          "name": "vbcc0_9g.tar.gz",
+          "url": "http://phoenix.owl.de/tags/vbcc0_9g.tar.gz",
+          "sha256": "49848aec62b756d495a47010774710fb3e8b2d16e7272675386398bd4823f972"
+        },
+        {
+          "name": "vbcc_target_m68k-atari.lha",
+          "url": "http://phoenix.owl.de/vbcc/2019-10-04/vbcc_target_m68k-atari.lha",
+          "sha256": "c626869c771227e0a27adfc809e3843c582c099831208d3d9f01e1aedbe690e9"
+        },
+        {
+          "name": "vbcc_unix_config.tar",
+          "url": "http://phoenix.owl.de/vbcc/2019-10-04/vbcc_unix_config.tar",
+          "sha256": "d8563016adefd3ef84b7a1e33e6a552feb978c16b5f63ec917861d72a531574e"
+        }
+      ]
+    },
+    "tc-a68k": {
+      "description": "A68K 2.71 (Charlie Gibbs, 1991, public domain) built from its C source (Aminet dev/asm/A68kGibbs.lha); vlink from tc-gnu",
+      "dockerfile": "tools/segarecomp_xplat_toolchains/tc-a68k.Dockerfile",
+      "base": "tc-vbcc",
+      "inputs": [
+        {
+          "name": "A68kGibbs.lha",
+          "url": "https://aminet.net/dev/asm/A68kGibbs.lha",
+          "sha256": "bc04d9b8c19a9d9500a3bc457bc5f596392326446c24312f5fc51e18791b5a32"
+        }
+      ]
+    },
+    "tc-mint": {
+      "description": "the pinned sidecartridge/atarist-toolkit-docker Dockerfile as-is (m68k-atari-mint GCC 4.6.4 / binutils 2.30 from the vriviere PPA). Its upstream inputs (PPA packages, vasm/vlink/agtools 'latest') are NOT pinned by the candidate: versions are recorded from the built image, reproducibility is observed, not guaranteed",
+      "context_candidate": "atarist-toolkit-docker"
+    }
+  },
+  "candidates": [
+    {
+      "id": "emutos",
+      "tier": "A",
+      "repo": "emutos/emutos",
+      "commit": "02c2db75fc875265c1449efea014450466cf20b7",
+      "platform": "atari-st+amiga",
+      "workload": "firmware",
+      "provenance": "authored",
+      "licence": "GPL-2.0 (doc/license.txt)",
+      "licence_status": "declared",
+      "class": "PARTIALLY_QUALIFIED",
+      "technical_class": "PARTIALLY_QUALIFIED",
+      "rationale": "Every original-68000 target (192, 256, 128 KB cartridge, Amiga 256 KB ROM) builds with m68k-atari-mint GCC 4.6.4; 68030/68040/ColdFire/Vampire machine targets are excluded. The base-68000 images still contain runtime-guarded 68010+/68030/68040 instruction spans (CPU/MMU/cache detection in bios/processor.S, bios/68040_pmmu.S, bios/startup.S, util/bootram.S) that T002 must type as CPU-variant regions, never label as base-68000 code. The build stamps the current date into the image header, so the recipes pin the date seen by the build (XPLAT_DATE) to make the image digests reproducible on any day. The cpu_variant_source_files count is a tree-wide mnemonic heuristic, not evidence: it includes the ColdFire-only file and misses hand-encoded (dc.w) instructions.",
+      "label_evidence": "compiler assembly (-save-temps) + assembler listings + emutos.map link map (T002)",
+      "lineage_hypothesis": "one firmware lineage (EmuTOS project); the four targets are configurations, not independent programs",
+      "recipes": [
+        {
+          "name": "rom-192",
+          "toolchain": "tc-mint",
+          "script": "export XPLAT_DATE='2026-01-01 00:00:00 UTC'; make 192 UNIQUE=us -j8",
+          "outputs": [
+            "etos192us.img",
+            "emutos.map"
+          ]
+        },
+        {
+          "name": "rom-256",
+          "toolchain": "tc-mint",
+          "script": "export XPLAT_DATE='2026-01-01 00:00:00 UTC'; make 256 UNIQUE=us -j8",
+          "outputs": [
+            "etos256us.img",
+            "emutos.map"
+          ]
+        },
+        {
+          "name": "cart",
+          "toolchain": "tc-mint",
+          "script": "export XPLAT_DATE='2026-01-01 00:00:00 UTC'; make cart UNIQUE=us -j8",
+          "outputs": [
+            "etoscart.img",
+            "emutos.map"
+          ]
+        },
+        {
+          "name": "amiga-rom",
+          "toolchain": "tc-mint",
+          "script": "export XPLAT_DATE='2026-01-01 00:00:00 UTC'; make amiga UNIQUE=us -j8",
+          "outputs": [
+            "emutos-amiga.rom",
+            "emutos.map"
+          ]
+        }
+      ],
+      "cpu_scan": true
+    },
+    {
+      "id": "toslibc",
+      "tier": "A",
+      "repo": "frno7/toslibc",
+      "commit": "162a2fb429879654e55dedd5b3abd14cece32e11",
+      "platform": "atari-st",
+      "workload": "application+runtime-library",
+      "provenance": "authored",
+      "licence": "GPL-2.0 / LGPL-2.1 / MIT (licence/)",
+      "licence_status": "declared",
+      "class": "QUALIFIED",
+      "technical_class": "QUALIFIED",
+      "rationale": "The library, six example applications and the test suite build with bare-metal m68k-elf GCC 13.3.0; toslibc's own compiler guard rejects m68k-linux-gnu-gcc, which always emits 68020 code (GCC bug 98627). Application code must be separated from the shared C runtime (T003).",
+      "label_evidence": "pre-conversion ELF objects with relocations + compiler assembly (T002)",
+      "lineage_hypothesis": "one runtime-library lineage plus small example programs by the same author; not one game lineage",
+      "recipes": [
+        {
+          "name": "lib+examples",
+          "toolchain": "tc-elf",
+          "script": "make TARGET_COMPILE=m68k-elf- -j16 all",
+          "outputs": [
+            "example/ALERT.PRG",
+            "example/COOKIE.TOS",
+            "example/DESK.ACC",
+            "example/HELLO.TOS",
+            "example/WINDOW.PRG",
+            "example/XBRA.PRG",
+            "test/SUITE.TOS"
+          ]
+        },
+        {
+          "name": "linux-gnu-gcc-rejected",
+          "toolchain": "tc-gnu",
+          "script": "make TARGET_COMPILE=m68k-linux-gnu- lib/start.o",
+          "expect": "failure",
+          "failure_signature": "m68k-linux-gcc always emits 68020"
+        }
+      ]
+    },
+    {
+      "id": "atarist-toolkit-docker",
+      "tier": "A",
+      "repo": "sidecartridge/atarist-toolkit-docker",
+      "commit": "ee2c9ec442a11a6bfd03fc42a14a96ac477e8de6",
+      "platform": "atari-st",
+      "workload": "infrastructure",
+      "provenance": "authored",
+      "licence": "AGPL/GPL-3.0 text (LICENSE)",
+      "licence_status": "declared",
+      "class": "QUALIFIED",
+      "technical_class": "QUALIFIED",
+      "role": "toolchain-infrastructure",
+      "rationale": "The pinned Dockerfile builds (it is toolchain tc-mint) and its four demos (ASM, C, C+ASM, C+libcmini) build. Infrastructure, not a labelled-program lineage; upstream inputs are unpinned (recorded versions only). Because tc-mint is unpinned upstream, the EmuTOS, listacsi and toolkit-demo results do not meet the pinned-inputs criterion; their reproducibility is observed (two runs, recorded versions) only.",
+      "label_evidence": "n/a (toolchain); demos only for extraction validation",
+      "lineage_hypothesis": "not a lineage",
+      "recipes": [
+        {
+          "name": "demos",
+          "toolchain": "tc-mint",
+          "script": "for d in ASM C C_ASM C_LIBCMINI; do make -C demo/$d || exit 1; done",
+          "outputs": [
+            "demo/ASM/build/hello.tos",
+            "demo/C/obj/hello_bb.tos",
+            "demo/C/obj/hello_ge.prg",
+            "demo/C_ASM/build/test.tos",
+            "demo/C_LIBCMINI/out/main.tos"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "space-invaders",
+      "tier": "A",
+      "repo": "awave1/space-invaders",
+      "commit": "26a049d6d655758bc684a3cb261935b548089777",
+      "platform": "atari-st",
+      "workload": "game",
+      "provenance": "authored",
+      "licence": "MIT",
+      "licence_status": "declared",
+      "class": "PARTIALLY_QUALIFIED",
+      "technical_class": "PARTIALLY_QUALIFIED",
+      "rationale": "The authentic toolchain (course cc68x compiler and gen assembler) is not publicly reproducible. Under declared substitutes every C and assembly module compiles (vbcc 0.9g +tos16, vasm), but no executable links: a header defines initialised globals in every unit (psg.h) and the program relies on the cc68x runtime's gemdos binding. Object-level evidence only; not a historical rebuild.",
+      "label_evidence": "vbcc emitted assembly + vasm listings at object level (T002)",
+      "lineage_hypothesis": "one student-game lineage (two authors), C + assembly",
+      "prerequisites": [
+        "cc68x / gen toolchain and its TOS runtime library (not publicly distributed)"
+      ],
+      "recipes": [
+        {
+          "name": "objects-vbcc",
+          "toolchain": "tc-vbcc",
+          "script": "mkdir -p out; for f in src/*.c; do vc +tos16 -cpu=68000 -c -c99 -O2 -k -Isrc/include $f -o out/$(basename $f .c).o || exit 1; done; for f in src/asm/*.s; do vasmm68k_mot -quiet -spaces -m68000 -Faout -mid=0 -L out/$(basename $f .s).lst $f -o out/$(basename $f .s)_s.o || exit 1; done",
+          "outputs": [
+            "out/*.o"
+          ],
+          "min_outputs": 19
+        },
+        {
+          "name": "link-vbcc",
+          "toolchain": "tc-vbcc",
+          "expect": "failure",
+          "failure_signature": "already defined",
+          "script": "mkdir -p out; for f in src/*.c; do vc +tos16 -cpu=68000 -c -c99 -O2 -use-commons -Isrc/include $f -o out/$(basename $f .c).o; done; for f in src/asm/*.s; do vasmm68k_mot -quiet -spaces -m68000 -Faout -mid=0 $f -o out/$(basename $f .s)_s.o; done; vc +tos16 -cpu=68000 out/*.o -o spaceinv.tos"
+        }
+      ]
+    },
+    {
+      "id": "perihelion-m68k-tutorials",
+      "tier": "A",
+      "repo": "nguillaumin/perihelion-m68k-tutorials",
+      "commit": "ee7b7a7cf4a090d1cc462e0c8fe0df35afe1a1a3",
+      "platform": "atari-st",
+      "workload": "tutorial",
+      "provenance": "authored",
+      "licence": "none declared",
+      "licence_status": "undeclared",
+      "class": "LICENSING_REVIEW_REQUIRED",
+      "technical_class": "QUALIFIED",
+      "rationale": "All 14 DevPac-syntax tutorials assemble with vasm (-devpac -spaces -m68000 -Ftos) with listings. Short fragments with large incbin pictures/music (some apparently third-party). No licence is declared, so use for training needs operator review; not to be over-weighted.",
+      "label_evidence": "vasm listing rows (T002)",
+      "lineage_hypothesis": "one tutorial lineage; tutorials share initlib.s",
+      "recipes": [
+        {
+          "name": "tutorials",
+          "toolchain": "tc-gnu",
+          "script": "mkdir -p out; cd src; for s in tut*.s; do n=${s%.s}; [ $n = tut03lib ] && continue; vasmm68k_mot -quiet -devpac -spaces -m68000 -no-fpu -Ftos -L ../out/$n.lst -o ../out/$n.tos $s || exit 1; done",
+          "outputs": [
+            "out/*.tos"
+          ],
+          "min_outputs": 14
+        }
+      ]
+    },
+    {
+      "id": "AtariST",
+      "tier": "A",
+      "repo": "miniupnp/AtariST",
+      "commit": "894b7279984ca712102cca748bca78b6cbb95e53",
+      "platform": "atari-st",
+      "workload": "demo+utility",
+      "provenance": "authored",
+      "licence": "none declared",
+      "licence_status": "undeclared",
+      "class": "LICENSING_REVIEW_REQUIRED",
+      "technical_class": "PARTIALLY_QUALIFIED",
+      "rationale": "Ten vasm -Ftos programs (intro effects, players, viewer, boot sectors) and listacsi (m68k-atari-mint GCC) build. the_80s fails under vasm 2.0f (local-label resolution), PLAY_VBL needs a missing helper tool, CosmosExMediaPlayer needs a ym_digit directory absent from the tree; show_gif (vbcc + GCC) and its ngiflib submodule (4c9b31ccb1b8857ba27dafc24a44709659f64308) were not attempted. Programs are small. No licence declared.",
+      "label_evidence": "vasm listing rows; GCC assembly + objects for listacsi (T002)",
+      "lineage_hypothesis": "one author lineage across assembly and C toolchains",
+      "recipes": [
+        {
+          "name": "vasm-programs",
+          "toolchain": "tc-gnu",
+          "script": "set -e; make -C steauply steauply.ttp steauply_int.ttp; make -C intro hblvbl.tos starf.tos tosfont.tos border.tos rotozoom.tos; make -C show_iff show_iff.ttp; make -C bootsector bs1.bin detect.bin",
+          "outputs": [
+            "steauply/*.ttp",
+            "intro/*.tos",
+            "show_iff/*.ttp",
+            "bootsector/*.bin"
+          ],
+          "min_outputs": 10
+        },
+        {
+          "name": "listacsi",
+          "toolchain": "tc-mint",
+          "script": "make -C listacsi",
+          "outputs": [
+            "listacsi/listacsi.tos"
+          ],
+          "volatile_outputs": {
+            "listacsi/listacsi.tos": "listacsi/main.c embeds the compiler's __DATE__"
+          }
+        },
+        {
+          "name": "the_80s",
+          "toolchain": "tc-gnu",
+          "script": "make -C the_80s the_80s.tos",
+          "expect": "failure",
+          "failure_signature": "undefined symbol"
+        }
+      ]
+    },
+    {
+      "id": "pacman500",
+      "tier": "A",
+      "repo": "jotd666/pacman500",
+      "commit": "3b8d970c2700af4275ce53549ceb234e2f7046f0",
+      "platform": "amiga",
+      "workload": "game",
+      "provenance": "commercial-derived",
+      "licence": "none declared",
+      "licence_status": "undeclared",
+      "class": "BUILD_BLOCKED",
+      "technical_class": "BUILD_BLOCKED",
+      "rationale": "pacman.s requires AmigaOS assembler includes (exec/, dos/, graphics/, intuition/, hardware/ *.i), lvo/*.i library-offset includes from the author's private include tree (amiga39_JFF_OS) and WHDLoad developer includes (whdload.i, whdmacros.i), none in the repository. Sprites/sounds are generated by the author's bitplanelib Python tools from ripped arcade graphics. No licence is declared and the bundled graphics are arcade rips: licensing review is also required. Provenance: by the author's own description this is a 1:1 port of the commercial arcade game by the author family of the galaga/xevious/mpatrol transcodes (not yet inspected for transcoded code); it is treated as commercial-derived and can never become clean truth through supplying the missing includes alone.",
+      "label_evidence": "vasm listing rows once buildable",
+      "lineage_hypothesis": "jotd666 author lineage shared with scramble500/galaga/xevious/mpatrol (common infrastructure, ptplayer by phx)",
+      "prerequisites": [
+        "AmigaOS NDK assembler includes (e.g. Hyperion NDK 3.2 R4 on Aminet dev/misc; no licence statement - operator decision)",
+        "lvo/*.i include set matching the author's tree",
+        "WHDLoad developer includes",
+        "jotd666 bitplanelib (public, amiga68ktools) + Pillow + sox for asset conversion"
+      ],
+      "recipes": [
+        {
+          "name": "main",
+          "toolchain": "tc-gnu",
+          "expect": "failure",
+          "failure_signature": "could not open",
+          "script": "cd src && vasmm68k_mot -phxass -nosym -Fhunkexe -kick1hunks -m68000 -o ../pacman pacman.s"
+        }
+      ]
+    },
+    {
+      "id": "scramble500",
+      "tier": "A",
+      "repo": "jotd666/scramble500",
+      "commit": "40d9a1212b53734441617e350dfdd50f88531eff",
+      "platform": "amiga",
+      "workload": "game",
+      "provenance": "commercial-derived",
+      "licence": "none declared",
+      "licence_status": "undeclared",
+      "class": "BUILD_BLOCKED",
+      "technical_class": "BUILD_BLOCKED",
+      "rationale": "Same prerequisites as pacman500 (AmigaOS/lvo/WHDLoad includes, bitplanelib asset conversion; arcade-ripped graphics; no declared licence). Provenance: by the author's own description this is a 1:1 port of the commercial arcade game by the author family of the galaga/xevious/mpatrol transcodes, and the repository commits a Z80-mnemonic disassembly listing of the arcade program (scramble_arcade.asm); it is treated as commercial-derived and can never become clean truth through supplying the missing includes alone.",
+      "label_evidence": "vasm listing rows once buildable",
+      "lineage_hypothesis": "jotd666 author lineage (see pacman500)",
+      "prerequisites": [
+        "as pacman500"
+      ],
+      "recipes": [
+        {
+          "name": "main",
+          "toolchain": "tc-gnu",
+          "expect": "failure",
+          "failure_signature": "could not open",
+          "script": "cd src && vasmm68k_mot -phxass -nosym -Fhunkexe -kick1hunks -m68000 -o ../scramble scramble.s"
+        }
+      ]
+    },
+    {
+      "id": "amiga_asmdev_workflow",
+      "tier": "A",
+      "repo": "neildavis/amiga_asmdev_workflow",
+      "commit": "21be8c826fa7899515033c32677c7bf401d4990e",
+      "platform": "amiga",
+      "workload": "demo",
+      "provenance": "authored",
+      "licence": "MIT-style (LICENSE)",
+      "licence_status": "declared",
+      "class": "BUILD_BLOCKED",
+      "technical_class": "BUILD_BLOCKED",
+      "rationale": "Only the ZX0 decompressor module assembles; main/copper/bobs/sprites incbin raw images and include palettes generated from the repository's own XCF files by a GIMP batch script and compressed by salvador (ZX0). The asset toolchain (GIMP, salvador) is not provisioned in T001. Not a commercial dependency.",
+      "label_evidence": "vasm listing rows once buildable",
+      "lineage_hypothesis": "one small demo lineage",
+      "prerequisites": [
+        "GIMP batch conversion of assets/*.xcf (scripts/convert_assets_to_raw.sh)",
+        "salvador ZX0 compressor"
+      ],
+      "recipes": [
+        {
+          "name": "unzx0",
+          "toolchain": "tc-gnu",
+          "script": "mkdir -p out && vasmm68k_mot -quiet -m68000 -Fhunk -I./include -L out/unzx0.lst -o out/unzx0.o src/unzx0.s",
+          "outputs": [
+            "out/unzx0.o"
+          ]
+        },
+        {
+          "name": "main",
+          "toolchain": "tc-gnu",
+          "expect": "failure",
+          "failure_signature": "could not open",
+          "script": "mkdir -p out && vasmm68k_mot -quiet -m68000 -Fhunk -I./include -o out/main.o src/main.s"
+        }
+      ]
+    },
+    {
+      "id": "amiga-realtime3d",
+      "tier": "A",
+      "repo": "johangardhage/amiga-realtime3d",
+      "commit": "f7f9f5b56ea588daf3bfe45006e94f68c8408179",
+      "platform": "amiga",
+      "workload": "demo/tutorial",
+      "provenance": "authored",
+      "licence": "CC BY-SA 4.0",
+      "licence_status": "declared",
+      "class": "QUALIFIED",
+      "technical_class": "QUALIFIED",
+      "rationale": "All nine programs assemble with vasm (-m68000 -Fhunkexe) with listings; self-contained includes. CC BY-SA 4.0: redistribution of derived datasets/models needs review.",
+      "label_evidence": "vasm listing rows (T002)",
+      "lineage_hypothesis": "one author lineage; the nine programs share an incremental code base",
+      "recipes": [
+        {
+          "name": "programs",
+          "toolchain": "tc-gnu",
+          "script": "mkdir -p out; for i in 01 02 03 04 05 06 07 08 09; do vasmm68k_mot -quiet -m68000 -Fhunkexe -nosym -I include -L out/P$i.lst -o out/Program_$i src/Program_$i.s || exit 1; done",
+          "outputs": [
+            "out/Program_*"
+          ],
+          "min_outputs": 9
+        }
+      ]
+    },
+    {
+      "id": "GODLIB",
+      "tier": "A",
+      "repo": "ReservoirGods/GODLIB",
+      "commit": "ae600aae192f35c8fe8a7e8164ec0e4caaa7e6e9",
+      "platform": "atari-st",
+      "workload": "game-library",
+      "provenance": "authored",
+      "licence": "none declared",
+      "licence_status": "undeclared",
+      "class": "LICENSING_REVIEW_REQUIRED",
+      "technical_class": "PARTIALLY_QUALIFIED",
+      "rationale": "A library, not a program: no authored executable target. With the toolchain declared by its ST makefile (vbcc 0.9g, 16-bit int) and an environment-only case-insensitive header shim, 120 C modules compile. 7 fail on Windows backslash include paths. The assembly modules use Pure C PASM directives (export/import) that vasm rejects, and two use FPU instructions. No licence declared.",
+      "label_evidence": "vbcc emitted assembly at object level (T002)",
+      "lineage_hypothesis": "Reservoir Gods library lineage; would contaminate any program built on it",
+      "mount": "/p/GODLIB",
+      "recipes": [
+        {
+          "name": "c-objects",
+          "toolchain": "tc-vbcc",
+          "min_outputs": 120,
+          "volatile_outputs": {
+            "out/__PROFILER_PROFILER_C.o": "PROFILER.C embeds __DATE__/__TIME__"
+          },
+          "script": "mkdir -p /p/ci out; for h in $VBCC/targets/m68k-atari/include/*.h; do b=$(basename $h); ln -sf $h /p/ci/$(echo $b | tr a-z A-Z); ln -sf $h /p/ci/$b; done; for f in $(find . -path ./out -prune -o -iname '*.c' -print | grep -viE '/TEST/|_PC|SDL|DUMMY' | sort); do vc +tos16 -cpu=68000 -c -c99 -O2 -k -I/p -I/p/ci \"$f\" -o out/$(echo $f | tr '/.' '__').o > /dev/null 2>&1; done; true",
+          "outputs": [
+            "out/*_C.o"
+          ]
+        },
+        {
+          "name": "pasm-modules",
+          "toolchain": "tc-gnu",
+          "expect": "failure",
+          "failure_signature": "unknown mnemonic",
+          "script": "vasmm68k_mot -quiet -devpac -m68000 -Felf -o /tmp/x.o AUDIO/AUDIO_S.S"
+        }
+      ]
+    },
+    {
+      "id": "Atari_ST_Sources",
+      "tier": "B",
+      "repo": "ggnkua/Atari_ST_Sources",
+      "commit": "63e0a458f522f4cd47e7941d02e693ad776fe0af",
+      "platform": "atari-st",
+      "workload": "archive",
+      "provenance": "authored",
+      "licence": "per-subproject, mostly undeclared",
+      "licence_status": "undeclared",
+      "class": "LICENSING_REVIEW_REQUIRED",
+      "technical_class": "PARTIALLY_QUALIFIED",
+      "fetch": "archive-pilot",
+      "rationale": "An archive of independent historical programs, never copied wholesale. A seeded pilot of 40 single-source ASM subprojects that ship one executable, assembled with vasm -devpac against the shipped executable, measures the qualification yield. Each subproject needs its own qualification and licence review. Large C sub-archives (Sozobon, Pure C/Lattice projects) are nominations for later work.",
+      "label_evidence": "vasm listing rows for reproduced subprojects; shipped executables give byte-level corroboration",
+      "lineage_hypothesis": "many independent author lineages; group by author directory",
+      "pilot": {
+        "seed": 75,
+        "size": 40,
+        "root": "ASM",
+        "max_files": 6
+      },
+      "recipes": [
+        {
+          "name": "asm-pilot",
+          "toolchain": "tc-gnu",
+          "script": "python3 /xplat/asts_pilot.py . pilot.tsv > pilot.result.tsv",
+          "outputs": [
+            "pilot.result.tsv"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "BattleIsleEditor",
+      "tier": "B",
+      "repo": "reinersmann/BattleIsleEditor",
+      "commit": "c56f82cf246939375139eb34b2d8c6108998e3e2",
+      "platform": "amiga",
+      "workload": "application",
+      "provenance": "authored",
+      "licence": "GPL-3.0",
+      "licence_status": "declared",
+      "class": "QUALIFIED",
+      "technical_class": "QUALIFIED",
+      "rationale": "The author's own toolchain (A68K 2.71, rebuilt from source) plus vlink (in place of BLINK) reproduces all six committed author executables byte for byte. These are authentic original 1990s application programs, not reconstructions.",
+      "label_evidence": "A68K listing rows, corroborated by byte identity with the author's binaries (T002)",
+      "lineage_hypothesis": "one author lineage; the six editors are variants sharing most code",
+      "recipes": [
+        {
+          "name": "editors",
+          "toolchain": "tc-a68k",
+          "script": "mkdir -p out; for s in source/*.asm; do n=$(basename $s .asm); a68k $s -oout/$n.o -lout/$n.lst > /dev/null || exit 1; vlink -bamigahunk -s -o out/$n out/$n.o || exit 1; done",
+          "outputs": [
+            "out/BIEd16",
+            "out/BIEdDD112",
+            "out/BIEdDD211",
+            "out/BIEdDD211_512K",
+            "out/HLEd12",
+            "out/HLEd12_512K"
+          ],
+          "author_compare": [
+            [
+              "out/BIEd16",
+              "bin/BIEd16"
+            ],
+            [
+              "out/BIEdDD112",
+              "bin/BIEdDD112"
+            ],
+            [
+              "out/BIEdDD211",
+              "bin/BIEdDD211"
+            ],
+            [
+              "out/BIEdDD211_512K",
+              "bin/BIEdDD211_512K"
+            ],
+            [
+              "out/HLEd12",
+              "bin/HLEd12"
+            ],
+            [
+              "out/HLEd12_512K",
+              "bin/HLEd12_512K"
+            ]
+          ]
+        },
+        {
+          "name": "vasm-rejects-a68k-dialect",
+          "toolchain": "tc-gnu",
+          "expect": "failure",
+          "failure_signature": "number or identifier expected",
+          "script": "vasmm68k_mot -quiet -devpac -m68000 -Fhunkexe -o /tmp/x source/BIEd16.asm"
+        }
+      ]
+    },
+    {
+      "id": "AmiGalaga",
+      "tier": "B",
+      "repo": "mwulffn/AmiGalaga",
+      "commit": "be410baa1371f0268fca4e02c0fb17393b667458",
+      "platform": "amiga",
+      "workload": "game",
+      "provenance": "authored",
+      "licence": "MIT",
+      "licence_status": "declared",
+      "class": "ASSET_DEPENDENCY_UNAVAILABLE",
+      "technical_class": "ASSET_DEPENDENCY_UNAVAILABLE",
+      "rationale": "The build reads graphics and sounds from the user's own copy of the arcade ROM set (galaga.zip). Not acquired.",
+      "label_evidence": "vasm listing rows if the operator supplies the ROM set",
+      "lineage_hypothesis": "independent author lineage",
+      "operator_inputs": [
+        {
+          "material": "Galaga arcade ROM set (MAME 'galaga.zip')",
+          "platform": "arcade (Namco Galaga)",
+          "use": "label qualification (build input)",
+          "alternative": "none in this repository"
+        }
+      ],
+      "recipes": [
+        {
+          "name": "game",
+          "toolchain": "tc-gnu",
+          "expect": "failure",
+          "failure_signature": "could not open",
+          "script": "cd game && vasmm68k_mot -quiet -m68000 -Fhunkexe -o /tmp/g main.s"
+        }
+      ]
+    },
+    {
+      "id": "galaga",
+      "tier": "B",
+      "repo": "jotd666/galaga",
+      "commit": "a362336a232c9478d18d65c9b7c9f1679b61f28d",
+      "platform": "amiga",
+      "workload": "game",
+      "provenance": "commercial-derived",
+      "licence": "none declared",
+      "licence_status": "undeclared",
+      "class": "LICENSING_REVIEW_REQUIRED",
+      "technical_class": "PARTIALLY_QUALIFIED",
+      "rationale": "A line-by-line 68k transcode of the commercial arcade Z80 program, with graphics extracted from the arcade ROMs committed as C data, so the code derives from commercial code. Technically the core transcoded modules assemble with GNU as (-m68000, register-prefix-optional); the Amiga main module needs generated sound/graphics includes, and vbr.68k is deliberately 68010+. No licence declared. No licence decision can admit it: as commercial-derived code it is excluded from clean truth by provenance; the class records only that its own repository licence is also unresolved.",
+      "label_evidence": "GNU as listings (if admitted after review)",
+      "lineage_hypothesis": "jotd666 author lineage (with xevious/mpatrol/pacman500/scramble500)",
+      "recipes": [
+        {
+          "name": "core-modules",
+          "toolchain": "tc-gnu",
+          "script": "cd src; mkdir -p /w/out; for f in galaga_ram.68k galaga.68k galaga_shared.68k galaga_sub.68k galaga_sub_rom.68k amiga/ReadJoypad.68k amiga/ptplayer.68k; do m68k-linux-gnu-as -c --register-prefix-optional --defsym __amiga__=1 -m68000 -Iamiga -I. $f -o /w/out/$(basename $f .68k).o || exit 1; done",
+          "outputs": [
+            "out/*.o"
+          ],
+          "min_outputs": 7
+        }
+      ]
+    },
+    {
+      "id": "xevious",
+      "tier": "B",
+      "repo": "jotd666/xevious",
+      "commit": "f4e86ebcb6f693895d691ef3823bf6d83511e9bd",
+      "platform": "amiga+neo-geo",
+      "workload": "game",
+      "provenance": "commercial-derived",
+      "licence": "none declared",
+      "licence_status": "undeclared",
+      "class": "LICENSING_REVIEW_REQUIRED",
+      "technical_class": "NOT_ATTEMPTED",
+      "rationale": "Same family as galaga: by its README, the core is a line-by-line transcode of the reverse-engineered commercial arcade ROMs, with ROM-extracted graphics. Build not attempted beyond triage because licensing review precedes any use. No licence decision can admit it: as commercial-derived code it is excluded from clean truth by provenance; the class records only that its own repository licence is also unresolved.",
+      "label_evidence": "n/a until reviewed",
+      "lineage_hypothesis": "jotd666/tcdev lineage",
+      "recipes": []
+    },
+    {
+      "id": "mpatrol",
+      "tier": "B",
+      "repo": "jotd666/mpatrol",
+      "commit": "c132e117009ead3f90af5e48324ff39110b1e8da",
+      "platform": "amiga",
+      "workload": "game",
+      "provenance": "commercial-derived",
+      "licence": "none declared",
+      "licence_status": "undeclared",
+      "class": "LICENSING_REVIEW_REQUIRED",
+      "technical_class": "NOT_ATTEMPTED",
+      "rationale": "Same family as galaga: an arcade transcode with ROM-extracted graphics. Licensing review precedes any use. No licence decision can admit it: as commercial-derived code it is excluded from clean truth by provenance; the class records only that its own repository licence is also unresolved.",
+      "label_evidence": "n/a until reviewed",
+      "lineage_hypothesis": "jotd666 lineage",
+      "recipes": []
+    },
+    {
+      "id": "amiga-boing",
+      "tier": "B",
+      "repo": "mbackschat/amiga-boing",
+      "commit": "fdf1e8c40cc10162b6d09783b0d5589a45691348",
+      "platform": "amiga",
+      "workload": "demo",
+      "provenance": "reconstruction",
+      "licence": "none declared",
+      "licence_status": "undeclared",
+      "class": "ASSET_DEPENDENCY_UNAVAILABLE",
+      "technical_class": "ASSET_DEPENDENCY_UNAVAILABLE",
+      "rationale": "Reconstructed from a disassembly of the Commodore sample. The build needs a private submodule holding Amiga 1.3 NDK headers and a Kickstart 1.3 ROM, neither redistributable and neither acquired. Diagnostic/hard-negative value only even if supplied.",
+      "label_evidence": "reconstructed listing: diagnostic only",
+      "lineage_hypothesis": "reconstruction, not an authored lineage",
+      "operator_inputs": [
+        {
+          "material": "Amiga 1.3 NDK assembler headers + Kickstart 1.3 (r34.5) ROM",
+          "platform": "Amiga",
+          "use": "build input (headers) / runtime (ROM)",
+          "alternative": "amiga-realtime3d, BattleIsleEditor are self-contained"
+        }
+      ],
+      "recipes": [
+        {
+          "name": "build",
+          "toolchain": "tc-gnu",
+          "expect": "failure",
+          "failure_signature": "could not open",
+          "script": "vasmm68k_mot -quiet -m68000 -Fhunk -Ivendor/include -o /tmp/b.o src/boing.s"
+        }
+      ]
+    },
+    {
+      "id": "monomental",
+      "tier": "B",
+      "repo": "theseniordads/monomental",
+      "commit": "5073815403c5a35a71a60ef4ba40bb7830069bfc",
+      "platform": "atari-st",
+      "workload": "demo",
+      "provenance": "reconstruction",
+      "licence": "none declared",
+      "licence_status": "undeclared",
+      "class": "LABEL_TRUTH_INSUFFICIENT",
+      "technical_class": "LABEL_TRUTH_INSUFFICIENT",
+      "rationale": "MAIN.S assembles with vasm (-devpac, case-insensitive alias shim). The source is the authors' own reverse-engineering of a binary whose original source is lost, so instruction/data labels are not independent truth. Diagnostic and hard-negative material only. Shipped builds are packed, so no byte comparison.",
+      "label_evidence": "reconstructed listing: diagnostic only",
+      "lineage_hypothesis": "reconstruction",
+      "shim": "ci_alias",
+      "recipes": [
+        {
+          "name": "main",
+          "toolchain": "tc-gnu",
+          "script": "mkdir -p out && vasmm68k_mot -quiet -devpac -spaces -m68000 -Ftos -o out/MAIN.PRG MAIN.S",
+          "outputs": [
+            "out/MAIN.PRG"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "atari_reverse",
+      "tier": "B",
+      "repo": "geogeo28/atari_reverse",
+      "commit": "c1b35bfebb9f0466698f7cf211ecb04a22b0a8b1",
+      "platform": "atari-st",
+      "workload": "reconstruction",
+      "provenance": "reconstruction",
+      "licence": "GPL-2.0",
+      "licence_status": "declared",
+      "class": "ASSET_DEPENDENCY_UNAVAILABLE",
+      "technical_class": "ASSET_DEPENDENCY_UNAVAILABLE",
+      "rationale": "C reconstructions verified against original commercial game executables that the repository deliberately does not ship (no PRG, data or disk image). Use requires operator-held originals. Diagnostic only: reconstructed C is not authored 68000 source.",
+      "label_evidence": "diagnostic only",
+      "lineage_hypothesis": "reconstruction",
+      "operator_inputs": [
+        {
+          "material": "original Atari ST game executables named by the repository (e.g. Buggy Boy, Joust)",
+          "platform": "Atari ST",
+          "use": "diagnostic only",
+          "alternative": "not needed for corpus qualification"
+        }
+      ],
+      "recipes": []
+    },
+    {
+      "id": "neogeosdk",
+      "tier": "C",
+      "repo": "eaglesoftware777/neogeosdk",
+      "commit": "9e05d4268e880f84ab25181ceab565a1b3d418f5",
+      "platform": "neo-geo",
+      "workload": "sdk+games",
+      "provenance": "authored",
+      "licence": "MIT",
+      "licence_status": "declared",
+      "class": "PARTIALLY_QUALIFIED",
+      "technical_class": "PARTIALLY_QUALIFIED",
+      "rationale": "The bundled demo game compiles (60 objects) and links into a statically linked m68k ELF executable (out/game) with m68k-elf GCC 13.3 substituted for the SDK's crosstool-ng GCC; only srec_cat ROM packaging is absent. BIOS is needed only for runtime. The bundled games share one engine and author: one SDK lineage, not six.",
+      "label_evidence": "ELF objects + linked ELF executable (T002)",
+      "lineage_hypothesis": "one SDK/engine lineage",
+      "recipes": [
+        {
+          "name": "demo-compile-link",
+          "toolchain": "tc-elf",
+          "min_outputs": 61,
+          "script": "mkdir -p /x/m68k-unknown-elf/bin; for t in gcc g++ ld objcopy objdump nm readelf as ar; do ln -sf /opt/m68k-elf/bin/m68k-elf-$t /x/m68k-unknown-elf/bin/m68k-unknown-elf-$t; done; rm -f out/*.o out/game0; make p1 GAME=demo XTOOLS_ROOT=/x SDKHOME=/w; grep -q srec_cat <(make -n p1 GAME=demo XTOOLS_ROOT=/x SDKHOME=/w 2>/dev/null) && test -s out/game0 && test -s out/game",
+          "outputs": [
+            "out/game",
+            "out/*.o"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "x68000dev",
+      "tier": "C",
+      "repo": "Armitage64/x68000dev",
+      "commit": "4cc02e9060a90f91a31c6b13d6d9e830a367b828",
+      "platform": "x68000",
+      "workload": "hello-world",
+      "provenance": "authored",
+      "licence": "'provided as-is for educational purposes'",
+      "licence_status": "undeclared",
+      "class": "LICENSING_REVIEW_REQUIRED",
+      "technical_class": "PARTIALLY_QUALIFIED",
+      "rationale": "The referenced assembly program (src/helloa.s) is absent from the tree. The C hello world builds only with m68k-elf GCC, because the project's m68k-linux-gnu-gcc emits 68020 code. Hello-world sized: a diversity/extraction probe, not a training lineage.",
+      "label_evidence": "ELF object",
+      "lineage_hypothesis": "probe only",
+      "recipes": [
+        {
+          "name": "helloc",
+          "toolchain": "tc-elf",
+          "script": "mkdir -p build/obj build/bin && m68k-elf-as -m68000 src/crt0.s -o build/obj/crt0.o && m68k-elf-gcc -m68000 -nostdlib -ffreestanding -fno-builtin -fomit-frame-pointer -mpcrel -c src/helloc.c -o build/obj/helloc.o && m68k-elf-ld -T x68k.ld -o build/bin/helloc.elf build/obj/crt0.o build/obj/helloc.o",
+          "outputs": [
+            "build/bin/helloc.elf"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "HelloAmi",
+      "tier": "C",
+      "repo": "nicodex/HelloAmi",
+      "commit": "6dae73b6968cc2caaea356b7a35b0ae1dd78fe09",
+      "platform": "amiga",
+      "workload": "hello-world+bootblock",
+      "provenance": "authored",
+      "licence": "MIT",
+      "licence_status": "declared",
+      "class": "QUALIFIED",
+      "technical_class": "QUALIFIED",
+      "rationale": "All assembly units assemble with vasm. The program is tiny; the disk-image units embed a reimplemented Workbench startup library. Diversity/extraction probe.",
+      "label_evidence": "vasm listing rows",
+      "lineage_hypothesis": "one small author lineage",
+      "recipes": [
+        {
+          "name": "units",
+          "toolchain": "tc-gnu",
+          "script": "mkdir -p out; for s in *.asm; do n=${s%.asm}; vasmm68k_mot -quiet -m68000 -Fhunkexe -nosym -L out/$n.lst -o out/$n $s || exit 1; done",
+          "outputs": [
+            "out/HelloAmi",
+            "out/BBlock0x.bb",
+            "out/Disk.info",
+            "out/HelloAmi.info"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "amiga-vasm-template",
+      "tier": "C",
+      "repo": "devpack/amiga-vasm-template",
+      "commit": "f62b09831d4f6d501bd17704a863558ecd92f086",
+      "platform": "amiga",
+      "workload": "template",
+      "provenance": "authored",
+      "licence": "none declared",
+      "licence_status": "undeclared",
+      "class": "LICENSING_REVIEW_REQUIRED",
+      "technical_class": "QUALIFIED",
+      "rationale": "A one-file template that assembles and links with vasm/vlink. Template, not a lineage; no licence declared.",
+      "label_evidence": "vasm listing rows",
+      "lineage_hypothesis": "not a lineage",
+      "recipes": [
+        {
+          "name": "test",
+          "toolchain": "tc-gnu",
+          "script": "vasmm68k_mot -quiet -m68000 -Fhunk -L test.lst -o test.o test.s && vlink test.o -o test",
+          "outputs": [
+            "test"
+          ]
+        }
+      ]
+    }
+  ]
+}
