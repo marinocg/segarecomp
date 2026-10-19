@@ -112,8 +112,8 @@ def counters():
     shared = "GenesisControlTransfer genesis_aot_shared_00000(GenesisRuntime *runtime, const void *s, uint32_t pc) {\n  return 0;\n}\n"
     with tempfile.TemporaryDirectory() as tmp:
         d = pathlib.Path(tmp)
-        (d / "a.c").write_text(owner)
-        (d / "e.c").write_text(entries + shared)
+        (d / "a.c").write_text(owner, newline="\n")
+        (d / "e.c").write_text(entries + shared, newline="\n")
         c = b.generated_counts(d)
     check(c["entry_segments"] == 3 and c["aot_owner_functions"] == 1 and c["dispatch_cases"] == 1 and c["compiled_entry_rows"] == 2
           and c["aot_shared_helpers"] == 1, f"counters: {c}")
@@ -126,7 +126,7 @@ def counters():
     op_dup = base.replace("00001000", "00001020").replace("00001004", "00001024").replace("00001234", "00005678")
     with tempfile.TemporaryDirectory() as tmp:
         d = pathlib.Path(tmp)
-        (d / "a.c").write_text("GenesisControlTransfer genesis_aot_owner_0(GenesisRuntime *r) {\n" + base + pc_dup + op_dup + "}\n")
+        (d / "a.c").write_text("GenesisControlTransfer genesis_aot_owner_0(GenesisRuntime *r) {\n" + base + pc_dup + op_dup + "}\n", newline="\n")
         r = b.rho_decomposition(d)
         total = len((d / "a.c").read_bytes())
     check(abs(r["rho_pc_only"] - len(pc_dup.encode()) / total) < 1e-12, f"PC-only duplicate share: {r}")
