@@ -6,8 +6,10 @@
   toolchains  download the pinned toolchain inputs (SHA-256 verified) and build the toolchain images from
               tools/segarecomp_xplat_toolchains/*.Dockerfile; record the observed tool versions and image identities
   build       run every recipe of the frozen plan twice, each time in a fresh copy of the pinned source inside an offline container
-              (--network none). Record the outcome, output digests/sizes/executable format, determinism, author-binary comparisons,
+              (--network none), after re-verifying that the cached checkout is exactly the pinned commit and unmodified. The two runs
+              see different wall-clock dates through a `date` wrapper, so date-dependent output is caught. Record the outcome, output digests/sizes/executable format, determinism, author-binary comparisons,
               the source CPU-variant scan and the archive pilot counts in a private record
+  verify      check that freshly built records reproduce the committed manifest (identities, classes, outcomes, code digests)
   report      combine the plan and the records into the sanitized manifest. It fails when any executed evidence contradicts the
               plan's declared expectation: a recipe declared to succeed fails, an expected failure does not reproduce its signature,
               or a declared author comparison is not byte-identical
@@ -40,14 +42,20 @@ PLAN = ROOT / "tools" / "segarecomp_xplat_qualify.plan.json"
 MANIFEST = ROOT / "tools" / "segarecomp_xplat_qualify.manifest.json"
 IMAGE_PREFIX = "segarecomp-xplat/"
 TECHNICAL_EXTRA = ("NOT_ATTEMPTED",)
+PROVENANCE = ("authored", "commercial-derived", "reconstruction")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
-# Source-level evidence of non-base-68000 code: CPU-selection directives and 68010+/FPU/MMU-only mnemonics.
+# HEURISTIC (not evidence): assembly source lines that select a non-68000 CPU or use a 68010+/FPU/MMU-only instruction or addressing form.
+# Instructions hand-encoded as dc.w are invisible to it; real CPU-variant typing is T002's decoder-backed job.
+_MNEM = (r"movec|moves|pmove|pflush\w*|ptest\w*|cinv[lpa]|cpush[lpa]|cas2?|chk2|cmp2|bf(?:chg|clr|ext[su]|ffo|ins|set|tst)|rtd|bkpt|pack|"
+         r"unpk|extb|trap(?:t|f|hi|ls|cc|cs|ne|eq|vc|vs|pl|mi|ge|lt|gt|le)|(?:mul|div)[su]\.l|divs?l|f(?:move|add|sub|mul|div|cmp|sqrt|tst|"
+         r"save|restore|b\w\w?|s\w\w?|db\w\w?)")
 CPU_VARIANT_RE = re.compile(
-    r"^\s*(?:[A-Za-z_.$][\w.$]*:?\s+)?(?:\.(?:chip|arch|cpu)\s|(?:mc)?680[1-6]0\b|(?:movec|moves|pmove|pflush\w*|ptest\w*|cinv\w|cpush\w|"
-    r"cas2?|chk2|cmp2|bfchg|bfclr|bfext[su]|bfffo|bfins|bfset|bftst|rtd|f(?:move|add|sub|mul|div|cmp|sqrt)\w*)(?:\.[bwlsdxp])?\s)",
+    r"^[^;*\n]*?(?:^|[\s:])(?:\.(?:chip|arch|cpu)\s+\S*680[1-6]0|\.?machine\s+680[1-6]0|opt\s+[^;\n]*\bp=680[1-6]0|"
+    r"(?:" + _MNEM + r")(?:\.[bwlsdxp])?(?=\s|$)(?!\s*=)|bra\.l\b|b\w\w\.l\b|move(?:\.w)?\s+ccr\s*,)"
+    r"|^[^;*\n]*?(?:\(\s*\[|\.[wl]\s*\*\s*[248]\s*[),])",
     re.IGNORECASE | re.MULTILINE)
-SOURCE_EXTS = (".s", ".S", ".asm", ".68k", ".i", ".inc", ".c", ".h")
+SOURCE_EXTS = (".s", ".asm", ".68k", ".i", ".inc")
 
 CI_ALIAS = '''import os, sys
 # Lower-case alias symlinks so case-insensitive (TOS/AmigaDOS) include names resolve; sources are never edited.
@@ -57,6 +65,14 @@ for dp, dns, fns in os.walk(sys.argv[1], topdown=True):
         if low != n and not os.path.lexists(os.path.join(dp, low)):
             os.symlink(n, os.path.join(dp, low))
 '''
+
+# `date` wrapper: each run fixes the wall-clock date seen by build scripts, and the two runs use dates years apart, so date-dependent
+# output shows up as nondeterminism. A recipe may pin XPLAT_DATE itself (then its output must be reproducible on any day).
+DATE_SHIM = '''#!/bin/sh
+if [ -n "$XPLAT_DATE" ]; then exec /bin/date -u -d "$XPLAT_DATE" "$@"; fi
+exec /bin/date "$@"
+'''
+RUN_DATES = {"a": "2026-10-19 12:00:00 UTC", "b": "2031-03-04 07:30:00 UTC"}
 
 ASTS_PILOT = r'''import collections, os, shutil, struct, subprocess, sys
 # Assemble each pilot subproject's single source with vasm (-devpac) and compare with the subproject's shipped TOS executable.
@@ -128,6 +144,11 @@ def validate_plan(plan: dict) -> None:
             raise QualifyError(f"{cid}: unknown class {c['class']}")
         if c["technical_class"] not in classes and c["technical_class"] not in TECHNICAL_EXTRA:
             raise QualifyError(f"{cid}: unknown technical class {c['technical_class']}")
+        if c.get("provenance") not in PROVENANCE:
+            raise QualifyError(f"{cid}: provenance must be one of {PROVENANCE}")
+        # Commercial-derived code and reconstructions are never clean truth, whatever their licence or build outcome.
+        if c["provenance"] != "authored" and c["class"] in ("QUALIFIED", "PARTIALLY_QUALIFIED"):
+            raise QualifyError(f"{cid}: {c['provenance']} source cannot be {c['class']}")
         if c["licence_status"] not in ("declared", "undeclared"):
             raise QualifyError(f"{cid}: bad licence status")
         # An undeclared licence never silently passes as usable: a technically usable candidate must then carry the review class.
@@ -216,7 +237,7 @@ def cpu_variant_files(root: pathlib.Path) -> int:
         if ".git" in dp.split(os.sep):
             continue
         for fn in fns:
-            if fn.endswith(SOURCE_EXTS) or fn.lower().endswith(tuple(e.lower() for e in SOURCE_EXTS)):
+            if fn.lower().endswith(SOURCE_EXTS):
                 try:
                     text = (pathlib.Path(dp) / fn).read_text(encoding="latin-1")
                 except OSError:
@@ -352,10 +373,14 @@ def _run_recipe(cache: pathlib.Path, cand: dict, recipe: dict, run: str) -> dict
     xplat.mkdir(exist_ok=True)
     (xplat / "ci_alias.py").write_text(CI_ALIAS, encoding="utf-8")
     (xplat / "asts_pilot.py").write_text(ASTS_PILOT, encoding="utf-8")
+    (xplat / "bin").mkdir(exist_ok=True)
+    (xplat / "bin" / "date").write_text(DATE_SHIM, encoding="utf-8")
+    os.chmod(xplat / "bin" / "date", 0o755)
     mount = cand.get("mount", "/w")
     script = recipe["script"]
     if cand.get("shim") == "ci_alias":
         script = f"python3 /xplat/ci_alias.py . && {{ {script}; }}"
+    script = f"export PATH=/xplat/bin:$PATH XPLAT_DATE='{RUN_DATES[run]}'; {script}"
     cmd = ["docker", "run", "--rm", "--network", "none", "-v", f"{work}:{mount}", "-w", mount, "-v", f"{xplat}:/xplat:ro",
            "--entrypoint", "/bin/bash", image(recipe["toolchain"]), "-c", script]
     try:
@@ -422,11 +447,21 @@ def evaluate_recipe(recipe: dict, a: dict, b: dict | None) -> dict:
     return res
 
 
+def observed_source(src: pathlib.Path, pinned: str) -> str:
+    """The cached checkout must be exactly the pinned commit with no tracked modification; returns the observed HEAD."""
+    head = _git("rev-parse", "HEAD", cwd=src).strip()
+    dirty = _git("status", "--porcelain", "--untracked-files=no", cwd=src).strip()
+    if head != pinned or dirty:
+        raise QualifyError(f"{src.name}: cached source is {head}{' (modified)' if dirty else ''}, plan pins {pinned}")
+    return head
+
+
 def build(plan: dict, cache: pathlib.Path, only: set[str] | None) -> None:
     (cache / "records").mkdir(parents=True, exist_ok=True)
     for c in plan["candidates"]:
         if only and c["id"] not in only:
             continue
+        head = observed_source(cache / "src" / c["id"], c["commit"])
         recs = []
         for r in c["recipes"]:
             a = _run_recipe(cache, c, r, "a")
@@ -435,7 +470,7 @@ def build(plan: dict, cache: pathlib.Path, only: set[str] | None) -> None:
             recs.append(res)
             print(f"build {c['id']}/{r['name']}: expect={res['expect']} observed={res['observed']} ok={res['matches_expectation']}"
                   + (f" deterministic={res.get('deterministic')} outputs={res.get('output_count')}" if res["expect"] == "success" else ""))
-        rec = {"id": c["id"], "commit": c["commit"], "recipes": recs}
+        rec = {"id": c["id"], "commit": head, "recipes": recs}
         if c.get("cpu_scan"):
             rec["cpu_variant_source_files"] = cpu_variant_files(cache / "src" / c["id"])
         (cache / "records" / f"{c['id']}.json").write_text(json.dumps(rec, indent=1, sort_keys=True) + "\n", encoding="utf-8")
@@ -453,12 +488,14 @@ def make_manifest(plan: dict, records: dict[str, dict], toolchain_ids: dict) -> 
             contradictions.append(f"{c['id']}: no build record")
             rec = {"recipes": []}
         rec = rec or {"recipes": []}
+        if "commit" in rec and rec["commit"] != c["commit"]:
+            contradictions.append(f"{c['id']}: built from {rec['commit']}, plan pins {c['commit']}")
         for r in rec["recipes"]:
             if not r["matches_expectation"]:
                 contradictions.append(f"{c['id']}/{r['name']}: expected {r['expect']}, observed {r['observed']}")
             elif r["expect"] == "success" and not r.get("deterministic", False):
                 contradictions.append(f"{c['id']}/{r['name']}: outputs differ between the two runs")
-        entry = {k: c[k] for k in ("id", "tier", "repo", "commit", "platform", "workload", "licence", "licence_status", "class",
+        entry = {k: c[k] for k in ("id", "tier", "repo", "commit", "platform", "workload", "provenance", "licence", "licence_status", "class",
                                    "technical_class", "rationale", "label_evidence", "lineage_hypothesis")}
         for k in ("role", "prerequisites", "operator_inputs"):
             if k in c:
@@ -473,7 +510,8 @@ def make_manifest(plan: dict, records: dict[str, dict], toolchain_ids: dict) -> 
         by_class[e["class"]] = by_class.get(e["class"], 0) + 1
         plat = by_platform.setdefault(e["platform"], {})
         plat[e["class"]] = plat.get(e["class"], 0) + 1
-    usable = [e for e in cands if e["class"] in ("QUALIFIED", "PARTIALLY_QUALIFIED") and e.get("role") != "toolchain-infrastructure"]
+    usable = [e for e in cands if e["class"] in ("QUALIFIED", "PARTIALLY_QUALIFIED") and e.get("role") != "toolchain-infrastructure"
+              and e["provenance"] == "authored"]
     return {
         "schema": "segarecomp.xplat_qualify.manifest.v1",
         "task": plan["task"], "adr": plan["adr"], "frozen": plan["frozen"],
@@ -487,13 +525,57 @@ def make_manifest(plan: dict, records: dict[str, dict], toolchain_ids: dict) -> 
     }
 
 
-def report(plan: dict, cache: pathlib.Path, out: pathlib.Path) -> int:
+def compare_manifests(committed: dict, fresh: dict) -> list[str]:
+    """Differences of identities, classes, outcomes and output digests between two manifests (pure; unit-tested)."""
+    diffs = []
+    old = {c["id"]: c for c in committed["candidates"]}
+    new = {c["id"]: c for c in fresh["candidates"]}
+    for cid in sorted(set(old) | set(new)):
+        a, b = old.get(cid), new.get(cid)
+        if a is None or b is None:
+            diffs.append(f"{cid}: present in only one manifest")
+            continue
+        for k in ("commit", "class", "technical_class", "provenance"):
+            if a.get(k) != b.get(k):
+                diffs.append(f"{cid}: {k} {a.get(k)} != {b.get(k)}")
+        ra = {r["name"]: r for r in a["recipes"]}
+        rb = {r["name"]: r for r in b["recipes"]}
+        for name in sorted(set(ra) | set(rb)):
+            x, y = ra.get(name), rb.get(name)
+            if x is None or y is None:
+                diffs.append(f"{cid}/{name}: recipe present in only one manifest")
+                continue
+            if x.get("observed") != y.get("observed"):
+                diffs.append(f"{cid}/{name}: outcome {x.get('observed')} != {y.get('observed')}")
+            vol = set(x.get("volatile_outputs", {}))
+            dx = {(o["path"], o.get("code_sha256", o["sha256"])) for o in x.get("outputs", []) if o["path"] not in vol}
+            dy = {(o["path"], o.get("code_sha256", o["sha256"])) for o in y.get("outputs", []) if o["path"] not in vol}
+            for path, _d in sorted(dx ^ dy):
+                diffs.append(f"{cid}/{name}: output {path} differs")
+    return diffs
+
+
+def verify(plan: dict, cache: pathlib.Path, committed_path: pathlib.Path) -> int:
+    """Rebuilt records (`build`) must reproduce the committed manifest's identities, classes, outcomes and code digests."""
+    fresh = _fresh_manifest(plan, cache)
+    diffs = fresh["summary"]["contradictions"] + compare_manifests(json.loads(committed_path.read_text(encoding="utf-8")), fresh)
+    for d in diffs:
+        print("DIFF:", d)
+    print("verify:", "PASS" if not diffs else f"FAIL ({len(diffs)})")
+    return 1 if diffs else 0
+
+
+def _fresh_manifest(plan: dict, cache: pathlib.Path) -> dict:
     records = {}
     for f in sorted((cache / "records").glob("*.json")):
         rec = json.loads(f.read_text(encoding="utf-8"))
         records[rec["id"]] = rec
     tcs = json.loads((cache / "toolchains.json").read_text(encoding="utf-8")) if (cache / "toolchains.json").exists() else {}
-    manifest = make_manifest(plan, records, tcs)
+    return make_manifest(plan, records, tcs)
+
+
+def report(plan: dict, cache: pathlib.Path, out: pathlib.Path) -> int:
+    manifest = _fresh_manifest(plan, cache)
     out.write_text(json.dumps(manifest, indent=1, sort_keys=False) + "\n", encoding="utf-8")
     for c in manifest["summary"]["contradictions"]:
         print("CONTRADICTION:", c)
@@ -503,7 +585,7 @@ def report(plan: dict, cache: pathlib.Path, out: pathlib.Path) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=("fetch", "toolchains", "build", "report", "validate"))
+    ap.add_argument("command", choices=("fetch", "toolchains", "build", "report", "verify", "validate"))
     ap.add_argument("--cache", type=pathlib.Path, help="private ignored cache directory")
     ap.add_argument("--only", action="append", help="restrict to candidate id (repeatable)")
     ap.add_argument("--plan", type=pathlib.Path, default=PLAN)
@@ -525,6 +607,8 @@ def main(argv: list[str] | None = None) -> int:
             toolchains(plan, cache)
         elif args.command == "build":
             build(plan, cache, only)
+        elif args.command == "verify":
+            return verify(plan, cache, MANIFEST)
         else:
             return report(plan, cache, args.out)
         return 0

@@ -74,6 +74,18 @@ def test_plan():
     bad["candidates"] = [c for c in bad["candidates"] if c["id"] != "GODLIB"]
     check(raises(q.validate_plan, bad), "dropping a Tier A candidate is rejected")
     bad = copy.deepcopy(plan)
+    hello = next(c for c in bad["candidates"] if c["id"] == "HelloAmi")
+    hello["recipes"] = [dict(hello["recipes"][0], expect="failure", failure_signature="x")]
+    check(raises(q.validate_plan, bad), "usable class needs a successful recipe")
+    bad = copy.deepcopy(plan)
+    next(c for c in bad["candidates"] if c["id"] == "galaga").update({"licence_status": "declared", "class": "PARTIALLY_QUALIFIED"})
+    check(raises(q.validate_plan, bad), "commercial-derived source never becomes usable, even with a licence")
+    bad = copy.deepcopy(plan)
+    del bad["candidates"][0]["provenance"]
+    check(raises(q.validate_plan, bad), "provenance required")
+    for cid in ("galaga", "xevious", "mpatrol", "pacman500", "scramble500"):
+        check(next(c for c in plan["candidates"] if c["id"] == cid)["provenance"] == "commercial-derived", f"{cid} commercial-derived")
+    bad = copy.deepcopy(plan)
     bad["candidates"][0]["recipes"][0]["toolchain"] = "tc-nope"
     check(raises(q.validate_plan, bad), "unknown toolchain rejected")
 
@@ -98,6 +110,9 @@ def test_probe():
     check(q.code_digest(sym1) == q.code_digest(sym2), "TOS code digest ignores the symbol table")
     check(q.code_digest(prg) != q.code_digest(prg[:28] + b"\x4e\x71" + prg[30:]), "TOS code digest covers text")
     check(q.code_digest(b"abc") != q.code_digest(b"abd"), "raw code digest covers every byte")
+    data_changed = bytearray(prg)
+    data_changed[28 + 8] ^= 0xFF
+    check(q.code_digest(prg) != q.code_digest(bytes(data_changed)), "TOS code digest covers the data segment")
 
 
 def test_cpu_scan():
@@ -109,6 +124,19 @@ def test_cpu_scan():
         (root / "d.c").write_text("int movec_count; /* movec mentioned in a comment only */\n")
         (root / "e.s").write_text("\tfmove.x fp0,fp1\n")
         check(q.cpu_variant_files(root) == 3, f"CPU-variant scan counts directive/mnemonic files: {q.cpu_variant_files(root)}")
+    positives = ["\tmuls.l d0,d1", "\tdivu.l d2,d3", "\textb.l d0", "\tmove.w (a0,d0.w*2),d1", "\tmove.l ([4,a0]),d0", "\tbra.l far",
+                 "\tbkpt #0", "\tmove.w ccr,d0", "\tpack d0,d1,#0", "\ttrapne", "\topt p=68020", "lbl:\tmovec vbr,d0", "\t.chip 68030",
+                 "\tfmove.x fp0,fp1", "\tcas.l d0,d1,(a0)", "\tbne.l x"]
+    negatives = ["cas = 1", "faddress\tdc.l 0", "\tmove.l d0,d1 ; moves the bytes", "* 68030 users should", "fsubmit:\trts",
+                 "\tmove.w d0,ccr", "\tmuls.w d0,d1", "\tbra.w x", "\tlea (a0,d0.w),a1", "\tdbra d0,loop", "\tmulu.w #2*4,d0",
+                 "\tmove.l d0,d1 ; (a0,d0.w*2)", "fbase:\tdc.w 1"]
+    for line in positives:
+        check(q.CPU_VARIANT_RE.search(line) is not None, f"CPU heuristic finds {line!r}")
+    for line in negatives:
+        check(q.CPU_VARIANT_RE.search(line) is None, f"CPU heuristic ignores {line!r}")
+    with tempfile.TemporaryDirectory() as d:
+        (pathlib.Path(d) / "x.c").write_text('asm("movec vbr,d0");\n')
+        check(q.cpu_variant_files(pathlib.Path(d)) == 0, "C sources are outside the assembly heuristic")
 
 
 def test_pilot():
@@ -147,6 +175,25 @@ def test_guard():
             ok = False
         check(ok, "directory outside any work tree accepted")
     check(raises(q.require_private, ROOT / "tools" / "xplat-cache"), "tracked product directory refused")
+
+
+def test_pin_check():
+    with tempfile.TemporaryDirectory() as d:
+        repo = pathlib.Path(d)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        (repo / "a.s").write_text("\trts\n")
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+        subprocess.run(["git", "-C", str(repo), "add", "a.s"], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "x"], check=True, env=env)
+        head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+        check(q.observed_source(repo, head) == head, "pinned clean checkout accepted")
+        check(raises(q.observed_source, repo, "0" * 40), "different commit refused")
+        (repo / "a.s").write_text("\tnop\n")
+        check(raises(q.observed_source, repo, head), "modified checkout refused")
+
+
+def test_date_shim():
+    check("XPLAT_DATE" in q.DATE_SHIM and q.RUN_DATES["a"][:4] != q.RUN_DATES["b"][:4], "the two runs see different years")
 
 
 def _run(rc, log, outputs, compares=()):
@@ -204,6 +251,24 @@ def test_manifest():
     records["BattleIsleEditor"]["recipes"][0]["deterministic"] = False
     check(any("differ between the two runs" in x for x in q.make_manifest(plan, records, {})["summary"]["contradictions"]),
           "nondeterministic success is a contradiction")
+    records["BattleIsleEditor"]["recipes"][0]["deterministic"] = True
+    records["HelloAmi"]["commit"] = "0" * 40
+    check(any(x.startswith("HelloAmi: built from") for x in q.make_manifest(plan, records, {})["summary"]["contradictions"]),
+          "record from a different commit is a contradiction")
+    records["HelloAmi"]["commit"] = next(c["commit"] for c in plan["candidates"] if c["id"] == "HelloAmi")
+    check("galaga" not in q.make_manifest(plan, records, {})["summary"]["usable_without_review"], "commercial-derived never usable")
+    base = q.make_manifest(plan, records, {})
+    other = copy.deepcopy(base)
+    other["candidates"][0]["recipes"].append({"name": "extra", "observed": "success", "outputs": []})
+    check(q.compare_manifests(base, base) == [], "identical manifests compare equal")
+    check(any("extra" in d for d in q.compare_manifests(base, other)), "recipe drift detected")
+    o1 = copy.deepcopy(base); o2 = copy.deepcopy(base)
+    o1["candidates"][0]["recipes"][0]["outputs"] = [{"path": "x", "sha256": "1" * 64, "code_sha256": "1" * 64}]
+    o2["candidates"][0]["recipes"][0]["outputs"] = [{"path": "x", "sha256": "2" * 64, "code_sha256": "2" * 64}]
+    check(any("output x differs" in d for d in q.compare_manifests(o1, o2)), "digest drift detected")
+    o2["candidates"][0]["recipes"][0]["volatile_outputs"] = {"x": "date"}
+    o1["candidates"][0]["recipes"][0]["volatile_outputs"] = {"x": "date"}
+    check(q.compare_manifests(o1, o2) == [], "declared volatile output ignored")
     del records["emutos"]
     check(any(x.startswith("emutos:") for x in q.make_manifest(plan, records, {})["summary"]["contradictions"]), "missing record reported")
 
@@ -225,7 +290,8 @@ def test_committed_manifest():
 
 
 def main():
-    for t in (test_plan, test_probe, test_cpu_scan, test_pilot, test_guard, test_evaluate, test_manifest, test_committed_manifest):
+    for t in (test_plan, test_probe, test_cpu_scan, test_pilot, test_guard, test_pin_check, test_date_shim, test_evaluate, test_manifest,
+              test_committed_manifest):
         t()
     if FAILURES:
         print(f"{len(FAILURES)} failure(s)")

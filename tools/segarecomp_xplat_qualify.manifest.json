@@ -152,11 +152,12 @@
    "commit": "02c2db75fc875265c1449efea014450466cf20b7",
    "platform": "atari-st+amiga",
    "workload": "firmware",
+   "provenance": "authored",
    "licence": "GPL-2.0 (doc/license.txt)",
    "licence_status": "declared",
    "class": "PARTIALLY_QUALIFIED",
    "technical_class": "PARTIALLY_QUALIFIED",
-   "rationale": "Every original-68000 target (192, 256, 128 KB cartridge, Amiga 256 KB ROM) builds with m68k-atari-mint GCC 4.6.4; 68030/68040/ColdFire/Vampire machine targets are excluded. The base-68000 images still contain runtime-guarded 68010+/68030/68040 instruction spans (CPU/MMU/cache detection in bios/processor.S, bios/68040_pmmu.S, bios/startup.S, util/bootram.S) that T002 must type as CPU-variant regions, never label as base-68000 code.",
+   "rationale": "Every original-68000 target (192, 256, 128 KB cartridge, Amiga 256 KB ROM) builds with m68k-atari-mint GCC 4.6.4; 68030/68040/ColdFire/Vampire machine targets are excluded. The base-68000 images still contain runtime-guarded 68010+/68030/68040 instruction spans (CPU/MMU/cache detection in bios/processor.S, bios/68040_pmmu.S, bios/startup.S, util/bootram.S) that T002 must type as CPU-variant regions, never label as base-68000 code. The build stamps the current date into the image header, so the recipes pin the date seen by the build (XPLAT_DATE) to make the image digests reproducible on any day. The cpu_variant_source_files count is a tree-wide mnemonic heuristic, not evidence: it includes the ColdFire-only file and misses hand-encoded (dc.w) instructions.",
    "label_evidence": "compiler assembly (-save-temps) + assembler listings + emutos.map link map (T002)",
    "lineage_hypothesis": "one firmware lineage (EmuTOS project); the four targets are configurations, not independent programs",
    "recipes": [
@@ -281,7 +282,7 @@
      "toolchain": "tc-mint"
     }
    ],
-   "cpu_variant_source_files": 4
+   "cpu_variant_source_files": 7
   },
   {
    "id": "toslibc",
@@ -290,6 +291,7 @@
    "commit": "162a2fb429879654e55dedd5b3abd14cece32e11",
    "platform": "atari-st",
    "workload": "application+runtime-library",
+   "provenance": "authored",
    "licence": "GPL-2.0 / LGPL-2.1 / MIT (licence/)",
    "licence_status": "declared",
    "class": "QUALIFIED",
@@ -379,11 +381,12 @@
    "commit": "ee2c9ec442a11a6bfd03fc42a14a96ac477e8de6",
    "platform": "atari-st",
    "workload": "infrastructure",
+   "provenance": "authored",
    "licence": "AGPL/GPL-3.0 text (LICENSE)",
    "licence_status": "declared",
    "class": "QUALIFIED",
    "technical_class": "QUALIFIED",
-   "rationale": "The pinned Dockerfile builds (it is toolchain tc-mint) and its four demos (ASM, C, C+ASM, C+libcmini) build. Infrastructure, not a labelled-program lineage; upstream inputs are unpinned (recorded versions only).",
+   "rationale": "The pinned Dockerfile builds (it is toolchain tc-mint) and its four demos (ASM, C, C+ASM, C+libcmini) build. Infrastructure, not a labelled-program lineage; upstream inputs are unpinned (recorded versions only). Because tc-mint is unpinned upstream, the EmuTOS, listacsi and toolkit-demo results do not meet the pinned-inputs criterion; their reproducibility is observed (two runs, recorded versions) only.",
    "label_evidence": "n/a (toolchain); demos only for extraction validation",
    "lineage_hypothesis": "not a lineage",
    "role": "toolchain-infrastructure",
@@ -412,14 +415,14 @@
        "code_sha256": "75223b88d0a1b3efac9018435b23650cf638be2afd363ea5ee061dc38a2796dd",
        "format": "tos-prg",
        "path": "demo/C/obj/hello_bb.tos",
-       "sha256": "24634406bf91d50dfc2f73244c8a3d5af51534da865c2ffe7f8b0b9a5b3a6725",
+       "sha256": "fbebbfe2c8cc0ef3bffca3c4414d36931a08e8fe5aa8998a1349d7658718833e",
        "size": 131757
       },
       {
        "code_sha256": "7c470c688391899038c57af67a679139d7db4e18d8125c27876459f290522e52",
        "format": "tos-prg",
        "path": "demo/C/obj/hello_ge.prg",
-       "sha256": "13d0a6b932e6e97f13457d99302d50dd51c03953cf276743eec10ac29ce056d7",
+       "sha256": "0885521d5991a02af36069b1ce3ab4c974bf657fbf89a0ae23201f32dc241166",
        "size": 132752
       },
       {
@@ -448,6 +451,7 @@
    "commit": "26a049d6d655758bc684a3cb261935b548089777",
    "platform": "atari-st",
    "workload": "game",
+   "provenance": "authored",
    "licence": "MIT",
    "licence_status": "declared",
    "class": "PARTIALLY_QUALIFIED",
@@ -624,6 +628,7 @@
    "commit": "ee7b7a7cf4a090d1cc462e0c8fe0df35afe1a1a3",
    "platform": "atari-st",
    "workload": "tutorial",
+   "provenance": "authored",
    "licence": "none declared",
    "licence_status": "undeclared",
    "class": "LICENSING_REVIEW_REQUIRED",
@@ -755,6 +760,7 @@
    "commit": "894b7279984ca712102cca748bca78b6cbb95e53",
    "platform": "atari-st",
    "workload": "demo+utility",
+   "provenance": "authored",
    "licence": "none declared",
    "licence_status": "undeclared",
    "class": "LICENSING_REVIEW_REQUIRED",
@@ -889,11 +895,12 @@
    "commit": "3b8d970c2700af4275ce53549ceb234e2f7046f0",
    "platform": "amiga",
    "workload": "game",
+   "provenance": "commercial-derived",
    "licence": "none declared",
    "licence_status": "undeclared",
    "class": "BUILD_BLOCKED",
    "technical_class": "BUILD_BLOCKED",
-   "rationale": "pacman.s requires AmigaOS assembler includes (exec/, dos/, graphics/, intuition/, hardware/ *.i), lvo/*.i library-offset includes from the author's private include tree (amiga39_JFF_OS) and WHDLoad developer includes (whdload.i, whdmacros.i), none in the repository. Sprites/sounds are generated by the author's bitplanelib Python tools from ripped arcade graphics. No licence is declared and the bundled graphics are arcade rips: licensing review is also required.",
+   "rationale": "pacman.s requires AmigaOS assembler includes (exec/, dos/, graphics/, intuition/, hardware/ *.i), lvo/*.i library-offset includes from the author's private include tree (amiga39_JFF_OS) and WHDLoad developer includes (whdload.i, whdmacros.i), none in the repository. Sprites/sounds are generated by the author's bitplanelib Python tools from ripped arcade graphics. No licence is declared and the bundled graphics are arcade rips: licensing review is also required. Provenance: by the author's own description this is a 1:1 port of the commercial arcade game by the author family of the galaga/xevious/mpatrol transcodes (not yet inspected for transcoded code); it is treated as commercial-derived and can never become clean truth through supplying the missing includes alone.",
    "label_evidence": "vasm listing rows once buildable",
    "lineage_hypothesis": "jotd666 author lineage shared with scramble500/galaga/xevious/mpatrol (common infrastructure, ptplayer by phx)",
    "prerequisites": [
@@ -919,11 +926,12 @@
    "commit": "40d9a1212b53734441617e350dfdd50f88531eff",
    "platform": "amiga",
    "workload": "game",
+   "provenance": "commercial-derived",
    "licence": "none declared",
    "licence_status": "undeclared",
    "class": "BUILD_BLOCKED",
    "technical_class": "BUILD_BLOCKED",
-   "rationale": "Same prerequisites as pacman500 (AmigaOS/lvo/WHDLoad includes, bitplanelib asset conversion; arcade-ripped graphics; no declared licence).",
+   "rationale": "Same prerequisites as pacman500 (AmigaOS/lvo/WHDLoad includes, bitplanelib asset conversion; arcade-ripped graphics; no declared licence). Provenance: by the author's own description this is a 1:1 port of the commercial arcade game by the author family of the galaga/xevious/mpatrol transcodes, and the repository commits a Z80-mnemonic disassembly listing of the arcade program (scramble_arcade.asm); it is treated as commercial-derived and can never become clean truth through supplying the missing includes alone.",
    "label_evidence": "vasm listing rows once buildable",
    "lineage_hypothesis": "jotd666 author lineage (see pacman500)",
    "prerequisites": [
@@ -946,6 +954,7 @@
    "commit": "21be8c826fa7899515033c32677c7bf401d4990e",
    "platform": "amiga",
    "workload": "demo",
+   "provenance": "authored",
    "licence": "MIT-style (LICENSE)",
    "licence_status": "declared",
    "class": "BUILD_BLOCKED",
@@ -997,6 +1006,7 @@
    "commit": "f7f9f5b56ea588daf3bfe45006e94f68c8408179",
    "platform": "amiga",
    "workload": "demo/tutorial",
+   "provenance": "authored",
    "licence": "CC BY-SA 4.0",
    "licence_status": "declared",
    "class": "QUALIFIED",
@@ -1093,6 +1103,7 @@
    "commit": "ae600aae192f35c8fe8a7e8164ec0e4caaa7e6e9",
    "platform": "atari-st",
    "workload": "game-library",
+   "provenance": "authored",
    "licence": "none declared",
    "licence_status": "undeclared",
    "class": "LICENSING_REVIEW_REQUIRED",
@@ -1787,10 +1798,10 @@
        "size": 1151
       },
       {
-       "code_sha256": "ee44b109cd54437ab6c354e913bd2cc6d2f1b9b747ba37830bb0ffae3e4c2c07",
+       "code_sha256": "d1a14198e7108ea58b3697b5a515ad0fd2165662030ffeb4d80da5c4b4c54599",
        "format": "aout",
        "path": "out/__PROFILER_PROFILER_C.o",
-       "sha256": "ee44b109cd54437ab6c354e913bd2cc6d2f1b9b747ba37830bb0ffae3e4c2c07",
+       "sha256": "d1a14198e7108ea58b3697b5a515ad0fd2165662030ffeb4d80da5c4b4c54599",
        "size": 3616
       },
       {
@@ -1976,6 +1987,7 @@
    "commit": "63e0a458f522f4cd47e7941d02e693ad776fe0af",
    "platform": "atari-st",
    "workload": "archive",
+   "provenance": "authored",
    "licence": "per-subproject, mostly undeclared",
    "licence_status": "undeclared",
    "class": "LICENSING_REVIEW_REQUIRED",
@@ -2024,6 +2036,7 @@
    "commit": "c56f82cf246939375139eb34b2d8c6108998e3e2",
    "platform": "amiga",
    "workload": "application",
+   "provenance": "authored",
    "licence": "GPL-3.0",
    "licence_status": "declared",
    "class": "QUALIFIED",
@@ -2108,6 +2121,7 @@
    "commit": "be410baa1371f0268fca4e02c0fb17393b667458",
    "platform": "amiga",
    "workload": "game",
+   "provenance": "authored",
    "licence": "MIT",
    "licence_status": "declared",
    "class": "ASSET_DEPENDENCY_UNAVAILABLE",
@@ -2140,6 +2154,7 @@
    "commit": "a362336a232c9478d18d65c9b7c9f1679b61f28d",
    "platform": "amiga",
    "workload": "game",
+   "provenance": "commercial-derived",
    "licence": "none declared",
    "licence_status": "undeclared",
    "class": "LICENSING_REVIEW_REQUIRED",
@@ -2222,6 +2237,7 @@
    "commit": "f4e86ebcb6f693895d691ef3823bf6d83511e9bd",
    "platform": "amiga+neo-geo",
    "workload": "game",
+   "provenance": "commercial-derived",
    "licence": "none declared",
    "licence_status": "undeclared",
    "class": "LICENSING_REVIEW_REQUIRED",
@@ -2238,6 +2254,7 @@
    "commit": "c132e117009ead3f90af5e48324ff39110b1e8da",
    "platform": "amiga",
    "workload": "game",
+   "provenance": "commercial-derived",
    "licence": "none declared",
    "licence_status": "undeclared",
    "class": "LICENSING_REVIEW_REQUIRED",
@@ -2254,6 +2271,7 @@
    "commit": "fdf1e8c40cc10162b6d09783b0d5589a45691348",
    "platform": "amiga",
    "workload": "demo",
+   "provenance": "reconstruction",
    "licence": "none declared",
    "licence_status": "undeclared",
    "class": "ASSET_DEPENDENCY_UNAVAILABLE",
@@ -2286,6 +2304,7 @@
    "commit": "5073815403c5a35a71a60ef4ba40bb7830069bfc",
    "platform": "atari-st",
    "workload": "demo",
+   "provenance": "reconstruction",
    "licence": "none declared",
    "licence_status": "undeclared",
    "class": "LABEL_TRUTH_INSUFFICIENT",
@@ -2326,6 +2345,7 @@
    "commit": "c1b35bfebb9f0466698f7cf211ecb04a22b0a8b1",
    "platform": "atari-st",
    "workload": "reconstruction",
+   "provenance": "reconstruction",
    "licence": "GPL-2.0",
    "licence_status": "declared",
    "class": "ASSET_DEPENDENCY_UNAVAILABLE",
@@ -2350,12 +2370,13 @@
    "commit": "9e05d4268e880f84ab25181ceab565a1b3d418f5",
    "platform": "neo-geo",
    "workload": "sdk+games",
+   "provenance": "authored",
    "licence": "MIT",
    "licence_status": "declared",
    "class": "PARTIALLY_QUALIFIED",
    "technical_class": "PARTIALLY_QUALIFIED",
-   "rationale": "The bundled demo game compiles and links (60 objects) with m68k-elf GCC 13.3 substituted for the SDK's crosstool-ng GCC; only srec_cat ROM packaging is absent. BIOS is needed only for runtime. The bundled games share one engine and author: one SDK lineage, not six.",
-   "label_evidence": "ELF objects + linker map (DEBUG=1) (T002)",
+   "rationale": "The bundled demo game compiles (60 objects) and links into a statically linked m68k ELF executable (out/game) with m68k-elf GCC 13.3 substituted for the SDK's crosstool-ng GCC; only srec_cat ROM packaging is absent. BIOS is needed only for runtime. The bundled games share one engine and author: one SDK lineage, not six.",
+   "label_evidence": "ELF objects + linked ELF executable (T002)",
    "lineage_hypothesis": "one SDK/engine lineage",
    "recipes": [
     {
@@ -2363,21 +2384,21 @@
      "deterministic": true,
      "expect": "success",
      "formats": {
-      "elf-m68k-relocatable": 55,
-      "intel-hex": 1
+      "elf-m68k-executable": 1,
+      "elf-m68k-relocatable": 60
      },
      "matches_expectation": true,
      "name": "demo-compile-link",
      "observed": "success",
-     "output_bytes": 1722843,
-     "output_count": 56,
+     "output_bytes": 1322572,
+     "output_count": 61,
      "outputs": [
       {
-       "code_sha256": "57eac9f69ad7fbc57d416bed4e20b7f78ef8f40e92310da72216d912ee522540",
-       "format": "intel-hex",
-       "path": "out/game0",
-       "sha256": "57eac9f69ad7fbc57d416bed4e20b7f78ef8f40e92310da72216d912ee522540",
-       "size": 1119467
+       "code_sha256": "1bf04cba45560044db78811040dda5f4bc0c7ccea51563484f5e68a3640a9175",
+       "format": "elf-m68k-executable",
+       "path": "out/game",
+       "sha256": "1bf04cba45560044db78811040dda5f4bc0c7ccea51563484f5e68a3640a9175",
+       "size": 456992
       },
       {
        "code_sha256": "3dbde204edfb74e49f467b8059e50914f572a9703733c68eca324a70115f3297",
@@ -2499,11 +2520,25 @@
        "size": 96648
       },
       {
+       "code_sha256": "56e6c22b9eb8d632e39246855cb90a64cbf07d2ffe3d2414ac898c8e0c596590",
+       "format": "elf-m68k-relocatable",
+       "path": "out/eyecatcher.o",
+       "sha256": "56e6c22b9eb8d632e39246855cb90a64cbf07d2ffe3d2414ac898c8e0c596590",
+       "size": 1940
+      },
+      {
        "code_sha256": "f378f856007fae6e5b575225603656f07fd0d6ec7eb45a3adbd106b017a85678",
        "format": "elf-m68k-relocatable",
        "path": "out/eyecatcher0.o",
        "sha256": "f378f856007fae6e5b575225603656f07fd0d6ec7eb45a3adbd106b017a85678",
        "size": 2212
+      },
+      {
+       "code_sha256": "9da9e16c5780916437c03bb4d05f4276ed83f9b856d4395075ede3fc4d31d289",
+       "format": "elf-m68k-relocatable",
+       "path": "out/main.o",
+       "sha256": "9da9e16c5780916437c03bb4d05f4276ed83f9b856d4395075ede3fc4d31d289",
+       "size": 233952
       },
       {
        "code_sha256": "fe24607429e10e31d28384aa024051b507d744e10d9b095d5f9180af2c08940a",
@@ -2513,11 +2548,25 @@
        "size": 234220
       },
       {
+       "code_sha256": "b6e16edc12594823b3e448d93e09fcf02d1403599d6c6c17091dacefd54d075c",
+       "format": "elf-m68k-relocatable",
+       "path": "out/neogeo.o",
+       "sha256": "b6e16edc12594823b3e448d93e09fcf02d1403599d6c6c17091dacefd54d075c",
+       "size": 6208
+      },
+      {
        "code_sha256": "13018b321b319bfd356872791b013fa7232b03fbc01528a2efec17bc1cbe9568",
        "format": "elf-m68k-relocatable",
        "path": "out/neogeo0.o",
        "sha256": "13018b321b319bfd356872791b013fa7232b03fbc01528a2efec17bc1cbe9568",
        "size": 6476
+      },
+      {
+       "code_sha256": "ac06781bba7594672d298b90c6b9c13bd960a90c86f6900a9e571d972ce7b431",
+       "format": "elf-m68k-relocatable",
+       "path": "out/neogeolib.o",
+       "sha256": "ac06781bba7594672d298b90c6b9c13bd960a90c86f6900a9e571d972ce7b431",
+       "size": 14088
       },
       {
        "code_sha256": "77cae1e040106c51b3f01675e7f5f951c187dd90248a91452b8433f932eabc23",
@@ -2758,6 +2807,13 @@
        "size": 1272
       },
       {
+       "code_sha256": "f88834ced4fe826bf55fa3152834a9b9ab539875869af37338dd28c526a60a22",
+       "format": "elf-m68k-relocatable",
+       "path": "out/user.o",
+       "sha256": "f88834ced4fe826bf55fa3152834a9b9ab539875869af37338dd28c526a60a22",
+       "size": 6016
+      },
+      {
        "code_sha256": "034d9d9439aa72d9d4fa3a9125828c35fd7c7ade6cc712a898ce19691418195d",
        "format": "elf-m68k-relocatable",
        "path": "out/user0.o",
@@ -2776,6 +2832,7 @@
    "commit": "4cc02e9060a90f91a31c6b13d6d9e830a367b828",
    "platform": "x68000",
    "workload": "hello-world",
+   "provenance": "authored",
    "licence": "'provided as-is for educational purposes'",
    "licence_status": "undeclared",
    "class": "LICENSING_REVIEW_REQUIRED",
@@ -2816,6 +2873,7 @@
    "commit": "6dae73b6968cc2caaea356b7a35b0ae1dd78fe09",
    "platform": "amiga",
    "workload": "hello-world+bootblock",
+   "provenance": "authored",
    "licence": "MIT",
    "licence_status": "declared",
    "class": "QUALIFIED",
@@ -2877,6 +2935,7 @@
    "commit": "f62b09831d4f6d501bd17704a863558ecd92f086",
    "platform": "amiga",
    "workload": "template",
+   "provenance": "authored",
    "licence": "none declared",
    "licence_status": "undeclared",
    "class": "LICENSING_REVIEW_REQUIRED",

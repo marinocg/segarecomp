@@ -1,12 +1,12 @@
 # ADR 0159: SEG-075-T001 cross-platform MC68000 source qualification and build inventory
 
 - Status: Accepted. **Qualification gate: PASSED_WITH_LIMITS.** Independently authored, reproducibly built base-68000 programs exist on
-  both Atari ST and Amiga, from five distinct assembler/compiler families. Only a minority of candidates is usable without operator review,
+  both Atari ST and Amiga, built by four distinct assembler/compiler families (GCC in two generations, vbcc, vasm, A68K). Only a minority of candidates is usable without operator review,
   and the strongest Amiga game candidates are blocked by OS-include or licensing prerequisites (section 5).
 - Task: SEG-075-T001, the first task of the SEG-075 research milestone (cross-platform M68K corpus and hybrid code recognition). One product
   PR. SEG-074 records, worktrees and contracts are unchanged; no SEG-072/073 artifact, label, marker or decision is touched.
 - Scope: offline research tooling only. No production, emitter, validator, runtime, launcher or default change. Nothing is trained.
-- Tooling: `tools/segarecomp_xplat_qualify.py` (`validate`, `fetch`, `toolchains`, `build`, `report`), the frozen plan
+- Tooling: `tools/segarecomp_xplat_qualify.py` (`validate`, `fetch`, `toolchains`, `build`, `report`, `verify`), the frozen plan
   `tools/segarecomp_xplat_qualify.plan.json`, pinned toolchain definitions `tools/segarecomp_xplat_toolchains/*.Dockerfile`, tests
   `tests/segarecomp_xplat_qualify_test.py`. Sanitized public record: `tools/segarecomp_xplat_qualify.manifest.json`.
 
@@ -19,7 +19,12 @@ is checked out (section 4); it is never copied. Further nominations must be adde
 
 ## 2. Toolchains
 
-Every build runs in an offline container (`--network none`) on a fresh copy of the pinned source.
+Every build runs in an offline container (`--network none`) on a fresh copy of the pinned source. Before building, `build` re-verifies
+that the cached checkout is exactly the pinned commit with no tracked modification and records the observed commit; `report` treats a record
+built from any other commit as a contradiction. Each successful recipe runs twice, and a `date` wrapper shows the two runs different
+wall-clock dates (2026 and 2031), so date-dependent output is caught as nondeterminism. EmuTOS stamps its build date into the image header,
+so its recipes pin the date the build sees: its image digests are then reproducible on any day. `verify` checks that freshly built records
+reproduce the committed manifest (identities, classes, outcomes, code digests).
 
 | id | toolchain | provenance |
 |---|---|---|
@@ -37,7 +42,10 @@ Consequential findings:
 - **Toolchain images are not bit-reproducible.** Their apt layers resolve current Ubuntu/PPA packages, so image IDs change between rebuilds.
   The reproducible identity is the pinned inputs plus the recorded tool and package versions (manifest `toolchains`). `tc-mint` inherits
   unpinned upstream inputs from the candidate Dockerfile (PPA packages, vasm/vlink/agtools "latest"); its versions are recorded, not
-  guaranteed. Output reproducibility is measured directly: every successful recipe runs twice and its output digests are compared.
+  guaranteed, so **the EmuTOS, listacsi and toolkit-demo results do not meet the pinned-inputs criterion**: their reproducibility is observed
+(two runs, recorded versions), not guaranteed. The vasm/vlink inputs come from upstream "release" URLs, which always serve the latest
+version (no versioned archive exists upstream). The SHA-256 pin fails closed, so `toolchains` stops at the next upstream release until the
+pinned tarballs are supplied from the private cache. Output reproducibility is measured directly by the double run.
 - Toolchain substitutions are declared per recipe, never hidden: vlink for BLINK (BattleIsleEditor), m68k-elf GCC 13.3 for the Neo Geo SDK's
   crosstool-ng GCC, vbcc/vasm for space-invaders' unavailable course toolchain. A substituted build is our build of the authored source, with
   its own truth; it is never presented as a historical rebuild.
@@ -53,14 +61,14 @@ the two mintlib-linked toolkit demos differ inside their PRG symbol tables.
 
 | tier | candidate | platform | class | technical | executed evidence |
 |---|---|---|---|---|---|
-| A | emutos | ST + Amiga | PARTIALLY_QUALIFIED | partial | 4/4 base-68000 targets (MiNT GCC 4.6.4); 4 source files with non-68000 code |
+| A | emutos | ST + Amiga | PARTIALLY_QUALIFIED | partial | 4/4 base-68000 targets (MiNT GCC 4.6.4, date pinned); guarded non-68000 code in bios/processor.S, 68040_pmmu.S, startup.S |
 | A | toslibc | ST | QUALIFIED | qualified | 6 example programs + test suite (m68k-elf GCC 13.3); linux-gnu GCC rejected (68020) |
 | A | atarist-toolkit-docker | ST | QUALIFIED (infrastructure) | qualified | image builds (= `tc-mint`); 5 demo executables |
 | A | space-invaders | ST | PARTIALLY_QUALIFIED | partial | 19 objects (vbcc 0.9g + vasm); link fails (duplicate definitions, cc68x runtime) |
 | A | perihelion-m68k-tutorials | ST | LICENSING_REVIEW_REQUIRED | qualified | 14/14 tutorials (vasm `-devpac`) |
 | A | AtariST (miniupnp) | ST | LICENSING_REVIEW_REQUIRED | partial | 10 vasm programs + listacsi (MiNT GCC); the_80s fails under vasm 2.0f |
-| A | pacman500 | Amiga | BUILD_BLOCKED | blocked | AmigaOS/lvo/WHDLoad includes absent |
-| A | scramble500 | Amiga | BUILD_BLOCKED | blocked | as pacman500 |
+| A | pacman500 | Amiga | BUILD_BLOCKED | blocked | AmigaOS/lvo/WHDLoad includes absent; commercial-derived (1:1 arcade port) |
+| A | scramble500 | Amiga | BUILD_BLOCKED | blocked | as pacman500; commits a Z80 disassembly of the arcade program |
 | A | amiga_asmdev_workflow | Amiga | BUILD_BLOCKED | blocked | only the ZX0 module; assets need GIMP + salvador |
 | A | amiga-realtime3d | Amiga | QUALIFIED | qualified | 9/9 programs (vasm, Amiga hunk) |
 | A | GODLIB | ST | LICENSING_REVIEW_REQUIRED | partial | 120 C objects (vbcc); PASM assembly unassemblable; library only |
@@ -73,7 +81,7 @@ the two mintlib-linked toolkit demos differ inside their PRG symbol tables.
 | B | amiga-boing | Amiga | ASSET_DEPENDENCY_UNAVAILABLE | - | NDK 1.3 headers + Kickstart 1.3 absent; reconstruction |
 | B | monomental | ST | LABEL_TRUTH_INSUFFICIENT | - | assembles (vasm `-devpac`); reconstructed source |
 | B | atari_reverse | ST | ASSET_DEPENDENCY_UNAVAILABLE | - | original commercial executables required; diagnostic |
-| C | neogeosdk | Neo Geo | PARTIALLY_QUALIFIED | partial | demo game compiles + links (m68k-elf GCC 13.3, 55 objects); packaging tool absent |
+| C | neogeosdk | Neo Geo | PARTIALLY_QUALIFIED | partial | demo game: 60 objects + linked m68k ELF executable (m68k-elf GCC 13.3); packaging tool absent |
 | C | x68000dev | X68000 | LICENSING_REVIEW_REQUIRED | partial | C hello world only (m68k-elf); its assembly program is absent from the tree |
 | C | HelloAmi | Amiga | QUALIFIED | qualified | 4 units (vasm); tiny |
 | C | amiga-vasm-template | Amiga | LICENSING_REVIEW_REQUIRED | qualified | one-file template |
@@ -81,6 +89,14 @@ the two mintlib-linked toolkit demos differ inside their PRG symbol tables.
 Totals: QUALIFIED 5 (one is infrastructure), PARTIALLY_QUALIFIED 3, LICENSING_REVIEW_REQUIRED 9, BUILD_BLOCKED 3,
 ASSET_DEPENDENCY_UNAVAILABLE 3, LABEL_TRUTH_INSUFFICIENT 1, CPU_VARIANT_UNSUPPORTED 0. No candidate was wholly CPU-variant unsupported. The
 CPU-variant findings are partial: EmuTOS's guarded spans, galaga's `vbr.68k`, two GODLIB FPU modules, and four archive pilot subprojects.
+The manifest's `cpu_variant_source_files` count is a tree-wide heuristic over assembly sources, not evidence. It cannot see instructions
+hand-encoded as `dc.w` (as in EmuTOS `startup.S`) and it also counts files outside the built targets (EmuTOS's ColdFire file). CPU-variant
+typing in T002 must be decoder-backed.
+
+Every candidate also carries a typed `provenance`: `authored`, `commercial-derived` (the jotd666 arcade ports, including pacman500 and
+scramble500) or `reconstruction` (Mono Mental, amiga-boing, atari_reverse). Only `authored` sources can be QUALIFIED or PARTIALLY_QUALIFIED
+or appear in the usable set. The plan validator enforces this regardless of licence or build outcome, so no later licence decision or
+supplied include can turn commercial-derived code into clean truth.
 
 Notes on the classes:
 
@@ -103,7 +119,9 @@ Notes on the classes:
   undeclared licence is never treated as permissive. The plan validator forbids a technically usable, undeclared-licence candidate from
   carrying any other class.
 - **BUILD_BLOCKED:** pacman500 and scramble500 need AmigaOS assembler includes, the author's private `lvo/*.i` tree and WHDLoad developer
-  includes, none of which the repositories contain. Their sprites are arcade rips, so they would also need licence review.
+  includes, none of which the repositories contain. Both are also commercial-derived: the author describes them as 1:1 ports of the
+  arcade games, and scramble500 commits a Z80-mnemonic disassembly of the arcade program. They are recorded for completeness, not as a
+  route to clean truth.
   amiga_asmdev_workflow needs its asset toolchain (GIMP batch conversion of its own XCF files, salvador ZX0); this is not commercial.
 - **ASSET_DEPENDENCY_UNAVAILABLE:** AmiGalaga (builds from the user's arcade ROM set), amiga-boing (Amiga 1.3 NDK headers + Kickstart 1.3 in
   a private submodule; also a disassembly reconstruction), atari_reverse (needs the original commercial executables; diagnostic only).
@@ -140,6 +158,9 @@ built and have checkable label evidence exist on both target platforms, from fiv
   configuration.
 - Neo Geo: the SDK demo game (m68k-elf GCC 13.3), one SDK lineage.
 
+The two GCC builds (13.3 bare-metal and 4.6.4 MiNT) are counted as one family in two generations. The only review-free compiler-generated
+Amiga code, and the only review-free hand-written Atari ST system assembly, come from EmuTOS: one firmware lineage.
+
 The limits, which T003 must carry:
 
 - Lineage hypothesis only about seven independent lineages, several of them small. Assembly-heavy *games* with mixed code/data, the
@@ -157,8 +178,8 @@ label qualification:
 1. Licence decision (e.g. private-research-only use, or author permission) for the undeclared-licence candidates: perihelion, miniupnp
    AtariST, GODLIB, amiga-vasm-template, x68000dev, and per subproject for the archive.
 2. AmigaOS assembler includes (e.g. Hyperion NDK 3.2 R4 from Aminet `dev/misc/NDK3.2`, which carries no explicit licence statement), the
-   `lvo/*.i` set, and the WHDLoad developer includes, to build pacman500/scramble500 for label qualification. Their arcade-ripped graphics
-   then also need licence review.
+   `lvo/*.i` set and the WHDLoad developer includes. With these, pacman500/scramble500 would build, but only as diagnostic material: they are
+   commercial-derived and stay out of clean truth. The same includes would also let other, authored Amiga OS-using sources be nominated.
 3. Optional: the Galaga arcade ROM set for AmiGalaga (MIT code; ROM = build input); Amiga 1.3 NDK headers + Kickstart 1.3 for amiga-boing
    (diagnostic only; not recommended).
 
