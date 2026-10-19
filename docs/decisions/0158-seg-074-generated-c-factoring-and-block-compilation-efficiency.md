@@ -161,7 +161,7 @@ runtime, launchers, Sega CD materialization and the Compatibility/optimized defa
 ## 4. Measured results (`tools/segarecomp_oracle_bench.t002.json`; clang 18.1.3 `-O2` strict, 4 jobs, cold cache, 11 images / 8 lineages)
 
 Ratios are variant / BASE total build CPU (plan + emit + compile + link), mean over the images of a lineage, then over the 8 lineages. INC is
-the deployed incumbent including its real fallback (Phantasy... D07 falls back in all variants, as in ADR 0157).
+the deployed incumbent including its real fallback (D07 falls back to broad in every variant, as in ADR 0157).
 
 | variant | strategy | CPU mean | D01 | D02 | D03 | D04 | D05 | D06 | D07 | D09 | generated C | peak compiler RSS | bounded throughput |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -175,8 +175,8 @@ the deployed incumbent including its real fallback (Phantasy... D07 falls back i
 Totals over the 11 images (CPU-s): BROAD 4262 -> A 3759 / B 3494 / AB 2982 (-30%); INC 2051 -> A 1814 / B 1484 / AB 1261 (-39%). Wall time
 follows (lineage-mean total wall 0.90 A, 0.90 B for BROAD; AB 0.81 BROAD, 0.80 INC). Executable size AB 0.91 / 0.89 of BASE. Emission CPU
 rises 12% under A (0.7 to 1.1 s on the large images; already counted in the totals). The cache-assisted warm rebuild is unchanged (0.96-0.99).
-Per-image extremes: A 0.85-0.94 in every one of the 22 image-strategy pairs; B 0.40 (Shining Force INC) to 1.06; no image exceeds 1.06
-(section 1.7 allows 1.05 for a registered *adoption* image bound: the largest is B/Flicky/INC 1.006 and B/D09/BROAD 1.012 by lineage; see below).
+Per-image extremes (variant / BASE, either strategy): A 0.847-0.937 (all 22 pairs below 1); B 0.482 (Shining Force INC) to 1.012 (D09 BROAD, the
+only pair above 1); AB 0.402 (Shining Force INC) to 0.915 (D05 BROAD). The largest image ratio is 1.012, below the registered 1.05.
 
 ### Pre-registered thresholds (section 1.7)
 
