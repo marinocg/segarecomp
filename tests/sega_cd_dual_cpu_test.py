@@ -22,6 +22,8 @@ import subprocess
 import sys
 import tempfile
 
+STRESS_TIMEOUT = 600  # SEGARECOMP_CI_MAX_TEST_SECONDS (tests/ci_shards.cmake)
+
 SEGARECOMP, CC, ROOT = sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3]).resolve()
 sys.path.insert(0, str(ROOT / "tests"))
 import sega_cd_common as common  # noqa: E402
@@ -65,7 +67,10 @@ def main():
         check(common.run(exe, disc, 100000)[1] == baseline, "two process runs give identical reports")
         partitions = [["--slice-ticks", str(t)] for t in (1, 977, 2147727, 3500000, 1000000000)]
         partitions += [["--slice-seed", str(s)] for s in range(1, 9)]
-        same = [common.run(exe, disc, 100000, *p)[1] == baseline for p in partitions]
+        # `--slice-ticks 1` interleaves the processors one tick at a time: the deliberate worst-case partition, ~1000x slower than the others
+        # (~22 s on a developer machine, ~120 s on the slowest CI runner), so it gets the per-test cap instead of the shared 120 s run limit.
+        same = [common.run(exe, disc, 100000, *p, timeout=STRESS_TIMEOUT if p == ["--slice-ticks", "1"] else common.RUN_TIMEOUT)[1] == baseline
+                for p in partitions]
         check(all(same), "identical state for %d deadline partitions (%s)" % (len(partitions), same))
 
         main_perturbed = common.run(exe, disc, 100000, "--set", "main:d5=0xDEADBEEF", "--set", "main:a4=0x00123456")[1]

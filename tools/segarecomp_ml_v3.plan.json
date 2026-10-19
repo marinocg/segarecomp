@@ -1,0 +1,487 @@
+{
+ "adr": "0151",
+ "budgets": {
+  "accounting": "N = ceil(cells * percent / 100) ranked cells (score desc, cell ordinal asc) UNION seed cells; retained = |R| / cells; post-validator K/U reported separately (structural closure)",
+  "adaptive": {
+   "abstention": "if b > MAX_RETENTION (0.60): broad AOT for that image (retained = 1.0, recall complete by construction)",
+   "budget": "b = ceil_to_0.01(e + m); N = ceil(cells * b) ranked cells UNION seed cells; retained = |R| / cells",
+   "density_estimate": "e = |{cells: probability >= 0.5}| / cells (the model's own code-density estimate at its balanced decision boundary)",
+   "fitting_images": "development: the out-of-fold records of the OTHER development lineages (nested by lineage; no inner refits - their fold models included the held-out lineage in training, a disclosed limitation); sealed: all development OOF records",
+   "forbidden_inputs": [
+    "source truth",
+    "game identity",
+    "lineage identity",
+    "held-out instruction positions",
+    "runtime traces",
+    "ROM digest",
+    "address"
+   ],
+   "id": "ADAPT",
+   "inputs": "cell probabilities of the candidate (label-free), seed cells, decision-cell count; nothing else",
+   "margin_fit": "m = max over FITTING images i of (residual_frf_i - e_i) + 0.05, floored at 0; residual_frf_i = smallest fraction of the image's cells, taken in rank order (seeds excluded from the count), that together with the seed cells holds every labelled start"
+  },
+  "fixed": {
+   "B35": 35,
+   "B45": 45,
+   "B50": 50,
+   "B60": 60
+  },
+  "max_retention": 0.6,
+  "seeds": "Genesis: production direct-control-discovery seed cells; Sonic CD modules: ADR 0140 seed definition"
+ },
+ "candidates": {
+  "M1_HGB": {
+   "complexity": 1,
+   "role": "simpler control",
+   "what": "gen2 M1: HistGradientBoostingClassifier(max_iter=200, max_depth=4, learning_rate=0.08, min_samples_leaf=40, l2_regularization=1.0, max_bins=255, early_stopping=False, class_weight=balanced, random_state=49) over the 219 gen2 multiscale aggregates; masked cells excluded"
+  },
+  "M3_FROZEN": {
+   "predictions": "historical title-held-out outer folds for s1/flicky/sf1/ps2/sk (reproduced, digest-verified); the production model (trained on those five) for every other image (zero-shot for D05-D12; lineage-correlated for s2/scd (D01) and sf2 (D03), flagged)",
+   "role": "baseline (no change)",
+   "what": "production gen2 M3 weights + representation + token contract, unchanged"
+  },
+  "M3_R": {
+   "complexity": 2,
+   "role": "isolate data",
+   "what": "gen2 M3 architecture, representation and recipe unchanged (seed 49, 30 epochs, AdamW, cosine), trained on the training lineages' images; masked cells carry zero loss weight; pos_weight over labelled cells"
+  },
+  "M4_DENSE": {
+   "complexity": 3,
+   "role": "M68K byte-dense",
+   "training": "margin 512 words of real context or PAD on each side, central 2048 words, batch 8, 4000 steps, AdamW lr 0.002 (x0.1 after 80%), weight decay 1e-4, masked BCE with pos_weight = mean over training lineages of negative/positive labelled words; sampling uniform over training lineages, then images by size within the lineage, window starts multiple of 16 words including image edges; seeds 1, 2, 3; ensemble = mean of the three word logits; no hard-positive emphasis",
+   "what": "dense per-word occupancy CNN: per-word input = embed(hi byte,8) + embed(lo byte,8) + the gen2 MC68000 decode-token embeddings (CPU-owned tokens, same dims as M3) with a distinct PAD index for every channel outside the image; local path 2x Conv1d k5 (32 ch) at word resolution; context path Conv1d k4 stride 4 (32 ch) + residual dilated Conv1d k5 dilations 1,2,4,8,16,32 (radius 504 words = 1008 bytes); fuse 1x1 (64->32) + ReLU + 1x1 head -> per-word logit; cell score = max word logit over the cell; cells {128, 64} bytes evaluated as aggregation only (the same networks)"
+  }
+ },
+ "classification": [
+  "1 RECALL_FAILED: no complete development pair, or the frozen pair misses >= 1 confidently labelled start on any qualified sealed lineage",
+  "2 CORPUS_INSUFFICIENT: fewer than 12 qualified development or 7 qualified sealed lineages (qualified-entry results reported separately; no promotion)",
+  "3 ECONOMICS_NOT_JUSTIFIED: the incumbent M3_FROZEN+B35 is retained, or the frozen alternative fails an economics gate",
+  "4 ADAPTIVE_ONLY_JUSTIFIED: frozen pair = M3_FROZEN + ADAPT",
+  "5 M3_RETRAIN_SUFFICIENT: frozen pair uses M3_R",
+  "6 V3_READY_FOR_OPT_IN: frozen pair uses M4_DENSE or M1_HGB",
+  "positive outcomes (4-6) additionally require the independent adversarial review's concurrence; otherwise the conservative class stands"
+ ],
+ "complexity_order": [
+  "M3_FROZEN",
+  "M1_HGB",
+  "M3_R",
+  "M4_DENSE@128",
+  "M4_DENSE@64"
+ ],
+ "corpus": {
+  "development": [
+   {
+    "lineage": "D01",
+    "members": [
+     {
+      "config": "Revision0",
+      "id": "s1",
+      "image_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+      "revision": "7ebe4b3d0c182b2566026b6d3f423d33539558da",
+      "source": "sonicretro/s1disasm",
+      "title": "Sonic the Hedgehog (USA/Europe REV00)",
+      "truth": "reuse ADR 0099 (digest re-verified)"
+     },
+     {
+      "config": "Sonic3_Complete=0",
+      "id": "sk",
+      "image_sha256": "6e12e6b33c26ebfcd0be433251d21cf6284eafe9f71b027bda3767ae59affec1",
+      "revision": "044fa46725c71187399e13f5ddb70e11d32dc024",
+      "source": "sonicretro/skdisasm",
+      "title": "Sonic & Knuckles (JUE standalone)",
+      "truth": "reuse ADR 0099 (digest re-verified)"
+     },
+     {
+      "config": "REGION=1",
+      "id": "scd",
+      "image_sha256": "operator CUE/BIN (ADR 0140 identity)",
+      "revision": "73a6a358496116bc892c7c068189b0771f273c58",
+      "source": "sonicretro/scddisasm",
+      "title": "Sonic CD (USA) verified application modules",
+      "truth": "reuse ADR 0140: 36 admitted modules, 96,276 starts; module classes kept"
+     },
+     {
+      "config": "documented build.lua procedure",
+      "id": "s2",
+      "image_sha256": "the operator image byte-identical to the build",
+      "revision": "4ef457c18fc4902396c43ab06fabc119ac6ecb64",
+      "source": "sonicretro/s2disasm",
+      "title": "Sonic the Hedgehog 2 (Genesis)",
+      "truth": "new: listing extraction"
+     }
+    ],
+    "name": "Sonic engine lineage"
+   },
+   {
+    "lineage": "D02",
+    "members": [
+     {
+      "config": "default",
+      "id": "flicky",
+      "image_sha256": "4df1a91e08376ae773a6eb8e5abe310f94ca39d8f81583b91a9477fedcb68c11",
+      "revision": "d9a0d4799c25fb23ba6251306508ee40a1ce9a89",
+      "source": "oranguthang/flicky_src",
+      "title": "Flicky (JUE)",
+      "truth": "reuse ADR 0099 (digest re-verified)"
+     }
+    ],
+    "name": "Flicky"
+   },
+   {
+    "lineage": "D03",
+    "members": [
+     {
+      "config": "default",
+      "id": "sf1",
+      "image_sha256": "6c43b41b60ae8147945b4420caeb5eb266e1dd57a0d125b7496fa8fb6fde522d",
+      "revision": "1f466bf038a64f6bdf3113e484bace0c3c66c6f7",
+      "source": "ShiningForceCentral/SF1DISASM",
+      "title": "Shining Force (USA)",
+      "truth": "reuse ADR 0099 (rebuild + digest re-verified)"
+     },
+     {
+      "config": "historical master original-ROM split/assembly",
+      "id": "sf2",
+      "image_sha256": "the operator image byte-identical to the build",
+      "revision": "77e5d6432444cef06e703db4791d6f63fc9a63cd",
+      "source": "ShiningForceCentral/SF2DISASM",
+      "title": "Shining Force II (USA)",
+      "truth": "new: listing extraction"
+     }
+    ],
+    "name": "Shining Force lineage"
+   },
+   {
+    "lineage": "D04",
+    "members": [
+     {
+      "config": "rev2",
+      "id": "ps2",
+      "image_sha256": "a0bd97f5aaa67301923ccc367511606bd3471ea9542919165311d4a23a2b696b",
+      "revision": "c23877b8aa090473562ae2ed571ace2869289167",
+      "source": "wyatt8740/ps2disasm",
+      "title": "Phantasy Star II (USA/Europe REV02)",
+      "truth": "reuse ADR 0099 (rebuild + digest re-verified)"
+     }
+    ],
+    "name": "Phantasy Star II"
+   },
+   {
+    "lineage": "D05",
+    "members": [
+     {
+      "config": "SGDK",
+      "id": "d05",
+      "image_sha256": "reproducible project build",
+      "revision": "931008f890292afec936699821ed0d5de705b2df",
+      "source": "atamurad/sega-2048",
+      "title": "Genesis 2048",
+      "truth": "new: SGDK LTO listing"
+     }
+    ],
+    "name": "Genesis 2048"
+   },
+   {
+    "lineage": "D06",
+    "members": [
+     {
+      "config": "SGDK",
+      "id": "d06",
+      "image_sha256": "reproducible project build",
+      "revision": "6169fb4af2c1c5fb27ea59b5a98997a022b34843",
+      "source": "NeroJin/TetrisMD",
+      "title": "TetrisMD",
+      "truth": "new: SGDK LTO listing"
+     }
+    ],
+    "name": "TetrisMD"
+   },
+   {
+    "lineage": "D07",
+    "members": [
+     {
+      "config": "Genesis version",
+      "id": "d07",
+      "image_sha256": "reproducible project build",
+      "revision": "89adfdd66853746fa9db9105104314ac58021791",
+      "source": "ArtemioUrbina/240pTestSuite",
+      "title": "240p Test Suite (Genesis)",
+      "truth": "new: SGDK LTO listing"
+     }
+    ],
+    "name": "240p Test Suite (Genesis)"
+   },
+   {
+    "lineage": "D08",
+    "members": [
+     {
+      "config": "SGDK",
+      "id": "d08",
+      "image_sha256": "reproducible project build",
+      "revision": "f6238c55d974bbecc25e5e05da355884265642ba",
+      "source": "realbrucest/Mega-Car-Wars",
+      "title": "Mega Car Wars",
+      "truth": "new: SGDK LTO listing"
+     }
+    ],
+    "name": "Mega Car Wars"
+   },
+   {
+    "lineage": "D09",
+    "members": [
+     {
+      "config": "SGDK",
+      "id": "d09",
+      "image_sha256": "reproducible project build",
+      "revision": "1064468a42553fb851abe536c314457269a762fa",
+      "source": "And-0/MegaPong",
+      "title": "MegaPong",
+      "truth": "new: SGDK LTO listing"
+     }
+    ],
+    "name": "MegaPong"
+   },
+   {
+    "lineage": "D10",
+    "members": [
+     {
+      "config": "SGDK",
+      "id": "d10",
+      "image_sha256": "reproducible project build",
+      "revision": "7895531e68cbc46169d3b33379856c7023790039",
+      "source": "danisc23/genesis-megatetris",
+      "title": "Genesis Megatetris",
+      "truth": "new: SGDK LTO listing"
+     }
+    ],
+    "name": "Genesis Megatetris"
+   },
+   {
+    "lineage": "D11",
+    "members": [
+     {
+      "config": "SGDK",
+      "id": "d11",
+      "image_sha256": "reproducible project build",
+      "revision": "8fd19587eb8513611a98059bf6914c69a9c91e83",
+      "source": "alicesim1/Penguin-World",
+      "title": "Penguin World",
+      "truth": "new: SGDK LTO listing"
+     }
+    ],
+    "name": "Penguin World"
+   },
+   {
+    "lineage": "D12",
+    "members": [
+     {
+      "config": "streeter program only",
+      "id": "d12",
+      "image_sha256": "reproducible project build",
+      "revision": "2e8c98862d8c1282e890786e7117152d1ebe072a",
+      "source": "radioation/MegaDriving",
+      "title": "MegaDriving (streeter)",
+      "truth": "new: SGDK LTO listing"
+     }
+    ],
+    "name": "MegaDriving (streeter)"
+   }
+  ],
+  "diagnostic": {
+   "id": "tmss",
+   "revision": "6bef50130248f57c5eaa88b32507a52cfcd4b62f",
+   "role": "diagnostic only: never training, never selection, never counted",
+   "source": "OrionNavattan/TMSS-Disassembly",
+   "title": "Mega Drive/Genesis TMSS boot ROM",
+   "unavailable_class": "TMSS_DIAGNOSTIC_UNAVAILABLE"
+  },
+  "frozen_m3_training_ids": [
+   "s1",
+   "flicky",
+   "sf1",
+   "ps2",
+   "sk"
+  ],
+  "min_development_lineages": 12,
+  "min_sealed_lineages": 7,
+  "rule": "fixed manifest; qualification failures are recorded and never shrink the denominator; no replacements",
+  "sealed": [
+   {
+    "disclosure": "historical ROM-only experiments used a US/EU image of this game (ADR 0099); not entirely unseen",
+    "id": "e01",
+    "image_sha1": "8f6eb584ed9487b8504fbc21d86783f58e6c9cd6",
+    "lineage": "E01",
+    "revision": "4f3d7e852aed6edd7a869afe6c252813c4acf316",
+    "source": "RetrolariumLab/alien_soldier_src",
+    "title": "Alien Soldier (original Japanese)"
+   },
+   {
+    "config": "US",
+    "disclosure": "historical ROM-only experiments used the local image; exact US rebuild match required (header-byte variant not qualified)",
+    "id": "e02",
+    "lineage": "E02",
+    "revision": "fb8a9c6c64ec27c05acea75f9556c928d2b9f081",
+    "source": "lordmir/landstalker_disasm",
+    "title": "Landstalker (original USA)"
+   },
+   {
+    "config": "bit-perfect build",
+    "id": "e03",
+    "lineage": "E03",
+    "revision": "5856daef633cd7162acdf9ddf1a56fa81aedc65b",
+    "source": "sonicretro/kid-chameleon-disasm",
+    "title": "Kid Chameleon"
+   },
+   {
+    "id": "e04",
+    "lineage": "E04",
+    "revision": "90f7be9961c78ca4df2deede0790789aea944f6e",
+    "source": "lab313ru/quackshot_src",
+    "title": "QuackShot"
+   },
+   {
+    "disclosure": "Sonic-related authorship/ecosystem overlap; IDA-derived disassembly (FIXME inline-hex rows are not authoritative)",
+    "id": "e05",
+    "lineage": "E05",
+    "revision": "d835779e55a36fa204edfa34c1a332d9e3836f6c",
+    "source": "sonicretro/spindisasm",
+    "title": "Sonic Spinball"
+   },
+   {
+    "disclosure": "SGDK/GCC ecosystem shared with development homebrew",
+    "id": "e06",
+    "lineage": "E06",
+    "revision": "eb7dc3044f9d2f76047f3b3573971bf86575ca52",
+    "source": "monteslu/retro-homebrew-games",
+    "title": "Tank Battle (genesis/tank-battle only)"
+   },
+   {
+    "disclosure": "SGDK/GCC ecosystem shared with development homebrew",
+    "id": "e07",
+    "lineage": "E07",
+    "revision": "0bdba1e0ea3d7a2e2166f1dde9636a72722c333a",
+    "source": "Ganso/The-Weave",
+    "title": "The Weave"
+   }
+  ]
+ },
+ "economics": {
+  "gate_vs_broad": "generated C reduction >= 30% and compile CPU reduction >= 25% (mean over sealed Genesis images), net of inference",
+  "gate_vs_incumbent": "an alternative must reduce generated C by >= 10% and compile CPU by >= 10% versus M3_FROZEN+B35 on the same images, OR be a reliability improvement (incumbent incomplete where it is complete) with generated C <= +10% versus the incumbent",
+  "measures": [
+   "selected code cells",
+   "emitted instruction functions",
+   "generated C bytes",
+   "compiler CPU and wall",
+   "peak compiler RSS",
+   "final binary size",
+   "ML inference CPU",
+   "net benefit after inference",
+   "cache-reuse note"
+  ],
+  "platforms": [
+   "Genesis immutable ROMs (general bridge, explicit admission plan)",
+   "Sonic CD verified application modules (R-only; no Sega CD R-admission path exists - ADR 0131/0133 - and none is built)",
+   "broad materialized M68K images only where an existing safe admission contract permits (none admits partial ML proposals today -> reported as not comparable)"
+  ]
+ },
+ "environment_rule": "Python/numpy/scikit-learn/torch versions, device, precision (float32), threads and deterministic-algorithm settings are recorded in the frozen record before the sealed truth is opened",
+ "experiment": "SEG-072",
+ "final_fit": "the frozen configuration refit once on ALL qualified development lineages (same recipe/seeds); M3_FROZEN uses the production weights unchanged; an adaptive policy's margin is fitted on all development OOF records of that configuration",
+ "folds": "leave-one-lineage-out over the qualified development lineages (all images of the held-out lineage leave together; merged lineages per INDEPENDENCE)",
+ "hardware": {
+  "benchmark": "before M4-Dense training: verify the available ROCm/PyTorch device without driver changes; final M4-Dense architecture and batch; representative qualified development data; warm-up then one representative epoch (= 500 steps) on CPU (2 threads) and ROCm, repeated 3x; epoch time, data-loading share, throughput, peak RSS/VRAM; estimated total cross-validation time for the actual parallel-CPU farm (8 concurrent 2-thread fits) versus ROCm; ROCm same-seed repeat reproducibility of the trained outputs",
+  "default": "CPU",
+  "rule": "ROCm only if >= 25% estimated end-to-end improvement over the parallel CPU farm AND reproducible; else parallel CPU; unavailable/unstable ROCm falls back explicitly; no kernel optimisation, no architecture change for GPU speed; one backend for every like-for-like comparison"
+ },
+ "independence": {
+  "development_app_code": "pairwise containment of 12-byte shingles of labelled app-code instruction runs (I/c bytes); >= 0.30 in either direction = substantially shared application code -> the two projects count as ONE lineage (merged fold), reported",
+  "sealed_vs_development": "raw-byte 12-byte shingle containment over whole images excluding uniform fill runs (no sealed labels used); >= 0.30 = closely related binary -> reported as correlated (no replacement)",
+  "sonic_family": "all Sonic-family development titles share fold D01 (similar routines never cross a train/test boundary)"
+ },
+ "labels": {
+  "cell": "positive iff it holds >= 1 I; negative iff every byte is D; otherwise masked (excluded from loss and from FRF positives/negatives)",
+  "classes": {
+   "D": "known data (data rows, project resources, padding explained by the build)",
+   "I": "MC68000 instruction-start byte of a source-backed instruction row",
+   "U": "unknown/masked: shared SDK/runtime/libgcc/startup code and data, vectors/header of SDK startup, unverifiable or ambiguous bytes",
+   "c": "continuation byte of that instruction (decoder length)"
+  },
+  "dense_word": "M4-Dense word label: 1 if the word holds an I or c byte, 0 if both bytes are D, masked otherwise",
+  "disassembly": "tools/segarecomp_source_map_extract.py listing semantics (ADR 0099 adapters; fails closed); non-instruction explained bytes = D",
+  "historical_titles": "s1/flicky/sf1/ps2/sk: every byte is explained by the listing, so their cell labels equal the frozen gen2 labels",
+  "ida_derived": "E05: FIXME/inline-hex rows and non-instruction bytes = U (only instruction rows are confident labels)",
+  "recall_scope": "only I starts are scored for recall (confidently labelled starts); U never counts as a miss or a negative",
+  "sgdk": "LTO link-time assembly kept with -save-temps and re-assembled with listings; sections placed with the linker map; app functions/objects = I/c/D; SGDK (libmd, sega.s, rom_head), libgcc and functions whose origin is ambiguous after LTO = U; app resources (rescomp) = D; instrumented build must be byte-identical to the plain build and two clean builds byte-identical"
+ },
+ "metrics": {
+  "aggregates": {
+   "complete": "C outside R = 0 on every image of every development lineage",
+   "mean_retained": "mean over lineages of the mean retained fraction over the lineage's images",
+   "worst_lineage_frf": "max over lineages of the max FRF over the lineage's images"
+  },
+  "per_image": [
+   "labelled starts",
+   "positive/negative/masked cells",
+   "FRF (rank order, ties with the weakest positive counted)",
+   "residual FRF (seeds excluded)",
+   "per policy: retained fraction (seeds + ceil included), C outside R, C outside ML-only, abstained",
+   "Genesis cartridge images: K/U and C outside K from the unchanged prune + validator (structural closure)"
+  ],
+  "secondary": [
+   "AUROC",
+   "precision"
+  ]
+ },
+ "order": [
+  "C1 this plan",
+  "T001 development qualification + truth",
+  "T002 sealed/TMSS qualification + binding",
+  "T003 frozen M3 reproduction + baseline",
+  "T004 adaptive vs fixed on frozen M3",
+  "T005 hardware benchmark, M3-R/M4-Dense/M1-HGB, freeze",
+  "T006 one-shot sealed + economics",
+  "T007 independent review + decision"
+ ],
+ "outcomes": [
+  "V3_READY_FOR_OPT_IN",
+  "M3_RETRAIN_SUFFICIENT",
+  "ADAPTIVE_ONLY_JUSTIFIED",
+  "RECALL_FAILED",
+  "ECONOMICS_NOT_JUSTIFIED",
+  "CORPUS_INSUFFICIENT"
+ ],
+ "plan_id": "seg072-m68k-ml-v3",
+ "representation": {
+  "cell_bytes": 128,
+  "m4_cell_bytes": [
+   128,
+   64
+  ],
+  "token_schema": "segarecomp.m68k_decode_tokens.v1 (gen2, unchanged)"
+ },
+ "schema": "segarecomp.ml_v3_plan.v1",
+ "scope": "OFFLINE research; production gen2 M3, Optimized v1, validator, prune, launcher defaults and Sega CD admission policy unchanged",
+ "sealed": {
+  "binding": "before any training: source commit, build inputs, image digest and an opaque truth digest per qualified entry in the sealed manifest; truth artifacts only under PRIVATE_ROOT/sealed; development tooling refuses that directory and every sealed id",
+  "gate": "zero-miss: any confidently labelled start of a qualified sealed lineage outside R = failure; no refit, recalibration or widening",
+  "retention": "retained fraction reported per lineage (no separate selectivity pass/fail; MAX_RETENTION bounds every policy)",
+  "runtime": "runnable Genesis images: broad vs frozen pair, identical inputs, explicit instruction budget and wall timeout; runtime-equivalent short traces are never evidence of static recall",
+  "unseal": "segarecomp_ml_v3_eval.py sealed: requires segarecomp_ml_v3.frozen.json committed in an ancestor of HEAD and byte-identical, verifies every sealed truth digest, writes a one-shot marker; a second run refuses"
+ },
+ "selection": {
+  "frozen_before_sealed": "exactly one configuration and one policy, plus the training backend/environment, are recorded in segarecomp_ml_v3.frozen.json and committed before the sealed truth is opened",
+  "incumbent": "M3_FROZEN+B35 is retained unless the best alternative pair is complete AND (M3_FROZEN+B35 is incomplete OR the alternative lowers mean retained by >= 0.05 absolute without raising worst-lineage FRF by more than 0.02)",
+  "m4_internal": "M4_DENSE@128 and @64 are configurations of one candidate; both obey the same rule (disclosed: two aggregations of one network)",
+  "no_complete_pair": "if no pair is complete, freeze the pair with the fewest development misses (then lowest mean retained) for descriptive sealed evidence; the outcome is RECALL_FAILED",
+  "order": [
+   "1 complete development recall (filter)",
+   "2 lowest worst-lineage FRF of the configuration (tie set within 0.02)",
+   "3 lowest mean retained fraction (tie set within 0.02)",
+   "4 lowest mean K/U over Genesis development images (tie set within 0.02)",
+   "5 simplest configuration (COMPLEXITY_ORDER), then fixed before adaptive, then the smaller fixed budget"
+  ],
+  "pairs": "every candidate configuration in COMPLEXITY_ORDER x every policy in {B35, B45, B50, B60, ADAPT}"
+ },
+ "status": "FROZEN BEFORE ANY NEW TRUTH EXTRACTION, MODEL FIT OR SEALED QUALIFICATION"
+}

@@ -1,0 +1,33 @@
+{
+ "adaptive_margin": null,
+ "configuration": "M3_R",
+ "environment": {
+  "deterministic_algorithms": true,
+  "device": "cpu",
+  "numpy": "2.5.3",
+  "precision": "float32",
+  "python": "3.13.14",
+  "scikit_learn": "1.9.1",
+  "threads": {
+   "M3_FROZEN": "n/a (inference only)",
+   "M3_R": 4,
+   "M4_DENSE": 2
+  },
+  "torch": "2.14.1+cu130"
+ },
+ "final_weights": {
+  "M3R": "20bfa46f0ec2e4278d75fb5880381f55f58fe204a23577dfabcd5d60b5f6f005"
+ },
+ "incumbent_retained": false,
+ "plan_sha256": "48da926fe0729680fa966f8272148662a66f7a09becc9b7de59046a4c45e4e36",
+ "policy": "B50",
+ "sealed_store": "private sealed/; opened once by `segarecomp_ml_v3_eval.py sealed` after this record is committed",
+ "selection_rule": "selection_order",
+ "selection_table_sha256": "962d955e6440a757bc196b4f7110b685b947e2b69999486d4e82e9cc4181d744",
+ "status": "FROZEN",
+ "training_backend": {
+  "improvement_estimate": 0.08890084242829943,
+  "rule": ">= 25% and reproducible",
+  "selected": "CPU"
+ }
+}

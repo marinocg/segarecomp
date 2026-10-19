@@ -127,11 +127,11 @@ def standard_manifest(disc_dir, names=("MODA.BIN;1", "MODB.BIN;1")):
     return module_list(identity, standard_modules(files, names))
 
 
-def run(exe, disc_dir, budget=2000000, *extra, frame=None):
+def run(exe, disc_dir, budget=2000000, *extra, frame=None, timeout=RUN_TIMEOUT):
     args = [str(exe), "--disc-dir", str(disc_dir), "--instruction-budget", str(budget), *extra]
     if frame is not None:
         args += ["--frame", str(frame)]
-    out = subprocess.run(args, capture_output=True, text=True, timeout=RUN_TIMEOUT)
+    out = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     report = json.loads(out.stdout) if out.stdout.strip() else {}
     return out.returncode, report
 

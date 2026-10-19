@@ -1,0 +1,135 @@
+# ADR 0154: SEG-072 one-shot sealed evaluation, compilation economics and M68K ML v3 decision
+
+- Status: Accepted. **Final classification: `RECALL_FAILED`** (ADR 0151 precedence: a confidently labelled sealed start outside R). Secondary
+  facts, recorded and not hidden under the primary class: the corpus minimums were not met (`CORPUS_INSUFFICIENT` for the full gate:
+  development 11/12, sealed 5/7) and the frozen pair fails the economics gate against the incumbent. Independent adversarial review (T007): PASS WITH
+  FINDINGS, concurs (appended below).
+- Scope: offline research only. **No production change**: production gen2 M3 + B35, Optimized v1, the structural prune, the validator, the
+  launcher defaults and the Sega CD admission policy are unchanged. No model weights trained on private inputs are published.
+- Inputs: frozen record `tools/segarecomp_ml_v3.frozen.json` (committed in `3f7d08b`, ADR 0153); sealed binding ADR 0152. Aggregates:
+  `tools/segarecomp_ml_v3.sealed_results.json`.
+
+## One-shot sealed evaluation (T006)
+
+`segarecomp_ml_v3_eval.py sealed` verified the committed frozen record and wrote the one-shot marker before reading any sealed truth; every
+sealed image and class digest matched the committed binding. Frozen pair: **M3-R + B50** (final refit on all 11 development lineages, weights
+`20bfa46f…`), R = top ceil(0.50 x cells) 128-byte cells UNION production seed cells.
+
+| sealed lineage | labelled starts | missed | retained | FRF (descriptive) | false-admission candidates | deterministic |
+|---|---|---|---|---|---|---|
+| E01 Alien Soldier | 72,444 | **0** | 0.500 | 0.151 | 132,181 | yes |
+| E02 Landstalker | unqualified (ADR 0152) | - | - | - | - | - |
+| E03 Kid Chameleon | 33,508 | **0** | 0.500 | 0.130 | 147,353 | yes |
+| E04 QuackShot | unqualified (ADR 0152) | - | - | - | - | - |
+| E05 Sonic Spinball | 49,140 | **40** | 0.500 | 0.748 | 19,641 | yes |
+| E06 Tank Battle | 2,784 | **0** | 0.500 | 0.343 | 7,300 | yes |
+| E07 The Weave | 24,952 | **0** | 0.500 | 0.125 | 163,298 | yes |
+
+**Zero-miss gate: FAILED** (E05). Descriptive post-unseal diagnosis (no change to anything frozen): the 40 starts lie in two 128-byte cells
+(18 and 22 starts, ~30% code coverage each, adjacent in one area of the image) - mixed code/data fragments that the model ranks below the
+50% budget (E05 full-recall fraction 0.748). Stated limitation: Spinball's rows come from an IDA-derived disassembly whose readme warns that some
+data was interpreted as code; the pre-registered rule (ADR 0151 `labels.ida_derived`) counts its instruction rows as confident labels, and no
+row was reclassified after unsealing. The other four qualified lineages hold full recall with wide margins (FRF 0.13-0.34 against a 0.50
+budget). Per the brief, nothing was refitted, recalibrated or widened after the miss.
+
+Structural closure (unchanged prune + validator; broad-accepted sealed images): E01 accepted, K/U 0.499, C outside K = 0; E03 accepted, K/U
+0.486, C outside K = 0; E05 accepted, K/U 0.483, **C outside K = 104** (the 40 R misses plus starts the prune then drops). E06/E07: the production
+broad-AOT enumerator rejects the images (`effective_address_not_24bit`), so there is no structural stage or generated-native comparison.
+
+Bounded generated-native execution (broad vs frozen pair explicit admission plan vs the incumbent native gen2 route; 120 frames, explicit
+instruction budget, clang): outcome, frame count, final-state, coverage and frame-stream digests equal to broad for both the frozen pair and the
+incumbent on E01, E03 and E05 - including E05, whose short trace does not reach the missed code. Runtime-equivalent short traces are not
+evidence of static recall.
+
+E06 application-code independence (promised in ADR 0152, measured after unsealing): 12-byte shingle containment of E06's labelled code in
+D12 is 0.006 (D12's in E06 0.001), far below 0.30 - the 0.660 raw-byte correlation is the shared SGDK runtime.
+
+TMSS: `TMSS_DIAGNOSTIC_UNAVAILABLE` (no authorized firmware input; ADR 0152). No firmware claim is made; no claim about authentic Sega CD BIOS
+optimization follows from game or homebrew results.
+
+## Compilation economics (per platform)
+
+**Genesis immutable ROMs** (sealed E01, E03, E05; bridge = emission + strict-C11 compile + bounded run):
+
+| image | generated C vs broad | bridge CPU vs broad | generated C vs incumbent M3+B35 | bridge CPU vs incumbent |
+|---|---|---|---|---|
+| E01 | -58.6% | -61.7% | -22.1% | -28.8% |
+| E03 | -41.4% | -42.6% | +33.9% | +36.0% |
+| E05 | -43.1% | -43.7% | +34.1% | +32.1% |
+| mean | **-47.7%** | **-49.3%** | **+15.3%** | **+13.1%** |
+
+Gate versus broad (generated C <= -30%, compile CPU <= -25%): met. Gate versus the incumbent (-10% generated C and -10% CPU, or a reliability
+improvement at <= +10% generated C): **not met** (+15.3% mean; the development reliability improvement does not offset it, and E05's sealed miss
+removes the reliability claim on sealed evidence). ML inference cost (research PyTorch, CPU, whole image): 0.45-7.1 s per sealed image versus
+86-442 s bridge CPU saved against broad - net positive against broad; the incumbent already has a native inference path. Cache-reuse effects were
+not measured separately (each bridge run is a cold, single-image build). Development baseline (ADR 0153): incumbent -38.5% generated C on five
+images.
+
+**Sonic CD verified application modules** (36 modules, development out-of-fold; R-only because no Sega CD R-admission path exists - ADR
+0131/0133 - and none was built): incumbent M3 + B35 reproduces ADR 0140's 306 missed starts in three Work RAM copy modules (mean retained 0.428);
+M3-R + B50 misses none (mean retained 0.557; per class: Word RAM in place 0.500, Work RAM copy 0.501, PCM driver 0.500, sub program 0.726). No
+generated-C or compile-time reduction can be measured or claimed for Sega CD.
+
+**Broad materialized M68K images**: not comparable - no existing safe admission contract admits partial ML proposals for materialized
+images, and none was added (brief).
+
+## Decision
+
+| criterion (ADR 0151 precedence) | result |
+|---|---|
+| 1 complete development pair exists | yes (M3-R+B50/B60, M4-Dense@64+B50/B60) |
+| 1 sealed zero-miss | **no - E05 misses 40 starts** -> `RECALL_FAILED` |
+| 2 corpus minimums 12 / 7 | not met (11 / 5) - would be `CORPUS_INSUFFICIENT` |
+| 3 economics vs incumbent | not met (+15.3% generated C) - would be `ECONOMICS_NOT_JUSTIFIED` |
+
+**Classification: `RECALL_FAILED`.** M3+B35 stays the production experimental `gen2` policy; Compatibility (broad AOT) stays the default and
+the unconditional fallback. What this means and does not mean:
+- The expanded corpus does improve development recall: with ten more lineages, retraining the frozen architecture (M3-R) or the byte-dense
+  M68K model (M4-Dense@64) reaches complete leave-one-lineage-out recall at B50, which the frozen M3 cannot at any budget up to B60 - but only at
+  a ~43% larger budget than B35, and the improvement did not survive the sealed test (E05).
+- B35 is not a safe budget for dense-code images: every model misses D07's dense code at B35 (density/budget failure), and frozen M3's B35 already
+  misses 306 starts in Sonic CD Work RAM copy modules and 7,760 in D07 on development.
+- Adaptive budgets did not help: the single label-free density policy never reached complete recall, and abstained on most images.
+- The byte-dense M4 model is not justified over the simpler M3-R: equal mean retention, worse K/U and weaker on Shining Force.
+- No production integration, model replacement, launcher default change or Sega CD admission-policy change follows. Any further attempt needs a
+  new pre-registered protocol with fresh sealed lineages (E05 and the other four are now exposed), and should treat small mixed code/data
+  fragments and dense-code images explicitly.
+
+## Independent adversarial review (T007)
+
+A fresh adversarial-validator session (no edit rights) attacked pre-registration integrity, ordering, selection, the sealed result, truth
+soundness, privacy and production scope. **Verdict: PASS WITH FINDINGS, no blocker or major; concurs with `RECALL_FAILED` and with "no
+production change".** Independently reproduced: plan untouched since C1 (`verify` OK); sealed binding before any model output; freeze commit
+before the unseal marker, frozen record byte-identical; the development pair table from the private scores (M3-R B50 0 / 0.5048, M4-Dense@64 B50
+0 / 0.5047, M3_FROZEN B35 8,066 / 0.3569, and others) and `select_pair` -> M3-R+B50; the selection-table digest equals the frozen record; 5/5
+historical digests; E05 40 missed starts in 2 cells (both truth copies), 0 on E01/E03/E06/E07; SGDK truth re-run for D05/D06 and extractor re-run
+for s1/sk reproduce their digests; committed data aggregate-only; only tools/, tests/, docs/decisions/ changed. Findings (minor/notes) and
+dispositions: extractor adapters not all strictly additive and `extract()` carries `_cover` - ADR 0152 corrected; retained fraction in bytes vs
+cells (<= 1e-4) and residual-FRF wording - ADR 0153 notes; E06 app-code independence now reported (above); combined T001-T007 PR follows the
+SEG-065/SEG-070 combined-branch precedent (the fast gate runs under the branch-owner ID T001); thin selection margin, sealed truth existing before
+the freeze (digest-bound, tooling-refused; process trust), private default paths in tools (as in the gen2 trainer) - accepted as notes.
+
+Local gate on `5ec7a43` (unchanged code since; this commit is docs-only): `agent-verify: PASS tier=fast`, 129/129 tests, focused
+`segarecomp_ml_v3|segarecomp_source_map_extract|segarecomp_ml_region` (all inside the fast preset). Full/extended gates are CI's.
+
+**Final classification confirmed: `RECALL_FAILED`.**
+
+## Post-hoc addendum: M4-Dense on the sealed games (user-requested, after the decision)
+
+Requested by the user after the one-shot run and the T007 review. **Descriptive only; it does not change the frozen classification
+(`RECALL_FAILED`) or any frozen artifact.** The M4-Dense final ensemble (seeds 1-3, refitted on all 11 development lineages with the unchanged
+recipe; weight digests `2ccb4fee…`, `ed8a54c8…`, `0a0c0309…`) was scored on the five qualified sealed images using the same per-image metric
+code as the sealed run (`evaluate_external`); the one-shot marker and frozen record were not touched. Labelled starts missed (FRF in brackets):
+
+| sealed lineage | M3-R + B50 (frozen) | M4-Dense@64 B35 / B45 / B50 / B60 | M4-Dense@128 B35 / B45 / B50 / B60 |
+|---|---|---|---|
+| E01 Alien Soldier | 0 (0.151) | 0 / 0 / 0 / 0 (0.175) | 0 / 0 / 0 / 0 (0.183) |
+| E03 Kid Chameleon | 0 (0.130) | 0 / 0 / 0 / 0 (0.126) | 0 / 0 / 0 / 0 (0.131) |
+| E05 Sonic Spinball | **40** (0.748) | **171 / 143 / 134 / 134** (0.975) | **171 / 171 / 134 / 134** (0.984) |
+| E06 Tank Battle | 0 (0.343) | 0 / 0 / 0 / 0 (0.318) | 0 / 0 / 0 / 0 (0.317) |
+| E07 The Weave | 0 (0.125) | 0 / 0 / 0 / 0 (0.122) | 0 / 0 / 0 / 0 (0.122) |
+
+Reading: M4-Dense would also have failed the zero-miss gate, more severely than the frozen M3-R (full recall on Spinball would need ~98% of
+the image versus ~75%); on the other four lineages it is marginally better (complete even at B35). This is consistent with the development-based
+choice of the simpler M3-R. The other candidates (frozen M3 recall, M1-HGB) were not evaluated on the sealed games. Same E05 label caveat (IDA-derived
+rows) applies to both models.
