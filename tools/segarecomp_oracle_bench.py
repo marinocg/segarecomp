@@ -48,6 +48,9 @@ sys.path.insert(0, str(HERE))
 SCHEMA = "segarecomp.oracle_bench.v1"
 CELL = 128
 STRATEGIES = ("BROAD", "INC", "M3RB50", "ORACLE_REGION", "ORACLE_INSTR")
+# Non-gating attribution diagnostic added after the first measurement (ADR 0157, not pre-registered): labelled I starts only (unknown U bytes
+# excluded - an optimistic floor that is NOT safe where U holds code), closed upward. Never part of the gate.
+DIAGNOSTICS = ("DIAG_INSTR_LABELLED",)
 # ADR 0156: the gate set (development Genesis images whose broad AOT is accepted) and its lineages - fixed before measurement.
 GATE_IMAGES = {"s1": "D01", "s2": "D01", "sk": "D01", "flicky": "D02", "sf1": "D03", "sf2": "D03", "ps2": "D04",
                "d05": "D05", "d06": "D06", "d07": "D07", "d09": "D09"}
@@ -188,6 +191,42 @@ def generated_counts(directory: pathlib.Path) -> dict:
     return counts
 
 
+def _segment_address(seg: str) -> int:
+    return int(re.match(r"genesis_aot_entry_([0-9A-Fa-f]+):", seg).group(1), 16)
+
+
+def _literals(text: str) -> list[int]:
+    return [int(x, 16) for x in _HEX.findall(text)] + [int(x) for x in _DEC.findall(text)]
+
+
+def rho_decomposition(directory: pathlib.Path) -> dict:
+    """Non-gating (ADR 0157) refinement of rho: of the duplicate entry-segment bytes, the share whose body (provenance line excluded - existing
+    shared helpers already take it as a parameter) differs only in PC-derived literals (every differing literal shifts by the address delta),
+    and the distribution of non-PC literal differences per duplicate (an operand parameter would be needed for each)."""
+    first: dict[str, str] = {}
+    total = dup = pc_only = 0
+    by_operands = {"0": 0, "1": 0, "2": 0, "3+": 0}
+    body = lambda seg: "\n".join(ln for ln in seg.splitlines()[1:] if "GenesisInstructionProvenance" not in ln)  # noqa: E731
+    for p in sorted(x for x in directory.rglob("*") if x.is_file() and x.suffix in (".c", ".h")):
+        text = p.read_text(encoding="utf-8", errors="replace")
+        total += len(text.encode("utf-8", errors="replace"))
+        for seg in aot_segments(text):
+            key = hashlib.sha256(normalize_segment(seg).encode()).hexdigest()
+            if key not in first:
+                first[key] = seg
+                continue
+            n = len(seg.encode())
+            dup += n
+            a = first[key]
+            delta = _segment_address(seg) - _segment_address(a)
+            diffs = [y - x for x, y in zip(_literals(body(a)), _literals(body(seg))) if y != x]
+            operands = sum(1 for d in diffs if d != delta)
+            pc_only += n if operands == 0 else 0
+            by_operands[str(operands) if operands < 3 else "3+"] += n
+    return {"rho": dup / total if total else 0.0, "rho_pc_only": pc_only / total if total else 0.0,
+            "rho_by_operand_literals": {k: v / total if total else 0.0 for k, v in by_operands.items()}}
+
+
 def deployed(strategy_rec: dict, broad_rec: dict) -> dict:
     """The deployed cost of a strategy: its own build when accepted, else the broad build plus the cost of the rejected attempt."""
     if strategy_rec.get("accepted"):
@@ -283,6 +322,15 @@ def run_timed(cmd, cwd=None, timeout=None, stdout=subprocess.DEVNULL) -> dict:
     return {"rc": proc.returncode, "wall": wall, "cpu": ru.ru_utime + ru.ru_stime, "rss_kib": ru.ru_maxrss, "stderr": err.decode(errors="replace")}
 
 
+def tu_family(path) -> str:
+    """Translation-unit family of a generated/runtime source (`bridge_generated_<family>_NN.c`, main, single file, runtime)."""
+    name = pathlib.Path(path).name
+    if name == "runtime.c":
+        return "runtime"
+    m = re.fullmatch(r"bridge_generated_([a-z]+)(?:_\d+)?\.c", name)
+    return m.group(1) if m else "single"
+
+
 def compile_cold(cc: str, flags: list, units: list, include: list, jobs: int, objdir: pathlib.Path) -> dict:
     """Compile every TU (no object cache) with `jobs` concurrent processes; per-process CPU/RSS from wait4. Objects follow unit order."""
     objdir.mkdir(parents=True, exist_ok=True)
@@ -295,7 +343,10 @@ def compile_cold(cc: str, flags: list, units: list, include: list, jobs: int, ob
     bad = [r for r in recs if r["rc"] != 0]
     if bad:
         raise RuntimeError("compile failed: " + bad[0]["stderr"][-2000:])
-    return {"base": base, "objects": objects, "compile_cpu": sum(r["cpu"] for r in recs), "compile_wall": wall,
+    families: dict[str, float] = {}
+    for u, r in zip(units, recs):
+        families[tu_family(u)] = families.get(tu_family(u), 0.0) + r["cpu"]
+    return {"base": base, "objects": objects, "compile_cpu": sum(r["cpu"] for r in recs), "compile_wall": wall, "family_cpu": families,
             "peak_compiler_rss_kib": max(r["rss_kib"] for r in recs), "object_bytes": sum(o.stat().st_size for o in objects), "units": len(units)}
 
 
@@ -410,7 +461,7 @@ def build_strategy(cli: str, rom: pathlib.Path, sha: str, extra: list, work: pat
     rec = {"emit_cpu": e["emit_cpu"], "emit_wall": e["emit_wall"], "emit_rss_kib": e["emit_rss_kib"], "admission": e["admission"],
            "enumeration": e["enumeration"], "counts": counts, "generated_bytes": counts["generated_bytes"], "tu_count": len(e["units"]),
            "compile_cpu": c["compile_cpu"], "compile_wall": c["compile_wall"], "peak_compiler_rss_kib": c["peak_compiler_rss_kib"],
-           "object_bytes": c["object_bytes"], "link_cpu": link["cpu"], "link_wall": link["wall"], "executable_bytes": exe.stat().st_size,
+           "family_cpu": c["family_cpu"], "object_bytes": c["object_bytes"], "link_cpu": link["cpu"], "link_wall": link["wall"], "executable_bytes": exe.stat().st_size,
            "flags": flags, "jobs": jobs, "compiler": cc}
     if cache:
         rec["cache"] = cache_rebuild(c["base"], units, c["objects"], ROOT, work / "cache")
@@ -457,6 +508,8 @@ def measure_image(cli: str, rom: pathlib.Path, sha: str, classes: bytes | None, 
                 continue
             elif name == "ORACLE_REGION":
                 proposal, closure = regions_text(sha, cell_ranges(oracle_region_cells(classes, seeds), size)), "prune"
+            elif name == "DIAG_INSTR_LABELLED":
+                proposal, closure = regions_text(sha, merge_ranges((p, p + 2) for p in labelled_starts(classes))), "close"
             else:
                 proposal, closure = regions_text(sha, oracle_instr_ranges(classes)), "close"
             p = make_plan(cli, rom, sha, proposal, sw / "plan", closure)
@@ -572,7 +625,7 @@ def cmd_measure(a) -> int:
     m3r_regions = {r["id"]: r["policies"]["B50"]["_region"] for r in m3r["records"] if "B50" in r.get("policies", {})}
     for iid in a.images:
         m = reg[iid]
-        out = work / iid / "result.json"
+        out = work / iid / a.result_name
         if out.exists() and not a.force:
             print(f"{iid}: cached", file=sys.stderr)
             continue
@@ -585,12 +638,56 @@ def cmd_measure(a) -> int:
         classes = bundle.file(str((d / "classes.bin").relative_to(bundle.payload))).read_bytes()
         seeds = json.loads(bundle.file(str((d / "seeds.json").relative_to(bundle.payload))).read_text())
         print(f"== {iid}", file=sys.stderr, flush=True)
-        res = measure_image(a.cli, rom, m["sha256"], classes, seeds, m3r_regions.get(iid), work / iid / "w", a.cc, a.opt, a.jobs, a.frames,
+        res = measure_image(a.cli, rom, m["sha256"], classes, seeds, m3r_regions.get(iid), work / iid / ("w" + a.result_name), a.cc, a.opt, a.jobs, a.frames,
                             a.timeout, strategies=tuple(a.strategies), cache=not a.no_cache)
         res.update({"lineage": m["lineage"], "status": "measured", "rom_sha256": m["sha256"]})
-        shutil.rmtree(work / iid / "w", ignore_errors=True)
+        shutil.rmtree(work / iid / ("w" + a.result_name), ignore_errors=True)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(public(res), indent=1, sort_keys=True))
+    return 0
+
+
+def cmd_diag_repr(a) -> int:
+    """Non-gating representation diagnostic (ADR 0157): re-plan and re-emit one strategy's build (ORACLE_REGION by default), decompose rho, and
+    compile each `block` TU separately (same flags, one process at a time) for the distribution of the precise-discovery block compile cost."""
+    dg, bundle = _bundle(a)
+    work = pathlib.Path(a.work).resolve()
+    dg.require_private_dir(work)
+    reg = dg.registry(bundle)
+    runtime_dir = ROOT / "platforms" / "genesis" / "runtime"
+    out = {}
+    for iid in a.images:
+        m = reg[iid]
+        rom = bundle.resolve_image(m)
+        d = pathlib.Path(m["dir"])
+        classes = bundle.file(str((d / "classes.bin").relative_to(bundle.payload))).read_bytes()
+        seeds = json.loads(bundle.file(str((d / "seeds.json").relative_to(bundle.payload))).read_text())
+        w = work / iid / "repr"
+        shutil.rmtree(w, ignore_errors=True)
+        p = make_plan(a.cli, rom, m["sha256"], regions_text(m["sha256"], cell_ranges(oracle_region_cells(classes, seeds), rom.stat().st_size)), w / "plan", "prune")
+        if not p["accepted"]:
+            out[iid] = {"status": "rejected"}
+            continue
+        e = emit(a.cli, rom, m["sha256"], ["--immutable-rom-aot-admission", str(p["plan"])], w / "emit")
+        rec = {"lineage": m["lineage"], "strategy": "ORACLE_REGION", **rho_decomposition(e["dir"])}
+        blocks = [u for u in e["units"] if tu_family(u) == "block"]
+        cpus = []
+        for u in blocks:
+            r = run_timed([a.cc] + BASE_FLAGS + OPT_FLAGS[a.opt] + ["-I", str(runtime_dir), "-I", str(e["dir"]), "-c", "-o", str(w / "b.o"), str(u)])
+            if r["rc"] != 0:
+                raise RuntimeError("block compile failed")
+            text = pathlib.Path(u).read_text(errors="replace")
+            fn_lines = [len(f.splitlines()) for f in re.split(r"\n(?=(?:static )?GenesisControlTransfer genesis_block_)", text)[1:]]
+            cpus.append((r["cpu"], max(fn_lines) if fn_lines else 0, len(fn_lines)))
+        cpus.sort(reverse=True)
+        tot = sum(c for c, _, _ in cpus)
+        rec["block"] = {"tus": len(cpus), "cpu": tot, "top1_tu_share": cpus[0][0] / tot if tot else 0.0,
+                        "top5_tu_share": sum(c for c, _, _ in cpus[:5]) / tot if tot else 0.0,
+                        "largest_function_lines": max((l for _, l, _ in cpus), default=0), "functions": sum(n for _, _, n in cpus)}
+        out[iid] = rec
+        shutil.rmtree(w, ignore_errors=True)
+        print(iid, json.dumps(public(rec)), file=sys.stderr, flush=True)
+    pathlib.Path(a.out).write_text(json.dumps(public(out), indent=1, sort_keys=True))
     return 0
 
 
@@ -656,6 +753,8 @@ def cmd_aggregate(a) -> int:
                     keep["aot_identities"] = int(s.get("enumeration", {}).get("accepted_count", 0) or 0)
                 if "cache" in s:
                     keep["cache"] = s["cache"]
+                if "family_cpu" in s:
+                    keep["family_cpu"] = s["family_cpu"]
                 if "runtime" in s:
                     keep["runtime"] = {k: s["runtime"].get(k) for k in ("ok", "outcome", "frames")}
                 if broad and broad.get("accepted") and (s.get("accepted") or name != "BROAD"):
@@ -664,6 +763,38 @@ def cmd_aggregate(a) -> int:
                                         "c_vs_broad": dep["generated_bytes"] / broad["generated_bytes"]}
                 row["strategies"][name] = keep
         record["images"][iid] = row
+    # Non-gating diagnostics (ADR 0157; not pre-registered): labelled-only instruction admission (unknown bytes excluded), the representation
+    # decomposition, and count-only corpus density (Sonic CD modules aggregated into one row).
+    diag: dict = {"note": "non-gating attribution diagnostics; never part of the ADR 0156 gate"}
+    labelled = {}
+    for iid in GATE_IMAGES:
+        p = work / iid / "diag.json"
+        if p.exists():
+            d = json.loads(p.read_text())
+            s, bro = d["strategies"].get("DIAG_INSTR_LABELLED", {}), d["strategies"].get("BROAD", {})
+            if s.get("accepted"):
+                labelled[iid] = {"k": s.get("k"), "stats": s.get("stats"), "cpu_vs_broad": s["total_cpu"] / bro["total_cpu"],
+                                 "c_vs_broad": s["generated_bytes"] / bro["generated_bytes"], "runtime_equal": s.get("runtime_equal"),
+                                 "runtime": {k: s.get("runtime", {}).get(k) for k in ("outcome", "frames")},
+                                 "broad_runtime": {k: bro.get("runtime", {}).get(k) for k in ("outcome", "frames")}}
+    if labelled:
+        diag["instr_labelled_only"] = labelled
+    if a.diag_repr and pathlib.Path(a.diag_repr).exists():
+        diag["representation"] = json.loads(pathlib.Path(a.diag_repr).read_text())
+    if a.density and pathlib.Path(a.density).exists():
+        rows = json.loads(pathlib.Path(a.density).read_text())["images"]
+        dens = {k: v for k, v in rows.items() if v["kind"] == "genesis_rom"}
+        scd = [v for v in rows.values() if v["kind"] != "genesis_rom"]
+        if scd:
+            keys = ("bytes", "labelled_starts", "instruction_bytes", "unknown_bytes", "data_bytes", "ordinary_decodable_positions", "positive_cells",
+                    "masked_cells", "negative_cells", "seed_cells", "oracle_region_cells", "oracle_instr_positions", "decodable_positions_in_oracle_region", "cells")
+            agg = {k: sum(v[k] for v in scd) for k in keys}
+            agg.update({"modules": len(scd), "lineage": "D01", "kind": "scd_module (aggregate)",
+                        "oracle_instr_fraction_of_decodable": agg["oracle_instr_positions"] / agg["ordinary_decodable_positions"],
+                        "oracle_region_fraction": agg["oracle_region_cells"] / agg["cells"]})
+            dens["scd_modules"] = agg
+        diag["density"] = dens
+    record["diagnostics"] = diag
     out = pathlib.Path(a.out)
     out.write_text(json.dumps(public(record), indent=1, sort_keys=True) + "\n")
     print(json.dumps(public(gate), indent=1, sort_keys=True))
@@ -691,9 +822,17 @@ def main(argv=None) -> int:
     m.add_argument("--bundle", required=True)
     m.add_argument("--rebase", action="append")
     m.add_argument("--images", nargs="+", default=list(GATE_IMAGES))
-    m.add_argument("--strategies", nargs="+", default=list(STRATEGIES), choices=STRATEGIES)
+    m.add_argument("--strategies", nargs="+", default=list(STRATEGIES), choices=STRATEGIES + DIAGNOSTICS)
+    m.add_argument("--result-name", default="result.json", help="per-image result file (diagnostic runs use a separate name)")
     m.add_argument("--force", action="store_true")
     m.set_defaults(fn=cmd_measure)
+    r = sub.add_parser("diag-repr")
+    common(r)
+    r.add_argument("--bundle", required=True)
+    r.add_argument("--rebase", action="append")
+    r.add_argument("--images", nargs="+", default=list(GATE_IMAGES))
+    r.add_argument("--out", required=True)
+    r.set_defaults(fn=cmd_diag_repr)
     d = sub.add_parser("density")
     d.add_argument("--bundle", required=True)
     d.add_argument("--rebase", action="append")
@@ -702,6 +841,8 @@ def main(argv=None) -> int:
     g = sub.add_parser("aggregate")
     g.add_argument("--work", required=True)
     g.add_argument("--out", required=True)
+    g.add_argument("--diag-repr", help="diag-repr output (non-gating)")
+    g.add_argument("--density", help="density output (non-gating)")
     g.set_defaults(fn=cmd_aggregate)
     a = p.parse_args(argv)
     return a.fn(a)
