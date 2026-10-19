@@ -895,20 +895,20 @@
    "blocks": 164,
    "by_class": {
     "CORROBORATED": {
-     "blocks": 97,
-     "starts": 42473
+     "blocks": 96,
+     "starts": 41957
     },
     "DATA_EVIDENCE": {
      "blocks": 4,
      "starts": 168
     },
     "PLAUSIBLE": {
-     "blocks": 28,
-     "starts": 4040
+     "blocks": 30,
+     "starts": 4654
     },
     "UNRESOLVED": {
-     "blocks": 35,
-     "starts": 2459
+     "blocks": 34,
+     "starts": 2361
     }
    },
    "credibility_adjusted_misses": {
@@ -962,6 +962,11 @@
     }
    },
    "data_evidence_starts": 168,
+   "ida_code_xref_parse": {
+    "code_xrefs": 4455,
+    "symbols": 9491,
+    "unresolved": 0
+   },
    "independent_candidates": 8312,
    "labelled_starts": 49140,
    "missed_cells": [

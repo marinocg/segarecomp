@@ -6,8 +6,8 @@
   `sealed` command was not rerun. Production M3 (`gen2`) + B35, Optimized v1, the structural prune, the validator, generated-native
   compilation, launchers, Sega CD hardware and runtime execution are unchanged.
 - Tooling: `tools/segarecomp_ml_v3_diagnose.py` (`smoke`, `infer`, `analyze`); tests `tests/segarecomp_ml_v3_diagnose_test.py` (synthetic,
-  standard library only). Aggregate results: `tools/segarecomp_ml_v3.diagnosis.json` (no addresses, cell indices, labels, bytes or per-cell
-  values; private per-cell results stay in ignored storage).
+  standard library only). Aggregate results: `tools/segarecomp_ml_v3.diagnosis.json` (no addresses, cell indices, labels, bytes or per-cell scores;
+  the only per-cell entries are non-locating aggregates of the six missed E05 cells; private per-cell results stay in ignored storage).
 - Evidence status: development numbers are leave-one-lineage-out out-of-fold (ADR 0153). Numbers on the five qualified sealed lineages are
   **exploratory**: those lineages were exposed by the SEG-072 one-shot run, so nothing here is blind evidence or a production-readiness claim.
 
@@ -61,16 +61,17 @@ classified from evidence that **never uses a model score**:
 - **Independent disassembler:** a candidate from a genuinely independent tool inside the block. The tool was pinned headless Ghidra 12.1.2
   whole-ROM analysis (ADR 0025 recipe), which produced 8,312 code-entry candidates for E05.
 - **Evidenced reference:** an IDA `CODE XREF` whose origin lies in another block that is itself supported by a root or a Ghidra candidate.
-  References from unsupported blocks don't count, because branch-like words inside a table refer only to each other.
+  References from unsupported blocks don't count, because branch-like words inside a table refer only to each other. Origins resolve
+  through the listing's own label definitions: all 4,455 E05 code xrefs resolve, 0 are unresolved.
 - **Flank-data signature:** the histogram intersection between the high-byte distribution of the block's instruction words and that of the
   labelled data words within 512 bytes on each side. Data that was read as code keeps the neighbouring table's signature.
 
 | class | rule | E05 blocks | E05 starts |
 |---|---|---|---|
-| independently corroborated code | root inside, or Ghidra candidate + evidenced reference | 97 | 42,473 |
-| plausible, not independently established | Ghidra candidate or evidenced reference, no data signature | 28 | 4,040 |
+| independently corroborated code | root inside, or Ghidra candidate + evidenced reference | 96 | 41,957 |
+| plausible, not independently established | Ghidra candidate or evidenced reference, no data signature | 30 | 4,654 |
 | evidence suggesting misclassified data | no root, no Ghidra candidate, no evidenced reference, signature >= 0.5 | **4** | **168** |
-| unresolved | otherwise | 35 | 2,459 |
+| unresolved | otherwise | 34 | 2,361 |
 
 The signature threshold sits in an empty gap:
 
@@ -159,7 +160,9 @@ to 0.59x, because they sit in D01/D03. It cannot reach the five sub-segment Soni
 segments; those modules are seed-covered anyway.
 
 M4-Dense already samples lineages uniformly and still did not beat M3-R on development (D03) or on the sealed set (E05). No observed failure
-class is addressed by lineage balancing. Improved recall from this schedule is **not claimed**: it was not trained.
+class is addressed by lineage balancing. The x3 rare-fragment weight does not even raise the rare-fragment share of positive visits (0.126 vs 0.162 actual): lineage balancing moves
+exposure away from D01/D03, where most rare fragments are. The weight is one arbitrary parameterization; the case against H1 rests on the causal
+finding, not on this number. Improved recall from this schedule is **not claimed**: it was not trained.
 
 ## 5. Reinterpreting the old metrics
 
@@ -220,7 +223,7 @@ Fusion reaches no complete pair below B50, is worse than M3-R at B45 (1 image), 
 sealed lineages it is worse than M3-R at every budget (B50: 104 vs 40 misses). **Rejected.**
 
 **B - bounded structural expansion** of M3-R regions tests B1, filling single-cell holes, and B2, linear fall-through from production
-direct-control roots using only the CPU-owned decode tokens (no target is invented, the ML score is never execution authority, the validator
+direct-control roots using only the CPU-owned decode tokens, stopping at any jump, call, return or trap (a callee's return is not assumed) (no target is invented, the ML score is never execution authority, the validator
 is unchanged):
 
 | | B35 | B45 | B50 |
@@ -244,8 +247,8 @@ Estimated cost from SEG-072's recorded CPU measurements:
 
 | hypothesis | estimate |
 |---|---|
-| H1 retraining | 11-fold cross-validation 12,930 CPU-s + final 574 s, about 3.8 CPU-hours (about 23 min wall on the 8-process farm, bounded by the slowest fold of 1,364 s) |
-| H2 | M4-sized network, 33 fits x 868 s x 1.25 (assumed head overhead) + final: about 11 CPU-hours |
+| H1 retraining | 11 folds of 4-thread training, 12,930 fold-seconds, + final 574 s, about 3.75 fold-hours; at least about 36 min wall on the 8-slot farm (11 folds over 8 slots >= 1,616 s, then the final refit) |
+| H2 | M4-sized network, 33 fits x 868 s x 1.25 (assumed head overhead) + final: about 11 fit-hours (2-thread fits) |
 
 Both would need a fresh, untouched evaluation cohort before any claim.
 
@@ -279,7 +282,7 @@ No new ML training is recommended. Reopen M68K ML only if at least one of these 
    instead of M3 + B35. Then the cheapest experiment is a **pre-registered fresh-cohort evaluation of the existing frozen M3-R + B50, with no
    retraining**. Cost: inference seconds per image, plus about 15 minutes per lineage to rebuild/qualify truth (ADR 0152 procedures).
 2. **A ranking change is proposed that targets dense-code images specifically.** It must first show, out-of-fold on development, a D07 ranking
-   excess at or below about 0.03 before any sealed use. Budget for H1-sized training: about 3.8 CPU-hours per cross-validation.
+   excess at or below about 0.03 before any sealed use. Budget for H1-sized training: about 3.75 fold-hours (at least about 36 min wall) per cross-validation.
 
 Prerequisites for any reopened protocol:
 
@@ -310,7 +313,7 @@ listing comes from the private sealed build tree; it is not bundled.
 
 - **The `DATA_EVIDENCE` threshold was set after viewing the E05 distribution.** It lies in an empty gap (0.222 vs 0.687) and has no false
   flags on development listings, but it is exploratory, and it classifies evidence, not ground truth. No row was relabelled.
-- The independent disassembler covers 89% of E05's labelled starts by block. The 35 `UNRESOLVED` blocks (2,459 starts) are neither
+- The independent disassembler covers 89% of E05's labelled starts by block. The 34 `UNRESOLVED` blocks (2,361 starts) are neither
   confirmed nor refuted.
 - Sealed results are exploratory (exposed lineages). M1-HGB has no final model, so it is absent from sealed comparisons. The hypothetical
   schedule's exposure is an expectation, not a training result. Training-cost estimates for H2 include an assumed overhead factor.

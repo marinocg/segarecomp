@@ -39,7 +39,7 @@ FLANK_BYTES = 512               # data window on each side of a labelled code bl
 WALK_LIMIT_BYTES = 4096         # bound on one direct-flow continuation walk
 HARD_POSITIVE_WEIGHT = 3.0      # hypothetical schedule: extra weight of a segment holding a rare-fragment positive cell (not trained here)
 SGDK_LINEAGES = ("D05", "D06", "D07", "D08", "D09", "D10", "D11", "D12")
-CONTROL_TERMINAL = (2, 4, 6, 7)  # token control: direct jump, dynamic jump, return, always-exception/trap (no fall-through)
+CONTROL_TERMINAL = (2, 3, 4, 5, 6, 7)  # token control: jumps, calls, return, trap - only proven fall-through (no callee-return assumption)
 TOKEN_FIELDS = 8                 # segarecomp.m68k_decode_tokens.v1: status, length, family, control, ea_src, ea_dst, width, flags
 SEALED_CLASSES = {"E01": "e01.1.cls", "E03": "e03.1.cls", "E05": "e05.1.cls", "E06": "e06.cls", "E07": "e07.cls"}
 SEALED_RAW = {"E05": "e05.1.raw.cls"}
@@ -330,8 +330,8 @@ def token_at(tokens: bytes, word: int) -> tuple | None:
 
 def direct_flow_cells(tokens: bytes, size: int, roots, cell: int = CELL, limit: int = WALK_LIMIT_BYTES) -> set[int]:
     """Experiment B2: cells covered by linear fall-through from ESTABLISHED roots (production direct-control discovery addresses) using only
-    the CPU-owned decode tokens: continue while the instruction decodes ordinarily with a known length (1..4 words) and does not end flow
-    (direct/dynamic jump, return, trap). Branch/call targets are not followed (the tokens carry none) and nothing is invented."""
+    the CPU-owned decode tokens: continue while the instruction decodes ordinarily with a known length (1..4 words) and is neither a
+    jump, a call (the callee's return is not proven), a return nor a trap; only conditional branches and ordinary instructions continue. Branch/call targets are not followed (the tokens carry none) and nothing is invented."""
     out = set()
     for a0 in sorted(set(roots)):
         a = a0
@@ -392,22 +392,59 @@ def high_byte_signature(rom: bytes, classes: bytes, data_classes: bytes, block, 
 
 
 IDA_LINE = re.compile(r"^ROM:([0-9A-Fa-f]{6,8})\b")
-IDA_XREF = re.compile(r"CODE XREF:\s*(?:ROM:([0-9A-Fa-f]{6,8})|(?:sub|loc|locret)_([0-9A-Fa-f]+)(?:\+([0-9A-Fa-f]+))?)")
+IDA_LABEL = re.compile(r"^ROM:([0-9A-Fa-f]{6,8})\s+([A-Za-z_.@$?][\w.@$?]*):")
+IDA_XREF = re.compile(r"CODE XREF:\s*([^\s\u2191\u2193]+)")
+IDA_AUTO = re.compile(r"^(?:sub|loc|locret|nullsub)_([0-9A-Fa-f]+)$")
 
 
-def parse_ida_code_xrefs(text: str) -> list[tuple[int, int]]:
-    """(listing-line address, referencing address) for every `CODE XREF` comment of an IDA text listing (private input; offline only)."""
-    out = []
+def _ida_symbol(name: str, symbols: dict) -> int | None:
+    if name in symbols:
+        return symbols[name]
+    m = IDA_AUTO.match(name)
+    return int(m.group(1), 16) if m else None
+
+
+def _ida_origin(token: str, symbols: dict) -> int | None:
+    """Resolve one IDA xref origin: `ROM:00012345`, `ROM:loc_123`, `name`, `name+1A`, `func:local` (+offset)."""
+    base, _, off = token.partition("+")
+    try:
+        delta = int(off, 16) if off else 0
+    except ValueError:
+        return None
+    if base.startswith("ROM:"):
+        rest = base[4:]
+        if re.fullmatch(r"[0-9A-Fa-f]{6,8}", rest):
+            return int(rest, 16) + delta
+        base = rest
+    for name in reversed(base.split(":")):
+        v = _ida_symbol(name, symbols)
+        if v is not None:
+            return v + delta
+    return None
+
+
+def parse_ida_code_xrefs(text: str, stats: dict | None = None) -> list[tuple[int, int]]:
+    """(listing-line address, referencing address) for every `CODE XREF` comment of an IDA text listing (private input; offline only).
+    Origins resolve through the listing's own label definitions (named routines, local `func:label` forms) and IDA's auto-name
+    convention; unresolvable origins are counted in `stats` instead of being dropped silently."""
+    symbols = {}
+    for line in text.splitlines():
+        m = IDA_LABEL.match(line)
+        if m:
+            symbols.setdefault(m.group(2), int(m.group(1), 16))
+    out, unresolved = [], 0
     for line in text.splitlines():
         m = IDA_LINE.match(line)
         if not m:
             continue
         for x in IDA_XREF.finditer(line):
-            if x.group(1):
-                src = int(x.group(1), 16)
+            src = _ida_origin(x.group(1), symbols)
+            if src is None:
+                unresolved += 1
             else:
-                src = int(x.group(2), 16) + (int(x.group(3), 16) if x.group(3) else 0)
-            out.append((int(m.group(1), 16), src))
+                out.append((int(m.group(1), 16), src))
+    if stats is not None:
+        stats.update({"code_xrefs": len(out) + unresolved, "unresolved": unresolved, "symbols": len(symbols)})
     return out
 
 
@@ -1183,10 +1220,12 @@ def cmd_analyze(a) -> int:
         L, p = item.split("=", 1)
         recs = json.loads(pathlib.Path(p).read_text())
         ghidra[L] = sorted(r["address"] for r in recs if r.get("kind") == "code_entry_candidate")
-    ida = {}
+    ida, ida_stats = {}, {}
     for item in a.ida_listing or []:
         L, p = item.split("=", 1)
-        ida[L] = parse_ida_code_xrefs(pathlib.Path(p).read_text(errors="replace"))
+        st = {}
+        ida[L] = parse_ida_code_xrefs(pathlib.Path(p).read_text(errors="replace"), st)
+        ida_stats[L] = st
     dev = dev_cases(bundle)
     sealed = sealed_cases(bundle, out)
     consistency = check_sealed_consistency(bundle, sealed)
@@ -1194,6 +1233,9 @@ def cmd_analyze(a) -> int:
         raise SystemExit("regenerated sealed scores do not reproduce the stored frozen regions / post-hoc aggregates")
     cred = analysis_label_credibility(sealed, ghidra, ida)
     cred["development_signature_control"] = analysis_signature_control(bundle, dev)
+    for L, st in ida_stats.items():
+        if L in cred:
+            cred[L]["ida_code_xref_parse"] = st
     comp_dev = analysis_complementarity(dev, DEV_MODELS)
     comp_sealed = analysis_complementarity(sealed, SEALED_MODELS)
     metrics = analysis_metrics(bundle, dev)

@@ -231,8 +231,10 @@ class Expansion(unittest.TestCase):
         self.assertEqual(dg.direct_flow_cells(tokens, 32, [1, -2, 99], cell=8), set())
         self.assertEqual(dg.direct_flow_cells(tokens, 32, [0], cell=8, limit=4), {0})
 
-    def test_conditional_and_call_fall_through_jump_does_not(self):
-        tokens = tok(control=1) + tok(control=3) + tok(control=2) + tok() + tok() + tok() + tok() + tok()
+    def test_only_conditional_and_ordinary_instructions_fall_through(self):
+        tokens = tok(control=1) + tok() + tok(control=3) + tok() + tok() + tok() + tok() + tok()
+        self.assertEqual(dg.direct_flow_cells(tokens, 16, [0], cell=4), {0, 1})   # stops at the call (callee return not proven)
+        tokens = tok(control=1) + tok() + tok(control=0) + tok(control=2) + tok() + tok() + tok() + tok()
         self.assertEqual(dg.direct_flow_cells(tokens, 16, [0], cell=4), {0, 1})
 
 
@@ -252,10 +254,18 @@ class LabelEvidence(unittest.TestCase):
         self.assertIsNone(dg.high_byte_signature(rom2, b"U" * 256 + b"Ic" * 64 + b"U" * 256, b"U" * 640, (256, 384)))
 
     def test_ida_xref_parser(self):
-        text = "\n".join(["ROM:0007099C loc_7099C:  ; CODE XREF: ROM:00070A0C↓j",
-                          "ROM:00001000 sub_1000:  ; CODE XREF: sub_200+1A↑p",
-                          "ROM:00001002 dc.b 1 ; DATA XREF: ROM:00000010↑o", "garbage"])
-        self.assertEqual(dg.parse_ida_code_xrefs(text), [(0x7099C, 0x70A0C), (0x1000, 0x21A)])
+        text = "\n".join(["ROM:00000200 sub_200:", "ROM:00000300 PrintMsg:", "ROM:00000340 loc_340:",
+                          "ROM:0007099C loc_7099C:  ; CODE XREF: ROM:00070A0C\u2193j",
+                          "ROM:00001000 sub_1000:  ; CODE XREF: sub_200+1A\u2191p",
+                          "ROM:00001010 loc_1010:  ; CODE XREF: PrintMsg+4\u2193j",
+                          "ROM:00001020 loc_1020:  ; CODE XREF: sub_200:loc_340\u2191p",
+                          "ROM:00001030 loc_1030:  ; CODE XREF: ROM:loc_340\u2193j",
+                          "ROM:00001040 loc_1040:  ; CODE XREF: Unknown+2\u2193j",
+                          "ROM:00001002 dc.b 1 ; DATA XREF: ROM:00000010\u2191o", "garbage"])
+        st = {}
+        got = dg.parse_ida_code_xrefs(text, st)
+        self.assertEqual(got, [(0x7099C, 0x70A0C), (0x1000, 0x21A), (0x1010, 0x304), (0x1020, 0x340), (0x1030, 0x340)])
+        self.assertEqual(st, {"code_xrefs": 6, "unresolved": 1, "symbols": 9})
 
     def test_reference_origin_must_be_supported(self):
         blocks = [(0, 10, 3), (20, 30, 2), (40, 50, 4)]
