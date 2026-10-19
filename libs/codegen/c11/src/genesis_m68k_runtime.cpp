@@ -143,6 +143,8 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
           if (ctx.return_target_is_computed_jump && !ctx.compiled_entry_lookup_symbol.empty()) {
             // ADR 0048: push-then-RTS computed jump; the popped value must be a final compiled identity.
             out << ctx.compiled_entry_lookup_symbol << "(m68k_observed_return) == NULL";
+          } else if (!ctx.return_target_member_symbol.empty() && !ctx.runtime_return_targets.empty()) {
+            out << "!" << ctx.return_target_member_symbol << "(m68k_observed_return)";
           } else {
           for (std::size_t index = 0; index < ctx.runtime_return_targets.size(); ++index) {
             if (index != 0U) out << " && ";

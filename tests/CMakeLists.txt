@@ -404,6 +404,11 @@ add_test(NAME genesis_immutable_rom_aot_owner_generated_test COMMAND ${Python3_E
 add_test(NAME genesis_immutable_rom_aot_body_factoring_differential_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_body_factoring_differential_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-074-T002 / ADR 0158: opt-in operand-parameterized AOT helpers and the shared return-target membership function
+# are observably identical to the reference (differential harness, mutants, -O2, single-file and sharded forms).
+add_test(NAME genesis_generated_c_compaction_differential_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_generated_c_compaction_differential_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_immutable_rom_aot_negate_disp16_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_negate_disp16_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

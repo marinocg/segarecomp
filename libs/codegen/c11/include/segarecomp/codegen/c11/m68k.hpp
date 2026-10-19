@@ -160,6 +160,11 @@ struct M68kMemoryEmissionContext {
   // SEG-022-T005: a non-owning view. The caller keeps the authoritative sorted vector alive across the
   // `emit_m68k_operation_c` call, so a per-operation context never copies a whole-program-sized set.
   std::span<const std::uint32_t> runtime_return_targets;
+  // SEG-074-T002 / ADR 0158 (opt-in): when non-empty, the C symbol of a caller-owned generated function
+  // `int symbol(uint32_t)` that returns nonzero exactly when its argument is a member of the same
+  // `runtime_return_targets` set. An RTS then tests `!symbol(popped)` instead of spelling the whole set as an
+  // inline `!=` chain. Same set, same stop, same evaluation point.
+  std::string_view return_target_member_symbol;
   // SEG-007-T124 / ADR-0009: the proven, sorted, deduplicated candidate
   // target set for a computed/indirect control transfer (currently JSR
   // through a brief PC-relative indexed EA), populated only by the C4

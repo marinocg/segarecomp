@@ -101,3 +101,20 @@ output directory.
 
 `tools/generated_aot_entry_crosscheck.py <legacy-dir> <direct-dir>` is the exhaustive whole-image equivalence check used for ADR 0083: every
 helper-backed PC selects the same helper, provenance fields and own-PC argument in both forms, and all shared helper bodies are identical.
+
+## Opt-in compaction switches (SEG-074-T002, ADR 0158)
+
+Two emitter switches, both **off by default** (the default output is byte-identical to the previous emitter):
+
+- `--aot-operand-sharing` extends the `genesis_aot_shared_*` scheme with one typed operand parameter: single-use AOT owner bodies that
+  differ in exactly one `UINT8_C/UINT16_C/UINT32_C(n)` constant share one helper
+  `genesis_aot_shared_N(runtime[, source][, genesis_aot_pc], uintW_t genesis_aot_operand)`. Each entry still calls it from its owner
+  `case` with the exact constant it replaced (an operand helper is never a direct entry). Every member is verified by exact restored-text
+  equality, so a hash collision can only cost sharing.
+- `--shared-return-targets` replaces each RTS's inline `m68k_observed_return != ... && ...` chain of the whole-program return-target set
+  with `!genesis_return_target_member(m68k_observed_return)`, one generated sorted `uint32_t` table plus a binary search placed once in the
+  `entries` translation unit (single-file output: before the first block). The set, the typed stop and its evaluation point are unchanged.
+
+`genesis_startup_bridge.py --emitter-flag=<switch>` forwards them (repeatable); `segarecomp_oracle_bench.py measure --emit-flag=<switch>`
+applies them to every emission and runtime build of a run, and `t002-aggregate` applies the ADR 0158 section 1.7 thresholds.
+`tests/genesis_generated_c_compaction_differential_test.py` is the differential, mutant and -O2 evidence.

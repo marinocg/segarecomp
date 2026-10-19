@@ -109,6 +109,32 @@ class ImmutableRomAotDirectEntriesScope {
  private:
   bool previous_;
 };
+// SEG-074-T002 / ADR 0158: opt-in (default off) generation-time selection of the shared return-target membership
+// function. Every RTS then tests the popped return value against one generated sorted table instead of an inline
+// `!=` chain of the whole set. Same set, same typed stop; nothing is decided at run time that was not before.
+class GeneratedCSharedReturnTargetsScope {
+ public:
+  explicit GeneratedCSharedReturnTargetsScope(bool enabled);
+  ~GeneratedCSharedReturnTargetsScope();
+  GeneratedCSharedReturnTargetsScope(const GeneratedCSharedReturnTargetsScope &) = delete;
+  GeneratedCSharedReturnTargetsScope &operator=(const GeneratedCSharedReturnTargetsScope &) = delete;
+
+ private:
+  bool previous_;
+};
+// SEG-074-T002 / ADR 0158: opt-in (default off) generation-time operand-parameterized sharing of single-use AOT bodies
+// that differ in exactly one `UINTn_C` constant. The helper is an ordinary generated function that takes the constant as
+// a typed parameter; nothing is interpreted or decoded at run time and no semantic owner changes.
+class ImmutableRomAotOperandSharingScope {
+ public:
+  explicit ImmutableRomAotOperandSharingScope(bool enabled);
+  ~ImmutableRomAotOperandSharingScope();
+  ImmutableRomAotOperandSharingScope(const ImmutableRomAotOperandSharingScope &) = delete;
+  ImmutableRomAotOperandSharingScope &operator=(const ImmutableRomAotOperandSharingScope &) = delete;
+
+ private:
+  bool previous_;
+};
 // SEG-022-T002: streaming forms. The generated program is written to `sink` as it is produced and is never
 // materialized as one string. The return value is empty on success; a non-empty return is the
 // "/* translation rejected: ... */" text and any bytes already written to `sink` MUST be discarded.

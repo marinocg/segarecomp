@@ -138,6 +138,53 @@ def counters():
     check(pub == {"a": 1.2346, "n": [{"y": 2}]}, f"public() strips private keys and paths: {pub}")
 
 
+def t002_aggregation():
+    """SEG-074-T002 (ADR 0158 1.7): the pre-registered adoption thresholds applied by `t002_evaluate`, on synthetic per-variant records."""
+    def rec(cpu, c=100.0, rss=1000.0, perf=1.0, runtime_digest="x"):
+        return {"total_cpu": cpu, "generated_bytes": c, "peak_compiler_rss_kib": rss, "perf": {"cpu_median": perf, "output_digest": "o"},
+                "runtime": {"ok": True, "outcome": "frames_reached", "frames": 120, "final_state": runtime_digest, "coverage": "c", "frame_stream": "f"},
+                "counts": {"compiled_entry_rows": 7}, "admission": {"k": "1"}}
+    lineage_images = {"s1": "D01", "flicky": "D02", "sf1": "D03", "d05": "D05"}
+    def build(a_scale, b_scale, ab_scale, sf_b=None, a_c=0.9, thr=1.0):
+        images = {}
+        for iid in lineage_images:
+            base = 100.0
+            sfb = sf_b if (iid == "sf1" and sf_b is not None) else b_scale
+            images[iid] = {"base": {"BROAD": rec(base), "INC": rec(base)},
+                           "a": {s: rec(base * a_scale, c=a_c * 100.0, perf=1.0 / thr) for s in ("BROAD", "INC")},
+                           "b": {s: rec(base * sfb) for s in ("BROAD", "INC")},
+                           "ab": {s: rec(base * ab_scale) for s in ("BROAD", "INC")}}
+        return images
+    # Only four of the eight lineages are present in the synthetic set, which the evaluator reports through measured_lineages.
+    ok = b.t002_evaluate(build(0.9, 0.9, 0.8, sf_b=0.5))
+    check(ok["variants"]["a"]["pass"], "A passes when every pre-registered condition holds")
+    check(ok["variants"]["b"]["pass"] and ok["variants"]["b"]["checks"]["best_lineage"], "B passes with a hotspot lineage <= 0.85")
+    check(ok["variants"]["ab"]["pass"], "AB passes when both pass and the combination is not worse than min + tolerance")
+    check(len(ok["variants"]["a"]["measured_lineages"]) == 4, "measured lineages are reported")
+    weak = b.t002_evaluate(build(0.96, 0.9, 0.9, sf_b=0.5))
+    check(not weak["variants"]["a"]["pass"] and weak["variants"]["a"]["checks"]["broad_cpu_mean"] is False, "A fails below the 5% BROAD saving")
+    no_hotspot = b.t002_evaluate(build(0.9, 0.95, 0.9))
+    check(no_hotspot["variants"]["b"]["checks"]["best_lineage"] is False and not no_hotspot["variants"]["b"]["pass"],
+          "B needs the hotspot lineage (<= 0.85) in addition to the mean")
+    regress = b.t002_evaluate(build(0.8, 0.9, 0.85, sf_b=0.5))
+    regress_images = build(0.8, 0.9, 0.85, sf_b=0.5)
+    regress_images["flicky"]["a"]["INC"] = rec(100.0 * 1.06)
+    bad = b.t002_evaluate(regress_images)
+    check(regress["variants"]["a"]["pass"] and not bad["variants"]["a"]["pass"] and bad["variants"]["a"]["checks"]["image_max"] is False,
+          "a single image above 1.05 fails A even when the lineage mean passes")
+    check(not b.t002_evaluate(build(0.9, 0.9, 0.9, a_c=1.0))["variants"]["a"]["pass"], "A needs the generated-C reduction as well")
+    check(not b.t002_evaluate(build(0.9, 0.9, 0.9, thr=0.9))["variants"]["a"]["pass"], "A fails below 0.97 of baseline throughput")
+    non_additive = b.t002_evaluate(build(0.9, 0.9, 0.95, sf_b=0.5))
+    check(not non_additive["variants"]["ab"]["pass"] and non_additive["variants"]["ab"]["combined_non_additivity_ok"]["broad"] is False,
+          "AB is rejected when it is worse than the best single variant + 0.02")
+    eq = b.t002_equivalence(build(0.9, 0.9, 0.9))
+    check(eq["runtime_equal"]["a"] == {"checked": 8, "equal": 8} and eq["compiled_entry_rows_equal"]["ab"]["equal"] == 8,
+          "identical runtime digests and compiled-entry rows are reported equal")
+    diverging = build(0.9, 0.9, 0.9)
+    diverging["s1"]["b"]["BROAD"]["runtime"]["final_state"] = "different"
+    check(b.t002_equivalence(diverging)["runtime_equal"]["b"]["equal"] == 7, "a diverging final-state digest is reported")
+
+
 def privacy_guard():
     import segarecomp_ml_v3_diagnose as dg
     try:
@@ -196,6 +243,7 @@ def main():
     gate()
     counters()
     privacy_guard()
+    t002_aggregation()
     rc = 0
     if len(sys.argv) == 3:
         rc = end_to_end(sys.argv[1], sys.argv[2])
