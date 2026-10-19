@@ -1,0 +1,379 @@
+{
+ "adr": "0161",
+ "backend": {
+  "basis": "SEG-072 hardware benchmark (ROCm 8.9% faster than the 8-process CPU farm, below its 25% rule); same environment (Python 3.13 venv, numpy 2.5.3, scikit-learn 1.9.1, torch 2.14.1 CPU, float32, deterministic algorithms)",
+  "parallelism": "M3_R 4 processes x 4 threads; M4_DENSE 8 processes x 2 threads; M1 sequential",
+  "selected": "CPU"
+ },
+ "barrier": {
+  "rule": "development, tuning and selection tooling refuses the sealed directory, every sealed sample id and every reserved lineage; the binding holds opaque digests only; the sealed labels are opened once by T006 after the frozen candidate is committed",
+  "sealed_dir": "<HARNESS_ROOT>/.cache/seg075/t003/snapshot/sealed",
+  "sealed_samples": 18
+ },
+ "budgets": {
+  "cell_bytes": 128,
+  "fixed": [
+   "B35",
+   "B50",
+   "B60"
+  ],
+  "max_retention": 0.6,
+  "training_effort": "every fit uses its unchanged SEG-072 recipe (epochs/steps/seeds/batch); conditions differ only in the training image list"
+ },
+ "conditions": {
+  "C0": {
+   "name": "Genesis-only",
+   "xplat_training": []
+  },
+  "C1": {
+   "name": "Genesis + Atari ST",
+   "xplat_training": [
+    "toslibc",
+    "emutos"
+   ]
+  },
+  "C2": {
+   "name": "Genesis + Atari ST + Amiga",
+   "xplat_training": [
+    "toslibc",
+    "emutos",
+    "BattleIsleEditor",
+    "amiga-realtime3d"
+   ]
+  }
+ },
+ "corpus": {
+  "snapshot_dev_samples": 36,
+  "snapshot_sealed_samples": 18,
+  "snapshot_sha256": "9c074704903ebf77acb32e6585bf529a096de4301f963cb011e0e6f22a43473d",
+  "t002_manifest_sha256": "d2956dbf3eb11e000bc8fb4fb83b98d548488469b6b0adb912363691c00accb5"
+ },
+ "decisions": {
+  "t005_scope": {
+   "model_A": "always built (cheap): a lightweight structural gradient-boosted model over CPU-owned decode features and local context, evaluated on genesis_lolo and xplat_lolo with the best transfer condition's training set (C2 unless T004 is HARMS, then C0)",
+   "model_B": "built only if headroom exists: the best of {M3_R, M4_DENSE, A} has genesis_lolo mean FRF - mean positive-cell fraction >= 0.05 (the ranking is materially worse than perfect) AND T004 is not EVIDENCE_INSUFFICIENT",
+   "model_C": "built only if B beats A by >= tau in mean FRF without any lineage regressing by > tau",
+   "preference": "if a simpler model is within tau of a more complex one (mean FRF and no extra misses at B50), the simpler is selected"
+  },
+  "t006": {
+   "credibility": "LIMITED: two reserved lineages (platform held-out Neo Geo / GCC 13.3; compiler held-out vbcc, object-only, small); results are descriptive cross-platform evidence; no Genesis generalization claim (no fresh Genesis held-out exists; the SEG-072 sealed cohort is exposed)",
+   "economics": "SEG-074's exact-code benchmark applies to Genesis images only: candidate versus C0 region proposals on Genesis development images (out-of-fold, development evidence), never on the reserved cross-platform lineages",
+   "freeze": "before the sealed labels are opened: one candidate (configuration + training condition + budget policy B50 unless the development table shows a smaller complete fixed budget) and the comparators M3_FROZEN and C0-all M3_R are written to segarecomp_xplat_design.frozen.json and committed",
+   "one_shot": "the sealed reserved lineages are scored once with the frozen models refit on all development data of the frozen condition; a one-shot marker is written to the private sealed directory; a second run refuses",
+   "outcome_rule": "the simplest outcome supported by development evidence AND not contradicted by the one-shot evaluation (a frozen candidate that misses more confident starts at B50 than the C0 comparator on a reserved lineage cannot be recommended); no production model is promoted",
+   "outcomes": [
+    "CORPUS_IMPROVES_EXISTING",
+    "LIGHTWEIGHT_STRUCTURAL_JUSTIFIED",
+    "LOCAL_TRANSFORMER_JUSTIFIED",
+    "GRAPH_TRANSFORMER_JUSTIFIED",
+    "CORPUS_EXPANSION_ONLY",
+    "DATA_INSUFFICIENT",
+    "NO_ECONOMIC_IMPROVEMENT"
+   ]
+  },
+  "transfer": {
+   "EVIDENCE_INSUFFICIENT": "the noise rule fires",
+   "TRANSFER_HARMS": "d_mean >= +tau OR any lineage d_l > +2*tau OR B50 misses increased by > 0",
+   "TRANSFER_HELPS": "d_mean <= -tau AND no lineage d_l > +tau AND B50 misses not increased",
+   "TRANSFER_NEUTRAL": "otherwise",
+   "overall": "the class of C2 under M3_R (primary model, matched to SEG-072's frozen selection); M4_DENSE and C1 reported as corroboration; disagreement between M3_R and M4_DENSE is reported, the M3_R class stands",
+   "per_model": "for each of M3_R and M4_DENSE, compare C2 (and C1) with C0 on genesis_lolo; d_mean = mean FRF(Cx) - mean FRF(C0), d_l = per-lineage difference"
+  }
+ },
+ "dedup": {
+  "rule": "within a lineage, greedy largest-first: an image whose instruction sequences are >= 0.5 contained in the kept images is a near-duplicate; only representatives train; near-duplicates are diagnostic only"
+ },
+ "excluded_t001": {
+  "blocked": [
+   "amiga_asmdev_workflow",
+   "AmiGalaga"
+  ],
+  "commercial_derived": [
+   "galaga",
+   "xevious",
+   "mpatrol",
+   "pacman500",
+   "scramble500"
+  ],
+  "infrastructure": [
+   "atarist-toolkit-docker"
+  ],
+  "licensing_review_required": [
+   "perihelion-m68k-tutorials",
+   "AtariST",
+   "GODLIB",
+   "Atari_ST_Sources",
+   "x68000dev",
+   "amiga-vasm-template"
+  ],
+  "reconstruction": [
+   "amiga-boing",
+   "monomental",
+   "atari_reverse"
+  ]
+ },
+ "feasibility": {
+  "admit_t004": true,
+  "admit_t006_one_shot": true,
+  "checks": {
+   "amiga_training_lineages_ge_2": true,
+   "atari_training_lineages_ge_2": true,
+   "genesis_folds_intact": true,
+   "independent_lineages_no_merge": true,
+   "label_unknown_fraction_le_0.10": true,
+   "mixed_code_data_present": true,
+   "reserved_lineages_ge_2": true,
+   "reserved_platform_or_compiler_held_out": true,
+   "training_toolchain_families_ge_3": true
+  },
+  "development_lineages": [
+   "toslibc",
+   "emutos",
+   "BattleIsleEditor",
+   "amiga-realtime3d"
+  ],
+  "evaluation_credibility": "LIMITED",
+  "genesis_images_available": 50,
+  "genesis_images_unavailable": 0,
+  "reserved_lineages": [
+   "neogeosdk",
+   "space-invaders"
+  ],
+  "training_toolchain_families": [
+   "a68k",
+   "gcc-13",
+   "gcc-4.6+gas",
+   "vasm"
+  ]
+ },
+ "folds": {
+  "genesis_lolo": "leave-one-lineage-out over the 11 qualified SEG-072 development lineages (available images only, see genesis); the held-out Genesis lineage is scored; the condition's cross-platform development representatives are added to every training set (never held out here)",
+  "xplat_lolo": "for each cross-platform development lineage x: C2-minus-x (Genesis + the other three) versus C0-all (Genesis only), both scoring x; this measures transfer to an unseen cross-platform lineage"
+ },
+ "genesis": {
+  "available_by_lineage": {
+   "D01": 39,
+   "D02": 1,
+   "D03": 2,
+   "D04": 1,
+   "D05": 1,
+   "D06": 1,
+   "D07": 1,
+   "D09": 1,
+   "D10": 1,
+   "D11": 1,
+   "D12": 1
+  },
+  "available_ids_sha256": "81f2ddff07dfbaf394a234f07038b123d5315e430492559cb5e6f44221ea4ac4",
+  "available_images": 50,
+  "restored": "the 36 Sonic CD modules (lineage D01) referenced by the SEG-072 registry were restored from the operator's disc image (ISO 9660 files of track 1); every restored file equals the SHA-256 the SEG-072 handoff bundle recorded",
+  "source": "SEG-072 qualified development registry (ADR 0152), images physically available at freeze",
+  "unavailable_by_lineage": {},
+  "unavailable_images": 0,
+  "unavailable_rule": "an image that is unavailable at freeze is excluded from EVERY condition (including C0, then retrained), so comparisons stay matched"
+ },
+ "independence": {
+  "max_pair_containment": 0.0009,
+  "measures": [
+   "code_shingles(12 bytes)",
+   "instruction_sequences(k=8)"
+  ],
+  "merge_threshold": 0.3
+ },
+ "lineages": {
+  "BattleIsleEditor": {
+   "fractions": {
+    "D": 0.4149,
+    "I": 0.1992,
+    "U": 0.0005,
+    "c": 0.3853
+   },
+   "genesis_containment": {
+    "code_shingles": 0.0,
+    "instruction_sequences": 0.0
+   },
+   "near_duplicates": 10,
+   "platform": "amiga",
+   "platform_group": "amiga",
+   "rationale": "six editor variants of one author's code base; near-duplicates reduced to representatives",
+   "representatives": 2,
+   "role": "development",
+   "samples": 12,
+   "size_class": "medium",
+   "starts": 28521,
+   "starts_in_representatives": 4860,
+   "toolchain": "A68K 2.71 + vlink 0.18a",
+   "toolchain_family": "a68k",
+   "workload": "application"
+  },
+  "HelloAmi": {
+   "fractions": {
+    "D": 0.8765,
+    "I": 0.0422,
+    "U": 0.0,
+    "c": 0.0813
+   },
+   "genesis_containment": {
+    "code_shingles": 0.0,
+    "instruction_sequences": 0.0
+   },
+   "near_duplicates": 0,
+   "platform": "amiga",
+   "platform_group": "amiga",
+   "rationale": "82 labelled starts in total: too small to be a training or evaluation lineage",
+   "representatives": 2,
+   "role": "diagnostics_only",
+   "samples": 4,
+   "size_class": "small",
+   "starts": 82,
+   "starts_in_representatives": 82,
+   "toolchain": "vasm 2.0f",
+   "toolchain_family": "vasm",
+   "workload": "hello-world+bootblock"
+  },
+  "amiga-realtime3d": {
+   "fractions": {
+    "D": 0.5721,
+    "I": 0.1367,
+    "U": 0.0001,
+    "c": 0.2911
+   },
+   "genesis_containment": {
+    "code_shingles": 0.0,
+    "instruction_sequences": 0.0008
+   },
+   "near_duplicates": 8,
+   "platform": "amiga",
+   "platform_group": "amiga",
+   "rationale": "nine incremental programs of one tutorial code base; one representative",
+   "representatives": 1,
+   "role": "development",
+   "samples": 9,
+   "size_class": "medium",
+   "starts": 13126,
+   "starts_in_representatives": 2349,
+   "toolchain": "vasm 2.0f",
+   "toolchain_family": "vasm",
+   "workload": "demo/tutorial"
+  },
+  "emutos": {
+   "fractions": {
+    "D": 0.1681,
+    "I": 0.2444,
+    "U": 0.0421,
+    "c": 0.5454
+   },
+   "genesis_containment": {
+    "code_shingles": 0.0002,
+    "instruction_sequences": 0.0004
+   },
+   "near_duplicates": 3,
+   "platform": "atari-st+amiga",
+   "platform_group": "atari-st",
+   "rationale": "one firmware lineage (four configurations); one representative image, the other configurations are near-duplicates (diagnostic only); counted as Atari ST (its primary platform) in every condition",
+   "representatives": 1,
+   "role": "development",
+   "samples": 4,
+   "size_class": "large",
+   "starts": 208244,
+   "starts_in_representatives": 66110,
+   "toolchain": "m68k-atari-mint GCC 4.6.4 + binutils 2.30",
+   "toolchain_family": "gcc-4.6+gas",
+   "workload": "firmware"
+  },
+  "neogeosdk": {
+   "fractions": "sealed (quality checked at freeze: decoder agreement and U fraction within the gate)",
+   "genesis_containment": {
+    "code_shingles": 0.0001,
+    "instruction_sequences": 0.0001
+   },
+   "near_duplicates": 0,
+   "platform": "neo-geo",
+   "platform_group": "neo-geo",
+   "rationale": "platform held-out: the only Neo Geo lineage (never in any training or selection condition)",
+   "representatives": 1,
+   "role": "reserved_evaluation",
+   "samples": 1,
+   "size_class": "large",
+   "starts": 93317,
+   "starts_in_representatives": 93317,
+   "toolchain": "m68k-elf GCC 13.3.0 + binutils 2.42",
+   "toolchain_family": "gcc-13",
+   "workload": "sdk+game"
+  },
+  "space-invaders": {
+   "fractions": "sealed (quality checked at freeze: decoder agreement and U fraction within the gate)",
+   "genesis_containment": {
+    "code_shingles": 0.0,
+    "instruction_sequences": 0.0
+   },
+   "near_duplicates": 0,
+   "platform": "atari-st",
+   "platform_group": "atari-st",
+   "rationale": "compiler held-out: the only vbcc lineage (object-only, small)",
+   "representatives": 14,
+   "role": "reserved_evaluation",
+   "samples": 17,
+   "size_class": "medium",
+   "starts": 3240,
+   "starts_in_representatives": 3232,
+   "toolchain": "vbcc 0.9g + vasm 2.0f",
+   "toolchain_family": "vbcc",
+   "workload": "game"
+  },
+  "toslibc": {
+   "fractions": {
+    "D": 0.0618,
+    "I": 0.2824,
+    "U": 0.0505,
+    "c": 0.6053
+   },
+   "genesis_containment": {
+    "code_shingles": 0.0002,
+    "instruction_sequences": 0.0
+   },
+   "near_duplicates": 5,
+   "platform": "atari-st",
+   "platform_group": "atari-st",
+   "rationale": "Atari ST C runtime library + examples (GCC 13.3); training material in conditions C1/C2",
+   "representatives": 2,
+   "role": "development",
+   "samples": 7,
+   "size_class": "medium",
+   "starts": 14086,
+   "starts_in_representatives": 4783,
+   "toolchain": "m68k-elf GCC 13.3.0 + binutils 2.42",
+   "toolchain_family": "gcc-13",
+   "workload": "application+runtime-library"
+  }
+ },
+ "metrics": {
+  "aggregation": "per lineage first, then mean over lineages (no image- or start-weighted pooling across lineages; EmuTOS counts once)",
+  "co_primary": "worst-lineage FRF (max over Genesis lineages)",
+  "primary": "Genesis transfer: mean over the 11 Genesis lineages of the per-lineage max FRF (required retention fraction at full recall, 128-byte cells, ties with the weakest positive counted) of the held-out fold",
+  "secondary": [
+   "misses (C outside R) at B35/B50/B60 per lineage",
+   "false-positive admissions: negative (all-D) cells inside R at B50",
+   "residual FRF (seeds excluded)",
+   "AUROC over labelled cells",
+   "M4 cell 64 aggregation",
+   "short/mixed stratum: positive cells holding <= 8 starts or any D byte (misses among them)",
+   "xplat_lolo FRF / misses per cross-platform lineage",
+   "per toolchain family and per platform"
+  ]
+ },
+ "models": {
+  "C0_reuse": "condition C0 genesis_lolo fold scores ARE the preserved SEG-072 development fold scores (M3R/M4 s1-s3/M1; same images, recipe and environment), admitted only after a bitwise reproduction check: one M3_R fold and one M4_DENSE seed-1 fold are retrained and must equal the preserved arrays exactly; otherwise every C0 fold is retrained",
+  "M1_HGB": "SEG-072 M1 control (HistGradientBoosting over the gen2 aggregates, random_state 49), all conditions",
+  "M3_FROZEN": "production gen2 M3 weights, unchanged (zero-shot reference on every development image)",
+  "M3_R": "SEG-072 M3-R recipe unchanged (seed 49, 30 epochs), all conditions; condition C0 additionally with seed 50 (noise floor)",
+  "M4_DENSE": "SEG-072 M4-Dense recipe unchanged (seeds 1-3 ensemble, cells 128 and 64), conditions C0 and C2"
+ },
+ "noise": {
+  "insufficient_if": "tau > 0.05 or any planned fit fails twice",
+  "rule": "noise floor n = max over Genesis lineages of |FRF(M3_R seed 49) - FRF(M3_R seed 50)| in condition C0, but the decision threshold tau = max(0.01, 2 * mean over lineages of that absolute difference)"
+ },
+ "schema": "segarecomp.xplat_design.plan.v1",
+ "seg072_sealed_cohort": "exposed by SEG-072: development/diagnostic only, never fresh evidence",
+ "task": "SEG-075-T003"
+}

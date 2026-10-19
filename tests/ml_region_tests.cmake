@@ -113,3 +113,7 @@ set_property(TEST segarecomp_xplat_handoff_test APPEND PROPERTY LABELS full fast
 add_test(NAME segarecomp_xplat_corpus_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_corpus_test.py $<TARGET_FILE:segarecomp>)
 set_property(TEST segarecomp_xplat_corpus_test APPEND PROPERTY LABELS full fast)
+# SEG-075-T003/T004 (ADR 0161): lineage deduplication, feasibility gate, evaluation barrier, frozen plan invariants, metrics and the
+# pre-registered transfer rule (standard library, synthetic data + the committed plan).
+add_test(NAME segarecomp_xplat_design_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_design_test.py)
+set_property(TEST segarecomp_xplat_design_test APPEND PROPERTY LABELS full fast)
