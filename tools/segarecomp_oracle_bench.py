@@ -324,6 +324,31 @@ def run_timed(cmd, cwd=None, stdout=subprocess.DEVNULL) -> dict:
     return {"rc": proc.returncode, "wall": wall, "cpu": ru.ru_utime + ru.ru_stime, "rss_kib": ru.ru_maxrss, "stderr": err.decode(errors="replace")}
 
 
+PERF_BUDGET = 60_000_000
+
+
+def runtime_perf(exe: pathlib.Path, budget: int, runs: int = 5, timeout: int = 900) -> dict:
+    """SEG-074-T002 bounded runtime throughput of the linked generated program: the built executable is run `runs` times with an explicit
+    instruction budget and a wall timeout (never unbounded); user+system CPU of the child from RUSAGE_CHILDREN deltas, median reported. The
+    sanitized output digest must be identical across runs (determinism) and across variants (checked by the aggregator)."""
+    import hashlib
+    import resource
+    import statistics
+    samples, digests, rc = [], set(), None
+    for _ in range(runs):
+        before = resource.getrusage(resource.RUSAGE_CHILDREN)
+        try:
+            done = subprocess.run([str(exe), "--instruction-budget", str(budget)], capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return {"budget": budget, "timeout": True}
+        after = resource.getrusage(resource.RUSAGE_CHILDREN)
+        samples.append((after.ru_utime - before.ru_utime) + (after.ru_stime - before.ru_stime))
+        digests.add(hashlib.sha256(done.stdout + done.stderr).hexdigest())
+        rc = done.returncode
+    return {"budget": budget, "cpu_median": statistics.median(samples), "cpu_samples": [round(x, 4) for x in samples], "rc": rc,
+            "output_digest": next(iter(digests)) if len(digests) == 1 else "NONDETERMINISTIC"}
+
+
 def tu_family(path) -> str:
     """Translation-unit family of a generated/runtime source (`bridge_generated_<family>_NN.c`, main, single file, runtime)."""
     name = pathlib.Path(path).name
@@ -430,7 +455,7 @@ def runtime_check(cli: str, rom: pathlib.Path, extra: list, out: pathlib.Path, f
            "--immutable-rom-aot", "--execution-coverage", str(frames), "--coverage-epoch-frames", str(frames), "--coverage-no-render",
            "--instruction-budget", str(budget), "--out-dir", str(out), "--cc", cc, "--build-profile", "quick"] + extra
     for flag in EMIT_FLAGS:
-        cmd += ["--emitter-flag", flag]
+        cmd += ["--emitter-flag=" + flag]
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     line = next((ln for ln in done.stderr.splitlines() if ln.startswith("COVERAGE_SUMMARY ")), None)
     rec: dict = {"ok": line is not None, "instruction_budget": budget}
@@ -467,6 +492,8 @@ def build_strategy(cli: str, rom: pathlib.Path, sha: str, extra: list, work: pat
            "compile_cpu": c["compile_cpu"], "compile_wall": c["compile_wall"], "peak_compiler_rss_kib": c["peak_compiler_rss_kib"],
            "family_cpu": c["family_cpu"], "object_bytes": c["object_bytes"], "link_cpu": link["cpu"], "link_wall": link["wall"], "executable_bytes": exe.stat().st_size,
            "flags": flags, "jobs": jobs, "compiler": cc}
+    if PERF_BUDGET:
+        rec["perf"] = runtime_perf(exe, PERF_BUDGET)
     if cache:
         rec["cache"] = cache_rebuild(c["base"], units, c["objects"], ROOT, work / "cache")
     shutil.rmtree(work / "obj", ignore_errors=True)
@@ -818,6 +845,7 @@ def main(argv=None) -> int:
         sp.add_argument("--timeout", type=int, default=3600)
         sp.add_argument("--work", required=True)
         sp.add_argument("--no-cache", action="store_true")
+        sp.add_argument("--perf-budget", type=int, default=60_000_000, help="SEG-074-T002 instruction budget of the bounded runtime-throughput runs (0 disables)")
         sp.add_argument("--emit-flag", action="append", default=[], choices=["--shared-return-targets", "--aot-operand-sharing"],
                         help="SEG-074-T002: opt-in emitter switch applied to every emission (repeatable); the result name should record the variant")
     f = sub.add_parser("fixture")
@@ -852,6 +880,8 @@ def main(argv=None) -> int:
     g.set_defaults(fn=cmd_aggregate)
     a = p.parse_args(argv)
     EMIT_FLAGS[:] = list(getattr(a, "emit_flag", []) or [])
+    global PERF_BUDGET
+    PERF_BUDGET = getattr(a, "perf_budget", PERF_BUDGET)
     return a.fn(a)
 
 
