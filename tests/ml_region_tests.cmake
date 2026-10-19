@@ -96,3 +96,9 @@ add_test(NAME segarecomp_oracle_bench_fixture_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_oracle_bench_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER})
 set_property(TEST segarecomp_oracle_bench_fixture_test APPEND PROPERTY LABELS full fast)
 set_property(TEST segarecomp_oracle_bench_fixture_test PROPERTY SKIP_RETURN_CODE 77)
+# SEG-075-T001 (ADR 0159): cross-platform MC68000 source qualification. Plan invariants, executable-container probes, the CPU-variant scan,
+# deterministic archive-pilot selection, the privacy guard, recipe evaluation and the sanitized manifest's contradiction check, all on
+# synthetic data (no network, Docker or third-party source); the committed manifest is checked against the frozen plan.
+add_test(NAME segarecomp_xplat_qualify_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_qualify_test.py)
+set_property(TEST segarecomp_xplat_qualify_test APPEND PROPERTY LABELS full fast)
