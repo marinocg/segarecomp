@@ -150,11 +150,30 @@ def test_plan_tamper():
             rx.PLAN, rx.DIGEST = old
 
 
+def test_rocm_amendment():
+    import segarecomp_xplat_explore as rx
+    p = rx.HERE / "segarecomp_xplat_explore.t001.rocm.plan.json"
+    if not p.is_file():
+        print("skip: no ROCm amendment in this tree")
+        return
+    import hashlib
+    doc = json.loads(p.read_text())
+    digest = (rx.HERE / "segarecomp_xplat_explore.t001.rocm.plan.digest").read_text().strip()
+    check(hashlib.sha256(rx.canonical(doc)).hexdigest() == digest, "amendment digest matches")
+    check(doc["t001_plan_sha256"] == rx.plan_sha(), "amendment bound to the frozen T001 plan")
+    check(doc["resources"]["parallel_fits"] == 1 and doc["resources"]["attempts"] == 1, "serial ROCm, one attempt")
+    check(doc["seed"] == rx.PILOT_SEED, "same pilot seed")
+    want = [f"{m}.{f}" for m in ("B", "C") for f in rx.GENESIS + ("all",)] + ["B.D05.repro", "C.D05.repro"]
+    check(doc["jobs"] == want, "amendment jobs: B and C on every fold plus determinism refits")
+    check("never replacing" in doc["reporting"], "amendment never replaces the pre-registered class")
+
+
 def main() -> int:
     test_barrier()
     test_strata()
     test_expansion()
     test_plan_tamper()
+    test_rocm_amendment()
     if FAILURES:
         print(f"{len(FAILURES)} failure(s)")
         return 1
