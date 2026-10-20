@@ -1,6 +1,6 @@
 {
  "label": "c3-t003-freeze",
- "manifest_sha256": "d35155cd4a7c6b9a993dcc7554e2e77b4aa94fcec31a4f8db55de4c41239f8ed",
+ "manifest_sha256": "14faa5dae1a03cb4498f61921f2c7d12b3f208c7abec03052de7b597dd5043f7",
  "required_problems": 0,
  "schema": "segarecomp.xplat_handoff.receipt.v1",
  "storage": {
@@ -96,7 +96,7 @@
    "PRESENT_AND_VERIFIED": 16457,
    "PRESENT_UNVERIFIED": 44
   },
-  "physical_bytes": 4548388074,
+  "physical_bytes": 4548411327,
   "physical_files": 31772
  },
  "verification": {
@@ -107,7 +107,7 @@
   },
   "problems": 0,
   "verdict": "PASS",
-  "verified_bytes": 4548388074,
+  "verified_bytes": 4548411327,
   "verified_files": 31772
  }
 }

@@ -1,14 +1,23 @@
 {
  "adr": "0161",
  "backend": {
-  "basis": "SEG-072 hardware benchmark (ROCm 8.9% faster than the 8-process CPU farm, below its 25% rule); same environment (Python 3.13 venv, numpy 2.5.3, scikit-learn 1.9.1, torch 2.14.1 CPU, float32, deterministic algorithms)",
-  "parallelism": "M3_R 4 processes x 4 threads; M4_DENSE 8 processes x 2 threads; M1 sequential",
+  "basis": "SEG-072 hardware benchmark (ROCm 8.9% faster than the 8-process CPU farm, below its 25% rule); research venv rebuilt at the recorded versions (Python 3.13.14, numpy 2.5.3, scikit-learn 1.9.1, torch 2.14.1+cu130 on CPU, float32, deterministic algorithms)",
+  "parallelism": "M3_R 4 processes x 4 threads; M4_DENSE 8 processes x 2 threads; M1 2 processes",
   "selected": "CPU"
  },
  "barrier": {
   "rule": "development, tuning and selection tooling refuses the sealed directory, every sealed sample id and every reserved lineage; the binding holds opaque digests only; the sealed labels are opened once by T006 after the frozen candidate is committed",
   "sealed_dir": "<HARNESS_ROOT>/.cache/seg075/t003/snapshot/sealed",
   "sealed_samples": 18
+ },
+ "bound_code": {
+  "segarecomp_ml_region_gen2.py": "5b5e07c6b6a2ae3af3a1a45aead275a23bd110a25bbfbf5efd73307d817650d3",
+  "segarecomp_ml_region_gen2_train.py": "5828443db2bba8dcbd8e6034be9f16524299039cd9434f548fb5caf3e3fa2c0c",
+  "segarecomp_ml_v3.py": "ef18ab40e1da9f25ecc4e1e0a9f0f630453fc8e15b13812750e133d8998947ba",
+  "segarecomp_ml_v3_eval.py": "eea86b0b1c35d79b235c4f0ed1e559cbb36fb190bc36509221184140aa6fa213",
+  "segarecomp_ml_v3_train.py": "7234c6ffe964f0f6db44126d760fb60eff6ce97b30e93a7034d3e1e2bb97592f",
+  "segarecomp_xplat_design.py": "1b06d0c310801730e637b1ffcea0eada4f1adc81bb08641a326ef4c889bdcd61",
+  "segarecomp_xplat_transfer.py": "57c2f75d822383610c321a40d5616e358b93a73375d63859b67e765e2f2783a1"
  },
  "budgets": {
   "cell_bytes": 128,
@@ -45,22 +54,49 @@
  "corpus": {
   "snapshot_dev_samples": 36,
   "snapshot_sealed_samples": 18,
-  "snapshot_sha256": "9c074704903ebf77acb32e6585bf529a096de4301f963cb011e0e6f22a43473d",
+  "snapshot_sha256": "74799cca5f87f263f7ea3550c385cc050cc57941e33fceb8a46399a136080086",
   "t002_manifest_sha256": "d2956dbf3eb11e000bc8fb4fb83b98d548488469b6b0adb912363691c00accb5"
  },
  "decisions": {
+  "ordering": {
+   "complexity": [
+    "M3_FROZEN",
+    "M1_HGB",
+    "A",
+    "M3_R",
+    "M4_DENSE@128",
+    "M4_DENSE@64",
+    "B",
+    "C"
+   ],
+   "condition": "each configuration in its best transfer condition (C2 if its class is HELPS or NEUTRAL, else C0)",
+   "rule": "a configuration's development record = (genesis B50 misses summed over lineages, genesis mean ER, xplat_lolo mean ER, complexity); candidates are compared lexicographically: fewer B50 misses; then lower genesis mean ER unless within tau (treated equal); then lower xplat_lolo mean ER unless within tau; then the simpler configuration"
+  },
   "t005_scope": {
-   "model_A": "always built (cheap): a lightweight structural gradient-boosted model over CPU-owned decode features and local context, evaluated on genesis_lolo and xplat_lolo with the best transfer condition's training set (C2 unless T004 is HARMS, then C0)",
-   "model_B": "built only if headroom exists: the best of {M3_R, M4_DENSE, A} has genesis_lolo mean FRF - mean positive-cell fraction >= 0.05 (the ranking is materially worse than perfect) AND T004 is not EVIDENCE_INSUFFICIENT",
-   "model_C": "built only if B beats A by >= tau in mean FRF without any lineage regressing by > tau",
-   "preference": "if a simpler model is within tau of a more complex one (mean FRF and no extra misses at B50), the simpler is selected"
+   "code_binding": "the A/B/C implementation files are written after this freeze and are bound by digest in a T005 pre-fit addendum (segarecomp_xplat_design.t005.json, committed and reviewed before any A/B/C fit)",
+   "condition": "models A/B/C train on C2 unless the T004 overall class is TRANSFER_HARMS (then C0); same genesis_lolo and xplat_lolo folds as T004; no hyper-parameter search (fixed configurations below) - nothing is tuned on the folds compared",
+   "model_A": "always built: sklearn HistGradientBoostingClassifier(max_iter=300, max_depth=6, learning_rate=0.05, min_samples_leaf=40, l2_regularization=1.0, max_bins=255, early_stopping=False, class_weight=balanced, random_state=49) over per-cell features: counts per token field value (status/length/family/control/ea_src/ea_dst/width/flags) over the cell's words; ordinary-decode chain features (longest chain of consecutive ordinary decodes following decoder lengths starting in the cell; number of chain starts); direct control-flow candidates (branch/call targets computed from the opcode displacement or absolute operand of ordinary direct-control decodes: count landing in the image on an ordinary decode, count landing in this cell from anywhere); byte context (zero-byte fraction, printable-ASCII fraction, byte-value entropy); relocation-field count in the cell (0 for Genesis); seed-cell flag; the same aggregates over the +/-1 and +/-4 neighbour cells; masked cells excluded from training",
+   "model_B": "built only if the ordering's best of {M1_HGB, A, M3_R, M4_DENSE} has genesis mean ER >= 0.10 AND T004 is not EVIDENCE_INSUFFICIENT: a bounded local instruction-aware Transformer: per-word input = embed(hi byte) + embed(lo byte) + the M3/M4 decode-token embeddings, d_model 64, 2 encoder layers, 4 heads, feed-forward 128, learned positions, attention restricted to non-overlapping 256-word windows with 64 words of real context (or PAD) on each side; per-word logit -> cell max (M4 aggregation); training exactly M4's budget and recipe (4000 steps, batch 8, AdamW lr 0.002 x0.1 after 80%, weight decay 1e-4, masked BCE with M4's pos_weight, lineage-uniform sampling, seeds 1-3 averaged)",
+   "model_C": "built only if B is better than A by the ordering with genesis mean ER lower by >= tau: B plus 2 rounds of typed sparse message passing per encoder layer over edges within the window+context: fall-through (ordinary decode -> next position by decoder length), direct branch / call target (computed as for A), overlapping interpretation (positions inside a decoded instruction's extent), each typed separately as CANDIDATE edges, plus a node flag for positions statically reachable from seed roots by fall-through and direct edges (PROVEN); hypothetical edges never mark a position reachable; same training budget as B",
+   "preference": "the ordering rule (simpler wins within tau and without extra misses)"
   },
   "t006": {
-   "credibility": "LIMITED: two reserved lineages (platform held-out Neo Geo / GCC 13.3; compiler held-out vbcc, object-only, small); results are descriptive cross-platform evidence; no Genesis generalization claim (no fresh Genesis held-out exists; the SEG-072 sealed cohort is exposed)",
-   "economics": "SEG-074's exact-code benchmark applies to Genesis images only: candidate versus C0 region proposals on Genesis development images (out-of-fold, development evidence), never on the reserved cross-platform lineages",
-   "freeze": "before the sealed labels are opened: one candidate (configuration + training condition + budget policy B50 unless the development table shows a smaller complete fixed budget) and the comparators M3_FROZEN and C0-all M3_R are written to segarecomp_xplat_design.frozen.json and committed",
-   "one_shot": "the sealed reserved lineages are scored once with the frozen models refit on all development data of the frozen condition; a one-shot marker is written to the private sealed directory; a second run refuses",
-   "outcome_rule": "the simplest outcome supported by development evidence AND not contradicted by the one-shot evaluation (a frozen candidate that misses more confident starts at B50 than the C0 comparator on a reserved lineage cannot be recommended); no production model is promoted",
+   "confident_starts": "the I-labelled starts of the sealed samples (ADR 0160 labels; U never counts as a miss)",
+   "credibility": "LIMITED: two reserved lineages (platform held-out Neo Geo, its GCC 13 compiler family is in training via toslibc; compiler held-out vbcc, object-only, small, shares vasm and the Atari ST platform with training); descriptive cross-platform evidence; no Genesis generalization claim",
+   "economics": "economic measure = complete budget: the smallest of B35/B50/B60 whose genesis_lolo B-misses summed over all 11 lineages are <= the M3_R seed-replicate allowance sum (sum a_l); a candidate is economically better than the comparator C0 M3_R iff its complete budget is smaller (retained cells -30%/-17%); when it is, the SEG-074 exact-code benchmark (tools/segarecomp_oracle_bench.py, unchanged) measures generated C bytes and compile CPU on the Genesis development images it supports, at both budgets, and the improvement is confirmed only if generated C falls by >= 10% AND compile CPU by >= 10% (SEG-072's incumbent gate); never run on the reserved cross-platform lineages",
+   "evaluated_samples": "every sealed sample with >= 1 labelled start (all of them, not only representatives - no reserved image trains); ER over informative samples; misses over all samples; per reserved lineage",
+   "freeze": "before the sealed labels are opened: the ordering's best configuration (+ its condition) as the candidate, budget policy B50, and the comparators M3_FROZEN and C0-all M3_R+B50 are written to segarecomp_xplat_design.frozen.json and committed",
+   "one_shot": "the frozen candidate and comparators are refit on all development data of their condition (fold 'all'), then score the sealed reserved samples once; a one-shot marker is written to the private sealed directory; a second run refuses",
+   "outcome_rule": [
+    "1 DATA_INSUFFICIENT: T004 overall EVIDENCE_INSUFFICIENT",
+    "2 contradiction: the one-shot contradicts the candidate if, on any reserved lineage, it misses more confident starts at B50 than the C0 M3_R comparator, or its reserved mean ER exceeds the comparator's by > tau; a contradicted candidate cannot carry classes 3-6",
+    "3 CORPUS_IMPROVES_EXISTING: candidate is M1_HGB/M3_R/M4_DENSE trained on C1/C2, ordered better than C0 M3_R, economically better (confirmed), not contradicted",
+    "4 LIGHTWEIGHT_STRUCTURAL_JUSTIFIED / 5 LOCAL_TRANSFORMER_JUSTIFIED / 6 GRAPH_TRANSFORMER_JUSTIFIED: candidate is A / B / C, ordered better than C0 M3_R, economically better (confirmed), not contradicted",
+    "7 NO_ECONOMIC_IMPROVEMENT: a candidate is ordered better than C0 M3_R but is not economically better (or the benchmark does not confirm), or it is contradicted",
+    "8 CORPUS_EXPANSION_ONLY: no candidate is ordered better than C0 M3_R on Genesis, but C2 improves xplat_lolo mean ER over C0-all by >= tau for M3_R",
+    "9 otherwise NO_ECONOMIC_IMPROVEMENT",
+    "rules apply in order; exactly one class; no production model is promoted"
+   ],
    "outcomes": [
     "CORPUS_IMPROVES_EXISTING",
     "LIGHTWEIGHT_STRUCTURAL_JUSTIFIED",
@@ -72,12 +108,12 @@
    ]
   },
   "transfer": {
-   "EVIDENCE_INSUFFICIENT": "the noise rule fires",
-   "TRANSFER_HARMS": "d_mean >= +tau OR any lineage d_l > +2*tau OR B50 misses increased by > 0",
-   "TRANSFER_HELPS": "d_mean <= -tau AND no lineage d_l > +tau AND B50 misses not increased",
+   "EVIDENCE_INSUFFICIENT": "the noise / completeness rule fires",
+   "TRANSFER_HARMS": "d_mean >= +tau OR any d_l > +2*tau OR any e_l > 0",
+   "TRANSFER_HELPS": "d_mean <= -tau AND every d_l <= +tau AND every e_l = 0",
    "TRANSFER_NEUTRAL": "otherwise",
-   "overall": "the class of C2 under M3_R (primary model, matched to SEG-072's frozen selection); M4_DENSE and C1 reported as corroboration; disagreement between M3_R and M4_DENSE is reported, the M3_R class stands",
-   "per_model": "for each of M3_R and M4_DENSE, compare C2 (and C1) with C0 on genesis_lolo; d_mean = mean FRF(Cx) - mean FRF(C0), d_l = per-lineage difference"
+   "overall": "the class of C2 under M3_R (primary model, matched to SEG-072's frozen selection); M4_DENSE, M1_HGB and C1 corroborate; Amiga attribution (C1 vs C2) relies on M4_DENSE (M3_R's cross-platform segments are dominated by EmuTOS)",
+   "per_model": "for M3_R, M4_DENSE@128, M4_DENSE@64 and M1_HGB, compare C2 (and C1 where fitted) with C0 on genesis_lolo; d_l = ER_l(Cx) - ER_l(C0), d_mean = mean over lineages; e_l = max(0, misses_B50_l(Cx) - misses_B50_l(C0) - a_l)"
   }
  },
  "dedup": {
@@ -147,8 +183,8 @@
   ]
  },
  "folds": {
-  "genesis_lolo": "leave-one-lineage-out over the 11 qualified SEG-072 development lineages (available images only, see genesis); the held-out Genesis lineage is scored; the condition's cross-platform development representatives are added to every training set (never held out here)",
-  "xplat_lolo": "for each cross-platform development lineage x: C2-minus-x (Genesis + the other three) versus C0-all (Genesis only), both scoring x; this measures transfer to an unseen cross-platform lineage"
+  "genesis_lolo": "leave-one-lineage-out over the 11 qualified SEG-072 development lineages (all 50 images); the held-out Genesis lineage is scored; the condition's cross-platform development representatives are added to every training set",
+  "xplat_lolo": "for each cross-platform development lineage x: C2-minus-x (Genesis + the other three) versus C0-all (Genesis only), both scoring the representatives of x; this measures transfer to an unseen cross-platform lineage"
  },
  "genesis": {
   "available_by_lineage": {
@@ -311,12 +347,12 @@
    "platform": "atari-st",
    "platform_group": "atari-st",
    "rationale": "compiler held-out: the only vbcc lineage (object-only, small)",
-   "representatives": 14,
+   "representatives": 16,
    "role": "reserved_evaluation",
    "samples": 17,
    "size_class": "medium",
    "starts": 3240,
-   "starts_in_representatives": 3232,
+   "starts_in_representatives": 3240,
    "toolchain": "vbcc 0.9g + vasm 2.0f",
    "toolchain_family": "vbcc",
    "workload": "game"
@@ -348,32 +384,42 @@
   }
  },
  "metrics": {
-  "aggregation": "per lineage first, then mean over lineages (no image- or start-weighted pooling across lineages; EmuTOS counts once)",
-  "co_primary": "worst-lineage FRF (max over Genesis lineages)",
-  "primary": "Genesis transfer: mean over the 11 Genesis lineages of the per-lineage max FRF (required retention fraction at full recall, 128-byte cells, ties with the weakest positive counted) of the held-out fold",
+  "aggregation": "per lineage first, then mean over lineages (no image- or start-weighted pooling across lineages; EmuTOS counts once in metrics - in M3_R training it dominates the cross-platform segments, see disclosure)",
+  "co_primary": "worst-lineage ER (max over the 11 Genesis lineages)",
+  "er": "excess retention ER(image) = (cells_needed - positive_cells) / (cells - positive_cells), cells_needed = the FRF cell count (rank order, ties with the weakest positive counted), 128-byte cells (M4@64: 64-byte); the fraction of the non-positive cells that must be retained to keep every labelled start; 0 = perfect ranking, 1 = no better than retaining everything",
+  "informative": "an image is informative iff it has >= 1 positive and >= 1 non-positive cell; ER is defined on informative images only; the number of trivial (all-positive or no-positive) images per lineage is reported",
+  "primary": "Genesis transfer: mean over the 11 Genesis lineages of the per-lineage max ER over its informative held-out images",
+  "retained": "retained fraction = retained cells / cells (cell units; SEG-072 reported cells too for policies)",
   "secondary": [
-   "misses (C outside R) at B35/B50/B60 per lineage",
-   "false-positive admissions: negative (all-D) cells inside R at B50",
-   "residual FRF (seeds excluded)",
+   "FRF (reported, not decisive; degenerate on all-positive images)",
+   "per-lineage B35/B50/B60 misses (labelled starts outside R; false negatives) and negative (all-D) cells admitted (false positives), reported separately",
+   "residual ER/FRF (seeds excluded)",
    "AUROC over labelled cells",
-   "M4 cell 64 aggregation",
-   "short/mixed stratum: positive cells holding <= 8 starts or any D byte (misses among them)",
-   "xplat_lolo FRF / misses per cross-platform lineage",
-   "per toolchain family and per platform"
-  ]
+   "short/mixed stratum: positive cells holding <= 8 starts or any D byte (missed cells)",
+   "xplat_lolo: mean / worst ER and misses over the four cross-platform lineages",
+   "per toolchain family and per platform",
+   "trivial-image counts"
+  ],
+  "seeds": "seed cells come from seed ADDRESSES (Genesis: the SEG-072 registry d.txt / seed_starts; cross-platform: meta seed_addresses), mapped address // cell_bytes for each cell size"
  },
  "models": {
-  "C0_reuse": "condition C0 genesis_lolo fold scores ARE the preserved SEG-072 development fold scores (M3R/M4 s1-s3/M1; same images, recipe and environment), admitted only after a bitwise reproduction check: one M3_R fold and one M4_DENSE seed-1 fold are retrained and must equal the preserved arrays exactly; otherwise every C0 fold is retrained",
+  "C0_reuse": "condition C0 genesis_lolo fold scores ARE the preserved SEG-072 development fold scores (M3R / M4 s1-s3 / M1; same images, recipes and environment), admitted only when `reproduce` retrained one fold of EACH of M3_R, M4_DENSE seed 1 and M1_HGB under this plan digest and all three equal the preserved arrays bit for bit (reproduce.json); otherwise every C0 fold is retrained; the runner refuses reuse without a passing reproduce.json",
   "M1_HGB": "SEG-072 M1 control (HistGradientBoosting over the gen2 aggregates, random_state 49), all conditions",
-  "M3_FROZEN": "production gen2 M3 weights, unchanged (zero-shot reference on every development image)",
-  "M3_R": "SEG-072 M3-R recipe unchanged (seed 49, 30 epochs), all conditions; condition C0 additionally with seed 50 (noise floor)",
-  "M4_DENSE": "SEG-072 M4-Dense recipe unchanged (seeds 1-3 ensemble, cells 128 and 64), conditions C0 and C2"
+  "M3_FROZEN": "production gen2 M3 weights, unchanged: zero-shot reference on every Genesis development image (SEG-072's stored scores) and every cross-platform development representative (inference)",
+  "M3_R": "SEG-072 M3-R recipe unchanged (seed 49, 30 epochs), all conditions; condition C0 additionally with seed 50 (noise replicate)",
+  "M4_DENSE": "SEG-072 M4-Dense recipe unchanged (seeds 1-3, word logits averaged then cell max at 128 and 64 bytes), conditions C0 and C2"
  },
  "noise": {
-  "insufficient_if": "tau > 0.05 or any planned fit fails twice",
-  "rule": "noise floor n = max over Genesis lineages of |FRF(M3_R seed 49) - FRF(M3_R seed 50)| in condition C0, but the decision threshold tau = max(0.01, 2 * mean over lineages of that absolute difference)"
+  "disclosure": "one seed pair; conservative (biased toward NEUTRAL/HARMS); fits are deterministic, so tau is not adjustable",
+  "insufficient_if": "tau > 0.05, or any planned fit missing / failed twice (the table then classifies EVIDENCE_INSUFFICIENT)",
+  "miss_allowance": "a_l = |misses_B50_l(seed 49) - misses_B50_l(seed 50)| per Genesis lineage l (M3_R, C0); applied to every model",
+  "tau": "tau = max(0.01, 2 * mean over the 11 Genesis lineages of |ER_l(M3_R C0 seed 49) - ER_l(M3_R C0 seed 50)|)"
  },
  "schema": "segarecomp.xplat_design.plan.v1",
  "seg072_sealed_cohort": "exposed by SEG-072: development/diagnostic only, never fresh evidence",
+ "supersedes": {
+  "plan_sha256": "f551fea791c307e15f5203ed30102d1b80db6a583128ae04a82df2565a053ad5",
+  "reason": "C3 review (APPROVE_WITH_CONDITIONS, before any fit): FRF degenerate on all-positive images (ER adopted), B50 miss rule without noise allowance, open selection/economics/outcome choices, runner not bound to the plan, C0 reuse not gated, representatives omitted images without an 8-instruction run"
+ },
  "task": "SEG-075-T003"
 }

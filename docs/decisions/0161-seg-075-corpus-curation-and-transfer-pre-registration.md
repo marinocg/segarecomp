@@ -4,23 +4,27 @@
 - Task: SEG-075-T003, combined SEG-075 product PR (checkpoint C3). This pre-registration is committed and pushed, and approved by
   independent adversarial review, before any model of the cross-platform experiments is fitted.
 - Frozen record: `tools/segarecomp_xplat_design.plan.json`, digest `tools/segarecomp_xplat_design.plan.digest`
-  (`f551fea791c307e15f5203ed30102d1b80db6a583128ae04a82df2565a053ad5`). The tools refuse to run when the plan differs from its digest.
+  (`9c4b166d01658e75df132f36eaaa93e6a7f99d09acdc01b0e8dcb492354fc6f3`).
+  - It supersedes the unused first freeze `f551fea7…` (section 6).
+  - The plan binds by digest the T004 runner, the design module and the SEG-072 code they call: `segarecomp_ml_v3{,_train,_eval}.py`
+    and `segarecomp_ml_region_gen2{,_train}.py`. Every tool refuses to run when any of them, or the plan, drifts.
 - Tooling:
   - `tools/segarecomp_xplat_design.py` (lineages, freeze, check, and the development API with its barrier);
-  - `tools/segarecomp_xplat_transfer.py` (the T004 runner, committed with the freeze and executed only after review);
+  - `tools/segarecomp_xplat_transfer.py` (the T004 runner: reproduce, fit, jobs, table);
   - tests in `tests/segarecomp_xplat_design_test.py`.
 
 ## 1. Frozen corpus
 
 - Corpus: T002 manifest v2 `d2956dbf3eb11e000bc8fb4fb83b98d548488469b6b0adb912363691c00accb5` (ADR 0160).
-- Frozen private snapshot: `<HARNESS_ROOT>/.cache/seg075/t003/snapshot` (`SNAPSHOT.json` `9c074704903ebf77acb32e6585bf529a096de4301f963cb011e0e6f22a43473d`).
-  - 36 development samples sit under `dev/`.
-  - The 18 samples of the two reserved lineages are copied only into `sealed/`. They are bound by opaque digests in the snapshot
-    manifest, and no label statistic beyond the T002 coverage aggregates is published.
-  - `check` re-verifies every development file and every sealed binding.
-- Genesis: the SEG-072 qualified development registry, 50 images in 11 lineages. Every image is physically available and
-  identity-checked, including the 36 Sonic CD modules of D01 restored from the operator's disc (ADR 0160 section 10). Any image unavailable
-  at freeze would have been excluded from every condition.
+- Frozen private snapshot: `<HARNESS_ROOT>/.cache/seg075/t003/snapshot` (`SNAPSHOT.json`
+  `74799cca5f87f263f7ea3550c385cc050cc57941e33fceb8a46399a136080086`).
+  - 36 development samples sit under `dev/`, with every file digest-bound.
+  - The 18 samples of the two reserved lineages exist only in `sealed/`, bound by opaque digests. No label statistic beyond the T002
+    coverage aggregates is published.
+  - The unsealed copies the T002 extraction wrote were moved out of the corpus directory into a mode-000 directory. The handoff store
+    also holds copies, as preservation, never development input.
+- Genesis: the SEG-072 qualified development registry, 50 images in 11 lineages, all physically present and identity-checked. This
+  includes the 36 Sonic CD modules of D01, restored from the operator's disc (ADR 0160 section 10).
 
 ## 2. Lineages, independence and deduplication
 
@@ -32,115 +36,154 @@ with two measures:
 - 12-byte shingles of labelled code (SEG-072's measure);
 - 8-instruction sequences of (opcode word, length), which are insensitive to relocated addresses.
 
-The maximum pairwise containment is 0.0009, against SEG-072's 0.30 merge threshold. Every program is its own lineage, and none overlaps
-Genesis code.
+The maximum pairwise containment is 0.0009, against SEG-072's 0.30 merge threshold. The review independently recomputed this: reserved
+images contain at most 10 development code shingles, toslibc and neogeosdk share no meaningful runtime code, and Genesis versus
+neogeosdk is 7e-5.
 
-Within a lineage, near-duplicates are reduced deterministically: largest first, an image whose instruction sequences are at least 50%
-contained in the kept images is dropped. Only representatives train; near-duplicates are diagnostic only. Raw instruction-start counts
-are therefore not presented as diversity.
+Within a lineage, near-duplicates are reduced deterministically: largest first, ties broken by id. An image whose instruction sequences
+are at least 50% contained in the kept images is dropped; the result is stable for thresholds 0.4-0.68. An image with labelled code
+but no 8-instruction run cannot be shown to be a duplicate and is kept. Only representatives train.
 
-| lineage | platform | toolchain family | samples | labelled starts | representatives (starts) | size class | role |
-|---|---|---|---|---|---|---|---|
-| BattleIsleEditor | Amiga | A68K | 12 | 28,521 | 2 (4,860) | medium | development |
-| amiga-realtime3d | Amiga | vasm | 9 | 13,126 | 1 (2,349) | medium | development |
-| toslibc | Atari ST | GCC 13 | 7 | 14,086 | 2 (4,783) | medium | development |
-| EmuTOS | Atari ST (+Amiga config) | GCC 4.6 + gas | 4 | 208,244 | 1 (66,110) | large | development |
-| neogeosdk | Neo Geo | GCC 13 | 1 | 93,317 | 1 (93,317) | large | **reserved evaluation** (platform held out) |
-| space-invaders | Atari ST | vbcc | 17 | 3,240 | 14 (3,232) | medium | **reserved evaluation** (compiler held out) |
-| HelloAmi | Amiga | vasm | 4 | 82 | 2 (82) | small | diagnostics only |
+| lineage | platform | toolchain family | samples | labelled starts | representatives (starts) | role |
+|---|---|---|---|---|---|---|
+| BattleIsleEditor | Amiga | A68K | 12 | 28,521 | 2 (4,860) | development |
+| amiga-realtime3d | Amiga | vasm | 9 | 13,126 | 1 (2,349) | development |
+| toslibc | Atari ST | GCC 13 | 7 | 14,086 | 2 (4,783) | development |
+| EmuTOS | Atari ST (+Amiga config) | GCC 4.6 + gas | 4 | 208,244 | 1 (66,110) | development |
+| neogeosdk | Neo Geo | GCC 13 | 1 | 93,317 | 1 | **reserved evaluation** (platform held out) |
+| space-invaders | Atari ST | vbcc | 17 | 3,240 | 16 | **reserved evaluation** (compiler held out) |
+| HelloAmi | Amiga | vasm | 4 | 82 | 2 | diagnostics only |
 
-Other exclusions:
+T001 exclusions (licensing review, commercial-derived, reconstructions, blocked, infrastructure) and the exposed SEG-072 sealed cohort
+are never used. EmuTOS is one firmware lineage. It counts as Atari ST in every condition, and its four configurations reduce to one
+representative.
 
-- From T001, not used anywhere: six candidates pending licensing review, five commercial-derived ports, three reconstructions, two
-  blocked builds, and the toolchain-infrastructure demos.
-- The SEG-072 sealed cohort is exposed and is never fresh evidence.
-- EmuTOS is one firmware lineage. It is counted as Atari ST in every condition, and its four configurations reduce to one representative.
-
-## 3. Feasibility gate (computed from aggregates at freeze; all checks pass)
+## 3. Feasibility gate (aggregates at freeze; all checks pass)
 
 | check | result |
 |---|---|
 | independent lineages (no pair >= 0.30) | yes (max 0.0009) |
-| Atari ST training lineages >= 2 | yes (toslibc, EmuTOS) |
-| Amiga training lineages >= 2 | yes (BattleIsleEditor, amiga-realtime3d) |
+| Atari ST / Amiga training lineages >= 2 each | yes / yes |
 | training toolchain families >= 3 | yes (A68K, vasm, GCC 13, GCC 4.6) |
 | unknown fraction <= 0.10 in every used lineage | yes (max 5.1%) |
-| mixed code/data present | yes (A68K/vasm programs: data 41-57% inside code hunks) |
-| reserved lineages >= 2 | yes |
-| reserved set holds a platform held-out and a compiler held-out | yes (Neo Geo; vbcc) |
+| mixed code/data present | yes |
+| reserved lineages >= 2, with a platform held-out and a compiler held-out | yes (Neo Geo; vbcc) |
 | Genesis folds intact | yes (50/50 images) |
 
-Evaluation credibility is **LIMITED**. There are only two reserved lineages; one is small and object-only (3,232 starts), and both are
-non-Genesis. T006 results are descriptive cross-platform evidence only. There is no Genesis generalization claim: no fresh Genesis
-held-out exists, and the SEG-072 sealed cohort is exposed.
+Evaluation credibility is **LIMITED**:
 
-What a stronger evaluation would need (not requested; recorded for a future acquisition):
+- neogeosdk holds out the platform only; its compiler family (GCC 13) is in training via toslibc.
+- space-invaders holds out the vbcc compiler, but shares the vasm assembler and the Atari ST platform with training.
+- Both reserved lineages are non-Genesis, and one is small and object-only.
+- T006 results are therefore descriptive cross-platform evidence. There is no Genesis generalization claim.
+
+A stronger evaluation would need:
 
 - at least two further independently authored, reproducibly built base-68000 programs per platform, with listings or byte-identical
-  source rebuilds;
-- in particular an assembler-written Atari ST game, a C-compiled Amiga game (SAS/C or vbcc), and a 68000 program from another compiler
-  family (e.g. Lattice/Pure C);
-- ideally new open-source Genesis homebrew with source-backed truth, never used by SEG-072.
+  rebuilds;
+- in particular an assembler-written Atari ST game, a C-compiled Amiga game (SAS/C or vbcc), and a program from another compiler family
+  (Lattice/Pure C);
+- new open-source Genesis homebrew with source-backed truth.
 
 ## 4. Experimental design (consumed by T004-T006)
 
 - **Conditions.** C0 Genesis-only, C1 Genesis + Atari ST (toslibc, EmuTOS), C2 Genesis + Atari ST + Amiga (+ BattleIsleEditor,
-  amiga-realtime3d). The conditions are nested. No reserved lineage appears in any condition. Training effort, preprocessing and
-  recipes are identical across conditions: the unchanged SEG-072 recipes; only the training image list differs.
-- **Weighting.** M3-R samples 32-cell segments uniformly over all images (unchanged recipe), so images under 4 KB add no M3-R segments and
-  EmuTOS's 256 KB representative dominates the cross-platform additions. M4-Dense samples lineages uniformly. Every metric is aggregated
-  per lineage first, so EmuTOS counts once.
+  amiga-realtime3d). The conditions are nested, and no reserved lineage appears in any of them. Recipes, effort and preprocessing are
+  SEG-072's, unchanged; only the training list differs.
 - **Models.**
-  - M3_FROZEN: zero-shot reference.
-  - M1_HGB: non-neural control, all conditions.
-  - M3_R: all conditions, plus a seed-50 replicate of C0 as the noise floor.
-  - M4_DENSE: seeds 1-3, cells 128 and 64, conditions C0 and C2.
-  - C0 reuse: C0's Genesis fold scores are SEG-072's preserved fold scores, which use the same images, recipe and environment. This is
-    admitted only if one M3_R fold and one M4_DENSE seed-1 fold reproduce bit for bit in the rebuilt environment; otherwise every C0 fold
-    is retrained.
+  - M3_FROZEN: zero-shot reference, tabulated.
+  - M1_HGB: all conditions.
+  - M3_R: all conditions, plus a C0 seed-50 replicate.
+  - M4_DENSE: seeds 1-3 at cells 128 and 64, conditions C0 and C2.
+  - C0 reuse: C0 Genesis fold scores are SEG-072's preserved scores only if `reproduce` retrains one fold each of M3_R, M4_DENSE seed 1
+    and M1_HGB under this plan digest and all three match bit for bit (`reproduce.json`). Otherwise all C0 folds are fitted.
 - **Folds.**
-  - `genesis_lolo`: leave one Genesis lineage out, with the condition's cross-platform representatives added to every training set.
-  - `xplat_lolo`: for each cross-platform development lineage x, C2-minus-x against C0-all.
-- **Metrics.**
-  - Primary: the mean over Genesis lineages of the per-lineage max FRF.
-  - Co-primary: worst-lineage FRF.
-  - Secondary: misses and negative-cell admissions at B35/B50/B60; residual FRF; AUROC; the short/mixed stratum (positive cells with at
-    most 8 starts or any data byte); `xplat_lolo` results; and per toolchain family and platform. False positives and false negatives are
-    reported separately.
-- **Noise and decision.** tau = max(0.01, 2 x the mean |FRF(seed 49) - FRF(seed 50)| over lineages) in C0. If tau > 0.05, the result is
-  `EVIDENCE_INSUFFICIENT`. Otherwise, per model:
-  - `TRANSFER_HELPS`: d_mean <= -tau, no lineage worse by more than tau, and no extra B50 misses.
-  - `TRANSFER_HARMS`: d_mean >= +tau, or any lineage worse by more than 2 tau, or any extra B50 miss.
-  - `TRANSFER_NEUTRAL`: otherwise.
-
-  The overall class is that of M3_R in C2; M4_DENSE and C1 corroborate.
-- **T005 gating.**
-  - Model A (lightweight structural gradient boosting over CPU-owned decode features) is always built on the best transfer condition
-    (C2 unless the result is HARMS).
-  - Model B (a bounded local instruction-aware Transformer) is built only if the best model's mean FRF exceeds the mean positive-cell
-    density by at least 0.05 and T004 is not `EVIDENCE_INSUFFICIENT`.
-  - Model C (graph-guided) is built only if B beats A by at least tau without a lineage regressing by more than tau.
-  - When a simpler model is within tau and has no extra B50 misses, the simpler model is selected.
+  - `genesis_lolo`: leave one Genesis lineage out (11 lineages), with the cross-platform representatives added to training.
+  - `xplat_lolo`: C2-minus-x versus C0-all, scored on x's representatives.
+- **Decision metric: excess retention ER.** ER = (cells needed for full recall - positive cells) / (cells - positive cells), defined on
+  informative images (at least one positive and one non-positive cell).
+  - It replaces FRF, which is 1.0 by construction on all-positive images (for example D01's small modules, toslibc's WINDOW.PRG and
+    BattleIsleEditor's 2-cell hunk), so FRF would make the worst-lineage metric constant.
+  - Primary: the mean over the 11 Genesis lineages of the per-lineage max ER.
+  - Co-primary: the worst-lineage ER.
+  - Secondary, reported with false negatives and false positives separately:
+    - FRF;
+    - per-lineage misses and negative cells admitted at B35/B50/B60;
+    - residual ER;
+    - AUROC;
+    - the short/mixed stratum;
+    - `xplat_lolo` ER and misses;
+    - trivial-image counts;
+    - results per toolchain family and per platform.
+  - Seed cells come from seed addresses at each cell size (SEG-072's convention).
+  - Aggregation is per lineage first.
+  - On cross-platform code-dense images, fixed budgets necessarily miss starts (most cells are positive). There, fixed-budget misses are
+    comparative only, and ER carries the comparison.
+- **Noise.** tau = max(0.01, 2 x the mean |ER_l(seed 49) - ER_l(seed 50)|) for M3_R C0. The per-lineage B50 miss allowance is
+  a_l = |misses_l(seed 49) - misses_l(seed 50)|, applied to every model. The outcome is `EVIDENCE_INSUFFICIENT` if tau > 0.05 or any
+  planned fit is missing or failed; the table checks completeness over all 11 lineages and all seeds.
+- **Transfer rule (per model).** With d_l = ER difference and e_l = max(0, extra B50 misses - a_l):
+  - `HELPS`: d_mean <= -tau, every d_l <= tau, and every e_l = 0.
+  - `HARMS`: d_mean >= tau, or any d_l > 2tau, or any e_l > 0.
+  - `NEUTRAL`: otherwise.
+  - The overall class is that of M3_R in C2. M4_DENSE, M1_HGB and C1 corroborate. Amiga attribution relies on M4_DENSE (section 5).
+- **Ordering** (used for T005 gating and for selecting the T006 candidate). Configurations are compared on: fewer Genesis B50 misses;
+  then lower Genesis mean ER unless within tau; then lower `xplat_lolo` mean ER unless within tau; then simplicity, in the order
+  M3_FROZEN < M1_HGB < A < M3_R < M4@128 < M4@64 < B < C. Each configuration is taken in its best transfer condition: C2 if its class
+  is HELPS or NEUTRAL, else C0.
+- **T005.** Models A/B/C train on C2 unless T004 is HARMS (then C0), on the same folds. They use fixed configurations with no
+  hyper-parameter search, so nothing is tuned on the folds being compared.
+  - **A:** a gradient-boosted model over per-cell aggregates of the CPU-owned decode tokens, ordinary-decode chain statistics, computed
+    direct-control targets, byte context, relocation-field counts, the seed flag, and the same aggregates over neighbouring cells. Always
+    built.
+  - **B:** a bounded local instruction-aware Transformer (64-wide, 2 layers, 4 heads, 256-word windows plus 64 words of context), trained
+    on M4's exact budget and recipe. Built only if the best of {M1, A, M3_R, M4} has Genesis mean ER >= 0.10.
+  - **C:** B plus typed sparse message passing over candidate fall-through, direct-target and overlap edges, and a PROVEN
+    seed-reachability flag. Hypothetical edges never mark a position reachable. Built only if B beats A by tau.
+  - The A/B/C code is bound by digest in a reviewed T005 pre-fit addendum before any fit.
 - **T006.**
-  - One frozen candidate and its comparators (M3_FROZEN, C0-all M3_R) are committed to `segarecomp_xplat_design.frozen.json` before the
-    sealed labels are opened.
-  - The sealed evaluation runs once on the reserved lineages, with a one-shot marker; a second run is refused.
-  - Economics: SEG-074's exact-code benchmark applies to Genesis development images only (development evidence); it is never run on the
-    reserved cross-platform lineages.
-  - Outcome classes: `CORPUS_IMPROVES_EXISTING`, `LIGHTWEIGHT_STRUCTURAL_JUSTIFIED`, `LOCAL_TRANSFORMER_JUSTIFIED`,
-    `GRAPH_TRANSFORMER_JUSTIFIED`, `CORPUS_EXPANSION_ONLY`, `DATA_INSUFFICIENT`, `NO_ECONOMIC_IMPROVEMENT`. The simplest class supported
-    by development evidence and not contradicted by the one-shot result is chosen. No production model is promoted.
-- **Backend.** CPU, per SEG-072's benchmark: ROCm was 8.9% faster, below the 25% rule, so it is not re-benchmarked. The environment is
-  the rebuilt research venv. Parallelism: M3_R 4x4 threads, M4_DENSE 8x2 threads.
+  - The ordering's best configuration at B50, with comparators M3_FROZEN and C0-all M3_R+B50, is committed before the seal is opened.
+  - It is refit on all development data and evaluated once on every sealed sample that has labelled starts, with a one-shot marker.
+  - Confident starts are I-labelled starts.
+  - Economic measure: the complete budget, i.e. the smallest of B35/B50/B60 whose Genesis misses fall within the summed allowance. A
+    smaller complete budget than C0 M3_R is confirmed only if SEG-074's unchanged exact-code benchmark shows at least 10% less generated C
+    and at least 10% less compile CPU on the Genesis development images it supports.
+  - Outcome predicates are applied in order (plan `decisions.t006.outcome_rule`): `DATA_INSUFFICIENT`; then contradiction by the one-shot
+    evaluation (more reserved B50 misses than the comparator, or reserved ER worse by more than tau); `CORPUS_IMPROVES_EXISTING` /
+    `LIGHTWEIGHT_STRUCTURAL_JUSTIFIED` / `LOCAL_TRANSFORMER_JUSTIFIED` / `GRAPH_TRANSFORMER_JUSTIFIED` by candidate type (better ordered,
+    economically confirmed, not contradicted); `NO_ECONOMIC_IMPROVEMENT`; `CORPUS_EXPANSION_ONLY` (no Genesis gain, but `xplat_lolo` ER
+    improves by tau); otherwise `NO_ECONOMIC_IMPROVEMENT`. No production model is promoted.
+- **Backend.** CPU, per SEG-072's benchmark (ROCm +8.9%, below its 25% rule). The rebuilt research venv uses the recorded versions.
 
-## 5. Barrier
+## 5. Disclosures
 
-`segarecomp_xplat_design.dev_sample_dirs` and `refuse_sealed` stop development, tuning and selection code from opening:
+- **M3_R is mostly an EmuTOS test.** M3_R samples 32-cell segments uniformly over images. The cross-platform representatives contribute
+  about 64 EmuTOS segments, about 9 Amiga and about 3 toslibc. M3_R's C2 class is therefore essentially an EmuTOS test, and C1-versus-C2
+  (Amiga) attribution can only come from M4_DENSE, which samples lineages uniformly. "EmuTOS counts once" holds for metrics, not for M3_R
+  training.
+- **The noise rule is conservative.** It rests on one seed pair with a 0.01 floor, so it is biased toward NEUTRAL/HARMS. Fits are
+  deterministic and C0 seed 49 is fixed, so tau cannot be adjusted.
+- **M3_FROZEN sanity check.** The runner's metric code reproduces SEG-072's evaluator: M3_FROZEN has 2 Genesis B50 misses, as SEG-072
+  recorded. Four D01 modules are trivial (all positive) and are excluded from ER.
 
-- the `sealed/` directory;
-- any reserved lineage;
-- any sealed sample id.
+## 6. Barrier, and the superseded freeze
 
-The T004 runner loads cross-platform data only through this API. The T002 corpus directory still holds the unsealed copies (it is the
-extraction output). Development code never reads it; it reads the snapshot. The sealed labels are opened once, by T006, after the frozen
-candidate is committed.
+`dev_sample_dirs` / `refuse_sealed` resolve paths, including symlinks, and refuse:
+
+- any path component equal to `sealed`;
+- any reserved lineage name;
+- any sealed sample id (also with the `#`/`@` section suffix).
+
+The T004 runner loads cross-platform data only through this API. The sealed labels are opened once, by T006, after the frozen candidate
+is committed.
+
+The first freeze `f551fea7…` (e805b8e) was reviewed APPROVE_WITH_CONDITIONS before any fit. Its defects:
+
+- degenerate FRF;
+- no miss allowance;
+- selection, economics and outcome rules left open;
+- the runner was not bound to the plan, and C0 reuse was not gated;
+- representatives omitted images without an 8-instruction run;
+- string-matching gaps in the barrier.
+
+They are corrected in this freeze, which records the superseded digest. No model was fitted under the first freeze.

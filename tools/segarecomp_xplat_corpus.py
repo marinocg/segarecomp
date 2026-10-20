@@ -655,6 +655,7 @@ def write_sample(out: pathlib.Path, sid: str, spec: dict, im: dict, classes: byt
             "syntax": spec["syntax"], "image": str((d / "image.bin").resolve()), "sha256": sha256(image), "size": len(image),
             "classes_sha256": sha256(classes), "tokens_sha256": sha256(tokens), "seeds_sha256": sha256(json.dumps(seeds).encode()),
             "seed_cells": len(seeds), "seeds_source": "container entry, only where the listing labels an instruction start",
+            "seed_addresses": [entry] if seeds else [],
             "relocations": len(im["relocs"]), "audit": au, "bytes": counts, "base_address": im.get("base_address"),
             "hunk_type": im.get("hunk_type"), "provenance": "authored"}
     if typed is not None:
