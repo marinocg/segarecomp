@@ -85,5 +85,19 @@ bundle verifies them by digest.
 
 ## 5. Final verification result
 
-Recorded at C7 (see the receipt): verdict, physical file count and bytes, manifest identity, and the fresh-process context. Any missing
-artifact or unrecoverable external dependency is listed there.
+**`ARTIFACT_HANDOFF_PASS`** (`tools/segarecomp_xplat_handoff.c7_receipt.json`).
+
+- **Manifest:** `c7-final-handoff` `1e8ba1e62f045eb762c2993f09f57849469ff000b8b379d6ebbafe5d449292cd`.
+- **Physical verification:** 32,154 files and 4,640,136,029 bytes rehashed, 0 problems.
+- **Run context:** from a `git archive` export of the product at the C6 head, `python3 -I`, cwd `/`, minimal environment, with the task
+  worktree moved away (unavailable) for the duration.
+- **Diagnostic:** a 131-cell cross-platform representative, re-scored from 9 restored copies, is bit-identical to the stored scores.
+- **Decision:** re-derived as `EVIDENCE_INSUFFICIENT` -> `DATA_INSUFFICIENT`.
+- **One-shot status:** present, `opened: false`.
+
+Artifacts:
+
+- **Missing because never produced:** T005 A/B/C weights and predictions (not admitted); one-shot predictions (not run).
+- **External, not copied:** the operator's commercial images and Sonic CD disc under `games/`, verified by digest by the SEG-072 bundle.
+- **Rebuildable, not bundled:** the research virtualenv.
+- **Unrecoverable dependencies:** none.
