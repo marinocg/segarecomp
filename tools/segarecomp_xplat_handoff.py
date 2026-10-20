@@ -68,6 +68,12 @@ NOT_PRESERVED = {
 WORKTREE_MARKERS = ("/.worktrees/", "/.worktrees-harness/")
 
 
+def under_worktree(path) -> bool:
+    """True when a path (any platform's separators) lies inside a task worktree (pure; unit-tested)."""
+    s = str(path).replace("\\", "/") + "/"
+    return any(m in s for m in WORKTREE_MARKERS)
+
+
 class HandoffError(Exception):
     pass
 
@@ -113,14 +119,14 @@ def symlinks_escaping(root: pathlib.Path) -> list[str]:
                 continue
             target = os.readlink(p)
             resolved = (p.parent / target).resolve() if not os.path.isabs(target) else pathlib.Path(target).resolve()
-            if any(m in str(resolved) + "/" for m in WORKTREE_MARKERS):
-                bad.append(f"{p.relative_to(root)} -> worktree")
+            if under_worktree(resolved):
+                bad.append(f"{p.relative_to(root).as_posix()} -> worktree")
             else:
                 try:
                     resolved.relative_to(rr)
                 except ValueError:
                     if not target.startswith("/xplat") and not target.startswith("/opt") and not target.startswith("/usr"):
-                        bad.append(f"{p.relative_to(root)} -> outside")
+                        bad.append(f"{p.relative_to(root).as_posix()} -> outside")
     return sorted(bad)
 
 
@@ -189,7 +195,7 @@ def audit_sources(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path
         working = list(iter_files(src))
         # `git hash-object --stdin-paths` applies the same clean filters (.gitattributes eol conversion) as the index, so a CRLF
         # working copy of an LF blob verifies against its committed blob id
-        rels = [str(p.relative_to(src)) for p in working]
+        rels = [p.relative_to(src).as_posix() for p in working]
         hashed = subprocess.run(["git", "-C", str(src), "hash-object", "--stdin-paths"], input="".join(r + "\n" for r in rels),
                                 capture_output=True, text=True).stdout.split() if rels else []
         if len(hashed) != len(rels):
@@ -197,13 +203,13 @@ def audit_sources(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path
         blob_of = dict(zip(rels, hashed))
         files = 0
         for p in working:
-            rel = str(p.relative_to(src))
+            rel = p.relative_to(src).as_posix()
             expect = index.get(rel)
             actual_blob = blob_of[rel]
             ok = expect is not None and expect[1] == actual_blob and checkout_ok
             sha = sha256_file(p)
             status = "PRESENT_AND_VERIFIED" if ok else "PRESENT_BUT_CHANGED"
-            out.append(entry(str(p.relative_to(cache_parent)), group, required, status if required else "NOT_REQUIRED_FOR_SUCCESSOR",
+            out.append(entry(p.relative_to(cache_parent).as_posix(), group, required, status if required else "NOT_REQUIRED_FOR_SUCCESSOR",
                              "git_blob", p, sha, p.stat().st_size, verified=status))
             files += 1
         missing = [p for p, (mode, _b) in index.items() if mode != "120000" and mode != "160000" and not (src / p).is_file()]
@@ -238,7 +244,7 @@ def audit_builds(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path)
             hashes: dict[str, dict[str, str]] = {}
             for run in runs:
                 d = base / run
-                hashes[run] = {str(p.relative_to(d)): sha256_file(p) for p in iter_files(d)} if d.is_dir() else {}
+                hashes[run] = {p.relative_to(d).as_posix(): sha256_file(p) for p in iter_files(d)} if d.is_dir() else {}
             for run in runs:
                 d = base / run
                 group = f"t001.build.{run}"
@@ -259,7 +265,7 @@ def audit_builds(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path)
                     else:
                         status, basis = verify_build_file(rel, sha, recorded, volatile, identical_runs, run, other, len(runs) == 2,
                                                           file_required)
-                    out.append(entry(str(p.relative_to(cache_parent)), group, file_required,
+                    out.append(entry(p.relative_to(cache_parent).as_posix(), group, file_required,
                                      status if file_required else "NOT_REQUIRED_FOR_SUCCESSOR", basis, p, sha, p.stat().st_size,
                                      verified=status))
                 for rel in sorted(set(recorded) - set(hashes[run])):
@@ -273,7 +279,7 @@ def audit_builds(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path)
                                          classify_missing(True), None, note="successor intermediate missing"))
                 log = base / f"{run}.log"
                 if log.is_file():
-                    out.append(entry(str(log.relative_to(cache_parent)), "t001.log", required,
+                    out.append(entry(log.relative_to(cache_parent).as_posix(), "t001.log", required,
                                      "PRESENT_AND_VERIFIED" if required else "NOT_REQUIRED_FOR_SUCCESSOR", "baseline", log, sha256_file(log),
                                      log.stat().st_size, verified="PRESENT_AND_VERIFIED"))
         if cid in NOT_PRESERVED:
@@ -302,14 +308,14 @@ def audit_control(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path
     out = []
     for p in sorted((cache / "records").glob("*.json")) + [cache / "toolchains.json"] + sorted((cache / "pilot").glob("*.tsv")):
         if p.is_file():
-            out.append(entry(str(p.relative_to(cache_parent)), "t001.record", True, "PRESENT_AND_VERIFIED", "baseline", p, sha256_file(p),
+            out.append(entry(p.relative_to(cache_parent).as_posix(), "t001.record", True, "PRESENT_AND_VERIFIED", "baseline", p, sha256_file(p),
                              p.stat().st_size))
     for tid, tc in plan["toolchains"].items():
         for item in tc.get("inputs", []):
             p = cache / "toolchains" / tid / item["name"]
             if p.is_file():
                 st, basis = classify_present(sha256_file(p), item["sha256"], "plan_sha256")
-                out.append(entry(str(p.relative_to(cache_parent)), "t001.toolchain_input", True, st, basis, p, sha256_file(p), p.stat().st_size))
+                out.append(entry(p.relative_to(cache_parent).as_posix(), "t001.toolchain_input", True, st, basis, p, sha256_file(p), p.stat().st_size))
             else:
                 # vasm/vlink/vbcc URLs serve "latest"; a lost pinned archive cannot be re-downloaded by digest.
                 out.append(entry(f"seg075/q/toolchains/{tid}/{item['name']}", "t001.toolchain_input", True, classify_missing(False), "plan_sha256"))
@@ -318,7 +324,7 @@ def audit_control(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path
             want = hashlib.sha256((product_root / tc["dockerfile"]).read_bytes()).hexdigest()
             if p.is_file():
                 st, basis = classify_present(sha256_file(p), want, "product_text")
-                out.append(entry(str(p.relative_to(cache_parent)), "t001.dockerfile", True, st, basis, p, sha256_file(p), p.stat().st_size))
+                out.append(entry(p.relative_to(cache_parent).as_posix(), "t001.dockerfile", True, st, basis, p, sha256_file(p), p.stat().st_size))
             else:
                 out.append(entry(f"seg075/q/toolchains/{tid}/Dockerfile", "t001.dockerfile", True, "REPRODUCIBLE_BUT_NOT_PRESERVED",
                                  "product_text", note="staged copy of the committed Dockerfile"))
@@ -328,7 +334,7 @@ def audit_control(q, plan: dict, cache: pathlib.Path, cache_parent: pathlib.Path
         want = hashlib.sha256(text.encode()).hexdigest()
         if p.is_file():
             st, basis = classify_present(sha256_file(p), want, "product_text")
-            out.append(entry(str(p.relative_to(cache_parent)), "t001.helper", True, st, basis, p, sha256_file(p), p.stat().st_size))
+            out.append(entry(p.relative_to(cache_parent).as_posix(), "t001.helper", True, st, basis, p, sha256_file(p), p.stat().st_size))
         else:
             out.append(entry(f"seg075/q/xplat/{rel}", "t001.helper", True, "REPRODUCIBLE_BUT_NOT_PRESERVED", "product_text"))
     return out
@@ -520,7 +526,7 @@ def verify_manifest(manifest_path: pathlib.Path, check_origin: bool = False, exp
     files = size = 0
     drift = 0
     for e in man["entries"]:
-        if any(m in e.get("origin", "") for m in WORKTREE_MARKERS):
+        if under_worktree(e.get("origin", "")):
             problems.append(f"{e['logical']}: origin is inside a task worktree")
         if "sha256" not in e:
             continue
@@ -601,7 +607,7 @@ def restore(manifest_path: pathlib.Path, dest: pathlib.Path, hardlink: bool = Fa
 def receipt_of(label: str, summary: dict, manifest_digest: str, store: pathlib.Path, verification: dict, extra: dict) -> dict:
     harness = store.parent.parent
     return {"schema": RECEIPT_SCHEMA, "label": label, "manifest_sha256": manifest_digest,
-            "storage": {"store": f"<HARNESS_ROOT>/{store.relative_to(harness)}", "physical_path_verified": store.is_dir(),
+            "storage": {"store": f"<HARNESS_ROOT>/{store.relative_to(harness).as_posix()}", "physical_path_verified": store.is_dir(),
                         "layout": "cas/sha256/<2>/<sha256> + manifests/<label>.json (git-ignored)"},
             "summary": {k: v for k, v in summary.items() if k != "required_problems"},
             "required_problems": len(summary["required_problems"]),
@@ -693,10 +699,10 @@ def cmd_add(a) -> int:
     for spec in a.tree:
         group, _, root = spec.partition("=")
         root_p = pathlib.Path(root).resolve()
-        if any(m in str(root_p) + "/" for m in WORKTREE_MARKERS):
+        if under_worktree(root_p):
             raise HandoffError(f"{root}: refusing a task-worktree path")
         for p in iter_files(root_p, skip_git=False):
-            logical = str(p.relative_to(harness_cache))
+            logical = p.relative_to(harness_cache).as_posix()
             if logical in seen:
                 entries = [e for e in entries if e["logical"] != logical]
             entries.append(entry(logical, group, True, "PRESENT_AND_VERIFIED", "baseline", p, sha256_file(p), p.stat().st_size))

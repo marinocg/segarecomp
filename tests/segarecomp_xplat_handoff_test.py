@@ -347,6 +347,19 @@ def test_audit_control():
         check(es[0]["status"] == "MISSING_UNRECOVERABLE", "a lost floating-URL input is unrecoverable by digest")
 
 
+def test_portability():
+    """Windows CI regression (PR 133 run 39418624402): worktree markers and logical paths must not depend on the host separator."""
+    check(h.under_worktree("D:\\a\\segarecomp\\.worktrees\\seg-075-t002\\tools\\x.py"), "Windows worktree path detected")
+    check(h.under_worktree("/r/.worktrees-harness/control-x/f") and h.under_worktree(pathlib.PureWindowsPath("C:/r/.worktrees/t")),
+          "POSIX / PureWindowsPath worktree paths detected")
+    check(not h.under_worktree("D:\\a\\worktrees\\x") and not h.under_worktree("/r/.worktreesX/y"), "near-miss names not flagged")
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        cache, commit = make_cache(td)
+        es = h.audit_builds(q, fake_plan(commit), cache, td / "cache") + h.audit_sources(q, fake_plan(commit), cache, td / "cache")
+        check(all("\\" not in e["logical"] for e in es), "logical paths are POSIX on every platform")
+
+
 def test_add_refuses_worktree():
     with tempfile.TemporaryDirectory() as td:
         bad = pathlib.Path(td) / ".worktrees" / "seg-075-t002"
@@ -368,7 +381,7 @@ def test_receipt_is_sanitized():
 
 
 def main():
-    for t in (test_classify, test_store_and_verify, test_symlinks, test_audit_builds_and_sources, test_cross_run, test_record_code_basis, test_truth_listing_resolution, test_audit_control, test_add_refuses_worktree,
+    for t in (test_classify, test_store_and_verify, test_symlinks, test_audit_builds_and_sources, test_cross_run, test_record_code_basis, test_truth_listing_resolution, test_portability, test_audit_control, test_add_refuses_worktree,
               test_receipt_is_sanitized):
         t()
     if FAILURES:
