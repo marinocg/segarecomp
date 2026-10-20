@@ -1,0 +1,40 @@
+{
+ "a_config": {
+  "class_weight": "balanced",
+  "early_stopping": false,
+  "l2_regularization": 1.0,
+  "learning_rate": 0.05,
+  "max_bins": 255,
+  "max_depth": 6,
+  "max_iter": 300,
+  "min_samples_leaf": 40,
+  "random_state": 49
+ },
+ "a_features": "segarecomp_xplat_models.a_features (210 columns: 59 token-value counts, chain max/mean/long, targets out/in, zero/ASCII fraction, entropy, relocation fields, seed flag, PROVEN-reach count; then the +/-1 and +/-4 neighbour means)",
+ "adr": "0161/0163",
+ "bc_architecture": {
+  "block": 256,
+  "context": 64,
+  "d_model": 64,
+  "ff": 128,
+  "heads": 4,
+  "layers": 2
+ },
+ "bc_training": "segarecomp_ml_v3_train.M4 recipe unchanged, seeds 1-3",
+ "bound_code": {
+  "segarecomp_xplat_decide.py": "078d35e97f0ed62aa101181f400400fcd5c1ff0d41bb6ba9a9fdf5a2d1f0747d",
+  "segarecomp_xplat_design.py": "9235527284e19ac274f3c146a2b6a3f040e425bb742531cbc84e9e1efbae4c3c",
+  "segarecomp_xplat_models.py": "99e0c1a7e3608a96a9919641bb4350239684a740330e27f4c83aabba3bf5b0a7",
+  "segarecomp_xplat_t005.py": "ecc8f9646fd31b92732dd3f8b307589d87714bf56591acbcc4b0f05491bc726a",
+  "segarecomp_xplat_transfer.py": "415bd6ab8dbf5b8b3d4f7c1c8da433fd8cf6bbf64fd76229807a656bf9cb399b"
+ },
+ "condition_rule": "models A/B/C train on C2 unless the T004 overall class is TRANSFER_HARMS (then C0); same genesis_lolo and xplat_lolo folds as T004; no hyper-parameter search (fixed configurations below) - nothing is tuned on the folds compared",
+ "enforcement": "fit refuses unless this addendum's digests equal the current files and the plan; each fit record carries the addendum digest; no A/B/C fit was run before this addendum was committed",
+ "gates": {
+  "B": "built only if decide.select over {M1_HGB, A, M3_R, M4_DENSE@128, M4_DENSE@64} returns a configuration with genesis mean ER >= 0.10 (decide.b_gate) AND T004 is not EVIDENCE_INSUFFICIENT: a bounded local instruction-aware Transformer: per-word input = embed(hi byte) + embed(lo byte) + the M3/M4 decode-token embeddings, d_model 64, 2 encoder layers, 4 heads, feed-forward 128, learned positions, attention restricted to non-overlapping 256-word windows with 64 words of real context (or PAD) on each side; per-word logit -> cell max (M4 aggregation); training exactly M4's budget and recipe (4000 steps, batch 8, AdamW lr 0.002 x0.1 after 80%, weight decay 1e-4, masked BCE with M4's pos_weight, lineage-uniform sampling, seeds 1-3 averaged)",
+  "C": "built only if B is better than A by the ordering with genesis mean ER lower by >= tau: B plus 2 rounds of typed sparse message passing per encoder layer over edges within the window+context: fall-through (ordinary decode -> next position by decoder length), direct branch / call target (computed as for A), overlapping interpretation (positions inside a decoded instruction's extent), each typed separately as CANDIDATE edges, plus a node flag for positions statically reachable from seed roots by fall-through and direct edges (PROVEN); hypothetical edges never mark a position reachable; same training budget as B"
+ },
+ "plan_sha256": "fde026ee1075d0c2a2f71679a4a40bdf9cffe7376baabf7b7982685d2915dd92",
+ "schema": "segarecomp.xplat_design.t005_addendum.v1",
+ "task": "SEG-075-T005"
+}

@@ -117,3 +117,7 @@ set_property(TEST segarecomp_xplat_corpus_test APPEND PROPERTY LABELS full fast)
 # pre-registered transfer rule (standard library, synthetic data + the committed plan).
 add_test(NAME segarecomp_xplat_design_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_design_test.py)
 set_property(TEST segarecomp_xplat_design_test APPEND PROPERTY LABELS full fast)
+# SEG-075-T005 (ADR 0161/0163): pre-registered B/C gates and candidate assembly (pure); structure / feature checks run only where numpy
+# and torch are installed (research environment), otherwise skipped.
+add_test(NAME segarecomp_xplat_models_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_models_test.py)
+set_property(TEST segarecomp_xplat_models_test APPEND PROPERTY LABELS full fast)
