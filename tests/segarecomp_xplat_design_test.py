@@ -167,6 +167,60 @@ def test_transfer_rule():
     check(x.complete_budget(rows, 0) == "B50" and x.complete_budget(rows, 1) == "B35", "complete budget within the allowance sum")
 
 
+def rec(cfg, misses, er, xer, cond="C2", budget="B50"):
+    return {"config": cfg, "condition": cond, "genesis_b50_misses": misses, "genesis_mean_er": er, "xplat_mean_er": xer,
+            "complete_budget": budget}
+
+
+def test_decide():
+    import segarecomp_xplat_decide as dc
+    # the reviewer's would-be cycle: pools are nested, so the choice is well defined and transitive
+    X, Y, Z = rec("M4_DENSE@64", 0, 0.200, 0.30), rec("M4_DENSE@128", 0, 0.209, 0.20), rec("M3_R", 0, 0.218, 0.10)
+    check(dc.select([X, Y, Z], 0.01, 0)["config"] == "M4_DENSE@128", "nested pools: ER pool {X,Y} (Z > 0.21), then xplat -> Y")
+    check(dc.select([Z, Y, X], 0.01, 0) == dc.select([X, Y, Z], 0.01, 0), "selection independent of input order")
+    check(dc.select([rec("M3_R", 0, 0.20, 0.1), rec("M1_HGB", 0, 0.205, 0.1)], 0.01, 0)["config"] == "M1_HGB", "simplest within tau")
+    check(dc.select([rec("M3_R", 0, 0.20, None), rec("M4_DENSE@128", 0, 0.20, 0.1)], 0.01, 0)["config"] == "M4_DENSE@128",
+          "None ranks after a value")
+    check(dc.select([rec("M3_R", 2, 0.10, 0.1), rec("M4_DENSE@128", 0, 0.30, 0.1)], 0.01, 1)["config"] == "M4_DENSE@128",
+          "misses beyond the allowance sum decide first")
+    check(dc.select([rec("M3_R", 1, 0.10, 0.1), rec("M4_DENSE@128", 0, 0.30, 0.1)], 0.01, 1)["config"] == "M3_R", "misses within allowance tie")
+    try:
+        dc.select([rec("M3_FROZEN", 0, 0.0, 0.0)], 0.01, 0)
+        check(False, "M3_FROZEN is never a candidate")
+    except ValueError:
+        pass
+    ref = rec("M3_R", 0, 0.20, 0.10, "C0")
+    check(dc.better_than(rec("M3_R", 0, 0.17, 0.10), ref, 0.02, 0) and not dc.better_than(rec("M3_R", 0, 0.19, 0.10), ref, 0.02, 0),
+          "better_than is strict on ER (> tau)")
+    check(dc.better_than(rec("A", 0, 0.195, 0.05), ref, 0.02, 0), "within tau on Genesis, better on xplat by > tau")
+    check(not dc.better_than(rec("A", 1, 0.0, 0.0), ref, 0.02, 0) and dc.better_than(rec("A", 0, 0.5, 0.5), rec("M3_R", 2, 0.2, 0.1), 0.02, 1),
+          "misses beyond the allowance dominate")
+    check([dc.budget_rank(b) for b in ("B35", "B50", "B60", None)] == [0, 1, 2, 3], "complete budget None is worst")
+    check(dc.best_condition("TRANSFER_NEUTRAL") == "C2" and dc.best_condition("TRANSFER_HARMS") == "C0", "best condition")
+    check(dc.b_gate(rec("M3_R", 0, 0.10, 0)) and not dc.b_gate(rec("M3_R", 0, 0.099, 0)), "B gate at ER 0.10")
+    check(dc.economics_confirmed("B35", "B50", {"generated_c_reduction": 0.2, "compile_cpu_reduction": 0.15})
+          and not dc.economics_confirmed("B50", "B50", {"generated_c_reduction": 0.5, "compile_cpu_reduction": 0.5})
+          and not dc.economics_confirmed("B35", "B50", {"generated_c_reduction": 0.05, "compile_cpu_reduction": 0.5}), "economics gate")
+    cand = {"reserved_b50_misses": {"neogeosdk": 5, "space-invaders": 1}, "reserved_max_er": {"neogeosdk": 0.2, "space-invaders": 0.3}}
+    comp = {"reserved_b50_misses": {"neogeosdk": 5, "space-invaders": 0}, "reserved_max_er": {"neogeosdk": 0.2, "space-invaders": 0.3}}
+    check(dc.contradicted(cand, comp, 0.02), "one extra reserved miss contradicts")
+    check(dc.reserved_er({"a": 0.2, "b": None, "c": 0.4}) == 0.30000000000000004 or abs(dc.reserved_er({"a": 0.2, "c": 0.4}) - 0.3) < 1e-9,
+          "reserved ER: mean of per-lineage max ER")
+    good = rec("A", 0, 0.10, 0.05)
+    check(dc.outcome("EVIDENCE_INSUFFICIENT", good, ref, 0.02, 0, True, False, None)["class"] == "DATA_INSUFFICIENT", "rule 1")
+    check(dc.outcome("TRANSFER_NEUTRAL", good, ref, 0.02, 0, True, False, None)["class"] == "LIGHTWEIGHT_STRUCTURAL_JUSTIFIED", "rule 4")
+    check(dc.outcome("TRANSFER_HELPS", rec("M3_R", 0, 0.1, 0.1, "C2"), ref, 0.02, 0, True, False, None)["class"] == "CORPUS_IMPROVES_EXISTING",
+          "rule 3")
+    check(dc.outcome("TRANSFER_HARMS", rec("M4_DENSE@128", 0, 0.1, 0.1, "C0"), ref, 0.02, 0, True, False, None)["class"]
+          == "NO_ECONOMIC_IMPROVEMENT", "C0 existing re-selection is not a SEG-075 result")
+    check(dc.outcome("TRANSFER_NEUTRAL", good, ref, 0.02, 0, True, True, None)["class"] == "NO_ECONOMIC_IMPROVEMENT", "contradicted -> rule 7")
+    check(dc.outcome("TRANSFER_NEUTRAL", good, ref, 0.02, 0, False, False, None)["class"] == "NO_ECONOMIC_IMPROVEMENT", "no economics -> 7")
+    check(dc.outcome("TRANSFER_NEUTRAL", rec("M3_R", 0, 0.2, 0.1), ref, 0.02, 0, False, False, 0.05)["class"] == "CORPUS_EXPANSION_ONLY",
+          "rule 8")
+    check(dc.outcome("TRANSFER_NEUTRAL", rec("M3_R", 0, 0.2, 0.1), ref, 0.02, 0, False, False, 0.0)["class"] == "NO_ECONOMIC_IMPROVEMENT",
+          "rule 9")
+
+
 def test_jobs():
     if not d.PLAN.is_file():
         return
@@ -180,7 +234,7 @@ def test_jobs():
 
 
 def main():
-    for t in (test_sequences, test_feasibility, test_plan, test_barrier, test_metrics, test_transfer_rule, test_jobs):
+    for t in (test_sequences, test_feasibility, test_plan, test_barrier, test_metrics, test_transfer_rule, test_decide, test_jobs):
         t()
     if FAILURES:
         print(f"{len(FAILURES)} failure(s)")

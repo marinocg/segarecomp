@@ -116,11 +116,16 @@ DECISIONS = {
                    "Amiga attribution (C1 vs C2) relies on M4_DENSE (M3_R's cross-platform segments are dominated by EmuTOS)",
     },
     "ordering": {
-        "rule": "a configuration's development record = (genesis B50 misses summed over lineages, genesis mean ER, xplat_lolo mean ER, "
-                "complexity); candidates are compared lexicographically: fewer B50 misses; then lower genesis mean ER unless within tau "
-                "(treated equal); then lower xplat_lolo mean ER unless within tau; then the simpler configuration",
-        "complexity": ["M3_FROZEN", "M1_HGB", "A", "M3_R", "M4_DENSE@128", "M4_DENSE@64", "B", "C"],
-        "condition": "each configuration in its best transfer condition (C2 if its class is HELPS or NEUTRAL, else C0)",
+        "rule": "tools/segarecomp_xplat_decide.py `select` (bound by digest): nested pools - Genesis B50 misses within the seed-replicate "
+                "allowance sum of the minimum; then Genesis mean ER within tau (<=) of the pool minimum; then xplat_lolo mean ER within tau "
+                "(<=) of the pool minimum; then the simplest by COMPLEXITY; a None value ranks after every value on its key",
+        "complexity": ["M1_HGB", "A", "M3_R", "M4_DENSE@128", "M4_DENSE@64", "B", "C"],
+        "reference_only": "M3_FROZEN is a reference and comparator, never a candidate (cannot be refit; lineage-correlated on D01/D03)",
+        "condition": "each configuration in its own best transfer condition (decide.best_condition: C2 if its class is HELPS or NEUTRAL, "
+                     "else C0)",
+        "better_than": "decide.better_than (strict): fewer Genesis B50 misses by more than the allowance sum, or not more by more than it "
+                       "and (Genesis mean ER lower by > tau, or within tau and xplat_lolo mean ER lower by > tau)",
+        "m4_cells": "M4_DENSE@64 ER is measured in 64-byte cells and ranked on the same keys (disclosed incommensurability)",
     },
     "t005_scope": {
         "condition": "models A/B/C train on C2 unless the T004 overall class is TRANSFER_HARMS (then C0); same genesis_lolo and xplat_lolo "
@@ -134,7 +139,8 @@ DECISIONS = {
                    "decode, count landing in this cell from anywhere); byte context (zero-byte fraction, printable-ASCII fraction, "
                    "byte-value entropy); relocation-field count in the cell (0 for Genesis); seed-cell flag; the same aggregates over "
                    "the +/-1 and +/-4 neighbour cells; masked cells excluded from training",
-        "model_B": "built only if the ordering's best of {M1_HGB, A, M3_R, M4_DENSE} has genesis mean ER >= 0.10 AND T004 is not "
+        "model_B": "built only if decide.select over {M1_HGB, A, M3_R, M4_DENSE@128, M4_DENSE@64} returns a configuration with genesis "
+                   "mean ER >= 0.10 (decide.b_gate) AND T004 is not "
                    "EVIDENCE_INSUFFICIENT: a bounded local instruction-aware Transformer: per-word input = embed(hi byte) + embed(lo byte) "
                    "+ the M3/M4 decode-token embeddings, d_model 64, 2 encoder layers, 4 heads, feed-forward 128, learned positions, "
                    "attention restricted to non-overlapping 256-word windows with 64 words of real context (or PAD) on each side; per-word "
@@ -173,11 +179,12 @@ DECISIONS = {
                      "GRAPH_TRANSFORMER_JUSTIFIED", "CORPUS_EXPANSION_ONLY", "DATA_INSUFFICIENT", "NO_ECONOMIC_IMPROVEMENT"],
         "outcome_rule": [
             "1 DATA_INSUFFICIENT: T004 overall EVIDENCE_INSUFFICIENT",
-            "2 contradiction: the one-shot contradicts the candidate if, on any reserved lineage, it misses more confident starts at B50 "
-            "than the C0 M3_R comparator, or its reserved mean ER exceeds the comparator's by > tau; a contradicted candidate cannot "
-            "carry classes 3-6",
-            "3 CORPUS_IMPROVES_EXISTING: candidate is M1_HGB/M3_R/M4_DENSE trained on C1/C2, ordered better than C0 M3_R, economically "
-            "better (confirmed), not contradicted",
+            "2 contradiction (decide.contradicted): on any reserved lineage more B50 misses of confident starts than the C0 M3_R "
+            "comparator, or reserved ER (per reserved lineage max ER over informative samples, then the mean over the reserved lineages) "
+            "worse than the comparator's by > tau; a contradicted candidate cannot carry classes 3-6",
+            "3 CORPUS_IMPROVES_EXISTING: candidate is M1_HGB/M3_R/M4_DENSE trained on C1/C2, better_than C0 M3_R, economically "
+            "better (confirmed), not contradicted; an existing architecture trained on C0 only that satisfies the same is a re-selection "
+            "outside SEG-075's question and is classified NO_ECONOMIC_IMPROVEMENT (rule 7, noted)",
             "4 LIGHTWEIGHT_STRUCTURAL_JUSTIFIED / 5 LOCAL_TRANSFORMER_JUSTIFIED / 6 GRAPH_TRANSFORMER_JUSTIFIED: candidate is A / B / C, "
             "ordered better than C0 M3_R, economically better (confirmed), not contradicted",
             "7 NO_ECONOMIC_IMPROVEMENT: a candidate is ordered better than C0 M3_R but is not economically better (or the benchmark does "
@@ -185,7 +192,7 @@ DECISIONS = {
             "8 CORPUS_EXPANSION_ONLY: no candidate is ordered better than C0 M3_R on Genesis, but C2 improves xplat_lolo mean ER over "
             "C0-all by >= tau for M3_R",
             "9 otherwise NO_ECONOMIC_IMPROVEMENT",
-            "rules apply in order; exactly one class; no production model is promoted",
+            "rules apply in order; exactly one class; implemented by decide.outcome (bound by digest); no production model is promoted",
         ],
     },
 }
@@ -193,12 +200,35 @@ BACKEND = {"selected": "CPU", "basis": "SEG-072 hardware benchmark (ROCm 8.9% fa
            "research venv rebuilt at the recorded versions (Python 3.13.14, numpy 2.5.3, scikit-learn 1.9.1, torch 2.14.1+cu130 on CPU, "
            "float32, deterministic algorithms)",
            "parallelism": "M3_R 4 processes x 4 threads; M4_DENSE 8 processes x 2 threads; M1 2 processes"}
-BOUND_CODE = ("segarecomp_xplat_design.py", "segarecomp_xplat_transfer.py", "segarecomp_ml_v3.py", "segarecomp_ml_v3_train.py",
-              "segarecomp_ml_v3_eval.py", "segarecomp_ml_region_gen2.py", "segarecomp_ml_region_gen2_train.py")
-SUPERSEDES = {"plan_sha256": "f551fea791c307e15f5203ed30102d1b80db6a583128ae04a82df2565a053ad5",
-              "reason": "C3 review (APPROVE_WITH_CONDITIONS, before any fit): FRF degenerate on all-positive images (ER adopted), B50 miss "
-                        "rule without noise allowance, open selection/economics/outcome choices, runner not bound to the plan, C0 reuse "
-                        "not gated, representatives omitted images without an 8-instruction run"}
+BOUND_CODE = ("segarecomp_xplat_design.py", "segarecomp_xplat_transfer.py", "segarecomp_xplat_decide.py", "segarecomp_ml_v3.py",
+              "segarecomp_ml_v3_train.py", "segarecomp_ml_v3_eval.py", "segarecomp_ml_region_gen2.py", "segarecomp_ml_region_gen2_train.py",
+              "segarecomp_oracle_bench.py")
+GENESIS_FOLDS = ("D01", "D02", "D03", "D04", "D05", "D06", "D07", "D09", "D10", "D11", "D12")
+
+
+def seg072_score_digests(seg072: pathlib.Path) -> dict:
+    """Digests of every preserved SEG-072 score file the runner may reuse (C0 fold scores, M3_FROZEN production + historical folds)."""
+    out = {}
+    sc = seg072 / "scores"
+    names = [f"M3R.{f}.npz" for f in GENESIS_FOLDS] + [f"M1.{f}.npz" for f in GENESIS_FOLDS]
+    names += [f"M4.{f}.s{s}.npz" for f in GENESIS_FOLDS for s in (1, 2, 3)] + ["M3_FROZEN.production.npz"]
+    for n in names:
+        out[f"seg072/scores/{n}"] = sha256((sc / n).read_bytes())
+    hist = seg072.parent / "seg049" / "scores"
+    for h in sorted(hist.glob("M3.*.npy")):
+        out[f"seg049/scores/{h.name}"] = sha256(h.read_bytes())
+    return out
+SUPERSEDES = [
+    {"plan_sha256": "f551fea791c307e15f5203ed30102d1b80db6a583128ae04a82df2565a053ad5",
+     "reason": "C3 review (APPROVE_WITH_CONDITIONS, before any fit): FRF degenerate on all-positive images (ER adopted), B50 miss rule "
+               "without noise allowance, open selection/economics/outcome choices, runner not bound to the plan, C0 reuse not gated, "
+               "representatives omitted images without an 8-instruction run"},
+    {"plan_sha256": "9c4b166d01658e75df132f36eaaa93e6a7f99d09acdc01b0e8dcb492354fc6f3",
+     "reason": "C3 delta review (APPROVE_WITH_CONDITIONS, before any fit): selection by a non-transitive pairwise rule and not "
+               "implemented in bound code (now decide.select, nested pools), M3_FROZEN in the candidate pool (now reference only), "
+               "reserved-lineage material readable outside the quarantine (moved), SEG-072 score files and the economics benchmark "
+               "not bound (now bound by digest)"},
+]
 
 
 def sha256(b: bytes) -> str:
@@ -447,6 +477,7 @@ def cmd_freeze(a) -> int:
                                        "training image list"},
         "backend": BACKEND, "feasibility": gate, "supersedes": SUPERSEDES,
         "bound_code": {n: sha256((HERE / n).read_bytes()) for n in BOUND_CODE},
+        "bound_seg072_scores": seg072_score_digests(seg072),
         "barrier": {"sealed_dir": f"<HARNESS_ROOT>/.cache/seg075/t003/snapshot/{SEALED_DIRNAME}",
                     "rule": "development, tuning and selection tooling refuses the sealed directory, every sealed sample id and every "
                             "reserved lineage; the binding holds opaque digests only; the sealed labels are opened once by T006 after the "

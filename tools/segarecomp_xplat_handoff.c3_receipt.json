@@ -1,6 +1,6 @@
 {
  "label": "c3-t003-freeze",
- "manifest_sha256": "14faa5dae1a03cb4498f61921f2c7d12b3f208c7abec03052de7b597dd5043f7",
+ "manifest_sha256": "ffe4c1c50e3fe71311100d8fc12cb58759812078a46a0913c92b0bb5ae386aa1",
  "required_problems": 0,
  "schema": "segarecomp.xplat_handoff.receipt.v1",
  "storage": {

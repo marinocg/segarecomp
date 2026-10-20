@@ -28,6 +28,7 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import segarecomp_ml_v3 as v3  # noqa: E402
+import segarecomp_xplat_decide as decide  # noqa: E402
 import segarecomp_xplat_design as design  # noqa: E402
 
 RESULTS = HERE / "segarecomp_xplat_transfer.results.json"
@@ -174,11 +175,22 @@ def cmd_reproduce(a) -> int:
         mine = np.load(score_path(out / "reproduce", model, "C0", a.fold, seed))
         theirs = np.load(ref)
         same = sorted(mine.files) == sorted(theirs.files) and all(np.array_equal(mine[k], theirs[k]) for k in mine.files)
-        res["models"][model] = {"bitwise_identical": bool(same), "images": len(mine.files)}
+        res["models"][model] = {"bitwise_identical": bool(same), "images": len(mine.files),
+                                "reference_sha256": hashlib.sha256(ref.read_bytes()).hexdigest(),
+                                "array_sha256": {k: hashlib.sha256(mine[k].tobytes()).hexdigest() for k in sorted(mine.files)}}
     res["c0_reuse_admitted"] = all(r["bitwise_identical"] for r in res["models"].values())
     (out / "reproduce.json").write_text(json.dumps(res, indent=1, sort_keys=True))
     print(json.dumps(res))
     return 0 if res["c0_reuse_admitted"] else 1
+
+
+def verify_seg072_scores() -> None:
+    """The preserved SEG-072 score files (reused C0 folds, M3_FROZEN) must equal the digests bound in the frozen plan."""
+    plan = design.verify_plan()
+    base = SEG072_SCORES.parent.parent
+    for rel, want in plan["bound_seg072_scores"].items():
+        if hashlib.sha256((base / rel).read_bytes()).hexdigest() != want:
+            raise SystemExit(f"{rel}: differs from the SEG-072 score digest bound by the frozen plan")
 
 
 def c0_reuse(out: pathlib.Path) -> bool:
@@ -187,6 +199,7 @@ def c0_reuse(out: pathlib.Path) -> bool:
     if not p.is_file():
         return False
     r = json.loads(p.read_text())
+    verify_seg072_scores()
     return (r.get("plan_sha256") == plan_sha() and r.get("c0_reuse_admitted") is True
             and set(r.get("models", {})) == {"M3R", "M4", "M1"} and all(m["bitwise_identical"] for m in r["models"].values()))
 
@@ -460,7 +473,22 @@ def cmd_table(a) -> int:
                       "genesis_trivial_images": sum(r["trivial_images"] for r in g.values()),
                       "xplat_mean_er": mean_er(x), "xplat_b50_misses": sum(r["misses_B50"] for r in x.values()) if x else None,
                       "complete_budget": complete_budget(g, asum) if g else None}
+    verify_seg072_scores()  # M3_FROZEN scores and (when reused) C0 folds are the bound files
+    candidates = []
+    for cfg in CONFIGS:
+        cls = decisions.get(f"{cfg}|C2", {"class": "EVIDENCE_INSUFFICIENT"})["class"]
+        cond = decide.best_condition(cls)
+        candidates.append({"config": cfg, "condition": cond, **{k: records[f"{cfg}|{cond}"][k] for k in
+                                                                 ("genesis_b50_misses", "genesis_mean_er", "xplat_mean_er", "complete_budget")}})
+    selection = None
+    if not insufficient:
+        sel = decide.select(candidates, tau, asum)
+        comp = {"config": "M3_R", "condition": "C0", **{k: records["M3_R|C0"][k] for k in
+                                                         ("genesis_b50_misses", "genesis_mean_er", "xplat_mean_er", "complete_budget")}}
+        selection = {"selected": sel, "b_gate_model_B": decide.b_gate(sel), "better_than_C0_M3_R": decide.better_than(sel, comp, tau, asum),
+                     "comparator": comp, "allowance_sum": asum}
     doc = {"schema": "segarecomp.xplat_transfer.results.v2", "task": "SEG-075-T004", "adr": "0162", "plan_sha256": plan_sha(),
+           "candidates": candidates, "selection": selection,
            "c0_reuse": reuse, "complete": complete, "missing_fits": missing,
            "noise": {"tau": tau, "per_lineage_abs_d_er_seed49_seed50": {l: round(v, 6) for l, v in diffs.items()},
                      "b50_miss_allowance": allowance, "insufficient": insufficient},

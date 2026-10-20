@@ -4,13 +4,20 @@
 - Task: SEG-075-T003, combined SEG-075 product PR (checkpoint C3). This pre-registration is committed and pushed, and approved by
   independent adversarial review, before any model of the cross-platform experiments is fitted.
 - Frozen record: `tools/segarecomp_xplat_design.plan.json`, digest `tools/segarecomp_xplat_design.plan.digest`
-  (`9c4b166d01658e75df132f36eaaa93e6a7f99d09acdc01b0e8dcb492354fc6f3`).
-  - It supersedes the unused first freeze `f551fea7…` (section 6).
-  - The plan binds by digest the T004 runner, the design module and the SEG-072 code they call: `segarecomp_ml_v3{,_train,_eval}.py`
-    and `segarecomp_ml_region_gen2{,_train}.py`. Every tool refuses to run when any of them, or the plan, drifts.
+  (`fde026ee1075d0c2a2f71679a4a40bdf9cffe7376baabf7b7982685d2915dd92`).
+  - It supersedes two unused earlier freezes, `f551fea7…` and `9c4b166d…` (section 6). No model was fitted under either.
+  - The plan binds by digest:
+    - the T004 runner, the design module and the decision module;
+    - the SEG-072 code they call: `segarecomp_ml_v3{,_train,_eval}.py` and `segarecomp_ml_region_gen2{,_train}.py`;
+    - SEG-074's economics benchmark `segarecomp_oracle_bench.py`;
+    - the 61 preserved SEG-072 / SEG-049 score files that may be reused: C0 folds and M3_FROZEN.
+
+    Every tool refuses to run when any of them, or the plan, drifts.
 - Tooling:
   - `tools/segarecomp_xplat_design.py` (lineages, freeze, check, and the development API with its barrier);
   - `tools/segarecomp_xplat_transfer.py` (the T004 runner: reproduce, fit, jobs, table);
+  - `tools/segarecomp_xplat_decide.py` (pure, pre-registered decisions: selection, the strict better-than relation, budget rank,
+    contradiction, economics gate, outcome classes);
   - tests in `tests/segarecomp_xplat_design_test.py`.
 
 ## 1. Frozen corpus
@@ -127,20 +134,33 @@ A stronger evaluation would need:
   - `HARMS`: d_mean >= tau, or any d_l > 2tau, or any e_l > 0.
   - `NEUTRAL`: otherwise.
   - The overall class is that of M3_R in C2. M4_DENSE, M1_HGB and C1 corroborate. Amiga attribution relies on M4_DENSE (section 5).
-- **Ordering** (used for T005 gating and for selecting the T006 candidate). Configurations are compared on: fewer Genesis B50 misses;
-  then lower Genesis mean ER unless within tau; then lower `xplat_lolo` mean ER unless within tau; then simplicity, in the order
-  M3_FROZEN < M1_HGB < A < M3_R < M4@128 < M4@64 < B < C. Each configuration is taken in its best transfer condition: C2 if its class
-  is HELPS or NEUTRAL, else C0.
+- **Selection** (`decide.select`, used for T005 gating and for selecting the T006 candidate) uses nested pools, which makes it
+  transitive:
+  1. keep the configurations whose Genesis B50 misses are within the allowance sum of the minimum;
+  2. of those, keep the ones whose Genesis mean ER is within tau (<=) of the minimum;
+  3. of those, keep the ones whose `xplat_lolo` mean ER is within tau (<=) of the minimum;
+  4. take the simplest: M1_HGB < A < M3_R < M4@128 < M4@64 < B < C.
+
+  Rules for values and conditions:
+  - A None value ranks after every value on its key.
+  - Each configuration enters in its own best transfer condition: C2 if its class is HELPS or NEUTRAL, else C0.
+  - M3_FROZEN is a reference and comparator only. It cannot be refit and is lineage-correlated on D01/D03 (ADR 0153).
+
+  Improvement over the comparator uses the strict `decide.better_than`: fewer misses by more than the allowance sum; or not more by more
+  than it and ER lower by more than tau; or ER within tau and `xplat_lolo` ER lower by more than tau. The complete-budget rank is
+  B35 < B50 < B60 < none.
 - **T005.** Models A/B/C train on C2 unless T004 is HARMS (then C0), on the same folds. They use fixed configurations with no
   hyper-parameter search, so nothing is tuned on the folds being compared.
   - **A:** a gradient-boosted model over per-cell aggregates of the CPU-owned decode tokens, ordinary-decode chain statistics, computed
     direct-control targets, byte context, relocation-field counts, the seed flag, and the same aggregates over neighbouring cells. Always
     built.
   - **B:** a bounded local instruction-aware Transformer (64-wide, 2 layers, 4 heads, 256-word windows plus 64 words of context), trained
-    on M4's exact budget and recipe. Built only if the best of {M1, A, M3_R, M4} has Genesis mean ER >= 0.10.
+    on M4's exact budget and recipe. Built only if `decide.select` over {M1, A, M3_R, M4@128, M4@64} returns Genesis mean ER >= 0.10.
   - **C:** B plus typed sparse message passing over candidate fall-through, direct-target and overlap edges, and a PROVEN
     seed-reachability flag. Hypothetical edges never mark a position reachable. Built only if B beats A by tau.
   - The A/B/C code is bound by digest in a reviewed T005 pre-fit addendum before any fit.
+  - The T005 runner must refuse an A/B/C fit without that addendum digest and stamp the digest into every fit record. Implementation
+    choices not fixed here, such as neighbour aggregates as means, are closed by binding the code, not by trial fits.
 - **T006.**
   - The ordering's best configuration at B50, with comparators M3_FROZEN and C0-all M3_R+B50, is committed before the seal is opened.
   - It is refit on all development data and evaluated once on every sealed sample that has labelled starts, with a one-shot marker.
@@ -148,11 +168,19 @@ A stronger evaluation would need:
   - Economic measure: the complete budget, i.e. the smallest of B35/B50/B60 whose Genesis misses fall within the summed allowance. A
     smaller complete budget than C0 M3_R is confirmed only if SEG-074's unchanged exact-code benchmark shows at least 10% less generated C
     and at least 10% less compile CPU on the Genesis development images it supports.
-  - Outcome predicates are applied in order (plan `decisions.t006.outcome_rule`): `DATA_INSUFFICIENT`; then contradiction by the one-shot
-    evaluation (more reserved B50 misses than the comparator, or reserved ER worse by more than tau); `CORPUS_IMPROVES_EXISTING` /
-    `LIGHTWEIGHT_STRUCTURAL_JUSTIFIED` / `LOCAL_TRANSFORMER_JUSTIFIED` / `GRAPH_TRANSFORMER_JUSTIFIED` by candidate type (better ordered,
-    economically confirmed, not contradicted); `NO_ECONOMIC_IMPROVEMENT`; `CORPUS_EXPANSION_ONLY` (no Genesis gain, but `xplat_lolo` ER
-    improves by tau); otherwise `NO_ECONOMIC_IMPROVEMENT`. No production model is promoted.
+  - Outcome predicates are applied in order (`decide.outcome`, plan `decisions.t006.outcome_rule`):
+    1. `DATA_INSUFFICIENT`.
+    2. Contradiction by the one-shot evaluation: more reserved B50 misses on any reserved lineage than the comparator, or reserved ER
+       (per-lineage max, then the mean over the two lineages) worse by more than tau.
+    3. `CORPUS_IMPROVES_EXISTING`, `LIGHTWEIGHT_STRUCTURAL_JUSTIFIED`, `LOCAL_TRANSFORMER_JUSTIFIED` or `GRAPH_TRANSFORMER_JUSTIFIED`, by
+       candidate type: better than the comparator, economically confirmed and not contradicted. An existing architecture trained on
+       Genesis only (C0) that satisfies this is a re-selection outside SEG-075's question; it is classified `NO_ECONOMIC_IMPROVEMENT`
+       with a note.
+    4. `NO_ECONOMIC_IMPROVEMENT`.
+    5. `CORPUS_EXPANSION_ONLY`: no Genesis gain, but `xplat_lolo` ER improves by tau.
+    6. Otherwise `NO_ECONOMIC_IMPROVEMENT`.
+
+    No production model is promoted.
 - **Backend.** CPU, per SEG-072's benchmark (ROCm +8.9%, below its 25% rule). The rebuilt research venv uses the recorded versions.
 
 ## 5. Disclosures
@@ -163,10 +191,23 @@ A stronger evaluation would need:
   training.
 - **The noise rule is conservative.** It rests on one seed pair with a 0.01 floor, so it is biased toward NEUTRAL/HARMS. Fits are
   deterministic and C0 seed 49 is fixed, so tau cannot be adjusted.
+- **Commensurability and provenance.**
+  - M4_DENSE@64's ER and complete budget are measured in 64-byte cells, finer than the others, yet ranked on the same keys as
+    pre-registered.
+  - `seed_addresses` were added to the corpus metadata after T002's manifest. They are not part of the manifest digest, but the
+    snapshot binds every file.
 - **M3_FROZEN sanity check.** The runner's metric code reproduces SEG-072's evaluator: M3_FROZEN has 2 Genesis B50 misses, as SEG-072
   recorded. Four D01 modules are trivial (all positive) and are excluded from ER.
 
 ## 6. Barrier, and the superseded freeze
+
+The barrier is **code plus procedure, not filesystem secrecy**. The tools run as root, so file modes protect nothing. The reserved
+programs' public sources and T001 build trees exist locally (`seg075/q/{src,build}`), and the handoff store holds copies.
+
+What is enforced:
+- Every unsealed reserved copy produced by SEG-075 is moved into one quarantine directory: the T002 extraction, the truth listings, and
+  the scratch re-extractions of development and review.
+- Development code reads cross-platform data only through the snapshot API.
 
 `dev_sample_dirs` / `refuse_sealed` resolve paths, including symlinks, and refuse:
 
@@ -177,7 +218,9 @@ A stronger evaluation would need:
 The T004 runner loads cross-platform data only through this API. The sealed labels are opened once, by T006, after the frozen candidate
 is committed.
 
-The first freeze `f551fea7…` (e805b8e) was reviewed APPROVE_WITH_CONDITIONS before any fit. Its defects:
+Two earlier freezes were reviewed APPROVE_WITH_CONDITIONS before any fit, so no model has been trained under either.
+
+The first, `f551fea7…` (e805b8e), had these defects:
 
 - degenerate FRF;
 - no miss allowance;
@@ -186,4 +229,11 @@ The first freeze `f551fea7…` (e805b8e) was reviewed APPROVE_WITH_CONDITIONS be
 - representatives omitted images without an 8-instruction run;
 - string-matching gaps in the barrier.
 
-They are corrected in this freeze, which records the superseded digest. No model was fitted under the first freeze.
+The second, `9c4b166d…` (fe68dd3), had these defects:
+
+- the selection rule was not transitive and was not implemented in bound code;
+- M3_FROZEN was in the candidate pool;
+- reserved material was readable outside the quarantine;
+- the SEG-072 score files and the benchmark were not bound.
+
+All of these are corrected here, and the plan records both superseded digests.
