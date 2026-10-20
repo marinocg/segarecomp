@@ -14,9 +14,8 @@ results are counts, fractions and quantiles.
 """
 from __future__ import annotations
 
-import ntpath
 import pathlib
-import posixpath
+import re
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -28,34 +27,53 @@ SHORT_RUN_STARTS = 8
 
 
 # ------------------------------------------------------------------------------------------------------------------------ barrier
+def _norm_name(comp: str) -> set[str]:
+    """Case-folded name variants a Windows file system treats as the same entry: trailing dots / spaces and ':stream' suffixes stripped,
+    plus the base before a '#'/'@' sample suffix."""
+    c = comp.casefold().split(":", 1)[0] if len(comp) > 2 or not comp.endswith(":") else comp.casefold()
+    c = c.rstrip(" .")
+    return {c, c.split("#", 1)[0].split("@", 1)[0]} - {""}
+
+
 def _components(text: str) -> list[str]:
-    """Lexical path components under BOTH conventions: drive / UNC prefixes dropped, '.' removed, '..' applied, names case-folded."""
-    s = text.replace("\\", "/")
-    _drive, rest = ntpath.splitdrive(s)
-    norm = posixpath.normpath(rest) if rest else ""
-    return [c.casefold() for c in norm.split("/") if c not in ("", ".", "..")]
+    """Lexical path components under BOTH conventions. Drive, UNC host and share and '\\\\?\\' prefixes are KEPT as components (fail-closed);
+    '.' is removed and '..' applied lexically."""
+    parts = []
+    for c in text.replace("\\", "/").split("/"):
+        if c in ("", "."):
+            continue
+        if c.rstrip(" .") == "" and c.startswith(".."):
+            if parts:
+                parts.pop()
+            continue
+        parts.append(c)
+    return parts
+
+
+def _short_name_hit(name: str, bad: set[str]) -> bool:
+    """8.3 alias ('SEALED~1', 'SPACE-~2'): its prefix before '~<digits>' is a prefix of a protected name."""
+    m = re.fullmatch(r"(.{1,6})~[0-9]+(\..{0,3})?", name)
+    return bool(m) and any(b.startswith(m.group(1)) for b in bad)
 
 
 def sealed_target(path, reserved: set[str], sealed_dirname: str = "sealed") -> bool:
-    """True when `path` names (or resolves into) the sealed subtree or a reserved lineage/sample, whether or not it exists.
-    Fails closed: any component equal to the sealed directory name or a reserved id (before '#'/'@' sample suffixes) counts, also for
-    nonexistent Windows-style paths. A path whose existence cannot be determined is judged on its lexical components only."""
-    names = set()
-    text = str(path)
-    for comp in _components(text):
-        names.add(comp)
-        names.add(comp.split("#", 1)[0].split("@", 1)[0])
-    try:
-        p = pathlib.Path(text)
-        if p.exists() or p.is_symlink():
-            for comp in p.resolve().parts:
-                c = comp.casefold()
-                names.add(c)
-                names.add(c.split("#", 1)[0].split("@", 1)[0])
-    except (OSError, ValueError):
-        pass
+    """True when `path` names, or resolves into, the sealed subtree or a reserved lineage / sample, whether or not it exists.
+
+    Fail-closed: the lexical components (both slash conventions, UNC / drive prefixes kept) AND the non-strictly resolved path (which
+    follows any existing symlink prefix, also for a nonexistent leaf) are checked; names are case-folded with Windows trailing dots /
+    spaces and ':stream' suffixes stripped; '#'/'@' sample suffixes and 8.3 short names are matched."""
     bad = {sealed_dirname.casefold()} | {r.casefold() for r in reserved}
-    return bool(names & bad)
+    text = str(path)
+    comps = list(_components(text))
+    try:
+        comps += list(pathlib.Path(text).resolve(strict=False).parts)
+    except (OSError, ValueError, RuntimeError):
+        pass
+    for comp in comps:
+        names = _norm_name(comp)
+        if names & bad or any(_short_name_hit(n, bad) for n in names):
+            return True
+    return False
 
 
 def refuse(paths, reserved: set[str], sealed_dirname: str = "sealed") -> None:

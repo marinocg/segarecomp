@@ -34,7 +34,9 @@ def test_barrier():
     refused = ["/x/seg075/t003/snapshot/sealed/a", "/x/sealed", "C:\\cache\\seg075\\t003\\snapshot\\sealed\\new\\file.bin",
                "C:\\cache\\SEALED\\x", "\\\\server\\share\\sealed\\x", "D:/cache/Sealed/x", "relative\\sealed", "sealed",
                "/x/dev/../sealed/y", "C:\\x\\dev\\..\\sealed\\y", "/x/snapshot/dev/neogeosdk@1", "C:\\s\\dev\\space-invaders#0\\meta.json",
-               "neogeosdk", "/x/Space-Invaders/y"]
+               "neogeosdk", "/x/Space-Invaders/y", "//srv/sealed/x", "\\\\?\\UNC\\srv\\sealed", "\\\\srv\\sealed\\x",
+               "C:\\x\\sealed.\\y", "C:\\x\\sealed \\y", "C:\\x\\sealed::$DATA", "C:\\x\\SEALED~1\\y", "C:\\x\\NEOGEO~1",
+               "C:\\x\\sealed:alt\\y", "/x/a/b/../../sealed"]
     for p in refused:
         check(ev.sealed_target(p, res), f"refused: {p!r}")
         try:
@@ -59,6 +61,8 @@ def test_barrier():
             check(ev.sealed_target(link, res), "symlink into sealed/ refused (existing target resolved)")
         check(ev.sealed_target(td / "sealed" / "not-yet-created" / "f", res), "nonexistent POSIX path under sealed/ refused")
         check(not ev.sealed_target(td / "dev" / "plain", res), "nonexistent development path allowed")
+        if link is not None:
+            check(ev.sealed_target(link / "newdir" / "f", res), "nonexistent child under a symlink into sealed/ refused")
 
 
 def test_strata():

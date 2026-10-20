@@ -42,7 +42,8 @@ RECEIPT_C7 = HERE / "segarecomp_xplat_handoff.c7_receipt.json"
 SCHEMA = "segarecomp.xplat_explore.t001.plan.v1"
 BOUND_CODE = ("segarecomp_xplat_explore.py", "segarecomp_xplat_explore_eval.py", "segarecomp_xplat_models.py",
               "segarecomp_xplat_transfer.py", "segarecomp_xplat_design.py", "segarecomp_xplat_decide.py", "segarecomp_ml_v3.py",
-              "segarecomp_ml_v3_train.py", "segarecomp_ml_v3_eval.py", "segarecomp_ml_region_gen2_train.py")
+              "segarecomp_ml_v3_train.py", "segarecomp_ml_v3_eval.py", "segarecomp_ml_region_gen2_train.py", "segarecomp_xplat_t005.py",
+              "segarecomp_ml_region.py", "segarecomp_ml_region_gen2.py", "segarecomp_ml_region_v2.py", "segarecomp_ml_v3_data.py")
 GENESIS = ("D01", "D02", "D03", "D04", "D05", "D06", "D07", "D09", "D10", "D11", "D12")
 PILOT_SEED = 1
 DETERMINISM_FOLD = "D05"
@@ -57,10 +58,12 @@ RESOURCES = {
                          "note": "C's typed message passing builds per-edge index lists in Python, so the step stays CPU-bound"}},
         "rule": "SEG-072 hardware rule (ADR 0153): ROCm only if >= 25% end-to-end improvement over the parallel CPU farm AND reproducible, "
                 "with every compared candidate on the same backend",
-        "decision": "CPU. All B and C fits on one ROCm process: ~0.5 h + ~7.2 h, versus ~2.7 h on the 6-process CPU farm (worse). Splitting "
-                    "B onto ROCm and C onto the CPU saves ~50 min but would put B on a different device and torch build than C, M4-Dense "
-                    "and A, confounding the B-vs-C and B-vs-M4 contrasts the expansion rule depends on (CPU and ROCm outputs are not "
-                    "bit-identical, ADR 0117). A later stage may pre-register its own ROCm decision.",
+        "decision": "CPU. Deciding reason: the same-backend clause. Every comparator the expansion rule uses (M4-Dense seed 1, M3-R, A) "
+                    "is a CPU result, and CPU and ROCm outputs are not bit-identical (ADR 0117), so a ROCm B or C would be an unmatched "
+                    "comparison (and splitting B onto ROCm, C onto CPU, would also confound the B-vs-C contrast; it would save ~50 min). "
+                    "Throughput context: all B and C fits in one ROCm process take ~0.55 h + ~7.2-7.8 h versus ~2.7-2.9 h on the "
+                    "6-process CPU farm; several concurrent ROCm processes (which could suit C's CPU-bound edge building) were not "
+                    "measured. A later stage may pre-register its own ROCm decision.",
     },
     "threads": {"A": "sklearn default (OpenMP), the farm sets OMP_NUM_THREADS=2", "B": 2, "C": 2},
     "parallel_fits": 6,
@@ -127,6 +130,38 @@ def comparator_files() -> dict[str, pathlib.Path]:
     return out
 
 
+# ------------------------------------------------------------------------------------------------------------------------- corpus
+def corpus_dirs() -> dict[str, pathlib.Path]:
+    """Every image directory T001 reads: the Genesis registry dirs of the 11 lineages and the 4 cross-platform representatives."""
+    import segarecomp_ml_v3_train as t
+    X = xt()
+    out = {}
+
+    def key(kind, d, rel):
+        # opaque, stable key: lineage plus a digest of the relative directory path (no title / module names in committed files)
+        lin = json.loads((d / "meta.json").read_text())["lineage"]
+        return f"{kind}/{lin}/{hashlib.sha256(rel.encode()).hexdigest()[:20]}"
+
+    for d in X.genesis_dirs(GENESIS):
+        out[key("genesis", d, d.relative_to(t.DATA).as_posix())] = d
+    snap = snapshot_dir()
+    for d in X.xplat_dirs(snap, design().verify_plan()["conditions"]["C2"]["xplat_training"]):
+        out[key("xplat", d, d.relative_to(snap).as_posix())] = d
+    if len(out) != len(set(out)):
+        raise SystemExit("corpus key collision")
+    guard(list(out.values()))
+    return out
+
+
+def corpus_manifest() -> dict:
+    """{dir key: {name: sha256}} over EVERY file of every image directory read (labels, tokens, seeds, relocations, meta.json, which
+    carries the ROM digest that Image verifies); the dir set itself is part of the identity (registry drift is refused)."""
+    out = {}
+    for key, d in sorted(corpus_dirs().items()):
+        out[key] = {f.relative_to(d).as_posix(): sha(f) for f in sorted(d.rglob("*")) if f.is_file()}
+    return out
+
+
 # --------------------------------------------------------------------------------------------------------------------------- plan
 def build_plan() -> dict:
     import segarecomp_xplat_models as xm
@@ -142,6 +177,7 @@ def build_plan() -> dict:
                    "handoff_manifest_sha256": receipt["manifest_sha256"], "handoff_label": receipt["label"],
                    "c7_receipt_sha256": sha(RECEIPT_C7)},
         "comparator_scores": {k: sha(v) for k, v in comparator_files().items()},
+        "corpus_files": corpus_manifest(),
         "condition": {"id": "C0", "name": "Genesis-only training", "why": "matched to the preserved, bit-reproduced SEG-072 C0 fold scores "
                       "of M3-R (seed 49), M4-Dense (seeds 1-3) and M1-HGB; C2 is not run in T001"},
         "folds": {"genesis_lolo": list(GENESIS), "all": "one fit on all 11 Genesis lineages per model: preserves the weights and scores "
@@ -213,6 +249,8 @@ def verify_plan() -> dict:
     for k, want in doc["comparator_scores"].items():
         if sha(files[k]) != want:
             raise SystemExit(f"comparator score {k} differs from its bound digest")
+    if corpus_manifest() != doc["corpus_files"]:
+        raise SystemExit("corpus (image directories or any of their files) differs from the T001 plan")
     return doc
 
 
@@ -250,6 +288,9 @@ def run_fit(model: str, fold: str, seed, out: pathlib.Path) -> dict:
         raise SystemExit(f"T001 pilots use seed {PILOT_SEED} only")
     if fold != "all" and fold not in GENESIS:
         raise SystemExit("T001 folds: a Genesis lineage or 'all'")
+    path = score_path(out, model, fold, seed)
+    if path.exists() or path.with_suffix(".json").exists():
+        raise SystemExit(f"{path.name}: already exists; fits are write-once (no silent retry)")
     train_dirs, held_dirs, held = xt().fold_sets(design().verify_plan(), "C0", fold, snap)
     train, held_imgs = load_dirs(train_dirs), load_dirs(held_dirs)
     if held and any(im.lineage == held for im in train):
@@ -268,7 +309,6 @@ def run_fit(model: str, fold: str, seed, out: pathlib.Path) -> dict:
         t1 = time.time()
         scores[im.id] = xm.score_a(net, im) if model == "A" else xm.infer_bc(net, im, model == "C")
         infer[im.id] = round(time.time() - t1, 3)
-    path = score_path(out, model, fold, seed)
     path.parent.mkdir(parents=True, exist_ok=True)
     t.save_scores(path, scores)
     if fold == "all":
@@ -278,7 +318,10 @@ def run_fit(model: str, fold: str, seed, out: pathlib.Path) -> dict:
         else:
             import torch
             torch.save(net.state_dict(), path.with_suffix(".pt"))
+    commit = subprocess.run(["git", "-C", str(HERE), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    dirty = bool(subprocess.run(["git", "-C", str(HERE), "status", "--porcelain", "--", "."], capture_output=True, text=True).stdout.strip())
     rec = {"task": "SEG-076-T001", "model": model, "condition": "C0", "fold": fold, "seed": seed, "plan_sha256": plan_sha(),
+           "product_commit": commit, "tools_tree_dirty": dirty,
            "fit_wall_seconds": round(fit_wall, 1), "fit_cpu_seconds": round(fit_cpu, 1),
            "inference_seconds": {"images": len(infer), "total": round(sum(infer.values()), 2), "max": max(infer.values(), default=0.0)},
            "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024,
@@ -334,8 +377,9 @@ def cmd_farm(a) -> int:
     todo = [j for j in jobs() if (not a.only or j["id"] in a.only) and j["id"] not in state["jobs"]]
     for jid in a.infra_rerun or []:
         prev = state["jobs"].get(jid)
-        if not prev or prev.get("attempts", 1) >= 2 or prev["status"] in ("ok",) or prev["status"] in ("timeout", "rss_limit"):
-            raise SystemExit(f"{jid}: infrastructure re-run not permitted (one re-run, only after a non-cap, non-ok failure)")
+        if not prev or prev.get("attempts", 1) >= 2 or not prev["status"].startswith("killed_signal"):
+            raise SystemExit(f"{jid}: infrastructure re-run not permitted (one re-run, only after an external signal kill; never after a "
+                             "cap, RSS-limit or model error)")
         if not a.reason:
             raise SystemExit("--reason is required for an infrastructure re-run")
         prev["infra_rerun_reason"] = a.reason
@@ -355,7 +399,15 @@ def cmd_farm(a) -> int:
         running[j["id"]] = (p, time.time(), j, log, 0)
         print(f"start {j['id']}", flush=True)
 
+    stall = None
     while todo or running:
+        if todo and not running and _available_mb() < RESOURCES["min_available_mb_to_start"]:
+            stall = stall or time.time()
+            if time.time() - stall > 1800:
+                save()
+                raise SystemExit("farm stalled: available memory below the start threshold for 30 min with nothing running")
+        else:
+            stall = None
         while todo and len(running) < RESOURCES["parallel_fits"] and _available_mb() >= RESOURCES["min_available_mb_to_start"]:
             start(todo.pop(0))
         time.sleep(5)
@@ -365,7 +417,7 @@ def cmd_farm(a) -> int:
             running[jid] = (p, t0, j, log, peak)
             status = None
             if p.poll() is not None:
-                status = "ok" if p.returncode == 0 else f"error_rc{p.returncode}"
+                status = "ok" if p.returncode == 0 else (f"killed_signal{-p.returncode}" if p.returncode < 0 else f"error_rc{p.returncode}")
             elif time.time() - t0 > caps[j["model"]] * 60:
                 p.kill(), p.wait()
                 status = "timeout"
@@ -388,12 +440,15 @@ def cmd_farm(a) -> int:
 
 
 # -------------------------------------------------------------------------------------------------------------------------- table
-def _stamped(p: pathlib.Path) -> bool:
+def _stamped(p: pathlib.Path, model: str, fold: str, seed) -> bool:
     rec = p.with_suffix(".json")
     if not (p.is_file() and rec.is_file()):
         return False
-    if json.loads(rec.read_text()).get("plan_sha256") != plan_sha():
+    r = json.loads(rec.read_text())
+    if r.get("plan_sha256") != plan_sha():
         raise SystemExit(f"{p.name}: score record not stamped with the current T001 plan")
+    if (r.get("model"), r.get("fold"), r.get("seed"), r.get("condition")) != (model, fold, seed, "C0"):
+        raise SystemExit(f"{p.name}: record fields do not match its file name")
     return True
 
 
@@ -434,12 +489,25 @@ def cmd_table(a) -> int:
 
     files = comparator_files()
     load = X.load_npz
+    farm_p = out / "farm.json"
+    if not farm_p.is_file():
+        raise SystemExit("farm.json missing: candidate scores count only through the farm's recorded job statuses")
+    farm = json.loads(farm_p.read_text())
+    if farm.get("plan_sha256") != plan_sha():
+        raise SystemExit("farm state belongs to a different plan")
+    farm_status = {k: v["status"] for k, v in farm["jobs"].items()}
+    unplanned = set(farm_status) - {j["id"] for j in jobs()}
+    if unplanned:
+        raise SystemExit(f"farm state holds unplanned jobs: {sorted(unplanned)}")
     missing, failed = {}, {}
 
     def own(model, fold, base=out):
-        p = score_path(base, model, fold, None if model == "A" else PILOT_SEED)
-        if not _stamped(p):
+        seed = None if model == "A" else PILOT_SEED
+        p = score_path(base, model, fold, seed)
+        if farm_status.get(f"{model}.{fold}") != "ok":
             return None
+        if not _stamped(p, model, fold, seed):
+            raise SystemExit(f"{p.name}: farm job ok but its stamped score is missing")
         sc = load(p)
         return _f64(sc) if model == "A" else {iid: t.cell_max(v.astype(np.float32), meta[iid]["size"], 128) for iid, v in sc.items()}
 
@@ -472,6 +540,8 @@ def cmd_table(a) -> int:
         raise SystemExit(cfg)
 
     configs = ("A", "B", "C", "M1_HGB", "M3_R_s49", "M3_R_s50", "M4_DENSE_s1@128", "M4_DENSE_ens@128")
+    want_g = {L: sorted(k for k, v in meta.items() if v["lineage"] == L and not k.startswith("xp/")) for L in GENESIS}
+    want_x = sorted(k for k in meta if k.startswith("xp/"))
     tables = {}
     for cfg in configs:
         g, miss = {}, []
@@ -480,6 +550,8 @@ def cmd_table(a) -> int:
             if sc is None:
                 miss.append(fold)
                 continue
+            if sorted(sc) != want_g[fold]:
+                raise SystemExit(f"{cfg}/{fold}: scored image set differs from the bound corpus")
             for iid, s in sc.items():
                 g[iid] = metrics(iid, s)
         x = {}
@@ -487,6 +559,8 @@ def cmd_table(a) -> int:
             sc = xplat_scores(cfg)
             if sc is None:
                 miss.append("all")
+            elif not set(want_x) <= set(sc):
+                raise SystemExit(f"{cfg}/all: cross-platform representatives missing from its scores")
             else:
                 for iid, s in sc.items():
                     if lineage_of.get(iid) in dev_x:
@@ -505,10 +579,9 @@ def cmd_table(a) -> int:
     gr, xr = ev6.lineage_summary(g, lineage_of), ev6.lineage_summary(x, lineage_of)
     tables["M3_FROZEN"] = {"genesis": gr, "xplat": xr, "genesis_summary": ev6.summary(gr), "xplat_summary": ev6.summary(xr),
                            "complete_genesis": True}
-    # farm state, costs, determinism
-    farm = json.loads((out / "farm.json").read_text()) if (out / "farm.json").is_file() else {"jobs": {}}
+    # farm state (every planned job must be present: missing = not run = failed), costs, determinism
     for model in ("A", "B", "C"):
-        bad = [k for k, v in farm["jobs"].items() if k.startswith(model + ".") and not k.endswith(".repro") and v["status"] != "ok"]
+        bad = [j["id"] for j in jobs() if j["model"] == model and j["dir"] == "." and farm_status.get(j["id"]) != "ok"]
         if bad:
             failed[model] = bad
     costs = {}
@@ -532,7 +605,8 @@ def cmd_table(a) -> int:
     for model in ("A", "B", "C"):
         seed = None if model == "A" else PILOT_SEED
         p1, p2 = score_path(out, model, DETERMINISM_FOLD, seed), score_path(out / "repro", model, DETERMINISM_FOLD, seed)
-        if p1.is_file() and p2.is_file() and _stamped(p2):
+        if farm_status.get(f"{model}.{DETERMINISM_FOLD}") == "ok" and farm_status.get(f"{model}.{DETERMINISM_FOLD}.repro") == "ok" \
+                and _stamped(p1, model, DETERMINISM_FOLD, seed) and _stamped(p2, model, DETERMINISM_FOLD, seed):
             x1, x2 = load(p1), load(p2)
             determinism[model] = bool(sorted(x1) == sorted(x2) and all(np.array_equal(x1[k], x2[k]) for k in x1))
         else:
@@ -551,7 +625,7 @@ def cmd_table(a) -> int:
                                 "lineages_better": sum(1 for v in d.values() if v < 0), "lineages_worse": sum(1 for v in d.values() if v > 0)}
     doc = {"schema": "segarecomp.xplat_explore.t001.results.v1", "task": "SEG-076-T001", "plan_sha256": plan_sha(),
            "status": "exploratory, development-only; single training seed for B and C", "missing": missing, "failed_fits": failed,
-           "farm": {k: v["status"] for k, v in sorted(farm["jobs"].items())}, "tables": tables, "costs": costs,
+           "farm": dict(sorted(farm_status.items())), "tables": tables, "costs": costs,
            "determinism_bitwise": determinism, "paired_lineage_differences": paired, "expansion": decision,
            "data_boundary": "aggregates only: per-lineage ER/FRF, counts, AUROC and rank quantiles; no per-cell score, address or "
                             "image content"}
