@@ -201,13 +201,22 @@ A stronger evaluation would need:
 
 ## 6. Barrier, and the superseded freeze
 
-The barrier is **code plus procedure, not filesystem secrecy**. The tools run as root, so file modes protect nothing. The reserved
-programs' public sources and T001 build trees exist locally (`seg075/q/{src,build}`), and the handoff store holds copies.
+The barrier is **code plus procedure, not filesystem secrecy**. The tools run as root, so file modes protect nothing.
+
+What remains readable outside the quarantine:
+- the reserved programs' public sources and the qualified T001 build trees (`seg075/q/{src,build}`), kept as T001 provenance;
+- the handoff store's copies;
+- build logs and T001 build records, which hold outcomes and digests only.
 
 What is enforced:
-- Every unsealed reserved copy produced by SEG-075 is moved into one quarantine directory: the T002 extraction, the truth listings, and
-  the scratch re-extractions of development and review.
+- One quarantine directory (`seg075/t002/reserved-unsealed`) holds every other copy of reserved-lineage material:
+  - the T002 extraction and the T002 truth listings;
+  - the scratch corpus;
+  - every scratch re-extraction and oracle work file of the C2 review (`extract`, `norelist`, `truth-si`, `mk-neogeosdk`, `recs.json`);
+  - the pre-tool exploratory copies (`seg075/{src,build}/{neogeosdk,space-invaders}`).
 - Development code reads cross-platform data only through the snapshot API.
+- The second delta review of `d15c960` found the C2-review oracle scratch and the exploratory copies still outside the quarantine. Both
+  were moved; the plan was not re-frozen, because it does not cover the cache layout or this document.
 
 `dev_sample_dirs` / `refuse_sealed` resolve paths, including symlinks, and refuse:
 
