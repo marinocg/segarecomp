@@ -1,0 +1,26 @@
+{
+ "context": "git-archive export of fce33de, python3 -I, cwd /, minimal environment, task worktree moved away (unavailable) for the duration",
+ "reason": "the handoff verifier code changed after the C7 receipt (Windows portability: POSIX logical paths, separator-independent worktree marker); this records the verification of the UNCHANGED private store with the new code; the C7 receipt still documents the earlier run at 0948214 and is not reinterpreted",
+ "result": {
+  "decision": {
+   "consistent": true,
+   "outcome": "DATA_INSUFFICIENT",
+   "recorded_t004": "EVIDENCE_INSUFFICIENT",
+   "t004": "EVIDENCE_INSUFFICIENT",
+   "tau": 0.10305163636363636
+  },
+  "diagnostic": {
+   "bitwise_identical": true,
+   "cells": 131,
+   "restored_files": 9
+  },
+  "manifest_sha256": "1e8ba1e62f045eb762c2993f09f57849469ff000b8b379d6ebbafe5d449292cd",
+  "one_shot_status_present": true,
+  "physical_problems": 0,
+  "verdict": "ARTIFACT_HANDOFF_PASS",
+  "verified_bytes": 4640136029,
+  "verified_files": 32154
+ },
+ "schema": "segarecomp.xplat_handoff.revalidation.v1",
+ "verifier_code_sha": "fce33de (product commit containing the changed verifier)"
+}

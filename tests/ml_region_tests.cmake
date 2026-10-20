@@ -102,3 +102,25 @@ set_property(TEST segarecomp_oracle_bench_fixture_test PROPERTY SKIP_RETURN_CODE
 add_test(NAME segarecomp_xplat_qualify_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_qualify_test.py)
 set_property(TEST segarecomp_xplat_qualify_test APPEND PROPERTY LABELS full fast)
+# SEG-075 C1 (ADR 0160): physical private-artifact audit, content-addressed store, verification (corruption/truncation/loss, worktree
+# dependency, fresh isolated process), restore and the T001 audit classes, on synthetic data (git, no network or Docker).
+add_test(NAME segarecomp_xplat_handoff_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_handoff_test.py)
+set_property(TEST segarecomp_xplat_handoff_test APPEND PROPERTY LABELS full fast)
+# SEG-075-T002 (ADR 0160): cross-platform container/listing adapters and label extraction on synthetic fixtures (PRG/hunk/ELF/a.out,
+# vasm/A68K/GNU as listings, relocation masking, placement, decoder typing); the end-to-end case runs the real CPU-owned decoder on
+# 68020 forms that must stay out of the base-68000 labels.
+add_test(NAME segarecomp_xplat_corpus_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_corpus_test.py $<TARGET_FILE:segarecomp>)
+set_property(TEST segarecomp_xplat_corpus_test APPEND PROPERTY LABELS full fast)
+# SEG-075-T003/T004 (ADR 0161): lineage deduplication, feasibility gate, evaluation barrier, frozen plan invariants, metrics and the
+# pre-registered transfer rule (standard library, synthetic data + the committed plan).
+add_test(NAME segarecomp_xplat_design_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_design_test.py)
+set_property(TEST segarecomp_xplat_design_test APPEND PROPERTY LABELS full fast)
+# SEG-075-T005 (ADR 0161/0163): pre-registered B/C gates and candidate assembly (pure); structure / feature checks run only where numpy
+# and torch are installed (research environment), otherwise skipped.
+add_test(NAME segarecomp_xplat_models_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_models_test.py)
+set_property(TEST segarecomp_xplat_models_test APPEND PROPERTY LABELS full fast)
+# SEG-075-T006 (ADR 0163): the final decision re-derives from the committed results under the bound rules; the C7 receipt is sanitized.
+add_test(NAME segarecomp_xplat_final_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_final_test.py)
+set_property(TEST segarecomp_xplat_final_test APPEND PROPERTY LABELS full fast)

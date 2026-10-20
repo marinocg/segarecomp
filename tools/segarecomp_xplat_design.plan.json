@@ -1,0 +1,498 @@
+{
+ "adr": "0161",
+ "backend": {
+  "basis": "SEG-072 hardware benchmark (ROCm 8.9% faster than the 8-process CPU farm, below its 25% rule); research venv rebuilt at the recorded versions (Python 3.13.14, numpy 2.5.3, scikit-learn 1.9.1, torch 2.14.1+cu130 on CPU, float32, deterministic algorithms)",
+  "parallelism": "M3_R 4 processes x 4 threads; M4_DENSE 8 processes x 2 threads; M1 2 processes",
+  "selected": "CPU"
+ },
+ "barrier": {
+  "rule": "development, tuning and selection tooling refuses the sealed directory, every sealed sample id and every reserved lineage; the binding holds opaque digests only; the sealed labels are opened once by T006 after the frozen candidate is committed",
+  "sealed_dir": "<HARNESS_ROOT>/.cache/seg075/t003/snapshot/sealed",
+  "sealed_samples": 18
+ },
+ "bound_code": {
+  "segarecomp_ml_region_gen2.py": "5b5e07c6b6a2ae3af3a1a45aead275a23bd110a25bbfbf5efd73307d817650d3",
+  "segarecomp_ml_region_gen2_train.py": "5828443db2bba8dcbd8e6034be9f16524299039cd9434f548fb5caf3e3fa2c0c",
+  "segarecomp_ml_v3.py": "ef18ab40e1da9f25ecc4e1e0a9f0f630453fc8e15b13812750e133d8998947ba",
+  "segarecomp_ml_v3_eval.py": "eea86b0b1c35d79b235c4f0ed1e559cbb36fb190bc36509221184140aa6fa213",
+  "segarecomp_ml_v3_train.py": "7234c6ffe964f0f6db44126d760fb60eff6ce97b30e93a7034d3e1e2bb97592f",
+  "segarecomp_oracle_bench.py": "c102a8b847736d4db28f240e948881f4194214dfe767f06470989c2396adef3c",
+  "segarecomp_xplat_decide.py": "078d35e97f0ed62aa101181f400400fcd5c1ff0d41bb6ba9a9fdf5a2d1f0747d",
+  "segarecomp_xplat_design.py": "9235527284e19ac274f3c146a2b6a3f040e425bb742531cbc84e9e1efbae4c3c",
+  "segarecomp_xplat_transfer.py": "415bd6ab8dbf5b8b3d4f7c1c8da433fd8cf6bbf64fd76229807a656bf9cb399b"
+ },
+ "bound_seg072_scores": {
+  "seg049/scores/M3.flicky.npy": "85237ef2cf163d2610d433db739899ccc3c6444cd2af9bf31c666608bfc4400f",
+  "seg049/scores/M3.ps2.npy": "0ab6b9ecb3e0abff520de4f824fb7ad63373e5b5ba62f6b8cc3cbe322869bb89",
+  "seg049/scores/M3.s1.npy": "11af2cc15fd3453e21bbae7173b880557e404a8536c4f0c28f04a2fe033bfd7a",
+  "seg049/scores/M3.sf1.npy": "9be44387b76d182a02dd4eb70f2243550f5810b5eb49a66a73e1468748cf58a9",
+  "seg049/scores/M3.sk.npy": "e50d2f364976927837e73b92c6ad3c6b95795659aa2182c1366312983f795dad",
+  "seg072/scores/M1.D01.npz": "1e75368825885ed3cf46466d97536c437f79613b66dec36469f20b96dd7e60ed",
+  "seg072/scores/M1.D02.npz": "711c2adc69581943703e9b053c4759327307f11554d08f5ed49cdf59dd64e923",
+  "seg072/scores/M1.D03.npz": "c76d621c5c94a31c09f0cf9c2011d55ff6a0dbcd4d19750675c59242424fca3c",
+  "seg072/scores/M1.D04.npz": "0d7bbaec191ed620d2eee0d8345421f6ed1b6850a42db9595640f9be757e09ea",
+  "seg072/scores/M1.D05.npz": "3bf797d945028913f30872c40beff910d335e22df46a0e05465cb2ec46c5d55f",
+  "seg072/scores/M1.D06.npz": "54467d145434ee4fecacde24e1c98ff01280d4ef16f9db152ae4ca6e27bb1e75",
+  "seg072/scores/M1.D07.npz": "2ba9f86bde8a3a9e7504df50f82ee3176054107c2c8e0d7f54df9825151dfaba",
+  "seg072/scores/M1.D09.npz": "34d92a22a5551a4aa2dc7fb222320777936b1a6de70052321d5686b7b84c7d7d",
+  "seg072/scores/M1.D10.npz": "f68853c6e1b2365b7452b3b27bb52582337b7390f35f1c87fb080f7fdc98dcf7",
+  "seg072/scores/M1.D11.npz": "795c62a1b548f01b063ea28c368b382fa7644af501aa07a2925a75cf0cf42fec",
+  "seg072/scores/M1.D12.npz": "fe0efc1c6f0c93ffad7313b058e0ae8807765a5f663cc00cec407f7a085eadc2",
+  "seg072/scores/M3R.D01.npz": "d929c79cf93afda167774b1a639e21604fb71d9f092dd09d84ff94e2f940c992",
+  "seg072/scores/M3R.D02.npz": "dcf1f4c9e0819ba515f191ce0a305448c4f6226606744430379641be3305fcda",
+  "seg072/scores/M3R.D03.npz": "9472d20408b0fcdbd638ea80665bb93d1819508e811907f0b203636d7bb0dc42",
+  "seg072/scores/M3R.D04.npz": "3f2f037269325d69c1c6d7d2337cbf55aabc9aaf7357329f5ac06c664611a05f",
+  "seg072/scores/M3R.D05.npz": "7070a54d46e2c0f2b100060f804c258979285a428ee9b943739ab75e77690393",
+  "seg072/scores/M3R.D06.npz": "f5ccb9a6582f1053f1e225284fd17de6a0e44c37be2e35955dd620663637c50b",
+  "seg072/scores/M3R.D07.npz": "7d0907b12f1538c93de5cd452c72bf308d81ce1e69f228a0081262708beb1287",
+  "seg072/scores/M3R.D09.npz": "c6cd182caabebd1eab2af2459dce83876cf98104830697964c943bf7c4e90398",
+  "seg072/scores/M3R.D10.npz": "fb406c88adeca7a8b35f2655d7924fb2ef36933b78f2f4f635e549d6cd5a642c",
+  "seg072/scores/M3R.D11.npz": "c3e51f7dafa10662542fecdb3c85305b48206457d8f2f0fde3f8e5240661707d",
+  "seg072/scores/M3R.D12.npz": "a4f154870e96e1dedbb1f30ced9c8426e3414b893d543a22e462fa5ec82ab5af",
+  "seg072/scores/M3_FROZEN.production.npz": "ad72bb09eb3de1ba7ef4a87bafd3c0f03113cd92c1c4ae6dd2dbfd62a8103bca",
+  "seg072/scores/M4.D01.s1.npz": "8c8bd26d4bc3487fb67d87365f6bfb981fb0041504eb892355b0adfabeb46c89",
+  "seg072/scores/M4.D01.s2.npz": "c72e82059d7d302af479f2e55a963e15626687d2039d1194bdb2a131c50ffeed",
+  "seg072/scores/M4.D01.s3.npz": "eaf1e67b3f23607238dccac649863190647caf51b98abd92b37ea001aa8fe1be",
+  "seg072/scores/M4.D02.s1.npz": "5a947483b9834d822a0c48a7182e999ca8be1477e0c215fae1d6cdc5e3216356",
+  "seg072/scores/M4.D02.s2.npz": "7bb55db4b41ab0d43abecdd26425b5c3c8bd7ba94aae75d2c17fed10a743d74f",
+  "seg072/scores/M4.D02.s3.npz": "36a6bff361449f3e6ab79843082fb2c7ff8be7612976107dbc5c9d1c2549efcc",
+  "seg072/scores/M4.D03.s1.npz": "09f3e74bfb88618d701417c704bb3c3de31f7d9bf20e9fcb782f9d72149960d4",
+  "seg072/scores/M4.D03.s2.npz": "80346adac95d5fbbb92407efbe6f24e1676383f6230a4839b340750f84f32410",
+  "seg072/scores/M4.D03.s3.npz": "728ea7a33b5bb23a6305bc1d98d9d2e4ced225b82704a3f2064d902a48721f8c",
+  "seg072/scores/M4.D04.s1.npz": "eae618a392a911e28773de221ec21c58bb8068e558d282a8740a8be654e52f40",
+  "seg072/scores/M4.D04.s2.npz": "6c089457668b305dc7eeddf68b53311baac7c3528debc3dee7d8b3b4cd3079af",
+  "seg072/scores/M4.D04.s3.npz": "fd21708bd064aba5cab0fc4c730c4b3ed04c53be5edffabc4dc9f33cc0cd2f2c",
+  "seg072/scores/M4.D05.s1.npz": "5c402e802617f6a4e2800371a475c30ec6b6075781f3cf62eff638f5348c713d",
+  "seg072/scores/M4.D05.s2.npz": "ffee409656a984d30b631374f6ea22469a2758e46d1405a497cc21c6e28d1190",
+  "seg072/scores/M4.D05.s3.npz": "e347f90e842dc56cfefeff03052308cda154963f750a42d28f7a0caff51f33b7",
+  "seg072/scores/M4.D06.s1.npz": "5ef6d431b9b408df93e2a54341663ecac1b4eaec4df3e7c2cb81ba63238a924b",
+  "seg072/scores/M4.D06.s2.npz": "a8f1ac0f61748a48367e83263be095ada2692542b727d4b23fea9646f7027a6f",
+  "seg072/scores/M4.D06.s3.npz": "89ac190fcf9db29c99a01fe17192b14366c80fa5916e0149c56954a9e5d2e1cd",
+  "seg072/scores/M4.D07.s1.npz": "c0c0cb1374d42426621a11ea27d2cea355e26eb0b5a4ed26eed7af150fb41d1c",
+  "seg072/scores/M4.D07.s2.npz": "31eacbd3e458a4c102f18af36b3537106c9e37daf5b26f527e533732b03b3b09",
+  "seg072/scores/M4.D07.s3.npz": "e34cd9c5175a614c839e6eb5ca67dcd32e584968b03200e2863d97c44a2e3db9",
+  "seg072/scores/M4.D09.s1.npz": "4f32ab60950e2ac4ae88db63431e3ba6602b0c4930fdda7c2c30d3422175e179",
+  "seg072/scores/M4.D09.s2.npz": "fce2a3df316c6a5ee2be25a111d05bd470473c4575618987d4316269ccbf98bb",
+  "seg072/scores/M4.D09.s3.npz": "7e27a99fbb64e5e8ddae06d703d0956e858eedd0a9ecec6d936ae9365f7f926c",
+  "seg072/scores/M4.D10.s1.npz": "df02506abfcde5bd4b42d59361c31805af4b1d1784eabc077a10f8c6f7c03ff9",
+  "seg072/scores/M4.D10.s2.npz": "6e07cbed0f20ffdae960bf6c1fd36fac436c5c6179a5e63175bf34ba03679aac",
+  "seg072/scores/M4.D10.s3.npz": "59e9e43620391e6d765dd2c8df647dd682fa548e8ddd14ebdb27fad7c0d33935",
+  "seg072/scores/M4.D11.s1.npz": "4be38bf58880854dfa7d739174ad828cc78af5760a00d1deaefafc2b85ae1373",
+  "seg072/scores/M4.D11.s2.npz": "c0a25ff21b818a724bb2d79c4efe1add45ff6e652418b00be57e866b02166ffe",
+  "seg072/scores/M4.D11.s3.npz": "a2ac0ad07f7118dad4aa411fad19e80e2b62399b44dbeab7238710fc5bd53b3a",
+  "seg072/scores/M4.D12.s1.npz": "8540e401ab8c5d6b66dd059e2aef5bc198458fe9cc034f505d4818f4ae4100eb",
+  "seg072/scores/M4.D12.s2.npz": "d6ceeba79be612b85bcf457e031d705b9b74442972ec5aab88d04ef8683bf4e4",
+  "seg072/scores/M4.D12.s3.npz": "09f04d96a78dc45cb36af0a4250a0cc599d94cea897d9ea92b0935362f9a170b"
+ },
+ "budgets": {
+  "cell_bytes": 128,
+  "fixed": [
+   "B35",
+   "B50",
+   "B60"
+  ],
+  "max_retention": 0.6,
+  "training_effort": "every fit uses its unchanged SEG-072 recipe (epochs/steps/seeds/batch); conditions differ only in the training image list"
+ },
+ "conditions": {
+  "C0": {
+   "name": "Genesis-only",
+   "xplat_training": []
+  },
+  "C1": {
+   "name": "Genesis + Atari ST",
+   "xplat_training": [
+    "toslibc",
+    "emutos"
+   ]
+  },
+  "C2": {
+   "name": "Genesis + Atari ST + Amiga",
+   "xplat_training": [
+    "toslibc",
+    "emutos",
+    "BattleIsleEditor",
+    "amiga-realtime3d"
+   ]
+  }
+ },
+ "corpus": {
+  "snapshot_dev_samples": 36,
+  "snapshot_sealed_samples": 18,
+  "snapshot_sha256": "74799cca5f87f263f7ea3550c385cc050cc57941e33fceb8a46399a136080086",
+  "t002_manifest_sha256": "d2956dbf3eb11e000bc8fb4fb83b98d548488469b6b0adb912363691c00accb5"
+ },
+ "decisions": {
+  "ordering": {
+   "better_than": "decide.better_than (strict): fewer Genesis B50 misses by more than the allowance sum, or not more by more than it and (Genesis mean ER lower by > tau, or within tau and xplat_lolo mean ER lower by > tau)",
+   "complexity": [
+    "M1_HGB",
+    "A",
+    "M3_R",
+    "M4_DENSE@128",
+    "M4_DENSE@64",
+    "B",
+    "C"
+   ],
+   "condition": "each configuration in its own best transfer condition (decide.best_condition: C2 if its class is HELPS or NEUTRAL, else C0)",
+   "m4_cells": "M4_DENSE@64 ER is measured in 64-byte cells and ranked on the same keys (disclosed incommensurability)",
+   "reference_only": "M3_FROZEN is a reference and comparator, never a candidate (cannot be refit; lineage-correlated on D01/D03)",
+   "rule": "tools/segarecomp_xplat_decide.py `select` (bound by digest): nested pools - Genesis B50 misses within the seed-replicate allowance sum of the minimum; then Genesis mean ER within tau (<=) of the pool minimum; then xplat_lolo mean ER within tau (<=) of the pool minimum; then the simplest by COMPLEXITY; a None value ranks after every value on its key"
+  },
+  "t005_scope": {
+   "code_binding": "the A/B/C implementation files are written after this freeze and are bound by digest in a T005 pre-fit addendum (segarecomp_xplat_design.t005.json, committed and reviewed before any A/B/C fit)",
+   "condition": "models A/B/C train on C2 unless the T004 overall class is TRANSFER_HARMS (then C0); same genesis_lolo and xplat_lolo folds as T004; no hyper-parameter search (fixed configurations below) - nothing is tuned on the folds compared",
+   "model_A": "always built: sklearn HistGradientBoostingClassifier(max_iter=300, max_depth=6, learning_rate=0.05, min_samples_leaf=40, l2_regularization=1.0, max_bins=255, early_stopping=False, class_weight=balanced, random_state=49) over per-cell features: counts per token field value (status/length/family/control/ea_src/ea_dst/width/flags) over the cell's words; ordinary-decode chain features (longest chain of consecutive ordinary decodes following decoder lengths starting in the cell; number of chain starts); direct control-flow candidates (branch/call targets computed from the opcode displacement or absolute operand of ordinary direct-control decodes: count landing in the image on an ordinary decode, count landing in this cell from anywhere); byte context (zero-byte fraction, printable-ASCII fraction, byte-value entropy); relocation-field count in the cell (0 for Genesis); seed-cell flag; the same aggregates over the +/-1 and +/-4 neighbour cells; masked cells excluded from training",
+   "model_B": "built only if decide.select over {M1_HGB, A, M3_R, M4_DENSE@128, M4_DENSE@64} returns a configuration with genesis mean ER >= 0.10 (decide.b_gate) AND T004 is not EVIDENCE_INSUFFICIENT: a bounded local instruction-aware Transformer: per-word input = embed(hi byte) + embed(lo byte) + the M3/M4 decode-token embeddings, d_model 64, 2 encoder layers, 4 heads, feed-forward 128, learned positions, attention restricted to non-overlapping 256-word windows with 64 words of real context (or PAD) on each side; per-word logit -> cell max (M4 aggregation); training exactly M4's budget and recipe (4000 steps, batch 8, AdamW lr 0.002 x0.1 after 80%, weight decay 1e-4, masked BCE with M4's pos_weight, lineage-uniform sampling, seeds 1-3 averaged)",
+   "model_C": "built only if B is better than A by the ordering with genesis mean ER lower by >= tau: B plus 2 rounds of typed sparse message passing per encoder layer over edges within the window+context: fall-through (ordinary decode -> next position by decoder length), direct branch / call target (computed as for A), overlapping interpretation (positions inside a decoded instruction's extent), each typed separately as CANDIDATE edges, plus a node flag for positions statically reachable from seed roots by fall-through and direct edges (PROVEN); hypothetical edges never mark a position reachable; same training budget as B",
+   "preference": "the ordering rule (simpler wins within tau and without extra misses)"
+  },
+  "t006": {
+   "confident_starts": "the I-labelled starts of the sealed samples (ADR 0160 labels; U never counts as a miss)",
+   "credibility": "LIMITED: two reserved lineages (platform held-out Neo Geo, its GCC 13 compiler family is in training via toslibc; compiler held-out vbcc, object-only, small, shares vasm and the Atari ST platform with training); descriptive cross-platform evidence; no Genesis generalization claim",
+   "economics": "economic measure = complete budget: the smallest of B35/B50/B60 whose genesis_lolo B-misses summed over all 11 lineages are <= the M3_R seed-replicate allowance sum (sum a_l); a candidate is economically better than the comparator C0 M3_R iff its complete budget is smaller (retained cells -30%/-17%); when it is, the SEG-074 exact-code benchmark (tools/segarecomp_oracle_bench.py, unchanged) measures generated C bytes and compile CPU on the Genesis development images it supports, at both budgets, and the improvement is confirmed only if generated C falls by >= 10% AND compile CPU by >= 10% (SEG-072's incumbent gate); never run on the reserved cross-platform lineages",
+   "evaluated_samples": "every sealed sample with >= 1 labelled start (all of them, not only representatives - no reserved image trains); ER over informative samples; misses over all samples; per reserved lineage",
+   "freeze": "before the sealed labels are opened: the ordering's best configuration (+ its condition) as the candidate, budget policy B50, and the comparators M3_FROZEN and C0-all M3_R+B50 are written to segarecomp_xplat_design.frozen.json and committed",
+   "one_shot": "the frozen candidate and comparators are refit on all development data of their condition (fold 'all'), then score the sealed reserved samples once; a one-shot marker is written to the private sealed directory; a second run refuses",
+   "outcome_rule": [
+    "1 DATA_INSUFFICIENT: T004 overall EVIDENCE_INSUFFICIENT",
+    "2 contradiction (decide.contradicted): on any reserved lineage more B50 misses of confident starts than the C0 M3_R comparator, or reserved ER (per reserved lineage max ER over informative samples, then the mean over the reserved lineages) worse than the comparator's by > tau; a contradicted candidate cannot carry classes 3-6",
+    "3 CORPUS_IMPROVES_EXISTING: candidate is M1_HGB/M3_R/M4_DENSE trained on C1/C2, better_than C0 M3_R, economically better (confirmed), not contradicted; an existing architecture trained on C0 only that satisfies the same is a re-selection outside SEG-075's question and is classified NO_ECONOMIC_IMPROVEMENT (rule 7, noted)",
+    "4 LIGHTWEIGHT_STRUCTURAL_JUSTIFIED / 5 LOCAL_TRANSFORMER_JUSTIFIED / 6 GRAPH_TRANSFORMER_JUSTIFIED: candidate is A / B / C, ordered better than C0 M3_R, economically better (confirmed), not contradicted",
+    "7 NO_ECONOMIC_IMPROVEMENT: a candidate is ordered better than C0 M3_R but is not economically better (or the benchmark does not confirm), or it is contradicted",
+    "8 CORPUS_EXPANSION_ONLY: no candidate is ordered better than C0 M3_R on Genesis, but C2 improves xplat_lolo mean ER over C0-all by >= tau for M3_R",
+    "9 otherwise NO_ECONOMIC_IMPROVEMENT",
+    "rules apply in order; exactly one class; implemented by decide.outcome (bound by digest); no production model is promoted"
+   ],
+   "outcomes": [
+    "CORPUS_IMPROVES_EXISTING",
+    "LIGHTWEIGHT_STRUCTURAL_JUSTIFIED",
+    "LOCAL_TRANSFORMER_JUSTIFIED",
+    "GRAPH_TRANSFORMER_JUSTIFIED",
+    "CORPUS_EXPANSION_ONLY",
+    "DATA_INSUFFICIENT",
+    "NO_ECONOMIC_IMPROVEMENT"
+   ]
+  },
+  "transfer": {
+   "EVIDENCE_INSUFFICIENT": "the noise / completeness rule fires",
+   "TRANSFER_HARMS": "d_mean >= +tau OR any d_l > +2*tau OR any e_l > 0",
+   "TRANSFER_HELPS": "d_mean <= -tau AND every d_l <= +tau AND every e_l = 0",
+   "TRANSFER_NEUTRAL": "otherwise",
+   "overall": "the class of C2 under M3_R (primary model, matched to SEG-072's frozen selection); M4_DENSE, M1_HGB and C1 corroborate; Amiga attribution (C1 vs C2) relies on M4_DENSE (M3_R's cross-platform segments are dominated by EmuTOS)",
+   "per_model": "for M3_R, M4_DENSE@128, M4_DENSE@64 and M1_HGB, compare C2 (and C1 where fitted) with C0 on genesis_lolo; d_l = ER_l(Cx) - ER_l(C0), d_mean = mean over lineages; e_l = max(0, misses_B50_l(Cx) - misses_B50_l(C0) - a_l)"
+  }
+ },
+ "dedup": {
+  "rule": "within a lineage, greedy largest-first: an image whose instruction sequences are >= 0.5 contained in the kept images is a near-duplicate; only representatives train; near-duplicates are diagnostic only"
+ },
+ "excluded_t001": {
+  "blocked": [
+   "amiga_asmdev_workflow",
+   "AmiGalaga"
+  ],
+  "commercial_derived": [
+   "galaga",
+   "xevious",
+   "mpatrol",
+   "pacman500",
+   "scramble500"
+  ],
+  "infrastructure": [
+   "atarist-toolkit-docker"
+  ],
+  "licensing_review_required": [
+   "perihelion-m68k-tutorials",
+   "AtariST",
+   "GODLIB",
+   "Atari_ST_Sources",
+   "x68000dev",
+   "amiga-vasm-template"
+  ],
+  "reconstruction": [
+   "amiga-boing",
+   "monomental",
+   "atari_reverse"
+  ]
+ },
+ "feasibility": {
+  "admit_t004": true,
+  "admit_t006_one_shot": true,
+  "checks": {
+   "amiga_training_lineages_ge_2": true,
+   "atari_training_lineages_ge_2": true,
+   "genesis_folds_intact": true,
+   "independent_lineages_no_merge": true,
+   "label_unknown_fraction_le_0.10": true,
+   "mixed_code_data_present": true,
+   "reserved_lineages_ge_2": true,
+   "reserved_platform_or_compiler_held_out": true,
+   "training_toolchain_families_ge_3": true
+  },
+  "development_lineages": [
+   "toslibc",
+   "emutos",
+   "BattleIsleEditor",
+   "amiga-realtime3d"
+  ],
+  "evaluation_credibility": "LIMITED",
+  "genesis_images_available": 50,
+  "genesis_images_unavailable": 0,
+  "reserved_lineages": [
+   "neogeosdk",
+   "space-invaders"
+  ],
+  "training_toolchain_families": [
+   "a68k",
+   "gcc-13",
+   "gcc-4.6+gas",
+   "vasm"
+  ]
+ },
+ "folds": {
+  "genesis_lolo": "leave-one-lineage-out over the 11 qualified SEG-072 development lineages (all 50 images); the held-out Genesis lineage is scored; the condition's cross-platform development representatives are added to every training set",
+  "xplat_lolo": "for each cross-platform development lineage x: C2-minus-x (Genesis + the other three) versus C0-all (Genesis only), both scoring the representatives of x; this measures transfer to an unseen cross-platform lineage"
+ },
+ "genesis": {
+  "available_by_lineage": {
+   "D01": 39,
+   "D02": 1,
+   "D03": 2,
+   "D04": 1,
+   "D05": 1,
+   "D06": 1,
+   "D07": 1,
+   "D09": 1,
+   "D10": 1,
+   "D11": 1,
+   "D12": 1
+  },
+  "available_ids_sha256": "81f2ddff07dfbaf394a234f07038b123d5315e430492559cb5e6f44221ea4ac4",
+  "available_images": 50,
+  "restored": "the 36 Sonic CD modules (lineage D01) referenced by the SEG-072 registry were restored from the operator's disc image (ISO 9660 files of track 1); every restored file equals the SHA-256 the SEG-072 handoff bundle recorded",
+  "source": "SEG-072 qualified development registry (ADR 0152), images physically available at freeze",
+  "unavailable_by_lineage": {},
+  "unavailable_images": 0,
+  "unavailable_rule": "an image that is unavailable at freeze is excluded from EVERY condition (including C0, then retrained), so comparisons stay matched"
+ },
+ "independence": {
+  "max_pair_containment": 0.0009,
+  "measures": [
+   "code_shingles(12 bytes)",
+   "instruction_sequences(k=8)"
+  ],
+  "merge_threshold": 0.3
+ },
+ "lineages": {
+  "BattleIsleEditor": {
+   "fractions": {
+    "D": 0.4149,
+    "I": 0.1992,
+    "U": 0.0005,
+    "c": 0.3853
+   },
+   "genesis_containment": {
+    "code_shingles": 0.0,
+    "instruction_sequences": 0.0
+   },
+   "near_duplicates": 10,
+   "platform": "amiga",
+   "platform_group": "amiga",
+   "rationale": "six editor variants of one author's code base; near-duplicates reduced to representatives",
+   "representatives": 2,
+   "role": "development",
+   "samples": 12,
+   "size_class": "medium",
+   "starts": 28521,
+   "starts_in_representatives": 4860,
+   "toolchain": "A68K 2.71 + vlink 0.18a",
+   "toolchain_family": "a68k",
+   "workload": "application"
+  },
+  "HelloAmi": {
+   "fractions": {
+    "D": 0.8765,
+    "I": 0.0422,
+    "U": 0.0,
+    "c": 0.0813
+   },
+   "genesis_containment": {
+    "code_shingles": 0.0,
+    "instruction_sequences": 0.0
+   },
+   "near_duplicates": 0,
+   "platform": "amiga",
+   "platform_group": "amiga",
+   "rationale": "82 labelled starts in total: too small to be a training or evaluation lineage",
+   "representatives": 2,
+   "role": "diagnostics_only",
+   "samples": 4,
+   "size_class": "small",
+   "starts": 82,
+   "starts_in_representatives": 82,
+   "toolchain": "vasm 2.0f",
+   "toolchain_family": "vasm",
+   "workload": "hello-world+bootblock"
+  },
+  "amiga-realtime3d": {
+   "fractions": {
+    "D": 0.5721,
+    "I": 0.1367,
+    "U": 0.0001,
+    "c": 0.2911
+   },
+   "genesis_containment": {
+    "code_shingles": 0.0,
+    "instruction_sequences": 0.0008
+   },
+   "near_duplicates": 8,
+   "platform": "amiga",
+   "platform_group": "amiga",
+   "rationale": "nine incremental programs of one tutorial code base; one representative",
+   "representatives": 1,
+   "role": "development",
+   "samples": 9,
+   "size_class": "medium",
+   "starts": 13126,
+   "starts_in_representatives": 2349,
+   "toolchain": "vasm 2.0f",
+   "toolchain_family": "vasm",
+   "workload": "demo/tutorial"
+  },
+  "emutos": {
+   "fractions": {
+    "D": 0.1681,
+    "I": 0.2444,
+    "U": 0.0421,
+    "c": 0.5454
+   },
+   "genesis_containment": {
+    "code_shingles": 0.0002,
+    "instruction_sequences": 0.0004
+   },
+   "near_duplicates": 3,
+   "platform": "atari-st+amiga",
+   "platform_group": "atari-st",
+   "rationale": "one firmware lineage (four configurations); one representative image, the other configurations are near-duplicates (diagnostic only); counted as Atari ST (its primary platform) in every condition",
+   "representatives": 1,
+   "role": "development",
+   "samples": 4,
+   "size_class": "large",
+   "starts": 208244,
+   "starts_in_representatives": 66110,
+   "toolchain": "m68k-atari-mint GCC 4.6.4 + binutils 2.30",
+   "toolchain_family": "gcc-4.6+gas",
+   "workload": "firmware"
+  },
+  "neogeosdk": {
+   "fractions": "sealed (quality checked at freeze: decoder agreement and U fraction within the gate)",
+   "genesis_containment": {
+    "code_shingles": 0.0001,
+    "instruction_sequences": 0.0001
+   },
+   "near_duplicates": 0,
+   "platform": "neo-geo",
+   "platform_group": "neo-geo",
+   "rationale": "platform held-out: the only Neo Geo lineage (never in any training or selection condition)",
+   "representatives": 1,
+   "role": "reserved_evaluation",
+   "samples": 1,
+   "size_class": "large",
+   "starts": 93317,
+   "starts_in_representatives": 93317,
+   "toolchain": "m68k-elf GCC 13.3.0 + binutils 2.42",
+   "toolchain_family": "gcc-13",
+   "workload": "sdk+game"
+  },
+  "space-invaders": {
+   "fractions": "sealed (quality checked at freeze: decoder agreement and U fraction within the gate)",
+   "genesis_containment": {
+    "code_shingles": 0.0,
+    "instruction_sequences": 0.0
+   },
+   "near_duplicates": 0,
+   "platform": "atari-st",
+   "platform_group": "atari-st",
+   "rationale": "compiler held-out: the only vbcc lineage (object-only, small)",
+   "representatives": 16,
+   "role": "reserved_evaluation",
+   "samples": 17,
+   "size_class": "medium",
+   "starts": 3240,
+   "starts_in_representatives": 3240,
+   "toolchain": "vbcc 0.9g + vasm 2.0f",
+   "toolchain_family": "vbcc",
+   "workload": "game"
+  },
+  "toslibc": {
+   "fractions": {
+    "D": 0.0618,
+    "I": 0.2824,
+    "U": 0.0505,
+    "c": 0.6053
+   },
+   "genesis_containment": {
+    "code_shingles": 0.0002,
+    "instruction_sequences": 0.0
+   },
+   "near_duplicates": 5,
+   "platform": "atari-st",
+   "platform_group": "atari-st",
+   "rationale": "Atari ST C runtime library + examples (GCC 13.3); training material in conditions C1/C2",
+   "representatives": 2,
+   "role": "development",
+   "samples": 7,
+   "size_class": "medium",
+   "starts": 14086,
+   "starts_in_representatives": 4783,
+   "toolchain": "m68k-elf GCC 13.3.0 + binutils 2.42",
+   "toolchain_family": "gcc-13",
+   "workload": "application+runtime-library"
+  }
+ },
+ "metrics": {
+  "aggregation": "per lineage first, then mean over lineages (no image- or start-weighted pooling across lineages; EmuTOS counts once in metrics - in M3_R training it dominates the cross-platform segments, see disclosure)",
+  "co_primary": "worst-lineage ER (max over the 11 Genesis lineages)",
+  "er": "excess retention ER(image) = (cells_needed - positive_cells) / (cells - positive_cells), cells_needed = the FRF cell count (rank order, ties with the weakest positive counted), 128-byte cells (M4@64: 64-byte); the fraction of the non-positive cells that must be retained to keep every labelled start; 0 = perfect ranking, 1 = no better than retaining everything",
+  "informative": "an image is informative iff it has >= 1 positive and >= 1 non-positive cell; ER is defined on informative images only; the number of trivial (all-positive or no-positive) images per lineage is reported",
+  "primary": "Genesis transfer: mean over the 11 Genesis lineages of the per-lineage max ER over its informative held-out images",
+  "retained": "retained fraction = retained cells / cells (cell units; SEG-072 reported cells too for policies)",
+  "secondary": [
+   "FRF (reported, not decisive; degenerate on all-positive images)",
+   "per-lineage B35/B50/B60 misses (labelled starts outside R; false negatives) and negative (all-D) cells admitted (false positives), reported separately",
+   "residual ER/FRF (seeds excluded)",
+   "AUROC over labelled cells",
+   "short/mixed stratum: positive cells holding <= 8 starts or any D byte (missed cells)",
+   "xplat_lolo: mean / worst ER and misses over the four cross-platform lineages",
+   "per toolchain family and per platform",
+   "trivial-image counts"
+  ],
+  "seeds": "seed cells come from seed ADDRESSES (Genesis: the SEG-072 registry d.txt / seed_starts; cross-platform: meta seed_addresses), mapped address // cell_bytes for each cell size"
+ },
+ "models": {
+  "C0_reuse": "condition C0 genesis_lolo fold scores ARE the preserved SEG-072 development fold scores (M3R / M4 s1-s3 / M1; same images, recipes and environment), admitted only when `reproduce` retrained one fold of EACH of M3_R, M4_DENSE seed 1 and M1_HGB under this plan digest and all three equal the preserved arrays bit for bit (reproduce.json); otherwise every C0 fold is retrained; the runner refuses reuse without a passing reproduce.json",
+  "M1_HGB": "SEG-072 M1 control (HistGradientBoosting over the gen2 aggregates, random_state 49), all conditions",
+  "M3_FROZEN": "production gen2 M3 weights, unchanged: zero-shot reference on every Genesis development image (SEG-072's stored scores) and every cross-platform development representative (inference)",
+  "M3_R": "SEG-072 M3-R recipe unchanged (seed 49, 30 epochs), all conditions; condition C0 additionally with seed 50 (noise replicate)",
+  "M4_DENSE": "SEG-072 M4-Dense recipe unchanged (seeds 1-3, word logits averaged then cell max at 128 and 64 bytes), conditions C0 and C2"
+ },
+ "noise": {
+  "disclosure": "one seed pair; conservative (biased toward NEUTRAL/HARMS); fits are deterministic, so tau is not adjustable",
+  "insufficient_if": "tau > 0.05, or any planned fit missing / failed twice (the table then classifies EVIDENCE_INSUFFICIENT)",
+  "miss_allowance": "a_l = |misses_B50_l(seed 49) - misses_B50_l(seed 50)| per Genesis lineage l (M3_R, C0); applied to every model",
+  "tau": "tau = max(0.01, 2 * mean over the 11 Genesis lineages of |ER_l(M3_R C0 seed 49) - ER_l(M3_R C0 seed 50)|)"
+ },
+ "schema": "segarecomp.xplat_design.plan.v1",
+ "seg072_sealed_cohort": "exposed by SEG-072: development/diagnostic only, never fresh evidence",
+ "supersedes": [
+  {
+   "plan_sha256": "f551fea791c307e15f5203ed30102d1b80db6a583128ae04a82df2565a053ad5",
+   "reason": "C3 review (APPROVE_WITH_CONDITIONS, before any fit): FRF degenerate on all-positive images (ER adopted), B50 miss rule without noise allowance, open selection/economics/outcome choices, runner not bound to the plan, C0 reuse not gated, representatives omitted images without an 8-instruction run"
+  },
+  {
+   "plan_sha256": "9c4b166d01658e75df132f36eaaa93e6a7f99d09acdc01b0e8dcb492354fc6f3",
+   "reason": "C3 delta review (APPROVE_WITH_CONDITIONS, before any fit): selection by a non-transitive pairwise rule and not implemented in bound code (now decide.select, nested pools), M3_FROZEN in the candidate pool (now reference only), reserved-lineage material readable outside the quarantine (moved), SEG-072 score files and the economics benchmark not bound (now bound by digest)"
+  }
+ ],
+ "task": "SEG-075-T003"
+}

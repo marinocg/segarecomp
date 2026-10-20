@@ -1,0 +1,113 @@
+{
+ "label": "c3-t003-freeze",
+ "manifest_sha256": "ffe4c1c50e3fe71311100d8fc12cb58759812078a46a0913c92b0bb5ae386aa1",
+ "required_problems": 0,
+ "schema": "segarecomp.xplat_handoff.receipt.v1",
+ "storage": {
+  "layout": "cas/sha256/<2>/<sha256> + manifests/<label>.json (git-ignored)",
+  "physical_path_verified": true,
+  "store": "<HARNESS_ROOT>/.cache/seg075-handoff"
+ },
+ "summary": {
+  "by_basis": {
+   "baseline": 11500,
+   "cross_run_differs": 44,
+   "cross_run_identical": 13914,
+   "git_blob": 5750,
+   "image_id": 1,
+   "plan_sha256": 8,
+   "product_text": 7,
+   "t001_record": 424,
+   "t001_record_code": 124
+  },
+  "by_group": {
+   "external.seg072_bundle": {
+    "PRESENT_AND_VERIFIED": 2
+   },
+   "t001.build.a": {
+    "NOT_REQUIRED_FOR_SUCCESSOR": 7389,
+    "PRESENT_AND_VERIFIED": 977
+   },
+   "t001.build.b": {
+    "NOT_REQUIRED_FOR_SUCCESSOR": 6276,
+    "PRESENT_AND_VERIFIED": 977
+   },
+   "t001.dockerfile": {
+    "PRESENT_AND_VERIFIED": 4
+   },
+   "t001.exploratory": {
+    "NOT_REQUIRED_FOR_SUCCESSOR": 5
+   },
+   "t001.helper": {
+    "PRESENT_AND_VERIFIED": 3
+   },
+   "t001.log": {
+    "NOT_REQUIRED_FOR_SUCCESSOR": 27,
+    "PRESENT_AND_VERIFIED": 25
+   },
+   "t001.record": {
+    "PRESENT_AND_VERIFIED": 26
+   },
+   "t001.source": {
+    "NOT_REQUIRED_FOR_SUCCESSOR": 2809,
+    "PRESENT_AND_VERIFIED": 2941
+   },
+   "t001.source_identity": {
+    "NOT_REQUIRED_FOR_SUCCESSOR": 16,
+    "PRESENT_AND_VERIFIED": 8
+   },
+   "t001.toolchain_image": {
+    "PRESENT_AND_VERIFIED": 5
+   },
+   "t001.toolchain_image_archive": {
+    "PRESENT_AND_VERIFIED": 1
+   },
+   "t001.toolchain_input": {
+    "PRESENT_AND_VERIFIED": 8
+   },
+   "t002.corpus": {
+    "PRESENT_AND_VERIFIED": 373
+   },
+   "t002.decoder_cli": {
+    "PRESENT_AND_VERIFIED": 5
+   },
+   "t002.restore_scripts": {
+    "PRESENT_AND_VERIFIED": 6
+   },
+   "t002.review_oracle": {
+    "PRESENT_AND_VERIFIED": 9
+   },
+   "t002.truth": {
+    "PRESENT_AND_VERIFIED": 9543
+   },
+   "t002.truth_listing": {
+    "PRESENT_AND_VERIFIED": 4
+   },
+   "t003.snapshot": {
+    "PRESENT_AND_VERIFIED": 373
+   }
+  },
+  "by_status": {
+   "NOT_REQUIRED_FOR_SUCCESSOR": 16522,
+   "PRESENT_AND_VERIFIED": 15290
+  },
+  "entries": 31812,
+  "not_required_underlying": {
+   "PRESENT_AND_VERIFIED": 16457,
+   "PRESENT_UNVERIFIED": 44
+  },
+  "physical_bytes": 4548411327,
+  "physical_files": 31772
+ },
+ "verification": {
+  "fresh_process": {
+   "cwd": "/",
+   "interpreter": "isolated (-I)",
+   "rc": 0
+  },
+  "problems": 0,
+  "verdict": "PASS",
+  "verified_bytes": 4548411327,
+  "verified_files": 31772
+ }
+}

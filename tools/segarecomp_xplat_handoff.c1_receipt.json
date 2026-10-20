@@ -1,0 +1,130 @@
+{
+ "image_archive": {
+  "bytes": 1210053632,
+  "images": 5
+ },
+ "label": "c1-t001-audit",
+ "manifest_sha256": "6a0acfb9fc22ed3487dd7dbb051ae38e906004f4343948fd2398b48f25e845ad",
+ "required_problems": 0,
+ "schema": "segarecomp.xplat_handoff.receipt.v1",
+ "storage": {
+  "layout": "cas/sha256/<2>/<sha256> + manifests/<label>.json (git-ignored)",
+  "physical_path_verified": true,
+  "store": "<HARNESS_ROOT>/.cache/seg075-handoff"
+ },
+ "summary": {
+  "by_basis": {
+   "baseline": 1191,
+   "cross_run_differs": 44,
+   "cross_run_identical": 13914,
+   "git_blob": 5750,
+   "image_id": 1,
+   "plan_sha256": 8,
+   "product_text": 7,
+   "t001_record": 424,
+   "t001_record_code": 124
+  },
+  "by_group": {
+   "external.seg072_bundle": {
+    "PRESENT_AND_VERIFIED": 2
+   },
+   "t001.build.a": {
+    "NOT_REQUIRED_FOR_SUCCESSOR": 7389,
+    "PRESENT_AND_VERIFIED": 977
+   },
+   "t001.build.b": {
+    "NOT_REQUIRED_FOR_SUCCESSOR": 6276,
+    "PRESENT_AND_VERIFIED": 977
+   },
+   "t001.dockerfile": {
+    "PRESENT_AND_VERIFIED": 4
+   },
+   "t001.exploratory": {
+    "NOT_REQUIRED_FOR_SUCCESSOR": 5
+   },
+   "t001.helper": {
+    "PRESENT_AND_VERIFIED": 3
+   },
+   "t001.log": {
+    "NOT_REQUIRED_FOR_SUCCESSOR": 27,
+    "PRESENT_AND_VERIFIED": 25
+   },
+   "t001.record": {
+    "PRESENT_AND_VERIFIED": 26
+   },
+   "t001.source": {
+    "NOT_REQUIRED_FOR_SUCCESSOR": 2809,
+    "PRESENT_AND_VERIFIED": 2941
+   },
+   "t001.source_identity": {
+    "NOT_REQUIRED_FOR_SUCCESSOR": 16,
+    "PRESENT_AND_VERIFIED": 8
+   },
+   "t001.toolchain_image": {
+    "PRESENT_AND_VERIFIED": 5
+   },
+   "t001.toolchain_image_archive": {
+    "PRESENT_AND_VERIFIED": 1
+   },
+   "t001.toolchain_input": {
+    "PRESENT_AND_VERIFIED": 8
+   },
+   "t002.truth_listing": {
+    "REPRODUCIBLE_BUT_NOT_PRESERVED": 4
+   }
+  },
+  "by_status": {
+   "NOT_REQUIRED_FOR_SUCCESSOR": 16522,
+   "PRESENT_AND_VERIFIED": 4977,
+   "REPRODUCIBLE_BUT_NOT_PRESERVED": 4
+  },
+  "entries": 21503,
+  "not_required_underlying": {
+   "PRESENT_AND_VERIFIED": 16457,
+   "PRESENT_UNVERIFIED": 44
+  },
+  "physical_bytes": 3924105211,
+  "physical_files": 21463
+ },
+ "symlinks_escaping": 0,
+ "t001_recorded_verify": "verify: PASS",
+ "toolchain_reproducibility": {
+  "classes": {
+   "environment_dependent": "the image installs floating package versions (apt / PPA / 'latest' downloads) that no pin controls",
+   "existing_machine": "the recorded image id is present on this machine and in the preserved image archive",
+   "pinned_tool_inputs": "the tool itself is built from SHA-256-pinned preserved sources; its host build environment (base image apt packages) floats"
+  },
+  "note": "two successful runs prove run-to-run determinism on this machine, not long-term rebuildability; the durable recovery path is the preserved image archive (`docker load` restores the recorded image ids)",
+  "tc-a68k": [
+   "existing_machine",
+   "pinned_tool_inputs"
+  ],
+  "tc-elf": [
+   "existing_machine",
+   "pinned_tool_inputs"
+  ],
+  "tc-gnu": [
+   "existing_machine",
+   "environment_dependent"
+  ],
+  "tc-mint": [
+   "existing_machine",
+   "environment_dependent"
+  ],
+  "tc-vbcc": [
+   "existing_machine",
+   "pinned_tool_inputs"
+  ]
+ },
+ "verification": {
+  "fresh_process": {
+   "cwd": "/",
+   "interpreter": "isolated (-I)",
+   "rc": 0
+  },
+  "problems": 0,
+  "verdict": "PASS",
+  "verified_bytes": 3924105211,
+  "verified_files": 21463
+ }
+}

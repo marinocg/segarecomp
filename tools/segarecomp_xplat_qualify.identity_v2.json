@@ -1,0 +1,175 @@
+{
+ "adr": "0160",
+ "helpers_sha256": {
+  "asts_pilot.py": "8e5e188b3b00bda563da8bd535d0629decefc0018b43613e8faaa40ba1a4fa00",
+  "bin/date": "dd6b14c096793176e824058364de02ee5a6b6de8249c88d7e37cc1034d11fd7b",
+  "ci_alias.py": "56898cfde76a8f59cc4be21b509f48818690d8a9b6a654f59ade89cb771794a2"
+ },
+ "image_ids": {
+  "tc-a68k": "sha256:e5f89973f5319b2215f19d79bd09f7d068f4e4c7d0ff861f8e4faa03dc386b0c",
+  "tc-elf": "sha256:c052c9a836fa15c2a41c23c79f39fd3b6d388b872b1c4344b2020490fdd35eb6",
+  "tc-gnu": "sha256:175a3aba35bcc4801c2b5680fadeef3dc38993bdce45b470dd0810066b7626e3",
+  "tc-mint": "sha256:fe8bd94e56953677a72ca7c2abf5719e6c7be4acdd85036700628d6341486368",
+  "tc-vbcc": "sha256:96e371fb92a25a27a0340ff0095616808823039cdd2858de9217f3dc3e853c8b"
+ },
+ "note": "v1 recipe digests are the frozen T001 values (ADR 0159) and are not rewritten; v2 additionally binds Dockerfile contents, embedded helpers and image ids, and was introduced after T001 (T001 did not use it)",
+ "recipes": {
+  "AmiGalaga/game": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "ff085e46c0bcc043754f8dc36feebde3b884fcbdf4e51f49c13635507fce4e6d",
+   "v2_identity_sha256": "3d37632a11f9886bcc066a4e237729d08b11de41f6c350a31b0debcc2273bbcc"
+  },
+  "AtariST/listacsi": {
+   "toolchain": "tc-mint",
+   "v1_recipe_sha256": "e35f9ddb6573e6ca4e44472dee2d371cea6710494a59f6e734613eb4af0a335e",
+   "v2_identity_sha256": "bbf76e8f8887e014c5be65b5a7d124c12635dfbad87a5179ae9463c6c694b03b"
+  },
+  "AtariST/the_80s": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "5943590dbe7101b163a02d4f580d5f9979f96a469d1164409dee4cb7b857f3a2",
+   "v2_identity_sha256": "22ba4ce6103c9a45eaac31c6881e393eb70f280aaa5fef591cec0a9817131ee2"
+  },
+  "AtariST/vasm-programs": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "ccfddf3f85699861d4229ad68a96ac265bd2e74e26c3ea9941c511d4b2749478",
+   "v2_identity_sha256": "7b01d8fbee75700c71be5c60e32cd304760925015f93bc46b6c02dfe9e4e8ff5"
+  },
+  "Atari_ST_Sources/asm-pilot": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "f94970eab8695df808e6ae169db2207fd8c8029e2b639304386f9b8fcc9521c6",
+   "v2_identity_sha256": "620c31a8f91308380f0e821607163d98cda04e0154e311315f888a07642b331d"
+  },
+  "BattleIsleEditor/editors": {
+   "toolchain": "tc-a68k",
+   "v1_recipe_sha256": "08f8fb922ce0e26557b34fb171a1b8759175907ec483b20f3b74e987df489ddd",
+   "v2_identity_sha256": "3f76abc22a88f8c52893946bb06d857d10f2e7f18d2402e7e2e34d3e2fe681f5"
+  },
+  "BattleIsleEditor/vasm-rejects-a68k-dialect": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "6cbc64e6a5c23c02498456c56e9786fd7f8715c70c5b972c80463fb924809135",
+   "v2_identity_sha256": "5d55f2d27fbfba45ab628753b69e5f5a1bed19307ebe28b0e1b3415326286a7a"
+  },
+  "GODLIB/c-objects": {
+   "toolchain": "tc-vbcc",
+   "v1_recipe_sha256": "45cd018e3b2b21091e367404926bf9c634b53a0b2d9a5bd6b5c45d3d16a8cc73",
+   "v2_identity_sha256": "e0689078a45cb6355306da5ed102c0d582b1eae5e192620c0a048373d98cf373"
+  },
+  "GODLIB/pasm-modules": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "885dcc31beeb686d0fe90db18308ceec6f94508a67785fdf0ac99477c96de6cf",
+   "v2_identity_sha256": "58e64e9aa57827f685a4f7d84d17d588325b563dc3f75dbadf94597427cde552"
+  },
+  "HelloAmi/units": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "608ea730cbae79eee92fe45dee2c20bb3325a1e17e5ff484ebddd6d27173dd89",
+   "v2_identity_sha256": "76168a5d2cdbe09bf71e994ec065d13f479a792e9bea4159f24793ba0b82fbc2"
+  },
+  "amiga-boing/build": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "c275e2b0f1b954a84cd1dc5845018d07d0e9aca8466b933262a7d8ca7444f4b8",
+   "v2_identity_sha256": "09df00ff80a05399c1500b2e553cc9e7acae4012c96125bafb06fbd841b111ef"
+  },
+  "amiga-realtime3d/programs": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "66e74bcc60a4b9fa348a04429df600985ed710a9e15c4a54fc6ab261beae4f3a",
+   "v2_identity_sha256": "ab947f74479eb070de18bf429333f6361eb7973c985346414686739f52d56869"
+  },
+  "amiga-vasm-template/test": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "ff9d3463db58f867f27baf482c2c75810b2edbfa4760746695d0796ba2f1a76e",
+   "v2_identity_sha256": "d5cdca3431e99b440893e16f0c8ce27ccc0cc9b53925944617b2fbe1c9c8ed5e"
+  },
+  "amiga_asmdev_workflow/main": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "3da437bd0269275e27338ae22ee4a542b67d17ccf06c8af9520f3821bbd889c4",
+   "v2_identity_sha256": "54895093d4d5297acb8093cd7eed90118f15fab009cfd15def96c6ef48782a2b"
+  },
+  "amiga_asmdev_workflow/unzx0": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "064365ed6cefcf7949be1876cfd2941ac20489bb19bb7847959b30eec422c348",
+   "v2_identity_sha256": "e2c6ecc5b3aa1702b1695bc3bafa42bafe2b93fc33aae563cf4697dc315d4ea8"
+  },
+  "atarist-toolkit-docker/demos": {
+   "toolchain": "tc-mint",
+   "v1_recipe_sha256": "005192f80f3d2d7c177ac6547945264b86c2999078a341b5442b3e1dafd8d6e2",
+   "v2_identity_sha256": "c211e53d20acc7b2451dc5678bc0067a2f74796681376d98f5dfab78e3789637"
+  },
+  "emutos/amiga-rom": {
+   "toolchain": "tc-mint",
+   "v1_recipe_sha256": "adcba033f4ae4ed7b5b60c46c4dd8d23d401eac86d55772e3a7ad33d23456ed4",
+   "v2_identity_sha256": "99a1924064d0b30290440dae5c10b6e41d225baf5aca63b8a70133933db3e201"
+  },
+  "emutos/cart": {
+   "toolchain": "tc-mint",
+   "v1_recipe_sha256": "df13aa6f9234f5254dcecef2248c59f12a19694f35c2a7e6ce8b57537b2402f2",
+   "v2_identity_sha256": "c2505cb605915a282484ae16fdf1c5f49debf84e8c90ccff4fb6f45e6579fe93"
+  },
+  "emutos/rom-192": {
+   "toolchain": "tc-mint",
+   "v1_recipe_sha256": "440a4b78a552f69f89275168c47b7074a3b6ff783bcb8fbb27e53e151d3385b0",
+   "v2_identity_sha256": "74d340b1cd28391f497525c111a38a1bb9986db11881bafa6b3e257662897a3e"
+  },
+  "emutos/rom-256": {
+   "toolchain": "tc-mint",
+   "v1_recipe_sha256": "7316e6a1332471f7265115f94bcc3005af58369d02919d7ce4fca1c493be9041",
+   "v2_identity_sha256": "34758081766b3be53da8fc66ad7acf5ac0dae886d5cc59e106d53697471d756a"
+  },
+  "galaga/core-modules": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "7c3ddac05564d38efd48389f5a9e41bae453b8630c6b6543d4dfde454da2ea91",
+   "v2_identity_sha256": "89728543a79671bc22fe168e68f68c8f68fa4a6d38cf2c970feafe797061dc20"
+  },
+  "monomental/main": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "562da8f183dca73a88ef0ab26808d2fc4cd44724bea36fef05cf9cdf1ea281fb",
+   "v2_identity_sha256": "6e842c647d9c7a083c4470f332248e120314d7505d94b017bef63f40cdfdba02"
+  },
+  "neogeosdk/demo-compile-link": {
+   "toolchain": "tc-elf",
+   "v1_recipe_sha256": "57e8841730e131dc245458e69615ba244f9c99f69c62dd69a6f0f2b03aea7f31",
+   "v2_identity_sha256": "beb1c59318077a04bff017b2e80a3af0cfc01c73c456fe66868c2ecc5bce9fe1"
+  },
+  "pacman500/main": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "142bc28e43fd0a94c5d241cc17cf46e9b9635e29d176d817d1fbebd12f0c09e3",
+   "v2_identity_sha256": "8bf5f51114dc00c8297c2dbdeadb9a61cc7e8ac2574ef68f022d5a4902c19aea"
+  },
+  "perihelion-m68k-tutorials/tutorials": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "60ad168234a0ce19a1f165f105f05ba774f79da64a15cddcca2643a59df26202",
+   "v2_identity_sha256": "a8b23e17f5f70ae06fd461cda27702362151e730f969f67caf538a07b622e1b2"
+  },
+  "scramble500/main": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "079c9bdb128bf2d6c16e05ee1e1102f5c9fdadb77ec725b08490a8e5931767fb",
+   "v2_identity_sha256": "f624660c4f440ad7582382bb3114c8ee0adcd4d8813faf1ac89a9911dad0810e"
+  },
+  "space-invaders/link-vbcc": {
+   "toolchain": "tc-vbcc",
+   "v1_recipe_sha256": "b9e1b1e7d01536bdc7dbb2b2e6927b6ebe644b69faa88e6fea9ffde5f2a8f5b6",
+   "v2_identity_sha256": "41cbb927ce1087b0890b9c7709dfa2214ec5f18738b63d630f1e033a9e9ac224"
+  },
+  "space-invaders/objects-vbcc": {
+   "toolchain": "tc-vbcc",
+   "v1_recipe_sha256": "7d0bc26a1cda2bb6711e789abf164ae466595d955ee72a41299d85b1cd497c45",
+   "v2_identity_sha256": "53b0d9a1857067fbb9d69b469fefc917c9457946000f9fbdc5337d234b5b856b"
+  },
+  "toslibc/lib+examples": {
+   "toolchain": "tc-elf",
+   "v1_recipe_sha256": "db03757734a3fe7a0153413c040d80196c98ac0a9898e9634edf4f40036fff92",
+   "v2_identity_sha256": "a3632bc1e961d7c068c1d9193f746a8148ba5511c268a3a78b4d4f39253b569f"
+  },
+  "toslibc/linux-gnu-gcc-rejected": {
+   "toolchain": "tc-gnu",
+   "v1_recipe_sha256": "e18bd9c33fb47794dfa0faf1a91e7a8ed49f7ff69f6ed8c9d4c95187ecba34fd",
+   "v2_identity_sha256": "99b3c7d388fbcd3578829889c85a67e6bb2e0d8d50770cd69b0c5369e20e21c3"
+  },
+  "x68000dev/helloc": {
+   "toolchain": "tc-elf",
+   "v1_recipe_sha256": "22292a893cbd4ed7970cf5107b17b6040da32094a589e3efd320f09c692fdb24",
+   "v2_identity_sha256": "4cb42b794be8b531f09ccf095fc3a11d80b0b777781a1e62eabf854f86cdc6d4"
+  }
+ },
+ "schema": "segarecomp.xplat_qualify.recipe_identity.v2",
+ "task": "SEG-075-T002 (C1)"
+}

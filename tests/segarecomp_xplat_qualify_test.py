@@ -336,9 +336,130 @@ def test_committed_manifest():
     check('"log"' not in text and '"script"' not in text, "committed manifest is sanitized")
 
 
+def test_identity_v2():
+    """SEG-075 C1 (ADR 0160): v2 binds Dockerfile contents, embedded helpers and image ids; the frozen v1 digest is untouched."""
+    plan = q.load_plan()
+    cand = next(c for c in plan["candidates"] if c["id"] == "HelloAmi")
+    recipe = cand["recipes"][0]
+    ids = {"tc-gnu": {"image_id": "sha256:" + "a" * 64}}
+    base = q.recipe_identity_v2(plan, cand, recipe, q.ROOT, None, ids)
+    check(base["v1_recipe_sha256"] == q.recipe_digest(plan, cand, recipe), "v2 carries the unchanged v1 digest")
+    check(q.recipe_identity_v2(plan, cand, recipe, q.ROOT, None, ids)["sha256"] == base["sha256"], "v2 identity is deterministic")
+    # recipe hash drift: both digests move
+    r2 = dict(recipe, script=recipe["script"] + " ")
+    moved = q.recipe_identity_v2(plan, cand, r2, q.ROOT, None, ids)
+    check(moved["v1_recipe_sha256"] != base["v1_recipe_sha256"] and moved["sha256"] != base["sha256"], "recipe drift moves v1 and v2")
+    # Dockerfile drift: the committed text changes, v1 cannot see it, v2 does
+    with tempfile.TemporaryDirectory() as td:
+        alt = pathlib.Path(td)
+        for tid, tc in plan["toolchains"].items():
+            if "dockerfile" in tc:
+                p = alt / tc["dockerfile"]
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes((q.ROOT / tc["dockerfile"]).read_bytes())
+        same = q.recipe_identity_v2(plan, cand, recipe, alt, None, ids)
+        check(same["sha256"] == base["sha256"], "identical Dockerfile text gives the same v2 identity")
+        df = alt / plan["toolchains"]["tc-gnu"]["dockerfile"]
+        df.write_bytes(df.read_bytes() + b"RUN true\n")
+        drift = q.recipe_identity_v2(plan, cand, recipe, alt, None, ids)
+        check(drift["v1_recipe_sha256"] == base["v1_recipe_sha256"], "v1 is blind to Dockerfile contents (the T001 gap)")
+        check(drift["sha256"] != base["sha256"], "Dockerfile drift moves the v2 identity")
+    # a base-image Dockerfile reaches derived toolchains through the base chain
+    a68k = next(c for c in plan["candidates"] if c["id"] == "BattleIsleEditor")
+    chain = q.recipe_identity_v2(plan, a68k, a68k["recipes"][0], q.ROOT, None, ids)
+    check(chain["toolchain"]["base"]["base"]["dockerfile_sha256"] is not None, "tc-a68k binds tc-vbcc and tc-gnu Dockerfiles")
+    # context-candidate image (tc-mint): the candidate's own Dockerfile contents are bound through the cache
+    emu = next(c for c in plan["candidates"] if c["id"] == "emutos")
+    with tempfile.TemporaryDirectory() as td:
+        cache = pathlib.Path(td)
+        ctx = cache / "src" / plan["toolchains"]["tc-mint"]["context_candidate"]
+        ctx.mkdir(parents=True)
+        (ctx / "Dockerfile").write_text("FROM ubuntu:24.04\n")
+        m1 = q.recipe_identity_v2(plan, emu, emu["recipes"][0], q.ROOT, cache, ids)
+        check(m1["toolchain"]["context_candidate"]["dockerfile_sha256"] is not None, "context Dockerfile hashed from the cache")
+        (ctx / "Dockerfile").write_text("FROM ubuntu:24.04\nRUN true\n")
+        m2 = q.recipe_identity_v2(plan, emu, emu["recipes"][0], q.ROOT, cache, ids)
+        check(m2["sha256"] != m1["sha256"] and m2["v1_recipe_sha256"] == m1["v1_recipe_sha256"], "context Dockerfile drift moves v2 only")
+    # embedded helper drift
+    helpers = dict(q.HELPERS, **{"bin/date": q.DATE_SHIM + "\n"})
+    check(q.recipe_identity_v2(plan, cand, recipe, q.ROOT, None, ids, helpers)["sha256"] != base["sha256"], "helper drift moves v2")
+    # actual image identity drift
+    ids2 = {"tc-gnu": {"image_id": "sha256:" + "b" * 64}}
+    check(q.recipe_identity_v2(plan, cand, recipe, q.ROOT, None, ids2)["sha256"] != base["sha256"], "image id drift moves v2")
+    # document comparison
+    doc = q.identity_document(plan, None, ids)
+    check(q.compare_identity(doc, doc) == [], "identical identity documents compare equal")
+    other = q.identity_document(plan, None, ids2)
+    check(any("image_ids" in d for d in q.compare_identity(doc, other)), "identity image drift reported")
+    check(any("v2_identity_sha256" in d for d in q.compare_identity(doc, other)), "per-recipe v2 drift reported")
+
+
+def test_committed_identity():
+    committed = json.loads(q.IDENTITY_V2.read_text())
+    plan = q.load_plan()
+    check(committed["schema"] == q.IDENTITY_V2_SCHEMA, "committed identity schema")
+    for c in plan["candidates"]:
+        for r in c["recipes"]:
+            row = committed["recipes"].get(f"{c['id']}/{r['name']}")
+            check(row is not None and row["v1_recipe_sha256"] == q.recipe_digest(plan, c, r),
+                  f"{c['id']}/{r['name']}: committed v2 identity bound to the frozen v1 digest")
+    check(committed["helpers_sha256"] == {k: __import__("hashlib").sha256(v.encode()).hexdigest() for k, v in sorted(q.HELPERS.items())},
+          "committed identity matches the embedded helpers")
+    manifest = json.loads(q.MANIFEST.read_text())
+    for tid, ident in committed["image_ids"].items():
+        check(manifest["toolchains"][tid].get("image_id") == ident, f"{tid}: identity image id equals the T001 manifest")
+
+
+def test_compare_recipe_hash():
+    """The T001 gap: compare_manifests must report a recipe-definition difference even when outputs are identical."""
+    plan = q.load_plan()
+    records = {c["id"]: {"id": c["id"], "recipes": [{"name": r["name"], "toolchain": r["toolchain"], "expect": r.get("expect", "success"),
+                                                     "observed": r.get("expect", "success"), "matches_expectation": True,
+                                                     "deterministic": True, "recipe_sha256": q.recipe_digest(plan, c, r)}
+                                                    for r in c["recipes"]]} for c in plan["candidates"]}
+    a = q.make_manifest(plan, records, {})
+    b = copy.deepcopy(a)
+    b["candidates"][0]["recipes"][0]["recipe_sha256"] = "f" * 64
+    check(any("recipe definition differs" in d for d in q.compare_manifests(a, b)), "recipe hash drift detected by compare_manifests")
+    c2 = copy.deepcopy(a)
+    c2["candidates"][0]["commit"] = "0" * 40
+    check(any(": commit " in d for d in q.compare_manifests(a, c2)), "source revision drift detected by compare_manifests")
+    c3 = copy.deepcopy(a)
+    c3["candidates"][0]["recipes"][0]["observed"] = "failure"
+    check(any("outcome" in d for d in q.compare_manifests(a, c3)), "outcome drift detected")
+
+
+def test_verify_paths():
+    """verify honours --manifest (a non-default input path) and rejects --out; both through the real CLI."""
+    plan = q.load_plan()
+    with tempfile.TemporaryDirectory() as td:
+        cache = pathlib.Path(td) / "cache"
+        (cache / "records").mkdir(parents=True)
+        for c in plan["candidates"]:
+            recs = [{"name": r["name"], "toolchain": r["toolchain"], "expect": r.get("expect", "success"), "observed": r.get("expect", "success"),
+                     "matches_expectation": True, "deterministic": True, "recipe_sha256": q.recipe_digest(plan, c, r), "outputs": []}
+                    for r in c["recipes"]]
+            (cache / "records" / f"{c['id']}.json").write_text(json.dumps({"id": c["id"], "commit": c["commit"], "recipes": recs}))
+        good = pathlib.Path(td) / "elsewhere" / "m.json"
+        good.parent.mkdir()
+        good.write_text(json.dumps(q._fresh_manifest(plan, cache)))
+        cli = [sys.executable, str(ROOT / "tools" / "segarecomp_xplat_qualify.py"), "verify", "--cache", str(cache)]
+        ok = subprocess.run(cli + ["--manifest", str(good)], capture_output=True, text=True)
+        check(ok.returncode == 0 and "verify: PASS" in ok.stdout, "verify reads the non-default --manifest path")
+        bad = json.loads(good.read_text())
+        bad["candidates"][1]["class"] = "BUILD_BLOCKED" if bad["candidates"][1]["class"] != "BUILD_BLOCKED" else "QUALIFIED"
+        good.write_text(json.dumps(bad))
+        fail = subprocess.run(cli + ["--manifest", str(good)], capture_output=True, text=True)
+        check(fail.returncode == 1 and "class" in fail.stdout, "verify fails against a different non-default manifest")
+        rej = subprocess.run(cli + ["--out", str(good)], capture_output=True, text=True)
+        check(rej.returncode == 2 and "--out" in rej.stderr, "verify rejects --out explicitly")
+        missing = subprocess.run(cli + ["--manifest", str(good) + ".nope"], capture_output=True, text=True)
+        check(missing.returncode == 2, "verify rejects a missing manifest path")
+
+
 def main():
     for t in (test_plan, test_probe, test_cpu_scan, test_pilot, test_guard, test_pin_check, test_date_shim, test_evaluate, test_manifest,
-              test_committed_manifest):
+              test_committed_manifest, test_identity_v2, test_committed_identity, test_compare_recipe_hash, test_verify_paths):
         t()
     if FAILURES:
         print(f"{len(FAILURES)} failure(s)")

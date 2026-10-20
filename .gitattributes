@@ -15,3 +15,20 @@ tests/fixtures/genesis-z80-*.json text eol=lf
 tests/fixtures/genesis-z80-forbidden-identifiers.txt text eol=lf
 tools/genesis_z80_fixture_rom.py text eol=lf
 tools/segarecomp_ml_region_gen2*.json text eol=lf
+# SEG-075 (ADRs 0159-0163): frozen research evidence verified by SHA-256 over its exact committed bytes. Windows autocrlf would rewrite
+# LF -> CRLF at checkout and every digest check would (correctly) refuse; pin the committed LF bytes on every platform.
+tools/segarecomp_xplat_design.plan.json text eol=lf
+tools/segarecomp_xplat_design.plan.digest text eol=lf
+tools/segarecomp_xplat_design.t005.json text eol=lf
+tools/segarecomp_xplat_design.py text eol=lf
+tools/segarecomp_xplat_transfer.py text eol=lf
+tools/segarecomp_xplat_decide.py text eol=lf
+tools/segarecomp_xplat_models.py text eol=lf
+tools/segarecomp_xplat_t005.py text eol=lf
+tools/segarecomp_ml_v3.py text eol=lf
+tools/segarecomp_ml_v3_train.py text eol=lf
+tools/segarecomp_ml_v3_eval.py text eol=lf
+tools/segarecomp_ml_region_gen2.py text eol=lf
+tools/segarecomp_ml_region_gen2_train.py text eol=lf
+tools/segarecomp_oracle_bench.py text eol=lf
+tools/segarecomp_xplat_toolchains/*.Dockerfile text eol=lf
