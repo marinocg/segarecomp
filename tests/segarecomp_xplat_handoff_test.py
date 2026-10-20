@@ -24,13 +24,10 @@ import segarecomp_xplat_qualify as q  # noqa: E402
 FAILURES = []
 
 
-def _exact_write_text(self, data, encoding="utf-8", errors=None, newline=None):
-    """Fixture files must hold exactly the bytes the test expects on every platform: Windows text mode would write '\\n' as '\\r\\n'
-    and the digest checks under test would (correctly) report drift. The tool's comparisons stay byte-exact."""
-    return self.write_bytes(data.encode(encoding))
-
-
-pathlib.Path.write_text = _exact_write_text
+def write_fixture(path: pathlib.Path, text: str) -> None:
+    """Write a synthetic fixture as exact UTF-8 bytes with LF line ends on every platform (Windows text mode would write CRLF, and the
+    digest comparisons under test would then - correctly - report drift). Production code under test keeps its own I/O behaviour."""
+    path.write_bytes(text.encode("utf-8"))
 
 
 def check(cond, msg):
@@ -143,7 +140,7 @@ def test_store_and_verify():
         saved_sums = sums.read_text()
         sums.unlink()
         check(any(".sha256 file missing" in p for p in h.verify_manifest(mpath)["problems"]), "missing digest file fails")
-        sums.write_text(saved_sums)
+        write_fixture(sums, saved_sums)
         # manifest tampering is detected by its own digest file
         man = json.loads(mpath.read_bytes())
         man["entries"][0]["note"] = "edited"
@@ -164,7 +161,7 @@ def test_symlinks():
     with tempfile.TemporaryDirectory() as td:
         root = pathlib.Path(td) / "c"
         root.mkdir()
-        (root / "f").write_text("x")
+        write_fixture((root / "f"), "x")
         try:
             os.symlink("f", root / "inside")
             os.symlink("/tmp", root / "outside")
@@ -192,8 +189,8 @@ def make_cache(td: pathlib.Path):
     src = cache / "src" / "HelloAmi"
     src.mkdir(parents=True)
     git("init", "-q", cwd=src)
-    (src / "a.s").write_text("rts\n")
-    (src / ".gitattributes").write_text("*.bat text eol=crlf\n")
+    write_fixture((src / "a.s"), "rts\n")
+    write_fixture((src / ".gitattributes"), "*.bat text eol=crlf\n")
     (src / "run.bat").write_bytes(b"echo\r\n")
     git("add", "-A", cwd=src)
     git("commit", "-q", "-m", "x", cwd=src)
@@ -203,17 +200,17 @@ def make_cache(td: pathlib.Path):
         d.mkdir(parents=True)
         (d / "HelloAmi").write_bytes(b"\x00\x00\x03\xf3exe")
         (d / "HelloAmi.lst").write_bytes(b"00:00000000 4E75\t1: rts\n")
-        (cache / "build" / "HelloAmi" / "units" / f"{run}.log").write_text("ok\n")
+        write_fixture((cache / "build" / "HelloAmi" / "units" / f"{run}.log"), "ok\n")
         e = cache / "build" / "emutos" / "rom-192" / run
         (e / "obj").mkdir(parents=True)
-        (e / "emutos.map").write_text("map\n")
+        write_fixture((e / "emutos.map"), "map\n")
         (e / "obj" / "x.o").write_bytes(b"\x7fELFobj")
     (cache / "build" / "HelloAmi" / "bad" / "a").mkdir(parents=True)
     (cache / "records").mkdir()
-    (cache / "records" / "HelloAmi.json").write_text(json.dumps({"id": "HelloAmi", "commit": commit, "recipes": [
+    write_fixture((cache / "records" / "HelloAmi.json"), json.dumps({"id": "HelloAmi", "commit": commit, "recipes": [
         {"name": "units", "byte_identical_runs": True, "outputs": [{"path": "out/HelloAmi", "sha256": sha(b"\x00\x00\x03\xf3exe")}]},
         {"name": "bad"}]}))
-    (cache / "records" / "emutos.json").write_text(json.dumps({"id": "emutos", "commit": commit, "recipes": [
+    write_fixture((cache / "records" / "emutos.json"), json.dumps({"id": "emutos", "commit": commit, "recipes": [
         {"name": "rom-192", "byte_identical_runs": True, "outputs": [{"path": "emutos.map", "sha256": sha(b"map\n")}]}]}))
     return cache, commit
 
@@ -238,7 +235,7 @@ def test_audit_builds_and_sources():
               "never-generated compiler listings are REPRODUCIBLE_BUT_NOT_PRESERVED")
         # corrupt the declared output of run a; change the link map of run b; delete run b's output
         (cache / "build" / "HelloAmi" / "units" / "a" / "out" / "HelloAmi").write_bytes(b"\x00\x00\x03\xf3exE")
-        (cache / "build" / "emutos" / "rom-192" / "b" / "emutos.map").write_text("map2\n")
+        write_fixture((cache / "build" / "emutos" / "rom-192" / "b" / "emutos.map"), "map2\n")
         (cache / "build" / "HelloAmi" / "units" / "b" / "out" / "HelloAmi").unlink()
         es = by_logical(h.audit_builds(q, plan, cache, parent))
         check(es[exe_a]["status"] == "PRESENT_BUT_CHANGED", "corrupted output detected")
@@ -259,7 +256,7 @@ def test_audit_builds_and_sources():
         ss = by_logical(h.audit_sources(q, wrong, cache, parent))
         check(ss["seg075/q/src/HelloAmi/.git#HEAD"]["status"] == "PRESENT_BUT_CHANGED", "incorrect source revision detected")
         check(ss["seg075/q/src/HelloAmi/a.s"]["status"] == "PRESENT_BUT_CHANGED", "files of a wrong revision are not verified")
-        (cache / "src" / "HelloAmi" / "a.s").write_text("nop\n")
+        write_fixture((cache / "src" / "HelloAmi" / "a.s"), "nop\n")
         ss = by_logical(h.audit_sources(q, plan, cache, parent))
         check(ss["seg075/q/src/HelloAmi/a.s"]["status"] == "PRESENT_BUT_CHANGED", "modified checkout file detected")
 
@@ -279,8 +276,8 @@ def test_cross_run():
         cache, commit = make_cache(td)
         plan = fake_plan(commit)
         (cache / "build" / "HelloAmi" / "units" / "a" / "out" / "HelloAmi.lst").write_bytes(b"00:00000000 4E71\t1: nop\n")
-        (cache / "build" / "HelloAmi" / "units" / "a" / "out" / "scratch.tmp").write_text("1")
-        (cache / "build" / "HelloAmi" / "units" / "b" / "out" / "scratch.tmp").write_text("2")
+        write_fixture((cache / "build" / "HelloAmi" / "units" / "a" / "out" / "scratch.tmp"), "1")
+        write_fixture((cache / "build" / "HelloAmi" / "units" / "b" / "out" / "scratch.tmp"), "2")
         es = by_logical(h.audit_builds(q, plan, cache, td / "cache"))
         lst = es["seg075/q/build/HelloAmi/units/a/out/HelloAmi.lst"]
         check(lst["status"] == "PRESENT_BUT_CHANGED" and lst["required"], "corrupted needed listing (one run) is a required problem")
@@ -301,7 +298,7 @@ def test_record_code_basis():
         rec = json.loads((cache / "records" / "HelloAmi.json").read_text())
         rec["recipes"][0]["byte_identical_runs"] = False
         rec["recipes"][0]["outputs"].append({"path": "out/x.prg", "sha256": sha(prg_a), "code_sha256": q.code_digest(prg_a)})
-        (cache / "records" / "HelloAmi.json").write_text(json.dumps(rec))
+        write_fixture((cache / "records" / "HelloAmi.json"), json.dumps(rec))
         (cache / "build" / "HelloAmi" / "units" / "a" / "out" / "x.prg").write_bytes(prg_a)
         (cache / "build" / "HelloAmi" / "units" / "b" / "out" / "x.prg").write_bytes(prg_b)
         es = by_logical(h.audit_builds(q, plan, cache, td / "cache"))
@@ -333,22 +330,22 @@ def test_audit_control():
         cache, commit = make_cache(td)
         product = td / "product"
         (product / "tools").mkdir(parents=True)
-        (product / "tools" / "tc-x.Dockerfile").write_text("FROM x\n")
+        write_fixture((product / "tools" / "tc-x.Dockerfile"), "FROM x\n")
         tc = cache / "toolchains" / "tc-x"
         tc.mkdir(parents=True)
         (tc / "in.tar").write_bytes(b"input")
-        (tc / "Dockerfile").write_text("FROM x\n")
+        write_fixture((tc / "Dockerfile"), "FROM x\n")
         xp = cache / "xplat"
         (xp / "bin").mkdir(parents=True)
-        (xp / "ci_alias.py").write_text(q.CI_ALIAS)
-        (xp / "asts_pilot.py").write_text(q.ASTS_PILOT)
-        (xp / "bin" / "date").write_text(q.DATE_SHIM)
+        write_fixture((xp / "ci_alias.py"), q.CI_ALIAS)
+        write_fixture((xp / "asts_pilot.py"), q.ASTS_PILOT)
+        write_fixture((xp / "bin" / "date"), q.DATE_SHIM)
         plan = fake_plan(commit)
         es = h.audit_control(q, plan, cache, td / "cache", product)
         check(all(e["status"] == "PRESENT_AND_VERIFIED" for e in es), "inputs, Dockerfile and helpers verify")
         (tc / "in.tar").write_bytes(b"inpuT")
-        (tc / "Dockerfile").write_text("FROM y\n")
-        (xp / "bin" / "date").write_text(q.DATE_SHIM + "#\n")
+        write_fixture((tc / "Dockerfile"), "FROM y\n")
+        write_fixture((xp / "bin" / "date"), q.DATE_SHIM + "#\n")
         es = {e["group"]: e for e in h.audit_control(q, plan, cache, td / "cache", product) if e["status"] == "PRESENT_BUT_CHANGED"}
         check(set(es) == {"t001.toolchain_input", "t001.dockerfile", "t001.helper"}, "input, Dockerfile and helper drift detected")
         (tc / "in.tar").unlink()
@@ -358,6 +355,29 @@ def test_audit_control():
 
 def test_portability():
     """Windows CI regression (PR 133 run 39418624402): worktree markers and logical paths must not depend on the host separator."""
+    check(pathlib.Path.write_text.__module__.startswith("pathlib"), "the standard library Path.write_text is not replaced")
+    with tempfile.TemporaryDirectory() as td:
+        f = pathlib.Path(td) / "x"
+        write_fixture(f, "a\nb\n")
+        check(f.read_bytes() == b"a\nb\n", "fixtures are exact LF bytes")
+    # a CRLF copy of an embedded helper (what a Windows text-mode write produces) is real drift and must be reported, not tolerated
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        cache, commit = make_cache(td)
+        product = td / "product"
+        (product / "tools").mkdir(parents=True)
+        write_fixture(product / "tools" / "tc-x.Dockerfile", "FROM x\n")
+        tc = cache / "toolchains" / "tc-x"
+        tc.mkdir(parents=True)
+        (tc / "in.tar").write_bytes(b"input")
+        write_fixture(tc / "Dockerfile", "FROM x\n")
+        xp = cache / "xplat"
+        (xp / "bin").mkdir(parents=True)
+        write_fixture(xp / "ci_alias.py", q.CI_ALIAS)
+        write_fixture(xp / "asts_pilot.py", q.ASTS_PILOT)
+        (xp / "bin" / "date").write_bytes(q.DATE_SHIM.replace("\n", "\r\n").encode())
+        es = {e["group"]: e for e in h.audit_control(q, fake_plan(commit), cache, td / "cache", product) if e["status"] == "PRESENT_BUT_CHANGED"}
+        check(set(es) == {"t001.helper"}, "a CRLF helper is detected as changed (byte-exact comparison preserved)")
     check(h.under_worktree("D:\\a\\segarecomp\\.worktrees\\seg-075-t002\\tools\\x.py"), "Windows worktree path detected")
     check(h.under_worktree("/r/.worktrees-harness/control-x/f") and h.under_worktree(pathlib.PureWindowsPath("C:/r/.worktrees/t")),
           "POSIX / PureWindowsPath worktree paths detected")
@@ -373,7 +393,7 @@ def test_add_refuses_worktree():
     with tempfile.TemporaryDirectory() as td:
         bad = pathlib.Path(td) / ".worktrees" / "seg-075-t002"
         bad.mkdir(parents=True)
-        (bad / "f").write_text("x")
+        write_fixture((bad / "f"), "x")
         rc = h.main(["add", "--store", str(pathlib.Path(td) / "s"), "--cache-parent", td, "--label", "x", "--tree", f"g={bad}"])
         check(rc == 2, "snapshotting a task-worktree tree is refused")
 
