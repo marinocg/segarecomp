@@ -57,6 +57,42 @@ python3 tools/segarecomp_xplat_qualify.py identity --cache <HARNESS>/.cache/seg0
 | label | content |
 |---|---|
 | `c1-t001-audit` | C1 audit of the T001 cache: checkouts, both runs of every recipe, records, toolchain inputs, Dockerfiles, helpers, image archive |
-| `c2-t002-corpus` | `c1-t001-audit` + T002 truth runs (`seg075/t002/truth`), canonical corpus (`seg075/t002/corpus`, 54 samples), decoder CLI binary |
+| `c2-t002-corpus` | `c1-t001-audit` + T002 truth runs, canonical corpus, decoder CLI binary, C2 review oracle scripts, restore scripts |
+| `c3-t003-freeze` | `c2` + the frozen T003 snapshot (36 development samples, the sealed cohort bound by opaque digests) |
+| `c4-t004-transfer` | `c3` + every T004 fit (records, fold scores, all-development weights `*.all.xplat.pt/.pkl`, `reproduce.json`, farm logs) |
+| `c7-final-handoff` | `c4` + T006 environment report and one-shot status: **the successor's manifest** |
 
 Later checkpoints add labels (T002 corpus, T003 snapshot, T004/T005 models, final C7 handoff); see the receipts committed under `tools/`.
+
+## Successor quick start (state at the end of SEG-075)
+
+- **Outcome:** `DATA_INSUFFICIENT` (ADR 0163).
+  - T004 is `EVIDENCE_INSUFFICIENT`: M3-R's seed noise (tau 0.103) exceeds every transfer effect.
+  - T005 was not admitted. Its models are implemented and bound, but not trained.
+  - The sealed reserved cohort (neogeosdk, space-invaders) was **never opened**. It is still fresh evidence; open it only through a new
+    pre-registration's one-shot.
+- **Verify everything first**, from any export of the product at the PR head, in a fresh process:
+  ```sh
+  python3 tools/segarecomp_xplat_final.py verify --venv-python <HARNESS>/.cache/seg049/venv/bin/python \
+      --manifest <HARNESS>/.cache/seg075-handoff/manifests/c7-final-handoff.json --receipt tools/segarecomp_xplat_handoff.c7_receipt.json
+  ```
+  It must print `ARTIFACT_HANDOFF_PASS`.
+- **Reuse without rebuilding:**
+  - Corpus samples load with `segarecomp_ml_v3_train.Image(<dir>)` from `seg075/t003/snapshot/dev`, only through
+    `segarecomp_xplat_design.dev_sample_dirs`, which enforces the barrier.
+  - T004 fold scores and fit records are in `seg075/t004/scores`. `segarecomp_xplat_transfer.py table` recomputes the whole results
+    document in minutes.
+  - The all-development models (`*.C0.all.xplat.*`, `*.C2.all.xplat.*`) load directly; the final verifier shows how.
+- **To continue the research** (ADR 0163 section 3):
+  1. Pre-register a multi-seed M3-R protocol.
+  2. Add harder source-backed programs (C-compiled games, code with jump tables or inline data, new Genesis homebrew), extracted with
+     `segarecomp_xplat_corpus.py` and checked with the C2 oracle scripts.
+  3. Re-freeze through `segarecomp_xplat_design.py freeze` with a new plan.
+  4. Run T004 unchanged, then the T005 models through their addendum.
+- **Environment:**
+  - The research venv is `<HARNESS>/.cache/seg049/venv`, with the package set in `seg075/t006/environment.json`.
+  - If that venv is lost, rebuild it with uv using Python 3.13.14 and the recorded package versions (torch 2.14.1+cu130 from the PyTorch
+    cu130 index, run on CPU). The SEG-072 bundle verifier then proves equivalence through bitwise reference inference.
+- **External inputs** (not copied, by policy): the operator's `games/` Genesis images and Sonic CD disc. If the SEG-063 module cache is
+  lost, `seg075/scripts/restore_scd_modules.py` re-extracts the 36 modules from the disc and verifies each against SEG-072's recorded
+  digests.

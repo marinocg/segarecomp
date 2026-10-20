@@ -121,3 +121,6 @@ set_property(TEST segarecomp_xplat_design_test APPEND PROPERTY LABELS full fast)
 # and torch are installed (research environment), otherwise skipped.
 add_test(NAME segarecomp_xplat_models_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_models_test.py)
 set_property(TEST segarecomp_xplat_models_test APPEND PROPERTY LABELS full fast)
+# SEG-075-T006 (ADR 0163): the final decision re-derives from the committed results under the bound rules; the C7 receipt is sanitized.
+add_test(NAME segarecomp_xplat_final_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_final_test.py)
+set_property(TEST segarecomp_xplat_final_test APPEND PROPERTY LABELS full fast)
