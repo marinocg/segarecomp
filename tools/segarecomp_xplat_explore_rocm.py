@@ -34,13 +34,17 @@ import segarecomp_xplat_explore as rx  # noqa: E402
 
 PLAN = HERE / "segarecomp_xplat_explore.t001.rocm.plan.json"
 DIGEST = HERE / "segarecomp_xplat_explore.t001.rocm.plan.digest"
-RESOURCES = {"device": "cuda:0 (ROCm/HIP)", "parallel_fits": 1, "cpu_threads_per_fit": 2,
-             "why_serial": "two host (WSL2) crashes occurred while 3 ROCm probe processes plus a CPU self-test were started on top of 6 "
-                           "running CPU fits (~11.5 GB RSS on a 16 GB host); the amendment therefore runs ONE ROCm process at a time and "
-                           "nothing heavier than one 2-thread CPU determinism refit beside it",
-             "wall_clock_cap_minutes": {"B": 30, "C": 120}, "caps_basis": "uncontended single-process ROCm probe: B 0.038 s/step (~2.5 min "
-                           "per 4000 steps), C 0.54 s/step (~36 min); caps ~3x those plus inference",
-             "rss_limit_mb": 4096, "min_available_mb_to_start": 3000, "attempts": 1,
+RESOURCES = {"device": "cuda:0 (ROCm/HIP)", "parallel_fits": 4, "cpu_threads_per_fit": 2,
+             "host_protection": "two host (WSL2) crashes occurred when 3 ROCm probes plus a CPU self-test were started on top of 6 running "
+                                "CPU fits (~11.5 GB RSS on a 16 GB host). Protection is a host-RAM guard, not serialization: a fit starts "
+                                "only when MemAvailable >= 4000 MB (starts staggered by 20 s), and when MemAvailable < 2000 MB the most "
+                                "recently started fit is killed and recorded 'host_memory_guard' (failed, not re-runnable)",
+             "min_available_mb_to_start": 4000, "host_memory_floor_mb": 2000,
+             "wall_clock_cap_minutes": {"B": 30, "C": 180},
+             "caps_basis": "uncontended single-process ROCm probe: B 0.038 s/step (~2.5 min per 4000 steps), C 0.54 s/step (~36 min); C's "
+                           "edge building is CPU-bound, so 4 concurrent fits may each slow down; caps are set generously (C 5x) so a "
+                           "resource cap does not decide the result again (new caps chosen after the CPU failure; disclosed)",
+             "rss_limit_mb": 4096, "attempts": 1,
              "env": {"CUBLAS_WORKSPACE_CONFIG": ":4096:8", "OMP_NUM_THREADS": "2", "MKL_NUM_THREADS": "2"}}
 JOB_MODELS = ("B", "C")
 
@@ -80,6 +84,8 @@ def build_plan(identity: dict) -> dict:
                           "amendment changes no threshold and no model setting",
             "selftest": "fit_bc_device / infer_bc_device on the CPU are bitwise identical to the frozen fit_bc / infer_bc (6 steps on the "
                         "D05-fold training set, B and C: parameters and inference)",
+            "cpu_determinism_command": "segarecomp_xplat_explore.py farm --out <t001> --only A.D05.repro B.D05.repro (the absent C CPU "
+                                       "jobs are deliberately not re-run)",
             "cpu_farm_interruption": "the T001 CPU farm was interrupted by a host crash while C.D07, C.D09-C.D12 and C.all were ~40 min "
                                      "into their runs (C.D01-C.D06 had already hit the 160-min cap at ~1500/4000 steps). They are not "
                                      "re-run on the CPU: they are absent from the CPU farm state, which the frozen table counts as "
@@ -94,7 +100,7 @@ def write_plan() -> dict:
     return doc
 
 
-def verify_plan() -> dict:
+def verify_plan(require_device: bool = False) -> dict:
     rx.verify_plan()
     if not (PLAN.is_file() and DIGEST.is_file()):
         raise SystemExit("ROCm amendment plan missing: no amendment fit before the reviewed, committed amendment")
@@ -106,6 +112,12 @@ def verify_plan() -> dict:
     for n, want in doc["bound_code"].items():
         if sha(HERE / n) != want:
             raise SystemExit(f"{n} differs from the amendment binding")
+    if require_device:
+        import torch
+        if not torch.cuda.is_available():
+            raise SystemExit("no ROCm device: the amendment never falls back to the CPU")
+        if rocm_identity() != doc["rocm_environment"]:
+            raise SystemExit(f"ROCm environment differs from the amendment plan: {rocm_identity()}")
     return doc
 
 
@@ -218,20 +230,34 @@ def score_path(out: pathlib.Path, model: str, fold: str) -> pathlib.Path:
     return rx.score_path(out, model, fold, rx.PILOT_SEED)
 
 
+AMEND_RESULTS = HERE / "segarecomp_xplat_explore.t001.rocm.results.json"
+TERMINAL_RERUNNABLE = ("interrupted", "killed_signal")
+
+
+def _farm_root(out: pathlib.Path) -> pathlib.Path:
+    return out.parent if out.name == "repro" else out
+
+
+def _require_amendment_out(out: pathlib.Path) -> None:
+    """Amendment fits write only into an out dir whose farm state belongs to THIS amendment (never into the CPU T001 tree)."""
+    st = _farm_root(out) / "farm.json"
+    if not st.is_file() or json.loads(st.read_text()).get("amendment_sha256") != amend_sha():
+        raise SystemExit(f"{out}: not an amendment out dir (farm.json missing or bound to another amendment)")
+
+
 def cmd_fit(a) -> int:
     import torch
     import segarecomp_ml_v3_train as t
-    verify_plan()
+    verify_plan(require_device=True)
     out = pathlib.Path(a.out).resolve()
     rx.guard([out])
+    _require_amendment_out(out)
     model, fold = a.model, a.fold
     if model not in JOB_MODELS or (fold != "all" and fold not in rx.GENESIS):
         raise SystemExit("amendment fits: B|C on a Genesis lineage or 'all'")
     path = score_path(out, model, fold)
     if path.exists() or path.with_suffix(".json").exists():
         raise SystemExit(f"{path.name}: already exists; fits are write-once")
-    if not torch.cuda.is_available():
-        raise SystemExit("no ROCm device: the amendment never falls back to the CPU")
     dev = torch.device("cuda:0")
     train_dirs, held_dirs, held = rx.xt().fold_sets(rx.design().verify_plan(), "C0", fold, rx.snapshot_dir())
     train, held_imgs = rx.load_dirs(train_dirs), rx.load_dirs(held_dirs)
@@ -266,30 +292,70 @@ def cmd_fit(a) -> int:
 
 
 def cmd_farm(a) -> int:
-    """T001's farm loop semantics with the amendment's jobs, parallelism and caps (same statuses, one attempt, write-once)."""
-    verify_plan()
+    """T001 farm semantics for the amendment jobs, plus crash-safe attempt accounting and a host-RAM guard:
+    - a job is persisted as 'started' BEFORE launch; a leftover 'started' at farm start (host crash) becomes 'interrupted' (failed);
+    - 'interrupted' / 'killed_signal*' may be re-run once, explicitly (--infra-rerun JOB --reason), identical configuration; never a
+      timeout, rss_limit, host_memory_guard or error; the earlier attempt's partial outputs make the write-once fit refuse (disclosed);
+    - logs are per attempt; new fits start only when MemAvailable >= the start threshold; when MemAvailable falls below the floor the
+      most recently started fit is killed and recorded 'host_memory_guard' (failed) to protect the host."""
+    verify_plan(require_device=True)
     out = pathlib.Path(a.out).resolve()
     rx.guard([out])
     (out / "logs").mkdir(parents=True, exist_ok=True)
     state_p = out / "farm.json"
     state = json.loads(state_p.read_text()) if state_p.is_file() else {"plan_sha256": rx.plan_sha(), "amendment_sha256": amend_sha(), "jobs": {}}
-    if state.get("amendment_sha256") != amend_sha():
-        raise SystemExit("farm state belongs to a different amendment")
-    todo = [j for j in jobs() if j["id"] not in state["jobs"]]
-    running = {}
-    env = dict(os.environ, **RESOURCES["env"])
+    if state.get("amendment_sha256") != amend_sha() or state.get("plan_sha256") != rx.plan_sha():
+        raise SystemExit("farm state belongs to a different amendment / plan")
 
     def save():
-        state_p.write_text(json.dumps(state, indent=1, sort_keys=True))
+        tmp = state_p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, indent=1, sort_keys=True))
+        os.replace(tmp, state_p)
 
+    for v in state["jobs"].values():
+        if v["status"] == "started":
+            v["status"] = "interrupted"
+    save()
+    by_id = {j["id"]: j for j in jobs()}
+    todo = [j for j in jobs() if j["id"] not in state["jobs"]]
+    for jid in a.infra_rerun or []:
+        prev = state["jobs"].get(jid)
+        if not prev or prev.get("attempts", 1) >= 2 or not prev["status"].startswith(TERMINAL_RERUNNABLE) or not a.reason:
+            raise SystemExit(f"{jid}: infra re-run refused (only once, only after interrupted / killed_signal, --reason required)")
+        prev["infra_rerun_reason"] = a.reason
+        todo.append(by_id[jid])
+    running = {}
+    env = dict(os.environ, **RESOURCES["env"])
+    stall = None
     while todo or running:
+        avail = rx._available_mb()
+        if running and avail < RESOURCES["host_memory_floor_mb"]:
+            jid = max(running, key=lambda k: running[k][1])
+            p, t0, j, log, peak = running.pop(jid)
+            p.kill(), p.wait(), log.close()
+            state["jobs"][jid].update(status="host_memory_guard", wall_seconds=round(time.time() - t0, 1), peak_rss_mb_watchdog=peak,
+                                      mem_available_mb=avail)
+            save()
+            print(f"done {jid} host_memory_guard ({avail} MB available)", flush=True)
+            continue
+        if todo and not running and avail < RESOURCES["min_available_mb_to_start"]:
+            stall = stall or time.time()
+            if time.time() - stall > 1800:
+                save()
+                raise SystemExit("farm stalled: available memory below the start threshold for 30 min with nothing running")
+        else:
+            stall = None
         while todo and len(running) < RESOURCES["parallel_fits"] and rx._available_mb() >= RESOURCES["min_available_mb_to_start"]:
             j = todo.pop(0)
-            log = open(out / "logs" / f"{j['id']}.log", "w")
+            attempt = state["jobs"].get(j["id"], {}).get("attempts", 0) + 1
+            state["jobs"][j["id"]] = dict(state["jobs"].get(j["id"], {}), status="started", attempts=attempt)
+            save()
+            log = open(out / "logs" / f"{j['id']}.a{attempt}.log", "w")
             cmd = [sys.executable, "-I", str(HERE / "segarecomp_xplat_explore_rocm.py"), "fit", "--model", j["model"], "--fold", j["fold"],
                    "--out", str(out / j["dir"])]
             running[j["id"]] = (subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env), time.time(), j, log, 0)
-            print(f"start {j['id']}", flush=True)
+            print(f"start {j['id']} attempt {attempt}", flush=True)
+            time.sleep(20)  # stagger corpus loading (RAM peaks) between concurrent fits
         time.sleep(5)
         for jid, (p, t0, j, log, peak) in list(running.items()):
             rss = rx._rss_mb(p.pid)
@@ -306,7 +372,7 @@ def cmd_farm(a) -> int:
                 status = "rss_limit"
             if status:
                 log.close()
-                state["jobs"][jid] = {"status": status, "wall_seconds": round(time.time() - t0, 1), "peak_rss_mb_watchdog": peak, "attempts": 1}
+                state["jobs"][jid].update(status=status, wall_seconds=round(time.time() - t0, 1), peak_rss_mb_watchdog=peak)
                 save()
                 del running[jid]
                 print(f"done {jid} {status} {round(time.time() - t0)}s", flush=True)
@@ -315,33 +381,87 @@ def cmd_farm(a) -> int:
     return 0
 
 
+def _check_record(rec_p: pathlib.Path, rocm_side: bool) -> None:
+    r = json.loads(rec_p.read_text())
+    if rocm_side and (r.get("device") != "rocm" or r.get("amendment_sha256") != amend_sha()):
+        raise SystemExit(f"{rec_p.name}: not a ROCm record of this amendment")
+    if not rocm_side and ("device" in r or "amendment_sha256" in r):
+        raise SystemExit(f"{rec_p.name}: not a CPU T001 record")
+
+
 def cmd_views(a) -> int:
-    """Two read-only views for the UNCHANGED T001 table. Scores are symlinks; each view's farm.json copies the real statuses of the
-    farm that produced each linked score (CPU farm for A / CPU-B, amendment farm for ROCm B / C)."""
+    """Two read-only views for the UNCHANGED T001 table (symlinked scores; each view's farm.json copies the real statuses of the farm
+    that produced each linked score). Provenance is asserted: the CPU farm is the T001 farm (no amendment stamp), the ROCm farm is this
+    amendment's, and every linked record carries the matching device / amendment stamps."""
     verify_plan()
     cpu, rocm, base = (pathlib.Path(x).resolve() for x in (a.cpu, a.rocm, a.views))
     rx.guard([cpu, rocm, base])
-    cpu_state = json.loads((cpu / "farm.json").read_text())["jobs"]
-    rocm_state = json.loads((rocm / "farm.json").read_text())["jobs"]
-    for view, src in (("rocm_bc", {"A": cpu, "B": rocm, "C": rocm}), ("mixed", {"A": cpu, "B": cpu, "C": rocm})):
+    cpu_farm, rocm_farm = json.loads((cpu / "farm.json").read_text()), json.loads((rocm / "farm.json").read_text())
+    if cpu_farm.get("plan_sha256") != rx.plan_sha() or "amendment_sha256" in cpu_farm:
+        raise SystemExit("--cpu is not the T001 CPU farm")
+    if rocm_farm.get("amendment_sha256") != amend_sha() or rocm_farm.get("plan_sha256") != rx.plan_sha():
+        raise SystemExit("--rocm is not this amendment's farm")
+    for view, src in VIEWS.items():
         v = base / view
         if v.exists():
             raise SystemExit(f"{v}: view exists (views are write-once)")
         (v / "scores").mkdir(parents=True)
         (v / "repro" / "scores").mkdir(parents=True)
-        st = {"plan_sha256": rx.plan_sha(), "view_of": {m: ("cpu" if s == cpu else "rocm") for m, s in src.items()}, "jobs": {}}
+        st = {"plan_sha256": rx.plan_sha(), "view": view, "view_of": src, "amendment_sha256_ref": amend_sha(), "jobs": {}}
         for j in rx.jobs():
-            s = src[j["model"]]
-            state = cpu_state if s == cpu else rocm_state
+            side = src[j["model"]]
+            root, state = (cpu, cpu_farm["jobs"]) if side == "cpu" else (rocm, rocm_farm["jobs"])
             if j["id"] not in state:
                 continue
             st["jobs"][j["id"]] = state[j["id"]]
-            p = rx.score_path(s / j["dir"], j["model"], j["fold"], j["seed"])
-            for f in (p, p.with_suffix(".json")):
+            sp = rx.score_path(root / j["dir"], j["model"], j["fold"], j["seed"])
+            if state[j["id"]]["status"] == "ok":
+                _check_record(sp.with_suffix(".json"), side == "rocm")
+            for f in (sp, sp.with_suffix(".json")):
                 if f.is_file():
                     (v / j["dir"] / "scores" / f.name).symlink_to(f)
         (v / "farm.json").write_text(json.dumps(st, indent=1, sort_keys=True))
-        print(f"view {view}: {sorted(st['jobs'])[:3]}... ({len(st['jobs'])} jobs)")
+        print(f"view {view}: {len(st['jobs'])} jobs")
+    return 0
+
+
+VIEWS = {"rocm_bc": {"A": "cpu", "B": "rocm", "C": "rocm"}, "mixed": {"A": "cpu", "B": "cpu", "C": "rocm"}}
+
+
+def cmd_table(a) -> int:
+    """Evaluate BOTH views with the unchanged T001 table into private files, then write ONE labelled, write-once amendment document
+    (never the pre-registered results path). Both views are always reported."""
+    verify_plan()
+    base, priv = pathlib.Path(a.views).resolve(), pathlib.Path(a.private).resolve()
+    rx.guard([base, priv])
+    target = pathlib.Path(a.results).resolve() if a.results else AMEND_RESULTS
+    if target == rx.RESULTS.resolve():
+        raise SystemExit("refused: the pre-registered T001 results path is not an amendment output")
+    if target.exists():
+        raise SystemExit(f"{target.name}: exists (the amendment document is write-once)")
+    priv.mkdir(parents=True, exist_ok=True)
+    docs = {}
+    for view in VIEWS:
+        r = priv / f"t001-rocm-view-{view}.json"
+        if r.exists():
+            raise SystemExit(f"{r}: exists (write-once)")
+        rx.main(["table", "--out", str(base / view), "--results", str(r)])
+        docs[view] = json.loads(r.read_text())
+    doc = {"schema": "segarecomp.xplat_explore.t001.rocm_amendment.results.v1", "task": "SEG-076-T001",
+           "label": "AMENDMENT - not the pre-registered class (resource-only ROCm amendment; the pre-registered T001 class is in "
+                    "segarecomp_xplat_explore.t001.results.json and governs SEG-076-T002 admission)",
+           "t001_plan_sha256": rx.plan_sha(), "amendment_sha256": amend_sha(),
+           "views": {v: {"view_of": VIEWS[v], **{k: d[k] for k in ("expansion", "tables", "failed_fits", "missing", "farm",
+                                                                 "determinism_bitwise", "paired_lineage_differences", "costs")}}
+                     for v, d in docs.items()},
+           "notes": ["both views are always reported, whichever looks better",
+                     "B is also redrawn on ROCm (device control): a class change driven by B(ROCm) is not acted on either",
+                     "costs in a view mix CPU (A, and B in 'mixed') and ROCm (B in 'rocm_bc', C) fit times under one model key",
+                     "B(CPU) vs B(ROCm) mixes device, torch build (2.14.1 CPU vs 2.6.0+rocm6.4.2), BLAS and optimizer paths: a "
+                     "single-seed perturbation estimate, not a measured bias; it does not exercise C's message passing"],
+           "data_boundary": "aggregates only"}
+    target.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
+    print(json.dumps({v: d["expansion"]["class"] for v, d in docs.items()}))
     return 0
 
 
@@ -360,12 +480,19 @@ def main(argv=None) -> int:
     f.set_defaults(func=cmd_fit)
     fm = sub.add_parser("farm")
     fm.add_argument("--out", required=True)
+    fm.add_argument("--infra-rerun", nargs="*")
+    fm.add_argument("--reason")
     fm.set_defaults(func=cmd_farm)
     v = sub.add_parser("views")
     v.add_argument("--cpu", required=True)
     v.add_argument("--rocm", required=True)
     v.add_argument("--views", required=True)
     v.set_defaults(func=cmd_views)
+    tb = sub.add_parser("table")
+    tb.add_argument("--views", required=True)
+    tb.add_argument("--private", required=True)
+    tb.add_argument("--results")
+    tb.set_defaults(func=cmd_table)
     a = ap.parse_args(argv)
     return a.func(a)
 

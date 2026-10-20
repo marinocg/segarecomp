@@ -1,7 +1,8 @@
 {
  "bound_code": {
-  "segarecomp_xplat_explore_rocm.py": "5dfffdea80013cacac228258edf3626505d758491a1fcfc430495593ae98429e"
+  "segarecomp_xplat_explore_rocm.py": "bcc8af765ed81669e89a8260fb0223650d4c44d3446de7ca7ac1eb95dbd7d9fc"
  },
+ "cpu_determinism_command": "segarecomp_xplat_explore.py farm --out <t001> --only A.D05.repro B.D05.repro (the absent C CPU jobs are deliberately not re-run)",
  "cpu_farm_interruption": "the T001 CPU farm was interrupted by a host crash while C.D07, C.D09-C.D12 and C.all were ~40 min into their runs (C.D01-C.D06 had already hit the 160-min cap at ~1500/4000 steps). They are not re-run on the CPU: they are absent from the CPU farm state, which the frozen table counts as failed. Only the planned A and B D05 determinism refits are completed on the CPU",
  "device_control": "B is refitted on ROCm on every fold: B(ROCm) vs B(CPU) measures the device effect; B(ROCm) vs C(ROCm) is the device-matched architecture contrast",
  "disclosure": "frozen after the CPU A and B results were visible (A Genesis mean ER 0.105, B 0.155); no C score existed. The amendment changes no threshold and no model setting",
@@ -38,7 +39,7 @@
  "reporting": "the unchanged T001 table and rule are evaluated on two views: 'rocm_bc' (A CPU, B ROCm, C ROCm) and 'mixed' (A CPU, B CPU, C ROCm). Both are reported as AMENDMENT results next to the pre-registered class (C failed under the CPU caps), never replacing it. A C that qualifies only under the amendment is reported as such; SEG-076-T002 admission follows the pre-registered class",
  "resources": {
   "attempts": 1,
-  "caps_basis": "uncontended single-process ROCm probe: B 0.038 s/step (~2.5 min per 4000 steps), C 0.54 s/step (~36 min); caps ~3x those plus inference",
+  "caps_basis": "uncontended single-process ROCm probe: B 0.038 s/step (~2.5 min per 4000 steps), C 0.54 s/step (~36 min); C's edge building is CPU-bound, so 4 concurrent fits may each slow down; caps are set generously (C 5x) so a resource cap does not decide the result again (new caps chosen after the CPU failure; disclosed)",
   "cpu_threads_per_fit": 2,
   "device": "cuda:0 (ROCm/HIP)",
   "env": {
@@ -46,14 +47,15 @@
    "MKL_NUM_THREADS": "2",
    "OMP_NUM_THREADS": "2"
   },
-  "min_available_mb_to_start": 3000,
-  "parallel_fits": 1,
+  "host_memory_floor_mb": 2000,
+  "host_protection": "two host (WSL2) crashes occurred when 3 ROCm probes plus a CPU self-test were started on top of 6 running CPU fits (~11.5 GB RSS on a 16 GB host). Protection is a host-RAM guard, not serialization: a fit starts only when MemAvailable >= 4000 MB (starts staggered by 20 s), and when MemAvailable < 2000 MB the most recently started fit is killed and recorded 'host_memory_guard' (failed, not re-runnable)",
+  "min_available_mb_to_start": 4000,
+  "parallel_fits": 4,
   "rss_limit_mb": 4096,
   "wall_clock_cap_minutes": {
    "B": 30,
-   "C": 120
-  },
-  "why_serial": "two host (WSL2) crashes occurred while 3 ROCm probe processes plus a CPU self-test were started on top of 6 running CPU fits (~11.5 GB RSS on a 16 GB host); the amendment therefore runs ONE ROCm process at a time and nothing heavier than one 2-thread CPU determinism refit beside it"
+   "C": 180
+  }
  },
  "rocm_environment": {
   "device": "AMD Radeon RX 9070 XT",

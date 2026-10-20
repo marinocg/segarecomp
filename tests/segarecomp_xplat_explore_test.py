@@ -161,7 +161,7 @@ def test_rocm_amendment():
     digest = (rx.HERE / "segarecomp_xplat_explore.t001.rocm.plan.digest").read_text().strip()
     check(hashlib.sha256(rx.canonical(doc)).hexdigest() == digest, "amendment digest matches")
     check(doc["t001_plan_sha256"] == rx.plan_sha(), "amendment bound to the frozen T001 plan")
-    check(doc["resources"]["parallel_fits"] == 1 and doc["resources"]["attempts"] == 1, "serial ROCm, one attempt")
+    check(doc["resources"]["attempts"] == 1 and doc["resources"]["host_memory_floor_mb"] >= 2000, "one attempt, host-RAM guard")
     check(doc["seed"] == rx.PILOT_SEED, "same pilot seed")
     want = [f"{m}.{f}" for m in ("B", "C") for f in rx.GENESIS + ("all",)] + ["B.D05.repro", "C.D05.repro"]
     check(doc["jobs"] == want, "amendment jobs: B and C on every fold plus determinism refits")
