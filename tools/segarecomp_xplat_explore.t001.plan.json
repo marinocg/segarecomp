@@ -1,0 +1,250 @@
+{
+ "barrier": {
+  "resolver": "every loaded directory, --out and --snapshot pass both SEG-075's refuse_sealed and SEG-076's fail-closed sealed_target (both slash conventions, nonexistent paths, case-folded)",
+  "seg072_sealed_cohort": "already exposed; not used and never presented as independent evidence",
+  "seg075_reserved_cohort": "sealed, never read, fitted, scored or used for selection"
+ },
+ "bound_code": {
+  "segarecomp_ml_region_gen2_train.py": "5828443db2bba8dcbd8e6034be9f16524299039cd9434f548fb5caf3e3fa2c0c",
+  "segarecomp_ml_v3.py": "ef18ab40e1da9f25ecc4e1e0a9f0f630453fc8e15b13812750e133d8998947ba",
+  "segarecomp_ml_v3_eval.py": "eea86b0b1c35d79b235c4f0ed1e559cbb36fb190bc36509221184140aa6fa213",
+  "segarecomp_ml_v3_train.py": "7234c6ffe964f0f6db44126d760fb60eff6ce97b30e93a7034d3e1e2bb97592f",
+  "segarecomp_xplat_decide.py": "078d35e97f0ed62aa101181f400400fcd5c1ff0d41bb6ba9a9fdf5a2d1f0747d",
+  "segarecomp_xplat_design.py": "9235527284e19ac274f3c146a2b6a3f040e425bb742531cbc84e9e1efbae4c3c",
+  "segarecomp_xplat_explore.py": "442a24128a8d315fa331b1ce5bc3cd5d3598876b6f5f59f87058005388d56b08",
+  "segarecomp_xplat_explore_eval.py": "042249f55b5aa199ccea2de6d545349459b186e34d619442ab9cd82bdc726a20",
+  "segarecomp_xplat_models.py": "3eabc2ed412ec3088938061af5a76b53f5b7fcf55deefdfd82031f533f268f8b",
+  "segarecomp_xplat_transfer.py": "415bd6ab8dbf5b8b3d4f7c1c8da433fd8cf6bbf64fd76229807a656bf9cb399b"
+ },
+ "comparator_scores": {
+  "seg072/M1.D01.npz": "1e75368825885ed3cf46466d97536c437f79613b66dec36469f20b96dd7e60ed",
+  "seg072/M1.D02.npz": "711c2adc69581943703e9b053c4759327307f11554d08f5ed49cdf59dd64e923",
+  "seg072/M1.D03.npz": "c76d621c5c94a31c09f0cf9c2011d55ff6a0dbcd4d19750675c59242424fca3c",
+  "seg072/M1.D04.npz": "0d7bbaec191ed620d2eee0d8345421f6ed1b6850a42db9595640f9be757e09ea",
+  "seg072/M1.D05.npz": "3bf797d945028913f30872c40beff910d335e22df46a0e05465cb2ec46c5d55f",
+  "seg072/M1.D06.npz": "54467d145434ee4fecacde24e1c98ff01280d4ef16f9db152ae4ca6e27bb1e75",
+  "seg072/M1.D07.npz": "2ba9f86bde8a3a9e7504df50f82ee3176054107c2c8e0d7f54df9825151dfaba",
+  "seg072/M1.D09.npz": "34d92a22a5551a4aa2dc7fb222320777936b1a6de70052321d5686b7b84c7d7d",
+  "seg072/M1.D10.npz": "f68853c6e1b2365b7452b3b27bb52582337b7390f35f1c87fb080f7fdc98dcf7",
+  "seg072/M1.D11.npz": "795c62a1b548f01b063ea28c368b382fa7644af501aa07a2925a75cf0cf42fec",
+  "seg072/M1.D12.npz": "fe0efc1c6f0c93ffad7313b058e0ae8807765a5f663cc00cec407f7a085eadc2",
+  "seg072/M3R.D01.npz": "d929c79cf93afda167774b1a639e21604fb71d9f092dd09d84ff94e2f940c992",
+  "seg072/M3R.D02.npz": "dcf1f4c9e0819ba515f191ce0a305448c4f6226606744430379641be3305fcda",
+  "seg072/M3R.D03.npz": "9472d20408b0fcdbd638ea80665bb93d1819508e811907f0b203636d7bb0dc42",
+  "seg072/M3R.D04.npz": "3f2f037269325d69c1c6d7d2337cbf55aabc9aaf7357329f5ac06c664611a05f",
+  "seg072/M3R.D05.npz": "7070a54d46e2c0f2b100060f804c258979285a428ee9b943739ab75e77690393",
+  "seg072/M3R.D06.npz": "f5ccb9a6582f1053f1e225284fd17de6a0e44c37be2e35955dd620663637c50b",
+  "seg072/M3R.D07.npz": "7d0907b12f1538c93de5cd452c72bf308d81ce1e69f228a0081262708beb1287",
+  "seg072/M3R.D09.npz": "c6cd182caabebd1eab2af2459dce83876cf98104830697964c943bf7c4e90398",
+  "seg072/M3R.D10.npz": "fb406c88adeca7a8b35f2655d7924fb2ef36933b78f2f4f635e549d6cd5a642c",
+  "seg072/M3R.D11.npz": "c3e51f7dafa10662542fecdb3c85305b48206457d8f2f0fde3f8e5240661707d",
+  "seg072/M3R.D12.npz": "a4f154870e96e1dedbb1f30ced9c8426e3414b893d543a22e462fa5ec82ab5af",
+  "seg072/M3_FROZEN.production.npz": "ad72bb09eb3de1ba7ef4a87bafd3c0f03113cd92c1c4ae6dd2dbfd62a8103bca",
+  "seg072/M4.D01.s1.npz": "8c8bd26d4bc3487fb67d87365f6bfb981fb0041504eb892355b0adfabeb46c89",
+  "seg072/M4.D01.s2.npz": "c72e82059d7d302af479f2e55a963e15626687d2039d1194bdb2a131c50ffeed",
+  "seg072/M4.D01.s3.npz": "eaf1e67b3f23607238dccac649863190647caf51b98abd92b37ea001aa8fe1be",
+  "seg072/M4.D02.s1.npz": "5a947483b9834d822a0c48a7182e999ca8be1477e0c215fae1d6cdc5e3216356",
+  "seg072/M4.D02.s2.npz": "7bb55db4b41ab0d43abecdd26425b5c3c8bd7ba94aae75d2c17fed10a743d74f",
+  "seg072/M4.D02.s3.npz": "36a6bff361449f3e6ab79843082fb2c7ff8be7612976107dbc5c9d1c2549efcc",
+  "seg072/M4.D03.s1.npz": "09f3e74bfb88618d701417c704bb3c3de31f7d9bf20e9fcb782f9d72149960d4",
+  "seg072/M4.D03.s2.npz": "80346adac95d5fbbb92407efbe6f24e1676383f6230a4839b340750f84f32410",
+  "seg072/M4.D03.s3.npz": "728ea7a33b5bb23a6305bc1d98d9d2e4ced225b82704a3f2064d902a48721f8c",
+  "seg072/M4.D04.s1.npz": "eae618a392a911e28773de221ec21c58bb8068e558d282a8740a8be654e52f40",
+  "seg072/M4.D04.s2.npz": "6c089457668b305dc7eeddf68b53311baac7c3528debc3dee7d8b3b4cd3079af",
+  "seg072/M4.D04.s3.npz": "fd21708bd064aba5cab0fc4c730c4b3ed04c53be5edffabc4dc9f33cc0cd2f2c",
+  "seg072/M4.D05.s1.npz": "5c402e802617f6a4e2800371a475c30ec6b6075781f3cf62eff638f5348c713d",
+  "seg072/M4.D05.s2.npz": "ffee409656a984d30b631374f6ea22469a2758e46d1405a497cc21c6e28d1190",
+  "seg072/M4.D05.s3.npz": "e347f90e842dc56cfefeff03052308cda154963f750a42d28f7a0caff51f33b7",
+  "seg072/M4.D06.s1.npz": "5ef6d431b9b408df93e2a54341663ecac1b4eaec4df3e7c2cb81ba63238a924b",
+  "seg072/M4.D06.s2.npz": "a8f1ac0f61748a48367e83263be095ada2692542b727d4b23fea9646f7027a6f",
+  "seg072/M4.D06.s3.npz": "89ac190fcf9db29c99a01fe17192b14366c80fa5916e0149c56954a9e5d2e1cd",
+  "seg072/M4.D07.s1.npz": "c0c0cb1374d42426621a11ea27d2cea355e26eb0b5a4ed26eed7af150fb41d1c",
+  "seg072/M4.D07.s2.npz": "31eacbd3e458a4c102f18af36b3537106c9e37daf5b26f527e533732b03b3b09",
+  "seg072/M4.D07.s3.npz": "e34cd9c5175a614c839e6eb5ca67dcd32e584968b03200e2863d97c44a2e3db9",
+  "seg072/M4.D09.s1.npz": "4f32ab60950e2ac4ae88db63431e3ba6602b0c4930fdda7c2c30d3422175e179",
+  "seg072/M4.D09.s2.npz": "fce2a3df316c6a5ee2be25a111d05bd470473c4575618987d4316269ccbf98bb",
+  "seg072/M4.D09.s3.npz": "7e27a99fbb64e5e8ddae06d703d0956e858eedd0a9ecec6d936ae9365f7f926c",
+  "seg072/M4.D10.s1.npz": "df02506abfcde5bd4b42d59361c31805af4b1d1784eabc077a10f8c6f7c03ff9",
+  "seg072/M4.D10.s2.npz": "6e07cbed0f20ffdae960bf6c1fd36fac436c5c6179a5e63175bf34ba03679aac",
+  "seg072/M4.D10.s3.npz": "59e9e43620391e6d765dd2c8df647dd682fa548e8ddd14ebdb27fad7c0d33935",
+  "seg072/M4.D11.s1.npz": "4be38bf58880854dfa7d739174ad828cc78af5760a00d1deaefafc2b85ae1373",
+  "seg072/M4.D11.s2.npz": "c0a25ff21b818a724bb2d79c4efe1add45ff6e652418b00be57e866b02166ffe",
+  "seg072/M4.D11.s3.npz": "a2ac0ad07f7118dad4aa411fad19e80e2b62399b44dbeab7238710fc5bd53b3a",
+  "seg072/M4.D12.s1.npz": "8540e401ab8c5d6b66dd059e2aef5bc198458fe9cc034f505d4818f4ae4100eb",
+  "seg072/M4.D12.s2.npz": "d6ceeba79be612b85bcf457e031d705b9b74442972ec5aab88d04ef8683bf4e4",
+  "seg072/M4.D12.s3.npz": "09f04d96a78dc45cb36af0a4250a0cc599d94cea897d9ea92b0935362f9a170b",
+  "seg075/M1.C0.all.xplat.npz": "a8f4a96e02acaf49c2715e9f6244ddb1b9102858c7118e44419021513f8cf318",
+  "seg075/M3R.C0.D01.s50.npz": "dbf0cd90a3509604985b2602572b68e77c4d62146f88c4ce13fd8bbc78040934",
+  "seg075/M3R.C0.D02.s50.npz": "85675877f414a6870b44b8de76ba2cdb6003daddaeaffdc02feb23b8f8a5fe8b",
+  "seg075/M3R.C0.D03.s50.npz": "79e2557218c537c78dcca5300bc61d6e54f8a35bc9d6ee7e7dfd0c604e54cc4d",
+  "seg075/M3R.C0.D04.s50.npz": "261dee28a4f151ba22975e831678d2c57fa17c3e85a12d2884b729cbbf24abd2",
+  "seg075/M3R.C0.D05.s50.npz": "3f3a23643d582263a21ceb9d92de5f7959a452cfab02389d268c7e180112f2fa",
+  "seg075/M3R.C0.D06.s50.npz": "7d59e98f4934c8c2a2fc83c15d75e1602947e3513682932e4eaaf2502cfdde2d",
+  "seg075/M3R.C0.D07.s50.npz": "4f6ba952a2b6c8cb09a2339679b317c6a4f99e5eeb16b038b2ba8779a48c686c",
+  "seg075/M3R.C0.D09.s50.npz": "75e323d7d86196b4394fd658737edbd3d4c01c21b3dc6ec7a0fd04fe506a11f8",
+  "seg075/M3R.C0.D10.s50.npz": "14cace31388668e13bdda0418503a7cef0b31d0672bbcde6d8ebfb33b7f3551b",
+  "seg075/M3R.C0.D11.s50.npz": "d37851ecd61bcd32f58f1fc04d4a5eba5d8f4f75f9d962b86ee6130871373973",
+  "seg075/M3R.C0.D12.s50.npz": "70907e3cfc79fe5fd36986823db7726aea5aacba3a8b5af86c66b2fb75162f39",
+  "seg075/M3R.C0.all.xplat.npz": "217219fadf926f4d89eca7bb20b7cc90dfd4e0f955e721ae19fc0e642d1f8695",
+  "seg075/M4.C0.all.s1.xplat.npz": "b37df4239cdf47a4a259686a85c5bece68beb4a4a8ee85fead01123284389288",
+  "seg075/M4.C0.all.s2.xplat.npz": "7ef40e1d28d1ada3d701b25a1701edb927cb9149d6454817fe8238e2690fdb3a",
+  "seg075/M4.C0.all.s3.xplat.npz": "51d0584f008d6332976afb8de2d3fa49765edd17c090bed20905f64c8cf4f11a"
+ },
+ "comparators": {
+  "genesis": {
+   "M1_HGB": "SEG-072 C0 fold scores",
+   "M3_FROZEN": "production M3 stored scores (descriptive only)",
+   "M3_R_s49": "SEG-072 C0 fold scores (recipe seed 49)",
+   "M3_R_s50": "SEG-075 T004 C0 seed-50 replicate",
+   "M4_DENSE_ens@128": "SEG-072 M4 seeds 1-3 word-logit mean, cell max at 128 (ensemble; reported separately, never used to judge B/C)",
+   "M4_DENSE_s1@128": "SEG-072 M4 seed 1 alone, cell max at 128 bytes (the single-seed comparator matched to the pilots)"
+  },
+  "xplat": "SEG-075 T004 C0-all scores of M3-R s49, M1-HGB, M4-Dense s1 and the 3-seed ensemble; M3_FROZEN by inference with the production weights"
+ },
+ "condition": {
+  "id": "C0",
+  "name": "Genesis-only training",
+  "why": "matched to the preserved, bit-reproduced SEG-072 C0 fold scores of M3-R (seed 49), M4-Dense (seeds 1-3) and M1-HGB; C2 is not run in T001"
+ },
+ "expansion_rule": {
+  "candidates": [
+   "B",
+   "C"
+  ],
+  "comparators": [
+   "M4_DENSE_s1@128",
+   "M3_R_s49",
+   "A"
+  ],
+  "lineage_tolerance": 0.05,
+  "mean_er_margin": 0.02,
+  "meaning": "the class only decides whether SEG-076-T002's multi-seed compute is justified; a single seed cannot establish architectural superiority or inferiority in either direction",
+  "text": "A model in {B, C} qualifies iff, against the best one-seed comparator (lowest Genesis mean ER among M4-Dense seed 1 @128, M3-R seed 49 and A; ties: fewer B50 misses, then that order): Genesis mean ER lower by >= 0.02; no lineage max ER worse by more than 0.05; no more boundary-stratum missed cells at B50; no more total B50 misses. Qualifying set {} -> NEGATIVE_STOP, {B} -> EXPAND_B, {C} -> EXPAND_C, {B,C} -> EXPAND_B_AND_C. Applied once, never tuned. A model with any failed planned Genesis fit does not qualify."
+ },
+ "folds": {
+  "all": "one fit on all 11 Genesis lineages per model: preserves the weights and scores the four cross-platform development representatives (toslibc, emutos, BattleIsleEditor, amiga-realtime3d) as evaluation only (under C0 no cross-platform data trains, so xplat_lolo fits would equal this fit)",
+  "genesis_lolo": [
+   "D01",
+   "D02",
+   "D03",
+   "D04",
+   "D05",
+   "D06",
+   "D07",
+   "D09",
+   "D10",
+   "D11",
+   "D12"
+  ]
+ },
+ "metrics": {
+  "boundary_strata": "positive cells holding any D byte; positive cells adjacent to a D-only cell; positive cells with <= 8 starts; their union ('boundary'); missed cells at B35/B50 and normalized rank quantiles q50/q90/q100",
+  "budgets": "B35/B50/B60 missed starts and missed positive cells; negative cells admitted at B50",
+  "cell_bytes": 128,
+  "code": "segarecomp_xplat_explore_eval.image_metrics_ext / lineage_summary / summary (calls SEG-075's unchanged image_metrics and lineage_rows)",
+  "determinism": "A, B and C are refitted once on fold D05 into a separate directory; scores must be bitwise identical (reported; a mismatch is disclosed, it does not change the class)",
+  "er": "SEG-075 per-image excess retention on informative images; per lineage max ER (primary) and mean image ER",
+  "frf": "retention needed for source-backed full recall (per image; lineage max/mean)",
+  "genesis_mean_er": "mean over the 11 lineages of the lineage max ER (SEG-075 definition)",
+  "secondary": "AUROC (mean per lineage), cost (wall / CPU seconds per fit, per-image inference seconds, peak RSS)",
+  "worst_er": "max lineage max ER"
+ },
+ "milestone": "SEG-076",
+ "models": {
+  "A": {
+   "config": {
+    "class_weight": "balanced",
+    "early_stopping": false,
+    "l2_regularization": 1.0,
+    "learning_rate": 0.05,
+    "max_bins": 255,
+    "max_depth": 6,
+    "max_iter": 300,
+    "min_samples_leaf": 40,
+    "random_state": 49
+   },
+   "features": "segarecomp_xplat_models.a_features unchanged (210 columns)",
+   "seed": "fixed (random_state 49; deterministic)"
+  },
+  "B": {
+   "architecture": {
+    "block": 256,
+    "context": 64,
+    "d_model": 64,
+    "ff": 128,
+    "heads": 4,
+    "layers": 2
+   },
+   "seed": 1,
+   "training": "segarecomp_ml_v3_train.M4 recipe unchanged"
+  },
+  "C": {
+   "architecture": {
+    "block": 256,
+    "context": 64,
+    "d_model": 64,
+    "ff": 128,
+    "heads": 4,
+    "layers": 2,
+    "message_passing": "2 rounds per layer, 3 typed candidate edge sets, PROVEN flag"
+   },
+   "seed": 1,
+   "training": "segarecomp_ml_v3_train.M4 recipe unchanged"
+  },
+  "order": "A first (all folds), then B and C on identical folds; B is not required to beat A before C is trained; no result of A cancels B or C"
+ },
+ "outputs": {
+  "private": "<HARNESS_ROOT>/.cache/seg076/t001 (scores, weights, records, logs; ignored, never committed)",
+  "public": "tools/segarecomp_xplat_explore.t001.results.json (aggregates only)"
+ },
+ "relation_to_seg075": "new experiment by explicit operator direction (2026-10-20); SEG-075-T005's gate does not apply; SEG-075's decision (DATA_INSUFFICIENT, ADR 0163), plan, results and sealed cohort are unchanged and not reinterpreted",
+ "resources": {
+  "attempts": 1,
+  "backend": "CPU (research venv torch 2.14.1 CPU execution) for every T001 fit, the reproducibility baseline",
+  "failure": "a fit that exceeds its cap, its RSS limit or raises is recorded failed; a model with any failed planned Genesis fit is 'missing or failed fits' in the expansion rule (no advantage); no retry with other hyperparameters, steps or seeds",
+  "infrastructure_rerun": "at most one, only for an infrastructure cause (host / process killed externally, not a cap or a model error), identical configuration and seed, recorded in the farm state with its reason",
+  "min_available_mb_to_start": 3000,
+  "parallel_fits": 6,
+  "probe": "pre-freeze cost probe (40 training steps on the all-Genesis set, no scores): B 0.39 s/step (~26 min/fit at 4000 steps), C 0.81 s/step (~54 min/fit), A features 3.4 s for all Genesis images; peak RSS A 0.8 / B 1.0 / C 1.4 GB",
+  "rocm_benchmark": {
+   "decision": "CPU. All B and C fits on one ROCm process: ~0.5 h + ~7.2 h, versus ~2.7 h on the 6-process CPU farm (worse). Splitting B onto ROCm and C onto the CPU saves ~50 min but would put B on a different device and torch build than C, M4-Dense and A, confounding the B-vs-C and B-vs-M4 contrasts the expansion rule depends on (CPU and ROCm outputs are not bit-identical, ADR 0117). A later stage may pre-register its own ROCm decision.",
+   "environment": "torch 2.6.0+rocm6.4.2 (HIP 6.4.43484), AMD Radeon RX 9070 XT gfx1201 via WSL2 /dev/dxg; benchmark only, no scores",
+   "method": "unchanged B/C network and M4 recipe, all-Genesis training set, seed 1, median step time after 5 warm-up steps; B 60 steps x 3 repeats, C 40 steps x 2 repeats; parameter hash after the run compared across repeats",
+   "result": {
+    "B": {
+     "cpu_s_per_step": 0.394,
+     "reproducible": true,
+     "rocm_s_per_step": 0.038
+    },
+    "C": {
+     "cpu_s_per_step": 0.807,
+     "note": "C's typed message passing builds per-edge index lists in Python, so the step stays CPU-bound",
+     "reproducible": true,
+     "rocm_s_per_step": 0.54
+    }
+   },
+   "rule": "SEG-072 hardware rule (ADR 0153): ROCm only if >= 25% end-to-end improvement over the parallel CPU farm AND reproducible, with every compared candidate on the same backend"
+  },
+  "rss_limit_mb": 4096,
+  "threads": {
+   "A": "sklearn default (OpenMP), the farm sets OMP_NUM_THREADS=2",
+   "B": 2,
+   "C": 2
+  },
+  "wall_clock_cap_minutes": {
+   "A": 30,
+   "B": 90,
+   "C": 160
+  }
+ },
+ "schema": "segarecomp.xplat_explore.t001.plan.v1",
+ "seg075": {
+  "c7_receipt_sha256": "a33a8fc8c03cffaac99375457ddfe2233bf2a4664f74642ac422988996982e70",
+  "handoff_label": "c7-final-handoff",
+  "handoff_manifest_sha256": "1e8ba1e62f045eb762c2993f09f57849469ff000b8b379d6ebbafe5d449292cd",
+  "plan_sha256": "fde026ee1075d0c2a2f71679a4a40bdf9cffe7376baabf7b7982685d2915dd92",
+  "snapshot_sha256": "74799cca5f87f263f7ea3550c385cc050cc57941e33fceb8a46399a136080086"
+ },
+ "status": "exploratory, development-only",
+ "task": "SEG-076-T001"
+}

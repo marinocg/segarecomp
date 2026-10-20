@@ -124,3 +124,7 @@ set_property(TEST segarecomp_xplat_models_test APPEND PROPERTY LABELS full fast)
 # SEG-075-T006 (ADR 0163): the final decision re-derives from the committed results under the bound rules; the C7 receipt is sanitized.
 add_test(NAME segarecomp_xplat_final_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_final_test.py)
 set_property(TEST segarecomp_xplat_final_test APPEND PROPERTY LABELS full fast)
+# SEG-076 (exploratory research tooling): fail-closed sealed-subtree resolver (both slash conventions, nonexistent paths), boundary
+# strata, the pre-registered T001 expansion rule and plan tamper refusal (pure; synthetic data only).
+add_test(NAME segarecomp_xplat_explore_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_explore_test.py)
+set_property(TEST segarecomp_xplat_explore_test APPEND PROPERTY LABELS full fast)
