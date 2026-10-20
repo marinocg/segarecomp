@@ -62,7 +62,7 @@ python3 tools/segarecomp_xplat_qualify.py identity --cache <HARNESS>/.cache/seg0
 | `c4-t004-transfer` | `c3` + every T004 fit (records, fold scores, all-development weights `*.all.xplat.pt/.pkl`, `reproduce.json`, farm logs) |
 | `c7-final-handoff` | `c4` + T006 environment report and one-shot status: **the successor's manifest** |
 
-Later checkpoints add labels (T002 corpus, T003 snapshot, T004/T005 models, final C7 handoff); see the receipts committed under `tools/`.
+Later checkpoints add labels (T002 corpus, T003 snapshot, T004 fits and models, final C7 handoff; T005 models were never trained); see the receipts committed under `tools/`.
 
 ## Successor quick start (state at the end of SEG-075)
 

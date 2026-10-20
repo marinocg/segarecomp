@@ -11,9 +11,11 @@ runs without rebuilding sources or retraining.
                  2. restore the needed objects into an empty temporary directory and, from those copies only (relocated paths), re-score a
                     cross-platform development representative with the preserved C2-all M3-R weights and the unchanged SEG-072 scorer;
                     the result must equal the stored score array bit for bit
-                 3. re-derive the T004 decision from the stored results document with the bound decision rules (tau > 0.05 ->
-                    EVIDENCE_INSUFFICIENT; outcome rule 1 -> DATA_INSUFFICIENT)
-                 4. confirm the one-shot status record and its binding to the frozen sealed digests
+                 3. re-apply the bound decision rules to the RECORDED tau / completeness of the committed T004 results (tau > 0.05 ->
+                    EVIDENCE_INSUFFICIENT; outcome rule 1 -> DATA_INSUFFICIENT); recomputing tau itself from the stored fold scores is
+                    `segarecomp_xplat_transfer.py table` (minutes; needs the operator's Genesis images)
+                 4. confirm the one-shot status record (opened = false) and its binding to the frozen sealed digests of the stored
+                    snapshot (SNAPSHOT.json in the store, plan snapshot digest)
                prints ARTIFACT_HANDOFF_PASS or ARTIFACT_HANDOFF_INCOMPLETE with counts, bytes and the manifest identity
 """
 from __future__ import annotations
@@ -123,6 +125,15 @@ print(json.dumps({{"cells": int(len(s)), "bitwise_identical": bool(np.array_equa
         return res
 
 
+def status_valid(status: dict, snapshot_bytes: bytes) -> bool:
+    """The one-shot status says the seal was never opened AND is bound to the frozen snapshot / sealed binding (pure; unit-tested)."""
+    plan = json.loads((HERE / "segarecomp_xplat_design.plan.json").read_text())
+    sealed = json.loads(snapshot_bytes)["sealed"]
+    return (status.get("opened") is False and status.get("snapshot_sha256") == hashlib.sha256(snapshot_bytes).hexdigest()
+            == plan["corpus"]["snapshot_sha256"]
+            and status.get("sealed_binding_sha256") == hashlib.sha256(json.dumps(sealed, sort_keys=True).encode()).hexdigest())
+
+
 def decision_check() -> dict:
     import segarecomp_xplat_decide as decide
     r = json.loads((HERE / "segarecomp_xplat_transfer.results.json").read_text())
@@ -142,11 +153,13 @@ def cmd_verify(a) -> int:
     diag = diagnostic(m, a.venv_python)
     dec = decision_check()
     man = json.loads(m.read_bytes())
+    store = m.resolve().parent.parent
     status = next((e for e in man["entries"] if e["logical"].endswith("t006/ONE_SHOT_STATUS.json")), None)
+    snap = next((e for e in man["entries"] if e["logical"] == "seg075/t003/snapshot/SNAPSHOT.json"), None)
     status_ok = False
-    if status:
-        doc = json.loads(handoff.cas_path(m.resolve().parent.parent, status["sha256"]).read_bytes())
-        status_ok = doc.get("opened") is False
+    if status and snap:
+        status_ok = status_valid(json.loads(handoff.cas_path(store, status["sha256"]).read_bytes()),
+                                 handoff.cas_path(store, snap["sha256"]).read_bytes())
     ok = phys["verdict"] == "PASS" and diag.get("bitwise_identical") and dec["consistent"] and status_ok
     res = {"verdict": "ARTIFACT_HANDOFF_PASS" if ok else "ARTIFACT_HANDOFF_INCOMPLETE", "manifest_sha256": phys["manifest_sha256"],
            "verified_files": phys["verified_files"], "verified_bytes": phys["verified_bytes"], "physical_problems": len(phys["problems"]),
