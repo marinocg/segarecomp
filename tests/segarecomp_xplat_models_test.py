@@ -49,6 +49,16 @@ def test_gates():
     check(all(c["config"] != "M3_FROZEN" for c in r["candidates"]), "M3_FROZEN never a candidate")
     insuff = dict(t004(), transfer_class="EVIDENCE_INSUFFICIENT")
     check(not x5.candidates_and_gates(insuff, {"A": tab(0.3, 0.3)})["gate_B"], "insufficient T004 closes the B gate")
+    # the reviewer's reproducer: B fitted although its gate is closed must never be selected
+    r = x5.candidates_and_gates(t004(), {"A": tab(0.06, 0.2), "B": tab(0.01, 0.2)})
+    check(not r["gate_B"] and r["selected"]["config"] != "B", "closed-gate B never enters selection")
+    r = x5.candidates_and_gates(t004(), {"A": tab(0.24, 0.2), "B": tab(0.23, 0.2), "C": tab(0.01, 0.0)})
+    check(not r["gate_C"] and r["selected"]["config"] != "C", "closed-gate C never enters selection")
+    try:
+        x5.candidates_and_gates(t004(), {"B": tab(0.2, 0.2)})
+        check(False, "gate evaluation without A refused")
+    except SystemExit:
+        pass
 
 
 def make_image(words: list[int], seed_addresses=(0,)):
@@ -88,8 +98,22 @@ def test_structure():
     check(list(s["reach"]) == [True, False, False, True, True, False, False], "PROVEN reach: root, branch target, fall-through to RTS")
     check(int(s["chain"][3]) == 3 and int(s["chain"][1]) == 0, "chains follow decoder lengths and stop at non-ordinary words")
     f1 = xm.a_features(im)
-    f2 = xm.a_features(make_image(words))
+    im2 = make_image(words)
+    im2.tokens[:] = im.tokens
+    f2 = xm.a_features(im2)
     check(f1.shape == (1, 210), "A features: 70 base columns x (self, +/-1, +/-4)")
+    import numpy as np
+    check(np.array_equal(f1, f2), "A features are deterministic")
+    # DBcc -4 at word 7 (+ disp word) -> word 7 + 1 - 2 = 6; JSR (d16,PC) +6 at word 9 -> 9 + 1 + 3 = 13; JMP abs.L 0x00000004 -> word 2;
+    # JMP abs.L outside the image -> no target
+    w2 = [0x4E71] * 7 + [0x51C8, 0xFFFC, 0x4EBA, 0x0006, 0x4EF9, 0x0000, 0x0004, 0x4EF9, 0x0010, 0x0000, 0x4E75]
+    im3 = make_image(w2)
+    for w, (status, length, control) in {7: (2, 2, 1), 9: (2, 2, 3), 11: (2, 3, 2), 14: (2, 3, 2)}.items():
+        im3.tokens[w, 0], im3.tokens[w, 1], im3.tokens[w, 3] = status, length, control
+    s3 = xm.structure(im3)
+    check(int(s3["target"][7]) == 6, "DBcc displacement target")
+    check(int(s3["target"][9]) == 13, "JSR (d16,PC) target")
+    check(int(s3["target"][11]) == 2 and int(s3["target"][14]) == -1, "JMP abs.L as an in-image offset; outside the image: none")
     try:
         import torch
     except ImportError:
@@ -97,6 +121,15 @@ def test_structure():
     for graph in (False, True):
         m = xm.build_bc(torch, graph)
         check(sum(p.numel() for p in m.parameters()) > 0, f"B/C builds (graph={graph})")
+    import segarecomp_ml_v3_train as tr
+    big = make_image([0x4E71] * 3000)
+    big.tokens[:, 0], big.tokens[:, 1] = 2, 1
+    big.wlabels = np.zeros(3000, dtype=np.int8)
+    reach, edges = xm.window_graph(np, torch, big, 0, 2048)
+    L = 2048 + 2 * tr.M4["margin"]
+    check(len(reach) == L and all(int(s.max()) < L and int(d.min()) >= 0 for s, d in edges if s.numel()), "window graph in window coordinates")
+    ft_s, ft_d = edges[0]
+    check(bool(((ft_d - ft_s) == 1).all()), "fall-through edges follow decoder length (1 word NOPs)")
 
 
 def main():

@@ -65,6 +65,18 @@ def structure(im) -> dict:
     is_db = ordinary & ((words & 0xF0F8) == 0x50C8)
     dd = ((nxt + 0x8000) & 0xFFFF) - 0x8000
     target = np.where(is_db & (dd % 2 == 0), idx + 1 + dd // 2, target)
+    # JMP / JSR: (d16,PC) -> pc + 2 + disp16; absolute .W / .L operand -> interpreted as an IMAGE OFFSET when it lies inside the image
+    # (Genesis cartridge addresses equal file offsets; in relocatable Atari/Amiga images the stored operand is section-relative, so the
+    # candidate is exact only for intra-section targets - disclosed in the T005 addendum)
+    is_jpc = ordinary & np.isin(words, (0x4EFA, 0x4EBA))
+    target = np.where(is_jpc & (dd % 2 == 0), idx + 1 + dd // 2, target)
+    nxt2 = np.concatenate([words[2:], [0, 0]])
+    abs_w = ((nxt + 0x8000) & 0xFFFF) - 0x8000
+    abs_l = (nxt << 16) | nxt2
+    is_aw = ordinary & np.isin(words, (0x4EF8, 0x4EB8))
+    is_al = ordinary & np.isin(words, (0x4EF9, 0x4EB9))
+    target = np.where(is_aw & (abs_w >= 0) & (abs_w % 2 == 0), abs_w // 2, target)
+    target = np.where(is_al & (abs_l % 2 == 0), abs_l // 2, target)
     target = np.where((target >= 0) & (target < n), target, -1)
     chain = np.zeros(n + 6, dtype=np.int64)
     for w in range(n - 1, -1, -1):

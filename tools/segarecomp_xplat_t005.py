@@ -50,7 +50,31 @@ def addendum_doc() -> dict:
             "condition_rule": plan["decisions"]["t005_scope"]["condition"],
             "gates": {"B": plan["decisions"]["t005_scope"]["model_B"], "C": plan["decisions"]["t005_scope"]["model_C"]},
             "enforcement": "fit refuses unless this addendum's digests equal the current files and the plan; each fit record carries "
-                           "the addendum digest; no A/B/C fit was run before this addendum was committed"}
+                           "the addendum digest and table ignores nothing unstamped (an unstamped / foreign-stamped score refuses); B and "
+                           "C fits require a committed T005 results document under this addendum showing their gate open (A complete); "
+                           "closed-gate models never enter selection; no A/B/C fit was run before this addendum was committed. Procedural "
+                           "limit: importing segarecomp_xplat_models directly cannot be prevented in code; such fits are never stamped "
+                           "and are refused by table",
+            "pre_fit_deviations": {
+                "control_targets": "candidate direct targets = Bcc/BRA/BSR (8/16-bit displacement), DBcc, JMP/JSR (d16,PC), and JMP/JSR "
+                                   "absolute .W/.L interpreted as an image offset when inside the image; exact on Genesis cartridges "
+                                   "(address = file offset); on relocatable Atari/Amiga images the stored absolute operand is "
+                                   "section-relative, so it is exact for intra-section targets only; the same targets feed C's direct "
+                                   "edges and the PROVEN search",
+                "chain_feature": "'number of chain starts' (equal to the ordinary-decode count, already in the status counts) is "
+                                 "replaced by the mean chain length and the count of chains >= 8"},
+            "disclosures": {
+                "label_gated_xplat_seeds": "cross-platform seeds exist only where the T002 listing labels the container entry as an "
+                                           "instruction start (BattleIsleEditor 6/12, HelloAmi 3/4, EmuTOS 1/4 samples have none); the "
+                                           "seed flag and the PROVEN-reach root are therefore label-gated on cross-platform images "
+                                           "(Genesis seeds come from the product's label-free discovery); xplat_lolo results carry "
+                                           "this caveat; inherited from the frozen T003 corpus and shared with the T004 baselines",
+                "relocation_feature": "relocation-field counts come from container metadata (available at inference on those "
+                                      "platforms; 0 on Genesis): platform-correlated, kept as pre-registered; a no-relocation "
+                                      "ablation would be exploratory only",
+                "proven_semantics": "PROVEN reachability follows fall-through past calls and traps (only direct jumps, dynamic jumps "
+                                    "and returns stop fall-through): more permissive than the product's conservative discovery; it "
+                                    "is a model input flag, never execution authority"}}
 
 
 def verify_addendum() -> str:
@@ -78,6 +102,24 @@ def condition() -> str:
     return "C0" if cls == "TRANSFER_HARMS" else "C2"
 
 
+def require_gate(model: str, addendum_sha: str) -> None:
+    """B may be fitted only when the committed T005 results (this addendum, A complete) show gate_B open; C only when gate_C is open."""
+    if not T005_RESULTS.is_file():
+        raise SystemExit(f"{model}: no T005 results document: its gate has not been evaluated")
+    r = json.loads(T005_RESULTS.read_text())
+    if r.get("addendum_sha256") != addendum_sha:
+        raise SystemExit(f"{model}: T005 results were produced under a different addendum")
+    import subprocess
+    st = subprocess.run(["git", "-C", str(HERE), "status", "--porcelain", "--", str(T005_RESULTS)], capture_output=True, text=True).stdout
+    tracked = subprocess.run(["git", "-C", str(HERE), "ls-files", "--error-unmatch", str(T005_RESULTS)], capture_output=True).returncode == 0
+    if st.strip() or not tracked:
+        raise SystemExit(f"{model}: the T005 results that open its gate must be committed")
+    if r.get("missing", {}).get("A"):
+        raise SystemExit(f"{model}: model A is incomplete")
+    if not r.get(f"gate_{model}"):
+        raise SystemExit(f"{model}: its pre-registered gate is closed")
+
+
 def attach(im, d: pathlib.Path):
     """Give a loaded image its seed addresses (Genesis: registry reports; cross-platform: meta) and its directory (relocations)."""
     im._dir = d
@@ -96,6 +138,8 @@ def run_fit(model: str, fold: str, seed: int | None, snapshot: pathlib.Path, out
         raise SystemExit("B/C require --seed 1|2|3")
     if model == "A" and seed is not None:
         raise SystemExit("A is deterministic (random_state 49): no --seed")
+    if model in ("B", "C"):
+        require_gate(model, add)
     train_dirs, held_dirs, held = xt.fold_sets(plan, cond, fold, snapshot) if not fold.startswith("xplat:") else \
         xt.fold_sets(plan, "C2", fold, snapshot) if cond == "C2" else (None, None, None)
     if train_dirs is None:
@@ -128,6 +172,16 @@ def run_fit(model: str, fold: str, seed: int | None, snapshot: pathlib.Path, out
     return rec
 
 
+def stamped(p: pathlib.Path) -> bool:
+    """A score file counts only when its record exists and carries the current addendum digest (refuses trial / unstamped fits)."""
+    rec = p.with_suffix(".json")
+    if not (p.exists() and rec.is_file()):
+        return False
+    if json.loads(rec.read_text()).get("addendum_sha256") != sha(ADDENDUM):
+        raise SystemExit(f"{p.name}: score record not stamped with the current T005 addendum")
+    return True
+
+
 def fit_scores(model: str, cond: str, fold: str, out: pathlib.Path, sizes: dict):
     import numpy as np
     import segarecomp_ml_v3_train as t
@@ -135,9 +189,9 @@ def fit_scores(model: str, cond: str, fold: str, out: pathlib.Path, sizes: dict)
     suffix = ".xplat" if fold == "all" else ""
     if model == "A":
         p = out / "scores" / f"A.{cond}.{f}{suffix}.npz"
-        return {k: v.astype(np.float64) for k, v in xt.load_npz(p).items()} if p.exists() else None
+        return {k: v.astype(np.float64) for k, v in xt.load_npz(p).items()} if stamped(p) else None
     ps = [out / "scores" / f"{model}.{cond}.{f}.s{s}{suffix}.npz" for s in (1, 2, 3)]
-    if not all(p.exists() for p in ps):
+    if not all(stamped(p) for p in ps):
         return None
     arrs = [xt.load_npz(p) for p in ps]
     return {iid: t.cell_max(np.mean([a[iid] for a in arrs], axis=0).astype(np.float32), sizes[iid], 128) for iid in arrs[0]}
@@ -178,6 +232,8 @@ def records_for(model: str, cond: str, out: pathlib.Path, snap: pathlib.Path) ->
 def candidates_and_gates(t004: dict, t005_tables: dict) -> dict:
     """Pre-registered gates (pure over the result documents; unit-tested)."""
     tau, asum = t004["noise"]["tau"], sum(t004["noise"]["b50_miss_allowance"].values())
+    if t005_tables.get("A") is None:
+        raise SystemExit("gate evaluation requires model A complete")
     cands = list(t004["candidates"])
     for model, tab in t005_tables.items():
         if tab is None:
@@ -189,9 +245,11 @@ def candidates_and_gates(t004: dict, t005_tables: dict) -> dict:
     best_base = decide.select(base, tau, asum)
     gate_b = decide.b_gate(best_base) and t004["transfer_class"] != "EVIDENCE_INSUFFICIENT"
     by = {c["config"]: c for c in cands}
-    gate_c = ("A" in by and "B" in by and decide.better_than(by["B"], by["A"], tau, asum)
+    gate_c = (gate_b and "A" in by and "B" in by and decide.better_than(by["B"], by["A"], tau, asum)
               and by["A"]["genesis_mean_er"] - by["B"]["genesis_mean_er"] >= tau)
-    selected = decide.select(cands, tau, asum)
+    # a model whose gate is closed never enters selection (it should not have been fitted; if it was, it is ignored)
+    eligible = [c for c in cands if (c["config"] != "B" or gate_b) and (c["config"] != "C" or gate_c)]
+    selected = decide.select(eligible, tau, asum)
     return {"candidates": cands, "best_without_B_C": best_base, "gate_B": gate_b, "gate_C": gate_c, "selected": selected, "tau": tau,
             "allowance_sum": asum}
 
