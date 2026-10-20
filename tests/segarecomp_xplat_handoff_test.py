@@ -24,6 +24,15 @@ import segarecomp_xplat_qualify as q  # noqa: E402
 FAILURES = []
 
 
+def _exact_write_text(self, data, encoding="utf-8", errors=None, newline=None):
+    """Fixture files must hold exactly the bytes the test expects on every platform: Windows text mode would write '\\n' as '\\r\\n'
+    and the digest checks under test would (correctly) report drift. The tool's comparisons stay byte-exact."""
+    return self.write_bytes(data.encode(encoding))
+
+
+pathlib.Path.write_text = _exact_write_text
+
+
 def check(cond, msg):
     if not cond:
         FAILURES.append(msg)
