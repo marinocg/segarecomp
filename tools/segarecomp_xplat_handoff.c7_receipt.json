@@ -1,6 +1,6 @@
 {
  "final_verify": {
-  "context": "run from a git-archive export of the product at the C6 head, python3 -I, cwd /, minimal environment, with the task worktree moved away (unavailable) for the duration",
+  "context": "run from a git-archive export of the product at 0948214 (C7 review head), python3 -I, cwd /, minimal environment, with the task worktree moved away (unavailable) for the duration; the one-shot status is checked against the stored snapshot and the plan's snapshot digest",
   "decision": {
    "consistent": true,
    "outcome": "DATA_INSUFFICIENT",
@@ -29,7 +29,8 @@
  "manifest_sha256": "1e8ba1e62f045eb762c2993f09f57849469ff000b8b379d6ebbafe5d449292cd",
  "missing_artifacts": {
   "external_not_copied": [
-   "operator-held commercial Genesis images and the Sonic CD disc under games/ (verified by digest by the SEG-072 bundle)"
+   "operator-held commercial Genesis images and the Sonic CD disc under games/ (verified by digest by the SEG-072 bundle)",
+   "the SEG-072 handoff bundle (<HARNESS_ROOT>/.cache/seg072-handoff, plus the live .cache/seg072 and the restored .cache/seg049): supplies the reused C0 Genesis fold scores and M3_FROZEN scores; verified by its own verifier (segarecomp_ml_v3_handoff.py verify) and, for the 61 reused score files, by the digests bound in the frozen plan (segarecomp_xplat_transfer.verify_seg072_scores); this store records its archive / manifest checksum check only"
   ],
   "never_produced": [
    "T005 model A/B/C weights and predictions (not admitted by the pre-registered gate)",
