@@ -1,0 +1,61 @@
+{
+ "context": "run from a git-archive export of the product at 85185bf, python3 -I, cwd /, empty environment, with the task worktree moved away (unavailable) for the duration",
+ "decisions": {
+  "t001": {
+   "consistent": true,
+   "recorded": "NEGATIVE_STOP"
+  },
+  "t001_amendment_mixed": {
+   "consistent": true,
+   "recorded": "NEGATIVE_STOP"
+  },
+  "t001_amendment_rocm_bc": {
+   "consistent": true,
+   "recorded": "NEGATIVE_STOP"
+  },
+  "t003_a_transfer": {
+   "consistent": true,
+   "recorded": "NO_MEANINGFUL_ADVANTAGE"
+  },
+  "t003_m1": {
+   "consistent": true,
+   "recorded": "DESCRIPTIVE_EFFECT_NOT_ROBUST"
+  },
+  "t003_m3r_transfer": {
+   "consistent": true,
+   "recorded": "EVIDENCE_INSUFFICIENT"
+  },
+  "t003_seed_stability": {
+   "consistent": true,
+   "recorded": "NO_MEANINGFUL_ADVANTAGE"
+  },
+  "t005_cv2_vs_a": {
+   "consistent": true,
+   "recorded": "EVIDENCE_INSUFFICIENT"
+  }
+ },
+ "fresh_process": {
+  "cwd": "/",
+  "interpreter": "isolated (-I)",
+  "rc": 0
+ },
+ "label": "seg076-c7-final",
+ "manifest_sha256": "5ca0d6712bfc6ddbcc81e71608bc0efaab08d7d99d62d628192b91ae1db7f06c",
+ "physical_problems": 0,
+ "regeneration": {
+  "A_cpu": {
+   "bitwise_identical": true,
+   "cells": 131
+  },
+  "CV2_rocm": {
+   "bitwise_identical": true,
+   "words": 8364
+  },
+  "restored_files": 11
+ },
+ "schema": "segarecomp.xplat_handoff.seg076_final_verify.v1",
+ "seg075_reserved_cohort_unopened": true,
+ "verdict": "ARTIFACT_HANDOFF_PASS",
+ "verified_bytes": 4810444100,
+ "verified_files": 32663
+}
