@@ -43,37 +43,51 @@ RESULTS = HERE / "segarecomp_xplat_stability.results.json"
 DIAGNOSIS = HERE / "segarecomp_xplat_stability.diagnosis.json"
 SEEDS = (49, 50, 51, 52)
 NEW_SEEDS = {"C0": (51, 52), "C2": (50, 51, 52)}
-DETERMINISM = ("C0", "D01", 50)
+DETERMINISM = (("C0", "D01", 50), ("C2", "D01", 49))
 T001_OUT = rx.HARNESS / ".cache" / "seg076" / "t001"
 SEG072_LOG = rx.HARNESS / ".cache" / "seg072" / "m3r.log"
 T004_LOGS = rx.SEG075 / "t004" / "logs"
 BOUND_EXTRA = ("segarecomp_xplat_stability.py", "segarecomp_xplat_explore.t001.plan.json", "segarecomp_xplat_explore.t001.plan.digest")
 RESOURCES = {"backend": "CPU (research venv torch 2.14.1, the device of every reused M3-R fit)", "m3r_threads": 4, "a_threads": 2,
-             "parallel_fits": 3, "wall_clock_cap_minutes": {"M3R": 90, "A": 20}, "rss_limit_mb": 4096,
+             "parallel_fits": 3, "start_stagger_seconds": 60, "wall_clock_cap_minutes": {"M3R": 90, "A": 20}, "rss_limit_mb": 4096,
              "min_available_mb_to_start": 4000, "host_memory_floor_mb": 2000, "attempts": 1,
              "infra_rerun": "once, only after 'interrupted' (host crash: a persisted 'started') or an external signal kill, identical "
-                            "configuration, recorded with a reason; never after timeout, rss_limit, host_memory_guard or a model error",
+                            "configuration, recorded with a reason; never after timeout, rss_limit, host_memory_guard or a model error. "
+                            "Disclosed edge cases: a host crash after the score and record are written but before the farm records ok "
+                            "leaves an 'interrupted' job whose re-run refuses (write-once) - fail-closed, the job counts as failed; a "
+                            "kernel OOM kill is recorded killed_signal9 and is re-runnable once",
              "basis": "SEG-075 T004 M3-R fits: ~21 min mean at 4 threads in a 4-fit farm (max 38 min); 3 parallel x 4 threads on the 8-core "
                       "host; cap ~4x the mean"}
 RULES = {
     "noise": "per condition: per-lineage between-seed spread of the lineage max ER over seeds 49-52; tau4 = 2 x mean over the 11 lineages "
              "of the mean absolute pairwise difference (the SEG-075 tau formula generalized from one pair to all 6 pairs)",
     "transfer": {"statistic": "d_s = Genesis mean ER (C2, seed s) - Genesis mean ER (C0, seed s), s in 49..52 (paired by seed number)",
+                 "pairing": "the C0 and C2 runs of seed s share only the initial weights (torch.manual_seed precedes build_model); the "
+                            "segment offsets / order walk different training lists, so the pairing is nominal and the df=3 paired t is "
+                            "conservative against an unpaired design",
                  "ci": "two-sided 95% t interval over the 4 paired seeds (t_0.975,3 = 3.182)",
                  "lineage_test": "exact two-sided sign-flip permutation over the 11 lineages of the seed-averaged per-lineage paired "
                                  "difference (2048 sign patterns)",
                  "classes": {"TRANSFER_EFFECT_MEASURABLE": "the t interval excludes 0 AND |mean d| >= 0.01 AND sign-flip p <= 0.05 "
-                                                           "(direction reported: helps if negative, harms if positive)",
-                             "EVIDENCE_INSUFFICIENT": "otherwise, when the t interval half-width > 0.05 (noise too large to bound "
-                                                      "an economically relevant effect)",
-                             "NO_MEANINGFUL_ADVANTAGE": "otherwise"},
+                                                           "(direction: helps if negative, harms if positive)",
+                             "EFFECT_LINEAGE_CONCENTRATED": "the t interval excludes 0 AND |mean d| >= 0.01 but sign-flip p > 0.05 "
+                                                            "(the seed-level effect is carried by few lineages)",
+                             "NO_EFFECT_DETECTED_BOUNDED": "otherwise, when the t interval half-width <= 0.02 (an effect larger than "
+                                                           "~0.02 is excluded); maps to NO_MEANINGFUL_ADVANTAGE in the synthesis",
+                             "EVIDENCE_INSUFFICIENT": "otherwise (half-width > 0.02)"},
+                 "power": "expected: the existing C0 seeds 49/50 differ by 0.036 in Genesis mean ER; with independent seeds SD(d) ~0.036 "
+                          "gives a half-width ~0.057, so EVIDENCE_INSUFFICIENT is the likely outcome; stated before any fit",
                  "persistence": "number of lineages whose seed-averaged difference has the sign of the mean effect; D01 reported"},
-    "stability": {"statistic": "spread = population SD of the Genesis mean ER (and, separately, of D01 max ER) across runs; single runs = "
-                               "the 4 seeds; 2-seed ensembles = the 6 seed pairs with word-level logit averaging (M3-R cell logits "
-                               "averaged); 4-seed ensemble reported",
-                  "class": "SEED_STABILITY_IMPROVED iff, in BOTH conditions, the 2-seed-ensemble spread <= 0.6 x the single-seed spread "
-                           "for the Genesis mean ER AND for D01 max ER, AND the 4-seed ensemble's Genesis mean ER is not above the mean "
-                           "of the single-seed values; otherwise NO_MEANINGFUL_ADVANTAGE (or EVIDENCE_INSUFFICIENT when fits failed)"},
+    "stability": {"statistic": "ensemble gain g = metric(logit-averaged ensemble) - mean(metric of its member seeds), for the "
+                               "Genesis mean ER and for D01 max ER; under pure averaging of a linear statistic g = 0, so g < 0 is the "
+                               "non-linear tail benefit of score averaging (M3-R cell logits averaged)",
+                  "units": "the 6 seed pairs per condition and the 4-seed ensemble",
+                  "class": "SEED_STABILITY_IMPROVED iff in BOTH conditions: at least 5 of the 6 pair ensembles have D01 max-ER gain < 0 "
+                           "(one-sided sign test p <= 0.11 per condition, 0.012 jointly), the mean pair gain of the Genesis mean ER is "
+                           "<= -0.005, and the 4-seed ensemble gain of the Genesis mean ER is <= 0; otherwise NO_MEANINGFUL_ADVANTAGE "
+                           "(EVIDENCE_INSUFFICIENT when fits failed)",
+                  "descriptive": "SD of the 6 overlapping pair ensembles / SD of the 4 single seeds is reported against its arithmetic "
+                                 "null of exactly 1/sqrt(3) = 0.577 for a linear statistic (overlapping pairs); it is NOT a criterion"},
     "a_transfer": "A is deterministic: d = Genesis mean ER (A, C2) - (A, C0) with per-lineage differences and the exact sign-flip test; "
                   "TRANSFER_EFFECT_MEASURABLE iff |d| >= 0.01 AND sign-flip p <= 0.05; else NO_MEANINGFUL_ADVANTAGE (tier 2: new fits "
                   "on the existing folds; training-noise free, so only lineage resampling bounds it)",
@@ -81,6 +95,9 @@ RULES = {
           "sklearn's 200k-sample binning threshold): per-lineage paired differences, lineage bootstrap 95% percentile CI (10000 "
           "resamples, numpy default_rng(0)), exact sign-flip p; DESCRIPTIVE_EFFECT_ROBUST iff the bootstrap CI excludes 0 and p <= "
           "0.05, else DESCRIPTIVE_EFFECT_NOT_ROBUST; never a confirmatory claim",
+    "determinism": "two refits are compared bitwise with the reused files: M3R C0/D01/s50 (SEG-075 T004) and M3R C2/D01/s49 (SEG-075 "
+                   "T004, also checking that the SEG-076 loader path equals T004's for C2). If either is not bitwise identical, or fails, "
+                   "every tier-2 M3-R decision is reported EVIDENCE_INSUFFICIENT (mixed provenance of reused and new seeds)",
     "barriers": "D01 is never excluded from any aggregate; the SEG-075 reserved cohort stays sealed; no SEG-075 tau / decision changes",
 }
 
@@ -115,8 +132,8 @@ def jobs() -> list[dict]:
                 out.append({"id": f"M3R.{cond}.{fold}.s{seed}", "model": "M3R", "condition": cond, "fold": fold, "seed": seed, "dir": "."})
     for fold in rx.GENESIS:
         out.append({"id": f"A.C2.{fold}", "model": "A", "condition": "C2", "fold": fold, "seed": None, "dir": "."})
-    c, f, s = DETERMINISM
-    out.append({"id": f"M3R.{c}.{f}.s{s}.repro", "model": "M3R", "condition": c, "fold": f, "seed": s, "dir": "repro"})
+    for c, f, sd in DETERMINISM:
+        out.append({"id": f"M3R.{c}.{f}.s{sd}.repro", "model": "M3R", "condition": c, "fold": f, "seed": sd, "dir": "repro"})
     return out
 
 
@@ -135,7 +152,7 @@ def build_plan() -> dict:
                                   "transfer differences, within a ~7-8 h CPU budget; a larger count was not affordable in this delivery "
                                   "and the rule's EVIDENCE_INSUFFICIENT branch covers an under-powered outcome"},
             "a_c2": "A (T001's unchanged structural HGB) refitted under C2 on the 11 Genesis folds; its C0 fits are T001's",
-            "determinism": f"M3R {DETERMINISM} refitted once into repro/ and compared bitwise with the SEG-075 T004 seed-50 file",
+            "determinism": "M3R C0/D01/s50 and C2/D01/s49 refitted once into repro/ and compared bitwise with the SEG-075 T004 files",
             "jobs": [j["id"] for j in jobs()], "rules": RULES, "resources": RESOURCES,
             "metrics": "segarecomp_xplat_explore_eval (SEG-075 image_metrics + boundary strata), 128-byte cells; Genesis mean ER = mean over "
                        "lineages of the lineage max ER (SEG-075); mean image ER reported as a secondary, less tail-sensitive statistic",
@@ -255,7 +272,7 @@ def cmd_farm(a) -> int:
             raise SystemExit(f"{jid}: infra re-run refused")
         prev["infra_rerun_reason"] = a.reason
         todo.append(by_id[jid])
-    running, stall = {}, None
+    running, stall, next_start = {}, None, 0.0
     while todo or running:
         avail = rx._available_mb()
         if running and avail < RESOURCES["host_memory_floor_mb"]:
@@ -273,7 +290,9 @@ def cmd_farm(a) -> int:
                 raise SystemExit("farm stalled: available memory below the start threshold for 30 min with nothing running")
         else:
             stall = None
-        if todo and len(running) < RESOURCES["parallel_fits"] and avail >= RESOURCES["min_available_mb_to_start"]:
+        if todo and len(running) < RESOURCES["parallel_fits"] and avail >= RESOURCES["min_available_mb_to_start"] \
+                and time.time() >= next_start:
+            next_start = time.time() + RESOURCES["start_stagger_seconds"]
             j = todo.pop(0)
             attempt = state["jobs"].get(j["id"], {}).get("attempts", 0) + 1
             state["jobs"][j["id"]] = dict(state["jobs"].get(j["id"], {}), status="started", attempts=attempt)
@@ -285,7 +304,6 @@ def cmd_farm(a) -> int:
             log = open(out / "logs" / f"{j['id']}.a{attempt}.log", "w")
             running[j["id"]] = (subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env), time.time(), j, log, 0)
             print(f"start {j['id']} attempt {attempt}", flush=True)
-            continue
         time.sleep(5)
         for jid, (p, t0, j, log, peak) in list(running.items()):
             rss = rx._rss_mb(p.pid)
@@ -346,30 +364,30 @@ def pop_sd(xs: list[float]) -> float:
 def transfer_class(d_seed: list[float], d_lineage: list[float]) -> dict:
     ci = t_interval(d_seed)
     p = sign_flip_p(d_lineage)
-    if (ci["lo"] > 0 or ci["hi"] < 0) and abs(ci["mean"]) >= 0.01 and p <= 0.05:
+    excl = (ci["lo"] > 0 or ci["hi"] < 0) and abs(ci["mean"]) >= 0.01
+    if excl and p <= 0.05:
         cls = "TRANSFER_EFFECT_MEASURABLE"
-    elif ci["half_width"] > 0.05:
-        cls = "EVIDENCE_INSUFFICIENT"
+    elif excl:
+        cls = "EFFECT_LINEAGE_CONCENTRATED"
+    elif ci["half_width"] <= 0.02:
+        cls = "NO_EFFECT_DETECTED_BOUNDED"
     else:
-        cls = "NO_MEANINGFUL_ADVANTAGE"
+        cls = "EVIDENCE_INSUFFICIENT"
     direction = "helps" if ci["mean"] < 0 else "harms"
     return {"class": cls, "direction": direction, "t_interval": ci, "sign_flip_p": round(p, 6),
             "lineages_with_effect_sign": sum(1 for x in d_lineage if (x < 0) == (ci["mean"] < 0) and x != 0)}
 
 
-def stability_class(single: dict, pairs: dict, ens4: dict) -> dict:
-    """single/pairs: {cond: {"mean_er": [..], "d01": [..]}}; ens4: {cond: {"mean_er": x}} (pure; unit-tested)."""
-    rows, ok = {}, True
-    for cond in single:
-        r = {}
-        for k in ("mean_er", "d01"):
-            s1, s2 = pop_sd(single[cond][k]), pop_sd(pairs[cond][k])
-            r[k] = {"single_sd": round(s1, 6), "pair_ensemble_sd": round(s2, 6), "ratio": round(s2 / s1, 6) if s1 > 0 else None}
-            ok &= s1 > 0 and s2 <= 0.6 * s1
-        r["ens4_mean_er"] = ens4[cond]["mean_er"]
-        r["single_mean_of_mean_er"] = round(sum(single[cond]["mean_er"]) / len(single[cond]["mean_er"]), 6)
-        ok &= r["ens4_mean_er"] <= r["single_mean_of_mean_er"] + 1e-12
-        rows[cond] = r
+def stability_class(gains: dict) -> dict:
+    """gains: {cond: {"pair_d01": [6 D01 max-ER gains], "pair_mean_er": [6 Genesis mean-ER gains], "ens4_mean_er": gain}} (pure; tested)."""
+    rows, ok = {}, bool(gains)
+    for cond, g in gains.items():
+        neg = sum(1 for x in g["pair_d01"] if x < 0)
+        mean_pair = sum(g["pair_mean_er"]) / len(g["pair_mean_er"])
+        c_ok = neg >= 5 and mean_pair <= -0.005 and g["ens4_mean_er"] <= 0
+        rows[cond] = {"pair_d01_negative_gains": neg, "pairs": len(g["pair_d01"]), "mean_pair_gain_mean_er": round(mean_pair, 6),
+                      "ens4_gain_mean_er": round(g["ens4_mean_er"], 6), "condition_ok": c_ok}
+        ok &= c_ok
     return {"class": "SEED_STABILITY_IMPROVED" if ok else "NO_MEANINGFUL_ADVANTAGE", "conditions": rows}
 
 
@@ -491,8 +509,8 @@ def cmd_diagnose(a) -> int:
                        "d01_informative_images": len(d01), "d01_images_worse_by_gt_0.05": sum(1 for x in deltas if x > 0.05),
                        "d01_images_better_by_gt_0.05": sum(1 for x in deltas if x < -0.05),
                        "d01_mean_image_d_er": round(sum(deltas) / len(deltas), 6),
-                       "d01_cell_rank_spearman_median": sorted(x["cell_rank_spearman"] for x in lineages["D01"]["images_detail"]
-                                                               if x["cell_rank_spearman"] is not None)[len(lineages["D01"]["images_detail"]) // 2]},
+                       "d01_cell_rank_spearman_median": (lambda v: v[len(v) // 2])(sorted(x["cell_rank_spearman"] for x in
+                                                          lineages["D01"]["images_detail"] if x["cell_rank_spearman"] is not None))},
            "lineages": lineages,
            "data_boundary": "aggregates only; D01 images are pseudonymous size-ordered indices with cell counts, no names or addresses"}
     target = pathlib.Path(a.results) if a.results else DIAGNOSIS
@@ -551,6 +569,9 @@ def cmd_table(a) -> int:
     for f in rx.GENESIS:
         if status.get(f"A.C2.{f}") == "ok":
             p = score_path(out, "A", "C2", f, None)
+            r = json.loads(p.with_suffix(".json").read_text())
+            if r.get("plan_sha256") != plan_sha() or (r["model"], r["condition"], r["fold"], r["seed"]) != ("A", "C2", f, None):
+                raise SystemExit(f"{p.name}: record does not match")
             a2[f] = _f64(X.load_npz(p))
     if len(a2) == len(rx.GENESIS):
         add("A.C2", a2)
@@ -586,12 +607,25 @@ def cmd_table(a) -> int:
         decisions["m3r_transfer_ens4"] = {"d_mean_er": round(tables["M3R.C2.ens4"]["summary"]["mean_er"] - tables["M3R.C0.ens4"]["summary"]["mean_er"], 6),
                                           "per_lineage": {L: round(v, 6) for L, v in per_lineage_d("M3R.C2.ens4", "M3R.C0.ens4").items()},
                                           "tier": 2, "note": "descriptive: one 4-seed ensemble per condition"}
-        single = {c: {"mean_er": [tables[f"M3R.{c}.s{s}"]["summary"]["mean_er"] for s in SEEDS],
-                      "d01": [tables[f"M3R.{c}.s{s}"]["genesis"]["D01"]["max_er"] for s in SEEDS]} for c in ("C0", "C2")}
-        pairs = {c: {"mean_er": [tables[n]["summary"]["mean_er"] for n in pair_names[c]],
-                     "d01": [tables[n]["genesis"]["D01"]["max_er"] for n in pair_names[c]]} for c in ("C0", "C2")}
-        ens4 = {c: {"mean_er": tables[f"M3R.{c}.ens4"]["summary"]["mean_er"]} for c in ("C0", "C2")}
-        decisions["m3r_seed_stability"] = dict(stability_class(single, pairs, ens4), tier=2)
+        gains, desc = {}, {}
+        for c in ("C0", "C2"):
+            def m(name, k):
+                return tables[name]["summary"]["mean_er"] if k == "mean_er" else tables[name]["genesis"]["D01"]["max_er"]
+            prs = list(itertools.combinations(SEEDS, 2))
+            g = {"pair_d01": [], "pair_mean_er": []}
+            for (x, y), name in zip(prs, pair_names[c]):
+                g["pair_d01"].append(m(name, "d01") - (m(f"M3R.{c}.s{x}", "d01") + m(f"M3R.{c}.s{y}", "d01")) / 2)
+                g["pair_mean_er"].append(m(name, "mean_er") - (m(f"M3R.{c}.s{x}", "mean_er") + m(f"M3R.{c}.s{y}", "mean_er")) / 2)
+            g["ens4_mean_er"] = m(f"M3R.{c}.ens4", "mean_er") - sum(m(f"M3R.{c}.s{x}", "mean_er") for x in SEEDS) / len(SEEDS)
+            gains[c] = g
+            sd1 = {k: pop_sd([m(f"M3R.{c}.s{x}", k) for x in SEEDS]) for k in ("mean_er", "d01")}
+            sd2 = {k: pop_sd([m(n, k) for n in pair_names[c]]) for k in ("mean_er", "d01")}
+            desc[c] = {k: {"single_sd": round(sd1[k], 6), "pair_ensemble_sd": round(sd2[k], 6),
+                           "ratio": round(sd2[k] / sd1[k], 6) if sd1[k] else None, "linear_null_ratio": round(1 / math.sqrt(3), 6)}
+                       for k in sd1}
+        decisions["m3r_seed_stability"] = dict(stability_class(gains), tier=2, descriptive_spread=desc,
+                                               gains={c: {k: ([round(x, 6) for x in v] if isinstance(v, list) else round(v, 6))
+                                                          for k, v in g.items()} for c, g in gains.items()})
     else:
         decisions["m3r_transfer"] = {"class": "EVIDENCE_INSUFFICIENT", "reason": "planned M3-R fits failed or missing", "missing": missing}
         decisions["m3r_seed_stability"] = {"class": "EVIDENCE_INSUFFICIENT", "reason": "planned M3-R fits failed or missing"}
@@ -612,16 +646,23 @@ def cmd_table(a) -> int:
                                             "bootstrap_ci": ci, "sign_flip_p": round(p, 6), "per_lineage_d": {L: round(v, 6) for L, v in dM.items()},
                                             "lineages_better": sum(1 for v in dM.values() if v < 0), "lineages_worse": sum(1 for v in dM.values() if v > 0),
                                             "tier": 1}
-    c, f, s = DETERMINISM
-    rp = score_path(out / "repro", "M3R", c, f, s)
-    if status.get(f"M3R.{c}.{f}.s{s}.repro") == "ok":
-        x1, x2 = X.load_npz(files[f"seg075/M3R.C0.{f}.s50.npz"]), X.load_npz(rp)
-        determinism = bool(sorted(x1) == sorted(x2) and all(np.array_equal(x1[k], x2[k]) for k in x1))
-    else:
-        determinism = None
+    determinism = {}
+    for c, f, sd in DETERMINISM:
+        jid = f"M3R.{c}.{f}.s{sd}.repro"
+        ref = files[f"seg075/M3R.C0.{f}.s50.npz"] if c == "C0" else files[f"seg075/M3R.C2.{f}.npz"]
+        if status.get(jid) == "ok":
+            x1, x2 = X.load_npz(ref), X.load_npz(score_path(out / "repro", "M3R", c, f, sd))
+            determinism[jid] = bool(sorted(x1) == sorted(x2) and all(np.array_equal(x1[k], x2[k]) for k in x1))
+        else:
+            determinism[jid] = None
+    if not all(v is True for v in determinism.values()):
+        for k in ("m3r_transfer", "m3r_seed_stability"):
+            decisions[k] = dict(decisions.get(k, {}), class_before_determinism_rule=decisions.get(k, {}).get("class"),
+                                **{"class": "EVIDENCE_INSUFFICIENT", "determinism_rule": "a determinism refit was not bitwise identical "
+                                   "or failed: mixed provenance of reused and new seeds"})
     costs = {}
     for model in ("M3R", "A"):
-        recs = [json.loads((out / "scores" / f"{j['id']}.json").read_text()) for j in jobs()
+        recs = [json.loads(score_path(out, j["model"], j["condition"], j["fold"], j["seed"]).with_suffix(".json").read_text()) for j in jobs()
                 if j["model"] == model and j["dir"] == "." and status.get(j["id"]) == "ok"]
         if recs:
             costs[model] = {"fits": len(recs), "fit_wall_seconds_mean": round(sum(r["fit_wall_seconds"] for r in recs) / len(recs), 1),
@@ -632,7 +673,7 @@ def cmd_table(a) -> int:
                for k, v in tables.items()}
     doc = {"schema": "segarecomp.xplat_stability.results.v1", "task": "SEG-076-T003", "plan_sha256": plan_sha(),
            "status": "exploratory, development-only", "farm": dict(sorted(status.items())), "missing": missing, "noise": noise,
-           "decisions": decisions, "determinism_bitwise_m3r_c0_d01_s50": determinism, "costs": costs, "configurations": compact,
+           "decisions": decisions, "determinism_bitwise": determinism, "costs": costs, "configurations": compact,
            "tiers": {"1": "reanalysis of existing development results", "2": "new training-seed experiment on existing development folds",
                      "3": "independent unseen-lineage evaluation: none"},
            "data_boundary": "aggregates only"}
