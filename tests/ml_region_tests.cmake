@@ -132,3 +132,7 @@ set_property(TEST segarecomp_xplat_explore_test APPEND PROPERTY LABELS full fast
 # classes), loss-log parsing and the job list (pure; synthetic data only).
 add_test(NAME segarecomp_xplat_stability_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_stability_test.py)
 set_property(TEST segarecomp_xplat_stability_test APPEND PROPERTY LABELS full fast)
+# SEG-076-T005 (exploratory research tooling): pre-registered C-v2 vs A rule and job list (pure); C-v2's padded in-edge table where
+# torch is installed (research environment), otherwise skipped.
+add_test(NAME segarecomp_xplat_cv2_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_cv2_test.py)
+set_property(TEST segarecomp_xplat_cv2_test APPEND PROPERTY LABELS full fast)
