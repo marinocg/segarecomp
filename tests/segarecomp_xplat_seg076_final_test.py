@@ -14,7 +14,7 @@ def main() -> int:
         import numpy  # noqa: F401
     except ImportError:
         print("skip: numpy not installed (research-environment check)")
-        return 0
+        return 77
     import segarecomp_xplat_seg076_final as f
     res = f.decisions()
     bad = {k: v for k, v in res.items() if not v["consistent"]}

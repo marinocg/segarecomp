@@ -9,7 +9,7 @@
    "A": "LIGHTWEIGHT_MODEL_PREFERRED",
    "B": "NO_MEANINGFUL_ADVANTAGE",
    "C": "EVIDENCE_INSUFFICIENT",
-   "m1_descriptive_transfer": "NO_MEANINGFUL_ADVANTAGE",
+   "m1_descriptive_transfer": "EVIDENCE_INSUFFICIENT",
    "m3r_seed_stability": "NO_MEANINGFUL_ADVANTAGE",
    "transfer": "EVIDENCE_INSUFFICIENT"
   },

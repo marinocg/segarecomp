@@ -140,3 +140,4 @@ set_property(TEST segarecomp_xplat_cv2_test APPEND PROPERTY LABELS full fast)
 # environment; skipped without numpy).
 add_test(NAME segarecomp_xplat_seg076_final_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_seg076_final_test.py)
 set_property(TEST segarecomp_xplat_seg076_final_test APPEND PROPERTY LABELS full fast)
+set_property(TEST segarecomp_xplat_seg076_final_test PROPERTY SKIP_RETURN_CODE 77)

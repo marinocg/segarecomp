@@ -21,12 +21,12 @@ hiding real progress?
 
 | subject | SEG-076 class | basis (tier) |
 |---|---|---|
-| 1. Structural baseline A | `LIGHTWEIGHT_MODEL_PREFERRED` | T001, T003 and T005 (tier 2, development folds) |
+| 1. Structural baseline A | `LIGHTWEIGHT_MODEL_PREFERRED` | descriptive synthesis of T001, T003 and T005 (tier 2, development folds); not a pre-registered test |
 | 2. Local Transformer B | `NO_MEANINGFUL_ADVANTAGE` | T001 pre-registered `NEGATIVE_STOP`; T002 not admitted (tier 2, single seed) |
 | 3. Graph-guided Transformer C | `EVIDENCE_INSUFFICIENT` | T005 pre-registered class (tier 2, 3 seeds); descriptively not better than A |
 | 4. M3-R seed stability | `NO_MEANINGFUL_ADVANTAGE` | T003 frozen rule; 4-seed ensembles help descriptively (tier 2) |
 | 5. Cross-platform transfer | `EVIDENCE_INSUFFICIENT` | M3-R paired 4-seed `EVIDENCE_INSUFFICIENT`; A `NO_MEANINGFUL_ADVANTAGE` (tier 2) |
-| 6. M1-HGB descriptive transfer | `NO_MEANINGFUL_ADVANTAGE` | T003 `DESCRIPTIVE_EFFECT_NOT_ROBUST` (tier 1 reanalysis) |
+| 6. M1-HGB descriptive transfer | `EVIDENCE_INSUFFICIENT` | T003 `DESCRIPTIVE_EFFECT_NOT_ROBUST` (tier 1 reanalysis); the interval is far wider than the +/-0.02 bounded-null margin |
 
 ### 1. A, the structural gradient boosting model: `LIGHTWEIGHT_MODEL_PREFERRED`
 
@@ -75,11 +75,14 @@ hiding real progress?
 - A, deterministic: C2 minus C0 is -0.003 (p = 0.89).
 - No measurable transfer effect at this corpus size. SEG-075's seed-49 benefit does not persist.
 
-### 6. M1-HGB's descriptive transfer: `NO_MEANINGFUL_ADVANTAGE`
+### 6. M1-HGB's descriptive transfer: `EVIDENCE_INSUFFICIENT`
 
 - The -0.028 comes about 93% from D01. Of the other lineages, 3 are better, 5 are worse and 2 are unchanged.
 - Bootstrap CI [-0.080, +0.002], p = 0.46.
 - This is a tier 1 reanalysis, not confirmation.
+- The interval [-0.080, +0.002] cannot bound the effect within the +/-0.02 margin that SEG-076 uses for a null class (ADR 0166). So the
+  synthesis class is `EVIDENCE_INSUFFICIENT`, not `NO_MEANINGFUL_ADVANTAGE`, even though the observed effect is concentrated in one
+  lineage.
 
 ## Compilation economics (C5, through SEG-074's unchanged benchmark)
 
@@ -98,11 +101,13 @@ Setup:
 
 Findings:
 
-- **Better ranking does not reduce compilation cost at a fixed budget.**
+- **No robust or consistent compilation saving at a fixed budget.**
   - Every model admits the same 35,840 cells at B50.
-  - A's better-ranked region contains more real code, so it compiles at least as much. Its lineage-mean ratio is worse, and its total is
-    only 3% lower.
-  - Lower ER at full recall pays off only if the budget shrinks.
+  - Against the saved M3-R region, A's result is mixed:
+    - its 11-image total is about 3% lower (2227 against 2304 CPU-s; compile 2175 against 2252);
+    - its lineage-mean ratio is about 17% higher (0.733 against 0.626).
+  - This is a single, unreplicated measurement session, and the code content of the regions was not measured.
+  - Lower ER at full recall can only pay off if the budget shrinks.
 - **Truth-informed full-recall regions show the potential, but these are diagnostics.**
   - A's total is 17% below M3-R's (1136 against 1375 CPU-s), mostly on D03.
   - The unchanged admission validator rejected 3 of A's 11 full-recall regions and 2 of M3-R's.
@@ -113,7 +118,7 @@ Findings:
 - Context: SEG-074's frozen production INC (M3 + B35) remains the cheapest deployed route in its own session (2063 CPU-s over 11
   images).
 
-Answer to the question: **no candidate reduces actual compilation cost at the existing budget.** A ranks difficult fragments better
+Answer to the question: **no candidate robustly or consistently reduces actual compilation cost at the existing budget.** A ranks difficult fragments better
 (lower ER, no misses, deterministic, cheap). Turning that into compile savings needs a budget policy, not a bigger model.
 
 ## Recommendation (no automatic promotion)
@@ -124,6 +129,8 @@ Answer to the question: **no candidate reduces actual compilation cost at the ex
   - evaluation on genuinely unseen lineages. The SEG-075 reserved cohort is still sealed and could serve as a one-shot under a new
     pre-registration, alongside new source-backed programs.
 - Not recommended for more compute on the current development folds: B, C / C-v2 multi-seed, M3-R C2 transfer, or M1 transfer.
+- Measured in the same session: only BROAD and the saved M3-R B50 region (plus the candidates). INC, the oracles and SEG-074's
+  generated-C optimisation appear as frozen context from another session.
 - Any future M3-R comparison must use multiple seeds or an ensemble. Single-seed M3-R baselines, including the production-era seed 49,
   are not reliable.
 - No production model, retention budget, default, validator, launcher or runtime change follows from SEG-076.
@@ -132,7 +139,9 @@ Answer to the question: **no candidate reduces actual compilation cost at the ex
 
 - The private store `<HARNESS_ROOT>/.cache/seg075-handoff` gets a new manifest label chained on SEG-075's `c7-final-handoff`. It covers
   every SEG-076 private tree:
-  - plans' private outputs, scores, every fitted weight file, fit records and CPU timing, farm states, logs;
+  - plans' private outputs, scores, every fitted weight file, fit records and CPU timing, logs;
+  - the four real farm states (the two `t001-views` farm.json files are derived copies; `segarecomp_xplat_explore_rocm.py views`
+    regenerates them);
   - the C5 economics records and the environment snapshot.
 - `tools/segarecomp_xplat_seg076_final.py verify` checks it in a fresh process with the task worktree unavailable:
   - physical rehash;
