@@ -11,6 +11,14 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
+# The SEG-076 research runners are Linux research tooling and import the Unix-only `resource` module (peak-RSS records). They are
+# digest-bound by their frozen plans, so they stay unchanged; on platforms without `resource` (Windows CI) a stand-in lets these tests
+# exercise the pure parts (rules, barrier, job lists), which never call it.
+try:
+    import resource  # noqa: F401
+except ImportError:
+    import types
+    sys.modules["resource"] = types.ModuleType("resource")
 FAILURES = []
 
 
