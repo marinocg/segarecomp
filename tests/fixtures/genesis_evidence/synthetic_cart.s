@@ -1,7 +1,9 @@
 | SEG-077-T001 synthetic Genesis cartridge (authored; no commercial content).
 | Ground truth comes from this file's GNU as listing. It exercises: executed code, an untaken direct branch target (static reach),
-| a jump table with an unused entry, inline data after a JSR (must never become code), code copied to RAM and executed there,
-| a VDP DMA from ROM (data evidence), a CPU-read pointer table, a checksum loop over code, a never-referenced dead routine and 0xFF padding.
+| a jump table with an unused entry, inline data after a JSR (must never become code), a VDP DMA from ROM (data evidence), a CPU-read
+| pointer table, a checksum loop over code, an IRQ-enabled VBlank handler, execution that jumps into the middle of an executed
+| instruction (overlapping spans), a never-referenced dead routine, 0xFF padding, and - only while pad button C is held - a routine
+| copied to work RAM, executed there and then cleared (any RAM execution must disable data-read evidence).
         .text
         .org    0
 vectors:
@@ -21,7 +23,8 @@ vectors:
         .long   exc_handler, exc_handler
         .long   exc_handler, exc_handler
         .long   exc_handler, exc_handler
-        .long   exc_handler, exc_handler
+        .long   vblank                  | vector 30: level-6 (VBlank) autovector
+        .long   exc_handler
         .long   exc_handler, exc_handler
         .long   exc_handler, exc_handler
         .long   exc_handler, exc_handler
@@ -85,13 +88,13 @@ reset:
         moveq   #0,%d2
 2:      add.w   (%a0)+,%d2
         dbra    %d7,2b
-        | copy ram_routine to work RAM and call it there
-        lea     ram_routine,%a0
-        lea     0xFF0000,%a1
-        move.w  #(ram_routine_end-ram_routine)/2-1,%d7
-1:      move.w  (%a0)+,(%a1)+
-        dbra    %d7,1b
-        jsr     0xFF0000
+        | 3-button pad on port 1: TH as output, TH = 1 (then bit 5 of the data port is button C, active low)
+        move.b  #0x40,0xA10009
+        move.b  #0x40,0xA10003
+        | jump into the middle of an executed instruction: ovl's long immediate is also executed as NOP; RTS
+        bsr     ovl
+        lea     ovl+2,%a0
+        jsr     (%a0)
         | inline-argument call: two data words follow the JSR
         jsr     inline_args
         .word   0x4E75, 0x4EF9
@@ -124,8 +127,28 @@ never_taken:
         move.w  #0x5678,%d4
         bra   main_loop
 main_loop:
+        move.w  #0x2000,%sr             | interrupts enabled (VBlank)
         addq.l  #1,%d3
-        bra   main_loop
+        btst    #5,0xA10003
+        bne     main_loop               | C not held
+        bsr     call_ram
+        bra     main_loop
+call_ram:
+        lea     ram_routine,%a0
+        lea     0xFF0000,%a1
+        move.w  #(ram_routine_end-ram_routine)/2-1,%d7
+1:      move.w  (%a0)+,(%a1)+
+        dbra    %d7,1b
+        jsr     0xFF0000
+        clr.l   0xFF0000                | the RAM routine is cleared after use
+        clr.w   0xFF0004
+        rts
+ovl:
+        move.l  #0x4E714E75,%d0         | its immediate is NOP; RTS when entered at ovl+2
+        rts
+vblank:
+        addq.l  #1,0xFF0100
+        rte
 inline_args:
         move.l  (%sp)+,%a0
         move.w  (%a0)+,%d2

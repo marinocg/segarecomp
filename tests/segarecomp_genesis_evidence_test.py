@@ -4,9 +4,10 @@
 Covers image identity normalization (plain, 512-byte copier header, SMD interleave, rejection), the VDP DMA reconstruction state machine
 (register writes, two-word commands, M1 gate, fill/copy exclusion, byte-write duplication, cancellation, zero length, 128 KiB window,
 post-transfer source advance), MAME trace and m68k-disasm parsing, direct-flow kinds, executed/static-reach acceptance (two-decoder length
-agreement, overlap, inline-argument calls never extended, conflicts), data assembly (hardware header, DMA/code conflict, Ghidra veto),
-data-read admission (code readers, prefetch shadow, copy origin widened to the copier extent, unaccepted readers), RAM copy origins
-(located, trampoline, unresolved), read-tap key decoding, cell statistics and synthetic soundness scoring.
+agreement, overlap, inline-argument calls never extended, conflicts), data assembly (hardware header, DMA/code conflict, Ghidra veto,
+DR extents), data-read admission (code readers, prefetch shadow, unaccepted readers), the executed-byte mask (a rejected executed PC
+never becomes data), withdrawal of static reach that conflicts with observed data, the SRAM rule, read-tap key decoding, cell statistics,
+synthetic soundness scoring and the frozen-plan invariants.
 """
 
 import pathlib
@@ -194,40 +195,84 @@ def test_build_code():
 def test_assemble_and_reads():
     img = build_case()
     code = {0x200: (6, "E"), 0x206: (2, "E"), 0x300: (2, "E")}
+    block = ge.executed_mask([0x200, 0x206, 0x300], code, len(img))
     typed = {}
-    cls, ext = ge.assemble(img, code, [(0x400, 0x480), (0x2FE, 0x310)], [0x420], typed, {0x600, 0x601})
+    cls, ext = ge.assemble(img, code, block, [(0x400, 0x480), (0x2FE, 0x310)], {0x600, 0x601}, [0x420], typed)
     check(cls[0:0x200] == b"D" * 0x200, "hardware header data")
     check(cls[0x400:0x420] == b"D" * 0x20 and cls[0x420:0x42A] == b"U" * 10 and cls[0x42A] == ord("D"), "Ghidra veto of 10 bytes")
     check(cls[0x2FE] == ord("U") and typed.get("DMA_CODE_CONFLICT") == 1 and any(e["masked"] for e in ext), "DMA over code masked whole")
-    check(cls[0x600] == ord("D") and typed.get("DR_BYTES_ADDED") == 2, "data reads added")
+    check(cls[0x600] == ord("D") and typed.get("DR_BYTES_ADDED") == 2 and {"kind": "DR", "start": 0x600, "end": 0x602, "masked": False} in ext,
+          "data reads added and recorded as a DR extent")
     check(cls[0x200] == ord("I") and cls[0x201:0x206] == b"c" * 5, "I/c")
     readers = {0x200: {0x203, 0x700, 0x701}, 0x206: {0x800, 0x300}, 0x300: {0x900}, 0x999: {0x950}, 0xFF0000: {0x20C, 0xA00}}
     typed = {}
-    dr = ge.data_reads(code, readers, [[0x900, 0x902]], 0x1000, typed)
+    dr = ge.data_reads(code, readers, block, 0x1000, typed)
     check(0x700 in dr and 0x701 in dr and 0x203 not in dr, "own fetch window excluded")
     check(0x800 not in dr and typed.get("DR_CODE_READER") == 1, "a reader of accepted code is excluded")
-    check(0x900 not in dr and typed.get("DR_COPY_ZONE") == 1, "copy origin excluded")
+    check(0x900 in dr, "plain data read admitted")
     check(0x950 not in dr and typed.get("DR_READER_NOT_ACCEPTED") == 1, "unaccepted ROM reader excluded")
     check(0xA00 in dr and 0x20C in dr, "RAM reader admitted for non-code bytes")
     typed = {}
-    dr2 = ge.data_reads(code, {0x300: {0x900, 0x901, 0x902, 0x903}}, [[0x900, 0x902]], 0x1000, typed)
-    check(dr2 == set(), "copy origin widened to the copier's contiguous extent")
-    typed = {}
-    dr3 = ge.data_reads(code, {0x300: {0x206 + 2 + 1}}, [], 0x1000, typed)
+    dr3 = ge.data_reads(code, {0x300: {0x206 + 2 + 1}}, block, 0x1000, typed)
     check(dr3 == set() and typed.get("DR_PREFETCH_SHADOW") == 1, "prefetch shadow after executed code")
 
 
-def test_ram_copy():
+def test_rejected_executed_never_data():
+    # C1 review reproducer: a branch's refill of a REJECTED executed target must not become data
     img = bytearray(0x1000)
-    img[0x500:0x506] = bytes.fromhex("323c11114e75")
-    ram = bytearray(0x10000)
-    ram[0:6] = bytes.fromhex("323c11114e75")
-    ram[0x100:0x106] = bytes.fromhex("4ef900000200")
-    ram[0x200:0x204] = bytes.fromhex("7001")+b"\x4e\x75"
-    c = ge.ram_copy_origin([0xFF0000, 0xFF0004, 0xFF0100], bytes(ram), bytes(img))
-    check(c["located"] == 1 and c["trampolines"] == 1 and c["unresolved"] == 0 and c["zones"] == [[0x500, 0x506]], f"copy origin {c}")
-    c2 = ge.ram_copy_origin([0xFF0200, 0xFF0202], bytes(ram), bytes(img))
-    check(c2["unresolved"] == 1, "RAM code without a ROM origin is unresolved")
+    code = {0x200: (2, "E")}
+    block = ge.executed_mask([0x200, 0x300], code, len(img))
+    check(block[0x300:0x30A] == b"\x01" * 10 and block[0x30A] == 0, "rejected executed PC masks 10 bytes")
+    typed = {}
+    dr = ge.data_reads(code, {0x200: {0x200, 0x201, 0x202, 0x203, 0x300, 0x301, 0x302, 0x303}}, block, len(img), typed)
+    check(dr == set() and typed.get("DR_CODE_READER") == 1, "a reader of rejected executed bytes is a code reader")
+    typed = {}
+    cls, _ = ge.assemble(bytes(img), code, block, [(0x2F0, 0x310)], {0x305}, [], typed)
+    check(cls[0x300:0x30A] == b"U" * 10 and typed.get("DMA_CODE_CONFLICT") == 1 and typed.get("DR_BLOCKED_BYTES") == 1,
+          "DMA extent masked whole and DR byte dropped over executed bytes")
+    check(ge.executed_mask([0x301], {}, 0x1000)[0x300] == 1, "odd executed PC rounds down")
+
+
+def test_execution_inside_rejected_instruction():
+    # G1 finding: the outer instruction is rejected (one decoder cannot decode it) while two instructions executed inside its immediate
+    # decode fine; none of them may be labelled
+    img = bytearray(cart(0x1000))
+    img[0x400:0x406] = bytes.fromhex("203c4e714e75")
+    img[0x406:0x408] = bytes.fromhex("4e75")
+    tok = tokens(img, {0x400: 6, 0x402: 2, 0x404: 2, 0x406: 2})
+    walk = {0x402: (2, "nop"), 0x404: (2, "rts"), 0x406: (2, "rts")}
+    typed = {}
+    code = ge.build_code(bytes(img), [0x400, 0x402, 0x404, 0x406], {}, walk, tok, typed)
+    check(0x402 not in code and 0x404 not in code and code.get(0x406) == (2, "E"), f"execution inside a rejected instruction masked {code}")
+    check(typed.get("E_OVERLAPPING_EXECUTED") == 2 and typed.get("E_DISASM_NO_DECODE") == 1, f"typed {typed}")
+    m = ge.executed_mask([0x400, 0x402, 0x404, 0x406], code, 0x1000, walk, {}, tok)
+    check(m[0x400:0x408] == b"\x01" * 8 and m[0x408] == 0, "rejected extent uses the longest decoder length")
+
+
+def test_r_withdrawn_on_data_conflict():
+    img = build_case()
+    lengths = {0x200: 6, 0x206: 2, 0x208: 4, 0x20C: 2, 0x20E: 2, 0x300: 2, 0x30A: 2}
+    tok = tokens(img, lengths)
+    walk = {pc: (n, "x") for pc, n in lengths.items()}
+    executed = [0x200, 0x206, 0x208, 0x300, 0x30A]
+    code = ge.build_code(img, executed, {}, walk, tok, {})
+    check(code[0x20C][1] == "R" and code[0x20E][1] == "R", "R present before the conflict")
+    typed = {}
+    block = ge.executed_mask(executed, code, len(img))
+    code2, block2 = ge.withdraw_conflicts(img, executed, {}, walk, tok, code, block, {0x20C}, [], typed)
+    check(0x20C not in code2 and 0x20E not in code2 and typed.get("R_DATA_CONFLICT") == 1, "conflicting R and its R-only successor withdrawn")
+    check(block2[0x20C] == 1 and block2[0x20D] == 1, "withdrawn bytes blocked from data")
+    cls, _ = ge.assemble(img, code2, block2, [], {0x20C}, [], typed)
+    check(cls[0x20C] == ord("U"), "conflict byte stays unknown")
+
+
+def test_sram_rule():
+    img = cart(0x400000)
+    img[0x1B0:0x1B2] = b"RA"
+    check(raises(ge.identity, bytes(img)), "declared SRAM over a >2 MiB image rejected")
+    small = cart()
+    small[0x1B0:0x1B2] = b"RA"
+    check(ge.identity(bytes(small))["sram_declared"], "declared SRAM recorded")
 
 
 def test_stats_and_score():
@@ -245,16 +290,17 @@ def test_stats_and_score():
 def test_plan_frozen():
     if ge.PLAN.exists():
         try:
-            ge.verify_plan()
+            ge.verify_plan_static()
         except ge.EvidenceError as e:
             check(False, f"frozen plan no longer verifies: {e}")
         doc = __import__("json").loads(ge.PLAN.read_text())
-        check(doc["gates"]["G1_synthetic_soundness"].startswith("0 wrong"), "G1 is soundness on the synthetic fixture")
+        check("0 wrong I, c or D" in doc["gates"]["G1_synthetic_soundness"], "G1 is soundness on the synthetic fixture")
         check(doc["scenarios"] == ge.SCENARIOS and doc["replicas"] == 2, "frozen scenarios and replicas")
 
 
 def main():
-    for t in (test_plan_frozen, test_identity, test_vdp, test_parsers, test_flow, test_build_code, test_assemble_and_reads, test_ram_copy, test_stats_and_score):
+    for t in (test_plan_frozen, test_identity, test_vdp, test_parsers, test_flow, test_build_code, test_assemble_and_reads,
+              test_rejected_executed_never_data, test_execution_inside_rejected_instruction, test_r_withdrawn_on_data_conflict, test_sram_rule, test_stats_and_score):
         t()
     print("FAILURES:", len(FAILURES))
     return 1 if FAILURES else 0

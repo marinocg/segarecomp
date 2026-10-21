@@ -1,12 +1,16 @@
 {
+ "amendments": "a rule change after the freeze requires a recorded amendment (ADR), a re-freeze and a G1 rerun; results of the replaced plan are reported, never silently replaced",
+ "asm_image_id": "sha256:175a3aba35bcc4801c2b5680fadeef3dc38993bdce45b470dd0810066b7626e3",
  "binding": "T001 self-assesses; T002 (independent) owns the binding class",
  "bound_code": {
-  "tests/fixtures/genesis_evidence/synthetic_cart.s": "e8e2f2dbbe4bb4c5b6ea5866f5247662ef7122f210be3fcfac88f6d146636d61",
-  "tests/segarecomp_genesis_evidence_test.py": "84fb6fcafe900807ed3e0dabb2ccec4b582c63b29a8843b0de05dea66180129e",
+  "tests/fixtures/genesis_evidence/synthetic_cart.s": "a901f147f5dd0fe4812ffb0b7e872138912ab2fce02f2d4ba1754efc15afb0b3",
+  "tests/segarecomp_genesis_evidence_test.py": "44d5be9511d2edea898507f12eabb9ac629c21906b8d558cb50ed08d878c6d7c",
+  "tools/ghidra.py": "4878ac9c095013588acd9a2814a5dbb74989a77921d03a1064d2e5516d3dd187",
   "tools/ghidra/scripts/ExportCodeEntryCandidates.java": "24972a3af0a5ee68e0f4285d32fde59b3c6c73d7628cda5423ee854925fa8343",
   "tools/ghidra/scripts/PinAnalysisRecipe.java": "f7435d0c965ec85bad7d2b07000a18eb64bf219a7c4c0d343267367022973c79",
   "tools/segarecomp_genesis_evidence.Dockerfile": "ef1c6aeb8958a6066fc550135e51b730b52d0c79d63987141ef1f91ebbb2b661",
-  "tools/segarecomp_genesis_evidence.py": "b79479f7dbf9c7dbe7eec9805dd341ea93b8f9f0787f69f5907be2f37bfa71d0",
+  "tools/segarecomp_genesis_evidence.py": "d7d3a503b52b96e076aca9018b64bf06cb28ed5e0e132c9a0ebb6c9d99651d27",
+  "tools/segarecomp_ml_region_gen2.py": "5b5e07c6b6a2ae3af3a1a45aead275a23bd110a25bbfbf5efd73307d817650d3",
   "tools/segarecomp_ml_v3_data.py": "90537880773627c1c1babcd2e36c2234325cf04c9e900afb07a6ab85bcd8097f",
   "tools/segarecomp_xplat_corpus.py": "e348a6e1ddb26f8944a9bb036cb86c20ccb63da703e38c84ed210391e296aec3",
   "tools/segarecomp_xplat_formats.py": "6e856b08d6f7bcf17ca282a7160b00dacd68c5e2199ff030368dbeceef704dc2"
@@ -15,24 +19,28 @@
  "classes": {
   "PARTIAL": "G1-G5 hold, positive cells >= 5% of cells, but U1, U2, U3 or C1 fails (usable with documented limitation)",
   "PROCEED": "G1-G5 hold and U1, U2, U3 and C1 hold",
-  "STOP": "any of G1-G4 fails after at most one bounded correction cycle, or positive cells < 5% of cells"
+  "STOP": "any of G1-G5 fails, or positive cells < 5% of cells"
  },
+ "cli_sha256": "357f8a23d7b09e2f416703be49d347cd6be83a4d8cf460d0cec3f3e8766cbe28",
  "cost": {
   "C1_cpu_hours_per_title_max": 10.0,
+  "C1_definition": "sum of single-CPU container wall time (traces, Ghidra -max-cpu 1) plus label wall time",
   "per_container": "1 CPU, 2 GiB",
   "trace_timeout_seconds": 7200
  },
+ "disclosure": "the DR tier and the 480 s play length were chosen after a bounded 60 s Chuck Rock preflight (aggregate counts only: low DMA-sourced data, read-tap throughput); no rule was tuned on labels",
  "evidence_image_id": "sha256:9bff87059ee6d06f3233d4e3feacb7c5500183f7b4abe5df0b9ffe73b8ce26e9",
  "evidence_tiers": {
   "D": [
    "HW_HEADER: 0x000-0x1FF vector table and cartridge header",
-   "DMA: observed 68K-bus VDP DMA sources inside the image (control-port reconstruction; an extent overlapping accepted code is masked whole)",
-   "DR: observed CPU data reads by an accepted executed reader (or RAM code) that never reads accepted code outside its own fetch window, outside the 4-byte prefetch shadow after executed code and outside copy origins of RAM-executed code widened to the copier's contiguous read extent; disabled for the image when any non-trampoline RAM-executed run has no ROM origin",
+   "DMA: observed 68K-bus VDP DMA sources inside the image (control-port reconstruction)",
+   "DR: observed data reads (program-space read tap, current-PC attribution) by an accepted executed reader or RAM code that never reads code bytes (accepted code or any executed PC's bytes) outside its own fetch window, excluding the 4-byte prefetch shadow after executed code; Z80/VDP bus reads are 68000 data; DR is disabled for the image when any scenario executes code from work RAM",
+   "no data byte overlaps an executed PC's bytes (accepted span, or [pc, pc+10) when rejected); HW/DMA extents touching code or such bytes are masked whole",
    "Ghidra veto: an ADR-0025 code-entry candidate inside data unlabels the next 10 bytes"
   ],
   "I/c": [
    "E executed: MAME 0.276 trace of :maincpu, PC inside the image, m68k-disasm (walk decode at that PC, else traced) and the CPU-owned decoder agree on the length; odd PCs, disagreements and overlapping executed spans are masked",
-   "R static reach: direct Bcc/BRA/BSR/DBcc/JMP/JSR(abs.w|abs.l|d16(PC)) targets and fall-through of non-call/trap, non-terminating instructions (calls/traps only when the return site was executed), from accepted code, with m68k-disasm walk + CPU-owned decoder length agreement and no overlap"
+   "R static reach: direct Bcc/BRA/BSR/DBcc/JMP/JSR(abs.w|abs.l|d16(PC)) targets and fall-through of non-call/trap, non-terminating instructions (calls/traps only when the return site was executed), from accepted code, with m68k-disasm walk + CPU-owned decoder length agreement and no overlap; withdrawn (with R reached only through it) when it conflicts with observed data, the conflict bytes becoming U"
   ],
   "U": "everything else; unknown is never a negative",
   "excluded": [
@@ -42,14 +50,15 @@
    "model scores",
    "agent judgement",
    "Ghidra as a label source (veto/disagreement only)",
-   "sega2asm (not selected for the pilot: no gap it fills)"
+   "sega2asm (not selected for the pilot: no gap it fills)",
+   "RAM-to-ROM copy inference"
   ]
  },
  "gates": {
-  "G1_synthetic_soundness": "0 wrong I, c or D bytes on the committed synthetic cartridge vs its GNU as listing truth",
-  "G2_determinism": "both replicas of every scenario have identical PC, DMA and read digests",
+  "G1_synthetic_soundness": "`g1`: 0 wrong I, c or D bytes on the committed synthetic cartridge vs its GNU as listing truth, for both the attract scenario (data reads active) and the play scenario (RAM execution disables data reads)",
+  "G2_determinism": "both replicas of every scenario have identical PC, DMA and read digests (computed; a failure is reported, never dropped)",
   "G3_mapping": "MAME ROM view equals the image (0 mismatched words) and no executed cartridge-space PC beyond the image",
-  "G4_decoder_consistency": "E rejections (no decode, CPU-decoder rejection, length disagreement, overlap) <= 2% of executed ROM PCs",
+  "G4_decoder_consistency": "sum of E_* rejections / distinct executed cartridge-space PCs <= 0.02 (rejected bytes are masked from data)",
   "G5_reproduction": "an independent validator (T002) re-runs label from the retained scenario evidence and obtains the same classes digest"
  },
  "ghidra_image_id": "sha256:045567d6bd7e1ea718577fd53b81b8e11067d2047416a1b07637a67ac1060266",
@@ -57,7 +66,7 @@
   "lineage": "G077-01",
   "raw_sha256": "d4cd7003c104f77bf9a9a78f43067f15a63f23925bc77746d0fdde419f594dc4",
   "raw_size": 1048576,
-  "reset": 512,
+  "reset_in_image": true,
   "title": "Chuck Rock (USA)"
  },
  "replicas": 2,
@@ -67,8 +76,8 @@
   "unknown bytes",
   "positive/negative/masked/mixed/hard-negative cells",
   "typed rejections",
-  "tool disagreement rates (E decode, Ghidra-in-data, DMA vs read-tap agreement, m68k-disasm walk instructions not admitted)",
-  "per-scenario coverage and saturation",
+  "tool disagreement rates (E decode, Ghidra-in-data, DMA vs read-tap agreement)",
+  "per-scenario coverage and marginal new PCs in plan order (saturation)",
   "replica determinism",
   "wall and CPU cost per stage"
  ],
@@ -101,7 +110,7 @@
   }
  ],
  "schema": "segarecomp.genesis_evidence.v1.plan",
- "status": "frozen before the first full Chuck Rock analysis",
+ "status": "frozen before the first full Chuck Rock analysis (revision 2: independent C1 review findings applied before any full analysis)",
  "stop_classes": [
   "INPUT_REQUIRED",
   "RETENTION_DECISION_REQUIRED",

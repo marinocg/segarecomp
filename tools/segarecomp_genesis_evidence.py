@@ -14,28 +14,37 @@ U is never a negative. Each label needs evidence from outside the production dec
                        itself executed (inline-argument calls never extend code);
                    and decoded with the same length by m68k-disasm's walk/follow mode and the CPU-owned decoder, with no overlap
                    with accepted code. m68k-disasm's own walk is a candidate source only: it decodes inline data after calls.
-  D  data          hardware-defined vector table + cartridge header (0x000-0x1FF), and ROM bytes that were the source of an observed
-                   68K->VDP DMA. The DMA is reconstructed from the trace-time VDP control-port write stream with the documented
-                   register semantics. A DMA extent that overlaps accepted code is masked whole; a Ghidra code-entry candidate
-                   (unchanged ADR-0025 recipe) inside data vetoes the following 10 bytes.
-  U  unknown       everything else, including ROM bytes of code copied to RAM and executed there (no validated copy relation), bytes
-                   that only bounded scenarios did not execute, and any contradiction.
+  D  data          HW: the vector table + cartridge header (0x000-0x1FF).
+                   DMA: ROM bytes that were the source of an observed 68K->VDP DMA, reconstructed from the trace-time VDP control-port
+                        write stream with the documented register semantics.
+                   DR: ROM bytes observed as data reads (MAME program-space read tap, attributed to the current PC), by an accepted
+                        executed reader or by RAM code that never reads code (accepted code or any executed PC's bytes) outside its own
+                        fetch window; bytes in the 4-byte prefetch shadow after executed code are excluded. Reads that pass through
+                        the 68000 bus on behalf of the Z80 or the VDP are data for the 68000 (Z80 code is 68000 data here). DR is
+                        disabled for the whole image when any scenario executes code from work RAM (no copy relation is inferred).
+                   Vetoes: no data byte may overlap an executed PC's bytes (accepted span, or [pc, pc+10) when the executed PC was
+                   rejected); an HW/DMA extent overlapping code or executed bytes is masked whole; a DR byte overlapping them is
+                   dropped; an R instruction that conflicts with observed data is withdrawn together with every R instruction reached
+                   only through it, and the conflicting data bytes become U; a Ghidra code-entry candidate (unchanged ADR-0025
+                   recipe) inside data unlabels the following 10 bytes.
+  U  unknown       everything else, including ROM bytes of code copied to RAM, bytes that the bounded scenarios did not execute, and
+                   every contradiction.
 
-Excluded evidence, with the reason recorded in the frozen protocol: CPU data-read taps/watchpoints (MAME reports opcode fetches and VDP
-DMA reads through the same path, and checksum/copy loops read code), byte-exact reassembly (`dc.b` reproduces anything), decoder
-agreement alone (validity, not intent), non-execution (never data), and any model score.
+Excluded evidence: decoder agreement alone (validity, not intent), non-execution (never data), byte-exact reassembly (`dc.b`
+reproduces anything), any model score, agent judgement, and Ghidra as a label source.
 
 Subcommands:
   identity     raw/normalized image identity (plain, 512-byte copier header, SMD interleave), vectors, header checks
   trace        one deterministic scenario under MAME in the pinned offline container: deduplicated ROM/RAM PCs (the trace is
                streamed through a FIFO, never stored), reconstructed ROM DMA extents, and a ROM mapping check
   ghidra       the unchanged pinned Ghidra recipe (ExportCodeEntryCandidates) run directly in its image, offline
-  label        union of scenario evidence -> sample directory (image ref, classes.bin, tokens.bin, seeds.json, relocs.json, spans.json,
-               meta.json) + evidence.json
+  label        union of scenario evidence -> sample directory (image ref, classes.bin, tokens.bin, seeds.json, relocs.json, spans.json
+               with per-tier code starts and data extents, meta.json)
   report       sanitized aggregate report (no addresses, bytes or listings)
   synthetic    label the authored synthetic cartridge and score every label against its GNU as listing truth
   run-title    the frozen protocol for one title: every scenario x replica in parallel (resumable: a completed run directory is reused
                only when its trace.json is complete), Ghidra, the replica determinism check, then label from replica A
+  g1           gate G1: assemble the fixture, trace both G1 scenarios, label and score each against the listing truth
   freeze       write the pilot protocol (tools/segarecomp_genesis_evidence.t001.plan.json + .digest) binding code and fixture digests
   verify-plan  fail unless the committed plan, its digest and every bound file still agree
 
@@ -66,7 +75,9 @@ CART_SPACE = 0x400000
 RAM_START = 0xE00000          # 64 KiB work RAM mirrored through 0xE00000-0xFFFFFF
 GHIDRA_VETO_BYTES = 10        # longest MC68000 instruction
 MAX_IMAGE = 0x400000          # m68k-disasm limit and linear cartridge space
-EXTRACTION_VERSION = 1
+EXTRACTION_VERSION = 2
+EXEC_MASK_BYTES = 10          # bytes masked from data after an executed PC whose length was not accepted
+SRAM_WINDOW = 0x200000        # cartridge SRAM is conventionally paged in at 0x200000
 
 
 class EvidenceError(Exception):
@@ -134,12 +145,15 @@ def identity(raw: bytes) -> dict:
         raise EvidenceError("IMAGE_TOO_LARGE: banked/mapper cartridges are outside the linear-map protocol")
     if len(img) % 2:
         raise EvidenceError("ODD_IMAGE_SIZE")
+    sram = img[0x1B0:0x1B2] == b"RA"
+    if sram and len(img) > SRAM_WINDOW:
+        raise EvidenceError("SRAM_OVERLAPS_IMAGE: declared SRAM pages over ROM above 0x200000; outside the linear-map protocol")
     reset, ssp = u32(img, 4), u32(img, 0)
     rom_start, rom_end = u32(img, 0x1A0), u32(img, 0x1A4)
     return {"raw_size": len(raw), "raw_sha256": sha256(raw), "format": fmt, "size": len(img), "sha256": sha256(img),
             "reset": reset, "ssp": ssp, "reset_in_image": reset is not None and 0 <= reset < len(img) and reset % 2 == 0,
             "header_rom_start": rom_start, "header_rom_end": rom_end,
-            "header_rom_end_matches": rom_end is not None and rom_end + 1 == len(img)}
+            "header_rom_end_matches": rom_end is not None and rom_end + 1 == len(img), "sram_declared": sram}
 
 
 # ---------------------------------------------------------------------------------------------------------------------------- VDP
@@ -263,50 +277,40 @@ def unranges(rs) -> set[int]:
     return {k for s0, e0 in rs for k in range(s0, e0)}
 
 
-TRAMPOLINE_FIRST_WORDS = {0x4EF9, 0x4EB9, 0x4EF8, 0x4EB8}
-
-
-def ram_copy_origin(ram_pcs: list[int], ram: bytes, img: bytes) -> dict:
-    """Locate the ROM origin of code executed from work RAM. Executed RAM PCs are grouped into runs (gap <= 10 bytes); a run's bytes from
-    the end-of-run RAM image (first PC to last PC + 2) must occur verbatim in the ROM image; every occurrence is a copy origin. (The
-    data-read rule widens each origin to the whole contiguous read extent of every reader that read it: the copier's source block.) A single absolute JMP/JSR or BRA trampoline (<= 6 bytes, written by code) is exempt. Any other run without
-    a ROM occurrence is unresolved, which disables data-read evidence for the whole image (fail closed)."""
-    offs = sorted({pc & 0xFFFF for pc in ram_pcs})
-    runs = []
-    for o in offs:
-        if runs and o - runs[-1][1] <= 10:
-            runs[-1][1] = o
-        else:
-            runs.append([o, o])
-    zones, unresolved, trampolines, located = [], 0, 0, 0
-    for a, b in runs:
-        chunk = ram[a:b + 2]
-        first = (chunk[0] << 8) | chunk[1] if len(chunk) >= 2 else None
-        if b - a <= 4 and first is not None and (first in TRAMPOLINE_FIRST_WORDS or first & 0xFF00 == 0x6000):
-            trampolines += 1
-            continue
-        if len(chunk) < 4:
-            chunk = ram[a:a + 4]
-        hits, i = [], img.find(chunk)
-        while i >= 0:
-            hits.append(i)
-            i = img.find(chunk, i + 1)
-        if not hits:
-            unresolved += 1
-            continue
-        located += 1
-        zones += [[h, h + len(chunk)] for h in hits]
-    return {"runs": len(runs), "trampolines": trampolines, "located": located, "unresolved": unresolved, "zones": sorted(zones)}
-
-
 PREFETCH_SHADOW = 4
 
 
-def data_reads(code: dict, readers: dict[int, set[int]], copy_zones: list, size: int, typed: dict) -> set[int]:
+def rejected_extent(pc: int, walk: dict, traced: dict, tokens: bytes) -> int:
+    """Byte extent assumed for an executed PC whose length was not accepted: the longest length either decoder reports there, else 10."""
+    lens = [x[0] for x in (walk.get(pc), traced.get(pc)) if x] + [token_len(tokens, pc) or 0]
+    return max(lens) if max(lens) > 0 else EXEC_MASK_BYTES
+
+
+def executed_mask(executed: list[int], code: dict, size: int, walk: dict | None = None, traced: dict | None = None,
+                  tokens: bytes = b"") -> bytearray:
+    """Bytes of every executed cartridge PC inside the image: the accepted span, else its rejected extent (see rejected_extent; odd PCs
+    are rounded down and use 10 bytes). No data label may overlap these bytes."""
+    m = bytearray(size)
+    for pc in executed:
+        if pc >= size:
+            continue
+        lo = pc & ~1
+        if pc in code and code[pc][1] == "E":
+            n = code[pc][0]
+        elif pc & 1:
+            n = EXEC_MASK_BYTES
+        else:
+            n = rejected_extent(pc, walk or {}, traced or {}, tokens)
+        for k in range(lo, min(size, lo + n)):
+            m[k] = 1
+    return m
+
+
+def data_reads(code: dict, readers: dict[int, set[int]], exec_mask: bytearray, size: int, typed: dict) -> set[int]:
     """DR bytes: observed data reads (see module doc). `code` = accepted {pc: (len, tier)}; readers = union of scenarios."""
     def bump(k, n=1):
         typed[k] = typed.get(k, 0) + n
-    code_bytes = bytearray(size)
+    code_bytes = bytearray(exec_mask)
     shadow = bytearray(size)
     for pc, (n, tier) in code.items():
         for k in range(pc, pc + n):
@@ -314,16 +318,6 @@ def data_reads(code: dict, readers: dict[int, set[int]], copy_zones: list, size:
         if tier == "E":
             for k in range(pc + n, min(size, pc + n + PREFETCH_SHADOW)):
                 shadow[k] = 1
-    excluded = bytearray(size)
-    for s0, e0 in copy_zones:
-        for k in range(s0, min(e0, size)):
-            excluded[k] = 1
-    origin = bytes(excluded)
-    for addrs in readers.values():                 # widen each copy origin to its copier's contiguous source extent
-        for s0, e0 in ranges(sorted(addrs)):
-            if any(origin[s0:e0]):
-                for k in range(s0, e0):
-                    excluded[k] = 1
     out = set()
     for pc, addrs in sorted(readers.items()):
         if pc < CART_SPACE:
@@ -340,8 +334,6 @@ def data_reads(code: dict, readers: dict[int, set[int]], copy_zones: list, size:
         for a in own:
             if shadow[a]:
                 bump("DR_PREFETCH_SHADOW")
-            elif excluded[a]:
-                bump("DR_COPY_ZONE")
             else:
                 out.add(a)
     return out
@@ -417,9 +409,6 @@ local function on_stop()
   local r = io.open("/out/reads.txt", "w")
   for k in pairs(rd) do r:write(string.format("%x\n", k)) end
   r:close()
-  local ram = {}
-  for a = 0xFF0000, 0xFFFFFF do ram[#ram + 1] = string.char(sp:read_u8(a)) end
-  local rf = io.open("/out/ram.bin", "wb") rf:write(table.concat(ram)) rf:close()
   local mis, words = 0, 0
   local f = io.open("/in/rom.bin", "rb")
   local rom = f:read("a") f:close()
@@ -492,11 +481,23 @@ def stage_image(rom: pathlib.Path, work: pathlib.Path) -> tuple[pathlib.Path, di
     return p, ident
 
 
+def container_dir(p: pathlib.Path, uid: int = 1000) -> None:
+    """Writable by the container user only, not world-writable (uid 1000: evidence image; 10001: Ghidra image)."""
+    if os.geteuid() == 0:
+        os.chown(p, uid, uid)
+        p.chmod(0o770)
+    else:
+        p.chmod(0o777)
+
+
 def cmd_trace(a) -> int:
     out = pathlib.Path(a.out)
+    require_private(out.parent if not out.exists() else out)
+    plan = verify_plan_doc() if PLAN.exists() else None
+    if plan and docker_image_id(EVIDENCE_IMAGE) != plan["evidence_image_id"]:
+        raise EvidenceError("evidence image differs from the frozen plan")
     out.mkdir(parents=True, exist_ok=False)
-    require_private(out)
-    out.chmod(0o777)
+    container_dir(out)
     inp = out / "in"
     inp.mkdir()
     img_path, ident = stage_image(pathlib.Path(a.rom), inp)
@@ -505,7 +506,7 @@ def cmd_trace(a) -> int:
     (inp / "trace.sh").write_text(TRACE_SH)
     for p in (inp, inp / "scenario.lua", inp / "trace.sh"):
         p.chmod(0o755 if p.is_dir() else 0o644)
-    t0, c0 = time.time(), os.times()
+    t0 = time.time()
     cmd = ["docker", "run", "--rm", "--network", "none", "--user", "1000:1000", "--cpus", "1", "--memory", "2g",
            "-e", f"SECONDS_TO_RUN={int(sc['seconds'])}",
            "-v", f"{img_path}:/in/rom.bin:ro", "-v", f"{inp / 'scenario.lua'}:/in/scenario.lua:ro", "-v", f"{inp / 'trace.sh'}:/in/trace.sh:ro",
@@ -521,7 +522,6 @@ def cmd_trace(a) -> int:
     ext = vdp.rom_extents(ident["size"])
     rom_pcs = sorted(first["rom"])
     reads = parse_reads((out / "reads.txt").read_text().split(), ident["size"])
-    copy = ram_copy_origin(first["ram"], (out / "ram.bin").read_bytes(), img_path.read_bytes())
     dma_bytes = {k for s0, e0 in ext for k in range(s0, e0)}
     read_bytes = set()
     for addrs in reads.values():
@@ -531,23 +531,21 @@ def cmd_trace(a) -> int:
     reads_digest = sha256(json.dumps(sorted((pc, sorted(a)) for pc, a in reads.items())).encode())
     res = {"schema": SCHEMA + ".trace", "scenario": sc, "image": ident, "emulator": {"image": EVIDENCE_IMAGE, "image_id": docker_image_id(EVIDENCE_IMAGE),
            "machine": "genesis", "cpu": MAME_CPU}, "extraction_version": EXTRACTION_VERSION,
-           "frames": int(run["frames"]), "map_words": int(run["map_words"]), "map_mismatch": int(run["map_mismatch"]),
+           "plan_sha256": sha256(PLAN.read_bytes()) if plan else None, "frames": int(run["frames"]), "map_words": int(run["map_words"]), "map_mismatch": int(run["map_mismatch"]),
            "rom_pcs": len(rom_pcs), "rom_pcs_beyond_image": sum(1 for p in rom_pcs if p >= ident["size"]),
            "ram_pcs": len(first["ram"]), "other_pcs": first["other"], "readers": len(reads),
-           "read_bytes": len(read_bytes), "dma_bytes_seen_by_read_tap": len(dma_bytes & read_bytes), "ram_copy": {k: v for k, v in copy.items() if k != "zones"}, "dma_events": sum(vdp.events.values()), "dma_distinct": len(vdp.events),
+           "read_bytes": len(read_bytes), "dma_bytes_seen_by_read_tap": len(dma_bytes & read_bytes), "dma_events": sum(vdp.events.values()), "dma_distinct": len(vdp.events),
            "dma_rom_extents": len(ext), "dma_rom_bytes": sum(e - s for s, e in ext), "pcs_sha256": pcs_digest, "dma_sha256": dma_digest, "reads_sha256": reads_digest,
            "wall_seconds": round(wall, 1)}
     (out / "pcs.json").write_text(json.dumps({"rom": {str(k): v for k, v in sorted(first["rom"].items())}, "ram": first["ram"]}))
     (out / "reads.json").write_text(json.dumps({str(pc): ranges(sorted(a)) for pc, a in sorted(reads.items())}))
-    (out / "copy.json").write_text(json.dumps(copy))
     (out / "reads.txt").unlink()
-    (out / "ram.bin").unlink()
     (out / "dma.json").write_text(json.dumps({"events": [[s, n, c] for (s, n), c in sorted(vdp.events.items())], "rom_extents": ext}))
     (out / "trace.json").write_text(json.dumps(res, indent=1, sort_keys=True))
     (out / "vdp.log").unlink()            # raw bus log is not retained; the reconstructed events are
     (out / "pcs_first.txt").unlink()
     print(json.dumps({k: res[k] for k in ("frames", "map_mismatch", "rom_pcs", "ram_pcs", "dma_rom_extents", "dma_rom_bytes", "readers",
-                                          "read_bytes", "dma_bytes_seen_by_read_tap", "ram_copy",
+                                          "read_bytes", "dma_bytes_seen_by_read_tap",
                                           "pcs_sha256", "dma_sha256", "reads_sha256", "wall_seconds")}))
     return 0
 
@@ -638,19 +636,24 @@ def flow(img: bytes, pc: int, length: int) -> tuple[list[int], str]:
     return [], "normal"
 
 
-def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens: bytes, typed: dict) -> dict[int, tuple[int, str]]:
-    """Accepted instructions {pc: (length, tier)} with tier E (executed) or R (direct-flow static reach)."""
+def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens: bytes, typed: dict,
+               forbidden: frozenset = frozenset()) -> dict[int, tuple[int, str]]:
+    """Accepted instructions {pc: (length, tier)} with tier E (executed) or R (direct-flow static reach). `forbidden` R starts (withdrawn
+    after a conflict with observed data) are never accepted, so R reached only through them disappears too."""
     def bump(k):
         typed[k] = typed.get(k, 0) + 1
     size = len(img)
     cand = {}
+    rejected = {}
     for pc in executed:
         if pc & 1:
             bump("E_ODD_PC")
+            rejected[pc & ~1] = EXEC_MASK_BYTES
             continue
         if pc >= size:
             bump("E_BEYOND_IMAGE")
             continue
+        rejected[pc] = rejected_extent(pc, walk, traced, tokens)
         # m68k-disasm's traced mode sometimes prints a traced location as a raw `.short`; its walk mode decodes the same address as
         # an instruction. The decode at that exact address is used either way.
         t = walk.get(pc) or traced.get(pc)
@@ -668,14 +671,22 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
             bump("E_SPAN_BEYOND_IMAGE")
             continue
         cand[pc] = tl
-    owner = {}
+        del rejected[pc]
+    # overlap among ALL executed PCs: a candidate whose span contains another executed PC, or that starts inside a rejected executed
+    # PC's extent, is masked (with the candidate it overlaps)
+    starts = sorted(set(cand) | set(rejected))
     bad = set()
-    for pc in sorted(cand):
-        for k in range(pc, pc + cand[pc]):
-            if k in owner and owner[k] != pc:
+    for pc in starts:
+        n = cand.get(pc) or rejected[pc]
+        for q in starts:
+            if q <= pc:
+                continue
+            if q >= pc + n:
+                break
+            if q in cand:
+                bad.add(q)
+            if pc in cand:
                 bad.add(pc)
-                bad.add(owner[k])
-            owner.setdefault(k, pc)
     for pc in bad:
         bump("E_OVERLAPPING_EXECUTED")
     acc = {pc: (n, "E") for pc, n in cand.items() if pc not in bad}
@@ -701,6 +712,9 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
                 if s & 1 or s < HEADER_END or s >= size:
                     bump("R_TARGET_OUTSIDE")
                     continue
+                if s in forbidden:
+                    bump("R_WITHDRAWN_DATA_CONFLICT")
+                    continue
                 w = walk.get(s)
                 tl = token_len(tokens, s)
                 if w is None:
@@ -721,7 +735,28 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
 
 
 # --------------------------------------------------------------------------------------------------------------------------- labels
-def assemble(img: bytes, code: dict, dma_extents: list, ghidra: list[int], typed: dict, dr: set[int] | None = None) -> tuple[bytearray, list]:
+def withdraw_conflicts(img, executed, traced, walk, tokens, code, exec_mask, dr, dma_ext, typed):
+    """Observed data outranks static reach: an R instruction overlapping observed data (HW header, DMA source, DR byte) is withdrawn, with
+    every R instruction reached only through it (rebuild with it forbidden); its bytes are blocked from data and stay U."""
+    size = len(img)
+    observed = set(dr)
+    for s0, e0 in [(0, min(HEADER_END, size))] + list(dma_ext):
+        observed.update(range(s0, e0))
+    conflict = sorted(pc for pc, (n, t) in code.items() if t == "R" and any(k in observed for k in range(pc, pc + n)))
+    block = bytearray(exec_mask)
+    if conflict:
+        typed["R_DATA_CONFLICT"] = len(conflict)
+        for pc in conflict:
+            for k in range(pc, pc + code[pc][0]):
+                block[k] = 1
+        code = build_code(img, executed, traced, walk, tokens, {}, frozenset(conflict))
+    return code, block
+
+
+def assemble(img: bytes, code: dict, block: bytearray, dma_extents: list, dr: set[int], ghidra: list[int],
+             typed: dict) -> tuple[bytearray, list]:
+    """classes + data extents. `block` marks bytes that may never be data (executed PCs' bytes, withdrawn R spans); accepted code bytes
+    block data as well. An HW/DMA extent touching a blocked or code byte is masked whole; a blocked DR byte is dropped."""
     def bump(k, n=1):
         typed[k] = typed.get(k, 0) + n
     size = len(img)
@@ -732,20 +767,23 @@ def assemble(img: bytes, code: dict, dma_extents: list, ghidra: list[int], typed
             cls[k] = ord("c")
     extents = []
     hw = (0, min(HEADER_END, size))
-    for kind, (s, e) in [("HW_HEADER", hw)] + [("DMA", x) for x in dma_extents]:
-        if any(cls[k] in b"Ic" for k in range(s, e)):
+    for kind, (s0, e0) in [("HW_HEADER", hw)] + [("DMA", x) for x in dma_extents]:
+        if any(cls[k] in b"Ic" or block[k] for k in range(s0, e0)):
             bump(f"{kind}_CODE_CONFLICT")
-            extents.append({"kind": kind, "start": s, "end": e, "masked": True})
+            extents.append({"kind": kind, "start": s0, "end": e0, "masked": True})
             continue
-        for k in range(s, e):
+        for k in range(s0, e0):
             cls[k] = ord("D")
-        extents.append({"kind": kind, "start": s, "end": e, "masked": False})
-    dr_new = 0
-    for a in sorted(dr or ()):
-        if cls[a] == ord("U"):
+        extents.append({"kind": kind, "start": s0, "end": e0, "masked": False})
+    added = []
+    for a in sorted(dr):
+        if block[a] or cls[a] in b"Ic":
+            bump("DR_BLOCKED_BYTES")
+        elif cls[a] == ord("U"):
             cls[a] = ord("D")
-            dr_new += 1
-    typed["DR_BYTES_ADDED"] = dr_new
+            added.append(a)
+    typed["DR_BYTES_ADDED"] = len(added)
+    extents += [{"kind": "DR", "start": s0, "end": e0, "masked": False} for s0, e0 in ranges(added)]
     for a in ghidra:
         if 0 <= a < size and cls[a] == ord("D"):
             bump("GHIDRA_CODE_IN_DATA")
@@ -785,7 +823,7 @@ def cell_stats(cls: bytes, img: bytes, tokens: bytes) -> dict:
 def load_scenarios(runs: list[pathlib.Path], size: int, sha: str):
     pcs, ext, info = set(), set(), []
     readers: dict[int, set[int]] = {}
-    zones, unresolved = [], 0
+    ram_exec = 0
     for r in runs:
         t = json.loads((r / "trace.json").read_text())
         if t["image"]["sha256"] != sha:
@@ -797,17 +835,18 @@ def load_scenarios(runs: list[pathlib.Path], size: int, sha: str):
         ext.update(tuple(x) for x in json.loads((r / "dma.json").read_text())["rom_extents"])
         for pc, rs in json.loads((r / "reads.json").read_text()).items():
             readers.setdefault(int(pc), set()).update(unranges(rs))
-        cp = json.loads((r / "copy.json").read_text())
-        zones += cp["zones"]
-        unresolved += cp["unresolved"]
+        ram_exec += t["ram_pcs"]
         info.append({k: t[k] for k in ("scenario", "frames", "rom_pcs", "ram_pcs", "dma_rom_extents", "pcs_sha256", "dma_sha256", "wall_seconds")})
-    return sorted(pcs), sorted(ext), info, readers, zones, unresolved
+    return sorted(pcs), sorted(ext), info, readers, ram_exec
 
 
 def label(rom: pathlib.Path, runs: list[pathlib.Path], ghidra_json: pathlib.Path | None, cli: str, out: pathlib.Path, lineage: str,
           sid: str) -> dict:
-    require_private(out)
-    plan_digest = verify_plan() if PLAN.exists() else None
+    require_private(out.parent if not out.exists() else out)
+    plan = verify_plan_doc() if PLAN.exists() else None
+    plan_digest = sha256(PLAN.read_bytes()) if plan else None
+    if plan and sha256(pathlib.Path(cli).read_bytes()) != plan["cli_sha256"]:
+        raise EvidenceError("decoder CLI differs from the frozen plan")
     out.mkdir(parents=True, exist_ok=False)
     work = out / ".work"
     work.mkdir()
@@ -815,7 +854,7 @@ def label(rom: pathlib.Path, runs: list[pathlib.Path], ghidra_json: pathlib.Path
     img_path, ident = stage_image(rom, work)
     img = img_path.read_bytes()
     t0 = time.time()
-    executed, dma_ext, info, readers, zones, unresolved = load_scenarios(runs, len(img), ident["sha256"])
+    executed, dma_ext, info, readers, ram_exec = load_scenarios(runs, len(img), ident["sha256"])
     traced = run_disasm(img_path, executed, False, work)
     walk = run_disasm(img_path, executed, True, work)
     tokens = tokens_for(cli, img, work)
@@ -824,13 +863,16 @@ def label(rom: pathlib.Path, runs: list[pathlib.Path], ghidra_json: pathlib.Path
         g = json.loads(ghidra_json.read_text())
         ghidra = sorted(int(x["address"]) for x in g if x.get("kind") == "code_entry_candidate")
     typed: dict = {}
+    size = len(img)
     code = build_code(img, executed, traced, walk, tokens, typed)
-    if unresolved:
-        typed["DR_DISABLED_RAM_CODE_ORIGIN_UNRESOLVED"] = unresolved
+    exec_mask = executed_mask(executed, code, size, walk, traced, tokens)
+    if ram_exec:
+        typed["DR_DISABLED_RAM_EXECUTION"] = ram_exec
         dr = set()
     else:
-        dr = data_reads(code, readers, zones, len(img), typed)
-    cls, extents = assemble(img, code, dma_ext, ghidra, typed, dr)
+        dr = data_reads(code, readers, exec_mask, size, typed)
+    code, block = withdraw_conflicts(img, executed, traced, walk, tokens, code, exec_mask, dr, dma_ext, typed)
+    cls, extents = assemble(img, code, block, dma_ext, dr, ghidra, typed)
     if ident["format"] == "plain":
         image_ref = str(img_path)
     else:
@@ -852,8 +894,9 @@ def label(rom: pathlib.Path, runs: list[pathlib.Path], ghidra_json: pathlib.Path
     ghidra_in_exec = sum(1 for a in ghidra if a in code)
     meta = {"schema": "segarecomp.xplat_corpus.sample.v1", "evidence_schema": SCHEMA, "id": sid, "kind": "genesis_commercial", "lineage": lineage,
             "candidate": lineage, "platform": "genesis", "cpu_variant": "MC68000", "provenance": "commercial-evidence",
-            "truth": "partial: E executed (MAME trace, two-decoder length agreement) + R direct-flow static reach + D hardware header / "
-                     "observed ROM DMA sources; U elsewhere (never negative)", "completeness": "partial",
+            "truth": "partial: I/c = E executed (MAME trace, two-decoder length agreement) + R direct-flow static reach; D = hardware "
+                     "header + observed ROM DMA sources + admitted observed data reads (DR); U elsewhere (never negative)",
+            "completeness": "partial",
             "image": image_ref, "sha256": ident["sha256"], "size": len(img), "identity": ident,
             "classes_sha256": sha256(bytes(cls)), "tokens_sha256": sha256(tokens), "seeds_sha256": sha256(json.dumps(seeds).encode()),
             "seed_cells": len(seeds), "seeds_source": "reset vector, only where labelled an instruction start",
@@ -901,7 +944,7 @@ def cmd_ghidra(a) -> int:
         shutil.copyfile(img_path, rom_in)       # the Ghidra container user must be able to read it; removed below
     rom_in.chmod(0o644)
     (work / "in").chmod(0o755)
-    (work / "out").chmod(0o777)
+    container_dir(work / "out", 10001)
     scripts = HERE / "ghidra" / "scripts"
     sha = ident["sha256"]
     t0 = time.time()
@@ -982,20 +1025,27 @@ def cmd_synthetic(a) -> int:
 # --------------------------------------------------------------------------------------------------------------------------- plan
 PLAN = HERE / "segarecomp_genesis_evidence.t001.plan.json"
 PLAN_DIGEST = HERE / "segarecomp_genesis_evidence.t001.plan.digest"
+FIXTURE = HERE.parent / "tests" / "fixtures" / "genesis_evidence" / "synthetic_cart.s"
+ASM_IMAGE = "segarecomp-xplat/tc-gnu:1"
 BOUND = ("tools/segarecomp_genesis_evidence.py", "tools/segarecomp_genesis_evidence.Dockerfile",
          "tests/fixtures/genesis_evidence/synthetic_cart.s", "tests/segarecomp_genesis_evidence_test.py",
-         "tools/ghidra/scripts/ExportCodeEntryCandidates.java", "tools/ghidra/scripts/PinAnalysisRecipe.java",
-         "tools/segarecomp_xplat_corpus.py", "tools/segarecomp_xplat_formats.py", "tools/segarecomp_ml_v3_data.py")
+         "tools/ghidra/scripts/ExportCodeEntryCandidates.java", "tools/ghidra/scripts/PinAnalysisRecipe.java", "tools/ghidra.py",
+         "tools/segarecomp_xplat_corpus.py", "tools/segarecomp_xplat_formats.py", "tools/segarecomp_ml_v3_data.py",
+         "tools/segarecomp_ml_region_gen2.py")
 SCENARIOS = [{"id": "attract", "policy": "none", "seconds": 180},
              {"id": "play-s1", "policy": "random", "seed": 1, "seconds": 480, "start_window": 40},
              {"id": "play-s2", "policy": "random", "seed": 2, "seconds": 480, "start_window": 40},
              {"id": "play-s3", "policy": "random", "seed": 3, "seconds": 480, "start_window": 40}]
+G1_SCENARIOS = [{"id": "g1-attract", "policy": "none", "seconds": 3},
+                {"id": "g1-play", "policy": "random", "seed": 1, "seconds": 3, "start_window": 0}]
+E_REJECTIONS = ("E_ODD_PC", "E_BEYOND_IMAGE", "E_DISASM_NO_DECODE", "E_CPU_DECODER_REJECTED", "E_LENGTH_DISAGREE", "E_SPAN_BEYOND_IMAGE",
+                "E_OVERLAPPING_EXECUTED")
 PROTOCOL = {
     "schema": SCHEMA + ".plan",
     "task": "SEG-077-T001",
-    "status": "frozen before the first full Chuck Rock analysis",
+    "status": "frozen before the first full Chuck Rock analysis (revision 2: independent C1 review findings applied before any full analysis)",
     "pilot": {"title": "Chuck Rock (USA)", "lineage": "G077-01", "raw_sha256": "d4cd7003c104f77bf9a9a78f43067f15a63f23925bc77746d0fdde419f594dc4",
-              "raw_size": 1048576, "reset": 512},
+              "raw_size": 1048576, "reset_in_image": True},
     "scenarios": SCENARIOS,
     "replicas": 2,
     "evidence_tiers": {
@@ -1003,37 +1053,49 @@ PROTOCOL = {
                 "CPU-owned decoder agree on the length; odd PCs, disagreements and overlapping executed spans are masked",
                 "R static reach: direct Bcc/BRA/BSR/DBcc/JMP/JSR(abs.w|abs.l|d16(PC)) targets and fall-through of non-call/trap, "
                 "non-terminating instructions (calls/traps only when the return site was executed), from accepted code, with "
-                "m68k-disasm walk + CPU-owned decoder length agreement and no overlap"],
+                "m68k-disasm walk + CPU-owned decoder length agreement and no overlap; withdrawn (with R reached only through it) when it "
+                "conflicts with observed data, the conflict bytes becoming U"],
         "D": ["HW_HEADER: 0x000-0x1FF vector table and cartridge header", "DMA: observed 68K-bus VDP DMA sources inside the image "
-              "(control-port reconstruction; an extent overlapping accepted code is masked whole)",
-              "DR: observed CPU data reads by an accepted executed reader (or RAM code) that never reads accepted code outside its own "
-              "fetch window, outside the 4-byte prefetch shadow after executed code and outside copy origins of RAM-executed code "
-              "widened to the copier's contiguous read extent; disabled for the image when any non-trampoline RAM-executed run has no "
-              "ROM origin", "Ghidra veto: an ADR-0025 code-entry candidate inside data unlabels the next 10 bytes"],
+              "(control-port reconstruction)",
+              "DR: observed data reads (program-space read tap, current-PC attribution) by an accepted executed reader or RAM code that "
+              "never reads code bytes (accepted code or any executed PC's bytes) outside its own fetch window, excluding the 4-byte "
+              "prefetch shadow after executed code; Z80/VDP bus reads are 68000 data; DR is disabled for the image when any scenario "
+              "executes code from work RAM",
+              "no data byte overlaps an executed PC's bytes (accepted span, or [pc, pc+10) when rejected); HW/DMA extents touching code "
+              "or such bytes are masked whole",
+              "Ghidra veto: an ADR-0025 code-entry candidate inside data unlabels the next 10 bytes"],
         "U": "everything else; unknown is never a negative",
         "excluded": ["decoder agreement alone", "non-execution", "byte-exact reassembly", "model scores", "agent judgement",
-                     "Ghidra as a label source (veto/disagreement only)", "sega2asm (not selected for the pilot: no gap it fills)"]},
+                     "Ghidra as a label source (veto/disagreement only)", "sega2asm (not selected for the pilot: no gap it fills)",
+                     "RAM-to-ROM copy inference"]},
     "cell_labels": "unchanged segarecomp_ml_v3.cell_labels: any I -> positive, all D -> negative, otherwise masked",
     "gates": {
-        "G1_synthetic_soundness": "0 wrong I, c or D bytes on the committed synthetic cartridge vs its GNU as listing truth",
-        "G2_determinism": "both replicas of every scenario have identical PC, DMA and read digests",
+        "G1_synthetic_soundness": "`g1`: 0 wrong I, c or D bytes on the committed synthetic cartridge vs its GNU as listing truth, for both "
+                                  "the attract scenario (data reads active) and the play scenario (RAM execution disables data reads)",
+        "G2_determinism": "both replicas of every scenario have identical PC, DMA and read digests (computed; a failure is reported, never dropped)",
         "G3_mapping": "MAME ROM view equals the image (0 mismatched words) and no executed cartridge-space PC beyond the image",
-        "G4_decoder_consistency": "E rejections (no decode, CPU-decoder rejection, length disagreement, overlap) <= 2% of executed ROM PCs",
+        "G4_decoder_consistency": "sum of E_* rejections / distinct executed cartridge-space PCs <= 0.02 (rejected bytes are masked from data)",
         "G5_reproduction": "an independent validator (T002) re-runs label from the retained scenario evidence and obtains the same classes digest"},
     "usefulness": {"U1_positive_cells_fraction_min": 0.10, "U2_negative_cells_fraction_min": 0.02, "U3_mixed_positive_cells_min": 50},
-    "cost": {"C1_cpu_hours_per_title_max": 10.0, "per_container": "1 CPU, 2 GiB", "trace_timeout_seconds": 7200},
+    "cost": {"C1_cpu_hours_per_title_max": 10.0, "C1_definition": "sum of single-CPU container wall time (traces, Ghidra -max-cpu 1) plus "
+             "label wall time", "per_container": "1 CPU, 2 GiB", "trace_timeout_seconds": 7200},
     "classes": {
         "PROCEED": "G1-G5 hold and U1, U2, U3 and C1 hold",
         "PARTIAL": "G1-G5 hold, positive cells >= 5% of cells, but U1, U2, U3 or C1 fails (usable with documented limitation)",
-        "STOP": "any of G1-G4 fails after at most one bounded correction cycle, or positive cells < 5% of cells"},
+        "STOP": "any of G1-G5 fails, or positive cells < 5% of cells"},
+    "amendments": "a rule change after the freeze requires a recorded amendment (ADR), a re-freeze and a G1 rerun; results of the replaced "
+                  "plan are reported, never silently replaced",
+    "disclosure": "the DR tier and the 480 s play length were chosen after a bounded 60 s Chuck Rock preflight (aggregate counts only: low "
+                  "DMA-sourced data, read-tap throughput); no rule was tuned on labels",
     "stop_classes": ["INPUT_REQUIRED", "RETENTION_DECISION_REQUIRED", "TOOLCHAIN_INFEASIBLE", "BUDGET_EXHAUSTED"],
     "binding": "T001 self-assesses; T002 (independent) owns the binding class",
     "report_metrics": ["qualified starts by tier (E/R) and continuation bytes", "D bytes by tier (HW/DMA/DR)", "unknown bytes",
                        "positive/negative/masked/mixed/hard-negative cells", "typed rejections", "tool disagreement rates (E decode, "
-                       "Ghidra-in-data, DMA vs read-tap agreement, m68k-disasm walk instructions not admitted)",
-                       "per-scenario coverage and saturation", "replica determinism", "wall and CPU cost per stage"],
+                       "Ghidra-in-data, DMA vs read-tap agreement)", "per-scenario coverage and marginal new PCs in plan order "
+                       "(saturation)", "replica determinism", "wall and CPU cost per stage"],
     "storage": "<HARNESS_ROOT>/.cache/m68k-corpus/ (git-ignored; ADR 0151 retention); committed evidence is aggregate-only",
 }
+PLAN_EXTRA = ("bound_code", "evidence_image_id", "ghidra_image_id", "asm_image_id", "cli_sha256")
 
 
 def bound_digests() -> dict:
@@ -1052,6 +1114,8 @@ def cmd_freeze(a) -> int:
     doc["bound_code"] = bound_digests()
     doc["evidence_image_id"] = docker_image_id(EVIDENCE_IMAGE)
     doc["ghidra_image_id"] = docker_image_id(GHIDRA_IMAGE)
+    doc["asm_image_id"] = docker_image_id(ASM_IMAGE)
+    doc["cli_sha256"] = sha256(pathlib.Path(a.cli).read_bytes())
     data = canonical(doc)
     PLAN.write_bytes(data)
     PLAN_DIGEST.write_text(sha256(data) + "\n")
@@ -1059,22 +1123,119 @@ def cmd_freeze(a) -> int:
     return 0
 
 
-def verify_plan() -> str:
+def verify_plan_static() -> dict:
+    """Digest, protocol and bound-code agreement (no Docker needed)."""
     data = PLAN.read_bytes()
-    digest = sha256(data)
-    if digest != PLAN_DIGEST.read_text().strip():
+    if sha256(data) != PLAN_DIGEST.read_text().strip():
         raise EvidenceError("plan digest mismatch")
     doc = json.loads(data)
-    if {k: v for k, v in doc.items() if k not in ("bound_code", "evidence_image_id", "ghidra_image_id")} != json.loads(json.dumps(PROTOCOL)):
+    if {k: v for k, v in doc.items() if k not in PLAN_EXTRA} != json.loads(json.dumps(PROTOCOL)):
         raise EvidenceError("committed plan differs from the protocol in code")
     if doc["bound_code"] != bound_digests():
         raise EvidenceError("bound code changed after the freeze")
-    return digest
+    return doc
+
+
+def verify_plan_doc() -> dict:
+    """verify_plan_static plus the local evidence and Ghidra image identities."""
+    doc = verify_plan_static()
+    if docker_image_id(EVIDENCE_IMAGE) != doc["evidence_image_id"] or docker_image_id(GHIDRA_IMAGE) != doc["ghidra_image_id"]:
+        raise EvidenceError("a container image differs from the frozen plan")
+    return doc
+
+
+def verify_plan() -> str:
+    verify_plan_doc()
+    return sha256(PLAN.read_bytes())
+
+
+def run_self(*args) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve()), *args], capture_output=True, text=True)
+
+
+def cmd_g1(a) -> int:
+    """G1: assemble the committed fixture, trace both G1 scenarios, label each and score it against the listing truth."""
+    plan = verify_plan_doc()
+    if docker_image_id(ASM_IMAGE) != plan["asm_image_id"]:
+        raise EvidenceError("assembler image differs from the frozen plan")
+    out = pathlib.Path(a.out)
+    require_private(out.parent if not out.exists() else out)
+    out.mkdir(parents=True, exist_ok=False)
+    container_dir(out)
+    src = out / "src"
+    src.mkdir()
+    shutil.copyfile(FIXTURE, src / "synthetic_cart.s")
+    src.chmod(0o755)
+    (src / "synthetic_cart.s").chmod(0o644)
+    r = subprocess.run(["docker", "run", "--rm", "--network", "none", "--user", "1000:1000", "-v", f"{src}:/src:ro", "-v", f"{out}:/o", "-w", "/tmp",
+                        ASM_IMAGE, "sh", "-c", "m68k-linux-gnu-as -m68000 --register-prefix-optional -alnm=/o/fixture.lst -o /o/fixture.o "
+                        "/src/synthetic_cart.s && m68k-linux-gnu-ld -e 0 -Ttext=0 -o /tmp/f.elf /o/fixture.o && "
+                        "m68k-linux-gnu-objcopy -O binary /tmp/f.elf /o/fixture.bin"], capture_output=True, text=True)
+    if r.returncode:
+        raise EvidenceError(f"fixture assembly failed: {r.stderr[-300:]}")
+    rom = out / "fixture.bin"
+    img = rom.read_bytes()
+    truth = listing_truth((out / "fixture.lst").read_text(), (out / "fixture.o").read_bytes(), img)
+    g = run_self("ghidra", "--rom", str(rom), "--out", str(out / "ghidra.json"))
+    if g.returncode:
+        raise EvidenceError(f"ghidra: {g.stderr[-300:]}")
+    res = {"fixture_sha256": sha256(img), "scenarios": {}}
+    for sc in G1_SCENARIOS:
+        t = run_self("trace", "--rom", str(rom), "--scenario", json.dumps(sc), "--out", str(out / sc["id"]))
+        if t.returncode:
+            raise EvidenceError(f"trace {sc['id']}: {t.stderr[-300:]}")
+        m = label(rom, [out / sc["id"]], out / "ghidra.json", a.cli, out / f"sample-{sc['id']}", "SYN", f"SYN/{sc['id']}")
+        pred = (out / f"sample-{sc['id']}" / "classes.bin").read_bytes()
+        sc_res = score(pred, truth)
+        sc_res["sound"] = not any(sc_res["wrong"].values())
+        sc_res["ram_pcs"] = m["scenarios"][0]["ram_pcs"]
+        sc_res["typed"] = m["typed"]
+        res["scenarios"][sc["id"]] = sc_res
+    res["G1"] = all(v["sound"] for v in res["scenarios"].values())
+    res["dr_exercised"] = res["scenarios"]["g1-attract"]["typed"].get("DR_BYTES_ADDED", 0) > 0
+    res["ram_rule_exercised"] = res["scenarios"]["g1-play"]["ram_pcs"] > 0 and "DR_DISABLED_RAM_EXECUTION" in res["scenarios"]["g1-play"]["typed"]
+    (out / "g1.json").write_text(json.dumps(res, indent=1, sort_keys=True))
+    print(json.dumps(res, sort_keys=True))
+    return 0 if res["G1"] and res["dr_exercised"] and res["ram_rule_exercised"] else 1
+
+
+def trace_reusable(d: pathlib.Path, plan_digest: str, image_id: str) -> bool:
+    f = d / "trace.json"
+    if not f.is_file():
+        return False
+    t = json.loads(f.read_text())
+    return (t.get("extraction_version") == EXTRACTION_VERSION and t.get("plan_sha256") == plan_digest
+            and t.get("emulator", {}).get("image_id") == image_id)
+
+
+def gates_and_class(meta: dict, traces: list[dict], det: dict, cost_hours: float, g1: bool | None) -> dict:
+    typed = meta["typed"]
+    executed = meta["decoders"]["executed_rom_pcs"]
+    rej = sum(typed.get(k, 0) for k in E_REJECTIONS)
+    cells = meta["cells"]
+    pos_frac = cells["positive"] / cells["cells"]
+    gates = {"G1": g1, "G2": all(det.values()),
+             "G3": all(t["map_mismatch"] == 0 and t["rom_pcs_beyond_image"] == 0 for t in traces),
+             "G4": executed > 0 and rej / executed <= 0.02, "G4_rate": round(rej / executed, 5) if executed else None, "G5": None}
+    use = {"U1": pos_frac >= PROTOCOL["usefulness"]["U1_positive_cells_fraction_min"],
+           "U2": cells["negative"] / cells["cells"] >= PROTOCOL["usefulness"]["U2_negative_cells_fraction_min"],
+           "U3": cells["mixed_positive"] >= PROTOCOL["usefulness"]["U3_mixed_positive_cells_min"],
+           "C1": cost_hours <= PROTOCOL["cost"]["C1_cpu_hours_per_title_max"]}
+    hard = [gates[k] for k in ("G1", "G2", "G3", "G4")]
+    if not all(hard) or pos_frac < 0.05:
+        cls = "STOP"
+    elif all(use.values()):
+        cls = "PROCEED"
+    else:
+        cls = "PARTIAL"
+    return {"gates": gates, "usefulness": use, "positive_fraction": round(pos_frac, 4), "cpu_hours": round(cost_hours, 2),
+            "provisional_class": cls + " (pending G5 by the independent validator)"}
 
 
 def cmd_run_title(a) -> int:
     from concurrent.futures import ThreadPoolExecutor
-    verify_plan()
+    plan = verify_plan_doc()
+    plan_digest = sha256(PLAN.read_bytes())
     root = pathlib.Path(a.out)
     root.mkdir(parents=True, exist_ok=True)
     require_private(root)
@@ -1086,47 +1247,57 @@ def cmd_run_title(a) -> int:
     def one(job):
         sc, rep = job
         d = root / "runs" / f"{sc['id']}-{rep}"
-        if (d / "trace.json").is_file():
+        if trace_reusable(d, plan_digest, plan["evidence_image_id"]):
             return d
         if d.exists():
             shutil.rmtree(d)
         d.parent.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve()), "trace", "--rom", str(rom), "--scenario", json.dumps(sc),
-                            "--out", str(d), "--timeout", str(PROTOCOL["cost"]["trace_timeout_seconds"])], capture_output=True, text=True)
+        r = run_self("trace", "--rom", str(rom), "--scenario", json.dumps(sc), "--out", str(d), "--timeout",
+                     str(PROTOCOL["cost"]["trace_timeout_seconds"]))
         if r.returncode:
             raise EvidenceError(f"{sc['id']}-{rep}: {r.stderr[-300:]}")
         return d
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=int(a.workers)) as ex:
         futs = [ex.submit(one, j) for j in jobs]
-        if not (root / "ghidra.json").is_file():
-            r = subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve()), "ghidra", "--rom", str(rom), "--out", str(root / "ghidra.json")],
-                               capture_output=True, text=True)
+        gpath = root / "ghidra.json"
+        if not gpath.is_file():
+            tg = time.time()
+            r = run_self("ghidra", "--rom", str(rom), "--out", str(gpath))
             if r.returncode:
                 raise EvidenceError(f"ghidra: {r.stderr[-300:]}")
+            (root / "ghidra.cost.json").write_text(json.dumps({"wall_seconds": round(time.time() - tg, 1)}))
         dirs = [f.result() for f in futs]
     det = {}
     for sc in SCENARIOS:
         ts = [json.loads((root / "runs" / f"{sc['id']}-{rep}" / "trace.json").read_text()) for rep in "ab"[:PROTOCOL["replicas"]]]
-        keys = ("pcs_sha256", "dma_sha256", "reads_sha256")
-        det[sc["id"]] = all(t[k] == ts[0][k] for t in ts for k in keys)
-    runs_a = [root / "runs" / f"{sc['id']}-a" for sc in SCENARIOS if det[sc["id"]]]
-    if not runs_a:
-        raise EvidenceError("no deterministic scenario")
+        det[sc["id"]] = all(t[k] == ts[0][k] for t in ts for k in ("pcs_sha256", "dma_sha256", "reads_sha256"))
+    runs_a = [root / "runs" / f"{sc['id']}-a" for sc in SCENARIOS]
     sample = root / "sample"
     if sample.exists():
         shutil.rmtree(sample)
-    meta = label(rom, runs_a, root / "ghidra.json", a.cli, sample, a.lineage, a.id)
+    meta = label(rom, runs_a, gpath, a.cli, sample, a.lineage, a.id)
     traces = [json.loads((d / "trace.json").read_text()) for d in dirs]
+    seen, marginal = set(), {}
+    for sc in SCENARIOS:
+        pcs = set(json.loads((root / "runs" / f"{sc['id']}-a" / "pcs.json").read_text())["rom"])
+        marginal[sc["id"]] = {"rom_pcs": len(pcs), "new_vs_previous": len(pcs - seen)}
+        seen |= pcs
+    ghidra_wall = json.loads((root / "ghidra.cost.json").read_text())["wall_seconds"] if (root / "ghidra.cost.json").is_file() else 0.0
+    cost_hours = (sum(t["wall_seconds"] for t in traces) + ghidra_wall + meta["label_seconds"]) / 3600
+    g1 = None
+    if a.g1:
+        g1 = json.loads(pathlib.Path(a.g1).read_text())["G1"]
     summary = sanitized(meta)
+    summary.update(gates_and_class(meta, traces, det, cost_hours, g1))
     summary["determinism"] = det
+    summary["marginal_coverage"] = marginal
     summary["trace_wall_seconds_sum"] = round(sum(t["wall_seconds"] for t in traces), 1)
+    summary["ghidra_wall_seconds"] = ghidra_wall
     summary["run_title_wall_seconds"] = round(time.time() - t0, 1)
-    summary["map_mismatch"] = sum(t["map_mismatch"] for t in traces)
-    summary["rom_pcs_beyond_image"] = sum(t["rom_pcs_beyond_image"] for t in traces)
-    summary["dma_bytes_seen_by_read_tap"] = [t["dma_bytes_seen_by_read_tap"] for t in traces]
     summary["dma_rom_bytes"] = [t["dma_rom_bytes"] for t in traces]
-    summary["ram_copy"] = [t["ram_copy"] for t in traces]
+    summary["dma_bytes_seen_by_read_tap"] = [t["dma_bytes_seen_by_read_tap"] for t in traces]
+    summary["plan_sha256"] = plan_digest
     (root / "report.json").write_text(json.dumps(summary, indent=1, sort_keys=True))
     print(json.dumps(summary, sort_keys=True))
     return 0
@@ -1178,8 +1349,14 @@ def main(argv=None) -> int:
     p.add_argument("--lineage", required=True)
     p.add_argument("--id", required=True)
     p.add_argument("--workers", default=8)
+    p.add_argument("--g1", help="g1.json of this plan's G1 run")
     p.set_defaults(fn=cmd_run_title)
+    p = sub.add_parser("g1")
+    p.add_argument("--out", required=True)
+    p.add_argument("--cli", required=True)
+    p.set_defaults(fn=cmd_g1)
     p = sub.add_parser("freeze")
+    p.add_argument("--cli", required=True)
     p.add_argument("--force", action="store_true")
     p.set_defaults(fn=cmd_freeze)
     p = sub.add_parser("verify-plan")

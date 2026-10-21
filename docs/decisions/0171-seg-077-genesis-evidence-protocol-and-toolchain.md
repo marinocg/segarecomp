@@ -25,15 +25,25 @@ Privacy and retention follow ADR 0151, by explicit operator decision on 2026-10-
 
 ## Decision
 
-### Evidence tiers (frozen)
+### Evidence tiers (frozen, revision 2)
+
+Revision 1 (commit 96cec35) was blocked by the independent C1 review **before any full analysis**, on two defects:
+
+1. **Rejected executed PCs could become data.** A refill read of a rejected executed target was credited to the branching instruction,
+   and that instruction was not treated as a code reader.
+2. **RAM-copy origins could be wrong.** They were matched from the end-of-run RAM, which can be cleared or reused, so a real copy source
+   could become data.
+
+Revision 2 fixes both and applies the review's notes. Revision 1 produced no commercial labels.
 
 | Label | Tier | Evidence | Never from |
 |---|---|---|---|
-| I/c | E executed | PC observed in an independent emulator trace (MAME 0.276, `:maincpu`), inside the image. Two independent decoders (m68k-disasm, CPU-owned token decoder) agree on the length. | odd PCs, decode disagreement, overlapping executed spans (all typed and masked) |
-| I/c | R static reach | Direct Bcc/BRA/BSR/DBcc/JMP/JSR (abs.w, abs.l, d16(PC)) targets, and fall-through of non-terminating, non-call instructions, from accepted code. Calls and traps continue only when their return site was executed. The same two-decoder agreement is required, with no overlap. | m68k-disasm's own walk (it decodes inline data after calls; observed on the fixture) |
+| I/c | E executed | PC observed in an independent emulator trace (MAME 0.276, `:maincpu`), inside the image. Two independent decoders (m68k-disasm, CPU-owned token decoder) agree on the length. | odd PCs, decode disagreement, overlapping executed spans (typed; masked from code and data) |
+| I/c | R static reach | Direct Bcc/BRA/BSR/DBcc/JMP/JSR (abs.w, abs.l, d16(PC)) targets, and fall-through of non-terminating, non-call instructions, from accepted code. Calls and traps continue only when their return site was executed. The same two-decoder agreement is required, with no overlap. If an R instruction conflicts with observed data, it is withdrawn together with every R instruction reached only through it, and its bytes become U. | m68k-disasm's own walk (it decodes inline data after calls; observed on the fixture) |
 | D | HW_HEADER | 0x000-0x1FF vector table and cartridge header | - |
-| D | DMA | Observed 68K-bus VDP DMA source extents, reconstructed from the control-port write stream with documented register semantics. Extents overlapping accepted code are masked whole. | fill/copy DMA, RAM sources |
-| D | DR | Observed CPU data reads by an accepted executed reader (or RAM code) that never reads accepted code outside its own fetch window. Bytes in the 4-byte prefetch shadow after executed code are excluded, as are copy origins of RAM-executed code (widened to the copier's contiguous read extent). DR is disabled for the whole image when any non-trampoline RAM run has no ROM origin. | checksum or copy loops, prefetch |
+| D | DMA | Observed 68K-bus VDP DMA source extents, reconstructed from the control-port write stream with documented register semantics | fill/copy DMA, RAM sources |
+| D | DR | Observed data reads (program-space read tap, current-PC attribution) by an accepted executed reader or by RAM code. The reader must never read code bytes outside its own fetch window, where code bytes means accepted code or any executed PC's bytes. Bytes in the 4-byte prefetch shadow after executed code are excluded. Reads made over the 68000 bus by the Z80 or VDP count as 68000 data, so Z80 code is D for this corpus. DR is **disabled for the image** when any scenario executes code from work RAM, because no copy relation is inferred. | checksum and copy loops, prefetch and refill reads, RAM-copied code |
+| block | executed bytes | No data byte may overlap an executed PC's bytes: the accepted span, or [pc, pc+10) for a rejected PC. An HW or DMA extent that touches code or executed bytes is masked whole, and a DR byte there is dropped. | - |
 | veto | Ghidra | An ADR-0025 code-entry candidate inside data unlabels the next 10 bytes | Ghidra never creates labels |
 | U | - | everything else | - |
 
@@ -42,7 +52,16 @@ Excluded as label evidence:
 - non-execution in bounded scenarios;
 - byte-exact reassembly, since `dc.b`/`incbin` reproduce anything;
 - model scores and agent judgement;
-- ROM bytes of RAM-executed code, because no copy relation is validated (they stay U).
+- any RAM-to-ROM copy inference.
+
+**Disclosure.** The DR tier and the 480 s play length were chosen after a bounded 60 s Chuck Rock preflight. Only aggregate counts were
+used: little DMA-sourced data, and the read-tap throughput. No rule was tuned on labels.
+
+**Residual risks.**
+- 68000 code that a non-code reader reads, and that never executes in the bounded scenarios or reaches RAM execution, can still become DR
+  data. One example is a routine copied to RAM in a scenario where its RAM copy never runs.
+- A title whose cartridge declares SRAM and is larger than 2 MiB is rejected (`SRAM_OVERLAPS_IMAGE`), because SRAM paging during play
+  would not be visible to the stop-time mapping check.
 
 ### Scenarios, determinism and mapping
 
@@ -58,13 +77,16 @@ Excluded as label evidence:
 
 ### Gates and classification (frozen; T002 owns the binding class)
 
-Principal gates (soundness):
+Principal gates (soundness), computed by the tool:
 
-- **G1** 0 wrong I, c or D bytes on the committed synthetic cartridge against its GNU as listing truth.
-- **G2** replica determinism.
-- **G3** mapping: 0 mismatched words, and no executed cartridge-space PC beyond the image.
-- **G4** executed-PC rejections at most 2% of the executed ROM PCs.
-- **G5** independent re-labelling reproduces the classes digest.
+- **G1** The `g1` command assembles the committed fixture, traces two scenarios, labels each and scores it against the GNU as listing
+  truth. It requires 0 wrong I, c or D bytes in both scenarios: attract, where DR is active, and play, where holding pad C executes a RAM
+  routine that is then cleared and DR must disable itself. It also requires that both rules were actually exercised.
+- **G2** Replica determinism, computed and reported; a failing scenario is never silently dropped.
+- **G3** Mapping: 0 mismatched words, and no executed cartridge-space PC beyond the image.
+- **G4** The sum of executed-PC rejections divided by the distinct executed cartridge-space PCs is at most 0.02. Rejected bytes cost
+  recall only, never soundness, because they are blocked from data.
+- **G5** Independent re-labelling reproduces the classes digest.
 
 Usefulness:
 
@@ -74,13 +96,17 @@ Usefulness:
 
 Cost:
 
-- **C1** at most 10 CPU-hours per title.
+- **C1** at most 10 CPU-hours per title. This is the sum of single-CPU container wall time (traces, Ghidra `-max-cpu 1`) plus label time.
 
 Classes:
 
 - `PROCEED`: G1-G5, U1-U3 and C1 all hold.
 - `PARTIAL`: G1-G5 hold and positives are at least 5%, but a usefulness or cost criterion fails.
-- `STOP`: any of G1-G4 fails after one bounded correction cycle, or positives are below 5%.
+- `STOP`: any of G1-G5 fails, or positives are below 5%.
+
+A rule change after the freeze requires a recorded amendment (an ADR), a re-freeze and a G1 rerun; the replaced plan's results are
+reported. The plan binds the code, the fixture, the image IDs of the evidence, Ghidra and assembler images, and the decoder CLI digest.
+A resumed trace is reused only when its extraction version, plan digest and image ID match.
 
 Stop classes: `INPUT_REQUIRED`, `RETENTION_DECISION_REQUIRED`, `TOOLCHAIN_INFEASIBLE`, `BUDGET_EXHAUSTED`.
 
@@ -97,13 +123,7 @@ Stop classes: `INPUT_REQUIRED`, `RETENTION_DECISION_REQUIRED`, `TOOLCHAIN_INFEAS
 | Corpus verification | existing manifest/handoff pattern (later checkpoints) | - | per-sample digests in `meta.json` | - |
 | A/B/C training | SEG-076 framework (T005/T006) | narrow compatible update | reuse plan only in T001 | - |
 
-Synthetic proof (G1 precondition), fixture under the frozen tool:
-- 0 wrong I, c or D bytes;
-- 58 of 65 true instruction starts and 580 of 604 data bytes recalled;
-- every abstention is a designed hazard: the RAM-copied routine, the dead routine, the unused jump-table case, the unraised exception
-  handler, inline arguments in the prefetch shadow, and the copy source.
-
-The checksum loop over executed and unexecuted code was rejected as a code reader.
+The G1 result under the revision-2 freeze is recorded in the Evidence of SEG-077-T001.
 
 ## Consequences
 
