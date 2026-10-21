@@ -1,0 +1,158 @@
+| SEG-077-T001 synthetic Genesis cartridge (authored; no commercial content).
+| Ground truth comes from this file's GNU as listing. It exercises: executed code, an untaken direct branch target (static reach),
+| a jump table with an unused entry, inline data after a JSR (must never become code), code copied to RAM and executed there,
+| a VDP DMA from ROM (data evidence), a CPU-read pointer table, a checksum loop over code, a never-referenced dead routine and 0xFF padding.
+        .text
+        .org    0
+vectors:
+        .long   0x00FFFE00              | initial SSP
+        .long   reset                   | reset PC
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .long   exc_handler, exc_handler
+        .org    0x100
+header:
+        .ascii  "SEGA GENESIS    "
+        .ascii  "(C)SEGARECOMP   "
+        .ascii  "SYNTHETIC EVIDENCE CARTRIDGE                    "
+        .ascii  "SYNTHETIC EVIDENCE CARTRIDGE                    "
+        .ascii  "GM 00000000-00"
+        .word   0                       | checksum
+        .ascii  "J               "
+        .long   0, 0x1FFFF, 0xFF0000, 0xFFFFFF
+        .ascii  "            "
+        .ascii  "            "
+        .ascii  "                                        "
+        .ascii  "JUE             "
+        .org    0x200
+reset:
+        move.w  #0x2700,%sr
+        lea     0xC00004,%a4
+        lea     0xC00000,%a5
+        move.w  #0x8004,(%a4)           | reg0
+        move.w  #0x8174,(%a4)           | reg1: display, vblank, DMA enable
+        move.w  #0x8F02,(%a4)           | autoincrement 2
+        | DMA 68K -> VRAM 0x0000: length (words), source (address >> 1)
+        move.w  #0x9320,(%a4)           | reg 0x13 = 32 words (64 bytes)
+        move.w  #0x9400,(%a4)
+        move.l  #tiles,%d0
+        lsr.l   #1,%d0
+        move.w  %d0,%d1
+        and.w   #0xFF,%d1
+        or.w    #0x9500,%d1
+        move.w  %d1,(%a4)
+        lsr.l   #8,%d0
+        move.w  %d0,%d1
+        and.w   #0xFF,%d1
+        or.w    #0x9600,%d1
+        move.w  %d1,(%a4)
+        lsr.l   #8,%d0
+        and.w   #0x7F,%d0
+        or.w    #0x9700,%d0
+        move.w  %d0,(%a4)
+        move.l  #0x40000080,(%a4)       | VRAM write + CD5: start DMA
+        | checksum loop: reads executed AND never-executed code as data (its reads must never become data labels)
+        lea     reset,%a0
+        move.w  #(ptr_table-reset)/2-1,%d7
+        moveq   #0,%d2
+2:      add.w   (%a0)+,%d2
+        dbra    %d7,2b
+        | copy ram_routine to work RAM and call it there
+        lea     ram_routine,%a0
+        lea     0xFF0000,%a1
+        move.w  #(ram_routine_end-ram_routine)/2-1,%d7
+1:      move.w  (%a0)+,(%a1)+
+        dbra    %d7,1b
+        jsr     0xFF0000
+        | inline-argument call: two data words follow the JSR
+        jsr     inline_args
+        .word   0x4E75, 0x4EF9
+        | read a pointer table entry
+        lea     ptr_table,%a0
+        move.l  4(%a0),%a1
+        | jump-table dispatch for indices 0..2 (entry 3 is never used)
+        moveq   #0,%d6
+dispatch:
+        move.w  %d6,%d0
+        add.w   %d0,%d0
+        move.w  jtab(%pc,%d0.w),%d0
+        jmp     jtab(%pc,%d0.w)
+jtab:
+        .word   case0-jtab, case1-jtab, case2-jtab, case3-jtab
+case0:
+        addq.w  #1,%d6
+        bra   dispatch
+case1:
+        addq.w  #1,%d6
+        tst.w   %d6
+        beq   never_taken             | d6 != 0 here: target only statically reached
+        bra   dispatch
+case2:
+        bra   main_loop
+case3:
+        move.w  #0x1234,%d5             | unused jump-table entry: never executed
+        bra   case3
+never_taken:
+        move.w  #0x5678,%d4
+        bra   main_loop
+main_loop:
+        addq.l  #1,%d3
+        bra   main_loop
+inline_args:
+        move.l  (%sp)+,%a0
+        move.w  (%a0)+,%d2
+        move.w  (%a0)+,%d2
+        jmp     (%a0)
+exc_handler:
+        rte
+dead_routine:
+        move.w  #0x2222,%d0
+        rts
+        .balign 2
+ram_routine:
+        move.w  #0x1111,%d0
+        rts
+ram_routine_end:
+        .balign 4
+ptr_table:
+        .long   case0, case1, tiles, header
+        .balign 2
+tiles:
+        .long   0x11223344, 0x11223344
+        .long   0x11223344, 0x11223344
+        .long   0x11223344, 0x11223344
+        .long   0x11223344, 0x11223344
+        .long   0x11223344, 0x11223344
+        .long   0x11223344, 0x11223344
+        .long   0x11223344, 0x11223344
+        .long   0x11223344, 0x11223344
+        .balign 2
+        .org    0x20000, 0xFF

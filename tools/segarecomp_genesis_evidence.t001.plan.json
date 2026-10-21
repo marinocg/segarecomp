@@ -1,0 +1,118 @@
+{
+ "binding": "T001 self-assesses; T002 (independent) owns the binding class",
+ "bound_code": {
+  "tests/fixtures/genesis_evidence/synthetic_cart.s": "e8e2f2dbbe4bb4c5b6ea5866f5247662ef7122f210be3fcfac88f6d146636d61",
+  "tests/segarecomp_genesis_evidence_test.py": "84fb6fcafe900807ed3e0dabb2ccec4b582c63b29a8843b0de05dea66180129e",
+  "tools/ghidra/scripts/ExportCodeEntryCandidates.java": "24972a3af0a5ee68e0f4285d32fde59b3c6c73d7628cda5423ee854925fa8343",
+  "tools/ghidra/scripts/PinAnalysisRecipe.java": "f7435d0c965ec85bad7d2b07000a18eb64bf219a7c4c0d343267367022973c79",
+  "tools/segarecomp_genesis_evidence.Dockerfile": "ef1c6aeb8958a6066fc550135e51b730b52d0c79d63987141ef1f91ebbb2b661",
+  "tools/segarecomp_genesis_evidence.py": "b79479f7dbf9c7dbe7eec9805dd341ea93b8f9f0787f69f5907be2f37bfa71d0",
+  "tools/segarecomp_ml_v3_data.py": "90537880773627c1c1babcd2e36c2234325cf04c9e900afb07a6ab85bcd8097f",
+  "tools/segarecomp_xplat_corpus.py": "e348a6e1ddb26f8944a9bb036cb86c20ccb63da703e38c84ed210391e296aec3",
+  "tools/segarecomp_xplat_formats.py": "6e856b08d6f7bcf17ca282a7160b00dacd68c5e2199ff030368dbeceef704dc2"
+ },
+ "cell_labels": "unchanged segarecomp_ml_v3.cell_labels: any I -> positive, all D -> negative, otherwise masked",
+ "classes": {
+  "PARTIAL": "G1-G5 hold, positive cells >= 5% of cells, but U1, U2, U3 or C1 fails (usable with documented limitation)",
+  "PROCEED": "G1-G5 hold and U1, U2, U3 and C1 hold",
+  "STOP": "any of G1-G4 fails after at most one bounded correction cycle, or positive cells < 5% of cells"
+ },
+ "cost": {
+  "C1_cpu_hours_per_title_max": 10.0,
+  "per_container": "1 CPU, 2 GiB",
+  "trace_timeout_seconds": 7200
+ },
+ "evidence_image_id": "sha256:9bff87059ee6d06f3233d4e3feacb7c5500183f7b4abe5df0b9ffe73b8ce26e9",
+ "evidence_tiers": {
+  "D": [
+   "HW_HEADER: 0x000-0x1FF vector table and cartridge header",
+   "DMA: observed 68K-bus VDP DMA sources inside the image (control-port reconstruction; an extent overlapping accepted code is masked whole)",
+   "DR: observed CPU data reads by an accepted executed reader (or RAM code) that never reads accepted code outside its own fetch window, outside the 4-byte prefetch shadow after executed code and outside copy origins of RAM-executed code widened to the copier's contiguous read extent; disabled for the image when any non-trampoline RAM-executed run has no ROM origin",
+   "Ghidra veto: an ADR-0025 code-entry candidate inside data unlabels the next 10 bytes"
+  ],
+  "I/c": [
+   "E executed: MAME 0.276 trace of :maincpu, PC inside the image, m68k-disasm (walk decode at that PC, else traced) and the CPU-owned decoder agree on the length; odd PCs, disagreements and overlapping executed spans are masked",
+   "R static reach: direct Bcc/BRA/BSR/DBcc/JMP/JSR(abs.w|abs.l|d16(PC)) targets and fall-through of non-call/trap, non-terminating instructions (calls/traps only when the return site was executed), from accepted code, with m68k-disasm walk + CPU-owned decoder length agreement and no overlap"
+  ],
+  "U": "everything else; unknown is never a negative",
+  "excluded": [
+   "decoder agreement alone",
+   "non-execution",
+   "byte-exact reassembly",
+   "model scores",
+   "agent judgement",
+   "Ghidra as a label source (veto/disagreement only)",
+   "sega2asm (not selected for the pilot: no gap it fills)"
+  ]
+ },
+ "gates": {
+  "G1_synthetic_soundness": "0 wrong I, c or D bytes on the committed synthetic cartridge vs its GNU as listing truth",
+  "G2_determinism": "both replicas of every scenario have identical PC, DMA and read digests",
+  "G3_mapping": "MAME ROM view equals the image (0 mismatched words) and no executed cartridge-space PC beyond the image",
+  "G4_decoder_consistency": "E rejections (no decode, CPU-decoder rejection, length disagreement, overlap) <= 2% of executed ROM PCs",
+  "G5_reproduction": "an independent validator (T002) re-runs label from the retained scenario evidence and obtains the same classes digest"
+ },
+ "ghidra_image_id": "sha256:045567d6bd7e1ea718577fd53b81b8e11067d2047416a1b07637a67ac1060266",
+ "pilot": {
+  "lineage": "G077-01",
+  "raw_sha256": "d4cd7003c104f77bf9a9a78f43067f15a63f23925bc77746d0fdde419f594dc4",
+  "raw_size": 1048576,
+  "reset": 512,
+  "title": "Chuck Rock (USA)"
+ },
+ "replicas": 2,
+ "report_metrics": [
+  "qualified starts by tier (E/R) and continuation bytes",
+  "D bytes by tier (HW/DMA/DR)",
+  "unknown bytes",
+  "positive/negative/masked/mixed/hard-negative cells",
+  "typed rejections",
+  "tool disagreement rates (E decode, Ghidra-in-data, DMA vs read-tap agreement, m68k-disasm walk instructions not admitted)",
+  "per-scenario coverage and saturation",
+  "replica determinism",
+  "wall and CPU cost per stage"
+ ],
+ "scenarios": [
+  {
+   "id": "attract",
+   "policy": "none",
+   "seconds": 180
+  },
+  {
+   "id": "play-s1",
+   "policy": "random",
+   "seconds": 480,
+   "seed": 1,
+   "start_window": 40
+  },
+  {
+   "id": "play-s2",
+   "policy": "random",
+   "seconds": 480,
+   "seed": 2,
+   "start_window": 40
+  },
+  {
+   "id": "play-s3",
+   "policy": "random",
+   "seconds": 480,
+   "seed": 3,
+   "start_window": 40
+  }
+ ],
+ "schema": "segarecomp.genesis_evidence.v1.plan",
+ "status": "frozen before the first full Chuck Rock analysis",
+ "stop_classes": [
+  "INPUT_REQUIRED",
+  "RETENTION_DECISION_REQUIRED",
+  "TOOLCHAIN_INFEASIBLE",
+  "BUDGET_EXHAUSTED"
+ ],
+ "storage": "<HARNESS_ROOT>/.cache/m68k-corpus/ (git-ignored; ADR 0151 retention); committed evidence is aggregate-only",
+ "task": "SEG-077-T001",
+ "usefulness": {
+  "U1_positive_cells_fraction_min": 0.1,
+  "U2_negative_cells_fraction_min": 0.02,
+  "U3_mixed_positive_cells_min": 50
+ }
+}
