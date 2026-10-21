@@ -16,7 +16,7 @@
   "segarecomp_xplat_explore.t001.plan.json": "c281ee386b310dfaffbab277512575a3c716e50e6ba2f74cb955a7dafc422a2d",
   "segarecomp_xplat_explore_eval.py": "8e547410df3176cf1259dc0f385a6f683c6e4721cce72296a76d49cd99a17b1e",
   "segarecomp_xplat_models.py": "3eabc2ed412ec3088938061af5a76b53f5b7fcf55deefdfd82031f533f268f8b",
-  "segarecomp_xplat_stability.py": "25b9605a8b991456770626bd34588c4730dafc51e319983a95743b243972d74b",
+  "segarecomp_xplat_stability.py": "a00e01472aa7cca7271635a1d0c3a2e73b9d206b9082a11941f565f28c810f62",
   "segarecomp_xplat_t005.py": "7422bcc4515b5969cd3bea7490b9ce1f7e3cc7aa3db738c20657a613610f0a60",
   "segarecomp_xplat_transfer.py": "415bd6ab8dbf5b8b3d4f7c1c8da433fd8cf6bbf64fd76229807a656bf9cb399b"
  },
@@ -748,21 +748,21 @@
  "rules": {
   "a_transfer": "A is deterministic: d = Genesis mean ER (A, C2) - (A, C0) with per-lineage differences and the exact sign-flip test; TRANSFER_EFFECT_MEASURABLE iff |d| >= 0.01 AND sign-flip p <= 0.05; else NO_MEANINGFUL_ADVANTAGE (tier 2: new fits on the existing folds; training-noise free, so only lineage resampling bounds it)",
   "barriers": "D01 is never excluded from any aggregate; the SEG-075 reserved cohort stays sealed; no SEG-075 tau / decision changes",
-  "determinism": "two refits are compared bitwise with the reused files: M3R C0/D01/s50 (SEG-075 T004) and M3R C2/D01/s49 (SEG-075 T004, also checking that the SEG-076 loader path equals T004's for C2). If either is not bitwise identical, or fails, every tier-2 M3-R decision is reported EVIDENCE_INSUFFICIENT (mixed provenance of reused and new seeds)",
+  "determinism": "two refits are compared bitwise with the reused files: M3R C0/D01/s50 (SEG-075 T004) and M3R C2/D01/s49 (SEG-075 T004, also checking that the SEG-076 loader path equals T004's for C2). If either is not bitwise identical, or fails, every tier-2 M3-R class (transfer, stability, and the descriptive secondary / ensemble contrasts) is reported EVIDENCE_INSUFFICIENT (mixed provenance of reused and new seeds)",
   "m1": "tier 1 reanalysis of the SEG-075 M1-HGB C0 / C2 fold scores (M1 is deterministic: its random_state has no effect below sklearn's 200k-sample binning threshold): per-lineage paired differences, lineage bootstrap 95% percentile CI (10000 resamples, numpy default_rng(0)), exact sign-flip p; DESCRIPTIVE_EFFECT_ROBUST iff the bootstrap CI excludes 0 and p <= 0.05, else DESCRIPTIVE_EFFECT_NOT_ROBUST; never a confirmatory claim",
   "noise": "per condition: per-lineage between-seed spread of the lineage max ER over seeds 49-52; tau4 = 2 x mean over the 11 lineages of the mean absolute pairwise difference (the SEG-075 tau formula generalized from one pair to all 6 pairs)",
   "stability": {
-   "class": "SEED_STABILITY_IMPROVED iff in BOTH conditions: at least 5 of the 6 pair ensembles have D01 max-ER gain < 0 (one-sided sign test p <= 0.11 per condition, 0.012 jointly), the mean pair gain of the Genesis mean ER is <= -0.005, and the 4-seed ensemble gain of the Genesis mean ER is <= 0; otherwise NO_MEANINGFUL_ADVANTAGE (EVIDENCE_INSUFFICIENT when fits failed)",
+   "class": "SEED_STABILITY_IMPROVED iff in BOTH conditions: at least 5 of the 6 pair ensembles have D01 g_score < 0, the mean pair g_score of the Genesis mean ER is <= -0.005, and the 4-seed ensemble's Genesis g_score is <= 0; otherwise NO_MEANINGFUL_ADVANTAGE (EVIDENCE_INSUFFICIENT when fits failed). The 5-of-6 count is a heuristic: the pairs share member seeds, so no binomial p is claimed; power is low (4 seeds) and disclosed",
    "descriptive": "SD of the 6 overlapping pair ensembles / SD of the 4 single seeds is reported against its arithmetic null of exactly 1/sqrt(3) = 0.577 for a linear statistic (overlapping pairs); it is NOT a criterion",
-   "statistic": "ensemble gain g = metric(logit-averaged ensemble) - mean(metric of its member seeds), for the Genesis mean ER and for D01 max ER; under pure averaging of a linear statistic g = 0, so g < 0 is the non-linear tail benefit of score averaging (M3-R cell logits averaged)",
-   "units": "the 6 seed pairs per condition and the 4-seed ensemble"
+   "statistic": "score-averaging gain g_score = metric(logit-averaged ensemble) - m_lin, where m_lin applies the SAME aggregation (lineage max over images, Genesis mean over lineages) to the image-wise mean of the member seeds' image ERs. Pure averaging of member image ERs gives g_score = 0 exactly; g_score < 0 means the averaged SCORES rank the tail better than averaging the members' outcomes. The Jensen term g_jensen = m_lin - mean(member metrics) <= 0 (max is convex) is reported descriptively only",
+   "units": "the 6 seed pairs per condition and the 4-seed ensemble (for the Genesis mean ER and for D01 max ER)"
   },
   "transfer": {
    "ci": "two-sided 95% t interval over the 4 paired seeds (t_0.975,3 = 3.182)",
    "classes": {
     "EFFECT_LINEAGE_CONCENTRATED": "the t interval excludes 0 AND |mean d| >= 0.01 but sign-flip p > 0.05 (the seed-level effect is carried by few lineages)",
-    "EVIDENCE_INSUFFICIENT": "otherwise (half-width > 0.02)",
-    "NO_EFFECT_DETECTED_BOUNDED": "otherwise, when the t interval half-width <= 0.02 (an effect larger than ~0.02 is excluded); maps to NO_MEANINGFUL_ADVANTAGE in the synthesis",
+    "EVIDENCE_INSUFFICIENT": "otherwise (the interval reaches beyond +/-0.02)",
+    "NO_EFFECT_DETECTED_BOUNDED": "otherwise, when the whole t interval lies within [-0.02, +0.02] (an equivalence margin of twice the 0.01 relevance floor: any effect beyond 0.02 is excluded); maps to NO_MEANINGFUL_ADVANTAGE in the synthesis",
     "TRANSFER_EFFECT_MEASURABLE": "the t interval excludes 0 AND |mean d| >= 0.01 AND sign-flip p <= 0.05 (direction: helps if negative, harms if positive)"
    },
    "lineage_test": "exact two-sided sign-flip permutation over the 11 lineages of the seed-averaged per-lineage paired difference (2048 sign patterns)",

@@ -72,20 +72,23 @@ RULES = {
                                                            "(direction: helps if negative, harms if positive)",
                              "EFFECT_LINEAGE_CONCENTRATED": "the t interval excludes 0 AND |mean d| >= 0.01 but sign-flip p > 0.05 "
                                                             "(the seed-level effect is carried by few lineages)",
-                             "NO_EFFECT_DETECTED_BOUNDED": "otherwise, when the t interval half-width <= 0.02 (an effect larger than "
-                                                           "~0.02 is excluded); maps to NO_MEANINGFUL_ADVANTAGE in the synthesis",
-                             "EVIDENCE_INSUFFICIENT": "otherwise (half-width > 0.02)"},
+                             "NO_EFFECT_DETECTED_BOUNDED": "otherwise, when the whole t interval lies within [-0.02, +0.02] (an "
+                                                           "equivalence margin of twice the 0.01 relevance floor: any effect beyond "
+                                                           "0.02 is excluded); maps to NO_MEANINGFUL_ADVANTAGE in the synthesis",
+                             "EVIDENCE_INSUFFICIENT": "otherwise (the interval reaches beyond +/-0.02)"},
                  "power": "expected: the existing C0 seeds 49/50 differ by 0.036 in Genesis mean ER; with independent seeds SD(d) ~0.036 "
                           "gives a half-width ~0.057, so EVIDENCE_INSUFFICIENT is the likely outcome; stated before any fit",
                  "persistence": "number of lineages whose seed-averaged difference has the sign of the mean effect; D01 reported"},
-    "stability": {"statistic": "ensemble gain g = metric(logit-averaged ensemble) - mean(metric of its member seeds), for the "
-                               "Genesis mean ER and for D01 max ER; under pure averaging of a linear statistic g = 0, so g < 0 is the "
-                               "non-linear tail benefit of score averaging (M3-R cell logits averaged)",
-                  "units": "the 6 seed pairs per condition and the 4-seed ensemble",
-                  "class": "SEED_STABILITY_IMPROVED iff in BOTH conditions: at least 5 of the 6 pair ensembles have D01 max-ER gain < 0 "
-                           "(one-sided sign test p <= 0.11 per condition, 0.012 jointly), the mean pair gain of the Genesis mean ER is "
-                           "<= -0.005, and the 4-seed ensemble gain of the Genesis mean ER is <= 0; otherwise NO_MEANINGFUL_ADVANTAGE "
-                           "(EVIDENCE_INSUFFICIENT when fits failed)",
+    "stability": {"statistic": "score-averaging gain g_score = metric(logit-averaged ensemble) - m_lin, where m_lin applies the SAME "
+                               "aggregation (lineage max over images, Genesis mean over lineages) to the image-wise mean of the member "
+                               "seeds' image ERs. Pure averaging of member image ERs gives g_score = 0 exactly; g_score < 0 means the "
+                               "averaged SCORES rank the tail better than averaging the members' outcomes. The Jensen term g_jensen = "
+                               "m_lin - mean(member metrics) <= 0 (max is convex) is reported descriptively only",
+                  "units": "the 6 seed pairs per condition and the 4-seed ensemble (for the Genesis mean ER and for D01 max ER)",
+                  "class": "SEED_STABILITY_IMPROVED iff in BOTH conditions: at least 5 of the 6 pair ensembles have D01 g_score < 0, the "
+                           "mean pair g_score of the Genesis mean ER is <= -0.005, and the 4-seed ensemble's Genesis g_score is <= 0; "
+                           "otherwise NO_MEANINGFUL_ADVANTAGE (EVIDENCE_INSUFFICIENT when fits failed). The 5-of-6 count is a heuristic: "
+                           "the pairs share member seeds, so no binomial p is claimed; power is low (4 seeds) and disclosed",
                   "descriptive": "SD of the 6 overlapping pair ensembles / SD of the 4 single seeds is reported against its arithmetic "
                                  "null of exactly 1/sqrt(3) = 0.577 for a linear statistic (overlapping pairs); it is NOT a criterion"},
     "a_transfer": "A is deterministic: d = Genesis mean ER (A, C2) - (A, C0) with per-lineage differences and the exact sign-flip test; "
@@ -97,7 +100,8 @@ RULES = {
           "0.05, else DESCRIPTIVE_EFFECT_NOT_ROBUST; never a confirmatory claim",
     "determinism": "two refits are compared bitwise with the reused files: M3R C0/D01/s50 (SEG-075 T004) and M3R C2/D01/s49 (SEG-075 "
                    "T004, also checking that the SEG-076 loader path equals T004's for C2). If either is not bitwise identical, or fails, "
-                   "every tier-2 M3-R decision is reported EVIDENCE_INSUFFICIENT (mixed provenance of reused and new seeds)",
+                   "every tier-2 M3-R class (transfer, stability, and the descriptive secondary / ensemble contrasts) is reported "
+                   "EVIDENCE_INSUFFICIENT (mixed provenance of reused and new seeds)",
     "barriers": "D01 is never excluded from any aggregate; the SEG-075 reserved cohort stays sealed; no SEG-075 tau / decision changes",
 }
 
@@ -369,13 +373,42 @@ def transfer_class(d_seed: list[float], d_lineage: list[float]) -> dict:
         cls = "TRANSFER_EFFECT_MEASURABLE"
     elif excl:
         cls = "EFFECT_LINEAGE_CONCENTRATED"
-    elif ci["half_width"] <= 0.02:
+    elif ci["lo"] >= -0.02 and ci["hi"] <= 0.02:
         cls = "NO_EFFECT_DETECTED_BOUNDED"
     else:
         cls = "EVIDENCE_INSUFFICIENT"
     direction = "helps" if ci["mean"] < 0 else "harms"
     return {"class": cls, "direction": direction, "t_interval": ci, "sign_flip_p": round(p, 6),
             "lineages_with_effect_sign": sum(1 for x in d_lineage if (x < 0) == (ci["mean"] < 0) and x != 0)}
+
+
+def aggregate_er(image_er: dict, lineage_of: dict) -> dict:
+    """{'mean_er': Genesis mean of lineage max image ER, 'd01': D01 max} over informative images (None ERs skipped) (pure)."""
+    lin = {}
+    for iid, e in image_er.items():
+        if e is not None:
+            L = lineage_of[iid]
+            lin[L] = max(lin.get(L, e), e)
+    return {"mean_er": sum(lin.values()) / len(lin), "d01": lin.get("D01")}
+
+
+def gain_terms(member_image_ers: list, ensemble_image_er: dict, lineage_of: dict) -> dict:
+    """g_score = aggregate(ensemble) - aggregate(image-wise member mean) and g_jensen = aggregate(image-wise member mean) - mean of the
+    members' aggregates, for the Genesis mean ER and D01 max ER (pure; unit-tested). Pure averaging of member image ERs gives g_score 0."""
+    ids = sorted(member_image_ers[0])
+    if any(sorted(m) != ids for m in member_image_ers) or sorted(ensemble_image_er) != ids:
+        raise SystemExit("gain_terms: image sets differ")
+    mean_img = {}
+    for iid in ids:
+        v = [m[iid] for m in member_image_ers]
+        mean_img[iid] = None if any(x is None for x in v) else sum(v) / len(v)
+    ref, ens = aggregate_er(mean_img, lineage_of), aggregate_er(ensemble_image_er, lineage_of)
+    mem = [aggregate_er(m, lineage_of) for m in member_image_ers]
+    out = {}
+    for k in ("mean_er", "d01"):
+        out[f"g_score_{k}"] = ens[k] - ref[k]
+        out[f"g_jensen_{k}"] = ref[k] - sum(x[k] for x in mem) / len(mem)
+    return out
 
 
 def stability_class(gains: dict) -> dict:
@@ -543,9 +576,11 @@ def cmd_table(a) -> int:
     tables = {}
 
     def add(name, sc):
-        rows, s, _ = lineage_table(sc, meta, classes)
-        tables[name] = {"genesis": rows, "summary": s}
+        rows, s, per = lineage_table(sc, meta, classes)
+        tables[name] = {"genesis": rows, "summary": s, "image_er": {iid: m["er"] for iid, m in per.items()}}
         return tables[name]
+
+
 
     for (cond, seed), sc in runs.items():
         add(f"M3R.{cond}.s{seed}", sc)
@@ -607,23 +642,32 @@ def cmd_table(a) -> int:
         decisions["m3r_transfer_ens4"] = {"d_mean_er": round(tables["M3R.C2.ens4"]["summary"]["mean_er"] - tables["M3R.C0.ens4"]["summary"]["mean_er"], 6),
                                           "per_lineage": {L: round(v, 6) for L, v in per_lineage_d("M3R.C2.ens4", "M3R.C0.ens4").items()},
                                           "tier": 2, "note": "descriptive: one 4-seed ensemble per condition"}
-        gains, desc = {}, {}
+        gains, desc, jensen = {}, {}, {}
+        lineage_of = {k: v["lineage"] for k, v in meta.items()}
         for c in ("C0", "C2"):
             def m(name, k):
                 return tables[name]["summary"]["mean_er"] if k == "mean_er" else tables[name]["genesis"]["D01"]["max_er"]
             prs = list(itertools.combinations(SEEDS, 2))
             g = {"pair_d01": [], "pair_mean_er": []}
+            jj = {"pair_d01": [], "pair_mean_er": []}
             for (x, y), name in zip(prs, pair_names[c]):
-                g["pair_d01"].append(m(name, "d01") - (m(f"M3R.{c}.s{x}", "d01") + m(f"M3R.{c}.s{y}", "d01")) / 2)
-                g["pair_mean_er"].append(m(name, "mean_er") - (m(f"M3R.{c}.s{x}", "mean_er") + m(f"M3R.{c}.s{y}", "mean_er")) / 2)
-            g["ens4_mean_er"] = m(f"M3R.{c}.ens4", "mean_er") - sum(m(f"M3R.{c}.s{x}", "mean_er") for x in SEEDS) / len(SEEDS)
-            gains[c] = g
+                gt = gain_terms([tables[f"M3R.{c}.s{x}"]["image_er"], tables[f"M3R.{c}.s{y}"]["image_er"]], tables[name]["image_er"], lineage_of)
+                g["pair_d01"].append(gt["g_score_d01"])
+                g["pair_mean_er"].append(gt["g_score_mean_er"])
+                jj["pair_d01"].append(gt["g_jensen_d01"])
+                jj["pair_mean_er"].append(gt["g_jensen_mean_er"])
+            gt4 = gain_terms([tables[f"M3R.{c}.s{x}"]["image_er"] for x in SEEDS], tables[f"M3R.{c}.ens4"]["image_er"], lineage_of)
+            g["ens4_mean_er"] = gt4["g_score_mean_er"]
+            jj["ens4_mean_er"] = gt4["g_jensen_mean_er"]
+            gains[c], jensen[c] = g, jj
             sd1 = {k: pop_sd([m(f"M3R.{c}.s{x}", k) for x in SEEDS]) for k in ("mean_er", "d01")}
             sd2 = {k: pop_sd([m(n, k) for n in pair_names[c]]) for k in ("mean_er", "d01")}
             desc[c] = {k: {"single_sd": round(sd1[k], 6), "pair_ensemble_sd": round(sd2[k], 6),
                            "ratio": round(sd2[k] / sd1[k], 6) if sd1[k] else None, "linear_null_ratio": round(1 / math.sqrt(3), 6)}
                        for k in sd1}
         decisions["m3r_seed_stability"] = dict(stability_class(gains), tier=2, descriptive_spread=desc,
+                                               jensen_term={c: {k: ([round(x, 6) for x in v] if isinstance(v, list) else round(v, 6))
+                                                                for k, v in jj.items()} for c, jj in jensen.items()},
                                                gains={c: {k: ([round(x, 6) for x in v] if isinstance(v, list) else round(v, 6))
                                                           for k, v in g.items()} for c, g in gains.items()})
     else:
@@ -656,7 +700,7 @@ def cmd_table(a) -> int:
         else:
             determinism[jid] = None
     if not all(v is True for v in determinism.values()):
-        for k in ("m3r_transfer", "m3r_seed_stability"):
+        for k in ("m3r_transfer", "m3r_seed_stability", "m3r_transfer_secondary_mean_image_er", "m3r_transfer_ens4"):
             decisions[k] = dict(decisions.get(k, {}), class_before_determinism_rule=decisions.get(k, {}).get("class"),
                                 **{"class": "EVIDENCE_INSUFFICIENT", "determinism_rule": "a determinism refit was not bitwise identical "
                                    "or failed: mixed provenance of reused and new seeds"})

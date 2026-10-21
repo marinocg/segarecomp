@@ -40,7 +40,12 @@ def main() -> int:
     tiny = s.transfer_class([-0.005, -0.0051, -0.0049, -0.005], [-0.005] * 11)
     check(tiny["class"] == "NO_EFFECT_DETECTED_BOUNDED", f"below the 0.01 floor, narrow interval {tiny['class']}")
     mid = s.transfer_class([-0.03, 0.0, -0.01, 0.02], [-0.002] * 11)
-    check(mid["class"] == "EVIDENCE_INSUFFICIENT" and mid["t_interval"]["half_width"] > 0.02, f"half-width > 0.02 {mid['class']}")
+    check(mid["class"] == "EVIDENCE_INSUFFICIENT", f"interval beyond +/-0.02 {mid['class']}")
+    edge = s.transfer_class([0.008, 0.009, 0.0085, 0.0095], [0.001] * 11)
+    check(edge["class"] == "NO_EFFECT_DETECTED_BOUNDED", f"small effect below the floor, interval inside +/-0.02 {edge['class']}")
+    reach = s.transfer_class([0.0, 0.01, 0.03, 0.04], [0.001] * 11)
+    check(reach["t_interval"]["lo"] < 0 < 0.02 < reach["t_interval"]["hi"] and reach["class"] == "EVIDENCE_INSUFFICIENT",
+          f"an interval including 0 but reaching past +0.02 is not bounded {reach['class']} {reach['t_interval']}")
     wide = s.transfer_class([-0.2, 0.1, -0.15, 0.12], [-0.02] * 11)
     check(wide["class"] == "EVIDENCE_INSUFFICIENT", f"wide interval {wide['class']}")
     conc = s.transfer_class([-0.03, -0.031, -0.029, -0.03], [-0.3] + [0.001, -0.001] * 5)
@@ -62,6 +67,30 @@ def main() -> int:
     worse4 = dict(good, C0=dict(good["C0"], ens4_mean_er=0.001))
     check(s.stability_class(worse4)["class"] == "NO_MEANINGFUL_ADVANTAGE", "4-seed ensemble gain > 0 fails")
     check(s.stability_class({})["class"] == "NO_MEANINGFUL_ADVANTAGE", "no conditions never passes")
+    # the convexity trap found by the C4 re-review: with seed-varying worst images, averaging the members' image ERs lowers the
+    # max-aggregate by itself (Jensen); g_score is measured against that pure-averaging reference, so it is 0 there and fails
+    a_er, b_er = (0.3, 0.1), (0.1, 0.3)
+    member_mean_of_max = (max(a_er) + max(b_er)) / 2
+    m_lin = max((x + y) / 2 for x, y in zip(a_er, b_er))
+    check(m_lin - member_mean_of_max < 0, "Jensen term is negative when the argmax varies (the trap)")
+    pure = {c: {"pair_d01": [m_lin - m_lin] * 6, "pair_mean_er": [0.0] * 6, "ens4_mean_er": 0.0} for c in ("C0", "C2")}
+    check(s.stability_class(pure)["class"] == "NO_MEANINGFUL_ADVANTAGE", "pure image-wise averaging (g_score = 0) fails")
+    lin = {"a": "D01", "b": "D01", "c": "D02"}
+    ma, mb = {"a": 0.3, "b": 0.1, "c": 0.05}, {"a": 0.1, "b": 0.3, "c": 0.07}
+    avg = {k: (ma[k] + mb[k]) / 2 for k in ma}
+    gt = s.gain_terms([ma, mb], avg, lin)
+    check(abs(gt["g_score_d01"]) < 1e-12 and abs(gt["g_score_mean_er"]) < 1e-12, f"pure averaging gives g_score 0 {gt}")
+    check(abs(gt["g_jensen_d01"] - (-0.1)) < 1e-12, f"Jensen term -0.1 in the trap example {gt}")
+    better = dict(avg, a=0.15, b=0.15)
+    gt2 = s.gain_terms([ma, mb], better, lin)
+    check(abs(gt2["g_score_d01"] - (-0.05)) < 1e-12, f"a genuine tail improvement is negative g_score {gt2}")
+    gt3 = s.gain_terms([dict(ma, c=None), dict(mb, c=None)], dict(avg, c=None), lin)
+    check(gt3["g_score_mean_er"] == 0 and s.aggregate_er({"c": None, "a": 0.2}, lin)["mean_er"] == 0.2, "None ERs are skipped")
+    try:
+        s.gain_terms([ma, {"a": 0.1}], avg, lin)
+        check(False, "mismatched image sets refused")
+    except SystemExit:
+        pass
     log = "[M3R/D01] epoch 1/30 loss 0.37547 t=19s\nnoise\n[M3R/D01] epoch 2/30 loss 0.15352 t=45s\n[M3R/D02] epoch 1/30 loss 0.5 t=1s\n"
     check(s.parse_losses(log, "M3R/D01") == [0.37547, 0.15352], "SEG-072 log parsing")
     check(s.parse_losses("[M3R/C0/D01] epoch 3/30 loss 0.09156 t=64s", "M3R/C0/D01") == [0.09156], "SEG-075 log parsing")

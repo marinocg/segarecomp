@@ -55,8 +55,8 @@ The seed instability that blocked SEG-075 (tau 0.103) is, in substance, the D01 
 - **Determinism, with a pre-registered consequence.**
   - Two refits are compared bitwise with the reused SEG-075 files: C0 / D01 / seed 50, and C2 / D01 / seed 49. The second also checks
     that SEG-076's loader path equals T004's for C2.
-  - If either refit differs or fails, every tier-2 M3-R decision is reported `EVIDENCE_INSUFFICIENT`, because the reused and new seeds
-    would then be of mixed provenance.
+  - If either refit differs or fails, every tier-2 M3-R class is reported `EVIDENCE_INSUFFICIENT`, because the reused and new seeds
+    would then be of mixed provenance. This covers transfer, stability, and the descriptive secondary and ensemble contrasts.
 - **Noise (descriptive).** tau4 = 2 x the mean over lineages of the mean absolute pairwise difference in lineage max ER.
 - **Transfer.** The statistic is d_s = Genesis mean ER (C2, s) - (C0, s), paired by seed number.
   - The pairing is nominal. The two runs of seed s share only the initial weights (`torch.manual_seed` runs before `build_model`). Their
@@ -64,24 +64,35 @@ The seed instability that blocked SEG-075 (tau 0.103) is, in substance, the D01 
   - Classes:
     - `TRANSFER_EFFECT_MEASURABLE`: the 95% t interval excludes 0, |mean d| >= 0.01, and the exact 11-lineage sign-flip p <= 0.05.
     - `EFFECT_LINEAGE_CONCENTRATED`: the interval excludes 0 and |mean d| >= 0.01, but p > 0.05.
-    - `NO_EFFECT_DETECTED_BOUNDED`: otherwise, if the half-width is at most 0.02. This maps to `NO_MEANINGFUL_ADVANTAGE` in the
-      synthesis.
+    - `NO_EFFECT_DETECTED_BOUNDED`: otherwise, if the *whole* interval lies within [-0.02, +0.02]. This is an equivalence margin of
+      twice the 0.01 relevance floor. It maps to `NO_MEANINGFUL_ADVANTAGE` in the synthesis.
     - `EVIDENCE_INSUFFICIENT`: otherwise.
   - **Expected power, stated before any fit.** C0 seeds 49 and 50 already differ by 0.036 in Genesis mean ER. If seeds are independent,
     SD(d) is about 0.036 and the half-width is about 0.057. `EVIDENCE_INSUFFICIENT` is therefore the likely outcome.
   - A secondary statistic (mean image ER) and a 4-seed-ensemble contrast are reported descriptively.
-- **Seed stability: the non-linear benefit of score ensembles.**
-  - The gain is g = metric(logit-averaged ensemble) - mean(metric of its member seeds). For a linear statistic under pure averaging,
-    g = 0.
+- **Seed stability: the benefit of averaging scores rather than outcomes.**
+  - The aggregate statistics are convex. Lineage max ER is a max over images, and the Genesis mean ER averages those maxes. So simply
+    averaging the members' *image ERs* already lowers them whenever the worst image differs between seeds (a Jensen effect). This is
+    exactly D01's regime.
+  - The criterion therefore uses g_score = metric(logit-averaged ensemble) - metric(image-wise mean of the members' image ERs, under the
+    same aggregation). Pure averaging of outcomes gives g_score = 0 exactly. g_score < 0 means the averaged *scores* rank the tail
+    better.
+  - The Jensen term (outcome-averaging reference minus the mean of the members' metrics) is reported descriptively only.
   - `SEED_STABILITY_IMPROVED` requires all of the following in *both* conditions:
-    - at least 5 of the 6 seed-pair ensembles have a negative D01 max-ER gain (one-sided sign test p <= 0.11 per condition);
-    - the mean pair gain of the Genesis mean ER is at most -0.005;
-    - the 4-seed-ensemble gain is at most 0.
+    - at least 5 of the 6 seed-pair ensembles have D01 g_score < 0;
+    - the mean pair g_score of the Genesis mean ER is at most -0.005;
+    - the 4-seed ensemble's Genesis g_score is at most 0.
 
     Otherwise the class is `NO_MEANINGFUL_ADVANTAGE`.
-  - The SD ratio of the 6 overlapping pair ensembles to the 4 single seeds is reported only descriptively. Its arithmetic null is
-    exactly 1/sqrt(3) = 0.577 for any linear statistic, so it is not a criterion. A first version of this plan used it as one; the C4
-    review blocked that before any fit.
+  - The 5-of-6 count is a heuristic. The pairs share member seeds, so no binomial p is claimed. Power is low with 4 seeds.
+  - The SD ratio of the overlapping pair ensembles to the single seeds is reported only descriptively, against its arithmetic null of
+    exactly 1/sqrt(3).
+  - **Review history before any fit.** The first version of this rule used that SD ratio as its criterion, which passes by construction.
+    The second version used gains against the member *mean*, which leans toward passing because of the Jensen term. Both were blocked by
+    the C4 reviews.
+  - **Disclosure.** A dry run of the frozen table code on the preserved C0 seeds 49 and 50 (C2 aliased to C0, dry run only) exercised
+    every code path before this freeze. It exposed that pair's gains: D01 g_score -0.24 and Genesis g_score -0.036, against a Jensen term
+    of -0.010. The rule above was written before those values were seen and was not changed after seeing them.
 
 ### A under C2 (tier 2, deterministic)
 
