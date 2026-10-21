@@ -124,3 +124,20 @@ set_property(TEST segarecomp_xplat_models_test APPEND PROPERTY LABELS full fast)
 # SEG-075-T006 (ADR 0163): the final decision re-derives from the committed results under the bound rules; the C7 receipt is sanitized.
 add_test(NAME segarecomp_xplat_final_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_final_test.py)
 set_property(TEST segarecomp_xplat_final_test APPEND PROPERTY LABELS full fast)
+# SEG-076 (exploratory research tooling): fail-closed sealed-subtree resolver (both slash conventions, nonexistent paths), boundary
+# strata, the pre-registered T001 expansion rule and plan tamper refusal (pure; synthetic data only).
+add_test(NAME segarecomp_xplat_explore_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_explore_test.py)
+set_property(TEST segarecomp_xplat_explore_test APPEND PROPERTY LABELS full fast)
+# SEG-076-T003 (exploratory research tooling): pre-registered T003 statistics (exact sign-flip, t interval, transfer / stability
+# classes), loss-log parsing and the job list (pure; synthetic data only).
+add_test(NAME segarecomp_xplat_stability_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_stability_test.py)
+set_property(TEST segarecomp_xplat_stability_test APPEND PROPERTY LABELS full fast)
+# SEG-076-T005 (exploratory research tooling): pre-registered C-v2 vs A rule and job list (pure); C-v2's padded in-edge table where
+# torch is installed (research environment), otherwise skipped.
+add_test(NAME segarecomp_xplat_cv2_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_cv2_test.py)
+set_property(TEST segarecomp_xplat_cv2_test APPEND PROPERTY LABELS full fast)
+# SEG-076-T004 (exploratory research tooling): every committed SEG-076 class re-derives from its committed result document (research
+# environment; skipped without numpy).
+add_test(NAME segarecomp_xplat_seg076_final_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_seg076_final_test.py)
+set_property(TEST segarecomp_xplat_seg076_final_test APPEND PROPERTY LABELS full fast)
+set_property(TEST segarecomp_xplat_seg076_final_test PROPERTY SKIP_RETURN_CODE 77)

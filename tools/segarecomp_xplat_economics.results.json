@@ -1,0 +1,182 @@
+{
+ "checkpoint": "C5",
+ "data_boundary": "aggregates only",
+ "images": 11,
+ "model_analysis_cost": {
+  "A": {
+   "fit_cpu_seconds_per_fit": 63.2,
+   "inference_seconds_per_image": 0.213
+  },
+  "CV2": {
+   "fit_cpu_seconds_per_fit": 5869.6,
+   "inference_seconds_per_image": 0.492
+  }
+ },
+ "notes": [
+  "ratios are per image against the same-session BROAD build, averaged within lineage then across lineages",
+  "a rejected admission is counted at its broad-fallback cost (deployed semantics)",
+  "*_FULL_RECALL regions are truth-informed diagnostics, not deployable policies",
+  "SEG-074 frozen totals are context from a different session and settings (cache), not a paired baseline"
+ ],
+ "plan_sha256": "913855aa5e2559d6e3bd4cea3414e65deca089d64b223c48f1e4f35a85d8ab42",
+ "schema": "segarecomp.xplat_economics.results.v1",
+ "seg074_frozen_context": {
+  "BROAD": {
+   "images": 11,
+   "total_cpu_sum": 4284.8
+  },
+  "INC": {
+   "images": 11,
+   "total_cpu_sum": 2062.8
+  },
+  "M3RB50": {
+   "images": 11,
+   "total_cpu_sum": 2510.7
+  },
+  "ORACLE_INSTR": {
+   "images": 11,
+   "total_cpu_sum": 885.9
+  },
+  "ORACLE_REGION": {
+   "images": 11,
+   "total_cpu_sum": 1111.1
+  }
+ },
+ "settings": {
+  "cache": false,
+  "cc": "clang",
+  "frames": 120,
+  "jobs": 4,
+  "opt": "O2",
+  "timeout": 3600
+ },
+ "strategies": {
+  "A_B50": {
+   "accepted": 11,
+   "compile_cpu": 2174.76,
+   "executable_bytes": 241870832.0,
+   "fallback_or_rejected": 0,
+   "generated_bytes": 1386519275.0,
+   "images": 11,
+   "lineage_mean_ratio_vs_broad": {
+    "compile_cpu": 0.7308,
+    "executable_bytes": 0.6821,
+    "generated_bytes": 0.7157,
+    "total_cpu": 0.7326
+   },
+   "runtime_checked": 11,
+   "runtime_equal_to_broad": 11,
+   "selected_cells": 35840,
+   "total_cpu": 2227.04
+  },
+  "A_FULL_RECALL": {
+   "accepted": 8,
+   "compile_cpu": 1094.93,
+   "executable_bytes": 120248208.0,
+   "fallback_or_rejected": 3,
+   "generated_bytes": 691554519.0,
+   "images": 11,
+   "lineage_mean_ratio_vs_broad": {
+    "compile_cpu": 0.5768,
+    "executable_bytes": 0.5767,
+    "generated_bytes": 0.583,
+    "total_cpu": 0.5799
+   },
+   "runtime_checked": 8,
+   "runtime_equal_to_broad": 8,
+   "selected_cells": 14304,
+   "total_cpu": 1136.36
+  },
+  "BROAD": {
+   "accepted": 11,
+   "compile_cpu": 3857.88,
+   "executable_bytes": 429401648.0,
+   "fallback_or_rejected": 0,
+   "generated_bytes": 2441602877.0,
+   "images": 11,
+   "lineage_mean_ratio_vs_broad": {
+    "compile_cpu": 1.0,
+    "executable_bytes": 1.0,
+    "generated_bytes": 1.0,
+    "total_cpu": 1.0
+   },
+   "runtime_checked": 0,
+   "runtime_equal_to_broad": 0,
+   "selected_cells": 0,
+   "total_cpu": 3926.9
+  },
+  "CV2E_B50": {
+   "accepted": 11,
+   "compile_cpu": 2244.47,
+   "executable_bytes": 249407528.0,
+   "fallback_or_rejected": 0,
+   "generated_bytes": 1432371573.0,
+   "images": 11,
+   "lineage_mean_ratio_vs_broad": {
+    "compile_cpu": 0.7431,
+    "executable_bytes": 0.6961,
+    "generated_bytes": 0.732,
+    "total_cpu": 0.7447
+   },
+   "runtime_checked": 11,
+   "runtime_equal_to_broad": 11,
+   "selected_cells": 35840,
+   "total_cpu": 2296.9
+  },
+  "M3RB50": {
+   "accepted": 11,
+   "compile_cpu": 2252.06,
+   "executable_bytes": 249164928.0,
+   "fallback_or_rejected": 0,
+   "generated_bytes": 1434029990.0,
+   "images": 11,
+   "lineage_mean_ratio_vs_broad": {
+    "compile_cpu": 0.6231,
+    "executable_bytes": 0.5892,
+    "generated_bytes": 0.6194,
+    "total_cpu": 0.6261
+   },
+   "runtime_checked": 11,
+   "runtime_equal_to_broad": 11,
+   "selected_cells": 35840,
+   "total_cpu": 2304.35
+  },
+  "M3RE4_B50": {
+   "accepted": 11,
+   "compile_cpu": 2248.45,
+   "executable_bytes": 249455392.0,
+   "fallback_or_rejected": 0,
+   "generated_bytes": 1435602468.0,
+   "images": 11,
+   "lineage_mean_ratio_vs_broad": {
+    "compile_cpu": 0.5986,
+    "executable_bytes": 0.5778,
+    "generated_bytes": 0.6064,
+    "total_cpu": 0.6023
+   },
+   "runtime_checked": 11,
+   "runtime_equal_to_broad": 11,
+   "selected_cells": 35840,
+   "total_cpu": 2300.64
+  },
+  "M3R_FULL_RECALL": {
+   "accepted": 9,
+   "compile_cpu": 1332.45,
+   "executable_bytes": 141841776.0,
+   "fallback_or_rejected": 2,
+   "generated_bytes": 819818273.0,
+   "images": 11,
+   "lineage_mean_ratio_vs_broad": {
+    "compile_cpu": 0.5194,
+    "executable_bytes": 0.5147,
+    "generated_bytes": 0.529,
+    "total_cpu": 0.5233
+   },
+   "runtime_checked": 9,
+   "runtime_equal_to_broad": 9,
+   "selected_cells": 17859,
+   "total_cpu": 1374.82
+  }
+ },
+ "task": "SEG-076-T004"
+}

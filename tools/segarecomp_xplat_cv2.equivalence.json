@@ -1,0 +1,54 @@
+{
+ "batches": [
+  {
+   "grad_max_rel_diff": 5.09192105621379e-07,
+   "logit_max_abs_diff": 4.76837158203125e-07,
+   "logit_scale": 2.1725
+  },
+  {
+   "grad_max_rel_diff": 3.5120223549253804e-07,
+   "logit_max_abs_diff": 3.5762786865234375e-07,
+   "logit_scale": 2.2842
+  },
+  {
+   "grad_max_rel_diff": 5.029188909511916e-07,
+   "logit_max_abs_diff": 3.5762786865234375e-07,
+   "logit_scale": 2.2928
+  },
+  {
+   "grad_max_rel_diff": 6.737122855862529e-07,
+   "logit_max_abs_diff": 4.76837158203125e-07,
+   "logit_scale": 2.2653
+  }
+ ],
+ "device": "cpu",
+ "pass": true,
+ "rocm_probe": {
+  "bitwise_inference": true,
+  "bitwise_params": true,
+  "device": "RX 9070 XT (ROCm, torch 2.6.0+rocm6.4.2)",
+  "fold_training_set": "all Genesis except D05",
+  "inference_hash": [
+   "715c0d9c3217f003",
+   "715c0d9c3217f003"
+  ],
+  "note": "CPU shared with the T003 farm during the probe",
+  "param_hash": [
+   "513ab3c59e20fdd1",
+   "513ab3c59e20fdd1"
+  ],
+  "repeats": 2,
+  "s_per_step": [
+   0.3933,
+   0.3263
+  ],
+  "seed": 1,
+  "steps": 150
+ },
+ "schema": "segarecomp.xplat_cv2.equivalence.v1",
+ "tolerance": {
+  "grad_rel": 0.0001,
+  "logit_abs": 1e-05
+ },
+ "torch": "2.14.1+cu130"
+}

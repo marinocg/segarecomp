@@ -1,0 +1,74 @@
+{
+ "bound_code": {
+  "segarecomp_xplat_explore_rocm.py": "bcc8af765ed81669e89a8260fb0223650d4c44d3446de7ca7ac1eb95dbd7d9fc"
+ },
+ "cpu_determinism_command": "segarecomp_xplat_explore.py farm --out <t001> --only A.D05.repro B.D05.repro (the absent C CPU jobs are deliberately not re-run)",
+ "cpu_farm_interruption": "the T001 CPU farm was interrupted by a host crash while C.D07, C.D09-C.D12 and C.all were ~40 min into their runs (C.D01-C.D06 had already hit the 160-min cap at ~1500/4000 steps). They are not re-run on the CPU: they are absent from the CPU farm state, which the frozen table counts as failed. Only the planned A and B D05 determinism refits are completed on the CPU",
+ "device_control": "B is refitted on ROCm on every fold: B(ROCm) vs B(CPU) measures the device effect; B(ROCm) vs C(ROCm) is the device-matched architecture contrast",
+ "disclosure": "frozen after the CPU A and B results were visible (A Genesis mean ER 0.105, B 0.155); no C score existed. The amendment changes no threshold and no model setting",
+ "jobs": [
+  "B.D01",
+  "B.D02",
+  "B.D03",
+  "B.D04",
+  "B.D05",
+  "B.D06",
+  "B.D07",
+  "B.D09",
+  "B.D10",
+  "B.D11",
+  "B.D12",
+  "B.all",
+  "C.D01",
+  "C.D02",
+  "C.D03",
+  "C.D04",
+  "C.D05",
+  "C.D06",
+  "C.D07",
+  "C.D09",
+  "C.D10",
+  "C.D11",
+  "C.D12",
+  "C.all",
+  "B.D05.repro",
+  "C.D05.repro"
+ ],
+ "kind": "resource-only amendment",
+ "outputs": "<HARNESS_ROOT>/.cache/seg076/t001-rocm (private)",
+ "reporting": "the unchanged T001 table and rule are evaluated on two views: 'rocm_bc' (A CPU, B ROCm, C ROCm) and 'mixed' (A CPU, B CPU, C ROCm). Both are reported as AMENDMENT results next to the pre-registered class (C failed under the CPU caps), never replacing it. A C that qualifies only under the amendment is reported as such; SEG-076-T002 admission follows the pre-registered class",
+ "resources": {
+  "attempts": 1,
+  "caps_basis": "uncontended single-process ROCm probe: B 0.038 s/step (~2.5 min per 4000 steps), C 0.54 s/step (~36 min); C's edge building is CPU-bound, so 4 concurrent fits may each slow down; caps are set generously (C 5x) so a resource cap does not decide the result again (new caps chosen after the CPU failure; disclosed)",
+  "cpu_threads_per_fit": 2,
+  "device": "cuda:0 (ROCm/HIP)",
+  "env": {
+   "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
+   "MKL_NUM_THREADS": "2",
+   "OMP_NUM_THREADS": "2"
+  },
+  "host_memory_floor_mb": 2000,
+  "host_protection": "two host (WSL2) crashes occurred when 3 ROCm probes plus a CPU self-test were started on top of 6 running CPU fits (~11.5 GB RSS on a 16 GB host). Protection is a host-RAM guard, not serialization: a fit starts only when MemAvailable >= 4000 MB (starts staggered by 20 s), and when MemAvailable < 2000 MB the most recently started fit is killed and recorded 'host_memory_guard' (failed, not re-runnable)",
+  "min_available_mb_to_start": 4000,
+  "parallel_fits": 4,
+  "rss_limit_mb": 4096,
+  "wall_clock_cap_minutes": {
+   "B": 30,
+   "C": 180
+  }
+ },
+ "rocm_environment": {
+  "device": "AMD Radeon RX 9070 XT",
+  "hip": "6.4.43484-123eb5128",
+  "numpy": "1.26.4",
+  "python": "3.12.13",
+  "torch": "2.6.0+rocm6.4.2.git76481f7c"
+ },
+ "schema": "segarecomp.xplat_explore.t001.rocm_amendment.v1",
+ "seed": 1,
+ "selftest": "fit_bc_device / infer_bc_device on the CPU are bitwise identical to the frozen fit_bc / infer_bc (6 steps on the D05-fold training set, B and C: parameters and inference)",
+ "t001_plan_sha256": "04eb81e87e6b1cbb5fbbfad922b22fe2b279468a2118355e468e788d424726ee",
+ "task": "SEG-076-T001",
+ "trigger": "every planned C fit exceeded the frozen 160-min CPU cap (C ~5.5 s/step under the 6-fit CPU farm vs 0.8 s/step in the probe); C is 'failed' under the frozen plan and that pre-registered T001 class is unchanged",
+ "unchanged": "network (segarecomp_xplat_models.build_bc), M4 recipe, 4000 steps, seed 1, folds, data, metrics, expansion rule; fit_bc_device is a line-for-line copy of the frozen fit_bc with tensors moved to the device, proven bitwise identical to fit_bc on CPU by `selftest`"
+}
