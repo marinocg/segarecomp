@@ -66,9 +66,39 @@ How the rule applied:
   with identical code, steps, seed and folds (`segarecomp_xplat_explore_rocm.py`, amendment `bb5c35e5...`). It is reported below as an
   amendment and never replaces this class.
 
-## Amendment result (ROCm)
+## Amendment result (ROCm, resource-only; does not replace the pre-registered class)
 
-Pending: the farm is running. This section is completed at the end of C2.
+The amendment (`segarecomp_xplat_explore.t001.rocm.results.json`, amendment `bb5c35e5...`) produced these results:
+
+- All 12 C fits and all 12 B fits completed on the RX 9070 XT. C took about 106 min per fit, with 4 fits in parallel.
+- The unchanged T001 table and rule evaluated two views: `rocm_bc` (A on CPU, B and C on ROCm) and `mixed` (A and B on CPU, C on ROCm).
+- **Both views give `NEGATIVE_STOP`**, with A as the best comparator.
+
+| configuration | Genesis mean ER | worst lineage ER | B50 misses | boundary missed @B50 | AUROC | xplat mean ER |
+|---|---|---|---|---|---|---|
+| C graph-guided Transformer (ROCm, s1) | 0.116 | 0.211 | 0 | 0 | 0.9990 | 0.089 |
+| B local Transformer (ROCm, s1; device control) | 0.199 | 0.613 | 1 | 1 | 0.9988 | 0.101 |
+
+What this shows:
+
+- **C is the second-best model measured.**
+  - It is 0.030 better than M3-R seed 49, with zero B50 and boundary misses.
+  - It is still 0.011 *worse* than A, and its D09 lineage regresses by 0.076, so it does not qualify. Under the rule's thresholds it
+    could not have qualified anyway: it would have needed a lead of 0.02 or more.
+  - Graph-guided message passing clearly helps the local Transformer. C minus B is -0.039 against CPU B and -0.082 against the
+    device-matched ROCm B.
+- **B is unstable.** Changing only the device and torch build (same code and seed) moved B from 0.155 / 117 B50 misses to 0.199 / 1.
+  That perturbation is larger than every architecture contrast measured here. A single-seed B result therefore cannot rank B.
+- **Cost.** C needs about 5.1 CPU-hours per fit even on the GPU (60.8 for 12 fits). Its typed message passing builds per-edge index
+  lists in Python and launches many tiny kernels, so the GPU is mostly idle. A needs about 40 CPU-seconds per fit. C's inference
+  averages 7.2 s per image (up to 67 s), against 0.2 s for A.
+- **Determinism.** B's ROCm refit on D05 is bitwise identical. C's ROCm determinism refit **hung in the GPU driver**:
+  - After step 500, two threads spun on a GPU queue with no progress, and the WSL `dxg` driver logged `DestroyPagingQueue fail`.
+  - The farm's 180-minute cap recorded it as `timeout`. It does not count as an attempt to be re-run under the amendment rules.
+  - C's ROCm determinism is therefore **not established** in the farm accounting. Any post-hoc retry after the GPU reset is reported
+    separately below and outside the farm accounting.
+- **Disclosure.** The amendment was frozen after the CPU A and B results were visible; C had no score at that point. Both views are
+  always reported. The class change that a B redraw could cause is not acted on.
 
 ## Review notes carried forward (non-blocking)
 
