@@ -26,7 +26,7 @@ How the rule applied:
 
 - The best one-seed comparator is **A**. B fails every criterion against it:
   - its mean ER is 0.050 *worse*;
-  - D01 and D03 regress by more than 0.05;
+  - D01, D03 and D09 regress by more than 0.05;
   - it has 1 boundary-stratum miss at B50, against 0 for A;
   - it has 117 B50 misses, against 0 for A.
 - C has no completed fit, so it does not qualify.
@@ -46,9 +46,9 @@ How the rule applied:
     states the decision).
 - **B (local Transformer).** B is a different architecture from M4-Dense and does not use M4's region features. Against its matched
   single-seed comparator, M4-Dense seed 1 (same recipe), B's mean ER is lower by 0.057, mostly D03 (-0.484) and D01 (-0.166). But B
-  misses many starts at the fixed budgets: 117 at B50, concentrated in a few lineages. Neither the expansion rule nor the economics
+  misses many starts at the fixed budgets: 117 at B50, all in one lineage (D01). Neither the expansion rule nor the economics
   favour it.
-- **Boundary strata.** Every model misses many boundary-stratum cells at B35 (5 to 17) but almost none at B50. The rank quantiles of
+- **Boundary strata.** Every model misses many boundary-stratum cells at B35 (5 to 18 where reported) but almost none at B50. The rank quantiles of
   boundary cells are similar across models (D01 median about 0.12 to 0.15 of the ranking). The differences between models are in the
   tail (the q100 rank), and that tail is what drives the lineage max ER.
 - **Determinism.** The A and B refits on fold D05 are bitwise identical to the original fits.
@@ -82,21 +82,26 @@ The amendment (`segarecomp_xplat_explore.t001.rocm.results.json`, amendment `bb5
 What this shows:
 
 - **C is the second-best model measured.**
-  - It is 0.030 better than M3-R seed 49, with zero B50 and boundary misses.
-  - It is still 0.011 *worse* than A, and its D09 lineage regresses by 0.076, so it does not qualify. Under the rule's thresholds it
-    could not have qualified anyway: it would have needed a lead of 0.02 or more.
-  - Graph-guided message passing clearly helps the local Transformer. C minus B is -0.039 against CPU B and -0.082 against the
-    device-matched ROCm B.
+  - It is 0.029 better than M3-R seed 49, with zero B50 and boundary misses.
+  - It is still 0.011 *worse* than A, and two lineages regress by more than the 0.05 tolerance: D09 by 0.076 and D03 by 0.057. So it
+    does not qualify. It would also have needed a lead of at least 0.02 over A to qualify.
+  - The results *suggest*, from a single seed, that graph-guided message passing helps the local Transformer. C minus B is -0.082
+    against the device-matched ROCm B. Against CPU B it is -0.039, which is within B's own device perturbation (0.044, below).
 - **B is unstable.** Changing only the device and torch build (same code and seed) moved B from 0.155 / 117 B50 misses to 0.199 / 1.
-  That perturbation is larger than every architecture contrast measured here. A single-seed B result therefore cannot rank B.
+  In mean ER that shift (0.044) is the same order as the architecture contrasts measured here (B minus A 0.050, B minus M4-Dense seed
+  1 0.057). For B50 misses it dwarfs them. A single-seed B result therefore cannot rank B.
 - **Cost.** C needs about 5.1 CPU-hours per fit even on the GPU (60.8 for 12 fits). Its typed message passing builds per-edge index
-  lists in Python and launches many tiny kernels, so the GPU is mostly idle. A needs about 40 CPU-seconds per fit. C's inference
+  lists in Python and launches many tiny kernels, so the step is CPU-bound. That is an inference from the CPU-time ratio (about 2.9
+  busy cores per fit) and the device benchmark; GPU utilization was not measured. A needs about 40 CPU-seconds per fit. C's inference
   averages 7.2 s per image (up to 67 s), against 0.2 s for A.
 - **Determinism.** B's ROCm refit on D05 is bitwise identical. C's ROCm determinism refit **hung in the GPU driver**:
   - After step 500, two threads spun on a GPU queue with no progress, and the WSL `dxg` driver logged `DestroyPagingQueue fail`.
-  - The farm's 180-minute cap recorded it as `timeout`. It does not count as an attempt to be re-run under the amendment rules.
-  - C's ROCm determinism is therefore **not established** in the farm accounting. Any post-hoc retry after the GPU reset is reported
-    separately below and outside the farm accounting.
+  - The farm's 180-minute cap recorded it as `timeout`. Under the amendment rules a timeout is final and is never re-run inside the
+    farm.
+  - C's ROCm determinism is therefore **not established** in the farm accounting. After the GPU reset, a disclosed post-hoc retry was
+    run outside the farm accounting. It used the same frozen `fit` command and wrote into the amendment's `repro/` directory. Its
+    bitwise comparison is reported in SEG-076-T004's synthesis ADR. It cannot change the committed determinism field, which counts only
+    farm jobs whose status is `ok`.
 - **Disclosure.** The amendment was frozen after the CPU A and B results were visible; C had no score at that point. Both views are
   always reported. The class change that a B redraw could cause is not acted on.
 

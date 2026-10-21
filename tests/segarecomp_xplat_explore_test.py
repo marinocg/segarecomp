@@ -168,12 +168,38 @@ def test_rocm_amendment():
     check("never replacing" in doc["reporting"], "amendment never replaces the pre-registered class")
 
 
+def test_committed_results_rederive():
+    """The committed pre-registered class (and both amendment views) re-derive from their committed tables under the frozen rule."""
+    import segarecomp_xplat_explore as rx
+    import segarecomp_xplat_explore_eval as ev
+    if not rx.RESULTS.is_file():
+        print("skip: no committed T001 results")
+        return
+    plan = json.loads(rx.PLAN.read_text())
+    docs = [("pre-registered", json.loads(rx.RESULTS.read_text()))]
+    am = rx.HERE / "segarecomp_xplat_explore.t001.rocm.results.json"
+    if am.is_file():
+        docs += [(f"amendment:{v}", d) for v, d in json.loads(am.read_text())["views"].items()]
+    for name, d in docs:
+        rule_in = {c: (None if c in d["failed_fits"] or not d["tables"][c]["complete_genesis"] else
+                       {"rows": d["tables"][c]["genesis"], "summary": d["tables"][c]["genesis_summary"]})
+                   for c in ("A", "B", "C", "M4_DENSE_s1@128", "M3_R_s49")}
+        got = ev.expansion_class(rule_in, plan["expansion_rule"])
+        check(got == d["expansion"], f"{name}: committed expansion re-derives from its tables")
+        for cfg, t in d["tables"].items():
+            if t["genesis_summary"] is not None:
+                check(ev.summary(t["genesis"]) == t["genesis_summary"], f"{name}/{cfg}: summary re-derives from lineage rows")
+    check(docs[0][1]["expansion"]["class"] == "NEGATIVE_STOP" and docs[0][1]["plan_sha256"] == rx.plan_sha(),
+          "pre-registered class and plan stamp")
+
+
 def main() -> int:
     test_barrier()
     test_strata()
     test_expansion()
     test_plan_tamper()
     test_rocm_amendment()
+    test_committed_results_rederive()
     if FAILURES:
         print(f"{len(FAILURES)} failure(s)")
         return 1
