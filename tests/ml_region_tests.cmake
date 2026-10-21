@@ -136,3 +136,7 @@ set_property(TEST segarecomp_xplat_stability_test APPEND PROPERTY LABELS full fa
 # torch is installed (research environment), otherwise skipped.
 add_test(NAME segarecomp_xplat_cv2_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_cv2_test.py)
 set_property(TEST segarecomp_xplat_cv2_test APPEND PROPERTY LABELS full fast)
+# SEG-076-T004 (exploratory research tooling): every committed SEG-076 class re-derives from its committed result document (research
+# environment; skipped without numpy).
+add_test(NAME segarecomp_xplat_seg076_final_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_seg076_final_test.py)
+set_property(TEST segarecomp_xplat_seg076_final_test APPEND PROPERTY LABELS full fast)
