@@ -285,6 +285,30 @@ def test_r_never_over_executed_or_observed():
     check(code3.get(0x20C) == (2, "R"), "R outside observed data admitted")
 
 
+def test_rebuild_may_admit_ordered_out_r():
+    # C1 round-3 H1: R reached only through a conflicting candidate can, in the first pass, block another path's R; the observed-data
+    # rebuild may then admit it. That is valid (it touches no observed or executed byte) and must not abort.
+    img = bytearray(cart(0x1000))
+    img[0x200:0x202] = bytes.fromhex("670e")          # BEQ.S 0x210
+    img[0x202:0x204] = bytes.fromhex("672c")          # BEQ.S 0x230
+    img[0x204:0x206] = bytes.fromhex("4e75")
+    img[0x210:0x212] = bytes.fromhex("600e")          # BRA.S 0x220 (Y)
+    img[0x220:0x224] = bytes.fromhex("303c1234")      # Z
+    img[0x230:0x232] = bytes.fromhex("4e71")
+    img[0x232:0x234] = bytes.fromhex("60ee")          # BRA.S 0x222 (W, inside Z)
+    lengths = {0x200: 2, 0x202: 2, 0x204: 2, 0x210: 2, 0x220: 4, 0x222: 2, 0x230: 2, 0x232: 2}
+    tok = tokens(img, lengths)
+    walk = {pc: (n, "x") for pc, n in lengths.items()}
+    first = ge.build_code(bytes(img), [0x200, 0x202, 0x204], {}, walk, tok, {})
+    check(first.get(0x220) == (4, "R") and 0x222 not in first, "first pass: Z blocks W")
+    observed = bytearray(0x1000)
+    observed[0x210] = observed[0x211] = 1
+    conflicts = []
+    second = ge.build_code(bytes(img), [0x200, 0x202, 0x204], {}, walk, tok, {}, observed, conflicts)
+    check(0x210 not in second and 0x220 not in second and second.get(0x222) == (2, "R") and conflicts == [(0x210, 0x212)],
+          f"rebuild: Y withdrawn, Z unexplored, W admitted {second}")
+
+
 def test_odd_executed_overlaps_even_instruction():
     img = bytearray(cart(0x1000))
     tok = tokens(img, {0x400: 2})
@@ -328,7 +352,7 @@ def test_plan_frozen():
 def main():
     for t in (test_plan_frozen, test_identity, test_vdp, test_parsers, test_flow, test_build_code, test_assemble_and_reads,
               test_rejected_executed_never_data, test_execution_inside_rejected_instruction, test_r_never_over_executed_or_observed,
-              test_odd_executed_overlaps_even_instruction, test_sram_rule, test_stats_and_score):
+              test_rebuild_may_admit_ordered_out_r, test_odd_executed_overlaps_even_instruction, test_sram_rule, test_stats_and_score):
         t()
     print("FAILURES:", len(FAILURES))
     return 1 if FAILURES else 0

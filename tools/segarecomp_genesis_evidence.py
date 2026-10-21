@@ -643,7 +643,7 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
     Executed PCs that are not accepted (rejected, or masked for overlap) are never R starts and their bytes are never covered by R.
     With `observed` (bytes of observed data: HW header, DMA sources, admitted data reads), an R candidate touching observed data is
     rejected at search time (R_DATA_CONFLICT; its successors are never explored), its span is appended to `conflicts` and kept out of any
-    other R: a single fixpoint, so observed data always outranks static reach."""
+    other R, so observed data always outranks static reach."""
     def bump(k):
         typed[k] = typed.get(k, 0) + 1
     size = len(img)
@@ -678,7 +678,6 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
         del rejected[pc]
     # overlap among ALL executed PCs: a candidate whose span contains another executed PC, or that starts inside a rejected executed
     # PC's extent, is masked (with the candidate it overlaps)
-    import bisect
     starts = sorted(set(cand) | set(rejected))
     bad = set()
     for i, pc in enumerate(starts):
@@ -691,7 +690,6 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
             if pc in cand:
                 bad.add(pc)
             j += 1
-    del bisect
     for pc in bad:
         bump("E_OVERLAPPING_EXECUTED")
     acc = {pc: (n, "E") for pc, n in cand.items() if pc not in bad}
@@ -703,7 +701,9 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
         if pc >= size or pc in acc:
             continue
         lo = pc & ~1
-        n = cand[pc] if pc in cand else rejected.get(pc, EXEC_MASK_BYTES)
+        n = max(cand.get(pc, 0), rejected.get(pc, 0)) if pc & 1 == 0 else EXEC_MASK_BYTES
+        if pc & 1 == 0:
+            n = max(n, rejected_extent(pc, walk, traced, tokens))
         for k in range(lo, min(size, lo + n)):
             taken[k] = 1
     executed_set = set(acc)
@@ -877,16 +877,19 @@ def label(rom: pathlib.Path, runs: list[pathlib.Path], ghidra_json: pathlib.Path
     for k in dr:
         observed[k] = 1
     conflicts: list = []
-    code0 = code
     code = build_code(img, executed, traced, walk, tokens, {}, observed, conflicts)
-    if not set(code) <= set(code0) or any(code[pc] != code0[pc] for pc in code):
-        raise EvidenceError("internal: the observed-data rebuild admitted new code")
+    # invariant (the rebuild may legitimately admit R that the first pass ordered out): no code byte over observed data or over a
+    # non-accepted executed PC's bytes
+    for pc, (n, t) in code.items():
+        if t == "R" and any(observed[k] or exec_mask[k] for k in range(pc, pc + n)):
+            raise EvidenceError("internal: static reach over observed data or executed bytes")
     if conflicts:
         typed["R_DATA_CONFLICT"] = len(conflicts)
     block = bytearray(exec_mask)
-    for s0, e0 in conflicts:
+    for s0, e0 in conflicts:                       # observed data stays data; the rest of a conflicting candidate span stays U
         for k in range(s0, e0):
-            block[k] = 1
+            if not observed[k]:
+                block[k] = 1
     cls, extents = assemble(img, code, block, dma_ext, dr, ghidra, typed)
     if ident["format"] == "plain":
         image_ref = str(img_path)
@@ -1058,7 +1061,7 @@ E_REJECTIONS = ("E_ODD_PC", "E_BEYOND_IMAGE", "E_DISASM_NO_DECODE", "E_CPU_DECOD
 PROTOCOL = {
     "schema": SCHEMA + ".plan",
     "task": "SEG-077-T001",
-    "status": "frozen before the first full Chuck Rock analysis (revision 3: independent C1 review rounds 1-2 applied before any full analysis)",
+    "status": "frozen before the first full Chuck Rock analysis (revision 4: independent C1 review rounds 1-3 applied before any full analysis)",
     "pilot": {"title": "Chuck Rock (USA)", "lineage": "G077-01", "raw_sha256": "d4cd7003c104f77bf9a9a78f43067f15a63f23925bc77746d0fdde419f594dc4",
               "raw_size": 1048576, "reset_in_image": True},
     "scenarios": SCENARIOS,
@@ -1069,7 +1072,7 @@ PROTOCOL = {
                 "R static reach: direct Bcc/BRA/BSR/DBcc/JMP/JSR(abs.w|abs.l|d16(PC)) targets and fall-through of non-call/trap, "
                 "non-terminating instructions (calls/traps only when the return site was executed), from accepted code, with "
                 "m68k-disasm walk + CPU-owned decoder length agreement and no overlap; never over or starting at a non-accepted executed PC; "
-                "a candidate touching observed data is rejected at search time (successors unexplored) and its span becomes U"],
+                "a candidate touching observed data is rejected at search time (successors unexplored); its non-observed bytes become U"],
         "D": ["HW_HEADER: 0x000-0x1FF vector table and cartridge header", "DMA: observed 68K-bus VDP DMA sources inside the image "
               "(control-port reconstruction)",
               "DR: observed data reads (program-space read tap, current-PC attribution) by an accepted executed reader or RAM code that "
