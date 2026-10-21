@@ -5,12 +5,14 @@ Transformer C (segarecomp_xplat_models.build_bc(graph=True)), which is left unch
 Same network function, parameters (identical module names, so a C state_dict loads into C-v2), M4 training recipe, candidate edges
 (segarecomp_xplat_models.window_graph) and PROVEN flag. Only the typed message passing is re-implemented:
 
-  frozen C   per layer and per round, per (batch item, edge type, block) Python loops building masked index tensors, then one atomic
-             `index_add` per piece (non-deterministic on ROCm; many tiny kernels, CPU-bound)
+  frozen C   per layer and per round, per (batch item, edge type, block) Python loops building masked index tensors, then one
+             `index_add` per piece (many tiny kernels, CPU-bound). It was observed NOT to be run-to-run deterministic on ROCm (T001
+             post-hoc refit); the root cause is not established (torch documents index_add as deterministic under
+             use_deterministic_algorithms on CUDA)
   C-v2       the edge index is built ONCE per forward in numpy; ONE padded in-edge table over all three edge types (unique destination x
              max in-degree, rows into the stacked per-type message tensor in a stable sorted order, zero mask for padding) turns aggregation
-             into gather + masked sum over a fixed axis, written with a unique-index copy: a fixed summation order with no atomic adds in
-             the forward pass
+             into gather + masked sum over a fixed axis, written with a unique-index copy: a fixed summation order. Its run-to-run
+             determinism is an EMPIRICAL claim (a 150-step ROCm probe and the pre-registered full-length refit), not a proof
 
 Mathematically the aggregated message is the same sum; only the floating-point summation order differs, so C-v2 equals C within float
 tolerance (verified on identical weights and batches), not bitwise.

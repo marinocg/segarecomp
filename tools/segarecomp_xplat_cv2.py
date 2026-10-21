@@ -40,7 +40,7 @@ SEEDS = (1, 2, 3)
 T001 = rx.HARNESS / ".cache" / "seg076" / "t001"
 T001_ROCM = rx.HARNESS / ".cache" / "seg076" / "t001-rocm"
 BOUND_EXTRA = ("segarecomp_xplat_cv2.py", "segarecomp_xplat_models_v2.py", "segarecomp_xplat_explore.t001.plan.digest",
-               "segarecomp_xplat_explore.t001.rocm.plan.digest")
+               "segarecomp_xplat_explore.t001.rocm.plan.digest", "segarecomp_xplat_stability.py", "segarecomp_xplat_stability.plan.digest")
 RESOURCES = {"device": "cuda:0 (ROCm/HIP), every C-v2 fit (one backend)", "parallel_fits": 3, "cpu_threads_per_fit": 2,
              "start_stagger_seconds": 30, "wall_clock_cap_minutes": 120, "rss_limit_mb": 4096, "min_available_mb_to_start": 4000,
              "host_memory_floor_mb": 2000, "attempts": 1,
@@ -375,6 +375,9 @@ def cmd_table(a) -> int:
     if farm.get("plan_sha256") != plan_sha():
         raise SystemExit("farm state belongs to a different plan")
     status = {k: v["status"] for k, v in farm["jobs"].items()}
+    unplanned = set(status) - {j["id"] for j in jobs()}
+    if unplanned:
+        raise SystemExit(f"farm state holds unplanned jobs: {sorted(unplanned)}")
     meta, classes = st.genesis_meta(), {}
     X, files = rx.xt(), comparator_files()
     tables, missing = {}, []
@@ -415,6 +418,9 @@ def cmd_table(a) -> int:
         add("CV2.ens3", {f: cells({iid: np.mean([words[s][f][iid] for s in SEEDS], axis=0) for iid in words[1][f]}) for f in rx.GENESIS})
     rp = score_path(out / "repro", "D05", 1)
     if status.get("CV2.D05.s1.repro") == "ok" and status.get("CV2.D05.s1") == "ok":
+        rr = json.loads(rp.with_suffix(".json").read_text())
+        if rr.get("plan_sha256") != plan_sha() or (rr["fold"], rr["seed"], rr["device"]) != ("D05", 1, "rocm"):
+            raise SystemExit("determinism refit record does not match")
         x1, x2 = X.load_npz(score_path(out, "D05", 1)), X.load_npz(rp)
         deterministic = bool(sorted(x1) == sorted(x2) and all(np.array_equal(x1[k], x2[k]) for k in x1))
     else:

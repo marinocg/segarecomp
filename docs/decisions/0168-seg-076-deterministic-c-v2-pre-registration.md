@@ -7,8 +7,9 @@
 ## Context
 
 In T001's ROCm amendment (ADR 0165), the graph-guided Transformer C was the second-best model: Genesis mean ER 0.116 against A's 0.105,
-with 0 B50 misses. A post-hoc refit showed that the frozen C is **not run-to-run deterministic on ROCm**. Its per-edge `index_add`
-message passing gave D05 ER 0.2053 in one run and 0.2086 in another. So the C result was one non-reproducible single-seed draw.
+with 0 B50 misses. A post-hoc refit showed that the frozen C is **not run-to-run deterministic on ROCm**: D05 ER was 0.2053 in one run and 0.2086 in
+another. The root cause is **not established**. The installed torch documents `index_add` as deterministic under
+`use_deterministic_algorithms` on CUDA, and C-v2 shares C's encoder layers and the backward pass of its gather. So the C result was one non-reproducible single-seed draw.
 
 The operator authorized a follow-up, delivered as a separate task. It does not reverse T001's pre-registered `NEGATIVE_STOP` or the
 cancellation of SEG-076-T002.
@@ -24,14 +25,20 @@ directly), the M4 training recipe, the candidate edges and the PROVEN flag. The 
 - **one** padded in-edge table covers all three edge types, with sources in a stable sorted order;
 - aggregation is a gather plus a masked sum over a fixed axis, written with a unique-index copy.
 
-There are no atomic adds in the forward pass. The frozen `segarecomp_xplat_models.py` is untouched.
+The frozen `segarecomp_xplat_models.py` is untouched. C-v2's run-to-run determinism is an **empirical** claim. It rests on the
+150-step probe and on the pre-registered full-length D05 refit. If that refit is missing or not bitwise identical, the result is
+`EVIDENCE_INSUFFICIENT`. The refit runs inside the 3-way parallel farm, so it also tests determinism under concurrency.
 
 ### Evidence before the freeze
 
 - **CPU equivalence** (4 real training batches, identical weights): logits agree within 4.8e-7 and every parameter gradient within
-  6.7e-7 relative (tolerances 1e-5 and 1e-4). The function is the same; only the float summation order differs.
+  6.7e-7 relative (tolerances 1e-5 and 1e-4). The function is the same; only the float summation order differs. This check ran on the
+  research venv's torch 2.14 on CPU, while the fits run on ROCm torch 2.6.
+  - The independent C5a review reproduced it with adversarial edges: cross-block edges, duplicate (src, dst) pairs, and empty edge sets
+    (logits within 7.2e-7).
 - **ROCm determinism probe** (150 steps, seed 1, twice): parameters and inference are bitwise identical, at 0.33 to 0.39 s per step with
-  the CPU shared. The frozen C runs at 1.6 s per step in the 4-way farm and diverged by step 500.
+  the CPU shared. The frozen C runs at 1.6 s per step in the 4-way farm. Its logs show divergence at the first logged step (500); that
+  is a log-granularity bound, so the short probe is suggestive and the full-length refit is the safeguard.
 
 ### Design
 
@@ -53,6 +60,10 @@ t = 4.303).
 | `A_ADVANTAGE_OVER_C` | the interval is entirely above 0, and \|mean\| >= 0.01 |
 | `NO_MEANINGFUL_DIFFERENCE_BOUNDED` | otherwise, when the whole interval lies within +/-0.02 |
 | `EVIDENCE_INSUFFICIENT` | otherwise, or when any planned fit fails, or when the determinism refit is not bitwise identical |
+
+A seed-level advantage (interval entirely below 0, |mean| >= 0.01) in which some seed has more B50 misses than A is not
+`C_ADVANTAGE_OVER_A`. It falls through: to `NO_MEANINGFUL_DIFFERENCE_BOUNDED` if the interval lies within +/-0.02, otherwise to
+`EVIDENCE_INSUFFICIENT`.
 
 Descriptive outputs:
 
