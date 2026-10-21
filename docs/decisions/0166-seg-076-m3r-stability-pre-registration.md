@@ -85,6 +85,16 @@ The seed instability that blocked SEG-075 (tau 0.103) is, in substance, the D01 
 
     Otherwise the class is `NO_MEANINGFUL_ADVANTAGE`.
   - The 5-of-6 count is a heuristic. The pairs share member seeds, so no binomial p is claimed. Power is low with 4 seeds.
+  - **Interpretation.** g_score's null is outcome averaging at the *image* level. Inside an image the sign of g_score is not fixed:
+    - seeds that disagree on which positive is weakest pull g_score negative, because averaging scores behaves roughly like averaging
+      ranks;
+    - positives that every seed buries pull it positive.
+
+    `SEED_STABILITY_IMPROVED` therefore means only that the logit-averaged ensemble achieves a lower tail ER than averaging the members'
+    image outcomes. It does not mean a benefit beyond rank averaging. Likewise `NO_EFFECT_DETECTED_BOUNDED` means "no effect above the
+    relevance floor, bounded within +/-0.02", not "exactly no effect".
+  - The C0 seed 49+50 pair, whose gains were seen in the dry run, is one of the six counted C0 pairs. The synthesis repeats this
+    disclosure.
   - The SD ratio of the overlapping pair ensembles to the single seeds is reported only descriptively, against its arithmetic null of
     exactly 1/sqrt(3).
   - **Review history before any fit.** The first version of this rule used that SD ratio as its criterion, which passes by construction.
