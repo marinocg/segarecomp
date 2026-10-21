@@ -336,6 +336,8 @@ def test_stats_and_score():
     lua = ge.scenario_lua({"id": "p", "policy": "random", "seed": 3, "seconds": 9, "start_window": 4}, 0x1000)
     check("seed = 3" in lua and "seconds = 9" in lua and "__" not in lua, "scenario substitution")
     check(raises(ge.scenario_lua, {"policy": "magic", "seconds": 1}, 0x1000), "unknown policy rejected")
+    lx = ge.scenario_lua({"id": "x", "policy": "explore", "seed": 2, "seconds": 9, "start_window": 4}, 0x1000)
+    check('policy = "explore"' in lx and "m:save(" in lx and "m:load(" in lx, "explore policy archives and resumes states")
 
 
 def test_plan_frozen():

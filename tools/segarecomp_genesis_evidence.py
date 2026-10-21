@@ -359,10 +359,14 @@ local function vr(offset, data, mask)
 end
 local cur = cpu.state["CURPC"]
 local rd = {}
+local seenpc = {}
+local novel = 0
 _G.seg077_rdtap = sp:install_read_tap(0x000000, S.size - 1, "seg077rd", function(offset, data, mask)
   local lane = 0
   if mask == 0xff00 then lane = 1 elseif mask == 0x00ff then lane = 2 end
-  rd[(cur.value << 26) | (offset << 2) | lane] = true
+  local pc = cur.value
+  rd[(pc << 26) | (offset << 2) | lane] = true
+  if not seenpc[pc] then seenpc[pc] = true novel = novel + 1 end
 end)
 _G.seg077_wtap = sp:install_write_tap(0xC00000, 0xDFFFFF, "seg077w", vw)
 _G.seg077_rtap = sp:install_read_tap(0xC00000, 0xDFFFFF, "seg077r", vr)
@@ -377,6 +381,7 @@ local held = {}
 local function set(n, v) if held[n] ~= v then F[n]:set_value(v) held[n] = v end end
 local function policy()
   if S.policy == "none" then return {} end
+  if frame >= S.seconds * 60 then return {} end
   local p = {}
   if frame < S.start_window * 60 then
     if frame % 120 < 6 then p["P1 Start"] = 1 end
@@ -396,8 +401,33 @@ local function policy()
   end
   return _G.seg077_act
 end
+-- explore: novelty-driven state archive (generic Go-Explore-style coverage; same input policy and frame budget)
+local SEG = 300
+local archive = 0
+local pending_load = nil
+local function explore_step()
+  if S.policy ~= "explore" or frame < S.start_window * 60 then return end
+  if pending_load ~= nil then
+    m:load(pending_load)
+    pending_load = nil
+    return
+  end
+  if (frame - S.start_window * 60) % SEG ~= 0 then return end
+  if novel > 0 or archive == 0 then
+    archive = archive + 1
+    m:save("x" .. archive)
+    novel = 0
+    return
+  end
+  local k = math.min(archive, 8)
+  pending_load = "x" .. (archive - rnd(k))
+end
 local function on_frame()
   frame = frame + 1
+  local s0 = cur.value
+  if not seenpc[s0] then seenpc[s0] = true novel = novel + 1 end
+  if S.policy == "explore" and frame >= S.seconds * 60 then m:exit() return end
+  explore_step()
   local p = policy()
   for _, n in ipairs(names) do set(n, p[n] or 0) end
 end
@@ -441,7 +471,7 @@ wait $AWK
 def scenario_lua(sc: dict, size: int) -> str:
     sub = {"__SECONDS__": str(int(sc["seconds"])), "__POLICY__": sc["policy"], "__SEED__": str(int(sc.get("seed", 0))),
            "__START_WINDOW__": str(int(sc.get("start_window", 0))), "__SIZE__": str(size)}
-    if sc["policy"] not in ("none", "random"):
+    if sc["policy"] not in ("none", "random", "explore"):
         raise EvidenceError(f"unknown scenario policy {sc['policy']}")
     out = LUA
     for k, v in sub.items():
@@ -508,7 +538,7 @@ def cmd_trace(a) -> int:
         p.chmod(0o755 if p.is_dir() else 0o644)
     t0 = time.time()
     cmd = ["docker", "run", "--rm", "--network", "none", "--user", "1000:1000", "--cpus", "1", "--memory", "2g",
-           "-e", f"SECONDS_TO_RUN={int(sc['seconds'])}",
+           "-e", f"SECONDS_TO_RUN={int(sc['seconds']) + (60 if sc['policy'] == 'explore' else 0)}",
            "-v", f"{img_path}:/in/rom.bin:ro", "-v", f"{inp / 'scenario.lua'}:/in/scenario.lua:ro", "-v", f"{inp / 'trace.sh'}:/in/trace.sh:ro",
            "-v", f"{out}:/out", EVIDENCE_IMAGE, "sh", "/in/trace.sh"]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=int(a.timeout))
@@ -1051,9 +1081,9 @@ BOUND = ("tools/segarecomp_genesis_evidence.py", "tools/segarecomp_genesis_evide
          "tools/segarecomp_xplat_corpus.py", "tools/segarecomp_xplat_formats.py", "tools/segarecomp_ml_v3_data.py",
          "tools/segarecomp_ml_region_gen2.py")
 SCENARIOS = [{"id": "attract", "policy": "none", "seconds": 180},
-             {"id": "play-s1", "policy": "random", "seed": 1, "seconds": 480, "start_window": 40},
-             {"id": "play-s2", "policy": "random", "seed": 2, "seconds": 480, "start_window": 40},
-             {"id": "play-s3", "policy": "random", "seed": 3, "seconds": 480, "start_window": 40}]
+             {"id": "explore-s1", "policy": "explore", "seed": 1, "seconds": 480, "start_window": 40},
+             {"id": "explore-s2", "policy": "explore", "seed": 2, "seconds": 480, "start_window": 40},
+             {"id": "explore-s3", "policy": "explore", "seed": 3, "seconds": 480, "start_window": 40}]
 G1_SCENARIOS = [{"id": "g1-attract", "policy": "none", "seconds": 3},
                 {"id": "g1-play", "policy": "random", "seed": 1, "seconds": 3, "start_window": 0}]
 E_REJECTIONS = ("E_ODD_PC", "E_BEYOND_IMAGE", "E_DISASM_NO_DECODE", "E_CPU_DECODER_REJECTED", "E_LENGTH_DISAGREE", "E_SPAN_BEYOND_IMAGE",
@@ -1061,7 +1091,19 @@ E_REJECTIONS = ("E_ODD_PC", "E_BEYOND_IMAGE", "E_DISASM_NO_DECODE", "E_CPU_DECOD
 PROTOCOL = {
     "schema": SCHEMA + ".plan",
     "task": "SEG-077-T001",
-    "status": "frozen before the first full Chuck Rock analysis (revision 4: independent C1 review rounds 1-3 applied before any full analysis)",
+    "status": "amendment A1 (scenario generation only) after the revision-4 pilot; revision 4 was frozen before the first full analysis",
+    "amendment_A1": {
+        "replaced_plan_sha256": "40f1f153cf39836e563aa794baaea7a65ae4a0685bfec92a25957f76033acc56",
+        "replaced_result": "Chuck Rock pilot under revision 4: G1-G4 hold (G4 rate 0.0007, all replicas identical); positive cells 266/8192 "
+                           "(3.25%), negative 344, mixed 24, 8.81 CPU-hours; self-assessed STOP (positives < 5%). Marginal new ROM PCs "
+                           "per scenario in plan order: attract 1537, play-s1 3839, play-s2 4, play-s3 220 (the random policy saturates)",
+        "change": "the three seeded random-play scenarios become seeded novelty-driven explore scenarios with the same input policy, seeds, "
+                  "start window and frame budget: every 300 frames after the start window the emulator state is archived when new code "
+                  "was reached (new read-tap reader PCs or new per-frame sampled PCs) or the archive is empty; otherwise the next "
+                  "segment resumes from a seeded choice among the 8 most recent archived states. Generic (no title knowledge); the "
+                  "evidence and label rules, gates, thresholds and budgets are unchanged",
+        "bound": "a single amendment: if the pilot is still STOP under A1, T001 ends STOP",
+        "disclosure": "explore mechanics were checked on the synthetic fixture only; no Chuck Rock run of A1 preceded this freeze"},
     "pilot": {"title": "Chuck Rock (USA)", "lineage": "G077-01", "raw_sha256": "d4cd7003c104f77bf9a9a78f43067f15a63f23925bc77746d0fdde419f594dc4",
               "raw_size": 1048576, "reset_in_image": True},
     "scenarios": SCENARIOS,

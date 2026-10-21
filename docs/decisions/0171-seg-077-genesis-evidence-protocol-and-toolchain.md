@@ -145,6 +145,27 @@ The G1 result under the revision-2 freeze is recorded in the Evidence of SEG-077
   reach, not ROM composition.
 - A title that executes RAM code with no ROM origin loses DR evidence entirely. It falls back to HW and DMA data evidence.
 
+## Amendment A1 (after the revision-4 pilot; scenario generation only)
+
+**Revision-4 pilot result, preserved and reported.**
+- G1-G4 held: the G4 rejection rate was 0.0007, and all four scenarios were digest-identical across replicas.
+- Positive cells were 266 of 8,192 (3.25%), with 344 negative and 24 mixed. The run took 8.81 CPU-hours.
+- The self-assessed class was therefore `STOP` (positives below 5%).
+- Marginal new ROM PCs per scenario, in plan order: attract 1,537, play-s1 3,839, play-s2 4, play-s3 220. The seeded random policy
+  saturates early, so the bottleneck is scenario reach, not label soundness.
+
+**Change.** The three random-play scenarios become `explore` scenarios with the same input policy, seeds, start window and frame
+budget:
+- Every 300 frames after the start window, the emulator state is archived if new code was reached (new read-tap reader PCs or new
+  per-frame sampled PCs) or if the archive is empty.
+- Otherwise, the next segment resumes from a seeded choice among the 8 most recent archived states.
+- The scenario ends on its own frame budget, because machine time rewinds on a state load.
+
+This is a generic coverage technique with no title knowledge. Evidence rules, label rules, gates, thresholds and budgets are unchanged.
+
+**Bound.** This is a single amendment: if the pilot is still `STOP` under A1, T001 ends `STOP`. The explore mechanics, including
+replica determinism, were checked on the synthetic fixture only; no Chuck Rock run of A1 preceded the freeze. G1 passed again under A1.
+
 ## Pilot result
 
-Recorded in the Evidence of SEG-077-T001 and checkpointed in ADR 0172 after the run (aggregate-only).
+Recorded in the Evidence of SEG-077-T001 (aggregate-only).
