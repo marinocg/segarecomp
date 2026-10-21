@@ -128,3 +128,7 @@ set_property(TEST segarecomp_xplat_final_test APPEND PROPERTY LABELS full fast)
 # strata, the pre-registered T001 expansion rule and plan tamper refusal (pure; synthetic data only).
 add_test(NAME segarecomp_xplat_explore_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_explore_test.py)
 set_property(TEST segarecomp_xplat_explore_test APPEND PROPERTY LABELS full fast)
+# SEG-076-T003 (exploratory research tooling): pre-registered T003 statistics (exact sign-flip, t interval, transfer / stability
+# classes), loss-log parsing and the job list (pure; synthetic data only).
+add_test(NAME segarecomp_xplat_stability_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_stability_test.py)
+set_property(TEST segarecomp_xplat_stability_test APPEND PROPERTY LABELS full fast)
