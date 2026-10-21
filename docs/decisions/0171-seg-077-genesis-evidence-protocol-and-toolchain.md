@@ -34,12 +34,22 @@ Revision 1 (commit 96cec35) was blocked by the independent C1 review **before an
 2. **RAM-copy origins could be wrong.** They were matched from the end-of-run RAM, which can be cleared or reused, so a real copy source
    could become data.
 
-Revision 2 fixes both and applies the review's notes. Revision 1 produced no commercial labels.
+Revision 2 fixed both and applied the review's notes. Its round-2 review was also blocked before any full analysis, on two holes in R:
+
+- an executed instruction masked for overlap could be re-admitted as R through a direct branch;
+- the one-round conflict withdrawal could admit a new R over the very observed data that caused the conflict.
+
+Revision 3 makes R a single fixpoint:
+- executed PCs that are not accepted are never R starts and their bytes are never covered by R;
+- an R candidate that touches observed data is rejected at search time, its successors are never explored, and its span is blocked from
+  both code and data.
+
+Revisions 1 and 2 produced no commercial labels.
 
 | Label | Tier | Evidence | Never from |
 |---|---|---|---|
 | I/c | E executed | PC observed in an independent emulator trace (MAME 0.276, `:maincpu`), inside the image. Two independent decoders (m68k-disasm, CPU-owned token decoder) agree on the length. | odd PCs, decode disagreement, overlapping executed spans (typed; masked from code and data) |
-| I/c | R static reach | Direct Bcc/BRA/BSR/DBcc/JMP/JSR (abs.w, abs.l, d16(PC)) targets, and fall-through of non-terminating, non-call instructions, from accepted code. Calls and traps continue only when their return site was executed. The same two-decoder agreement is required, with no overlap. If an R instruction conflicts with observed data, it is withdrawn together with every R instruction reached only through it, and its bytes become U. | m68k-disasm's own walk (it decodes inline data after calls; observed on the fixture) |
+| I/c | R static reach | Direct Bcc/BRA/BSR/DBcc/JMP/JSR (abs.w, abs.l, d16(PC)) targets, and fall-through of non-terminating, non-call instructions, from accepted code. Calls and traps continue only when their return site was executed. The same two-decoder agreement is required, with no overlap. Executed PCs that are not accepted are never R starts and are never covered by R. An R candidate that touches observed data (HW, DMA or admitted DR bytes) is rejected at search time, and its successors are not explored. Its span becomes U and is blocked from data. | m68k-disasm's own walk (it decodes inline data after calls; observed on the fixture) |
 | D | HW_HEADER | 0x000-0x1FF vector table and cartridge header | - |
 | D | DMA | Observed 68K-bus VDP DMA source extents, reconstructed from the control-port write stream with documented register semantics | fill/copy DMA, RAM sources |
 | D | DR | Observed data reads (program-space read tap, current-PC attribution) by an accepted executed reader or by RAM code. The reader must never read code bytes outside its own fetch window, where code bytes means accepted code or any executed PC's bytes. Bytes in the 4-byte prefetch shadow after executed code are excluded. Reads made over the 68000 bus by the Z80 or VDP count as 68000 data, so Z80 code is D for this corpus. DR is **disabled for the image** when any scenario executes code from work RAM, because no copy relation is inferred. | checksum and copy loops, prefetch and refill reads, RAM-copied code |

@@ -6,7 +6,7 @@ Covers image identity normalization (plain, 512-byte copier header, SMD interlea
 post-transfer source advance), MAME trace and m68k-disasm parsing, direct-flow kinds, executed/static-reach acceptance (two-decoder length
 agreement, overlap, inline-argument calls never extended, conflicts), data assembly (hardware header, DMA/code conflict, Ghidra veto,
 DR extents), data-read admission (code readers, prefetch shadow, unaccepted readers), the executed-byte mask (a rejected executed PC
-never becomes data), withdrawal of static reach that conflicts with observed data, the SRAM rule, read-tap key decoding, cell statistics,
+never becomes data), static reach never over executed or observed-data bytes, the SRAM rule, read-tap key decoding, cell statistics,
 synthetic soundness scoring and the frozen-plan invariants.
 """
 
@@ -249,21 +249,48 @@ def test_execution_inside_rejected_instruction():
     check(m[0x400:0x408] == b"\x01" * 8 and m[0x408] == 0, "rejected extent uses the longest decoder length")
 
 
-def test_r_withdrawn_on_data_conflict():
-    img = build_case()
-    lengths = {0x200: 6, 0x206: 2, 0x208: 4, 0x20C: 2, 0x20E: 2, 0x300: 2, 0x30A: 2}
+def test_r_never_over_executed_or_observed():
+    # C1 round-2 B1: an executed instruction masked for overlap must not be re-admitted as R through a direct branch
+    img = bytearray(cart(0x1000))
+    img[0x200:0x202] = bytes.fromhex("6706")          # BEQ.S 0x208 (executed, not taken)
+    img[0x202:0x204] = bytes.fromhex("4e75")
+    img[0x208:0x20C] = bytes.fromhex("303c4e71")      # move.w #$4E71,d0 (executed) ...
+    img[0x20C:0x20E] = bytes.fromhex("4e75")          # ... whose immediate is also executed as NOP at 0x20A
+    lengths = {0x200: 2, 0x202: 2, 0x208: 4, 0x20A: 2, 0x20C: 2}
     tok = tokens(img, lengths)
     walk = {pc: (n, "x") for pc, n in lengths.items()}
-    executed = [0x200, 0x206, 0x208, 0x300, 0x30A]
-    code = ge.build_code(img, executed, {}, walk, tok, {})
-    check(code[0x20C][1] == "R" and code[0x20E][1] == "R", "R present before the conflict")
     typed = {}
-    block = ge.executed_mask(executed, code, len(img))
-    code2, block2 = ge.withdraw_conflicts(img, executed, {}, walk, tok, code, block, {0x20C}, [], typed)
-    check(0x20C not in code2 and 0x20E not in code2 and typed.get("R_DATA_CONFLICT") == 1, "conflicting R and its R-only successor withdrawn")
-    check(block2[0x20C] == 1 and block2[0x20D] == 1, "withdrawn bytes blocked from data")
-    cls, _ = ge.assemble(img, code2, block2, [], {0x20C}, [], typed)
-    check(cls[0x20C] == ord("U"), "conflict byte stays unknown")
+    code = ge.build_code(bytes(img), [0x200, 0x202, 0x208, 0x20A, 0x20C], {}, walk, tok, typed)
+    check(0x208 not in code and 0x20A not in code and typed.get("E_OVERLAPPING_EXECUTED") == 2, f"B1: masked executed not re-admitted {code}")
+    # C1 round-2 B2: an R candidate touching observed data is rejected once and nothing else is admitted over that span
+    img2 = bytearray(cart(0x1000))
+    img2[0x200:0x202] = bytes.fromhex("6706")         # BEQ.S 0x208
+    img2[0x202:0x204] = bytes.fromhex("6706")         # BEQ.S 0x20A
+    img2[0x204:0x206] = bytes.fromhex("4e75")
+    lengths2 = {0x200: 2, 0x202: 2, 0x204: 2, 0x208: 4, 0x20A: 2}
+    tok2 = tokens(img2, lengths2)
+    walk2 = {pc: (n, "x") for pc, n in lengths2.items()}
+    observed = bytearray(0x1000)
+    for k in range(0x208, 0x20C):
+        observed[k] = 1
+    conflicts, typed = [], {}
+    code2 = ge.build_code(bytes(img2), [0x200, 0x202, 0x204], {}, walk2, tok2, typed, observed, conflicts)
+    check(0x208 not in code2 and 0x20A not in code2, f"B2: no R inside observed data {code2}")
+    check(conflicts and conflicts[0] == (0x208, 0x20C) and typed.get("R_DATA_CONFLICT", 0) >= 1, f"B2: conflict recorded {conflicts} {typed}")
+    # a plain R target outside observed data is still admitted
+    img3 = build_case()
+    lengths3 = {0x200: 6, 0x206: 2, 0x208: 4, 0x20C: 2, 0x20E: 2, 0x300: 2, 0x30A: 2}
+    code3 = ge.build_code(img3, [0x200, 0x206, 0x208, 0x300, 0x30A], {}, {pc: (n, "x") for pc, n in lengths3.items()},
+                          tokens(img3, lengths3), {}, bytearray(0x1000), [])
+    check(code3.get(0x20C) == (2, "R"), "R outside observed data admitted")
+
+
+def test_odd_executed_overlaps_even_instruction():
+    img = bytearray(cart(0x1000))
+    tok = tokens(img, {0x400: 2})
+    typed = {}
+    code = ge.build_code(bytes(img), [0x400, 0x401], {}, {0x400: (2, "x")}, tok, typed)
+    check(0x400 not in code and typed.get("E_ODD_PC") == 1 and typed.get("E_OVERLAPPING_EXECUTED") == 1, f"odd executed PC inside an instruction {typed}")
 
 
 def test_sram_rule():
@@ -300,7 +327,8 @@ def test_plan_frozen():
 
 def main():
     for t in (test_plan_frozen, test_identity, test_vdp, test_parsers, test_flow, test_build_code, test_assemble_and_reads,
-              test_rejected_executed_never_data, test_execution_inside_rejected_instruction, test_r_withdrawn_on_data_conflict, test_sram_rule, test_stats_and_score):
+              test_rejected_executed_never_data, test_execution_inside_rejected_instruction, test_r_never_over_executed_or_observed,
+              test_odd_executed_overlaps_even_instruction, test_sram_rule, test_stats_and_score):
         t()
     print("FAILURES:", len(FAILURES))
     return 1 if FAILURES else 0

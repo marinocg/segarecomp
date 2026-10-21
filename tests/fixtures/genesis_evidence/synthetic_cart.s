@@ -95,6 +95,10 @@ reset:
         bsr     ovl
         lea     ovl+2,%a0
         jsr     (%a0)
+        | the same with an outer instruction both decoders decode (entered by a direct BSR: never re-admitted as static reach)
+        bsr     ovl2
+        lea     ovl2+2,%a0
+        jsr     (%a0)
         | inline-argument call: two data words follow the JSR
         jsr     inline_args
         .word   0x4E75, 0x4EF9
@@ -145,6 +149,9 @@ call_ram:
         rts
 ovl:
         move.l  #0x4E714E75,%d0         | its immediate is NOP; RTS when entered at ovl+2
+        rts
+ovl2:
+        move.w  #0x4E71,%d0             | its immediate is NOP when entered at ovl2+2
         rts
 vblank:
         addq.l  #1,0xFF0100

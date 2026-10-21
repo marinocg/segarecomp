@@ -526,7 +526,7 @@ def cmd_trace(a) -> int:
     read_bytes = set()
     for addrs in reads.values():
         read_bytes |= addrs
-    pcs_digest = sha256(json.dumps(rom_pcs).encode())
+    pcs_digest = sha256(json.dumps([rom_pcs, first["ram"]]).encode())
     dma_digest = sha256(json.dumps(sorted(vdp.events.items())).encode())
     reads_digest = sha256(json.dumps(sorted((pc, sorted(a)) for pc, a in reads.items())).encode())
     res = {"schema": SCHEMA + ".trace", "scenario": sc, "image": ident, "emulator": {"image": EVIDENCE_IMAGE, "image_id": docker_image_id(EVIDENCE_IMAGE),
@@ -637,9 +637,13 @@ def flow(img: bytes, pc: int, length: int) -> tuple[list[int], str]:
 
 
 def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens: bytes, typed: dict,
-               forbidden: frozenset = frozenset()) -> dict[int, tuple[int, str]]:
-    """Accepted instructions {pc: (length, tier)} with tier E (executed) or R (direct-flow static reach). `forbidden` R starts (withdrawn
-    after a conflict with observed data) are never accepted, so R reached only through them disappears too."""
+               observed: bytearray | None = None, conflicts: list | None = None) -> dict[int, tuple[int, str]]:
+    """Accepted instructions {pc: (length, tier)} with tier E (executed) or R (direct-flow static reach).
+
+    Executed PCs that are not accepted (rejected, or masked for overlap) are never R starts and their bytes are never covered by R.
+    With `observed` (bytes of observed data: HW header, DMA sources, admitted data reads), an R candidate touching observed data is
+    rejected at search time (R_DATA_CONFLICT; its successors are never explored), its span is appended to `conflicts` and kept out of any
+    other R: a single fixpoint, so observed data always outranks static reach."""
     def bump(k):
         typed[k] = typed.get(k, 0) + 1
     size = len(img)
@@ -648,7 +652,7 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
     for pc in executed:
         if pc & 1:
             bump("E_ODD_PC")
-            rejected[pc & ~1] = EXEC_MASK_BYTES
+            rejected[pc] = EXEC_MASK_BYTES
             continue
         if pc >= size:
             bump("E_BEYOND_IMAGE")
@@ -674,19 +678,20 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
         del rejected[pc]
     # overlap among ALL executed PCs: a candidate whose span contains another executed PC, or that starts inside a rejected executed
     # PC's extent, is masked (with the candidate it overlaps)
+    import bisect
     starts = sorted(set(cand) | set(rejected))
     bad = set()
-    for pc in starts:
+    for i, pc in enumerate(starts):
         n = cand.get(pc) or rejected[pc]
-        for q in starts:
-            if q <= pc:
-                continue
-            if q >= pc + n:
-                break
+        j = i + 1
+        while j < len(starts) and starts[j] < pc + n:
+            q = starts[j]
             if q in cand:
                 bad.add(q)
             if pc in cand:
                 bad.add(pc)
+            j += 1
+    del bisect
     for pc in bad:
         bump("E_OVERLAPPING_EXECUTED")
     acc = {pc: (n, "E") for pc, n in cand.items() if pc not in bad}
@@ -694,9 +699,16 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
     for pc, (n, _) in acc.items():
         for k in range(pc, pc + n):
             taken[k] = 1
+    for pc in executed:                             # non-accepted executed bytes are never covered by R
+        if pc >= size or pc in acc:
+            continue
+        lo = pc & ~1
+        n = cand[pc] if pc in cand else rejected.get(pc, EXEC_MASK_BYTES)
+        for k in range(lo, min(size, lo + n)):
+            taken[k] = 1
     executed_set = set(acc)
     queue = sorted(acc)
-    seen = set(queue)
+    seen = set(queue) | set(executed)               # a non-accepted executed PC is never an R start
     while queue:
         nxt = []
         for pc in queue:
@@ -712,9 +724,6 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
                 if s & 1 or s < HEADER_END or s >= size:
                     bump("R_TARGET_OUTSIDE")
                     continue
-                if s in forbidden:
-                    bump("R_WITHDRAWN_DATA_CONFLICT")
-                    continue
                 w = walk.get(s)
                 tl = token_len(tokens, s)
                 if w is None:
@@ -726,6 +735,13 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
                 if s + tl > size or any(taken[k] for k in range(s, s + tl)):
                     bump("R_OVERLAP")
                     continue
+                if observed is not None and any(observed[k] for k in range(s, s + tl)):
+                    bump("R_DATA_CONFLICT")
+                    if conflicts is not None:
+                        conflicts.append((s, s + tl))
+                    for k in range(s, s + tl):
+                        taken[k] = 1
+                    continue
                 for k in range(s, s + tl):
                     taken[k] = 1
                 acc[s] = (tl, "R")
@@ -735,24 +751,6 @@ def build_code(img: bytes, executed: list[int], traced: dict, walk: dict, tokens
 
 
 # --------------------------------------------------------------------------------------------------------------------------- labels
-def withdraw_conflicts(img, executed, traced, walk, tokens, code, exec_mask, dr, dma_ext, typed):
-    """Observed data outranks static reach: an R instruction overlapping observed data (HW header, DMA source, DR byte) is withdrawn, with
-    every R instruction reached only through it (rebuild with it forbidden); its bytes are blocked from data and stay U."""
-    size = len(img)
-    observed = set(dr)
-    for s0, e0 in [(0, min(HEADER_END, size))] + list(dma_ext):
-        observed.update(range(s0, e0))
-    conflict = sorted(pc for pc, (n, t) in code.items() if t == "R" and any(k in observed for k in range(pc, pc + n)))
-    block = bytearray(exec_mask)
-    if conflict:
-        typed["R_DATA_CONFLICT"] = len(conflict)
-        for pc in conflict:
-            for k in range(pc, pc + code[pc][0]):
-                block[k] = 1
-        code = build_code(img, executed, traced, walk, tokens, {}, frozenset(conflict))
-    return code, block
-
-
 def assemble(img: bytes, code: dict, block: bytearray, dma_extents: list, dr: set[int], ghidra: list[int],
              typed: dict) -> tuple[bytearray, list]:
     """classes + data extents. `block` marks bytes that may never be data (executed PCs' bytes, withdrawn R spans); accepted code bytes
@@ -871,7 +869,24 @@ def label(rom: pathlib.Path, runs: list[pathlib.Path], ghidra_json: pathlib.Path
         dr = set()
     else:
         dr = data_reads(code, readers, exec_mask, size, typed)
-    code, block = withdraw_conflicts(img, executed, traced, walk, tokens, code, exec_mask, dr, dma_ext, typed)
+    # observed data outranks static reach: rebuild with observed data; conflicting R spans become U (blocked from data too)
+    observed = bytearray(size)
+    for s0, e0 in [(0, min(HEADER_END, size))] + list(dma_ext):
+        for k in range(s0, min(e0, size)):
+            observed[k] = 1
+    for k in dr:
+        observed[k] = 1
+    conflicts: list = []
+    code0 = code
+    code = build_code(img, executed, traced, walk, tokens, {}, observed, conflicts)
+    if not set(code) <= set(code0) or any(code[pc] != code0[pc] for pc in code):
+        raise EvidenceError("internal: the observed-data rebuild admitted new code")
+    if conflicts:
+        typed["R_DATA_CONFLICT"] = len(conflicts)
+    block = bytearray(exec_mask)
+    for s0, e0 in conflicts:
+        for k in range(s0, e0):
+            block[k] = 1
     cls, extents = assemble(img, code, block, dma_ext, dr, ghidra, typed)
     if ident["format"] == "plain":
         image_ref = str(img_path)
@@ -1043,7 +1058,7 @@ E_REJECTIONS = ("E_ODD_PC", "E_BEYOND_IMAGE", "E_DISASM_NO_DECODE", "E_CPU_DECOD
 PROTOCOL = {
     "schema": SCHEMA + ".plan",
     "task": "SEG-077-T001",
-    "status": "frozen before the first full Chuck Rock analysis (revision 2: independent C1 review findings applied before any full analysis)",
+    "status": "frozen before the first full Chuck Rock analysis (revision 3: independent C1 review rounds 1-2 applied before any full analysis)",
     "pilot": {"title": "Chuck Rock (USA)", "lineage": "G077-01", "raw_sha256": "d4cd7003c104f77bf9a9a78f43067f15a63f23925bc77746d0fdde419f594dc4",
               "raw_size": 1048576, "reset_in_image": True},
     "scenarios": SCENARIOS,
@@ -1053,8 +1068,8 @@ PROTOCOL = {
                 "CPU-owned decoder agree on the length; odd PCs, disagreements and overlapping executed spans are masked",
                 "R static reach: direct Bcc/BRA/BSR/DBcc/JMP/JSR(abs.w|abs.l|d16(PC)) targets and fall-through of non-call/trap, "
                 "non-terminating instructions (calls/traps only when the return site was executed), from accepted code, with "
-                "m68k-disasm walk + CPU-owned decoder length agreement and no overlap; withdrawn (with R reached only through it) when it "
-                "conflicts with observed data, the conflict bytes becoming U"],
+                "m68k-disasm walk + CPU-owned decoder length agreement and no overlap; never over or starting at a non-accepted executed PC; "
+                "a candidate touching observed data is rejected at search time (successors unexplored) and its span becomes U"],
         "D": ["HW_HEADER: 0x000-0x1FF vector table and cartridge header", "DMA: observed 68K-bus VDP DMA sources inside the image "
               "(control-port reconstruction)",
               "DR: observed data reads (program-space read tap, current-PC attribution) by an accepted executed reader or RAM code that "
@@ -1192,6 +1207,8 @@ def cmd_g1(a) -> int:
         sc_res["typed"] = m["typed"]
         res["scenarios"][sc["id"]] = sc_res
     res["G1"] = all(v["sound"] for v in res["scenarios"].values())
+    res["plan_sha256"] = sha256(PLAN.read_bytes())
+    res["cli_sha256"] = sha256(pathlib.Path(a.cli).read_bytes())
     res["dr_exercised"] = res["scenarios"]["g1-attract"]["typed"].get("DR_BYTES_ADDED", 0) > 0
     res["ram_rule_exercised"] = res["scenarios"]["g1-play"]["ram_pcs"] > 0 and "DR_DISABLED_RAM_EXECUTION" in res["scenarios"]["g1-play"]["typed"]
     (out / "g1.json").write_text(json.dumps(res, indent=1, sort_keys=True))
@@ -1287,7 +1304,9 @@ def cmd_run_title(a) -> int:
     cost_hours = (sum(t["wall_seconds"] for t in traces) + ghidra_wall + meta["label_seconds"]) / 3600
     g1 = None
     if a.g1:
-        g1 = json.loads(pathlib.Path(a.g1).read_text())["G1"]
+        gj = json.loads(pathlib.Path(a.g1).read_text())
+        g1 = (gj.get("plan_sha256") == plan_digest and gj.get("cli_sha256") == plan["cli_sha256"] and gj["G1"]
+              and gj["dr_exercised"] and gj["ram_rule_exercised"])
     summary = sanitized(meta)
     summary.update(gates_and_class(meta, traces, det, cost_hours, g1))
     summary["determinism"] = det

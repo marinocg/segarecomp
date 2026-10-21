@@ -3,13 +3,13 @@
  "asm_image_id": "sha256:175a3aba35bcc4801c2b5680fadeef3dc38993bdce45b470dd0810066b7626e3",
  "binding": "T001 self-assesses; T002 (independent) owns the binding class",
  "bound_code": {
-  "tests/fixtures/genesis_evidence/synthetic_cart.s": "a901f147f5dd0fe4812ffb0b7e872138912ab2fce02f2d4ba1754efc15afb0b3",
-  "tests/segarecomp_genesis_evidence_test.py": "44d5be9511d2edea898507f12eabb9ac629c21906b8d558cb50ed08d878c6d7c",
+  "tests/fixtures/genesis_evidence/synthetic_cart.s": "ad2d240f7e74e0f9cab830cd20081e646dfb6466ddd96f04373103bcf9bf602c",
+  "tests/segarecomp_genesis_evidence_test.py": "57aa2cb08932f96fcdd756e6723933e5bd4b1b269653a56e3619572c9b77e66b",
   "tools/ghidra.py": "4878ac9c095013588acd9a2814a5dbb74989a77921d03a1064d2e5516d3dd187",
   "tools/ghidra/scripts/ExportCodeEntryCandidates.java": "24972a3af0a5ee68e0f4285d32fde59b3c6c73d7628cda5423ee854925fa8343",
   "tools/ghidra/scripts/PinAnalysisRecipe.java": "f7435d0c965ec85bad7d2b07000a18eb64bf219a7c4c0d343267367022973c79",
   "tools/segarecomp_genesis_evidence.Dockerfile": "ef1c6aeb8958a6066fc550135e51b730b52d0c79d63987141ef1f91ebbb2b661",
-  "tools/segarecomp_genesis_evidence.py": "d7d3a503b52b96e076aca9018b64bf06cb28ed5e0e132c9a0ebb6c9d99651d27",
+  "tools/segarecomp_genesis_evidence.py": "6b8d5b0929f7881f42f2adee27ea8ec355b7c219c3b3a86a8738592c5a22c82a",
   "tools/segarecomp_ml_region_gen2.py": "5b5e07c6b6a2ae3af3a1a45aead275a23bd110a25bbfbf5efd73307d817650d3",
   "tools/segarecomp_ml_v3_data.py": "90537880773627c1c1babcd2e36c2234325cf04c9e900afb07a6ab85bcd8097f",
   "tools/segarecomp_xplat_corpus.py": "e348a6e1ddb26f8944a9bb036cb86c20ccb63da703e38c84ed210391e296aec3",
@@ -40,7 +40,7 @@
   ],
   "I/c": [
    "E executed: MAME 0.276 trace of :maincpu, PC inside the image, m68k-disasm (walk decode at that PC, else traced) and the CPU-owned decoder agree on the length; odd PCs, disagreements and overlapping executed spans are masked",
-   "R static reach: direct Bcc/BRA/BSR/DBcc/JMP/JSR(abs.w|abs.l|d16(PC)) targets and fall-through of non-call/trap, non-terminating instructions (calls/traps only when the return site was executed), from accepted code, with m68k-disasm walk + CPU-owned decoder length agreement and no overlap; withdrawn (with R reached only through it) when it conflicts with observed data, the conflict bytes becoming U"
+   "R static reach: direct Bcc/BRA/BSR/DBcc/JMP/JSR(abs.w|abs.l|d16(PC)) targets and fall-through of non-call/trap, non-terminating instructions (calls/traps only when the return site was executed), from accepted code, with m68k-disasm walk + CPU-owned decoder length agreement and no overlap; never over or starting at a non-accepted executed PC; a candidate touching observed data is rejected at search time (successors unexplored) and its span becomes U"
   ],
   "U": "everything else; unknown is never a negative",
   "excluded": [
@@ -110,7 +110,7 @@
   }
  ],
  "schema": "segarecomp.genesis_evidence.v1.plan",
- "status": "frozen before the first full Chuck Rock analysis (revision 2: independent C1 review findings applied before any full analysis)",
+ "status": "frozen before the first full Chuck Rock analysis (revision 3: independent C1 review rounds 1-2 applied before any full analysis)",
  "stop_classes": [
   "INPUT_REQUIRED",
   "RETENTION_DECISION_REQUIRED",
