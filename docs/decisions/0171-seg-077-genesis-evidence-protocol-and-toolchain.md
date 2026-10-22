@@ -184,6 +184,35 @@ pilot traces started under the first A1 freeze were stopped and discarded.
 **Bound.** This is a single amendment: if the pilot is still `STOP` under A1, T001 ends `STOP`. The explore mechanics, including
 replica determinism, were checked on the synthetic fixture only; no Chuck Rock run of A1 preceded the freeze. G1 passed again under A1.
 
-## Pilot result
+## Pilot result (aggregate-only; `tools/segarecomp_genesis_evidence.t001.results.json`)
 
-Recorded in the Evidence of SEG-077-T001 (aggregate-only).
+| | revision 4 (random play) | amendment A1 (explore) |
+|---|---|---|
+| G1 / G2 / G3 / G4 | pass / pass / pass / pass (rate 0.0007) | pass / pass / pass / pass (rate 0.0009) |
+| executed ROM PCs | 5,600 | 4,480 |
+| E / R instruction starts | 5,596 / 1,394 | 4,476 / 2,060 |
+| I / c / D / U bytes | 6,990 / 21,894 / 60,264 / 959,428 | 6,536 / 20,414 / 50,506 / 971,120 |
+| DR bytes admitted | 34,248 | 31,914 |
+| positive / negative / mixed / masked cells (of 8,192) | 266 / 344 / 24 / 7,582 | 255 / 276 / 24 / 7,661 |
+| positive fraction (U1 needs 10%, STOP below 5%) | 3.25% | 3.11% |
+| CPU-hours (C1 cap 10) | 8.81 | 9.06 |
+| marginal new ROM PCs per scenario | 1,537 / 3,839 / 4 / 220 | 1,537 / 2,909 / 11 / 23 |
+| self-assessed class | STOP | **STOP** (final for T001: single amendment) |
+
+Further results:
+- Re-labelling from the retained evidence reproduces the classes and tokens digests exactly.
+- Ghidra produced 1,216 code-entry candidates; 664 of them fall on accepted code starts. No Ghidra veto of data fired, because no
+  candidate fell in labelled data.
+
+**Diagnosis.** The limit is scenario reach, not label soundness.
+- Under A1, the three explore seeds reached an identical ROM PC set.
+- Under revision 4, the second and third random seeds added only 4 and 220 PCs.
+- The generic seeded input policies therefore do not drive the title beyond its early states. Novelty archiving cannot create reach
+  that the input policy lacks.
+
+The labels that were produced are sound under every gate, but too few for the pre-registered usefulness floor.
+
+**Implication for SEG-077.** At about 9 CPU-hours per title and about 260 positive cells per title, scenario-bounded evidence is far below
+the yield the expansion needs. A materially different, authorized scenario source would be a new protocol, not a further amendment of
+this one. Examples are operator-recorded human input movies, or title-agnostic save states supplied by the operator. SEG-077-T002 owns the
+binding class and the expansion decision.
