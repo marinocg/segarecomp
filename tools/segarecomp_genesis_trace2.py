@@ -158,8 +158,7 @@ def cmd_trace(a) -> int:
     ext = [tuple(x) for s0, e0 in raw_ext for x in ge.ranges(sorted(k for k in range(s0, e0) if k in tap))]
     img_b = img_path.read_bytes()
     vectors = {ge.u32(img_b, 4 * i) for i in range(1, 64)}
-    edges = sorted({tuple(int(x, 16) for x in ln.split()) for ln in (out / "edges.txt").read_text().splitlines() if ln.strip()}
-                   - {(s_, t_) for s_, t_ in []})
+    edges = sorted({tuple(int(x, 16) for x in ln.split()) for ln in (out / "edges.txt").read_text().splitlines() if ln.strip()})
     edges = [e for e in edges if e[1] not in vectors]      # an exception entry right after a site is not that site's target
     (out / "pcs.json").write_text(json.dumps({"rom": {str(k): v for k, v in sorted(first["rom"].items())}, "ram": first["ram"]}))
     (out / "reads.json").write_text(json.dumps({str(pc): ge.ranges(sorted(v)) for pc, v in sorted(reads.items())}))

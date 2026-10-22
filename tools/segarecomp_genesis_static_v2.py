@@ -852,7 +852,8 @@ RULES = {
                  "predictions on the exposed set; procedure: start from the v1 base tiers (V, J, PT, FILL) plus IP, drop the worst "
                  "failing tier and re-measure until all pass (a V failure is STOP: no admitted set); test each other tier alone on top; "
                  "finally measure the combined admitted set (and JT) on both sets, dropping optional tiers in reverse admission order "
-                 "until the combination passes",
+                 "until the combination passes; JT data is exempt from the exposed known-prediction requirement but must meet the rate "
+                 "tests wherever it has known predictions; a record whose combined set does not pass admits nothing",
     "rt": "record-table roots (RT) are reported but not admissible: no source-backed precision measurement exists (d07 had no qualifying "
           "table)",
 }
@@ -991,6 +992,8 @@ def cmd_admit(a) -> int:
         admitted = admitted[:-1]
     jt_ok = "D_JT" not in failing_of(admitted, msf)
     final_ok = not [n for n in failing_of(admitted, msf) if n != "D_JT"]
+    for t, v in optional.items():
+        v["in_final_set"] = t in admitted
     doc = {"schema": SCHEMA + ".admission", "plan_sha256": hashlib.sha256(PLAN.read_bytes()).hexdigest(), "admitted_tiers": admitted,
            "jt_data_admitted": jt_ok, "combined_set_passes": final_ok, "final_measure": {k: v["tiers"] for k, v in msf.items()},
            "procedure": log, "optional": optional, "data_boundary": "aggregates only"}
@@ -1003,6 +1006,8 @@ def admitted_tiers() -> list[str]:
     doc = json.loads(ADMISSION.read_text())
     if doc["plan_sha256"] != hashlib.sha256(PLAN.read_bytes()).hexdigest():
         raise SystemExit("admission record belongs to another plan")
+    if not doc.get("combined_set_passes"):
+        raise SystemExit("admission record: the combined admitted set did not pass (nothing admitted)")
     return doc["admitted_tiers"]
 
 

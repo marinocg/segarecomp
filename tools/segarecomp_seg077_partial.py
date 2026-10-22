@@ -34,7 +34,9 @@ PARTIAL_TIERS = ("V", "J", "PT", "FILL")
 COMMERCIAL = ("D01", "D02", "D03", "D04")
 BOUND = ("segarecomp_seg077_partial.py", "segarecomp_genesis_static_v2.py", "segarecomp_genesis_evidence.py", "segarecomp_xplat_models.py",
          "segarecomp_xplat_transfer.py", "segarecomp_ml_v3.py", "segarecomp_ml_v3_train.py", "segarecomp_xplat_stability.py",
-         "segarecomp_xplat_t005.py", "segarecomp_ml_v3_data.py")
+         "segarecomp_xplat_t005.py", "segarecomp_ml_v3_data.py", "segarecomp_xplat_design.py", "segarecomp_xplat_decide.py",
+         "segarecomp_xplat_explore.py", "segarecomp_xplat_explore_eval.py", "segarecomp_ml_region_gen2.py", "segarecomp_ml_region_gen2_train.py",
+         "segarecomp_xplat_design.plan.json", "segarecomp_xplat_design.plan.digest")
 RULE = {"question": "does adding a lineage with partial static-first labels (U masked) improve held-out ER over omitting it?",
         "statistic": "d(F, X) = ER(MINUS_X+PARTIAL_X) - ER(MINUS_X); cluster by held-out fold: D(F) = mean over X of d(F, X) (11 values); "
                      "exact two-sided sign-flip test over the 11 D(F); d is also reported per X",
@@ -136,7 +138,7 @@ def cmd_run(a) -> int:
     by_lin = {}
     for d in dirs:
         by_lin.setdefault(lineage_of(d), []).append(d)
-    res_dir = OUT / "results"
+    res_dir = OUT / "results" / hashlib.sha256(PLAN.read_bytes()).hexdigest()[:16]
     res_dir.mkdir(parents=True, exist_ok=True)
     for j in doc["jobs"]:
         key = f"{j['fold']}.{j['cond']}.{j['x'] or '-'}"
@@ -172,8 +174,11 @@ def cmd_table(a) -> int:
     import segarecomp_xplat_stability as st
     doc = verify_plan()
     R = {}
-    for p in (OUT / "results").glob("*.json"):
+    digest = hashlib.sha256(PLAN.read_bytes()).hexdigest()
+    for p in (OUT / "results" / digest[:16]).glob("*.json"):
         r = json.loads(p.read_text())
+        if r.get("plan_sha256") != digest:
+            raise SystemExit(f"{p.name}: result belongs to another plan")
         j = r["job"]
         R[(j["fold"], j["cond"], j["x"])] = r["lineage_max_er"]
     pairs, per_x = {}, {}
@@ -182,6 +187,8 @@ def cmd_table(a) -> int:
             v = er - R[(F, "MINUS_X", X)]
             pairs.setdefault(F, []).append(v)
             per_x.setdefault(X, []).append(v)
+    if len(R) != len(doc["jobs"]) or len(pairs) != len(doc["lineages"]):
+        raise SystemExit(f"incomplete matrix: {len(R)}/{len(doc['jobs'])} jobs, {len(pairs)} fold means (fail closed)")
     d = [sum(v) / len(v) for F, v in sorted(pairs.items())]
     mean = sum(d) / len(d) if d else None
     p = st.sign_flip_p(d) if d else None
@@ -205,10 +212,10 @@ def cmd_table(a) -> int:
     out = {"schema": "segarecomp.seg077.partial.results.v1", "plan_sha256": hashlib.sha256(PLAN.read_bytes()).hexdigest(), "rule": RULE,
            "per_x_mean_d": {X: round(sum(v) / len(v), 6) for X, v in sorted(per_x.items())}, "fold_means": [round(x, 6) for x in d],
            "partial_label_coverage": cov,
-           "pairs": len(d), "mean_d": round(mean, 6) if mean is not None else None, "sign_flip_p": round(p, 6) if p is not None else None,
+           "folds": len(d), "mean_d": round(mean, 6) if mean is not None else None, "sign_flip_p": round(p, 6) if p is not None else None,
            "class": cls, "retention": retention, "jobs_done": len(R), "jobs_planned": len(doc["jobs"])}
     RESULTS.write_text(json.dumps(out, indent=1, sort_keys=True) + "\n")
-    print(json.dumps({k: out[k] for k in ("pairs", "mean_d", "sign_flip_p", "class", "jobs_done", "jobs_planned")}))
+    print(json.dumps({k: out[k] for k in ("folds", "mean_d", "sign_flip_p", "class", "jobs_done", "jobs_planned")}))
     return 0
 
 
