@@ -692,22 +692,41 @@ def cmd_table(a) -> int:
 def final_models() -> dict[str, pathlib.Path]:
     """The blind cohort's models: K1 all fits (A; B and C-v2 seeds 1-3) and the K0 (SEG-076-equivalent) comparators. SEG-076 weights
     are admitted only with a passing reuse check."""
-    if not json.loads((OUT / "reuse.json").read_text()).get("admitted"):
-        raise SystemExit("K0 reuse not admitted: the SEG-076 all-fit weights cannot be used")
-    out = {"A.K1": score_path("A", "K1", "all", None).with_suffix(".pkl"), "A.K0": comparator_files()["A.K0.all"]}
+    rp = OUT / "reuse.json"
+    if not rp.is_file():
+        raise SystemExit("reuse.json missing: run `reuse` after the farm")
+    admitted = json.loads(rp.read_text()).get("admitted")
+    out = {"A.K1": score_path("A", "K1", "all", None).with_suffix(".pkl")}
+    if admitted:                                  # a failed reuse check drops only the SEG-076 K0 keys (K0 INCOMPLETE)
+        out["A.K0"] = comparator_files()["A.K0.all"]
     for m in ("B", "CV2"):
         for s in SEEDS:
             out[f"{m}.K1.s{s}"] = score_path(m, "K1", "all", s).with_suffix(".pt")
-            out[f"{m}.K0.s{s}"] = comparator_files()[f"{m}.K0.all.s1"] if s == 1 else score_path(m, "K0", "all", s).with_suffix(".pt")
+            if s != 1:
+                out[f"{m}.K0.s{s}"] = score_path(m, "K0", "all", s).with_suffix(".pt")
+            elif admitted:
+                out[f"{m}.K0.s{s}"] = comparator_files()[f"{m}.K0.all.s1"]
     return out
+
+
+def _fit_ok(key: str) -> bool:
+    """A final model counts only if its farm status is ok (SEG-076 reused weights: the passing reuse check)."""
+    parts = key.split(".")
+    m, cond = parts[0], parts[1]
+    seed = int(parts[2][1:]) if len(parts) > 2 else None
+    jid = job_id(m, cond, "all", seed)
+    status = json.loads((OUT / "farm.json").read_text())["jobs"] if (OUT / "farm.json").is_file() else {}
+    if jid in status:
+        return status[jid].get("status") == "ok" and score_path(m, cond, "all", seed).with_suffix(".json").is_file()
+    return comparator_files().get(jid) is not None
 
 
 def cmd_freeze_models(a) -> int:
     verify_plan_full()
     fm = final_models()
     doc = {"schema": "segarecomp.seg077.models.v1", "plan_sha256": plan_sha(),
-           "models": {k: sha(p) for k, p in sorted(fm.items()) if p.is_file()},
-           "missing": sorted(k for k, p in fm.items() if not p.is_file()),
+           "models": {k: sha(p) for k, p in sorted(fm.items()) if p.is_file() and _fit_ok(k)},
+           "missing": sorted(k for k, p in fm.items() if not (p.is_file() and _fit_ok(k))),
            "policy": {"budgets": ["B35", "B50", "B60"], "ensemble": "B and C-v2: mean of the 3 seeds' word logits, cell max at 128 bytes",
                       "metrics": DECISION["blind"]["metrics"]}}
     MODELS_FROZEN.write_bytes(canonical(doc))
@@ -756,6 +775,10 @@ def cmd_blind_score(a) -> int:
     verify_plan_full()
     verify_models()
     key = a.key
+    if a.equiv and key.split(".")[1] != "K1":
+        raise SystemExit("--equiv applies to K1 all-fit models only (K0 comparators are not equivalence-gated; disclosed)")
+    if not a.equiv and not a.blind:
+        raise SystemExit("--blind <custodian root> is required without --equiv")
     if key not in verify_models()["models"]:
         raise SystemExit(f"{key} is not a recorded final model")
     path = final_models()[key]

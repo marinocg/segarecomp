@@ -104,7 +104,9 @@ actually qualified.
 - **Equivalence gate.** Before any exposure, `blind-score --equiv` scores G077-01 through the label-free blind path with each K1 `all`
   model. The scores must be bitwise equal to the scores that fit wrote in its own process; the gate exercises the weight reload.
 - **Identity.** Blind samples must match the pinned cohort by recomputed image digest, with token digests checked, and all 8 must be
-  present.
+  present. All 8 cohort images are plain format, so the recomputed digest is the raw pin itself.
+- **Comparators.** K0 comparators are not equivalence-gated (disclosed). A failed reuse check drops only the SEG-076 K0 keys, and the K1
+  comparison proceeds. Only fits whose farm status is `ok` are frozen as final models.
 - **Metrics.** They use labelled cells only: labelled ER (masked cells are excluded), plus B35/B50/B60 misses of labelled starts under
   SEG-072's unchanged budget regions. A title is informative when it has at least 50 labelled positive and 50 labelled negative cells.
   Incomplete truth is reported as incomplete.
@@ -138,6 +140,10 @@ The `DATA_INSUFFICIENT` threshold can only stop an advantage claim. `neural_adva
 The C5 pre-registration review (round 1) blocked two defects before any fit, and both were fixed before the freeze:
 - seed addresses were used as cells in the budget misses;
 - farm memory overcommit and failure handling.
+
+Round 2 passed with findings. Three fixes were applied before any fit: reuse failure is scoped to K0, models are frozen only with `ok`
+status, and `--equiv` is guarded. One minor farm-robustness note is accepted: no monitoring during the 30 s start stagger, and signal
+deaths count as infrastructure.
 
 ## Consequences
 
