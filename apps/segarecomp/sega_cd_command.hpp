@@ -13,7 +13,8 @@ inline constexpr const char *segarecomp_sega_cd_usage =
     "                          [--application-entry <address>]\n"
     "      (SEG-064 BIOS-image profile, ADR 0142; run it with --bios <image> as well; --materialize-dir <dir> makes a build pass;\n"
     "       --partition-window writes one translation unit per processor PC window next to <program.c>, listed in the report;\n"
-    "       --disc-image admits a disc system-area extent the BIOS places in a processor's RAM as an executable image (SEG-064-T004);\n"
+    "       --disc-image admits a track-1 extent placed in a processor's RAM as an executable image (SEG-064-T004; main: work RAM\n"
+    "       or, SEG-071-T001, the 2M Word RAM view $200000-$23FFFF; sub: PRG RAM);\n"
     "       --application-entry ends the run, with the typed stop application_handoff, at the first main instruction there)\n";
 
 int segarecomp_sega_cd_command(int argc, char **argv);

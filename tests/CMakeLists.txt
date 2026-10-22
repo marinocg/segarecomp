@@ -1196,6 +1196,10 @@ set_property(TEST sega_cd_bios_bootarea_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_bios_posthandoff_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_bios_posthandoff_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_bios_posthandoff_test APPEND PROPERTY LABELS full fast)
+# SEG-071-T001: a disc extent mapped into the main processor's 2M Word RAM view (owner rule, live-byte guard, authority, refusals).
+add_test(NAME sega_cd_bios_wordram_extent_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_bios_wordram_extent_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_bios_wordram_extent_test APPEND PROPERTY LABELS full fast)
 # SEG-065-T002 (ADR 0147): the internal backup RAM machine input (bus table, authored formatted image, program option).
 add_test(NAME sega_cd_backup_ram_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_backup_ram_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
