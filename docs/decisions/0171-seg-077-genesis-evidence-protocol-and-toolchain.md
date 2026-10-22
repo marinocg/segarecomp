@@ -166,9 +166,19 @@ This is a generic coverage technique with no title knowledge.
 State loads force one soundness tightening of the DMA rule. MAME restores the VDP registers on a load, but the control-port
 reconstruction cannot see that. Registers are therefore treated as unknown at power-on and after every load, and a DMA is recorded only
 when register 1 and registers 0x13-0x17 have been written since. In addition, a reconstructed DMA extent is kept only where the same run's read
-tap saw those bytes read. This independent cross-check closes the window between a load request and the actual load. Both measures can
-only drop DMA evidence, never add it. G1 gains a 20 s explore scenario (state loads), and the fixture repeats its DMA every VBlank, so
-post-load DMA is exercised. Gates, thresholds and budgets are unchanged. The independent A1 review found the stale-register defect; the
+tap saw those bytes read. This is a weak, drop-only filter, because the tap is the union of all readers. Both measures can only drop DMA
+evidence, never add it.
+
+The window between a load request and the actual load is closed in practice by MAME's load timing, not by the tap. MAME performs a
+scheduled load right after the timeslice whose timers fired the frame notifier, so normally no 68000 instruction runs in between.
+
+**Residual window (confirmation review, rated near zero).** If MAME defers the load by up to about one timeslice, both of these must also
+happen inside that slice: the old timeline writes all six DMA registers, and the loaded state then issues a DMA command before the next
+frame without rewriting them. Only then could a stale source be recorded. Hardening (dropping every DMA command between the two markers)
+is deferred to any future plan revision.
+
+G1 gains a 20 s explore scenario with real state loads, and the fixture repeats its DMA every VBlank. Because the fixture writes register 1
+only at reset, G1 exercises the *dropping* of post-load DMA, not its re-recognition. Gates, thresholds and budgets are unchanged. The independent A1 review found the stale-register defect; the
 pilot traces started under the first A1 freeze were stopped and discarded.
 
 **Bound.** This is a single amendment: if the pilot is still `STOP` under A1, T001 ends `STOP`. The explore mechanics, including
