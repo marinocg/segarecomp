@@ -8,6 +8,7 @@
   "positive_fraction": 0.0364
  },
  "data_boundary": "aggregates only",
+ "operator_acceptance": "STOP_ACQUISITION accepted 2026-10-22; deterministic TAS / recorded-input movies remain an open avenue for future investigation (sync fidelity, full verified playthrough coverage, diverse engines, novelty check first)",
  "recommendation": "STOP_ACQUISITION",
  "review": "independent results review CONCUR_WITH_FINDINGS (F1-F6 applied)",
  "schema": "segarecomp.seg077.t009.results.v1",

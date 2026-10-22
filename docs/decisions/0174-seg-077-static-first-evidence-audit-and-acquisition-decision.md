@@ -1,6 +1,6 @@
 # ADR 0174: SEG-077 static-first evidence audit, dispatch and dynamic-evidence spikes, and the acquisition decision
 
-- Status: accepted (independent results review CONCUR_WITH_FINDINGS; findings F1-F6 applied)
+- Status: accepted by the operator (2026-10-22), with the TAS caveat below; independent results review CONCUR_WITH_FINDINGS, findings F1-F6 applied
 - Task: SEG-077-T009, combined SEG-077 PR #135
 - Records (aggregate-only):
   - `tools/segarecomp_seg077_t009.results.json`
@@ -141,3 +141,19 @@ input is touched.
   - the decompression helper (sega2asm decompressors, measured unreliable for labels);
   - the record-table verifier (unadmitted);
   - the bounded-switch observation for a future static tier.
+
+## Operator acceptance (2026-10-22)
+
+- **Decision.** `STOP_ACQUISITION` is accepted, and SEG-077 closes on it. The remaining retraining and evaluation children (T006-T008) and
+  the 16-title acquisition (T010) are not run on this corpus.
+- **TAS stays open.** Deterministic tool-assisted or recorded input movies are **not** a no-go for future investigation, for four reasons:
+  - **Determinism.** The public Chuck Rock TAS replayed deterministically in MAME.
+  - **Reach.** It reached code no random scenario did.
+  - **Data evidence.** It produced the largest gain in trustworthy non-trivial data evidence.
+  - **Unmeasured ceiling.** Its ceiling is unmeasured: desync is only a hypothesis, there are only two coverage points, and no
+    synchronization work was attempted.
+- **What a follow-up should investigate:**
+  - **Sync.** Synchronization fidelity: emulator alignment, a frame-offset search and lag-frame handling.
+  - **Coverage.** Coverage over a full verified playthrough.
+  - **Diversity.** Movies for structurally different engines.
+  - **Novelty first.** The ADR 0174 novelty check, run before any acquisition.
