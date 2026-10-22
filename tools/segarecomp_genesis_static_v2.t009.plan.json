@@ -8,8 +8,8 @@
   "tools/segarecomp_genesis_decomp/main.go": "6e37257764428a7b0e1e990e9575e743c2f863aed5ff6cf363944e0649da910b",
   "tools/segarecomp_genesis_evidence.py": "1582d2ed01db7692c6564750a8a7e6d01b08ee59f421d26776906523bd009885",
   "tools/segarecomp_genesis_static.py": "23b3593f14f1e4eb5012e6df53e55076d2e3f52405ec9cceb3bc9e9040131c2c",
-  "tools/segarecomp_genesis_static_v2.py": "e40fb3685b730a643d3d5f21942ad03af27e9bb1469edced761503d110f502bd",
-  "tools/segarecomp_genesis_trace2.py": "579f80bf46f8dce6a8fc47075202ffb076a6174ee815f82d88807f5e6483cccf"
+  "tools/segarecomp_genesis_static_v2.py": "ce37784e8ac1b2e8e41ca7d8681d93a5c29f13ed5947d2e4c188cf1ff652e302",
+  "tools/segarecomp_genesis_trace2.py": "4a7f0e61b9efa0ed769d87ee22fd929381195d2c30ecc6e6884b1cf34fd77350"
  },
  "capstone_lib_sha256": "fb3e851989440c51fa026fa5be0441a5d5f09d3c4018f6521138762bfbf473b8",
  "images": {
@@ -18,8 +18,8 @@
   "segarecomp/ghidra-mcp-headless:6.0.0": "sha256:045567d6bd7e1ea718577fd53b81b8e11067d2047416a1b07637a67ac1060266"
  },
  "rules": {
-  "admission": "unchanged v1 thresholds applied with v2 measurement on BOTH sets: known-truth wrong rate <= 0.001 per set, no image > 0.005, tiers with < 1000 known predictions in a set need 0 wrong there; procedure: start from all v1 base tiers (V, J, PT, FILL) plus IP, drop the worst failing tier and re-measure until all pass; then test each other tier alone on top",
-  "correction": "rates use only predictions against known reference truth; predictions over reference-unknown bytes are reported separately; every tier is tested, including the JT data bytes (v1 treated JT as always admitted)",
+  "admission": "unchanged v1 thresholds applied with v2 measurement on BOTH sets: known-truth wrong rate <= 0.001 per set, no image > 0.005, tiers with < 1000 known predictions in a set need 0 wrong there, and every admitted tier needs > 0 known predictions on the exposed set; procedure: start from the v1 base tiers (V, J, PT, FILL) plus IP, drop the worst failing tier and re-measure until all pass (a V failure is STOP: no admitted set); test each other tier alone on top; finally measure the combined admitted set (and JT) on both sets, dropping optional tiers in reverse admission order until the combination passes",
+  "correction": "rates use only predictions against known reference truth; predictions over reference-unknown bytes are reported separately. The exposed set has complete truth, so v1's exposed-set rates are unchanged by the correction; v2's outcome changes come from (a) also requiring the development set (with corrected rates), (b) testing JT data, (c) the enforced three-decoder rule (Capstone dc.w pseudo-ops are not decodes; v1's fallback accepted them)",
   "decoders": "CPU-owned decoder AND m68k-disasm AND Capstone on every instruction; CPU must agree with every independent decode and at least one independent decoder must decode",
   "rt": "record-table roots (RT) are reported but not admissible: no source-backed precision measurement exists (d07 had no qualifying table)",
   "sets": {

@@ -3402,5 +3402,6 @@
     }
    }
   }
- }
+ },
+ "superseded_note": "generated before the round-1 review fixes (Capstone dc.w pseudo-ops counted as decodes; IP measured with that rule). Retained as the record of the audit that diagnosed the v1 IP admission; decisions use the v2 admission's own measurement"
 }

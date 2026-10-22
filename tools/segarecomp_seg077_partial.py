@@ -33,12 +33,17 @@ RESULTS = HERE / "segarecomp_seg077_partial.results.json"
 PARTIAL_TIERS = ("V", "J", "PT", "FILL")
 COMMERCIAL = ("D01", "D02", "D03", "D04")
 BOUND = ("segarecomp_seg077_partial.py", "segarecomp_genesis_static_v2.py", "segarecomp_genesis_evidence.py", "segarecomp_xplat_models.py",
-         "segarecomp_xplat_transfer.py", "segarecomp_ml_v3.py", "segarecomp_ml_v3_train.py")
+         "segarecomp_xplat_transfer.py", "segarecomp_ml_v3.py", "segarecomp_ml_v3_train.py", "segarecomp_xplat_stability.py",
+         "segarecomp_xplat_t005.py", "segarecomp_ml_v3_data.py")
 RULE = {"question": "does adding a lineage with partial static-first labels (U masked) improve held-out ER over omitting it?",
-        "useful": "mean d <= -0.002 and sign-flip p <= 0.10 over (F, X) pairs, d = ER(MINUS_X+PARTIAL_X) - ER(MINUS_X)",
-        "harmful": "mean d >= +0.002 and sign-flip p <= 0.10", "otherwise": "NO_MEASURABLE_EFFECT",
+        "statistic": "d(F, X) = ER(MINUS_X+PARTIAL_X) - ER(MINUS_X); cluster by held-out fold: D(F) = mean over X of d(F, X) (11 values); "
+                     "exact two-sided sign-flip test over the 11 D(F); d is also reported per X",
+        "useful": "mean D <= -0.002 and sign-flip p <= 0.10", "harmful": "mean D >= +0.002 and sign-flip p <= 0.10",
+        "otherwise": "NO_MEASURABLE_EFFECT",
         "descriptive": "signal retention = (ER(PARTIAL_ALL) vs ER(TRUTH_ALL)) per fold; partial-label coverage and wrong-label rate vs truth",
-        "caveat": "the six commercial images influenced the v1 rule selection (exposed); development use only, not an independent test"}
+        "caveat": "the six commercial images influenced the v1 rule selection (exposed); flicky (lineage D02) is in the development set the "
+                  "labeller rules were tuned on (its partial labels are optimistic); PARTIAL_TIERS were chosen after the v2 audit; JT data "
+                  "bytes are excluded from the partial labels (JT fails on the exposed set); development use only, not an independent test"}
 
 
 def sha(p: pathlib.Path) -> str:
@@ -58,7 +63,7 @@ def partial_classes(d: pathlib.Path) -> bytes:
     """Static-first labels for one image (cached; truth is never read here)."""
     import segarecomp_genesis_static_v2 as v2
     m = json.loads((d / "meta.json").read_text())
-    cache = OUT / "labels" / f"{m['id']}.cls"
+    cache = OUT / "labels" / hashlib.sha256(PLAN.read_bytes()).hexdigest()[:16] / f"{m['id']}.cls"
     if cache.is_file():
         return cache.read_bytes()
     work = OUT / "work"
@@ -66,6 +71,7 @@ def partial_classes(d: pathlib.Path) -> bytes:
     work.chmod(0o755)
     img_path = pathlib.Path(m["image"])
     res = v2.label_static(img_path.read_bytes(), (d / "tokens.bin").read_bytes(), img_path, work, PARTIAL_TIERS)
+    res["data"] = [x for x in res["data"] if x[2] != "JT"]
     cls, _ = v2.classes_of(len(img_path.read_bytes()), res)
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_bytes(bytes(cls))
@@ -170,10 +176,13 @@ def cmd_table(a) -> int:
         r = json.loads(p.read_text())
         j = r["job"]
         R[(j["fold"], j["cond"], j["x"])] = r["lineage_max_er"]
-    d = []
+    pairs, per_x = {}, {}
     for (F, c, X), er in R.items():
         if c == "MINUS_X+PARTIAL_X" and er is not None and R.get((F, "MINUS_X", X)) is not None:
-            d.append(er - R[(F, "MINUS_X", X)])
+            v = er - R[(F, "MINUS_X", X)]
+            pairs.setdefault(F, []).append(v)
+            per_x.setdefault(X, []).append(v)
+    d = [sum(v) / len(v) for F, v in sorted(pairs.items())]
     mean = sum(d) / len(d) if d else None
     p = st.sign_flip_p(d) if d else None
     cls = "NO_MEASURABLE_EFFECT"
@@ -182,7 +191,20 @@ def cmd_table(a) -> int:
     elif d and mean >= 0.002 and p <= 0.10:
         cls = "HARMFUL"
     retention = {F: {"truth_all": R.get((F, "TRUTH_ALL", None)), "partial_all": R.get((F, "PARTIAL_ALL", None))} for F in doc["lineages"]}
+    import segarecomp_ml_v3 as v3
+    cov = {}
+    for dd in cart_dirs():
+        mm = json.loads((dd / "meta.json").read_text())
+        pc, tr = partial_classes(dd), (dd / "classes.bin").read_bytes()
+        known = [(a, b) for a, b in zip(pc, tr) if a != ord("U") and b != ord("U")]
+        wrong = sum(1 for a, b in known if (chr(a), chr(b)) in {("I", "c"), ("I", "D"), ("c", "I"), ("c", "D"), ("D", "I"), ("D", "c")})
+        lp, lt = v3.cell_labels(pc), v3.cell_labels(tr)
+        cov[mm["id"]] = {"labelled_fraction": round(sum(1 for a in pc if a != ord("U")) / len(pc), 4), "wrong_rate_known": round(wrong / max(1, len(known)), 6),
+                         "positive_cells_recalled": round(sum(1 for a, b in zip(lp, lt) if a == b == 1) / max(1, lt.count(1)), 4),
+                         "negative_cells_recalled": round(sum(1 for a, b in zip(lp, lt) if a == b == 0) / max(1, lt.count(0)), 4)}
     out = {"schema": "segarecomp.seg077.partial.results.v1", "plan_sha256": hashlib.sha256(PLAN.read_bytes()).hexdigest(), "rule": RULE,
+           "per_x_mean_d": {X: round(sum(v) / len(v), 6) for X, v in sorted(per_x.items())}, "fold_means": [round(x, 6) for x in d],
+           "partial_label_coverage": cov,
            "pairs": len(d), "mean_d": round(mean, 6) if mean is not None else None, "sign_flip_p": round(p, 6) if p is not None else None,
            "class": cls, "retention": retention, "jobs_done": len(R), "jobs_planned": len(doc["jobs"])}
     RESULTS.write_text(json.dumps(out, indent=1, sort_keys=True) + "\n")

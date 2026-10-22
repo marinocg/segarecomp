@@ -68,7 +68,7 @@ md = capstone.Cs(capstone.CS_ARCH_M68K, capstone.CS_MODE_M68K_000)
 out = {}
 for pc in json.load(open(sys.argv[2])):
     ins = next(md.disasm(img[pc:pc + 10], pc, 1), None)
-    if ins is not None:
+    if ins is not None and ins.id != capstone.m68k.M68K_INS_INVALID and ins.mnemonic.lower() not in ("dc.w", "dc.b", "dc.l"):
         out[pc] = ins.size
 print(json.dumps(out))
 """
@@ -345,6 +345,11 @@ def disasm_lengths(img_path: pathlib.Path, pcs: list[int], work: pathlib.Path) -
     return out
 
 
+def capstone_decoded(ins_id: int, mnemonic: str, invalid_id: int) -> bool:
+    """Pure rule (mirrored in CAPSTONE_SNIPPET): Capstone's data pseudo-ops for undecodable words are NOT decodes."""
+    return ins_id != invalid_id and mnemonic.lower() not in ("dc.w", "dc.b", "dc.l")
+
+
 def capstone_lengths(img_path: pathlib.Path, pcs: list[int], work: pathlib.Path) -> dict:
     """Capstone M68K (68000 mode) instruction lengths at the given PCs: the independent decoder used where m68k-disasm abstains."""
     sf, pf = work / "cap.py", work / "cap.json"
@@ -424,7 +429,7 @@ def record_table_candidates(img: bytes, edges: list, labelled_code: bytearray) -
     for site, tg in sorted(by_site.items()):
         if len(tg) < RT_MIN_ANCHORS:
             continue
-        occ = sorted(a for a in range(0, size - 3, 2) if ge.u32(img, a) in tg and not any(labelled_code[a:a + 4]))
+        occ = sorted(a for a in range(ge.HEADER_END, size - 3, 2) if ge.u32(img, a) in tg and not any(labelled_code[a:a + 4]))
         clusters, cur = [], []
         for a in occ:
             if cur and a - cur[-1] > RT_MAX_GAP:
@@ -473,7 +478,7 @@ def label_static(img: bytes, tok: bytes, img_path: pathlib.Path, work: pathlib.P
                     roots[pc] = "X"
         for i in range(1, 64):
             t = ge.u32(img, 4 * i)
-            if t is not None and t % 2 == 0 and ge.HEADER_END <= t < size:
+            if "V" in tiers and t is not None and t % 2 == 0 and ge.HEADER_END <= t < size:
                 roots.setdefault(t, "V")
         allow = set(tiers)
         descend(img, tok, roots, forbidden, allow, accepted, owner, typed, tables, prov)
@@ -531,6 +536,8 @@ def label_static(img: bytes, tok: bytes, img_path: pathlib.Path, work: pathlib.P
             break
         typed["DECODER_DISAGREE_REMOVED"] = typed.get("DECODER_DISAGREE_REMOVED", 0) + len(bad - forbidden)
         forbidden |= bad
+    else:
+        raise ge.EvidenceError("decoder-agreement fixpoint did not converge in 6 passes (fail closed)")
     data = [(0, min(ge.HEADER_END, size), "HW")]
     for kind_t, (s0, e0) in tables:
         if kind_t in ("rel16", "abs32") and e0 > s0:
@@ -800,12 +807,9 @@ def cmd_calibrate(a) -> int:
 PLAN = HERE / "segarecomp_genesis_static_v2.t009.plan.json"
 PLAN_DIGEST = HERE / "segarecomp_genesis_static_v2.t009.plan.digest"
 ADMISSION = HERE / "segarecomp_genesis_static_v2.t009.admission.json"
-BOUND = ("tools/segarecomp_genesis_static.py", "tools/segarecomp_genesis_evidence.py", "tools/segarecomp_genesis_decomp/main.go",
-         "tools/segarecomp_genesis_decomp.Dockerfile", "tools/segarecomp_genesis_evidence.Dockerfile",
-         "tools/ghidra/scripts/ExportCodeEntryCandidates.java", "tools/ghidra/scripts/PinAnalysisRecipe.java")
 BASE_TIERS = ("V", "CD", "J", "PT", "FILL", "PTD", "DC")
 OPTIONAL_TIERS = ("P", "G", "IP", "IL", "DREF")
-RULES_V1 = {
+_RULES_V1_UNUSED = {
     "development_set": list(DEV_SET), "heldout_set": list(HELD_OUT),
     "base_tiers": list(BASE_TIERS), "optional_tiers": list(OPTIONAL_TIERS), "always": ["HW (vectors + header)", "JT (resolved table bytes)"],
     "wrong_label": "predicted I vs truth c/D, c vs I/D, D vs I/c; truth U never counts",
@@ -835,16 +839,20 @@ V2_TIERS = ("V", "J", "PT", "FILL", "IP", "CD", "PTD", "DC", "P", "G", "IL", "DR
 RULES = {
     "version": "v2 (corrected measurement; supersedes v1 for decisions, v1 plan 5a1cd094 and its admission are preserved unchanged)",
     "correction": "rates use only predictions against known reference truth; predictions over reference-unknown bytes are reported "
-                  "separately; every tier is tested, including the JT data bytes (v1 treated JT as always admitted)",
+                  "separately. The exposed set has complete truth, so v1's exposed-set rates are unchanged by the correction; v2's "
+                  "outcome changes come from (a) also requiring the development set (with corrected rates), (b) testing JT data, (c) "
+                  "the enforced three-decoder rule (Capstone dc.w pseudo-ops are not decodes; v1's fallback accepted them)",
     "decoders": "CPU-owned decoder AND m68k-disasm AND Capstone on every instruction; CPU must agree with every independent decode and "
                 "at least one independent decoder must decode",
     "sets": {"development": list(DEV_SET), "exposed_validation": list(HELD_OUT),
              "status": "the exposed set influenced v1 rule selection and was re-measured after v1: it is exposed validation, not an "
                        "independent test; v2 is a measurement correction on already-seen data, disclosed as such"},
     "admission": "unchanged v1 thresholds applied with v2 measurement on BOTH sets: known-truth wrong rate <= 0.001 per set, no image "
-                 "> 0.005, tiers with < 1000 known predictions in a set need 0 wrong there; procedure: start from all v1 base tiers "
-                 "(V, J, PT, FILL) plus IP, drop the worst failing tier and re-measure until all pass; then test each other tier alone "
-                 "on top",
+                 "> 0.005, tiers with < 1000 known predictions in a set need 0 wrong there, and every admitted tier needs > 0 known "
+                 "predictions on the exposed set; procedure: start from the v1 base tiers (V, J, PT, FILL) plus IP, drop the worst "
+                 "failing tier and re-measure until all pass (a V failure is STOP: no admitted set); test each other tier alone on top; "
+                 "finally measure the combined admitted set (and JT) on both sets, dropping optional tiers in reverse admission order "
+                 "until the combination passes",
     "rt": "record-table roots (RT) are reported but not admissible: no source-backed precision measurement exists (d07 had no qualifying "
           "table)",
 }
@@ -914,11 +922,12 @@ def key(t):
     return t if t in CODE_TIERS else "D_" + t
 
 
-def tier_ok_v2(name: str, m: dict) -> bool:
-    """Frozen v2 test on one set's measure() output: known-truth rate and per-image rate (known predictions only)."""
+def tier_ok_v2(name: str, m: dict, require_known: bool = False) -> bool:
+    """Frozen v2 test on one set's measure() output: known-truth rate and per-image rate (known predictions only). With require_known
+    (the exposed set) a tier without known predictions fails."""
     t = m["tiers"].get(name)
     if not t or not t.get("pred_known"):
-        return True
+        return not require_known
     if t["pred_known"] < 1000:
         return t["wrong_known"] == 0
     if t["wrong_known"] / t["pred_known"] > 0.001:
@@ -940,13 +949,27 @@ def cmd_admit(a) -> int:
 
     def both(tiers):
         return {"development": measure(DEV_SET, tiers, work, "G" in tiers), "exposed_validation": measure(HELD_OUT, tiers, work, "G" in tiers)}
+    def failing_of(tiers, ms):
+        names = [key(t) for t in tiers] + ["D_JT"]
+        out = set()
+        for n in names:
+            if not tier_ok_v2(n, ms["development"]):
+                out.add(n)
+            if not tier_ok_v2(n, ms["exposed_validation"], require_known=(n != "D_JT")):
+                out.add(n)
+        return sorted(out)
     while True:
         ms = both(base)
-        names = [key(t) for t in base] + ["D_JT"]
-        failing = sorted({n for n in names for m in ms.values() if not tier_ok_v2(n, m)})
+        failing = failing_of(base, ms)
         log.append({"tiers": list(base), "failing": failing, "measure": {k: v["tiers"] for k, v in ms.items()}})
         print(json.dumps({"base": base, "failing": failing}), flush=True)
         removable = [t for t in base if key(t) in failing]
+        if "V" in removable:
+            doc = {"schema": SCHEMA + ".admission", "plan_sha256": hashlib.sha256(PLAN.read_bytes()).hexdigest(), "admitted_tiers": [],
+                   "class": "STOP_V_FAILED", "procedure": log}
+            ADMISSION.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
+            print(json.dumps({"admitted": [], "class": "STOP_V_FAILED"}))
+            return 0
         if not removable:
             break
         worst = max(removable, key=lambda t: max((m["tiers"].get(key(t), {}).get("wrong_known", 0) / max(1, m["tiers"].get(key(t), {}).get("pred_known", 1))) for m in ms.values()))
@@ -955,13 +978,22 @@ def cmd_admit(a) -> int:
     optional = {}
     for t in ("CD", "PTD", "DC", "P", "G", "IL", "DREF"):
         ms2 = both(base + [t])
-        ok = all(tier_ok_v2(key(t), m) for m in ms2.values())
-        still = all(tier_ok_v2(key(b), m) for b in base for m in ms2.values())
+        ok = tier_ok_v2(key(t), ms2["development"]) and tier_ok_v2(key(t), ms2["exposed_validation"], require_known=True)
+        still = not [n for n in failing_of(base, ms2) if n != "D_JT"]
         optional[t] = {"admitted": ok and still, "measure": {k: v["tiers"].get(key(t)) for k, v in ms2.items()}}
         print(json.dumps({"optional": t, "admitted": ok and still}), flush=True)
     admitted = base + [t for t, v in optional.items() if v["admitted"]]
+    while True:                                      # the combined admitted set must pass on both sets
+        msf = both(admitted)
+        bad = [n for n in failing_of(admitted, msf) if n != "D_JT"]
+        if not bad or admitted == base:
+            break
+        admitted = admitted[:-1]
+    jt_ok = "D_JT" not in failing_of(admitted, msf)
+    final_ok = not [n for n in failing_of(admitted, msf) if n != "D_JT"]
     doc = {"schema": SCHEMA + ".admission", "plan_sha256": hashlib.sha256(PLAN.read_bytes()).hexdigest(), "admitted_tiers": admitted,
-           "jt_data_admitted": jt_ok, "procedure": log, "optional": optional, "data_boundary": "aggregates only"}
+           "jt_data_admitted": jt_ok, "combined_set_passes": final_ok, "final_measure": {k: v["tiers"] for k, v in msf.items()},
+           "procedure": log, "optional": optional, "data_boundary": "aggregates only"}
     ADMISSION.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
     print(json.dumps({"admitted": admitted, "jt_data_admitted": jt_ok}))
     return 0
@@ -1093,6 +1125,8 @@ def cmd_synthetic(a) -> int:
     for scen in ("g1-attract", "g1-play", "g1-explore"):
         executed, xdata = execution_evidence([g / scen], g / f"sample-{scen}")
         res = label_static(img, tok, img_path, work, tuple(tiers) + ("X",), [], executed)
+        if not jt_admitted():
+            res["data"] = [x for x in res["data"] if x[2] != "JT"]
         cls, info = classes_of(len(img), res, xdata, mask_on_conflict=True)
         sc = t009_wrong(bytes(cls), truth)
         sc["sound"] = not any(sc["wrong"].values())
@@ -1141,6 +1175,8 @@ def measure(ids, tiers, work, ghidra_needed):
             for k, x in v.items():
                 if isinstance(x, int):
                     a[k] = a.get(k, 0) + x
+        dz = tax.setdefault("decoder_disagreement_removed", {"instructions": 0})
+        dz["instructions"] += tx["decoder_disagreement_removed"]["instructions"]
         for k, v in tx.items():
             if isinstance(v, dict) and "bytes" in v:
                 a = tax.setdefault(k, {"instructions": 0, "bytes": 0})

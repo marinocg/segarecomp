@@ -90,8 +90,39 @@ def test_taxonomy():
     check(tx["decoder_disagreement_removed"]["instructions"] == 1, "decoder removals reported")
 
 
+def test_capstone_filter():
+    check(not v2.capstone_decoded(0, "dc.w", 0), "invalid id is not a decode")
+    check(not v2.capstone_decoded(5, "dc.w", 0), "dc.w pseudo-op is not a decode")
+    check(v2.capstone_decoded(5, "move.w", 0), "a real mnemonic is a decode")
+    check("M68K_INS_INVALID" in v2.CAPSTONE_SNIPPET and "dc.w" in v2.CAPSTONE_SNIPPET, "the Capstone snippet applies the same filter")
+
+
+def test_tier_ok_v2():
+    m = {"tiers": {"V": {"pred_known": 5000, "wrong_known": 4}, "S": {"pred_known": 500, "wrong_known": 1}, "U": {"pred_known": 0}},
+         "per_image": {"a": {"tiers": {"V": {"pred_known": 1000, "wrong_known": 4}}}}}
+    check(v2.tier_ok_v2("V", m) is True, "0.08% overall and 0.4% worst image passes")
+    m["per_image"]["a"]["tiers"]["V"]["wrong_known"] = 6
+    check(v2.tier_ok_v2("V", m) is False, "an image above 0.5% fails")
+    check(v2.tier_ok_v2("S", m) is False, "small tier needs 0 wrong")
+    check(v2.tier_ok_v2("U", m) is True and v2.tier_ok_v2("U", m, require_known=True) is False, "no known predictions fails where required")
+
+
+def test_record_tables():
+    img = bytearray(0x1000)
+    base = 0x400
+    tgts = [0x800 + 0x40 * i for i in range(6)]
+    for i, t in enumerate(tgts):
+        img[base + 24 * i + 4:base + 24 * i + 8] = t.to_bytes(4, "big")
+    edges = [(0x300, t) for t in tgts[1:4]]
+    roots, tables = v2.record_table_candidates(bytes(img), edges, bytearray(0x1000))
+    check(sorted(roots) == tgts and tables == [(base + 4, base + 24 * 5 + 8, 24)], f"24-byte records anchored by 3 observed targets {tables}")
+    roots2, _ = v2.record_table_candidates(bytes(img), edges[:2], bytearray(0x1000))
+    check(roots2 == {}, "fewer than 3 anchors: no table")
+
+
 def main():
-    for t in (test_v1_bias_and_v2_separation, test_error_kinds_cells_recall, test_marginal_cells, test_taxonomy):
+    for t in (test_v1_bias_and_v2_separation, test_error_kinds_cells_recall, test_marginal_cells, test_taxonomy, test_capstone_filter,
+              test_tier_ok_v2, test_record_tables):
         t()
     print("FAILURES:", len(FAILURES))
     return 1 if FAILURES else 0

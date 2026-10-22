@@ -1,11 +1,14 @@
 {
  "bound_code": {
   "segarecomp_genesis_evidence.py": "1582d2ed01db7692c6564750a8a7e6d01b08ee59f421d26776906523bd009885",
-  "segarecomp_genesis_static_v2.py": "e40fb3685b730a643d3d5f21942ad03af27e9bb1469edced761503d110f502bd",
+  "segarecomp_genesis_static_v2.py": "ce37784e8ac1b2e8e41ca7d8681d93a5c29f13ed5947d2e4c188cf1ff652e302",
   "segarecomp_ml_v3.py": "ef18ab40e1da9f25ecc4e1e0a9f0f630453fc8e15b13812750e133d8998947ba",
+  "segarecomp_ml_v3_data.py": "90537880773627c1c1babcd2e36c2234325cf04c9e900afb07a6ab85bcd8097f",
   "segarecomp_ml_v3_train.py": "7234c6ffe964f0f6db44126d760fb60eff6ce97b30e93a7034d3e1e2bb97592f",
-  "segarecomp_seg077_partial.py": "2787d6df3692a20c3fb35889c53c2073dfa85990ca3f91368bc29db89b29ff00",
+  "segarecomp_seg077_partial.py": "7f4e15a7f4175f98acefafef304f56d2c42f430b8f4cae89a0dd1cccf309471c",
   "segarecomp_xplat_models.py": "3eabc2ed412ec3088938061af5a76b53f5b7fcf55deefdfd82031f533f268f8b",
+  "segarecomp_xplat_stability.py": "a00e01472aa7cca7271635a1d0c3a2e73b9d206b9082a11941f565f28c810f62",
+  "segarecomp_xplat_t005.py": "7422bcc4515b5969cd3bea7490b9ce1f7e3cc7aa3db738c20657a613610f0a60",
   "segarecomp_xplat_transfer.py": "415bd6ab8dbf5b8b3d4f7c1c8da433fd8cf6bbf64fd76229807a656bf9cb399b"
  },
  "images": {
@@ -557,12 +560,13 @@
   "FILL"
  ],
  "rule": {
-  "caveat": "the six commercial images influenced the v1 rule selection (exposed); development use only, not an independent test",
+  "caveat": "the six commercial images influenced the v1 rule selection (exposed); flicky (lineage D02) is in the development set the labeller rules were tuned on (its partial labels are optimistic); PARTIAL_TIERS were chosen after the v2 audit; JT data bytes are excluded from the partial labels (JT fails on the exposed set); development use only, not an independent test",
   "descriptive": "signal retention = (ER(PARTIAL_ALL) vs ER(TRUTH_ALL)) per fold; partial-label coverage and wrong-label rate vs truth",
-  "harmful": "mean d >= +0.002 and sign-flip p <= 0.10",
+  "harmful": "mean D >= +0.002 and sign-flip p <= 0.10",
   "otherwise": "NO_MEASURABLE_EFFECT",
   "question": "does adding a lineage with partial static-first labels (U masked) improve held-out ER over omitting it?",
-  "useful": "mean d <= -0.002 and sign-flip p <= 0.10 over (F, X) pairs, d = ER(MINUS_X+PARTIAL_X) - ER(MINUS_X)"
+  "statistic": "d(F, X) = ER(MINUS_X+PARTIAL_X) - ER(MINUS_X); cluster by held-out fold: D(F) = mean over X of d(F, X) (11 values); exact two-sided sign-flip test over the 11 D(F); d is also reported per X",
+  "useful": "mean D <= -0.002 and sign-flip p <= 0.10"
  },
  "schema": "segarecomp.seg077.partial.plan.v1",
  "task": "SEG-077-T009 step 5"

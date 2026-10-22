@@ -72,7 +72,7 @@ end
 """
 
 EDGE_AWK = r"""awk -v SITES="$SITES" 'BEGIN{n=split(SITES,a,",");for(i=1;i<=n;i++)site[a[i]]=1}
-{ if (substr($0,7,1) != ":") next; pc=substr($0,1,6);
+{ if (substr($0,7,1) != ":") { prev=""; next } pc=substr($0,1,6);
   if (!(pc in seen)) { seen[pc]=1; print > "/out/pcs_first.txt" }
   if (prev in site) { k=prev" "pc; if (!(k in edge)) { edge[k]=1; print k > "/out/edges.txt" } }
   prev=pc }' /tmp/trace.fifo"""
@@ -85,7 +85,7 @@ def scenario_lua(sc: dict, size: int) -> str:
         lua = lua.replace('policy = "none"', 'policy = "movie", offset = %d' % int(sc.get("offset", 0)), 1)
         lua = lua.replace("local function on_frame()", MOVIE_POLICY + "\nlocal function on_frame()", 1)
         lua = lua.replace("  local p = policy()\n", "  local p = (S.policy == \"movie\") and movie_policy() or policy()\n", 1)
-        if "movie_policy()" not in lua:
+        if 'local p = (S.policy == "movie") and movie_policy() or policy()' not in lua:
             raise ge.EvidenceError("movie policy injection failed")
     return lua
 
@@ -156,7 +156,11 @@ def cmd_trace(a) -> int:
         tap |= v
     raw_ext = vdp.rom_extents(ident["size"])
     ext = [tuple(x) for s0, e0 in raw_ext for x in ge.ranges(sorted(k for k in range(s0, e0) if k in tap))]
-    edges = sorted({tuple(int(x, 16) for x in ln.split()) for ln in (out / "edges.txt").read_text().splitlines() if ln.strip()})
+    img_b = img_path.read_bytes()
+    vectors = {ge.u32(img_b, 4 * i) for i in range(1, 64)}
+    edges = sorted({tuple(int(x, 16) for x in ln.split()) for ln in (out / "edges.txt").read_text().splitlines() if ln.strip()}
+                   - {(s_, t_) for s_, t_ in []})
+    edges = [e for e in edges if e[1] not in vectors]      # an exception entry right after a site is not that site's target
     (out / "pcs.json").write_text(json.dumps({"rom": {str(k): v for k, v in sorted(first["rom"].items())}, "ram": first["ram"]}))
     (out / "reads.json").write_text(json.dumps({str(pc): ge.ranges(sorted(v)) for pc, v in sorted(reads.items())}))
     (out / "dma.json").write_text(json.dumps({"events": [[s, n, c] for (s, n), c in sorted(vdp.events.items())], "rom_extents": ext}))
