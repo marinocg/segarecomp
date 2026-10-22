@@ -53,7 +53,7 @@ a conflicting candidate span stay data; only the rest of the span becomes U. Rev
 | I/c | E executed | PC observed in an independent emulator trace (MAME 0.276, `:maincpu`), inside the image. Two independent decoders (m68k-disasm, CPU-owned token decoder) agree on the length. | odd PCs, decode disagreement, overlapping executed spans (typed; masked from code and data) |
 | I/c | R static reach | Direct Bcc/BRA/BSR/DBcc/JMP/JSR (abs.w, abs.l, d16(PC)) targets, and fall-through of non-terminating, non-call instructions, from accepted code. Calls and traps continue only when their return site was executed. The same two-decoder agreement is required, with no overlap. Executed PCs that are not accepted are never R starts and are never covered by R. An R candidate that touches observed data (HW, DMA or admitted DR bytes) is rejected at search time, and its successors are not explored. The non-observed bytes of its span become U. | m68k-disasm's own walk (it decodes inline data after calls; observed on the fixture) |
 | D | HW_HEADER | 0x000-0x1FF vector table and cartridge header | - |
-| D | DMA | Observed 68K-bus VDP DMA source extents, reconstructed from the control-port write stream with documented register semantics | fill/copy DMA, RAM sources |
+| D | DMA | Observed 68K-bus VDP DMA source extents, reconstructed from the control-port write stream with documented register semantics. Registers are unknown at power-on and after a state load (A1) until rewritten. | fill/copy DMA, RAM sources |
 | D | DR | Observed data reads (program-space read tap, current-PC attribution) by an accepted executed reader or by RAM code. The reader must never read code bytes outside its own fetch window, where code bytes means accepted code or any executed PC's bytes. Bytes in the 4-byte prefetch shadow after executed code are excluded. Reads made over the 68000 bus by the Z80 or VDP count as 68000 data, so Z80 code is D for this corpus. DR is **disabled for the image** when any scenario executes code from work RAM, because no copy relation is inferred. | checksum and copy loops, prefetch and refill reads, RAM-copied code |
 | block | executed bytes | No data byte may overlap an executed PC's bytes: the accepted span, or [pc, pc+10) for a rejected PC. An HW or DMA extent that touches code or executed bytes is masked whole, and a DR byte there is dropped. | - |
 | veto | Ghidra | An ADR-0025 code-entry candidate inside data unlabels the next 10 bytes | Ghidra never creates labels |
@@ -145,7 +145,7 @@ The G1 result under the revision-2 freeze is recorded in the Evidence of SEG-077
   reach, not ROM composition.
 - A title that executes RAM code with no ROM origin loses DR evidence entirely. It falls back to HW and DMA data evidence.
 
-## Amendment A1 (after the revision-4 pilot; scenario generation only)
+## Amendment A1 (after the revision-4 pilot: explore scenarios and the DMA tightening that state loads require)
 
 **Revision-4 pilot result, preserved and reported.**
 - G1-G4 held: the G4 rejection rate was 0.0007, and all four scenarios were digest-identical across replicas.
@@ -161,7 +161,15 @@ budget:
 - Otherwise, the next segment resumes from a seeded choice among the 8 most recent archived states.
 - The scenario ends on its own frame budget, because machine time rewinds on a state load.
 
-This is a generic coverage technique with no title knowledge. Evidence rules, label rules, gates, thresholds and budgets are unchanged.
+This is a generic coverage technique with no title knowledge.
+
+State loads force one soundness tightening of the DMA rule. MAME restores the VDP registers on a load, but the control-port
+reconstruction cannot see that. Registers are therefore treated as unknown at power-on and after every load, and a DMA is recorded only
+when register 1 and registers 0x13-0x17 have been written since. In addition, a reconstructed DMA extent is kept only where the same run's read
+tap saw those bytes read. This independent cross-check closes the window between a load request and the actual load. Both measures can
+only drop DMA evidence, never add it. G1 gains a 20 s explore scenario (state loads), and the fixture repeats its DMA every VBlank, so
+post-load DMA is exercised. Gates, thresholds and budgets are unchanged. The independent A1 review found the stale-register defect; the
+pilot traces started under the first A1 freeze were stopped and discarded.
 
 **Bound.** This is a single amendment: if the pilot is still `STOP` under A1, T001 ends `STOP`. The explore mechanics, including
 replica determinism, were checked on the synthetic fixture only; no Chuck Rock run of A1 preceded the freeze. G1 passed again under A1.

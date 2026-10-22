@@ -77,7 +77,16 @@ def test_identity():
 
 
 def test_vdp():
+    u = ge.VdpDma()
+    for w in (0x8114, 0x9320, 0x4000, 0x0080):
+        u.write(w)
+    check(u.events == {} and u.unknown_dma == 1, "never-written source registers: no DMA recorded")
+    u2 = ge.replay_vdp_log(["W 4 8114 ffff", "W 4 9320 ffff", "W 4 9400 ffff", "W 4 9500 ffff", "W 4 9601 ffff", "W 4 9700 ffff", "L",
+                            "W 4 4000 ffff", "W 6 80 ffff"])
+    check(u2.events == {} and u2.unknown_dma == 1, "a state load makes every register unknown again")
     v = ge.VdpDma()
+    for w in (0x9400, 0x9500, 0x9600, 0x9700):
+        v.write(w)
     for w in (0x8114, 0x8F02, 0x9320, 0x9400, 0x9500 | 0x80, 0x9600 | 0x01, 0x9700):
         v.write(w)
     v.write(0x4000)
@@ -89,14 +98,15 @@ def test_vdp():
     v.write(0x0080)
     check(((0x01A0) * 2, 0x40) in v.events, "second DMA uses the advanced source")
     v2 = ge.VdpDma()
-    for w in (0x8104, 0x9320, 0x4000, 0x0080):
+    for w in (0x8104, 0x9320, 0x9400, 0x9500, 0x9600, 0x9700, 0x4000, 0x0080):
         v2.write(w)
     check(v2.events == {}, "M1 clear: no DMA")
     v3 = ge.VdpDma()
-    for w in (0x8114, 0x9780, 0x4000, 0x0080):
+    for w in (0x8114, 0x9320, 0x9400, 0x9500, 0x9600, 0x9780, 0x4000, 0x0080):
         v3.write(w)
     check(v3.events == {}, "fill/copy mode is not a 68K-bus source")
-    v4 = ge.replay_vdp_log(["W 4 8114 ffff", "W 4 4000 ffff", "R 4", "W 4 8114 ffff", "W 4 93 ff", "W 4 4000 ffff", "W 6 80 ffff"])
+    v4 = ge.replay_vdp_log(["W 4 9400 ffff", "W 4 9500 ffff", "W 4 9600 ffff", "W 4 9700 ffff",
+                            "W 4 8114 ffff", "W 4 4000 ffff", "R 4", "W 4 8114 ffff", "W 4 93 ff", "W 4 4000 ffff", "W 6 80 ffff"])
     check(v4.regs[0x13] == 0 and len(v4.events) == 1, "byte write duplicated; read cancels a pending first half")
     k = list(v4.events)[0]
     check(k[1] == 0x93 * 2, f"byte-duplicated register 0x13 = 0x93 {k}")

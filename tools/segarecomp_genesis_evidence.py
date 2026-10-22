@@ -164,14 +164,24 @@ class VdpDma:
     two-word command whose second word completes it. Reads of the control port and data-port accesses cancel a pending first half. A
     command with CD5 (second word bit 7) set while register 1 bit 4 (M1) is set starts a DMA; register 0x17 bit 7 clear selects the
     68K-bus source (bits 6-0 of 0x17 : 0x16 : 0x15, a word address), length 0x14:0x13 words (0 = 0x10000). After the transfer the length
-    registers read zero and the source advances by the length inside its 128 KiB window (register 0x17 unchanged)."""
+    registers read zero and the source advances by the length inside its 128 KiB window (register 0x17 unchanged).
+
+    Registers start UNKNOWN (never assumed) and become unknown again on every emulator state load (`reset_unknown`); a DMA is recorded
+    only when register 1 and 0x13-0x17 were all written since the last reset, so a load can never produce a misattributed source."""
+
+    DMA_REGS = (1, 0x13, 0x14, 0x15, 0x16, 0x17)
 
     def __init__(self):
-        self.regs = [0] * 32
+        self.regs: list = [None] * 32
         self.pending = None
         self.events: dict[tuple[int, int], int] = {}
+        self.unknown_dma = 0
 
     def cancel(self):
+        self.pending = None
+
+    def reset_unknown(self):
+        self.regs = [None] * 32
         self.pending = None
 
     def write(self, word: int):
@@ -183,7 +193,12 @@ class VdpDma:
             self.pending = word
             return
         second, self.pending = word, None
-        if second & 0x80 and self.regs[1] & 0x10 and not self.regs[0x17] & 0x80:
+        if not second & 0x80:
+            return
+        if any(self.regs[r] is None for r in self.DMA_REGS):
+            self.unknown_dma += 1
+            return
+        if self.regs[1] & 0x10 and not self.regs[0x17] & 0x80:
             length = self.regs[0x13] | (self.regs[0x14] << 8) or 0x10000
             src_words = self.regs[0x15] | (self.regs[0x16] << 8) | ((self.regs[0x17] & 0x7F) << 16)
             key = (src_words * 2, length * 2)
@@ -207,7 +222,7 @@ class VdpDma:
 
 
 def replay_vdp_log(lines) -> VdpDma:
-    """Lines 'W <offset> <data> <mask>' / 'R <offset>' / 'D' (data-port access) in bus order."""
+    """Lines 'W <offset> <data> <mask>' / 'R <offset>' / 'D' (data-port access) / 'L' (state load) in bus order."""
     v = VdpDma()
     for ln in lines:
         p = ln.split()
@@ -224,6 +239,8 @@ def replay_vdp_log(lines) -> VdpDma:
                 raise EvidenceError(f"unexpected VDP write mask {mask:#x}")
         elif p[0] in ("R", "D"):
             v.cancel()
+        elif p[0] == "L":
+            v.reset_unknown()
         else:
             raise EvidenceError(f"bad VDP log line: {ln!r}")
     return v
@@ -405,11 +422,19 @@ end
 local SEG = 300
 local archive = 0
 local pending_load = nil
+local loaded = false
 local function explore_step()
   if S.policy ~= "explore" or frame < S.start_window * 60 then return end
+  if loaded then
+    vdp:write("L\n")
+    loaded = false
+    held = {}
+  end
   if pending_load ~= nil then
+    vdp:write("L\n")
     m:load(pending_load)
     pending_load = nil
+    loaded = true
     return
   end
   if (frame - S.start_window * 60) % SEG ~= 0 then return end
@@ -549,10 +574,16 @@ def cmd_trace(a) -> int:
     first = parse_trace_first((out / "pcs_first.txt").read_text(errors="replace").splitlines())
     with open(out / "vdp.log") as f:
         vdp = replay_vdp_log(f)
-    ext = vdp.rom_extents(ident["size"])
+    raw_ext = vdp.rom_extents(ident["size"])
     rom_pcs = sorted(first["rom"])
     reads = parse_reads((out / "reads.txt").read_text().split(), ident["size"])
-    dma_bytes = {k for s0, e0 in ext for k in range(s0, e0)}
+    tap_bytes = set()
+    for addrs in reads.values():
+        tap_bytes |= addrs
+    # a reconstructed DMA extent is kept only where the read tap of the same run saw those bytes read (independent cross-check)
+    ext = [tuple(r) for s0, e0 in raw_ext for r in ranges(sorted(k for k in range(s0, e0) if k in tap_bytes))]
+    unconfirmed = sum(e0 - s0 for s0, e0 in raw_ext) - sum(e0 - s0 for s0, e0 in ext)
+    dma_bytes = {k for s0, e0 in raw_ext for k in range(s0, e0)}
     read_bytes = set()
     for addrs in reads.values():
         read_bytes |= addrs
@@ -565,6 +596,7 @@ def cmd_trace(a) -> int:
            "rom_pcs": len(rom_pcs), "rom_pcs_beyond_image": sum(1 for p in rom_pcs if p >= ident["size"]),
            "ram_pcs": len(first["ram"]), "other_pcs": first["other"], "readers": len(reads),
            "read_bytes": len(read_bytes), "dma_bytes_seen_by_read_tap": len(dma_bytes & read_bytes), "dma_events": sum(vdp.events.values()), "dma_distinct": len(vdp.events),
+           "dma_unknown_register_commands": vdp.unknown_dma, "dma_bytes_unconfirmed_by_read_tap": unconfirmed,
            "dma_rom_extents": len(ext), "dma_rom_bytes": sum(e - s for s, e in ext), "pcs_sha256": pcs_digest, "dma_sha256": dma_digest, "reads_sha256": reads_digest,
            "wall_seconds": round(wall, 1)}
     (out / "pcs.json").write_text(json.dumps({"rom": {str(k): v for k, v in sorted(first["rom"].items())}, "ram": first["ram"]}))
@@ -1085,13 +1117,15 @@ SCENARIOS = [{"id": "attract", "policy": "none", "seconds": 180},
              {"id": "explore-s2", "policy": "explore", "seed": 2, "seconds": 480, "start_window": 40},
              {"id": "explore-s3", "policy": "explore", "seed": 3, "seconds": 480, "start_window": 40}]
 G1_SCENARIOS = [{"id": "g1-attract", "policy": "none", "seconds": 3},
-                {"id": "g1-play", "policy": "random", "seed": 1, "seconds": 3, "start_window": 0}]
+                {"id": "g1-play", "policy": "random", "seed": 1, "seconds": 3, "start_window": 0},
+                {"id": "g1-explore", "policy": "explore", "seed": 1, "seconds": 20, "start_window": 0}]
 E_REJECTIONS = ("E_ODD_PC", "E_BEYOND_IMAGE", "E_DISASM_NO_DECODE", "E_CPU_DECODER_REJECTED", "E_LENGTH_DISAGREE", "E_SPAN_BEYOND_IMAGE",
                 "E_OVERLAPPING_EXECUTED")
 PROTOCOL = {
     "schema": SCHEMA + ".plan",
     "task": "SEG-077-T001",
-    "status": "amendment A1 (scenario generation only) after the revision-4 pilot; revision 4 was frozen before the first full analysis",
+    "status": "amendment A1 after the revision-4 pilot (explore scenarios plus the DMA tightening their state loads require); revision 4 was "
+              "frozen before the first full analysis",
     "amendment_A1": {
         "replaced_plan_sha256": "40f1f153cf39836e563aa794baaea7a65ae4a0685bfec92a25957f76033acc56",
         "replaced_result": "Chuck Rock pilot under revision 4: G1-G4 hold (G4 rate 0.0007, all replicas identical); positive cells 266/8192 "
@@ -1100,8 +1134,12 @@ PROTOCOL = {
         "change": "the three seeded random-play scenarios become seeded novelty-driven explore scenarios with the same input policy, seeds, "
                   "start window and frame budget: every 300 frames after the start window the emulator state is archived when new code "
                   "was reached (new read-tap reader PCs or new per-frame sampled PCs) or the archive is empty; otherwise the next "
-                  "segment resumes from a seeded choice among the 8 most recent archived states. Generic (no title knowledge); the "
-                  "evidence and label rules, gates, thresholds and budgets are unchanged",
+                  "segment resumes from a seeded choice among the 8 most recent archived states. Generic (no title knowledge). One "
+                  "soundness tightening required by state loads: VDP DMA reconstruction treats registers as unknown at power-on and "
+                  "after every state load, and records a DMA only when register 1 and 0x13-0x17 were written since; and a reconstructed "
+                  "DMA extent is kept only where the same run's read tap saw those bytes read (both only drop DMA evidence, never add "
+                  "it). G1 gains an explore scenario and the fixture repeats its DMA every VBlank. Gates, thresholds and budgets are "
+                  "unchanged",
         "bound": "a single amendment: if the pilot is still STOP under A1, T001 ends STOP",
         "disclosure": "explore mechanics were checked on the synthetic fixture only; no Chuck Rock run of A1 preceded this freeze"},
     "pilot": {"title": "Chuck Rock (USA)", "lineage": "G077-01", "raw_sha256": "d4cd7003c104f77bf9a9a78f43067f15a63f23925bc77746d0fdde419f594dc4",
@@ -1116,7 +1154,8 @@ PROTOCOL = {
                 "m68k-disasm walk + CPU-owned decoder length agreement and no overlap; never over or starting at a non-accepted executed PC; "
                 "a candidate touching observed data is rejected at search time (successors unexplored); its non-observed bytes become U"],
         "D": ["HW_HEADER: 0x000-0x1FF vector table and cartridge header", "DMA: observed 68K-bus VDP DMA sources inside the image "
-              "(control-port reconstruction)",
+              "(control-port reconstruction; registers unknown at power-on and after a state load until rewritten; kept only where the "
+              "same run's read tap saw the bytes read)",
               "DR: observed data reads (program-space read tap, current-PC attribution) by an accepted executed reader or RAM code that "
               "never reads code bytes (accepted code or any executed PC's bytes) outside its own fetch window, excluding the 4-byte "
               "prefetch shadow after executed code; Z80/VDP bus reads are 68000 data; DR is disabled for the image when any scenario "
@@ -1256,9 +1295,11 @@ def cmd_g1(a) -> int:
     res["cli_sha256"] = sha256(pathlib.Path(a.cli).read_bytes())
     res["dr_exercised"] = res["scenarios"]["g1-attract"]["typed"].get("DR_BYTES_ADDED", 0) > 0
     res["ram_rule_exercised"] = res["scenarios"]["g1-play"]["ram_pcs"] > 0 and "DR_DISABLED_RAM_EXECUTION" in res["scenarios"]["g1-play"]["typed"]
+    ex = json.loads((out / "g1-explore" / "trace.json").read_text())
+    res["explore_exercised"] = ex["frames"] == G1_SCENARIOS[2]["seconds"] * 60 and ex["dma_unknown_register_commands"] > 0
     (out / "g1.json").write_text(json.dumps(res, indent=1, sort_keys=True))
     print(json.dumps(res, sort_keys=True))
-    return 0 if res["G1"] and res["dr_exercised"] and res["ram_rule_exercised"] else 1
+    return 0 if res["G1"] and res["dr_exercised"] and res["ram_rule_exercised"] and res["explore_exercised"] else 1
 
 
 def trace_reusable(d: pathlib.Path, plan_digest: str, image_id: str) -> bool:
@@ -1351,7 +1392,7 @@ def cmd_run_title(a) -> int:
     if a.g1:
         gj = json.loads(pathlib.Path(a.g1).read_text())
         g1 = (gj.get("plan_sha256") == plan_digest and gj.get("cli_sha256") == plan["cli_sha256"] and gj["G1"]
-              and gj["dr_exercised"] and gj["ram_rule_exercised"])
+              and gj["dr_exercised"] and gj["ram_rule_exercised"] and gj.get("explore_exercised", False))
     summary = sanitized(meta)
     summary.update(gates_and_class(meta, traces, det, cost_hours, g1))
     summary["determinism"] = det

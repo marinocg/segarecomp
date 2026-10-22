@@ -63,25 +63,7 @@ reset:
         move.w  #0x8004,(%a4)           | reg0
         move.w  #0x8174,(%a4)           | reg1: display, vblank, DMA enable
         move.w  #0x8F02,(%a4)           | autoincrement 2
-        | DMA 68K -> VRAM 0x0000: length (words), source (address >> 1)
-        move.w  #0x9320,(%a4)           | reg 0x13 = 32 words (64 bytes)
-        move.w  #0x9400,(%a4)
-        move.l  #tiles,%d0
-        lsr.l   #1,%d0
-        move.w  %d0,%d1
-        and.w   #0xFF,%d1
-        or.w    #0x9500,%d1
-        move.w  %d1,(%a4)
-        lsr.l   #8,%d0
-        move.w  %d0,%d1
-        and.w   #0xFF,%d1
-        or.w    #0x9600,%d1
-        move.w  %d1,(%a4)
-        lsr.l   #8,%d0
-        and.w   #0x7F,%d0
-        or.w    #0x9700,%d0
-        move.w  %d0,(%a4)
-        move.l  #0x40000080,(%a4)       | VRAM write + CD5: start DMA
+        bsr     dma_tiles
         | checksum loop: reads executed AND never-executed code as data (its reads must never become data labels)
         lea     reset,%a0
         move.w  #(ptr_table-reset)/2-1,%d7
@@ -154,8 +136,33 @@ ovl2:
         move.w  #0x4E71,%d0             | its immediate is NOP when entered at ovl2+2
         rts
 vblank:
+        movem.l %d0-%d1/%a4,-(%sp)      | every VBlank re-programs and repeats the tile DMA (exercised after state loads)
+        lea     0xC00004,%a4
+        bsr     dma_tiles
+        movem.l (%sp)+,%d0-%d1/%a4
         addq.l  #1,0xFF0100
         rte
+dma_tiles:
+        | DMA 68K -> VRAM 0x0000: length (words), source (address >> 1)
+        move.w  #0x9320,(%a4)           | reg 0x13 = 32 words (64 bytes)
+        move.w  #0x9400,(%a4)
+        move.l  #tiles,%d0
+        lsr.l   #1,%d0
+        move.w  %d0,%d1
+        and.w   #0xFF,%d1
+        or.w    #0x9500,%d1
+        move.w  %d1,(%a4)
+        lsr.l   #8,%d0
+        move.w  %d0,%d1
+        and.w   #0xFF,%d1
+        or.w    #0x9600,%d1
+        move.w  %d1,(%a4)
+        lsr.l   #8,%d0
+        and.w   #0x7F,%d0
+        or.w    #0x9700,%d0
+        move.w  %d0,(%a4)
+        move.l  #0x40000080,(%a4)       | VRAM write + CD5: start DMA
+        rts
 inline_args:
         move.l  (%sp)+,%a0
         move.w  (%a0)+,%d2
