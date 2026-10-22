@@ -16,6 +16,11 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
+try:
+    import resource  # noqa: F401  (POSIX only; the runner's fit path uses it, these tests never do)
+except ImportError:
+    import types
+    sys.modules["resource"] = types.ModuleType("resource")
 import segarecomp_seg077 as s7  # noqa: E402
 
 FAILURES = []

@@ -32,3 +32,20 @@ tools/segarecomp_ml_region_gen2.py text eol=lf
 tools/segarecomp_ml_region_gen2_train.py text eol=lf
 tools/segarecomp_oracle_bench.py text eol=lf
 tools/segarecomp_xplat_toolchains/*.Dockerfile text eol=lf
+# SEG-077 (ADRs 0171-0174): frozen plans bind their code, fixtures and scripts by SHA-256 over the exact committed LF bytes; pin LF on
+# every platform so Windows autocrlf cannot change a verified digest.
+tools/*.plan.json text eol=lf
+tools/*.plan.digest text eol=lf
+tools/segarecomp_genesis_*.py text eol=lf
+tools/segarecomp_genesis_*.Dockerfile text eol=lf
+tools/segarecomp_genesis_*.json text eol=lf
+tools/segarecomp_genesis_decomp/*.go text eol=lf
+tools/segarecomp_seg077*.py text eol=lf
+tools/segarecomp_seg077*.json text eol=lf
+tools/segarecomp_xplat_*.py text eol=lf
+tools/segarecomp_ml_v3_data.py text eol=lf
+tools/ghidra.py text eol=lf
+tools/ghidra/scripts/*.java text eol=lf
+tests/fixtures/genesis_evidence/* text eol=lf
+tests/segarecomp_genesis_*_test.py text eol=lf
+tests/segarecomp_seg077_test.py text eol=lf
