@@ -200,7 +200,8 @@ def main():
                             ("below the Word RAM view (the PRG-RAM window)", "main:%d:0x1FFFF0:32" % ip_offset),
                             ("for the sub at a main Word RAM base", "sub:%d:0x200000:32" % ip_offset)):
             code, report = emit(tmp, disc, bios, *ip_image, *sp_image, "--disc-image", spec)
-            check(code != 0 and report.get("ok") is not True, "an extent %s is refused (exit %d)" % (label, code))
+            check(code == 6 and report.get("ok") is False and "disc_image_invalid" in json.dumps(report),
+                  "an extent %s is refused as disc_image_invalid (exit %d, %s)" % (label, code, report))
         code, report = emit(tmp, disc, bios, *ip_image, *sp_image, "--disc-image", "main:%d:0x23FFE0:32" % ip_offset)
         check(code == 0 and report.get("ok") is True, "an extent ending exactly at the end of the Word RAM view is accepted (exit %d)" % code)
 

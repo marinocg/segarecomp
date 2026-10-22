@@ -1,7 +1,8 @@
 # ADR 0176: SEG-071 - Word RAM executable authority, the stage's sub bank, the input-instant correction and the Checkpoint H result
 
 - Status: Accepted (SEG-071-T001). Judged against the pre-registration of ADR 0175 (frames, schedule frame numbers and pass rule
-  unchanged); corrects how the schedule's frame numbers are converted to machine ticks (decision 3), a convention inherited from ADR 0150.
+  unchanged); corrects how the schedule's frame numbers are converted to machine ticks (decision 3), a convention inherited from ADR 0150. Decision 3 was found after generated runs; it is a fact of the reference
+  implementation (its own code and pad log), and Checkpoint H is not claimed, so nothing rests on the change.
 - Scope: the authentic BIOS and the Sonic CD (USA) application, generated-native, from reset through the second START, the level load,
   the first level and a 240-frame RIGHT hold, to entry + 1,600 frames; the comparison with the independent reference.
 - Privacy: no BIOS or disc byte, hash, address, extent coordinate, file name, level name, frame image or digest appears here or in any
@@ -35,7 +36,7 @@
    implementation, established from its own code and pad log, independent of generated output. The generated schedule is therefore
    `onset --base-onsets 1197 --press N-1` for every registered N (START 479 / 599, RIGHT 1259, holds unchanged). The registered frame
    numbers, compared frames and pass rule are unchanged.
-4. **Consequence for Checkpoint G (re-verified, same program, corrected schedule).** Frames entry + 510 / 540 / 600 identical, VRAM and Word
+4. **Consequence for Checkpoint G (a post-hoc re-verification under the corrected conversion, same program; ADR 0150's result stands as recorded).** Frames entry + 510 / 540 / 600 identical, VRAM and Word
    RAM identical, work RAM 16 bytes (was 20-25) and PRG RAM 137-138 bytes (ADR 0145/0147 classes); the polls reading START are at entry +
    480, 482, 483, 485 - **exactly** the reference's (ADR 0148 decision 4), where ADR 0150 reported 481, 482, 484, 485. The per-frame
    port-1 poll counts are identical to the reference's in every frame from entry + 65 to 950 except one. ADR 0150 decision 4's
@@ -52,7 +53,7 @@ checkpoint (re-verified, decision 4).
 | level reached | yes: the level fades in, its title card, the running timer, the player |
 | Checkpoint G frames entry + 510 / 540 / 600 | identical (decision 4) |
 | RIGHT observation | the 240 polls reading RIGHT are in exactly the reference's frames (entry + 1,260 ... 1,499); poll sequence 1,250-1,510 identical |
-| player object state (the 64-byte player record) | **byte-identical** to the reference at every sampled frame entry + 1,260 ... 1,500 (13 frames): the player accelerates, runs and scrolls exactly as in the reference |
+| player object state (the player's object record) | **byte-identical** to the reference at every sampled frame entry + 1,260 ... 1,500 (13 frames): the player accelerates, runs and scrolls exactly as in the reference |
 | canonical frames 1,150 / 1,250 / 1,300 / **1,400** / 1,500 | differ in 1,241 / 1,052 / 963 / 966 / 1,228 pixels (of 71,680); at +-1 frame the RIGHT frames differ in ~42,000, so the play is time-aligned; the differing pixels are the timer's centiseconds, the ring animation phase and animated scenery |
 | determinism | one outcome (report and every capture) over 2 repeats and 8 seeded deadline partitions |
 | Checkpoint F (same program, no input) | entry + 420 / 480 / 540 identical; VRAM and Word RAM identical; work / PRG RAM the ADR 0147 classes |
@@ -84,6 +85,6 @@ program's inputs produce the identical program. The synthetic profile and the fo
 
 ## Consequences
 
-- The generated-native Sonic CD reaches and plays its first level from authentic BIOS boot: a held RIGHT moves the player exactly as in the
-  independent reference. The frame-level checkpoint is not claimed; its blocker is a timing-convention decision, not executable authority.
+- The generated-native Sonic CD reaches its first level from authentic BIOS boot, and under a held RIGHT the player's state equals the
+  independent reference's at every sampled frame. The frame-level checkpoint is not claimed; its blocker is a timing-convention decision, not executable authority.
 - The schedule conversion of decision 3 applies to every later timed-input checkpoint.
