@@ -204,7 +204,7 @@ Further results:
   candidate fell in labelled data.
 
 **Diagnosis.** The limit is scenario reach, not label soundness.
-- Under A1, the three explore seeds reached an identical ROM PC set.
+- Under A1, the three explore seeds reached equal counts and near-identical ROM PC sets (4,345 each; intersection 4,316 of a union of 4,379; corrected after the T002 validation).
 - Under revision 4, the second and third random seeds added only 4 and 220 PCs.
 - The generic seeded input policies therefore do not drive the title beyond its early states. Novelty archiving cannot create reach
   that the input policy lacks.

@@ -100,7 +100,7 @@
   }
  },
  "basis": "positive cells < 5% of cells under revision 4 (3.25%) and under the single permitted amendment A1 (3.11%); soundness gates G1-G4 held in both; G5 and the binding class belong to SEG-077-T002",
- "diagnosis": "scenario reach, not label soundness: under A1 the three explore seeds reached the identical ROM PC set, and under revision 4 the second and third random seeds added 4 and 220 PCs; the generic input policies do not drive the title beyond its early states",
+ "diagnosis": "scenario reach, not label soundness: under A1 the three explore seeds reached equal counts and near-identical ROM PC sets (4,345 each; intersection 4,316 of union 4,379; corrected after T002), and under revision 4 the second and third random seeds added 4 and 220 PCs; the generic input policies do not drive the title beyond its early states",
  "format": "plain",
  "g1": {
   "A1": "G1 true for attract, play and explore; dr, ram-rule and explore exercised",
