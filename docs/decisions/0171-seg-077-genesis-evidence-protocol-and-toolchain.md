@@ -178,8 +178,7 @@ frame without rewriting them. Only then could a stale source be recorded. Harden
 is deferred to any future plan revision.
 
 G1 gains a 20 s explore scenario with real state loads, and the fixture repeats its DMA every VBlank. Because the fixture writes register 1
-only at reset, G1 exercises the *dropping* of post-load DMA, not its re-recognition. Gates, thresholds and budgets are unchanged. The independent A1 review found the stale-register defect; the
-pilot traces started under the first A1 freeze were stopped and discarded.
+only at reset, G1 exercises the *dropping* of post-load DMA, not its re-recognition. Gates, thresholds and budgets are unchanged. The independent A1 review found the stale-register defect; the incomplete pilot traces started under the first A1 freeze were stopped and excluded from all results (they remain only in private storage).
 
 **Bound.** This is a single amendment: if the pilot is still `STOP` under A1, T001 ends `STOP`. The explore mechanics, including
 replica determinism, were checked on the synthetic fixture only; no Chuck Rock run of A1 preceded the freeze. G1 passed again under A1.
