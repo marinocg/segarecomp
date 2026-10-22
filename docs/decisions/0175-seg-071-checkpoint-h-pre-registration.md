@@ -3,6 +3,9 @@
 - Status: Accepted (SEG-071-T001). Fixed from the independent reference before any generated-native execution past the SEG-070 frontier
   (`entry_not_compiled` at about entry + 957) and before any generated-native run with the schedule below. It may only be made stricter
   later; any other change invalidates Checkpoint H.
+- Later (ADR 0176 decision 3): the reference applies each press from the onset that *opens* reference frame entry + N (closes entry +
+  N - 1), not the onset closing it as decision 2 states; the generated schedule uses that instant. Frame numbers, compared frames and
+  the pass rule are unchanged.
 - Scope: what Checkpoint H injects, when, what the independent reference shows, what the generated program must reproduce and what
   counts as a pass. It claims nothing about the generated program.
 - Privacy: no BIOS or disc byte, hash, address, file name, level name, frame image, frame digest, controller trace or disassembly
