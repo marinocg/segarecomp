@@ -66,9 +66,18 @@ BOUND = ("segarecomp_seg077.py", "segarecomp_genesis_evidence.py", "segarecomp_g
          "segarecomp_xplat_design.py", "segarecomp_ml_v3.py", "segarecomp_ml_v3_train.py", "segarecomp_ml_region_gen2.py",
          "segarecomp_xplat_cv2.py", "segarecomp_xplat_economics.py")
 RESOURCES = {
+    "phases": "all CPU (A) jobs first (at most 4 at once), then the GPU (B, C-v2) jobs (at most 3 at once, starts staggered); the two "
+              "groups never overlap",
     "gpu_parallel_fits": 3, "cpu_parallel_fits": 4, "cpu_threads_per_fit": 2, "start_stagger_seconds": 30,
     "wall_clock_cap_minutes": {"A": 30, "B": 60, "CV2": 150}, "rss_limit_mb": 4096, "min_available_mb_to_start": 4000,
     "host_memory_floor_mb": 2000, "attempts": 1,
+    "guard": "when MemAvailable < floor the MOST RECENTLY started fit is killed (SEG-076 practice) and recorded host_memory_guard",
+    "infra_rerun": "exactly one identical re-run (recorded as attempt 2) after host_memory_guard, a signal kill, or 'interrupted' (a "
+                   "persisted 'started' job found at farm start after a host crash); never after timeout, rss_limit or a model error",
+    "missing_fits": "a configuration with any failed fit is INCOMPLETE: its ensemble and development class are not computed (reported "
+                    "INCOMPLETE); a missing K1 all-fit model is excluded from the blind evaluation; if A_K1 is missing, the final class is "
+                    "decided by precedence steps 1-2 only and otherwise recorded as INCOMPLETE_BASELINE; a failed reuse check means "
+                    "K0 = INCOMPLETE (no silent refit)",
     "env": {"CUBLAS_WORKSPACE_CONFIG": ":4096:8", "OMP_NUM_THREADS": "2", "MKL_NUM_THREADS": "2"},
     "basis": "SEG-076 measured costs (B ROCm ~7 min, C-v2 ROCm ~26 min per 4000-step fit, 3 parallel C-v2 fits); the caps are >= 5x B and "
              "~6x C-v2; the T005 runtime preflight (recorded in the plan) confirms them on K1 before the matrix"}
@@ -193,12 +202,20 @@ DECISION = {
         "EQUIVALENT_WITH_COST_DIFFERENCE: no advantage either way and, for at least one neural model, |blind delta| < 0.01 and "
         "|development delta| < 0.005",
         "A_PREFERRED: otherwise"],
-    "economics": "measured (SEG-076 C5 bench, unchanged, 11 SEG-074 gate images) only for a K1 model whose development mean ER beats "
-                 "A_K0 (SEG-076 A) by >= 0.01; otherwise classified 'not measured: no development retention advantage at verified full "
-                 "recall'",
+    "economics": "measured (SEG-076 C5 bench, unchanged, 11 SEG-074 gate images) for (a) every model with a neural advantage and (b) "
+                 "every K1 model whose development mean ER beats A_K0 (SEG-076 A) by >= 0.01; otherwise classified 'not measured: no "
+                 "development retention advantage at verified full recall'; an unmeasured winner never receives economic credit",
     "learning_curve": "4/8/12/16-game checkpoints are infeasible: SEG-077-T002 bound STOP and exactly one new lineage qualified",
     "adaptive_budget": "no separately validated recall-safe adaptive policy exists for these models; fixed B35/B50/B60 only",
 }
+
+
+def environments() -> dict:
+    def probe(py, code):
+        r = subprocess.run([str(py), "-c", code], capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else f"unavailable: {r.stderr.strip()[-120:]}"
+    return {"cpu": probe(CPU_PY, "import sys,numpy,sklearn,torch;print(sys.version.split()[0],numpy.__version__,sklearn.__version__,torch.__version__)"),
+            "rocm": probe(ROCM_PY, "import sys,numpy,torch;print(sys.version.split()[0],numpy.__version__,torch.__version__,torch.version.hip)")}
 
 
 def build_plan() -> dict:
@@ -215,8 +232,11 @@ def build_plan() -> dict:
         "models": {"A": "segarecomp_xplat_models.fit_a/score_a (HistGradientBoosting, fixed configuration), CPU venv",
                    "B": "segarecomp_xplat_explore_rocm.fit_bc_device(graph=False)/infer_bc_device, M4 recipe, ROCm",
                    "CV2": "segarecomp_xplat_models_v2.fit_cv2/infer_cv2, M4 recipe, ROCm"},
-        "seeds": list(SEEDS), "reuse": "K0 SEG-076 arrays are admitted only when `reuse` refits A.K0.D05, B.K0.D05.s1 and CV2.K0.D05.s1 under "
-                                       "this plan and all three are bitwise identical to the SEG-076 arrays; otherwise every K0 fit is refitted",
+        "seeds": list(SEEDS), "reuse": "K0 SEG-076 arrays and all-fit weights are admitted only when `reuse` refits A.K0.D05, B.K0.D05.s1 "
+                                       "and CV2.K0.D05.s1 under this plan and all three are bitwise identical to the SEG-076 arrays "
+                                       "(SEG-076 precedent: D05 is the determinism sentinel; C-v2 seeds 2-3 and the all weights are "
+                                       "covered by the same environment identity, not by their own refit); otherwise K0 is INCOMPLETE and "
+                                       "any K0 refit requires a recorded amendment",
         "comparators": {k: sha(p) for k, p in sorted(files.items())},
         "seeds_policy": "commercial images: reset-vector cell from the header only (label-free); Genesis images: SEG-072 registry seeds",
         "graph_integrity": "C-v2 candidate edges and the PROVEN flag come from CPU-owned decode tokens, instruction words and the label-free "
@@ -226,7 +246,7 @@ def build_plan() -> dict:
                           "gives a mostly-masked lineage 1/12 of the windows, some of which carry no loss (frozen recipe, disclosed)",
         "resources": RESOURCES, "preflight": json.loads(preflight.read_text()) if preflight.is_file() else None,
         "decision": DECISION,
-        "environments": {"cpu_python": str(CPU_PY.name), "rocm_python": str(ROCM_PY.name)},
+        "environments": environments(),
         "bound_code": {f: sha(HERE / f) for f in BOUND},
         "jobs": [j["id"] for j in jobs()],
     }
@@ -385,72 +405,79 @@ def cmd_farm(a) -> int:
     st = json.loads(status_p.read_text()) if status_p.is_file() else {"plan_sha256": plan_sha(), "jobs": {}}
     if st["plan_sha256"] != plan_sha():
         raise SystemExit("farm.json belongs to another plan")
+    for jid, v in st["jobs"].items():             # a 'started' job found here was interrupted by a host crash
+        if v.get("status") == "started":
+            st["jobs"][jid] = {"status": "interrupted", "attempts": v.get("attempts", 1)}
     only = set(a.only or [])
-    todo = [j for j in jobs() if (not only or j["id"] in only) and st["jobs"].get(j["id"], {}).get("status") not in ("ok", "failed")]
+
+    def runnable(j):
+        v = st["jobs"].get(j["id"])
+        if v is None:
+            return True
+        return v["status"] in ("interrupted", "host_memory_guard", "killed_signal") and v.get("attempts", 1) < 2
     env = dict(os.environ, **RESOURCES["env"])
     (OUT / "logs").mkdir(exist_ok=True)
-    running = {}
 
     def save():
         status_p.write_text(json.dumps(st, indent=1, sort_keys=True))
 
-    def launch(j):
-        py = CPU_PY if j["model"] == "A" else ROCM_PY
-        cmd = [str(py), str(HERE / "segarecomp_seg077.py"), "fit", "--model", j["model"], "--cond", j["cond"], "--fold", j["fold"]]
-        if j["seed"] is not None:
-            cmd += ["--seed", str(j["seed"])]
-        if j["repro"]:
-            cmd += ["--repro"]
-        log = open(OUT / "logs" / f"{j['id']}.log", "w")
-        p = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env)
-        st["jobs"][j["id"]] = {"status": "started", "attempts": 1}
-        save()
-        running[j["id"]] = (p, time.time(), j, log, 0)
-
-    while todo or running:
-        gpu = sum(1 for _, _, j, _, _ in running.values() if j["model"] != "A")
-        cpu = sum(1 for _, _, j, _, _ in running.values() if j["model"] == "A")
-        for j in list(todo):
-            if _available_mb() < RESOURCES["min_available_mb_to_start"]:
-                break
-            if j["model"] == "A" and cpu < RESOURCES["cpu_parallel_fits"]:
-                todo.remove(j)
-                launch(j)
-                cpu += 1
-            elif j["model"] != "A" and gpu < RESOURCES["gpu_parallel_fits"]:
-                todo.remove(j)
-                launch(j)
-                gpu += 1
+    for phase in ("cpu", "gpu"):
+        todo = [j for j in jobs() if (not only or j["id"] in only) and runnable(j) and (j["model"] == "A") == (phase == "cpu")]
+        limit = RESOURCES["cpu_parallel_fits"] if phase == "cpu" else RESOURCES["gpu_parallel_fits"]
+        running = {}
+        while todo or running:
+            if todo and len(running) < limit and _available_mb() >= RESOURCES["min_available_mb_to_start"]:
+                j = todo.pop(0)
+                attempt = st["jobs"].get(j["id"], {}).get("attempts", 0) + 1
+                py = CPU_PY if j["model"] == "A" else ROCM_PY
+                cmd = [str(py), str(HERE / "segarecomp_seg077.py"), "fit", "--model", j["model"], "--cond", j["cond"], "--fold", j["fold"]]
+                if j["seed"] is not None:
+                    cmd += ["--seed", str(j["seed"])]
+                if j["repro"]:
+                    cmd += ["--repro"]
+                if attempt == 2:                  # an infrastructure re-run starts from a clean write-once slot
+                    sp = score_path(j["model"], j["cond"], j["fold"], j["seed"], j["repro"])
+                    for q in (sp, sp.with_suffix(".json"), sp.with_suffix(".pt"), sp.with_suffix(".pkl")):
+                        if q.exists():
+                            q.unlink()
+                log = open(OUT / "logs" / f"{j['id']}.a{attempt}.log", "w")
+                pr = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env)
+                st["jobs"][j["id"]] = {"status": "started", "attempts": attempt}
+                save()
+                running[j["id"]] = (pr, time.time(), j, log, 0, attempt)
                 time.sleep(RESOURCES["start_stagger_seconds"])
-                break
-        for jid, (p, t0, j, log, peak) in list(running.items()):
-            peak = max(peak, _rss_mb(p.pid))
-            running[jid] = (p, t0, j, log, peak)
-            cap = RESOURCES["wall_clock_cap_minutes"][j["model"]] * 60
-            reason = None
-            if time.time() - t0 > cap:
-                reason = "timeout"
-            elif peak > RESOURCES["rss_limit_mb"]:
-                reason = "rss_limit"
-            elif _available_mb() < RESOURCES["host_memory_floor_mb"]:
-                reason = "host_memory_guard"
-            if reason and p.poll() is None:
-                p.kill()
-                p.wait()
-                st["jobs"][jid] = {"status": "failed", "reason": reason, "attempts": 1, "wall_seconds": round(time.time() - t0, 1),
-                                   "peak_rss_mb_watchdog": peak}
-            elif p.poll() is not None:
-                ok = p.returncode == 0
-                st["jobs"][jid] = {"status": "ok" if ok else "failed", "attempts": 1, "wall_seconds": round(time.time() - t0, 1),
-                                   "peak_rss_mb_watchdog": peak, **({} if ok else {"reason": f"exit {p.returncode}"})}
-            else:
                 continue
-            log.close()
-            del running[jid]
-            save()
-        time.sleep(5)
+            newest = max(running, key=lambda k: running[k][1]) if running else None
+            for jid, (pr, t0, j, log, peak, attempt) in list(running.items()):
+                peak = max(peak, _rss_mb(pr.pid))
+                running[jid] = (pr, t0, j, log, peak, attempt)
+                reason = None
+                if pr.poll() is None:
+                    if time.time() - t0 > RESOURCES["wall_clock_cap_minutes"][j["model"]] * 60:
+                        reason = "timeout"
+                    elif peak > RESOURCES["rss_limit_mb"]:
+                        reason = "rss_limit"
+                    elif jid == newest and _available_mb() < RESOURCES["host_memory_floor_mb"]:
+                        reason = "host_memory_guard"
+                    if reason is None:
+                        continue
+                    pr.kill()
+                    pr.wait()
+                    rec = {"status": reason if reason == "host_memory_guard" else "failed", "reason": reason}
+                else:
+                    ok = pr.returncode == 0
+                    rec = {"status": "ok"} if ok else ({"status": "killed_signal"} if pr.returncode < 0 else
+                                                       {"status": "failed", "reason": f"exit {pr.returncode}"})
+                rec.update({"attempts": attempt, "wall_seconds": round(time.time() - t0, 1), "peak_rss_mb_watchdog": peak})
+                if rec["status"] in ("host_memory_guard", "killed_signal") and attempt < 2:
+                    todo.append(j)                # the single pre-registered infrastructure re-run
+                st["jobs"][jid] = rec
+                log.close()
+                del running[jid]
+                save()
+            time.sleep(5)
     save()
-    print(json.dumps({k: sum(1 for v in st["jobs"].values() if v["status"] == k) for k in ("ok", "failed")}))
+    print(json.dumps({k: sum(1 for v in st["jobs"].values() if v["status"] == k) for k in ("ok", "failed", "host_memory_guard", "killed_signal")}))
     return 0
 
 
@@ -464,6 +491,7 @@ def labelled_metrics(classes: bytes, scores, seeds=(), cell: int = 128) -> dict:
     s = [float(x) for x in scores]
     if len(s) != len(labels):
         raise SystemExit("score/cell count mismatch")
+    seeds = {a // cell for a in seeds if 0 <= a < len(classes)}     # seed ADDRESSES -> cells, as the frozen SEG-075/076 callers do
     pos = [i for i, y in enumerate(labels) if y == 1]
     neg = [i for i, y in enumerate(labels) if y == 0]
     out = {"cells": len(labels), "labelled_positive": len(pos), "labelled_negative": len(neg),
@@ -561,7 +589,7 @@ def _scores(model, cond, fold, seed, status) -> dict | None:
     reuse = json.loads((OUT / "reuse.json").read_text()) if (OUT / "reuse.json").is_file() else {}
     if cond == "K0" and k0_reused(model, fold, seed) is not None and fold != "all":
         if not reuse.get("admitted"):
-            raise SystemExit("K0 reuse was not admitted: the K0 refits require a recorded amendment")
+            return None                           # K0 INCOMPLETE (a refit needs a recorded amendment)
         return X.load_npz(k0_reused(model, fold, seed))
     jid = job_id(model, cond, fold, seed)
     if status.get(jid, {}).get("status") != "ok":
@@ -618,7 +646,10 @@ def cmd_table(a) -> int:
                                          for f in genesis()})
     dev = {}
     for m, k0, k1 in (("A", "A.K0", "A.K1"), ("B", "B.K0.ens3", "B.K1.ens3"), ("CV2", "CV2.K0.ens3", "CV2.K1.ens3")):
-        if k0 in tables and k1 in tables:
+        if k0 not in tables or k1 not in tables:
+            dev[m] = {"class": "INCOMPLETE", "missing": [k for k in (k0, k1) if k not in tables]}
+            continue
+        if True:
             d = {L: tables[k1]["rows"][L]["max_er"] - tables[k0]["rows"][L]["max_er"] for L in genesis()}
             pr = paired(d)
             dev[m] = {"class": dev_class(d), "mean_d": round(pr["mean"], 6), "p": round(pr["p"], 6),
@@ -659,7 +690,10 @@ def cmd_table(a) -> int:
 
 # ----------------------------------------------------------------------------------------------------------------- final models
 def final_models() -> dict[str, pathlib.Path]:
-    """The blind cohort's models: K1 all fits (A; B and C-v2 seeds 1-3) and the K0 (SEG-076-equivalent) comparators."""
+    """The blind cohort's models: K1 all fits (A; B and C-v2 seeds 1-3) and the K0 (SEG-076-equivalent) comparators. SEG-076 weights
+    are admitted only with a passing reuse check."""
+    if not json.loads((OUT / "reuse.json").read_text()).get("admitted"):
+        raise SystemExit("K0 reuse not admitted: the SEG-076 all-fit weights cannot be used")
     out = {"A.K1": score_path("A", "K1", "all", None).with_suffix(".pkl"), "A.K0": comparator_files()["A.K0.all"]}
     for m in ("B", "CV2"):
         for s in SEEDS:
@@ -670,8 +704,10 @@ def final_models() -> dict[str, pathlib.Path]:
 
 def cmd_freeze_models(a) -> int:
     verify_plan_full()
+    fm = final_models()
     doc = {"schema": "segarecomp.seg077.models.v1", "plan_sha256": plan_sha(),
-           "models": {k: sha(p) for k, p in sorted(final_models().items())},
+           "models": {k: sha(p) for k, p in sorted(fm.items()) if p.is_file()},
+           "missing": sorted(k for k, p in fm.items() if not p.is_file()),
            "policy": {"budgets": ["B35", "B50", "B60"], "ensemble": "B and C-v2: mean of the 3 seeds' word logits, cell max at 128 bytes",
                       "metrics": DECISION["blind"]["metrics"]}}
     MODELS_FROZEN.write_bytes(canonical(doc))
@@ -681,7 +717,8 @@ def cmd_freeze_models(a) -> int:
 
 def verify_models() -> dict:
     doc = json.loads(MODELS_FROZEN.read_text())
-    if doc["plan_sha256"] != plan_sha() or doc["models"] != {k: sha(p) for k, p in sorted(final_models().items())}:
+    fm = final_models()
+    if doc["plan_sha256"] != plan_sha() or doc["models"] != {k: sha(fm[k]) for k in sorted(doc["models"])}:
         raise SystemExit("final models differ from the committed tools/segarecomp_seg077.models.json")
     return doc
 
@@ -696,20 +733,39 @@ def blind_dirs(root: pathlib.Path) -> list[pathlib.Path]:
         want = BLIND_COHORT.get(bid)
         if want is None or m["identity"]["raw_sha256"] != want["raw_sha256"] or m["identity"]["raw_size"] != want["raw_size"]:
             raise SystemExit(f"{bid}: blind sample is not a pinned cohort member")
+        img = pathlib.Path(m["image"]).read_bytes()
+        if hashlib.sha256(img).hexdigest() != m["sha256"] or (m["identity"]["format"] == "plain" and m["sha256"] != want["raw_sha256"]):
+            raise SystemExit(f"{bid}: recomputed image identity differs")
+        if sha(p.parent / "tokens.bin") != m["tokens_sha256"]:
+            raise SystemExit(f"{bid}: tokens differ from the custodian record")
         out.append(p.parent)
+    missing = sorted(set(BLIND_COHORT) - {d.parent.name for d in out})
+    if missing:
+        raise SystemExit(f"blind cohort incomplete: {missing} (record them as incomplete-truth titles via the custodian, then rerun)")
     return out
 
 
 def cmd_blind_score(a) -> int:
-    """Evaluator side: score the custodian's blind images with one frozen model (no labels are read here)."""
+    """Evaluator side: score the custodian's blind images with one frozen model (no labels are read here). With --equiv, score the
+    qualified development lineage(s) through the same label-free path and require bitwise equality with the scores the K1 all fit wrote
+    in its own process (proves the hand-built image and the weight reload are equivalent) BEFORE any blind exposure."""
     import pickle
     import segarecomp_ml_v3_train as t
+    import segarecomp_xplat_transfer as X
+    import numpy as np
     verify_plan_full()
     verify_models()
     key = a.key
+    if key not in verify_models()["models"]:
+        raise SystemExit(f"{key} is not a recorded final model")
     path = final_models()[key]
     ims = []
-    for d in blind_dirs(pathlib.Path(a.blind)):
+    src = [NEW_LINEAGES[L] for L in sorted(NEW_LINEAGES)] if a.equiv else blind_dirs(pathlib.Path(a.blind))
+    if not a.equiv:
+        for k in verify_models()["models"]:
+            if k.endswith(("K1", ".K1.s1", ".K1.s2", ".K1.s3")) and not (OUT / "blind" / f"equiv.{k}.json").is_file():
+                raise SystemExit(f"equivalence gate missing for {k}")
+    for d in src:
         im = t.Image.__new__(t.Image)
         m = json.loads((d / "meta.json").read_text())
         im.id, im.lineage, im.kind = m["id"], m["lineage"], m["kind"]
@@ -754,6 +810,18 @@ def cmd_blind_score(a) -> int:
             net = net.to(dev).eval()
             for im in ims:
                 scores[im.id] = v2.infer_cv2(net, im, dev)
+    if a.equiv:
+        m, cond, rest = key.split(".")[0], "K1", key.split(".")[2:]
+        seed = int(rest[0][1:]) if rest else None
+        ref = X.load_npz(score_path(m, cond, "all", seed))
+        same = sorted(ref) == sorted(scores) and all(np.array_equal(np.asarray(ref[k]), np.asarray(scores[k])) for k in ref)
+        (OUT / "blind").mkdir(parents=True, exist_ok=True)
+        (OUT / "blind" / f"equiv.{key}.json").write_text(json.dumps({"key": key, "bitwise_identical": bool(same)}))
+        print(json.dumps({"key": key, "bitwise_identical": bool(same)}))
+        if not same:
+            (OUT / "blind" / f"equiv.{key}.json").unlink()
+            raise SystemExit("blind scoring path is not equivalent to the fit-time scoring")
+        return 0
     outp = OUT / "blind" / f"{key}.npz"
     t.save_scores(outp, scores)
     outp.with_suffix(".json").write_text(json.dumps({"key": key, "model_sha256": sha(path), "plan_sha256": plan_sha(),
@@ -779,7 +847,8 @@ def cmd_blind_table(a) -> int:
     dirs = blind_dirs(pathlib.Path(a.blind))
     metas = {json.loads((d / "meta.json").read_text())["id"]: d for d in dirs}
     raw = {}
-    for key in final_models():
+    recorded = verify_models()["models"]
+    for key in recorded:
         f = OUT / "blind" / f"{key}.npz"
         if not f.is_file():
             raise SystemExit(f"missing blind scores for {key}")
@@ -791,20 +860,22 @@ def cmd_blind_table(a) -> int:
     def cellsof(iid, w):
         size = json.loads((metas[iid] / "meta.json").read_text())["size"]
         return t.cell_max(np.asarray(w, dtype=np.float32), size, 128)
-    configs = {"A.K1": {i: np.asarray(v, dtype=np.float64) for i, v in raw["A.K1"].items()},
-               "A.K0": {i: np.asarray(v, dtype=np.float64) for i, v in raw["A.K0"].items()}}
+    configs = {k: {i: np.asarray(v, dtype=np.float64) for i, v in raw[k].items()} for k in ("A.K1", "A.K0") if k in raw}
     for m in ("B", "CV2"):
         for c in ("K0", "K1"):
             for sd in SEEDS:
-                configs[f"{m}.{c}.s{sd}"] = {i: cellsof(i, w) for i, w in raw[f"{m}.{c}.s{sd}"].items()}
-            configs[f"{m}.{c}.ens3"] = {i: cellsof(i, np.mean([raw[f"{m}.{c}.s{sd}"][i] for sd in SEEDS], axis=0)) for i in metas}
+                if f"{m}.{c}.s{sd}" in raw:
+                    configs[f"{m}.{c}.s{sd}"] = {i: cellsof(i, w) for i, w in raw[f"{m}.{c}.s{sd}"].items()}
+            if all(f"{m}.{c}.s{sd}" in raw for sd in SEEDS):
+                configs[f"{m}.{c}.ens3"] = {i: cellsof(i, np.mean([raw[f"{m}.{c}.s{sd}"][i] for sd in SEEDS], axis=0)) for i in metas}
     per = {}
     for name, sc in configs.items():
         per[name] = {}
         for iid, d in metas.items():
             seeds = attach_new(type("I", (), {})(), d).seed_addresses
             per[name][iid] = labelled_metrics((d / "classes.bin").read_bytes(), sc[iid], seeds)
-    informative = sorted(i for i, mm in per["A.K1"].items() if mm["informative"])
+    ref = per.get("A.K1") or next(iter(per.values()))
+    informative = sorted(i for i, mm in ref.items() if mm["informative"])
 
     def blind_er(name):
         return {i: per[name][i]["labelled_er"] for i in informative}
@@ -812,10 +883,14 @@ def cmd_blind_table(a) -> int:
     def b50(name):
         return sum(per[name][i]["misses_B50"] for i in metas)
     conf = dev["configurations"]
-    a_mean = conf["A.K1"]["summary"]["mean_er"]
     adv, equiv, means = {}, False, {}
+    baseline_ok = "A.K1" in configs and "A.K1" in conf
+    a_mean = conf["A.K1"]["summary"]["mean_er"] if baseline_ok else None
     for m in ("B", "CV2"):
         x = f"{m}.K1.ens3"
+        if not baseline_ok or x not in configs or x not in conf or any(f"{m}.K1.s{sd}" not in conf for sd in SEEDS):
+            adv[m], means[m] = False, None
+            continue
         dd = {L: conf[x]["lineage_max_er"][L] - conf["A.K1"]["lineage_max_er"][L] for L in genesis()}
         seed_means = [conf[f"{m}.K1.s{sd}"]["summary"]["mean_er"] for sd in SEEDS]
         adv[m] = neural_advantage(blind_er(x), blind_er("A.K1"), conf[x]["summary"]["mean_er"], a_mean, dd, seed_means, b50(x), b50("A.K1"))
@@ -827,20 +902,22 @@ def cmd_blind_table(a) -> int:
     econ = json.loads(pathlib.Path(a.economics).read_text()) if a.economics else {}
     econ_ok = {m: econ.get(m) for m in ("B", "CV2")}
     cls = final_class(len(informative), len(plan["new_lineages_qualified"]), adv, econ_ok, equiv, means)
+    if not baseline_ok and cls not in ("LABEL_TRUTH_INSUFFICIENT", "DATA_INSUFFICIENT"):
+        cls = "INCOMPLETE_BASELINE"
     summary = {}
     for name in configs:
         ers = [per[name][i]["labelled_er"] for i in informative]
         summary[name] = {"mean_labelled_er": round(sum(ers) / len(ers), 6) if ers else None, "worst_labelled_er": round(max(ers), 6) if ers else None,
                          "misses_B35": sum(per[name][i]["misses_B35"] for i in metas), "misses_B50": b50(name),
                          "misses_B60": sum(per[name][i]["misses_B60"] for i in metas)}
-    titles = {f"T{k + 1}": {"informative": per["A.K1"][i]["informative"], "labelled_positive": per["A.K1"][i]["labelled_positive"],
-                           "labelled_negative": per["A.K1"][i]["labelled_negative"],
+    titles = {f"T{k + 1}": {"informative": ref[i]["informative"], "labelled_positive": ref[i]["labelled_positive"],
+                           "labelled_negative": ref[i]["labelled_negative"],
                            "labelled_er": {n: (round(per[n][i]["labelled_er"], 6) if per[n][i]["labelled_er"] is not None else None)
                                            for n in configs}} for k, i in enumerate(sorted(metas))}
     doc = {"schema": "segarecomp.seg077.t007.results.v1", "task": "SEG-077-T007", "plan_sha256": plan_sha(),
            "models_json_sha256": sha(MODELS_FROZEN), "titles": len(metas), "informative_titles": len(informative),
            "per_title": titles, "summary": summary, "neural_advantage": adv, "equivalent": equiv, "economics": econ_ok,
-           "final_class": cls, "data_boundary": "aggregates only; title order is opaque (T1..Tn by image id)"}
+           "final_class": cls, "data_boundary": "aggregates only; T1..Tn follow the sorted image ids (B077-01..08 order)"}
     pathlib.Path(a.results or BLIND_RESULTS).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
     print(json.dumps({"final_class": cls, "informative": len(informative), "summary": {k: v["mean_labelled_er"] for k, v in summary.items()}},
                      indent=1))
@@ -870,7 +947,8 @@ def main(argv=None) -> int:
     sub.add_parser("freeze-models").set_defaults(func=cmd_freeze_models)
     bs = sub.add_parser("blind-score")
     bs.add_argument("--key", required=True)
-    bs.add_argument("--blind", required=True)
+    bs.add_argument("--blind")
+    bs.add_argument("--equiv", action="store_true")
     bs.set_defaults(func=cmd_blind_score)
     bt = sub.add_parser("blind-table")
     bt.add_argument("--blind", required=True)

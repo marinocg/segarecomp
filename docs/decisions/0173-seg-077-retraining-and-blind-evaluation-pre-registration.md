@@ -46,8 +46,10 @@ actually qualified.
   - C-v2: `fit_cv2`, ROCm, bitwise deterministic in SEG-076-T005.
   - Recipes are unchanged. B and C-v2 use matched seeds 1-3.
 - **K0 reuse.** SEG-076's K0 arrays (A; B seed 1 from the ROCm amendment; C-v2 seeds 1-3; their `all` weights) are admitted only if
-  `reuse` refits A.K0.D05, B.K0.D05.s1 and CV2.K0.D05.s1 under this plan and all three are bitwise identical. Otherwise the K0 refits
-  require a recorded amendment.
+  `reuse` refits A.K0.D05, B.K0.D05.s1 and CV2.K0.D05.s1 under this plan and all three are bitwise identical.
+  - This follows SEG-076 precedent: D05 is the determinism sentinel.
+  - C-v2 seeds 2-3 and the `all` weights are covered by the identical environment, not by their own refit.
+  - Otherwise K0 is `INCOMPLETE`, and any K0 refit requires a recorded amendment.
 - **Job matrix (113 jobs).**
 
   | Group | Fits |
@@ -62,8 +64,28 @@ actually qualified.
   - B: 0.049 s/step, about 3.3 min per fit.
   - C-v2: 0.342 s/step, about 23 min per fit.
   - About 0.9 GB GPU and 3.6 GB host RSS per process.
-- **Resources.** The resource policy (3 parallel GPU fits, caps of 60/150 min, a 4 GB RSS limit, a host-memory guard, a single attempt,
-  and failures recorded rather than retuned) follows SEG-076's measured practice.
+- **Resources.** Caps are 60 min (B) and 150 min (C-v2), with a 4 GB RSS limit.
+  - The CPU (A) and GPU (B, C-v2) groups run in separate phases. At most 4 CPU or 3 GPU fits run at once, with staggered starts.
+  - The host-memory guard kills the most recently started fit, as in SEG-076.
+  - Exactly one identical, recorded infrastructure re-run is allowed, only after a host-memory guard kill, a signal kill or a crash
+    interruption.
+  - Failures are never retuned.
+  - Missing fits make their configuration `INCOMPLETE`, with an explicit rule for the ensembles, the development classes, the blind
+    models and the baseline (plan `resources.missing_fits`).
+  - The RSS margin of the largest fit is about 11-13% (3.56-3.63 GB against the 4 GB cap).
+
+### Corpus verification and independence
+
+- **Label verification.** The G077-01 labels were verified independently by SEG-077-T002 (ADR 0172): two independent replays, a
+  digest-identical re-label, and sampled truth-rule and decoder agreement checks (90/90 family).
+- **Independence.** G077-01 is independent of D01-D12 at the title and developer level. Byte-level code-shingle overlap was not measured.
+  T002 found no new instruction trigrams, so the title adds training mass rather than new structure.
+- **Seed asymmetry (disclosed).**
+  - Genesis development images carry many label-free seeds from the production bridge's direct-control reports and linker
+    relocations.
+  - Commercial images (G077-01 and the blind cohort) carry only the header reset-vector seed and no relocations.
+  - Both are label-free, so this is not leakage. However, A's seed, reach and relocation features and C-v2's PROVEN roots are sparser on
+    commercial inputs, which confounds blind-versus-development comparisons, especially for C-v2.
 
 ### Development rules (T006)
 
@@ -79,6 +101,10 @@ actually qualified.
 - **Custodian/evaluator boundary.** A custodian session runs the frozen evidence protocol (plan `03ebc8f8...`) into a sealed private
   directory. The evaluator scores with the frozen models only after `tools/segarecomp_seg077.models.json` (the model digests) is
   committed. Labels are read only by `blind-table`. Nothing changes after exposure.
+- **Equivalence gate.** Before any exposure, `blind-score --equiv` scores G077-01 through the label-free blind path with each K1 `all`
+  model. The scores must be bitwise equal to the scores that fit wrote in its own process; the gate exercises the weight reload.
+- **Identity.** Blind samples must match the pinned cohort by recomputed image digest, with token digests checked, and all 8 must be
+  present.
 - **Metrics.** They use labelled cells only: labelled ER (masked cells are excluded), plus B35/B50/B60 misses of labelled starts under
   SEG-072's unchanged budget regions. A title is informative when it has at least 50 labelled positive and 50 labelled negative cells.
   Incomplete truth is reported as incomplete.
@@ -95,9 +121,23 @@ actually qualified.
   4. `C_ADVANTAGE` / `B_ADVANTAGE`.
   5. `EQUIVALENT_WITH_COST_DIFFERENCE`.
   6. `A_PREFERRED`.
-- **Economics.** They are measured with SEG-076's unchanged C5 bench only for a K1 model whose development mean ER beats SEG-076's A by
-  at least 0.01. Otherwise they are reported as not measured, with the reason.
+- **Economics.** They are measured with SEG-076's unchanged C5 bench for every model with a neural advantage, and for every K1 model whose
+  development mean ER beats SEG-076's A by at least 0.01. Otherwise they are reported as not measured, with the reason. An unmeasured
+  winner never receives economic credit.
 - **Adaptive budget.** There is no separately validated recall-safe adaptive policy for these models, so only fixed budgets are used.
+
+## Disclosure
+
+The thresholds were chosen after ADR 0172 (n = 1 new lineage) and with SEG-076's K0 development results known:
+- the `DATA_INSUFFICIENT` threshold (4 lineages);
+- the advantage margins (0.01 blind, 0.005 development);
+- the informative-title threshold (50/50).
+
+The `DATA_INSUFFICIENT` threshold can only stop an advantage claim. `neural_advantage` is still computed and reported descriptively.
+
+The C5 pre-registration review (round 1) blocked two defects before any fit, and both were fixed before the freeze:
+- seed addresses were used as cells in the budget misses;
+- farm memory overcommit and failure handling.
 
 ## Consequences
 

@@ -87,6 +87,17 @@ def test_labelled_metrics():
     check(abs(m["labelled_er"] - 0.5) < 1e-12, f"labelled ER counts only labelled negatives at or above the weakest positive {m}")
     check(m["informative"] is False, "informative needs >= 50 of each")
     check(m["misses_B35"] >= 1, "B35 region (2 of 6 cells) misses a labelled positive")
+    # C5 review B1: seed ADDRESSES are converted to cells (reset vector at 0x200 -> cell 4), never used as cell indices
+    big = bytearray(b"D" * cell * 1024)
+    for c in range(100, 160):
+        big[c * cell] = ord("I")
+    big[4 * cell] = ord("I")                    # the reset cell: labelled code, scored lowest
+    sc = [0.0] * 1024
+    for c in range(100, 160):
+        sc[c] = 10.0
+    sc[4] = -100.0
+    mb = s7.labelled_metrics(bytes(big), sc, [0x200])
+    check(mb["misses_B35"] == mb["misses_B50"] == mb["misses_B60"] == 0, f"reset seed cell forced into every budget region {mb}")
 
 
 def plain(x):
@@ -135,6 +146,29 @@ def test_numpy_leakage():
             except Exception:
                 graphs.append(None)
         check(seeds[0] == seeds[1] == ((0x200,), (4,)), f"seeds come from the header only {seeds}")
+    real = s7.NEW_LINEAGES.get("G077-01")
+    if real is not None and (real / "meta.json").is_file():
+        # optional private-data run on the frozen extraction: swap classes.bin in a temp copy
+        import shutil
+        with tempfile.TemporaryDirectory() as td2:
+            outs = []
+            for k, variant in enumerate((None, "random")):
+                d = pathlib.Path(td2) / f"r{k}"
+                shutil.copytree(real, d)
+                if variant:
+                    n = len((d / "classes.bin").read_bytes())
+                    (d / "classes.bin").write_bytes(bytes(rnd.choice(b"IcDU") for _ in range(n)))
+                im = s7.attach_new(t.Image(d), d)
+                g = None
+                try:
+                    import torch
+                    g = plain([xm.window_graph(np, torch, im, st, 2048) for st in range(0, im.n_words, 2048 * 8)])
+                except Exception:
+                    pass
+                outs.append((tuple(im.seed_addresses), xm.a_features(im, xm.relocs_of(im)), g))
+            check(outs[0][0] == outs[1][0], "real sample: seeds invariant to classes.bin")
+            check(np.array_equal(outs[0][1], outs[1][1]), "real sample: A features invariant to classes.bin")
+            check(outs[0][2] == outs[1][2], "real sample: C graph invariant to classes.bin")
         check(np.array_equal(feats[0], feats[1]), "A features are invariant to classes.bin")
         if graphs[0] is not None:
             check(graphs[0] == graphs[1], "C candidate graph is invariant to classes.bin")

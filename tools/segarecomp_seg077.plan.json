@@ -47,7 +47,7 @@
   "segarecomp_ml_region_gen2.py": "5b5e07c6b6a2ae3af3a1a45aead275a23bd110a25bbfbf5efd73307d817650d3",
   "segarecomp_ml_v3.py": "ef18ab40e1da9f25ecc4e1e0a9f0f630453fc8e15b13812750e133d8998947ba",
   "segarecomp_ml_v3_train.py": "7234c6ffe964f0f6db44126d760fb60eff6ce97b30e93a7034d3e1e2bb97592f",
-  "segarecomp_seg077.py": "956b98baa8e6457339d41ff5dec61ef5415f8d706d5d8f50aef7091159dd1eca",
+  "segarecomp_seg077.py": "6c581555d0057c72ec61a090e68f393e14057392d582ff9e8ffa03f1ca7dd872",
   "segarecomp_xplat_cv2.py": "cc2339be365e8a9ac2ac982fbc6c3f308d9ad9f405be7c68d462742c8858fb03",
   "segarecomp_xplat_design.py": "9235527284e19ac274f3c146a2b6a3f040e425bb742531cbc84e9e1efbae4c3c",
   "segarecomp_xplat_economics.py": "17bd7853d5e1cd8d3193de583860535da5ee2a39f00ae9c4fa4e354bee480b0c",
@@ -169,13 +169,13 @@
    "WORSENED": "mean d >= +0.005 and p <= 0.05",
    "definition": "paired lineage differences d_L = ER_K1(L) - ER_K0(L) over the 11 Genesis lineages, ER(L) = the lineage's maximum image ER (SEG-075 definition; the Genesis 'mean ER' is the mean of these over lineages); B and C-v2 on the 3-seed word-logit-mean ensemble, cell max at 128 bytes; mean d and the exact sign-flip p (two-sided)"
   },
-  "economics": "measured (SEG-076 C5 bench, unchanged, 11 SEG-074 gate images) only for a K1 model whose development mean ER beats A_K0 (SEG-076 A) by >= 0.01; otherwise classified 'not measured: no development retention advantage at verified full recall'",
+  "economics": "measured (SEG-076 C5 bench, unchanged, 11 SEG-074 gate images) for (a) every model with a neural advantage and (b) every K1 model whose development mean ER beats A_K0 (SEG-076 A) by >= 0.01; otherwise classified 'not measured: no development retention advantage at verified full recall'; an unmeasured winner never receives economic credit",
   "learning_curve": "4/8/12/16-game checkpoints are infeasible: SEG-077-T002 bound STOP and exactly one new lineage qualified",
   "neural_advantage": "model X in {B, CV2} (K1 ensemble) beats A_K1 when ALL hold: blind mean labelled ER over informative titles lower by >= 0.01; lower on >= 75% of informative titles; blind B50 misses not greater; development mean ER lower by >= 0.005 with sign-flip p <= 0.05 over the 11 lineages; and each of its 3 seeds alone has development mean ER below A_K1's"
  },
  "environments": {
-  "cpu_python": "python",
-  "rocm_python": "python"
+  "cpu": "3.13.14 2.5.3 1.9.1 2.14.1+cu130",
+  "rocm": "3.12.13 1.26.4 2.6.0+rocm6.4.2.git76481f7c 6.4.43484-123eb5128"
  },
  "genesis_folds": [
   "D01",
@@ -344,8 +344,12 @@
    "OMP_NUM_THREADS": "2"
   },
   "gpu_parallel_fits": 3,
+  "guard": "when MemAvailable < floor the MOST RECENTLY started fit is killed (SEG-076 practice) and recorded host_memory_guard",
   "host_memory_floor_mb": 2000,
+  "infra_rerun": "exactly one identical re-run (recorded as attempt 2) after host_memory_guard, a signal kill, or 'interrupted' (a persisted 'started' job found at farm start after a host crash); never after timeout, rss_limit or a model error",
   "min_available_mb_to_start": 4000,
+  "missing_fits": "a configuration with any failed fit is INCOMPLETE: its ensemble and development class are not computed (reported INCOMPLETE); a missing K1 all-fit model is excluded from the blind evaluation; if A_K1 is missing, the final class is decided by precedence steps 1-2 only and otherwise recorded as INCOMPLETE_BASELINE; a failed reuse check means K0 = INCOMPLETE (no silent refit)",
+  "phases": "all CPU (A) jobs first (at most 4 at once), then the GPU (B, C-v2) jobs (at most 3 at once, starts staggered); the two groups never overlap",
   "rss_limit_mb": 4096,
   "start_stagger_seconds": 30,
   "wall_clock_cap_minutes": {
@@ -354,7 +358,7 @@
    "CV2": 150
   }
  },
- "reuse": "K0 SEG-076 arrays are admitted only when `reuse` refits A.K0.D05, B.K0.D05.s1 and CV2.K0.D05.s1 under this plan and all three are bitwise identical to the SEG-076 arrays; otherwise every K0 fit is refitted",
+ "reuse": "K0 SEG-076 arrays and all-fit weights are admitted only when `reuse` refits A.K0.D05, B.K0.D05.s1 and CV2.K0.D05.s1 under this plan and all three are bitwise identical to the SEG-076 arrays (SEG-076 precedent: D05 is the determinism sentinel; C-v2 seeds 2-3 and the all weights are covered by the same environment identity, not by their own refit); otherwise K0 is INCOMPLETE and any K0 refit requires a recorded amendment",
  "schema": "segarecomp.seg077.plan.v1",
  "seeds": [
   1,
