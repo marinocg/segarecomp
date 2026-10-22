@@ -1,0 +1,93 @@
+{
+ "chuck_rock_final_v2": {
+  "code_source": "execution (X) ~ all; static V 2 bytes",
+  "mixed": 29,
+  "negative_cells": 1088,
+  "novel_trigram_cells": "0 among the labelled positive cells (3.6% of cells, execution-derived; coarse vocabulary; one title)",
+  "positive_cells": 298,
+  "positive_fraction": 0.0364
+ },
+ "data_boundary": "aggregates only",
+ "operator_acceptance": "STOP_ACQUISITION accepted 2026-10-22; deterministic TAS / recorded-input movies remain an open avenue for future investigation (sync fidelity, full verified playthrough coverage, diverse engines, novelty check first)",
+ "recommendation": "STOP_ACQUISITION",
+ "review": "independent results review CONCUR_WITH_FINDINGS (F1-F6 applied)",
+ "schema": "segarecomp.seg077.t009.results.v1",
+ "step1_measurement": {
+  "decoder_independence": "v1/v2-pre used Capstone only as fallback and counted its dc.w pseudo-op as a decode; fixed: CPU, m68k-disasm and Capstone on every instruction, >=1 genuine independent decode required",
+  "v1_IP_admission": "IP admitted by v1 on 1,532 exposed bytes; 96% wrong on the development set under corrected measurement (88 wrong roots -> 73K inherited instructions)",
+  "v1_score_bias": "confirmed: predictions over reference-unknown counted in the denominator only (tests/segarecomp_genesis_static_test.py); no effect on the v1 exposed-set decision (complete truth) but development rates were understated"
+ },
+ "step2_diagnosis": {
+  "exposed_errors_v1_set": "3 direct-flow instructions, 4 table-boundary bytes",
+  "ghidra": {
+   "conclusion": "loader/seeding are not the limit; Ghidra's discovery is ~10x above the admission error bar",
+   "recipe_only_exposed": {
+    "false_start_rate_known": 0.01119,
+    "recall_starts": 0.5195
+   },
+   "vector_seeded_exposed": {
+    "false_start_rate_known": 0.01103,
+    "recall_starts": 0.5327
+   }
+  },
+  "negatives": "static negative cells are almost entirely trivial padding (development 2,657 trivial vs 58 hard; exposed 847 vs 24)",
+  "rejected_tiers": {
+   "CD": "4.1% (149 wrong)",
+   "DC": "about 25%",
+   "DREF": "32% exposed / 26% development",
+   "G": "0.35% (1,060 wrong)",
+   "IL": "about 58%",
+   "P": "about 1.9%",
+   "PTD": "about 3.5%",
+   "source": "v2 admission record, exposed set"
+  }
+ },
+ "step3_indirect_dispatch": {
+  "chuck_rock_sites": "2 multi-target register-indirect call sites (3 and 8 observed targets), pointer from RAM objects, targets present in fixed-size ROM records; no bounds check; full set not provable",
+  "cpu_hours": "about 5 (traces), analysis small",
+  "d07_sites": "8 multi-target sites (25 targets), all the bounded switch idiom (bounds check + PC-relative word offset table): full target sets statically provable (125 targets, all true starts) - corrected after the results review",
+  "execution_precision_d07": "10,027 executed PCs: 7,563 on true starts, 2,464 on reference-unknown, 0 on truth c/D",
+  "rt_verifier": "10 candidate roots on Chuck Rock (+152 starts, +4 positive cells); no source-backed precision measurable (0 candidates on d07): not admissible"
+ },
+ "step4_dynamic": {
+  "chuck_rock_cells": {
+   "plus_movie": {
+    "mixed": 29,
+    "nontrivial_negative": 486,
+    "positive": 298
+   },
+   "t001_exec_plus_static": {
+    "mixed": 25,
+    "nontrivial_negative": 278,
+    "positive": 290
+   }
+  },
+  "coverage": {
+   "movie_only": 843,
+   "movie_rom_pcs": 6289,
+   "t001_union_rom_pcs": 5609,
+   "union": 6452
+  },
+  "cpu_hours": 2.4,
+  "input": "public TAS input log (TASVideos 827M, Gens .gmv, 32,476 frames) replayed in MAME; deterministic (replica digests identical)",
+  "plateau": "diminishing returns (5,705 PCs at 120 s, 6,289 at movie end); desync is a hypothesis, not shown"
+ },
+ "step5_usefulness": {
+  "class": "NO_MEASURABLE_EFFECT",
+  "folds": 11,
+  "framing": "inconclusive / underpowered: recoverable signal in 2 of 11 folds (D01 with partial D03: ~70% of the loss recovered; D03 with partial D01: >100%), single fits",
+  "mean_D": -0.017235,
+  "plan": "tools/segarecomp_seg077_partial.plan.json (d24a1a1e...)",
+  "sign_flip_p": 0.222656
+ },
+ "task": "SEG-077-T009 (operator-directed audit and spikes, 2026-10-22)",
+ "v2_admission": {
+  "admitted": [
+   "V",
+   "PT",
+   "FILL"
+  ],
+  "note": "measurement correction on already-seen data, two review rounds",
+  "plan": "tools/segarecomp_genesis_static_v2.t009.plan.json (c51293b6...)"
+ }
+}

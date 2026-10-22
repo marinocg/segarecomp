@@ -141,3 +141,16 @@ set_property(TEST segarecomp_xplat_cv2_test APPEND PROPERTY LABELS full fast)
 add_test(NAME segarecomp_xplat_seg076_final_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_xplat_seg076_final_test.py)
 set_property(TEST segarecomp_xplat_seg076_final_test APPEND PROPERTY LABELS full fast)
 set_property(TEST segarecomp_xplat_seg076_final_test PROPERTY SKIP_RETURN_CODE 77)
+# SEG-077-T001 (research tooling): Genesis evidence-tier labeller pure logic - identity normalization, VDP DMA reconstruction, trace /
+# disassembler parsing, executed + direct-flow acceptance, data admission rules, RAM copy origins (standard library, synthetic data).
+add_test(NAME segarecomp_genesis_evidence_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_genesis_evidence_test.py)
+set_property(TEST segarecomp_genesis_evidence_test APPEND PROPERTY LABELS full fast)
+# SEG-077-T005 (research tooling): frozen SEG-077 decision rules, labelled-cell blind metrics, the job matrix and, in the research
+# environment (numpy, torch), label-free seeds and leakage invariance of A features and C's candidate graph (skipped without numpy).
+add_test(NAME segarecomp_seg077_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg077_test.py)
+set_property(TEST segarecomp_seg077_test APPEND PROPERTY LABELS full fast)
+set_property(TEST segarecomp_seg077_test PROPERTY SKIP_RETURN_CODE 77)
+# SEG-077-T009 (research tooling): corrected static-evidence measurement (v2) - known vs reference-unknown predictions, error kinds,
+# error cells, marginal mixed / hard-negative credit and the root-cause taxonomy, including the v1 denominator bias (synthetic data).
+add_test(NAME segarecomp_genesis_static_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_genesis_static_test.py)
+set_property(TEST segarecomp_genesis_static_test APPEND PROPERTY LABELS full fast)

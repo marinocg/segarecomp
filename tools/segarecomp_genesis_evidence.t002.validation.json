@@ -1,0 +1,109 @@
+{
+ "G1_rerun": {
+  "G1": true,
+  "all_exercised": true
+ },
+ "G5": {
+  "classes_tokens_seeds_spans_relocs_identical": true
+ },
+ "binding_class": "STOP",
+ "consequence": "T003 and T004 are cancelled with this evidence; T005-T008 proceed on the corpus that actually qualified",
+ "criterion_trace": {
+  "C1": true,
+  "G1": true,
+  "G2": true,
+  "G3": true,
+  "G4": true,
+  "G5": true,
+  "U1": false,
+  "U2": true,
+  "U3": false,
+  "positive_fraction": 0.0311,
+  "rule": "STOP if any G fails or positive cells < 5%"
+ },
+ "identity": {
+  "cli_and_images_match_plan": true,
+  "plan_sha256": "03ebc8f8ec40245575614287ca9d1c62d3537ab3d393751b0cbb4597eb2f4056",
+  "raw_sha256_matches_plan": true,
+  "raw_size_matches_plan": true
+ },
+ "metrics": {
+  "D_bytes": {
+   "DMA": 18080,
+   "DR": 31914,
+   "HW": 512,
+   "total": 50506
+  },
+  "E_starts": 4476,
+  "R_starts": 2060,
+  "U_fraction": 0.9261,
+  "c_bytes": 20414,
+  "cells": {
+   "hard_negative": 270,
+   "masked": 7661,
+   "mixed_positive": 24,
+   "negative": 276,
+   "positive": 255,
+   "total": 8192
+  },
+  "cost": {
+   "cpu_hours": 9.06,
+   "per_cpu_hour": {
+    "labelled_bytes": 8549,
+    "negative_cells": 30.5,
+    "positive_cells": 28.1,
+    "qualified_starts": 721
+   }
+  },
+  "explore_seed_sets": {
+   "each": 4345,
+   "intersection": 4316,
+   "union": 4379
+  },
+  "new_structural_patterns": {
+   "negative_cells_with_novel_byte_4gram": "266/276 (96.4%); hold-one-out SEG-072 images 66.7-99.4% (not distinctive)",
+   "positive_cells_with_novel_family_control_trigram": "0/255 (0.0%); hold-one-out SEG-072 images 0.6-4.1%"
+  },
+  "scenario_marginal_rom_pcs": {
+   "attract": 1537,
+   "explore-s1": 2909,
+   "explore-s2": 11,
+   "explore-s3": 23,
+   "union": 4480
+  },
+  "tool_disagreement": {
+   "E_rejection_rate": 0.00089,
+   "dma_vs_read_tap_agreement": 1.0,
+   "ghidra_at_accepted_starts": 664,
+   "ghidra_candidates": 1216,
+   "ghidra_in_labelled_D": 0,
+   "walk_instructions_not_admitted": "1465/8001 (all U)"
+  }
+ },
+ "replays": {
+  "attract": {
+   "dma": true,
+   "pcs": true,
+   "reads": true
+  },
+  "explore-s1": {
+   "dma": true,
+   "pcs": true,
+   "reads": true
+  },
+  "mismatches": 0
+ },
+ "schema": "segarecomp.genesis_evidence.t002.validation.v1",
+ "spot_checks": {
+  "DR_over_executed": 0,
+  "D_bytes_in_prefetch_shadow": 0,
+  "D_bytes_inside_executed_bytes": 0,
+  "I_starts_not_E_or_R": 0,
+  "mame_text_vs_cpu_decoder_sample": "90/90 family, 22/22 control, 58/58 size (every 50th E start)",
+  "ram_executed_pcs": 0,
+  "rejected_spans_labelled": 0,
+  "start_span_vs_decoder_length_mismatch": 0
+ },
+ "task": "SEG-077-T002",
+ "validator": "independent adversarial-validator session (not T001's implementer)"
+}

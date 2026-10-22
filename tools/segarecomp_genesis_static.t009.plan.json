@@ -1,0 +1,67 @@
+{
+ "bound_code": {
+  "tools/ghidra/scripts/ExportCodeEntryCandidates.java": "24972a3af0a5ee68e0f4285d32fde59b3c6c73d7628cda5423ee854925fa8343",
+  "tools/ghidra/scripts/PinAnalysisRecipe.java": "f7435d0c965ec85bad7d2b07000a18eb64bf219a7c4c0d343267367022973c79",
+  "tools/segarecomp_genesis_decomp.Dockerfile": "8b1edf422931ecdbd7caa1750a9ea7862117a809cd9d6ff0df556827bfa9be32",
+  "tools/segarecomp_genesis_decomp/main.go": "6e37257764428a7b0e1e990e9575e743c2f863aed5ff6cf363944e0649da910b",
+  "tools/segarecomp_genesis_evidence.Dockerfile": "ef1c6aeb8958a6066fc550135e51b730b52d0c79d63987141ef1f91ebbb2b661",
+  "tools/segarecomp_genesis_evidence.py": "1582d2ed01db7692c6564750a8a7e6d01b08ee59f421d26776906523bd009885",
+  "tools/segarecomp_genesis_static.py": "23b3593f14f1e4eb5012e6df53e55076d2e3f52405ec9cceb3bc9e9040131c2c"
+ },
+ "capstone_lib_sha256": "fb3e851989440c51fa026fa5be0441a5d5f09d3c4018f6521138762bfbf473b8",
+ "images": {
+  "segarecomp-seg077/decomp:1": "sha256:83e18a43f9df7e10d3f155b12ae4e4a12d8f553b33381d06c90e0ceabdf75250",
+  "segarecomp-seg077/evidence:t009": "sha256:9bff87059ee6d06f3233d4e3feacb7c5500183f7b4abe5df0b9ffe73b8ce26e9",
+  "segarecomp/ghidra-mcp-headless:6.0.0": "sha256:045567d6bd7e1ea718577fd53b81b8e11067d2047416a1b07637a67ac1060266"
+ },
+ "rules": {
+  "admission": "a tier is admitted when, over the held-out images, its wrong bytes / labelled bytes <= 0.001 and no image exceeds 0.005; a tier labelling < 1000 bytes in total is admitted only with 0 wrong bytes. Procedure: measure the base tiers together; while a base tier fails, drop the failing base tier with the highest aggregate rate and re-measure; then measure each optional tier alone on top of the admitted base (marginal bytes) and admit it if it passes",
+  "always": [
+   "HW (vectors + header)",
+   "JT (resolved table bytes)"
+  ],
+  "base_tiers": [
+   "V",
+   "CD",
+   "J",
+   "PT",
+   "FILL",
+   "PTD",
+   "DC"
+  ],
+  "chuck_rock": "admitted static tiers + T001 execution evidence (executed roots through the same two-decoder descent; DMA and admitted data reads from the A1 runs); any static code / execution-data or static data / executed-code overlap masks both",
+  "decoders": "CPU-owned token decoder + m68k-disasm bb6d839 (traced, walk); Capstone 5.0.6 where m68k-disasm abstains",
+  "decompression": "sega2asm 78f37b0 decompressors, only formats whose routine signature is detected in the ROM; candidates = lea / PC-relative read targets and pointer-table entries outside code; consumed >= 256 bytes, output >= input, all decoding formats agree on the extent, no overlap with code or another blob",
+  "development_set": [
+   "d05",
+   "d06",
+   "d07",
+   "d09",
+   "d10",
+   "d11",
+   "d12",
+   "flicky"
+  ],
+  "heldout_set": [
+   "s1",
+   "s2",
+   "sk",
+   "ps2",
+   "sf1",
+   "sf2"
+  ],
+  "optional_tiers": [
+   "P",
+   "G",
+   "IP",
+   "IL",
+   "DREF"
+  ],
+  "soundness": "the labeller with the admitted tiers gives 0 wrong I/c/D (frozen definition; labels over listing-unknown bytes such as .org fill are reported separately) on the committed synthetic fixture, static-only and with each G1 scenario's execution evidence, and the Chuck Rock labels are digest-reproducible",
+  "usefulness_and_classes": "as ADR 0171: PROCEED when positive cells >= 10%, negative cells >= 2% and >= 50 mixed cells; PARTIAL when positive cells >= 5%; STOP otherwise or when a soundness gate fails; the independent validator binds",
+  "wrong_label": "predicted I vs truth c/D, c vs I/D, D vs I/c; truth U never counts"
+ },
+ "schema": "segarecomp.genesis_static.v1.plan",
+ "status": "frozen before the held-out admission set is labelled",
+ "task": "SEG-077-T009"
+}

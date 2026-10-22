@@ -1,0 +1,215 @@
+{
+ "amendment_A1": {
+  "audit": {
+   "length_mismatch": 0,
+   "not_ordinary_decode": 0,
+   "odd_starts": 0,
+   "starts": 6536
+  },
+  "bytes": {
+   "D": 50506,
+   "I": 6536,
+   "U": 971120,
+   "c": 20414
+  },
+  "cells": {
+   "cells": 8192,
+   "hard_negative": 270,
+   "masked": 7661,
+   "mixed_positive": 24,
+   "negative": 276,
+   "positive": 255
+  },
+  "classes_sha256": "5da84ad6d56db1918e671d4ae37565757fd410f9df2fac70bc530f37adc515ae",
+  "cpu_hours": 9.06,
+  "decoders": {
+   "executed_rom_pcs": 4480,
+   "m68k_disasm_traced": 4013,
+   "m68k_disasm_walk": 8001
+  },
+  "determinism": {
+   "attract": true,
+   "explore-s1": true,
+   "explore-s2": true,
+   "explore-s3": true
+  },
+  "dma_rom_bytes": [
+   3072,
+   3072,
+   15008,
+   15008,
+   15776,
+   15776,
+   12704,
+   12704
+  ],
+  "gates": {
+   "G1": true,
+   "G2": true,
+   "G3": true,
+   "G4": true,
+   "G4_rate": 0.00089,
+   "G5": null
+  },
+  "ghidra": {
+   "candidates": 1216,
+   "in_accepted_code_starts": 664
+  },
+  "marginal_coverage": {
+   "attract": {
+    "new_vs_previous": 1537,
+    "rom_pcs": 1537
+   },
+   "explore-s1": {
+    "new_vs_previous": 2909,
+    "rom_pcs": 4345
+   },
+   "explore-s2": {
+    "new_vs_previous": 11,
+    "rom_pcs": 4345
+   },
+   "explore-s3": {
+    "new_vs_previous": 23,
+    "rom_pcs": 4345
+   }
+  },
+  "plan_sha256": "03ebc8f8ec40245575614287ca9d1c62d3537ab3d393751b0cbb4597eb2f4056",
+  "positive_fraction": 0.0311,
+  "provisional_class": "STOP (pending G5 by the independent validator)",
+  "relabel_reproduced": true,
+  "run_title_wall_seconds": 4899.2,
+  "seed_cells": 1,
+  "tiers": {
+   "E": 4476,
+   "R": 2060
+  },
+  "trace_wall_seconds_sum": 32584.7,
+  "typed": {
+   "DR_BYTES_ADDED": 31914,
+   "DR_CODE_READER": 1103,
+   "DR_PREFETCH_SHADOW": 77,
+   "DR_READER_NOT_ACCEPTED": 5,
+   "E_DISASM_NO_DECODE": 4,
+   "R_DISASM_NO_DECODE": 1
+  },
+  "usefulness": {
+   "C1": true,
+   "U1": false,
+   "U2": true,
+   "U3": false
+  }
+ },
+ "basis": "positive cells < 5% of cells under revision 4 (3.25%) and under the single permitted amendment A1 (3.11%); soundness gates G1-G4 held in both; G5 and the binding class belong to SEG-077-T002",
+ "diagnosis": "scenario reach, not label soundness: under A1 the three explore seeds reached equal counts and near-identical ROM PC sets (4,345 each; intersection 4,316 of union 4,379; corrected after T002), and under revision 4 the second and third random seeds added 4 and 220 PCs; the generic input policies do not drive the title beyond its early states",
+ "format": "plain",
+ "g1": {
+  "A1": "G1 true for attract, play and explore; dr, ram-rule and explore exercised",
+  "revision4": "g1-rev4 G1 true (attract, play)"
+ },
+ "lineage": "G077-01",
+ "raw_sha256": "d4cd7003c104f77bf9a9a78f43067f15a63f23925bc77746d0fdde419f594dc4",
+ "revision4": {
+  "audit": {
+   "length_mismatch": 0,
+   "not_ordinary_decode": 0,
+   "odd_starts": 0,
+   "starts": 6990
+  },
+  "bytes": {
+   "D": 60264,
+   "I": 6990,
+   "U": 959428,
+   "c": 21894
+  },
+  "cells": {
+   "cells": 8192,
+   "hard_negative": 334,
+   "masked": 7582,
+   "mixed_positive": 24,
+   "negative": 344,
+   "positive": 266
+  },
+  "classes_sha256": "fc8348a32215848603a2550e2962fb5138d0b4a8273b65cf8d8a035534bf3cdf",
+  "cpu_hours": 8.81,
+  "decoders": {
+   "executed_rom_pcs": 5600,
+   "m68k_disasm_traced": 5025,
+   "m68k_disasm_walk": 8066
+  },
+  "determinism": {
+   "attract": true,
+   "play-s1": true,
+   "play-s2": true,
+   "play-s3": true
+  },
+  "dma_rom_bytes": [
+   3072,
+   3072,
+   19104,
+   19104,
+   16544,
+   16544,
+   16288,
+   16288
+  ],
+  "gates": {
+   "G1": true,
+   "G2": true,
+   "G3": true,
+   "G4": true,
+   "G4_rate": 0.00071,
+   "G5": null
+  },
+  "ghidra": {
+   "candidates": 1216,
+   "in_accepted_code_starts": 669
+  },
+  "marginal_coverage": {
+   "attract": {
+    "new_vs_previous": 1537,
+    "rom_pcs": 1537
+   },
+   "play-s1": {
+    "new_vs_previous": 3839,
+    "rom_pcs": 5278
+   },
+   "play-s2": {
+    "new_vs_previous": 4,
+    "rom_pcs": 4692
+   },
+   "play-s3": {
+    "new_vs_previous": 220,
+    "rom_pcs": 5271
+   }
+  },
+  "plan_sha256": "40f1f153cf39836e563aa794baaea7a65ae4a0685bfec92a25957f76033acc56",
+  "positive_fraction": 0.0325,
+  "provisional_class": "STOP (pending G5 by the independent validator)",
+  "run_title_wall_seconds": 4746.7,
+  "seed_cells": 1,
+  "tiers": {
+   "E": 5596,
+   "R": 1394
+  },
+  "trace_wall_seconds_sum": 31693.7,
+  "typed": {
+   "DR_BYTES_ADDED": 34248,
+   "DR_CODE_READER": 1319,
+   "DR_PREFETCH_SHADOW": 78,
+   "DR_READER_NOT_ACCEPTED": 5,
+   "E_DISASM_NO_DECODE": 4,
+   "R_DISASM_NO_DECODE": 1
+  },
+  "usefulness": {
+   "C1": true,
+   "U1": false,
+   "U2": true,
+   "U3": false
+  }
+ },
+ "schema": "segarecomp.genesis_evidence.t001.results.v1",
+ "self_assessed_class": "STOP",
+ "size": 1048576,
+ "task": "SEG-077-T001",
+ "title": "Chuck Rock (USA)"
+}
