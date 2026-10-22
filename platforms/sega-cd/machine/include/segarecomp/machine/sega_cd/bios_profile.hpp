@@ -96,7 +96,7 @@ struct BiosProfileInputs {
 enum class BiosProfileError : std::uint8_t {
   none,
   copy_invalid,           // descriptor outside the ROM or the processor's RAM, odd, empty, or too many
-  disc_image_invalid,     // SEG-064-T004: extent outside the system area or main work RAM, odd, empty, no system area, or too many
+  disc_image_invalid,     // SEG-064-T004: extent outside the processor's RAM (main: work RAM or, SEG-071-T001, the 2M Word RAM view), odd, empty, no system area, or too many
   provenance_mismatch,    // an admission's pass identity is not the identity of the program before it
   epoch_invalid,          // empty, longer than PRG RAM, not a whole snapshot (granule / trailing zero rule) or too many
   template_invalid,       // not exactly one JMP (xxx).W/.L at an even RAM address of its processor, duplicate, or too many

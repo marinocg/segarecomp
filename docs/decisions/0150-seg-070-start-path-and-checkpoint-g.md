@@ -2,6 +2,9 @@
 
 - Status: Accepted (SEG-070-T003). Judged against the pre-registration of ADR 0148, which it does not change, using the machine input of
   ADR 0149.
+- Later (SEG-071-T001, ADR 0176 decisions 3-4): the reference presses at the onset that opens frame entry + N, one frame before the instant
+  decision 1 converted; with that instant the START polls equal the reference's exactly (480, 482, 483, 485) and the frames at entry + 510 /
+  540 / 600 stay identical. Decision 4's poll-cadence phase was this offset, not a CD-sector phase. The result below is unchanged.
 - Scope: the authentic BIOS and the Sonic CD (USA) application, generated-native, from reset through the Checkpoint F interval plus one
   START press on controller port 1 to entry + 603 frames; the comparison of the pre-registered frames and state with the independent
   reference. It does **not** claim gameplay, audio output, the Z80 sound driver's execution, the intro movie, a second START, or any

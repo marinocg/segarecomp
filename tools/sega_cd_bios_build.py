@@ -377,7 +377,7 @@ def main(argv=None):
     parser.add_argument("--bios", required=True, help="the BIOS image, or - to read it once from standard input (streamed by pipe)")
     parser.add_argument("--work", required=True)
     parser.add_argument("--copy-image", action="append")
-    parser.add_argument("--disc-image", action="append", help="main|sub:<system-area offset>:<base>:<length>: a disc extent the BIOS places in work RAM (SEG-064-T004)")
+    parser.add_argument("--disc-image", action="append", help="main|sub:<track-1 byte offset>:<base>:<length>: a disc extent placed in the processor's RAM (SEG-064-T004; main Word RAM SEG-071-T001)")
     parser.add_argument("--application-entry", help="the main address whose first execution ends the run (typed stop application_handoff)")
     parser.add_argument("--budget", type=int, default=5_000_000)
     parser.add_argument("--pass-set", action="append", help="main|sub:dN|aN=VALUE: a register preset of every build pass (fixture case selection)")

@@ -49,6 +49,16 @@ bool ram_of(Processor p, std::uint32_t address, std::uint32_t length) {
   if (p == Processor::main) return main_ram(address) && end <= 0x01000000U;
   return end <= kPrgRamBytes;
 }
+// SEG-071-T001: a disc extent may also be placed in the main processor's 2M Word RAM view ($200000-$23FFFF, contract section 15): code
+// the sub loads there from the disc and main executes in place. The extent lies wholly inside the view; whether main may fetch it (owner,
+// 1M/2M mode) and whether its bytes are live is decided per instruction at run time (the live view of scd_code_byte), never here.
+bool main_word_ram(std::uint32_t address, std::uint32_t length) {
+  const std::uint64_t end = static_cast<std::uint64_t>(address) + length;
+  return length != 0U && address >= 0x00200000U && end <= 0x00240000U;
+}
+bool disc_extent_ram_of(Processor p, std::uint32_t address, std::uint32_t length) {
+  return ram_of(p, address, length) || (p == Processor::main && main_word_ram(address, length));
+}
 
 // A decoded operand template: one JMP (xxx).W/.L at its address.
 struct Template {
@@ -220,7 +230,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
   if (inputs.disc_images.size() > kMaxDiscImages) return fail(BiosProfileError::disc_image_invalid, kMaxDiscImages);
   for (std::size_t i = 0; i < inputs.disc_images.size(); ++i) {
     const auto &d = inputs.disc_images[i];
-    if (((d.base | d.length) & 1U) != 0U || d.length == 0U || d.bytes.size() != d.length || !ram_of(d.processor, d.base, d.length))
+    if (((d.base | d.length) & 1U) != 0U || d.length == 0U || d.bytes.size() != d.length || !disc_extent_ram_of(d.processor, d.base, d.length))
       return fail(BiosProfileError::disc_image_invalid, i);
     images.push_back(Image{d.processor, "disc" + std::to_string(i), "track:1 byte:" + std::to_string(d.track_offset) + " length:" + std::to_string(d.length),
                            ImageAuthority::immutable_input, true, d.base, d.bytes});
