@@ -3,12 +3,13 @@
   "code_source": "execution (X) ~ all; static V 2 bytes",
   "mixed": 29,
   "negative_cells": 1088,
-  "novel_trigram_cells": 0,
+  "novel_trigram_cells": "0 among the labelled positive cells (3.6% of cells, execution-derived; coarse vocabulary; one title)",
   "positive_cells": 298,
   "positive_fraction": 0.0364
  },
  "data_boundary": "aggregates only",
  "recommendation": "STOP_ACQUISITION",
+ "review": "independent results review CONCUR_WITH_FINDINGS (F1-F6 applied)",
  "schema": "segarecomp.seg077.t009.results.v1",
  "step1_measurement": {
   "decoder_independence": "v1/v2-pre used Capstone only as fallback and counted its dc.w pseudo-op as a decode; fixed: CPU, m68k-disasm and Capstone on every instruction, >=1 genuine independent decode required",
@@ -30,20 +31,21 @@
   },
   "negatives": "static negative cells are almost entirely trivial padding (development 2,657 trivial vs 58 hard; exposed 847 vs 24)",
   "rejected_tiers": {
-   "CD": "97 wrong dynamic-call fall-throughs (3.8%)",
-   "DC": "blob provenance, 25% of 1.5 MB",
-   "DREF": "28%",
-   "G": "207 wrong roots + 280 inherited + 21 table (0.28%)",
-   "IL": "58%",
-   "P": "1.9%",
-   "PTD": "3.5%"
+   "CD": "4.1% (149 wrong)",
+   "DC": "about 25%",
+   "DREF": "32% exposed / 26% development",
+   "G": "0.35% (1,060 wrong)",
+   "IL": "about 58%",
+   "P": "about 1.9%",
+   "PTD": "about 3.5%",
+   "source": "v2 admission record, exposed set"
   }
  },
  "step3_indirect_dispatch": {
-  "chuck_rock_sites": "2 multi-target JSR (A1) sites (3 and 8 observed targets); pointer from RAM objects; all targets present in 24-byte ROM records; no bounds check; full set not provable",
+  "chuck_rock_sites": "2 multi-target register-indirect call sites (3 and 8 observed targets), pointer from RAM objects, targets present in fixed-size ROM records; no bounds check; full set not provable",
   "cpu_hours": "about 5 (traces), analysis small",
-  "d07_sites": "5 multi-target PC-indexed JMP sites (19 targets, all true code); targets not stored as pointers; no record table",
-  "execution_precision_d07": "executed code 27,428 known bytes, 0 wrong, 8,173 true starts recalled",
+  "d07_sites": "8 multi-target sites (25 targets), all the bounded switch idiom (bounds check + PC-relative word offset table): full target sets statically provable (125 targets, all true starts) - corrected after the results review",
+  "execution_precision_d07": "10,027 executed PCs: 7,563 on true starts, 2,464 on reference-unknown, 0 on truth c/D",
   "rt_verifier": "10 candidate roots on Chuck Rock (+152 starts, +4 positive cells); no source-backed precision measurable (0 candidates on d07): not admissible"
  },
  "step4_dynamic": {
@@ -67,11 +69,12 @@
   },
   "cpu_hours": 2.4,
   "input": "public TAS input log (TASVideos 827M, Gens .gmv, 32,476 frames) replayed in MAME; deterministic (replica digests identical)",
-  "plateau": "5,705 PCs at 120 s vs 6,289 at 560 s (likely desync: TAS made in Gens)"
+  "plateau": "diminishing returns (5,705 PCs at 120 s, 6,289 at movie end); desync is a hypothesis, not shown"
  },
  "step5_usefulness": {
   "class": "NO_MEASURABLE_EFFECT",
   "folds": 11,
+  "framing": "inconclusive / underpowered: recoverable signal in 2 of 11 folds (D01 with partial D03: ~70% of the loss recovered; D03 with partial D01: >100%), single fits",
   "mean_D": -0.017235,
   "plan": "tools/segarecomp_seg077_partial.plan.json (d24a1a1e...)",
   "sign_flip_p": 0.222656

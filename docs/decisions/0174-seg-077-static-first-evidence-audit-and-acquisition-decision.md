@@ -1,6 +1,6 @@
 # ADR 0174: SEG-077 static-first evidence audit, dispatch and dynamic-evidence spikes, and the acquisition decision
 
-- Status: proposed (pending independent review of the results; SEG-077-T009 is not complete until then)
+- Status: accepted (independent results review CONCUR_WITH_FINDINGS; findings F1-F6 applied)
 - Task: SEG-077-T009, combined SEG-077 PR #135
 - Records (aggregate-only):
   - `tools/segarecomp_seg077_t009.results.json`
@@ -36,45 +36,66 @@ and admitted tiers on six held-out commercial images. The operator then required
    - The IP-containing Chuck Rock sample is superseded.
 2. **Corrected admission (v2, versioned, two review rounds).** Only V (vector-root descent), PT (code-pointer tables) and FILL (padding)
    are admitted.
-   - J fails, through its table-data boundary and a development per-image rate.
+   - J fails through its table-data boundary (JT: 4 wrong of 670 exposed bytes) and through one development image (d11: 8 of 8 known
+     bytes wrong). J's code side is clean: 0 wrong of 29,288 known exposed predictions.
    - Every other tier fails:
 
-     | Tier | Wrong rate |
+     | Tier | Wrong rate (exposed set, v2 admission record) |
      |---|---|
-     | CD (dynamic-call fall-through) | 3.8% |
-     | G (Ghidra-corroborated roots) | 0.28% |
-     | DC (sega2asm decompression) | 25% |
-     | PTD | 3.5% |
-     | P | 1.9% |
-     | IL | 58% |
-     | DREF | 28% |
+     | CD (dynamic-call fall-through) | 4.1% |
+     | G (Ghidra-corroborated roots) | 0.35% |
+     | DC (sega2asm decompression) | about 25% |
+     | PTD | about 3.5% |
+     | P | about 1.9% |
+     | IL | about 58% |
+     | DREF | 32% (development: 26%) |
 
    - The six images that influenced v1 are now exposed validation, and v2 is a disclosed measurement correction on already-seen data.
 3. **Ghidra is not limited by loading or seeding.** The existing recipe recovers 52% of true starts on the exposed images at a 1.1%
    false-start rate. Vector seeding gives 53% and 1.1%.
 4. **Static negatives are trivial.** Static negative cells are almost all padding: 2,657 trivial versus 58 hard on the development set.
-5. **Indirect dispatch (bounded spike, about 5 CPU-hours).**
-   - The observed multi-target sites are 2 on Chuck Rock (`JSR (A1)` from RAM objects) and 5 on d07 (PC-indexed `JMP` without stored
-     pointers).
-   - None has a ROM-loaded table at the site, a bounds check, or a provable full target set.
-   - Runtime targets are observable but cover only the executed ones, which execution evidence already labels (d07: 27,428 known bytes,
-     0 wrong).
-   - A generic record-table verifier (RT) found Chuck Rock's 24-byte object records (10 roots, +4 positive cells). Nothing on d07 lets its
-     precision be measured, so it is not admissible.
+5. **Indirect dispatch (bounded spike, about 5 CPU-hours; corrected after the independent results review).**
+   - **d07 (source-backed).** All 8 observed multi-target sites (25 targets) use the standard bounded switch idiom: load an immediate,
+     compare, unsigned branch as the bounds check, scale, a PC-relative word load from a ROM offset table, then a PC-indexed jump.
+     - Decoding each table over its bound plus one entry gives 125 targets. All are true instruction starts, and the decoded set covers
+       every observed target.
+     - The full target sets are therefore provable statically. The original analysis looked for 32-bit pointers and missed 16-bit offset
+       tables; that error is corrected here.
+     - This is a credible, generic static rule. The current J tier misses the variant with intervening scaling instructions.
+   - **Chuck Rock.** Its 2 observed multi-target sites are register-indirect calls whose pointer comes from RAM objects.
+     - No ROM table is loaded at the site, there is no bounds check, and the full target set is not provable.
+     - All observed targets also occur in fixed-size ROM records. A generic record-table verifier (RT) recovers 10 roots (+4 positive
+       cells). Its precision cannot be measured, because d07 has no such tables, so RT is not admissible.
+   - **Execution precision (d07).** 10,027 executed PCs: 7,563 on true starts, 2,464 on reference-unknown, 0 on truth c or D.
+   - **Chuck Rock's labelled code** contains no bounded-switch idiom, so a switch rule would not change its evidence.
 6. **Better dynamic evidence.**
    - A public TAS input log (TASVideos 827M, Gens) replays deterministically in MAME.
-   - It adds 843 ROM PCs to T001's 5,609 (+15%) for 2.4 CPU-hours, then plateaus, most likely through desync.
+   - It adds 843 ROM PCs to T001's 5,609 (+15%) for 2.4 CPU-hours (two replicas of about 1.2 h).
+   - Growth shows diminishing returns: 5,705 PCs at 120 s and 6,289 at the movie's end. Desync (the TAS was made in Gens) is a hypothesis,
+     not shown.
    - On Chuck Rock it adds mostly observed data: non-trivial negatives rise from 278 to 486, positive cells only from 290 to 298, and mixed
      cells from 25 to 29.
    - A random-seed diagnostic had already shown seeds reaching near-identical states, so more seeds were not run.
 7. **Final Chuck Rock evidence (v2 tiers plus all execution).**
    - 298 positive cells (3.6%), 1,088 negative cells (about 486 non-trivial) and 29 mixed.
    - The code comes almost entirely from execution.
-   - **0 positive cells carry an instruction trigram absent from SEG-072/075.** Held-out SEG-072 images show 0.6-4.1%.
+   - **None of the labelled positive cells contains an instruction trigram absent from SEG-072/075.** Held-out SEG-072 images show
+     0.6-4.1%.
+   - This covers only the 3.6% of cells that are labelled, which are execution-derived and biased toward common routines. It uses a
+     coarse vocabulary (989 reference trigrams) and a single title.
 8. **Usefulness simulation (frozen and reviewed; model A; 102 fits; source-backed images; partial labels generated without truth).**
    - Adding a partially labelled lineage changes held-out ER by D = -0.017 on average over 11 folds, with sign-flip p = 0.22:
-     `NO_MEASURABLE_EFFECT`.
-   - The effect is concentrated in two folds and two added lineages (Sonic, Shining Force).
+     `NO_MEASURABLE_EFFECT` under the frozen rule.
+   - **The study is underpowered, not evidence of no effect.** In 9 of 11 folds, dropping a lineage barely changes held-out ER compared with
+     keeping all truth, so there is almost nothing to recover.
+   - Where there is something to recover, partial labels recover most of it:
+
+     | Held-out fold | Dropped lineage | ER: all truth / dropped / partial labels | Loss recovered |
+     |---|---|---|---|
+     | D01 | D03 | 0.153 / 0.743 / 0.328 | about 70% |
+     | D03 | D01 | 0.054 / 0.197 / 0.039 | more than 100% |
+
+     These are single fits per condition, so fit instability is possible.
    - Partial labels alone are a poor substitute for truth (for example, ER 0.89 against 0.15).
    - Static partial labels on commercial images are nearly error-free but cover only 1-8% of the bytes.
 
@@ -82,11 +103,13 @@ and admitted tiers on six held-out commercial images. The operator then required
 
 **`STOP_ACQUISITION`.** Under every tested approach, new commercial titles would yield:
 
-- **little code.** Static recovery of commercial dispatch is not credible at the admission error bar, so code comes from execution, which
-  is bounded by input reach;
-- **no new structure.** Chuck Rock adds no structure relative to SEG-072/075;
+- **little code.** On Chuck Rock, static rules add essentially no code (V adds 2 bytes). Its dispatch is register-indirect through RAM
+  objects, outside what any admissible static rule can prove, so code comes from execution, which is bounded by input reach. (Bounded
+  switch tables, as on d07, are statically provable, but Chuck Rock's labelled code contains none.)
+- **no new structure in the labelled cells.** Chuck Rock's labelled positive cells contain no new structure relative to SEG-072/075;
 - **mostly trivial static negatives.** The useful data evidence (DMA and reads) is execution-bound;
-- **no measurable training effect.** The frozen simulation finds no measurable effect from adding partially labelled lineages;
+- **an inconclusive training value.** The frozen simulation is inconclusive: recoverable signal appears in only 2 of 11 folds, and those are
+  unreplicated single fits;
 - **a cost that does not scale.** About 7-12 CPU-hours per title, plus a per-title deterministic input recording, which does not scale to
   diverse engines.
 
@@ -103,7 +126,10 @@ input is touched.
   structurally different engines.
 - **Cheap novelty check first.** A cheap novelty check is run on each before acquisition: novel-trigram positive cells must be at least
   the SEG-072 hold-one-out floor (0.6%).
-- **Adequately powered study.** The usefulness study is re-run with enough lineages to be powered.
+- **Adequately powered study.** The usefulness study is re-run with enough lineages to be powered, including seed-replicated fits for the
+  D01/D03 folds where partial labels recovered most of the loss.
+- **Bounded-switch rule.** A separately admitted bounded-switch tier (the d07 idiom) is a credible generic static improvement for titles
+  that use it.
 
 ## Consequences
 
@@ -113,4 +139,5 @@ input is touched.
   - the corrected measurement and three-decoder tooling;
   - the deterministic movie/edge tracer;
   - the decompression helper (sega2asm decompressors, measured unreliable for labels);
-  - the record-table verifier (unadmitted).
+  - the record-table verifier (unadmitted);
+  - the bounded-switch observation for a future static tier.

@@ -133,6 +133,7 @@
   }
  },
  "jt_data_admitted": true,
+ "jt_data_note": "jt_data_admitted is vacuous in the final set (no J tier, no D_JT measurement): JT data is not applicable; per-image measurements are not stored in this record (J's d11 failure is visible in the superseded audit)",
  "optional": {
   "CD": {
    "admitted": false,
