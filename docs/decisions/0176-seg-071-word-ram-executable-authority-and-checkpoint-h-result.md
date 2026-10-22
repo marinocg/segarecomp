@@ -3,6 +3,9 @@
 - Status: Accepted (SEG-071-T001). Judged against the pre-registration of ADR 0175 (frames, schedule frame numbers and pass rule
   unchanged); corrects how the schedule's frame numbers are converted to machine ticks (decision 3), a convention inherited from ADR 0150. Decision 3 was found after generated runs; it is a fact of the reference
   implementation (its own code and pad log), and Checkpoint H is not claimed, so nothing rests on the change.
+- Later (ADR 0177): the remaining difference was resolved - the sub/CD clock convention was necessary but not sufficient (the main
+  processor's bus timing and the video phase were also missing) and Checkpoint H is achieved; the onset base `1197` of decision 3 became
+  `1202` with the corrected video phase. The measurements below stand as recorded.
 - Scope: the authentic BIOS and the Sonic CD (USA) application, generated-native, from reset through the second START, the level load,
   the first level and a 240-frame RIGHT hold, to entry + 1,600 frames; the comparison with the independent reference.
 - Privacy: no BIOS or disc byte, hash, address, extent coordinate, file name, level name, frame image or digest appears here or in any

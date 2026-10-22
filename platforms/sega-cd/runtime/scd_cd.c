@@ -31,7 +31,7 @@
 /* GPGX: CD access latency (default on) - 2 + 10 ticks, plus a seek of 120 ticks per 270000 sectors of distance. */
 #define SCD_CDD_BASE_LATENCY 12U
 
-static uint64_t scd_dma_byte_ticks(void) { return SCD_DMA_SUB_CYCLES_PER_BYTE * SCD_SUB_CYCLE_TICKS; }
+static uint64_t scd_dma_byte_ticks(const ScdMachine *m) { return SCD_DMA_SUB_CYCLES_PER_BYTE * scd_sub_cycle_ticks(m); }
 
 static void scd_cdc_level5(ScdMachine *m) {
   if (m->ga.interrupt_enable & 0x20U) scd_raise_sub_level(m, 5U); /* only with IEN5 (GPGX) */
@@ -92,7 +92,7 @@ static void scd_cdc_dma_finish(ScdMachine *m) {
 /* Bring a running DMA up to tick `now` (GPGX cdc_dma_update). */
 static void scd_cdc_dma_sync(ScdMachine *m, uint64_t now) {
   uint64_t elapsed, groups;
-  const uint64_t bt = scd_dma_byte_ticks();
+  const uint64_t bt = scd_dma_byte_ticks(m);
   if (m->cdc.dma_state != SCD_DMA_RUNNING || now <= m->cdc.dma_base) return;
   elapsed = (now - m->cdc.dma_base + bt - 1U) / bt;
   groups = elapsed & ~(uint64_t)7U;
@@ -130,7 +130,7 @@ void scd_cdc_host_read(ScdMachine *m, uint32_t cpu_access, uint32_t *word) {
 
 static uint64_t scd_cdc_dma_completion(const ScdMachine *m) {
   const uint64_t rounded = ((uint64_t)m->cdc.dbc + 1U + 7U) & ~(uint64_t)7U;
-  return m->cdc.dma_base + (rounded - 1U) * scd_dma_byte_ticks() + 1U;
+  return m->cdc.dma_base + (rounded - 1U) * scd_dma_byte_ticks(m) + 1U;
 }
 
 int scd_cd_observe(ScdMachine *m) {
@@ -414,7 +414,7 @@ static int scd_cdc_decode(ScdMachine *m, const uint8_t header[4]) {
   memcpy(m->cdc.head[0], header, 4U);
   m->cdc.stat3 = 0x00U;
   m->cdc.ifstat = (uint8_t)(m->cdc.ifstat & ~SCD_IFSTAT_DECI);
-  m->cdc.decoder_end = m->now + SCD_DECODER_ACTIVE_SUB_CYCLES * SCD_SUB_CYCLE_TICKS;
+  m->cdc.decoder_end = m->now + SCD_DECODER_ACTIVE_SUB_CYCLES * scd_sub_cycle_ticks(m);
   if (m->cdc.ifctrl & SCD_IFCTRL_DECIEN) {
     if (!(m->cdc.irq & SCD_IFSTAT_DTEI)) scd_cdc_level5(m);
     m->cdc.irq = (uint8_t)(m->cdc.irq | SCD_IFSTAT_DECI);
@@ -460,9 +460,29 @@ int scd_cdd_active(const ScdMachine *m) {
 
 /* While the drive has nothing to do its 75 Hz ticks are no-ops and are not scheduled; when it becomes active again the next tick is
  * the first grid point after the current instruction. */
+/* The first drive-tick instant strictly after `t` (t >= the anchor). Synthetic profile: the exact 75 Hz grid. BIOS-image profile (ADR
+ * 0177 decision 3): tick k (k >= 1) falls at the end of the first video line n after the anchor's own with acc0 + 9,552 n >= 2,000,000 k,
+ * where acc0 = -12 x (sub cycles already run in the anchor's line). */
+uint64_t scd_cdd_grid_after(const ScdMachine *m, uint64_t t) {
+  int64_t k, n;
+  if (m->bios == NULL) return m->cdd.anchor + ((t - m->cdd.anchor) / SCD_CDD_TICK_TICKS + 1U) * SCD_CDD_TICK_TICKS;
+  n = (int64_t)(t / SCD_LINE_TICKS_MACHINE) - (int64_t)m->cdd.grid_line0 + 1; /* the first line end strictly after t, counted from the anchor line */
+  k = m->cdd.grid_acc0 + SCD_CDD_ACC_PER_LINE * (n - 1);                       /* smallest k >= 1 with 2,000,000 k > acc0 + 9,552 (n - 1) */
+  k = (k >= 0 ? k / SCD_CDD_ACC_PER_TICK : -((-k + SCD_CDD_ACC_PER_TICK - 1) / SCD_CDD_ACC_PER_TICK)) + 1;
+  if (k < 1) k = 1;
+  n = (SCD_CDD_ACC_PER_TICK * k - m->cdd.grid_acc0 + SCD_CDD_ACC_PER_LINE - 1) / SCD_CDD_ACC_PER_LINE;
+  return (m->cdd.grid_line0 + (uint64_t)n) * SCD_LINE_TICKS_MACHINE;
+}
+
+void scd_cdd_anchor(ScdMachine *m, uint64_t at) {
+  m->cdd.anchor = at;
+  m->cdd.grid_line0 = at / SCD_LINE_TICKS_MACHINE;
+  m->cdd.grid_acc0 = -SCD_CDD_ACC_PER_SUB_CYCLE * (int64_t)((at - m->cdd.grid_line0 * SCD_LINE_TICKS_MACHINE) / SCD_SUB_CYCLE_TICKS_LINE_LOCKED);
+  m->cdd.next_tick = scd_cdd_grid_after(m, at);
+}
+
 void scd_cdd_refresh(ScdMachine *m, int was_active) {
-  if (!was_active && scd_cdd_active(m))
-    m->cdd.next_tick = m->cdd.anchor + ((m->now - m->cdd.anchor) / SCD_CDD_TICK_TICKS + 1U) * SCD_CDD_TICK_TICKS;
+  if (!was_active && scd_cdd_active(m)) m->cdd.next_tick = scd_cdd_grid_after(m, m->now);
 }
 
 static void scd_cdd_reset(ScdMachine *m) {
@@ -487,8 +507,7 @@ void scd_devices_power_on(ScdMachine *m) {
   scd_cdd_register_defaults(m);
   scd_cdd_reset(m);
   scd_cdc_reset(m);
-  m->cdd.anchor = 0U;
-  m->cdd.next_tick = SCD_CDD_TICK_TICKS;
+  scd_cdd_anchor(m, 0U);
   m->ga.stopwatch_origin = 0U;
   m->ga.stopwatch_base = 0U;
   scd_pcm_reset(m);
@@ -508,8 +527,7 @@ void scd_peripheral_reset(ScdMachine *m) {
   memset(m->ga.scratch, 0, sizeof m->ga.scratch);
   scd_cdd_register_defaults(m);
   m->ga.pending = 0U;
-  m->cdd.anchor = m->now;
-  m->cdd.next_tick = m->now + SCD_CDD_TICK_TICKS;
+  scd_cdd_anchor(m, m->now);
   m->ga.stopwatch_origin = m->now; /* GPGX scd_reset: the stopwatch counter clears and its grid restarts */
   m->ga.stopwatch_base = 0U;
   scd_cdd_reset(m);
@@ -786,6 +804,7 @@ void scd_devices_advance(ScdMachine *m, uint64_t until) {
      * date (the graphics ASIC and CDC transfers are synced lazily; an extra sync point would make the run depend on the capture set) */
     uint64_t other = scd_timer_next_event(m);
     if (m->bios != NULL && m->vdp_onset < other) other = m->vdp_onset;
+    if (m->bios != NULL && m->vint_at != 0U && m->vint_at < other) other = m->vint_at; /* SEG-071-T002 (ADR 0177) */
     if (scd_input_next_event(m) < other) other = scd_input_next_event(m);
     if (scd_gfx_next_event(m) < other) other = scd_gfx_next_event(m);
     if (scd_cdd_active(m) && m->cdd.next_tick < other) other = m->cdd.next_tick;
@@ -797,7 +816,7 @@ void scd_devices_advance(ScdMachine *m, uint64_t until) {
   }
   scd_input_advance(m, until);
   if (scd_cdd_active(m) && m->cdd.next_tick <= until) {
-    m->cdd.next_tick += SCD_CDD_TICK_TICKS;
+    m->cdd.next_tick = scd_cdd_grid_after(m, m->cdd.next_tick);
     if (scd_cdd_tick(m) != 0) return;
   }
   if (scd_timer_next_event(m) <= until) scd_timer_event(m);

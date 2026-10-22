@@ -259,7 +259,7 @@ static int scd_ga_sub_unmodelled(uint32_t offset) { return (offset >= 0x4CU && o
  * byte access is not modelled and stops typed). 12 bits, one count per 384 sub cycles (TIMERS_SCYCLES_RATIO) on a free-running grid;
  * a write of any value clears the count and keeps the grid phase; the peripheral reset re-anchors the grid. */
 static uint32_t scd_stopwatch_count(const ScdMachine *m) {
-  return (uint32_t)((m->now - m->ga.stopwatch_origin) / SCD_STOPWATCH_UNIT_TICKS);
+  return (uint32_t)((m->now - m->ga.stopwatch_origin) / (SCD_TIMER_UNIT_SUB_CYCLES * scd_sub_cycle_ticks(m)));
 }
 
 static int scd_stopwatch_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {

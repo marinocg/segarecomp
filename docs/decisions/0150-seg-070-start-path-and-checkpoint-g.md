@@ -5,6 +5,8 @@
 - Later (SEG-071-T001, ADR 0176 decisions 3-4): the reference presses at the onset that opens frame entry + N, one frame before the instant
   decision 1 converted; with that instant the START polls equal the reference's exactly (480, 482, 483, 485) and the frames at entry + 510 /
   540 / 600 stay identical. Decision 4's poll-cadence phase was this offset, not a CD-sector phase. The result below is unchanged.
+- Later (SEG-071-T002, ADR 0177 decision 4): the profile's onset numbering now equals the reference's frame numbering, so the entry-relative
+  schedules use `--base-onsets 1202` where decision 1 uses 1197; Checkpoint G's frames are identical under it.
 - Scope: the authentic BIOS and the Sonic CD (USA) application, generated-native, from reset through the Checkpoint F interval plus one
   START press on controller port 1 to entry + 603 frames; the comparison of the pre-registered frames and state with the independent
   reference. It does **not** claim gameplay, audio output, the Z80 sound driver's execution, the intro movie, a second START, or any

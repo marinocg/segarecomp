@@ -6,6 +6,8 @@
 - Later (ADR 0176 decision 3): the reference applies each press from the onset that *opens* reference frame entry + N (closes entry +
   N - 1), not the onset closing it as decision 2 states; the generated schedule uses that instant. Frame numbers, compared frames and
   the pass rule are unchanged.
+- Later (ADR 0177): Checkpoint H was achieved (`TIME_ALIGNED`) under this pre-registration; the profile's onset numbering now equals the
+  reference's frame numbering, so the entry-relative schedules use `--base-onsets 1202` (the entry frame) where they used 1197.
 - Scope: what Checkpoint H injects, when, what the independent reference shows, what the generated program must reproduce and what
   counts as a pass. It claims nothing about the generated program.
 - Privacy: no BIOS or disc byte, hash, address, file name, level name, frame image, frame digest, controller trace or disassembly

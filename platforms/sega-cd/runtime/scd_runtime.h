@@ -39,6 +39,29 @@ extern "C" {
 #define SCD_MAIN_CYCLE_TICKS UINT64_C(3500000)
 #define SCD_SUB_CYCLE_TICKS UINT64_C(2147727)
 #define SCD_CDD_TICK_TICKS UINT64_C(357954500000)
+/* SEG-071-T002 (ADR 0177): the BIOS-image profile locks the sub clock to the video line as the independent reference does: 796 sub
+ * cycles per 1,710,000,000-tick line (3,420 master clocks), and the 75 Hz drive tick examined only at line ends (an accumulator that
+ * gains 9,552 per line and fires at 2,000,000). The synthetic profile keeps the exact 12.5 MHz clock and the exact 75 Hz grid. */
+#define SCD_SUB_CYCLE_TICKS_LINE_LOCKED UINT64_C(2148241)
+/* SEG-071-T002 (ADR 0177): the main bus's DRAM refresh delay (BIOS-image profile): when an instruction is about to execute at or after
+ * the refresh deadline the main processor loses 2 cycles (14 master clocks) and the next deadline is 128 cycles (896 master clocks)
+ * after that instant (the independent reference's "68K bus access refresh delay (Mega Drive / Genesis specific)"). */
+#define SCD_MAIN_REFRESH_PERIOD_TICKS (UINT64_C(896) * UINT64_C(500000))
+#define SCD_MAIN_REFRESH_DELAY_TICKS (UINT64_C(14) * UINT64_C(500000))
+/* The Z80 bus access latency (the reference's z80_read_byte/z80_write_byte): each main access to the Z80 window $A00000-$A0FFFF takes
+ * one more cycle (7 master clocks); a long access reaches the bus as two. */
+#define SCD_MAIN_Z80_ACCESS_TICKS (UINT64_C(7) * UINT64_C(500000))
+/* The BIOS-image profile's video phase (ADR 0177 decision 4): the main processor leaves reset 229 lines + 1,004 master clocks (784,184)
+ * into the 262-line frame whose origin is the vertical-blank onset (the reference's measured-on-hardware hard-reset point, GPGX
+ * core/genesis.c gen_reset), so (the reset point rounded down to a multiple of 7, 784,182) the first onset is 896,040 - 784,182 = 111,858 master clocks after power-on,
+ * and the vertical interrupt is requested 788 (H40) / 770 (H32) master clocks after each onset (core/vdp_ctrl.c VINT_Hxx_MCYCLE). */
+#define SCD_BIOS_FIRST_ONSET_MCLK UINT64_C(111858)
+#define SCD_VINT_H40_MCLK UINT64_C(788)
+#define SCD_VINT_H32_MCLK UINT64_C(770)
+#define SCD_LINE_TICKS_MACHINE UINT64_C(1710000000)
+#define SCD_CDD_ACC_PER_LINE INT64_C(9552)
+#define SCD_CDD_ACC_PER_TICK INT64_C(2000000)
+#define SCD_CDD_ACC_PER_SUB_CYCLE INT64_C(12)
 #define SCD_TIMER_UNIT_SUB_CYCLES UINT64_C(384)
 #define SCD_DMA_SUB_CYCLES_PER_BYTE UINT64_C(4)
 #define SCD_STOPWATCH_UNIT_TICKS (SCD_TIMER_UNIT_SUB_CYCLES * SCD_SUB_CYCLE_TICKS) /* 384 sub cycles = 30.72 us per count */
@@ -348,6 +371,8 @@ typedef struct ScdCdd {
   int32_t lba;              /* current position (may be negative inside the lead-in) */
   uint32_t index;           /* current track index (== track count: past the last track) */
   uint64_t anchor;          /* origin of the 75 Hz grid (power-on, or the last peripheral reset) */
+  uint64_t grid_line0;      /* BIOS-image profile (ADR 0177): the video line containing the anchor */
+  int64_t grid_acc0;        /* BIOS-image profile: the drive accumulator at the anchor (-12 x the sub cycles already run in that line) */
   uint64_t next_tick;       /* next grid point to process while the drive is active */
   uint64_t delivered;       /* data blocks read while playing */
 } ScdCdd;
@@ -414,6 +439,10 @@ typedef struct ScdMachine {
   uint32_t capture_length;                /* epoch snapshot length */
   uint8_t capture_bytes[8];               /* frontier live bytes */
   /* SEG-064-T003: main-side devices of the BIOS-image profile (scd_vdp.c). */
+  uint32_t main_irq_delay;                /* BIOS-image profile: instructions to execute before a main interrupt is recognised (VDP register #1 IE0 set while a vertical interrupt is pending) */
+  uint64_t main_extra_ticks;              /* BIOS-image profile: bus wait added to the executing main instruction (Z80-window accesses), charged at its retire */
+  uint64_t main_refresh_due;              /* BIOS-image profile: the instant from which the next main instruction loses the bus-refresh cycles */
+  uint64_t vint_at;                       /* BIOS-image profile: tick at which the vertical interrupt of the last onset is requested (0: none due) */
   uint64_t vdp_onset;                     /* tick of the next VDP vertical-blank onset */
   uint8_t vint_pending;                   /* the VDP vertical interrupt is pending (requests level 6 while register #1 IE0 is set) */
   uint8_t z80_ran;                        /* the Z80 has been runnable (reset released, bus not requested): its RAM is not modelled */
@@ -442,6 +471,11 @@ typedef struct ScdMachine {
   struct ScdInput *input;
 } ScdMachine;
 
+/* The duration of one sub cycle in ticks for this machine's profile (ADR 0177). */
+static inline uint64_t scd_sub_cycle_ticks(const ScdMachine *m) {
+  return m->bios != NULL ? SCD_SUB_CYCLE_TICKS_LINE_LOCKED : SCD_SUB_CYCLE_TICKS;
+}
+
 /* Physical memories whose bytes may hold executable images (for write invalidation). */
 #define SCD_MEMORY_PRG 0U
 #define SCD_MEMORY_WORD 1U  /* offset in the 2M layout */
@@ -467,6 +501,8 @@ int scd_compiled(const ScdMachine *m, uint32_t cpu, uint32_t address);
 int scd_code_matches(ScdMachine *m, uint32_t cpu, uint32_t address, const uint8_t *expected, uint32_t length);
 /* Side-effect-free view of executable RAM (work RAM, the PRG-RAM window, PRG RAM, owned Word RAM) for byte comparison, or NULL. */
 const uint8_t *scd_code_byte(const ScdMachine *m, uint32_t cpu, uint32_t address);
+/* The byte the main processor's instruction stream holds at `address` (BIOS image or RAM), or NULL where it is neither. */
+const uint8_t *scd_main_stream_byte(const ScdMachine *m, uint32_t address);
 /* Overlay selection for an address the per-PC dispatch does not own (scd_overlay.c). */
 int scd_overlay_dispatch(ScdMachine *m, uint32_t cpu);
 /* Write invalidation: `length` bytes at `offset` of `memory` changed; and: which memory a processor sees at an address changed. */
@@ -492,6 +528,13 @@ int scd_sub_runnable_epoch(ScdMachine *m, uint32_t pc);
 /* Length of the materialization snapshot of PRG RAM (end of the last non-zero byte, rounded up to 256). */
 uint32_t scd_prg_snapshot_length(const ScdMachine *m);
 ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline);
+/* ADR 0177 (BIOS-image profile main-processor bus timing; exposed for the synthetic fixtures): the refresh gate and the long-instruction
+ * rule, the dynamic cycles of the instruction at the main pc that follow their own refresh bookkeeping, and the cycles of an autovector
+ * interrupt exception of `cpu`. */
+int scd_main_refresh_gate(ScdMachine *m, uint64_t ready);
+void scd_main_refresh_note_instruction(ScdMachine *m, uint64_t ready);
+uint32_t scd_main_refresh_skip_cycles(const ScdMachine *m);
+uint32_t scd_interrupt_entry_cycles(const ScdMachine *m, uint32_t cpu, uint32_t level);
 uint64_t scd_machine_time(const ScdMachine *m);
 void scd_machine_release(ScdMachine *m);
 
@@ -556,6 +599,8 @@ int scd_vdp_init(ScdMachine *m);
 int scd_main_device_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 /* SEG-065-T003 (ADR 0147): capture the frame whose active display ends at vertical-blank onset number `onset` (>= 2, BIOS-image
  * profile, at most 8) into `dir`: the per-line VDP state is sampled at each active line's start and rendered by the existing renderer. */
+/* ADR 0177: master clocks (7 per main cycle) and ticks since the origin of the frame containing tick `t` (the last onset). */
+uint64_t scd_frame_ticks_since_origin(const ScdMachine *m, uint64_t t);
 int scd_vdp_capture_request(ScdMachine *m, uint64_t onset, const char *dir);
 void scd_vdp_capture_report(const ScdMachine *m, FILE *out);
 int scd_vdp_capture_line_due(const ScdMachine *m, uint64_t until);
@@ -602,6 +647,9 @@ void scd_cdc_dma_resume_2m(ScdMachine *m);
 void scd_peripheral_reset(ScdMachine *m);
 int scd_cdd_active(const ScdMachine *m);
 void scd_cdd_refresh(ScdMachine *m, int was_active);
+/* ADR 0177: (re)anchor the 75 Hz drive grid at tick `at` and the first drive-tick instant strictly after `t` (t >= the anchor). */
+void scd_cdd_anchor(ScdMachine *m, uint64_t at);
+uint64_t scd_cdd_grid_after(const ScdMachine *m, uint64_t t);
 void scd_devices_power_on(ScdMachine *m);
 
 /* Program driver: parses argv, opens the disc, runs, writes the report and the frame. */
