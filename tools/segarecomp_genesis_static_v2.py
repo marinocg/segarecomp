@@ -72,7 +72,10 @@ for pc in json.load(open(sys.argv[2])):
         out[pc] = ins.size
 print(json.dumps(out))
 """
-CODE_TIERS = ("X", "V", "CD", "J", "P", "G", "IP", "IL")
+CODE_TIERS = ("X", "V", "CD", "J", "P", "G", "IP", "IL", "RT")
+RT_MIN_ANCHORS = 3
+RT_MAX_GAP = 512
+RT_MAX_RECORDS = 256
 DATA_TIERS = ("HW", "JT", "PT", "X", "FILL", "DREF", "PTD", "DC")
 DECOMP_IMAGE = "segarecomp-seg077/decomp:1"
 DC_MIN_CONSUMED = 256
@@ -401,8 +404,58 @@ def pointer_runs(img: bytes, accepted: dict, owner: bytearray) -> list[tuple[int
     return runs
 
 
+def record_table_candidates(img: bytes, edges: list, labelled_code: bytearray) -> tuple[dict, list]:
+    """RT: dispatch-record tables anchored by observed runtime targets (generic; no title knowledge).
+
+    For each indirect site with >= 3 distinct observed targets: the ROM longword occurrences of those targets are clustered (consecutive
+    gap <= 512); a cluster with >= 3 anchors whose pairwise gaps share a stride >= 4 (gcd) defines records of that stride with the
+    pointer field at the anchors' residue. The table grows record by record in both directions while the field holds an even in-image
+    address >= 0x200 and the field bytes lie outside labelled code (<= 256 records). Returns ({candidate root: site}, [(start, end)])."""
+    import math
+    size = len(img)
+    by_site: dict = {}
+    for site, tgt in edges:
+        by_site.setdefault(site, set()).add(tgt)
+    roots, tables = {}, []
+
+    def ptr_ok(a):
+        v = ge.u32(img, a)
+        return v is not None and v % 2 == 0 and ge.HEADER_END <= v < size and not any(labelled_code[a:a + 4])
+    for site, tg in sorted(by_site.items()):
+        if len(tg) < RT_MIN_ANCHORS:
+            continue
+        occ = sorted(a for a in range(0, size - 3, 2) if ge.u32(img, a) in tg and not any(labelled_code[a:a + 4]))
+        clusters, cur = [], []
+        for a in occ:
+            if cur and a - cur[-1] > RT_MAX_GAP:
+                clusters.append(cur)
+                cur = []
+            cur.append(a)
+        if cur:
+            clusters.append(cur)
+        for cl in clusters:
+            if len(cl) < RT_MIN_ANCHORS:
+                continue
+            stride = 0
+            for a, b in zip(cl, cl[1:]):
+                stride = math.gcd(stride, b - a)
+            if stride < 4:
+                continue
+            lo = hi = cl[0]
+            while lo - stride >= 0 and ptr_ok(lo - stride) and (hi - lo) // stride < RT_MAX_RECORDS:
+                lo -= stride
+            while hi + stride + 4 <= size and ptr_ok(hi + stride) and (hi - lo) // stride < RT_MAX_RECORDS:
+                hi += stride
+            if not all(ptr_ok(a) for a in range(lo, hi + 1, stride)):
+                continue
+            for a in range(lo, hi + 1, stride):
+                roots.setdefault(ge.u32(img, a), site)
+            tables.append((lo, hi + 4, stride))
+    return roots, tables
+
+
 def label_static(img: bytes, tok: bytes, img_path: pathlib.Path, work: pathlib.Path, tiers: tuple, ghidra: list[int] = (),
-                 executed: list[int] = (), exec_lengths: dict | None = None) -> dict:
+                 executed: list[int] = (), exec_lengths: dict | None = None, rt_roots: dict | None = None) -> dict:
     """Return {'code': {pc: (len, tier)}, 'data': [(start, end, tier)], 'typed': {...}, 'tables': n}."""
     size = len(img)
     typed: dict = {}
@@ -441,6 +494,9 @@ def label_static(img: bytes, tok: bytes, img_path: pathlib.Path, work: pathlib.P
                         if k in kinds and adr % 2 == 0 and ge.HEADER_END <= adr < size and adr not in accepted:
                             new[adr] = tier_name
                 descend(img, tok, new, forbidden, allow, accepted, owner, typed, tables, prov)
+        if "RT" in tiers and rt_roots:
+            new = {r: "RT" for r in rt_roots if r not in accepted}
+            descend(img, tok, new, forbidden, allow, accepted, owner, typed, tables, prov)
         if "G" in tiers and ghidra:
             ptr_values = set()
             for a in range(0x200, size - 3, 2):
@@ -749,7 +805,7 @@ BOUND = ("tools/segarecomp_genesis_static.py", "tools/segarecomp_genesis_evidenc
          "tools/ghidra/scripts/ExportCodeEntryCandidates.java", "tools/ghidra/scripts/PinAnalysisRecipe.java")
 BASE_TIERS = ("V", "CD", "J", "PT", "FILL", "PTD", "DC")
 OPTIONAL_TIERS = ("P", "G", "IP", "IL", "DREF")
-RULES = {
+RULES_V1 = {
     "development_set": list(DEV_SET), "heldout_set": list(HELD_OUT),
     "base_tiers": list(BASE_TIERS), "optional_tiers": list(OPTIONAL_TIERS), "always": ["HW (vectors + header)", "JT (resolved table bytes)"],
     "wrong_label": "predicted I vs truth c/D, c vs I/D, D vs I/c; truth U never counts",
@@ -771,6 +827,29 @@ RULES = {
 }
 
 
+BOUND = ("tools/segarecomp_genesis_static_v2.py", "tools/segarecomp_genesis_static.py", "tools/segarecomp_genesis_evidence.py",
+         "tools/segarecomp_genesis_decomp/main.go", "tools/segarecomp_genesis_decomp.Dockerfile", "tools/segarecomp_genesis_trace2.py",
+         "tools/ghidra/scripts/ExportCodeEntryCandidates.java", "tools/ghidra/scripts/PinAnalysisRecipe.java",
+         "tools/ghidra/scripts/ExportInstructionStarts.java", "tools/ghidra/scripts/SeedGenesisVectors.java")
+V2_TIERS = ("V", "J", "PT", "FILL", "IP", "CD", "PTD", "DC", "P", "G", "IL", "DREF")
+RULES = {
+    "version": "v2 (corrected measurement; supersedes v1 for decisions, v1 plan 5a1cd094 and its admission are preserved unchanged)",
+    "correction": "rates use only predictions against known reference truth; predictions over reference-unknown bytes are reported "
+                  "separately; every tier is tested, including the JT data bytes (v1 treated JT as always admitted)",
+    "decoders": "CPU-owned decoder AND m68k-disasm AND Capstone on every instruction; CPU must agree with every independent decode and "
+                "at least one independent decoder must decode",
+    "sets": {"development": list(DEV_SET), "exposed_validation": list(HELD_OUT),
+             "status": "the exposed set influenced v1 rule selection and was re-measured after v1: it is exposed validation, not an "
+                       "independent test; v2 is a measurement correction on already-seen data, disclosed as such"},
+    "admission": "unchanged v1 thresholds applied with v2 measurement on BOTH sets: known-truth wrong rate <= 0.001 per set, no image "
+                 "> 0.005, tiers with < 1000 known predictions in a set need 0 wrong there; procedure: start from all v1 base tiers "
+                 "(V, J, PT, FILL) plus IP, drop the worst failing tier and re-measure until all pass; then test each other tier alone "
+                 "on top",
+    "rt": "record-table roots (RT) are reported but not admissible: no source-backed precision measurement exists (d07 had no qualifying "
+          "table)",
+}
+
+
 def bound_digests() -> dict:
     root = HERE.parent
     return {f: hashlib.sha256((root / f).read_bytes()).hexdigest() for f in BOUND}
@@ -779,7 +858,7 @@ def bound_digests() -> dict:
 def cmd_freeze(a) -> int:
     if PLAN.exists() and not a.force:
         raise SystemExit("plan already frozen")
-    doc = {"schema": SCHEMA + ".plan", "task": "SEG-077-T009", "status": "frozen before the held-out admission set is labelled",
+    doc = {"schema": SCHEMA + ".plan", "task": "SEG-077-T009", "status": "v2 corrected-measurement plan (see rules.sets.status)",
            "rules": RULES, "bound_code": bound_digests(),
            "images": {k: subprocess.run(["docker", "image", "inspect", k, "--format", "{{.Id}}"], capture_output=True, text=True).stdout.strip()
                       for k in (EVIDENCE_IMAGE, DECOMP_IMAGE, ge.GHIDRA_IMAGE)},
@@ -831,19 +910,24 @@ def run_set(ids, tiers, work, ghidra_needed):
     return agg, per
 
 
-def tier_passes(name, agg, per) -> bool:
-    lab, wr = agg.get(name, {}).get("labelled", 0), agg.get(name, {}).get("wrong", 0)
-    if lab == 0:
-        return True
-    if lab < 1000:
-        return wr == 0
-    if wr / lab > 0.001:
-        return False
-    return all(p[name]["wrong"] / p[name]["labelled"] <= 0.005 for p in per.values() if p.get(name, {}).get("labelled"))
-
-
 def key(t):
     return t if t in CODE_TIERS else "D_" + t
+
+
+def tier_ok_v2(name: str, m: dict) -> bool:
+    """Frozen v2 test on one set's measure() output: known-truth rate and per-image rate (known predictions only)."""
+    t = m["tiers"].get(name)
+    if not t or not t.get("pred_known"):
+        return True
+    if t["pred_known"] < 1000:
+        return t["wrong_known"] == 0
+    if t["wrong_known"] / t["pred_known"] > 0.001:
+        return False
+    for p in m["per_image"].values():
+        x = p["tiers"].get(name)
+        if x and x["pred_known"] and x["wrong_known"] / x["pred_known"] > 0.005:
+            return False
+    return True
 
 
 def cmd_admit(a) -> int:
@@ -851,38 +935,35 @@ def cmd_admit(a) -> int:
     work = pathlib.Path(a.work)
     work.mkdir(parents=True, exist_ok=True)
     work.chmod(0o755)
-    base = list(BASE_TIERS)
+    base = ["V", "J", "PT", "FILL", "IP"]
     log = []
+
+    def both(tiers):
+        return {"development": measure(DEV_SET, tiers, work, "G" in tiers), "exposed_validation": measure(HELD_OUT, tiers, work, "G" in tiers)}
     while True:
-        agg, per = run_set(HELD_OUT, base, work, False)
-        failing = [t for t in base if not tier_passes(key(t), agg, per)]
-        log.append({"tiers": list(base), "aggregate": agg, "failing": failing})
+        ms = both(base)
+        names = [key(t) for t in base] + ["D_JT"]
+        failing = sorted({n for n in names for m in ms.values() if not tier_ok_v2(n, m)})
+        log.append({"tiers": list(base), "failing": failing, "measure": {k: v["tiers"] for k, v in ms.items()}})
         print(json.dumps({"base": base, "failing": failing}), flush=True)
-        if not failing:
+        removable = [t for t in base if key(t) in failing]
+        if not removable:
             break
-        worst = max(failing, key=lambda t: agg[key(t)]["wrong"] / max(1, agg[key(t)]["labelled"]))
+        worst = max(removable, key=lambda t: max((m["tiers"].get(key(t), {}).get("wrong_known", 0) / max(1, m["tiers"].get(key(t), {}).get("pred_known", 1))) for m in ms.values()))
         base.remove(worst)
-    base_agg, base_per = agg, per
+    jt_ok = "D_JT" not in failing
     optional = {}
-    for t in OPTIONAL_TIERS:
-        agg, per = run_set(HELD_OUT, base + [t], work, t == "G")
-        ok = tier_passes(key(t), agg, per)
-        optional[t] = {"aggregate": agg.get(key(t)), "admitted": ok,
-                       "base_tiers_still_pass": all(tier_passes(key(b), agg, per) for b in base)}
-        print(json.dumps({"optional": t, "admitted": ok, "agg": agg.get(key(t))}), flush=True)
-    admitted = base + [t for t, v in optional.items() if v["admitted"] and v["base_tiers_still_pass"]]
-    recall = {}
-    agg, per = run_set(HELD_OUT, admitted, work, "G" in admitted)
-    for i, p in per.items():
-        r = p["_recall"]
-        recall[i] = {"starts_found_fraction": round(r["found_starts"] / max(1, r["true_starts"]), 4),
-                     "data_found_fraction": round(r["found_data"] / max(1, r["true_data"]), 4),
-                     "wrong_total": sum(v["wrong"] for k, v in p.items() if not k.startswith("_"))}
+    for t in ("CD", "PTD", "DC", "P", "G", "IL", "DREF"):
+        ms2 = both(base + [t])
+        ok = all(tier_ok_v2(key(t), m) for m in ms2.values())
+        still = all(tier_ok_v2(key(b), m) for b in base for m in ms2.values())
+        optional[t] = {"admitted": ok and still, "measure": {k: v["tiers"].get(key(t)) for k, v in ms2.items()}}
+        print(json.dumps({"optional": t, "admitted": ok and still}), flush=True)
+    admitted = base + [t for t, v in optional.items() if v["admitted"]]
     doc = {"schema": SCHEMA + ".admission", "plan_sha256": hashlib.sha256(PLAN.read_bytes()).hexdigest(), "admitted_tiers": admitted,
-           "base_procedure": log, "base_aggregate": base_agg, "optional": optional, "final_aggregate": agg, "heldout_recall": recall,
-           "data_boundary": "aggregates only (counts and fractions)"}
+           "jt_data_admitted": jt_ok, "procedure": log, "optional": optional, "data_boundary": "aggregates only"}
     ADMISSION.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
-    print(json.dumps({"admitted": admitted, "recall": recall}, indent=1))
+    print(json.dumps({"admitted": admitted, "jt_data_admitted": jt_ok}))
     return 0
 
 
@@ -891,6 +972,10 @@ def admitted_tiers() -> list[str]:
     if doc["plan_sha256"] != hashlib.sha256(PLAN.read_bytes()).hexdigest():
         raise SystemExit("admission record belongs to another plan")
     return doc["admitted_tiers"]
+
+
+def jt_admitted() -> bool:
+    return bool(json.loads(ADMISSION.read_text()).get("jt_data_admitted"))
 
 
 def execution_evidence(runs: list[pathlib.Path], t001_sample: pathlib.Path | None) -> tuple[list[int], list]:
@@ -925,6 +1010,8 @@ def cmd_title(a) -> int:
         ghidra = [int(x["address"]) for x in json.loads(pathlib.Path(a.ghidra).read_text()) if x.get("kind") == "code_entry_candidate"]
     use = tuple(tiers) + (("X",) if executed else ())
     res = label_static(img, tok, img_path, work, use, ghidra, executed)
+    if not jt_admitted():
+        res["data"] = [x for x in res["data"] if x[2] != "JT"]
     cls, info = classes_of(len(img), res, xdata, mask_on_conflict=True)
     sys.path.insert(0, str(HERE))
     import segarecomp_ml_v3_data as v3d

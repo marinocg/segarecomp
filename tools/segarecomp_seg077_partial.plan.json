@@ -1,0 +1,569 @@
+{
+ "bound_code": {
+  "segarecomp_genesis_evidence.py": "1582d2ed01db7692c6564750a8a7e6d01b08ee59f421d26776906523bd009885",
+  "segarecomp_genesis_static_v2.py": "e40fb3685b730a643d3d5f21942ad03af27e9bb1469edced761503d110f502bd",
+  "segarecomp_ml_v3.py": "ef18ab40e1da9f25ecc4e1e0a9f0f630453fc8e15b13812750e133d8998947ba",
+  "segarecomp_ml_v3_train.py": "7234c6ffe964f0f6db44126d760fb60eff6ce97b30e93a7034d3e1e2bb97592f",
+  "segarecomp_seg077_partial.py": "2787d6df3692a20c3fb35889c53c2073dfa85990ca3f91368bc29db89b29ff00",
+  "segarecomp_xplat_models.py": "3eabc2ed412ec3088938061af5a76b53f5b7fcf55deefdfd82031f533f268f8b",
+  "segarecomp_xplat_transfer.py": "415bd6ab8dbf5b8b3d4f7c1c8da433fd8cf6bbf64fd76229807a656bf9cb399b"
+ },
+ "images": {
+  "d05": "D05",
+  "d06": "D06",
+  "d07": "D07",
+  "d09": "D09",
+  "d10": "D10",
+  "d11": "D11",
+  "d12": "D12",
+  "flicky": "D02",
+  "ps2": "D04",
+  "s1": "D01",
+  "s2": "D01",
+  "sf1": "D03",
+  "sf2": "D03",
+  "sk": "D01"
+ },
+ "jobs": [
+  {
+   "cond": "TRUTH_ALL",
+   "fold": "D01",
+   "x": null
+  },
+  {
+   "cond": "PARTIAL_ALL",
+   "fold": "D01",
+   "x": null
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D01",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D01",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D01",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D01",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D01",
+   "x": "D04"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D01",
+   "x": "D04"
+  },
+  {
+   "cond": "TRUTH_ALL",
+   "fold": "D02",
+   "x": null
+  },
+  {
+   "cond": "PARTIAL_ALL",
+   "fold": "D02",
+   "x": null
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D02",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D02",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D02",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D02",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D02",
+   "x": "D04"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D02",
+   "x": "D04"
+  },
+  {
+   "cond": "TRUTH_ALL",
+   "fold": "D03",
+   "x": null
+  },
+  {
+   "cond": "PARTIAL_ALL",
+   "fold": "D03",
+   "x": null
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D03",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D03",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D03",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D03",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D03",
+   "x": "D04"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D03",
+   "x": "D04"
+  },
+  {
+   "cond": "TRUTH_ALL",
+   "fold": "D04",
+   "x": null
+  },
+  {
+   "cond": "PARTIAL_ALL",
+   "fold": "D04",
+   "x": null
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D04",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D04",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D04",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D04",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D04",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D04",
+   "x": "D03"
+  },
+  {
+   "cond": "TRUTH_ALL",
+   "fold": "D05",
+   "x": null
+  },
+  {
+   "cond": "PARTIAL_ALL",
+   "fold": "D05",
+   "x": null
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D05",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D05",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D05",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D05",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D05",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D05",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D05",
+   "x": "D04"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D05",
+   "x": "D04"
+  },
+  {
+   "cond": "TRUTH_ALL",
+   "fold": "D06",
+   "x": null
+  },
+  {
+   "cond": "PARTIAL_ALL",
+   "fold": "D06",
+   "x": null
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D06",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D06",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D06",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D06",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D06",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D06",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D06",
+   "x": "D04"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D06",
+   "x": "D04"
+  },
+  {
+   "cond": "TRUTH_ALL",
+   "fold": "D07",
+   "x": null
+  },
+  {
+   "cond": "PARTIAL_ALL",
+   "fold": "D07",
+   "x": null
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D07",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D07",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D07",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D07",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D07",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D07",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D07",
+   "x": "D04"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D07",
+   "x": "D04"
+  },
+  {
+   "cond": "TRUTH_ALL",
+   "fold": "D09",
+   "x": null
+  },
+  {
+   "cond": "PARTIAL_ALL",
+   "fold": "D09",
+   "x": null
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D09",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D09",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D09",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D09",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D09",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D09",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D09",
+   "x": "D04"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D09",
+   "x": "D04"
+  },
+  {
+   "cond": "TRUTH_ALL",
+   "fold": "D10",
+   "x": null
+  },
+  {
+   "cond": "PARTIAL_ALL",
+   "fold": "D10",
+   "x": null
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D10",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D10",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D10",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D10",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D10",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D10",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D10",
+   "x": "D04"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D10",
+   "x": "D04"
+  },
+  {
+   "cond": "TRUTH_ALL",
+   "fold": "D11",
+   "x": null
+  },
+  {
+   "cond": "PARTIAL_ALL",
+   "fold": "D11",
+   "x": null
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D11",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D11",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D11",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D11",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D11",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D11",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D11",
+   "x": "D04"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D11",
+   "x": "D04"
+  },
+  {
+   "cond": "TRUTH_ALL",
+   "fold": "D12",
+   "x": null
+  },
+  {
+   "cond": "PARTIAL_ALL",
+   "fold": "D12",
+   "x": null
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D12",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D12",
+   "x": "D01"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D12",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D12",
+   "x": "D02"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D12",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D12",
+   "x": "D03"
+  },
+  {
+   "cond": "MINUS_X",
+   "fold": "D12",
+   "x": "D04"
+  },
+  {
+   "cond": "MINUS_X+PARTIAL_X",
+   "fold": "D12",
+   "x": "D04"
+  }
+ ],
+ "lineages": [
+  "D01",
+  "D02",
+  "D03",
+  "D04",
+  "D05",
+  "D06",
+  "D07",
+  "D09",
+  "D10",
+  "D11",
+  "D12"
+ ],
+ "model": "A (fit_a, fixed configuration), CPU research venv",
+ "partial_tiers": [
+  "V",
+  "J",
+  "PT",
+  "FILL"
+ ],
+ "rule": {
+  "caveat": "the six commercial images influenced the v1 rule selection (exposed); development use only, not an independent test",
+  "descriptive": "signal retention = (ER(PARTIAL_ALL) vs ER(TRUTH_ALL)) per fold; partial-label coverage and wrong-label rate vs truth",
+  "harmful": "mean d >= +0.002 and sign-flip p <= 0.10",
+  "otherwise": "NO_MEASURABLE_EFFECT",
+  "question": "does adding a lineage with partial static-first labels (U masked) improve held-out ER over omitting it?",
+  "useful": "mean d <= -0.002 and sign-flip p <= 0.10 over (F, X) pairs, d = ER(MINUS_X+PARTIAL_X) - ER(MINUS_X)"
+ },
+ "schema": "segarecomp.seg077.partial.plan.v1",
+ "task": "SEG-077-T009 step 5"
+}
