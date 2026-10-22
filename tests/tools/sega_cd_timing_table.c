@@ -147,6 +147,9 @@ int main(void) {
     row(scd_main_refresh_skip_cycles(m) == 120U, "long instruction: MOVEM.L of 15 registers follows 15 x 8 = 120 cycles");
     m->cpu[SCD_MAIN].pc = 0x230U;
     row(scd_main_refresh_skip_cycles(m) == 0U, "long instruction: MOVEM.W is not of the class");
+    bios[0x250] = 0x48U; bios[0x251] = 0xC0U; bios[0x252] = 0xFFU; bios[0x253] = 0xFFU; /* EXT.L D0 followed by a word that looks like a mask */
+    m->cpu[SCD_MAIN].pc = 0x250U;
+    row(scd_main_refresh_skip_cycles(m) == 0U, "long instruction: EXT.L D0 (opcode $48C0) is not MOVEM.L");
     m->cpu[SCD_MAIN].pc = 0x240U;
     row(scd_main_refresh_skip_cycles(m) == 0U, "long instruction: NOP is not of the class");
     m->main_refresh_due = 1000U * MASTER;

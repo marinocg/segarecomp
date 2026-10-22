@@ -56,10 +56,20 @@ be reproduced for the orderings the application depends on to come out the same;
    lets the next instruction execute before the interrupt is recognised (reference `m68k_set_irq_delay`).
 8. **Not modelled, recorded.** The reference's idle-skip of a Gate Array poll loop (its clock jumps to the writer's time) and its
    processor synchronisation at line chunks; the cycles of DIVU/DIVS in the refresh-skip rule; the exact intra-instruction time of a
-   VDP status read (taken as the instant 8 cycles after the instruction starts). The instruction streams still agree (decision 9).
+   VDP status read (taken as the instant 8 cycles after the instruction starts; the reference adds the opcode's own base cycles, so a
+16-cycle form is 8 cycles off at FIFO and busy-bit edges); the guest-visible VBLANK, HBLANK and odd-field status bits and the HV
+counter, which the shared Genesis host still derives from the old 224-line phase (the frames compared do not read them); the register
+#0 IE1 latency path; aborting a fill by a register write. The instruction streams agree for the span stated in decision 9 and the table.
+The sub cycle (decision 1) is an integer 2,148,241 ticks against the exact 2,148,241.206: the sub runs ahead of the line grid by about
+0.2 ticks per cycle, 54 sub cycles (232 master clocks) by entry + 1,500; the checkpoint outcome shows this margin does not flip the
+orderings compared, a race closer than that could.
 9. **Acceptance and method.** Checkpoint H as ADR 0175 decision 8 (`TIME_ALIGNED`), Checkpoints E, F and G re-verified with the same
    program, determinism (two repeats, eight seeded deadline partitions), synthetic fixtures for every changed rule
-   (`tests/sega_cd_timing_convention_test.py`). Method: the executed main-processor instruction starts (program counter and start time)
+   (`tests/sega_cd_timing_convention_test.py`). ADR 0175 decision 7's full compared state (VDP registers, CRAM, VSRAM, VRAM and RAM per
+   selected frame, executed instruction starts to entry + 1,500) was not compared beyond the canonical frames, the controller log, the
+   Checkpoint E state and the instruction-start lockstep to frame 129. Decision 1 was fixed before generated runs; decisions 2-8 were
+   found by lockstep against the reference's source and are modelling conventions (including the round-down to a multiple of 7 of the
+   reset point and the 8-cycle status read), none fitted to a frame. Method: the executed main-processor instruction starts (program counter and start time)
    of the generated run and of the reference were compared in lockstep from reset; each divergence named the next convention; the lists
    above are the divergences found, in the order they appeared.
 

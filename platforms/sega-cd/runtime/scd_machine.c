@@ -633,7 +633,7 @@ uint32_t scd_main_refresh_skip_cycles(const ScdMachine *m) {
   if (b0 == NULL || b1 == NULL) return 0U;
   op = ((uint32_t)*b0 << 8) | *b1;
   if ((op & 0xF000U) == 0xE000U && (op & 0x00C0U) != 0x00C0U && (op & 0x0020U) != 0U) return 2U * (c->d[(op >> 9) & 7U] & 63U);
-  if ((op & 0xFB80U) == 0x4880U && (op & 0x0040U) != 0U) {
+  if ((op & 0xFB80U) == 0x4880U && (op & 0x0040U) != 0U && (op & 0x0038U) != 0U) { /* MOVEM.L (EA mode 0 is EXT.L) */
     const uint8_t *h = scd_main_stream_byte(m, c->pc + 2U), *l = scd_main_stream_byte(m, c->pc + 3U);
     uint32_t mask, count = 0U;
     if (h == NULL || l == NULL) return 0U;
@@ -682,7 +682,7 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
     m->cpu[cpu].next = ready;
     {
       const int taken = cpu == SCD_SUB ? scd_sub_accept_interrupt(m)
-                        : m->main_irq_delay != 0U ? (m->main_irq_delay -= 1U, 0) : scd_main_accept_interrupt(m);
+                        : (m->main_irq_delay != 0U || m->main_refresh_hold != 0U) ? 0 : scd_main_accept_interrupt(m);
       if (taken < 0) return SCD_RUN_STOPPED;
       if (taken > 0) continue;
     }
@@ -710,7 +710,10 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
     /* SEG-071-T002 (ADR 0177): the main bus's refresh delay, charged after the instruction is fetched and before it executes: the
      * instruction starts 2 cycles later and the next refresh is due 128 cycles after this instant. The instant is re-evaluated (a
      * device event or the sub may fall in the 2 cycles). */
-    if (cpu == SCD_MAIN && m->bios != NULL && scd_main_refresh_gate(m, ready)) continue;
+    if (cpu == SCD_MAIN && m->bios != NULL && scd_main_refresh_gate(m, ready)) {
+      m->main_refresh_hold = 1U; /* the reference executes the fetched instruction before an interrupt becomes visible */
+      continue;
+    }
     if (m->instruction_budget == 0U) return SCD_RUN_BUDGET;
     m->instruction_budget -= 1U;
     if (m->coverage != NULL) scd_coverage_note(m, cpu, m->cpu[cpu].pc);
@@ -732,7 +735,11 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
       }
       continue;
     }
-    if (cpu == SCD_MAIN && m->bios != NULL) scd_main_refresh_note_instruction(m, ready);
+    if (cpu == SCD_MAIN && m->bios != NULL) {
+      scd_main_refresh_note_instruction(m, ready);
+      if (m->main_irq_delay != 0U) m->main_irq_delay -= 1U; /* one instruction executes before the interrupt is recognised */
+      m->main_refresh_hold = 0U;
+    }
     if (m->program->processors[cpu].dispatch(m) != 0) return SCD_RUN_STOPPED;
   }
 }

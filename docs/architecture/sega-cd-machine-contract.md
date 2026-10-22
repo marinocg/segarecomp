@@ -387,7 +387,7 @@ stops with `bios_absent`. The BIOS-image profile wires the VDP's level 6 (sectio
   full/empty status bits; emptied at each frame's start) and the VRAM-fill busy bit; one instruction executes before a vertical
   interrupt enabled by a register-#1 MOVE (not MOVE.L) is recognised; an autovector interrupt exception takes 50..59 cycles by the
   processor's cycle count within the frame mod 10 (both processors); a VDP status read is taken 8 cycles after its instruction starts.
-  Not modelled: the reference's idle-skip of a Gate Array poll loop and its line-chunk processor synchronisation.
+  Not modelled: the reference's idle-skip of a Gate Array poll loop and its line-chunk processor synchronisation; the VBLANK / HBLANK / odd-field status bits and the HV counter keep the Genesis host's old 224-line phase; the sub cycle is an integer (drift ~0.2 tick per cycle against exact per-line locking).
 
 ## 13. Unresolved items
 

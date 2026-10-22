@@ -439,6 +439,7 @@ typedef struct ScdMachine {
   uint32_t capture_length;                /* epoch snapshot length */
   uint8_t capture_bytes[8];               /* frontier live bytes */
   /* SEG-064-T003: main-side devices of the BIOS-image profile (scd_vdp.c). */
+  uint32_t main_refresh_hold;             /* BIOS-image profile: the refresh delay was just charged; the instruction runs before an interrupt is taken */
   uint32_t main_irq_delay;                /* BIOS-image profile: instructions to execute before a main interrupt is recognised (VDP register #1 IE0 set while a vertical interrupt is pending) */
   uint64_t main_extra_ticks;              /* BIOS-image profile: bus wait added to the executing main instruction (Z80-window accesses), charged at its retire */
   uint64_t main_refresh_due;              /* BIOS-image profile: the instant from which the next main instruction loses the bus-refresh cycles */
