@@ -1,0 +1,537 @@
+{
+ "admitted_tiers": [
+  "V",
+  "J",
+  "PT",
+  "FILL",
+  "IP"
+ ],
+ "base_aggregate": {
+  "CD": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "D_DC": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "D_DREF": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "D_FILL": {
+   "labelled": 115196,
+   "wrong": 0
+  },
+  "D_HW": {
+   "labelled": 3072,
+   "wrong": 0
+  },
+  "D_JT": {
+   "labelled": 670,
+   "wrong": 4
+  },
+  "D_PT": {
+   "labelled": 144,
+   "wrong": 0
+  },
+  "D_PTD": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "D_X": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "G": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "IL": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "IP": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "J": {
+   "labelled": 29288,
+   "wrong": 0
+  },
+  "P": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "V": {
+   "labelled": 72990,
+   "wrong": 16
+  },
+  "X": {
+   "labelled": 0,
+   "wrong": 0
+  }
+ },
+ "base_procedure": [
+  {
+   "aggregate": {
+    "CD": {
+     "labelled": 3568,
+     "wrong": 136
+    },
+    "D_DC": {
+     "labelled": 1526954,
+     "wrong": 390777
+    },
+    "D_DREF": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "D_FILL": {
+     "labelled": 101693,
+     "wrong": 0
+    },
+    "D_HW": {
+     "labelled": 3072,
+     "wrong": 0
+    },
+    "D_JT": {
+     "labelled": 702,
+     "wrong": 4
+    },
+    "D_PT": {
+     "labelled": 268,
+     "wrong": 0
+    },
+    "D_PTD": {
+     "labelled": 75221,
+     "wrong": 1872
+    },
+    "D_X": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "G": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "IL": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "IP": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "J": {
+     "labelled": 44646,
+     "wrong": 240
+    },
+    "P": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "V": {
+     "labelled": 71692,
+     "wrong": 16
+    },
+    "X": {
+     "labelled": 0,
+     "wrong": 0
+    }
+   },
+   "failing": [
+    "CD",
+    "J",
+    "PTD",
+    "DC"
+   ],
+   "tiers": [
+    "V",
+    "CD",
+    "J",
+    "PT",
+    "FILL",
+    "PTD",
+    "DC"
+   ]
+  },
+  {
+   "aggregate": {
+    "CD": {
+     "labelled": 3568,
+     "wrong": 136
+    },
+    "D_DC": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "D_DREF": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "D_FILL": {
+     "labelled": 115194,
+     "wrong": 0
+    },
+    "D_HW": {
+     "labelled": 3072,
+     "wrong": 0
+    },
+    "D_JT": {
+     "labelled": 702,
+     "wrong": 4
+    },
+    "D_PT": {
+     "labelled": 312,
+     "wrong": 0
+    },
+    "D_PTD": {
+     "labelled": 90976,
+     "wrong": 3144
+    },
+    "D_X": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "G": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "IL": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "IP": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "J": {
+     "labelled": 44646,
+     "wrong": 240
+    },
+    "P": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "V": {
+     "labelled": 71692,
+     "wrong": 16
+    },
+    "X": {
+     "labelled": 0,
+     "wrong": 0
+    }
+   },
+   "failing": [
+    "CD",
+    "J",
+    "PTD"
+   ],
+   "tiers": [
+    "V",
+    "CD",
+    "J",
+    "PT",
+    "FILL",
+    "PTD"
+   ]
+  },
+  {
+   "aggregate": {
+    "CD": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "D_DC": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "D_DREF": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "D_FILL": {
+     "labelled": 115194,
+     "wrong": 0
+    },
+    "D_HW": {
+     "labelled": 3072,
+     "wrong": 0
+    },
+    "D_JT": {
+     "labelled": 670,
+     "wrong": 4
+    },
+    "D_PT": {
+     "labelled": 144,
+     "wrong": 0
+    },
+    "D_PTD": {
+     "labelled": 91160,
+     "wrong": 3160
+    },
+    "D_X": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "G": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "IL": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "IP": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "J": {
+     "labelled": 29288,
+     "wrong": 0
+    },
+    "P": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "V": {
+     "labelled": 72990,
+     "wrong": 16
+    },
+    "X": {
+     "labelled": 0,
+     "wrong": 0
+    }
+   },
+   "failing": [
+    "PTD"
+   ],
+   "tiers": [
+    "V",
+    "J",
+    "PT",
+    "FILL",
+    "PTD"
+   ]
+  },
+  {
+   "aggregate": {
+    "CD": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "D_DC": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "D_DREF": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "D_FILL": {
+     "labelled": 115196,
+     "wrong": 0
+    },
+    "D_HW": {
+     "labelled": 3072,
+     "wrong": 0
+    },
+    "D_JT": {
+     "labelled": 670,
+     "wrong": 4
+    },
+    "D_PT": {
+     "labelled": 144,
+     "wrong": 0
+    },
+    "D_PTD": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "D_X": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "G": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "IL": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "IP": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "J": {
+     "labelled": 29288,
+     "wrong": 0
+    },
+    "P": {
+     "labelled": 0,
+     "wrong": 0
+    },
+    "V": {
+     "labelled": 72990,
+     "wrong": 16
+    },
+    "X": {
+     "labelled": 0,
+     "wrong": 0
+    }
+   },
+   "failing": [],
+   "tiers": [
+    "V",
+    "J",
+    "PT",
+    "FILL"
+   ]
+  }
+ ],
+ "data_boundary": "aggregates only (counts and fractions)",
+ "final_aggregate": {
+  "CD": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "D_DC": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "D_DREF": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "D_FILL": {
+   "labelled": 115196,
+   "wrong": 0
+  },
+  "D_HW": {
+   "labelled": 3072,
+   "wrong": 0
+  },
+  "D_JT": {
+   "labelled": 670,
+   "wrong": 4
+  },
+  "D_PT": {
+   "labelled": 144,
+   "wrong": 0
+  },
+  "D_PTD": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "D_X": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "G": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "IL": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "IP": {
+   "labelled": 1532,
+   "wrong": 0
+  },
+  "J": {
+   "labelled": 29288,
+   "wrong": 0
+  },
+  "P": {
+   "labelled": 0,
+   "wrong": 0
+  },
+  "V": {
+   "labelled": 72990,
+   "wrong": 16
+  },
+  "X": {
+   "labelled": 0,
+   "wrong": 0
+  }
+ },
+ "heldout_recall": {
+  "ps2": {
+   "data_found_fraction": 0.0055,
+   "starts_found_fraction": 0.0531,
+   "wrong_total": 0
+  },
+  "s1": {
+   "data_found_fraction": 0.0061,
+   "starts_found_fraction": 0.111,
+   "wrong_total": 0
+  },
+  "s2": {
+   "data_found_fraction": 0.0029,
+   "starts_found_fraction": 0.0344,
+   "wrong_total": 0
+  },
+  "sf1": {
+   "data_found_fraction": 0.0447,
+   "starts_found_fraction": 0.4419,
+   "wrong_total": 4
+  },
+  "sf2": {
+   "data_found_fraction": 0.0119,
+   "starts_found_fraction": 0.069,
+   "wrong_total": 16
+  },
+  "sk": {
+   "data_found_fraction": 0.0146,
+   "starts_found_fraction": 0.0049,
+   "wrong_total": 0
+  }
+ },
+ "optional": {
+  "DREF": {
+   "admitted": false,
+   "aggregate": {
+    "labelled": 27248,
+    "wrong": 7906
+   },
+   "base_tiers_still_pass": true
+  },
+  "G": {
+   "admitted": false,
+   "aggregate": {
+    "labelled": 433960,
+    "wrong": 1212
+   },
+   "base_tiers_still_pass": false
+  },
+  "IL": {
+   "admitted": false,
+   "aggregate": {
+    "labelled": 13622,
+    "wrong": 7851
+   },
+   "base_tiers_still_pass": true
+  },
+  "IP": {
+   "admitted": true,
+   "aggregate": {
+    "labelled": 1532,
+    "wrong": 0
+   },
+   "base_tiers_still_pass": true
+  },
+  "P": {
+   "admitted": false,
+   "aggregate": {
+    "labelled": 11880,
+    "wrong": 227
+   },
+   "base_tiers_still_pass": true
+  }
+ },
+ "plan_sha256": "5a1cd094593768c0ac5ca4707d5938431ea0b0f9d37761b0144d14a9dfe41c13",
+ "schema": "segarecomp.genesis_static.v1.admission"
+}
