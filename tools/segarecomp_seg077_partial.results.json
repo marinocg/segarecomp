@@ -1,0 +1,170 @@
+{
+ "class": "NO_MEASURABLE_EFFECT",
+ "fold_means": [
+  -0.135095,
+  0.0,
+  -0.054046,
+  6e-05,
+  0.001337,
+  0.000437,
+  -0.001086,
+  0.0005,
+  -0.0,
+  -0.000535,
+  -0.001152
+ ],
+ "folds": 11,
+ "jobs_done": 102,
+ "jobs_planned": 102,
+ "mean_d": -0.017235,
+ "partial_label_coverage": {
+  "d05": {
+   "labelled_fraction": 0.7116,
+   "negative_cells_recalled": 0.9785,
+   "positive_cells_recalled": 0.0787,
+   "wrong_rate_known": 0.0
+  },
+  "d06": {
+   "labelled_fraction": 0.2888,
+   "negative_cells_recalled": 0.347,
+   "positive_cells_recalled": 0.0093,
+   "wrong_rate_known": 0.0
+  },
+  "d07": {
+   "labelled_fraction": 0.2107,
+   "negative_cells_recalled": 0.0821,
+   "positive_cells_recalled": 0.6087,
+   "wrong_rate_known": 0.0
+  },
+  "d09": {
+   "labelled_fraction": 0.5097,
+   "negative_cells_recalled": 0.9911,
+   "positive_cells_recalled": 0.3333,
+   "wrong_rate_known": 3.5e-05
+  },
+  "d10": {
+   "labelled_fraction": 0.2661,
+   "negative_cells_recalled": 0.3011,
+   "positive_cells_recalled": 0.0495,
+   "wrong_rate_known": 0.0
+  },
+  "d11": {
+   "labelled_fraction": 0.4288,
+   "negative_cells_recalled": 0.5398,
+   "positive_cells_recalled": 0.0894,
+   "wrong_rate_known": 8.9e-05
+  },
+  "d12": {
+   "labelled_fraction": 0.4317,
+   "negative_cells_recalled": 0.5295,
+   "positive_cells_recalled": 0.3237,
+   "wrong_rate_known": 0.0
+  },
+  "flicky": {
+   "labelled_fraction": 0.5672,
+   "negative_cells_recalled": 0.6789,
+   "positive_cells_recalled": 0.0611,
+   "wrong_rate_known": 0.0
+  },
+  "ps2": {
+   "labelled_fraction": 0.0101,
+   "negative_cells_recalled": 0.005,
+   "positive_cells_recalled": 0.0743,
+   "wrong_rate_known": 0.0
+  },
+  "s1": {
+   "labelled_fraction": 0.0223,
+   "negative_cells_recalled": 0.0058,
+   "positive_cells_recalled": 0.1098,
+   "wrong_rate_known": 0.0
+  },
+  "s2": {
+   "labelled_fraction": 0.0076,
+   "negative_cells_recalled": 0.0026,
+   "positive_cells_recalled": 0.0356,
+   "wrong_rate_known": 0.0
+  },
+  "sf1": {
+   "labelled_fraction": 0.085,
+   "negative_cells_recalled": 0.0439,
+   "positive_cells_recalled": 0.5603,
+   "wrong_rate_known": 0.0
+  },
+  "sf2": {
+   "labelled_fraction": 0.0163,
+   "negative_cells_recalled": 0.0112,
+   "positive_cells_recalled": 0.0856,
+   "wrong_rate_known": 0.000468
+  },
+  "sk": {
+   "labelled_fraction": 0.012,
+   "negative_cells_recalled": 0.0129,
+   "positive_cells_recalled": 0.0052,
+   "wrong_rate_known": 0.0
+  }
+ },
+ "per_x_mean_d": {
+  "D01": -0.016699,
+  "D02": 0.000813,
+  "D03": -0.040675,
+  "D04": -0.000363
+ },
+ "plan_sha256": "d24a1a1e37773342999725500771f04fd0c81b8f94a8401d42aef5ee62175806",
+ "retention": {
+  "D01": {
+   "partial_all": 0.8885549508569572,
+   "truth_all": 0.1531986531986532
+  },
+  "D02": {
+   "partial_all": 0.18601895734597157,
+   "truth_all": 0.001184834123222749
+  },
+  "D03": {
+   "partial_all": 0.8154177317368492,
+   "truth_all": 0.054419480694201536
+  },
+  "D04": {
+   "partial_all": 0.6201828284638824,
+   "truth_all": 0.0001792435920415845
+  },
+  "D05": {
+   "partial_all": 0.2545454545454545,
+   "truth_all": 0.20962566844919786
+  },
+  "D06": {
+   "partial_all": 0.18334499650104968,
+   "truth_all": 0.1000699790062981
+  },
+  "D07": {
+   "partial_all": 0.38015930485155686,
+   "truth_all": 0.19333816075307747
+  },
+  "D09": {
+   "partial_all": 0.175,
+   "truth_all": 0.174
+  },
+  "D10": {
+   "partial_all": 0.48906418070993185,
+   "truth_all": 0.10182861240588024
+  },
+  "D11": {
+   "partial_all": 0.48421615837346177,
+   "truth_all": 0.19154628143392188
+  },
+  "D12": {
+   "partial_all": 0.1837557603686636,
+   "truth_all": 0.04032258064516129
+  }
+ },
+ "rule": {
+  "caveat": "the six commercial images influenced the v1 rule selection (exposed); flicky (lineage D02) is in the development set the labeller rules were tuned on (its partial labels are optimistic); PARTIAL_TIERS were chosen after the v2 audit; JT data bytes are excluded from the partial labels (JT fails on the exposed set); development use only, not an independent test",
+  "descriptive": "signal retention = (ER(PARTIAL_ALL) vs ER(TRUTH_ALL)) per fold; partial-label coverage and wrong-label rate vs truth",
+  "harmful": "mean D >= +0.002 and sign-flip p <= 0.10",
+  "otherwise": "NO_MEASURABLE_EFFECT",
+  "question": "does adding a lineage with partial static-first labels (U masked) improve held-out ER over omitting it?",
+  "statistic": "d(F, X) = ER(MINUS_X+PARTIAL_X) - ER(MINUS_X); cluster by held-out fold: D(F) = mean over X of d(F, X) (11 values); exact two-sided sign-flip test over the 11 D(F); d is also reported per X",
+  "useful": "mean D <= -0.002 and sign-flip p <= 0.10"
+ },
+ "schema": "segarecomp.seg077.partial.results.v1",
+ "sign_flip_p": 0.222656
+}

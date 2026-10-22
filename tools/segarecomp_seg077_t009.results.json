@@ -1,0 +1,89 @@
+{
+ "chuck_rock_final_v2": {
+  "code_source": "execution (X) ~ all; static V 2 bytes",
+  "mixed": 29,
+  "negative_cells": 1088,
+  "novel_trigram_cells": 0,
+  "positive_cells": 298,
+  "positive_fraction": 0.0364
+ },
+ "data_boundary": "aggregates only",
+ "recommendation": "STOP_ACQUISITION",
+ "schema": "segarecomp.seg077.t009.results.v1",
+ "step1_measurement": {
+  "decoder_independence": "v1/v2-pre used Capstone only as fallback and counted its dc.w pseudo-op as a decode; fixed: CPU, m68k-disasm and Capstone on every instruction, >=1 genuine independent decode required",
+  "v1_IP_admission": "IP admitted by v1 on 1,532 exposed bytes; 96% wrong on the development set under corrected measurement (88 wrong roots -> 73K inherited instructions)",
+  "v1_score_bias": "confirmed: predictions over reference-unknown counted in the denominator only (tests/segarecomp_genesis_static_test.py); no effect on the v1 exposed-set decision (complete truth) but development rates were understated"
+ },
+ "step2_diagnosis": {
+  "exposed_errors_v1_set": "3 direct-flow instructions, 4 table-boundary bytes",
+  "ghidra": {
+   "conclusion": "loader/seeding are not the limit; Ghidra's discovery is ~10x above the admission error bar",
+   "recipe_only_exposed": {
+    "false_start_rate_known": 0.01119,
+    "recall_starts": 0.5195
+   },
+   "vector_seeded_exposed": {
+    "false_start_rate_known": 0.01103,
+    "recall_starts": 0.5327
+   }
+  },
+  "negatives": "static negative cells are almost entirely trivial padding (development 2,657 trivial vs 58 hard; exposed 847 vs 24)",
+  "rejected_tiers": {
+   "CD": "97 wrong dynamic-call fall-throughs (3.8%)",
+   "DC": "blob provenance, 25% of 1.5 MB",
+   "DREF": "28%",
+   "G": "207 wrong roots + 280 inherited + 21 table (0.28%)",
+   "IL": "58%",
+   "P": "1.9%",
+   "PTD": "3.5%"
+  }
+ },
+ "step3_indirect_dispatch": {
+  "chuck_rock_sites": "2 multi-target JSR (A1) sites (3 and 8 observed targets); pointer from RAM objects; all targets present in 24-byte ROM records; no bounds check; full set not provable",
+  "cpu_hours": "about 5 (traces), analysis small",
+  "d07_sites": "5 multi-target PC-indexed JMP sites (19 targets, all true code); targets not stored as pointers; no record table",
+  "execution_precision_d07": "executed code 27,428 known bytes, 0 wrong, 8,173 true starts recalled",
+  "rt_verifier": "10 candidate roots on Chuck Rock (+152 starts, +4 positive cells); no source-backed precision measurable (0 candidates on d07): not admissible"
+ },
+ "step4_dynamic": {
+  "chuck_rock_cells": {
+   "plus_movie": {
+    "mixed": 29,
+    "nontrivial_negative": 486,
+    "positive": 298
+   },
+   "t001_exec_plus_static": {
+    "mixed": 25,
+    "nontrivial_negative": 278,
+    "positive": 290
+   }
+  },
+  "coverage": {
+   "movie_only": 843,
+   "movie_rom_pcs": 6289,
+   "t001_union_rom_pcs": 5609,
+   "union": 6452
+  },
+  "cpu_hours": 2.4,
+  "input": "public TAS input log (TASVideos 827M, Gens .gmv, 32,476 frames) replayed in MAME; deterministic (replica digests identical)",
+  "plateau": "5,705 PCs at 120 s vs 6,289 at 560 s (likely desync: TAS made in Gens)"
+ },
+ "step5_usefulness": {
+  "class": "NO_MEASURABLE_EFFECT",
+  "folds": 11,
+  "mean_D": -0.017235,
+  "plan": "tools/segarecomp_seg077_partial.plan.json (d24a1a1e...)",
+  "sign_flip_p": 0.222656
+ },
+ "task": "SEG-077-T009 (operator-directed audit and spikes, 2026-10-22)",
+ "v2_admission": {
+  "admitted": [
+   "V",
+   "PT",
+   "FILL"
+  ],
+  "note": "measurement correction on already-seen data, two review rounds",
+  "plan": "tools/segarecomp_genesis_static_v2.t009.plan.json (c51293b6...)"
+ }
+}
