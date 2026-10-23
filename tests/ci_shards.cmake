@@ -34,7 +34,7 @@ set(SEGARECOMP_CI_TEST_COSTS
   genesis_z80_build_pipeline_falsify_test=20 sms_machine_tests=19 cpu_z80_decode_tests=18 genesis_audio_ym_test=18 z80_control_stack_dispatch_test=17
   genesis_z80_images_test=16 m68k_batch_c_static_slice_test=16 genesis_z80_build_pipeline_prepare_test=10 sms_native_build_failclosed_test=9
   sms_psg_differential_test=7 ci_shard_guard_test=1
-  sega_cd_bios_partition_test=110 sega_cd_bios_hardware_test=15 sega_cd_epoch_recipe_test=17 sega_cd_epoch_recipe_build_test=45
+  sega_cd_bios_partition_test=110 sega_cd_bios_hardware_test=15 sega_cd_epoch_recipe_test=17 sega_cd_epoch_recipe_build_test=45 sega_cd_template_run_test=40
   sega_cd_dual_cpu_test=150 genesis_cartridge_sram_generated_test=145  # measured on the Linux GCC shard runner (PR #128 runs 39210640179, 39214882993); unlisted they
   # defaulted to 3 s and could land in one shard together, where contention pushed a dual-CPU partition run past its 120 s timeout
   segarecomp_ml_v3_test=1 segarecomp_ml_v3_sgdk_test=1 segarecomp_ml_v3_train_test=1 segarecomp_ml_v3_diagnose_test=1

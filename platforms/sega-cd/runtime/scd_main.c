@@ -229,6 +229,20 @@ static void scd_hex(FILE *out, const uint8_t *bytes, uint32_t length) {
   for (i = 0; i < length; ++i) fprintf(out, "%02x", bytes[i]);
 }
 
+#define SCD_CAPTURE_RUN_SLOTS 128U /* kMaxTemplateRunSlots */
+
+/* SEG-079-T002: the 6 bytes at `address` are a live JMP (xxx).L slot: wholly RAM, opcode $4EF9, even operand. */
+static int scd_slot_live(const ScdMachine *m, unsigned cpu, uint32_t address) {
+  uint32_t i;
+  const uint8_t *b[6];
+  if ((address & 1U) != 0U) return 0;
+  for (i = 0; i < 6U; ++i) {
+    b[i] = scd_code_byte(m, cpu, address + i);
+    if (b[i] == NULL) return 0;
+  }
+  return *b[0] == 0x4EU && *b[1] == 0xF9U && (*b[5] & 1U) == 0U;
+}
+
 /* Build pass (ADR 0142 decisions 3 and 7): an unknown epoch image is written to <dir>/epoch.bin; a stop at a RAM PC with no compiled
  * variant for its live bytes is reported as a frontier. Both carry the identity of this program (the provenance chain). */
 static int scd_capture(ScdMachine *m, const ScdProgram *program, const char *dir) {
@@ -264,7 +278,22 @@ static int scd_capture(ScdMachine *m, const ScdProgram *program, const char *dir
     fprintf(f, "{\"kind\":\"frontier\",\"pass_identity\":\"%s\",\"cpu\":%u,\"pc\":%u,\"bytes\":\"", program->program_identity,
             m->stop.cpu, m->stop.pc);
     scd_hex(f, m->capture_bytes, 8U);
-    fprintf(f, "\"}\n");
+    fprintf(f, "\"");
+    /* SEG-079-T002 (ADR 0180): when the stopped instruction is a JMP (xxx).L slot ($4EF9, even operand), also report the bounded
+     * contiguous run of such live slots (6-byte stride, wholly RAM) that contains it, so one admission can cover a jump-slot table. */
+    if (m->capture_bytes[0] == 0x4EU && m->capture_bytes[1] == 0xF9U && (m->capture_bytes[5] & 1U) == 0U) {
+      uint32_t first = m->stop.pc, last = m->stop.pc; /* slot addresses */
+      uint8_t buffer[SCD_CAPTURE_RUN_SLOTS * 6U];
+      uint32_t slots = 0U, i;
+      while (last - first < (SCD_CAPTURE_RUN_SLOTS - 1U) * 6U && first >= 6U && scd_slot_live(m, m->stop.cpu, first - 6U)) first -= 6U;
+      while (last - first < (SCD_CAPTURE_RUN_SLOTS - 1U) * 6U && last <= 0x00FFFFF0U && scd_slot_live(m, m->stop.cpu, last + 6U)) last += 6U;
+      slots = (last - first) / 6U + 1U;
+      for (i = 0; i < slots * 6U; ++i) buffer[i] = *scd_code_byte(m, m->stop.cpu, first + i);
+      fprintf(f, ",\"run\":{\"base\":%u,\"slots\":%u,\"bytes\":\"", first, slots);
+      scd_hex(f, buffer, slots * 6U);
+      fprintf(f, "\"}");
+    }
+    fprintf(f, "}\n");
     return fclose(f) == 0;
   }
   return 1;

@@ -11,7 +11,8 @@
 //   - epoch images: `bounded_build_time_materialization`, the PRG RAM observed at the sub runnable epoch by a build pass; or (SEG-079,
 //     ADR 0179) `static_proof`, an image reconstructed from the BIOS image by a recipe (epoch_recipe.hpp), with no pass identity. Both are
 //     verified whole against the live PRG RAM at the epoch;
-//   - operand templates: `bounded_build_time_materialization` (a build-pass RAM frontier), verification `structural`.
+//   - operand templates: `bounded_build_time_materialization` (a build-pass RAM frontier), verification `structural`; SEG-079-T002 (ADR 0180):
+//     one record may be a bounded run of contiguous JMP (xxx).L slots (same authority and verification, every slot guarded individually).
 // Every image is admitted by broad AOT (each aligned start the CPU owner decodes, lifts and lowers is a compiled entry; admission
 // is not a claim that the bytes are code). RAM images are verified per instruction (exact bytes) before each instruction runs.
 // Admissions form a provenance chain: each carries the identity of the program whose build pass produced it, and that identity
@@ -35,7 +36,9 @@ namespace segarecomp::machine::sega_cd {
 inline constexpr std::uint32_t kBiosWindowBytes = 0x20000U;   // main $000000-$01FFFF (contract section 3)
 inline constexpr std::uint32_t kBiosMinimumBytes = 0x200U;    // vector table + system header
 inline constexpr std::uint32_t kMaxEpochImages = 4U;          // ADR 0142 decision 8
-inline constexpr std::uint32_t kMaxOperandTemplates = 64U;
+inline constexpr std::uint32_t kMaxOperandTemplates = 256U;   // template SLOTS (SEG-079-T002, ADR 0180: was 64 single-instruction records, ADR 0142 decision 8)
+inline constexpr std::uint32_t kMaxTemplateRunSlots = 128U;   // slots in one run record (SEG-079-T002)
+inline constexpr std::uint32_t kTemplateSlotBytes = 6U;       // JMP (xxx).L
 inline constexpr std::uint32_t kMaxCopyImages = 8U;
 inline constexpr std::uint32_t kMaxDiscImages = 16U;           // SEG-064-T004
 inline constexpr std::uint32_t kEpochGranule = 0x100U;        // snapshot length granule (scd_prg_snapshot_length)
@@ -85,7 +88,9 @@ struct Admission {
   std::string pass_identity;            // identity of the program whose build pass observed it
   Processor processor{Processor::sub};  // operand_template: the processor; epoch: always sub
   std::uint32_t address{};              // operand_template: the instruction address; epoch: 0 (PRG RAM base)
-  std::vector<std::uint8_t> bytes;      // epoch: the PRG RAM snapshot; operand_template: the observed live bytes (>= 6)
+  std::vector<std::uint8_t> bytes;      // epoch: the PRG RAM snapshot; operand_template: the observed live bytes (>= 6; a run: 6 * slots)
+  std::uint32_t slots{1};               // operand_template: 1 = one instruction at `address`; >1 (SEG-079-T002, ADR 0180) = a run of that many
+                                        // contiguous JMP (xxx).L slots at a 6-byte stride from `address`, `bytes` exactly 6 * slots
   EpochRecipe recipe;                   // epoch_recipe: the image is reconstructed from the BIOS image (no pass identity, bytes ignored)
 };
 
@@ -104,7 +109,8 @@ enum class BiosProfileError : std::uint8_t {
   provenance_mismatch,    // an admission's pass identity is not the identity of the program before it
   epoch_recipe_invalid,   // SEG-079: the recipe does not reconstruct a whole-snapshot image from the BIOS image (index = admission)
   epoch_invalid,          // empty, longer than PRG RAM, not a whole snapshot (granule / trailing zero rule) or too many
-  template_invalid,       // not exactly one JMP (xxx).W/.L at an even RAM address of its processor, duplicate, or too many
+  template_invalid,       // not exactly one JMP (xxx).W/.L at an even RAM address of its processor, duplicate, or too many; a run: any slot not
+                          // JMP (xxx).L with an even operand, a run over kMaxTemplateRunSlots, or an overlap
   image_validation,
   partition_invalid,      // a partition window that is not a power of two in [kMinPartitionWindow, kMaxPartitionWindow]
 };

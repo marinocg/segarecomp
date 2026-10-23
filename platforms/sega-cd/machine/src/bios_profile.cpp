@@ -145,7 +145,8 @@ std::string identity_text(const DiscImage &disc, const BiosProfileInputs &inputs
     else if (a.kind == AdmissionKind::epoch)
       t << "epoch " << a.pass_identity << " " << a.bytes.size() << " " << sha256_hex(a.bytes) << "\n";
     else
-      t << "template " << a.pass_identity << " " << processor_name(a.processor) << " " << a.address << " " << bytes_hex(a.bytes) << "\n";
+      t << (a.slots > 1U ? "templaterun " : "template ") << a.pass_identity << " " << processor_name(a.processor) << " " << a.address << " "
+        << (a.slots > 1U ? std::to_string(a.slots) + " " : std::string()) << bytes_hex(a.bytes) << "\n";
   }
   return t.str();
 }
@@ -263,11 +264,27 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
       images.push_back(Image{Processor::sub, "epoch" + std::to_string(epochs - 1U), std::string(), ImageAuthority::bounded_build_time_materialization, true,
                              0U, a.bytes, true});
     } else {
-      auto t = decode_template(a);
-      if (!t || templates.size() >= kMaxOperandTemplates) return fail(BiosProfileError::template_invalid, i);
-      for (const auto &other : templates)
-        if (other.processor == t->processor && other.address == t->address) return fail(BiosProfileError::template_invalid, i);
-      templates.push_back(std::move(*t));
+      // SEG-079-T002 (ADR 0180): a record is one instruction or a bounded run of contiguous JMP (xxx).L slots. Every slot is decoded and
+      // admitted exactly as a single record would be (own opcode-word guard, live operand, compiled-destination check); the run only
+      // batches the admission. A run that does not re-validate slot by slot is refused whole.
+      if (a.slots == 0U || a.slots > kMaxTemplateRunSlots || (a.slots > 1U && a.bytes.size() != std::size_t{a.slots} * kTemplateSlotBytes))
+        return fail(BiosProfileError::template_invalid, i);
+      for (std::uint32_t slot = 0; slot < a.slots; ++slot) {
+        Admission one = a;
+        one.slots = 1U;
+        if (a.slots > 1U) {
+          const auto first = a.bytes.begin() + static_cast<std::ptrdiff_t>(slot * kTemplateSlotBytes);
+          one.address = a.address + slot * kTemplateSlotBytes;
+          one.bytes.assign(first, first + kTemplateSlotBytes);
+          if (one.bytes[0] != 0x4EU || one.bytes[1] != 0xF9U || (one.bytes[5] & 1U) != 0U)  // JMP (xxx).L with an even operand only
+            return fail(BiosProfileError::template_invalid, i);
+        }
+        auto t = decode_template(one);
+        if (!t || templates.size() >= kMaxOperandTemplates) return fail(BiosProfileError::template_invalid, i);
+        for (const auto &other : templates)
+          if (other.processor == t->processor && other.address == t->address) return fail(BiosProfileError::template_invalid, i);
+        templates.push_back(std::move(*t));
+      }
     }
   }
 

@@ -362,6 +362,23 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
         if (!byte) return bad("admit", "template_syntax");
         a.bytes.push_back(static_cast<std::uint8_t>(*byte));
       }
+    } else if (f.size() == 6U && f[0] == "template-run") {  // SEG-079-T002 (ADR 0180): template-run:<pass>:<cpu>:<pc>:<slots>:<6*slots bytes hex>
+      const auto proc = parse_processor(f[2]);
+      const auto pc = parse_u32(f[3]);
+      const auto slots = parse_u32(f[4]);
+      if (!proc || !pc || !slots || *slots < 2U || *slots > scd::kMaxTemplateRunSlots ||
+          f[5].size() != std::size_t{*slots} * scd::kTemplateSlotBytes * 2U)
+        return bad("admit", "template_syntax");
+      a.kind = scd::AdmissionKind::operand_template;
+      a.pass_identity = f[1];
+      a.processor = *proc;
+      a.address = *pc;
+      a.slots = *slots;
+      for (std::size_t i = 0; i < f[5].size(); i += 2U) {
+        const auto byte = parse_u32("0x" + f[5].substr(i, 2));
+        if (!byte) return bad("admit", "template_syntax");
+        a.bytes.push_back(static_cast<std::uint8_t>(*byte));
+      }
     } else {
       return bad("admit", "admit_syntax");
     }
