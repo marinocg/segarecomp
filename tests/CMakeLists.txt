@@ -1221,6 +1221,13 @@ set_property(TEST sega_cd_timing_convention_test APPEND PROPERTY LABELS full fas
 add_test(NAME sega_cd_refresh_skip_variant_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_refresh_skip_variant_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_refresh_skip_variant_test APPEND PROPERTY LABELS full fast)
+# SEG-079 (ADR 0178/0179): the epoch-image recipe (independent Kosinski decoder, fail-closed schema) and the provenance classifier on synthetic inputs.
+add_test(NAME sega_cd_epoch_recipe_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_epoch_recipe_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_epoch_recipe_test APPEND PROPERTY LABELS full fast)
+add_test(NAME sega_cd_epoch_recipe_build_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_epoch_recipe_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_epoch_recipe_build_test APPEND PROPERTY LABELS full)
 # SEG-062-T005 (Checkpoint C): CDD/CDC sector delivery, CDC DMA into Word RAM, the main CPU and the Genesis VDP frame; liveness,
 # start-up disc identity and typed CD failures.
 add_test(NAME sega_cd_disc_to_frame_test COMMAND ${Python3_EXECUTABLE}

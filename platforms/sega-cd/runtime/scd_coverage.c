@@ -156,6 +156,32 @@ void scd_trace_close(ScdMachine *m) {
   m->access_trace = NULL;
 }
 
+/* SEG-079 diagnostic: binary RAM write / BIOS read log (see scd_runtime.h). */
+int scd_wlog_open(ScdMachine *m, const char *path) {
+  m->write_log = fopen(path, "wb");
+  return m->write_log == NULL;
+}
+
+void scd_wlog(ScdMachine *m, uint32_t kind, uint32_t cpu, uint32_t offset, uint32_t width, uint32_t value, uint32_t pc) {
+  uint8_t r[16];
+  uint32_t k;
+  r[0] = (uint8_t)kind;
+  r[1] = (uint8_t)width;
+  r[2] = (uint8_t)cpu;
+  r[3] = 0U;
+  for (k = 0; k < 4U; ++k) {
+    r[4U + k] = (uint8_t)(offset >> (8U * k));
+    r[8U + k] = (uint8_t)(value >> (8U * k));
+    r[12U + k] = (uint8_t)(pc >> (8U * k));
+  }
+  (void)fwrite(r, 1U, sizeof r, (FILE *)m->write_log);
+}
+
+void scd_wlog_close(ScdMachine *m) {
+  if (m->write_log != NULL) fclose((FILE *)m->write_log);
+  m->write_log = NULL;
+}
+
 /* Event log: "<vertical-blank onsets so far> <event> <detail hex>" per event. */
 int scd_event_open(ScdMachine *m, const char *path) {
   m->event_log = fopen(path, "w");

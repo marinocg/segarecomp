@@ -366,7 +366,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   const char *capture_dir = NULL;
   uint64_t capture_onsets[8];
   unsigned capture_count = 0U;
-  const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *event_path = NULL, *backup_ram_path = NULL;
+  const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *wlog_path = NULL, *event_path = NULL, *backup_ram_path = NULL;
   const char *input_script_path = NULL, *input_log_path = NULL;
   unsigned set_count = 0, i;
   uint64_t budget = 0U, slice_ticks = 0U, slice_seed = 0U, until_tick = UINT64_MAX;
@@ -403,6 +403,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     else if (strcmp(flag, "--coverage") == 0) coverage_path = value;
     else if (strcmp(flag, "--access-trace") == 0) trace_path = value;
     else if (strcmp(flag, "--event-log") == 0) event_path = value;
+    else if (strcmp(flag, "--ram-write-log") == 0) wlog_path = value;     /* SEG-079 diagnostic (local only) */
     else if (authentic != NULL && strcmp(flag, "--bios") == 0) bios_path = value;           /* SEG-064-T002 */
     else if (authentic != NULL && strcmp(flag, "--materialize-dir") == 0) materialize_dir = value;
     else return 2;
@@ -460,6 +461,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   scd_overlay_attach(&machine, overlays);
   if (coverage_path != NULL && scd_coverage_enable(&machine) != 0) return 1;
   if (trace_path != NULL && scd_trace_open(&machine, trace_path) != 0) return 1;
+  if (wlog_path != NULL && scd_wlog_open(&machine, wlog_path) != 0) return 1;
   if (event_path != NULL && scd_event_open(&machine, event_path) != 0) return 1;
   for (i = 0; i < set_count; ++i)
     if (!scd_apply_set(&machine, sets[i])) return 2;
@@ -500,6 +502,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   scd_write_report(report, &machine, program, result, frame_digest);
   if (report != stdout && fclose(report) != 0) return 1;
   scd_trace_close(&machine);
+  scd_wlog_close(&machine);
   scd_event_close(&machine);
   scd_coverage_release(&machine);
   scd_machine_release(&machine);

@@ -140,6 +140,7 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
       /* SEG-064-T002 (ADR 0142): the verified BIOS image, when the profile maps one; past its end (or without one) bios_absent. */
       if (m->bios != NULL && a + width <= m->bios_size) {
         *value = scd_ram_get(m->bios, a, width);
+        if (m->write_log != NULL) scd_wlog(m, 3U, SCD_MAIN, a, width, *value, pc);
         /* SEG-064-T003: the level-4 vector reads $FFFF:<H-INT vector register> (GPGX scd_reset writes $FFFF over the boot ROM's $70
          * word and $A12006 owns its $72 word; contract section 16). */
         if (a >= 0x70U && a < 0x74U) {
@@ -154,6 +155,7 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
     offset = (uint32_t)m->ga.prg_bank * UINT32_C(0x20000) + (a - UINT32_C(0x20000));
     if (is_write) {
       scd_ram_put(m->prg_ram, offset, width, *value);
+      if (m->write_log != NULL) scd_wlog(m, 1U, SCD_MAIN, offset, width, *value, pc);
       SCD_OVERLAY_NOTE_WRITE(m, SCD_MEMORY_PRG, offset, width);
     } else {
       *value = scd_ram_get(m->prg_ram, offset, width);
@@ -176,6 +178,7 @@ static int scd_main_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_
     const uint32_t offset = address & 0xFFFFU;
     if (is_write) {
       scd_ram_put(m->work_ram, offset, width, *value);
+      if (m->write_log != NULL) scd_wlog(m, 2U, SCD_MAIN, offset, width, *value, pc);
       SCD_OVERLAY_NOTE_WRITE(m, SCD_MEMORY_WORK, offset, width);
     } else {
       *value = scd_ram_get(m->work_ram, offset, width);
@@ -228,6 +231,7 @@ static int scd_sub_bus(ScdMachine *m, uint32_t address, uint32_t width, int is_w
         return 0;
       }
       scd_ram_put(m->prg_ram, a, width, *value);
+      if (m->write_log != NULL) scd_wlog(m, 1U, SCD_SUB, a, width, *value, pc);
       SCD_OVERLAY_NOTE_WRITE(m, SCD_MEMORY_PRG, a, width);
     } else {
       *value = scd_ram_get(m->prg_ram, a, width);

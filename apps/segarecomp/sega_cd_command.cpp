@@ -344,6 +344,11 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
       a.kind = scd::AdmissionKind::epoch;
       a.pass_identity = f[1];
       a.bytes = *bytes;
+    } else if (text.rfind("epoch-recipe:", 0) == 0) {  // SEG-079 (ADR 0179): a static producer, no pass identity
+      const auto recipe = scd::parse_epoch_recipe(text.substr(13));
+      if (!recipe) return bad("admit", "epoch_recipe_syntax");
+      a.kind = scd::AdmissionKind::epoch_recipe;
+      a.recipe = *recipe;
     } else if (f.size() == 5U && f[0] == "template") {
       const auto proc = parse_processor(f[2]);
       const auto pc = parse_u32(f[3]);

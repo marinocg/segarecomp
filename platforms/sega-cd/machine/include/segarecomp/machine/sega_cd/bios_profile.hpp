@@ -8,7 +8,9 @@
 //   - copy images: `static_proof`, a verbatim copy of a ROM span declared by an explicit descriptor, checked against the ROM;
 //   - disc images (SEG-064-T004): `immutable_input`, an extent of the external disc's track 1 that is placed in a processor's RAM
 //     (the disc's identity is verified at start-up, so the bytes are immutable inputs; verification is per instruction, byte identity);
-//   - epoch images: `bounded_build_time_materialization`, the PRG RAM observed at the sub runnable epoch by a build pass;
+//   - epoch images: `bounded_build_time_materialization`, the PRG RAM observed at the sub runnable epoch by a build pass; or (SEG-079,
+//     ADR 0179) `static_proof`, an image reconstructed from the BIOS image by a recipe (epoch_recipe.hpp), with no pass identity. Both are
+//     verified whole against the live PRG RAM at the epoch;
 //   - operand templates: `bounded_build_time_materialization` (a build-pass RAM frontier), verification `structural`.
 // Every image is admitted by broad AOT (each aligned start the CPU owner decodes, lifts and lowers is a compiled entry; admission
 // is not a claim that the bytes are code). RAM images are verified per instruction (exact bytes) before each instruction runs.
@@ -25,6 +27,7 @@
 
 #include "segarecomp/disc.hpp"
 #include "segarecomp/machine/sega_cd/boot_images.hpp"
+#include "segarecomp/machine/sega_cd/epoch_recipe.hpp"
 #include "segarecomp/recompiler/executable_image.hpp"
 
 namespace segarecomp::machine::sega_cd {
@@ -75,7 +78,7 @@ struct DiscImageSpec {
   std::vector<std::uint8_t> bytes;  // the extent as read from the verified disc at build time (length bytes)
 };
 
-enum class AdmissionKind : std::uint8_t { epoch, operand_template };
+enum class AdmissionKind : std::uint8_t { epoch, operand_template, epoch_recipe };  // epoch_recipe: SEG-079 (ADR 0179), a static producer
 
 struct Admission {
   AdmissionKind kind{AdmissionKind::epoch};
@@ -83,6 +86,7 @@ struct Admission {
   Processor processor{Processor::sub};  // operand_template: the processor; epoch: always sub
   std::uint32_t address{};              // operand_template: the instruction address; epoch: 0 (PRG RAM base)
   std::vector<std::uint8_t> bytes;      // epoch: the PRG RAM snapshot; operand_template: the observed live bytes (>= 6)
+  EpochRecipe recipe;                   // epoch_recipe: the image is reconstructed from the BIOS image (no pass identity, bytes ignored)
 };
 
 struct BiosProfileInputs {
@@ -98,6 +102,7 @@ enum class BiosProfileError : std::uint8_t {
   copy_invalid,           // descriptor outside the ROM or the processor's RAM, odd, empty, or too many
   disc_image_invalid,     // SEG-064-T004: extent outside the processor's RAM (main: work RAM or, SEG-071-T001, the 2M Word RAM view), odd, empty, no system area, or too many
   provenance_mismatch,    // an admission's pass identity is not the identity of the program before it
+  epoch_recipe_invalid,   // SEG-079: the recipe does not reconstruct a whole-snapshot image from the BIOS image (index = admission)
   epoch_invalid,          // empty, longer than PRG RAM, not a whole snapshot (granule / trailing zero rule) or too many
   template_invalid,       // not exactly one JMP (xxx).W/.L at an even RAM address of its processor, duplicate, or too many
   image_validation,
