@@ -20,6 +20,9 @@ static const char *dir;
 #define MASTER UINT64_C(500000)
 #define LINE (UINT64_C(3420) * MASTER)
 #define FRAME (LINE * 262U)
+/* ADR 0177 decision 4: onset k (1-based) is at FIRST + (k - 1) * FRAME and the frame it ends began 224 lines earlier. */
+#define ONSET(k) (SCD_BIOS_FIRST_ONSET_MCLK * MASTER + ((uint64_t)(k)-1U) * FRAME)
+#define TOP(k) (ONSET(k) - 224U * LINE)
 
 static void row(int ok, const char *label) {
   printf("%s %s\n", ok ? "ok   " : "FAIL ", label);
@@ -91,14 +94,14 @@ int main(int argc, char **argv) {
   m = (ScdMachine *)calloc(1U, sizeof *m);
   if (m == NULL) return 2;
 
-  /* the frame whose display ends at onset 3: frame index 2, line L sampled at 2 * FRAME + L * LINE */
+  /* the frame whose display ends at onset 3: line L is sampled at TOP(3) + L * LINE */
   fresh(0x04U, 0x00U);
   row(scd_vdp_capture_request(m, 3U, dir) == 0, "capture request accepted (onset 3)");
   row(scd_vdp_capture_request(m, 1U, dir) == -1, "onset 1 is refused (no complete frame before it)");
-  run_until(2U * FRAME + 100U * LINE - 1U);
+  run_until(TOP(3) + 100U * LINE - 1U);
   port(0xC00004U, 4U, 0xC0020000U);
   port(0xC00000U, 2U, 0x0E00U); /* just before line 100 begins */
-  run_until(3U * FRAME);
+  run_until(ONSET(3));
   row(strstr(report(), "\"onset\":3,\"status\":\"written\",\"width\":256,\"height\":224,\"vram_display_changes\":0") != NULL,
       "report: onset 3 written, 256 x 224, VRAM at the start of display and at the onset byte-identical (endpoint comparison)");
   if (load("canon", 3U, canon, sizeof canon, &n)) {
@@ -126,16 +129,16 @@ int main(int argc, char **argv) {
   /* refusals */
   fresh(0x04U, 0x08U); /* shadow/highlight */
   scd_vdp_capture_request(m, 3U, dir);
-  run_until(3U * FRAME);
+  run_until(ONSET(3));
   row(strstr(report(), "\"status\":\"vdp_state_unsupported\"") != NULL, "shadow/highlight on the captured lines: vdp_state_unsupported");
   fresh(0x00U, 0x00U); /* register #0 bit 2 clear: palette-select mode */
   scd_vdp_capture_request(m, 3U, dir);
-  run_until(3U * FRAME);
+  run_until(ONSET(3));
   row(strstr(report(), "\"status\":\"vdp_state_unsupported\"") != NULL, "palette-select mode: vdp_state_unsupported");
   fresh(0x04U, 0x00U);
-  run_until(2U * FRAME + 10U * LINE);
+  run_until(TOP(3) + 10U * LINE);
   scd_vdp_capture_request(m, 3U, dir); /* its frame began before the request */
-  run_until(3U * FRAME);
+  run_until(ONSET(3));
   row(strstr(report(), "\"status\":\"lines_incomplete\"") != NULL, "a frame already in progress at the request: lines_incomplete");
 
   scd_vdp_release(m);

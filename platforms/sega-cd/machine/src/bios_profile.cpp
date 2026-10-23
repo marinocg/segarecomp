@@ -383,6 +383,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
                     << "U) != 0) return 1;\n";
         // SEG-064-T004: with an application entry the same selection and byte guard can run without the instruction body (verify only)
         if (inputs.application_entry != 0U) functions << "  if (m->verify_only) return 0;\n";
+        if (cpu == 0U) functions << v.lowered.refresh_skip;  // ADR 0177: this verified variant's own refresh-skip cycles
         functions << v.lowered.slots << v.lowered.body << "  cpu->pc = pc;\n  return scd_retire(m, " << k << ", (uint32_t)("
                   << v.lowered.timing << "));\n}\n";
         ++result.functions;

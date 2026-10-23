@@ -3,7 +3,8 @@
 
 The machine input's time is an absolute machine tick since reset. The vertical-blank onsets of the BIOS-image profile are exactly
 periodic: onset number n (1-based) is at ONSET + (n - 1) * FRAME ticks (contract section 16), with 500,000 ticks per master clock,
-3,420 master clocks per line, 262 lines per frame and the onset at the start of line 224. This tool converts "press at the onset
+3,420 master clocks per line and 262 lines per frame; the first onset is 111,858 master clocks after power-on (ADR 0177 decision 4: the main
+processor leaves reset 784,182 master clocks into the frame whose origin is the onset). This tool converts "press at the onset
 that follows `--base-onsets` + N onsets, hold H frames" into the two absolute ticks, so that a schedule fixed in frames (ADR 0148)
 is expressed in the one canonical time the runtime accepts.
 
@@ -16,7 +17,7 @@ import sys
 MASTER_TICKS = 500_000
 LINE_MASTER = 3420
 FRAME_TICKS = LINE_MASTER * 262 * MASTER_TICKS         # 448,020,000,000
-ONSET_TICKS = LINE_MASTER * 224 * MASTER_TICKS         # 383,040,000,000
+ONSET_TICKS = (LINE_MASTER * 262 - 784_182) * MASTER_TICKS  # 55,929,000,000: the first onset
 BUTTONS = ("UP", "DOWN", "LEFT", "RIGHT", "A", "B", "C", "START")
 
 

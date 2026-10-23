@@ -177,7 +177,7 @@ static int scd_gfx_start(ScdMachine *m, uint32_t trace_base, uint32_t pc) {
   g->base = m->now;
   h = (uint32_t)(g->h_dots & 0x1FFU);
   offset = (uint32_t)(g->offset & 3U);
-  g->line_ticks = (uint64_t)SCD_GFX_CYCLES_PER_ACCESS * (4U + 2U * h + ((h + offset + 3U) >> 2)) * SCD_SUB_CYCLE_TICKS;
+  g->line_ticks = (uint64_t)SCD_GFX_CYCLES_PER_ACCESS * (4U + 2U * h + ((h + offset + 3U) >> 2)) * scd_sub_cycle_ticks(m);
   g->lines_left = (uint8_t)(g->v_lines & 0xFFU);
   g->busy = 1U;
   scd_log(m, 0xB1U, trace_base, g->lines_left);

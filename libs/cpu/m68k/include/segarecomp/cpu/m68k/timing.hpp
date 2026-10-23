@@ -85,6 +85,17 @@ m68k_instruction_timing(const M68kIrOperation &operation) noexcept;
 // `M68kInstructionTiming::exception_entry_cycles`), or nullopt when the form takes none / has no published EA cell.
 [[nodiscard]] std::optional<std::uint32_t> m68k_exception_entry_cycles(const M68kIrOperation &operation) noexcept;
 
+// SEG-071-T002 (ADR 0177): the instruction classes after which a platform whose bus refresh the CPU does not model may owe a
+// refresh-deadline adjustment: a register-count shift/rotate (2 cycles per count) and MOVEM.L (8 cycles per register). Decided from the
+// lifted operation at build time; a platform never inspects guest instruction bytes to find the class.
+enum class M68kLongInstructionKind : std::uint8_t { none, register_count_shift, movem_long };
+struct M68kLongInstructionClass {
+  M68kLongInstructionKind kind = M68kLongInstructionKind::none;
+  std::uint8_t count_register = 0U;  // register_count_shift: the Dn holding the runtime count (count = Dn & 63, 2 cycles each)
+  std::uint8_t registers = 0U;       // movem_long: the number of registers in the decoded mask (8 cycles each)
+};
+[[nodiscard]] M68kLongInstructionClass m68k_long_instruction_class(const M68kIrOperation &operation) noexcept;
+
 // Table 8-1 effective-address cells.  Dynamic instruction timing expressions
 // consume this typed CPU fact rather than duplicating an EA timing table in a
 // machine/codegen owner.

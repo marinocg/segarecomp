@@ -65,15 +65,15 @@ def main():
             if line.startswith("FAIL"):
                 print("      " + line)
 
-        # ---- the onset-schedule author: ticks derived by hand (ONSET = 224 lines * 3420 * 500,000; FRAME = 262 lines) ----
+        # ---- the onset-schedule author: ticks derived by hand (ONSET = (262 * 3420 - 784,182) * 500,000, ADR 0177 decision 4; FRAME = 262 lines) ----
         tool = ROOT / "tools" / "sega_cd_input_script.py"
-        text = subprocess.run([sys.executable, str(tool), "onset", "--base-onsets", "1197", "--press", "480", "--hold", "6"],
+        text = subprocess.run([sys.executable, str(tool), "onset", "--base-onsets", "1202", "--press", "480", "--hold", "6"],
                               capture_output=True, text=True).stdout
-        onset = 224 * 3420 * 500_000
+        onset = (262 * 3420 - 784_182) * 500_000
         frame = 262 * 3420 * 500_000
-        want = "segarecomp-input-script 1\n%d 1 press START\n%d 1 release START\n" % (onset + 1676 * frame, onset + 1682 * frame)
-        check(frame == 448_020_000_000 and onset == 383_040_000_000 and text == want,
-              "the onset-schedule author: press at onset 1677, release at onset 1683 (%s)" % text.replace("\n", " | "))
+        want = "segarecomp-input-script 1\n%d 1 press START\n%d 1 release START\n" % (onset + 1681 * frame, onset + 1687 * frame)
+        check(frame == 448_020_000_000 and onset == 55_929_000_000 and text == want,
+              "the onset-schedule author: press at onset 1682, release at onset 1688 (%s)" % text.replace("\n", " | "))
         check(subprocess.run([sys.executable, str(tool), "onset", "--base-onsets", "0", "--press", "0", "--hold", "6"],
                              capture_output=True).returncode == 2, "the author refuses an onset number below 1")
 

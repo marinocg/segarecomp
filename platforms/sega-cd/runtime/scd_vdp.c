@@ -58,12 +58,17 @@ typedef struct ScdVdpHost {
   uint8_t vram_line0[GENESIS_VDP_VRAM_BYTES];
   GenesisFrameArtifact frame;
   uint8_t dma_armed;           /* SEG-065-T002: the access being routed performs a 68K->VDP DMA */
+  /* SEG-071-T002 (ADR 0177): the reference's cycle-accurate VDP port timing (core/vdp_ctrl.c), BIOS-image profile: the data-port write
+   * FIFO (per frame, in master clocks since the frame's origin, the onset) and the end of a VRAM fill (the DMA-busy status bit). */
+  uint32_t fifo_cycles[4];
+  uint32_t fifo_idx;
+  uint64_t fill_end;           /* tick at which the last fill ends (0: none in flight) */
 } ScdVdpHost;
 
 int scd_vdp_init(ScdMachine *m) {
   ScdVdpHost *h = (ScdVdpHost *)calloc(1U, sizeof(ScdVdpHost));
   m->vdp_host = h;
-  m->vdp_onset = SCD_ONSET_TICKS;
+  m->vdp_onset = m->bios != NULL ? SCD_BIOS_FIRST_ONSET_MCLK * SCD_MASTER_TICK_TICKS : SCD_ONSET_TICKS;
   if (h == NULL) return 1;
   h->capture_line = -1; /* SEG-065-T003: no line sampling until a requested frame begins */
   if (m->bios != NULL) {
@@ -230,11 +235,98 @@ static void scd_vdp_dma_registers_done(GenesisRuntime *host) {
   ((ScdVdpHost *)host)->dma_armed = 0U;
 }
 
+/* ---- SEG-071-T002 (ADR 0177): VDP data-port FIFO and VRAM-fill timing of the BIOS-image profile --------------------------------------
+ * GPGX core/vdp_ctrl.c vdp_68k_data_w_m5 / vdp_68k_ctrl_r / vdp_dma_update, integer master clocks counted from the frame origin (the
+ * last vertical-blank onset, as in scd_vdp_dma_end). `mcycles_vdp` of GPGX is the start of the line in which the instruction begins. */
+static const uint32_t scd_fifo_timing_h32[] = {230, 510, 810, 970, 1130, 1450, 1610, 1770, 2090, 2250, 2410, 2730, 2890, 3050, 3350, 3370,
+                                               3420 + 230, 3420 + 510, 3420 + 810, 3420 + 970, 3420 + 1130, 3420 + 1450, 3420 + 1610,
+                                               3420 + 1770, 3420 + 2090, 3420 + 2250, 3420 + 2410, 3420 + 2730};
+static const uint32_t scd_fifo_timing_h40[] = {352, 820, 948, 1076, 1332, 1460, 1588, 1844, 1972, 2100, 2356, 2484, 2612, 2868, 2996, 3124,
+                                               3364, 3380, 3420 + 352, 3420 + 820, 3420 + 948, 3420 + 1076, 3420 + 1332, 3420 + 1460,
+                                               3420 + 1588, 3420 + 1844, 3420 + 1972, 3420 + 2100, 3420 + 2356, 3420 + 2484};
+#define SCD_VDP_BLANK_LINES 37U /* the vertical-blank window of GPGX's frame (status bit 3 set): the first 37 lines from the origin */
+
+/* Master clocks since the frame origin at tick `t`. */
+static uint64_t scd_frame_mclk(const ScdMachine *m, uint64_t t) { return (t + SCD_FRAME_TICKS - m->vdp_onset) / SCD_MASTER_TICK_TICKS; }
+
+/* One data-port word write (GPGX vdp_68k_data_w_m5, restricted writes during the active display): the FIFO entry's read-out slot, and
+ * the stall of the processor when all four entries are in use (added to the instruction's `main_extra_ticks`). */
+static void scd_vdp_fifo_word_write(ScdMachine *m, ScdVdpHost *h, const GenesisRuntime *host) {
+  const uint16_t *r = host->devices.vdp.registers;
+  uint64_t cycles = scd_frame_mclk(m, m->now + m->main_extra_ticks);
+  const uint64_t line_base = (scd_frame_mclk(m, m->now) / 3420U) * 3420U; /* GPGX mcycles_vdp: the line of the instruction's start */
+  const uint32_t *timing = (r[12] & 1U) ? scd_fifo_timing_h40 : scd_fifo_timing_h32;
+  const uint32_t code = host->devices.vdp.data_port_transfer_code;
+  const uint32_t byte_access = (code & 0x06U) ? 0U : 1U;
+  uint32_t slot = 0U;
+  if (cycles < SCD_VDP_BLANK_LINES * 3420U || !(r[1] & 0x40U)) return; /* vertical blank or display disabled: unrestricted */
+  if (cycles < h->fifo_cycles[(h->fifo_idx + 3U) & 3U]) {
+    if (cycles < h->fifo_cycles[h->fifo_idx]) { /* all four entries in use: the processor waits for the oldest to be processed */
+      const uint64_t resume = (((uint64_t)h->fifo_cycles[h->fifo_idx] + 6U) / 7U) * 7U;
+      m->main_extra_ticks += (resume - cycles) * SCD_MASTER_TICK_TICKS;
+    }
+    cycles = h->fifo_cycles[(h->fifo_idx + 3U) & 3U];
+  }
+  cycles -= line_base;
+  while (cycles >= timing[slot]) slot++;
+  h->fifo_cycles[h->fifo_idx] = (uint32_t)(line_base + timing[slot + byte_access]);
+  h->fifo_idx = (h->fifo_idx + 1U) & 3U;
+}
+
+/* GPGX vdp_dma_update for a DMA fill started at tick `start` with `length` bytes: the tick at which the transfer ends. */
+static uint64_t scd_vdp_fill_end(const ScdMachine *m, const GenesisRuntime *host, uint64_t start, uint32_t length) {
+  static const uint32_t timing[2][2] = {{16U, 18U}, {166U, 204U}};
+  const uint32_t line = GENESIS_NTSC_MASTER_TICKS_PER_LINE, frame_lines = GENESIS_NTSC_LINES_PER_FRAME;
+  const uint16_t *r = host->devices.vdp.registers;
+  const uint32_t h40 = r[12] & 1U, display = (r[1] & 0x40U) != 0U;
+  const uint64_t frame_start = m->vdp_onset - SCD_FRAME_TICKS;
+  uint64_t cyc = scd_frame_mclk(m, start), frames = 0U;
+  uint32_t remaining = length;
+  {
+    const uint32_t l0 = (uint32_t)(cyc / line);
+    const uint32_t rate0 = timing[(l0 < SCD_VDP_BLANK_LINES) || !display][h40];
+    cyc += 2U * (line / rate0); /* the initial data-port write */
+  }
+  for (;;) {
+    const uint32_t l = (uint32_t)(cyc / line);
+    const int vblank = l < SCD_VDP_BLANK_LINES;
+    const uint32_t rate = timing[vblank || !display][h40];
+    const uint64_t window_end = vblank ? (uint64_t)SCD_VDP_BLANK_LINES * line : (uint64_t)(l + 1U) * line;
+    const uint64_t cap = ((window_end - cyc) * rate) / line;
+    if (remaining < cap) {
+      cyc += ((uint64_t)remaining * line) / rate;
+      break;
+    }
+    remaining -= (uint32_t)cap;
+    cyc = window_end;
+    if (remaining == 0U) break;
+    if (cyc >= (uint64_t)frame_lines * line) {
+      cyc -= (uint64_t)frame_lines * line;
+      frames += 1U;
+    }
+  }
+  return frame_start + (frames * frame_lines * line + cyc) * SCD_MASTER_TICK_TICKS;
+}
+
 int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
   GenesisRuntime *host = scd_host(m);
   GenesisRuntimeStop stop = {0};
   uint32_t routed = is_write ? *value : 0U;
+  uint32_t fill_length = 0U;
+  const uint16_t register1_before = host->devices.vdp.registers[1];
   scd_log(m, is_write ? 0x41U : 0x40U, address, routed);
+  if (m->bios != NULL && is_write && (address & ~3U) == 0xC00000U) {
+    /* SEG-071-T002 (ADR 0177): the FIFO entry (and possibly the stall) of each word, before the data is written; an armed VRAM fill
+     * starts with this write. */
+    ScdVdpHost *const h = (ScdVdpHost *)host;
+    const int fill = host->devices.vdp.dma.phase == GENESIS_VDP_DMA_BUSY && host->devices.vdp.dma.kind == GENESIS_VDP_DMA_VRAM_FILL;
+    uint32_t words = width == 4U ? 2U : 1U;
+    while (words-- != 0U) scd_vdp_fifo_word_write(m, h, host);
+    if (fill) {
+      fill_length = (host->devices.vdp.registers[19] & 0xFFU) | ((host->devices.vdp.registers[20] & 0xFFU) << 8);
+      if (fill_length == 0U) fill_length = 0x10000U;
+    }
+  }
   if (m->bios != NULL) {
     if (is_write && (address & ~3U) == 0xC00004U && width != 1U) {
       const int awaiting = host->devices.vdp.control_port_awaiting_second_word != 0U;
@@ -270,6 +362,26 @@ int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write
   if (genesis_route_access(host, address, scd_genesis_width(width), is_write ? GENESIS_ACCESS_WRITE : GENESIS_ACCESS_READ, &routed,
                            &stop) != GENESIS_ACCESS_OK)
     return scd_fail_access(m, SCD_MAIN, SCD_STOP_VDP_ACCESS_UNSUPPORTED, pc, address, width, is_write); /* SEG-064-T004: with its width and direction */
+  /* SEG-071-T002 (ADR 0177): GPGX m68k_set_irq_delay - enabling the vertical interrupt (register #1 IE0) while one is pending, from a MOVE
+   * that is not a MOVE.L, lets the next instruction execute before the interrupt is recognised ("IRQ latency"). */
+  if (m->bios != NULL && is_write && width != 4U && (address & ~3U) == 0xC00004U && !(register1_before & 0x20U) &&
+      (host->devices.vdp.registers[1] & 0x20U) && m->vint_pending)
+    m->main_irq_delay = 1U;
+  if (m->bios != NULL && fill_length != 0U && host->devices.vdp.dma.phase != GENESIS_VDP_DMA_BUSY)
+    ((ScdVdpHost *)host)->fill_end = scd_vdp_fill_end(m, host, m->now + m->main_extra_ticks, fill_length);
+  if (m->bios != NULL && !is_write && (address & ~3U) == 0xC00004U && width <= 2U) {
+    /* SEG-071-T002 (ADR 0177): GPGX vdp_68k_ctrl_r: the DMA-busy bit until the fill's end, and the FIFO empty / full bits at the
+     * instant of the read (the instruction's own cycles are counted: the read is taken as an 8-cycle instruction's). */
+    ScdVdpHost *const h = (ScdVdpHost *)host;
+    const uint64_t at = m->now + m->main_extra_ticks + UINT64_C(8) * SCD_MAIN_CYCLE_TICKS;
+    const uint64_t cycles = scd_frame_mclk(m, at);
+    uint32_t word = width == 2U ? routed : (address & 1U) ? routed : routed << 8;
+    word &= ~0x0302U;
+    if (h->fill_end != 0U && at < h->fill_end) word |= 0x0002U;
+    if (cycles >= h->fifo_cycles[(h->fifo_idx + 3U) & 3U]) word |= 0x0200U;
+    else if (cycles < h->fifo_cycles[h->fifo_idx]) word |= 0x0100U;
+    routed = width == 2U ? word : (address & 1U) ? (word & 0xFFU) : (word >> 8);
+  }
   if (!is_write) *value = routed;
   scd_vdp_dma_registers_done(host);
   if (m->bios != NULL && !is_write) scd_log(m, 0x42U, address, routed); /* the observed value is part of the device history */
@@ -288,6 +400,8 @@ static const uint8_t *scd_stream_byte(const ScdMachine *m, uint32_t address) {
   }
   return scd_code_byte(m, SCD_MAIN, address);
 }
+
+const uint8_t *scd_main_stream_byte(const ScdMachine *m, uint32_t address) { return scd_stream_byte(m, address); }
 
 static int scd_prefetch_word(const ScdMachine *m, uint32_t *word) {
   const uint32_t at = m->cpu[SCD_MAIN].prefetch;
@@ -324,6 +438,7 @@ int scd_main_device_access(ScdMachine *m, uint32_t address, uint32_t width, int 
   GenesisRuntimeStop stop = {0};
   uint32_t routed = is_write ? *value : 0U;
   scd_log(m, is_write ? 0x45U : 0x44U, address, routed);
+  if (address >= UINT32_C(0x00A00000) && address < UINT32_C(0x00A10000)) m->main_extra_ticks += SCD_MAIN_Z80_ACCESS_TICKS;
   if (!is_write && address < UINT32_C(0x00A10000) && m->z80_ran)
     return scd_fail_access(m, SCD_MAIN, SCD_STOP_MAIN_DEVICE_UNSUPPORTED, pc, address, width, 0); /* would observe the Z80 */
   /* Version register: a Mega-CD is attached, so bit 5 (DISK, "expansion unit") reads 0 (GTO1 I/O section; GPGX io_reset sets it only
@@ -516,24 +631,36 @@ int scd_vdp_capture_line_due(const ScdMachine *m, uint64_t until) {
   return m->bios != NULL && h != NULL && h->capture_line >= 0 && h->capture_line_tick <= until && h->capture_line_tick < m->vdp_onset;
 }
 
+uint64_t scd_frame_ticks_since_origin(const ScdMachine *m, uint64_t t) { return t + SCD_FRAME_TICKS - m->vdp_onset; }
+
 uint64_t scd_vdp_next_event(const ScdMachine *m) {
   const ScdVdpHost *h = (const ScdVdpHost *)m->vdp_host;
+  uint64_t next = m->vdp_onset;
   if (m->bios == NULL) return UINT64_MAX;
-  if (h != NULL && h->capture_line >= 0 && h->capture_line_tick < m->vdp_onset) return h->capture_line_tick;
-  return m->vdp_onset;
+  if (m->vint_at != 0U && m->vint_at < next) next = m->vint_at;
+  if (h != NULL && h->capture_line >= 0 && h->capture_line_tick < next) next = h->capture_line_tick;
+  return next;
 }
 
 void scd_vdp_event(ScdMachine *m) {
   GenesisRuntime *host = scd_host(m);
   ScdVdpHost *h = (ScdVdpHost *)m->vdp_host;
-  if (h->capture_line >= 0 && h->capture_line_tick < m->vdp_onset) { /* SEG-065-T003: an active line of a captured frame begins */
-    scd_capture_line(m);
+  if (h->capture_line >= 0 && h->capture_line_tick < m->vdp_onset && (m->vint_at == 0U || h->capture_line_tick < m->vint_at)) {
+    scd_capture_line(m); /* SEG-065-T003: an active line of a captured frame begins */
+    return;
+  }
+  if (m->vint_at != 0U && m->vint_at < m->vdp_onset) {
+    /* SEG-071-T002 (ADR 0177): the vertical interrupt is requested a fixed delay after the onset (GPGX VINT_Hxx_MCYCLE). */
+    m->vint_at = 0U;
+    m->vint_pending = 1U;
+    host->devices.vdp.status_register = (uint16_t)(host->devices.vdp.status_register | 0x0080U); /* F: vertical interrupt occurred */
+    scd_log(m, 0x91U, (uint32_t)m->vdp_frames, host->devices.vdp.registers[1]);
     return;
   }
   m->vdp_onset += SCD_FRAME_TICKS;
   m->vdp_frames += 1U;
-  m->vint_pending = 1U;
-  host->devices.vdp.status_register = (uint16_t)(host->devices.vdp.status_register | 0x0080U); /* F: vertical interrupt occurred */
+  m->vint_at = (m->vdp_onset - SCD_FRAME_TICKS) + ((host->devices.vdp.registers[12] & 1U) ? SCD_VINT_H40_MCLK : SCD_VINT_H32_MCLK) * SCD_MASTER_TICK_TICKS;
+  memset(h->fifo_cycles, 0, sizeof h->fifo_cycles); /* GPGX system_frame_scd: the VDP FIFO is empty at the frame's start */
   scd_log(m, 0x90U, (uint32_t)m->vdp_frames, host->devices.vdp.registers[1]);
   if (h->capture_count != 0U) {
     ScdFrameCapture *done = scd_capture_for(h, m->vdp_frames);

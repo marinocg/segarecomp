@@ -63,8 +63,8 @@ variant, an executable-image field or an emitter mode.
 | item | value | tag |
 | --- | --- | --- |
 | main CPU clock | MCLK / 7 = 7,670,453.57 Hz | V2 (GPGX, repository Genesis runtime) |
-| sub CPU clock | 12,500,000 Hz (50 MHz Sega CD master clock / 4) | V2 (GPGX `SCD_CLOCK` and `s68k` cycle scaling; MAME `SEGACD_CLOCK 12500000`) |
-| CDD interrupt rate | 75 Hz (one CD sector time) | V2 (GPGX `cdd.cycles` modulus; CDROM) |
+| sub CPU clock | 12,500,000 Hz (50 MHz Sega CD master clock / 4); the BIOS-image profile runs the sub line-locked, 796 cycles per video line (about 12.497 MHz), as the reference does (ADR 0177 decision 1) | V2 (GPGX `SCD_CLOCK` and `s68k` cycle scaling; MAME `SEGACD_CLOCK 12500000`); line-locked: G (GPGX `scd.cycles_per_line`) |
+| CDD interrupt rate | 75 Hz (one CD sector time); in the BIOS-image profile examined at video-line ends (average 209.38 lines, 209 or 210 between ticks) | V2 (GPGX `cdd.cycles` modulus; CDROM); line quantisation: G (GPGX `scd_update`) |
 | timer unit | 384 sub-CPU cycles = 30.72 us per count | V2 (GPGX `TIMERS_SCYCLES_RATIO 384*4` SCD cycles; MAME `30720` ns) |
 | CDC DMA rate | 4 sub-CPU cycles per byte, transferred in 8-byte groups | V1 (GPGX `DMA_CYCLES_PER_BYTE 16` SCD cycles citing MiSTer logic-analyser logs) |
 
@@ -72,6 +72,12 @@ Integer clock domain (ADR 0128): one **tick** is 1 / 26,846,587,500,000 s, the l
 rates (53,693,175, 12,500,000 and 75 Hz numerators). Exactly: main cycle = 3,500,000 ticks; sub cycle = 2,147,727 ticks;
 CDD sector = 357,954,500,000 ticks; timer unit = 384 sub cycles. All machine time is `uint64_t` ticks (190 hours of
 range). No floating point is used anywhere in timing.
+
+The BIOS-image profile (ADR 0177) changes two of these: its sub cycle is 2,148,241 ticks (796 per 1,710,000,000-tick line; the
+timer unit, stopwatch, CDC DMA and decoder and graphics durations are counted in it) and its drive tick is placed on the video-line
+grid: tick `k` after an anchor in line `L0` with `acc0 = -12 x` (sub cycles already run in that line) falls at the end of the first
+line `n` with `acc0 + 9,552 n >= 2,000,000 k` (power-on: `acc0 = 0`; a peripheral reset re-anchors). The synthetic profile keeps the
+values above.
 
 ## 3. Main CPU bus view (24-bit)
 
@@ -340,8 +346,9 @@ stops with `bios_absent`. The BIOS-image profile wires the VDP's level 6 (sectio
 
 ## 12. Timing approximations (recorded deviations, not hardware proof)
 
-- A bus access takes effect at the start time of its instruction; there is no wait-state, refresh, DMA or Word-RAM
-  contention modelling. Cross-CPU ordering is exact only at instruction granularity.
+- A bus access takes effect at the start time of its instruction; there is no Word-RAM contention modelling, and the synthetic profile
+  has no wait-state, refresh or DMA modelling. Cross-CPU ordering is exact only at instruction granularity. The BIOS-image profile adds
+  the main processor's bus conventions of ADR 0177 (below).
 - GPGX evaluates the 75 Hz drive clock, DMA progress and DMA completion at its emulation-slice boundaries; this profile
   evaluates them at their exact tick (DMA: 4 sub cycles per byte counted from the transfer's base tick, rounded up to whole
   bytes and down to 8-byte groups; completion at the first tick where the whole count is reached). Every Gate Array CDC/DMA
@@ -353,10 +360,10 @@ stops with `bios_absent`. The BIOS-image profile wires the VDP's level 6 (sectio
 - GPGX stops a CPU that polls a Gate Array register in a tight loop after three reads until the register is written (its idle-skip
   optimization); the reference's execution counts of such loops are therefore not comparable with a full-rate execution, which this
   runtime performs (SEG-064-T004: observed as 20x-1600x differences in a handful of poll loops, with identical resulting state).
-- The CDD 75 Hz clock ticks at its exact instant; GPGX processes it at line boundaries (SEG-064-T004: the reference had processed one tick
-  more at the same main instruction).
-- BIOS-image profile: a VDP fill has no duration (SEG-064-T003) - a guest poll for fill completion iterates once (the reference's fill
-  takes time: observed as the only per-address execution-count difference up to the sub release, ADR 0143). A 68K->VDP transfer
+- The CDD 75 Hz clock ticks at its exact instant in the synthetic profile; GPGX processes it at line boundaries, which the BIOS-image
+  profile does (SEG-064-T004 observed the reference processing one tick more at the same main instruction; ADR 0177 decision 1).
+- BIOS-image profile: a VDP fill takes the slot model's time and its busy status bit lasts as long (ADR 0177 decision 6; SEG-064-T003
+  had no duration, observed as the only per-address execution-count difference up to the sub release, ADR 0143). A 68K->VDP transfer
   (SEG-065-T002, ADR 0147) writes its data at the arming write but **freezes the main processor** for the transfer's duration by
   GPGX's slot model (`vdp_dma_update`): per line 16 (H32) / 18 (H40) access slots in the active display and 166 / 204 while blanked
   (vertical blank or display disabled), a VRAM word taking two slots, a CRAM/VSRAM word one with 161 / 198 on a blanked line; the
@@ -370,7 +377,19 @@ stops with `bios_absent`. The BIOS-image profile wires the VDP's level 6 (sectio
   (VRAM at the start of active display against VRAM at the vertical-blank onset, byte for byte; it is not a VRAM-write trace and does
   not count writes that restore the original byte or changes that do not survive to the onset); it was 0 at every compared frame, where
   the canonical frames independently equal the reference.
-  The vertical-blank onset is the Genesis runtime's NTSC schedule from machine time 0.
+  The vertical-blank onset schedule of the BIOS-image profile is the NTSC schedule with the phase of ADR 0177 decision 4: the first
+  onset 111,858 master clocks after power-on, the vertical interrupt 788 (H40) / 770 (H32) master clocks after each onset.
+
+- **BIOS-image profile, main-processor and VDP-port conventions (SEG-071-T002, ADR 0177; rule G = the reference's own source, hardware
+  measurement cited there).** The main processor's refresh delay (2 cycles when an instruction is about to execute at or after the
+  deadline, deadline +128 cycles; a long shift/rotate or MOVEM.L moves the deadline on by a period when it reaches it - the class and its cycles are a build-time
+  record of each verified executable variant, written by the generated instruction after its byte guard (the count register is read
+  before the instruction executes) and committed by the scheduler only for an instruction that retired; the runtime never classifies
+  guest bytes; division not modelled); one more cycle per main access to the Z80 window; the data-port FIFO (a stall until the oldest of four entries is read out;
+  full/empty status bits; emptied at each frame's start) and the VRAM-fill busy bit; one instruction executes before a vertical
+  interrupt enabled by a register-#1 MOVE (not MOVE.L) is recognised; an autovector interrupt exception takes 50..59 cycles by the
+  processor's cycle count within the frame mod 10 (both processors); a VDP status read is taken 8 cycles after its instruction starts.
+  Not modelled: the reference's idle-skip of a Gate Array poll loop and its line-chunk processor synchronisation; the VBLANK / HBLANK / odd-field status bits and the HV counter keep the Genesis host's old 224-line phase; the sub cycle is an integer (drift ~0.2 tick per cycle against exact per-line locking).
 
 ## 13. Unresolved items
 
@@ -442,13 +461,13 @@ synthetic post-BIOS profile.
 | main Genesis devices (SEG-064-T003, ADR 0143) | `$A00000-$A0FFFF` Z80 RAM, `$A10000-$A1001F` I/O, `$A11100`/`$A11200` Z80 BUSREQ/RESET, `$C00000-$C0001F` VDP (PSG at `$C00011`, HV counter) are the Genesis runtime device host's, its master clock = machine time / 500,000 ticks; version register bit 5 (DISK) reads 0; an I/O word read returns the register byte on both lanes; BUSACK's other bits are open bus; unsupported shapes stop `main_device_unsupported` | version bit V2 (GTO1, GPGX `io_reset`); BUSACK bits V1 (GPGX); routing C |
 | Z80 | never executed: BUSREQ/RESET and RAM writes only; once the Z80 has been runnable, a main read of the Z80 area stops `main_device_unsupported`; what a running Z80 would do through its 68000 bank window is not modelled (recorded deviation) | C |
 | VDP DMA | fill: the device's; 68K->VDP from the BIOS image or main work RAM (the host is fed from the Sega CD memory); Word RAM / PRG-window sources `vdp_dma_unsupported`; copy fail-closed; no duration (section 12) | sources V2 (GPGX, MAME); duration deviation C |
-| main interrupts | vertical-blank onset every frame (device event); VDP level 6 pending at every onset, requested while register #1 IE0 is set, cleared (with status F) by the acknowledge; accepted through the BIOS vectors (CPU-owned exception core); a register #0 write setting IE1 (H-interrupt) stops `interrupt_source_unsupported` at that write | pending rule G (section 13); acceptance V2 (UM68K) |
+| main interrupts | vertical-blank onset every frame (device event, ADR 0177 decision 4: first onset 111,858 master clocks after power-on); VDP level 6 pending a fixed delay after every onset, requested while register #1 IE0 is set, cleared (with status F) by the acknowledge; accepted through the BIOS vectors (CPU-owned exception core); a register #0 write setting IE1 (H-interrupt) stops `interrupt_source_unsupported` at that write | pending rule G (section 13); acceptance V2 (UM68K) |
 | H-INT vector `$A12006` | word register (initial `$FFFF`): written by main, read back; the level-4 autovector is `$FFFF:<register>`; reads of BIOS `$70`/`$71` return `$FFFF` and of `$72`/`$73` the register | V1 (GPGX `scd_reset`, `mem68k.c`; section 13) |
 | open bus | a main read nothing answers (empty cartridge slot `$400000-$7FFFFF`, unused areas) returns the instruction-stream word at the prefetch position (byte by A0; both halves of a long), stated per generated instruction where exact; otherwise, for the sub and in the synthetic profile `open_bus_read`; empty-slot writes are ignored | V1 (GPGX `m68k_read_bus_8/16`, section 13) |
 | exception into uncompiled RAM | the handler is entered and the dispatch stops `entry_not_compiled` at its PC (a build-pass RAM frontier, ADR 0142 decision 7) | C (ADR 0143 decision 9) |
 | sub-side boot hardware (SEG-064-T004) | the stopwatch, PCM write state, graphics ASIC with its level-1 interrupt, the CDD TOC/seek/pause/resume/jump commands and the CDC host-data transfer (sections 7, 8 and 17); 2M Word RAM owned by main as a VDP DMA source | G; C for the routing |
 | application handoff and after (SEG-064-T005) | without `--application-entry` the application runs through normal generated-native dispatch (section 18); `--until-tick <ticks>` ends a run at a machine-time instant with the result `deadline` (exit 11, no typed stop, resumable: identical under any deadline partition) | C (ADR 0145) |
-| timed standard-pad input (SEG-070-T002, ADR 0149) | `--input-script FILE` (optional; `--input-log FILE` writes the observation log): a text script of `<tick> <port> <press|release> <BUTTON>[,...]` lines under the header `segarecomp-input-script 1`, ticks absolute since reset (500,000 per master clock, 448,020,000,000 per NTSC frame), validated whole before any guest instruction (`input_refused`, exit 23, with the refusal class and line; also refused in the synthetic profile); a transition is a device event that sets the host's pad mask, processed before every other device event and before any processor instruction or interrupt acceptance at or after its tick, in script order, whatever the deadline partition; the Genesis controller pin model serves the pad (TH multiplexing, CTRL direction, data latch, 0 = pressed), so a processor access observes the state in force at its instruction's start tick; without the option no pad is ever pressed and every report is unchanged; with it the report gains an `input` object (events, applied, pad masks, data-port byte reads per port, observation count and FNV digest of the log) | rule C; protocol V2 (GTO1 I/O section, the Genesis hardware notes cited by the controller-I/O policy); the 3-button pad only (6-button and multitap protocols not modelled); a press the independent reference schedules at "frame entry + N" takes effect at the onset that opens that frame (ADR 0176 decision 3) |
+| timed standard-pad input (SEG-070-T002, ADR 0149) | `--input-script FILE` (optional; `--input-log FILE` writes the observation log): a text script of `<tick> <port> <press|release> <BUTTON>[,...]` lines under the header `segarecomp-input-script 1`, ticks absolute since reset (500,000 per master clock, 448,020,000,000 per NTSC frame), validated whole before any guest instruction (`input_refused`, exit 23, with the refusal class and line; also refused in the synthetic profile); a transition is a device event that sets the host's pad mask, processed before every other device event and before any processor instruction or interrupt acceptance at or after its tick, in script order, whatever the deadline partition; the Genesis controller pin model serves the pad (TH multiplexing, CTRL direction, data latch, 0 = pressed), so a processor access observes the state in force at its instruction's start tick; without the option no pad is ever pressed and every report is unchanged; with it the report gains an `input` object (events, applied, pad masks, data-port byte reads per port, observation count and FNV digest of the log) | rule C; protocol V2 (GTO1 I/O section, the Genesis hardware notes cited by the controller-I/O policy); the 3-button pad only (6-button and multitap protocols not modelled); a press the independent reference schedules at "frame entry + N" takes effect at the onset that opens that frame (ADR 0176 decision 3; onset numbering equals the reference's frame numbering, ADR 0177 decision 4) |
 | not modelled in this profile yet | the H-interrupt line counter, Z80 execution, 1M/sub-owned Word RAM VDP DMA, PCM sound and register reads, the font registers, CD-DA, and any application behaviour past the interval of section 18 | - |
 
 ## 17. Sub-side boot hardware (SEG-064-T004, ADR 0144)

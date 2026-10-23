@@ -334,11 +334,16 @@ int scd_retire(ScdMachine *m, uint32_t cpu, uint32_t cycles) {
     m->main_dma_until = 0U;
     m->main_dma_multi = 0U;
     if (multi) {
+      m->main_extra_ticks = 0U; /* the transfer's end re-anchors the clock */
       scd_trace(c);
       return 0;
     }
   }
   c->next += (uint64_t)cycles * c->cycle_ticks;
+  if (cpu == SCD_MAIN) {
+    c->next += m->main_extra_ticks;
+    m->main_extra_ticks = 0U;
+  }
   scd_trace(c);
   return 0;
 }
@@ -506,6 +511,18 @@ void scd_raise_sub_level(ScdMachine *m, uint32_t level) {
 
 void scd_update_sub_interrupt(ScdMachine *m) { (void)m; /* the level is sampled at every sub boundary */ }
 
+/* SEG-071-T002 (ADR 0177 decision 5): the cycles of an autovector interrupt exception. MC68000 User Manual appendix B: 44 cycles plus
+ * wait states that depend on the alignment of the processor clock with the internal E clock (clock / 10) when the acknowledge cycle
+ * starts; the reference (core/m68k/m68kcpu.h m68ki_cycle_interrupts, the measured 5..14) indexes a 50..59 cycle table by the processor's
+ * own cycle count within the video frame. BIOS-image profile only. */
+uint32_t scd_interrupt_entry_cycles(const ScdMachine *m, uint32_t cpu, uint32_t level) {
+  static const uint8_t table[10] = {50U, 59U, 58U, 57U, 56U, 55U, 54U, 53U, 52U, 51U};
+  uint64_t cycles;
+  if (m->bios == NULL) return segarecomp_m68k_exception_entry_cycles(24U + level);
+  cycles = scd_frame_ticks_since_origin(m, m->cpu[cpu].next) / (cpu == SCD_MAIN ? SCD_MAIN_CYCLE_TICKS : scd_sub_cycle_ticks(m));
+  return table[cycles % 10U];
+}
+
 /* Accept a recognized sub interrupt at this boundary. Returns 1 when an interrupt was taken, 0 when none, -1 on a stop. */
 static int scd_sub_accept_interrupt(ScdMachine *m) {
   ScdCpu *c = &m->cpu[SCD_SUB];
@@ -532,7 +549,7 @@ static int scd_sub_accept_interrupt(ScdMachine *m) {
   scd_log(m, 0x61U, level, handler);
   if (m->event_log != NULL) scd_event(m, "sub_irq", level);
   c->pc = handler;
-  scd_retire(m, SCD_SUB, segarecomp_m68k_exception_entry_cycles(24U + level));
+  scd_retire(m, SCD_SUB, scd_interrupt_entry_cycles(m, SCD_SUB, level));
   return 1;
 }
 
@@ -557,7 +574,7 @@ static int scd_main_accept_interrupt(ScdMachine *m) {
   m->main_interrupts_taken[level] += 1U;
   scd_log(m, 0x62U, level, handler);
   c->pc = handler;
-  scd_retire(m, SCD_MAIN, segarecomp_m68k_exception_entry_cycles(24U + level));
+  scd_retire(m, SCD_MAIN, scd_interrupt_entry_cycles(m, SCD_MAIN, level));
   return 1;
 }
 
@@ -605,6 +622,24 @@ static int scd_machine_idle(const ScdMachine *m) {
   return !segarecomp_m68k_stop_wake_possible(&sub->irq, scd_sub_max_wake_level(m), sub->sr);
 }
 
+/* The refresh delay (ADR 0177 decision 6): an instruction about to execute at or after the deadline loses 2 cycles and the next
+ * deadline is 128 cycles after this instant. Returns 1 when the delay was charged: the instruction restarts at the processor's new `next`. */
+int scd_main_refresh_gate(ScdMachine *m, uint64_t ready) {
+  if (ready < m->main_refresh_due) return 0;
+  m->main_refresh_due = ready + SCD_MAIN_REFRESH_PERIOD_TICKS;
+  m->cpu[SCD_MAIN].next = ready + SCD_MAIN_REFRESH_DELAY_TICKS;
+  return 1;
+}
+
+/* The instruction that started at `ready` retired. One of the classes that follow their own cycles with the reference's SKIP_BUS_REFRESH()
+ * (a register-count shift or rotate: 2 cycles per count; MOVEM.L: 8 cycles per register) moves the deadline on by a period when its start
+ * plus those cycles has reached the deadline. `cycles` is the instruction's own generated record (m->refresh_skip_cycles, set by the
+ * verified variant that ran from its build-time class and the count register's value before execution); the runtime never decodes
+ * guest bytes. Division (also in that class) is not modelled: its cycles follow the operand values. */
+void scd_main_refresh_note_instruction(ScdMachine *m, uint64_t ready, uint32_t cycles) {
+  if (cycles != 0U && ready + (uint64_t)cycles * SCD_MAIN_CYCLE_TICKS >= m->main_refresh_due) m->main_refresh_due += SCD_MAIN_REFRESH_PERIOD_TICKS;
+}
+
 ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
   for (;;) {
     uint64_t ready_main, ready_sub, ready, device;
@@ -627,7 +662,8 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
     m->now = ready;
     m->cpu[cpu].next = ready;
     {
-      const int taken = cpu == SCD_SUB ? scd_sub_accept_interrupt(m) : scd_main_accept_interrupt(m);
+      const int taken = cpu == SCD_SUB ? scd_sub_accept_interrupt(m)
+                        : (m->main_irq_delay != 0U || m->main_refresh_hold != 0U) ? 0 : scd_main_accept_interrupt(m);
       if (taken < 0) return SCD_RUN_STOPPED;
       if (taken > 0) continue;
     }
@@ -652,6 +688,13 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
       scd_fail(m, SCD_MAIN, SCD_STOP_APPLICATION_HANDOFF, saved_pc, saved_pc);
       return SCD_RUN_STOPPED;
     }
+    /* SEG-071-T002 (ADR 0177): the main bus's refresh delay, charged after the instruction is fetched and before it executes: the
+     * instruction starts 2 cycles later and the next refresh is due 128 cycles after this instant. The instant is re-evaluated (a
+     * device event or the sub may fall in the 2 cycles). */
+    if (cpu == SCD_MAIN && m->bios != NULL && scd_main_refresh_gate(m, ready)) {
+      m->main_refresh_hold = 1U; /* the reference executes the fetched instruction before an interrupt becomes visible */
+      continue;
+    }
     if (m->instruction_budget == 0U) return SCD_RUN_BUDGET;
     m->instruction_budget -= 1U;
     if (m->coverage != NULL) scd_coverage_note(m, cpu, m->cpu[cpu].pc);
@@ -673,7 +716,17 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
       }
       continue;
     }
+    if (cpu == SCD_MAIN && m->bios != NULL) {
+      m->refresh_skip_cycles = 0U;
+      if (m->main_irq_delay != 0U) m->main_irq_delay -= 1U; /* one instruction executes before the interrupt is recognised */
+      m->main_refresh_hold = 0U;
+    }
     if (m->program->processors[cpu].dispatch(m) != 0) return SCD_RUN_STOPPED;
+    /* The refresh-skip record is committed only by an instruction that retired (a rejected or failed one returns before/without it). */
+    if (cpu == SCD_MAIN && m->bios != NULL) {
+      scd_main_refresh_note_instruction(m, ready, m->refresh_skip_cycles);
+      m->refresh_skip_cycles = 0U;
+    }
   }
 }
 
@@ -710,7 +763,7 @@ int scd_machine_init(ScdMachine *m, const ScdProgram *program, ScdDisc *disc, ui
     m->cpu[SCD_SUB].pc = sub->entry_pc;
   }
   m->cpu[SCD_MAIN].cycle_ticks = SCD_MAIN_CYCLE_TICKS;
-  m->cpu[SCD_SUB].cycle_ticks = SCD_SUB_CYCLE_TICKS;
+  m->cpu[SCD_SUB].cycle_ticks = scd_sub_cycle_ticks(m);
   /* Power-on Gate Array state (contract sections 5, 6; GPGX scd_reset(1)): the sub held in reset and halted with SBRQ reading 1, the
    * PRG-RAM window mapped, 2M mode with main owning Word RAM. */
   m->ga.ctl = 0x02U;
@@ -743,8 +796,9 @@ int scd_machine_init_bios(ScdMachine *m, const ScdProgram *program, const ScdAut
   m->cpu[SCD_MAIN].sr = UINT16_C(0x2700);
   m->cpu[SCD_SUB].sr = UINT16_C(0x2700);
   m->cpu[SCD_MAIN].cycle_ticks = SCD_MAIN_CYCLE_TICKS;
-  m->cpu[SCD_SUB].cycle_ticks = SCD_SUB_CYCLE_TICKS;
+  m->cpu[SCD_SUB].cycle_ticks = scd_sub_cycle_ticks(m);
   m->cpu[SCD_MAIN].next = UINT64_C(40) * SCD_MAIN_CYCLE_TICKS; /* MC68000 reset exception processing: 40 clocks (UM68K) */
+  m->main_refresh_due = (m->cpu[SCD_MAIN].next / SCD_MAIN_REFRESH_PERIOD_TICKS + 1U) * SCD_MAIN_REFRESH_PERIOD_TICKS; /* synchronised at reset */
   m->hint_vector = 0xFFFFU; /* GPGX scd_reset(1): "H-INT default vector" - the boot ROM's $70 and $72 words read $FFFF */
   m->ga.ctl = 0x02U;
   m->ga.sub_halted = 1U;

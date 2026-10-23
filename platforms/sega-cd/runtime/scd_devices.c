@@ -11,7 +11,7 @@ int scd_timer_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_writ
  * uses N * 384 - contract section 13); writing 0 stops it; $FF8031 reads the value, $FF8030 reads 0. At each expiry it raises
  * level 3 only if IEN3 is set, then reloads. */
 static uint64_t scd_timer_period(const ScdMachine *m) {
-  return ((uint64_t)m->ga.timer_reload + 1U) * SCD_TIMER_UNIT_SUB_CYCLES * SCD_SUB_CYCLE_TICKS;
+  return ((uint64_t)m->ga.timer_reload + 1U) * SCD_TIMER_UNIT_SUB_CYCLES * scd_sub_cycle_ticks(m);
 }
 
 int scd_timer_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
