@@ -63,33 +63,53 @@ PROTOCOL = {
     "emulator": "BizHawk 2.9.1 official linux-x64 package under Mono; the movie header names version 2.9.1 and core Genplus-gx",
     "window": {"frames": FRAMES, "note": "first 15 minutes at 60 frames/s of emulated gameplay from power-on; not adapted after inspection",
                "checkpoints": CHECKPOINTS, "growth_every_frames": GROWTH_EVERY},
-    "control": {"policy": "SEG-077 `random` policy (segarecomp_genesis_evidence.LUA), ported verbatim", "seed": 1, "start_window": 40,
-                "seconds": FRAMES // 60},
+    "control": {"policy": "SEG-077 `random` policy (segarecomp_genesis_evidence.LUA): emulated frame k receives policy(k-1), frame 1 none",
+                "seed": 1, "sensitivity_seed": 2, "start_window": 40, "seconds": FRAMES // 60,
+                "sync": "BizHawk default GPGX sync settings (the movie run uses the movie's); decision is conditional on seed 1, the "
+                        "seed-2 control is reported as sensitivity only",
+                "label_inputs": "tas = trace run A only; control = seed-1 run A only; repeats serve only the determinism checks"},
+    "amendment_A1": "pre-results amendment after the independent plan review (no run output existed): enforced freeze (plan verified by run, "
+                    "label and evaluate; decoder CLI, truth-file and registry digests pinned), control policy aligned to the SEG-077 Lua "
+                    "(emulated frame k receives policy(k-1); frame 1 none), Gate A expected zone order and end state, read self-fetch and "
+                    "vblank-execution checks, control fidelity in tracing_ok, an append-only CPU ledger, extra cells exclude cells the control "
+                    "labelled wrongly, a second control seed as a sensitivity report, DATA_ONLY_PROMISE listed as a secondary label",
     "gate_a": {
+        "zone_play_order": [0x00, 0x0D, 0x0F, 0x0C, 0x07, 0x0B, 0x0A, 0x04, 0x10, 0x06, 0x0E],
+        "expected_end_state": "final game mode 0x20 (ending sequence) or (game mode 0x0C and zone 0x0E) at the last movie frame",
+        "level_mode": "(Game_Mode & 0x7F) == 0x0C; special stage 0x10; a checkpoint in any other mode (title, menu, continue) is a stall",
+        "progression": "all five checkpoints in level or special-stage mode; >= 2 level-mode checkpoints; their zones, in checkpoint order, form "
+                       "a non-decreasing subsequence of zone_play_order with >= 2 distinct zones",
+        "read_self_fetch_fraction_max": 0.10,
         "needs": ["movie/ROM identities", "no savestate in the movie", "movie plays to its end in the original emulator",
                   "five frozen checkpoints show actual progression (>= 2 different zone/act values, game mode in-level at >= 2)",
                   "trace repeat: identical PC-set digest, read-set digest and checkpoint state digests",
                   "trace fidelity: ROM mapping mismatch 0; every PC even; accepted-E fraction of executed ROM PCs >= 0.99; "
-                  "execute callbacks seen at the reset-vector PC"],
+                  "execute callbacks seen at the reset-vector PC and the vblank-vector PC",
+                  "the same fidelity and determinism checks for the control runs"],
         "failure": ["REPLAY_INVALID", "TRACING_UNAVAILABLE"]},
     "gate_b": {"new_label_accuracy_min": 0.999, "code_as_data_conflicts_max": 0,
                "subjects": ["all TAS labels", "TAS labels absent (same class) from the control labels"],
                "separate_metrics": ["I (start)", "c (continuation)", "D"], "failure": "LABELS_UNSAFE"},
-    "gate_c": {"extra_code_positive_cells_min": 24, "extra_mixed_cells_min": 8, "failure": "INSUFFICIENT_CODE_YIELD",
+    "gate_c": {"threshold_rationale": "operator-fixed engineering feasibility thresholds (materially above the Chuck Rock TAS yield)",
+               "extra_code_positive_cells_min": 24, "extra_mixed_cells_min": 8, "failure": "INSUFFICIENT_CODE_YIELD",
                "secondary": {"extra_nontrivial_negative_cells_min": 200, "label": "DATA_ONLY_PROMISE"},
                "nontrivial_negative": "a fully-D 128-byte cell whose bytes are not all one repeated value",
-               "extra": "cell index labelled correctly by the TAS under the cell predicate, not satisfying it in the control labels",
+               "extra": "cell index satisfying the predicate with correct TAS labels, neither satisfying it in the control labels nor containing a "
+                        "wrong control label",
                "correct": "every I/c/D label inside the cell agrees with the independent source truth"},
     "limits": {"cpu_hours_tracing_and_verification": 8, "engineering_hours_compatibility": 3, "sync_correction_attempts": 1},
     "tiers": "SEG-077 `label()` unchanged; DMA-source tier absent for both conditions; DR read rule: one byte at the reported address",
     "novelty": "descriptive only (no threshold): 4-gram of (family, ea_src, ea_dst, width, control) signatures over consecutive labelled "
                "starts, and 3-cell class-pattern windows, against every SEG-072 registry image except Sonic 2",
     "evaluator_isolation": "the source-truth classes of `s2` are read only by `evaluate`; `run` and `label` never open them",
+    "secondary_labels": ["DATA_ONLY_PROMISE (only with INSUFFICIENT_CODE_YIELD)"],
+    "precedence": "BUDGET_EXHAUSTED is reported first when the CPU ledger exceeds the cap (the experiment could not be completed within the cap)",
+    "gate_b_vacuity": "a class with zero labels passes vacuously; counts are reported",
     "decision": ["REPLAY_INVALID", "TRACING_UNAVAILABLE", "LABELS_UNSAFE", "INSUFFICIENT_CODE_YIELD", "ACQUISITION_PROMISING",
                  "BUDGET_EXHAUSTED"],
     "disclosure": "Sonic 2 was used in SEG-072 and in SEG-077 rule selection: a controlled known-truth engineering test, not blind",
 }
-PLAN_EXTRA = ("bound_code", "inputs")
+PLAN_EXTRA = ("bound_code", "inputs", "cli_sha256", "truth_sha256", "registry_sha256")
 BOUND = ["tools/segarecomp_genesis_bizhawk.py", "tools/segarecomp_genesis_evidence.py"]
 
 
@@ -192,7 +212,7 @@ local ended = -1
 for f = 0, last - 1 do
   frame_now = f
   if S.mode == "random" then
-    local p = policy(f + 1)
+    local p = (f == 0) and {} or policy(f)
     local t = {}
     for _, n in ipairs(names) do t[n] = p[n] == 1 end
     joypad.set(t)
@@ -273,8 +293,40 @@ def cmd_identity(a) -> int:
     return 0 if ident["rom_ok"] and ident["movie_rom_md5_matches"] else 2
 
 
+# ------------------------------------------------------------------------------------------------------------------------ ledger
+def cpu_now() -> float:
+    r = resource.getrusage(resource.RUSAGE_SELF)
+    c = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return r.ru_utime + r.ru_stime + c.ru_utime + c.ru_stime
+
+
+def ledger_add(path: str, label: str, cpu: float, wall: float, ok: bool) -> None:
+    """Append-only CPU ledger (one line per attempt, failed attempts included)."""
+    with open(path, "a") as f:
+        f.write(json.dumps({"label": label, "cpu_seconds": round(cpu, 2), "wall_seconds": round(wall, 2), "ok": ok}) + "\n")
+
+
+def ledger_hours(path: str) -> float:
+    return sum(json.loads(ln)["cpu_seconds"] for ln in pathlib.Path(path).read_text().splitlines() if ln.strip()) / 3600
+
+
+def measured(ledger: str, label: str, fn, *args):
+    c0, t0, ok = cpu_now(), time.time(), False
+    try:
+        r = fn(*args)
+        ok = True
+        return r
+    finally:
+        ledger_add(ledger, label, cpu_now() - c0, time.time() - t0, ok)
+
+
 # -------------------------------------------------------------------------------------------------------------------------- run
 def cmd_run(a) -> int:
+    verify_plan()
+    return measured(a.ledger, "run:" + json.loads(a.scenario)["id"], run_scenario, a)
+
+
+def run_scenario(a) -> int:
     out = pathlib.Path(a.out)
     ge.require_private(out.parent if not out.exists() else out)
     sc = json.loads(a.scenario)
@@ -302,6 +354,7 @@ def cmd_run(a) -> int:
         subprocess.run(cmd, timeout=int(a.timeout) + 60)
     finally:
         xvfb.terminate()
+        xvfb.wait()
     wall = time.time() - t0
     r1 = resource.getrusage(resource.RUSAGE_CHILDREN)
     cpu = (r1.ru_utime + r1.ru_stime) - (r0.ru_utime + r0.ru_stime)
@@ -334,7 +387,12 @@ def cmd_run(a) -> int:
         growth = {}
         for p, b in pcs.items():
             growth[b] = growth.get(b, 0) + 1
-        res.update({"image": {"sha256": ROM_SHA256, "size": ROM_SIZE, "format": "plain"}, "rom_pcs": len(rom_pcs), "ram_pcs": len(ram),
+        rom_img = pathlib.Path(a.rom).read_bytes()
+        pairs = [(pc, b) for pc, s_ in reads.items() for b in s_]
+        self_fetch = sum(1 for pc, b in pairs if pc <= b < pc + 10)
+        vbl = ge.u32(rom_img, 0x78)
+        res.update({"read_self_fetch_fraction": round(self_fetch / len(pairs), 5) if pairs else 0.0, "vbl_pc_executed": vbl in pcs,
+                    "image": {"sha256": ROM_SHA256, "size": ROM_SIZE, "format": "plain"}, "rom_pcs": len(rom_pcs), "ram_pcs": len(ram),
                     "other_pcs": other, "odd_pcs": sum(1 for p in pcs if p & 1), "rom_pcs_beyond_image": sum(1 for p in rom_pcs if p >= ROM_SIZE),
                     "readers": len(reads), "read_bytes": len(read_bytes), "edges": len(edges), "dma_rom_extents": 0, "dma_events": 0, "dma_sha256": ge.sha256(b"[]"),
                     "pcs_sha256": ge.sha256(json.dumps([rom_pcs, ram]).encode()),
@@ -355,6 +413,13 @@ def cmd_run(a) -> int:
 
 # ------------------------------------------------------------------------------------------------------------------------ label
 def cmd_label(a) -> int:
+    plan = verify_plan()
+    if ge.sha256(pathlib.Path(a.cli).read_bytes()) != plan["cli_sha256"]:
+        raise ge.EvidenceError("decoder CLI differs from the frozen plan")
+    return measured(a.ledger, "label:" + pathlib.Path(a.out).name, label_dir, a)
+
+
+def label_dir(a) -> int:
     ge.PLAN = pathlib.Path("/nonexistent/seg080-no-t001-plan")      # the T001 plan binds MAME; this task has its own plan
     meta = ge.label(pathlib.Path(a.rom), [pathlib.Path(r) for r in a.runs], None, a.cli, pathlib.Path(a.out), a.lineage, a.id)
     print(json.dumps(ge.sanitized(meta), sort_keys=True))
@@ -413,7 +478,8 @@ def pick_gate_b(tas_cls: bytes, ctl_cls: bytes, truth: bytes) -> dict:
 
 
 def marginal(tas: dict, ctl: dict) -> dict:
-    return {k: sorted(tas[k] - ctl[k]) for k in ("pos", "neg", "mixed")}
+    """Cells satisfying the predicate in the TAS labels but not in the control, excluding cells where the control labelled something wrong."""
+    return {k: sorted(tas[k] - ctl[k] - ctl["bad"]) for k in ("pos", "neg", "mixed")}
 
 
 def bootstrap_extra(tas: dict, ctl: dict, blocks: int = 64, reps: int = 2000, seed: int = 80) -> dict:
@@ -423,7 +489,7 @@ def bootstrap_extra(tas: dict, ctl: dict, blocks: int = 64, reps: int = 2000, se
     rows = []
     for b in range(blocks):
         lo, hi = b * per, (b + 1) * per
-        rows.append(tuple(len({c for c in (tas[k] - ctl[k]) if lo <= c < hi}) for k in ("pos", "mixed", "neg")))
+        rows.append(tuple(len({c for c in (tas[k] - ctl[k] - ctl["bad"]) if lo <= c < hi}) for k in ("pos", "mixed", "neg")))
     rng = random.Random(seed)
     sums = [[0, 0, 0] for _ in range(reps)]
     for r in range(reps):
@@ -500,7 +566,8 @@ def parse_state(s: str) -> dict:
     return dict(kv.split("=", 1) for kv in s.split())
 
 
-def gate_a(identity: dict, playback: dict, tas_a: dict, tas_b: dict, ck_a: list, ck_b: list, labelled: dict) -> dict:
+def gate_a(identity: dict, playback: dict, tas_a: dict, tas_b: dict, ck_a: list, ck_b: list, labelled: dict, playback_final: str = "",
+           ctl: tuple | None = None) -> dict:
     """Gate A criteria over aggregate run records (pure)."""
     movie = identity["movie"]
     ident_ok = bool(identity["rom_ok"] and identity["movie_rom_md5_matches"] and not movie["starts_from_savestate"]
@@ -508,9 +575,16 @@ def gate_a(identity: dict, playback: dict, tas_a: dict, tas_b: dict, ck_a: list,
                     and movie["header"]["emuVersion"].endswith("2.9.1"))
     frozen = {c: next(x for x in ck_a if x["tag"] == "ck" and x["frame"] == c) for c in CHECKPOINTS}
     st = {c: parse_state(frozen[c]["state"]) for c in CHECKPOINTS}
-    level = {c: (st[c]["zone"], st[c]["act"]) for c in CHECKPOINTS if int(st[c]["mode"]) == 12}
-    progression = len(set(level.values())) >= 2
-    played_to_end = playback["movie_finished_at"] > 0 or playback["movie_mode_end"] == "FINISHED"
+    mode = {c: int(st[c]["mode"]) & 0x7F for c in CHECKPOINTS}
+    level = {c: (int(st[c]["zone"]), int(st[c]["act"])) for c in CHECKPOINTS if mode[c] == 0x0C}
+    order = PROTOCOL["gate_a"]["zone_play_order"]
+    zones = [level[c][0] for c in CHECKPOINTS if c in level]
+    idx = [order.index(z) if z in order else -1 for z in zones]
+    progression = (all(m in (0x0C, 0x10) for m in mode.values()) and len(level) >= 2 and -1 not in idx
+                   and all(x <= y for x, y in zip(idx, idx[1:])) and len(set(zones)) >= 2)
+    fin = parse_state(playback_final) if playback_final else {}
+    end_ok = bool(fin) and ((int(fin["mode"]) & 0x7F) == 0x20 or ((int(fin["mode"]) & 0x7F) == 0x0C and int(fin["zone"]) == 0x0E))
+    played_to_end = (playback["movie_finished_at"] > 0 or playback["movie_mode_end"] == "FINISHED") and end_ok
     fingerprint = lambda ck: [(x["frame"], x["state"].split(" shot=")[0]) for x in ck]
     determinism = {"pcs": tas_a["pcs_sha256"] == tas_b["pcs_sha256"], "reads": tas_a["reads_sha256"] == tas_b["reads_sha256"],
                    "edges": tas_a["edges_sha256"] == tas_b["edges_sha256"], "checkpoints": fingerprint(ck_a) == fingerprint(ck_b)}
@@ -520,11 +594,23 @@ def gate_a(identity: dict, playback: dict, tas_a: dict, tas_b: dict, ck_a: list,
     accepted = labelled["meta"]["tiers"]["E"] / executed if executed else 0
     fidelity = {"map_mismatch": tas_a["map_mismatch"], "odd_pcs": tas_a["odd_pcs"], "accepted_E_fraction": round(accepted, 5),
                 "reset_pc_executed": tas_a["reset_pc_executed"], "e_rejections": rejected}
-    fid_ok = tas_a["map_mismatch"] == 0 and tas_a["odd_pcs"] == 0 and accepted >= 0.99 and tas_a["reset_pc_executed"]
-    replay_ok = ident_ok and played_to_end and progression and tas_a["frames"] == FRAMES
+    fidelity["read_self_fetch_fraction"] = tas_a["read_self_fetch_fraction"]
+    fidelity["vbl_pc_executed"] = tas_a["vbl_pc_executed"]
+    fid_ok = (tas_a["map_mismatch"] == 0 and tas_a["odd_pcs"] == 0 and accepted >= 0.99 and tas_a["reset_pc_executed"]
+              and tas_a["vbl_pc_executed"] and tas_a["read_self_fetch_fraction"] <= PROTOCOL["gate_a"]["read_self_fetch_fraction_max"])
+    ctl_ok = True
+    if ctl is not None:
+        ca, cb = ctl
+        ctl_ok = (ca["map_mismatch"] == 0 and ca["odd_pcs"] == 0 and ca["reset_pc_executed"] and ca["frames"] == FRAMES
+                  and ca["read_self_fetch_fraction"] <= PROTOCOL["gate_a"]["read_self_fetch_fraction_max"]
+                  and all(ca[k] == cb[k] for k in ("pcs_sha256", "reads_sha256", "edges_sha256")))
+        fidelity["control_ok"] = ctl_ok
+    fid_ok = fid_ok and ctl_ok
+    determinism["frames_b"] = tas_b["frames"] == FRAMES
+    replay_ok = ident_ok and played_to_end and progression and tas_a["frames"] == FRAMES and tas_b["frames"] == FRAMES
     return {"identity_ok": ident_ok, "played_to_end": played_to_end, "movie_length_frames": movie["frames"], "progression": progression,
             "checkpoint_levels": {str(c): list(v) for c, v in level.items()}, "determinism": determinism, "fidelity": fidelity,
-            "replay_ok": replay_ok, "tracing_ok": bool(fid_ok and all(determinism.values()))}
+            "end_state_ok": end_ok, "replay_ok": replay_ok, "tracing_ok": bool(fid_ok and all(determinism.values()))}
 
 
 def hard_cells(cls: bytes, img: bytes, tokens: bytes, neg: set) -> set:
@@ -553,16 +639,28 @@ def reference_novelty(tas_new: set, tas_all: set, ref_grams: set) -> dict:
             "all_ngrams": len(tas_all), "all_absent_from_reference": len(tas_all - ref_grams)}
 
 
+def registry_digest(reg: pathlib.Path) -> str:
+    h = hashlib.sha256()
+    for d in sorted(reg.iterdir()):
+        if d.name != "s2" and (d / "classes.bin").exists():
+            h.update(d.name.encode() + hashlib.sha256((d / "classes.bin").read_bytes()).digest() + hashlib.sha256((d / "tokens.bin").read_bytes()).digest())
+    return h.hexdigest()
+
+
 def cmd_evaluate(a) -> int:
+    plan = verify_plan()
+    c0 = cpu_now()
     root = pathlib.Path(a.private)
     img = pathlib.Path(a.rom).read_bytes()
     truth = pathlib.Path(a.truth).read_bytes()          # the ONLY place the source-backed truth is opened
+    if ge.sha256(truth) != plan["truth_sha256"] or registry_digest(pathlib.Path(a.registry)) != plan["registry_sha256"]:
+        raise ge.EvidenceError("truth or registry differs from the frozen plan")
     ident = json.loads(pathlib.Path(a.identity).read_text())
-    runs = {k: json.loads((root / "runs" / k / "trace.json").read_text()) for k in ("playback", "tas_a", "tas_b", "ctl_a", "ctl_b")}
+    runs = {k: json.loads((root / "runs" / k / "trace.json").read_text()) for k in ("playback", "tas_a", "tas_b", "ctl_a", "ctl_b", "ctl2_a")}
     ck = {k: json.loads((root / "runs" / k / "checkpoints.json").read_text()) for k in runs}
     tas, ctl = load_label_dir(root / "labels" / "tas"), load_label_dir(root / "labels" / "ctl")
-    ga = gate_a(ident, runs["playback"], runs["tas_a"], runs["tas_b"], ck["tas_a"], ck["tas_b"], tas)
-    ga["control_repeat_determinism"] = {k: runs["ctl_a"][k] == runs["ctl_b"][k] for k in ("pcs_sha256", "reads_sha256", "edges_sha256")}
+    pb_final = next(x["state"] for x in ck["playback"] if x["tag"] == "final")
+    ga = gate_a(ident, runs["playback"], runs["tas_a"], runs["tas_b"], ck["tas_a"], ck["tas_b"], tas, pb_final, (runs["ctl_a"], runs["ctl_b"]))
     gb = pick_gate_b(tas["cls"], ctl["cls"], truth)
     gb["control_all"] = class_accuracy(ctl["cls"], truth)
     ts, cs = cell_sets(tas["cls"], truth, img), cell_sets(ctl["cls"], truth, img)
@@ -586,9 +684,15 @@ def cmd_evaluate(a) -> int:
         ref |= ngrams(signatures(b"", cls_r, tok_r))
         refpat |= cell_patterns(cls_r)
     pt, pc_ = cell_patterns(tas["cls"]), cell_patterns(ctl["cls"])
-    cpu_h = sum(r["cpu_seconds"] for r in runs.values()) / 3600 + float(a.verification_cpu_hours)
+    ctl2 = load_label_dir(root / "labels" / "ctl2")
+    c2 = marginal(ts, cell_sets(ctl2["cls"], truth, img))
+    sens = {"extra_pos_correct": len(c2["pos"]), "extra_mixed_correct": len(c2["mixed"]), "extra_neg_correct": len(c2["neg"])}
+    sens["decision_with_seed2_control"] = decide(ga, gb, sens, 0.0)["primary"]
+    mixed_also_pos = len(set(m["mixed"]) & set(m["pos"]))
+    cpu_h = ledger_hours(a.ledger) + (cpu_now() - c0) / 3600
     gc = {"extra_pos_correct": extra["pos"], "extra_mixed_correct": extra["mixed"], "extra_neg_correct": extra["neg"]}
-    res = {"schema": SCHEMA + ".results", "gate_a": ga, "gate_b": gb, "gate_c": gc, "cpu_hours": round(cpu_h, 3),
+    res = {"schema": SCHEMA + ".results", "plan_sha256": ge.sha256(PLAN.read_bytes()), "sensitivity_control_seed2": sens,
+           "extra_mixed_that_are_also_extra_pos": mixed_also_pos, "gate_a": ga, "gate_b": gb, "gate_c": gc, "cpu_hours": round(cpu_h, 3),
            "pc_sets": {"tas": len(pcs["tas_a"]), "control": len(pcs["ctl_a"]), "intersection": len(pcs["tas_a"] & pcs["ctl_a"]),
                        "union": len(pcs["tas_a"] | pcs["ctl_a"]), "added_by_tas": len(pcs["tas_a"] - pcs["ctl_a"]),
                        "added_by_control": len(pcs["ctl_a"] - pcs["tas_a"])},
@@ -617,9 +721,12 @@ def bound_digests() -> dict:
 
 
 def cmd_freeze(a) -> int:
-    if PLAN.exists() and not a.force:
-        raise ge.EvidenceError("plan already frozen; a revision needs a recorded amendment")
+    if PLAN.exists():
+        raise ge.EvidenceError("plan already frozen; a revision needs a recorded amendment (delete only before any run output exists)")
     doc = dict(PROTOCOL)
+    doc["cli_sha256"] = ge.sha256(pathlib.Path(a.cli).read_bytes())
+    doc["truth_sha256"] = ge.sha256(pathlib.Path(a.truth).read_bytes())          # a digest, not a read of the truth content for labelling
+    doc["registry_sha256"] = registry_digest(pathlib.Path(a.registry))
     doc["bound_code"] = bound_digests()
     doc["inputs"] = json.loads(pathlib.Path(a.identity).read_text())
     data = ge.canonical(doc)
@@ -657,19 +764,22 @@ def main(argv=None) -> int:
     p.add_argument("--rom", required=True), p.add_argument("--movie"), p.add_argument("--bizhawk", required=True)
     p.add_argument("--scenario", required=True, help='JSON {"id","mode":"movie|random|playback","frames":54000,"seed":1,"start_window":40}')
     p.add_argument("--out", required=True), p.add_argument("--jobs", required=True)
+    p.add_argument("--ledger", required=True)
     p.add_argument("--user", default="bhuser"), p.add_argument("--display", default="99"), p.add_argument("--timeout", default="7200")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("label")
     p.add_argument("--rom", required=True), p.add_argument("--cli", required=True), p.add_argument("--out", required=True)
-    p.add_argument("--id", default="s2"), p.add_argument("--lineage", default="D01"), p.add_argument("runs", nargs="+")
+    p.add_argument("--id", default="s2"), p.add_argument("--lineage", default="D01"), p.add_argument("--ledger", required=True)
+    p.add_argument("runs", nargs="+")
     p.set_defaults(fn=cmd_label)
     p = sub.add_parser("evaluate")
     p.add_argument("--private", required=True), p.add_argument("--rom", required=True), p.add_argument("--truth", required=True)
     p.add_argument("--identity", required=True), p.add_argument("--registry", required=True), p.add_argument("--out", required=True)
-    p.add_argument("--verification-cpu-hours", default="0")
+    p.add_argument("--ledger", required=True)
     p.set_defaults(fn=cmd_evaluate)
     p = sub.add_parser("freeze")
-    p.add_argument("--identity", required=True), p.add_argument("--force", action="store_true")
+    p.add_argument("--identity", required=True), p.add_argument("--cli", required=True), p.add_argument("--truth", required=True)
+    p.add_argument("--registry", required=True)
     p.set_defaults(fn=cmd_freeze)
     p = sub.add_parser("verify-plan")
     p.set_defaults(fn=cmd_verify_plan)

@@ -1,13 +1,18 @@
 {
+ "amendment_A1": "pre-results amendment after the independent plan review (no run output existed): enforced freeze (plan verified by run, label and evaluate; decoder CLI, truth-file and registry digests pinned), control policy aligned to the SEG-077 Lua (emulated frame k receives policy(k-1); frame 1 none), Gate A expected zone order and end state, read self-fetch and vblank-execution checks, control fidelity in tracing_ok, an append-only CPU ledger, extra cells exclude cells the control labelled wrongly, a second control seed as a sensitivity report, DATA_ONLY_PROMISE listed as a secondary label",
  "bound_code": {
-  "tools/segarecomp_genesis_bizhawk.py": "c72241a5de09bbde9780a5ecf80a5ea069fcf10e751f866f80055819036acd57",
+  "tools/segarecomp_genesis_bizhawk.py": "87fc142dd8aefa5a1aa5866b3784a8ba35d2fd2eec65f40310d62228d9a9a773",
   "tools/segarecomp_genesis_evidence.py": "1582d2ed01db7692c6564750a8a7e6d01b08ee59f421d26776906523bd009885"
  },
+ "cli_sha256": "407cc83b587a512a635c0f2fc08794c463d6fc93b1830bb4fd81c100cef042d9",
  "control": {
-  "policy": "SEG-077 `random` policy (segarecomp_genesis_evidence.LUA), ported verbatim",
+  "label_inputs": "tas = trace run A only; control = seed-1 run A only; repeats serve only the determinism checks",
+  "policy": "SEG-077 `random` policy (segarecomp_genesis_evidence.LUA): emulated frame k receives policy(k-1), frame 1 none",
   "seconds": 900,
   "seed": 1,
-  "start_window": 40
+  "sensitivity_seed": 2,
+  "start_window": 40,
+  "sync": "BizHawk default GPGX sync settings (the movie run uses the movie's); decision is conditional on seed 1, the seed-2 control is reported as sensitivity only"
  },
  "decision": [
   "REPLAY_INVALID",
@@ -22,17 +27,35 @@
  "evaluator_isolation": "the source-truth classes of `s2` are read only by `evaluate`; `run` and `label` never open them",
  "game": "Sonic the Hedgehog 2 (World, REV01)",
  "gate_a": {
+  "expected_end_state": "final game mode 0x20 (ending sequence) or (game mode 0x0C and zone 0x0E) at the last movie frame",
   "failure": [
    "REPLAY_INVALID",
    "TRACING_UNAVAILABLE"
   ],
+  "level_mode": "(Game_Mode & 0x7F) == 0x0C; special stage 0x10; a checkpoint in any other mode (title, menu, continue) is a stall",
   "needs": [
    "movie/ROM identities",
    "no savestate in the movie",
    "movie plays to its end in the original emulator",
    "five frozen checkpoints show actual progression (>= 2 different zone/act values, game mode in-level at >= 2)",
    "trace repeat: identical PC-set digest, read-set digest and checkpoint state digests",
-   "trace fidelity: ROM mapping mismatch 0; every PC even; accepted-E fraction of executed ROM PCs >= 0.99; execute callbacks seen at the reset-vector PC"
+   "trace fidelity: ROM mapping mismatch 0; every PC even; accepted-E fraction of executed ROM PCs >= 0.99; execute callbacks seen at the reset-vector PC and the vblank-vector PC",
+   "the same fidelity and determinism checks for the control runs"
+  ],
+  "progression": "all five checkpoints in level or special-stage mode; >= 2 level-mode checkpoints; their zones, in checkpoint order, form a non-decreasing subsequence of zone_play_order with >= 2 distinct zones",
+  "read_self_fetch_fraction_max": 0.1,
+  "zone_play_order": [
+   0,
+   13,
+   15,
+   12,
+   7,
+   11,
+   10,
+   4,
+   16,
+   6,
+   14
   ]
  },
  "gate_b": {
@@ -49,9 +72,10 @@
    "TAS labels absent (same class) from the control labels"
   ]
  },
+ "gate_b_vacuity": "a class with zero labels passes vacuously; counts are reported",
  "gate_c": {
   "correct": "every I/c/D label inside the cell agrees with the independent source truth",
-  "extra": "cell index labelled correctly by the TAS under the cell predicate, not satisfying it in the control labels",
+  "extra": "cell index satisfying the predicate with correct TAS labels, neither satisfying it in the control labels nor containing a wrong control label",
   "extra_code_positive_cells_min": 24,
   "extra_mixed_cells_min": 8,
   "failure": "INSUFFICIENT_CODE_YIELD",
@@ -59,7 +83,8 @@
   "secondary": {
    "extra_nontrivial_negative_cells_min": 200,
    "label": "DATA_ONLY_PROMISE"
-  }
+  },
+  "threshold_rationale": "operator-fixed engineering feasibility thresholds (materially above the Chuck Rock TAS yield)"
  },
  "inputs": {
   "emulator": {
@@ -126,14 +151,20 @@
  },
  "movie": "tasvideos 5640M, BizHawk 2.9.1 .bk2, core Genplus-gx, 2-player (6-button sync setting), starts from power-on",
  "novelty": "descriptive only (no threshold): 4-gram of (family, ea_src, ea_dst, width, control) signatures over consecutive labelled starts, and 3-cell class-pattern windows, against every SEG-072 registry image except Sonic 2",
+ "precedence": "BUDGET_EXHAUSTED is reported first when the CPU ledger exceeds the cap (the experiment could not be completed within the cap)",
+ "registry_sha256": "0af0ece33cbef6684516b3c1a41b39f9e57e202259181e75def78ee6f7e5107d",
  "rom": {
   "sha1": "8bca5dcef1af3e00098666fd892dc1c2a76333f9",
   "sha256": "193bc4064ce0daf27ea9e908ed246d87ec576cc294833badebb590b6ad8e8f6b",
   "size": 1048576
  },
  "schema": "segarecomp.genesis_bizhawk.v1.plan",
+ "secondary_labels": [
+  "DATA_ONLY_PROMISE (only with INSUFFICIENT_CODE_YIELD)"
+ ],
  "task": "SEG-080-T001",
  "tiers": "SEG-077 `label()` unchanged; DMA-source tier absent for both conditions; DR read rule: one byte at the reported address",
+ "truth_sha256": "50bca5d8b91a1dbebff1f094338163b62ffe1f2a5418e96222b6c6b11121959f",
  "window": {
   "checkpoints": [
    7200,
