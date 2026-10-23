@@ -75,6 +75,14 @@ reference-unknown bytes. **Gate B: pass** (thresholds >= 99.9%, zero code-as-dat
 The control, not a historical trace, is the comparator: it also reaches 15,023 PCs, so the equal-duration control is strong; the TAS's marginal yield
 comes from different code, not from a larger executed set. The novelty numbers are descriptive and have no threshold.
 
+## Independent review
+
+A post-execution reviewer reproduced: the synthetic fixture (exact), a 7,200-frame movie re-run (checkpoint state, RAM and VRAM digests identical to the
+full run), the Gate B accuracy and the extra-cell counts (168/35/915) by independent code, equal TAS repeat digests, ledger accounting, and that
+tracing does not perturb emulation (playback and traced runs have identical RAM/VRAM digests at all five checkpoints). No blocker. One policy note
+accepted: the tracked Lua template reads a handful of well-known public Sonic 2 work-RAM variables (game mode, zone, act, player position, rings,
+lives) for the checkpoints; these are public RAM-map facts, not ROM content, and no ROM byte or code address is tracked. The seed-2 sensitivity was not re-run by the reviewer.
+
 ## Resources
 
 CPU ledger 2.25 CPU-hours (limit 8) across the playback, five traces, fixture, three labellings and evaluation; BizHawk wall clock was about twice the CPU
