@@ -81,7 +81,7 @@ compiled entry executes) stay separate.
    its fixed width; the destination (sign-extended for `.W`) must be even and a compiled entry of the processor, otherwise
    `entry_not_compiled`; timing is the CPU owner's for that instruction. A template is the last variant tried at its PC. Any other
    shape or a changed opcode word fails closed. No run-time decoder is involved: the template's shape is fixed at build time.
-8. **Bounds.** At most 4 materialized images and 64 operand templates per program; at most 1 + 4 + 64 build rounds; constant per-round
+8. **Bounds.** At most 4 materialized images and 64 operand templates per program (amended by ADR 0180: 64 template admissions, 256 template slots, at most 128 contiguous `JMP (xxx).L` slots in one run record); at most 1 + 4 + 64 build rounds; constant per-round
    instruction budget and wall timeout; every exhaustion is a typed build failure.
 
 ## Gates

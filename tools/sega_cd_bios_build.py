@@ -11,6 +11,9 @@ wall-clock timeout) -> the pass either
 A confirming run of the candidate must reproduce its outcome exactly. Every admission carries the identity of the program whose pass
 observed it; `segarecomp sega-cd emit` refuses a broken chain. Bounds are constants; exhaustion is a typed failure.
 
+SEG-079-T002 (ADR 0180): a frontier capture also reports the bounded contiguous run of live JMP (xxx).L slots containing the stopped PC;
+the run is admitted as ONE `template-run` record (still one admission per pass). `--no-template-runs` restores one template per round.
+
 One admission per pass: a pass ends at its first stop (an epoch capture or a frontier is a fail-closed stop - nothing after it runs),
 so every later observation would depend on executing past an unadmitted image. Several admissions per pass would need evidence a
 stopped pass cannot produce; the per-round cost is instead bounded by incremental compilation (SEG-064-T003):
@@ -51,7 +54,9 @@ SCD_RUNTIME = ROOT / "platforms" / "sega-cd" / "runtime"
 GENESIS_RUNTIME = ROOT / "platforms" / "genesis" / "runtime"
 CFLAGS = ["-std=c11", "-Wall", "-Wextra", "-pedantic", "-Werror", "-Wno-type-limits", "-O1"]
 MAX_EPOCHS = 4
-MAX_TEMPLATES = 64
+MAX_TEMPLATES = 64        # template ADMISSIONS (rounds) - ADR 0142 decision 8; one admission is one instruction or, SEG-079-T002, one slot run
+MAX_TEMPLATE_SLOTS = 256  # template slots over all admissions (ADR 0180)
+MAX_RUN_SLOTS = 128       # slots in one run admission (ADR 0180)
 MAX_ROUNDS = 1 + MAX_EPOCHS + MAX_TEMPLATES  # ADR 0142 decision 8
 TEMPLATE_OPCODES = ("4ef8", "4ef9")           # JMP (xxx).W / JMP (xxx).L: the only proposed shapes
 DEFAULT_WINDOW = 0x2000                       # measured (ADR 0142 "Result (SEG-064-T003)"); 0 = one translation unit
@@ -318,7 +323,7 @@ class Driver:
     def build(self):
         started = time.monotonic()
         admits, history = [], []
-        epochs = templates = 0
+        epochs = templates = slot_total = 0
         exe = self.work / ("program" + EXE)
         if self.args.epoch_recipe:  # SEG-079 (ADR 0179): the epoch is a static producer: no discovery round, still verified whole at the epoch
             admits.append("epoch-recipe:" + self.args.epoch_recipe)
@@ -354,15 +359,46 @@ class Driver:
                                      "sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest()}
                 history.append(entry)
                 continue
-            proposed = {(a.split(":")[2], int(a.split(":")[3], 0)) for a in admits if a.startswith("template:")}
+            proposed = set()
+            for a in admits:
+                if a.startswith("template:"):
+                    proposed.add((a.split(":")[2], int(a.split(":")[3], 0)))
+                elif a.startswith("template-run:"):
+                    f = a.split(":")
+                    proposed.update((f[2], int(f[3], 0) + 6 * k) for k in range(int(f[4])))
             if (capture is not None and capture["kind"] == "frontier" and capture["bytes"][:4] in TEMPLATE_OPCODES and
                     ("main" if capture["cpu"] == 0 else "sub", capture["pc"]) not in proposed):
                 templates += 1
                 if templates > MAX_TEMPLATES:
                     raise BuildFailure("template_bound_exceeded")
                 cpu = "main" if capture["cpu"] == 0 else "sub"
-                admits.append("template:%s:%s:0x%x:%s" % (capture["pass_identity"], cpu, capture["pc"], capture["bytes"]))
-                entry["admitted"] = {"kind": "operand_template", "cpu": cpu, "pc": capture["pc"]}
+                run = capture.get("run") if self.args.template_runs else None
+                if run is not None:
+                    # trim the run to the maximal stretch around the stopped PC that holds no already admitted slot (a table longer than
+                    # one run is admitted run after run; the capture itself cannot know the admissions)
+                    base, slots, pc = run["base"], run["slots"], capture["pc"]
+                    if slots >= 1 and len(run["bytes"]) == 12 * slots and base <= pc < base + 6 * slots and (pc - base) % 6 == 0:
+                        lo = hi = (pc - base) // 6
+                        while lo > 0 and (cpu, base + 6 * (lo - 1)) not in proposed:
+                            lo -= 1
+                        while hi < slots - 1 and (cpu, base + 6 * (hi + 1)) not in proposed:
+                            hi += 1
+                        run = {"base": base + 6 * lo, "slots": hi - lo + 1, "bytes": run["bytes"][12 * lo:12 * (hi + 1)]}
+                if run is not None and run["slots"] > 1:
+                    # SEG-079-T002 (ADR 0180): the whole contiguous JMP (xxx).L slot run containing the stopped PC, as ONE admission. The
+                    # emitter re-validates every slot; a malformed run is a typed failure, never a silent fallback.
+                    if (run["slots"] > MAX_RUN_SLOTS or len(run["bytes"]) != 12 * run["slots"] or
+                            not run["base"] <= capture["pc"] < run["base"] + 6 * run["slots"] or (capture["pc"] - run["base"]) % 6):
+                        raise BuildFailure("template_run_invalid")
+                    slot_total += run["slots"]
+                    if slot_total > MAX_TEMPLATE_SLOTS:
+                        raise BuildFailure("template_slot_bound_exceeded")
+                    admits.append("template-run:%s:%s:0x%x:%d:%s" % (capture["pass_identity"], cpu, run["base"], run["slots"], run["bytes"]))
+                    entry["admitted"] = {"kind": "operand_template_run", "cpu": cpu, "base": run["base"], "slots": run["slots"]}
+                else:
+                    slot_total += 1
+                    admits.append("template:%s:%s:0x%x:%s" % (capture["pass_identity"], cpu, capture["pc"], capture["bytes"]))
+                    entry["admitted"] = {"kind": "operand_template", "cpu": cpu, "pc": capture["pc"]}
                 history.append(entry)
                 continue
             history.append(entry)
@@ -389,6 +425,8 @@ def main(argv=None):
     parser.add_argument("--disc-image", action="append", help="main|sub:<track-1 byte offset>:<base>:<length>: a disc extent placed in the processor's RAM (SEG-064-T004; main Word RAM SEG-071-T001)")
     parser.add_argument("--application-entry", help="the main address whose first execution ends the run (typed stop application_handoff)")
     parser.add_argument("--epoch-recipe", help="SEG-079: the epoch image as a static producer, <length>:<source>@<dest>[,...] (tools/sega_cd_epoch_recipe.py spec); no epoch discovery round")
+    parser.add_argument("--no-template-runs", dest="template_runs", action="store_false",
+                        help="SEG-079-T002: admit one operand template per round even when the capture reports a slot run (the conventional baseline)")
     parser.add_argument("--budget", type=int, default=5_000_000)
     parser.add_argument("--pass-set", action="append", help="main|sub:dN|aN=VALUE: a register preset of every build pass (fixture case selection)")
     parser.add_argument("--until-tick", type=int, default=0, help="end every pass at this machine-time instant (typed result deadline); 0 = none")
