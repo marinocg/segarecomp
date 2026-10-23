@@ -1,0 +1,187 @@
+{
+ "amendment_A1": "pre-results amendment after the independent plan review (no run output existed): enforced freeze (plan verified by run, label and evaluate; decoder CLI, truth-file and registry digests pinned), control policy aligned to the SEG-077 Lua (emulated frame k receives policy(k-1); frame 1 none), Gate A expected zone order and end state, read self-fetch and vblank-execution checks, control fidelity in tracing_ok, an append-only CPU ledger, extra cells exclude cells the control labelled wrongly, a second control seed as a sensitivity report, DATA_ONLY_PROMISE listed as a secondary label",
+ "amendment_A2": "pre-results tool fix: movie.* Lua calls are only called in the movie and playback modes (they raise a .NET exception that pcall cannot catch when no movie is loaded)",
+ "amendment_A3": "pre-results: the CPU ledger is <private>/ledger.jsonl with intent+completion lines, evaluate requires a successful attempt per expected step and charges an unfinished attempt its wall time; control Gate A requires the vblank PC executed",
+ "amendment_A4": "pre-results (operator request): BizHawk's native Code/Data Logger is started from Lua (client.gettool('cdl').Restart(), no BizHawk change) and its MD CART log is read by reflection at the end of each run. A synthetic DMA fixture (`cdl-fixture`) must reproduce, exactly, the executed PCs, the DMASource extent (0x40), and the data-read extents (0x04, true access size); exec flags must agree with the callback PCs within 0.1% of bytes; both are Gate A tracing conditions. DMA-source extents come from CDL flag 0x40 and a callback read byte is admitted as data only where the CDL logged a data access (instruction fetch and prefetch are never CDL data). Both conditions use the identical tiers. Reset/state-load behaviour is not exercised (power-on movie, random control, no loads). Batch-1 traces (A3, no CDL) were produced and their aggregate PC counts were seen before this amendment; they are superseded, archived and reported, the thresholds and decision logic are unchanged. If the DMA tier cannot be assessed the mixed-cell metric is NOT_EVALUABLE rather than a code-yield failure.",
+ "amendment_F1": "post-results, operator-directed: the window is the full movie (115,665 frames) instead of the first 15 minutes; the T001 result (ADR 0181, REPLAY_INVALID by a gate-design artifact) stays as recorded. The T001 playback timeline and results were seen first. Checkpoints move to 20/40/60/80/100 % of the movie; the Gate A progression rule needs >= 3 level-mode checkpoints in >= 3 zones in play order (zone 0x05, the third Metropolis act, is added to the play order); thresholds, tiers, Gate B and C and the decision logic are unchanged. The control runs the same number of frames with the same policy and seed.",
+ "bound_code": {
+  "tools/segarecomp_genesis_bizhawk.py": "c27cf3895ebec5d87f7575f81d7c59455bba787a224728bb762aa385f22825c4",
+  "tools/segarecomp_genesis_bizhawk_full.py": "571a5af11294b63d2ec94572c2299ffc423cbd8d99edf562a763b41e24d74085",
+  "tools/segarecomp_genesis_evidence.py": "1582d2ed01db7692c6564750a8a7e6d01b08ee59f421d26776906523bd009885"
+ },
+ "cli_sha256": "407cc83b587a512a635c0f2fc08794c463d6fc93b1830bb4fd81c100cef042d9",
+ "control": {
+  "label_inputs": "tas = trace run A only; control = seed-1 run A only; repeats serve only the determinism checks",
+  "policy": "SEG-077 `random` policy (segarecomp_genesis_evidence.LUA): emulated frame k receives policy(k-1), frame 1 none",
+  "seconds": 1927,
+  "seed": 1,
+  "sensitivity_seed": 2,
+  "start_window": 40,
+  "sync": "BizHawk default GPGX sync settings (the movie run uses the movie's); decision is conditional on seed 1, the seed-2 control is reported as sensitivity only"
+ },
+ "decision": [
+  "REPLAY_INVALID",
+  "TRACING_UNAVAILABLE",
+  "LABELS_UNSAFE",
+  "INSUFFICIENT_CODE_YIELD",
+  "ACQUISITION_PROMISING",
+  "BUDGET_EXHAUSTED"
+ ],
+ "disclosure": "Sonic 2 was used in SEG-072 and in SEG-077 rule selection: a controlled known-truth engineering test, not blind",
+ "emulator": "BizHawk 2.9.1 official linux-x64 package under Mono; the movie header names version 2.9.1 and core Genplus-gx",
+ "evaluator_isolation": "the source-truth classes of `s2` are read only by `evaluate`; `run` and `label` never open them",
+ "game": "Sonic the Hedgehog 2 (World, REV01)",
+ "gate_a": {
+  "cdl_exec_mismatch_fraction_max": 0.001,
+  "expected_end_state": "final game mode 0x20 (ending sequence) or (game mode 0x0C and zone 0x0E) at the last movie frame",
+  "failure": [
+   "REPLAY_INVALID",
+   "TRACING_UNAVAILABLE"
+  ],
+  "level_mode": "(Game_Mode & 0x7F) == 0x0C; special stage 0x10; a checkpoint in any other mode (title, menu, continue) is a stall",
+  "needs": [
+   "movie/ROM identities",
+   "no savestate in the movie",
+   "movie plays to its end in the original emulator",
+   "five frozen checkpoints show actual progression (>= 2 different zone/act values, game mode in-level at >= 2)",
+   "trace repeat: identical PC-set digest, read-set digest and checkpoint state digests",
+   "trace fidelity: ROM mapping mismatch 0; every PC even; accepted-E fraction of executed ROM PCs >= 0.99; execute callbacks seen at the reset-vector PC and the vblank-vector PC",
+   "the same fidelity and determinism checks for the control runs"
+  ],
+  "progression": "all five checkpoints in level or special-stage mode; >= 3 level-mode checkpoints; their zones, in checkpoint order, form a non-decreasing subsequence of zone_play_order with >= 3 distinct zones",
+  "read_self_fetch_fraction_max": 0.1,
+  "zone_play_order": [
+   0,
+   13,
+   15,
+   12,
+   7,
+   11,
+   10,
+   4,
+   5,
+   16,
+   6,
+   14
+  ]
+ },
+ "gate_b": {
+  "code_as_data_conflicts_max": 0,
+  "failure": "LABELS_UNSAFE",
+  "new_label_accuracy_min": 0.999,
+  "separate_metrics": [
+   "I (start)",
+   "c (continuation)",
+   "D"
+  ],
+  "subjects": [
+   "all TAS labels",
+   "TAS labels absent (same class) from the control labels"
+  ]
+ },
+ "gate_b_vacuity": "a class with zero labels passes vacuously; counts are reported",
+ "gate_c": {
+  "correct": "every I/c/D label inside the cell agrees with the independent source truth",
+  "extra": "cell index satisfying the predicate with correct TAS labels, neither satisfying it in the control labels nor containing a wrong control label",
+  "extra_code_positive_cells_min": 24,
+  "extra_mixed_cells_min": 8,
+  "failure": "INSUFFICIENT_CODE_YIELD",
+  "nontrivial_negative": "a fully-D 128-byte cell whose bytes are not all one repeated value",
+  "secondary": {
+   "extra_nontrivial_negative_cells_min": 200,
+   "label": "DATA_ONLY_PROMISE"
+  },
+  "threshold_rationale": "operator-fixed engineering feasibility thresholds (materially above the Chuck Rock TAS yield)"
+ },
+ "inputs": {
+  "emulator": {
+   "EmuHawk.exe": "6ce622d4ed4e8460ce362cf35ef67dc70096fec2c9a174cbef6a3e5b04f18bcc",
+   "gpgx.wbx.zst": "067ced324e9bfdbda74196f36e296dc257009d90fce84b691b3daf07ab005502",
+   "mono": "Mono JIT compiler version 6.8.0.105 (Debian 6.8.0.105+dfsg-3.6ubuntu2 Sun Mar 31 02:55:28 UTC 2024)",
+   "package_sha256": "5afb39afef8874bc6ef62bdac1e40a2aa3c47d6b74f9acc62a057cc44d355634"
+  },
+  "movie": {
+   "entries": [
+    "BizState 1.0",
+    "BizVersion.txt",
+    "Comments.txt",
+    "Header.txt",
+    "Input Log.txt",
+    "Subtitles.txt",
+    "SyncSettings.json"
+   ],
+   "frames": 115665,
+   "header": {
+    "Core": "Genplus-gx",
+    "GameName": "Sonic The Hedgehog 2 (W) (REV01) [!]",
+    "OriginalEmuVersion": "Version 2.9.1",
+    "Platform": "GEN",
+    "SHA1": "9FEEB724052C39982D432A7851C98D3E",
+    "emuVersion": "Version 2.9.1",
+    "rerecordCount": "35624"
+   },
+   "input_log_sha256": "8e000fd48dd528fa12ccea0cbc1696c67dd8bc65d9e37344ab878aadd7819646",
+   "log_key_sha256": "4458addbf1ab76cea982be62cc22e34b7486d51f854bd02b09d0d3ecd7df9cfd",
+   "p2_frames_with_input": 58769,
+   "players_in_log": 2,
+   "sha256": "85403cb6c40857c1cade73b5ff9f50a78ac1a0d8e03706658c20cbd5d3731f05",
+   "starts_from_savestate": false,
+   "sync": {
+    "$type": "BizHawk.Emulation.Cores.Consoles.Sega.gpgx.GPGX+GPGXSyncSettings, BizHawk.Emulation.Cores",
+    "BackdropColor": 4294902015,
+    "ControlTypeLeft": 1,
+    "ControlTypeRight": 1,
+    "Filter": 1,
+    "HighFreq": 5000,
+    "HighGain": 1.0,
+    "LowFreq": 880,
+    "LowGain": 1.0,
+    "LowPassRange": 26214,
+    "MidGain": 1.0,
+    "Region": 0,
+    "UseSixButton": true
+   }
+  },
+  "movie_rom_md5_matches": true,
+  "rom": {
+   "md5": "9feeb724052c39982d432a7851c98d3e",
+   "sha1": "8bca5dcef1af3e00098666fd892dc1c2a76333f9",
+   "sha256": "193bc4064ce0daf27ea9e908ed246d87ec576cc294833badebb590b6ad8e8f6b",
+   "size": 1048576
+  },
+  "rom_ok": true
+ },
+ "limits": {
+  "cpu_hours_tracing_and_verification": 8,
+  "engineering_hours_compatibility": 3,
+  "sync_correction_attempts": 1
+ },
+ "movie": "tasvideos 5640M, BizHawk 2.9.1 .bk2, core Genplus-gx, 2-player (6-button sync setting), starts from power-on",
+ "novelty": "descriptive only (no threshold): 4-gram of (family, ea_src, ea_dst, width, control) signatures over consecutive labelled starts, and 3-cell class-pattern windows, against every SEG-072 registry image except Sonic 2",
+ "precedence": "BUDGET_EXHAUSTED is reported first when the CPU ledger exceeds the cap (the experiment could not be completed within the cap)",
+ "registry_sha256": "0af0ece33cbef6684516b3c1a41b39f9e57e202259181e75def78ee6f7e5107d",
+ "rom": {
+  "sha1": "8bca5dcef1af3e00098666fd892dc1c2a76333f9",
+  "sha256": "193bc4064ce0daf27ea9e908ed246d87ec576cc294833badebb590b6ad8e8f6b",
+  "size": 1048576
+ },
+ "schema": "segarecomp.genesis_bizhawk.v1.plan",
+ "secondary_labels": [
+  "DATA_ONLY_PROMISE (only with INSUFFICIENT_CODE_YIELD)"
+ ],
+ "task": "SEG-080-T002",
+ "tiers": "SEG-077 `label()` unchanged; DMA-source tier from the BizHawk CDL (both conditions); DR reads: callback bytes gated by CDL data flags",
+ "truth_sha256": "50bca5d8b91a1dbebff1f094338163b62ffe1f2a5418e96222b6c6b11121959f",
+ "window": {
+  "checkpoints": [
+   23133,
+   46266,
+   69399,
+   92532,
+   115665
+  ],
+  "frames": 115665,
+  "growth_every_frames": 1800,
+  "note": "the complete movie from power-on"
+ }
+}

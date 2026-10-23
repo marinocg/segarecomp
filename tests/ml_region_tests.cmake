@@ -147,6 +147,8 @@ add_test(NAME segarecomp_genesis_evidence_test COMMAND ${Python3_EXECUTABLE} ${C
 set_property(TEST segarecomp_genesis_evidence_test APPEND PROPERTY LABELS full fast)
 add_test(NAME segarecomp_genesis_bizhawk_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_genesis_bizhawk_test.py)
 set_property(TEST segarecomp_genesis_bizhawk_test APPEND PROPERTY LABELS full fast)
+add_test(NAME segarecomp_genesis_bizhawk_full_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_genesis_bizhawk_full_test.py)
+set_property(TEST segarecomp_genesis_bizhawk_full_test APPEND PROPERTY LABELS full fast)
 # SEG-077-T005 (research tooling): frozen SEG-077 decision rules, labelled-cell blind metrics, the job matrix and, in the research
 # environment (numpy, torch), label-free seeds and leakage invariance of A features and C's candidate graph (skipped without numpy).
 add_test(NAME segarecomp_seg077_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg077_test.py)
