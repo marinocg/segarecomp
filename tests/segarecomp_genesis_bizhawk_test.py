@@ -14,6 +14,11 @@ import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
+try:
+    import resource  # noqa: F401  (POSIX only; the adapter uses it only when it launches BizHawk, which is not exercised here)
+except ImportError:
+    import types
+    sys.modules["resource"] = types.ModuleType("resource")
 import segarecomp_genesis_bizhawk as bz  # noqa: E402
 
 FAILURES = []
