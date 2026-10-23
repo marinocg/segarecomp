@@ -8,7 +8,9 @@
 //   - copy images: `static_proof`, a verbatim copy of a ROM span declared by an explicit descriptor, checked against the ROM;
 //   - disc images (SEG-064-T004): `immutable_input`, an extent of the external disc's track 1 that is placed in a processor's RAM
 //     (the disc's identity is verified at start-up, so the bytes are immutable inputs; verification is per instruction, byte identity);
-//   - epoch images: `bounded_build_time_materialization`, the PRG RAM observed at the sub runnable epoch by a build pass;
+//   - epoch images: `bounded_build_time_materialization`, the PRG RAM observed at the sub runnable epoch by a build pass; or (SEG-078,
+//     ADR 0179) `static_proof`, an image reconstructed from the BIOS image by a recipe (epoch_recipe.hpp), with no pass identity. Both are
+//     verified whole against the live PRG RAM at the epoch;
 //   - operand templates: `bounded_build_time_materialization` (a build-pass RAM frontier), verification `structural`.
 // Every image is admitted by broad AOT (each aligned start the CPU owner decodes, lifts and lowers is a compiled entry; admission
 // is not a claim that the bytes are code). RAM images are verified per instruction (exact bytes) before each instruction runs.

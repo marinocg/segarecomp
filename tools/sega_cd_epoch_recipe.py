@@ -16,6 +16,7 @@ decoded length that does not end inside the image.
 usage: sega_cd_epoch_recipe.py reconstruct --bios FILE --recipe FILE --out FILE
        sega_cd_epoch_recipe.py verify --bios FILE --recipe FILE [--expect-sha256 HEX] [--epoch FILE]
        sega_cd_epoch_recipe.py spec --bios FILE --recipe FILE      (the emitter's --admit epoch-recipe:<spec> text)
+       sega_cd_epoch_recipe.py scan --bios FILE --out RECIPE            (candidate from a structural scan of the BIOS; not an authority)
        sega_cd_epoch_recipe.py derive --bios FILE --epoch FILE --write-log FILE --out RECIPE   (local, private input; see below)
 """
 import argparse
@@ -158,6 +159,50 @@ def reconstruct(bios, recipe):
     return bytes(image)
 
 
+WINDOW = 0x20000   # main sees PRG RAM bank 0 at $020000-$03FFFF through the Gate Array window (contract section 3)
+
+
+class ScanError(Exception):
+    pass
+
+
+def scan(bios):
+    """Candidate steps found by a structural scan of an immutable BIOS image; returns (steps, image_length). NOT an authority.
+
+    The scan looks for the call shape `LEA abs.l,A0 ; LEA abs.l,A1 ; BSR.W target` (A0 = source, A1 = a destination in the PRG-RAM window
+    bank 0), keeps the sites whose source decodes with the independent decoder to a properly terminated stream inside the image, and
+    requires every kept site to call one target. It does not execute or lift anything and does not prove that the routine at the target
+    is a Kosinski decoder or that the sites run: the run-time whole-image epoch verification is the authority (ADR 0142 decision 4), so a
+    wrong candidate stops `materialized_image_unverified` before the sub retires an instruction. It is local tooling, not compiler core."""
+    sites = []
+    for i in range(0, len(bios) - 16, 2):
+        if bios[i:i + 2] == b"\x41\xf9" and bios[i + 6:i + 8] == b"\x43\xf9" and bios[i + 12:i + 14] == b"\x61\x00":
+            src = int.from_bytes(bios[i + 2:i + 6], "big")
+            dst = int.from_bytes(bios[i + 8:i + 12], "big")
+            disp = int.from_bytes(bios[i + 14:i + 16], "big", signed=True)
+            if src >= len(bios) or not (WINDOW <= dst < WINDOW + MAX_IMAGE):
+                continue
+            try:
+                data, _ = kosinski(bios, src, MAX_IMAGE - (dst - WINDOW))
+            except RecipeError:
+                continue
+            if data:
+                sites.append((i, i + 14 + disp, src, dst - WINDOW, len(data)))
+    targets = {t for _, t, _, _, _ in sites}
+    if not sites or len(targets) != 1 or len(sites) > MAX_STEPS:
+        raise ScanError("scan_ambiguous")
+    spans = sorted((d, d + n) for _, _, _, d, n in sites)
+    if any(spans[k][1] > spans[k + 1][0] for k in range(len(spans) - 1)):
+        raise ScanError("scan_overlap")
+    end = max(hi for _, hi in spans)
+    image = bytearray(end)
+    for _, _, src, dst, n in sites:
+        image[dst:dst + n] = kosinski(bios, src)[0]
+    length = len(image.rstrip(b"\0"))
+    length = (length + GRANULE - 1) // GRANULE * GRANULE
+    return [(src, dst) for _, _, src, dst, _ in sites], length
+
+
 def spec(recipe):
     """The emitter's canonical text form (segarecomp sega-cd emit --admit epoch-recipe:<spec>)."""
     return "%d:%s" % (recipe["image_length"], ",".join("%d@%d" % (s["source_offset"], s["dest"]) for s in recipe["steps"]))
@@ -218,16 +263,18 @@ def derive(bios, epoch, log_records):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("reconstruct", "verify", "derive", "spec"):
+    for name in ("reconstruct", "verify", "derive", "spec", "scan"):
         p = sub.add_parser(name)
         p.add_argument("--bios", required=True)
-        if name != "derive":
+        if name not in ("derive", "scan"):
             p.add_argument("--recipe", required=True)
         if name == "reconstruct":
             p.add_argument("--out", required=True)
         if name == "verify":
             p.add_argument("--expect-sha256")
             p.add_argument("--epoch")
+        if name == "scan":
+            p.add_argument("--out", required=True)
         if name == "derive":
             p.add_argument("--epoch", required=True)
             p.add_argument("--write-log", required=True)
@@ -235,6 +282,12 @@ def main(argv=None):
     args = ap.parse_args(argv)
     bios = pathlib.Path(args.bios).read_bytes()
     try:
+        if args.cmd == "scan":
+            steps, length = scan(bios)
+            recipe = make_recipe(bios, length, steps)
+            pathlib.Path(args.out).write_text(canonical(recipe) + "\n")
+            print(json.dumps({"steps": len(steps), "image_length": length, "recipe_identity": identity(recipe)}))
+            return 0
         if args.cmd == "derive":
             import sega_cd_epoch_provenance as prov
             epoch = pathlib.Path(args.epoch).read_bytes()
@@ -258,6 +311,9 @@ def main(argv=None):
         return 0 if ok else 1
     except RecipeError as e:
         print(json.dumps({"ok": False, "error": e.kind}))
+        return 1
+    except ScanError as e:
+        print(json.dumps({"ok": False, "error": str(e)}))
         return 1
 
 

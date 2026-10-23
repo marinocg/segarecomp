@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 import sega_cd_epoch_common as C  # noqa: E402
 import sega_cd_epoch_provenance as P  # noqa: E402
 import sega_cd_epoch_recipe as R  # noqa: E402
+import sega_cd_template_provenance as T  # noqa: E402
 
 failures = []
 
@@ -71,8 +72,17 @@ offsets = []
 for s in streams:
     offsets.append(len(bios))
     bios += s + bytes(6)   # trailing bytes: the decoder's eager final refill may read two bytes past the end marker
-bios = bytes(bios)
 DEST = [0x0000, 0x2000, 0x5000]
+
+
+def call_site(src, dst, target_disp=0x40):
+    """LEA abs.l,A0 ; LEA abs.l,A1 ; BSR.W - a project-authored call shape (the scan's only structural input)."""
+    return b"\x41\xf9" + struct.pack(">I", src) + b"\x43\xf9" + struct.pack(">I", 0x20000 + dst) + b"\x61\x00" + struct.pack(">h", target_disp)
+
+
+for k, (o, d) in enumerate(zip(offsets, DEST)):
+    bios[0x600 + 0x20 * k:0x600 + 0x20 * k + 16] = call_site(o, d, 0x1000 - (0x600 + 0x20 * k + 14))
+bios = bytes(bios)
 LENGTH = 0x6900
 expected_image = bytearray(LENGTH)
 for p, d in zip(parts, DEST):
@@ -86,6 +96,45 @@ check(hashlib.sha256(image).hexdigest() == hashlib.sha256(expected_image).hexdig
 check(R.identity(recipe) == R.identity(json.loads(R.canonical(recipe))), "identity is canonical")
 check(R.spec(recipe) == "%d:%s" % (LENGTH, ",".join("%d@%d" % (o, d) for o, d in zip(offsets, DEST))), "emitter spec text")
 check("bytes" not in R.canonical(recipe) and len(R.canonical(recipe)) < 400, "a recipe carries no image bytes")
+
+# ---- the committed synthetic example in the schema document validates against its project-authored BIOS pattern ----
+doc = (ROOT / "docs" / "architecture" / "sega-cd-epoch-recipe.md").read_text()
+example = json.loads(doc.split("```json\n")[1].split("\n```")[0])
+try:
+    R.validate(example, pad)
+    check(R.canonical(example) == doc.split("```json\n")[1].split("\n```")[0], "the documented example is in canonical form")
+except R.RecipeError as e:
+    check(False, "the documented example does not validate: %s" % e.kind)
+
+# ---- the structural scan: candidates from the BIOS image alone, no execution ----
+scanned, scanned_length = R.scan(bios)
+check(scanned == list(zip(offsets, DEST)) and scanned_length == LENGTH, "scan finds the call sites and the image length (%s %s)" % (scanned, scanned_length))
+check(R.reconstruct(bios, R.make_recipe(bios, scanned_length, scanned)) == image, "the scanned recipe reconstructs the same image")
+variant = bytearray(bios)
+variant[0x600 + 0x20 + 14:0x600 + 0x20 + 16] = struct.pack(">h", 0x2000)           # one site calls another routine
+try:
+    R.scan(bytes(variant))
+    check(False, "two call targets accepted")
+except R.ScanError as e:
+    check(str(e) == "scan_ambiguous", "two call targets refused: %s" % e)
+variant = bytearray(bios)
+variant[0x600 + 0x40:0x600 + 0x50] = call_site(offsets[2], DEST[0] + 0x100, 0x1000 - (0x640 + 14))         # destination inside step 0's range
+try:
+    R.scan(bytes(variant))
+    check(False, "overlapping destinations accepted")
+except R.ScanError as e:
+    check(str(e) == "scan_overlap", "overlapping destinations refused: %s" % e)
+variant = bytearray(bios)
+for k in range(3):
+    variant[0x600 + 0x20 * k:0x600 + 0x20 * k + 16] = bytes(16)
+try:
+    R.scan(bytes(variant))
+    check(False, "a BIOS without call sites accepted")
+except R.ScanError:
+    check(True, "a BIOS without call sites refused")
+variant = bytearray(bios)
+variant[0x600 + 8:0x600 + 12] = struct.pack(">I", 0x100)                             # destination outside the PRG-RAM window: not a site
+check(R.scan(bytes(variant))[0] == list(zip(offsets, DEST))[1:], "a destination outside the window is not a site")
 
 # ---- fail-closed matrix ----
 def mutate(path, value):
@@ -284,6 +333,32 @@ with tempfile.TemporaryDirectory() as tmp:
             "--write-log", str(tmp / "w.bin")]
     out = subprocess.run(prov, capture_output=True, text=True)
     check(out.returncode == 0 and json.loads(out.stdout)["fully_explained"], "CLI provenance")
+
+
+# ---- mutable JMP template writer attribution ----
+def store(kind, cpu, offset, value, pc, width=2):
+    return C.log_record(kind, width, cpu, offset, value, pc)
+
+
+tlog = b""
+for i in range(5):   # main: a 5-slot table built by ROM code in work RAM, then slot 1 re-installed by other ROM code
+    tlog += store(C.KIND_WORK, 0, 0xFD00 + 6 * i, 0x4EF9, 0x3C0) + store(C.KIND_WORK, 0, 0xFD02 + 6 * i, 0x0000, 0x3C2, 4)
+tlog += store(C.KIND_WORK, 0, 0xFD06, 0x4EF9, 0x2000)
+for i in range(4):   # sub: a 4-slot table built by code inside a reconstructed range
+    tlog += store(C.KIND_PRG, 1, 0x5EE0 + 6 * i, 0x4EF9, 0x0340)
+tlog += store(C.KIND_PRG, 1, 0x7000, 0x4EF9, 0x9000)          # a lone slot written by code no image explains
+tlog += store(C.KIND_PRG, 1, 0x7100, 0x4EB9, 0x0340)          # a JSR opcode: never a template store
+tlog += store(C.KIND_PRG, 1, 0x7200, 0x4EF90000, 0x0340, 4)         # long store: the high half is the opcode
+with tempfile.TemporaryDirectory() as tmp2:
+    tmp2 = pathlib.Path(tmp2)
+    (tmp2 / "t.bin").write_bytes(tlog)
+    trep, tdetail = T.classify([(0, 0xFFFD06), (0, 0xFFFD18), (1, 0x5EE6), (1, 0x7000), (1, 0x9999), (1, 0x7100), (1, 0x7200)],
+                               P.read_log(tmp2 / "t.bin"), 0x20000, [(0, 0x5800)])
+check(trep["classes"] == {"static_writer": 2, "reconstructed_writer": 2, "runtime_writer": 1, "unattributed": 2},
+      "template writer attribution %s" % trep["classes"])
+check(trep["slot_runs"]["largest"][:2] == [5, 4] and trep["templates_in_multi_slot_runs"] == 3 and trep["statically_derived_before_execution"] == 0,
+      "slot runs %s" % trep["slot_runs"])
+check(not any(k in json.dumps(trep) for k in ('"address"', '"pc"')), "template report holds counts only")
 
 if failures:
     print("%d failure(s)" % len(failures))

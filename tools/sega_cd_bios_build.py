@@ -331,8 +331,11 @@ class Driver:
             metrics = self.compile(emitted, c_path, exe)
             t2 = time.monotonic()
             report, capture = self.pass_run(exe, self.work / "pass")
-            if self.args.epoch_recipe and report["stop"]["class"] == "materialized_image_unverified":
-                raise BuildFailure("epoch_recipe_unverified", "the live PRG RAM at the epoch is not the reconstructed image")
+            if self.args.epoch_recipe and (report["stop"]["class"] == "materialized_image_unverified" or (
+                    capture is not None and capture["kind"] == "epoch" and report.get("bios_profile", {}).get("epochs", 0) == 0)):
+                # a build pass writes a snapshot instead of stopping when the live image matches no admitted one (ADR 0142 decision 4): at the
+                # first epoch that means the recipe image is not what the BIOS produced
+                raise BuildFailure("epoch_recipe_unverified", "the live PRG RAM at the first epoch is not the reconstructed image")
             metrics.update({"round": round_index, "emit_seconds": round(t1 - t0, 3), "pass_seconds": round(time.monotonic() - t2, 3),
                             "functions": emitted["functions"], "c_bytes": emitted["c_bytes"]})
             self.rounds.append(metrics)
