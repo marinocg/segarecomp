@@ -6,6 +6,11 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
+try:
+    import resource  # noqa: F401  (POSIX only; used by the adapter only when it launches BizHawk)
+except ImportError:
+    import types
+    sys.modules["resource"] = types.ModuleType("resource")
 import segarecomp_genesis_bizhawk_full as full  # noqa: E402
 import segarecomp_genesis_bizhawk as bz  # noqa: E402
 
