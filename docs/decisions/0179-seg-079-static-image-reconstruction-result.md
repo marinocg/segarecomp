@@ -112,8 +112,11 @@ The saving is one discovery round: the sub translation units are compiled once i
 Rounds 2-15 (the 14 template rounds, ~50 % of the build) are untouched. Single runs; no variance estimate. Synthetic baselines
 (`sega_cd_epoch_recipe_build_test`, fixture BIOS carrying a project-authored stream): 5 -> 4 rounds, same three templates, same digests,
 COMSTAT and both processors' state; every fixture negative (uncompiled/odd targets, rewritten opcode, resident-code mutation, stale
-return, incomplete/corrupt image) stops identically on the recipe-assisted program. Checkpoint H still fails strict frame equivalence
-as recorded in ADR 0177; nothing about its timing or gate was touched. Sonic CD Checkpoint G has no separate build here: the Checkpoint H
+return, incomplete/corrupt image) stops identically on the recipe-assisted program. SEG-079 leaves the accepted timing contract and the Checkpoint H result unchanged: ADR 0177 records Checkpoint H as achieved
+(`TIME_ALIGNED`, identical pre-registered frames), and nothing about its timing conventions, gate or frames was touched. What SEG-079 measured is narrower: the
+generated-native **outcome-digest equivalence** of the conventional and recipe-assisted programs (both CPUs' registers and trace
+digests, all RAM/VRAM digests, result block, device log, ticks). It did **not** rerun the frame-by-frame Checkpoint H comparison against the
+independent reference. Sonic CD Checkpoint G has no separate build here: the Checkpoint H
 build contains its executable images.
 
 ## Adversarial matrix (task section 9)
@@ -137,6 +140,12 @@ contains no offsets.
 2. The task statement says twelve templates (two main, ten sub), the figure of the ADR 0144 configuration; the Checkpoint H build admits 14.
    Both are reported.
 3. Phase E was implemented for the epoch producer only, as the evidence supports nothing more.
+
+## Correction of a premise carried from ADR 0178
+
+ADR 0178 (frozen, preserved unaltered as historical pre-registration) says Checkpoint H "remains `TIME_ALIGNED`/strict-equivalence failing as
+recorded". That reflected the task statement's outdated premise (ADR 0176's *not achieved* result). ADR 0177 superseded it: Checkpoint H is
+achieved. ADR 0178's sentence had no bearing on any rule, measurement or decision; the correct statement is the one in Phase E above.
 
 ## Limitations
 

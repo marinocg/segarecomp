@@ -176,7 +176,7 @@ with tempfile.TemporaryDirectory() as tmp:
     code, bad = build(tmp, "bad", disc, bios, copy_spec, "--epoch-recipe", wrong)
     check(code == 1 and bad.get("failure") == "epoch_recipe_unverified", "the driver fails closed on an unverified recipe epoch: %s" % bad)
     # run that program directly: typed stop, sub retired nothing
-    exe = tmp / "bad" / "program"
+    exe = tmp / "bad" / ("program" + common.EXE)
     check(exe.exists(), "the rejected build left its program for inspection")
     if True:
         _, report = run(exe, disc, bios)
