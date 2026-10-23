@@ -35,7 +35,11 @@ correct (0 false starts, 0 data-as-code). **Three data bytes are labelled data w
 bar, but the frozen rule also requires zero code-as-data conflicts). They lie in two 128-byte cells; all three come from the data-read tier (none from
 the DMA tier or the header); the seed-1 control has one such byte, which is among the three. Cells containing a wrong label are excluded from every
 cell count below. The mechanism is the known limit of a read-based data label (a code byte read by an executed instruction as data); it is not a
-tracing or synchronisation defect. The rule was not relaxed.
+tracing or synchronisation defect. The rule was not relaxed. The independent reviewer's diagnosis (aggregate): each of the three bytes is read as data by one to three executed
+instructions, none lies inside an executed opcode word, and the truth classes them as code-continuation; the same mechanism produces the control's one
+byte. So the conflict is a systematic read-tap-versus-source-truth disagreement (the truth may over-claim code or contain code/data overlap there), not
+TAS-specific label noise and not proven truth error; `LABELS_UNSAFE` reflects the strictness of the frozen zero-conflict rule. A sound follow-up is a
+new pre-registered amendment (for example, read-derived data labels never override a code claim, or are demoted to unknown), not a post-hoc waiver.
 
 ## Gate C measurements (non-binding because Gate B failed; thresholds unchanged)
 
