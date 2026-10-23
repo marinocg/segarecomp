@@ -2,6 +2,7 @@
 
 - Status: Accepted (SEG-078-T001, checkpoint C1). Frozen before any measurement of the authentic sub-BIOS epoch image, the mutable
   templates or a recipe-assisted build. It may only be made stricter later; any other change is recorded as a deviation in the result ADR.
+- Later: ADR 0179 reports the result (deviations listed there).
 - Scope: how the hypothesis is tested and what each outcome means. It claims nothing about the authentic images.
 - Privacy: no BIOS, disc or snapshot byte, hash, offset, destination address, template address or trace appears in this or the result
   ADR. Private intermediates stay in the ignored `.cache/` of the base checkout.
