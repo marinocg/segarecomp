@@ -77,6 +77,28 @@ static void fresh(int bios_profile, uint32_t reg1, uint32_t reg12, uint64_t onse
   }
 }
 
+
+/* Stub generated variants for the long-instruction rule (section 3). */
+static uint32_t stub_cycles;
+static int stub_result;
+static int stub_dispatch(ScdMachine *machine) {
+  machine->refresh_skip_cycles = stub_cycles;
+  if (stub_result != 0) {
+    machine->stop.stop_class = SCD_STOP_INTERNAL;
+    return 1;
+  }
+  return scd_retire(machine, SCD_MAIN, 4U);
+}
+
+static void fresh_stub(const ScdProgram *program, uint64_t start) {
+  fresh(1, 0x04U, 0x00U, 0U);
+  m->program = program;
+  m->ga.sub_halted = 1U;
+  m->instruction_budget = 1U;
+  m->cpu[SCD_MAIN].next = start;
+  m->cpu[SCD_MAIN].sr = UINT16_C(0x2700);
+}
+
 static uint64_t line_of(uint64_t tick) { return tick / LINE_TICKS; }
 
 int main(void) {
@@ -128,36 +150,43 @@ int main(void) {
   }
   row(scd_main_refresh_gate(m, 5014U * MASTER) == 0, "refresh: the restarted instruction runs");
   {
-    /* project-authored opcode words: LSR.W D7,D1 ($EE69), ASL.W #1,D0 ($E340), MOVEM.L (A7)+,D0-D7/A0-A6 ($4CDF $7FFF), MOVEM.W ($4C9F $7FFF), NOP */
-    bios[0x200] = 0xEEU; bios[0x201] = 0x69U;
-    bios[0x210] = 0xE3U; bios[0x211] = 0x40U;
-    bios[0x220] = 0x4CU; bios[0x221] = 0xDFU; bios[0x222] = 0x7FU; bios[0x223] = 0xFFU;
-    bios[0x230] = 0x4CU; bios[0x231] = 0x9FU; bios[0x232] = 0x7FU; bios[0x233] = 0xFFU;
-    bios[0x240] = 0x4EU; bios[0x241] = 0x71U;
-    m->cpu[SCD_MAIN].d[7] = 10U;
-    m->cpu[SCD_MAIN].pc = 0x200U;
-    row(scd_main_refresh_skip_cycles(m) == 20U, "long instruction: LSR.W D7,D1 with D7 = 10 follows 2 x 10 = 20 cycles");
-    m->cpu[SCD_MAIN].d[7] = 64U + 3U;
-    row(scd_main_refresh_skip_cycles(m) == 6U, "long instruction: the count is D7 modulo 64 (67 -> 3 -> 6 cycles)");
-    m->cpu[SCD_MAIN].d[7] = 64U;
-    row(scd_main_refresh_skip_cycles(m) == 0U, "long instruction: a zero count follows nothing");
-    m->cpu[SCD_MAIN].pc = 0x210U;
-    row(scd_main_refresh_skip_cycles(m) == 0U, "long instruction: an immediate-count shift is not of the class");
-    m->cpu[SCD_MAIN].pc = 0x220U;
-    row(scd_main_refresh_skip_cycles(m) == 120U, "long instruction: MOVEM.L of 15 registers follows 15 x 8 = 120 cycles");
-    m->cpu[SCD_MAIN].pc = 0x230U;
-    row(scd_main_refresh_skip_cycles(m) == 0U, "long instruction: MOVEM.W is not of the class");
-    bios[0x250] = 0x48U; bios[0x251] = 0xC0U; bios[0x252] = 0xFFU; bios[0x253] = 0xFFU; /* EXT.L D0 followed by a word that looks like a mask */
-    m->cpu[SCD_MAIN].pc = 0x250U;
-    row(scd_main_refresh_skip_cycles(m) == 0U, "long instruction: EXT.L D0 (opcode $48C0) is not MOVEM.L");
-    m->cpu[SCD_MAIN].pc = 0x240U;
-    row(scd_main_refresh_skip_cycles(m) == 0U, "long instruction: NOP is not of the class");
+    /* The long-instruction rule consumes the executing variant's own build-time record (m->refresh_skip_cycles); the runtime never
+     * decodes guest bytes. Stub dispatchers stand in for generated variants: the shift variant records 2 x count (count read before it
+     * executes), the MOVEM.L variant 8 x registers, a plain variant nothing, and a rejected variant records nothing and stops. */
+    ScdProgram program;
+    memset(&program, 0, sizeof program);
+    program.processors[SCD_MAIN].dispatch = stub_dispatch;
     m->main_refresh_due = 1000U * MASTER;
-    m->cpu[SCD_MAIN].pc = 0x220U; /* 120 cycles = 840 master clocks */
-    scd_main_refresh_note_instruction(m, 1000U * MASTER - 840U * MASTER);
+    scd_main_refresh_note_instruction(m, 1000U * MASTER - 840U * MASTER, 120U); /* 120 cycles = 840 master clocks */
     row(m->main_refresh_due == 1896U * MASTER, "refresh skipped: a MOVEM.L starting 120 cycles before the deadline reaches it -> the deadline moves on by 896");
-    scd_main_refresh_note_instruction(m, 1896U * MASTER - 841U * MASTER);
+    scd_main_refresh_note_instruction(m, 1896U * MASTER - 841U * MASTER, 120U);
     row(m->main_refresh_due == 1896U * MASTER, "refresh kept: one master clock short of the deadline it is not skipped");
+    scd_main_refresh_note_instruction(m, 1896U * MASTER, 0U);
+    row(m->main_refresh_due == 1896U * MASTER, "refresh kept: an instruction of no long class (0 cycles) never moves the deadline");
+
+    /* the scheduler commits the record only of an instruction that retired */
+#define START (100U * MASTER)
+    stub_cycles = 20U; stub_result = 0;
+    fresh_stub(&program, START);
+    m->main_refresh_due = START + 20U * SCD_MAIN_CYCLE_TICKS; /* the start plus exactly 20 cycles */
+    row(scd_machine_run(m, UINT64_MAX) == SCD_RUN_BUDGET && m->main_refresh_due == START + 20U * SCD_MAIN_CYCLE_TICKS + SCD_MAIN_REFRESH_PERIOD_TICKS &&
+            m->refresh_skip_cycles == 0U,
+        "retired shift variant (record 20): the start plus 20 cycles reaches the deadline -> the deadline moves on by a period; the record is consumed");
+    fresh_stub(&program, START);
+    m->main_refresh_due = START + 20U * SCD_MAIN_CYCLE_TICKS + 1U;
+    row(scd_machine_run(m, UINT64_MAX) == SCD_RUN_BUDGET && m->main_refresh_due == START + 20U * SCD_MAIN_CYCLE_TICKS + 1U,
+        "retired shift variant (record 20): one tick short of the deadline -> unchanged");
+    stub_cycles = 0U;
+    fresh_stub(&program, START);
+    m->main_refresh_due = START + 1000U * SCD_MAIN_CYCLE_TICKS;
+    row(scd_machine_run(m, UINT64_MAX) == SCD_RUN_BUDGET && m->main_refresh_due == START + 1000U * SCD_MAIN_CYCLE_TICKS,
+        "variant without a record (a plain instruction at the same pc): the deadline is unchanged");
+    stub_cycles = 120U; stub_result = 1; /* a variant that records and then stops (an abandoned/failed execution) */
+    fresh_stub(&program, START);
+    m->main_refresh_due = START + 120U * SCD_MAIN_CYCLE_TICKS;
+    row(scd_machine_run(m, UINT64_MAX) == SCD_RUN_STOPPED && m->main_refresh_due == START + 120U * SCD_MAIN_CYCLE_TICKS,
+        "a failed execution never commits its record (the deadline is unchanged)");
+#undef START
   }
 
   /* ---- 4. the Z80-window latency ---- */

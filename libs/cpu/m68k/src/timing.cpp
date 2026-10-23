@@ -555,4 +555,16 @@ std::optional<std::uint32_t> m68k_effective_address_cycles(
   return ea_cycles(effective_address, size);
 }
 
+M68kLongInstructionClass m68k_long_instruction_class(const M68kIrOperation &operation) noexcept {
+  M68kLongInstructionClass out;
+  if (operation.kind == M68kIrKind::shift_rotate_register && operation.source_ea.mode == M68kEaMode::data_register) {
+    out.kind = M68kLongInstructionKind::register_count_shift;
+    out.count_register = static_cast<std::uint8_t>(operation.source_ea.reg & 7U);
+  } else if (operation.kind == M68kIrKind::movem_transfer && operation.size == M68kMemoryAccessWidth::long_word) {
+    out.kind = M68kLongInstructionKind::movem_long;
+    for (std::uint32_t mask = operation.movem_register_mask; mask != 0U; mask >>= 1U) out.registers += static_cast<std::uint8_t>(mask & 1U);
+  }
+  return out;
+}
+
 }  // namespace segarecomp

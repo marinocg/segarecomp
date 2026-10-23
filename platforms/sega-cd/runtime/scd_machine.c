@@ -622,27 +622,6 @@ static int scd_machine_idle(const ScdMachine *m) {
   return !segarecomp_m68k_stop_wake_possible(&sub->irq, scd_sub_max_wake_level(m), sub->sr);
 }
 
-/* SEG-071-T002 (ADR 0177): the dynamic cycles of the instruction at the main processor's pc when it is of a class that follows its own
- * cycles with the reference's SKIP_BUS_REFRESH() - a register-count shift or rotate (2 cycles per count, only when the count is not
- * zero) or MOVEM.L (8 cycles per register): the reference skips the next refresh delay when the instruction's start plus these cycles
- * has reached the refresh deadline. Division (also in that class) is not modelled: its cycles follow the operand values. */
-uint32_t scd_main_refresh_skip_cycles(const ScdMachine *m) {
-  const ScdCpu *c = &m->cpu[SCD_MAIN];
-  const uint8_t *b0 = scd_main_stream_byte(m, c->pc), *b1 = scd_main_stream_byte(m, c->pc + 1U);
-  uint32_t op;
-  if (b0 == NULL || b1 == NULL) return 0U;
-  op = ((uint32_t)*b0 << 8) | *b1;
-  if ((op & 0xF000U) == 0xE000U && (op & 0x00C0U) != 0x00C0U && (op & 0x0020U) != 0U) return 2U * (c->d[(op >> 9) & 7U] & 63U);
-  if ((op & 0xFB80U) == 0x4880U && (op & 0x0040U) != 0U && (op & 0x0038U) != 0U) { /* MOVEM.L (EA mode 0 is EXT.L) */
-    const uint8_t *h = scd_main_stream_byte(m, c->pc + 2U), *l = scd_main_stream_byte(m, c->pc + 3U);
-    uint32_t mask, count = 0U;
-    if (h == NULL || l == NULL) return 0U;
-    for (mask = ((uint32_t)*h << 8) | *l; mask != 0U; mask >>= 1) count += mask & 1U;
-    return 8U * count;
-  }
-  return 0U;
-}
-
 /* The refresh delay (ADR 0177 decision 6): an instruction about to execute at or after the deadline loses 2 cycles and the next
  * deadline is 128 cycles after this instant. Returns 1 when the delay was charged: the instruction restarts at the processor's new `next`. */
 int scd_main_refresh_gate(ScdMachine *m, uint64_t ready) {
@@ -652,11 +631,13 @@ int scd_main_refresh_gate(ScdMachine *m, uint64_t ready) {
   return 1;
 }
 
-/* The instruction at the main processor's pc starts at `ready`: one that follows its own cycles with the reference's SKIP_BUS_REFRESH()
- * moves the deadline on by a period when its start plus those cycles has reached the deadline. */
-void scd_main_refresh_note_instruction(ScdMachine *m, uint64_t ready) {
-  const uint32_t dynamic = scd_main_refresh_skip_cycles(m);
-  if (dynamic != 0U && ready + (uint64_t)dynamic * SCD_MAIN_CYCLE_TICKS >= m->main_refresh_due) m->main_refresh_due += SCD_MAIN_REFRESH_PERIOD_TICKS;
+/* The instruction that started at `ready` retired. One of the classes that follow their own cycles with the reference's SKIP_BUS_REFRESH()
+ * (a register-count shift or rotate: 2 cycles per count; MOVEM.L: 8 cycles per register) moves the deadline on by a period when its start
+ * plus those cycles has reached the deadline. `cycles` is the instruction's own generated record (m->refresh_skip_cycles, set by the
+ * verified variant that ran from its build-time class and the count register's value before execution); the runtime never decodes
+ * guest bytes. Division (also in that class) is not modelled: its cycles follow the operand values. */
+void scd_main_refresh_note_instruction(ScdMachine *m, uint64_t ready, uint32_t cycles) {
+  if (cycles != 0U && ready + (uint64_t)cycles * SCD_MAIN_CYCLE_TICKS >= m->main_refresh_due) m->main_refresh_due += SCD_MAIN_REFRESH_PERIOD_TICKS;
 }
 
 ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
@@ -736,11 +717,16 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline) {
       continue;
     }
     if (cpu == SCD_MAIN && m->bios != NULL) {
-      scd_main_refresh_note_instruction(m, ready);
+      m->refresh_skip_cycles = 0U;
       if (m->main_irq_delay != 0U) m->main_irq_delay -= 1U; /* one instruction executes before the interrupt is recognised */
       m->main_refresh_hold = 0U;
     }
     if (m->program->processors[cpu].dispatch(m) != 0) return SCD_RUN_STOPPED;
+    /* The refresh-skip record is committed only by an instruction that retired (a rejected or failed one returns before/without it). */
+    if (cpu == SCD_MAIN && m->bios != NULL) {
+      scd_main_refresh_note_instruction(m, ready, m->refresh_skip_cycles);
+      m->refresh_skip_cycles = 0U;
+    }
   }
 }
 

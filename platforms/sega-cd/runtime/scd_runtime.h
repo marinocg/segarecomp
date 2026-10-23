@@ -442,6 +442,7 @@ typedef struct ScdMachine {
   uint32_t main_refresh_hold;             /* BIOS-image profile: the refresh delay was just charged; the instruction runs before an interrupt is taken */
   uint32_t main_irq_delay;                /* BIOS-image profile: instructions to execute before a main interrupt is recognised (VDP register #1 IE0 set while a vertical interrupt is pending) */
   uint64_t main_extra_ticks;              /* BIOS-image profile: bus wait added to the executing main instruction (Z80-window accesses), charged at its retire */
+  uint32_t refresh_skip_cycles;           /* BIOS-image profile: the executing main instruction's refresh-skip cycles, set by its generated variant (ADR 0177) */
   uint64_t main_refresh_due;              /* BIOS-image profile: the instant from which the next main instruction loses the bus-refresh cycles */
   uint64_t vint_at;                       /* BIOS-image profile: tick at which the vertical interrupt of the last onset is requested (0: none due) */
   uint64_t vdp_onset;                     /* tick of the next VDP vertical-blank onset */
@@ -533,8 +534,7 @@ ScdRunResult scd_machine_run(ScdMachine *m, uint64_t deadline);
  * rule, the dynamic cycles of the instruction at the main pc that follow their own refresh bookkeeping, and the cycles of an autovector
  * interrupt exception of `cpu`. */
 int scd_main_refresh_gate(ScdMachine *m, uint64_t ready);
-void scd_main_refresh_note_instruction(ScdMachine *m, uint64_t ready);
-uint32_t scd_main_refresh_skip_cycles(const ScdMachine *m);
+void scd_main_refresh_note_instruction(ScdMachine *m, uint64_t ready, uint32_t cycles);
 uint32_t scd_interrupt_entry_cycles(const ScdMachine *m, uint32_t cpu, uint32_t level);
 uint64_t scd_machine_time(const ScdMachine *m);
 void scd_machine_release(ScdMachine *m);

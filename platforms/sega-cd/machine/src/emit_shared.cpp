@@ -121,6 +121,11 @@ LoweredInstruction lower_instruction(const M68kIrOperation &op, std::uint32_t pc
   out.body = emit_m68k_operation_c(op, "cpu->d", "cpu->sr", "  ", &ctx);
   out.compiled = timing.has_value() && out.body.find_first_not_of(" \n") != std::string::npos;
   if (timing) out.timing = *timing;
+  const auto long_class = m68k_long_instruction_class(op);
+  if (long_class.kind == M68kLongInstructionKind::register_count_shift)
+    out.refresh_skip = "  m->refresh_skip_cycles = 2U * (cpu->d[" + std::to_string(long_class.count_register) + "] & UINT32_C(63));\n";
+  else if (long_class.kind == M68kLongInstructionKind::movem_long)
+    out.refresh_skip = "  m->refresh_skip_cycles = " + std::to_string(8U * long_class.registers) + "U;\n";
   return out;
 }
 

@@ -49,6 +49,9 @@ struct LoweredInstruction {
   std::string slots;
   std::string body;
   std::string timing;
+  // SEG-071-T002 (ADR 0177): a statement recording the instruction's refresh-skip cycles (BIOS-image main processor only; empty otherwise).
+  // Placed after the byte guard and before the body, so the count register is read as it stands before the instruction executes.
+  std::string refresh_skip;
 };
 
 [[nodiscard]] LoweredInstruction lower_instruction(const M68kIrOperation &op, std::uint32_t pc, const SegaCdM68kRuntimeCEmitter &emitter,
