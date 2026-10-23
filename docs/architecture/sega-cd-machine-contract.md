@@ -382,8 +382,10 @@ stops with `bios_absent`. The BIOS-image profile wires the VDP's level 6 (sectio
 
 - **BIOS-image profile, main-processor and VDP-port conventions (SEG-071-T002, ADR 0177; rule G = the reference's own source, hardware
   measurement cited there).** The main processor's refresh delay (2 cycles when an instruction is about to execute at or after the
-  deadline, deadline +128 cycles; a long shift/rotate or MOVEM.L moves the deadline on by a period when it reaches it; division not
-  modelled); one more cycle per main access to the Z80 window; the data-port FIFO (a stall until the oldest of four entries is read out;
+  deadline, deadline +128 cycles; a long shift/rotate or MOVEM.L moves the deadline on by a period when it reaches it - the class and its cycles are a build-time
+  record of each verified executable variant, written by the generated instruction after its byte guard (the count register is read
+  before the instruction executes) and committed by the scheduler only for an instruction that retired; the runtime never classifies
+  guest bytes; division not modelled); one more cycle per main access to the Z80 window; the data-port FIFO (a stall until the oldest of four entries is read out;
   full/empty status bits; emptied at each frame's start) and the VRAM-fill busy bit; one instruction executes before a vertical
   interrupt enabled by a register-#1 MOVE (not MOVE.L) is recognised; an autovector interrupt exception takes 50..59 cycles by the
   processor's cycle count within the frame mod 10 (both processors); a VDP status read is taken 8 cycles after its instruction starts.

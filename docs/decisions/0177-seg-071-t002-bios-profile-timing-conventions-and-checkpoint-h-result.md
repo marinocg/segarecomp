@@ -33,6 +33,11 @@ be reproduced for the orderings the application depends on to come out the same;
    that follows its own cycles - a register-count shift or rotate (2 cycles per count) or MOVEM.L (8 per register) - whose start plus
    those cycles has reached the deadline moves the deadline on by one period (`SKIP_BUS_REFRESH`); division is in the same class in the
    reference and is not modelled (its cycles follow the operand values).
+   The class is a build-time fact of each verified executable variant, never a runtime inspection of guest bytes: the CPU owner
+   (`m68k_long_instruction_class`) classifies the lifted operation; the generated variant records, after its byte guard and before its
+   body, either 2 x (the count register's current value modulo 64, read before the instruction executes) or 8 x the number of registers
+   in the decoded MOVEM.L mask; the scheduler commits that record only when the instruction retired (a rejected, abandoned or failed
+   execution commits nothing), so overlapping executable images that put different instructions at one pc each carry their own record.
 3. **Z80 window.** Each main bus access to `$A00000-$A0FFFF` takes one more cycle (7 master clocks; reference `z80_read_byte` /
    `z80_write_byte`, "Z80 bus access latency").
 4. **Video phase.** The main processor leaves reset 229 lines + 1,004 master clocks into the 262-line frame whose origin is the
@@ -65,13 +70,13 @@ The sub cycle (decision 1) is an integer 2,148,241 ticks against the exact 2,148
 orderings compared, a race closer than that could.
 9. **Acceptance and method.** Checkpoint H as ADR 0175 decision 8 (`TIME_ALIGNED`), Checkpoints E, F and G re-verified with the same
    program, determinism (two repeats, eight seeded deadline partitions), synthetic fixtures for every changed rule
-   (`tests/sega_cd_timing_convention_test.py`). ADR 0175 decision 7's full compared state (VDP registers, CRAM, VSRAM, VRAM and RAM per
-   selected frame, executed instruction starts to entry + 1,500) was not compared beyond the canonical frames, the controller log, the
-   Checkpoint E state and the instruction-start lockstep to frame 129. Decision 1 was fixed before generated runs; decisions 2-8 were
-   found by lockstep against the reference's source and are modelling conventions (including the round-down to a multiple of 7 of the
-   reset point and the 8-cycle status read), none fitted to a frame. Method: the executed main-processor instruction starts (program counter and start time)
-   of the generated run and of the reference were compared in lockstep from reset; each divergence named the next convention; the lists
-   above are the divergences found, in the order they appeared.
+   (`tests/sega_cd_timing_convention_test.py`, `tests/sega_cd_refresh_skip_variant_test.py`). ADR 0175 decision 7's compared state was
+   first measured only for the canonical frames, the controller log, the Checkpoint E state and an instruction-start lockstep to frame
+   129; the full decision 7 comparison is the section "Decision 7 comparison" below. Decision 1 was fixed before generated runs;
+   decisions 2-8 were found by lockstep against the reference's source and are modelling conventions (including the round-down to a
+   multiple of 7 of the reset point and the 8-cycle status read), none fitted to a frame. Method: the executed main-processor
+   instruction starts (program counter and start time) of the generated run and of the reference were compared in lockstep from reset;
+   each divergence named the next convention; the lists above are the divergences found, in the order they appeared.
 
 ## Result
 
@@ -96,6 +101,56 @@ vertical-interrupt delay and the interrupt exception cycles do not change these 
 own rules for the hardware behaviour they model, and the two processors' instruction streams stay in lockstep only with them (without the
 exception cycles the start times differ from the first interrupt, frame 70; without the refresh-skip rule the first program-counter
 divergence is at frame 128, with all of them at frame 129).
+
+## Decision 7 comparison (independent reference, same registered runs)
+
+Method: the registered generated-native program and input schedule (ADR 0176 decision 3, `--base-onsets 1202`) was run once with
+captures at entry + 510 / 540 / 600 / 1,150 / 1,250 / 1,300 / 1,400 / 1,500, the input read log and execution coverage, and compared
+with the reference run of the same schedule (re-run for this section; its canonical frames, VDP state, registers, RAM images and
+executed-start tables are identical to the earlier run). The reference state files are the reference's own dumps; nothing was
+computed by the generated program. Private files stay in ignored storage; the table is aggregate.
+
+| compared state | entry + 1,150 / 1,250 / 1,300 / 1,400 / 1,500 (and Checkpoint G 510 / 540 / 600) |
+| --- | --- |
+| canonical frame, dimensions | identical at all eight, 320 x 224 |
+| VDP registers (24), CRAM (64 entries), VSRAM, VRAM | identical at all eight |
+| Word RAM | identical at all eight |
+| main register file | identical at 1,300 and 1,500 and at G; at 1,150 / 1,250 / 1,400 only the program counter differs, both pcs inside the same tight polling loop (loop phase, ADR 0145 class b) |
+| sub register file | identical at 1,300 and 1,500; at 1,250 / 1,400 and at G only the pc differs, polling-loop phase; at 1,150 the sub is inside its level-3 interrupt entry in the generated run (pc, SR and SP differ by one exception frame) and in the polling loop in the reference: the instant at which the interrupt is accepted differs by less than one instruction slot at that frame (ADR 0145 class b) |
+| work RAM | 1 byte differs at each of the five H frames (6 at the G frames): all below the main stack pointer (stack residue) |
+| PRG RAM | 24-70 bytes: 6-52 below the sub stack pointer (stack residue); 18 bytes in two adjacent 28-byte record slots of one sub-side table (the reference holds a complete record in one slot, the generated run the first part of the next slot: a producer/consumer phase one record apart, ADR 0145 "BIOS status/message data" class), constant from entry + 510 to 1,500; at 1,150 only, 1 further byte that coincides with the interrupt-entry phase above and is absent from 1,250 on |
+| controller observations | the multiset and the order of port-1 and port-2 reads are equal in each of the 1,436 frames entry + 65 ... 1,500; the 240 reads returning the RIGHT value are in exactly the reference's frames (frames entry + 1,259 ... 1,498 in the numbering of both logs, which is ADR 0175 decision 4's polls 1,260 ... 1,499 counted from the entry frame itself) |
+| executed instruction starts, reset to entry + 1,500 | sub: 5,241 starts in both, sets equal; main: 6,905 generated, 6,907 reference, the 6,905 equal; every generated start is an entry of the compiled-entry table (the dispatch is byte-verified per instruction and no typed stop occurred); counts per start: equal 5,144 main / 4,843 sub, differing by one 1,208 / 337 (frame-boundary or loop-exit phase), small phase differences (at most 8 or 5 %) 517 / 44, the reference idle-skipping a Gate Array poll loop (generated count at least twice the reference's) 28 / 12, and 8 main / 5 sub starts in wait loops whose iteration counts differ by tens and which are not attributed individually |
+
+Typed differences found and classified:
+
+1. **Expansion-port control register read-back (model difference, not timing).** Two main starts exist only in the reference. At the
+   stage's first run of the Word RAM program a `BTST #6` of the third GPIO control register ($A1000D) is followed by a branch; the
+   BIOS wrote $40 to the three control registers earlier and the reference reads $40 back, so it takes the path that checks a
+   warm-start marker (two instructions) and then rejoins; the generated run reads a value with bit 6 clear (the shared Genesis I/O policy's CTRL3 read
+   value; the written latch is not read back, `platforms/genesis/runtime/runtime.c`) and skips the two instructions. No state differs after the rejoin and
+   no selected frame is affected (the marker is absent in this run, so both paths proceed identically); with the marker present the
+   generated run would not take the warm-start path. It is outside this task's timing conventions and is **not corrected here**; the
+   fix is a read-back of the latched control value in the shared I/O policy (a follow-up, with its own fixture).
+2. **Polling-loop and interrupt-instant phase** of the pc (and of the sub's exception frame at entry + 1,150), count differences of the
+   idle-skipped Gate Array poll loops: the asynchronous classes ADR 0145 recorded; the reference's idle-skip is not modelled (decision 8).
+3. **Sub-side record-slot phase** (18 bytes) and stack residue (below both stack pointers): ADR 0145/0147 classes; identified by
+   structure (two adjacent 28-byte slots; bytes below the stack pointer), not by disassembly of the table's meaning.
+
+Limitations of this comparison: it is a single generated run per schedule plus the determinism runs (identical outputs) and a
+single reference (repeated, identical); the controller log of the reference comes from the earlier instrumented build of the
+reference (its pad-read hook is absent from the present build; the present build reproduces every other output byte for byte);
+"not read by any frame" is established by the eight identical frames and the identical VDP state, not by tracing readers; the
+unattributed wait-loop count differences (13 starts) and the record-slot meaning are classified by structure only; division and the
+reference's idle-skip remain unmodelled (decision 8). Checkpoint F (entry + 420 / 480 / 540, no input) frames are identical to the
+no-input reference; Checkpoint E (handoff and 60-frame interval): both register files equal, Word RAM and PCM RAM identical, executed
+sets equal (main 1,724, sub 3,519), work RAM 5 and PRG RAM 21 bytes differ (the classes above).
+
+Equivalence of the runtime classification change: after the review of this task replaced the runtime opcode inspection of the refresh-skip
+rule by the build-time record above, the fixed point was rebuilt (16 rounds, the same admission chain and materialized image, no typed
+stop); the Checkpoint E, F and G+H runs of the rebuilt program are byte-identical to the runs of the previous program in every output
+(reports, canonical frames, VDP/RAM dumps, CPU states, read log and coverage), and the two repeats and eight deadline partitions give
+one outcome.
 
 ## Consequences
 
