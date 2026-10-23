@@ -96,6 +96,7 @@ struct Image {
   bool guarded = false;
   std::uint32_t base{};
   std::vector<std::uint8_t> bytes;
+  bool epoch = false;  // verified whole at the sub runnable epoch (materialized by a pass, or SEG-078 reconstructed from a recipe)
 };
 
 struct Variant {
@@ -139,7 +140,9 @@ std::string identity_text(const DiscImage &disc, const BiosProfileInputs &inputs
   if (inputs.application_entry != 0U) t << "entry " << inputs.application_entry << "\n";
   for (std::size_t i = 0; i < admissions && i < inputs.admissions.size(); ++i) {
     const auto &a = inputs.admissions[i];
-    if (a.kind == AdmissionKind::epoch)
+    if (a.kind == AdmissionKind::epoch_recipe)  // SEG-078: no pass identity; the recipe and the BIOS identity above determine the bytes
+      t << "epochrecipe " << epoch_recipe_text(a.recipe) << "\n";
+    else if (a.kind == AdmissionKind::epoch)
       t << "epoch " << a.pass_identity << " " << a.bytes.size() << " " << sha256_hex(a.bytes) << "\n";
     else
       t << "template " << a.pass_identity << " " << processor_name(a.processor) << " " << a.address << " " << bytes_hex(a.bytes) << "\n";
@@ -166,6 +169,7 @@ const char *bios_profile_error_name(BiosProfileError error) noexcept {
   case BiosProfileError::disc_image_invalid: return "disc_image_invalid";
   case BiosProfileError::provenance_mismatch: return "provenance_mismatch";
   case BiosProfileError::epoch_invalid: return "epoch_invalid";
+  case BiosProfileError::epoch_recipe_invalid: return "epoch_recipe_invalid";
   case BiosProfileError::template_invalid: return "template_invalid";
   case BiosProfileError::image_validation: return "image_validation";
   case BiosProfileError::partition_invalid: return "partition_invalid";
@@ -239,6 +243,17 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
   std::uint32_t epochs = 0;
   for (std::size_t i = 0; i < inputs.admissions.size(); ++i) {
     const auto &a = inputs.admissions[i];
+    if (a.kind == AdmissionKind::epoch_recipe) {
+      // SEG-078 (ADR 0179): a static producer. The image is derived from the immutable BIOS image alone and is verified whole at the epoch.
+      EpochRecipeError recipe_error{};
+      auto bytes = reconstruct_epoch_image(rom, a.recipe, &recipe_error);
+      if (!bytes || ++epochs > kMaxEpochImages) return fail(BiosProfileError::epoch_recipe_invalid, i);
+      Image image{Processor::sub, "epoch" + std::to_string(epochs - 1U), epoch_recipe_text(a.recipe), ImageAuthority::static_proof, true,
+                  0U, std::move(*bytes)};
+      image.epoch = true;
+      images.push_back(std::move(image));
+      continue;
+    }
     if (a.pass_identity != bios_profile_identity(disc, inputs, i)) return fail(BiosProfileError::provenance_mismatch, i);
     if (a.kind == AdmissionKind::epoch) {
       const auto n = a.bytes.size();
@@ -246,7 +261,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
           std::all_of(a.bytes.end() - kEpochGranule, a.bytes.end(), [](std::uint8_t b) { return b == 0U; }))
         return fail(BiosProfileError::epoch_invalid, i);
       images.push_back(Image{Processor::sub, "epoch" + std::to_string(epochs - 1U), std::string(), ImageAuthority::bounded_build_time_materialization, true,
-                             0U, a.bytes});
+                             0U, a.bytes, true});
     } else {
       auto t = decode_template(a);
       if (!t || templates.size() >= kMaxOperandTemplates) return fail(BiosProfileError::template_invalid, i);
@@ -270,9 +285,10 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
       e.provenance.authority = image.authority;
       e.provenance.producer = image.name == "bios" ? "sega_cd.bios_image"
                               : image.name.rfind("disc", 0) == 0 ? "sega_cd.disc_extent"
+                              : image.epoch && image.authority == ImageAuthority::static_proof ? "sega_cd.sub_epoch_recipe"
                               : image.authority == ImageAuthority::static_proof ? "sega_cd.bios_copy"
                                                                                 : "sega_cd.sub_epoch";
-      if (!image.extent.empty()) e.provenance.evidence = {{"disc.extent", image.extent}};
+      if (!image.extent.empty()) e.provenance.evidence = {{image.epoch ? "epoch.recipe" : "disc.extent", image.extent}};
       e.verification = image.guarded ? ImageVerification::byte_identity : ImageVerification::none;
       set.images.push_back(std::move(e));
     }
@@ -510,7 +526,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
   out << "};\n";
   std::vector<const Image *> epoch_images;
   for (const auto &image : images)
-    if (image.authority == ImageAuthority::bounded_build_time_materialization) epoch_images.push_back(&image);
+    if (image.epoch) epoch_images.push_back(&image);
   if (!epoch_images.empty()) {
     out << "static const ScdMaterializedIdentity scd_sub_images[] = {\n";
     for (const auto *image : epoch_images) out << "  {" << image->bytes.size() << "U, \"" << sha256_hex(image->bytes) << "\"},\n";

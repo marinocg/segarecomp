@@ -455,6 +455,7 @@ typedef struct ScdMachine {
   ScdPcm pcm;
   ScdGfx gfx;
   void *access_trace;                     /* SEG-064-T004 diagnostic (--access-trace): run-length-coded sub Gate Array accesses, or NULL */
+  void *write_log;                        /* SEG-078 diagnostic (--ram-write-log): main BIOS reads and PRG/work RAM writes with the writer PC, or NULL */
   void *event_log;                        /* SEG-064-T004 diagnostic (--event-log): "<vblank count> <event>" lines, or NULL */
   uint8_t verify_only;                    /* SEG-064-T004: the generated variants verify their bytes and return (the handoff entry check) */
   void *coverage;                         /* SEG-064-T004 diagnostic (--coverage): executed instruction starts per processor, or NULL */
@@ -622,6 +623,11 @@ int scd_event_open(ScdMachine *m, const char *path);
 void scd_event(ScdMachine *m, const char *kind, uint32_t detail);
 void scd_event_close(ScdMachine *m);
 int scd_trace_open(ScdMachine *m, const char *path);
+/* SEG-078 diagnostic (--ram-write-log, local only, outside the program identity): 16-byte little-endian records
+ * {u8 kind, u8 width, u8 cpu, u8 0, u32 offset, u32 value, u32 pc}; kind 1 = PRG RAM write, 2 = work RAM write, 3 = main BIOS-window read. */
+int scd_wlog_open(ScdMachine *m, const char *path);
+void scd_wlog(ScdMachine *m, uint32_t kind, uint32_t cpu, uint32_t offset, uint32_t width, uint32_t value, uint32_t pc);
+void scd_wlog_close(ScdMachine *m);
 void scd_trace_ga(ScdMachine *m, uint32_t cpu, uint32_t offset, uint32_t width, int is_write, uint32_t value);
 void scd_trace_close(ScdMachine *m);
 int scd_coverage_enable(ScdMachine *m);
