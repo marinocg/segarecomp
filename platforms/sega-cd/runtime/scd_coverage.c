@@ -156,7 +156,7 @@ void scd_trace_close(ScdMachine *m) {
   m->access_trace = NULL;
 }
 
-/* SEG-078 diagnostic: binary RAM write / BIOS read log (see scd_runtime.h). */
+/* SEG-079 diagnostic: binary RAM write / BIOS read log (see scd_runtime.h). */
 int scd_wlog_open(ScdMachine *m, const char *path) {
   m->write_log = fopen(path, "wb");
   return m->write_log == NULL;

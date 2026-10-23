@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic reconstruction of a Sega CD sub-CPU runnable-epoch image from a BIOS image and a structural recipe (SEG-078, ADR 0179).
+"""Deterministic reconstruction of a Sega CD sub-CPU runnable-epoch image from a BIOS image and a structural recipe (SEG-079, ADR 0179).
 
 A recipe never contains executable bytes. It names the BIOS image it applies to (SHA-256 and size) and the image's length; the
 image is zero-initialised (the BIOS clears PRG RAM before it builds anything; the clear is a recorded producer, not a copy) and

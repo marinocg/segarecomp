@@ -1,4 +1,4 @@
-"""SEG-078 (ADR 0178/0179): the Sega CD epoch-image recipe, its independent decoder and the provenance classifier on project-authored
+"""SEG-079 (ADR 0178/0179): the Sega CD epoch-image recipe, its independent decoder and the provenance classifier on project-authored
 synthetic inputs only. Stdlib only; no commercial byte. usage: sega_cd_epoch_recipe_test.py <project root>"""
 import copy
 import hashlib

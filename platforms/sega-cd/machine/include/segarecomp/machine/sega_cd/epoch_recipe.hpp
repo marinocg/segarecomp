@@ -1,6 +1,6 @@
 #pragma once
 
-// SEG-078 (ADR 0179): the static producer of a Sega CD sub runnable-epoch image. A recipe names ordered bounded decode steps over the
+// SEG-079 (ADR 0179): the static producer of a Sega CD sub runnable-epoch image. A recipe names ordered bounded decode steps over the
 // immutable BIOS image; the image is zero-initialised and each step writes one decoded stream into it. The only decoder is the public
 // Kosinski LZ decoder. Build time only: the emitter reconstructs the image (authority `static_proof`: static reasoning over an
 // immutable input, no guest execution); the generated program still verifies the live PRG RAM against it at the epoch (ADR 0142

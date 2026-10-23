@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded, sanitized provenance classification of a materialized Sega CD sub-CPU epoch image (SEG-078, ADR 0178/0179).
+"""Bounded, sanitized provenance classification of a materialized Sega CD sub-CPU epoch image (SEG-079, ADR 0178/0179).
 
 For every byte of a materialized image: is it a verbatim copy of an immutable input, a deterministic transform of one,
 initialised/generated, or unexplained - and does a *writer* explain it (not just byte equality)?

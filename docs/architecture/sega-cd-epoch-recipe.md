@@ -1,4 +1,4 @@
-# Sega CD epoch-image recipe (SEG-078, ADR 0178/0179)
+# Sega CD epoch-image recipe (SEG-079, ADR 0178/0179)
 
 - Status: **Research candidate, opt-in.** Decision and evidence: ADR 0179. Plan: ADR 0178.
 - Scope: the *sub runnable-epoch image* only. Mutable `JMP` operand templates are **not** part of this schema (see "Template record").

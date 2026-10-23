@@ -1,4 +1,4 @@
-"""SEG-078 (ADR 0179): the static epoch producer end to end on the project-authored synthetic BIOS image.
+"""SEG-079 (ADR 0179): the static epoch producer end to end on the project-authored synthetic BIOS image.
 
 The fixture BIOS (tools/sega_cd_bios_fixture.py) builds the sub program by XOR-transforming a ROM span into PRG RAM. The test appends a
 Kosinski stream of the fixture's own pre-transform sub image to a copy of that BIOS (so the recipe's source is project-authored) and checks:

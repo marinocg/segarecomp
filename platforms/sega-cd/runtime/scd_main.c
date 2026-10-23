@@ -403,7 +403,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     else if (strcmp(flag, "--coverage") == 0) coverage_path = value;
     else if (strcmp(flag, "--access-trace") == 0) trace_path = value;
     else if (strcmp(flag, "--event-log") == 0) event_path = value;
-    else if (strcmp(flag, "--ram-write-log") == 0) wlog_path = value;     /* SEG-078 diagnostic (local only) */
+    else if (strcmp(flag, "--ram-write-log") == 0) wlog_path = value;     /* SEG-079 diagnostic (local only) */
     else if (authentic != NULL && strcmp(flag, "--bios") == 0) bios_path = value;           /* SEG-064-T002 */
     else if (authentic != NULL && strcmp(flag, "--materialize-dir") == 0) materialize_dir = value;
     else return 2;

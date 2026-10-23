@@ -1,6 +1,6 @@
-# ADR 0179: SEG-078 - Sega CD static image reconstruction and one-shot compilation: result
+# ADR 0179: SEG-079 - Sega CD static image reconstruction and one-shot compilation: result
 
-- Status: Accepted (SEG-078-T001, checkpoints C2-C7). Executes the plan frozen in ADR 0178; deviations are listed in "Deviations".
+- Status: Accepted (SEG-079-T001, checkpoints C2-C7). Executes the plan frozen in ADR 0178; deviations are listed in "Deviations".
 - Primary outcome: **`PARTIAL_STATIC_RECONSTRUCTION_SUPPORTED`**.
 - Privacy: no BIOS, disc or snapshot byte, hash, offset, destination, table base, template address, trace or disassembly appears here.
   Commercial inputs and every private intermediate stayed in the ignored `.cache/` of the base checkout; counts and classes only.

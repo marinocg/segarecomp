@@ -320,7 +320,7 @@ class Driver:
         admits, history = [], []
         epochs = templates = 0
         exe = self.work / ("program" + EXE)
-        if self.args.epoch_recipe:  # SEG-078 (ADR 0179): the epoch is a static producer: no discovery round, still verified whole at the epoch
+        if self.args.epoch_recipe:  # SEG-079 (ADR 0179): the epoch is a static producer: no discovery round, still verified whole at the epoch
             admits.append("epoch-recipe:" + self.args.epoch_recipe)
             epochs = 1
             history.append({"round": None, "admitted": {"kind": "epoch_recipe", "recipe": self.args.epoch_recipe}})
@@ -388,7 +388,7 @@ def main(argv=None):
     parser.add_argument("--copy-image", action="append")
     parser.add_argument("--disc-image", action="append", help="main|sub:<track-1 byte offset>:<base>:<length>: a disc extent placed in the processor's RAM (SEG-064-T004; main Word RAM SEG-071-T001)")
     parser.add_argument("--application-entry", help="the main address whose first execution ends the run (typed stop application_handoff)")
-    parser.add_argument("--epoch-recipe", help="SEG-078: the epoch image as a static producer, <length>:<source>@<dest>[,...] (tools/sega_cd_epoch_recipe.py spec); no epoch discovery round")
+    parser.add_argument("--epoch-recipe", help="SEG-079: the epoch image as a static producer, <length>:<source>@<dest>[,...] (tools/sega_cd_epoch_recipe.py spec); no epoch discovery round")
     parser.add_argument("--budget", type=int, default=5_000_000)
     parser.add_argument("--pass-set", action="append", help="main|sub:dN|aN=VALUE: a register preset of every build pass (fixture case selection)")
     parser.add_argument("--until-tick", type=int, default=0, help="end every pass at this machine-time instant (typed result deadline); 0 = none")

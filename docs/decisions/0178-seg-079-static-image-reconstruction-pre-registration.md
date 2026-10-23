@@ -1,6 +1,6 @@
-# ADR 0178: SEG-078 - Sega CD static image reconstruction and one-shot compilation: frozen experimental plan
+# ADR 0178: SEG-079 - Sega CD static image reconstruction and one-shot compilation: frozen experimental plan
 
-- Status: Accepted (SEG-078-T001, checkpoint C1). Frozen before any measurement of the authentic sub-BIOS epoch image, the mutable
+- Status: Accepted (SEG-079-T001, checkpoint C1). Frozen before any measurement of the authentic sub-BIOS epoch image, the mutable
   templates or a recipe-assisted build. It may only be made stricter later; any other change is recorded as a deviation in the result ADR.
 - Later: ADR 0179 reports the result (deviations listed there).
 - Scope: how the hypothesis is tested and what each outcome means. It claims nothing about the authentic images.

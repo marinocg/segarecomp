@@ -96,7 +96,7 @@ struct Image {
   bool guarded = false;
   std::uint32_t base{};
   std::vector<std::uint8_t> bytes;
-  bool epoch = false;  // verified whole at the sub runnable epoch (materialized by a pass, or SEG-078 reconstructed from a recipe)
+  bool epoch = false;  // verified whole at the sub runnable epoch (materialized by a pass, or SEG-079 reconstructed from a recipe)
 };
 
 struct Variant {
@@ -140,7 +140,7 @@ std::string identity_text(const DiscImage &disc, const BiosProfileInputs &inputs
   if (inputs.application_entry != 0U) t << "entry " << inputs.application_entry << "\n";
   for (std::size_t i = 0; i < admissions && i < inputs.admissions.size(); ++i) {
     const auto &a = inputs.admissions[i];
-    if (a.kind == AdmissionKind::epoch_recipe)  // SEG-078: no pass identity; the recipe and the BIOS identity above determine the bytes
+    if (a.kind == AdmissionKind::epoch_recipe)  // SEG-079: no pass identity; the recipe and the BIOS identity above determine the bytes
       t << "epochrecipe " << epoch_recipe_text(a.recipe) << "\n";
     else if (a.kind == AdmissionKind::epoch)
       t << "epoch " << a.pass_identity << " " << a.bytes.size() << " " << sha256_hex(a.bytes) << "\n";
@@ -244,7 +244,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
   for (std::size_t i = 0; i < inputs.admissions.size(); ++i) {
     const auto &a = inputs.admissions[i];
     if (a.kind == AdmissionKind::epoch_recipe) {
-      // SEG-078 (ADR 0179): a static producer. The image is derived from the immutable BIOS image alone and is verified whole at the epoch.
+      // SEG-079 (ADR 0179): a static producer. The image is derived from the immutable BIOS image alone and is verified whole at the epoch.
       EpochRecipeError recipe_error{};
       auto bytes = reconstruct_epoch_image(rom, a.recipe, &recipe_error);
       if (!bytes || ++epochs > kMaxEpochImages) return fail(BiosProfileError::epoch_recipe_invalid, i);

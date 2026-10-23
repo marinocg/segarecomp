@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writer attribution of the Sega CD mutable `JMP (xxx).L/.W` operand templates (SEG-078, ADR 0178/0179).
+"""Writer attribution of the Sega CD mutable `JMP (xxx).L/.W` operand templates (SEG-079, ADR 0178/0179).
 
 A template discovered by a build pass is evidence, not authority: its recorded address says nothing about *why* the opcode word is
 there. This tool answers, from the program's writer log (`--ram-write-log`, see sega_cd_epoch_provenance.py), who stored each

@@ -1,4 +1,4 @@
-"""Project-authored helpers for the SEG-078 epoch-recipe tests: a Kosinski encoder (the public LZ format; stdlib only) and
+"""Project-authored helpers for the SEG-079 epoch-recipe tests: a Kosinski encoder (the public LZ format; stdlib only) and
 synthetic writer-log builders. No commercial byte is read or reproduced."""
 import struct
 
