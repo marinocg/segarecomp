@@ -22,14 +22,19 @@ pass already contain the whole table**: when the pass stops at the first slot, t
    (the run record is part of the program identity text as `templaterun`, a single record keeps its previous text, so every existing program is
    byte-identical). A run of one slot is an ordinary `template` record; `.W` slots, other opcodes and slots beyond a gap end a run and are admitted
    by their own later rounds exactly as before.
-2. **Why over-admitting slots is sound.** The emitter expands a run into exactly the per-slot templates a sequence of single records would have
-   produced: each slot has its own opcode-word guard (the instruction is compiled only for execution when the live opcode word is still `$4EF9`),
-   reads its operand live, and may only transfer to a destination that is a compiled entry of the processor (else `entry_not_compiled`, the
-   existing negative). An admitted slot grants no execution authority beyond the compiled destinations that the operand guard already allows for any
-   admitted template; a slot the program never executes costs only generated code. A run that does not re-validate slot by slot (not `$4EF9`, odd
-   operand, hole, outside the processor's RAM, past the end of RAM, over 128 slots, a byte count other than 6 x slots, overlap or duplicate of an
-   admitted slot, broken provenance) is refused whole (`template_invalid` or a typed `admit` syntax error); the driver never falls back silently
-   (`template_run_invalid`). The captured bytes are build-pass observations; the run-time guards, not the capture, remain the verification.
+2. **Why the broader admission is acceptable - and what it is not.** This is a *controlled broadening of admission*: a run compiles entry PCs
+   (the slots) that no executed frontier named, so the generated program contains more reachable-by-jump entries than before. It is **not** a proof
+   that the additional entries are inert on every possible path; a slot the program never reaches in the measured configuration could be reached
+   by another input, and then it executes. What bounds the broadening: (a) each added entry is a slot of the exact shape `JMP (xxx).L` (opcode
+   `$4EF9`, even operand, even address, 6 bytes wholly inside the processor's RAM) observed in the live RAM of the stopped build pass, contiguous
+   with the stopped slot at a 6-byte stride, at most 128 per run and 256 per program; (b) the emitter expands a run into exactly the per-slot
+   templates single records would have produced and re-validates every slot with the CPU-owned decoder, refusing the whole run otherwise
+   (not `$4EF9`, odd operand or base, hole, outside RAM, past the end of RAM, over 128 slots, a byte count other than 6 x slots, overlap or
+   duplicate of an admitted slot, broken provenance); the driver never falls back silently (`template_run_invalid`); (c) at execution every slot
+   keeps its own opcode-word guard (the instruction runs only while the live opcode word is still `$4EF9`) and reads its operand live, and the
+   compiled-destination check is unchanged (a destination that is not a compiled entry of the processor is `entry_not_compiled`). Adjacent bytes
+   that do not match the slot shape and bounds are never admitted: the capture stops a run at the first non-matching slot, and the emitter
+   would refuse them if supplied. The capture is a build-pass observation, not a verification; the run-time guards remain the verification.
 3. **Bounds.** ADR 0142 decision 8's 64 templates become 64 template *admissions* (rounds) and 256 template *slots* per program, 128 slots per run
    (the measured tables hold 30 and 48 slots, ADR 0179). The round bound 1 + 4 + 64 is unchanged. `--no-template-runs` restores one template per
    round for comparison.
@@ -52,7 +57,7 @@ cold object cache, 8 jobs, 16-core host; aggregates only). The conventional and 
 | --- | ---: | ---: | ---: |
 | generation rounds (+ confirming run) | 16 | 15 | **3** |
 | operand-template admissions / slots admitted | 14 / 14 | 14 / 14 | **2 / 78** |
-| compiled instruction functions (final) | 395,207 | 395,207 | 395,271 (+64 slot functions) |
+| compiled instruction functions (final) | 395,207 | 395,207 | 395,271 (+64 additional slot entries) |
 | generated C | 399,251,233 B | 399,251,233 B | 399,308,405 B |
 | wall time | 1,035 s | 920 s | **523 s (-43 % vs recipe-assisted, -49 % vs conventional)** |
 | compile / emit / build-pass seconds | 747 / 211 / 63 | 645 / 200 / 60 | 451 / 40 / 18 |
@@ -60,8 +65,7 @@ cold object cache, 8 jobs, 16-core host; aggregates only). The conventional and 
 | peak compiler RSS / peak emitter RSS | 856 MB / 1,229 MB | 855 MB / 1,228 MB | 856 MB / 1,228 MB |
 | final outcome (both CPUs' registers and trace digests, all RAM/VRAM digests, result block, device log, BIOS-profile counters, ticks) | - | - | **identical to the recipe-assisted build** |
 
-The two runs cover the two tables that ADR 0179 measured; the 14 slots the program actually jumps through are among the 78 admitted, the other 64 are
-inert generated functions (guards never satisfied-and-reached at run time; no new execution authority). Single runs; no variance estimate. The
+The two runs cover the two tables that ADR 0179 measured; the 14 slots needed by the measured run are among the 78 admitted; the other 64 are additional compiled entries that this run never reached (not shown inert for other paths, see decision 2). Single runs; no variance estimate. The
 projection in the task ("about three rounds") held: one recipe round, one main run, one sub run, plus the confirming run. The remaining cost is
 dominated by compiling the two admitted sub/main windows, not by discovery rounds. Checkpoint H gates and frames were not re-run (nothing about
 timing changed); the outcome-digest equality above is the equivalence evidence, as in ADR 0179.
