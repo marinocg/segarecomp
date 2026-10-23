@@ -39,7 +39,7 @@ data-side error split in the diagnostic, and token/ROM identity assertions.
   few negatives. Seed-2 control: strong 906 pos / 688 neg, weak 903 / 233 mixed / 3,955.
 - **Training-label noise:** no negative cell of either variant contains truth code (the 3 wrong bytes sit in positive cells).
 
-## Model-A diagnostic (M1 HistGradientBoosting; leave-one-lineage-out over the 9 qualified non-Sonic lineages)
+## Model-A diagnostic (M1 HistGradientBoosting; leave-one-lineage-out, 10 held-out folds over the qualified non-Sonic lineages)
 
 | arm | pooled AP | pooled AUC | FN rate (positive cells) | FP rate (negative) | FP rate (hard negative) |
 |---|---|---|---|---|---|
