@@ -69,11 +69,23 @@ PROTOCOL = {
         "metrics": "per held-out lineage and pooled over held-out cells: average precision and ROC AUC of the cell score against truth cell labels",
         "in_image_note": "an additional non-blind check scores the Sonic 2 cells that the arm left unlabelled against truth; not generalisation evidence",
         "not_claimed": "no blind generalisation (Sonic 2 is already in SEG-072); no A/B/C retraining; one game; one seed set"},
+    "amendment_A1": "pre-evaluation, after the independent plan review: rules A/B/C get minimum-support and sensitivity conditions and report PASS / FAIL / "
+                    "INCONCLUSIVE; a `combine` step computes the verdict; the diagnostic reports code-side and data-side error rates at a threshold frozen "
+                    "from B0; the in-image check masks truth-masked cells; token/ROM identity between variants and the truth image is asserted",
+    "notes": ["upstream assembly already blocks data labels over E code bytes and withdraws R spans that overlap observed data, so 'code wins a byte' "
+              "holds by construction and weak data is non-vetoing only at the cell level; weak-variant R coverage is therefore understated",
+              "HGB_CONFIG uses class_weight='balanced'; sklearn multiplies it with sample_weight", "pooled AP mixes scores of different classifiers: descriptive",
+              "no seed-2 control arm in the diagnostic: the control arms S_ctl/W_ctl are the noise reference"],
     "recommendation_rule": {
-        "A_clean_strong_tier": "strong tiers E/H/M have zero code-as-data and data-as-code bytes and the E I/c wrong rate <= 0.001",
-        "B_coverage": "the strong variant keeps >= 50% of the weak variant's TAS-over-control extra correct code-positive cells",
-        "C_no_harm": "pooled AP of S_tas >= pooled AP of B0 - 0.005 and >= pooled AP of S_ctl - 0.005",
-        "verdict": "single different-engine TAS pilot recommended iff A and B and C; otherwise not recommended until the failing part is fixed"},
+        "A_clean_strong_tier": "for the TAS, seed-1 control and seed-2 control: strong tiers E/H/M have zero code-as-data and data-as-code bytes, the E I/c "
+                               "wrong rate <= 0.001, and at least 1000 E-labelled bytes (else INCONCLUSIVE)",
+        "B_coverage": "the strong variant keeps >= 50% of the weak variant's TAS-over-control extra correct code-positive cells; INCONCLUSIVE when the weak "
+                      "variant has fewer than 50 such cells",
+        "C_no_harm": "pooled AP of S_tas >= pooled AP of B0 - 0.005 and >= pooled AP of S_ctl - 0.005, and no held-out lineage has AP(S_tas) < AP(B0) - 0.02; "
+                     "INCONCLUSIVE unless the reference arm shows sensitivity: pooled AP(T) - AP(B0) >= 0.005",
+        "error_split": "per fold, threshold = the 10th percentile of B0 scores over the held-out positive cells (B0 recall 0.90); every arm is scored at that "
+                       "threshold: false-negative rate on positive cells (code side), false-positive rate on negative cells and on hard-negative cells (data side)",
+        "verdict": "`combine`: any FAIL -> NOT_RECOMMENDED; else any INCONCLUSIVE -> INCONCLUSIVE; else RECOMMENDED (a single different-engine TAS pilot)"},
     "limits": {"cpu_hours": 4, "tracing": "none", "retraining": "none beyond the minimal model-A arms"},
 }
 PLAN_EXTRA = ("bound_code",)
@@ -220,6 +232,50 @@ def noisy_negative_cells(vcls: bytes, labels: list, truth: bytes, weights: list)
     return {"negative_cells": n, "negative_cells_containing_truth_code": bad}
 
 
+def rule_a(per_tier: dict) -> str:
+    verdicts = []
+    for n in ("tas", "ctl", "ctl2"):
+        e = per_tier[n]["E"]
+        if e["labelled_bytes"] < 1000:
+            return "INCONCLUSIVE"
+        clean = all(per_tier[n][t]["code_as_data"] == 0 and per_tier[n][t]["data_as_code"] == 0 for t in "EHM")
+        verdicts.append(clean and e["wrong"] / e["labelled_bytes"] <= 0.001)
+    return "PASS" if all(verdicts) else "FAIL"
+
+
+def rule_b(rec: dict) -> str:
+    w, s = rec["weak"]["extra_correct_pos_cells"], rec["strong"]["extra_correct_pos_cells"]
+    if w < 50:
+        return "INCONCLUSIVE"
+    return "PASS" if s >= 0.5 * w else "FAIL"
+
+
+def combine_verdict(a: str, b: str, c: str) -> str:
+    if "FAIL" in (a, b, c):
+        return "NOT_RECOMMENDED"
+    if "INCONCLUSIVE" in (a, b, c):
+        return "INCONCLUSIVE"
+    return "RECOMMENDED"
+
+
+def rule_c(pooled: dict, folds: dict) -> str:
+    if pooled["T"]["ap"] - pooled["B0"]["ap"] < 0.005:
+        return "INCONCLUSIVE"
+    ok = pooled["S_tas"]["ap"] >= pooled["B0"]["ap"] - 0.005 and pooled["S_tas"]["ap"] >= pooled["S_ctl"]["ap"] - 0.005
+    ok = ok and all(f["S_tas"]["ap"] >= f["B0"]["ap"] - 0.02 for f in folds.values())
+    return "PASS" if ok else "FAIL"
+
+
+def cmd_combine(a) -> int:
+    verify_plan()
+    m = json.loads(pathlib.Path(a.measure).read_text())["recommendation_inputs"]
+    d = json.loads(pathlib.Path(a.diagnose).read_text())["recommendation_inputs"]
+    out = {"A": m["A_clean_strong_tier"], "B": m["B_coverage"], "C": d["C_no_harm"]}
+    out["verdict"] = combine_verdict(out["A"], out["B"], out["C"])
+    print(json.dumps(out))
+    return 0
+
+
 def cmd_measure(a) -> int:
     verify_plan()
     import segarecomp_genesis_bizhawk as bz
@@ -269,13 +325,10 @@ def cmd_measure(a) -> int:
                       "vs_seed2_control": {"pos": len(m2["pos"]), "mixed": len(m2["mixed"]), "neg": len(m2["neg"])},
                       "cells_with_wrong_label": {"tas": len(ts["bad"]), "control": len(cs["bad"])}}
     res["recovered"] = rec
-    A = all(res["per_tier_errors"]["tas"][t]["code_as_data"] == 0 and res["per_tier_errors"]["tas"][t]["data_as_code"] == 0 for t in "EHM")
-    ew = res["per_tier_errors"]["tas"]["E"]
-    A = A and (ew["wrong"] / max(1, ew["labelled_bytes"])) <= 0.001
-    B = rec["strong"]["extra_correct_pos_cells"] >= 0.5 * rec["weak"]["extra_correct_pos_cells"]
-    res["recommendation_inputs"] = {"A_clean_strong_tier": bool(A), "B_coverage": bool(B)}
+    A, B = rule_a(res["per_tier_errors"]), rule_b(rec)
+    res["recommendation_inputs"] = {"A_clean_strong_tier": A, "B_coverage": B}
     pathlib.Path(a.out).write_text(json.dumps(res, indent=1, sort_keys=True))
-    print(json.dumps({"A": bool(A), "B": bool(B), "recovered": rec, "loss": {n: cov[n]["loss_when_weak_excluded"] for n in cov}}, sort_keys=True))
+    print(json.dumps({"A": A, "B": B, "recovered": rec, "loss": {n: cov[n]["loss_when_weak_excluded"] for n in cov}}, sort_keys=True))
     return 0
 
 
@@ -303,11 +356,15 @@ def cmd_diagnose(a) -> int:
             feat_cache[im.id] = g2.m1_features(im)
         return feat_cache[im.id]
 
+    import segarecomp_genesis_bizhawk as bz
     sonic = {"truth": tr.Image(truth_dir)}
     for n, k in (("tas", "tas"), ("ctl", "ctl")):
         for which in ("strong", "weak"):
             im = tr.Image(pol / n / which)
             sonic[f"{n}_{which}"] = im
+    for k, im in sonic.items():
+        if im.rom != sonic["truth"].rom or not np.array_equal(im.tokens, sonic["truth"].tokens):
+            raise ge.EvidenceError(f"{k}: ROM or tokens differ from the truth image")
     full = {k: json.loads((pol / k.split("_")[0] / k.split("_")[1] / "weights.json").read_text()) for k in sonic if k != "truth"}
     sonic_feat = feats(sonic["truth"])
     arms = {"B0": None, "S_tas": "tas_strong", "W_tas": "tas_weak", "S_ctl": "ctl_strong", "W_ctl": "ctl_weak", "T": "truth"}
@@ -320,6 +377,7 @@ def cmd_diagnose(a) -> int:
         ys = [(im.labels[im.labels >= 0] == 1).astype(np.int64) for im in train]
         ws = [np.ones(len(y)) for y in ys]
         res = {}
+        thr = None
         for arm, key in arms.items():
             X, Y, Wt = list(xs), list(ys), list(ws)
             if key is not None:
@@ -329,20 +387,27 @@ def cmd_diagnose(a) -> int:
                 Y.append((im.labels[keep] == 1).astype(np.int64))
                 Wt.append(np.array(full[key])[keep] if key != "truth" else np.ones(int(keep.sum())))
             clf = HistGradientBoostingClassifier(**g2.HGB_CONFIG).fit(np.concatenate(X), np.concatenate(Y), sample_weight=np.concatenate(Wt))
-            sc, yy = [], []
+            sc, yy, hh = [], [], []
             for t in test:
                 p = clf.predict_proba(feats(t))[:, 1]
                 keep = t.labels >= 0
+                hard = bz.hard_cells(t.classes, t.rom, t.tokens.tobytes(), {int(c) for c in np.nonzero(t.labels == 0)[0]})
                 sc.append(p[keep])
                 yy.append(t.labels[keep])
-            sc, yy = np.concatenate(sc), np.concatenate(yy)
-            res[arm] = {"ap": round(float(average_precision_score(yy, sc)), 5), "auc": round(float(roc_auc_score(yy, sc)), 5), "cells": int(len(yy))}
+                hh.append(np.array([(int(c) in hard) for c in np.nonzero(keep)[0]]))
+            sc, yy, hh = np.concatenate(sc), np.concatenate(yy), np.concatenate(hh)
+            if arm == "B0":
+                thr = float(np.percentile(sc[yy == 1], 10))        # B0 recall 0.90 on this fold's held-out positive cells
+            res[arm] = {"ap": round(float(average_precision_score(yy, sc)), 5), "auc": round(float(roc_auc_score(yy, sc)), 5), "cells": int(len(yy)),
+                        "threshold": round(thr, 6), "fn_rate_positive_cells": round(float((sc[yy == 1] < thr).mean()), 5),
+                        "fp_rate_negative_cells": round(float((sc[yy == 0] >= thr).mean()), 5),
+                        "fp_rate_hard_negative_cells": round(float((sc[hh] >= thr).mean()), 5) if hh.any() else None}
             pooled[arm][0].append(sc)
             pooled[arm][1].append(yy)
             if held == sorted(dirs)[0] and key is not None and key != "truth":
                 im = sonic[key]
-                un = im.labels < 0
                 tt = sonic["truth"].labels
+                un = (im.labels < 0) & (tt >= 0)
                 p = clf.predict_proba(sonic_feat)[:, 1]
                 results["in_image"][arm] = {"unlabelled_cells": int(un.sum()), "ap_on_unlabelled": round(float(average_precision_score(tt[un], p[un])), 5)
                                             if len(set(tt[un])) > 1 else None, "note": "non-blind: same image as the arm's labels"}
@@ -351,10 +416,13 @@ def cmd_diagnose(a) -> int:
         s, y = np.concatenate(s), np.concatenate(y)
         results["pooled"][arm] = {"ap": round(float(average_precision_score(y, s)), 5), "auc": round(float(roc_auc_score(y, s)), 5)}
     P = results["pooled"]
-    C = P["S_tas"]["ap"] >= P["B0"]["ap"] - 0.005 and P["S_tas"]["ap"] >= P["S_ctl"]["ap"] - 0.005
-    results["recommendation_inputs"] = {"C_no_harm": bool(C), "deltas_ap": {arm: round(P[arm]["ap"] - P["B0"]["ap"], 5) for arm in P}}
+    C = rule_c(P, results["folds"])
+    results["pooled_error_rates"] = {arm: {k: round(float(np.mean([results["folds"][f][arm][k] for f in results["folds"]
+                                                                   if results["folds"][f][arm][k] is not None])), 5)
+                                           for k in ("fn_rate_positive_cells", "fp_rate_negative_cells", "fp_rate_hard_negative_cells")} for arm in arms}
+    results["recommendation_inputs"] = {"C_no_harm": C, "deltas_ap": {arm: round(P[arm]["ap"] - P["B0"]["ap"], 5) for arm in P}}
     pathlib.Path(a.out).write_text(json.dumps(results, indent=1, sort_keys=True))
-    print(json.dumps({"pooled": P, "C": bool(C)}, sort_keys=True))
+    print(json.dumps({"pooled": P, "C": C, "error_rates": results["pooled_error_rates"]}, sort_keys=True))
     return 0
 
 
@@ -402,6 +470,9 @@ def main(argv=None) -> int:
     p = sub.add_parser("diagnose")
     p.add_argument("--registry", required=True), p.add_argument("--policy-root", required=True), p.add_argument("--out", required=True)
     p.set_defaults(fn=cmd_diagnose)
+    p = sub.add_parser("combine")
+    p.add_argument("--measure", required=True), p.add_argument("--diagnose", required=True)
+    p.set_defaults(fn=cmd_combine)
     p = sub.add_parser("freeze")
     p.set_defaults(fn=cmd_freeze)
     p = sub.add_parser("verify-plan")

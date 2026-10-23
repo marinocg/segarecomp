@@ -62,6 +62,26 @@ def test_errors():
     check(n["negative_cells_containing_truth_code"]["weak"] == 1 and n["negative_cells_containing_truth_code"]["strong"] == 0, "noisy weak negative")
 
 
+def test_rules():
+    per = lambda w=0, cad=0, n=5000: {"E": {"labelled_bytes": n, "wrong": w, "code_as_data": cad, "data_as_code": 0},
+                                      "H": {"code_as_data": 0, "data_as_code": 0}, "M": {"code_as_data": 0, "data_as_code": 0}}
+    ok = {n: per() for n in ("tas", "ctl", "ctl2")}
+    check(lp.rule_a(ok) == "PASS", "rule A passes on clean strong tiers")
+    check(lp.rule_a(dict(ok, ctl=per(cad=1))) == "FAIL", "a code-as-data byte in any trace fails A")
+    check(lp.rule_a(dict(ok, tas=per(n=10))) == "INCONCLUSIVE", "A needs minimum E support")
+    check(lp.rule_a(dict(ok, ctl2=per(w=10))) == "FAIL", "E wrong rate above 0.001 fails A")
+    rec = lambda s, w: {"strong": {"extra_correct_pos_cells": s}, "weak": {"extra_correct_pos_cells": w}}
+    check(lp.rule_b(rec(60, 100)) == "PASS" and lp.rule_b(rec(40, 100)) == "FAIL" and lp.rule_b(rec(0, 49)) == "INCONCLUSIVE", "rule B")
+    pooled = lambda b0, st, sc, t: {"B0": {"ap": b0}, "S_tas": {"ap": st}, "S_ctl": {"ap": sc}, "T": {"ap": t}}
+    folds = {"f": {"B0": {"ap": 0.5}, "S_tas": {"ap": 0.5}}}
+    check(lp.rule_c(pooled(0.5, 0.5, 0.5, 0.504), folds) == "INCONCLUSIVE", "C needs reference-arm sensitivity")
+    check(lp.rule_c(pooled(0.5, 0.5, 0.5, 0.51), folds) == "PASS", "C passes")
+    check(lp.rule_c(pooled(0.5, 0.49, 0.5, 0.51), folds) == "FAIL", "C fails on harm")
+    check(lp.rule_c(pooled(0.5, 0.5, 0.5, 0.51), {"f": {"B0": {"ap": 0.5}, "S_tas": {"ap": 0.47}}}) == "FAIL", "C per-fold floor")
+    check(lp.combine_verdict("PASS", "PASS", "PASS") == "RECOMMENDED" and lp.combine_verdict("PASS", "INCONCLUSIVE", "PASS") == "INCONCLUSIVE"
+          and lp.combine_verdict("PASS", "INCONCLUSIVE", "FAIL") == "NOT_RECOMMENDED", "combine propagation")
+
+
 def test_plan():
     if lp.PLAN.exists():
         check(bool(lp.verify_plan()), "frozen plan verifies")
@@ -72,6 +92,7 @@ def test_plan():
 def main():
     test_tiers_and_variants()
     test_errors()
+    test_rules()
     test_plan()
     print("FAILURES:", len(FAILURES), *FAILURES)
     return 1 if FAILURES else 0
