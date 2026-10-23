@@ -87,7 +87,7 @@ orderings compared, a race closer than that could.
 | canonical frames entry + 1,150 / 1,250 / 1,300 / 1,400 / 1,500 | **identical** (ADR 0176: 963-1,241 differing pixels of 71,680 each) |
 | Checkpoint G frames entry + 510 / 540 / 600, same run | identical |
 | Checkpoint F frames entry + 420 / 480 / 540 (no input) | identical |
-| RIGHT observation | the 240 data-port reads returning `$77` are in exactly the reference's frames (entry + 1,260 ... 1,499); the multiset of port-1 reads is equal in every frame from entry + 65 to 1,510 |
+| RIGHT observation | the 240 data-port reads returning `$77` are in exactly the reference's frames (entry + 1,260 ... 1,499); the multiset of port-1 reads is equal in every frame from entry + 65 to 1,500 |
 | Checkpoint E: handoff and the 60-frame interval | both processors' registers identical (the earlier result left the sub two instructions apart in a poll loop); Word RAM and PCM RAM identical; executed instruction starts equal (main 1,724, sub 3,519, sets equal); work RAM 5 bytes and PRG RAM 21 bytes differ (earlier 28 and 44), the ADR 0145/0147 asynchronous classes |
 | application entry | the generated entry instruction starts within 205 master clocks (30 main cycles) of the reference's, 1,202 frames after power-on |
 | main-processor instruction starts, reset to frame 129 (about 680,000 instructions) | identical program counters; start times equal to a constant offset (the reference's first instruction slot) to within the 14-master-clock refresh phase; the first divergence is one instruction in a Gate Array poll loop at frame 129 (decision 8) |
@@ -131,7 +131,8 @@ Typed differences found and classified:
    value; the written latch is not read back, `platforms/genesis/runtime/runtime.c`) and skips the two instructions. No state differs after the rejoin and
    no selected frame is affected (the marker is absent in this run, so both paths proceed identically); with the marker present the
    generated run would not take the warm-start path. It is outside this task's timing conventions and is **not corrected here**; the
-   fix is a read-back of the latched control value in the shared I/O policy (a follow-up, with its own fixture).
+   fix is a read-back of the latched control value in the shared I/O policy. It is recorded here as an open item (no successor task was
+   created by this PR; it needs its own fixture and a policy-document change).
 2. **Polling-loop and interrupt-instant phase** of the pc (and of the sub's exception frame at entry + 1,150), count differences of the
    idle-skipped Gate Array poll loops: the asynchronous classes ADR 0145 recorded; the reference's idle-skip is not modelled (decision 8).
 3. **Sub-side record-slot phase** (18 bytes) and stack residue (below both stack pointers): ADR 0145/0147 classes; identified by
