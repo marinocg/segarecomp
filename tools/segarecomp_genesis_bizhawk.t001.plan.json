@@ -1,0 +1,149 @@
+{
+ "bound_code": {
+  "tools/segarecomp_genesis_bizhawk.py": "c72241a5de09bbde9780a5ecf80a5ea069fcf10e751f866f80055819036acd57",
+  "tools/segarecomp_genesis_evidence.py": "1582d2ed01db7692c6564750a8a7e6d01b08ee59f421d26776906523bd009885"
+ },
+ "control": {
+  "policy": "SEG-077 `random` policy (segarecomp_genesis_evidence.LUA), ported verbatim",
+  "seconds": 900,
+  "seed": 1,
+  "start_window": 40
+ },
+ "decision": [
+  "REPLAY_INVALID",
+  "TRACING_UNAVAILABLE",
+  "LABELS_UNSAFE",
+  "INSUFFICIENT_CODE_YIELD",
+  "ACQUISITION_PROMISING",
+  "BUDGET_EXHAUSTED"
+ ],
+ "disclosure": "Sonic 2 was used in SEG-072 and in SEG-077 rule selection: a controlled known-truth engineering test, not blind",
+ "emulator": "BizHawk 2.9.1 official linux-x64 package under Mono; the movie header names version 2.9.1 and core Genplus-gx",
+ "evaluator_isolation": "the source-truth classes of `s2` are read only by `evaluate`; `run` and `label` never open them",
+ "game": "Sonic the Hedgehog 2 (World, REV01)",
+ "gate_a": {
+  "failure": [
+   "REPLAY_INVALID",
+   "TRACING_UNAVAILABLE"
+  ],
+  "needs": [
+   "movie/ROM identities",
+   "no savestate in the movie",
+   "movie plays to its end in the original emulator",
+   "five frozen checkpoints show actual progression (>= 2 different zone/act values, game mode in-level at >= 2)",
+   "trace repeat: identical PC-set digest, read-set digest and checkpoint state digests",
+   "trace fidelity: ROM mapping mismatch 0; every PC even; accepted-E fraction of executed ROM PCs >= 0.99; execute callbacks seen at the reset-vector PC"
+  ]
+ },
+ "gate_b": {
+  "code_as_data_conflicts_max": 0,
+  "failure": "LABELS_UNSAFE",
+  "new_label_accuracy_min": 0.999,
+  "separate_metrics": [
+   "I (start)",
+   "c (continuation)",
+   "D"
+  ],
+  "subjects": [
+   "all TAS labels",
+   "TAS labels absent (same class) from the control labels"
+  ]
+ },
+ "gate_c": {
+  "correct": "every I/c/D label inside the cell agrees with the independent source truth",
+  "extra": "cell index labelled correctly by the TAS under the cell predicate, not satisfying it in the control labels",
+  "extra_code_positive_cells_min": 24,
+  "extra_mixed_cells_min": 8,
+  "failure": "INSUFFICIENT_CODE_YIELD",
+  "nontrivial_negative": "a fully-D 128-byte cell whose bytes are not all one repeated value",
+  "secondary": {
+   "extra_nontrivial_negative_cells_min": 200,
+   "label": "DATA_ONLY_PROMISE"
+  }
+ },
+ "inputs": {
+  "emulator": {
+   "EmuHawk.exe": "6ce622d4ed4e8460ce362cf35ef67dc70096fec2c9a174cbef6a3e5b04f18bcc",
+   "gpgx.wbx.zst": "067ced324e9bfdbda74196f36e296dc257009d90fce84b691b3daf07ab005502",
+   "mono": "Mono JIT compiler version 6.8.0.105 (Debian 6.8.0.105+dfsg-3.6ubuntu2 Sun Mar 31 02:55:28 UTC 2024)",
+   "package_sha256": "5afb39afef8874bc6ef62bdac1e40a2aa3c47d6b74f9acc62a057cc44d355634"
+  },
+  "movie": {
+   "entries": [
+    "BizState 1.0",
+    "BizVersion.txt",
+    "Comments.txt",
+    "Header.txt",
+    "Input Log.txt",
+    "Subtitles.txt",
+    "SyncSettings.json"
+   ],
+   "frames": 115665,
+   "header": {
+    "Core": "Genplus-gx",
+    "GameName": "Sonic The Hedgehog 2 (W) (REV01) [!]",
+    "OriginalEmuVersion": "Version 2.9.1",
+    "Platform": "GEN",
+    "SHA1": "9FEEB724052C39982D432A7851C98D3E",
+    "emuVersion": "Version 2.9.1",
+    "rerecordCount": "35624"
+   },
+   "input_log_sha256": "8e000fd48dd528fa12ccea0cbc1696c67dd8bc65d9e37344ab878aadd7819646",
+   "log_key_sha256": "4458addbf1ab76cea982be62cc22e34b7486d51f854bd02b09d0d3ecd7df9cfd",
+   "p2_frames_with_input": 58769,
+   "players_in_log": 2,
+   "sha256": "85403cb6c40857c1cade73b5ff9f50a78ac1a0d8e03706658c20cbd5d3731f05",
+   "starts_from_savestate": false,
+   "sync": {
+    "$type": "BizHawk.Emulation.Cores.Consoles.Sega.gpgx.GPGX+GPGXSyncSettings, BizHawk.Emulation.Cores",
+    "BackdropColor": 4294902015,
+    "ControlTypeLeft": 1,
+    "ControlTypeRight": 1,
+    "Filter": 1,
+    "HighFreq": 5000,
+    "HighGain": 1.0,
+    "LowFreq": 880,
+    "LowGain": 1.0,
+    "LowPassRange": 26214,
+    "MidGain": 1.0,
+    "Region": 0,
+    "UseSixButton": true
+   }
+  },
+  "movie_rom_md5_matches": true,
+  "rom": {
+   "md5": "9feeb724052c39982d432a7851c98d3e",
+   "sha1": "8bca5dcef1af3e00098666fd892dc1c2a76333f9",
+   "sha256": "193bc4064ce0daf27ea9e908ed246d87ec576cc294833badebb590b6ad8e8f6b",
+   "size": 1048576
+  },
+  "rom_ok": true
+ },
+ "limits": {
+  "cpu_hours_tracing_and_verification": 8,
+  "engineering_hours_compatibility": 3,
+  "sync_correction_attempts": 1
+ },
+ "movie": "tasvideos 5640M, BizHawk 2.9.1 .bk2, core Genplus-gx, 2-player (6-button sync setting), starts from power-on",
+ "novelty": "descriptive only (no threshold): 4-gram of (family, ea_src, ea_dst, width, control) signatures over consecutive labelled starts, and 3-cell class-pattern windows, against every SEG-072 registry image except Sonic 2",
+ "rom": {
+  "sha1": "8bca5dcef1af3e00098666fd892dc1c2a76333f9",
+  "sha256": "193bc4064ce0daf27ea9e908ed246d87ec576cc294833badebb590b6ad8e8f6b",
+  "size": 1048576
+ },
+ "schema": "segarecomp.genesis_bizhawk.v1.plan",
+ "task": "SEG-080-T001",
+ "tiers": "SEG-077 `label()` unchanged; DMA-source tier absent for both conditions; DR read rule: one byte at the reported address",
+ "window": {
+  "checkpoints": [
+   7200,
+   18000,
+   28800,
+   39600,
+   54000
+  ],
+  "frames": 54000,
+  "growth_every_frames": 1800,
+  "note": "first 15 minutes at 60 frames/s of emulated gameplay from power-on; not adapted after inspection"
+ }
+}
