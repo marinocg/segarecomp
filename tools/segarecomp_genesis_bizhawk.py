@@ -486,10 +486,11 @@ def run_scenario(a) -> int:
     if job.exists():
         shutil.rmtree(job)
     job.mkdir(parents=True)
-    shutil.copy(a.rom, job / "rom.bin")
+    romp = job / ("rom" + pathlib.Path(a.rom).suffix)          # BizHawk picks the system from the extension for images missing from its DB
+    shutil.copy(a.rom, romp)
     if sc["mode"] in ("movie", "playback"):
         shutil.copy(a.movie, job / "movie.bk2")
-    (job / "scenario.lua").write_text(render_lua(sc, str(job), str(job / "rom.bin")))
+    (job / "scenario.lua").write_text(render_lua(sc, str(job), str(romp)))
     if os.geteuid() == 0:
         subprocess.run(["chown", "-R", user, str(job)], check=True)
     disp = f":{int(a.display)}"
@@ -497,7 +498,7 @@ def run_scenario(a) -> int:
     time.sleep(2)
     emu = (f"cd {bh} && DISPLAY={disp} HOME=/home/{user} LD_LIBRARY_PATH={bh} timeout {int(a.timeout)} mono EmuHawk.exe "
            f"--lua={job / 'scenario.lua'} " + (f"--movie={job / 'movie.bk2'} " if sc["mode"] in ("movie", "playback") else "") +
-           f"{job / 'rom.bin'} > {job / 'bizhawk.log'} 2>&1")
+           f"{romp} > {job / 'bizhawk.log'} 2>&1")
     cmd = ["su", user, "-s", "/bin/bash", "-c", emu] if os.geteuid() == 0 else ["bash", "-c", emu]
     r0 = resource.getrusage(resource.RUSAGE_CHILDREN)
     t0 = time.time()

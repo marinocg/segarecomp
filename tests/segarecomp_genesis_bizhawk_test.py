@@ -26,7 +26,7 @@ def check(cond, msg):
 
 def test_lua_and_movie():
     lua = bz.render_lua({"mode": "random", "frames": 600, "seed": 1, "start_window": 40}, "/o", "/r")
-    check("__" not in lua and 'mode = "random"' in lua and "seed = 1" in lua, "lua placeholders substituted")
+    check("__MODE__" not in lua and "__OUT__" not in lua and 'mode = "random"' in lua and "seed = 1" in lua, "lua placeholders substituted")
     try:
         bz.render_lua({"mode": "bogus", "frames": 1}, "/o", "/r")
         check(False, "unknown mode rejected")
@@ -118,11 +118,11 @@ def test_gate_a():
            "frames": bz.FRAMES, "movie_finished_at": 5, "movie_mode_end": "FINISHED", "read_self_fetch_fraction": 0.01,
            "vbl_pc_executed": True, "cdl_sha256": "d", "cdl": {"cdl_exec_bytes": 100, "cdl_exec_mismatch_bytes": 0}}
     lab = {"meta": {"typed": {}, "decoders": {"executed_rom_pcs": 100}, "tiers": {"E": 100}}}
-    ga = bz.gate_a(ident, run, run, dict(run), ck, [dict(x) for x in ck], lab, "zone=14 act=0 mode=12", (run, dict(run)))
+    ga = bz.gate_a(ident, run, run, dict(run), ck, [dict(x) for x in ck], lab, "zone=14 act=0 mode=12", (run, dict(run)), True)
     check(ga["replay_ok"] and ga["tracing_ok"], "gate A passes on a clean synthetic record")
     zz = [{"tag": "ck", "frame": c, "state": f"zone={z} act=0 mode=12 x=1 y=1 shot="} for c, z in zip(bz.CHECKPOINTS, (0x0F, 0x0D, 0x0D, 0x00, 0x07))]
     check(not bz.gate_a(ident, run, run, dict(run), zz, zz, lab, "zone=14 act=0 mode=12", (run, dict(run)), True)["progression"], "zones out of play order fail")
-    check(not bz.gate_a(ident, run, run, dict(run), ck, ck, lab, "zone=3 act=0 mode=4")["replay_ok"], "wrong end state fails")
+    check(not bz.gate_a(ident, run, run, dict(run), ck, ck, lab, "zone=3 act=0 mode=4", (run, dict(run)), True)["replay_ok"], "wrong end state fails")
     flat = [{"tag": "ck", "frame": c, "state": "zone=0 act=0 mode=12 x=1 y=1 shot="} for c in bz.CHECKPOINTS]
     check(not bz.gate_a(ident, run, run, dict(run), flat, flat, lab, "zone=14 act=0 mode=12", (run, dict(run)), True)["replay_ok"], "no zone progression is REPLAY_INVALID")
     diff = dict(run, pcs_sha256="z")
