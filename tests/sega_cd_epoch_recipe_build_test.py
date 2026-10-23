@@ -115,6 +115,10 @@ with tempfile.TemporaryDirectory() as tmp:
         _, theirs = run(conv["program"], disc, bios, "--set", spec)
         check(ours["digests"] == theirs["digests"] and ours["ga"]["comstat"] == theirs["ga"]["comstat"], "positive variant %s identical" % spec)
 
+    # ---- a correct recipe with a program that releases the sub twice (two verified epochs): the driver must not mistake it for a mismatch ----
+    code, twice = build(tmp, "twice", disc, bios, copy_spec, "--epoch-recipe", good, "--pass-set", "main:d5=4")
+    check(code == 0 and twice.get("ok") and twice["outcome"]["bios_profile"]["epochs"] == 2, "two verified epochs under one recipe: %s" % str(twice)[:300])
+
     # ---- deterministic emission ----
     c1, e1 = emit(disc / "disc.cue", bios, tmp / "a.c", "--admit", "epoch-recipe:" + good, "--copy-image", copy_spec)
     c2, e2 = emit(disc / "disc.cue", bios, tmp / "b.c", "--admit", "epoch-recipe:" + good, "--copy-image", copy_spec)
@@ -157,11 +161,10 @@ with tempfile.TemporaryDirectory() as tmp:
     stale_path = tmp / "stale.bin"
     stale_path.write_bytes(bytes(stale))
     code, out = emit(disc / "disc.cue", stale_path, tmp / "s.c", "--admit", "epoch-recipe:" + good, "--copy-image", copy_spec)
-    if code != 0:
-        check(out.get("error") == "epoch_recipe_invalid", "a stale BIOS image is refused at emission: %s" % out)
-    else:
-        code, failed = build(tmp, "stale", disc, stale_path, copy_spec, "--epoch-recipe", good)
-        check(code == 1 and failed.get("failure") == "epoch_recipe_unverified", "stale BIOS bytes fail closed at the epoch: %s" % failed)
+    check(code == 0 or out.get("error") == "epoch_recipe_invalid", "a stale BIOS image is refused at emission or emits a different image: %s" % out)
+    code, failed = build(tmp, "stale", disc, stale_path, copy_spec, "--epoch-recipe", good)
+    check(code == 1 and failed.get("failure") in ("epoch_recipe_unverified", "emit_failed"),
+          "stale BIOS bytes never produce a build: %s" % str(failed)[:300])
     for label, spec_text in (("wrong destination", "%d:%d@256" % (LENGTH + 256, STREAM_AT)),):
         code, failed = build(tmp, "wd", disc, bios, copy_spec, "--epoch-recipe", spec_text)
         check(code == 1 and failed.get("failure") == "epoch_recipe_unverified", "%s fails closed at the epoch: %s" % (label, failed))
@@ -174,7 +177,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check(code == 1 and bad.get("failure") == "epoch_recipe_unverified", "the driver fails closed on an unverified recipe epoch: %s" % bad)
     # run that program directly: typed stop, sub retired nothing
     exe = tmp / "bad" / "program"
-    if exe.exists():
+    check(exe.exists(), "the rejected build left its program for inspection")
+    if True:
         _, report = run(exe, disc, bios)
         check(report["stop"]["class"] == "materialized_image_unverified" and report["cpus"][1]["retired"] == 0,
               "unverified epoch: typed stop with the sub having retired nothing (%s)" % report["stop"])

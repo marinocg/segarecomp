@@ -10,9 +10,9 @@
 | question | answer |
 | --- | --- |
 | Is the sub-BIOS epoch image fully reconstructable, without executing the BIOS, from the user's own input files? | **Yes** (tested BIOS, all qualified configurations): 131,072 of 131,072 bytes, identical length and SHA-256, from the BIOS image alone and a three-step recipe. |
-| Are all mutable `JMP` templates structurally admissible? | **Attributable, not statically derivable.** 14 of 14 have constant-opcode writers in immutable BIOS code (2) or in the reconstructed epoch image (12); 0 depend on runtime-dependent code; 0 are unattributed. **0 of 14 are derived before execution** by anything in this repository. |
+| Are all mutable `JMP` templates structurally admissible? | **Attributable, not statically derivable.** 14 of 14 have a writer PC in immutable BIOS code (2) or in code of the reconstructed epoch image (12); 0 depend on runtime-dependent code; 0 are unattributed. **0 of 14 are derived before execution** by anything in this repository. |
 | Is a safe distributable metadata schema possible? | **The epoch recipe is schema-safe but not publishable under the current policy; recommendation: do not commit it, regenerate it locally.** No template schema (no derivation to base it on). |
-| Is cold one-shot compilation feasible? | **No.** The templates need execution-derived evidence; a program emitted from the recipe alone stops `entry_not_compiled` at the first main thunk. |
+| Is cold one-shot compilation feasible? | **Not with what exists, under the stop rule.** The templates need execution-derived evidence (or a successor derivation / batched slot-run admission); a program emitted from the recipe alone stops `entry_not_compiled` at the first main thunk. |
 | Is an opt-in implementation justified? | **Partly, and it is implemented:** the static epoch producer (small). The batched slot-run template admission that would remove ~14 of 15 rounds is a successor (authority-contract change). |
 
 ## Phase A: provenance of the materialized 128 KiB epoch image (C2)
@@ -33,8 +33,8 @@ times with constant arguments from three static call sites of the immutable BIOS
 
 - *Equality is not provenance.* A source search alone finds 3,396 bytes (2.6 %) of long exact runs against the BIOS; **none** is a copy:
   they are the decoder's literal runs. A search-only method would have mislabelled them class 1. No byte was classified by equality.
-- *Independent support for class 4.* (1) The BIOS routine's complete sequence of 50,581 source reads equals, address for address, the
-  access sequence of the independent Python decoder; (2) its output equals the image byte for byte; (3) the C++ decoder in the emitter
+- *Independent support for class 4.* (1) A one-off private observation (no committed tool or test; an independent reviewer reproduced it with a separately written decoder): the BIOS routine's complete sequence of 50,581 source reads equals, address for address, the
+  access sequence of the independent Python decoder; (2) its output equals the image byte for byte (the provenance tool reuses the recipe tool's decoder, so its 'independent reproduction' is independent of the BIOS code, not of the recipe tool); (3) the C++ decoder in the emitter
   (a third implementation) produces the same image inside the real build (the run-time epoch check passes).
 - *Executable vs data.* Of the sub's executed instruction starts in a bounded run, 3,078 lie in class 4 regions and 9 in class 5 regions
   (the runtime-built jump-slot table lives in a zero-filled gap). The reconstruction target is the entire image, not only code.
@@ -61,7 +61,7 @@ The Checkpoint H configuration admits 14 templates (2 main, 12 sub; the authenti
 
 | writer class | count (14) | count (12-subset) |
 | --- | ---: | ---: |
-| static writer (immutable BIOS code, constant opcode) - main | 2 | 2 |
+| static writer (writer PC in immutable BIOS code) - main | 2 | 2 |
 | reconstructed writer (code inside the reconstructed epoch image) - sub | 12 | 10 |
 | runtime writer (RAM code no immutable input or reconstruction explains) | 0 | 0 |
 | unattributed | 0 | 0 |
@@ -128,8 +128,12 @@ contains no offsets.
 
 ## Deviations from ADR 0178
 
-1. The plan's template classes S/E conflated *attribution* with *derivation*. This result adds the stricter criterion "derived before any
-   guest execution" and applies it to the cold-one-shot and template decisions (the plan permits only making rules stricter).
+1. ADR 0178 defined template class S as "writer and destination derivable from immutable instructions by a bounded analysis" and E as "present in
+   the reconstructed epoch image" or "written by a copy loop of a verified reconstructed image". Under those **literal** definitions the sub
+   slot tables (built at run time in a zero-filled gap, so not present in the image) are not E, and no template is S by an implemented
+   analysis: the literal-rule outcome is S = 0, E = 0, R/U = 14 (they depend on running the initialiser code). This result nevertheless reports the
+   finer writer-attribution classes above (writer PC in immutable or reconstructed code), which is a relabelling, not the plan's rule; the
+   decisions rest on the literal outcome and on the added criterion "derived before any guest execution" (the plan permits only stricter rules).
 2. The task statement says twelve templates (two main, ten sub), the figure of the ADR 0144 configuration; the Checkpoint H build admits 14.
    Both are reported.
 3. Phase E was implemented for the epoch producer only, as the evidence supports nothing more.

@@ -180,11 +180,12 @@ def classify(image, sources, log, executed_starts=None):
             cls[b] = c
         previous_last = s["last"]
         detail.append(rec)
+    unwritten_zero = False
     for b in range(size):
         if not claimed[b]:
             if image[b] == 0:
                 cls[b] = 5
-                support[5] = support[5]  # machine-initial zero: counted, but only supported by the clear stream when present
+                unwritten_zero = True   # machine-initial zero with no writer: counted in class 5 but never 'supported'
             else:
                 cls[b] = 6
     eq = set()
@@ -208,7 +209,7 @@ def classify(image, sources, log, executed_starts=None):
         n = counts.get(c, 0)
         table.append({"class": c, "name": CLASSES[c], "regions": regions.get(c, 0), "bytes": n,
                       "percent": round(100.0 * n / size, 3) if size else 0.0,
-                      "independently_supported": bool(n and support[c] and not unresolved[c]),
+                      "independently_supported": bool(n and support[c] and not unresolved[c] and not (c == 5 and unwritten_zero)),
                       "unresolved_dynamic_behaviour": bool(n and (unresolved[c] or c == 6)),
                       "executed_instruction_starts": exe.get(c, 0) if executed_starts else None})
     report = {"image_bytes": size, "classes": table, "equality_only_bytes": equality_only,

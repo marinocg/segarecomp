@@ -5,7 +5,8 @@ A template discovered by a build pass is evidence, not authority: its recorded a
 there. This tool answers, from the program's writer log (`--ram-write-log`, see sega_cd_epoch_provenance.py), who stored each
 template's opcode word and what kind of code that writer is:
 
-  static_writer         main: every store of the opcode word executes from the immutable BIOS image (PC below the image size)
+  static_writer         main: every store of the opcode word executes from the immutable BIOS image (PC below the image size); the stored
+                        value being a constant is NOT checked (only that it is a JMP opcode word)
   reconstructed_writer  sub: every store executes from a byte range of the epoch image that a recipe reconstructs from immutable input
                         (class 4 decoded regions; the caller supplies the ranges)
   runtime_writer        some store executes from RAM that no immutable input or reconstruction explains
@@ -91,7 +92,7 @@ def classify(templates, log, bios_size, reconstructed):
               "classes": {k: counts.get(k, 0) for k in ("static_writer", "reconstructed_writer", "runtime_writer", "unattributed")},
               "templates_in_multi_slot_runs": members,
               "slot_runs": {"count": len(runs), "multi_slot": sum(1 for s in run_sizes if s > 1), "largest": run_sizes[:4]},
-              "statically_derived_before_execution": 0}
+              "statically_derived_before_execution": 0}  # a documented literal: this tool derives nothing, it attributes recorded stores
     return report, detail
 
 

@@ -360,6 +360,35 @@ check(trep["slot_runs"]["largest"][:2] == [5, 4] and trep["templates_in_multi_sl
       "slot runs %s" % trep["slot_runs"])
 check(not any(k in json.dumps(trep) for k in ('"address"', '"pc"')), "template report holds counts only")
 
+
+# ---- mutation-driven negatives (adversarial review) ----
+with tempfile.TemporaryDirectory() as tmp3:
+    tmp3 = pathlib.Path(tmp3)
+    (tmp3 / "w.bin").write_bytes(log_bytes)
+    recs3 = P.read_log(tmp3 / "w.bin")
+    bad_image = bytearray(image)
+    bad_image[DEST[0] + 7] ^= 0x10                      # a decoded stream whose bytes no longer match what the decoder produces
+    repb, _ = P.classify(bytes(bad_image), {"bios": bios}, recs3)
+    rb = {row["class"]: row for row in repb["classes"]}
+    check(rb[4]["regions"] == 2 and rb[6]["bytes"] == len(parts[0]) and not repb["fully_explained"],
+          "a stream the independent decoder does not reproduce is class 6, never class 4")
+    # a stream of non-zero values over bytes that are zero in the image is not a zero fill
+    nz = b"".join(C.log_record(C.KIND_PRG, 2, 0, a, 0x0101, 0x100) for a in range(0, 0x100, 2))
+    (tmp3 / "nz.bin").write_bytes(nz)
+    repn, _ = P.classify(bytes(0x100), {"bios": bios}, P.read_log(tmp3 / "nz.bin"))
+    rn = {row["class"]: row for row in repn["classes"]}
+    check(rn[6]["bytes"] == 0x100 and not rn[5]["independently_supported"] and rn[5]["bytes"] == 0, "non-zero writes are not a zero fill")
+    # unwritten zero bytes are counted as class 5 but never reported as supported
+    (tmp3 / "none.bin").write_bytes(C.log_record(C.KIND_WORK, 2, 0, 0, 1, 0x100))
+    repu, _ = P.classify(bytes(0x100), {"bios": bios}, P.read_log(tmp3 / "none.bin"))
+    ru = {row["class"]: row for row in repu["classes"]}
+    check(ru[5]["bytes"] == 0x100 and not ru[5]["independently_supported"], "unwritten zeros are not writer-supported")
+    # a main template whose writer runs from RAM (not the BIOS image) is a runtime writer
+    mlog = store(C.KIND_WORK, 0, 0xFD00, 0x4EF9, 0x21000)
+    (tmp3 / "m.bin").write_bytes(mlog)
+    repm, _ = T.classify([(0, 0xFFFD00)], P.read_log(tmp3 / "m.bin"), 0x20000, [])
+    check(repm["classes"]["runtime_writer"] == 1 and repm["classes"]["static_writer"] == 0, "a main writer outside the BIOS image is a runtime writer")
+
 if failures:
     print("%d failure(s)" % len(failures))
     sys.exit(1)
