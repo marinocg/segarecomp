@@ -73,6 +73,8 @@ PROTOCOL = {
                     "(emulated frame k receives policy(k-1); frame 1 none), Gate A expected zone order and end state, read self-fetch and "
                     "vblank-execution checks, control fidelity in tracing_ok, an append-only CPU ledger, extra cells exclude cells the control "
                     "labelled wrongly, a second control seed as a sensitivity report, DATA_ONLY_PROMISE listed as a secondary label",
+    "amendment_A3": "pre-results: the CPU ledger is <private>/ledger.jsonl with intent+completion lines, evaluate requires a successful attempt per "
+                    "expected step and charges an unfinished attempt its wall time; control Gate A requires the vblank PC executed",
     "amendment_A2": "pre-results tool fix: movie.* Lua calls are only called in the movie and playback modes (they raise a .NET exception that pcall cannot catch when no movie is loaded)",
     "gate_a": {
         "zone_play_order": [0x00, 0x0D, 0x0F, 0x0C, 0x07, 0x0B, 0x0A, 0x04, 0x10, 0x06, 0x0E],
@@ -303,24 +305,47 @@ def cpu_now() -> float:
     return r.ru_utime + r.ru_stime + c.ru_utime + c.ru_stime
 
 
-def ledger_add(path: str, label: str, cpu: float, wall: float, ok: bool) -> None:
-    """Append-only CPU ledger (one line per attempt, failed attempts included)."""
+def ledger_add(path: str, label: str, cpu: float, wall: float, ok: bool, attempt: str) -> None:
+    """Append-only CPU ledger: an intent line before each attempt and a completion line after it (failed attempts included)."""
     with open(path, "a") as f:
-        f.write(json.dumps({"label": label, "cpu_seconds": round(cpu, 2), "wall_seconds": round(wall, 2), "ok": ok}) + "\n")
+        f.write(json.dumps({"attempt": attempt, "label": label, "cpu_seconds": round(cpu, 2), "wall_seconds": round(wall, 2), "ok": ok}) + "\n")
 
 
-def ledger_hours(path: str) -> float:
-    return sum(json.loads(ln)["cpu_seconds"] for ln in pathlib.Path(path).read_text().splitlines() if ln.strip()) / 3600
+EXPECTED_LEDGER = ["run:playback", "run:tas_a", "run:tas_b", "run:ctl_a", "run:ctl_b", "run:ctl2_a", "label:tas", "label:ctl", "label:ctl2"]
+
+
+def ledger_hours(path: str, private: str | None = None) -> float:
+    """CPU hours over the ledger. An attempt with an intent line and no completion line (killed/timed out) costs its wall time since the
+    intent. When `private` is given the ledger must be that directory's own ledger and cover every expected step."""
+    lp = pathlib.Path(path).resolve()
+    if private is not None and lp != (pathlib.Path(private).resolve() / "ledger.jsonl"):
+        raise ge.EvidenceError("the ledger must be <private>/ledger.jsonl")
+    rows = [json.loads(ln) for ln in lp.read_text().splitlines() if ln.strip()]
+    done = {r["attempt"]: r for r in rows if "cpu_seconds" in r}
+    total = sum(r["cpu_seconds"] for r in done.values())
+    now = time.time()
+    for r in rows:
+        if r.get("intent") and r["attempt"] not in done:
+            total += now - r["t"]
+    if private is not None:
+        ok = {r["label"] for r in done.values() if r["ok"]}
+        missing = [e for e in EXPECTED_LEDGER if e not in ok]
+        if missing:
+            raise ge.EvidenceError(f"ledger lacks a successful attempt for {missing}")
+    return total / 3600
 
 
 def measured(ledger: str, label: str, fn, *args):
     c0, t0, ok = cpu_now(), time.time(), False
+    attempt = f"{label}#{int(t0 * 1000)}"
+    with open(ledger, "a") as f:
+        f.write(json.dumps({"attempt": attempt, "label": label, "intent": True, "t": t0}) + "\n")
     try:
         r = fn(*args)
         ok = True
         return r
     finally:
-        ledger_add(ledger, label, cpu_now() - c0, time.time() - t0, ok)
+        ledger_add(ledger, label, cpu_now() - c0, time.time() - t0, ok, attempt)
 
 
 # -------------------------------------------------------------------------------------------------------------------------- run
@@ -604,7 +629,7 @@ def gate_a(identity: dict, playback: dict, tas_a: dict, tas_b: dict, ck_a: list,
     ctl_ok = True
     if ctl is not None:
         ca, cb = ctl
-        ctl_ok = (ca["map_mismatch"] == 0 and ca["odd_pcs"] == 0 and ca["reset_pc_executed"] and ca["frames"] == FRAMES
+        ctl_ok = (ca["map_mismatch"] == 0 and ca["odd_pcs"] == 0 and ca["reset_pc_executed"] and ca["vbl_pc_executed"] and ca["frames"] == FRAMES
                   and ca["read_self_fetch_fraction"] <= PROTOCOL["gate_a"]["read_self_fetch_fraction_max"]
                   and all(ca[k] == cb[k] for k in ("pcs_sha256", "reads_sha256", "edges_sha256")))
         fidelity["control_ok"] = ctl_ok
@@ -692,7 +717,7 @@ def cmd_evaluate(a) -> int:
     sens = {"extra_pos_correct": len(c2["pos"]), "extra_mixed_correct": len(c2["mixed"]), "extra_neg_correct": len(c2["neg"])}
     sens["decision_with_seed2_control"] = decide(ga, gb, sens, 0.0)["primary"]
     mixed_also_pos = len(set(m["mixed"]) & set(m["pos"]))
-    cpu_h = ledger_hours(a.ledger) + (cpu_now() - c0) / 3600
+    cpu_h = ledger_hours(a.ledger, a.private) + (cpu_now() - c0) / 3600
     gc = {"extra_pos_correct": extra["pos"], "extra_mixed_correct": extra["mixed"], "extra_neg_correct": extra["neg"]}
     res = {"schema": SCHEMA + ".results", "plan_sha256": ge.sha256(PLAN.read_bytes()), "sensitivity_control_seed2": sens,
            "extra_mixed_that_are_also_extra_pos": mixed_also_pos, "gate_a": ga, "gate_b": gb, "gate_c": gc, "cpu_hours": round(cpu_h, 3),
