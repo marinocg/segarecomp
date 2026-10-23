@@ -68,8 +68,8 @@ The Checkpoint H configuration admits 14 templates (2 main, 12 sub; the authenti
 | **derived before any execution by an implemented analysis** | **0** | **0** |
 
 All 14 are members of two bulk jump-slot tables (30 slots main, 48 slots sub) built by loops in immutable or reconstructed code, and
-re-installed with the same opcode by vector-setting routines in the same classes; the tables are complete at the first frontier stop
-of each processor. The classes S/E of ADR 0178 are therefore met by *attribution*; they are **not** met by *derivation*, because
+re-installed with the same opcode by vector-setting routines in the same classes; the tables are complete (all slots written) at the frontier stop at which the
+recorded run ends. The classes S/E of ADR 0178 are therefore met by *attribution*; they are **not** met by *derivation*, because
 deriving the table (base, stride, count) without running guest code needs a concrete evaluator of the initialiser routines, which the
 stop rule excludes ("arbitrary guest execution", "symbolic execution"). A previously observed PC is not authority; here it would also be
 the wrong unit, since each template is one of a 30- or 48-slot run.
