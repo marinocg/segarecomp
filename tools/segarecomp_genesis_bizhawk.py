@@ -12,8 +12,8 @@ original emulator: BizHawk 2.9.1 (Genplus-gx waterbox core) driven by a Lua scri
       conservative rule records exactly the one byte AT the reported address. That under-approximates reads, never over-approximates;
     * five frozen checkpoints (zone/act, player position, work-RAM digest, optional screenshot digest) and trace growth every 1800 frames;
     * the ROM mapping check (every ROM word read through the bus equals the image).
-  Not available under this tracer (and therefore disabled identically for both conditions): VDP control-port write DATA (the callback
-  value is always 0), hence the DMA-source tier. Graphics DMA sources therefore stay U.
+  VDP control-port write DATA is not available from the callbacks (value is always 0); the DMA-source tier and exact read extents instead
+  come from BizHawk's native Code/Data Logger (A4), started from Lua and read by reflection; an exact synthetic fixture validates it.
 
 Subcommands:
   identity   pin ROM / movie / emulator identities (aggregate record)
@@ -73,6 +73,15 @@ PROTOCOL = {
                     "(emulated frame k receives policy(k-1); frame 1 none), Gate A expected zone order and end state, read self-fetch and "
                     "vblank-execution checks, control fidelity in tracing_ok, an append-only CPU ledger, extra cells exclude cells the control "
                     "labelled wrongly, a second control seed as a sensitivity report, DATA_ONLY_PROMISE listed as a secondary label",
+    "amendment_A4": "pre-results (operator request): BizHawk's native Code/Data Logger is started from Lua (client.gettool('cdl').Restart(), no BizHawk "
+                    "change) and its MD CART log is read by reflection at the end of each run. A synthetic DMA fixture (`cdl-fixture`) must reproduce, "
+                    "exactly, the executed PCs, the DMASource extent (0x40), and the data-read extents (0x04, true access size); exec flags must agree "
+                    "with the callback PCs within 0.1% of bytes; both are Gate A tracing conditions. DMA-source extents come from CDL flag 0x40 and a "
+                    "callback read byte is admitted as data only where the CDL logged a data access (instruction fetch and prefetch are never CDL data). "
+                    "Both conditions use the identical tiers. Reset/state-load behaviour is not exercised (power-on movie, random control, no loads). "
+                    "Batch-1 traces (A3, no CDL) were produced and their aggregate PC counts were seen before this amendment; they are superseded, "
+                    "archived and reported, the thresholds and decision logic are unchanged. If the DMA tier cannot be assessed the mixed-cell "
+                    "metric is NOT_EVALUABLE rather than a code-yield failure.",
     "amendment_A3": "pre-results: the CPU ledger is <private>/ledger.jsonl with intent+completion lines, evaluate requires a successful attempt per "
                     "expected step and charges an unfinished attempt its wall time; control Gate A requires the vblank PC executed",
     "amendment_A2": "pre-results tool fix: movie.* Lua calls are only called in the movie and playback modes (they raise a .NET exception that pcall cannot catch when no movie is loaded)",
@@ -83,6 +92,7 @@ PROTOCOL = {
         "progression": "all five checkpoints in level or special-stage mode; >= 2 level-mode checkpoints; their zones, in checkpoint order, form "
                        "a non-decreasing subsequence of zone_play_order with >= 2 distinct zones",
         "read_self_fetch_fraction_max": 0.10,
+        "cdl_exec_mismatch_fraction_max": 0.001,
         "needs": ["movie/ROM identities", "no savestate in the movie", "movie plays to its end in the original emulator",
                   "five frozen checkpoints show actual progression (>= 2 different zone/act values, game mode in-level at >= 2)",
                   "trace repeat: identical PC-set digest, read-set digest and checkpoint state digests",
@@ -101,7 +111,7 @@ PROTOCOL = {
                         "wrong control label",
                "correct": "every I/c/D label inside the cell agrees with the independent source truth"},
     "limits": {"cpu_hours_tracing_and_verification": 8, "engineering_hours_compatibility": 3, "sync_correction_attempts": 1},
-    "tiers": "SEG-077 `label()` unchanged; DMA-source tier absent for both conditions; DR read rule: one byte at the reported address",
+    "tiers": "SEG-077 `label()` unchanged; DMA-source tier from the BizHawk CDL (both conditions); DR reads: callback bytes gated by CDL data flags",
     "novelty": "descriptive only (no threshold): 4-gram of (family, ea_src, ea_dst, width, control) signatures over consecutive labelled "
                "starts, and 3-cell class-pattern windows, against every SEG-072 registry image except Sonic 2",
     "evaluator_isolation": "the source-truth classes of `s2` are read only by `evaluate`; `run` and `label` never open them",
@@ -125,6 +135,11 @@ local function mv(f) if not has_movie then return "none" end return f() end
 local function w(name) return assert(io.open(S.out .. "/" .. name, "w")) end
 local function ts() return os.clock() end
 local isck = {} for _, c in ipairs(S.ck) do isck[c] = true end
+local cdl_tool = nil
+if S.mode ~= "playback" then
+  cdl_tool = client.gettool("cdl")      -- BizHawk's native Code/Data Logger; started before the first emulated frame
+  cdl_tool.Restart()
+end
 local pcs, nuniq = {}, 0
 local edges, nedge = {}, 0
 local reads, nread = {}, 0
@@ -233,6 +248,22 @@ snap("final")
 run:write("frames ", emu.framecount(), "\nmovie_mode_end ", tostring(mv(movie.mode)), "\nmovie_finished_at ", ended, "\ncpu_lua ", ts() - t0, "\n")
 run:close() ckf:close()
 if collect then
+  local core = cdl_tool.get__cdlCore()
+  local BF = luanet.import_type("System.Reflection.BindingFlags")
+  local log = core:GetType():GetField("CDL", luanet.enum(BF, "NonPublic,Instance,Public")):GetValue(core)
+  local arr = log:get_Item("MD CART")
+  local o = assert(io.open(S.out .. "/cdl.bin", "wb"))
+  local i = 0
+  while i < S.size do
+    local n = math.min(4096, S.size - i)
+    local t = {}
+    for k = 1, n do t[k] = arr[i + k - 1] end
+    o:write(string.char(table.unpack(t)))
+    i = i + n
+  end
+  o:close()
+end
+if collect then
   local o = w("pcs.txt") for a, bkt in pairs(pcs) do o:write(string.format("%06x %d\n", a, bkt)) end o:close()
   o = w("edges.txt") for k in pairs(edges) do o:write(string.format("%06x %06x\n", k >> 24, k & 0xFFFFFF)) end o:close()
   o = w("reads.txt") for k in pairs(reads) do o:write(string.format("%x\n", k)) end o:close()
@@ -244,7 +275,7 @@ client.exit()
 
 def render_lua(sc: dict, out: str, rom: str) -> str:
     sub = {"__MODE__": sc["mode"], "__FRAMES__": str(int(sc["frames"])), "__SEED__": str(int(sc.get("seed", 0))),
-           "__SW__": str(int(sc.get("start_window", 0))), "__SIZE__": str(ROM_SIZE), "__OUT__": out, "__ROM__": rom,
+           "__SW__": str(int(sc.get("start_window", 0))), "__SIZE__": str(int(sc.get("size", ROM_SIZE))), "__OUT__": out, "__ROM__": rom,
            "__CK__": ",".join(str(c) for c in sc.get("checkpoints", CHECKPOINTS)), "__GROWTH__": str(GROWTH_EVERY)}
     if sc["mode"] not in ("movie", "random", "playback"):
         raise ge.EvidenceError(f"unknown mode {sc['mode']}")
@@ -298,6 +329,98 @@ def cmd_identity(a) -> int:
     return 0 if ident["rom_ok"] and ident["movie_rom_md5_matches"] else 2
 
 
+# ------------------------------------------------------------------------------------------------------------------------- CDL
+CDL_EXEC, CDL_DATA, CDL_DMA = 0x01, 0x04, 0x40
+
+
+def cdl_apply(cdl: bytes, rom_pcs: list, reads: dict, size: int) -> tuple[dict, list, dict]:
+    """Combine BizHawk's native Code/Data Logger flags with the callback evidence.
+    * exec: the CDL marks the opcode word (2 bytes) of every executed instruction; it must agree with the callback PC set;
+    * data: a callback-observed read byte is admitted only where the CDL logged a data access (the CDL knows the true access size and
+      never flags instruction fetch/prefetch); an even byte's partner (b+1) is added to the same reader only when the CDL logged it and no
+      callback saw a read at b+1 (so it was the second half of a word read at b);
+    * DMA: maximal runs of the CDL DMASource flag are the 68K->VDP ROM DMA extents (no VDP write data is needed)."""
+    cdl = cdl[:size]
+    exp = bytearray(size)
+    for pc in rom_pcs:
+        if pc + 1 < size:
+            exp[pc] = exp[pc + 1] = 1
+    got = bytes(1 if c & CDL_EXEC else 0 for c in cdl)
+    sym = sum(1 for x, y in zip(exp, got) if x != y)
+    global_read = set()
+    for b in reads.values():
+        global_read |= b
+    gated = {}
+    dropped = 0
+    for pc, bs in reads.items():
+        keep = set()
+        for b in bs:
+            if cdl[b] & CDL_DATA:
+                keep.add(b)
+                if b % 2 == 0 and b + 1 < size and cdl[b + 1] & CDL_DATA and (b + 1) not in global_read:
+                    keep.add(b + 1)
+            else:
+                dropped += 1
+        if keep:
+            gated[pc] = keep
+    dma = ge.ranges([i for i, c in enumerate(cdl) if c & CDL_DMA])
+    data_bytes = sum(1 for c in cdl if c & CDL_DATA)
+    both = sum(1 for c in cdl if c & CDL_DATA and c & CDL_EXEC)
+    return gated, [tuple(r) for r in dma], {"cdl_exec_bytes": sum(got), "cdl_exec_mismatch_bytes": sym, "cdl_data_bytes": data_bytes,
+                                           "cdl_dma_bytes": sum(e - b for b, e in dma), "cdl_dma_extents": len(dma),
+                                           "cdl_exec_and_data_bytes": both, "callback_reads_dropped_by_cdl": dropped}
+
+
+def build_fixture() -> tuple[bytes, dict]:
+    """Synthetic cartridge: one 68K->VDP DMA of 64 ROM bytes, a word data read, two byte data reads (odd and even), then a loop."""
+    import struct
+    rom = bytearray(0x20000)
+    for i, v in enumerate([0xFFFF0000, 0x200] + [0x200] * 62):
+        rom[i * 4:i * 4 + 4] = struct.pack(">I", v)
+    hdr = b"SEGA MEGA DRIVE " + b"(C)TEST 2026.OCT" + b"FIXTURE".ljust(48) + b"FIXTURE".ljust(48) + b"GM 00000000-00" + b"\x00\x00" + b"J".ljust(16)
+    rom[0x100:0x100 + len(hdr)] = hdr
+    rom[0x1A0:0x1B0] = struct.pack(">IIII", 0, 0x1FFFF, 0xFF0000, 0xFFFFFF)
+    code = b""
+    for w in (0x8174, 0x9320, 0x9400, 0x9500, 0x9608, 0x9700):      # M1 on; length 0x20 words; source word address 0x0800 (byte 0x1000)
+        code += struct.pack(">HHI", 0x33FC, w, 0xC00004)
+    code += struct.pack(">HII", 0x23FC, 0x40000080, 0xC00004)       # DMA to VRAM 0
+    code += struct.pack(">HI", 0x3039, 0x2000) + struct.pack(">HI", 0x1039, 0x2101) + struct.pack(">HI", 0x1039, 0x2200) + b"\x60\xFE"
+    rom[0x200:0x200 + len(code)] = code
+    for i in range(0x1000, 0x1040):
+        rom[i] = 0xA0 + (i & 0xF)
+    pcs = [0x200 + 8 * k for k in range(6)] + [0x230, 0x23A, 0x240, 0x246, 0x24C]
+    return bytes(rom), {"pcs": pcs, "dma": [(0x1000, 0x1040)], "reads": {0x23A: [0x2000, 0x2001], 0x240: [0x2101], 0x246: [0x2200]}}
+
+
+def fixture_check(trace: pathlib.Path, truth: dict) -> dict:
+    pcs = sorted(int(k) for k in json.loads((trace / "pcs.json").read_text())["rom"])
+    dma = [tuple(x) for x in json.loads((trace / "dma.json").read_text())["rom_extents"]]
+    reads = {int(pc): sorted(b for s0, e0 in rs for b in range(s0, e0)) for pc, rs in json.loads((trace / "reads.json").read_text()).items()}
+    t = json.loads((trace / "trace.json").read_text())
+    r = {"exec_pcs_exact": pcs == truth["pcs"], "dma_extents_exact": dma == truth["dma"], "reads_exact": reads == {k: v for k, v in truth["reads"].items()},
+         "cdl_exec_mismatch_bytes": t["cdl"]["cdl_exec_mismatch_bytes"], "exec_data_overlap_bytes": t["cdl"]["cdl_exec_and_data_bytes"]}
+    r["ok"] = bool(r["exec_pcs_exact"] and r["dma_extents_exact"] and r["reads_exact"] and r["cdl_exec_mismatch_bytes"] == 0
+                   and r["exec_data_overlap_bytes"] == 0)
+    return r
+
+
+def cmd_cdl_fixture(a) -> int:
+    verify_plan()
+    out = pathlib.Path(a.out)
+    rom, truth = build_fixture()
+    fx = pathlib.Path(a.jobs) / "fixture.gen"        # .gen extension: BizHawk otherwise opens a system chooser for an unknown image
+    fx.parent.mkdir(parents=True, exist_ok=True)
+    fx.write_bytes(rom)
+    ns = argparse.Namespace(rom=str(fx), movie=None, bizhawk=a.bizhawk, scenario=json.dumps({"id": "fixture", "mode": "random", "frames": 120, "seed": 1,
+                            "start_window": 40, "size": len(rom), "checkpoints": [60]}), out=str(out), jobs=a.jobs, ledger=a.ledger, user=a.user,
+                            display=a.display, timeout="300")
+    measured(a.ledger, "fixture", run_scenario, ns)
+    res = fixture_check(out, truth)
+    (out / "fixture.json").write_text(json.dumps(res, indent=1, sort_keys=True))
+    print(json.dumps(res))
+    return 0 if res["ok"] else 2
+
+
 # ------------------------------------------------------------------------------------------------------------------------ ledger
 def cpu_now() -> float:
     r = resource.getrusage(resource.RUSAGE_SELF)
@@ -311,7 +434,7 @@ def ledger_add(path: str, label: str, cpu: float, wall: float, ok: bool, attempt
         f.write(json.dumps({"attempt": attempt, "label": label, "cpu_seconds": round(cpu, 2), "wall_seconds": round(wall, 2), "ok": ok}) + "\n")
 
 
-EXPECTED_LEDGER = ["run:playback", "run:tas_a", "run:tas_b", "run:ctl_a", "run:ctl_b", "run:ctl2_a", "label:tas", "label:ctl", "label:ctl2"]
+EXPECTED_LEDGER = ["fixture", "run:playback", "run:tas_a", "run:tas_b", "run:ctl_a", "run:ctl_b", "run:ctl2_a", "label:tas", "label:ctl", "label:ctl2"]
 
 
 def ledger_hours(path: str, private: str | None = None) -> float:
@@ -407,7 +530,9 @@ def run_scenario(a) -> int:
         rom_pcs = sorted(p for p in pcs if p < ge.CART_SPACE)
         ram = sorted(p for p in pcs if p >= ge.RAM_START)
         other = sum(1 for p in pcs if ge.CART_SPACE <= p < ge.RAM_START)
-        reads = ge.parse_reads((job / "reads.txt").read_text().split(), ROM_SIZE)
+        size = int(sc.get("size", ROM_SIZE))
+        reads = ge.parse_reads((job / "reads.txt").read_text().split(), size)
+        reads, dma_ext, cdl_sum = cdl_apply((job / "cdl.bin").read_bytes(), rom_pcs, reads, size)
         edges = [tuple(int(x, 16) for x in ln.split()) for ln in (job / "edges.txt").read_text().splitlines() if ln]
         read_bytes = set()
         for s in reads.values():
@@ -420,9 +545,11 @@ def run_scenario(a) -> int:
         self_fetch = sum(1 for pc, b in pairs if pc <= b < pc + 10)
         vbl = ge.u32(rom_img, 0x78)
         res.update({"read_self_fetch_fraction": round(self_fetch / len(pairs), 5) if pairs else 0.0, "vbl_pc_executed": vbl in pcs,
-                    "image": {"sha256": ROM_SHA256, "size": ROM_SIZE, "format": "plain"}, "rom_pcs": len(rom_pcs), "ram_pcs": len(ram),
-                    "other_pcs": other, "odd_pcs": sum(1 for p in pcs if p & 1), "rom_pcs_beyond_image": sum(1 for p in rom_pcs if p >= ROM_SIZE),
-                    "readers": len(reads), "read_bytes": len(read_bytes), "edges": len(edges), "dma_rom_extents": 0, "dma_events": 0, "dma_sha256": ge.sha256(b"[]"),
+                    "image": {"sha256": ge.sha256(rom_img), "size": size, "format": "plain"}, "rom_pcs": len(rom_pcs), "ram_pcs": len(ram),
+                    "other_pcs": other, "odd_pcs": sum(1 for p in pcs if p & 1), "rom_pcs_beyond_image": sum(1 for p in rom_pcs if p >= size),
+                    "readers": len(reads), "read_bytes": len(read_bytes), "edges": len(edges), "dma_rom_extents": len(dma_ext), "dma_rom_bytes": cdl_sum["cdl_dma_bytes"], "dma_events": 0,
+                    "dma_sha256": ge.sha256(json.dumps(dma_ext).encode()), "cdl": cdl_sum,
+                    "cdl_sha256": ge.sha256((job / "cdl.bin").read_bytes()),
                     "pcs_sha256": ge.sha256(json.dumps([rom_pcs, ram]).encode()),
                     "reads_sha256": ge.sha256(json.dumps(sorted((pc, sorted(s)) for pc, s in reads.items())).encode()),
                     "edges_sha256": ge.sha256(json.dumps(sorted(edges)).encode()),
@@ -430,7 +557,7 @@ def run_scenario(a) -> int:
                     "reset_pc_executed": res["reset_pc"] in pcs})
         (out / "pcs.json").write_text(json.dumps({"rom": {str(p): "" for p in rom_pcs}, "ram": ram}))
         (out / "reads.json").write_text(json.dumps({str(pc): ge.ranges(sorted(s)) for pc, s in sorted(reads.items())}))
-        (out / "dma.json").write_text(json.dumps({"events": [], "rom_extents": []}))
+        (out / "dma.json").write_text(json.dumps({"events": [], "rom_extents": dma_ext}))
         (out / "edges.json").write_text(json.dumps(sorted(edges)))
     (out / "trace.json").write_text(json.dumps(res, indent=1, sort_keys=True))
     shutil.rmtree(job)
@@ -595,7 +722,7 @@ def parse_state(s: str) -> dict:
 
 
 def gate_a(identity: dict, playback: dict, tas_a: dict, tas_b: dict, ck_a: list, ck_b: list, labelled: dict, playback_final: str = "",
-           ctl: tuple | None = None) -> dict:
+           ctl: tuple | None = None, fixture_ok: bool | None = None) -> dict:
     """Gate A criteria over aggregate run records (pure)."""
     movie = identity["movie"]
     ident_ok = bool(identity["rom_ok"] and identity["movie_rom_md5_matches"] and not movie["starts_from_savestate"]
@@ -614,7 +741,7 @@ def gate_a(identity: dict, playback: dict, tas_a: dict, tas_b: dict, ck_a: list,
     end_ok = bool(fin) and ((int(fin["mode"]) & 0x7F) == 0x20 or ((int(fin["mode"]) & 0x7F) == 0x0C and int(fin["zone"]) == 0x0E))
     played_to_end = (playback["movie_finished_at"] > 0 or playback["movie_mode_end"] == "FINISHED") and end_ok
     fingerprint = lambda ck: [(x["frame"], x["state"].split(" shot=")[0]) for x in ck]
-    determinism = {"pcs": tas_a["pcs_sha256"] == tas_b["pcs_sha256"], "reads": tas_a["reads_sha256"] == tas_b["reads_sha256"],
+    determinism = {"cdl": tas_a["cdl_sha256"] == tas_b["cdl_sha256"], "pcs": tas_a["pcs_sha256"] == tas_b["pcs_sha256"], "reads": tas_a["reads_sha256"] == tas_b["reads_sha256"],
                    "edges": tas_a["edges_sha256"] == tas_b["edges_sha256"], "checkpoints": fingerprint(ck_a) == fingerprint(ck_b)}
     typed = labelled["meta"]["typed"]
     executed = labelled["meta"]["decoders"]["executed_rom_pcs"]
@@ -622,16 +749,21 @@ def gate_a(identity: dict, playback: dict, tas_a: dict, tas_b: dict, ck_a: list,
     accepted = labelled["meta"]["tiers"]["E"] / executed if executed else 0
     fidelity = {"map_mismatch": tas_a["map_mismatch"], "odd_pcs": tas_a["odd_pcs"], "accepted_E_fraction": round(accepted, 5),
                 "reset_pc_executed": tas_a["reset_pc_executed"], "e_rejections": rejected}
+    cdl_frac = tas_a["cdl"]["cdl_exec_mismatch_bytes"] / max(1, tas_a["cdl"]["cdl_exec_bytes"])
+    fidelity["cdl_exec_mismatch_fraction"] = round(cdl_frac, 6)
+    fidelity["cdl_fixture_ok"] = bool(fixture_ok)
     fidelity["read_self_fetch_fraction"] = tas_a["read_self_fetch_fraction"]
     fidelity["vbl_pc_executed"] = tas_a["vbl_pc_executed"]
     fid_ok = (tas_a["map_mismatch"] == 0 and tas_a["odd_pcs"] == 0 and accepted >= 0.99 and tas_a["reset_pc_executed"]
-              and tas_a["vbl_pc_executed"] and tas_a["read_self_fetch_fraction"] <= PROTOCOL["gate_a"]["read_self_fetch_fraction_max"])
+              and tas_a["vbl_pc_executed"] and tas_a["read_self_fetch_fraction"] <= PROTOCOL["gate_a"]["read_self_fetch_fraction_max"]
+              and cdl_frac <= PROTOCOL["gate_a"]["cdl_exec_mismatch_fraction_max"] and bool(fixture_ok))
     ctl_ok = True
     if ctl is not None:
         ca, cb = ctl
         ctl_ok = (ca["map_mismatch"] == 0 and ca["odd_pcs"] == 0 and ca["reset_pc_executed"] and ca["vbl_pc_executed"] and ca["frames"] == FRAMES
                   and ca["read_self_fetch_fraction"] <= PROTOCOL["gate_a"]["read_self_fetch_fraction_max"]
-                  and all(ca[k] == cb[k] for k in ("pcs_sha256", "reads_sha256", "edges_sha256")))
+                  and ca["cdl"]["cdl_exec_mismatch_bytes"] / max(1, ca["cdl"]["cdl_exec_bytes"]) <= PROTOCOL["gate_a"]["cdl_exec_mismatch_fraction_max"]
+                  and all(ca[k] == cb[k] for k in ("pcs_sha256", "reads_sha256", "edges_sha256", "cdl_sha256")))
         fidelity["control_ok"] = ctl_ok
     fid_ok = fid_ok and ctl_ok
     determinism["frames_b"] = tas_b["frames"] == FRAMES
@@ -687,8 +819,9 @@ def cmd_evaluate(a) -> int:
     runs = {k: json.loads((root / "runs" / k / "trace.json").read_text()) for k in ("playback", "tas_a", "tas_b", "ctl_a", "ctl_b", "ctl2_a")}
     ck = {k: json.loads((root / "runs" / k / "checkpoints.json").read_text()) for k in runs}
     tas, ctl = load_label_dir(root / "labels" / "tas"), load_label_dir(root / "labels" / "ctl")
+    fixture_ok = json.loads((root / "runs" / "fixture" / "fixture.json").read_text())["ok"]
     pb_final = next(x["state"] for x in ck["playback"] if x["tag"] == "final")
-    ga = gate_a(ident, runs["playback"], runs["tas_a"], runs["tas_b"], ck["tas_a"], ck["tas_b"], tas, pb_final, (runs["ctl_a"], runs["ctl_b"]))
+    ga = gate_a(ident, runs["playback"], runs["tas_a"], runs["tas_b"], ck["tas_a"], ck["tas_b"], tas, pb_final, (runs["ctl_a"], runs["ctl_b"]), fixture_ok)
     gb = pick_gate_b(tas["cls"], ctl["cls"], truth)
     gb["control_all"] = class_accuracy(ctl["cls"], truth)
     ts, cs = cell_sets(tas["cls"], truth, img), cell_sets(ctl["cls"], truth, img)
@@ -795,6 +928,10 @@ def main(argv=None) -> int:
     p.add_argument("--ledger", required=True)
     p.add_argument("--user", default="bhuser"), p.add_argument("--display", default="99"), p.add_argument("--timeout", default="7200")
     p.set_defaults(fn=cmd_run)
+    p = sub.add_parser("cdl-fixture")
+    p.add_argument("--bizhawk", required=True), p.add_argument("--jobs", required=True), p.add_argument("--out", required=True)
+    p.add_argument("--ledger", required=True), p.add_argument("--user", default="bhuser"), p.add_argument("--display", default="99")
+    p.set_defaults(fn=cmd_cdl_fixture)
     p = sub.add_parser("label")
     p.add_argument("--rom", required=True), p.add_argument("--cli", required=True), p.add_argument("--out", required=True)
     p.add_argument("--id", default="s2"), p.add_argument("--lineage", default="D01"), p.add_argument("--ledger", required=True)

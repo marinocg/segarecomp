@@ -116,19 +116,41 @@ def test_gate_a():
     ck = [{"tag": "ck", "frame": c, "state": f"zone={zs[i]} act=0 mode=12 x=1 y=1 shot=/x"} for i, c in enumerate(bz.CHECKPOINTS)]
     run = {"pcs_sha256": "a", "reads_sha256": "b", "edges_sha256": "c", "map_mismatch": 0, "odd_pcs": 0, "reset_pc_executed": True,
            "frames": bz.FRAMES, "movie_finished_at": 5, "movie_mode_end": "FINISHED", "read_self_fetch_fraction": 0.01,
-           "vbl_pc_executed": True}
+           "vbl_pc_executed": True, "cdl_sha256": "d", "cdl": {"cdl_exec_bytes": 100, "cdl_exec_mismatch_bytes": 0}}
     lab = {"meta": {"typed": {}, "decoders": {"executed_rom_pcs": 100}, "tiers": {"E": 100}}}
     ga = bz.gate_a(ident, run, run, dict(run), ck, [dict(x) for x in ck], lab, "zone=14 act=0 mode=12", (run, dict(run)))
     check(ga["replay_ok"] and ga["tracing_ok"], "gate A passes on a clean synthetic record")
     zz = [{"tag": "ck", "frame": c, "state": f"zone={z} act=0 mode=12 x=1 y=1 shot="} for c, z in zip(bz.CHECKPOINTS, (0x0F, 0x0D, 0x0D, 0x00, 0x07))]
-    check(not bz.gate_a(ident, run, run, dict(run), zz, zz, lab, "zone=14 act=0 mode=12")["progression"], "zones out of play order fail")
+    check(not bz.gate_a(ident, run, run, dict(run), zz, zz, lab, "zone=14 act=0 mode=12", (run, dict(run)), True)["progression"], "zones out of play order fail")
     check(not bz.gate_a(ident, run, run, dict(run), ck, ck, lab, "zone=3 act=0 mode=4")["replay_ok"], "wrong end state fails")
     flat = [{"tag": "ck", "frame": c, "state": "zone=0 act=0 mode=12 x=1 y=1 shot="} for c in bz.CHECKPOINTS]
-    check(not bz.gate_a(ident, run, run, dict(run), flat, flat, lab, "zone=14 act=0 mode=12")["replay_ok"], "no zone progression is REPLAY_INVALID")
+    check(not bz.gate_a(ident, run, run, dict(run), flat, flat, lab, "zone=14 act=0 mode=12", (run, dict(run)), True)["replay_ok"], "no zone progression is REPLAY_INVALID")
     diff = dict(run, pcs_sha256="z")
-    check(not bz.gate_a(ident, run, run, diff, ck, ck, lab, "zone=14 act=0 mode=12")["tracing_ok"], "non-deterministic repeat blocks tracing")
+    check(not bz.gate_a(ident, run, run, diff, ck, ck, lab, "zone=14 act=0 mode=12", (run, dict(run)), True)["tracing_ok"], "non-deterministic repeat blocks tracing")
     lab2 = {"meta": {"typed": {}, "decoders": {"executed_rom_pcs": 100}, "tiers": {"E": 90}}}
-    check(not bz.gate_a(ident, run, run, dict(run), ck, ck, lab2, "zone=14 act=0 mode=12")["tracing_ok"], "low accepted-E fraction blocks tracing")
+    check(not bz.gate_a(ident, run, run, dict(run), ck, ck, lab2, "zone=14 act=0 mode=12", (run, dict(run)), True)["tracing_ok"], "low accepted-E fraction blocks tracing")
+
+
+def test_cdl_and_fixture():
+    rom, truth = bz.build_fixture()
+    check(len(rom) == 0x20000 and truth["dma"] == [(0x1000, 0x1040)], "fixture truth")
+    size = 0x2000
+    cdl = bytearray(size)
+    for pc in (0x200, 0x208):
+        cdl[pc] = cdl[pc + 1] = bz.CDL_EXEC
+    cdl[0x1000:0x1040] = bytes([bz.CDL_DMA]) * 0x40
+    cdl[0x1100] = cdl[0x1101] = bz.CDL_DATA          # a word read at 0x1100
+    cdl[0x1201] = bz.CDL_DATA                         # a byte read at an odd address
+    reads = {0x208: {0x1100}, 0x200: {0x1201, 0x1300}}   # 0x1300 not CDL data (prefetch-like): dropped
+    gated, dma, summ = bz.cdl_apply(bytes(cdl), [0x200, 0x208], reads, size)
+    check(gated == {0x208: {0x1100, 0x1101}, 0x200: {0x1201}}, "reads gated by CDL data; word partner added")
+    check(dma == [(0x1000, 0x1040)] and summ["cdl_dma_bytes"] == 64 and summ["callback_reads_dropped_by_cdl"] == 1, "DMA extent")
+    check(summ["cdl_exec_mismatch_bytes"] == 0, "exec flags agree with callback PCs")
+    _, _, bad = bz.cdl_apply(bytes(cdl), [0x200, 0x208, 0x210], reads, size)
+    check(bad["cdl_exec_mismatch_bytes"] == 2, "a callback PC without a CDL exec flag is a mismatch")
+    # a byte read at b+1 by another reader forbids the word-partner rule
+    g2, _, _ = bz.cdl_apply(bytes(cdl), [0x200], {0x200: {0x1100}, 0x300: {0x1101}}, size)
+    check(g2 == {0x200: {0x1100}, 0x300: {0x1101}}, "no partner when a callback saw the odd byte")
 
 
 def test_plan():
@@ -141,7 +163,7 @@ def test_plan():
 
 
 def main():
-    for t in (test_lua_and_movie, test_cells_and_accuracy, test_decide, test_novelty_and_bootstrap, test_gate_a, test_plan):
+    for t in (test_lua_and_movie, test_cells_and_accuracy, test_decide, test_novelty_and_bootstrap, test_gate_a, test_cdl_and_fixture, test_plan):
         t()
     print("FAILURES:", len(FAILURES), *FAILURES)
     return 1 if FAILURES else 0

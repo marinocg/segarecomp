@@ -2,8 +2,9 @@
  "amendment_A1": "pre-results amendment after the independent plan review (no run output existed): enforced freeze (plan verified by run, label and evaluate; decoder CLI, truth-file and registry digests pinned), control policy aligned to the SEG-077 Lua (emulated frame k receives policy(k-1); frame 1 none), Gate A expected zone order and end state, read self-fetch and vblank-execution checks, control fidelity in tracing_ok, an append-only CPU ledger, extra cells exclude cells the control labelled wrongly, a second control seed as a sensitivity report, DATA_ONLY_PROMISE listed as a secondary label",
  "amendment_A2": "pre-results tool fix: movie.* Lua calls are only called in the movie and playback modes (they raise a .NET exception that pcall cannot catch when no movie is loaded)",
  "amendment_A3": "pre-results: the CPU ledger is <private>/ledger.jsonl with intent+completion lines, evaluate requires a successful attempt per expected step and charges an unfinished attempt its wall time; control Gate A requires the vblank PC executed",
+ "amendment_A4": "pre-results (operator request): BizHawk's native Code/Data Logger is started from Lua (client.gettool('cdl').Restart(), no BizHawk change) and its MD CART log is read by reflection at the end of each run. A synthetic DMA fixture (`cdl-fixture`) must reproduce, exactly, the executed PCs, the DMASource extent (0x40), and the data-read extents (0x04, true access size); exec flags must agree with the callback PCs within 0.1% of bytes; both are Gate A tracing conditions. DMA-source extents come from CDL flag 0x40 and a callback read byte is admitted as data only where the CDL logged a data access (instruction fetch and prefetch are never CDL data). Both conditions use the identical tiers. Reset/state-load behaviour is not exercised (power-on movie, random control, no loads). Batch-1 traces (A3, no CDL) were produced and their aggregate PC counts were seen before this amendment; they are superseded, archived and reported, the thresholds and decision logic are unchanged. If the DMA tier cannot be assessed the mixed-cell metric is NOT_EVALUABLE rather than a code-yield failure.",
  "bound_code": {
-  "tools/segarecomp_genesis_bizhawk.py": "aec7685095565b49a437effb0137f815a5d12d73ae6e785a2774653dda929b2e",
+  "tools/segarecomp_genesis_bizhawk.py": "478814d861ec1b497aa24a28d95f676e74a02127369d8eddb9922c9d45670766",
   "tools/segarecomp_genesis_evidence.py": "1582d2ed01db7692c6564750a8a7e6d01b08ee59f421d26776906523bd009885"
  },
  "cli_sha256": "407cc83b587a512a635c0f2fc08794c463d6fc93b1830bb4fd81c100cef042d9",
@@ -29,6 +30,7 @@
  "evaluator_isolation": "the source-truth classes of `s2` are read only by `evaluate`; `run` and `label` never open them",
  "game": "Sonic the Hedgehog 2 (World, REV01)",
  "gate_a": {
+  "cdl_exec_mismatch_fraction_max": 0.001,
   "expected_end_state": "final game mode 0x20 (ending sequence) or (game mode 0x0C and zone 0x0E) at the last movie frame",
   "failure": [
    "REPLAY_INVALID",
@@ -165,7 +167,7 @@
   "DATA_ONLY_PROMISE (only with INSUFFICIENT_CODE_YIELD)"
  ],
  "task": "SEG-080-T001",
- "tiers": "SEG-077 `label()` unchanged; DMA-source tier absent for both conditions; DR read rule: one byte at the reported address",
+ "tiers": "SEG-077 `label()` unchanged; DMA-source tier from the BizHawk CDL (both conditions); DR reads: callback bytes gated by CDL data flags",
  "truth_sha256": "50bca5d8b91a1dbebff1f094338163b62ffe1f2a5418e96222b6c6b11121959f",
  "window": {
   "checkpoints": [
