@@ -73,6 +73,7 @@ PROTOCOL = {
                     "(emulated frame k receives policy(k-1); frame 1 none), Gate A expected zone order and end state, read self-fetch and "
                     "vblank-execution checks, control fidelity in tracing_ok, an append-only CPU ledger, extra cells exclude cells the control "
                     "labelled wrongly, a second control seed as a sensitivity report, DATA_ONLY_PROMISE listed as a secondary label",
+    "amendment_A2": "pre-results tool fix: movie.* Lua calls are only called in the movie and playback modes (they raise a .NET exception that pcall cannot catch when no movie is loaded)",
     "gate_a": {
         "zone_play_order": [0x00, 0x0D, 0x0F, 0x0C, 0x07, 0x0B, 0x0A, 0x04, 0x10, 0x06, 0x0E],
         "expected_end_state": "final game mode 0x20 (ending sequence) or (game mode 0x0C and zone 0x0E) at the last movie frame",
@@ -117,6 +118,8 @@ BOUND = ["tools/segarecomp_genesis_bizhawk.py", "tools/segarecomp_genesis_eviden
 LUA = r"""
 local S = {mode = "__MODE__", frames = __FRAMES__, seed = __SEED__, start_window = __SW__, size = __SIZE__, out = "__OUT__",
             rom = "__ROM__", ck = {__CK__}, growth = __GROWTH__}
+local has_movie = S.mode ~= "random"
+local function mv(f) if not has_movie then return "none" end return f() end
 local function w(name) return assert(io.open(S.out .. "/" .. name, "w")) end
 local function ts() return os.clock() end
 local isck = {} for _, c in ipairs(S.ck) do isck[c] = true end
@@ -126,7 +129,7 @@ local reads, nread = {}, 0
 local prev, lastpc, frame_now = -1, 0, 0
 local collect = S.mode ~= "playback"
 local run = w("run.txt")
-run:write("mode ", S.mode, "\nmovie_mode_start ", tostring(movie.mode()), "\nmovie_length ", tostring(movie.length()), "\n")
+run:write("mode ", S.mode, "\nmovie_mode_start ", tostring(mv(movie.mode)), "\nmovie_length ", tostring(mv(movie.length)), "\n")
 -- ROM mapping check through the M68K bus (no callbacks are registered yet)
 local mis, words = 0, 0
 do
@@ -207,7 +210,7 @@ local function snap(tag)
 end
 local t0 = ts()
 local last = S.frames
-if S.mode == "playback" then last = movie.length() end
+if S.mode == "playback" then last = mv(movie.length) end
 local ended = -1
 for f = 0, last - 1 do
   frame_now = f
@@ -220,12 +223,12 @@ for f = 0, last - 1 do
   emu.frameadvance()
   frame_now = f + 1
   if S.mode == "movie" or S.mode == "playback" then
-    if ended < 0 and movie.mode() == "FINISHED" then ended = frame_now end
+    if ended < 0 and mv(movie.mode) == "FINISHED" then ended = frame_now end
   end
   if isck[frame_now] then snap("ck") elseif frame_now % S.growth == 0 then snap("g") end
 end
 snap("final")
-run:write("frames ", emu.framecount(), "\nmovie_mode_end ", tostring(movie.mode()), "\nmovie_finished_at ", ended, "\ncpu_lua ", ts() - t0, "\n")
+run:write("frames ", emu.framecount(), "\nmovie_mode_end ", tostring(mv(movie.mode)), "\nmovie_finished_at ", ended, "\ncpu_lua ", ts() - t0, "\n")
 run:close() ckf:close()
 if collect then
   local o = w("pcs.txt") for a, bkt in pairs(pcs) do o:write(string.format("%06x %d\n", a, bkt)) end o:close()

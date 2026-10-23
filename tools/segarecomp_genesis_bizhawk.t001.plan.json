@@ -1,7 +1,8 @@
 {
  "amendment_A1": "pre-results amendment after the independent plan review (no run output existed): enforced freeze (plan verified by run, label and evaluate; decoder CLI, truth-file and registry digests pinned), control policy aligned to the SEG-077 Lua (emulated frame k receives policy(k-1); frame 1 none), Gate A expected zone order and end state, read self-fetch and vblank-execution checks, control fidelity in tracing_ok, an append-only CPU ledger, extra cells exclude cells the control labelled wrongly, a second control seed as a sensitivity report, DATA_ONLY_PROMISE listed as a secondary label",
+ "amendment_A2": "pre-results tool fix: movie.* Lua calls are only called in the movie and playback modes (they raise a .NET exception that pcall cannot catch when no movie is loaded)",
  "bound_code": {
-  "tools/segarecomp_genesis_bizhawk.py": "87fc142dd8aefa5a1aa5866b3784a8ba35d2fd2eec65f40310d62228d9a9a773",
+  "tools/segarecomp_genesis_bizhawk.py": "ccb9e2a95538824eaca82ef44190cba45ef0fea267ecc6b1f6ebe4aff694e1e6",
   "tools/segarecomp_genesis_evidence.py": "1582d2ed01db7692c6564750a8a7e6d01b08ee59f421d26776906523bd009885"
  },
  "cli_sha256": "407cc83b587a512a635c0f2fc08794c463d6fc93b1830bb4fd81c100cef042d9",
