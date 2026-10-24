@@ -61,7 +61,8 @@ def proposed_gates(res: dict) -> dict:
     discovery = res["gate_replay"].get("fifths_with_new_code")
     return {"replay_fidelity": fidelity, "continued_discovery_fifths": discovery, "label_confidence": label,
             "acquisition_yield": cls if cls.startswith("QUALIFIED") else ("QUALIFIED_LOW_YIELD" if label else None),
-            "original_class": cls,
+            "original_class": cls, "retroactive_effect": False,
+            "note": "prospective proposal only: ADR 0187's class is unchanged; continued discovery stays a separately reported field",
             "proposed_class": ("QUALIFIED_USEFUL" if label and res["classification"].get("code_yield_rule") and res["classification"].get("novelty_rule")
                                else "QUALIFIED_LOW_YIELD" if label else
                                "REPLAY_INVALID" if not fidelity else "TRACING_UNAVAILABLE" if not t else "LABEL_POLICY_CONFLICT")}
@@ -83,20 +84,30 @@ def raw_kinds(text: str, pcs: set) -> dict:
     return out
 
 
-def classify_pc(pc: int, size: int, tokens: bytes, succ: set, accepted_spans: list, kinds: tuple) -> dict:
+def classify_pc(pc: int, size: int, tokens: bytes, succ: set, accepted_spans: list, kinds: tuple, opcode_line: int, target: int | None = None) -> dict:
+    """One rejected executed start. Corroboration = the emulator-observed successors are consistent with the CPU decoder's length: straight-line instructions continue at
+    pc + length; direct conditional branches / jumps / calls only reach pc + length or the PC-relative target decoded from the instruction words. Dynamic jumps and returns
+    are unverifiable and count AGAINST a limitation finding."""
     w = pc // 2
     status = tokens[w * TOKEN_FIELDS] if (w + 1) * TOKEN_FIELDS <= len(tokens) else None
     length = tokens[w * TOKEN_FIELDS + 1] * 2 if status == 2 else 0
     control = tokens[w * TOKEN_FIELDS + 3] if status == 2 else None
     inside = any(s < pc < s + n for s, n in accepted_spans)
-    straight = control in (0, None)             # token control 0 = no control transfer
+    fall = pc + length
+    if control == 0 and length:
+        kind, ok = "straight", bool(succ) and succ <= {fall}
+    elif control in (1, 2, 3) and length and target is not None and target >= 0:
+        allowed = {fall, target} if control == 1 else {target}
+        kind, ok = "direct", bool(succ) and succ <= allowed and (control != 1 or bool(succ & allowed))
+    else:
+        kind, ok = "unverifiable", False
     return {"outside_image": pc >= size, "header_or_vector": pc < 0x200, "cpu_ordinary": status == 2, "cpu_length": length, "inside_other_instruction": inside,
-            "successor_matches_length": bool(length and straight and (pc + length) in succ), "has_successor": bool(succ), "straight_line": straight,
-            "disasm": kinds[0] if kinds[0] == kinds[1] else "mixed"}
+            "kind": kind, "corroborated": bool(ok and kind != "unverifiable"), "contradicted": bool(kind != "unverifiable" and bool(succ) and not ok), "has_successor": bool(succ),
+            "opcode_line": opcode_line, "disasm": kinds[0] if kinds[0] == kinds[1] else "mixed"}
 
 
-def classify_rejections(rows: list) -> dict:
-    """Closed-vocabulary classification of the rejected executed starts (pure)."""
+def classify_rejections(rows: list, mapping_signals: int = 0) -> dict:
+    """Closed-vocabulary classification of the rejected executed starts (pure). mapping_signals = executed PCs skipped before classification because they were odd or beyond the image."""
     n = len(rows)
     if not n:
         return {"class": "UNRESOLVED", "reason": "no rejected starts", "counts": {}}
@@ -108,24 +119,29 @@ def classify_rejections(rows: list) -> dict:
             c["cpu_not_ordinary"] += 1
         elif r["inside_other_instruction"]:
             c["inside_other"] += 1
-        elif r["straight_line"] and r["has_successor"] and not r["successor_matches_length"]:
+        elif r["contradicted"]:
             c["successor_contradicts"] += 1
-        elif r["straight_line"] and r["successor_matches_length"]:
+        elif r["corroborated"]:
             c["corroborated"] += 1
         else:
             c["unverifiable"] += 1
-    counts = dict(c)
-    checkable = c["corroborated"] + c["successor_contradicts"] + c["inside_other"]
-    out = {"counts": counts, "rejected": n, "disasm_kinds": dict(collections.Counter(r["disasm"] for r in rows))}
-    if c["mapping"]:
-        out.update({"class": "ROM_MAPPING_ISSUE", "reason": f"{c['mapping']} rejected PCs lie outside the image or in the header/vector area"})
+    by_line = collections.defaultdict(lambda: [0, 0])
+    for r in rows:
+        by_line[r["opcode_line"]][0] += 1
+        by_line[r["opcode_line"]][1] += int(r["corroborated"] and not r["inside_other_instruction"])
+    weak_lines = sorted(k for k, (t, ok) in by_line.items() if t >= 3 and ok / t < 0.90)
+    out = {"counts": dict(c), "rejected": n, "disasm_kinds": dict(collections.Counter(r["disasm"] for r in rows)), "mapping_signals_skipped": mapping_signals,
+           "kinds": dict(collections.Counter(r["kind"] for r in rows)), "opcode_lines_below_90pct": weak_lines}
+    if c["mapping"] or mapping_signals:
+        out.update({"class": "ROM_MAPPING_ISSUE", "reason": f"{c['mapping']} rejected and {mapping_signals} skipped executed PCs are odd, outside the image or in the header/vector area"})
     elif (c["successor_contradicts"] + c["inside_other"]) / n > UNSOUND_MAX:
-        out.update({"class": "UNSOUND_EXECUTION_LABELS", "reason": "the emulator-observed successor or overlap contradicts the CPU decoder length for more than 5 % of the rejected starts"})
+        out.update({"class": "UNSOUND_EXECUTION_LABELS", "reason": "the emulator-observed successors or an overlap contradict the CPU decoder length for more than 5 % of the rejected starts"})
     elif c["cpu_not_ordinary"] / n > UNSOUND_MAX:
         out.update({"class": "INSTRUCTION_FORM_MISMATCH", "reason": "the CPU decoder itself reports a non-ordinary decode for more than 5 % of the rejected starts"})
-    elif checkable and c["corroborated"] / n >= SUCCESSOR_MATCH_MIN and all(r["disasm"] in ("short", "absent") for r in rows):
-        out.update({"class": "DISASSEMBLER_LIMITATION", "reason": "the CPU decoder is ordinary, the emulator-observed successor equals pc + decoded length for >= 95 % of the "
-                                                                     "rejected starts, and m68k-disasm printed raw data or nothing there"})
+    elif c["corroborated"] / n >= SUCCESSOR_MATCH_MIN and not c["inside_other"] and not weak_lines:
+        out.update({"class": "DISASSEMBLER_LIMITATION", "reason": "at least 95 % of ALL rejected starts (unverifiable ones count against) have emulator-observed successors consistent with the CPU decoder "
+                                                                     "length (straight-line fall-through, or direct branch / call targets decoded from the instruction words), none overlaps an accepted "
+                                                                     "instruction, and every opcode line with >= 3 rejected starts is >= 90 % corroborated"})
     else:
         out.update({"class": "UNRESOLVED", "reason": "the bounded evidence neither corroborates nor contradicts the CPU decoder for enough of the rejected starts"})
     return out
@@ -161,6 +177,17 @@ def cmd_nhl(a) -> int:
                 raise SystemExit(f"m68k-disasm failed: {r.stderr[-200:]}")
             texts[mode] = r.stdout
     traced, walk = ge.parse_disasm(texts["traced"]), ge.parse_disasm(texts["walk"])
+    import numpy as np
+    import segarecomp_xplat_models as xm
+    skipped = sum(1 for pc in executed if pc & 1 or pc >= len(img))
+
+    class Shim:                      # the minimum `xplat_models.structure` needs: PC-relative direct targets from the instruction words and the CPU token report
+        n_words = len(img) // 2
+        tokens = np.frombuffer(tokens, dtype=np.uint8).reshape(len(img) // 2, TOKEN_FIELDS)
+        hi = np.frombuffer(img[:(len(img) // 2) * 2], dtype=np.uint8)[0::2]
+        lo = np.frombuffer(img[:(len(img) // 2) * 2], dtype=np.uint8)[1::2]
+        seed_addresses = []
+    targets = xm.structure(Shim)["target"]
     rejected, accepted_spans = [], []
     for pc in executed:
         if pc & 1 or pc >= len(img):
@@ -173,8 +200,9 @@ def cmd_nhl(a) -> int:
             accepted_spans.append((pc, tl))
     accepted_spans.sort()
     kt, kw = raw_kinds(texts["traced"], set(rejected)), raw_kinds(texts["walk"], set(rejected))
-    rows = [classify_pc(pc, len(img), tokens, succ.get(pc, set()), accepted_spans, (kt[pc], kw[pc])) for pc in rejected]
-    res = classify_rejections(rows)
+    rows = [classify_pc(pc, len(img), tokens, succ.get(pc, set()), accepted_spans, (kt[pc], kw[pc]), int.from_bytes(img[pc:pc + 2], "big") >> 12,
+                        int(targets[pc // 2]) * 2 if targets[pc // 2] >= 0 else None) for pc in rejected]
+    res = classify_rejections(rows, skipped)
     res["executed_rom_pcs"] = len(executed)
     res["rejected_starts"] = len(rejected)
     res["accepted_e_fraction_recomputed"] = round(1 - len(rejected) / max(1, len(executed)), 5)

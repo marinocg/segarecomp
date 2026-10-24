@@ -68,7 +68,7 @@ ARMS = {
 }
 WEIGHTED_ARMS = ("A_all_W", "A_control_W")
 READY = {"diversity_code_min_independent_useful": 5, "diversity_code_min_new_positive_fraction": 0.20, "diversity_negative_min_lineages": 3,
-         "diversity_negative_min_strong_hard_cells": 300, "response_min_folds": 2, "residual_er": 0.05, "residual_min_folds": 2,
+         "diversity_negative_min_strong_hard_cells": 300, "response_min_folds": 2, "dose_response": "mean ER(A_all) < mean ER(A_matched)", "residual_er": 0.05, "residual_min_folds": 2,
          "required_comparisons": ["A0", "A81", "A83", "A_all", "A_control", "A_matched"]}
 
 
@@ -76,9 +76,11 @@ READY = {"diversity_code_min_independent_useful": 5, "diversity_code_min_new_pos
 def readiness(m: dict) -> dict:
     """Frozen readiness decision (pure). Code diversity and negative-supervision diversity are judged independently.
 
-    m: missing_arms (list), a0_reproduces (bool), code_independent_useful (int), code_new_positive_fraction (float), negative_lineages (int: independent
-    qualified lineages with >= 300 strong hard-negative cells, regardless of code class), response_folds (folds where A_all improves ER beyond that fold's
-    noise), response_mean_beyond_noise (bool), residual_folds (folds where A_all still has ER >= 0.05 and its gain over A0 is within noise)."""
+    m: missing_arms (list), a0_reproduces (bool), code_independent_useful (int), code_new_positive_fraction (float; strong positive cells of the USEFUL games only),
+    negative_lineages (int: independent qualified lineages with >= 300 strong hard-negative cells, regardless of code class), response_folds (folds where A_all
+    improves ER beyond that fold's noise), response_mean_beyond_noise (bool), dose_response (bool: A_all's mean ER is below A_matched's, the same labels at the control's
+    volume, so the gain grows with the amount of labelled evidence rather than being noise), residual_folds (folds where A_all still has ER >= 0.05 and its gain over A0
+    is within noise). TAS-versus-control content (A_all vs A_matched / A_control) is a reported descriptor, not a gate."""
     R = READY
     if m["missing_arms"] or not m["a0_reproduces"]:
         return {"decision": "EVIDENCE_INSUFFICIENT", "reasons": [f"missing arms {m['missing_arms']}" if m["missing_arms"] else "A0 does not reproduce the stored SEG-076 scores"],
@@ -92,10 +94,10 @@ def readiness(m: dict) -> dict:
         div.append(f"negatives: independent lineages with >= {R['diversity_negative_min_strong_hard_cells']} strong hard-negative cells {m['negative_lineages']} < {R['diversity_negative_min_lineages']}")
     if div:
         return {"decision": "MORE_DIVERSITY_NEEDED", "reasons": div, "recommendation": "acquire_targeted_batch"}
-    responds = m["response_mean_beyond_noise"] and m["response_folds"] >= R["response_min_folds"]
+    responds = m["response_mean_beyond_noise"] and m["response_folds"] >= R["response_min_folds"] and m["dose_response"]
     if not responds:
         return {"decision": "MODEL_OR_EVALUATION_LIMITATION",
-                "reasons": ["diversity criteria met, but the structural model A's ER does not respond to the added labels beyond the noise reference"],
+                "reasons": ["diversity criteria met, but the structural model A's ER does not respond to the added labels beyond the noise reference, or the response is not dose-dependent"],
                 "recommendation": "improve_evaluation_or_source_backed_evidence_before_more_acquisition"}
     if m["residual_folds"] >= R["residual_min_folds"]:
         return {"decision": "NEURAL_PILOT_JUSTIFIED", "reasons": [], "recommendation": "run_bounded_b_c_v2_pilot_now"}
@@ -151,7 +153,10 @@ def bound_files() -> list:
                    "tools/segarecomp_xplat_explore_eval.py", "tools/segarecomp_xplat_transfer.py", "tools/segarecomp_xplat_t005.py", "tools/segarecomp_ml_v3.py",
                    "tools/segarecomp_ml_v3_train.py", "tools/segarecomp_ml_v3_eval.py", "tools/segarecomp_ml_region_gen2_train.py", "tools/segarecomp_ml_region_gen2.py",
                    "tools/segarecomp_genesis_bizhawk.py", "tools/segarecomp_genesis_tasbatch_ml.py", "tools/segarecomp_ml_v3.corpus_manifest.json",
-                   "tools/segarecomp_genesis_tasbatch5.readiness.results.json", "tools/segarecomp_genesis_tasbatch5.model_a.results.json"})
+                   "tools/segarecomp_genesis_tasbatch5.readiness.results.json", "tools/segarecomp_genesis_tasbatch5.model_a.results.json",
+                   "tools/segarecomp_genesis_evidence.py", "tools/segarecomp_xplat_design.py", "tools/segarecomp_genesis_tasbatch.py", "tools/segarecomp_ml_v3_data.py",
+                   "tools/segarecomp_seg084_audit.inventory.json", "tools/segarecomp_genesis_tasbatch5.shadowrun.results.json", "tools/segarecomp_genesis_tasbatch5.nhl94.results.json",
+                   "tools/segarecomp_genesis_tasbatch5.shoveit.results.json", "tools/segarecomp_genesis_tasbatch5.doraemon.results.json", "tools/segarecomp_genesis_tasbatch5.terminator.results.json"})
 
 
 def sha_file(p: pathlib.Path) -> str:
@@ -215,7 +220,8 @@ def build_protocol() -> dict:
                       "code_diversity": "independent useful lineages among the eight SEG-081/083 candidates (SEG-083 rule: code yield >= usefulness criterion, shingle containment <= 0.30) >= 5 AND the six "
                                         "qualified games' strong positive cells >= 20 % of the base positive cells",
                       "negative_diversity": "independent qualified lineages with >= 300 strong hard-negative cells, regardless of their code-yield class, >= 3",
-                      "response": "A_all improves ER beyond the fold noise on >= 2 folds AND the mean ER change exceeds the mean noise",
+                      "response": "A_all improves ER beyond the fold noise on >= 2 folds AND the mean ER change exceeds the mean noise AND the response is dose-dependent (mean ER of A_all below that of A_matched, the same TAS labels at the control's volume). Reported, not gating: A_all vs A_control / A_matched per fold (TAS-specific content versus volume), and the negative-slice responses below",
+                      "expected_from_existing_data": "stated before any fit: with the SEG-081/083 results already in hand the code criteria (5 independent useful lineages; strong positive cells of the useful games ~32 % of the base) and the negative criterion (vm2, bnr, ewj2 and The Terminator exceed 300 strong hard-negative cells) are expected to pass, so the decision is expected to hinge on the response and residual rules measured here",
                       "residual": "folds where A_all still has lineage-max ER >= 0.05 and its gain over A0 is within that fold's noise: >= 2",
                       "recommendation_map": {"NEURAL_PILOT_JUSTIFIED": "run a bounded B / C-v2 pilot now (not started automatically)", "MORE_DIVERSITY_NEEDED": "acquire a targeted batch",
                                              "MODEL_OR_EVALUATION_LIMITATION": "improve evaluation / source-backed evidence before more acquisition", "EVIDENCE_INSUFFICIENT": "repair the inputs first"},
@@ -286,13 +292,20 @@ def load_registry_images():
     return [x5.attach(im, d) for im, d in zip(xt.load(dirs), dirs)], dirs
 
 
+def check_context(ctx: pathlib.Path) -> dict:
+    cj = json.loads((ctx / "context.json").read_text())
+    if cj.get("plan_sha256") != plan_sha():
+        raise SystemExit("private context was prepared under a different plan: re-run `prepare` under the frozen plan")
+    return cj
+
+
 def load_tas(root: pathlib.Path, ctx: pathlib.Path) -> dict:
     """Per game: ROM-level features (one Image carries tokens / seeds), labels and weights for each (condition, variant)."""
     import numpy as np
     import segarecomp_ml_v3_train as tr
     import segarecomp_xplat_models as xm
     out = {}
-    cj = json.loads((ctx / "context.json").read_text())
+    cj = check_context(ctx)
     for g in ALL:
         base = tr.Image(sample_dir(root, g, "tas", "strong"))
         addrs = json.loads((ctx / "seeds" / g / "addresses.json").read_text())
@@ -330,6 +343,16 @@ def cmd_prepare(a) -> int:
     for im in imgs:
         lineage_sh.setdefault(im.lineage, set()).update(ml81.code_shingles(im.classes, im.rom))
     out = {"cli_sha256": cli_sha, "plan_sha256": plan_sha(), "games": {}}
+    chk = next(im for im in imgs if im.lineage == "D02")                      # seed-procedure self-check on an accepted registry ROM
+    chk_dir = pathlib.Path(chk._dir)
+    with __import__("tempfile").TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        proc = subprocess.run([str(cli), "emit-general-startup-bridge-c", "--rom", str(json.loads((chk_dir / "meta.json").read_text())["image"]),
+                               "--reset-entry", "--rom-sha256", json.loads((chk_dir / "meta.json").read_text())["sha256"], "--immutable-rom-aot", "--direct-control-address-report", str(td / "d.txt"),
+                               "--immutable-aot-address-report", str(td / "u.txt"), "--generated-c-output", str(td / "p.c")], capture_output=True, text=True, timeout=3600)
+        out["seed_procedure_self_check"] = bool(proc.returncode == 0 and (td / "d.txt").read_text() == (chk_dir / "d.txt").read_text())
+    if not out["seed_procedure_self_check"]:
+        raise SystemExit("seed procedure self-check failed: the CLI does not regenerate the stored registry d.txt")
     for g in ALL:
         meta = json.loads((sample_dir(root, g, "tas", "strong") / "meta.json").read_text())
         rom_path = pathlib.Path(meta["image"])
@@ -470,6 +493,12 @@ def cmd_table(a) -> int:
     by_fold = {f: [im for im in imgs if im.lineage == f] for f in folds}
     lineage_of = {im.id: im.lineage for im in imgs}
     ref = pathlib.Path(a.seg076_scores)
+    cj = check_context(ctx)
+    for arm in ARMS:
+        for f in folds:
+            j = score_path(f, arm).with_suffix(".json")
+            if j.exists() and json.loads(j.read_text()).get("plan_sha256") != plan_sha():
+                raise SystemExit(f"{arm}.{f}: score was produced under a different plan")
     complete, missing = {}, []
     for arm in ARMS:
         ok = all(score_path(f, arm).exists() for f in folds)
@@ -540,6 +569,19 @@ def cmd_table(a) -> int:
                                   "sub_seed_mean_er": {f"A0_sub{i}": per_arm[f"A0_sub{i}"]["summary"]["mean_er"] for i in (1, 2, 3)}}
         pairs = (("A_all", "A_control"), ("A_all", "A_matched"), ("A_all_W", "A_all"), ("A_control_W", "A_control"), ("A_term", "A0"), ("A_all", "A_noterm"), ("A_all", "A81"), ("A_all", "A83"))
         out["paired"] = {f"{x}-{y}": classify_response(er[y], er[x], noise) for x, y in pairs}
+        def slice_vals(arm, key):
+            if key == "hard_neg_fp_rate":
+                return {f: per_arm[arm]["negative_errors"]["by_fold"][f]["hard_neg_fp_rate"] for f in folds}
+            return {f: per_arm[arm]["lineage"][f][key] for f in folds}
+        out["negative_slices"] = {}
+        for key in ("hard_neg_fp_rate", "negative_admitted_B35", "negative_admitted_B50"):
+            v0 = slice_vals("A0", key)
+            nz = fold_noise(v0, [slice_vals(f"A0_sub{i}", key) for i in (1, 2, 3)])
+            out["negative_slices"][key] = {"noise_per_fold": {f: None if x is None else round(x, 6) for f, x in nz.items()},
+                                           "paired": {f"{x}-{y}": classify_response(slice_vals(y, key), slice_vals(x, key), nz)
+                                                      for x, y in (("A_term", "A0"), ("A_all", "A0"), ("A_all", "A_noterm"), ("A_all", "A_control"), ("A_all", "A_matched"))}}
+        out["tas_vs_control"] = {"A_all-A_control": out["paired"]["A_all-A_control"], "A_all-A_matched": out["paired"]["A_all-A_matched"],
+                                 "reading": "negative mean_delta_er = TAS better than the control-derived labels; inside the noise = control-equivalent (volume, not TAS content)"}
         out["difficult_folds"] = {f: {arm: {"max_er": er[arm][f], "hard_neg_fp": per_arm[arm]["negative_errors"]["by_fold"][f]["hard_neg_fp_rate"]}
                                       for arm in ("A0", "A_all", "A_control", "A_matched", "A_term")} for f in ("D01", "D03", "D07") if f in folds}
         out["residual"] = {f: {"a0": er["A0"][f], "a_all": er["A_all"][f],
@@ -569,33 +611,64 @@ def _hard(bz, im) -> set:
     return bz.hard_cells(im.classes, im.rom, im.tokens.tobytes(), neg)
 
 
+def hard_breakdown(cls: bytes, tokens, neg: set) -> dict:
+    """Why a negative cell is 'hard' (genesis_bizhawk.hard_cells): adjacent to an instruction cell (near) and/or >= 50 % of its words decode as ordinary instructions (ordinary).
+    Reports the split and the mean ordinary-decode fraction, so Terminator can be compared with the registry's own hard negatives (pure given numbers)."""
+    n = (len(cls) + 127) // 128
+    near_n = ord_only = both = 0
+    fr = []
+    for c in neg:
+        near = any(0 <= c + d < n and b"I" in cls[(c + d) * 128:(c + d + 1) * 128] for d in (-1, 1))
+        ws = tokens[c * 64:(c + 1) * 64, 0]
+        ordf = float((ws == 2).mean()) if len(ws) else 0.0
+        o = ordf >= 0.5
+        if not (near or o):
+            continue
+        fr.append(ordf)
+        near_n += int(near and not o)
+        ord_only += int(o and not near)
+        both += int(near and o)
+    h = len(fr)
+    return {"hard": h, "near_only": near_n, "ordinary_only": ord_only, "both": both, "mean_ordinary_fraction": round(sum(fr) / h, 4) if h else None,
+            "near_share": round((near_n + both) / h, 4) if h else None}
+
+
 def negative_audit(a, imgs, base_hard) -> dict:
     """Legitimacy and non-triviality of the TAS strong negatives, per game (aggregate only), against the registry's hard negatives."""
-    import numpy as np
     import segarecomp_ml_v3_train as tr
     import segarecomp_genesis_bizhawk as bz
     root = pathlib.Path(a.samples)
+    inv = json.loads((HERE / "segarecomp_seg084_audit.inventory.json").read_text())["tas"]["snapshots"]
+    tiers = {g: r["conditions"]["tas"] for s in inv.values() for g, r in s["games"].items() if g in ALL}
     out = {}
-    base_neg = sum(int((im.labels == 0).sum()) for im in imgs)
-    base_hardn = sum(len(h) for h in base_hard.values())
-    out["registry"] = {"negative_cells": base_neg, "hard_negative_cells": base_hardn}
+    reg_neg = reg_hard = 0
+    reg_b = {"hard": 0, "near_only": 0, "ordinary_only": 0, "both": 0}
+    reg_fr = []
+    for im in imgs:
+        neg = {int(c) for c, x in enumerate(im.labels) if x == 0}
+        reg_neg += len(neg)
+        bd = hard_breakdown(im.classes, im.tokens, neg)
+        reg_hard += bd["hard"]
+        for k in reg_b:
+            reg_b[k] += bd[k]
+        if bd["mean_ordinary_fraction"] is not None:
+            reg_fr.append((bd["mean_ordinary_fraction"], bd["hard"]))
+    out["registry"] = {"negative_cells": reg_neg, "hard_negative_cells": reg_hard, "hard_share_of_negatives": round(reg_hard / reg_neg, 4), **{k: v for k, v in reg_b.items() if k != "hard"},
+                       "near_share": round((reg_b["near_only"] + reg_b["both"]) / max(1, reg_b["hard"]), 4),
+                       "mean_ordinary_fraction": round(sum(f * n for f, n in reg_fr) / max(1, sum(n for _, n in reg_fr)), 4)}
     for g in ALL:
         im = tr.Image(sample_dir(root, g, "tas", "strong"))
         iw = tr.Image(sample_dir(root, g, "tas", "weak"))
         neg = {int(c) for c, x in enumerate(im.labels) if x == 0}
-        h = bz.hard_cells(im.classes, im.rom, im.tokens.tobytes(), neg)
         negw = {int(c) for c, x in enumerate(iw.labels) if x == 0}
-        hw = bz.hard_cells(iw.classes, iw.rom, iw.tokens.tobytes(), negw)
-        tok = im.tokens
-        wordstat = tok[:, 0]
-        ord_frac = []
-        for c in h:
-            ws = wordstat[c * 64:(c + 1) * 64]
-            ord_frac.append(float((ws == 2).mean()))
-        out[g] = {"strong_negative_cells": len(neg), "strong_hard_negative_cells": len(h), "weak_negative_cells": len(negw), "weak_hard_negative_cells": len(hw),
+        bd, bw = hard_breakdown(im.classes, im.tokens, neg), hard_breakdown(iw.classes, iw.tokens, negw)
+        tb_ = tiers[g]["tier_bytes"]
+        sb = tiers[g]["strong_bytes"]
+        out[g] = {"strong_negative_cells": len(neg), "strong_hard_negative_cells": bd["hard"], "weak_negative_cells": len(negw), "weak_hard_negative_cells": bw["hard"],
                   "strong_positive_cells": int((im.labels == 1).sum()), "mixed_boundary_cells_weak": int(sum(1 for c in range(iw.n_cells) if iw.labels[c] == 1 and b"D" in iw.classes[c * 128:(c + 1) * 128])),
-                  "strong_d_bytes": im.classes.count(b"D"),
-                  "hard_cells_mean_ordinary_decode_fraction": round(sum(ord_frac) / len(ord_frac), 4) if ord_frac else None}
+                  "strong_d_bytes": sb["D"], "tier_header_H_bytes": tb_["H"], "tier_dma_M_bytes": tb_["M"],
+                  "strong_data_is_only_H_or_M": bool(sb["D"] == tb_["H"] + tb_["M"]), "strong_hard_breakdown": {k: v for k, v in bd.items() if k != "hard"},
+                  "hard_share_of_strong_negatives": round(bd["hard"] / len(neg), 4) if neg else None}
     return out
 
 
@@ -608,12 +681,12 @@ def readiness_inputs(a, res: dict, imgs) -> dict:
     useful = [g for g, v in GAMES.items() if v[2] == "QUALIFIED_USEFUL"]
     neg_games = [g for g in ALL if hn[g] >= READY["diversity_negative_min_strong_hard_cells"]]
     base_pos = sum(int((im.labels == 1).sum()) for im in imgs)
-    new_pos = sum(res["negative_audit"][g]["strong_positive_cells"] for g in ALL)
-    noise = res["noise_per_fold"]
+    new_pos = sum(res["negative_audit"][g]["strong_positive_cells"] for g in useful)            # the code axis counts the useful games' positives only
     resp = res["response"]["A_all"]
     return {"missing_arms": res["missing_arms"], "a0_reproduces": res["a0_reproduces_seg076"], "code_independent_useful": independent_count(useful, pair, reg),
             "code_new_positive_fraction": round(new_pos / base_pos, 4), "negative_lineages": independent_count(neg_games, pair, reg),
-            "response_folds": len(resp["folds_better"]), "response_mean_beyond_noise": resp["mean_beyond_noise"], "residual_folds": res["residual_folds"]}
+            "response_folds": len(resp["folds_better"]), "response_mean_beyond_noise": resp["mean_beyond_noise"],
+            "dose_response": bool(res["arms"]["A_all"]["summary"]["mean_er"] < res["arms"]["A_matched"]["summary"]["mean_er"]), "residual_folds": res["residual_folds"]}
 
 
 # -------------------------------------------------------------------------------------------------------------------------- main

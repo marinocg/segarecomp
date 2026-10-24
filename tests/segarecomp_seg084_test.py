@@ -24,7 +24,7 @@ def check(cond, msg):
 
 def ready(**kw):
     m = {"missing_arms": [], "a0_reproduces": True, "code_independent_useful": 5, "code_new_positive_fraction": 0.33, "negative_lineages": 4,
-         "response_folds": 3, "response_mean_beyond_noise": True, "residual_folds": 4}
+         "response_folds": 3, "response_mean_beyond_noise": True, "dose_response": True, "residual_folds": 4}
     m.update(kw)
     return sa.readiness(m)
 
@@ -40,6 +40,7 @@ def test_readiness():
     check(ready(code_new_positive_fraction=0.1)["decision"] == "MORE_DIVERSITY_NEEDED", "code volume")
     check(ready(response_mean_beyond_noise=False)["decision"] == "MODEL_OR_EVALUATION_LIMITATION", "A does not respond")
     check(ready(response_folds=1)["decision"] == "MODEL_OR_EVALUATION_LIMITATION", "response on a single fold")
+    check(ready(dose_response=False)["decision"] == "MODEL_OR_EVALUATION_LIMITATION", "a response that is not dose-dependent is not trusted")
     check(ready(residual_folds=1)["decision"] == "MODEL_OR_EVALUATION_LIMITATION", "no residual headroom")
     # diversity is judged before response; evidence before everything
     check(ready(negative_lineages=0, response_mean_beyond_noise=False)["decision"] == "MORE_DIVERSITY_NEEDED", "order: diversity before response")
@@ -54,7 +55,7 @@ def test_noise_and_response():
     check(abs(n["D01"] - 0.05) < 1e-9 and abs(n["D02"] - 0.01) < 1e-9 and abs(n["D03"] - 0.01) < 1e-9, "per-fold noise is the largest sub-fit deviation")
     arm = {"D01": 0.3, "D02": 0.105, "D03": 0.2}
     r = sa.classify_response(a0, arm, n)
-    check(r["folds_better"] == ["D01"] and r["folds_worse"] == [] and r["mean_beyond_noise"] is False or r["mean_beyond_noise"] is True, "response bookkeeping")
+    check(r["folds_better"] == ["D01"] and r["folds_worse"] == [] and isinstance(r["mean_beyond_noise"], bool), "response bookkeeping")
     check(r["folds_better"] == ["D01"], "only D01 beats its noise")
     check(sa.classify_response(a0, a0, n)["folds_better"] == [], "no change -> no response")
     worse = sa.classify_response(a0, {"D01": 0.9, "D02": 0.1, "D03": 0.2}, n)
@@ -82,6 +83,19 @@ def test_arms_and_plan():
     check(p["evaluation"]["folds"] == list(sa.GENESIS), "SEG-076 C0 folds")
     if sa.PLAN.exists():
         check(bool(sa.verify_plan()), "frozen plan verifies")
+
+
+def test_hard_breakdown():
+    try:
+        import numpy as np
+    except Exception:
+        SKIPPED.append("hard_breakdown (numpy missing)")
+        return
+    cls = b"I" * 128 + b"D" * 128 + b"D" * 128 + b"D" * 128
+    tok = np.zeros((256, 8), dtype=np.uint8)
+    tok[128:192, 0] = 2                                              # cell 2: all words ordinary decodes
+    bd = sa.hard_breakdown(cls, tok, {1, 2, 3})
+    check(bd["hard"] == 2 and bd["near_only"] == 1 and bd["ordinary_only"] == 1, "hard = adjacent to code or >= 50 % ordinary decodes; cell 3 is easy")
 
 
 def test_audit_helpers():
@@ -122,8 +136,8 @@ def test_fit_equivalence():
 
 
 def row(**kw):
-    r = {"outside_image": False, "header_or_vector": False, "cpu_ordinary": True, "cpu_length": 4, "inside_other_instruction": False, "successor_matches_length": True,
-         "has_successor": True, "straight_line": True, "disasm": "short"}
+    r = {"outside_image": False, "header_or_vector": False, "cpu_ordinary": True, "cpu_length": 4, "inside_other_instruction": False, "kind": "straight", "corroborated": True,
+         "contradicted": False, "has_successor": True, "opcode_line": 4, "disasm": "short"}
     r.update(kw)
     return r
 
@@ -133,14 +147,32 @@ def test_diag_rules():
     check(f["per_fifth"][0] == 2448 and f["per_fifth"][4] == 3 and f["fifths_ge_min"] == 1 and f["first_window_fraction"] > 0.98, "Shove It!-shaped growth: one fifth")
     check(dg.fifth_distribution({"0": 10, "20": 10, "40": 10, "60": 10, "80": 10}, 180000)["fifths_ge_min"] == 5, "evenly spread discovery: five fifths")
     check(dg.classify_rejections([row() for _ in range(20)])["class"] == "DISASSEMBLER_LIMITATION", "corroborated by emulator successors")
-    check(dg.classify_rejections([row(successor_matches_length=False) for _ in range(20)])["class"] == "UNSOUND_EXECUTION_LABELS", "successor contradicts the CPU length")
+    check(dg.classify_rejections([row(corroborated=False, contradicted=True) for _ in range(20)])["class"] == "UNSOUND_EXECUTION_LABELS", "successor contradicts the CPU length")
     check(dg.classify_rejections([row(cpu_ordinary=False) for _ in range(20)])["class"] == "INSTRUCTION_FORM_MISMATCH", "CPU decoder not ordinary")
-    check(dg.classify_rejections([row(), row(header_or_vector=True)])["class"] == "ROM_MAPPING_ISSUE", "mapping")
-    check(dg.classify_rejections([row(has_successor=False, successor_matches_length=False) for _ in range(20)])["class"] == "UNRESOLVED", "no evidence is not a pass")
-    check(dg.classify_rejections([row(disasm="decoded") for _ in range(20)])["class"] == "UNRESOLVED", "disassembler decoded it: not a limitation")
-    check(dg.classify_rejections([row() for _ in range(19)] + [row(inside_other_instruction=True)])["class"] == "DISASSEMBLER_LIMITATION", "one overlap in twenty is not > 5 %")
-    check(dg.classify_rejections([row() for _ in range(18)] + [row(inside_other_instruction=True)] * 2)["class"] == "UNSOUND_EXECUTION_LABELS", "two overlaps in twenty are")
-    check(dg.classify_rejections([row() for _ in range(17)] + [row(has_successor=False, successor_matches_length=False)] * 3)["class"] == "UNRESOLVED", "85 % corroborated is below the 95 % bar")
+    check(dg.classify_rejections([row(), row(header_or_vector=True)])["class"] == "ROM_MAPPING_ISSUE", "mapping row")
+    check(dg.classify_rejections([row() for _ in range(20)], mapping_signals=1)["class"] == "ROM_MAPPING_ISSUE", "a skipped odd / out-of-image executed PC is a mapping signal")
+    check(dg.classify_rejections([row(corroborated=False, has_successor=False, kind="unverifiable") for _ in range(20)])["class"] == "UNRESOLVED", "no evidence is not a pass")
+    check(dg.classify_rejections([row() for _ in range(18)] + [row(corroborated=False, kind="unverifiable")] * 2)["class"] == "UNRESOLVED", "unverifiable starts count against (90 % < 95 %)")
+    check(dg.classify_rejections([row() for _ in range(19)] + [row(inside_other_instruction=True)])["class"] == "UNRESOLVED", "any overlap with an accepted instruction blocks the limitation finding")
+    check(dg.classify_rejections([row() for _ in range(18)] + [row(inside_other_instruction=True)] * 2)["class"] == "UNSOUND_EXECUTION_LABELS", "two overlaps in twenty are unsound")
+    mixed = [row(opcode_line=4) for _ in range(40)] + [row(opcode_line=6, corroborated=False, kind="unverifiable") for _ in range(2)] + [row(opcode_line=6) for _ in range(1)]
+    check(dg.classify_rejections(mixed)["class"] == "UNRESOLVED" and dg.classify_rejections(mixed)["opcode_lines_below_90pct"] == [6], "a weak opcode line blocks the aggregate claim")
+    # classify_pc: straight-line and direct branch corroboration
+    toks = bytes([2, 2, 1, 0, 0, 0, 0, 0] * 4)                       # status ordinary, length 2 words, control 0
+    r = dg.classify_pc(0x200, 0x1000, toks, {0x204}, [], ("short", "short"), 4)
+    check(r["cpu_length"] == 0 or True, "classify_pc runs")
+    toks2 = bytes([2, 2, 1, 0, 0, 0, 0, 0]) * 400
+    r = dg.classify_pc(0x200, 0x4000, toks2, {0x204}, [], ("short", "absent"), 4)
+    check(r["kind"] == "straight" and r["corroborated"] and r["disasm"] == "mixed", "straight-line corroboration")
+    r = dg.classify_pc(0x200, 0x4000, toks2, {0x208}, [], ("short", "short"), 4)
+    check(r["contradicted"] and not r["corroborated"], "successor != pc + length contradicts")
+    toks3 = bytes([2, 2, 1, 1, 0, 0, 0, 0]) * 400                    # control 1 = conditional direct branch
+    r = dg.classify_pc(0x200, 0x4000, toks3, {0x204, 0x300}, [], ("short", "short"), 6, 0x300)
+    check(r["kind"] == "direct" and r["corroborated"], "conditional branch: fall-through and target are both allowed")
+    r = dg.classify_pc(0x200, 0x4000, toks3, {0x310}, [], ("short", "short"), 6, 0x300)
+    check(r["contradicted"], "an unexplained successor contradicts")
+    r = dg.classify_pc(0x200, 0x4000, bytes([2, 2, 1, 4, 0, 0, 0, 0]) * 400, {0x300}, [], ("short", "short"), 4)
+    check(r["kind"] == "unverifiable" and not r["corroborated"] and not r["contradicted"], "dynamic jump is unverifiable")
     check(set(dg.CLASSES) >= {"DISASSEMBLER_LIMITATION", "UNRESOLVED"}, "closed vocabulary")
     res = {"gate_replay": {"identity_ok": True, "played_to_end": True, "no_perturbation": True, "determinism": {"a": True}, "distinct_ram_vram_states": 6, "digest_domains_missing": False,
                            "fifths_with_new_code": 1, "progression": False, "replay_ok": False},
@@ -167,6 +199,7 @@ def main():
     test_noise_and_response()
     test_independence_and_matching()
     test_arms_and_plan()
+    test_hard_breakdown()
     test_audit_helpers()
     test_fit_equivalence()
     test_diag_rules()
