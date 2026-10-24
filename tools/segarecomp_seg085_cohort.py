@@ -320,6 +320,18 @@ def mask_cells(classes: bytes, byte_offsets, cell: int = 128) -> tuple[bytes, in
     for c in cells:
         for x in range(c * cell, min((c + 1) * cell, len(out))):
             out[x] = ord("U")
+    i = 0
+    while i < len(classes):                              # an instruction straddling a masked cell is unknown as a whole, never a truncated start
+        if classes[i] == ord("I"):
+            j = i + 1
+            while j < len(classes) and classes[j] == ord("c"):
+                j += 1
+            if any(out[x] == ord("U") for x in range(i, j)):
+                for x in range(i, j):
+                    out[x] = ord("U")
+            i = j
+        else:
+            i += 1
     return bytes(out), len(cells)
 
 
