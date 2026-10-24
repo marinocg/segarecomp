@@ -1,0 +1,478 @@
+{
+ "classification": {
+  "ambitious_secondary": false,
+  "class": "QUALIFIED_USEFUL",
+  "code_yield_rule": true,
+  "novelty_rule": true
+ },
+ "consistency": {
+  "audit": {
+   "length_mismatch": 0,
+   "not_ordinary_decode": 0,
+   "odd_starts": 0,
+   "starts": 19389
+  },
+  "audit_ok": true,
+  "e_bytes": 71774,
+  "e_bytes_also_read_as_data": 2,
+  "e_bytes_in_dma_source": 0,
+  "ok": true,
+  "strong_data_conflict_fraction": 0.0
+ },
+ "control_quality": {
+  "note": "executed ROM PCs of the control divided by the TAS's; a low value means a shallow control (disclosed limitation)",
+  "p1only_baseline_pc_ratio": 0.555,
+  "primary_all_controller_pc_ratio": 0.555
+ },
+ "coverage": {
+  "cpu_seconds_per_extra_strong_cell": 2.887,
+  "executed_rom_pcs": {
+   "control": 9183,
+   "control_only": 962,
+   "control_p1only": 9183,
+   "tas": 16546,
+   "tas_only": 8325
+  },
+  "frames_per_extra_strong_cell": 224.83,
+  "growth_new_pcs_cumulative": {
+   "control": {
+    "100": 9183,
+    "25": 8173,
+    "50": 9054,
+    "75": 9075,
+    "total_new_pcs": 9183
+   },
+   "tas": {
+    "100": 16546,
+    "25": 10984,
+    "50": 13484,
+    "75": 14566,
+    "total_new_pcs": 16546
+   }
+  },
+  "indirect": {
+   "edges_tas": 147,
+   "extra_edges": 129,
+   "extra_targets": 125,
+   "targets_control": 33,
+   "targets_tas": 143
+  },
+  "strong_code_cells": {
+   "control": 475,
+   "control_p1only": 475,
+   "extra_vs_control": 326,
+   "extra_vs_control_p1only": 326,
+   "extra_weak_variant_cells": 285,
+   "relative_increase": 0.6863,
+   "tas": 772,
+   "useful_vs_p1only": true
+  },
+  "tiers": {
+   "ctl": {
+    "E": 38980,
+    "E_I": 9183,
+    "E_c": 29797,
+    "H": 512,
+    "M": 0,
+    "R": 13120,
+    "U": 1895296,
+    "W": 149244
+   },
+   "ctl_p1only": {
+    "E": 38980,
+    "E_I": 9183,
+    "E_c": 29797,
+    "H": 512,
+    "M": 0,
+    "R": 13120,
+    "U": 1895296,
+    "W": 149244
+   },
+   "tas": {
+    "E": 71774,
+    "E_I": 16546,
+    "E_c": 55228,
+    "H": 512,
+    "M": 0,
+    "R": 12944,
+    "U": 1219379,
+    "W": 792543
+   }
+  }
+ },
+ "cpu_hours": 1.154,
+ "data": {
+  "data_extents": {
+   "ctl": {
+    "DR": 20343,
+    "HW_HEADER": 1
+   },
+   "ctl_p1only": {
+    "DR": 20343,
+    "HW_HEADER": 1
+   },
+   "tas": {
+    "DR": 105454,
+    "HW_HEADER": 1
+   }
+  },
+  "extra_data": {
+   "extra_hard_negative_cells_strong": 0,
+   "extra_mixed_cells_strong": 0,
+   "strong_negative_cells_vs_control": 0,
+   "weak_negative_cells_vs_control": 3246
+  },
+  "overlap": {
+   "ambiguous_masked_extents": 0,
+   "cdl_exec_and_data_bytes": 2,
+   "e_bytes_also_read_as_data": 2,
+   "e_bytes_in_dma_source": 0,
+   "r_data_conflicts": 0,
+   "rom_bytes_read_as_data_fraction": 0.378
+  },
+  "strong": {
+   "ctl": {
+    "cells_masked": 15905,
+    "cells_mixed": 0,
+    "cells_neg": 4,
+    "cells_pos": 475,
+    "hard_negative_cells": 4,
+    "labelled_bytes": 39492,
+    "masked_fraction_bytes": 0.9812
+   },
+   "ctl_p1only": {
+    "cells_masked": 15905,
+    "cells_mixed": 0,
+    "cells_neg": 4,
+    "cells_pos": 475,
+    "hard_negative_cells": 4,
+    "labelled_bytes": 39492,
+    "masked_fraction_bytes": 0.9812
+   },
+   "tas": {
+    "cells_masked": 15608,
+    "cells_mixed": 0,
+    "cells_neg": 4,
+    "cells_pos": 772,
+    "hard_negative_cells": 4,
+    "labelled_bytes": 72286,
+    "masked_fraction_bytes": 0.9655
+   }
+  },
+  "strong_vs_weak": {
+   "labelled_bytes_lost_without_weak": 0.9176
+  },
+  "weak": {
+   "ctl": {
+    "cells_masked": 15050,
+    "cells_mixed": 29,
+    "cells_neg": 775,
+    "cells_pos": 559,
+    "hard_negative_cells": 680,
+    "labelled_bytes": 201856,
+    "masked_fraction_bytes": 0.9037
+   },
+   "ctl_p1only": {
+    "cells_masked": 15050,
+    "cells_mixed": 29,
+    "cells_neg": 775,
+    "cells_pos": 559,
+    "hard_negative_cells": 680,
+    "labelled_bytes": 201856,
+    "masked_fraction_bytes": 0.9037
+   },
+   "tas": {
+    "cells_masked": 11558,
+    "cells_mixed": 65,
+    "cells_neg": 4012,
+    "cells_pos": 814,
+    "hard_negative_cells": 3452,
+    "labelled_bytes": 877773,
+    "masked_fraction_bytes": 0.5814
+   }
+  }
+ },
+ "extra_cells_kept_private": false,
+ "frames": 73294,
+ "game": "shadowrun",
+ "gate_replay": {
+  "checkpoints": 6,
+  "determinism": {
+   "cdl": true,
+   "checkpoints": true,
+   "edges": true,
+   "pcs": true,
+   "reads": true
+  },
+  "digest_domains_missing": false,
+  "distinct_ram_vram_states": 6,
+  "fifths_with_new_code": 5,
+  "identity_ok": true,
+  "no_perturbation": true,
+  "played_to_end": true,
+  "progression": true,
+  "replay_ok": true,
+  "states": 6
+ },
+ "gate_tracing": {
+  "fidelity": {
+   "accepted_E_fraction": 1.0,
+   "cdl_exec_mismatch_fraction": 0.0,
+   "cdl_fixture_ok": true,
+   "controls_ok": [
+    true,
+    true
+   ],
+   "e_rejection_classes": {},
+   "e_rejections": 0,
+   "map_mismatch": 0,
+   "odd_pcs": 0,
+   "read_self_fetch_fraction": 0.0,
+   "reset_pc_executed": true,
+   "vbl_pc_executed": true
+  },
+  "tracing_ok": true
+ },
+ "image": {
+  "sha256": "92a614491fc3ea12a6df32459cce08b48574b7b814e244c07eb860dc5c6edb7e",
+  "size": 2097152
+ },
+ "isolation": {
+  "image_in_sealed_blind_manifest": false,
+  "image_sha256_in_registry": false,
+  "lineage_in_registry": false,
+  "ok": true
+ },
+ "lineage": "T83_SHADOWRUN",
+ "movie_sha256": "20a5ae31f6bf7b0b9da10f4334ee8650bfcb92e1b5bc7b330fe605661fb20a8b",
+ "novelty": {
+  "batch:bnr": {
+   "N_struct": 889,
+   "N_struct_not_in_control": 245,
+   "forms_absent_from_reference": 61,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 19,
+     "absent_from_reference_and_control": 13,
+     "reference": 1,
+     "target": 19
+    },
+    "cfg": {
+     "absent_from_reference": 828,
+     "absent_from_reference_and_control": 232,
+     "reference": 945,
+     "target": 985
+    },
+    "forms": {
+     "absent_from_reference": 61,
+     "absent_from_reference_and_control": 13,
+     "reference": 307,
+     "target": 246
+    },
+    "g3": {
+     "absent_from_reference": 6653,
+     "absent_from_reference_and_control": 2847,
+     "reference": 8807,
+     "target": 7210
+    },
+    "g4": {
+     "absent_from_reference": 9645,
+     "absent_from_reference_and_control": 4629,
+     "reference": 10934,
+     "target": 9801
+    }
+   },
+   "rare_forms_in_target": 32,
+   "relative_increase": {
+    "boundary": 19.0,
+    "cfg": 0.8762,
+    "forms": 0.1987,
+    "g3": 0.7554,
+    "g4": 0.8821
+   }
+  },
+  "batch:ewj2": {
+   "N_struct": 610,
+   "N_struct_not_in_control": 182,
+   "forms_absent_from_reference": 32,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 18,
+     "absent_from_reference_and_control": 13,
+     "reference": 12,
+     "target": 19
+    },
+    "cfg": {
+     "absent_from_reference": 578,
+     "absent_from_reference_and_control": 172,
+     "reference": 1043,
+     "target": 985
+    },
+    "forms": {
+     "absent_from_reference": 32,
+     "absent_from_reference_and_control": 10,
+     "reference": 266,
+     "target": 246
+    },
+    "g3": {
+     "absent_from_reference": 5937,
+     "absent_from_reference_and_control": 2594,
+     "reference": 7779,
+     "target": 7210
+    },
+    "g4": {
+     "absent_from_reference": 9190,
+     "absent_from_reference_and_control": 4445,
+     "reference": 10711,
+     "target": 9801
+    }
+   },
+   "rare_forms_in_target": 35,
+   "relative_increase": {
+    "boundary": 1.5,
+    "cfg": 0.5542,
+    "forms": 0.1203,
+    "g3": 0.7632,
+    "g4": 0.858
+   }
+  },
+  "batch:vm2": {
+   "N_struct": 739,
+   "N_struct_not_in_control": 220,
+   "forms_absent_from_reference": 35,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 19,
+     "absent_from_reference_and_control": 13,
+     "reference": 4,
+     "target": 19
+    },
+    "cfg": {
+     "absent_from_reference": 704,
+     "absent_from_reference_and_control": 212,
+     "reference": 1147,
+     "target": 985
+    },
+    "forms": {
+     "absent_from_reference": 35,
+     "absent_from_reference_and_control": 8,
+     "reference": 319,
+     "target": 246
+    },
+    "g3": {
+     "absent_from_reference": 6236,
+     "absent_from_reference_and_control": 2770,
+     "reference": 9480,
+     "target": 7210
+    },
+    "g4": {
+     "absent_from_reference": 9357,
+     "absent_from_reference_and_control": 4587,
+     "reference": 13222,
+     "target": 9801
+    }
+   },
+   "rare_forms_in_target": 45,
+   "relative_increase": {
+    "boundary": 4.75,
+    "cfg": 0.6138,
+    "forms": 0.1097,
+    "g3": 0.6578,
+    "g4": 0.7077
+   }
+  },
+  "registry": {
+   "N_struct": 346,
+   "N_struct_not_in_control": 106,
+   "forms_absent_from_reference": 6,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 18,
+     "absent_from_reference_and_control": 12,
+     "reference": 1205,
+     "target": 19
+    },
+    "cfg": {
+     "absent_from_reference": 340,
+     "absent_from_reference_and_control": 104,
+     "reference": 5476,
+     "target": 985
+    },
+    "forms": {
+     "absent_from_reference": 6,
+     "absent_from_reference_and_control": 2,
+     "reference": 507,
+     "target": 246
+    },
+    "g3": {
+     "absent_from_reference": 4457,
+     "absent_from_reference_and_control": 2043,
+     "reference": 87211,
+     "target": 7210
+    },
+    "g4": {
+     "absent_from_reference": 8599,
+     "absent_from_reference_and_control": 4238,
+     "reference": 168735,
+     "target": 9801
+    }
+   },
+   "rare_forms_in_target": 9,
+   "relative_increase": {
+    "boundary": 0.0149,
+    "cfg": 0.0621,
+    "forms": 0.0118,
+    "g3": 0.0511,
+    "g4": 0.051
+   }
+  },
+  "sonic2_seg080": {
+   "N_struct": 836,
+   "N_struct_not_in_control": 224,
+   "forms_absent_from_reference": 71,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 19,
+     "absent_from_reference_and_control": 13,
+     "reference": 0,
+     "target": 19
+    },
+    "cfg": {
+     "absent_from_reference": 765,
+     "absent_from_reference_and_control": 212,
+     "reference": 1140,
+     "target": 985
+    },
+    "forms": {
+     "absent_from_reference": 71,
+     "absent_from_reference_and_control": 12,
+     "reference": 285,
+     "target": 246
+    },
+    "g3": {
+     "absent_from_reference": 6461,
+     "absent_from_reference_and_control": 2773,
+     "reference": 11398,
+     "target": 7210
+    },
+    "g4": {
+     "absent_from_reference": 9583,
+     "absent_from_reference_and_control": 4598,
+     "reference": 16585,
+     "target": 9801
+    }
+   },
+   "rare_forms_in_target": 33,
+   "relative_increase": {
+    "boundary": null,
+    "cfg": 0.6711,
+    "forms": 0.2491,
+    "g3": 0.5669,
+    "g4": 0.5778
+   }
+  }
+ },
+ "plan_sha256": "228647dd43f4ba8b66fcfb2a6633a641a388b5a7052e1423cfb78c16cb2d4b61",
+ "registry_digest": "dab51db40680defd9f9f090b42f35a8b1125a8c3466c0a0b2f3081ad152d4830",
+ "title": "Shadowrun (USA)"
+}

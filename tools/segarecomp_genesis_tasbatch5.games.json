@@ -1,0 +1,122 @@
+{
+ "doraemon": {
+  "lineage": "T83_DORAEMON",
+  "movie": {
+   "Core": "Genplus-gx",
+   "OriginalEmuVersion": "Version 2.9.1",
+   "UseSixButton": false,
+   "emuVersion": "Version 2.9.1",
+   "frames": 41468,
+   "header_md5": "c78423b48acc46f4cb927665cd9f36c6",
+   "input_log_sha256": "f586db8497cc8615ba461de3b281f006ce45b3820d82c3a630d8057845821dbe",
+   "log_key_sha256": "128d1c5b9648308464a14609bbcd9bc03e2f1810146561b539e92a31472323d1",
+   "players_in_log": 2,
+   "sha256": "80243a97cb448781afccc39dc5cc6045bf08af04b80a6f1e70c4b3fa5001c7f3"
+  },
+  "order": 4,
+  "rom": {
+   "md5": "c78423b48acc46f4cb927665cd9f36c6",
+   "sha1": "aa92c04afd6b1916fcc6c64285d8dffe0b2b895f",
+   "sha256": "54aac77159188dc230b8b6130d5207eb4aadce92a7bf5bd63ee48230510d193a",
+   "size": 524288
+  },
+  "tasvideos": "8708S",
+  "title": "Doraemon - Yume Dorobou to 7 Nin no Gozans (Japan)"
+ },
+ "nhl94": {
+  "lineage": "T83_NHL94",
+  "movie": {
+   "Core": "Genplus-gx",
+   "OriginalEmuVersion": "Version 2.9.1",
+   "UseSixButton": false,
+   "emuVersion": "Version 2.9.1",
+   "frames": 16010,
+   "header_md5": "8356b3f0d091b9cc441e2ff8721ad063",
+   "input_log_sha256": "67ca30c4722a313bca70bfeabbca9cd501141bcabb0bcdb1a31b4d652b4fa4e3",
+   "log_key_sha256": "128d1c5b9648308464a14609bbcd9bc03e2f1810146561b539e92a31472323d1",
+   "players_in_log": 2,
+   "sha256": "2eca003d7f1a0d9cd8162941f4d23039b7442643e4595061422077f71878cac7"
+  },
+  "order": 2,
+  "rom": {
+   "md5": "8356b3f0d091b9cc441e2ff8721ad063",
+   "sha1": "7b1489ab501258133bf03e5f0892b77d04312580",
+   "sha256": "ccc0298c118d580863c877abd470c71186ef0a1b60f1e7c6ff1e5a38f48fd053",
+   "size": 1048576
+  },
+  "tasvideos": "9294S",
+  "title": "NHL '94 (USA, Europe)"
+ },
+ "shadowrun": {
+  "lineage": "T83_SHADOWRUN",
+  "movie": {
+   "Core": "Genplus-gx",
+   "OriginalEmuVersion": "Version 2.8",
+   "UseSixButton": true,
+   "emuVersion": "Version 2.9.1",
+   "frames": 73294,
+   "header_md5": "53090bcd67a0b6262f71ef7c5838c02b",
+   "input_log_sha256": "d161107a936493fd47cef4062a7aca200c41f250fabc4998294cfcf9ab77e05e",
+   "log_key_sha256": "4458addbf1ab76cea982be62cc22e34b7486d51f854bd02b09d0d3ecd7df9cfd",
+   "players_in_log": 2,
+   "sha256": "20a5ae31f6bf7b0b9da10f4334ee8650bfcb92e1b5bc7b330fe605661fb20a8b"
+  },
+  "order": 1,
+  "rom": {
+   "md5": "53090bcd67a0b6262f71ef7c5838c02b",
+   "sha1": "a06a281d39e845bff446a541b2ff48e1d93143c2",
+   "sha256": "92a614491fc3ea12a6df32459cce08b48574b7b814e244c07eb860dc5c6edb7e",
+   "size": 2097152
+  },
+  "tasvideos": "8945S",
+  "title": "Shadowrun (USA)"
+ },
+ "shoveit": {
+  "lineage": "T83_SHOVEIT",
+  "movie": {
+   "Core": "Genplus-gx",
+   "OriginalEmuVersion": "Version 2.8",
+   "UseSixButton": true,
+   "emuVersion": "Version 2.9.1",
+   "frames": 66331,
+   "header_md5": "2c6a960f66d1c87855424e6528d6eac6",
+   "input_log_sha256": "c8fa4ba48277847b8b878e7044b0f2b9ce582688f01c75f0ac9a4fa29ef8a4f3",
+   "log_key_sha256": "4458addbf1ab76cea982be62cc22e34b7486d51f854bd02b09d0d3ecd7df9cfd",
+   "players_in_log": 2,
+   "sha256": "514ab7cbd954e10377b330de42a652ab33e88786043bb1de94ff95f4f604f670"
+  },
+  "order": 3,
+  "rom": {
+   "md5": "2c6a960f66d1c87855424e6528d6eac6",
+   "sha1": "e4094c5a575f8d7325e7ec7425ecf022a6bf434e",
+   "sha256": "70caff1e855b370f275f97d3441aef31a78af8bcb5b006db91f0703af08f720c",
+   "size": 131072
+  },
+  "tasvideos": "5781M",
+  "title": "Shove It! ...The Warehouse Game (USA)"
+ },
+ "terminator": {
+  "lineage": "T83_TERMINATOR",
+  "movie": {
+   "Core": "Genplus-gx",
+   "OriginalEmuVersion": "Version 2.9.1",
+   "UseSixButton": false,
+   "emuVersion": "Version 2.9.1",
+   "frames": 17090,
+   "header_md5": "de0e4f5e3c45a42959defc1de97a79ff",
+   "input_log_sha256": "df64f779cee7b1dc8b05e2bef59745e4626a2f96f91131b1765862cf4b64638c",
+   "log_key_sha256": "128d1c5b9648308464a14609bbcd9bc03e2f1810146561b539e92a31472323d1",
+   "players_in_log": 2,
+   "sha256": "2f6d9c1ef0fe1a48a7e1b05047746ca4d53754c03ed30ff1dc7e6cdbe782c189"
+  },
+  "order": 5,
+  "rom": {
+   "md5": "de0e4f5e3c45a42959defc1de97a79ff",
+   "sha1": "2a1894e7f40b9001961f7bf1c70672351aa525f9",
+   "sha256": "89a6ce1eeb77495111c49a45944cc9bb1abfe7f60de366ae19f5118c03c742f9",
+   "size": 1048576
+  },
+  "tasvideos": "8956S",
+  "title": "Terminator, The (USA)"
+ }
+}

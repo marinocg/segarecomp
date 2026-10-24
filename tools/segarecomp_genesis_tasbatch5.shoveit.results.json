@@ -1,0 +1,565 @@
+{
+ "classification": {
+  "class": "REPLAY_INVALID"
+ },
+ "consistency": {
+  "audit": {
+   "length_mismatch": 0,
+   "not_ordinary_decode": 0,
+   "odd_starts": 0,
+   "starts": 2708
+  },
+  "audit_ok": true,
+  "e_bytes": 10294,
+  "e_bytes_also_read_as_data": 10294,
+  "e_bytes_in_dma_source": 0,
+  "ok": true,
+  "strong_data_conflict_fraction": 0.0
+ },
+ "control_quality": {
+  "note": "executed ROM PCs of the control divided by the TAS's; a low value means a shallow control (disclosed limitation)",
+  "p1only_baseline_pc_ratio": 1.0588,
+  "primary_all_controller_pc_ratio": 1.0588
+ },
+ "coverage": {
+  "cpu_seconds_per_extra_strong_cell": 141.66,
+  "executed_rom_pcs": {
+   "control": 2595,
+   "control_only": 447,
+   "control_p1only": 2595,
+   "tas": 2451,
+   "tas_only": 303
+  },
+  "frames_per_extra_strong_cell": 13266.2,
+  "growth_new_pcs_cumulative": {
+   "control": {
+    "100": 2595,
+    "25": 2548,
+    "50": 2593,
+    "75": 2593,
+    "total_new_pcs": 2595
+   },
+   "tas": {
+    "100": 2451,
+    "25": 2448,
+    "50": 2448,
+    "75": 2448,
+    "total_new_pcs": 2451
+   }
+  },
+  "indirect": {
+   "edges_tas": 12,
+   "extra_edges": 4,
+   "extra_targets": 4,
+   "targets_control": 16,
+   "targets_tas": 12
+  },
+  "strong_code_cells": {
+   "control": 122,
+   "control_p1only": 122,
+   "extra_vs_control": 5,
+   "extra_vs_control_p1only": 5,
+   "extra_weak_variant_cells": 5,
+   "relative_increase": 0.041,
+   "tas": 107,
+   "useful_vs_p1only": false
+  },
+  "tiers": {
+   "ctl": {
+    "E": 11182,
+    "E_I": 2595,
+    "E_c": 8587,
+    "H": 512,
+    "M": 0,
+    "R": 1032,
+    "U": 67373,
+    "W": 50973
+   },
+   "ctl_p1only": {
+    "E": 11182,
+    "E_I": 2595,
+    "E_c": 8587,
+    "H": 512,
+    "M": 0,
+    "R": 1032,
+    "U": 67373,
+    "W": 50973
+   },
+   "tas": {
+    "E": 10294,
+    "E_I": 2451,
+    "E_c": 7843,
+    "H": 512,
+    "M": 0,
+    "R": 1166,
+    "U": 59162,
+    "W": 59938
+   }
+  }
+ },
+ "cpu_hours": 0.846,
+ "data": {
+  "data_extents": {
+   "ctl": {
+    "DR": 2153,
+    "HW_HEADER": 1
+   },
+   "ctl_p1only": {
+    "DR": 2153,
+    "HW_HEADER": 1
+   },
+   "tas": {
+    "DR": 2193,
+    "HW_HEADER": 1
+   }
+  },
+  "extra_data": {
+   "extra_hard_negative_cells_strong": 0,
+   "extra_mixed_cells_strong": 0,
+   "strong_negative_cells_vs_control": 0,
+   "weak_negative_cells_vs_control": 52
+  },
+  "overlap": {
+   "ambiguous_masked_extents": 0,
+   "cdl_exec_and_data_bytes": 4902,
+   "e_bytes_also_read_as_data": 10294,
+   "e_bytes_in_dma_source": 0,
+   "r_data_conflicts": 0,
+   "rom_bytes_read_as_data_fraction": 0.9961
+  },
+  "strong": {
+   "ctl": {
+    "cells_masked": 898,
+    "cells_mixed": 0,
+    "cells_neg": 4,
+    "cells_pos": 122,
+    "hard_negative_cells": 4,
+    "labelled_bytes": 11694,
+    "masked_fraction_bytes": 0.9108
+   },
+   "ctl_p1only": {
+    "cells_masked": 898,
+    "cells_mixed": 0,
+    "cells_neg": 4,
+    "cells_pos": 122,
+    "hard_negative_cells": 4,
+    "labelled_bytes": 11694,
+    "masked_fraction_bytes": 0.9108
+   },
+   "tas": {
+    "cells_masked": 913,
+    "cells_mixed": 0,
+    "cells_neg": 4,
+    "cells_pos": 107,
+    "hard_negative_cells": 4,
+    "labelled_bytes": 10806,
+    "masked_fraction_bytes": 0.9176
+   }
+  },
+  "strong_vs_weak": {
+   "labelled_bytes_lost_without_weak": 0.8497
+  },
+  "weak": {
+   "ctl": {
+    "cells_masked": 546,
+    "cells_mixed": 29,
+    "cells_neg": 349,
+    "cells_pos": 129,
+    "hard_negative_cells": 305,
+    "labelled_bytes": 63699,
+    "masked_fraction_bytes": 0.514
+   },
+   "ctl_p1only": {
+    "cells_masked": 546,
+    "cells_mixed": 29,
+    "cells_neg": 349,
+    "cells_pos": 129,
+    "hard_negative_cells": 305,
+    "labelled_bytes": 63699,
+    "masked_fraction_bytes": 0.514
+   },
+   "tas": {
+    "cells_masked": 507,
+    "cells_mixed": 23,
+    "cells_neg": 399,
+    "cells_pos": 118,
+    "hard_negative_cells": 349,
+    "labelled_bytes": 71910,
+    "masked_fraction_bytes": 0.4514
+   }
+  }
+ },
+ "extra_cells_kept_private": false,
+ "frames": 66331,
+ "game": "shoveit",
+ "gate_replay": {
+  "checkpoints": 6,
+  "determinism": {
+   "cdl": true,
+   "checkpoints": true,
+   "edges": true,
+   "pcs": true,
+   "reads": true
+  },
+  "digest_domains_missing": false,
+  "distinct_ram_vram_states": 6,
+  "fifths_with_new_code": 1,
+  "identity_ok": true,
+  "no_perturbation": true,
+  "played_to_end": true,
+  "progression": false,
+  "replay_ok": false,
+  "states": 6
+ },
+ "gate_tracing": {
+  "fidelity": {
+   "accepted_E_fraction": 1.0,
+   "cdl_exec_mismatch_fraction": 0.0,
+   "cdl_fixture_ok": true,
+   "controls_ok": [
+    true,
+    true
+   ],
+   "e_rejection_classes": {},
+   "e_rejections": 0,
+   "map_mismatch": 0,
+   "odd_pcs": 0,
+   "read_self_fetch_fraction": 0.00012,
+   "reset_pc_executed": true,
+   "vbl_pc_executed": true
+  },
+  "tracing_ok": true
+ },
+ "image": {
+  "sha256": "70caff1e855b370f275f97d3441aef31a78af8bcb5b006db91f0703af08f720c",
+  "size": 131072
+ },
+ "isolation": {
+  "image_in_sealed_blind_manifest": false,
+  "image_sha256_in_registry": false,
+  "lineage_in_registry": false,
+  "ok": true
+ },
+ "lineage": "T83_SHOVEIT",
+ "movie_sha256": "514ab7cbd954e10377b330de42a652ab33e88786043bb1de94ff95f4f604f670",
+ "novelty": {
+  "batch:bnr": {
+   "N_struct": 176,
+   "N_struct_not_in_control": 7,
+   "forms_absent_from_reference": 16,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 10,
+     "absent_from_reference_and_control": 2,
+     "reference": 1,
+     "target": 10
+    },
+    "cfg": {
+     "absent_from_reference": 160,
+     "absent_from_reference_and_control": 7,
+     "reference": 945,
+     "target": 211
+    },
+    "forms": {
+     "absent_from_reference": 16,
+     "absent_from_reference_and_control": 0,
+     "reference": 307,
+     "target": 120
+    },
+    "g3": {
+     "absent_from_reference": 950,
+     "absent_from_reference_and_control": 55,
+     "reference": 8807,
+     "target": 1082
+    },
+    "g4": {
+     "absent_from_reference": 1260,
+     "absent_from_reference_and_control": 99,
+     "reference": 10934,
+     "target": 1311
+    }
+   },
+   "rare_forms_in_target": 15,
+   "relative_increase": {
+    "boundary": 10.0,
+    "cfg": 0.1693,
+    "forms": 0.0521,
+    "g3": 0.1079,
+    "g4": 0.1152
+   }
+  },
+  "batch:ewj2": {
+   "N_struct": 109,
+   "N_struct_not_in_control": 5,
+   "forms_absent_from_reference": 3,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 9,
+     "absent_from_reference_and_control": 1,
+     "reference": 12,
+     "target": 10
+    },
+    "cfg": {
+     "absent_from_reference": 106,
+     "absent_from_reference_and_control": 5,
+     "reference": 1043,
+     "target": 211
+    },
+    "forms": {
+     "absent_from_reference": 3,
+     "absent_from_reference_and_control": 0,
+     "reference": 266,
+     "target": 120
+    },
+    "g3": {
+     "absent_from_reference": 844,
+     "absent_from_reference_and_control": 50,
+     "reference": 7779,
+     "target": 1082
+    },
+    "g4": {
+     "absent_from_reference": 1203,
+     "absent_from_reference_and_control": 96,
+     "reference": 10711,
+     "target": 1311
+    }
+   },
+   "rare_forms_in_target": 10,
+   "relative_increase": {
+    "boundary": 0.75,
+    "cfg": 0.1016,
+    "forms": 0.0113,
+    "g3": 0.1085,
+    "g4": 0.1123
+   }
+  },
+  "batch:nhl94": {
+   "N_struct": 154,
+   "N_struct_not_in_control": 6,
+   "forms_absent_from_reference": 20,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 10,
+     "absent_from_reference_and_control": 2,
+     "reference": 38,
+     "target": 10
+    },
+    "cfg": {
+     "absent_from_reference": 134,
+     "absent_from_reference_and_control": 6,
+     "reference": 760,
+     "target": 211
+    },
+    "forms": {
+     "absent_from_reference": 20,
+     "absent_from_reference_and_control": 0,
+     "reference": 302,
+     "target": 120
+    },
+    "g3": {
+     "absent_from_reference": 995,
+     "absent_from_reference_and_control": 54,
+     "reference": 5900,
+     "target": 1082
+    },
+    "g4": {
+     "absent_from_reference": 1273,
+     "absent_from_reference_and_control": 99,
+     "reference": 6821,
+     "target": 1311
+    }
+   },
+   "rare_forms_in_target": 23,
+   "relative_increase": {
+    "boundary": 0.2632,
+    "cfg": 0.1763,
+    "forms": 0.0662,
+    "g3": 0.1686,
+    "g4": 0.1866
+   }
+  },
+  "batch:shadowrun": {
+   "N_struct": 97,
+   "N_struct_not_in_control": 4,
+   "forms_absent_from_reference": 4,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 9,
+     "absent_from_reference_and_control": 2,
+     "reference": 19,
+     "target": 10
+    },
+    "cfg": {
+     "absent_from_reference": 93,
+     "absent_from_reference_and_control": 4,
+     "reference": 985,
+     "target": 211
+    },
+    "forms": {
+     "absent_from_reference": 4,
+     "absent_from_reference_and_control": 0,
+     "reference": 246,
+     "target": 120
+    },
+    "g3": {
+     "absent_from_reference": 807,
+     "absent_from_reference_and_control": 48,
+     "reference": 7210,
+     "target": 1082
+    },
+    "g4": {
+     "absent_from_reference": 1199,
+     "absent_from_reference_and_control": 96,
+     "reference": 9801,
+     "target": 1311
+    }
+   },
+   "rare_forms_in_target": 16,
+   "relative_increase": {
+    "boundary": 0.4737,
+    "cfg": 0.0944,
+    "forms": 0.0163,
+    "g3": 0.1119,
+    "g4": 0.1223
+   }
+  },
+  "batch:vm2": {
+   "N_struct": 148,
+   "N_struct_not_in_control": 6,
+   "forms_absent_from_reference": 9,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 10,
+     "absent_from_reference_and_control": 2,
+     "reference": 4,
+     "target": 10
+    },
+    "cfg": {
+     "absent_from_reference": 139,
+     "absent_from_reference_and_control": 6,
+     "reference": 1147,
+     "target": 211
+    },
+    "forms": {
+     "absent_from_reference": 9,
+     "absent_from_reference_and_control": 0,
+     "reference": 319,
+     "target": 120
+    },
+    "g3": {
+     "absent_from_reference": 961,
+     "absent_from_reference_and_control": 54,
+     "reference": 9480,
+     "target": 1082
+    },
+    "g4": {
+     "absent_from_reference": 1262,
+     "absent_from_reference_and_control": 99,
+     "reference": 13222,
+     "target": 1311
+    }
+   },
+   "rare_forms_in_target": 14,
+   "relative_increase": {
+    "boundary": 2.5,
+    "cfg": 0.1212,
+    "forms": 0.0282,
+    "g3": 0.1014,
+    "g4": 0.0954
+   }
+  },
+  "registry": {
+   "N_struct": 50,
+   "N_struct_not_in_control": 3,
+   "forms_absent_from_reference": 1,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 9,
+     "absent_from_reference_and_control": 2,
+     "reference": 1205,
+     "target": 10
+    },
+    "cfg": {
+     "absent_from_reference": 49,
+     "absent_from_reference_and_control": 3,
+     "reference": 5476,
+     "target": 211
+    },
+    "forms": {
+     "absent_from_reference": 1,
+     "absent_from_reference_and_control": 0,
+     "reference": 507,
+     "target": 120
+    },
+    "g3": {
+     "absent_from_reference": 562,
+     "absent_from_reference_and_control": 42,
+     "reference": 87211,
+     "target": 1082
+    },
+    "g4": {
+     "absent_from_reference": 1054,
+     "absent_from_reference_and_control": 94,
+     "reference": 168735,
+     "target": 1311
+    }
+   },
+   "rare_forms_in_target": 1,
+   "relative_increase": {
+    "boundary": 0.0075,
+    "cfg": 0.0089,
+    "forms": 0.002,
+    "g3": 0.0064,
+    "g4": 0.0062
+   }
+  },
+  "sonic2_seg080": {
+   "N_struct": 153,
+   "N_struct_not_in_control": 7,
+   "forms_absent_from_reference": 17,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 10,
+     "absent_from_reference_and_control": 2,
+     "reference": 0,
+     "target": 10
+    },
+    "cfg": {
+     "absent_from_reference": 136,
+     "absent_from_reference_and_control": 7,
+     "reference": 1140,
+     "target": 211
+    },
+    "forms": {
+     "absent_from_reference": 17,
+     "absent_from_reference_and_control": 0,
+     "reference": 285,
+     "target": 120
+    },
+    "g3": {
+     "absent_from_reference": 920,
+     "absent_from_reference_and_control": 55,
+     "reference": 11398,
+     "target": 1082
+    },
+    "g4": {
+     "absent_from_reference": 1226,
+     "absent_from_reference_and_control": 98,
+     "reference": 16585,
+     "target": 1311
+    }
+   },
+   "rare_forms_in_target": 12,
+   "relative_increase": {
+    "boundary": null,
+    "cfg": 0.1193,
+    "forms": 0.0596,
+    "g3": 0.0807,
+    "g4": 0.0739
+   }
+  }
+ },
+ "plan_sha256": "228647dd43f4ba8b66fcfb2a6633a641a388b5a7052e1423cfb78c16cb2d4b61",
+ "registry_digest": "dab51db40680defd9f9f090b42f35a8b1125a8c3466c0a0b2f3081ad152d4830",
+ "title": "Shove It! ...The Warehouse Game (USA)"
+}
