@@ -1,0 +1,5411 @@
+{
+ "categories": {
+  "historical_genesis": {
+   "B35_missed_starts": 223,
+   "B50_missed_starts": 0,
+   "definition": "commercial-era Genesis, community reconstruction (build-identical rebuild; boundaries by the reconstruction authors)",
+   "label_audit": {
+    "contradiction_rate": 0.000127,
+    "direct_targets": 102021,
+    "inside_instruction": 1,
+    "on_labelled_data": 12,
+    "on_start": 102008,
+    "on_unknown": 0
+   },
+   "lineage_mean_er": 0.00905,
+   "lineage_mean_max_er": 0.045822,
+   "lineages": {
+    "D01": {
+     "B35_images_missing": 3,
+     "B35_missed_starts": 223,
+     "B35_oracle_infeasible_images": 2,
+     "B50_images_missing": 0,
+     "B50_missed_starts": 0,
+     "cells": 51295,
+     "density_labelled": 0.188797,
+     "images": 39,
+     "max_er": 0.153199,
+     "mean_er": 0.020065,
+     "mixed_share": 0.370236,
+     "positive_cells": 9683,
+     "starts": 288508
+    },
+    "D02": {
+     "B35_images_missing": 0,
+     "B35_missed_starts": 0,
+     "B35_oracle_infeasible_images": 0,
+     "B50_images_missing": 0,
+     "B50_missed_starts": 0,
+     "cells": 1024,
+     "density_labelled": 0.175781,
+     "images": 1,
+     "max_er": 0.001185,
+     "mean_er": 0.001185,
+     "mixed_share": 0.4,
+     "positive_cells": 180,
+     "starts": 5707
+    },
+    "D03": {
+     "B35_images_missing": 0,
+     "B35_missed_starts": 0,
+     "B35_oracle_infeasible_images": 0,
+     "B50_images_missing": 0,
+     "B50_missed_starts": 0,
+     "cells": 28672,
+     "density_labelled": 0.09864,
+     "images": 2,
+     "max_er": 0.028723,
+     "mean_er": 0.014771,
+     "mixed_share": 0.424328,
+     "positive_cells": 2828,
+     "starts": 93367
+    },
+    "D04": {
+     "B35_images_missing": 0,
+     "B35_missed_starts": 0,
+     "B35_oracle_infeasible_images": 0,
+     "B50_images_missing": 0,
+     "B50_missed_starts": 0,
+     "cells": 6144,
+     "density_labelled": 0.09196,
+     "images": 1,
+     "max_er": 0.000179,
+     "mean_er": 0.000179,
+     "mixed_share": 0.138053,
+     "positive_cells": 565,
+     "starts": 19261
+    }
+   },
+   "lineages_with_B35_miss": [
+    "D01"
+   ],
+   "lineages_with_B50_miss": [],
+   "n_images": 43,
+   "n_lineages": 4,
+   "positive_cell_share_of_corpus": 0.864935
+  },
+  "modern_sgdk": {
+   "B35_missed_starts": 7837,
+   "B50_missed_starts": 0,
+   "definition": "modern SGDK/GCC homebrew (author builds; GCC-listing / re-assembly truth)",
+   "label_audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 9269,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 7769,
+    "on_unknown": 1500
+   },
+   "lineage_mean_er": 0.139086,
+   "lineage_mean_max_er": 0.139086,
+   "lineages": {
+    "D05": {
+     "B35_images_missing": 0,
+     "B35_missed_starts": 0,
+     "B35_oracle_infeasible_images": 0,
+     "B50_images_missing": 0,
+     "B50_missed_starts": 0,
+     "cells": 1024,
+     "density_labelled": 0.12027,
+     "images": 1,
+     "max_er": 0.210695,
+     "mean_er": 0.210695,
+     "mixed_share": 0.0,
+     "positive_cells": 89,
+     "starts": 3388
+    },
+    "D06": {
+     "B35_images_missing": 0,
+     "B35_missed_starts": 0,
+     "B35_oracle_infeasible_images": 0,
+     "B50_images_missing": 0,
+     "B50_missed_starts": 0,
+     "cells": 3072,
+     "density_labelled": 0.085225,
+     "images": 1,
+     "max_er": 0.10007,
+     "mean_er": 0.10007,
+     "mixed_share": 0.018692,
+     "positive_cells": 214,
+     "starts": 6750
+    },
+    "D07": {
+     "B35_images_missing": 1,
+     "B35_missed_starts": 7837,
+     "B35_oracle_infeasible_images": 0,
+     "B50_images_missing": 0,
+     "B50_missed_starts": 0,
+     "cells": 2048,
+     "density_labelled": 0.406459,
+     "images": 1,
+     "max_er": 0.193338,
+     "mean_er": 0.193338,
+     "mixed_share": 0.031484,
+     "positive_cells": 667,
+     "starts": 25246
+    },
+    "D09": {
+     "B35_images_missing": 0,
+     "B35_missed_starts": 0,
+     "B35_oracle_infeasible_images": 0,
+     "B50_images_missing": 0,
+     "B50_missed_starts": 0,
+     "cells": 1024,
+     "density_labelled": 0.050847,
+     "images": 1,
+     "max_er": 0.135,
+     "mean_er": 0.135,
+     "mixed_share": 0.041667,
+     "positive_cells": 24,
+     "starts": 742
+    },
+    "D10": {
+     "B35_images_missing": 0,
+     "B35_missed_starts": 0,
+     "B35_oracle_infeasible_images": 0,
+     "B50_images_missing": 0,
+     "B50_missed_starts": 0,
+     "cells": 3072,
+     "density_labelled": 0.110633,
+     "images": 1,
+     "max_er": 0.102546,
+     "mean_er": 0.102546,
+     "mixed_share": 0.021201,
+     "positive_cells": 283,
+     "starts": 10592
+    },
+    "D11": {
+     "B35_images_missing": 0,
+     "B35_missed_starts": 0,
+     "B35_oracle_infeasible_images": 0,
+     "B50_images_missing": 0,
+     "B50_missed_starts": 0,
+     "cells": 2048,
+     "density_labelled": 0.122519,
+     "images": 1,
+     "max_er": 0.190476,
+     "mean_er": 0.190476,
+     "mixed_share": 0.022346,
+     "positive_cells": 179,
+     "starts": 6343
+    },
+    "D12": {
+     "B35_images_missing": 0,
+     "B35_missed_starts": 0,
+     "B35_oracle_infeasible_images": 0,
+     "B50_images_missing": 0,
+     "B50_missed_starts": 0,
+     "cells": 2048,
+     "density_labelled": 0.181501,
+     "images": 1,
+     "max_er": 0.041475,
+     "mean_er": 0.041475,
+     "mixed_share": 0.012821,
+     "positive_cells": 312,
+     "starts": 11010
+    }
+   },
+   "lineages_with_B35_miss": [
+    "D07"
+   ],
+   "lineages_with_B50_miss": [],
+   "n_images": 7,
+   "n_lineages": 7,
+   "positive_cell_share_of_corpus": 0.11536
+  },
+  "xplat_modern": {
+   "B35_missed_starts": 3383,
+   "B50_missed_starts": 2055,
+   "definition": "cross-platform M68K, modern toolchain or modern authored source",
+   "label_audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 1037,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 994,
+    "on_unknown": 43
+   },
+   "lineage_mean_er": 0.05,
+   "lineage_mean_max_er": 0.05,
+   "lineages": {
+    "amiga-realtime3d": {
+     "B35_images_missing": 1,
+     "B35_missed_starts": 514,
+     "B35_oracle_infeasible_images": 1,
+     "B50_images_missing": 0,
+     "B50_missed_starts": 0,
+     "cells": 131,
+     "density_labelled": 0.458015,
+     "images": 1,
+     "max_er": 0.0,
+     "mean_er": 0.0,
+     "mixed_share": 0.066667,
+     "positive_cells": 60,
+     "starts": 2349
+    },
+    "toslibc": {
+     "B35_images_missing": 2,
+     "B35_missed_starts": 2869,
+     "B35_oracle_infeasible_images": 2,
+     "B50_images_missing": 2,
+     "B50_missed_starts": 2055,
+     "cells": 150,
+     "density_labelled": 0.970149,
+     "images": 2,
+     "max_er": 0.1,
+     "mean_er": 0.1,
+     "mixed_share": 0.069231,
+     "positive_cells": 130,
+     "starts": 4783
+    }
+   },
+   "lineages_with_B35_miss": [
+    "amiga-realtime3d",
+    "toslibc"
+   ],
+   "lineages_with_B50_miss": [
+    "toslibc"
+   ],
+   "n_images": 3,
+   "n_lineages": 2,
+   "positive_cell_share_of_corpus": 0.012397
+  },
+  "xplat_period": {
+   "B35_missed_starts": 2053,
+   "B50_missed_starts": 937,
+   "definition": "cross-platform M68K, period toolchain or period source",
+   "label_audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 927,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 927,
+    "on_unknown": 0
+   },
+   "lineage_mean_er": 0.0,
+   "lineage_mean_max_er": 0.0,
+   "lineages": {
+    "BattleIsleEditor": {
+     "B35_images_missing": 1,
+     "B35_missed_starts": 2053,
+     "B35_oracle_infeasible_images": 1,
+     "B50_images_missing": 1,
+     "B50_missed_starts": 937,
+     "cells": 180,
+     "density_labelled": 0.625698,
+     "images": 2,
+     "max_er": 0.0,
+     "mean_er": 0.0,
+     "mixed_share": 0.017857,
+     "positive_cells": 112,
+     "starts": 4860
+    }
+   },
+   "lineages_with_B35_miss": [
+    "BattleIsleEditor"
+   ],
+   "lineages_with_B50_miss": [
+    "BattleIsleEditor"
+   ],
+   "n_images": 2,
+   "n_lineages": 1,
+   "positive_cell_share_of_corpus": 0.007308
+  }
+ },
+ "d07": {
+  "d07_B35_missed_starts": 7837,
+  "share_of_all_B35_missed_starts": 0.580691,
+  "total_B35_missed_starts": 13496
+ },
+ "images": [
+  {
+   "B35": {
+    "masked_admitted": 2,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 612,
+    "oracle_feasible": true,
+    "retained": 0.350098
+   },
+   "B50": {
+    "masked_admitted": 2,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 1226,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.200195,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 5573,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 5573,
+    "on_unknown": 0
+   },
+   "auroc": 0.999765,
+   "category": "historical_genesis",
+   "cells": 4096,
+   "density_all_cells": 0.200195,
+   "density_labelled": 0.200293,
+   "dynamic_control_cells": 264,
+   "er": 0.061661,
+   "frf": 0.249512,
+   "id": "s1",
+   "lineage": "D01",
+   "masked_cells": 2,
+   "masked_fraction": 0.000488,
+   "mixed_share": 0.452439,
+   "negative_cells": 3274,
+   "oracle_fraction": 0.200195,
+   "oracle_fraction_if_masked_is_code": 0.200684,
+   "positive_cells": 820,
+   "positive_cells_mixed_with_data": 371,
+   "positive_cells_near_dynamic_control": 540,
+   "residual_frf": 0.249512,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 4.517612,
+     "p50": -11.428314,
+     "p95": -8.727397,
+     "p99": -3.164607
+    },
+    "positive_non_seed": {
+     "p00": -9.079158,
+     "p01": -1.428062,
+     "p05": 4.016077,
+     "p50": 10.765741
+    },
+    "worst_positive_rank_fraction": 0.249268
+   },
+   "seed_cells": 58,
+   "seed_positive_share": 0.070732,
+   "short_positive_cells": 44,
+   "size": 524288,
+   "starts": 24180,
+   "starts_unreached_by_direct_flow": 0.78048,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 1210,
+    "oracle_feasible": true,
+    "retained": 0.350098
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 2438,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.200806,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 11732,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 11732,
+    "on_unknown": 0
+   },
+   "auroc": 0.999664,
+   "category": "historical_genesis",
+   "cells": 8192,
+   "density_all_cells": 0.202393,
+   "density_labelled": 0.202393,
+   "dynamic_control_cells": 440,
+   "er": 0.153199,
+   "frf": 0.324585,
+   "id": "s2",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.44994,
+   "negative_cells": 6534,
+   "oracle_fraction": 0.202393,
+   "oracle_fraction_if_masked_is_code": 0.202393,
+   "positive_cells": 1658,
+   "positive_cells_mixed_with_data": 746,
+   "positive_cells_near_dynamic_control": 1006,
+   "residual_frf": 0.324585,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 4.467943,
+     "p50": -11.411697,
+     "p95": -8.440309,
+     "p99": -4.608645
+    },
+    "positive_non_seed": {
+     "p00": -10.339092,
+     "p01": -3.591417,
+     "p05": 5.441655,
+     "p50": 10.681109
+    },
+    "worst_positive_rank_fraction": 0.324463
+   },
+   "seed_cells": 38,
+   "seed_positive_share": 0.022919,
+   "short_positive_cells": 85,
+   "size": 1048576,
+   "starts": 48733,
+   "starts_unreached_by_direct_flow": 0.842325,
+   "tail25": {
+    "cells": 1,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 1,
+    "near_dynamic_control": 0,
+    "short_run": 1,
+    "unreached_by_direct_flow": 1
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 0,
+    "oracle_feasible": true,
+    "retained": 1.0
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 0,
+    "oracle_feasible": true,
+    "retained": 1.0
+   },
+   "adapt_density_estimate": 1.0,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 38,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 38,
+    "on_unknown": 0
+   },
+   "auroc": null,
+   "category": "historical_genesis",
+   "cells": 5,
+   "density_all_cells": 1.0,
+   "density_labelled": 1.0,
+   "dynamic_control_cells": 0,
+   "er": null,
+   "frf": 1.0,
+   "id": "scd/BADEND.BIN",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.2,
+   "negative_cells": 0,
+   "oracle_fraction": 1.0,
+   "oracle_fraction_if_masked_is_code": 1.0,
+   "positive_cells": 5,
+   "positive_cells_mixed_with_data": 1,
+   "positive_cells_near_dynamic_control": 0,
+   "residual_frf": 0.0,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": null,
+     "p50": null,
+     "p95": null,
+     "p99": null
+    },
+    "positive_non_seed": {
+     "p00": null,
+     "p01": null,
+     "p05": null,
+     "p50": null
+    },
+    "worst_positive_rank_fraction": 0.0
+   },
+   "seed_cells": 5,
+   "seed_positive_share": 1.0,
+   "short_positive_cells": 0,
+   "size": 640,
+   "starts": 140,
+   "starts_unreached_by_direct_flow": 0.035714,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 1,
+    "oracle_feasible": true,
+    "retained": 0.360465
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 13,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.348837,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 194,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 194,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 86,
+   "density_all_cells": 0.348837,
+   "density_labelled": 0.348837,
+   "dynamic_control_cells": 5,
+   "er": 0.0,
+   "frf": 0.348837,
+   "id": "scd/BRAMINIT.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.4,
+   "negative_cells": 56,
+   "oracle_fraction": 0.348837,
+   "oracle_fraction_if_masked_is_code": 0.348837,
+   "positive_cells": 30,
+   "positive_cells_mixed_with_data": 12,
+   "positive_cells_near_dynamic_control": 18,
+   "residual_frf": 0.348837,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -4.069318,
+     "p50": -11.472468,
+     "p95": -6.313612,
+     "p99": -4.631398
+    },
+    "positive_non_seed": {
+     "p00": 2.607047,
+     "p01": 2.607047,
+     "p05": 2.607047,
+     "p50": 7.338211
+    },
+    "worst_positive_rank_fraction": 0.337209
+   },
+   "seed_cells": 24,
+   "seed_positive_share": 0.8,
+   "short_positive_cells": 1,
+   "size": 10998,
+   "starts": 956,
+   "starts_unreached_by_direct_flow": 0.420502,
+   "tail25": {
+    "cells": 3,
+    "executable_boundary_adjacent": 3,
+    "mixed_with_data": 1,
+    "near_dynamic_control": 2,
+    "short_run": 0,
+    "unreached_by_direct_flow": 3
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 0,
+    "oracle_feasible": true,
+    "retained": 0.380952
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 3,
+    "oracle_feasible": true,
+    "retained": 0.52381
+   },
+   "adapt_density_estimate": 0.380952,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 37,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 37,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 21,
+   "density_all_cells": 0.380952,
+   "density_labelled": 0.380952,
+   "dynamic_control_cells": 1,
+   "er": 0.0,
+   "frf": 0.380952,
+   "id": "scd/BRAMSUB.BIN",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.25,
+   "negative_cells": 13,
+   "oracle_fraction": 0.380952,
+   "oracle_fraction_if_masked_is_code": 0.380952,
+   "positive_cells": 8,
+   "positive_cells_mixed_with_data": 2,
+   "positive_cells_near_dynamic_control": 5,
+   "residual_frf": 0.380952,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -5.135281,
+     "p50": -11.472468,
+     "p95": -10.473367,
+     "p99": -5.135281
+    },
+    "positive_non_seed": {
+     "p00": 7.285596,
+     "p01": 7.285596,
+     "p05": 7.285596,
+     "p50": 8.445356
+    },
+    "worst_positive_rank_fraction": 0.333333
+   },
+   "seed_cells": 4,
+   "seed_positive_share": 0.5,
+   "short_positive_cells": 0,
+   "size": 2592,
+   "starts": 251,
+   "starts_unreached_by_direct_flow": 0.737052,
+   "tail25": {
+    "cells": 3,
+    "executable_boundary_adjacent": 3,
+    "mixed_with_data": 1,
+    "near_dynamic_control": 2,
+    "short_run": 0,
+    "unreached_by_direct_flow": 3
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 303,
+    "oracle_feasible": true,
+    "retained": 0.350098
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 610,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.199219,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 2632,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 2632,
+    "on_unknown": 0
+   },
+   "auroc": 0.999505,
+   "category": "historical_genesis",
+   "cells": 2048,
+   "density_all_cells": 0.202148,
+   "density_labelled": 0.202148,
+   "dynamic_control_cells": 89,
+   "er": 0.046512,
+   "frf": 0.239258,
+   "id": "scd/DEMO11A.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.379227,
+   "negative_cells": 1634,
+   "oracle_fraction": 0.202148,
+   "oracle_fraction_if_masked_is_code": 0.202148,
+   "positive_cells": 414,
+   "positive_cells_mixed_with_data": 157,
+   "positive_cells_near_dynamic_control": 216,
+   "residual_frf": 0.239258,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 7.425175,
+     "p50": -11.259602,
+     "p95": -6.610016,
+     "p99": -3.734448
+    },
+    "positive_non_seed": {
+     "p00": -6.39189,
+     "p01": -4.266991,
+     "p05": 4.198821,
+     "p50": 10.837005
+    },
+    "worst_positive_rank_fraction": 0.23877
+   },
+   "seed_cells": 11,
+   "seed_positive_share": 0.02657,
+   "short_positive_cells": 17,
+   "size": 262144,
+   "starts": 12639,
+   "starts_unreached_by_direct_flow": 0.988132,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 30,
+    "oracle_feasible": true,
+    "retained": 0.353846
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 49,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.123077,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 141,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 141,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 130,
+   "density_all_cells": 0.123077,
+   "density_labelled": 0.123077,
+   "dynamic_control_cells": 5,
+   "er": 0.0,
+   "frf": 0.123077,
+   "id": "scd/DUMMY0.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.25,
+   "negative_cells": 114,
+   "oracle_fraction": 0.123077,
+   "oracle_fraction_if_masked_is_code": 0.123077,
+   "positive_cells": 16,
+   "positive_cells_mixed_with_data": 4,
+   "positive_cells_near_dynamic_control": 6,
+   "residual_frf": 0.1,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -5.700189,
+     "p50": -11.472468,
+     "p95": -6.994273,
+     "p99": -5.71565
+    },
+    "positive_non_seed": {
+     "p00": 9.609144,
+     "p01": 9.609144,
+     "p05": 9.609144,
+     "p50": 10.046654
+    },
+    "worst_positive_rank_fraction": 0.092308
+   },
+   "seed_cells": 13,
+   "seed_positive_share": 0.8125,
+   "short_positive_cells": 0,
+   "size": 16640,
+   "starts": 624,
+   "starts_unreached_by_direct_flow": 0.55609,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 29,
+    "oracle_feasible": true,
+    "retained": 0.353846
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 48,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.130769,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 141,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 141,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 130,
+   "density_all_cells": 0.130769,
+   "density_labelled": 0.130769,
+   "dynamic_control_cells": 4,
+   "er": 0.0,
+   "frf": 0.130769,
+   "id": "scd/DUMMY1.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.235294,
+   "negative_cells": 113,
+   "oracle_fraction": 0.130769,
+   "oracle_fraction_if_masked_is_code": 0.130769,
+   "positive_cells": 17,
+   "positive_cells_mixed_with_data": 4,
+   "positive_cells_near_dynamic_control": 7,
+   "residual_frf": 0.130769,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -4.973776,
+     "p50": -11.472468,
+     "p95": -8.667878,
+     "p99": -6.151428
+    },
+    "positive_non_seed": {
+     "p00": 3.124681,
+     "p01": 3.124681,
+     "p05": 3.124681,
+     "p50": 9.820477
+    },
+    "worst_positive_rank_fraction": 0.123077
+   },
+   "seed_cells": 13,
+   "seed_positive_share": 0.764706,
+   "short_positive_cells": 1,
+   "size": 16640,
+   "starts": 624,
+   "starts_unreached_by_direct_flow": 0.55609,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 30,
+    "oracle_feasible": true,
+    "retained": 0.353846
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 49,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.123077,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 141,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 141,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 130,
+   "density_all_cells": 0.123077,
+   "density_labelled": 0.123077,
+   "dynamic_control_cells": 4,
+   "er": 0.0,
+   "frf": 0.123077,
+   "id": "scd/DUMMY2.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.3125,
+   "negative_cells": 114,
+   "oracle_fraction": 0.123077,
+   "oracle_fraction_if_masked_is_code": 0.123077,
+   "positive_cells": 16,
+   "positive_cells_mixed_with_data": 5,
+   "positive_cells_near_dynamic_control": 7,
+   "residual_frf": 0.1,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -5.23504,
+     "p50": -11.472468,
+     "p95": -7.19621,
+     "p99": -6.26467
+    },
+    "positive_non_seed": {
+     "p00": 9.639015,
+     "p01": 9.639015,
+     "p05": 9.639015,
+     "p50": 10.096498
+    },
+    "worst_positive_rank_fraction": 0.092308
+   },
+   "seed_cells": 13,
+   "seed_positive_share": 0.8125,
+   "short_positive_cells": 0,
+   "size": 16640,
+   "starts": 624,
+   "starts_unreached_by_direct_flow": 0.55609,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 29,
+    "oracle_feasible": true,
+    "retained": 0.353846
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 48,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.130769,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 141,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 141,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 130,
+   "density_all_cells": 0.130769,
+   "density_labelled": 0.130769,
+   "dynamic_control_cells": 4,
+   "er": 0.0,
+   "frf": 0.130769,
+   "id": "scd/DUMMY3.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.235294,
+   "negative_cells": 113,
+   "oracle_fraction": 0.130769,
+   "oracle_fraction_if_masked_is_code": 0.130769,
+   "positive_cells": 17,
+   "positive_cells_mixed_with_data": 4,
+   "positive_cells_near_dynamic_control": 7,
+   "residual_frf": 0.130769,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -5.736056,
+     "p50": -11.472468,
+     "p95": -7.384066,
+     "p99": -6.154001
+    },
+    "positive_non_seed": {
+     "p00": 1.190738,
+     "p01": 1.190738,
+     "p05": 1.190738,
+     "p50": 10.00477
+    },
+    "worst_positive_rank_fraction": 0.123077
+   },
+   "seed_cells": 13,
+   "seed_positive_share": 0.764706,
+   "short_positive_cells": 1,
+   "size": 16640,
+   "starts": 624,
+   "starts_unreached_by_direct_flow": 0.55609,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 27,
+    "oracle_feasible": true,
+    "retained": 0.353846
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 46,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.138462,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 145,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 145,
+    "on_unknown": 0
+   },
+   "auroc": 0.999526,
+   "category": "historical_genesis",
+   "cells": 130,
+   "density_all_cells": 0.146154,
+   "density_labelled": 0.146154,
+   "dynamic_control_cells": 2,
+   "er": 0.009009,
+   "frf": 0.153846,
+   "id": "scd/DUMMY4.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.315789,
+   "negative_cells": 111,
+   "oracle_fraction": 0.146154,
+   "oracle_fraction_if_masked_is_code": 0.146154,
+   "positive_cells": 19,
+   "positive_cells_mixed_with_data": 6,
+   "positive_cells_near_dynamic_control": 7,
+   "residual_frf": 0.153846,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -2.707682,
+     "p50": -11.472468,
+     "p95": -7.267654,
+     "p99": -5.429826
+    },
+    "positive_non_seed": {
+     "p00": -4.224801,
+     "p01": -4.224801,
+     "p05": -4.224801,
+     "p50": 9.335482
+    },
+    "worst_positive_rank_fraction": 0.146154
+   },
+   "seed_cells": 13,
+   "seed_positive_share": 0.684211,
+   "short_positive_cells": 3,
+   "size": 16640,
+   "starts": 653,
+   "starts_unreached_by_direct_flow": 0.519142,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 22,
+    "oracle_feasible": true,
+    "retained": 0.353846
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 41,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.184615,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 202,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 202,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 130,
+   "density_all_cells": 0.184615,
+   "density_labelled": 0.184615,
+   "dynamic_control_cells": 3,
+   "er": 0.0,
+   "frf": 0.184615,
+   "id": "scd/DUMMY5.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.375,
+   "negative_cells": 106,
+   "oracle_fraction": 0.184615,
+   "oracle_fraction_if_masked_is_code": 0.184615,
+   "positive_cells": 24,
+   "positive_cells_mixed_with_data": 9,
+   "positive_cells_near_dynamic_control": 11,
+   "residual_frf": 0.184615,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -1.475342,
+     "p50": -11.472468,
+     "p95": -7.24937,
+     "p99": -3.461683
+    },
+    "positive_non_seed": {
+     "p00": 3.354661,
+     "p01": 3.354661,
+     "p05": 3.354661,
+     "p50": 8.961867
+    },
+    "worst_positive_rank_fraction": 0.176923
+   },
+   "seed_cells": 19,
+   "seed_positive_share": 0.791667,
+   "short_positive_cells": 0,
+   "size": 16640,
+   "starts": 814,
+   "starts_unreached_by_direct_flow": 0.443489,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 0,
+    "oracle_feasible": true,
+    "retained": 1.0
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 0,
+    "oracle_feasible": true,
+    "retained": 1.0
+   },
+   "adapt_density_estimate": 1.0,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 38,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 38,
+    "on_unknown": 0
+   },
+   "auroc": null,
+   "category": "historical_genesis",
+   "cells": 5,
+   "density_all_cells": 1.0,
+   "density_labelled": 1.0,
+   "dynamic_control_cells": 0,
+   "er": null,
+   "frf": 1.0,
+   "id": "scd/GOODEND.BIN",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.2,
+   "negative_cells": 0,
+   "oracle_fraction": 1.0,
+   "oracle_fraction_if_masked_is_code": 1.0,
+   "positive_cells": 5,
+   "positive_cells_mixed_with_data": 1,
+   "positive_cells_near_dynamic_control": 0,
+   "residual_frf": 0.0,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": null,
+     "p50": null,
+     "p95": null,
+     "p99": null
+    },
+    "positive_non_seed": {
+     "p00": null,
+     "p01": null,
+     "p05": null,
+     "p50": null
+    },
+    "worst_positive_rank_fraction": 0.0
+   },
+   "seed_cells": 5,
+   "seed_positive_share": 1.0,
+   "short_positive_cells": 0,
+   "size": 640,
+   "starts": 140,
+   "starts_unreached_by_direct_flow": 0.035714,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 17,
+    "oracle_feasible": true,
+    "retained": 0.355932
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 26,
+    "oracle_feasible": true,
+    "retained": 0.508475
+   },
+   "adapt_density_estimate": 0.067797,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 11,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 11,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 59,
+   "density_all_cells": 0.067797,
+   "density_labelled": 0.067797,
+   "dynamic_control_cells": 1,
+   "er": 0.0,
+   "frf": 0.067797,
+   "id": "scd/MDINIT.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.5,
+   "negative_cells": 55,
+   "oracle_fraction": 0.067797,
+   "oracle_fraction_if_masked_is_code": 0.067797,
+   "positive_cells": 4,
+   "positive_cells_mixed_with_data": 2,
+   "positive_cells_near_dynamic_control": 0,
+   "residual_frf": 0.0,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -6.075634,
+     "p50": -11.14663,
+     "p95": -7.767319,
+     "p99": -7.590499
+    },
+    "positive_non_seed": {
+     "p00": null,
+     "p01": null,
+     "p05": null,
+     "p50": null
+    },
+    "worst_positive_rank_fraction": 0.0
+   },
+   "seed_cells": 4,
+   "seed_positive_share": 1.0,
+   "short_positive_cells": 0,
+   "size": 7514,
+   "starts": 81,
+   "starts_unreached_by_direct_flow": 0.246914,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 30,
+    "oracle_feasible": true,
+    "retained": 0.353846
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 49,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.123077,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 141,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 141,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 130,
+   "density_all_cells": 0.123077,
+   "density_labelled": 0.123077,
+   "dynamic_control_cells": 2,
+   "er": 0.0,
+   "frf": 0.123077,
+   "id": "scd/NISI.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.25,
+   "negative_cells": 114,
+   "oracle_fraction": 0.123077,
+   "oracle_fraction_if_masked_is_code": 0.123077,
+   "positive_cells": 16,
+   "positive_cells_mixed_with_data": 4,
+   "positive_cells_near_dynamic_control": 7,
+   "residual_frf": 0.092308,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -4.254563,
+     "p50": -11.472468,
+     "p95": -8.061475,
+     "p99": -5.800049
+    },
+    "positive_non_seed": {
+     "p00": 9.799072,
+     "p01": 9.799072,
+     "p05": 9.799072,
+     "p50": 9.888654
+    },
+    "worst_positive_rank_fraction": 0.084615
+   },
+   "seed_cells": 13,
+   "seed_positive_share": 0.8125,
+   "short_positive_cells": 0,
+   "size": 16640,
+   "starts": 624,
+   "starts_unreached_by_direct_flow": 0.55609,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 14,
+    "oracle_feasible": true,
+    "retained": 0.35443
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 26,
+    "oracle_feasible": true,
+    "retained": 0.506329
+   },
+   "adapt_density_estimate": 0.177215,
+   "audit": {
+    "contradiction_rate": 0.013514,
+    "direct_targets": 74,
+    "inside_instruction": 1,
+    "on_labelled_data": 0,
+    "on_start": 73,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 79,
+   "density_all_cells": 0.177215,
+   "density_labelled": 0.177215,
+   "dynamic_control_cells": 2,
+   "er": 0.0,
+   "frf": 0.177215,
+   "id": "scd/OPEN_M.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.428571,
+   "negative_cells": 65,
+   "oracle_fraction": 0.177215,
+   "oracle_fraction_if_masked_is_code": 0.177215,
+   "positive_cells": 14,
+   "positive_cells_mixed_with_data": 6,
+   "positive_cells_near_dynamic_control": 8,
+   "residual_frf": 0.177215,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -4.477531,
+     "p50": -11.22498,
+     "p95": -6.48447,
+     "p99": -6.269435
+    },
+    "positive_non_seed": {
+     "p00": 5.452475,
+     "p01": 5.452475,
+     "p05": 5.452475,
+     "p50": 10.544494
+    },
+    "worst_positive_rank_fraction": 0.164557
+   },
+   "seed_cells": 11,
+   "seed_positive_share": 0.785714,
+   "short_positive_cells": 0,
+   "size": 10026,
+   "starts": 365,
+   "starts_unreached_by_direct_flow": 0.419178,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 0,
+    "oracle_feasible": true,
+    "retained": 1.0
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 0,
+    "oracle_feasible": true,
+    "retained": 1.0
+   },
+   "adapt_density_estimate": 1.0,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 34,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 34,
+    "on_unknown": 0
+   },
+   "auroc": null,
+   "category": "historical_genesis",
+   "cells": 5,
+   "density_all_cells": 1.0,
+   "density_labelled": 1.0,
+   "dynamic_control_cells": 0,
+   "er": null,
+   "frf": 1.0,
+   "id": "scd/OPEN_S.BIN",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.2,
+   "negative_cells": 0,
+   "oracle_fraction": 1.0,
+   "oracle_fraction_if_masked_is_code": 1.0,
+   "positive_cells": 5,
+   "positive_cells_mixed_with_data": 1,
+   "positive_cells_near_dynamic_control": 0,
+   "residual_frf": 0.0,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": null,
+     "p50": null,
+     "p95": null,
+     "p99": null
+    },
+    "positive_non_seed": {
+     "p00": null,
+     "p01": null,
+     "p05": null,
+     "p50": null
+    },
+    "worst_positive_rank_fraction": 0.0
+   },
+   "seed_cells": 5,
+   "seed_positive_share": 1.0,
+   "short_positive_cells": 0,
+   "size": 590,
+   "starts": 128,
+   "starts_unreached_by_direct_flow": 0.0,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 5,
+     "mixed_with_data": 2,
+     "near_dynamic_control": 1,
+     "short_run": 1,
+     "unreached_by_direct_flow": 6
+    },
+    "missed_cells": 6,
+    "missed_starts": 170,
+    "negative_admitted": 0,
+    "oracle_feasible": false,
+    "retained": 0.408046
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 10,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.442529,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 541,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 541,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 174,
+   "density_all_cells": 0.442529,
+   "density_labelled": 0.442529,
+   "dynamic_control_cells": 7,
+   "er": 0.0,
+   "frf": 0.442529,
+   "id": "scd/PLANET_M.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.311688,
+   "negative_cells": 97,
+   "oracle_fraction": 0.442529,
+   "oracle_fraction_if_masked_is_code": 0.442529,
+   "positive_cells": 77,
+   "positive_cells_mixed_with_data": 24,
+   "positive_cells_near_dynamic_control": 26,
+   "residual_frf": 0.442529,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -5.818979,
+     "p50": -11.410226,
+     "p95": -8.095629,
+     "p99": -5.958165
+    },
+    "positive_non_seed": {
+     "p00": 3.894354,
+     "p01": 3.894354,
+     "p05": 6.615018,
+     "p50": 11.509704
+    },
+    "worst_positive_rank_fraction": 0.436782
+   },
+   "seed_cells": 38,
+   "seed_positive_share": 0.493506,
+   "short_positive_cells": 4,
+   "size": 22248,
+   "starts": 2431,
+   "starts_unreached_by_direct_flow": 0.598108,
+   "tail25": {
+    "cells": 12,
+    "executable_boundary_adjacent": 12,
+    "mixed_with_data": 4,
+    "near_dynamic_control": 5,
+    "short_run": 1,
+    "unreached_by_direct_flow": 12
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 88,
+    "oracle_feasible": true,
+    "retained": 0.350482
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 135,
+    "oracle_feasible": true,
+    "retained": 0.501608
+   },
+   "adapt_density_estimate": 0.067524,
+   "audit": {
+    "contradiction_rate": 0.023077,
+    "direct_targets": 130,
+    "inside_instruction": 0,
+    "on_labelled_data": 3,
+    "on_start": 127,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 311,
+   "density_all_cells": 0.067524,
+   "density_labelled": 0.067524,
+   "dynamic_control_cells": 7,
+   "er": 0.0,
+   "frf": 0.067524,
+   "id": "scd/PLANET_S.BIN",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.285714,
+   "negative_cells": 290,
+   "oracle_fraction": 0.067524,
+   "oracle_fraction_if_masked_is_code": 0.067524,
+   "positive_cells": 21,
+   "positive_cells_mixed_with_data": 6,
+   "positive_cells_near_dynamic_control": 10,
+   "residual_frf": 0.067524,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -3.172196,
+     "p50": -11.512662,
+     "p95": -10.11196,
+     "p99": -8.669855
+    },
+    "positive_non_seed": {
+     "p00": 7.041627,
+     "p01": 7.041627,
+     "p05": 7.041627,
+     "p50": 8.376444
+    },
+    "worst_positive_rank_fraction": 0.064309
+   },
+   "seed_cells": 14,
+   "seed_positive_share": 0.666667,
+   "short_positive_cells": 0,
+   "size": 39728,
+   "starts": 631,
+   "starts_unreached_by_direct_flow": 0.394612,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 0,
+    "oracle_feasible": true,
+    "retained": 1.0
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 0,
+    "oracle_feasible": true,
+    "retained": 1.0
+   },
+   "adapt_density_estimate": 1.0,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 18,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 18,
+    "on_unknown": 0
+   },
+   "auroc": null,
+   "category": "historical_genesis",
+   "cells": 3,
+   "density_all_cells": 1.0,
+   "density_labelled": 1.0,
+   "dynamic_control_cells": 0,
+   "er": null,
+   "frf": 1.0,
+   "id": "scd/PTEST.BIN",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.0,
+   "negative_cells": 0,
+   "oracle_fraction": 1.0,
+   "oracle_fraction_if_masked_is_code": 1.0,
+   "positive_cells": 3,
+   "positive_cells_mixed_with_data": 0,
+   "positive_cells_near_dynamic_control": 0,
+   "residual_frf": 0.0,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": null,
+     "p50": null,
+     "p95": null,
+     "p99": null
+    },
+    "positive_non_seed": {
+     "p00": null,
+     "p01": null,
+     "p05": null,
+     "p50": null
+    },
+    "worst_positive_rank_fraction": 0.0
+   },
+   "seed_cells": 3,
+   "seed_positive_share": 1.0,
+   "short_positive_cells": 1,
+   "size": 286,
+   "starts": 60,
+   "starts_unreached_by_direct_flow": 0.083333,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 303,
+    "oracle_feasible": true,
+    "retained": 0.350098
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 610,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.200195,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 2632,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 2632,
+    "on_unknown": 0
+   },
+   "auroc": 0.999387,
+   "category": "historical_genesis",
+   "cells": 2048,
+   "density_all_cells": 0.202148,
+   "density_labelled": 0.202148,
+   "dynamic_control_cells": 91,
+   "er": 0.056916,
+   "frf": 0.247559,
+   "id": "scd/R11A__.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.374396,
+   "negative_cells": 1634,
+   "oracle_fraction": 0.202148,
+   "oracle_fraction_if_masked_is_code": 0.202148,
+   "positive_cells": 414,
+   "positive_cells_mixed_with_data": 155,
+   "positive_cells_near_dynamic_control": 214,
+   "residual_frf": 0.247559,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 8.487636,
+     "p50": -11.22905,
+     "p95": -6.450304,
+     "p99": -3.547458
+    },
+    "positive_non_seed": {
+     "p00": -6.635135,
+     "p01": -4.573858,
+     "p05": 5.426261,
+     "p50": 10.864827
+    },
+    "worst_positive_rank_fraction": 0.24707
+   },
+   "seed_cells": 10,
+   "seed_positive_share": 0.024155,
+   "short_positive_cells": 11,
+   "size": 262144,
+   "starts": 12627,
+   "starts_unreached_by_direct_flow": 0.988121,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 325,
+    "oracle_feasible": true,
+    "retained": 0.350098
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 632,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.19043,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 2460,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 2460,
+    "on_unknown": 0
+   },
+   "auroc": 0.999407,
+   "category": "historical_genesis",
+   "cells": 2048,
+   "density_all_cells": 0.191406,
+   "density_labelled": 0.191406,
+   "dynamic_control_cells": 88,
+   "er": 0.036232,
+   "frf": 0.220703,
+   "id": "scd/R11B__.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.364796,
+   "negative_cells": 1656,
+   "oracle_fraction": 0.191406,
+   "oracle_fraction_if_masked_is_code": 0.191406,
+   "positive_cells": 392,
+   "positive_cells_mixed_with_data": 143,
+   "positive_cells_near_dynamic_control": 205,
+   "residual_frf": 0.220703,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 8.803882,
+     "p50": -11.215868,
+     "p95": -6.219198,
+     "p99": -2.454228
+    },
+    "positive_non_seed": {
+     "p00": -5.618305,
+     "p01": -2.303673,
+     "p05": 4.699596,
+     "p50": 10.74995
+    },
+    "worst_positive_rank_fraction": 0.220215
+   },
+   "seed_cells": 10,
+   "seed_positive_share": 0.02551,
+   "short_positive_cells": 17,
+   "size": 262144,
+   "starts": 11867,
+   "starts_unreached_by_direct_flow": 0.98736,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 1,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 325,
+    "oracle_feasible": true,
+    "retained": 0.350098
+   },
+   "B50": {
+    "masked_admitted": 1,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 632,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.191895,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 2458,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 2458,
+    "on_unknown": 0
+   },
+   "auroc": 0.999342,
+   "category": "historical_genesis",
+   "cells": 2048,
+   "density_all_cells": 0.190918,
+   "density_labelled": 0.191011,
+   "dynamic_control_cells": 83,
+   "er": 0.059143,
+   "frf": 0.23877,
+   "id": "scd/R11C__.MMD",
+   "lineage": "D01",
+   "masked_cells": 1,
+   "masked_fraction": 0.000488,
+   "mixed_share": 0.352941,
+   "negative_cells": 1656,
+   "oracle_fraction": 0.190918,
+   "oracle_fraction_if_masked_is_code": 0.191406,
+   "positive_cells": 391,
+   "positive_cells_mixed_with_data": 138,
+   "positive_cells_near_dynamic_control": 206,
+   "residual_frf": 0.23877,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 7.977274,
+     "p50": -11.176065,
+     "p95": -5.708983,
+     "p99": -2.18316
+    },
+    "positive_non_seed": {
+     "p00": -6.089056,
+     "p01": -2.155363,
+     "p05": 4.455481,
+     "p50": 10.844258
+    },
+    "worst_positive_rank_fraction": 0.238281
+   },
+   "seed_cells": 9,
+   "seed_positive_share": 0.023018,
+   "short_positive_cells": 19,
+   "size": 262144,
+   "starts": 11879,
+   "starts_unreached_by_direct_flow": 0.987373,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 328,
+    "oracle_feasible": true,
+    "retained": 0.350098
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 635,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.191406,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 2456,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 2456,
+    "on_unknown": 0
+   },
+   "auroc": 0.999535,
+   "category": "historical_genesis",
+   "cells": 2048,
+   "density_all_cells": 0.189941,
+   "density_labelled": 0.189941,
+   "dynamic_control_cells": 82,
+   "er": 0.036166,
+   "frf": 0.219238,
+   "id": "scd/R11D__.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.354756,
+   "negative_cells": 1659,
+   "oracle_fraction": 0.189941,
+   "oracle_fraction_if_masked_is_code": 0.189941,
+   "positive_cells": 389,
+   "positive_cells_mixed_with_data": 138,
+   "positive_cells_near_dynamic_control": 202,
+   "residual_frf": 0.219238,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 6.244602,
+     "p50": -11.173954,
+     "p95": -5.514644,
+     "p99": -1.626404
+    },
+    "positive_non_seed": {
+     "p00": -4.931031,
+     "p01": -2.34115,
+     "p05": 5.219297,
+     "p50": 10.692333
+    },
+    "worst_positive_rank_fraction": 0.21875
+   },
+   "seed_cells": 9,
+   "seed_positive_share": 0.023136,
+   "short_positive_cells": 15,
+   "size": 262144,
+   "starts": 11872,
+   "starts_unreached_by_direct_flow": 0.987365,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 296,
+    "oracle_feasible": true,
+    "retained": 0.350098
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 603,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.203125,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 2602,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 2602,
+    "on_unknown": 0
+   },
+   "auroc": 0.999737,
+   "category": "historical_genesis",
+   "cells": 2048,
+   "density_all_cells": 0.205566,
+   "density_labelled": 0.205566,
+   "dynamic_control_cells": 89,
+   "er": 0.051629,
+   "frf": 0.246582,
+   "id": "scd/R61A__.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.361045,
+   "negative_cells": 1627,
+   "oracle_fraction": 0.205566,
+   "oracle_fraction_if_masked_is_code": 0.205566,
+   "positive_cells": 421,
+   "positive_cells_mixed_with_data": 152,
+   "positive_cells_near_dynamic_control": 212,
+   "residual_frf": 0.246582,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 7.153207,
+     "p50": -11.17887,
+     "p95": -6.809456,
+     "p99": -4.130052
+    },
+    "positive_non_seed": {
+     "p00": -6.850521,
+     "p01": -1.13323,
+     "p05": 5.048554,
+     "p50": 10.728404
+    },
+    "worst_positive_rank_fraction": 0.246094
+   },
+   "seed_cells": 9,
+   "seed_positive_share": 0.021378,
+   "short_positive_cells": 17,
+   "size": 262144,
+   "starts": 12712,
+   "starts_unreached_by_direct_flow": 0.9882,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 577,
+    "oracle_feasible": true,
+    "retained": 0.350558
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 832,
+    "oracle_feasible": true,
+    "retained": 0.500294
+   },
+   "adapt_density_estimate": 0.011744,
+   "audit": {
+    "contradiction_rate": 0.006329,
+    "direct_targets": 158,
+    "inside_instruction": 0,
+    "on_labelled_data": 1,
+    "on_start": 157,
+    "on_unknown": 0
+   },
+   "auroc": 0.99997,
+   "category": "historical_genesis",
+   "cells": 1703,
+   "density_all_cells": 0.011744,
+   "density_labelled": 0.011744,
+   "dynamic_control_cells": 3,
+   "er": 0.000594,
+   "frf": 0.012331,
+   "id": "scd/SNCBNK1B.BIN",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.35,
+   "negative_cells": 1683,
+   "oracle_fraction": 0.011744,
+   "oracle_fraction_if_masked_is_code": 0.011744,
+   "positive_cells": 20,
+   "positive_cells_mixed_with_data": 7,
+   "positive_cells_near_dynamic_control": 7,
+   "residual_frf": 0.011157,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 0.358527,
+     "p50": -11.529492,
+     "p95": -10.771533,
+     "p99": -9.963554
+    },
+    "positive_non_seed": {
+     "p00": 6.241535,
+     "p01": 6.241535,
+     "p05": 6.241535,
+     "p50": 7.935087
+    },
+    "worst_positive_rank_fraction": 0.01057
+   },
+   "seed_cells": 16,
+   "seed_positive_share": 0.8,
+   "short_positive_cells": 1,
+   "size": 217866,
+   "starts": 658,
+   "starts_unreached_by_direct_flow": 0.261398,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 532,
+    "oracle_feasible": true,
+    "retained": 0.350476
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 768,
+    "oracle_feasible": true,
+    "retained": 0.500317
+   },
+   "adapt_density_estimate": 0.012698,
+   "audit": {
+    "contradiction_rate": 0.006329,
+    "direct_targets": 158,
+    "inside_instruction": 0,
+    "on_labelled_data": 1,
+    "on_start": 157,
+    "on_unknown": 0
+   },
+   "auroc": 0.999968,
+   "category": "historical_genesis",
+   "cells": 1575,
+   "density_all_cells": 0.012698,
+   "density_labelled": 0.012698,
+   "dynamic_control_cells": 3,
+   "er": 0.000643,
+   "frf": 0.013333,
+   "id": "scd/SNCBNK4B.BIN",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.35,
+   "negative_cells": 1555,
+   "oracle_fraction": 0.012698,
+   "oracle_fraction_if_masked_is_code": 0.012698,
+   "positive_cells": 20,
+   "positive_cells_mixed_with_data": 7,
+   "positive_cells_near_dynamic_control": 7,
+   "residual_frf": 0.012063,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 0.358527,
+     "p50": -11.49538,
+     "p95": -10.898117,
+     "p99": -10.337999
+    },
+    "positive_non_seed": {
+     "p00": 4.856932,
+     "p01": 4.856932,
+     "p05": 4.856932,
+     "p50": 7.873095
+    },
+    "worst_positive_rank_fraction": 0.011429
+   },
+   "seed_cells": 16,
+   "seed_positive_share": 0.8,
+   "short_positive_cells": 1,
+   "size": 201562,
+   "starts": 658,
+   "starts_unreached_by_direct_flow": 0.261398,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 575,
+    "oracle_feasible": true,
+    "retained": 0.350206
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 830,
+    "oracle_feasible": true,
+    "retained": 0.500294
+   },
+   "adapt_density_estimate": 0.011772,
+   "audit": {
+    "contradiction_rate": 0.006329,
+    "direct_targets": 158,
+    "inside_instruction": 0,
+    "on_labelled_data": 1,
+    "on_start": 157,
+    "on_unknown": 0
+   },
+   "auroc": 0.99997,
+   "category": "historical_genesis",
+   "cells": 1699,
+   "density_all_cells": 0.011772,
+   "density_labelled": 0.011772,
+   "dynamic_control_cells": 4,
+   "er": 0.000596,
+   "frf": 0.01236,
+   "id": "scd/SNCBNK6B.BIN",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.35,
+   "negative_cells": 1679,
+   "oracle_fraction": 0.011772,
+   "oracle_fraction_if_masked_is_code": 0.011772,
+   "positive_cells": 20,
+   "positive_cells_mixed_with_data": 7,
+   "positive_cells_near_dynamic_control": 7,
+   "residual_frf": 0.011183,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 0.358527,
+     "p50": -11.575498,
+     "p95": -10.908593,
+     "p99": -9.946823
+    },
+    "positive_non_seed": {
+     "p00": 5.932868,
+     "p01": 5.932868,
+     "p05": 5.932868,
+     "p50": 7.898332
+    },
+    "worst_positive_rank_fraction": 0.010594
+   },
+   "seed_cells": 16,
+   "seed_positive_share": 0.8,
+   "short_positive_cells": 1,
+   "size": 217454,
+   "starts": 658,
+   "starts_unreached_by_direct_flow": 0.261398,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 9,
+    "oracle_feasible": true,
+    "retained": 0.357143
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 23,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.255102,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 222,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 222,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 98,
+   "density_all_cells": 0.265306,
+   "density_labelled": 0.265306,
+   "dynamic_control_cells": 4,
+   "er": 0.0,
+   "frf": 0.265306,
+   "id": "scd/SOSEL_.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.5,
+   "negative_cells": 72,
+   "oracle_fraction": 0.265306,
+   "oracle_fraction_if_masked_is_code": 0.265306,
+   "positive_cells": 26,
+   "positive_cells_mixed_with_data": 13,
+   "positive_cells_near_dynamic_control": 12,
+   "residual_frf": 0.265306,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -2.343123,
+     "p50": -11.472468,
+     "p95": -7.443009,
+     "p99": -5.515936
+    },
+    "positive_non_seed": {
+     "p00": -1.331937,
+     "p01": -1.331937,
+     "p05": -1.331937,
+     "p50": 9.781782
+    },
+    "worst_positive_rank_fraction": 0.255102
+   },
+   "seed_cells": 19,
+   "seed_positive_share": 0.730769,
+   "short_positive_cells": 1,
+   "size": 12544,
+   "starts": 871,
+   "starts_unreached_by_direct_flow": 0.548794,
+   "tail25": {
+    "cells": 1,
+    "executable_boundary_adjacent": 1,
+    "mixed_with_data": 1,
+    "near_dynamic_control": 0,
+    "short_run": 1,
+    "unreached_by_direct_flow": 1
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 27,
+    "oracle_feasible": true,
+    "retained": 0.353846
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 46,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.146154,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 149,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 149,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 130,
+   "density_all_cells": 0.146154,
+   "density_labelled": 0.146154,
+   "dynamic_control_cells": 2,
+   "er": 0.0,
+   "frf": 0.146154,
+   "id": "scd/SPEEND.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.315789,
+   "negative_cells": 111,
+   "oracle_fraction": 0.146154,
+   "oracle_fraction_if_masked_is_code": 0.146154,
+   "positive_cells": 19,
+   "positive_cells_mixed_with_data": 6,
+   "positive_cells_near_dynamic_control": 7,
+   "residual_frf": 0.146154,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -5.022074,
+     "p50": -11.472468,
+     "p95": -7.380187,
+     "p99": -5.275831
+    },
+    "positive_non_seed": {
+     "p00": 3.383439,
+     "p01": 3.383439,
+     "p05": 3.383439,
+     "p50": 8.967737
+    },
+    "worst_positive_rank_fraction": 0.138462
+   },
+   "seed_cells": 14,
+   "seed_positive_share": 0.736842,
+   "short_positive_cells": 2,
+   "size": 16640,
+   "starts": 668,
+   "starts_unreached_by_direct_flow": 0.52994,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 1,
+     "mixed_with_data": 1,
+     "near_dynamic_control": 0,
+     "short_run": 1,
+     "unreached_by_direct_flow": 1
+    },
+    "missed_cells": 1,
+    "missed_starts": 8,
+    "negative_admitted": 5,
+    "oracle_feasible": true,
+    "retained": 0.353211
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 36,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.33945,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 538,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 538,
+    "on_unknown": 0
+   },
+   "auroc": 0.999244,
+   "category": "historical_genesis",
+   "cells": 218,
+   "density_all_cells": 0.334862,
+   "density_labelled": 0.334862,
+   "dynamic_control_cells": 9,
+   "er": 0.055172,
+   "frf": 0.37156,
+   "id": "scd/SPMM__.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.383562,
+   "negative_cells": 145,
+   "oracle_fraction": 0.334862,
+   "oracle_fraction_if_masked_is_code": 0.334862,
+   "positive_cells": 73,
+   "positive_cells_mixed_with_data": 28,
+   "positive_cells_near_dynamic_control": 28,
+   "residual_frf": 0.37156,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 0.837557,
+     "p50": -11.681775,
+     "p95": -4.97904,
+     "p99": 0.219275
+    },
+    "positive_non_seed": {
+     "p00": -4.987663,
+     "p01": -4.987663,
+     "p05": 3.447234,
+     "p50": 8.808935
+    },
+    "worst_positive_rank_fraction": 0.366972
+   },
+   "seed_cells": 46,
+   "seed_positive_share": 0.630137,
+   "short_positive_cells": 3,
+   "size": 27904,
+   "starts": 2133,
+   "starts_unreached_by_direct_flow": 0.45429,
+   "tail25": {
+    "cells": 14,
+    "executable_boundary_adjacent": 14,
+    "mixed_with_data": 9,
+    "near_dynamic_control": 8,
+    "short_run": 2,
+    "unreached_by_direct_flow": 14
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 809,
+    "oracle_feasible": true,
+    "retained": 0.35
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 1193,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.034375,
+   "audit": {
+    "contradiction_rate": 0.003968,
+    "direct_targets": 504,
+    "inside_instruction": 0,
+    "on_labelled_data": 2,
+    "on_start": 502,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 2560,
+   "density_all_cells": 0.033984,
+   "density_labelled": 0.033984,
+   "dynamic_control_cells": 49,
+   "er": 0.0,
+   "frf": 0.033984,
+   "id": "scd/SPSS__.BIN",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.482759,
+   "negative_cells": 2473,
+   "oracle_fraction": 0.033984,
+   "oracle_fraction_if_masked_is_code": 0.033984,
+   "positive_cells": 87,
+   "positive_cells_mixed_with_data": 42,
+   "positive_cells_near_dynamic_control": 52,
+   "residual_frf": 0.033984,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 1.093093,
+     "p50": -11.687381,
+     "p95": -9.968287,
+     "p99": -8.387452
+    },
+    "positive_non_seed": {
+     "p00": 1.918197,
+     "p01": 2.692164,
+     "p05": 5.780261,
+     "p50": 9.322509
+    },
+    "worst_positive_rank_fraction": 0.033594
+   },
+   "seed_cells": 31,
+   "seed_positive_share": 0.356322,
+   "short_positive_cells": 6,
+   "size": 327680,
+   "starts": 2472,
+   "starts_unreached_by_direct_flow": 0.687702,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 24,
+    "oracle_feasible": true,
+    "retained": 0.352941
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 44,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.176471,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 225,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 225,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 136,
+   "density_all_cells": 0.176471,
+   "density_labelled": 0.176471,
+   "dynamic_control_cells": 1,
+   "er": 0.0,
+   "frf": 0.176471,
+   "id": "scd/SPX___.BIN",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.208333,
+   "negative_cells": 112,
+   "oracle_fraction": 0.176471,
+   "oracle_fraction_if_masked_is_code": 0.176471,
+   "positive_cells": 24,
+   "positive_cells_mixed_with_data": 5,
+   "positive_cells_near_dynamic_control": 1,
+   "residual_frf": 0.176471,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -5.767719,
+     "p50": -11.472468,
+     "p95": -6.893151,
+     "p99": -5.78576
+    },
+    "positive_non_seed": {
+     "p00": 0.508317,
+     "p01": 0.508317,
+     "p05": 6.324971,
+     "p50": 8.784427
+    },
+    "worst_positive_rank_fraction": 0.169118
+   },
+   "seed_cells": 2,
+   "seed_positive_share": 0.083333,
+   "short_positive_cells": 1,
+   "size": 17408,
+   "starts": 655,
+   "starts_unreached_by_direct_flow": 0.957252,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 16,
+    "oracle_feasible": true,
+    "retained": 0.357143
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 30,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.183673,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 156,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 156,
+    "on_unknown": 0
+   },
+   "auroc": 0.996003,
+   "category": "historical_genesis",
+   "cells": 98,
+   "density_all_cells": 0.193878,
+   "density_labelled": 0.193878,
+   "dynamic_control_cells": 2,
+   "er": 0.075949,
+   "frf": 0.255102,
+   "id": "scd/STSEL_.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.368421,
+   "negative_cells": 79,
+   "oracle_fraction": 0.193878,
+   "oracle_fraction_if_masked_is_code": 0.193878,
+   "positive_cells": 19,
+   "positive_cells_mixed_with_data": 7,
+   "positive_cells_near_dynamic_control": 7,
+   "residual_frf": 0.255102,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -2.353824,
+     "p50": -11.391776,
+     "p95": -7.761649,
+     "p99": -4.689918
+    },
+    "positive_non_seed": {
+     "p00": -7.826119,
+     "p01": -7.826119,
+     "p05": -7.826119,
+     "p50": 9.65812
+    },
+    "worst_positive_rank_fraction": 0.244898
+   },
+   "seed_cells": 14,
+   "seed_positive_share": 0.736842,
+   "short_positive_cells": 2,
+   "size": 12544,
+   "starts": 688,
+   "starts_unreached_by_direct_flow": 0.508721,
+   "tail25": {
+    "cells": 1,
+    "executable_boundary_adjacent": 1,
+    "mixed_with_data": 1,
+    "near_dynamic_control": 0,
+    "short_run": 1,
+    "unreached_by_direct_flow": 1
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 28,
+    "oracle_feasible": true,
+    "retained": 0.353488
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 60,
+    "oracle_feasible": true,
+    "retained": 0.502326
+   },
+   "adapt_density_estimate": 0.218605,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 362,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 362,
+    "on_unknown": 0
+   },
+   "auroc": 0.99975,
+   "category": "historical_genesis",
+   "cells": 215,
+   "density_all_cells": 0.223256,
+   "density_labelled": 0.223256,
+   "dynamic_control_cells": 8,
+   "er": 0.005988,
+   "frf": 0.227907,
+   "id": "scd/TITLEM.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.354167,
+   "negative_cells": 167,
+   "oracle_fraction": 0.223256,
+   "oracle_fraction_if_masked_is_code": 0.223256,
+   "positive_cells": 48,
+   "positive_cells_mixed_with_data": 17,
+   "positive_cells_near_dynamic_control": 13,
+   "residual_frf": 0.227907,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 0.705011,
+     "p50": -11.501123,
+     "p95": -7.348416,
+     "p99": -5.950011
+    },
+    "positive_non_seed": {
+     "p00": -1.950439,
+     "p01": -1.950439,
+     "p05": -0.590922,
+     "p50": 10.245295
+    },
+    "worst_positive_rank_fraction": 0.223256
+   },
+   "seed_cells": 26,
+   "seed_positive_share": 0.541667,
+   "short_positive_cells": 3,
+   "size": 27484,
+   "starts": 1447,
+   "starts_unreached_by_direct_flow": 0.497581,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 12,
+    "oracle_feasible": true,
+    "retained": 0.359375
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 21,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.171875,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 59,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 59,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 64,
+   "density_all_cells": 0.171875,
+   "density_labelled": 0.171875,
+   "dynamic_control_cells": 1,
+   "er": 0.0,
+   "frf": 0.171875,
+   "id": "scd/TITLES.BIN",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.272727,
+   "negative_cells": 53,
+   "oracle_fraction": 0.171875,
+   "oracle_fraction_if_masked_is_code": 0.171875,
+   "positive_cells": 11,
+   "positive_cells_mixed_with_data": 3,
+   "positive_cells_near_dynamic_control": 0,
+   "residual_frf": 0.0,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -3.29527,
+     "p50": -11.669806,
+     "p95": -6.522155,
+     "p99": -5.851178
+    },
+    "positive_non_seed": {
+     "p00": null,
+     "p01": null,
+     "p05": null,
+     "p50": null
+    },
+    "worst_positive_rank_fraction": 0.0
+   },
+   "seed_cells": 11,
+   "seed_positive_share": 1.0,
+   "short_positive_cells": 0,
+   "size": 8090,
+   "starts": 360,
+   "starts_unreached_by_direct_flow": 0.008333,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 21,
+    "oracle_feasible": true,
+    "retained": 0.354839
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 39,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.193548,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 139,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 139,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 124,
+   "density_all_cells": 0.185484,
+   "density_labelled": 0.185484,
+   "dynamic_control_cells": 5,
+   "er": 0.0,
+   "frf": 0.185484,
+   "id": "scd/VM____.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.347826,
+   "negative_cells": 101,
+   "oracle_fraction": 0.185484,
+   "oracle_fraction_if_masked_is_code": 0.185484,
+   "positive_cells": 23,
+   "positive_cells_mixed_with_data": 8,
+   "positive_cells_near_dynamic_control": 10,
+   "residual_frf": 0.145161,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 0.311286,
+     "p50": -11.54849,
+     "p95": -8.244927,
+     "p99": -4.081843
+    },
+    "positive_non_seed": {
+     "p00": 7.786538,
+     "p01": 7.786538,
+     "p05": 7.786538,
+     "p50": 9.232171
+    },
+    "worst_positive_rank_fraction": 0.137097
+   },
+   "seed_cells": 20,
+   "seed_positive_share": 0.869565,
+   "short_positive_cells": 1,
+   "size": 15774,
+   "starts": 788,
+   "starts_unreached_by_direct_flow": 0.356599,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 1,
+     "mixed_with_data": 1,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 1
+    },
+    "missed_cells": 1,
+    "missed_starts": 45,
+    "negative_admitted": 0,
+    "oracle_feasible": false,
+    "retained": 0.403509
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 5,
+    "oracle_feasible": true,
+    "retained": 0.508772
+   },
+   "adapt_density_estimate": 0.438596,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 183,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 183,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 57,
+   "density_all_cells": 0.421053,
+   "density_labelled": 0.421053,
+   "dynamic_control_cells": 5,
+   "er": 0.0,
+   "frf": 0.421053,
+   "id": "scd/WARP__.MMD",
+   "lineage": "D01",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.291667,
+   "negative_cells": 33,
+   "oracle_fraction": 0.421053,
+   "oracle_fraction_if_masked_is_code": 0.421053,
+   "positive_cells": 24,
+   "positive_cells_mixed_with_data": 7,
+   "positive_cells_near_dynamic_control": 12,
+   "residual_frf": 0.421053,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 1.666296,
+     "p50": -6.941057,
+     "p95": -3.964994,
+     "p99": 1.666296
+    },
+    "positive_non_seed": {
+     "p00": 6.754209,
+     "p01": 6.754209,
+     "p05": 6.754209,
+     "p50": 9.265178
+    },
+    "worst_positive_rank_fraction": 0.403509
+   },
+   "seed_cells": 19,
+   "seed_positive_share": 0.791667,
+   "short_positive_cells": 1,
+   "size": 7242,
+   "starts": 854,
+   "starts_unreached_by_direct_flow": 0.485948,
+   "tail25": {
+    "cells": 4,
+    "executable_boundary_adjacent": 4,
+    "mixed_with_data": 1,
+    "near_dynamic_control": 1,
+    "short_run": 0,
+    "unreached_by_direct_flow": 4
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 4,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 1658,
+    "oracle_feasible": true,
+    "retained": 0.350037
+   },
+   "B50": {
+    "masked_admitted": 4,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 4115,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.24762,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 30526,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 30526,
+    "on_unknown": 0
+   },
+   "auroc": 0.999929,
+   "category": "historical_genesis",
+   "cells": 16384,
+   "density_all_cells": 0.248596,
+   "density_labelled": 0.248657,
+   "dynamic_control_cells": 594,
+   "er": 0.05288,
+   "frf": 0.28833,
+   "id": "sk",
+   "lineage": "D01",
+   "masked_cells": 4,
+   "masked_fraction": 0.000244,
+   "mixed_share": 0.328259,
+   "negative_cells": 12307,
+   "oracle_fraction": 0.248596,
+   "oracle_fraction_if_masked_is_code": 0.24884,
+   "positive_cells": 4073,
+   "positive_cells_mixed_with_data": 1337,
+   "positive_cells_near_dynamic_control": 1514,
+   "residual_frf": 0.28833,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 6.477157,
+     "p50": -11.31727,
+     "p95": -8.944479,
+     "p99": -5.636948
+    },
+    "positive_non_seed": {
+     "p00": -9.061753,
+     "p01": 1.689542,
+     "p05": 7.559474,
+     "p50": 11.256248
+    },
+    "worst_positive_rank_fraction": 0.288269
+   },
+   "seed_cells": 17,
+   "seed_positive_share": 0.004174,
+   "short_positive_cells": 129,
+   "size": 2097152,
+   "starts": 119319,
+   "starts_unreached_by_direct_flow": 0.996229,
+   "tail25": {
+    "cells": 17,
+    "executable_boundary_adjacent": 16,
+    "mixed_with_data": 17,
+    "near_dynamic_control": 7,
+    "short_run": 14,
+    "unreached_by_direct_flow": 17
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 179,
+    "oracle_feasible": true,
+    "retained": 0.350586
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 332,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.176758,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 1496,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 1496,
+    "on_unknown": 0
+   },
+   "auroc": 0.999987,
+   "category": "historical_genesis",
+   "cells": 1024,
+   "density_all_cells": 0.175781,
+   "density_labelled": 0.175781,
+   "dynamic_control_cells": 22,
+   "er": 0.001185,
+   "frf": 0.176758,
+   "id": "flicky",
+   "lineage": "D02",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.4,
+   "negative_cells": 844,
+   "oracle_fraction": 0.175781,
+   "oracle_fraction_if_masked_is_code": 0.175781,
+   "positive_cells": 180,
+   "positive_cells_mixed_with_data": 72,
+   "positive_cells_near_dynamic_control": 76,
+   "residual_frf": 0.176758,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 2.230809,
+     "p50": -12.346551,
+     "p95": -9.397742,
+     "p99": -4.09092
+    },
+    "positive_non_seed": {
+     "p00": 1.583269,
+     "p01": 3.285819,
+     "p05": 6.033801,
+     "p50": 10.887031
+    },
+    "worst_positive_rank_fraction": 0.175781
+   },
+   "seed_cells": 11,
+   "seed_positive_share": 0.061111,
+   "short_positive_cells": 11,
+   "size": 131072,
+   "starts": 5707,
+   "starts_unreached_by_direct_flow": 0.960049,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 2,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 2989,
+    "oracle_feasible": true,
+    "retained": 0.350016
+   },
+   "B50": {
+    "masked_admitted": 2,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 4832,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.105957,
+   "audit": {
+    "contradiction_rate": 7.3e-05,
+    "direct_targets": 13669,
+    "inside_instruction": 0,
+    "on_labelled_data": 1,
+    "on_start": 13668,
+    "on_unknown": 0
+   },
+   "auroc": 0.999995,
+   "category": "historical_genesis",
+   "cells": 12288,
+   "density_all_cells": 0.106608,
+   "density_labelled": 0.106625,
+   "dynamic_control_cells": 536,
+   "er": 0.00082,
+   "frf": 0.10734,
+   "id": "sf1",
+   "lineage": "D03",
+   "masked_cells": 2,
+   "masked_fraction": 0.000163,
+   "mixed_share": 0.339695,
+   "negative_cells": 10976,
+   "oracle_fraction": 0.106608,
+   "oracle_fraction_if_masked_is_code": 0.106771,
+   "positive_cells": 1310,
+   "positive_cells_mixed_with_data": 445,
+   "positive_cells_near_dynamic_control": 432,
+   "residual_frf": 0.10734,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 2.594553,
+     "p50": -11.524736,
+     "p95": -9.721777,
+     "p99": -7.810854
+    },
+    "positive_non_seed": {
+     "p00": -3.196561,
+     "p01": 1.076271,
+     "p05": 4.952042,
+     "p50": 9.378608
+    },
+    "worst_positive_rank_fraction": 0.107259
+   },
+   "seed_cells": 75,
+   "seed_positive_share": 0.057252,
+   "short_positive_cells": 33,
+   "size": 1572864,
+   "starts": 44740,
+   "starts_unreached_by_direct_flow": 0.697988,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 4217,
+    "oracle_feasible": true,
+    "retained": 0.350037
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 6674,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.093628,
+   "audit": {
+    "contradiction_rate": 0.000219,
+    "direct_targets": 13713,
+    "inside_instruction": 0,
+    "on_labelled_data": 3,
+    "on_start": 13710,
+    "on_unknown": 0
+   },
+   "auroc": 0.999866,
+   "category": "historical_genesis",
+   "cells": 16384,
+   "density_all_cells": 0.092651,
+   "density_labelled": 0.092651,
+   "dynamic_control_cells": 192,
+   "er": 0.028723,
+   "frf": 0.118713,
+   "id": "sf2",
+   "lineage": "D03",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.497365,
+   "negative_cells": 14866,
+   "oracle_fraction": 0.092651,
+   "oracle_fraction_if_masked_is_code": 0.092651,
+   "positive_cells": 1518,
+   "positive_cells_mixed_with_data": 755,
+   "positive_cells_near_dynamic_control": 184,
+   "residual_frf": 0.118713,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 5.323621,
+     "p50": -11.004706,
+     "p95": -7.696058,
+     "p99": -3.519982
+    },
+    "positive_non_seed": {
+     "p00": -6.373937,
+     "p01": -0.478165,
+     "p05": 3.250549,
+     "p50": 9.18815
+    },
+    "worst_positive_rank_fraction": 0.118652
+   },
+   "seed_cells": 58,
+   "seed_positive_share": 0.038208,
+   "short_positive_cells": 78,
+   "size": 2097152,
+   "starts": 48627,
+   "starts_unreached_by_direct_flow": 0.930738,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 1586,
+    "oracle_feasible": true,
+    "retained": 0.350098
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 2507,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.092285,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 4894,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 4894,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "historical_genesis",
+   "cells": 6144,
+   "density_all_cells": 0.09196,
+   "density_labelled": 0.09196,
+   "dynamic_control_cells": 138,
+   "er": 0.000179,
+   "frf": 0.092122,
+   "id": "ps2",
+   "lineage": "D04",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.138053,
+   "negative_cells": 5579,
+   "oracle_fraction": 0.09196,
+   "oracle_fraction_if_masked_is_code": 0.09196,
+   "positive_cells": 565,
+   "positive_cells_mixed_with_data": 78,
+   "positive_cells_near_dynamic_control": 280,
+   "residual_frf": 0.092122,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 0.748868,
+     "p50": -10.961108,
+     "p95": -6.217889,
+     "p99": -3.83787
+    },
+    "positive_non_seed": {
+     "p00": 0.251185,
+     "p01": 6.484655,
+     "p05": 7.718466,
+     "p50": 10.978973
+    },
+    "worst_positive_rank_fraction": 0.09196
+   },
+   "seed_cells": 45,
+   "seed_positive_share": 0.079646,
+   "short_positive_cells": 5,
+   "size": 786432,
+   "starts": 19261,
+   "starts_unreached_by_direct_flow": 0.709517,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 266,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 4,
+    "oracle_feasible": true,
+    "retained": 0.350586
+   },
+   "B50": {
+    "masked_admitted": 278,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 145,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.297852,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 600,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 517,
+    "on_unknown": 83
+   },
+   "auroc": 1.0,
+   "category": "modern_sgdk",
+   "cells": 1024,
+   "density_all_cells": 0.086914,
+   "density_labelled": 0.12027,
+   "dynamic_control_cells": 65,
+   "er": 0.210695,
+   "frf": 0.279297,
+   "id": "d05",
+   "lineage": "D05",
+   "masked_cells": 284,
+   "masked_fraction": 0.277344,
+   "mixed_share": 0.0,
+   "negative_cells": 651,
+   "oracle_fraction": 0.107422,
+   "oracle_fraction_if_masked_is_code": 0.364258,
+   "positive_cells": 89,
+   "positive_cells_mixed_with_data": 0,
+   "positive_cells_near_dynamic_control": 31,
+   "residual_frf": 0.279297,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -6.969334,
+     "p50": -11.698517,
+     "p95": -11.698517,
+     "p99": -10.967744
+    },
+    "positive_non_seed": {
+     "p00": 8.972769,
+     "p01": 9.112817,
+     "p05": 9.785376,
+     "p50": 12.027643
+    },
+    "worst_positive_rank_fraction": 0.27832
+   },
+   "seed_cells": 27,
+   "seed_positive_share": 0.067416,
+   "short_positive_cells": 1,
+   "size": 131072,
+   "starts": 3388,
+   "starts_unreached_by_direct_flow": 0.0,
+   "tail25": {
+    "cells": 8,
+    "executable_boundary_adjacent": 8,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 4,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 480,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 382,
+    "oracle_feasible": true,
+    "retained": 0.35026
+   },
+   "B50": {
+    "masked_admitted": 528,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 794,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.167318,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 1052,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 821,
+    "on_unknown": 231
+   },
+   "auroc": 1.0,
+   "category": "modern_sgdk",
+   "cells": 3072,
+   "density_all_cells": 0.069661,
+   "density_labelled": 0.085225,
+   "dynamic_control_cells": 136,
+   "er": 0.10007,
+   "frf": 0.16276,
+   "id": "d06",
+   "lineage": "D06",
+   "masked_cells": 561,
+   "masked_fraction": 0.182617,
+   "mixed_share": 0.018692,
+   "negative_cells": 2297,
+   "oracle_fraction": 0.076172,
+   "oracle_fraction_if_masked_is_code": 0.252279,
+   "positive_cells": 214,
+   "positive_cells_mixed_with_data": 4,
+   "positive_cells_near_dynamic_control": 123,
+   "residual_frf": 0.16276,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -5.393087,
+     "p50": -11.849266,
+     "p95": -10.544907,
+     "p99": -9.345659
+    },
+    "positive_non_seed": {
+     "p00": 5.271452,
+     "p01": 6.568444,
+     "p05": 8.016193,
+     "p50": 10.945033
+    },
+    "worst_positive_rank_fraction": 0.162435
+   },
+   "seed_cells": 23,
+   "seed_positive_share": 0.014019,
+   "short_positive_cells": 4,
+   "size": 393216,
+   "starts": 6750,
+   "starts_unreached_by_direct_flow": 0.44,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 239,
+    "mechanism": {
+     "executable_boundary_adjacent": 36,
+     "mixed_with_data": 1,
+     "near_dynamic_control": 198,
+     "short_run": 0,
+     "unreached_by_direct_flow": 187
+    },
+    "missed_cells": 199,
+    "missed_starts": 7837,
+    "negative_admitted": 11,
+    "oracle_feasible": true,
+    "retained": 0.350586
+   },
+   "B50": {
+    "masked_admitted": 264,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 93,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.456055,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 3441,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 2637,
+    "on_unknown": 804
+   },
+   "auroc": 0.991496,
+   "category": "modern_sgdk",
+   "cells": 2048,
+   "density_all_cells": 0.325684,
+   "density_labelled": 0.406459,
+   "dynamic_control_cells": 425,
+   "er": 0.193338,
+   "frf": 0.456055,
+   "id": "d07",
+   "lineage": "D07",
+   "masked_cells": 407,
+   "masked_fraction": 0.19873,
+   "mixed_share": 0.031484,
+   "negative_cells": 974,
+   "oracle_fraction": 0.336426,
+   "oracle_fraction_if_masked_is_code": 0.524414,
+   "positive_cells": 667,
+   "positive_cells_mixed_with_data": 21,
+   "positive_cells_near_dynamic_control": 594,
+   "residual_frf": 0.456055,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 12.161331,
+     "p50": -10.939454,
+     "p95": -7.952188,
+     "p99": 10.763287
+    },
+    "positive_non_seed": {
+     "p00": 1.200694,
+     "p01": 3.465817,
+     "p05": 5.470092,
+     "p50": 10.847978
+    },
+    "worst_positive_rank_fraction": 0.455566
+   },
+   "seed_cells": 28,
+   "seed_positive_share": 0.008996,
+   "short_positive_cells": 1,
+   "size": 262144,
+   "starts": 25246,
+   "starts_unreached_by_direct_flow": 0.895112,
+   "tail25": {
+    "cells": 346,
+    "executable_boundary_adjacent": 346,
+    "mixed_with_data": 8,
+    "near_dynamic_control": 325,
+    "short_run": 0,
+    "unreached_by_direct_flow": 331
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 330,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 5,
+    "oracle_feasible": true,
+    "retained": 0.350586
+   },
+   "B50": {
+    "masked_admitted": 476,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 12,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.266602,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 88,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 72,
+    "on_unknown": 16
+   },
+   "auroc": 1.0,
+   "category": "modern_sgdk",
+   "cells": 1024,
+   "density_all_cells": 0.023438,
+   "density_labelled": 0.050847,
+   "dynamic_control_cells": 69,
+   "er": 0.135,
+   "frf": 0.155273,
+   "id": "d09",
+   "lineage": "D09",
+   "masked_cells": 552,
+   "masked_fraction": 0.539062,
+   "mixed_share": 0.041667,
+   "negative_cells": 448,
+   "oracle_fraction": 0.046875,
+   "oracle_fraction_if_masked_is_code": 0.5625,
+   "positive_cells": 24,
+   "positive_cells_mixed_with_data": 1,
+   "positive_cells_near_dynamic_control": 16,
+   "residual_frf": 0.155273,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -3.965796,
+     "p50": -11.824209,
+     "p95": -11.824209,
+     "p99": -9.009542
+    },
+    "positive_non_seed": {
+     "p00": 10.396813,
+     "p01": 10.396813,
+     "p05": 10.868351,
+     "p50": 11.79518
+    },
+    "worst_positive_rank_fraction": 0.154297
+   },
+   "seed_cells": 27,
+   "seed_positive_share": 0.125,
+   "short_positive_cells": 1,
+   "size": 131072,
+   "starts": 742,
+   "starts_unreached_by_direct_flow": 0.134771,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 392,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 401,
+    "oracle_feasible": true,
+    "retained": 0.35026
+   },
+   "B50": {
+    "masked_admitted": 463,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 790,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.187174,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 1523,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 1386,
+    "on_unknown": 137
+   },
+   "auroc": 1.0,
+   "category": "modern_sgdk",
+   "cells": 3072,
+   "density_all_cells": 0.092122,
+   "density_labelled": 0.110633,
+   "dynamic_control_cells": 107,
+   "er": 0.102546,
+   "frf": 0.185221,
+   "id": "d10",
+   "lineage": "D10",
+   "masked_cells": 514,
+   "masked_fraction": 0.167318,
+   "mixed_share": 0.021201,
+   "negative_cells": 2275,
+   "oracle_fraction": 0.092122,
+   "oracle_fraction_if_masked_is_code": 0.25944,
+   "positive_cells": 283,
+   "positive_cells_mixed_with_data": 6,
+   "positive_cells_near_dynamic_control": 86,
+   "residual_frf": 0.185221,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": 0.477374,
+     "p50": -11.678826,
+     "p95": -9.785089,
+     "p99": -8.676666
+    },
+    "positive_non_seed": {
+     "p00": 4.452234,
+     "p01": 5.589842,
+     "p05": 8.228906,
+     "p50": 10.979699
+    },
+    "worst_positive_rank_fraction": 0.184896
+   },
+   "seed_cells": 0,
+   "seed_positive_share": 0.0,
+   "short_positive_cells": 1,
+   "size": 393216,
+   "starts": 10592,
+   "starts_unreached_by_direct_flow": 1.0,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 419,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 119,
+    "oracle_feasible": true,
+    "retained": 0.350098
+   },
+   "B50": {
+    "masked_admitted": 508,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 337,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.263184,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 1048,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 879,
+    "on_unknown": 169
+   },
+   "auroc": 1.0,
+   "category": "modern_sgdk",
+   "cells": 2048,
+   "density_all_cells": 0.087402,
+   "density_labelled": 0.122519,
+   "dynamic_control_cells": 246,
+   "er": 0.190476,
+   "frf": 0.26123,
+   "id": "d11",
+   "lineage": "D11",
+   "masked_cells": 587,
+   "masked_fraction": 0.286621,
+   "mixed_share": 0.022346,
+   "negative_cells": 1282,
+   "oracle_fraction": 0.087402,
+   "oracle_fraction_if_masked_is_code": 0.374023,
+   "positive_cells": 179,
+   "positive_cells_mixed_with_data": 4,
+   "positive_cells_near_dynamic_control": 150,
+   "residual_frf": 0.26123,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -3.721108,
+     "p50": -11.869646,
+     "p95": -9.485052,
+     "p99": -7.055591
+    },
+    "positive_non_seed": {
+     "p00": 3.950071,
+     "p01": 6.876346,
+     "p05": 8.502803,
+     "p50": 11.026595
+    },
+    "worst_positive_rank_fraction": 0.260742
+   },
+   "seed_cells": 0,
+   "seed_positive_share": 0.0,
+   "short_positive_cells": 3,
+   "size": 262144,
+   "starts": 6343,
+   "starts_unreached_by_direct_flow": 1.0,
+   "tail25": {
+    "cells": 4,
+    "executable_boundary_adjacent": 4,
+    "mixed_with_data": 2,
+    "near_dynamic_control": 1,
+    "short_run": 1,
+    "unreached_by_direct_flow": 4
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 205,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 200,
+    "oracle_feasible": true,
+    "retained": 0.350098
+   },
+   "B50": {
+    "masked_admitted": 270,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 442,
+    "oracle_feasible": true,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.150391,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 1517,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 1457,
+    "on_unknown": 60
+   },
+   "auroc": 0.999979,
+   "category": "modern_sgdk",
+   "cells": 2048,
+   "density_all_cells": 0.152344,
+   "density_labelled": 0.181501,
+   "dynamic_control_cells": 71,
+   "er": 0.041475,
+   "frf": 0.1875,
+   "id": "d12",
+   "lineage": "D12",
+   "masked_cells": 329,
+   "masked_fraction": 0.160645,
+   "mixed_share": 0.012821,
+   "negative_cells": 1407,
+   "oracle_fraction": 0.152344,
+   "oracle_fraction_if_masked_is_code": 0.312988,
+   "positive_cells": 312,
+   "positive_cells_mixed_with_data": 4,
+   "positive_cells_near_dynamic_control": 125,
+   "residual_frf": 0.1875,
+   "role": "genesis_oof",
+   "score": {
+    "negative": {
+     "p100": -5.344734,
+     "p50": -11.769255,
+     "p95": -10.341419,
+     "p99": -9.112562
+    },
+    "positive_non_seed": {
+     "p00": -7.02281,
+     "p01": -5.865896,
+     "p05": -4.579219,
+     "p50": 10.200322
+    },
+    "worst_positive_rank_fraction": 0.187012
+   },
+   "seed_cells": 0,
+   "seed_positive_share": 0.0,
+   "short_positive_cells": 0,
+   "size": 262144,
+   "starts": 11010,
+   "starts_unreached_by_direct_flow": 1.0,
+   "tail25": {
+    "cells": 0,
+    "executable_boundary_adjacent": 0,
+    "mixed_with_data": 0,
+    "near_dynamic_control": 0,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 0,
+    "oracle_feasible": true,
+    "retained": 1.0
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 0,
+    "oracle_feasible": true,
+    "retained": 1.0
+   },
+   "adapt_density_estimate": 1.0,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 7,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 7,
+    "on_unknown": 0
+   },
+   "auroc": null,
+   "category": "xplat_period",
+   "cells": 2,
+   "density_all_cells": 1.0,
+   "density_labelled": 1.0,
+   "dynamic_control_cells": 2,
+   "er": null,
+   "frf": 1.0,
+   "id": "xp/BattleIsleEditor/editors/BIEd16#hunk0",
+   "lineage": "BattleIsleEditor",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.5,
+   "negative_cells": 0,
+   "oracle_fraction": 1.0,
+   "oracle_fraction_if_masked_is_code": 1.0,
+   "positive_cells": 2,
+   "positive_cells_mixed_with_data": 1,
+   "positive_cells_near_dynamic_control": 2,
+   "residual_frf": 0.5,
+   "role": "xplat_transfer",
+   "score": {
+    "negative": {
+     "p100": null,
+     "p50": null,
+     "p95": null,
+     "p99": null
+    },
+    "positive_non_seed": {
+     "p00": 10.904603,
+     "p01": 10.904603,
+     "p05": 10.904603,
+     "p50": 10.904603
+    },
+    "worst_positive_rank_fraction": 0.0
+   },
+   "seed_cells": 1,
+   "seed_positive_share": 0.5,
+   "short_positive_cells": 0,
+   "size": 252,
+   "starts": 68,
+   "starts_unreached_by_direct_flow": 0.0,
+   "tail25": {
+    "cells": 1,
+    "executable_boundary_adjacent": 1,
+    "mixed_with_data": 1,
+    "near_dynamic_control": 1,
+    "short_run": 0,
+    "unreached_by_direct_flow": 0
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 11,
+     "mixed_with_data": 1,
+     "near_dynamic_control": 46,
+     "short_run": 0,
+     "unreached_by_direct_flow": 47
+    },
+    "missed_cells": 47,
+    "missed_starts": 2053,
+    "negative_admitted": 0,
+    "oracle_feasible": false,
+    "retained": 0.353933
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 14,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 21,
+     "short_run": 0,
+     "unreached_by_direct_flow": 21
+    },
+    "missed_cells": 21,
+    "missed_starts": 937,
+    "negative_admitted": 0,
+    "oracle_feasible": false,
+    "retained": 0.5
+   },
+   "adapt_density_estimate": 0.617978,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 920,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 920,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "xplat_period",
+   "cells": 178,
+   "density_all_cells": 0.617978,
+   "density_labelled": 0.621469,
+   "dynamic_control_cells": 68,
+   "er": 0.0,
+   "frf": 0.617978,
+   "id": "xp/BattleIsleEditor/editors/BIEdDD112#hunk1",
+   "lineage": "BattleIsleEditor",
+   "masked_cells": 1,
+   "masked_fraction": 0.005618,
+   "mixed_share": 0.009091,
+   "negative_cells": 67,
+   "oracle_fraction": 0.617978,
+   "oracle_fraction_if_masked_is_code": 0.623596,
+   "positive_cells": 110,
+   "positive_cells_mixed_with_data": 1,
+   "positive_cells_near_dynamic_control": 108,
+   "residual_frf": 0.617978,
+   "role": "xplat_transfer",
+   "score": {
+    "negative": {
+     "p100": -5.442284,
+     "p50": -10.851066,
+     "p95": -6.040367,
+     "p99": -5.468345
+    },
+    "positive_non_seed": {
+     "p00": 2.396073,
+     "p01": 2.972032,
+     "p05": 3.574202,
+     "p50": 6.992834
+    },
+    "worst_positive_rank_fraction": 0.61236
+   },
+   "seed_cells": 0,
+   "seed_positive_share": 0.0,
+   "short_positive_cells": 0,
+   "size": 22756,
+   "starts": 4792,
+   "starts_unreached_by_direct_flow": 1.0,
+   "tail25": {
+    "cells": 66,
+    "executable_boundary_adjacent": 66,
+    "mixed_with_data": 1,
+    "near_dynamic_control": 65,
+    "short_run": 0,
+    "unreached_by_direct_flow": 66
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 12,
+     "mixed_with_data": 3,
+     "near_dynamic_control": 6,
+     "short_run": 1,
+     "unreached_by_direct_flow": 7
+    },
+    "missed_cells": 14,
+    "missed_starts": 514,
+    "negative_admitted": 0,
+    "oracle_feasible": false,
+    "retained": 0.351145
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 0,
+     "mixed_with_data": 0,
+     "near_dynamic_control": 0,
+     "short_run": 0,
+     "unreached_by_direct_flow": 0
+    },
+    "missed_cells": 0,
+    "missed_starts": 0,
+    "negative_admitted": 6,
+    "oracle_feasible": true,
+    "retained": 0.503817
+   },
+   "adapt_density_estimate": 0.458015,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 330,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 330,
+    "on_unknown": 0
+   },
+   "auroc": 1.0,
+   "category": "xplat_modern",
+   "cells": 131,
+   "density_all_cells": 0.458015,
+   "density_labelled": 0.458015,
+   "dynamic_control_cells": 14,
+   "er": 0.0,
+   "frf": 0.458015,
+   "id": "xp/amiga-realtime3d/programs/Program_09#hunk0",
+   "lineage": "amiga-realtime3d",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.066667,
+   "negative_cells": 71,
+   "oracle_fraction": 0.458015,
+   "oracle_fraction_if_masked_is_code": 0.458015,
+   "positive_cells": 60,
+   "positive_cells_mixed_with_data": 4,
+   "positive_cells_near_dynamic_control": 25,
+   "residual_frf": 0.458015,
+   "role": "xplat_transfer",
+   "score": {
+    "negative": {
+     "p100": -6.878972,
+     "p50": -11.838117,
+     "p95": -9.744257,
+     "p99": -8.548793
+    },
+    "positive_non_seed": {
+     "p00": 2.161362,
+     "p01": 3.571249,
+     "p05": 5.836487,
+     "p50": 10.277891
+    },
+    "worst_positive_rank_fraction": 0.450382
+   },
+   "seed_cells": 1,
+   "seed_positive_share": 0.016667,
+   "short_positive_cells": 1,
+   "size": 16728,
+   "starts": 2349,
+   "starts_unreached_by_direct_flow": 0.238399,
+   "tail25": {
+    "cells": 28,
+    "executable_boundary_adjacent": 28,
+    "mixed_with_data": 4,
+    "near_dynamic_control": 15,
+    "short_run": 1,
+    "unreached_by_direct_flow": 14
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 11,
+     "mixed_with_data": 1,
+     "near_dynamic_control": 15,
+     "short_run": 0,
+     "unreached_by_direct_flow": 13
+    },
+    "missed_cells": 22,
+    "missed_starts": 830,
+    "negative_admitted": 0,
+    "oracle_feasible": false,
+    "retained": 0.371429
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 10,
+     "mixed_with_data": 1,
+     "near_dynamic_control": 12,
+     "short_run": 0,
+     "unreached_by_direct_flow": 11
+    },
+    "missed_cells": 17,
+    "missed_starts": 654,
+    "negative_admitted": 0,
+    "oracle_feasible": false,
+    "retained": 0.514286
+   },
+   "adapt_density_estimate": 1.0,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 119,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 97,
+    "on_unknown": 22
+   },
+   "auroc": null,
+   "category": "xplat_modern",
+   "cells": 35,
+   "density_all_cells": 1.0,
+   "density_labelled": 1.0,
+   "dynamic_control_cells": 12,
+   "er": null,
+   "frf": 1.0,
+   "id": "xp/toslibc/lib+examples/example/WINDOW.PRG#text+data",
+   "lineage": "toslibc",
+   "masked_cells": 0,
+   "masked_fraction": 0.0,
+   "mixed_share": 0.028571,
+   "negative_cells": 0,
+   "oracle_fraction": 1.0,
+   "oracle_fraction_if_masked_is_code": 1.0,
+   "positive_cells": 35,
+   "positive_cells_mixed_with_data": 1,
+   "positive_cells_near_dynamic_control": 21,
+   "residual_frf": 1.0,
+   "role": "xplat_transfer",
+   "score": {
+    "negative": {
+     "p100": null,
+     "p50": null,
+     "p95": null,
+     "p99": null
+    },
+    "positive_non_seed": {
+     "p00": 9.681716,
+     "p01": 9.681716,
+     "p05": 10.006876,
+     "p50": 11.487696
+    },
+    "worst_positive_rank_fraction": 0.971429
+   },
+   "seed_cells": 1,
+   "seed_positive_share": 0.028571,
+   "short_positive_cells": 0,
+   "size": 4460,
+   "starts": 1288,
+   "starts_unreached_by_direct_flow": 0.438665,
+   "tail25": {
+    "cells": 27,
+    "executable_boundary_adjacent": 27,
+    "mixed_with_data": 1,
+    "near_dynamic_control": 17,
+    "short_run": 0,
+    "unreached_by_direct_flow": 16
+   }
+  },
+  {
+   "B35": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 18,
+     "mixed_with_data": 8,
+     "near_dynamic_control": 41,
+     "short_run": 0,
+     "unreached_by_direct_flow": 52
+    },
+    "missed_cells": 54,
+    "missed_starts": 2039,
+    "negative_admitted": 0,
+    "oracle_feasible": false,
+    "retained": 0.356522
+   },
+   "B50": {
+    "masked_admitted": 0,
+    "mechanism": {
+     "executable_boundary_adjacent": 18,
+     "mixed_with_data": 8,
+     "near_dynamic_control": 27,
+     "short_run": 0,
+     "unreached_by_direct_flow": 37
+    },
+    "missed_cells": 37,
+    "missed_starts": 1401,
+    "negative_admitted": 0,
+    "oracle_feasible": false,
+    "retained": 0.504348
+   },
+   "adapt_density_estimate": 0.843478,
+   "audit": {
+    "contradiction_rate": 0.0,
+    "direct_targets": 588,
+    "inside_instruction": 0,
+    "on_labelled_data": 0,
+    "on_start": 567,
+    "on_unknown": 21
+   },
+   "auroc": 1.0,
+   "category": "xplat_modern",
+   "cells": 115,
+   "density_all_cells": 0.826087,
+   "density_labelled": 0.959596,
+   "dynamic_control_cells": 34,
+   "er": 0.1,
+   "frf": 0.843478,
+   "id": "xp/toslibc/lib+examples/test/SUITE.TOS#text+data",
+   "lineage": "toslibc",
+   "masked_cells": 16,
+   "masked_fraction": 0.13913,
+   "mixed_share": 0.084211,
+   "negative_cells": 4,
+   "oracle_fraction": 0.826087,
+   "oracle_fraction_if_masked_is_code": 0.965217,
+   "positive_cells": 95,
+   "positive_cells_mixed_with_data": 8,
+   "positive_cells_near_dynamic_control": 77,
+   "residual_frf": 0.843478,
+   "role": "xplat_transfer",
+   "score": {
+    "negative": {
+     "p100": -3.487636,
+     "p50": -4.852718,
+     "p95": -3.487636,
+     "p99": -3.487636
+    },
+    "positive_non_seed": {
+     "p00": 5.024725,
+     "p01": 7.436437,
+     "p05": 8.603205,
+     "p50": 10.95041
+    },
+    "worst_positive_rank_fraction": 0.834783
+   },
+   "seed_cells": 1,
+   "seed_positive_share": 0.010526,
+   "short_positive_cells": 0,
+   "size": 14672,
+   "starts": 3495,
+   "starts_unreached_by_direct_flow": 0.87897,
+   "tail25": {
+    "cells": 67,
+    "executable_boundary_adjacent": 67,
+    "mixed_with_data": 8,
+    "near_dynamic_control": 53,
+    "short_run": 0,
+    "unreached_by_direct_flow": 65
+   }
+  }
+ ],
+ "lineage_table": {
+  "BattleIsleEditor": {
+   "category": "xplat_period",
+   "evidence": "Amiga; the author's 1991 source, A68K 2.71 + vlink, executables byte-identical",
+   "note": "authentic corroboration"
+  },
+  "D01": {
+   "category": "historical_genesis",
+   "evidence": "Sonic 1/2/S&K (1991-94) + 36 Sonic CD (1993) modules; Sega hand assembly; AS / asl rebuilds, listing semantics",
+   "note": "one engine family"
+  },
+  "D02": {
+   "category": "historical_genesis",
+   "evidence": "Flicky (Genesis 1991); Sega hand assembly; AS asl rebuild",
+   "note": ""
+  },
+  "D03": {
+   "category": "historical_genesis",
+   "evidence": "Shining Force I/II (1992/93); SN 68k 2.53 rebuild; data split of the authorized image by the reconstruction authors",
+   "note": "boundaries from a community data split"
+  },
+  "D04": {
+   "category": "historical_genesis",
+   "evidence": "Phantasy Star II (1989); AS Bld 89 rebuild",
+   "note": ""
+  },
+  "D05": {
+   "category": "modern_sgdk",
+   "evidence": "Genesis 2048, SGDK 1.62 / GCC",
+   "note": ""
+  },
+  "D06": {
+   "category": "modern_sgdk",
+   "evidence": "TetrisMD, SGDK 1.41 / GCC",
+   "note": ""
+  },
+  "D07": {
+   "category": "modern_sgdk",
+   "evidence": "240p Test Suite (SGDK 1.11 fork, GCC 3.4.6, non-LTO)",
+   "note": ""
+  },
+  "D09": {
+   "category": "modern_sgdk",
+   "evidence": "MegaPong, SGDK 1.34 / GCC",
+   "note": ""
+  },
+  "D10": {
+   "category": "modern_sgdk",
+   "evidence": "Genesis Megatetris, SGDK 1.90 / GCC",
+   "note": ""
+  },
+  "D11": {
+   "category": "modern_sgdk",
+   "evidence": "Penguin World, SGDK 1.70 / GCC",
+   "note": ""
+  },
+  "D12": {
+   "category": "modern_sgdk",
+   "evidence": "MegaDriving, SGDK 2.11 / GCC 13.2",
+   "note": ""
+  },
+  "EmuTOS": {
+   "category": "xplat_modern",
+   "evidence": "Atari ST/Amiga firmware reimplementation; GCC 4.6.4 + gas; reproducibility observed, not pinned",
+   "note": "authored 2001+"
+  },
+  "HelloAmi": {
+   "category": "xplat_diagnostic",
+   "evidence": "Amiga vasm units, tiny",
+   "note": ""
+  },
+  "amiga-realtime3d": {
+   "category": "xplat_modern",
+   "evidence": "Amiga programs, vasm, CC BY-SA 4.0 repository",
+   "note": "modern authored"
+  },
+  "toslibc": {
+   "category": "xplat_modern",
+   "evidence": "Atari ST C library and examples, m68k-elf GCC 13.3",
+   "note": "modern toolchain"
+  }
+ },
+ "schema": "segarecomp.seg085.diag.v1.taxonomy",
+ "scope_note": "Genesis rows are out-of-fold (strict leave-one-lineage-out, SEG-084 A0 = SEG-076 model A, bitwise); cross-platform rows are transfer scores of the all-Genesis model A and are never out-of-fold; no row is a held-out independent evaluation (those are SEG-085-T002/T004)"
+}

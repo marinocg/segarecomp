@@ -1,0 +1,707 @@
+{
+ "configs": {
+  "M1_HGB": {
+   "abstentions": 16,
+   "committed_ADAPT": {
+    "complete": false,
+    "images": 50,
+    "lineages": 11,
+    "mean_ku": null,
+    "mean_retained": 0.9484590316837259,
+    "misses": 1,
+    "worst_frf": 1.0
+   },
+   "density_estimate_vs_labelled_density": {
+    "d05": [
+     0.296875,
+     0.086914
+    ],
+    "d06": [
+     0.166016,
+     0.069661
+    ],
+    "d07": [
+     0.456055,
+     0.325684
+    ],
+    "d09": [
+     0.265625,
+     0.023438
+    ],
+    "d10": [
+     0.1875,
+     0.092122
+    ],
+    "d11": [
+     0.263672,
+     0.087402
+    ],
+    "d12": [
+     0.150879,
+     0.152344
+    ],
+    "flicky": [
+     0.175781,
+     0.175781
+    ],
+    "ps2": [
+     0.09375,
+     0.09196
+    ],
+    "s1": [
+     0.199219,
+     0.200195
+    ],
+    "s2": [
+     0.200195,
+     0.202393
+    ],
+    "scd/DEMO11A.MMD": [
+     0.208496,
+     0.202148
+    ],
+    "scd/R11A__.MMD": [
+     0.209961,
+     0.202148
+    ],
+    "scd/R11B__.MMD": [
+     0.196289,
+     0.191406
+    ],
+    "scd/R11C__.MMD": [
+     0.197754,
+     0.190918
+    ],
+    "scd/R11D__.MMD": [
+     0.196289,
+     0.189941
+    ],
+    "scd/R61A__.MMD": [
+     0.205078,
+     0.205566
+    ],
+    "scd/SNCBNK1B.BIN": [
+     0.011157,
+     0.011744
+    ],
+    "scd/SNCBNK4B.BIN": [
+     0.012063,
+     0.012698
+    ],
+    "scd/SNCBNK6B.BIN": [
+     0.011183,
+     0.011772
+    ],
+    "scd/SPSS__.BIN": [
+     0.033594,
+     0.033984
+    ],
+    "sf1": [
+     0.105143,
+     0.106608
+    ],
+    "sf2": [
+     0.097778,
+     0.092651
+    ],
+    "sk": [
+     0.248169,
+     0.248596
+    ]
+   },
+   "margins": {
+    "D01": 0.162223,
+    "D02": 0.664624,
+    "D03": 0.664624,
+    "D04": 0.664624,
+    "D05": 0.664624,
+    "D06": 0.664624,
+    "D07": 0.664624,
+    "D09": 0.664624,
+    "D10": 0.664624,
+    "D11": 0.664624,
+    "D12": 0.664624
+   },
+   "pairs": {
+    "ADAPT": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.948459,
+     "misses": 1,
+     "worst_frf": 1.0
+    },
+    "B35": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.357098,
+     "misses": 7929,
+     "worst_frf": 1.0
+    },
+    "B45": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.455592,
+     "misses": 537,
+     "worst_frf": 1.0
+    },
+    "B50": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.504828,
+     "misses": 1,
+     "worst_frf": 1.0
+    },
+    "B60": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.604143,
+     "misses": 1,
+     "worst_frf": 1.0
+    }
+   },
+   "per_lineage_ADAPT": {
+    "D01": {
+     "abstained": 5,
+     "images_missing": 1,
+     "mean_retained": 0.4330493485209848,
+     "misses": 1
+    },
+    "D02": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D03": {
+     "abstained": 2,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D04": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D05": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D06": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D07": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D09": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D10": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D11": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D12": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    }
+   },
+   "reproduces_committed": true
+  },
+  "M3_FROZEN": {
+   "abstentions": 15,
+   "committed_ADAPT": {
+    "complete": false,
+    "images": 50,
+    "lineages": 11,
+    "mean_ku": null,
+    "mean_retained": 0.9467205365262598,
+    "misses": 2,
+    "worst_frf": 1.0
+   },
+   "density_estimate_vs_labelled_density": {
+    "d05": [
+     0.295898,
+     0.086914
+    ],
+    "d06": [
+     0.165039,
+     0.069661
+    ],
+    "d07": [
+     0.452637,
+     0.325684
+    ],
+    "d09": [
+     0.265625,
+     0.023438
+    ],
+    "d10": [
+     0.182617,
+     0.092122
+    ],
+    "d11": [
+     0.259766,
+     0.087402
+    ],
+    "d12": [
+     0.15332,
+     0.152344
+    ],
+    "flicky": [
+     0.174805,
+     0.175781
+    ],
+    "ps2": [
+     0.095703,
+     0.09196
+    ],
+    "s1": [
+     0.204102,
+     0.200195
+    ],
+    "s2": [
+     0.202881,
+     0.202393
+    ],
+    "scd/DEMO11A.MMD": [
+     0.205078,
+     0.202148
+    ],
+    "scd/R11A__.MMD": [
+     0.206543,
+     0.202148
+    ],
+    "scd/R11B__.MMD": [
+     0.199219,
+     0.191406
+    ],
+    "scd/R11C__.MMD": [
+     0.199707,
+     0.190918
+    ],
+    "scd/R11D__.MMD": [
+     0.200195,
+     0.189941
+    ],
+    "scd/R61A__.MMD": [
+     0.206543,
+     0.205566
+    ],
+    "scd/SNCBNK1B.BIN": [
+     0.011157,
+     0.011744
+    ],
+    "scd/SNCBNK4B.BIN": [
+     0.012063,
+     0.012698
+    ],
+    "scd/SNCBNK6B.BIN": [
+     0.011183,
+     0.011772
+    ],
+    "scd/SPSS__.BIN": [
+     0.033984,
+     0.033984
+    ],
+    "sf1": [
+     0.10498,
+     0.106608
+    ],
+    "sf2": [
+     0.09436,
+     0.092651
+    ],
+    "sk": [
+     0.249512,
+     0.248596
+    ]
+   },
+   "margins": {
+    "D01": 0.152946,
+    "D02": 0.82551,
+    "D03": 0.82551,
+    "D04": 0.82551,
+    "D05": 0.82551,
+    "D06": 0.82551,
+    "D07": 0.82551,
+    "D09": 0.82551,
+    "D10": 0.82551,
+    "D11": 0.82551,
+    "D12": 0.82551
+   },
+   "pairs": {
+    "ADAPT": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.946721,
+     "misses": 2,
+     "worst_frf": 1.0
+    },
+    "B35": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.356851,
+     "misses": 8066,
+     "worst_frf": 1.0
+    },
+    "B45": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.455596,
+     "misses": 637,
+     "worst_frf": 1.0
+    },
+    "B50": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.504813,
+     "misses": 2,
+     "worst_frf": 1.0
+    },
+    "B60": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.604215,
+     "misses": 2,
+     "worst_frf": 1.0
+    }
+   },
+   "per_lineage_ADAPT": {
+    "D01": {
+     "abstained": 4,
+     "images_missing": 1,
+     "mean_retained": 0.4139259017888578,
+     "misses": 2
+    },
+    "D02": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D03": {
+     "abstained": 2,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D04": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D05": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D06": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D07": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D09": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D10": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D11": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D12": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    }
+   },
+   "reproduces_committed": true
+  },
+  "M3_R": {
+   "abstentions": 11,
+   "committed_ADAPT": {
+    "complete": false,
+    "images": 50,
+    "lineages": 11,
+    "mean_ku": null,
+    "mean_retained": 0.5847085660256113,
+    "misses": 32,
+    "worst_frf": 1.0
+   },
+   "density_estimate_vs_labelled_density": {
+    "d05": [
+     0.307617,
+     0.086914
+    ],
+    "d06": [
+     0.172526,
+     0.069661
+    ],
+    "d07": [
+     0.456055,
+     0.325684
+    ],
+    "d09": [
+     0.28418,
+     0.023438
+    ],
+    "d10": [
+     0.186523,
+     0.092122
+    ],
+    "d11": [
+     0.270508,
+     0.087402
+    ],
+    "d12": [
+     0.171875,
+     0.152344
+    ],
+    "flicky": [
+     0.172852,
+     0.175781
+    ],
+    "ps2": [
+     0.094401,
+     0.09196
+    ],
+    "s1": [
+     0.206055,
+     0.200195
+    ],
+    "s2": [
+     0.203491,
+     0.202393
+    ],
+    "scd/DEMO11A.MMD": [
+     0.20459,
+     0.202148
+    ],
+    "scd/R11A__.MMD": [
+     0.208496,
+     0.202148
+    ],
+    "scd/R11B__.MMD": [
+     0.203613,
+     0.191406
+    ],
+    "scd/R11C__.MMD": [
+     0.204102,
+     0.190918
+    ],
+    "scd/R11D__.MMD": [
+     0.203125,
+     0.189941
+    ],
+    "scd/R61A__.MMD": [
+     0.211426,
+     0.205566
+    ],
+    "scd/SNCBNK1B.BIN": [
+     0.011157,
+     0.011744
+    ],
+    "scd/SNCBNK4B.BIN": [
+     0.012063,
+     0.012698
+    ],
+    "scd/SNCBNK6B.BIN": [
+     0.011183,
+     0.011772
+    ],
+    "scd/SPSS__.BIN": [
+     0.035156,
+     0.033984
+    ],
+    "sf1": [
+     0.105876,
+     0.106608
+    ],
+    "sf2": [
+     0.092834,
+     0.092651
+    ],
+    "sk": [
+     0.250549,
+     0.248596
+    ]
+   },
+   "margins": {
+    "D01": 0.301058,
+    "D02": 0.301058,
+    "D03": 0.243878,
+    "D04": 0.301058,
+    "D05": 0.301058,
+    "D06": 0.301058,
+    "D07": 0.301058,
+    "D09": 0.301058,
+    "D10": 0.301058,
+    "D11": 0.301058,
+    "D12": 0.301058
+   },
+   "pairs": {
+    "ADAPT": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.584709,
+     "misses": 32,
+     "worst_frf": 1.0
+    },
+    "B35": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.35696,
+     "misses": 8121,
+     "worst_frf": 1.0
+    },
+    "B45": {
+     "complete": false,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.455558,
+     "misses": 435,
+     "worst_frf": 1.0
+    },
+    "B50": {
+     "complete": true,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.504795,
+     "misses": 0,
+     "worst_frf": 1.0
+    },
+    "B60": {
+     "complete": true,
+     "images": 50,
+     "lineages": 11,
+     "mean_retained": 0.6042,
+     "misses": 0,
+     "worst_frf": 1.0
+    }
+   },
+   "per_lineage_ADAPT": {
+    "D01": {
+     "abstained": 9,
+     "images_missing": 0,
+     "mean_retained": 0.5844940146931821,
+     "misses": 0
+    },
+    "D02": {
+     "abstained": 0,
+     "images_missing": 0,
+     "mean_retained": 0.48046875,
+     "misses": 0
+    },
+    "D03": {
+     "abstained": 0,
+     "images_missing": 1,
+     "mean_retained": 0.34502156575520837,
+     "misses": 32
+    },
+    "D04": {
+     "abstained": 0,
+     "images_missing": 0,
+     "mean_retained": 0.4000651041666667,
+     "misses": 0
+    },
+    "D05": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D06": {
+     "abstained": 0,
+     "images_missing": 0,
+     "mean_retained": 0.4801432291666667,
+     "misses": 0
+    },
+    "D07": {
+     "abstained": 1,
+     "images_missing": 0,
+     "mean_retained": 1.0,
+     "misses": 0
+    },
+    "D09": {
+     "abstained": 0,
+     "images_missing": 0,
+     "mean_retained": 0.5908203125,
+     "misses": 0
+    },
+    "D10": {
+     "abstained": 0,
+     "images_missing": 0,
+     "mean_retained": 0.490234375,
+     "misses": 0
+    },
+    "D11": {
+     "abstained": 0,
+     "images_missing": 0,
+     "mean_retained": 0.580078125,
+     "misses": 0
+    },
+    "D12": {
+     "abstained": 0,
+     "images_missing": 0,
+     "mean_retained": 0.48046875,
+     "misses": 0
+    }
+   },
+   "reproduces_committed": true
+  }
+ },
+ "schema": "segarecomp.seg085.diag.v1.adapt_repro"
+}
