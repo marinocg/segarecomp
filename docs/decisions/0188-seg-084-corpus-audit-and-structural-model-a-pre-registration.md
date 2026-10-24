@@ -26,9 +26,11 @@
 | Sealed / reserved material (SEG-072 7 entries, SEG-075 18, SEG-077 8 reserved titles) | opaque bindings in public manifests; contents under custodian-controlled `sealed` directories and in the handoffs | sealed and custodian-controlled; **never** placed in a training-visible snapshot; a separate encrypted or access-controlled backup is recommended (below), not built here |
 | ROM / executable images, handoff CAS, toolchain images, traces, disassembly, token streams | `games/`, `.cache` | deliberately excluded from Git retention |
 
+> **Superseded digest.** The plan below was re-frozen once more (digest `f93e4023919b476ad169794088255923f1ed8ec9a2e6db832779b42e5e55f18e`) after the first NHL '94 diagnostic run exposed a defect in the corroboration definition and a class-scope bug, and before any retained fit; ADR 0189 records the final digest and the voided partial fit set. The rules in this ADR are otherwise unchanged apart from the corroboration semantics (the edge log records only non-sequential steps) and the added retention-only rule (post-hoc: written after the two failed games' outcomes were known).
+
 ## Frozen assessment protocol
 
-Plan `tools/segarecomp_seg084_a.plan.json`, digest `bfb996e98d88bb15baa875946c360e174d5c34bf54615c7ef832bf5802095467`, committed before any non-rehearsal fit (the first plan, `83b79e80...`, was superseded by this one after the independent review below). It binds the study tool, the audit and diagnostic tools, their tests, the unchanged SEG-075/076
+Plan `tools/segarecomp_seg084_a.plan.json`, digest `bfb996e98d88bb15baa875946c360e174d5c34bf54615c7ef832bf5802095467`, committed before any non-rehearsal fit (the first plan, `83b79e80...`, was superseded after the independent review below; see the superseded-digest note). It binds the study tool, the audit and diagnostic tools, their tests, the unchanged SEG-075/076
 modules and the SEG-083 results it reads. Summary (the plan is authoritative):
 
 - **Model**: true SEG-076 model A (`a_features`, `A_CONFIG`), strict leave-one-lineage-out over the 11 qualified lineages (SEG-076's C0 folds). **Arms**: A0 (registry only), A81, A83, A_all (Sonic 2 excluded: same image as D01's `s2`), A_control,
