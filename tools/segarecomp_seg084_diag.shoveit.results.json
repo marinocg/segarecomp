@@ -1,0 +1,47 @@
+{
+ "executed_rom_pcs": 2451,
+ "fidelity": {
+  "deterministic": true,
+  "distinct_states": 6,
+  "domains_complete": true,
+  "identity_ok": true,
+  "no_perturbation": true,
+  "played_to_end": true,
+  "states_ok": true
+ },
+ "fifths": {
+  "fifths_ge_min": 1,
+  "first_window_fraction": 0.98368,
+  "fractions": [
+   0.99878,
+   0.0,
+   0.0,
+   0.0,
+   0.00122
+  ],
+  "frames_to_first_window_end": 1800,
+  "per_fifth": [
+   2448,
+   0,
+   0,
+   0,
+   3
+  ],
+  "total": 2451,
+  "windows_with_new_code": 4
+ },
+ "frames": 66331,
+ "map_mismatch": 0,
+ "movie_finished_at_frame": 66331,
+ "original_class": "REPLAY_INVALID",
+ "proposed": {
+  "acquisition_yield": "QUALIFIED_LOW_YIELD",
+  "continued_discovery_fifths": 1,
+  "label_confidence": true,
+  "note": "prospective proposal only: ADR 0187's class is unchanged; continued discovery stays a separately reported field",
+  "original_class": "REPLAY_INVALID",
+  "proposed_class": "QUALIFIED_LOW_YIELD",
+  "replay_fidelity": true,
+  "retroactive_effect": false
+ }
+}

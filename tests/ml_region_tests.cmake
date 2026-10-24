@@ -159,6 +159,10 @@ set_property(TEST segarecomp_genesis_tasbatch_test APPEND PROPERTY LABELS full f
 # region-level (ER, B35/B50) metrics on synthetic cells, frozen-plan integrity (synthetic data only).
 add_test(NAME segarecomp_genesis_tasbatch5_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_genesis_tasbatch5_test.py)
 set_property(TEST segarecomp_genesis_tasbatch5_test APPEND PROPERTY LABELS full fast)
+# SEG-084-T001 (research tooling): M68K corpus audit helpers and the structural model-A reassessment rules (readiness decision, noise reference, independence,
+# weighted-fit equivalence when numpy / scikit-learn are available; synthetic data only).
+add_test(NAME segarecomp_seg084_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg084_test.py)
+set_property(TEST segarecomp_seg084_test APPEND PROPERTY LABELS full fast)
 # SEG-077-T005 (research tooling): frozen SEG-077 decision rules, labelled-cell blind metrics, the job matrix and, in the research
 # environment (numpy, torch), label-free seeds and leakage invariance of A features and C's candidate graph (skipped without numpy).
 add_test(NAME segarecomp_seg077_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg077_test.py)

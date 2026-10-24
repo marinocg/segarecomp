@@ -1,0 +1,30 @@
+{
+ "accepted_e_fraction_recomputed": 0.98068,
+ "class": "DISASSEMBLER_LIMITATION",
+ "contiguous_runs": 174,
+ "counts": {
+  "corroborated": 204
+ },
+ "cpu_forms": {
+  "family2/ea_src10/width1": 15,
+  "family2/ea_src10/width2": 177,
+  "family2/ea_src10/width3": 11,
+  "family3/ea_src1/width1": 1
+ },
+ "disasm_kinds": {
+  "short": 204
+ },
+ "executed_rom_pcs": 10561,
+ "kinds": {
+  "straight": 204
+ },
+ "mapping_signals_skipped": 0,
+ "opcode_line_histogram": {
+  "0": 1,
+  "B": 203
+ },
+ "opcode_lines_below_90pct": [],
+ "reason": "at least 95 % of ALL rejected starts (unverifiable ones count against) have emulator-observed successors consistent with the CPU decoder length (straight-line fall-through, or direct branch / call targets decoded from the instruction words), none overlaps an accepted instruction, and every opcode line with >= 3 rejected starts is >= 90 % corroborated",
+ "rejected": 204,
+ "rejected_starts": 204
+}
