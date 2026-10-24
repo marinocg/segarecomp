@@ -1,0 +1,136 @@
+{
+ "arms": {
+  "A0": "SEG-072 qualified development corpus only (Genesis, the other 10 lineages per fold)",
+  "A0_sub1..3": "noise reference",
+  "A81": "A0 + SEG-081 TAS strong labels (vm2, bnr, ewj2)",
+  "A83": "A0 + SEG-083 TAS strong labels (shadowrun, doraemon, terminator)",
+  "A_all": "A0 + all six qualified TAS strong labels; Sonic 2 (SEG-080) excluded (the same image is the registry's D01 member: no duplicate training, no extra lineage count)",
+  "A_all_W": "A0 + TAS strong+weak labels with cell weights (seg084.a_weighted.v1); not the original model A",
+  "A_control": "A0 + the matching control strong labels of the same six games (SEG-081: player-1-only primary; SEG-083: all-controller primary)",
+  "A_control_W": "A0 + control strong+weak labels with cell weights (seg084.a_weighted.v1)",
+  "A_matched": "A0 + TAS strong labels randomly down-sampled (seed 84) to each game's control positive / negative cell counts",
+  "A_noterm": "A0 + the five other TAS strong labels (A_all without The Terminator)",
+  "A_term": "A0 + The Terminator TAS strong labels only (low code yield, 2,117 strong hard-negative cells)"
+ },
+ "bound_code": {
+  "tests/segarecomp_seg084_test.py": "0b58b381910d929ea1fcec1bddeb148c48213fe6889a1674d4ac8684f3b292d8",
+  "tools/segarecomp_genesis_bizhawk.py": "c27cf3895ebec5d87f7575f81d7c59455bba787a224728bb762aa385f22825c4",
+  "tools/segarecomp_genesis_tasbatch5.model_a.results.json": "e8783efa1273baae923b757e4c1d0045d996a655883017b0280613023f8d3328",
+  "tools/segarecomp_genesis_tasbatch5.readiness.results.json": "2e119704e11b5765185c385fca5e3c75f865c153016da3b73fb9087556b7b5bf",
+  "tools/segarecomp_genesis_tasbatch_ml.py": "dd073447927caaeb7ff09949058743001b87658c3e0fa9d2d4cdca6e22e37e98",
+  "tools/segarecomp_ml_region_gen2.py": "5b5e07c6b6a2ae3af3a1a45aead275a23bd110a25bbfbf5efd73307d817650d3",
+  "tools/segarecomp_ml_region_gen2_train.py": "5828443db2bba8dcbd8e6034be9f16524299039cd9434f548fb5caf3e3fa2c0c",
+  "tools/segarecomp_ml_v3.corpus_manifest.json": "0afb54640affa17678ffd3af610e54e1bbee8cfa93d768356ff4ce74f5c8ea23",
+  "tools/segarecomp_ml_v3.py": "ef18ab40e1da9f25ecc4e1e0a9f0f630453fc8e15b13812750e133d8998947ba",
+  "tools/segarecomp_ml_v3_eval.py": "eea86b0b1c35d79b235c4f0ed1e559cbb36fb190bc36509221184140aa6fa213",
+  "tools/segarecomp_ml_v3_train.py": "7234c6ffe964f0f6db44126d760fb60eff6ce97b30e93a7034d3e1e2bb97592f",
+  "tools/segarecomp_seg084_a.py": "90cbffc6c3a10be3cfb13a021d204811c05ae11089071c9bacfd650b9aff81fe",
+  "tools/segarecomp_seg084_audit.py": "75cb5e3ad116bceda4ef790585b642964b5ffa496c61107cbd671c419e313387",
+  "tools/segarecomp_seg084_diag.py": "b8b0dd172df2e9809a32191869de18b2bd7b06359b6bf85ff41ecea96cd07889",
+  "tools/segarecomp_xplat_explore_eval.py": "8e547410df3176cf1259dc0f385a6f683c6e4721cce72296a76d49cd99a17b1e",
+  "tools/segarecomp_xplat_models.py": "3eabc2ed412ec3088938061af5a76b53f5b7fcf55deefdfd82031f533f268f8b",
+  "tools/segarecomp_xplat_t005.py": "7422bcc4515b5969cd3bea7490b9ce1f7e3cc7aa3db738c20657a613610f0a60",
+  "tools/segarecomp_xplat_transfer.py": "415bd6ab8dbf5b8b3d4f7c1c8da433fd8cf6bbf64fd76229807a656bf9cb399b"
+ },
+ "evaluation": {
+  "caution": "development folds are reused and lineage-max ER is outlier-driven: differences inside the noise reference are not evidence; nothing here is confirmatory generalisation",
+  "cost": "per-arm CPU seconds of the fit and inference seconds per held-out lineage",
+  "folds": [
+   "D01",
+   "D02",
+   "D03",
+   "D04",
+   "D05",
+   "D06",
+   "D07",
+   "D09",
+   "D10",
+   "D11",
+   "D12"
+  ],
+  "metrics": "SEG-076 definitions unchanged: segarecomp_xplat_explore_eval.image_metrics_ext / lineage_summary / summary (excess retention ER, lineage-max ER, Genesis mean and worst ER, B35/B50 region retention and misses, boundary strata); AP / AUC are secondary context",
+  "negative_errors": "operating point = the A0 fold score at the 10th percentile of positive labelled cells (A0 recall 0.90); every arm is judged at it: false-positive rate on negative cells, on hard-negative cells (genesis_bizhawk.hard_cells) and negative cells admitted at B35/B50",
+  "scheme": "strict leave-one-lineage-out over the 11 qualified SEG-072 lineages (the SEG-076 C0 folds): a held-out lineage contributes no image to training"
+ },
+ "isolation": {
+  "code_shingles": "12-byte shingle containment of labelled code runs (TAS strong U control strong) against the held-out lineage's labelled code, either direction, > 0.30 withholds the game from that fold (SEG-081 rule)",
+  "image": "a TAS ROM whose SHA-256 equals a registry image is excluded",
+  "lineage": "TAS lineage ids are outside the D## namespace",
+  "sealed": "no sealed, reserved or blind path is read (refuse_sealed); the SEG-075 cross-platform dev samples are not used (SEG-076 A used the Genesis corpus only)"
+ },
+ "limits": {
+  "cpu_hours": 8,
+  "fits": "13 arms x 11 folds, one fit each (A is deterministic)",
+  "no": "hyperparameter search, B / C / C-v2 training, sealed data, retracing, new games"
+ },
+ "model": {
+  "features": "segarecomp_xplat_models.a_features(im, relocs_of(im)) (token aggregates, ordinary-decode chains, PC-relative targets, byte statistics, relocations, seed flag, PROVEN reach from seed addresses, +/-1 and +/-4 neighbour means)",
+  "fit": "HistGradientBoostingClassifier(**A_CONFIG) with class_weight balanced, random_state 49, on the pooled labelled 128-byte cells (masked cells excluded)",
+  "reproduction_gate": "A0 for every fold must equal the stored SEG-076 T001 A.C0.<fold> scores bitwise; otherwise EVIDENCE_INSUFFICIENT",
+  "score": "log-odds of predict_proba, exactly `score_a`",
+  "unchanged_modules": "imported unchanged: xplat_models, xplat_explore_eval, xplat_transfer, xplat_t005, ml_v3*, gen2_train",
+  "weighted_path": "seg084.a_weighted.v1: optional per-cell sample_weight (1.0 strong-only evidence, 0.25 weak; masked excluded) used ONLY by ['A_all_W', 'A_control_W']; weights=None is byte-identical to fit_a; weighted arms are NOT called the original model A"
+ },
+ "negative_supervision": {
+  "reported_separately": [
+   "independently qualified code-positive yield",
+   "strong hard-negative yield",
+   "weak weighted hard-negative yield",
+   "mixed-boundary examples",
+   "novel structural examples",
+   "effective independent lineages supplying each kind"
+  ],
+  "terminator": "legitimacy of its strong negatives is checked against the tier definitions (strong D = H header + M DMA-source tiers only) and their non-triviality by the fraction of their words with an ordinary decode; their value by A_term vs A0 and A_noterm vs A_all on the held-out hard-negative and negative-admitted slices",
+  "weak_vs_strong": "A_all_W vs A_all and A_control_W vs A_control; no reference truth repairs any commercial label"
+ },
+ "noise_reference": {
+  "method": "A0 refitted on a random 90% of the labelled base cells with seeds [84, 85, 86] (A0_sub1..3); per-fold noise = max |ER(sub) - ER(A0)|",
+  "rule": "an arm's per-fold ER change counts only if it exceeds that fold's noise; the mean change counts only if it exceeds the mean noise"
+ },
+ "preserved": "ADRs 0181-0187, the SEG-083 frozen plan 228647dd, its decisions (EXPANSION_MIXED, ML_INCONCLUSIVE, MORE_DIVERSITY_NEEDED) and all SEG-076 results are unchanged",
+ "privacy": "private cell scores and contexts stay in the ignored cache; committed results are aggregate counts, rates and digests",
+ "purpose": "reassess the data contribution of the SEG-081 / SEG-083 TAS labels with the TRUE SEG-076 structural model A (a_features + A_CONFIG), not the SEG-072 M1-HGB of the SEG-083 diagnostic; decide readiness for a bounded B / C-v2 pilot with code diversity and negative-supervision diversity judged separately",
+ "readiness": {
+  "code_diversity": "independent useful lineages among the eight SEG-081/083 candidates (SEG-083 rule: code yield >= usefulness criterion, shingle containment <= 0.30) >= 5 AND the six qualified games' strong positive cells >= 20 % of the base positive cells",
+  "independent_of_SEG-083": "this decision does not reinterpret SEG-083's frozen verdict",
+  "negative_diversity": "independent qualified lineages with >= 300 strong hard-negative cells, regardless of their code-yield class, >= 3",
+  "order": "EVIDENCE_INSUFFICIENT (a required arm missing or A0 not reproduced) -> MORE_DIVERSITY_NEEDED (any diversity criterion unmet) -> MODEL_OR_EVALUATION_LIMITATION (A does not respond beyond noise, or no residual headroom) -> NEURAL_PILOT_JUSTIFIED",
+  "outcomes": [
+   "NEURAL_PILOT_JUSTIFIED",
+   "MORE_DIVERSITY_NEEDED",
+   "MODEL_OR_EVALUATION_LIMITATION",
+   "EVIDENCE_INSUFFICIENT"
+  ],
+  "recommendation_map": {
+   "EVIDENCE_INSUFFICIENT": "repair the inputs first",
+   "MODEL_OR_EVALUATION_LIMITATION": "improve evaluation / source-backed evidence before more acquisition",
+   "MORE_DIVERSITY_NEEDED": "acquire a targeted batch",
+   "NEURAL_PILOT_JUSTIFIED": "run a bounded B / C-v2 pilot now (not started automatically)"
+  },
+  "residual": "folds where A_all still has lineage-max ER >= 0.05 and its gain over A0 is within that fold's noise: >= 2",
+  "response": "A_all improves ER beyond the fold noise on >= 2 folds AND the mean ER change exceeds the mean noise",
+  "thresholds": {
+   "diversity_code_min_independent_useful": 5,
+   "diversity_code_min_new_positive_fraction": 0.2,
+   "diversity_negative_min_lineages": 3,
+   "diversity_negative_min_strong_hard_cells": 300,
+   "required_comparisons": [
+    "A0",
+    "A81",
+    "A83",
+    "A_all",
+    "A_control",
+    "A_matched"
+   ],
+   "residual_er": 0.05,
+   "residual_min_folds": 2,
+   "response_min_folds": 2
+  }
+ },
+ "schema": "segarecomp.seg084.a.v1.plan",
+ "seeds": {
+  "problem": "SEG-072 Genesis seeds (`seeds.json`/`d.txt`) are produced by the production CLI `emit-general-startup-bridge-c --reset-entry --direct-control-address-report`, a label-free static direct-flow set; the retained TAS samples carry only the reset vector. Feeding model A the retained seeds would give the TAS images a PROVEN-reach feature distribution unlike every registry image.",
+  "rule": "`prepare` regenerates d.txt for each TAS ROM with the same pinned CLI and the SEG-072 procedure (seed cell = address // 128); a ROM the CLI rejects gets no seeds, as the registry's rejected images do. Seeds never use labels."
+ },
+ "task": "SEG-084-T001"
+}

@@ -11,6 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 import segarecomp_seg084_a as sa  # noqa: E402
 import segarecomp_seg084_audit as au  # noqa: E402
+import segarecomp_seg084_diag as dg  # noqa: E402
 
 FAILURES = []
 SKIPPED = []
@@ -120,6 +121,40 @@ def test_fit_equivalence():
     check(np.allclose(lg, np.log(np.clip(p, 1e-300, 1)) - np.log(np.clip(1 - p, 1e-300, 1)), atol=1e-12), "score is the log-odds of score_a")
 
 
+def row(**kw):
+    r = {"outside_image": False, "header_or_vector": False, "cpu_ordinary": True, "cpu_length": 4, "inside_other_instruction": False, "successor_matches_length": True,
+         "has_successor": True, "straight_line": True, "disasm": "short"}
+    r.update(kw)
+    return r
+
+
+def test_diag_rules():
+    f = dg.fifth_distribution({"0": 2411, "1": 34, "4": 3, "30": 3}, 66331)
+    check(f["per_fifth"][0] == 2448 and f["per_fifth"][4] == 3 and f["fifths_ge_min"] == 1 and f["first_window_fraction"] > 0.98, "Shove It!-shaped growth: one fifth")
+    check(dg.fifth_distribution({"0": 10, "20": 10, "40": 10, "60": 10, "80": 10}, 180000)["fifths_ge_min"] == 5, "evenly spread discovery: five fifths")
+    check(dg.classify_rejections([row() for _ in range(20)])["class"] == "DISASSEMBLER_LIMITATION", "corroborated by emulator successors")
+    check(dg.classify_rejections([row(successor_matches_length=False) for _ in range(20)])["class"] == "UNSOUND_EXECUTION_LABELS", "successor contradicts the CPU length")
+    check(dg.classify_rejections([row(cpu_ordinary=False) for _ in range(20)])["class"] == "INSTRUCTION_FORM_MISMATCH", "CPU decoder not ordinary")
+    check(dg.classify_rejections([row(), row(header_or_vector=True)])["class"] == "ROM_MAPPING_ISSUE", "mapping")
+    check(dg.classify_rejections([row(has_successor=False, successor_matches_length=False) for _ in range(20)])["class"] == "UNRESOLVED", "no evidence is not a pass")
+    check(dg.classify_rejections([row(disasm="decoded") for _ in range(20)])["class"] == "UNRESOLVED", "disassembler decoded it: not a limitation")
+    check(dg.classify_rejections([row() for _ in range(19)] + [row(inside_other_instruction=True)])["class"] == "DISASSEMBLER_LIMITATION", "one overlap in twenty is not > 5 %")
+    check(dg.classify_rejections([row() for _ in range(18)] + [row(inside_other_instruction=True)] * 2)["class"] == "UNSOUND_EXECUTION_LABELS", "two overlaps in twenty are")
+    check(dg.classify_rejections([row() for _ in range(17)] + [row(has_successor=False, successor_matches_length=False)] * 3)["class"] == "UNRESOLVED", "85 % corroborated is below the 95 % bar")
+    check(set(dg.CLASSES) >= {"DISASSEMBLER_LIMITATION", "UNRESOLVED"}, "closed vocabulary")
+    res = {"gate_replay": {"identity_ok": True, "played_to_end": True, "no_perturbation": True, "determinism": {"a": True}, "distinct_ram_vram_states": 6, "digest_domains_missing": False,
+                           "fifths_with_new_code": 1, "progression": False, "replay_ok": False},
+           "gate_tracing": {"tracing_ok": True}, "consistency": {"ok": True}, "classification": {"class": "REPLAY_INVALID", "code_yield_rule": False, "novelty_rule": False}}
+    g = dg.proposed_gates(res)
+    check(g["replay_fidelity"] and g["label_confidence"] and g["proposed_class"] == "QUALIFIED_LOW_YIELD" and g["original_class"] == "REPLAY_INVALID", "fidelity decoupled from discovery")
+    res2 = json.loads(json.dumps(res))
+    res2["gate_replay"]["no_perturbation"] = False
+    check(dg.proposed_gates(res2)["proposed_class"] == "REPLAY_INVALID", "a perturbed replay stays invalid")
+    res3 = json.loads(json.dumps(res))
+    res3["gate_tracing"]["tracing_ok"] = False
+    check(dg.proposed_gates(res3)["proposed_class"] == "TRACING_UNAVAILABLE" and not dg.proposed_gates(res3)["label_confidence"], "tracing failure keeps labels out")
+
+
 def test_committed_artifacts_aggregate_only():
     for f in sorted((ROOT / "tools").glob("segarecomp_seg084*.json")):
         t = f.read_text()
@@ -134,6 +169,7 @@ def main():
     test_arms_and_plan()
     test_audit_helpers()
     test_fit_equivalence()
+    test_diag_rules()
     test_committed_artifacts_aggregate_only()
     print("FAILURES:", len(FAILURES), *FAILURES)
     if SKIPPED:

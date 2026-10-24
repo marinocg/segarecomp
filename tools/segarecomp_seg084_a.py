@@ -147,7 +147,7 @@ def logit(clf, F):
 
 # ------------------------------------------------------------------------------------------------------------------------ plan
 def bound_files() -> list:
-    return sorted({"tools/segarecomp_seg084_a.py", "tools/segarecomp_seg084_audit.py", "tests/segarecomp_seg084_test.py", "tools/segarecomp_xplat_models.py",
+    return sorted({"tools/segarecomp_seg084_a.py", "tools/segarecomp_seg084_audit.py", "tools/segarecomp_seg084_diag.py", "tests/segarecomp_seg084_test.py", "tools/segarecomp_xplat_models.py",
                    "tools/segarecomp_xplat_explore_eval.py", "tools/segarecomp_xplat_transfer.py", "tools/segarecomp_xplat_t005.py", "tools/segarecomp_ml_v3.py",
                    "tools/segarecomp_ml_v3_train.py", "tools/segarecomp_ml_v3_eval.py", "tools/segarecomp_ml_region_gen2_train.py", "tools/segarecomp_ml_region_gen2.py",
                    "tools/segarecomp_genesis_bizhawk.py", "tools/segarecomp_genesis_tasbatch_ml.py", "tools/segarecomp_ml_v3.corpus_manifest.json",
@@ -466,25 +466,26 @@ def cmd_table(a) -> int:
     import segarecomp_genesis_bizhawk as bz
     imgs, _d = load_registry_images()
     ctx = ctx_dir()
-    by_fold = {f: [im for im in imgs if im.lineage == f] for f in GENESIS}
+    folds = tuple(a.folds) if a.folds else GENESIS         # a subset is a mechanics rehearsal only (no readiness decision)
+    by_fold = {f: [im for im in imgs if im.lineage == f] for f in folds}
     lineage_of = {im.id: im.lineage for im in imgs}
     ref = pathlib.Path(a.seg076_scores)
     complete, missing = {}, []
     for arm in ARMS:
-        ok = all(score_path(f, arm).exists() for f in GENESIS)
+        ok = all(score_path(f, arm).exists() for f in folds)
         complete[arm] = ok
         if not ok:
             missing.append(arm)
     a0_repro = False
     if complete["A0"] and ref.is_dir():
         a0_repro = True
-        for f in GENESIS:
+        for f in folds:
             r = xt.load_npz(ref / f"A.C0.{f}.npz")
             m = xt.load_npz(score_path(f, "A0"))
             a0_repro &= all(k in r and np.array_equal(r[k], m[k]) for k in m) and len(r) == len(m)
     per_arm = {}
     thr = {}
-    for f in GENESIS:                                   # A0 operating point of the fold: 10th percentile of positive labelled cells
+    for f in folds:                                     # A0 operating point of the fold: 10th percentile of positive labelled cells
         if not complete["A0"]:
             break
         sc = xt.load_npz(score_path(f, "A0"))
@@ -496,7 +497,7 @@ def cmd_table(a) -> int:
             continue
         pi, fr = {}, {}
         ap_s, ap_y, fold_ap = [], [], {}
-        for f in GENESIS:
+        for f in folds:
             sc = xt.load_npz(score_path(f, arm))
             neg_fp = neg_n = hard_fp = hard_n = 0
             fs, fy = [], []
@@ -519,7 +520,7 @@ def cmd_table(a) -> int:
             fr[f] = {"neg_fp_rate": round(neg_fp / neg_n, 6) if neg_n else None, "hard_neg_fp_rate": round(hard_fp / hard_n, 6) if hard_n else None, "hard_cells": hard_n}
         rows = ev6.lineage_summary(pi, lineage_of)
         S = ev6.summary(rows)
-        cost = [json.loads(score_path(f, arm).with_suffix(".json").read_text()) for f in GENESIS]
+        cost = [json.loads(score_path(f, arm).with_suffix(".json").read_text()) for f in folds]
         ys, ss = np.concatenate(ap_y), np.concatenate(ap_s)
         per_arm[arm] = {"summary": S, "lineage": {L: {k: v for k, v in r.items() if k in ("max_er", "mean_image_er", "misses_B35", "misses_B50", "missed_cells_B35", "missed_cells_B50",
                                                                                          "negative_admitted_B35", "negative_admitted_B50", "mean_auroc", "max_frf", "strata")}
@@ -529,8 +530,8 @@ def cmd_table(a) -> int:
                         "secondary": {"pooled_ap": round(float(average_precision_score(ys, ss)), 5), "pooled_auc": round(float(roc_auc_score(ys, ss)), 5), "by_fold": fold_ap},
                         "cost": {"fit_cpu_seconds": round(sum(c["fit_cpu_seconds"] for c in cost), 1), "inference_seconds": round(sum(c["inference_seconds"] for c in cost), 2),
                                  "train_cells_mean": round(sum(c["train_cells"] for c in cost) / len(cost)), "withheld_game_folds": sum(len(c["withheld_games"]) for c in cost)}}
-    er = {arm: {f: v["lineage"][f]["max_er"] for f in GENESIS} for arm, v in per_arm.items()}
-    out = {"schema": SCHEMA + ".results", "plan_sha256": plan_sha(), "arms": per_arm, "missing_arms": missing, "a0_reproduces_seg076": a0_repro}
+    er = {arm: {f: v["lineage"][f]["max_er"] for f in folds} for arm, v in per_arm.items()}
+    out = {"schema": SCHEMA + ".results", "plan_sha256": plan_sha(), "folds": list(folds), "arms": per_arm, "missing_arms": missing, "a0_reproduces_seg076": a0_repro}
     if not missing:
         noise = fold_noise(er["A0"], [er[f"A0_sub{i}"] for i in (1, 2, 3)])
         out["noise_per_fold"] = {f: None if v is None else round(v, 6) for f, v in noise.items()}
@@ -540,13 +541,14 @@ def cmd_table(a) -> int:
         pairs = (("A_all", "A_control"), ("A_all", "A_matched"), ("A_all_W", "A_all"), ("A_control_W", "A_control"), ("A_term", "A0"), ("A_all", "A_noterm"), ("A_all", "A81"), ("A_all", "A83"))
         out["paired"] = {f"{x}-{y}": classify_response(er[y], er[x], noise) for x, y in pairs}
         out["difficult_folds"] = {f: {arm: {"max_er": er[arm][f], "hard_neg_fp": per_arm[arm]["negative_errors"]["by_fold"][f]["hard_neg_fp_rate"]}
-                                      for arm in ("A0", "A_all", "A_control", "A_matched", "A_term")} for f in ("D01", "D03", "D07")}
+                                      for arm in ("A0", "A_all", "A_control", "A_matched", "A_term")} for f in ("D01", "D03", "D07") if f in folds}
         out["residual"] = {f: {"a0": er["A0"][f], "a_all": er["A_all"][f],
-                               "residual": bool(er["A_all"][f] is not None and er["A_all"][f] >= READY["residual_er"] and er["A0"][f] - er["A_all"][f] <= (noise[f] or 0))} for f in GENESIS}
+                               "residual": bool(er["A_all"][f] is not None and er["A_all"][f] >= READY["residual_er"] and er["A0"][f] - er["A_all"][f] <= (noise[f] or 0))} for f in folds}
         out["residual_folds"] = sum(1 for v in out["residual"].values() if v["residual"])
         out["negative_audit"] = negative_audit(a, imgs, hard)
-        out["readiness_inputs"] = readiness_inputs(a, out, imgs)
-        out["readiness"] = readiness(out["readiness_inputs"])
+        if folds == GENESIS:
+            out["readiness_inputs"] = readiness_inputs(a, out, imgs)
+            out["readiness"] = readiness(out["readiness_inputs"])
     pathlib.Path(a.out).write_text(json.dumps(out, indent=1, sort_keys=True))
     print(json.dumps({"missing": missing, "a0_reproduces": a0_repro, "mean_er": {k: v["summary"]["mean_er"] for k, v in per_arm.items()},
                       "readiness": out.get("readiness", {}).get("decision")}, sort_keys=True))
@@ -627,7 +629,7 @@ def main(argv=None) -> int:
     p.add_argument("--fold", required=True), p.add_argument("--samples", required=True), p.add_argument("--arm", nargs="*")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("table")
-    p.add_argument("--samples", required=True), p.add_argument("--seg076-scores", required=True), p.add_argument("--out", required=True)
+    p.add_argument("--samples", required=True), p.add_argument("--seg076-scores", required=True), p.add_argument("--out", required=True), p.add_argument("--folds", nargs="*")
     p.set_defaults(fn=cmd_table)
     a = ap.parse_args(argv)
     return a.fn(a)
