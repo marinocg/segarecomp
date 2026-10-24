@@ -159,7 +159,10 @@ void invalid_arguments_are_rejected() {
   o = options_for(dir, 1U, 1U, 0U);
   check(genesis_frame_capture_run(&r, synthetic_dispatch, &o, 1000U).outcome == GENESIS_FRAME_CAPTURE_INVALID_ARGUMENT,
         "zero stride rejected");
-  o = options_for(dir + "/missing-subdir", 1U, 1U, 1U);
+  // The options keep a pointer to the path: the string must outlive them (a temporary here left out_dir dangling, so under memory reuse
+  // the run saw an empty path and returned INVALID_ARGUMENT instead of IO_ERROR).
+  const std::string missing_dir = dir + "/missing-subdir";
+  o = options_for(missing_dir, 1U, 1U, 1U);
   check(genesis_frame_capture_run(&r, synthetic_dispatch, &o, 10000000U).outcome == GENESIS_FRAME_CAPTURE_IO_ERROR,
         "unwritable output fails closed");
   check(r.live_frame_observer == nullptr, "observer detached after failure");

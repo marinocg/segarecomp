@@ -56,8 +56,15 @@ bool main_word_ram(std::uint32_t address, std::uint32_t length) {
   const std::uint64_t end = static_cast<std::uint64_t>(address) + length;
   return length != 0U && address >= 0x00200000U && end <= 0x00240000U;
 }
+// The sub's linear 2M Word RAM view ($080000-$0BFFFF): code the sub loads from the disc and executes in place (Earthworm Jim SE level
+// modules). Live ownership (2M, sub-owned) is decided per instruction at run time by scd_code_byte, exactly as for the main view.
+bool sub_word_ram(std::uint32_t address, std::uint32_t length) {
+  const std::uint64_t end = static_cast<std::uint64_t>(address) + length;
+  return length != 0U && address >= 0x00080000U && end <= 0x000C0000U;
+}
 bool disc_extent_ram_of(Processor p, std::uint32_t address, std::uint32_t length) {
-  return ram_of(p, address, length) || (p == Processor::main && main_word_ram(address, length));
+  return ram_of(p, address, length) || (p == Processor::main && main_word_ram(address, length)) ||
+         (p == Processor::sub && sub_word_ram(address, length));
 }
 
 // A decoded operand template: one JMP (xxx).W/.L at its address.

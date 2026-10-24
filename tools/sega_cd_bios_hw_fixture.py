@@ -167,7 +167,9 @@ def main_program(sub_len, layout):
     vram_checksum(m, 0x1000, len(DMA_WORDS), 0x14)
     dma_from(m, DMA_ROM, len(ROM_DMA_WORDS), 0x1100)
     vram_checksum(m, 0x1100, len(ROM_DMA_WORDS), 0x16)
-    for i, word in enumerate(WORD_DMA_WORDS):             # SEG-064-T004: 2M Word RAM owned by main is plain memory for the DMA
+    # SEG-064-T004: 2M Word RAM owned by main is plain memory for the DMA, with GPGX's one-word source delay: VRAM $1300 stays 0
+    # (skipped), words 0..2 land at $1302-$1306 and the last source word is not transferred (the checksum covers 4 words)
+    for i, word in enumerate(WORD_DMA_WORDS):
         m.move("w", F.imm(word), F.absl(WORD_RAM + 2 * i))
     dma_from(m, WORD_RAM, len(WORD_DMA_WORDS), 0x1300)
     vram_checksum(m, 0x1300, len(WORD_DMA_WORDS), 0x28)
@@ -284,7 +286,7 @@ def expected(rom, sub, layout):
     result = {
         "0": 0x80, "2": 0x8080, "4": 0x40, "6": 0x7F, "8": 0x33,
         "10": ((free_next >> 8) | 0x01) << 8, "12": ((held_next >> 8) & 0xFE) << 8,
-        "14": 0xC35A, "16": 0x5A5A, "18": 0, "20": be(sum(DMA_WORDS), 2), "22": be(sum(ROM_DMA_WORDS), 2), "40": be(sum(WORD_DMA_WORDS), 2), "24": 1, "26": 3,
+        "14": 0xC35A, "16": 0x5A5A, "18": 0, "20": be(sum(DMA_WORDS), 2), "22": be(sum(ROM_DMA_WORDS), 2), "40": be(sum(WORD_DMA_WORDS[:-1]), 2), "24": 1, "26": 3,
         "28": 0x1234, "30": 0x1234, "32": 0xFFFF, "34": cart_next, "36": cart_next, "38": (byte_next & 0xFF) << 8,
     }
     padded = sub.ljust((len(sub) + 0xFF) & ~0xFF, b"\0")

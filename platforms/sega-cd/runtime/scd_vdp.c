@@ -162,9 +162,10 @@ static uint64_t scd_vdp_dma_end(const ScdMachine *m, const GenesisRuntime *host,
   return frame_start + (frames * frame_lines * line + cyc) * SCD_MASTER_TICK_TICKS;
 }
 
-static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t first, uint16_t second, uint32_t pc) {
-  const uint16_t *r = host->devices.vdp.registers;
+static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t first, uint16_t second, uint32_t pc, uint32_t *word_ram_lag) {
+  uint16_t *r = host->devices.vdp.registers;
   uint32_t length, source, end;
+  *word_ram_lag = 0U;
   if (!((second >> 7) & 1U) || !(r[1] & 0x10U) || (r[23] & 0x80U)) return 0;
   length = (uint32_t)(r[19] & 0xFFU) | ((uint32_t)(r[20] & 0xFFU) << 8);
   if (length == 0U) length = 0x10000U;
@@ -179,6 +180,15 @@ static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t fir
      * operation or CDC transfer in flight is brought up to this instant first. */
     if (scd_cd_observe(m) != 0) return 1;
     host->owned_region_count = 2U;
+    /* GPGX vdp_ctrl.c (a Sega CD source $200000-$3FFFFF, (reg23 & $70) == $10): the source data arrives one bus cycle late - the first
+     * word the VDP writes is the stale word on the bus (GPGX writes nothing), the destination address advances by the auto-increment,
+     * the source words follow, and the last source word is ignored: dma_length-- and addr += reg15. A one-word transfer has no
+     * source word left and is not modelled. */
+    if (length == 1U) return scd_fail(m, SCD_MAIN, SCD_STOP_VDP_DMA_UNSUPPORTED, pc, source);
+    *word_ram_lag = 1U;
+    length -= 1U;
+    r[19] = (uint16_t)(length & 0xFFU);
+    r[20] = (uint16_t)((length >> 8) & 0xFFU);
   } else if (!(end <= m->bios_size)) {
     return scd_fail(m, SCD_MAIN, SCD_STOP_VDP_DMA_UNSUPPORTED, pc, source);
   }
@@ -342,7 +352,19 @@ int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write
         first = *value >> 16;
         second = *value & 0xFFFFU;
       }
-      if (second != UINT32_MAX && scd_vdp_dma_prepare(m, host, (uint16_t)first, (uint16_t)second, pc) != 0) return 1;
+      if (second != UINT32_MAX) {
+        uint32_t lag = 0U;
+        if (scd_vdp_dma_prepare(m, host, (uint16_t)first, (uint16_t)second, pc, &lag) != 0) return 1;
+        if (lag != 0U) { /* the destination advances past the skipped first word (the command's address, rewritten) */
+          const uint32_t addr = ((first & 0x3FFFU) | ((second & 3U) << 14)), moved = (addr + host->devices.vdp.registers[15]) & 0xFFFFU;
+          const uint32_t nfirst = (first & 0xC000U) | (moved & 0x3FFFU), nsecond = (second & ~3U) | ((moved >> 14) & 3U);
+          if (width == 4U && awaiting) *value = (nsecond << 16) | (*value & 0xFFFFU);
+          else if (width == 4U) *value = (nfirst << 16) | nsecond;
+          else *value = nsecond;
+          if (width != 4U || awaiting) host->devices.vdp.control_port_first_word = (uint16_t)nfirst;
+          routed = *value;
+        }
+      }
     }
   } else if (is_write && (address & ~3U) == 0xC00004U &&
              ((width == 2U && scd_vdp_enables_dma(*value)) ||
