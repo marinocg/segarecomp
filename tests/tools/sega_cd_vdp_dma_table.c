@@ -137,8 +137,8 @@ int main(void) {
     m->now = m->vdp_onset - FRAME;
     vdp(4U, 0x40000080U);
     r = ((const GenesisRuntime *)m->vdp_host)->devices.vdp.registers;
-    row(m->vdp_dma_count == 1U && r[19] == 0U && r[20] == 0U && r[21] == 0x10U && r[22] == 0x00U && r[23] == 0x10U,
-        "the source advance wraps at 16 bits: $FFF0 + $20 -> #21/#22 = $0010, #23 unchanged ($10)");
+    row(m->vdp_dma_count == 1U && r[19] == 0U && r[20] == 0U && r[21] == 0x0FU && r[22] == 0x00U && r[23] == 0x10U,
+        "Word RAM source delay (GPGX): the last source word is not read, so the advance wraps at 16 bits: $FFF0 + $1F -> #21/#22 = $000F, #23 unchanged ($10)");
   }
 
   /* a transfer spanning several slot windows: GPGX re-anchors the 68K at the transfer's end at the next line start, so the arming
