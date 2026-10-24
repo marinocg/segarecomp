@@ -1,4 +1,5 @@
 {
+ "acquisition_class_frozen_rule": "EXPANSION_MIXED",
  "classes": {
   "doraemon": "QUALIFIED_USEFUL",
   "nhl94": "TRACING_UNAVAILABLE",
@@ -7,8 +8,9 @@
   "terminator": "QUALIFIED_LOW_YIELD"
  },
  "cpu_hours_total": 3.206,
- "decision": "CROSS_ENGINE_ACQUISITION_SUPPORTED",
+ "legacy_seg081_vocabulary_decision": "CROSS_ENGINE_ACQUISITION_SUPPORTED",
  "limiting_factor": null,
+ "note": "the unchanged SEG-081 `batch` command prints its own vocabulary and a 2-useful threshold; the SEG-083 acquisition class is `acquisition` in the readiness results (EXPANSION_MIXED), which applies the frozen >= 3 useful rule",
  "open_review_blockers": 0,
  "qualified": [
   "shadowrun",
