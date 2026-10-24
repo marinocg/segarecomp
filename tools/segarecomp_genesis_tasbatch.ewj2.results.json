@@ -1,0 +1,431 @@
+{
+ "classification": {
+  "ambitious_secondary": true,
+  "class": "QUALIFIED_USEFUL",
+  "code_yield_rule": true,
+  "novelty_rule": true
+ },
+ "consistency": {
+  "audit": {
+   "length_mismatch": 0,
+   "not_ordinary_decode": 0,
+   "odd_starts": 0,
+   "starts": 22031
+  },
+  "audit_ok": true,
+  "e_bytes": 82394,
+  "e_bytes_also_read_as_data": 28,
+  "e_bytes_in_dma_source": 0,
+  "ok": true,
+  "strong_data_conflict_fraction": 0.0
+ },
+ "coverage": {
+  "cpu_seconds_per_extra_strong_cell": 2.019,
+  "executed_rom_pcs": {
+   "control": 6854,
+   "control_only": 147,
+   "control_seed2": 6728,
+   "tas": 19619,
+   "tas_only": 12912
+  },
+  "frames_per_extra_strong_cell": 141.7,
+  "growth_new_pcs_cumulative": {
+   "control": {
+    "100": 6854,
+    "25": 6012,
+    "50": 6641,
+    "75": 6795,
+    "total_new_pcs": 6854
+   },
+   "tas": {
+    "100": 19619,
+    "25": 12874,
+    "50": 15943,
+    "75": 18222,
+    "total_new_pcs": 19619
+   }
+  },
+  "indirect": {
+   "edges_tas": 353,
+   "extra_edges": 295,
+   "extra_targets": 240,
+   "targets_control": 42,
+   "targets_tas": 282
+  },
+  "strong_code_cells": {
+   "control": 327,
+   "control_seed2": 320,
+   "extra_vs_control": 506,
+   "extra_vs_control_seed2": 513,
+   "extra_weak_variant_cells": 480,
+   "relative_increase": 1.5474,
+   "tas": 829,
+   "useful_vs_seed2": true
+  },
+  "tiers": {
+   "ctl": {
+    "E": 27880,
+    "E_I": 6854,
+    "E_c": 21026,
+    "H": 512,
+    "M": 145248,
+    "R": 10736,
+    "U": 2876337,
+    "W": 85015
+   },
+   "ctl2": {
+    "E": 27370,
+    "E_I": 6728,
+    "E_c": 20642,
+    "H": 512,
+    "M": 129024,
+    "R": 10726,
+    "U": 2896888,
+    "W": 81208
+   },
+   "tas": {
+    "E": 82394,
+    "E_I": 19619,
+    "E_c": 62775,
+    "H": 512,
+    "M": 1029056,
+    "R": 10818,
+    "U": 1420747,
+    "W": 602201
+   }
+  }
+ },
+ "cpu_hours": 1.207,
+ "data": {
+  "data_extents": {
+   "ctl": {
+    "DMA": 62,
+    "DR": 1447,
+    "HW_HEADER": 1
+   },
+   "ctl2": {
+    "DMA": 52,
+    "DR": 1307,
+    "HW_HEADER": 1
+   },
+   "tas": {
+    "DMA": 140,
+    "DR": 8901,
+    "HW_HEADER": 1
+   }
+  },
+  "extra_data": {
+   "extra_hard_negative_cells_strong": 5599,
+   "extra_mixed_cells_strong": 0,
+   "strong_negative_cells_vs_control": 6930,
+   "weak_negative_cells_vs_control": 9887
+  },
+  "overlap": {
+   "ambiguous_masked_extents": 0,
+   "cdl_exec_and_data_bytes": 14,
+   "e_bytes_also_read_as_data": 28,
+   "e_bytes_in_dma_source": 0,
+   "r_data_conflicts": 0,
+   "rom_bytes_read_as_data_fraction": 0.1927
+  },
+  "strong": {
+   "ctl": {
+    "cells_masked": 23152,
+    "cells_mixed": 0,
+    "cells_neg": 1097,
+    "cells_pos": 327,
+    "hard_negative_cells": 1006,
+    "labelled_bytes": 173640,
+    "masked_fraction_bytes": 0.9448
+   },
+   "ctl2": {
+    "cells_masked": 23280,
+    "cells_mixed": 0,
+    "cells_neg": 976,
+    "cells_pos": 320,
+    "hard_negative_cells": 896,
+    "labelled_bytes": 156906,
+    "masked_fraction_bytes": 0.9501
+   },
+   "tas": {
+    "cells_masked": 15799,
+    "cells_mixed": 0,
+    "cells_neg": 7948,
+    "cells_pos": 829,
+    "hard_negative_cells": 6528,
+    "labelled_bytes": 1111962,
+    "masked_fraction_bytes": 0.6465
+   }
+  },
+  "strong_vs_weak": {
+   "labelled_bytes_lost_without_weak": 0.3554
+  },
+  "weak": {
+   "ctl": {
+    "cells_masked": 22602,
+    "cells_mixed": 4,
+    "cells_neg": 1586,
+    "cells_pos": 388,
+    "hard_negative_cells": 1445,
+    "labelled_bytes": 269391,
+    "masked_fraction_bytes": 0.9144
+   },
+   "ctl2": {
+    "cells_masked": 22734,
+    "cells_mixed": 3,
+    "cells_neg": 1461,
+    "cells_pos": 381,
+    "hard_negative_cells": 1331,
+    "labelled_bytes": 248840,
+    "masked_fraction_bytes": 0.9209
+   },
+   "tas": {
+    "cells_masked": 12322,
+    "cells_mixed": 20,
+    "cells_neg": 11389,
+    "cells_pos": 865,
+    "hard_negative_cells": 9718,
+    "labelled_bytes": 1724981,
+    "masked_fraction_bytes": 0.4516
+   }
+  }
+ },
+ "extra_cells_kept_private": false,
+ "frames": 71699,
+ "game": "ewj2",
+ "gate_replay": {
+  "checkpoints": 6,
+  "determinism": {
+   "cdl": true,
+   "checkpoints": true,
+   "edges": true,
+   "pcs": true,
+   "reads": true
+  },
+  "digest_domains_missing": false,
+  "distinct_ram_vram_states": 6,
+  "fifths_with_new_code": 5,
+  "identity_ok": true,
+  "no_perturbation": true,
+  "played_to_end": true,
+  "progression": true,
+  "replay_ok": true,
+  "states": 6
+ },
+ "gate_tracing": {
+  "fidelity": {
+   "accepted_E_fraction": 1.0,
+   "cdl_exec_mismatch_fraction": 0.0,
+   "cdl_fixture_ok": true,
+   "controls_ok": [
+    true,
+    true
+   ],
+   "e_rejection_classes": {},
+   "e_rejections": 0,
+   "map_mismatch": 0,
+   "odd_pcs": 0,
+   "read_self_fetch_fraction": 0.0,
+   "reset_pc_executed": true,
+   "vbl_pc_executed": true
+  },
+  "tracing_ok": true
+ },
+ "image": {
+  "sha256": "2ad42010f092b7f481bd0079a385e8bc3e856eb29d8977803208d2bda81cf755",
+  "size": 3145728
+ },
+ "isolation": {
+  "image_in_sealed_blind_manifest": false,
+  "image_sha256_in_registry": false,
+  "lineage_in_registry": false,
+  "ok": true
+ },
+ "lineage": "T81_EWJ2",
+ "movie_sha256": "891eb962d11dfe261da23cbb0cf3db9f377802ae3dac86ac9c0b5bed4a7cc1fa",
+ "novelty": {
+  "batch:bnr": {
+   "N_struct": 892,
+   "N_struct_not_in_control": 406,
+   "forms_absent_from_reference": 71,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 12,
+     "absent_from_reference_and_control": 10,
+     "reference": 1,
+     "target": 12
+    },
+    "cfg": {
+     "absent_from_reference": 821,
+     "absent_from_reference_and_control": 389,
+     "reference": 945,
+     "target": 1043
+    },
+    "forms": {
+     "absent_from_reference": 71,
+     "absent_from_reference_and_control": 17,
+     "reference": 307,
+     "target": 266
+    },
+    "g3": {
+     "absent_from_reference": 7181,
+     "absent_from_reference_and_control": 4173,
+     "reference": 8807,
+     "target": 7779
+    },
+    "g4": {
+     "absent_from_reference": 10527,
+     "absent_from_reference_and_control": 6756,
+     "reference": 10934,
+     "target": 10711
+    }
+   },
+   "rare_forms_in_target": 34,
+   "relative_increase": {
+    "boundary": 12.0,
+    "cfg": 0.8688,
+    "forms": 0.2313,
+    "g3": 0.8154,
+    "g4": 0.9628
+   }
+  },
+  "batch:vm2": {
+   "N_struct": 764,
+   "N_struct_not_in_control": 371,
+   "forms_absent_from_reference": 48,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 11,
+     "absent_from_reference_and_control": 10,
+     "reference": 4,
+     "target": 12
+    },
+    "cfg": {
+     "absent_from_reference": 716,
+     "absent_from_reference_and_control": 356,
+     "reference": 1147,
+     "target": 1043
+    },
+    "forms": {
+     "absent_from_reference": 48,
+     "absent_from_reference_and_control": 15,
+     "reference": 319,
+     "target": 266
+    },
+    "g3": {
+     "absent_from_reference": 6810,
+     "absent_from_reference_and_control": 3987,
+     "reference": 9480,
+     "target": 7779
+    },
+    "g4": {
+     "absent_from_reference": 10314,
+     "absent_from_reference_and_control": 6686,
+     "reference": 13222,
+     "target": 10711
+    }
+   },
+   "rare_forms_in_target": 51,
+   "relative_increase": {
+    "boundary": 2.75,
+    "cfg": 0.6242,
+    "forms": 0.1505,
+    "g3": 0.7184,
+    "g4": 0.7801
+   }
+  },
+  "registry": {
+   "N_struct": 298,
+   "N_struct_not_in_control": 129,
+   "forms_absent_from_reference": 3,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 12,
+     "absent_from_reference_and_control": 10,
+     "reference": 1205,
+     "target": 12
+    },
+    "cfg": {
+     "absent_from_reference": 295,
+     "absent_from_reference_and_control": 128,
+     "reference": 5476,
+     "target": 1043
+    },
+    "forms": {
+     "absent_from_reference": 3,
+     "absent_from_reference_and_control": 1,
+     "reference": 507,
+     "target": 266
+    },
+    "g3": {
+     "absent_from_reference": 4867,
+     "absent_from_reference_and_control": 2858,
+     "reference": 87211,
+     "target": 7779
+    },
+    "g4": {
+     "absent_from_reference": 9442,
+     "absent_from_reference_and_control": 6065,
+     "reference": 168735,
+     "target": 10711
+    }
+   },
+   "rare_forms_in_target": 9,
+   "relative_increase": {
+    "boundary": 0.01,
+    "cfg": 0.0539,
+    "forms": 0.0059,
+    "g3": 0.0558,
+    "g4": 0.056
+   }
+  },
+  "sonic2_seg080": {
+   "N_struct": 860,
+   "N_struct_not_in_control": 379,
+   "forms_absent_from_reference": 81,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 12,
+     "absent_from_reference_and_control": 10,
+     "reference": 0,
+     "target": 12
+    },
+    "cfg": {
+     "absent_from_reference": 779,
+     "absent_from_reference_and_control": 365,
+     "reference": 1140,
+     "target": 1043
+    },
+    "forms": {
+     "absent_from_reference": 81,
+     "absent_from_reference_and_control": 14,
+     "reference": 285,
+     "target": 266
+    },
+    "g3": {
+     "absent_from_reference": 6929,
+     "absent_from_reference_and_control": 4016,
+     "reference": 11398,
+     "target": 7779
+    },
+    "g4": {
+     "absent_from_reference": 10418,
+     "absent_from_reference_and_control": 6680,
+     "reference": 16585,
+     "target": 10711
+    }
+   },
+   "rare_forms_in_target": 37,
+   "relative_increase": {
+    "boundary": null,
+    "cfg": 0.6833,
+    "forms": 0.2842,
+    "g3": 0.6079,
+    "g4": 0.6282
+   }
+  }
+ },
+ "plan_sha256": "a51546ad2c1b2c62ab329f0299d7504548c7c7a9db0aa1b77ef781333d652845",
+ "registry_digest": "dab51db40680defd9f9f090b42f35a8b1125a8c3466c0a0b2f3081ad152d4830",
+ "title": "Earthworm Jim 2 (USA)"
+}
