@@ -153,7 +153,7 @@ add_test(NAME segarecomp_genesis_label_policy_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST segarecomp_genesis_label_policy_test APPEND PROPERTY LABELS full fast)
 # SEG-081-T001 (research tooling): three-game TAS batch - generic checkpoint Lua, Python port of the SEG-080 control policy (against the Lua when lua is
 # installed), synthesized control movie, structural signatures and novelty, frozen classification / batch / model-A decision rules (synthetic data).
-add_test(NAME segarecomp_genesis_tasbatch_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_genesis_tasbatch_test.py)
+add_test(NAME segarecomp_genesis_tasbatch_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_genesis_tasbatch_test.py)
 set_property(TEST segarecomp_genesis_tasbatch_test APPEND PROPERTY LABELS full fast)
 # SEG-077-T005 (research tooling): frozen SEG-077 decision rules, labelled-cell blind metrics, the job matrix and, in the research
 # environment (numpy, torch), label-free seeds and leakage invariance of A features and C's candidate graph (skipped without numpy).
