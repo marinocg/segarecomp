@@ -51,3 +51,8 @@ tests/segarecomp_genesis_*_test.py text eol=lf
 tests/segarecomp_seg077_test.py text eol=lf
 # SEG-081: the frozen three-game plan binds the SEG-072 corpus manifest by SHA-256 over its exact committed bytes.
 tools/segarecomp_ml_v3.corpus_manifest.json text eol=lf
+# SEG-084: the frozen model-A assessment plan binds its code, results inputs and tests by SHA-256 over the exact committed LF bytes; pin LF on every platform
+# so a Windows autocrlf checkout cannot change a verified digest.
+tools/segarecomp_seg084_*.py text eol=lf
+tools/segarecomp_seg084_*.json text eol=lf
+tests/segarecomp_seg084_test.py text eol=lf
