@@ -348,6 +348,53 @@ int main(void) {
         "BIOS source (no delay): all four words land from the start, source advanced by four");
   }
 
+  { /* the ownership and range guards are unchanged: a Word RAM source the main processor cannot read as plain memory is a typed stop */
+    static const uint16_t src[2] = {0x1357U, 0x2468U};
+    uint32_t k;
+    for (k = 0U; k < 3U; ++k) {
+      static const char *const names[3] = {"sub-owned 2M Word RAM", "1M mode", "a source crossing the end of Word RAM ($240000)"};
+      fresh(0x54U, 0x00U);
+      m->ga.mode = k == 0U ? 0U : k == 1U ? (SCD_MODE_1M | SCD_MODE_RET) : SCD_MODE_RET;
+      fill_word_ram(0x0000U, src, 2U);
+      sentinels();
+      w = arm(4U, k == 2U ? 0x23FFFCU : 0x200000U, 2U, 0x4000U | 0x0040U, 0x0080U, 0);
+      snprintf(label, sizeof label, "Word RAM DMA from %s stops vdp_dma_unsupported and writes nothing", names[k]);
+      row(w == UINT64_MAX && m->stop.stop_class == SCD_STOP_VDP_DMA_UNSUPPORTED && m->vdp_dma_count == 0U &&
+              target_word(host()->devices.vdp.vram, 0x0042U) == 0xA55AU,
+          label);
+      m->stop.stop_class = SCD_STOP_NONE;
+    }
+  }
+  { /* length 0 is 65536 words: the lagged transfer is 65535 words (registers #19/#20 = $FF/$FF before the transfer) */
+    fresh(0x54U, 0x00U);
+    m->ga.mode = SCD_MODE_RET;
+    sentinels();
+    w = arm(0U, 0x200000U, 2U, 0x4000U | 0x0000U, 0x0080U, 0);
+    row(w != UINT64_MAX && m->vdp_dma_count == 1U && reg(19) == 0U && reg(20) == 0U && reg(21) == 0xFFU && reg(22) == 0xFFU && reg(23) == 0x10U &&
+            target_word(host()->devices.vdp.vram, 0x0002U) == 0x0000U, /* VRAM wraps twice: word 1 is overwritten by source word 32768 (zero) */
+        "length 0 (65536 words) from $200000: 65535 words transferred and the source advanced by $FFFF words");
+  }
+  { /* a 32-bit write whose high word completes the command (the VDP awaits the second word) and whose low word is a register write */
+    static const uint16_t src[4] = {0x0C01U, 0x0C02U, 0x0C03U, 0x0C04U};
+    fresh(0x54U, 0x00U);
+    m->ga.mode = SCD_MODE_RET;
+    fill_word_ram(0x0800U, src, 4U);
+    sentinels();
+    vdp(2U, 0x8F02U);
+    vdp(2U, 0x9304U);
+    vdp(2U, 0x9400U);
+    vdp(2U, 0x9500U | (((0x200800U >> 1) & 0xFFU)));
+    vdp(2U, 0x9600U | (((0x200800U >> 1) >> 8) & 0xFFU));
+    vdp(2U, 0x9700U | (((0x200800U >> 1) >> 16) & 0x7FU));
+    m->now = m->vdp_onset - FRAME;
+    vdp(2U, 0x4000U | 0x0600U);       /* first command word */
+    vdp(4U, (0x0080U << 16) | 0x8F04U); /* second word + register #15 = 4 written after the transfer (GPGX cached write) */
+    row(m->vdp_dma_count == 1U && target_word(host()->devices.vdp.vram, 0x0600U) == 0xA55AU && target_word(host()->devices.vdp.vram, 0x0602U) == 0x0C01U &&
+            target_word(host()->devices.vdp.vram, 0x0604U) == 0x0C02U && target_word(host()->devices.vdp.vram, 0x0606U) == 0x0C03U &&
+            target_word(host()->devices.vdp.vram, 0x0608U) == 0xA55AU && reg(15) == 0x04U,
+        "32-bit write completing a pending command: the destination skips the first word; the low word's register write lands after the transfer");
+  }
+
   scd_vdp_release(m);
   free(m);
   printf("%d failures\n", failures);

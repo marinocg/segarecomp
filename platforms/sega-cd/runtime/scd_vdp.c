@@ -164,8 +164,8 @@ static uint64_t scd_vdp_dma_end(const ScdMachine *m, const GenesisRuntime *host,
 
 static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t first, uint16_t second, uint32_t pc, uint32_t *word_ram_lag) {
   uint16_t *r = host->devices.vdp.registers;
-  *word_ram_lag = 0U;
   uint32_t length, source, end;
+  *word_ram_lag = 0U;
   if (!((second >> 7) & 1U) || !(r[1] & 0x10U) || (r[23] & 0x80U)) return 0;
   length = (uint32_t)(r[19] & 0xFFU) | ((uint32_t)(r[20] & 0xFFU) << 8);
   if (length == 0U) length = 0x10000U;
