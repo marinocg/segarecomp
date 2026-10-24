@@ -1,0 +1,74 @@
+{
+ "bnr": {
+  "lineage": "T81_BNR",
+  "movie": {
+   "Core": "Genplus-gx",
+   "OriginalEmuVersion": "Version 2.9.1",
+   "UseSixButton": false,
+   "emuVersion": "Version 2.9.1",
+   "frames": 130772,
+   "header_md5": "5b1bcb3793262d2d0282b49e0c2ee053",
+   "input_log_sha256": "bec7d6bba977edd247987f0c748697bf74c620e2a743cd552a2b8e4b932690de",
+   "log_key_sha256": "77f6381034b1665d33e7c8dbb19ba2eb9547e66323f881b0bd607d4d4d75c6c8",
+   "players_in_log": 1,
+   "sha256": "5c73d263934f2d443bb2a4fa374dee5b5c7944390e621d1bf7021a8e0e9c3575"
+  },
+  "order": 2,
+  "rom": {
+   "md5": "5b1bcb3793262d2d0282b49e0c2ee053",
+   "sha1": "1da4b3fc92a6572e70d748ebad346aeb291f89f3",
+   "sha256": "9343edb48b8c6afcf44536875d5430548737599bbc49ea93cc5cf430b18ed0aa",
+   "size": 2097152
+  },
+  "tasvideos": "6248M",
+  "title": "The Adventures of Batman & Robin (USA)"
+ },
+ "ewj2": {
+  "lineage": "T81_EWJ2",
+  "movie": {
+   "Core": "Genplus-gx",
+   "OriginalEmuVersion": "Version 2.6.3",
+   "UseSixButton": false,
+   "emuVersion": "Version 2.6.3",
+   "frames": 71699,
+   "header_md5": "2ed39b147fa5fa67d6d0707f54a5a078",
+   "input_log_sha256": "6bebeff5ac83945d603692b86b822cad3598fd4ca0eceeb59bfa0d3234d01580",
+   "log_key_sha256": "128d1c5b9648308464a14609bbcd9bc03e2f1810146561b539e92a31472323d1",
+   "players_in_log": 2,
+   "sha256": "891eb962d11dfe261da23cbb0cf3db9f377802ae3dac86ac9c0b5bed4a7cc1fa"
+  },
+  "order": 3,
+  "rom": {
+   "md5": "2ed39b147fa5fa67d6d0707f54a5a078",
+   "sha1": "ef7cccfc5eafa32fc6acc71dd9b71693f64eac94",
+   "sha256": "2ad42010f092b7f481bd0079a385e8bc3e856eb29d8977803208d2bda81cf755",
+   "size": 3145728
+  },
+  "tasvideos": "5952M (submission 9027S)",
+  "title": "Earthworm Jim 2 (USA)"
+ },
+ "vm2": {
+  "lineage": "T81_VM2",
+  "movie": {
+   "Core": "Genplus-gx",
+   "OriginalEmuVersion": "Version 2.9.1",
+   "UseSixButton": true,
+   "emuVersion": "Version 2.9.1",
+   "frames": 28632,
+   "header_md5": "9666d682cc7c69b26b834b4d8a949277",
+   "input_log_sha256": "af492f5bb609eb30baa1ee41cc597a86c315a63ab532acb1c8b45e37b8ac156b",
+   "log_key_sha256": "4458addbf1ab76cea982be62cc22e34b7486d51f854bd02b09d0d3ecd7df9cfd",
+   "players_in_log": 2,
+   "sha256": "22773f51d732324149f1046cb0213386829960170cae49aaae6ea4c1e6118e3a"
+  },
+  "order": 1,
+  "rom": {
+   "md5": "9666d682cc7c69b26b834b4d8a949277",
+   "sha1": "c5adca10408f055c0431e1ffc01d4fbab53ade01",
+   "sha256": "02a5d53336729ad41881ea97c66018da92152d9cef65fd46d6965730cb57af04",
+   "size": 3145728
+  },
+  "tasvideos": "8668S",
+  "title": "Vectorman 2 (USA)"
+ }
+}
