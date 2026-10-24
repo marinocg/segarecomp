@@ -32,7 +32,7 @@
 ## Eight-candidate comparison (titles versus independent engines)
 
 Titles: 8 candidates (SEG-081's Vectorman 2, Batman & Robin, Earthworm Jim 2 plus these five). Qualified: 6 (SEG-081: 3 useful; SEG-083: 2 useful, 1 low yield). Max 12-byte code-shingle
-containment (either direction) against any SEG-072 development lineage is <= 0.023 for every qualified game and every pair of games is <= 0.01, so by the frozen rule all six qualified titles are independent lineages
+containment (either direction) against any SEG-072 development lineage is <= 0.023 for every qualified game and every pair of games is <= 0.03, so by the frozen rule all six qualified titles are independent lineages
 (**effective independent lineages: 5 useful + 1 low yield**). This is shingle containment, not engine ancestry: SEG-081's sequels remain engine-adjacent to SEG-077 candidates, and publisher/developer overlap is not measured.
 Of the five usable (useful) lineages, only the two new ones count towards the new-batch readiness criteria.
 
