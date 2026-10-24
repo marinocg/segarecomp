@@ -1,0 +1,618 @@
+{
+ "classification": {
+  "ambitious_secondary": false,
+  "class": "QUALIFIED_USEFUL",
+  "code_yield_rule": true,
+  "novelty_rule": true
+ },
+ "consistency": {
+  "audit": {
+   "length_mismatch": 0,
+   "not_ordinary_decode": 0,
+   "odd_starts": 0,
+   "starts": 13143
+  },
+  "audit_ok": true,
+  "e_bytes": 45508,
+  "e_bytes_also_read_as_data": 45508,
+  "e_bytes_in_dma_source": 0,
+  "ok": true,
+  "strong_data_conflict_fraction": 0.0
+ },
+ "control_quality": {
+  "note": "executed ROM PCs of the control divided by the TAS's; a low value means a shallow control (disclosed limitation)",
+  "p1only_baseline_pc_ratio": 0.7164,
+  "primary_all_controller_pc_ratio": 0.7164
+ },
+ "coverage": {
+  "cpu_seconds_per_extra_strong_cell": 4.292,
+  "executed_rom_pcs": {
+   "control": 8610,
+   "control_only": 427,
+   "control_p1only": 8610,
+   "tas": 12018,
+   "tas_only": 3835
+  },
+  "frames_per_extra_strong_cell": 318.98,
+  "growth_new_pcs_cumulative": {
+   "control": {
+    "100": 8610,
+    "25": 8289,
+    "50": 8584,
+    "75": 8589,
+    "total_new_pcs": 8610
+   },
+   "tas": {
+    "100": 12018,
+    "25": 9766,
+    "50": 10774,
+    "75": 11119,
+    "total_new_pcs": 12018
+   }
+  },
+  "indirect": {
+   "edges_tas": 372,
+   "extra_edges": 261,
+   "extra_targets": 251,
+   "targets_control": 122,
+   "targets_tas": 360
+  },
+  "strong_code_cells": {
+   "control": 342,
+   "control_p1only": 342,
+   "extra_vs_control": 130,
+   "extra_vs_control_p1only": 130,
+   "extra_weak_variant_cells": 131,
+   "relative_increase": 0.3801,
+   "tas": 465,
+   "useful_vs_p1only": true
+  },
+  "tiers": {
+   "ctl": {
+    "E": 32340,
+    "E_I": 8609,
+    "E_c": 23731,
+    "H": 512,
+    "M": 1600,
+    "R": 3936,
+    "U": 381096,
+    "W": 104804
+   },
+   "ctl_p1only": {
+    "E": 32340,
+    "E_I": 8609,
+    "E_c": 23731,
+    "H": 512,
+    "M": 1600,
+    "R": 3936,
+    "U": 381096,
+    "W": 104804
+   },
+   "tas": {
+    "E": 45508,
+    "E_I": 12016,
+    "E_c": 33492,
+    "H": 512,
+    "M": 1600,
+    "R": 4494,
+    "U": 218375,
+    "W": 253799
+   }
+  }
+ },
+ "cpu_hours": 0.671,
+ "data": {
+  "data_extents": {
+   "ctl": {
+    "DMA": 1,
+    "DR": 3382,
+    "HW_HEADER": 1
+   },
+   "ctl_p1only": {
+    "DMA": 1,
+    "DR": 3382,
+    "HW_HEADER": 1
+   },
+   "tas": {
+    "DMA": 1,
+    "DR": 5232,
+    "HW_HEADER": 1
+   }
+  },
+  "extra_data": {
+   "extra_hard_negative_cells_strong": 0,
+   "extra_mixed_cells_strong": 0,
+   "strong_negative_cells_vs_control": 0,
+   "weak_negative_cells_vs_control": 942
+  },
+  "overlap": {
+   "ambiguous_masked_extents": 0,
+   "cdl_exec_and_data_bytes": 24036,
+   "e_bytes_also_read_as_data": 45508,
+   "e_bytes_in_dma_source": 0,
+   "r_data_conflicts": 0,
+   "rom_bytes_read_as_data_fraction": 0.999
+  },
+  "strong": {
+   "ctl": {
+    "cells_masked": 3738,
+    "cells_mixed": 0,
+    "cells_neg": 16,
+    "cells_pos": 342,
+    "hard_negative_cells": 16,
+    "labelled_bytes": 34452,
+    "masked_fraction_bytes": 0.9343
+   },
+   "ctl_p1only": {
+    "cells_masked": 3738,
+    "cells_mixed": 0,
+    "cells_neg": 16,
+    "cells_pos": 342,
+    "hard_negative_cells": 16,
+    "labelled_bytes": 34452,
+    "masked_fraction_bytes": 0.9343
+   },
+   "tas": {
+    "cells_masked": 3615,
+    "cells_mixed": 0,
+    "cells_neg": 16,
+    "cells_pos": 465,
+    "hard_negative_cells": 16,
+    "labelled_bytes": 47620,
+    "masked_fraction_bytes": 0.9092
+   }
+  },
+  "strong_vs_weak": {
+   "labelled_bytes_lost_without_weak": 0.8443
+  },
+  "weak": {
+   "ctl": {
+    "cells_masked": 3042,
+    "cells_mixed": 16,
+    "cells_neg": 705,
+    "cells_pos": 349,
+    "hard_negative_cells": 644,
+    "labelled_bytes": 143192,
+    "masked_fraction_bytes": 0.7269
+   },
+   "ctl_p1only": {
+    "cells_masked": 3042,
+    "cells_mixed": 16,
+    "cells_neg": 705,
+    "cells_pos": 349,
+    "hard_negative_cells": 644,
+    "labelled_bytes": 143192,
+    "masked_fraction_bytes": 0.7269
+   },
+   "tas": {
+    "cells_masked": 2027,
+    "cells_mixed": 23,
+    "cells_neg": 1595,
+    "cells_pos": 474,
+    "hard_negative_cells": 1389,
+    "labelled_bytes": 305913,
+    "masked_fraction_bytes": 0.4165
+   }
+  }
+ },
+ "extra_cells_kept_private": false,
+ "frames": 41468,
+ "game": "doraemon",
+ "gate_replay": {
+  "checkpoints": 6,
+  "determinism": {
+   "cdl": true,
+   "checkpoints": true,
+   "edges": true,
+   "pcs": true,
+   "reads": true
+  },
+  "digest_domains_missing": false,
+  "distinct_ram_vram_states": 6,
+  "fifths_with_new_code": 5,
+  "identity_ok": true,
+  "no_perturbation": true,
+  "played_to_end": true,
+  "progression": true,
+  "replay_ok": true,
+  "states": 6
+ },
+ "gate_tracing": {
+  "fidelity": {
+   "accepted_E_fraction": 0.99983,
+   "cdl_exec_mismatch_fraction": 0.0,
+   "cdl_fixture_ok": true,
+   "controls_ok": [
+    true,
+    true
+   ],
+   "e_rejection_classes": {
+    "E_DISASM_NO_DECODE": 2
+   },
+   "e_rejections": 2,
+   "map_mismatch": 0,
+   "odd_pcs": 0,
+   "read_self_fetch_fraction": 1e-05,
+   "reset_pc_executed": true,
+   "vbl_pc_executed": true
+  },
+  "tracing_ok": true
+ },
+ "image": {
+  "sha256": "54aac77159188dc230b8b6130d5207eb4aadce92a7bf5bd63ee48230510d193a",
+  "size": 524288
+ },
+ "isolation": {
+  "image_in_sealed_blind_manifest": false,
+  "image_sha256_in_registry": false,
+  "lineage_in_registry": false,
+  "ok": true
+ },
+ "lineage": "T83_DORAEMON",
+ "movie_sha256": "80243a97cb448781afccc39dc5cc6045bf08af04b80a6f1e70c4b3fa5001c7f3",
+ "novelty": {
+  "batch:bnr": {
+   "N_struct": 564,
+   "N_struct_not_in_control": 109,
+   "forms_absent_from_reference": 33,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 11,
+     "absent_from_reference_and_control": 3,
+     "reference": 1,
+     "target": 11
+    },
+    "cfg": {
+     "absent_from_reference": 531,
+     "absent_from_reference_and_control": 107,
+     "reference": 945,
+     "target": 764
+    },
+    "forms": {
+     "absent_from_reference": 33,
+     "absent_from_reference_and_control": 2,
+     "reference": 307,
+     "target": 219
+    },
+    "g3": {
+     "absent_from_reference": 4297,
+     "absent_from_reference_and_control": 1185,
+     "reference": 8807,
+     "target": 4952
+    },
+    "g4": {
+     "absent_from_reference": 6249,
+     "absent_from_reference_and_control": 1994,
+     "reference": 10934,
+     "target": 6450
+    }
+   },
+   "rare_forms_in_target": 24,
+   "relative_increase": {
+    "boundary": 11.0,
+    "cfg": 0.5619,
+    "forms": 0.1075,
+    "g3": 0.4879,
+    "g4": 0.5715
+   }
+  },
+  "batch:ewj2": {
+   "N_struct": 614,
+   "N_struct_not_in_control": 111,
+   "forms_absent_from_reference": 59,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 9,
+     "absent_from_reference_and_control": 3,
+     "reference": 12,
+     "target": 11
+    },
+    "cfg": {
+     "absent_from_reference": 555,
+     "absent_from_reference_and_control": 107,
+     "reference": 1043,
+     "target": 764
+    },
+    "forms": {
+     "absent_from_reference": 59,
+     "absent_from_reference_and_control": 4,
+     "reference": 266,
+     "target": 219
+    },
+    "g3": {
+     "absent_from_reference": 4473,
+     "absent_from_reference_and_control": 1210,
+     "reference": 7779,
+     "target": 4952
+    },
+    "g4": {
+     "absent_from_reference": 6298,
+     "absent_from_reference_and_control": 2005,
+     "reference": 10711,
+     "target": 6450
+    }
+   },
+   "rare_forms_in_target": 18,
+   "relative_increase": {
+    "boundary": 0.75,
+    "cfg": 0.5321,
+    "forms": 0.2218,
+    "g3": 0.575,
+    "g4": 0.588
+   }
+  },
+  "batch:nhl94": {
+   "N_struct": 645,
+   "N_struct_not_in_control": 116,
+   "forms_absent_from_reference": 29,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 8,
+     "absent_from_reference_and_control": 3,
+     "reference": 38,
+     "target": 11
+    },
+    "cfg": {
+     "absent_from_reference": 616,
+     "absent_from_reference_and_control": 115,
+     "reference": 760,
+     "target": 764
+    },
+    "forms": {
+     "absent_from_reference": 29,
+     "absent_from_reference_and_control": 1,
+     "reference": 302,
+     "target": 219
+    },
+    "g3": {
+     "absent_from_reference": 4578,
+     "absent_from_reference_and_control": 1252,
+     "reference": 5900,
+     "target": 4952
+    },
+    "g4": {
+     "absent_from_reference": 6344,
+     "absent_from_reference_and_control": 2024,
+     "reference": 6821,
+     "target": 6450
+    }
+   },
+   "rare_forms_in_target": 47,
+   "relative_increase": {
+    "boundary": 0.2105,
+    "cfg": 0.8105,
+    "forms": 0.096,
+    "g3": 0.7759,
+    "g4": 0.9301
+   }
+  },
+  "batch:shadowrun": {
+   "N_struct": 682,
+   "N_struct_not_in_control": 111,
+   "forms_absent_from_reference": 66,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 10,
+     "absent_from_reference_and_control": 3,
+     "reference": 19,
+     "target": 11
+    },
+    "cfg": {
+     "absent_from_reference": 616,
+     "absent_from_reference_and_control": 108,
+     "reference": 985,
+     "target": 764
+    },
+    "forms": {
+     "absent_from_reference": 66,
+     "absent_from_reference_and_control": 3,
+     "reference": 246,
+     "target": 219
+    },
+    "g3": {
+     "absent_from_reference": 4515,
+     "absent_from_reference_and_control": 1216,
+     "reference": 7210,
+     "target": 4952
+    },
+    "g4": {
+     "absent_from_reference": 6295,
+     "absent_from_reference_and_control": 2000,
+     "reference": 9801,
+     "target": 6450
+    }
+   },
+   "rare_forms_in_target": 24,
+   "relative_increase": {
+    "boundary": 0.5263,
+    "cfg": 0.6254,
+    "forms": 0.2683,
+    "g3": 0.6262,
+    "g4": 0.6423
+   }
+  },
+  "batch:shoveit": {
+   "N_struct": 824,
+   "N_struct_not_in_control": 141,
+   "forms_absent_from_reference": 125,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 11,
+     "absent_from_reference_and_control": 3,
+     "reference": 10,
+     "target": 11
+    },
+    "cfg": {
+     "absent_from_reference": 699,
+     "absent_from_reference_and_control": 135,
+     "reference": 211,
+     "target": 764
+    },
+    "forms": {
+     "absent_from_reference": 125,
+     "absent_from_reference_and_control": 6,
+     "reference": 120,
+     "target": 219
+    },
+    "g3": {
+     "absent_from_reference": 4830,
+     "absent_from_reference_and_control": 1320,
+     "reference": 1082,
+     "target": 4952
+    },
+    "g4": {
+     "absent_from_reference": 6390,
+     "absent_from_reference_and_control": 2035,
+     "reference": 1311,
+     "target": 6450
+    }
+   },
+   "rare_forms_in_target": 31,
+   "relative_increase": {
+    "boundary": 1.1,
+    "cfg": 3.3128,
+    "forms": 1.0417,
+    "g3": 4.464,
+    "g4": 4.8741
+   }
+  },
+  "batch:vm2": {
+   "N_struct": 462,
+   "N_struct_not_in_control": 88,
+   "forms_absent_from_reference": 14,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 10,
+     "absent_from_reference_and_control": 3,
+     "reference": 4,
+     "target": 11
+    },
+    "cfg": {
+     "absent_from_reference": 448,
+     "absent_from_reference_and_control": 88,
+     "reference": 1147,
+     "target": 764
+    },
+    "forms": {
+     "absent_from_reference": 14,
+     "absent_from_reference_and_control": 0,
+     "reference": 319,
+     "target": 219
+    },
+    "g3": {
+     "absent_from_reference": 4126,
+     "absent_from_reference_and_control": 1116,
+     "reference": 9480,
+     "target": 4952
+    },
+    "g4": {
+     "absent_from_reference": 6125,
+     "absent_from_reference_and_control": 1943,
+     "reference": 13222,
+     "target": 6450
+    }
+   },
+   "rare_forms_in_target": 30,
+   "relative_increase": {
+    "boundary": 2.5,
+    "cfg": 0.3906,
+    "forms": 0.0439,
+    "g3": 0.4352,
+    "g4": 0.4632
+   }
+  },
+  "registry": {
+   "N_struct": 104,
+   "N_struct_not_in_control": 15,
+   "forms_absent_from_reference": 1,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 10,
+     "absent_from_reference_and_control": 3,
+     "reference": 1205,
+     "target": 11
+    },
+    "cfg": {
+     "absent_from_reference": 103,
+     "absent_from_reference_and_control": 15,
+     "reference": 5476,
+     "target": 764
+    },
+    "forms": {
+     "absent_from_reference": 1,
+     "absent_from_reference_and_control": 0,
+     "reference": 507,
+     "target": 219
+    },
+    "g3": {
+     "absent_from_reference": 1965,
+     "absent_from_reference_and_control": 585,
+     "reference": 87211,
+     "target": 4952
+    },
+    "g4": {
+     "absent_from_reference": 4478,
+     "absent_from_reference_and_control": 1540,
+     "reference": 168735,
+     "target": 6450
+    }
+   },
+   "rare_forms_in_target": 1,
+   "relative_increase": {
+    "boundary": 0.0083,
+    "cfg": 0.0188,
+    "forms": 0.002,
+    "g3": 0.0225,
+    "g4": 0.0265
+   }
+  },
+  "sonic2_seg080": {
+   "N_struct": 441,
+   "N_struct_not_in_control": 86,
+   "forms_absent_from_reference": 24,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 11,
+     "absent_from_reference_and_control": 3,
+     "reference": 0,
+     "target": 11
+    },
+    "cfg": {
+     "absent_from_reference": 417,
+     "absent_from_reference_and_control": 86,
+     "reference": 1140,
+     "target": 764
+    },
+    "forms": {
+     "absent_from_reference": 24,
+     "absent_from_reference_and_control": 0,
+     "reference": 285,
+     "target": 219
+    },
+    "g3": {
+     "absent_from_reference": 3817,
+     "absent_from_reference_and_control": 1049,
+     "reference": 11398,
+     "target": 4952
+    },
+    "g4": {
+     "absent_from_reference": 5996,
+     "absent_from_reference_and_control": 1923,
+     "reference": 16585,
+     "target": 6450
+    }
+   },
+   "rare_forms_in_target": 31,
+   "relative_increase": {
+    "boundary": null,
+    "cfg": 0.3658,
+    "forms": 0.0842,
+    "g3": 0.3349,
+    "g4": 0.3615
+   }
+  }
+ },
+ "plan_sha256": "228647dd43f4ba8b66fcfb2a6633a641a388b5a7052e1423cfb78c16cb2d4b61",
+ "registry_digest": "dab51db40680defd9f9f090b42f35a8b1125a8c3466c0a0b2f3081ad152d4830",
+ "title": "Doraemon - Yume Dorobou to 7 Nin no Gozans (Japan)"
+}
