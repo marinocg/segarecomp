@@ -1,0 +1,338 @@
+{
+ "classification": {
+  "ambitious_secondary": true,
+  "class": "QUALIFIED_USEFUL",
+  "code_yield_rule": true,
+  "novelty_rule": true
+ },
+ "consistency": {
+  "audit": {
+   "length_mismatch": 0,
+   "not_ordinary_decode": 0,
+   "odd_starts": 0,
+   "starts": 41408
+  },
+  "audit_ok": true,
+  "e_bytes": 156468,
+  "e_bytes_also_read_as_data": 275,
+  "e_bytes_in_dma_source": 0,
+  "ok": true,
+  "strong_data_conflict_fraction": 0.0
+ },
+ "coverage": {
+  "cpu_seconds_per_extra_strong_cell": 0.364,
+  "executed_rom_pcs": {
+   "control": 10592,
+   "control_only": 479,
+   "control_seed2": 10698,
+   "tas": 37764,
+   "tas_only": 27651
+  },
+  "frames_per_extra_strong_cell": 24.31,
+  "growth_new_pcs_cumulative": {
+   "control": {
+    "100": 10601,
+    "25": 10506,
+    "50": 10563,
+    "75": 10573,
+    "total_new_pcs": 10601
+   },
+   "tas": {
+    "100": 37773,
+    "25": 21731,
+    "50": 26779,
+    "75": 33740,
+    "total_new_pcs": 37773
+   }
+  },
+  "indirect": {
+   "edges_tas": 2492,
+   "extra_edges": 2255,
+   "extra_targets": 2110,
+   "targets_control": 253,
+   "targets_tas": 2329
+  },
+  "strong_code_cells": {
+   "control": 486,
+   "control_seed2": 492,
+   "extra_vs_control": 1178,
+   "extra_vs_control_seed2": 1172,
+   "extra_weak_variant_cells": 1166,
+   "relative_increase": 2.4239,
+   "tas": 1647,
+   "useful_vs_seed2": true
+  },
+  "tiers": {
+   "ctl": {
+    "E": 37902,
+    "E_I": 10592,
+    "E_c": 27310,
+    "H": 512,
+    "M": 42424,
+    "R": 8386,
+    "U": 3056504,
+    "W": 0
+   },
+   "ctl2": {
+    "E": 38356,
+    "E_I": 10698,
+    "E_c": 27658,
+    "H": 512,
+    "M": 43352,
+    "R": 8312,
+    "U": 3055196,
+    "W": 0
+   },
+   "tas": {
+    "E": 156468,
+    "E_I": 37764,
+    "E_c": 118704,
+    "H": 512,
+    "M": 317784,
+    "R": 14380,
+    "U": 2656584,
+    "W": 0
+   }
+  }
+ },
+ "cpu_hours": 0.509,
+ "data": {
+  "data_extents": {
+   "ctl": {
+    "DMA": 59,
+    "HW_HEADER": 1
+   },
+   "ctl2": {
+    "DMA": 61,
+    "HW_HEADER": 1
+   },
+   "tas": {
+    "DMA": 403,
+    "HW_HEADER": 1
+   }
+  },
+  "extra_data": {
+   "extra_hard_negative_cells_strong": 1666,
+   "extra_mixed_cells_strong": 1,
+   "strong_negative_cells_vs_control": 1842,
+   "weak_negative_cells_vs_control": 1842
+  },
+  "overlap": {
+   "ambiguous_masked_extents": 0,
+   "cdl_exec_and_data_bytes": 242,
+   "e_bytes_also_read_as_data": 275,
+   "e_bytes_in_dma_source": 0,
+   "r_data_conflicts": 0,
+   "rom_bytes_read_as_data_fraction": 0.1883
+  },
+  "strong": {
+   "ctl": {
+    "cells_masked": 23808,
+    "cells_mixed": 5,
+    "cells_neg": 282,
+    "cells_pos": 486,
+    "hard_negative_cells": 184,
+    "labelled_bytes": 80838,
+    "masked_fraction_bytes": 0.9743
+   },
+   "ctl2": {
+    "cells_masked": 23798,
+    "cells_mixed": 5,
+    "cells_neg": 286,
+    "cells_pos": 492,
+    "hard_negative_cells": 188,
+    "labelled_bytes": 82220,
+    "masked_fraction_bytes": 0.9739
+   },
+   "tas": {
+    "cells_masked": 20812,
+    "cells_mixed": 4,
+    "cells_neg": 2117,
+    "cells_pos": 1647,
+    "hard_negative_cells": 1843,
+    "labelled_bytes": 474764,
+    "masked_fraction_bytes": 0.8491
+   }
+  },
+  "strong_vs_weak": {
+   "labelled_bytes_lost_without_weak": 0.0294
+  },
+  "weak": {
+   "ctl": {
+    "cells_masked": 23773,
+    "cells_mixed": 5,
+    "cells_neg": 282,
+    "cells_pos": 521,
+    "hard_negative_cells": 184,
+    "labelled_bytes": 89224,
+    "masked_fraction_bytes": 0.9716
+   },
+   "ctl2": {
+    "cells_masked": 23763,
+    "cells_mixed": 5,
+    "cells_neg": 286,
+    "cells_pos": 527,
+    "hard_negative_cells": 188,
+    "labelled_bytes": 90532,
+    "masked_fraction_bytes": 0.9712
+   },
+   "tas": {
+    "cells_masked": 20789,
+    "cells_mixed": 4,
+    "cells_neg": 2117,
+    "cells_pos": 1670,
+    "hard_negative_cells": 1843,
+    "labelled_bytes": 489144,
+    "masked_fraction_bytes": 0.8445
+   }
+  }
+ },
+ "extra_cells_kept_private": false,
+ "frames": 28632,
+ "game": "vm2",
+ "gate_replay": {
+  "checkpoints": 6,
+  "determinism": {
+   "cdl": true,
+   "checkpoints": true,
+   "edges": true,
+   "pcs": true,
+   "reads": true
+  },
+  "digest_domains_missing": false,
+  "distinct_ram_vram_states": 6,
+  "fifths_with_new_code": 5,
+  "identity_ok": true,
+  "no_perturbation": true,
+  "played_to_end": true,
+  "progression": true,
+  "replay_ok": true,
+  "states": 6
+ },
+ "gate_tracing": {
+  "fidelity": {
+   "accepted_E_fraction": 1.0,
+   "cdl_exec_mismatch_fraction": 0.0,
+   "cdl_fixture_ok": true,
+   "controls_ok": [
+    true,
+    true
+   ],
+   "e_rejection_classes": {},
+   "e_rejections": 0,
+   "map_mismatch": 0,
+   "odd_pcs": 0,
+   "read_self_fetch_fraction": 4e-05,
+   "reset_pc_executed": true,
+   "vbl_pc_executed": true
+  },
+  "tracing_ok": true
+ },
+ "image": {
+  "sha256": "02a5d53336729ad41881ea97c66018da92152d9cef65fd46d6965730cb57af04",
+  "size": 3145728
+ },
+ "isolation": {
+  "image_in_sealed_blind_manifest": false,
+  "image_sha256_in_registry": false,
+  "lineage_in_registry": false,
+  "ok": true
+ },
+ "lineage": "T81_VM2",
+ "movie_sha256": "22773f51d732324149f1046cb0213386829960170cae49aaae6ea4c1e6118e3a",
+ "novelty": {
+  "registry": {
+   "N_struct": 231,
+   "N_struct_not_in_control": 95,
+   "forms_absent_from_reference": 5,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 2,
+     "absent_from_reference_and_control": 1,
+     "reference": 1205,
+     "target": 4
+    },
+    "cfg": {
+     "absent_from_reference": 226,
+     "absent_from_reference_and_control": 93,
+     "reference": 5476,
+     "target": 1147
+    },
+    "forms": {
+     "absent_from_reference": 5,
+     "absent_from_reference_and_control": 2,
+     "reference": 507,
+     "target": 319
+    },
+    "g3": {
+     "absent_from_reference": 4832,
+     "absent_from_reference_and_control": 2180,
+     "reference": 87211,
+     "target": 9480
+    },
+    "g4": {
+     "absent_from_reference": 10561,
+     "absent_from_reference_and_control": 5682,
+     "reference": 168735,
+     "target": 13222
+    }
+   },
+   "rare_forms_in_target": 5,
+   "relative_increase": {
+    "boundary": 0.0017,
+    "cfg": 0.0413,
+    "forms": 0.0099,
+    "g3": 0.0554,
+    "g4": 0.0626
+   }
+  },
+  "sonic2_seg080": {
+   "N_struct": 781,
+   "N_struct_not_in_control": 306,
+   "forms_absent_from_reference": 79,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 4,
+     "absent_from_reference_and_control": 1,
+     "reference": 0,
+     "target": 4
+    },
+    "cfg": {
+     "absent_from_reference": 702,
+     "absent_from_reference_and_control": 290,
+     "reference": 1140,
+     "target": 1147
+    },
+    "forms": {
+     "absent_from_reference": 79,
+     "absent_from_reference_and_control": 16,
+     "reference": 285,
+     "target": 319
+    },
+    "g3": {
+     "absent_from_reference": 7805,
+     "absent_from_reference_and_control": 3609,
+     "reference": 11398,
+     "target": 9480
+    },
+    "g4": {
+     "absent_from_reference": 12578,
+     "absent_from_reference_and_control": 6806,
+     "reference": 16585,
+     "target": 13222
+    }
+   },
+   "rare_forms_in_target": 52,
+   "relative_increase": {
+    "boundary": null,
+    "cfg": 0.6158,
+    "forms": 0.2772,
+    "g3": 0.6848,
+    "g4": 0.7584
+   }
+  }
+ },
+ "plan_sha256": "a51546ad2c1b2c62ab329f0299d7504548c7c7a9db0aa1b77ef781333d652845",
+ "registry_digest": "dab51db40680defd9f9f090b42f35a8b1125a8c3466c0a0b2f3081ad152d4830",
+ "title": "Vectorman 2 (USA)"
+}
