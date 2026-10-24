@@ -1,0 +1,3876 @@
+{
+ "schema": "segarecomp.seg084.audit.v1",
+ "seg072": {
+  "all_present_and_verified": true,
+  "image_count": 50,
+  "images": [
+   {
+    "broad_aot": "accepted",
+    "bytes": {
+     "D": 83707,
+     "I": 3388,
+     "U": 36167,
+     "c": 7810
+    },
+    "cells": {
+     "cells": 1024,
+     "masked": 284,
+     "neg": 651,
+     "pos": 89
+    },
+    "classes_ok": true,
+    "classes_sha256": "f39506ac5cc315ab9cc627890a91cbd2aaaa679bbd4346e6b6a0898370f3bb0c",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "01b8970a6c997d492815cd39d96985c9dbefe020e6ca59872ffbde9b98e8e654",
+    "in_manifest": true,
+    "key": "2a10eeb47fc8c514",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D05",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "reproducible_build",
+    "qualified_lineage": true,
+    "seed_address_file": true,
+    "seed_cells": 27,
+    "size": 131072,
+    "tokens_ok": true,
+    "tokens_sha256": "f9d1e5243b7528df73cfdc6922f8c6f67003d8506ff68ae6c1e0d5ded91e4a60"
+   },
+   {
+    "broad_aot": "accepted",
+    "bytes": {
+     "D": 294357,
+     "I": 6750,
+     "U": 72181,
+     "c": 19928
+    },
+    "cells": {
+     "cells": 3072,
+     "masked": 561,
+     "neg": 2297,
+     "pos": 214
+    },
+    "classes_ok": true,
+    "classes_sha256": "ab9237d97eaca442fcf3f864a712a0dc60bef8a294be00dc4a7e359e17810b4e",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "c335ba9898a67fecccc415c0d00f9ad6d09c63fe584e638f7cbbf3a7c1c34cbf",
+    "in_manifest": true,
+    "key": "945a17a7f40f9e70",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D06",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "reproducible_build",
+    "qualified_lineage": true,
+    "seed_address_file": true,
+    "seed_cells": 23,
+    "size": 393216,
+    "tokens_ok": true,
+    "tokens_sha256": "2027bd0f6f26bf7ad213fb37cd923f1b4406fecd70cb4cc0a33e15dbea35f687"
+   },
+   {
+    "broad_aot": "accepted",
+    "bytes": {
+     "D": 125401,
+     "I": 25246,
+     "U": 51875,
+     "c": 59622
+    },
+    "cells": {
+     "cells": 2048,
+     "masked": 407,
+     "neg": 974,
+     "pos": 667
+    },
+    "classes_ok": true,
+    "classes_sha256": "12ee34dbe6d3a5e2da9740a19493859519b32dd9ebf6091a764a43e0c419d685",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "d998d87aed4fdd6ffa4c06551d2d92423b6617873ef59e426e747150a35a2aab",
+    "in_manifest": true,
+    "key": "d47544545e3bb601",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D07",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "reproducible_build",
+    "qualified_lineage": true,
+    "seed_address_file": true,
+    "seed_cells": 28,
+    "size": 262144,
+    "tokens_ok": true,
+    "tokens_sha256": "997eb2939fb4a438e93644c31ff67aa121feb2dbd7686ea1fd80f0de7b38f8ad"
+   },
+   {
+    "broad_aot": "accepted",
+    "bytes": {
+     "D": 57619,
+     "I": 742,
+     "U": 70579,
+     "c": 2132
+    },
+    "cells": {
+     "cells": 1024,
+     "masked": 552,
+     "neg": 448,
+     "pos": 24
+    },
+    "classes_ok": true,
+    "classes_sha256": "0dbb55b447f9744e1fd34d86f47ece5dd60d541a4d287035bb6ee9302e48e4e4",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "d5a26cae67ad7b113f73ceba604d33d5b1649eedd157293275cea915b31f0536",
+    "in_manifest": true,
+    "key": "50b170118b6c3a54",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D09",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "reproducible_build",
+    "qualified_lineage": true,
+    "seed_address_file": true,
+    "seed_cells": 27,
+    "size": 131072,
+    "tokens_ok": true,
+    "tokens_sha256": "51beb77c609abfc46155b49af3fbce8b4b257d11106a3453d4fa0b42581ae310"
+   },
+   {
+    "broad_aot": "effective_address_not_24bit",
+    "bytes": {
+     "D": 292000,
+     "I": 10592,
+     "U": 65506,
+     "c": 25118
+    },
+    "cells": {
+     "cells": 3072,
+     "masked": 514,
+     "neg": 2275,
+     "pos": 283
+    },
+    "classes_ok": true,
+    "classes_sha256": "feff37e25dbaebaeeefbf66b0e0f5028d1865dd026dbf2dbc26585979bff5b4f",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "5a21ad79dc62d68f09520013237e63464e1759c44fdd571669afe585c9551b88",
+    "in_manifest": true,
+    "key": "614089915385256e",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D10",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "reproducible_build",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 0,
+    "size": 393216,
+    "tokens_ok": true,
+    "tokens_sha256": "8e36617b4a423d7895e76c926a027923f503bb52600ec2ba50917a8f7821b720"
+   },
+   {
+    "broad_aot": "effective_address_not_24bit",
+    "bytes": {
+     "D": 165135,
+     "I": 6343,
+     "U": 74649,
+     "c": 16017
+    },
+    "cells": {
+     "cells": 2048,
+     "masked": 587,
+     "neg": 1282,
+     "pos": 179
+    },
+    "classes_ok": true,
+    "classes_sha256": "c4d614b2d85f18d15169e2f82ffc488efe181e61e53704bafc19bde9f9445535",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "bd5510c70a1976a4094359dc4916ddce64599af7e81363803b7961f63beb8bff",
+    "in_manifest": true,
+    "key": "87053bb41e5fc2d7",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D11",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "reproducible_build",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 0,
+    "size": 262144,
+    "tokens_ok": true,
+    "tokens_sha256": "c51140a34163e79d6c8a17295504dd1382dc759af9e0a79ef6f91a71c1802bee"
+   },
+   {
+    "broad_aot": "effective_address_not_24bit",
+    "bytes": {
+     "D": 180973,
+     "I": 11010,
+     "U": 41473,
+     "c": 28688
+    },
+    "cells": {
+     "cells": 2048,
+     "masked": 329,
+     "neg": 1407,
+     "pos": 312
+    },
+    "classes_ok": true,
+    "classes_sha256": "bf4b4f9ea6af9ee6188e2537a615262025acc1ca2611be5e70568b736d1f5160",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "03c832fb83b0548b739386c809721ef08238b1cc776b051b51c5df930c5754f2",
+    "in_manifest": true,
+    "key": "1b9e712f280f5b1e",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D12",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "reproducible_build",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 0,
+    "size": 262144,
+    "tokens_ok": true,
+    "tokens_sha256": "dee600cf5ba54ad3f2227bc8e738e892f9519017a1aa6396e1b06f87caf9f525"
+   },
+   {
+    "broad_aot": "accepted",
+    "bytes": {
+     "D": 111486,
+     "I": 5707,
+     "U": 0,
+     "c": 13879
+    },
+    "cells": {
+     "cells": 1024,
+     "masked": 0,
+     "neg": 844,
+     "pos": 180
+    },
+    "classes_ok": true,
+    "classes_sha256": "2e0e3f040a34f9c668cc6cb6afb9d701833e378c1c5a2b56e1917efd37469889",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "4df1a91e08376ae773a6eb8e5abe310f94ca39d8f81583b91a9477fedcb68c11",
+    "in_manifest": true,
+    "key": "3ffb6dd4b4a11d5c",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D02",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "community_disassembly_of_commercial_title",
+    "qualified_lineage": true,
+    "seed_address_file": true,
+    "seed_cells": 11,
+    "size": 131072,
+    "tokens_ok": true,
+    "tokens_sha256": "a8b168d0baa0c10d8690d49b5e3401f9e9733032f827ad6b85f4e4837a0b0605"
+   },
+   {
+    "broad_aot": "accepted",
+    "bytes": {
+     "D": 716858,
+     "I": 19261,
+     "U": 0,
+     "c": 50313
+    },
+    "cells": {
+     "cells": 6144,
+     "masked": 0,
+     "neg": 5579,
+     "pos": 565
+    },
+    "classes_ok": true,
+    "classes_sha256": "c10b058f357e291d09a7c08c757341b9e8a49b17f6a298ca2883dab8b637b6d7",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "a0bd97f5aaa67301923ccc367511606bd3471ea9542919165311d4a23a2b696b",
+    "in_manifest": true,
+    "key": "05b09e57ded0ff56",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D04",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "community_disassembly_of_commercial_title",
+    "qualified_lineage": true,
+    "seed_address_file": true,
+    "seed_cells": 45,
+    "size": 786432,
+    "tokens_ok": true,
+    "tokens_sha256": "05b4277ac15e62c7b48367bbcddd0ce4df7d6b7295e8b33296e342995eaa8c6e"
+   },
+   {
+    "broad_aot": "accepted",
+    "bytes": {
+     "D": 434138,
+     "I": 24180,
+     "U": 0,
+     "c": 65970
+    },
+    "cells": {
+     "cells": 4096,
+     "masked": 2,
+     "neg": 3274,
+     "pos": 820
+    },
+    "classes_ok": true,
+    "classes_sha256": "07c8aa7ed1a013b1a94b0047503d4559a3a6a33d01cebcc617b32f9db4666197",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "in_manifest": true,
+    "key": "9d08785555193ef5",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "community_disassembly_of_commercial_title",
+    "qualified_lineage": true,
+    "seed_address_file": true,
+    "seed_cells": 58,
+    "size": 524288,
+    "tokens_ok": true,
+    "tokens_sha256": "e80dd7af2c80b5765a4c690a4bd3bff362f48e0947331d90eb4a8861431ccb9e"
+   },
+   {
+    "broad_aot": "accepted",
+    "bytes": {
+     "D": 865354,
+     "I": 48733,
+     "U": 0,
+     "c": 134489
+    },
+    "cells": {
+     "cells": 8192,
+     "masked": 0,
+     "neg": 6534,
+     "pos": 1658
+    },
+    "classes_ok": true,
+    "classes_sha256": "50bca5d8b91a1dbebff1f094338163b62ffe1f2a5418e96222b6c6b11121959f",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "193bc4064ce0daf27ea9e908ed246d87ec576cc294833badebb590b6ad8e8f6b",
+    "in_manifest": true,
+    "key": "9fcac2f50bca486f",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "community_disassembly_of_commercial_title",
+    "qualified_lineage": true,
+    "seed_address_file": true,
+    "seed_cells": 38,
+    "size": 1048576,
+    "tokens_ok": true,
+    "tokens_sha256": "cf90313d62b48840f9f1afc9fef460520302913334428e30baa11f845fb1755d"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 8,
+     "I": 140,
+     "U": 0,
+     "c": 492
+    },
+    "cells": {
+     "cells": 5,
+     "masked": 0,
+     "neg": 0,
+     "pos": 5
+    },
+    "classes_ok": true,
+    "classes_sha256": "4b947c76b2d03ca8e59f49c3349a0b47e60af7c56930440a079318fd6ba79e93",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "11b52cf7e80912c2919a81cfe7111f56a4b6bfdcfa6371a1cedffaaa73b95a76",
+    "in_manifest": false,
+    "key": "a5bdb96be40c88d0",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 5,
+    "size": 640,
+    "tokens_ok": true,
+    "tokens_sha256": "834e9be44adb972781c897b602fe3945690e994a5421885e12fdcdfb1c588fe5"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 7688,
+     "I": 956,
+     "U": 0,
+     "c": 2354
+    },
+    "cells": {
+     "cells": 86,
+     "masked": 0,
+     "neg": 56,
+     "pos": 30
+    },
+    "classes_ok": true,
+    "classes_sha256": "d8e74ed4ce9a5b52495c111f33a9965005c2bbbfbec86fc826d9a38985033ae4",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "5895de24b19d0a362f9184ff049d4e5e857f32b0e591184027b0802342765fe6",
+    "in_manifest": false,
+    "key": "47485728ecd4b013",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 24,
+    "size": 10998,
+    "tokens_ok": true,
+    "tokens_sha256": "7b857049a0c4f27ea9c8c195214f95918fd5b10e748d4560721d28646f25cd86"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 1634,
+     "I": 251,
+     "U": 0,
+     "c": 707
+    },
+    "cells": {
+     "cells": 21,
+     "masked": 0,
+     "neg": 13,
+     "pos": 8
+    },
+    "classes_ok": true,
+    "classes_sha256": "d2ef8a8f21301da5924ebfcd5c2cf18f305526c31ce0fd9a8a7b98ad24b675fc",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "a1585624a99082c7a41a4107848763e73f3a0e86a6fd74749c8868dcac114ab9",
+    "in_manifest": false,
+    "key": "6113637c391855aa",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 4,
+    "size": 2592,
+    "tokens_ok": true,
+    "tokens_sha256": "5052a8e32f13a98d7d7840be2bf3f4b689aeef0ade0f6c2eaa3fa946895ee5ae"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 214526,
+     "I": 12639,
+     "U": 0,
+     "c": 34979
+    },
+    "cells": {
+     "cells": 2048,
+     "masked": 0,
+     "neg": 1634,
+     "pos": 414
+    },
+    "classes_ok": true,
+    "classes_sha256": "04a62f7af9d338b6162fb8b90fe150f6778bfb04fca65876aa4e036bc76063dc",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "e99ae7708e5d32a16bdd3b902dc549124436ae5cabca663f32ae7bd593749c9e",
+    "in_manifest": false,
+    "key": "27af74d1c3a593a5",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 11,
+    "size": 262144,
+    "tokens_ok": true,
+    "tokens_sha256": "996e03f632093e5cd3777ffcfc38559b5fc7c1d4ba4ea560c7e5b76373e56a37"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 14750,
+     "I": 624,
+     "U": 0,
+     "c": 1266
+    },
+    "cells": {
+     "cells": 130,
+     "masked": 0,
+     "neg": 114,
+     "pos": 16
+    },
+    "classes_ok": true,
+    "classes_sha256": "a575fc9e5c964adea1b31d6505f7a75c5ecfae1f47a2a1d4ae8f3b6a98880307",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "a7e01254c3ee2e2993e2aee3b4394d08f057d0b6256e03c3309e8a1267bcc840",
+    "in_manifest": false,
+    "key": "d550c5ae85db1a5c",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 13,
+    "size": 16640,
+    "tokens_ok": true,
+    "tokens_sha256": "7fe38b3cf0c7434c731ebd2fae070ced0c47771d7b9001201663a6d91c17cab5"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 14750,
+     "I": 624,
+     "U": 0,
+     "c": 1266
+    },
+    "cells": {
+     "cells": 130,
+     "masked": 0,
+     "neg": 113,
+     "pos": 17
+    },
+    "classes_ok": true,
+    "classes_sha256": "bbcf00ba20266359f9c69fefe31e8b829fad73633913bd35ea1f050bbd7d954c",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "fe3a8911dca2571600ebb7b98d3a7dfe73dc1fd264937c4fa2a6e9e91f852724",
+    "in_manifest": false,
+    "key": "d63ae94ff35169ef",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 13,
+    "size": 16640,
+    "tokens_ok": true,
+    "tokens_sha256": "67dac3920a0fa86a44e2c686d2adb13cc5e9ddaffc558ed417d8d6c77d26f6f0"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 14750,
+     "I": 624,
+     "U": 0,
+     "c": 1266
+    },
+    "cells": {
+     "cells": 130,
+     "masked": 0,
+     "neg": 114,
+     "pos": 16
+    },
+    "classes_ok": true,
+    "classes_sha256": "91cd5b020aaad6119930fe0bfdc4f8c65595f96b90c392eee4f125dbcd658f12",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "9a7541bd89f52a89b43e57b10617e98e6683687b86413525d5c289c59f2f8337",
+    "in_manifest": false,
+    "key": "6c666c88499d2b03",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 13,
+    "size": 16640,
+    "tokens_ok": true,
+    "tokens_sha256": "9dfb9eabb89b38a558e93bd59eadbe29fb88ce74827b72228521a199b43bdfef"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 14750,
+     "I": 624,
+     "U": 0,
+     "c": 1266
+    },
+    "cells": {
+     "cells": 130,
+     "masked": 0,
+     "neg": 113,
+     "pos": 17
+    },
+    "classes_ok": true,
+    "classes_sha256": "ae721540a2e7c0205ad95f025ca8556f55cfb1b705e09b517a2d1e71ab2304c9",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "b1b8218914622cdba798df78bf7ae70fce68fd8a6c2cdebc39b0002b2b01a172",
+    "in_manifest": false,
+    "key": "415af7caf20d0790",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 13,
+    "size": 16640,
+    "tokens_ok": true,
+    "tokens_sha256": "5a64eda83b2d72f2b95baefd6bffa06658a8a1bc8e6d9b8924ec01eca85d6c56"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 14636,
+     "I": 653,
+     "U": 0,
+     "c": 1351
+    },
+    "cells": {
+     "cells": 130,
+     "masked": 0,
+     "neg": 111,
+     "pos": 19
+    },
+    "classes_ok": true,
+    "classes_sha256": "26830be82342d9d5b6bb4d69f5e1791af186bee28f0dbde8ef1d286870828b66",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "a45d92e5d0fab7df5f5ca59d94f85ffb3ca39436207755a711adc2cce90f942b",
+    "in_manifest": false,
+    "key": "64d484bd23541a46",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 13,
+    "size": 16640,
+    "tokens_ok": true,
+    "tokens_sha256": "2c5bab4730552fc302daaa9bb94fb417712410fe86067e93f9de79384372f182"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 13996,
+     "I": 814,
+     "U": 0,
+     "c": 1830
+    },
+    "cells": {
+     "cells": 130,
+     "masked": 0,
+     "neg": 106,
+     "pos": 24
+    },
+    "classes_ok": true,
+    "classes_sha256": "9fe41f3ec6499b926779873676e2bb439561ec17caafdbe8b2c3b0a255d17a5e",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "14de84b06cf76710d5beccad52036dff3acef46c79b99bab832def7233c392ad",
+    "in_manifest": false,
+    "key": "6a5a91d07e7fc812",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 19,
+    "size": 16640,
+    "tokens_ok": true,
+    "tokens_sha256": "d7506812a7de880c1330c614f0cdd3d2300da46de8f0a3fd7b82f2efdffbe9c6"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 8,
+     "I": 140,
+     "U": 0,
+     "c": 492
+    },
+    "cells": {
+     "cells": 5,
+     "masked": 0,
+     "neg": 0,
+     "pos": 5
+    },
+    "classes_ok": true,
+    "classes_sha256": "4b947c76b2d03ca8e59f49c3349a0b47e60af7c56930440a079318fd6ba79e93",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "66d4258c6fabe508d16a5cd5eb9af28d7177e32c10199a2e105ff88b0fb01465",
+    "in_manifest": false,
+    "key": "ac18a82e2ed6712b",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 5,
+    "size": 640,
+    "tokens_ok": true,
+    "tokens_sha256": "834e9be44adb972781c897b602fe3945690e994a5421885e12fdcdfb1c588fe5"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 7150,
+     "I": 81,
+     "U": 0,
+     "c": 283
+    },
+    "cells": {
+     "cells": 59,
+     "masked": 0,
+     "neg": 55,
+     "pos": 4
+    },
+    "classes_ok": true,
+    "classes_sha256": "3edd106e1f039087828f7018fa6f943e7365cb401c80463835d818e694acddab",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "abd4735cb55aac797402d611b6d732276f02f1394ef39e7e1af6cd9dbd6fdf7e",
+    "in_manifest": false,
+    "key": "3a281a070683807e",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 4,
+    "size": 7514,
+    "tokens_ok": true,
+    "tokens_sha256": "a40d28e02c7586ad6aaca8ff241eef6a021982bef88d09c1c5eaa9a325674e16"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 14750,
+     "I": 624,
+     "U": 0,
+     "c": 1266
+    },
+    "cells": {
+     "cells": 130,
+     "masked": 0,
+     "neg": 114,
+     "pos": 16
+    },
+    "classes_ok": true,
+    "classes_sha256": "68eeb89f78812e328fc236e6d31bce71489eb7171f5fbbe046c9d7bc32c482bf",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "a63cf65088abc603454222818cb0e8092d07ddd11b73e0628095a0a0ee249b0e",
+    "in_manifest": false,
+    "key": "3ea6810b1fada03e",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 13,
+    "size": 16640,
+    "tokens_ok": true,
+    "tokens_sha256": "6b1e51a958cbc9054e820ce9a369e273a0a26d0710b9bb3e05f8c6035f049a91"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 8488,
+     "I": 365,
+     "U": 0,
+     "c": 1173
+    },
+    "cells": {
+     "cells": 79,
+     "masked": 0,
+     "neg": 65,
+     "pos": 14
+    },
+    "classes_ok": true,
+    "classes_sha256": "21dbd0e5a6ff2ceefbad52c58cba83a210aba69c783ba0622556bc6d29b5b9d8",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "0c1f41e0020ab07db2bab64daf2364308c6d7e9d5a2ceb6c847be633596ba15e",
+    "in_manifest": false,
+    "key": "b35f94f553055ecb",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 11,
+    "size": 10026,
+    "tokens_ok": true,
+    "tokens_sha256": "8e4687bae49fb3506706f177248e280873c0b7f7144945518227420d640c690a"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 8,
+     "I": 128,
+     "U": 0,
+     "c": 454
+    },
+    "cells": {
+     "cells": 5,
+     "masked": 0,
+     "neg": 0,
+     "pos": 5
+    },
+    "classes_ok": true,
+    "classes_sha256": "300ebd9646ea17809c6a2848dd7c1d7efbcb528e038c848ef8a84bdb654378f3",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "a20496100b68b88f6aab63b2ea6657b0782dc1485f67ec9b5ff56f322771094a",
+    "in_manifest": false,
+    "key": "88d4cdd937a812ec",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 5,
+    "size": 590,
+    "tokens_ok": true,
+    "tokens_sha256": "4495d2c918a2393bb0f86405aabc7d5b4e58e1e70ef4967a57baa10a378c1c72"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 13278,
+     "I": 2431,
+     "U": 0,
+     "c": 6539
+    },
+    "cells": {
+     "cells": 174,
+     "masked": 0,
+     "neg": 97,
+     "pos": 77
+    },
+    "classes_ok": true,
+    "classes_sha256": "fed86ba016baf46feb0c84ce219bc30d4b408378e8990bb51ae19c22db413571",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "dad020ef9cc998ad940990628d6808cf91bbee4f56a51946abfc3b5b66d645f4",
+    "in_manifest": false,
+    "key": "9b3fe715dc3d1d7e",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 38,
+    "size": 22248,
+    "tokens_ok": true,
+    "tokens_sha256": "2c4e7dc18b1680143232912e0327efa8e63682804ab5585a7c1690b9b2ac7cb5"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 37390,
+     "I": 631,
+     "U": 0,
+     "c": 1707
+    },
+    "cells": {
+     "cells": 311,
+     "masked": 0,
+     "neg": 290,
+     "pos": 21
+    },
+    "classes_ok": true,
+    "classes_sha256": "acfa9dc797f5e87e83c331ca29f56a9a96a2743f44c34b843267fcd5cfe6dbb0",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "6869b3cfbfa0d81c6d12d63fc3f7470c9ef0e9e519b3181dec56f93b18a993d0",
+    "in_manifest": false,
+    "key": "d0a5f488713c15c9",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 14,
+    "size": 39728,
+    "tokens_ok": true,
+    "tokens_sha256": "ea911fa192f55cbd374f59f109b51f2bfb9247e586ebea21c8334669705a4d70"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 0,
+     "I": 60,
+     "U": 0,
+     "c": 226
+    },
+    "cells": {
+     "cells": 3,
+     "masked": 0,
+     "neg": 0,
+     "pos": 3
+    },
+    "classes_ok": true,
+    "classes_sha256": "77fccc0bbd44727d2ddcb9e30e03f13fb2a30aaf5910ce5fd4cd54d25534582b",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "dc76f463ada7d9281d1c8ed5806f2d2ed6884a8c87d3be15a90dac5a0f01a29c",
+    "in_manifest": false,
+    "key": "70f28aec302da3c9",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 3,
+    "size": 286,
+    "tokens_ok": true,
+    "tokens_sha256": "027ec26e9f657d72f1fad4bac558b96cf8d8cabee0dc7fe8bb47a6897e0d8026"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 214578,
+     "I": 12627,
+     "U": 0,
+     "c": 34939
+    },
+    "cells": {
+     "cells": 2048,
+     "masked": 0,
+     "neg": 1634,
+     "pos": 414
+    },
+    "classes_ok": true,
+    "classes_sha256": "1f9eefa4acaff236757e32c66889cfe878547841e7da2cb1ed94d0642d3ac7fc",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "7aa54c36ab94dbe14068a18613c574b883ce446337bfaa9c571ec3523aff14e2",
+    "in_manifest": false,
+    "key": "2da5a4157b3f25dd",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 10,
+    "size": 262144,
+    "tokens_ok": true,
+    "tokens_sha256": "f1cf28cab6ace6923bddb2e8a0d2ba4f6f32e62cf1a111aff952916bae340dce"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 217404,
+     "I": 11867,
+     "U": 0,
+     "c": 32873
+    },
+    "cells": {
+     "cells": 2048,
+     "masked": 0,
+     "neg": 1656,
+     "pos": 392
+    },
+    "classes_ok": true,
+    "classes_sha256": "d7c1c0aa34cc82207d87b44c7082053fbc1a5632bbb00f478e019eda6c102d76",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "b7ebd9d362e91b213d53e984f737642f3e09cd2a511d3c5f1142c660e6aff265",
+    "in_manifest": false,
+    "key": "bfb3c47a093ab00f",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 10,
+    "size": 262144,
+    "tokens_ok": true,
+    "tokens_sha256": "913f1750ed49a8b61fe8b2c8f2b2a8e8fb0dfee4aa3cc666b0060f546273db2e"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 217426,
+     "I": 11879,
+     "U": 0,
+     "c": 32839
+    },
+    "cells": {
+     "cells": 2048,
+     "masked": 1,
+     "neg": 1656,
+     "pos": 391
+    },
+    "classes_ok": true,
+    "classes_sha256": "1157269549b430b5d7ce111afca49ef6be110a0ca249447928bd022509e46f74",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "b7023364db06b554123d4da0f92319eec592ea4a14d7602ce8ec769189b9bb60",
+    "in_manifest": false,
+    "key": "3d00bbe83dd2e2ad",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 9,
+    "size": 262144,
+    "tokens_ok": true,
+    "tokens_sha256": "971f9f8f91f292fa0517c5a16b08b6bd86c4702514738c5779b8bb1c16c9772a"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 217432,
+     "I": 11872,
+     "U": 0,
+     "c": 32840
+    },
+    "cells": {
+     "cells": 2048,
+     "masked": 0,
+     "neg": 1659,
+     "pos": 389
+    },
+    "classes_ok": true,
+    "classes_sha256": "96ae42469dbd8d585841f0186a5347567bbb0b1d517b6b2bf1ef66221e5b07c6",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "91c0992ad2729e5cbd85fe8d16af7731d319ee0a51c4f221def344cf02a5176e",
+    "in_manifest": false,
+    "key": "056f5ebfa674e00e",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 9,
+    "size": 262144,
+    "tokens_ok": true,
+    "tokens_sha256": "b9ff71a52f1e952b20a037d0094ce798217f144752e4b92ff737f1b11f3921a4"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 213908,
+     "I": 12712,
+     "U": 0,
+     "c": 35524
+    },
+    "cells": {
+     "cells": 2048,
+     "masked": 0,
+     "neg": 1627,
+     "pos": 421
+    },
+    "classes_ok": true,
+    "classes_sha256": "4953925f12ba878b3412d8a928f4ad1994a44a43bb5b06e6579ccf973c1b3f17",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "1c5617246f4de14aab548bf3663d27a34f566399ede381f1ceec1b1feaa01bce",
+    "in_manifest": false,
+    "key": "a836860e1e091837",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 9,
+    "size": 262144,
+    "tokens_ok": true,
+    "tokens_sha256": "2866aa6c9cfe4167344e638002068dbb00b3170b770af5c9e3c5f8aca1f32de1"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 215598,
+     "I": 658,
+     "U": 0,
+     "c": 1610
+    },
+    "cells": {
+     "cells": 1703,
+     "masked": 0,
+     "neg": 1683,
+     "pos": 20
+    },
+    "classes_ok": true,
+    "classes_sha256": "18c4afe5291e4ee2f79af3c0c861937949901b9155bed4984c26559d01015cb6",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "fd7ab10c908bd26545afc5bf5da0765e7178fe8fe2929b15957acf9bd7d6e558",
+    "in_manifest": false,
+    "key": "cba668c9b4beb2a1",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 16,
+    "size": 217866,
+    "tokens_ok": true,
+    "tokens_sha256": "b2b415105a8275ac52a16f6e3889b6716e14571ad46791d0657c8e7599430137"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 199294,
+     "I": 658,
+     "U": 0,
+     "c": 1610
+    },
+    "cells": {
+     "cells": 1575,
+     "masked": 0,
+     "neg": 1555,
+     "pos": 20
+    },
+    "classes_ok": true,
+    "classes_sha256": "f0b54664a502d03f005fd4f6bdf1b632b6e681e660e031ccac551bc895ecda9c",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "7746a04d60551aeeae724a2c6d77b48d7ff52bb050707495010b514e10b41296",
+    "in_manifest": false,
+    "key": "fc7fc83530d30668",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 16,
+    "size": 201562,
+    "tokens_ok": true,
+    "tokens_sha256": "c3795ddf63a22e6db55156484da1517270fc531f93d40d2a0adda8daeac651de"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 215186,
+     "I": 658,
+     "U": 0,
+     "c": 1610
+    },
+    "cells": {
+     "cells": 1699,
+     "masked": 0,
+     "neg": 1679,
+     "pos": 20
+    },
+    "classes_ok": true,
+    "classes_sha256": "4f9469e82d35fbd1849b215310162e1bce5342767acd6f96ed7ef7e43b2eef1d",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "a7091e8e91b4dab34164adf81c7b0f0d321da6aa8fd6f7acb8b3af51cca71142",
+    "in_manifest": false,
+    "key": "c7d766a30c114585",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 16,
+    "size": 217454,
+    "tokens_ok": true,
+    "tokens_sha256": "bd103f90b6f49366166f1d806507bea6c101a7393e52f051b70bca303d729a9e"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 9710,
+     "I": 871,
+     "U": 0,
+     "c": 1963
+    },
+    "cells": {
+     "cells": 98,
+     "masked": 0,
+     "neg": 72,
+     "pos": 26
+    },
+    "classes_ok": true,
+    "classes_sha256": "6137c206b1094b80fd2d2d9253f64353c1b6d0f3e5dce5555fb0badfb4154b47",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "27dfb7822347e8c07a1645039f76c4094209f5542ca171603ba72bda1aa35eaf",
+    "in_manifest": false,
+    "key": "af35c3cf3f827402",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 19,
+    "size": 12544,
+    "tokens_ok": true,
+    "tokens_sha256": "81fd3618f498a7dfaf151c21a625777e62bf8c64e8182831e9424e03c029f491"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 14598,
+     "I": 668,
+     "U": 0,
+     "c": 1374
+    },
+    "cells": {
+     "cells": 130,
+     "masked": 0,
+     "neg": 111,
+     "pos": 19
+    },
+    "classes_ok": true,
+    "classes_sha256": "b63704e96ae94b2b848c9efde93aab24fdaf9d69bf7ad1493d062a1c3a3bc499",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "9124578d4e26002fe071ff4765cd3208165b5d95e154fe78998d22933cb6ea45",
+    "in_manifest": false,
+    "key": "e43ff239e7a1163c",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 14,
+    "size": 16640,
+    "tokens_ok": true,
+    "tokens_sha256": "ae3d5e2dd83f58215f0e51024f51254f5b14a19ba13ebb9f536658f2d55b0c0b"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 19922,
+     "I": 2133,
+     "U": 0,
+     "c": 5849
+    },
+    "cells": {
+     "cells": 218,
+     "masked": 0,
+     "neg": 145,
+     "pos": 73
+    },
+    "classes_ok": true,
+    "classes_sha256": "f5fdc12204359294d15e88209990f2f277b08afa6bd2dafc36306319159c30c9",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "add49c7fb83dc4a3a027355c4389eb5cdfc8acd0c2a8ffc8f40cca0a442be611",
+    "in_manifest": false,
+    "key": "99bacb259032c232",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 46,
+    "size": 27904,
+    "tokens_ok": true,
+    "tokens_sha256": "d2f46edab757d9a59f1167f31a6463cce1277c3b8d355b5557fc36be9ca13fae"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 318378,
+     "I": 2472,
+     "U": 0,
+     "c": 6830
+    },
+    "cells": {
+     "cells": 2560,
+     "masked": 0,
+     "neg": 2473,
+     "pos": 87
+    },
+    "classes_ok": true,
+    "classes_sha256": "ef72a870b0dbe2877d01b9554237987ea42b7f4ffc097a01ee2c922197a0bb45",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "eb3b498eed81a79da9132420fefe4622b5d7b30aa0e8b569982b7df6fa2642ca",
+    "in_manifest": false,
+    "key": "299a1efa9e516e3e",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 31,
+    "size": 327680,
+    "tokens_ok": true,
+    "tokens_sha256": "8c282da76e87ba479275f1bebf20a77f612abe11c5179376a2534dfc765f467f"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 14582,
+     "I": 655,
+     "U": 0,
+     "c": 2171
+    },
+    "cells": {
+     "cells": 136,
+     "masked": 0,
+     "neg": 112,
+     "pos": 24
+    },
+    "classes_ok": true,
+    "classes_sha256": "ed6f05456771baff7cc89e423a6aae4f45737bd9a41db095ef1e5bfe63531d7d",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "f0e9805a060fdd201e9f9e0043bd1d89d61ea69bd3de429bd4c2a83dd498f0d5",
+    "in_manifest": false,
+    "key": "0f6414c10c657c7f",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 2,
+    "size": 17408,
+    "tokens_ok": true,
+    "tokens_sha256": "b6b8b59841efbe83b89deca123638e9ececbfe50874f5d075e5428e897ea76c6"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 10428,
+     "I": 688,
+     "U": 0,
+     "c": 1428
+    },
+    "cells": {
+     "cells": 98,
+     "masked": 0,
+     "neg": 79,
+     "pos": 19
+    },
+    "classes_ok": true,
+    "classes_sha256": "741e0946d6d5225ea3d4acbfb697ed68515518dc6696c0c82a9fd2ad12397ec3",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "196df26e4c08ebeea776fdf69191040e633d445449145934cb5542e5af316532",
+    "in_manifest": false,
+    "key": "cbdc0f1f1f03462b",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 14,
+    "size": 12544,
+    "tokens_ok": true,
+    "tokens_sha256": "f1dbba24fd77f82e8ccac276c6c1e3c7f3f42d8ec6997eb2fe20f13d706bfa2e"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 22128,
+     "I": 1447,
+     "U": 0,
+     "c": 3909
+    },
+    "cells": {
+     "cells": 215,
+     "masked": 0,
+     "neg": 167,
+     "pos": 48
+    },
+    "classes_ok": true,
+    "classes_sha256": "fb9afdb53ae3fca7cee59f14a80ccbaaada3c40a1ef94b4462ac03ba78dd78af",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "cde2fc4325091b6345a3d2bcab8660a306894bc20b645c49f78f9a4a799ebc68",
+    "in_manifest": false,
+    "key": "0bf7eb48bdd1faa6",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 26,
+    "size": 27484,
+    "tokens_ok": true,
+    "tokens_sha256": "d7c4b5a2c74f0b91fffb5cec8e132393a2e393afde848f66471f4b890b6b3a2e"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 6816,
+     "I": 360,
+     "U": 0,
+     "c": 914
+    },
+    "cells": {
+     "cells": 64,
+     "masked": 0,
+     "neg": 53,
+     "pos": 11
+    },
+    "classes_ok": true,
+    "classes_sha256": "0902986202f58357c0ce4e08a82d77da7ae71f168d58dd4ad16e1bd5c3e73822",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "4fa341a61de9038e53998b3a8cbde0c1ddb6b826ac5700b82131ccff40ce1167",
+    "in_manifest": false,
+    "key": "082d29247d4accf8",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 11,
+    "size": 8090,
+    "tokens_ok": true,
+    "tokens_sha256": "70987615940164f900fc5422da07a6ca0f5b5b63c397c1a249e26120a07c17f8"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 13180,
+     "I": 788,
+     "U": 0,
+     "c": 1806
+    },
+    "cells": {
+     "cells": 124,
+     "masked": 0,
+     "neg": 101,
+     "pos": 23
+    },
+    "classes_ok": true,
+    "classes_sha256": "c833e06a825fa724f19d5ad2ff0d4e46f2b99ef2f47bed0f13fdaca59d395394",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "5e4f8320d3aedbd7c32b8001795d875931251d25745c67276693a89cb0dcf1db",
+    "in_manifest": false,
+    "key": "a76549baeb4f4c89",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 20,
+    "size": 15774,
+    "tokens_ok": true,
+    "tokens_sha256": "80f07bcc2f3c05b9d779dd20957a9a0d57f2bfe901e89e139a5583841489e626"
+   },
+   {
+    "broad_aot": "not_applicable",
+    "bytes": {
+     "D": 4470,
+     "I": 854,
+     "U": 0,
+     "c": 1918
+    },
+    "cells": {
+     "cells": 57,
+     "masked": 0,
+     "neg": 33,
+     "pos": 24
+    },
+    "classes_ok": true,
+    "classes_sha256": "060e47b8c5e0cb59cde0d9ad6daaef070d914e55f6d8912c4a21d8e6bc23802c",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "a417c910f61e0d95b33f292b3e84206e1f71018c4478c83da86737b10d0ffe06",
+    "in_manifest": false,
+    "key": "91d61bc5836db801",
+    "kind": "scd_module",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": false,
+    "platform": "sega_cd",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "module_reuse",
+    "qualified_lineage": true,
+    "seed_address_file": false,
+    "seed_cells": 19,
+    "size": 7242,
+    "tokens_ok": true,
+    "tokens_sha256": "24c5abe45611c52cb431e7aee6990bc553c6da322a34f42907800fe184d3d99b"
+   },
+   {
+    "broad_aot": "accepted",
+    "bytes": {
+     "D": 1417424,
+     "I": 44740,
+     "U": 0,
+     "c": 110700
+    },
+    "cells": {
+     "cells": 12288,
+     "masked": 2,
+     "neg": 10976,
+     "pos": 1310
+    },
+    "classes_ok": true,
+    "classes_sha256": "89115fcd4ff05db4892d024a6a826455907adb280673f0d454020de8b0522d52",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "6c43b41b60ae8147945b4420caeb5eb266e1dd57a0d125b7496fa8fb6fde522d",
+    "in_manifest": true,
+    "key": "d16b79498822161f",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D03",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "community_disassembly_of_commercial_title",
+    "qualified_lineage": true,
+    "seed_address_file": true,
+    "seed_cells": 75,
+    "size": 1572864,
+    "tokens_ok": true,
+    "tokens_sha256": "5bea70c07b4a1b1e71fee762772e77acd282951bb873a7a737e5f292f1dcd607"
+   },
+   {
+    "broad_aot": "accepted",
+    "bytes": {
+     "D": 1934916,
+     "I": 48627,
+     "U": 0,
+     "c": 113609
+    },
+    "cells": {
+     "cells": 16384,
+     "masked": 0,
+     "neg": 14866,
+     "pos": 1518
+    },
+    "classes_ok": true,
+    "classes_sha256": "11555dd115f0ea92850395ae965dfffb22eca7556137fcd94faab714866c188b",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "9adf662d09881f58ec37d174ab01e87a7fcfb24700b5f84b26c0cd4f351509e9",
+    "in_manifest": true,
+    "key": "781c88a2be5bc7fd",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D03",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "community_disassembly_of_commercial_title",
+    "qualified_lineage": true,
+    "seed_address_file": true,
+    "seed_cells": 58,
+    "size": 2097152,
+    "tokens_ok": true,
+    "tokens_sha256": "98155b25363f3660553266e5e5a4bd01ea6f210663c0170eb97b95eed308be47"
+   },
+   {
+    "broad_aot": "accepted",
+    "bytes": {
+     "D": 1625094,
+     "I": 119319,
+     "U": 0,
+     "c": 352739
+    },
+    "cells": {
+     "cells": 16384,
+     "masked": 4,
+     "neg": 12307,
+     "pos": 4073
+    },
+    "classes_ok": true,
+    "classes_sha256": "a2954ff2e37c2f30b37d3a5e3eeba89edcaae4d5715f27c6214e62a4eb7e5992",
+    "cpu": "MC68000",
+    "image_identity_ok": true,
+    "image_present": true,
+    "image_sha256": "6e12e6b33c26ebfcd0be433251d21cf6284eafe9f71b027bda3767ae59affec1",
+    "in_manifest": true,
+    "key": "e9cc48c53c87f0c0",
+    "kind": "genesis_rom",
+    "label_origin": "independent source-backed truth (assembler listing / reproducible build map)",
+    "lineage": "D01",
+    "manifest_classes_match": true,
+    "platform": "genesis",
+    "preserved_in_handoff_bundle": true,
+    "provenance_class": "community_disassembly_of_commercial_title",
+    "qualified_lineage": true,
+    "seed_address_file": true,
+    "seed_cells": 17,
+    "size": 2097152,
+    "tokens_ok": true,
+    "tokens_sha256": "53e2aef44930f2ec842cff3aec64f160fa439e131153a203a72a840bf520584e"
+   }
+  ],
+  "lineages": {
+   "D01": {
+    "images": 39,
+    "masked": 7,
+    "neg": 41605,
+    "pos": 9683
+   },
+   "D02": {
+    "images": 1,
+    "masked": 0,
+    "neg": 844,
+    "pos": 180
+   },
+   "D03": {
+    "images": 2,
+    "masked": 2,
+    "neg": 25842,
+    "pos": 2828
+   },
+   "D04": {
+    "images": 1,
+    "masked": 0,
+    "neg": 5579,
+    "pos": 565
+   },
+   "D05": {
+    "images": 1,
+    "masked": 284,
+    "neg": 651,
+    "pos": 89
+   },
+   "D06": {
+    "images": 1,
+    "masked": 561,
+    "neg": 2297,
+    "pos": 214
+   },
+   "D07": {
+    "images": 1,
+    "masked": 407,
+    "neg": 974,
+    "pos": 667
+   },
+   "D09": {
+    "images": 1,
+    "masked": 552,
+    "neg": 448,
+    "pos": 24
+   },
+   "D10": {
+    "images": 1,
+    "masked": 514,
+    "neg": 2275,
+    "pos": 283
+   },
+   "D11": {
+    "images": 1,
+    "masked": 587,
+    "neg": 1282,
+    "pos": 179
+   },
+   "D12": {
+    "images": 1,
+    "masked": 329,
+    "neg": 1407,
+    "pos": 312
+   }
+  },
+  "qualified_lineages": [
+   "D01",
+   "D02",
+   "D03",
+   "D04",
+   "D05",
+   "D06",
+   "D07",
+   "D09",
+   "D10",
+   "D11",
+   "D12"
+  ],
+  "sealed_entries_in_public_manifest": 7,
+  "unqualified": [
+   "D08"
+  ]
+ },
+ "seg075": {
+  "all_present_and_verified": true,
+  "image_count": 36,
+  "images": [
+   {
+    "bytes": {
+     "D": 28,
+     "I": 68,
+     "U": 0,
+     "c": 156
+    },
+    "cells": {
+     "cells": 2,
+     "masked": 0,
+     "neg": 0,
+     "pos": 2
+    },
+    "classes_sha256": "f0da5ac82a644c88cb2dabb0605ea3b45c5d14834ac6e79a7d508cee7b15dc12",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "660e471f632c72b4c36a5511cfaa98ba0e9feaeee6975cfb5f0133ba7cab7255",
+    "key": "6451c3fd4956cc80",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "BattleIsleEditor",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 1,
+    "representative": true,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "994e861490a6337cf222d868c8ec7c7ddd8d7a842c954d44bd3c09f99f7a8094"
+   },
+   {
+    "bytes": {
+     "D": 8694,
+     "I": 4747,
+     "U": 2,
+     "c": 9109
+    },
+    "cells": {
+     "cells": 177,
+     "masked": 1,
+     "neg": 67,
+     "pos": 109
+    },
+    "classes_sha256": "204e3a8e160c7d02da36ceea02119c25ec3a5acffe78052e148db57b3b834cea",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "ba4f0bceedcf7df07d1e9b77f68c02e107ba505f1341898d4245f59c44c7e02a",
+    "key": "e00b9c9367a6c550",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "BattleIsleEditor",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 248,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 0,
+    "tokens_sha256": "0e14653e99ea0c44bab94d2d62ade81fbccbc0dc2563f6e6a46790e8ff4413b5"
+   },
+   {
+    "bytes": {
+     "D": 32,
+     "I": 68,
+     "U": 0,
+     "c": 156
+    },
+    "cells": {
+     "cells": 2,
+     "masked": 0,
+     "neg": 0,
+     "pos": 2
+    },
+    "classes_sha256": "89457e30e2d7932c4c2d791cbd9186f0c34750996224d1ccf87ffce60121e3aa",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "87b755851f25945a17232aa32d01a7ae838829c6bd002dbbc3923e8e90dd60a6",
+    "key": "cc7f73017e37657e",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "BattleIsleEditor",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 1,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "9ba44b6adb32faac3ded211b8ca4041f9c925ac0135144be2864423b15c0465d"
+   },
+   {
+    "bytes": {
+     "D": 8710,
+     "I": 4792,
+     "U": 4,
+     "c": 9250
+    },
+    "cells": {
+     "cells": 178,
+     "masked": 1,
+     "neg": 67,
+     "pos": 110
+    },
+    "classes_sha256": "48f886ca21de223020e66090902bc832517aac073e929abd61ff0a465f004c81",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "26b08120583b2ded8acf11834e517ee8a949c797670b88658e8aca54b9cf2cce",
+    "key": "4106d108fb5f8030",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "BattleIsleEditor",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 248,
+    "representative": true,
+    "role": "development",
+    "seed_cells": 0,
+    "tokens_sha256": "b11fdef4affb91f98e4026b7a0c4291e2ebceef8650b16e24301d3e4e30a5ca2"
+   },
+   {
+    "bytes": {
+     "D": 32,
+     "I": 68,
+     "U": 0,
+     "c": 156
+    },
+    "cells": {
+     "cells": 2,
+     "masked": 0,
+     "neg": 0,
+     "pos": 2
+    },
+    "classes_sha256": "89457e30e2d7932c4c2d791cbd9186f0c34750996224d1ccf87ffce60121e3aa",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "c8594929eaca4ca932cad2ae79041907d73f9400a4af22c7cb2955e7044feb59",
+    "key": "8db19baff020ccad",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "BattleIsleEditor",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 1,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "9ba44b6adb32faac3ded211b8ca4041f9c925ac0135144be2864423b15c0465d"
+   },
+   {
+    "bytes": {
+     "D": 9398,
+     "I": 4605,
+     "U": 18,
+     "c": 8863
+    },
+    "cells": {
+     "cells": 179,
+     "masked": 2,
+     "neg": 71,
+     "pos": 106
+    },
+    "classes_sha256": "f4b75cfd386c097e451a6a08b5eb09b11b43c17dc754e545dd4997625ba3c9d1",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "0e628f5ba4316c4235b560d043df70a9194edf489dd3b2d8539029897c106e78",
+    "key": "91f0c18b8cbc0694",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "BattleIsleEditor",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 276,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 0,
+    "tokens_sha256": "c909c26aa7055aebd306aaad47b9d9ef835ae943097d3ce6d6fdc36b03f26a42"
+   },
+   {
+    "bytes": {
+     "D": 32,
+     "I": 68,
+     "U": 0,
+     "c": 156
+    },
+    "cells": {
+     "cells": 2,
+     "masked": 0,
+     "neg": 0,
+     "pos": 2
+    },
+    "classes_sha256": "89457e30e2d7932c4c2d791cbd9186f0c34750996224d1ccf87ffce60121e3aa",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "c8594929eaca4ca932cad2ae79041907d73f9400a4af22c7cb2955e7044feb59",
+    "key": "37d16845c0543d43",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "BattleIsleEditor",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 1,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "9ba44b6adb32faac3ded211b8ca4041f9c925ac0135144be2864423b15c0465d"
+   },
+   {
+    "bytes": {
+     "D": 9426,
+     "I": 4638,
+     "U": 18,
+     "c": 8990
+    },
+    "cells": {
+     "cells": 181,
+     "masked": 1,
+     "neg": 73,
+     "pos": 107
+    },
+    "classes_sha256": "6a9fe5fb18374bf548eb7b2abb32744dbf1394e309f61bfdb0683d8351170388",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "f9c5297461c61d6aefa16c0ab23e388cadce7157dfe06735b13edbc7c0a04ce1",
+    "key": "671c6f517948d714",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "BattleIsleEditor",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 290,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 0,
+    "tokens_sha256": "90b0f4fb47b0e18e511997ebcb0cc5de725804f2b7fe1c4e365c5ec6d6c947c3"
+   },
+   {
+    "bytes": {
+     "D": 16,
+     "I": 68,
+     "U": 12,
+     "c": 156
+    },
+    "cells": {
+     "cells": 2,
+     "masked": 0,
+     "neg": 0,
+     "pos": 2
+    },
+    "classes_sha256": "ee879b4c593271e34d64ebef505fb3a1890dfb675c8cbadd9c825f2670d806ed",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "df927b9ba4e4248a8bd7e5d9afe4b07148df903d9ba340864260a951e992890b",
+    "key": "f2e029483d682840",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "BattleIsleEditor",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 1,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "994e861490a6337cf222d868c8ec7c7ddd8d7a842c954d44bd3c09f99f7a8094"
+   },
+   {
+    "bytes": {
+     "D": 11498,
+     "I": 4649,
+     "U": 2,
+     "c": 8947
+    },
+    "cells": {
+     "cells": 197,
+     "masked": 1,
+     "neg": 89,
+     "pos": 107
+    },
+    "classes_sha256": "2f042c35f378629383ec83542b4cb5a3f126a8960db401f9c1ec1e4b7b502a52",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "c7c0aac3ca1ca60b164f1f1f933bb9bf59f29f1b346519a296c2d4f83bc434ed",
+    "key": "e1358651cda72bce",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "BattleIsleEditor",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 351,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 0,
+    "tokens_sha256": "62e6b8c8ccf3151b62e7d45ba924829f83c067b1582a5ce6cc080d469cbe0855"
+   },
+   {
+    "bytes": {
+     "D": 16,
+     "I": 68,
+     "U": 12,
+     "c": 156
+    },
+    "cells": {
+     "cells": 2,
+     "masked": 0,
+     "neg": 0,
+     "pos": 2
+    },
+    "classes_sha256": "ee879b4c593271e34d64ebef505fb3a1890dfb675c8cbadd9c825f2670d806ed",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "df927b9ba4e4248a8bd7e5d9afe4b07148df903d9ba340864260a951e992890b",
+    "key": "aba7e3363ef95580",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "BattleIsleEditor",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 1,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "994e861490a6337cf222d868c8ec7c7ddd8d7a842c954d44bd3c09f99f7a8094"
+   },
+   {
+    "bytes": {
+     "D": 11526,
+     "I": 4682,
+     "U": 4,
+     "c": 9076
+    },
+    "cells": {
+     "cells": 198,
+     "masked": 1,
+     "neg": 89,
+     "pos": 108
+    },
+    "classes_sha256": "810fbbff46c18666911a02b4e4da11f23e425f050f73c2a0f7fae8221457134c",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "24ab90f40abb3b4190610028ecdef56392314015fd7402f6362aa5edd2076820",
+    "key": "7b4b73439b84ef30",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "BattleIsleEditor",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 365,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 0,
+    "tokens_sha256": "7595197b2890b27d033def7332802e332184aa8aa0f244ef37a0271661a77d99"
+   },
+   {
+    "bytes": {
+     "D": 952,
+     "I": 25,
+     "U": 0,
+     "c": 47
+    },
+    "cells": {
+     "cells": 8,
+     "masked": 0,
+     "neg": 7,
+     "pos": 1
+    },
+    "classes_sha256": "4a5f2e54dbc454b6e464392da4d942deb11e100c02675c1582464ecdc3049f87",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "5699a21245e1fe4af2cfac757f983558c88b90ec03666819f4276fccd42b8b1c",
+    "key": "28fa89b9f03a4f0d",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "HelloAmi",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 0,
+    "representative": true,
+    "role": "diagnostics_only",
+    "seed_cells": 0,
+    "tokens_sha256": "126c55107459b5499d7cfee1b6a4f3179090aa965665accad119e58135ae8f56"
+   },
+   {
+    "bytes": {
+     "D": 396,
+     "I": 0,
+     "U": 0,
+     "c": 0
+    },
+    "cells": {
+     "cells": 4,
+     "masked": 0,
+     "neg": 4,
+     "pos": 0
+    },
+    "classes_sha256": "bab8db12c179d81a344e43d654d2536cb905f27b28b0606ece9096ed324b9ace",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "170d6721fbaf2b83fe5f201c3ba3bc04b2ee4d46c1f7febe8e55ca9611ed8b09",
+    "key": "bcf0c990ef3ede0d",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "HelloAmi",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 0,
+    "representative": false,
+    "role": "diagnostics_only",
+    "seed_cells": 0,
+    "tokens_sha256": "25a2a4bb9b7b6899a3e16b48c81bdb9f9ba6f3167757dc74cdb0420b3892d64e"
+   },
+   {
+    "bytes": {
+     "D": 40,
+     "I": 57,
+     "U": 0,
+     "c": 111
+    },
+    "cells": {
+     "cells": 2,
+     "masked": 0,
+     "neg": 0,
+     "pos": 2
+    },
+    "classes_sha256": "a9af44254ddc329d3a97fc576bb701e8691e67b1de9ef88a66fb414bbe8c87b0",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "9e33014f87428999d7adacf19bbdacf76d1f1e7f2e2a609a3591f1b973ad8704",
+    "key": "7742477e30cc93f9",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "HelloAmi",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 0,
+    "representative": true,
+    "role": "diagnostics_only",
+    "seed_cells": 1,
+    "tokens_sha256": "1c8ba6827bda8639f278ae0fe8035caea172dbb82c74faf4571e5f6937a706ba"
+   },
+   {
+    "bytes": {
+     "D": 316,
+     "I": 0,
+     "U": 0,
+     "c": 0
+    },
+    "cells": {
+     "cells": 3,
+     "masked": 0,
+     "neg": 3,
+     "pos": 0
+    },
+    "classes_sha256": "af042983ecef6cd74eb9e80aece31a1c9b3436097901b60eabdcb24c5cb64b41",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "b4c52b3a2a12215af888199a5533feaf402ffdd36929818bb43a2449f08a8f59",
+    "key": "645d4a9bc3b31064",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "HelloAmi",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 0,
+    "representative": false,
+    "role": "diagnostics_only",
+    "seed_cells": 0,
+    "tokens_sha256": "180880184ff96e4e43e7b4d7b5d58c41a72445ea3c2acb2bbb55fe241c160edc"
+   },
+   {
+    "bytes": {
+     "D": 1992,
+     "I": 608,
+     "U": 0,
+     "c": 1512
+    },
+    "cells": {
+     "cells": 33,
+     "masked": 0,
+     "neg": 15,
+     "pos": 18
+    },
+    "classes_sha256": "68037a089e581ca6cb1f1d639196ff9fed67ea70690c1da4562ed5544ba73b7e",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "cfe370a35f2cf89a41c98ea64df612bb29644e731f35c232d16a0ac6877e5451",
+    "key": "f2b7c735d8ff900b",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "amiga-realtime3d",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 38,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "0cf76205d73beff73f310fc61fcfcb326f8cce304bd84b1dfde0460f10a0f6bd"
+   },
+   {
+    "bytes": {
+     "D": 2430,
+     "I": 832,
+     "U": 0,
+     "c": 1814
+    },
+    "cells": {
+     "cells": 40,
+     "masked": 0,
+     "neg": 18,
+     "pos": 22
+    },
+    "classes_sha256": "1da3f128ce31e9ffe34f4f547cf12a1ba18f0184913048ed54a45a5c52a57307",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "ee5d25aeadd3c3675f3eec64ee9ba0c4c02d1b3d8170175da7dcc6294b9c853f",
+    "key": "e506e314ac9610b5",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "amiga-realtime3d",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 39,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "062bb54890eee5973b1a7a087a2acaa8d0f055fe068eae8815fee41bf3d9423c"
+   },
+   {
+    "bytes": {
+     "D": 3922,
+     "I": 936,
+     "U": 0,
+     "c": 2010
+    },
+    "cells": {
+     "cells": 54,
+     "masked": 0,
+     "neg": 29,
+     "pos": 25
+    },
+    "classes_sha256": "0325027843b3541b8357a7a64302e17d3a639b9b903f978c41e05cb057399dd7",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "bfa67b589201e60a4944fe8f90a5c25895db1220eff9f8421169e2469a195b20",
+    "key": "fe019a45154fa914",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "amiga-realtime3d",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 41,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "dc6d3edbe4f51347a3dc7d6c9ea725cd7164947484c146c9153dad478b088d12"
+   },
+   {
+    "bytes": {
+     "D": 6970,
+     "I": 1332,
+     "U": 0,
+     "c": 2714
+    },
+    "cells": {
+     "cells": 87,
+     "masked": 0,
+     "neg": 53,
+     "pos": 34
+    },
+    "classes_sha256": "c88689de21ae6cfaf0ba841e29b7103a370c886d4d6ab41a178699928ac77329",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "c06f74697b97cd8d4980eb58eb2c6de9613aa90259131f4466204dcc17e2478d",
+    "key": "8897154b016bd9f5",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "amiga-realtime3d",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 55,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "68c2a81e533da8eef7d736c55d77dde76ae4a7cd80918d04c939810d90f2f9a0"
+   },
+   {
+    "bytes": {
+     "D": 6548,
+     "I": 1143,
+     "U": 0,
+     "c": 2409
+    },
+    "cells": {
+     "cells": 79,
+     "masked": 0,
+     "neg": 50,
+     "pos": 29
+    },
+    "classes_sha256": "02fb6c61583ed12bd37443253c644d05792eb5cc9d28b2d662a01dc5317b4775",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "43726b954b2b9131a4c35f0cae30b14347ab976b2c067ddc3c339b9f00c831e5",
+    "key": "aaee750d0733058d",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "amiga-realtime3d",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 57,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "10bc30e763cd8226895b1f8860dd557987d1d9d32a47eb454bb782e9c8001b3d"
+   },
+   {
+    "bytes": {
+     "D": 7194,
+     "I": 1640,
+     "U": 6,
+     "c": 3440
+    },
+    "cells": {
+     "cells": 96,
+     "masked": 0,
+     "neg": 55,
+     "pos": 41
+    },
+    "classes_sha256": "f0667db398e02dd1dd1696f15ab4ae8f4626c2f68ac8d514c79fdfcaa9bfdead",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "53d42a707b75e7382428353e405ab1c8e90af1f68d92c516d37ea8160c00f063",
+    "key": "c4744c3aac3856e8",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "amiga-realtime3d",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 110,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "906f9704d858c2df6c4158cd698a191fe162b134718eaa914ea026e9ec434062"
+   },
+   {
+    "bytes": {
+     "D": 7244,
+     "I": 1953,
+     "U": 4,
+     "c": 3987
+    },
+    "cells": {
+     "cells": 104,
+     "masked": 0,
+     "neg": 55,
+     "pos": 49
+    },
+    "classes_sha256": "b0fb62310ed6bf0e07509a034f5da7679e13caa3c4f9df404ec700138e465f63",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "724ee1e562c47e785f965501b40e0df155a6f764ef8435847d3a3d9dac26eef4",
+    "key": "4aaefb7ac9cb41e1",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "amiga-realtime3d",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 114,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "5a0460eddb97b2a7b1cac760c75a2b579adebdd05679601054eb48d9db6574af"
+   },
+   {
+    "bytes": {
+     "D": 9320,
+     "I": 2333,
+     "U": 0,
+     "c": 5007
+    },
+    "cells": {
+     "cells": 131,
+     "masked": 0,
+     "neg": 72,
+     "pos": 59
+    },
+    "classes_sha256": "458f728f7173b953018118c7ae35646f9b3eeccfce2b4c86e85c197bcbe1010e",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "468a0e8370584b218bca60b7375a90baf129526c1d6dacc4daf2b9e8120327cd",
+    "key": "7efbae0381a3652a",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "amiga-realtime3d",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 239,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "40efee5ea2c8cf385bd2438d8b48cec214c3c5dc1ac9723945f271dcee105ca4"
+   },
+   {
+    "bytes": {
+     "D": 9320,
+     "I": 2349,
+     "U": 0,
+     "c": 5059
+    },
+    "cells": {
+     "cells": 131,
+     "masked": 0,
+     "neg": 71,
+     "pos": 60
+    },
+    "classes_sha256": "7224e1030be9b09ec0c894cd07dcef994603ea731a08d4b233a8ef4a0a021bd7",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "835c1b3810bd7ef3c8dadb12ddd62b18a6d3192f2cd4d6eb99488a7d6f30d1a7",
+    "key": "04853d57c181fd42",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "amiga-realtime3d",
+    "platform": "amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 245,
+    "representative": true,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "737113422ca1efb4ce332e0ee2150249d6e40f003920d039b40282f90ebe99b8"
+   },
+   {
+    "bytes": {
+     "D": 41784,
+     "I": 59664,
+     "U": 27116,
+     "c": 133580
+    },
+    "cells": {
+     "cells": 2048,
+     "masked": 225,
+     "neg": 252,
+     "pos": 1571
+    },
+    "classes_sha256": "d738b3c0a15fb7af1c3c40c4135ad0573e4eebfba7a63714acf115ce02cb8779",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "e9fb92e925e0658af9ec9f0bcf8038820d89b8333c0a43b2bd4dfd6628e66b8e",
+    "key": "5329f75a36414e2a",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "emutos",
+    "platform": "atari-st+amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 0,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "6bade20f4432e25cdd6a69ac9d33e6947180f29b367461375885a0c9169c4b71"
+   },
+   {
+    "bytes": {
+     "D": 25512,
+     "I": 32816,
+     "U": 1392,
+     "c": 71352
+    },
+    "cells": {
+     "cells": 1024,
+     "masked": 19,
+     "neg": 147,
+     "pos": 858
+    },
+    "classes_sha256": "25306e35d3b7940eb5f823f6f074f8fa025299e4e02f56a1453b7ae27a2a42dc",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "73cd7beb8c6b789274cf972173bf4fc2b738b5d57fa81aa1e201eb6e39544f98",
+    "key": "0b79ccddc11450f8",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "emutos",
+    "platform": "atari-st+amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 0,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 0,
+    "tokens_sha256": "a515ff933cde16d7b9c4030e6002219b3efb83780e0c84f000482950092c9a43"
+   },
+   {
+    "bytes": {
+     "D": 32517,
+     "I": 49654,
+     "U": 2613,
+     "c": 111824
+    },
+    "cells": {
+     "cells": 1536,
+     "masked": 25,
+     "neg": 203,
+     "pos": 1308
+    },
+    "classes_sha256": "4a2566e6cb28ffdf29dab600ae67a3a5b2b493bcebc90e42d10eac3795350da0",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "ff823068d343582765da3dba576fa11c4662524cf89f707b3d88f4ccbee18283",
+    "key": "c8266aef35f8ddad",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "emutos",
+    "platform": "atari-st+amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 0,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "aead4e5e52923fbb111f6b0c846c25a8e63fac3392e590913656465b6d92513e"
+   },
+   {
+    "bytes": {
+     "D": 43371,
+     "I": 66110,
+     "U": 4733,
+     "c": 147930
+    },
+    "cells": {
+     "cells": 2048,
+     "masked": 53,
+     "neg": 254,
+     "pos": 1741
+    },
+    "classes_sha256": "d6f65ad6512136079580836cce906c055e38fb4a1d31d89cb993b0fba35e94e1",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "7cde373a5fceddc2470619651fe97f0acd3175d0d968f77e92369d59c0137312",
+    "key": "62653c16a0e6778e",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "emutos",
+    "platform": "atari-st+amiga",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 0,
+    "representative": true,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "ea93cbaf42311a7d7b80a265a7175117692a5071f812ffd43d1373a8327c11fc"
+   },
+   {
+    "bytes": {
+     "D": 264,
+     "I": 1753,
+     "U": 58,
+     "c": 3617
+    },
+    "cells": {
+     "cells": 45,
+     "masked": 1,
+     "neg": 0,
+     "pos": 44
+    },
+    "classes_sha256": "9ed6bf528ba878b2d4c0b28be8375ab909369aa46d15172b3c32897fd399c5ff",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "880615afdcb65c136e2a1119bfe1d1d4983198bef9dc3144ac42002ceb78b0e4",
+    "key": "c3194fb334489edf",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "toslibc",
+    "platform": "atari-st",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 65,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "8d8a1b41064224e808401be0b6ee19cf6af2e5eccdd87d383d9c1adf920b82d0"
+   },
+   {
+    "bytes": {
+     "D": 410,
+     "I": 1935,
+     "U": 178,
+     "c": 3893
+    },
+    "cells": {
+     "cells": 51,
+     "masked": 1,
+     "neg": 1,
+     "pos": 49
+    },
+    "classes_sha256": "fc6ad8c5c95dd69f7f4fe3237746b2e226705d7a44d9786e07702f4167bc292e",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "b6a0187be8112ca8f8e86891a2331e94e96502d438a8a304e731832cf128cf48",
+    "key": "f259feca135d4b48",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "toslibc",
+    "platform": "atari-st",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 83,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "412b10e1139b3fc909cedfc938555e6a7569071c68f55d2f8f331c80f87d0a0b"
+   },
+   {
+    "bytes": {
+     "D": 277,
+     "I": 1816,
+     "U": 61,
+     "c": 3794
+    },
+    "cells": {
+     "cells": 47,
+     "masked": 1,
+     "neg": 0,
+     "pos": 46
+    },
+    "classes_sha256": "19edc587113ec4c6a0105a27fc3d85338d5b9f403cc8aeebc4683177cf4edb2a",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "b0ed27ae814ab7908bb2225fbc8927d35d43621f81a802b2af623e8c88dcb31d",
+    "key": "06a88dcf6fdf0b29",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "toslibc",
+    "platform": "atari-st",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 70,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "924004b26db1d68a2ee039c725d775dba6f0b587470fbeebdf48b0c6085c214f"
+   },
+   {
+    "bytes": {
+     "D": 385,
+     "I": 1838,
+     "U": 151,
+     "c": 3702
+    },
+    "cells": {
+     "cells": 48,
+     "masked": 0,
+     "neg": 0,
+     "pos": 48
+    },
+    "classes_sha256": "64516413b515cefd34f7535804004e8d6895089391b2f6c7c5f820ab79e804d7",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "b23d7755ad64244e23ece237d595710d4edd309a8add105c6d6a41571e84515c",
+    "key": "cf32f380c55bae39",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "toslibc",
+    "platform": "atari-st",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 70,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "c8a2d13efd55fab9f0c6cdb90c53cfb1c9a4a2478fe04ed7db486f71410325dc"
+   },
+   {
+    "bytes": {
+     "D": 18,
+     "I": 1288,
+     "U": 68,
+     "c": 3086
+    },
+    "cells": {
+     "cells": 35,
+     "masked": 0,
+     "neg": 0,
+     "pos": 35
+    },
+    "classes_sha256": "eca769ce024c5cc25587935515b2e69b2fb48a3d0981284e176b15f51bc48640",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "1c73e9abcb5bfa659ed9bea19cf4e75d986edfcdbfc001908dd09e815b2e1869",
+    "key": "a787c0aa0f569e1c",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "toslibc",
+    "platform": "atari-st",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 97,
+    "representative": true,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "253d9c2c9efa822ec645649f53c7f48caad48bacc2964c8457a162df22192ded"
+   },
+   {
+    "bytes": {
+     "D": 249,
+     "I": 1961,
+     "U": 215,
+     "c": 4191
+    },
+    "cells": {
+     "cells": 52,
+     "masked": 1,
+     "neg": 0,
+     "pos": 51
+    },
+    "classes_sha256": "0453a7f2bd3ad85319824640558793538186f7c6c25420e8d62a5131da1243d6",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "77c5d5cc84cf2b33503cd8e5aa8ac590bdab95b27813f248a7db76e3ed9e60b0",
+    "key": "707b696a025bdd1a",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "toslibc",
+    "platform": "atari-st",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 103,
+    "representative": false,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "7fb6343ebc7c9ca541de08b6377178d02df9e9a5c8913e5a657292c3b60e819a"
+   },
+   {
+    "bytes": {
+     "D": 1481,
+     "I": 3495,
+     "U": 1787,
+     "c": 7909
+    },
+    "cells": {
+     "cells": 115,
+     "masked": 16,
+     "neg": 4,
+     "pos": 95
+    },
+    "classes_sha256": "a7508e83933a51932a4d14f34428d134d9d5b831c052e3cff9c275c4f522837c",
+    "cpu": "MC68000",
+    "files_present_and_verified": true,
+    "image_sha256": "2bd5683f3d4a802bc9b810ebbe853439b803435ad18c19899d5771999ca7b063",
+    "key": "59212cc2f31e81c6",
+    "kind": "xplat_image",
+    "label_origin": "independent source-backed truth (assembler/linker map, per-statement re-assembly oracle)",
+    "lineage": "toslibc",
+    "platform": "atari-st",
+    "preserved_in_handoff": true,
+    "provenance": "authored",
+    "relocations": 567,
+    "representative": true,
+    "role": "development",
+    "seed_cells": 1,
+    "tokens_sha256": "f3cd9e71fa078daf13146b5d9bbb40d5be03077a7843070649c2a8116534017c"
+   }
+  ],
+  "lineages": {
+   "BattleIsleEditor": {
+    "images": 12,
+    "masked": 7,
+    "neg": 456,
+    "pos": 659,
+    "relocations": 1784,
+    "representatives": 2
+   },
+   "HelloAmi": {
+    "images": 4,
+    "masked": 0,
+    "neg": 14,
+    "pos": 3,
+    "relocations": 0,
+    "representatives": 2
+   },
+   "amiga-realtime3d": {
+    "images": 9,
+    "masked": 0,
+    "neg": 418,
+    "pos": 337,
+    "relocations": 938,
+    "representatives": 1
+   },
+   "emutos": {
+    "images": 4,
+    "masked": 322,
+    "neg": 856,
+    "pos": 5478,
+    "relocations": 0,
+    "representatives": 1
+   },
+   "toslibc": {
+    "images": 7,
+    "masked": 20,
+    "neg": 5,
+    "pos": 368,
+    "relocations": 1055,
+    "representatives": 2
+   }
+  },
+  "sealed_entries_in_snapshot_index": 18
+ },
+ "seg077": {
+  "samples": [
+   {
+    "bytes": {
+     "D": 84269,
+     "I": 7364,
+     "U": 933689,
+     "c": 23254
+    },
+    "cells": {
+     "cells": 8192,
+     "masked": 7432,
+     "neg": 483,
+     "pos": 277
+    },
+    "classes_sha256": "247b51f51299cec9339425ddcf8c007973a208cbe377a044be0547458b9d7f13",
+    "key": "0356117bf40a6ec0",
+    "provenance": "commercial-evidence",
+    "truth": "partial: I/c = E executed (MAME trace, two-decoder length agreement) + R direct-flow static reach; D = hardware header +",
+    "variant": "t001_execution_evidence"
+   },
+   {
+    "bytes": {
+     "D": 128421,
+     "I": 9716,
+     "U": 879919,
+     "c": 30520
+    },
+    "cells": {
+     "cells": 8192,
+     "masked": 7006,
+     "neg": 834,
+     "pos": 352
+    },
+    "classes_sha256": "369e691ab3a784d16b8ca87b30cfd59bc0cc9fefc4ca654c1dd209457fc9e931",
+    "key": "99953cd7f3a30560",
+    "provenance": "commercial-evidence",
+    "truth": "partial, static-first: admitted static tiers V,J,PT,FILL,IP + T001 execution evidence; U elsewhere (never negative)",
+    "variant": "t009_static_first"
+   },
+   {
+    "bytes": {
+     "D": 164831,
+     "I": 8217,
+     "U": 849369,
+     "c": 26159
+    },
+    "cells": {
+     "cells": 8192,
+     "masked": 6806,
+     "neg": 1088,
+     "pos": 298
+    },
+    "classes_sha256": "a7a601edf58a10a7fd869bb2376f13794f63365b1a6a5d1805f927435fc9d5af",
+    "key": "d37a926863100483",
+    "provenance": "commercial-evidence",
+    "truth": "partial, static-first: admitted static tiers V,PT,FILL + T001 execution evidence; U elsewhere (never negative)",
+    "variant": "t009_static_first"
+   }
+  ]
+ },
+ "tas": {
+  "local_sample_dirs": {
+   "seg080": {
+    "present": true
+   },
+   "seg081": {
+    "present": true
+   },
+   "seg083": {
+    "present": true
+   }
+  },
+  "snapshots": {
+   "seg081-v1": {
+    "games": {
+     "bnr": {
+      "conditions": {
+       "ctl": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 130772,
+        "strong_bytes": {
+         "D": 107872,
+         "I": 7402,
+         "U": 1966620,
+         "c": 15258
+        },
+        "strong_cells": {
+         "masked": 15402,
+         "neg": 638,
+         "pos": 344
+        },
+        "tier_bytes": {
+         "E": 22660,
+         "H": 512,
+         "M": 107360,
+         "R": 3632,
+         "U": 1849021,
+         "W": 113967
+        },
+        "weak_bytes": {
+         "D": 221839,
+         "I": 8577,
+         "U": 1849021,
+         "c": 17715
+        },
+        "weak_cells": {
+         "masked": 14500,
+         "neg": 1529,
+         "pos": 355
+        }
+       },
+       "ctl2": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 130772,
+        "strong_bytes": {
+         "D": 111392,
+         "I": 7374,
+         "U": 1963172,
+         "c": 15214
+        },
+        "strong_cells": {
+         "masked": 15369,
+         "neg": 672,
+         "pos": 343
+        },
+        "tier_bytes": {
+         "E": 22588,
+         "H": 512,
+         "M": 110880,
+         "R": 3680,
+         "U": 1845709,
+         "W": 113783
+        },
+        "weak_bytes": {
+         "D": 225175,
+         "I": 8569,
+         "U": 1845709,
+         "c": 17699
+        },
+        "weak_cells": {
+         "masked": 14477,
+         "neg": 1553,
+         "pos": 354
+        }
+       },
+       "tas": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 130772,
+        "strong_bytes": {
+         "D": 558144,
+         "I": 26588,
+         "U": 1461556,
+         "c": 50864
+        },
+        "strong_cells": {
+         "masked": 11969,
+         "neg": 3375,
+         "pos": 1040
+        },
+        "tier_bytes": {
+         "E": 77452,
+         "H": 512,
+         "M": 557632,
+         "R": 3604,
+         "U": 1457952,
+         "W": 0
+        },
+        "weak_bytes": {
+         "D": 558144,
+         "I": 27766,
+         "U": 1457952,
+         "c": 53290
+        },
+        "weak_cells": {
+         "masked": 11960,
+         "neg": 3375,
+         "pos": 1049
+        }
+       }
+      },
+      "lineage": "T81_BNR",
+      "rom_sha256": "9343edb48b8c6afcf44536875d5430548737599bbc49ea93cc5cf430b18ed0aa",
+      "rom_size": 2097152
+     },
+     "ewj2": {
+      "conditions": {
+       "ctl": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 71699,
+        "strong_bytes": {
+         "D": 145760,
+         "I": 6854,
+         "U": 2972088,
+         "c": 21026
+        },
+        "strong_cells": {
+         "masked": 23152,
+         "neg": 1097,
+         "pos": 327
+        },
+        "tier_bytes": {
+         "E": 27880,
+         "H": 512,
+         "M": 145248,
+         "R": 10736,
+         "U": 2876337,
+         "W": 85015
+        },
+        "weak_bytes": {
+         "D": 230775,
+         "I": 9486,
+         "U": 2876337,
+         "c": 29130
+        },
+        "weak_cells": {
+         "masked": 22602,
+         "neg": 1586,
+         "pos": 388
+        }
+       },
+       "ctl2": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 71699,
+        "strong_bytes": {
+         "D": 129536,
+         "I": 6728,
+         "U": 2988822,
+         "c": 20642
+        },
+        "strong_cells": {
+         "masked": 23280,
+         "neg": 976,
+         "pos": 320
+        },
+        "tier_bytes": {
+         "E": 27370,
+         "H": 512,
+         "M": 129024,
+         "R": 10726,
+         "U": 2896888,
+         "W": 81208
+        },
+        "weak_bytes": {
+         "D": 210744,
+         "I": 9363,
+         "U": 2896888,
+         "c": 28733
+        },
+        "weak_cells": {
+         "masked": 22734,
+         "neg": 1461,
+         "pos": 381
+        }
+       },
+       "tas": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 71699,
+        "strong_bytes": {
+         "D": 1029568,
+         "I": 19619,
+         "U": 2033766,
+         "c": 62775
+        },
+        "strong_cells": {
+         "masked": 15799,
+         "neg": 7948,
+         "pos": 829
+        },
+        "tier_bytes": {
+         "E": 82394,
+         "H": 512,
+         "M": 1029056,
+         "R": 10818,
+         "U": 1420747,
+         "W": 602201
+        },
+        "weak_bytes": {
+         "D": 1631769,
+         "I": 22031,
+         "U": 1420747,
+         "c": 71181
+        },
+        "weak_cells": {
+         "masked": 12322,
+         "neg": 11389,
+         "pos": 865
+        }
+       }
+      },
+      "lineage": "T81_EWJ2",
+      "rom_sha256": "2ad42010f092b7f481bd0079a385e8bc3e856eb29d8977803208d2bda81cf755",
+      "rom_size": 3145728
+     },
+     "sonic2": {
+      "conditions": {
+       "ctl": {
+        "decoder_cli_sha256": "407cc83b587a512a635c0f2fc08794c463d6fc93b1830bb4fd81c100cef042d9",
+        "frames": 115665,
+        "strong_bytes": {
+         "D": 83520,
+         "I": 15022,
+         "U": 911966,
+         "c": 38068
+        },
+        "strong_cells": {
+         "masked": 6919,
+         "neg": 628,
+         "pos": 645
+        },
+        "tier_bytes": {
+         "E": 53090,
+         "H": 512,
+         "M": 83008,
+         "R": 10218,
+         "U": 715699,
+         "W": 186049
+        },
+        "weak_bytes": {
+         "D": 269569,
+         "I": 17682,
+         "U": 715699,
+         "c": 45626
+        },
+        "weak_cells": {
+         "masked": 5605,
+         "neg": 1912,
+         "pos": 675
+        }
+       },
+       "ctl2": {
+        "decoder_cli_sha256": "407cc83b587a512a635c0f2fc08794c463d6fc93b1830bb4fd81c100cef042d9",
+        "frames": 115665,
+        "strong_bytes": {
+         "D": 35712,
+         "I": 9508,
+         "U": 979452,
+         "c": 23904
+        },
+        "strong_cells": {
+         "masked": 7478,
+         "neg": 262,
+         "pos": 452
+        },
+        "tier_bytes": {
+         "E": 33412,
+         "H": 512,
+         "M": 35200,
+         "R": 13492,
+         "U": 891953,
+         "W": 74007
+        },
+        "weak_bytes": {
+         "D": 109719,
+         "I": 13266,
+         "U": 891953,
+         "c": 33638
+        },
+        "weak_cells": {
+         "masked": 6919,
+         "neg": 762,
+         "pos": 511
+        }
+       },
+       "tas": {
+        "decoder_cli_sha256": "407cc83b587a512a635c0f2fc08794c463d6fc93b1830bb4fd81c100cef042d9",
+        "frames": 115665,
+        "strong_bytes": {
+         "D": 122592,
+         "I": 32605,
+         "U": 804332,
+         "c": 89047
+        },
+        "strong_cells": {
+         "masked": 5906,
+         "neg": 934,
+         "pos": 1352
+        },
+        "tier_bytes": {
+         "E": 121652,
+         "H": 512,
+         "M": 122080,
+         "R": 18276,
+         "U": 253359,
+         "W": 532697
+        },
+        "weak_bytes": {
+         "D": 655289,
+         "I": 37451,
+         "U": 253359,
+         "c": 102477
+        },
+        "weak_cells": {
+         "masked": 2081,
+         "neg": 4701,
+         "pos": 1410
+        }
+       }
+      },
+      "lineage": "D01",
+      "rom_sha256": "193bc4064ce0daf27ea9e908ed246d87ec576cc294833badebb590b6ad8e8f6b",
+      "rom_size": 1048576
+     },
+     "vm2": {
+      "conditions": {
+       "ctl": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 28632,
+        "strong_bytes": {
+         "D": 42936,
+         "I": 10592,
+         "U": 3064890,
+         "c": 27310
+        },
+        "strong_cells": {
+         "masked": 23808,
+         "neg": 282,
+         "pos": 486
+        },
+        "tier_bytes": {
+         "E": 37902,
+         "H": 512,
+         "M": 42424,
+         "R": 8386,
+         "U": 3056504,
+         "W": 0
+        },
+        "weak_bytes": {
+         "D": 42936,
+         "I": 12993,
+         "U": 3056504,
+         "c": 33295
+        },
+        "weak_cells": {
+         "masked": 23773,
+         "neg": 282,
+         "pos": 521
+        }
+       },
+       "ctl2": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 28632,
+        "strong_bytes": {
+         "D": 43864,
+         "I": 10698,
+         "U": 3063508,
+         "c": 27658
+        },
+        "strong_cells": {
+         "masked": 23798,
+         "neg": 286,
+         "pos": 492
+        },
+        "tier_bytes": {
+         "E": 38356,
+         "H": 512,
+         "M": 43352,
+         "R": 8312,
+         "U": 3055196,
+         "W": 0
+        },
+        "weak_bytes": {
+         "D": 43864,
+         "I": 13077,
+         "U": 3055196,
+         "c": 33591
+        },
+        "weak_cells": {
+         "masked": 23763,
+         "neg": 286,
+         "pos": 527
+        }
+       },
+       "tas": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 28632,
+        "strong_bytes": {
+         "D": 318296,
+         "I": 37764,
+         "U": 2670964,
+         "c": 118704
+        },
+        "strong_cells": {
+         "masked": 20812,
+         "neg": 2117,
+         "pos": 1647
+        },
+        "tier_bytes": {
+         "E": 156468,
+         "H": 512,
+         "M": 317784,
+         "R": 14380,
+         "U": 2656584,
+         "W": 0
+        },
+        "weak_bytes": {
+         "D": 318296,
+         "I": 41408,
+         "U": 2656584,
+         "c": 129440
+        },
+        "weak_cells": {
+         "masked": 20789,
+         "neg": 2117,
+         "pos": 1670
+        }
+       }
+      },
+      "lineage": "T81_VM2",
+      "rom_sha256": "02a5d53336729ad41881ea97c66018da92152d9cef65fd46d6965730cb57af04",
+      "rom_size": 3145728
+     }
+    },
+    "policy": "seg080.label_policy.v1",
+    "status": "partially_observed",
+    "tree_sha256": "9ddad6a7cd261354ec16f75fc12a9d1a93f71deb1b25c4de4b2e239979348450"
+   },
+   "seg083-v1": {
+    "games": {
+     "doraemon": {
+      "conditions": {
+       "ctl": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 41468,
+        "strong_bytes": {
+         "D": 2112,
+         "I": 8609,
+         "U": 489836,
+         "c": 23731
+        },
+        "strong_cells": {
+         "masked": 3738,
+         "neg": 16,
+         "pos": 342
+        },
+        "tier_bytes": {
+         "E": 32340,
+         "H": 512,
+         "M": 1600,
+         "R": 3936,
+         "U": 381096,
+         "W": 104804
+        },
+        "weak_bytes": {
+         "D": 106916,
+         "I": 9621,
+         "U": 381096,
+         "c": 26655
+        },
+        "weak_cells": {
+         "masked": 3042,
+         "neg": 705,
+         "pos": 349
+        }
+       },
+       "ctl2": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 41468,
+        "strong_bytes": {
+         "D": 2112,
+         "I": 8609,
+         "U": 489836,
+         "c": 23731
+        },
+        "strong_cells": {
+         "masked": 3738,
+         "neg": 16,
+         "pos": 342
+        },
+        "tier_bytes": {
+         "E": 32340,
+         "H": 512,
+         "M": 1600,
+         "R": 3936,
+         "U": 381096,
+         "W": 104804
+        },
+        "weak_bytes": {
+         "D": 106916,
+         "I": 9621,
+         "U": 381096,
+         "c": 26655
+        },
+        "weak_cells": {
+         "masked": 3042,
+         "neg": 705,
+         "pos": 349
+        }
+       },
+       "tas": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 41468,
+        "strong_bytes": {
+         "D": 2112,
+         "I": 12016,
+         "U": 476668,
+         "c": 33492
+        },
+        "strong_cells": {
+         "masked": 3615,
+         "neg": 16,
+         "pos": 465
+        },
+        "tier_bytes": {
+         "E": 45508,
+         "H": 512,
+         "M": 1600,
+         "R": 4494,
+         "U": 218375,
+         "W": 253799
+        },
+        "weak_bytes": {
+         "D": 255911,
+         "I": 13143,
+         "U": 218375,
+         "c": 36859
+        },
+        "weak_cells": {
+         "masked": 2027,
+         "neg": 1595,
+         "pos": 474
+        }
+       }
+      },
+      "lineage": "T83_DORAEMON",
+      "rom_sha256": "54aac77159188dc230b8b6130d5207eb4aadce92a7bf5bd63ee48230510d193a",
+      "rom_size": 524288
+     },
+     "shadowrun": {
+      "conditions": {
+       "ctl": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 73294,
+        "strong_bytes": {
+         "D": 512,
+         "I": 9183,
+         "U": 2057660,
+         "c": 29797
+        },
+        "strong_cells": {
+         "masked": 15905,
+         "neg": 4,
+         "pos": 475
+        },
+        "tier_bytes": {
+         "E": 38980,
+         "H": 512,
+         "M": 0,
+         "R": 13120,
+         "U": 1895296,
+         "W": 149244
+        },
+        "weak_bytes": {
+         "D": 149756,
+         "I": 12164,
+         "U": 1895296,
+         "c": 39936
+        },
+        "weak_cells": {
+         "masked": 15050,
+         "neg": 775,
+         "pos": 559
+        }
+       },
+       "ctl2": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 73294,
+        "strong_bytes": {
+         "D": 512,
+         "I": 9183,
+         "U": 2057660,
+         "c": 29797
+        },
+        "strong_cells": {
+         "masked": 15905,
+         "neg": 4,
+         "pos": 475
+        },
+        "tier_bytes": {
+         "E": 38980,
+         "H": 512,
+         "M": 0,
+         "R": 13120,
+         "U": 1895296,
+         "W": 149244
+        },
+        "weak_bytes": {
+         "D": 149756,
+         "I": 12164,
+         "U": 1895296,
+         "c": 39936
+        },
+        "weak_cells": {
+         "masked": 15050,
+         "neg": 775,
+         "pos": 559
+        }
+       },
+       "tas": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 73294,
+        "strong_bytes": {
+         "D": 512,
+         "I": 16546,
+         "U": 2024866,
+         "c": 55228
+        },
+        "strong_cells": {
+         "masked": 15608,
+         "neg": 4,
+         "pos": 772
+        },
+        "tier_bytes": {
+         "E": 71774,
+         "H": 512,
+         "M": 0,
+         "R": 12944,
+         "U": 1219379,
+         "W": 792543
+        },
+        "weak_bytes": {
+         "D": 793055,
+         "I": 19389,
+         "U": 1219379,
+         "c": 65329
+        },
+        "weak_cells": {
+         "masked": 11558,
+         "neg": 4012,
+         "pos": 814
+        }
+       }
+      },
+      "lineage": "T83_SHADOWRUN",
+      "rom_sha256": "92a614491fc3ea12a6df32459cce08b48574b7b814e244c07eb860dc5c6edb7e",
+      "rom_size": 2097152
+     },
+     "terminator": {
+      "conditions": {
+       "ctl": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 17090,
+        "strong_bytes": {
+         "D": 146176,
+         "I": 4205,
+         "U": 886156,
+         "c": 12039
+        },
+        "strong_cells": {
+         "masked": 6868,
+         "neg": 1139,
+         "pos": 185
+        },
+        "tier_bytes": {
+         "E": 16244,
+         "H": 512,
+         "M": 145664,
+         "R": 5130,
+         "U": 803503,
+         "W": 77523
+        },
+        "weak_bytes": {
+         "D": 223699,
+         "I": 5509,
+         "U": 803503,
+         "c": 15865
+        },
+        "weak_cells": {
+         "masked": 6285,
+         "neg": 1702,
+         "pos": 205
+        }
+       },
+       "ctl2": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 17090,
+        "strong_bytes": {
+         "D": 146176,
+         "I": 4205,
+         "U": 886156,
+         "c": 12039
+        },
+        "strong_cells": {
+         "masked": 6868,
+         "neg": 1139,
+         "pos": 185
+        },
+        "tier_bytes": {
+         "E": 16244,
+         "H": 512,
+         "M": 145664,
+         "R": 5130,
+         "U": 803503,
+         "W": 77523
+        },
+        "weak_bytes": {
+         "D": 223699,
+         "I": 5509,
+         "U": 803503,
+         "c": 15865
+        },
+        "weak_cells": {
+         "masked": 6285,
+         "neg": 1702,
+         "pos": 205
+        }
+       },
+       "tas": {
+        "decoder_cli_sha256": "8f6d043f7a7d70605335a8f193dddd03a663b5afa83b1e4d963af9479e9d2a20",
+        "frames": 17090,
+        "strong_bytes": {
+         "D": 304640,
+         "I": 4935,
+         "U": 724832,
+         "c": 14169
+        },
+        "strong_cells": {
+         "masked": 5621,
+         "neg": 2377,
+         "pos": 194
+        },
+        "tier_bytes": {
+         "E": 19104,
+         "H": 512,
+         "M": 304128,
+         "R": 2760,
+         "U": 431786,
+         "W": 290286
+        },
+        "weak_bytes": {
+         "D": 594926,
+         "I": 5644,
+         "U": 431786,
+         "c": 16220
+        },
+        "weak_cells": {
+         "masked": 3417,
+         "neg": 4564,
+         "pos": 211
+        }
+       }
+      },
+      "lineage": "T83_TERMINATOR",
+      "rom_sha256": "89a6ce1eeb77495111c49a45944cc9bb1abfe7f60de366ae19f5118c03c742f9",
+      "rom_size": 1048576
+     }
+    },
+    "policy": "seg080.label_policy.v1",
+    "status": "partially_observed",
+    "tree_sha256": "4d92fd7a6c323d8e4abb9bc4031df1e9fcc1691eb0f5a04c70cf09cf9df06f19"
+   }
+  }
+ }
+}
