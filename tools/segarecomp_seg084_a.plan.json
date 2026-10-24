@@ -13,7 +13,7 @@
   "A_term": "A0 + The Terminator TAS strong labels only (low code yield, 2,117 strong hard-negative cells)"
  },
  "bound_code": {
-  "tests/segarecomp_seg084_test.py": "573900b60c4feaa3cdd34528fdaf803ab9399093dface4662c4807237955168c",
+  "tests/segarecomp_seg084_test.py": "d7c820e59b36f591d446a463c96449384ddf5f2729a0832a694f80877fd51820",
   "tools/segarecomp_genesis_bizhawk.py": "c27cf3895ebec5d87f7575f81d7c59455bba787a224728bb762aa385f22825c4",
   "tools/segarecomp_genesis_evidence.py": "1582d2ed01db7692c6564750a8a7e6d01b08ee59f421d26776906523bd009885",
   "tools/segarecomp_genesis_tasbatch.py": "62eed1fe5e2819f43cc392394b42cca213e2752fd78f8e933cbed82d5746d704",
@@ -32,10 +32,10 @@
   "tools/segarecomp_ml_v3_data.py": "90537880773627c1c1babcd2e36c2234325cf04c9e900afb07a6ab85bcd8097f",
   "tools/segarecomp_ml_v3_eval.py": "eea86b0b1c35d79b235c4f0ed1e559cbb36fb190bc36509221184140aa6fa213",
   "tools/segarecomp_ml_v3_train.py": "7234c6ffe964f0f6db44126d760fb60eff6ce97b30e93a7034d3e1e2bb97592f",
-  "tools/segarecomp_seg084_a.py": "cc6e8bb7a02610d1df197774c101e5633dcc6e43e8570b89b7e127d1ed78bdfc",
+  "tools/segarecomp_seg084_a.py": "6479d2ac9af0aee02380b8dedfe588f9bbf096c030730c1ec579cd78fde5d113",
   "tools/segarecomp_seg084_audit.inventory.json": "c1c4559d69c01229bef334737a2ded84856d6612eb7f2ad5b9173574c4121a96",
   "tools/segarecomp_seg084_audit.py": "75cb5e3ad116bceda4ef790585b642964b5ffa496c61107cbd671c419e313387",
-  "tools/segarecomp_seg084_diag.py": "fb158db85737e62a7c00b25d5a158620eae56d6f91d19f984a52bdca60206a86",
+  "tools/segarecomp_seg084_diag.py": "d5ee51a4122bddb8fed071dab009376985f20c8607d9d64989da79621daad536",
   "tools/segarecomp_xplat_design.py": "9235527284e19ac274f3c146a2b6a3f040e425bb742531cbc84e9e1efbae4c3c",
   "tools/segarecomp_xplat_explore_eval.py": "8e547410df3176cf1259dc0f385a6f683c6e4721cce72296a76d49cd99a17b1e",
   "tools/segarecomp_xplat_models.py": "3eabc2ed412ec3088938061af5a76b53f5b7fcf55deefdfd82031f533f268f8b",
@@ -99,6 +99,12 @@
  },
  "preserved": "ADRs 0181-0187, the SEG-083 frozen plan 228647dd, its decisions (EXPANSION_MIXED, ML_INCONCLUSIVE, MORE_DIVERSITY_NEEDED) and all SEG-076 results are unchanged",
  "privacy": "private cell scores and contexts stay in the ignored cache; committed results are aggregate counts, rates and digests",
+ "prospective_retention_rule": {
+  "eligible_when": "replay fidelity (identity, played to the end, no perturbation, deterministic, >= 5 distinct states, complete domains) AND label consistency AND sound tracing; yield and the number of movie fifths with new code are irrelevant; a tracing failure that is solely accepted-executed fraction < 0.99 is waived only when every rejected start is classified DISASSEMBLER_LIMITATION by the bounded diagnostic",
+  "no_threshold_lowered": true,
+  "purpose": "decide, prospectively, which labels of the two SEG-083 games that failed a frozen gate may be retained privately; ADR 0187 and its classes are untouched",
+  "uses": "retention only; the labels are not part of any A arm in this study"
+ },
  "purpose": "reassess the data contribution of the SEG-081 / SEG-083 TAS labels with the TRUE SEG-076 structural model A (a_features + A_CONFIG), not the SEG-072 M1-HGB of the SEG-083 diagnostic; decide readiness for a bounded B / C-v2 pilot with code diversity and negative-supervision diversity judged separately",
  "readiness": {
   "code_diversity": "independent useful lineages among the eight SEG-081/083 candidates (SEG-083 rule: code yield >= usefulness criterion, shingle containment <= 0.30) >= 5 AND the six qualified games' strong positive cells >= 20 % of the base positive cells",

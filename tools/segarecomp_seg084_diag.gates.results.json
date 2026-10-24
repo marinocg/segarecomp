@@ -1,0 +1,97 @@
+{
+ "doraemon": {
+  "acquisition_yield": "QUALIFIED_USEFUL",
+  "continued_discovery_fifths": 5,
+  "label_confidence": true,
+  "note": "prospective proposal only: ADR 0187's class is unchanged; continued discovery stays a separately reported field",
+  "original_class": "QUALIFIED_USEFUL",
+  "proposed_class": "QUALIFIED_USEFUL",
+  "replay_fidelity": true,
+  "retention": {
+   "consistency": true,
+   "eligible": true,
+   "fidelity": true,
+   "original_class": "QUALIFIED_USEFUL",
+   "retroactive_effect": false,
+   "tracing_ok": true,
+   "tracing_waived_by_diagnostic": false
+  },
+  "retroactive_effect": false
+ },
+ "nhl94": {
+  "acquisition_yield": null,
+  "continued_discovery_fifths": 3,
+  "label_confidence": false,
+  "note": "prospective proposal only: ADR 0187's class is unchanged; continued discovery stays a separately reported field",
+  "original_class": "TRACING_UNAVAILABLE",
+  "proposed_class": "TRACING_UNAVAILABLE",
+  "replay_fidelity": true,
+  "retention": {
+   "consistency": true,
+   "eligible": true,
+   "fidelity": true,
+   "original_class": "TRACING_UNAVAILABLE",
+   "retroactive_effect": false,
+   "tracing_ok": false,
+   "tracing_waived_by_diagnostic": true
+  },
+  "retroactive_effect": false
+ },
+ "shadowrun": {
+  "acquisition_yield": "QUALIFIED_USEFUL",
+  "continued_discovery_fifths": 5,
+  "label_confidence": true,
+  "note": "prospective proposal only: ADR 0187's class is unchanged; continued discovery stays a separately reported field",
+  "original_class": "QUALIFIED_USEFUL",
+  "proposed_class": "QUALIFIED_USEFUL",
+  "replay_fidelity": true,
+  "retention": {
+   "consistency": true,
+   "eligible": true,
+   "fidelity": true,
+   "original_class": "QUALIFIED_USEFUL",
+   "retroactive_effect": false,
+   "tracing_ok": true,
+   "tracing_waived_by_diagnostic": false
+  },
+  "retroactive_effect": false
+ },
+ "shoveit": {
+  "acquisition_yield": "QUALIFIED_LOW_YIELD",
+  "continued_discovery_fifths": 1,
+  "label_confidence": true,
+  "note": "prospective proposal only: ADR 0187's class is unchanged; continued discovery stays a separately reported field",
+  "original_class": "REPLAY_INVALID",
+  "proposed_class": "QUALIFIED_LOW_YIELD",
+  "replay_fidelity": true,
+  "retention": {
+   "consistency": true,
+   "eligible": true,
+   "fidelity": true,
+   "original_class": "REPLAY_INVALID",
+   "retroactive_effect": false,
+   "tracing_ok": true,
+   "tracing_waived_by_diagnostic": false
+  },
+  "retroactive_effect": false
+ },
+ "terminator": {
+  "acquisition_yield": "QUALIFIED_LOW_YIELD",
+  "continued_discovery_fifths": 5,
+  "label_confidence": true,
+  "note": "prospective proposal only: ADR 0187's class is unchanged; continued discovery stays a separately reported field",
+  "original_class": "QUALIFIED_LOW_YIELD",
+  "proposed_class": "QUALIFIED_LOW_YIELD",
+  "replay_fidelity": true,
+  "retention": {
+   "consistency": true,
+   "eligible": true,
+   "fidelity": true,
+   "original_class": "QUALIFIED_LOW_YIELD",
+   "retroactive_effect": false,
+   "tracing_ok": true,
+   "tracing_waived_by_diagnostic": false
+  },
+  "retroactive_effect": false
+ }
+}

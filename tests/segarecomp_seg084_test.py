@@ -137,7 +137,7 @@ def test_fit_equivalence():
 
 def row(**kw):
     r = {"outside_image": False, "header_or_vector": False, "cpu_ordinary": True, "cpu_length": 4, "inside_other_instruction": False, "kind": "straight", "corroborated": True,
-         "contradicted": False, "has_successor": True, "opcode_line": 4, "disasm": "short"}
+         "contradicted": False, "has_successor": False, "opcode_line": 4, "disasm": "short"}
     r.update(kw)
     return r
 
@@ -157,22 +157,45 @@ def test_diag_rules():
     check(dg.classify_rejections([row() for _ in range(18)] + [row(inside_other_instruction=True)] * 2)["class"] == "UNSOUND_EXECUTION_LABELS", "two overlaps in twenty are unsound")
     mixed = [row(opcode_line=4) for _ in range(40)] + [row(opcode_line=6, corroborated=False, kind="unverifiable") for _ in range(2)] + [row(opcode_line=6) for _ in range(1)]
     check(dg.classify_rejections(mixed)["class"] == "UNRESOLVED" and dg.classify_rejections(mixed)["opcode_lines_below_90pct"] == [6], "a weak opcode line blocks the aggregate claim")
-    # classify_pc: straight-line and direct branch corroboration
-    toks = bytes([2, 2, 1, 0, 0, 0, 0, 0] * 4)                       # status ordinary, length 2 words, control 0
-    r = dg.classify_pc(0x200, 0x1000, toks, {0x204}, [], ("short", "short"), 4)
-    check(r["cpu_length"] == 0 or True, "classify_pc runs")
+    # classify_pc: the edge log holds only discontinuities, so straight-line corroboration is "no edge, fall-through executed"
     toks2 = bytes([2, 2, 1, 0, 0, 0, 0, 0]) * 400
-    r = dg.classify_pc(0x200, 0x4000, toks2, {0x204}, [], ("short", "absent"), 4)
-    check(r["kind"] == "straight" and r["corroborated"] and r["disasm"] == "mixed", "straight-line corroboration")
-    r = dg.classify_pc(0x200, 0x4000, toks2, {0x208}, [], ("short", "short"), 4)
-    check(r["contradicted"] and not r["corroborated"], "successor != pc + length contradicts")
+    r = dg.classify_pc(0x200, 0x4000, toks2, set(), [], ("short", "absent"), 4, None, True)
+    check(r["kind"] == "straight" and r["corroborated"] and not r["contradicted"] and r["disasm"] == "mixed", "straight-line: no discontinuity and the fall-through was executed")
+    r = dg.classify_pc(0x200, 0x4000, toks2, set(), [], ("short", "short"), 4, None, False)
+    check(not r["corroborated"] and not r["contradicted"], "fall-through never executed: no corroboration")
+    r = dg.classify_pc(0x200, 0x4000, toks2, {0x900}, [], ("short", "short"), 4, None, True)
+    check(r["contradicted"] and not r["corroborated"], "a discontinuity out of a straight-line instruction contradicts the CPU decode")
+    r = dg.classify_pc(0x200, 0x4000, toks2, {0x900}, [], ("short", "short"), 4, None, True, frozenset({0x900}))
+    check(r["corroborated"] and not r["contradicted"], "an interrupt / exception entry (vector handler) is not a contradiction")
     toks3 = bytes([2, 2, 1, 1, 0, 0, 0, 0]) * 400                    # control 1 = conditional direct branch
-    r = dg.classify_pc(0x200, 0x4000, toks3, {0x204, 0x300}, [], ("short", "short"), 6, 0x300)
-    check(r["kind"] == "direct" and r["corroborated"], "conditional branch: fall-through and target are both allowed")
-    r = dg.classify_pc(0x200, 0x4000, toks3, {0x310}, [], ("short", "short"), 6, 0x300)
-    check(r["contradicted"], "an unexplained successor contradicts")
+    r = dg.classify_pc(0x200, 0x4000, toks3, {0x300}, [], ("short", "short"), 6, 0x300, True)
+    check(r["kind"] == "direct" and r["corroborated"], "conditional branch: taken edge to the decoded target")
+    r = dg.classify_pc(0x200, 0x4000, toks3, set(), [], ("short", "short"), 6, 0x300, True)
+    check(r["corroborated"], "conditional branch not taken: fall-through executed")
+    r = dg.classify_pc(0x200, 0x4000, toks3, {0x310}, [], ("short", "short"), 6, 0x300, True)
+    check(r["contradicted"] and not r["corroborated"], "an unexplained discontinuity contradicts")
+    toks4 = bytes([2, 2, 1, 2, 0, 0, 0, 0]) * 400                    # control 2 = direct jump
+    check(dg.classify_pc(0x200, 0x4000, toks4, {0x300}, [], ("short", "short"), 6, 0x300)["corroborated"], "direct jump: the edge is exactly the target")
+    check(not dg.classify_pc(0x200, 0x4000, toks4, set(), [], ("short", "short"), 6, 0x300, True)["corroborated"], "direct jump without its edge is not corroborated")
     r = dg.classify_pc(0x200, 0x4000, bytes([2, 2, 1, 4, 0, 0, 0, 0]) * 400, {0x300}, [], ("short", "short"), 4)
     check(r["kind"] == "unverifiable" and not r["corroborated"] and not r["contradicted"], "dynamic jump is unverifiable")
+    base = {"gate_replay": {"identity_ok": True, "played_to_end": True, "no_perturbation": True, "determinism": {"a": True}, "distinct_ram_vram_states": 6, "digest_domains_missing": False},
+            "consistency": {"ok": True}, "classification": {"class": "TRACING_UNAVAILABLE"},
+            "gate_tracing": {"tracing_ok": False, "fidelity": {"map_mismatch": 0, "odd_pcs": 0, "reset_pc_executed": True, "vbl_pc_executed": True, "read_self_fetch_fraction": 0.0,
+                                                               "cdl_exec_mismatch_fraction": 0.0, "cdl_fixture_ok": True, "controls_ok": [True, True], "accepted_E_fraction": 0.98}}}
+    check(not dg.retention_eligibility(base)["eligible"], "tracing failure without a diagnostic keeps labels out")
+    check(dg.retention_eligibility(base, {"class": "DISASSEMBLER_LIMITATION"})["eligible"], "e-fraction-only failure waived by a limitation finding")
+    check(not dg.retention_eligibility(base, {"class": "UNRESOLVED"})["eligible"], "unresolved stays out")
+    b2 = json.loads(json.dumps(base))
+    b2["gate_tracing"]["fidelity"]["controls_ok"] = [True, False]
+    check(not dg.retention_eligibility(b2, {"class": "DISASSEMBLER_LIMITATION"})["eligible"], "any other failing tracing component is not waived")
+    b3 = json.loads(json.dumps(base))
+    b3["gate_replay"]["no_perturbation"] = False
+    check(not dg.retention_eligibility(b3, {"class": "DISASSEMBLER_LIMITATION"})["eligible"], "a perturbed replay is never eligible")
+    b4 = json.loads(json.dumps(base))
+    b4["gate_tracing"]["tracing_ok"] = True
+    b4["classification"]["class"] = "QUALIFIED_LOW_YIELD"
+    check(dg.retention_eligibility(b4)["eligible"], "yield is irrelevant to eligibility")
     check(set(dg.CLASSES) >= {"DISASSEMBLER_LIMITATION", "UNRESOLVED"}, "closed vocabulary")
     res = {"gate_replay": {"identity_ok": True, "played_to_end": True, "no_perturbation": True, "determinism": {"a": True}, "distinct_ram_vram_states": 6, "digest_domains_missing": False,
                            "fifths_with_new_code": 1, "progression": False, "replay_ok": False},

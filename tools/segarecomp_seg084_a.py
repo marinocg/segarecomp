@@ -214,6 +214,11 @@ def build_protocol() -> dict:
             "terminator": "legitimacy of its strong negatives is checked against the tier definitions (strong D = H header + M DMA-source tiers only) and their non-triviality by the fraction "
                           "of their words with an ordinary decode; their value by A_term vs A0 and A_noterm vs A_all on the held-out hard-negative and negative-admitted slices",
             "weak_vs_strong": "A_all_W vs A_all and A_control_W vs A_control; no reference truth repairs any commercial label"},
+        "prospective_retention_rule": {"purpose": "decide, prospectively, which labels of the two SEG-083 games that failed a frozen gate may be retained privately; ADR 0187 and its classes are untouched",
+                                       "eligible_when": "replay fidelity (identity, played to the end, no perturbation, deterministic, >= 5 distinct states, complete domains) AND label consistency AND sound tracing; yield and the number of "
+                                                        "movie fifths with new code are irrelevant; a tracing failure that is solely accepted-executed fraction < 0.99 is waived only when every rejected start is classified "
+                                                        "DISASSEMBLER_LIMITATION by the bounded diagnostic",
+                                       "no_threshold_lowered": True, "uses": "retention only; the labels are not part of any A arm in this study"},
         "readiness": {"outcomes": ["NEURAL_PILOT_JUSTIFIED", "MORE_DIVERSITY_NEEDED", "MODEL_OR_EVALUATION_LIMITATION", "EVIDENCE_INSUFFICIENT"], "thresholds": READY,
                       "order": "EVIDENCE_INSUFFICIENT (a required arm missing or A0 not reproduced) -> MORE_DIVERSITY_NEEDED (any diversity criterion unmet) -> MODEL_OR_EVALUATION_LIMITATION "
                                "(A does not respond beyond noise, or no residual headroom) -> NEURAL_PILOT_JUSTIFIED",
