@@ -1,0 +1,386 @@
+{
+ "classification": {
+  "ambitious_secondary": true,
+  "class": "QUALIFIED_USEFUL",
+  "code_yield_rule": true,
+  "novelty_rule": true
+ },
+ "consistency": {
+  "audit": {
+   "length_mismatch": 0,
+   "not_ordinary_decode": 0,
+   "odd_starts": 0,
+   "starts": 27766
+  },
+  "audit_ok": true,
+  "e_bytes": 77452,
+  "e_bytes_also_read_as_data": 62,
+  "e_bytes_in_dma_source": 0,
+  "ok": true,
+  "strong_data_conflict_fraction": 0.0
+ },
+ "coverage": {
+  "cpu_seconds_per_extra_strong_cell": 2.657,
+  "executed_rom_pcs": {
+   "control": 7403,
+   "control_only": 86,
+   "control_seed2": 7375,
+   "tas": 26589,
+   "tas_only": 19272
+  },
+  "frames_per_extra_strong_cell": 187.89,
+  "growth_new_pcs_cumulative": {
+   "control": {
+    "100": 7403,
+    "25": 7215,
+    "50": 7312,
+    "75": 7321,
+    "total_new_pcs": 7403
+   },
+   "tas": {
+    "100": 26598,
+    "25": 14297,
+    "50": 17178,
+    "75": 23368,
+    "total_new_pcs": 26598
+   }
+  },
+  "indirect": {
+   "edges_tas": 6761,
+   "extra_edges": 5960,
+   "extra_targets": 2187,
+   "targets_control": 321,
+   "targets_tas": 2505
+  },
+  "strong_code_cells": {
+   "control": 344,
+   "control_seed2": 343,
+   "extra_vs_control": 696,
+   "extra_vs_control_seed2": 697,
+   "extra_weak_variant_cells": 694,
+   "relative_increase": 2.0233,
+   "tas": 1040,
+   "useful_vs_seed2": true
+  },
+  "tiers": {
+   "ctl": {
+    "E": 22660,
+    "E_I": 7402,
+    "E_c": 15258,
+    "H": 512,
+    "M": 107360,
+    "R": 3632,
+    "U": 1849021,
+    "W": 113967
+   },
+   "ctl2": {
+    "E": 22588,
+    "E_I": 7374,
+    "E_c": 15214,
+    "H": 512,
+    "M": 110880,
+    "R": 3680,
+    "U": 1845709,
+    "W": 113783
+   },
+   "tas": {
+    "E": 77452,
+    "E_I": 26588,
+    "E_c": 50864,
+    "H": 512,
+    "M": 557632,
+    "R": 3604,
+    "U": 1457952,
+    "W": 0
+   }
+  }
+ },
+ "cpu_hours": 2.244,
+ "data": {
+  "data_extents": {
+   "ctl": {
+    "DMA": 208,
+    "DR": 3473,
+    "HW_HEADER": 1
+   },
+   "ctl2": {
+    "DMA": 203,
+    "DR": 3483,
+    "HW_HEADER": 1
+   },
+   "tas": {
+    "DMA": 1015,
+    "HW_HEADER": 1
+   }
+  },
+  "extra_data": {
+   "extra_hard_negative_cells_strong": 3038,
+   "extra_mixed_cells_strong": 2,
+   "strong_negative_cells_vs_control": 3166,
+   "weak_negative_cells_vs_control": 3166
+  },
+  "overlap": {
+   "ambiguous_masked_extents": 0,
+   "cdl_exec_and_data_bytes": 60,
+   "e_bytes_also_read_as_data": 62,
+   "e_bytes_in_dma_source": 0,
+   "r_data_conflicts": 0,
+   "rom_bytes_read_as_data_fraction": 0.2887
+  },
+  "strong": {
+   "ctl": {
+    "cells_masked": 15402,
+    "cells_mixed": 0,
+    "cells_neg": 638,
+    "cells_pos": 344,
+    "hard_negative_cells": 619,
+    "labelled_bytes": 130532,
+    "masked_fraction_bytes": 0.9378
+   },
+   "ctl2": {
+    "cells_masked": 15369,
+    "cells_mixed": 0,
+    "cells_neg": 672,
+    "cells_pos": 343,
+    "hard_negative_cells": 652,
+    "labelled_bytes": 133980,
+    "masked_fraction_bytes": 0.9361
+   },
+   "tas": {
+    "cells_masked": 11969,
+    "cells_mixed": 2,
+    "cells_neg": 3375,
+    "cells_pos": 1040,
+    "hard_negative_cells": 3235,
+    "labelled_bytes": 635596,
+    "masked_fraction_bytes": 0.6969
+   }
+  },
+  "strong_vs_weak": {
+   "labelled_bytes_lost_without_weak": 0.0056
+  },
+  "weak": {
+   "ctl": {
+    "cells_masked": 14500,
+    "cells_mixed": 35,
+    "cells_neg": 1529,
+    "cells_pos": 355,
+    "hard_negative_cells": 1431,
+    "labelled_bytes": 248131,
+    "masked_fraction_bytes": 0.8817
+   },
+   "ctl2": {
+    "cells_masked": 14477,
+    "cells_mixed": 34,
+    "cells_neg": 1553,
+    "cells_pos": 354,
+    "hard_negative_cells": 1454,
+    "labelled_bytes": 251443,
+    "masked_fraction_bytes": 0.8801
+   },
+   "tas": {
+    "cells_masked": 11960,
+    "cells_mixed": 2,
+    "cells_neg": 3375,
+    "cells_pos": 1049,
+    "hard_negative_cells": 3235,
+    "labelled_bytes": 639200,
+    "masked_fraction_bytes": 0.6952
+   }
+  }
+ },
+ "frames": 130772,
+ "game": "bnr",
+ "gate_replay": {
+  "checkpoints": 6,
+  "determinism": {
+   "cdl": true,
+   "checkpoints": true,
+   "edges": true,
+   "pcs": true,
+   "reads": true
+  },
+  "digest_domains_missing": false,
+  "distinct_ram_vram_states": 6,
+  "fifths_with_new_code": 5,
+  "identity_ok": true,
+  "no_perturbation": true,
+  "played_to_end": true,
+  "progression": true,
+  "replay_ok": true,
+  "states": 6
+ },
+ "gate_tracing": {
+  "fidelity": {
+   "accepted_E_fraction": 0.99996,
+   "cdl_exec_mismatch_fraction": 0.0,
+   "cdl_fixture_ok": true,
+   "controls_ok": [
+    true,
+    true
+   ],
+   "e_rejection_classes": {
+    "E_DISASM_NO_DECODE": 1
+   },
+   "e_rejections": 1,
+   "map_mismatch": 0,
+   "odd_pcs": 0,
+   "read_self_fetch_fraction": 0.0,
+   "reset_pc_executed": true,
+   "vbl_pc_executed": true
+  },
+  "tracing_ok": true
+ },
+ "image": {
+  "sha256": "9343edb48b8c6afcf44536875d5430548737599bbc49ea93cc5cf430b18ed0aa",
+  "size": 2097152
+ },
+ "isolation": {
+  "image_in_sealed_blind_manifest": false,
+  "image_sha256_in_registry": false,
+  "lineage_in_registry": false,
+  "ok": true
+ },
+ "lineage": "T81_BNR",
+ "movie_sha256": "5c73d263934f2d443bb2a4fa374dee5b5c7944390e621d1bf7021a8e0e9c3575",
+ "novelty": {
+  "batch:vm2": {
+   "N_struct": 665,
+   "N_struct_not_in_control": 346,
+   "forms_absent_from_reference": 59,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 1,
+     "absent_from_reference_and_control": 1,
+     "reference": 4,
+     "target": 1
+    },
+    "cfg": {
+     "absent_from_reference": 606,
+     "absent_from_reference_and_control": 324,
+     "reference": 1147,
+     "target": 945
+    },
+    "forms": {
+     "absent_from_reference": 59,
+     "absent_from_reference_and_control": 22,
+     "reference": 319,
+     "target": 307
+    },
+    "g3": {
+     "absent_from_reference": 7751,
+     "absent_from_reference_and_control": 4633,
+     "reference": 9480,
+     "target": 8807
+    },
+    "g4": {
+     "absent_from_reference": 10586,
+     "absent_from_reference_and_control": 6775,
+     "reference": 13222,
+     "target": 10934
+    }
+   },
+   "rare_forms_in_target": 61,
+   "relative_increase": {
+    "boundary": 0.25,
+    "cfg": 0.5283,
+    "forms": 0.185,
+    "g3": 0.8176,
+    "g4": 0.8006
+   }
+  },
+  "registry": {
+   "N_struct": 278,
+   "N_struct_not_in_control": 145,
+   "forms_absent_from_reference": 9,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 0,
+     "absent_from_reference_and_control": 0,
+     "reference": 1205,
+     "target": 1
+    },
+    "cfg": {
+     "absent_from_reference": 269,
+     "absent_from_reference_and_control": 144,
+     "reference": 5476,
+     "target": 945
+    },
+    "forms": {
+     "absent_from_reference": 9,
+     "absent_from_reference_and_control": 1,
+     "reference": 507,
+     "target": 307
+    },
+    "g3": {
+     "absent_from_reference": 5523,
+     "absent_from_reference_and_control": 3288,
+     "reference": 87211,
+     "target": 8807
+    },
+    "g4": {
+     "absent_from_reference": 9467,
+     "absent_from_reference_and_control": 6069,
+     "reference": 168735,
+     "target": 10934
+    }
+   },
+   "rare_forms_in_target": 12,
+   "relative_increase": {
+    "boundary": 0.0,
+    "cfg": 0.0491,
+    "forms": 0.0178,
+    "g3": 0.0633,
+    "g4": 0.0561
+   }
+  },
+  "sonic2_seg080": {
+   "N_struct": 687,
+   "N_struct_not_in_control": 356,
+   "forms_absent_from_reference": 80,
+   "per_kind": {
+    "boundary": {
+     "absent_from_reference": 1,
+     "absent_from_reference_and_control": 1,
+     "reference": 0,
+     "target": 1
+    },
+    "cfg": {
+     "absent_from_reference": 607,
+     "absent_from_reference_and_control": 328,
+     "reference": 1140,
+     "target": 945
+    },
+    "forms": {
+     "absent_from_reference": 80,
+     "absent_from_reference_and_control": 28,
+     "reference": 285,
+     "target": 307
+    },
+    "g3": {
+     "absent_from_reference": 7600,
+     "absent_from_reference_and_control": 4545,
+     "reference": 11398,
+     "target": 8807
+    },
+    "g4": {
+     "absent_from_reference": 10527,
+     "absent_from_reference_and_control": 6744,
+     "reference": 16585,
+     "target": 10934
+    }
+   },
+   "rare_forms_in_target": 40,
+   "relative_increase": {
+    "boundary": null,
+    "cfg": 0.5325,
+    "forms": 0.2807,
+    "g3": 0.6668,
+    "g4": 0.6347
+   }
+  }
+ },
+ "plan_sha256": "a51546ad2c1b2c62ab329f0299d7504548c7c7a9db0aa1b77ef781333d652845",
+ "registry_digest": "dab51db40680defd9f9f090b42f35a8b1125a8c3466c0a0b2f3081ad152d4830",
+ "title": "The Adventures of Batman & Robin (USA)"
+}

@@ -1,0 +1,22 @@
+{
+ "classes": {
+  "bnr": "QUALIFIED_USEFUL",
+  "ewj2": "QUALIFIED_USEFUL",
+  "vm2": "QUALIFIED_USEFUL"
+ },
+ "cpu_hours_total": 3.96,
+ "decision": "CROSS_ENGINE_ACQUISITION_SUPPORTED",
+ "limiting_factor": null,
+ "open_review_blockers": 0,
+ "qualified": [
+  "vm2",
+  "bnr",
+  "ewj2"
+ ],
+ "unresolved_major": 0,
+ "useful": [
+  "vm2",
+  "bnr",
+  "ewj2"
+ ]
+}
