@@ -49,3 +49,5 @@ tools/ghidra/scripts/*.java text eol=lf
 tests/fixtures/genesis_evidence/* text eol=lf
 tests/segarecomp_genesis_*_test.py text eol=lf
 tests/segarecomp_seg077_test.py text eol=lf
+# SEG-081: the frozen three-game plan binds the SEG-072 corpus manifest by SHA-256 over its exact committed bytes.
+tools/segarecomp_ml_v3.corpus_manifest.json text eol=lf
