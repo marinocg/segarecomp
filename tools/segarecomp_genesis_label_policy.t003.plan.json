@@ -1,0 +1,74 @@
+{
+ "amendment_A1": "pre-evaluation, after the independent plan review: rules A/B/C get minimum-support and sensitivity conditions and report PASS / FAIL / INCONCLUSIVE; a `combine` step computes the verdict; the diagnostic reports code-side and data-side error rates at a threshold frozen from B0; the in-image check masks truth-masked cells; token/ROM identity between variants and the truth image is asserted",
+ "bound_code": {
+  "tools/segarecomp_genesis_bizhawk.py": "c27cf3895ebec5d87f7575f81d7c59455bba787a224728bb762aa385f22825c4",
+  "tools/segarecomp_genesis_evidence.py": "1582d2ed01db7692c6564750a8a7e6d01b08ee59f421d26776906523bd009885",
+  "tools/segarecomp_genesis_label_policy.py": "d19580a07bcdbe2af34acfca85137c15b3a0f625661d74fa92d62b20d6875b84",
+  "tools/segarecomp_ml_v3_train.py": "7234c6ffe964f0f6db44126d760fb60eff6ce97b30e93a7034d3e1e2bb97592f"
+ },
+ "cell_rule": "unchanged SEG-072: positive when any I, negative when every byte is D, else masked",
+ "cell_weights": {
+  "definition": "weight 1.0 iff the cell label rests on strong tiers only (positive with an E start; negative of only H/M bytes)",
+  "strong": 1.0,
+  "weak_only_label": 0.25
+ },
+ "diagnostic": {
+  "arms": {
+   "B0": "base only",
+   "S_ctl": "base + seed-1 control strong labels",
+   "S_tas": "base + TAS strong labels",
+   "T": "base + SEG-072 complete Sonic 2 truth (reference only)",
+   "W_ctl": "base + seed-1 control strong+weak labels (weighted)",
+   "W_tas": "base + TAS strong+weak labels (weighted)"
+  },
+  "folds": "leave-one-lineage-out over the qualified non-Sonic lineages (every qualified lineage except D01); train = the other non-Sonic qualified lineages (truth labels) + the arm's Sonic 2 labels; the Sonic lineage (s1, sk, s2 truth) never enters the base pool",
+  "in_image_note": "an additional non-blind check scores the Sonic 2 cells that the arm left unlabelled against truth; not generalisation evidence",
+  "metrics": "per held-out lineage and pooled over held-out cells: average precision and ROC AUC of the cell score against truth cell labels",
+  "model": "SEG-072 model A = M1 HistGradientBoostingClassifier over the multiscale aggregates (frozen HGB_CONFIG); masked cells excluded",
+  "not_claimed": "no blind generalisation (Sonic 2 is already in SEG-072); no A/B/C retraining; one game; one seed set",
+  "weights": "sample_weight = cell weight; B0 and T use 1.0"
+ },
+ "inputs": "existing private Sonic 2 label directories from ADR 0182's runs (TAS, seed-1 control, seed-2 control); no retracing",
+ "limits": {
+  "cpu_hours": 4,
+  "retraining": "none beyond the minimal model-A arms",
+  "tracing": "none"
+ },
+ "measure": [
+  "coverage lost when weak tiers are excluded (bytes and cells)",
+  "per-tier errors split into code-as-data / data-as-code / wrong I-c",
+  "weak-negative cells containing truth code (training-label noise)",
+  "extra correct code-positive, mixed and hard-negative cells (TAS minus control, cells with a wrong label excluded), per variant",
+  "code and data errors are always reported separately"
+ ],
+ "notes": [
+  "upstream assembly already blocks data labels over E code bytes and withdraws R spans that overlap observed data, so 'code wins a byte' holds by construction and weak data is non-vetoing only at the cell level; weak-variant R coverage is therefore understated",
+  "HGB_CONFIG uses class_weight='balanced'; sklearn multiplies it with sample_weight",
+  "pooled AP mixes scores of different classifiers: descriptive",
+  "no seed-2 control arm in the diagnostic: the control arms S_ctl/W_ctl are the noise reference"
+ ],
+ "policy": "seg080.label_policy.v1",
+ "preserves": "ADR 0181 (REPLAY_INVALID) and ADR 0182 (LABELS_UNSAFE) are unchanged; this is a training-label layer, not a revised Gate B; generated-native code admission is untouched and fail-closed",
+ "recommendation_rule": {
+  "A_clean_strong_tier": "for the TAS, seed-1 control and seed-2 control: strong tiers E/H/M have zero code-as-data and data-as-code bytes, the E I/c wrong rate <= 0.001, and at least 1000 E-labelled bytes (else INCONCLUSIVE)",
+  "B_coverage": "the strong variant keeps >= 50% of the weak variant's TAS-over-control extra correct code-positive cells; INCONCLUSIVE when the weak variant has fewer than 50 such cells",
+  "C_no_harm": "pooled AP of S_tas >= pooled AP of B0 - 0.005 and >= pooled AP of S_ctl - 0.005, and no held-out lineage has AP(S_tas) < AP(B0) - 0.02; INCONCLUSIVE unless the reference arm shows sensitivity: pooled AP(T) - AP(B0) >= 0.005",
+  "error_split": "per fold, threshold = the 10th percentile of B0 scores over the held-out positive cells (B0 recall 0.90); every arm is scored at that threshold: false-negative rate on positive cells (code side), false-positive rate on negative cells and on hard-negative cells (data side)",
+  "verdict": "`combine`: any FAIL -> NOT_RECOMMENDED; else any INCONCLUSIVE -> INCONCLUSIVE; else RECOMMENDED (a single different-engine TAS pilot)"
+ },
+ "schema": "segarecomp.genesis_label_policy.plan",
+ "task": "SEG-080-T003",
+ "tiers": {
+  "E": "executed I/c: strong code",
+  "H": "hardware header: strong data",
+  "M": "DMA-source extent: strong data (independently supported)",
+  "R": "direct static reach I/c: weak code",
+  "U": "unknown / masked: permitted",
+  "W": "ordinary observed data read: weak, nonexclusive data"
+ },
+ "truth_use": "evaluator only (`measure`, `diagnose` scoring); never used to form, repair or filter training labels",
+ "variants": {
+  "strong": "E + H + M",
+  "weak": "strong + R + W; code always wins a byte; W never vetoes a code cell"
+ }
+}
