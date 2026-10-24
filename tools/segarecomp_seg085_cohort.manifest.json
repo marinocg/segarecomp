@@ -1,0 +1,85 @@
+{
+ "cohort_classification": "EVIDENCE_INSUFFICIENT_COHORT",
+ "data_boundary": "identities, digests and aggregate counts only",
+ "entries": [
+  {
+   "bytes_corroborated": {
+    "D": 2728810,
+    "I": 102375,
+    "U": 648,
+    "c": 313895
+   },
+   "classes_sha256_corroborated": "e0c78d676e4bf5f92f70d9ff7fdfbd6d2e40c586d83fb839845dd28f0a727a69",
+   "classes_sha256_raw": "107a40c40ceba1f76c83821316abbdeccf57876736fe48b0a97c9bf516c79c57",
+   "corroboration": {
+    "decoder_audit": {
+     "length_mismatch": 0,
+     "not_ordinary_decode": 0,
+     "odd_starts": 0,
+     "starts": 102494
+    },
+    "masked_cells": 5,
+    "target_audit": {
+     "contradictions": 4,
+     "direct_targets": 27916,
+     "inside_instruction": 1,
+     "masked_cells": 5,
+     "on_data": 3
+    }
+   },
+   "era": "1995 commercial release (English revision)",
+   "image_bytes": 3145728,
+   "image_sha256": "511f35cc11f88316f8b8940e28ab298bd75a4da193672a80172884d6eb913b6a",
+   "independence": {
+    "max_shingle_containment": 0.02777,
+    "note": "same disassembly-project family as D04 (Phantasy Star II) but containment with D04 is 0.0066/0.0014",
+    "threshold": 0.3,
+    "with_lineage": "D02"
+   },
+   "labels": "extract: tools/segarecomp_source_map_extract.py listing semantics (dialect as), unchanged; masked per corroboration",
+   "lineage": "H01",
+   "platform": "Sega Genesis (MC68000)",
+   "rebuild": "byte-identical to the authorized image (SHA-1 bc7ff6d6...2629) before the header checksum fix-up",
+   "role": "evaluation-only",
+   "source": "github.com/squidfeatures/ps4disasm",
+   "source_revision": "8a658314850904c6888969f90177779845133a7e",
+   "starts_raw": 102494,
+   "tier": "T-B",
+   "toolchain": "repository-bundled AS V1.42 Bld 89 (asw.exe, sha256 a782c3c7...f7dcc, identical to the SEG-072 D04 build tool) under Wine 9.0, p2bin; options revision = 1"
+  }
+ ],
+ "excluded": [
+  {
+   "candidate": "ToeJam & Earl (REV 02)",
+   "reason": "SEG-077 reserved blind-cohort title (B077-04); examined before the reserved-identity guard existed, all derived data deleted, nothing scored"
+  },
+  {
+   "candidate": "Ristar, Puyo Puyo (Japan)",
+   "reason": "SEG-077 reserved blind-cohort titles; Ristar's public project is an IDA database, Puyo Puyo's a partial translation disassembly"
+  },
+  {
+   "candidate": "Sonic 3D Blast",
+   "reason": "public project is an IDA database (not rebuildable); tier T-C at best"
+  },
+  {
+   "candidate": "Streets of Rage 1-3",
+   "reason": "IDA assembly exports without addresses or encodings; not rebuildable; tier T-C at best"
+  },
+  {
+   "candidate": "Beyond Oasis, Dr. Robotnik's Mean Bean Machine, Toy Story, Dragon Ball Z Buyuu Retsuden, NHL 96",
+   "reason": "no authorized local image"
+  },
+  {
+   "candidate": "Kid Chameleon, Alien Soldier, Landstalker, QuackShot, Sonic Spinball",
+   "reason": "SEG-072 sealed cohort"
+  },
+  {
+   "candidate": "Sonic 3 / S&K family, Flicky, Shining Force, Phantasy Star II",
+   "reason": "development lineages D01-D04"
+  }
+ ],
+ "preregistered_minimum": 3,
+ "qualified_independent_historical_lineages": 1,
+ "schema": "segarecomp.seg085.cohort.manifest.v1",
+ "status": "frozen before any policy was scored on it"
+}

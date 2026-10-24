@@ -1,0 +1,52 @@
+{
+ "T": -13.655373878023223,
+ "adapt_margin": 0.173779296875,
+ "images": {
+  "h01/ps4": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3200276692708333,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3500162760416667,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_after_seeds": null,
+    "cells_before_seeds": 24576,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 24576,
+   "lineage": "H01",
+   "masked_cells": 5,
+   "positive_cells": 3499,
+   "starts": 102375
+  }
+ },
+ "plan_sha256": "59813af76417d99e76be302e37059f013860b1d160d09678722a10575a683d8f",
+ "schema": "segarecomp.seg085.eval.v1.cohort_outcomes"
+}
