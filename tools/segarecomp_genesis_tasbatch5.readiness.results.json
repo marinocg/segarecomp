@@ -1,0 +1,91 @@
+{
+ "acquisition": {
+  "decision": "EXPANSION_MIXED",
+  "limiting_factor": "fewer than three useful games",
+  "qualified": [
+   "shadowrun",
+   "doraemon",
+   "terminator"
+  ],
+  "unresolved_major": 0,
+  "useful": [
+   "shadowrun",
+   "doraemon"
+  ]
+ },
+ "classes": {
+  "bnr": "QUALIFIED_USEFUL",
+  "doraemon": "QUALIFIED_USEFUL",
+  "ewj2": "QUALIFIED_USEFUL",
+  "nhl94": "TRACING_UNAVAILABLE",
+  "shadowrun": "QUALIFIED_USEFUL",
+  "shoveit": "REPLAY_INVALID",
+  "terminator": "QUALIFIED_LOW_YIELD",
+  "vm2": "QUALIFIED_USEFUL"
+ },
+ "decision": {
+  "decision": "MORE_DIVERSITY_NEEDED",
+  "missing": [
+   "new useful independent lineages 2 < 3",
+   "new strong hard-negative cells 20 < 300"
+  ],
+  "reasons": []
+ },
+ "independence_all": {
+  "clusters": [
+   [
+    "bnr"
+   ],
+   [
+    "doraemon"
+   ],
+   [
+    "ewj2"
+   ],
+   [
+    "shadowrun"
+   ],
+   [
+    "vm2"
+   ]
+  ],
+  "effective_independent": 5,
+  "redundant_with_registry": [],
+  "titles": 5
+ },
+ "independence_new": {
+  "clusters": [
+   [
+    "doraemon"
+   ],
+   [
+    "shadowrun"
+   ]
+  ],
+  "effective_independent": 2,
+  "redundant_with_registry": [],
+  "titles": 2
+ },
+ "measurements": {
+  "new_hard_negative_cells": 20,
+  "new_novel_signatures": 322,
+  "new_useful_independent_lineages": 2,
+  "provenance_ok": true,
+  "residual_folds": 6,
+  "total_useful_independent_lineages": 5
+ },
+ "note": "SEG-081 classes were judged against the player-1-only control; only the five new games were judged against the all-controller control",
+ "thresholds": {
+  "floor_new_novel_signatures": 100,
+  "floor_new_useful_independent_lineages": 2,
+  "floor_residual_er": 0.05,
+  "floor_residual_folds": 1,
+  "noise_note": "see model_a.noise",
+  "pilot_new_hard_negative_cells": 300,
+  "pilot_new_novel_signatures": 300,
+  "pilot_new_useful_independent_lineages": 3,
+  "pilot_residual_er": 0.05,
+  "pilot_residual_folds": 2,
+  "pilot_total_useful_independent_lineages": 5
+ }
+}

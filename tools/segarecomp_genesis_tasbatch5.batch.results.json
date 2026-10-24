@@ -1,0 +1,23 @@
+{
+ "classes": {
+  "doraemon": "QUALIFIED_USEFUL",
+  "nhl94": "TRACING_UNAVAILABLE",
+  "shadowrun": "QUALIFIED_USEFUL",
+  "shoveit": "REPLAY_INVALID",
+  "terminator": "QUALIFIED_LOW_YIELD"
+ },
+ "cpu_hours_total": 3.206,
+ "decision": "CROSS_ENGINE_ACQUISITION_SUPPORTED",
+ "limiting_factor": null,
+ "open_review_blockers": 0,
+ "qualified": [
+  "shadowrun",
+  "doraemon",
+  "terminator"
+ ],
+ "unresolved_major": 0,
+ "useful": [
+  "shadowrun",
+  "doraemon"
+ ]
+}
