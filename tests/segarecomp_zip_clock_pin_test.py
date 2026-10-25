@@ -45,7 +45,11 @@ def test_root_cause_is_zip_metadata_only():
 
 def test_shim_pins_the_clock_for_the_real_generator():
     script = textwrap.dedent(f"""
-        import sys, time, hashlib
+        import sys, time, types
+        try:
+            import resource
+        except ImportError:
+            sys.modules['resource'] = types.ModuleType('resource')      # Windows: the SEG-080 adapter imports it at module level but never uses it offline
         sys.path.insert(0, {str(ROOT / 'tools')!r}); sys.path.insert(0, {str(ROOT / 'tests')!r})
         import segarecomp_genesis_tasbatch5 as t5
         from segarecomp_genesis_tasbatch_test import make_bk2
@@ -62,8 +66,8 @@ def test_shim_pins_the_clock_for_the_real_generator():
         f.write_text(script)
         out = subprocess.run([sys.executable, str(SHIM), str(f)], capture_output=True, text=True, timeout=300)
     check(out.stdout.split() == ["1", "1"], f"pinned: the same controller streams give byte-identical archives and a different seed still differs: {out.stdout!r} {out.stderr[-300:]!r}")
-    plain = subprocess.run([sys.executable, "-c", script.replace("import sys, time, hashlib", "import sys, time, hashlib")], capture_output=True, text=True, timeout=300)
-    check(plain.stdout.split()[:1] == ["0"], f"without the pin the fixture reproduces the flake: {plain.stdout!r}")
+    plain = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=300)
+    check(plain.stdout.split()[:1] == ["0"], f"without the pin the fixture reproduces the flake: {plain.stdout!r} {plain.stderr[-300:]!r}")
 
 
 def main() -> int:
