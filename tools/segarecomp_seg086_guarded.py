@@ -40,9 +40,15 @@ def records_digest(recs) -> str:
 
 
 def check_out(path: str) -> pathlib.Path:
+    """Allowlist: `--out` must resolve OUTSIDE the repository tree (scratch directory) or inside its ignored `.cache` directory; it can therefore never name a tracked, bound or
+    frozen file, under any alias (relative path, symlink, case variant, hardlink inside the tree is also excluded because the tree is excluded)."""
     p = pathlib.Path(path).resolve()
-    if p.name in FROZEN_ARTIFACTS or p.parent == HERE.resolve() and p.name.startswith("segarecomp_seg086"):
-        raise SystemExit(f"--out may not name a committed or frozen SEG-086 artifact: {p.name}")
+    root = HERE.parent.resolve()
+    inside = p == root or root in p.parents
+    if inside and (root / ".cache") not in p.parents:
+        raise SystemExit(f"--out must be outside the repository tree or under its .cache directory: {p}")
+    if p.name.casefold() in {n.casefold() for n in FROZEN_ARTIFACTS}:
+        raise SystemExit(f"--out may not use the name of a frozen SEG-086 artifact: {p.name}")
     return p
 
 

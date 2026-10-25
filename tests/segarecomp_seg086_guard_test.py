@@ -222,7 +222,8 @@ def test_dispatcher_installs_guard_before_delegating_and_preserves_outputs():
 def test_dispatcher_rejects_unsafe_commands_and_frozen_outputs():
     ev = []
     e = env_for(ev, fake_cal(ev, pathlib.Path("/nonexistent")))
-    for argv in (["freeze"], ["final"], ["bogus"], [], ["nested", "--variants", "N9"], ["diag"], ["nested", "--out", "tools/segarecomp_seg086_cal.results.json"],
+    for argv in (["freeze"], ["final"], ["bogus"], [], ["nested", "--variants", "N9"], ["diag"], ["nested", "--out", "tools/segarecomp_seg086_cal.results.json"], ["nested", "--out", "tools/segarecomp_sample_roles.py"], ["nested", "--out", "docs/x.json"],
+                 ["nested", "--out", "/tmp/SEGARECOMP_SEG086_CAL.RESULTS.JSON"],
                  ["select", "--out", str(gd.HERE / "segarecomp_seg086_cal.selection.json")], ["diag", "--out", str(gd.HERE / "segarecomp_seg086_diag.results.json")]):
         check(raises(lambda a=argv: gd.run(a, e), SystemExit) and ev == [], f"{argv}: accepted or guard/delegate reached")
 
