@@ -15,7 +15,8 @@ Witnesses (all label-free):
   W_REACH_TARGET     a direct edge whose SOURCE word is seed-reached lands in the cell (subset of the above by construction; reported for completeness).
   W_RELOC            a trusted relocation field lies in the cell (no Genesis development image carries any; the field exists for relocatable images).
   W_VECTOR_ROOTED    a word of the cell is reachable (same edges) from the program-counter entries of the 68000 exception-vector table in the image header
-                     (longwords at offsets 4..0xFF that are even and inside the image). INDEPENDENT (header metadata, no labels); added after review because the
+                     (longwords at offsets 4..0xFF that are even and inside the image). Applied only to images that carry the cartridge header
+                     ("SEGA" at 0x100); a CD module or relocatable blob yields none. Relocation offsets outside the image are ignored, never clamped. INDEPENDENT (header metadata, no labels); added after review because the
                      three unseeded images have no seed roots, so seed-rooted reach is undefined there.
   W_UNROOTED_TARGET  a direct edge from ANY decoder-ordinary word (reached or not) lands in the cell. NOT independent: arbitrary decodable bytes produce such edges.
   W_DECODE_CHAIN     a run of at least 8 consecutive decoder-ordinary words starts in the cell. NOT independent (the decoder accepts most data).
@@ -120,9 +121,17 @@ def subcell_resolution(chunk: bytes, sub: int) -> dict:
             "start_bearing": code_subcells, "resolved": mixed == 0 and unknown == 0}
 
 
+def has_cartridge_header(rom: bytes) -> bool:
+    """Label-free applicability test for the 68000 vector-table root: the image carries the Mega Drive / Genesis cartridge header ("SEGA" console name at 0x100).
+    A Sega CD module, a relocatable executable or any other blob has no such table and yields no vector roots (fail closed)."""
+    return len(rom) >= 0x200 and (rom[0x100:0x104] == b"SEGA" or rom[0x101:0x105] == b"SEGA")
+
+
 def vector_roots(rom: bytes, n_words: int) -> list:
     """Word indices of the exception-vector program-counter entries (longwords 1..63 of the header; the initial stack pointer is not code). Even, in-image only."""
     out = []
+    if not has_cartridge_header(rom):
+        return out
     for i in range(1, 64):
         if 4 * i + 4 > len(rom):
             break
@@ -172,7 +181,9 @@ def witness_flags(cell_words: int, n_cells: int, reach, target, ordinary, chain,
         if r:
             out["W_VECTOR_ROOTED"][cw(w)] = True
     for off, _w in relocs:
-        out["W_RELOC"][min(int(off) // reloc_cell_bytes, n_cells - 1)] = True
+        c = int(off) // reloc_cell_bytes if int(off) >= 0 else -1
+        if 0 <= c < n_cells:                    # an out-of-range relocation is invalid input: ignored, never evidence for another cell
+            out["W_RELOC"][c] = True
     return out
 
 
@@ -230,11 +241,20 @@ def group_of(img_id: str) -> str:
     return "sgdk" if img_id in SGDK_IMAGES else "historical"
 
 
-def _load():
+def _load(guard_install=None, loader=None):
+    """Install the SEG-086 sample-role guard (ADR 0198) on the training-image constructor BEFORE any development sample is loaded, then use the unchanged SEG-084 loader.
+    Evaluation-only, exploratory, contradictory-role, frozen-evaluation and reserved identities are refused from metadata alone; an authorization failure raises."""
+    if guard_install is None:
+        import segarecomp_sample_guard as sg
+        guard_install = sg.install
+    guard_install()
+    if loader is None:
+        import segarecomp_seg084_a as s84
+        loader = s84.load_registry_images
+    imgs, _ = loader()
     import numpy as np
     import segarecomp_seg084_a as s84
     import segarecomp_xplat_transfer as xt
-    imgs, _ = s84.load_registry_images()
     oof = {}
     for L in GENESIS:
         oof.update(xt.load_npz(s84.score_path(L, "A0")))

@@ -9,14 +9,14 @@
 Question: can independently established, label-free structural evidence identify the rare executable 128-byte cells that structural model A scores poorly (the cells that force the SEG-085/086 absolute threshold to be conservative), so that a small witness union could replace a global margin?
 If not, this line stops (`STRUCTURAL_EVIDENCE_INSUFFICIENT`) without a rescue mechanism.
 
-- Frozen inputs, read not modified: the stored out-of-fold model-A scores (SEG-076/084), the SEG-085 inner-refit scores, the unchanged CPU decode tokens and seed roots, the development labels. Model A is not refitted. Registry loading uses the unchanged SEG-084 loader with the lineage and reserved-identity
-  guards used since SEG-086; H01 (Phantasy Star IV) and every evaluation-only, sealed or reserved sample are not loaded, and nothing here is fresh evidence.
+- Frozen inputs, read not modified: the stored out-of-fold model-A scores (SEG-076/084), the SEG-085 inner-refit scores, the unchanged CPU decode tokens and seed roots, the development labels. Model A is not refitted. Registry loading uses the unchanged SEG-084 loader **after** installing the SEG-086 runtime sample-role guard (`segarecomp_sample_guard`, ADR 0198) in `_load()` (a first revision omitted it; corrected after the PR review, with a synthetic test that the guard is installed first and an evaluation-only sample is refused before any class map is read); H01 (Phantasy Star IV) and every evaluation-only, sealed or reserved sample are not loaded, and nothing here is fresh evidence.
 - Labels are used only to describe the cells being diagnosed and to score a witness afterwards. Every witness is computed from tokens, image words, seed roots and relocation fields (the test file asserts the witness extractor has no label parameter).
 - Witnesses examined (definitions in the tool header): seed-rooted reachability by fall-through and direct edges over decoder-ordinary words (`W_REACH_ROOTED`, already an input feature of model A), direct targets of seed-reached sources (`W_REACH_TARGET`), trusted relocation fields (`W_RELOC`), reachability from the program-counter entries of the exception-vector table in the image header (`W_VECTOR_ROOTED`; **added after the adversarial review**, which showed that the three unseeded SGDK images have no seed roots and so made seed-rooted reach undefined there), and two measured-but-**non-independent**
   heuristics: a direct target from any decoder-ordinary word (`W_UNROOTED_TARGET`) and a long ordinary decode run (`W_DECODE_CHAIN`). Only these four can be a code root; arbitrary decodable bytes are not trusted.
 - **Go/no-go rule for a rescue experiment (T002), written down for this ADR.** Proceed only if all hold: (G1) independent witnesses cover at least 50 % of the non-seed low-tail cells in images that have a seed universe **and** at least 50 % of the image-weakest negative-logit cells (the cells that decide each image's oracle threshold);
   (G2) independent witnesses fire on at most 1 % of verified-data cells; (G3) removing the independently witnessed cells from the lineage minima moves the SEG-085 decomposition (`T0`, shortfall) by at least 2 logits. Otherwise record `STRUCTURAL_EVIDENCE_INSUFFICIENT`, close T002/T003 unexecuted and go to the decision.
   *Disclosure:* the 205 low-tail count and the seed-reach coverage were seen in exploratory runs while the tool was being built, before this rule was written; the 50 % level is deliberately generous (a rescue that leaves the weakest binding cell unrescued gains nothing, because the threshold is set by the weakest unrescued positive) and was not tuned to that outcome.
+- Witness eligibility (PR review): the vector-table root is applied only to images carrying the cartridge header ("SEGA" at 0x100), so a CD module or relocatable blob contributes none; relocation offsets outside the image are ignored instead of being clamped into the last cell. Synthetic tests cover both. The aggregates changed by one cell (all-positive coverage 1,743, one witnessed data cell); no conclusion changed.
 - Compute: the whole diagnosis runs in about 6 CPU-seconds on stored scores (ceiling 4 CPU-hours).
 
 ## C1: results (50 development images, 14,186 non-seed positive cells; aggregates)
@@ -56,11 +56,11 @@ distinct byte statistic (few zero bytes, 0.07 against 0.17-0.22; 0.46 ASCII-rang
 | low-tail, SGDK `d12` (no seed universe) | 47 | 47 (100 %) | 0 | 0 | 47 | 0 | 0 | 47 |
 | image-weakest negative cells (decide each image's threshold) | 17 | **1 (5.9 %)** (`d12`) | 0 | 0 | 1 | 0 | 8 | 15 |
 | lineage-weakest cells | 11 | 4 | 1 | 1 | 4 | 0 | 7 | 9 |
-| all non-seed positives | 14,186 | 1,744 (12.3 %) | 1,326 | 1,227 | 1,321 | 0 | 13,122 | 14,126 |
-| verified-data cells, historical | 73,870 | 2 (0.003 %) | 0 | | 0 | 0 | 53.2 % | 59.5 % |
+| all non-seed positives | 14,186 | 1,743 (12.3 %) | 1,326 | 1,227 | 1,320 | 0 | 13,122 | 14,126 |
+| verified-data cells, historical | 73,870 | 1 (0.001 %) | 0 | | 0 | 0 | 53.2 % | 59.5 % |
 | verified-data cells, SGDK | 9,334 | 0 | 0 | | 0 | 0 | 18.5 % | 70.3 % |
 
-Rooted evidence is precise (it fires on 2 verified-data cells in 83,204) but sparse: seed roots reach 9 % of all non-seed positives (631 seed cells in 51,295 D01 cells; none in D10-D12) and vector roots 9 % as well. The vector-table root changes the SGDK picture and not the historical one: the 47 pure-code `d12` cells are all reached from the header vectors (SGDK code is generated
+Rooted evidence is precise (it fires on 1 verified-data cell in 83,204) but sparse: seed roots reach 9 % of all non-seed positives (631 seed cells in 51,295 D01 cells; none in D10-D12) and vector roots 9 % as well. The vector-table root changes the SGDK picture and not the historical one: the 47 pure-code `d12` cells are all reached from the header vectors (SGDK code is generated
 and reachable), while the 158 historical cells are witnessed in only 4 cases (2.5 %). The two heuristics that do cover the historical tail are non-specific: the long-decode-run heuristic fires on 60-70 % of data cells and on nearly every positive, the unrooted-target heuristic on 53 % of historical data cells, and arbitrary decodable bytes are not a trustworthy root. By category, an independent witness exists for 1 of 96 data-dominated fragments, 0 of 26 mixed,
 49 of 57 pure-code and 1 of 26 single-start cells. Not tested: jump-table / indirect-target recovery as a witness (120 of 205 cells begin after data); no such deterministic route exists in the evaluated tooling and building one is the speculative-disassembly infrastructure the brief excludes.
 
@@ -70,7 +70,7 @@ five witnesses is granted, i.e. the non-independent heuristics are treated as ro
 **Granularity (descriptive; nothing trained).** 147 of 205 cells still contain a mixed sub-cell at 64 bytes and 146 at 32 bytes; only 58 and 59 cells separate completely, 47 of them the trivially pure D12 cells. Of the 158 historical cells, 11 resolve at 64 bytes and 12 at 32. At 32 bytes 189 mixed sub-cells remain; finer units move the ambiguity to a new boundary
 (inline data adjacent to short code runs) instead of removing it. D01 cells are short fragments of 1-2 start-bearing sub-cells (mean 1.2 at 64 bytes), so a finer unit would retain fewer bytes only if a finer unit could be *decided*, which is the unsolved part.
 
-**Gate evaluation.** G1: 2.5 % of the seeded-image (historical) tail and 5.9 % of the image-weakest cells (24.9 % of all 205 only because the unseeded SGDK image is entirely vector-reachable) against 50 % - **fail**. G2: 0.003 % - pass. G3 for independent witnesses: `T0` moves 0 logits (and the shortfall grows) - **fail**.
+**Gate evaluation.** G1: 2.5 % of the seeded-image (historical) tail and 5.9 % of the image-weakest cells (24.9 % of all 205 only because the unseeded SGDK image is entirely vector-reachable) against 50 % - **fail**. G2: 0.001 % - pass. G3 for independent witnesses: `T0` moves 0 logits (and the shortfall grows) - **fail**.
 
 ## Decision at C1: `STRUCTURAL_EVIDENCE_INSUFFICIENT`
 

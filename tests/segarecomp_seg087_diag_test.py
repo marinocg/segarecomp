@@ -90,17 +90,24 @@ def test_contradictory_and_out_of_range_candidates_fail_closed():
     reach, target, ordn, chain = _structure(reach=[1], targets=[(1, 9999), (2, -5)])
     f = dg.witness_flags(64, 4, reach, target, ordn, chain, [])
     check(not any(f["W_REACH_TARGET"]) and not any(f["W_UNROOTED_TARGET"]), "out-of-range / negative targets ignored")
-    f = dg.witness_flags(64, 4, reach, target, ordn, chain, [(10 ** 9, 2)])
-    check(f["W_RELOC"] == [False, False, False, True], "an out-of-range relocation clamps to the last cell, never raises")
+    f = dg.witness_flags(64, 4, reach, target, ordn, chain, [(10 ** 9, 2), (-5, 1), (3 * 128 + 5, 1)])
+    check(f["W_RELOC"] == [False, False, False, True], f"out-of-range / negative relocations are ignored, never clamped into the last cell: {f['W_RELOC']}")
+    f = dg.witness_flags(64, 4, reach, target, ordn, chain, [(10 ** 9, 2), (-1, 1)])
+    check(not any(f["W_RELOC"]), "only invalid relocations: no evidence")
 
 
 def test_vector_roots_and_reach():
     rom = bytearray(512)
+    rom[0x100:0x104] = b"SEGA"
     rom[0:4] = (0x1000).to_bytes(4, "big")            # initial SP: not a root
     rom[4:8] = (0x100).to_bytes(4, "big")             # reset PC
     rom[8:12] = (0x101).to_bytes(4, "big")            # odd: rejected
     rom[12:16] = (0xFFFFFF).to_bytes(4, "big")        # outside the image: rejected
     check(dg.vector_roots(bytes(rom), 256) == [128], "even in-image PC entries only")
+    noheader = bytearray(rom)
+    noheader[0x100:0x104] = b"\0\0\0\0"
+    check(dg.vector_roots(bytes(noheader), 256) == [], "no cartridge header (e.g. a CD module or relocatable blob): no vector table is assumed")
+    check(dg.vector_roots(b"SEGA", 2) == [] and not dg.has_cartridge_header(b""), "short images fail closed")
     ordn = [True] * 256
     length = [1] * 256
     control = [0] * 256
@@ -119,6 +126,46 @@ def test_missing_seed_universe_has_no_rooted_witness():
     reach, target, ordn, chain = _structure(reach=[], targets=[(3, 70)])
     f = dg.witness_flags(64, 4, reach, target, ordn, chain, [])
     check(not any(f["W_REACH_ROOTED"]) and not any(f["W_REACH_TARGET"]) and f["W_UNROOTED_TARGET"][1], "without roots only heuristics fire")
+
+
+def test_guard_installed_before_any_sample_is_loaded():
+    import json, tempfile, types
+    import segarecomp_sample_guard as sg
+    import segarecomp_sample_roles as sr
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+        d = root / "eval"
+        d.mkdir()
+        (d / "meta.json").write_text(json.dumps({"id": "x/e", "sha256": "e" * 64, "lineage": "D99", "role": "evaluation-only", "role_class": "evaluation-only", "evaluation_only": True}))
+        reads = []
+
+        class Image:
+            def __init__(self, meta_dir):
+                reads.append(("classes", meta_dir))
+                (pathlib.Path(meta_dir) / "classes.bin").read_bytes()
+
+        tr = types.SimpleNamespace(Image=Image, registry=lambda ids=None: [d])
+        order = []
+        real_install = sg.install
+
+        def guard_install():
+            order.append("guard")
+            return real_install(tr, reserved=set())
+
+        def loader():
+            order.append("load")
+            tr.Image(d)
+            return [], []
+        try:
+            dg._load(guard_install=guard_install, loader=loader)
+            check(False, "evaluation-only sample must be refused")
+        except sr.RoleError:
+            pass
+        except Exception as e:                     # noqa: BLE001
+            check(False, f"expected RoleError before any class map is read, got {type(e).__name__}")
+        check(order[:2] == ["guard", "load"] and reads == [], f"guard first, nothing read before refusal: {order} {reads}")
+        for g in list(sg._ACTIVE):
+            g.uninstall()
 
 
 def test_lineage_minima_driver():

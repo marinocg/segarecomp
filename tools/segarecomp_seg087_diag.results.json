@@ -192,7 +192,7 @@
   ]
  },
  "cell_bytes": 128,
- "cpu_seconds": 6.2,
+ "cpu_seconds": 6.0,
  "data_boundary": "aggregates only; per-cell arrays stay in the ignored cache",
  "feature_character_medians": {
   "low_tail_D01": {
@@ -717,12 +717,12 @@
     "share": 0.925
    },
    "W_VECTOR_ROOTED": {
-    "count": 1321,
-    "share": 0.0931
+    "count": 1320,
+    "share": 0.093
    },
    "cells": 14186,
    "usable_independent": {
-    "count": 1744,
+    "count": 1743,
     "share": 0.1229
    }
   },
@@ -1116,12 +1116,12 @@
      "share": 0.5321
     },
     "W_VECTOR_ROOTED": {
-     "count": 1,
+     "count": 0,
      "share": 0.0
     },
     "cells": 73870,
     "usable_independent": {
-     "count": 2,
+     "count": 1,
      "share": 0.0
     }
    },
@@ -1179,13 +1179,13 @@
     "share": 0.9328
    },
    "W_VECTOR_ROOTED": {
-    "count": 1271,
-    "share": 0.0909
+    "count": 1270,
+    "share": 0.0908
    },
    "cells": 13981,
    "usable_independent": {
-    "count": 1693,
-    "share": 0.1211
+    "count": 1692,
+    "share": 0.121
    }
   }
  },
@@ -1193,7 +1193,7 @@
   "D01": {
    "cells": 51295,
    "nonseed_positive_with_independent_witness": [
-    381,
+    380,
     9052
    ],
    "seed_cells": 631
