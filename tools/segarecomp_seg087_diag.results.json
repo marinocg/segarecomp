@@ -1,0 +1,1215 @@
+{
+ "binding": {
+  "image_weakest_negative_cells": {
+   "count": 17,
+   "images": [
+    "d12",
+    "s1",
+    "s2",
+    "scd/DEMO11A.MMD",
+    "scd/DUMMY4.MMD",
+    "scd/R11A__.MMD",
+    "scd/R11B__.MMD",
+    "scd/R11C__.MMD",
+    "scd/R11D__.MMD",
+    "scd/R61A__.MMD",
+    "scd/SOSEL_.MMD",
+    "scd/SPMM__.MMD",
+    "scd/STSEL_.MMD",
+    "scd/TITLEM.MMD",
+    "sf1",
+    "sf2",
+    "sk"
+   ],
+   "usable_independent_witness": 0
+  },
+  "lineage_weakest_cells": [
+   {
+    "category": "SINGLE_START_FRAGMENT",
+    "data_bytes": 122,
+    "entry": "AFTER_DATA",
+    "group": "historical",
+    "kept": {
+     "B35": true,
+     "B45": true,
+     "B50": true
+    },
+    "lineage": "D01",
+    "logit": -10.3391,
+    "starts": 1,
+    "usable_independent_witness": false
+   },
+   {
+    "category": "DATA_DOMINATED_FRAGMENT",
+    "data_bytes": 88,
+    "entry": "AFTER_DATA",
+    "group": "historical",
+    "kept": {
+     "B35": true,
+     "B45": true,
+     "B50": true
+    },
+    "lineage": "D02",
+    "logit": 1.5833,
+    "starts": 12,
+    "usable_independent_witness": false
+   },
+   {
+    "category": "SINGLE_START_FRAGMENT",
+    "data_bytes": 126,
+    "entry": "AFTER_DATA",
+    "group": "historical",
+    "kept": {
+     "B35": true,
+     "B45": true,
+     "B50": true
+    },
+    "lineage": "D03",
+    "logit": -6.3739,
+    "starts": 1,
+    "usable_independent_witness": false
+   },
+   {
+    "category": "SINGLE_START_FRAGMENT",
+    "data_bytes": 126,
+    "entry": "AFTER_DATA",
+    "group": "historical",
+    "kept": {
+     "B35": true,
+     "B45": true,
+     "B50": true
+    },
+    "lineage": "D04",
+    "logit": 0.2512,
+    "starts": 1,
+    "usable_independent_witness": false
+   },
+   {
+    "category": "PURE_CODE",
+    "data_bytes": 0,
+    "entry": "FALLTHROUGH_FROM_CODE",
+    "group": "sgdk",
+    "kept": {
+     "B35": true,
+     "B45": true,
+     "B50": true
+    },
+    "lineage": "D05",
+    "logit": 8.9728,
+    "starts": 39,
+    "usable_independent_witness": true
+   },
+   {
+    "category": "PURE_CODE",
+    "data_bytes": 0,
+    "entry": "FALLTHROUGH_FROM_CODE",
+    "group": "sgdk",
+    "kept": {
+     "B35": true,
+     "B45": true,
+     "B50": true
+    },
+    "lineage": "D06",
+    "logit": 5.2715,
+    "starts": 32,
+    "usable_independent_witness": false
+   },
+   {
+    "category": "PURE_CODE",
+    "data_bytes": 0,
+    "entry": "FALLTHROUGH_FROM_CODE",
+    "group": "sgdk",
+    "kept": {
+     "B35": false,
+     "B45": false,
+     "B50": true
+    },
+    "lineage": "D07",
+    "logit": 1.2007,
+    "starts": 54,
+    "usable_independent_witness": false
+   },
+   {
+    "category": "AMBIGUOUS_UNKNOWN",
+    "data_bytes": 2,
+    "entry": "AFTER_TERMINATOR",
+    "group": "sgdk",
+    "kept": {
+     "B35": true,
+     "B45": true,
+     "B50": true
+    },
+    "lineage": "D09",
+    "logit": 10.3968,
+    "starts": 21,
+    "usable_independent_witness": false
+   },
+   {
+    "category": "PURE_CODE",
+    "data_bytes": 0,
+    "entry": "FALLTHROUGH_FROM_CODE",
+    "group": "sgdk",
+    "kept": {
+     "B35": true,
+     "B45": true,
+     "B50": true
+    },
+    "lineage": "D10",
+    "logit": 4.4522,
+    "starts": 35,
+    "usable_independent_witness": false
+   },
+   {
+    "category": "DATA_DOMINATED_FRAGMENT",
+    "data_bytes": 90,
+    "entry": "FALLTHROUGH_FROM_CODE",
+    "group": "sgdk",
+    "kept": {
+     "B35": true,
+     "B45": true,
+     "B50": true
+    },
+    "lineage": "D11",
+    "logit": 3.9501,
+    "starts": 7,
+    "usable_independent_witness": false
+   },
+   {
+    "category": "PURE_CODE",
+    "data_bytes": 0,
+    "entry": "FALLTHROUGH_FROM_CODE",
+    "group": "sgdk",
+    "kept": {
+     "B35": true,
+     "B45": true,
+     "B50": true
+    },
+    "lineage": "D12",
+    "logit": -7.0228,
+    "starts": 43,
+    "usable_independent_witness": false
+   }
+  ]
+ },
+ "cell_bytes": 128,
+ "cpu_seconds": 6.0,
+ "data_boundary": "aggregates only; per-cell arrays stay in the ignored cache",
+ "feature_character_medians": {
+  "low_tail_D01": {
+   "ascii_byte_share": 0.2031,
+   "cells": 132,
+   "decode_chain_max": 27.0,
+   "ordinary_word_share": 0.7031,
+   "zero_byte_share": 0.2656
+  },
+  "low_tail_D03": {
+   "ascii_byte_share": 0.2656,
+   "cells": 26,
+   "decode_chain_max": 20.0,
+   "ordinary_word_share": 0.8281,
+   "zero_byte_share": 0.1484
+  },
+  "low_tail_D12": {
+   "ascii_byte_share": 0.4609,
+   "cells": 47,
+   "decode_chain_max": 64.0,
+   "ordinary_word_share": 0.7656,
+   "zero_byte_share": 0.0703
+  },
+  "negatives_D01_D03_D12": {
+   "ascii_byte_share": 0.2891,
+   "cells": 68854,
+   "decode_chain_max": 9.0,
+   "ordinary_word_share": 0.6562,
+   "zero_byte_share": 0.0312
+  },
+  "other_positive_D01": {
+   "ascii_byte_share": 0.3828,
+   "cells": 8920,
+   "decode_chain_max": 64.0,
+   "ordinary_word_share": 0.8438,
+   "zero_byte_share": 0.2188
+  },
+  "other_positive_D03": {
+   "ascii_byte_share": 0.3906,
+   "cells": 2669,
+   "decode_chain_max": 64.0,
+   "ordinary_word_share": 0.8438,
+   "zero_byte_share": 0.1719
+  },
+  "other_positive_D12": {
+   "ascii_byte_share": 0.3672,
+   "cells": 265,
+   "decode_chain_max": 64.0,
+   "ordinary_word_share": 0.8438,
+   "zero_byte_share": 0.1719
+  }
+ },
+ "granularity": {
+  "caveat": "descriptive truth-based composition only; no 64- or 32-byte model was trained or scored. `resolved` means every sub-cell is pure code or pure data.",
+  "low_tail_32": {
+   "cells": 205,
+   "mixed_subcells_total": 189,
+   "pure_code_subcells_total": 285,
+   "pure_data_subcells_total": 346,
+   "resolved_without_mixed_subcell": 59,
+   "start_bearing_subcells_mean": 2.278,
+   "subcells_per_cell": 4,
+   "with_mixed_subcell": 146
+  },
+  "low_tail_32_by_lineage": {
+   "D01": {
+    "cells": 132,
+    "mixed_subcells_total": 147,
+    "pure_code_subcells_total": 79,
+    "pure_data_subcells_total": 302,
+    "resolved_without_mixed_subcell": 8,
+    "start_bearing_subcells_mean": 1.6591,
+    "subcells_per_cell": 4,
+    "with_mixed_subcell": 124
+   },
+   "D03": {
+    "cells": 26,
+    "mixed_subcells_total": 42,
+    "pure_code_subcells_total": 18,
+    "pure_data_subcells_total": 44,
+    "resolved_without_mixed_subcell": 4,
+    "start_bearing_subcells_mean": 2.3077,
+    "subcells_per_cell": 4,
+    "with_mixed_subcell": 22
+   },
+   "D12": {
+    "cells": 47,
+    "mixed_subcells_total": 0,
+    "pure_code_subcells_total": 188,
+    "pure_data_subcells_total": 0,
+    "resolved_without_mixed_subcell": 47,
+    "start_bearing_subcells_mean": 4.0,
+    "subcells_per_cell": 4,
+    "with_mixed_subcell": 0
+   }
+  },
+  "low_tail_64": {
+   "cells": 205,
+   "mixed_subcells_total": 162,
+   "pure_code_subcells_total": 126,
+   "pure_data_subcells_total": 122,
+   "resolved_without_mixed_subcell": 58,
+   "start_bearing_subcells_mean": 1.3854,
+   "subcells_per_cell": 2,
+   "with_mixed_subcell": 147
+  },
+  "low_tail_64_by_lineage": {
+   "D01": {
+    "cells": 132,
+    "mixed_subcells_total": 134,
+    "pure_code_subcells_total": 24,
+    "pure_data_subcells_total": 106,
+    "resolved_without_mixed_subcell": 7,
+    "start_bearing_subcells_mean": 1.1667,
+    "subcells_per_cell": 2,
+    "with_mixed_subcell": 125
+   },
+   "D03": {
+    "cells": 26,
+    "mixed_subcells_total": 28,
+    "pure_code_subcells_total": 8,
+    "pure_data_subcells_total": 16,
+    "resolved_without_mixed_subcell": 4,
+    "start_bearing_subcells_mean": 1.3846,
+    "subcells_per_cell": 2,
+    "with_mixed_subcell": 22
+   },
+   "D12": {
+    "cells": 47,
+    "mixed_subcells_total": 0,
+    "pure_code_subcells_total": 94,
+    "pure_data_subcells_total": 0,
+    "resolved_without_mixed_subcell": 47,
+    "start_bearing_subcells_mean": 2.0,
+    "subcells_per_cell": 2,
+    "with_mixed_subcell": 0
+   }
+  }
+ },
+ "images": 50,
+ "label_audit_definition": "a direct edge from a labelled instruction start that lands on a labelled continuation or data byte contradicts the reconstruction labels (ADR 0191)",
+ "m4_dense_descriptive": {
+  "images_with_m4": 50,
+  "low_tail_cells_covered": 205,
+  "model_a_top35": 204,
+  "note": "M4-Dense (SEG-072 stored held-out word logits, 3 seeds averaged) is a different model; reported only to see whether a finer unit changes the ranking of these cells",
+  "top35_at_128": 203,
+  "top35_at_64_either_half": 203
+ },
+ "population": {
+  "by_group": {
+   "historical": {
+    "low_tail": 158,
+    "nonseed_positive": 12436
+   },
+   "sgdk": {
+    "low_tail": 47,
+    "nonseed_positive": 1750
+   }
+  },
+  "by_lineage": {
+   "D01": 132,
+   "D02": 0,
+   "D03": 26,
+   "D04": 0,
+   "D05": 0,
+   "D06": 0,
+   "D07": 0,
+   "D09": 0,
+   "D10": 0,
+   "D11": 0,
+   "D12": 47
+  },
+  "low_tail_in_images_without_seed_universe": 47,
+  "low_tail_negative_logit_cells": 205,
+  "nonseed_positive_cells": 14186,
+  "seed_positive_cells": 838,
+  "seed_positive_cells_with_negative_logit": 4
+ },
+ "rank_in_image_of_low_tail": {
+  "0.0": 0.0938,
+  "0.25": 0.166,
+  "0.5": 0.2019,
+  "0.75": 0.2188,
+  "1.0": 0.367
+ },
+ "retention_of_low_tail": {
+  "B35": {
+   "by_group": {
+    "historical": [
+     157,
+     158
+    ],
+    "sgdk": [
+     47,
+     47
+    ]
+   },
+   "by_lineage": {
+    "D01": [
+     131,
+     132
+    ],
+    "D03": [
+     26,
+     26
+    ],
+    "D12": [
+     47,
+     47
+    ]
+   },
+   "of": 205,
+   "retained": 204
+  },
+  "B45": {
+   "by_group": {
+    "historical": [
+     158,
+     158
+    ],
+    "sgdk": [
+     47,
+     47
+    ]
+   },
+   "by_lineage": {
+    "D01": [
+     132,
+     132
+    ],
+    "D03": [
+     26,
+     26
+    ],
+    "D12": [
+     47,
+     47
+    ]
+   },
+   "of": 205,
+   "retained": 205
+  },
+  "B50": {
+   "by_group": {
+    "historical": [
+     158,
+     158
+    ],
+    "sgdk": [
+     47,
+     47
+    ]
+   },
+   "by_lineage": {
+    "D01": [
+     132,
+     132
+    ],
+    "D03": [
+     26,
+     26
+    ],
+    "D12": [
+     47,
+     47
+    ]
+   },
+   "of": 205,
+   "retained": 205
+  }
+ },
+ "schema": "segarecomp.seg087.diag.v1",
+ "stability_over_fits": {
+  "always_below_zero": 128,
+  "below_zero_in_at_least_half": 195,
+  "cells": 205,
+  "fits_per_cell": 11,
+  "never_below_zero_in_inner_fits": 0,
+  "note": "fits = the out-of-fold model plus the ten SEG-085 inner refits that do not train on the cell's lineage; the in-sample final model is not used (optimistic)"
+ },
+ "taxonomy": {
+  "low_tail": {
+   "AMBIGUOUS_UNKNOWN": 0,
+   "DATA_DOMINATED_FRAGMENT": 96,
+   "MIXED_CODE_DATA": 26,
+   "PURE_CODE": 57,
+   "SINGLE_START_FRAGMENT": 26,
+   "cells": 205,
+   "entries": {
+    "AFTER_DATA": 120,
+    "AFTER_TERMINATOR": 2,
+    "AFTER_UNKNOWN": 0,
+    "FALLTHROUGH_FROM_CODE": 83,
+    "IMAGE_START": 0,
+    "NO_START": 0
+   },
+   "label_audit_flagged": 0
+  },
+  "low_tail_by_image_family": {
+   "s1": {
+    "AMBIGUOUS_UNKNOWN": 0,
+    "DATA_DOMINATED_FRAGMENT": 13,
+    "MIXED_CODE_DATA": 0,
+    "PURE_CODE": 0,
+    "SINGLE_START_FRAGMENT": 0,
+    "cells": 13,
+    "entries": {
+     "AFTER_DATA": 12,
+     "AFTER_TERMINATOR": 0,
+     "AFTER_UNKNOWN": 0,
+     "FALLTHROUGH_FROM_CODE": 1,
+     "IMAGE_START": 0,
+     "NO_START": 0
+    },
+    "label_audit_flagged": 0
+   },
+   "s2": {
+    "AMBIGUOUS_UNKNOWN": 0,
+    "DATA_DOMINATED_FRAGMENT": 21,
+    "MIXED_CODE_DATA": 5,
+    "PURE_CODE": 1,
+    "SINGLE_START_FRAGMENT": 3,
+    "cells": 30,
+    "entries": {
+     "AFTER_DATA": 23,
+     "AFTER_TERMINATOR": 0,
+     "AFTER_UNKNOWN": 0,
+     "FALLTHROUGH_FROM_CODE": 7,
+     "IMAGE_START": 0,
+     "NO_START": 0
+    },
+    "label_audit_flagged": 0
+   },
+   "scd/": {
+    "AMBIGUOUS_UNKNOWN": 0,
+    "DATA_DOMINATED_FRAGMENT": 36,
+    "MIXED_CODE_DATA": 12,
+    "PURE_CODE": 5,
+    "SINGLE_START_FRAGMENT": 7,
+    "cells": 60,
+    "entries": {
+     "AFTER_DATA": 40,
+     "AFTER_TERMINATOR": 0,
+     "AFTER_UNKNOWN": 0,
+     "FALLTHROUGH_FROM_CODE": 20,
+     "IMAGE_START": 0,
+     "NO_START": 0
+    },
+    "label_audit_flagged": 0
+   },
+   "sk": {
+    "AMBIGUOUS_UNKNOWN": 0,
+    "DATA_DOMINATED_FRAGMENT": 14,
+    "MIXED_CODE_DATA": 3,
+    "PURE_CODE": 0,
+    "SINGLE_START_FRAGMENT": 12,
+    "cells": 29,
+    "entries": {
+     "AFTER_DATA": 24,
+     "AFTER_TERMINATOR": 0,
+     "AFTER_UNKNOWN": 0,
+     "FALLTHROUGH_FROM_CODE": 5,
+     "IMAGE_START": 0,
+     "NO_START": 0
+    },
+    "label_audit_flagged": 0
+   }
+  },
+  "low_tail_by_lineage": {
+   "D01": {
+    "AMBIGUOUS_UNKNOWN": 0,
+    "DATA_DOMINATED_FRAGMENT": 84,
+    "MIXED_CODE_DATA": 20,
+    "PURE_CODE": 6,
+    "SINGLE_START_FRAGMENT": 22,
+    "cells": 132,
+    "entries": {
+     "AFTER_DATA": 99,
+     "AFTER_TERMINATOR": 0,
+     "AFTER_UNKNOWN": 0,
+     "FALLTHROUGH_FROM_CODE": 33,
+     "IMAGE_START": 0,
+     "NO_START": 0
+    },
+    "label_audit_flagged": 0
+   },
+   "D03": {
+    "AMBIGUOUS_UNKNOWN": 0,
+    "DATA_DOMINATED_FRAGMENT": 12,
+    "MIXED_CODE_DATA": 6,
+    "PURE_CODE": 4,
+    "SINGLE_START_FRAGMENT": 4,
+    "cells": 26,
+    "entries": {
+     "AFTER_DATA": 21,
+     "AFTER_TERMINATOR": 2,
+     "AFTER_UNKNOWN": 0,
+     "FALLTHROUGH_FROM_CODE": 3,
+     "IMAGE_START": 0,
+     "NO_START": 0
+    },
+    "label_audit_flagged": 0
+   },
+   "D12": {
+    "AMBIGUOUS_UNKNOWN": 0,
+    "DATA_DOMINATED_FRAGMENT": 0,
+    "MIXED_CODE_DATA": 0,
+    "PURE_CODE": 47,
+    "SINGLE_START_FRAGMENT": 0,
+    "cells": 47,
+    "entries": {
+     "AFTER_DATA": 0,
+     "AFTER_TERMINATOR": 0,
+     "AFTER_UNKNOWN": 0,
+     "FALLTHROUGH_FROM_CODE": 47,
+     "IMAGE_START": 0,
+     "NO_START": 0
+    },
+    "label_audit_flagged": 0
+   }
+  },
+  "other_nonseed_positive": {
+   "AMBIGUOUS_UNKNOWN": 31,
+   "DATA_DOMINATED_FRAGMENT": 924,
+   "MIXED_CODE_DATA": 3597,
+   "PURE_CODE": 9400,
+   "SINGLE_START_FRAGMENT": 29,
+   "cells": 13981,
+   "entries": {
+    "AFTER_DATA": 1374,
+    "AFTER_TERMINATOR": 849,
+    "AFTER_UNKNOWN": 12,
+    "FALLTHROUGH_FROM_CODE": 11746,
+    "IMAGE_START": 0,
+    "NO_START": 0
+   },
+   "label_audit_flagged": 12
+  }
+ },
+ "threshold_drivers": {
+  "decomposition": {
+   "shortfall": 3.3163,
+   "shortfall_calibration_minimum_lineage": "D12",
+   "shortfall_held_out": "D01",
+   "t0": -10.3391,
+   "t0_lineage": "D01"
+  },
+  "lineage_weakest_positive": {
+   "D01": -10.3391,
+   "D02": 1.5833,
+   "D03": -6.3739,
+   "D04": 0.2512,
+   "D05": 8.9728,
+   "D06": 5.2715,
+   "D07": 1.2007,
+   "D09": 10.3968,
+   "D10": 4.4522,
+   "D11": 3.9501,
+   "D12": -7.0228
+  },
+  "seg085_dyn_score_T_final": -13.6554
+ },
+ "threshold_effect_of_witness_removal": {
+  "baseline": {
+   "shortfall": 3.3163,
+   "shortfall_calibration_minimum_lineage": "D12",
+   "shortfall_held_out": "D01",
+   "t0": -10.3391,
+   "t0_lineage": "D01"
+  },
+  "note": "removing a witnessed cell from the lineage minimum is what a perfect rescue of those cells would do to the calibration; the threshold is set by the weakest UNRESCUED positive",
+  "remove_all_five_witnesses_NON_INDEPENDENT_UPPER_BOUND": {
+   "shortfall": 0.1973,
+   "shortfall_calibration_minimum_lineage": "D03",
+   "shortfall_held_out": "D01",
+   "t0": -6.1361,
+   "t0_lineage": "D01"
+  },
+  "remove_independent_witnessed": {
+   "shortfall": 3.3163,
+   "shortfall_calibration_minimum_lineage": "D12",
+   "shortfall_held_out": "D01",
+   "t0": -10.3391,
+   "t0_lineage": "D01"
+  },
+  "remove_unrooted_target_witnessed_NON_INDEPENDENT_UPPER_BOUND": {
+   "shortfall": 2.0563,
+   "shortfall_calibration_minimum_lineage": "D12",
+   "shortfall_held_out": "D01",
+   "t0": -9.0792,
+   "t0_lineage": "D01"
+  }
+ },
+ "witness_coverage": {
+  "all_nonseed_positive": {
+   "W_DECODE_CHAIN": {
+    "count": 14126,
+    "share": 0.9958
+   },
+   "W_REACH_ROOTED": {
+    "count": 1326,
+    "share": 0.0935
+   },
+   "W_REACH_TARGET": {
+    "count": 1227,
+    "share": 0.0865
+   },
+   "W_RELOC": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_UNROOTED_TARGET": {
+    "count": 13122,
+    "share": 0.925
+   },
+   "cells": 14186,
+   "usable_independent": {
+    "count": 1327,
+    "share": 0.0935
+   }
+  },
+  "image_weakest_negative": {
+   "W_DECODE_CHAIN": {
+    "count": 15,
+    "share": 0.8824
+   },
+   "W_REACH_ROOTED": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_REACH_TARGET": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_RELOC": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_UNROOTED_TARGET": {
+    "count": 8,
+    "share": 0.4706
+   },
+   "cells": 17,
+   "usable_independent": {
+    "count": 0,
+    "share": 0.0
+   }
+  },
+  "image_weakest_negative_seeded_only": {
+   "W_DECODE_CHAIN": {
+    "count": 14,
+    "share": 0.875
+   },
+   "W_REACH_ROOTED": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_REACH_TARGET": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_RELOC": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_UNROOTED_TARGET": {
+    "count": 8,
+    "share": 0.5
+   },
+   "cells": 16,
+   "usable_independent": {
+    "count": 0,
+    "share": 0.0
+   }
+  },
+  "lineage_weakest": {
+   "W_DECODE_CHAIN": {
+    "count": 9,
+    "share": 0.8182
+   },
+   "W_REACH_ROOTED": {
+    "count": 1,
+    "share": 0.0909
+   },
+   "W_REACH_TARGET": {
+    "count": 1,
+    "share": 0.0909
+   },
+   "W_RELOC": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_UNROOTED_TARGET": {
+    "count": 7,
+    "share": 0.6364
+   },
+   "cells": 11,
+   "usable_independent": {
+    "count": 1,
+    "share": 0.0909
+   }
+  },
+  "low_tail": {
+   "W_DECODE_CHAIN": {
+    "count": 188,
+    "share": 0.9171
+   },
+   "W_REACH_ROOTED": {
+    "count": 4,
+    "share": 0.0195
+   },
+   "W_REACH_TARGET": {
+    "count": 3,
+    "share": 0.0146
+   },
+   "W_RELOC": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_UNROOTED_TARGET": {
+    "count": 80,
+    "share": 0.3902
+   },
+   "cells": 205,
+   "usable_independent": {
+    "count": 4,
+    "share": 0.0195
+   }
+  },
+  "low_tail_by_group": {
+   "historical": {
+    "W_DECODE_CHAIN": {
+     "count": 141,
+     "share": 0.8924
+    },
+    "W_REACH_ROOTED": {
+     "count": 4,
+     "share": 0.0253
+    },
+    "W_REACH_TARGET": {
+     "count": 3,
+     "share": 0.019
+    },
+    "W_RELOC": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_UNROOTED_TARGET": {
+     "count": 80,
+     "share": 0.5063
+    },
+    "cells": 158,
+    "usable_independent": {
+     "count": 4,
+     "share": 0.0253
+    }
+   },
+   "sgdk": {
+    "W_DECODE_CHAIN": {
+     "count": 47,
+     "share": 1.0
+    },
+    "W_REACH_ROOTED": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_REACH_TARGET": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_RELOC": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_UNROOTED_TARGET": {
+     "count": 0,
+     "share": 0.0
+    },
+    "cells": 47,
+    "usable_independent": {
+     "count": 0,
+     "share": 0.0
+    }
+   }
+  },
+  "low_tail_by_lineage": {
+   "D01": {
+    "W_DECODE_CHAIN": {
+     "count": 119,
+     "share": 0.9015
+    },
+    "W_REACH_ROOTED": {
+     "count": 1,
+     "share": 0.0076
+    },
+    "W_REACH_TARGET": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_RELOC": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_UNROOTED_TARGET": {
+     "count": 65,
+     "share": 0.4924
+    },
+    "cells": 132,
+    "usable_independent": {
+     "count": 1,
+     "share": 0.0076
+    }
+   },
+   "D03": {
+    "W_DECODE_CHAIN": {
+     "count": 22,
+     "share": 0.8462
+    },
+    "W_REACH_ROOTED": {
+     "count": 3,
+     "share": 0.1154
+    },
+    "W_REACH_TARGET": {
+     "count": 3,
+     "share": 0.1154
+    },
+    "W_RELOC": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_UNROOTED_TARGET": {
+     "count": 15,
+     "share": 0.5769
+    },
+    "cells": 26,
+    "usable_independent": {
+     "count": 3,
+     "share": 0.1154
+    }
+   },
+   "D12": {
+    "W_DECODE_CHAIN": {
+     "count": 47,
+     "share": 1.0
+    },
+    "W_REACH_ROOTED": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_REACH_TARGET": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_RELOC": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_UNROOTED_TARGET": {
+     "count": 0,
+     "share": 0.0
+    },
+    "cells": 47,
+    "usable_independent": {
+     "count": 0,
+     "share": 0.0
+    }
+   }
+  },
+  "low_tail_categories_with_usable_witness": {
+   "AMBIGUOUS_UNKNOWN": [
+    0,
+    0
+   ],
+   "DATA_DOMINATED_FRAGMENT": [
+    1,
+    96
+   ],
+   "MIXED_CODE_DATA": [
+    0,
+    26
+   ],
+   "PURE_CODE": [
+    2,
+    57
+   ],
+   "SINGLE_START_FRAGMENT": [
+    1,
+    26
+   ]
+  },
+  "low_tail_seeded_images_only": {
+   "W_DECODE_CHAIN": {
+    "count": 141,
+    "share": 0.8924
+   },
+   "W_REACH_ROOTED": {
+    "count": 4,
+    "share": 0.0253
+   },
+   "W_REACH_TARGET": {
+    "count": 3,
+    "share": 0.019
+   },
+   "W_RELOC": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_UNROOTED_TARGET": {
+    "count": 80,
+    "share": 0.5063
+   },
+   "cells": 158,
+   "usable_independent": {
+    "count": 4,
+    "share": 0.0253
+   }
+  },
+  "low_tail_unseeded_images_only": {
+   "W_DECODE_CHAIN": {
+    "count": 47,
+    "share": 1.0
+   },
+   "W_REACH_ROOTED": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_REACH_TARGET": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_RELOC": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_UNROOTED_TARGET": {
+    "count": 0,
+    "share": 0.0
+   },
+   "cells": 47,
+   "usable_independent": {
+    "count": 0,
+    "share": 0.0
+   }
+  },
+  "negatives_false_witness": {
+   "historical": {
+    "W_DECODE_CHAIN": {
+     "count": 43953,
+     "share": 0.595
+    },
+    "W_REACH_ROOTED": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_REACH_TARGET": {
+     "count": 1,
+     "share": 0.0
+    },
+    "W_RELOC": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_UNROOTED_TARGET": {
+     "count": 39307,
+     "share": 0.5321
+    },
+    "cells": 73870,
+    "usable_independent": {
+     "count": 1,
+     "share": 0.0
+    }
+   },
+   "sgdk": {
+    "W_DECODE_CHAIN": {
+     "count": 6561,
+     "share": 0.7029
+    },
+    "W_REACH_ROOTED": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_REACH_TARGET": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_RELOC": {
+     "count": 0,
+     "share": 0.0
+    },
+    "W_UNROOTED_TARGET": {
+     "count": 1730,
+     "share": 0.1853
+    },
+    "cells": 9334,
+    "usable_independent": {
+     "count": 0,
+     "share": 0.0
+    }
+   }
+  },
+  "other_nonseed_positive": {
+   "W_DECODE_CHAIN": {
+    "count": 13938,
+    "share": 0.9969
+   },
+   "W_REACH_ROOTED": {
+    "count": 1322,
+    "share": 0.0946
+   },
+   "W_REACH_TARGET": {
+    "count": 1224,
+    "share": 0.0875
+   },
+   "W_RELOC": {
+    "count": 0,
+    "share": 0.0
+   },
+   "W_UNROOTED_TARGET": {
+    "count": 13042,
+    "share": 0.9328
+   },
+   "cells": 13981,
+   "usable_independent": {
+    "count": 1323,
+    "share": 0.0946
+   }
+  }
+ },
+ "witness_density_by_lineage": {
+  "D01": {
+   "cells": 51295,
+   "nonseed_positive_with_independent_witness": [
+    380,
+    9052
+   ],
+   "seed_cells": 631
+  },
+  "D02": {
+   "cells": 1024,
+   "nonseed_positive_with_independent_witness": [
+    0,
+    169
+   ],
+   "seed_cells": 11
+  },
+  "D03": {
+   "cells": 28672,
+   "nonseed_positive_with_independent_witness": [
+    511,
+    2695
+   ],
+   "seed_cells": 133
+  },
+  "D04": {
+   "cells": 6144,
+   "nonseed_positive_with_independent_witness": [
+    137,
+    520
+   ],
+   "seed_cells": 45
+  },
+  "D05": {
+   "cells": 1024,
+   "nonseed_positive_with_independent_witness": [
+    83,
+    83
+   ],
+   "seed_cells": 27
+  },
+  "D06": {
+   "cells": 3072,
+   "nonseed_positive_with_independent_witness": [
+    127,
+    211
+   ],
+   "seed_cells": 23
+  },
+  "D07": {
+   "cells": 2048,
+   "nonseed_positive_with_independent_witness": [
+    71,
+    661
+   ],
+   "seed_cells": 28
+  },
+  "D09": {
+   "cells": 1024,
+   "nonseed_positive_with_independent_witness": [
+    18,
+    21
+   ],
+   "seed_cells": 27
+  },
+  "D10": {
+   "cells": 3072,
+   "nonseed_positive_with_independent_witness": [
+    0,
+    283
+   ],
+   "seed_cells": 0
+  },
+  "D11": {
+   "cells": 2048,
+   "nonseed_positive_with_independent_witness": [
+    0,
+    179
+   ],
+   "seed_cells": 0
+  },
+  "D12": {
+   "cells": 2048,
+   "nonseed_positive_with_independent_witness": [
+    0,
+    312
+   ],
+   "seed_cells": 0
+  }
+ }
+}
