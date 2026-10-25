@@ -175,3 +175,9 @@ set_property(TEST segarecomp_seg077_test PROPERTY SKIP_RETURN_CODE 77)
 # error cells, marginal mixed / hard-negative credit and the root-cause taxonomy, including the v1 denominator bias (synthetic data).
 add_test(NAME segarecomp_genesis_static_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_genesis_static_test.py)
 set_property(TEST segarecomp_genesis_static_test APPEND PROPERTY LABELS full fast)
+# SEG-086 (research tooling): sample-role enforcement (evaluation-only training rejection, frozen-manifest membership, reserved identities first); synthetic data only.
+add_test(NAME segarecomp_seg086_roles_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg086_roles_test.py)
+set_property(TEST segarecomp_seg086_roles_test APPEND PROPERTY LABELS full fast)
+# SEG-086-T001..T004 (research tooling): score-distribution diagnostics, normalised dynamic selector, calibration and decision rules; synthetic data only.
+add_test(NAME segarecomp_seg086_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg086_test.py)
+set_property(TEST segarecomp_seg086_test APPEND PROPERTY LABELS full fast)
