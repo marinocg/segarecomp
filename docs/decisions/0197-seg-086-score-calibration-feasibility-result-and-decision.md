@@ -40,3 +40,8 @@ The cause is the same mechanism as SEG-085's `DYN_SCORE`, now in the normalised 
 - An exploratory nested run preceded the freeze (ADR 0196) and exposed that the shortfall margin leads to universal fallback; the margin rule is the SEG-085 precedent the brief said to reuse and was not changed afterwards. The margin-free rule is reported as a diagnostic only and could not determine the decision.
 - Compute: about 3 CPU-minutes of 8 CPU-hours (one final-model refit 60 s, two spot refits 85 s, the rest reuses stored scores); economics 0 of 12 CPU-hours.
 - Not a completeness guarantee: a zero-miss result means zero missed *verified* starts on the evaluated data. Boundaries remain the reconstruction authors'.
+
+## Review notes (adversarial review, READY_WITH_FIXES; wording fixed)
+
+- `isolation_ok` in the final command is asserted, backed by the RAW-control reproduction gate and the two spot refits recorded in the plan, not recomputed there. `misses_disclosed` in the results JSON is keyed by image and shows only one variant; the per-variant misses are in the report JSON and diagnostic tables. `segarecomp_seg086_report.py` and `segarecomp_seg086_h01.py` are post-freeze, non-fitting analysis code (the report reproduces the stored results byte-for-byte). The cap-boundary (exactly 0.60) case is not covered by a dedicated test.
+- The decision cannot depend on the normaliser choice: RAW and N2 fall back on all 40 domain images and the disqualified N1 still fails gate S.
