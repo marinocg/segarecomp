@@ -175,3 +175,6 @@ set_property(TEST segarecomp_seg077_test PROPERTY SKIP_RETURN_CODE 77)
 # error cells, marginal mixed / hard-negative credit and the root-cause taxonomy, including the v1 denominator bias (synthetic data).
 add_test(NAME segarecomp_genesis_static_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_genesis_static_test.py)
 set_property(TEST segarecomp_genesis_static_test APPEND PROPERTY LABELS full fast)
+# SEG-083 CI flake regression: ZIP member timestamps come from the wall clock; the test launcher pins the clock seen by zipfile (deterministic, no sleeping).
+add_test(NAME segarecomp_zip_clock_pin_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_zip_clock_pin_test.py)
+set_property(TEST segarecomp_zip_clock_pin_test APPEND PROPERTY LABELS full fast)
