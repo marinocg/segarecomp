@@ -78,8 +78,12 @@
    "reason": "development lineages D01-D04"
   }
  ],
+ "exposure_disclosures": [
+  "Phantasy Star IV appears in the SEG-050 startup inventory (ADR 0110): an execution exposure, not a label exposure; no model consumed its labels",
+  "the public Ristar and Sonic 3D Blast projects (SEG-077 reserved / IDA-only) were cloned to inspect their form; no ROM analysis, no labels, deleted"
+ ],
  "preregistered_minimum": 3,
  "qualified_independent_historical_lineages": 1,
  "schema": "segarecomp.seg085.cohort.manifest.v1",
- "status": "frozen before any policy was scored on it"
+ "status": "class map and membership fixed before any policy was scored (the DYN_SCORE plan was frozen first); this record was committed after the single cohort image was scored under that frozen plan - disclosed, no outcome depends on the order"
 }

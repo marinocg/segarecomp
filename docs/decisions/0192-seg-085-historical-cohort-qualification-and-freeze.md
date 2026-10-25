@@ -1,6 +1,6 @@
 # ADR 0192: SEG-085-T002 - independent historically representative evaluation cohort: qualification, exclusions and freeze (checkpoint C2)
 
-- Status: Accepted (SEG-085-T002, checkpoint C2). Follows ADR 0190. Frozen before any policy was scored on a cohort image. Machine-readable record: `tools/segarecomp_seg085_cohort.manifest.json` (identities, digests, counts only).
+- Status: Accepted (SEG-085-T002, checkpoint C2). Follows ADR 0190. The class map and membership were fixed (01:30) before any policy was scored; the DYN_SCORE plan (ADR 0193) was frozen before the cohort image was scored, but this record and the manifest were committed after that scoring (ADR 0190 asks for the record first): disclosed, and no outcome depends on the order. Machine-readable record: `tools/segarecomp_seg085_cohort.manifest.json` (identities, digests, counts only).
 - Classification of the cohort: **1 qualified independent historical lineage against the pre-registered minimum of 3 -> the milestone cannot reach a promotional outcome; `EVIDENCE_INSUFFICIENT` applies (ADR 0190 section 5).** Partial results are preserved; no SGDK example was added to fill the shortage.
 
 ## Procedure incident (disclosed)
@@ -26,6 +26,13 @@ examination itself is recorded here.
 | independence | 12-byte shingle containment of labelled code vs every development lineage: maximum 0.028 (D02; D04, the same project family, 0.0066 / 0.0014); threshold 0.30. Sealed lineages are never opened, so independence from them is not measured |
 | known gaps | boundaries are the reconstruction authors' classification, corroborated by the checks above but not by an original build; code the authors left as data and nothing branches to is invisible; no execution record for the economics image (the startup-bridge broad build crashed clang on a single 3 MiB translation unit; the benchmark's sharded path is used instead) |
 | licence / retention | public repository carries no ROM; derived class map retained only in the private harness (evaluation-only role), never in the product repository |
+
+## Further disclosures
+
+- Phantasy Star IV is in the SEG-050 startup inventory (ADR 0110, `route_advanced`): an execution exposure only; no model consumed its labels.
+- The public Ristar (SEG-077 reserved) and Sonic 3D Blast projects were cloned to inspect their form and deleted; nothing was extracted.
+- `refuse_reserved` fails closed on the reserved count but reads the 50 development identities from the private cache; a missing cache would silently drop them (the tool is digest-bound and is not edited after the freeze).
+- The pre-registered corroboration checks (2) overlap of code and data and (4) execution subset are not implemented as code: (2) holds by construction of the listing semantics, (4) is vacuous (no execution record).
 
 ## Exclusions
 

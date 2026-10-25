@@ -2,6 +2,16 @@
  "groups": {
   "development_historical": {
    "images": 7,
+   "images_in_group": 7,
+   "images_with_missed_starts_after_closure": [
+    "s2"
+   ],
+   "pooled_excluding_those_images": {
+    "ADAPT": 1519.7,
+    "B50": 2261.2,
+    "BROAD": 4212.4,
+    "INC": 1816.5
+   },
    "pooled_total_cpu": {
     "ADAPT": 1670.2,
     "B50": 2528.1,
@@ -19,6 +29,9 @@
   },
   "development_sgdk": {
    "images": 4,
+   "images_in_group": 4,
+   "images_with_missed_starts_after_closure": [],
+   "pooled_excluding_those_images": {},
    "pooled_total_cpu": {
     "ADAPT": 250.0,
     "B50": 243.2,
@@ -36,6 +49,9 @@
   },
   "independent_historical": {
    "images": 1,
+   "images_in_group": 1,
+   "images_with_missed_starts_after_closure": [],
+   "pooled_excluding_those_images": {},
    "pooled_total_cpu": {
     "ADAPT": 790.0,
     "B50": 1267.5,

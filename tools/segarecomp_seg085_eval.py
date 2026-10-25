@@ -246,7 +246,12 @@ def cmd_econ_table(a) -> int:
             out["images"][iid] = row
             n += 1
         if n:
-            out["groups"][g] = {"images": n, "pooled_total_cpu": {k: round(v, 1) for k, v in agg.items() if v},
+            excl = [i for i in ids if i in out["images"] and any((v.get("c_outside_k") or 0) > 0 for v in out["images"][i]["policies"].values())]
+            ex = {}
+            if excl:
+                ex = {k: round(sum(out["images"][i]["BROAD"]["total_cpu"] if k == "BROAD" else (out["images"][i]["INC"]["total_cpu"] if k == "INC" else out["images"][i]["policies"][k]["total_cpu"])
+                                   for i in ids if i in out["images"] and i not in excl), 1) for k in ("ADAPT", "B50", "BROAD", "INC")}
+            out["groups"][g] = {"images_with_missed_starts_after_closure": excl, "pooled_excluding_those_images": ex, "images_in_group": len(ids),"images": n, "pooled_total_cpu": {k: round(v, 1) for k, v in agg.items() if v},
                                 "ratio_to_B50": {k: round(v / agg["B50"], 4) for k, v in agg.items() if v and agg["B50"]}}
     pathlib.Path(a.out).write_text(json.dumps(out, indent=1, sort_keys=True))
     print(json.dumps(out["groups"], sort_keys=True))
