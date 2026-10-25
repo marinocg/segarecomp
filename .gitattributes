@@ -56,3 +56,4 @@ tools/segarecomp_ml_v3.corpus_manifest.json text eol=lf
 tools/segarecomp_seg084_*.py text eol=lf
 tools/segarecomp_seg084_*.json text eol=lf
 tests/segarecomp_seg084_test.py text eol=lf
+tests/segarecomp_seg085_test.py text eol=lf

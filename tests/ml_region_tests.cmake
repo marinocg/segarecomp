@@ -163,6 +163,9 @@ set_property(TEST segarecomp_genesis_tasbatch5_test APPEND PROPERTY LABELS full 
 # weighted-fit equivalence when numpy / scikit-learn are available; synthetic data only).
 add_test(NAME segarecomp_seg084_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg084_test.py)
 set_property(TEST segarecomp_seg084_test APPEND PROPERTY LABELS full fast)
+# SEG-085 (research tooling): historical-evaluation diagnostics (error taxonomy, label-reliability audit) and the dynamic-budget policies; synthetic data only.
+add_test(NAME segarecomp_seg085_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg085_test.py)
+set_property(TEST segarecomp_seg085_test APPEND PROPERTY LABELS full fast)
 # SEG-077-T005 (research tooling): frozen SEG-077 decision rules, labelled-cell blind metrics, the job matrix and, in the research
 # environment (numpy, torch), label-free seeds and leakage invariance of A features and C's candidate graph (skipped without numpy).
 add_test(NAME segarecomp_seg077_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg077_test.py)

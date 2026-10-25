@@ -1,0 +1,3298 @@
+{
+ "cap": 0.6,
+ "final": {
+  "T": -13.655373878023223,
+  "T0": -10.339091954313878,
+  "adapt_margin_unchanged_protocol": 0.173779296875,
+  "minima": {
+   "D01": -10.3391,
+   "D02": 1.5833,
+   "D03": -6.3739,
+   "D04": 0.2512,
+   "D05": 8.9728,
+   "D06": 5.2715,
+   "D07": 1.2007,
+   "D09": 10.3968,
+   "D10": 4.4522,
+   "D11": 3.9501,
+   "D12": -7.0228
+  },
+  "shortfall": 3.3162819237093464
+ },
+ "folds": {
+  "D01": {
+   "T0_isolated": -9.785634225086007,
+   "T_isolated": -12.119070488839174,
+   "T_nonisolated": -7.671683059158247,
+   "adapt_margin_isolated": 0.22724609375,
+   "adapt_margin_nonisolated": 0.087109375,
+   "minima_isolated": {
+    "D02": -0.8276,
+    "D03": -9.7856,
+    "D04": 2.9204,
+    "D05": 10.1466,
+    "D06": 6.4939,
+    "D07": -0.7851,
+    "D09": 10.7273,
+    "D10": 5.2423,
+    "D11": 2.8778,
+    "D12": -7.4522
+   },
+   "shortfall_isolated": 2.3334362637531667
+  },
+  "D02": {
+   "T0_isolated": -10.109718128517407,
+   "T_isolated": -12.607457938134182,
+   "T_nonisolated": -13.655373878023223,
+   "adapt_margin_isolated": 0.1526611328125,
+   "adapt_margin_nonisolated": 0.173779296875,
+   "minima_isolated": {
+    "D01": -10.1097,
+    "D03": -7.612,
+    "D04": 1.7136,
+    "D05": 9.3701,
+    "D06": 5.8968,
+    "D07": 1.4691,
+    "D09": 10.6213,
+    "D10": 3.837,
+    "D11": 3.1129,
+    "D12": -7.4387
+   },
+   "shortfall_isolated": 2.4977398096167747
+  },
+  "D03": {
+   "T0_isolated": -10.779957270829046,
+   "T_isolated": -14.619421804599472,
+   "T_nonisolated": -13.655373878023223,
+   "adapt_margin_isolated": 0.6465576171875,
+   "adapt_margin_nonisolated": 0.173779296875,
+   "minima_isolated": {
+    "D01": -10.78,
+    "D02": 1.6843,
+    "D04": -0.9305,
+    "D05": 7.8165,
+    "D06": 5.7689,
+    "D07": 1.3351,
+    "D09": 10.3926,
+    "D10": 3.8544,
+    "D11": 4.4903,
+    "D12": -6.9405
+   },
+   "shortfall_isolated": 3.8394645337704256
+  },
+  "D04": {
+   "T0_isolated": -10.020390817342994,
+   "T_isolated": -12.952237446467892,
+   "T_nonisolated": -13.655373878023223,
+   "adapt_margin_isolated": 0.18720703125,
+   "adapt_margin_nonisolated": 0.173779296875,
+   "minima_isolated": {
+    "D01": -10.0204,
+    "D02": 1.0055,
+    "D03": -7.0885,
+    "D05": 9.0,
+    "D06": 6.3861,
+    "D07": 0.2158,
+    "D09": 10.5891,
+    "D10": 4.6036,
+    "D11": 3.8997,
+    "D12": -6.7391
+   },
+   "shortfall_isolated": 2.931846629124898
+  },
+  "D05": {
+   "T0_isolated": -10.645090767585819,
+   "T_isolated": -14.800684913343247,
+   "T_nonisolated": -13.655373878023223,
+   "adapt_margin_isolated": 0.2085693359375,
+   "adapt_margin_nonisolated": 0.173779296875,
+   "minima_isolated": {
+    "D01": -10.6451,
+    "D02": 0.9537,
+    "D03": -6.3382,
+    "D04": 0.8365,
+    "D06": 6.0667,
+    "D07": 0.7272,
+    "D09": 10.7085,
+    "D10": 4.3877,
+    "D11": 2.7294,
+    "D12": -6.4895
+   },
+   "shortfall_isolated": 4.155594145757428
+  },
+  "D06": {
+   "T0_isolated": -10.656140701918579,
+   "T_isolated": -14.772951595627784,
+   "T_nonisolated": -13.655373878023223,
+   "adapt_margin_isolated": 0.2239501953125,
+   "adapt_margin_nonisolated": 0.173779296875,
+   "minima_isolated": {
+    "D01": -10.6561,
+    "D02": 1.7064,
+    "D03": -6.0367,
+    "D04": -0.0658,
+    "D05": 8.8371,
+    "D07": 1.2595,
+    "D09": 10.0682,
+    "D10": 2.712,
+    "D11": 2.5053,
+    "D12": -6.5393
+   },
+   "shortfall_isolated": 4.116810893709205
+  },
+  "D07": {
+   "T0_isolated": -10.65750225897379,
+   "T_isolated": -14.505753921189392,
+   "T_nonisolated": -13.655373878023223,
+   "adapt_margin_isolated": 0.212841796875,
+   "adapt_margin_nonisolated": 0.173779296875,
+   "minima_isolated": {
+    "D01": -10.6575,
+    "D02": 0.2682,
+    "D03": -6.16,
+    "D04": 0.4296,
+    "D05": 8.3664,
+    "D06": 5.744,
+    "D09": 11.0364,
+    "D10": 4.1629,
+    "D11": 4.3791,
+    "D12": -6.8093
+   },
+   "shortfall_isolated": 3.8482516622156
+  },
+  "D09": {
+   "T0_isolated": -10.674940925926766,
+   "T_isolated": -14.375466980280253,
+   "T_nonisolated": -13.655373878023223,
+   "adapt_margin_isolated": 0.217236328125,
+   "adapt_margin_nonisolated": 0.173779296875,
+   "minima_isolated": {
+    "D01": -10.6749,
+    "D02": 1.0109,
+    "D03": -6.9432,
+    "D04": 1.0816,
+    "D05": 8.776,
+    "D06": 5.9975,
+    "D07": 0.5204,
+    "D10": 4.3399,
+    "D11": 3.7652,
+    "D12": -6.9744
+   },
+   "shortfall_isolated": 3.700526054353487
+  },
+  "D10": {
+   "T0_isolated": -10.634153605677037,
+   "T_isolated": -13.912995927390627,
+   "T_nonisolated": -13.655373878023223,
+   "adapt_margin_isolated": 0.207958984375,
+   "adapt_margin_nonisolated": 0.173779296875,
+   "minima_isolated": {
+    "D01": -10.6342,
+    "D02": 1.477,
+    "D03": -6.0366,
+    "D04": 0.3487,
+    "D05": 8.6904,
+    "D06": 5.2251,
+    "D07": 0.0107,
+    "D09": 10.4072,
+    "D11": 3.3346,
+    "D12": -7.3553
+   },
+   "shortfall_isolated": 3.27884232171359
+  },
+  "D11": {
+   "T0_isolated": -10.43660160335208,
+   "T_isolated": -14.070156990983332,
+   "T_nonisolated": -13.655373878023223,
+   "adapt_margin_isolated": 0.1878173828125,
+   "adapt_margin_nonisolated": 0.173779296875,
+   "minima_isolated": {
+    "D01": -10.4366,
+    "D02": 0.9525,
+    "D03": -6.1522,
+    "D04": 0.9288,
+    "D05": 8.5922,
+    "D06": 5.7203,
+    "D07": 0.8443,
+    "D09": 10.404,
+    "D10": 4.1726,
+    "D12": -6.803
+   },
+   "shortfall_isolated": 3.633555387631251
+  },
+  "D12": {
+   "T0_isolated": -10.541927161044944,
+   "T_isolated": -14.476180932760661,
+   "T_nonisolated": -14.304246906576939,
+   "adapt_margin_isolated": 0.1990478515625,
+   "adapt_margin_nonisolated": 0.173779296875,
+   "minima_isolated": {
+    "D01": -10.5419,
+    "D02": 1.5163,
+    "D03": -6.6077,
+    "D04": 1.5455,
+    "D05": 8.7787,
+    "D06": 3.7629,
+    "D07": -4.539,
+    "D09": 10.5082,
+    "D10": 2.0526,
+    "D11": 2.5959
+   },
+   "shortfall_isolated": 3.934253771715717
+  }
+ },
+ "per_image": {
+  "d05": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.48046875,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5107421875,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3505859375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 1024,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 1024,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 1024,
+   "has_universe": true,
+   "lineage": "D05",
+   "oracle_residual_frf": 0.279296875,
+   "positive_cells": 89
+  },
+  "d06": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3502604166666667,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.4000651041666667,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3502604166666667,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 3072,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 3072,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 3072,
+   "has_universe": true,
+   "lineage": "D06",
+   "oracle_residual_frf": 0.16276041666666666,
+   "positive_cells": 214
+  },
+  "d07": {
+   "ADAPT": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "ADAPT_isolated": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 7837,
+    "positive_cells_missed": 199,
+    "retained": 0.3505859375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 2048,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 2048,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 2048,
+   "has_universe": true,
+   "lineage": "D07",
+   "oracle_residual_frf": 0.4560546875,
+   "positive_cells": 667
+  },
+  "d09": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.4501953125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.490234375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3505859375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 1024,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 1024,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 1024,
+   "has_universe": true,
+   "lineage": "D09",
+   "oracle_residual_frf": 0.1552734375,
+   "positive_cells": 24
+  },
+  "d10": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3701171875,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.4000651041666667,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3502604166666667,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 3072,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 3072,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 3072,
+   "has_universe": false,
+   "lineage": "D10",
+   "oracle_residual_frf": 0.18522135416666666,
+   "positive_cells": 283
+  },
+  "d11": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.4404296875,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.46044921875,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35009765625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 2048,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 2048,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 2048,
+   "has_universe": false,
+   "lineage": "D11",
+   "oracle_residual_frf": 0.26123046875,
+   "positive_cells": 179
+  },
+  "d12": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.330078125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35009765625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35009765625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 2048,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 2048,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 2048,
+   "has_universe": false,
+   "lineage": "D12",
+   "oracle_residual_frf": 0.1875,
+   "positive_cells": 312
+  },
+  "flicky": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3603515625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.330078125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3505859375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 1007,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9833984375,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 1024,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 1024,
+   "has_universe": true,
+   "lineage": "D02",
+   "oracle_residual_frf": 0.1767578125,
+   "positive_cells": 180
+  },
+  "ps2": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.27001953125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2801106770833333,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35009765625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 6141,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.99951171875,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 6144,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 6144,
+   "has_universe": true,
+   "lineage": "D04",
+   "oracle_residual_frf": 0.09212239583333333,
+   "positive_cells": 565
+  },
+  "s1": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2900390625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.43017578125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35009765625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 4008,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.978515625,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 933,
+    "missed_starts": 4,
+    "positive_cells_missed": 1,
+    "retained": 0.227783203125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 4096,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.24951171875,
+   "positive_cells": 820
+  },
+  "s2": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 1,
+    "positive_cells_missed": 1,
+    "retained": 0.2900390625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.4300537109375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35009765625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 8069,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9849853515625,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 1898,
+    "missed_starts": 6,
+    "positive_cells_missed": 3,
+    "retained": 0.231689453125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 8192,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.3245849609375,
+   "positive_cells": 1658
+  },
+  "scd/BADEND.BIN": {
+   "ADAPT": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "ADAPT_isolated": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 5,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 5,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 5,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.0,
+   "positive_cells": 5
+  },
+  "scd/BRAMINIT.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.4418604651162791,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5813953488372093,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.36046511627906974,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 85,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9883720930232558,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 36,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.4186046511627907,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 86,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.3488372093023256,
+   "positive_cells": 30
+  },
+  "scd/BRAMSUB.BIN": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.47619047619047616,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.38095238095238093,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5238095238095238,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 21,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 9,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.42857142857142855,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 21,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.38095238095238093,
+   "positive_cells": 8
+  },
+  "scd/DEMO11A.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2900390625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.43017578125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35009765625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 1935,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.94482421875,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 568,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.27734375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 2048,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.2392578125,
+   "positive_cells": 414
+  },
+  "scd/DUMMY0.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2230769230769231,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.36153846153846153,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35384615384615387,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 130,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 23,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.17692307692307693,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 130,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.1,
+   "positive_cells": 16
+  },
+  "scd/DUMMY1.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2230769230769231,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.36153846153846153,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35384615384615387,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 130,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 22,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.16923076923076924,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 130,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.13076923076923078,
+   "positive_cells": 17
+  },
+  "scd/DUMMY2.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2230769230769231,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.36153846153846153,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35384615384615387,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 130,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 23,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.17692307692307693,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 130,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.1,
+   "positive_cells": 16
+  },
+  "scd/DUMMY3.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2230769230769231,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.36153846153846153,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35384615384615387,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 130,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 26,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 130,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.13076923076923078,
+   "positive_cells": 17
+  },
+  "scd/DUMMY4.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.23076923076923078,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3769230769230769,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35384615384615387,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 129,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9923076923076923,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 32,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.24615384615384617,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 130,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.15384615384615385,
+   "positive_cells": 19
+  },
+  "scd/DUMMY5.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2846153846153846,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.4230769230769231,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35384615384615387,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 129,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9923076923076923,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 31,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.23846153846153847,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 130,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.18461538461538463,
+   "positive_cells": 24
+  },
+  "scd/GOODEND.BIN": {
+   "ADAPT": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "ADAPT_isolated": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 5,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 5,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 5,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.0,
+   "positive_cells": 5
+  },
+  "scd/MDINIT.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.1694915254237288,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3050847457627119,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3559322033898305,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5084745762711864,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 59,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 7,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.11864406779661017,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 59,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.0,
+   "positive_cells": 4
+  },
+  "scd/NISI.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2230769230769231,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.36153846153846153,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35384615384615387,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 130,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 21,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.16153846153846155,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 130,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.09230769230769231,
+   "positive_cells": 16
+  },
+  "scd/OPEN_M.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.27848101265822783,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.4177215189873418,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35443037974683544,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5063291139240507,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 78,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9873417721518988,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 34,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.43037974683544306,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 79,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.17721518987341772,
+   "positive_cells": 14
+  },
+  "scd/OPEN_S.BIN": {
+   "ADAPT": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "ADAPT_isolated": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 5,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 5,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 5,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.0,
+   "positive_cells": 5
+  },
+  "scd/PLANET_M.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5344827586206896,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 170,
+    "positive_cells_missed": 6,
+    "retained": 0.40804597701149425,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 173,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9942528735632183,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 82,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.47126436781609193,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 174,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.4425287356321839,
+   "positive_cells": 77
+  },
+  "scd/PLANET_S.BIN": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.1607717041800643,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3022508038585209,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3504823151125402,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5016077170418006,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 307,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9871382636655949,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 23,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.07395498392282958,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 311,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.06752411575562701,
+   "positive_cells": 21
+  },
+  "scd/PTEST.BIN": {
+   "ADAPT": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "ADAPT_isolated": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 3,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 3,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 3,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.0,
+   "positive_cells": 3
+  },
+  "scd/R11A__.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2900390625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.43017578125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35009765625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 1934,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9443359375,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 587,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.28662109375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 2048,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.24755859375,
+   "positive_cells": 414
+  },
+  "scd/R11B__.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2802734375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.42041015625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35009765625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 1936,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9453125,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 558,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2724609375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 2048,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.220703125,
+   "positive_cells": 392
+  },
+  "scd/R11C__.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2802734375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.42041015625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35009765625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 1936,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9453125,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 570,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2783203125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 2048,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.23876953125,
+   "positive_cells": 391
+  },
+  "scd/R11D__.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2802734375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.42041015625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35009765625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 1936,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9453125,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 606,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2958984375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 2048,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.21923828125,
+   "positive_cells": 389
+  },
+  "scd/R61A__.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.30029296875,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.4404296875,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35009765625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 1966,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9599609375,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 545,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.26611328125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 2048,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.24658203125,
+   "positive_cells": 421
+  },
+  "scd/SNCBNK1B.BIN": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.10041103934233706,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2401644157369348,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3505578391074574,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5002935995302408,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 1634,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9594832648267763,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 24,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.014092777451556078,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 1703,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.011156782149148562,
+   "positive_cells": 20
+  },
+  "scd/SNCBNK4B.BIN": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.10031746031746032,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.24,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3504761904761905,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5003174603174603,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 1514,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9612698412698413,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 24,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.015238095238095238,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 1575,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.012063492063492064,
+   "positive_cells": 20
+  },
+  "scd/SNCBNK6B.BIN": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.10005885815185403,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.24014125956444968,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3502060035314891,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5002942907592701,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 1607,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9458505002942907,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 25,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.014714537963507945,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 1699,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.011183048852266038,
+   "positive_cells": 20
+  },
+  "scd/SOSEL_.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35714285714285715,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35714285714285715,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 98,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 33,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.336734693877551,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 98,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.2653061224489796,
+   "positive_cells": 26
+  },
+  "scd/SPEEND.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.24615384615384617,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.38461538461538464,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35384615384615387,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 129,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9923076923076923,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 28,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2153846153846154,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 130,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.14615384615384616,
+   "positive_cells": 19
+  },
+  "scd/SPMM__.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.43119266055045874,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.573394495412844,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 8,
+    "positive_cells_missed": 1,
+    "retained": 0.3532110091743119,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 215,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9862385321100917,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 96,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.44036697247706424,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 218,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.37155963302752293,
+   "positive_cells": 73
+  },
+  "scd/SPSS__.BIN": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.130078125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2703125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 2538,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.99140625,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 102,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.03984375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 2560,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.033984375,
+   "positive_cells": 87
+  },
+  "scd/SPX___.BIN": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.27205882352941174,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.4117647058823529,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35294117647058826,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 136,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 38,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.27941176470588236,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 136,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.17647058823529413,
+   "positive_cells": 24
+  },
+  "scd/STSEL_.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2857142857142857,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.42857142857142855,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35714285714285715,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 98,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 22,
+    "missed_starts": 2,
+    "positive_cells_missed": 1,
+    "retained": 0.22448979591836735,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 98,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.25510204081632654,
+   "positive_cells": 19
+  },
+  "scd/TITLEM.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3116279069767442,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.4511627906976744,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35348837209302325,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5023255813953489,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 214,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9953488372093023,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 57,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2651162790697674,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 215,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.22790697674418606,
+   "positive_cells": 48
+  },
+  "scd/TITLES.BIN": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.265625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.40625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.359375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 64,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 16,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.25,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 64,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.0,
+   "positive_cells": 11
+  },
+  "scd/VM____.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.2903225806451613,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.43548387096774194,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3548387096774194,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 120,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.967741935483871,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 27,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.21774193548387097,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 124,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.14516129032258066,
+   "positive_cells": 23
+  },
+  "scd/WARP__.MMD": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.543859649122807,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 45,
+    "positive_cells_missed": 1,
+    "retained": 0.40350877192982454,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5087719298245614,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 57,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 43,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.7543859649122807,
+    "status": "abstain_cap"
+   },
+   "cells": 57,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.42105263157894735,
+   "positive_cells": 24
+  },
+  "sf1": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.280029296875,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.3500162760416667,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 12288,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 12288,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 12288,
+   "has_universe": true,
+   "lineage": "D03",
+   "oracle_residual_frf": 0.10734049479166667,
+   "positive_cells": 1310
+  },
+  "sf2": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.27001953125,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": true,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": null,
+    "status": "abstain_cap"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35003662109375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 16384,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": true,
+    "cells_before_seeds": 16384,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "cells": 16384,
+   "has_universe": true,
+   "lineage": "D03",
+   "oracle_residual_frf": 0.11871337890625,
+   "positive_cells": 1518
+  },
+  "sk": {
+   "ADAPT": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.34002685546875,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "ADAPT_isolated": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.48004150390625,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B35": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.35003662109375,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "B50": {
+    "abstained": false,
+    "cells_before_seeds": null,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 0.5,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "DYN_SCORE": {
+    "abstained": true,
+    "cells_before_seeds": 16142,
+    "missed_starts": 0,
+    "positive_cells_missed": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 0.9852294921875,
+    "status": "abstain_cap"
+   },
+   "DYN_SCORE_nonisolated": {
+    "abstained": false,
+    "cells_before_seeds": 4366,
+    "missed_starts": 6,
+    "positive_cells_missed": 3,
+    "retained": 0.2664794921875,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   },
+   "cells": 16384,
+   "has_universe": true,
+   "lineage": "D01",
+   "oracle_residual_frf": 0.288330078125,
+   "positive_cells": 4073
+  }
+ },
+ "schema": "segarecomp.seg085.dyn.v1.nested",
+ "variants": {}
+}

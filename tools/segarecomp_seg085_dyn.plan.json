@@ -1,0 +1,44 @@
+{
+ "adr": "0190/0193",
+ "bound_files": {
+  "tests/segarecomp_seg085_test.py": "769a8481fbcdbcf3ab546caefbccc76aa6a9f9f640f5ef1c738a01b677b9d67b",
+  "tools/segarecomp_ml_v3.py": "ef18ab40e1da9f25ecc4e1e0a9f0f630453fc8e15b13812750e133d8998947ba",
+  "tools/segarecomp_oracle_bench.py": "c102a8b847736d4db28f240e948881f4194214dfe767f06470989c2396adef3c",
+  "tools/segarecomp_seg085_cohort.py": "2fe13737d3a84c9fb2c8d0019746e16046fe8c18effcbba7cefe2779b716a856",
+  "tools/segarecomp_seg085_diag.py": "d88159ca2c5e73e88681c66685ef15ae7fa7d3cd97596a0c73bfd9f35485f4fc",
+  "tools/segarecomp_seg085_dyn.py": "5d5a2b352b017e0cd0fa03f3c9ed31afa51e5f009b74191e1ad32770933a46d6",
+  "tools/segarecomp_seg085_eval.py": "f99ca0cdc2e65784750efb5068ed889444c92cf8697a3d97e7b5c3b9144bb234",
+  "tools/segarecomp_xplat_models.py": "3eabc2ed412ec3088938061af5a76b53f5b7fcf55deefdfd82031f533f268f8b"
+ },
+ "calibration": {
+  "T0_final": -10.339091954313878,
+  "T_final": -13.655373878023223,
+  "adapt_margin_final": 0.173779296875,
+  "fitting_lineages": [
+   "D01",
+   "D02",
+   "D03",
+   "D04",
+   "D05",
+   "D06",
+   "D07",
+   "D09",
+   "D10",
+   "D11",
+   "D12"
+  ],
+  "isolation": "inner refits (one fit per ordered lineage pair) for nested folds; leave-one-lineage-out records for the final calibration",
+  "shortfall_final": 3.3162819237093464
+ },
+ "cap": 0.6,
+ "cell_bytes": 128,
+ "nested_results_sha256": "3d873ab3aa1658654b292ec61a04c03a9c2a4aa02b1f3728868ff71049485435",
+ "policies": {
+  "ADAPT": "unchanged SEG-072 rule; margin fitted on the eleven leave-one-lineage-out records",
+  "B35": "ml_v3 fixed budget 35 % over model-A ranking + seeds",
+  "B50": "ml_v3 fixed budget 50 %",
+  "DYN_SCORE": "score >= T cells union seeds; abstain above CAP; T = T0 - shortfall (module docstring)"
+ },
+ "protocol": "seg085.protocol.v1",
+ "schema": "segarecomp.seg085.dyn.v1.plan"
+}
