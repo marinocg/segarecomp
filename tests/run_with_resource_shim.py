@@ -31,8 +31,14 @@ def pin_zip_clock():
     zipfile.time = _PinnedClock()
 
 
+def pins_zip_clock(script: pathlib.Path, environ) -> bool:
+    """Scope: only the SEG-081/083 TAS batch tests (they compare independently generated .bk2 archives) and anything that opts in with SEGARECOMP_PIN_ZIP_CLOCK=1."""
+    return script.name.startswith("segarecomp_genesis_tasbatch") or environ.get("SEGARECOMP_PIN_ZIP_CLOCK") == "1"
+
+
 def main():
-    pin_zip_clock()
+    if len(sys.argv) > 1 and pins_zip_clock(pathlib.Path(sys.argv[1]), __import__("os").environ):
+        pin_zip_clock()
     _main()
 
 

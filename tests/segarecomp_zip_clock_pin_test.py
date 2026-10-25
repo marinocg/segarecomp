@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Regression for the SEG-083 `ctl_a = all-controller primary` CI flake: ZIP member timestamps came from the wall clock. Deterministic (no sleeping): the clock is MOVED, not waited for."""
 import io
+import os
 import pathlib
 import subprocess
 import sys
@@ -64,8 +65,10 @@ def test_shim_pins_the_clock_for_the_real_generator():
     with tempfile.TemporaryDirectory() as t:
         f = pathlib.Path(t) / "probe.py"
         f.write_text(script)
-        out = subprocess.run([sys.executable, str(SHIM), str(f)], capture_output=True, text=True, timeout=300)
+        out = subprocess.run([sys.executable, str(SHIM), str(f)], capture_output=True, text=True, timeout=300, env={**os.environ, "SEGARECOMP_PIN_ZIP_CLOCK": "1"})
+        unscoped = subprocess.run([sys.executable, str(SHIM), str(f)], capture_output=True, text=True, timeout=300, env={k: v for k, v in os.environ.items() if k != "SEGARECOMP_PIN_ZIP_CLOCK"})
     check(out.stdout.split() == ["1", "1"], f"pinned: the same controller streams give byte-identical archives and a different seed still differs: {out.stdout!r} {out.stderr[-300:]!r}")
+    check(unscoped.stdout.split()[:1] == ["0"], f"the launcher must NOT pin the clock for a script outside the TAS tests: {unscoped.stdout!r}")
     plain = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=300)
     check(plain.stdout.split()[:1] == ["0"], f"without the pin the fixture reproduces the flake: {plain.stdout!r} {plain.stderr[-300:]!r}")
 
