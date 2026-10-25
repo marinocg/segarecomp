@@ -16,6 +16,7 @@ sys.path.insert(0, str(HERE))
 import segarecomp_seg086_cal as cal  # noqa: E402
 import segarecomp_seg086_norm as nm  # noqa: E402
 import segarecomp_sample_roles as sr  # noqa: E402
+import segarecomp_sample_guard as sg  # noqa: E402
 import segarecomp_ml_v3 as v3  # noqa: E402
 
 LABEL = "REUSED_HISTORICAL_DIAGNOSTIC - NOT INDEPENDENT CONFIRMATION"
@@ -33,7 +34,8 @@ def main() -> int:
     import numpy as np
     ctx = sr.EvaluationContext.from_file(MANIFEST, "SEG-086 " + LABEL)
     dirs = ctx.discover(cal.dyn.CACHE / "data")
-    ims = [x5.attach(tr.Image(d), d) for d in dirs]
+    sg.install(tr)                                                                      # post-freeze protection layer (ADR 0198): every Image is role-checked
+    ims = [x5.attach(tr.Image(d, evaluation=ctx), d) for d in dirs]
     imgs, recs = cal.load_records()
     tau_final = cal.calibrate_tau(cal.lineage_minima(recs, chosen))                    # deployment-style calibration: the eleven strict leave-one-lineage-out records
     out = {"label": LABEL, "plan_sha256": plan_digest, "development_results_sha256": cal.sha_file(cal.RESULTS), "manifest_sha256": ctx.digest, "normaliser": chosen,

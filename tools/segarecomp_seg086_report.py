@@ -99,6 +99,8 @@ def low_tail_character(recs) -> dict:
 
 
 def main() -> int:
+    import segarecomp_sample_guard as sg
+    sg.install()                                                                        # post-freeze protection layer (ADR 0198)
     res = json.loads(cal.RESULTS.read_text())
     imgs, recs = cal.load_records()
     nested = res["nested"]

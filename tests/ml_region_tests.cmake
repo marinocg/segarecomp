@@ -185,3 +185,5 @@ add_test(NAME segarecomp_seg086_norm_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_
 set_property(TEST segarecomp_seg086_norm_test APPEND PROPERTY LABELS full fast)
 add_test(NAME segarecomp_seg086_cal_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg086_cal_test.py)
 set_property(TEST segarecomp_seg086_cal_test APPEND PROPERTY LABELS full fast)
+add_test(NAME segarecomp_seg086_guard_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg086_guard_test.py)
+set_property(TEST segarecomp_seg086_guard_test APPEND PROPERTY LABELS full fast)
