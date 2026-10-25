@@ -16,15 +16,24 @@ ADR 0195 disclosed that the SEG-086 development loaders (`segarecomp_seg086_cal.
 
 Every sample the frozen tools load is constructed through `segarecomp_ml_v3_train.Image` (directly or via `xplat_transfer.load`). `segarecomp_sample_guard.install()` wraps `Image.__init__` and `registry()`: the metadata (`meta.json` only) is read, the reserved/sealed identity list is checked first (fail-closed if unreadable), then `require_trainable(meta)` (evaluation-only, exploratory, contradictory or unknown roles and frozen-evaluation identities/lineages are refused) - or, with `evaluation=ctx`, `ctx.admit(meta)` (exact frozen-manifest membership) - and only then does the original constructor read the ROM, tokens or class map. Existing `segarecomp_sample_roles` functions are reused unchanged.
 
+## Approved entry point (supersedes the first wording of this section)
+
+`tools/segarecomp_seg086_guarded.py` is the **only approved entry point** for running the SEG-086 development pipeline. It validates the command and arguments, installs the guard **before** any delegate can load a sample, and then calls the existing frozen implementation unchanged, preserving its output and exit status:
+`verify-frozen`, `diag --out`, `select --out`, `nested [--out] [--variants]`, `report`, `h01`. `freeze` and `final` are not exposed (they would overwrite frozen artifacts) and `--out` may not name a committed or frozen artifact. An authorization failure raises; there is no fallback to the original loader.
+The historical scripts `segarecomp_seg086_cal.py` and `segarecomp_seg086_diag.py` remain directly callable for archival reproducibility only; they use the unguarded legacy loaders and are **not approved** for future research with evaluation-only data (they cannot be edited without invalidating the frozen plan).
+
+`verify-frozen` no longer loads any sample without the guard (the first version loaded the records once unguarded to compare). It verifies the frozen plan, installs the guard, loads the records once, compares their digest to `REFERENCE_RECORDS_SHA256` and recomputes the nested evaluation, comparing it with the **frozen** determinism digest in `segarecomp_seg086_cal.results.json`; any mismatch exits 1. Provenance and limit of the records reference: it was
+computed in the guard's first verification (guarded and unguarded loads were byte-identical at that time) and documented in this ADR; it is a post-freeze reference, not part of the frozen plan. The frozen, independently meaningful evidence is the nested determinism digest. `diag --out` and `select --out` reproduce the committed `segarecomp_seg086_diag.results.json` and `segarecomp_seg086_cal.selection.json` except for the `cpu_seconds` field.
+
 ## Limit
 
-Calling `segarecomp_seg086_cal.py` or `segarecomp_seg086_diag.py` **directly** still uses the unguarded loaders (they could not be edited without invalidating the frozen plan). The sanctioned route is `segarecomp_seg086_guarded.py` (and the report/H01 modules). A future prospective experiment must start from a new, versioned pipeline that installs the guard itself.
+Direct calls of the historical scripts are unprotected (above). `Image.__new__` without `__init__` and a process in which the guard is not installed bypass the layer by design.
 
 Known limits of the identity check: `reserved_sha256()` writes the SEG-072 development scan last, so an image that were BOTH reserved and present in the development cache would be reported only as development (no such overlap exists today: 8 reserved, 5 sealed, 50 development, no intersection), and a missing development cache silently yields no development entries (harmless for the reserved filter; "fail-closed" applies to an unreadable reserved list). `Image.__new__` without `__init__`, or an unguarded process, bypasses the layer by design.
 
 ## Reproducibility check
 
-`python3 tools/segarecomp_seg086_guarded.py verify-frozen` (research environment): the frozen plan verifies; the 50 development records are identical with and without the guard (sha256 `e4d471de...ebfe1`); the nested evaluation recomputed under the guard reproduces the stored determinism digest `2957098525e6...`; the report and H01 modules regenerate their committed JSON byte-for-byte. The guard therefore changes neither experimental inputs nor outputs.
+`python3 tools/segarecomp_seg086_guarded.py verify-frozen` (research environment): the frozen plan verifies; the 50 development records loaded under the guard have sha256 `e4d471de...ebfe1`, equal to the post-freeze reference (established when guarded and unguarded loads were compared once, before this correction); the nested evaluation recomputed under the guard reproduces the stored determinism digest `2957098525e6...`; the report and H01 modules regenerate their committed JSON byte-for-byte. The guard therefore does not change experimental inputs or outputs; the decision remains `CALIBRATION_INEFFECTIVE` with 40/40 domain images falling back to broad AOT.
 
 ## Unrelated CI fix
 
