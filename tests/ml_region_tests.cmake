@@ -181,3 +181,7 @@ set_property(TEST segarecomp_seg086_roles_test APPEND PROPERTY LABELS full fast)
 # SEG-086-T001..T004 (research tooling): score-distribution diagnostics, normalised dynamic selector, calibration and decision rules; synthetic data only.
 add_test(NAME segarecomp_seg086_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg086_test.py)
 set_property(TEST segarecomp_seg086_test APPEND PROPERTY LABELS full fast)
+add_test(NAME segarecomp_seg086_norm_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg086_norm_test.py)
+set_property(TEST segarecomp_seg086_norm_test APPEND PROPERTY LABELS full fast)
+add_test(NAME segarecomp_seg086_cal_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_with_resource_shim.py ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_seg086_cal_test.py)
+set_property(TEST segarecomp_seg086_cal_test APPEND PROPERTY LABELS full fast)
