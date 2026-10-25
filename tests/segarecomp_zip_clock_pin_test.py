@@ -21,7 +21,8 @@ def check(cond, msg):
 
 def build(offset: float) -> bytes:
     """Same members and bytes; only the generation clock differs."""
-    real = time.time
+    real, pinned = time.time, zipfile.time
+    zipfile.time = time                      # this test may itself be launched through the shim, which pins zipfile's clock: use the real clock for the unpinned demonstration
     time.time = lambda: real() + offset
     try:
         buf = io.BytesIO()
@@ -31,6 +32,7 @@ def build(offset: float) -> bytes:
         return buf.getvalue()
     finally:
         time.time = real
+        zipfile.time = pinned
 
 
 def test_root_cause_is_zip_metadata_only():
