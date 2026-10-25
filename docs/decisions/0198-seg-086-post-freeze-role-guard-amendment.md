@@ -20,6 +20,8 @@ Every sample the frozen tools load is constructed through `segarecomp_ml_v3_trai
 
 Calling `segarecomp_seg086_cal.py` or `segarecomp_seg086_diag.py` **directly** still uses the unguarded loaders (they could not be edited without invalidating the frozen plan). The sanctioned route is `segarecomp_seg086_guarded.py` (and the report/H01 modules). A future prospective experiment must start from a new, versioned pipeline that installs the guard itself.
 
+Known limits of the identity check: `reserved_sha256()` writes the SEG-072 development scan last, so an image that were BOTH reserved and present in the development cache would be reported only as development (no such overlap exists today: 8 reserved, 5 sealed, 50 development, no intersection), and a missing development cache silently yields no development entries (harmless for the reserved filter; "fail-closed" applies to an unreadable reserved list). `Image.__new__` without `__init__`, or an unguarded process, bypasses the layer by design.
+
 ## Reproducibility check
 
 `python3 tools/segarecomp_seg086_guarded.py verify-frozen` (research environment): the frozen plan verifies; the 50 development records are identical with and without the guard (sha256 `e4d471de...ebfe1`); the nested evaluation recomputed under the guard reproduces the stored determinism digest `2957098525e6...`; the report and H01 modules regenerate their committed JSON byte-for-byte. The guard therefore changes neither experimental inputs nor outputs.

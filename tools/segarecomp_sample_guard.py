@@ -28,7 +28,7 @@ def default_reserved_identities() -> set:
     """Image digests that no training or calibration may read: SEG-077 reserved titles and SEG-072 sealed images (development images are legitimate training data).
     Fail-closed: an unreadable reserved list raises."""
     import segarecomp_seg085_cohort as co
-    return {sha for sha, why in co.reserved_sha256().items() if "development" not in why}
+    return {sha for sha, why in co.reserved_sha256().items() if why != "SEG-072 development image"}
 
 
 class Guard:
