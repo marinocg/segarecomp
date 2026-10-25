@@ -1,0 +1,30 @@
+{
+ "development_results_sha256": "af7fc3ea365b0e10057675855045ddaf93e27c9e1f4489db2410eadad29ed361",
+ "images": {
+  "h01/ps4": {
+   "frozen_policy": {
+    "cells": 24576,
+    "missed_starts": 0,
+    "retained": 1.0,
+    "selected_fraction_before_cap": 1.0,
+    "status": "abstain_cap"
+   },
+   "plain_minimum_diagnostic_not_the_policy": {
+    "cells": 24576,
+    "missed_starts": 0,
+    "retained": 0.2970784505208333,
+    "selected_fraction_before_cap": null,
+    "status": "selected"
+   }
+  }
+ },
+ "label": "REUSED_HISTORICAL_DIAGNOSTIC - NOT INDEPENDENT CONFIRMATION",
+ "manifest_sha256": "aa612cb1f3de510161ae091166828055cdd5c8e6a8ec80f41ec978c6641ad4f5",
+ "normaliser": "N2",
+ "plan_sha256": "d5b2d43db248959df434b756a01d29096797af9fcdfb506e58983dae92b90ba1",
+ "tau_final": {
+  "T0": 1.526949,
+  "shortfall": 3.661537,
+  "tau": -2.134587
+ }
+}

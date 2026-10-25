@@ -1,0 +1,146 @@
+{
+ "choice": {
+  "chosen": "N2",
+  "disqualified": [
+   "N1"
+  ],
+  "reason": "smaller lineage-balanced mean retained fraction; a difference below 0.01 prefers N2"
+ },
+ "cpu_seconds": 3.8,
+ "lineage_minima": {
+  "N1": {
+   "D01": 0.2147,
+   "D02": 6.6535,
+   "D03": 2.5134,
+   "D04": 4.8018,
+   "D05": 0.9468,
+   "D06": 13.6429,
+   "D07": 0.4665,
+   "D09": 1.2789,
+   "D10": 8.956,
+   "D11": 0.7862,
+   "D12": 3.508
+  },
+  "N2": {
+   "D01": 1.5269,
+   "D02": 13.9298,
+   "D03": 5.541,
+   "D04": 12.3611,
+   "D05": 20.6713,
+   "D06": 17.2703,
+   "D07": 12.9926,
+   "D09": 22.221,
+   "D10": 16.578,
+   "D11": 15.8197,
+   "D12": 5.1885
+  },
+  "RAW": {
+   "D01": -10.3391,
+   "D02": 1.5833,
+   "D03": -6.3739,
+   "D04": 0.2512,
+   "D05": 8.9728,
+   "D06": 5.2715,
+   "D07": 1.2007,
+   "D09": 10.3968,
+   "D10": 4.4522,
+   "D11": 3.9501,
+   "D12": -7.0228
+  }
+ },
+ "normalisation_failures_non_all_code": {
+  "N1": 2,
+  "N2": 0,
+  "RAW": 0
+ },
+ "rule": "ADR 0195 (amended before computation)",
+ "schema": "segarecomp.seg086.cal.v1.selection",
+ "summaries": {
+  "N1": {
+   "below_minimum_cells": 7,
+   "cell_weighted_retained": 0.388217,
+   "image_mean_retained": 0.451417,
+   "images_evaluated": 43,
+   "lineage_balanced_mean_retained": 0.387529,
+   "lineage_mean_retained": {
+    "D01": 0.468376,
+    "D02": 0.365234,
+    "D03": 0.385925,
+    "D04": 0.385579,
+    "D05": 0.319336,
+    "D06": 0.405273,
+    "D07": 0.457031,
+    "D09": 0.313477
+   },
+   "max_retained": 1.0,
+   "min_retained": 0.285714,
+   "missed_starts": 0,
+   "status_counts": {
+    "abstain_cap": 0,
+    "normalisation_failed": 9,
+    "rejected": 0,
+    "selected": 38,
+    "unsupported": 3
+   }
+  },
+  "N2": {
+   "below_minimum_cells": 7,
+   "cell_weighted_retained": 0.342345,
+   "image_mean_retained": 0.396539,
+   "images_evaluated": 43,
+   "lineage_balanced_mean_retained": 0.423485,
+   "lineage_mean_retained": {
+    "D01": 0.392816,
+    "D02": 0.273438,
+    "D03": 0.307566,
+    "D04": 0.448568,
+    "D05": 0.348633,
+    "D06": 0.238932,
+    "D07": 1.0,
+    "D09": 0.37793
+   },
+   "max_retained": 1.0,
+   "min_retained": 0.026032,
+   "missed_starts": 0,
+   "status_counts": {
+    "abstain_cap": 1,
+    "normalisation_failed": 7,
+    "rejected": 0,
+    "selected": 39,
+    "unsupported": 3
+   }
+  },
+  "RAW": {
+   "below_minimum_cells": 0,
+   "cell_weighted_retained": 0.32861,
+   "image_mean_retained": 0.364397,
+   "images_evaluated": 43,
+   "lineage_balanced_mean_retained": 0.404966,
+   "lineage_mean_retained": {
+    "D01": 0.357482,
+    "D02": 0.25293,
+    "D03": 0.274984,
+    "D04": 0.395671,
+    "D05": 0.348633,
+    "D06": 0.23112,
+    "D07": 1.0,
+    "D09": 0.378906
+   },
+   "max_retained": 1.0,
+   "min_retained": 0.024127,
+   "missed_starts": 0,
+   "status_counts": {
+    "abstain_cap": 6,
+    "normalisation_failed": 0,
+    "rejected": 0,
+    "selected": 41,
+    "unsupported": 3
+   }
+  }
+ },
+ "tau_star": {
+  "N1": 0.214673,
+  "N2": 1.526949,
+  "RAW": -10.339092
+ }
+}
