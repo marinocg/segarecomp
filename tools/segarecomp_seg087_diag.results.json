@@ -21,7 +21,7 @@
     "sf2",
     "sk"
    ],
-   "usable_independent_witness": 0
+   "usable_independent_witness": 1
   },
   "lineage_weakest_cells": [
    {
@@ -157,7 +157,7 @@
     "lineage": "D10",
     "logit": 4.4522,
     "starts": 35,
-    "usable_independent_witness": false
+    "usable_independent_witness": true
    },
    {
     "category": "DATA_DOMINATED_FRAGMENT",
@@ -172,7 +172,7 @@
     "lineage": "D11",
     "logit": 3.9501,
     "starts": 7,
-    "usable_independent_witness": false
+    "usable_independent_witness": true
    },
    {
     "category": "PURE_CODE",
@@ -187,12 +187,12 @@
     "lineage": "D12",
     "logit": -7.0228,
     "starts": 43,
-    "usable_independent_witness": false
+    "usable_independent_witness": true
    }
   ]
  },
  "cell_bytes": 128,
- "cpu_seconds": 6.0,
+ "cpu_seconds": 6.2,
  "data_boundary": "aggregates only; per-cell arrays stay in the ignored cache",
  "feature_character_medians": {
   "low_tail_D01": {
@@ -673,6 +673,13 @@
    "t0_lineage": "D01"
   },
   "remove_independent_witnessed": {
+   "shortfall": 3.9652,
+   "shortfall_calibration_minimum_lineage": "D03",
+   "shortfall_held_out": "D01",
+   "t0": -10.3391,
+   "t0_lineage": "D01"
+  },
+  "remove_independent_witnessed_seed_roots_only": {
    "shortfall": 3.3163,
    "shortfall_calibration_minimum_lineage": "D12",
    "shortfall_held_out": "D01",
@@ -680,8 +687,8 @@
    "t0_lineage": "D01"
   },
   "remove_unrooted_target_witnessed_NON_INDEPENDENT_UPPER_BOUND": {
-   "shortfall": 2.0563,
-   "shortfall_calibration_minimum_lineage": "D12",
+   "shortfall": 3.1403,
+   "shortfall_calibration_minimum_lineage": "D03",
    "shortfall_held_out": "D01",
    "t0": -9.0792,
    "t0_lineage": "D01"
@@ -709,10 +716,14 @@
     "count": 13122,
     "share": 0.925
    },
+   "W_VECTOR_ROOTED": {
+    "count": 1321,
+    "share": 0.0931
+   },
    "cells": 14186,
    "usable_independent": {
-    "count": 1327,
-    "share": 0.0935
+    "count": 1744,
+    "share": 0.1229
    }
   },
   "image_weakest_negative": {
@@ -736,10 +747,14 @@
     "count": 8,
     "share": 0.4706
    },
+   "W_VECTOR_ROOTED": {
+    "count": 1,
+    "share": 0.0588
+   },
    "cells": 17,
    "usable_independent": {
-    "count": 0,
-    "share": 0.0
+    "count": 1,
+    "share": 0.0588
    }
   },
   "image_weakest_negative_seeded_only": {
@@ -762,6 +777,10 @@
    "W_UNROOTED_TARGET": {
     "count": 8,
     "share": 0.5
+   },
+   "W_VECTOR_ROOTED": {
+    "count": 0,
+    "share": 0.0
    },
    "cells": 16,
    "usable_independent": {
@@ -790,10 +809,14 @@
     "count": 7,
     "share": 0.6364
    },
+   "W_VECTOR_ROOTED": {
+    "count": 4,
+    "share": 0.3636
+   },
    "cells": 11,
    "usable_independent": {
-    "count": 1,
-    "share": 0.0909
+    "count": 4,
+    "share": 0.3636
    }
   },
   "low_tail": {
@@ -817,10 +840,14 @@
     "count": 80,
     "share": 0.3902
    },
+   "W_VECTOR_ROOTED": {
+    "count": 50,
+    "share": 0.2439
+   },
    "cells": 205,
    "usable_independent": {
-    "count": 4,
-    "share": 0.0195
+    "count": 51,
+    "share": 0.2488
    }
   },
   "low_tail_by_group": {
@@ -844,6 +871,10 @@
     "W_UNROOTED_TARGET": {
      "count": 80,
      "share": 0.5063
+    },
+    "W_VECTOR_ROOTED": {
+     "count": 3,
+     "share": 0.019
     },
     "cells": 158,
     "usable_independent": {
@@ -872,10 +903,14 @@
      "count": 0,
      "share": 0.0
     },
+    "W_VECTOR_ROOTED": {
+     "count": 47,
+     "share": 1.0
+    },
     "cells": 47,
     "usable_independent": {
-     "count": 0,
-     "share": 0.0
+     "count": 47,
+     "share": 1.0
     }
    }
   },
@@ -900,6 +935,10 @@
     "W_UNROOTED_TARGET": {
      "count": 65,
      "share": 0.4924
+    },
+    "W_VECTOR_ROOTED": {
+     "count": 0,
+     "share": 0.0
     },
     "cells": 132,
     "usable_independent": {
@@ -928,6 +967,10 @@
      "count": 15,
      "share": 0.5769
     },
+    "W_VECTOR_ROOTED": {
+     "count": 3,
+     "share": 0.1154
+    },
     "cells": 26,
     "usable_independent": {
      "count": 3,
@@ -955,10 +998,14 @@
      "count": 0,
      "share": 0.0
     },
+    "W_VECTOR_ROOTED": {
+     "count": 47,
+     "share": 1.0
+    },
     "cells": 47,
     "usable_independent": {
-     "count": 0,
-     "share": 0.0
+     "count": 47,
+     "share": 1.0
     }
    }
   },
@@ -976,7 +1023,7 @@
     26
    ],
    "PURE_CODE": [
-    2,
+    49,
     57
    ],
    "SINGLE_START_FRAGMENT": [
@@ -1005,6 +1052,10 @@
     "count": 80,
     "share": 0.5063
    },
+   "W_VECTOR_ROOTED": {
+    "count": 3,
+    "share": 0.019
+   },
    "cells": 158,
    "usable_independent": {
     "count": 4,
@@ -1032,10 +1083,14 @@
     "count": 0,
     "share": 0.0
    },
+   "W_VECTOR_ROOTED": {
+    "count": 47,
+    "share": 1.0
+   },
    "cells": 47,
    "usable_independent": {
-    "count": 0,
-    "share": 0.0
+    "count": 47,
+    "share": 1.0
    }
   },
   "negatives_false_witness": {
@@ -1060,9 +1115,13 @@
      "count": 39307,
      "share": 0.5321
     },
+    "W_VECTOR_ROOTED": {
+     "count": 1,
+     "share": 0.0
+    },
     "cells": 73870,
     "usable_independent": {
-     "count": 1,
+     "count": 2,
      "share": 0.0
     }
    },
@@ -1086,6 +1145,10 @@
     "W_UNROOTED_TARGET": {
      "count": 1730,
      "share": 0.1853
+    },
+    "W_VECTOR_ROOTED": {
+     "count": 0,
+     "share": 0.0
     },
     "cells": 9334,
     "usable_independent": {
@@ -1115,10 +1178,14 @@
     "count": 13042,
     "share": 0.9328
    },
+   "W_VECTOR_ROOTED": {
+    "count": 1271,
+    "share": 0.0909
+   },
    "cells": 13981,
    "usable_independent": {
-    "count": 1323,
-    "share": 0.0946
+    "count": 1693,
+    "share": 0.1211
    }
   }
  },
@@ -1126,7 +1193,7 @@
   "D01": {
    "cells": 51295,
    "nonseed_positive_with_independent_witness": [
-    380,
+    381,
     9052
    ],
    "seed_cells": 631
@@ -1190,7 +1257,7 @@
   "D10": {
    "cells": 3072,
    "nonseed_positive_with_independent_witness": [
-    0,
+    15,
     283
    ],
    "seed_cells": 0
@@ -1198,7 +1265,7 @@
   "D11": {
    "cells": 2048,
    "nonseed_positive_with_independent_witness": [
-    0,
+    178,
     179
    ],
    "seed_cells": 0
@@ -1206,7 +1273,7 @@
   "D12": {
    "cells": 2048,
    "nonseed_positive_with_independent_witness": [
-    0,
+    223,
     312
    ],
    "seed_cells": 0

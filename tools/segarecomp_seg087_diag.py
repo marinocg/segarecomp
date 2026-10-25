@@ -14,6 +14,9 @@ Witnesses (all label-free):
                      low despite this witness is a ranking limit of the model, not missing evidence.
   W_REACH_TARGET     a direct edge whose SOURCE word is seed-reached lands in the cell (subset of the above by construction; reported for completeness).
   W_RELOC            a trusted relocation field lies in the cell (no Genesis development image carries any; the field exists for relocatable images).
+  W_VECTOR_ROOTED    a word of the cell is reachable (same edges) from the program-counter entries of the 68000 exception-vector table in the image header
+                     (longwords at offsets 4..0xFF that are even and inside the image). INDEPENDENT (header metadata, no labels); added after review because the
+                     three unseeded images have no seed roots, so seed-rooted reach is undefined there.
   W_UNROOTED_TARGET  a direct edge from ANY decoder-ordinary word (reached or not) lands in the cell. NOT independent: arbitrary decodable bytes produce such edges.
   W_DECODE_CHAIN     a run of at least 8 consecutive decoder-ordinary words starts in the cell. NOT independent (the decoder accepts most data).
 Only the first three can serve as a code root. The other two are measured so the report can show how non-specific they are.
@@ -46,7 +49,7 @@ CHAIN_RUN = 8
 TERMINATING = (2, 4, 6)       # token control: direct jump, dynamic jump, return
 CATEGORIES = ("AMBIGUOUS_UNKNOWN", "PURE_CODE", "SINGLE_START_FRAGMENT", "DATA_DOMINATED_FRAGMENT", "MIXED_CODE_DATA")
 ENTRIES = ("IMAGE_START", "AFTER_DATA", "AFTER_UNKNOWN", "AFTER_TERMINATOR", "FALLTHROUGH_FROM_CODE", "NO_START")
-INDEPENDENT = ("W_REACH_ROOTED", "W_REACH_TARGET", "W_RELOC")
+INDEPENDENT = ("W_REACH_ROOTED", "W_REACH_TARGET", "W_RELOC", "W_VECTOR_ROOTED")
 HEURISTIC = ("W_UNROOTED_TARGET", "W_DECODE_CHAIN")
 
 
@@ -117,7 +120,36 @@ def subcell_resolution(chunk: bytes, sub: int) -> dict:
             "start_bearing": code_subcells, "resolved": mixed == 0 and unknown == 0}
 
 
-def witness_flags(cell_words: int, n_cells: int, reach, target, ordinary, chain, relocs, reloc_cell_bytes: int = CELL) -> dict:
+def vector_roots(rom: bytes, n_words: int) -> list:
+    """Word indices of the exception-vector program-counter entries (longwords 1..63 of the header; the initial stack pointer is not code). Even, in-image only."""
+    out = []
+    for i in range(1, 64):
+        if 4 * i + 4 > len(rom):
+            break
+        a = int.from_bytes(rom[4 * i:4 * i + 4], "big")
+        if a % 2 == 0 and 0 < a // 2 < n_words:
+            out.append(a // 2)
+    return sorted(set(out))
+
+
+def reach_from(roots, ordinary, length, control, target) -> list:
+    """Words reachable from `roots` by fall-through (unless the instruction terminates) and direct edges, over decoder-ordinary words (same rule as model A's `reach`)."""
+    n = len(ordinary)
+    seen = [False] * n
+    stack = [w for w in roots if 0 <= w < n]
+    while stack:
+        w = stack.pop()
+        if w < 0 or w >= n or seen[w] or not ordinary[w]:
+            continue
+        seen[w] = True
+        if control[w] not in TERMINATING:
+            stack.append(w + max(1, int(length[w])))
+        if target[w] >= 0:
+            stack.append(int(target[w]))
+    return seen
+
+
+def witness_flags(cell_words: int, n_cells: int, reach, target, ordinary, chain, relocs, reloc_cell_bytes: int = CELL, vreach=None) -> dict:
     """Per-cell boolean witness arrays (lists) from per-word structural arrays (pure; `reach`, `ordinary`: bool lists/arrays, `target`: word index or -1, `chain`: run length).
     Words are mapped to cells with the model-A convention (cell = word // cell_words, clamped)."""
     def cw(w):
@@ -136,6 +168,9 @@ def witness_flags(cell_words: int, n_cells: int, reach, target, ordinary, chain,
     for w, c in enumerate(chain):
         if c >= CHAIN_RUN and ordinary[w]:
             out["W_DECODE_CHAIN"][cw(w)] = True
+    for w, r in enumerate(vreach if vreach is not None else ()):
+        if r:
+            out["W_VECTOR_ROOTED"][cw(w)] = True
     for off, _w in relocs:
         out["W_RELOC"][min(int(off) // reloc_cell_bytes, n_cells - 1)] = True
     return out
@@ -246,7 +281,8 @@ def cmd_run(a) -> int:
         seeds = {c for c in im.seeds if 0 <= c < im.n_cells}
         st = xm.structure(im)
         relocs = xm.relocs_of(im)
-        fl = witness_flags(64, im.n_cells, st["reach"], st["target"], st["ordinary"], st["chain"], relocs)
+        vr = reach_from(vector_roots(im.rom, im.n_words), st["ordinary"], st["length"], st["control"], st["target"])
+        fl = witness_flags(64, im.n_cells, st["reach"], st["target"], st["ordinary"], st["chain"], relocs, vreach=vr)
         ctl = _controls_by_start(im, np)
         la_src, la_dst = label_audit_cells(im, st, np)
         reg = {p: retained_by_budget(sc, seeds, p) for p in (35, 45, 50)}
@@ -360,6 +396,7 @@ def cmd_run(a) -> int:
     out["threshold_effect_of_witness_removal"] = {
         "baseline": lineage_minima_driver(minima),
         "remove_independent_witnessed": lineage_minima_driver(minima_without(lambda r: usable_witness(r["w"]))),
+        "remove_independent_witnessed_seed_roots_only": lineage_minima_driver(minima_without(lambda r: r["w"]["W_REACH_ROOTED"] or r["w"]["W_REACH_TARGET"] or r["w"]["W_RELOC"])),
         "remove_unrooted_target_witnessed_NON_INDEPENDENT_UPPER_BOUND": lineage_minima_driver(minima_without(lambda r: r["w"]["W_UNROOTED_TARGET"] or usable_witness(r["w"]))),
         "remove_all_five_witnesses_NON_INDEPENDENT_UPPER_BOUND": lineage_minima_driver(minima_without(lambda r: any(r["w"].values()))),
         "note": "removing a witnessed cell from the lineage minimum is what a perfect rescue of those cells would do to the calibration; the threshold is set by the weakest UNRESCUED positive"}

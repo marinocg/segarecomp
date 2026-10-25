@@ -94,6 +94,27 @@ def test_contradictory_and_out_of_range_candidates_fail_closed():
     check(f["W_RELOC"] == [False, False, False, True], "an out-of-range relocation clamps to the last cell, never raises")
 
 
+def test_vector_roots_and_reach():
+    rom = bytearray(512)
+    rom[0:4] = (0x1000).to_bytes(4, "big")            # initial SP: not a root
+    rom[4:8] = (0x100).to_bytes(4, "big")             # reset PC
+    rom[8:12] = (0x101).to_bytes(4, "big")            # odd: rejected
+    rom[12:16] = (0xFFFFFF).to_bytes(4, "big")        # outside the image: rejected
+    check(dg.vector_roots(bytes(rom), 256) == [128], "even in-image PC entries only")
+    ordn = [True] * 256
+    length = [1] * 256
+    control = [0] * 256
+    control[128] = 2                                  # terminating direct jump with an edge
+    target = [-1] * 256
+    target[128] = 200
+    r = dg.reach_from([128], ordn, length, control, target)
+    check(r[128] and r[200] and not r[129] and not r[201 - 1 - 1] or r[200], "direct edge followed, terminator does not fall through")
+    check(not r[129], "terminating instruction does not fall through")
+    check(dg.reach_from([300, -1], ordn, length, control, target) == [False] * 256, "out-of-range roots ignored")
+    f = dg.witness_flags(64, 4, [False] * 256, [-1] * 256, ordn, [0] * 256, [], vreach=r)
+    check(f["W_VECTOR_ROOTED"] == [False, False, True, True] and dg.usable_witness({k: f[k][2] for k in f}), "vector-rooted witness is independent")
+
+
 def test_missing_seed_universe_has_no_rooted_witness():
     reach, target, ordn, chain = _structure(reach=[], targets=[(3, 70)])
     f = dg.witness_flags(64, 4, reach, target, ordn, chain, [])
