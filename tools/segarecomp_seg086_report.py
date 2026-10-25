@@ -81,6 +81,23 @@ def threshold_vs_plateau(nested: dict, results: dict, recs, variant: str) -> dic
     return {"tau_range": [r4(min(taus)), r4(max(taus))], "fraction_of_cells_at_or_above_tau": {"min": r4(min(fr)), "median": r4(statistics.median(fr)), "max": r4(max(fr))} if fr else None, "images": len(fr)}
 
 
+def low_tail_character(recs) -> dict:
+    """Descriptive (after the decision rule was applied): what kind of cell are the verified non-seed positives that score below 0 (inside the data plateau) compared with the rest?"""
+    import segarecomp_seg085_diag as sd
+    low, rest = {"cells": 0, "mixed_with_data": 0, "mostly_data": 0, "single_start": 0}, {"cells": 0, "mixed_with_data": 0, "mostly_data": 0, "single_start": 0}
+    for r in recs:
+        lab = r["labels"]
+        st, dt, _ = sd.cell_stats(r["classes"], lab)
+        for c, y in enumerate(lab):
+            if y == 1 and c not in r["seeds"]:
+                d = low if r["scores"][c] < 0.0 else rest
+                d["cells"] += 1
+                d["mixed_with_data"] += dt[c] > 0
+                d["mostly_data"] += dt[c] * 2 > v3.CELL_BYTES
+                d["single_start"] += st[c] == 1
+    return {"below_zero": low, "at_or_above_zero": rest, "note": "counts only; the low-tail positives are mostly mixed or data-dominated 128-byte cells containing few instruction starts"}
+
+
 def main() -> int:
     res = json.loads(cal.RESULTS.read_text())
     imgs, recs = cal.load_records()
@@ -93,7 +110,7 @@ def main() -> int:
            "retention": {"primary_" + chosen: retention_stats(first["rows"][chosen]), "plain_min_diagnostic_" + chosen: retention_stats(first["plain_min_rows"][chosen]),
                          **{"diagnostic_" + v: retention_stats(first["rows"][v]) for v in ("RAW", "N1") if v != chosen}},
            "disclosed_misses": [m for v in ("RAW", "N1", "N2") for m in classify_misses(v, first, recs, first["rows"][v])] + [dict(m, rule="plain_minimum_diagnostic") for v in ("RAW", "N1", "N2") for m in classify_misses(v, {"folds": {L: {v: {"tau": f[v]["T0"]}} for L, f in first["folds"].items()}}, recs, first["plain_min_rows"][v])],
-           "threshold_vs_plateau": threshold_vs_plateau(first, res, recs, chosen), "validator_rejections": "none: no proposal was passed to the closure and validator (the frozen policy abstains on every domain image, and the economics gate was not reached)",
+           "low_tail_positive_character": low_tail_character(recs), "threshold_vs_plateau": threshold_vs_plateau(first, res, recs, chosen), "validator_rejections": "none: no proposal was passed to the closure and validator (the frozen policy abstains on every domain image, and the economics gate was not reached)",
            "seed_and_closure_effects": "offline only: seeds are united with every selection (seed-only cells are reported per selected row); structural closure was not evaluated because no region was proposed",
            "normalisation_failures": {"primary_domain": sum(1 for r in first["rows"][chosen].values() if r["status"] == "normalisation_failed" and r.get("reason") != "too_few_cells" and not r["all_code"]),
                                       "below_minimum_cells": sum(1 for r in first["rows"][chosen].values() if r.get("reason") == "too_few_cells")}}

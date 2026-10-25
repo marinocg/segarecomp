@@ -56,6 +56,21 @@
    "variant": "N1"
   }
  ],
+ "low_tail_positive_character": {
+  "at_or_above_zero": {
+   "cells": 13981,
+   "mixed_with_data": 4557,
+   "mostly_data": 953,
+   "single_start": 29
+  },
+  "below_zero": {
+   "cells": 205,
+   "mixed_with_data": 148,
+   "mostly_data": 122,
+   "single_start": 26
+  },
+  "note": "counts only; the low-tail positives are mostly mixed or data-dominated 128-byte cells containing few instruction starts"
+ },
  "normalisation_failures": {
   "below_minimum_cells": 7,
   "primary_domain": 0
