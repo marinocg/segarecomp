@@ -1,0 +1,123 @@
+{
+ "abstention": [
+  "unsupported (no independently established seed universe)",
+  "rejected (non-finite score, empty image, bad threshold)",
+  "normalisation_failed (fewer than min_cells cells, scale below floor, non-finite normalised score)",
+  "abstain_cap (selected fraction above the cap)"
+ ],
+ "adr": "0195/0196",
+ "bound_files": {
+  "tools/segarecomp_ml_v3.py": "ef18ab40e1da9f25ecc4e1e0a9f0f630453fc8e15b13812750e133d8998947ba",
+  "tools/segarecomp_sample_roles.py": "bcc1aae37ceddd23b3e772cdf2b7ea02a3170c2530253e9b1b230a6edeae115d",
+  "tools/segarecomp_seg085_cohort.manifest.json": "b6aee5f448141b69eab67a561c70081a2003c6642adc8bea61ad64f36d1872b7",
+  "tools/segarecomp_seg085_dyn.py": "5d5a2b352b017e0cd0fa03f3c9ed31afa51e5f009b74191e1ad32770933a46d6",
+  "tools/segarecomp_seg086_cal.py": "125c7424c87f3d48b6dcf6c87b15446d443f1a8ad00c8166de2c2bb3723b0125",
+  "tools/segarecomp_seg086_cal.selection.json": "18a3aa61e1b9ff589071eaae84092ebc858f5ce63c87b78dea5d2865684e0ddd",
+  "tools/segarecomp_seg086_diag.py": "9477b9dc87b39313c9b10ddbada4b8619a4237846f5d03ef7b65862be43a2873",
+  "tools/segarecomp_seg086_norm.py": "b10e74c19eb61de93ba42064d3948a5c4538802749a5bda0718f8f9514cc127a",
+  "tools/segarecomp_xplat_models.py": "3eabc2ed412ec3088938061af5a76b53f5b7fcf55deefdfd82031f533f268f8b"
+ },
+ "calibration": {
+  "cap": 0.6,
+  "diagnostic_only": "plain minimum rule without margin (never the policy)",
+  "fitting_lineages": [
+   "D01",
+   "D02",
+   "D03",
+   "D04",
+   "D05",
+   "D06",
+   "D07",
+   "D09",
+   "D10",
+   "D11",
+   "D12"
+  ],
+  "isolation": "calibration records of lineage C for held-out H come from the SEG-085 inner refit H.C (model trained on neither H nor C); the held-out lineage is scored by its own leave-one-lineage-out model; LeakageError otherwise",
+  "low_tail_treatment": "no trimming: every verified non-seed positive of every calibration image enters the lineage minimum; images whose normalisation fails are skipped (they fall back to broad AOT)",
+  "minimum_fitting_lineages": 2,
+  "rule": "tau = T0 - shortfall in the chosen space (SEG-085 DYN_SCORE rule: lowest lineage-minimum weakest-positive score minus the largest leave-one-lineage-out miss of the plain minimum rule)",
+  "safety_margin": "shortfall (leave-one-lineage-out, calibration lineages only)"
+ },
+ "compute_ceilings_cpu_hours": {
+  "calibration_and_refits": 8,
+  "economics": 12
+ },
+ "decision_ladder": [
+  "EVIDENCE_INSUFFICIENT",
+  "RANKING_LIMITATION",
+  "RECALL_FAILED",
+  "CALIBRATION_INEFFECTIVE",
+  "GATES_PASSED_ECONOMICS_REQUIRED -> economics -> SCORE_CALIBRATION_FEASIBLE | CALIBRATION_INEFFECTIVE | RECALL_FAILED"
+ ],
+ "economics": {
+  "benchmark": "SEG-074/076 exact-code benchmark (unchanged settings)",
+  "cpu_ceiling_hours": 12,
+  "overhead": "normalisation and inference CPU is added to the policy cost",
+  "policies": [
+   "deployed incremental",
+   "A+B50",
+   "historical ADAPT",
+   "normalised dynamic",
+   "broad AOT"
+  ],
+  "run_only_if": "all development gates pass"
+ },
+ "gates": {
+  "cell_weighted_retained_max": 0.4,
+  "distinct_from_fixed_budgets_share_min": 0.5,
+  "economics_regression_vs_incremental_max": 0.05,
+  "economics_saving_vs_b50_min": 0.1,
+  "fallback_cell_share_max": 0.25,
+  "fallback_image_share_max": 0.25,
+  "lineage_balanced_mean_retained_max": 0.4,
+  "min_evaluable_lineages": 8,
+  "min_selected_images": 5,
+  "oracle_over_cap_share_max": 0.2,
+  "retained_spread_min": 0.15,
+  "retained_std_min": 0.05
+ },
+ "h01": "REUSED_HISTORICAL_DIAGNOSTIC - NOT INDEPENDENT CONFIRMATION; evaluated only after this plan and the development results are frozen; never counted toward a fresh minimum",
+ "normaliser": {
+  "chosen": "N2",
+  "iqr_floor": 0.5,
+  "min_cells": 64,
+  "rule": "ADR 0195 selection rule incl. its two recorded amendments",
+  "secondary_diagnostics": [
+   "N1"
+  ]
+ },
+ "populations": {
+  "all_code_images": "excluded from the domain and counted",
+  "primary": "historical commercial-era Genesis (D01-D04)",
+  "robustness": "modern SGDK (D05-D12)"
+ },
+ "protocol": "seg086.protocol.v1",
+ "reference_model": {
+  "config": {
+   "class_weight": "balanced",
+   "early_stopping": false,
+   "l2_regularization": 1.0,
+   "learning_rate": 0.05,
+   "max_bins": 255,
+   "max_depth": 6,
+   "max_iter": 300,
+   "min_samples_leaf": 40,
+   "random_state": 49
+  },
+  "inner_refit_bitwise_spot_checks": [
+   [
+    "D09",
+    "D05"
+   ],
+   [
+    "D12",
+    "D01"
+   ]
+  ],
+  "inner_refit_digest": "bbc21e44a09a57845fe47727e97cabb647f7e9f2a97a51d8f2ca2813035b7a6e",
+  "name": "structural model A (SEG-076, unchanged)",
+  "oof_scores_digest": "85eeead2313ac19b1471b76e3fdccaa2e3fa1a1c3fce1c2fe48311dc7f13a9ec"
+ },
+ "schema": "segarecomp.seg086.cal.v1.plan"
+}
