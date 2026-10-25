@@ -1,0 +1,189 @@
+{
+ "chosen_normaliser": "N2",
+ "disclosed_misses": [
+  {
+   "cells_before_seeds": 4580,
+   "image": "sk",
+   "in_mixed_code_data_cells": 1,
+   "in_pure_code_cells": 0,
+   "lineage": "D01",
+   "missed_starts": 1,
+   "seed_only_cells": 0,
+   "variant": "N1"
+  },
+  {
+   "cells_before_seeds": 2345,
+   "image": "s2",
+   "in_mixed_code_data_cells": 1,
+   "in_pure_code_cells": 0,
+   "lineage": "D01",
+   "missed_starts": 1,
+   "rule": "plain_minimum_diagnostic",
+   "seed_only_cells": 0,
+   "variant": "RAW"
+  },
+  {
+   "cells_before_seeds": 2545,
+   "image": "s2",
+   "in_mixed_code_data_cells": 1,
+   "in_pure_code_cells": 0,
+   "lineage": "D01",
+   "missed_starts": 1,
+   "rule": "plain_minimum_diagnostic",
+   "seed_only_cells": 0,
+   "variant": "N1"
+  },
+  {
+   "cells_before_seeds": 78,
+   "image": "scd/SPMM__.MMD",
+   "in_mixed_code_data_cells": 8,
+   "in_pure_code_cells": 0,
+   "lineage": "D01",
+   "missed_starts": 8,
+   "rule": "plain_minimum_diagnostic",
+   "seed_only_cells": 0,
+   "variant": "N1"
+  },
+  {
+   "cells_before_seeds": 4398,
+   "image": "sk",
+   "in_mixed_code_data_cells": 6,
+   "in_pure_code_cells": 0,
+   "lineage": "D01",
+   "missed_starts": 6,
+   "rule": "plain_minimum_diagnostic",
+   "seed_only_cells": 0,
+   "variant": "N1"
+  }
+ ],
+ "normalisation_failures": {
+  "below_minimum_cells": 7,
+  "primary_domain": 0
+ },
+ "plan_sha256": "d5b2d43db248959df434b756a01d29096797af9fcdfb506e58983dae92b90ba1",
+ "reproduces_stored_results": true,
+ "retention": {
+  "diagnostic_N1": {
+   "all_code_images": 4,
+   "below_minimum_cells_images": 7,
+   "domain_images": 40,
+   "fallback_reasons": {
+    "abstain_cap": 8,
+    "normalisation_failed:scale_below_floor": 2,
+    "selected": 30
+   },
+   "lineage_mean": {
+    "D01": 0.4017,
+    "D02": 1.0,
+    "D03": 1.0,
+    "D04": 1.0,
+    "D05": 1.0,
+    "D06": 1.0,
+    "D07": 1.0,
+    "D09": 1.0
+   },
+   "max": 1.0,
+   "mean": 0.5214,
+   "median": 0.3772,
+   "min": 0.2755,
+   "non_fallback_images": 30,
+   "unsupported_images": 3,
+   "worst_lineage": "D09",
+   "worst_lineage_mean": 1.0
+  },
+  "diagnostic_RAW": {
+   "all_code_images": 4,
+   "below_minimum_cells_images": 0,
+   "domain_images": 40,
+   "fallback_reasons": {
+    "abstain_cap": 40
+   },
+   "lineage_mean": {
+    "D01": 1.0,
+    "D02": 1.0,
+    "D03": 1.0,
+    "D04": 1.0,
+    "D05": 1.0,
+    "D06": 1.0,
+    "D07": 1.0,
+    "D09": 1.0
+   },
+   "max": 1.0,
+   "mean": 1.0,
+   "median": 1.0,
+   "min": 1.0,
+   "non_fallback_images": 0,
+   "unsupported_images": 3,
+   "worst_lineage": "D09",
+   "worst_lineage_mean": 1.0
+  },
+  "plain_min_diagnostic_N2": {
+   "all_code_images": 4,
+   "below_minimum_cells_images": 7,
+   "domain_images": 40,
+   "fallback_reasons": {
+    "abstain_cap": 3,
+    "selected": 37
+   },
+   "lineage_mean": {
+    "D01": 0.3491,
+    "D02": 0.2705,
+    "D03": 1.0,
+    "D04": 0.4155,
+    "D05": 0.3496,
+    "D06": 0.2803,
+    "D07": 1.0,
+    "D09": 0.4023
+   },
+   "max": 1.0,
+   "mean": 0.3972,
+   "median": 0.3825,
+   "min": 0.0298,
+   "non_fallback_images": 37,
+   "unsupported_images": 3,
+   "worst_lineage": "D07",
+   "worst_lineage_mean": 1.0
+  },
+  "primary_N2": {
+   "all_code_images": 4,
+   "below_minimum_cells_images": 7,
+   "domain_images": 40,
+   "fallback_reasons": {
+    "abstain_cap": 40
+   },
+   "lineage_mean": {
+    "D01": 1.0,
+    "D02": 1.0,
+    "D03": 1.0,
+    "D04": 1.0,
+    "D05": 1.0,
+    "D06": 1.0,
+    "D07": 1.0,
+    "D09": 1.0
+   },
+   "max": 1.0,
+   "mean": 1.0,
+   "median": 1.0,
+   "min": 1.0,
+   "non_fallback_images": 0,
+   "unsupported_images": 3,
+   "worst_lineage": "D09",
+   "worst_lineage_mean": 1.0
+  }
+ },
+ "schema": "segarecomp.seg086.report.v1",
+ "seed_and_closure_effects": "offline only: seeds are united with every selection (seed-only cells are reported per selected row); structural closure was not evaluated because no region was proposed",
+ "threshold_vs_plateau": {
+  "fraction_of_cells_at_or_above_tau": {
+   "max": 1.0,
+   "median": 1.0,
+   "min": 1.0
+  },
+  "images": 40,
+  "tau_range": [
+   -4.8955,
+   -1.1409
+  ]
+ },
+ "validator_rejections": "none: no proposal was passed to the closure and validator (the frozen policy abstains on every domain image, and the economics gate was not reached)"
+}
