@@ -144,8 +144,15 @@ def cmd_econ(a) -> int:
                 distinct.setdefault(tuple(cells), []).append(pol)
         res = {"sha256": m["sha256"], "strategies": {}, "policy_to_region": {}}
         t0 = time.time()
-        r = o.measure_image(str(cli), rom, m["sha256"], classes, seeds, None, work / iid.replace("/", "@@") / "w_BROAD", SETTINGS["cc"], SETTINGS["opt"],
+        try:
+            r = o.measure_image(str(cli), rom, m["sha256"], classes, seeds, None, work / iid.replace("/", "@@") / "w_BROAD", SETTINGS["cc"], SETTINGS["opt"],
                             SETTINGS["jobs"], SETTINGS["frames"], SETTINGS["timeout"], strategies=("BROAD",), cache=SETTINGS["cache"])
+        except Exception as e:                                   # the broad reference itself cannot be built: an economics coverage gap, recorded, never substituted
+            res["coverage_gap"] = {"stage": "BROAD", "error": str(e)[:300]}
+            (work / iid.replace("/", "@@")).mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(res, indent=1, sort_keys=True))
+            print(f"{iid}: COVERAGE GAP {res['coverage_gap']['error'][:80]}", file=sys.stderr, flush=True)
+            continue
         res["strategies"]["BROAD"] = o.public(r["strategies"]["BROAD"])
         res["universe"], res["labelled_starts_in_universe"] = r["universe"], r["labelled_starts_in_universe"]
         for k, (cells, pols) in enumerate(sorted(distinct.items(), key=lambda kv: kv[1])):
@@ -167,6 +174,85 @@ def cmd_econ(a) -> int:
     return 0
 
 
+def cmd_econ_inc(a) -> int:
+    """Same-benchmark measurement of the deployed incremental route (INC: native gen2 M3 + B35 admission) for the economics images."""
+    o = ob()
+    cli = pathlib.Path(a.cli).resolve()
+    work = pathlib.Path(a.work).resolve()
+    sets = json.loads(pathlib.Path(a.regions).read_text())
+    for iid, spec in sets.items():
+        out = work / iid.replace("/", "@@") / "inc.json"
+        if out.exists():
+            continue
+        d = pathlib.Path(spec["dir"])
+        m = json.loads((d / "meta.json").read_text())
+        r = o.measure_image(str(cli), pathlib.Path(m["image"]), m["sha256"], (d / "classes.bin").read_bytes(), json.loads((d / "seeds.json").read_text()), None,
+                            work / iid.replace("/", "@@") / "w_INC", SETTINGS["cc"], SETTINGS["opt"], SETTINGS["jobs"], SETTINGS["frames"], SETTINGS["timeout"],
+                            strategies=("INC",), cache=False)
+        import shutil
+        shutil.rmtree(work / iid.replace("/", "@@") / "w_INC", ignore_errors=True)
+        out.write_text(json.dumps(o.public(r["strategies"].get("INC", {})), indent=1, sort_keys=True))
+        print(f"{iid}: INC measured", file=sys.stderr, flush=True)
+    return 0
+
+
+def cost_of(res: dict, policy: str, inc: dict | None = None):
+    """Total build CPU of a policy for one image from the measured strategies. Abstention/unsupported = the same-session BROAD cost; a validator
+    rejection followed by the broad fallback is charged in full (rejected plan CPU + BROAD). Returns (cpu, kind, record)."""
+    broad = res["strategies"]["BROAD"]
+    name = res["policy_to_region"].get(policy)
+    if name is None:
+        return broad["total_cpu"], "broad_abstain", broad
+    rec = res["strategies"][name]
+    if not rec.get("accepted", False) or "total_cpu" not in rec:
+        return rec.get("plan_cpu", 0.0) + broad["total_cpu"], "rejected_then_broad", rec
+    return rec["total_cpu"], "selective", rec
+
+
+def cmd_econ_table(a) -> int:
+    work = pathlib.Path(a.work).resolve()
+    groups = {"independent_historical": ["h01@@ps4"], "development_historical": ["s1", "s2", "sk", "flicky", "sf1", "sf2", "ps2"], "development_sgdk": ["d05", "d06", "d07", "d09"]}
+    out = {"schema": SCHEMA + ".economics", "settings": SETTINGS, "groups": {}, "images": {}}
+    for g, ids in groups.items():
+        agg = {p: 0.0 for p in ("BROAD",) + POLICIES[1:]}
+        agg["INC"] = 0.0
+        gen = {p: 0 for p in agg}
+        n = 0
+        for iid in ids:
+            f = work / iid / "econ.json"
+            if not f.is_file():
+                continue
+            res = json.loads(f.read_text())
+            inc = json.loads((work / iid / "inc.json").read_text()) if (work / iid / "inc.json").is_file() else None
+            row = {"universe": res.get("universe"), "labelled_starts_in_universe": res.get("labelled_starts_in_universe"), "policies": {}}
+            row["BROAD"] = {"total_cpu": res["strategies"]["BROAD"]["total_cpu"], "compile_cpu": res["strategies"]["BROAD"]["compile_cpu"],
+                            "generated_bytes": res["strategies"]["BROAD"]["generated_bytes"]}
+            agg["BROAD"] += row["BROAD"]["total_cpu"]
+            for p in ("B50", "ADAPT", "DYN_SCORE"):
+                if p not in res["policy_to_region"] and not (p in ("DYN_SCORE", "ADAPT")):
+                    continue
+                cpu, kind, rec = cost_of(res, p)
+                rt, rb = rec.get("runtime") or {}, res["strategies"]["BROAD"].get("runtime") or {}
+                eq = None if (kind != "selective" or not rt.get("ok") or not rb.get("ok")) else all(rt.get(k) == rb.get(k) for k in ("outcome", "frames", "final_state", "coverage", "frame_stream"))
+                row["policies"][p] = {"kind": kind, "total_cpu": round(cpu, 1), "c_outside_k": rec.get("c_outside_k"), "runtime_equal_to_broad": eq,
+                                      "accepted": rec.get("accepted"), "selected_cells": rec.get("selected_cells"), "generated_bytes": rec.get("generated_bytes"),
+                                      "compile_cpu": rec.get("compile_cpu"), "reason": rec.get("reason")}
+                agg[p] += cpu
+            if inc is not None and inc.get("total_cpu") is not None:
+                ri, rb2 = inc.get("runtime") or {}, res["strategies"]["BROAD"].get("runtime") or {}
+                row["INC"] = {"total_cpu": round(inc["total_cpu"], 1), "accepted": inc.get("accepted"),
+                              "runtime_equal_to_broad": (all(ri.get(k) == rb2.get(k) for k in ("outcome", "frames", "final_state", "coverage", "frame_stream")) if ri.get("ok") and rb2.get("ok") else None)}
+                agg["INC"] += inc["total_cpu"]
+            out["images"][iid] = row
+            n += 1
+        if n:
+            out["groups"][g] = {"images": n, "pooled_total_cpu": {k: round(v, 1) for k, v in agg.items() if v},
+                                "ratio_to_B50": {k: round(v / agg["B50"], 4) for k, v in agg.items() if v and agg["B50"]}}
+    pathlib.Path(a.out).write_text(json.dumps(out, indent=1, sort_keys=True))
+    print(json.dumps(out["groups"], sort_keys=True))
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -183,6 +269,15 @@ def main(argv=None) -> int:
     e.add_argument("--regions", required=True)
     e.add_argument("--work", required=True)
     e.set_defaults(func=cmd_econ)
+    ei = sub.add_parser("econ-inc")
+    ei.add_argument("--cli", required=True)
+    ei.add_argument("--regions", required=True)
+    ei.add_argument("--work", required=True)
+    ei.set_defaults(func=cmd_econ_inc)
+    et = sub.add_parser("econ-table")
+    et.add_argument("--work", required=True)
+    et.add_argument("--out", default=str(HERE / "segarecomp_seg085_eval.economics.json"))
+    et.set_defaults(func=cmd_econ_table)
     a = ap.parse_args(argv)
     return a.func(a)
 

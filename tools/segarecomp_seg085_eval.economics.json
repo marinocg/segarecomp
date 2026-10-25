@@ -1,0 +1,654 @@
+{
+ "groups": {
+  "development_historical": {
+   "images": 7,
+   "pooled_total_cpu": {
+    "ADAPT": 1670.2,
+    "B50": 2528.1,
+    "BROAD": 4758.5,
+    "DYN_SCORE": 4758.5,
+    "INC": 2027.5
+   },
+   "ratio_to_B50": {
+    "ADAPT": 0.6607,
+    "B50": 1.0,
+    "BROAD": 1.8822,
+    "DYN_SCORE": 1.8822,
+    "INC": 0.802
+   }
+  },
+  "development_sgdk": {
+   "images": 4,
+   "pooled_total_cpu": {
+    "ADAPT": 250.0,
+    "B50": 243.2,
+    "BROAD": 301.5,
+    "DYN_SCORE": 301.5,
+    "INC": 239.7
+   },
+   "ratio_to_B50": {
+    "ADAPT": 1.0282,
+    "B50": 1.0,
+    "BROAD": 1.24,
+    "DYN_SCORE": 1.24,
+    "INC": 0.9858
+   }
+  },
+  "independent_historical": {
+   "images": 1,
+   "pooled_total_cpu": {
+    "ADAPT": 790.0,
+    "B50": 1267.5,
+    "BROAD": 1872.2,
+    "DYN_SCORE": 1872.2,
+    "INC": 892.7
+   },
+   "ratio_to_B50": {
+    "ADAPT": 0.6232,
+    "B50": 1.0,
+    "BROAD": 1.4771,
+    "DYN_SCORE": 1.4771,
+    "INC": 0.7043
+   }
+  }
+ },
+ "images": {
+  "d05": {
+   "BROAD": {
+    "compile_cpu": 30.8823,
+    "generated_bytes": 16276574,
+    "total_cpu": 31.7292
+   },
+   "INC": {
+    "accepted": true,
+    "runtime_equal_to_broad": true,
+    "total_cpu": 24.2
+   },
+   "labelled_starts_in_universe": 3388,
+   "policies": {
+    "ADAPT": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 29.4141,
+     "generated_bytes": 14568096,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 492,
+     "total_cpu": 30.1
+    },
+    "B50": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 29.6827,
+     "generated_bytes": 14568096,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 512,
+     "total_cpu": 30.4
+    },
+    "DYN_SCORE": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 30.8823,
+     "generated_bytes": 16276574,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 31.7
+    }
+   },
+   "universe": 65160
+  },
+  "d06": {
+   "BROAD": {
+    "compile_cpu": 98.7431,
+    "generated_bytes": 54376418,
+    "total_cpu": 101.3925
+   },
+   "INC": {
+    "accepted": true,
+    "runtime_equal_to_broad": true,
+    "total_cpu": 60.8
+   },
+   "labelled_starts_in_universe": 6750,
+   "policies": {
+    "ADAPT": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 69.7184,
+     "generated_bytes": 36229928,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 1076,
+     "total_cpu": 71.6
+    },
+    "B50": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 88.3175,
+     "generated_bytes": 44235772,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 1536,
+     "total_cpu": 90.8
+    },
+    "DYN_SCORE": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 98.7431,
+     "generated_bytes": 54376418,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 101.4
+    }
+   },
+   "universe": 193648
+  },
+  "d07": {
+   "BROAD": {
+    "compile_cpu": 117.284,
+    "generated_bytes": 54909701,
+    "total_cpu": 119.2346
+   },
+   "INC": {
+    "accepted": false,
+    "runtime_equal_to_broad": true,
+    "total_cpu": 130.3
+   },
+   "labelled_starts_in_universe": 25246,
+   "policies": {
+    "ADAPT": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 117.284,
+     "generated_bytes": 54909701,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 119.2
+    },
+    "B50": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 91.9686,
+     "generated_bytes": 34940969,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 1024,
+     "total_cpu": 94.1
+    },
+    "DYN_SCORE": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 117.284,
+     "generated_bytes": 54909701,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 119.2
+    }
+   },
+   "universe": 128385
+  },
+  "d09": {
+   "BROAD": {
+    "compile_cpu": 48.2057,
+    "generated_bytes": 22192670,
+    "total_cpu": 49.1556
+   },
+   "INC": {
+    "accepted": true,
+    "runtime_equal_to_broad": true,
+    "total_cpu": 24.4
+   },
+   "labelled_starts_in_universe": 742,
+   "policies": {
+    "ADAPT": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 28.4522,
+     "generated_bytes": 17169031,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 461,
+     "total_cpu": 29.1
+    },
+    "B50": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 27.2295,
+     "generated_bytes": 18628457,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 512,
+     "total_cpu": 27.9
+    },
+    "DYN_SCORE": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 48.2057,
+     "generated_bytes": 22192670,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 49.2
+    }
+   },
+   "universe": 64509
+  },
+  "flicky": {
+   "BROAD": {
+    "compile_cpu": 34.3921,
+    "generated_bytes": 26617514,
+    "total_cpu": 35.0726
+   },
+   "INC": {
+    "accepted": true,
+    "runtime_equal_to_broad": true,
+    "total_cpu": 25.1
+   },
+   "labelled_starts_in_universe": 5707,
+   "policies": {
+    "ADAPT": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 33.5192,
+     "generated_bytes": 19734992,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 369,
+     "total_cpu": 34.2
+    },
+    "B50": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 40.8532,
+     "generated_bytes": 23300926,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 512,
+     "total_cpu": 41.6
+    },
+    "DYN_SCORE": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 34.3921,
+     "generated_bytes": 26617514,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 35.1
+    }
+   },
+   "universe": 64352
+  },
+  "h01@@ps4": {
+   "BROAD": {
+    "compile_cpu": 1838.2052,
+    "generated_bytes": 839335827,
+    "total_cpu": 1872.235
+   },
+   "INC": {
+    "accepted": true,
+    "runtime_equal_to_broad": true,
+    "total_cpu": 892.7
+   },
+   "labelled_starts_in_universe": 102375,
+   "policies": {
+    "ADAPT": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 769.0436,
+     "generated_bytes": 298336409,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 7865,
+     "total_cpu": 790.0
+    },
+    "B50": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 1243.6307,
+     "generated_bytes": 440856428,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 12288,
+     "total_cpu": 1267.5
+    },
+    "DYN_SCORE": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 1838.2052,
+     "generated_bytes": 839335827,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 1872.2
+    }
+   },
+   "universe": 1478957
+  },
+  "ps2": {
+   "BROAD": {
+    "compile_cpu": 412.1232,
+    "generated_bytes": 221299609,
+    "total_cpu": 418.4861
+   },
+   "INC": {
+    "accepted": true,
+    "runtime_equal_to_broad": true,
+    "total_cpu": 136.9
+   },
+   "labelled_starts_in_universe": 19261,
+   "policies": {
+    "ADAPT": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 111.6527,
+     "generated_bytes": 81858270,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 1659,
+     "total_cpu": 115.7
+    },
+    "B50": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 157.1388,
+     "generated_bytes": 126244244,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 3072,
+     "total_cpu": 161.0
+    },
+    "DYN_SCORE": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 412.1232,
+     "generated_bytes": 221299609,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 418.5
+    }
+   },
+   "universe": 367930
+  },
+  "s1": {
+   "BROAD": {
+    "compile_cpu": 304.9856,
+    "generated_bytes": 177954042,
+    "total_cpu": 308.9158
+   },
+   "INC": {
+    "accepted": true,
+    "runtime_equal_to_broad": true,
+    "total_cpu": 102.3
+   },
+   "labelled_starts_in_universe": 24180,
+   "policies": {
+    "ADAPT": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 95.8111,
+     "generated_bytes": 54598047,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 1188,
+     "total_cpu": 98.3
+    },
+    "B50": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 171.7262,
+     "generated_bytes": 92096002,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 2048,
+     "total_cpu": 174.9
+    },
+    "DYN_SCORE": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 304.9856,
+     "generated_bytes": 177954042,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 308.9
+    }
+   },
+   "universe": 246293
+  },
+  "s2": {
+   "BROAD": {
+    "compile_cpu": 537.8463,
+    "generated_bytes": 302320879,
+    "total_cpu": 546.1405
+   },
+   "INC": {
+    "accepted": true,
+    "runtime_equal_to_broad": true,
+    "total_cpu": 211.0
+   },
+   "labelled_starts_in_universe": 48733,
+   "policies": {
+    "ADAPT": {
+     "accepted": true,
+     "c_outside_k": 116,
+     "compile_cpu": 145.4376,
+     "generated_bytes": 90806086,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 2376,
+     "total_cpu": 150.6
+    },
+    "B50": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 261.0552,
+     "generated_bytes": 155947072,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 4096,
+     "total_cpu": 266.9
+    },
+    "DYN_SCORE": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 537.8463,
+     "generated_bytes": 302320879,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 546.1
+    }
+   },
+   "universe": 496309
+  },
+  "sf1": {
+   "BROAD": {
+    "compile_cpu": 1352.8522,
+    "generated_bytes": 488525419,
+    "total_cpu": 1369.2961
+   },
+   "INC": {
+    "accepted": true,
+    "runtime_equal_to_broad": true,
+    "total_cpu": 728.6
+   },
+   "labelled_starts_in_universe": 44740,
+   "policies": {
+    "ADAPT": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 576.2594,
+     "generated_bytes": 184005347,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 3441,
+     "total_cpu": 585.3
+    },
+    "B50": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 816.0984,
+     "generated_bytes": 287098641,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 6144,
+     "total_cpu": 827.7
+    },
+    "DYN_SCORE": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 1352.8522,
+     "generated_bytes": 488525419,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 1369.3
+    }
+   },
+   "universe": 735560
+  },
+  "sf2": {
+   "BROAD": {
+    "compile_cpu": 1123.3366,
+    "generated_bytes": 566837474,
+    "total_cpu": 1139.9899
+   },
+   "INC": {
+    "accepted": true,
+    "runtime_equal_to_broad": true,
+    "total_cpu": 447.3
+   },
+   "labelled_starts_in_universe": 48627,
+   "policies": {
+    "ADAPT": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 324.939,
+     "generated_bytes": 193691522,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 4424,
+     "total_cpu": 334.0
+    },
+    "B50": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 518.1605,
+     "generated_bytes": 314599437,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 8192,
+     "total_cpu": 529.8
+    },
+    "DYN_SCORE": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 1123.3366,
+     "generated_bytes": 566837474,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 1140.0
+    }
+   },
+   "universe": 991544
+  },
+  "sk": {
+   "BROAD": {
+    "compile_cpu": 917.7638,
+    "generated_bytes": 510292577,
+    "total_cpu": 940.6245
+   },
+   "INC": {
+    "accepted": true,
+    "runtime_equal_to_broad": true,
+    "total_cpu": 376.3
+   },
+   "labelled_starts_in_universe": 119319,
+   "policies": {
+    "ADAPT": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 337.1746,
+     "generated_bytes": 196521771,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 5571,
+     "total_cpu": 352.2
+    },
+    "B50": {
+     "accepted": true,
+     "c_outside_k": 0,
+     "compile_cpu": 510.0751,
+     "generated_bytes": 274859659,
+     "kind": "selective",
+     "reason": "",
+     "runtime_equal_to_broad": true,
+     "selected_cells": 8192,
+     "total_cpu": 526.2
+    },
+    "DYN_SCORE": {
+     "accepted": true,
+     "c_outside_k": null,
+     "compile_cpu": 917.7638,
+     "generated_bytes": 510292577,
+     "kind": "broad_abstain",
+     "reason": null,
+     "runtime_equal_to_broad": null,
+     "selected_cells": null,
+     "total_cpu": 940.6
+    }
+   },
+   "universe": 989195
+  }
+ },
+ "schema": "segarecomp.seg085.eval.v1.economics",
+ "settings": {
+  "cache": false,
+  "cc": "clang",
+  "frames": 120,
+  "jobs": 4,
+  "opt": "O2",
+  "timeout": 3600
+ }
+}
