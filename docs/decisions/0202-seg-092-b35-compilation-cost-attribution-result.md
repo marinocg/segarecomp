@@ -12,7 +12,7 @@ SEG-091 measured model A at the same B35 budget about 9 % cheaper in total cold-
 ## Method (pre-registered before measurement)
 
 Product `0a530ba`, clang 18.1.3 `-O2 -std=c11 -Wall -Wextra -Werror -pedantic`, 4 compile jobs, no object cache, cold; SEG-091's exact selections and score snapshots; unchanged prune/closure/validator.
-Nine images (seven lineages): four expected large gains (Sonic 1, Sonic 2, Sonic & Knuckles, Shining Force II), one weak (Shining Force), one borderline (Phantasy Star II), three controls (Flicky, two SGDK).
+Nine images (six lineages): four expected large gains (Sonic 1, Sonic 2, Sonic & Knuckles, Shining Force II), one weak (Shining Force), one borderline (Phantasy Star II), three controls (Flicky, two SGDK).
 Arms INC, A35_final, A35_oof (compiled) and an emit-only M3-through-plan arm whose generated C was byte-identical to INC's on every image and repetition. Three cold repetitions (Shining Force: two), arm order randomised per image/repetition, one serial worker on an idle-checked host,
 per-translation-unit CPU from `wait4`. 13,430 CPU s spent of a 24,000 ceiling; no abort, failure or re-run. Generated C was digest-identical across repetitions for every arm.
 
@@ -41,7 +41,7 @@ The property of the exchanged cells that lowers their segment/byte volume (for e
 
 - Per-cell generated-C cost (entry-segment bytes headed in the cell, from the broad emission) is context-free (99.99 % equal bytes at matched head labels; the table covers 83-91 % of heads) and reproduces the byte difference of the exchanged cells (pooled 0.92; >= 0.70 on 5 of 6 gaining images; opposite sign on Flicky).
 - Causal intervention on Sonic 1, Sonic 2 and Flicky (random half-swaps of the exchanged cells at fixed B35 budget and seeds, three cold repetitions, randomised order): 55-64 % of A's CPU saving, and a same-direction penalty on Flicky.
-- No cheap model-free structural proxy: leave-one-image-out R^2 0.20-0.39 on gaining images (mean over nine 0.10; threshold 0.30). An exploitable source exists only as an emitted-cost oracle (extra broad emission, +4.6 % pooled CPU on the large images, 6.3 % on one; the frozen "<= 5 % on the large images" clause was applied pooled - per image it would have failed).
+- No usable cheap model-free structural proxy (H-C ambiguous: pooled leave-one-image-out R^2 0.31 passes, per-image fails; exchange-level reproduction poor): leave-one-image-out R^2 0.20-0.39 on gaining images (per-image mean 0.12, true pooled 0.31 against a 0.30 threshold whose "pooled" wording is ambiguous; the proxy reproduces only 0.25-0.58 of the table exchange on four images and <= 0 on two). An exploitable source exists only as an emitted-cost oracle (extra broad emission, +4.6 % pooled CPU on the large images, 6.3 % on one; the frozen "<= 5 % on the large images" clause was applied pooled - per image it would have failed).
 - A's exclusive cells are deep in M3's ranking (median 64th percentile; 14-23 % within M3's top 45 %), so a rank-band reselection reaches only a small part of the effect. The rank-neutral null and the oracle upper bounds are weak/post-hoc.
 
 ## Checkpoint C3 (T003): `NO_MATERIAL_IMPROVEMENT`
