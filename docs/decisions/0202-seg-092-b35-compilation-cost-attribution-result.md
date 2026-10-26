@@ -1,9 +1,9 @@
-# ADR 0202: SEG-092-T001 - compilation-cost attribution of A+B35 versus M3+B35 (Checkpoint C1): `PLAUSIBLE_COST_CAUSES_IDENTIFIED`
+# ADR 0202: SEG-092 - compilation-cost attribution of A+B35 versus M3+B35 and incumbent-preserving optimisation: `INCUMBENT_PREFERRED`
 
-- Status: Accepted (research, SEG-092-T001, Checkpoint C1 only). Follows ADR 0157 (cost baselines), the model comparison ADRs 0165/0169/0170 and SEG-091's incumbent-preserving comparison.
+- Status: Accepted (research, SEG-092 T001-T004: checkpoints C1 `PLAUSIBLE_COST_CAUSES_IDENTIFIED`, C2 `GENERIC_CAUSE_IDENTIFIED` (limited), C3 `NO_MATERIAL_IMPROVEMENT`, final decision `INCUMBENT_PREFERRED`). Follows ADR 0157 (cost baselines), the model comparison ADRs 0165/0169/0170 and SEG-091's incumbent-preserving comparison.
   No ADR is amended. **No product change, no default change, no selection/prune/closure/validator/runtime change, no new budget, no retraining.** M3+B35 (`--immutable-rom-aot-ml-gen2-admission`) is unchanged and remains the incumbent.
 - Privacy: aggregate only (ratios, counts, byte totals). ROM bytes, addresses, generated C, per-address and per-translation-unit data stay in the private harness; the pre-registration, tooling and per-image results are harness-private.
-- Scope: attribution only. The mechanisms below are **candidates from paired measurements**; causality is the job of SEG-092-T002. Nothing here qualifies model A for deployment (it has no native implementation).
+- Scope: development images only. Nothing here qualifies model A for deployment (it has no native implementation) and no result is independent evidence.
 
 ## Question
 
@@ -31,13 +31,30 @@ per-translation-unit CPU from `wait4`. 13,430 CPU s spent of a 24,000 ceiling; n
 5. **Fragmentation is neither necessary nor sufficient.** Contiguous admitted cell runs fall 17-53 % on five gaining images but are unchanged on Shining Force I (-0.2 %) and nearly so on II (-2.5 %), which still gain 8 %; SGDK d09 halves its runs for a 2 % gain; Flicky's runs rise 9 % with its cost.
 6. **No evidence for (post-hoc):** link (0.1-0.3 s), translation-unit count (equal on 6 of 9 images; +/-2 on the three controls, Flicky higher with its worse result), size concentration, precise-discovery block function counts (equal on every image), a difference at equal segment head labels.
 
-## Checkpoint C1 decision
+## Checkpoint C1 decision (T001)
 
 Frozen rule: benefit reproduced in sign on all four large images, and one component (generated-C volume of the exchanged identities, `aot` family) explains >= 25 % of the claimed delta in both A35_final and A35_oof -> **`PLAUSIBLE_COST_CAUSES_IDENTIFIED`**. The frozen clause "absent or small in negative controls" was not mechanically evaluated: Flicky shows the volume terms with opposite sign (+1.0 s aot, +0.8 s shared on 23.3 s), d05/d09 are small or inside noise; reading the reversal as consistent with a volume mechanism is a post-hoc interpretation. Volume is tautologically tied to compile CPU, so C1 identifies the carrier, not the cause of the lower volume. Ranked candidates for T002:
 (H1) generated-C volume per admitted identity of the exchanged cells (about 74 %); (H2) per-byte compile intensity (about 16 %, weak); (H3) native M3 inference inside INC's emit versus cheaper A inference (about 9 %, tied to the model implementation); (H4) fragmentation (weak). 
-The property of the exchanged cells that lowers their segment/byte volume (for example branch-target or block-leader density) is **not identified** and is T002's first question; whether a model-free change of M3's B35 composition or of generated-C organisation can obtain it is open.
+The property of the exchanged cells that lowers their segment/byte volume (for example branch-target or block-leader density) was **not identified** by C1; T002 below.
+
+## Checkpoint C2 (T002): `GENERIC_CAUSE_IDENTIFIED` (limited meaning)
+
+- Per-cell generated-C cost (entry-segment bytes headed in the cell, from the broad emission) is context-free (99.99 % equal bytes at matched head labels; the table covers 83-91 % of heads) and reproduces the byte difference of the exchanged cells (pooled 0.92; >= 0.70 on 5 of 6 gaining images; opposite sign on Flicky).
+- Causal intervention on Sonic 1, Sonic 2 and Flicky (random half-swaps of the exchanged cells at fixed B35 budget and seeds, three cold repetitions, randomised order): 55-64 % of A's CPU saving, and a same-direction penalty on Flicky.
+- No cheap model-free structural proxy: leave-one-image-out R^2 0.20-0.39 on gaining images (mean over nine 0.10; threshold 0.30). An exploitable source exists only as an emitted-cost oracle (extra broad emission, +4.6 % pooled CPU on the large images, 6.3 % on one; the frozen "<= 5 % on the large images" clause was applied pooled - per image it would have failed).
+- A's exclusive cells are deep in M3's ranking (median 64th percentile; 14-23 % within M3's top 45 %), so a rank-band reselection reaches only a small part of the effect. The rank-neutral null and the oracle upper bounds are weak/post-hoc.
+
+## Checkpoint C3 (T003): `NO_MATERIAL_IMPROVEMENT`
+
+Two pre-registered, opt-in, model-free candidates (cost-aware reselection inside +-5 % or +-10 % of cells around the B35 cutoff, exact budget and seeds, cost from the broad-emission table). CB5: no missed verified start, validator accepts everywhere, generated C -1.8 to -3.3 % on the large images, but screened net CPU lineage mean 0.978 (> 0.96; worst 1.016) after charging the oracle table, so no compile stage. CB10: 297 verified starts outside the admitted set on Sonic 2 and validator rejection of two SGDK images -> rejected without tuning.
+
+## Final decision (T004): `INCUMBENT_PREFERRED`
+
+M3+B35 is unchanged and remains the best supported approach. No model-free optimisation met the gates; A+B35's advantage reproduces on development data but its held-out arm fails SEG-091's frozen gate (0.969 / worst 1.095, Flicky +9.5 %), Flicky is significantly worse, and no eligible independent lineage exists, so `MODEL_A_NATIVE_FEASIBILITY_JUSTIFIED` is not met and the native-A assessment was not triggered. `INDEPENDENT_EVIDENCE_REQUIRED` is recorded as a secondary finding. No product task is proposed.
 
 ## Limits and non-claims
+
+All analyses of the mechanism (hypothesis ranking, composition, band bounds) are post-hoc/exploratory except where marked pre-registered; T003's economic decision rests on a screen, not a compile. 
 
 The hypothesis ranking and the composition analysis are post-hoc/exploratory. Pre-registered per-region bytes, contiguous-range statistics, duplicate bytes and rho are not reported. Idle host was checked by a 1-s busy-fraction (<10 %) rather than the pre-registered loadavg. Development images only (INC in-sample on five titles); Shining Force I with two repetitions; model-A inference is research Python and has no native implementation, so a deployable A would add inference cost not measured here; identity-level analysis uses entry-segment bytes as the generated-C proxy;
 correlation across nine images with one reversed point; verified-start retention and runtime equivalence were not re-measured (SEG-091's stand; nothing here changes selection). No completeness claim, no adoption proposal, no change to M3+B35.
