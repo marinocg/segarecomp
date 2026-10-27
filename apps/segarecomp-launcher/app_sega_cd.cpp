@@ -64,6 +64,7 @@ void App::scd_start_import(const std::string &target_id, const fs::path &bios, c
   scd_done_ = 0;
   scd_cancel_ = false;
   scd_import_target_ = target_id;
+  scd_import_reverify_ = !target_id.empty() && program.empty();
   std::uint64_t total = 0;
   std::error_code ec;
   const LibraryEntry *existing = target_id.empty() ? nullptr : catalog_.find_id(target_id);
@@ -123,7 +124,12 @@ void App::scd_poll() {
         toast("Program verified and bound to this game.");
         trace("scd=program_attached");
       } else {
-        show_message("This program cannot be used", {scd::message(result.refusal, result.detail)});
+        if (scd_import_reverify_) {  // "Verify again" found a difference: the earlier verification no longer stands
+          entry->sega_cd.disc_verified = false;
+          save_catalog();
+          request_status_refresh();
+        }
+        show_message(scd_import_reverify_ ? "Verification failed" : "This program cannot be used", {scd::message(result.refusal, result.detail)});
         trace(std::string("scd=program_refused refusal=") + scd::code(result.refusal));
       }
     }
@@ -180,6 +186,7 @@ bool App::scd_spawn(const std::string &id, const scd::Plan &plan) {
     environment = {{"SDL_VIDEODRIVER", "dummy"}, {"SDL_AUDIODRIVER", "dummy"}, {"SEGARECOMP_VIEWER_UNTHROTTLED", "1"}, {"SEGARECOMP_VIEWER_NO_STOP_SCREEN", "1"}};
   }
   RomView view = view_from_entry(*entry);
+  view.sha256.clear();  // the entry identity is not a ROM digest: the viewer's System page must not present it as one
   sv_diag_yield_exclusive_devices(diag_);  // a libusb-driven controller can be opened by one process only: free it for the viewer
   game_ = std::make_unique<GameRun>(view, layout_, plan.program, scd_dir(*entry) / "run.log", scd::run_arguments(plan, scd_launch_options_), environment, true);
   if (!game_->started()) {

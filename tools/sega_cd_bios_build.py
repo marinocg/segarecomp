@@ -117,12 +117,25 @@ def run(cmd, timeout, pass_fds=(), cwd=None):
 
 
 def find_sdl3():
-    """(compile flags, link flags) of an installed SDL3, or None. SDL3_PREFIX first, then the common prefixes (the Genesis viewer's rule)."""
+    """(compile flags, link flags) of an installed SDL3, or None. SDL3_PREFIX first, then the common prefixes (the Genesis viewer's rule). A prefix
+    with a pkg-config file (`lib/pkgconfig/sdl3.pc`) gives its own flags - `--static` when only a static library is installed (a vcpkg Linux
+    triplet), whose private dependencies a plain `-lSDL3` would miss; otherwise `-L<lib> -lSDL3`."""
     for prefix in [p for p in (os.environ.get("SDL3_PREFIX"), "/opt/homebrew", "/usr/local", "/usr") if p]:
         base = pathlib.Path(prefix)
         libdir = base / "lib"
-        if (base / "include" / "SDL3" / "SDL.h").is_file() and any(libdir.glob("libSDL3.*")):
-            return ["-I", str(base / "include")], ["-L", str(libdir), "-Wl,-rpath," + str(libdir), "-lSDL3"]
+        if not ((base / "include" / "SDL3" / "SDL.h").is_file() and any(libdir.glob("libSDL3.*"))):
+            continue
+        shared = any(libdir.glob("libSDL3.so*")) or any(libdir.glob("libSDL3*.dylib"))
+        pc = libdir / "pkgconfig" / "sdl3.pc"
+        if pc.is_file() and shutil.which("pkg-config"):
+            env = dict(os.environ, PKG_CONFIG_PATH=str(libdir / "pkgconfig") + os.pathsep + os.environ.get("PKG_CONFIG_PATH", ""))
+            flags = subprocess.run(["pkg-config", "--cflags", "--libs", *([] if shared else ["--static"]), "sdl3"], capture_output=True, text=True, env=env)
+            if flags.returncode == 0 and flags.stdout.strip():
+                tokens = flags.stdout.split()
+                compile_flags = [t for t in tokens if t.startswith(("-I", "-D"))]
+                link_flags = [t for t in tokens if not t.startswith(("-I", "-D"))] + (["-Wl,-rpath," + str(libdir)] if shared else [])
+                return compile_flags, link_flags
+        return ["-I", str(base / "include")], ["-L", str(libdir), "-Wl,-rpath," + str(libdir), "-lSDL3"]
     return None
 
 

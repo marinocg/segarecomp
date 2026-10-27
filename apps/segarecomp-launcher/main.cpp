@@ -250,7 +250,9 @@ int sega_cd_headless(int argc, char **argv) {
   std::vector<std::pair<std::string, std::string>> environment;
   if (windowless) environment = {{"SDL_VIDEODRIVER", "dummy"}, {"SDL_AUDIODRIVER", "dummy"}, {"SEGARECOMP_VIEWER_UNTHROTTLED", "1"}, {"SEGARECOMP_VIEWER_NO_STOP_SCREEN", "1"}};
   const Layout layout = locate_layout();
-  GameRun game(view_from_entry(*added.entry), layout, plan.program, dir / "run.log", scd::run_arguments(plan, options), environment, true);
+  RomView run_view = view_from_entry(*added.entry);
+  run_view.sha256.clear();
+  GameRun game(run_view, layout, plan.program, dir / "run.log", scd::run_arguments(plan, options), environment, true);
   if (!game.started()) { emit("run=failed_to_start"); return finish(6); }
   while (!game.poll()) SDL_Delay(50);
   const scd::Outcome outcome = scd::read_outcome(options.report, game.exit_code());

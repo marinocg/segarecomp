@@ -325,6 +325,7 @@ private:
   ScdForm scd_form_;
   bool scd_form_open_ = false;                         // the form is shown on the Import page
   std::future<scd::ImportResult> scd_import_job_;      // import / attach / re-verify on a worker (hashing a disc takes seconds)
+  bool scd_import_reverify_ = false;                  // the running check is "Verify again" of the existing program
   std::string scd_import_target_;                      // entry id for attach / re-verify, empty for a new game
   std::atomic<std::uint64_t> scd_done_{0};
   std::atomic<bool> scd_cancel_{false};
