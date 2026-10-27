@@ -167,7 +167,11 @@ Claims parse_claims(const std::string &text) {
   if (text.empty() || text.size() > 8192U) return unverifiable("no statement");
   std::string error;
   const auto root = json::parse(text, &error);
-  if (!root || !root->is_object()) return unverifiable("not a statement");
+  if (!root || !root->is_object()) {
+    std::string head;  // a short, printable-ASCII head of what the program printed (diagnostics only)
+    for (std::size_t i = 0; i < text.size() && head.size() < 48; ++i) head.push_back(text[i] >= 0x20 && text[i] < 0x7F ? text[i] : '?');
+    return unverifiable("not a statement: " + (root ? std::string("not an object") : error) + " [" + head + "]");
+  }
   if (root->num("describe", 0) != 1) return unverifiable("unknown statement version");
   c.runtime_abi = static_cast<int>(std::clamp(root->num("runtime_abi", 0), 0LL, 1000000LL));
   c.profile = root->str("profile");
