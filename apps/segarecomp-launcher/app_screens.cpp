@@ -32,6 +32,7 @@ std::vector<const LibraryEntry *> App::visible_entries() const {
   for (const auto &e : catalog_.entries()) {
     if (platform_filter_ == 1 && e.platform_id != "genesis") continue;
     if (platform_filter_ == 2 && e.platform_id != "master-system") continue;
+    if (platform_filter_ == 3 && e.platform_id != "sega-cd") continue;
     const StatusInfo &info = status_of(e.id());
     if (status_filter_ == 1 && info.status != GameStatus::ready) continue;
     if (status_filter_ == 2 && info.status == GameStatus::ready) continue;
@@ -375,7 +376,7 @@ void App::draw_drop_zone(float w, float h, bool compact_box) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 origin = ImGui::GetCursorScreenPos();
   // once there are import results the drop zone shrinks so the results are visible without scrolling
-  const float bw = w, bh = compact_box ? ctx_.u(!import_results_.empty() ? 150.0F : (win_h_ < ctx_.u(600.0F) ? 200.0F : 322.0F)) : std::max(ctx_.u(260.0F), h - ctx_.u(110.0F));
+  const float bw = w, bh = compact_box ? ctx_.u(!import_results_.empty() || scd_form_open_ ? 150.0F : (win_h_ < ctx_.u(600.0F) ? 200.0F : 322.0F)) : std::max(ctx_.u(260.0F), h - ctx_.u(110.0F));
   const ImVec2 a(origin.x, origin.y), b(a.x + bw, a.y + bh);
   const bool hover = ImGui::IsMouseHoveringRect(a, b, false);
   const bool active = dragging_;
@@ -393,8 +394,18 @@ void App::draw_drop_zone(float w, float h, bool compact_box) {
   const float npx = ctx_.u(12.0F);
   draw_text(dl, ctx_.regular, npx, col::text2, ImVec2(cx - text_width(ctx_.regular, npx, note) * 0.5F, cy), note);
   cy += npx + ctx_.u(16.0F);
-  ImGui::SetCursorScreenPos(ImVec2(cx - ctx_.u(90.0F), cy));
-  if (button(ctx_, "dz_browse", "Browse for ROMs...", ImVec2(ctx_.u(180.0F), ctx_.u(36.0F)), Style::primary, !import_job_.valid(), ctx_.icon("folder"))) browse_import();
+  // SEG-078-T002: a Sega CD game is a BIOS plus a disc, not a dropped file: its own small form opens below, and the drop zone makes room for it.
+  const float bw1 = ctx_.u(180.0F), bw2 = ctx_.u(200.0F), gap2 = ctx_.u(10.0F);
+  const char *scd_label_text = scd_form_open_ ? "Hide Sega CD form" : "Add Sega CD game...";
+  if (tiny) {
+    ImGui::SetCursorScreenPos(ImVec2(cx - (bw1 + gap2 + bw2) * 0.5F, cy));
+  } else {
+    ImGui::SetCursorScreenPos(ImVec2(cx - bw1 * 0.5F, cy));
+  }
+  if (button(ctx_, "dz_browse", "Browse for ROMs...", ImVec2(bw1, ctx_.u(36.0F)), Style::primary, !import_job_.valid(), ctx_.icon("folder"))) browse_import();
+  if (tiny) ImGui::SetCursorScreenPos(ImVec2(cx - (bw1 + gap2 + bw2) * 0.5F + bw1 + gap2, cy));
+  else ImGui::SetCursorScreenPos(ImVec2(cx - bw2 * 0.5F, cy + ctx_.u(44.0F)));
+  if (button(ctx_, "dz_scd", scd_label_text, ImVec2(bw2, tiny ? ctx_.u(36.0F) : ctx_.u(30.0F)), Style::ghost, true, ctx_.icon("controller"))) scd_form_open_ = !scd_form_open_;
   ImGui::SetCursorScreenPos(ImVec2(origin.x, b.y + ctx_.u(8.0F)));
   ImGui::Dummy(ImVec2(w, ctx_.u(2.0F)));
 }
@@ -644,7 +655,7 @@ void App::draw_library(float w, float h) {
     int sort = 0;
     for (int i = 0; i < 5; ++i) if (settings_.sort == sort_ids[i]) sort = i;
     const float dw = narrow ? std::max(ctx_.u(104.0F), (w - ctx_.u(16.0F)) / 3.0F) : ctx_.u(160.0F);
-    if (dropdown(ctx_, "pf", {"All Platforms", "Genesis", "Master System"}, &platform, dw, narrow ? nullptr : ctx_.icon("controller"))) platform_filter_ = platform;
+    if (dropdown(ctx_, "pf", {"All Platforms", "Genesis", "Master System", "Sega CD"}, &platform, dw, narrow ? nullptr : ctx_.icon("controller"))) platform_filter_ = platform;
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (dropdown(ctx_, "sf", {"All Statuses", "Ready", "Needs build", "Failed", "Missing ROM"}, &status, dw)) status_filter_ = status;
     ImGui::SameLine(0.0F, ctx_.u(8.0F));

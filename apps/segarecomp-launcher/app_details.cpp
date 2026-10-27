@@ -83,13 +83,17 @@ std::string App::build_action_label(const StatusInfo &info) const {
 }
 
 bool App::can_build(const LibraryEntry &entry, const StatusInfo &info) const {
+  if (entry.platform_id == "sega-cd") return false;  // ADR 0204: unsupported, shown as such
   const bool mapper_needed = entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty();
   return !game_ && !is_building(entry.id()) && !is_queued(entry.id()) && !info.rom_missing && !mapper_needed;
 }
 
-bool App::can_play(const StatusInfo &info) const { return info.runnable() && !game_ && !maintenance_running_ && !(job_ && job_key_ == info.key); }
+bool App::can_play(const StatusInfo &info) const {
+  if (info.sega_cd) return info.scd.state == scd::State::ready && !game_ && !maintenance_running_ && !scd_launch_job_.valid() && !scd_import_job_.valid();
+  return info.runnable() && !game_ && !maintenance_running_ && !(job_ && job_key_ == info.key); }
 
 void App::play(const std::string &id) {
+  if (const LibraryEntry *e = catalog_.find_id(id); e != nullptr && e->platform_id == "sega-cd") { trace("play=requested title=" + e->title()); scd_play(id, 0); return; }
   trace("play=requested title=" + (catalog_.find_id(id) != nullptr ? catalog_.find_id(id)->title() : std::string("?")));
   restarted_this_play_ = false;
   notices_.erase(id);
@@ -115,7 +119,7 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
   if (include_details) {
     if (menu_item(ctx_, "m_details", "Details", nullptr, ctx_.icon("info"), mw)) open_details(id);
     if (menu_item(ctx_, "m_play", "Play", nullptr, ctx_.icon("play"), mw, can_play(info))) play(id);
-    if (menu_item(ctx_, "m_build", build_action_label(info).c_str(), nullptr, ctx_.icon("reset"), mw, can_build(*entry, info))) { notices_.erase(id); request_build(id); }
+    if (entry->platform_id != "sega-cd" && menu_item(ctx_, "m_build", build_action_label(info).c_str(), nullptr, ctx_.icon("reset"), mw, can_build(*entry, info))) { notices_.erase(id); request_build(id); }
     if (is_queued(id) && menu_item(ctx_, "m_unqueue", "Remove from build queue", nullptr, ctx_.icon("trash"), mw)) dequeue_build(id);
     if (is_building(id) && menu_item(ctx_, "m_cancel_build", is_stopping(id) ? "Stopping build..." : "Cancel build", nullptr, ctx_.icon("close"), mw, !is_stopping(id))) cancel_build(id);
     if (menu_item(ctx_, "m_fav", entry->favorite ? "Remove from favorites" : "Add to favorites", nullptr, ctx_.icon("star"), mw)) { entry->favorite = !entry->favorite; save_catalog(); }
@@ -126,9 +130,13 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
     if (is_queued(id) && menu_item(ctx_, "m_unqueue", "Remove from build queue", nullptr, ctx_.icon("trash"), mw)) dequeue_build(id);
     if (is_building(id) && menu_item(ctx_, "m_cancel_build", is_stopping(id) ? "Stopping build..." : "Cancel build", nullptr, ctx_.icon("close"), mw, !is_stopping(id))) cancel_build(id);
   }
-  if (menu_item(ctx_, "m_logs", show_log_ && !include_details ? "Hide build log" : "View build log", nullptr, ctx_.icon("file"), mw)) { if (include_details) open_details(id); show_log_ = include_details ? true : !show_log_; }
-  if (menu_item(ctx_, "m_folder", "Open build folder", nullptr, ctx_.icon("folder"), mw, fs::is_directory(info.entry, ec))) SDL_OpenURL(("file://" + u8s(info.entry)).c_str());
-  if (menu_item(ctx_, "m_storage", "Manage storage...", "Cleanup options for this game", ctx_.icon("storage"), mw)) { storage_selected_ = {id}; go(Page::storage); }
+  if (menu_item(ctx_, "m_logs", entry->platform_id == "sega-cd" ? (show_log_ && !include_details ? "Hide run log" : "View run log") : (show_log_ && !include_details ? "Hide build log" : "View build log"), nullptr, ctx_.icon("file"), mw)) { if (include_details) open_details(id); show_log_ = include_details ? true : !show_log_; }
+  if (entry->platform_id != "sega-cd") {
+    if (menu_item(ctx_, "m_folder", "Open build folder", nullptr, ctx_.icon("folder"), mw, fs::is_directory(info.entry, ec))) SDL_OpenURL(("file://" + u8s(info.entry)).c_str());
+    if (menu_item(ctx_, "m_storage", "Manage storage...", "Cleanup options for this game", ctx_.icon("storage"), mw)) { storage_selected_ = {id}; go(Page::storage); }
+  } else if (menu_item(ctx_, "m_folder", "Open recordings folder", nullptr, ctx_.icon("folder"), mw, fs::is_directory(scd_dir(*entry) / "recordings", ec))) {
+    SDL_OpenURL(("file://" + u8s(scd_dir(*entry) / "recordings")).c_str());
+  }
   menu_separator(ctx_, mw);
   if (menu_item(ctx_, "m_cover", "Change cover...", "Choose a local PNG or JPEG", ctx_.icon("edit"), mw)) browse_cover(id);
   if (!entry->cover.empty() && menu_item(ctx_, "m_cover_rm", "Remove cover", nullptr, ctx_.icon("close"), mw)) {
@@ -147,8 +155,8 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
     const std::string url = names.empty() ? std::string() : libretro_candidate_url(entry->platform_id, names.front());
     if (menu_item(ctx_, "m_web", "Find cover online", "Opens your web browser", ctx_.icon("search"), mw, !url.empty())) SDL_OpenURL(url.c_str());
   }
-  if (menu_item(ctx_, "m_sha", "Copy ROM SHA-256", nullptr, ctx_.icon("file"), mw)) { SDL_SetClipboardText(entry->sha256.c_str()); toast("SHA-256 copied."); }
-  if (info.rom_missing && menu_item(ctx_, "m_locate", "Locate ROM...", "Re-link a moved ROM (same SHA-256)", ctx_.icon("folder"), mw)) browse_locate(id);
+  if (menu_item(ctx_, "m_sha", entry->platform_id == "sega-cd" ? "Copy game identity" : "Copy ROM SHA-256", nullptr, ctx_.icon("file"), mw)) { SDL_SetClipboardText(entry->sha256.c_str()); toast("SHA-256 copied."); }
+  if (info.rom_missing && entry->platform_id != "sega-cd" && menu_item(ctx_, "m_locate", "Locate ROM...", "Re-link a moved ROM (same SHA-256)", ctx_.icon("folder"), mw)) browse_locate(id);
   menu_separator(ctx_, mw);
   if (menu_item(ctx_, "m_remove", "Remove from library...", "ROM files and extracted copies stay", ctx_.icon("trash"), mw, !game_ || game_id_ != id, true)) ask_remove(*entry);
   end_menu();
@@ -205,14 +213,14 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
   }
   {  // platform, build state, ROM health
     ImVec2 p(x0, y), size;
-    pill(ctx_, dl, p, entry.platform_id == "master-system" ? "Master System" : "Genesis / Mega Drive", col::info, ctx_.icon("controller"), ctx_.u(12.0F), &size);
+    pill(ctx_, dl, p, entry.platform_id == "master-system" ? "Master System" : entry.platform_id == "sega-cd" ? "Sega CD" : "Genesis / Mega Drive", col::info, ctx_.icon("controller"), ctx_.u(12.0F), &size);
     p.x += size.x + ctx_.u(8.0F);
     const ImU32 sc = is_building ? col::warn : (is_running ? col::ok : status_color(info));
-    const std::string state = is_building ? "Building..." : (is_running ? "Playing" : status_label(info));
+    const std::string state = is_building ? "Building..." : (is_running ? (info.sega_cd ? "Running" : "Playing") : status_label(info));
     pill(ctx_, dl, p, state.c_str(), sc, nullptr, ctx_.u(12.0F), &size);
     p.x += size.x + ctx_.u(8.0F);
     const bool linked = !info.rom_missing;
-    const char *rom_text = linked ? "ROM linked" : (entry.rom_path_unknown ? "ROM path not recorded" : "ROM missing");
+    const char *rom_text = info.sega_cd ? (linked ? "BIOS and disc linked" : "BIOS or disc missing") : (linked ? "ROM linked" : (entry.rom_path_unknown ? "ROM path not recorded" : "ROM missing"));
     if (p.x + text_width(ctx_.bold, ctx_.u(12.0F), rom_text) + ctx_.u(40.0F) > x0 + tw) { p.x = x0; p.y += size.y + ctx_.u(6.0F); }
     pill(ctx_, dl, p, rom_text, linked ? col::text2 : col::warn, ctx_.icon(linked ? "check" : "warning"), ctx_.u(12.0F), &size);
     y = p.y + size.y + ctx_.u(10.0F);
@@ -223,7 +231,13 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     ImU32 color = col::text2;
     const std::string mode = selected_mode_label(entry);
     const bool mapper_needed = entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty();
-    if (is_running) { line = running_label(game_report_, restarted_this_play_); color = col::ok; }
+    if (info.sega_cd) {
+      if (is_running) { line = "Running in the viewer. Close its window to return here."; color = col::ok; }
+      else if (scd_launch_job_.valid() && scd_launch_id_ == entry.id()) { line = "Checking the BIOS, the program and the disc files before launch..."; color = col::warn; }
+      else if (info.scd.state == scd::State::ready) { line = "Ready to play. Last played " + fmt_relative(entry.last_played_at, std::time(nullptr)) + "."; color = col::text2; }
+      else { line = scd_hint(info); color = col::warn; }
+    }
+    else if (is_running) { line = running_label(game_report_, restarted_this_play_); color = col::ok; }
     else if (is_building) { line = "Recompiling with " + mode + ". This can take several minutes the first time."; color = col::warn; }
     else if (mapper_needed) { line = "Declare the cartridge mapper below before building."; color = col::warn; }
     else if (info.status == GameStatus::playable_older) { line = "Playable: an earlier release built this game. Recompile is recommended, not required."; color = col::warn; }
@@ -260,15 +274,24 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     if (ImGui::IsItemHovered()) tooltip(ctx_, "Stop this build and discard its partial files. A previously built program is kept.");
     y += bh;
   } else {
-    const bool locate_primary = info.rom_missing && !info.runnable() && !entry.rom_paths.empty();  // a playable build needs no ROM: Play stays primary
+    const bool locate_primary = info.rom_missing && !info.runnable() && !entry.rom_paths.empty() && !info.sega_cd;  // a playable build needs no ROM: Play stays primary
     const float play_w = std::min(ctx_.u(150.0F), (tw - ctx_.u(16.0F)) * 0.36F), build_w = std::min(ctx_.u(148.0F), (tw - ctx_.u(16.0F)) * 0.36F), more_w = std::min(ctx_.u(96.0F), tw - play_w - build_w - ctx_.u(16.0F));
     if (locate_primary) {
       if (button(ctx_, "locate", "Locate ROM...", ImVec2(play_w, bh), Style::primary, true, ctx_.icon("folder"))) browse_locate(entry.id());
     } else if (button(ctx_, "play", is_running ? "Playing" : "Play", ImVec2(play_w, bh), Style::primary, can_play(info), ctx_.icon("play"))) play(entry.id());
-    if (ImGui::IsItemHovered() && !can_play(info) && !locate_primary) tooltip(ctx_, info.status == GameStatus::ready ? "Wait for the running game or build to finish." : "No executable matches the current build configuration yet.");
+    if (ImGui::IsItemHovered() && !can_play(info) && !locate_primary) {
+      const std::string why = info.sega_cd ? (info.scd.state == scd::State::ready ? std::string("Wait for the running game or check to finish.") : scd::message(info.scd.refusal, info.scd.detail))
+                              : info.status == GameStatus::ready ? std::string("Wait for the running game or build to finish.") : std::string("No executable matches the current build configuration yet.");
+      tooltip(ctx_, why.c_str());
+    }
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     const bool prominent_build = info.status != GameStatus::ready && !info.older.playable;  // Play stays the dominant action while an earlier build is playable
-    if (is_queued(entry.id())) {
+    if (info.sega_cd) {
+      // ADR 0204: no Build for Sega CD; the one honest alternative is importing a verified program.
+      if (button(ctx_, "scd_import_top", entry.sega_cd.program.path.empty() ? "Import program..." : "Replace program...", ImVec2(build_w + ctx_.u(20.0F), bh), info.scd.state == scd::State::ready ? Style::secondary : Style::primary,
+                 !game_ && !scd_import_job_.valid(), ctx_.icon("import"))) scd_browse("scd_attach", entry.id());
+      if (ImGui::IsItemHovered()) tooltip(ctx_, "Segarecomp cannot build Sega CD games yet. Choose a viewer program built with the developer procedure; it is checked against this BIOS and disc.");
+    } else if (is_queued(entry.id())) {
       // SEG-069-T001: a queued game's build action is its way out of the queue (it owns no process or folder yet).
       const bool unqueue_pressed = button(ctx_, "unqueue", "Unqueue", ImVec2(build_w, bh), Style::secondary, true, ctx_.icon("close"));
       take_details_focus("unqueue");
@@ -686,7 +709,8 @@ void App::draw_details(float w, float h) {
     draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::dim, ImVec2(cx + hw + ctx_.u(12.0F), p.y + ctx_.u(9.0F)), crumb.c_str());
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + ctx_.u(42.0F)));
   }
-  const bool rail = w > ctx_.u(700.0F);
+  const bool sega_cd = entry->platform_id == "sega-cd";
+  const bool rail = w > ctx_.u(700.0F) && !sega_cd;  // a Sega CD game has no build folders to measure
   const float gap = ctx_.u(16.0F), rail_w = rail ? std::clamp(w * 0.29F, ctx_.u(220.0F), ctx_.u(262.0F)) : 0.0F;
   const float main_w = rail ? w - rail_w - gap : w;
   const ImVec2 top = ImGui::GetCursorScreenPos();
@@ -695,7 +719,8 @@ void App::draw_details(float w, float h) {
   ImGui::SetCursorScreenPos(top);
   const float cover_w = std::clamp(main_w * 0.24F, ctx_.u(96.0F), ctx_.u(136.0F));
   draw_details_identity(*entry, info, main_w, cover_w);
-  draw_build_config(*entry, info, main_w);
+  if (sega_cd) draw_scd_details(*entry, info, main_w);
+  else draw_build_config(*entry, info, main_w);
   ImGui::Dummy(ImVec2(1, ctx_.u(12.0F)));
   // notices of this session (restart, failure) sit right under the configuration
   const auto banner = [&](ImU32 color, const char *icon, const std::string &text) {
@@ -715,7 +740,7 @@ void App::draw_details(float w, float h) {
     if (button(ctx_, "dismiss_fail", "Dismiss", ImVec2(ctx_.u(100.0F), ctx_.u(26.0F)), Style::ghost)) failures_.erase(failure);
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
   }
-  if (!is_building && info.rom_missing)
+  if (!is_building && info.rom_missing && !sega_cd)
     banner(col::warn, "warning", entry->rom_path_unknown ? "The original ROM location was never recorded (this entry came from an older cache record). Locate ROM to enable rebuilding; playing an existing build still works."
                                                          : "The original ROM is not at its recorded location. Playing an existing build still works; Locate ROM re-links it (the SHA-256 must match).");
   // build log: live while building, on request otherwise
@@ -728,7 +753,10 @@ void App::draw_details(float w, float h) {
       }
       text = live_log_.empty() ? "Waiting for the build tool's first message..." : live_log_;
     } else if (const auto d = diagnostics_.find(entry->id()); d != diagnostics_.end()) text = d->second;
-    else {
+    else if (sega_cd) {
+      text = read_tail(scd_dir(*entry) / "run.log", 6000);
+      if (text.empty()) text = "No run log exists for this game yet.";
+    } else {
       const fs::path failed = info.entry.parent_path() / (info.key + ".failed");
       text = read_tail(info.entry / "build.log", 6000);
       if (text.empty()) text = read_tail(failed / "build.log", 6000);
@@ -756,13 +784,13 @@ void App::draw_details(float w, float h) {
     ImGui::Dummy(ImVec2(main_w, box_h + ctx_.u(12.0F)));
     if (is_building) { paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, main_w, "The build reports stages, not a percentage. Cancel build stops it and discards its partial files; closing the launcher waits for it."); ImGui::Dummy(ImVec2(1, ctx_.u(10.0F))); }
   }
-  if (!rail) {  // narrow window: the storage card follows the configuration
+  if (!rail && !sega_cd) {  // narrow window: the storage card follows the configuration
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float sh = draw_storage_rail(*entry, info, p, main_w);
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + sh + ctx_.u(12.0F)));
     ImGui::Dummy(ImVec2(main_w, 0.0F));
   }
-  draw_provenance(*entry, info, main_w);
+  if (!sega_cd) draw_provenance(*entry, info, main_w);
   const float bottom = std::max(rail_bottom, ImGui::GetCursorScreenPos().y);
   ImGui::SetCursorScreenPos(ImVec2(top.x, bottom));
   ImGui::Dummy(ImVec2(w, ctx_.u(12.0F)));

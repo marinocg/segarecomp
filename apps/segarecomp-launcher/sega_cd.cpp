@@ -447,7 +447,7 @@ Outcome read_outcome(const fs::path &report, int exit_code) {
   if (!root || !root->is_object()) return o;
   o.report_read = true;
   o.result = root->str("result");
-  if (const json::Value *stop = root->get("stop"); stop != nullptr && stop->is_object()) o.stop_class = stop->str("class");
+  if (const json::Value *stop = root->get("stop"); stop != nullptr && stop->is_object() && o.result == "stopped") o.stop_class = stop->str("class");
   if (const json::Value *live = root->get("live"); live != nullptr && live->is_object()) {
     o.live_outcome = live->str("outcome");
     o.frames = static_cast<std::uint64_t>(std::max(0LL, live->num("frames")));

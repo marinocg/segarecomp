@@ -4,6 +4,7 @@
 #include "launcher_core.hpp"
 #include "library_catalog.hpp"
 #include "rom_zip.hpp"
+#include "sega_cd.hpp"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -189,6 +190,77 @@ int headless(int argc, char **argv) {
   return rc;
 }
 
+// ---- SEG-078-T002 (ADR 0204): the Sega CD flow without a window (package smoke test, automation): the same core as the window.
+//   Segarecomp --sega-cd --bios <file> --cue <file> [--program <viewer program>] [--record <script> | --replay <script>] [--windowless] [--report <file>]
+// Adds the game to the library (by reference), verifies the program against the BIOS and disc, and - when a program was given and accepted - runs it.
+// Output: `key=value` lines. Exit: 0 ran and closed / finished, 1 usage-level failure, 3 the inputs were refused, 4 the program ended with a failure status,
+// 5 the program was refused before launch, 6 the program could not be started.
+int sega_cd_headless(int argc, char **argv) {
+  fs::path bios, cue, program, record, replay, report_path;
+  bool windowless = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (arg == "--bios" && i + 1 < argc) bios = from_u8(argv[++i]);
+    else if (arg == "--cue" && i + 1 < argc) cue = from_u8(argv[++i]);
+    else if (arg == "--program" && i + 1 < argc) program = from_u8(argv[++i]);
+    else if (arg == "--record" && i + 1 < argc) record = from_u8(argv[++i]);
+    else if (arg == "--replay" && i + 1 < argc) replay = from_u8(argv[++i]);
+    else if (arg == "--report" && i + 1 < argc) report_path = from_u8(argv[++i]);
+    else if (arg == "--windowless") windowless = true;
+    else { std::fprintf(stderr, "usage: Segarecomp --sega-cd --bios <file> --cue <file> [--program <file>] [--record <script> | --replay <script>] [--windowless] [--report <file>]\n"); return 2; }
+  }
+  if (!record.empty() && !replay.empty()) { std::fprintf(stderr, "--record and --replay are exclusive\n"); return 2; }
+  std::string report;
+  const auto emit = [&](const std::string &line) { report += line + "\n"; std::puts(line.c_str()); };
+  const auto finish = [&](int rc) { if (!report_path.empty()) std::ofstream(report_path, std::ios::binary) << report; return rc; };
+  Catalog catalog(library_root() / "library.json");
+  catalog.load();
+  scd::ImportRequest request;
+  request.bios = bios; request.cue = cue; request.program = program;
+  const scd::ImportResult imported = scd::import_entry(request);
+  if (imported.record.bios_sha256.empty() || imported.record.cue_sha256.empty()) {
+    emit(std::string("result=refused refusal=") + scd::code(imported.refusal) + " detail=" + imported.detail);
+    return finish(3);
+  }
+  const auto added = catalog.import_sega_cd(imported.record, imported.title, static_cast<long long>(std::time(nullptr)));
+  std::string save_error;
+  if (added.entry == nullptr || !catalog.save(&save_error)) { emit("result=failed problem=" + (added.entry == nullptr ? added.error : save_error)); return finish(1); }
+  emit("platform=sega-cd");
+  emit("entry=" + added.entry->id());
+  emit(std::string("added=") + (added.added ? "yes" : "no"));
+  emit(std::string("program=") + (imported.program_attached ? "verified" : (program.empty() ? "none" : std::string("refused ") + scd::code(imported.refusal))));
+  const scd::EntryRecord &stored = added.entry->sega_cd;
+  const scd::Status quick = scd::quick_status(stored);
+  emit(std::string("state=") + scd::state_label(quick.state));
+  emit(std::string("refusal=") + scd::code(quick.refusal));
+  if (quick.state != scd::State::ready) {
+    if (quick.state == scd::State::no_program) emit(std::string("build=") + scd::code(scd::Refusal::unsupported_build));
+    return finish(quick.state == scd::State::no_program && imported.refusal == scd::Refusal::none ? 0 : 5);
+  }
+  const scd::Plan plan = scd::prepare_launch(stored, false);
+  if (plan.status.state != scd::State::ready) { emit(std::string("result=refused refusal=") + scd::code(plan.status.refusal)); return finish(5); }
+  scd::RunOptions options;
+  const fs::path dir = library_root() / "sega-cd" / added.entry->sha256.substr(0, 16);
+  std::error_code ec;
+  fs::create_directories(dir, ec);
+  options.report = dir / "last-report.json";
+  options.record_to = record;
+  options.replay_from = replay;
+  fs::remove(options.report, ec);
+  std::vector<std::pair<std::string, std::string>> environment;
+  if (windowless) environment = {{"SDL_VIDEODRIVER", "dummy"}, {"SDL_AUDIODRIVER", "dummy"}, {"SEGARECOMP_VIEWER_UNTHROTTLED", "1"}, {"SEGARECOMP_VIEWER_NO_STOP_SCREEN", "1"}};
+  const Layout layout = locate_layout();
+  GameRun game(view_from_entry(*added.entry), layout, plan.program, dir / "run.log", scd::run_arguments(plan, options), environment, true);
+  if (!game.started()) { emit("run=failed_to_start"); return finish(6); }
+  while (!game.poll()) SDL_Delay(50);
+  const scd::Outcome outcome = scd::read_outcome(options.report, game.exit_code());
+  emit("run=exited code=" + std::to_string(game.exit_code()));
+  emit("outcome=" + scd::describe_outcome(outcome));
+  if (!outcome.stop_class.empty()) emit("stop=" + outcome.stop_class);
+  if (!outcome.live_outcome.empty()) emit("live=" + outcome.live_outcome + " frames=" + std::to_string(outcome.frames) + " presented=" + std::to_string(outcome.presented) + " input_events=" + std::to_string(outcome.input_events));
+  return finish(game.exit_code() == 0 || game.exit_code() == 10 || game.exit_code() == 11 ? 0 : 4);
+}
+
 // ---- `Segarecomp --input-report`: the input diagnostics without a window (package smoke test, support) ----
 // Prints which SDL library this process really loaded, what that build declares about the Switch 2 USB driver, whether libusb can be loaded the way
 // SDL loads it, and the same copyable summary the Input diagnostics page shows. It opens no window and never touches a ROM.
@@ -267,6 +339,7 @@ int main(int argc, char **argv) {
   enable_dpi_awareness();
 #endif
   if (argc == 2 && std::string(argv[1]) == "--input-report") return input_report();
+  if (argc > 1 && std::string(argv[1]) == "--sega-cd") return sega_cd_headless(argc, argv);
   if (argc > 1) return headless(argc, argv);
 #if defined(_WIN32)
   hide_child_console_windows();

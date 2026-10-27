@@ -35,6 +35,16 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
   std::map<std::string, StatusInfo> out;
   for (const auto &e : entries) {
     StatusInfo info;
+    if (e.platform_id == "sega-cd") {  // SEG-078-T002: no cache entry and no build; the cheap checks of sega_cd.hpp decide
+      info.sega_cd = true;
+      info.scd = scd::quick_status(e.sega_cd);
+      info.key = "scd-" + e.sha256.substr(0, 16);
+      info.rom_missing = info.scd.state == scd::State::inputs_not_configured;
+      info.status = info.scd.state == scd::State::ready ? GameStatus::ready
+                    : (info.scd.state == scd::State::inputs_not_configured || info.scd.state == scd::State::no_program) ? GameStatus::not_built : GameStatus::stale;
+      out[e.id()] = info;
+      continue;
+    }
     RomView view = view_from_entry(e);
     view.sms_optimized_available = sms_optimized;
     std::error_code ec;
@@ -288,6 +298,7 @@ const StatusInfo &App::status_of(const std::string &id) const {
 }
 
 std::string App::status_label(const StatusInfo &info) const {
+  if (info.sega_cd) return scd_label(info);
   switch (info.status) {
     case GameStatus::ready: return "Ready";
     case GameStatus::metadata_only: return "Metadata only";
@@ -300,6 +311,7 @@ std::string App::status_label(const StatusInfo &info) const {
 }
 
 ImU32 App::status_color(const StatusInfo &info) const {
+  if (info.sega_cd) return info.scd.state == scd::State::ready ? ui::col::ok : (info.scd.state == scd::State::mismatched ? ui::col::err : ui::col::warn);
   switch (info.status) {
     case GameStatus::ready: return ui::col::ok;
     case GameStatus::failed: return ui::col::err;
@@ -443,6 +455,15 @@ void App::browse_locate(const std::string &id) {
   if (use_builtin_picker()) { open_picker("locate", id); return; }
   static const SDL_DialogFileFilter filters[] = {{"ROMs", "md;bin;gen;smd;sms;zip"}, {"All files", "*"}};
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "locate", id}, window_, filters, 2, nullptr, false);
+}
+
+void App::scd_browse(const std::string &purpose, const std::string &id) {
+  if (use_builtin_picker()) { open_picker(purpose, id); return; }
+  static const SDL_DialogFileFilter bios_filters[] = {{"BIOS images", "bin;md;rom"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter cue_filters[] = {{"CUE sheets", "cue"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter program_filters[] = {{"Programs and all files", "*"}};
+  const bool bios = purpose == "scd_bios" || purpose == "scd_locate_bios", cue = purpose == "scd_cue" || purpose == "scd_locate_cue";
+  SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, purpose, id}, window_, bios ? bios_filters : (cue ? cue_filters : program_filters), bios || cue ? 2 : 1, nullptr, false);
 }
 
 void App::browse_cover(const std::string &id) {
@@ -643,6 +664,11 @@ void App::go(Page page) {
 bool App::start_build(const std::string &id, bool restart_after) {
   LibraryEntry *entry = catalog_.find_id(id);
   if (entry == nullptr) return false;
+  if (entry->platform_id == "sega-cd") {  // ADR 0204: a typed, actionable "unsupported", never a silent bypass
+    show_message("Sega CD games cannot be built here yet", {scd::message(scd::Refusal::unsupported_build), "Open the game and use Import program... to attach one."});
+    trace("build=refused reason=unsupported_build platform=sega-cd");
+    return false;
+  }
   if (job_) { toast("A build is already running.", true); return false; }
   if (!layout_.problem.empty()) { show_message("Installation incomplete", {layout_.problem}); return false; }
   const fs::path rom_path = usable_rom_path(*entry);
@@ -711,6 +737,7 @@ void App::stop_or_dequeue_build(const std::string &id) {
 
 void App::request_build(const std::string &id) {
   if (is_building(id) || is_queued(id)) return;
+  if (const LibraryEntry *e = catalog_.find_id(id); e != nullptr && e->platform_id == "sega-cd") { start_build(id); return; }  // the typed refusal above
   if (job_ || !build_queue_.empty() || maintenance_running_) {
     build_queue_.push(id);
     if (const LibraryEntry *e = catalog_.find_id(id)) toast("Queued: " + e->title() + " (build " + std::to_string(build_count()) + ").");
@@ -722,7 +749,8 @@ void App::request_build(const std::string &id) {
 App::Badge App::badge_for(const LibraryEntry &entry, const StatusInfo &info) const {
   if (is_building(entry.id())) return {"Building", ui::col::warn, true};
   if (is_queued(entry.id())) return {"Queued", ui::col::info, false};
-  if (info.rom_missing && !info.runnable()) return {"ROM missing", ui::col::warn, false};
+  if (info.sega_cd && game_ && game_id_ == entry.id()) return {"Running", ui::col::ok, false};
+  if (info.rom_missing && !info.runnable() && !info.sega_cd) return {"ROM missing", ui::col::warn, false};
   return {status_label(info), status_color(info), false};
 }
 
@@ -791,6 +819,7 @@ void App::finish_build() {
 bool App::launch(const std::string &id, bool restarted) {
   LibraryEntry *entry = catalog_.find_id(id);
   if (entry == nullptr || game_) return false;
+  if (entry->platform_id == "sega-cd") { scd_play(id, 0); return true; }  // SEG-078-T002: verified program, not a cache entry
   RomView view = view_for(*entry);
   if (const std::string refusal = launch_refusal(view); !refusal.empty()) { failures_[id] = refusal; diagnostics_[id] = refusal; return false; }
   fs::path dir = entry_dir(view, layout_);
@@ -835,6 +864,7 @@ bool App::launch(const std::string &id, bool restarted) {
 }
 
 void App::finish_run() {
+  if (game_is_scd_) { scd_finish_run(); return; }
   const int exit_code = game_->exit_code();
   const std::string id = game_id_;
   const RomView ran = game_view_;
@@ -895,11 +925,12 @@ void App::update_jobs() {
     for (auto &e : events) {
       if (!e.error.empty() && e.paths.empty()) {
         // No native chooser is available (no portal under WSL, a minimal desktop): the built-in picker does the same job.
-        if (e.purpose == "import" || e.purpose == "locate" || e.purpose == "cover") { toast("The system file chooser is not available; using the built-in picker."); open_picker(e.purpose, e.key); continue; }
+        if (e.purpose == "import" || e.purpose == "locate" || e.purpose == "cover" || e.purpose.rfind("scd_", 0) == 0) { toast("The system file chooser is not available; using the built-in picker."); open_picker(e.purpose, e.key); continue; }
         show_message("The file picker could not be opened", {"SDL: " + e.error, "On Linux this usually means no file-chooser service (XDG Desktop Portal) is available - common under WSL/WSLg.", "Drop the file onto this window instead."});
         continue;
       }
       if (e.purpose == "import") start_import(e.paths, import_build_option_);
+      else if (e.purpose.rfind("scd_", 0) == 0) scd_dialog_result(e.purpose, e.key, e.paths);
       else if (e.purpose == "locate" && !e.paths.empty()) {
         const RomView view = inspect_rom_or_zip(from_u8(e.paths[0]), layout_, library_dir_ / "roms");
         LibraryEntry *entry = catalog_.find_id(e.key);
@@ -926,6 +957,7 @@ void App::update_jobs() {
   poll_status_refresh();
   poll_scan();
   poll_import();
+  scd_poll();
   poll_maintenance();
   poll_cover_download();
   if (!cover_job_.valid() && !auto_cover_pending_.empty()) {
@@ -1147,6 +1179,37 @@ void App::run_script() {
     }
   } else if (cmd == "play") {  // the Play action of the open game (does nothing when it cannot be played)
     if (!detail_id_.empty() && can_play(status_of(detail_id_))) play(detail_id_);
+  } else if (cmd == "shot") {
+    script_shot_ = arg;
+  } else if (cmd == "page") {  // go to a page: library | import | storage | settings
+    go(arg == "import" ? Page::import_page : arg == "storage" ? Page::storage : arg == "settings" ? Page::settings : Page::library);
+  } else if (cmd == "scd_form_open") {
+    scd_form_open_ = arg != "off";
+  } else if (cmd == "scd_form") {  // SEG-078-T002: fill the "Add a Sega CD game" form: <bios>|<cue>|<program or empty>
+    std::vector<std::string> parts;
+    std::size_t at = 0;
+    for (std::size_t bar; (bar = arg.find('|', at)) != std::string::npos; at = bar + 1) parts.push_back(arg.substr(at, bar - at));
+    parts.push_back(arg.substr(at));
+    parts.resize(3);
+    scd_form_.bios = parts[0]; scd_form_.cue = parts[1]; scd_form_.program = parts[2];
+    scd_form_open_ = true;
+  } else if (cmd == "scd_add") {  // press "Add Sega CD game"
+    if (!scd_form_.bios.empty() && !scd_form_.cue.empty() && !scd_import_job_.valid())
+      scd_start_import({}, from_u8(scd_form_.bios), from_u8(scd_form_.cue), scd_form_.program.empty() ? fs::path{} : from_u8(scd_form_.program));
+  } else if (cmd == "scd_attach") {  // "Import program..." for the open game, with this path
+    if (!detail_id_.empty()) scd_start_import(detail_id_, {}, {}, from_u8(arg));
+  } else if (cmd == "scd_verify") {  // "Verify again" for the open game
+    if (!detail_id_.empty()) scd_start_import(detail_id_, {}, {}, {});
+  } else if (cmd == "scd_record") {  // the "Record this session" switch
+    scd_record_ = arg == "on";
+  } else if (cmd == "scd_replay") {  // replay the newest recording of the open game: `viewer` or `windowless`
+    if (const LibraryEntry *e = detail_id_.empty() ? nullptr : catalog_.find_id(detail_id_)) {
+      const auto recordings = scd_recordings(*e);
+      if (!recordings.empty()) scd_play(detail_id_, arg == "windowless" ? 2 : 1, recordings.front());
+      else trace("script=no_recording");
+    }
+  } else if (cmd == "wait_scd") {  // hold the script until no Sega CD check or program is running
+    if (scd_import_job_.valid() || scd_launch_job_.valid() || game_) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "wait_play_end") {  // hold the script until no game is running
     if (game_) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "cancel_build") {  // the Cancel build / Unqueue action for the open game
@@ -1199,6 +1262,12 @@ void App::run_script() {
     else if (key == "status") actual = !detail_id_.empty() ? status_label(status_of(detail_id_)) : "-";
     else if (key == "can_play") actual = !detail_id_.empty() && can_play(status_of(detail_id_)) ? "1" : "0";
     else if (key == "playing") actual = game_ != nullptr ? "1" : "0";
+    else if (key == "scd_state") actual = !detail_id_.empty() && status_of(detail_id_).sega_cd ? scd_label(status_of(detail_id_)) : "-";
+    else if (key == "scd_refusal") actual = !detail_id_.empty() && status_of(detail_id_).sega_cd ? scd::code(status_of(detail_id_).scd.refusal) : "-";
+    else if (key == "scd_outcome") actual = scd_last_outcome_.count(detail_id_) != 0 ? scd_last_outcome_.at(detail_id_) : "-";
+    else if (key == "scd_failure") actual = failures_.count(detail_id_) != 0 ? failures_.at(detail_id_) : "-";
+    else if (key == "scd_recordings") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr ? std::to_string(scd_recordings(*catalog_.find_id(detail_id_)).size()) : "-";
+    else if (key == "scd_form_message") actual = scd_form_.message.empty() ? "-" : scd_form_.message;
     else if (key == "hints") actual = gamepad_is_last_input() && modal_.kind == Modal::Kind::none && !picker_.open ? "1" : "0";
     else if (key == "want_text") actual = ImGui::GetIO().WantTextInput ? "1" : "0";
     else if (key == "settings_tab") actual = std::to_string(settings_tab_);
@@ -1380,6 +1449,11 @@ int App::run() {
     SDL_SetRenderDrawColor(renderer_, 8, 11, 26, 255);
     SDL_RenderClear(renderer_);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
+    if (!script_shot_.empty()) {  // script command `shot <file.bmp>`: a review aid, the window keeps running
+      if (SDL_Surface *surface = SDL_RenderReadPixels(renderer_, nullptr)) { SDL_SaveBMP(surface, script_shot_.c_str()); SDL_DestroySurface(surface); }
+      trace("script=shot_saved");
+      script_shot_.clear();
+    }
     if (!shot_path_.empty() && frame_ >= shot_frame_ && !status_pending_ && !scanning_ && (!job_ || SDL_getenv("SEGARECOMP_SHOT_DURING_BUILD") != nullptr) && !import_job_.valid()) {
       trace("capture=read_pixels page=" + shot_page_);
       if (SDL_Surface *surface = SDL_RenderReadPixels(renderer_, nullptr)) { SDL_SaveBMP(surface, shot_path_.c_str()); SDL_DestroySurface(surface); }
