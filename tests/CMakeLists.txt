@@ -1224,9 +1224,13 @@ set_property(TEST sega_cd_live_test APPEND PROPERTY LABELS full fast)
 # SEG-078-T001: the same program in the real shared SDL3 viewer (dummy video/audio drivers; keys pushed by the viewer's automation seam). Only with
 # the SDL3 viewer enabled; the test itself skips on a host without SDL3 or off Linux.
 if(SEGARECOMP_ENABLE_SDL3_VIEWER)
-  get_target_property(_scd_sdl_include SDL3::SDL3 INTERFACE_INCLUDE_DIRECTORIES)
-  list(GET _scd_sdl_include 0 _scd_sdl_include0)
-  get_filename_component(_scd_sdl_prefix "${_scd_sdl_include0}" DIRECTORY)
+  # The installation prefix of SDL3 for the build driver: SDL3_DIR is <prefix>/lib/cmake/SDL3 (CMake config) or <prefix>/share/sdl3 (vcpkg).
+  get_filename_component(_scd_sdl_dir "${SDL3_DIR}" ABSOLUTE)
+  if(_scd_sdl_dir MATCHES "/share/sdl3$")
+    get_filename_component(_scd_sdl_prefix "${_scd_sdl_dir}/../.." ABSOLUTE)
+  else()
+    get_filename_component(_scd_sdl_prefix "${_scd_sdl_dir}/../../.." ABSOLUTE)
+  endif()
   add_test(NAME sega_cd_viewer_sdl_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_viewer_sdl_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
   set_property(TEST sega_cd_viewer_sdl_test APPEND PROPERTY LABELS full fast)

@@ -25,7 +25,7 @@ target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
 # The launcher's non-UI core (layout, cache identity, `segarecomp build` orchestration, status reading) is a separate target so its
 # policy/cache-identity contract is unit-testable without a window.
-add_library(segarecomp_launcher_core STATIC launcher_core.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp storage.cpp launcher_settings.cpp)
+add_library(segarecomp_launcher_core STATIC launcher_core.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp storage.cpp launcher_settings.cpp sega_cd.cpp)
 target_include_directories(segarecomp_launcher_core PUBLIC .)
 target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media)
 # Linux only: the glibc the generated programs link against (release default 2.35 = the bundled SDL3's baseline; a developer who built SDL3 on a
@@ -157,6 +157,22 @@ if(BUILD_TESTING)
   set_property(TEST launcher_older_build_test APPEND PROPERTY LABELS full fast)
   set_property(TEST launcher_older_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST launcher_older_build_test PROPERTY TIMEOUT 900)
+endif()
+
+# SEG-078-T002 (ADR 0204): the Sega CD core of the launcher (identity, the program's statement, verification, typed refusals, import, run arguments,
+# outcomes, the library record and its schema). A program double stands in for the generated viewer program; no window, no compiler.
+add_executable(fake_scd_program fake_scd_program.cpp)
+target_compile_features(fake_scd_program PRIVATE cxx_std_20)
+segarecomp_enable_warnings(fake_scd_program)
+add_executable(launcher_sega_cd_test launcher_sega_cd_test.cpp)
+target_link_libraries(launcher_sega_cd_test PRIVATE segarecomp_launcher_core)
+target_compile_features(launcher_sega_cd_test PRIVATE cxx_std_20)
+segarecomp_enable_warnings(launcher_sega_cd_test)
+if(BUILD_TESTING)
+  add_dependencies(launcher_sega_cd_test fake_scd_program)
+  add_test(NAME launcher_sega_cd_test COMMAND launcher_sega_cd_test $<TARGET_FILE:fake_scd_program>)
+  set_property(TEST launcher_sega_cd_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_sega_cd_test PROPERTY TIMEOUT 300)
 endif()
 
 # SEG-069-T004: the controller-operable file picker's model (root confinement, filtering, symlink refusal).

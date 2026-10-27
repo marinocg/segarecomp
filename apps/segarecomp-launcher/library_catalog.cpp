@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 
 namespace fs = std::filesystem;
@@ -67,7 +68,86 @@ json::Value to_json(const LibraryEntry &e) {
     builds.push(std::move(o));
   }
   v.set("builds", std::move(builds));
+  if (e.platform_id == "sega-cd") {  // ADR 0204: only these records carry the member
+    const scd::EntryRecord &r = e.sega_cd;
+    json::Value o = json::Value::make_object();
+    o.set("identity_version", json::Value::make_int(r.identity_version));
+    o.set("bios_path", json::Value::make_string(r.bios_path));
+    o.set("bios_size", json::Value::make_int(static_cast<long long>(r.bios_size)));
+    o.set("bios_sha256", json::Value::make_string(r.bios_sha256));
+    o.set("cue_path", json::Value::make_string(r.cue_path));
+    o.set("cue_size", json::Value::make_int(static_cast<long long>(r.cue_size)));
+    o.set("cue_sha256", json::Value::make_string(r.cue_sha256));
+    json::Value files = json::Value::make_array();
+    for (const auto &f : r.disc_files) {
+      json::Value file = json::Value::make_object();
+      file.set("name", json::Value::make_string(f.name));
+      file.set("size", json::Value::make_int(static_cast<long long>(f.size)));
+      file.set("sha256", json::Value::make_string(f.sha256));
+      files.push(std::move(file));
+    }
+    o.set("disc_files", std::move(files));
+    o.set("disc_verified", json::Value::make_bool(r.disc_verified));
+    json::Value program = json::Value::make_object();
+    program.set("path", json::Value::make_string(r.program.path));
+    program.set("size", json::Value::make_int(static_cast<long long>(r.program.size)));
+    program.set("mtime", json::Value::make_int(r.program.mtime));
+    program.set("sha256", json::Value::make_string(r.program.sha256));
+    program.set("program_identity", json::Value::make_string(r.program.program_identity));
+    program.set("disc_identity", json::Value::make_string(r.program.disc_identity));
+    program.set("runtime_abi", json::Value::make_int(r.program.runtime_abi));
+    program.set("viewer", json::Value::make_bool(r.program.viewer));
+    program.set("verified_at", json::Value::make_int(r.program.verified_at));
+    o.set("program", std::move(program));
+    o.set("last_stop", json::Value::make_string(r.last_stop));
+    v.set("sega_cd", std::move(o));
+  }
   return v;
+}
+
+std::uint64_t size_field(const json::Value &v, std::string_view key) { return static_cast<std::uint64_t>(std::max(0LL, v.num(key))); }
+
+// A Sega CD record is accepted only when its identity is self-consistent: the entry key must be the identity of the stored BIOS and CUE digests
+// (a hand-edited or damaged record is dropped, never half-trusted). Paths are references; nothing else about the files is kept.
+bool sega_cd_from_json(const json::Value *o, LibraryEntry &e) {
+  if (o == nullptr || !o->is_object()) return false;
+  scd::EntryRecord r;
+  r.identity_version = static_cast<int>(o->num("identity_version", 0));
+  if (r.identity_version != scd::identity_version) return false;  // an unknown identity layout is not guessed at
+  r.bios_path = clamp_text(o->str("bios_path"), 4096);
+  r.bios_size = size_field(*o, "bios_size");
+  r.bios_sha256 = o->str("bios_sha256");
+  r.cue_path = clamp_text(o->str("cue_path"), 4096);
+  r.cue_size = size_field(*o, "cue_size");
+  r.cue_sha256 = o->str("cue_sha256");
+  if (!is_hex_digest(r.bios_sha256, 64) || !is_hex_digest(r.cue_sha256, 64) || scd::entry_identity(r.bios_sha256, r.cue_sha256) != e.sha256) return false;
+  if (const json::Value *files = o->get("disc_files"); files != nullptr && files->is_array())
+    for (const auto &f : files->items) {
+      if (!f.is_object() || r.disc_files.size() >= scd::max_disc_files) continue;
+      scd::FileFact fact;
+      fact.name = clamp_text(f.str("name"), 255);
+      fact.size = size_field(f, "size");
+      fact.sha256 = f.str("sha256");
+      if (fact.name.empty() || fact.name.find_first_of("/\\:") != std::string::npos || !is_hex_digest(fact.sha256, 64)) { r.disc_files.clear(); break; }
+      r.disc_files.push_back(std::move(fact));
+    }
+  r.disc_verified = o->flag("disc_verified") && !r.disc_files.empty();
+  if (const json::Value *p = o->get("program"); p != nullptr && p->is_object() && !p->str("path").empty()) {
+    r.program.path = clamp_text(p->str("path"), 4096);
+    r.program.size = size_field(*p, "size");
+    r.program.mtime = std::max(0LL, p->num("mtime"));
+    r.program.sha256 = p->str("sha256");
+    r.program.program_identity = p->str("program_identity");
+    r.program.disc_identity = p->str("disc_identity");
+    r.program.runtime_abi = static_cast<int>(std::clamp(p->num("runtime_abi"), 0LL, 1000LL));
+    r.program.viewer = p->flag("viewer");
+    r.program.verified_at = std::max(0LL, p->num("verified_at"));
+    if (!is_hex_digest(r.program.sha256, 64) || !is_hex_digest(r.program.program_identity, 64) || !is_hex_digest(r.program.disc_identity, 64)) r.program = scd::ProgramRecord{};
+  }
+  r.last_stop = clamp_text(o->str("last_stop"), 64);
+  e.sega_cd = std::move(r);
+  if (e.rom_paths.empty() && !e.sega_cd.cue_path.empty()) e.rom_paths.push_back(e.sega_cd.cue_path);
+  return true;
 }
 
 // Validates and sanitizes one entry; nullopt when it cannot be an entry at all (bad platform or digest).
@@ -76,7 +156,7 @@ bool entry_from_json(const json::Value &v, LibraryEntry &e) {
   e = LibraryEntry{};
   e.platform_id = v.str("platform");
   e.sha256 = v.str("sha256");
-  if ((e.platform_id != "genesis" && e.platform_id != "master-system") || !is_hex_digest(e.sha256, 64)) return false;
+  if ((e.platform_id != "genesis" && e.platform_id != "master-system" && e.platform_id != "sega-cd") || !is_hex_digest(e.sha256, 64)) return false;
   e.detected_title = clamp_text(v.str("detected_title"), 200);
   e.display_title = clamp_text(v.str("display_title"), 200);
   if (const json::Value *paths = v.get("rom_paths"); paths != nullptr && paths->is_array())
@@ -125,6 +205,7 @@ bool entry_from_json(const json::Value &v, LibraryEntry &e) {
       e.builds.push_back(r);
     }
   if (e.builds.size() > Catalog::max_builds) e.builds.erase(e.builds.begin(), e.builds.end() - static_cast<std::ptrdiff_t>(Catalog::max_builds));
+  if (e.platform_id == "sega-cd" && !sega_cd_from_json(v.get("sega_cd"), e)) return false;
   return true;
 }
 
@@ -198,7 +279,8 @@ CatalogLoad Catalog::load() {
 bool Catalog::save(std::string *error) {
   if (read_only_) { if (error) *error = "the library is read-only"; return false; }
   json::Value root = json::Value::make_object();
-  root.set("schema", json::Value::make_int(schema_version));
+  const bool has_sega_cd = std::any_of(entries_.begin(), entries_.end(), [](const LibraryEntry &e) { return e.platform_id == "sega-cd"; });
+  root.set("schema", json::Value::make_int(has_sega_cd ? 2 : 1));  // schema 1 stays byte-compatible for every library without a Sega CD game
   json::Value games = json::Value::make_array();
   for (const auto &e : entries_) games.push(to_json(e));
   root.set("games", std::move(games));
@@ -260,6 +342,48 @@ Catalog::ImportResult Catalog::import_rom(const RomView &rom, long long now) {
   }
   if (!rom.mapper.empty()) entry->mapper = rom.mapper;
   if (!rom.mapper_manifest_sha256.empty()) entry->mapper_manifest_sha256 = rom.mapper_manifest_sha256;
+  result.entry = entry;
+  return result;
+}
+
+Catalog::ImportResult Catalog::import_sega_cd(const scd::EntryRecord &record, const std::string &title, long long now) {
+  ImportResult result;
+  if (read_only_) { result.error = "The library is read-only."; return result; }
+  if (!is_hex_digest(record.bios_sha256, 64) || !is_hex_digest(record.cue_sha256, 64) || record.bios_path.empty() || record.cue_path.empty()) {
+    result.error = "A Sega CD game needs a BIOS image and a disc (CUE).";
+    return result;
+  }
+  const std::string id_digest = scd::entry_identity(record.bios_sha256, record.cue_sha256);
+  LibraryEntry *entry = find("sega-cd", id_digest);
+  if (entry == nullptr) {
+    if (entries_.size() >= max_entries) { result.error = "The library is full."; return result; }
+    LibraryEntry fresh;
+    fresh.platform_id = "sega-cd";
+    fresh.sha256 = id_digest;
+    fresh.detected_title = clamp_text(title, 200);
+    fresh.added_at = now;
+    fresh.aot_policy = "compatibility";
+    fresh.aot_model = "v1";
+    entries_.push_back(std::move(fresh));
+    entry = &entries_.back();
+    result.added = true;
+  }
+  const bool location_changed = entry->sega_cd.cue_path != record.cue_path || entry->sega_cd.bios_path != record.bios_path;
+  // An existing program is kept when the new record has none (adding the same game again must not discard what was imported).
+  scd::ProgramRecord keep_program = entry->sega_cd.program;
+  std::vector<scd::FileFact> keep_files = entry->sega_cd.disc_files;
+  const bool keep_verified = entry->sega_cd.disc_verified;
+  const std::string keep_stop = entry->sega_cd.last_stop;
+  entry->sega_cd = record;
+  if (record.program.path.empty()) {
+    entry->sega_cd.program = keep_program;
+    entry->sega_cd.disc_files = keep_files;
+    entry->sega_cd.disc_verified = keep_verified;
+    entry->sega_cd.last_stop = keep_stop;
+  }
+  entry->rom_paths.assign(1, record.cue_path);
+  entry->rom_path_unknown = false;
+  result.path_added = !result.added && location_changed;
   result.entry = entry;
   return result;
 }
@@ -356,7 +480,7 @@ RomView view_from_entry(const LibraryEntry &entry) {
   view.title = entry.title();
   view.platform_id = entry.platform_id;
   view.supported_platform = true;
-  view.platform = entry.platform_id == "master-system" ? "Master System" : "Genesis / Mega Drive";
+  view.platform = entry.platform_id == "master-system" ? "Master System" : entry.platform_id == "sega-cd" ? "Sega CD" : "Genesis / Mega Drive";
   view.mapper = entry.mapper;
   view.mapper_manifest_sha256 = entry.mapper_manifest_sha256;
   view.aot_policy = entry.aot_policy;
