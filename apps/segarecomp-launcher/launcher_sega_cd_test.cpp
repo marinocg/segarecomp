@@ -48,6 +48,16 @@ std::string statement(bool viewer, int abi, const std::string &bios_digest, std:
   return o.str();
 }
 
+// A path as it appears inside a JSON string (a Windows path has backslashes to escape).
+std::string json_escaped(const std::string &text) {
+  std::string out;
+  for (const char c : text) {
+    if (c == '\\' || c == '"') out.push_back('\\');
+    out.push_back(c);
+  }
+  return out;
+}
+
 struct Fixture {
   fs::path dir, bios, cue, program;
   explicit Fixture(const fs::path &base, const fs::path &fake_program, const std::string &name = "fx") {
@@ -420,7 +430,7 @@ void test_catalog(const fs::path &base, const fs::path &fake) {
     const std::string head = library_fixture().substr(library_fixture().find("\"games\""));
     const std::string old_games = head.substr(0, head.rfind("\n  ]") );
     expect(text.find(old_games.substr(0, old_games.size())) != std::string::npos, "the Genesis and Master System records are written exactly as before");
-    expect(text.find("\"sega_cd\"") != std::string::npos && text.find(u8(f.program)) != std::string::npos, "the Sega CD member holds the references");
+    expect(text.find("\"sega_cd\"") != std::string::npos && text.find(json_escaped(u8(f.program))) != std::string::npos, "the Sega CD member holds the references");
     // nothing but references and digests: no file bytes
     expect(text.find("SYNTHETIC") == std::string::npos, "no BIOS, disc or program content is stored");
   }
