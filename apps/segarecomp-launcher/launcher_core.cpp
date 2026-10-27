@@ -657,7 +657,7 @@ void ScdBuildJob::run() {
 #else
   args.insert(args.end(), {"--link-arg", "-Wl,-rpath," + utf8(layout_.sdl_lib)});
 #endif
-  if (const char *extra = SDL_getenv("SEGARECOMP_SCD_BUILD_ARGS")) {  // test seam: whitespace-separated extra product-CLI options (budget, host source, ...)
+  if (const char *extra = SDL_getenv("SEGARECOMP_SCD_BUILD_ARGS")) {  // TEST SEAM (documented in ADR 0205; local environment only, never set by Segarecomp): whitespace-separated extra product-CLI options (budget, host source, ...)
     std::istringstream words(extra);
     for (std::string word; words >> word;) args.push_back(word);
   }
@@ -773,9 +773,23 @@ void ScdBuildJob::run() {
       std::lock_guard<std::mutex> lock(mutex_);
       summary_ = text;
     }
-    fs::remove_all(request_.out_dir, ec);
+    // Publish without ever losing the previous build: move it aside, move the new one in, and put the old one back if that fails.
+    const fs::path aside = request_.out_dir.parent_path() / (request_.out_dir.filename().string() + ".old");
+    fs::remove_all(aside, ec);
+    const bool had_old = fs::exists(request_.out_dir, ec);
+    if (had_old) {
+      fs::rename(request_.out_dir, aside, ec);
+      if (ec) { set_message("Cannot store the build in the game's folder (the previous build is kept)."); finish(false); return; }
+    }
     fs::rename(partial, request_.out_dir, ec);
-    if (ec) { set_message("Cannot store the build in the game's folder."); finish(false); return; }
+    if (ec) {
+      std::error_code restore_ec;
+      if (had_old) fs::rename(aside, request_.out_dir, restore_ec);
+      set_message("Cannot store the build in the game's folder (the previous build is kept).");
+      finish(false);
+      return;
+    }
+    fs::remove_all(aside, ec);
     finish(true);
     return;
   }

@@ -246,6 +246,7 @@ void App::init_ui() {
 void App::shutdown() {
   trace("shutdown=workers");
   if (job_) job_->wait();
+  if (scd_build_) { scd_build_->request_cancel(); scd_build_->wait(); scd_build_.reset(); }   // a quit never leaves a build running without a window
   game_.reset();
   sv_diag_reclaim_exclusive_devices(diag_);
   scan_cancel_ = true;

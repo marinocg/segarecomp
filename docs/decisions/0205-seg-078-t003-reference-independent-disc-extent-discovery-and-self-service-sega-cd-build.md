@@ -104,8 +104,9 @@ refused); the two stops are not extent refusals.
 
 ## Decision: GO, for a stated scope
 
-`GO` by the criteria above: every synthetic row behaved as expected and the mechanism built a useful bounded program for a commercial title without any
-reference, on the route the launcher actually runs. The scope of what is claimed is exactly that: **the build discovers by itself the disc spans that the
+`GO` by the synthetic matrix (pre-registered) plus two commercial routes that were fixed *after* the pre-registration (see the chronology above; this is weaker
+than the criterion's "independently fixed route" and is stated as such): every synthetic row behaved as expected and the mechanism built a useful bounded program
+for a commercial title without any reference, on the route the launcher actually runs. The scope of what is claimed is exactly that: **the build discovers by itself the disc spans that the
 console loads into RAM and executes, and compiles the path the console takes from reset without controller input, up to the first code that is not
 provably on the disc or the first documented non-goal.** It is not a general CUE-to-play claim. Implemented and shipped with this decision:
 
@@ -126,3 +127,5 @@ provably on the disc or the first documented non-goal.** It is not a general CUE
 3. **Audio** (PCM, CD-DA, the Z80): route A ends there. Out of scope for this task.
 4. Code that is generated, decompressed or transformed at run time is refused (`no_source`) by design; a generic answer would need the immutable
    generated-data ownership evaluated in `AGENTS.md`, not byte matching.
+
+`SEGARECOMP_SCD_BUILD_ARGS` (launcher environment) appends extra product-CLI options to the launcher's build: a local test seam, never set by Segarecomp.

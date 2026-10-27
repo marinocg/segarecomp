@@ -101,11 +101,18 @@ std::optional<std::string> raw_value(const std::string &text, const std::string 
 
 std::optional<std::uint64_t> number_value(const std::string &text, const std::string &key, std::size_t from = 0) {
   const auto raw = raw_value(text, key, from);
-  if (!raw || raw->empty() || raw->find_first_not_of("0123456789") != std::string::npos) return std::nullopt;
+  if (!raw || raw->empty() || raw->size() > 18U || raw->find_first_not_of("0123456789") != std::string::npos) return std::nullopt;
   return std::stoull(*raw);
 }
 
 void stage(const std::string &name, const char *state) { std::cout << "@stage " << name << ' ' << state << std::endl; }
+
+// A per-process token so two builds sharing one object cache never write the same partial file.
+std::uint64_t process_token() {
+  static const std::uint64_t token = static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count()) ^
+                                     (reinterpret_cast<std::uintptr_t>(&token) << 7U) ^ static_cast<std::uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+  return token;
+}
 
 class Builder {
  public:
@@ -256,7 +263,8 @@ class Builder {
     for (const auto &a : o_.cc_args) material += "arg " + a + "\n";
     material += "opt " + o_.optimize + "\n";
     std::vector<fs::path> files;
-    for (const char *rel : {"platforms/sega-cd/runtime", "platforms/genesis/runtime", "libs/cpu/m68k/include", "libs/device/sega/genesis/include"}) {
+    for (const char *rel : {"platforms/sega-cd/runtime", "platforms/sega-cd/viewer", "platforms/genesis/runtime", "platforms/genesis/viewer", "platforms/genesis/machine/include", "libs/cpu/m68k/include",
+                            "libs/device/sega/genesis/include", "libs/codegen/c11/include", "libs/viewer/include", "libs/viewer/src"}) {
       std::error_code ec;
       for (fs::recursive_directory_iterator it(o_.runtime_dir / rel, ec), end; !ec && it != end; it.increment(ec))
         if (it->is_regular_file() && (it->path().extension() == ".c" || it->path().extension() == ".h")) files.push_back(it->path());
@@ -293,7 +301,7 @@ class Builder {
     rebuilt = false;
     std::error_code ec;
     if (fs::exists(object, ec)) return std::nullopt;
-    const fs::path partial = o_.cache_dir / (key + ".part" + std::to_string(counter_.fetch_add(1)));
+    const fs::path partial = o_.cache_dir / (key + ".part" + std::to_string(process_token()) + "-" + std::to_string(counter_.fetch_add(1)));
         const int code = run_process(compile_command(source, partial, extra, viewer), partial.string() + ".log", {}, o_.compile_timeout);
     if (code != 0) {
       std::lock_guard<std::mutex> lock(log_mutex_);
@@ -534,7 +542,9 @@ class Builder {
                                  "--region-base", std::to_string(base), "--delivered-overflow", overflow};
     if (!delivered.empty()) { cmd.push_back("--delivered"); cmd.push_back(delivered); }
     const fs::path out = o_.output / "resolve.json";
-    run_process(cmd, out, {}, 600);
+    std::error_code rm_ec;
+    fs::remove(out, rm_ec);   // never read an earlier round's answer
+    if (run_process(cmd, out, {}, 600) < 0) return {std::nullopt, "resolver_failed"};   // exit 8 is a normal typed refusal; < 0 is a start failure or a timeout
     const std::string text = read_text(out);
     if (raw_value(text, "ok").value_or("") == "true") {
       const std::string spec = cpu + ":" + raw_value(text, "offset").value_or("0") + ":" + raw_value(text, "base").value_or("0") + ":" + raw_value(text, "length").value_or("0");
@@ -591,7 +601,16 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
     return 2;
   }
-  const std::string self = fs::absolute(argv[0]).string();
+  std::string self = fs::absolute(argv[0]).string();
+#if defined(__linux__)
+  { std::error_code exe_ec; const fs::path exe = fs::read_symlink("/proc/self/exe", exe_ec); if (!exe_ec && !exe.empty()) self = exe.string(); }
+#endif
   Builder builder(std::move(o), self);
-  return builder.run();
+  try {
+    return builder.run();
+  } catch (const std::exception &e) {   // malformed tool output must be a typed failure, never an abort
+    std::cout << "@result failed stage=build message=internal_error" << std::endl;
+    std::cerr << "internal error: " << e.what() << '\n';
+    return 3;
+  }
 }
