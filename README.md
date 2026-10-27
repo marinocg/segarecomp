@@ -47,7 +47,7 @@ below may reach gameplay, encounter unsupported behavior or fail to build.
 | **Z80 CPU** | Z80 decode/semantics and generated-C lowering components exist and are used by ongoing platform work. | CPU coverage, hardware integration and game compatibility remain experimental. |
 | **Master System** | Generated-native Z80 path, C11 runtime, VDP/PSG/input components, headless support and optional viewer. Sonic 1 and 2, Wonder Boy III and Alex Kidd in Miracle World play well. | Compatibility varies by title; mapper selection is explicit. |
 | **Game Gear** | Planned platform work. | No general compatibility claim. |
-| **Sega CD** | A **synthetic post-BIOS** path using project-authored CUE/BIN discs, two generated-native MC68000 CPUs, CD/CDC and Word RAM behavior, a Genesis VDP frame, and disc-loaded modules/overlays. | Synthetic fixtures only: no authentic BIOS execution or commercial-disc compatibility claim. |
+| **Sega CD** | **Synthetic** project-authored CUE/BIN discs with two generated-native MC68000 CPUs, CD/CDC and Word RAM behavior; **authentic BIOS execution** (your own BIOS image) with the generated-native boot and hand-off; **Sonic CD** is checked from the BIOS through the title, two START presses and the first level, with a timed RIGHT input, against an independent reference (checkpoint evidence, not a compatibility claim); a second title has only **experimental observations**. A program can be played **interactively in the shared viewer** (keyboard/gamepad, pause, frame step, input recording and exact replay) and the launcher plays a **verified prebuilt program** that you import for your own BIOS and disc. | **No audio** (the Z80 does not execute; no PCM or CD-DA output). **Generic CUE-to-play compilation does not exist**: a program is built per title with the [developer procedure](docs/product/sega-cd-play.md), reaches only the code regions its build admitted (other code stops with a typed stop), and the launcher never builds one. BIOS, disc and programs are yours and are never bundled. |
 | **32X / Saturn** | Roadmap targets. | No working platform implementation claimed. |
 
 ### Known working games
@@ -150,7 +150,7 @@ To build the launcher and distribution archives from source, see
 | Path | Contents |
 | --- | --- |
 | `libs/` | reusable libraries: core, MC68000 and Z80 CPU semantics, recompiler, C11 code generation, devices and media |
-| `platforms/` | machine/runtime/viewer composition for Genesis, Master System and synthetic Sega CD; other targets have roadmap documentation |
+| `platforms/` | machine/runtime/viewer composition for Genesis, Master System and Sega CD (synthetic and authentic-BIOS); other targets have roadmap documentation |
 | `apps/segarecomp` | the CLI (including `build`, the native ROM-to-executable route) |
 | `apps/segarecomp-launcher` | opt-in consumer GUI launcher (SDL3 + Dear ImGui) |
 | `packaging/` | release staging, package smoke test, pinned third-party inputs |
