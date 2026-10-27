@@ -1221,6 +1221,18 @@ set_property(TEST sega_cd_frame_capture_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_live_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_live_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_live_test APPEND PROPERTY LABELS full fast)
+# SEG-078-T001: the same program in the real shared SDL3 viewer (dummy video/audio drivers; keys pushed by the viewer's automation seam). Only with
+# the SDL3 viewer enabled; the test itself skips on a host without SDL3 or off Linux.
+if(SEGARECOMP_ENABLE_SDL3_VIEWER)
+  get_target_property(_scd_sdl_include SDL3::SDL3 INTERFACE_INCLUDE_DIRECTORIES)
+  list(GET _scd_sdl_include 0 _scd_sdl_include0)
+  get_filename_component(_scd_sdl_prefix "${_scd_sdl_include0}" DIRECTORY)
+  add_test(NAME sega_cd_viewer_sdl_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_viewer_sdl_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+  set_property(TEST sega_cd_viewer_sdl_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST sega_cd_viewer_sdl_test APPEND PROPERTY ENVIRONMENT "SDL3_PREFIX=${_scd_sdl_prefix}")
+  set_property(TEST sega_cd_viewer_sdl_test PROPERTY TIMEOUT 600)
+endif()
 # SEG-071-T002 (ADR 0177): the sub clock, drive grid, main bus, VDP port and video-phase conventions of the BIOS-image profile.
 add_test(NAME sega_cd_timing_convention_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_timing_convention_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

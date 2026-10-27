@@ -12,13 +12,13 @@
 
 #define KEY_SCRIPT_MAX 4096U
 
-/* Automation seam (like the launcher's SEGARECOMP_GUI_SCRIPT): SEGARECOMP_VIEWER_KEY_SCRIPT names a file of `<poll> down|up <SDL key name>`
+/* Automation seam (like the launcher's SEGARECOMP_GUI_SCRIPT): SEGARECOMP_VIEWER_KEY_SCRIPT names a file of `<poll> down|up <SDL key name>` (or `<poll> quit x`)
  * lines; at the start of that poll of the driver the key event is pushed onto SDL's queue, so the REAL keyboard mapping, settings and
  * pause handling are exercised without a person. Unset in every shipped use. */
 typedef struct KeyLine {
   uint64_t poll;
   SDL_Scancode scancode;
-  int down;
+  int down, quit;   /* quit: the window's close button (SDL_EVENT_QUIT) */
 } KeyLine;
 
 typedef struct ScdSdlHost {
@@ -46,8 +46,9 @@ static void load_key_script(ScdSdlHost *h) {
     if (sscanf(text, "%llu %7s %63s", &poll, action, name) != 3) continue;
     k->poll = (uint64_t)poll;
     k->down = strcmp(action, "down") == 0;
+    k->quit = strcmp(action, "quit") == 0;
     k->scancode = SDL_GetScancodeFromName(name);
-    if (k->scancode == SDL_SCANCODE_UNKNOWN || (!k->down && strcmp(action, "up") != 0)) continue;
+    if (!k->quit && (k->scancode == SDL_SCANCODE_UNKNOWN || (!k->down && strcmp(action, "up") != 0))) continue;
     h->key_count += 1U;
   }
   fclose(f);
@@ -57,7 +58,7 @@ static void push_scripted_keys(ScdSdlHost *h) {
   while (h->key_next < h->key_count && h->keys[h->key_next].poll <= h->polls) {
     SDL_Event e;
     SDL_zero(e);
-    e.type = (Uint32)(h->keys[h->key_next].down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP);
+    e.type = (Uint32)(h->keys[h->key_next].quit ? SDL_EVENT_QUIT : h->keys[h->key_next].down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP);
     e.common.timestamp = SDL_GetTicksNS();
     e.key.scancode = h->keys[h->key_next].scancode;
     e.key.down = h->keys[h->key_next].down != 0;

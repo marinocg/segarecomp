@@ -124,7 +124,7 @@ def main():
                                 "--viewer-host-source", str(HOST)], capture_output=True, text=True, timeout=1800)
         summary = json.loads(built.stdout) if built.stdout.strip() else {}
         check(built.returncode == 0 and summary.get("ok") and summary.get("viewer", {}).get("host") == "test",
-              "the fixture builds with its viewer variant: %s" % built.stdout[-300:])
+              "the fixture builds with its viewer variant" + ("" if summary.get("ok") else ": %s" % built.stdout[-300:]))
         if not summary.get("ok"):
             return 1
         exe, vexe = pathlib.Path(summary["program"]), pathlib.Path(summary["viewer"]["program"])
