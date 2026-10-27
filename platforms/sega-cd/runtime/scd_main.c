@@ -6,9 +6,14 @@
  *           [--set main|sub:dN|aN=VALUE]... [--until-tick T] [--backup-ram FILE]
  *           [--capture-onset N]... --capture-dir DIR   (BIOS-image profile; SEG-065-T003)
  *           [--input-script FILE [--input-log FILE]]   (BIOS-image profile; SEG-070-T002, ADR 0149)
+ *           [--record-input FILE]   (live programs only, SEG-078-T001, ADR 0204: the script the live run recorded)
  *
- * Exit status: 0 idle (success), 10 typed stop, 11 budget exhausted or deadline (read `result`), 20 disc refused at start-up, 22 backup RAM input refused, 23 input script refused, 2 usage. */
+ * Exit status: 0 idle (success), 10 typed stop, 11 budget exhausted or deadline (read `result`), 20 disc refused at start-up, 22 backup RAM input refused, 23 input script refused, 2 usage.
+ * A live program (a viewer registered a host, SEG-078-T001) additionally: 24 host failure, 25 recording capacity reached (the valid prefix is
+ * recorded), 26 recorder refused, 27 recording could not be written; leaving by the host's quit is 0. */
 #include "scd_runtime.h"
+
+#include "scd_live.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -72,7 +77,8 @@ static int scd_apply_set(ScdMachine *m, const char *spec) {
   return 1;
 }
 
-static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *program, ScdRunResult result, const char *frame_sha) {
+static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *program, ScdRunResult result, const char *frame_sha,
+                             const ScdLiveSummary *live) {
   const ScdAuthentic *authentic = m->authentic;
   char digest[65];
   unsigned k, i;
@@ -168,6 +174,15 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
             (unsigned long long)m->backup_ram_writes, digest);
   }
   scd_input_report(m, out); /* SEG-070-T002: absent without --input-script (reports unchanged) */
+  if (live != NULL) { /* SEG-078-T001: the host-loop summary of a live program (absent from every headless report) */
+    uint64_t rendered, skipped, rejected;
+    scd_vdp_present_counts(m, &rendered, &skipped, &rejected);
+    fprintf(out, ",\"live\":{\"outcome\":\"%s\",\"frames\":%llu,\"presented\":%llu,\"rendered\":%llu,\"skipped\":%llu,\"rejected\":%llu,"
+                 "\"paused_polls\":%llu,\"steps\":%llu}",
+            scd_live_outcome_name(live->outcome), (unsigned long long)live->boundaries, (unsigned long long)live->frames_presented,
+            (unsigned long long)rendered, (unsigned long long)skipped, (unsigned long long)rejected,
+            (unsigned long long)live->paused_polls, (unsigned long long)live->steps);
+  }
   if (m->overlays != NULL) { /* SEG-063: overlay activation (absent for programs without modules: their reports are unchanged) */
     const ScdOverlayProgram *o = m->overlays;
     unsigned g, c;
@@ -196,6 +211,8 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
   }
   fprintf(out, "}\n");
 }
+
+const ScdLiveHost *scd_live_host_registered = NULL;
 
 int scd_program_main(const ScdProgram *program, int argc, char **argv) { return scd_program_main_overlays(program, NULL, argc, argv); }
 
@@ -373,6 +390,34 @@ static int scd_load_input_script(ScdMachine *m, const char *path, int log, int b
   return 0;
 }
 
+/* SEG-078-T002 (ADR 0204): `--describe` prints what this program claims about itself - the contract version, its build identities and
+ * the BIOS and disc files it will accept (sizes and SHA-256 only) - and runs nothing. A launcher compares these claims with the files the
+ * user chose; the run itself re-verifies the BIOS and every disc file against the same table before any guest instruction. */
+static void scd_json_name(const char *name) {
+  putchar('"');
+  for (; *name != '\0'; ++name) {
+    if (*name == '"' || *name == '\\') putchar('\\');
+    putchar(*name);
+  }
+  putchar('"');
+}
+
+static void scd_describe(const ScdProgram *program, const ScdAuthentic *authentic, int viewer) {
+  uint32_t i;
+  printf("{\"describe\":1,\"runtime_abi\":%u,\"profile\":\"%s\",\"viewer\":%s,\"program_identity\":\"%s\",\"disc_identity\":\"%s\",",
+         SCD_RUNTIME_ABI, authentic != NULL ? "bios_image" : "synthetic", viewer ? "true" : "false", program->program_identity,
+         program->disc.identity);
+  if (authentic != NULL) printf("\"bios\":{\"size\":%u,\"sha256\":\"%s\"},", authentic->bios_size, authentic->bios_sha256);
+  else printf("\"bios\":null,");
+  printf("\"disc_files\":[");
+  for (i = 0U; i < program->disc.file_count; ++i) {
+    printf("%s{\"name\":", i ? "," : "");
+    scd_json_name(program->disc.files[i].name);
+    printf(",\"size\":%llu,\"sha256\":\"%s\"}", (unsigned long long)program->disc.files[i].size, program->disc.files[i].sha256);
+  }
+  printf("]}\n");
+}
+
 /* SEG-063: `overlays` is the generated overlay registry (NULL for programs without disc-loaded modules). */
 static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *overlays, const ScdAuthentic *authentic, int argc,
                            char **argv);
@@ -396,7 +441,10 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   uint64_t capture_onsets[8];
   unsigned capture_count = 0U;
   const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *wlog_path = NULL, *event_path = NULL, *backup_ram_path = NULL;
-  const char *input_script_path = NULL, *input_log_path = NULL;
+  const char *input_script_path = NULL, *input_log_path = NULL, *record_path = NULL;
+  const ScdLiveHost *const live_host = scd_live_host_registered; /* SEG-078-T001: a viewer registered its host */
+  ScdLiveSummary live_summary;
+  int live_exit = 0;
   unsigned set_count = 0, i;
   uint64_t budget = 0U, slice_ticks = 0U, slice_seed = 0U, until_tick = UINT64_MAX;
   int have_seed = 0;
@@ -404,6 +452,10 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   char frame_sha[65];
   const char *frame_digest = NULL;
   FILE *report;
+  if (argc == 2 && strcmp(argv[1], "--describe") == 0) {
+    scd_describe(program, authentic, live_host != NULL);
+    return 0;
+  }
   for (i = 1; i < (unsigned)argc; i += 2U) {
     const char *flag = argv[i];
     const char *value = (int)(i + 1U) < argc ? argv[i + 1U] : NULL;
@@ -428,6 +480,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     else if (strcmp(flag, "--backup-ram") == 0) backup_ram_path = value; /* SEG-065-T002: the backup RAM machine input */
     else if (strcmp(flag, "--input-script") == 0) input_script_path = value; /* SEG-070-T002: the timed pad machine input */
     else if (strcmp(flag, "--input-log") == 0) input_log_path = value;       /* its read log (local diagnostic) */
+    else if (live_host != NULL && strcmp(flag, "--record-input") == 0) record_path = value; /* SEG-078-T001 */
     else if (strcmp(flag, "--dump-dir") == 0) dump_dir = value;           /* SEG-064-T004 diagnostics (local only) */
     else if (strcmp(flag, "--coverage") == 0) coverage_path = value;
     else if (strcmp(flag, "--access-trace") == 0) trace_path = value;
@@ -475,7 +528,16 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
       return 22;
     }
   }
-  if (input_log_path != NULL && input_script_path == NULL) return 2;
+  if (live_host != NULL && authentic == NULL) return 2;                        /* SEG-078-T001: the viewer drives the BIOS-image profile only */
+  if (record_path != NULL && input_script_path != NULL) return 2;               /* a replay records nothing: its script is its input */
+  if (input_log_path != NULL && input_script_path == NULL && live_host == NULL) return 2;
+  if (live_host != NULL && input_script_path == NULL) { /* live input: an empty script the host's pad transitions are appended to */
+    if (scd_input_live_begin(&machine, input_log_path != NULL) != 0) {
+      scd_machine_release(&machine);
+      scd_disc_close(&disc);
+      return 1;
+    }
+  }
   if (input_script_path != NULL) {
     const int refused = scd_load_input_script(&machine, input_script_path, input_log_path != NULL, authentic != NULL);
     if (refused != 0) {
@@ -494,7 +556,20 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   if (event_path != NULL && scd_event_open(&machine, event_path) != 0) return 1;
   for (i = 0; i < set_count; ++i)
     if (!scd_apply_set(&machine, sets[i])) return 2;
-  if (slice_ticks == 0U && !have_seed) {
+  memset(&live_summary, 0, sizeof live_summary);
+  if (live_host != NULL) {
+    ScdLiveConfig live_config;
+    memset(&live_config, 0, sizeof live_config);
+    live_config.sample_pad = input_script_path == NULL; /* a script drives the machine (replay): the host pad is not sampled */
+    live_config.slice_ticks = slice_ticks;
+    live_config.have_seed = have_seed;
+    live_config.slice_seed = slice_seed;
+    live_config.until_tick = until_tick;
+    live_summary = scd_live_run(&machine, live_host, &live_config);
+    result = live_summary.result;
+    live_exit = live_summary.outcome == SCD_LIVE_HOST_ERROR ? 24 : live_summary.outcome == SCD_LIVE_RECORDING_CAPACITY ? 25
+                : live_summary.outcome == SCD_LIVE_RECORDING_REFUSED ? 26 : 0;
+  } else if (slice_ticks == 0U && !have_seed) {
     result = scd_machine_run(&machine, until_tick);
   } else {
     uint64_t deadline = 0U, state = slice_seed * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
@@ -525,10 +600,11 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   if (coverage_path != NULL && scd_coverage_write(&machine, coverage_path) != 0) return 1;
   if (dump_dir != NULL && scd_dump_state(&machine, dump_dir) != 0) return 1;
   if (input_log_path != NULL && scd_input_write_log(&machine, input_log_path) != 0) return 1;
+  if (record_path != NULL && scd_input_live_write(&machine, record_path) != 0) return 27; /* SEG-078-T001: the recorded script, also after a quit or a stop */
   if (materialize_dir != NULL && result == SCD_RUN_STOPPED && !scd_capture(&machine, program, materialize_dir)) return 1;
   report = report_path != NULL ? fopen(report_path, "w") : stdout;
   if (report == NULL) return 1;
-  scd_write_report(report, &machine, program, result, frame_digest);
+  scd_write_report(report, &machine, program, result, frame_digest, live_host != NULL ? &live_summary : NULL);
   if (report != stdout && fclose(report) != 0) return 1;
   scd_trace_close(&machine);
   scd_wlog_close(&machine);
@@ -536,5 +612,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   scd_coverage_release(&machine);
   scd_machine_release(&machine);
   scd_disc_close(&disc);
+  if (live_exit != 0) return live_exit;
+  if (live_host != NULL && live_summary.outcome == SCD_LIVE_QUIT) return 0;
   return result == SCD_RUN_IDLE ? 0 : result == SCD_RUN_STOPPED ? 10 : 11;
 }

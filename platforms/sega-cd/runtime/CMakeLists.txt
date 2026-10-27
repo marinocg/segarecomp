@@ -10,6 +10,7 @@ add_library(segarecomp_runtime_sega_cd STATIC
   scd_gate_array.c
   scd_gfx.c
   scd_input.c
+  scd_live.c
   scd_machine.c
   scd_main.c
   scd_overlay.c

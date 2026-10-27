@@ -31,8 +31,14 @@
 extern "C" {
 #endif
 
+struct GenesisFrameArtifact; /* SEG-078-T001: presented frames (genesis runtime frame artifact) */
+
 #define SCD_MAIN 0U
 #define SCD_SUB 1U
+
+/* SEG-078-T002 (ADR 0204): the version of the program's host-facing contract (command line, exit statuses, `--describe` and the report
+ * fields a launcher reads). A launcher accepts exactly the versions it knows; an older program is stale, never guessed at. */
+#define SCD_RUNTIME_ABI 1U
 
 /* Integer clock domain (contract section 2): ticks per second = lcm(53693175, 12500000, 75). */
 #define SCD_TICKS_PER_SECOND UINT64_C(26846587500000)
@@ -568,6 +574,11 @@ typedef struct ScdInput {
   ScdInputRead *log;                 /* data-port reads, in order (bounded; NULL when not logging) */
   size_t log_count, log_dropped;
   uint64_t reads[2];
+  /* SEG-078-T001 (ADR 0204): live recording. A live input is an ordinary script whose events are appended at the machine's own
+   * frame boundaries; `live_pad` is the state after the last appended event and `script_bytes` the size of its serialisation. */
+  uint8_t live;
+  uint8_t live_pad[2];
+  size_t script_bytes;
 } ScdInput;
 /* Parse and validate a script (`error` receives the refusal class and `line` its 1-based line); `events` has room for
  * SCD_INPUT_MAX_EVENTS. Returns 0 on success. Nothing is applied. */
@@ -581,6 +592,24 @@ void scd_input_note_read(ScdMachine *m, uint32_t port, uint32_t value);
 void scd_input_report(const ScdMachine *m, FILE *out);
 int scd_input_write_log(const ScdMachine *m, const char *path);
 void scd_input_release(ScdMachine *m);
+/* --- SEG-078-T001 (ADR 0204): live pad input and its recording --------------------------------------------------------------- */
+typedef enum ScdLiveSample {
+  SCD_LIVE_SAMPLE_OK = 0,
+  SCD_LIVE_SAMPLE_CAPACITY,   /* the transition would exceed the script grammar's event or byte limit: nothing was appended */
+  SCD_LIVE_SAMPLE_PASSED,     /* the tick is not strictly after every device event and instruction already executed */
+  SCD_LIVE_SAMPLE_NO_INPUT    /* no live input is installed */
+} ScdLiveSample;
+/* Install an empty (header-only) script that accepts live samples; `log` enables the data-port read log. 0 on success. */
+int scd_input_live_begin(ScdMachine *m, int log);
+/* Record that the host's port-1 pad is `pad1` from machine tick `tick` on: the differing buttons become transitions appended to the
+ * script (releases then presses, canonical button order) and are applied by the ordinary script machinery when the machine reaches
+ * `tick`. The tick must be greater than the time of every instruction and device event already executed (m->now) and than the last
+ * recorded tick (so one tick never touches a button twice). All or nothing: at the grammar's limits (4,096 events, 65,536 bytes) nothing is appended. */
+ScdLiveSample scd_input_live_sample(ScdMachine *m, uint64_t tick, uint8_t pad1);
+/* The recorded script as grammar text; returns its length, or 0 when `capacity` is too small or no live input is installed. The text
+ * is re-parsed by the script validator before it is returned (a recorder defect is an error, never an invalid file). */
+size_t scd_input_serialize(const ScdMachine *m, char *out, size_t capacity);
+int scd_input_live_write(const ScdMachine *m, const char *path);
 /* The device host's pad mask for a port (scd_vdp.c owns the Genesis runtime). */
 void scd_vdp_set_pad(ScdMachine *m, uint32_t port, uint8_t mask);
 
@@ -604,6 +633,18 @@ int scd_main_device_access(ScdMachine *m, uint32_t address, uint32_t width, int 
 /* ADR 0177: master clocks (7 per main cycle) and ticks since the origin of the frame containing tick `t` (the last onset). */
 uint64_t scd_frame_ticks_since_origin(const ScdMachine *m, uint64_t t);
 int scd_vdp_capture_request(ScdMachine *m, uint64_t onset, const char *dir);
+/* SEG-078-T001 (ADR 0204): continuous completed-frame presentation. Every frame (not only chosen onsets) has its per-line state sampled
+ * by the capture path's observer instants and is rendered once at its vertical-blank onset; the machine's behaviour and every report
+ * field other than the presentation counters are unchanged. The first frame (the power-on run-in) never has its first lines and is
+ * counted skipped. Only the BIOS-image profile; 0 on success. */
+int scd_vdp_present_enable(ScdMachine *m);
+/* The frame completed at the latest onset (valid until the machine next runs), or NULL when none is new since the last call. */
+const struct GenesisFrameArtifact *scd_vdp_present_take(ScdMachine *m, uint64_t *onset);
+void scd_vdp_present_counts(const ScdMachine *m, uint64_t *rendered, uint64_t *skipped, uint64_t *rejected);
+/* The canonical frame digest (ADR 0146 decision 5), the same SHA-256 as a capture report's `sha256`. */
+void scd_frame_sha256(const struct GenesisFrameArtifact *frame, char out[65]);
+/* Ticks of one video frame of this machine (the distance between successive vertical-blank onsets). */
+uint64_t scd_frame_ticks(void);
 void scd_vdp_capture_report(const ScdMachine *m, FILE *out);
 int scd_vdp_capture_line_due(const ScdMachine *m, uint64_t until);
 uint64_t scd_vdp_next_event(const ScdMachine *m);

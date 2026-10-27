@@ -1216,6 +1216,11 @@ set_property(TEST sega_cd_input_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_frame_capture_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_frame_capture_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_frame_capture_test APPEND PROPERTY LABELS full fast)
+# SEG-078-T001 (ADR 0204): the live (interactive) driver - recorder, pacer period, continuous presentation, record -> replay equality - over a
+# project-authored fixture linked with a scripted test host (no window).
+add_test(NAME sega_cd_live_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_live_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_live_test APPEND PROPERTY LABELS full fast)
 # SEG-071-T002 (ADR 0177): the sub clock, drive grid, main bus, VDP port and video-phase conventions of the BIOS-image profile.
 add_test(NAME sega_cd_timing_convention_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_timing_convention_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

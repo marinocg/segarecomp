@@ -74,6 +74,13 @@ uint64_t genesis_pacer_period_floor_ns(void);
  * non-monotonic clock. */
 int genesis_pacer_wait(GenesisPacer *pacer, const GenesisViewerHost *host);
 
+/* SEG-078-T001: the same pacer for a machine whose frame length is not the Genesis constant (the Sega CD machine derives it from its own
+ * vertical-blank timeline). The exact period frame_units / units_per_second seconds is reduced by its gcd; `num / den` receives the period
+ * in nanoseconds (-1: zero argument, or the reduced period does not fit - never rounded). genesis_pacer_wait is this with the Genesis
+ * NTSC constants. */
+int genesis_pacer_period(uint64_t frame_units, uint64_t units_per_second, uint64_t *num, uint64_t *den);
+int genesis_pacer_wait_period(GenesisPacer *pacer, const GenesisViewerHost *host, uint64_t frame_units, uint64_t units_per_second);
+
 typedef enum GenesisViewerOutcome {
   GENESIS_VIEWER_GUEST_STOP = 1,      /* guest GENESIS_STOP */
   GENESIS_VIEWER_GUEST_COMPLETE = 2,  /* guest GENESIS_COMPLETE */
