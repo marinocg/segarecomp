@@ -95,6 +95,10 @@ and route A afterwards because the launcher supplies no controller input; neithe
 | A - the launcher route (no input, no deadline) | 17 | 12 | 1 epoch image, 3 jump-slot templates | none | the documented audio boundary (`pcm_unsupported`) after 3,371 vertical-blank onsets, i.e. past the 2,802 onsets of the earlier developer-procedure route |
 | B - the timed input schedule and deadline of the earlier developer procedure (machine inputs, not recipes) | 14 | 10 | 1 epoch image, 2 templates | none | an uncompiled *computed destination* inside the span of an admitted extent (`entry_not_compiled`), after 2,156 onsets (77% of the route's deadline) |
 
+End to end on route A through the launcher's own code (`Segarecomp --sega-cd --bios ... --cue ... --build`, bundled-compiler stand-in, Release product CLI): added
+with no program, built (17 rounds), the built viewer program verified against the BIOS and the disc files, Ready to play, and run in the SDL3 viewer (dummy
+video driver, scripted close after 900 frames): 899 frames presented, clean close, no input events.
+
 Every round of both routes was resolved by the mechanism (the disc spans were found by byte-exact match against delivered blocks, never ambiguous, never
 refused); the two stops are not extent refusals.
 

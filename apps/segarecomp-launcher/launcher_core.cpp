@@ -763,7 +763,11 @@ void ScdBuildJob::run() {
       text += "The program covers the part of the game the build could prove, and stops at the first code it cannot: " +
               scd_frontier_text(end == std::string::npos ? std::string() : status_text.substr(refusal + 11U, end - refusal - 11U));
     } else {
-      text += "No unexplained code region was reached while the build ran; the program stops with a typed stop if it later runs into code outside what was proven.";
+      text += "No unexplained code region was reached while the build ran.";
+      const std::string stop = field("stop");
+      if (stop == "pcm_unsupported") text += " The run reached sound playback (PCM), which is not supported, and the program stops there with a typed stop.";
+      else if (!stop.empty() && stop != "none") text += " The run ended at the typed stop \"" + stop + "\"; the program stops there.";
+      else text += " The program stops with a typed stop if it later runs into code outside what was proven.";
     }
     {
       std::lock_guard<std::mutex> lock(mutex_);
