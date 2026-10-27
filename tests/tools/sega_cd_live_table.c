@@ -75,7 +75,7 @@ static void recorder(void) {
 
   fresh();
   row(scd_input_live_sample(m, 100U, GENESIS_PAD_RIGHT) == SCD_LIVE_SAMPLE_NO_INPUT, "no live input installed: the sample is refused");
-  row(scd_input_live_begin(m, 0) == 0, "live input installed");
+  row(scd_input_live_begin(m, 0, 1) == 0, "live input installed");
   n = serialize();
   row(n == 26U && strcmp(text, "segarecomp-input-script 1\n") == 0, "nothing recorded yet: the script is exactly the header");
   m->now = 1000U;
@@ -115,7 +115,7 @@ static void recorder(void) {
 
   /* limits: even the shortest lines (4-digit ticks, UP only) exceed 65,536 bytes before 4,096 events: the byte limit binds */
   fresh();
-  scd_input_live_begin(m, 0);
+  scd_input_live_begin(m, 0, 1);
   for (i = 0U, t = 1U; (r = scd_input_live_sample(m, t, (i & 1U) ? 0U : GENESIS_PAD_UP)) == SCD_LIVE_SAMPLE_OK; ++i, ++t) {
   }
   n = serialize();
@@ -126,7 +126,7 @@ static void recorder(void) {
       "the kept prefix is a valid script of exactly the recorded events");
   /* limits: large ticks hit the byte limit first */
   fresh();
-  scd_input_live_begin(m, 0);
+  scd_input_live_begin(m, 0, 1);
   for (i = 0U, t = UINT64_C(100000000000000); (r = scd_input_live_sample(m, t, (i & 1U) ? 0U : GENESIS_PAD_START)) == SCD_LIVE_SAMPLE_OK; ++i, ++t) {
   }
   n = serialize();
@@ -136,13 +136,29 @@ static void recorder(void) {
       "byte limit: the kept prefix is a valid script of exactly the counted size");
   /* all or nothing: a sample needing two events with room for one */
   fresh();
-  scd_input_live_begin(m, 0);
+  scd_input_live_begin(m, 0, 1);
   scd_input_live_sample(m, 10U, GENESIS_PAD_UP);
   m->input->count = SCD_INPUT_MAX_EVENTS - 1U;   /* one slot left (the events themselves are irrelevant to this check) */
   row(scd_input_live_sample(m, 20U, GENESIS_PAD_DOWN) == SCD_LIVE_SAMPLE_CAPACITY && m->input->count == SCD_INPUT_MAX_EVENTS - 1U &&
           m->input->live_pad[0] == GENESIS_PAD_UP,
       "all or nothing: a release + press needing two events with one slot left appends none and keeps the recorded state");
   m->input->count = 1U;
+}
+
+/* A session that records nothing is not bounded by the script grammar: applied events are discarded, the report still counts them. */
+static void unrecorded(void) {
+  unsigned i;
+  ScdLiveSample r = SCD_LIVE_SAMPLE_OK;
+  fresh();
+  scd_input_live_begin(m, 0, 0);
+  for (i = 0U; i < 20000U && r == SCD_LIVE_SAMPLE_OK; ++i) {
+    r = scd_input_live_sample(m, 1000U * (i + 1U), (i & 1U) ? 0U : GENESIS_PAD_RIGHT);
+    run_to(1000U * (i + 1U) + 500U);
+  }
+  row(r == SCD_LIVE_SAMPLE_OK && i == 20000U, "unrecorded: 20,000 transitions never reach a capacity (65,536 bytes / 4,096 events apply to a recording only)");
+  row(m->input->count + m->input->compacted == 20000U && m->input->next + m->input->compacted == 20000U && m->input->count < 4U, "unrecorded: applied events are discarded, the totals are still counted");
+  row(serialize() == 0U, "unrecorded: there is no script to serialise");
+  row(th_high_read() == 0x7FU, "unrecorded: the pad state still follows the last transition (released)");
 }
 
 static void pacing(void) {
@@ -243,6 +259,7 @@ int main(void) {
   m = (ScdMachine *)calloc(1U, sizeof *m);
   if (m == NULL) return 2;
   recorder();
+  unrecorded();
   pacing();
   pacing_total();
   presentation();

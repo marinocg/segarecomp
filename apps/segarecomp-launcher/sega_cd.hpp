@@ -185,7 +185,10 @@ struct RunOptions {
   std::filesystem::path record_to;     // --record-input
   std::filesystem::path replay_from;   // --input-script (replay in the viewer)
   std::uint64_t instruction_budget = 1ULL << 50U;
+  std::uint64_t until_tick = 0;        // --until-tick (0 = none): the end of a replay without a window, which has no one to close it
 };
+// The machine tick at which a replay of `script` ends: its last event plus `margin_frames` frames (the first onset plus the margin for an empty script).
+[[nodiscard]] std::uint64_t replay_end_tick(const std::filesystem::path &script, unsigned margin_frames = 120);
 [[nodiscard]] std::vector<std::string> run_arguments(const Plan &plan, const RunOptions &options);
 // The BIOS reads the console's internal backup RAM, and the program stops with a typed stop when no image is supplied. The launcher supplies the state
 // of a new console: 8 KiB, zero except for the public 64-byte format trailer (ADR 0147; identical to tools/sega_cd_backup_ram.py). It holds no

@@ -35,7 +35,7 @@ by path, never copied, never uploaded and never part of a release.
    Esc or the gamepad's Back button opens the pause menu; **F6** holds the machine, **F7** steps one frame while held. Closing the window returns to the
    launcher (a clean end).
 4. **Record this session** (details page) writes a small text script of your button presses at exact frame boundaries. **Replay** plays it back in the
-   viewer; **No window** replays it as fast as possible and reports the result. A replay reproduces the run exactly.
+   viewer; **No window** replays it as fast as possible and reports the result. A replay reproduces the run exactly. The recording is written when the viewer closes (a crash loses it); sessions you do not record have no length limit, a recording is limited to about 2,000 button changes. "No window" stops by itself two seconds of game time after the last recorded button change.
 
 ## What "verified" does and does not mean
 

@@ -108,6 +108,15 @@ def main():
         check(code == 0 and got2.get("live", "").startswith("quit frames=25 presented=24") and strip(report1)["input"]["events"] == 4 and strip(report1) == strip(report2),
               "replay: the recording replays to the identical report (registers, digests, input counters)")
 
+        # ---- a replay without a window ends by itself shortly after its last event (nobody closes a window that is not there) ----
+        code, out, err, library3 = launch(tmp, ["--bios", bios, "--cue", cue, "--program", viewer, "--replay", rec, "--windowless"], name="lib2b")
+        got3 = lines(out)
+        report3 = json.loads(next((library3 / "sega-cd").glob("*/last-report.json")).read_text())
+        last_event = FIRST_ONSET + 18 * FRAME
+        check(code == 0 and report3["result"] == "deadline" and report3["ticks"] < last_event + 121 * FRAME and 130 <= report3["live"]["frames"] <= 141,
+              "replay without a window: ends at its last event + 120 frames by itself (%s frames), reported as the time limit" % report3["live"]["frames"])
+        check("time limit" in got3.get("outcome", ""), "replay without a window: the outcome says the time limit was reached")
+
         # ---- typed refusals ----
         other_bios = tmp / "other-bios.bin"
         other_bios.write_bytes(bios.read_bytes()[:-1] + b"\xff")

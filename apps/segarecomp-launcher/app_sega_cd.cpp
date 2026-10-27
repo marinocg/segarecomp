@@ -48,7 +48,7 @@ std::vector<fs::path> App::scd_recordings(const LibraryEntry &entry) const {
   std::vector<fs::path> out;
   std::error_code ec;
   const fs::path dir = scd_dir(entry) / "recordings";
-  for (fs::directory_iterator it(dir, ec), end; !ec && it != end && out.size() < 64; it.increment(ec)) {
+  for (fs::directory_iterator it(dir, ec), end; !ec && it != end && out.size() < 4096; it.increment(ec)) {
     std::error_code sec;
     if (it->is_regular_file(sec) && !it->is_symlink(sec) && it->path().extension() == ".txt") out.push_back(it->path());
   }
@@ -156,13 +156,18 @@ void App::scd_play(const std::string &id, int mode, const fs::path &script) {
   LibraryEntry *entry = catalog_.find_id(id);
   if (entry == nullptr || entry->platform_id != "sega-cd") return;
   if (game_ || scd_launch_job_.valid() || scd_import_job_.valid()) { toast("Wait for the running game or check to finish.", true); return; }
-  fs::create_directories(scd_dir(*entry) / "recordings");
+  {
+    std::error_code ec;
+    fs::create_directories(scd_dir(*entry) / "recordings", ec);
+    if (ec) { show_message("The game could not be prepared", {"The folder for this game's run files cannot be written: " + ec.message()}); return; }
+  }
   scd::RunOptions options;
   options.report = scd_dir(*entry) / "last-report.json";
   options.backup_ram = scd_dir(*entry) / "backup-ram.bin";
   if (!scd::ensure_backup_ram(options.backup_ram)) { show_message("The game could not be prepared", {"The folder for this game's run files cannot be written."}); return; }
   if (mode == 0 && scd_record_) options.record_to = scd_dir(*entry) / "recordings" / ("session-" + std::to_string(unix_now()) + ".txt");
   if (mode != 0) options.replay_from = script;
+  if (mode == 2) options.until_tick = scd::replay_end_tick(script);  // nobody closes a window that is not there: the replay ends shortly after its last event
   scd_launch_options_ = options;
   scd_launch_windowless_ = mode == 2;
   scd_launch_id_ = id;

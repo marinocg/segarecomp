@@ -215,6 +215,7 @@ int sega_cd_headless(int argc, char **argv) {
   const auto finish = [&](int rc) { if (!report_path.empty()) std::ofstream(report_path, std::ios::binary) << report; return rc; };
   Catalog catalog(library_root() / "library.json");
   catalog.load();
+  if (catalog.read_only()) { std::puts("result=failed problem=the library was written by a newer release and is read-only"); return 1; }
   scd::ImportRequest request;
   request.bios = bios; request.cue = cue; request.program = program;
   const scd::ImportResult imported = scd::import_entry(request);
@@ -248,6 +249,7 @@ int sega_cd_headless(int argc, char **argv) {
   if (!scd::ensure_backup_ram(options.backup_ram)) { emit("run=failed_to_prepare"); return finish(6); }
   options.record_to = record;
   options.replay_from = replay;
+  if (windowless && !replay.empty()) options.until_tick = scd::replay_end_tick(replay);
   fs::remove(options.report, ec);
   std::vector<std::pair<std::string, std::string>> environment;
   if (windowless) environment = {{"SDL_VIDEODRIVER", "dummy"}, {"SDL_AUDIODRIVER", "dummy"}, {"SEGARECOMP_VIEWER_UNTHROTTLED", "1"}, {"SEGARECOMP_VIEWER_NO_STOP_SCREEN", "1"}};

@@ -290,6 +290,13 @@ def main():
         run(exe, long_base + ["--input-script", rec, "--until-tick", until, "--report", rep2])
         check(keep(json.loads(rep2.read_text())) == keep(crep), "capacity: the replay of the kept prefix reproduces the live report to the stop")
 
+        # a session that records nothing has no capacity: the same 3,500 transitions run to the end of the program
+        rec2, rep3, log3 = tmp / "nr.rec", tmp / "nr.json", tmp / "nr.log"
+        code, _ = run(vexe, long_base + ["--report", rep3], {"SCD_TEST_HOST_SCRIPT": str(flip), "SCD_TEST_HOST_LOG": str(log3)}, timeout=600)
+        nrep = json.loads(rep3.read_text())
+        check(code == 0 and nrep["live"]["outcome"] in ("quit", "machine_stop") and nrep["input"]["events"] >= 3400 and nrep["input"]["applied"] >= nrep["input"]["events"] - 2,
+              "no recording: the same session is not bounded by the recorder's limits (%s events counted)" % nrep["input"]["events"])
+
         # ---- host failures and usage refusals ----
         for what in ("poll", "present", "pace"):
             code, frep = run(vexe, base, {"SCD_TEST_HOST_SCRIPT": str(script), "SCD_TEST_HOST_FAIL": what})

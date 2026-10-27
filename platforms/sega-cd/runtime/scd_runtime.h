@@ -577,6 +577,9 @@ typedef struct ScdInput {
   /* SEG-078-T001 (ADR 0204): live recording. A live input is an ordinary script whose events are appended at the machine's own
    * frame boundaries; `live_pad` is the state after the last appended event and `script_bytes` the size of its serialisation. */
   uint8_t live;
+  uint8_t recording;                 /* the events are kept for a script; otherwise applied events are discarded (a long session has no limit) */
+  size_t compacted;                  /* events discarded so far (the report counts them) */
+  uint64_t live_last_tick;           /* the tick of the last appended event */
   uint8_t live_pad[2];
   size_t script_bytes;
 } ScdInput;
@@ -599,8 +602,9 @@ typedef enum ScdLiveSample {
   SCD_LIVE_SAMPLE_PASSED,     /* the tick is not strictly after every device event and instruction already executed */
   SCD_LIVE_SAMPLE_NO_INPUT    /* no live input is installed */
 } ScdLiveSample;
-/* Install an empty (header-only) script that accepts live samples; `log` enables the data-port read log. 0 on success. */
-int scd_input_live_begin(ScdMachine *m, int log);
+/* Install an empty (header-only) script that accepts live samples; `log` enables the data-port read log. `record` keeps the events (and applies the
+ * grammar's limits); without it an applied event is discarded at the next sample, so an unrecorded session is unbounded. 0 on success. */
+int scd_input_live_begin(ScdMachine *m, int log, int record);
 /* Record that the host's port-1 pad is `pad1` from machine tick `tick` on: the differing buttons become transitions appended to the
  * script (releases then presses, canonical button order) and are applied by the ordinary script machinery when the machine reaches
  * `tick`. The tick must be greater than the time of every instruction and device event already executed (m->now) and than the last

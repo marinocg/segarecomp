@@ -339,6 +339,13 @@ void test_run_arguments_and_outcomes(const fs::path &base, const fs::path &fake)
   opt.backup_ram = base / "bram.bin";
   auto args = scd::run_arguments(plan, opt);
   expect(args.size() == 10 && args[6] == "--backup-ram" && args[7] == u8(opt.backup_ram) && args[8] == "--report" && args[9] == u8(opt.report), "run arguments: the formatted backup RAM is passed");
+  opt.until_tick = 12345;
+  args = scd::run_arguments(plan, opt);
+  expect(std::find(args.begin(), args.end(), "--until-tick") != args.end() && *(std::find(args.begin(), args.end(), "--until-tick") + 1) == "12345", "a replay without a window is given its end tick");
+  opt.until_tick = 0;
+  spit(base / "end.txt", "segarecomp-input-script 1\n1000000 1 press UP\n2000000 1 release UP\n");
+  expect(scd::replay_end_tick(base / "end.txt", 10) == 2000000 + 10 * UINT64_C(448020000000) && scd::replay_end_tick(base / "none.txt", 1) == UINT64_C(55929000000) + UINT64_C(448020000000),
+         "the end tick of a replay is its last event plus the margin (the first onset plus the margin without events)");
   opt.backup_ram.clear();
   args = scd::run_arguments(plan, opt);
   expect(args.size() == 8 && args[0] == "--disc-dir" && args[1] == u8(f.dir / "disc") && args[2] == "--bios" && args[3] == u8(f.bios) && args[4] == "--instruction-budget" &&

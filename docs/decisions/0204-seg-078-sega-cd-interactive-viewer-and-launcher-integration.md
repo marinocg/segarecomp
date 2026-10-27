@@ -28,7 +28,9 @@ the launcher persists games as `platform + ROM SHA-256` with a build cache. Sega
    never touches a button twice), writes releases before presses in the grammar's button order, and emits no redundant transition. The recording is
    therefore the exact tick list the machine applied, and `--input-script <recording>` reproduces the run: report, input counters and read-log digest,
    and captured frames are equal (tested with the live run and the replay under different deadline slicing).
-3. **Recorder limits are the grammar's.** 65,536 bytes, 256-byte lines, 4,096 events, port 1, no MODE/X/Y/Z. The byte limit always binds first (even
+3. **Recorder limits are the grammar's - for a recording.** Without `--record-input` nothing is kept: an applied event is discarded at the next sample (the report's
+   counters still count it), so an unrecorded session is unbounded. The recording is written when the program exits (a killed viewer loses it).
+   For a recording the limits are the grammar's. 65,536 bytes, 256-byte lines, 4,096 events, port 1, no MODE/X/Y/Z. The byte limit always binds first (even
    the shortest line makes 4,096 events exceed 64 KiB). An append is all or nothing; at the limit the run stops with the typed outcome
    `recording_capacity` (program exit 25), the valid prefix is written, and the replay of that prefix reproduces the live run to the stop instant.
 4. **Pause and single step touch the host loop only.** While held, `poll` is called repeatedly and nothing else is: no tick is assigned, no device
@@ -87,7 +89,7 @@ the launcher persists games as `platform + ROM SHA-256` with a build cache. Sega
    diagnostics). The command line is `--disc-dir <CUE directory> --bios <file> --instruction-budget 2^50 --backup-ram <file> --report <file>` plus
    `--record-input` or `--input-script`. The BIOS reads the console's internal backup RAM and the program stops with a typed stop without an image, so
    the launcher writes the state of a new console - 8 KiB, zero except the public 64-byte format trailer (ADR 0147; byte-identical to
-   `tools/sega_cd_backup_ram.py`), no software-derived byte - into the game's run folder; the program does not write it back, so saves are not persisted yet. The "no window" replay runs the viewer variant under SDL's dummy drivers, unthrottled, and reports the result. Recordings live
+   `tools/sega_cd_backup_ram.py`), no software-derived byte - into the game's run folder; the program does not write it back, so saves are not persisted yet. The "no window" replay runs the viewer variant under SDL's dummy drivers, unthrottled, with `--until-tick` = the recording's last event + 120 frames (nobody closes a window that is not there), and reports the result. Recordings live
    in the launcher's library folder (`sega-cd/<id>/recordings/`) and contain only button transitions.
 8. **Packaging.** Nothing of a Sega CD game is bundled: the install rules name no Sega CD runtime source, program or disc, and the package verifier
    (`packaging/dependency_check.py`) refuses BIOS, CUE/disc image, generated program, `--describe` sidecar and Sega CD runtime file names.

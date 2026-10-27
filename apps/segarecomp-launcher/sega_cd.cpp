@@ -169,7 +169,7 @@ Claims parse_claims(const std::string &text) {
   const auto root = json::parse(text, &error);
   if (!root || !root->is_object()) return unverifiable("not a statement");
   if (root->num("describe", 0) != 1) return unverifiable("unknown statement version");
-  c.runtime_abi = static_cast<int>(root->num("runtime_abi", 0));
+  c.runtime_abi = static_cast<int>(std::clamp(root->num("runtime_abi", 0), 0LL, 1000000LL));
   c.profile = root->str("profile");
   const json::Value *viewer = root->get("viewer");
   if (viewer == nullptr || viewer->kind != json::Value::Kind::boolean) return unverifiable("missing viewer flag");
@@ -428,6 +428,21 @@ ImportResult attach_program(const EntryRecord &record, const fs::path &program, 
 
 // ---- running ----
 
+std::uint64_t replay_end_tick(const fs::path &script, unsigned margin_frames) {
+  constexpr std::uint64_t frame = UINT64_C(262) * 3420U * 500000U, first_onset = UINT64_C(111858) * 500000U;
+  std::uint64_t last = 0;
+  std::ifstream in(script, std::ios::binary);
+  std::string line;
+  std::size_t lines = 0;
+  while (std::getline(in, line) && ++lines <= 8192) {  // the grammar allows 4,096 events
+    std::uint64_t tick = 0;
+    std::size_t digits = 0;
+    while (digits < line.size() && digits < 19 && line[digits] >= '0' && line[digits] <= '9') tick = tick * 10 + static_cast<std::uint64_t>(line[digits++] - '0');
+    if (digits > 0 && digits < line.size() && line[digits] == ' ' && tick > last) last = tick;
+  }
+  return (last != 0 ? last : first_onset) + static_cast<std::uint64_t>(margin_frames) * frame;
+}
+
 std::vector<std::uint8_t> formatted_backup_ram() {
   constexpr std::size_t size = 0x2000, block = 64;
   std::vector<std::uint8_t> image(size, 0);
@@ -463,6 +478,7 @@ std::vector<std::string> run_arguments(const Plan &plan, const RunOptions &o) {
   std::vector<std::string> args{"--disc-dir", u8(plan.disc_dir), "--bios", u8(plan.bios), "--instruction-budget", std::to_string(o.instruction_budget)};
   if (!o.backup_ram.empty()) { args.emplace_back("--backup-ram"); args.push_back(u8(o.backup_ram)); }
   if (!o.report.empty()) { args.emplace_back("--report"); args.push_back(u8(o.report)); }
+  if (o.until_tick != 0) { args.emplace_back("--until-tick"); args.push_back(std::to_string(o.until_tick)); }
   if (!o.record_to.empty()) { args.emplace_back("--record-input"); args.push_back(u8(o.record_to)); }
   else if (!o.replay_from.empty()) { args.emplace_back("--input-script"); args.push_back(u8(o.replay_from)); }
   return args;

@@ -532,7 +532,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   if (record_path != NULL && input_script_path != NULL) return 2;               /* a replay records nothing: its script is its input */
   if (input_log_path != NULL && input_script_path == NULL && live_host == NULL) return 2;
   if (live_host != NULL && input_script_path == NULL) { /* live input: an empty script the host's pad transitions are appended to */
-    if (scd_input_live_begin(&machine, input_log_path != NULL) != 0) {
+    if (scd_input_live_begin(&machine, input_log_path != NULL, record_path != NULL) != 0) {
       scd_machine_release(&machine);
       scd_disc_close(&disc);
       return 1;
