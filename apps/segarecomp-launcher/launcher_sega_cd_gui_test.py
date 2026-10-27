@@ -91,8 +91,8 @@ def main():
         other.write_bytes(bios.read_bytes()[:-1] + b"\xff")
         trace, lib = run_window(tmp, "b", [
             "frames 8", "page import", "frames 6", "scd_form %s|%s|" % (bios, cue), "frames 4", "scd_add", "wait_scd", "frames 10",
-            "expect page=details", "expect scd_state=No program (automatic build unsupported)", "expect can_play=0", "expect scd_refusal=program_missing",
-            "scd_attach %s" % headless, "wait_scd", "frames 6", "expect modal=1", "key Escape", "frames 6", "expect modal=0", "expect scd_state=No program (automatic build unsupported)",
+            "expect page=details", "expect scd_state=No program yet (can be built)", "expect can_play=0", "expect scd_refusal=program_missing",
+            "scd_attach %s" % headless, "wait_scd", "frames 6", "expect modal=1", "key Escape", "frames 6", "expect modal=0", "expect scd_state=No program yet (can be built)",
             "scd_attach %s" % viewer, "wait_scd", "frames 8", "expect scd_state=Ready to play", "expect can_play=1",
             "scd_verify", "wait_scd", "frames 8", "expect scd_state=Ready to play", "quit"])
         bad = [l for l in trace if l.startswith("expect FAIL")]

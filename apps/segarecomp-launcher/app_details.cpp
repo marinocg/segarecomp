@@ -83,13 +83,13 @@ std::string App::build_action_label(const StatusInfo &info) const {
 }
 
 bool App::can_build(const LibraryEntry &entry, const StatusInfo &info) const {
-  if (entry.platform_id == "sega-cd") return false;  // ADR 0204: unsupported, shown as such
+  if (entry.platform_id == "sega-cd") return scd_can_build(entry, info);   // SEG-078-T003: its own job and its own preconditions
   const bool mapper_needed = entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty();
   return !game_ && !is_building(entry.id()) && !is_queued(entry.id()) && !info.rom_missing && !mapper_needed;
 }
 
 bool App::can_play(const StatusInfo &info) const {
-  if (info.sega_cd) return info.scd.state == scd::State::ready && !game_ && !maintenance_running_ && !scd_launch_job_.valid() && !scd_import_job_.valid();
+  if (info.sega_cd) return info.scd.state == scd::State::ready && !game_ && !maintenance_running_ && !scd_launch_job_.valid() && !scd_import_job_.valid() && !scd_build_;
   return info.runnable() && !game_ && !maintenance_running_ && !(job_ && job_key_ == info.key); }
 
 void App::play(const std::string &id) {
@@ -287,10 +287,16 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     const bool prominent_build = info.status != GameStatus::ready && !info.older.playable;  // Play stays the dominant action while an earlier build is playable
     if (info.sega_cd) {
-      // ADR 0204: no Build for Sega CD; the one honest alternative is importing a verified program.
-      if (button(ctx_, "scd_import_top", entry.sega_cd.program.path.empty() ? "Import program..." : "Replace program...", ImVec2(build_w + ctx_.u(20.0F), bh), info.scd.state == scd::State::ready ? Style::secondary : Style::primary,
-                 !game_ && !scd_import_job_.valid(), ctx_.icon("import"))) scd_browse("scd_attach", entry.id());
-      if (ImGui::IsItemHovered()) tooltip(ctx_, "Segarecomp cannot build Sega CD games yet. Choose a viewer program built with the developer procedure; it is checked against this BIOS and disc.");
+      // SEG-078-T003 (ADR 0205): Build (or Rebuild) runs the product's self-service Sega CD build; Import stays in the panel below.
+      const bool mine = scd_build_ && scd_build_id_ == entry.id();
+      if (mine) {
+        if (button(ctx_, "scd_cancel_build", scd_build_->cancel_requested() ? "Stopping..." : "Cancel build", ImVec2(build_w + ctx_.u(20.0F), bh), Style::secondary, !scd_build_->cancel_requested(), ctx_.icon("close"))) scd_cancel_build();
+        if (ImGui::IsItemHovered()) tooltip(ctx_, "Stop this build and discard its partial files. A previously built program is kept.");
+      } else {
+        const bool has_program = !entry.sega_cd.program.path.empty();
+        if (button(ctx_, "scd_build", has_program ? "Rebuild" : "Build", ImVec2(build_w + ctx_.u(20.0F), bh), has_program && info.scd.state == scd::State::ready ? Style::secondary : Style::primary, scd_can_build(entry, info), ctx_.icon("reset"))) { notices_.erase(entry.id()); scd_start_build(entry.id()); }
+        if (ImGui::IsItemHovered()) tooltip(ctx_, scd_can_build(entry, info) ? "Build a playable program from your BIOS and disc on this computer (several minutes the first time)." : "A build needs a free viewer, the BIOS and the disc in place and no other running check.");
+      }
     } else if (is_queued(entry.id())) {
       // SEG-069-T001: a queued game's build action is its way out of the queue (it owns no process or folder yet).
       const bool unqueue_pressed = button(ctx_, "unqueue", "Unqueue", ImVec2(build_w, bh), Style::secondary, true, ctx_.icon("close"));

@@ -197,17 +197,18 @@ int headless(int argc, char **argv) {
 // 5 the program was refused before launch, 6 the program could not be started.
 int sega_cd_headless(int argc, char **argv) {
   fs::path bios, cue, program, record, replay, report_path;
-  bool windowless = false;
+  bool windowless = false, build = false;
   for (int i = 2; i < argc; ++i) {
     const std::string arg = argv[i];
-    if (arg == "--bios" && i + 1 < argc) bios = from_u8(argv[++i]);
+    if (arg == "--build") build = true;
+    else if (arg == "--bios" && i + 1 < argc) bios = from_u8(argv[++i]);
     else if (arg == "--cue" && i + 1 < argc) cue = from_u8(argv[++i]);
     else if (arg == "--program" && i + 1 < argc) program = from_u8(argv[++i]);
     else if (arg == "--record" && i + 1 < argc) record = from_u8(argv[++i]);
     else if (arg == "--replay" && i + 1 < argc) replay = from_u8(argv[++i]);
     else if (arg == "--report" && i + 1 < argc) report_path = from_u8(argv[++i]);
     else if (arg == "--windowless") windowless = true;
-    else { std::fprintf(stderr, "usage: Segarecomp --sega-cd --bios <file> --cue <file> [--program <file>] [--record <script> | --replay <script>] [--windowless] [--report <file>]\n"); return 2; }
+    else { std::fprintf(stderr, "usage: Segarecomp --sega-cd --bios <file> --cue <file> [--program <file> | --build] [--record <script> | --replay <script>] [--windowless] [--report <file>]\n"); return 2; }
   }
   if (!record.empty() && !replay.empty()) { std::fprintf(stderr, "--record and --replay are exclusive\n"); return 2; }
   std::string report;
@@ -230,12 +231,32 @@ int sega_cd_headless(int argc, char **argv) {
   emit("entry=" + added.entry->id());
   emit(std::string("added=") + (added.added ? "yes" : "no"));
   emit(std::string("program=") + (imported.program_attached ? "verified" : (program.empty() ? "none" : std::string("refused ") + scd::code(imported.refusal))));
+  const Layout layout = locate_layout();
+  if (build && imported.program_attached) { emit("build=skipped reason=program_already_attached"); build = false; }
+  if (build && !program.empty()) { emit("result=failed problem=--build and --program are exclusive"); return finish(2); }
+  if (build) {
+    // SEG-078-T003: the automatic build, exactly what the window's Build button runs; the built program is then verified like an imported one.
+    if (!layout.scd_build_problem.empty() || !layout.problem.empty()) { emit(std::string("build=") + scd::code(scd::Refusal::unsupported_build)); return finish(5); }
+    ScdBuildRequest request;
+    request.bios = bios; request.cue = cue;
+    request.out_dir = library_root() / "sega-cd" / added.entry->sha256.substr(0, 16) / "build";
+    ScdBuildJob job(request, layout);
+    job.wait();
+    if (job.outcome() != BuildOutcome::succeeded) { emit("build=failed"); emit("message=" + job.message()); return finish(7); }
+    emit("build=ok");
+    emit("build_summary=" + job.summary());
+    const scd::ImportResult attached = scd::attach_program(added.entry->sega_cd, job.program());
+    if (!attached.program_attached) { emit(std::string("result=refused refusal=") + scd::code(attached.refusal)); return finish(5); }
+    added.entry->sega_cd = attached.record;
+    emit("program=verified");
+    if (!catalog.save(&save_error)) { emit("result=failed problem=" + save_error); return finish(1); }
+  }
   const scd::EntryRecord &stored = added.entry->sega_cd;
   const scd::Status quick = scd::quick_status(stored);
   emit(std::string("state=") + scd::state_label(quick.state));
   emit(std::string("refusal=") + scd::code(quick.refusal));
   if (quick.state != scd::State::ready) {
-    if (quick.state == scd::State::no_program) emit(std::string("build=") + scd::code(scd::Refusal::unsupported_build));
+    if (quick.state == scd::State::no_program) emit(layout.scd_build_problem.empty() && layout.problem.empty() ? std::string("build=available") : std::string("build=") + scd::code(scd::Refusal::unsupported_build));
     return finish(quick.state == scd::State::no_program && imported.refusal == scd::Refusal::none ? 0 : 5);
   }
   const scd::Plan plan = scd::prepare_launch(stored, false);
@@ -253,7 +274,6 @@ int sega_cd_headless(int argc, char **argv) {
   fs::remove(options.report, ec);
   std::vector<std::pair<std::string, std::string>> environment;
   if (windowless) environment = {{"SDL_VIDEODRIVER", "dummy"}, {"SDL_AUDIODRIVER", "dummy"}, {"SEGARECOMP_VIEWER_UNTHROTTLED", "1"}, {"SEGARECOMP_VIEWER_NO_STOP_SCREEN", "1"}};
-  const Layout layout = locate_layout();
   RomView run_view = view_from_entry(*added.entry);
   run_view.sha256.clear();
   GameRun game(run_view, layout, plan.program, dir / "run.log", scd::run_arguments(plan, options), environment, true);

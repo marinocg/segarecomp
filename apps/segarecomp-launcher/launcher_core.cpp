@@ -107,6 +107,7 @@ Layout locate_layout() {
   layout.cc = layout.root / "toolchain" / (std::string("zig") + exe_suffix);
   layout.runtime = layout.root / "runtime" / "platforms" / "genesis";
   layout.runtime_sms = layout.root / "runtime" / "platforms" / "master-system";
+  layout.runtime_root = layout.root / "runtime";
   layout.sdl_include = layout.root / "sdl3" / "include";
   layout.sdl_lib = layout.root / "sdl3" / "lib";
   std::error_code ec;
@@ -116,6 +117,10 @@ Layout locate_layout() {
                                layout.root / "runtime" / "libs" / "viewer" / "src" / "sv_input_diag.c",
                                layout.sdl_include / "SDL3" / "SDL.h"}) {
     if (!fs::exists(required, ec)) { layout.problem = "This Segarecomp installation is incomplete (missing " + utf8(required.filename()) + "). Please download it again."; break; }
+  }
+  for (const auto &required : {layout.runtime_root / "platforms" / "sega-cd" / "runtime" / "scd_main.c", layout.runtime_root / "platforms" / "sega-cd" / "viewer" / "scd_viewer.c",
+                               layout.runtime / "runtime" / "vdp_render.c"}) {
+    if (!fs::exists(required, ec)) { layout.scd_build_problem = "This installation does not contain the Sega CD runtime (missing " + utf8(required.filename()) + ")."; break; }
   }
   return layout;
 }
@@ -550,6 +555,226 @@ std::string read_tail(const fs::path &path, std::size_t max_bytes) {
   std::string text = read_all(path);
   if (text.size() > max_bytes) text = "…" + text.substr(text.size() - max_bytes);
   return text;
+}
+
+// ---- ScdBuildJob (SEG-078-T003, ADR 0205) ----
+
+const char *ScdBuildJob::stage_label(int index) {
+  static const char *labels[stage_count] = {"Generate", "Compile", "Link", "Run discovery pass", "Confirm", "Viewer"};
+  return index >= 0 && index < stage_count ? labels[index] : "";
+}
+
+fs::path scd_build_program(const fs::path &out_dir) { return out_dir / (std::string("program-viewer") + exe_suffix); }
+
+std::string scd_frontier_text(const std::string &refusal) {
+  if (refusal == "no_source") return "The game runs code that the disc does not contain verbatim (generated, decompressed or modified at run time); it is not compiled.";
+  if (refusal == "ambiguous_source") return "The game runs code that is identical in several places on the disc, so its origin cannot be proven; it is not compiled.";
+  if (refusal == "no_delivery_evidence" || refusal == "no_evidence" || refusal == "ledger_overflow")
+    return "The build could not establish where the code came from (no or too much load evidence); it is not compiled.";
+  if (refusal == "extent_bound_exceeded") return "The game loads more separate code modules than a build admits; the rest is not compiled.";
+  if (refusal == "no_progress") return "The same code module was explained twice without progress; the rest is not compiled.";
+  return "A code region at the end of the covered path could not be proven to come from the disc; it is not compiled.";
+}
+
+ScdBuildJob::ScdBuildJob(ScdBuildRequest request, Layout layout, bool cancelled_at_start) : request_(std::move(request)), layout_(std::move(layout)) {
+  cancel_.store(cancelled_at_start);
+  thread_ = std::thread([this] { run(); });
+}
+
+ScdBuildJob::~ScdBuildJob() { wait(); }
+
+void ScdBuildJob::wait() {
+  if (thread_.joinable()) thread_.join();
+}
+
+BuildOutcome ScdBuildJob::outcome() const {
+  if (!finished_.load()) return BuildOutcome::running;
+  if (ok_.load()) return BuildOutcome::succeeded;
+  return cancelled_.load() ? BuildOutcome::cancelled : BuildOutcome::failed;
+}
+
+bool ScdBuildJob::request_cancel() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (publishing_ || ok_.load()) return false;
+    if (finished_.load()) return cancelled_.load();
+    cancel_.store(true);
+  }
+  tree_.terminate();
+  return true;
+}
+
+std::string ScdBuildJob::message() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return message_;
+}
+
+std::string ScdBuildJob::summary() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return summary_;
+}
+
+fs::path ScdBuildJob::program() const { return ok_.load() ? scd_build_program(request_.out_dir) : fs::path{}; }
+
+void ScdBuildJob::run() {
+  const auto set_message = [this](const std::string &text) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    message_ = text;
+  };
+  const auto finish = [this](bool ok) { ok_.store(ok); finished_.store(true); };
+  std::error_code ec;
+  const fs::path partial = request_.out_dir.parent_path() / (request_.out_dir.filename().string() + ".partial");
+  const auto finish_cancelled = [&] {
+    std::error_code remove_ec;
+    for (int attempt = 0; attempt < 40; ++attempt) {
+      fs::remove_all(partial, remove_ec);
+      if (!remove_ec && !fs::exists(partial, remove_ec)) break;
+      SDL_Delay(50);
+    }
+    set_message("Build cancelled.");
+    cancelled_.store(true);
+    finish(false);
+  };
+  if (cancel_.load()) { set_message("Build cancelled."); cancelled_.store(true); finish(false); return; }
+  if (!layout_.scd_build_problem.empty()) { set_message(layout_.scd_build_problem); finish(false); return; }
+  fs::remove_all(partial, ec);
+  fs::create_directories(partial.parent_path(), ec);
+  if (ec) { set_message("Cannot create the folder for this game's build."); finish(false); return; }
+  if (cancel_.load()) { finish_cancelled(); return; }
+
+  const fs::path objects = cache_root() / "sega-cd-objects";
+  std::vector<std::string> args{utf8(layout_.cli), "sega-cd", "build", "--cue", utf8(request_.cue), "--bios", utf8(request_.bios), "--output", utf8(partial),
+                                "--cc", utf8(layout_.cc), "--cc-arg", "cc", "--cc-arg", "-target", "--cc-arg", zig_target(),
+                                "--runtime-dir", utf8(layout_.runtime_root), "--viewer", "1", "--cache-dir", utf8(objects),
+                                "--sdl3-include", utf8(layout_.sdl_include), "--sdl3-lib", utf8(layout_.sdl_lib)};
+#if defined(_WIN32)
+  args.insert(args.end(), {"--link-arg", "-Wl,--stack,8388608"});
+#else
+  args.insert(args.end(), {"--link-arg", "-Wl,-rpath," + utf8(layout_.sdl_lib)});
+#endif
+  if (const char *extra = SDL_getenv("SEGARECOMP_SCD_BUILD_ARGS")) {  // test seam: whitespace-separated extra product-CLI options (budget, host source, ...)
+    std::istringstream words(extra);
+    for (std::string word; words >> word;) args.push_back(word);
+  }
+  std::vector<const char *> argv;
+  for (const auto &arg : args) argv.push_back(arg.c_str());
+  argv.push_back(nullptr);
+
+  SDL_Environment *environment = SDL_CreateEnvironment(true);
+  const std::string zig_cache = utf8(cache_root() / "zig-cache");
+  SDL_SetEnvironmentVariable(environment, "ZIG_GLOBAL_CACHE_DIR", zig_cache.c_str(), true);
+  SDL_SetEnvironmentVariable(environment, "ZIG_LOCAL_CACHE_DIR", zig_cache.c_str(), true);
+  SDL_PropertiesID props = SDL_CreateProperties();
+  SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
+  SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, environment);
+  SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
+  SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_APP);
+  SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN, true);
+  SDL_Process *process = SDL_CreateProcessWithProperties(props);
+  SDL_DestroyProperties(props);
+  SDL_DestroyEnvironment(environment);
+  if (!process) {
+    if (cancel_.load()) { finish_cancelled(); return; }
+    set_message("Could not start the Segarecomp build tool.");
+    finish(false);
+    return;
+  }
+  tree_.attach(process);
+  if (cancel_.load()) tree_.terminate();
+
+  std::string result_line, pending;
+  char buffer[512];
+  SDL_IOStream *output = SDL_GetProcessOutput(process);
+  const auto set_stage = [this](int index, StageState state) { stages_[index].store(static_cast<int>(state)); };
+  const auto handle_line = [&](const std::string &line) {
+    if (line.rfind("@round ", 0) == 0) {
+      round_.store(std::atoi(line.c_str() + 7) + 1);
+      for (int i = 0; i < 4; ++i) set_stage(i, StageState::pending);
+      set_stage(0, StageState::running);
+      set_message("Discovery round " + std::to_string(round_.load()));
+    } else if (line.rfind("@stage ", 0) == 0) {
+      static const struct { const char *name; int index; } map[] = {{"analyze", 0}, {"generate", 0}, {"compile", 1}, {"link", 2}, {"pass", 3}, {"confirm", 4}, {"viewer", 5}};
+      for (const auto &m : map) {
+        const std::string prefix = std::string("@stage ") + m.name + ' ';
+        if (line.rfind(prefix, 0) != 0) continue;
+        const bool done = line.substr(prefix.size()) == "done";
+        if (std::string(m.name) == "analyze") break;   // the first generate belongs to the same stage; "analyze done" carries no extra information
+        set_stage(m.index, done ? StageState::done : StageState::running);
+        if (!done && m.index + 1 < stage_count && m.index < 3) {}  // later stages of the round are reset by the next @round
+        break;
+      }
+    } else if (line.rfind("@result failed", 0) == 0) {
+      const auto at = line.find("message=");
+      result_line = at == std::string::npos ? "The build failed." : line.substr(at + 8);
+    }
+  };
+  while (output && !cancel_.load()) {
+    const std::size_t got = SDL_ReadIO(output, buffer, sizeof(buffer));
+    if (got == 0) {
+      if (SDL_GetIOStatus(output) == SDL_IO_STATUS_NOT_READY) { SDL_Delay(15); continue; }
+      break;
+    }
+    pending.append(buffer, got);
+    for (std::size_t nl; (nl = pending.find('\n')) != std::string::npos;) {
+      std::string line = pending.substr(0, nl);
+      if (!line.empty() && line.back() == '\r') line.pop_back();
+      handle_line(line);
+      pending.erase(0, nl + 1);
+    }
+  }
+  if (cancel_.load()) tree_.terminate();
+  int exit_code = -1;
+  SDL_WaitProcess(process, true, &exit_code);
+  tree_.release();
+  SDL_DestroyProcess(process);
+
+  bool publish = false;
+  std::string status_text;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!cancel_.load()) {
+      publishing_ = true;
+      status_text = read_all(partial / "status.json");
+      publish = exit_code == 0 && status_text.find("\"status\":\"ok\"") != std::string::npos && fs::exists(scd_build_program(partial), ec);
+    }
+  }
+  if (cancel_.load()) { finish_cancelled(); return; }
+  if (publish) {
+    // What the program covers, in plain language, from the product's own typed fields (never parsed from human text).
+    const auto field = [&](const std::string &key) -> std::string {
+      const auto at = status_text.find("\"" + key + "\":");
+      if (at == std::string::npos) return {};
+      std::size_t p = at + key.size() + 3U;
+      if (p < status_text.size() && status_text[p] == '"') { const auto e = status_text.find('"', p + 1U); return e == std::string::npos ? std::string() : status_text.substr(p + 1U, e - p - 1U); }
+      std::size_t e = p;
+      while (e < status_text.size() && status_text[e] != ',' && status_text[e] != '}') ++e;
+      return status_text.substr(p, e - p);
+    };
+    std::string text = "Built in " + field("rounds") + " round(s). ";
+    const auto frontier = status_text.find("\"frontier\":{");
+    if (frontier != std::string::npos) {
+      const auto refusal = status_text.find("\"refusal\":\"", frontier);
+      const auto end = refusal == std::string::npos ? std::string::npos : status_text.find('"', refusal + 11U);
+      text += "The program covers the part of the game the build could prove, and stops at the first code it cannot: " +
+              scd_frontier_text(end == std::string::npos ? std::string() : status_text.substr(refusal + 11U, end - refusal - 11U));
+    } else {
+      text += "No unexplained code region was reached while the build ran; the program stops with a typed stop if it later runs into code outside what was proven.";
+    }
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      summary_ = text;
+    }
+    fs::remove_all(request_.out_dir, ec);
+    fs::rename(partial, request_.out_dir, ec);
+    if (ec) { set_message("Cannot store the build in the game's folder."); finish(false); return; }
+    finish(true);
+    return;
+  }
+  const fs::path failed = request_.out_dir.parent_path() / (request_.out_dir.filename().string() + ".failed");
+  fs::remove_all(failed, ec);
+  fs::rename(partial, failed, ec);
+  set_message(result_line.empty() ? "The build failed unexpectedly." : result_line);
+  finish(false);
 }
 
 // ---- BuildJob ----

@@ -338,6 +338,13 @@ private:
   bool game_is_scd_ = false;
   scd::RunOptions game_scd_options_;
   std::string game_scd_note_;
+  std::unique_ptr<ScdBuildJob> scd_build_;             // SEG-078-T003: the automatic Sega CD build of one game (independent of the Genesis/SMS queue)
+  std::string scd_build_id_;
+  std::map<std::string, std::string> scd_build_notes_; // id -> what the last successful build of this session covers (plain language)
+  void scd_start_build(const std::string &id);
+  void scd_cancel_build();
+  void scd_finish_build();
+  [[nodiscard]] bool scd_can_build(const LibraryEntry &entry, const StatusInfo &info) const;
   std::map<std::string, std::string> scd_last_outcome_;  // id -> the plain-language end of the last run of this session
   [[nodiscard]] std::filesystem::path scd_dir(const LibraryEntry &entry) const;
   [[nodiscard]] std::vector<std::filesystem::path> scd_recordings(const LibraryEntry &entry) const;
@@ -352,7 +359,7 @@ private:
   bool scd_spawn(const std::string &id, const scd::Plan &plan);
   void scd_finish_run();
   [[nodiscard]] static std::string scd_label(const StatusInfo &info);
-  [[nodiscard]] static std::string scd_hint(const StatusInfo &info);
+  [[nodiscard]] std::string scd_hint(const StatusInfo &info) const;
   // ---- import ----
   std::future<std::vector<std::pair<std::string, RomView>>> import_job_;
   std::atomic<int> import_done_{0};
