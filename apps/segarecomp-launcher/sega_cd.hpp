@@ -180,12 +180,19 @@ struct ImportResult {
 // The command line of a verified program: --disc-dir, --bios, --instruction-budget, --report and the recording / replay choice. The budget is
 // large but finite (a viewer session is bounded by the user; the program never runs unbounded).
 struct RunOptions {
+  std::filesystem::path backup_ram;    // --backup-ram: the formatted, empty internal backup RAM image (see ensure_backup_ram)
   std::filesystem::path report;
   std::filesystem::path record_to;     // --record-input
   std::filesystem::path replay_from;   // --input-script (replay in the viewer)
   std::uint64_t instruction_budget = 1ULL << 50U;
 };
 [[nodiscard]] std::vector<std::string> run_arguments(const Plan &plan, const RunOptions &options);
+// The BIOS reads the console's internal backup RAM, and the program stops with a typed stop when no image is supplied. The launcher supplies the state
+// of a new console: 8 KiB, zero except for the public 64-byte format trailer (ADR 0147; identical to tools/sega_cd_backup_ram.py). It holds no
+// software-derived byte. The program does not write it back: saves are not persisted yet.
+[[nodiscard]] std::vector<std::uint8_t> formatted_backup_ram();
+// Writes that image to `path` unless the file already holds exactly it (a changed file is replaced: it is not user data). False when it cannot be written.
+[[nodiscard]] bool ensure_backup_ram(const std::filesystem::path &path);
 
 // The outcome of a finished run, from the program's exit status and its --report file (a stable, sanitized subset).
 struct Outcome {

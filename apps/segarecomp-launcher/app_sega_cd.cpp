@@ -159,6 +159,8 @@ void App::scd_play(const std::string &id, int mode, const fs::path &script) {
   fs::create_directories(scd_dir(*entry) / "recordings");
   scd::RunOptions options;
   options.report = scd_dir(*entry) / "last-report.json";
+  options.backup_ram = scd_dir(*entry) / "backup-ram.bin";
+  if (!scd::ensure_backup_ram(options.backup_ram)) { show_message("The game could not be prepared", {"The folder for this game's run files cannot be written."}); return; }
   if (mode == 0 && scd_record_) options.record_to = scd_dir(*entry) / "recordings" / ("session-" + std::to_string(unix_now()) + ".txt");
   if (mode != 0) options.replay_from = script;
   scd_launch_options_ = options;

@@ -12,6 +12,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -335,7 +336,11 @@ void test_run_arguments_and_outcomes(const fs::path &base, const fs::path &fake)
   expect(plan.status.state == scd::State::ready, "run: ready");
   scd::RunOptions opt;
   opt.report = base / "r.json";
+  opt.backup_ram = base / "bram.bin";
   auto args = scd::run_arguments(plan, opt);
+  expect(args.size() == 10 && args[6] == "--backup-ram" && args[7] == u8(opt.backup_ram) && args[8] == "--report" && args[9] == u8(opt.report), "run arguments: the formatted backup RAM is passed");
+  opt.backup_ram.clear();
+  args = scd::run_arguments(plan, opt);
   expect(args.size() == 8 && args[0] == "--disc-dir" && args[1] == u8(f.dir / "disc") && args[2] == "--bios" && args[3] == u8(f.bios) && args[4] == "--instruction-budget" &&
              args[5] == std::to_string(1ULL << 50U) && args[6] == "--report" && args[7] == u8(opt.report),
          "run arguments: disc directory beside the CUE, BIOS, a finite budget, the report");
@@ -362,6 +367,19 @@ void test_run_arguments_and_outcomes(const fs::path &base, const fs::path &fake)
   expect(scd::describe_outcome(scd::read_outcome({}, 139)).find("139") != std::string::npos, "an unknown status is shown as it is");
   spit(base / "bad.json", "{{{");
   expect(!scd::read_outcome(base / "bad.json", 0).report_read, "a damaged report is not trusted");
+}
+
+void test_backup_ram(const fs::path &base) {
+  const std::vector<std::uint8_t> image = scd::formatted_backup_ram();
+  const std::string text(image.begin(), image.end());
+  // tools/sega_cd_backup_ram.py formatted_empty(): SHA-256 of the 8 KiB image, computed there from the same published layout
+  expect(image.size() == 8192 && sha(text) == "92e9da5c5773baa515ca0f87742eaa8ba8f89167e2d83da4e06fde8dbedf5652", "the formatted backup RAM image is the documented one (8 KiB, SHA-256 of tools/sega_cd_backup_ram.py's image)");
+  expect(std::all_of(image.begin(), image.end() - 64, [](std::uint8_t b) { return b == 0; }) && text.substr(8192 - 16) == "RAM_CARTRIDGE___" && text.substr(8192 - 64, 11) == std::string(11, '_'),
+         "it is zero except its last 64 bytes: the volume name, the free-block counts and the format signatures");
+  const fs::path file = base / "bram" / "backup-ram.bin";
+  expect(scd::ensure_backup_ram(file) && slurp(file) == text, "ensure_backup_ram writes the image (and its folder)");
+  spit(file, "changed");
+  expect(scd::ensure_backup_ram(file) && slurp(file) == text, "a changed file is replaced: it is not user data");
 }
 
 void test_catalog(const fs::path &base, const fs::path &fake) {
@@ -450,6 +468,7 @@ int main(int argc, char **argv) {
   test_import_and_status(base, fake);
   test_claims_against_files(base, fake);
   test_run_arguments_and_outcomes(base, fake);
+  test_backup_ram(base);
   test_catalog(base, fake);
   std::cout << failures << " failures\n";
   return failures == 0 ? 0 : 1;

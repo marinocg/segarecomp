@@ -428,8 +428,40 @@ ImportResult attach_program(const EntryRecord &record, const fs::path &program, 
 
 // ---- running ----
 
+std::vector<std::uint8_t> formatted_backup_ram() {
+  constexpr std::size_t size = 0x2000, block = 64;
+  std::vector<std::uint8_t> image(size, 0);
+  std::vector<std::uint8_t> trailer;
+  trailer.insert(trailer.end(), 11, static_cast<std::uint8_t>('_'));
+  trailer.insert(trailer.end(), {0, 0, 0, 0, 0x40});
+  const std::uint16_t free_blocks = static_cast<std::uint16_t>(size / block - 3);  // 125 for an empty internal RAM
+  for (int i = 0; i < 4; ++i) { trailer.push_back(static_cast<std::uint8_t>(free_blocks >> 8)); trailer.push_back(static_cast<std::uint8_t>(free_blocks & 0xFF)); }
+  trailer.insert(trailer.end(), 8, 0);
+  for (const char c : std::string("SEGA_CD_ROM")) trailer.push_back(static_cast<std::uint8_t>(c));
+  trailer.insert(trailer.end(), {0, 1, 0, 0, 0});
+  for (const char c : std::string("RAM_CARTRIDGE___")) trailer.push_back(static_cast<std::uint8_t>(c));
+  std::copy(trailer.begin(), trailer.end(), image.end() - static_cast<std::ptrdiff_t>(block));
+  return image;
+}
+
+bool ensure_backup_ram(const fs::path &path) {
+  const std::vector<std::uint8_t> want = formatted_backup_ram();
+  std::error_code ec;
+  if (fs::is_regular_file(path, ec) && fs::file_size(path, ec) == want.size()) {
+    std::ifstream in(path, std::ios::binary);
+    std::vector<std::uint8_t> have((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (have == want) return true;
+  }
+  fs::create_directories(path.parent_path(), ec);
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  out.write(reinterpret_cast<const char *>(want.data()), static_cast<std::streamsize>(want.size()));
+  out.flush();
+  return static_cast<bool>(out);
+}
+
 std::vector<std::string> run_arguments(const Plan &plan, const RunOptions &o) {
   std::vector<std::string> args{"--disc-dir", u8(plan.disc_dir), "--bios", u8(plan.bios), "--instruction-budget", std::to_string(o.instruction_budget)};
+  if (!o.backup_ram.empty()) { args.emplace_back("--backup-ram"); args.push_back(u8(o.backup_ram)); }
   if (!o.report.empty()) { args.emplace_back("--report"); args.push_back(u8(o.report)); }
   if (!o.record_to.empty()) { args.emplace_back("--record-input"); args.push_back(u8(o.record_to)); }
   else if (!o.replay_from.empty()) { args.emplace_back("--input-script"); args.push_back(u8(o.replay_from)); }

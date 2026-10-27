@@ -244,6 +244,8 @@ int sega_cd_headless(int argc, char **argv) {
   std::error_code ec;
   fs::create_directories(dir, ec);
   options.report = dir / "last-report.json";
+  options.backup_ram = dir / "backup-ram.bin";
+  if (!scd::ensure_backup_ram(options.backup_ram)) { emit("run=failed_to_prepare"); return finish(6); }
   options.record_to = record;
   options.replay_from = replay;
   fs::remove(options.report, ec);
