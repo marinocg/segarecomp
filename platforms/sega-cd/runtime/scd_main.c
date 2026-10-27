@@ -260,6 +260,41 @@ static int scd_slot_live(const ScdMachine *m, unsigned cpu, uint32_t address) {
   return *b[0] == 0x4EU && *b[1] == 0xF9U && (*b[5] & 1U) == 0U;
 }
 
+/* SEG-078-T003 (ADR 0205): the live bytes of the RAM window around a frontier and the machine's delivery ledger - the evidence the build driver
+ * hands to `segarecomp sega-cd resolve-source` (which finds, or refuses to find, the disc span those bytes came from). The window is the
+ * processor's executable-extent RAM (main work RAM or the 2M Word RAM view; sub PRG RAM or its 2M Word RAM view), clipped to the bytes the
+ * processor can see now. Returns 0 when region.bin cannot be written. */
+static int scd_capture_region(ScdMachine *m, FILE *json, const char *dir) {
+  static uint8_t window[0x80000U];
+  const uint32_t pc = m->stop.pc & UINT32_C(0x00FFFFFF);
+  uint32_t wlo, whi, lo, hi, i;
+  char path[4096];
+  FILE *f;
+  if (m->stop.cpu == SCD_MAIN) {
+    if (pc >= UINT32_C(0xFF0000)) { wlo = UINT32_C(0xFF0000); whi = UINT32_C(0x1000000); }
+    else if (pc >= UINT32_C(0x200000) && pc < UINT32_C(0x240000)) { wlo = UINT32_C(0x200000); whi = UINT32_C(0x240000); }
+    else return 1;
+  } else {
+    if (pc < SCD_PRG_RAM_BYTES) { wlo = 0U; whi = SCD_PRG_RAM_BYTES; }
+    else if (pc >= UINT32_C(0x80000) && pc < UINT32_C(0xC0000)) { wlo = UINT32_C(0x80000); whi = UINT32_C(0xC0000); }
+    else return 1;
+  }
+  (void)scd_cd_observe(m); /* a Word RAM view is current only after the CDC DMA has been brought up to date */
+  if (scd_code_byte(m, m->stop.cpu, pc) == NULL) return 1;
+  for (lo = pc; lo > wlo && scd_code_byte(m, m->stop.cpu, lo - 1U) != NULL; --lo) {}
+  for (hi = pc + 1U; hi < whi && scd_code_byte(m, m->stop.cpu, hi) != NULL; ++hi) {}
+  for (i = lo; i < hi; ++i) window[i - lo] = *scd_code_byte(m, m->stop.cpu, i);
+  snprintf(path, sizeof path, "%s/region.bin", dir);
+  f = fopen(path, "wb");
+  if (f == NULL) return 0;
+  if (fwrite(window, 1U, hi - lo, f) != hi - lo || fclose(f) != 0) return 0;
+  fprintf(json, ",\"region\":{\"base\":%u,\"length\":%u,\"track1_first_lba\":%u,\"delivered_overflow\":%u,\"delivered\":[", lo, hi - lo,
+          m->disc->track_count != 0U ? m->disc->tracks[0].first_lba : 0U, (unsigned)m->delivered_overflow);
+  for (i = 0; i < m->delivered_count; ++i) fprintf(json, "%s[%u,%u]", i ? "," : "", m->delivered[i].first_lba, m->delivered[i].count);
+  fprintf(json, "]}");
+  return 1;
+}
+
 /* Build pass (ADR 0142 decisions 3 and 7): an unknown epoch image is written to <dir>/epoch.bin; a stop at a RAM PC with no compiled
  * variant for its live bytes is reported as a frontier. Both carry the identity of this program (the provenance chain). */
 static int scd_capture(ScdMachine *m, const ScdProgram *program, const char *dir) {
@@ -309,6 +344,10 @@ static int scd_capture(ScdMachine *m, const ScdProgram *program, const char *dir
       fprintf(f, ",\"run\":{\"base\":%u,\"slots\":%u,\"bytes\":\"", first, slots);
       scd_hex(f, buffer, slots * 6U);
       fprintf(f, "\"}");
+    }
+    if (!scd_capture_region(m, f, dir)) {
+      fclose(f);
+      return 0;
     }
     fprintf(f, "}\n");
     return fclose(f) == 0;

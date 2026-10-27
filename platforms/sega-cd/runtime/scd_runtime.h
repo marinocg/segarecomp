@@ -408,6 +408,13 @@ typedef struct ScdGfx {
   uint64_t operations, lines_rendered;
 } ScdGfx;
 
+/* SEG-078-T003 (ADR 0205): the delivery ledger - the disc blocks the CDC decoder has read into its buffer, as merged LBA ranges. A fact of the
+ * device (what the machine itself read from the user's disc), the evidence a build pass offers when it asks where code in RAM came from. */
+#define SCD_LEDGER_MAX 256U
+typedef struct ScdLedgerRange {
+  uint32_t first_lba, count;
+} ScdLedgerRange;
+
 typedef struct ScdMachine {
   ScdCpu cpu[2];
   const ScdProgram *program;
@@ -478,6 +485,9 @@ typedef struct ScdMachine {
   /* SEG-070-T002 (ADR 0149): the optional timed standard-pad machine input (--input-script), or NULL: then no pad event exists and
    * every behaviour and report is that of SEG-065. */
   struct ScdInput *input;
+  ScdLedgerRange delivered[SCD_LEDGER_MAX];
+  uint32_t delivered_count;
+  uint8_t delivered_overflow;             /* more ranges than the ledger holds: the evidence is incomplete and is never used */
 } ScdMachine;
 
 /* The duration of one sub cycle in ticks for this machine's profile (ADR 0177). */
@@ -662,6 +672,7 @@ void scd_vdp_release(ScdMachine *m);
 void scd_cdc_host_read(ScdMachine *m, uint32_t cpu_access, uint32_t *word);
 /* Bring an in-flight CDC DMA up to the current instruction tick (every Word RAM / CDC observation point). */
 int scd_cd_observe(ScdMachine *m);
+void scd_ledger_note(ScdMachine *m, uint32_t lba);
 int scd_cdc_sub_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 /* SEG-064-T004 diagnostics: executed-instruction-start coverage (scd_coverage.c). Enabled only by the program driver's --coverage flag. */
 int scd_event_open(ScdMachine *m, const char *path);

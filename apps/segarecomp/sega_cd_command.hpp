@@ -16,6 +16,10 @@ inline constexpr const char *segarecomp_sega_cd_usage =
     "       --partition-window writes one translation unit per processor PC window next to <program.c>, listed in the report;\n"
     "       --disc-image admits a track-1 extent placed in a processor's RAM as an executable image (SEG-064-T004; main: work RAM\n"
     "       or, SEG-071-T001, the 2M Word RAM view $200000-$23FFFF; sub: PRG RAM);\n"
-    "       --application-entry ends the run, with the typed stop application_handoff, at the first main instruction there)\n";
+    "       --application-entry ends the run, with the typed stop application_handoff, at the first main instruction there)\n"
+    "  segarecomp sega-cd resolve-source --cue <disc.cue> --cpu main|sub --pc <address> --region <file> --region-base <address>\n"
+    "                                    [--delivered <first-lba>:<count>[,...]] [--delivered-overflow 1]\n"
+    "      (SEG-078-T003, ADR 0205: find the track-1 span the live RAM window is an exact copy of, among the blocks the build pass's CDC read;\n"
+    "       prints the --disc-image extent or a typed refusal; exit 0 resolved, 8 refused)\n";
 
 int segarecomp_sega_cd_command(int argc, char **argv);

@@ -8,6 +8,8 @@
 //   - copy images: `static_proof`, a verbatim copy of a ROM span declared by an explicit descriptor, checked against the ROM;
 //   - disc images (SEG-064-T004): `immutable_input`, an extent of the external disc's track 1 that is placed in a processor's RAM
 //     (the disc's identity is verified at start-up, so the bytes are immutable inputs; verification is per instruction, byte identity);
+//   - discovered disc extents (SEG-078-T003, ADR 0205): the same bytes and the same per-instruction guard as a disc image, but admitted in chain order with
+//     the identity of the build pass whose frontier they explain (`resolve_source`: an exact copy of blocks the machine itself read);
 //   - epoch images: `bounded_build_time_materialization`, the PRG RAM observed at the sub runnable epoch by a build pass; or (SEG-079,
 //     ADR 0179) `static_proof`, an image reconstructed from the BIOS image by a recipe (epoch_recipe.hpp), with no pass identity. Both are
 //     verified whole against the live PRG RAM at the epoch;
@@ -81,7 +83,8 @@ struct DiscImageSpec {
   std::vector<std::uint8_t> bytes;  // the extent as read from the verified disc at build time (length bytes)
 };
 
-enum class AdmissionKind : std::uint8_t { epoch, operand_template, epoch_recipe };  // epoch_recipe: SEG-079 (ADR 0179), a static producer
+enum class AdmissionKind : std::uint8_t { epoch, operand_template, epoch_recipe, disc_extent };  // epoch_recipe: SEG-079 (ADR 0179), a static producer;
+                                                                                                 // disc_extent: SEG-078-T003 (ADR 0205), a discovered extent
 
 struct Admission {
   AdmissionKind kind{AdmissionKind::epoch};
@@ -91,6 +94,7 @@ struct Admission {
   std::vector<std::uint8_t> bytes;      // epoch: the PRG RAM snapshot; operand_template: the observed live bytes (>= 6; a run: 6 * slots)
   std::uint32_t slots{1};               // operand_template: 1 = one instruction at `address`; >1 (SEG-079-T002, ADR 0180) = a run of that many
                                         // contiguous JMP (xxx).L slots at a 6-byte stride from `address`, `bytes` exactly 6 * slots
+  std::uint32_t track_offset{};         // disc_extent: the track-1 user-data byte offset (`address` is the execution base, `bytes` the extent read from the disc)
   EpochRecipe recipe;                   // epoch_recipe: the image is reconstructed from the BIOS image (no pass identity, bytes ignored)
 };
 

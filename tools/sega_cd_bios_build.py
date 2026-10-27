@@ -33,8 +33,14 @@ copied to disk.
 usage: sega_cd_bios_build.py --segarecomp EXE --cc CC --cue DISC --bios IMAGE|- --work DIR [--copy-image SPEC]... [--disc-image SPEC]...
                              [--application-entry ADDRESS]
                              [--budget N] [--until-tick T] [--backup-ram FILE] [--input-script FILE] [--pass-set SPEC]... [--timeout S] [--cflags "..."] [--partition-window BYTES] [--jobs N]
-                             [--viewer]
+                             [--viewer] [--discover-extents]
 prints the build summary JSON; exit 0 on a confirmed build, 1 on a typed build failure, 2 on usage errors.
+
+SEG-078-T003 (ADR 0205): `--discover-extents` lets a build pass that stops at a RAM program counter with no compiled variant ask where those bytes
+came from: the pass writes the live RAM window and the machine's delivery ledger (the disc blocks its CDC read), `segarecomp sega-cd resolve-source`
+finds the track-1 span the window is an exact copy of among the DELIVERED blocks (longest explanation wins, a tie, a short run, an undelivered or
+transformed window is a typed refusal), and the span becomes a `--disc-image` extent for the next round. No reference emulator, trace or recipe is
+used. A refusal ends the build at that frontier (the program stops there with its typed stop) and is reported in `frontier`; it is never a guess.
 
 SEG-078-T001 (ADR 0204): `--viewer` additionally links the viewer variant of the confirmed program, `program-viewer` next to `program`: the
 SAME generated C and objects (the program identity and the headless `program` are unchanged) with only its `main` entry renamed to
@@ -68,7 +74,8 @@ MAX_EPOCHS = 4
 MAX_TEMPLATES = 64        # template ADMISSIONS (rounds) - ADR 0142 decision 8; one admission is one instruction or, SEG-079-T002, one slot run
 MAX_TEMPLATE_SLOTS = 256  # template slots over all admissions (ADR 0180)
 MAX_RUN_SLOTS = 128       # slots in one run admission (ADR 0180)
-MAX_ROUNDS = 1 + MAX_EPOCHS + MAX_TEMPLATES  # ADR 0142 decision 8
+MAX_EXTENTS = 16          # kMaxDiscImages (SEG-078-T003: manual and discovered extents together)
+MAX_ROUNDS = 1 + MAX_EPOCHS + MAX_TEMPLATES + MAX_EXTENTS  # ADR 0142 decision 8; SEG-078-T003: one round per discovered extent
 TEMPLATE_OPCODES = ("4ef8", "4ef9")           # JMP (xxx).W / JMP (xxx).L: the only proposed shapes
 DEFAULT_WINDOW = 0x2000                       # measured (ADR 0142 "Result (SEG-064-T003)"); 0 = one translation unit
 CACHE_VERSION = "segarecomp.sega_cd_bios_build.objects.v2"
@@ -164,6 +171,8 @@ class Driver:
                 raise BuildFailure("bios_stream_unsupported")
             self.bios_bytes = sys.stdin.buffer.read(0x20001)
         self.runtime = None
+        self.extents = []          # SEG-078-T003: discovered disc extents "main|sub:<offset>:<base>:<length>" (each is also an ordered admission)
+        self.frontier = None       # the last frontier that could not be explained (typed), reported in the summary
         self.compile_seconds = []
         self.rounds = []
         self.peak_compile_kb = 0
@@ -356,6 +365,26 @@ class Driver:
     def outcome(report):
         return {k: report.get(k) for k in ("result", "stop", "cpus", "digests", "result_block", "bios_profile", "device_log", "ticks")}
 
+    def resolve_frontier(self, capture, pass_dir):
+        """SEG-078-T003 (ADR 0205): the disc span the frontier's RAM window is an exact copy of. Returns (extent spec or None, refusal dict or None)."""
+        region = capture.get("region")
+        cpu = "main" if capture["cpu"] == 0 else "sub"
+        if region is None:
+            return None, {"cpu": cpu, "pc": capture["pc"], "refusal": "no_evidence"}
+        delivered = ",".join("%d:%d" % (a, b) for a, b in region["delivered"])
+        cmd = [self.args.segarecomp, "sega-cd", "resolve-source", "--cue", self.args.cue, "--cpu", cpu, "--pc", str(capture["pc"]),
+               "--region", str(pass_dir / "region.bin"), "--region-base", str(region["base"]), "--delivered-overflow", str(region["delivered_overflow"])]
+        if delivered:
+            cmd += ["--delivered", delivered]
+        out = run(cmd, 600)
+        try:
+            answer = json.loads(out.stdout) if out.stdout.strip() else {}
+        except ValueError:
+            answer = {}
+        if out.returncode == 0 and answer.get("ok"):
+            return "%s:%d:%d:%d" % (cpu, answer["offset"], answer["base"], answer["length"]), None
+        return None, {"cpu": cpu, "pc": capture["pc"], "refusal": answer.get("error", "resolver_failed")}
+
     def link_viewer(self):
         """SEG-078-T001 (ADR 0204): the viewer variant of the program just confirmed. Every unit object is reused; only `program.c` is
         recompiled with its entry renamed, and the shared SDL3 viewer sources are compiled and linked next to the runtime objects.
@@ -474,6 +503,21 @@ class Driver:
                     entry["admitted"] = {"kind": "operand_template", "cpu": cpu, "pc": capture["pc"]}
                 history.append(entry)
                 continue
+            if capture is not None and capture["kind"] == "frontier" and self.args.discover_extents:
+                # SEG-078-T003: not a template shape; where did the RAM window come from?
+                spec, refusal = self.resolve_frontier(capture, self.work / "pass")
+                if spec is not None and (len(self.extents) + len(self.args.disc_image or [])) >= MAX_EXTENTS:
+                    spec, refusal = None, {"cpu": "main" if capture["cpu"] == 0 else "sub", "pc": capture["pc"], "refusal": "extent_bound_exceeded"}
+                if spec is not None and spec in self.extents:
+                    spec, refusal = None, {"cpu": "main" if capture["cpu"] == 0 else "sub", "pc": capture["pc"], "refusal": "no_progress"}
+                if spec is not None:
+                    self.extents.append(spec)
+                    admits.append("extent:%s:%s" % (capture["pass_identity"], spec))   # ordered, with the identity of the pass that explained it
+                    entry["admitted"] = {"kind": "disc_extent", "extent": spec}
+                    history.append(entry)
+                    continue
+                self.frontier = refusal
+                entry["frontier"] = refusal
             history.append(entry)
             confirm, confirm_capture = self.pass_run(exe, self.work / "confirm")
             if self.outcome(confirm) != self.outcome(report) or (confirm_capture is None) != (capture is None):
@@ -481,7 +525,7 @@ class Driver:
             viewer = self.link_viewer() if self.args.viewer else None
             return {"ok": True, "viewer": viewer, "rounds": round_index + 1, "admissions": admits, "history": history,
                     "program_identity": emitted["program_identity"], "program": str(exe), "c_bytes": emitted["c_bytes"],
-                    "emit": emitted, "compile_seconds": self.compile_seconds, "outcome": self.outcome(report),
+                    "extents": list(self.extents), "frontier": self.frontier, "emit": emitted, "compile_seconds": self.compile_seconds, "outcome": self.outcome(report),
                     "partition_window": self.window, "round_metrics": self.rounds, "peak_compile_kb": self.peak_compile_kb,
                     "peak_emit_kb": self.peak_emit_kb, "total_seconds": round(time.monotonic() - started, 3),
                     "link_inputs": self.link_inputs}
@@ -510,6 +554,7 @@ def main(argv=None):
     parser.add_argument("--cflags", default="")
     parser.add_argument("--partition-window", type=lambda v: int(v, 0), default=DEFAULT_WINDOW)
     parser.add_argument("--jobs", type=int, default=min(os.cpu_count() or 1, 8))
+    parser.add_argument("--discover-extents", action="store_true", help="SEG-078-T003: resolve RAM frontiers to disc extents from the machine's own delivery ledger (ADR 0205)")
     parser.add_argument("--viewer", action="store_true", help="SEG-078-T001: also link the SDL3 viewer variant, program-viewer (the headless program is unchanged)")
     parser.add_argument("--viewer-host-source", help=argparse.SUPPRESS)  # test seam: a project-authored C host instead of the SDL3 viewer (implies --viewer)
     parser.add_argument("--reverse-compile-order", action="store_true", help=argparse.SUPPRESS)
