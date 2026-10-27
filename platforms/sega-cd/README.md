@@ -20,7 +20,7 @@ recording and the launcher's Sega CD game)**.
 | **Interactive viewer** | `sega_cd_bios_build.py --viewer` links the same generated program with the shared viewer: every frame is presented at its vertical-blank onset, paced by the machine's own frame length (59.92 Hz), keyboard or gamepad on port 1 (the Genesis viewer's mapping and settings), Esc/Back pause menu, F6 hold and F7 single-step. |
 | **Input recording** | The player's port-1 input is recorded as an `segarecomp-input-script 1` file whose headless replay reproduces the run exactly (report, input counters and captured frames). |
 | **Launcher** | Sega CD is a platform of the library: your BIOS and CUE are referenced (never copied), an imported viewer program is verified against them, and Play, recording and replay are in the game's details page. |
-| **Not supported** | **Audio** (the Z80 does not execute; no PCM or CD-DA output). **Generic CUE-to-play compilation** and executable-extent discovery (SEG-078-T003): the launcher never builds a Sega CD game. Code a program's build did not admit stops with a typed stop (`entry_not_compiled`, ...). |
+| **Not supported** | **Audio** (the Z80 does not execute; no PCM or CD-DA output). **Saving** (the launcher passes a new console's formatted, empty backup RAM; nothing is written back). **Generic CUE-to-play compilation** and executable-extent discovery (SEG-078-T003): the launcher never builds a Sega CD game. Code a program's build did not admit stops with a typed stop (`entry_not_compiled`, ...). |
 
 ## Producing and importing a verified program (developer procedure)
 

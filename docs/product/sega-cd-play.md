@@ -45,5 +45,5 @@ launcher speaks. **Not verified**: that the program is a faithful translation of
 
 ## Not supported
 
-Audio (no Z80 execution, no PCM or CD-DA output); generic CUE-to-play compilation; any code region a program's build did not admit; 6-button pads and
+Audio (no Z80 execution, no PCM or CD-DA output); saving (each run starts from a new console's empty internal backup RAM, which the launcher supplies, and nothing is written back); generic CUE-to-play compilation; any code region a program's build did not admit; 6-button pads and
 player 2 input in the Sega CD viewer; other titles' compatibility.
