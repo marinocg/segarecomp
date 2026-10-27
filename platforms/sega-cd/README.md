@@ -19,8 +19,9 @@ recording and the launcher's Sega CD game)**.
 | **A second title** | Experimental observations only (parts of its start-up run); no checkpoint and no claim. |
 | **Interactive viewer** | `sega_cd_bios_build.py --viewer` links the same generated program with the shared viewer: every frame is presented at its vertical-blank onset, paced by the machine's own frame length (59.92 Hz), keyboard or gamepad on port 1 (the Genesis viewer's mapping and settings), Esc/Back pause menu, F6 hold and F7 single-step. |
 | **Input recording** | The player's port-1 input is recorded as an `segarecomp-input-script 1` file whose headless replay reproduces the run exactly (report, input counters and captured frames). |
-| **Launcher** | Sega CD is a platform of the library: your BIOS and CUE are referenced (never copied), an imported viewer program is verified against them, and Play, recording and replay are in the game's details page. |
-| **Not supported** | **Audio** (the Z80 does not execute; no PCM or CD-DA output). **Saving** (the launcher passes a new console's formatted, empty backup RAM; nothing is written back). **Generic CUE-to-play compilation** and executable-extent discovery (SEG-078-T003): the launcher never builds a Sega CD game. Code a program's build did not admit stops with a typed stop (`entry_not_compiled`, ...). |
+| **Launcher** | Sega CD is a platform of the library: your BIOS and CUE are referenced (never copied); **Build** compiles a viewer program from them on this computer (SEG-078-T003, ADR 0205), or an imported viewer program is verified against them; Play, recording and replay are in the game's details page. |
+| **Disc-extent discovery** | The build pass records every disc block the CDC delivered. At a stop in RAM code, `segarecomp sega-cd resolve-source` finds the track-1 span the live RAM window is a byte-exact copy of among the *delivered* blocks, and admits it as an ordered `extent:` admission (the same executable-image authority as `--disc-image`, without a human-supplied extent). Ambiguous, undelivered, generated or modified code is refused with a typed class (`ambiguous_source`, `no_source`, ...) and never guessed. No reference emulator, trace or title table is consulted. |
+| **Not supported** | **Audio** (the Z80 does not execute; no PCM or CD-DA output). **Saving** (the launcher passes a new console's formatted, empty backup RAM; nothing is written back). **Complete CUE-to-play compilation**: `segarecomp sega-cd build` and the launcher's Build button discover the disc extents a title loads without a reference (ADR 0205), but a title whose code is generated, transformed or reached only through computed destinations the build never observed is not fully covered; code a program's build did not admit stops with a typed stop (`entry_not_compiled`, ...). |
 
 ## Producing and importing a verified program (developer procedure)
 
@@ -42,7 +43,19 @@ inputs in ignored local storage; never commit, publish or bundle them.
    statement matches the BIOS and every disc file (SHA-256) and it is a viewer build of the current runtime contract; otherwise the launcher says which
    check failed (`program_bios_mismatch`, `disc_file_missing`, `program_headless_only`, `program_abi_unsupported`, ...).
 
-Without a program the game stays in the library as *No program (automatic build unsupported)*.
+### Self-service build (no developer procedure)
+
+    segarecomp sega-cd build --cue "<disc.cue>" --bios <bios.bin> --output <ignored dir> --runtime-dir <repository root> --cc <compiler> \
+        [--viewer 1 --sdl3-include <dir> --sdl3-lib <dir>] [--cache-dir <dir>] [--backup-ram <formatted empty image>] [--budget <instructions>]
+
+This is the same fixed point as `tools/sega_cd_bios_build.py --discover-extents`, in the product CLI: emit, compile (parallel, content-addressed object cache),
+run a build pass from reset, admit the epoch image, jump-slot templates and discovered disc extents the pass proves, and confirm with a second identical
+pass. It prints `@stage` / `@round` / `@result` progress lines and writes `status.json` (`extents`, the typed `frontier` refusal if any, rounds, result)
+and `build.log`. The launcher's **Build** button runs exactly this command with the bundled compiler. A game that was added without a program is shown
+as *No program yet (can be built)*.
+
+The build does not invent controller input: it covers the path the console takes from reset with no button pressed. A title that waits for START at its
+first menu is therefore built up to that menu; the program stops with a typed stop (`entry_not_compiled`) when play reaches code the build never ran.
 
 ## Code
 

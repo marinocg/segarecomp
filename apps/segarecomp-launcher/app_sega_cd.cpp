@@ -364,8 +364,8 @@ void App::draw_scd_import(float w) {
   ImGui::Dummy(ImVec2(1, ctx_.u(14.0F)));
   heading(ctx_, "SEGA CD (DISC)");
   paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w,
-            "A Sega CD game is your BIOS image plus your disc (the CUE file), added by reference: nothing is copied. Segarecomp cannot build Sega CD games yet, "
-            "so playing needs a verified viewer program built with the developer procedure (see the Sega CD notes in the documentation). The program is checked "
+            "A Sega CD game is your BIOS image plus your disc (the CUE file), added by reference: nothing is copied. After adding it, choose Build to compile a playable program from these two "
+            "files on this computer (experimental; code the disc does not contain verbatim is never guessed), or import a verified prebuilt program. A program is checked "
             "against exactly these two files.");
   ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
   const bool busy = scd_import_job_.valid();
