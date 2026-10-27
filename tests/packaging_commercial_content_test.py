@@ -29,7 +29,7 @@ forbidden = ["games/Sonic CD (USA).cue", "disc.cue", "bios/Sega CD BIOS.bin", "S
              "runtime/platforms/sega-cd/runtime/scd_main.c", "sega-cd/last-report.json", "image.iso", "game.chd", "x/Mega-CD BIOS.md"]
 allowed = ["Segarecomp", "segarecomp.exe", "bin/segarecomp", "licenses/MPL-2.0.txt", "assets/ui/icon-play.png", "runtime/platforms/genesis/runtime/runtime.c",
            "runtime/platforms/master-system/viewer/sms_viewer_sdl3.c", "runtime/libs/viewer/src/sv_host.c", "sdl3/lib/libSDL3.so.0", "toolchain/zig", "README.txt",
-           "runtime/libs/device/sega/ym2612/ym2612.cpp"]
+           "runtime/libs/device/sega/ym2612/ym2612.cpp", "toolchain/lib/libc/include/any-linux-any/linux/apm_bios.h", "toolchain/lib/libc/include/x86/bios_stub.c"]
 for name in forbidden:
     check(dep.FORBIDDEN_COMMERCIAL.search(name) is not None, "refused: " + name)
 for name in allowed:
