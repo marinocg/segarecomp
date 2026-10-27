@@ -10,6 +10,7 @@ On project-authored fixtures (no commercial input) it checks that the native bui
 usage: sega_cd_native_build_test.py <segarecomp> <c-compiler> <source-root>
 """
 import hashlib
+import os
 import json
 import pathlib
 import subprocess
@@ -21,6 +22,7 @@ FIXTURE = ROOT / "tools" / "sega_cd_bios_loader_fixture.py"
 DRIVER = ROOT / "tools" / "sega_cd_bios_build.py"
 HOST = ROOT / "tests" / "tools" / "sega_cd_live_test_host.c"
 failures = []
+EXE = ".exe" if os.name == "nt" else ""
 
 
 def check(ok, label):
@@ -55,11 +57,11 @@ def main():
                   "%s: the same extents and frontier as the Python driver" % case)
             check(status["program_identity"] == ref["program_identity"], "%s: the same program identity as the Python driver" % case)
             if case == "duplicates":
-                check(status["frontier"]["refusal"] == "ambiguous_source" and not status["extents"] and (tmp / "n-duplicates" / "program").exists(),
+                check(status["frontier"]["refusal"] == "ambiguous_source" and not status["extents"] and (tmp / "n-duplicates" / ("program" + EXE)).exists(),
                       "duplicates: a typed refusal ends the build at the frontier; the program still exists")
             if case == "overlay":
                 first = status
-                program = tmp / "n-overlay" / "program"
+                program = tmp / "n-overlay" / ("program" + EXE)
                 report = subprocess.run([str(program), "--disc-dir", str(fx / "disc"), "--bios", str(bios), "--instruction-budget", "3000000"], capture_output=True, text=True, timeout=300)
                 check(json.loads(report.stdout)["result"] == "idle", "overlay: the built program runs to its end")
                 objects = sorted(p.name for p in (tmp / "n-overlay" / "objects").glob("*.o"))
@@ -70,11 +72,11 @@ def main():
                 done3, status3 = native(tmp / "n-overlay-b", cue, bios, "--cache-dir", str(tmp / "n-overlay" / "objects"))
                 check(status3 and status3["program_identity"] == first["program_identity"] and
                       sorted(p.name for p in (tmp / "n-overlay" / "objects").glob("*.o")) == objects, "overlay: a shared cache folder serves a second output folder")
-                hashes = {hashlib.sha256((tmp / d / "program").read_bytes()).hexdigest() for d in ("n-overlay", "n-overlay-b")}
+                hashes = {hashlib.sha256((tmp / d / ("program" + EXE)).read_bytes()).hexdigest() for d in ("n-overlay", "n-overlay-b")}
                 check(len(hashes) == 1, "overlay: the two builds are byte-identical programs")
                 done4, status4 = native(tmp / "n-overlay-v", cue, bios, "--viewer", "1", "--viewer-host-source", str(HOST), "--cache-dir", str(tmp / "n-overlay" / "objects"))
-                vexe = tmp / "n-overlay-v" / "program-viewer"
-                check(status4 and status4["viewer"] is True and status4["viewer_program"] == "program-viewer" and vexe.exists(), "overlay: --viewer builds the viewer variant")
+                vexe = tmp / "n-overlay-v" / ("program-viewer" + EXE)
+                check(status4 and status4["viewer"] is True and status4["viewer_program"] == "program-viewer" + EXE and vexe.exists(), "overlay: --viewer builds the viewer variant")
                 head = json.loads(subprocess.run([str(program), "--describe"], capture_output=True, text=True).stdout)
                 view = json.loads(subprocess.run([str(vexe), "--describe"], capture_output=True, text=True).stdout)
                 check(head["viewer"] is False and view["viewer"] is True and head["program_identity"] == view["program_identity"] == status4["program_identity"],
