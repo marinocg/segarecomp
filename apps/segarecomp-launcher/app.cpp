@@ -1266,7 +1266,7 @@ void App::run_script() {
     else if (key == "scd_refusal") actual = !detail_id_.empty() && status_of(detail_id_).sega_cd ? scd::code(status_of(detail_id_).scd.refusal) : "-";
     else if (key == "scd_outcome") actual = scd_last_outcome_.count(detail_id_) != 0 ? scd_last_outcome_.at(detail_id_) : "-";
     else if (key == "scd_building") actual = scd_build_ ? "1" : "0";
-    else if (key == "scd_build_note") actual = scd_build_notes_.count(detail_id_) != 0 ? scd_build_notes_.at(detail_id_).substr(0, 24) : "-";
+    else if (key == "scd_build_note") actual = scd_build_notes_.count(detail_id_) != 0 ? scd_build_notes_.at(detail_id_).substr(0, 20) : "-";
     else if (key == "scd_failure") actual = failures_.count(detail_id_) != 0 ? failures_.at(detail_id_) : "-";
     else if (key == "scd_recordings") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr ? std::to_string(scd_recordings(*catalog_.find_id(detail_id_)).size()) : "-";
     else if (key == "scd_form_message") actual = scd_form_.message.empty() ? "-" : scd_form_.message;

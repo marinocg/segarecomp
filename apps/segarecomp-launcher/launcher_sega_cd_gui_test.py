@@ -38,9 +38,11 @@ def run_window(tmp, name, script, extra_env=None):
     script_path.write_text("\n".join(script) + "\n")
     trace_path.unlink(missing_ok=True)
     env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software", SEGARECOMP_LIBRARY_DIR=str(lib), SEGARECOMP_CACHE_DIR=str(tmp / (name + "-cache")),
-               SEGARECOMP_HOME=str(tmp / "no-home"), SEGARECOMP_NO_COVER_FETCH="1", SEGARECOMP_SHOT_SIZE="1080x740", SEGARECOMP_VIEWER_UNTHROTTLED="1",
+               SEGARECOMP_NO_COVER_FETCH="1", SEGARECOMP_SHOT_SIZE="1080x740", SEGARECOMP_VIEWER_UNTHROTTLED="1",
                SEGARECOMP_VIEWER_NO_STOP_SCREEN="1", SEGARECOMP_VIEWER_SETTINGS=str(tmp / "viewer.cfg"), SEGARECOMP_GUI_SCRIPT=str(script_path),
-               SEGARECOMP_GUI_TRACE=str(trace_path), **(extra_env or {}))
+               SEGARECOMP_GUI_TRACE=str(trace_path))
+    env.setdefault("SEGARECOMP_HOME", str(tmp / "no-home"))
+    env.update(extra_env or {})
     subprocess.run([LAUNCHER], env=env, timeout=300, check=True, capture_output=True)
     return trace_path.read_text().splitlines() if trace_path.exists() else [], lib
 
@@ -82,7 +84,7 @@ def main():
         check("scd=added program=verified" in text and "scd=run_started windowless=0 recording=1" in text and "scd=run_exited code=0" in text and "live=quit" in text,
               "window A: added with a verified program, ran in the viewer with a recording, closed with exit 0")
         check("scd=run_started windowless=1" in text, "window A: the replay ran without a window")
-        check("build=refused reason=unsupported_build platform=sega-cd" in text, "window A: Build is the typed unsupported state for a Sega CD game")
+        check("build=refused reason=unsupported_build platform=sega-cd" in text, "window A: Build is the typed unsupported state when the installation has no Sega CD runtime")
         stored = json.loads((lib / "library.json").read_text())
         check(stored["schema"] == 2 and stored["games"][0]["platform"] == "sega-cd" and stored["games"][0]["last_run"] == "clean", "window A: the library holds the Sega CD game and the clean run")
 
@@ -115,6 +117,28 @@ def main():
                                           "expect scd_state=Stale program", "expect scd_refusal=program_changed", "expect can_play=0", "quit"])
         bad = [l for l in trace if l.startswith("expect FAIL")]
         check(not bad and sum(l.startswith("expect ok") for l in trace) >= 4, "window C: a program changed after verification shows 'Stale program' (%s)" % (bad or "ok"))
+
+        # ---- SEG-078-T003 (ADR 0205): the Build button of a Sega CD game, in the real window, on a complete (staged) installation ----
+        package = common.stage_launcher_package(tmp / "package", SEGARECOMP, CC, os.environ.get("SDL3_PREFIX", "/usr"))
+        loader = tmp / "loader"
+        subprocess.run([sys.executable, str(ROOT / "tools" / "sega_cd_bios_loader_fixture.py"), "build", "--case", "overlay", "--out", str(loader)], check=True, capture_output=True)
+        lbios, lcue = loader / "bios.bin", loader / "disc" / "disc.cue"
+        env = {"SEGARECOMP_HOME": str(package), "SEGARECOMP_SCD_BUILD_ARGS": "--budget 3000000", "SEGARECOMP_VIEWER_KEY_SCRIPT": str(keys)}
+        # window D: add without a program, cancel a running build (nothing is left behind), then build to the end and play the built program
+        trace, lib = run_window(tmp, "d", [
+            "frames 8", "page import", "frames 6", "scd_form %s|%s|" % (lbios, lcue), "frames 4", "scd_add", "wait_scd", "frames 10",
+            "expect page=details", "expect scd_state=No program yet (can be built)", "expect can_play=0",
+            "build", "frames 20", "expect scd_building=1", "cancel_build", "wait_scd", "frames 10", "expect scd_building=0", "expect scd_state=No program yet (can be built)",
+            "build", "frames 6", "expect scd_building=1", "wait_scd", "frames 20",
+            "expect scd_building=0", "expect scd_state=Ready to play", "expect can_play=1", "expect scd_build_note=Built in 4 round(s).", "play", "frames 4", "wait_scd", "wait_play_end", "frames 10",
+            "expect scd_outcome=The program finished.", "quit"], env)
+        bad = [l for l in trace if l.startswith("expect FAIL")]
+        check(not bad and sum(l.startswith("expect ok") for l in trace) >= 12, "window D: Build cancels cleanly, then builds, verifies and plays (%s)" % (bad or "%d ok" % sum(l.startswith("expect ok") for l in trace)))
+        text = "\n".join(trace)
+        check("build=started platform=sega-cd" in text and "build=cancel_requested platform=sega-cd" in text and "build=cancelled platform=sega-cd" in text and "build=ok platform=sega-cd" in text
+              and "scd=program_attached" in text, "window D: the trace shows start, cancel, cancelled, start again, ok, and the program attached")
+        scd_dir = next((lib / "sega-cd").glob("*"))
+        check((scd_dir / "build").is_dir() and not (scd_dir / "build.partial").exists() and not (scd_dir / "build.failed").exists(), "window D: only the finished build remains (no partial or failed folder)")
     print("%d failures" % len(failures))
     return 1 if failures else 0
 
