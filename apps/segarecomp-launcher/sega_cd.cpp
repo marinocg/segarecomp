@@ -230,10 +230,14 @@ Claims describe_program(const fs::path &program, unsigned timeout_ms) {
   bool timed_out = false;
   while (stream != nullptr) {
     if (SDL_GetTicks() > deadline) { timed_out = true; break; }
-    const std::size_t got = SDL_ReadIO(stream, buffer, sizeof(buffer));
+    std::size_t got = SDL_ReadIO(stream, buffer, sizeof(buffer));
     if (got == 0) {
-      if (SDL_GetIOStatus(stream) == SDL_IO_STATUS_NOT_READY) { SDL_Delay(5); continue; }
-      break;
+      // No data now: either the program has more to say (a pipe read can return empty while it runs - seen on Windows after the first 512 bytes) or it
+      // ended. Only an exited process followed by one more empty read is the end of its output.
+      int ignored = 0;
+      if (!SDL_WaitProcess(process, false, &ignored)) { SDL_Delay(5); continue; }
+      got = SDL_ReadIO(stream, buffer, sizeof(buffer));
+      if (got == 0) break;
     }
     if (out.size() < 12000U) out.append(buffer, got);  // keep the head, but always drain the pipe to EOF
   }
