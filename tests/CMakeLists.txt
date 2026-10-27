@@ -1220,6 +1220,10 @@ set_property(TEST sega_cd_frame_capture_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_extent_discovery_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_extent_discovery_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_extent_discovery_test APPEND PROPERTY LABELS full fast)
+# SEG-078-T003 (ADR 0205): the product `segarecomp sega-cd build` equals the Python driver; progress, object cache, viewer variant, typed failures.
+add_test(NAME sega_cd_native_build_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_native_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_native_build_test APPEND PROPERTY LABELS full fast)
 # SEG-078-T002 (ADR 0204): the release package contains no BIOS, disc, generated Sega CD program or Sega CD runtime source.
 add_test(NAME packaging_no_game_content_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/packaging_no_game_content_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST packaging_no_game_content_test APPEND PROPERTY LABELS full fast)

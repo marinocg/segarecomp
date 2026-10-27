@@ -606,6 +606,7 @@ int resolve_source_command(int argc, char **argv) {
 int segarecomp_sega_cd_command(int argc, char **argv) {
   if (argc >= 3 && std::string_view(argv[2]) == "inspect") return inspect(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "emit") return emit(argc, argv);
+  if (argc >= 3 && std::string_view(argv[2]) == "build") return segarecomp_sega_cd_build(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "resolve-source") return resolve_source_command(argc, argv);
   std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
   return 2;

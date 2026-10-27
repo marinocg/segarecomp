@@ -19,7 +19,16 @@ inline constexpr const char *segarecomp_sega_cd_usage =
     "       --application-entry ends the run, with the typed stop application_handoff, at the first main instruction there)\n"
     "  segarecomp sega-cd resolve-source --cue <disc.cue> --cpu main|sub --pc <address> --region <file> --region-base <address>\n"
     "                                    [--delivered <first-lba>:<count>[,...]] [--delivered-overflow 1]\n"
+    "  segarecomp sega-cd build --cue <disc.cue> --bios <image> --output <dir> --runtime-dir <runtime root> --cc <compiler> [--cc-arg <arg>]...\n"
+    "                           [--viewer 1 --sdl3-include <dir> --sdl3-lib <dir>] [--cache-dir <dir>] [--jobs <n>] [--budget <instructions>] [--until-tick <t>]\n"
+    "                           [--pass-timeout <seconds>] [--input-script <file>] [--backup-ram <file>] [--optimize 0|1|2] [--link-arg <arg>]...\n"
+    "      (SEG-078-T003, ADR 0205: the self-service build - emit, compile, run a build pass, admit the epoch, operand templates and discovered\n"
+    "       disc extents, confirm; writes <output>/{program[,program-viewer],status.json,build.log}; progress as @stage/@round/@result lines)\n"
+    "  segarecomp sega-cd resolve-source --cue <disc.cue> --cpu main|sub --pc <address> --region <file> --region-base <address>\n"
+    "                                    [--delivered <first-lba>:<count>[,...]] [--delivered-overflow 1]\n"
     "      (SEG-078-T003, ADR 0205: find the track-1 span the live RAM window is an exact copy of, among the blocks the build pass's CDC read;\n"
     "       prints the --disc-image extent or a typed refusal; exit 0 resolved, 8 refused)\n";
 
 int segarecomp_sega_cd_command(int argc, char **argv);
+// SEG-078-T003: `segarecomp sega-cd build` (sega_cd_build.cpp).
+int segarecomp_sega_cd_build(int argc, char **argv);
