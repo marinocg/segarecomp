@@ -56,7 +56,11 @@ struct Fixture {
     fs::create_directories(dir / "disc");
     bios = dir / "bios.bin";
     cue = dir / "disc" / "Game.cue";
+    #if defined(_WIN32)
+    program = dir / "prog" / "game-viewer.exe";  // a program double must be an executable name to be started
+#else
     program = dir / "prog" / "game-viewer";
+#endif
     spit(bios, bios_bytes);
     spit(cue, "FILE \"Game (Track 1).bin\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\nFILE \"Game (Track 2).bin\" BINARY\n  TRACK 02 AUDIO\n    INDEX 01 00:00:00\n");
     spit(dir / "disc" / "Game (Track 1).bin", track1);

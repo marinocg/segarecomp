@@ -5,7 +5,7 @@ Two independent checks, both hermetic:
   1. the extracted-package verifier (packaging/dependency_check.py) refuses every such file name and accepts every file the package really holds;
   2. the install rules (packaging/install.cmake, apps/segarecomp-launcher/CMakeLists.txt) never name platforms/sega-cd, a Sega CD program or a disc.
 
-usage: packaging_commercial_content_test.py <source-root>
+usage: packaging_no_game_content_test.py <source-root>
 """
 import importlib.util
 import pathlib

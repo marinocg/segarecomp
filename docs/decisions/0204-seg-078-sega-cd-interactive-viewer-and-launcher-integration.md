@@ -121,4 +121,4 @@ press differ). No frame, digest, address or trace is recorded. This is a local, 
 `sega_cd_live_test` (recorder, pacer period, presentation counts; record/replay equality incl. slicing, pause/step, quit, capacity, host failure),
 `sega_cd_viewer_sdl_test` (the real SDL3 viewer under dummy drivers), `launcher_sega_cd_test` (identity, statement, verification, refusals, import,
 catalog and its byte-compatibility), `launcher_sega_cd_flow_test` (launcher -> verified program -> viewer -> keys -> close/typed stop),
-`launcher_sega_cd_gui_test` (the window), `packaging_commercial_content_test`, plus every earlier launcher, viewer and Sega CD suite unchanged.
+`launcher_sega_cd_gui_test` (the window), `packaging_no_game_content_test`, plus every earlier launcher, viewer and Sega CD suite unchanged.
