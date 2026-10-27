@@ -84,8 +84,10 @@ the launcher persists games as `platform + ROM SHA-256` with a build cache. Sega
    the first Sega CD game makes it schema 2, which an older release opens read-only (never damaged). The `sega_cd` member exists only on Sega CD records.
    Re-adding a game keeps its imported program. There is no migration of earlier records.
 7. **Running.** Play reuses the launcher's process orchestration (`GameRun`, log file, exclusive-device handling, busy guard, failure banners,
-   diagnostics). The command line is `--disc-dir <CUE directory> --bios <file> --instruction-budget 2^50 --report <file>` plus `--record-input` or
-   `--input-script`. The "no window" replay runs the viewer variant under SDL's dummy drivers, unthrottled, and reports the result. Recordings live
+   diagnostics). The command line is `--disc-dir <CUE directory> --bios <file> --instruction-budget 2^50 --backup-ram <file> --report <file>` plus
+   `--record-input` or `--input-script`. The BIOS reads the console's internal backup RAM and the program stops with a typed stop without an image, so
+   the launcher writes the state of a new console - 8 KiB, zero except the public 64-byte format trailer (ADR 0147; byte-identical to
+   `tools/sega_cd_backup_ram.py`), no software-derived byte - into the game's run folder; the program does not write it back, so saves are not persisted yet. The "no window" replay runs the viewer variant under SDL's dummy drivers, unthrottled, and reports the result. Recordings live
    in the launcher's library folder (`sega-cd/<id>/recordings/`) and contain only button transitions.
 8. **Packaging.** Nothing of a Sega CD game is bundled: the install rules name no Sega CD runtime source, program or disc, and the package verifier
    (`packaging/dependency_check.py`) refuses BIOS, CUE/disc image, generated program, `--describe` sidecar and Sega CD runtime file names.
@@ -100,6 +102,17 @@ the launcher persists games as `platform + ROM SHA-256` with a build cache. Sega
 - The viewer's frame is only as good as the VDP model: frames of modes the renderer does not support are counted `rejected`, not drawn.
 - The F6/F7 hold and step keys are keyboard-only; a gamepad has the shared pause menu.
 - Generic CUE-to-play compilation, executable-extent discovery and a supported build API are SEG-078-T003.
+
+## Result (authorized local smoke, classes and counts only)
+
+With an authorized local BIOS and the Sonic CD (USA) program built by the local recipe of SEG-079 with `--viewer` (the same fixed point as the headless
+program: 3 rounds), run through the launcher (`--sega-cd` and the window's Play button) under SDL's dummy video/audio drivers with scripted keys at the
+frame boundaries of the build's own input schedule (START, START, RIGHT): the viewer ran 2,780 frames and presented 2,778 (one power-on frame skipped,
+one frame the renderer refused - an unsupported VDP state, counted `rejected`), closed cleanly (`Closed.`), and recorded exactly the six transitions of
+the build's schedule. The headless replay of that recording (`--input-script`, same instruction stream, `--until-tick` at the closing boundary) produced a
+report equal in every field (registers, memory and VDP digests, input counters, ticks), and eight frames captured at chosen onsets across the title,
+both START presses, the level and the RIGHT hold were equal between the live run and the replay (seven pairwise distinct; the frames before and after the RIGHT
+press differ). No frame, digest, address or trace is recorded. This is a local, ephemeral procedure; the durable evidence is the synthetic fixtures.
 
 ## Evidence
 
