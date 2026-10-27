@@ -8,6 +8,7 @@
 #include "launcher_settings.hpp"
 #include "library_catalog.hpp"
 #include "older_build.hpp"
+#include "sega_cd.hpp"
 #include "library_view.hpp"
 #include "storage.hpp"
 #include "ui_kit.hpp"
@@ -58,6 +59,9 @@ struct StatusInfo {
   bool other_mode_ready = false;
   // SEG-069-T005: what an earlier release's build of this game is (evaluated only when the current identity has no ready build).
   OlderBuild older;
+  // SEG-078-T002: a Sega CD game is judged by scd::quick_status (no cache entry, no build): `status` is only its coarse mapping (ready / needs attention).
+  bool sega_cd = false;
+  scd::Status scd;
   [[nodiscard]] bool runnable() const { return status == GameStatus::ready || older.playable; }
 };
 
@@ -315,6 +319,40 @@ private:
   bool restarted_this_play_ = false;
   std::string live_log_;
   Uint64 live_log_at_ = 0;
+  // ---- SEG-078-T002 (ADR 0204): Sega CD ----
+  // The "Add a Sega CD game" form of the Import page: BIOS, CUE and an optional verified program, each chosen with the file picker.
+  struct ScdForm { std::string bios, cue, program, message; bool error = false; };
+  ScdForm scd_form_;
+  bool scd_form_open_ = false;                         // the form is shown on the Import page
+  std::future<scd::ImportResult> scd_import_job_;      // import / attach / re-verify on a worker (hashing a disc takes seconds)
+  bool scd_import_reverify_ = false;                  // the running check is "Verify again" of the existing program
+  std::string scd_import_target_;                      // entry id for attach / re-verify, empty for a new game
+  std::atomic<std::uint64_t> scd_done_{0};
+  std::atomic<bool> scd_cancel_{false};
+  std::uint64_t scd_total_ = 0;
+  std::future<scd::Plan> scd_launch_job_;              // the full check before a launch (program hash + statement + disc sizes)
+  std::string scd_launch_id_;
+  scd::RunOptions scd_launch_options_;
+  bool scd_launch_windowless_ = false;
+  bool scd_record_ = false;                            // "Record this session": the next Play writes an input script
+  bool game_is_scd_ = false;
+  scd::RunOptions game_scd_options_;
+  std::string game_scd_note_;
+  std::map<std::string, std::string> scd_last_outcome_;  // id -> the plain-language end of the last run of this session
+  [[nodiscard]] std::filesystem::path scd_dir(const LibraryEntry &entry) const;
+  [[nodiscard]] std::vector<std::filesystem::path> scd_recordings(const LibraryEntry &entry) const;
+  void draw_scd_import(float w);
+  float draw_scd_details(LibraryEntry &entry, const StatusInfo &info, float w);
+  void scd_browse(const std::string &purpose, const std::string &id);
+  void scd_dialog_result(const std::string &purpose, const std::string &id, const std::vector<std::string> &paths);
+  void scd_start_import(const std::string &target_id, const std::filesystem::path &bios, const std::filesystem::path &cue, const std::filesystem::path &program);
+  void scd_poll();
+  // mode: 0 live (records when "Record this session" is on), 1 replay <path> in the viewer, 2 replay <path> without a window (fast)
+  void scd_play(const std::string &id, int mode = 0, const std::filesystem::path &script = {});
+  bool scd_spawn(const std::string &id, const scd::Plan &plan);
+  void scd_finish_run();
+  [[nodiscard]] static std::string scd_label(const StatusInfo &info);
+  [[nodiscard]] static std::string scd_hint(const StatusInfo &info);
   // ---- import ----
   std::future<std::vector<std::pair<std::string, RomView>>> import_job_;
   std::atomic<int> import_done_{0};
@@ -352,6 +390,7 @@ private:
   bool autoplay_ = false, autoplay_pending_ = false, autoplay_started_ = false, autoplay_build_tried_ = false;
   std::string trace_path_;  // owned copy: SDL_getenv's pointer does not survive SDL_Quit, and the last trace lines are written after it
   std::string shot_path_;
+  std::string script_shot_;  // script command `shot <file>`: save the next rendered frame
   std::string shot_page_;
   int shot_frame_ = 14;
   bool restart_pending_ = false;

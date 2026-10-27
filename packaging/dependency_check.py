@@ -10,7 +10,8 @@ CI glue (not shipped). Checks, on the extracted package of the running platform:
      statically linked, ADR 0096);
   2. the package contains no Python source/bytecode/interpreter, no ML framework file and no research model/weights file (`*.model.json`, `*.onnx`,
      `*.pt`, `*.npz`, ...);
-  3. the frozen native models are embedded in `segarecomp`: the v1 feature-schema digest, the gen2 model digest and the SMS Z80 D512HP digests are present in the binary.
+  3. no BIOS, disc image / CUE sheet, generated Sega CD program or Sega CD runtime source (SEG-078-T002);
+  4. the frozen native models are embedded in `segarecomp`: the v1 feature-schema digest, the gen2 model digest and the SMS Z80 D512HP digests are present in the binary.
 It prints an aggregate JSON report; exit 1 on any violation.
 """
 import json
@@ -25,6 +26,9 @@ FORBIDDEN_LIB = re.compile(r"python|libtorch|torch_|libc10|(^|[/\\])c10\.dll|num
 # Windows: a redistributable C/C++ runtime is never assumed on a clean machine (the CRT is linked statically; libusb is the MinGW build).
 REDISTRIBUTABLE_DLL = re.compile(r"^(vcruntime|msvcp|msvcr\d|concrt|vccorlib|libgcc|libstdc|libwinpthread)", re.I)  # msvcrt.dll is an OS component
 FORBIDDEN_FILE = re.compile(r"(\.pyc?$|\.pyd$|\.npz?$|\.onnx$|\.pt$|\.pth$|\.safetensors$|\.gguf$|\.tflite$|\.h5$|\.pkl$|\.joblib$|\.ckpt$|\.pb$|\.model\.json$|^python[0-9.]*(\.exe)?$|(^|[/\\])site-packages|segarecomp_ml_region|libpython|torch|numpy|sklearn)", re.I)
+# SEG-078-T002 (ADR 0204): a Sega CD game is the user's BIOS and disc plus a program generated from them. None of it is ever bundled: no disc image or CUE sheet,
+# no BIOS, no generated viewer/headless Sega CD program, no Sega CD runtime sources (the developer procedure compiles those from a checkout), no run report.
+FORBIDDEN_COMMERCIAL = re.compile(r"(\.cue$|\.iso$|\.chd$|\.mdf$|\.ccd$|\.mds$|bios[^/\\]*\.(bin|rom|md|gen|zip|img|7z)$|program-viewer|(^|[/\\])sega-cd([/\\]|$)|last-report\.json$|\.describe$)", re.I)
 MODEL_DIGESTS = {  # embedded in `segarecomp` (the frozen native models), see ADR 0096 / 0102
     "gen2 model": b"11258708285e4427a3e38e02732e8f93b4c5d497883101f0629223d2366a98e1",
     "v1 feature schema": b"d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570",
@@ -119,6 +123,8 @@ def main():
         rel = p.relative_to(root).as_posix()
         if FORBIDDEN_FILE.search(p.name) or FORBIDDEN_FILE.search(rel):
             problems.append(f"forbidden file in the package: {rel}")
+        if FORBIDDEN_COMMERCIAL.search(rel):
+            problems.append(f"commercial input or generated Sega CD program in the package: {rel}")
     report["files"] = len(files)
     blob = cli.read_bytes()
     report["embedded_models"] = {}

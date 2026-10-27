@@ -5,6 +5,7 @@
 // recorded against it. Original ROMs are referenced by path and never copied. Orchestration data only: no recompilation logic.
 
 #include "launcher_core.hpp"
+#include "sega_cd.hpp"
 
 #include <filesystem>
 #include <string>
@@ -21,8 +22,8 @@ struct BuildRecord {
 };
 
 struct LibraryEntry {
-  std::string platform_id;      // genesis | master-system
-  std::string sha256;           // the ROM image digest (64 lowercase hex)
+  std::string platform_id;      // genesis | master-system | sega-cd
+  std::string sha256;           // the ROM image digest (64 lowercase hex); Sega CD: scd::entry_identity(BIOS SHA-256, CUE SHA-256)
   std::string detected_title;   // from the image/file name when added
   std::string display_title;    // user edited; empty means "use detected_title"
   std::vector<std::string> rom_paths;  // tracked locations (references); the first is the primary
@@ -45,6 +46,9 @@ struct LibraryEntry {
   int last_exit_code = 0;
   std::string current_build_key;       // the build the entry last produced or adopted
   std::vector<BuildRecord> builds;     // history, oldest first, bounded
+  // SEG-078-T002 (ADR 0204): Sega CD only (platform_id "sega-cd"): the referenced BIOS and disc, the imported program and the last typed stop.
+  // Never written for another platform, so a Genesis / Master System record is byte-for-byte what it was before.
+  scd::EntryRecord sega_cd;
 
   [[nodiscard]] std::string id() const { return platform_id + ":" + sha256; }
   [[nodiscard]] const std::string &title() const { return display_title.empty() ? detected_title : display_title; }
@@ -54,7 +58,9 @@ enum class CatalogLoad { created, loaded, recovered_from_backup, recovered_empty
 
 class Catalog {
 public:
-  static constexpr int schema_version = 1;
+  // The newest schema this release reads and writes. A library without a Sega CD game is still written as schema 1 (byte-compatible with every earlier
+  // release); the first Sega CD game makes it schema 2, which an older release opens read-only instead of damaging (ADR 0204).
+  static constexpr int schema_version = 2;
   static constexpr std::size_t max_entries = 5000, max_paths = 8, max_builds = 16;
 
   explicit Catalog(std::filesystem::path file);
@@ -76,6 +82,8 @@ public:
   // Adds the ROM (or only a new tracked location of an existing one). Never builds, never copies the ROM. A duplicate content digest
   // is the same logical game.
   ImportResult import_rom(const RomView &rom, long long now);
+  // SEG-078-T002: adds a Sega CD game (or updates the references and program of the existing one with the same identity). Never copies a file.
+  ImportResult import_sega_cd(const scd::EntryRecord &record, const std::string &title, long long now);
   // Rebinds an entry to a relocated file after the caller re-hashed it; refuses a different digest.
   [[nodiscard]] bool relocate(LibraryEntry &entry, const std::filesystem::path &path, const std::string &sha256_of_file);
   bool remove(const std::string &id);

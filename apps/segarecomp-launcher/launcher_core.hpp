@@ -12,6 +12,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace launcher {
@@ -222,6 +223,10 @@ public:
   // installation as run-time search path, which may no longer exist). Used only for such older builds.
   GameRun(const RomView &rom, const Layout &layout, const std::filesystem::path &entry,
           const std::vector<std::string> &extra_args = {}, bool bind_installed_runtime = false);
+  // SEG-078-T002: an imported Sega CD viewer program. The executable and the log file are given (nothing is derived from a cache entry);
+  // `extra_environment` adds per-launch variables of the child only (the launcher's own environment is never touched).
+  GameRun(const RomView &rom, const Layout &layout, const std::filesystem::path &executable, const std::filesystem::path &log_file,
+          const std::vector<std::string> &args, const std::vector<std::pair<std::string, std::string>> &extra_environment, bool bind_installed_runtime);
   ~GameRun();
   GameRun(const GameRun &) = delete;
   GameRun &operator=(const GameRun &) = delete;
@@ -231,6 +236,8 @@ public:
   [[nodiscard]] int exit_code() const { return exit_code_; }
 
 private:
+  void start(const RomView &rom, const Layout &layout, const std::string &executable, const std::filesystem::path &log_file,
+             const std::vector<std::string> &args, const std::vector<std::pair<std::string, std::string>> &extra_environment, bool bind_installed_runtime);
   SDL_Process *process_ = nullptr;
   int exit_code_ = 0;
 };

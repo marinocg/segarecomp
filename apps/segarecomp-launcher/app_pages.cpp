@@ -36,6 +36,7 @@ void App::draw_import_body(float w, float h) {
   const float drop_w = two ? w - steps_w - gap : w;
   const ImVec2 top = ImGui::GetCursorScreenPos();
   draw_drop_zone(drop_w, h, true);
+  draw_scd_import(drop_w);  // SEG-078-T002: Sega CD games are a BIOS + a disc + an imported program, never a single dropped file
   const float after_drop = ImGui::GetCursorScreenPos().y;
   float side_bottom = top.y;
   if (two) {

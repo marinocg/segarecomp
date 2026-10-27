@@ -25,7 +25,7 @@ target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
 # The launcher's non-UI core (layout, cache identity, `segarecomp build` orchestration, status reading) is a separate target so its
 # policy/cache-identity contract is unit-testable without a window.
-add_library(segarecomp_launcher_core STATIC launcher_core.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp storage.cpp launcher_settings.cpp)
+add_library(segarecomp_launcher_core STATIC launcher_core.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp storage.cpp launcher_settings.cpp sega_cd.cpp)
 target_include_directories(segarecomp_launcher_core PUBLIC .)
 target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media)
 # Linux only: the glibc the generated programs link against (release default 2.35 = the bundled SDL3's baseline; a developer who built SDL3 on a
@@ -47,7 +47,7 @@ target_compile_definitions(segarecomp_launcher_ui_support PUBLIC
   SEGARECOMP_LAUNCHER_SOURCE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 segarecomp_enable_warnings(segarecomp_launcher_ui_support)
 
-add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_picker.cpp app_screens.cpp app_pages.cpp app_details.cpp app_input.cpp app_art.cpp ui_kit.cpp)
+add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_sega_cd.cpp app_picker.cpp app_screens.cpp app_pages.cpp app_details.cpp app_input.cpp app_art.cpp ui_kit.cpp)
 if(WIN32)
   # The executable's own icon (Explorer, taskbar, shortcuts): a resource script embedding packaging/windows/Segarecomp.ico, when a resource compiler exists.
   include(CheckLanguage)
@@ -157,6 +157,44 @@ if(BUILD_TESTING)
   set_property(TEST launcher_older_build_test APPEND PROPERTY LABELS full fast)
   set_property(TEST launcher_older_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST launcher_older_build_test PROPERTY TIMEOUT 900)
+endif()
+
+# SEG-078-T002 (ADR 0204): the Sega CD core of the launcher (identity, the program's statement, verification, typed refusals, import, run arguments,
+# outcomes, the library record and its schema). A program double stands in for the generated viewer program; no window, no compiler.
+add_executable(fake_scd_program fake_scd_program.cpp)
+target_compile_features(fake_scd_program PRIVATE cxx_std_20)
+segarecomp_enable_warnings(fake_scd_program)
+add_executable(launcher_sega_cd_test launcher_sega_cd_test.cpp)
+target_link_libraries(launcher_sega_cd_test PRIVATE segarecomp_launcher_core)
+target_compile_features(launcher_sega_cd_test PRIVATE cxx_std_20)
+segarecomp_enable_warnings(launcher_sega_cd_test)
+if(BUILD_TESTING)
+  add_dependencies(launcher_sega_cd_test fake_scd_program)
+  add_test(NAME launcher_sega_cd_test COMMAND launcher_sega_cd_test $<TARGET_FILE:fake_scd_program>)
+  set_property(TEST launcher_sega_cd_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_sega_cd_test PROPERTY TIMEOUT 300)
+endif()
+
+if(BUILD_TESTING AND SEGARECOMP_ENABLE_SDL3_VIEWER)
+  # The whole flow without a window: launcher -> verified program (the real viewer variant of a project-authored fixture) -> SDL3 viewer under the dummy
+  # drivers -> scripted keys -> close / typed stop, plus the typed refusals. Skips itself without SDL3 or off Linux.
+  get_filename_component(_scd_flow_sdl_dir "${SDL3_DIR}" ABSOLUTE)
+  if(_scd_flow_sdl_dir MATCHES "/share/sdl3$")
+    get_filename_component(_scd_flow_sdl_prefix "${_scd_flow_sdl_dir}/../.." ABSOLUTE)
+  else()
+    get_filename_component(_scd_flow_sdl_prefix "${_scd_flow_sdl_dir}/../../.." ABSOLUTE)
+  endif()
+  add_test(NAME launcher_sega_cd_flow_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_sega_cd_flow_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_scd_program> $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+  add_test(NAME launcher_sega_cd_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_sega_cd_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+  set_property(TEST launcher_sega_cd_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_sega_cd_gui_test APPEND PROPERTY ENVIRONMENT "SDL3_PREFIX=${_scd_flow_sdl_prefix}")
+  set_property(TEST launcher_sega_cd_gui_test PROPERTY TIMEOUT 900)
+  add_dependencies(launcher_sega_cd_test segarecomp-launcher)
+  set_property(TEST launcher_sega_cd_flow_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_sega_cd_flow_test APPEND PROPERTY ENVIRONMENT "SDL3_PREFIX=${_scd_flow_sdl_prefix}")
+  set_property(TEST launcher_sega_cd_flow_test PROPERTY TIMEOUT 900)
 endif()
 
 # SEG-069-T004: the controller-operable file picker's model (root confinement, filtering, symlink refusal).

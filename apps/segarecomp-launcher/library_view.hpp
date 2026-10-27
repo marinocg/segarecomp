@@ -23,6 +23,7 @@ inline FitRect fit_inside(float frame_w, float frame_h, float tex_w, float tex_h
 // The library's region column: the Genesis run-time region of the game, the Master System baseline profile (the NTSC export console), else Unknown.
 inline const char *region_label(const std::string &platform_id, const std::string &region) {
   if (platform_id == "master-system") return "Export";
+  if (platform_id == "sega-cd") return "Disc";  // SEG-078-T002: the disc carries no console-region claim the launcher verifies
   if (platform_id != "genesis") return "Unknown";
   if (region == "usa") return "USA";
   if (region == "japan") return "Japan";

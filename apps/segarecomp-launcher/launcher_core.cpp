@@ -743,12 +743,22 @@ void BuildJob::run() {
 // ---- GameRun ----
 
 GameRun::GameRun(const RomView &rom, const Layout &layout, const fs::path &entry, const std::vector<std::string> &extra_args, bool bind_installed_runtime) {
-  const std::string exe = utf8(entry_executable(entry));
+  start(rom, layout, utf8(entry_executable(entry)), entry / "run.log", extra_args, {}, bind_installed_runtime);
+}
+
+GameRun::GameRun(const RomView &rom, const Layout &layout, const fs::path &executable, const fs::path &log_file, const std::vector<std::string> &args,
+                 const std::vector<std::pair<std::string, std::string>> &extra_environment, bool bind_installed_runtime) {
+  start(rom, layout, utf8(executable), log_file, args, extra_environment, bind_installed_runtime);
+}
+
+void GameRun::start(const RomView &rom, const Layout &layout, const std::string &exe, const fs::path &log_file, const std::vector<std::string> &extra_args,
+                    const std::vector<std::pair<std::string, std::string>> &extra_environment, bool bind_installed_runtime) {
   std::vector<const char *> argv{exe.c_str()};
   for (const auto &arg : extra_args) argv.push_back(arg.c_str());
   argv.push_back(nullptr);
   SDL_Environment *environment = SDL_CreateEnvironment(true);
   apply_game_environment(environment, rom);
+  for (const auto &[name, value] : extra_environment) SDL_SetEnvironmentVariable(environment, name.c_str(), value.c_str(), true);
 #if defined(_WIN32)
   // The game links SDL3.dll; find it next to the package rather than requiring it on PATH.
   const char *old_path = SDL_getenv("PATH");
@@ -767,7 +777,7 @@ GameRun::GameRun(const RomView &rom, const Layout &layout, const fs::path &entry
   }
 #endif
   (void)bind_installed_runtime;
-  SDL_IOStream *log = SDL_IOFromFile(utf8(entry / "run.log").c_str(), "wb");
+  SDL_IOStream *log = SDL_IOFromFile(utf8(log_file).c_str(), "wb");
   SDL_PropertiesID props = SDL_CreateProperties();
   SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
   SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, environment);

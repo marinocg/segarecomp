@@ -1,23 +1,57 @@
 # Sega CD
 
-**Status:** SEG-062 and SEG-063 (disc-loaded modules and overlays) implemented (synthetic profile); contract in [docs/architecture/sega-cd-machine-contract.md](../../docs/architecture/sega-cd-machine-contract.md)
-(SEG-062). Decisions: ADR 0126 (executable images per processor instance), 0127 (overlay dispatch) and 0132 (its implementation
-and module lists), 0133 (M3 transfer: evidence unavailable), 0128
-(dual-CPU execution and scheduling), 0129 (disc resources and media boundary), 0130 (BIOS profiles and gate), 0131 (ML reuse).
+**Status:** synthetic discs and the authentic-BIOS profile are implemented; a generated-native Sega CD program can be played interactively in the
+shared SDL3 viewer and from the launcher as an imported, verified prebuilt program. Contract:
+[docs/architecture/sega-cd-machine-contract.md](../../docs/architecture/sega-cd-machine-contract.md). Decisions: ADR 0126-0133 (two processors,
+overlays, scheduling, disc resources, BIOS profiles), 0142-0149 (BIOS-image profile, hand-off, input), 0176/0177 (Word RAM executable authority,
+timing conventions and the Sonic CD checkpoint), 0179/0180 (epoch recipe, batched templates) and **0204 (the interactive viewer, live input
+recording and the launcher's Sega CD game)**.
 
 **Purpose:** Genesis plus a second MC68000 (the sub CPU), the Gate Array, Word RAM and the CD drive/CDC data path.
 
-**Profile:** synthetic post-BIOS fixture profile only: project-authored discs, no BIOS executed or present, no
-commercial software. Where the reference emulators disagree the runtime follows Genesis Plus GX (consulted, never copied;
-contract tag G, ADR 0128).
+## What is supported
 
-**Code:** `machine/` (build time: boot images from `libs/media` disc ingestion, two-processor program emission over the
-generic M68K lowering, digest-checked module lists over `libs/media` ISO9660 lookup, `segarecomp sega-cd inspect|emit
-[--modules]`); `runtime/` (strict C11: scheduler, buses, Gate Array, Word RAM, timer, CDD/CDC, disc reader, overlay selection,
-driver). Fixtures: `tools/sega_cd_fixture_disc.py`. Tests: `tests/sega_cd_*`.
+| | |
+| --- | --- |
+| **Synthetic profile** | Project-authored post-BIOS fixture discs only; no BIOS and no commercial software. Where the reference emulators disagree the runtime follows Genesis Plus GX (consulted, never copied; contract tag G). |
+| **Authentic BIOS execution** | Your own BIOS image (verified by SHA-256) runs generated-native on the main CPU; the sub CPU, Gate Array, CDD/CDC, Word RAM and VDP follow the contract. Programs are compiled ahead of time; there is no interpreter, JIT or runtime opcode decoder. |
+| **Sonic CD (USA)** | Checked from the BIOS through the title, the first START, the second START, the first level and a timed RIGHT input, against an independent reference at pre-registered checkpoints (ADR 0176, 0177). This is checkpoint evidence for one title, not a compatibility claim. |
+| **A second title** | Experimental observations only (parts of its start-up run); no checkpoint and no claim. |
+| **Interactive viewer** | `sega_cd_bios_build.py --viewer` links the same generated program with the shared viewer: every frame is presented at its vertical-blank onset, paced by the machine's own frame length (59.92 Hz), keyboard or gamepad on port 1 (the Genesis viewer's mapping and settings), Esc/Back pause menu, F6 hold and F7 single-step. |
+| **Input recording** | The player's port-1 input is recorded as an `segarecomp-input-script 1` file whose headless replay reproduces the run exactly (report, input counters and captured frames). |
+| **Launcher** | Sega CD is a platform of the library: your BIOS and CUE are referenced (never copied), an imported viewer program is verified against them, and Play, recording and replay are in the game's details page. |
+| **Not supported** | **Audio** (the Z80 does not execute; no PCM or CD-DA output). **Saving** (the launcher passes a new console's formatted, empty backup RAM; nothing is written back). **Generic CUE-to-play compilation** and executable-extent discovery (SEG-078-T003): the launcher never builds a Sega CD game. Code a program's build did not admit stops with a typed stop (`entry_not_compiled`, ...). |
 
-**Reuse:** `libs/cpu/m68k` and the generic M68K emitter instantiated twice (one `ExecutableImageSet` and one
-`M68kRuntimeCEmitter` per processor instance, both `CpuVariant::mc68000`); the Genesis VDP device and frame export.
+## Producing and importing a verified program (developer procedure)
 
-**Milestones:** SEG-062 (synthetic disc, dual generated-native M68K, CD data path); SEG-063 (modules and overlays);
-SEG-064 (authentic BIOS, gated); SEG-065 (graphics ASIC, PCM, CD-DA, viewer).
+A Sega CD program is generated from **your** BIOS and disc and is itself derived from commercial content: keep it, its work directory and the
+inputs in ignored local storage; never commit, publish or bundle them.
+
+1. Build the tools: `cmake --preset dev` (add `-DSEGARECOMP_ENABLE_SDL3_VIEWER=ON` and an SDL3 installation for the viewer) and build `segarecomp`.
+2. Run the multi-pass build driver on your files, with the executable regions and admissions your title needs (the procedure of
+   [the epoch recipe](../../docs/architecture/sega-cd-epoch-recipe.md) and ADR 0176/0180; the regions are title-specific and are not published):
+
+       python3 tools/sega_cd_bios_build.py --segarecomp <segarecomp> --cc <compiler> --cue "<disc.cue>" --bios <bios.bin> --work <ignored dir> \
+           [--disc-image ...] [--epoch-recipe ...] --viewer
+
+   The summary JSON names `program` (headless) and `viewer.program` (`program-viewer`, the playable variant); the program identity is the same.
+   `--viewer` needs SDL3 (`SDL3_PREFIX`); without it the build fails with `sdl3_unavailable`.
+3. Check it: `<program-viewer> --describe` prints what the program claims (runtime contract, BIOS and disc files by size and SHA-256).
+4. In the launcher: **Import ROMs > Add Sega CD game...**, choose your BIOS, the disc's CUE (its track files must be beside it) and, optionally, the
+   `program-viewer`; or from a terminal: `Segarecomp --sega-cd --bios <bios> --cue <cue> --program <program-viewer>`. The program is accepted only if its
+   statement matches the BIOS and every disc file (SHA-256) and it is a viewer build of the current runtime contract; otherwise the launcher says which
+   check failed (`program_bios_mismatch`, `disc_file_missing`, `program_headless_only`, `program_abi_unsupported`, ...).
+
+Without a program the game stays in the library as *No program (automatic build unsupported)*.
+
+## Code
+
+`machine/` (build time: boot images from `libs/media` disc ingestion, two-processor program emission over the generic M68K lowering, digest-checked
+module lists, `segarecomp sega-cd inspect|emit`); `runtime/` (strict C11: scheduler, buses, Gate Array, Word RAM, timer, CDD/CDC, disc reader, overlay
+selection, driver, and `scd_live.c`, the interactive driver loop); `viewer/` (the SDL3 host of the live driver, opt-in). Fixtures:
+`tools/sega_cd_fixture_disc.py`, `tools/sega_cd_bios_live_fixture.py`. Tests: `tests/sega_cd_*`, `apps/segarecomp-launcher/launcher_sega_cd_*`.
+
+**Reuse:** `libs/cpu/m68k` and the generic M68K emitter instantiated twice (one `ExecutableImageSet` and one `M68kRuntimeCEmitter` per processor
+instance, both `CpuVariant::mc68000`); the Genesis VDP device and frame export; the Genesis viewer's presenter, pacer and controller mapping.
+
+**Milestones:** SEG-062/063 (synthetic disc, dual M68K, modules/overlays), SEG-064..071 (authentic BIOS, checkpoints), SEG-078 (interactive play).

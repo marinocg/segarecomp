@@ -33,7 +33,13 @@ copied to disk.
 usage: sega_cd_bios_build.py --segarecomp EXE --cc CC --cue DISC --bios IMAGE|- --work DIR [--copy-image SPEC]... [--disc-image SPEC]...
                              [--application-entry ADDRESS]
                              [--budget N] [--until-tick T] [--backup-ram FILE] [--input-script FILE] [--pass-set SPEC]... [--timeout S] [--cflags "..."] [--partition-window BYTES] [--jobs N]
+                             [--viewer]
 prints the build summary JSON; exit 0 on a confirmed build, 1 on a typed build failure, 2 on usage errors.
+
+SEG-078-T001 (ADR 0204): `--viewer` additionally links the viewer variant of the confirmed program, `program-viewer` next to `program`: the
+SAME generated C and objects (the program identity and the headless `program` are unchanged) with only its `main` entry renamed to
+`scd_viewer_main_bios`, linked with the shared SDL3 viewer (platforms/sega-cd/viewer, platforms/genesis/viewer, libs/viewer). It needs SDL3
+(SDL3_PREFIX or a standard prefix); a missing SDL3 is the typed failure `sdl3_unavailable`, never a silent headless fallback.
 """
 import argparse
 import concurrent.futures
@@ -52,6 +58,11 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCD_RUNTIME = ROOT / "platforms" / "sega-cd" / "runtime"
 GENESIS_RUNTIME = ROOT / "platforms" / "genesis" / "runtime"
+SCD_VIEWER = ROOT / "platforms" / "sega-cd" / "viewer"
+GENESIS_VIEWER = ROOT / "platforms" / "genesis" / "viewer"
+SV_DIR = ROOT / "libs" / "viewer"
+SV_SOURCES = ("sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c",
+              "sv_host.c", "sv_pages.c", "sv_draw.c")
 CFLAGS = ["-std=c11", "-Wall", "-Wextra", "-pedantic", "-Werror", "-Wno-type-limits", "-O1"]
 MAX_EPOCHS = 4
 MAX_TEMPLATES = 64        # template ADMISSIONS (rounds) - ADR 0142 decision 8; one admission is one instruction or, SEG-079-T002, one slot run
@@ -103,6 +114,29 @@ def run(cmd, timeout, pass_fds=(), cwd=None):
         out.seek(0)
         err.seek(0)
         return Result(proc.returncode, out.read().decode(errors="replace"), err.read().decode(errors="replace"), usage.ru_maxrss)
+
+
+def find_sdl3():
+    """(compile flags, link flags) of an installed SDL3, or None. SDL3_PREFIX first, then the common prefixes (the Genesis viewer's rule). A prefix
+    with a pkg-config file (`lib/pkgconfig/sdl3.pc`) gives its own flags - `--static` when only a static library is installed (a vcpkg Linux
+    triplet), whose private dependencies a plain `-lSDL3` would miss; otherwise `-L<lib> -lSDL3`."""
+    for prefix in [p for p in (os.environ.get("SDL3_PREFIX"), "/opt/homebrew", "/usr/local", "/usr") if p]:
+        base = pathlib.Path(prefix)
+        libdir = base / "lib"
+        if not ((base / "include" / "SDL3" / "SDL.h").is_file() and any(libdir.glob("libSDL3.*"))):
+            continue
+        shared = any(libdir.glob("libSDL3.so*")) or any(libdir.glob("libSDL3*.dylib"))
+        pc = libdir / "pkgconfig" / "sdl3.pc"
+        if pc.is_file() and shutil.which("pkg-config"):
+            env = dict(os.environ, PKG_CONFIG_PATH=str(libdir / "pkgconfig") + os.pathsep + os.environ.get("PKG_CONFIG_PATH", ""))
+            flags = subprocess.run(["pkg-config", "--cflags", "--libs", *([] if shared else ["--static"]), "sdl3"], capture_output=True, text=True, env=env)
+            if flags.returncode == 0 and flags.stdout.strip():
+                tokens = flags.stdout.split()
+                compile_flags = [t for t in tokens if t.startswith(("-I", "-D"))]
+                link_flags = [t for t in tokens if not t.startswith(("-I", "-D"))] + (["-Wl,-rpath," + str(libdir)] if shared else [])
+                return compile_flags, link_flags
+        return ["-I", str(base / "include")], ["-L", str(libdir), "-Wl,-rpath," + str(libdir), "-lSDL3"]
+    return None
 
 
 def sha256_text(*parts):
@@ -185,9 +219,10 @@ class Driver:
     def runtime_sources():
         return sorted(SCD_RUNTIME.glob("*.c")) + [GENESIS_RUNTIME / n for n in ("runtime.c", "vdp_render.c", "frame_export.c")]
 
-    def object_for(self, name, text, include_dirs):
-        """Compile one source text (or reuse its cached object). Returns (object path, rebuilt?)."""
-        key = sha256_text(self.key_base, name, text)
+    def object_for(self, name, text, include_dirs, extra_flags=()):
+        """Compile one source text (or reuse its cached object). Returns (object path, rebuilt?). `extra_flags` (the viewer variant's
+        entry rename) are part of the key; with none the key is the historical one."""
+        key = sha256_text(self.key_base, name, text, *([json.dumps(list(map(str, extra_flags)))] if extra_flags else []))
         obj = self.objects_dir / (key + ".o")
         if obj.exists():
             return obj, False
@@ -195,7 +230,7 @@ class Driver:
             # Compiled by its bare name from a private directory: no host path enters the object, so equal keys give equal bytes.
             (pathlib.Path(tmp) / name).write_bytes(text)
             partial = pathlib.Path(tmp) / "out.o"
-            cmd = [self.args.cc, *self.cflags]
+            cmd = [self.args.cc, *self.cflags, *map(str, extra_flags)]
             for d in include_dirs:
                 cmd += ["-I", pathlib.Path(d).resolve()]
             out = run(cmd + ["-c", name, "-o", "out.o"], 1800, cwd=tmp)
@@ -283,6 +318,7 @@ class Driver:
         items = [(u["name"], (c_path.parent / u["name"]).read_bytes(), inc) for u in units]  # emitter order = link order
         items.append(("program.c", c_path.read_bytes(), inc))
         objects, rebuilt = self.compile_all(items)
+        self.last_items, self.last_objects = items, objects   # the viewer variant reuses every unit object
         compiled = time.monotonic()
         inputs = [*objects, *self.runtime_objects()]
         # The link inputs in link order: equal digests mean an equal program on every host (a Windows PE link also stamps a time).
@@ -319,6 +355,43 @@ class Driver:
     @staticmethod
     def outcome(report):
         return {k: report.get(k) for k in ("result", "stop", "cpus", "digests", "result_block", "bios_profile", "device_log", "ticks")}
+
+    def link_viewer(self):
+        """SEG-078-T001 (ADR 0204): the viewer variant of the program just confirmed. Every unit object is reused; only `program.c` is
+        recompiled with its entry renamed, and the shared SDL3 viewer sources are compiled and linked next to the runtime objects.
+        Returns the summary entry. `--viewer-host-source` replaces the SDL3 viewer by a project-authored test host (no SDL3 needed)."""
+        items, objects = self.last_items, self.last_objects
+        name, text, include_dirs = items[-1]
+        if name != "program.c":
+            raise BuildFailure("viewer_link_failed", "the program unit is not the last item")
+        program_object, _ = self.object_for(name, text, include_dirs, ["-Dscd_program_main_bios=scd_viewer_main_bios"])
+        out = self.work / ("program-viewer" + EXE)
+        host_source = self.args.viewer_host_source
+        includes = [SCD_RUNTIME, GENESIS_RUNTIME, SCD_VIEWER, GENESIS_VIEWER, SV_DIR / "include", SV_DIR / "src"]
+        if host_source:
+            sdl, sources, host = ([], []), [pathlib.Path(host_source)], "test"
+        else:
+            sdl = find_sdl3()
+            if sdl is None:
+                raise BuildFailure("sdl3_unavailable", "SDL3 headers/library not found (install SDL3 or set SDL3_PREFIX)")
+            sources = [SCD_VIEWER / "scd_viewer.c", GENESIS_VIEWER / "viewer.c", GENESIS_VIEWER / "viewer_sdl3.c"] + [SV_DIR / "src" / n for n in SV_SOURCES]
+            host = "sdl3"
+        inc_flags = [f for d in includes for f in ("-I", str(d))] + sdl[0]
+        with tempfile.TemporaryDirectory(dir=self.objects_dir) as tmp:
+            def compile_one(i_src):
+                i, src = i_src
+                obj = pathlib.Path(tmp) / ("v%02d.o" % i)
+                result = run([self.args.cc, *self.cflags, *inc_flags, "-c", src, "-o", obj], 600)
+                if result.returncode != 0:
+                    raise BuildFailure("viewer_compile_failed", "%s: %s" % (src.name, result.stderr[-2000:]))
+                return obj
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.jobs) as pool:
+                viewer_objects = list(pool.map(compile_one, enumerate(sources)))
+            link = run([self.args.cc, *objects[:-1], program_object, *self.runtime_objects(), *viewer_objects, "-o", out, *sdl[1],
+                        *([] if os.name == "nt" else ["-lm"])], 600)
+            if link.returncode != 0:
+                raise BuildFailure("viewer_link_failed", link.stderr[-2000:])
+        return {"program": str(out), "host": host, "sources": len(sources)}
 
     def build(self):
         started = time.monotonic()
@@ -405,7 +478,8 @@ class Driver:
             confirm, confirm_capture = self.pass_run(exe, self.work / "confirm")
             if self.outcome(confirm) != self.outcome(report) or (confirm_capture is None) != (capture is None):
                 raise BuildFailure("materialization_nondeterministic")
-            return {"ok": True, "rounds": round_index + 1, "admissions": admits, "history": history,
+            viewer = self.link_viewer() if self.args.viewer else None
+            return {"ok": True, "viewer": viewer, "rounds": round_index + 1, "admissions": admits, "history": history,
                     "program_identity": emitted["program_identity"], "program": str(exe), "c_bytes": emitted["c_bytes"],
                     "emit": emitted, "compile_seconds": self.compile_seconds, "outcome": self.outcome(report),
                     "partition_window": self.window, "round_metrics": self.rounds, "peak_compile_kb": self.peak_compile_kb,
@@ -436,8 +510,12 @@ def main(argv=None):
     parser.add_argument("--cflags", default="")
     parser.add_argument("--partition-window", type=lambda v: int(v, 0), default=DEFAULT_WINDOW)
     parser.add_argument("--jobs", type=int, default=min(os.cpu_count() or 1, 8))
+    parser.add_argument("--viewer", action="store_true", help="SEG-078-T001: also link the SDL3 viewer variant, program-viewer (the headless program is unchanged)")
+    parser.add_argument("--viewer-host-source", help=argparse.SUPPRESS)  # test seam: a project-authored C host instead of the SDL3 viewer (implies --viewer)
     parser.add_argument("--reverse-compile-order", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.viewer_host_source:
+        args.viewer = True
     if args.budget <= 0 or (args.partition_window and (args.partition_window < 0x100 or args.partition_window > 0x1000000 or
                                                        args.partition_window & (args.partition_window - 1))):
         return 2

@@ -55,12 +55,13 @@ uint8_t genesis_viewer_pad_from_keys(const GenesisViewerKeys *k) {
                    (k->c ? GENESIS_PAD_C : 0U) | (k->start ? GENESIS_PAD_START : 0U));
 }
 
-int genesis_pacer_wait(GenesisPacer *pacer, const GenesisViewerHost *host) {
+/* The pacing core: one frame boundary of the exact rational period period_num / period_den nanoseconds. */
+static int pacer_wait_core(GenesisPacer *pacer, const GenesisViewerHost *host, uint64_t period_num, uint64_t period_den) {
   if (pacer == NULL || host == NULL || host->now_ns == NULL) return -1;
   if (!pacer->unthrottled && host->sleep_ns == NULL) return -1;
   uint64_t now = host->now_ns(host->ctx);
   if (pacer->started && now < pacer->last_now_ns) return -1; /* clock went backwards */
-  uint64_t period = genesis_pacer_period_floor_ns();
+  uint64_t period = period_num / period_den;
   if (!pacer->started) {
     pacer->started = 1;
     pacer->deadline_ns = now;
@@ -78,12 +79,42 @@ int genesis_pacer_wait(GenesisPacer *pacer, const GenesisViewerHost *host) {
   pacer->last_now_ns = now;
   /* advance accumulated deadline by the exact rational period */
   pacer->deadline_ns += period;
-  pacer->rem += PERIOD_NUM % GENESIS_NTSC_MASTER_TICKS_PER_SECOND;
-  if (pacer->rem >= GENESIS_NTSC_MASTER_TICKS_PER_SECOND) {
-    pacer->rem -= GENESIS_NTSC_MASTER_TICKS_PER_SECOND;
+  pacer->rem += period_num % period_den;
+  if (pacer->rem >= period_den) {
+    pacer->rem -= period_den;
     pacer->deadline_ns++;
   }
   return 0;
+}
+
+int genesis_pacer_wait(GenesisPacer *pacer, const GenesisViewerHost *host) {
+  return pacer_wait_core(pacer, host, PERIOD_NUM, GENESIS_NTSC_MASTER_TICKS_PER_SECOND);
+}
+
+static uint64_t gcd_u64(uint64_t a, uint64_t b) {
+  while (b != 0u) {
+    const uint64_t t = a % b;
+    a = b;
+    b = t;
+  }
+  return a;
+}
+
+int genesis_pacer_period(uint64_t frame_units, uint64_t units_per_second, uint64_t *num, uint64_t *den) {
+  if (frame_units == 0u || units_per_second == 0u || num == NULL || den == NULL) return -1;
+  const uint64_t g = gcd_u64(frame_units, units_per_second);
+  frame_units /= g;
+  units_per_second /= g;
+  if (frame_units > UINT64_MAX / NS_PER_SEC) return -1; /* the exact period does not fit: refuse rather than round */
+  *num = frame_units * NS_PER_SEC;
+  *den = units_per_second;
+  return 0;
+}
+
+int genesis_pacer_wait_period(GenesisPacer *pacer, const GenesisViewerHost *host, uint64_t frame_units, uint64_t units_per_second) {
+  uint64_t num, den;
+  if (genesis_pacer_period(frame_units, units_per_second, &num, &den) != 0) return -1;
+  return pacer_wait_core(pacer, host, num, den);
 }
 
 static GenesisViewerResult finish(GenesisViewerResult r, GenesisViewerOutcome o) {

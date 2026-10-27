@@ -63,6 +63,11 @@ typedef struct ScdVdpHost {
   uint32_t fifo_cycles[4];
   uint32_t fifo_idx;
   uint64_t fill_end;           /* tick at which the last fill ends (0: none in flight) */
+  /* SEG-078-T001 (ADR 0204): continuous completed-frame presentation. */
+  uint8_t present;             /* every frame is sampled and rendered at its onset */
+  uint8_t present_ready;       /* a completed frame awaits scd_vdp_present_take */
+  uint64_t present_onset;      /* the onset number of the awaiting frame */
+  uint64_t present_rendered, present_skipped, present_rejected;
 } ScdVdpHost;
 
 int scd_vdp_init(ScdMachine *m) {
@@ -557,6 +562,23 @@ static size_t scd_canonical_frame(const GenesisFrameArtifact *f, uint8_t *out) {
   return n;
 }
 
+static void scd_canonical_sha256(const uint8_t *canonical, size_t n, char out[65]) {
+  GenesisSha256 sha;
+  uint8_t digest[32];
+  uint32_t i;
+  genesis_sha256_init(&sha);
+  genesis_sha256_update(&sha, canonical, (uint32_t)n); /* n <= 4 + 2 * 320 * 448 */
+  genesis_sha256_final(&sha, digest);
+  for (i = 0; i < 32U; ++i) snprintf(out + 2U * i, 3U, "%02x", digest[i]);
+}
+
+void scd_frame_sha256(const GenesisFrameArtifact *frame, char out[65]) {
+  static uint8_t canonical[4U + 2U * GENESIS_FRAME_MAX_WIDTH * GENESIS_FRAME_MAX_HEIGHT];
+  scd_canonical_sha256(canonical, scd_canonical_frame(frame, canonical), out);
+}
+
+uint64_t scd_frame_ticks(void) { return SCD_FRAME_TICKS; }
+
 static void scd_capture_line(ScdMachine *m) {
   ScdVdpHost *h = (ScdVdpHost *)m->vdp_host;
   const GenesisVdpState *vdp = &h->host.devices.vdp;
@@ -598,14 +620,7 @@ static void scd_capture_frame(ScdMachine *m, ScdFrameCapture *c) {
   c->width = h->frame.width;
   c->height = h->frame.height;
   n = scd_canonical_frame(&h->frame, canonical);
-  {
-    GenesisSha256 sha;
-    uint8_t digest[32];
-    genesis_sha256_init(&sha);
-    genesis_sha256_update(&sha, canonical, (uint32_t)n); /* n <= 4 + 2 * 320 * 448 */
-    genesis_sha256_final(&sha, digest);
-    for (i = 0; i < 32U; ++i) snprintf(c->sha256 + 2U * i, 3U, "%02x", digest[i]);
-  }
+  scd_canonical_sha256(canonical, n, c->sha256);
   {
     uint8_t vdp_state[2U * GENESIS_VDP_REGISTER_COUNT + GENESIS_VDP_CRAM_BYTES + GENESIS_VDP_VSRAM_BYTES + GENESIS_VDP_VRAM_BYTES];
     size_t k = 0U;
@@ -630,6 +645,47 @@ static void scd_capture_frame(ScdMachine *m, ScdFrameCapture *c) {
     }
   }
   c->status = 1U;
+}
+
+int scd_vdp_present_enable(ScdMachine *m) {
+  ScdVdpHost *h = (ScdVdpHost *)m->vdp_host;
+  if (h == NULL || m->bios == NULL) return -1;
+  h->present = 1U;
+  h->capture_line = -1;
+  return 0;
+}
+
+const GenesisFrameArtifact *scd_vdp_present_take(ScdMachine *m, uint64_t *onset) {
+  ScdVdpHost *h = (ScdVdpHost *)m->vdp_host;
+  if (h == NULL || !h->present_ready) return NULL;
+  h->present_ready = 0U;
+  if (onset != NULL) *onset = h->present_onset;
+  return &h->frame;
+}
+
+void scd_vdp_present_counts(const ScdMachine *m, uint64_t *rendered, uint64_t *skipped, uint64_t *rejected) {
+  const ScdVdpHost *h = (const ScdVdpHost *)m->vdp_host;
+  *rendered = h != NULL ? h->present_rendered : 0U;
+  *skipped = h != NULL ? h->present_skipped : 0U;
+  *rejected = h != NULL ? h->present_rejected : 0U;
+}
+
+/* The frame whose active display ended at the onset just processed: rendered from the sampled per-line state and the VRAM at the onset
+ * (the capture path's rule). A frame whose first lines were not sampled (the power-on run-in) is skipped, never approximated. */
+static void scd_present_frame(ScdMachine *m, ScdVdpHost *h) {
+  const GenesisVdpState *vdp = &h->host.devices.vdp;
+  if (h->capture_lines_done != GENESIS_RASTER_MAX_LINES) {
+    h->present_skipped += 1U;
+    return;
+  }
+  h->raster.has_vram_journal = 0U;
+  if (genesis_vdp_produce_frame_raster(vdp->vram, &h->raster, &h->frame) != 0) {
+    h->present_rejected += 1U;
+    return;
+  }
+  h->present_rendered += 1U;
+  h->present_ready = 1U;
+  h->present_onset = m->vdp_frames;
 }
 
 void scd_vdp_capture_report(const ScdMachine *m, FILE *out) {
@@ -684,10 +740,11 @@ void scd_vdp_event(ScdMachine *m) {
   m->vint_at = (m->vdp_onset - SCD_FRAME_TICKS) + ((host->devices.vdp.registers[12] & 1U) ? SCD_VINT_H40_MCLK : SCD_VINT_H32_MCLK) * SCD_MASTER_TICK_TICKS;
   memset(h->fifo_cycles, 0, sizeof h->fifo_cycles); /* GPGX system_frame_scd: the VDP FIFO is empty at the frame's start */
   scd_log(m, 0x90U, (uint32_t)m->vdp_frames, host->devices.vdp.registers[1]);
-  if (h->capture_count != 0U) {
-    ScdFrameCapture *done = scd_capture_for(h, m->vdp_frames);
+  if (h->capture_count != 0U || h->present) {
+    ScdFrameCapture *done = h->capture_count != 0U ? scd_capture_for(h, m->vdp_frames) : NULL;
     if (done != NULL && done->status == 0U) scd_capture_frame(m, done); /* its active display has just ended */
-    if (scd_capture_for(h, m->vdp_frames + 1U) != NULL) {              /* the next frame is a target: sample its lines */
+    if (h->present) scd_present_frame(m, h);
+    if (h->present || scd_capture_for(h, m->vdp_frames + 1U) != NULL) { /* the next frame is a target: sample its lines */
       h->capture_line = 0;
       h->capture_lines_done = 0U;
       h->capture_line_tick = m->vdp_onset - SCD_ONSET_TICKS;           /* line 0 of the frame whose onset is next */

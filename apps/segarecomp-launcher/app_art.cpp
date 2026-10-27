@@ -130,7 +130,7 @@ void App::draw_cover(ImDrawList *dl, const LibraryEntry &entry, ImVec2 a, ImVec2
     const float band = std::max(ctx_.u(3.0F), std::floor(h * 0.10F));
     dl->AddRectFilled(a, ImVec2(b.x, a.y + band), rgba(4, 10, 26, 225), rounding, ImDrawFlags_RoundCornersTop);
     dl->AddRectFilled(ImVec2(a.x, a.y + band), ImVec2(b.x, a.y + band + std::max(1.0F, ctx_.u(2.0F))), accent);
-    const char *system = sms ? "MASTER SYSTEM" : "GENESIS";
+    const char *system = sms ? "MASTER SYSTEM" : entry.platform_id == "sega-cd" ? "SEGA CD" : "GENESIS";
     float spx = std::min(band * 0.52F, ctx_.u(10.0F));
     while (spx > 5.0F && text_width(ctx_.display, spx, system) > w * 0.6F) spx -= 0.5F;
     draw_text(dl, ctx_.display, spx, with_alpha(accent, 240), ImVec2(a.x + ctx_.u(7.0F), a.y + (band - spx) * 0.5F), system);

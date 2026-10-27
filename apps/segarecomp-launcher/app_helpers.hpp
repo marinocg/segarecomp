@@ -141,7 +141,7 @@ inline void spinner(Ctx &ctx, ImDrawList *dl, ImVec2 c, float r, ImU32 color) {
   dl->PathStroke(color, 0, std::max(1.0F, ctx.u(2.0F)));
 }
 
-inline const char *platform_short(const std::string &platform_id) { return platform_id == "master-system" ? "Master System" : "Genesis"; }
+inline const char *platform_short(const std::string &platform_id) { return platform_id == "master-system" ? "Master System" : platform_id == "sega-cd" ? "Sega CD" : "Genesis"; }
 
 
 } // namespace uih

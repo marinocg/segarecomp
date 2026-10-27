@@ -14,6 +14,7 @@
  * guest instruction. */
 #include "scd_runtime.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -296,7 +297,7 @@ void scd_input_report(const ScdMachine *m, FILE *out) {
   }
   fprintf(out, ",\"input\":{\"events\":%llu,\"applied\":%llu,\"pad\":[%u,%u],\"reads\":[%llu,%llu],\"logged\":%llu,\"log_dropped\":%llu,"
                "\"log_fnv\":\"%016llx\"}",
-          (unsigned long long)in->count, (unsigned long long)in->next, in->pad[0], in->pad[1], (unsigned long long)in->reads[0],
+          (unsigned long long)(in->count + in->compacted), (unsigned long long)(in->next + in->compacted), in->pad[0], in->pad[1], (unsigned long long)in->reads[0],
           (unsigned long long)in->reads[1], (unsigned long long)in->log_count, (unsigned long long)in->log_dropped,
           (unsigned long long)fnv);
 }
@@ -311,6 +312,96 @@ int scd_input_write_log(const ScdMachine *m, const char *path) {
   for (i = 0U; i < in->log_count; ++i)
     fprintf(f, "%llu %llu %u %02X\n", (unsigned long long)in->log[i].tick, (unsigned long long)in->log[i].onset, in->log[i].port,
             in->log[i].value);
+  return fclose(f) != 0;
+}
+
+/* ---- SEG-078-T001 (ADR 0204): live recording ------------------------------------------------------------------------------ */
+
+#define SCD_INPUT_HEADER "segarecomp-input-script 1\n"
+
+int scd_input_live_begin(ScdMachine *m, int log, int record) {
+  const char *error = NULL;
+  unsigned line = 0U;
+  if (scd_input_install(m, SCD_INPUT_HEADER, sizeof SCD_INPUT_HEADER - 1U, log, &error, &line) != 0) return 1;
+  m->input->live = 1U;
+  m->input->recording = record != 0;
+  m->input->script_bytes = sizeof SCD_INPUT_HEADER - 1U;
+  return 0;
+}
+
+/* One serialised event line into `out` (at least 64 bytes); returns its length. Buttons in the table's order. */
+static size_t scd_input_format(const ScdInputEvent *e, char *out) {
+  size_t n = (size_t)sprintf(out, "%llu %u %s ", (unsigned long long)e->tick, (unsigned)e->port, e->press ? "press" : "release");
+  int first = 1;
+  size_t b;
+  for (b = 0U; b < sizeof scd_input_buttons / sizeof scd_input_buttons[0]; ++b) {
+    if ((e->mask & scd_input_buttons[b].mask) == 0U) continue;
+    n += (size_t)sprintf(out + n, "%s%s", first ? "" : ",", scd_input_buttons[b].name);
+    first = 0;
+  }
+  out[n++] = '\n';
+  out[n] = '\0';
+  return n;
+}
+
+ScdLiveSample scd_input_live_sample(ScdMachine *m, uint64_t tick, uint8_t pad1) {
+  ScdInput *in = m->input;
+  ScdInputEvent pending[2];
+  size_t need = 0U, bytes = 0U, i;
+  const uint8_t was = in != NULL ? in->live_pad[0] : 0U;
+  const uint8_t released = (uint8_t)(was & ~pad1), pressed = (uint8_t)(pad1 & ~was);
+  char line[64];
+  if (in == NULL || !in->live) return SCD_LIVE_SAMPLE_NO_INPUT;
+  if (released == 0U && pressed == 0U) return SCD_LIVE_SAMPLE_OK;  /* nothing changed: the recorder holds no redundant transition */
+  if (!in->recording && in->next == in->count) {  /* every event so far was applied and nothing is kept: start over (the counters keep the totals) */
+    in->compacted += in->count;
+    in->count = in->next = 0U;
+    in->script_bytes = sizeof SCD_INPUT_HEADER - 1U;
+  }
+  if (tick <= m->now || tick > UINT64_C(0x7FFFFFFFFFFFFFFF) || tick <= in->live_last_tick)
+    return SCD_LIVE_SAMPLE_PASSED;
+  if (released != 0U) {
+    pending[need].tick = tick; pending[need].port = 1U; pending[need].press = 0U; pending[need].mask = released;
+    ++need;
+  }
+  if (pressed != 0U) {
+    pending[need].tick = tick; pending[need].port = 1U; pending[need].press = 1U; pending[need].mask = pressed;
+    ++need;
+  }
+  for (i = 0U; i < need; ++i) bytes += scd_input_format(&pending[i], line);
+  if (in->count + need > SCD_INPUT_MAX_EVENTS || in->script_bytes + bytes > SCD_INPUT_MAX_SCRIPT_BYTES) return SCD_LIVE_SAMPLE_CAPACITY;
+  for (i = 0U; i < need; ++i) in->events[in->count++] = pending[i];
+  in->script_bytes += bytes;
+  in->live_last_tick = tick;
+  in->live_pad[0] = pad1;
+  return SCD_LIVE_SAMPLE_OK;
+}
+
+size_t scd_input_serialize(const ScdMachine *m, char *out, size_t capacity) {
+  const ScdInput *in = m->input;
+  size_t n, i;
+  static ScdInputEvent check[SCD_INPUT_MAX_EVENTS];
+  size_t count = 0U;
+  const char *error = NULL;
+  unsigned line = 0U;
+  if (in == NULL || !in->live || !in->recording || capacity < in->script_bytes + 1U) return 0U;
+  memcpy(out, SCD_INPUT_HEADER, sizeof SCD_INPUT_HEADER - 1U);
+  n = sizeof SCD_INPUT_HEADER - 1U;
+  for (i = 0U; i < in->count; ++i) n += scd_input_format(&in->events[i], out + n);
+  out[n] = '\0';
+  if (n != in->script_bytes || scd_input_parse(out, n, check, &count, &error, &line) != 0 || count != in->count) return 0U;
+  return n;
+}
+
+int scd_input_live_write(const ScdMachine *m, const char *path) {
+  static char text[SCD_INPUT_MAX_SCRIPT_BYTES + 1U];
+  FILE *f;
+  const size_t n = scd_input_serialize(m, text, sizeof text);
+  if (n == 0U || (f = fopen(path, "wb")) == NULL) return 1;
+  if (fwrite(text, 1U, n, f) != n) {
+    fclose(f);
+    return 1;
+  }
   return fclose(f) != 0;
 }
 
