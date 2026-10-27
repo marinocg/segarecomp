@@ -73,3 +73,52 @@ overflow, empty ledger, window smaller than an anchor, a run shorter than 64 byt
 (Chronology, for the record: the resolver, the loader fixture and the driver hook were written together; the cases and their expected outcomes above
 were fixed in the fixture's description before its first run, and the first run matched every row. The local commercial evaluation had not been
 run when this section was committed.)
+
+## Result
+
+**Synthetic matrix** (`tests/sega_cd_extent_discovery_test.py`, 26 checks, run in CI): every row behaved as pre-registered. `direct`, `siblings` and `overlay`
+discovered extents equal to the disc spans actually loaded (the sibling case admitted the longer explanation, the overlay case two extents at one base)
+and the programs ran to their end writing every marker; `duplicates` was refused `ambiguous_source` and the module never ran; `late_flip` admitted only
+the exact-copy prefix and stopped at or before the flipped instruction (`no_source`); `generated`, `transformed` and `undelivered` admitted nothing and
+stopped (`no_source`). Two builds of one case gave identical extents, admissions, rounds and program identity. The resolver refused a ledger overflow, an
+empty ledger, a window shorter than an anchor, a PC outside the window, an explanation shorter than 64 bytes, and bytes whose only matches were *not*
+delivered blocks; the emitter refused an `extent:` admission with a wrong pass identity (`provenance_mismatch`), one outside the processor's RAM and one
+beyond the track. No guessed or wrong extent was ever admitted. The product CLI (`segarecomp sega-cd build`, ported from the driver) matches the driver
+(extents, frontier, program identity) on the same fixtures (`tests/sega_cd_native_build_test.py`).
+
+**Authorized local commercial title (one, classes and counts only; nothing derived from it is committed).** Neither route used a manual extent, an epoch
+recipe, a trace or any reference; both consumed only the user's BIOS image and disc (and a formatted empty backup RAM). Chronology: route B was run first
+and route A afterwards because the launcher supplies no controller input; neither route was in the pre-registration above.
+
+| Route | Rounds | Extents | Other admissions | Resolver refusals | End of the program |
+| --- | --- | --- | --- | --- | --- |
+| A - the launcher route (no input, no deadline) | 17 | 12 | 1 epoch image, 3 jump-slot templates | none | the documented audio boundary (`pcm_unsupported`) after 3,371 vertical-blank onsets, i.e. past the 2,802 onsets of the earlier developer-procedure route |
+| B - the timed input schedule and deadline of the earlier developer procedure (machine inputs, not recipes) | 14 | 10 | 1 epoch image, 2 templates | none | an uncompiled *computed destination* inside the span of an admitted extent (`entry_not_compiled`), after 2,156 onsets (77% of the route's deadline) |
+
+Every round of both routes was resolved by the mechanism (the disc spans were found by byte-exact match against delivered blocks, never ambiguous, never
+refused); the two stops are not extent refusals.
+
+## Decision: GO, for a stated scope
+
+`GO` by the criteria above: every synthetic row behaved as expected and the mechanism built a useful bounded program for a commercial title without any
+reference, on the route the launcher actually runs. The scope of what is claimed is exactly that: **the build discovers by itself the disc spans that the
+console loads into RAM and executes, and compiles the path the console takes from reset without controller input, up to the first code that is not
+provably on the disc or the first documented non-goal.** It is not a general CUE-to-play claim. Implemented and shipped with this decision:
+
+- the runtime delivery ledger and region capture (build pass only), `segarecomp sega-cd resolve-source`, ordered `extent:` admissions (the same authority and
+  limits as `--disc-image`, sharing its 16-extent bound), the Python driver's `--discover-extents`;
+- the product `segarecomp sega-cd build` (bounded rounds, content-addressed object cache, parallel compile, `@stage`/`@round`/`@result` progress,
+  `status.json` with a typed frontier refusal, `--viewer` variant) and its packaging (runtime *sources* ship; no BIOS, disc or program ever does);
+- the launcher's Build / Cancel / progress and the headless `--build`, verifying the built program exactly like an imported one; the prebuilt import path
+  stays.
+
+## What is still not available (the next obstacles)
+
+1. **Computed destinations inside proven extents** (route B's stop): an indirect jump/return to an address inside an admitted extent that no static entry
+   reaches stops with an ordinary `entry_not_compiled`. The smallest next step is to capture such a destination in the build pass and admit it as an entry of
+   the extent that already proves its bytes (the extent supplies the authority; the destination is only a new entry).
+2. **Input-driven coverage**: the build presses nothing, so code behind a START press is covered only if a developer supplies a pad schedule
+   (`--input-script`, a machine input of the developer driver, not exposed in the launcher).
+3. **Audio** (PCM, CD-DA, the Z80): route A ends there. Out of scope for this task.
+4. Code that is generated, decompressed or transformed at run time is refused (`no_source`) by design; a generic answer would need the immutable
+   generated-data ownership evaluated in `AGENTS.md`, not byte matching.
