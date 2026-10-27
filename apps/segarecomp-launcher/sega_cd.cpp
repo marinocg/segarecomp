@@ -213,38 +213,40 @@ Claims describe_program(const fs::path &program, unsigned timeout_ms) {
   }
   const std::string exe = u8(program);
   std::vector<const char *> argv{exe.c_str(), "--describe", nullptr};
+  // The statement goes to a temporary FILE, not a pipe: a redirected file behaves the same on every platform (a pipe read can return empty while the
+  // program still has output - seen on Windows after the first 512 bytes).
+  static std::atomic<unsigned> counter{0};
+  const fs::path capture = fs::temp_directory_path() / ("segarecomp-describe-" + std::to_string(SDL_GetTicksNS() & 0xFFFFFFFFULL) + "-" + std::to_string(counter.fetch_add(1)) + ".txt");
+  SDL_IOStream *sink = SDL_IOFromFile(u8(capture).c_str(), "wb");
+  Claims fail_claims;
+  fail_claims.refusal = Refusal::program_unverifiable;
+  if (sink == nullptr) { fail_claims.detail = "its output could not be captured"; return fail_claims; }
   SDL_PropertiesID props = SDL_CreateProperties();
   SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
   SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
-  SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_APP);
+  SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_REDIRECT);
+  SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_POINTER, sink);
   SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_NULL);
   SDL_Process *process = SDL_CreateProcessWithProperties(props);
   SDL_DestroyProperties(props);
-  Claims fail_claims;
-  fail_claims.refusal = Refusal::program_unverifiable;
-  if (process == nullptr) { fail_claims.detail = "it could not be started"; return fail_claims; }
-  std::string out;
-  char buffer[512];
-  SDL_IOStream *stream = SDL_GetProcessOutput(process);
+  SDL_CloseIO(sink);
+  if (process == nullptr) { fs::remove(capture, ec); fail_claims.detail = "it could not be started"; return fail_claims; }
   const Uint64 deadline = SDL_GetTicks() + timeout_ms;
   bool timed_out = false;
-  while (stream != nullptr) {
-    if (SDL_GetTicks() > deadline) { timed_out = true; break; }
-    std::size_t got = SDL_ReadIO(stream, buffer, sizeof(buffer));
-    if (got == 0) {
-      // No data now: either the program has more to say (a pipe read can return empty while it runs - seen on Windows after the first 512 bytes) or it
-      // ended. Only an exited process followed by one more empty read is the end of its output.
-      int ignored = 0;
-      if (!SDL_WaitProcess(process, false, &ignored)) { SDL_Delay(5); continue; }
-      got = SDL_ReadIO(stream, buffer, sizeof(buffer));
-      if (got == 0) break;
-    }
-    if (out.size() < 12000U) out.append(buffer, got);  // keep the head, but always drain the pipe to EOF
-  }
   int code_out = -1;
-  if (timed_out) SDL_KillProcess(process, true);
-  SDL_WaitProcess(process, true, &code_out);
+  while (!SDL_WaitProcess(process, false, &code_out)) {
+    if (SDL_GetTicks() > deadline) { timed_out = true; break; }
+    SDL_Delay(5);
+  }
+  if (timed_out) { SDL_KillProcess(process, true); SDL_WaitProcess(process, true, &code_out); }
   SDL_DestroyProcess(process);
+  std::string out;
+  if (!timed_out && code_out == 0) {
+    std::ifstream in(capture, std::ios::binary);
+    char buffer[4096];
+    while (in && out.size() < 12000U) { in.read(buffer, sizeof buffer); out.append(buffer, static_cast<std::size_t>(in.gcount())); }
+  }
+  fs::remove(capture, ec);
   if (timed_out) { fail_claims.detail = "it did not answer"; return fail_claims; }
   if (code_out != 0) { fail_claims.detail = "it does not understand the statement request (status " + std::to_string(code_out) + ")"; return fail_claims; }
   return parse_claims(out);
