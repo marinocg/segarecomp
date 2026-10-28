@@ -236,6 +236,7 @@ struct ScdPolicyReport {
   std::string requested, effective, reason, failed_image;
   bool fallback = false;
   long long broad_entries = 0, admitted_entries = 0;
+  long long m3_images = 0, m3_broad_entries = 0, m3_admitted_entries = 0;   // the scored game modules only (firmware and boot code are never scored)
 };
 [[nodiscard]] ScdPolicyReport read_scd_policy_report(const std::string &status_text);
 // One plain sentence for the build summary (empty for a Compatibility build).

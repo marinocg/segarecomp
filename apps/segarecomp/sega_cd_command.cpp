@@ -474,7 +474,7 @@ int emit(int argc, char **argv) {
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
     else if (arg == "--position-independent") emit_options.position_independent = true;  // SEG-097-T002 (ADR 0207)
     else if (arg == "--report-offsets") report_offsets = true;  // SEG-097-T003: list each mapping's compiled source-relative offsets in the report (evidence tooling)
-    else if ((arg == "--aot-policy" || arg == "--aot-model") && i + 1 < argc) {  // SEG-097-T003 (ADR 0208): the product's policy vocabulary
+    else if ((arg == "--aot-policy" || arg == "--aot-model" || arg == "--aot-scope") && i + 1 < argc) {  // SEG-097-T003 (ADR 0208): the product's policy vocabulary
       if (!segarecomp_app::set_sega_cd_aot_option(aot, arg, argv[++i])) {
         std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
         return 2;

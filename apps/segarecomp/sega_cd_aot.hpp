@@ -17,6 +17,7 @@ namespace segarecomp_app {
 struct SegaCdAotOptions {
   std::string policy = "compatibility";
   bool model_given = false;
+  bool all_images = false;   // `--aot-scope all-images`: the HISTORICAL M1 scope (every image scored), evidence tooling only; the product default scores game modules only
   [[nodiscard]] bool optimized() const { return policy == "optimized"; }
 };
 

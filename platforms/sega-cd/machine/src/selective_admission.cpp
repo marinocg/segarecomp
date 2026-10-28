@@ -8,6 +8,15 @@
 
 namespace segarecomp::machine::sega_cd {
 
+const char *image_selection_name(ImageSelection selection) noexcept {
+  switch (selection) {
+  case ImageSelection::broad_required: return "broad_required";
+  case ImageSelection::m3_selected: return "m3_selected";
+  case ImageSelection::broad_fallback: return "broad_fallback";
+  }
+  return "unknown";
+}
+
 std::string validate_region_proposal(const RegionProposal &proposal, std::uint32_t image_bytes, std::span<const std::uint32_t> seed_offsets) {
   if (!proposal.ok) return proposal.failure.empty() ? "empty_proposal" : proposal.failure;
   if (proposal.ranges.empty()) return "empty_proposal";

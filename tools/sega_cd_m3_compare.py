@@ -14,7 +14,11 @@ import subprocess
 import sys
 import tempfile
 
-ARMS = {"A": [], "B": ["--position-independent"], "C": ["--position-independent", "--aot-policy", "optimized", "--aot-model", "gen2"]}
+# A = full Compatibility (per-mapping, the reference); B = Compatibility with source-relative bodies; H = the HISTORICAL M1 experimental scope (every image scored);
+# C = the experimental policy as shipped (only independently admitted disc game modules / extents are scored; firmware, BIOS-derived and boot code stay broad).
+ARMS = {"A": [], "B": ["--position-independent"],
+        "H": ["--position-independent", "--aot-policy", "optimized", "--aot-model", "gen2", "--aot-scope", "all-images"],
+        "C": ["--position-independent", "--aot-policy", "optimized", "--aot-model", "gen2"]}
 ROUTES = {"default": None, "B": 2, "C": 3}
 
 
@@ -53,6 +57,8 @@ def main():
             for im in report["images"]:
                 admitted.setdefault((im["processor"], im["name"]), set()).update(im["source_offsets"])
             entry["admitted_offsets"] = {"%s:%s" % k: len(v) for k, v in sorted(admitted.items())}
+            import hashlib
+            entry["admitted_digests"] = {"%s:%s" % k: hashlib.sha256(json.dumps(sorted(v)).encode()).hexdigest()[:16] for k, v in sorted(admitted.items())}
             entry["admitted_total"] = sum(len(v) for v in admitted.values())
             entry["bodies"] = sum(p["bodies"] for p in report["processors"])
             entry["c_bytes"] = len(text)
@@ -71,7 +77,8 @@ def main():
             if "aot_policy" in report:
                 a = report["aot_policy"]
                 entry["aot_policy"] = {k: a[k] for k in ("requested", "experimental", "effective", "fallback", "reason", "model", "rank_policy", "rank_plan", "weights", "k_sha256",
-                                                          "policy_identity", "broad_entries", "admitted_entries") if k in a}
+                                                          "policy_identity", "broad_entries", "admitted_entries", "m3_images", "m3_broad_entries", "m3_admitted_entries", "scope") if k in a}
+                entry["images_policy"] = [{k: i[k] for k in ("name", "selection", "selection_reason", "units", "selected", "broad_entries", "admitted_entries")} for i in a.get("images", [])]
             routes = {}
             executed = set()
             for route, d7 in ROUTES.items():
@@ -111,7 +118,7 @@ def main():
         fx = tmp / "s2"
         subprocess.run([sys.executable, str(root / "tools" / "sega_cd_bios_loader_fixture.py"), "build", "--case", "direct", "--out", str(fx)], check=True, capture_output=True)
         s2 = {}
-        for arm, flags in (("A", []), ("C", ["--aot-policy", "optimized", "--aot-model", "gen2"])):
+        for arm, flags in (("A", []), ("H", ["--aot-policy", "optimized", "--aot-model", "gen2", "--aot-scope", "all-images"]), ("C", ["--aot-policy", "optimized", "--aot-model", "gen2"])):
             out_dir = tmp / ("s2-" + arm)
             rc, out, cpu, rss, wall, err = common.measured([segarecomp, "sega-cd", "build", "--cue", fx / "disc" / "disc.cue", "--bios", fx / "bios.bin", "--output", out_dir,
                                                             "--runtime-dir", root, "--cc", cc, "--budget", "3000000", "--jobs", "4", *flags])
@@ -121,7 +128,8 @@ def main():
             s2[arm] = {"status": status["status"], "build_cpu_s": round(cpu, 2), "build_peak_kib": rss, "rounds": status["rounds"], "result": status["result"], "stop": status["stop"],
                        "extents": len(status["extents"]), "frontier": (status["frontier"] or {}).get("refusal"), "c_bytes": c_bytes,
                        "program_identity": status["program_identity"],
-                       "aot_policy": {k: a[k] for k in ("requested", "effective", "fallback", "reason", "broad_entries", "admitted_entries", "k_sha256") if k in a}}
+                       "aot_policy": {k: a[k] for k in ("requested", "effective", "fallback", "reason", "broad_entries", "admitted_entries", "k_sha256", "m3_images", "m3_broad_entries", "m3_admitted_entries") if k in a},
+                       "images": [{k: i[k] for k in ("name", "selection", "selection_reason", "broad_entries", "admitted_entries")} for i in a.get("images", [])]}
         result["subjects"]["S2"] = {"fixture": "bios_loader_fixture/direct (BIOS-image profile, end-to-end build)", "arms": s2}
     json.dump(result, sys.stdout, indent=1, sort_keys=True, default=sorted)
     print()

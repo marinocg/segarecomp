@@ -119,13 +119,51 @@ int main() {
     check(e.admission.broad_entries == e.admission.admitted_entries && !e.admission.k_sha256.empty(), "the counts agree and the admitted set has a digest");
     distinct_broad = e.admission.broad_entries;
     check(distinct_broad < broad.stats[0].compiled + broad.stats[1].compiled, "entries are SOURCE-RELATIVE offsets: the module's three mappings count once, not three times");
-    check(fake.calls == 3, "one scoring per IMAGE: 3 images (IP, SP, one module with 3 mappings) -> 3 proposals, not 5 (got " + std::to_string(fake.calls) + ")");
+    check(fake.calls == 1, "only the disc-loaded module is scored, once, although it has 3 mappings (IP and SP stay broad); got " + std::to_string(fake.calls));
+    check(e.admission.images.size() == 3U && e.admission.images[0].selection == ImageSelection::broad_required && e.admission.images[0].selection_reason == "sega_cd.boot_ip" &&
+              e.admission.images[1].selection == ImageSelection::broad_required && e.admission.images[1].selection_reason == "sega_cd.boot_sp" &&
+              e.admission.images[2].selection == ImageSelection::m3_selected && e.admission.images[2].selection_reason == "sega_cd.disc_module" && e.admission.m3_images == 1U,
+          "reports: boot_ip and boot_sp are broad_required (by producer), the module is m3_selected; skipped images count as broad-admitted");
+    check(e.admission.images[0].admitted_entries == e.admission.images[0].broad_entries && e.admission.images[0].broad_entries > 0U, "a broad_required image is counted broad-admitted, not optimized");
+  }
+  // 1b. The historical M1 scope scores every image.
+  {
+    Fake fake;
+    fake.body = [](auto bytes, auto) { return ranges({{0, static_cast<std::uint32_t>(bytes.size())}}); };
+    auto request = fake.request();
+    request.all_images = true;
+    SegaCdEmitOptions options;
+    options.selective = &request;
+    const auto e = emit_sega_cd_processors(program(), options);
+    check(fake.calls == 3 && e.admission.m3_images == 3U && e.admission.images[0].selection == ImageSelection::m3_selected, "all_images (historical M1 scope): IP, SP and the module are all scored");
+  }
+  // 1c. Eligibility is the explicit producer, never the role flag or the address: a boot-like image with the module producer is scored, a module with another producer is not.
+  {
+    BootImages images = program();
+    images.sub.images.images[1].provenance.producer = "sega_cd.something_else";
+    Fake fake;
+    fake.body = [](auto bytes, auto) { return ranges({{0, static_cast<std::uint32_t>(bytes.size())}}); };
+    const auto request = fake.request();
+    SegaCdEmitOptions options;
+    options.selective = &request;
+    const auto e = emit_sega_cd_processors(images, options);
+    check(fake.calls == 0 && !e.admission.admitted && e.admission.reason == "no_eligible_images" && e.c_source == emit_sega_cd_processors(images).c_source,
+          "an unrecognised producer is never scored: with no eligible image the build is broad (no_eligible_images)");
+    BootImages ip_as_module = program();
+    ip_as_module.main.images.images[0].provenance.producer = "sega_cd.disc_module";
+    Fake second;
+    second.body = fake.body;
+    const auto request2 = second.request();
+    options.selective = &request2;
+    (void)emit_sega_cd_processors(ip_as_module, options);
+    check(second.calls == 2, "the producer decides, not the role or the address: an image carrying the disc_module producer is scored wherever it sits");
   }
   // 2. A partial proposal removes instructions and nothing else.
   {
     Fake fake;
     fake.body = [](auto bytes, auto) {
-      return bytes.size() == kModule.size() ? ranges({{0, 6}}) /* moveq, nop, nop */ : ranges({{0, static_cast<std::uint32_t>(bytes.size())}});
+      (void)bytes;
+      return ranges({{0, 6}}) /* moveq, nop, nop */;
     };
     const auto request = fake.request();
     SegaCdEmitOptions options;
@@ -167,8 +205,8 @@ int main() {
     SegaCdEmitOptions options;
     options.selective = &request;
     const auto e = emit_sega_cd_processors(program(), options);
-    check(e.admission.requested && !e.admission.admitted && e.admission.reason == f.reason && e.c_source == broad.c_source && e.admission.admitted_entries == 0U &&
-              e.admission.k_sha256.empty() && !e.admission.failed_image.empty() && e.admission.broad_entries == distinct_broad && e.admission.images.size() == 3U,
+    check(e.admission.requested && !e.admission.admitted && e.admission.reason == f.reason && e.c_source == broad.c_source && e.admission.admitted_entries == e.admission.broad_entries &&
+              e.admission.images[2].selection == ImageSelection::broad_fallback && e.admission.images[0].selection == ImageSelection::broad_required && e.admission.k_sha256.empty() && !e.admission.failed_image.empty() && e.admission.broad_entries == distinct_broad && e.admission.images.size() == 3U,
           std::string("fallback (") + f.name + "): broad text, reason " + f.reason + ", failed image named, no admitted set claimed (got " + e.admission.reason + ")");
   }
   // 4. Identity: the request enters the program identity; a fallback never aliases a selective build; the default is untouched.

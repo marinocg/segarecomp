@@ -24,7 +24,10 @@
 namespace segarecomp::machine::sega_cd {
 
 // Bump on any change to how proposals are applied or validated (it enters the policy identity).
-inline constexpr const char *kSelectiveAdmissionContract = "segarecomp.sega_cd.selective_admission.v1";
+// v2 (SEG-097 follow-up, ADR 0208): the proposal applies ONLY to independently admitted disc-loaded game modules and extents; firmware, BIOS-derived images,
+// the boot IP/SP and boot-area extents stay under broad AOT. v1 (every image) is the historical M1 reference, reachable only with `all_images`.
+inline constexpr const char *kSelectiveAdmissionContract = "segarecomp.sega_cd.selective_admission.v2";
+inline constexpr const char *kSelectiveAdmissionContractV1 = "segarecomp.sega_cd.selective_admission.v1";
 
 struct RegionProposal {
   bool ok = false;
@@ -39,11 +42,19 @@ struct RegionProposal {
 using RegionProposer = std::function<RegionProposal(std::span<const std::uint8_t> bytes, std::span<const std::uint32_t> seed_offsets)>;
 
 struct SelectiveAdmissionRequest {
+  bool all_images = false;  // HISTORICAL M1 scope (every image is scored); evidence tooling only, never the product default
   RegionProposer propose;
   std::string policy_identity;  // ROM-independent identity of the producer + analysis contract; enters the program identity when requested
 };
 
+// How one image was treated (typed): m3_selected = scored by the producer and filtered; broad_required = eligible for nothing but broad AOT by its role/provenance;
+// broad_fallback = it was eligible but the producer/validator failed (the whole build then falls back, so this appears only in a fallback report).
+enum class ImageSelection : std::uint8_t { broad_required, m3_selected, broad_fallback };
+[[nodiscard]] const char *image_selection_name(ImageSelection selection) noexcept;
+
 struct ImageAdmissionReport {
+  ImageSelection selection{ImageSelection::broad_required};
+  std::string selection_reason;         // the role / provenance that decided it, e.g. boot_ip, bios_firmware, disc_module
   Processor processor{Processor::main};
   std::string name;
   std::uint32_t image_id = 0;
@@ -61,8 +72,11 @@ struct SelectiveAdmissionOutcome {
   std::string failed_image;       // the image whose proposal failed or was rejected (a platform-assigned name, never content)
   std::string k_sha256;           // digest of the admitted (image, source-offset) set when admitted
   std::vector<ImageAdmissionReport> images;
-  std::uint32_t broad_entries = 0;
-  std::uint32_t admitted_entries = 0;
+  std::uint32_t broad_entries = 0;     // all images
+  std::uint32_t admitted_entries = 0;  // all images (broad_required images count as broad-admitted here)
+  std::uint32_t m3_images = 0;         // images actually scored
+  std::uint32_t m3_broad_entries = 0;  // entries of the scored images only: what the optimization could touch
+  std::uint32_t m3_admitted_entries = 0;
 };
 
 // Shared validation of one proposal against its image (build time, pure). Empty string = valid.

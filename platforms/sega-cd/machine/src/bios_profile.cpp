@@ -104,6 +104,8 @@ struct Image {
   std::uint32_t base{};
   std::vector<std::uint8_t> bytes;
   bool epoch = false;  // verified whole at the sub runnable epoch (materialized by a pass, or SEG-079 reconstructed from a recipe)
+  std::string role = std::string();      // SEG-097 follow-up: the provenance that decides the selective policy (bios_firmware, bios_derived_copy, bios_derived_epoch, manual_disc_image, boot_area_extent, disc_extent)
+  bool m3_eligible = false;  // only an independently admitted game extent outside the disc's boot area
 };
 
 struct Variant {
@@ -247,48 +249,52 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
   auto selective = emit_bios_once(disc, inputs, options, attempt);
   SelectiveState broad_state;
   auto broad = emit_bios_once(disc, inputs, options, broad_state);
-  attempt.outcome.requested = true;
-  if (selective.error != BiosProfileError::none && attempt.outcome.reason == "none") attempt.outcome.reason = "validator_rejected:emission_" + std::string(bios_profile_error_name(selective.error));
-  if (broad.error != BiosProfileError::none && attempt.outcome.admitted && selective.error == BiosProfileError::none) {
-    selective.admission = attempt.outcome;  // the broad reference only supplied the comparison counts; a valid selective result is not discarded for it
-    selective.admission.k_sha256.clear();
+  auto &outcome = attempt.outcome;
+  outcome.requested = true;
+  if (selective.error != BiosProfileError::none && outcome.reason == "none") outcome.reason = "validator_rejected:emission_" + std::string(bios_profile_error_name(selective.error));
+  const bool selective_ok = outcome.admitted && selective.error == BiosProfileError::none;
+  // Per-image counts. Images that are not scored are broad in either emission; scored images compare the selective set with the broad one (unknown, 0, if the
+  // reference emission failed). A fallback build admits every entry.
+  const auto tally = [&](bool applied) {
+    outcome.broad_entries = outcome.admitted_entries = outcome.m3_images = outcome.m3_broad_entries = outcome.m3_admitted_entries = 0;
     std::vector<std::pair<std::string, std::vector<std::uint32_t>>> rows;
-    for (std::size_t i = 0; i < attempt.outcome.images.size(); ++i) {
-      selective.admission.images[i].admitted_entries = static_cast<std::uint32_t>(attempt.admitted[i].size());
-      selective.admission.admitted_entries += selective.admission.images[i].admitted_entries;
-      rows.emplace_back(std::string(processor_name(attempt.outcome.images[i].processor)) + ":" + attempt.outcome.images[i].name,
-                        std::vector<std::uint32_t>(attempt.admitted[i].begin(), attempt.admitted[i].end()));
+    for (std::size_t i = 0; i < outcome.images.size(); ++i) {
+      auto &r = outcome.images[i];
+      const std::size_t chosen = applied ? attempt.admitted[i].size() : broad_state.admitted[i].size();
+      r.broad_entries = static_cast<std::uint32_t>(broad.error == BiosProfileError::none ? broad_state.admitted[i].size() : attempt.admitted[i].size());
+      r.admitted_entries = static_cast<std::uint32_t>(applied && r.selection == ImageSelection::m3_selected ? chosen : r.broad_entries);
+      outcome.broad_entries += r.broad_entries;
+      outcome.admitted_entries += r.admitted_entries;
+      if (applied && r.selection == ImageSelection::m3_selected) {
+        ++outcome.m3_images;
+        outcome.m3_broad_entries += r.broad_entries;
+        outcome.m3_admitted_entries += r.admitted_entries;
+      }
+      const auto &set = applied ? attempt.admitted[i] : broad_state.admitted[i];
+      rows.emplace_back(std::string(processor_name(r.processor)) + ":" + r.name, std::vector<std::uint32_t>(set.begin(), set.end()));
     }
-    selective.admission.k_sha256 = admitted_set_digest(rows);
-    return selective;
+    return rows;
+  };
+  if (selective_ok) {
+    auto rows = tally(true);
+    if (outcome.m3_images == 0U) {
+      outcome.reason = "no_eligible_images";
+    } else if (outcome.m3_admitted_entries == 0U && outcome.m3_broad_entries != 0U) {
+      outcome.reason = "validator_rejected:nothing_admitted";
+    } else {
+      outcome.k_sha256 = admitted_set_digest(rows);
+      selective.admission = outcome;
+      return selective;   // a valid selective result is not discarded because the comparison emission failed
+    }
   }
-  if (broad.error != BiosProfileError::none || !attempt.outcome.admitted || selective.error != BiosProfileError::none) {
-    broad.admission = attempt.outcome;
-    broad.admission.requested = true;
-    broad.admission.admitted = false;
-    if (broad.admission.reason == "none") broad.admission.reason = "validator_rejected:unclassified";
-    return broad;
-  }
-  // Counts: per image, the broad emission's distinct compiled offsets against the selective one's.
-  auto &outcome = selective.admission = attempt.outcome;
-  std::vector<std::pair<std::string, std::vector<std::uint32_t>>> rows;
-  outcome.broad_entries = outcome.admitted_entries = 0;
-  for (std::size_t i = 0; i < outcome.images.size(); ++i) {
-    outcome.images[i].broad_entries = static_cast<std::uint32_t>(broad_state.admitted[i].size());
-    outcome.images[i].admitted_entries = static_cast<std::uint32_t>(attempt.admitted[i].size());
-    outcome.broad_entries += outcome.images[i].broad_entries;
-    outcome.admitted_entries += outcome.images[i].admitted_entries;
-    rows.emplace_back(std::string(processor_name(outcome.images[i].processor)) + ":" + outcome.images[i].name,
-                      std::vector<std::uint32_t>(attempt.admitted[i].begin(), attempt.admitted[i].end()));
-  }
-  if (outcome.admitted_entries == 0U && outcome.broad_entries != 0U) {
-    broad.admission = outcome;
-    broad.admission.admitted = false;
-    broad.admission.reason = "validator_rejected:nothing_admitted";
-    return broad;
-  }
-  outcome.k_sha256 = admitted_set_digest(rows);
-  return selective;
+  outcome.admitted = false;
+  if (outcome.reason == "none") outcome.reason = "validator_rejected:unclassified";
+  for (auto &r : outcome.images)
+    if (r.selection == ImageSelection::m3_selected) r.selection = ImageSelection::broad_fallback;
+  if (broad.error == BiosProfileError::none) tally(false);
+  outcome.k_sha256.clear();
+  broad.admission = outcome;
+  return broad;
 }
 
 namespace {
@@ -305,6 +311,7 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
   // ---- images, in a fixed order: bios, copies, epochs ----
   std::vector<Image> images;
   images.push_back(Image{Processor::main, "bios", std::string(), ImageAuthority::immutable_input, false, 0U, rom});
+  images.back().role = "bios_firmware";
   if (inputs.copies.size() > kMaxCopyImages) return fail(BiosProfileError::copy_invalid, kMaxCopyImages);
   for (std::size_t i = 0; i < inputs.copies.size(); ++i) {
     const auto &c = inputs.copies[i];
@@ -313,6 +320,7 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
       return fail(BiosProfileError::copy_invalid, i);
     images.push_back(Image{c.processor, "copy" + std::to_string(i), std::string(), ImageAuthority::static_proof, true, c.base,
                            std::vector<std::uint8_t>(rom.begin() + c.rom_offset, rom.begin() + c.rom_offset + c.length)});
+    images.back().role = "bios_derived_copy";
   }
   if (inputs.disc_images.size() > kMaxDiscImages) return fail(BiosProfileError::disc_image_invalid, kMaxDiscImages);
   for (std::size_t i = 0; i < inputs.disc_images.size(); ++i) {
@@ -321,6 +329,7 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
       return fail(BiosProfileError::disc_image_invalid, i);
     images.push_back(Image{d.processor, "disc" + std::to_string(i), "track:1 byte:" + std::to_string(d.track_offset) + " length:" + std::to_string(d.length),
                            ImageAuthority::immutable_input, true, d.base, d.bytes});
+    images.back().role = "manual_disc_image";   // a user-declared extent: its role (boot code or game code) is not established, so it stays broad
   }
   std::vector<Template> templates;
   std::uint32_t epochs = 0;
@@ -335,6 +344,7 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
       Image image{Processor::sub, "epoch" + std::to_string(epochs - 1U), epoch_recipe_text(a.recipe), ImageAuthority::static_proof, true,
                   0U, std::move(*bytes)};
       image.epoch = true;
+      image.role = "bios_derived_epoch";
       images.push_back(std::move(image));
       continue;
     }
@@ -347,6 +357,9 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
         return fail(BiosProfileError::disc_image_invalid, i);
       images.push_back(Image{a.processor, "disc" + std::to_string(taken - 1U), "track:1 byte:" + std::to_string(a.track_offset) + " length:" + std::to_string(a.bytes.size()),
                              ImageAuthority::immutable_input, true, a.address, a.bytes});
+      // A discovered extent is a game module unless it lies in the disc's system area (the boot header, IP and SP live in its first 32 KiB): boot code stays broad.
+      images.back().m3_eligible = a.track_offset >= kSegaCdSystemAreaBytes;
+      images.back().role = images.back().m3_eligible ? "disc_extent" : "boot_area_extent";
       continue;
     }
     if (a.kind == AdmissionKind::epoch) {
@@ -356,6 +369,7 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
         return fail(BiosProfileError::epoch_invalid, i);
       images.push_back(Image{Processor::sub, "epoch" + std::to_string(epochs - 1U), std::string(), ImageAuthority::bounded_build_time_materialization, true,
                              0U, a.bytes, true});
+      images.back().role = "bios_derived_epoch";
     } else {
       // SEG-079-T002 (ADR 0180): a record is one instruction or a bounded run of contiguous JMP (xxx).L slots. Every slot is decoded and
       // admitted exactly as a single record would be (own opcode-word guard, live operand, compiled-destination check); the run only
@@ -414,21 +428,29 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
   const bool apply = selective.request != nullptr;
   if (apply) {
     auto &outcome = selective.outcome;
-    for (std::size_t index = 0; index < images.size(); ++index) {
+    const auto eligible = [&](const Image &image) { return image.m3_eligible || selective.request->all_images; };
+    for (std::size_t index = 0; index < images.size(); ++index) {   // every image is reported, scored or not
       const auto &image = images[index];
-      std::vector<std::uint32_t> seeds;
-      if (index == 0U && inputs.bios.reset_pc < image.bytes.size()) seeds.push_back(inputs.bios.reset_pc);  // the BIOS image's reset entry: certain code
-      RegionProposal proposal = selective.request->propose(image.bytes, seeds);
       ImageAdmissionReport report;
+      report.selection = eligible(image) ? ImageSelection::m3_selected : ImageSelection::broad_required;
+      report.selection_reason = image.role.empty() ? std::string("unknown_provenance") : image.role;
       report.processor = image.processor;
       report.name = image.name;
       report.image_id = static_cast<std::uint32_t>(index + 1U);
       report.source_bytes = static_cast<std::uint32_t>(image.bytes.size());
+      outcome.images.push_back(std::move(report));
+    }
+    for (std::size_t index = 0; index < images.size(); ++index) {
+      const auto &image = images[index];
+      if (!eligible(image)) continue;   // firmware, BIOS-derived and boot-area images: broad, never scored
+      std::vector<std::uint32_t> seeds;
+      if (index == 0U && inputs.bios.reset_pc < image.bytes.size()) seeds.push_back(inputs.bios.reset_pc);
+      RegionProposal proposal = selective.request->propose(image.bytes, seeds);
+      auto &report = outcome.images[index];
       report.units = proposal.units;
       report.selected = proposal.selected;
       report.seed_units = proposal.seed_units;
       for (const auto &[b, e] : proposal.ranges) report.proposed_bytes += e - b;
-      outcome.images.push_back(report);
       const std::string error = validate_region_proposal(proposal, static_cast<std::uint32_t>(image.bytes.size()), seeds);
       if (!error.empty()) {
         outcome.reason = error;
@@ -453,7 +475,7 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
     stats.start = image.base;
     stats.length = static_cast<std::uint32_t>(image.bytes.size());
     for (std::uint32_t offset = 0; offset + 2U <= image.bytes.size(); offset += 2U) {
-      if (apply && !ranges_contain(selective.ranges[index], offset)) {  // outside the proposal: never decoded, never compiled
+      if (apply && selective.ranges.count(index) != 0U && !ranges_contain(selective.ranges[index], offset)) {  // outside the proposal: never decoded, never compiled
         ++stats.omitted;
         continue;
       }

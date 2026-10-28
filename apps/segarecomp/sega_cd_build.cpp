@@ -55,6 +55,7 @@ struct Options {
   std::string optimize = "1";
   std::string aot_policy = "compatibility";   // SEG-097-T003 (ADR 0208): `optimized` (experimental) selects the frozen gen2 M3 + B35 proposal
   bool aot_model_given = false;
+  bool aot_all_images = false;
 };
 
 struct Failure {
@@ -391,6 +392,7 @@ class Builder {
     fs::create_directories(src, ec);
     std::vector<std::string> cmd{self_, "sega-cd", "emit", "--cue", o_.cue.string(), "--bios", o_.bios.string(), "--out", (src / "program.c").string(), "--partition-window", "8192"};
     if (o_.aot_policy == "optimized") cmd.insert(cmd.end(), {"--aot-policy", "optimized", "--aot-model", "gen2"});
+    if (o_.aot_all_images) cmd.insert(cmd.end(), {"--aot-scope", "all-images"});
     for (const auto &a : admits) { cmd.push_back("--admit"); cmd.push_back(a); }
     const fs::path out = o_.output / "emit.json";
     if (run_process(cmd, out, {}, o_.compile_timeout) != 0) return Failure{"generate", "the program could not be generated: " + read_text(out, 4096)};
@@ -609,13 +611,14 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--optimize" && (value == "0" || value == "1" || value == "2")) o.optimize = value;
     else if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) o.aot_policy = value;
     else if (key == "--aot-model" && value == "gen2" && !o.aot_model_given) o.aot_model_given = true;
+    else if (key == "--aot-scope" && value == "all-images") o.aot_all_images = true;   // historical M1 scope, evidence only
     else {
       std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
       return 2;
     }
   }
   if (!have_cue || !have_bios || !have_output || !have_runtime || o.cc.empty() || o.budget == 0 || (argc - 3) % 2 != 0 ||
-      (o.aot_model_given && o.aot_policy != "optimized")) {
+      ((o.aot_model_given || o.aot_all_images) && o.aot_policy != "optimized")) {
     std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
     return 2;
   }

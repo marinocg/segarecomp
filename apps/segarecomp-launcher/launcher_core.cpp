@@ -594,14 +594,18 @@ ScdPolicyReport read_scd_policy_report(const std::string &status_text) {
   out.fallback = field("fallback") == "true";
   out.broad_entries = std::atoll(field("broad_entries").c_str());
   out.admitted_entries = std::atoll(field("admitted_entries").c_str());
+  out.m3_images = std::atoll(field("m3_images").c_str());
+  out.m3_broad_entries = std::atoll(field("m3_broad_entries").c_str());
+  out.m3_admitted_entries = std::atoll(field("m3_admitted_entries").c_str());
   return out;
 }
 
 std::string scd_policy_sentence(const ScdPolicyReport &r) {
   if (!r.present || r.requested != "optimized") return {};
   if (r.effective == "selective")
-    return "Experimental Optimized: the program contains " + std::to_string(r.admitted_entries) + " of the " + std::to_string(r.broad_entries) +
-           " instruction entries the Compatibility build would compile. It may omit code the game needs and then stops at an uncompiled entry; rebuild with Compatibility if it does. ";
+    return "Experimental Optimized: only the game's own loaded modules are optimized (" + std::to_string(r.m3_images) + " module image(s): " + std::to_string(r.m3_admitted_entries) +
+           " of the " + std::to_string(r.m3_broad_entries) + " instruction entries Compatibility would compile); the BIOS and the game's boot code stay fully compiled. "
+           "It may still omit module code the game needs and then stops at an uncompiled entry; rebuild with Compatibility if it does. ";
   return "Experimental Optimized was requested but this build is Compatibility (the product fell back: " + (r.reason.empty() ? std::string("unspecified") : r.reason) + "). ";
 }
 

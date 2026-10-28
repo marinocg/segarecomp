@@ -51,6 +51,11 @@ def main():
         fields = dict(f.split("=", 1) for f in scd_out.split())
         check(rc == 0 and fields.get("platform") == "sega-cd" and fields.get("experimental") == "1" and fields["policy_identity"] != GENESIS_GEN2_IDENTITY.split()[0].split("=")[1],
               "the Sega CD experimental policy has its own identity, labelled experimental")
+        rc, compat_out, _ = cli("aot-policy-identity", "--platform", "sega-cd", "--aot-policy", "compatibility")
+        check(rc == 0 and "policy_identity=773742c0e113b3dc5754bb759513502cc5e519f4094ee1fe0755ad247c902211" in compat_out,
+              "the Compatibility policy identity is unchanged by the changed experimental contract")
+        check(fields["policy_identity"] != "dcfc165125640c9d0b26a4a61fa5bc5c417e3b2c616dbf30a1c067e489ac7ca8" and "selective_admission.v2" in scd_out,
+              "the experimental policy identity changed (contract v2): a build made under the previous eligibility can never be reused")
         rc, out, _ = cli("aot-policy-identity", "--platform", "sega-cd", "--aot-policy", "optimized", "--aot-model", "v1")
         check(rc == 2, "Sega CD accepts only the frozen gen2 model (v1 is a usage error)")
         rc, out, _ = cli("aot-policy-identity", "--platform", "sega-cd", "--aot-policy", "compatibility", "--aot-model", "gen2")
@@ -91,8 +96,14 @@ def main():
         for r, target in ((plain, broad_off), (selective, sel_off)):
             for im in r["images"]:
                 target.setdefault((im["processor"], im["name"], im["mapping"]), set()).update(im["source_offsets"])
-        check(all(sel_off[k] <= broad_off[k] for k in broad_off) and sum(len(v) for v in sel_off.values()) < sum(len(v) for v in broad_off.values()),
-              "every offset the experimental emission compiles is also compiled by the broad one, and it omits some: a proposal can only remove entries")
+        check(all(sel_off[k] <= broad_off[k] for k in broad_off) and sum(len(v) for v in sel_off.values()) <= sum(len(v) for v in broad_off.values()),
+              "every offset the experimental emission compiles is also compiled by the broad one: a proposal can only remove entries")
+        hist_rc, hist, _ = emit("hist.c", "--aot-policy", "optimized", "--aot-model", "gen2", "--aot-scope", "all-images")
+        check(hist_rc == 0 and hist["program_identity"] not in (selective["program_identity"], plain["program_identity"]) and hist["aot_policy"]["scope"] == "all_images" and
+              selective["aot_policy"]["scope"] == "game_modules" and hist["aot_policy"]["m3_images"] == 5 and selective["aot_policy"]["m3_images"] == 3,
+              "the scope is part of the identity: the historical all-image arm and the shipped game-module arm are different programs (scored images 5 vs 3)")
+        proc = subprocess.run([*base, "--out", str(tmp / "bad.c"), "--aot-scope", "all-images"], capture_output=True, text=True)
+        check(proc.returncode == 2, "usage error: --aot-scope without the experimental policy")
         # one scoring per image: module C has two mappings and ONE report row
         names = [i["name"] for i in a["images"]]
         check(names.count("lba30") == 1 and len(names) == len(set((i["processor"], i["name"]) for i in a["images"])),
@@ -106,42 +117,77 @@ def main():
         data = json.loads(proc.stdout)
         (tmp / "comparison.json").write_text(proc.stdout)
         arms = data["subjects"]["S1"]["arms"]
-        A, B, C = arms["A"], arms["B"], arms["C"]
-        check(A["inventory"] == B["inventory"] == C["inventory"], "S1: the inventories of A, B and C are identical")
-        check(A["admitted_offsets"] == B["admitted_offsets"] and A["admitted_total"] == B["admitted_total"], "S1: B (position-independent) admits exactly A's source-relative offsets")
+        A, B, H, C = arms["A"], arms["B"], arms["H"], arms["C"]
+        check(A["inventory"] == B["inventory"] == H["inventory"] == C["inventory"], "S1: the inventories of A, B, H and C are identical (authority and mappings untouched)")
+        check(A["admitted_offsets"] == B["admitted_offsets"], "S1: B (source-relative bodies) admits exactly A's source-relative offsets")
         check(all(C["admitted_offsets"].get(k, 0) <= v for k, v in A["admitted_offsets"].items()), "S1: C admits no more offsets than A in any image")
-        check(A["deterministic"] and B["deterministic"] and C["deterministic"], "S1: every arm is deterministic")
-        check(len({A["program_identity"], B["program_identity"], C["program_identity"]}) == 3, "S1: three arms, three program identities")
-        check(A["routes"] == B["routes"], "S1: arms A and B run every route identically (result words, retired, stop)")
-        for route, r in C["routes"].items():
-            same = r == A["routes"][route]
-            check(same or (r["stop"] == "entry_not_compiled" and r["retired"] <= A["routes"][route]["retired"]),
-                  "S1/C route %s: identical to A or a typed uncompiled-entry stop after no more work (%s, %d instructions)" % (route, r["stop"], r["retired"]))
-        check(A["retention"]["retained"] == A["retention"]["executed_starts"] and C["retention"]["retained"] <= A["retention"]["executed_starts"],
-              "S1: retention of executed starts - A %d/%d, C %d/%d (reported, not claimed complete)" % (A["retention"]["retained"], A["retention"]["executed_starts"],
-                                                                                              C["retention"]["retained"], A["retention"]["executed_starts"]))
+        check(A["deterministic"] and B["deterministic"] and H["deterministic"] and C["deterministic"], "S1: every arm is deterministic")
+        check(len({A["program_identity"], B["program_identity"], H["program_identity"], C["program_identity"]}) == 4, "S1: four arms, four program identities (scope is in the experimental identity)")
+        check(A["routes"] == B["routes"], "S1: arms A and B run every route identically")
+        # the policy: boot code is broad, the modules are scored
+        sel = {i["name"]: i for i in C["images_policy"]}
+        check(sel["boot_ip"]["selection"] == "broad_required" and sel["boot_sp"]["selection"] == "broad_required" and
+              sel["boot_ip"]["selection_reason"] == "sega_cd.boot_ip" and sel["boot_sp"]["selection_reason"] == "sega_cd.boot_sp",
+              "S1/C: the boot IP and SP are broad_required (reason: their producer) and not scored")
+        mods = [i for n, i in sel.items() if n.startswith("lba")]
+        check(len(mods) == 3 and all(m["selection"] == "m3_selected" and m["selection_reason"] == "sega_cd.disc_module" and m["units"] > 0 and m["selected"] > 0 for m in mods),
+              "S1/C: the three disc game modules are genuinely scored by M3 (cells %s, selected %s)" % ([m["units"] for m in mods], [m["selected"] for m in mods]))
+        check(C["admitted_digests"]["main:boot_ip"] == A["admitted_digests"]["main:boot_ip"] and C["admitted_digests"]["sub:boot_sp"] == A["admitted_digests"]["sub:boot_sp"],
+              "S1/C: the admitted instruction sets of boot IP and SP equal Compatibility exactly")
         ca = C["aot_policy"]
-        check(ca["effective"] == "selective" and ca["admitted_entries"] == C["admitted_total"] and ca["broad_entries"] == A["admitted_total"] and not ca["fallback"],
-              "S1/C: the policy report's counts equal the independently measured offsets (%d of %d)" % (ca["admitted_entries"], ca["broad_entries"]))
-        check(C["bodies"] < B["bodies"] <= A["bodies"] and C["c_bytes"] < B["c_bytes"] < A["c_bytes"], "S1: native bodies %d / %d / %d and C bytes %d / %d / %d (A / B / C)" % (
-            A["bodies"], B["bodies"], C["bodies"], A["c_bytes"], B["c_bytes"], C["c_bytes"]))
-        missed = {k: v["missed"] for k, v in C["recall"].items()}
+        check(ca["effective"] == "selective" and not ca["fallback"] and ca["m3_images"] == 3 and ca["m3_admitted_entries"] <= ca["m3_broad_entries"] and
+              ca["admitted_entries"] == C["admitted_total"] and ca["broad_entries"] == A["admitted_total"],
+              "S1/C: report - effective selective, 3 scored images (%d of %d entries admitted), totals count the broad images as broad-admitted" % (ca["m3_admitted_entries"], ca["m3_broad_entries"]))
+        for route in C["routes"]:
+            check(C["routes"][route] == A["routes"][route] and A["routes"][route]["stop"] == "none",
+                  "S1/C route %s completes with exactly Compatibility's results (words %s, %d instructions)" % (route, C["routes"][route]["words"], C["routes"][route]["retired"]))
+        check(C["retention"]["retained"] == A["retention"]["executed_starts"], "S1/C: every executed start of the three routes is retained (%d/%d)" % (C["retention"]["retained"], A["retention"]["executed_starts"]))
+        check(any(r["stop"] == "entry_not_compiled" for r in H["routes"].values()) and H["retention"]["retained"] < A["retention"]["executed_starts"],
+              "S1/H (historical global scope): stops at uncompiled boot code on %s routes, retains %d/%d - the reason for the change" % (
+                  [k for k, r in H["routes"].items() if r["stop"] != "none"], H["retention"]["retained"], A["retention"]["executed_starts"]))
+        check(C["bodies"] <= B["bodies"] <= A["bodies"], "S1: native bodies A %d / B %d / H %d / C %d, C bytes %d / %d / %d / %d" % (A["bodies"], B["bodies"], H["bodies"], C["bodies"],
+                                                                                           A["c_bytes"], B["c_bytes"], H["c_bytes"], C["c_bytes"]))
         print("      label recall (independent encoder starts), A: %s" % {k: "%d/%d" % (v["admitted"], v["labels"]) for k, v in A["recall"].items()})
         print("      label recall (independent encoder starts), C: %s" % {k: "%d/%d" % (v["admitted"], v["labels"]) for k, v in C["recall"].items()})
-        check(any(v["missed"] > 0 for v in C["recall"].values()), "S1: the complete-recall gate is NOT met by M3+B35 (missed labelled starts per image: %s) - reported, not hidden" % missed)
+        check(any(v["missed"] > 0 for k, v in C["recall"].items() if k.startswith("lba")) or all(C["recall"][k]["admitted"] == A["recall"][k]["admitted"] for k in C["recall"]),
+              "S1: module recall under M3 is reported, not claimed (missed per image %s; full recall is not claimed - ADR 0140's 306 starts remain a known limitation)" % {k: v["missed"] for k, v in C["recall"].items()})
+
+        # BIOS-profile eligibility by provenance (negative and positive, project-authored fixture): firmware, a user-declared extent and a boot-area extent stay broad;
+        # a discovered extent outside the boot area is scored.
+        fx = tmp / "bf"
+        subprocess.run([sys.executable, str(ROOT / "tools" / "sega_cd_bios_loader_fixture.py"), "build", "--case", "direct", "--out", str(fx)], check=True, capture_output=True)
+        bios_base = [SEGARECOMP, "sega-cd", "emit", "--cue", str(fx / "disc" / "disc.cue"), "--bios", str(fx / "bios.bin"), "--aot-policy", "optimized", "--aot-model", "gen2"]
+
+        def bios_emit(name, *extra):
+            proc = subprocess.run([*bios_base, "--out", str(tmp / name), *extra], capture_output=True, text=True, timeout=600)
+            return json.loads(proc.stdout)
+        first = bios_emit("e0.c")
+        pid = first["program_identity"]
+        manual = bios_emit("e1.c", "--disc-image", "sub:81920:524288:4096")
+        boot_area = bios_emit("e2.c", "--admit", "extent:%s:sub:2048:24576:1024" % pid)
+        game_extent = bios_emit("e3.c", "--admit", "extent:%s:sub:81920:524288:4096" % pid)
+        pol = lambda r: {i["name"]: (i["selection"], i["selection_reason"]) for i in r["aot_policy"]["images"]}
+        check(pol(first)["bios"] == ("broad_required", "bios_firmware"),
+              "BIOS profile: the BIOS image is broad_required (bios_firmware)")
+        check(first["aot_policy"]["effective"] == "broad" and first["aot_policy"]["reason"] == "no_eligible_images", "BIOS profile: nothing but firmware admitted -> no eligible image, a broad build with that reason")
+        check(pol(manual)["disc0"] == ("broad_required", "manual_disc_image"), "BIOS profile: a user-declared disc image has no established role and stays broad (manual_disc_image)")
+        check(pol(boot_area)["disc0"] == ("broad_required", "boot_area_extent"), "BIOS profile: a discovered extent inside the disc's system area (boot code) stays broad (boot_area_extent)")
+        check(pol(game_extent)["disc0"] == ("m3_selected", "disc_extent") and game_extent["aot_policy"]["effective"] == "selective" and game_extent["aot_policy"]["m3_images"] == 1 and
+              game_extent["aot_policy"]["admitted_entries"] > 0, "BIOS profile: a discovered game extent outside the boot area is scored (m3_selected, disc_extent)")
+        check(game_extent["program_identity"] != first["program_identity"], "BIOS profile: the admission chain keeps working under the experimental identity")
 
         s2 = data["subjects"]["S2"]["arms"]
-        check(s2["A"]["status"] == "ok" and s2["C"]["status"] == "ok" and s2["A"]["aot_policy"]["effective"] == "broad", "S2: both builds complete; the default is the broad policy")
+        check(all(s2[a]["status"] == "ok" for a in "ACH") and s2["A"]["aot_policy"]["effective"] == "broad", "S2: all builds complete; the default is the broad policy")
         c2 = s2["C"]["aot_policy"]
-        check(c2["requested"] == "optimized" and c2["effective"] == "selective" and not c2["fallback"] and c2["admitted_entries"] < c2["broad_entries"],
-              "S2: status.json records the experimental policy (admitted %d of %d aligned starts)" % (c2["admitted_entries"], c2["broad_entries"]))
-        check(s2["C"]["c_bytes"] < s2["A"]["c_bytes"] and s2["C"]["build_cpu_s"] < s2["A"]["build_cpu_s"], "S2: generated C %d -> %d bytes, build CPU %.1f -> %.1f s" % (
-            s2["A"]["c_bytes"], s2["C"]["c_bytes"], s2["A"]["build_cpu_s"], s2["C"]["build_cpu_s"]))
-        check(s2["C"]["stop"] in ("none", "entry_not_compiled") and (s2["C"]["stop"] == "none" or s2["C"]["frontier"]), "S2: the experimental program ends normally or at a typed uncompiled entry with a recorded frontier (%s / %s)" % (
-            s2["C"]["stop"], s2["C"]["frontier"]))
+        check(c2["requested"] == "optimized" and c2["effective"] in ("selective", "broad") and (c2["effective"] == "selective" or c2["fallback"]),
+              "S2/C: status.json records the experimental request and the product's effective policy (%s; reason %s; scored images %s)" % (c2["effective"], c2["reason"], c2.get("m3_images")))
+        names = {i["name"]: i for i in s2["C"]["images"]}
+        check(names["bios"]["selection"] == "broad_required" and names["bios"]["selection_reason"] == "bios_firmware" and
+              all(i["selection"] in ("broad_required", "m3_selected", "broad_fallback") for i in names.values()), "S2/C: the BIOS image is broad_required (bios_firmware); every image reports its selection")
+        check(all(i["selection"] != "m3_selected" or i["selection_reason"] == "disc_extent" for i in names.values()), "S2/C: only discovered disc extents outside the boot area are ever scored")
         check(s2["A"]["program_identity"] != s2["C"]["program_identity"], "S2: the experimental request has its own program identity")
         print(json.dumps({"S1": {k: {kk: vv for kk, vv in v.items() if kk in ("bodies", "admitted_total", "c_bytes", "compile_cpu_s", "compile_peak_kib", "object_bytes", "retention")}
-                                    for k, v in arms.items()}, "S2": {k: {kk: vv for kk, vv in v.items() if kk in ("build_cpu_s", "build_peak_kib", "c_bytes", "result", "stop", "frontier", "rounds")}
+                                    for k, v in arms.items()}, "S2": {k: {kk: vv for kk, vv in v.items() if kk in ("build_cpu_s", "build_peak_kib", "c_bytes", "result", "stop", "frontier", "rounds", "extents", "aot_policy")}
                                                                       for k, v in s2.items()}}, sort_keys=True))
     print("%d checks, %d failures" % (checks[0], len(failures)))
     return 1 if failures else 0

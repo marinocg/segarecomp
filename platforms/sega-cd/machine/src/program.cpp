@@ -635,6 +635,12 @@ std::string image_label(const ProcessorImages &processor, std::uint32_t index) {
   return std::string(processor_name(processor.processor)) + ":" + processor.roles[index].name;
 }
 
+// Eligibility by the image's own producer (explicit provenance, never an address range or a name): only a module admitted from the disc by the module list is scored.
+// The boot IP/SP (and anything unrecognised) stays under broad AOT.
+bool m3_eligible(const SelectiveAdmissionRequest &request, const ExecutableImage &image) {
+  return request.all_images || image.provenance.producer == "sega_cd.disc_module";
+}
+
 Proposals make_proposals(const BootImages &images, const SelectiveAdmissionRequest &request) {
   Proposals out;
   const ProcessorImages *processors[2] = {&images.main, &images.sub};
@@ -647,6 +653,17 @@ Proposals make_proposals(const BootImages &images, const SelectiveAdmissionReque
     for (std::uint32_t i = 0; i < processor.images.images.size(); ++i) {
       const auto &image = processor.images.images[i];
       const auto bytes = executable_image_bytes(processor.images, image);
+      if (!m3_eligible(request, image)) {
+        ImageAdmissionReport skipped;
+        skipped.selection = ImageSelection::broad_required;
+        skipped.selection_reason = image.provenance.producer.empty() ? std::string("unknown_provenance") : image.provenance.producer;
+        skipped.processor = processor.processor;
+        skipped.name = processor.roles[i].name;
+        skipped.image_id = image.id.value;
+        skipped.source_bytes = static_cast<std::uint32_t>(bytes.size());
+        out.reports.push_back(std::move(skipped));
+        continue;
+      }
       std::vector<std::uint32_t> seeds;
       if (!processor.roles[i].module) {
         const auto &mapping = image.mappings.front();
@@ -659,6 +676,8 @@ Proposals make_proposals(const BootImages &images, const SelectiveAdmissionReque
       seeds.erase(std::unique(seeds.begin(), seeds.end()), seeds.end());
       RegionProposal proposal = request.propose(bytes, seeds);
       ImageAdmissionReport report;
+      report.selection = ImageSelection::m3_selected;
+      report.selection_reason = image.provenance.producer;
       report.processor = processor.processor;
       report.name = processor.roles[i].name;
       report.image_id = image.id.value;
@@ -706,10 +725,13 @@ ProcessorsEmission emit_sega_cd_processors(const BootImages &images, const SegaC
         report.processor = processors[cpu]->processor;
         report.name = processors[cpu]->roles[i].name;
         report.image_id = image.id.value;
+        report.selection = m3_eligible(*options.selective, image) ? ImageSelection::broad_fallback : ImageSelection::broad_required;
+        report.selection_reason = image.provenance.producer.empty() ? std::string("unknown_provenance") : image.provenance.producer;
         report.source_bytes = static_cast<std::uint32_t>(executable_image_bytes(processors[cpu]->images, image).size());
         report.broad_entries = static_cast<std::uint32_t>(admission[cpu].broad[i].size());
-        report.admitted_entries = 0;
+        report.admitted_entries = report.broad_entries;  // the build is broad: every entry is admitted
         outcome.broad_entries += report.broad_entries;
+        outcome.admitted_entries += report.admitted_entries;
         outcome.images.push_back(std::move(report));
       }
     broad.admission = outcome;
@@ -739,10 +761,17 @@ ProcessorsEmission emit_sega_cd_processors(const BootImages &images, const SegaC
       report.admitted_entries = static_cast<std::uint32_t>(admission[cpu].admitted[i].size());
       rows.emplace_back(image_label(processor, i), std::vector<std::uint32_t>(admission[cpu].admitted[i].begin(), admission[cpu].admitted[i].end()));
     }
+    if (report.selection != ImageSelection::m3_selected) report.admitted_entries = report.broad_entries;
+    else {
+      ++outcome.m3_images;
+      outcome.m3_broad_entries += report.broad_entries;
+      outcome.m3_admitted_entries += report.admitted_entries;
+    }
     admitted_total += report.admitted_entries;
     broad_total += report.broad_entries;
   }
-  if (admitted_total == 0U && broad_total != 0U) return finish_broad("validator_rejected:nothing_admitted", {}, std::move(proposals.reports));
+  if (outcome.m3_images == 0U) return finish_broad("no_eligible_images", {}, std::move(proposals.reports));
+  if (outcome.m3_admitted_entries == 0U && outcome.m3_broad_entries != 0U) return finish_broad("validator_rejected:nothing_admitted", {}, std::move(proposals.reports));
   outcome.admitted = true;
   outcome.k_sha256 = admitted_set_digest(rows);
   outcome.images = std::move(proposals.reports);

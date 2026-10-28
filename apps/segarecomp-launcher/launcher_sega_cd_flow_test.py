@@ -210,8 +210,8 @@ def main():
         check(code == 0 and got.get("build") == "ok" and "experimental_optimized" in got.get("build_policy", "") and "Experimental Optimized" in got.get("build_summary", ""),
               "experimental build: the summary says it is the experimental policy (%s)" % got.get("build_policy"))
         check(status["aot_policy"]["requested"] == "optimized" and status["aot_policy"]["effective"] == "selective" and not status["aot_policy"]["fallback"] and
-              status["aot_policy"]["admitted_entries"] < status["aot_policy"]["broad_entries"],
-              "experimental build: status.json records the product's effective policy (admitted %s of %s)" % (status["aot_policy"]["admitted_entries"], status["aot_policy"]["broad_entries"]))
+              status["aot_policy"]["m3_admitted_entries"] <= status["aot_policy"]["m3_broad_entries"] and status["aot_policy"]["m3_images"] >= 1,
+              "experimental build: status.json records the product's effective policy (game modules: %s of %s entries)" % (status["aot_policy"]["m3_admitted_entries"], status["aot_policy"]["m3_broad_entries"]))
         check(got.get("stop") in (None, "entry_not_compiled", "image_entry_not_compiled"), "experimental build: the program ends normally or at a typed uncompiled entry (%s)" % got.get("stop"))
         library_text = (library3 / "library.json").read_text()
         check('"experimental_m3": true' in library_text and '"program_experimental": true' in library_text, "experimental build: the library records the choice and the program's policy")

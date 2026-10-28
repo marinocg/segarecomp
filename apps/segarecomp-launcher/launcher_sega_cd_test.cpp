@@ -483,12 +483,12 @@ void test_experimental_policy(const fs::path &base, const fs::path &fake) {
   expect(!ScdBuildRequest{}.experimental_m3, "policy: a build request is Compatibility unless the experimental choice is set");
   const std::string selective =
       "{\"status\":\"ok\",\"aot_policy\":{\"requested\":\"optimized\",\"experimental\":true,\"effective\":\"selective\",\"fallback\":false,\"reason\":\"none\",\"failed_image\":\"\","
-      "\"k_sha256\":\"ab\",\"broad_entries\":8574,\"admitted_entries\":3072,\"images\":[{\"name\":\"bios\",\"broad_entries\":1}]},\"frontier\":null}";
+      "\"k_sha256\":\"ab\",\"broad_entries\":10439,\"admitted_entries\":9280,\"m3_images\":1,\"m3_broad_entries\":1865,\"m3_admitted_entries\":706,\"images\":[{\"name\":\"bios\",\"broad_entries\":1}]},\"frontier\":null}";
   const auto sel = read_scd_policy_report(selective);
-  expect(sel.present && sel.requested == "optimized" && sel.effective == "selective" && !sel.fallback && sel.broad_entries == 8574 && sel.admitted_entries == 3072,
+  expect(sel.present && sel.requested == "optimized" && sel.effective == "selective" && !sel.fallback && sel.broad_entries == 10439 && sel.admitted_entries == 9280 && sel.m3_images == 1 && sel.m3_admitted_entries == 706,
          "policy: the product's aot_policy member is read (requested, effective, no fallback, counts)");
-  expect(scd_policy_sentence(sel).find("3072 of the 8574") != std::string::npos && scd_policy_sentence(sel).find("Experimental") != std::string::npos &&
-             scd_policy_sentence(sel).find("uncompiled entry") != std::string::npos,
+  expect(scd_policy_sentence(sel).find("706 of the 1865") != std::string::npos && scd_policy_sentence(sel).find("Experimental") != std::string::npos &&
+             scd_policy_sentence(sel).find("uncompiled entry") != std::string::npos && scd_policy_sentence(sel).find("BIOS and the game's boot code stay fully compiled") != std::string::npos,
          "policy: the summary says it is experimental, how much it compiled, and that it can stop at an uncompiled entry");
   const std::string fallback =
       "{\"aot_policy\":{\"requested\":\"optimized\",\"experimental\":true,\"effective\":\"broad\",\"fallback\":true,\"reason\":\"rom_size\",\"failed_image\":\"main:bios\","
