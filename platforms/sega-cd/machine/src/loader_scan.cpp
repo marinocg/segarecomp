@@ -130,6 +130,7 @@ public:
     for (auto it = roots.rbegin(); it != roots.rend(); ++it) {
       State start;
       start.pc = *it;
+      if (!options_.module_table_roots) { stack.push_back(std::move(start)); continue; }   // the legacy single root: states and pruning exactly as in M1
       if (seen_.insert(serialize(start)).second) { ++scan_.states; stack.push_back(std::move(start)); }
     }
     while (!stack.empty() && scan_.complete) {

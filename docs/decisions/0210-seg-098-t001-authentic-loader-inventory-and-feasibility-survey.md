@@ -27,16 +27,16 @@ are off by default and the build never passes them.
 | Static, what-if: walk continues after computed calls | 36 states, 1,122 steps, still 0 CDD/CDC sites, 0 operations; 4 BIOS-service call sites (2 with a function number not constant) |
 | Byte-pattern count in the SP image (not a decode) | 17 `MOVE.W #n,D0` + `JSR` to the BIOS service vector, 6 to the SP's own dispatcher |
 | Observed build route | 17 rounds, 12 admitted extents, stop `pcm_unsupported` (the previous result, reproduced) |
-| Observed by destination | 7 main Work RAM, 5 sub PRG RAM, 0 Word RAM; sizes: 1 under 2 KiB, 10 of 2-32 KiB, 1 of at least 32 KiB; 158,010 bytes; ~79,000 aligned instruction starts |
+| Observed by destination | 7 main Work RAM, 5 sub PRG RAM, 0 Word RAM; sizes: 1 under 2 KiB, 10 of 2-32 KiB, 1 of at least 32 KiB; about 158 KB; ~79,000 aligned instruction starts |
 | Overlay alternatives needed | 4 destination groups with more than one alternative |
 | Static sources / observed sources / overlap | 0 / 12 / 0 |
-| ISO9660 | 131 files, 120.9 MB; 7 of 12 observed sources start exactly at a file's first block, 9 of 12 lie inside a file |
+| ISO9660 | about 130 files, ~121 MB; 7 of 12 observed sources start exactly at a file's first block, 9 of 12 lie inside a file |
 | LBA constants in the boot images | 0 of the 131 file start blocks occur as a 32-bit constant; 3 of 12 observed sources match a 16/32-bit pattern (an upper bound: 16-bit matches of small values are expected by chance) |
 | Bounded-analysis exhaustion | none (states, steps, depth, operations, modules: no limit reached) |
 
-Reading: on the authentic disc the scan found nothing for two stacked reasons. First, a defect of scope, not of principle: it never walked the SP's real entry points. Second,
-even when it does, the SP does not program the CD hardware itself on the walked paths: it requests CD service through the BIOS service vector with constant function numbers and
-SP-internal table dispatch, and file selection is not by LBA constant (none of the 131 file start blocks appears in the boot images), i.e. it goes through the ISO9660 directory
+Reading (a hypothesis consistent with the measurements, not a proof): on the authentic disc the scan found nothing for two stacked reasons. First, a defect of scope, not of principle: it never walked the SP's real entry points. Second,
+even when it does, the SP does not program the CD hardware itself on the walked paths (a short prefix of the SP: 38 steps, 1,122 in the what-if; both stop at a computed dispatcher, so this says nothing about the rest of the SP): it requests CD service through the BIOS service vector with constant function numbers and
+SP-internal table dispatch, and file selection is not by LBA constant (none of the file start blocks appears as a 32-bit big-endian constant in the two boot images; BCD/MSF encodings, constants in loaded code or data and computed addresses are not searched, so this is weak evidence), i.e. it goes through the ISO9660 directory
 at run time. The loader arguments (which file, which destination) are produced by later, command- or table-driven code that a constant walk of the boot image cannot reach without
 (a) recovering immutable PC-indexed dispatch tables, (b) modelling the documented BIOS CD/file service arguments, and very likely (c) the main program's requests (its IP is
 also a static boot image). The first is bounded; the third is not established by this survey and is recorded as the open question for T003.
@@ -46,7 +46,7 @@ descriptor entry and finds modules A, B and C (identical to the entry-at-start d
 
 ## Decision
 
-`AUTHENTIC_SURVEY_COMPLETE`. Ranked missing capabilities, by what blocks the most coverage on the authentic evidence:
+`AUTHENTIC_SURVEY_COMPLETE`. Ranked missing capabilities (rank 1 is measured; ranks 2 and 3 are judgement, not quantified by the survey):
 
 1. **SP module-jump-table roots (T002 prerequisite).** Without it nothing on an authentic disc is walked. Bounded, no new semantics (a header field and four word offsets, all
    validated inside the image, `MAIN` name check, fall back to the descriptor entry). Adopted by T002 for production.
