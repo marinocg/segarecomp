@@ -37,7 +37,7 @@ HEADER_A = 0x40
 FAR_A = 0x840
 CASES = ("base", "alias", "unmodelled", "two_paths", "corrupt_pvd", "corrupt_extent", "no_exec", "stale_service", "late_patch", "entry_unknown",
          "loop_pointer", "loop_pointer_late", "loop_pointer_early_store", "loop_unknown_exit", "loop_memory", "loop_memory_base", "branch_two", "loop_alias", "computed",
-         "recursive", "cycle", "transformed", "overlay")   # SEG-099-T003: state-convergence cases; T004: recursive discovery cases
+         "recursive", "recursive_taken", "cycle", "transformed", "overlay", "hdr_alias")   # SEG-099-T003: state-convergence cases; T004: recursive discovery cases
 SP_TABLE_PREFIX = 0x2A
 SCRATCH = 0x040000
 BASE_A2 = 0x0B8000
@@ -246,7 +246,10 @@ def build(options):
     bios("CDCREAD")
     s.bcc("cs", "rs_next")
     s.move("l", work(V_DEST), F.a(0))                          # A0 = destination (memory-carried)
-    s.lea(work(V_HDR), 1)
+    if case == "hdr_alias":                                    # the header pointer carries a high byte the 68000 bus ignores: it lands on the base variable
+        s.move("l", F.imm(WORK + V_BASE + 0x01000000), F.a(1))
+    else:
+        s.lea(work(V_HDR), 1)
     bios("CDCTRN")
     bios("CDCACK")
     s.immop("add", "l", 2048, work(V_DEST))
@@ -350,6 +353,14 @@ def build(options):
         then(m)
 
     extra_a = None
+    if case == "recursive_taken":                              # the same, with the load on the TAKEN arm of a conditional branch inside module A
+        def extra_a(m):
+            m.immop("cmp", "b", 3, F.d(7))
+            m.bcc("eq", "do_r")
+            m.bra("skip_r")
+            m.label("do_r")
+            loader_call(m, "name_r", BASE_R, lambda mm: mm.w(0x4E90))
+            m.label("skip_r")
     if case == "recursive":                                    # on route 3 module A itself loads and runs module R (never loaded by the build pass)
         def extra_a(m):
             m.immop("cmp", "b", 3, F.d(7))

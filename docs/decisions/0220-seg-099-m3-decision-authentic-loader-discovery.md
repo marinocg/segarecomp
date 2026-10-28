@@ -50,3 +50,17 @@ Smallest evidence-backed next step: a bounded **feasibility survey** (aggregate,
 ## Not claimed
 
 Whole-game completeness of any title; a commercial game becoming playable; any authentic static coverage; main-processor loader analysis; offline decompression or relocation; any benefit of `loaded` over `hull`; robustness of the convergence threshold beyond the measured range.
+
+## Independent adversarial review (fresh validator, scratch reproducers under /tmp) and fixes
+
+Six defects were confirmed against head 671aabe and are fixed in this PR; each now has a regression where a project fixture can express it.
+
+1. *Recursive walk dropped the taken arm of an undecided branch inside a proven module* (a load on that arm was missed with `complete: true`). Fixed (`queue_taken`); `recursive_taken` fixture + test. Side effect also fixed: a module's own internal direct branches/calls (same run of sectors) are no longer recorded as entries; only transfers from outside the module are.
+2. *PC-relative reads ignored `image_dirty` and volatility* in the work-variable model. Fixed: in that model the generic path alone reads the image, and only until it may have changed.
+3. *A refused or unknown hardware CDC transfer left tracked memory intact.* Fixed: it forgets all abstract state (`unresolved_hw_transfer`).
+4. *MOVEP invalidated too few bytes* (spans 2n-1). Fixed.
+5. *CDCTRN's header clear used an unmasked A1.* Fixed (24-bit bus mask, image-dirty on overlap); `hdr_alias` fixture + test.
+6. *M2 behaviour with the new options off was not byte-identical.* The module-grouping rewrite is now used only with `work_state` (the M1/M2 grouping is kept verbatim otherwise). The DBcc counter-register correction (the legacy scan cleared D0 instead of the counter register - an unsoundness) is deliberately unconditional and is recorded here as a correction of the M1/M2 scan, not a feature.
+
+Also taken from the unconfirmed concerns: `top_dirty` is set by any store through the stack pointer; a tail `JMP $5F22` returns to the caller's continuation instead of ending the path; proven-module code that cannot be decoded is `loaded_bytes_unknown`, not a silent path end; entries must be even and inside the image and a run is capped at the module list's size bound.
+Known and accepted: runs may merge sectors loaded on exclusive paths (byte-verified at admission, wasteful at worst); `static_extent_is_proven` caches one scan per process (one disc per process); the async-volatility fixpoint has no shipped fixture (verified by the validator with a scratch interrupt entry); the BIOS-model assumptions of ADR 0216 cannot be falsified with project fixtures.

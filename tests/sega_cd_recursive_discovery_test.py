@@ -82,6 +82,12 @@ def main():
             r = scan(fx, "--recursive-modules", "--scan-order", str(order))
             check(json.dumps(r["modules"], sort_keys=True) == json.dumps(rec["modules"], sort_keys=True) and r["complete"], "recursive: exploration order %d gives the same modules" % order)
 
+        # ---- the load sits on the TAKEN arm of a conditional branch inside module A ----
+        ftk, otk = fixture(tmp, "recursive_taken")
+        tk = scan(ftk, "--recursive-modules")
+        check(set(blocks(tk)) == {A, B, R} and tk["complete"], "recursive_taken: a load on the taken arm of an undecided branch inside a proven module is found too (the taken arm is walked, not dropped)")
+        check(all(0x840 not in m["entries"] for m in blocks(tk).values()) and blocks(rec)[A]["entries"] == [0x40], "entries: only transfers into a module from outside it are entries; its internal direct branches and calls are not")
+
         # ---- the supported build and launcher ----
         done, st = build(fx, tmp / "n-rec", cache)
         check(done.returncode == 0 and st and st["status"] == "ok" and st["stop"] == "none" and st["result"] == "idle", "build: the supported build succeeds; the build pass (route 0) never loads R")

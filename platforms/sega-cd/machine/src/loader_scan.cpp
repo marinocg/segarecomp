@@ -415,6 +415,7 @@ private:
   std::set<std::pair<std::uint32_t, std::uint32_t>> modelled_sites_;
   std::set<std::uint32_t> unmodelled_sites_, args_resolved_, args_unresolved_, transfers_resolved_, transfers_unresolved_, decided_sites_;
   std::uint32_t mem_resolved_reads_{};
+  std::uint32_t cur_pc_{};            // the address of the instruction being executed
   std::set<std::uint32_t> entered_;   // distinct proven entries whose code was walked (recursive_modules)
   bool lookup_unknown_{};
   std::unordered_map<std::string, Head> heads_;
@@ -605,20 +606,23 @@ private:
     if (h.reg_ptr.v != 0U) h.reg_ptr = K((h.reg_ptr.v + 1U) & 0xFU);
   }
 
+  // A hardware transfer the walk cannot resolve may still write memory (a DMA to an unknown or unsupported destination): in the work-variable model nothing tracked survives it.
+  void unresolved_hw_transfer(State &s) { if (ws_) forget_all(s); }
+
   void transfer(State &s, std::uint32_t pc) {
     trigger_sites_.insert(pc);
     const auto &h = s.hw;
     // DOUTEN known clear: DTRG starts nothing. Unknown: the load is proposed anyway (a proposal can only fail closed at run time).
     if (h.ifctrl.known() && (h.ifctrl.v & 0x02U) == 0U) return;
     if (!h.lba.known()) {
-      refuse(LoaderRefusalKind::lba_unknown, pc); return; }
-    if (!h.dest.known() || !h.dma_address.known()) { refuse(LoaderRefusalKind::destination_unknown, pc); return; }
-    if (h.dest.v != 7U) { refuse(LoaderRefusalKind::destination_unsupported, pc); return; }
-    if (!h.dbcl.known() || !h.dbch.known()) { refuse(LoaderRefusalKind::length_unsupported, pc); return; }
+      refuse(LoaderRefusalKind::lba_unknown, pc); unresolved_hw_transfer(s); return; }
+    if (!h.dest.known() || !h.dma_address.known()) { refuse(LoaderRefusalKind::destination_unknown, pc); unresolved_hw_transfer(s); return; }
+    if (h.dest.v != 7U) { refuse(LoaderRefusalKind::destination_unsupported, pc); unresolved_hw_transfer(s); return; }
+    if (!h.dbcl.known() || !h.dbch.known()) { refuse(LoaderRefusalKind::length_unsupported, pc); unresolved_hw_transfer(s); return; }
     const std::uint32_t bytes = (((h.dbch.v & 0xFU) << 8) | h.dbcl.v) + 1U;
-    if (bytes != kLoaderScanSectorBytes) { refuse(LoaderRefusalKind::length_unsupported, pc); return; }
+    if (bytes != kLoaderScanSectorBytes) { refuse(LoaderRefusalKind::length_unsupported, pc); unresolved_hw_transfer(s); return; }
     const std::uint32_t destination = kWordRamSub + ((h.dma_address.v << 3) & kDmaAddressMask);
-    if (destination + bytes > kWordRamSubEnd) { refuse(LoaderRefusalKind::destination_unsupported, pc); return; }
+    if (destination + bytes > kWordRamSubEnd) { refuse(LoaderRefusalKind::destination_unsupported, pc); unresolved_hw_transfer(s); return; }
     std::uint32_t op = 0;
     for (; op < scan_.operations.size(); ++op) {
       const auto &o = scan_.operations[op];
@@ -794,7 +798,7 @@ private:
         }
         if (all) { if (!p.pc_rel) ++mem_resolved_reads_; Val r = K(v); r.disc = disc; return r; }
       }
-      if (p.pc_rel && options_.constant_dispatch) return image_read(p.addr, w);
+      if (p.pc_rel && options_.constant_dispatch && !ws_) return image_read(p.addr, w);   // (in the work-variable model the generic path above already reads the image, until it may have changed)
       return {};
     }
     default: return {};
@@ -812,7 +816,8 @@ private:
         note_write(s, p.addr, p.addr + nbytes(w));
       }
       return;
-    case Place::Kind::unknown_mem: s.mem.clear(); s.image_dirty = true; note_write_unknown(s); taint_hw(s); return;   // an unknown alias: nothing tracked survives
+    case Place::Kind::unknown_mem: s.mem.clear(); s.image_dirty = true; note_write_unknown(s); taint_hw(s); return;
+    case Place::Kind::stack: s.top_dirty = true; return;   // an unknown alias: nothing tracked survives
     default: return;
     }
   }
@@ -968,7 +973,7 @@ private:
     Inval out;
     const auto &ea = op.destination_ea;
     const unsigned r = ea.reg & 7U;
-    const std::uint32_t n = op.kind == M68kIrKind::movem_transfer ? 64U : nbytes(op.size);
+    const std::uint32_t n = op.kind == M68kIrKind::movem_transfer ? 64U : op.kind == M68kIrKind::movep_transfer ? 2U * nbytes(op.size) - 1U : nbytes(op.size);
     switch (ea.mode) {
     case M68kEaMode::address_indirect: case M68kEaMode::address_postinc: case M68kEaMode::address_predec: case M68kEaMode::address_disp16: case M68kEaMode::address_index8: {
       if (op.kind == M68kIrKind::movem_transfer && op.movem_direction != M68kMovemDirection::registers_to_memory) return out;
@@ -1146,7 +1151,7 @@ private:
     loaded.push_back({op, destination, kLoaderScanSectorBytes});
     note_write(s, destination, destination + kLoaderScanCdcTrnSpan);
     deposit_sector(s, cd.pos.v, destination, kLoaderScanCdcTrnSpan);
-    if (s.a[1].known()) { s.mem.clear_range(s.a[1].v, s.a[1].v + 4U); note_write(s, s.a[1].v, s.a[1].v + 4U); }
+    if (s.a[1].known()) { const std::uint32_t h = s.a[1].v & 0x00FFFFFFU; s.mem.clear_range(h, h + 4U); note_write(s, h, h + 4U); if (h < end_ && h + 4U > base_) s.image_dirty = true; }
     else { s.mem.clear(); note_write_unknown(s); }
   }
 
@@ -1283,15 +1288,29 @@ private:
   }
 
   // ---- control -----------------------------------------------------------------------------------------------------------
+  // The taken arm of a conditional: a target inside a loaded range is an entry proof (when it comes from outside that range) and, under recursion, is still walked.
+  bool queue_taken(State &taken, std::uint32_t target) {
+    const bool landed = note_entry(taken, target, true);
+    return !landed || (ws_ && options_.recursive_modules && decode_state(taken, target));
+  }
+
   // A transfer to `target`: records the entry when it lands in a load of this path. Returns true when it did.
-  bool note_entry(State &s, std::uint32_t target) {
+  // `direct`: a statically encoded branch or call. Inside a proven module such a transfer from the module's own code is not a new entry (the traversal follows it); computed ones are.
+  bool note_entry(State &s, std::uint32_t target, bool direct = false) {
     bool landed = false;
     for (const auto &l : s.loaded) {
       if (target >= l.base && target < l.base + l.bytes) {
+        // the same module = the same run of consecutive sectors (disc and memory advance together)
+        const bool from_inside = ws_ && options_.recursive_modules && std::any_of(s.loaded.begin(), s.loaded.end(), [&](const Loaded &o) {
+          return cur_pc_ >= o.base && cur_pc_ < o.base + o.bytes &&
+                 static_cast<std::int64_t>(scan_.operations[o.op].lba) - static_cast<std::int64_t>(scan_.operations[l.op].lba) ==
+                     (static_cast<std::int64_t>(o.base) - static_cast<std::int64_t>(l.base)) / static_cast<std::int64_t>(kLoaderScanSectorBytes);
+        });
         if (ws_ && !(s.mem.get_disc(target) && s.mem.get_disc(target + 1U))) {   // the bytes at the target are no longer known to be the disc's (decoded in place, overwritten, forgotten): no source claim
           refuse(LoaderRefusalKind::loaded_bytes_unknown, s.pc);
           continue;
         }
+        if (direct && from_inside) { landed = true; continue; }
         auto &entries = scan_.operations[l.op].entries;
         if (std::find(entries.begin(), entries.end(), target) == entries.end()) entries.push_back(target);
         landed = true;
@@ -1339,9 +1358,16 @@ private:
       if (!scan_.complete) return;
       if (++scan_.steps > kLoaderScanMaxSteps) { exhausted(s.pc); return; }
       const auto decoded = decode_state(s, s.pc);
-      if (!decoded) { end_at("undecodable_or_outside", s.pc); return; }  // outside the boot image (a loaded module's code is not walked) or not an instruction
+      if (!decoded) {
+        if (ws_ && options_.recursive_modules && (s.pc < base_ || s.pc >= end_) &&
+            std::any_of(s.loaded.begin(), s.loaded.end(), [&](const Loaded &l) { return s.pc >= l.base && s.pc < l.base + l.bytes; }))
+          refuse(LoaderRefusalKind::loaded_bytes_unknown, s.pc);   // proven module code that cannot be decoded from known bytes: not silently dropped
+        end_at("undecodable_or_outside", s.pc);
+        return;
+      }  // outside the boot image (a loaded module's code is not walked) or not an instruction
       const M68kIrOperation &op = *decoded;
       const std::uint32_t here = s.pc;
+      cur_pc_ = here;
       const std::uint32_t next = here + op.provenance.length.value;
       if (op.kind == M68kIrKind::stop_until_interrupt) { end_at("stop", here); return; }
       if (op.kind == M68kIrKind::write_move && op.source_ea.mode == M68kEaMode::address_postinc && op.destination_ea.mode == M68kEaMode::address_postinc) copy_sites_.insert(here);
@@ -1354,6 +1380,8 @@ private:
         const Inval inval = invalidation_for(s, op);
         const bool touches_stack = op.kind == M68kIrKind::link_frame || op.kind == M68kIrKind::unlink_frame || op.kind == M68kIrKind::push_effective_address ||
                                    op.kind == M68kIrKind::movem_transfer || op.destination_ea.mode == M68kEaMode::address_predec || op.destination_ea.mode == M68kEaMode::address_postinc ||
+                                   ((op.destination_ea.mode == M68kEaMode::address_indirect || op.destination_ea.mode == M68kEaMode::address_disp16) && (op.destination_ea.reg & 7U) == 7U) ||
+                                   ((op.destination_ea.mode == M68kEaMode::address_indirect || op.destination_ea.mode == M68kEaMode::address_disp16) && (op.destination_ea.reg & 7U) == 7U) ||
                                    op.source_ea.mode == M68kEaMode::address_predec || op.source_ea.mode == M68kEaMode::address_postinc ||
                                    (op.destination_ea.mode == M68kEaMode::address_register && (op.destination_ea.reg & 7U) == 7U);
         // An unmodelled instruction still advances a known auto-incremented / -decremented address register by the access size.
@@ -1424,14 +1452,14 @@ private:
       if (successors.empty()) return;
       // Direct calls: BSR/JSR to a constant.
       if (successors.size() == 1U && successors.front().kind == M68kControlSuccessorKind::call_target) {
-        if (!transfer_to(s, K(successors.front().target), true, next, here, stack)) return;
+        if (!transfer_to(s, K(successors.front().target), true, next, here, stack, true)) return;
         if (!continue_or_fork(s, stack)) return;
         continue;
       }
       if (successors.size() == 1U) {
         const auto &only = successors.front();
         if (only.kind == M68kControlSuccessorKind::branch_target) {
-          if (!transfer_to(s, K(only.target), false, next, here, stack)) return;
+          if (!transfer_to(s, K(only.target), false, next, here, stack, true)) return;
           if (!continue_or_fork(s, stack)) return;
         } else {
           s.pc = only.target;  // straight-line flow is not a join point: no visited-set entry
@@ -1461,7 +1489,7 @@ private:
               State taken = s;
               taken.pc = taken_succ->target;
               if (low.known() && low.v == 0U && !cond) { /* an expired counter cannot take the loop unless the condition was true: the arm below covers it */ }
-              else { taken.d[counter] = merge(taken.d[counter], low.known() ? K((low.v - 1U) & 0xFFFFU) : Val{}, Width::word); if (!note_entry(taken, taken_succ->target)) push(stack, std::move(taken)); }
+              else { taken.d[counter] = merge(taken.d[counter], low.known() ? K((low.v - 1U) & 0xFFFFU) : Val{}, Width::word); if (queue_taken(taken, taken_succ->target)) push(stack, std::move(taken)); }
               s.d[counter] = merge(s.d[counter], Val{}, Width::word);
               s.pc = fall_succ->target;
               if (!continue_or_fork(s, stack)) return;
@@ -1473,7 +1501,7 @@ private:
           }
           if (go) {
             if (*go) {
-              if (!transfer_to(s, K(taken_succ->target), false, next, here, stack)) return;
+              if (!transfer_to(s, K(taken_succ->target), false, next, here, stack, true)) return;
             } else {
               s.pc = fall_succ->target;
             }
@@ -1488,7 +1516,7 @@ private:
           State taken = s;
           taken.pc = successor.target;
           if (op.kind == M68kIrKind::dbcc_loop) taken.d[op.destination_ea.reg & 7U] = {};
-          if (!note_entry(taken, successor.target)) push(stack, std::move(taken));
+          if (queue_taken(taken, successor.target)) push(stack, std::move(taken));
         } else {
           s.pc = successor.target;
         }
@@ -1508,7 +1536,7 @@ private:
   }
 
   // Control transfer to `target` (a call when `call`, with continuation `next`). Returns false when the path ends here.
-  bool transfer_to(State &s, const Val &target, bool call, std::uint32_t next, std::uint32_t here, std::vector<State> &) {
+  bool transfer_to(State &s, const Val &target, bool call, std::uint32_t next, std::uint32_t here, std::vector<State> &, bool direct = false) {
     if (!target.known()) {
       foreign_unknown_.insert(here);
       if (options_.constant_dispatch) refuse(LoaderRefusalKind::computed_control_unresolved, here);
@@ -1516,7 +1544,7 @@ private:
       if (call) { havoc_after_foreign_call(s); s.pc = next; return true; }
       return false;
     }
-    if (note_entry(s, target.v)) {  // a proven entry into a loaded range
+    if (note_entry(s, target.v, direct)) {  // a proven entry into a loaded range
       if (ws_ && options_.recursive_modules && decode_state(s, target.v)) {   // recursive discovery: walk the module's own code from the proven entry
         if (entered_.insert(target.v).second && entered_.size() > kLoaderScanMaxModuleEntries) { exhausted(here); return false; }
         if (call) {
@@ -1542,6 +1570,12 @@ private:
           if (target.v == kCdBiosVector) bios_call(s, here, fn);
           else { unmodelled_sites_.insert(here); s.d[0] = {}; s.d[1] = {}; s.a[0] = {}; s.a[1] = {}; forget_all(s); }
           if (call) { s.pc = next; return true; }
+          if (s.rets.size() == 1U && !s.rets[0].empty()) {   // a tail jump to the vector: the service returns to the caller's continuation
+            s.pc = s.rets[0].back();
+            s.rets[0].pop_back();
+            s.top_dirty = true;
+            return true;
+          }
           return false;
         }
       } else {
@@ -1636,22 +1670,39 @@ LoaderScan scan_sega_cd_loaders(const DiscImage &disc, const BootImages &images,
     std::vector<std::uint32_t> ops;
   };
   std::map<std::pair<std::uint32_t, std::uint32_t>, std::pair<std::set<std::uint32_t>, std::vector<std::uint32_t>>> merged;   // (lba, destination) -> entries, operation indices
+  std::vector<Group> groups;
+  if (!options.work_state) {   // the M1/M2 grouping, unchanged: one module per (sector, proven entry set)
+    for (std::uint32_t i = 0; i < scan.operations.size(); ++i) {
+      const auto &op = scan.operations[i];
+      if (op.entries.empty()) { scan.refusals.push_back({LoaderRefusalKind::loaded_not_executed, op.trigger_pc}); continue; }
+      std::vector<std::uint32_t> offsets;
+      for (const auto e : op.entries) offsets.push_back(e - op.destination);
+      std::sort(offsets.begin(), offsets.end());
+      auto it = std::find_if(groups.begin(), groups.end(), [&](const Group &g) { return g.lba == op.lba && g.entry_offsets == offsets; });
+      if (it == groups.end()) { groups.push_back(Group{op.lba, 1U, offsets, {}, {}}); it = groups.end() - 1; }
+      if (std::find(it->bases.begin(), it->bases.end(), op.destination) == it->bases.end()) it->bases.push_back(op.destination);
+      it->ops.push_back(i);
+    }
+  } else {
   for (std::uint32_t i = 0; i < scan.operations.size(); ++i) {
     const auto &op = scan.operations[i];
     auto &slot = merged[{op.lba, op.destination}];
     slot.first.insert(op.entries.begin(), op.entries.end());
     slot.second.push_back(i);
   }
-  std::vector<Group> groups;
   for (const auto &[key, slot] : merged) {
     if (key.first >= 1U && key.second >= kLoaderScanSectorBytes && merged.count({key.first - 1U, key.second - kLoaderScanSectorBytes}) != 0U) continue;   // a continuation of an earlier sector
     std::uint32_t n = 1;
     std::set<std::uint32_t> entries = slot.first;
-    while (true) {
+    while (n < kModuleMaxBytes / kLoaderScanSectorBytes) {   // a run is one module image: at most the module list's own size bound
       const auto next = merged.find({key.first + n, key.second + n * kLoaderScanSectorBytes});
       if (next == merged.end()) break;
       entries.insert(next->second.first.begin(), next->second.first.end());
       ++n;
+    }
+    for (auto e = entries.begin(); e != entries.end();) {   // an entry must be an even address inside the image
+      if (((*e) & 1U) != 0U || *e < key.second || *e - key.second >= n * kLoaderScanSectorBytes) { scan.refusals.push_back({LoaderRefusalKind::entry_not_code, *e}); e = entries.erase(e); }
+      else ++e;
     }
     if (entries.empty()) {
       scan.refusals.push_back({LoaderRefusalKind::loaded_not_executed, scan.operations[slot.second.front()].trigger_pc});
@@ -1667,6 +1718,7 @@ LoaderScan scan_sega_cd_loaders(const DiscImage &disc, const BootImages &images,
     }
     if (std::find(it->bases.begin(), it->bases.end(), key.second) == it->bases.end()) it->bases.push_back(key.second);
     it->ops.push_back(slot.second.front());
+  }
   }
   if (disc.tracks().empty() || disc.tracks().front().type == DiscTrackType::audio) return scan;
   const auto &track = disc.tracks().front();
