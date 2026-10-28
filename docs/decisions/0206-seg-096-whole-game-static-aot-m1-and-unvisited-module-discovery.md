@@ -97,6 +97,43 @@ only by the test and never passed to the tool.
 - `STATIC_UNVISITED_DISCOVERY_BLOCKED`: the positive rows cannot be made to pass without a broad symbolic-execution framework or fixture-specific
   logic. The evidence limitation is recorded and this branch of the implementation stops; the manual list is not substituted.
 
-## Result
+## Result (T001)
 
-(appended after the run)
+Run: `tests/sega_cd_unvisited_discovery_test.py` (40 checks, CI test `sega_cd_unvisited_discovery_test`), `tests/sega_cd_modules_build_test.py` (new `range`
+rows) and the existing module/overlay/executable-image suites. Every positive and negative row behaved as pre-registered except the deviations listed
+below; nothing was guessed.
+
+| # | Result |
+|---|--------|
+| 1 | discovery of the base disc: A, B, C from the disc alone (exit 0, complete); the default route runs A only (`[1,0,0]`, marker A) |
+| 2 | the same binary, run with the machine input selecting B, executes B (`[0,1,0]`, marker B); selecting C executes C at both bases (`[0,0,2]`); the binary is byte-identical before and after |
+| 3 | A and B are two candidates of one overlay group at `$080000` (A's subrange starts at `$080040`); the existing selector chooses by live bytes |
+| 4 | A: executable subrange `[0x40, 0x5C)`; its 64-byte header is outside the mapping, and a loader write into the header leaves A running (`header_patched`) |
+| 5 | C: one image, two verified mappings (`$090000`, `$0A0000`), both run |
+| 6 | decoy X is neither an operation nor a module |
+| 7 | D (loaded, never executed): `loaded_not_executed`, admits nothing |
+| 8-10 | `destination_unknown`, `lba_unknown`, `destination_unsupported`: only the unprovable load is refused; the independent loads and the other mapping of C stay discovered |
+| 11 | a list whose digest names other bytes: `digest_mismatch`; another disc's list: `disc_identity_mismatch` (the unchanged admission) |
+| 12 | a word of the executable range changed before the call: typed stop `image_bytes_mismatch`, no instruction of the wrong image retired |
+| 13 | not repeated here: a mixture of two images is the existing `image_partially_overwritten` row of `sega_cd_overlay_test` (ADR 0132); T001 adds no selection logic |
+| 14 | two discoveries and two emits from the discovered list: byte-identical list, identity, report, program identity and generated C |
+| 15 | discovery reads no sector beyond the boot images and the proven ones: changing unrelated sectors (and the decoy) changes nothing but the disc identity |
+| bounds | unbounded recursion ends in `scan_limit_exceeded`, `complete=false`, no module proposed (exit 9) |
+
+Deviations from the pre-registration, each conservative or presentational: (a) the runtime input is the machine input `--set main:d7=N`, because the synthetic
+post-BIOS profile maps no controller port (the controller-driven variant needs the BIOS-image profile, below); (b) DOUTEN unknown at DTRG proposes the load
+instead of refusing (a proposal can only fail closed at run time; a known-clear DOUTEN starts nothing), so `cdc_state_unknown` is reserved for an unknown register
+pointer and is not currently emitted; (c) the permitted tool budget is 4,096 states / 100,000 steps as registered; the fixture uses 79 states and 493 steps.
+
+## Decision (T001): `STATIC_UNVISITED_DISCOVERY_GO`, for a stated scope
+
+Modules B and C were admitted, compiled into the binary and verified byte-for-byte against the disc before any run had loaded or executed them, from the
+sub boot image's own CD-load operations, without a manifest, trace, file name or coordinate given to the tool. The mechanism is not a broad symbolic-execution
+framework: it is a bounded path-sensitive constant walk over the existing CPU-owned decode/lift/effect/control APIs, a model of the machine's documented CD
+interface, and the existing module-list admission. The generalizable parts are: the source-to-mapping proof (LBA -> destination), the entry proof, the
+executable-subrange hull and the separation of proposal from admission.
+
+What is NOT claimed (the stated scope): loaders that call BIOS file/CD services (the BIOS-image profile, where the module list is not wired), tables,
+computed LBAs/destinations, partial-sector or multi-sector transfers, nested loaders (the walk does not enter loaded code), interrupt-driven loaders, PRG RAM or
+PCM destinations, decompression. The 2M Word RAM mode is assumed (its mode bit is main-owned); a 1M-mode loader would produce bytes that fail the runtime digest
+check. Nothing here says any commercial title's unvisited modules are found; that is the M2 question. Open limits are carried to SEG-097.

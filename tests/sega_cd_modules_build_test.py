@@ -131,10 +131,22 @@ def main():
             ("a repeated name", common.module_list(identity, [base[0], dict(base[1], name="moda")]), "duplicate_name"),
             ("an invalid name", variant_of(name="ModA"), "name_invalid"),
             ("an unknown processor", variant_of(processor="z80"), "processor_invalid"),
+            # SEG-096-T001: the optional executable subrange
+            ("an odd range offset", variant_of(range=(1, 64), entries=[2]), "range_invalid"),
+            ("an empty range", variant_of(range=(0, 0)), "range_invalid"),
+            ("a range leaving the extent", variant_of(range=(64, 192)), "range_invalid"),
+            ("an entry outside the range", variant_of(range=(64, 64), entries=[0]), "entry_invalid"),
+            ("a ranged mapping outside executable RAM", variant_of(range=(64, 64), entries=[64], bases=[0x0F0000]), "mapping_outside_executable_ram"),
         ]
         for label, text, error in cases:
             code, out = emit_with(text, "neg-" + re.sub(r"\W+", "_", label))
             check(code == 5 and out.get("error") == error, "module list: %s -> %s (got %s)" % (label, error, out.get("error")))
+        ranged = [dict(m) for m in base[:1]]
+        ranged[0].update(range=(64, 64), entries=[64], bases=[0x020000])
+        code, out = emit_with(common.module_list(identity, ranged), "ranged")
+        image = [i for i in out.get("images", []) if i.get("name") == "moda"]
+        check(code == 0 and out.get("ok") and image and image[0]["start"] == 0x020040 and image[0]["length"] == 64,
+              "a ranged module is admitted and compiled over exactly its subrange ($020040, 64 bytes), not the whole extent")
         syntax = [
             ("no version line", "disc %s\n" % identity, "manifest_version"),
             ("unknown directive", common.standard_manifest(disc).replace("verify byte_identity", "verify byte_identity\ntrust yes", 1),
