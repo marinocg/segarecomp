@@ -648,11 +648,12 @@ int resolve_source_command(int argc, char **argv) {
 // SEG-097-T001 (ADR 0206): static discovery of disc-loaded modules. Pure function of the disc; executes nothing.
 int discover_modules_command(int argc, char **argv) {
   std::optional<std::string> cue, out_path, extents_path;
-  bool table_roots = false, computed_continue = false;
+  bool table_roots = false, computed_continue = false, constant_dispatch = false;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
     else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
+    else if (arg == "--constant-dispatch") constant_dispatch = true;   // SEG-098-T003 (ADR 0212)
     else if (arg == "--computed-call-whatif") computed_continue = true;   // SEG-098-T001 survey what-if (never used by a build)
     else if (arg == "--static-extents" && i + 1 < argc) extents_path = argv[++i];   // SEG-098-T002: one `<cpu>:<offset>:<base>:<length>` per verified mapping
     else if (arg == "--module-table-roots") table_roots = true;   // SEG-098-T001: walk the SP module jump table, not only the descriptor entry
@@ -678,6 +679,7 @@ int discover_modules_command(int argc, char **argv) {
   scd::LoaderScanOptions scan_options;
   scan_options.module_table_roots = table_roots;
   scan_options.continue_after_computed_call = computed_continue;
+  scan_options.constant_dispatch = constant_dispatch;
   const auto scan = scd::scan_sega_cd_loaders(*loaded.disc, *produced.images, scan_options);
   std::ostringstream report;
   report << "{\"ok\":" << (!scan.modules.empty() && scan.complete ? "true" : "false") << ",\"complete\":" << (scan.complete ? "true" : "false")
@@ -688,7 +690,7 @@ int discover_modules_command(int argc, char **argv) {
     report << ",\"survey\":{\"roots\":" << sv.roots << ",\"module_table_found\":" << (sv.module_table_found ? "true" : "false") << ",\"cdd_commands\":" << sv.cdd_commands
            << ",\"cdc_transfer_triggers\":" << sv.cdc_transfer_triggers << ",\"bios_service_calls\":" << sv.bios_service_calls << ",\"bios_service_unknown_function\":"
            << sv.bios_service_unknown_function << ",\"foreign_calls_other\":" << sv.foreign_calls_other << ",\"foreign_calls_unknown\":" << sv.foreign_calls_unknown
-           << ",\"copy_loop_candidates\":" << sv.copy_loop_candidates << ",\"counted_loops\":" << sv.counted_loops << ",\"bios_functions\":{";
+           << ",\"copy_loop_candidates\":" << sv.copy_loop_candidates << ",\"counted_loops\":" << sv.counted_loops << ",\"dispatch_resolved\":" << sv.dispatch_resolved << ",\"table_reads\":" << sv.table_reads << ",\"memory_carried_reads\":" << sv.memory_carried_reads << ",\"bios_functions\":{";
     bool first = true;
     for (const auto &[fn, n] : sv.bios_functions) { report << (first ? "" : ",") << "\"" << fn << "\":" << n; first = false; }
     report << "},\"path_ends\":{";

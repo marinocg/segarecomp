@@ -24,7 +24,7 @@ import sega_cd_unvisited_fixture as U  # noqa: E402
 ROM_SIZE = L.ROM_SIZE
 MAIN, FAULT, SUB_SRC = L.MAIN, L.FAULT, L.SUB_SRC
 GA, GA_SUB, WINDOW, RESULT = L.GA, L.GA_SUB, L.WINDOW, L.RESULT
-CASES = ("base", "overwritten", "header_patched", "unknown_lba", "unknown_dest", "prg_dest")
+CASES = ("base", "overwritten", "header_patched", "unknown_lba", "unknown_dest", "prg_dest", "dispatch", "dispatch_unknown")
 
 
 def sub_program(sp_disc_offset, sp_len, init_entry):

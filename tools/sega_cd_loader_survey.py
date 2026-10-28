@@ -182,6 +182,8 @@ def main():
     out["scan_module_table_roots"] = static_view(table)
     whatif = scan(args.segarecomp, args.cue, "--module-table-roots", "--computed-call-whatif")
     out["scan_module_table_roots_computed_call_whatif"] = static_view(whatif)
+    dispatch = scan(args.segarecomp, args.cue, "--module-table-roots", "--constant-dispatch")
+    out["scan_module_table_roots_constant_dispatch"] = static_view(dispatch)
     if args.status:
         status = json.load(open(args.status))
         out["observed"] = observed_view(status, table["modules"])

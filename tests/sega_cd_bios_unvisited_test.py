@@ -119,6 +119,24 @@ def main():
             check((r3["stop"]["class"] != "none" or r3["result"] == "budget_exhausted") and w3[:3] == [0, 0, 0],
                   "%s: the unproven mapping fails closed (a typed stop, or the loader never completes its own transfer; nothing of C executes)" % case)
 
+        # ---- SEG-098-T003: the modules sit behind a PC-relative offset-table dispatcher (constant selectors) ----
+        fd, od = fixture(tmp, "dispatch")
+        done, sd_ = build(fd, tmp / "n-dsp", cache)
+        pd = tmp / "n-dsp" / ("program" + EXE)
+        check(sd_ and sd_["status"] == "ok" and sd_["static_discovery"]["status"] == "admitted" and sd_["static_extents"] == 4 and len(sd_["extents"]) == 2,
+              "dispatch: the static scan resolves the table dispatch and admits A, B and C before any pass (only the IP and SP are resolved from evidence)")
+        for choice, want_counts, idx in ((0, [1, 0, 0], 3), (2, [0, 1, 0], 4), (3, [0, 0, 2], 5)):
+            rd, wd = run(pd, fd, choice)
+            check(rd["result"] == "idle" and wd[:3] == want_counts and wd[idx] == od["markers"]["ABC"[want_counts.index(max(want_counts))]], "dispatch: route %d runs its module from the same binary" % choice)
+        fu, ou = fixture(tmp, "dispatch_unknown")
+        done, su = build(fu, tmp / "n-dsu", cache)
+        pu = tmp / "n-dsu" / ("program" + EXE)
+        check(su and su["static_discovery"]["refusals"] == {"computed_control_unresolved": 1} and su["static_extents"] == 2, "dispatch_unknown: A and B admitted, the unresolved computed call is reported (typed), C is not admitted")
+        rb, wb = run(pu, fu, 2)
+        rc, wc = run(pu, fu, 3)
+        check(wb[:3] == [0, 1, 0] and wc[2] == 0 and wc[5] == 0,
+              "dispatch_unknown: B runs; C never executes (the register-fed selector dispatches to a compiled module - here A - or stops; it never reaches uncompiled code)")
+
         # ---- mutable data outside an instruction's range, and a changed instruction inside it ----
         f3, o3 = fixture(tmp, "header_patched")
         done, s3 = build(f3, tmp / "n-hp", cache)
