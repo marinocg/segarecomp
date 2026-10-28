@@ -712,6 +712,8 @@ ProcessorsEmission emit_sega_cd_processors(const BootImages &images, const SegaC
     admission[0].track = admission[1].track = true;
     auto broad = emit_processors_once(images, options, admission);
     outcome.admitted = false;
+    outcome.m3_images = outcome.m3_broad_entries = outcome.m3_admitted_entries = 0;   // a fallback build scored nothing
+    outcome.broad_entries = outcome.admitted_entries = 0;
     outcome.reason = std::move(reason);
     outcome.failed_image = std::move(failed_image);
     // Every image is reported: the ones the producer reached keep its counts, the others only their name and the broad entry count.

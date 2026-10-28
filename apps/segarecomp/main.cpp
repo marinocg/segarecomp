@@ -1046,7 +1046,7 @@ int run_cli(int argc, char **argv) {
           return 3;
         }
         std::cout << "policy_identity=" << segarecomp_app::sega_cd_aot_policy_identity(scd_options) << " requested=" << policy << " requested_model="
-                  << (policy == "optimized" ? "gen2" : "none") << " contract=" << segarecomp::machine::sega_cd::kSelectiveAdmissionContract << " platform=sega-cd experimental="
+                  << (policy == "optimized" ? "gen2" : "none") << " contract=" << (policy == "optimized" ? segarecomp::machine::sega_cd::kSelectiveAdmissionContract : segarecomp::machine::sega_cd::kSelectiveAdmissionContractV1) << " platform=sega-cd experimental="
                   << (policy == "optimized" ? "1" : "0") << '\n';
         return 0;
       }

@@ -206,7 +206,7 @@ int main() {
     options.selective = &request;
     const auto e = emit_sega_cd_processors(program(), options);
     check(e.admission.requested && !e.admission.admitted && e.admission.reason == f.reason && e.c_source == broad.c_source && e.admission.admitted_entries == e.admission.broad_entries &&
-              e.admission.images[2].selection == ImageSelection::broad_fallback && e.admission.images[0].selection == ImageSelection::broad_required && e.admission.k_sha256.empty() && !e.admission.failed_image.empty() && e.admission.broad_entries == distinct_broad && e.admission.images.size() == 3U,
+              e.admission.m3_images == 0U && e.admission.m3_broad_entries == 0U && e.admission.m3_admitted_entries == 0U && e.admission.images[2].selection == ImageSelection::broad_fallback && e.admission.images[0].selection == ImageSelection::broad_required && e.admission.k_sha256.empty() && !e.admission.failed_image.empty() && e.admission.broad_entries == distinct_broad && e.admission.images.size() == 3U,
           std::string("fallback (") + f.name + "): broad text, reason " + f.reason + ", failed image named, no admitted set claimed (got " + e.admission.reason + ")");
   }
   // 4. Identity: the request enters the program identity; a fallback never aliases a selective build; the default is untouched.

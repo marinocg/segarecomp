@@ -77,13 +77,16 @@ std::string sega_cd_aot_policy_json(const SegaCdAotOptions &options, const scd::
   out << "{\"requested\":\"" << options.policy << "\",\"experimental\":" << (options.optimized() ? "true" : "false") << ",\"effective\":\""
       << (o.admitted ? "selective" : "broad") << "\",\"fallback\":" << (options.optimized() && !o.admitted ? "true" : "false") << ",\"reason\":\""
       << (options.optimized() ? o.reason : std::string("none")) << "\",\"failed_image\":\"" << o.failed_image << "\",\"policy_identity\":\""
-      << sega_cd_aot_policy_identity(options) << "\",\"contract\":\"" << scd::kSelectiveAdmissionContract << "\"";
+      << sega_cd_aot_policy_identity(options) << "\",\"contract\":\"" << (options.optimized() ? scd::kSelectiveAdmissionContract : scd::kSelectiveAdmissionContractV1) << "\"";
   if (options.optimized())
     out << ",\"model_family\":\"gen2\",\"model\":\"" << id.model_sha256 << "\",\"rank_policy\":\"" << id.policy_id << "\",\"rank_plan\":\""
         << id.rank_plan_sha256 << "\",\"weights\":\"" << id.weight_table_sha256 << "\"";
   out << ",\"k_sha256\":\"" << (o.admitted ? o.k_sha256 : std::string()) << "\",\"broad_entries\":" << o.broad_entries
-      << ",\"admitted_entries\":" << o.admitted_entries << ",\"scope\":\"" << (options.all_images ? "all_images" : "game_modules") << "\",\"m3_images\":" << o.m3_images
-      << ",\"m3_broad_entries\":" << o.m3_broad_entries << ",\"m3_admitted_entries\":" << o.m3_admitted_entries << ",\"images\":[";
+      << ",\"admitted_entries\":" << o.admitted_entries;
+  if (options.optimized())   // the Compatibility report keeps exactly its earlier keys
+    out << ",\"scope\":\"" << (options.all_images ? "all_images" : "game_modules") << "\",\"m3_images\":" << o.m3_images << ",\"m3_broad_entries\":" << o.m3_broad_entries
+        << ",\"m3_admitted_entries\":" << o.m3_admitted_entries;
+  out << ",\"images\":[";
   for (std::size_t i = 0; i < o.images.size(); ++i) {
     const auto &r = o.images[i];
     out << (i ? "," : "") << "{\"processor\":\"" << scd::processor_name(r.processor) << "\",\"name\":\"" << r.name << "\",\"selection\":\"" << scd::image_selection_name(r.selection)

@@ -160,8 +160,7 @@ M3 still only proposes: it discovers no image, extends no range, decides no mapp
 the build is broad and says `no_eligible_images`; a producer or validator failure still falls back to the whole broad build and marks the eligible images `broad_fallback`. Every image is
 reported with `selection`, `selection_reason`, source size and entry counts; images that are not scored are counted as broad-admitted (`admitted_entries == broad_entries`), and the report
 adds `m3_images`, `m3_broad_entries`, `m3_admitted_entries` for the optimized part only. The contract name moved to `...selective_admission.v2` and the policy identity carries
-`scope=game_modules`: a program built under the previous eligibility can never be reused. The Compatibility policy identity text and every Compatibility output are unchanged (pinned in the
-test). The historical scope remains reachable for evidence only, as `--aot-scope all-images` (identity `scope=all_images`); it is not offered by the launcher, which uses the shipped scope.
+`scope=game_modules`: a program built under the previous eligibility can never be reused. The Compatibility policy identity text, report keys and every generated Compatibility output are unchanged (pinned in the test). The historical scope remains reachable for evidence only, as `--aot-scope all-images` (identity `scope=all_images`); it is not offered by the launcher, which uses the shipped scope.
 
 **Results** (`tests/sega_cd_experimental_m3_test.py`, 52 checks; arms A = Compatibility, H = historical global scope, C = shipped game-module scope).
 
@@ -204,8 +203,8 @@ in the repository**; the full Compatibility build reproduces ADR 0205's route A:
 | generated C bytes | 183,880,647 | 57,504,834 | 146,086,169 |
 | build CPU s / peak MiB | 844 / 1,130 | 238 / 550 | 462 / 623 |
 
-Where C stops: the instruction that no admitted variant matches lies in one of the two disc *game-module* extents (a 3.8 KB module loaded at the main work-RAM base, 693 of 1,891
-instruction entries admitted, 11 of 30 cells selected): the missing code belongs to a **game module**, not to boot code or firmware. This is the incomplete-recall limitation of ADR 0140,
+Where C stops: the instruction that no admitted variant matches lies in one of the two disc *game-module* extents (a small module loaded by the main processor; roughly a third of its instruction
+entries were admitted): the missing code belongs to a **game module**, not to boot code or firmware. This is the incomplete-recall limitation of ADR 0140,
 now observed in a build rather than a benchmark; no code was admitted heuristically to get past it (the frontier extent was already admitted, so the resolver correctly reports `no_progress`).
 The savings of C and H against A are NOT like-for-like: both builds end 8 rounds earlier, with 5 extents instead of 12. Independent source-backed labels (ADR 0140 needs the public
 disassembly built locally) were not rebuilt in this task: recall against independent labels is measured only on the synthetic fixture.

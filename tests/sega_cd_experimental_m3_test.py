@@ -52,7 +52,7 @@ def main():
         check(rc == 0 and fields.get("platform") == "sega-cd" and fields.get("experimental") == "1" and fields["policy_identity"] != GENESIS_GEN2_IDENTITY.split()[0].split("=")[1],
               "the Sega CD experimental policy has its own identity, labelled experimental")
         rc, compat_out, _ = cli("aot-policy-identity", "--platform", "sega-cd", "--aot-policy", "compatibility")
-        check(rc == 0 and "policy_identity=773742c0e113b3dc5754bb759513502cc5e519f4094ee1fe0755ad247c902211" in compat_out,
+        check(rc == 0 and "policy_identity=773742c0e113b3dc5754bb759513502cc5e519f4094ee1fe0755ad247c902211" in compat_out and "selective_admission.v1" in compat_out,
               "the Compatibility policy identity is unchanged by the changed experimental contract")
         check(fields["policy_identity"] != "dcfc165125640c9d0b26a4a61fa5bc5c417e3b2c616dbf30a1c067e489ac7ca8" and "selective_admission.v2" in scd_out,
               "the experimental policy identity changed (contract v2): a build made under the previous eligibility can never be reused")
@@ -74,6 +74,9 @@ def main():
         rc2, explicit, _ = emit("explicit.c", "--aot-policy", "compatibility")
         check(rc == 0 and rc2 == 0 and (tmp / "plain.c").read_bytes() == (tmp / "explicit.c").read_bytes() and plain["program_identity"] == explicit["program_identity"],
               "Compatibility is the default: `--aot-policy compatibility` is byte-identical to no option, same program identity")
+        check(set(plain["aot_policy"]) == {"requested", "experimental", "effective", "fallback", "reason", "failed_image", "policy_identity", "contract", "k_sha256", "broad_entries",
+                                           "admitted_entries", "images"} and plain["aot_policy"]["contract"].endswith("selective_admission.v1"),
+              "the Compatibility report keeps exactly its earlier keys and contract name")
         check(plain["aot_policy"]["requested"] == "compatibility" and plain["aot_policy"]["effective"] == "broad" and not plain["aot_policy"]["fallback"] and
               not plain["aot_policy"]["experimental"], "the default report states Compatibility / broad / no fallback / not experimental")
         for bad in (["--aot-model", "gen2"], ["--aot-policy", "optimized", "--aot-model", "v1"], ["--aot-policy", "fast"], ["--aot-policy", "optimized", "--aot-model", "gen2", "--aot-model", "gen2"]):
@@ -179,7 +182,7 @@ def main():
         s2 = data["subjects"]["S2"]["arms"]
         check(all(s2[a]["status"] == "ok" for a in "ACH") and s2["A"]["aot_policy"]["effective"] == "broad", "S2: all builds complete; the default is the broad policy")
         c2 = s2["C"]["aot_policy"]
-        check(c2["requested"] == "optimized" and c2["effective"] in ("selective", "broad") and (c2["effective"] == "selective" or c2["fallback"]),
+        check(c2["requested"] == "optimized" and c2["effective"] == "selective" and not c2["fallback"] and c2["m3_images"] == 1 and c2["m3_admitted_entries"] < c2["m3_broad_entries"],
               "S2/C: status.json records the experimental request and the product's effective policy (%s; reason %s; scored images %s)" % (c2["effective"], c2["reason"], c2.get("m3_images")))
         names = {i["name"]: i for i in s2["C"]["images"]}
         check(names["bios"]["selection"] == "broad_required" and names["bios"]["selection_reason"] == "bios_firmware" and

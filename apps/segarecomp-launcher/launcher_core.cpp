@@ -602,6 +602,8 @@ ScdPolicyReport read_scd_policy_report(const std::string &status_text) {
 
 std::string scd_policy_sentence(const ScdPolicyReport &r) {
   if (!r.present || r.requested != "optimized") return {};
+  if (r.effective == "selective" && r.m3_images == 0)
+    return "Experimental Optimized was used by an earlier release (all images were optimized, including the BIOS); rebuild to use the current game-module scope. ";
   if (r.effective == "selective")
     return "Experimental Optimized: only the game's own loaded modules are optimized (" + std::to_string(r.m3_images) + " module image(s): " + std::to_string(r.m3_admitted_entries) +
            " of the " + std::to_string(r.m3_broad_entries) + " instruction entries Compatibility would compile); the BIOS and the game's boot code stay fully compiled. "
