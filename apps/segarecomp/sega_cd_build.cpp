@@ -57,6 +57,7 @@ struct Options {
   std::string aot_policy = "compatibility";   // SEG-097-T003 (ADR 0208): `optimized` (experimental) selects the frozen gen2 M3 + B35 proposal
   bool aot_model_given = false;
   bool aot_all_images = false;
+  bool static_recursion = true;   // SEG-099-T004: follow the proven entries into the modules (0 reproduces the M2 scan)
   std::string static_range = "hull";   // SEG-098-T004: `loaded` admits every loaded byte of a proven module (computed entries beyond the traversed hull), `hull` only the traversed subrange
   bool static_discovery = true;   // SEG-098-T002: `--static-discovery 0` is the control (and the escape hatch): the build as it was before the static producer
 };
@@ -617,7 +618,11 @@ class Builder {
     std::error_code ec;
     fs::remove(list, ec);
     fs::remove(o_.output / "static-windows.txt", ec);
-    const int code = run_process({self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--constant-dispatch", "--work-state", "--state-convergence", "--static-extents", list.string(), "--static-scope", o_.static_range, "--static-windows", (o_.output / "static-windows.txt").string()}, report, {}, 300);
+    std::vector<std::string> scan_args{self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--constant-dispatch", "--work-state"};
+    if (o_.static_recursion) scan_args.push_back("--recursive-modules");
+    for (const char *a : {"--state-convergence", "--static-extents"}) scan_args.push_back(a);
+    for (const auto &a : {list.string(), std::string("--static-scope"), o_.static_range, std::string("--static-windows"), (o_.output / "static-windows.txt").string()}) scan_args.push_back(a);
+    const int code = run_process(scan_args, report, {}, 300);
     const std::string text = read_text(report);
     if (code < 0 || text.empty() || text.find("\"complete\":") == std::string::npos) { static_json_ = "{\"ran\":true,\"status\":\"scan_failed\"}"; return; }
     const bool complete = raw_value(text, "complete").value_or("") == "true";
@@ -720,6 +725,7 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--runtime-dir") { o.runtime_dir = value; have_runtime = true; }
     else if (key == "--cache-dir") o.cache_dir = value;
     else if (key == "--static-discovery") o.static_discovery = value != "0";
+    else if (key == "--static-recursion" && (value == "0" || value == "1")) o.static_recursion = value == "1";
     else if (key == "--static-range" && (value == "hull" || value == "loaded")) o.static_range = value;
     else if (key == "--cc") o.cc = value;
     else if (key == "--cc-arg") o.cc_args.push_back(value);

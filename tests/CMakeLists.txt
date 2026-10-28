@@ -1295,6 +1295,9 @@ set_property(TEST sega_cd_services_loader_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_state_convergence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_state_convergence_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_state_convergence_test APPEND PROPERTY LABELS full fast)
+add_test(NAME sega_cd_recursive_discovery_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_recursive_discovery_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_recursive_discovery_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_bios_scale_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_bios_scale_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_bios_scale_test APPEND PROPERTY LABELS full)   # about 2.5 minutes locally: not in the fast tier

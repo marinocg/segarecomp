@@ -40,6 +40,7 @@ const char *loader_refusal_name(LoaderRefusalKind kind) noexcept {
   case LoaderRefusalKind::scan_limit_exceeded: return "scan_limit_exceeded";
   case LoaderRefusalKind::computed_control_unresolved: return "computed_control_unresolved";
   case LoaderRefusalKind::lookup_key_unknown: return "lookup_key_unknown";
+  case LoaderRefusalKind::loaded_bytes_unknown: return "loaded_bytes_unknown";
   }
   return "unknown";
 }
@@ -390,6 +391,7 @@ public:
     sv.memory_args_resolved = static_cast<std::uint32_t>(args_resolved_.size());
     sv.memory_args_unresolved = static_cast<std::uint32_t>(args_unresolved_.size());
     sv.branches_decided = static_cast<std::uint32_t>(decided_sites_.size());
+    sv.module_entries_walked = static_cast<std::uint32_t>(entered_.size());
     sv.joins = joins_;
     sv.widenings = widenings_;
     sv.async_volatile_ranges = static_cast<std::uint32_t>(assumed_.ranges.size());
@@ -413,6 +415,7 @@ private:
   std::set<std::pair<std::uint32_t, std::uint32_t>> modelled_sites_;
   std::set<std::uint32_t> unmodelled_sites_, args_resolved_, args_unresolved_, transfers_resolved_, transfers_unresolved_, decided_sites_;
   std::uint32_t mem_resolved_reads_{};
+  std::set<std::uint32_t> entered_;   // distinct proven entries whose code was walked (recursive_modules)
   bool lookup_unknown_{};
   std::unordered_map<std::string, Head> heads_;
   std::uint32_t joins_{}, widenings_{};
@@ -633,6 +636,7 @@ private:
     loaded.erase(std::remove_if(loaded.begin(), loaded.end(), [&](const Loaded &l) { return l.base < destination + bytes && destination < l.base + l.bytes; }),
                  loaded.end());  // a newer load replaces what it overlaps
     loaded.push_back({op, destination, bytes});
+    if (ws_) deposit_sector(s, h.lba.v, destination, bytes);
     s.hw.lba = {};  // the drive advances every 75 Hz tick: a further transfer needs a further play command
   }
 
@@ -1094,6 +1098,21 @@ private:
     s.hw.dest = dest;
   }
 
+  // The sector's bytes are immutable disc content: known concretely (so title code that parses them, e.g. an ISO9660 directory search, can be evaluated and a module can be walked).
+  void deposit_sector(State &s, std::uint32_t lba, std::uint32_t destination, std::uint32_t forget_span) {
+    note_write(s, destination, destination + forget_span);
+    s.mem.clear_range(destination, destination + forget_span);
+    bool read = false;
+    if (!disc_.tracks().empty() && disc_.tracks().front().type != DiscTrackType::audio && lba < disc_.tracks().front().sector_count) {
+      std::array<std::uint8_t, kDiscUserBytes> user{};
+      if (disc_.read_user_data(disc_.tracks().front().first_lba + lba, std::span<std::uint8_t, kDiscUserBytes>(user.data(), kDiscUserBytes)) == DiscError::none) {
+        s.mem.put_bytes(destination, std::span<const std::uint8_t>(user.data(), kLoaderScanSectorBytes), true);
+        read = true;
+      }
+    }
+    if (!read) refuse(LoaderRefusalKind::source_outside_track, s.pc);
+  }
+
   void cdc_transfer(State &s, std::uint32_t here, const Cd &cd) {
     if (!s.hw.dest.known()) { refuse(LoaderRefusalKind::destination_unknown, here); transfers_unresolved_.insert(here); return; }
     if (s.hw.dest.v != 3U || !cd.header_read) return;   // CDCTRN requires the sub-read device and a CDCREAD'ed sector: otherwise it transfers nothing
@@ -1126,13 +1145,7 @@ private:
     loaded.erase(std::remove_if(loaded.begin(), loaded.end(), [&](const Loaded &l) { return l.base < destination + kLoaderScanSectorBytes && destination < l.base + l.bytes; }), loaded.end());
     loaded.push_back({op, destination, kLoaderScanSectorBytes});
     note_write(s, destination, destination + kLoaderScanCdcTrnSpan);
-    // The sector's bytes are immutable disc content: known concretely (so title code that parses them, e.g. an ISO9660 directory search, can be evaluated).
-    s.mem.clear_range(destination, destination + kLoaderScanCdcTrnSpan);
-    if (!disc_.tracks().empty() && disc_.tracks().front().type != DiscTrackType::audio && cd.pos.v < disc_.tracks().front().sector_count) {
-      std::array<std::uint8_t, kDiscUserBytes> user{};
-      if (disc_.read_user_data(disc_.tracks().front().first_lba + cd.pos.v, std::span<std::uint8_t, kDiscUserBytes>(user.data(), kDiscUserBytes)) == DiscError::none)
-        s.mem.put_bytes(destination, std::span<const std::uint8_t>(user.data(), kLoaderScanSectorBytes), true);
-    }
+    deposit_sector(s, cd.pos.v, destination, kLoaderScanCdcTrnSpan);
     if (s.a[1].known()) { s.mem.clear_range(s.a[1].v, s.a[1].v + 4U); note_write(s, s.a[1].v, s.a[1].v + 4U); }
     else { s.mem.clear(); note_write_unknown(s); }
   }
@@ -1144,6 +1157,28 @@ private:
     const auto visible = bytes_.subspan(0, static_cast<std::size_t>(first_offset_) + (end_ - base_));
     const DecodeSource source{CpuVariant::mc68000, M68kProgramAddress{TargetAddressSpace::m68k_program, pc}, MoveqImageOffset{offset}};
     const auto result = decode_m68k_instruction(visible, source, M68kDecodeProfile::general_startup);
+    const auto *decoded = std::get_if<M68kDecodedInstruction>(&result);
+    if (decoded == nullptr) return std::nullopt;
+    auto operation = lift_m68k_instruction(*decoded);
+    if (decoded->kind != M68kInstructionKind::moveq && operation.kind == M68kIrKind::write_moveq) return std::nullopt;
+    return operation;
+  }
+
+  // Under recursive_modules a proven-loaded range is executable by the walk too: its instructions are decoded from the abstract memory, whose bytes are the sector the walk proved (or unknown once
+  // anything may have changed them). Only a transfer the entry proof accepted leads here; data is never walked because it happens to decode.
+  std::optional<M68kIrOperation> decode_state(const State &s, std::uint32_t pc) const {
+    if (pc >= base_ && pc < end_) return decode_at(pc);
+    if (!ws_ || !options_.recursive_modules || (pc & 1U) != 0U || pc + 2U > kMemTrackedEnd) return std::nullopt;
+    std::array<std::uint8_t, 10> buf{};
+    std::size_t n = 0;
+    for (; n < buf.size(); ++n) {
+      const auto b = s.mem.get(pc + static_cast<std::uint32_t>(n));
+      if (!b) break;
+      buf[n] = *b;
+    }
+    if (n < 2U) return std::nullopt;
+    const DecodeSource source{CpuVariant::mc68000, M68kProgramAddress{TargetAddressSpace::m68k_program, pc}, MoveqImageOffset{0}};
+    const auto result = decode_m68k_instruction(std::span<const std::uint8_t>(buf.data(), n), source, M68kDecodeProfile::general_startup);
     const auto *decoded = std::get_if<M68kDecodedInstruction>(&result);
     if (decoded == nullptr) return std::nullopt;
     auto operation = lift_m68k_instruction(*decoded);
@@ -1253,6 +1288,10 @@ private:
     bool landed = false;
     for (const auto &l : s.loaded) {
       if (target >= l.base && target < l.base + l.bytes) {
+        if (ws_ && !(s.mem.get_disc(target) && s.mem.get_disc(target + 1U))) {   // the bytes at the target are no longer known to be the disc's (decoded in place, overwritten, forgotten): no source claim
+          refuse(LoaderRefusalKind::loaded_bytes_unknown, s.pc);
+          continue;
+        }
         auto &entries = scan_.operations[l.op].entries;
         if (std::find(entries.begin(), entries.end(), target) == entries.end()) entries.push_back(target);
         landed = true;
@@ -1299,7 +1338,7 @@ private:
     for (;;) {
       if (!scan_.complete) return;
       if (++scan_.steps > kLoaderScanMaxSteps) { exhausted(s.pc); return; }
-      const auto decoded = decode_at(s.pc);
+      const auto decoded = decode_state(s, s.pc);
       if (!decoded) { end_at("undecodable_or_outside", s.pc); return; }  // outside the boot image (a loaded module's code is not walked) or not an instruction
       const M68kIrOperation &op = *decoded;
       const std::uint32_t here = s.pc;
@@ -1317,7 +1356,17 @@ private:
                                    op.kind == M68kIrKind::movem_transfer || op.destination_ea.mode == M68kEaMode::address_predec || op.destination_ea.mode == M68kEaMode::address_postinc ||
                                    op.source_ea.mode == M68kEaMode::address_predec || op.source_ea.mode == M68kEaMode::address_postinc ||
                                    (op.destination_ea.mode == M68kEaMode::address_register && (op.destination_ea.reg & 7U) == 7U);
+        // An unmodelled instruction still advances a known auto-incremented / -decremented address register by the access size.
+        std::array<std::optional<Val>, 2> stepped{};
+        const M68kEffectiveAddress *eas[2] = {&op.source_ea, &op.destination_ea};
+        for (int k = 0; k < 2; ++k) {
+          const auto &e = *eas[k];
+          const unsigned r = e.reg & 7U;
+          if ((e.mode == M68kEaMode::address_postinc || e.mode == M68kEaMode::address_predec) && r != 7U && s.a[r].known() && op.destination_ea.mode != M68kEaMode::address_register && op.kind != M68kIrKind::movem_transfer)
+            stepped[static_cast<std::size_t>(k)] = K(e.mode == M68kEaMode::address_postinc ? s.a[r].v + nbytes(op.size) : s.a[r].v - nbytes(op.size));
+        }
         apply_data(s, op);
+        for (int k = 0; k < 2; ++k) if (stepped[static_cast<std::size_t>(k)]) s.a[eas[k]->reg & 7U] = *stepped[static_cast<std::size_t>(k)];
         if (inval.kind == Inval::Kind::all) { s.mem.clear(); s.image_dirty = true; note_write_unknown(s); }
         else if (inval.kind == Inval::Kind::range) {
           s.mem.clear_range(inval.lo, inval.hi);
@@ -1467,7 +1516,17 @@ private:
       if (call) { havoc_after_foreign_call(s); s.pc = next; return true; }
       return false;
     }
-    if (note_entry(s, target.v)) {  // a proven entry into a loaded range: the module's own code is not walked
+    if (note_entry(s, target.v)) {  // a proven entry into a loaded range
+      if (ws_ && options_.recursive_modules && decode_state(s, target.v)) {   // recursive discovery: walk the module's own code from the proven entry
+        if (entered_.insert(target.v).second && entered_.size() > kLoaderScanMaxModuleEntries) { exhausted(here); return false; }
+        if (call) {
+          for (const auto &rs : s.rets) if (rs.size() >= kLoaderScanMaxCallDepth) { exhausted(here); return false; }
+          for (auto &rs : s.rets) rs.push_back(next);
+          s.top_dirty = false;
+        }
+        s.pc = target.v;
+        return true;
+      }
       if (!call) return false;
       havoc_after_foreign_call(s);
       s.pc = next;

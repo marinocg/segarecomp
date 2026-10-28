@@ -29,19 +29,22 @@ FN = {"CDCSTOP": 0x89, "CDCSTAT": 0x8A, "CDCREAD": 0x8B, "CDCTRN": 0x8C, "CDCACK
 WORK, DIRBUF = 0x020000, 0x021000
 V_LBA, V_COUNT, V_BASE, V_DEST, V_HDR, V_MODE = 4, 8, 12, 16, 20, 40
 LBA_PVD, LBA_TERM, LBA_ROOT = 16, 17, 18
-FILES = {"MODA.BIN;1": (40, 2), "MODB.BIN;1": (44, 1), "MODC.BIN;1": (46, 1)}   # name -> (first LBA, sectors)
+FILES = {"MODA.BIN;1": (40, 2), "MODB.BIN;1": (44, 1), "MODC.BIN;1": (46, 1), "MODR.BIN;1": (48, 1)}   # name -> (first LBA, sectors)
 BASE_A, BASE_B, BASE_C = 0x090000, 0x0A0000, 0x0B0000
+BASE_R = 0x0A8000
+XOR_KEY = 0x5A
 HEADER_A = 0x40
 FAR_A = 0x840
 CASES = ("base", "alias", "unmodelled", "two_paths", "corrupt_pvd", "corrupt_extent", "no_exec", "stale_service", "late_patch", "entry_unknown",
-         "loop_pointer", "loop_pointer_late", "loop_pointer_early_store", "loop_unknown_exit", "loop_memory", "loop_memory_base", "branch_two", "loop_alias", "computed")   # SEG-099-T003: state-convergence cases
+         "loop_pointer", "loop_pointer_late", "loop_pointer_early_store", "loop_unknown_exit", "loop_memory", "loop_memory_base", "branch_two", "loop_alias", "computed",
+         "recursive", "cycle", "transformed", "overlay")   # SEG-099-T003: state-convergence cases; T004: recursive discovery cases
 SP_TABLE_PREFIX = 0x2A
 SCRATCH = 0x040000
 BASE_A2 = 0x0B8000
 V_X = 24
 
 
-def module_a():
+def module_a(extra=None):
     """Module A at BASE_A: header, entry at +0x40 (marker, a call into sector 1 that counts), RTS; the routine is at +0x840 (in the second sector)."""
     m = F.Asm(BASE_A + HEADER_A)
     m.moveq(1, 0)
@@ -49,6 +52,8 @@ def module_a():
     m.w(0x6100)                                             # BSR.W far
     far_disp_at = len(m.words)
     m.w(0)
+    if extra:
+        extra(m)
     m.rts()
     code = bytearray(m.assemble())
     far = F.Asm(BASE_A + FAR_A)
@@ -193,6 +198,12 @@ def build(options):
             s.move("w", F.imm(0x0B), F.d(0))                    # a service number that is no load
             s.jsr(F.absl(BIOS_VECTOR))
         s.bsr("load_file")
+        if case == "transformed" and label == "pick_b":         # the module is stored encoded and decoded in place before it runs: its executed bytes are not a disc span
+            s.move("l", work(V_BASE), F.a(0))
+            s.move("w", F.imm(2047), F.d(1))
+            s.label("tx_loop")
+            s.immop("eor", "b", XOR_KEY, ("inc", 0))
+            s.dbra(1, "tx_loop")
         if case == "no_exec" and label == "pick_a":
             s.bra("done")                                       # loaded and never executed: data
         if case in ("entry_unknown", "computed") and label == "pick_a":
@@ -207,7 +218,7 @@ def build(options):
         s.bra("done")
 
     pick("pick_a", "name_a", BASE_A, HEADER_A)
-    pick("pick_b", "name_b", BASE_B, 0)
+    pick("pick_b", "name_b", BASE_A if case == "overlay" else BASE_B, 0)
     if case == "two_paths":
         pick("pick_c", "name_c", BASE_C, 0)
 
@@ -296,6 +307,9 @@ def build(options):
     s.label("name_b")
     for pair in (b"MO", b"DB", b".B", b"IN", b";1"):
         s.w(struct.unpack(">H", pair)[0])
+    s.label("name_r")
+    for pair in (b"MO", b"DR", b".B", b"IN", b";1"):
+        s.w(struct.unpack(">H", pair)[0])
     s.label("name_c")
     for pair in (b"MO", b"DC", b".B", b"IN", b";1"):
         s.w(struct.unpack(">H", pair)[0])
@@ -326,15 +340,45 @@ def build(options):
         main.move("w", F.absl(F.GA_MAIN + 0x20 + 2 * reg), ("inc", 3))
     F.main_finish(main)
 
-    a_sectors, a_code_len, far_len = module_a()
+    L = s.labels   # the SP's own routine and name addresses: a module may call the SP's library (an absolute call into the boot image)
+
+    def loader_call(m, name, base, then):
+        m.lea(F.absl(L[name]), 0)
+        m.move("l", F.imm(base), work(V_BASE))
+        m.jsr(F.absl(L["load_file"]))
+        m.move("l", work(V_BASE), F.a(0))
+        then(m)
+
+    extra_a = None
+    if case == "recursive":                                    # on route 3 module A itself loads and runs module R (never loaded by the build pass)
+        def extra_a(m):
+            m.immop("cmp", "b", 3, F.d(7))
+            m.bcc("ne", "skip_r")
+            loader_call(m, "name_r", BASE_R, lambda mm: mm.w(0x4E90))   # JSR (A0)
+            m.label("skip_r")
+    if case == "cycle":                                        # A loads B and jumps to it; B loads A and jumps back: a loading cycle
+        def extra_a(m):
+            loader_call(m, "name_b", BASE_B, lambda mm: mm.w(0x4ED0))   # JMP (A0)
+    a_sectors, a_code_len, far_len = module_a(extra_a)
     b_sector, b_code_len = module_plain("B", BASE_B, 0xB1)
+    if case == "cycle":
+        mb = F.Asm(BASE_B)
+        loader_call(mb, "name_a", BASE_A, lambda mm: (mm.lea(("d16", HEADER_A, 0), 0), mm.w(0x4ED0)))
+        code_b = mb.assemble()
+        rngb = random.Random(0xB1)
+        b_sector = code_b + bytes(rngb.randrange(256) for _ in range(2048 - len(code_b)))
+        b_code_len = len(code_b)
+    if case == "transformed":
+        b_sector = bytes(x ^ XOR_KEY for x in b_sector)
     c_sector, c_code_len = module_plain("C", BASE_C, 0xC1)
+    r_sector, r_code_len = module_plain("C", BASE_R, 0xD1)
     sectors = {}
     sectors[FILES["MODA.BIN;1"][0]] = a_sectors[:2048]
     sectors[FILES["MODA.BIN;1"][0] + 1] = a_sectors[2048:]
     sectors[FILES["MODB.BIN;1"][0]] = b_sector
     sectors[FILES["MODC.BIN;1"][0]] = c_sector
-    file_sizes = {"MODA.BIN;1": (FILES["MODA.BIN;1"][0], 4096), "MODB.BIN;1": (FILES["MODB.BIN;1"][0], 2048), "MODC.BIN;1": (FILES["MODC.BIN;1"][0], 2048)}
+    sectors[FILES["MODR.BIN;1"][0]] = r_sector
+    file_sizes = {"MODA.BIN;1": (FILES["MODA.BIN;1"][0], 4096), "MODB.BIN;1": (FILES["MODB.BIN;1"][0], 2048), "MODC.BIN;1": (FILES["MODC.BIN;1"][0], 2048), "MODR.BIN;1": (FILES["MODR.BIN;1"][0], 2048)}
     if case == "corrupt_extent":
         file_sizes["MODB.BIN;1"] = (5000, 2048)                  # a directory record whose extent leaves the track
     iso = iso_sectors(file_sizes, case)
@@ -349,6 +393,7 @@ def build(options):
             "A": {"lba": FILES["MODA.BIN;1"][0], "sectors": 2, "bases": [BASE_A], "entries": [HEADER_A], "far": FAR_A, "far_bytes": far_len, "code_bytes": a_code_len},
             "B": {"lba": FILES["MODB.BIN;1"][0], "sectors": 1, "bases": [BASE_B], "entries": [0], "code_bytes": b_code_len},
             "C": {"lba": FILES["MODC.BIN;1"][0], "sectors": 1, "bases": [BASE_C], "entries": [0], "code_bytes": c_code_len},
+            "R": {"lba": FILES["MODR.BIN;1"][0], "sectors": 1, "bases": [BASE_R], "entries": [0], "code_bytes": r_code_len},
         },
         "directory_lba": LBA_ROOT, "pvd_lba": LBA_PVD,
         "sha256": {str(k): hashlib.sha256(v).hexdigest() for k, v in sectors.items() if k >= 40},
