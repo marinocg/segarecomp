@@ -782,7 +782,7 @@ LoaderScan scan_sega_cd_loaders(const DiscImage &disc, const BootImages &images,
   const auto &track = disc.tracks().front();
   std::map<std::uint32_t, unsigned> per_lba;
   for (auto &g : groups) {
-    if (scan.modules.size() >= kModuleMaxCount) {
+    if (scan.modules.size() >= kLoaderScanMaxModules) {
       scan.refusals.push_back({LoaderRefusalKind::too_many_modules, 0U});
       scan.complete = false;
       scan.modules.clear();  // an exhausted inventory proposes nothing
@@ -824,7 +824,7 @@ LoaderScan scan_sega_cd_loaders(const DiscImage &disc, const BootImages &images,
   std::sort(scan.refusals.begin(), scan.refusals.end(), [](const LoaderRefusal &a, const LoaderRefusal &b) {
     return std::tie(a.kind, a.pc) < std::tie(b.kind, b.pc);
   });
-  if (!scan.modules.empty()) {
+  if (!scan.modules.empty() && scan.modules.size() <= kModuleMaxCount) {   // the module-list text is only valid within the list's own bound
     std::ostringstream text;
     text << kModuleManifestVersion << "\n# discovered by the static loader scan (SEG-097-T001, ADR 0206); admitted unchanged by the module list\n"
          << "disc " << disc.identity() << "\n";

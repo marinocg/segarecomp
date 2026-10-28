@@ -24,12 +24,13 @@ import sega_cd_unvisited_fixture as U  # noqa: E402
 ROM_SIZE = L.ROM_SIZE
 MAIN, FAULT, SUB_SRC = L.MAIN, L.FAULT, L.SUB_SRC
 GA, GA_SUB, WINDOW, RESULT = L.GA, L.GA_SUB, L.WINDOW, L.RESULT
-CASES = ("base", "overwritten", "header_patched", "unknown_lba", "unknown_dest", "prg_dest", "dispatch", "dispatch_unknown")
+CASES = ("base", "overwritten", "header_patched", "unknown_lba", "unknown_dest", "prg_dest", "dispatch", "dispatch_unknown", "computed_entry")
 
 
 def sub_program(sp_disc_offset, sp_len, init_entry):
+    sectors_to_read = (sp_disc_offset + sp_len + 2047) // 2048
     sub = L.Sub()
-    sub.load(0, 2, 0)                                           # the system area (IP and SP) through the CDD/CDC into Word RAM
+    sub.load(0, sectors_to_read, 0)                                           # the system area (IP and SP) through the CDD/CDC into Word RAM
     sub.copy_blob(L.WORD_RAM_SUB + sp_disc_offset, F.SP_BASE, sp_len)   # the SP into PRG RAM at $6000
     s = sub.s
     s.move("b", F.imm(0x01), F.absl(GA_SUB + 0x03))             # RET = 1: Word RAM back to main (the IP is copied from it)
@@ -73,13 +74,13 @@ def main_program(sub_len, ip_disc_offset, ip_len):
     return code
 
 
-def build(out, case="base"):
+def build(out, case="base", many=0, many_groups=4, many_nops=0):
     assert case in CASES, case
-    ip, sp, sectors, oracle = U.build({"unvisited_case": case, "sp_table": True, "bios": True})
+    ip, sp, sectors, oracle = U.build({"unvisited_case": case, "sp_table": True, "bios": True, "many": many, "many_groups": many_groups, "many_nops": many_nops})
     area, extents = F.system_area(ip, sp, "BIOSUNVIS")
     ip_off, ip_len = extents["ip"][0], extents["ip"][1]
     sp_off, sp_len = extents["sp"][0], extents["sp"][1]
-    assert ip_off + ip_len <= 2048 <= sp_off and sp_off + sp_len <= 4096, extents       # IP in LBA 0, SP in LBA 1: two sectors read
+    assert ip_off + ip_len <= 2048 <= sp_off and sp_off + sp_len <= 16 * 2048, extents       # IP in LBA 0, the SP from LBA 1 on: the sectors it spans are read
     sub = sub_program(sp_off, sp_len, F.SP_BASE + U.SP_TABLE_PREFIX)
     sub_len = (len(sub) + 1) & ~1
     rom = bytearray(ROM_SIZE)
@@ -98,7 +99,7 @@ def build(out, case="base"):
     import random
     rng = random.Random(0x7004)
     users = []
-    for lba in range(F.TRACK1_SECTORS):
+    for lba in range(max(F.TRACK1_SECTORS, (max(sectors) + 4) if sectors else 0)):
         if lba < 16:
             users.append(area[lba * 2048:(lba + 1) * 2048])
         elif lba in sectors:
@@ -121,8 +122,11 @@ def main(argv=None):
     parser.add_argument("command", choices=["build"])
     parser.add_argument("--out", type=pathlib.Path, required=True)
     parser.add_argument("--case", choices=CASES, default="base")
+    parser.add_argument("--many-groups", type=int, default=4)
+    parser.add_argument("--many-nops", type=int, default=0)
+    parser.add_argument("--many", type=int, default=0, help="N distinct modules behind the dispatcher over 4 bases (SEG-098-T004)")
     args = parser.parse_args(argv)
-    print(json.dumps(build(args.out, args.case), sort_keys=True))
+    print(json.dumps(build(args.out, args.case, args.many, args.many_groups, args.many_nops), sort_keys=True))
     return 0
 
 

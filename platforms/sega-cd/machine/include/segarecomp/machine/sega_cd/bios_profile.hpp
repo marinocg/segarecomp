@@ -43,7 +43,7 @@ inline constexpr std::uint32_t kMaxOperandTemplates = 256U;   // template SLOTS 
 inline constexpr std::uint32_t kMaxTemplateRunSlots = 128U;   // slots in one run record (SEG-079-T002)
 inline constexpr std::uint32_t kTemplateSlotBytes = 6U;       // JMP (xxx).L
 inline constexpr std::uint32_t kMaxCopyImages = 8U;
-inline constexpr std::uint32_t kMaxDiscImages = 16U;           // SEG-064-T004
+inline constexpr std::uint32_t kMaxDiscImages = 64U;           // SEG-064-T004 (16); SEG-098-T004 (ADR 0213): 64, measured
 inline constexpr std::uint32_t kEpochGranule = 0x100U;        // snapshot length granule (scd_prg_snapshot_length)
 inline constexpr const char *kSegaCdBiosGeneratorVersion = "segarecomp.sega_cd.bios_profile.v2";
 

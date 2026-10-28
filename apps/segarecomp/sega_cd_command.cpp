@@ -647,8 +647,9 @@ int resolve_source_command(int argc, char **argv) {
 
 // SEG-097-T001 (ADR 0206): static discovery of disc-loaded modules. Pure function of the disc; executes nothing.
 int discover_modules_command(int argc, char **argv) {
-  std::optional<std::string> cue, out_path, extents_path;
+  std::optional<std::string> cue, out_path, extents_path, windows_path;
   bool table_roots = false, computed_continue = false, constant_dispatch = false;
+  std::string static_scope = "hull";   // SEG-098-T004: `loaded` = every loaded byte of a proven module (all aligned starts), `hull` = the traversed executable subrange
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
@@ -656,6 +657,8 @@ int discover_modules_command(int argc, char **argv) {
     else if (arg == "--constant-dispatch") constant_dispatch = true;   // SEG-098-T003 (ADR 0212)
     else if (arg == "--computed-call-whatif") computed_continue = true;   // SEG-098-T001 survey what-if (never used by a build)
     else if (arg == "--static-extents" && i + 1 < argc) extents_path = argv[++i];   // SEG-098-T002: one `<cpu>:<offset>:<base>:<length>` per verified mapping
+    else if (arg == "--static-windows" && i + 1 < argc) windows_path = argv[++i];   // SEG-098-T004: `<cpu>:<base>:<bytes>` per loaded module window (classification of a later stop)
+    else if (arg == "--static-scope" && i + 1 < argc) { static_scope = argv[++i]; if (static_scope != "hull" && static_scope != "loaded") { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; } }
     else if (arg == "--module-table-roots") table_roots = true;   // SEG-098-T001: walk the SP module jump table, not only the descriptor entry
     else {
       std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
@@ -724,13 +727,22 @@ int discover_modules_command(int argc, char **argv) {
     if (scan.complete)
       for (const auto &m : scan.modules)
         for (const auto base : m.bases)
-          lines << "sub:" << (static_cast<std::uint64_t>(m.block) * 2048U + m.range_offset) << ":" << (base + m.range_offset) << ":" << m.range_length << "\n";
+          lines << "sub:" << (static_cast<std::uint64_t>(m.block) * 2048U + (static_scope == "loaded" ? 0U : m.range_offset)) << ":" << (base + (static_scope == "loaded" ? 0U : m.range_offset)) << ":"
+                << (static_scope == "loaded" ? m.size : m.range_length) << "\n";
     std::ofstream out(*extents_path, std::ios::binary);
     out << lines.str();
     if (!out) {
       std::cout << "{\"ok\":false,\"stage\":\"write\",\"error\":\"out_unwritable\"}\n";
       return 6;
     }
+  }
+  if (windows_path) {
+    std::ostringstream lines;
+    if (scan.complete)
+      for (const auto &m : scan.modules)
+        for (const auto base : m.bases) lines << "sub:" << base << ":" << m.size << "\n";
+    std::ofstream out(*windows_path, std::ios::binary);
+    out << lines.str();
   }
   if (out_path && !scan.manifest.empty()) {
     std::ofstream out(*out_path, std::ios::binary);
