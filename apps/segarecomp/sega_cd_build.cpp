@@ -543,7 +543,7 @@ class Builder {
     fs::remove(list, ec);
     const int code = run_process({self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--static-extents", list.string()}, report, {}, 300);
     const std::string text = read_text(report);
-    if (code < 0 || text.empty()) { static_json_ = "{\"ran\":true,\"status\":\"scan_failed\"}"; return; }
+    if (code < 0 || text.empty() || text.find("\"complete\":") == std::string::npos) { static_json_ = "{\"ran\":true,\"status\":\"scan_failed\"}"; return; }
     const bool complete = raw_value(text, "complete").value_or("") == "true";
     std::map<std::string, unsigned> reasons;
     for (std::size_t at = text.find("\"reason\":\""); at != std::string::npos; at = text.find("\"reason\":\"", at + 1U)) {

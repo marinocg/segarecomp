@@ -51,9 +51,9 @@ Gate: `BIOS_PROFILE_UNVISITED_ADMISSION_GO` = rows 1-10 hold through the support
 
 ## Result
 
-`tests/sega_cd_bios_unvisited_test.py` (28 checks): every row behaved as pre-registered. On the base build the static scan admitted 4 extents before any pass; the build
+`tests/sega_cd_bios_unvisited_test.py` (27 checks): every row behaved as pre-registered. On the base build the static scan admitted 4 extents before any pass; the build
 resolved exactly 2 extents from evidence (IP, SP); B and C ran from the unchanged binary (counts [0,1,0] and [0,0,2], markers equal the oracle); the control build stopped
-typed at B. Variation: row 9 is stronger than registered (the program refuses any disc other than the verified one before running). Row 8's unknown-LBA variant ends in the loader's
+typed at B. The program-identity equality with the Python driver (`sega_cd_native_build_test`) holds only for discs with no discovered module (no static admission). Variation: row 9 is stronger than registered (the program refuses any disc other than the verified one before running). Row 8's unknown-LBA variant ends in the loader's
 own never-satisfied transfer wait (`budget_exhausted`), also with no execution of C.
 
 ## Decision: `BIOS_PROFILE_UNVISITED_ADMISSION_GO` (for project-authored BIOS-image discs)
