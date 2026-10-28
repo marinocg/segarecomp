@@ -55,7 +55,7 @@ def route(exe, disc, choice, tmp, label):
         for line in coverage.read_text().splitlines():
             fields = line.split()
             if len(fields) >= 2 and fields[0] == "1":
-                executed.add(int(fields[1], 16) if not fields[1].isdigit() else int(fields[1]))
+                executed.add(int(fields[1], 16))   # the runtime writes the PC in hexadecimal: "<cpu> <pc hex> <count> <first>"
     return code, report, words, executed
 
 
@@ -126,8 +126,10 @@ def main():
         check(code_c == 0 and words_c == [0, 0, 2, 0, 0, 0xCCCC], "the previously unvisited module C runs at both of its bases (count 2): %s" % words_c)
         check(hashlib.sha256(exe.read_bytes()).hexdigest() == before, "the binary is unchanged by running: nothing is compiled after the run starts")
         b_range = range(0x080000, 0x080000 + 0x1C)
-        check(ex_a and not any(pc in b_range for pc in ex_a) and any(pc in b_range for pc in ex_b),
-              "coverage: B's instructions execute only on the route that selects B (they were compiled before they were ever executed)")
+        a_range = range(0x080040, 0x080040 + 0x1C)
+        check(ex_a and not any(pc in b_range for pc in ex_a) and any(pc in a_range for pc in ex_a) and any(pc in b_range for pc in ex_b) and
+              not any(pc in a_range for pc in ex_b),
+              "coverage: B's instructions execute only on the route that selects B (they were compiled before they were ever executed), A's only on A's")
 
         # -- 11: wrong digest -------------------------------------------------------------------------------------------------------
         bad = tmp / "modules-bad-digest.txt"

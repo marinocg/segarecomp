@@ -73,3 +73,59 @@ the milestone does not claim M3 is safe for general Sega CD gameplay.
 
 (Chronology, for the record: the seam, the emitters and a first CLI run on `unvisited/pi` and on S2 were written and run exploratorily before this section was
 committed; they showed the stop at an uncompiled entry and the S2 reduction qualitatively. The table, the labels and the figures below were produced after.)
+
+## Result
+
+Run: `tests/sega_cd_experimental_m3_test.py` (38 checks, real native model, CI test `sega_cd_experimental_m3_test`), `tests/sega_cd_selective_admission_test.cpp` (fake
+producer, 27 checks), `tests/sega_cd_unvisited_discovery_test.py`, `apps/segarecomp-launcher/launcher_sega_cd_test.cpp` (policy rows) and
+`launcher_sega_cd_flow_test.py` (an experimental build through the launcher). Figures are from one local run on project-authored fixtures (GCC, Linux, `-O1`);
+CPU/memory figures are noisy at this scale.
+
+**S1** - the `unvisited` disc with the module list discovered by T001 (synthetic profile; independent labels = the fixture encoder's own instruction starts):
+
+| | A per-mapping broad | B broad, position-independent bodies | C experimental M3 + B35, position-independent bodies |
+|---|---:|---:|---:|
+| image / mapping / root / producer inventory | reference | identical | identical |
+| distinct source-relative offsets admitted | 214 | 214 | 164 (a subset of A in every image) |
+| native instruction bodies | 249 | 214 | 164 |
+| generated C bytes | 241,201 | 214,462 | 161,040 |
+| compile CPU s / peak KiB / object bytes | 0.34 / 48,144 / 126,976 | 0.31 / 46,940 / 121,704 | 0.20 / 40,792 / 95,168 |
+| label recall IP / SP / A / B / C | 28/28, 133/133, 8/8, 8/8, 35/39 | same as A | 23/28, 88/133, 8/8, 8/8, 35/39 |
+| executed starts retained (3 routes, 214 starts under A) | 214 | 214 | 164 |
+| routes (default / B / C) | complete: 787,225 / 263,087 / 525,215 instructions, correct markers | identical to A | all three stop with the typed `entry_not_compiled` after 70 / 68 / 71 instructions |
+| two emissions identical, `k_sha256` equal | yes | yes | yes |
+
+The 4 labelled starts of module C that arm A also misses are dead instructions after an unconditional branch / indirect jump: the encoder labels them, the
+static traversal rightly does not reach them. Module C (two mappings) is scored **once** (one policy-report row) and its admitted offsets are identical for both
+mappings. Arms A and B run every route identically (the ADR 0207 result); B and C compile 35 % fewer bodies than A per ADR 0207's sharing, and C a further 23 % fewer
+than B.
+
+**S2** - the BIOS-image profile fixture `direct` (a 16 KiB BIOS-like image and one disc extent), the launcher's own build route (`segarecomp sega-cd build`):
+
+| | A Compatibility | C experimental |
+|---|---:|---:|
+| status / rounds / result | ok / 3 / `idle` (runs to its end) | ok / 2 / `stopped`, typed `entry_not_compiled`, frontier `no_delivery_evidence` |
+| aligned starts compiled | 8,574 (everything the CPU owner lowers) | 3,072 (of 8,574; 35 % B35 + seed cells) |
+| generated C bytes | 9,350,968 | 2,629,952 |
+| whole build CPU s / peak KiB | 18.6 / 374,428 | 6.4 / 282,576 |
+| discovered extents | 1 | 0 (the program stops before the loader's data path is reached) |
+| program identity | differs (the request enters it) | |
+
+Fallbacks (producer failures `model_identity`, `rom_size`, `non_finite_score`, an empty proposal, and validator rejections of odd/empty/outside/unordered
+ranges and of a seed outside the proposal) are covered with a fake producer: each gives the broad text, the exact reason, the offending image, no admitted-set
+claim and the unchanged identity of the request. The real model never failed on the fixtures, so no fallback was observed with it.
+
+## Decision
+
+- **`EXPERIMENTAL_PATH_IMPLEMENTED`**: every registered gate holds. The frozen gen2 M3 + B35 is selectable explicitly for Sega CD (CLI `--aot-policy optimized
+  [--aot-model gen2]` for `emit` and `build`; the launcher's off-by-default "Optimized (experimental)" choice and a Compatibility rebuild), runs natively with the
+  frozen identities, reports a truthful effective policy, never expands image authority, preserves the byte guards and the typed stops, scores each image once, and
+  leaves Genesis policies, weights and identities untouched (the Genesis `aot-policy-identity` output is pinned in the test). No runtime ML and no runtime code
+  generation exist.
+- **`NOT_PROMOTED`**: the complete-recall gate fails, as ADR 0140 predicted and as registered: M3 + B35 omitted 50 labelled starts of the 144-byte-scale IP/SP and every
+  route of the fixture ends at an uncompiled entry that the broad build compiles. On the BIOS-image fixture it cuts build CPU by about two thirds while the program
+  stops at its first omitted entry. This is a build-size saving that costs correctness of the route, on a fixture where there is no size problem to solve (ADR 0140:
+  no compile-size/time problem exists for the Sega CD module programs). It is **not** a default, not a correctness authority and not a claim that M3 is safe for
+  general Sega CD gameplay. Compatibility remains the default and the fallback; the Compatibility emission is byte-identical to before.
+- Limits: two small project-authored subjects; the BIOS-image profile's per-image scoring covers BIOS, copy, disc-extent and epoch images the same way, but no
+  commercial disc was run (no aggregate figure exists for one); a model-proposed region is never a completeness certificate.

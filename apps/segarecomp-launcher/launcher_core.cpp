@@ -567,6 +567,44 @@ const char *ScdBuildJob::stage_label(int index) {
 
 fs::path scd_build_program(const fs::path &out_dir) { return out_dir / (std::string("program-viewer") + exe_suffix); }
 
+std::vector<std::string> scd_build_policy_arguments(bool experimental_m3) {
+  return experimental_m3 ? std::vector<std::string>{"--aot-policy", "optimized", "--aot-model", "gen2"} : std::vector<std::string>{};
+}
+
+ScdPolicyReport read_scd_policy_report(const std::string &status_text) {
+  ScdPolicyReport out;
+  const auto at = status_text.find("\"aot_policy\":{");
+  if (at == std::string::npos) return out;
+  const auto end = status_text.find("\"images\":[", at);   // the scalar members come first; the per-image rows are not read
+  const std::string object = status_text.substr(at, end == std::string::npos ? std::string::npos : end - at);
+  const auto field = [&](const std::string &key) -> std::string {
+    const auto k = object.find("\"" + key + "\":");
+    if (k == std::string::npos) return {};
+    std::size_t p = k + key.size() + 3U;
+    if (p < object.size() && object[p] == '"') { const auto e = object.find('"', p + 1U); return e == std::string::npos ? std::string() : object.substr(p + 1U, e - p - 1U); }
+    std::size_t e = p;
+    while (e < object.size() && object[e] != ',' && object[e] != '}') ++e;
+    return object.substr(p, e - p);
+  };
+  out.present = true;
+  out.requested = field("requested");
+  out.effective = field("effective");
+  out.reason = field("reason");
+  out.failed_image = field("failed_image");
+  out.fallback = field("fallback") == "true";
+  out.broad_entries = std::atoll(field("broad_entries").c_str());
+  out.admitted_entries = std::atoll(field("admitted_entries").c_str());
+  return out;
+}
+
+std::string scd_policy_sentence(const ScdPolicyReport &r) {
+  if (!r.present || r.requested != "optimized") return {};
+  if (r.effective == "selective")
+    return "Experimental Optimized: the program contains " + std::to_string(r.admitted_entries) + " of the " + std::to_string(r.broad_entries) +
+           " instruction entries the Compatibility build would compile. It may omit code the game needs and then stops at an uncompiled entry; rebuild with Compatibility if it does. ";
+  return "Experimental Optimized was requested but this build is Compatibility (the product fell back: " + (r.reason.empty() ? std::string("unspecified") : r.reason) + "). ";
+}
+
 std::string scd_frontier_text(const std::string &refusal) {
   if (refusal == "no_source") return "The game runs code that the disc does not contain verbatim (generated, decompressed or modified at run time); it is not compiled.";
   if (refusal == "ambiguous_source") return "The game runs code that is identical in several places on the disc, so its origin cannot be proven; it is not compiled.";
@@ -657,6 +695,7 @@ void ScdBuildJob::run() {
 #else
   args.insert(args.end(), {"--link-arg", "-Wl,-rpath," + utf8(layout_.sdl_lib)});
 #endif
+  for (const auto &option : scd_build_policy_arguments(request_.experimental_m3)) args.push_back(option);
   if (const char *extra = SDL_getenv("SEGARECOMP_SCD_BUILD_ARGS")) {  // TEST SEAM (documented in ADR 0205; local environment only, never set by Segarecomp): whitespace-separated extra product-CLI options (budget, host source, ...)
     std::istringstream words(extra);
     for (std::string word; words >> word;) args.push_back(word);
@@ -755,7 +794,9 @@ void ScdBuildJob::run() {
       while (e < status_text.size() && status_text[e] != ',' && status_text[e] != '}') ++e;
       return status_text.substr(p, e - p);
     };
-    std::string text = "Built in " + field("rounds") + " round(s). ";
+    const ScdPolicyReport policy = read_scd_policy_report(status_text);
+    built_experimental_.store(policy.present && policy.requested == "optimized" && policy.effective == "selective");
+    std::string text = "Built in " + field("rounds") + " round(s). " + scd_policy_sentence(policy);
     const auto frontier = status_text.find("\"frontier\":{");
     if (frontier != std::string::npos) {
       const auto refusal = status_text.find("\"refusal\":\"", frontier);
