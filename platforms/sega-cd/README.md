@@ -67,4 +67,4 @@ selection, driver, and `scd_live.c`, the interactive driver loop); `viewer/` (th
 **Reuse:** `libs/cpu/m68k` and the generic M68K emitter instantiated twice (one `ExecutableImageSet` and one `M68kRuntimeCEmitter` per processor
 instance, both `CpuVariant::mc68000`); the Genesis VDP device and frame export; the Genesis viewer's presenter, pacer and controller mapping.
 
-**Milestones:** SEG-062/063 (synthetic disc, dual M68K, modules/overlays), SEG-064..071 (authentic BIOS, checkpoints), SEG-078 (interactive play).
+**Milestones:** SEG-062/063 (synthetic disc, dual M68K, modules/overlays), SEG-064..071 (authentic BIOS, checkpoints), SEG-078 (interactive play), SEG-097 (static discovery of modules no run has loaded, source-relative bodies, the experimental frozen-M3 policy; contract section 19).
