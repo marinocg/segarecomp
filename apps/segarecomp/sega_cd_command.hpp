@@ -27,7 +27,10 @@ inline constexpr const char *segarecomp_sega_cd_usage =
     "  segarecomp sega-cd resolve-source --cue <disc.cue> --cpu main|sub --pc <address> --region <file> --region-base <address>\n"
     "                                    [--delivered <first-lba>:<count>[,...]] [--delivered-overflow 1]\n"
     "      (SEG-078-T003, ADR 0205: find the track-1 span the live RAM window is an exact copy of, among the blocks the build pass's CDC read;\n"
-    "       prints the --disc-image extent or a typed refusal; exit 0 resolved, 8 refused)\n";
+    "       prints the --disc-image extent or a typed refusal; exit 0 resolved, 8 refused)\n"
+    "  segarecomp sega-cd discover-modules --cue <disc.cue> [--out <modules.txt>]\n"
+    "      (SEG-097-T001, ADR 0206: static discovery of disc-loaded modules from the sub boot image's own CD-load operations, including modules\n"
+    "       no run has loaded; writes the module list admitted by `emit --modules`; prints the typed report; exit 0 found, 9 none or incomplete)\n";
 
 int segarecomp_sega_cd_command(int argc, char **argv);
 // SEG-078-T003: `segarecomp sega-cd build` (sega_cd_build.cpp).

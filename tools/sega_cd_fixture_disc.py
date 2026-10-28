@@ -20,6 +20,8 @@ Fixtures (the main program is the IP, mapped at $FF0000; the sub program is the 
   modules     SEG-063 Checkpoint D: an ISO9660 volume with module files; the sub loads module A by CDC DMA into Word RAM and runs
                     it at $080000, copies it to PRG RAM $020000 and runs it there, then does the same with module B at the same
                     addresses (--module-case selects a negative loader; --iso-defect corrupts one ISO9660 structure)
+  unvisited   SEG-097-T001 (ADR 0206): a boot loader that loads one of three modules chosen by a pad button; two of them are never loaded on the
+                    default route (see tools/sega_cd_unvisited_fixture.py; --unvisited-case selects a negative loader)
   wordram_wait T004  the sub touches 2M Word RAM before main hands it over: it waits for DTACK and retries (GPGX)
   wordram_violation, neg_*   negative fixtures (typed stops or defined GPGX results)
 Variants: `cooked` (MODE1/2048) and `raw` (MODE1/2352 with sync and header); options alter the cdframe sub program for
@@ -31,7 +33,7 @@ Result block convention: the main program reports into work RAM at $FFC000 and w
 usage:
   sega_cd_fixture_disc.py build --fixture NAME --out DIR [--variant cooked|raw] [--seed N] [--data-flip OFFSET]
                                 [--cd-lba LBA] [--dma-dest N] [--bad-checksum] [--abort-dma] [--bad-cdc-register] [--no-audio]
-                                [--module-case CASE] [--iso-defect DEFECT]
+                                [--module-case CASE] [--iso-defect DEFECT] [--unvisited-case CASE]
   sega_cd_fixture_disc.py describe --fixture NAME [options]   JSON: data LBA, expected values (used by tests)
   sega_cd_fixture_disc.py --check | --write-manifest
 """
@@ -1268,6 +1270,7 @@ FIXTURES = {
     "bootarea": fixture_bootarea,
     "cdframe": fixture_cdframe,
     "modules": fixture_modules,
+    "unvisited": lambda o: __import__("sega_cd_unvisited_fixture").build(o),   # SEG-097-T001 (ADR 0206); lazy: that module imports this one
 }
 for _kind in ("ga_register", "prg_window_nobus", "ifl2_masked", "handler_not_compiled", "entry_not_compiled", "code_overwrite",
               "write_protect", "busreq_stopped"):
@@ -1371,6 +1374,8 @@ def options_from(args):
         options["module_case"] = args.module_case
     if args.iso_defect is not None:
         options["iso_defect"] = args.iso_defect
+    if args.unvisited_case is not None:
+        options["unvisited_case"] = args.unvisited_case
     return options
 
 
@@ -1391,6 +1396,7 @@ def main(argv=None):
     parser.add_argument("--no-audio", action="store_true")
     parser.add_argument("--module-case", choices=MODULE_CASES)
     parser.add_argument("--iso-defect", choices=ISO_DEFECTS)
+    parser.add_argument("--unvisited-case", choices=("base", "overwritten", "header_patched", "unknown_lba", "unknown_dest", "prg_dest", "recursion"))
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--write-manifest", action="store_true")
     args = parser.parse_args(argv)

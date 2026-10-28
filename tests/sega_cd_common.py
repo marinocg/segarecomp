@@ -103,6 +103,8 @@ def module_list(identity, modules):
         lines.append("sha256 " + m["sha256"])
         for base in m["bases"]:
             lines.append("map 0x%x" % base)
+        if m.get("range"):
+            lines.append("range 0x%x 0x%x" % tuple(m["range"]))
         for entry in m["entries"]:
             lines.append("entry 0x%x" % entry)
         lines.append("verify " + m.get("verify", "byte_identity"))

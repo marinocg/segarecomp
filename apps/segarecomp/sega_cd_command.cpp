@@ -16,6 +16,7 @@
 #include "segarecomp/iso9660.hpp"
 #include "segarecomp/machine/sega_cd/bios_profile.hpp"
 #include "segarecomp/machine/sega_cd/boot_images.hpp"
+#include "segarecomp/machine/sega_cd/loader_scan.hpp"
 #include "segarecomp/machine/sega_cd/modules.hpp"
 #include "segarecomp/machine/sega_cd/program.hpp"
 #include "segarecomp/machine/sega_cd/source_resolve.hpp"
@@ -601,6 +602,69 @@ int resolve_source_command(int argc, char **argv) {
   return 0;
 }
 
+// SEG-097-T001 (ADR 0206): static discovery of disc-loaded modules. Pure function of the disc; executes nothing.
+int discover_modules_command(int argc, char **argv) {
+  std::optional<std::string> cue, out_path;
+  for (int i = 3; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
+    else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
+    else {
+      std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+      return 2;
+    }
+  }
+  if (!cue) {
+    std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+    return 2;
+  }
+  const auto loaded = segarecomp::load_cue_disc(*cue);
+  if (!loaded.disc) {
+    std::cout << "{\"ok\":false,\"stage\":\"disc\",\"error\":\"" << segarecomp::disc_error_name(loaded.error) << "\"}\n";
+    return 3;
+  }
+  const auto produced = scd::produce_boot_images(*loaded.disc);
+  if (!produced.images) {
+    std::cout << "{\"ok\":false,\"stage\":\"boot\",\"error\":\"" << scd::boot_image_error_name(produced.error) << "\"}\n";
+    return 4;
+  }
+  const auto scan = scd::scan_sega_cd_loaders(*loaded.disc, *produced.images);
+  std::ostringstream report;
+  report << "{\"ok\":" << (!scan.modules.empty() && scan.complete ? "true" : "false") << ",\"complete\":" << (scan.complete ? "true" : "false")
+         << ",\"disc_identity\":\"" << loaded.disc->identity() << "\",\"identity\":\"" << scan.identity << "\",\"states\":" << scan.states
+         << ",\"steps\":" << scan.steps << ",\"operations\":[";
+  for (std::size_t i = 0; i < scan.operations.size(); ++i) {
+    const auto &o = scan.operations[i];
+    report << (i ? "," : "") << "{\"lba\":" << o.lba << ",\"destination\":" << o.destination << ",\"bytes\":" << o.bytes << ",\"entries\":[";
+    for (std::size_t e = 0; e < o.entries.size(); ++e) report << (e ? "," : "") << o.entries[e];
+    report << "]}";
+  }
+  report << "],\"modules\":[";
+  for (std::size_t i = 0; i < scan.modules.size(); ++i) {
+    const auto &m = scan.modules[i];
+    report << (i ? "," : "") << "{\"name\":" << json_string(m.name) << ",\"block\":" << m.block << ",\"size\":" << m.size << ",\"sha256\":\"" << m.sha256
+           << "\",\"range\":{\"offset\":" << m.range_offset << ",\"length\":" << m.range_length << "},\"bases\":[";
+    for (std::size_t b = 0; b < m.bases.size(); ++b) report << (b ? "," : "") << m.bases[b];
+    report << "],\"entries\":[";
+    for (std::size_t e = 0; e < m.entries.size(); ++e) report << (e ? "," : "") << m.entries[e];
+    report << "]}";
+  }
+  report << "],\"refusals\":[";
+  for (std::size_t i = 0; i < scan.refusals.size(); ++i)
+    report << (i ? "," : "") << "{\"reason\":\"" << scd::loader_refusal_name(scan.refusals[i].kind) << "\",\"pc\":" << scan.refusals[i].pc << "}";
+  report << "]}\n";
+  if (out_path && !scan.manifest.empty()) {
+    std::ofstream out(*out_path, std::ios::binary);
+    out << scan.manifest;
+    if (!out) {
+      std::cout << "{\"ok\":false,\"stage\":\"write\",\"error\":\"out_unwritable\"}\n";
+      return 6;
+    }
+  }
+  std::cout << report.str();
+  return !scan.modules.empty() && scan.complete ? 0 : 9;
+}
+
 }  // namespace
 
 int segarecomp_sega_cd_command(int argc, char **argv) {
@@ -608,6 +672,7 @@ int segarecomp_sega_cd_command(int argc, char **argv) {
   if (argc >= 3 && std::string_view(argv[2]) == "emit") return emit(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "build") return segarecomp_sega_cd_build(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "resolve-source") return resolve_source_command(argc, argv);
+  if (argc >= 3 && std::string_view(argv[2]) == "discover-modules") return discover_modules_command(argc, argv);
   std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
   return 2;
 }

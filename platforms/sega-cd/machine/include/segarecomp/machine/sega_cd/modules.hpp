@@ -15,7 +15,9 @@
 //   extent <block> <bytes>        optional; logical block of track 1 and byte size (required when there is no file)
 //   sha256 <64 lowercase hex>
 //   map <execution base>          one or more; the whole module at that base
-//   entry <image offset>          one or more; declared entry roots (applied to every base)
+//   range <offset> <length>       optional (SEG-097-T001): the executable subrange of the extent (even, inside it); the rest of the
+//                                 extent (a file header, trailing data) is verified source but never executable authority
+//   entry <image offset>          one or more; declared entry roots (applied to every base; inside the range when one is given)
 //   verify byte_identity          the only policy for RAM-resident code
 //   end
 //
@@ -28,6 +30,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "segarecomp/disc.hpp"
@@ -60,7 +63,8 @@ enum class ModuleError : std::uint8_t {
   mapping_invalid,            // an odd base
   mapping_outside_executable_ram,  // the mapped range is not inside one executable RAM region of the processor
   entry_missing,
-  entry_invalid,              // an odd offset or one outside the module
+  entry_invalid,              // an odd offset or one outside the module (or outside its executable range)
+  range_invalid,              // an odd or empty executable range, or one leaving the extent
   verification_unsupported,   // anything but byte_identity
   duplicate_module,           // the same bytes mapped over the same addresses twice (indistinguishable candidates)
   too_many_modules,
@@ -76,6 +80,7 @@ struct ModuleSpec {
   std::string sha256;
   std::vector<std::uint32_t> bases;
   std::vector<std::uint32_t> entries;
+  std::optional<std::pair<std::uint32_t, std::uint32_t>> range;  // (offset, length) inside the extent
   std::string verification;
   unsigned line{};
 };
@@ -101,6 +106,8 @@ struct AdmittedModule {
   std::string sha256;
   std::vector<std::uint32_t> bases;
   std::vector<std::uint32_t> entries;
+  std::uint32_t first_offset{};  // executable subrange inside the extent
+  std::uint32_t length{};
   std::uint32_t image_id{};    // ImageId in the processor's set
 };
 
