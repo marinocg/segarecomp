@@ -120,6 +120,15 @@ std::uint64_t process_token() {
   return token;
 }
 
+// The stop classes that name an unmodelled DEVICE capability (hardware/audio/DMA/register behaviour), as opposed to a code-coverage, CPU-architectural or machine-evidence stop.
+// An explicit list (runtime stop names, platforms/sega-cd/runtime/scd_machine.c): `instruction_unsupported`, `trace_unsupported` and the exception classes are CPU stops, not device stops.
+bool is_device_stop_class(const std::string &cls) {
+  static const char *const kDevice[] = {"wordram_cell_image_unsupported", "wordram_dot_image_unsupported", "backup_ram_unsupported", "pcm_unsupported", "gate_array_register_unsupported",
+                                        "vdp_access_unsupported", "vdp_dma_unsupported", "cdc_destination_unsupported", "cdd_command_unsupported", "main_device_unsupported"};
+  for (const char *name : kDevice) if (cls == name) return true;
+  return false;
+}
+
 class Builder {
  public:
   Builder(Options options, std::string self) : o_(std::move(options)), self_(std::move(self)) {}
@@ -140,6 +149,7 @@ class Builder {
 
     stage("analyze", "running");
     std::vector<std::string> admits;
+    if (!o_.static_discovery) static_status_ = "disabled";
     if (o_.static_discovery) static_discovery(admits);   // SEG-098-T002: first in the chain, so every later admission's identity includes them
     unsigned epochs = 0, templates = 0, slot_total = 0;
     for (unsigned round = 0; round < kMaxRounds; ++round) {
@@ -220,7 +230,7 @@ class Builder {
 
   int fail(const Failure &f) {
     log_ << "FAILED (" << f.stage << "): " << f.message << std::endl;
-    std::ofstream(o_.output / "status.json", std::ios::binary | std::ios::trunc) << "{\"status\":\"failed\",\"stage\":\"" << f.stage << "\",\"message\":\"" << json_escape(f.message) << "\"}\n";
+    std::ofstream(o_.output / "status.json", std::ios::binary | std::ios::trunc) << "{\"status\":\"failed\",\"stage\":\"" << f.stage << "\",\"message\":\"" << json_escape(f.message) << "\",\"inventory\":" << inventory_json(std::string(), f.stage) << "}\n";
     std::cout << "@result failed stage=" << f.stage << " message=" << f.message << std::endl;
     return 3;
   }
@@ -238,7 +248,7 @@ class Builder {
     out << "{\"status\":\"ok\",\"program\":\"" << exe.filename().string() << "\",\"viewer_program\":" << (viewer_path.empty() ? "null" : "\"" + viewer_path + "\"")
         << ",\"program_identity\":\"" << program_identity << "\",\"bios_sha256\":\"" << bios_sha_ << "\",\"rounds\":" << rounds << ",\"extents\":[";
     for (std::size_t i = 0; i < extents_.size(); ++i) out << (i ? "," : "") << "\"" << extents_[i] << "\"";
-    out << "],\"static_extents\":" << static_extents_.size() << ",\"static_discovery\":" << static_json_ << ",\"final_stop\":" << final_stop_json(report) << ",\"aot_policy\":" << (aot_policy_json_.empty() ? "null" : aot_policy_json_) << ",\"frontier\":" << (frontier_.empty() ? "null" : frontier_)
+    out << "],\"static_extents\":" << static_extents_.size() << ",\"static_discovery\":" << static_json_ << ",\"inventory\":" << inventory_json(report) << ",\"final_stop\":" << final_stop_json(report) << ",\"aot_policy\":" << (aot_policy_json_.empty() ? "null" : aot_policy_json_) << ",\"frontier\":" << (frontier_.empty() ? "null" : frontier_)
         << ",\"result\":\"" << raw_value(report, "result").value_or("") << "\",\"stop\":\"" << stop_class(report)
         << "\",\"viewer\":" << (o_.viewer ? "true" : "false") << ",\"history\":[" << history_ << "]}\n";
     std::ofstream(o_.output / "status.json", std::ios::binary | std::ios::trunc) << out.str();
@@ -269,8 +279,43 @@ class Builder {
       }
       return false;
     };
-    const char *where = inside(extents_, false) || inside(static_extents_, false) ? "inside_admitted_extent" : inside(static_windows_, true) ? "inside_static_module_window" : "outside_admitted_images";
+    const bool device = is_device_stop_class(cls);   // a hardware-capability stop is not about code coverage
+    const char *where = device ? "device_capability" : inside(extents_, false) || inside(static_extents_, false) ? "inside_admitted_extent" : inside(static_windows_, true) ? "inside_static_module_window" : "outside_admitted_images";
     return std::string("{\"class\":\"") + cls + "\",\"cpu\":\"" + want + "\",\"location\":\"" + where + "\"}";
+  }
+
+  // SEG-098-T005 (ADR 0214): the machine-readable inventory status. `complete` is only claimed under an explicit proof criterion; `partial` = useful inventory with named
+  // unresolved parts; `blocked` = a typed barrier stopped further justified compilation. A device/hardware stop (`*_unsupported`) is reported as `device_stop`, not as a code barrier.
+  // Zero frontiers on a bounded run prove nothing: loaders inside the admitted modules are not analyzed (kNestedLoaderAnalysis), so `complete` cannot currently be reached.
+  static constexpr bool kNestedLoaderAnalysis = false;
+  std::string inventory_json(const std::string &report, const std::string &failure_stage = std::string()) const {
+    std::vector<std::string> reasons, barriers;
+    bool device_stop = false;
+    std::string cls = "none";
+    if (!failure_stage.empty()) barriers.push_back("build_failed:" + failure_stage);
+    if (failure_stage.empty()) {
+      cls = stop_class(report);
+      if (cls != "none") {
+        if (is_device_stop_class(cls)) device_stop = true;
+        else barriers.push_back("stop:" + cls);
+      }
+      if (!frontier_.empty()) barriers.push_back("frontier:" + raw_value(frontier_, "refusal").value_or("unknown"));
+    }
+    if (!kNestedLoaderAnalysis) reasons.push_back("nested_loaders_not_analyzed");
+    if (static_status_ == "disabled") reasons.push_back("static_discovery_disabled");
+    else if (static_status_ == "not_run") reasons.push_back("static_discovery_not_run");
+    else if (static_status_ != "admitted" && static_status_ != "no_modules") reasons.push_back("static:" + static_status_);
+    for (const auto &[k, n] : static_refusals_) { (void)n; reasons.push_back("static_refusal:" + k); }
+    if (!extents_.empty()) reasons.push_back("execution_derived_extents");
+    const std::string status = !barriers.empty() ? "blocked" : reasons.empty() ? "complete" : "partial";
+    std::ostringstream out;
+    out << "{\"schema\":\"segarecomp.sega_cd.inventory.v1\",\"status\":\"" << status << "\",\"device_stop\":" << (device_stop ? "true" : "false") << ",\"stop_class\":\"" << cls
+        << "\",\"static_extents\":" << static_extents_.size() << ",\"resolved_extents\":" << extents_.size() << ",\"barriers\":[";
+    for (std::size_t i = 0; i < barriers.size(); ++i) out << (i ? "," : "") << "\"" << json_escape(barriers[i]) << "\"";
+    out << "],\"unresolved\":[";
+    for (std::size_t i = 0; i < reasons.size(); ++i) out << (i ? "," : "") << "\"" << json_escape(reasons[i]) << "\"";
+    out << "]}";
+    return out.str();
   }
 
   static std::string stop_class(const std::string &report) {
@@ -566,6 +611,8 @@ class Builder {
   // guard remains the runtime authority. Any failure leaves the build exactly as it was without this step and is reported, never hidden.
   void static_discovery(std::vector<std::string> &admits) {
     static_json_ = "{\"ran\":false}";
+    static_status_ = "scan_failed";
+    static_refusals_.clear();
     const fs::path list = o_.output / "static-extents.txt", report = o_.output / "static-scan.json";
     std::error_code ec;
     fs::remove(list, ec);
@@ -598,6 +645,8 @@ class Builder {
     for (const auto &[k, n] : reasons) { out << (first ? "" : ",") << "\"" << k << "\":" << n; first = false; }
     out << "}}";
     static_json_ = out.str();
+    static_status_ = status;
+    static_refusals_ = reasons;
     log_ << "static discovery: " << status << ", " << static_extents_.size() << " extent(s)" << std::endl;
   }
 
@@ -649,6 +698,8 @@ class Builder {
   std::mutex log_mutex_;
   std::atomic<unsigned> counter_{0};
   std::vector<std::string> extents_, static_extents_, static_windows_;
+  std::string static_status_ = "not_run";
+  std::map<std::string, unsigned> static_refusals_;
   std::string static_json_ = "{\"ran\":false}";
   std::vector<std::string> unit_names_;
   std::string aot_policy_json_;   // SEG-097-T003: the last emission's machine-readable aot_policy object (status.json)

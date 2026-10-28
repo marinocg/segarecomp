@@ -68,6 +68,10 @@ def main():
         check(len(a_line) == 1 and int(a_line[0].split(":")[3]) == oracle["modules"]["A"]["range"][1],
               "A: the admitted extent starts at its executable subrange (the 64-byte header is outside it)")
         check(len(lines) == 4 and len({l.split(":")[1] for l in lines}) == 3, "B and C: one extent per mapping, three sources (C twice)")
+        inv = st["inventory"]
+        check(inv["schema"] == "segarecomp.sega_cd.inventory.v1" and inv["status"] == "partial" and inv["barriers"] == [] and "nested_loaders_not_analyzed" in inv["unresolved"] and
+              "execution_derived_extents" in inv["unresolved"] and inv["static_extents"] == 4 and inv["resolved_extents"] == 2,
+              "inventory: a build with zero frontiers is `partial`, never `complete` (loaders inside the admitted modules are not analyzed; the IP and SP are evidence-derived)")
         program = tmp / "n-base" / ("program" + EXE)
         before = hashlib.sha256(program.read_bytes()).hexdigest()
 
@@ -83,6 +87,7 @@ def main():
         # ---- control: without the static producer the unvisited module is not compiled ----
         done, ctl = build(fx, tmp / "n-ctl", cache, "--static-discovery", "0")
         cprog = tmp / "n-ctl" / ("program" + EXE)
+        check(ctl["inventory"]["status"] == "partial" and "static_discovery_disabled" in ctl["inventory"]["unresolved"], "inventory (control): the disabled static producer is named")
         check(ctl and ctl["status"] == "ok" and ctl["static_extents"] == 0 and ctl["static_discovery"] == {"ran": False}, "control: --static-discovery 0 reproduces the previous build (no static admission)")
         rc0, wc0 = run(cprog, fx, 0)
         rc2, wc2 = run(cprog, fx, 2)
@@ -132,6 +137,7 @@ def main():
         done, su = build(fu, tmp / "n-dsu", cache)
         pu = tmp / "n-dsu" / ("program" + EXE)
         check(su and su["static_discovery"]["refusals"] == {"computed_control_unresolved": 1} and su["static_extents"] == 2, "dispatch_unknown: A and B admitted, the unresolved computed call is reported (typed), C is not admitted")
+        check(su["inventory"]["status"] == "partial" and "static_refusal:computed_control_unresolved" in su["inventory"]["unresolved"], "inventory: the unresolved computed transfer is named in `unresolved` (the inventory knows it is incomplete behind it)")
         rb, wb = run(pu, fu, 2)
         rc, wc = run(pu, fu, 3)
         check(wb[:3] == [0, 1, 0] and wc[2] == 0 and wc[5] == 0,
