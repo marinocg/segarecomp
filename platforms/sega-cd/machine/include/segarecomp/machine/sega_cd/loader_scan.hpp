@@ -27,6 +27,10 @@ inline constexpr std::uint32_t kLoaderScanMaxStates = 4096U;
 inline constexpr std::uint32_t kLoaderScanMaxSteps = 100000U;
 inline constexpr std::uint32_t kLoaderScanMaxCallDepth = 8U;
 inline constexpr std::uint32_t kLoaderScanSectorBytes = 2048U;
+// SEG-099-T002 (ADR 0216): the bounded abstract RAM of the optional work-variable model: 256-byte pages of known bytes below the sub's I/O window (a page-count bound keeps a state small; exceeding it forgets, never invents).
+inline constexpr std::uint32_t kLoaderScanMaxTrackedPages = 128U;
+inline constexpr std::uint32_t kLoaderScanBiosAreaEnd = 0x6000U;      // sub PRG RAM below the SP is BIOS-owned: any modelled service may change it (ADR 0215)
+inline constexpr std::uint32_t kLoaderScanCdcTrnSpan = 0x920U;        // the documented CDCTRN buffer advance; only the first 2,048 bytes are claimed as the sector
 
 enum class LoaderRefusalKind : std::uint8_t {
   lba_unknown,                // the CDD play position was not a constant at the transfer
@@ -89,6 +93,16 @@ struct LoaderSurvey {
   std::uint32_t dispatch_resolved{};         // distinct computed-call/jump sites whose target was computed from known values (constant_dispatch)
   std::uint32_t memory_carried_reads{};      // distinct sites that load a data register from (An), (An)+ or d16(An) memory (not the stack): values the walk cannot know (the SP's work-variable state)
   std::uint32_t table_reads{};               // distinct immutable-image reads folded to constants (constant_dispatch)
+  // SEG-099-T002 (work_state): the BIOS CD-service model and the abstract work-variable memory.
+  std::uint32_t bios_modelled_calls{};       // distinct (site, function) calls to a service with a modelled effect (ADR 0215)
+  std::uint32_t bios_unmodelled_calls{};     // distinct (site) calls whose effects are unknown: all abstract memory is forgotten
+  std::uint32_t sector_transfers{};          // distinct CDCTRN sites that resolved source and destination
+  std::uint32_t sector_transfers_unresolved{};  // distinct CDCTRN sites whose read position or destination was not constant
+  std::uint32_t memory_args_resolved{};      // distinct ROMREADN sites whose {sector,count} block was read from abstract memory
+  std::uint32_t memory_args_unresolved{};    // distinct ROMREADN sites whose block was not known
+  std::uint32_t async_volatile_ranges{};     // ranges the interrupt/user entries write: unknown to the init/main entries (ADR 0216)
+  bool async_volatile_all{};                 // an interrupt/user entry wrote through an unknown pointer or an unmodelled service: no tracked memory is trusted
+  std::uint32_t branches_decided{};          // distinct conditional-branch sites decided by tracked condition codes
   std::map<std::string, std::uint32_t> path_ends;  // distinct sites where a path ended, by class (undecodable_or_outside, computed_jump, return_to_caller, stop, exception)
 };
 
@@ -97,6 +111,8 @@ struct LoaderScanOptions {
   // (b) reads a word/long at a known PC-relative address inside the SP image (the table is assumed immutable: a wrong assumption only yields a proposal that the
   // runtime byte guard refuses) and (c) follows `JSR/JMP (d8,PC|An,Xn)` whose index is known, so one call site with a constant selector reaches exactly one handler.
   bool constant_dispatch{false};
+  // SEG-099-T002 (ADR 0216): a bounded abstract model of work-variable memory, condition codes and the documented BIOS sector-read services (ADR 0215). Off by default.
+  bool work_state{false};
   bool module_table_roots{false};  // walk the SP module jump table (init, main, int2, user) instead of only the descriptor entry
   bool continue_after_computed_call{false};  // survey what-if: a computed call (JSR (d8,An,Xn) / (d8,PC,Xn)) is a foreign call that returns, so the walk continues after it
 };
