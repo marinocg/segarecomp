@@ -11,6 +11,7 @@
 // It models no memory except the CD hardware registers, no interpreter state beyond constants, and nothing is decoded at run time.
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -69,6 +70,28 @@ struct DiscoveredModule {
   std::uint32_t range_length{};
 };
 
+// SEG-098-T001 (ADR 0210): aggregate, non-reconstructable survey counters gathered by the same walk (classes and counts only; no
+// address, name or byte of the disc is retained here beyond the BIOS service function numbers, which are the public BIOS API).
+struct LoaderSurvey {
+  std::uint32_t roots{};                     // walk roots (the descriptor entry, or the SP module jump-table entries)
+  bool module_table_found{};                 // the SP carries a valid module jump table (header word at +$18)
+  std::uint32_t cdd_commands{};              // distinct sites writing the CDD command word (TX8/TX9)
+  std::uint32_t cdc_transfer_triggers{};     // distinct sites writing the CDC transfer trigger
+  std::uint32_t bios_service_calls{};        // distinct (site, function) calls into the BIOS area below the SP image
+  std::uint32_t bios_service_unknown_function{};
+  std::map<std::uint32_t, std::uint32_t> bios_functions;  // D0.w function number -> distinct call sites
+  std::uint32_t foreign_calls_other{};       // distinct constant calls/jumps to other targets outside the image
+  std::uint32_t foreign_calls_unknown{};     // distinct computed calls/jumps whose target is unknown
+  std::uint32_t copy_loop_candidates{};      // distinct (An)+,(Am)+ moves reached (CPU copy candidates)
+  std::uint32_t counted_loops{};             // distinct DBcc sites reached
+  std::map<std::string, std::uint32_t> path_ends;  // distinct sites where a path ended, by class (undecodable_or_outside, computed_jump, return_to_caller, stop, exception)
+};
+
+struct LoaderScanOptions {
+  bool module_table_roots{false};  // walk the SP module jump table (init, main, int2, user) instead of only the descriptor entry
+  bool continue_after_computed_call{false};  // survey what-if: a computed call (JSR (d8,An,Xn) / (d8,PC,Xn)) is a foreign call that returns, so the walk continues after it
+};
+
 struct LoaderScan {
   std::vector<LoadOperation> operations;
   std::vector<DiscoveredModule> modules;
@@ -78,9 +101,10 @@ struct LoaderScan {
   std::uint32_t steps{};
   std::string manifest;  // canonical module list text (`segarecomp.sega_cd.modules.v1`); empty when no module was discovered
   std::string identity;  // SHA-256 of the manifest text
+  LoaderSurvey survey;
 };
 
 // Pure function of the disc and its admitted boot images. Executes no guest instruction and reads from the disc only the sectors it digests.
-[[nodiscard]] LoaderScan scan_sega_cd_loaders(const DiscImage &disc, const BootImages &images);
+[[nodiscard]] LoaderScan scan_sega_cd_loaders(const DiscImage &disc, const BootImages &images, const LoaderScanOptions &options = {});
 
 }  // namespace segarecomp::machine::sega_cd

@@ -38,7 +38,8 @@ BASES_C = (0x090000, 0x0A0000)
 BASE_D = 0x0B0000
 HEADER = 0x40
 CASES = ("base", "overwritten", "header_patched", "unknown_lba", "unknown_dest", "prg_dest", "recursion",
-         "pi", "pi_odd", "pi_escape", "pi_overwrite", "long_dest", "stale_lba")
+         "pi", "pi_odd", "pi_escape", "pi_overwrite", "long_dest", "stale_lba", "table_header")
+SP_TABLE_PREFIX = 0x2A   # SEG-098-T001: an authentic-style SP header ("MAIN", module jump table at +$20, init at +$2A) before the loader code
 MARK = {"A": F.SUB_DATA + 0x20, "B": F.SUB_DATA + 0x22, "C": F.SUB_DATA + 0x24}
 COUNT = {"A": F.SUB_DATA + 0x30, "B": F.SUB_DATA + 0x32, "C": F.SUB_DATA + 0x34}
 MARKER = {"A": 0xAAAA, "B": 0xBBBB, "C": 0xCCCC}
@@ -209,7 +210,7 @@ def sector(kind, variant=None, helper=0, pi_base=BASES_C[0]):
 def build(options):
     case = options.get("unvisited_case", "base")
     assert case in CASES, case
-    sub = F.Asm(F.SP_BASE)
+    sub = F.Asm(F.SP_BASE + (SP_TABLE_PREFIX if case == "table_header" else 0))
 
     def cdc_write(reg, value):
         sub.move("b", F.imm(reg), F.absl(F.GA_SUB + 0x05))
@@ -370,9 +371,15 @@ def build(options):
     if case == "prg_dest":
         loader("load_sector_prg", 5)
     sp = sub.assemble()
+    if case == "table_header":   # descriptor entry stays 0 (the header); the BIOS enters through the module jump table: init, main, int2, user
+        header = bytearray(SP_TABLE_PREFIX)
+        header[0:8] = b"MAIN    "
+        header[0x18:0x1C] = (0x20).to_bytes(4, "big")
+        header[0x20:0x28] = (0x000A).to_bytes(2, "big") + bytes(6)
+        sp = bytes(header) + sp
 
     main = F.Asm(F.IP_BASE)
-    F.main_start_sub(main, F.SP_BASE)
+    F.main_start_sub(main, F.SP_BASE + (SP_TABLE_PREFIX if case == "table_header" else 0))
     F.wait_flag(main, F.GA_MAIN + 0x0F, 1, "w_ready")
     main.moveq(1, 1)                                       # default: module A
     main.immop("cmp", "w", 2, F.d(7))                      # the runtime input: the machine input main:d7 (this profile has no controller port)

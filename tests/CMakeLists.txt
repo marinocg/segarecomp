@@ -1280,6 +1280,9 @@ set_property(TEST sega_cd_modules_build_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_unvisited_discovery_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_unvisited_discovery_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_unvisited_discovery_test APPEND PROPERTY LABELS full fast)
+add_test(NAME sega_cd_loader_survey_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_loader_survey_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_loader_survey_test APPEND PROPERTY LABELS full fast)
 # SEG-097-T002 (ADR 0207): the source-relative text derivation, and the source-relative emitter against the per-mapping reference (reports equal).
 add_executable(source_relative_test source_relative_test.cpp)
 target_link_libraries(source_relative_test PRIVATE segarecomp::codegen_c11)
