@@ -48,3 +48,11 @@ reaches the service layer, and the load parameters live in the SP's work-variabl
 them would need memory/taint modelling of the SP work area (explicitly out of scope) and the BIOS service ABI as evidence; the survey finds no bounded constant-argument shape to
 pre-register. The next evidence-backed opportunity is therefore not another loader class but (T004/T005) coverage accounting and the honest `partial` label: an authentic title's
 module inventory from static analysis of the SP alone is 0, and the observed route remains the source of authentic coverage.
+
+## Notes for T005 and consumers (from the adversarial review)
+
+- `complete` in the scan report means only "the walk was not exhausted by a resource limit". It is NOT "no computed transfer was left unresolved": a scan can report `complete: true`
+  together with `computed_control_unresolved` refusals. Completeness labelling (T005) must key off the refusal classes, never off `complete` alone.
+- The survey object gained `dispatch_resolved`, `table_reads` and `memory_carried_reads` (the last two are counted only with the rule on); modules, operations, refusals, states and
+  steps of the default scan are unchanged.
+- The folded arithmetic (ADD/SUB widths, ADDQ immediate 8, ADDA/SUBA staying unknown) is exercised through the dispatcher fixtures only; there is no dedicated arithmetic unit test.

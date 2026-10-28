@@ -587,7 +587,7 @@ private:
       if (op.kind == M68kIrKind::stop_until_interrupt) { end_at("stop", here); return; }
       if (op.kind == M68kIrKind::write_move && op.source_ea.mode == M68kEaMode::address_postinc && op.destination_ea.mode == M68kEaMode::address_postinc) copy_sites_.insert(here);
       if (op.kind == M68kIrKind::dbcc_loop) loop_sites_.insert(here);
-      if (op.kind == M68kIrKind::write_move && op.destination_ea.mode == M68kEaMode::data_register && (op.source_ea.reg & 7U) != 7U &&
+      if (options_.constant_dispatch && op.kind == M68kIrKind::write_move && op.destination_ea.mode == M68kEaMode::data_register && (op.source_ea.reg & 7U) != 7U &&
           (op.source_ea.mode == M68kEaMode::address_indirect || op.source_ea.mode == M68kEaMode::address_postinc || op.source_ea.mode == M68kEaMode::address_disp16))
         memory_read_sites_.insert(here);
       apply_data(s, op);
