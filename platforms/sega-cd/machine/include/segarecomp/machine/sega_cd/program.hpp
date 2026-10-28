@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "segarecomp/disc.hpp"
@@ -18,12 +19,26 @@
 
 namespace segarecomp::machine::sega_cd {
 
+// SEG-097-T002 (ADR 0207): emitter policy. The default is the per-mapping emitter of ADR 0132, kept byte-identical as the verified reference;
+// `position_independent` emits ONE source-relative body per (image, source offset) of an image with several mappings and a thin per-mapping
+// dispatch to it. Every instruction whose lowering cannot be proven source-relative keeps the per-mapping emission and is reported.
+struct SegaCdEmitOptions {
+  bool position_independent = false;
+};
+
 struct ProcessorEmissionStats {
   Processor processor{Processor::main};
   std::uint32_t compiled{};           // instructions lowered to generated C
   std::uint32_t unsupported{};        // reached instructions emitted as typed instruction_unsupported stops
   std::uint32_t out_of_image_targets{};  // statically known targets outside the image (dispatch stops entry_not_compiled)
   std::uint32_t vector_roots{};       // handlers proven by static vector installation (MOVE.L #imm,(vector).W/L)
+  // SEG-097-T002: native instruction bodies (generated functions that lower an instruction), shared source-relative bodies among them, the
+  // (mapping, instruction) instances those shared bodies serve, and the instances that kept per-mapping emission with the refusal reasons.
+  std::uint32_t bodies{};
+  std::uint32_t shared_bodies{};
+  std::uint32_t shared_instances{};
+  std::uint32_t fallback_instances{};
+  std::vector<std::pair<std::string, std::uint32_t>> fallback_reasons;  // sorted by reason
 };
 
 // SEG-063-T001 (ADR 0127, ADR 0132): one compilation unit per (image, mapping). Units that overlap a module unit form an overlay
@@ -41,6 +56,8 @@ struct ImageEmissionStats {
   std::uint32_t compiled{};
   std::uint32_t unsupported{};
   std::uint32_t out_of_image_targets{};
+  std::uint32_t shared_instances{};    // SEG-097-T002: this mapping's instructions served by a shared source-relative body
+  std::uint32_t fallback_instances{};  // and those that kept per-mapping emission although position independence was requested
   int overlay_group = -1;  // index into the program's overlay groups, or -1 (SEG-062 per-PC dispatch)
 };
 
@@ -82,9 +99,11 @@ struct ProgramEmission {
 inline constexpr const char *kSegaCdGeneratorVersion = "segarecomp.sega_cd.generator.v1";
 
 // The disc-independent part of the emission (used directly by the Checkpoint A tests).
-[[nodiscard]] ProcessorsEmission emit_sega_cd_processors(const BootImages &images);
+[[nodiscard]] ProcessorsEmission emit_sega_cd_processors(const BootImages &images, const SegaCdEmitOptions &options = {});
 // `module_identity` (the SHA-256 of the admitted module manifest, empty without modules) enters the program identity only when set,
 // so a program without modules keeps its SEG-062 identity and text.
-[[nodiscard]] ProgramEmission emit_sega_cd_program(const DiscImage &disc, const BootImages &images, std::string_view module_identity = {});
+// The program identity includes the emitter policy only when it is not the default, so default programs keep their identity and text.
+[[nodiscard]] ProgramEmission emit_sega_cd_program(const DiscImage &disc, const BootImages &images, std::string_view module_identity = {},
+                                                   const SegaCdEmitOptions &options = {});
 
 }  // namespace segarecomp::machine::sega_cd

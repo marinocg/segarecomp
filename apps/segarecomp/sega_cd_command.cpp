@@ -458,9 +458,11 @@ int emit(int argc, char **argv) {
   std::optional<std::string> cue, out_path, expected, modules, bios;
   std::vector<std::string> copies, admits, disc_images;
   std::optional<std::uint32_t> partition_window, application_entry;
+  scd::SegaCdEmitOptions emit_options;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
+    else if (arg == "--position-independent") emit_options.position_independent = true;  // SEG-097-T002 (ADR 0207)
     else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
     else if (arg == "--expect-identity" && i + 1 < argc) expected = argv[++i];
     else if (arg == "--modules" && i + 1 < argc) modules = argv[++i];
@@ -485,7 +487,7 @@ int emit(int argc, char **argv) {
       return 2;
     }
   }
-  if (!cue || !out_path || (!bios && (!copies.empty() || !admits.empty() || !disc_images.empty() || application_entry || partition_window)) || (bios && modules)) {
+  if (!cue || !out_path || (!bios && (!copies.empty() || !admits.empty() || !disc_images.empty() || application_entry || partition_window)) || (bios && modules) || (bios && emit_options.position_independent)) {
     std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
     return 2;
   }
@@ -510,7 +512,7 @@ int emit(int argc, char **argv) {
     }
     admission = std::move(loaded_modules.admission);
   }
-  const auto emission = scd::emit_sega_cd_program(*loaded.disc, images, admission ? std::string_view(admission->identity) : std::string_view());
+  const auto emission = scd::emit_sega_cd_program(*loaded.disc, images, admission ? std::string_view(admission->identity) : std::string_view(), emit_options);
   if (emission.error != scd::EmissionError::none) {
     std::cout << "{\"ok\":false,\"stage\":\"emit\",\"error\":\"" << scd::emission_error_name(emission.error) << "\"}\n";
     return 6;
@@ -528,9 +530,13 @@ int emit(int argc, char **argv) {
     const auto &s = emission.stats[i];
     report << (i ? "," : "") << "{\"processor\":\"" << scd::processor_name(s.processor) << "\",\"compiled\":" << s.compiled
            << ",\"unsupported\":" << s.unsupported << ",\"out_of_image_targets\":" << s.out_of_image_targets
-           << ",\"vector_roots\":" << s.vector_roots << "}";
+           << ",\"vector_roots\":" << s.vector_roots << ",\"bodies\":" << s.bodies << ",\"shared_bodies\":" << s.shared_bodies
+           << ",\"shared_instances\":" << s.shared_instances << ",\"fallback_instances\":" << s.fallback_instances << ",\"fallback_reasons\":{";
+    for (std::size_t r = 0; r < s.fallback_reasons.size(); ++r)
+      report << (r ? "," : "") << "\"" << s.fallback_reasons[r].first << "\":" << s.fallback_reasons[r].second;
+    report << "}}";
   }
-  report << "],\"overlay_groups\":" << emission.overlay_groups << ",\"images\":[";
+  report << "],\"position_independent\":" << (emit_options.position_independent ? "true" : "false") << ",\"overlay_groups\":" << emission.overlay_groups << ",\"images\":[";
   for (std::size_t i = 0; i < emission.images.size(); ++i) {
     const auto &image = emission.images[i];
     report << (i ? "," : "") << "{\"processor\":\"" << scd::processor_name(image.processor) << "\",\"image_id\":" << image.image_id
