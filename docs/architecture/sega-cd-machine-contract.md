@@ -545,6 +545,6 @@ Three additions to the synthetic profile and one experiment, none of which chang
   under the actual guest PC (`scd_pc0`), compares the live bytes at that PC as every body does, and only PC-derived literals differ from the per-mapping text. A form that does not
   derive cleanly keeps the per-mapping emission and is reported. The default emission is the verified reference and is unchanged.
 - **Experimental frozen M3 + B35 (ADR 0208).** `--aot-policy optimized [--aot-model gen2]` on `emit` and `build`; Compatibility is the default and the fallback. A producer proposes
-  source-relative regions per image; the emitters compile only the broad entries inside a validated proposal and report requested/effective/fallback/reason. A proposal never adds an
+  source-relative regions per image, only for independently admitted disc game modules and extents (contract `selective_admission.v2`: firmware, BIOS-derived images, boot IP/SP, boot-area and user-declared extents stay broad); the emitters compile only the broad entries inside a validated proposal and report requested/effective/fallback/reason. A proposal never adds an
   entry, an image or a mapping; an omitted entry is the typed `entry_not_compiled` stop. M3 is not promoted and is not a completeness certificate.
 

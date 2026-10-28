@@ -133,3 +133,89 @@ Review notes: (1) `sega-cd build` now ends the build at the frontier `uncompiled
 (it never occurred there because an admitted extent is compiled), the emission itself being byte-identical. (2) The request, not the outcome, enters the program identity; the admitted
 set also depends on binary32 scores, which are bit-identical across IEEE-754 hosts under the pinned numeric contract (ADR 0102) - the same assumption the Genesis policy makes. (3) The
 BIOS-image selective path runs a second, broad emission for the comparison counts (about twice the emission cost); a failure of that comparison emission does not discard a valid selective result.
+
+## Follow-up (SEG-097 M1 follow-up): the experimental policy scores only game modules
+
+**Why.** The first result (above, "arm H" below) was too aggressive: on every synthetic route the program stopped at uncompiled *boot IP/SP* code while the actual game modules kept every
+executed start, and on the BIOS-image fixture the build stopped before it could discover the executable disc extent because BIOS-derived code had been cut. ADR 0140 separately showed
+incomplete M3 recall inside real game modules. The experiment therefore asks a narrower question: with firmware, BIOS-derived images and boot code under full broad AOT, does M3 on the
+independently admitted game modules alone keep routes complete?
+
+**Decision (contract `selective_admission.v2`, policy identity changed).** Eligibility is read from explicit executable-image provenance, never from an address range, a name, a file
+extension or a title:
+
+| image | role / provenance | policy |
+|---|---|---|
+| BIOS image | `bios_firmware` (BIOS-image profile) | `broad_required` |
+| BIOS copy images, sub-BIOS epoch images (materialized or recipe) | `bios_derived_copy`, `bios_derived_epoch` | `broad_required` |
+| boot IP / SP (synthetic profile) | producer `sega_cd.boot_ip` / `sega_cd.boot_sp` | `broad_required` |
+| discovered disc extent inside the disc's system area (first 32 KiB: header, IP, SP) | `boot_area_extent` | `broad_required` |
+| user-declared disc image | `manual_disc_image` (role not established) | `broad_required` |
+| disc-loaded module (module list) | producer `sega_cd.disc_module` | `m3_selected` |
+| discovered disc extent outside the boot area | `disc_extent` | `m3_selected` |
+| any other / unknown producer | `unknown_provenance` or its producer | `broad_required` |
+| runtime-generated BIOS jump-slot templates | not images | unchanged, never scored |
+
+M3 still only proposes: it discovers no image, extends no range, decides no mapping and weakens no byte guard. The model, B35 and the native evaluator are unchanged. With no eligible image
+the build is broad and says `no_eligible_images`; a producer or validator failure still falls back to the whole broad build and marks the eligible images `broad_fallback`. Every image is
+reported with `selection`, `selection_reason`, source size and entry counts; images that are not scored are counted as broad-admitted (`admitted_entries == broad_entries`), and the report
+adds `m3_images`, `m3_broad_entries`, `m3_admitted_entries` for the optimized part only. The contract name moved to `...selective_admission.v2` and the policy identity carries
+`scope=game_modules`: a program built under the previous eligibility can never be reused. The Compatibility policy identity text and every Compatibility output are unchanged (pinned in the
+test). The historical scope remains reachable for evidence only, as `--aot-scope all-images` (identity `scope=all_images`); it is not offered by the launcher, which uses the shipped scope.
+
+**Results** (`tests/sega_cd_experimental_m3_test.py`, 52 checks; arms A = Compatibility, H = historical global scope, C = shipped game-module scope).
+
+Synthetic three-route fixture (module list discovered by T001; independent labels = the fixture encoder's starts):
+
+| | A | H (historical) | C (shipped) |
+|---|---:|---:|---:|
+| route default / B / C | complete | stops `entry_not_compiled` after 70 / 68 / 71 instructions (boot SP) | **complete, identical result words, retired counts and register state to A** |
+| executed starts retained | 214/214 | 164/214 | **214/214** |
+| IP / SP admitted instruction sets | reference | cut (23/28, 88/133 labels) | **equal to A exactly** (digests) |
+| modules scored | - | 3 (+ IP, SP) | 3 genuinely scored (cells 16 each, 6 selected each), module recall 8/8, 8/8, 35/39 = A's |
+| native bodies / C bytes (with source-relative bodies) | 249 / 241,201 | 164 / 161,040 | 214 / 214,462 (= source-relative Compatibility) |
+
+The 3 modules are 28-byte routines: M3 keeps all their code, so the game-module-only policy saves **nothing** on this fixture beyond what ADR 0207 saves. It is a correctness
+improvement (no regression against Compatibility), not a size gain.
+
+BIOS-image fixture (`direct`, end-to-end `sega-cd build`):
+
+| | A | H | C |
+|---|---:|---:|---:|
+| rounds / result / extents discovered | 3 / `idle` / 1 | 2 / `stopped` `entry_not_compiled` / 0 | **3 / `idle` / 1** (reaches and discovers the extent; runs to the same end) |
+| entries admitted (all images) | 10,439 | 3,072 of 8,574 | 9,280 of 10,439 (the one scored extent: 706 of 1,865) |
+| generated C bytes | 9,350,968 | 2,629,952 | 8,143,726 |
+| build CPU s / peak KiB | 18.5 / 374,228 | 6.4 / 282,408 | 16.9 / 373,852 |
+
+Eligibility negatives and positives on the same fixture: the BIOS image is `broad_required`/`bios_firmware`; with nothing but firmware admitted the build is broad (`no_eligible_images`); a
+user-declared disc image stays `broad_required` (`manual_disc_image`); a discovered extent inside the boot area stays `broad_required` (`boot_area_extent`); a discovered extent outside it is
+scored (`m3_selected`, `disc_extent`).
+
+Authorized local commercial title (Sonic CD, the launcher route: BIOS image and disc only, no input, no reference; one run per arm; **aggregates only, nothing derived from the disc or BIOS is kept
+in the repository**; the full Compatibility build reproduces ADR 0205's route A: 17 rounds, 12 extents, ending at the documented PCM boundary):
+
+| | A Compatibility | H historical global | C game-module scope |
+|---|---:|---:|---:|
+| rounds / extents discovered | 17 / 12 | 9 / 5 | **9 / 5** |
+| end of the build's route | `pcm_unsupported` (the documented audio boundary) | `code_bytes_mismatch` at the main boot-area base, frontier `no_progress` | `code_bytes_mismatch`, same place, frontier `no_progress` |
+| image classes scored | - | firmware 1, BIOS epoch 1, boot-area extents 3, disc extents 2 | **disc extents 2 only** |
+| entries admitted per class (broad -> admitted) | all | firmware 61,869 -> 22,329; epoch 64,628 -> 22,493; boot-area 30,707 -> 10,806; disc 11,154 -> 3,945 | firmware, epoch, boot-area unchanged; **disc 11,154 -> 3,945** |
+| instruction functions in the final emission | 185,289 | 59,588 | 153,304 |
+| generated C bytes | 183,880,647 | 57,504,834 | 146,086,169 |
+| build CPU s / peak MiB | 844 / 1,130 | 238 / 550 | 462 / 623 |
+
+Where C stops: the instruction that no admitted variant matches lies in one of the two disc *game-module* extents (a 3.8 KB module loaded at the main work-RAM base, 693 of 1,891
+instruction entries admitted, 11 of 30 cells selected): the missing code belongs to a **game module**, not to boot code or firmware. This is the incomplete-recall limitation of ADR 0140,
+now observed in a build rather than a benchmark; no code was admitted heuristically to get past it (the frontier extent was already admitted, so the resolver correctly reports `no_progress`).
+The savings of C and H against A are NOT like-for-like: both builds end 8 rounds earlier, with 5 extents instead of 12. Independent source-backed labels (ADR 0140 needs the public
+disassembly built locally) were not rebuilt in this task: recall against independent labels is measured only on the synthetic fixture.
+
+## Decision (follow-up): `PARTIAL`
+
+- Synthetic routes: `GO` - all three complete with Compatibility's exact results, boot/IP/SP sets equal, modules genuinely scored; but no size gain (modules are tiny).
+- BIOS-image fixture: `GO` for reach - keeping BIOS-derived code broad lets the build discover and compile the disc extent and finish like Compatibility; saving 13 % C / 9 % CPU.
+- Real title: no gain that can be claimed. The shipped scope removes the boot-code stop of the historical scope (both stop at the same game-module instruction, so on this title the
+  boot-code policy was not the binding limit) and still ends 8 rounds before Compatibility because a game module's required instruction was not selected. 
+- The policy stays experimental and off by default; M3 is not promoted. **Recommendation:** no further M3 work before M2. Any retry needs the independent module labels and a recall
+  fix (budget or seeding by evidence), which is a research question, not a launcher feature; the loader-coverage work of M2 has a clearer benefit than a 21 % build-size reduction that
+  costs the route.
