@@ -30,6 +30,7 @@ const char *module_error_name(ModuleError error) noexcept {
   case ModuleError::mapping_outside_executable_ram: return "mapping_outside_executable_ram";
   case ModuleError::entry_missing: return "entry_missing";
   case ModuleError::entry_invalid: return "entry_invalid";
+  case ModuleError::range_invalid: return "range_invalid";
   case ModuleError::verification_unsupported: return "verification_unsupported";
   case ModuleError::duplicate_module: return "duplicate_module";
   case ModuleError::too_many_modules: return "too_many_modules";
@@ -108,7 +109,7 @@ ModuleManifestResult parse_module_manifest(std::string_view text) {
     return result;
   };
   bool have_version = false, have_disc = false, in_module = false;
-  std::array<bool, 6> seen{};  // processor, file, extent, sha256, verify, (unused)
+  std::array<bool, 6> seen{};  // processor, file, extent, sha256, verify, range
   ModuleSpec current;
   unsigned number = 0;
   std::size_t at = 0;
@@ -174,6 +175,10 @@ ModuleManifestResult parse_module_manifest(std::string_view text) {
       std::uint32_t offset = 0;
       if (!parse_number(t[1], offset)) return fail(ModuleError::manifest_syntax, number);
       current.entries.push_back(offset);
+    } else if (key == "range" && t.size() == 3 && once(5)) {
+      std::uint32_t first = 0, length = 0;
+      if (!parse_number(t[1], first) || !parse_number(t[2], length)) return fail(ModuleError::manifest_syntax, number);
+      current.range = std::make_pair(first, length);
     } else if (key == "verify" && t.size() == 2 && once(4)) {
       current.verification = std::string(t[1]);
     } else if (key == "end" && t.size() == 1) {
@@ -242,26 +247,37 @@ ModuleAdmission admit_modules(const DiscImage &disc, const ModuleManifest &manif
     bytes.resize(extent.size);
     const std::string digest = sha256_hex(bytes);
     if (digest != spec.sha256) return fail(ModuleError::digest_mismatch, spec.name);
+    // The executable subrange (SEG-097-T001): by default the whole extent; a `range` narrows what may execute (the digest still covers the whole extent).
+    std::uint32_t first_offset = 0U, range_length = extent.size;
+    if (spec.range) {
+      first_offset = spec.range->first;
+      range_length = spec.range->second;
+      if ((first_offset & 1U) != 0U || (range_length & 1U) != 0U || range_length == 0U ||
+          static_cast<std::uint64_t>(first_offset) + range_length > extent.size)
+        return fail(ModuleError::range_invalid, spec.name);
+    }
     if (spec.bases.empty()) return fail(ModuleError::mapping_missing, spec.name);
     for (const auto base : spec.bases) {
       if ((base & 1U) != 0U) return fail(ModuleError::mapping_invalid, spec.name);
-      if (!inside_executable_ram(spec.processor, base, extent.size)) return fail(ModuleError::mapping_outside_executable_ram, spec.name);
+      if (!inside_executable_ram(spec.processor, base + first_offset, range_length))
+        return fail(ModuleError::mapping_outside_executable_ram, spec.name);
     }
     if (spec.entries.empty()) return fail(ModuleError::entry_missing, spec.name);
     for (const auto entry : spec.entries)
-      if ((entry & 1U) != 0U || entry >= extent.size) return fail(ModuleError::entry_invalid, spec.name);
+      if ((entry & 1U) != 0U || entry < first_offset || entry >= first_offset + range_length) return fail(ModuleError::entry_invalid, spec.name);
     if (spec.verification != "byte_identity") return fail(ModuleError::verification_unsupported, spec.name);
     auto &processor = spec.processor == Processor::main ? staged.main : staged.sub;
     for (const auto &other : result.modules) {
       if (other.processor != spec.processor || other.sha256 != digest) continue;
       for (const auto a : other.bases)
         for (const auto b : spec.bases)
-          if (a < b + extent.size && b < a + other.extent.size) return fail(ModuleError::duplicate_module, spec.name);
+          if (a + other.first_offset < b + first_offset + range_length && b + first_offset < a + other.first_offset + other.length)
+            return fail(ModuleError::duplicate_module, spec.name);
     }
     ExecutableImage image;
     image.id = ImageId{static_cast<std::uint32_t>(processor.images.images.size() + 1U)};
     image.bytes = bytes;
-    for (const auto base : spec.bases) image.mappings.push_back(ImageMapping{base, 0U, extent.size});
+    for (const auto base : spec.bases) image.mappings.push_back(ImageMapping{base, first_offset, range_length});
     image.provenance.authority = ImageAuthority::immutable_input;
     image.provenance.producer = "sega_cd.disc_module";
     image.provenance.evidence = {{"module", spec.name},
@@ -283,11 +299,14 @@ ModuleAdmission admit_modules(const DiscImage &disc, const ModuleManifest &manif
     admitted.sha256 = digest;
     admitted.bases = spec.bases;
     admitted.entries = entries;
+    admitted.first_offset = first_offset;
+    admitted.length = range_length;
     admitted.image_id = processor.images.images.back().id.value;
     result.modules.push_back(admitted);
     canonical << "module " << spec.name << " processor " << processor_name(spec.processor) << " block " << extent.block << " size "
               << extent.size << " sha256 " << digest << " path " << (spec.path ? *spec.path : std::string("-"));
     for (const auto base : spec.bases) canonical << " map " << hex32(base);
+    if (spec.range) canonical << " range " << hex32(first_offset) << " " << hex32(range_length);  // absent: byte-identical to the SEG-063 identity
     for (const auto entry : entries) canonical << " entry " << hex32(entry);
     canonical << " verify byte_identity\n";
   }

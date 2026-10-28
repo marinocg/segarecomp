@@ -1,5 +1,7 @@
 #include "sega_cd_command.hpp"
 
+#include "sega_cd_aot.hpp"
+
 #include <cstdio>
 #include <algorithm>
 #include <cctype>
@@ -16,6 +18,7 @@
 #include "segarecomp/iso9660.hpp"
 #include "segarecomp/machine/sega_cd/bios_profile.hpp"
 #include "segarecomp/machine/sega_cd/boot_images.hpp"
+#include "segarecomp/machine/sega_cd/loader_scan.hpp"
 #include "segarecomp/machine/sega_cd/modules.hpp"
 #include "segarecomp/machine/sega_cd/program.hpp"
 #include "segarecomp/machine/sega_cd/source_resolve.hpp"
@@ -306,7 +309,8 @@ std::string read_track1_extent(const segarecomp::DiscImage &disc, std::uint32_t 
 
 int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios_path, const std::vector<std::string> &copies,
                       const std::vector<std::string> &admits, const std::vector<std::string> &disc_images,
-                      std::optional<std::uint32_t> application_entry, const std::string &out_path, std::uint32_t partition_window) {
+                      std::optional<std::uint32_t> application_entry, const std::string &out_path, std::uint32_t partition_window,
+                      const segarecomp_app::SegaCdAotOptions &aot, const std::optional<scd::SelectiveAdmissionRequest> &aot_request) {
   const auto bad = [](const std::string &stage, const std::string &error) {
     std::cout << "{\"ok\":false,\"stage\":\"" << stage << "\",\"error\":\"" << error << "\"}\n";
     return 7;
@@ -403,7 +407,12 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     }
     inputs.admissions.push_back(std::move(a));
   }
-  const auto emission = scd::emit_sega_cd_bios_program(disc, inputs, scd::BiosProfileEmitOptions{partition_window});
+  scd::BiosProfileEmitOptions bios_options{partition_window};
+  if (aot_request) {  // SEG-097-T003 (ADR 0208): the experimental request enters the program identity and the provenance chain
+    inputs.aot_policy = aot_request->policy_identity;
+    bios_options.selective = &*aot_request;
+  }
+  const auto emission = scd::emit_sega_cd_bios_program(disc, inputs, bios_options);
   if (emission.error != scd::BiosProfileError::none) {
     std::cout << "{\"ok\":false,\"stage\":\"emit\",\"error\":\"" << scd::bios_profile_error_name(emission.error) << "\",\"index\":"
               << emission.error_index << ",\"validation\":\"" << segarecomp::image_validation_error_name(emission.validation) << "\"}\n";
@@ -446,9 +455,9 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     const auto &s = emission.images[i];
     report << (i ? "," : "") << "{\"processor\":\"" << scd::processor_name(s.processor) << "\",\"name\":\"" << s.name
            << "\",\"authority\":\"" << s.authority << "\",\"start\":" << s.start << ",\"length\":" << s.length
-           << ",\"compiled\":" << s.compiled << ",\"rejected\":" << s.rejected << "}";
+           << ",\"compiled\":" << s.compiled << ",\"rejected\":" << s.rejected << ",\"omitted\":" << s.omitted << "}";
   }
-  report << "]}\n";
+  report << "],\"aot_policy\":" << segarecomp_app::sega_cd_aot_policy_json(aot, emission.admission) << "}\n";
   std::cout << report.str();
   return 0;
 }
@@ -457,9 +466,20 @@ int emit(int argc, char **argv) {
   std::optional<std::string> cue, out_path, expected, modules, bios;
   std::vector<std::string> copies, admits, disc_images;
   std::optional<std::uint32_t> partition_window, application_entry;
+  scd::SegaCdEmitOptions emit_options;
+  segarecomp_app::SegaCdAotOptions aot;
+  bool report_offsets = false;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
+    else if (arg == "--position-independent") emit_options.position_independent = true;  // SEG-097-T002 (ADR 0207)
+    else if (arg == "--report-offsets") report_offsets = true;  // SEG-097-T003: list each mapping's compiled source-relative offsets in the report (evidence tooling)
+    else if ((arg == "--aot-policy" || arg == "--aot-model" || arg == "--aot-scope") && i + 1 < argc) {  // SEG-097-T003 (ADR 0208): the product's policy vocabulary
+      if (!segarecomp_app::set_sega_cd_aot_option(aot, arg, argv[++i])) {
+        std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+        return 2;
+      }
+    }
     else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
     else if (arg == "--expect-identity" && i + 1 < argc) expected = argv[++i];
     else if (arg == "--modules" && i + 1 < argc) modules = argv[++i];
@@ -484,7 +504,7 @@ int emit(int argc, char **argv) {
       return 2;
     }
   }
-  if (!cue || !out_path || (!bios && (!copies.empty() || !admits.empty() || !disc_images.empty() || application_entry || partition_window)) || (bios && modules)) {
+  if (!cue || !out_path || (!bios && (!copies.empty() || !admits.empty() || !disc_images.empty() || application_entry || partition_window)) || (bios && modules) || (bios && emit_options.position_independent) || !segarecomp_app::sega_cd_aot_options_valid(aot)) {
     std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
     return 2;
   }
@@ -493,7 +513,9 @@ int emit(int argc, char **argv) {
     std::cout << "{\"ok\":false,\"stage\":\"disc\",\"error\":\"" << segarecomp::disc_error_name(loaded.error) << "\"}\n";
     return 3;
   }
-  if (bios) return emit_bios_profile(*loaded.disc, *bios, copies, admits, disc_images, application_entry, *out_path, partition_window.value_or(0U));
+  const auto aot_request = segarecomp_app::make_sega_cd_aot_request(aot);
+  if (bios) return emit_bios_profile(*loaded.disc, *bios, copies, admits, disc_images, application_entry, *out_path, partition_window.value_or(0U), aot, aot_request);
+  if (aot_request) emit_options.selective = &*aot_request;
   const auto produced = scd::produce_boot_images(*loaded.disc);
   if (!produced.images) {
     std::cout << "{\"ok\":false,\"stage\":\"boot\",\"error\":\"" << scd::boot_image_error_name(produced.error) << "\"}\n";
@@ -509,7 +531,7 @@ int emit(int argc, char **argv) {
     }
     admission = std::move(loaded_modules.admission);
   }
-  const auto emission = scd::emit_sega_cd_program(*loaded.disc, images, admission ? std::string_view(admission->identity) : std::string_view());
+  const auto emission = scd::emit_sega_cd_program(*loaded.disc, images, admission ? std::string_view(admission->identity) : std::string_view(), emit_options);
   if (emission.error != scd::EmissionError::none) {
     std::cout << "{\"ok\":false,\"stage\":\"emit\",\"error\":\"" << scd::emission_error_name(emission.error) << "\"}\n";
     return 6;
@@ -527,16 +549,27 @@ int emit(int argc, char **argv) {
     const auto &s = emission.stats[i];
     report << (i ? "," : "") << "{\"processor\":\"" << scd::processor_name(s.processor) << "\",\"compiled\":" << s.compiled
            << ",\"unsupported\":" << s.unsupported << ",\"out_of_image_targets\":" << s.out_of_image_targets
-           << ",\"vector_roots\":" << s.vector_roots << "}";
+           << ",\"vector_roots\":" << s.vector_roots << ",\"bodies\":" << s.bodies << ",\"shared_bodies\":" << s.shared_bodies
+           << ",\"shared_instances\":" << s.shared_instances << ",\"fallback_instances\":" << s.fallback_instances << ",\"fallback_reasons\":{";
+    for (std::size_t r = 0; r < s.fallback_reasons.size(); ++r)
+      report << (r ? "," : "") << "\"" << s.fallback_reasons[r].first << "\":" << s.fallback_reasons[r].second;
+    report << "}}";
   }
-  report << "],\"overlay_groups\":" << emission.overlay_groups << ",\"images\":[";
+  report << "],\"aot_policy\":" << segarecomp_app::sega_cd_aot_policy_json(aot, emission.admission) << ",\"position_independent\":"
+         << (emit_options.position_independent ? "true" : "false") << ",\"overlay_groups\":" << emission.overlay_groups << ",\"images\":[";
   for (std::size_t i = 0; i < emission.images.size(); ++i) {
     const auto &image = emission.images[i];
     report << (i ? "," : "") << "{\"processor\":\"" << scd::processor_name(image.processor) << "\",\"image_id\":" << image.image_id
            << ",\"name\":" << json_string(image.name) << ",\"producer\":\"" << image.producer << "\",\"mapping\":"
            << image.mapping_index << ",\"start\":" << image.start << ",\"length\":" << image.length << ",\"roots\":" << image.roots
            << ",\"compiled\":" << image.compiled << ",\"unsupported\":" << image.unsupported << ",\"out_of_image_targets\":"
-           << image.out_of_image_targets << ",\"overlay_group\":" << image.overlay_group << "}";
+           << image.out_of_image_targets << ",\"overlay_group\":" << image.overlay_group;
+    if (report_offsets) {
+      report << ",\"source_offsets\":[";
+      for (std::size_t o = 0; o < image.source_offsets.size(); ++o) report << (o ? "," : "") << image.source_offsets[o];
+      report << "]";
+    }
+    report << "}";
   }
   report << "]";
   if (admission) report << ",\"modules\":" << modules_json(*admission);
@@ -601,6 +634,69 @@ int resolve_source_command(int argc, char **argv) {
   return 0;
 }
 
+// SEG-097-T001 (ADR 0206): static discovery of disc-loaded modules. Pure function of the disc; executes nothing.
+int discover_modules_command(int argc, char **argv) {
+  std::optional<std::string> cue, out_path;
+  for (int i = 3; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
+    else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
+    else {
+      std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+      return 2;
+    }
+  }
+  if (!cue) {
+    std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+    return 2;
+  }
+  const auto loaded = segarecomp::load_cue_disc(*cue);
+  if (!loaded.disc) {
+    std::cout << "{\"ok\":false,\"stage\":\"disc\",\"error\":\"" << segarecomp::disc_error_name(loaded.error) << "\"}\n";
+    return 3;
+  }
+  const auto produced = scd::produce_boot_images(*loaded.disc);
+  if (!produced.images) {
+    std::cout << "{\"ok\":false,\"stage\":\"boot\",\"error\":\"" << scd::boot_image_error_name(produced.error) << "\"}\n";
+    return 4;
+  }
+  const auto scan = scd::scan_sega_cd_loaders(*loaded.disc, *produced.images);
+  std::ostringstream report;
+  report << "{\"ok\":" << (!scan.modules.empty() && scan.complete ? "true" : "false") << ",\"complete\":" << (scan.complete ? "true" : "false")
+         << ",\"disc_identity\":\"" << loaded.disc->identity() << "\",\"identity\":\"" << scan.identity << "\",\"states\":" << scan.states
+         << ",\"steps\":" << scan.steps << ",\"operations\":[";
+  for (std::size_t i = 0; i < scan.operations.size(); ++i) {
+    const auto &o = scan.operations[i];
+    report << (i ? "," : "") << "{\"lba\":" << o.lba << ",\"destination\":" << o.destination << ",\"bytes\":" << o.bytes << ",\"entries\":[";
+    for (std::size_t e = 0; e < o.entries.size(); ++e) report << (e ? "," : "") << o.entries[e];
+    report << "]}";
+  }
+  report << "],\"modules\":[";
+  for (std::size_t i = 0; i < scan.modules.size(); ++i) {
+    const auto &m = scan.modules[i];
+    report << (i ? "," : "") << "{\"name\":" << json_string(m.name) << ",\"block\":" << m.block << ",\"size\":" << m.size << ",\"sha256\":\"" << m.sha256
+           << "\",\"range\":{\"offset\":" << m.range_offset << ",\"length\":" << m.range_length << "},\"bases\":[";
+    for (std::size_t b = 0; b < m.bases.size(); ++b) report << (b ? "," : "") << m.bases[b];
+    report << "],\"entries\":[";
+    for (std::size_t e = 0; e < m.entries.size(); ++e) report << (e ? "," : "") << m.entries[e];
+    report << "]}";
+  }
+  report << "],\"refusals\":[";
+  for (std::size_t i = 0; i < scan.refusals.size(); ++i)
+    report << (i ? "," : "") << "{\"reason\":\"" << scd::loader_refusal_name(scan.refusals[i].kind) << "\",\"pc\":" << scan.refusals[i].pc << "}";
+  report << "]}\n";
+  if (out_path && !scan.manifest.empty()) {
+    std::ofstream out(*out_path, std::ios::binary);
+    out << scan.manifest;
+    if (!out) {
+      std::cout << "{\"ok\":false,\"stage\":\"write\",\"error\":\"out_unwritable\"}\n";
+      return 6;
+    }
+  }
+  std::cout << report.str();
+  return !scan.modules.empty() && scan.complete ? 0 : 9;
+}
+
 }  // namespace
 
 int segarecomp_sega_cd_command(int argc, char **argv) {
@@ -608,6 +704,7 @@ int segarecomp_sega_cd_command(int argc, char **argv) {
   if (argc >= 3 && std::string_view(argv[2]) == "emit") return emit(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "build") return segarecomp_sega_cd_build(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "resolve-source") return resolve_source_command(argc, argv);
+  if (argc >= 3 && std::string_view(argv[2]) == "discover-modules") return discover_modules_command(argc, argv);
   std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
   return 2;
 }

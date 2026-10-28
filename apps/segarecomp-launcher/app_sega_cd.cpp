@@ -123,6 +123,7 @@ void App::scd_start_build(const std::string &id) {
   request.bios = from_u8(entry->sega_cd.bios_path);
   request.cue = from_u8(entry->sega_cd.cue_path);
   request.out_dir = scd_dir(*entry) / "build";
+  request.experimental_m3 = entry->sega_cd.experimental_m3;   // SEG-097-T003: off unless the user chose the experimental option for this game
   scd_build_ = std::make_unique<ScdBuildJob>(std::move(request), layout_);
   scd_build_id_ = id;
   failures_.erase(id);
@@ -142,6 +143,7 @@ void App::scd_finish_build() {
   scd_build_->wait();
   const BuildOutcome outcome = scd_build_->outcome();
   const std::string message = scd_build_->message(), summary = scd_build_->summary();
+  const bool built_experimental = scd_build_->built_experimental();
   const fs::path program = scd_build_->program(), out_dir = scd_build_->out_dir();
   const std::string id = scd_build_id_;
   scd_build_.reset();
@@ -161,7 +163,8 @@ void App::scd_finish_build() {
     return;
   }
   scd_build_notes_[id] = summary;
-  trace("build=ok platform=sega-cd");
+  scd_built_experimental_[id] = built_experimental;
+  trace(std::string("build=ok platform=sega-cd policy=") + (built_experimental ? "experimental_optimized" : "compatibility"));
   // The built program is verified exactly like an imported one: it is bound to this entry's BIOS and disc only if its own statement matches.
   scd_start_import(id, {}, {}, program);
 }
@@ -196,7 +199,12 @@ void App::scd_poll() {
       }
     } else if (LibraryEntry *entry = catalog_.find_id(target)) {
       if (result.program_attached) {
+        const bool keep_choice = entry->sega_cd.experimental_m3;   // the build option is the user's choice; importing a program never changes it
         entry->sega_cd = result.record;
+        entry->sega_cd.experimental_m3 = keep_choice;
+        const auto built = scd_built_experimental_.find(target);   // a program the launcher just built carries the product's effective policy; an imported one is not experimental
+        entry->sega_cd.program_experimental = built != scd_built_experimental_.end() && built->second;
+        if (built != scd_built_experimental_.end()) scd_built_experimental_.erase(built);
         save_catalog();
         request_status_refresh();
         toast("Program verified and bound to this game.");
@@ -508,6 +516,40 @@ float App::draw_scd_details(LibraryEntry &entry, const StatusInfo &info, float w
     ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
     paragraph(ctx_, ctx_.regular, ctx_.u(size), color, inner, text);
   };
+  // ---- SEG-097-T003 (ADR 0208): the build policy. Compatibility is the default; Optimized is EXPERIMENTAL for Sega CD and always an explicit choice. ----
+  {
+    const bool building_this = scd_build_ && scd_build_id_ == entry.id();
+    int sel = entry.sega_cd.experimental_m3 ? 1 : 0;
+    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
+    ImGui::BeginDisabled(building_this || busy);
+    if (option_tiles(ctx_, "scd_policy", {"Compatibility", "Optimized (experimental)"},
+                     {"Broad compilation of everything the build can prove. The default.",
+                      "A frozen model proposes which code to compile. Smaller and faster to build, but it may omit code the game needs."},
+                     &sel, inner, ctx_.u(74.0F), {true, true})) {
+      entry.sega_cd.experimental_m3 = sel == 1;
+      save_catalog();
+      trace(std::string("scd=policy_selected policy=") + (sel == 1 ? "experimental_optimized" : "compatibility"));
+    }
+    ImGui::EndDisabled();
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    if (entry.sega_cd.experimental_m3)
+      line(col::warn, "Experimental: the program built this way can stop at an uncompiled entry, and the model has no proven complete coverage on Sega CD games. It applies at the next Build; Compatibility stays the safe choice.", 11.5F);
+    if (entry.sega_cd.program_experimental && !entry.sega_cd.program.path.empty()) {
+      line(col::text2, "The current program was built with the experimental Optimized policy.", 11.5F);
+      if (scd::is_uncompiled_entry_stop(entry.sega_cd.last_stop)) {
+        line(col::warn, "The last run ended at an uncompiled entry (" + entry.sega_cd.last_stop + "): the experimental build omitted code the game needed. A full Compatibility rebuild starts the game again from reset.", 12.0F);
+        ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
+        if (button(ctx_, "scd_rebuild_compat", "Rebuild with Compatibility", ImVec2(ctx_.u(240.0F), ctx_.u(32.0F)), Style::primary, scd_can_build(entry, info), ctx_.icon("reset"))) {
+          entry.sega_cd.experimental_m3 = false;
+          save_catalog();
+          trace("scd=compat_rebuild_after_uncompiled_entry");
+          notices_.erase(entry.id());
+          scd_start_build(entry.id());
+        }
+        ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+      }
+    }
+  }
   if (scd_build_ && scd_build_id_ == entry.id()) {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     spinner(ctx_, dl, ImVec2(a.x + pad + ctx_.u(8.0F), p.y + ctx_.u(9.0F)), ctx_.u(7.0F), col::info);

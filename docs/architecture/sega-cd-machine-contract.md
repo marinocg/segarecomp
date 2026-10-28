@@ -528,3 +528,23 @@ after the entry: `j + (1 - entry phase)` frames), and (ii) at an equivalent sema
 sub). Polling-loop iteration counts and the sample instants of interrupts are not compared (the reference idle-skips a processor that
 polls a Gate Array register); the executed instruction-start sets, the register files at the checkpoints, the RAM images, the Gate Array
 command/status/flag/mode/timer registers, the Word RAM, the PCM chip and the Z80 bus activity are.
+
+## 19. Whole-game static AOT, milestone 1 (SEG-097, ADR 0206-0209)
+
+Three additions to the synthetic profile and one experiment, none of which changes an existing default.
+
+- **Static module discovery (ADR 0206).** `segarecomp sega-cd discover-modules --cue <disc>` walks the sub boot image with a bounded, path-sensitive constant-propagation
+  over the CPU-owned decode/lift/effect/control APIs and recognises the machine's CD-load operation of sections 7 and 8: a CDD play command (valid checksum, constant MSF)
+  followed by a CDC DMA of one 2,048-byte sector to Word RAM, and a control transfer that lands in the loaded range (the entry proof). Both arms of a conditional are
+  explored, so a module the player has not chosen yet is found without being run. The output is the module list of section 15 - the unchanged admission re-checks digest, extent,
+  executable RAM region and image-set validity - with one new optional directive, `range <offset> <length>`: the executable subrange of the extent (the digest covers the whole
+  extent; a file header or trailing data is never executable authority). Resource bounds (64 operations, 4,096 walked states, 100,000 steps, call depth 8) end in the typed
+  `scan_limit_exceeded` and an incomplete result. Loaders that use BIOS file services, tables, computed LBAs, PRG RAM/PCM destinations, partial or multi-sector transfers, nested
+  loaders or interrupts are refused or invisible (typed), not guessed. The Word RAM mode is assumed to be 2M (its bit is main-owned).
+- **Source-relative bodies (ADR 0207).** `emit --position-independent` emits one generated function per `(image, source offset)` of an image with several mappings; the function runs
+  under the actual guest PC (`scd_pc0`), compares the live bytes at that PC as every body does, and only PC-derived literals differ from the per-mapping text. A form that does not
+  derive cleanly keeps the per-mapping emission and is reported. The default emission is the verified reference and is unchanged.
+- **Experimental frozen M3 + B35 (ADR 0208).** `--aot-policy optimized [--aot-model gen2]` on `emit` and `build`; Compatibility is the default and the fallback. A producer proposes
+  source-relative regions per image, only for independently admitted disc game modules and extents (contract `selective_admission.v2`: firmware, BIOS-derived images, boot IP/SP, boot-area and user-declared extents stay broad); the emitters compile only the broad entries inside a validated proposal and report requested/effective/fallback/reason. A proposal never adds an
+  entry, an image or a mapping; an omitted entry is the typed `entry_not_compiled` stop. M3 is not promoted and is not a completeness certificate.
+

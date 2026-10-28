@@ -211,6 +211,7 @@ private:
   std::atomic<bool> ok_{false};
   std::atomic<bool> cancel_{false};
   std::atomic<bool> cancelled_{false};
+  std::atomic<bool> built_experimental_{false};
   bool publishing_ = false;  // guarded by mutex_: the point of no return after which a cancel request is refused
   ProcessTree tree_;
   mutable std::mutex mutex_;
@@ -225,7 +226,21 @@ private:
 // removes the attempt's own folder; a finished build is never replaced by a cancelled or failed attempt. Poll from the UI thread.
 struct ScdBuildRequest {
   std::filesystem::path bios, cue, out_dir;   // out_dir receives program-viewer[.exe], program[.exe], status.json, build.log
+  bool experimental_m3 = false;               // SEG-097-T003 (ADR 0208): ask the product for its EXPERIMENTAL Optimized policy; off unless the user chose it
 };
+// The product options that request the policy (empty for Compatibility). The launcher knows no model, threshold or compatibility rule.
+[[nodiscard]] std::vector<std::string> scd_build_policy_arguments(bool experimental_m3);
+// What the product's final emission says about the policy (status.json `aot_policy`; thin typed read, no human text parsed).
+struct ScdPolicyReport {
+  bool present = false;
+  std::string requested, effective, reason, failed_image;
+  bool fallback = false;
+  long long broad_entries = 0, admitted_entries = 0;
+  long long m3_images = 0, m3_broad_entries = 0, m3_admitted_entries = 0;   // the scored game modules only (firmware and boot code are never scored)
+};
+[[nodiscard]] ScdPolicyReport read_scd_policy_report(const std::string &status_text);
+// One plain sentence for the build summary (empty for a Compatibility build).
+[[nodiscard]] std::string scd_policy_sentence(const ScdPolicyReport &report);
 class ScdBuildJob {
 public:
   static constexpr int stage_count = 6;  // generate, compile, link, discovery pass, confirm, viewer
@@ -242,6 +257,7 @@ public:
   [[nodiscard]] int round() const { return round_.load(); }
   [[nodiscard]] std::string message() const;       // a failure line, or the progress line while running
   [[nodiscard]] std::string summary() const;       // after success: the plain-language outcome of the build (what the program covers)
+  [[nodiscard]] bool built_experimental() const { return built_experimental_.load(); }   // the product's EFFECTIVE policy was the experimental one
   [[nodiscard]] std::filesystem::path program() const;   // the viewer program of a successful build
   [[nodiscard]] const std::filesystem::path &out_dir() const { return request_.out_dir; }
   void wait();
@@ -256,6 +272,7 @@ private:
   std::atomic<bool> ok_{false};
   std::atomic<bool> cancel_{false};
   std::atomic<bool> cancelled_{false};
+  std::atomic<bool> built_experimental_{false};
   bool publishing_ = false;  // guarded by mutex_
   ProcessTree tree_;
   mutable std::mutex mutex_;

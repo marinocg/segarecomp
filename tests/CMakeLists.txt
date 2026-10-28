@@ -1276,6 +1276,34 @@ set_property(TEST sega_cd_disc_to_frame_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_modules_build_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_modules_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_modules_build_test APPEND PROPERTY LABELS full fast)
+# SEG-097-T001 (ADR 0206): static discovery of modules no run has loaded (loader scan -> module list -> same-binary routes); refusals and bounds.
+add_test(NAME sega_cd_unvisited_discovery_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_unvisited_discovery_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_unvisited_discovery_test APPEND PROPERTY LABELS full fast)
+# SEG-097-T002 (ADR 0207): the source-relative text derivation, and the source-relative emitter against the per-mapping reference (reports equal).
+add_executable(source_relative_test source_relative_test.cpp)
+target_link_libraries(source_relative_test PRIVATE segarecomp::codegen_c11)
+segarecomp_enable_warnings(source_relative_test)
+add_test(NAME source_relative_test COMMAND source_relative_test)
+add_test(NAME sega_cd_source_relative_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_source_relative_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST source_relative_test sega_cd_source_relative_test APPEND PROPERTY LABELS full fast)
+# SEG-097-T003 (ADR 0208): the Sega CD selective-admission seam with a fake producer; the frozen M3 end to end is sega_cd_experimental_m3_test.
+add_executable(sega_cd_selective_admission_test sega_cd_selective_admission_test.cpp)
+target_link_libraries(sega_cd_selective_admission_test PRIVATE segarecomp::machine_sega_cd)
+segarecomp_enable_warnings(sega_cd_selective_admission_test)
+add_test(NAME sega_cd_selective_admission_test COMMAND sega_cd_selective_admission_test)
+set_property(TEST sega_cd_selective_admission_test APPEND PROPERTY LABELS full fast)
+# SEG-097-T004 (ADR 0209): the Genesis ROM-to-work-RAM copy alias (ADR 0049) against the source-relative derivation shared with Sega CD.
+add_executable(genesis_source_relative_reuse_tool genesis_source_relative_reuse_tool.cpp)
+target_link_libraries(genesis_source_relative_reuse_tool PRIVATE segarecomp::machine_genesis segarecomp::codegen_c11_genesis segarecomp::codegen_c11)
+segarecomp_enable_warnings(genesis_source_relative_reuse_tool)
+add_test(NAME genesis_source_relative_reuse_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_source_relative_reuse_test.py $<TARGET_FILE:genesis_source_relative_reuse_tool> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_source_relative_reuse_test APPEND PROPERTY LABELS full fast)
+add_test(NAME sega_cd_experimental_m3_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_experimental_m3_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_experimental_m3_test APPEND PROPERTY LABELS full fast)
 # SEG-063-T001 Checkpoints C/D: overlay runtime harness; module A then module B at one address by CDC DMA and CPU copy; typed stops.
 # SEG-064-T002 (ADR 0142): the BIOS-image profile mechanism proof (synthetic image; bounded materialization fixed point; strict C11).
 add_test(NAME sega_cd_bios_profile_test COMMAND ${Python3_EXECUTABLE}

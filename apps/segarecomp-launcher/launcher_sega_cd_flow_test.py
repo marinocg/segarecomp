@@ -202,6 +202,20 @@ def main():
         got = lines(out)
         check(code == 0 and got.get("build") == "ok" and "stops at the first code it cannot" in got.get("build_summary", "") and got.get("stop") == "entry_not_compiled",
               "automatic build: generated code is never guessed - the build says where it stops and the program ends with the typed stop (%s)" % got.get("build_summary", "")[:200])
+        # ---- SEG-097-T003 (ADR 0208): the EXPERIMENTAL Optimized choice. Off by default (the build above is Compatibility); chosen explicitly it is the product's own
+        # option, the summary says it is experimental, status.json records the effective policy, and the program stops only at a typed uncompiled entry. ----
+        code, out, err, library3 = launch(tmp, ["--bios", loader / "bios.bin", "--cue", loader / "disc" / "disc.cue", "--build", "--aot-policy", "optimized"], env, "lib-build-exp")
+        got = lines(out)
+        status = json.loads(next((library3 / "sega-cd").glob("*")).joinpath("build", "status.json").read_text())
+        check(code == 0 and got.get("build") == "ok" and "experimental_optimized" in got.get("build_policy", "") and "Experimental Optimized" in got.get("build_summary", ""),
+              "experimental build: the summary says it is the experimental policy (%s)" % got.get("build_policy"))
+        check(status["aot_policy"]["requested"] == "optimized" and status["aot_policy"]["effective"] == "selective" and not status["aot_policy"]["fallback"] and
+              status["aot_policy"]["m3_admitted_entries"] <= status["aot_policy"]["m3_broad_entries"] and status["aot_policy"]["m3_images"] >= 1,
+              "experimental build: status.json records the product's effective policy (game modules: %s of %s entries)" % (status["aot_policy"]["m3_admitted_entries"], status["aot_policy"]["m3_broad_entries"]))
+        check(got.get("stop") in (None, "entry_not_compiled", "image_entry_not_compiled"), "experimental build: the program ends normally or at a typed uncompiled entry (%s)" % got.get("stop"))
+        library_text = (library3 / "library.json").read_text()
+        check('"experimental_m3": true' in library_text and '"program_experimental": true' in library_text, "experimental build: the library records the choice and the program's policy")
+        check('experimental' not in (library / "library.json").read_text(), "the default (Compatibility) build leaves no experimental member in the library record")
     print("%d failures" % len(failures))
     return 1 if failures else 0
 
