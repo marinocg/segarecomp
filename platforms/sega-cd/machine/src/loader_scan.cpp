@@ -8,6 +8,7 @@
 #include <optional>
 #include <span>
 #include <tuple>
+#include <string_view>
 #include <unordered_set>
 
 #include "segarecomp/cpu/m68k/control_successors.hpp"
@@ -109,7 +110,7 @@ std::string serialize(const State &s) {
 
 class Walker {
 public:
-  Walker(const DiscImage &disc, const ProcessorImages &sub) : disc_(disc), sub_(sub) {
+  Walker(const DiscImage &disc, const ProcessorImages &sub, const LoaderScanOptions &options) : disc_(disc), sub_(sub), options_(options) {
     const auto &image = sub.images.images.front();
     const auto &mapping = image.mappings.front();
     bytes_ = executable_image_bytes(sub.images, image);
@@ -120,26 +121,68 @@ public:
   }
 
   LoaderScan run() {
-    State start;
-    start.pc = sub_.entry_pc;
     // Registers other than the stack pointer are unknown at entry (the BIOS hands over nothing the walk may rely on).
-    std::vector<State> stack{start};
+    std::vector<std::uint32_t> roots;
+    if (options_.module_table_roots) roots = module_table_roots();
+    if (roots.empty()) roots.push_back(sub_.entry_pc);
+    scan_.survey.roots = static_cast<std::uint32_t>(roots.size());
+    std::vector<State> stack;
+    for (auto it = roots.rbegin(); it != roots.rend(); ++it) {
+      State start;
+      start.pc = *it;
+      if (!options_.module_table_roots) { stack.push_back(std::move(start)); continue; }   // the legacy single root: states and pruning exactly as in M1
+      if (seen_.insert(serialize(start)).second) { ++scan_.states; stack.push_back(std::move(start)); }
+    }
     while (!stack.empty() && scan_.complete) {
       State s = std::move(stack.back());
       stack.pop_back();
       walk(std::move(s), stack);
     }
+    auto &sv = scan_.survey;
+    sv.cdd_commands = static_cast<std::uint32_t>(cdd_sites_.size());
+    sv.cdc_transfer_triggers = static_cast<std::uint32_t>(trigger_sites_.size());
+    for (const auto &[site, fn] : bios_sites_) { (void)site; ++sv.bios_service_calls; if (fn == 0xFFFFFFFFU) ++sv.bios_service_unknown_function; }
+    sv.foreign_calls_other = static_cast<std::uint32_t>(foreign_other_.size());
+    sv.foreign_calls_unknown = static_cast<std::uint32_t>(foreign_unknown_.size());
+    sv.copy_loop_candidates = static_cast<std::uint32_t>(copy_sites_.size());
+    sv.counted_loops = static_cast<std::uint32_t>(loop_sites_.size());
     return std::move(scan_);
   }
 
 private:
   const DiscImage &disc_;
   const ProcessorImages &sub_;
+  const LoaderScanOptions &options_;
+  std::set<std::pair<std::string, std::uint32_t>> ends_;
+  void end_at(const char *kind, std::uint32_t pc) { if (ends_.insert({kind, pc}).second) ++scan_.survey.path_ends[kind]; }
+  std::set<std::uint32_t> cdd_sites_, trigger_sites_, copy_sites_, loop_sites_, foreign_other_, foreign_unknown_;
+  std::set<std::pair<std::uint32_t, std::uint32_t>> bios_sites_;
   std::span<const std::uint8_t> bytes_;
   std::uint32_t base_{}, end_{}, first_offset_{};
   LoaderScan scan_;
   std::unordered_set<std::string> seen_;
   std::set<std::pair<LoaderRefusalKind, std::uint32_t>> refused_;
+
+  // The SP module jump table (the BIOS enters an SP module through it): header word $18 is the table offset from the module start; the table
+  // is four word offsets (init, main, int2, user) from the table start, zero meaning none. Only offsets that land inside the image count.
+  std::vector<std::uint32_t> module_table_roots() {
+    std::vector<std::uint32_t> roots;
+    const std::uint32_t size = end_ - base_;
+    const auto be32 = [&](std::uint32_t o) { return (std::uint32_t{bytes_[first_offset_ + o]} << 24) | (std::uint32_t{bytes_[first_offset_ + o + 1U]} << 16) | (std::uint32_t{bytes_[first_offset_ + o + 2U]} << 8) | bytes_[first_offset_ + o + 3U]; };
+    const auto be16 = [&](std::uint32_t o) { return (std::uint32_t{bytes_[first_offset_ + o]} << 8) | bytes_[first_offset_ + o + 1U]; };
+    if (size < 0x20U || bytes_.size() < first_offset_ + size) return roots;
+    if (std::string_view(reinterpret_cast<const char *>(bytes_.data()) + first_offset_, 4U) != "MAIN") return roots;   // the module header's name field
+    const std::uint32_t table = be32(0x18U);
+    if ((table & 1U) != 0U || table < 0x20U || table + 8U > size) return roots;
+    scan_.survey.module_table_found = true;
+    for (std::uint32_t i = 0; i < 4U; ++i) {
+      const std::uint32_t w = be16(table + 2U * i);
+      const std::uint32_t at = table + w;
+      if (w == 0U || (at & 1U) != 0U || at >= size) continue;
+      if (std::find(roots.begin(), roots.end(), base_ + at) == roots.end()) roots.push_back(base_ + at);
+    }
+    return roots;
+  }
 
   void refuse(LoaderRefusalKind kind, std::uint32_t pc) {
     if (refused_.insert({kind, pc}).second) scan_.refusals.push_back({kind, pc});
@@ -261,6 +304,7 @@ private:
   }
 
   void transfer(State &s, std::uint32_t pc) {
+    trigger_sites_.insert(pc);
     const auto &h = s.hw;
     // DOUTEN known clear: DTRG starts nothing. Unknown: the load is proposed anyway (a proposal can only fail closed at run time).
     if (h.ifctrl.known() && (h.ifctrl.v & 0x02U) == 0U) return;
@@ -339,6 +383,7 @@ private:
         if (off == 0x4AU) {  // the word written to TX8/TX9 starts the command; the drive discards the pair after it checked the sum
           h.tx[8] = val.known() ? K((val.v >> 8) & 0xFFU) : Val{};
           h.tx[9] = val.known() ? K(val.v & 0xFFU) : Val{};
+          cdd_sites_.insert(pc);
           cdd_command(s, pc);
           return;
         }
@@ -471,17 +516,19 @@ private:
       if (!scan_.complete) return;
       if (++scan_.steps > kLoaderScanMaxSteps) { exhausted(s.pc); return; }
       const auto decoded = decode_at(s.pc);
-      if (!decoded) return;  // outside the boot image (a loaded module's code is not walked) or not an instruction
+      if (!decoded) { end_at("undecodable_or_outside", s.pc); return; }  // outside the boot image (a loaded module's code is not walked) or not an instruction
       const M68kIrOperation &op = *decoded;
       const std::uint32_t here = s.pc;
       const std::uint32_t next = here + op.provenance.length.value;
-      if (op.kind == M68kIrKind::stop_until_interrupt) return;
+      if (op.kind == M68kIrKind::stop_until_interrupt) { end_at("stop", here); return; }
+      if (op.kind == M68kIrKind::write_move && op.source_ea.mode == M68kEaMode::address_postinc && op.destination_ea.mode == M68kEaMode::address_postinc) copy_sites_.insert(here);
+      if (op.kind == M68kIrKind::dbcc_loop) loop_sites_.insert(here);
       apply_data(s, op);
       const auto control = m68k_control_successors(op);
-      if (control.always_raises_exception) return;
+      if (control.always_raises_exception) { end_at("exception", here); return; }
       if (control.dynamic != M68kDynamicControlFamily::none) {
         if (control.dynamic == M68kDynamicControlFamily::return_from_subroutine) {
-          if (s.ret.empty()) return;
+          if (s.ret.empty()) { end_at("return_to_caller", here); return; }
           s.pc = s.ret.back();
           s.ret.pop_back();
         } else if (control.dynamic == M68kDynamicControlFamily::jump_address_indirect || control.dynamic == M68kDynamicControlFamily::call_address_indirect ||
@@ -490,10 +537,15 @@ private:
           Val target = s.a[op.source_ea.reg & 7U];
           if (target.known() && op.source_ea.mode == M68kEaMode::address_disp16)
             target = K(target.v + static_cast<std::uint32_t>(static_cast<std::int32_t>(op.source_ea.displacement)));
-          if (!transfer_to(s, target, call, next, here, stack)) return;
+          if (!transfer_to(s, target, call, next, here, stack)) { end_at("computed_jump", here); return; }
         } else {
+          const bool indexed_call = control.dynamic == M68kDynamicControlFamily::call_pc_index || control.dynamic == M68kDynamicControlFamily::call_address_index;
+          end_at(control.dynamic == M68kDynamicControlFamily::call_pc_index ? "computed_call_pc_index" : control.dynamic == M68kDynamicControlFamily::call_address_index ? "computed_call_address_index"
+                 : control.dynamic == M68kDynamicControlFamily::jump_pc_index ? "computed_jump_pc_index" : control.dynamic == M68kDynamicControlFamily::jump_address_index ? "computed_jump_address_index" : "computed_other", here);
           if (!s.loaded.empty()) refuse(LoaderRefusalKind::entry_unknown, here);
-          return;
+          if (!(indexed_call && options_.continue_after_computed_call)) return;
+          havoc_after_foreign_call(s);
+          s.pc = next;
         }
         if (!continue_or_fork(s, stack)) return;
         continue;
@@ -543,6 +595,7 @@ private:
   // Control transfer to `target` (a call when `call`, with continuation `next`). Returns false when the path ends here.
   bool transfer_to(State &s, const Val &target, bool call, std::uint32_t next, std::uint32_t here, std::vector<State> &) {
     if (!target.known()) {
+      foreign_unknown_.insert(here);
       if (!s.loaded.empty()) refuse(LoaderRefusalKind::entry_unknown, here);
       if (call) { havoc_after_foreign_call(s); s.pc = next; return true; }
       return false;
@@ -555,6 +608,13 @@ private:
     }
     const bool inside = target.v >= base_ && target.v < end_;
     if (!inside) {
+      if (target.v < base_) {  // a call/jump into the BIOS area below the SP image: the BIOS service interface, function number in D0.w
+        const Val fn = exact(s.d[0], Width::word);
+        if (fn.known()) { if (bios_sites_.insert({here, fn.v}).second) ++scan_.survey.bios_functions[fn.v]; }
+        else bios_sites_.insert({here, 0xFFFFFFFFU});
+      } else {
+        foreign_other_.insert(here);
+      }
       if (call) { havoc_after_foreign_call(s); s.pc = next; return true; }
       return false;
     }
@@ -612,8 +672,8 @@ std::string hex32(std::uint32_t value) {
 
 }  // namespace
 
-LoaderScan scan_sega_cd_loaders(const DiscImage &disc, const BootImages &images) {
-  Walker walker(disc, images.sub);
+LoaderScan scan_sega_cd_loaders(const DiscImage &disc, const BootImages &images, const LoaderScanOptions &options) {
+  Walker walker(disc, images.sub, options);
   LoaderScan scan = walker.run();
   if (!scan.complete) return scan;  // an exhausted walk proposes nothing: the inventory is not labelled complete
 
