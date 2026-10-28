@@ -25,13 +25,14 @@ inline constexpr const char *segarecomp_sega_cd_usage =
     "                           [--viewer 1 --sdl3-include <dir> --sdl3-lib <dir>] [--cache-dir <dir>] [--jobs <n>] [--budget <instructions>] [--until-tick <t>]\n"
     "                           [--pass-timeout <seconds>] [--input-script <file>] [--backup-ram <file>] [--optimize 0|1|2] [--link-arg <arg>]...\n"
     "                           [--aot-policy compatibility|optimized [--aot-model gen2]]   (SEG-097-T003: `optimized` = EXPERIMENTAL frozen gen2 M3+B35 selective proposal; status.json aot_policy)\n"
+    "                           [--static-discovery 0|1]   (SEG-098-T002, ADR 0211: 1 = default, admit the disc modules the static loader scan proves; 0 = the previous build)\n"
     "      (SEG-078-T003, ADR 0205: the self-service build - emit, compile, run a build pass, admit the epoch, operand templates and discovered\n"
     "       disc extents, confirm; writes <output>/{program[,program-viewer],status.json,build.log}; progress as @stage/@round/@result lines)\n"
     "  segarecomp sega-cd resolve-source --cue <disc.cue> --cpu main|sub --pc <address> --region <file> --region-base <address>\n"
     "                                    [--delivered <first-lba>:<count>[,...]] [--delivered-overflow 1]\n"
     "      (SEG-078-T003, ADR 0205: find the track-1 span the live RAM window is an exact copy of, among the blocks the build pass's CDC read;\n"
     "       prints the --disc-image extent or a typed refusal; exit 0 resolved, 8 refused)\n"
-    "  segarecomp sega-cd discover-modules --cue <disc.cue> [--out <modules.txt>] [--module-table-roots] [--computed-call-whatif]\n"
+    "  segarecomp sega-cd discover-modules --cue <disc.cue> [--out <modules.txt>] [--module-table-roots] [--computed-call-whatif] [--static-extents <file>]\n"
     "      (SEG-097-T001, ADR 0206: static discovery of disc-loaded modules from the sub boot image's own CD-load operations, including modules\n"
     "       no run has loaded; writes the module list admitted by `emit --modules`; prints the typed report; exit 0 found, 9 none or incomplete)\n";
 

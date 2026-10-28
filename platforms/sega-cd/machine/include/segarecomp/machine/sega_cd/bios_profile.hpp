@@ -84,8 +84,9 @@ struct DiscImageSpec {
   std::vector<std::uint8_t> bytes;  // the extent as read from the verified disc at build time (length bytes)
 };
 
-enum class AdmissionKind : std::uint8_t { epoch, operand_template, epoch_recipe, disc_extent };  // epoch_recipe: SEG-079 (ADR 0179), a static producer;
-                                                                                                 // disc_extent: SEG-078-T003 (ADR 0205), a discovered extent
+enum class AdmissionKind : std::uint8_t { epoch, operand_template, epoch_recipe, disc_extent, static_disc_extent };  // epoch_recipe: SEG-079 (ADR 0179), a static producer;
+                                                                                                 // disc_extent: SEG-078-T003 (ADR 0205), a discovered extent;
+                                                                                                 // static_disc_extent: SEG-098-T002 (ADR 0211), an extent proven by the static loader scan (no pass identity)
 
 struct Admission {
   AdmissionKind kind{AdmissionKind::epoch};
