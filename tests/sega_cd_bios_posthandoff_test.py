@@ -199,8 +199,8 @@ def main():
             check(code == 0 and word(f, 0x4A) == 0x5E0A and word(f, 0x46) == 0x5678, "six extents: the same post-handoff behaviour")
         sixteen = emit(tmp, disc, bios, *(ip_image + sp_image + copy_image * 14))
         check(sixteen[0] == 0, "exactly sixteen extents are accepted (exit %d)" % sixteen[0])
-        code, report = emit(tmp, disc, bios, *(images + extra_images * 6))
-        check(code != 0, "more than sixteen extents are refused (exit %d)" % code)
+        code, report = emit(tmp, disc, bios, *(ip_image + sp_image + copy_image * 63))   # SEG-098-T004 (ADR 0213): the bound is 64 (was 16)
+        check(code != 0, "more than sixty-four extents are refused (exit %d)" % code)
 
         # ---- the machine-time end ----
         code, full = case(exe, 20, "--until-tick", 4000000000000000)
