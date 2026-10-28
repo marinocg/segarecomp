@@ -61,4 +61,4 @@ source image, several execution addresses). T004 asks whether the same mechanism
 4. **An explicit equivalence gate and a measured justification** before any default: the gate of this test (exact lowering equivalence plus the trace comparison) is the template.
    This task does not claim a saving for a real title (one copy, one alias: K = 1) and changes no Genesis output.
 
-No extensive emitter redesign was started: the Genesis consumer path stays as it is and the follow-up above is recorded for the roadmap (SEG-097 candidate).
+No extensive emitter redesign was started: the Genesis consumer path stays as it is and the follow-up above is recorded for the roadmap (SEG-098 candidate).

@@ -78,7 +78,7 @@ body; the actual guest PC with the runtime mapping that selected the instruction
   in the source-relative one. Dispatch overhead is below the noise of this measurement (the route's run time is equal to within 3%); there is no evidence
   of a run-time cost and none is claimed. Emission CPU time is dominated by process start at this size and is not separable.
 - Not claimed: faster compilation of a real game (these are synthetic modules of 28-140 bytes of code per mapping); a benefit for single-mapping images;
-  integration into the BIOS-image profile's partitioned emission (`bios_profile.cpp`), which has no multi-mapping image in M1 (carried to SEG-097).
+  integration into the BIOS-image profile's partitioned emission (`bios_profile.cpp`), which has no multi-mapping image in M1 (carried to SEG-098).
 
 ## Consequences
 

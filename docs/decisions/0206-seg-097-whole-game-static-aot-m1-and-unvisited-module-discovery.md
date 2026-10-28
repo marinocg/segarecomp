@@ -142,4 +142,4 @@ executable-subrange hull and the separation of proposal from admission.
 What is NOT claimed (the stated scope): loaders that call BIOS file/CD services (the BIOS-image profile, where the module list is not wired), tables,
 computed LBAs/destinations, partial-sector or multi-sector transfers, nested loaders (the walk does not enter loaded code), interrupt-driven loaders, PRG RAM or
 PCM destinations, decompression. The 2M Word RAM mode is assumed (its mode bit is main-owned); a 1M-mode loader would produce bytes that fail the runtime digest
-check. Nothing here says any commercial title's unvisited modules are found; that is the M2 question. Open limits are carried to SEG-097.
+check. Nothing here says any commercial title's unvisited modules are found; that is the M2 question. Open limits are carried to SEG-098.
