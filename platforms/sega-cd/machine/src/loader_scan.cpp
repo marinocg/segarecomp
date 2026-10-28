@@ -312,7 +312,7 @@ State join_states(const State &a, const State &b) {
   std::sort(r.rets.begin(), r.rets.end());
   r.rets.erase(std::unique(r.rets.begin(), r.rets.end()), r.rets.end());
   for (const auto &l : b.loaded)
-    if (std::find(r.loaded.begin(), r.loaded.end(), l) == r.loaded.end()) r.loaded.push_back(l);
+    if (std::none_of(r.loaded.begin(), r.loaded.end(), [&](const Loaded &x) { return x == l; })) r.loaded.push_back(l);
   std::sort(r.loaded.begin(), r.loaded.end(), [](const Loaded &x, const Loaded &y) { return std::tie(x.op, x.base, x.bytes) < std::tie(y.op, y.base, y.bytes); });
   r.mem.join(b.mem);
   r.cd.pos = join_val(a.cd.pos, b.cd.pos);
