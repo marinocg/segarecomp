@@ -28,8 +28,9 @@ file, the build cache or the product: no placeholder values.
   Master System mapper on the game's page).
 * **Sega CD** - a different kind of game: **Import ROMs > Add Sega CD game...** takes your BIOS image, the disc's CUE file and (optionally) a verified viewer
   program built with the developer procedure. All three are referenced by path (never copied or bundled) and only paths, sizes and SHA-256 values are stored.
-  The launcher cannot build Sega CD games: its details page replaces Build by **Import program...**, shows the verification (BIOS, disc files, program) and
-  the honest state (inputs not configured, no program, headless-only build, stale program, mismatched, ready), and Play opens the shared viewer. See
+  The details page offers **Build** (SEG-078-T003: compiles a viewer program from the two files on this computer, with progress and Cancel; experimental, see the
+  coverage notes) next to **Import program...**, shows the verification (BIOS, disc files, program) and
+  the honest state (inputs not configured, no program yet, headless-only build, stale program, mismatched, ready), and Play opens the shared viewer. See
   [sega-cd-play.md](sega-cd-play.md).
 * **Details** - top to bottom, inside the first 1080x740 view: the cover (change from its corner), editable display name (the header name is kept),
   favorite, platform, build state and ROM link health, one sentence of what matters now, and the two dominant actions **Play** (only for an executable whose

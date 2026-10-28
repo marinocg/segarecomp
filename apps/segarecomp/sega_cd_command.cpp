@@ -18,6 +18,7 @@
 #include "segarecomp/machine/sega_cd/boot_images.hpp"
 #include "segarecomp/machine/sega_cd/modules.hpp"
 #include "segarecomp/machine/sega_cd/program.hpp"
+#include "segarecomp/machine/sega_cd/source_resolve.hpp"
 #include "segarecomp/sha256.hpp"
 
 namespace {
@@ -283,6 +284,26 @@ std::optional<scd::Processor> parse_processor(const std::string &text) {
 }
 
 // SEG-064-T002 (ADR 0142): the BIOS-image profile emission. Returns the process status.
+// The bytes of a track-1 extent through the verified disc reader; an empty string on success, else the typed error.
+std::string read_track1_extent(const segarecomp::DiscImage &disc, std::uint32_t off, std::uint32_t len, std::vector<std::uint8_t> &bytes) {
+  if (disc.tracks().empty() || disc.tracks().front().type == segarecomp::DiscTrackType::audio) return "first_track_not_data";
+  const auto &first = disc.tracks().front();
+  const std::uint64_t end = static_cast<std::uint64_t>(off) + len;
+  if ((end + segarecomp::kDiscUserBytes - 1U) / segarecomp::kDiscUserBytes > first.sector_count) return "disc_image_outside_track";
+  bytes.clear();
+  bytes.reserve(len);
+  std::array<std::uint8_t, segarecomp::kDiscUserBytes> block{};
+  for (std::uint32_t at = off; at < end;) {
+    const std::uint32_t lba = first.first_lba + at / segarecomp::kDiscUserBytes;
+    if (disc.read_user_data(lba, std::span<std::uint8_t, segarecomp::kDiscUserBytes>(block)) != segarecomp::DiscError::none) return "disc_image_unreadable";
+    const std::uint32_t inside = at % segarecomp::kDiscUserBytes;
+    const std::uint32_t take = static_cast<std::uint32_t>(std::min<std::uint64_t>(segarecomp::kDiscUserBytes - inside, end - at));
+    bytes.insert(bytes.end(), block.begin() + inside, block.begin() + inside + take);
+    at += take;
+  }
+  return {};
+}
+
 int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios_path, const std::vector<std::string> &copies,
                       const std::vector<std::string> &admits, const std::vector<std::string> &disc_images,
                       std::optional<std::uint32_t> application_entry, const std::string &out_path, std::uint32_t partition_window) {
@@ -313,22 +334,8 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     const auto len = f.size() == 4U ? parse_u32(f[3]) : std::nullopt;
     if (!proc || !off || !base || !len || *len == 0U || *len > 0x80000U) return bad("disc_image", "disc_image_syntax");
     // The extent is read through the verified disc reader from the logical user data of track 1 (cooked 2048-byte blocks).
-    if (disc.tracks().empty() || disc.tracks().front().type == segarecomp::DiscTrackType::audio) return bad("disc_image", "first_track_not_data");
-    const auto &first = disc.tracks().front();
-    const std::uint64_t end = static_cast<std::uint64_t>(*off) + *len;
-    if ((end + segarecomp::kDiscUserBytes - 1U) / segarecomp::kDiscUserBytes > first.sector_count) return bad("disc_image", "disc_image_outside_track");
     scd::DiscImageSpec spec{*proc, *off, *base, *len, {}};
-    spec.bytes.reserve(*len);
-    std::array<std::uint8_t, segarecomp::kDiscUserBytes> block{};
-    for (std::uint32_t at = *off; at < end;) {
-      const std::uint32_t lba = first.first_lba + at / segarecomp::kDiscUserBytes;
-      if (disc.read_user_data(lba, std::span<std::uint8_t, segarecomp::kDiscUserBytes>(block)) != segarecomp::DiscError::none)
-        return bad("disc_image", "disc_image_unreadable");
-      const std::uint32_t inside = at % segarecomp::kDiscUserBytes;
-      const std::uint32_t take = static_cast<std::uint32_t>(std::min<std::uint64_t>(segarecomp::kDiscUserBytes - inside, end - at));
-      spec.bytes.insert(spec.bytes.end(), block.begin() + inside, block.begin() + inside + take);
-      at += take;
-    }
+    if (const auto error = read_track1_extent(disc, *off, *len, spec.bytes); !error.empty()) return bad("disc_image", error);
     inputs.disc_images.push_back(std::move(spec));
   }
   if (application_entry) inputs.application_entry = *application_entry;
@@ -362,6 +369,18 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
         if (!byte) return bad("admit", "template_syntax");
         a.bytes.push_back(static_cast<std::uint8_t>(*byte));
       }
+    } else if (f.size() == 6U && f[0] == "extent") {  // SEG-078-T003 (ADR 0205): extent:<pass>:<cpu>:<track-1 offset>:<base>:<length>
+      const auto proc = parse_processor(f[2]);
+      const auto off = parse_u32(f[3]);
+      const auto base = parse_u32(f[4]);
+      const auto len = parse_u32(f[5]);
+      if (!proc || !off || !base || !len || *len == 0U || *len > 0x80000U) return bad("admit", "extent_syntax");
+      a.kind = scd::AdmissionKind::disc_extent;
+      a.pass_identity = f[1];
+      a.processor = *proc;
+      a.address = *base;
+      a.track_offset = *off;
+      if (const auto error = read_track1_extent(disc, *off, *len, a.bytes); !error.empty()) return bad("admit", error);
     } else if (f.size() == 6U && f[0] == "template-run") {  // SEG-079-T002 (ADR 0180): template-run:<pass>:<cpu>:<pc>:<slots>:<6*slots bytes hex>
       const auto proc = parse_processor(f[2]);
       const auto pc = parse_u32(f[3]);
@@ -526,11 +545,69 @@ int emit(int argc, char **argv) {
   return 0;
 }
 
+// SEG-078-T003 (ADR 0205): resolve the disc source of a frontier's RAM window.
+int resolve_source_command(int argc, char **argv) {
+  std::optional<std::string> cue, region_path, cpu_text;
+  std::optional<std::uint32_t> pc, region_base;
+  std::string delivered_text;
+  bool overflow = false;
+  for (int i = 3; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
+    else if (arg == "--cpu" && i + 1 < argc) cpu_text = argv[++i];
+    else if (arg == "--pc" && i + 1 < argc) pc = parse_u32(argv[++i]);
+    else if (arg == "--region" && i + 1 < argc) region_path = argv[++i];
+    else if (arg == "--region-base" && i + 1 < argc) region_base = parse_u32(argv[++i]);
+    else if (arg == "--delivered" && i + 1 < argc) delivered_text = argv[++i];
+    else if (arg == "--delivered-overflow" && i + 1 < argc) overflow = std::string_view(argv[++i]) == "1";
+    else {
+      std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+      return 2;
+    }
+  }
+  const auto processor = cpu_text ? parse_processor(*cpu_text) : std::nullopt;
+  if (!cue || !region_path || !pc || !region_base || !processor) {
+    std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+    return 2;
+  }
+  const auto refuse = [](const std::string &error) {
+    std::cout << "{\"ok\":false,\"error\":\"" << error << "\"}\n";
+    return 8;
+  };
+  const auto region = read_file(*region_path, 0x80000U);
+  if (!region) return refuse("bad_evidence");
+  scd::SourceEvidence evidence;
+  evidence.processor = *processor;
+  evidence.pc = *pc;
+  evidence.region_base = *region_base;
+  evidence.region = *region;
+  evidence.delivered_overflow = overflow;
+  if (!delivered_text.empty()) {
+    for (const auto &item : split(delivered_text, ',')) {
+      const auto f = split(item, ':');
+      const auto first = f.size() == 2U ? parse_u32(f[0]) : std::nullopt;
+      const auto count = f.size() == 2U ? parse_u32(f[1]) : std::nullopt;
+      if (!first || !count) return refuse("bad_evidence");
+      if (evidence.delivered.size() >= 4096U) return refuse("bad_evidence");
+      evidence.delivered.push_back({*first, *count});
+    }
+  }
+  const auto loaded = segarecomp::load_cue_disc(*cue);
+  if (!loaded.disc) return refuse(std::string("disc_") + segarecomp::disc_error_name(loaded.error));
+  const auto result = scd::resolve_source(*loaded.disc, evidence);
+  if (!result.source) return refuse(scd::resolve_error_name(result.error));
+  std::cout << "{\"ok\":true,\"processor\":\"" << scd::processor_name(*processor) << "\",\"offset\":" << result.source->disc_offset
+            << ",\"base\":" << result.source->base << ",\"length\":" << result.source->length << ",\"candidates\":" << result.source->candidates << "}\n";
+  return 0;
+}
+
 }  // namespace
 
 int segarecomp_sega_cd_command(int argc, char **argv) {
   if (argc >= 3 && std::string_view(argv[2]) == "inspect") return inspect(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "emit") return emit(argc, argv);
+  if (argc >= 3 && std::string_view(argv[2]) == "build") return segarecomp_sega_cd_build(argc, argv);
+  if (argc >= 3 && std::string_view(argv[2]) == "resolve-source") return resolve_source_command(argc, argv);
   std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
   return 2;
 }

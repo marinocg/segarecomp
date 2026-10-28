@@ -2,8 +2,9 @@
 
 // SEG-078-T002 (ADR 0204): Sega CD in the launcher, without a compiler. A Sega CD library entry is the user's BIOS image plus the user's disc
 // (a CUE sheet), both referenced by path - never copied, never stored beyond path, size and SHA-256 - and, optionally, an IMPORTED generated-native
-// viewer program (a developer build, see platforms/sega-cd/README.md). The launcher builds nothing for Sega CD: generic CUE-to-play compilation is not
-// available (SEG-078-T003), and the UI says so instead of hiding it.
+// viewer program: either BUILT on this computer by `segarecomp sega-cd build` (SEG-078-T003, ADR 0205: the launcher runs the product CLI with the bundled
+// compiler; see ScdBuildJob in launcher_core.hpp) or IMPORTED from a developer build (platforms/sega-cd/README.md). Both paths end in the same
+// verification below: a built program is imported through `attach_program` like any other, so it is bound to exactly these two files.
 //
 // What the launcher can verify - and nothing more is claimed:
 //   * the BIOS image: size (<= 128 KiB) and SHA-256, measured here;
@@ -64,7 +65,7 @@ enum class Refusal {
   disc_file_missing,
   disc_file_size_mismatch,
   disc_file_changed,       // SHA-256 differs
-  unsupported_build,       // automatic Sega CD compilation is not offered
+  unsupported_build,       // this installation cannot build Sega CD games (its Sega CD runtime sources are missing)
 };
 [[nodiscard]] const char *code(Refusal r);
 [[nodiscard]] std::string message(Refusal r, const std::string &detail = {});
@@ -128,7 +129,7 @@ struct EntryRecord {
 // How the entry stands. Order matters for the library badge: the first failing check names the state.
 enum class State {
   inputs_not_configured,   // BIOS and/or disc reference missing
-  no_program,              // inputs fine, no program imported: automatic build unsupported, import a verified program
+  no_program,              // inputs fine, no program yet: build one (Segarecomp) or import a verified one
   headless_only,           // the imported program has no viewer
   stale,                   // changed since import, or an older runtime contract
   mismatched,              // built for other inputs than the ones configured

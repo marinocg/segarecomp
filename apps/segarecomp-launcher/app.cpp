@@ -246,6 +246,7 @@ void App::init_ui() {
 void App::shutdown() {
   trace("shutdown=workers");
   if (job_) job_->wait();
+  if (scd_build_) { scd_build_->request_cancel(); scd_build_->wait(); scd_build_.reset(); }   // a quit never leaves a build running without a window
   game_.reset();
   sv_diag_reclaim_exclusive_devices(diag_);
   scan_cancel_ = true;
@@ -664,10 +665,9 @@ void App::go(Page page) {
 bool App::start_build(const std::string &id, bool restart_after) {
   LibraryEntry *entry = catalog_.find_id(id);
   if (entry == nullptr) return false;
-  if (entry->platform_id == "sega-cd") {  // ADR 0204: a typed, actionable "unsupported", never a silent bypass
-    show_message("Sega CD games cannot be built here yet", {scd::message(scd::Refusal::unsupported_build), "Open the game and use Import program... to attach one."});
-    trace("build=refused reason=unsupported_build platform=sega-cd");
-    return false;
+  if (entry->platform_id == "sega-cd") {  // SEG-078-T003 (ADR 0205): the automatic Sega CD build (its own job; typed refusal when this installation cannot)
+    scd_start_build(id);
+    return scd_build_ != nullptr;
   }
   if (job_) { toast("A build is already running.", true); return false; }
   if (!layout_.problem.empty()) { show_message("Installation incomplete", {layout_.problem}); return false; }
@@ -737,7 +737,7 @@ void App::stop_or_dequeue_build(const std::string &id) {
 
 void App::request_build(const std::string &id) {
   if (is_building(id) || is_queued(id)) return;
-  if (const LibraryEntry *e = catalog_.find_id(id); e != nullptr && e->platform_id == "sega-cd") { start_build(id); return; }  // the typed refusal above
+  if (const LibraryEntry *e = catalog_.find_id(id); e != nullptr && e->platform_id == "sega-cd") { start_build(id); return; }  // the Sega CD build is its own job
   if (job_ || !build_queue_.empty() || maintenance_running_) {
     build_queue_.push(id);
     if (const LibraryEntry *e = catalog_.find_id(id)) toast("Queued: " + e->title() + " (build " + std::to_string(build_count()) + ").");
@@ -747,7 +747,7 @@ void App::request_build(const std::string &id) {
 }
 
 App::Badge App::badge_for(const LibraryEntry &entry, const StatusInfo &info) const {
-  if (is_building(entry.id())) return {"Building", ui::col::warn, true};
+  if (is_building(entry.id()) || (scd_build_ && scd_build_id_ == entry.id())) return {"Building", ui::col::warn, true};
   if (is_queued(entry.id())) return {"Queued", ui::col::info, false};
   if (info.sega_cd && game_ && game_id_ == entry.id()) return {"Running", ui::col::ok, false};
   if (info.rom_missing && !info.runnable() && !info.sega_cd) return {"ROM missing", ui::col::warn, false};
@@ -1209,11 +1209,12 @@ void App::run_script() {
       else trace("script=no_recording");
     }
   } else if (cmd == "wait_scd") {  // hold the script until no Sega CD check or program is running
-    if (scd_import_job_.valid() || scd_launch_job_.valid() || game_) { --script_at_; script_wait_ = 2; }
+    if (scd_import_job_.valid() || scd_launch_job_.valid() || scd_build_ || game_) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "wait_play_end") {  // hold the script until no game is running
     if (game_) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "cancel_build") {  // the Cancel build / Unqueue action for the open game
-    if (!detail_id_.empty()) stop_or_dequeue_build(detail_id_);
+    if (!detail_id_.empty() && scd_build_ && scd_build_id_ == detail_id_) scd_cancel_build();
+    else if (!detail_id_.empty()) stop_or_dequeue_build(detail_id_);
   } else if (cmd == "wait_idle") {  // hold the script until no build is running or queued
     if (job_ || !build_queue_.empty() || status_pending_) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "wait_file") {  // hold the script until a file exists (at most ~20 s of frames)
@@ -1265,6 +1266,8 @@ void App::run_script() {
     else if (key == "scd_state") actual = !detail_id_.empty() && status_of(detail_id_).sega_cd ? scd_label(status_of(detail_id_)) : "-";
     else if (key == "scd_refusal") actual = !detail_id_.empty() && status_of(detail_id_).sega_cd ? scd::code(status_of(detail_id_).scd.refusal) : "-";
     else if (key == "scd_outcome") actual = scd_last_outcome_.count(detail_id_) != 0 ? scd_last_outcome_.at(detail_id_) : "-";
+    else if (key == "scd_building") actual = scd_build_ ? "1" : "0";
+    else if (key == "scd_build_note") actual = scd_build_notes_.count(detail_id_) != 0 ? scd_build_notes_.at(detail_id_).substr(0, 20) : "-";
     else if (key == "scd_failure") actual = failures_.count(detail_id_) != 0 ? failures_.at(detail_id_) : "-";
     else if (key == "scd_recordings") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr ? std::to_string(scd_recordings(*catalog_.find_id(detail_id_)).size()) : "-";
     else if (key == "scd_form_message") actual = scd_form_.message.empty() ? "-" : scd_form_.message;

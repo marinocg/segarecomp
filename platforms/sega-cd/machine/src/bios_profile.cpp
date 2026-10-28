@@ -149,6 +149,9 @@ std::string identity_text(const DiscImage &disc, const BiosProfileInputs &inputs
     const auto &a = inputs.admissions[i];
     if (a.kind == AdmissionKind::epoch_recipe)  // SEG-079: no pass identity; the recipe and the BIOS identity above determine the bytes
       t << "epochrecipe " << epoch_recipe_text(a.recipe) << "\n";
+    else if (a.kind == AdmissionKind::disc_extent)  // SEG-078-T003: coordinates and a digest of the bytes, like a manual extent, in chain order
+      t << "discextent " << a.pass_identity << " " << processor_name(a.processor) << " " << a.track_offset << " " << a.address << " " << a.bytes.size() << " "
+        << sha256_hex(a.bytes) << "\n";
     else if (a.kind == AdmissionKind::epoch)
       t << "epoch " << a.pass_identity << " " << a.bytes.size() << " " << sha256_hex(a.bytes) << "\n";
     else
@@ -249,6 +252,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
   }
   std::vector<Template> templates;
   std::uint32_t epochs = 0;
+  std::size_t disc_extents = 0;
   for (std::size_t i = 0; i < inputs.admissions.size(); ++i) {
     const auto &a = inputs.admissions[i];
     if (a.kind == AdmissionKind::epoch_recipe) {
@@ -263,6 +267,16 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
       continue;
     }
     if (a.pass_identity != bios_profile_identity(disc, inputs, i)) return fail(BiosProfileError::provenance_mismatch, i);
+    if (a.kind == AdmissionKind::disc_extent) {
+      // SEG-078-T003 (ADR 0205): a discovered extent is a disc image whose position in the chain records the pass that explained it. The bytes were read
+      // from the verified disc by the caller; the same limits as a manual extent apply, to both kinds together.
+      const auto taken = inputs.disc_images.size() + ++disc_extents;
+      if (taken > kMaxDiscImages || ((a.address | a.bytes.size()) & 1U) != 0U || a.bytes.empty() || !disc_extent_ram_of(a.processor, a.address, static_cast<std::uint32_t>(a.bytes.size())))
+        return fail(BiosProfileError::disc_image_invalid, i);
+      images.push_back(Image{a.processor, "disc" + std::to_string(taken - 1U), "track:1 byte:" + std::to_string(a.track_offset) + " length:" + std::to_string(a.bytes.size()),
+                             ImageAuthority::immutable_input, true, a.address, a.bytes});
+      continue;
+    }
     if (a.kind == AdmissionKind::epoch) {
       const auto n = a.bytes.size();
       if (n == 0U || n > kPrgRamBytes || n % kEpochGranule != 0U || ++epochs > kMaxEpochImages ||

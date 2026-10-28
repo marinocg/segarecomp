@@ -22,9 +22,12 @@ Good to know
 * Compatibility is experimental. Sega Genesis / Mega Drive images and (baseline) Sega Master System images
   are supported, and many games will not translate or run correctly yet. A Master System cartridge's mapper cannot be
   detected: the launcher asks you to choose it (or reads a `<rom name>.mapper.json` file beside the ROM). "Compatibility unknown" means nothing is known about that ROM.
-* Sega CD: Segarecomp cannot build Sega CD games. If you have a viewer program built for your own BIOS image and disc with the developer
-  procedure (docs/product/sega-cd-play.md in the source repository), use Import ROMs > "Add Sega CD game..." to reference the BIOS, the CUE file and
-  that program (nothing is copied, and none of it is part of this package). No sound is available for Sega CD.
+* Sega CD (experimental): Import ROMs > "Add Sega CD game..." references your own BIOS image and your own disc (the CUE file); nothing is
+  copied, and none of it is part of this package. Choose Build and Segarecomp compiles a playable program from those two files on this
+  computer (several minutes the first time; it can be cancelled). The build finds which code the disc loads by running the console from reset;
+  code that does not exist verbatim on the disc (generated or decompressed at run time) is never guessed: the program stops there with a typed
+  stop and the build says so. A program built elsewhere with the developer procedure (docs/product/sega-cd-play.md) can still be imported
+  and is verified against your BIOS and disc. No sound is available for Sega CD.
 * In a game, Escape (or the gamepad Back button) opens the pause menu: Resume, Quick Settings, Video & Display (scaling,
   aspect, CRT presets), Controls (rebind keys and gamepad buttons, Player 1 and 2), Audio, System & Diagnostics (screenshot,
   and Reset for Master System) and Return to Launcher. F11 toggles fullscreen, F12 saves a screenshot of the game picture.

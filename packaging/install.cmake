@@ -31,6 +31,11 @@ install(DIRECTORY ${_src}/platforms/genesis/machine/include/ DESTINATION ${_rt}/
 install(DIRECTORY ${_src}/libs/device/sega/genesis/include/ DESTINATION ${_rt}/libs/device/sega/genesis/include FILES_MATCHING PATTERN "*.h")
 install(DIRECTORY ${_src}/libs/cpu/m68k/include/ DESTINATION ${_rt}/libs/cpu/m68k/include FILES_MATCHING PATTERN "*.h")
 
+# SEG-078-T003 (ADR 0205): the project-authored Sega CD runtime and viewer sources, compiled with the user's generated program by `segarecomp sega-cd build`.
+# Sources only: no BIOS, disc, program or table ships (packaging/dependency_check.py refuses anything else under a sega-cd folder).
+install(DIRECTORY ${_src}/platforms/sega-cd/runtime/ DESTINATION ${_rt}/platforms/sega-cd/runtime FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
+install(DIRECTORY ${_src}/platforms/sega-cd/viewer/ DESTINATION ${_rt}/platforms/sega-cd/viewer FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
+
 # SEG-058 (ADR 0120): the shared SDL3 viewer foundation is compiled into every game by the bundled compiler, next to the console adapter.
 install(DIRECTORY ${_src}/libs/viewer/src/ DESTINATION ${_rt}/libs/viewer/src FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
 install(DIRECTORY ${_src}/libs/viewer/include/ DESTINATION ${_rt}/libs/viewer/include FILES_MATCHING PATTERN "*.h")

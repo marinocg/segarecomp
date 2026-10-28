@@ -106,7 +106,7 @@ std::string message(Refusal r, const std::string &detail) {
     case Refusal::disc_file_missing: text = "A disc file the program needs was not found next to the CUE file."; break;
     case Refusal::disc_file_size_mismatch: text = "A disc file next to the CUE file has a different size than the program expects."; break;
     case Refusal::disc_file_changed: text = "A disc file next to the CUE file is not the one the program was built from (its SHA-256 differs)."; break;
-    case Refusal::unsupported_build: text = "Segarecomp cannot build Sega CD games yet. Import a verified program built with the developer procedure."; break;
+    case Refusal::unsupported_build: text = "This installation of Segarecomp cannot build Sega CD games (its Sega CD runtime is missing). Import a verified program built with the developer procedure, or install a complete release."; break;
   }
   if (!detail.empty()) text += " (" + detail + ")";
   return text;
@@ -115,7 +115,7 @@ std::string message(Refusal r, const std::string &detail) {
 const char *state_label(State s) {
   switch (s) {
     case State::inputs_not_configured: return "Inputs not configured";
-    case State::no_program: return "No program (automatic build unsupported)";
+    case State::no_program: return "No program yet (can be built)";
     case State::headless_only: return "Headless-only build";
     case State::stale: return "Stale program";
     case State::mismatched: return "Mismatched";

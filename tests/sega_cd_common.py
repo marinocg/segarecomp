@@ -187,3 +187,28 @@ def run_reference(exe, disc_dir, out_dir):
     for name in ("prg_ram", "work_ram", "word_ram"):
         state[name + "_sha256"] = hashlib.sha256((out_dir / (name + ".bin")).read_bytes()).hexdigest()
     return 0, state
+
+
+def stage_launcher_package(package, segarecomp, cc, sdl3_prefix):
+    """SEG-078-T003: a launcher installation (SEGARECOMP_HOME) assembled from the source tree for a test: the product CLI, a `zig` stand-in that forwards
+    `zig cc -target T <args>` to the host C compiler, the runtime sources (the tree mirrors the repository, as the release package does) and SDL3.
+    Symlinks only; nothing is copied and no game content is involved."""
+    package = pathlib.Path(package)
+    (package / "bin").mkdir(parents=True)
+    (package / "toolchain").mkdir()
+    (package / "runtime").mkdir()
+    (package / "bin" / ("segarecomp" + EXE)).symlink_to(pathlib.Path(segarecomp).resolve())
+    zig = package / "toolchain" / "zig"
+    zig.write_text('#!/bin/sh\nif [ "$1" = "--version" ]; then exec %s --version; fi\nshift 3\nexec %s "$@"\n' % (shlex_quote(cc), shlex_quote(cc)))
+    zig.chmod(0o755)
+    (package / "runtime" / "platforms").symlink_to(ROOT / "platforms")
+    (package / "runtime" / "libs").symlink_to(ROOT / "libs")
+    (package / "sdl3").mkdir()
+    (package / "sdl3" / "include").symlink_to(pathlib.Path(sdl3_prefix) / "include")
+    (package / "sdl3" / "lib").symlink_to(pathlib.Path(sdl3_prefix) / "lib")
+    return package
+
+
+def shlex_quote(text):
+    import shlex
+    return shlex.quote(str(text))

@@ -404,7 +404,28 @@ static int scd_cdd_read_data(ScdMachine *m, uint8_t *destination) {
   if (index >= m->disc->track_count || m->disc->tracks[index].type == 2U || m->cdd.lba < 0) return 0;
   if (scd_disc_read_user_data(m->disc, (uint32_t)m->cdd.lba, destination) != SCD_DISC_OK)
     return scd_fail(m, SCD_SUB, SCD_STOP_CD_READ_FAILED, 0U, (uint32_t)m->cdd.lba);
+  scd_ledger_note(m, (uint32_t)m->cdd.lba); /* SEG-078-T003: what the machine read from the disc */
   return 0;
+}
+
+void scd_ledger_note(ScdMachine *m, uint32_t lba) {
+  uint32_t i;
+  for (i = m->delivered_count; i > 0U; --i) { /* the newest ranges first: blocks are read in order, so the last range is nearly always the one to extend */
+    ScdLedgerRange *r = &m->delivered[i - 1U];
+    if (lba >= r->first_lba && lba - r->first_lba < r->count) return;
+    if (lba == r->first_lba + r->count) {
+      r->count += 1U;
+      return;
+    }
+    if (m->delivered_count - i >= 4U) break;
+  }
+  if (m->delivered_count >= SCD_LEDGER_MAX) {
+    m->delivered_overflow = 1U;
+    return;
+  }
+  m->delivered[m->delivered_count].first_lba = lba;
+  m->delivered[m->delivered_count].count = 1U;
+  m->delivered_count += 1U;
 }
 
 /* One decoded block (GPGX cdc_decoder_update). Returns 1 on a stop. */

@@ -25,7 +25,9 @@ struct Layout {
   std::filesystem::path runtime_sms;  // runtime/platforms/master-system (runtime/, headless/, viewer/); libs/ are siblings of platforms/
   std::filesystem::path sdl_include;
   std::filesystem::path sdl_lib;
+  std::filesystem::path runtime_root; // runtime/ (mirrors the repository: platforms/, libs/); `segarecomp sega-cd build --runtime-dir`
   std::string problem;                // non-empty when the package is incomplete
+  std::string scd_build_problem;      // SEG-078-T003: non-empty when this installation cannot build Sega CD games (the Sega CD runtime sources are missing)
 };
 
 struct RomView {
@@ -215,6 +217,57 @@ private:
   std::string message_;
   std::thread thread_;
 };
+
+
+// SEG-078-T003 (ADR 0205): one asynchronous `segarecomp sega-cd build` of a Sega CD game (the user's BIOS and CUE sheet), the self-service build. It runs the
+// product CLI (multi-pass: emit, compile with the bundled compiler, run a build pass, admit what the machine itself proves, confirm) in
+// `<out_dir>.partial`, parses its `@stage`/`@round`/`@result` lines, and publishes by rename. Cancellation terminates the CLI and everything it started and
+// removes the attempt's own folder; a finished build is never replaced by a cancelled or failed attempt. Poll from the UI thread.
+struct ScdBuildRequest {
+  std::filesystem::path bios, cue, out_dir;   // out_dir receives program-viewer[.exe], program[.exe], status.json, build.log
+};
+class ScdBuildJob {
+public:
+  static constexpr int stage_count = 6;  // generate, compile, link, discovery pass, confirm, viewer
+  static const char *stage_label(int index);
+  ScdBuildJob(ScdBuildRequest request, Layout layout, bool cancelled_at_start = false);
+  ~ScdBuildJob();
+  ScdBuildJob(const ScdBuildJob &) = delete;
+  ScdBuildJob &operator=(const ScdBuildJob &) = delete;
+  [[nodiscard]] bool finished() const { return finished_.load(); }
+  [[nodiscard]] BuildOutcome outcome() const;
+  bool request_cancel();
+  [[nodiscard]] bool cancel_requested() const { return cancel_.load(); }
+  [[nodiscard]] StageState stage(int index) const { return static_cast<StageState>(stages_[index].load()); }
+  [[nodiscard]] int round() const { return round_.load(); }
+  [[nodiscard]] std::string message() const;       // a failure line, or the progress line while running
+  [[nodiscard]] std::string summary() const;       // after success: the plain-language outcome of the build (what the program covers)
+  [[nodiscard]] std::filesystem::path program() const;   // the viewer program of a successful build
+  [[nodiscard]] const std::filesystem::path &out_dir() const { return request_.out_dir; }
+  void wait();
+
+private:
+  void run();
+  ScdBuildRequest request_;
+  Layout layout_;
+  std::atomic<int> stages_[stage_count]{};
+  std::atomic<int> round_{0};
+  std::atomic<bool> finished_{false};
+  std::atomic<bool> ok_{false};
+  std::atomic<bool> cancel_{false};
+  std::atomic<bool> cancelled_{false};
+  bool publishing_ = false;  // guarded by mutex_
+  ProcessTree tree_;
+  mutable std::mutex mutex_;
+  std::string message_, summary_;
+  std::thread thread_;
+};
+// The viewer program name inside a build folder.
+[[nodiscard]] std::filesystem::path scd_build_program(const std::filesystem::path &out_dir);
+
+// The launcher's own copy of the plain-language reading of a typed refusal / stop class of the build (stable codes of the product CLI).
+[[nodiscard]] std::string scd_frontier_text(const std::string &refusal);
+
 
 // The launched native game; its output goes to <entry>/run.log.
 class GameRun {

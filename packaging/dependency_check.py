@@ -27,8 +27,10 @@ FORBIDDEN_LIB = re.compile(r"python|libtorch|torch_|libc10|(^|[/\\])c10\.dll|num
 REDISTRIBUTABLE_DLL = re.compile(r"^(vcruntime|msvcp|msvcr\d|concrt|vccorlib|libgcc|libstdc|libwinpthread)", re.I)  # msvcrt.dll is an OS component
 FORBIDDEN_FILE = re.compile(r"(\.pyc?$|\.pyd$|\.npz?$|\.onnx$|\.pt$|\.pth$|\.safetensors$|\.gguf$|\.tflite$|\.h5$|\.pkl$|\.joblib$|\.ckpt$|\.pb$|\.model\.json$|^python[0-9.]*(\.exe)?$|(^|[/\\])site-packages|segarecomp_ml_region|libpython|torch|numpy|sklearn)", re.I)
 # SEG-078-T002 (ADR 0204): a Sega CD game is the user's BIOS and disc plus a program generated from them. None of it is ever bundled: no disc image or CUE sheet,
-# no BIOS, no generated viewer/headless Sega CD program, no Sega CD runtime sources (the developer procedure compiles those from a checkout), no run report.
-FORBIDDEN_COMMERCIAL = re.compile(r"(\.cue$|\.iso$|\.chd$|\.mdf$|\.ccd$|\.mds$|bios[^/\\]*\.(bin|rom|md|gen|zip|img|7z)$|program-viewer|(^|[/\\])sega-cd([/\\]|$)|last-report\.json$|\.describe$)", re.I)
+# no BIOS, no generated viewer/headless Sega CD program, no run report. SEG-078-T003 (ADR 0205): the project-authored Sega CD RUNTIME SOURCES
+# (platforms/sega-cd/{runtime,viewer}/*.c|*.h) ship, as the Genesis ones do, because the launcher compiles the user's program with them; any other file under a
+# `sega-cd` folder (a binary, a table, a report, a program, a disc) is still refused.
+FORBIDDEN_COMMERCIAL = re.compile(r"(\.cue$|\.iso$|\.chd$|\.mdf$|\.ccd$|\.mds$|bios[^/\\]*\.(bin|rom|md|gen|zip|img|7z)$|program-viewer|(^|[/\\])sega-cd([/\\]|$)(?!(runtime|viewer)[/\\][^/\\]+\.[ch]$)|last-report\.json$|\.describe$)", re.I)
 MODEL_DIGESTS = {  # embedded in `segarecomp` (the frozen native models), see ADR 0096 / 0102
     "gen2 model": b"11258708285e4427a3e38e02732e8f93b4c5d497883101f0629223d2366a98e1",
     "v1 feature schema": b"d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570",

@@ -122,7 +122,7 @@ def main():
         other_bios.write_bytes(bios.read_bytes()[:-1] + b"\xff")
         code, out, _, _ = launch(tmp, ["--bios", other_bios, "--cue", cue, "--program", viewer], name="lib3")
         got = lines(out)
-        check(code == 5 and got.get("program", "").startswith("refused program_bios_mismatch") and got.get("state") == "No program (automatic build unsupported)" and got.get("build") == "unsupported_build",
+        check(code == 5 and got.get("program", "").startswith("refused program_bios_mismatch") and got.get("state") == "No program yet (can be built)" and got.get("build") == "unsupported_build",
               "refusal: a program built for another BIOS is program_bios_mismatch, and the automatic build is the typed unsupported state")
         moved = tmp / "disc2"
         shutil.copytree(disc, moved)
@@ -140,7 +140,7 @@ def main():
         check(code == 5 and lines(out).get("program", "").startswith("refused program_unverifiable"), "refusal: a program that cannot state itself (an older build) is unverifiable, never trusted")
         code, out, _, _ = launch(tmp, ["--bios", bios, "--cue", cue], name="lib7")
         got = lines(out)
-        check(code == 0 and got.get("program") == "none" and got.get("state") == "No program (automatic build unsupported)" and got.get("build") == "unsupported_build" and "run" not in got,
+        check(code == 0 and got.get("program") == "none" and got.get("state") == "No program yet (can be built)" and got.get("build") == "unsupported_build" and "run" not in got,
               "no program: the entry is added, nothing is run, and the automatic build is the typed unsupported state")
         code, out, _, _ = launch(tmp, ["--bios", tmp / "absent.bin", "--cue", cue, "--program", viewer], name="lib8")
         check(code == 3 and "refusal=bios_missing" in out, "refusal: a missing BIOS file refuses the whole add")
@@ -173,6 +173,35 @@ def main():
               "typed stop: the class of the program's stop is reported (entry_not_compiled), exit 10 is a stop, not a crash")
         code, out, _, _ = launch(tmp, ["--bios", bios, "--cue", cue, "--program", double], {"FAKE_SCD_EXIT": "21"}, "lib10")
         check(code == 4 and "BIOS image does not match" in out, "typed refusal exit 21 of the program: reported as the BIOS refusal, a failure status for the launcher")
+
+        # ---- SEG-078-T003 (ADR 0205): BIOS + disc -> automatic build (extent discovery) -> verified viewer program -> run in the SDL3 viewer ----
+        # The loader fixture's modules reach the sub CPU only through the CD data path, so the build must DISCOVER where they came from. The launcher is
+        # given nothing but the two files: no program, no extent, no recipe.
+        package = common.stage_launcher_package(tmp / "package", SEGARECOMP, CC, os.environ.get("SDL3_PREFIX", "/usr"))
+        loader = tmp / "loader"
+        subprocess.run([sys.executable, str(ROOT / "tools" / "sega_cd_bios_loader_fixture.py"), "build", "--case", "overlay", "--out", str(loader)], check=True, capture_output=True)
+        env = {"SEGARECOMP_HOME": str(package), "SEGARECOMP_CACHE_DIR": str(tmp / "cache"), "SEGARECOMP_VIEWER_KEY_SCRIPT": str(keys), "SEGARECOMP_SCD_BUILD_ARGS": "--budget 3000000"}
+        code, out, err, library = launch(tmp, ["--bios", loader / "bios.bin", "--cue", loader / "disc" / "disc.cue", "--build"], env, "lib-build")
+        got = lines(out)
+        check(code == 0 and got.get("build") == "ok" and "\nprogram=verified\n" in out and got.get("program") == "none" and got.get("state") == "Ready to play",
+              "automatic build: BIOS + disc -> built, verified and Ready to play with no program, extent or recipe given (%s)" % out.replace("\n", " | ")[:400])
+        check("No unexplained code region" in got.get("build_summary", "") and got.get("run", "").startswith("exited code="), "automatic build: the build reports full coverage and the viewer ran the built program (%s)" % got.get("run"))
+        entry_dir = next((library / "sega-cd").glob("*"))
+        status = json.loads((entry_dir / "build" / "status.json").read_text())
+        check(status["status"] == "ok" and len(status["extents"]) == 2 and status["frontier"] is None and status["viewer"] is True and not (entry_dir / "build.partial").exists(),
+              "automatic build: the product recorded two discovered disc extents, no unexplained frontier, a viewer variant, and left no partial folder")
+        text = (library / "library.json").read_text()
+        check(str(entry_dir / "build") in text and "SEGA" not in text, "automatic build: the library stores only the reference to the built program")
+        # an unsupported installation is a typed refusal, not a crash
+        code, out, _, _ = launch(tmp, ["--bios", loader / "bios.bin", "--cue", loader / "disc" / "disc.cue", "--build"], {"SEGARECOMP_HOME": str(tmp / "no-home")}, "lib-nobuild")
+        check(code == 5 and lines(out).get("build") == "unsupported_build", "automatic build: an installation without the Sega CD runtime refuses with the typed unsupported_build")
+        # a disc whose code is not on the disc builds, stops honestly, and the program says so
+        gen = tmp / "generated"
+        subprocess.run([sys.executable, str(ROOT / "tools" / "sega_cd_bios_loader_fixture.py"), "build", "--case", "generated", "--out", str(gen)], check=True, capture_output=True)
+        code, out, _, library2 = launch(tmp, ["--bios", gen / "bios.bin", "--cue", gen / "disc" / "disc.cue", "--build"], env, "lib-build2")
+        got = lines(out)
+        check(code == 0 and got.get("build") == "ok" and "stops at the first code it cannot" in got.get("build_summary", "") and got.get("stop") == "entry_not_compiled",
+              "automatic build: generated code is never guessed - the build says where it stops and the program ends with the typed stop (%s)" % got.get("build_summary", "")[:200])
     print("%d failures" % len(failures))
     return 1 if failures else 0
 
