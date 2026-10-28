@@ -46,8 +46,8 @@ Authentic Earthworm Jim SE (identical authorized inputs, no gameplay script):
 | Measure | M2 / T002 (no convergence) | With convergence |
 |---|---|---|
 | Scan result | `scan_limit_exceeded`, incomplete | **complete** |
-| Visited states / steps | 4,096 / 8,187 (exhausted) | 3,535 / 64,623 |
-| Joins / widenings | 0 / 0 | 309 / 156 |
+| Visited states / steps | 4,096 / 8,187 (exhausted) | 3,528 / 64,589 |
+| Joins / widenings | 0 / 0 | 294 / 158 |
 | Branches decided by tracked condition codes | 9 | 17 |
 | Statically discovered modules | 0 | 0 (the one transfer's destination is unknown: `destination_unknown`) |
 | False admissions | 0 | 0 |
@@ -62,4 +62,4 @@ The scan of the authentic title now terminates inside the unchanged bounds with 
 
 ## Amendment (follow-up review, ADR 0220): threshold re-measured after the CDCTRN soundness fix
 
-Forgetting memory for an unresolved CDCTRN (the sound behaviour) removed knowledge on the authentic Earthworm Jim SE path and its scan again exhausted at the old default 32 (`widen_after` 12-24 complete: 2,230 / 2,606 / 3,052 / 3,535 states; 32 exhausts). The default is now **24** (3,535 states, 86% of the bound); 16 and 20 were rejected because the exploration-order test (`loop_unknown_exit`) then differs between orders. On the project fixtures with all-joins forced (`--converge-always`) the three-path fixture keeps 2 of 3 modules at 16-24 and all 3 at 32; the exact attempt (the default path) is unaffected. The conclusions of this ADR stand: a sound scan that completes inside the unchanged bounds, with the margin and precision cost stated.
+Forgetting memory for an unresolved CDCTRN (the sound behaviour) removed knowledge on the authentic Earthworm Jim SE path and its scan again exhausted at the old default 32 (`widen_after` 12-24 complete: 2,230 / 2,606 / 3,052 / 3,528 states; 32 exhausts). The default is now **24** (3,528 states, 86% of the bound); 16 and 20 were rejected because the exploration-order test (`loop_unknown_exit`) then differs between orders. On the project fixtures with all-joins forced (`--converge-always`) the three-path fixture keeps 2 of 3 modules at 16-24 and all 3 at 32; the exact attempt (the default path) is unaffected. The conclusions of this ADR stand: a sound scan that completes inside the unchanged bounds, with the margin and precision cost stated.

@@ -31,7 +31,7 @@ Gate: `RECURSIVE_DISCOVERY_GO` = rows 1-6 hold through the supported build and l
 ## Result
 
 `tests/sega_cd_recursive_discovery_test.py` (24 checks): rows 1-6 hold. In the hermetic chain the build pass loads and runs A only; the scan proves R inside A; the build admits A, B and R statically (2 resolved extents: IP and SP); route 3 then runs A, which loads and runs R (never loaded or compiled by any build pass) from the unchanged binary; the control build without the static producer stops typed at R. A loading cycle terminates in 722 states with each module once.
-Authentic: no proven module exists on either title, so no module entry is walked (0 entries, scan results unchanged: Sonic CD 13 states / 0 modules; Earthworm Jim SE 3,535 states / 0 modules).
+Authentic: no proven module exists on either title, so no module entry is walked (0 entries, scan results unchanged: Sonic CD 13 states / 0 modules; Earthworm Jim SE 3,528 states / 0 modules).
 
 ## Decision: `RECURSIVE_DISCOVERY_GO` (mechanism); authentic benefit none
 
