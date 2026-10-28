@@ -548,3 +548,14 @@ Three additions to the synthetic profile and one experiment, none of which chang
   source-relative regions per image, only for independently admitted disc game modules and extents (contract `selective_admission.v2`: firmware, BIOS-derived images, boot IP/SP, boot-area and user-declared extents stay broad); the emitters compile only the broad entries inside a validated proposal and report requested/effective/fallback/reason. A proposal never adds an
   entry, an image or a mapping; an omitted entry is the typed `entry_not_compiled` stop. M3 is not promoted and is not a completeness certificate.
 
+
+
+## 20. Whole-game static AOT, milestone 3 (SEG-099, ADR 0215-0220)
+
+Additions to the static loader scan; every option is off by default for `discover-modules` and enabled by the supported `sega-cd build` (`--static-recursion 0` restores the M2 scan). Nothing changes at run time: the program still only selects among precompiled, byte-verified variants.
+
+- **Documented BIOS CD-service ABI (ADR 0215).** `JSR $5F22` with D0.W: ROMREADN (`{LBA, count}` through A0), ROMREAD, CDCSTOP, CDCSTAT, CDCREAD, CDCTRN (sub-read device, A0 = buffer), CDCACK, with the public register / memory effects. There is no BIOS file-name service.
+- **Work-variable state (ADR 0216, `--work-state`).** Bounded abstract RAM (256-byte pages), condition codes (CPU-owned arithmetic and condition tables), the services above, ISO9660 resolved only by evaluating title code over validated disc bytes, a comparison of disc data with an unknown key is `lookup_key_unknown`, interrupt/user entries make what they write unknown to init/main. Unknown aliases, unmodelled services and foreign calls forget everything.
+- **State convergence (ADR 0217, `--state-convergence`).** A fallback after an exhausted exact walk: joins beyond 32 states per location, all-or-nothing, return stacks summarised as sets (<= 64).
+- **Recursive discovery (ADR 0218, `--recursive-modules`).** A transfer accepted by the entry proof into a proven loaded module is followed; bytes at the target that are not known to be the disc's are `loaded_bytes_unknown`.
+- **Provenance and diagnostics (ADR 0219).** `emit --admit static-extent:` is refused unless a proven module mapping contains it (`static_extent_unproven`); `final_stop` reports a computed destination separately (`destination`, `destination_location`); inventory labels `main_processor_loaders_not_analyzed`, `static_scan_joined`.
