@@ -38,8 +38,8 @@ using segarecomp_cli::run_process;
 
 namespace {
 
-constexpr unsigned kMaxEpochs = 4, kMaxTemplates = 64, kMaxTemplateSlots = 256, kMaxRunSlots = 128, kMaxExtents = 16;
-constexpr unsigned kMaxStaticExtents = 12;   // SEG-098-T002: of the 16 disc-image slots (shared with the resolved extents); more is the typed static_extent_bound_exceeded, admitting none
+constexpr unsigned kMaxEpochs = 4, kMaxTemplates = 64, kMaxTemplateSlots = 256, kMaxRunSlots = 128, kMaxExtents = 64;   // SEG-098-T004 (ADR 0213): 16 -> 64, measured
+constexpr unsigned kMaxStaticExtents = 48;   // SEG-098-T002 (12), T004 (48, ADR 0213): of the 64 disc-image slots (shared with the resolved extents); more is the typed static_extent_bound_exceeded, admitting none
 constexpr unsigned kMaxRounds = 1 + kMaxEpochs + kMaxTemplates + kMaxExtents;
 constexpr const char *kCacheVersion = "segarecomp.sega_cd_build.objects.v1";
 constexpr const char *kViewerFoundation[] = {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c", "sv_host.c", "sv_pages.c", "sv_draw.c"};
@@ -57,6 +57,7 @@ struct Options {
   std::string aot_policy = "compatibility";   // SEG-097-T003 (ADR 0208): `optimized` (experimental) selects the frozen gen2 M3 + B35 proposal
   bool aot_model_given = false;
   bool aot_all_images = false;
+  std::string static_range = "hull";   // SEG-098-T004: `loaded` admits every loaded byte of a proven module (computed entries beyond the traversed hull), `hull` only the traversed subrange
   bool static_discovery = true;   // SEG-098-T002: `--static-discovery 0` is the control (and the escape hatch): the build as it was before the static producer
 };
 
@@ -237,12 +238,39 @@ class Builder {
     out << "{\"status\":\"ok\",\"program\":\"" << exe.filename().string() << "\",\"viewer_program\":" << (viewer_path.empty() ? "null" : "\"" + viewer_path + "\"")
         << ",\"program_identity\":\"" << program_identity << "\",\"bios_sha256\":\"" << bios_sha_ << "\",\"rounds\":" << rounds << ",\"extents\":[";
     for (std::size_t i = 0; i < extents_.size(); ++i) out << (i ? "," : "") << "\"" << extents_[i] << "\"";
-    out << "],\"static_extents\":" << static_extents_.size() << ",\"static_discovery\":" << static_json_ << ",\"aot_policy\":" << (aot_policy_json_.empty() ? "null" : aot_policy_json_) << ",\"frontier\":" << (frontier_.empty() ? "null" : frontier_)
+    out << "],\"static_extents\":" << static_extents_.size() << ",\"static_discovery\":" << static_json_ << ",\"final_stop\":" << final_stop_json(report) << ",\"aot_policy\":" << (aot_policy_json_.empty() ? "null" : aot_policy_json_) << ",\"frontier\":" << (frontier_.empty() ? "null" : frontier_)
         << ",\"result\":\"" << raw_value(report, "result").value_or("") << "\",\"stop\":\"" << stop_class(report)
         << "\",\"viewer\":" << (o_.viewer ? "true" : "false") << ",\"history\":[" << history_ << "]}\n";
     std::ofstream(o_.output / "status.json", std::ios::binary | std::ios::trunc) << out.str();
     std::cout << "@result ok" << std::endl;
     return 0;
+  }
+
+  // SEG-098-T004 (ADR 0213): where the final stop's program counter lies relative to what is admitted - the classes the next step depends on:
+  // inside an admitted extent (a known image whose start was not compiled), inside a proven module's loaded window but outside its admitted range (a computed
+  // entry beyond the traversed hull), or outside every admitted image (an unknown source or a not yet admitted overlay).
+  std::string final_stop_json(const std::string &report) const {
+    const auto at = report.find("\"stop\":{");
+    if (at == std::string::npos) return "null";
+    const std::string cls = raw_value(report, "class", at).value_or("none");
+    if (cls == "none") return "null";
+    const auto cpu = number_value(report, "cpu", at).value_or(0);
+    const auto pc = number_value(report, "pc", at).value_or(0);
+    const char *want = cpu == 0 ? "main" : "sub";
+    const auto inside = [&](const std::vector<std::string> &list, bool window) {
+      for (const auto &e : list) {
+        std::vector<std::string> f;
+        std::stringstream ss(e);
+        for (std::string part; std::getline(ss, part, ':');) f.push_back(part);
+        if (f.size() < (window ? 3U : 4U) || f[0] != want) continue;
+        std::uint64_t base = 0, len = 0;
+        try { base = std::stoull(window ? f[1] : f[2]); len = std::stoull(window ? f[2] : f[3]); } catch (const std::exception &) { continue; }
+        if (pc >= base && pc < base + len) return true;
+      }
+      return false;
+    };
+    const char *where = inside(extents_, false) || inside(static_extents_, false) ? "inside_admitted_extent" : inside(static_windows_, true) ? "inside_static_module_window" : "outside_admitted_images";
+    return std::string("{\"class\":\"") + cls + "\",\"cpu\":\"" + want + "\",\"location\":\"" + where + "\"}";
   }
 
   static std::string stop_class(const std::string &report) {
@@ -541,7 +569,8 @@ class Builder {
     const fs::path list = o_.output / "static-extents.txt", report = o_.output / "static-scan.json";
     std::error_code ec;
     fs::remove(list, ec);
-    const int code = run_process({self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--constant-dispatch", "--static-extents", list.string()}, report, {}, 300);
+    fs::remove(o_.output / "static-windows.txt", ec);
+    const int code = run_process({self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--constant-dispatch", "--static-extents", list.string(), "--static-scope", o_.static_range, "--static-windows", (o_.output / "static-windows.txt").string()}, report, {}, 300);
     const std::string text = read_text(report);
     if (code < 0 || text.empty() || text.find("\"complete\":") == std::string::npos) { static_json_ = "{\"ran\":true,\"status\":\"scan_failed\"}"; return; }
     const bool complete = raw_value(text, "complete").value_or("") == "true";
@@ -551,9 +580,14 @@ class Builder {
       if (end != std::string::npos) ++reasons[text.substr(at + 10U, end - at - 10U)];
     }
     std::vector<std::string> found;
+    static_windows_.clear();
     {
       std::ifstream in(list);
       for (std::string line; std::getline(in, line);) if (!line.empty()) found.push_back(line);
+    }
+    {
+      std::ifstream in(o_.output / "static-windows.txt");
+      for (std::string line; std::getline(in, line);) if (!line.empty()) static_windows_.push_back(line);
     }
     std::string status = !complete ? "scan_incomplete" : found.empty() ? "no_modules" : "admitted";
     if (found.size() > kMaxStaticExtents) { status = "static_extent_bound_exceeded"; found.clear(); }
@@ -614,7 +648,7 @@ class Builder {
   std::ofstream log_;
   std::mutex log_mutex_;
   std::atomic<unsigned> counter_{0};
-  std::vector<std::string> extents_, static_extents_;
+  std::vector<std::string> extents_, static_extents_, static_windows_;
   std::string static_json_ = "{\"ran\":false}";
   std::vector<std::string> unit_names_;
   std::string aot_policy_json_;   // SEG-097-T003: the last emission's machine-readable aot_policy object (status.json)
@@ -635,6 +669,7 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--runtime-dir") { o.runtime_dir = value; have_runtime = true; }
     else if (key == "--cache-dir") o.cache_dir = value;
     else if (key == "--static-discovery") o.static_discovery = value != "0";
+    else if (key == "--static-range" && (value == "hull" || value == "loaded")) o.static_range = value;
     else if (key == "--cc") o.cc = value;
     else if (key == "--cc-arg") o.cc_args.push_back(value);
     else if (key == "--link-arg") o.link_args.push_back(value);

@@ -21,7 +21,8 @@
 namespace segarecomp::machine::sega_cd {
 
 // Resource controls (ADR 0206 decision 7): exhaustion is a typed refusal and marks the scan incomplete, never a silent truncation.
-inline constexpr std::uint32_t kLoaderScanMaxOperations = 64U;
+inline constexpr std::uint32_t kLoaderScanMaxOperations = 128U;   // SEG-098-T004 (ADR 0213): 64 -> 128, measured
+inline constexpr std::uint32_t kLoaderScanMaxModules = 64U;       // the synthetic module list keeps its own bound (kModuleMaxCount = 32): above it the scan proposes modules but writes no list text
 inline constexpr std::uint32_t kLoaderScanMaxStates = 4096U;
 inline constexpr std::uint32_t kLoaderScanMaxSteps = 100000U;
 inline constexpr std::uint32_t kLoaderScanMaxCallDepth = 8U;

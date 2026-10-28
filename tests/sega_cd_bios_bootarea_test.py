@@ -241,7 +241,7 @@ def main():
             ("a base outside the processor's RAM", ["--disc-image", "main:512:0x100000:26"], 6),
             ("a sub base past PRG RAM", ["--disc-image", "sub:512:0x7FFF0:26"], 6),
             ("a bad syntax", ["--disc-image", "main:512"], 7),
-            ("too many images", ["--disc-image", "main:512:0xFF0000:26"] * 17, 6),
+            ("too many images", ["--disc-image", "main:512:0xFF0000:26"] * 65, 6),   # SEG-098-T004: the bound is 64 (was 16)
             ("a zero application entry", ["--application-entry", "0"], 2),
             ("an odd application entry", ["--application-entry", "0xFF0001"], 2),
             ("an application entry past 24 bits", ["--application-entry", "0x1000000"], 2),

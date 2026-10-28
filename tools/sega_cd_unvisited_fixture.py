@@ -38,8 +38,56 @@ BASES_C = (0x090000, 0x0A0000)
 BASE_D = 0x0B0000
 HEADER = 0x40
 CASES = ("base", "overwritten", "header_patched", "unknown_lba", "unknown_dest", "prg_dest", "recursion",
-         "pi", "pi_odd", "pi_escape", "pi_overwrite", "long_dest", "stale_lba", "table_header", "dispatch", "dispatch_unknown")
+         "pi", "pi_odd", "pi_escape", "pi_overwrite", "long_dest", "stale_lba", "table_header", "dispatch", "dispatch_unknown", "computed_entry")
 SP_TABLE_PREFIX = 0x2A   # SEG-098-T001: an authentic-style SP header ("MAIN", module jump table at +$20, init at +$2A) before the loader code
+MANY_LBA = 40
+MANY_BASES = (0x080000, 0x090000, 0x0A0000, 0x0B0000)
+
+
+MANY = {"groups": 4, "nops": 0}   # set per build from the options: Word RAM bases in use, and a fixed NOP count per module (0 = 1..5 by k)
+
+
+def many_base(k):
+    return MANY_BASES[k % MANY["groups"]]
+
+
+def many_module(k):
+    """Module k: a marker word and a count into the result slots of module A, a few NOPs, RTS; seeded filler to one sector."""
+    m = F.Asm(many_base(k))
+    m.move("w", F.imm(0xA000 + k), F.absl(MARK["A"]))
+    m.quick("add", "w", 1, F.absl(COUNT["A"]))
+    if MANY["nops"]:   # distinct, seeded code per module (identical bytes at one address would share one compiled variant)
+        body = random.Random(0x5100 + k)
+        for _ in range(MANY["nops"]):
+            m.move("w", F.imm(body.randrange(0x10000)), F.d(1))
+    else:
+        for _ in range(k % 5 + 1):
+            m.nop()
+    m.rts()
+    code = m.assemble()
+    rng = random.Random(0x3A00 + k)
+    return code + bytes(rng.randrange(256) for _ in range(2048 - len(code))), len(code)
+
+
+COMPUTED_ROUTINE = 0x400   # SEG-098-T004: module B's second routine, reachable only through JMP (A0) with A0 loaded by LEA (a computed transfer the hull traversal does not follow)
+COMPUTED_MARKER = 0xB2B2
+
+
+def computed_sector():
+    m = F.Asm(WORD_RAM)
+    m.move("w", F.imm(0xBBBB), F.absl(MARK["B"]))
+    m.quick("add", "w", 1, F.absl(COUNT["B"]))
+    m.lea(F.absl(WORD_RAM + COMPUTED_ROUTINE), 0)
+    m.w(0x4ED0)                                           # JMP (A0)
+    head = m.assemble()
+    r = F.Asm(WORD_RAM + COMPUTED_ROUTINE)
+    r.move("w", F.imm(COMPUTED_MARKER), F.absl(MARK["B"]))
+    r.rts()
+    routine = r.assemble()
+    body = head + bytes(COMPUTED_ROUTINE - len(head)) + routine
+    return body + bytes(2048 - len(body)), len(head)
+
+
 MARK = {"A": F.SUB_DATA + 0x20, "B": F.SUB_DATA + 0x22, "C": F.SUB_DATA + 0x24}
 COUNT = {"A": F.SUB_DATA + 0x30, "B": F.SUB_DATA + 0x32, "C": F.SUB_DATA + 0x34}
 MARKER = {"A": 0xAAAA, "B": 0xBBBB, "C": 0xCCCC}
@@ -225,8 +273,11 @@ def sector(kind, variant=None, helper=0, pi_base=BASES_C[0]):
 def build(options):
     case = options.get("unvisited_case", "base")
     assert case in CASES, case
-    dispatch = case in ("dispatch", "dispatch_unknown")                                      # SEG-098-T003 (ADR 0212): every module is reached through a PC-relative offset-table dispatcher
-    table = case in ("table_header", "dispatch", "dispatch_unknown") or bool(options.get("sp_table"))   # SEG-098-T002: the authentic-style SP header + module jump table, with any case
+    MANY["groups"] = int(options.get("many_groups", 4))
+    MANY["nops"] = int(options.get("many_nops", 0))
+    many = int(options.get("many", 0))                                  # SEG-098-T004: N distinct modules behind the dispatcher, over 4 Word RAM bases (overlay depth N/4)
+    dispatch = many > 0 or case in ("dispatch", "dispatch_unknown")                                      # SEG-098-T003 (ADR 0212): every module is reached through a PC-relative offset-table dispatcher
+    table = many > 0 or case in ("table_header", "dispatch", "dispatch_unknown", "computed_entry") or bool(options.get("sp_table"))   # SEG-098-T002: the authentic-style SP header + module jump table, with any case
     bios = bool(options.get("bios"))                                    # SEG-098-T002: a BIOS-image profile boot: the BIOS starts the sub, so the IP does not
     sub = (PiAsm if dispatch else F.Asm)(F.SP_BASE + (SP_TABLE_PREFIX if table else 0))
 
@@ -271,12 +322,38 @@ def build(options):
     sub.btst(0, F.absl(F.GA_SUB + 0x03))
     sub.bcc("ne", "w_own")
     sub.move("b", F.absl(F.GA_SUB + 0x0E), F.d(0))        # the choice made by the player (main reads the pad)
-    sub.immop("cmp", "b", 2, F.d(0))
-    sub.bcc("eq", "pick_b")
-    sub.immop("cmp", "b", 3, F.d(0))
-    sub.bcc("eq", "pick_c")
+    if many:
+        for k in range(many):
+            sub.immop("cmp", "b", k + 1, F.d(0))
+            sub.bcc("eq", "arm%d" % k)
+        sub.bra("arm0")
+    else:
+        sub.immop("cmp", "b", 2, F.d(0))
+        sub.bcc("eq", "pick_b")
+        sub.immop("cmp", "b", 3, F.d(0))
+        sub.bcc("eq", "pick_c")
 
-    if dispatch:   # each arm calls the dispatcher with a constant selector; the handlers hold what the direct arms hold
+    if many:
+        for k in range(many):
+            sub.label("arm%d" % k)
+            sub.moveq(k, 0)
+            sub.bsr("dispatch")
+            sub.bra("done")
+        sub.label("dispatch")
+        sub.alu("add", "w", F.d(0), 0)
+        sub.move_w_pc_index("dsp_tab", 0, 0)
+        sub.jsr_pc_index(0, "dsp_jx")
+        sub.rts()
+        sub.label("dsp_tab")
+        for k in range(many):
+            sub.table_word("h%d" % k, "dsp_jx")
+        for k in range(many):
+            sub.label("h%d" % k)
+            args(MANY_LBA + k, many_base(k))
+            sub.bsr("load_sector")
+            sub.jsr(F.absl(many_base(k)))
+            sub.rts()
+    elif dispatch:   # each arm calls the dispatcher with a constant selector; the handlers hold what the direct arms hold
         sub.label("pick_a")
         sub.moveq(0, 0)
         sub.bsr("dispatch")
@@ -443,6 +520,11 @@ def build(options):
         F.main_start_sub(main, F.SP_BASE + (SP_TABLE_PREFIX if table else 0))
     F.wait_flag(main, F.GA_MAIN + 0x0F, 1, "w_ready")
     main.moveq(1, 1)                                       # default: module A
+    if many:                                               # the machine input selects module k as d7 = k + 1 (0 = the first module)
+        main.tst("w", F.d(7))
+        main.bcc("eq", "go")
+        main.move("w", F.d(7), F.d(1))
+        main.bra("go")
     main.immop("cmp", "w", 2, F.d(7))                      # the runtime input: the machine input main:d7 (this profile has no controller port)
     main.bcc("ne", "not_b")
     main.moveq(2, 1)
@@ -489,6 +571,16 @@ def build(options):
             labels[kind] = [o + (HEADER if kind == "A" else 0) for o in module_code.starts]
     expected["labels"] = {"boot_ip": [pc - F.IP_BASE for pc in main.starts], "boot_sp": [pc - F.SP_BASE for pc in sub.starts],
                           "lba%d" % LBA["A"]: labels["A"], "lba%d" % LBA["B"]: labels["B"], "lba%d" % LBA["C"]: labels["C"]}
+    if case == "computed_entry":
+        sectors[LBA["B"]], head = computed_sector()
+        expected["modules"]["B"]["range"] = [0, head]
+        expected["computed"] = {"routine_offset": COMPUTED_ROUTINE, "marker": COMPUTED_MARKER}
+    if many:
+        expected["many"] = []
+        for k in range(many):
+            data, length = many_module(k)
+            sectors[MANY_LBA + k] = data
+            expected["many"].append({"k": k, "lba": MANY_LBA + k, "base": many_base(k), "range": [0, length], "marker": 0xA000 + k})
     if variant is not None:
         _, data_offset = module_code_pi(BASES_C[0], helper, variant)
         expected["pi"] = {"sum_low16": sum(base + data_offset for base in BASES_C) & 0xFFFF, "w2": PI_TAB[1], "w1": PI_DATA_WORD,
