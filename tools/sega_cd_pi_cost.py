@@ -12,24 +12,12 @@ import argparse
 import json
 import pathlib
 import re
-import resource
 import shutil
 import statistics
 import subprocess
 import sys
 import tempfile
 import time
-
-
-def measured(args, **kw):
-    """(returncode, stdout, cpu seconds, peak RSS KiB, wall seconds) of one child, with the peak taken from this child alone."""
-    wrapper = ("import resource,subprocess,sys,time,json\n"
-               "t=time.time(); p=subprocess.run(sys.argv[1:],capture_output=True,text=True); w=time.time()-t\n"
-               "r=resource.getrusage(resource.RUSAGE_CHILDREN)\n"
-               "print(json.dumps({'rc':p.returncode,'out':p.stdout,'err':p.stderr[-2000:],'cpu':r.ru_utime+r.ru_stime,'rss':r.ru_maxrss,'wall':w}))\n")
-    out = subprocess.run([sys.executable, "-c", wrapper, *map(str, args)], capture_output=True, text=True, **kw)
-    d = json.loads(out.stdout)
-    return d["rc"], d["out"], d["cpu"], d["rss"], d["wall"], d["err"]
 
 
 def main():
@@ -43,6 +31,7 @@ def main():
     root = pathlib.Path(args.root).resolve()
     sys.path.insert(0, str(root / "tests"))
     import sega_cd_common as common
+    measured = common.measured
     ks = [int(k) for k in args.ks.split(",")]
     result = {"schema": 1, "fixture": "unvisited/pi", "rows": []}
     with tempfile.TemporaryDirectory(prefix="scd-pi-cost-") as tmp:

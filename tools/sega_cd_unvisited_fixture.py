@@ -61,33 +61,44 @@ def module_code(kind, base):
     m.nop()
     m.moveq({"A": 4, "B": 5, "C": 6}[kind], 1)
     m.rts()
-    return m.assemble()
+    code = m.assemble()
+    module_code.starts = [pc - base for pc in m.starts]   # the encoder's own instruction starts (offsets in the code; the test oracle's labels)
+    return code
 
 
 class PiAsm(F.Asm):
     """The shared encoder plus the PC-relative and byte-displacement forms the source-relative matrix needs."""
 
+    def mark(self):
+        if not self.starts or self.starts[-1] != self.pc:
+            self.starts.append(self.pc)
+
     def lea_pc(self, label, an):
+        self.mark()
         self.w(0x41FA | (an << 9))
         self.fixups.append((len(self.words), label, "rel16"))
         self.w(0)
 
     def move_w_pc(self, label, dn):
+        self.mark()
         self.w(0x303A | (dn << 9))
         self.fixups.append((len(self.words), label, "rel16"))
         self.w(0)
 
     def move_w_pc_index(self, label, xn, dn):  # move.w label(pc,xn.w),dn  (brief extension word, d8 resolved by the assembler)
+        self.mark()
         self.w(0x303B | (dn << 9))
         self.fixups.append((len(self.words), label, "rel8w"))
         self.w(xn << 12)
 
     def jsr_pc(self, label):
+        self.mark()
         self.w(0x4EBA)
         self.fixups.append((len(self.words), label, "rel16"))
         self.w(0)
 
     def bcc_s(self, cond, label):
+        self.mark()
         self.w(0x6000 | (F.COND[cond] << 8))
         self.fixups.append((len(self.words) - 1, label, "rel8"))
 
@@ -121,6 +132,7 @@ def module_code_pi(base, helper, variant):
         m.quick("add", "l", 1, F.a(0))
         m.move("w", ("ind", 0), F.d(0))                    # an odd-address word read: the address-error path
     if variant == "escape":
+        m.mark()
         m.w(0x4EF9)                                      # jmp $0B8000: outside every admitted image
         m.lw(0x0B8000)
     m.lea_pc("data", 0)
@@ -148,14 +160,17 @@ def module_code_pi(base, helper, variant):
     m.bcc_s("ne", "bad")
     m.jsr_pc("jtarget")
     m.lea_pc("target", 1)
+    m.mark()
     m.w(0x4ED1)                                          # jmp (a1)
     m.nop()
     m.nop()
     m.label("target")
     m.quick("add", "w", 1, F.absl(PI["W4"]))
     m.jsr(F.absl(helper))
+    m.mark()
     m.w(0x4E40)                                          # trap #0
     m.moveq(1, 0)
+    m.mark()
     m.w(0x80FC)                                          # divu.w #0,d0  (vector 5)
     m.w(0)
     m.label("bad")
@@ -170,7 +185,9 @@ def module_code_pi(base, helper, variant):
     m.w(PI_DATA_WORD)
     m.label("tab")
     m.w(*PI_TAB)
-    return m.assemble(), m.labels["data"] - base
+    code = m.assemble()
+    module_code_pi.starts = [pc - base for pc in m.starts]   # offsets of the instructions of the last call (the test oracle)
+    return code, m.labels["data"] - base
 
 
 def sector(kind, variant=None, helper=0, pi_base=BASES_C[0]):
@@ -384,6 +401,16 @@ def build(options):
         "data_sector": LBA["D"], "decoy_sector": LBA["X"], "layout": layout,
         "markers": {k: MARKER[k] for k in "ABC"},
     }
+    labels = {}
+    for kind in "ABC":
+        if variant is not None and kind == "C":
+            module_code_pi(BASES_C[0], helper, variant)
+            labels[kind] = list(module_code_pi.starts)
+        else:
+            module_code(kind, WORD_RAM + (HEADER if kind == "A" else 0))
+            labels[kind] = [o + (HEADER if kind == "A" else 0) for o in module_code.starts]
+    expected["labels"] = {"boot_ip": [pc - F.IP_BASE for pc in main.starts], "boot_sp": [pc - F.SP_BASE for pc in sub.starts],
+                          "lba%d" % LBA["A"]: labels["A"], "lba%d" % LBA["B"]: labels["B"], "lba%d" % LBA["C"]: labels["C"]}
     if variant is not None:
         _, data_offset = module_code_pi(BASES_C[0], helper, variant)
         expected["pi"] = {"sum_low16": sum(base + data_offset for base in BASES_C) & 0xFFFF, "w2": PI_TAB[1], "w1": PI_DATA_WORD,

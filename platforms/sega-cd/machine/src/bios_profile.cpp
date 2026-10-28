@@ -139,6 +139,7 @@ std::uint32_t prefetch_position(const M68kDecodedInstruction &d, std::uint32_t p
 std::string identity_text(const DiscImage &disc, const BiosProfileInputs &inputs, std::size_t admissions) {
   std::ostringstream t;
   t << kSegaCdBiosGeneratorVersion << "\ndisc " << disc.identity() << "\nbios " << inputs.bios.sha256 << "\n";
+  if (!inputs.aot_policy.empty()) t << "aot experimental_m3 " << inputs.aot_policy << "\n";  // absent for Compatibility: its identity is unchanged
   for (const auto &c : inputs.copies)
     t << "copy " << processor_name(c.processor) << " " << c.base << " " << c.rom_offset << " " << c.length << "\n";
   for (const auto &d : inputs.disc_images)  // SEG-064-T004: the extent's coordinates and a digest of its bytes (a different disc is a different program)
@@ -221,7 +222,65 @@ bool valid_partition_window(std::uint32_t window) noexcept {
   return window >= kMinPartitionWindow && window <= kMaxPartitionWindow && (window & (window - 1U)) == 0U;
 }
 
+namespace {
+
+// What the selective pass hands the emission loop: the validated proposal of each image (by index into the emission's image list).
+struct SelectiveState {
+  const SelectiveAdmissionRequest *request = nullptr;  // non-null: apply the producer's proposals
+  SelectiveAdmissionOutcome outcome;
+  std::map<std::size_t, std::vector<std::pair<std::uint32_t, std::uint32_t>>> ranges;
+  std::map<std::size_t, std::set<std::uint32_t>> admitted;  // distinct source offsets compiled, by image index (always tracked)
+};
+
+BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInputs &inputs, const BiosProfileEmitOptions &options, SelectiveState &selective);
+
+}  // namespace
+
 BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosProfileInputs &inputs, const BiosProfileEmitOptions &options) {
+  if (options.selective == nullptr || !options.selective->propose) {
+    SelectiveState none;
+    return emit_bios_once(disc, inputs, options, none);
+  }
+  // Experimental selective admission (ADR 0208): the selective emission first; on any failure (or an emission error) the broad emission, and the reason.
+  SelectiveState attempt;
+  attempt.request = options.selective;
+  auto selective = emit_bios_once(disc, inputs, options, attempt);
+  SelectiveState broad_state;
+  auto broad = emit_bios_once(disc, inputs, options, broad_state);
+  attempt.outcome.requested = true;
+  if (selective.error != BiosProfileError::none && attempt.outcome.reason == "none") attempt.outcome.reason = "validator_rejected:emission_" + std::string(bios_profile_error_name(selective.error));
+  if (broad.error != BiosProfileError::none || !attempt.outcome.admitted || selective.error != BiosProfileError::none) {
+    broad.admission = attempt.outcome;
+    broad.admission.requested = true;
+    broad.admission.admitted = false;
+    if (broad.admission.reason == "none") broad.admission.reason = "validator_rejected:unclassified";
+    return broad;
+  }
+  // Counts: per image, the broad emission's distinct compiled offsets against the selective one's.
+  auto &outcome = selective.admission = attempt.outcome;
+  std::vector<std::pair<std::string, std::vector<std::uint32_t>>> rows;
+  outcome.broad_entries = outcome.admitted_entries = 0;
+  for (std::size_t i = 0; i < outcome.images.size(); ++i) {
+    outcome.images[i].broad_entries = static_cast<std::uint32_t>(broad_state.admitted[i].size());
+    outcome.images[i].admitted_entries = static_cast<std::uint32_t>(attempt.admitted[i].size());
+    outcome.broad_entries += outcome.images[i].broad_entries;
+    outcome.admitted_entries += outcome.images[i].admitted_entries;
+    rows.emplace_back(std::string(processor_name(outcome.images[i].processor)) + ":" + outcome.images[i].name,
+                      std::vector<std::uint32_t>(attempt.admitted[i].begin(), attempt.admitted[i].end()));
+  }
+  if (outcome.admitted_entries == 0U && outcome.broad_entries != 0U) {
+    broad.admission = outcome;
+    broad.admission.admitted = false;
+    broad.admission.reason = "validator_rejected:nothing_admitted";
+    return broad;
+  }
+  outcome.k_sha256 = admitted_set_digest(rows);
+  return selective;
+}
+
+namespace {
+
+BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInputs &inputs, const BiosProfileEmitOptions &options, SelectiveState &selective) {
   BiosProfileEmission result;
   const auto fail = [&](BiosProfileError error, std::size_t index) {
     result.error = error;
@@ -338,7 +397,36 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
     }
   }
 
-  // ---- broad admission and lowering ----
+  // ---- experimental selective admission (ADR 0208): one proposal per IMAGE, validated; any failure ends this attempt (the caller emits broad) ----
+  const bool apply = selective.request != nullptr;
+  if (apply) {
+    auto &outcome = selective.outcome;
+    for (std::size_t index = 0; index < images.size(); ++index) {
+      const auto &image = images[index];
+      std::vector<std::uint32_t> seeds;
+      if (index == 0U && inputs.bios.reset_pc < image.bytes.size()) seeds.push_back(inputs.bios.reset_pc);  // the BIOS image's reset entry: certain code
+      RegionProposal proposal = selective.request->propose(image.bytes, seeds);
+      ImageAdmissionReport report;
+      report.processor = image.processor;
+      report.name = image.name;
+      report.image_id = static_cast<std::uint32_t>(index + 1U);
+      report.source_bytes = static_cast<std::uint32_t>(image.bytes.size());
+      report.units = proposal.units;
+      report.selected = proposal.selected;
+      report.seed_units = proposal.seed_units;
+      for (const auto &[b, e] : proposal.ranges) report.proposed_bytes += e - b;
+      outcome.images.push_back(report);
+      const std::string error = validate_region_proposal(proposal, static_cast<std::uint32_t>(image.bytes.size()), seeds);
+      if (!error.empty()) {
+        outcome.reason = error;
+        outcome.failed_image = std::string(processor_name(image.processor)) + ":" + image.name;
+        return result;
+      }
+      selective.ranges[index] = std::move(proposal.ranges);
+    }
+  }
+
+  // ---- broad admission and lowering (or, when `apply`, only the proposed aligned starts) ----
   std::map<std::uint32_t, std::vector<Variant>> variants[2];
   for (std::size_t index = 0; index < images.size(); ++index) {
     const auto &image = images[index];
@@ -352,6 +440,10 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
     stats.start = image.base;
     stats.length = static_cast<std::uint32_t>(image.bytes.size());
     for (std::uint32_t offset = 0; offset + 2U <= image.bytes.size(); offset += 2U) {
+      if (apply && !ranges_contain(selective.ranges[index], offset)) {  // outside the proposal: never decoded, never compiled
+        ++stats.omitted;
+        continue;
+      }
       const std::uint32_t pc = image.base + offset;
       const DecodeSource source{CpuVariant::mc68000, M68kProgramAddress{TargetAddressSpace::m68k_program, pc}, MoveqImageOffset{offset}};
       const auto decoded = decode_m68k_instruction(std::span<const std::uint8_t>(image.bytes), source, M68kDecodeProfile::general_startup);
@@ -373,6 +465,7 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
         }
       }
       ++(ok ? stats.compiled : stats.rejected);
+      if (ok) selective.admitted[index].insert(offset);
     }
     result.images.push_back(std::move(stats));
   }
@@ -579,7 +672,10 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
       << "\", {0}},\n  UINT32_C(0x" << hex(inputs.bios.reset_ssp) << "),\n  \"" << result.program_identity << "\"\n};\n\n"
       << "int main(int argc, char **argv) { return scd_program_main_bios(&scd_program, &scd_bios_profile, argc, argv); }\n";
   result.c_source = out.str();
+  if (apply) selective.outcome.admitted = true;
   return result;
 }
+
+}  // namespace
 
 }  // namespace segarecomp::machine::sega_cd

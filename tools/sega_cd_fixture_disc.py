@@ -85,6 +85,7 @@ class Asm:
         self.words = []
         self.labels = {}
         self.fixups = []  # (word index, label, kind)
+        self.starts = []  # SEG-096-T003: the address of every instruction the encoder emitted (an independent label set; raw `w()` words are not instructions)
 
     @property
     def pc(self):
@@ -244,6 +245,23 @@ class Asm:
                 assert -0x8000 <= disp < 0x8000, label
                 self.words[index] = disp & 0xFFFF
         return b"".join(struct.pack(">H", w) for w in self.words)
+
+
+def _record_starts(cls, names):
+    """Wrap the instruction methods so the encoder records where each instruction begins (the fixture's own ground truth, independent of any decoder)."""
+    for name in names:
+        method = getattr(cls, name)
+
+        def wrapped(self, *args, _method=method, **kwargs):
+            if not self.starts or self.starts[-1] != self.pc:
+                self.starts.append(self.pc)
+            return _method(self, *args, **kwargs)
+        wrapped.__name__ = name
+        setattr(cls, name, wrapped)
+
+
+_record_starts(Asm, ("move", "moveq", "lea", "alu", "eor", "quick", "immop", "tst", "clr", "btst", "bcc", "bsr", "dbra", "lsl_w", "lsr_w", "mulu",
+                     "move_sr", "stop", "rts", "rte", "nop", "jsr"))
 
 
 def absl(addr):

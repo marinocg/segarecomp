@@ -4,6 +4,7 @@ add_library(segarecomp_machine_sega_cd
   src/boot_images.cpp
   src/modules.cpp
   src/loader_scan.cpp
+  src/selective_admission.cpp
   src/program.cpp
   src/emit_shared.cpp
   src/bios_profile.cpp

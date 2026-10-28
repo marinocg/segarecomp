@@ -31,6 +31,7 @@
 #include "segarecomp/disc.hpp"
 #include "segarecomp/machine/sega_cd/boot_images.hpp"
 #include "segarecomp/machine/sega_cd/epoch_recipe.hpp"
+#include "segarecomp/machine/sega_cd/selective_admission.hpp"
 #include "segarecomp/recompiler/executable_image.hpp"
 
 namespace segarecomp::machine::sega_cd {
@@ -104,6 +105,7 @@ struct BiosProfileInputs {
   std::vector<DiscImageSpec> disc_images;     // SEG-064-T004
   std::uint32_t application_entry{};          // SEG-064-T004: the main address whose first execution ends the run (0 = none)
   std::vector<Admission> admissions;  // in admission order
+  std::string aot_policy;                     // SEG-096-T003: the policy identity of an experimental request ("" = Compatibility); enters the program identity
 };
 
 enum class BiosProfileError : std::uint8_t {
@@ -128,6 +130,7 @@ struct BiosProfileImageStats {
   std::uint32_t length{};
   std::uint32_t compiled{};   // aligned starts admitted as compiled entries
   std::uint32_t rejected{};   // aligned starts the CPU owner does not decode, lift or lower (no entry)
+  std::uint32_t omitted{};    // SEG-096-T003: aligned starts outside the (validated) selective proposal, never decoded
 };
 
 // SEG-064-T003: deterministic translation-unit partitioning. A window of 0 emits the single translation unit of SEG-064-T002
@@ -142,6 +145,10 @@ inline constexpr std::uint32_t kMaxPartitionWindow = 0x01000000U;
 
 struct BiosProfileEmitOptions {
   std::uint32_t partition_window{};
+  // SEG-096-T003 (ADR 0208): the experimental selective admission. The producer scores each image's bytes once; aligned starts outside its validated
+  // proposal are not compiled. Any failure emits the broad program (this call) and reports the reason in `BiosProfileEmission::admission`. The caller
+  // must also set `BiosProfileInputs::aot_policy` to the same policy identity so the program identity (and the admission provenance chain) carries it.
+  const SelectiveAdmissionRequest *selective = nullptr;
 };
 
 struct BiosProfileUnit {
@@ -164,6 +171,7 @@ struct BiosProfileEmission {
   std::uint32_t variant_pcs[2]{};    // PCs with more than one distinct compiled instruction (selected by live bytes)
   std::uint32_t deduplicated{};      // identical variants merged at emission
   std::uint32_t templates{};
+  SelectiveAdmissionOutcome admission;
   BiosProfileError error{BiosProfileError::none};
   std::uint32_t error_index{};       // the failing copy/admission
   ImageValidationError validation{ImageValidationError::none};

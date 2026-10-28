@@ -53,6 +53,8 @@ struct Options {
   unsigned jobs = 0, pass_timeout = 900, compile_timeout = 1800;
   std::uint64_t budget = 300000000ULL, until_tick = 0;
   std::string optimize = "1";
+  std::string aot_policy = "compatibility";   // SEG-096-T003 (ADR 0208): `optimized` (experimental) selects the frozen gen2 M3 + B35 proposal
+  bool aot_model_given = false;
 };
 
 struct Failure {
@@ -173,7 +175,13 @@ class Builder {
           history_ += ",\"admitted\":\"template\"}";
           continue;
         }
-        const auto spec = resolve(capture_text, cpu, pc, extents_.size());
+        auto spec = resolve(capture_text, cpu, pc, extents_.size());
+        // An extent that is already admitted explains nothing new: the program stopped inside bytes it has authority for but did not compile (an
+        // experimental selective policy omits code on purpose), so the stop is the frontier, not a reason to admit the same bytes again.
+        if (spec.extent && std::find(extents_.begin(), extents_.end(), *spec.extent) != extents_.end()) {
+          spec.extent.reset();
+          spec.refusal = "uncompiled_entry_in_admitted_extent";
+        }
         if (spec.extent) {
           extents_.push_back(*spec.extent);
           admits.push_back("extent:" + program_identity + ":" + *spec.extent);
@@ -224,7 +232,8 @@ class Builder {
     out << "{\"status\":\"ok\",\"program\":\"" << exe.filename().string() << "\",\"viewer_program\":" << (viewer_path.empty() ? "null" : "\"" + viewer_path + "\"")
         << ",\"program_identity\":\"" << program_identity << "\",\"bios_sha256\":\"" << bios_sha_ << "\",\"rounds\":" << rounds << ",\"extents\":[";
     for (std::size_t i = 0; i < extents_.size(); ++i) out << (i ? "," : "") << "\"" << extents_[i] << "\"";
-    out << "],\"frontier\":" << (frontier_.empty() ? "null" : frontier_) << ",\"result\":\"" << raw_value(report, "result").value_or("") << "\",\"stop\":\"" << stop_class(report)
+    out << "],\"aot_policy\":" << (aot_policy_json_.empty() ? "null" : aot_policy_json_) << ",\"frontier\":" << (frontier_.empty() ? "null" : frontier_)
+        << ",\"result\":\"" << raw_value(report, "result").value_or("") << "\",\"stop\":\"" << stop_class(report)
         << "\",\"viewer\":" << (o_.viewer ? "true" : "false") << ",\"history\":[" << history_ << "]}\n";
     std::ofstream(o_.output / "status.json", std::ios::binary | std::ios::trunc) << out.str();
     std::cout << "@result ok" << std::endl;
@@ -381,12 +390,17 @@ class Builder {
     fs::remove_all(src, ec);
     fs::create_directories(src, ec);
     std::vector<std::string> cmd{self_, "sega-cd", "emit", "--cue", o_.cue.string(), "--bios", o_.bios.string(), "--out", (src / "program.c").string(), "--partition-window", "8192"};
+    if (o_.aot_policy == "optimized") cmd.insert(cmd.end(), {"--aot-policy", "optimized", "--aot-model", "gen2"});
     for (const auto &a : admits) { cmd.push_back("--admit"); cmd.push_back(a); }
     const fs::path out = o_.output / "emit.json";
     if (run_process(cmd, out, {}, o_.compile_timeout) != 0) return Failure{"generate", "the program could not be generated: " + read_text(out, 4096)};
     const std::string text = read_text(out);
     if (raw_value(text, "ok").value_or("") != "true") return Failure{"generate", "the program could not be generated: " + text.substr(0, 300)};
     identity = raw_value(text, "program_identity").value_or("");
+    if (const auto at = text.find("\"aot_policy\":"); at != std::string::npos) {  // the last member of the report: the object up to the report's closing brace
+      const auto begin = at + 13U, end = text.rfind('}');
+      if (end != std::string::npos && end > begin) aot_policy_json_ = text.substr(begin, end - begin);
+    }
     unit_names_.clear();   // the emitter's order is the link order
     const auto units = text.find("\"units\":[");
     const auto units_end = units == std::string::npos ? units : text.find("],\"processors\"", units);
@@ -561,6 +575,7 @@ class Builder {
   std::atomic<unsigned> counter_{0};
   std::vector<std::string> extents_;
   std::vector<std::string> unit_names_;
+  std::string aot_policy_json_;   // SEG-096-T003: the last emission's machine-readable aot_policy object (status.json)
   std::vector<fs::path> unit_sources_, unit_objects_, runtime_objects_;
 };
 
@@ -592,12 +607,15 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--input-script") o.input_script = value;
     else if (key == "--backup-ram") o.backup_ram = value;
     else if (key == "--optimize" && (value == "0" || value == "1" || value == "2")) o.optimize = value;
+    else if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) o.aot_policy = value;
+    else if (key == "--aot-model" && value == "gen2" && !o.aot_model_given) o.aot_model_given = true;
     else {
       std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
       return 2;
     }
   }
-  if (!have_cue || !have_bios || !have_output || !have_runtime || o.cc.empty() || o.budget == 0 || (argc - 3) % 2 != 0) {
+  if (!have_cue || !have_bios || !have_output || !have_runtime || o.cc.empty() || o.budget == 0 || (argc - 3) % 2 != 0 ||
+      (o.aot_model_given && o.aot_policy != "optimized")) {
     std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
     return 2;
   }
