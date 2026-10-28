@@ -1294,6 +1294,13 @@ target_link_libraries(sega_cd_selective_admission_test PRIVATE segarecomp::machi
 segarecomp_enable_warnings(sega_cd_selective_admission_test)
 add_test(NAME sega_cd_selective_admission_test COMMAND sega_cd_selective_admission_test)
 set_property(TEST sega_cd_selective_admission_test APPEND PROPERTY LABELS full fast)
+# SEG-096-T004 (ADR 0209): the Genesis ROM-to-work-RAM copy alias (ADR 0049) against the source-relative derivation shared with Sega CD.
+add_executable(genesis_source_relative_reuse_tool genesis_source_relative_reuse_tool.cpp)
+target_link_libraries(genesis_source_relative_reuse_tool PRIVATE segarecomp::machine_genesis segarecomp::codegen_c11_genesis segarecomp::codegen_c11)
+segarecomp_enable_warnings(genesis_source_relative_reuse_tool)
+add_test(NAME genesis_source_relative_reuse_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_source_relative_reuse_test.py $<TARGET_FILE:genesis_source_relative_reuse_tool> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_source_relative_reuse_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_experimental_m3_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_experimental_m3_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_experimental_m3_test APPEND PROPERTY LABELS full fast)

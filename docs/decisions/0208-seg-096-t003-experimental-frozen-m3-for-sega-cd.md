@@ -77,7 +77,7 @@ committed; they showed the stop at an uncompiled entry and the S2 reduction qual
 ## Result
 
 Run: `tests/sega_cd_experimental_m3_test.py` (38 checks, real native model, CI test `sega_cd_experimental_m3_test`), `tests/sega_cd_selective_admission_test.cpp` (fake
-producer, 27 checks), `tests/sega_cd_unvisited_discovery_test.py`, `apps/segarecomp-launcher/launcher_sega_cd_test.cpp` (policy rows) and
+producer), `tests/sega_cd_unvisited_discovery_test.py`, `apps/segarecomp-launcher/launcher_sega_cd_test.cpp` (policy rows) and
 `launcher_sega_cd_flow_test.py` (an experimental build through the launcher). Figures are from one local run on project-authored fixtures (GCC, Linux, `-O1`);
 CPU/memory figures are noisy at this scale.
 
@@ -97,8 +97,7 @@ CPU/memory figures are noisy at this scale.
 
 The 4 labelled starts of module C that arm A also misses are dead instructions after an unconditional branch / indirect jump: the encoder labels them, the
 static traversal rightly does not reach them. Module C (two mappings) is scored **once** (one policy-report row) and its admitted offsets are identical for both
-mappings. Arms A and B run every route identically (the ADR 0207 result); B and C compile 35 % fewer bodies than A per ADR 0207's sharing, and C a further 23 % fewer
-than B.
+mappings. Arms A and B run every route identically (the ADR 0207 result); B compiles 14 % fewer bodies than A (214 against 249, the ADR 0207 sharing of module C's two mappings) and C a further 23 % fewer than B (164).
 
 **S2** - the BIOS-image profile fixture `direct` (a 16 KiB BIOS-like image and one disc extent), the launcher's own build route (`segarecomp sega-cd build`):
 
@@ -122,7 +121,7 @@ claim and the unchanged identity of the request. The real model never failed on 
   frozen identities, reports a truthful effective policy, never expands image authority, preserves the byte guards and the typed stops, scores each image once, and
   leaves Genesis policies, weights and identities untouched (the Genesis `aot-policy-identity` output is pinned in the test). No runtime ML and no runtime code
   generation exist.
-- **`NOT_PROMOTED`**: the complete-recall gate fails, as ADR 0140 predicted and as registered: M3 + B35 omitted 50 labelled starts of the 144-byte-scale IP/SP and every
+- **`NOT_PROMOTED`**: the complete-recall gate fails, as ADR 0140 predicted and as registered: M3 + B35 omitted 50 labelled starts of the small IP (158 bytes) and SP (716 bytes) and every
   route of the fixture ends at an uncompiled entry that the broad build compiles. On the BIOS-image fixture it cuts build CPU by about two thirds while the program
   stops at its first omitted entry. This is a build-size saving that costs correctness of the route, on a fixture where there is no size problem to solve (ADR 0140:
   no compile-size/time problem exists for the Sega CD module programs). It is **not** a default, not a correctness authority and not a claim that M3 is safe for
