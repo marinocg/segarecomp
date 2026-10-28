@@ -89,6 +89,7 @@ def main():
         cue, bios = fx / "disc" / "disc.cue", fx / "bios.bin"
         done, st = native(tmp / "f-bios", cue, tmp / "missing.bin")
         check(done.returncode != 0 and st and st["status"] == "failed" and st["stage"] == "setup", "an unreadable BIOS fails at setup, typed")
+        check(st["inventory"]["status"] == "blocked" and st["inventory"]["barriers"] == ["build_failed:setup"], "a failed build reports a `blocked` inventory with the failure stage")
         done, st = native(tmp / "f-runtime", cue, bios, runtime=tmp / "nowhere")
         check(done.returncode != 0 and st and st["stage"] == "setup" and "runtime" in st["message"], "a missing runtime tree fails at setup, typed")
         done, st = native(tmp / "f-cc", cue, bios, cc=str(tmp / "no-such-compiler"))
