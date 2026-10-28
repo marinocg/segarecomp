@@ -25,10 +25,15 @@ EXE = ".exe" if os.name == "nt" else ""
 
 def measured(args, **kw):
     """(returncode, stdout, cpu seconds, peak RSS KiB, wall seconds, stderr tail) of one child, with the peak taken from this child alone."""
-    wrapper = ("import resource,subprocess,sys,time,json\n"
+    # `resource` does not exist on Windows: there the CPU figure is the wall time and the peak memory is 0 (unmeasured); the figures are evidence only, never asserted.
+    wrapper = ("import subprocess,sys,time,json\n"
+               "try:\n"
+               "    import resource\n"
+               "except ImportError:\n"
+               "    resource = None\n"
                "t=time.time(); p=subprocess.run(sys.argv[1:],capture_output=True,text=True); w=time.time()-t\n"
-               "r=resource.getrusage(resource.RUSAGE_CHILDREN)\n"
-               "print(json.dumps({'rc':p.returncode,'out':p.stdout,'err':p.stderr[-2000:],'cpu':r.ru_utime+r.ru_stime,'rss':r.ru_maxrss,'wall':w}))\n")
+               "r=resource.getrusage(resource.RUSAGE_CHILDREN) if resource else None\n"
+               "print(json.dumps({'rc':p.returncode,'out':p.stdout,'err':p.stderr[-2000:],'cpu':(r.ru_utime+r.ru_stime) if r else w,'rss':r.ru_maxrss if r else 0,'wall':w}))\n")
     out = subprocess.run([sys.executable, "-c", wrapper, *map(str, args)], capture_output=True, text=True, **kw)
     d = json.loads(out.stdout)
     return d["rc"], d["out"], d["cpu"], d["rss"], d["wall"], d["err"]
