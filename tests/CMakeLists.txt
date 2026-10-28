@@ -1280,6 +1280,14 @@ set_property(TEST sega_cd_modules_build_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_unvisited_discovery_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_unvisited_discovery_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_unvisited_discovery_test APPEND PROPERTY LABELS full fast)
+# SEG-096-T002 (ADR 0207): the source-relative text derivation, and the source-relative emitter against the per-mapping reference (reports equal).
+add_executable(source_relative_test source_relative_test.cpp)
+target_link_libraries(source_relative_test PRIVATE segarecomp::codegen_c11)
+segarecomp_enable_warnings(source_relative_test)
+add_test(NAME source_relative_test COMMAND source_relative_test)
+add_test(NAME sega_cd_source_relative_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_source_relative_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST source_relative_test sega_cd_source_relative_test APPEND PROPERTY LABELS full fast)
 # SEG-063-T001 Checkpoints C/D: overlay runtime harness; module A then module B at one address by CDC DMA and CPU copy; typed stops.
 # SEG-064-T002 (ADR 0142): the BIOS-image profile mechanism proof (synthetic image; bounded materialization fixed point; strict C11).
 add_test(NAME sega_cd_bios_profile_test COMMAND ${Python3_EXECUTABLE}

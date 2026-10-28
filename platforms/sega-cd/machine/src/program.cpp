@@ -1,6 +1,7 @@
 #include "segarecomp/machine/sega_cd/program.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <deque>
 #include <map>
@@ -9,6 +10,7 @@
 #include <sstream>
 
 #include "segarecomp/codegen/c11/m68k.hpp"
+#include "segarecomp/codegen/c11/source_relative.hpp"
 #include "segarecomp/cpu/m68k/control_successors.hpp"
 #include "segarecomp/cpu/m68k/decode.hpp"
 #include "segarecomp/cpu/m68k/ir.hpp"
@@ -104,12 +106,98 @@ Traversal traverse(const ProcessorImages &processor, const Unit &unit) {
 
 bool compiled_bytes(const Reached &reached) { return reached.operation.has_value(); }
 
+// ---- SEG-096-T002 (ADR 0207): source-relative bodies -------------------------------------------------------------------------------
+// One body per (image, source offset) of an image with several mappings. The body is the CPU lowering of the instruction, lowered at three
+// distinct sentinel PCs and reduced to a single text in which each PC-derived literal is `scd_pc0 + constant` (libs/codegen/c11/
+// source_relative.hpp); it runs under the actual guest PC the dispatcher selected and verifies the live bytes at that PC like every body.
+struct SharedBody {
+  std::string name;
+  std::vector<std::uint8_t> raw;
+  detail::LoweredInstruction lowered;
+  std::uint32_t instances{};
+};
+
+struct PiPlan {
+  std::map<std::pair<std::uint32_t, std::uint32_t>, SharedBody> shared;    // (image index, source offset)
+  std::map<std::pair<std::uint32_t, std::uint32_t>, std::string> refused;  // (image index, source offset) -> reason
+};
+
+std::optional<SharedBody> derive_shared_body(const Reached &reached, std::uint32_t offset, const SegaCdM68kRuntimeCEmitter &emitter,
+                                             const std::string &lookup_symbol, const std::string &name, std::string &reason) {
+  constexpr std::array<std::uint32_t, 3> kSentinel{0x00200000U, 0x00300000U, 0x00480000U};
+  const auto &raw = reached.decoded->raw_bytes;
+  // The decoder reads the instruction at the image offset it is given: a window holding exactly its bytes there.
+  std::vector<std::uint8_t> window(static_cast<std::size_t>(offset) + raw.size(), 0U);
+  std::copy(raw.begin(), raw.end(), window.begin() + offset);
+  std::array<std::uint32_t, 3> pcs{};
+  std::array<detail::LoweredInstruction, 3> lowered;
+  for (std::size_t i = 0; i < 3; ++i) {
+    pcs[i] = kSentinel[i] + offset;
+    const DecodeSource source{CpuVariant::mc68000, M68kProgramAddress{TargetAddressSpace::m68k_program, pcs[i]}, MoveqImageOffset{offset}};
+    const auto result = decode_m68k_instruction(window, source, M68kDecodeProfile::general_startup);
+    const auto *decoded = std::get_if<M68kDecodedInstruction>(&result);
+    if (decoded == nullptr || decoded->kind != reached.decoded->kind || decoded->raw_bytes != raw) {
+      reason = "redecode";
+      return std::nullopt;
+    }
+    const auto operation = lift_m68k_instruction(*decoded);
+    lowered[i] = detail::lower_instruction(operation, pcs[i], emitter, lookup_symbol);
+    if (!lowered[i].compiled) {
+      reason = "not_compiled";
+      return std::nullopt;
+    }
+  }
+  SharedBody body;
+  body.name = name;
+  body.raw = raw;
+  body.lowered.compiled = true;
+  const auto derive = [&](auto member, std::string &target) {
+    const auto derived = derive_source_relative_text({lowered[0].*member, lowered[1].*member, lowered[2].*member}, pcs, "scd_pc0");
+    if (derived.status != SourceRelativeStatus::ok) {
+      reason = source_relative_status_name(derived.status);
+      return false;
+    }
+    target = derived.text;
+    return true;
+  };
+  if (!derive(&detail::LoweredInstruction::slots, body.lowered.slots) || !derive(&detail::LoweredInstruction::body, body.lowered.body) ||
+      !derive(&detail::LoweredInstruction::timing, body.lowered.timing) ||
+      !derive(&detail::LoweredInstruction::refresh_skip, body.lowered.refresh_skip))
+    return std::nullopt;
+  return body;
+}
+
+// The generated function that serves (unit, pc): the shared body when the plan has one, else the unit's own.
+std::string function_name(const PiPlan &plan, const Unit &unit, std::uint32_t first_offset, std::uint32_t pc) {
+  const auto it = plan.shared.find({unit.image_index, pc - unit.start + first_offset});
+  return it != plan.shared.end() ? it->second.name : unit.prefix + "i_" + hex(pc);
+}
+
+void emit_bytes(std::ostringstream &out, const std::string &name, const std::vector<std::uint8_t> &raw) {
+  out << "static const uint8_t " << name << "_bytes[] = {";
+  for (std::size_t i = 0; i < raw.size(); ++i) out << (i ? ", " : "") << "0x" << hex(raw[i], 2);
+  out << "};\n";
+}
+
 // Emit one unit's per-instruction functions. Returns false for an instruction emitted as the typed instruction_unsupported stop.
 void emit_unit_functions(std::ostringstream &out, unsigned cpu, const SegaCdM68kRuntimeCEmitter &emitter, const std::string &lookup_symbol,
-                         const Unit &unit, ProcessorEmissionStats &stats, ImageEmissionStats &image_stats,
-                         std::set<std::uint32_t> &unsupported) {
+                         const Unit &unit, std::uint32_t first_offset, const PiPlan &plan, ProcessorEmissionStats &stats,
+                         ImageEmissionStats &image_stats, std::set<std::uint32_t> &unsupported) {
   const std::string k = std::to_string(cpu) + "U";
   for (const auto &[pc, reached] : unit.traversal.instructions) {
+    if (plan.shared.count({unit.image_index, pc - unit.start + first_offset}) != 0U) {  // served by a shared source-relative body
+      ++stats.compiled;
+      ++image_stats.compiled;
+      ++stats.shared_instances;
+      ++image_stats.shared_instances;
+      continue;
+    }
+    if (!plan.shared.empty() || !plan.refused.empty()) {
+      if (plan.refused.count({unit.image_index, pc - unit.start + first_offset}) != 0U) {
+        ++stats.fallback_instances;
+        ++image_stats.fallback_instances;
+      }
+    }
     const std::string fn = unit.prefix + "i_" + hex(pc);
     detail::LoweredInstruction lowered;
     if (reached.operation) lowered = detail::lower_instruction(*reached.operation, pc, emitter, lookup_symbol);
@@ -124,10 +212,9 @@ void emit_unit_functions(std::ostringstream &out, unsigned cpu, const SegaCdM68k
     }
     ++stats.compiled;
     ++image_stats.compiled;
+    ++stats.bodies;
     const auto &raw = reached.decoded->raw_bytes;
-    out << "static const uint8_t " << fn << "_bytes[] = {";
-    for (std::size_t i = 0; i < raw.size(); ++i) out << (i ? ", " : "") << "0x" << hex(raw[i], 2);
-    out << "};\n";
+    emit_bytes(out, fn, raw);
     out << "static int " << fn << "(ScdMachine *m) {\n"
         << "  ScdCpu *const cpu = &m->cpu[" << cpu << "];\n"
         << "  uint32_t pc = cpu->pc;\n"
@@ -239,7 +326,8 @@ EmissionError plan_groups(const ProcessorImages &processor, const std::vector<Un
 }
 
 ProcessorOutput emit_processor(unsigned cpu, const ProcessorImages &processor, std::vector<Unit> &units, const std::vector<Group> &groups,
-                               const std::vector<int> &group_of, ProcessorEmissionStats &stats, std::vector<ImageEmissionStats> &image_stats) {
+                               const std::vector<int> &group_of, const SegaCdEmitOptions &options, ProcessorEmissionStats &stats,
+                               std::vector<ImageEmissionStats> &image_stats) {
   const SegaCdM68kRuntimeCEmitter emitter(cpu);
   const std::string p = "scd_p" + std::to_string(cpu);
   const std::string lookup_symbol = p + "_lookup"; /* outlives every emitter context that views it */
@@ -266,6 +354,62 @@ ProcessorOutput emit_processor(unsigned cpu, const ProcessorImages &processor, s
       << "  while (lo < hi) { const size_t mid = lo + (hi - lo) / 2U; if (" << p << "_entries[mid] == pc) return &" << p
       << "_entries[mid]; if (" << p << "_entries[mid] < pc) lo = mid + 1U; else hi = mid; }\n"
       << "  return NULL;\n}\n";
+  PiPlan plan;
+  if (options.position_independent) {
+    std::map<std::uint32_t, std::vector<std::size_t>> by_image;
+    for (std::size_t u = 0; u < units.size(); ++u)
+      if (processor.roles[units[u].image_index].module) by_image[units[u].image_index].push_back(u);
+    for (const auto &[image_index, unit_indices] : by_image) {
+      if (unit_indices.size() < 2U) continue;  // one mapping: nothing to share
+      const auto &image = processor.images.images[image_index];
+      std::map<std::uint32_t, const Reached *> first;
+      std::map<std::uint32_t, std::uint32_t> instances;
+      for (const std::size_t u : unit_indices) {
+        const auto &unit = units[u];
+        const auto first_offset = image.mappings[unit.mapping_index].first_offset;
+        for (const auto &[pc, reached] : unit.traversal.instructions) {
+          if (!compiled_bytes(reached)) continue;
+          const std::uint32_t offset = pc - unit.start + first_offset;
+          first.emplace(offset, &reached);
+          ++instances[offset];
+        }
+      }
+      for (const auto &[offset, reached] : first) {
+        std::string reason;
+        const std::string name = "scd_p" + std::to_string(cpu) + "_m" + std::to_string(image.id.value) + "_s" + hex(offset, 6);
+        auto body = derive_shared_body(*reached, offset, emitter, lookup_symbol, name, reason);
+        if (body) {
+          body->instances = instances[offset];
+          plan.shared.emplace(std::make_pair(image_index, offset), std::move(*body));
+        } else {
+          plan.refused.emplace(std::make_pair(image_index, offset), reason);
+        }
+      }
+    }
+    std::map<std::string, std::uint32_t> reasons;
+    for (const std::size_t u : [&] { std::vector<std::size_t> all; for (const auto &[ii, us] : by_image) all.insert(all.end(), us.begin(), us.end()); return all; }()) {
+      const auto &unit = units[u];
+      const auto first_offset = processor.images.images[unit.image_index].mappings[unit.mapping_index].first_offset;
+      if (by_image[unit.image_index].size() < 2U) continue;
+      for (const auto &[pc, reached] : unit.traversal.instructions) {
+        const auto it = plan.refused.find({unit.image_index, pc - unit.start + first_offset});
+        if (it != plan.refused.end() && compiled_bytes(reached)) ++reasons[it->second];
+      }
+    }
+    for (const auto &[reason, count] : reasons) stats.fallback_reasons.emplace_back(reason, count);
+    for (const auto &[key, body] : plan.shared) {
+      ++stats.bodies;
+      ++stats.shared_bodies;
+      emit_bytes(out, body.name, body.raw);
+      out << "static int " << body.name << "(ScdMachine *m) {\n"
+          << "  ScdCpu *const cpu = &m->cpu[" << cpu << "];\n"
+          << "  uint32_t pc = cpu->pc;\n"
+          << "  const uint32_t scd_pc0 = pc; /* the guest address this execution was dispatched at (ADR 0207) */\n"
+          << "  if (scd_code_guard(m, " << k << ", scd_pc0, " << body.name << "_bytes, " << body.raw.size() << "U) != 0) return 1;\n"
+          << body.lowered.slots << body.lowered.body << "  cpu->pc = pc;\n"
+          << "  return scd_retire(m, " << k << ", (uint32_t)(" << body.lowered.timing << "));\n}\n";
+    }
+  }
   std::vector<std::set<std::uint32_t>> unsupported(units.size());
   for (std::size_t u = 0; u < units.size(); ++u) {
     const auto &unit = units[u];
@@ -281,7 +425,7 @@ ProcessorOutput emit_processor(unsigned cpu, const ProcessorImages &processor, s
     istats.roots = static_cast<std::uint32_t>(unit.roots.size());
     istats.overlay_group = group_of[u];
     istats.out_of_image_targets = unit.traversal.out_of_image;
-    emit_unit_functions(out, cpu, emitter, lookup_symbol, unit, stats, istats, unsupported[u]);
+    emit_unit_functions(out, cpu, emitter, lookup_symbol, unit, image.mappings[unit.mapping_index].first_offset, plan, stats, istats, unsupported[u]);
     stats.out_of_image_targets += unit.traversal.out_of_image;
     stats.vector_roots += unit.traversal.vector_roots;
     image_stats.push_back(std::move(istats));
@@ -291,7 +435,9 @@ ProcessorOutput emit_processor(unsigned cpu, const ProcessorImages &processor, s
   for (std::size_t u = 0; u < units.size(); ++u) {
     if (group_of[u] >= 0) continue;  // overlay candidates are selected by the platform (scd_overlay_dispatch), never by PC alone
     for (const auto &[pc, reached] : units[u].traversal.instructions)
-      out << "  case UINT32_C(0x" << hex(pc) << "): return " << units[u].prefix << "i_" << hex(pc) << "(m);\n";
+      out << "  case UINT32_C(0x" << hex(pc) << "): return "
+          << function_name(plan, units[u], processor.images.images[units[u].image_index].mappings[units[u].mapping_index].first_offset, pc)
+          << "(m);\n";
   }
   if (groups.empty())
     out << "  default: return scd_fail(m, " << k << ", SCD_STOP_ENTRY_NOT_COMPILED, m->cpu[" << cpu << "].pc, m->cpu[" << cpu
@@ -329,7 +475,7 @@ ProcessorOutput emit_processor(unsigned cpu, const ProcessorImages &processor, s
       first = true;
       for (const auto &[pc, reached] : instructions) {
         const bool has = compiled_bytes(reached) && unsupported[u].count(pc) == 0U;
-        tables << (first ? "" : ", ") << (has ? unit.prefix + "i_" + hex(pc) + "_bytes" : std::string("NULL"));
+        tables << (first ? "" : ", ") << (has ? function_name(plan, unit, mapping.first_offset, pc) + "_bytes" : std::string("NULL"));
         first = false;
       }
       if (instructions.empty()) tables << "NULL";
@@ -352,7 +498,7 @@ ProcessorOutput emit_processor(unsigned cpu, const ProcessorImages &processor, s
       tables << "};\n";
       tables << "static int " << cp << "_dispatch(ScdMachine *m) {\n  switch (m->cpu[" << cpu << "].pc) {\n";
       for (const auto &[pc, reached] : instructions)
-        tables << "  case UINT32_C(0x" << hex(pc) << "): return " << unit.prefix << "i_" << hex(pc) << "(m);\n";
+        tables << "  case UINT32_C(0x" << hex(pc) << "): return " << function_name(plan, unit, mapping.first_offset, pc) << "(m);\n";
       tables << "  default: return SCD_IMAGE_NO_ENTRY;\n  }\n}\n";
       std::ostringstream c;
       c << "{" << image.id.value << "U, " << c_string(processor.roles[unit.image_index].name) << ", UINT32_C(0x" << hex(unit.start)
@@ -390,7 +536,7 @@ const char *emission_error_name(EmissionError error) noexcept {
   return "unknown";
 }
 
-ProcessorsEmission emit_sega_cd_processors(const BootImages &images) {
+ProcessorsEmission emit_sega_cd_processors(const BootImages &images, const SegaCdEmitOptions &options) {
   ProcessorsEmission result;
   const ProcessorImages *processors[2] = {&images.main, &images.sub};
   std::ostringstream functions, tables, groups;
@@ -412,7 +558,7 @@ ProcessorsEmission emit_sega_cd_processors(const BootImages &images) {
     }
     ProcessorEmissionStats stats;
     stats.processor = processors[cpu]->processor;
-    const auto output = emit_processor(cpu, *processors[cpu], units, planned, group_of, stats, result.images);
+    const auto output = emit_processor(cpu, *processors[cpu], units, planned, group_of, options, stats, result.images);
     functions << output.functions;
     tables << output.tables;
     groups << output.groups;
@@ -430,14 +576,16 @@ ProcessorsEmission emit_sega_cd_processors(const BootImages &images) {
   return result;
 }
 
-ProgramEmission emit_sega_cd_program(const DiscImage &disc, const BootImages &images, std::string_view module_identity) {
+ProgramEmission emit_sega_cd_program(const DiscImage &disc, const BootImages &images, std::string_view module_identity,
+                                     const SegaCdEmitOptions &options) {
   ProgramEmission result;
   std::ostringstream out;
   std::string identity_text = std::string(kSegaCdGeneratorVersion) + "\n" + disc.identity() + "\n";
   if (!module_identity.empty()) identity_text += "modules " + std::string(module_identity) + "\n";
+  if (options.position_independent) identity_text += "emitter position_independent.v1\n";  // generated-code identity only when not the reference
   result.program_identity =
       sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(identity_text.data()), identity_text.size()));
-  auto processors = emit_sega_cd_processors(images);
+  auto processors = emit_sega_cd_processors(images, options);
   result.error = processors.error;
   if (processors.error != EmissionError::none) return result;
   result.stats = std::move(processors.stats);

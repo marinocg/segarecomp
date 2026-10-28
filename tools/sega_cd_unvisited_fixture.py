@@ -37,11 +37,16 @@ BASE_A, BASE_B = WORD_RAM, WORD_RAM
 BASES_C = (0x090000, 0x0A0000)
 BASE_D = 0x0B0000
 HEADER = 0x40
-CASES = ("base", "overwritten", "header_patched", "unknown_lba", "unknown_dest", "prg_dest", "recursion")
+CASES = ("base", "overwritten", "header_patched", "unknown_lba", "unknown_dest", "prg_dest", "recursion",
+         "pi", "pi_odd", "pi_escape", "pi_overwrite")
 MARK = {"A": F.SUB_DATA + 0x20, "B": F.SUB_DATA + 0x22, "C": F.SUB_DATA + 0x24}
 COUNT = {"A": F.SUB_DATA + 0x30, "B": F.SUB_DATA + 0x32, "C": F.SUB_DATA + 0x34}
 MARKER = {"A": 0xAAAA, "B": 0xBBBB, "C": 0xCCCC}
-RESULT_WORDS = 6
+RESULT_WORDS = 8
+PI_BASE = F.SUB_DATA + 0x40
+PI = {name: PI_BASE + 2 * i for i, name in enumerate(("W1", "W2", "CNT", "EXC", "EXC2", "HELP", "W3", "W4"))}
+PI_SUM = F.SUB_DATA + 0x60   # long: the sum of the addresses LEA d(PC) produced at each base
+PI_DATA_WORD, PI_TAB = 0x1357, (0x1111, 0x2222, 0x3333)
 
 
 def module_code(kind, base):
@@ -59,7 +64,116 @@ def module_code(kind, base):
     return m.assemble()
 
 
-def sector(kind):
+class PiAsm(F.Asm):
+    """The shared encoder plus the PC-relative and byte-displacement forms the source-relative matrix needs."""
+
+    def lea_pc(self, label, an):
+        self.w(0x41FA | (an << 9))
+        self.fixups.append((len(self.words), label, "rel16"))
+        self.w(0)
+
+    def move_w_pc(self, label, dn):
+        self.w(0x303A | (dn << 9))
+        self.fixups.append((len(self.words), label, "rel16"))
+        self.w(0)
+
+    def move_w_pc_index(self, label, xn, dn):  # move.w label(pc,xn.w),dn  (brief extension word, d8 resolved by the assembler)
+        self.w(0x303B | (dn << 9))
+        self.fixups.append((len(self.words), label, "rel8w"))
+        self.w(xn << 12)
+
+    def jsr_pc(self, label):
+        self.w(0x4EBA)
+        self.fixups.append((len(self.words), label, "rel16"))
+        self.w(0)
+
+    def bcc_s(self, cond, label):
+        self.w(0x6000 | (F.COND[cond] << 8))
+        self.fixups.append((len(self.words) - 1, label, "rel8"))
+
+    def assemble(self):
+        keep = []
+        for index, label, kind in self.fixups:
+            if kind == "rel8":
+                disp = self.labels[label] - (self.base + 2 * index) - 2
+                assert -128 <= disp < 128 and disp != 0, label
+                self.words[index] |= disp & 0xFF
+            elif kind == "rel8w":
+                disp = self.labels[label] - (self.base + 2 * index)
+                assert -128 <= disp < 128, label
+                self.words[index] |= disp & 0xFF
+            else:
+                keep.append((index, label, kind))
+        self.fixups = keep
+        return super().assemble()
+
+
+def module_code_pi(base, helper, variant):
+    """Module C of the source-relative matrix: PC-relative effective addresses (lea, d16(PC), (d8,PC,Xn)), a PC-relative JSR, a computed JMP,
+    forward/backward/short branches, DBRA, a local BSR, an ABSOLUTE call into the boot image, absolute stores, TRAP and divide-by-zero
+    exceptions, then RTS. Everything is position-independent except the absolute helper call and the absolute stores."""
+    m = PiAsm(base)
+    m.moveq(3, 0)
+    m.move("w", F.imm(MARKER["C"]), F.absl(MARK["C"]))
+    m.quick("add", "w", 1, F.absl(COUNT["C"]))
+    if variant == "odd":
+        m.lea_pc("data", 0)
+        m.quick("add", "l", 1, F.a(0))
+        m.move("w", ("ind", 0), F.d(0))                    # an odd-address word read: the address-error path
+    if variant == "escape":
+        m.w(0x4EF9)                                      # jmp $0B8000: outside every admitted image
+        m.lw(0x0B8000)
+    m.lea_pc("data", 0)
+    m.move("l", F.a(0), F.d(5))
+    m.move("l", F.absl(PI_SUM), F.d(6))
+    m.alu("add", "l", F.d(5), 6)
+    m.move("l", F.d(6), F.absl(PI_SUM))
+    m.move_w_pc("data", 1)
+    m.move("w", F.d(1), F.absl(PI["W1"]))
+    m.moveq(2, 3)
+    m.move_w_pc_index("tab", 3, 4)
+    m.move("w", F.d(4), F.absl(PI["W2"]))
+    m.bsr("leaf")
+    m.moveq(3, 2)
+    m.label("loop")
+    m.quick("add", "w", 1, F.absl(PI["CNT"]))
+    m.dbra(2, "loop")
+    m.bcc_s("t", "skip")
+    m.nop()
+    m.nop()
+    m.label("skip")
+    m.moveq(1, 7)
+    m.bcc_s("eq", "target")                              # never taken; gives the computed JMP's destination a static edge (the emitter compiles reached code)
+    m.immop("cmp", "w", PI_DATA_WORD, F.d(1))
+    m.bcc_s("ne", "bad")
+    m.jsr_pc("jtarget")
+    m.lea_pc("target", 1)
+    m.w(0x4ED1)                                          # jmp (a1)
+    m.nop()
+    m.nop()
+    m.label("target")
+    m.quick("add", "w", 1, F.absl(PI["W4"]))
+    m.jsr(F.absl(helper))
+    m.w(0x4E40)                                          # trap #0
+    m.moveq(1, 0)
+    m.w(0x80FC)                                          # divu.w #0,d0  (vector 5)
+    m.w(0)
+    m.label("bad")
+    m.rts()
+    m.label("jtarget")
+    m.quick("add", "w", 1, F.absl(PI["W3"]))
+    m.rts()
+    m.label("leaf")
+    m.nop()
+    m.rts()
+    m.label("data")
+    m.w(PI_DATA_WORD)
+    m.label("tab")
+    m.w(*PI_TAB)
+    return m.assemble(), m.labels["data"] - base
+
+
+def sector(kind, variant=None, helper=0, pi_base=BASES_C[0]):
     """(2,048-byte sector, number of meaningful bytes). Filler after the module is seeded pseudo-random data."""
     rng = random.Random({"A": 0xA0, "B": 0xB0, "C": 0xC0, "D": 0xD0, "X": 0xE0}[kind])
     if kind == "D":
@@ -68,6 +182,8 @@ def sector(kind):
         body = b"SYNTHHDR" + bytes(rng.randrange(256) for _ in range(HEADER - 8)) + module_code("A", WORD_RAM + HEADER)
     elif kind == "X":  # a valid instruction stream that no loader operation names
         body = bytes(HEADER) + module_code("A", WORD_RAM + HEADER)
+    elif kind == "C" and variant is not None:
+        body = module_code_pi(pi_base, helper, variant)[0]
     else:
         body = module_code(kind, WORD_RAM)
     return (body + bytes(rng.randrange(256) for _ in range(2048 - len(body)))), len(body)
@@ -98,9 +214,15 @@ def build(options):
         sub.move("w", F.imm(want[0]), F.d(6))
         sub.move("w", F.imm(want[1]), F.d(7))
 
+    pi = case.startswith("pi")
     sub.label("entry")
     if case == "recursion":
         sub.bsr("rec")
+    if pi:   # install the TRAP #0 and divide-by-zero handlers in the sub's vector table (MOVE.L #handler,(vector).L)
+        for label, vector in (("h_trap", 0x80), ("h_div", 0x14)):
+            sub.w(0x23FC)
+            sub.lw(label)
+            sub.lw(vector)
     cdc_write(0x0F, 0x00)
     cdc_write(0x01, 0x02)
     cdc_write(0x0A, 0x84)
@@ -143,6 +265,8 @@ def build(options):
     for base in BASES_C:
         args(LBA["C"], base, unknown_lba=(case == "unknown_lba"), unknown_dest=(case == "unknown_dest") and base == BASES_C[0])
         sub.bsr("load_sector_prg" if case == "prg_dest" else "load_sector")
+        if case == "pi_overwrite" and base == BASES_C[1]:
+            sub.move("w", F.imm(0x4E71), F.absl(base + 4))   # one word inside the second mapping, after it was loaded
         sub.jsr(F.absl(base))
 
     sub.label("done")
@@ -153,6 +277,8 @@ def build(options):
     stop_words, _ = F.cdd_words(1)
     for i, word in enumerate(stop_words):
         sub.move("w", F.imm(word), F.absl(F.GA_SUB + 0x42 + 2 * i))
+    sub.move("w", F.absl(PI_SUM + 2), F.absl(F.GA_SUB + 0x2C))
+    sub.move("w", F.absl(PI["W2"]), F.absl(F.GA_SUB + 0x2E))
     sub.move("b", F.imm(0x01), F.absl(F.GA_SUB + 0x03))   # RET = 1: Word RAM back to main
     sub.move("b", F.imm(0x02), F.absl(F.GA_SUB + 0x0F))
     sub.stop(0x2700)
@@ -203,6 +329,16 @@ def build(options):
         sub.label("rec")
         sub.bsr("rec")
         sub.rts()
+    if pi:
+        sub.label("pi_helper")                            # an absolute call target for the module (never relocated)
+        sub.quick("add", "w", 1, F.absl(PI["HELP"]))
+        sub.rts()
+        sub.label("h_trap")
+        sub.quick("add", "w", 1, F.absl(PI["EXC"]))
+        sub.rte()
+        sub.label("h_div")
+        sub.quick("add", "w", 1, F.absl(PI["EXC2"]))
+        sub.rte()
     loader("load_sector", 7)
     if case == "prg_dest":
         loader("load_sector_prg", 5)
@@ -229,10 +365,12 @@ def build(options):
         main.move("w", F.absl(F.GA_MAIN + 0x20 + 2 * reg), ("inc", 3))
     F.main_finish(main)
 
+    variant = {"pi": "pi", "pi_overwrite": "pi", "pi_odd": "odd", "pi_escape": "escape"}.get(case)
+    helper = sub.labels.get("pi_helper", 0)
     sectors = {}
     layout = {}
     for kind in "ABCDX":
-        data, length = sector(kind)
+        data, length = sector(kind, variant, helper)
         sectors[LBA[kind]] = data
         layout[kind] = {"lba": LBA[kind], "sha256": hashlib.sha256(data).hexdigest(), "code_bytes": length}
     code_a = module_code("A", BASE_A + HEADER)
@@ -246,4 +384,8 @@ def build(options):
         "data_sector": LBA["D"], "decoy_sector": LBA["X"], "layout": layout,
         "markers": {k: MARKER[k] for k in "ABC"},
     }
+    if variant is not None:
+        _, data_offset = module_code_pi(BASES_C[0], helper, variant)
+        expected["pi"] = {"sum_low16": sum(base + data_offset for base in BASES_C) & 0xFFFF, "w2": PI_TAB[1], "w1": PI_DATA_WORD,
+                          "helper": helper, "data_offset": data_offset, "scratch": {k: v for k, v in PI.items()}, "sum_address": PI_SUM}
     return main.assemble(), sp, sectors, expected
