@@ -325,9 +325,51 @@ EmissionError plan_groups(const ProcessorImages &processor, const std::vector<Un
   return EmissionError::none;
 }
 
+// SEG-097-T003: the selective admission of one processor's images (proposal ranges per image, and the distinct source offsets the broad and the
+// admitted emission compile). `active` applies the proposals; `track` only counts (a broad emission that still reports what it would have saved).
+struct AdmissionState {
+  bool track = false;
+  bool active = false;
+  std::map<std::uint32_t, std::vector<std::pair<std::uint32_t, std::uint32_t>>> ranges;  // image index -> proposal R
+  std::map<std::uint32_t, std::set<std::uint32_t>> broad, admitted;                       // image index -> distinct source offsets
+  std::string rejection;                                                                   // set by the validator
+};
+
+// Keeps only the reached instructions whose source offset the proposal contains (never adds one). The validator: every declared root that the
+// broad traversal compiled must still be compiled.
+void apply_admission(const ProcessorImages &processor, Unit &unit, AdmissionState &admission) {
+  const auto &image = processor.images.images[unit.image_index];
+  const std::uint32_t first_offset = image.mappings[unit.mapping_index].first_offset;
+  auto &broad = admission.broad[unit.image_index];
+  auto &kept = admission.admitted[unit.image_index];
+  const auto ranges_it = admission.ranges.find(unit.image_index);
+  const bool apply = admission.active && ranges_it != admission.ranges.end();
+  std::vector<std::uint32_t> compiled_roots;
+  if (apply)
+    for (const std::uint32_t root : unit.roots) {
+      const auto it = unit.traversal.instructions.find(root);
+      if (it != unit.traversal.instructions.end() && compiled_bytes(it->second)) compiled_roots.push_back(root);
+    }
+  for (auto it = unit.traversal.instructions.begin(); it != unit.traversal.instructions.end();) {
+    const std::uint32_t offset = it->first - unit.start + first_offset;
+    const bool compiled = compiled_bytes(it->second);
+    if (compiled) broad.insert(offset);
+    if (apply && !ranges_contain(ranges_it->second, offset)) {
+      it = unit.traversal.instructions.erase(it);
+      continue;
+    }
+    if (compiled) kept.insert(offset);
+    ++it;
+  }
+  for (const std::uint32_t root : compiled_roots) {
+    const auto it = unit.traversal.instructions.find(root);
+    if (it == unit.traversal.instructions.end() || !compiled_bytes(it->second)) admission.rejection = "validator_rejected:root_not_admitted";
+  }
+}
+
 ProcessorOutput emit_processor(unsigned cpu, const ProcessorImages &processor, std::vector<Unit> &units, const std::vector<Group> &groups,
-                               const std::vector<int> &group_of, const SegaCdEmitOptions &options, ProcessorEmissionStats &stats,
-                               std::vector<ImageEmissionStats> &image_stats) {
+                               const std::vector<int> &group_of, const SegaCdEmitOptions &options, AdmissionState &admission,
+                               ProcessorEmissionStats &stats, std::vector<ImageEmissionStats> &image_stats) {
   const SegaCdM68kRuntimeCEmitter emitter(cpu);
   const std::string p = "scd_p" + std::to_string(cpu);
   const std::string lookup_symbol = p + "_lookup"; /* outlives every emitter context that views it */
@@ -336,6 +378,7 @@ ProcessorOutput emit_processor(unsigned cpu, const ProcessorImages &processor, s
   std::size_t reached_total = 0;
   for (auto &unit : units) {
     unit.traversal = traverse(processor, unit);
+    if (admission.track) apply_admission(processor, unit, admission);
     reached_total += unit.traversal.instructions.size();
     for (const auto &[pc, reached] : unit.traversal.instructions) all.insert(pc);
   }
@@ -425,6 +468,8 @@ ProcessorOutput emit_processor(unsigned cpu, const ProcessorImages &processor, s
     istats.roots = static_cast<std::uint32_t>(unit.roots.size());
     istats.overlay_group = group_of[u];
     istats.out_of_image_targets = unit.traversal.out_of_image;
+    for (const auto &[pc, reached] : unit.traversal.instructions)
+      if (compiled_bytes(reached)) istats.source_offsets.push_back(pc - unit.start + image.mappings[unit.mapping_index].first_offset);
     emit_unit_functions(out, cpu, emitter, lookup_symbol, unit, image.mappings[unit.mapping_index].first_offset, plan, stats, istats, unsupported[u]);
     stats.out_of_image_targets += unit.traversal.out_of_image;
     stats.vector_roots += unit.traversal.vector_roots;
@@ -536,7 +581,7 @@ const char *emission_error_name(EmissionError error) noexcept {
   return "unknown";
 }
 
-ProcessorsEmission emit_sega_cd_processors(const BootImages &images, const SegaCdEmitOptions &options) {
+ProcessorsEmission emit_processors_once(const BootImages &images, const SegaCdEmitOptions &options, AdmissionState (&admission)[2]) {
   ProcessorsEmission result;
   const ProcessorImages *processors[2] = {&images.main, &images.sub};
   std::ostringstream functions, tables, groups;
@@ -558,7 +603,7 @@ ProcessorsEmission emit_sega_cd_processors(const BootImages &images, const SegaC
     }
     ProcessorEmissionStats stats;
     stats.processor = processors[cpu]->processor;
-    const auto output = emit_processor(cpu, *processors[cpu], units, planned, group_of, options, stats, result.images);
+    const auto output = emit_processor(cpu, *processors[cpu], units, planned, group_of, options, admission[cpu], stats, result.images);
     functions << output.functions;
     tables << output.tables;
     groups << output.groups;
@@ -576,13 +621,145 @@ ProcessorsEmission emit_sega_cd_processors(const BootImages &images, const SegaC
   return result;
 }
 
+// One proposal per IMAGE (never per mapping). Seeds are the declared certain code: the boot entry, or a module's entry roots.
+struct Proposals {
+  std::map<std::pair<unsigned, std::uint32_t>, RegionProposal> by_image;
+  std::string failure;
+  std::string failed_image;
+  std::vector<ImageAdmissionReport> reports;
+};
+
+std::string image_label(const ProcessorImages &processor, std::uint32_t index) {
+  return std::string(processor_name(processor.processor)) + ":" + processor.roles[index].name;
+}
+
+Proposals make_proposals(const BootImages &images, const SelectiveAdmissionRequest &request) {
+  Proposals out;
+  const ProcessorImages *processors[2] = {&images.main, &images.sub};
+  for (unsigned cpu = 0; cpu < 2U; ++cpu) {
+    const auto &processor = *processors[cpu];
+    if (processor.roles.size() != processor.images.images.size()) {
+      out.failure = "validator_rejected:roles_mismatch";
+      return out;
+    }
+    for (std::uint32_t i = 0; i < processor.images.images.size(); ++i) {
+      const auto &image = processor.images.images[i];
+      const auto bytes = executable_image_bytes(processor.images, image);
+      std::vector<std::uint32_t> seeds;
+      if (!processor.roles[i].module) {
+        const auto &mapping = image.mappings.front();
+        if (processor.entry_pc >= mapping.execution_base && processor.entry_pc - mapping.execution_base < bytes.size())
+          seeds.push_back(processor.entry_pc - mapping.execution_base);
+      } else {
+        seeds = processor.roles[i].entry_offsets;
+      }
+      std::sort(seeds.begin(), seeds.end());
+      seeds.erase(std::unique(seeds.begin(), seeds.end()), seeds.end());
+      RegionProposal proposal = request.propose(bytes, seeds);
+      ImageAdmissionReport report;
+      report.processor = processor.processor;
+      report.name = processor.roles[i].name;
+      report.image_id = image.id.value;
+      report.source_bytes = static_cast<std::uint32_t>(bytes.size());
+      report.units = proposal.units;
+      report.selected = proposal.selected;
+      report.seed_units = proposal.seed_units;
+      for (const auto &[b, e] : proposal.ranges) report.proposed_bytes += e - b;
+      out.reports.push_back(report);
+      const std::string error = validate_region_proposal(proposal, static_cast<std::uint32_t>(bytes.size()), seeds);
+      if (!error.empty()) {
+        out.failure = error;
+        out.failed_image = image_label(processor, i);
+        return out;
+      }
+      out.by_image.emplace(std::make_pair(cpu, i), std::move(proposal));
+    }
+  }
+  return out;
+}
+
+ProcessorsEmission emit_sega_cd_processors(const BootImages &images, const SegaCdEmitOptions &options) {
+  if (options.selective == nullptr || !options.selective->propose) {
+    AdmissionState admission[2];
+    return emit_processors_once(images, options, admission);
+  }
+  // Experimental selective admission (ADR 0208): propose, validate, apply; on ANY failure emit the broad program and say why.
+  SelectiveAdmissionOutcome outcome;
+  outcome.requested = true;
+  const auto finish_broad = [&](std::string reason, std::string failed_image, std::vector<ImageAdmissionReport> reports) {
+    AdmissionState admission[2];
+    admission[0].track = admission[1].track = true;
+    auto broad = emit_processors_once(images, options, admission);
+    outcome.admitted = false;
+    outcome.reason = std::move(reason);
+    outcome.failed_image = std::move(failed_image);
+    // Every image is reported: the ones the producer reached keep its counts, the others only their name and the broad entry count.
+    const ProcessorImages *processors[2] = {&images.main, &images.sub};
+    for (unsigned cpu = 0; cpu < 2U; ++cpu)
+      for (std::uint32_t i = 0; i < processors[cpu]->images.images.size(); ++i) {
+        const auto &image = processors[cpu]->images.images[i];
+        ImageAdmissionReport report;
+        for (const auto &known : reports)
+          if (known.processor == processors[cpu]->processor && known.image_id == image.id.value) report = known;
+        report.processor = processors[cpu]->processor;
+        report.name = processors[cpu]->roles[i].name;
+        report.image_id = image.id.value;
+        report.source_bytes = static_cast<std::uint32_t>(executable_image_bytes(processors[cpu]->images, image).size());
+        report.broad_entries = static_cast<std::uint32_t>(admission[cpu].broad[i].size());
+        report.admitted_entries = 0;
+        outcome.broad_entries += report.broad_entries;
+        outcome.images.push_back(std::move(report));
+      }
+    broad.admission = outcome;
+    return broad;
+  };
+  Proposals proposals = make_proposals(images, *options.selective);
+  if (!proposals.failure.empty()) return finish_broad(proposals.failure, proposals.failed_image, std::move(proposals.reports));
+  AdmissionState admission[2];
+  for (unsigned cpu = 0; cpu < 2U; ++cpu) {
+    admission[cpu].track = admission[cpu].active = true;
+    for (const auto &[key, proposal] : proposals.by_image)
+      if (key.first == cpu) admission[cpu].ranges[key.second] = proposal.ranges;
+  }
+  auto selective = emit_processors_once(images, options, admission);
+  if (selective.error != EmissionError::none) return finish_broad("validator_rejected:emission_" + std::string(emission_error_name(selective.error)), {}, std::move(proposals.reports));
+  for (unsigned cpu = 0; cpu < 2U; ++cpu)
+    if (!admission[cpu].rejection.empty()) return finish_broad(admission[cpu].rejection, {}, std::move(proposals.reports));
+  // Report, digest and the nothing-admitted check.
+  std::vector<std::pair<std::string, std::vector<std::uint32_t>>> rows;
+  std::uint32_t admitted_total = 0, broad_total = 0;
+  for (auto &report : proposals.reports) {
+    const auto &processor = report.processor == Processor::main ? images.main : images.sub;
+    const unsigned cpu = report.processor == Processor::main ? 0U : 1U;
+    for (std::uint32_t i = 0; i < processor.images.images.size(); ++i) {
+      if (processor.images.images[i].id.value != report.image_id) continue;
+      report.broad_entries = static_cast<std::uint32_t>(admission[cpu].broad[i].size());
+      report.admitted_entries = static_cast<std::uint32_t>(admission[cpu].admitted[i].size());
+      rows.emplace_back(image_label(processor, i), std::vector<std::uint32_t>(admission[cpu].admitted[i].begin(), admission[cpu].admitted[i].end()));
+    }
+    admitted_total += report.admitted_entries;
+    broad_total += report.broad_entries;
+  }
+  if (admitted_total == 0U && broad_total != 0U) return finish_broad("validator_rejected:nothing_admitted", {}, std::move(proposals.reports));
+  outcome.admitted = true;
+  outcome.k_sha256 = admitted_set_digest(rows);
+  outcome.images = std::move(proposals.reports);
+  outcome.broad_entries = broad_total;
+  outcome.admitted_entries = admitted_total;
+  selective.admission = std::move(outcome);
+  return selective;
+}
+
 ProgramEmission emit_sega_cd_program(const DiscImage &disc, const BootImages &images, std::string_view module_identity,
                                      const SegaCdEmitOptions &options) {
   ProgramEmission result;
   std::ostringstream out;
   std::string identity_text = std::string(kSegaCdGeneratorVersion) + "\n" + disc.identity() + "\n";
   if (!module_identity.empty()) identity_text += "modules " + std::string(module_identity) + "\n";
-  if (options.position_independent) identity_text += "emitter position_independent.v1\n";  // generated-code identity only when not the reference
+  // Generated-code identity: only a non-default emitter policy changes it. The experimental request enters, not its outcome: the admitted set is a
+  // pure function of the inputs and the policy identity, and a fallback build must still never alias a build that was not asked to be experimental.
+  if (options.position_independent) identity_text += "emitter position_independent.v1\n";
+  if (options.selective != nullptr) identity_text += "aot experimental_m3 " + options.selective->policy_identity + "\n";
   result.program_identity =
       sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(identity_text.data()), identity_text.size()));
   auto processors = emit_sega_cd_processors(images, options);
@@ -591,6 +768,7 @@ ProgramEmission emit_sega_cd_program(const DiscImage &disc, const BootImages &im
   result.stats = std::move(processors.stats);
   result.images = std::move(processors.images);
   result.overlay_groups = processors.overlay_groups;
+  result.admission = processors.admission;
   out << "/* Generated by segarecomp (" << kSegaCdGeneratorVersion << ", SEG-062). Sega CD synthetic post-BIOS profile.\n"
       << " * Disc identity " << disc.identity() << ". Do not edit. */\n";
   if (!module_identity.empty())

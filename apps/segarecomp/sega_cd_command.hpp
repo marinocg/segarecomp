@@ -4,7 +4,9 @@
 // reader is libs/media and every machine decision is platforms/sega-cd/machine.
 inline constexpr const char *segarecomp_sega_cd_usage =
     "  segarecomp sega-cd inspect --cue <disc.cue> [--expect-identity <sha256>] [--sector-digests] [--iso-tree] [--modules <list>]\n"
-    "  segarecomp sega-cd emit --cue <disc.cue> --out <program.c> [--expect-identity <sha256>] [--modules <list>] [--position-independent]\n"
+    "  segarecomp sega-cd emit --cue <disc.cue> --out <program.c> [--expect-identity <sha256>] [--modules <list>] [--position-independent] [--report-offsets]\n"
+    "                              [--aot-policy compatibility|optimized [--aot-model gen2]]  (SEG-097-T003: `optimized` is EXPERIMENTAL for Sega CD - the frozen gen2 M3+B35 proposes which\n"
+    "       source-relative regions are compiled; it may omit code and stop at an uncompiled entry; any failure falls back to broad and says why)\n"
     "      (compile <program.c> with platforms/sega-cd/runtime/*.c and platforms/genesis/runtime/{runtime,vdp_render,frame_export}.c;\n"
     "       run it with --disc-dir <dir> --instruction-budget <n>)\n"
     "  segarecomp sega-cd emit --cue <disc.cue> --bios <image> --out <program.c> [--copy-image main|sub:<base>:<rom-offset>:<length>]...\n"
@@ -22,6 +24,7 @@ inline constexpr const char *segarecomp_sega_cd_usage =
     "  segarecomp sega-cd build --cue <disc.cue> --bios <image> --output <dir> --runtime-dir <runtime root> --cc <compiler> [--cc-arg <arg>]...\n"
     "                           [--viewer 1 --sdl3-include <dir> --sdl3-lib <dir>] [--cache-dir <dir>] [--jobs <n>] [--budget <instructions>] [--until-tick <t>]\n"
     "                           [--pass-timeout <seconds>] [--input-script <file>] [--backup-ram <file>] [--optimize 0|1|2] [--link-arg <arg>]...\n"
+    "                           [--aot-policy compatibility|optimized [--aot-model gen2]]   (SEG-097-T003: `optimized` = EXPERIMENTAL frozen gen2 M3+B35 selective proposal; status.json aot_policy)\n"
     "      (SEG-078-T003, ADR 0205: the self-service build - emit, compile, run a build pass, admit the epoch, operand templates and discovered\n"
     "       disc extents, confirm; writes <output>/{program[,program-viewer],status.json,build.log}; progress as @stage/@round/@result lines)\n"
     "  segarecomp sega-cd resolve-source --cue <disc.cue> --cpu main|sub --pc <address> --region <file> --region-base <address>\n"

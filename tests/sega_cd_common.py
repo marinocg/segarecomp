@@ -23,6 +23,17 @@ RUN_TIMEOUT = 120
 EXE = ".exe" if os.name == "nt" else ""
 
 
+def measured(args, **kw):
+    """(returncode, stdout, cpu seconds, peak RSS KiB, wall seconds, stderr tail) of one child, with the peak taken from this child alone."""
+    wrapper = ("import resource,subprocess,sys,time,json\n"
+               "t=time.time(); p=subprocess.run(sys.argv[1:],capture_output=True,text=True); w=time.time()-t\n"
+               "r=resource.getrusage(resource.RUSAGE_CHILDREN)\n"
+               "print(json.dumps({'rc':p.returncode,'out':p.stdout,'err':p.stderr[-2000:],'cpu':r.ru_utime+r.ru_stime,'rss':r.ru_maxrss,'wall':w}))\n")
+    out = subprocess.run([sys.executable, "-c", wrapper, *map(str, args)], capture_output=True, text=True, **kw)
+    d = json.loads(out.stdout)
+    return d["rc"], d["out"], d["cpu"], d["rss"], d["wall"], d["err"]
+
+
 def build_disc(directory, fixture, variant="cooked", *extra):
     out = subprocess.run([sys.executable, str(BUILDER), "build", "--fixture", fixture, "--variant", variant, "--out", str(directory),
                           *extra], check=True, capture_output=True, text=True)

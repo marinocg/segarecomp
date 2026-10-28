@@ -16,14 +16,20 @@
 
 #include "segarecomp/disc.hpp"
 #include "segarecomp/machine/sega_cd/boot_images.hpp"
+#include "segarecomp/machine/sega_cd/selective_admission.hpp"
 
 namespace segarecomp::machine::sega_cd {
 
 // SEG-097-T002 (ADR 0207): emitter policy. The default is the per-mapping emitter of ADR 0132, kept byte-identical as the verified reference;
 // `position_independent` emits ONE source-relative body per (image, source offset) of an image with several mappings and a thin per-mapping
 // dispatch to it. Every instruction whose lowering cannot be proven source-relative keeps the per-mapping emission and is reported.
+//
+// SEG-097-T003 (ADR 0208): `selective`, when set, requests the experimental model-proposed selective admission: the producer scores each IMAGE's
+// source bytes once; the emission compiles only the statically reached instructions whose source offset the (validated) proposal contains. Any
+// failure falls back to the broad emission inside the same call, and `admission` says what actually happened.
 struct SegaCdEmitOptions {
   bool position_independent = false;
+  const SelectiveAdmissionRequest *selective = nullptr;
 };
 
 struct ProcessorEmissionStats {
@@ -58,6 +64,7 @@ struct ImageEmissionStats {
   std::uint32_t out_of_image_targets{};
   std::uint32_t shared_instances{};    // SEG-097-T002: this mapping's instructions served by a shared source-relative body
   std::uint32_t fallback_instances{};  // and those that kept per-mapping emission although position independence was requested
+  std::vector<std::uint32_t> source_offsets;  // SEG-097-T003: the distinct source-relative offsets of this mapping's compiled instructions (ascending)
   int overlay_group = -1;  // index into the program's overlay groups, or -1 (SEG-062 per-PC dispatch)
 };
 
@@ -84,6 +91,7 @@ struct ProcessorsEmission {
   std::vector<ProcessorEmissionStats> stats;
   std::vector<ImageEmissionStats> images;
   std::uint32_t overlay_groups{};
+  SelectiveAdmissionOutcome admission;  // SEG-097-T003: requested == false without an experimental request
   EmissionError error{EmissionError::none};
 };
 
@@ -93,6 +101,7 @@ struct ProgramEmission {
   std::string program_identity;
   std::vector<ImageEmissionStats> images;
   std::uint32_t overlay_groups{};
+  SelectiveAdmissionOutcome admission;
   EmissionError error{EmissionError::none};
 };
 

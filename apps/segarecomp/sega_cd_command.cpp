@@ -1,5 +1,7 @@
 #include "sega_cd_command.hpp"
 
+#include "sega_cd_aot.hpp"
+
 #include <cstdio>
 #include <algorithm>
 #include <cctype>
@@ -307,7 +309,8 @@ std::string read_track1_extent(const segarecomp::DiscImage &disc, std::uint32_t 
 
 int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios_path, const std::vector<std::string> &copies,
                       const std::vector<std::string> &admits, const std::vector<std::string> &disc_images,
-                      std::optional<std::uint32_t> application_entry, const std::string &out_path, std::uint32_t partition_window) {
+                      std::optional<std::uint32_t> application_entry, const std::string &out_path, std::uint32_t partition_window,
+                      const segarecomp_app::SegaCdAotOptions &aot, const std::optional<scd::SelectiveAdmissionRequest> &aot_request) {
   const auto bad = [](const std::string &stage, const std::string &error) {
     std::cout << "{\"ok\":false,\"stage\":\"" << stage << "\",\"error\":\"" << error << "\"}\n";
     return 7;
@@ -404,7 +407,12 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     }
     inputs.admissions.push_back(std::move(a));
   }
-  const auto emission = scd::emit_sega_cd_bios_program(disc, inputs, scd::BiosProfileEmitOptions{partition_window});
+  scd::BiosProfileEmitOptions bios_options{partition_window};
+  if (aot_request) {  // SEG-097-T003 (ADR 0208): the experimental request enters the program identity and the provenance chain
+    inputs.aot_policy = aot_request->policy_identity;
+    bios_options.selective = &*aot_request;
+  }
+  const auto emission = scd::emit_sega_cd_bios_program(disc, inputs, bios_options);
   if (emission.error != scd::BiosProfileError::none) {
     std::cout << "{\"ok\":false,\"stage\":\"emit\",\"error\":\"" << scd::bios_profile_error_name(emission.error) << "\",\"index\":"
               << emission.error_index << ",\"validation\":\"" << segarecomp::image_validation_error_name(emission.validation) << "\"}\n";
@@ -447,9 +455,9 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     const auto &s = emission.images[i];
     report << (i ? "," : "") << "{\"processor\":\"" << scd::processor_name(s.processor) << "\",\"name\":\"" << s.name
            << "\",\"authority\":\"" << s.authority << "\",\"start\":" << s.start << ",\"length\":" << s.length
-           << ",\"compiled\":" << s.compiled << ",\"rejected\":" << s.rejected << "}";
+           << ",\"compiled\":" << s.compiled << ",\"rejected\":" << s.rejected << ",\"omitted\":" << s.omitted << "}";
   }
-  report << "]}\n";
+  report << "],\"aot_policy\":" << segarecomp_app::sega_cd_aot_policy_json(aot, emission.admission) << "}\n";
   std::cout << report.str();
   return 0;
 }
@@ -459,10 +467,19 @@ int emit(int argc, char **argv) {
   std::vector<std::string> copies, admits, disc_images;
   std::optional<std::uint32_t> partition_window, application_entry;
   scd::SegaCdEmitOptions emit_options;
+  segarecomp_app::SegaCdAotOptions aot;
+  bool report_offsets = false;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
     else if (arg == "--position-independent") emit_options.position_independent = true;  // SEG-097-T002 (ADR 0207)
+    else if (arg == "--report-offsets") report_offsets = true;  // SEG-097-T003: list each mapping's compiled source-relative offsets in the report (evidence tooling)
+    else if ((arg == "--aot-policy" || arg == "--aot-model") && i + 1 < argc) {  // SEG-097-T003 (ADR 0208): the product's policy vocabulary
+      if (!segarecomp_app::set_sega_cd_aot_option(aot, arg, argv[++i])) {
+        std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+        return 2;
+      }
+    }
     else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
     else if (arg == "--expect-identity" && i + 1 < argc) expected = argv[++i];
     else if (arg == "--modules" && i + 1 < argc) modules = argv[++i];
@@ -487,7 +504,7 @@ int emit(int argc, char **argv) {
       return 2;
     }
   }
-  if (!cue || !out_path || (!bios && (!copies.empty() || !admits.empty() || !disc_images.empty() || application_entry || partition_window)) || (bios && modules) || (bios && emit_options.position_independent)) {
+  if (!cue || !out_path || (!bios && (!copies.empty() || !admits.empty() || !disc_images.empty() || application_entry || partition_window)) || (bios && modules) || (bios && emit_options.position_independent) || !segarecomp_app::sega_cd_aot_options_valid(aot)) {
     std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
     return 2;
   }
@@ -496,7 +513,9 @@ int emit(int argc, char **argv) {
     std::cout << "{\"ok\":false,\"stage\":\"disc\",\"error\":\"" << segarecomp::disc_error_name(loaded.error) << "\"}\n";
     return 3;
   }
-  if (bios) return emit_bios_profile(*loaded.disc, *bios, copies, admits, disc_images, application_entry, *out_path, partition_window.value_or(0U));
+  const auto aot_request = segarecomp_app::make_sega_cd_aot_request(aot);
+  if (bios) return emit_bios_profile(*loaded.disc, *bios, copies, admits, disc_images, application_entry, *out_path, partition_window.value_or(0U), aot, aot_request);
+  if (aot_request) emit_options.selective = &*aot_request;
   const auto produced = scd::produce_boot_images(*loaded.disc);
   if (!produced.images) {
     std::cout << "{\"ok\":false,\"stage\":\"boot\",\"error\":\"" << scd::boot_image_error_name(produced.error) << "\"}\n";
@@ -536,14 +555,21 @@ int emit(int argc, char **argv) {
       report << (r ? "," : "") << "\"" << s.fallback_reasons[r].first << "\":" << s.fallback_reasons[r].second;
     report << "}}";
   }
-  report << "],\"position_independent\":" << (emit_options.position_independent ? "true" : "false") << ",\"overlay_groups\":" << emission.overlay_groups << ",\"images\":[";
+  report << "],\"aot_policy\":" << segarecomp_app::sega_cd_aot_policy_json(aot, emission.admission) << ",\"position_independent\":"
+         << (emit_options.position_independent ? "true" : "false") << ",\"overlay_groups\":" << emission.overlay_groups << ",\"images\":[";
   for (std::size_t i = 0; i < emission.images.size(); ++i) {
     const auto &image = emission.images[i];
     report << (i ? "," : "") << "{\"processor\":\"" << scd::processor_name(image.processor) << "\",\"image_id\":" << image.image_id
            << ",\"name\":" << json_string(image.name) << ",\"producer\":\"" << image.producer << "\",\"mapping\":"
            << image.mapping_index << ",\"start\":" << image.start << ",\"length\":" << image.length << ",\"roots\":" << image.roots
            << ",\"compiled\":" << image.compiled << ",\"unsupported\":" << image.unsupported << ",\"out_of_image_targets\":"
-           << image.out_of_image_targets << ",\"overlay_group\":" << image.overlay_group << "}";
+           << image.out_of_image_targets << ",\"overlay_group\":" << image.overlay_group;
+    if (report_offsets) {
+      report << ",\"source_offsets\":[";
+      for (std::size_t o = 0; o < image.source_offsets.size(); ++o) report << (o ? "," : "") << image.source_offsets[o];
+      report << "]";
+    }
+    report << "}";
   }
   report << "]";
   if (admission) report << ",\"modules\":" << modules_json(*admission);
