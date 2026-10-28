@@ -373,6 +373,17 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
         if (!byte) return bad("admit", "template_syntax");
         a.bytes.push_back(static_cast<std::uint8_t>(*byte));
       }
+    } else if (f.size() == 5U && f[0] == "static-extent") {  // SEG-098-T002 (ADR 0211): static-extent:<cpu>:<track-1 offset>:<base>:<length> (the static scan's proof; no pass)
+      const auto proc = parse_processor(f[1]);
+      const auto off = parse_u32(f[2]);
+      const auto base = parse_u32(f[3]);
+      const auto len = parse_u32(f[4]);
+      if (!proc || !off || !base || !len || *len == 0U || *len > 0x80000U) return bad("admit", "extent_syntax");
+      a.kind = scd::AdmissionKind::static_disc_extent;
+      a.processor = *proc;
+      a.address = *base;
+      a.track_offset = *off;
+      if (const auto error = read_track1_extent(disc, *off, *len, a.bytes); !error.empty()) return bad("admit", error);
     } else if (f.size() == 6U && f[0] == "extent") {  // SEG-078-T003 (ADR 0205): extent:<pass>:<cpu>:<track-1 offset>:<base>:<length>
       const auto proc = parse_processor(f[2]);
       const auto off = parse_u32(f[3]);
@@ -636,13 +647,14 @@ int resolve_source_command(int argc, char **argv) {
 
 // SEG-097-T001 (ADR 0206): static discovery of disc-loaded modules. Pure function of the disc; executes nothing.
 int discover_modules_command(int argc, char **argv) {
-  std::optional<std::string> cue, out_path;
+  std::optional<std::string> cue, out_path, extents_path;
   bool table_roots = false, computed_continue = false;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
     else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
     else if (arg == "--computed-call-whatif") computed_continue = true;   // SEG-098-T001 survey what-if (never used by a build)
+    else if (arg == "--static-extents" && i + 1 < argc) extents_path = argv[++i];   // SEG-098-T002: one `<cpu>:<offset>:<base>:<length>` per verified mapping
     else if (arg == "--module-table-roots") table_roots = true;   // SEG-098-T001: walk the SP module jump table, not only the descriptor entry
     else {
       std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
@@ -705,6 +717,19 @@ int discover_modules_command(int argc, char **argv) {
   for (std::size_t i = 0; i < scan.refusals.size(); ++i)
     report << (i ? "," : "") << "{\"reason\":\"" << scd::loader_refusal_name(scan.refusals[i].kind) << "\",\"pc\":" << scan.refusals[i].pc << "}";
   report << "]}\n";
+  if (extents_path) {   // the static admissions of the BIOS-image build: only a complete scan proposes extents (an exhausted inventory proposes nothing)
+    std::ostringstream lines;
+    if (scan.complete)
+      for (const auto &m : scan.modules)
+        for (const auto base : m.bases)
+          lines << "sub:" << (static_cast<std::uint64_t>(m.block) * 2048U + m.range_offset) << ":" << (base + m.range_offset) << ":" << m.range_length << "\n";
+    std::ofstream out(*extents_path, std::ios::binary);
+    out << lines.str();
+    if (!out) {
+      std::cout << "{\"ok\":false,\"stage\":\"write\",\"error\":\"out_unwritable\"}\n";
+      return 6;
+    }
+  }
   if (out_path && !scan.manifest.empty()) {
     std::ofstream out(*out_path, std::ios::binary);
     out << scan.manifest;

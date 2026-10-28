@@ -39,6 +39,7 @@ using segarecomp_cli::run_process;
 namespace {
 
 constexpr unsigned kMaxEpochs = 4, kMaxTemplates = 64, kMaxTemplateSlots = 256, kMaxRunSlots = 128, kMaxExtents = 16;
+constexpr unsigned kMaxStaticExtents = 12;   // SEG-098-T002: of the 16 disc-image slots (shared with the resolved extents); more is the typed static_extent_bound_exceeded, admitting none
 constexpr unsigned kMaxRounds = 1 + kMaxEpochs + kMaxTemplates + kMaxExtents;
 constexpr const char *kCacheVersion = "segarecomp.sega_cd_build.objects.v1";
 constexpr const char *kViewerFoundation[] = {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c", "sv_host.c", "sv_pages.c", "sv_draw.c"};
@@ -56,6 +57,7 @@ struct Options {
   std::string aot_policy = "compatibility";   // SEG-097-T003 (ADR 0208): `optimized` (experimental) selects the frozen gen2 M3 + B35 proposal
   bool aot_model_given = false;
   bool aot_all_images = false;
+  bool static_discovery = true;   // SEG-098-T002: `--static-discovery 0` is the control (and the escape hatch): the build as it was before the static producer
 };
 
 struct Failure {
@@ -137,6 +139,7 @@ class Builder {
 
     stage("analyze", "running");
     std::vector<std::string> admits;
+    if (o_.static_discovery) static_discovery(admits);   // SEG-098-T002: first in the chain, so every later admission's identity includes them
     unsigned epochs = 0, templates = 0, slot_total = 0;
     for (unsigned round = 0; round < kMaxRounds; ++round) {
       std::cout << "@round " << round << " start" << std::endl;
@@ -176,10 +179,11 @@ class Builder {
           history_ += ",\"admitted\":\"template\"}";
           continue;
         }
-        auto spec = resolve(capture_text, cpu, pc, extents_.size());
+        auto spec = resolve(capture_text, cpu, pc, extents_.size() + static_extents_.size());
         // An extent that is already admitted explains nothing new: the program stopped inside bytes it has authority for but did not compile (an
         // experimental selective policy omits code on purpose), so the stop is the frontier, not a reason to admit the same bytes again.
-        if (spec.extent && std::find(extents_.begin(), extents_.end(), *spec.extent) != extents_.end()) {
+        if (spec.extent && (std::find(extents_.begin(), extents_.end(), *spec.extent) != extents_.end() ||
+                            std::find(static_extents_.begin(), static_extents_.end(), *spec.extent) != static_extents_.end())) {
           spec.extent.reset();
           spec.refusal = "uncompiled_entry_in_admitted_extent";
         }
@@ -233,7 +237,7 @@ class Builder {
     out << "{\"status\":\"ok\",\"program\":\"" << exe.filename().string() << "\",\"viewer_program\":" << (viewer_path.empty() ? "null" : "\"" + viewer_path + "\"")
         << ",\"program_identity\":\"" << program_identity << "\",\"bios_sha256\":\"" << bios_sha_ << "\",\"rounds\":" << rounds << ",\"extents\":[";
     for (std::size_t i = 0; i < extents_.size(); ++i) out << (i ? "," : "") << "\"" << extents_[i] << "\"";
-    out << "],\"aot_policy\":" << (aot_policy_json_.empty() ? "null" : aot_policy_json_) << ",\"frontier\":" << (frontier_.empty() ? "null" : frontier_)
+    out << "],\"static_extents\":" << static_extents_.size() << ",\"static_discovery\":" << static_json_ << ",\"aot_policy\":" << (aot_policy_json_.empty() ? "null" : aot_policy_json_) << ",\"frontier\":" << (frontier_.empty() ? "null" : frontier_)
         << ",\"result\":\"" << raw_value(report, "result").value_or("") << "\",\"stop\":\"" << stop_class(report)
         << "\",\"viewer\":" << (o_.viewer ? "true" : "false") << ",\"history\":[" << history_ << "]}\n";
     std::ofstream(o_.output / "status.json", std::ios::binary | std::ios::trunc) << out.str();
@@ -528,6 +532,41 @@ class Builder {
     return std::nullopt;
   }
 
+  // ---- static module admission (SEG-098-T002, ADR 0211) ----
+  // The static loader scan (disc + admitted boot images, module-jump-table roots; executes nothing) proposes the extents of disc modules no pass has
+  // loaded. They enter the chain as `static-extent:` admissions; the emitter re-reads every one from the verified disc, and the per-instruction live-byte
+  // guard remains the runtime authority. Any failure leaves the build exactly as it was without this step and is reported, never hidden.
+  void static_discovery(std::vector<std::string> &admits) {
+    static_json_ = "{\"ran\":false}";
+    const fs::path list = o_.output / "static-extents.txt", report = o_.output / "static-scan.json";
+    std::error_code ec;
+    fs::remove(list, ec);
+    const int code = run_process({self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--static-extents", list.string()}, report, {}, 300);
+    const std::string text = read_text(report);
+    if (code < 0 || text.empty() || text.find("\"complete\":") == std::string::npos) { static_json_ = "{\"ran\":true,\"status\":\"scan_failed\"}"; return; }
+    const bool complete = raw_value(text, "complete").value_or("") == "true";
+    std::map<std::string, unsigned> reasons;
+    for (std::size_t at = text.find("\"reason\":\""); at != std::string::npos; at = text.find("\"reason\":\"", at + 1U)) {
+      const auto end = text.find('"', at + 10U);
+      if (end != std::string::npos) ++reasons[text.substr(at + 10U, end - at - 10U)];
+    }
+    std::vector<std::string> found;
+    {
+      std::ifstream in(list);
+      for (std::string line; std::getline(in, line);) if (!line.empty()) found.push_back(line);
+    }
+    std::string status = !complete ? "scan_incomplete" : found.empty() ? "no_modules" : "admitted";
+    if (found.size() > kMaxStaticExtents) { status = "static_extent_bound_exceeded"; found.clear(); }
+    for (const auto &e : found) { static_extents_.push_back(e); admits.push_back("static-extent:" + e); }
+    std::ostringstream out;
+    out << "{\"ran\":true,\"status\":\"" << status << "\",\"complete\":" << (complete ? "true" : "false") << ",\"extents\":" << static_extents_.size() << ",\"refusals\":{";
+    bool first = true;
+    for (const auto &[k, n] : reasons) { out << (first ? "" : ",") << "\"" << k << "\":" << n; first = false; }
+    out << "}}";
+    static_json_ = out.str();
+    log_ << "static discovery: " << status << ", " << static_extents_.size() << " extent(s)" << std::endl;
+  }
+
   // ---- disc extents (ADR 0205) ----
   struct Resolution {
     std::optional<std::string> extent;   // "<cpu>:<offset>:<base>:<length>"
@@ -575,7 +614,8 @@ class Builder {
   std::ofstream log_;
   std::mutex log_mutex_;
   std::atomic<unsigned> counter_{0};
-  std::vector<std::string> extents_;
+  std::vector<std::string> extents_, static_extents_;
+  std::string static_json_ = "{\"ran\":false}";
   std::vector<std::string> unit_names_;
   std::string aot_policy_json_;   // SEG-097-T003: the last emission's machine-readable aot_policy object (status.json)
   std::vector<fs::path> unit_sources_, unit_objects_, runtime_objects_;
@@ -594,6 +634,7 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--output") { o.output = value; have_output = true; }
     else if (key == "--runtime-dir") { o.runtime_dir = value; have_runtime = true; }
     else if (key == "--cache-dir") o.cache_dir = value;
+    else if (key == "--static-discovery") o.static_discovery = value != "0";
     else if (key == "--cc") o.cc = value;
     else if (key == "--cc-arg") o.cc_args.push_back(value);
     else if (key == "--link-arg") o.link_args.push_back(value);
