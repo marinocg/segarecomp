@@ -117,13 +117,19 @@ below; nothing was guessed.
 | 12 | a word of the executable range changed before the call: typed stop `image_bytes_mismatch`, no instruction of the wrong image retired |
 | 13 | not repeated here: a mixture of two images is the existing `image_partially_overwritten` row of `sega_cd_overlay_test` (ADR 0132); T001 adds no selection logic |
 | 14 | two discoveries and two emits from the discovered list: byte-identical list, identity, report, program identity and generated C |
-| 15 | discovery reads no sector beyond the boot images and the proven ones: changing unrelated sectors (and the decoy) changes nothing but the disc identity |
+| 15 | the result is a function of the boot images and the proven sectors: changing unrelated sectors (and the decoy) changes nothing but the disc identity (output invariance; no read ledger is kept) |
 | bounds | unbounded recursion ends in `scan_limit_exceeded`, `complete=false`, no module proposed (exit 9) |
 
 Deviations from the pre-registration, each conservative or presentational: (a) the runtime input is the machine input `--set main:d7=N`, because the synthetic
 post-BIOS profile maps no controller port (the controller-driven variant needs the BIOS-image profile, below); (b) DOUTEN unknown at DTRG proposes the load
 instead of refusing (a proposal can only fail closed at run time; a known-clear DOUTEN starts nothing), so `cdc_state_unknown` is reserved for an unknown register
 pointer and is not currently emitted; (c) the permitted tool budget is 4,096 states / 100,000 steps as registered; the fixture uses 79 states and 493 steps.
+
+Adversarial review corrections (before merge): a LONG write to a Gate Array register (the runtime splits it into two word accesses) now drops everything the walk knows about the
+interface (`long_dest`: nothing proposed); the play position is dropped after every transfer and by every non-status drive command, because the drive advances every 75 Hz tick and a
+transfer without a new play command takes another sector (`stale_lba`: that load is `lba_unknown`); an exhausted module inventory (`too_many_modules`) writes no list. The walk
+still ignores the loader's header-wait comparison (it is the loader's own check that the drive reached the sector) and assumes A7 never points at the register block; both are
+proposals-only assumptions, since the unchanged admission and the runtime digests refuse bytes that differ.
 
 ## Decision (T001): `STATIC_UNVISITED_DISCOVERY_GO`, for a stated scope
 

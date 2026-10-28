@@ -128,3 +128,8 @@ claim and the unchanged identity of the request. The real model never failed on 
   general Sega CD gameplay. Compatibility remains the default and the fallback; the Compatibility emission is byte-identical to before.
 - Limits: two small project-authored subjects; the BIOS-image profile's per-image scoring covers BIOS, copy, disc-extent and epoch images the same way, but no
   commercial disc was run (no aggregate figure exists for one); a model-proposed region is never a completeness certificate.
+
+Review notes: (1) `sega-cd build` now ends the build at the frontier `uncompiled_entry_in_admitted_extent` instead of admitting the same extent again; this also applies to Compatibility
+(it never occurred there because an admitted extent is compiled), the emission itself being byte-identical. (2) The request, not the outcome, enters the program identity; the admitted
+set also depends on binary32 scores, which are bit-identical across IEEE-754 hosts under the pinned numeric contract (ADR 0102) - the same assumption the Genesis policy makes. (3) The
+BIOS-image selective path runs a second, broad emission for the comparison counts (about twice the emission cost); a failure of that comparison emission does not discard a valid selective result.

@@ -106,7 +106,7 @@ def main():
         def strip(f):
             return f["modules"], f["operations"], f["refusals"]
         check(strip(found3) == strip(found) and found3["disc_identity"] != found["disc_identity"],
-              "altering sectors that no loader operation names changes nothing but the disc identity (discovery reads only boot images and proven sectors)")
+              "altering sectors that no loader operation names changes nothing but the disc identity (the result is a function of the boot images and the proven sectors alone)")
 
         # -- build once, run every route with the SAME binary (2/3) -----------------------------------------------------------------
         c_path = tmp / "program.c"
@@ -157,7 +157,7 @@ def main():
                 stop = report.get("stop", {}).get("class")
                 check(f["ok"] and code != 0 and stop in ("image_bytes_mismatch", "code_bytes_mismatch", "image_partially_overwritten"),
                       "overwritten: a word changed inside the executable range ends in a typed stop, the patched instruction never runs (%s)" % stop)
-                check(words is None or words[0] == 0, "overwritten: A's counter stays 0 (no instruction of the wrong image retired)")
+                check(words is not None and words[0] == 0, "overwritten: A's counter stays 0 (no instruction of the wrong image retired)")
 
         # -- 8/9/10: refusals -------------------------------------------------------------------------------------------------------
         for case, reason in (("unknown_lba", "lba_unknown"), ("unknown_dest", "destination_unknown"), ("prg_dest", "destination_unsupported")):
@@ -169,6 +169,14 @@ def main():
             c_bases = [m["bases"] for m in f["modules"] if m["block"] == o["lba"]["C"]]
             want = {"unknown_lba": [], "unknown_dest": [[0x0A0000]], "prg_dest": []}[case]
             check(c_bases == want, "%s: the mappings of C that are proven are exactly %s (got %s)" % (case, want, c_bases))
+        for case, label in (("long_dest", "a LONG write to the Gate Array (split by the runtime into two word accesses)"),
+                            ("stale_lba", "a second transfer with no new play command (the drive advanced)")):
+            d, o = build_case(tmp, case)
+            rc, f = discover(d / "disc.cue", tmp / ("m-%s.txt" % case))
+            blocks = {m["block"]: m for m in f["modules"]}
+            ok = (not f["modules"]) if case == "long_dest" else (set(blocks) <= {o["lba"]["A"], o["lba"]["B"], o["lba"]["C"]} and o["lba"]["B"] not in
+                  {b for b, m in blocks.items() if 0x0A8000 in m["bases"]})
+            check(ok, "%s: nothing is proposed from %s" % (case, label))
         d, o = build_case(tmp, "recursion")
         rc, f = discover(d / "disc.cue")
         check(rc == 9 and not f["ok"] and not f["complete"] and any(r["reason"] == "scan_limit_exceeded" for r in f["refusals"]) and not f["modules"],

@@ -205,7 +205,10 @@ private:
       h.play_invalid = false;
       return;
     }
-    if ((h.tx[0].v & 0xFU) != 3U) return;  // not a play command: the position is unchanged
+    if ((h.tx[0].v & 0xFU) != 3U) {  // status (0) leaves the position; stop, seek, pause, TOC... move or end it: the walk no longer knows it
+      if ((h.tx[0].v & 0xFU) != 0U) h.lba = {};
+      return;
+    }
     std::uint32_t t[8];
     bool ok = true;
     for (std::size_t i = 2; i < 8; ++i) ok = ok && digit(i, t[i]);
@@ -287,9 +290,14 @@ private:
     loaded.erase(std::remove_if(loaded.begin(), loaded.end(), [&](const Loaded &l) { return l.base < destination + bytes && destination < l.base + l.bytes; }),
                  loaded.end());  // a newer load replaces what it overlaps
     loaded.push_back({op, destination, bytes});
+    s.hw.lba = {};  // the drive advances every 75 Hz tick: a further transfer needs a further play command
   }
 
   void hw_write(State &s, std::uint32_t off, Width w, const Val &val) {
+    if (w == Width::long_word) {  // the runtime splits a long access into two word accesses the walk does not model: nothing known about the interface survives
+      taint_hw(s);
+      return;
+    }
     auto &h = s.hw;
     const std::uint32_t pc = s.pc;
     if (off == 0x04U || off == 0x05U) {
@@ -642,7 +650,8 @@ LoaderScan scan_sega_cd_loaders(const DiscImage &disc, const BootImages &images)
     if (scan.modules.size() >= kModuleMaxCount) {
       scan.refusals.push_back({LoaderRefusalKind::too_many_modules, 0U});
       scan.complete = false;
-      break;
+      scan.modules.clear();  // an exhausted inventory proposes nothing
+      return scan;
     }
     std::vector<std::uint8_t> sector(kLoaderScanSectorBytes);
     if (g.lba < kIso9660FirstDescriptor || static_cast<std::uint64_t>(g.lba) + 1U > track.sector_count ||

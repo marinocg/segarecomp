@@ -38,7 +38,7 @@ BASES_C = (0x090000, 0x0A0000)
 BASE_D = 0x0B0000
 HEADER = 0x40
 CASES = ("base", "overwritten", "header_patched", "unknown_lba", "unknown_dest", "prg_dest", "recursion",
-         "pi", "pi_odd", "pi_escape", "pi_overwrite")
+         "pi", "pi_odd", "pi_escape", "pi_overwrite", "long_dest", "stale_lba")
 MARK = {"A": F.SUB_DATA + 0x20, "B": F.SUB_DATA + 0x22, "C": F.SUB_DATA + 0x24}
 COUNT = {"A": F.SUB_DATA + 0x30, "B": F.SUB_DATA + 0x32, "C": F.SUB_DATA + 0x34}
 MARKER = {"A": 0xAAAA, "B": 0xBBBB, "C": 0xCCCC}
@@ -269,6 +269,10 @@ def build(options):
         sub.move("w", F.imm(0x1234), F.absl(BASE_A + 8))      # inside the 64-byte header, outside the executable subrange
     if case == "overwritten":
         sub.move("w", F.imm(0x4E71), F.absl(BASE_A + HEADER + 4))   # one word inside A's executable range
+    if case == "stale_lba":   # a second transfer with no new play command: the drive has moved on, so the position is not the one last commanded
+        args(LBA["B"], 0x0A8000)
+        sub.bsr("load_sector_noplay")
+        sub.jsr(F.absl(0x0A8000))
     sub.jsr(F.absl(BASE_A + HEADER))
     sub.bra("done")
 
@@ -300,12 +304,13 @@ def build(options):
     sub.move("b", F.imm(0x02), F.absl(F.GA_SUB + 0x0F))
     sub.stop(0x2700)
 
-    def loader(label, destination):
+    def loader(label, destination, play=True, long_dest=False):
         # one sector: the play command (d1..d4), wait for its header (d6, d7), CDC DMA of 2,048 bytes to the destination at d5 * 8
         sub.label(label)
-        sub.move("w", F.imm(0x0300), F.absl(F.GA_SUB + 0x42))
-        for i, reg in enumerate((1, 2, 3, 4)):
-            sub.move("w", F.d(reg), F.absl(F.GA_SUB + 0x44 + 2 * i))
+        if play:
+            sub.move("w", F.imm(0x0300), F.absl(F.GA_SUB + 0x42))
+            for i, reg in enumerate((1, 2, 3, 4)):
+                sub.move("w", F.d(reg), F.absl(F.GA_SUB + 0x44 + 2 * i))
         sub.label("w_valid_" + label)
         sub.move("b", F.imm(0x0F), F.absl(F.GA_SUB + 0x05))
         sub.move("b", F.absl(F.GA_SUB + 0x07), F.d(0))
@@ -327,7 +332,10 @@ def build(options):
         sub.lsl_w(8, 2)
         sub.alu("or", "w", F.d(1), 2)
         sub.quick("add", "w", 4, F.d(2))                  # DAC = PT + 4
-        sub.move("b", F.imm(destination), F.absl(F.GA_SUB + 0x04))
+        if long_dest:   # a LONG write to the Gate Array: the runtime splits it into two word accesses (the high word selects destination 0)
+            sub.move("l", F.imm(destination), F.absl(F.GA_SUB + 0x04))
+        else:
+            sub.move("b", F.imm(destination), F.absl(F.GA_SUB + 0x04))
         sub.move("w", F.d(5), F.absl(F.GA_SUB + 0x0A))
         sub.move("b", F.imm(0x02), F.absl(F.GA_SUB + 0x05))
         sub.move("b", F.imm(0xFF), F.absl(F.GA_SUB + 0x07))
@@ -356,7 +364,9 @@ def build(options):
         sub.label("h_div")
         sub.quick("add", "w", 1, F.absl(PI["EXC2"]))
         sub.rte()
-    loader("load_sector", 7)
+    loader("load_sector", 7, long_dest=(case == "long_dest"))
+    if case == "stale_lba":
+        loader("load_sector_noplay", 7, play=False)
     if case == "prg_dest":
         loader("load_sector_prg", 5)
     sp = sub.assemble()

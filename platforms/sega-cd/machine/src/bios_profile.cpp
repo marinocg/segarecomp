@@ -249,6 +249,19 @@ BiosProfileEmission emit_sega_cd_bios_program(const DiscImage &disc, const BiosP
   auto broad = emit_bios_once(disc, inputs, options, broad_state);
   attempt.outcome.requested = true;
   if (selective.error != BiosProfileError::none && attempt.outcome.reason == "none") attempt.outcome.reason = "validator_rejected:emission_" + std::string(bios_profile_error_name(selective.error));
+  if (broad.error != BiosProfileError::none && attempt.outcome.admitted && selective.error == BiosProfileError::none) {
+    selective.admission = attempt.outcome;  // the broad reference only supplied the comparison counts; a valid selective result is not discarded for it
+    selective.admission.k_sha256.clear();
+    std::vector<std::pair<std::string, std::vector<std::uint32_t>>> rows;
+    for (std::size_t i = 0; i < attempt.outcome.images.size(); ++i) {
+      selective.admission.images[i].admitted_entries = static_cast<std::uint32_t>(attempt.admitted[i].size());
+      selective.admission.admitted_entries += selective.admission.images[i].admitted_entries;
+      rows.emplace_back(std::string(processor_name(attempt.outcome.images[i].processor)) + ":" + attempt.outcome.images[i].name,
+                        std::vector<std::uint32_t>(attempt.admitted[i].begin(), attempt.admitted[i].end()));
+    }
+    selective.admission.k_sha256 = admitted_set_digest(rows);
+    return selective;
+  }
   if (broad.error != BiosProfileError::none || !attempt.outcome.admitted || selective.error != BiosProfileError::none) {
     broad.admission = attempt.outcome;
     broad.admission.requested = true;
