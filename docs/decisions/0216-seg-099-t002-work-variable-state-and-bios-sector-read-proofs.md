@@ -52,7 +52,7 @@ Authentic (authorized local discs, Model 1 BIOS; aggregates only):
 
 | Title | Before (M2) | After (this task) |
 |---|---|---|
-| Sonic CD | 0 static modules; 1 `computed_control_unresolved`; build 17 rounds, 12 extents, `pcm_unsupported` | **identical** (0 static modules, same build outcome, identical program identity class); the scan completes in 84 states / 1,229 steps, 0 transfers resolved; the SP interrupt entry makes unmodelled calls or unresolved stores, so no tracked memory is trusted (`async_volatile_all`) |
+| Sonic CD | 0 static modules; 1 `computed_control_unresolved`; build 17 rounds, 12 extents, `pcm_unsupported` | **identical** (0 static modules, same build outcome, identical program identity class); the scan completes in 13 states / 44 steps (the final head; 84 / 1,229 before the review fixes, when a PC-relative table read was still trusted after an unknown store), 0 transfers resolved; the SP interrupt entry makes unmodelled calls or unresolved stores, so no tracked memory is trusted (`async_volatile_all`) |
 | Earthworm Jim SE | scan exhausts 4,096 states | 16 BIOS calls (all in the modelled ABI set), 1 `{sector,count}` block resolved and 1 unresolved, 1 transfer with an unknown destination, still exhausts 4,096 states (T003) |
 
 Why no authentic module (cause, not a claim of impossibility): the load arguments are produced by command-driven code - the file name comes from the main processor's command, the dispatch on the command is a computed transfer, and the interrupt path is
