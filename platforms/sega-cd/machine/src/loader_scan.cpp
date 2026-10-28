@@ -36,6 +36,7 @@ const char *loader_refusal_name(LoaderRefusalKind kind) noexcept {
   case LoaderRefusalKind::too_many_operations: return "too_many_operations";
   case LoaderRefusalKind::too_many_modules: return "too_many_modules";
   case LoaderRefusalKind::scan_limit_exceeded: return "scan_limit_exceeded";
+  case LoaderRefusalKind::computed_control_unresolved: return "computed_control_unresolved";
   }
   return "unknown";
 }
@@ -146,6 +147,9 @@ public:
     sv.foreign_calls_unknown = static_cast<std::uint32_t>(foreign_unknown_.size());
     sv.copy_loop_candidates = static_cast<std::uint32_t>(copy_sites_.size());
     sv.counted_loops = static_cast<std::uint32_t>(loop_sites_.size());
+    sv.dispatch_resolved = static_cast<std::uint32_t>(dispatch_sites_.size());
+    sv.table_reads = static_cast<std::uint32_t>(table_read_sites_.size());
+    sv.memory_carried_reads = static_cast<std::uint32_t>(memory_read_sites_.size());
     return std::move(scan_);
   }
 
@@ -155,6 +159,7 @@ private:
   const LoaderScanOptions &options_;
   std::set<std::pair<std::string, std::uint32_t>> ends_;
   void end_at(const char *kind, std::uint32_t pc) { if (ends_.insert({kind, pc}).second) ++scan_.survey.path_ends[kind]; }
+  std::set<std::uint32_t> table_read_sites_, dispatch_sites_, memory_read_sites_;
   std::set<std::uint32_t> cdd_sites_, trigger_sites_, copy_sites_, loop_sites_, foreign_other_, foreign_unknown_;
   std::set<std::pair<std::uint32_t, std::uint32_t>> bios_sites_;
   std::span<const std::uint8_t> bytes_;
@@ -193,7 +198,45 @@ private:
   }
 
   // ---- values ------------------------------------------------------------------------------------------------------------
-  static Val read_ea(const State &s, const M68kEffectiveAddress &ea, Width w) {
+  // A word/long at `address` inside the boot image (a constant when the table is not rewritten before the read; see LoaderScanOptions::constant_dispatch).
+  Val image_read(std::uint32_t address, Width w) {
+    const std::uint32_t n = w == Width::byte ? 1U : w == Width::word ? 2U : 4U;
+    if (w == Width::byte || (address & 1U) != 0U || address < base_ || static_cast<std::uint64_t>(address) + n > end_) return {};
+    const std::uint32_t off = first_offset_ + (address - base_);
+    std::uint32_t v = 0;
+    for (std::uint32_t i = 0; i < n; ++i) v = (v << 8) | bytes_[off + i];
+    table_read_sites_.insert(address);
+    return K(v);
+  }
+
+  // The effective address of a (d8,PC|An,Xn) control/data operand when its base and index are known.
+  std::optional<std::uint32_t> indexed_address(const State &s, const M68kEffectiveAddress &ea) const {
+    Val base;
+    if (ea.mode == M68kEaMode::pc_index8) base = K(ea.pc_base_address);
+    else if (ea.mode == M68kEaMode::address_index8) base = s.a[ea.reg & 7U];
+    else return std::nullopt;
+    const Val index = ea.index_is_address ? s.a[ea.index_reg & 7U] : s.d[ea.index_reg & 7U];
+    if (!base.known()) return std::nullopt;
+    std::int64_t idx = 0;
+    if (ea.index_is_long) {
+      if (!index.known()) return std::nullopt;
+      idx = static_cast<std::int32_t>(index.v);
+    } else {
+      const Val low = exact(index, Width::word);
+      if (!low.known()) return std::nullopt;
+      idx = static_cast<std::int16_t>(low.v);
+    }
+    return static_cast<std::uint32_t>((static_cast<std::int64_t>(base.v) + ea.displacement + idx) & 0x00FFFFFF);
+  }
+
+  Val read_ea(const State &s, const M68kEffectiveAddress &ea, Width w) {
+    if (options_.constant_dispatch) {
+      if (ea.mode == M68kEaMode::pc_index8 || ea.mode == M68kEaMode::address_index8) {
+        const auto address = ea.mode == M68kEaMode::pc_index8 ? indexed_address(s, ea) : std::nullopt;   // only the immutable image is read
+        return address ? image_read(*address, w) : Val{};
+      }
+      if (ea.mode == M68kEaMode::pc_disp16) return image_read(ea.absolute_address & 0x00FFFFFFU, w);
+    }
     switch (ea.mode) {
     case M68kEaMode::immediate: return K(mask_of(w, ea.immediate_value));
     case M68kEaMode::data_register: return exact(s.d[ea.reg & 7U], w);
@@ -411,6 +454,13 @@ private:
 
   // ---- data effect of one instruction --------------------------------------------------------------------------------
   void apply_data(State &s, const M68kIrOperation &op) {
+    std::optional<State> pre;   // the state before the instruction, for the folded arithmetic and the table read below (the footprint clears the destination first)
+    std::optional<State> pre_move;
+    if (options_.constant_dispatch && op.kind == M68kIrKind::write_move && op.source_ea.mode == M68kEaMode::pc_index8) pre_move = s;
+    if (options_.constant_dispatch && op.destination_ea.mode == M68kEaMode::data_register &&
+        (op.kind == M68kIrKind::add || op.kind == M68kIrKind::add_immediate || op.kind == M68kIrKind::add_quick || op.kind == M68kIrKind::subtract ||
+         op.kind == M68kIrKind::subtract_immediate || op.kind == M68kIrKind::subtract_quick))
+      pre = s;
     const auto effect = m68k_operation_effect(op);
     const bool pure = op.kind == M68kIrKind::write_moveq || op.kind == M68kIrKind::write_move || op.kind == M68kIrKind::write_movea ||
                       op.kind == M68kIrKind::write_clr || op.kind == M68kIrKind::load_effective_address;
@@ -424,7 +474,10 @@ private:
         // written explicitly below / by the walker (the effect owner does not advertise a complete footprint for these)
         op.kind == M68kIrKind::write_moveq || op.kind == M68kIrKind::load_effective_address || op.kind == M68kIrKind::dbcc_loop;
     // The footprint first (what the walk does not model becomes Unknown); the explicit results below override it.
-    if (no_register_write) {
+    // A MOVEM store (registers to memory) writes no data or address register except an auto-decremented A7 (modelled: the stack is never a register block).
+    const bool movem_store = options_.constant_dispatch && op.kind == M68kIrKind::movem_transfer && op.movem_direction == M68kMovemDirection::registers_to_memory &&
+                             (op.destination_ea.mode == M68kEaMode::address_predec || op.destination_ea.mode == M68kEaMode::address_indirect) && (op.destination_ea.reg & 7U) == 7U;
+    if (no_register_write || movem_store) {
       // nothing is written
     } else if (!effect.register_write_footprint_complete) {
       for (auto &v : s.d) v = {};
@@ -436,12 +489,23 @@ private:
       }
     }
     const Width w = op.size;
+    if (pre) {   // ADD/SUB into a data register with known operands: the result is known (the condition codes are not modelled)
+      const unsigned r = op.destination_ea.reg & 7U;
+      const Val before = exact(pre->d[r], w);
+      const Val src = read_ea(*pre, op.source_ea, w);
+      if (before.known() && src.known()) {
+        const bool sub = op.kind == M68kIrKind::subtract || op.kind == M68kIrKind::subtract_immediate || op.kind == M68kIrKind::subtract_quick;
+        const std::uint32_t result = mask_of(w, sub ? before.v - src.v : before.v + src.v);
+        s.d[r] = merge(pre->d[r], K(result), w);
+      }
+      return;
+    }
     switch (op.kind) {
     case M68kIrKind::write_moveq:
       s.d[static_cast<unsigned>(op.destination) & 7U] = K(static_cast<std::uint32_t>(static_cast<std::int32_t>(op.operand)));
       return;
     case M68kIrKind::write_move:
-      write_memory_ea(s, op.destination_ea, w, read_ea(s, op.source_ea, w));
+      write_memory_ea(s, op.destination_ea, w, read_ea(pre_move ? *pre_move : s, op.source_ea, w));
       return;
     case M68kIrKind::write_clr:
       write_memory_ea(s, op.destination_ea, w, K(0));
@@ -523,6 +587,9 @@ private:
       if (op.kind == M68kIrKind::stop_until_interrupt) { end_at("stop", here); return; }
       if (op.kind == M68kIrKind::write_move && op.source_ea.mode == M68kEaMode::address_postinc && op.destination_ea.mode == M68kEaMode::address_postinc) copy_sites_.insert(here);
       if (op.kind == M68kIrKind::dbcc_loop) loop_sites_.insert(here);
+      if (options_.constant_dispatch && op.kind == M68kIrKind::write_move && op.destination_ea.mode == M68kEaMode::data_register && (op.source_ea.reg & 7U) != 7U &&
+          (op.source_ea.mode == M68kEaMode::address_indirect || op.source_ea.mode == M68kEaMode::address_postinc || op.source_ea.mode == M68kEaMode::address_disp16))
+        memory_read_sites_.insert(here);
       apply_data(s, op);
       const auto control = m68k_control_successors(op);
       if (control.always_raises_exception) { end_at("exception", here); return; }
@@ -538,11 +605,18 @@ private:
           if (target.known() && op.source_ea.mode == M68kEaMode::address_disp16)
             target = K(target.v + static_cast<std::uint32_t>(static_cast<std::int32_t>(op.source_ea.displacement)));
           if (!transfer_to(s, target, call, next, here, stack)) { end_at("computed_jump", here); return; }
+        } else if (options_.constant_dispatch && (control.dynamic == M68kDynamicControlFamily::call_pc_index || control.dynamic == M68kDynamicControlFamily::jump_pc_index ||
+                                                  control.dynamic == M68kDynamicControlFamily::call_address_index || control.dynamic == M68kDynamicControlFamily::jump_address_index) &&
+                   indexed_address(s, op.source_ea)) {
+          const bool call = control.dynamic == M68kDynamicControlFamily::call_pc_index || control.dynamic == M68kDynamicControlFamily::call_address_index;
+          dispatch_sites_.insert(here);
+          if (!transfer_to(s, K(*indexed_address(s, op.source_ea)), call, next, here, stack)) { end_at("computed_jump", here); return; }
         } else {
           const bool indexed_call = control.dynamic == M68kDynamicControlFamily::call_pc_index || control.dynamic == M68kDynamicControlFamily::call_address_index;
           end_at(control.dynamic == M68kDynamicControlFamily::call_pc_index ? "computed_call_pc_index" : control.dynamic == M68kDynamicControlFamily::call_address_index ? "computed_call_address_index"
                  : control.dynamic == M68kDynamicControlFamily::jump_pc_index ? "computed_jump_pc_index" : control.dynamic == M68kDynamicControlFamily::jump_address_index ? "computed_jump_address_index" : "computed_other", here);
           if (!s.loaded.empty()) refuse(LoaderRefusalKind::entry_unknown, here);
+          if (options_.constant_dispatch) refuse(LoaderRefusalKind::computed_control_unresolved, here);
           if (!(indexed_call && options_.continue_after_computed_call)) return;
           havoc_after_foreign_call(s);
           s.pc = next;
@@ -596,6 +670,7 @@ private:
   bool transfer_to(State &s, const Val &target, bool call, std::uint32_t next, std::uint32_t here, std::vector<State> &) {
     if (!target.known()) {
       foreign_unknown_.insert(here);
+      if (options_.constant_dispatch) refuse(LoaderRefusalKind::computed_control_unresolved, here);
       if (!s.loaded.empty()) refuse(LoaderRefusalKind::entry_unknown, here);
       if (call) { havoc_after_foreign_call(s); s.pc = next; return true; }
       return false;

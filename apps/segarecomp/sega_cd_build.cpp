@@ -541,7 +541,7 @@ class Builder {
     const fs::path list = o_.output / "static-extents.txt", report = o_.output / "static-scan.json";
     std::error_code ec;
     fs::remove(list, ec);
-    const int code = run_process({self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--static-extents", list.string()}, report, {}, 300);
+    const int code = run_process({self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--constant-dispatch", "--static-extents", list.string()}, report, {}, 300);
     const std::string text = read_text(report);
     if (code < 0 || text.empty() || text.find("\"complete\":") == std::string::npos) { static_json_ = "{\"ran\":true,\"status\":\"scan_failed\"}"; return; }
     const bool complete = raw_value(text, "complete").value_or("") == "true";

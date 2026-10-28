@@ -38,7 +38,7 @@ BASES_C = (0x090000, 0x0A0000)
 BASE_D = 0x0B0000
 HEADER = 0x40
 CASES = ("base", "overwritten", "header_patched", "unknown_lba", "unknown_dest", "prg_dest", "recursion",
-         "pi", "pi_odd", "pi_escape", "pi_overwrite", "long_dest", "stale_lba", "table_header")
+         "pi", "pi_odd", "pi_escape", "pi_overwrite", "long_dest", "stale_lba", "table_header", "dispatch", "dispatch_unknown")
 SP_TABLE_PREFIX = 0x2A   # SEG-098-T001: an authentic-style SP header ("MAIN", module jump table at +$20, init at +$2A) before the loader code
 MARK = {"A": F.SUB_DATA + 0x20, "B": F.SUB_DATA + 0x22, "C": F.SUB_DATA + 0x24}
 COUNT = {"A": F.SUB_DATA + 0x30, "B": F.SUB_DATA + 0x32, "C": F.SUB_DATA + 0x34}
@@ -92,6 +92,16 @@ class PiAsm(F.Asm):
         self.fixups.append((len(self.words), label, "rel8w"))
         self.w(xn << 12)
 
+    def jsr_pc_index(self, xn, ext_label):  # jsr (0,PC,Xn.w): the base is the extension word's own address (named `ext_label`)
+        self.mark()
+        self.w(0x4EBB)
+        self.labels[ext_label] = self.pc
+        self.w(xn << 12)
+
+    def table_word(self, label, relative_to):  # dc.w label - relative_to
+        self.fixups.append((len(self.words), (label, relative_to), "diff16"))
+        self.w(0)
+
     def jsr_pc(self, label):
         self.mark()
         self.w(0x4EBA)
@@ -114,6 +124,11 @@ class PiAsm(F.Asm):
                 disp = self.labels[label] - (self.base + 2 * index)
                 assert -128 <= disp < 128, label
                 self.words[index] |= disp & 0xFF
+            elif kind == "diff16":
+                target, base_label = label
+                disp = self.labels[target] - self.labels[base_label]
+                assert -32768 <= disp < 32768, label
+                self.words[index] = disp & 0xFFFF
             else:
                 keep.append((index, label, kind))
         self.fixups = keep
@@ -210,9 +225,10 @@ def sector(kind, variant=None, helper=0, pi_base=BASES_C[0]):
 def build(options):
     case = options.get("unvisited_case", "base")
     assert case in CASES, case
-    table = case == "table_header" or bool(options.get("sp_table"))   # SEG-098-T002: the authentic-style SP header + module jump table, with any case
+    dispatch = case in ("dispatch", "dispatch_unknown")                                      # SEG-098-T003 (ADR 0212): every module is reached through a PC-relative offset-table dispatcher
+    table = case in ("table_header", "dispatch", "dispatch_unknown") or bool(options.get("sp_table"))   # SEG-098-T002: the authentic-style SP header + module jump table, with any case
     bios = bool(options.get("bios"))                                    # SEG-098-T002: a BIOS-image profile boot: the BIOS starts the sub, so the IP does not
-    sub = F.Asm(F.SP_BASE + (SP_TABLE_PREFIX if table else 0))
+    sub = (PiAsm if dispatch else F.Asm)(F.SP_BASE + (SP_TABLE_PREFIX if table else 0))
 
     def cdc_write(reg, value):
         sub.move("b", F.imm(reg), F.absl(F.GA_SUB + 0x05))
@@ -260,38 +276,80 @@ def build(options):
     sub.immop("cmp", "b", 3, F.d(0))
     sub.bcc("eq", "pick_c")
 
-    sub.label("pick_a")
-    args(LBA["A"], BASE_A)
-    sub.bsr("load_sector")
-    args(LBA["D"], BASE_D)
-    sub.bsr("load_sector")
-    # D is loaded and never used. A's DMA was overwritten by D only if the bases overlapped (they do not).
-    args(LBA["A"], BASE_A)
-    sub.bsr("load_sector")
-    if case == "header_patched":
-        sub.move("w", F.imm(0x1234), F.absl(BASE_A + 8))      # inside the 64-byte header, outside the executable subrange
-    if case == "overwritten":
-        sub.move("w", F.imm(0x4E71), F.absl(BASE_A + HEADER + 4))   # one word inside A's executable range
-    if case == "stale_lba":   # a second transfer with no new play command: the drive has moved on, so the position is not the one last commanded
-        args(LBA["B"], 0x0A8000)
-        sub.bsr("load_sector_noplay")
-        sub.jsr(F.absl(0x0A8000))
-    sub.jsr(F.absl(BASE_A + HEADER))
-    sub.bra("done")
+    if dispatch:   # each arm calls the dispatcher with a constant selector; the handlers hold what the direct arms hold
+        sub.label("pick_a")
+        sub.moveq(0, 0)
+        sub.bsr("dispatch")
+        sub.bra("done")
+        sub.label("pick_b")
+        sub.moveq(1, 0)
+        sub.bsr("dispatch")
+        sub.bra("done")
+        sub.label("pick_c")
+        if case == "dispatch_unknown":   # the selector is a Gate Array register the program cannot know statically
+            sub.move("w", F.absl(F.GA_SUB + 0x10), F.d(0))
+        else:
+            sub.moveq(2, 0)
+        sub.bsr("dispatch")
+        sub.bra("done")
+        # (the direct arms below are skipped: their labels are the handlers)
+        sub.label("dispatch")            # d0.w = the selector: add.w d0,d0 / move.w table(pc,d0.w),d0 / jsr (0,pc,d0.w)
+        sub.alu("add", "w", F.d(0), 0)
+        sub.move_w_pc_index("dsp_tab", 0, 0)
+        sub.jsr_pc_index(0, "dsp_jx")
+        sub.rts()
+        sub.label("dsp_tab")
+        for handler in ("h_a", "h_b", "h_c"):
+            sub.table_word(handler, "dsp_jx")
+        sub.label("h_a")
+        args(LBA["A"], BASE_A)
+        sub.bsr("load_sector")
+        sub.jsr(F.absl(BASE_A + HEADER))
+        sub.rts()
+        sub.label("h_b")
+        args(LBA["B"], BASE_B)
+        sub.bsr("load_sector")
+        sub.jsr(F.absl(BASE_B))
+        sub.rts()
+        sub.label("h_c")
+        for base in BASES_C:
+            args(LBA["C"], base)
+            sub.bsr("load_sector")
+            sub.jsr(F.absl(base))
+        sub.rts()
+    if not dispatch:
+        sub.label("pick_a")
+        args(LBA["A"], BASE_A)
+        sub.bsr("load_sector")
+        args(LBA["D"], BASE_D)
+        sub.bsr("load_sector")
+        # D is loaded and never used. A's DMA was overwritten by D only if the bases overlapped (they do not).
+        args(LBA["A"], BASE_A)
+        sub.bsr("load_sector")
+        if case == "header_patched":
+            sub.move("w", F.imm(0x1234), F.absl(BASE_A + 8))      # inside the 64-byte header, outside the executable subrange
+        if case == "overwritten":
+            sub.move("w", F.imm(0x4E71), F.absl(BASE_A + HEADER + 4))   # one word inside A's executable range
+        if case == "stale_lba":   # a second transfer with no new play command: the drive has moved on, so the position is not the one last commanded
+            args(LBA["B"], 0x0A8000)
+            sub.bsr("load_sector_noplay")
+            sub.jsr(F.absl(0x0A8000))
+        sub.jsr(F.absl(BASE_A + HEADER))
+        sub.bra("done")
 
-    sub.label("pick_b")
-    args(LBA["B"], BASE_B)
-    sub.bsr("load_sector")
-    sub.jsr(F.absl(BASE_B))
-    sub.bra("done")
+        sub.label("pick_b")
+        args(LBA["B"], BASE_B)
+        sub.bsr("load_sector")
+        sub.jsr(F.absl(BASE_B))
+        sub.bra("done")
 
-    sub.label("pick_c")
-    for base in BASES_C:
-        args(LBA["C"], base, unknown_lba=(case == "unknown_lba"), unknown_dest=(case == "unknown_dest") and base == BASES_C[0])
-        sub.bsr("load_sector_prg" if case == "prg_dest" else "load_sector")
-        if case == "pi_overwrite" and base == BASES_C[1]:
-            sub.move("w", F.imm(0x4E71), F.absl(base + 4))   # one word inside the second mapping, after it was loaded
-        sub.jsr(F.absl(base))
+        sub.label("pick_c")
+        for base in BASES_C:
+            args(LBA["C"], base, unknown_lba=(case == "unknown_lba"), unknown_dest=(case == "unknown_dest") and base == BASES_C[0])
+            sub.bsr("load_sector_prg" if case == "prg_dest" else "load_sector")
+            if case == "pi_overwrite" and base == BASES_C[1]:
+                sub.move("w", F.imm(0x4E71), F.absl(base + 4))   # one word inside the second mapping, after it was loaded
+            sub.jsr(F.absl(base))
 
     sub.label("done")
     for i, name in enumerate(("A", "B", "C")):

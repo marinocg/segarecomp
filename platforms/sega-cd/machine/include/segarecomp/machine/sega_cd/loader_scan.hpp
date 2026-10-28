@@ -41,6 +41,7 @@ enum class LoaderRefusalKind : std::uint8_t {
   too_many_operations,
   too_many_modules,
   scan_limit_exceeded,        // states, steps or call depth exhausted
+  computed_control_unresolved,  // SEG-098-T003: a computed jump/call (constant_dispatch mode) whose target the walk could not compute: code behind it is not inventoried
 };
 [[nodiscard]] const char *loader_refusal_name(LoaderRefusalKind kind) noexcept;
 
@@ -84,10 +85,17 @@ struct LoaderSurvey {
   std::uint32_t foreign_calls_unknown{};     // distinct computed calls/jumps whose target is unknown
   std::uint32_t copy_loop_candidates{};      // distinct (An)+,(Am)+ moves reached (CPU copy candidates)
   std::uint32_t counted_loops{};             // distinct DBcc sites reached
+  std::uint32_t dispatch_resolved{};         // distinct computed-call/jump sites whose target was computed from known values (constant_dispatch)
+  std::uint32_t memory_carried_reads{};      // distinct sites that load a data register from (An), (An)+ or d16(An) memory (not the stack): values the walk cannot know (the SP's work-variable state)
+  std::uint32_t table_reads{};               // distinct immutable-image reads folded to constants (constant_dispatch)
   std::map<std::string, std::uint32_t> path_ends;  // distinct sites where a path ended, by class (undecodable_or_outside, computed_jump, return_to_caller, stop, exception)
 };
 
 struct LoaderScanOptions {
+  // SEG-098-T003 (ADR 0212): constant-argument dispatch through immutable offset tables inside the image. The walk (a) folds ADD/SUB of known data-register values,
+  // (b) reads a word/long at a known PC-relative address inside the SP image (the table is assumed immutable: a wrong assumption only yields a proposal that the
+  // runtime byte guard refuses) and (c) follows `JSR/JMP (d8,PC|An,Xn)` whose index is known, so one call site with a constant selector reaches exactly one handler.
+  bool constant_dispatch{false};
   bool module_table_roots{false};  // walk the SP module jump table (init, main, int2, user) instead of only the descriptor entry
   bool continue_after_computed_call{false};  // survey what-if: a computed call (JSR (d8,An,Xn) / (d8,PC,Xn)) is a foreign call that returns, so the walk continues after it
 };
