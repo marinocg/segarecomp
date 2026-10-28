@@ -744,6 +744,10 @@ int discover_modules_command(int argc, char **argv) {
     std::ofstream out(*windows_path, std::ios::binary);
     out << lines.str();
   }
+  if (out_path && scan.manifest.empty()) {   // never leave an earlier run's list behind; a module inventory above the list bound has no list text (kModuleMaxCount)
+    std::error_code rm_ec;
+    std::filesystem::remove(*out_path, rm_ec);
+  }
   if (out_path && !scan.manifest.empty()) {
     std::ofstream out(*out_path, std::ios::binary);
     out << scan.manifest;

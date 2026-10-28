@@ -74,7 +74,7 @@ MAX_EPOCHS = 4
 MAX_TEMPLATES = 64        # template ADMISSIONS (rounds) - ADR 0142 decision 8; one admission is one instruction or, SEG-079-T002, one slot run
 MAX_TEMPLATE_SLOTS = 256  # template slots over all admissions (ADR 0180)
 MAX_RUN_SLOTS = 128       # slots in one run admission (ADR 0180)
-MAX_EXTENTS = 16          # kMaxDiscImages (SEG-078-T003: manual and discovered extents together)
+MAX_EXTENTS = 64          # kMaxDiscImages (SEG-078-T003: manual and discovered extents together)
 MAX_ROUNDS = 1 + MAX_EPOCHS + MAX_TEMPLATES + MAX_EXTENTS  # ADR 0142 decision 8; SEG-078-T003: one round per discovered extent
 TEMPLATE_OPCODES = ("4ef8", "4ef9")           # JMP (xxx).W / JMP (xxx).L: the only proposed shapes
 DEFAULT_WINDOW = 0x2000                       # measured (ADR 0142 "Result (SEG-064-T003)"); 0 = one translation unit

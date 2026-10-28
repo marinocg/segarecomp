@@ -29,6 +29,8 @@ of the inventory; the fixture therefore uses distinct bodies.)
 Reading: generated C grows linearly with admitted code bytes (~0.8 MB per 1.6 KiB module, i.e. about 2 KB of C per guest instruction) and does not depend on overlay depth; build time grows
 mildly with bytes and faster with depth at one base (the per-pc variant choice), 58 s for 48 modules stacked on one base. All spot checks ran correctly. The bounds, not the cost, were the limit.
 
+Reproduce: `python3 tools/sega_cd_scale_measure.py --segarecomp <cli> --cc <cc> --root <repo> --work <dir> --nops 400 --groups 4 --jobs 16 3 6 12 24 36 48` (and `--groups 1` for the one-base column); `--nops` is the instruction count per module.
+
 ## Decisions
 
 1. **Bounds** (measured, deterministic, typed exhaustion kept): disc-image slots 16 -> **64**; static admission 12 -> **48** (the rest of the slots stay for evidence-resolved extents);
@@ -40,13 +42,18 @@ mildly with bytes and faster with depth at one base (the per-pc variant choice),
    never executable authority) and the T002 contract are unchanged; `loaded` is an explicit option (`segarecomp sega-cd build --static-range loaded`). Whether Compatibility should default to
    `loaded` is an open policy decision (cost: at most one sector per module; benefit: computed destinations inside loaded modules) recorded for T005/the operator, not taken silently.
 3. **Frontier classification.** `status.json` gains `final_stop` {class, cpu, location} with location `inside_admitted_extent` (the stopping instruction is admitted code: for
-   `entry_not_compiled` a computed destination whose start is not compiled; for `code_bytes_mismatch` changed live bytes), or `outside_admitted_images` (an unknown source or a not yet
-   admitted overlay). The destination of a computed transfer is not reported by the runtime stop (its `address` is 0), so "destination inside the loaded window but outside the range" cannot be
+   `entry_not_compiled` a computed destination whose start is not compiled; for `code_bytes_mismatch` changed live bytes), `inside_static_module_window` (the pc lies in a proven module's loaded window outside its admitted range) or `outside_admitted_images` (an unknown source or a not yet
+   admitted overlay). For the computed-transfer stop of the fixture the runtime's `address` field was 0 and `pc` was the transfer instruction (the destination is not reported there), so "destination inside the loaded window but outside the range" cannot be
    told apart from "destination elsewhere" without a runtime change; this is stated, not guessed.
 4. **Shared code (source-relative bodies in the BIOS emitter): not enabled.** The measured cost is bytes-proportional and depth-independent; the only inventory shape that source-relative
-   bodies help (one source image at several bases) occurs once in the fixture (C at two bases) and is not what the authentic route showed (4 overlay groups of *distinct* sources). With no
+   bodies help (one source image at several bases) occurs once in the fixture (C at two bases) and is not what the authentic route showed (4 overlay groups of *distinct* sources). The fixture uses distinct sources by construction, so it cannot show a benefit; the decision rests on the cost model (bytes-proportional) and on the authentic overlay groups being distinct modules, as ADR 0210's survey counted them (4 groups with more than one alternative; not whether sources repeat across bases - that was not measured). With no
    measured benefit on a real inventory shape there is no reason to put the PI mechanism into the partitioned emitter; the question reopens if a survey finds multi-base sources.
 
 ## Not claimed
 
 A real title's inventory beyond what static analysis proves (ADR 0210/0212: 0 on the authentic disc); a benefit of the larger bounds on a commercial title; hardware or audio coverage.
+
+## Review notes
+
+- `discover-modules` reports `module_list_omitted` when modules exist but the list text is not written (more than 32); `--out` is removed in that case, never left stale. The Python build driver's extent bound follows the C++ one (64).
+- `loaded` extents of a window near the end of sub RAM can fail the emit with `disc_image_invalid` (fail closed, untyped for that case).

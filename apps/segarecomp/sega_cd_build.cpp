@@ -262,9 +262,10 @@ class Builder {
         std::vector<std::string> f;
         std::stringstream ss(e);
         for (std::string part; std::getline(ss, part, ':');) f.push_back(part);
-        if (f.empty() || f[0] != want) continue;
-        const std::uint64_t base = std::stoull(window ? f[1] : f[2]), len = std::stoull(window ? f[2] : f[3]);
-        if (f.size() >= (window ? 3U : 4U) && pc >= base && pc < base + len) return true;
+        if (f.size() < (window ? 3U : 4U) || f[0] != want) continue;
+        std::uint64_t base = 0, len = 0;
+        try { base = std::stoull(window ? f[1] : f[2]); len = std::stoull(window ? f[2] : f[3]); } catch (const std::exception &) { continue; }
+        if (pc >= base && pc < base + len) return true;
       }
       return false;
     };
@@ -568,6 +569,7 @@ class Builder {
     const fs::path list = o_.output / "static-extents.txt", report = o_.output / "static-scan.json";
     std::error_code ec;
     fs::remove(list, ec);
+    fs::remove(o_.output / "static-windows.txt", ec);
     const int code = run_process({self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--constant-dispatch", "--static-extents", list.string(), "--static-scope", o_.static_range, "--static-windows", (o_.output / "static-windows.txt").string()}, report, {}, 300);
     const std::string text = read_text(report);
     if (code < 0 || text.empty() || text.find("\"complete\":") == std::string::npos) { static_json_ = "{\"ran\":true,\"status\":\"scan_failed\"}"; return; }
