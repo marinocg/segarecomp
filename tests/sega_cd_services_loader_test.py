@@ -150,6 +150,22 @@ def main():
         rep = json.loads(out.stdout)
         check(rep["result"] == "disc_refused" and "result_block" not in rep, "a disc whose module bytes differ is refused as a different disc; nothing runs")
 
+        # ---- provenance of the static_disc_extent admission (SEG-099-T005, ADR 0219) ----
+        def emit_with(spec):
+            done = subprocess.run([SEGARECOMP, "sega-cd", "emit", "--cue", str(fx / "disc" / "disc.cue"), "--bios", str(fx / "bios.bin"), "--out", str(tmp / "emit.c"), "--admit", "static-extent:" + spec],
+                                  capture_output=True, text=True, timeout=300)
+            return done.returncode, done.stdout
+        good = lines[0]
+        rc, out = emit_with(good)
+        check(rc == 0, "provenance: an extent the scan proved is admitted by the emitter")
+        off_, base_, len_ = (int(x) for x in good.split(":")[1:])
+        rc, out = emit_with("sub:%d:%d:%d" % (oracle["pvd_lba"] * 2048, 0x90000, 2048))
+        check(rc != 0 and "static_extent_unproven" in out, "provenance: a coordinate string naming a sector no loader proof covers (the volume descriptor as code) is refused: it is not a static result")
+        rc, out = emit_with("sub:%d:%d:%d" % (off_, base_ + 0x2000, len_))
+        check(rc != 0 and "static_extent_unproven" in out, "provenance: a proven source at a guest mapping the scan did not prove is refused")
+        rc, out = emit_with("sub:%d:%d:%d" % (off_, base_, 6 * 2048))
+        check(rc != 0 and "static_extent_unproven" in out, "provenance: an extent that runs past the proven source is refused")
+
         # ---- a mapped executable image that changes after loading ----
         f4, o4 = fixture(tmp, "late_patch")
         done, s4 = build(f4, tmp / "n-lp", cache)

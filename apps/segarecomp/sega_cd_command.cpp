@@ -307,6 +307,31 @@ std::string read_track1_extent(const segarecomp::DiscImage &disc, std::uint32_t 
   return {};
 }
 
+// The proven mappings of the disc (computed once per process): the strongest static scan the supported build may use. Only the sub processor has static producers.
+bool static_extent_is_proven(const segarecomp::DiscImage &disc, scd::Processor processor, std::uint32_t off, std::uint32_t base, std::uint32_t len) {
+  static std::optional<scd::LoaderScan> proven;
+  static bool computed = false;
+  if (!computed) {
+    computed = true;
+    const auto produced = scd::produce_boot_images(disc);
+    if (produced.images) {
+      scd::LoaderScanOptions options;
+      options.module_table_roots = options.constant_dispatch = options.work_state = options.recursive_modules = options.state_convergence = true;
+      auto scan = scd::scan_sega_cd_loaders(disc, *produced.images, options);
+      if (scan.complete) proven = std::move(scan);
+    }
+  }
+  if (!proven || processor != scd::Processor::sub) return false;
+  for (const auto &m : proven->modules) {
+    const std::uint64_t lo = static_cast<std::uint64_t>(m.block) * 2048U;
+    if (off < lo || static_cast<std::uint64_t>(off) + len > lo + m.size) continue;   // inside the proven source
+    const std::uint32_t inside = static_cast<std::uint32_t>(off - lo);
+    for (const auto b : m.bases)
+      if (b + inside == base) return true;                                           // at one of its proven guest mappings
+  }
+  return false;
+}
+
 int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios_path, const std::vector<std::string> &copies,
                       const std::vector<std::string> &admits, const std::vector<std::string> &disc_images,
                       std::optional<std::uint32_t> application_entry, const std::string &out_path, std::uint32_t partition_window,
@@ -383,6 +408,9 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
       a.processor = *proc;
       a.address = *base;
       a.track_offset = *off;
+      // SEG-099-T005 (ADR 0219): the kind's name is a claim - the static loader scan proved this source-to-mapping. The emitter does not trust the coordinate string: it recomputes the scan (a pure
+      // function of the disc) and refuses an extent that no proven module mapping contains.
+      if (!static_extent_is_proven(disc, *proc, *off, *base, *len)) return bad("admit", "static_extent_unproven");
       if (const auto error = read_track1_extent(disc, *off, *len, a.bytes); !error.empty()) return bad("admit", error);
     } else if (f.size() == 6U && f[0] == "extent") {  // SEG-078-T003 (ADR 0205): extent:<pass>:<cpu>:<track-1 offset>:<base>:<length>
       const auto proc = parse_processor(f[2]);
