@@ -117,10 +117,11 @@ def main():
                                   ("trn_dev", True, "an unknown device byte with known disjoint buffers: CDCTRN needs the sub-read device, the known buffers are not written, A is retained"),
                                   ("trn_lba", True, "an unknown read position with known disjoint buffers: only those buffers are forgotten, A is retained"),
                                   ("trn_a0", False, "an unknown data-buffer pointer may overwrite the stored base: everything tracked is forgotten, A is not proven"),
+                                  ("trn_lost", False, "the walk lost its read state through a documented drive call and CDCTRN then aims at the stored base: it may still write, so the stored base is forgotten and A is not proven"),
                                   ("trn_hdr", False, "an unknown header-buffer pointer: everything tracked is forgotten and the boot image is no longer trusted, A is not proven")):
             ft, ot = fixture(tmp, case)
             r = scan(ft, "--work-state", "--state-convergence")
-            check((A["lba"] in mods(r)) == proven and B["lba"] in mods(r) and r["complete"], "%s: %s; the independent module B is proven" % (case, why))
+            check((A["lba"] in mods(r)) == proven and (B["lba"] in mods(r) or case == "trn_lost") and r["complete"], "%s: %s%s" % (case, why, "" if case == "trn_lost" else "; the independent module B is proven"))
         fh, oh = fixture(tmp, "hdr_alias")
         r = scan(fh, "--work-state", "--state-convergence")
         check(set(mods(r)) == set() and "destination_unknown" in refusals(r), "hdr_alias: a CDCTRN header pointer whose ignored high byte aliases the base variable overwrites it: the destination is unknown, nothing is proven (A1 is masked to the 24-bit bus)")

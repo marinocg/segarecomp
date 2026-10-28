@@ -38,7 +38,7 @@ FAR_A = 0x840
 CASES = ("base", "alias", "unmodelled", "two_paths", "corrupt_pvd", "corrupt_extent", "no_exec", "stale_service", "late_patch", "entry_unknown",
          "loop_pointer", "loop_pointer_late", "loop_pointer_early_store", "loop_unknown_exit", "loop_memory", "loop_memory_base", "branch_two", "loop_alias", "computed",
          "recursive", "recursive_taken", "cycle", "transformed", "overlay", "hdr_alias",
-         "trn_disjoint", "trn_a0", "trn_dev", "trn_lba", "trn_hdr")   # T005 follow-up: CDCTRN calls whose effects the walk cannot bound   # SEG-099-T003: state-convergence cases; T004: recursive discovery cases
+         "trn_disjoint", "trn_a0", "trn_dev", "trn_lba", "trn_hdr", "trn_lost")   # T005 follow-up: CDCTRN calls whose effects the walk cannot bound   # SEG-099-T003: state-convergence cases; T004: recursive discovery cases
 SP_TABLE_PREFIX = 0x2A
 SCRATCH = 0x040000
 RAW_BUF, RAW_HDR = 0x050000, 0x050A00
@@ -199,7 +199,7 @@ def build(options):
         if case == "stale_service" and label == "pick_a":
             s.move("w", F.imm(0x0B), F.d(0))                    # a service number that is no load
             s.jsr(F.absl(BIOS_VECTOR))
-        if case in ("trn_disjoint", "trn_a0", "trn_dev", "trn_lba", "trn_hdr") and label == "pick_a":
+        if case in ("trn_disjoint", "trn_a0", "trn_dev", "trn_lba", "trn_hdr", "trn_lost") and label == "pick_a":
             # one hand-written sector transfer before the loader: the arguments are stored, then CDCTRN is called with fully known (disjoint) buffers or with ONE unknown input
             s.move("l", F.imm(16), work(V_LBA))
             s.move("l", F.imm(1), work(V_COUNT))
@@ -215,7 +215,13 @@ def build(options):
             s.bcc("cs", "raw_stat")
             bios("CDCREAD")
             s.bcc("cs", "raw_stat")
-            if case == "trn_a0":
+            if case == "trn_lost":                                                 # a documented drive call loses the walk's read state; the next CDCTRN may still write (A0 aims at the stored base)
+                s.move("w", F.imm(0x10), F.d(0))
+                s.jsr(F.absl(BIOS_VECTOR))
+                s.move("b", F.imm(3), work(V_MODE))
+                s.move("b", F.imm(3), F.absl(F.GA_SUB + 0x04))
+                s.move("l", F.imm(WORK + V_BASE), F.a(0))
+            elif case == "trn_a0":
                 s.move("l", F.absl(F.GA_SUB + 0x10), F.a(0))
             else:
                 s.move("l", F.imm(RAW_BUF), F.a(0))

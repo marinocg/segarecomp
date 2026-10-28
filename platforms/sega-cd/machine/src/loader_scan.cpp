@@ -236,6 +236,7 @@ struct Cd {
   Val pos{};
   Val left{};
   bool header_read{};   // CDCREAD has been called since the last CDCACK
+  bool idle{};          // the walk KNOWS no sector is pending (after ROMREADN / ROMREAD / CDCSTOP / CDCACK); a lost read state is not idle and a CDCTRN then may write
 };
 
 struct Loaded {
@@ -278,6 +279,7 @@ std::string serialize(const State &s) {
   out.push_back(static_cast<char>(s.fl.val & s.fl.mask));
   putv(s.cd.pos); putv(s.cd.left);
   out.push_back(s.cd.header_read ? 1 : 0);
+  out.push_back(s.cd.idle ? 1 : 0);
   out.push_back(s.top_dirty ? 1 : 0);
   out.push_back(s.image_dirty ? 1 : 0);
   out.push_back(static_cast<char>(s.root));
@@ -318,6 +320,7 @@ State join_states(const State &a, const State &b) {
   r.cd.pos = join_val(a.cd.pos, b.cd.pos);
   r.cd.left = join_val(a.cd.left, b.cd.left);
   r.cd.header_read = a.cd.header_read || b.cd.header_read;
+  r.cd.idle = a.cd.idle && b.cd.idle;
   r.top_dirty = a.top_dirty || b.top_dirty;
   r.image_dirty = a.image_dirty || b.image_dirty;
   return r;
@@ -1040,7 +1043,7 @@ private:
       (pos.known() && left.known() ? args_resolved_ : args_unresolved_).insert(here);
       clobber();
       s.mem.clear_range(0U, kLoaderScanBiosAreaEnd);
-      s.cd = Cd{pos.known() && left.known() ? pos : Val{}, pos.known() && left.known() ? left : Val{}, false};
+      s.cd = Cd{pos.known() && left.known() ? pos : Val{}, pos.known() && left.known() ? left : Val{}, false, true};
       break;
     }
     case 0x89U:   // CDCSTOP
@@ -1048,6 +1051,7 @@ private:
       clobber();
       s.mem.clear_range(0U, kLoaderScanBiosAreaEnd);
       s.cd = Cd{};
+      s.cd.idle = true;
       break;
     case 0x8AU:   // CDCSTAT (carry: a sector is ready; unknown to the walk, both arms are explored)
       modelled_sites_.insert({here, 0x8AU});
@@ -1067,6 +1071,7 @@ private:
       if (s.cd.pos.known()) s.cd.pos = K(s.cd.pos.v + 1U);
       if (s.cd.left.known()) s.cd.left = K(s.cd.left.v - 1U);
       s.cd.header_read = false;
+      s.cd.idle = true;
       break;
     case 0x8CU:   // CDCTRN: A0 = data buffer, A1 = header buffer; sub-read device only
       modelled_sites_.insert({here, 0x8CU});
@@ -1082,7 +1087,7 @@ private:
       (pos.known() ? args_resolved_ : args_unresolved_).insert(here);
       clobber();
       s.mem.clear_range(0U, kLoaderScanBiosAreaEnd);
-      s.cd = Cd{pos, Val{}, false};
+      s.cd = Cd{pos, Val{}, false, true};
       break;
     }
     default:
@@ -1125,6 +1130,7 @@ private:
       if (!p.known()) { forget_all(s); return; }
       const std::uint32_t lo = p.v & 0x00FFFFFFU;
       s.mem.clear_range(lo, lo + n);
+      s.loaded.erase(std::remove_if(s.loaded.begin(), s.loaded.end(), [&](const Loaded &l) { return l.base < lo + n && lo < l.base + l.bytes; }), s.loaded.end());   // a loaded range it may overwrite is no longer the disc's
       note_write(s, lo, lo + n);
       if (lo < end_ && lo + n > base_) s.image_dirty = true;
     };
@@ -1134,7 +1140,11 @@ private:
 
   void cdc_transfer(State &s, std::uint32_t here, const Cd &cd) {
     if (!s.hw.dest.known()) { refuse(LoaderRefusalKind::destination_unknown, here); transfers_unresolved_.insert(here); cdctrn_may_write(s); return; }
-    if (s.hw.dest.v != 3U || !cd.header_read) return;   // CDCTRN requires the sub-read device and a CDCREAD'ed sector: otherwise it transfers nothing
+    if (s.hw.dest.v != 3U) return;                       // CDCTRN requires the sub-read device
+    if (!cd.header_read) {                               // ... and a CDCREAD'ed sector: otherwise it transfers nothing - but only when the walk KNOWS none is pending
+      if (!cd.idle) { refuse(LoaderRefusalKind::lba_unknown, here); transfers_unresolved_.insert(here); cdctrn_may_write(s); }
+      return;
+    }
     if (cd.left.known() && static_cast<std::int32_t>(cd.left.v) <= 0) return;   // the read already delivered every requested sector
     if (!cd.pos.known()) { refuse(LoaderRefusalKind::lba_unknown, here); transfers_unresolved_.insert(here); cdctrn_may_write(s); return; }
     const Val a0 = s.a[0];
