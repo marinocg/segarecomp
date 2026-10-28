@@ -617,7 +617,7 @@ class Builder {
     std::error_code ec;
     fs::remove(list, ec);
     fs::remove(o_.output / "static-windows.txt", ec);
-    const int code = run_process({self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--constant-dispatch", "--work-state", "--static-extents", list.string(), "--static-scope", o_.static_range, "--static-windows", (o_.output / "static-windows.txt").string()}, report, {}, 300);
+    const int code = run_process({self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--constant-dispatch", "--work-state", "--state-convergence", "--static-extents", list.string(), "--static-scope", o_.static_range, "--static-windows", (o_.output / "static-windows.txt").string()}, report, {}, 300);
     const std::string text = read_text(report);
     if (code < 0 || text.empty() || text.find("\"complete\":") == std::string::npos) { static_json_ = "{\"ran\":true,\"status\":\"scan_failed\"}"; return; }
     const bool complete = raw_value(text, "complete").value_or("") == "true";

@@ -9,6 +9,7 @@
 #include <span>
 #include <tuple>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "segarecomp/cpu/m68k/control_successors.hpp"
@@ -38,6 +39,7 @@ const char *loader_refusal_name(LoaderRefusalKind kind) noexcept {
   case LoaderRefusalKind::too_many_modules: return "too_many_modules";
   case LoaderRefusalKind::scan_limit_exceeded: return "scan_limit_exceeded";
   case LoaderRefusalKind::computed_control_unresolved: return "computed_control_unresolved";
+  case LoaderRefusalKind::lookup_key_unknown: return "lookup_key_unknown";
   }
   return "unknown";
 }
@@ -57,6 +59,7 @@ using Width = M68kMemoryAccessWidth;
 struct Val {
   std::uint32_t v{};
   std::uint32_t mask{};
+  bool disc{};   // the known bits derive from immutable disc content a documented service delivered (SEG-099: a comparison of such data with an unknown key is an unresolved lookup)
   [[nodiscard]] bool known() const { return mask == 0xFFFFFFFFU; }
 };
 Val K(std::uint32_t v) { return Val{v, 0xFFFFFFFFU}; }
@@ -64,7 +67,12 @@ Val K(std::uint32_t v) { return Val{v, 0xFFFFFFFFU}; }
 std::uint32_t width_mask(Width w) { return w == Width::byte ? 0xFFU : w == Width::word ? 0xFFFFU : 0xFFFFFFFFU; }
 std::uint32_t mask_of(Width w, std::uint32_t v) { return v & width_mask(w); }
 // The value of `x` as a `w`-wide quantity, when every bit of that width is known (the result is then a fully known Val).
-Val exact(const Val &x, Width w) { return (x.mask & width_mask(w)) == width_mask(w) ? K(x.v & width_mask(w)) : Val{}; }
+Val exact(const Val &x, Width w) {
+  if ((x.mask & width_mask(w)) != width_mask(w)) return Val{};
+  Val r = K(x.v & width_mask(w));
+  r.disc = x.disc;
+  return r;
+}
 
 // The machine's CD interface as the walk sees it (contract section 7). Unknown until a constant write defines it.
 struct Hw {
@@ -93,6 +101,7 @@ constexpr std::uint32_t kMemTrackedEnd = 0x000C0000U;   // sub PRG RAM and the 2
 struct Page {
   std::array<std::uint8_t, 256> v{};
   std::array<std::uint64_t, 4> known{};
+  std::array<std::uint64_t, 4> disc{};   // bytes whose value is immutable disc content
 };
 
 // Bounded abstract RAM: only bytes with an independently justified value are present. Copy-on-write pages keep a forked state cheap.
@@ -105,7 +114,13 @@ public:
     if (((it->second->known[o >> 6U] >> (o & 63U)) & 1U) == 0U) return std::nullopt;
     return it->second->v[o];
   }
-  void put(std::uint32_t a, std::optional<std::uint8_t> b) {
+  [[nodiscard]] bool get_disc(std::uint32_t a) const {
+    const auto it = pages_.find(a >> 8);
+    if (it == pages_.end()) return false;
+    const unsigned o = a & 0xFFU;
+    return ((it->second->disc[o >> 6U] >> (o & 63U)) & 1U) != 0U;
+  }
+  void put(std::uint32_t a, std::optional<std::uint8_t> b, bool disc = false) {
     auto it = pages_.find(a >> 8);
     if (it == pages_.end()) {
       if (!b || pages_.size() >= kLoaderScanMaxTrackedPages) return;   // over the page bound: forget (never invent)
@@ -116,15 +131,18 @@ public:
     if (b) {
       page->v[o] = *b;
       page->known[o >> 6U] |= std::uint64_t{1} << (o & 63U);
+      if (disc) page->disc[o >> 6U] |= std::uint64_t{1} << (o & 63U);
+      else page->disc[o >> 6U] &= ~(std::uint64_t{1} << (o & 63U));
     } else {
       page->v[o] = 0;
       page->known[o >> 6U] &= ~(std::uint64_t{1} << (o & 63U));
+      page->disc[o >> 6U] &= ~(std::uint64_t{1} << (o & 63U));
     }
     if ((page->known[0] | page->known[1] | page->known[2] | page->known[3]) != 0U) it->second = std::move(page);
     else pages_.erase(it);
   }
-  void put_bytes(std::uint32_t a, std::span<const std::uint8_t> data) {
-    for (std::size_t i = 0; i < data.size(); ++i) put(a + static_cast<std::uint32_t>(i), data[i]);
+  void put_bytes(std::uint32_t a, std::span<const std::uint8_t> data, bool disc = false) {
+    for (std::size_t i = 0; i < data.size(); ++i) put(a + static_cast<std::uint32_t>(i), data[i], disc);
   }
   void clear_range(std::uint32_t lo, std::uint32_t hi) {   // [lo, hi)
     if (hi <= lo) return;
@@ -133,7 +151,7 @@ public:
       if (pb >= lo && pb + 256U <= hi) { it = pages_.erase(it); continue; }
       auto page = std::make_shared<Page>(*it->second);
       for (unsigned o = 0; o < 256U; ++o)
-        if (pb + o >= lo && pb + o < hi) page->known[o >> 6U] &= ~(std::uint64_t{1} << (o & 63U));
+        if (pb + o >= lo && pb + o < hi) { page->known[o >> 6U] &= ~(std::uint64_t{1} << (o & 63U)); page->disc[o >> 6U] &= ~(std::uint64_t{1} << (o & 63U)); }
       if ((page->known[0] | page->known[1] | page->known[2] | page->known[3]) != 0U) { it->second = std::move(page); ++it; }
       else it = pages_.erase(it);
     }
@@ -147,6 +165,7 @@ public:
     for (const auto &[index, page] : pages_) {
       put32(index);
       for (const auto k : page->known) out.append(reinterpret_cast<const char *>(&k), 8);
+      for (const auto k : page->disc) out.append(reinterpret_cast<const char *>(&k), 8);
       for (unsigned o = 0; o < 256U; ++o)
         if (((page->known[o >> 6U] >> (o & 63U)) & 1U) != 0U) out.push_back(static_cast<char>(page->v[o]));
     }
@@ -163,7 +182,8 @@ public:
         const bool mine = ((page->known[b >> 6U] >> (b & 63U)) & 1U) != 0U;
         if (!mine) continue;
         const bool theirs = ((o->second->known[b >> 6U] >> (b & 63U)) & 1U) != 0U;
-        if (!theirs || o->second->v[b] != page->v[b]) { page->known[b >> 6U] &= ~(std::uint64_t{1} << (b & 63U)); page->v[b] = 0; changed = true; }
+        if (!theirs || o->second->v[b] != page->v[b]) { page->known[b >> 6U] &= ~(std::uint64_t{1} << (b & 63U)); page->disc[b >> 6U] &= ~(std::uint64_t{1} << (b & 63U)); page->v[b] = 0; changed = true; }
+        else if (((page->disc[b >> 6U] >> (b & 63U)) & 1U) != 0U && ((o->second->disc[b >> 6U] >> (b & 63U)) & 1U) == 0U) { page->disc[b >> 6U] &= ~(std::uint64_t{1} << (b & 63U)); changed = true; }
       }
       if (changed) {
         lost = true;
@@ -229,7 +249,7 @@ struct State {
   std::array<Val, 8> d{};
   std::array<Val, 8> a{};
   Hw hw;
-  std::vector<std::uint32_t> ret;
+  std::vector<std::vector<std::uint32_t>> rets{std::vector<std::uint32_t>{}};   // the possible return stacks: exactly one until a join merges paths that came from different callers
   std::vector<Loaded> loaded;
   Flags fl;
   Mem mem;
@@ -242,15 +262,15 @@ struct State {
 std::string serialize(const State &s) {
   std::string out;
   const auto put = [&](std::uint32_t v) { out.append(reinterpret_cast<const char *>(&v), 4); };
-  const auto putv = [&](const Val &v) { put(v.mask); put(v.v & v.mask); };
+  const auto putv = [&](const Val &v) { put(v.mask); put(v.v & v.mask); out.push_back(v.disc ? 1 : 0); };
   put(s.pc);
   for (const auto &v : s.d) putv(v);
   for (const auto &v : s.a) putv(v);
   for (const auto &v : s.hw.tx) putv(v);
   putv(s.hw.reg_ptr); putv(s.hw.dest); putv(s.hw.dma_address); putv(s.hw.ifctrl); putv(s.hw.dbcl); putv(s.hw.dbch); putv(s.hw.lba);
   out.push_back(s.hw.play_invalid ? 1 : 0);
-  put(static_cast<std::uint32_t>(s.ret.size()));
-  for (const auto r : s.ret) put(r);
+  put(static_cast<std::uint32_t>(s.rets.size()));
+  for (const auto &stack : s.rets) { put(static_cast<std::uint32_t>(stack.size())); for (const auto r : stack) put(r); }
   put(static_cast<std::uint32_t>(s.loaded.size()));
   for (const auto &l : s.loaded) { put(l.op); put(l.base); put(l.bytes); }
   out.push_back(static_cast<char>(s.fl.mask));
@@ -261,6 +281,60 @@ std::string serialize(const State &s) {
   out.push_back(s.image_dirty ? 1 : 0);
   out.push_back(static_cast<char>(s.root));
   s.mem.serialize(out);
+  return out;
+}
+
+// ---- state convergence (SEG-099-T003, ADR 0217) --------------------------------------------------------------------------------------
+// The join of two abstract values: identical knowledge is kept, any difference becomes unknown (all-or-nothing, so a location changes at most once). A join never chooses a constant.
+Val join_val(const Val &a, const Val &b) {
+  if (a.mask == b.mask && ((a.v ^ b.v) & a.mask) == 0U) { Val r = a; r.disc = a.disc && b.disc; return r; }   // identical knowledge is kept; any difference widens the whole value to unknown (a bounded number of changes per location)
+  return Val{};
+}
+
+// Joins `b` into `a` (same pc, root and return stack). May-facts (loads seen, header read, dirtiness) are united, must-facts (values) are met.
+State join_states(const State &a, const State &b) {
+  State r = a;
+  for (std::size_t i = 0; i < r.d.size(); ++i) r.d[i] = join_val(a.d[i], b.d[i]);
+  for (std::size_t i = 0; i < r.a.size(); ++i) r.a[i] = join_val(a.a[i], b.a[i]);
+  for (std::size_t i = 0; i < r.hw.tx.size(); ++i) r.hw.tx[i] = join_val(a.hw.tx[i], b.hw.tx[i]);
+  r.hw.reg_ptr = join_val(a.hw.reg_ptr, b.hw.reg_ptr);
+  r.hw.dest = join_val(a.hw.dest, b.hw.dest);
+  r.hw.dma_address = join_val(a.hw.dma_address, b.hw.dma_address);
+  r.hw.ifctrl = join_val(a.hw.ifctrl, b.hw.ifctrl);
+  r.hw.dbcl = join_val(a.hw.dbcl, b.hw.dbcl);
+  r.hw.dbch = join_val(a.hw.dbch, b.hw.dbch);
+  r.hw.lba = join_val(a.hw.lba, b.hw.lba);
+  r.hw.play_invalid = a.hw.play_invalid || b.hw.play_invalid;
+  r.fl.mask = static_cast<std::uint8_t>(a.fl.mask & b.fl.mask & ~(a.fl.val ^ b.fl.val));
+  r.fl.val = static_cast<std::uint8_t>(a.fl.val & r.fl.mask);
+  r.rets.insert(r.rets.end(), b.rets.begin(), b.rets.end());
+  std::sort(r.rets.begin(), r.rets.end());
+  r.rets.erase(std::unique(r.rets.begin(), r.rets.end()), r.rets.end());
+  for (const auto &l : b.loaded)
+    if (std::find(r.loaded.begin(), r.loaded.end(), l) == r.loaded.end()) r.loaded.push_back(l);
+  std::sort(r.loaded.begin(), r.loaded.end(), [](const Loaded &x, const Loaded &y) { return std::tie(x.op, x.base, x.bytes) < std::tie(y.op, y.base, y.bytes); });
+  r.mem.join(b.mem);
+  r.cd.pos = join_val(a.cd.pos, b.cd.pos);
+  r.cd.left = join_val(a.cd.left, b.cd.left);
+  r.cd.header_read = a.cd.header_read || b.cd.header_read;
+  r.top_dirty = a.top_dirty || b.top_dirty;
+  r.image_dirty = a.image_dirty || b.image_dirty;
+  return r;
+}
+
+struct Head {
+  std::uint32_t count{};
+  bool have{};
+  State joined;
+};
+
+std::string head_key(const State &s) {
+  std::string out;
+  const auto put = [&](std::uint32_t v) { out.append(reinterpret_cast<const char *>(&v), 4); };
+  put(s.pc);
+  put(s.root);
+  // States are only joined with states of the same knowledge profile, so a path that has lost its work-area knowledge (an unknown alias, an unmodelled service) cannot degrade a path that has not.
+  out.push_back(static_cast<char>((s.image_dirty ? 1 : 0) | (s.mem.empty() ? 2 : 0)));
   return out;
 }
 
@@ -283,6 +357,7 @@ public:
     if (roots.empty()) roots.emplace_back(1U, sub_.entry_pc);
     scan_.survey.roots = static_cast<std::uint32_t>(roots.size());
     std::vector<State> stack;
+    if (options_.order >= 2U) std::reverse(roots.begin(), roots.end());   // test-only variant: roots in the opposite order
     for (auto it = roots.rbegin(); it != roots.rend(); ++it) {
       State start;
       start.pc = it->second;
@@ -291,8 +366,10 @@ public:
       if (seen_.insert(serialize(start)).second) { ++scan_.states; stack.push_back(std::move(start)); }
     }
     while (!stack.empty() && scan_.complete) {
-      State s = std::move(stack.back());
-      stack.pop_back();
+      // Exploration order is deterministic (depth first). The test-only variants exist to check that the result does not depend on it.
+      const bool fifo = options_.order == 1U || options_.order == 3U;
+      State s = fifo ? std::move(stack.front()) : std::move(stack.back());
+      if (fifo) stack.erase(stack.begin()); else stack.pop_back();
       walk(std::move(s), stack);
     }
     auto &sv = scan_.survey;
@@ -313,6 +390,8 @@ public:
     sv.memory_args_resolved = static_cast<std::uint32_t>(args_resolved_.size());
     sv.memory_args_unresolved = static_cast<std::uint32_t>(args_unresolved_.size());
     sv.branches_decided = static_cast<std::uint32_t>(decided_sites_.size());
+    sv.joins = joins_;
+    sv.widenings = widenings_;
     sv.async_volatile_ranges = static_cast<std::uint32_t>(assumed_.ranges.size());
     sv.async_volatile_all = assumed_.all;
     return std::move(scan_);
@@ -334,6 +413,9 @@ private:
   std::set<std::pair<std::uint32_t, std::uint32_t>> modelled_sites_;
   std::set<std::uint32_t> unmodelled_sites_, args_resolved_, args_unresolved_, transfers_resolved_, transfers_unresolved_, decided_sites_;
   std::uint32_t mem_resolved_reads_{};
+  bool lookup_unknown_{};
+  std::unordered_map<std::string, Head> heads_;
+  std::uint32_t joins_{}, widenings_{};
   bool ws_{};
   std::span<const std::uint8_t> bytes_;
   std::uint32_t base_{}, end_{}, first_offset_{};
@@ -424,6 +506,7 @@ private:
     Val out;
     out.mask = (old.mask & ~wm) | (val.mask & wm);
     out.v = ((old.v & ~wm) | (val.v & wm)) & out.mask;
+    out.disc = old.disc || val.disc;
     return out;
   }
 
@@ -616,18 +699,22 @@ private:
 
   static Val mem_read(const Mem &m, std::uint32_t a, Width w) {
     std::uint32_t v = 0;
+    bool disc = true;
     for (std::uint32_t i = 0; i < nbytes(w); ++i) {
       const auto b = m.get(a + i);
       if (!b) return {};
       v = (v << 8) | *b;
+      disc = disc && m.get_disc(a + i);
     }
-    return K(v);
+    Val r = K(v);
+    r.disc = disc;
+    return r;
   }
   static void mem_write(Mem &m, std::uint32_t a, Width w, const Val &val) {
     const std::uint32_t n = nbytes(w);
     for (std::uint32_t i = 0; i < n; ++i) {
       const unsigned shift = 8U * (n - 1U - i);
-      if (((val.mask >> shift) & 0xFFU) == 0xFFU) m.put(a + i, static_cast<std::uint8_t>((val.v >> shift) & 0xFFU));
+      if (((val.mask >> shift) & 0xFFU) == 0xFFU) m.put(a + i, static_cast<std::uint8_t>((val.v >> shift) & 0xFFU), val.disc);
       else m.put(a + i, std::nullopt);
     }
   }
@@ -694,13 +781,14 @@ private:
       if (p.addr >= kGateArraySub && p.addr < kGateArraySubEnd) return {};
       if (p.addr + nbytes(w) <= kMemTrackedEnd && !volatile_read(s, p.addr, p.addr + nbytes(w))) {
         std::uint32_t v = 0;
-        bool all = true;
+        bool all = true, disc = true;
         for (std::uint32_t i = 0; i < nbytes(w) && all; ++i) {
           auto b = s.mem.get(p.addr + i);
+          if (b) disc = disc && s.mem.get_disc(p.addr + i); else disc = false;
           if (!b && !s.image_dirty && p.addr + i >= base_ && p.addr + i < end_) b = bytes_[first_offset_ + (p.addr + i - base_)];   // the admitted image, until something may have rewritten it
           if (!b) all = false; else v = (v << 8) | *b;
         }
-        if (all) { if (!p.pc_rel) ++mem_resolved_reads_; return K(v); }
+        if (all) { if (!p.pc_rel) ++mem_resolved_reads_; Val r = K(v); r.disc = disc; return r; }
       }
       if (p.pc_rel && options_.constant_dispatch) return image_read(p.addr, w);
       return {};
@@ -763,7 +851,7 @@ private:
       const bool pop = op.source_ea.mode == M68kEaMode::address_postinc && (op.source_ea.reg & 7U) == 7U && w == Width::long_word;
       Val v;
       if (pop) {
-        if (!s.ret.empty() && !s.top_dirty) { v = K(s.ret.back()); s.ret.pop_back(); }
+        if (s.rets.size() == 1U && !s.rets[0].empty() && !s.top_dirty) { v = K(s.rets[0].back()); s.rets[0].pop_back(); }
         s.top_dirty = true;
       } else {
         const Place src = place(s, op.source_ea, w);
@@ -845,6 +933,10 @@ private:
       Val sv = read_place(s, src, w);
       if (addr && sv.known() && w == Width::word) sv = K(static_cast<std::uint32_t>(static_cast<std::int32_t>(static_cast<std::int16_t>(sv.v))));
       const Val dv = read_place(s, dst, cw);
+      if ((dv.known() && dv.disc && !sv.known()) || (sv.known() && sv.disc && !dv.known())) {   // a lookup: immutable disc data compared with a key the walk does not know
+        refuse(LoaderRefusalKind::lookup_key_unknown, s.pc);
+        lookup_unknown_ = true;
+      }
       if (dv.known() && sv.known()) {
         const auto r = m68k_evaluate_subtraction(sv.v, dv.v, cw);
         s.fl = known_flags(r.negative, r.zero, r.overflow, r.carry);
@@ -1039,7 +1131,7 @@ private:
     if (!disc_.tracks().empty() && disc_.tracks().front().type != DiscTrackType::audio && cd.pos.v < disc_.tracks().front().sector_count) {
       std::array<std::uint8_t, kDiscUserBytes> user{};
       if (disc_.read_user_data(disc_.tracks().front().first_lba + cd.pos.v, std::span<std::uint8_t, kDiscUserBytes>(user.data(), kDiscUserBytes)) == DiscError::none)
-        s.mem.put_bytes(destination, std::span<const std::uint8_t>(user.data(), kLoaderScanSectorBytes));
+        s.mem.put_bytes(destination, std::span<const std::uint8_t>(user.data(), kLoaderScanSectorBytes), true);
     }
     if (s.a[1].known()) { s.mem.clear_range(s.a[1].v, s.a[1].v + 4U); note_write(s, s.a[1].v, s.a[1].v + 4U); }
     else { s.mem.clear(); note_write_unknown(s); }
@@ -1176,9 +1268,29 @@ private:
     if (ws_) forget_all(s);   // an unknown callee may write any tracked byte
   }
 
+  // After `widen_after` distinct states at one (pc, root, call stack) the next ones are joined into one state that only ever loses knowledge, so a loop whose state keeps changing
+  // reaches a fixed point; a state already covered by the joined one ends its path. Within the threshold exploration is exact.
+  bool admit(State &s) {
+    if (!options_.state_convergence) return true;
+    auto &h = heads_[head_key(s)];
+    if (++h.count <= options_.widen_after) return true;
+    if (!h.have) { h.have = true; h.joined = s; return true; }
+    State j = join_states(h.joined, s);
+    if (j.rets.size() > kLoaderScanMaxReturnContexts) { exhausted(s.pc); return false; }   // more callers than the bound: not summarised, reported incomplete
+    const std::string before = serialize(h.joined);
+    if (serialize(j) == before) return false;   // covered: the joined state was (or will be) explored
+    ++joins_;
+    if (serialize(j) != serialize(s)) ++widenings_;
+    h.joined = j;
+    s = std::move(j);
+    seen_.insert(serialize(s));
+    return true;
+  }
+
   void push(std::vector<State> &stack, State &&next) {
     if (scan_.states >= kLoaderScanMaxStates) { exhausted(next.pc); return; }
     if (!seen_.insert(serialize(next)).second) return;
+    if (!admit(next)) return;
     ++scan_.states;
     stack.push_back(std::move(next));
   }
@@ -1215,14 +1327,24 @@ private:
         if (!preserves_condition_codes(op.kind)) s.fl = {};
         if (touches_stack) s.top_dirty = true;
       }
+      if (lookup_unknown_) { lookup_unknown_ = false; end_at("lookup_key_unknown", here); return; }   // no source is proposed behind a search with an unknown key
       const auto control = m68k_control_successors(op);
       if (control.always_raises_exception) { end_at("exception", here); return; }
       if (control.dynamic != M68kDynamicControlFamily::none) {
         if (control.dynamic == M68kDynamicControlFamily::return_from_subroutine) {
-          if (s.ret.empty()) { end_at("return_to_caller", here); return; }
-          s.pc = s.ret.back();
-          s.ret.pop_back();
-          s.top_dirty = true;
+          // One continuation per possible return stack (a joined state may have several callers); the first continues this walk, the others are queued.
+          bool continued = false;
+          const auto stacks = s.rets;
+          for (const auto &rs : stacks) {
+            if (rs.empty()) { end_at("return_to_caller", here); continue; }
+            State t = s;
+            t.rets = {std::vector<std::uint32_t>(rs.begin(), rs.end() - 1)};
+            t.pc = rs.back();
+            t.top_dirty = true;
+            if (!continued) { s = std::move(t); continued = true; }
+            else push(stack, std::move(t));
+          }
+          if (!continued) return;
         } else if (control.dynamic == M68kDynamicControlFamily::jump_address_indirect || control.dynamic == M68kDynamicControlFamily::call_address_indirect ||
                    control.dynamic == M68kDynamicControlFamily::jump_address_disp16 || control.dynamic == M68kDynamicControlFamily::call_address_disp16) {
           const bool call = control.dynamic == M68kDynamicControlFamily::call_address_indirect || control.dynamic == M68kDynamicControlFamily::call_address_disp16;
@@ -1331,6 +1453,7 @@ private:
   bool continue_or_fork(State &s, std::vector<State> &) {
     if (scan_.states >= kLoaderScanMaxStates) { exhausted(s.pc); return false; }
     if (!seen_.insert(serialize(s)).second) return false;
+    if (!admit(s)) return false;
     ++scan_.states;
     return true;
   }
@@ -1369,8 +1492,8 @@ private:
       return false;
     }
     if (call) {
-      if (s.ret.size() >= kLoaderScanMaxCallDepth) { exhausted(here); return false; }
-      s.ret.push_back(next);
+      for (const auto &rs : s.rets) if (rs.size() >= kLoaderScanMaxCallDepth) { exhausted(here); return false; }
+      for (auto &rs : s.rets) rs.push_back(next);
       s.top_dirty = false;
     }
     s.pc = target.v;
@@ -1426,14 +1549,21 @@ std::string hex32(std::uint32_t value) {
 LoaderScan scan_sega_cd_loaders(const DiscImage &disc, const BootImages &images, const LoaderScanOptions &options) {
   // The asynchronous entries (interrupt, user) are walked as roots of their own; whatever they write is unknown to the init and main entries. The walk is repeated until the
   // set the synchronous entries assumed covers what the asynchronous ones were found to write (monotone, at most four passes; otherwise the result is incomplete).
-  Volatile assumed;
+  // Convergence is a fallback: the exact walk runs first (so every earlier result is reproduced) and only an exhausted walk is repeated with joins.
   LoaderScan scan;
-  for (unsigned pass = 0;; ++pass) {
-    Walker walker(disc, images.sub, options, assumed);
-    scan = walker.run();
-    if (!scan.complete || assumed.covers(walker.async_writes())) break;
-    if (pass >= 3U) { scan.refusals.push_back({LoaderRefusalKind::scan_limit_exceeded, 0U}); scan.complete = false; break; }
-    assumed.merge(walker.async_writes());
+  for (int attempt = options.converge_always ? 1 : 0; attempt < 2; ++attempt) {
+    LoaderScanOptions attempt_options = options;
+    attempt_options.state_convergence = attempt == 1;
+    Volatile assumed;
+    for (unsigned pass = 0;; ++pass) {
+      Walker walker(disc, images.sub, attempt_options, assumed);
+      scan = walker.run();
+      if (!scan.complete || assumed.covers(walker.async_writes())) break;
+      if (pass >= 3U) { scan.refusals.push_back({LoaderRefusalKind::scan_limit_exceeded, 0U}); scan.complete = false; break; }
+      assumed.merge(walker.async_writes());
+    }
+    scan.survey.convergence_used = attempt == 1;
+    if (scan.complete || !options.state_convergence) break;
   }
   if (!scan.complete) return scan;  // an exhausted walk proposes nothing: the inventory is not labelled complete
 

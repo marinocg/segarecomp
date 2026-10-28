@@ -648,13 +648,18 @@ int resolve_source_command(int argc, char **argv) {
 // SEG-097-T001 (ADR 0206): static discovery of disc-loaded modules. Pure function of the disc; executes nothing.
 int discover_modules_command(int argc, char **argv) {
   std::optional<std::string> cue, out_path, extents_path, windows_path;
-  bool table_roots = false, computed_continue = false, constant_dispatch = false, work_state = false;
+  bool table_roots = false, computed_continue = false, constant_dispatch = false, work_state = false, state_convergence = false, converge_always = false;
+  std::uint32_t widen_after = 32U, scan_order = 0U;
   std::string static_scope = "hull";   // SEG-098-T004: `loaded` = every loaded byte of a proven module (all aligned starts), `hull` = the traversed executable subrange
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
     else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
     else if (arg == "--constant-dispatch") constant_dispatch = true;   // SEG-098-T003 (ADR 0212)
+    else if (arg == "--state-convergence") state_convergence = true;   // SEG-099-T003 (ADR 0217)
+    else if (arg == "--converge-always") { state_convergence = true; converge_always = true; }   // test-only
+    else if (arg == "--widen-after" && i + 1 < argc) widen_after = static_cast<std::uint32_t>(std::strtoul(argv[++i], nullptr, 10));   // diagnostic: the join threshold
+    else if (arg == "--scan-order" && i + 1 < argc) scan_order = static_cast<std::uint32_t>(std::strtoul(argv[++i], nullptr, 10));   // test-only exploration order
     else if (arg == "--work-state") work_state = true;   // SEG-099-T002 (ADR 0216): work-variable memory, condition codes and the documented BIOS CD services
     else if (arg == "--computed-call-whatif") computed_continue = true;   // SEG-098-T001 survey what-if (never used by a build)
     else if (arg == "--static-extents" && i + 1 < argc) extents_path = argv[++i];   // SEG-098-T002: one `<cpu>:<offset>:<base>:<length>` per verified mapping
@@ -685,6 +690,10 @@ int discover_modules_command(int argc, char **argv) {
   scan_options.continue_after_computed_call = computed_continue;
   scan_options.constant_dispatch = constant_dispatch;
   scan_options.work_state = work_state;
+  scan_options.state_convergence = state_convergence;
+  scan_options.widen_after = widen_after;
+  scan_options.converge_always = converge_always;
+  scan_options.order = scan_order;
   const auto scan = scd::scan_sega_cd_loaders(*loaded.disc, *produced.images, scan_options);
   std::ostringstream report;
   report << "{\"ok\":" << (!scan.modules.empty() && scan.complete ? "true" : "false") << ",\"complete\":" << (scan.complete ? "true" : "false")
@@ -698,7 +707,7 @@ int discover_modules_command(int argc, char **argv) {
            << ",\"copy_loop_candidates\":" << sv.copy_loop_candidates << ",\"counted_loops\":" << sv.counted_loops << ",\"dispatch_resolved\":" << sv.dispatch_resolved << ",\"table_reads\":" << sv.table_reads << ",\"memory_carried_reads\":" << sv.memory_carried_reads
            << ",\"bios_modelled_calls\":" << sv.bios_modelled_calls << ",\"bios_unmodelled_calls\":" << sv.bios_unmodelled_calls << ",\"sector_transfers\":" << sv.sector_transfers
            << ",\"sector_transfers_unresolved\":" << sv.sector_transfers_unresolved << ",\"memory_args_resolved\":" << sv.memory_args_resolved << ",\"memory_args_unresolved\":" << sv.memory_args_unresolved
-           << ",\"branches_decided\":" << sv.branches_decided << ",\"async_volatile_ranges\":" << sv.async_volatile_ranges << ",\"async_volatile_all\":" << (sv.async_volatile_all ? "true" : "false") << ",\"bios_functions\":{";
+           << ",\"convergence_used\":" << (sv.convergence_used ? "true" : "false") << ",\"joins\":" << sv.joins << ",\"widenings\":" << sv.widenings << ",\"branches_decided\":" << sv.branches_decided << ",\"async_volatile_ranges\":" << sv.async_volatile_ranges << ",\"async_volatile_all\":" << (sv.async_volatile_all ? "true" : "false") << ",\"bios_functions\":{";
     bool first = true;
     for (const auto &[fn, n] : sv.bios_functions) { report << (first ? "" : ",") << "\"" << fn << "\":" << n; first = false; }
     report << "},\"path_ends\":{";

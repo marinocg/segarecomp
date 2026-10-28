@@ -33,8 +33,12 @@ FILES = {"MODA.BIN;1": (40, 2), "MODB.BIN;1": (44, 1), "MODC.BIN;1": (46, 1)}   
 BASE_A, BASE_B, BASE_C = 0x090000, 0x0A0000, 0x0B0000
 HEADER_A = 0x40
 FAR_A = 0x840
-CASES = ("base", "alias", "unmodelled", "two_paths", "corrupt_pvd", "corrupt_extent", "no_exec", "stale_service", "late_patch", "entry_unknown")
+CASES = ("base", "alias", "unmodelled", "two_paths", "corrupt_pvd", "corrupt_extent", "no_exec", "stale_service", "late_patch", "entry_unknown",
+         "loop_pointer", "loop_pointer_late", "loop_pointer_early_store", "loop_unknown_exit", "loop_memory", "loop_memory_base", "branch_two", "loop_alias", "computed")   # SEG-099-T003: state-convergence cases
 SP_TABLE_PREFIX = 0x2A
+SCRATCH = 0x040000
+BASE_A2 = 0x0B8000
+V_X = 24
 
 
 def module_a():
@@ -114,8 +118,40 @@ def build(options):
     s.btst(0, F.absl(F.GA_SUB + 0x03))
     s.bcc("ne", "w_own")
     s.move("b", F.absl(F.GA_SUB + 0x0E), F.d(7))              # the player's choice (main reads the machine input)
+    if case == "loop_pointer":                                  # a counted read loop over a known, advancing pointer: every iteration is a new exact state, nothing is stored
+        s.lea(F.absl(SCRATCH), 2)
+        s.move("w", F.imm(5999), F.d(3))
+        s.label("lp_clear")
+        s.move("l", ("inc", 2), F.d(5))
+        s.dbra(3, "lp_clear")
+    if case == "loop_pointer_early_store":                      # the store loop before any argument is stored: later knowledge is intact but the boot image is no longer trusted
+        s.lea(F.absl(SCRATCH), 2)
+        s.move("w", F.imm(5999), F.d(3))
+        s.label("lpe_clear")
+        s.clr("l", ("inc", 2))
+        s.dbra(3, "lpe_clear")
     s.lea(F.absl(WORK), 5)
     s.move("b", F.imm(3), work(V_MODE))                        # device byte: sub read
+    if case == "loop_pointer_late":                             # the same loop AFTER the arguments are stored: the widened pointer is an unknown store target, so the work area is forgotten
+        s.lea(F.absl(SCRATCH), 2)
+        s.move("w", F.imm(5999), F.d(3))
+        s.label("lp_clear")
+        s.clr("l", ("inc", 2))
+        s.dbra(3, "lp_clear")
+    if case == "loop_unknown_exit":                             # a register that grows without bound while the exit depends on a value the program cannot know
+        s.moveq(0, 4)
+        s.label("lu_loop")
+        s.quick("add", "l", 1, F.d(4))
+        s.move("w", F.absl(F.GA_SUB + 0x10), F.d(0))
+        s.tst("w", F.d(0))
+        s.bcc("ne", "lu_loop")
+    if case == "loop_memory":                                   # a work variable that changes every iteration (unrelated to the load arguments)
+        s.move("l", F.imm(0), work(V_X))
+        s.label("lm_loop")
+        s.quick("add", "l", 1, work(V_X))
+        s.move("w", F.absl(F.GA_SUB + 0x10), F.d(0))
+        s.tst("w", F.d(0))
+        s.bcc("ne", "lm_loop")
     s.immop("cmp", "b", 2, F.d(7))
     s.bcc("eq", "pick_b")
     if case == "two_paths":
@@ -126,6 +162,26 @@ def build(options):
         s.label(label)
         s.lea(F.absl(name_label), 0)
         s.move("l", F.imm(base), work(V_BASE))                  # the destination, carried in the work area
+        if case == "loop_memory_base" and label == "pick_a":    # the loop changes the destination itself: it must become unknown, never a chosen value
+            s.label("lb_loop")
+            s.immop("add", "l", 0x10000, work(V_BASE))
+            s.move("w", F.absl(F.GA_SUB + 0x10), F.d(0))
+            s.tst("w", F.d(0))
+            s.bcc("ne", "lb_loop")
+        if case == "branch_two" and label == "pick_a":          # two candidate destinations meet at the shared loader
+            s.move("w", F.absl(F.GA_SUB + 0x10), F.d(0))
+            s.tst("w", F.d(0))
+            s.bcc("eq", "bt_join")
+            s.move("l", F.imm(BASE_A2), work(V_BASE))
+            s.label("bt_join")
+        if case == "loop_alias" and label == "pick_a":          # every iteration stores through a pointer the program cannot know
+            s.move("w", F.absl(F.GA_SUB + 0x12), F.d(0))
+            s.move("w", F.d(0), F.a(3))
+            s.label("la_loop")
+            s.move("l", F.imm(0), ("inc", 3))
+            s.move("w", F.absl(F.GA_SUB + 0x10), F.d(0))
+            s.tst("w", F.d(0))
+            s.bcc("ne", "la_loop")
         if case == "alias" and label == "pick_a":
             s.move("w", F.absl(F.GA_SUB + 0x10), F.d(0))        # an address the program cannot know ...
             s.move("w", F.d(0), F.a(3))
@@ -139,7 +195,7 @@ def build(options):
         s.bsr("load_file")
         if case == "no_exec" and label == "pick_a":
             s.bra("done")                                       # loaded and never executed: data
-        if case == "entry_unknown" and label == "pick_a":
+        if case in ("entry_unknown", "computed") and label == "pick_a":
             s.move("l", F.absl(F.GA_SUB + 0x10), F.a(0))        # the entry comes from a Gate Array register: the load is proven, its execution mapping is not
         else:
             s.move("l", work(V_BASE), F.a(0))
