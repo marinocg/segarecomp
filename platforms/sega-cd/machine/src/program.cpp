@@ -430,13 +430,15 @@ ProcessorOutput emit_processor(unsigned cpu, const ProcessorImages &processor, s
       }
     }
     std::map<std::string, std::uint32_t> reasons;
-    for (const std::size_t u : [&] { std::vector<std::size_t> all; for (const auto &[ii, us] : by_image) all.insert(all.end(), us.begin(), us.end()); return all; }()) {
-      const auto &unit = units[u];
-      const auto first_offset = processor.images.images[unit.image_index].mappings[unit.mapping_index].first_offset;
-      if (by_image[unit.image_index].size() < 2U) continue;
-      for (const auto &[pc, reached] : unit.traversal.instructions) {
-        const auto it = plan.refused.find({unit.image_index, pc - unit.start + first_offset});
-        if (it != plan.refused.end() && compiled_bytes(reached)) ++reasons[it->second];
+    for (const auto &[image_index, unit_indices] : by_image) {
+      if (unit_indices.size() < 2U) continue;
+      for (const std::size_t u : unit_indices) {
+        const auto &unit = units[u];
+        const auto first_offset = processor.images.images[image_index].mappings[unit.mapping_index].first_offset;
+        for (const auto &[pc, reached] : unit.traversal.instructions) {
+          const auto it = plan.refused.find({image_index, pc - unit.start + first_offset});
+          if (it != plan.refused.end() && compiled_bytes(reached)) ++reasons[it->second];
+        }
       }
     }
     for (const auto &[reason, count] : reasons) stats.fallback_reasons.emplace_back(reason, count);
