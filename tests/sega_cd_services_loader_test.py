@@ -112,6 +112,15 @@ def main():
         check(refusals(r).get("loaded_not_executed", 0) >= 3, "no_exec: the typed refusal is loaded_not_executed")
         r = scan(fixture(tmp, "entry_unknown")[0], "--work-state")
         check("entry_unknown" in refusals(r), "entry_unknown: the typed refusal is entry_unknown")
+        # ---- a CDCTRN whose effects the walk cannot bound must not leave stale knowledge (review follow-up) ----
+        for case, proven, why in (("trn_disjoint", True, "fully known, disjoint buffers: the earlier knowledge is retained and A is proven"),
+                                  ("trn_dev", True, "an unknown device byte with known disjoint buffers: CDCTRN needs the sub-read device, the known buffers are not written, A is retained"),
+                                  ("trn_lba", True, "an unknown read position with known disjoint buffers: only those buffers are forgotten, A is retained"),
+                                  ("trn_a0", False, "an unknown data-buffer pointer may overwrite the stored base: everything tracked is forgotten, A is not proven"),
+                                  ("trn_hdr", False, "an unknown header-buffer pointer: everything tracked is forgotten and the boot image is no longer trusted, A is not proven")):
+            ft, ot = fixture(tmp, case)
+            r = scan(ft, "--work-state", "--state-convergence")
+            check((A["lba"] in mods(r)) == proven and B["lba"] in mods(r) and r["complete"], "%s: %s; the independent module B is proven" % (case, why))
         fh, oh = fixture(tmp, "hdr_alias")
         r = scan(fh, "--work-state", "--state-convergence")
         check(set(mods(r)) == set() and "destination_unknown" in refusals(r), "hdr_alias: a CDCTRN header pointer whose ignored high byte aliases the base variable overwrites it: the destination is unknown, nothing is proven (A1 is masked to the 24-bit bus)")
@@ -168,6 +177,28 @@ def main():
         check(rc != 0 and "static_extent_unproven" in out, "provenance: a proven source at a guest mapping the scan did not prove is refused")
         rc, out = emit_with("sub:%d:%d:%d" % (off_, base_, 6 * 2048))
         check(rc != 0 and "static_extent_unproven" in out, "provenance: an extent that runs past the proven source is refused")
+
+        # ---- the declared executable RANGE must be a producer-authorized extent, not any subrange of a proven source (review follow-up) ----
+        def producer(scope, *flags):
+            out = tmp / ("ext-" + scope)
+            subprocess.run([SEGARECOMP, "sega-cd", "discover-modules", "--cue", str(fx / "disc" / "disc.cue"), "--module-table-roots", "--constant-dispatch", "--work-state",
+                            "--recursive-modules", "--state-convergence", "--static-extents", str(out), "--static-scope", scope, *flags], capture_output=True, text=True, timeout=300)
+            return out.read_text().split()
+        hull_lines, loaded_lines = producer("hull"), producer("loaded")
+        a_off = A["lba"] * 2048
+        hull_a = [l for l in hull_lines if int(l.split(":")[1]) >= a_off and int(l.split(":")[1]) < a_off + 4096][0]
+        loaded_a = [l for l in loaded_lines if int(l.split(":")[1]) == a_off][0]
+        check(all(emit_with(l)[0] == 0 for l in hull_lines + loaded_lines), "range authority: every extent either producer policy emits (hull and explicit loaded) is admitted exactly")
+        ho, hb, hl = (int(x) for x in hull_a.split(":")[1:])
+        lo_, lb_, ll_ = (int(x) for x in loaded_a.split(":")[1:])
+        check(ho > lo_, "range authority: the fixture's module has a non-code header (hull starts after the loaded range)")
+        for label, spec in (("a subrange inside the source but outside the hull (the header)", "sub:%d:%d:%d" % (lo_, lb_, ho - lo_)),
+                            ("a partial range crossing the hull boundary", "sub:%d:%d:%d" % (ho - 16, hb - 16, 64)),
+                            ("a strict subrange inside the hull", "sub:%d:%d:%d" % (ho, hb, hl - 8)),
+                            ("the hull start extended past the hull end", "sub:%d:%d:%d" % (ho, hb, hl + 16)),
+                            ("a valid source mapped at an unproven guest base", "sub:%d:%d:%d" % (ho, hb + 0x4000, hl))):
+            rc, out = emit_with(spec)
+            check(rc != 0 and "static_extent_unproven" in out, "range authority: %s is refused (static_extent_unproven)" % label)
 
         # ---- a mapped executable image that changes after loading ----
         f4, o4 = fixture(tmp, "late_patch")

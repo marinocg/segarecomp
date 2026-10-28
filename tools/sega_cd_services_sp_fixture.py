@@ -37,9 +37,11 @@ HEADER_A = 0x40
 FAR_A = 0x840
 CASES = ("base", "alias", "unmodelled", "two_paths", "corrupt_pvd", "corrupt_extent", "no_exec", "stale_service", "late_patch", "entry_unknown",
          "loop_pointer", "loop_pointer_late", "loop_pointer_early_store", "loop_unknown_exit", "loop_memory", "loop_memory_base", "branch_two", "loop_alias", "computed",
-         "recursive", "recursive_taken", "cycle", "transformed", "overlay", "hdr_alias")   # SEG-099-T003: state-convergence cases; T004: recursive discovery cases
+         "recursive", "recursive_taken", "cycle", "transformed", "overlay", "hdr_alias",
+         "trn_disjoint", "trn_a0", "trn_dev", "trn_lba", "trn_hdr")   # T005 follow-up: CDCTRN calls whose effects the walk cannot bound   # SEG-099-T003: state-convergence cases; T004: recursive discovery cases
 SP_TABLE_PREFIX = 0x2A
 SCRATCH = 0x040000
+RAW_BUF, RAW_HDR = 0x050000, 0x050A00
 BASE_A2 = 0x0B8000
 V_X = 24
 
@@ -197,6 +199,33 @@ def build(options):
         if case == "stale_service" and label == "pick_a":
             s.move("w", F.imm(0x0B), F.d(0))                    # a service number that is no load
             s.jsr(F.absl(BIOS_VECTOR))
+        if case in ("trn_disjoint", "trn_a0", "trn_dev", "trn_lba", "trn_hdr") and label == "pick_a":
+            # one hand-written sector transfer before the loader: the arguments are stored, then CDCTRN is called with fully known (disjoint) buffers or with ONE unknown input
+            s.move("l", F.imm(16), work(V_LBA))
+            s.move("l", F.imm(1), work(V_COUNT))
+            if case == "trn_dev":
+                s.move("b", F.absl(F.GA_SUB + 0x10), F.absl(F.GA_SUB + 0x04))     # a device byte the program cannot know
+            else:
+                s.move("b", work(V_MODE), F.absl(F.GA_SUB + 0x04))
+            bios("CDCSTOP")
+            s.lea(work(V_X) if case == "trn_lba" else work(V_LBA), 0)               # trn_lba: the {sector,count} block was never written: unknown
+            bios("ROMREADN")
+            s.label("raw_stat")
+            bios("CDCSTAT")
+            s.bcc("cs", "raw_stat")
+            bios("CDCREAD")
+            s.bcc("cs", "raw_stat")
+            if case == "trn_a0":
+                s.move("l", F.absl(F.GA_SUB + 0x10), F.a(0))
+            else:
+                s.move("l", F.imm(RAW_BUF), F.a(0))
+            if case == "trn_hdr":
+                s.move("l", F.absl(F.GA_SUB + 0x14), F.a(1))
+            else:
+                s.move("l", F.imm(RAW_HDR), F.a(1))
+            bios("CDCTRN")
+            bios("CDCACK")
+            s.lea(F.absl(name_label), 0)                                              # the raw sequence used A0
         s.bsr("load_file")
         if case == "transformed" and label == "pick_b":         # the module is stored encoded and decoded in place before it runs: its executed bytes are not a disc span
             s.move("l", work(V_BASE), F.a(0))

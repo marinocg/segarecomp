@@ -10,6 +10,8 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <set>
+#include <tuple>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -307,29 +309,32 @@ std::string read_track1_extent(const segarecomp::DiscImage &disc, std::uint32_t 
   return {};
 }
 
-// The proven mappings of the disc (computed once per process): the strongest static scan the supported build may use. Only the sub processor has static producers.
+// The extents the static producer can emit for this disc, computed once per process: for each proven module and guest base the executable `hull` extent (the default policy) and the whole
+// `loaded` extent (`--static-range loaded`), from the scan with and without the recursive walk (the build may run either). The declared range must be exactly one of them: containment in a
+// proven source is not authority for an arbitrary subrange (a header, a partial range, a range crossing the hull boundary).
 bool static_extent_is_proven(const segarecomp::DiscImage &disc, scd::Processor processor, std::uint32_t off, std::uint32_t base, std::uint32_t len) {
-  static std::optional<scd::LoaderScan> proven;
+  static std::set<std::tuple<std::uint64_t, std::uint64_t, std::uint64_t>> authorized;   // (track-1 offset, guest base, length)
   static bool computed = false;
   if (!computed) {
     computed = true;
     const auto produced = scd::produce_boot_images(disc);
     if (produced.images) {
-      scd::LoaderScanOptions options;
-      options.module_table_roots = options.constant_dispatch = options.work_state = options.recursive_modules = options.state_convergence = true;
-      auto scan = scd::scan_sega_cd_loaders(disc, *produced.images, options);
-      if (scan.complete) proven = std::move(scan);
+      for (const bool recursive : {true, false}) {
+        scd::LoaderScanOptions options;
+        options.module_table_roots = options.constant_dispatch = options.work_state = options.state_convergence = true;
+        options.recursive_modules = recursive;
+        const auto scan = scd::scan_sega_cd_loaders(disc, *produced.images, options);
+        if (!scan.complete) continue;   // an incomplete scan proves nothing
+        for (const auto &m : scan.modules)
+          for (const auto b : m.bases) {
+            const std::uint64_t lo = static_cast<std::uint64_t>(m.block) * 2048U;
+            authorized.emplace(lo + m.range_offset, static_cast<std::uint64_t>(b) + m.range_offset, m.range_length);   // hull
+            authorized.emplace(lo, b, m.size);                                                                         // loaded
+          }
+      }
     }
   }
-  if (!proven || processor != scd::Processor::sub) return false;
-  for (const auto &m : proven->modules) {
-    const std::uint64_t lo = static_cast<std::uint64_t>(m.block) * 2048U;
-    if (off < lo || static_cast<std::uint64_t>(off) + len > lo + m.size) continue;   // inside the proven source
-    const std::uint32_t inside = static_cast<std::uint32_t>(off - lo);
-    for (const auto b : m.bases)
-      if (b + inside == base) return true;                                           // at one of its proven guest mappings
-  }
-  return false;
+  return processor == scd::Processor::sub && authorized.count({off, base, len}) != 0U;
 }
 
 int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios_path, const std::vector<std::string> &copies,

@@ -1118,18 +1118,33 @@ private:
     if (!read) refuse(LoaderRefusalKind::source_outside_track, s.pc);
   }
 
+  // A CDCTRN the walk cannot resolve may still write: the data buffer at A0 and the 4-byte header at A1. Whatever those may be, nothing tracked there survives (an unknown pointer forgets
+  // everything), and the boot image is no longer trusted if a write may reach it. An independently known, disjoint range is retained.
+  void cdctrn_may_write(State &s) {
+    const auto span = [&](const Val &p, std::uint32_t n) {
+      if (!p.known()) { forget_all(s); return; }
+      const std::uint32_t lo = p.v & 0x00FFFFFFU;
+      s.mem.clear_range(lo, lo + n);
+      note_write(s, lo, lo + n);
+      if (lo < end_ && lo + n > base_) s.image_dirty = true;
+    };
+    span(s.a[0], kLoaderScanCdcTrnSpan);
+    span(s.a[1], 4U);
+  }
+
   void cdc_transfer(State &s, std::uint32_t here, const Cd &cd) {
-    if (!s.hw.dest.known()) { refuse(LoaderRefusalKind::destination_unknown, here); transfers_unresolved_.insert(here); return; }
+    if (!s.hw.dest.known()) { refuse(LoaderRefusalKind::destination_unknown, here); transfers_unresolved_.insert(here); cdctrn_may_write(s); return; }
     if (s.hw.dest.v != 3U || !cd.header_read) return;   // CDCTRN requires the sub-read device and a CDCREAD'ed sector: otherwise it transfers nothing
     if (cd.left.known() && static_cast<std::int32_t>(cd.left.v) <= 0) return;   // the read already delivered every requested sector
-    if (!cd.pos.known()) { refuse(LoaderRefusalKind::lba_unknown, here); transfers_unresolved_.insert(here); return; }
+    if (!cd.pos.known()) { refuse(LoaderRefusalKind::lba_unknown, here); transfers_unresolved_.insert(here); cdctrn_may_write(s); return; }
     const Val a0 = s.a[0];
-    if (!a0.known()) { refuse(LoaderRefusalKind::destination_unknown, here); transfers_unresolved_.insert(here); return; }
+    if (!a0.known()) { refuse(LoaderRefusalKind::destination_unknown, here); transfers_unresolved_.insert(here); cdctrn_may_write(s); return; }
     const std::uint32_t destination = a0.v & 0x00FFFFFFU;
     if (destination < kLoaderScanBiosAreaEnd || static_cast<std::uint64_t>(destination) + kLoaderScanSectorBytes > kMemTrackedEnd ||
         (destination < end_ && destination + kLoaderScanSectorBytes > base_)) {
       refuse(LoaderRefusalKind::destination_unsupported, here);
       transfers_unresolved_.insert(here);
+      cdctrn_may_write(s);
       return;
     }
     transfers_resolved_.insert(here);
@@ -1152,7 +1167,8 @@ private:
     note_write(s, destination, destination + kLoaderScanCdcTrnSpan);
     deposit_sector(s, cd.pos.v, destination, kLoaderScanCdcTrnSpan);
     if (s.a[1].known()) { const std::uint32_t h = s.a[1].v & 0x00FFFFFFU; s.mem.clear_range(h, h + 4U); note_write(s, h, h + 4U); if (h < end_ && h + 4U > base_) s.image_dirty = true; }
-    else { s.mem.clear(); note_write_unknown(s); }
+    else forget_all(s);
+    if (destination < end_ && destination + kLoaderScanCdcTrnSpan > base_) s.image_dirty = true;   // the documented buffer advance may reach the boot image even when the sector does not
   }
 
   // ---- decode ------------------------------------------------------------------------------------------------------------
