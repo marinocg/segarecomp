@@ -682,7 +682,7 @@ int resolve_source_command(int argc, char **argv) {
 int discover_modules_command(int argc, char **argv) {
   std::optional<std::string> cue, out_path, extents_path, windows_path;
   bool table_roots = false, computed_continue = false, constant_dispatch = false, work_state = false, recursive_modules = false, state_convergence = false, converge_always = false;
-  std::uint32_t widen_after = 32U, scan_order = 0U;
+  std::uint32_t widen_after = 24U, scan_order = 0U;
   std::string static_scope = "hull";   // SEG-098-T004: `loaded` = every loaded byte of a proven module (all aligned starts), `hull` = the traversed executable subrange
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];

@@ -126,7 +126,7 @@ struct LoaderScanOptions {
   // SEG-099-T004 (ADR 0218): follow a proven transfer INTO a loaded module and find the loads that module performs (requires work_state).
   bool recursive_modules{false};
   bool state_convergence{false};
-  std::uint32_t widen_after{32U};
+  std::uint32_t widen_after{24U};
   bool converge_always{false};   // test-only: skip the exact attempt (joins from the first walk)
   std::uint32_t order{0U};
   bool module_table_roots{false};  // walk the SP module jump table (init, main, int2, user) instead of only the descriptor entry

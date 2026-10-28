@@ -11,7 +11,7 @@ through many call contexts - the visited set is keyed by the complete state *inc
 
 ## Pre-registered rule (written before the sensitivity matrix; limits not raised)
 
-Option `state_convergence` (`discover-modules --state-convergence [--widen-after N]`; the build enables it; default `widen_after = 32`):
+Option `state_convergence` (`discover-modules --state-convergence [--widen-after N]`; the build enables it; default `widen_after = 24`):
 
 0. **Convergence is a fallback.** The exact walk runs first, so every earlier result (including the 48-module overlay inventories of ADR 0213, which joins at the shared dispatcher would degrade) is reproduced unchanged; only a walk that exhausted a bound is repeated with joins (`survey.convergence_used`). A first all-joins design failed `sega_cd_bios_scale_test` for exactly that reason and was replaced.
 1. Exact exploration up to `widen_after` distinct states at one control-flow location (head = pc + module-table slot + a two-bit knowledge profile: "abstract memory empty", "boot image possibly rewritten"). A path that has lost its work-area knowledge cannot degrade one that has not.
@@ -46,16 +46,20 @@ Authentic Earthworm Jim SE (identical authorized inputs, no gameplay script):
 | Measure | M2 / T002 (no convergence) | With convergence |
 |---|---|---|
 | Scan result | `scan_limit_exceeded`, incomplete | **complete** |
-| Visited states / steps | 4,096 / 8,187 (exhausted) | 3,940 / 87,855 |
-| Joins / widenings | 0 / 0 | 289 / 168 |
+| Visited states / steps | 4,096 / 8,187 (exhausted) | 3,535 / 64,623 |
+| Joins / widenings | 0 / 0 | 309 / 156 |
 | Branches decided by tracked condition codes | 9 | 17 |
 | Statically discovered modules | 0 | 0 (the one transfer's destination is unknown: `destination_unknown`) |
 | False admissions | 0 | 0 |
 | Scan wall time / peak memory | 5.2 s / 12.7 MB | 5.5 s / 10.0 MB |
 | Build (6 rounds, 2 extents) | stop `entry_not_compiled`, inventory `blocked` | the same stop and inventory; the static discovery is `no_modules` with the typed refusal instead of `scan_incomplete` |
 
-Sensitivity of the threshold (aggregate): Earthworm Jim SE completes for `widen_after` 12-32 (2,057 / 2,422 / 3,210 / 3,940 states) and exhausts again at 48 (the bound, not the threshold, is the limit). On the project fixtures, three loader paths sharing one reader (`two_paths`) keep all three modules for `widen_after >= 32`, two of three at 16-24 and one at 8-12: *paths that share code compete for the per-location exact budget*, a precision cost of context-insensitive joining, not an unsoundness. The default 32 is the smallest value that keeps the three-path fixture exact and still completes the authentic scan; the margin on the authentic title is thin (96% of the state bound).
+Sensitivity of the threshold (aggregate, before the CDCTRN follow-up; see the Amendment for the final numbers): Earthworm Jim SE completed for `widen_after` 12-32 (2,057 / 2,422 / 3,210 / 3,940 states) and exhausts again at 48 (the bound, not the threshold, is the limit). On the project fixtures, three loader paths sharing one reader (`two_paths`) keep all three modules for `widen_after >= 32`, two of three at 16-24 and one at 8-12: *paths that share code compete for the per-location exact budget*, a precision cost of context-insensitive joining, not an unsoundness. The default 32 is the smallest value that keeps the three-path fixture exact and still completes the authentic scan; the margin on the authentic title is thin (86% of the state bound).
 
 ## Decision: `STATE_CONVERGENCE_GO` (mechanism) with recorded limits
 
 The scan of the authentic title now terminates inside the unchanged bounds with a typed result instead of exhaustion, no joins invent knowledge, and nothing is admitted without proof. Not achieved: any authentic module (the loads of this title are selected by commands, ADR 0215/0216), and a robust margin: a title with more shared-code paths can still exhaust or lose precision.
+
+## Amendment (follow-up review, ADR 0220): threshold re-measured after the CDCTRN soundness fix
+
+Forgetting memory for an unresolved CDCTRN (the sound behaviour) removed knowledge on the authentic Earthworm Jim SE path and its scan again exhausted at the old default 32 (`widen_after` 12-24 complete: 2,230 / 2,606 / 3,052 / 3,535 states; 32 exhausts). The default is now **24** (3,535 states, 86% of the bound); 16 and 20 were rejected because the exploration-order test (`loop_unknown_exit`) then differs between orders. On the project fixtures with all-joins forced (`--converge-always`) the three-path fixture keeps 2 of 3 modules at 16-24 and all 3 at 32; the exact attempt (the default path) is unaffected. The conclusions of this ADR stand: a sound scan that completes inside the unchanged bounds, with the margin and precision cost stated.
