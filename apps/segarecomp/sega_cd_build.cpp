@@ -120,6 +120,15 @@ std::uint64_t process_token() {
   return token;
 }
 
+// The stop classes that name an unmodelled DEVICE capability (hardware/audio/DMA/register behaviour), as opposed to a code-coverage, CPU-architectural or machine-evidence stop.
+// An explicit list (runtime stop names, platforms/sega-cd/runtime/scd_machine.c): `instruction_unsupported`, `trace_unsupported` and the exception classes are CPU stops, not device stops.
+bool is_device_stop_class(const std::string &cls) {
+  static const char *const kDevice[] = {"wordram_cell_image_unsupported", "wordram_dot_image_unsupported", "backup_ram_unsupported", "pcm_unsupported", "gate_array_register_unsupported",
+                                        "vdp_access_unsupported", "vdp_dma_unsupported", "cdc_destination_unsupported", "cdd_command_unsupported", "main_device_unsupported"};
+  for (const char *name : kDevice) if (cls == name) return true;
+  return false;
+}
+
 class Builder {
  public:
   Builder(Options options, std::string self) : o_(std::move(options)), self_(std::move(self)) {}
@@ -140,6 +149,7 @@ class Builder {
 
     stage("analyze", "running");
     std::vector<std::string> admits;
+    if (!o_.static_discovery) static_status_ = "disabled";
     if (o_.static_discovery) static_discovery(admits);   // SEG-098-T002: first in the chain, so every later admission's identity includes them
     unsigned epochs = 0, templates = 0, slot_total = 0;
     for (unsigned round = 0; round < kMaxRounds; ++round) {
@@ -269,7 +279,7 @@ class Builder {
       }
       return false;
     };
-    const bool device = cls.size() > 12U && cls.compare(cls.size() - 12U, 12U, "_unsupported") == 0;   // a hardware-capability stop is not about code coverage
+    const bool device = is_device_stop_class(cls);   // a hardware-capability stop is not about code coverage
     const char *where = device ? "device_capability" : inside(extents_, false) || inside(static_extents_, false) ? "inside_admitted_extent" : inside(static_windows_, true) ? "inside_static_module_window" : "outside_admitted_images";
     return std::string("{\"class\":\"") + cls + "\",\"cpu\":\"" + want + "\",\"location\":\"" + where + "\"}";
   }
@@ -286,13 +296,14 @@ class Builder {
     if (failure_stage.empty()) {
       cls = stop_class(report);
       if (cls != "none") {
-        if (cls.size() > 12U && cls.compare(cls.size() - 12U, 12U, "_unsupported") == 0) device_stop = true;
+        if (is_device_stop_class(cls)) device_stop = true;
         else barriers.push_back("stop:" + cls);
       }
       if (!frontier_.empty()) barriers.push_back("frontier:" + raw_value(frontier_, "refusal").value_or("unknown"));
     }
     if (!kNestedLoaderAnalysis) reasons.push_back("nested_loaders_not_analyzed");
     if (static_status_ == "disabled") reasons.push_back("static_discovery_disabled");
+    else if (static_status_ == "not_run") reasons.push_back("static_discovery_not_run");
     else if (static_status_ != "admitted" && static_status_ != "no_modules") reasons.push_back("static:" + static_status_);
     for (const auto &[k, n] : static_refusals_) { (void)n; reasons.push_back("static_refusal:" + k); }
     if (!extents_.empty()) reasons.push_back("execution_derived_extents");
@@ -687,7 +698,7 @@ class Builder {
   std::mutex log_mutex_;
   std::atomic<unsigned> counter_{0};
   std::vector<std::string> extents_, static_extents_, static_windows_;
-  std::string static_status_ = "disabled";
+  std::string static_status_ = "not_run";
   std::map<std::string, unsigned> static_refusals_;
   std::string static_json_ = "{\"ran\":false}";
   std::vector<std::string> unit_names_;

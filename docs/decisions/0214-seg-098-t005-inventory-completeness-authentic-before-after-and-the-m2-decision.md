@@ -13,7 +13,7 @@
 | `partial` | a useful inventory with named unresolved parts (`unresolved`: `nested_loaders_not_analyzed`, `static_refusal:<class>`, `static:<status>`, `static_discovery_disabled`, `execution_derived_extents`) |
 | `blocked` | a typed barrier stopped further justified compilation (`barriers`: `stop:<class>` for a code stop, `frontier:<refusal>` for an unresolvable frontier, `build_failed:<stage>`) |
 
-A hardware-capability stop (`*_unsupported`, e.g. an unmodelled PCM/audio feature) is reported as `device_stop: true`, not as a code barrier and not as missing code (its `final_stop.location` is
+A hardware-capability stop (an explicit list of device classes: PCM, backup RAM, Word RAM image formats, Gate Array register, VDP access/DMA, CDC destination, CDD command, main-side device; e.g. an unmodelled PCM/audio feature; `instruction_unsupported` and the CPU exception/trace stops are code stops and stay barriers) is reported as `device_stop: true`, not as a code barrier and not as missing code (its `final_stop.location` is
 `device_capability`). Zero frontiers on a bounded no-input run prove nothing: the scan does not analyze loaders inside the modules it admits (`kNestedLoaderAnalysis = false`), so `complete`
 is **currently unreachable by construction** and every successful build says `partial` - this is the honest label, covered by tests (`sega_cd_bios_unvisited_test`, `sega_cd_bios_scale_test`,
 `sega_cd_native_build_test`). The review note of ADR 0212 stands: the scan's own `complete` means only "not exhausted"; the inventory status keys off refusals.
@@ -27,13 +27,14 @@ is **currently unreachable by construction** and every successful build says `pa
 
 - Additional source-authorized executable coverage before gameplay from the static producer on authentic titles: **0 modules**. The Compatibility route did not regress.
 - No fixed gameplay route is available locally, so no route replay was run; **Checkpoint H is not claimed and was not re-run**; its earlier result remains a separate regression reference.
+- The device-class stop rule is an explicit list; no hermetic fixture reaches a device stop through the BIOS-image build, so `device_stop` is exercised only by the authentic Sonic CD run (its `pcm_unsupported`) and is untested in CI.
 - Earthworm Jim SE shows a second authentic limit: the scan's state-keyed visited set explodes on its boot image (62,314 steps / 4,096 states with module-table roots alone). The bound turns this into a typed
   incomplete result (nothing admitted - never a silent truncation), not a wrong inventory.
 
 ## Decision: `M2_PARTIAL`
 
-Pre-registered conditions for `M2_GO`: (1) the BIOS-image builder compiles and later executes an independently justified unvisited module - **met** (T002/T003/T004 fixtures through the supported build and launcher
-path, no manifest, no execution-derived admission of the module, runtime guards unchanged); (2) wider discovery demonstrates useful additional coverage - **met on project-authored discs** (module jump table,
+Conditions for `M2_GO` (from the operator's M2 brief): (1) the BIOS-image builder compiles and later executes an independently justified unvisited module - **met** (T002/T003/T004 fixtures through the supported build and launcher
+path, no manifest, no execution-derived admission of the module, runtime guards unchanged); (2) wider discovery demonstrates useful additional coverage - **met only on project-authored discs, i.e. partially met** (module jump table,
 constant-argument table dispatch, computed entries with `--static-range loaded`, 48-module overlay inventories), **not met on either authentic title** (0 modules; limits above); (3) safety and determinism hold -
 **met** (typed refusals, identity includes every static admission, repeat builds identical, no regression of the authentic baseline).
 
