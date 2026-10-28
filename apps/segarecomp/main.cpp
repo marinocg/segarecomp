@@ -11,6 +11,7 @@
 #include "segarecomp/sha256.hpp"
 #include "segarecomp/machine/genesis/reachability_challenger.hpp"
 #include "build_command.hpp"
+#include "sega_cd_aot.hpp"
 #include "sega_cd_command.hpp"
 #include "segarecomp/machine/master_system/ml_region_z80_producer.hpp"
 #include "segarecomp/rom.hpp"
@@ -46,7 +47,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp m68k-frontend <image> <source-id> <entry> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
-                "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n  segarecomp ml-gen2-cell-logits --rom <image> --output <path>\n  segarecomp ml-gen2-probe-report --synthetic\n  segarecomp aot-policy-identity --aot-policy <compatibility|optimized> [--aot-model <v1|gen2>] [--platform <genesis|master-system>]\n"
+                "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n  segarecomp ml-gen2-cell-logits --rom <image> --output <path>\n  segarecomp ml-gen2-probe-report --synthetic\n  segarecomp aot-policy-identity --aot-policy <compatibility|optimized> [--aot-model <v1|gen2>] [--platform <genesis|master-system|sega-cd>]\n"
                   "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--ml-gen2-region-proposal-output <path> [--ml-gen2-logits-output <path>]] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path> [--region-proposal-closure <prune|close>]] [--legacy-aot-entries] [--shared-return-targets] [--aot-operand-sharing] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission | --immutable-rom-aot-ml-gen2-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
@@ -1031,10 +1032,24 @@ int run_cli(int argc, char **argv) {
         const std::string_view key = argv[index], value = argv[index + 1];
         if (key == "--aot-policy" && policy.empty() && (value == "compatibility" || value == "optimized")) policy = value;
         else if (key == "--aot-model" && !model_given && (value == "v1" || value == "gen2")) { model = value; model_given = true; }
-        else if (key == "--platform" && !platform_given && (value == "genesis" || value == "master-system")) { platform = value; platform_given = true; }
+        else if (key == "--platform" && !platform_given && (value == "genesis" || value == "master-system" || value == "sega-cd")) { platform = value; platform_given = true; }
         else { print_usage(std::cerr); return 2; }
       }
       if (policy.empty() || (policy == "compatibility" && model_given)) { print_usage(std::cerr); return 2; }  // same rule as `build`
+      if (platform == "sega-cd") {  // SEG-096-T003 (ADR 0208): the EXPERIMENTAL Sega CD policy; only the frozen gen2 model is accepted
+        if (model_given && model != "gen2") { print_usage(std::cerr); return 2; }
+        segarecomp_app::SegaCdAotOptions scd_options;
+        scd_options.policy = policy;
+        scd_options.model_given = model_given;
+        if (policy == "optimized" && !segarecomp_app::sega_cd_aot_producer_failure().empty()) {
+          std::cerr << "segarecomp: the Sega CD experimental producer is unavailable (model_identity)\n";
+          return 3;
+        }
+        std::cout << "policy_identity=" << segarecomp_app::sega_cd_aot_policy_identity(scd_options) << " requested=" << policy << " requested_model="
+                  << (policy == "optimized" ? "gen2" : "none") << " contract=" << segarecomp::machine::sega_cd::kSelectiveAdmissionContract << " platform=sega-cd experimental="
+                  << (policy == "optimized" ? "1" : "0") << '\n';
+        return 0;
+      }
       if (platform == "master-system") {
         if (model_given) { print_usage(std::cerr); return 2; }  // a Genesis model family is never a Z80 model name
         if (policy == "optimized" && !segarecomp::machine::master_system::ml_identity_failure().empty()) {

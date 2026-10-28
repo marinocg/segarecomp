@@ -197,10 +197,11 @@ int headless(int argc, char **argv) {
 // 5 the program was refused before launch, 6 the program could not be started.
 int sega_cd_headless(int argc, char **argv) {
   fs::path bios, cue, program, record, replay, report_path;
-  bool windowless = false, build = false;
+  bool windowless = false, build = false, experimental_m3 = false;
   for (int i = 2; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--build") build = true;
+    else if (arg == "--aot-policy" && i + 1 < argc && (std::string(argv[i + 1]) == "compatibility" || std::string(argv[i + 1]) == "optimized")) experimental_m3 = std::string(argv[++i]) == "optimized";
     else if (arg == "--bios" && i + 1 < argc) bios = from_u8(argv[++i]);
     else if (arg == "--cue" && i + 1 < argc) cue = from_u8(argv[++i]);
     else if (arg == "--program" && i + 1 < argc) program = from_u8(argv[++i]);
@@ -208,7 +209,7 @@ int sega_cd_headless(int argc, char **argv) {
     else if (arg == "--replay" && i + 1 < argc) replay = from_u8(argv[++i]);
     else if (arg == "--report" && i + 1 < argc) report_path = from_u8(argv[++i]);
     else if (arg == "--windowless") windowless = true;
-    else { std::fprintf(stderr, "usage: Segarecomp --sega-cd --bios <file> --cue <file> [--program <file> | --build] [--record <script> | --replay <script>] [--windowless] [--report <file>]\n"); return 2; }
+    else { std::fprintf(stderr, "usage: Segarecomp --sega-cd --bios <file> --cue <file> [--program <file> | --build [--aot-policy <compatibility|optimized>]] [--record <script> | --replay <script>] [--windowless] [--report <file>]\n"); return 2; }
   }
   if (!record.empty() && !replay.empty()) { std::fprintf(stderr, "--record and --replay are exclusive\n"); return 2; }
   std::string report;
@@ -240,14 +241,19 @@ int sega_cd_headless(int argc, char **argv) {
     ScdBuildRequest request;
     request.bios = bios; request.cue = cue;
     request.out_dir = library_root() / "sega-cd" / added.entry->sha256.substr(0, 16) / "build";
+    request.experimental_m3 = experimental_m3;   // SEG-096-T003: the same switch as the window's policy choice; Compatibility unless asked
     ScdBuildJob job(request, layout);
     job.wait();
     if (job.outcome() != BuildOutcome::succeeded) { emit("build=failed"); emit("message=" + job.message()); return finish(7); }
     emit("build=ok");
     emit("build_summary=" + job.summary());
+    emit(std::string("build_policy=") + (experimental_m3 ? "optimized_experimental_requested" : "compatibility") + " effective=" + (job.built_experimental() ? "experimental_optimized" : "compatibility"));
     const scd::ImportResult attached = scd::attach_program(added.entry->sega_cd, job.program());
     if (!attached.program_attached) { emit(std::string("result=refused refusal=") + scd::code(attached.refusal)); return finish(5); }
+    const bool chosen = added.entry->sega_cd.experimental_m3;
     added.entry->sega_cd = attached.record;
+    added.entry->sega_cd.experimental_m3 = chosen || experimental_m3;
+    added.entry->sega_cd.program_experimental = job.built_experimental();
     emit("program=verified");
     if (!catalog.save(&save_error)) { emit("result=failed problem=" + save_error); return finish(1); }
   }

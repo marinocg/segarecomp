@@ -5,6 +5,7 @@
 // usage: launcher_sega_cd_test <fake_scd_program>
 
 #include "json_lite.hpp"
+#include "launcher_core.hpp"
 #include "library_catalog.hpp"
 #include "sega_cd.hpp"
 
@@ -474,6 +475,61 @@ void test_catalog(const fs::path &base, const fs::path &fake) {
   }
 }
 
+// SEG-096-T003 (ADR 0208): the EXPERIMENTAL Sega CD policy at the launcher - an explicit choice that is off by default, passed to the product as its own
+// option, read back from the product's own report, and persisted without touching any record that never chose it.
+void test_experimental_policy(const fs::path &base, const fs::path &fake) {
+  expect(scd_build_policy_arguments(false).empty(), "policy: Compatibility passes no policy option to the product");
+  expect((scd_build_policy_arguments(true) == std::vector<std::string>{"--aot-policy", "optimized", "--aot-model", "gen2"}), "policy: the experimental choice is the product's own option, nothing else");
+  expect(!ScdBuildRequest{}.experimental_m3, "policy: a build request is Compatibility unless the experimental choice is set");
+  const std::string selective =
+      "{\"status\":\"ok\",\"aot_policy\":{\"requested\":\"optimized\",\"experimental\":true,\"effective\":\"selective\",\"fallback\":false,\"reason\":\"none\",\"failed_image\":\"\","
+      "\"k_sha256\":\"ab\",\"broad_entries\":8574,\"admitted_entries\":3072,\"images\":[{\"name\":\"bios\",\"broad_entries\":1}]},\"frontier\":null}";
+  const auto sel = read_scd_policy_report(selective);
+  expect(sel.present && sel.requested == "optimized" && sel.effective == "selective" && !sel.fallback && sel.broad_entries == 8574 && sel.admitted_entries == 3072,
+         "policy: the product's aot_policy member is read (requested, effective, no fallback, counts)");
+  expect(scd_policy_sentence(sel).find("3072 of the 8574") != std::string::npos && scd_policy_sentence(sel).find("Experimental") != std::string::npos &&
+             scd_policy_sentence(sel).find("uncompiled entry") != std::string::npos,
+         "policy: the summary says it is experimental, how much it compiled, and that it can stop at an uncompiled entry");
+  const std::string fallback =
+      "{\"aot_policy\":{\"requested\":\"optimized\",\"experimental\":true,\"effective\":\"broad\",\"fallback\":true,\"reason\":\"rom_size\",\"failed_image\":\"main:bios\","
+      "\"broad_entries\":10,\"admitted_entries\":0,\"images\":[]}}";
+  const auto fb = read_scd_policy_report(fallback);
+  expect(fb.fallback && fb.effective == "broad" && fb.reason == "rom_size" && scd_policy_sentence(fb).find("fell back: rom_size") != std::string::npos &&
+             scd_policy_sentence(fb).find("Experimental Optimized: the program") == std::string::npos,
+         "policy: a fallback is stated as Compatibility with the exact reason, never as an experimental result");
+  const auto compat = read_scd_policy_report("{\"aot_policy\":{\"requested\":\"compatibility\",\"effective\":\"broad\",\"fallback\":false,\"reason\":\"none\",\"images\":[]}}");
+  expect(compat.present && scd_policy_sentence(compat).empty() && !read_scd_policy_report("{\"status\":\"ok\"}").present && scd_policy_sentence(read_scd_policy_report("{}")).empty(),
+         "policy: a Compatibility build (or an older product without the member) says nothing about the experiment");
+  expect(scd::is_uncompiled_entry_stop("entry_not_compiled") && scd::is_uncompiled_entry_stop("image_entry_not_compiled") && !scd::is_uncompiled_entry_stop("pcm_unsupported") &&
+             !scd::is_uncompiled_entry_stop("") && !scd::is_uncompiled_entry_stop("code_bytes_mismatch"),
+         "policy: only the uncompiled-entry stops offer the Compatibility rebuild");
+  // persistence: written only when chosen, kept when the game is added again, byte-identical records otherwise
+  Fixture f(base, fake, "policyfx");
+  scd::ImportResult imp;
+  const scd::EntryRecord rec = imported(f, &imp);
+  const fs::path file = base / "policyfx-catalog.json";
+  fs::remove(file);
+  {
+    Catalog c(file);
+    c.load();
+    auto added = c.import_sega_cd(rec, "Game", 1800000000);
+    expect(added.entry != nullptr && !added.entry->sega_cd.experimental_m3 && !added.entry->sega_cd.program_experimental, "policy: a new game is Compatibility");
+    expect(c.save() && slurp(file).find("experimental") == std::string::npos, "policy: a record that never chose the option is written without the members");
+    added.entry->sega_cd.experimental_m3 = true;
+    added.entry->sega_cd.program_experimental = true;
+    expect(c.save() && slurp(file).find("\"experimental_m3\": true") != std::string::npos, "policy: the choice and the program's effective policy are persisted");
+  }
+  {
+    Catalog c(file);
+    expect(c.load() == CatalogLoad::loaded, "policy: reload");
+    LibraryEntry *e = c.find("sega-cd", scd::entry_identity(rec.bios_sha256, rec.cue_sha256));
+    expect(e != nullptr && e->sega_cd.experimental_m3 && e->sega_cd.program_experimental, "policy: the choice survives a reload");
+    const auto again = c.import_sega_cd(scd::import_entry({f.bios, f.cue, {}}).record, "Game", 1800000100);
+    expect(again.entry->sega_cd.experimental_m3 && again.entry->sega_cd.program_experimental && !again.entry->sega_cd.program.path.empty(),
+           "policy: adding the same game again keeps the user's choice and the program's policy");
+  }
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -491,6 +547,7 @@ int main(int argc, char **argv) {
   test_run_arguments_and_outcomes(base, fake);
   test_backup_ram(base);
   test_catalog(base, fake);
+  test_experimental_policy(base, fake);
   std::cout << failures << " failures\n";
   return failures == 0 ? 0 : 1;
 }

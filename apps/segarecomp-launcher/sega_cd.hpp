@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace launcher::scd {
@@ -124,6 +125,10 @@ struct EntryRecord {
   bool disc_verified = false;         // the digests above were measured and matched
   ProgramRecord program;              // path empty = none imported
   std::string last_stop;              // the typed stop class of the last run ("" none)
+  // SEG-096-T003 (ADR 0208): the EXPERIMENTAL Sega CD build option. `experimental_m3` is the user's choice for the next build (off by default);
+  // `program_experimental` is what the stored program was actually built with (the product's own effective policy). Both are written only when true.
+  bool experimental_m3 = false;
+  bool program_experimental = false;
 };
 
 // How the entry stands. Order matters for the library badge: the first failing check names the state.
@@ -136,6 +141,9 @@ enum class State {
   ready,                   // checks passed
 };
 [[nodiscard]] const char *state_label(State s);
+// The typed execution stops that mean "the program reached code it was not built to run" - for an experimental build, the code the selective policy
+// omitted. Product-defined class names (platforms/sega-cd/runtime/scd_runtime.h); the launcher decides nothing else from them.
+[[nodiscard]] bool is_uncompiled_entry_stop(std::string_view stop_class);
 
 struct Status {
   State state = State::inputs_not_configured;

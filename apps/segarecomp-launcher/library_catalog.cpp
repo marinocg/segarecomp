@@ -100,6 +100,8 @@ json::Value to_json(const LibraryEntry &e) {
     program.set("verified_at", json::Value::make_int(r.program.verified_at));
     o.set("program", std::move(program));
     o.set("last_stop", json::Value::make_string(r.last_stop));
+    if (r.experimental_m3) o.set("experimental_m3", json::Value::make_bool(true));          // SEG-096-T003: absent unless chosen, so older records are byte-identical
+    if (r.program_experimental) o.set("program_experimental", json::Value::make_bool(true));
     v.set("sega_cd", std::move(o));
   }
   return v;
@@ -145,6 +147,8 @@ bool sega_cd_from_json(const json::Value *o, LibraryEntry &e) {
     if (!is_hex_digest(r.program.sha256, 64) || !is_hex_digest(r.program.program_identity, 64) || !is_hex_digest(r.program.disc_identity, 64)) r.program = scd::ProgramRecord{};
   }
   r.last_stop = clamp_text(o->str("last_stop"), 64);
+  r.experimental_m3 = o->flag("experimental_m3");
+  r.program_experimental = o->flag("program_experimental");
   e.sega_cd = std::move(r);
   if (e.rom_paths.empty() && !e.sega_cd.cue_path.empty()) e.rom_paths.push_back(e.sega_cd.cue_path);
   return true;
@@ -374,12 +378,16 @@ Catalog::ImportResult Catalog::import_sega_cd(const scd::EntryRecord &record, co
   std::vector<scd::FileFact> keep_files = entry->sega_cd.disc_files;
   const bool keep_verified = entry->sega_cd.disc_verified;
   const std::string keep_stop = entry->sega_cd.last_stop;
+  const bool keep_program_experimental = entry->sega_cd.program_experimental;
+  const bool keep_choice = entry->sega_cd.experimental_m3;  // the build option is the user's choice for this game; adding it again keeps it
   entry->sega_cd = record;
+  entry->sega_cd.experimental_m3 = keep_choice;
   if (record.program.path.empty()) {
     entry->sega_cd.program = keep_program;
     entry->sega_cd.disc_files = keep_files;
     entry->sega_cd.disc_verified = keep_verified;
     entry->sega_cd.last_stop = keep_stop;
+    entry->sega_cd.program_experimental = keep_program_experimental;
   }
   entry->rom_paths.assign(1, record.cue_path);
   entry->rom_path_unknown = false;

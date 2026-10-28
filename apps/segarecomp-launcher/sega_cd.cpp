@@ -112,6 +112,11 @@ std::string message(Refusal r, const std::string &detail) {
   return text;
 }
 
+bool is_uncompiled_entry_stop(std::string_view stop_class) {
+  return stop_class == "entry_not_compiled" || stop_class == "image_entry_not_compiled" || stop_class == "return_target_not_compiled" ||
+         stop_class == "exception_vector_not_compiled";
+}
+
 const char *state_label(State s) {
   switch (s) {
     case State::inputs_not_configured: return "Inputs not configured";
