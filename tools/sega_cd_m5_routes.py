@@ -8,7 +8,7 @@ derives from the report's per-image account (ADR 0228) which compiled images wer
 Nothing committed may contain an image id, address, hash or byte: `--private` receives the full JSON, stdout only counts and classes.
 
 usage: sega_cd_m5_routes.py --program P --disc-dir D --bios B [--backup-ram F] --work W --observed-from REPORT.json
-         --route NAME:SCRIPT:UNTIL_TICK[:REFDIR:FRAMES[:EXTRA_ARGS]] ... [--base-onset 1202] [--budget N] [--private FILE]
+         --route NAME:SCRIPT:UNTIL_TICK[:REFDIR:FRAMES[:EXTRA_ARGS]] ... --expect NAME=STOP ... [--base-onset 1202] [--budget N] [--private FILE]
          (FRAMES: comma-separated reference frames relative to the entry; REFDIR: the reference's output directory for that route; EXTRA_ARGS: space-separated program arguments, used by the
           project-authored fixtures' machine-input choice)
 """
@@ -83,6 +83,7 @@ def main():
     ap.add_argument("--base-onset", type=int, default=1202)
     ap.add_argument("--budget", type=int, default=300000000)
     ap.add_argument("--private", type=pathlib.Path)
+    ap.add_argument("--expect", action="append", default=[], help="NAME=STOP_CLASS: the pre-registered typed stop of a route ('none' = it must reach its deadline/idle); every route needs one")
     args = ap.parse_args()
     args.work.mkdir(parents=True, exist_ok=True)
     pdir = args.program.parent
@@ -146,11 +147,24 @@ def main():
         for name in result["routes"]:
             if name != "R0":
                 result["routes"][name]["executed_starts_new_vs_R0"] = {"main": len(set(private[name]["starts_main"]) - set(r0["starts_main"])), "sub": len(set(private[name]["starts_sub"]) - set(r0["starts_sub"]))}
+    expected = dict(e.split("=", 1) for e in args.expect)
+    failures = []
+    for name, route in result["routes"].items():
+        if name not in expected:
+            failures.append("%s: no pre-registered expected stop" % name)
+        elif route["stop"] != expected[name]:
+            failures.append("%s: stop %s, expected %s" % (name, route["stop"], expected[name]))
+        for f in route.get("frames", []):
+            if not f.get("captured") or not f.get("frame_equal") or not f.get("vram_equal"):
+                failures.append("%s: reference frame %d missing or different" % (name, f["frame"]))
+    result["failures"] = failures
     result["program_unchanged_after_all_routes"] = sha256(args.program) == program_hash and inventory(pdir) == base_inventory
     if args.private:
         args.private.write_text(json.dumps({"aggregate": result, "private": private}, indent=1))
     print(json.dumps(result, indent=1, sort_keys=True))
-    return 0 if result["program_unchanged_after_all_routes"] else 3
+    if not result["program_unchanged_after_all_routes"]:
+        return 3
+    return 5 if failures else 0
 
 
 if __name__ == "__main__":

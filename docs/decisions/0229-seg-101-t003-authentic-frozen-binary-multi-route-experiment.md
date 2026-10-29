@@ -2,7 +2,7 @@
 
 - Status: Accepted. Milestone SEG-101 (M5), task T003. Judged against ADR 0227 (routes, frames, definitions, fixed before any generated run with input; nothing was changed afterwards) with the accounting of ADR 0228.
 - Privacy: counts and classes only. The program hash, image ids, file identities, addresses, hashes, captures and reports are private artifacts of the operator's machine.
-- Tool: `tools/sega_cd_m5_routes.py` (generic; prints aggregates; the private JSON holds ids).
+- Tool: `tools/sega_cd_m5_routes.py` (generic; prints aggregates; the private JSON holds ids). It exits non-zero (5) if a route ends differently from its pre-registered `--expect` stop (every route needs one) or any supplied reference frame is missing or differs; re-run on the recorded data: 15/15 frames, no failures.
 
 ## Method
 

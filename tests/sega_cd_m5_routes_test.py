@@ -37,7 +37,7 @@ def main():
         subprocess.run(base + ["--report", str(tmp / "r0.json")], check=True, capture_output=True, timeout=300)
         private = tmp / "private.json"
         done = subprocess.run([sys.executable, str(TOOL), "--program", str(program), "--disc-dir", str(fx / "disc"), "--bios", str(fx / "bios.bin"), "--work", str(tmp / "work"), "--budget", "3000000",
-                               "--observed-from", str(tmp / "r0.json"), "--private", str(private), "--route", "R0:::", "--route", "R2:::::--set main:d7=2", "--route", "R3:::::--set main:d7=3"],
+                               "--observed-from", str(tmp / "r0.json"), "--private", str(private), "--route", "R0:::", "--route", "R2:::::--set main:d7=2", "--route", "R3:::::--set main:d7=3", "--expect", "R0=none", "--expect", "R2=none", "--expect", "R3=none"],
                               capture_output=True, text=True, timeout=600)
         check(done.returncode == 0, "the runner succeeds and the frozen program is unchanged after every route (exit %d)" % done.returncode)
         if done.returncode != 0:
@@ -50,6 +50,16 @@ def main():
         check(all(x["program_unchanged"] and x["empty_path"] and x["refusals"] == {} and x["retired_dynamic"] > 0 for x in r.values()) and res["program_unchanged_after_all_routes"],
               "every route ran with PATH=/nonexistent, with no refusal, with dynamic bodies retiring, and the program directory unchanged")
         check("unvisited_ids" not in done.stdout and json.loads(private.read_text())["private"]["R2"]["unvisited_ids"], "aggregate output names no image id; the private file does")
+        # negative regressions: the runner must FAIL on a wrong expected stop, a missing expectation and a missing/different reference frame
+        def runner(*extra):
+            return subprocess.run([sys.executable, str(TOOL), "--program", str(program), "--disc-dir", str(fx / "disc"), "--bios", str(fx / "bios.bin"), "--work", str(tmp / "w2"), "--budget", "3000000",
+                                   "--observed-from", str(tmp / "r0.json"), *extra], capture_output=True, text=True, timeout=600)
+        bad = runner("--route", "R0:::", "--expect", "R0=pcm_unsupported")
+        check(bad.returncode == 5 and "expected pcm_unsupported" in bad.stdout, "a route that ends differently from its pre-registered stop fails the evaluation")
+        check(runner("--route", "R0:::").returncode == 5, "a route with no pre-registered expectation fails the evaluation")
+        (tmp / "emptyref").mkdir()
+        miss = runner("--route", "R0:::%s:5" % (tmp / "emptyref"), "--expect", "R0=none")
+        check(miss.returncode == 5 and "missing or different" in miss.stdout, "an expected reference frame that is missing or different fails the evaluation")
     print("%d failure(s)" % len(failures))
     return 1 if failures else 0
 
