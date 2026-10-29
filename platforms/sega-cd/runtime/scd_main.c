@@ -143,10 +143,12 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
           m->cdc.head[0][3]);
   /* SEG-064-T004: the sub-side devices of the boot path (stopwatch, graphics ASIC, PCM write state, CDC host register). */
   fprintf(out, ",\"sub_devices\":{\"stopwatch\":{\"origin\":%llu,\"base\":%u},\"gfx\":{\"busy\":%u,\"ctl\":%u,\"lines_left\":%u,"
-               "\"operations\":%llu,\"lines_rendered\":%llu},\"pcm\":{\"index\":%u,\"bank\":%u,\"enabled\":%u,\"onoff\":%u,\"ram\":\"",
+               "\"operations\":%llu,\"lines_rendered\":%llu},\"pcm\":{\"index\":%u,\"bank\":%u,\"enabled\":%u,\"onoff\":%u,\"running\":%u,\"origin\":%llu,\"samples\":%llu,\"syncs\":%llu,\"channel_steps\":%llu,\"max_catchup\":%llu,\"addr\":[%u,%u,%u,%u,%u,%u,%u,%u],\"ram\":\"",
           (unsigned long long)m->ga.stopwatch_origin, m->ga.stopwatch_base, m->gfx.busy, m->gfx.ctl, m->gfx.lines_left,
           (unsigned long long)m->gfx.operations, (unsigned long long)m->gfx.lines_rendered, m->pcm.index, m->pcm.bank, m->pcm.enabled,
-          m->pcm.onoff);
+          m->pcm.onoff, m->pcm.running, (unsigned long long)m->pcm.origin, (unsigned long long)m->pcm.samples,
+          (unsigned long long)m->pcm.syncs, (unsigned long long)m->pcm.channel_steps, (unsigned long long)m->pcm.max_catchup,
+          m->pcm.addr[0], m->pcm.addr[1], m->pcm.addr[2], m->pcm.addr[3], m->pcm.addr[4], m->pcm.addr[5], m->pcm.addr[6], m->pcm.addr[7]);
   scd_sha_hex(m->pcm.ram, sizeof m->pcm.ram, digest);
   fprintf(out, "%s\"},\"cdc_host_word\":%u}", digest, m->cdc.host_word);
   fprintf(out, ",\"cdd\":{\"status\":%u,\"lba\":%ld,\"index\":%u,\"latency\":%u,\"pending\":%u,\"delivered\":%llu,\"rx\":[",
