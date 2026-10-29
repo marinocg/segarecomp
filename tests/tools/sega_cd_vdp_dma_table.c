@@ -514,6 +514,8 @@ int main(void) {
       w = arm(4U, 0x200000U, 2U, 0x4000U | 0x0040U, 0x0080U, 0);
       row(w == 123U && m->vdp_dma_bank_count == 1U && m->main_dma_bank_until == m->main_dma_until && m->wordram_mode_changes_in_dma == 0U,
           "a 1M-bank transfer is counted and its wait end recorded");
+      row(host()->owned_region_count == 1U && host()->owned_regions[0].begin == 0U && host()->owned_regions[0].end == m->bios_size,
+          "after the transfer the host's regions are the default again (the staged bank copy is gone)");
       m->now += 1U; /* the sub processor's instruction inside the wait: RET 0 -> 1 */
       scd_word_ram_sub_mode_write(m, SCD_MODE_1M | SCD_MODE_RET, 0x1000U);
       row(m->wordram_mode_changes_in_dma == 1U, "a RET change by the sub inside the wait is counted");
