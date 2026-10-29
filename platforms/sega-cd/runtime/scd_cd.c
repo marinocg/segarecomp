@@ -512,6 +512,7 @@ static void scd_cdd_reset(ScdMachine *m) {
   m->cdd.lba = 0;
   m->cdd.status = SCD_CDD_TOC_STATUS;
   m->cdd.pending = 0U;
+  scd_cdda_reset(m); /* SEG-104: playback ends and the fader returns to unity */
 }
 
 static void scd_cdd_register_defaults(ScdMachine *m) {
@@ -587,6 +588,8 @@ static int scd_cdd_command(ScdMachine *m, uint32_t pc) {
   m->cdd.tx[8] = 0U;
   m->cdd.tx[9] = 0U;
   scd_log(m, 0xA0U, command, (uint32_t)m->cdd.lba);
+  m->cdda.commands[command] += 1U; /* SEG-104: plain counters (not part of the device log) */
+  if (command == 0x1U || command == 0x3U || command == 0x4U || command == 0x6U || command == 0xAU) scd_cdda_interrupt(m); /* the drive stops reporting audio at once */
   switch (command) {
   case 0x0: /* drive status */
     if (m->cdd.latency <= 3U) {
@@ -744,10 +747,12 @@ int scd_cdd_register_access(ScdMachine *m, uint32_t offset, uint32_t width, int 
 static int scd_cdd_tick(ScdMachine *m) {
   static const uint8_t no_header[4] = {0U, 0U, 0U, 0U};
   if (m->cdd.latency > 0U) {
+    scd_cdda_silent_tick(m);
     m->cdd.latency -= 1U;
     if (scd_cdc_decode(m, no_header) != 0) return 1; /* the decoder keeps running while the drive seeks */
   } else if (m->cdd.status == SCD_CDD_PLAY) {
     if (m->cdd.index >= m->disc->track_count) {
+      scd_cdda_silent_tick(m);
       m->cdd.status = SCD_CDD_END; /* past the last track; a pending command waits for the next tick */
       goto hock;
     }
@@ -761,9 +766,23 @@ static int scd_cdd_tick(ScdMachine *m) {
       if (m->cdd.lba >= (int32_t)m->disc->tracks[m->cdd.index].first_lba) m->ga.cdd_ctrl_hi = 0x00U;
       scd_log(m, 0xA3U, (uint32_t)m->cdd.lba, m->cdd.index);
       if (scd_cdc_decode(m, no_header) != 0) return 1;
+      /* SEG-104 (ADR 0244): the sector under the head is audible exactly when the drive reports audio playing (CDD control high byte $00:
+       * at or after INDEX 01) and no play/seek command is pending (the drive already reports SEEK). Production never alters the drive. */
+      if (m->cdda.enabled) {
+        if (m->cdd.lba < (int32_t)m->disc->tracks[m->cdd.index].first_lba) {
+          m->cdda.pregap_ticks += 1U;
+          scd_cdda_interrupt(m);
+        } else if (m->cdd.pending) {
+          m->cdda.suppressed_pending += 1U;
+          scd_cdda_interrupt(m);
+        } else if (scd_cdda_play(m, m->cdd.lba, m->cdd.index) != 0) {
+          return 1;
+        }
+      }
     } else {
       const uint32_t msf = (uint32_t)(m->cdd.lba + 150);
       uint8_t header[4];
+      scd_cdda_silent_tick(m); /* a data track plays no audio */
       header[0] = scd_bcd(msf / 75U / 60U);
       header[1] = scd_bcd(msf / 75U % 60U);
       header[2] = scd_bcd(msf % 75U);
@@ -778,6 +797,7 @@ static int scd_cdd_tick(ScdMachine *m) {
       m->ga.cdd_ctrl_hi = 0x01U;
     }
   } else {
+    scd_cdda_silent_tick(m); /* paused, seeking, stopped or past the end: no audio */
     if (scd_cdc_decode(m, no_header) != 0) return 1; /* the decoder keeps running while the disc is not read */
   }
   if (m->cdd.pending) { /* a play command starts: seek to TX2..TX7 (MSF digits as written) */

@@ -4,6 +4,7 @@
 add_library(segarecomp_runtime_sega_cd STATIC
   scd_bios.c
   scd_cd.c
+  scd_cdda.c
   scd_coverage.c
   scd_devices.c
   scd_disc.c

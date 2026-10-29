@@ -1188,6 +1188,14 @@ segarecomp_enable_warnings(sega_cd_pcm_test)
 add_test(NAME sega_cd_pcm_test COMMAND sega_cd_pcm_test)
 set_property(TEST sega_cd_pcm_test APPEND PROPERTY LABELS full fast)
 
+# SEG-104 (ADR 0244): CD-DA sector reader, canonical samples and drive-timed playback
+add_executable(sega_cd_cdda_test sega_cd_cdda_test.c)
+set_target_properties(sega_cd_cdda_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_link_libraries(sega_cd_cdda_test PRIVATE segarecomp::runtime_sega_cd)
+segarecomp_enable_warnings(sega_cd_cdda_test)
+add_test(NAME sega_cd_cdda_test COMMAND sega_cd_cdda_test)
+set_property(TEST sega_cd_cdda_test APPEND PROPERTY LABELS full fast)
+
 # Local diagnostic (not a test; built on request): replays recorded PCM operation sequences through the chip model (ADR 0236).
 add_executable(sega_cd_pcm_replay EXCLUDE_FROM_ALL sega_cd_pcm_replay.c)
 set_target_properties(sega_cd_pcm_replay PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
