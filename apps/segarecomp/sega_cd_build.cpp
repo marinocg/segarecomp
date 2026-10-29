@@ -57,6 +57,7 @@ struct Options {
   std::string aot_policy = "compatibility";   // SEG-097-T003 (ADR 0208): `optimized` (experimental) selects the frozen gen2 M3 + B35 proposal
   bool aot_model_given = false;
   bool aot_all_images = false;
+  bool static_recursion = true;   // SEG-099-T004: follow the proven entries into the modules (0 reproduces the M2 scan)
   std::string static_range = "hull";   // SEG-098-T004: `loaded` admits every loaded byte of a proven module (computed entries beyond the traversed hull), `hull` only the traversed subrange
   bool static_discovery = true;   // SEG-098-T002: `--static-discovery 0` is the control (and the escape hatch): the build as it was before the static producer
 };
@@ -267,7 +268,7 @@ class Builder {
     const auto cpu = number_value(report, "cpu", at).value_or(0);
     const auto pc = number_value(report, "pc", at).value_or(0);
     const char *want = cpu == 0 ? "main" : "sub";
-    const auto inside = [&](const std::vector<std::string> &list, bool window) {
+    const auto inside_at = [&](std::uint64_t pc, const std::vector<std::string> &list, bool window) {
       for (const auto &e : list) {
         std::vector<std::string> f;
         std::stringstream ss(e);
@@ -279,15 +280,22 @@ class Builder {
       }
       return false;
     };
+    const auto locate = [&](std::uint64_t at_pc) {
+      return inside_at(at_pc, extents_, false) || inside_at(at_pc, static_extents_, false) ? "inside_admitted_extent" : inside_at(at_pc, static_windows_, true) ? "inside_static_module_window" : "outside_admitted_images";
+    };
     const bool device = is_device_stop_class(cls);   // a hardware-capability stop is not about code coverage
-    const char *where = device ? "device_capability" : inside(extents_, false) || inside(static_extents_, false) ? "inside_admitted_extent" : inside(static_windows_, true) ? "inside_static_module_window" : "outside_admitted_images";
-    return std::string("{\"class\":\"") + cls + "\",\"cpu\":\"" + want + "\",\"location\":\"" + where + "\"}";
+    const char *where = device ? "device_capability" : locate(pc);
+    std::string out = std::string("{\"class\":\"") + cls + "\",\"cpu\":\"" + want + "\",\"location\":\"" + where + "\"";
+    // SEG-099-T005 (ADR 0219): an uncompiled COMPUTED destination is reported separately from the transfer instruction (`location` is always about the instruction's pc). The runtime's detail field is the
+    // destination only for this stop class; it is absent (0) for a stop that has no computed destination, and then nothing is reported.
+    const auto detail = number_value(report, "address", at).value_or(0);
+    if (cls == "entry_not_compiled" && detail != 0 && detail != pc) out += ",\"destination\":" + std::to_string(detail) + ",\"destination_location\":\"" + locate(detail) + "\"";
+    return out + "}";
   }
 
   // SEG-098-T005 (ADR 0214): the machine-readable inventory status. `complete` is only claimed under an explicit proof criterion; `partial` = useful inventory with named
   // unresolved parts; `blocked` = a typed barrier stopped further justified compilation. A device/hardware stop (`*_unsupported`) is reported as `device_stop`, not as a code barrier.
-  // Zero frontiers on a bounded run prove nothing: loaders inside the admitted modules are not analyzed (kNestedLoaderAnalysis), so `complete` cannot currently be reached.
-  static constexpr bool kNestedLoaderAnalysis = false;
+  // Zero frontiers on a bounded run prove nothing: the main processor's loaders are not analyzed, so `complete` cannot currently be reached.
   std::string inventory_json(const std::string &report, const std::string &failure_stage = std::string()) const {
     std::vector<std::string> reasons, barriers;
     bool device_stop = false;
@@ -301,7 +309,11 @@ class Builder {
       }
       if (!frontier_.empty()) barriers.push_back("frontier:" + raw_value(frontier_, "refusal").value_or("unknown"));
     }
-    if (!kNestedLoaderAnalysis) reasons.push_back("nested_loaders_not_analyzed");
+    // SEG-099-T004/T005 (ADR 0218/0219): loaders inside admitted SUB modules are analyzed (the recursive walk) unless recursion is off; the MAIN processor's loaders are never analyzed, so
+    // `complete` stays unreachable by construction. A scan that needed joins to finish is named: its precision was reduced (never its soundness).
+    if (!(o_.static_discovery && o_.static_recursion)) reasons.push_back("nested_loaders_not_analyzed");
+    reasons.push_back("main_processor_loaders_not_analyzed");
+    if (static_joined_) reasons.push_back("static_scan_joined");
     if (static_status_ == "disabled") reasons.push_back("static_discovery_disabled");
     else if (static_status_ == "not_run") reasons.push_back("static_discovery_not_run");
     else if (static_status_ != "admitted" && static_status_ != "no_modules") reasons.push_back("static:" + static_status_);
@@ -617,10 +629,15 @@ class Builder {
     std::error_code ec;
     fs::remove(list, ec);
     fs::remove(o_.output / "static-windows.txt", ec);
-    const int code = run_process({self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--constant-dispatch", "--static-extents", list.string(), "--static-scope", o_.static_range, "--static-windows", (o_.output / "static-windows.txt").string()}, report, {}, 300);
+    std::vector<std::string> scan_args{self_, "sega-cd", "discover-modules", "--cue", o_.cue.string(), "--module-table-roots", "--constant-dispatch", "--work-state"};
+    if (o_.static_recursion) scan_args.push_back("--recursive-modules");
+    for (const char *a : {"--state-convergence", "--static-extents"}) scan_args.push_back(a);
+    for (const auto &a : {list.string(), std::string("--static-scope"), o_.static_range, std::string("--static-windows"), (o_.output / "static-windows.txt").string()}) scan_args.push_back(a);
+    const int code = run_process(scan_args, report, {}, 300);
     const std::string text = read_text(report);
     if (code < 0 || text.empty() || text.find("\"complete\":") == std::string::npos) { static_json_ = "{\"ran\":true,\"status\":\"scan_failed\"}"; return; }
     const bool complete = raw_value(text, "complete").value_or("") == "true";
+    static_joined_ = raw_value(text, "convergence_used").value_or("") == "true";
     std::map<std::string, unsigned> reasons;
     for (std::size_t at = text.find("\"reason\":\""); at != std::string::npos; at = text.find("\"reason\":\"", at + 1U)) {
       const auto end = text.find('"', at + 10U);
@@ -699,6 +716,7 @@ class Builder {
   std::atomic<unsigned> counter_{0};
   std::vector<std::string> extents_, static_extents_, static_windows_;
   std::string static_status_ = "not_run";
+  bool static_joined_ = false;
   std::map<std::string, unsigned> static_refusals_;
   std::string static_json_ = "{\"ran\":false}";
   std::vector<std::string> unit_names_;
@@ -720,6 +738,7 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--runtime-dir") { o.runtime_dir = value; have_runtime = true; }
     else if (key == "--cache-dir") o.cache_dir = value;
     else if (key == "--static-discovery") o.static_discovery = value != "0";
+    else if (key == "--static-recursion" && (value == "0" || value == "1")) o.static_recursion = value == "1";
     else if (key == "--static-range" && (value == "hull" || value == "loaded")) o.static_range = value;
     else if (key == "--cc") o.cc = value;
     else if (key == "--cc-arg") o.cc_args.push_back(value);

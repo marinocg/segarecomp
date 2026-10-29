@@ -46,7 +46,7 @@ std::string SegaCdM68kRuntimeCEmitter::return_pop_guard(const M68kMemoryEmission
          ", SCD_STOP_RETURN_TARGET_NOT_COMPILED, " + std::string(ctx.runtime_source) + ", m68k_observed_return); ";
 }
 std::string SegaCdM68kRuntimeCEmitter::unresolved_indirect_stop(const M68kMemoryEmissionContext &ctx) const {
-  return "return scd_fail(m, " + k_ + ", SCD_STOP_ENTRY_NOT_COMPILED, " + std::string(ctx.runtime_source) + ", 0U);\n";
+  return "return scd_fail(m, " + k_ + ", SCD_STOP_ENTRY_NOT_COMPILED, " + std::string(ctx.runtime_source) + ", m68k_indirect_ea);\n";   // the detail is the computed destination (SEG-099-T005)
 }
 std::string SegaCdM68kRuntimeCEmitter::call_push_guard(const M68kMemoryEmissionContext &ctx, std::string_view a7, bool) const {
   return "{ uint32_t m68k_continuation = UINT32_C(0x" + hex(ctx.continuation) + "); { const uint32_t m68k_new_a7 = " + std::string(a7) +

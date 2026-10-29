@@ -53,15 +53,20 @@ def main():
         # ---- computed entries ----
         fx, oracle = fixture(tmp, "fx-computed", "--case", "computed_entry")
         marker = oracle["computed"]["marker"]
-        st = build(fx, tmp / "o-hull", cache, "--pass-set", "main:d7=2")
+        st = build(fx, tmp / "o-hull", cache, "--pass-set", "main:d7=2", "--static-recursion", "0")   # the M2 scan: the recursive walk (SEG-099-T004) would follow the constant computed target
         check(st["static_discovery"]["status"] == "admitted" and st["stop"] == "entry_not_compiled" and
-              st["final_stop"] == {"class": "entry_not_compiled", "cpu": "sub", "location": "inside_admitted_extent"},
-              "hull (default): the build pass stops at the computed transfer whose destination is beyond the traversed range; classified entry_not_compiled / inside an admitted extent")
+              {k: st["final_stop"][k] for k in ("class", "cpu", "location")} == {"class": "entry_not_compiled", "cpu": "sub", "location": "inside_admitted_extent"},
+              "hull (M2 scan, --static-recursion 0): the build pass stops at the computed transfer whose destination is beyond the traversed range; classified entry_not_compiled / inside an admitted extent")
+        fs = st["final_stop"]
+        check(fs.get("destination", 0) != 0 and fs["destination_location"] == "inside_static_module_window" and fs["location"] == "inside_admitted_extent",
+              "diagnostics (SEG-099-T005): the report names the computed DESTINATION (inside the proven module's loaded window, outside its admitted range) separately from the transfer instruction (inside the admitted extent)")
         check(st["inventory"]["status"] == "blocked" and st["inventory"]["barriers"] == ["stop:entry_not_compiled"], "inventory: an uncompiled entry inside an admitted image is a typed barrier (`blocked`)")
         rep, words = run(tmp / "o-hull" / ("program" + EXE), fx, 2)
         check(rep["stop"]["class"] == "entry_not_compiled" and words[4] != marker, "hull: the same typed stop at run time; the uncompiled routine never executes")
         lines = (tmp / "o-hull" / "static-extents.txt").read_text().split()
         check(sorted(int(l.split(":")[3]) for l in lines)[0] < 2048, "hull: B's admitted extent is shorter than its loaded sector")
+        st = build(fx, tmp / "o-rec", cache, "--pass-set", "main:d7=2")
+        check(st["stop"] == "none" and st["final_stop"] is None, "hull + recursive walk (SEG-099-T004, default): the computed target is a proven constant inside the loaded module, so the walk follows it and its routine is compiled with no `loaded` policy")
         st = build(fx, tmp / "o-loaded", cache, "--pass-set", "main:d7=2", "--static-range", "loaded")
         check(st["stop"] == "none" and st["final_stop"] is None and st["static_extents"] == 4, "loaded: every loaded byte of a proven module is admitted; the same route completes")
         check(st["inventory"]["status"] == "partial" and st["inventory"]["barriers"] == [], "inventory (loaded): the same route has no barrier: `partial`")

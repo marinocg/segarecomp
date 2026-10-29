@@ -69,9 +69,9 @@ def main():
               "A: the admitted extent starts at its executable subrange (the 64-byte header is outside it)")
         check(len(lines) == 4 and len({l.split(":")[1] for l in lines}) == 3, "B and C: one extent per mapping, three sources (C twice)")
         inv = st["inventory"]
-        check(inv["schema"] == "segarecomp.sega_cd.inventory.v1" and inv["status"] == "partial" and inv["barriers"] == [] and "nested_loaders_not_analyzed" in inv["unresolved"] and
+        check(inv["schema"] == "segarecomp.sega_cd.inventory.v1" and inv["status"] == "partial" and inv["barriers"] == [] and "main_processor_loaders_not_analyzed" in inv["unresolved"] and
               "execution_derived_extents" in inv["unresolved"] and inv["static_extents"] == 4 and inv["resolved_extents"] == 2,
-              "inventory: a build with zero frontiers is `partial`, never `complete` (loaders inside the admitted modules are not analyzed; the IP and SP are evidence-derived)")
+              "inventory: a build with zero frontiers is `partial`, never `complete` (the main processor's loaders are not analyzed; the IP and SP are evidence-derived)")
         program = tmp / "n-base" / ("program" + EXE)
         before = hashlib.sha256(program.read_bytes()).hexdigest()
 

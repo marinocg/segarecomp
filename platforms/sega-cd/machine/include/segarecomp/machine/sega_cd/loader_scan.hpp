@@ -26,7 +26,13 @@ inline constexpr std::uint32_t kLoaderScanMaxModules = 64U;       // the synthet
 inline constexpr std::uint32_t kLoaderScanMaxStates = 4096U;
 inline constexpr std::uint32_t kLoaderScanMaxSteps = 100000U;
 inline constexpr std::uint32_t kLoaderScanMaxCallDepth = 8U;
+inline constexpr std::uint32_t kLoaderScanMaxModuleEntries = 64U;   // SEG-099-T004: distinct proven module entries whose code the recursive walk follows
+inline constexpr std::uint32_t kLoaderScanMaxReturnContexts = 64U;   // SEG-099-T003: caller contexts a joined state may summarise
 inline constexpr std::uint32_t kLoaderScanSectorBytes = 2048U;
+// SEG-099-T002 (ADR 0216): the bounded abstract RAM of the optional work-variable model: 256-byte pages of known bytes below the sub's I/O window (a page-count bound keeps a state small; exceeding it forgets, never invents).
+inline constexpr std::uint32_t kLoaderScanMaxTrackedPages = 128U;
+inline constexpr std::uint32_t kLoaderScanBiosAreaEnd = 0x6000U;      // sub PRG RAM below the SP is BIOS-owned: any modelled service may change it (ADR 0215)
+inline constexpr std::uint32_t kLoaderScanCdcTrnSpan = 0x920U;        // the documented CDCTRN buffer advance; only the first 2,048 bytes are claimed as the sector
 
 enum class LoaderRefusalKind : std::uint8_t {
   lba_unknown,                // the CDD play position was not a constant at the transfer
@@ -43,6 +49,8 @@ enum class LoaderRefusalKind : std::uint8_t {
   too_many_modules,
   scan_limit_exceeded,        // states, steps or call depth exhausted
   computed_control_unresolved,  // SEG-098-T003: a computed jump/call (constant_dispatch mode) whose target the walk could not compute: code behind it is not inventoried
+  loaded_bytes_unknown,         // SEG-099-T004: a transfer lands in a loaded range but the bytes at the target are not known to be the disc's (transformed in place, overwritten or forgotten): no source is claimed
+  lookup_key_unknown,           // SEG-099-T002: immutable disc data (a directory record) was compared with a value the walk does not know: a search with an unknown key proposes no source
 };
 [[nodiscard]] const char *loader_refusal_name(LoaderRefusalKind kind) noexcept;
 
@@ -89,6 +97,20 @@ struct LoaderSurvey {
   std::uint32_t dispatch_resolved{};         // distinct computed-call/jump sites whose target was computed from known values (constant_dispatch)
   std::uint32_t memory_carried_reads{};      // distinct sites that load a data register from (An), (An)+ or d16(An) memory (not the stack): values the walk cannot know (the SP's work-variable state)
   std::uint32_t table_reads{};               // distinct immutable-image reads folded to constants (constant_dispatch)
+  // SEG-099-T002 (work_state): the BIOS CD-service model and the abstract work-variable memory.
+  std::uint32_t bios_modelled_calls{};       // distinct (site, function) calls to a service with a modelled effect (ADR 0215)
+  std::uint32_t bios_unmodelled_calls{};     // distinct (site) calls whose effects are unknown: all abstract memory is forgotten
+  std::uint32_t sector_transfers{};          // distinct CDCTRN sites that resolved source and destination
+  std::uint32_t sector_transfers_unresolved{};  // distinct CDCTRN sites whose read position or destination was not constant
+  std::uint32_t memory_args_resolved{};      // distinct ROMREADN sites whose {sector,count} block was read from abstract memory
+  std::uint32_t memory_args_unresolved{};    // distinct ROMREADN sites whose block was not known
+  std::uint32_t module_entries_walked{};     // distinct proven entries whose module code was walked (recursive_modules)
+  bool convergence_used{};                   // the exact walk exhausted a bound and the result is the repeated walk with joins
+  std::uint32_t joins{};                     // join operations that changed a head's joined state (state_convergence)
+  std::uint32_t widenings{};                 // joins that discarded knowledge the arriving state had
+  std::uint32_t async_volatile_ranges{};     // ranges the interrupt/user entries write: unknown to the init/main entries (ADR 0216)
+  bool async_volatile_all{};                 // an interrupt/user entry wrote through an unknown pointer or an unmodelled service: no tracked memory is trusted
+  std::uint32_t branches_decided{};          // distinct conditional-branch sites decided by tracked condition codes
   std::map<std::string, std::uint32_t> path_ends;  // distinct sites where a path ended, by class (undecodable_or_outside, computed_jump, return_to_caller, stop, exception)
 };
 
@@ -97,6 +119,16 @@ struct LoaderScanOptions {
   // (b) reads a word/long at a known PC-relative address inside the SP image (the table is assumed immutable: a wrong assumption only yields a proposal that the
   // runtime byte guard refuses) and (c) follows `JSR/JMP (d8,PC|An,Xn)` whose index is known, so one call site with a constant selector reaches exactly one handler.
   bool constant_dispatch{false};
+  // SEG-099-T002 (ADR 0216): a bounded abstract model of work-variable memory, condition codes and the documented BIOS sector-read services (ADR 0215). Off by default.
+  bool work_state{false};
+  // SEG-099-T003 (ADR 0217), a FALLBACK: when the exact walk exhausts a bound it is repeated, and after `widen_after` distinct states at one control-flow location the further states there are joined (knowledge is only ever lost) so a loop reaches a fixed point instead of
+  // exhausting the state bound. `order` selects a test-only exploration order (0 = the default depth-first); the result must not depend on it.
+  // SEG-099-T004 (ADR 0218): follow a proven transfer INTO a loaded module and find the loads that module performs (requires work_state).
+  bool recursive_modules{false};
+  bool state_convergence{false};
+  std::uint32_t widen_after{24U};
+  bool converge_always{false};   // test-only: skip the exact attempt (joins from the first walk)
+  std::uint32_t order{0U};
   bool module_table_roots{false};  // walk the SP module jump table (init, main, int2, user) instead of only the descriptor entry
   bool continue_after_computed_call{false};  // survey what-if: a computed call (JSR (d8,An,Xn) / (d8,PC,Xn)) is a foreign call that returns, so the walk continues after it
 };

@@ -10,6 +10,8 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <set>
+#include <tuple>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -307,6 +309,34 @@ std::string read_track1_extent(const segarecomp::DiscImage &disc, std::uint32_t 
   return {};
 }
 
+// The extents the static producer can emit for this disc, computed once per process: for each proven module and guest base the executable `hull` extent (the default policy) and the whole
+// `loaded` extent (`--static-range loaded`), from the scan with and without the recursive walk (the build may run either). The declared range must be exactly one of them: containment in a
+// proven source is not authority for an arbitrary subrange (a header, a partial range, a range crossing the hull boundary).
+bool static_extent_is_proven(const segarecomp::DiscImage &disc, scd::Processor processor, std::uint32_t off, std::uint32_t base, std::uint32_t len) {
+  static std::set<std::tuple<std::uint64_t, std::uint64_t, std::uint64_t>> authorized;   // (track-1 offset, guest base, length)
+  static bool computed = false;
+  if (!computed) {
+    computed = true;
+    const auto produced = scd::produce_boot_images(disc);
+    if (produced.images) {
+      for (const bool recursive : {true, false}) {
+        scd::LoaderScanOptions options;
+        options.module_table_roots = options.constant_dispatch = options.work_state = options.state_convergence = true;
+        options.recursive_modules = recursive;
+        const auto scan = scd::scan_sega_cd_loaders(disc, *produced.images, options);
+        if (!scan.complete) continue;   // an incomplete scan proves nothing
+        for (const auto &m : scan.modules)
+          for (const auto b : m.bases) {
+            const std::uint64_t lo = static_cast<std::uint64_t>(m.block) * 2048U;
+            authorized.emplace(lo + m.range_offset, static_cast<std::uint64_t>(b) + m.range_offset, m.range_length);   // hull
+            authorized.emplace(lo, b, m.size);                                                                         // loaded
+          }
+      }
+    }
+  }
+  return processor == scd::Processor::sub && authorized.count({off, base, len}) != 0U;
+}
+
 int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios_path, const std::vector<std::string> &copies,
                       const std::vector<std::string> &admits, const std::vector<std::string> &disc_images,
                       std::optional<std::uint32_t> application_entry, const std::string &out_path, std::uint32_t partition_window,
@@ -383,6 +413,9 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
       a.processor = *proc;
       a.address = *base;
       a.track_offset = *off;
+      // SEG-099-T005 (ADR 0219): the kind's name is a claim - the static loader scan proved this source-to-mapping. The emitter does not trust the coordinate string: it recomputes the scan (a pure
+      // function of the disc) and refuses an extent that no proven module mapping contains.
+      if (!static_extent_is_proven(disc, *proc, *off, *base, *len)) return bad("admit", "static_extent_unproven");
       if (const auto error = read_track1_extent(disc, *off, *len, a.bytes); !error.empty()) return bad("admit", error);
     } else if (f.size() == 6U && f[0] == "extent") {  // SEG-078-T003 (ADR 0205): extent:<pass>:<cpu>:<track-1 offset>:<base>:<length>
       const auto proc = parse_processor(f[2]);
@@ -648,13 +681,20 @@ int resolve_source_command(int argc, char **argv) {
 // SEG-097-T001 (ADR 0206): static discovery of disc-loaded modules. Pure function of the disc; executes nothing.
 int discover_modules_command(int argc, char **argv) {
   std::optional<std::string> cue, out_path, extents_path, windows_path;
-  bool table_roots = false, computed_continue = false, constant_dispatch = false;
+  bool table_roots = false, computed_continue = false, constant_dispatch = false, work_state = false, recursive_modules = false, state_convergence = false, converge_always = false;
+  std::uint32_t widen_after = 24U, scan_order = 0U;
   std::string static_scope = "hull";   // SEG-098-T004: `loaded` = every loaded byte of a proven module (all aligned starts), `hull` = the traversed executable subrange
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
     else if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
     else if (arg == "--constant-dispatch") constant_dispatch = true;   // SEG-098-T003 (ADR 0212)
+    else if (arg == "--recursive-modules") recursive_modules = true;   // SEG-099-T004 (ADR 0218)
+    else if (arg == "--state-convergence") state_convergence = true;   // SEG-099-T003 (ADR 0217)
+    else if (arg == "--converge-always") { state_convergence = true; converge_always = true; }   // test-only
+    else if (arg == "--widen-after" && i + 1 < argc) widen_after = static_cast<std::uint32_t>(std::strtoul(argv[++i], nullptr, 10));   // diagnostic: the join threshold
+    else if (arg == "--scan-order" && i + 1 < argc) scan_order = static_cast<std::uint32_t>(std::strtoul(argv[++i], nullptr, 10));   // test-only exploration order
+    else if (arg == "--work-state") work_state = true;   // SEG-099-T002 (ADR 0216): work-variable memory, condition codes and the documented BIOS CD services
     else if (arg == "--computed-call-whatif") computed_continue = true;   // SEG-098-T001 survey what-if (never used by a build)
     else if (arg == "--static-extents" && i + 1 < argc) extents_path = argv[++i];   // SEG-098-T002: one `<cpu>:<offset>:<base>:<length>` per verified mapping
     else if (arg == "--static-windows" && i + 1 < argc) windows_path = argv[++i];   // SEG-098-T004: `<cpu>:<base>:<bytes>` per loaded module window (classification of a later stop)
@@ -683,6 +723,12 @@ int discover_modules_command(int argc, char **argv) {
   scan_options.module_table_roots = table_roots;
   scan_options.continue_after_computed_call = computed_continue;
   scan_options.constant_dispatch = constant_dispatch;
+  scan_options.work_state = work_state;
+  scan_options.recursive_modules = recursive_modules;
+  scan_options.state_convergence = state_convergence;
+  scan_options.widen_after = widen_after;
+  scan_options.converge_always = converge_always;
+  scan_options.order = scan_order;
   const auto scan = scd::scan_sega_cd_loaders(*loaded.disc, *produced.images, scan_options);
   std::ostringstream report;
   report << "{\"ok\":" << (!scan.modules.empty() && scan.complete ? "true" : "false") << ",\"complete\":" << (scan.complete ? "true" : "false")
@@ -693,7 +739,10 @@ int discover_modules_command(int argc, char **argv) {
     report << ",\"survey\":{\"roots\":" << sv.roots << ",\"module_table_found\":" << (sv.module_table_found ? "true" : "false") << ",\"cdd_commands\":" << sv.cdd_commands
            << ",\"cdc_transfer_triggers\":" << sv.cdc_transfer_triggers << ",\"bios_service_calls\":" << sv.bios_service_calls << ",\"bios_service_unknown_function\":"
            << sv.bios_service_unknown_function << ",\"foreign_calls_other\":" << sv.foreign_calls_other << ",\"foreign_calls_unknown\":" << sv.foreign_calls_unknown
-           << ",\"copy_loop_candidates\":" << sv.copy_loop_candidates << ",\"counted_loops\":" << sv.counted_loops << ",\"dispatch_resolved\":" << sv.dispatch_resolved << ",\"table_reads\":" << sv.table_reads << ",\"memory_carried_reads\":" << sv.memory_carried_reads << ",\"bios_functions\":{";
+           << ",\"copy_loop_candidates\":" << sv.copy_loop_candidates << ",\"counted_loops\":" << sv.counted_loops << ",\"dispatch_resolved\":" << sv.dispatch_resolved << ",\"table_reads\":" << sv.table_reads << ",\"memory_carried_reads\":" << sv.memory_carried_reads
+           << ",\"bios_modelled_calls\":" << sv.bios_modelled_calls << ",\"bios_unmodelled_calls\":" << sv.bios_unmodelled_calls << ",\"sector_transfers\":" << sv.sector_transfers
+           << ",\"sector_transfers_unresolved\":" << sv.sector_transfers_unresolved << ",\"memory_args_resolved\":" << sv.memory_args_resolved << ",\"memory_args_unresolved\":" << sv.memory_args_unresolved
+           << ",\"module_entries_walked\":" << sv.module_entries_walked << ",\"convergence_used\":" << (sv.convergence_used ? "true" : "false") << ",\"joins\":" << sv.joins << ",\"widenings\":" << sv.widenings << ",\"branches_decided\":" << sv.branches_decided << ",\"async_volatile_ranges\":" << sv.async_volatile_ranges << ",\"async_volatile_all\":" << (sv.async_volatile_all ? "true" : "false") << ",\"bios_functions\":{";
     bool first = true;
     for (const auto &[fn, n] : sv.bios_functions) { report << (first ? "" : ",") << "\"" << fn << "\":" << n; first = false; }
     report << "},\"path_ends\":{";
