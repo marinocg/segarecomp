@@ -1180,6 +1180,13 @@ target_link_libraries(sega_cd_file_candidates_test PRIVATE segarecomp::machine_s
 segarecomp_enable_warnings(sega_cd_file_candidates_test)
 add_test(NAME sega_cd_file_candidates_test COMMAND sega_cd_file_candidates_test)
 set_property(TEST sega_cd_file_candidates_test APPEND PROPERTY LABELS full fast)
+# SEG-100-T003 (ADR 0223): runtime binding of a file-first dynamic image to the guest memory the original game loaded it into.
+add_executable(sega_cd_dynamic_binding_test sega_cd_dynamic_binding_test.c)
+set_target_properties(sega_cd_dynamic_binding_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_link_libraries(sega_cd_dynamic_binding_test PRIVATE segarecomp::runtime_sega_cd)
+segarecomp_enable_warnings(sega_cd_dynamic_binding_test)
+add_test(NAME sega_cd_dynamic_binding_test COMMAND sega_cd_dynamic_binding_test)
+set_property(TEST sega_cd_dynamic_binding_test APPEND PROPERTY LABELS full fast)
 # SEG-062-T002 (ADR 0129, Checkpoint A): CUE/BIN ingestion and IP/SP images against an independent reader; fixture reproducibility.
 add_test(NAME sega_cd_disc_ingestion_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_disc_ingestion_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR})

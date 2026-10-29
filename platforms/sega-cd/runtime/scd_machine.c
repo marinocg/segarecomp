@@ -123,7 +123,7 @@ const uint8_t *scd_code_byte(const ScdMachine *m, uint32_t cpu, uint32_t address
 }
 
 /* 1 when `address` of `cpu` reads Word RAM (a code fetch there is a Word RAM observation point: the CDC DMA is brought up first). */
-static int scd_is_word_ram(uint32_t cpu, uint32_t address) {
+int scd_is_word_ram(uint32_t cpu, uint32_t address) {
   address &= UINT32_C(0x00FFFFFF);
   if (cpu == SCD_MAIN) return address >= UINT32_C(0x00200000) && address < UINT32_C(0x00400000);
   address &= UINT32_C(0xFFFFF);
@@ -312,7 +312,8 @@ int scd_compiled(const ScdMachine *m, uint32_t cpu, uint32_t address) {
     if (program->entries[mid] < address) lo = mid + 1U;
     else hi = mid;
   }
-  return 0;
+  /* SEG-100 (ADR 0221): an address inside a verified dynamic binding with a precompiled body is a compiled entry as well. */
+  return m->program->dynamic != NULL && scd_dynamic_lookup(cpu, address) != NULL;
 }
 
 static void scd_trace(ScdCpu *c) {

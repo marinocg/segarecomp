@@ -209,6 +209,7 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
     }
     fprintf(out, "]}");
   }
+  scd_dynamic_report(m, out); /* SEG-100: absent for a program without dynamic images (reports unchanged) */
   fprintf(out, "}\n");
 }
 
@@ -589,6 +590,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   for (i = 0; i < capture_count; ++i)
     if (scd_vdp_capture_request(&machine, capture_onsets[i], capture_dir) != 0) return 2;
   scd_overlay_attach(&machine, overlays);
+  scd_dynamic_attach(&machine); /* SEG-100: idle for a program without dynamic images */
   if (coverage_path != NULL && scd_coverage_enable(&machine) != 0) return 1;
   if (trace_path != NULL && scd_trace_open(&machine, trace_path) != 0) return 1;
   if (wlog_path != NULL && scd_wlog_open(&machine, wlog_path) != 0) return 1;

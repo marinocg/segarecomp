@@ -7,6 +7,7 @@ add_library(segarecomp_runtime_sega_cd STATIC
   scd_coverage.c
   scd_devices.c
   scd_disc.c
+  scd_dynamic.c
   scd_gate_array.c
   scd_gfx.c
   scd_input.c
