@@ -27,6 +27,7 @@
 #include "segarecomp/machine/sega_cd/bios_profile.hpp"
 #include "segarecomp/machine/sega_cd/boot_images.hpp"
 #include "segarecomp/machine/sega_cd/file_candidates.hpp"
+#include "segarecomp/machine/sega_cd/file_first.hpp"
 #include "segarecomp/machine/sega_cd/loader_scan.hpp"
 #include "segarecomp/machine/sega_cd/modules.hpp"
 #include "segarecomp/machine/sega_cd/program.hpp"
@@ -344,10 +345,18 @@ bool static_extent_is_proven(const segarecomp::DiscImage &disc, scd::Processor p
   return processor == scd::Processor::sub && authorized.count({off, base, len}) != 0U;
 }
 
+// SEG-100 (ADR 0221): the file-first request of `emit` / `build`.
+struct FileFirstRequest {
+  bool enabled = false;
+  scd::FileFirstPolicy policy = scd::FileFirstPolicy::structural;
+  scd::FileFirstLimits limits;
+};
+
 int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios_path, const std::vector<std::string> &copies,
                       const std::vector<std::string> &admits, const std::vector<std::string> &disc_images,
                       std::optional<std::uint32_t> application_entry, const std::string &out_path, std::uint32_t partition_window,
-                      const segarecomp_app::SegaCdAotOptions &aot, const std::optional<scd::SelectiveAdmissionRequest> &aot_request) {
+                      const segarecomp_app::SegaCdAotOptions &aot, const std::optional<scd::SelectiveAdmissionRequest> &aot_request,
+                      const FileFirstRequest &file_first) {
   const auto bad = [](const std::string &stage, const std::string &error) {
     std::cout << "{\"ok\":false,\"stage\":\"" << stage << "\",\"error\":\"" << error << "\"}\n";
     return 7;
@@ -458,7 +467,15 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     }
     inputs.admissions.push_back(std::move(a));
   }
+  scd::FileFirstSelection selection;
+  if (file_first.enabled) {  // SEG-100: the candidate files are chosen from the verified disc by the generic policy, compiled before launch, bound at run time
+    selection = scd::select_file_first_images(disc, file_first.policy, file_first.limits);
+    if (selection.enumeration != scd::FileCandidateError::none) return bad("file_first", scd::file_candidate_error_name(selection.enumeration));
+    inputs.dynamic_images = std::move(selection.images);
+    inputs.dynamic_policy = selection.policy;
+  }
   scd::BiosProfileEmitOptions bios_options{partition_window};
+  bios_options.jobs = file_first.limits.jobs;
   if (aot_request) {  // SEG-097-T003 (ADR 0208): the experimental request enters the program identity and the provenance chain
     inputs.aot_policy = aot_request->policy_identity;
     bios_options.selective = &*aot_request;
@@ -466,7 +483,8 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
   const auto emission = scd::emit_sega_cd_bios_program(disc, inputs, bios_options);
   if (emission.error != scd::BiosProfileError::none) {
     std::cout << "{\"ok\":false,\"stage\":\"emit\",\"error\":\"" << scd::bios_profile_error_name(emission.error) << "\",\"index\":"
-              << emission.error_index << ",\"validation\":\"" << segarecomp::image_validation_error_name(emission.validation) << "\"}\n";
+              << emission.error_index << ",\"validation\":\"" << segarecomp::image_validation_error_name(emission.validation) << "\",\"dynamic\":\""
+              << scd::dynamic_error_name(emission.dynamic.error) << "\"}\n";
     return 6;
   }
   // SEG-064-T003: the shared dispatch unit goes to --out, every partition unit next to it under its own name (listed, in order, in
@@ -508,7 +526,21 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
            << "\",\"authority\":\"" << s.authority << "\",\"start\":" << s.start << ",\"length\":" << s.length
            << ",\"compiled\":" << s.compiled << ",\"rejected\":" << s.rejected << ",\"omitted\":" << s.omitted << "}";
   }
-  report << "],\"aot_policy\":" << segarecomp_app::sega_cd_aot_policy_json(aot, emission.admission) << "}\n";
+  report << "]";
+  if (file_first.enabled) {
+    const auto &d = emission.dynamic;
+    report << ",\"file_first\":{\"policy\":" << json_string(inputs.dynamic_policy) << ",\"identity\":\"" << d.identity << "\",\"files\":" << selection.files
+           << ",\"file_bytes\":" << selection.file_bytes << ",\"oversize_files\":" << selection.oversize_files << ",\"oversize_bytes\":" << selection.oversize_bytes
+           << ",\"duplicate_files\":" << selection.duplicate_files << ",\"empty_files\":" << selection.empty_files << ",\"unreadable_files\":" << selection.unreadable_files
+           << ",\"no_structure_files\":" << selection.no_structure_files << ",\"over_budget_files\":" << selection.over_budget_files << ",\"complete\":"
+           << (selection.complete ? "true" : "false") << ",\"images\":" << d.images.size() << ",\"admitted_bytes\":" << selection.admitted_bytes
+           << ",\"candidate_offsets\":" << d.candidate_offsets << ",\"compiled_offsets\":" << d.compiled_offsets << ",\"unique_encodings\":" << d.unique_encodings
+           << ",\"bodies\":" << d.bodies << ",\"refused_encodings\":" << d.refused << ",\"refused_reasons\":{";
+    for (std::size_t r = 0; r < d.refused_reasons.size(); ++r) report << (r ? "," : "") << "\"" << d.refused_reasons[r].first << "\":" << d.refused_reasons[r].second;
+    report << "},\"body_units\":" << d.body_units << ",\"body_text_bytes\":" << d.body_text_bytes << ",\"map_text_bytes\":" << d.map_text_bytes << "}";
+  }
+  report << ",\"aot_policy\":" << segarecomp_app::sega_cd_aot_policy_json(aot, emission.admission);
+  report << "}\n";
   std::cout << report.str();
   return 0;
 }
@@ -520,9 +552,28 @@ int emit(int argc, char **argv) {
   scd::SegaCdEmitOptions emit_options;
   segarecomp_app::SegaCdAotOptions aot;
   bool report_offsets = false;
+  FileFirstRequest file_first;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
+    else if (arg == "--file-first" && i + 1 < argc) {  // SEG-100 (ADR 0221)
+      const std::string_view value = argv[++i];
+      if (value != "all" && value != "structural") { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+      file_first.enabled = true;
+      file_first.policy = value == "all" ? scd::FileFirstPolicy::all : scd::FileFirstPolicy::structural;
+    } else if (arg == "--file-first-max-bytes" && i + 1 < argc) {
+      const auto v = parse_u32(argv[++i]);
+      if (!v || *v < 2U || *v > scd::kDynamicMaxImageBytes) { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+      file_first.limits.max_file_bytes = *v;
+    } else if (arg == "--file-first-max-offsets" && i + 1 < argc) {
+      const auto v = parse_u32(argv[++i]);
+      if (!v) { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+      file_first.limits.max_candidate_offsets = *v;
+    } else if (arg == "--jobs" && i + 1 < argc) {
+      const auto v = parse_u32(argv[++i]);
+      if (!v || *v == 0U || *v > 64U) { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+      file_first.limits.jobs = *v;
+    }
     else if (arg == "--position-independent") emit_options.position_independent = true;  // SEG-097-T002 (ADR 0207)
     else if (arg == "--report-offsets") report_offsets = true;  // SEG-097-T003: list each mapping's compiled source-relative offsets in the report (evidence tooling)
     else if ((arg == "--aot-policy" || arg == "--aot-model" || arg == "--aot-scope") && i + 1 < argc) {  // SEG-097-T003 (ADR 0208): the product's policy vocabulary
@@ -555,7 +606,7 @@ int emit(int argc, char **argv) {
       return 2;
     }
   }
-  if (!cue || !out_path || (!bios && (!copies.empty() || !admits.empty() || !disc_images.empty() || application_entry || partition_window)) || (bios && modules) || (bios && emit_options.position_independent) || !segarecomp_app::sega_cd_aot_options_valid(aot)) {
+  if (!cue || !out_path || (!bios && (!copies.empty() || !admits.empty() || !disc_images.empty() || application_entry || partition_window || file_first.enabled)) || (bios && modules) || (bios && emit_options.position_independent) || !segarecomp_app::sega_cd_aot_options_valid(aot)) {
     std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
     return 2;
   }
@@ -565,7 +616,7 @@ int emit(int argc, char **argv) {
     return 3;
   }
   const auto aot_request = segarecomp_app::make_sega_cd_aot_request(aot);
-  if (bios) return emit_bios_profile(*loaded.disc, *bios, copies, admits, disc_images, application_entry, *out_path, partition_window.value_or(0U), aot, aot_request);
+  if (bios) return emit_bios_profile(*loaded.disc, *bios, copies, admits, disc_images, application_entry, *out_path, partition_window.value_or(0U), aot, aot_request, file_first);
   if (aot_request) emit_options.selective = &*aot_request;
   const auto produced = scd::produce_boot_images(*loaded.disc);
   if (!produced.images) {

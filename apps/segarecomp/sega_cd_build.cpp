@@ -59,6 +59,9 @@ struct Options {
   bool aot_all_images = false;
   bool static_recursion = true;   // SEG-099-T004: follow the proven entries into the modules (0 reproduces the M2 scan)
   std::string static_range = "hull";   // SEG-098-T004: `loaded` admits every loaded byte of a proven module (computed entries beyond the traversed hull), `hull` only the traversed subrange
+  std::vector<std::string> emit_args;   // tests only: extra arguments forwarded to every `emit` (e.g. a manual `--disc-image` extent that shadows an address)
+  std::string file_first;   // SEG-100 (ADR 0221): "" = off, else the candidate policy (all|structural) of the file-first dynamic images
+  std::string file_first_max_bytes, file_first_max_offsets;
   bool static_discovery = true;   // SEG-098-T002: `--static-discovery 0` is the control (and the escape hatch): the build as it was before the static producer
 };
 
@@ -249,7 +252,7 @@ class Builder {
     out << "{\"status\":\"ok\",\"program\":\"" << exe.filename().string() << "\",\"viewer_program\":" << (viewer_path.empty() ? "null" : "\"" + viewer_path + "\"")
         << ",\"program_identity\":\"" << program_identity << "\",\"bios_sha256\":\"" << bios_sha_ << "\",\"rounds\":" << rounds << ",\"extents\":[";
     for (std::size_t i = 0; i < extents_.size(); ++i) out << (i ? "," : "") << "\"" << extents_[i] << "\"";
-    out << "],\"static_extents\":" << static_extents_.size() << ",\"static_discovery\":" << static_json_ << ",\"inventory\":" << inventory_json(report) << ",\"final_stop\":" << final_stop_json(report) << ",\"aot_policy\":" << (aot_policy_json_.empty() ? "null" : aot_policy_json_) << ",\"frontier\":" << (frontier_.empty() ? "null" : frontier_)
+    out << "],\"static_extents\":" << static_extents_.size() << ",\"static_discovery\":" << static_json_ << ",\"inventory\":" << inventory_json(report) << ",\"final_stop\":" << final_stop_json(report) << ",\"aot_policy\":" << (aot_policy_json_.empty() ? "null" : aot_policy_json_) << ",\"file_first\":" << (file_first_json_.empty() ? "null" : file_first_json_) << ",\"frontier\":" << (frontier_.empty() ? "null" : frontier_)
         << ",\"result\":\"" << raw_value(report, "result").value_or("") << "\",\"stop\":\"" << stop_class(report)
         << "\",\"viewer\":" << (o_.viewer ? "true" : "false") << ",\"history\":[" << history_ << "]}\n";
     std::ofstream(o_.output / "status.json", std::ios::binary | std::ios::trunc) << out.str();
@@ -319,6 +322,11 @@ class Builder {
     else if (static_status_ != "admitted" && static_status_ != "no_modules") reasons.push_back("static:" + static_status_);
     for (const auto &[k, n] : static_refusals_) { (void)n; reasons.push_back("static_refusal:" + k); }
     if (!extents_.empty()) reasons.push_back("execution_derived_extents");
+    if (!o_.file_first.empty()) {   // SEG-100 (ADR 0224): a filtered subset is never called a complete executable inventory; the mappings are decided at run time
+      reasons.push_back("file_first_runtime_binding");
+      if (o_.file_first == "structural") reasons.push_back("file_first_structural_filter");
+      if (raw_value(file_first_json_, "complete").value_or("true") != "true") reasons.push_back("file_first_inventory_incomplete");
+    }
     const std::string status = !barriers.empty() ? "blocked" : reasons.empty() ? "complete" : "partial";
     std::ostringstream out;
     out << "{\"schema\":\"segarecomp.sega_cd.inventory.v1\",\"status\":\"" << status << "\",\"device_stop\":" << (device_stop ? "true" : "false") << ",\"stop_class\":\"" << cls
@@ -482,12 +490,23 @@ class Builder {
     std::vector<std::string> cmd{self_, "sega-cd", "emit", "--cue", o_.cue.string(), "--bios", o_.bios.string(), "--out", (src / "program.c").string(), "--partition-window", "8192"};
     if (o_.aot_policy == "optimized") cmd.insert(cmd.end(), {"--aot-policy", "optimized", "--aot-model", "gen2"});
     if (o_.aot_all_images) cmd.insert(cmd.end(), {"--aot-scope", "all-images"});
+    if (!o_.file_first.empty()) {   // SEG-100: the same selection on every round (it never depends on a pass), so its units are unchanged and their objects are reused
+      cmd.insert(cmd.end(), {"--file-first", o_.file_first});
+      if (!o_.file_first_max_bytes.empty()) cmd.insert(cmd.end(), {"--file-first-max-bytes", o_.file_first_max_bytes});
+      if (!o_.file_first_max_offsets.empty()) cmd.insert(cmd.end(), {"--file-first-max-offsets", o_.file_first_max_offsets});
+      if (o_.jobs != 0U) cmd.insert(cmd.end(), {"--jobs", std::to_string(o_.jobs)});
+    }
     for (const auto &a : admits) { cmd.push_back("--admit"); cmd.push_back(a); }
+    cmd.insert(cmd.end(), o_.emit_args.begin(), o_.emit_args.end());
     const fs::path out = o_.output / "emit.json";
     if (run_process(cmd, out, {}, o_.compile_timeout) != 0) return Failure{"generate", "the program could not be generated: " + read_text(out, 4096)};
     const std::string text = read_text(out);
     if (raw_value(text, "ok").value_or("") != "true") return Failure{"generate", "the program could not be generated: " + text.substr(0, 300)};
     identity = raw_value(text, "program_identity").value_or("");
+    if (const auto at = text.find("\"file_first\":{"); at != std::string::npos) {   // SEG-100: the selection and compile statistics of the dynamic images
+      const auto end = text.find("},\"aot_policy\"", at);
+      if (end != std::string::npos) file_first_json_ = text.substr(at + 13U, end + 1U - (at + 13U));
+    }
     if (const auto at = text.find("\"aot_policy\":"); at != std::string::npos) {  // the last member of the report: the object up to the report's closing brace
       const auto begin = at + 13U, end = text.rfind('}');
       if (end != std::string::npos && end > begin) aot_policy_json_ = text.substr(begin, end - begin);
@@ -720,6 +739,7 @@ class Builder {
   std::map<std::string, unsigned> static_refusals_;
   std::string static_json_ = "{\"ran\":false}";
   std::vector<std::string> unit_names_;
+  std::string file_first_json_;   // SEG-100: the last emission's file_first object (status.json), or empty
   std::string aot_policy_json_;   // SEG-097-T003: the last emission's machine-readable aot_policy object (status.json)
   std::vector<fs::path> unit_sources_, unit_objects_, runtime_objects_;
 };
@@ -757,6 +777,10 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--optimize" && (value == "0" || value == "1" || value == "2")) o.optimize = value;
     else if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) o.aot_policy = value;
     else if (key == "--aot-model" && value == "gen2" && !o.aot_model_given) o.aot_model_given = true;
+    else if (key == "--file-first" && (value == "all" || value == "structural")) o.file_first = value;   // SEG-100 (ADR 0221)
+    else if (key == "--emit-arg") o.emit_args.push_back(value);   // tests only
+    else if (key == "--file-first-max-bytes") o.file_first_max_bytes = value;
+    else if (key == "--file-first-max-offsets") o.file_first_max_offsets = value;
     else if (key == "--aot-scope" && value == "all-images") o.aot_all_images = true;   // historical M1 scope, evidence only
     else {
       std::cerr << "usage:\n" << segarecomp_sega_cd_usage;

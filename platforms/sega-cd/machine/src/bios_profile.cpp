@@ -4,6 +4,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <thread>
 
 #include "segarecomp/cpu/m68k/decode.hpp"
 #include "segarecomp/cpu/m68k/ir.hpp"
@@ -127,6 +128,7 @@ std::string identity_text(const DiscImage &disc, const BiosProfileInputs &inputs
   for (const auto &d : inputs.disc_images)  // SEG-064-T004: the extent's coordinates and a digest of its bytes (a different disc is a different program)
     t << "discimage " << processor_name(d.processor) << " " << d.track_offset << " " << d.base << " " << d.length << " " << sha256_hex(d.bytes)
       << "\n";
+  if (!inputs.dynamic_images.empty()) t << "dynamic " << dynamic_images_identity(inputs.dynamic_images, inputs.dynamic_policy) << "\n";   // SEG-100: absent without dynamic images
   if (inputs.application_entry != 0U) t << "entry " << inputs.application_entry << "\n";
   for (std::size_t i = 0; i < admissions && i < inputs.admissions.size(); ++i) {
     const auto &a = inputs.admissions[i];
@@ -169,6 +171,7 @@ const char *bios_profile_error_name(BiosProfileError error) noexcept {
   case BiosProfileError::template_invalid: return "template_invalid";
   case BiosProfileError::image_validation: return "image_validation";
   case BiosProfileError::partition_invalid: return "partition_invalid";
+  case BiosProfileError::dynamic_invalid: return "dynamic_invalid";
   }
   return "unknown";
 }
@@ -493,6 +496,19 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
   // is one unit per processor and the concatenation below is exactly the single translation unit of SEG-064-T002.
   const std::uint32_t window = options.partition_window;
   if (window != 0U && !valid_partition_window(window)) return fail(BiosProfileError::partition_invalid, window);
+  // SEG-100 (ADR 0221): file-first dynamic images. Their bodies and maps are separate translation units, so a partitioned emission is required.
+  const bool dynamic_present = !inputs.dynamic_images.empty();
+  DynamicEmission dynamic;
+  if (dynamic_present) {
+    if (window == 0U) return fail(BiosProfileError::partition_invalid, 0U);
+    unsigned jobs = options.jobs != 0U ? options.jobs : std::thread::hardware_concurrency();
+    jobs = std::max(1U, std::min(jobs, 16U));
+    dynamic = emit_dynamic_images(disc, inputs.dynamic_images, inputs.dynamic_policy, inputs.application_entry != 0U, jobs);
+    if (dynamic.error != DynamicError::none) {
+      result.dynamic = std::move(dynamic);
+      return fail(BiosProfileError::dynamic_invalid, result.dynamic.error_index);
+    }
+  }
   struct UnitText {
     std::string variants, templates, chains, cases;
     std::uint32_t functions = 0;
@@ -524,7 +540,8 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
       out << "};\nstatic const uint32_t *" << p << "_lookup(uint32_t pc) {\n";
     out << "  size_t lo = 0U, hi = " << entries.size() << "U;\n  pc &= UINT32_C(0x00FFFFFF); /* the 68000 address bus is 24 bits (SEG-064-T004) */\n"
         << "  while (lo < hi) { const size_t mid = lo + (hi - lo) / 2U; if (" << p << "_entries[mid] == pc) return &" << p
-        << "_entries[mid]; if (" << p << "_entries[mid] < pc) lo = mid + 1U; else hi = mid; }\n  return NULL;\n}\n";
+        << "_entries[mid]; if (" << p << "_entries[mid] < pc) lo = mid + 1U; else hi = mid; }\n  return "
+        << (dynamic_present ? "scd_dynamic_lookup(" + std::to_string(cpu) + "U, pc)" : std::string("NULL")) << ";\n}\n";
   }
   for (unsigned cpu = 0; cpu < 2U; ++cpu) {
     const std::string k = std::to_string(cpu) + "U";
@@ -592,18 +609,25 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
       const auto it = variants[cpu].find(pc);
       const std::size_t exact = it == variants[cpu].end() ? 0U : it->second.size();
       const bool has_template = cpu_templates.count(pc) != 0U;
-      if (exact == 1U && !has_template) {
+      // SEG-100: with dynamic images a RAM PC is never a direct `case`: when its live bytes equal no static variant the chain offers the PC to the verified dynamic
+      // bindings (a module loaded over an address an earlier extent compiled) before it fails with the typed code_bytes_mismatch. ROM-only PCs stay direct.
+      bool any_guarded = false;
+      if (it != variants[cpu].end())
+        for (const auto &v : it->second) any_guarded = any_guarded || v.guarded;
+      const bool dynamic_chain = dynamic_present && (any_guarded || has_template);
+      if (exact == 1U && !has_template && !dynamic_chain) {
         u.cases += "  case UINT32_C(0x" + hex(pc) + "): return " + it->second.front().name + "(m);\n";
         continue;
       }
-      if (exact == 0U) {
+      if (exact == 0U && !dynamic_chain) {
         u.cases += "  case UINT32_C(0x" + hex(pc) + "): return " + p + "_t_" + hex(pc, 6) + "(m);\n";
         continue;
       }
       ++result.variant_pcs[cpu];
       const std::string chain = p + "_v_" + hex(pc, 6);
       functions << "static int " << chain << "(ScdMachine *m) {\n";
-      for (const auto &v : it->second) {
+      static const std::vector<Variant> no_variants;
+      for (const auto &v : (it != variants[cpu].end() ? it->second : no_variants)) {
         if (!v.guarded) {  // an unguarded (ROM) variant cannot overlap another image: the address is outside every RAM view
           functions << "  return " << v.name << "(m);\n";
           continue;
@@ -614,14 +638,19 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
       if (has_template)
         functions << "  if (scd_code_matches(m, " << k << ", UINT32_C(0x" << hex(pc) << "), " << p << "_t_" << hex(pc, 6)
                   << "_opcode, 2U)) return " << p << "_t_" << hex(pc, 6) << "(m);\n";
-      functions << "  return scd_fail(m, " << k << ", SCD_STOP_CODE_BYTES_MISMATCH, UINT32_C(0x" << hex(pc) << "), UINT32_C(0x" << hex(pc)
-                << "));\n}\n";
+      if (dynamic_present)
+        functions << "  return scd_dynamic_dispatch(m, " << k << ", SCD_STOP_CODE_BYTES_MISMATCH);\n}\n";
+      else
+        functions << "  return scd_fail(m, " << k << ", SCD_STOP_CODE_BYTES_MISMATCH, UINT32_C(0x" << hex(pc) << "), UINT32_C(0x" << hex(pc)
+                  << "));\n}\n";
       u.chains += functions.str();
       u.cases += "  case UINT32_C(0x" + hex(pc) + "): return " + chain + "(m);\n";
     }
   }
-  const auto default_stop = [](unsigned cpu) {
+  const auto default_stop = [&](unsigned cpu) {
     const std::string k = std::to_string(cpu) + "U", c = std::to_string(cpu);
+    if (dynamic_present)  // SEG-100: a PC no static case owns is offered to the verified dynamic bindings, which fail with the same typed stop
+      return "  default: return scd_dynamic_dispatch(m, " + k + ", SCD_STOP_ENTRY_NOT_COMPILED);\n  }\n}\n";
     return "  default: return scd_fail(m, " + k + ", SCD_STOP_ENTRY_NOT_COMPILED, m->cpu[" + c + "].pc, m->cpu[" + c + "].pc);\n  }\n}\n";
   };
   if (window == 0U) {
@@ -665,6 +694,10 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
       out << default_stop(cpu);
     }
   }
+  if (dynamic_present) {  // SEG-100: the processor-neutral computed-control authority of the dynamic bodies, and the dynamic images' tables
+    out << dynamic.program_text
+        << "const uint32_t *scd_neutral_lookup(uint32_t pc);\nconst uint32_t *scd_neutral_lookup(uint32_t pc) {\n  return scd_dynamic_exec_cpu() == 0U ? scd_p0_lookup(pc) : scd_p1_lookup(pc);\n}\n";
+  }
   out << "static const ScdDiscFile scd_disc_files[] = {\n";
   for (const auto &file : disc.files())
     out << "  {" << c_string(file.name) << ", UINT64_C(" << file.size << "), \"" << file.sha256 << "\"},\n";
@@ -687,8 +720,21 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
       << "static const ScdProgram scd_program = {\n  {{scd_p0_entries, " << result.entries[0] << "U, scd_p0_dispatch, UINT32_C(0x"
       << hex(inputs.bios.reset_pc) << "), 0U, 0U, 0U},\n   {scd_p1_entries, " << result.entries[1] << "U, scd_p1_dispatch, 0U, 0U, 0U, 0U}},\n"
       << "  {scd_disc_files, " << disc.files().size() << "U, scd_disc_tracks, " << disc.tracks().size() << "U, \"" << disc.identity()
-      << "\", {0}},\n  UINT32_C(0x" << hex(inputs.bios.reset_ssp) << "),\n  \"" << result.program_identity << "\"\n};\n\n"
+      << "\", {0}},\n  UINT32_C(0x" << hex(inputs.bios.reset_ssp) << "),\n  \"" << result.program_identity << "\"" << (dynamic_present ? ",\n  &scd_dynamic_program" : "") << "\n};\n\n"
       << "int main(int argc, char **argv) { return scd_program_main_bios(&scd_program, &scd_bios_profile, argc, argv); }\n";
+  if (dynamic_present) {
+    for (auto &unit : dynamic.units) {
+      BiosProfileUnit u;
+      u.name = unit.name;
+      u.cpu = 0U;
+      u.first_pc = 0U;
+      u.functions = unit.functions;
+      u.c_source = std::move(unit.c_source);
+      result.units.push_back(std::move(u));
+    }
+    dynamic.units.clear();
+    result.dynamic = std::move(dynamic);
+  }
   result.c_source = out.str();
   if (apply) selective.outcome.admitted = true;
   return result;
