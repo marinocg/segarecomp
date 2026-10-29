@@ -254,7 +254,7 @@ static void peripheral_reset(void) {
 
 static void fail_closed(void) {
   uint32_t v = 0U;
-  const uint32_t classes[] = {0x00U, 0x07U, 0x08U, 0x0FU, 0x20U, 0x7FU, 0x1000U, 0x1FFFU};
+  const uint32_t classes[] = {0x00U, 0x07U, 0x08U, 0x0FU, 0x20U, 0x7FU, 0x1000U, 0x1010U, 0x1011U, 0x1FFFU};
   unsigned i;
   for (i = 0; i < sizeof classes / sizeof classes[0]; ++i) {
     fresh();
@@ -273,9 +273,9 @@ static void fail_closed(void) {
   wr(1U, 0x07U, 0x80U);
   wr(1U, 0x08U, 0xFEU);
   {
-    const uint64_t before = machine->device_log;
-    check(rd(1U + 9U * PERIOD, 0x1000U, &v) != 0, "wave RAM read refused");
-    check(machine->device_log == before, "a refused read does not enter the device log");
+    const uint64_t before = machine->device_log, syncs = machine->pcm.syncs;
+    check(rd(1U + 9U * PERIOD, 0x1010U, &v) != 0, "wave RAM read at the pointer registers' offsets in the RAM window refused");
+    check(machine->device_log == before && machine->pcm.syncs == syncs, "a refused read neither enters the device log nor synchronizes the chip");
   }
 }
 
