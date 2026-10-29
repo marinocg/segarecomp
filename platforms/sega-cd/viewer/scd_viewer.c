@@ -12,6 +12,7 @@
 #include "viewer_sdl3.h"
 
 #define KEY_SCRIPT_MAX 4096U
+#define CDDA_PRIME_FRAMES 1176U   /* two sectors: a run's first frames wait (at most two video frames) until the device queue can be fed without a gap */
 #define CDDA_PENDING_FRAMES 4096U /* about 93 ms: several video frames of CD-DA (a frame carries 1 or 2 sectors, 588 frames each) */
 
 /* Automation seam (like the launcher's SEGARECOMP_GUI_SCRIPT): SEGARECOMP_VIEWER_KEY_SCRIPT names a file of `<poll> down|up <SDL key name>` (or `<poll> quit x`)
@@ -37,7 +38,7 @@ typedef struct ScdSdlHost {
    * flow: nothing here is read by the machine, and a frame that does not fit is counted and dropped, never waited for. */
   GenesisAudioPresenter presenter;
   int16_t pending[CDDA_PENDING_FRAMES * 2U];
-  uint32_t pending_frames;
+  uint32_t pending_frames, held_frames;
   uint64_t pending_dropped, delivered;
 } ScdSdlHost;
 
@@ -141,8 +142,19 @@ static int sdl_present(void *ctx, const struct GenesisFrameArtifact *frame, uint
   return ensure_open(h) == 0 ? h->host.present(h->host.ctx, frame) : -1;
 }
 
-static void flush_cdda(ScdSdlHost *h) {
-  if (h->pending_frames == 0U) return;
+static void flush_cdda(ScdSdlHost *h, int force) {
+  if (h->pending_frames == 0U) {
+    h->held_frames = 0U;
+    return;
+  }
+  /* A sector is 13.3 ms and a video frame 16.7 ms: delivered one sector at a time the host queue would run dry between frames. Into an empty
+   * queue a run's first frames therefore wait for a second sector (never more than two frames); afterwards the queue stays ahead. */
+  if (h->presenter.sink != NULL && !h->presenter.muted && h->presenter.sink->queued_frames(h->presenter.sink->context) == 0U &&
+      h->pending_frames < CDDA_PRIME_FRAMES && h->held_frames < 2U && !force) {
+    h->held_frames += 1U;
+    return;
+  }
+  h->held_frames = 0U;
   genesis_audio_present_chunk(&h->presenter, h->pending, h->pending_frames);
   h->delivered += h->pending_frames;
   h->pending_frames = 0U;
@@ -162,7 +174,7 @@ static int sdl_audio(void *ctx, const int16_t *frames, uint32_t count) {
 
 static int sdl_pace(void *ctx, uint64_t frame_ticks, uint64_t ticks_per_second) {
   ScdSdlHost *h = (ScdSdlHost *)ctx;
-  if (h->opened) flush_cdda(h); /* the frame's CD-DA reaches the device before the pacer waits */
+  if (h->opened) flush_cdda(h, 0); /* the frame's CD-DA reaches the device before the pacer waits */
   return ensure_open(h) == 0 ? genesis_pacer_wait_period(&h->pacer, &h->host, frame_ticks, ticks_per_second) : -1;
 }
 
@@ -170,7 +182,7 @@ static void sdl_finished(void *ctx, const struct ScdLiveSummary *summary, const 
   ScdSdlHost *h = (ScdSdlHost *)ctx;
   char detail[240];
   if (!h->opened) return;
-  flush_cdda(h);
+  flush_cdda(h, 1);
   if (h->delivered + h->pending_dropped != 0U)
     fprintf(stderr, "viewer: cdda frames offered=%llu submitted=%llu overrun_dropped=%llu refused=%llu discarded=%llu underruns=%llu pending_dropped=%llu\n",
             (unsigned long long)(h->delivered + h->pending_dropped), (unsigned long long)h->presenter.submitted,
