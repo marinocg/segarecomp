@@ -8,7 +8,7 @@ derives from the report's per-image account (ADR 0228) which compiled images wer
 Nothing committed may contain an image id, address, hash or byte: `--private` receives the full JSON, stdout only counts and classes.
 
 usage: sega_cd_m5_routes.py --program P --disc-dir D --bios B [--backup-ram F] --work W --observed-from REPORT.json
-         --route NAME:SCRIPT:UNTIL_TICK[:REFDIR:FRAMES[:EXTRA_ARGS]] ... --expect NAME=STOP ... [--base-onset 1202] [--budget N] [--private FILE]
+         --route NAME:SCRIPT:UNTIL_TICK[:REFDIR:FRAMES[:EXTRA_ARGS]] ... (fields separated by ':' or, when a field contains ':', by '|') --expect NAME=STOP ... [--base-onset 1202] [--budget N] [--private FILE]
          (FRAMES: comma-separated reference frames relative to the entry; REFDIR: the reference's output directory for that route; EXTRA_ARGS: space-separated program arguments, used by the
           project-authored fixtures' machine-input choice)
 """
@@ -94,7 +94,7 @@ def main():
     result = {"program_sha256": program_hash, "program_bytes": args.program.stat().st_size, "build_observed_images": len(observed), "routes": {}}
     private = {"build_observed_ids": sorted(observed)}
     for spec in args.route:
-        parts = spec.split(":")
+        parts = spec.split("|" if "|" in spec else ":")  # "|" when any field holds a ":" (a Windows drive, a --set main:d7=2)
         name, script, until = parts[0], parts[1], parts[2]
         refdir = pathlib.Path(parts[3]) if len(parts) > 3 and parts[3] else None
         frames = [int(x) for x in parts[4].split(",")] if len(parts) > 4 and parts[4] else []
@@ -106,8 +106,8 @@ def main():
             cmd += ["--backup-ram", args.backup_ram]
         if script:
             cmd += ["--input-script", script]
-        if len(parts) > 5 and ":".join(parts[5:]):
-            cmd += ":".join(parts[5:]).split()
+        if len(parts) > 5 and "|".join(parts[5:]):
+            cmd += "|".join(parts[5:]).split()
         if until and int(until) > 0:
             cmd += ["--until-tick", until]
         if frames:

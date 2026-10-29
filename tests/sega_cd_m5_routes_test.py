@@ -37,7 +37,7 @@ def main():
         subprocess.run(base + ["--report", str(tmp / "r0.json")], check=True, capture_output=True, timeout=300)
         private = tmp / "private.json"
         done = subprocess.run([sys.executable, str(TOOL), "--program", str(program), "--disc-dir", str(fx / "disc"), "--bios", str(fx / "bios.bin"), "--work", str(tmp / "work"), "--budget", "3000000",
-                               "--observed-from", str(tmp / "r0.json"), "--private", str(private), "--route", "R0:::", "--route", "R2:::::--set main:d7=2", "--route", "R3:::::--set main:d7=3", "--expect", "R0=none", "--expect", "R2=none", "--expect", "R3=none"],
+                               "--observed-from", str(tmp / "r0.json"), "--private", str(private), "--route", "R0:::", "--route", "R2|||||--set main:d7=2", "--route", "R3|||||--set main:d7=3", "--expect", "R0=none", "--expect", "R2=none", "--expect", "R3=none"],
                               capture_output=True, text=True, timeout=600)
         check(done.returncode == 0, "the runner succeeds and the frozen program is unchanged after every route (exit %d)" % done.returncode)
         if done.returncode != 0:
@@ -58,7 +58,7 @@ def main():
         check(bad.returncode == 5 and "expected pcm_unsupported" in bad.stdout, "a route that ends differently from its pre-registered stop fails the evaluation")
         check(runner("--route", "R0:::").returncode == 5, "a route with no pre-registered expectation fails the evaluation")
         (tmp / "emptyref").mkdir()
-        miss = runner("--route", "R0:::%s:5" % (tmp / "emptyref"), "--expect", "R0=none")
+        miss = runner("--route", "R0|||%s|5" % (tmp / "emptyref"), "--expect", "R0=none")
         check(miss.returncode == 5 and "missing or different" in miss.stdout, "an expected reference frame that is missing or different fails the evaluation")
     print("%d failure(s)" % len(failures))
     return 1 if failures else 0
