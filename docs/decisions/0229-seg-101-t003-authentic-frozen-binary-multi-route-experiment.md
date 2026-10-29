@@ -46,7 +46,7 @@ Without `--until-tick` the frozen program continues R1 for about 12,450 referenc
 
 ## Independent audit of the executed bytes
 
-For each unvisited image, the reference's own RAM dump at entry+1500 and the disc file are compared at every instruction start the reference executed inside the image's extent: **3,763, 93 and 2,531 starts, every opcode word equal to the file**; B1's per-instruction guard compared them as well. The audit used no output of B1.
+For each unvisited image the reference's own RAM dump at entry+1500 and the disc file are compared at every instruction start the reference executed inside the image's extent *while the image could be resident*: the two R1 images were the only code ever at their addresses (**3,763 and 93 starts, the program's own counts being 3,761 and 93 offsets**), and for the R2 image, whose Work RAM base earlier hosted three other modules, the starts first executed after its load (found by a second reference run stopped at the load instant) number **1,080**; in every case **each opcode word equals the file's**. The program's 1,265 offsets of that image are those 1,080 plus 185 already executed under the earlier modules (same code at the same offsets). The audit used no output of B1. The three images are not copies of observed modules: the same-offset identical-word fraction with the best observed image is 7.9 %, 0.2 % and 0.7 %.
 
 ## Gate
 
