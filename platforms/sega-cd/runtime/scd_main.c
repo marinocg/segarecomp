@@ -168,8 +168,8 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
   }
   scd_vdp_capture_report(m, out); /* SEG-065-T003: absent without --capture-onset */
   if (m->vdp_dma_count != 0U) /* SEG-065-T002: 68K->VDP DMA transfers and the main processor's total wait (absent without one) */
-    fprintf(out, ",\"vdp_dma\":{\"count\":%llu,\"stall_ticks\":%llu}", (unsigned long long)m->vdp_dma_count,
-            (unsigned long long)m->vdp_dma_stall_ticks);
+    fprintf(out, ",\"vdp_dma\":{\"count\":%llu,\"stall_ticks\":%llu,\"bank_1m\":%llu,\"bank_mode_changes_during_wait\":%llu}", (unsigned long long)m->vdp_dma_count,
+            (unsigned long long)m->vdp_dma_stall_ticks, (unsigned long long)m->vdp_dma_bank_count, (unsigned long long)m->wordram_mode_changes_in_dma);
   if (m->backup_ram_present) { /* SEG-065-T002: the backup RAM machine input (absent without --backup-ram: reports unchanged) */
     scd_sha_hex(m->backup_ram, sizeof m->backup_ram, digest);
     fprintf(out, ",\"backup_ram\":{\"reads\":%llu,\"writes\":%llu,\"sha256\":\"%s\"}", (unsigned long long)m->backup_ram_reads,

@@ -567,8 +567,82 @@ const char *ScdBuildJob::stage_label(int index) {
 
 fs::path scd_build_program(const fs::path &out_dir) { return out_dir / (std::string("program-viewer") + exe_suffix); }
 
-std::vector<std::string> scd_build_policy_arguments(bool experimental_m3) {
-  return experimental_m3 ? std::vector<std::string>{"--aot-policy", "optimized", "--aot-model", "gen2"} : std::vector<std::string>{};
+const char *scd_build_mode_code(ScdBuildMode mode) {
+  switch (mode) {
+    case ScdBuildMode::file_first: return "file_first";
+    case ScdBuildMode::optimized: return "optimized";
+    default: return "compatibility";
+  }
+}
+
+std::vector<std::string> scd_build_policy_arguments(ScdBuildMode mode) {
+  switch (mode) {
+    case ScdBuildMode::file_first: return {"--file-first", "structural"};   // the product's own option, nothing else (never an aot policy)
+    case ScdBuildMode::optimized: return {"--aot-policy", "optimized", "--aot-model", "gen2"};
+    default: return {};
+  }
+}
+
+namespace {
+// The text of the object that starts at `key`":{` in a JSON text (balanced braces, strings skipped), or empty when the member is absent or not an object (null).
+std::string scd_json_object(const std::string &text, const std::string &key) {
+  const std::string needle = "\"" + key + "\":{";
+  const auto at = text.find(needle);
+  if (at == std::string::npos) return {};
+  const std::size_t begin = at + needle.size() - 1U;
+  int depth = 0;
+  bool in_string = false;
+  for (std::size_t i = begin; i < text.size(); ++i) {
+    const char c = text[i];
+    if (in_string) { if (c == '\\') ++i; else if (c == '"') in_string = false; continue; }
+    if (c == '"') in_string = true;
+    else if (c == '{') ++depth;
+    else if (c == '}' && --depth == 0) return text.substr(begin, i + 1U - begin);
+  }
+  return {};
+}
+std::string scd_json_field(const std::string &object, const std::string &key) {
+  const auto k = object.find("\"" + key + "\":");
+  if (k == std::string::npos) return {};
+  std::size_t p = k + key.size() + 3U;
+  if (p < object.size() && object[p] == '"') { const auto e = object.find('"', p + 1U); return e == std::string::npos ? std::string() : object.substr(p + 1U, e - p - 1U); }
+  std::size_t e = p;
+  while (e < object.size() && object[e] != ',' && object[e] != '}') ++e;
+  return object.substr(p, e - p);
+}
+} // namespace
+
+ScdFileFirstReport read_scd_file_first_report(const std::string &status_text) {
+  ScdFileFirstReport out;
+  const std::string object = scd_json_object(status_text, "file_first");
+  if (object.empty()) return out;   // absent, null (not a file-first build) or malformed: nothing is claimed
+  out.present = true;
+  out.complete = scd_json_field(object, "complete") == "true";
+  out.policy = scd_json_field(object, "policy");
+  out.files = std::atoll(scd_json_field(object, "files").c_str());
+  out.images = std::atoll(scd_json_field(object, "images").c_str());
+  out.oversize_files = std::atoll(scd_json_field(object, "oversize_files").c_str());
+  out.no_structure_files = std::atoll(scd_json_field(object, "no_structure_files").c_str());
+  out.duplicate_files = std::atoll(scd_json_field(object, "duplicate_files").c_str());
+  out.compiled_offsets = std::atoll(scd_json_field(object, "compiled_offsets").c_str());
+  return out;
+}
+
+std::string scd_file_first_sentence(const ScdFileFirstReport &r) {
+  if (!r.present) return {};
+  std::string text = "File-first (structural): " + std::to_string(r.images) + " disc image(s) from " + std::to_string(r.files) + " disc file(s) were compiled before the game ran; their code is bound at run time only when the bytes the game loads match them exactly. ";
+  if (!r.complete)
+    text += "The inventory is incomplete (" + std::to_string(r.oversize_files) + " oversize, " + std::to_string(r.no_structure_files) + " without code structure, " + std::to_string(r.duplicate_files) +
+            " duplicate file(s) were not compiled): code outside it still stops at an uncompiled entry. ";
+  else
+    text += "The inventory covered every eligible file; code the disc does not contain verbatim is still not compiled. ";
+  return text;
+}
+
+std::string scd_effective_build_mode(const std::string &status_text) {
+  if (read_scd_file_first_report(status_text).present) return "file_first";
+  const ScdPolicyReport policy = read_scd_policy_report(status_text);
+  return policy.present && policy.requested == "optimized" && policy.effective == "selective" ? "optimized" : "compatibility";
 }
 
 ScdPolicyReport read_scd_policy_report(const std::string &status_text) {
@@ -701,7 +775,7 @@ void ScdBuildJob::run() {
 #else
   args.insert(args.end(), {"--link-arg", "-Wl,-rpath," + utf8(layout_.sdl_lib)});
 #endif
-  for (const auto &option : scd_build_policy_arguments(request_.experimental_m3)) args.push_back(option);
+  for (const auto &option : scd_build_policy_arguments(request_.mode)) args.push_back(option);
   if (const char *extra = SDL_getenv("SEGARECOMP_SCD_BUILD_ARGS")) {  // TEST SEAM (documented in ADR 0205; local environment only, never set by Segarecomp): whitespace-separated extra product-CLI options (budget, host source, ...)
     std::istringstream words(extra);
     for (std::string word; words >> word;) args.push_back(word);
@@ -786,6 +860,11 @@ void ScdBuildJob::run() {
       publishing_ = true;
       status_text = read_all(partial / "status.json");
       publish = exit_code == 0 && status_text.find("\"status\":\"ok\"") != std::string::npos && fs::exists(scd_build_program(partial), ec);
+      if (publish && request_.mode == ScdBuildMode::file_first && !read_scd_file_first_report(status_text).present) {
+        // SEG-103-T007: a file-first request is never published as file-first on the strength of the request: the product's structured inventory must say so.
+        publish = false;
+        result_line = "File-first was requested but the product did not report a file-first inventory for this disc, so the program was not accepted as file-first.";
+      }
     }
   }
   if (cancel_.load()) { finish_cancelled(); return; }
@@ -802,7 +881,13 @@ void ScdBuildJob::run() {
     };
     const ScdPolicyReport policy = read_scd_policy_report(status_text);
     built_experimental_.store(policy.present && policy.requested == "optimized" && policy.effective == "selective");
-    std::string text = "Built in " + field("rounds") + " round(s). " + scd_policy_sentence(policy);
+    const ScdFileFirstReport inventory = read_scd_file_first_report(status_text);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      built_mode_ = scd_effective_build_mode(status_text);
+      file_first_ = inventory;
+    }
+    std::string text = "Built in " + field("rounds") + " round(s). " + scd_policy_sentence(policy) + scd_file_first_sentence(inventory);
     const auto frontier = status_text.find("\"frontier\":{");
     if (frontier != std::string::npos) {
       const auto refusal = status_text.find("\"refusal\":\"", frontier);
@@ -843,8 +928,25 @@ void ScdBuildJob::run() {
   const fs::path failed = request_.out_dir.parent_path() / (request_.out_dir.filename().string() + ".failed");
   fs::remove_all(failed, ec);
   fs::rename(partial, failed, ec);
-  set_message(result_line.empty() ? "The build failed unexpectedly." : result_line);
+  std::string failure = result_line.empty() ? "The build failed unexpectedly." : result_line;
+  if (request_.mode == ScdBuildMode::file_first)   // SEG-103-T007: no silent fallback; the user decides whether to try Compatibility
+  {
+    if (failure.find("\"error\":\"iso9660\"") != std::string::npos) failure = "this disc has no ISO9660 file system the product can read, so its files cannot be inventoried";
+    while (!failure.empty() && (failure.back() == '.' || failure.back() == ' ')) failure.pop_back();
+    failure = "File-first build failed: " + failure + ". Nothing was substituted; choose Compatibility to build this game without file-first.";
+  }
+  set_message(failure);
   finish(false);
+}
+
+std::string ScdBuildJob::built_mode() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return built_mode_;
+}
+
+ScdFileFirstReport ScdBuildJob::file_first_report() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return file_first_;
 }
 
 // ---- BuildJob ----

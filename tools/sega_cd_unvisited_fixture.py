@@ -37,6 +37,7 @@ BASE_A, BASE_B = WORD_RAM, WORD_RAM
 BASES_C = (0x090000, 0x0A0000)
 BASE_D = 0x0B0000
 HEADER = 0x40
+PAD_POLLS, PAD_DELAY = 200, 2000   # SEG-103-T007: the pad is polled for about 30 frames, then the default module is chosen
 CASES = ("base", "overwritten", "header_patched", "unknown_lba", "unknown_dest", "prg_dest", "recursion",
          "pi", "pi_odd", "pi_escape", "pi_overwrite", "long_dest", "stale_lba", "table_header", "dispatch", "dispatch_unknown", "computed_entry")
 SP_TABLE_PREFIX = 0x2A   # SEG-098-T001: an authentic-style SP header ("MAIN", module jump table at +$20, init at +$2A) before the loader code
@@ -524,6 +525,24 @@ def build(options):
         main.tst("w", F.d(7))
         main.bcc("eq", "go")
         main.move("w", F.d(7), F.d(1))
+        main.bra("go")
+    pad_choice = int(options.get("pad", 0))
+    if pad_choice:   # SEG-103-T007: a controller transition. START on pad 1 (polled for a bounded number of frames) selects module `pad_choice`; no input leaves the default
+        main.move("b", F.imm(0x40), F.absl(0xA10009))      # CTRL1: TH output
+        main.move("w", F.imm(PAD_POLLS - 1), F.d(2))
+        main.label("pad_poll")
+        main.move("b", F.imm(0x00), F.absl(0xA10003))      # TH low: bit 5 is Start (0 = pressed)
+        main.move("b", F.absl(0xA10003), F.d(3))
+        main.move("b", F.imm(0x40), F.absl(0xA10003))
+        main.btst(5, F.d(3))
+        main.bcc("eq", "pad_start")
+        main.move("w", F.imm(PAD_DELAY), F.d(4))
+        main.label("pad_wait")
+        main.dbra(4, "pad_wait")
+        main.dbra(2, "pad_poll")
+        main.bra("go")
+        main.label("pad_start")
+        main.moveq(pad_choice, 1)
         main.bra("go")
     main.immop("cmp", "w", 2, F.d(7))                      # the runtime input: the machine input main:d7 (this profile has no controller port)
     main.bcc("ne", "not_b")

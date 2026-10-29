@@ -224,12 +224,28 @@ private:
 // product CLI (multi-pass: emit, compile with the bundled compiler, run a build pass, admit what the machine itself proves, confirm) in
 // `<out_dir>.partial`, parses its `@stage`/`@round`/`@result` lines, and publishes by rename. Cancellation terminates the CLI and everything it started and
 // removes the attempt's own folder; a finished build is never replaced by a cancelled or failed attempt. Poll from the UI thread.
+// SEG-103-T007: the three build choices. One value, so file-first and Optimized (mutually exclusive in the product CLI) cannot be combined.
+enum class ScdBuildMode { compatibility, file_first, optimized };
+[[nodiscard]] const char *scd_build_mode_code(ScdBuildMode mode);   // "compatibility" | "file_first" | "optimized"
 struct ScdBuildRequest {
   std::filesystem::path bios, cue, out_dir;   // out_dir receives program-viewer[.exe], program[.exe], status.json, build.log
-  bool experimental_m3 = false;               // SEG-097-T003 (ADR 0208): ask the product for its EXPERIMENTAL Optimized policy; off unless the user chose it
+  ScdBuildMode mode = ScdBuildMode::compatibility;   // the next build's choice: Compatibility unless the user chose file-first or the EXPERIMENTAL Optimized (ADR 0208)
 };
-// The product options that request the policy (empty for Compatibility). The launcher knows no model, threshold or compatibility rule.
-[[nodiscard]] std::vector<std::string> scd_build_policy_arguments(bool experimental_m3);
+// The product options that request the mode (empty for Compatibility; `--file-first structural`; `--aot-policy optimized --aot-model gen2`). The launcher knows no
+// model, threshold, compatibility rule or inventory logic.
+[[nodiscard]] std::vector<std::string> scd_build_policy_arguments(ScdBuildMode mode);
+// SEG-103-T007: what the product's final emission says about the file-first inventory (status.json `file_first`, null when the build was not file-first). Read
+// independently of `aot_policy`: a file-first program is built under the Compatibility AOT policy. Counts only; `complete` false is never presented as complete.
+struct ScdFileFirstReport {
+  bool present = false, complete = false;
+  std::string policy;
+  long long files = 0, images = 0, oversize_files = 0, no_structure_files = 0, duplicate_files = 0, compiled_offsets = 0;
+};
+[[nodiscard]] ScdFileFirstReport read_scd_file_first_report(const std::string &status_text);
+[[nodiscard]] std::string scd_file_first_sentence(const ScdFileFirstReport &report);
+// The build mode a finished emission actually has, from the product's own structured members (never from what was requested): "file_first" when status.json
+// carries a file_first object, "optimized" when the experimental policy was effective, else "compatibility".
+[[nodiscard]] std::string scd_effective_build_mode(const std::string &status_text);
 // What the product's final emission says about the policy (status.json `aot_policy`; thin typed read, no human text parsed).
 struct ScdPolicyReport {
   bool present = false;
@@ -258,6 +274,8 @@ public:
   [[nodiscard]] std::string message() const;       // a failure line, or the progress line while running
   [[nodiscard]] std::string summary() const;       // after success: the plain-language outcome of the build (what the program covers)
   [[nodiscard]] bool built_experimental() const { return built_experimental_.load(); }   // the product's EFFECTIVE policy was the experimental one
+  [[nodiscard]] std::string built_mode() const;                       // SEG-103-T007: the EFFECTIVE mode of the published build (scd_effective_build_mode), "" before success
+  [[nodiscard]] ScdFileFirstReport file_first_report() const;         // the product's file_first inventory of the published build (present = false otherwise)
   [[nodiscard]] std::filesystem::path program() const;   // the viewer program of a successful build
   [[nodiscard]] const std::filesystem::path &out_dir() const { return request_.out_dir; }
   void wait();
@@ -273,6 +291,8 @@ private:
   std::atomic<bool> cancel_{false};
   std::atomic<bool> cancelled_{false};
   std::atomic<bool> built_experimental_{false};
+  std::string built_mode_;                 // guarded by mutex_ (SEG-103-T007)
+  ScdFileFirstReport file_first_;          // guarded by mutex_
   bool publishing_ = false;  // guarded by mutex_
   ProcessTree tree_;
   mutable std::mutex mutex_;

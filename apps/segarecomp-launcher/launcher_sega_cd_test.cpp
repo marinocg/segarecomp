@@ -478,9 +478,17 @@ void test_catalog(const fs::path &base, const fs::path &fake) {
 // SEG-097-T003 (ADR 0208): the EXPERIMENTAL Sega CD policy at the launcher - an explicit choice that is off by default, passed to the product as its own
 // option, read back from the product's own report, and persisted without touching any record that never chose it.
 void test_experimental_policy(const fs::path &base, const fs::path &fake) {
-  expect(scd_build_policy_arguments(false).empty(), "policy: Compatibility passes no policy option to the product");
-  expect((scd_build_policy_arguments(true) == std::vector<std::string>{"--aot-policy", "optimized", "--aot-model", "gen2"}), "policy: the experimental choice is the product's own option, nothing else");
-  expect(!ScdBuildRequest{}.experimental_m3, "policy: a build request is Compatibility unless the experimental choice is set");
+  expect(scd_build_policy_arguments(ScdBuildMode::compatibility).empty(), "policy: Compatibility passes no policy option to the product (the legacy command)");
+  expect((scd_build_policy_arguments(ScdBuildMode::optimized) == std::vector<std::string>{"--aot-policy", "optimized", "--aot-model", "gen2"}), "policy: the experimental choice is the product's own option, nothing else");
+  expect((scd_build_policy_arguments(ScdBuildMode::file_first) == std::vector<std::string>{"--file-first", "structural"}), "file-first: the product's own option, and no aot policy option");
+  {
+    const auto ff = scd_build_policy_arguments(ScdBuildMode::file_first), op = scd_build_policy_arguments(ScdBuildMode::optimized);
+    bool overlap = false;
+    for (const auto &a : ff) for (const auto &b : op) overlap = overlap || a == b;
+    expect(!overlap && std::find(ff.begin(), ff.end(), "--aot-policy") == ff.end() && std::find(op.begin(), op.end(), "--file-first") == op.end(),
+           "file-first and Optimized are one choice: no request carries both option families (the product CLI refuses the pair)");
+  }
+  expect(ScdBuildRequest{}.mode == ScdBuildMode::compatibility, "policy: a build request is Compatibility unless another mode is chosen");
   const std::string selective =
       "{\"status\":\"ok\",\"aot_policy\":{\"requested\":\"optimized\",\"experimental\":true,\"effective\":\"selective\",\"fallback\":false,\"reason\":\"none\",\"failed_image\":\"\","
       "\"k_sha256\":\"ab\",\"broad_entries\":10439,\"admitted_entries\":9280,\"m3_images\":1,\"m3_broad_entries\":1865,\"m3_admitted_entries\":706,\"images\":[{\"name\":\"bios\",\"broad_entries\":1}]},\"frontier\":null}";
@@ -503,6 +511,33 @@ void test_experimental_policy(const fs::path &base, const fs::path &fake) {
   expect(scd::is_uncompiled_entry_stop("entry_not_compiled") && scd::is_uncompiled_entry_stop("image_entry_not_compiled") && !scd::is_uncompiled_entry_stop("pcm_unsupported") &&
              !scd::is_uncompiled_entry_stop("") && !scd::is_uncompiled_entry_stop("code_bytes_mismatch"),
          "policy: only the uncompiled-entry stops offer the Compatibility rebuild");
+  // SEG-103-T007: file-first is read from status.json.file_first, independently of aot_policy
+  const std::string file_first_status =
+      "{\"status\":\"ok\",\"aot_policy\":{\"requested\":\"compatibility\",\"effective\":\"broad\",\"fallback\":false,\"reason\":\"none\",\"images\":[]},"
+      "\"file_first\":{\"policy\":\"file_first.v1:structural:max_bytes=524288:max_offsets=0\",\"files\":131,\"oversize_files\":4,\"duplicate_files\":4,\"no_structure_files\":2,\"complete\":false,"
+      "\"images\":120,\"compiled_offsets\":1536888,\"refused_reasons\":{}},\"frontier\":null}";
+  const auto ffr = read_scd_file_first_report(file_first_status);
+  expect(ffr.present && !ffr.complete && ffr.files == 131 && ffr.images == 120 && ffr.oversize_files == 4 && ffr.no_structure_files == 2 && ffr.compiled_offsets == 1536888,
+         "file-first: the product's file_first member is read (counts, complete = false)");
+  expect(scd_effective_build_mode(file_first_status) == "file_first" && read_scd_policy_report(file_first_status).requested == "compatibility",
+         "file-first: the effective mode comes from file_first although the aot_policy member says compatibility");
+  expect(scd_file_first_sentence(ffr).find("incomplete") != std::string::npos && scd_file_first_sentence(ffr).find("uncompiled entry") != std::string::npos &&
+             scd_file_first_sentence(ffr).find("every eligible file") == std::string::npos,
+         "file-first: an incomplete inventory is never described as complete");
+  expect(scd_effective_build_mode(selective) == "optimized" && scd_effective_build_mode(fallback) == "compatibility" && scd_effective_build_mode("{\"status\":\"ok\"}") == "compatibility" &&
+             !read_scd_file_first_report("{\"status\":\"ok\",\"file_first\":null}").present && !read_scd_file_first_report("{\"file_first\":{\"files\":1").present,
+         "file-first: null, absent or malformed file_first claims nothing; Optimized and fallback read as before");
+  expect(std::string(scd_build_mode_code(ScdBuildMode::file_first)) == "file_first" && std::string(scd::selected_build_mode(scd::EntryRecord{})) == "compatibility",
+         "file-first: stable mode codes; a record is Compatibility unless it chose otherwise");
+  {
+    scd::EntryRecord r;
+    scd::select_build_mode(r, "file_first");
+    expect(r.file_first && !r.experimental_m3 && std::string(scd::selected_build_mode(r)) == "file_first", "file-first: selecting it");
+    scd::select_build_mode(r, "optimized");
+    expect(!r.file_first && r.experimental_m3, "file-first: selecting Optimized clears file-first (never both)");
+    scd::select_build_mode(r, "compatibility");
+    expect(!r.file_first && !r.experimental_m3, "file-first: selecting Compatibility clears both");
+  }
   // persistence: written only when chosen, kept when the game is added again, byte-identical records otherwise
   Fixture f(base, fake, "policyfx");
   scd::ImportResult imp;
@@ -515,6 +550,7 @@ void test_experimental_policy(const fs::path &base, const fs::path &fake) {
     auto added = c.import_sega_cd(rec, "Game", 1800000000);
     expect(added.entry != nullptr && !added.entry->sega_cd.experimental_m3 && !added.entry->sega_cd.program_experimental, "policy: a new game is Compatibility");
     expect(c.save() && slurp(file).find("experimental") == std::string::npos, "policy: a record that never chose the option is written without the members");
+    expect(slurp(file).find("file_first") == std::string::npos && slurp(file).find("program_built_mode") == std::string::npos, "file-first: a record that never chose it is byte-compatible (no new members)");
     added.entry->sega_cd.experimental_m3 = true;
     added.entry->sega_cd.program_experimental = true;
     expect(c.save() && slurp(file).find("\"experimental_m3\": true") != std::string::npos, "policy: the choice and the program's effective policy are persisted");
@@ -527,6 +563,55 @@ void test_experimental_policy(const fs::path &base, const fs::path &fake) {
     const auto again = c.import_sega_cd(scd::import_entry({f.bios, f.cue, {}}).record, "Game", 1800000100);
     expect(again.entry->sega_cd.experimental_m3 && again.entry->sega_cd.program_experimental && !again.entry->sega_cd.program.path.empty(),
            "policy: adding the same game again keeps the user's choice and the program's policy");
+    expect(again.entry->sega_cd.program_built_mode == "optimized", "migration: a record written by an earlier release (program_experimental only) reads as an Optimized-built program");
+  }
+  {   // SEG-103-T007: the file-first selection and the built mode persist and migrate
+    const fs::path file2 = base / "policyfx-catalog2.json";
+    fs::remove(file2);
+    {
+      Catalog c(file2);
+      c.load();
+      auto added = c.import_sega_cd(rec, "Game", 1800000000);
+      scd::select_build_mode(added.entry->sega_cd, "file_first");
+      added.entry->sega_cd.program_built_mode = "compatibility";
+      expect(c.save() && slurp(file2).find("\"file_first\": true") != std::string::npos && slurp(file2).find("\"program_built_mode\": \"compatibility\"") != std::string::npos &&
+                 slurp(file2).find("experimental_m3") == std::string::npos,
+             "file-first: the selection and the (different) built mode are persisted separately");
+    }
+    {
+      Catalog c(file2);
+      expect(c.load() == CatalogLoad::loaded, "file-first: reload");
+      LibraryEntry *e = c.find("sega-cd", scd::entry_identity(rec.bios_sha256, rec.cue_sha256));
+      expect(e != nullptr && e->sega_cd.file_first && !e->sega_cd.experimental_m3 && e->sega_cd.program_built_mode == "compatibility" && std::string(scd::selected_build_mode(e->sega_cd)) == "file_first",
+             "file-first: the selection survives a reload and is not reinterpreted as the built mode");
+      const auto again = c.import_sega_cd(scd::import_entry({f.bios, f.cue, {}}).record, "Game", 1800000100);
+      expect(again.entry->sega_cd.file_first && again.entry->sega_cd.program_built_mode == "compatibility", "file-first: adding the game again keeps the selection and how the program was built");
+      e->sega_cd.program.mtime = -4644358762LL;   // a non-Unix file-clock epoch gives a negative stamp; it must survive a reload (else a reopened launcher calls a built program changed)
+      e->sega_cd.program_built_mode = "file_first";
+      e->sega_cd.program_file_first_inventory = "incomplete";
+      expect(c.save() && slurp(file2).find("\"program_file_first_inventory\": \"incomplete\"") != std::string::npos, "file-first: an incomplete inventory is persisted as incomplete");
+      {
+        Catalog again(file2);
+        again.load();
+        LibraryEntry *g = again.find("sega-cd", scd::entry_identity(rec.bios_sha256, rec.cue_sha256));
+        expect(g != nullptr && g->sega_cd.program.mtime == -4644358762LL && g->sega_cd.program_built_mode == "file_first" && g->sega_cd.program_file_first_inventory == "incomplete",
+               "file-first: a negative import stamp and the built mode round-trip");
+      }
+    }
+    {   // hand-edited and invalid values
+      std::string text = slurp(file2);
+      const auto at = text.find("\"file_first\": true");
+      text.replace(at, 18, "\"experimental_m3\": true, \"file_first\": true");
+      const auto built = text.find("\"program_built_mode\": \"file_first\"");
+      text.replace(built, 34, "\"program_built_mode\": \"bogus\"");
+      std::ofstream(file2, std::ios::binary) << text;
+      Catalog c(file2);
+      expect(c.load() == CatalogLoad::loaded, "file-first: reload of a hand-edited record");
+      LibraryEntry *e = c.find("sega-cd", scd::entry_identity(rec.bios_sha256, rec.cue_sha256));
+      expect(e != nullptr && e->sega_cd.experimental_m3 && !e->sega_cd.file_first && std::string(scd::selected_build_mode(e->sega_cd)) == "optimized" && e->sega_cd.program_built_mode.empty() &&
+                 e->sega_cd.program_file_first_inventory.empty(),
+             "file-first: both flags read as Optimized, an unknown built mode reads as unknown, an inventory without a file-first program is dropped");
+    }
   }
 }
 

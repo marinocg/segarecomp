@@ -216,6 +216,69 @@ def main():
         library_text = (library3 / "library.json").read_text()
         check('"experimental_m3": true' in library_text and '"program_experimental": true' in library_text, "experimental build: the library records the choice and the program's policy")
         check('experimental' not in (library / "library.json").read_text(), "the default (Compatibility) build leaves no experimental member in the library record")
+
+        # ---- SEG-103-T007: File-first (structural) through the launcher, end to end. A project-authored BIOS + disc (ISO9660 volume) whose game loads module C
+        # only after START on pad 1 (a controller transition the no-input build run never takes; the module's load address comes from a register no static
+        # analysis can know). The SAME input script runs under the legacy Compatibility build and under the launcher-built file-first program. ----
+        pad = tmp / "padfx"
+        subprocess.run([sys.executable, str(ROOT / "tools" / "sega_cd_bios_unvisited_fixture.py"), "build", "--out", str(pad), "--case", "unknown_lba", "--iso", "--pad", "3"], check=True, capture_output=True)
+        start = tmp / "start.script"
+        start.write_text("segarecomp-input-script 1\n%d 1 press START\n%d 1 release START\n%d 1 press A\n%d 1 release A\n" %
+                         (FIRST_ONSET + 8 * FRAME, FIRST_ONSET + 14 * FRAME, FIRST_ONSET + 300 * FRAME, FIRST_ONSET + 302 * FRAME))
+        build_env = {k: v for k, v in env.items() if k != "SEGARECOMP_VIEWER_KEY_SCRIPT"}   # the replay is driven by the script, not by the earlier tests' key script
+        pargs = ["--bios", pad / "bios.bin", "--cue", pad / "disc" / "disc.cue"]
+
+        def result_words(report):
+            block = bytes.fromhex(report.get("result_block", "")).ljust(16, b"\0")
+            return [int.from_bytes(block[2 * i:2 * i + 2], "big") for i in range(8)]
+
+        code, out, err, lib_legacy = launch(tmp, [*pargs, "--build", "--replay", start, "--windowless"], build_env, "lib-ff-legacy")
+        legacy = lines(out)
+        legacy_report = json.loads(next((lib_legacy / "sega-cd").glob("*/last-report.json")).read_text())
+        check(code == 0 and legacy.get("build") == "ok" and legacy.get("build_mode_requested") == "compatibility" and legacy.get("build_mode_effective") == "compatibility" and "file_first_inventory" not in legacy,
+              "T007 legacy: no option builds the legacy Compatibility program and reports requested = effective = compatibility, no file-first inventory (%s)" % out.replace("\n", " | ")[:300])
+        check(legacy.get("stop") == "entry_not_compiled" and result_words(legacy_report)[:3] == [0, 0, 0],
+              "T007 legacy: the same START script stops the legacy program at an uncompiled entry; nothing ran the module and no authority was guessed (%s)" % legacy.get("stop"))
+
+        code, out, err, lib_ff = launch(tmp, [*pargs, "--build", "--file-first", "structural", "--replay", start, "--windowless"], build_env, "lib-ff")
+        ff = lines(out)
+        ff_report = json.loads(next((lib_ff / "sega-cd").glob("*/last-report.json")).read_text())
+        ff_status = json.loads(next((lib_ff / "sega-cd").glob("*")).joinpath("build", "status.json").read_text())
+        check(code == 0 and ff.get("build") == "ok" and ff.get("build_mode_requested") == "file_first" and ff.get("build_mode_effective") == "file_first" and ff.get("file_first_inventory", "").startswith("complete"),
+              "T007 file-first: --file-first structural reaches the product; requested and effective mode, and the product's inventory status, are reported (%s)" % out.replace("\n", " | ")[:400])
+        check(ff_status["file_first"] and ff_status["file_first"]["policy"].startswith("file_first.v1:structural:") and ff_status["aot_policy"]["requested"] == "compatibility" and ff_status["aot_policy"]["effective"] == "broad",
+              "T007 file-first: status.json carries file_first while its aot_policy stays Compatibility (the two are independent members)")
+        check(ff.get("stop") in (None, "") and ff_report["result"] != "stopped" and result_words(ff_report)[2] == 2 and result_words(ff_report)[5] == 0xCCCC,
+              "T007 file-first: the same START script runs the module the legacy build could not compile, at both bases the loader chose (result words %s)" % result_words(ff_report))
+        dyn = ff_report["dynamic"]
+        check(dyn["binds"] == 2 and dyn["refusals"] == {} and dyn["retired"] > 0 and dyn["last_refusal"] == "none",
+              "T007 file-first: execution used verified dynamic binding (2 bindings, no refusal) of precompiled bodies")
+        lib_text = (lib_ff / "library.json").read_text()
+        check('"file_first": true' in lib_text and '"program_built_mode": "file_first"' in lib_text and '"program_file_first_inventory": "complete"' in lib_text and "experimental_m3" not in lib_text,
+              "T007 file-first: the library stores the selection and the built mode (file_first, inventory complete)")
+        legacy_text = (lib_legacy / "library.json").read_text()
+        check('"program_built_mode": "compatibility"' in legacy_text and "file_first" not in legacy_text.replace("program_built_mode", ""),
+              "T007 legacy: the library stores the built mode compatibility and no file-first member")
+        prog = next((lib_ff / "sega-cd").glob("*/build/program-viewer"))
+        recorded = json.loads((lib_ff / "library.json").read_text())["games"][0]["sega_cd"]["program"]["sha256"]
+        check(hashlib.sha256(prog.read_bytes()).hexdigest() == recorded, "T007 file-first: after the replay the stored program is byte-identical to the one verified at attach (nothing is compiled or rewritten at run time)")
+
+        # exclusivity and usage
+        code, out, err, _ = launch(tmp, [*pargs, "--build", "--file-first", "structural", "--aot-policy", "optimized"], build_env, "lib-ff-excl")
+        check(code == 2 and "exclusive" in err, "T007 headless: --file-first with --aot-policy optimized is refused as usage (the product CLI refuses the same pair)")
+        code, out, err, _ = launch(tmp, [*pargs, "--file-first", "structural"], build_env, "lib-ff-nobuild")
+        check(code == 2, "T007 headless: --file-first without --build is a usage error")
+
+        # inventory failure: a disc without an ISO9660 volume cannot be inventoried; typed failure, no silent fallback, nothing attached
+        noiso = tmp / "noisofx"
+        subprocess.run([sys.executable, str(ROOT / "tools" / "sega_cd_bios_unvisited_fixture.py"), "build", "--out", str(noiso), "--case", "unknown_lba", "--pad", "3"], check=True, capture_output=True)
+        code, out, err, lib_noiso = launch(tmp, ["--bios", noiso / "bios.bin", "--cue", noiso / "disc" / "disc.cue", "--build", "--file-first", "structural"], build_env, "lib-ff-noiso")
+        bad = lines(out)
+        entry = json.loads((lib_noiso / "library.json").read_text())["games"][0]["sega_cd"]
+        check(code == 7 and bad.get("build") == "failed" and "File-first build failed" in bad.get("message", "") and "ISO9660" in bad.get("message", "") and "Compatibility" in bad.get("message", "") and not entry["program"].get("path"),
+              "T007 inventory failure: an actionable file-first failure that names the cause and offers Compatibility; no program was substituted or attached (%s)" % bad.get("message", "")[:200])
+        code, out, err, lib_noiso2 = launch(tmp, ["--bios", noiso / "bios.bin", "--cue", noiso / "disc" / "disc.cue", "--build"], build_env, "lib-ff-noiso2")
+        check(code == 0 and lines(out).get("build") == "ok" and lines(out).get("build_mode_effective") == "compatibility", "T007 inventory failure: Compatibility is the explicit alternative and builds the same disc")
     print("%d failures" % len(failures))
     return 1 if failures else 0
 

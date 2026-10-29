@@ -197,11 +197,12 @@ int headless(int argc, char **argv) {
 // 5 the program was refused before launch, 6 the program could not be started.
 int sega_cd_headless(int argc, char **argv) {
   fs::path bios, cue, program, record, replay, report_path;
-  bool windowless = false, build = false, experimental_m3 = false;
+  bool windowless = false, build = false, experimental_m3 = false, file_first = false;
   for (int i = 2; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--build") build = true;
     else if (arg == "--aot-policy" && i + 1 < argc && (std::string(argv[i + 1]) == "compatibility" || std::string(argv[i + 1]) == "optimized")) experimental_m3 = std::string(argv[++i]) == "optimized";
+    else if (arg == "--file-first" && i + 1 < argc && std::string(argv[i + 1]) == "structural") { file_first = true; ++i; }   // SEG-103-T007: the product's own option and its only launcher-supported value
     else if (arg == "--bios" && i + 1 < argc) bios = from_u8(argv[++i]);
     else if (arg == "--cue" && i + 1 < argc) cue = from_u8(argv[++i]);
     else if (arg == "--program" && i + 1 < argc) program = from_u8(argv[++i]);
@@ -209,9 +210,11 @@ int sega_cd_headless(int argc, char **argv) {
     else if (arg == "--replay" && i + 1 < argc) replay = from_u8(argv[++i]);
     else if (arg == "--report" && i + 1 < argc) report_path = from_u8(argv[++i]);
     else if (arg == "--windowless") windowless = true;
-    else { std::fprintf(stderr, "usage: Segarecomp --sega-cd --bios <file> --cue <file> [--program <file> | --build [--aot-policy <compatibility|optimized>]] [--record <script> | --replay <script>] [--windowless] [--report <file>]\n"); return 2; }
+    else { std::fprintf(stderr, "usage: Segarecomp --sega-cd --bios <file> --cue <file> [--program <file> | --build [--file-first structural | --aot-policy <compatibility|optimized>]] [--record <script> | --replay <script>] [--windowless] [--report <file>]\n"); return 2; }
   }
   if (!record.empty() && !replay.empty()) { std::fprintf(stderr, "--record and --replay are exclusive\n"); return 2; }
+  if (file_first && experimental_m3) { std::fprintf(stderr, "--file-first and --aot-policy optimized are exclusive\n"); return 2; }   // the product CLI refuses the same pair
+  if (file_first && !build) { std::fprintf(stderr, "--file-first applies to --build\n"); return 2; }
   std::string report;
   const auto emit = [&](const std::string &line) { report += line + "\n"; std::puts(line.c_str()); };
   const auto finish = [&](int rc) { if (!report_path.empty()) std::ofstream(report_path, std::ios::binary) << report; return rc; };
@@ -241,19 +244,28 @@ int sega_cd_headless(int argc, char **argv) {
     ScdBuildRequest request;
     request.bios = bios; request.cue = cue;
     request.out_dir = library_root() / "sega-cd" / added.entry->sha256.substr(0, 16) / "build";
-    request.experimental_m3 = experimental_m3;   // SEG-097-T003: the same switch as the window's policy choice; Compatibility unless asked
+    request.mode = file_first ? ScdBuildMode::file_first : experimental_m3 ? ScdBuildMode::optimized : ScdBuildMode::compatibility;   // the same choice as the window's; Compatibility unless asked
     ScdBuildJob job(request, layout);
     job.wait();
     if (job.outcome() != BuildOutcome::succeeded) { emit("build=failed"); emit("message=" + job.message()); return finish(7); }
     emit("build=ok");
     emit("build_summary=" + job.summary());
     emit(std::string("build_policy=") + (experimental_m3 ? "optimized_experimental_requested" : "compatibility") + " effective=" + (job.built_experimental() ? "experimental_optimized" : "compatibility"));
+    {   // SEG-103-T007: requested and effective build mode, and the product's own file-first inventory status
+      const ScdFileFirstReport inventory = job.file_first_report();
+      emit(std::string("build_mode_requested=") + scd_build_mode_code(request.mode));
+      emit("build_mode_effective=" + job.built_mode());
+      if (inventory.present) emit(std::string("file_first_inventory=") + (inventory.complete ? "complete" : "incomplete") + " files=" + std::to_string(inventory.files) + " images=" + std::to_string(inventory.images));
+    }
     const scd::ImportResult attached = scd::attach_program(added.entry->sega_cd, job.program());
     if (!attached.program_attached) { emit(std::string("result=refused refusal=") + scd::code(attached.refusal)); return finish(5); }
-    const bool chosen = added.entry->sega_cd.experimental_m3;
+    const bool chosen = added.entry->sega_cd.experimental_m3, chosen_file_first = added.entry->sega_cd.file_first;
     added.entry->sega_cd = attached.record;
     added.entry->sega_cd.experimental_m3 = chosen || experimental_m3;
+    added.entry->sega_cd.file_first = (chosen_file_first || file_first) && !added.entry->sega_cd.experimental_m3;
     added.entry->sega_cd.program_experimental = job.built_experimental();
+    added.entry->sega_cd.program_built_mode = job.built_mode();
+    added.entry->sega_cd.program_file_first_inventory = job.built_mode() == "file_first" ? (job.file_first_report().complete ? "complete" : "incomplete") : "";
     emit("program=verified");
     if (!catalog.save(&save_error)) { emit("result=failed problem=" + save_error); return finish(1); }
   }

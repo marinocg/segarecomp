@@ -9,9 +9,11 @@ Skipped (exit 0) without SDL3 or off Linux.
 
 usage: launcher_sega_cd_gui_test.py <Segarecomp> <segarecomp> <c-compiler> <source-root>
 """
+import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -139,6 +141,49 @@ def main():
               and "scd=program_attached" in text, "window D: the trace shows start, cancel, cancelled, start again, ok, and the program attached")
         scd_dir = next((lib / "sega-cd").glob("*"))
         check((scd_dir / "build").is_dir() and not (scd_dir / "build.partial").exists() and not (scd_dir / "build.failed").exists(), "window D: only the finished build remains (no partial or failed folder)")
+
+        # ---- SEG-103-T007: the build mode in the real window: three tiles, a selection that does not touch the current program, a rebuild that applies it, and a
+        # failed rebuild that leaves the previous program in place ----
+        pad = tmp / "padfx"
+        subprocess.run([sys.executable, str(ROOT / "tools" / "sega_cd_bios_unvisited_fixture.py"), "build", "--out", str(pad), "--case", "unknown_lba", "--iso", "--pad", "3"], check=True, capture_output=True)
+        env_e = {"SEGARECOMP_HOME": str(package), "SEGARECOMP_SCD_BUILD_ARGS": "--budget 3000000"}
+        trace, lib = run_window(tmp, "e", [
+            "frames 8", "page import", "frames 6", "scd_form %s|%s|" % (pad / "bios.bin", pad / "disc" / "disc.cue"), "frames 4", "scd_add", "wait_scd", "frames 10",
+            "expect page=details", "expect scd_selected_mode=compatibility", "expect scd_built_mode=-",
+            "build", "frames 6", "wait_scd", "frames 20", "expect scd_building=0", "expect scd_built_mode=compatibility", "expect scd_state=Ready to play",
+            "scd_mode file_first", "frames 4", "expect scd_selected_mode=file_first", "expect scd_built_mode=compatibility",
+            "build", "frames 6", "wait_scd", "frames 20", "expect scd_building=0", "expect scd_selected_mode=file_first", "expect scd_built_mode=file_first", "expect scd_built_inventory=complete",
+            "expect scd_state=Ready to play", "quit"], env_e)
+        bad = [l for l in trace if l.startswith("expect FAIL")]
+        check(not bad and sum(l.startswith("expect ok") for l in trace) >= 13, "window E: Compatibility build, selecting File-first leaves the built program as it was, the next Build applies it (%s)" % (bad or "%d ok" % sum(l.startswith("expect ok") for l in trace)))
+        text = "\n".join(trace)
+        check("scd=mode_selected mode=file_first" in text and "build=started platform=sega-cd mode=compatibility" in text and "build=started platform=sega-cd mode=file_first" in text and
+              "build=ok platform=sega-cd policy=compatibility mode=file_first file_first_inventory=complete" in text, "window E: the trace shows the requested mode of each build and the effective file-first result")
+        scd_dir = next((lib / "sega-cd").glob("*"))
+        prog = scd_dir / "build" / "program-viewer"
+        before = hashlib.sha256(prog.read_bytes()).hexdigest()
+        # a file-first rebuild that fails (the product refuses an option): the earlier completed build stays
+        trace, lib = run_window(tmp, "e", ["frames 12", "focus_card 0", "frames 4", "key Return", "frames 8", "expect page=details", "expect scd_selected_mode=file_first", "expect scd_built_mode=file_first",
+                                           "play", "frames 4", "wait_scd", "wait_play_end", "frames 10",   # a launch refreshes the program's import stamp (as in window D)
+                                           "build", "frames 6", "wait_scd", "frames 20", "expect scd_building=0", "expect scd_built_mode=file_first", "quit"],
+                                {"SEGARECOMP_HOME": str(package), "SEGARECOMP_SCD_BUILD_ARGS": "--budget 3000000 --no-such-option"})
+        bad = [l for l in trace if l.startswith("expect FAIL")]
+        text = "\n".join(trace)
+        check(not bad and "build=failed platform=sega-cd message=File-first build failed" in text and "Compatibility" in text.split("build=failed platform=sega-cd message=")[1].split("\n")[0],
+              "window F: a failed file-first build is reported as a file-first failure that offers Compatibility, nothing is substituted (%s)" % (bad or [l for l in trace if "build=" in l]))
+        check(prog.is_file() and hashlib.sha256(prog.read_bytes()).hexdigest() == before and not (scd_dir / "build.partial").exists(),
+              "window F: the previous completed program is untouched by the failed build and no partial folder remains")
+        # window G: replacing the program with a different one never carries the earlier program's built-mode label (it is unknown, not "compatibility")
+        a_copy = tmp / "program-A-copy"
+        shutil.copyfile(prog, a_copy)
+        os.chmod(a_copy, 0o755)
+        trace, lib = run_window(tmp, "e", ["frames 12", "focus_card 0", "frames 4", "key Return", "frames 8", "expect page=details", "expect scd_built_mode=file_first",
+                                           "play", "frames 4", "wait_scd", "wait_play_end", "frames 10",
+                                           "scd_mode compatibility", "build", "frames 6", "wait_scd", "frames 20", "expect scd_built_mode=compatibility", "expect scd_built_inventory=-",
+                                           "scd_attach %s" % a_copy, "frames 6", "wait_scd", "frames 20", "expect scd_built_mode=-", "expect scd_built_inventory=-", "expect scd_selected_mode=compatibility", "quit"],
+                                {"SEGARECOMP_HOME": str(package), "SEGARECOMP_SCD_BUILD_ARGS": "--budget 3000000"})
+        bad = [l for l in trace if l.startswith("expect FAIL")]
+        check(not bad and sum(l.startswith("expect ok") for l in trace) >= 7, "window G: an imported different program has an unknown build mode, not the previous program's (%s)" % (bad or "ok"))
     print("%d failures" % len(failures))
     return 1 if failures else 0
 

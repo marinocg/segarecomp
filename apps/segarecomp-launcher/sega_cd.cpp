@@ -112,6 +112,16 @@ std::string message(Refusal r, const std::string &detail) {
   return text;
 }
 
+const char *selected_build_mode(const EntryRecord &record) {
+  if (record.experimental_m3) return "optimized";
+  return record.file_first ? "file_first" : "compatibility";
+}
+
+void select_build_mode(EntryRecord &record, std::string_view code) {
+  record.experimental_m3 = code == "optimized";
+  record.file_first = code == "file_first";
+}
+
 bool is_uncompiled_entry_stop(std::string_view stop_class) {
   return stop_class == "entry_not_compiled" || stop_class == "image_entry_not_compiled" || stop_class == "return_target_not_compiled" ||
          stop_class == "exception_vector_not_compiled";

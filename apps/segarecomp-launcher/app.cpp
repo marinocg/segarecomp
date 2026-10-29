@@ -1208,6 +1208,10 @@ void App::run_script() {
       if (!recordings.empty()) scd_play(detail_id_, arg == "windowless" ? 2 : 1, recordings.front());
       else trace("script=no_recording");
     }
+  } else if (cmd == "scd_mode") {  // SEG-103-T007: select the build mode of the open Sega CD game: compatibility | file_first | optimized
+    if (LibraryEntry *e = detail_id_.empty() ? nullptr : catalog_.find_id(detail_id_)) {
+      if (e->platform_id == "sega-cd") { scd::select_build_mode(e->sega_cd, arg); save_catalog(); trace(std::string("scd=mode_selected mode=") + scd::selected_build_mode(e->sega_cd)); }
+    }
   } else if (cmd == "wait_scd") {  // hold the script until no Sega CD check or program is running
     if (scd_import_job_.valid() || scd_launch_job_.valid() || scd_build_ || game_) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "wait_play_end") {  // hold the script until no game is running
@@ -1268,6 +1272,9 @@ void App::run_script() {
     else if (key == "scd_outcome") actual = scd_last_outcome_.count(detail_id_) != 0 ? scd_last_outcome_.at(detail_id_) : "-";
     else if (key == "scd_building") actual = scd_build_ ? "1" : "0";
     else if (key == "scd_build_note") actual = scd_build_notes_.count(detail_id_) != 0 ? scd_build_notes_.at(detail_id_).substr(0, 20) : "-";
+    else if (key == "scd_selected_mode") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr ? scd::selected_build_mode(catalog_.find_id(detail_id_)->sega_cd) : "-";
+    else if (key == "scd_built_mode") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr && !catalog_.find_id(detail_id_)->sega_cd.program_built_mode.empty() ? catalog_.find_id(detail_id_)->sega_cd.program_built_mode : "-";
+    else if (key == "scd_built_inventory") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr && !catalog_.find_id(detail_id_)->sega_cd.program_file_first_inventory.empty() ? catalog_.find_id(detail_id_)->sega_cd.program_file_first_inventory : "-";
     else if (key == "scd_failure") actual = failures_.count(detail_id_) != 0 ? failures_.at(detail_id_) : "-";
     else if (key == "scd_recordings") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr ? std::to_string(scd_recordings(*catalog_.find_id(detail_id_)).size()) : "-";
     else if (key == "scd_form_message") actual = scd_form_.message.empty() ? "-" : scd_form_.message;

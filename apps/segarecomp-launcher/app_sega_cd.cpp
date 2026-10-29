@@ -123,13 +123,18 @@ void App::scd_start_build(const std::string &id) {
   request.bios = from_u8(entry->sega_cd.bios_path);
   request.cue = from_u8(entry->sega_cd.cue_path);
   request.out_dir = scd_dir(*entry) / "build";
-  request.experimental_m3 = entry->sega_cd.experimental_m3;   // SEG-097-T003: off unless the user chose the experimental option for this game
+  {   // SEG-103-T007: the stored selection, exactly; Compatibility unless the user chose file-first or the experimental Optimized for this game
+    const std::string mode = scd::selected_build_mode(entry->sega_cd);
+    request.mode = mode == "file_first" ? ScdBuildMode::file_first : mode == "optimized" ? ScdBuildMode::optimized : ScdBuildMode::compatibility;
+  }
+  const ScdBuildMode request_mode = request.mode;
   scd_build_ = std::make_unique<ScdBuildJob>(std::move(request), layout_);
   scd_build_id_ = id;
   failures_.erase(id);
   diagnostics_.erase(id);
   scd_build_notes_.erase(id);
-  trace("build=started platform=sega-cd");
+  scd_built_.erase(id);   // a leftover result of an earlier build whose import was refused must never label another program
+  trace(std::string("build=started platform=sega-cd mode=") + scd_build_mode_code(request_mode));
 }
 
 void App::scd_cancel_build() {
@@ -144,6 +149,8 @@ void App::scd_finish_build() {
   const BuildOutcome outcome = scd_build_->outcome();
   const std::string message = scd_build_->message(), summary = scd_build_->summary();
   const bool built_experimental = scd_build_->built_experimental();
+  const std::string built_mode = scd_build_->built_mode();
+  const ScdFileFirstReport inventory = scd_build_->file_first_report();
   const fs::path program = scd_build_->program(), out_dir = scd_build_->out_dir();
   const std::string id = scd_build_id_;
   scd_build_.reset();
@@ -163,8 +170,9 @@ void App::scd_finish_build() {
     return;
   }
   scd_build_notes_[id] = summary;
-  scd_built_experimental_[id] = built_experimental;
-  trace(std::string("build=ok platform=sega-cd policy=") + (built_experimental ? "experimental_optimized" : "compatibility"));
+  scd_built_[id] = ScdBuiltInfo{built_experimental, built_mode, built_mode == "file_first" ? (inventory.complete ? "complete" : "incomplete") : ""};
+  trace(std::string("build=ok platform=sega-cd policy=") + (built_experimental ? "experimental_optimized" : "compatibility") + " mode=" + built_mode +
+        (built_mode == "file_first" ? std::string(" file_first_inventory=") + (inventory.complete ? "complete" : "incomplete") : std::string()));
   // The built program is verified exactly like an imported one: it is bound to this entry's BIOS and disc only if its own statement matches.
   scd_start_import(id, {}, {}, program);
 }
@@ -199,17 +207,34 @@ void App::scd_poll() {
       }
     } else if (LibraryEntry *entry = catalog_.find_id(target)) {
       if (result.program_attached) {
-        const bool keep_choice = entry->sega_cd.experimental_m3;   // the build option is the user's choice; importing a program never changes it
+        const bool keep_choice = entry->sega_cd.experimental_m3, keep_file_first = entry->sega_cd.file_first;   // the build choice is the user's; importing a program never changes it
+        const bool same_program = !entry->sega_cd.program.sha256.empty() && entry->sega_cd.program.sha256 == result.record.program.sha256;
+        const bool keep_experimental = entry->sega_cd.program_experimental;
+        const std::string keep_mode = entry->sega_cd.program_built_mode, keep_inventory = entry->sega_cd.program_file_first_inventory;
         entry->sega_cd = result.record;
         entry->sega_cd.experimental_m3 = keep_choice;
-        const auto built = scd_built_experimental_.find(target);   // a program the launcher just built carries the product's effective policy; an imported one is not experimental
-        entry->sega_cd.program_experimental = built != scd_built_experimental_.end() && built->second;
-        if (built != scd_built_experimental_.end()) scd_built_experimental_.erase(built);
+        entry->sega_cd.file_first = keep_file_first;
+        const auto built = scd_built_.find(target);   // a program the launcher just built carries the product's structured result
+        if (built != scd_built_.end()) {
+          entry->sega_cd.program_experimental = built->second.experimental;
+          entry->sega_cd.program_built_mode = built->second.mode;
+          entry->sega_cd.program_file_first_inventory = built->second.inventory;
+          scd_built_.erase(built);
+        } else if (same_program) {   // verifying the same program again does not forget how it was built
+          entry->sega_cd.program_experimental = keep_experimental;
+          entry->sega_cd.program_built_mode = keep_mode;
+          entry->sega_cd.program_file_first_inventory = keep_inventory;
+        } else {   // an imported different program: how it was built is unknown and is not invented (the earlier program's label must not carry over)
+          entry->sega_cd.program_experimental = false;
+          entry->sega_cd.program_built_mode.clear();
+          entry->sega_cd.program_file_first_inventory.clear();
+        }
         save_catalog();
         request_status_refresh();
         toast("Program verified and bound to this game.");
         trace("scd=program_attached");
       } else {
+        scd_built_.erase(target);   // the just-built program was refused: its build result describes nothing
         if (scd_import_reverify_) {  // "Verify again" found a difference: the earlier verification no longer stands
           entry->sega_cd.disc_verified = false;
           save_catalog();
@@ -516,37 +541,69 @@ float App::draw_scd_details(LibraryEntry &entry, const StatusInfo &info, float w
     ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
     paragraph(ctx_, ctx_.regular, ctx_.u(size), color, inner, text);
   };
-  // ---- SEG-097-T003 (ADR 0208): the build policy. Compatibility is the default; Optimized is EXPERIMENTAL for Sega CD and always an explicit choice. ----
+  // ---- SEG-097-T003 (ADR 0208) / SEG-103-T007: the build mode. Compatibility stays the default of an existing game; File-first (structural) is the recommended
+  // choice for broader coverage; Optimized is EXPERIMENTAL. Selected (the next Build) and built (what the attached program is) are different facts. ----
   {
     const bool building_this = scd_build_ && scd_build_id_ == entry.id();
-    int sel = entry.sega_cd.experimental_m3 ? 1 : 0;
+    const std::string selected = scd::selected_build_mode(entry.sega_cd), built = entry.sega_cd.program_built_mode;
+    const bool has_program = !entry.sega_cd.program.path.empty();
+    int sel = selected == "file_first" ? 1 : selected == "optimized" ? 2 : 0;
     ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
     ImGui::BeginDisabled(building_this || busy);
-    if (option_tiles(ctx_, "scd_policy", {"Compatibility", "Optimized (experimental)"},
-                     {"Broad compilation of everything the build can prove. The default.",
-                      "A frozen model proposes which code to compile. Smaller and faster to build, but it may omit code the game needs."},
-                     &sel, inner, ctx_.u(74.0F), {true, true})) {
-      entry.sega_cd.experimental_m3 = sel == 1;
+    const bool narrow = inner < ctx_.u(700.0F);   // the window's minimum width: shorter labels so no tile title or recommendation is cut off
+    if (option_tiles(ctx_, "scd_policy",
+                     narrow ? std::vector<std::string>{"Compatibility", "File-first", "Optimized (exp.)"} : std::vector<std::string>{"Compatibility", "File-first (structural)", "Optimized (experimental)"},
+                     narrow ? std::vector<std::string>{"Run-reached code only.", "Recommended. Adds disc files.", "Model-picked; may omit code."}
+                            : std::vector<std::string>{"Compiles what the build's run reaches. May miss later play.", "Recommended. Also precompiles eligible disc files.",
+                                                       "A model picks the code; may omit code the game needs."},
+                     &sel, inner, ctx_.u(88.0F), {true, true, true})) {
+      scd::select_build_mode(entry.sega_cd, sel == 1 ? "file_first" : sel == 2 ? "optimized" : "compatibility");
       save_catalog();
-      trace(std::string("scd=policy_selected policy=") + (sel == 1 ? "experimental_optimized" : "compatibility"));
+      trace(std::string("scd=policy_selected mode=") + scd::selected_build_mode(entry.sega_cd) + (sel == 2 ? " policy=experimental_optimized" : " policy=other"));
     }
     ImGui::EndDisabled();
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-    if (entry.sega_cd.experimental_m3)
+    if (selected == "optimized")
       line(col::warn, "Experimental: the program built this way can stop at an uncompiled entry, and the model has no proven complete coverage on Sega CD games. It applies at the next Build; Compatibility stays the safe choice.", 11.5F);
-    if (entry.sega_cd.program_experimental && !entry.sega_cd.program.path.empty()) {
-      line(col::text2, "The current program was built with the experimental Optimized policy.", 11.5F);
+    else if (selected == "file_first")
+      line(col::text2, "File-first compiles the structurally supported instructions of eligible disc files before the game runs; the game's own loads are still verified byte for byte before any of that code runs. "
+                       "Files that are oversize, duplicated or without code structure are not covered, and transformed or generated code is never guessed. It applies at the next Build.", 11.5F);
+    if (has_program) {
+      if (built.empty()) line(col::text2, "How the current program was built is not recorded (it was imported or built by an earlier release).", 11.5F);
+      else if (built == "compatibility") line(col::text2, "The current program was built with Compatibility.", 11.5F);
+      else if (built == "optimized") line(col::text2, "The current program was built with the experimental Optimized policy.", 11.5F);
+      else line(col::text2, std::string("The current program was built with File-first (structural). The disc inventory is ") +
+                              (entry.sega_cd.program_file_first_inventory == "complete" ? "complete." : "incomplete (a structurally filtered subset): code outside it still stops at an uncompiled entry."), 11.5F);
+      if ((!built.empty() && built != selected) || (built.empty() && selected != "compatibility"))
+        line(col::info, "The selected mode differs from the one the current program was built with: Build to apply it. Changing the selection does not change the current program.", 11.5F);
       if (scd::is_uncompiled_entry_stop(entry.sega_cd.last_stop)) {
-        line(col::warn, "The last run ended at an uncompiled entry (" + entry.sega_cd.last_stop + "): the experimental build omitted code the game needed. A full Compatibility rebuild starts the game again from reset.", 12.0F);
-        ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-        if (button(ctx_, "scd_rebuild_compat", "Rebuild with Compatibility", ImVec2(ctx_.u(240.0F), ctx_.u(32.0F)), Style::primary, scd_can_build(entry, info), ctx_.icon("reset"))) {
-          entry.sega_cd.experimental_m3 = false;
-          save_catalog();
-          trace("scd=compat_rebuild_after_uncompiled_entry");
-          notices_.erase(entry.id());
-          scd_start_build(entry.id());
+        if (built == "file_first") {
+          line(col::warn, "The last run ended at an uncompiled entry (" + entry.sega_cd.last_stop + ") even with File-first: that code is probably not in an eligible disc file "
+                          "(oversize, duplicated, without structure, transformed or generated at run time), so rebuilding will not change it.", 12.0F);
+        } else if (built == "optimized") {
+          line(col::warn, "The last run ended at an uncompiled entry (" + entry.sega_cd.last_stop + "): the experimental build omitted code the game needed. A full Compatibility rebuild starts the game again from reset.", 12.0F);
+          ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
+          if (button(ctx_, "scd_rebuild_compat", "Rebuild with Compatibility", ImVec2(ctx_.u(240.0F), ctx_.u(32.0F)), Style::primary, scd_can_build(entry, info), ctx_.icon("reset"))) {
+            scd::select_build_mode(entry.sega_cd, "compatibility");
+            save_catalog();
+            trace("scd=compat_rebuild_after_uncompiled_entry");
+            notices_.erase(entry.id());
+            scd_start_build(entry.id());
+          }
+          ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+        } else {
+          line(col::warn, "The last run ended at an uncompiled entry (" + entry.sega_cd.last_stop + "): the build only compiled the code its own run reached. Rebuilding with File-first "
+                          "(structural) can precompile eligible disc files; it does not fix transformed or unavailable code.", 12.0F);
+          ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
+          if (button(ctx_, "scd_rebuild_file_first", "Rebuild with File-first", ImVec2(ctx_.u(240.0F), ctx_.u(32.0F)), Style::primary, scd_can_build(entry, info), ctx_.icon("reset"))) {
+            scd::select_build_mode(entry.sega_cd, "file_first");
+            save_catalog();
+            trace("scd=file_first_rebuild_after_uncompiled_entry");
+            notices_.erase(entry.id());
+            scd_start_build(entry.id());
+          }
+          ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
         }
-        ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
       }
     }
   }
@@ -559,7 +616,7 @@ float App::draw_scd_details(LibraryEntry &entry, const StatusInfo &info, float w
       const StageState st = scd_build_->stage(i);
       line(st == StageState::done ? col::ok : (st == StageState::running ? col::text : col::dim), std::string(st == StageState::done ? "[done] " : (st == StageState::running ? "[....] " : "[    ] ")) + ScdBuildJob::stage_label(i));
     }
-    line(col::text2, "The build runs the game from reset to find which code the disc loads and executes, compiles it and checks its own result. It can be cancelled at any time.", 11.5F);
+    line(col::text2, "The build runs the game from reset to find which code the disc loads and executes, compiles it (File-first also compiles eligible disc files) and checks its own result. It can be cancelled at any time.", 11.5F);
   } else {
     line(col::text2, !layout_.scd_build_problem.empty() ? scd::message(scd::Refusal::unsupported_build)
                      : "Build compiles a program from your BIOS and disc on this computer; nothing is downloaded and no game data leaves it. The first build takes several minutes. "
