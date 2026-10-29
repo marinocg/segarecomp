@@ -1,6 +1,7 @@
 #include "emit_shared.hpp"
 
 #include <cstdio>
+#include <utility>
 
 #include "segarecomp/cpu/m68k/timing.hpp"
 
@@ -24,6 +25,9 @@ std::string hex(std::uint32_t value, int width) {
 // Every failure returns 1 after the runtime recorded the typed stop; nothing is committed by the failing statement.
 SegaCdM68kRuntimeCEmitter::SegaCdM68kRuntimeCEmitter(unsigned cpu)
     : k_(std::to_string(cpu) + "U"), lookup_("scd_p" + std::to_string(cpu) + "_lookup") {}
+
+SegaCdM68kRuntimeCEmitter::SegaCdM68kRuntimeCEmitter(std::string k_expr, std::string lookup_symbol)
+    : k_(std::move(k_expr)), lookup_(std::move(lookup_symbol)) {}
 
 std::string SegaCdM68kRuntimeCEmitter::instruction_source(const M68kIrOperation &op) const {
   return "UINT32_C(0x" + hex(op.provenance.source.address.value) + ")";
@@ -128,5 +132,27 @@ LoweredInstruction lower_instruction(const M68kIrOperation &op, std::uint32_t pc
     out.refresh_skip = "  m->refresh_skip_cycles = " + std::to_string(8U * long_class.registers) + "U;\n";
   return out;
 }
+
+// SEG-064-T003: the instruction-stream address the processor's prefetch holds while this instruction reads its operands - the value an
+// open-bus read returns (GPGX m68k_read_bus_8/16 read the word at the CPU's program counter, which has consumed every extension word
+// fetched before the operand read). For every instruction whose operand reads follow all of its extension words that is the address
+// after the instruction. A MOVE reading a memory source before fetching the destination's extension words would see a word inside
+// the instruction: not established (0), so such an open-bus read stays the typed stop. Determined from the decoded shape at build time.
+static bool has_extension(M68kEaMode mode) {
+  return mode == M68kEaMode::address_disp16 || mode == M68kEaMode::address_index8 || mode == M68kEaMode::absolute_word ||
+         mode == M68kEaMode::absolute_long || mode == M68kEaMode::pc_disp16 || mode == M68kEaMode::pc_index8 ||
+         mode == M68kEaMode::immediate;
+}
+static bool reads_memory(M68kEaMode mode) {
+  return mode != M68kEaMode::unused && mode != M68kEaMode::data_register && mode != M68kEaMode::address_register &&
+         mode != M68kEaMode::immediate;
+}
+std::uint32_t prefetch_position(const M68kDecodedInstruction &d, std::uint32_t pc) {
+  if ((d.kind == M68kInstructionKind::move || d.kind == M68kInstructionKind::movea) && reads_memory(d.source_ea.mode) &&
+      has_extension(d.destination_ea.mode))
+    return 0U;
+  return pc + static_cast<std::uint32_t>(d.raw_bytes.size());
+}
+
 
 }  // namespace segarecomp::machine::sega_cd::detail

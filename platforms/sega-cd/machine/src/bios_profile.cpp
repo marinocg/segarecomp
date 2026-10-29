@@ -16,6 +16,7 @@ namespace segarecomp::machine::sega_cd {
 namespace {
 
 using detail::hex;
+using detail::prefetch_position;
 
 std::uint32_t be32(std::span<const std::uint8_t> b, std::size_t o) {
   return (static_cast<std::uint32_t>(b[o]) << 24) | (static_cast<std::uint32_t>(b[o + 1]) << 16) | (static_cast<std::uint32_t>(b[o + 2]) << 8) |
@@ -116,27 +117,6 @@ struct Variant {
   detail::LoweredInstruction lowered;
   std::uint32_t prefetch{};
 };
-
-// SEG-064-T003: the instruction-stream address the processor's prefetch holds while this instruction reads its operands - the value an
-// open-bus read returns (GPGX m68k_read_bus_8/16 read the word at the CPU's program counter, which has consumed every extension word
-// fetched before the operand read). For every instruction whose operand reads follow all of its extension words that is the address
-// after the instruction. A MOVE reading a memory source before fetching the destination's extension words would see a word inside
-// the instruction: not established (0), so such an open-bus read stays the typed stop. Determined from the decoded shape at build time.
-bool has_extension(M68kEaMode mode) {
-  return mode == M68kEaMode::address_disp16 || mode == M68kEaMode::address_index8 || mode == M68kEaMode::absolute_word ||
-         mode == M68kEaMode::absolute_long || mode == M68kEaMode::pc_disp16 || mode == M68kEaMode::pc_index8 ||
-         mode == M68kEaMode::immediate;
-}
-bool reads_memory(M68kEaMode mode) {
-  return mode != M68kEaMode::unused && mode != M68kEaMode::data_register && mode != M68kEaMode::address_register &&
-         mode != M68kEaMode::immediate;
-}
-std::uint32_t prefetch_position(const M68kDecodedInstruction &d, std::uint32_t pc) {
-  if ((d.kind == M68kInstructionKind::move || d.kind == M68kInstructionKind::movea) && reads_memory(d.source_ea.mode) &&
-      has_extension(d.destination_ea.mode))
-    return 0U;
-  return pc + static_cast<std::uint32_t>(d.raw_bytes.size());
-}
 
 std::string identity_text(const DiscImage &disc, const BiosProfileInputs &inputs, std::size_t admissions) {
   std::ostringstream t;

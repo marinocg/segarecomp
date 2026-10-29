@@ -10,8 +10,12 @@ add_library(segarecomp_machine_sega_cd
   src/bios_profile.cpp
   src/epoch_recipe.cpp
   src/source_resolve.cpp
+  src/dynamic_body.cpp
+  src/file_candidates.cpp
 )
 add_library(segarecomp::machine_sega_cd ALIAS segarecomp_machine_sega_cd)
 target_link_libraries(segarecomp_machine_sega_cd PUBLIC segarecomp::media segarecomp::recompiler segarecomp::codegen_c11_m68k)
+find_package(Threads REQUIRED)
+target_link_libraries(segarecomp_machine_sega_cd PRIVATE Threads::Threads)   # SEG-100: the dynamic images' derivation and the candidate census use worker threads
 target_include_directories(segarecomp_machine_sega_cd PUBLIC include)
 segarecomp_enable_warnings(segarecomp_machine_sega_cd)

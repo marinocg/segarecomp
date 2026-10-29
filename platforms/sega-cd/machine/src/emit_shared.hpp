@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "segarecomp/codegen/c11/m68k.hpp"
+#include "segarecomp/cpu/m68k/decode.hpp"
 #include "segarecomp/cpu/m68k/ir.hpp"
 
 namespace segarecomp::machine::sega_cd::detail {
@@ -19,6 +20,9 @@ std::string hex(std::uint32_t value, int width = 8);
 class SegaCdM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
  public:
   explicit SegaCdM68kRuntimeCEmitter(unsigned cpu);
+  // SEG-100 (ADR 0221): a processor-neutral emitter for file-first dynamic bodies. `k_expr` is a C expression naming the processor index the body
+  // runs for (a local initialised from the dispatcher), and `lookup_symbol` the computed-control authority function that consults it.
+  SegaCdM68kRuntimeCEmitter(std::string k_expr, std::string lookup_symbol);
   std::string instruction_source(const M68kIrOperation &op) const override;
   std::string_view default_provenance_helper() const override;
   std::string routed_read(const M68kMemoryEmissionContext &ctx, std::string_view addr, std::string_view value, std::string_view,
@@ -53,6 +57,10 @@ struct LoweredInstruction {
   // Placed after the byte guard and before the body, so the count register is read as it stands before the instruction executes.
   std::string refresh_skip;
 };
+
+// SEG-064-T003: the instruction-stream address the processor's prefetch holds while this instruction reads its operands (0 = not established).
+// Either 0 or pc + the instruction's length (SEG-100: the dynamic bodies reuse it, expressing the second as `scd_pc0 + length`).
+[[nodiscard]] std::uint32_t prefetch_position(const M68kDecodedInstruction &d, std::uint32_t pc);
 
 [[nodiscard]] LoweredInstruction lower_instruction(const M68kIrOperation &op, std::uint32_t pc, const SegaCdM68kRuntimeCEmitter &emitter,
                                                    const std::string &lookup_symbol);
