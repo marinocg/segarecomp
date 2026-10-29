@@ -74,7 +74,32 @@ def main_program(sub_len, ip_disc_offset, ip_len):
     return code
 
 
-def build(out, case="base", many=0, many_groups=4, many_nops=0):
+def iso_sectors(files):
+    """SEG-100 (ADR 0221): a minimal ISO9660 volume (PVD at LBA 16, terminator at 17, a flat root at 18) naming `files` ({identifier: (lba, size)}).
+    The game never reads it; the build's file-first enumeration does. No name carries meaning for the build."""
+    pvd = bytearray(2048)
+    pvd[0], pvd[1:6], pvd[6] = 1, b"CD001", 1
+    pvd[8:40] = b"SEGARECOMP".ljust(32)
+    pvd[40:72] = b"SEGARECOMP_FILEFIRST".ljust(32)
+    pvd[80:88] = F.iso_both32(F.TRACK1_SECTORS)
+    pvd[120:124] = F.iso_both16(1)
+    pvd[124:128] = F.iso_both16(1)
+    pvd[128:132] = F.iso_both16(2048)
+    pvd[156:190] = F.iso_record(b"\x00", 18, 2048, directory=True)
+    pvd[190:318] = b" " * 128
+    pvd[881] = 1
+    term = bytearray(2048)
+    term[0], term[1:6], term[6] = 255, b"CD001", 1
+    root = bytearray()
+    root += F.iso_record(b"\x00", 18, 2048, directory=True)
+    root += F.iso_record(b"\x01", 18, 2048, directory=True)
+    for name, (lba, size) in files.items():
+        root += F.iso_record(name.encode(), lba, size)
+    assert len(root) <= 2048
+    return {16: bytes(pvd), 17: bytes(term), 18: bytes(root.ljust(2048, b"\x00"))}
+
+
+def build(out, case="base", many=0, many_groups=4, many_nops=0, iso=False):
     assert case in CASES, case
     ip, sp, sectors, oracle = U.build({"unvisited_case": case, "sp_table": True, "bios": True, "many": many, "many_groups": many_groups, "many_nops": many_nops})
     area, extents = F.system_area(ip, sp, "BIOSUNVIS")
@@ -99,6 +124,11 @@ def build(out, case="base", many=0, many_groups=4, many_nops=0):
     import random
     rng = random.Random(0x7004)
     users = []
+    if iso:   # SEG-100: the volume names the module sectors the loader reads (A..D, X) plus the many-module sectors
+        listing = {"MOD%s.BIN;1" % k: (U.LBA[k], 2048) for k in ("A", "B", "C", "D", "X")}
+        for k in range(many):
+            listing["MODN%03d.BIN;1" % k] = (U.MANY_LBA + k, 2048)
+        sectors = {**sectors, **iso_sectors(listing)}
     for lba in range(max(F.TRACK1_SECTORS, (max(sectors) + 4) if sectors else 0)):
         if lba < 16:
             users.append(area[lba * 2048:(lba + 1) * 2048])
@@ -124,9 +154,10 @@ def main(argv=None):
     parser.add_argument("--case", choices=CASES, default="base")
     parser.add_argument("--many-groups", type=int, default=4)
     parser.add_argument("--many-nops", type=int, default=0)
+    parser.add_argument("--iso", action="store_true", help="SEG-100: add an ISO9660 volume naming the module sectors (the game never reads it)")
     parser.add_argument("--many", type=int, default=0, help="N distinct modules behind the dispatcher over 4 bases (SEG-098-T004)")
     args = parser.parse_args(argv)
-    print(json.dumps(build(args.out, args.case, args.many, args.many_groups, args.many_nops), sort_keys=True))
+    print(json.dumps(build(args.out, args.case, args.many, args.many_groups, args.many_nops, args.iso), sort_keys=True))
     return 0
 
 

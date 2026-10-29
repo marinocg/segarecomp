@@ -67,7 +67,7 @@ void scd_overlay_attach(ScdMachine *m, const ScdOverlayProgram *overlays) {
 }
 
 /* The (canonical) address at which processor `cpu` currently sees byte `offset` of `memory`; *visible = 0 when it does not see it. */
-static uint32_t scd_view_of(const ScdMachine *m, uint32_t cpu, uint32_t memory, uint32_t offset, int *visible) {
+uint32_t scd_overlay_view_of(const ScdMachine *m, uint32_t cpu, uint32_t memory, uint32_t offset, int *visible) {
   *visible = 0;
   if (memory == SCD_MEMORY_PRG) {
     if (cpu == SCD_SUB) {
@@ -111,7 +111,7 @@ void scd_overlay_note_write(ScdMachine *m, uint32_t memory, uint32_t offset, uin
     if (s->all_dirty) continue;
     for (i = 0; i < length; ++i) {
       int visible;
-      const uint32_t address = scd_view_of(m, group->cpu, memory, offset + i, &visible);
+      const uint32_t address = scd_overlay_view_of(m, group->cpu, memory, offset + i, &visible);
       if (!visible || address < group->start || address >= group->end) continue;
       {
         const uint32_t bit = (address >> SCD_OVERLAY_GRANULE_SHIFT) - group->granule_first;
@@ -126,6 +126,7 @@ void scd_overlay_note_write(ScdMachine *m, uint32_t memory, uint32_t offset, uin
 
 void scd_overlay_note_view_change(ScdMachine *m) {
   uint32_t g;
+  if (m->dyn.enabled) scd_dynamic_note_view_change(m); /* SEG-100 */
   if (m->overlays == NULL) return;
   for (g = 0; g < m->overlays->group_count; ++g) {
     m->overlay[g].all_dirty = 1U;

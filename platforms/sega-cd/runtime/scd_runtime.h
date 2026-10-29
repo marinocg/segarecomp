@@ -297,6 +297,95 @@ typedef struct ScdAuthentic {
   uint32_t ip_entry;              /* SEG-064-T004: the documented IP entry (main work RAM; contract section 9); 0 = no handoff boundary */
 } ScdAuthentic;
 
+/* SEG-100 (ADR 0221): file-first dynamic images. A dynamic image is an immutable disc file (a track-1 extent) whose instruction bodies were
+ * compiled before launch for source offsets, with no guest base. At run time the machine may *bind* one to the live bytes the original game
+ * loaded (scd_dynamic.c): the binding chooses which precompiled body serves a guest PC. It never decodes, lowers or compiles anything, and
+ * every body still compares its instruction's bytes with the live bytes before it runs. */
+#define SCD_DYN_MAX_BINDINGS 16U
+#define SCD_DYN_MAX_IMAGE_BYTES 0x80000U /* PRG RAM: the largest executable region of a processor */
+#define SCD_DYN_GRANULE_SHIFT 6U
+#define SCD_DYN_GRANULES (SCD_DYN_MAX_IMAGE_BYTES >> SCD_DYN_GRANULE_SHIFT)
+#define SCD_DYN_ANCHOR_BYTES 32U
+#define SCD_DYN_MIN_RUN 64U
+#define SCD_DYN_MAX_CANDIDATES 64U
+#define SCD_DYN_LOG 64U
+
+typedef struct ScdDynamicImage {
+  uint32_t id;                /* 1-based, unique in the program (a body is processor-neutral: the image serves whichever processor loads it) */
+  uint32_t first_lba;         /* absolute LBA of the first sector of the file (data track 1) */
+  uint32_t length;            /* bytes */
+  const char *sha256;         /* lowercase hex of the bytes (verified against the disc when the program was built) */
+  const uint32_t *body_map;   /* per even source offset: 1-based index into the processor's body table, 0 = no compiled body */
+} ScdDynamicImage;
+
+typedef struct ScdDynamicProgram {
+  const ScdDynamicImage *images;
+  uint32_t image_count;
+  const ScdDispatchFunction *const *body_slices;  /* slices of the body table, shared by both processors (index / body_slice_size selects the slice) */
+  uint32_t body_slice_size;
+  uint32_t body_count;
+  const uint8_t *body_lengths;    /* per body (index - 1): the byte length of its instruction, 0 when the encoding has no body */
+  uint32_t candidate_bytes;       /* report: source bytes of all images */
+  uint32_t compiled_offsets;      /* report: image source offsets that have a body */
+  uint32_t unique_bodies;         /* report */
+  const char *policy;             /* report: the build-time candidate policy */
+} ScdDynamicProgram;
+
+typedef struct ScdDynamicBinding {
+  uint8_t active;
+  uint32_t image;          /* index into ScdDynamicProgram::images */
+  uint32_t base;           /* guest address of the image's byte 0 */
+  uint32_t lo, hi;         /* the image's extent at that base, guest addresses [lo, hi): what the binding can serve */
+  uint32_t run_lo, run_hi; /* the exact-copy run that identified the image (report) */
+  uint32_t granule_first;  /* lo >> SCD_DYN_GRANULE_SHIFT */
+  uint64_t order, retired;   /* order: recency of use; the most recently used binding that still explains an instruction wins; the least recently used is evicted */
+  uint8_t stale;             /* an instruction in the extent was not the image's when last tried (the binding is skipped for it, kept for the rest) */
+  uint8_t dirty[SCD_DYN_GRANULES / 8U + 2U];    /* bit set: the 64-byte granule is not known to equal the image (outside the run, or written since) */
+  uint8_t mutated[SCD_DYN_GRANULES / 8U + 2U];  /* bit set: a whole-granule comparison found it different (data the loader or the module changed); cleared by a write */
+} ScdDynamicBinding;
+
+enum {
+  SCD_DYN_REFUSE_NONE = 0,
+  SCD_DYN_REFUSE_NOT_EXECUTABLE,   /* the PC is not RAM the processor can fetch from, or is odd */
+  SCD_DYN_REFUSE_LEDGER_OVERFLOW,  /* the delivery evidence is incomplete */
+  SCD_DYN_REFUSE_NO_DELIVERY,      /* no candidate image has a delivered sector */
+  SCD_DYN_REFUSE_NO_SOURCE,        /* no delivered candidate explains the live bytes */
+  SCD_DYN_REFUSE_TOO_SHORT,        /* the best explanation is shorter than SCD_DYN_MIN_RUN */
+  SCD_DYN_REFUSE_AMBIGUOUS,        /* several candidates explain the live bytes equally */
+  SCD_DYN_REFUSE_BODY_NOT_COMPILED,/* bound, but the image has no precompiled body at this source offset */
+  SCD_DYN_REFUSE_DISC_UNREADABLE,
+  SCD_DYN_REFUSE_INSTRUCTION_DIFFERS, /* bound, but the live bytes of the instruction at the PC are not the image's: the instruction is not the image's */
+  SCD_DYN_REFUSE_COUNT
+};
+
+typedef struct ScdDynamicEvent {
+  uint64_t tick;
+  uint32_t cpu, kind, pc, image, base;  /* kind: 1 bound, 2 invalidated (an instruction no longer equals the image), 3 replaced, 4 refused (image = reason) */
+} ScdDynamicEvent;
+
+#define SCD_DYN_MAX_IMAGES 4096U
+#define SCD_DYN_CACHE_SECTORS 4U
+
+typedef struct ScdDynamicState {
+  uint8_t enabled;         /* the program registered dynamic images (scd_dynamic_register); idle otherwise */
+  uint32_t cpu;            /* the processor whose instruction the dispatched body executes (read by the body into its `scd_k`) */
+  ScdDynamicBinding binding[2][SCD_DYN_MAX_BINDINGS];
+  uint64_t order;
+  uint64_t binds, invalidations, replacements, rechecks, recheck_failures, granule_compares, granule_upgrades, lookups, lookup_hits;
+  uint64_t binds_by_cpu[2];
+  uint64_t scan_bytes, scans, retired;
+  uint64_t refused[SCD_DYN_REFUSE_COUNT];
+  uint32_t last_refusal;
+  uint32_t ambiguity_run, ambiguity_count, ambiguity_images[8];   /* the last tie: the length of the equal runs, how many candidates tied, and (up to eight of) their image ids */
+  uint32_t events;
+  ScdDynamicEvent log[SCD_DYN_LOG];
+  uint8_t bound_ever[SCD_DYN_MAX_IMAGES / 8U];   /* images identified at least once */
+  uint8_t exercised[SCD_DYN_MAX_IMAGES / 8U];    /* images through which at least one instruction retired */
+  uint32_t cache_lba[SCD_DYN_CACHE_SECTORS];     /* a small direct-mapped cache of image sectors for the instruction and granule comparisons */
+  uint8_t cache_valid[SCD_DYN_CACHE_SECTORS];
+  uint8_t cache[SCD_DYN_CACHE_SECTORS][2048];
+} ScdDynamicState;
+
 typedef struct ScdProgram {
   ScdProcessorProgram processors[2];
   ScdDisc disc;
@@ -485,6 +574,7 @@ typedef struct ScdMachine {
   /* SEG-070-T002 (ADR 0149): the optional timed standard-pad machine input (--input-script), or NULL: then no pad event exists and
    * every behaviour and report is that of SEG-065. */
   struct ScdInput *input;
+  ScdDynamicState dyn;                    /* SEG-100: runtime bindings of the program's dynamic images (idle without them) */
   ScdLedgerRange delivered[SCD_LEDGER_MAX];
   uint32_t delivered_count;
   uint8_t delivered_overflow;             /* more ranges than the ledger holds: the evidence is incomplete and is never used */
@@ -518,6 +608,8 @@ int scd_fail_access(ScdMachine *m, uint32_t cpu, ScdStopClass stop_class, uint32
 int scd_compiled(const ScdMachine *m, uint32_t cpu, uint32_t address);
 /* SEG-064-T002 (ADR 0142): 1 when the live bytes at `address` equal `expected` (comparison only; never a stop). */
 int scd_code_matches(ScdMachine *m, uint32_t cpu, uint32_t address, const uint8_t *expected, uint32_t length);
+/* 1 when `address` of `cpu` reads Word RAM: a code fetch there is a Word RAM observation point (the CDC DMA and the graphics ASIC are brought up first). */
+int scd_is_word_ram(uint32_t cpu, uint32_t address);
 /* Side-effect-free view of executable RAM (work RAM, the PRG-RAM window, PRG RAM, owned Word RAM) for byte comparison, or NULL. */
 const uint8_t *scd_code_byte(const ScdMachine *m, uint32_t cpu, uint32_t address);
 /* The byte the main processor's instruction stream holds at `address` (BIOS image or RAM), or NULL where it is neither. */
@@ -531,8 +623,24 @@ void scd_overlay_note_view_change(ScdMachine *m);
 #define SCD_OVERLAY_NOTE_WRITE(m, memory, offset, length) \
   do { \
     if ((m)->overlays != NULL) scd_overlay_note_write((m), (memory), (offset), (length)); \
+    if ((m)->dyn.enabled) scd_dynamic_note_write((m), (memory), (offset), (length)); \
   } while (0)
 void scd_overlay_attach(ScdMachine *m, const ScdOverlayProgram *overlays);
+/* The address at which processor `cpu` sees byte `offset` of `memory`; *visible = 0 when it does not see it (scd_overlay.c). */
+uint32_t scd_overlay_view_of(const ScdMachine *m, uint32_t cpu, uint32_t memory, uint32_t offset, int *visible);
+
+/* SEG-100 (ADR 0221, scd_dynamic.c): the file-first dynamic images. Dispatch of a PC no static case and no overlay group owns; a computed-control
+ * or exception-handler query; the write and view-change notifications that keep bindings honest; the end-of-run report. */
+int scd_dynamic_dispatch(ScdMachine *m, uint32_t cpu, ScdStopClass refusal_stop);
+uint32_t scd_dynamic_exec_cpu(void); /* the processor whose instruction a dynamic body is executing (the neutral computed-control authority's key) */
+const uint32_t *scd_dynamic_lookup(uint32_t cpu, uint32_t pc);
+int scd_dynamic_known(ScdMachine *m, uint32_t cpu, uint32_t pc);
+void scd_dynamic_note_write(ScdMachine *m, uint32_t memory, uint32_t offset, uint32_t length);
+void scd_dynamic_note_view_change(ScdMachine *m);
+/* A program with dynamic images registers them before it starts (generated main); the field is not part of ScdProgram so that every other program is unchanged. */
+void scd_dynamic_register(const ScdDynamicProgram *program);
+void scd_dynamic_attach(ScdMachine *m);
+void scd_dynamic_report(const ScdMachine *m, FILE *out);
 
 /* --- machine ---------------------------------------------------------------------------------------------------------------- */
 

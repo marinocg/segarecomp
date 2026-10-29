@@ -8,6 +8,8 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <map>
 #include <iostream>
 #include <optional>
 #include <set>
@@ -15,11 +17,17 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <mutex>
+#include <unordered_map>
+#include <atomic>
 
 #include "segarecomp/disc.hpp"
 #include "segarecomp/iso9660.hpp"
 #include "segarecomp/machine/sega_cd/bios_profile.hpp"
 #include "segarecomp/machine/sega_cd/boot_images.hpp"
+#include "segarecomp/machine/sega_cd/file_candidates.hpp"
+#include "segarecomp/machine/sega_cd/file_first.hpp"
 #include "segarecomp/machine/sega_cd/loader_scan.hpp"
 #include "segarecomp/machine/sega_cd/modules.hpp"
 #include "segarecomp/machine/sega_cd/program.hpp"
@@ -337,10 +345,18 @@ bool static_extent_is_proven(const segarecomp::DiscImage &disc, scd::Processor p
   return processor == scd::Processor::sub && authorized.count({off, base, len}) != 0U;
 }
 
+// SEG-100 (ADR 0221): the file-first request of `emit` / `build`.
+struct FileFirstRequest {
+  bool enabled = false;
+  scd::FileFirstPolicy policy = scd::FileFirstPolicy::structural;
+  scd::FileFirstLimits limits;
+};
+
 int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios_path, const std::vector<std::string> &copies,
                       const std::vector<std::string> &admits, const std::vector<std::string> &disc_images,
                       std::optional<std::uint32_t> application_entry, const std::string &out_path, std::uint32_t partition_window,
-                      const segarecomp_app::SegaCdAotOptions &aot, const std::optional<scd::SelectiveAdmissionRequest> &aot_request) {
+                      const segarecomp_app::SegaCdAotOptions &aot, const std::optional<scd::SelectiveAdmissionRequest> &aot_request,
+                      const FileFirstRequest &file_first) {
   const auto bad = [](const std::string &stage, const std::string &error) {
     std::cout << "{\"ok\":false,\"stage\":\"" << stage << "\",\"error\":\"" << error << "\"}\n";
     return 7;
@@ -451,7 +467,16 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     }
     inputs.admissions.push_back(std::move(a));
   }
+  scd::FileFirstSelection selection;
+  if (file_first.enabled && aot_request) return bad("file_first", "incompatible_with_experimental_aot_policy");   // the experimental selector is never an image authority and is not combined with dynamic images
+  if (file_first.enabled) {  // SEG-100: the candidate files are chosen from the verified disc by the generic policy, compiled before launch, bound at run time
+    selection = scd::select_file_first_images(disc, file_first.policy, file_first.limits);
+    if (selection.enumeration != scd::FileCandidateError::none) return bad("file_first", scd::file_candidate_error_name(selection.enumeration));
+    inputs.dynamic_images = std::move(selection.images);
+    inputs.dynamic_policy = selection.policy;
+  }
   scd::BiosProfileEmitOptions bios_options{partition_window};
+  bios_options.jobs = file_first.limits.jobs;
   if (aot_request) {  // SEG-097-T003 (ADR 0208): the experimental request enters the program identity and the provenance chain
     inputs.aot_policy = aot_request->policy_identity;
     bios_options.selective = &*aot_request;
@@ -459,7 +484,8 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
   const auto emission = scd::emit_sega_cd_bios_program(disc, inputs, bios_options);
   if (emission.error != scd::BiosProfileError::none) {
     std::cout << "{\"ok\":false,\"stage\":\"emit\",\"error\":\"" << scd::bios_profile_error_name(emission.error) << "\",\"index\":"
-              << emission.error_index << ",\"validation\":\"" << segarecomp::image_validation_error_name(emission.validation) << "\"}\n";
+              << emission.error_index << ",\"validation\":\"" << segarecomp::image_validation_error_name(emission.validation) << "\",\"dynamic\":\""
+              << scd::dynamic_error_name(emission.dynamic.error) << "\"}\n";
     return 6;
   }
   // SEG-064-T003: the shared dispatch unit goes to --out, every partition unit next to it under its own name (listed, in order, in
@@ -501,7 +527,21 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
            << "\",\"authority\":\"" << s.authority << "\",\"start\":" << s.start << ",\"length\":" << s.length
            << ",\"compiled\":" << s.compiled << ",\"rejected\":" << s.rejected << ",\"omitted\":" << s.omitted << "}";
   }
-  report << "],\"aot_policy\":" << segarecomp_app::sega_cd_aot_policy_json(aot, emission.admission) << "}\n";
+  report << "]";
+  if (file_first.enabled) {
+    const auto &d = emission.dynamic;
+    report << ",\"file_first\":{\"policy\":" << json_string(inputs.dynamic_policy) << ",\"identity\":\"" << d.identity << "\",\"files\":" << selection.files
+           << ",\"file_bytes\":" << selection.file_bytes << ",\"oversize_files\":" << selection.oversize_files << ",\"oversize_bytes\":" << selection.oversize_bytes
+           << ",\"duplicate_files\":" << selection.duplicate_files << ",\"empty_files\":" << selection.empty_files << ",\"unreadable_files\":" << selection.unreadable_files
+           << ",\"no_structure_files\":" << selection.no_structure_files << ",\"over_budget_files\":" << selection.over_budget_files << ",\"complete\":"
+           << (selection.complete ? "true" : "false") << ",\"images\":" << d.images.size() << ",\"admitted_bytes\":" << selection.admitted_bytes
+           << ",\"candidate_offsets\":" << d.candidate_offsets << ",\"compiled_offsets\":" << d.compiled_offsets << ",\"unique_encodings\":" << d.unique_encodings
+           << ",\"bodies\":" << d.bodies << ",\"refused_encodings\":" << d.refused << ",\"refused_reasons\":{";
+    for (std::size_t r = 0; r < d.refused_reasons.size(); ++r) report << (r ? "," : "") << "\"" << d.refused_reasons[r].first << "\":" << d.refused_reasons[r].second;
+    report << "},\"body_units\":" << d.body_units << ",\"body_text_bytes\":" << d.body_text_bytes << ",\"map_text_bytes\":" << d.map_text_bytes << "}";
+  }
+  report << ",\"aot_policy\":" << segarecomp_app::sega_cd_aot_policy_json(aot, emission.admission);
+  report << "}\n";
   std::cout << report.str();
   return 0;
 }
@@ -513,9 +553,28 @@ int emit(int argc, char **argv) {
   scd::SegaCdEmitOptions emit_options;
   segarecomp_app::SegaCdAotOptions aot;
   bool report_offsets = false;
+  FileFirstRequest file_first;
   for (int i = 3; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
+    else if (arg == "--file-first" && i + 1 < argc) {  // SEG-100 (ADR 0221)
+      const std::string_view value = argv[++i];
+      if (value != "all" && value != "structural") { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+      file_first.enabled = true;
+      file_first.policy = value == "all" ? scd::FileFirstPolicy::all : scd::FileFirstPolicy::structural;
+    } else if (arg == "--file-first-max-bytes" && i + 1 < argc) {
+      const auto v = parse_u32(argv[++i]);
+      if (!v || *v < 2U || *v > scd::kDynamicMaxImageBytes) { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+      file_first.limits.max_file_bytes = *v;
+    } else if (arg == "--file-first-max-offsets" && i + 1 < argc) {
+      const auto v = parse_u32(argv[++i]);
+      if (!v) { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+      file_first.limits.max_candidate_offsets = *v;
+    } else if (arg == "--jobs" && i + 1 < argc) {
+      const auto v = parse_u32(argv[++i]);
+      if (!v || *v == 0U || *v > 64U) { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+      file_first.limits.jobs = *v;
+    }
     else if (arg == "--position-independent") emit_options.position_independent = true;  // SEG-097-T002 (ADR 0207)
     else if (arg == "--report-offsets") report_offsets = true;  // SEG-097-T003: list each mapping's compiled source-relative offsets in the report (evidence tooling)
     else if ((arg == "--aot-policy" || arg == "--aot-model" || arg == "--aot-scope") && i + 1 < argc) {  // SEG-097-T003 (ADR 0208): the product's policy vocabulary
@@ -548,7 +607,7 @@ int emit(int argc, char **argv) {
       return 2;
     }
   }
-  if (!cue || !out_path || (!bios && (!copies.empty() || !admits.empty() || !disc_images.empty() || application_entry || partition_window)) || (bios && modules) || (bios && emit_options.position_independent) || !segarecomp_app::sega_cd_aot_options_valid(aot)) {
+  if (!cue || !out_path || (!bios && (!copies.empty() || !admits.empty() || !disc_images.empty() || application_entry || partition_window || file_first.enabled)) || (bios && modules) || (bios && emit_options.position_independent) || !segarecomp_app::sega_cd_aot_options_valid(aot)) {
     std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
     return 2;
   }
@@ -558,7 +617,7 @@ int emit(int argc, char **argv) {
     return 3;
   }
   const auto aot_request = segarecomp_app::make_sega_cd_aot_request(aot);
-  if (bios) return emit_bios_profile(*loaded.disc, *bios, copies, admits, disc_images, application_entry, *out_path, partition_window.value_or(0U), aot, aot_request);
+  if (bios) return emit_bios_profile(*loaded.disc, *bios, copies, admits, disc_images, application_entry, *out_path, partition_window.value_or(0U), aot, aot_request, file_first);
   if (aot_request) emit_options.selective = &*aot_request;
   const auto produced = scd::produce_boot_images(*loaded.disc);
   if (!produced.images) {
@@ -809,6 +868,259 @@ int discover_modules_command(int argc, char **argv) {
   return !scan.modules.empty() && scan.complete ? 0 : 9;
 }
 
+// SEG-100-T001 (ADR 0221): `file-survey` - the aggregate, privacy-safe census of the disc's ISO9660 files for file-first broad AOT.
+// Counts only (and, with --per-file, one record per file identified by its extent and digest for a local join with execution evidence:
+// never a name). `--max-file-bytes` bounds which files are lowered: a larger file is reported `oversize` with its size, never silently dropped.
+int file_survey_command(int argc, char **argv) {
+  std::optional<std::string> cue, expected;
+  std::uint32_t max_bytes = 0x80000U, jobs = 4U;
+  bool per_file = false, census = true, structural = false;
+  scd::StructuralOptions closure_options;
+  std::optional<std::string> probe_path, oracle_path;
+  for (int i = 3; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
+    else if (arg == "--expect-identity" && i + 1 < argc) expected = argv[++i];
+    else if (arg == "--max-file-bytes" && i + 1 < argc) {
+      const auto v = parse_u32(argv[++i]);
+      if (!v) { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+      max_bytes = *v;
+    } else if (arg == "--jobs" && i + 1 < argc) {
+      const auto v = parse_u32(argv[++i]);
+      if (!v || *v == 0U || *v > 64U) { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+      jobs = *v;
+    } else if (arg == "--per-file") per_file = true;
+    else if (arg == "--no-census") census = false;
+    else if (arg == "--structural") structural = true;
+    else if (arg == "--structural-open") { structural = true; closure_options.leave_file_is_boundary = true; }   // evaluation only (ADR 0221)
+    else if (arg == "--structural-faults") { structural = true; closure_options.faults_are_terminators = true; }   // evaluation only (ADR 0221)
+    else if (arg == "--probe-offsets" && i + 1 < argc) probe_path = argv[++i];
+    else if (arg == "--oracle" && i + 1 < argc) oracle_path = argv[++i];
+    else { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+  }
+  if (!cue) { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+  const auto loaded = segarecomp::load_cue_disc(*cue, expected ? std::optional<std::string_view>(*expected) : std::nullopt);
+  if (!loaded.disc) {
+    std::cout << "{\"ok\":false,\"stage\":\"disc\",\"error\":\"" << segarecomp::disc_error_name(loaded.error) << "\"}\n";
+    return 3;
+  }
+  // SEG-100-T001: `--probe-offsets` is a local file with one line per instruction start an independent execution observed; a line is one or more
+  // comma-separated track-1 byte offsets (several when the executed address lies in RAM that more than one candidate source overlaid, so the
+  // source is not attributable). Only counts of how the structural policy classifies them are reported; the offsets themselves are never printed.
+  std::vector<std::vector<std::uint64_t>> probe_groups;
+  std::vector<std::uint64_t> probes;   // the distinct offsets of all groups, sorted
+  if (probe_path) {
+    std::ifstream in(*probe_path);
+    for (std::string line; std::getline(in, line);) {
+      std::vector<std::uint64_t> group;
+      std::stringstream ss(line);
+      for (std::string item; std::getline(ss, item, ',');) {
+        if (item.empty()) continue;
+        group.push_back(std::strtoull(item.c_str(), nullptr, 10));
+        probes.push_back(group.back());
+      }
+      if (!group.empty()) probe_groups.push_back(std::move(group));
+    }
+    std::sort(probes.begin(), probes.end());
+    probes.erase(std::unique(probes.begin(), probes.end()), probes.end());
+  }
+  // SEG-100-T001: `--oracle` is a local file of "<sha256> <class-map path>" lines: an independent, source-backed per-byte class map (I instruction
+  // start, c continuation, D data, U unknown) for files whose bytes are known by digest. It is an evaluation control for the candidate policy and is never an
+  // input of it; only aggregate counts are printed.
+  std::map<std::string, std::string> oracle;
+  if (oracle_path) {
+    std::ifstream in(*oracle_path);
+    for (std::string sha, path; in >> sha >> path;) oracle[sha] = path;
+  }
+  struct OracleCounts {
+    std::uint64_t modules = 0, size_mismatch = 0, starts = 0, starts_decodable = 0, starts_valid = 0, valid_total = 0, valid_on_start = 0, valid_on_continuation = 0, valid_on_data = 0, valid_on_unknown = 0;
+    std::uint64_t decodable_on_data = 0, min_recall_ppm = 1000000U, modules_full_recall = 0;
+    std::uint64_t missed_by_defect[8] = {0, 0, 0, 0, 0, 0, 0, 0};   // true instruction starts outside the closure, by root defect (StructuralClosure::Defect)
+  } oc;
+  std::mutex probe_mutex;
+  std::unordered_map<std::uint64_t, std::uint8_t> probe_flags;   // offset -> bit0 in a lowered file, bit1 decodes, bit2 closure-valid, bit3 odd
+  const auto list = scd::enumerate_file_candidates(*loaded.disc);
+  if (!list.complete()) {
+    std::cout << "{\"ok\":false,\"stage\":\"enumerate\",\"error\":\"" << scd::file_candidate_error_name(list.error) << "\",\"iso9660\":\""
+              << segarecomp::iso9660_error_name(list.iso_error) << "\"}\n";
+    return 4;
+  }
+  struct Record {
+    bool oversize{}, unreadable{};
+    std::string sha256;
+    scd::BroadCensus census;
+    std::uint64_t decodable{}, closure_valid{};
+  };
+  std::vector<Record> records(list.files.size());
+  std::atomic<std::size_t> next{0};
+  std::mutex unique_mutex;
+  std::unordered_map<std::string, std::uint32_t> unique_bodies;  // instruction bytes -> text bytes of its body (sharing across offsets and files)
+  const auto work = [&]() {
+    for (std::size_t i = next++; i < list.files.size(); i = next++) {
+      auto &r = records[i];
+      const auto &file = list.files[i];
+      if (file.extent.size > max_bytes) { r.oversize = true; continue; }
+      const auto bytes = scd::read_file_candidate(*loaded.disc, file.extent);
+      if (bytes.size() != file.extent.size) { r.unreadable = true; continue; }
+      r.sha256 = segarecomp::sha256_hex(bytes);
+      if (census) {
+        std::unordered_map<std::string, std::uint32_t> local;
+        scd::StructuralClosure closure;
+        if (structural) {
+          closure = scd::structural_closure(bytes, closure_options);
+          r.decodable = closure.decodable;
+          r.closure_valid = closure.valid_offsets;
+          if (const auto it = oracle.find(r.sha256); it != oracle.end()) {
+            std::ifstream cin_(it->second, std::ios::binary);
+            const std::string classes((std::istreambuf_iterator<char>(cin_)), std::istreambuf_iterator<char>());
+            const std::lock_guard<std::mutex> lock(probe_mutex);
+            if (classes.size() != bytes.size()) {
+              ++oc.size_mismatch;
+            } else {
+              ++oc.modules;
+              std::uint64_t starts = 0, starts_valid = 0;
+              for (std::size_t o = 0; o < classes.size(); ++o) {
+                const char cls = classes[o];
+                const bool even = (o & 1U) == 0U;
+                const bool valid = even && o / 2U < closure.valid.size() && closure.valid[o / 2U] != 0U;
+                const bool decoded = even && o / 2U < closure.decoded.size() && closure.decoded[o / 2U] != 0U;
+                if (cls == 'I') {
+                  ++starts;
+                  oc.starts_decodable += decoded ? 1U : 0U;
+                  if (valid) ++starts_valid;
+                  else if (even && o / 2U < closure.defect.size()) ++oc.missed_by_defect[closure.defect[o / 2U] & 7U];
+                }
+                if (valid) {
+                  ++oc.valid_total;
+                  if (cls == 'I') ++oc.valid_on_start; else if (cls == 'c') ++oc.valid_on_continuation; else if (cls == 'D') ++oc.valid_on_data; else ++oc.valid_on_unknown;
+                } else if (decoded && cls == 'D') {
+                  ++oc.decodable_on_data;
+                }
+              }
+              oc.starts += starts;
+              oc.starts_valid += starts_valid;
+              if (starts != 0U) oc.min_recall_ppm = std::min<std::uint64_t>(oc.min_recall_ppm, starts_valid * 1000000U / starts);
+              if (starts_valid == starts) ++oc.modules_full_recall;
+            }
+          }
+          const std::uint64_t lo = static_cast<std::uint64_t>(file.extent.block) * 2048U, hi = lo + file.extent.size;
+          std::vector<std::pair<std::uint64_t, std::uint8_t>> local_flags;
+          for (auto it = std::lower_bound(probes.begin(), probes.end(), lo); it != probes.end() && *it < hi; ++it) {
+            const std::uint64_t rel = *it - lo;
+            std::uint8_t flags = 1U;
+            if ((rel & 1U) != 0U || rel / 2U >= closure.valid.size()) flags |= 8U;
+            else flags = static_cast<std::uint8_t>(flags | (closure.decoded[rel / 2U] ? 2U : 0U) | (closure.valid[rel / 2U] ? 4U : 0U) | ((closure.defect[rel / 2U] & 7U) << 4U));
+            local_flags.emplace_back(*it, flags);
+          }
+          if (!local_flags.empty()) {
+            const std::lock_guard<std::mutex> lock(probe_mutex);
+            for (const auto &[offset, flags] : local_flags) probe_flags[offset] = flags;
+          }
+        }
+        r.census = scd::broad_census(bytes, [&](std::uint32_t, const scd::DynamicBody &b) {
+          local.emplace(std::string(b.raw.begin(), b.raw.end()),
+                        static_cast<std::uint32_t>(b.body.size() + b.slots.size() + b.timing.size() + b.refresh_skip.size()));
+        }, structural ? std::span<const std::uint8_t>(closure.valid) : std::span<const std::uint8_t>());
+        const std::lock_guard<std::mutex> lock(unique_mutex);
+        unique_bodies.merge(local);
+      }
+    }
+  };
+  std::vector<std::thread> threads;
+  for (std::uint32_t t = 0; t < jobs; ++t) threads.emplace_back(work);
+  for (auto &t : threads) t.join();
+  std::ostringstream out;
+  scd::BroadCensus sum;
+  std::uint64_t total_decodable = 0, total_closure_valid = 0;
+  std::uint64_t oversize_files = 0, oversize_bytes = 0, lowered_files = 0, lowered_bytes = 0, total_bytes = 0, unreadable = 0;
+  for (std::size_t i = 0; i < records.size(); ++i) {
+    const auto &r = records[i];
+    total_bytes += list.files[i].extent.size;
+    if (r.oversize) { ++oversize_files; oversize_bytes += list.files[i].extent.size; continue; }
+    if (r.unreadable) { ++unreadable; continue; }
+    ++lowered_files;
+    total_decodable += r.decodable;
+    total_closure_valid += r.closure_valid;
+    lowered_bytes += list.files[i].extent.size;
+    sum.even_offsets += r.census.even_offsets; sum.not_decoded += r.census.not_decoded; sum.not_lifted += r.census.not_lifted;
+    sum.not_lowered += r.census.not_lowered; sum.redecode += r.census.redecode;
+    sum.refused_token_structure += r.census.refused_token_structure; sum.refused_literal_not_linear += r.census.refused_literal_not_linear;
+    sum.refused_literal_suffix += r.census.refused_literal_suffix; sum.refused_constant_context += r.census.refused_constant_context;
+    sum.compiled += r.census.compiled; sum.pc_dependent += r.census.pc_dependent; sum.generated_text_bytes += r.census.generated_text_bytes;
+  }
+  std::uint64_t pg_missed_defect[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+  std::uint64_t pg_total = 0, pg_single = 0, pg_multi = 0, pg_in_file = 0, pg_decoded_all = 0, pg_valid_all = 0, pg_valid_any = 0, pg_multi_valid_all = 0, pg_multi_valid_any = 0, pg_single_valid = 0;
+  for (const auto &group : probe_groups) {
+    ++pg_total;
+    bool in_file_any = false, all_decoded = true, all_valid = true, any_valid = false;
+    for (const auto offset : group) {
+      const auto it = probe_flags.find(offset);
+      const std::uint8_t f = it == probe_flags.end() ? 0U : it->second;
+      in_file_any = in_file_any || (f & 1U) != 0U;
+      all_decoded = all_decoded && (f & 2U) != 0U;
+      all_valid = all_valid && (f & 4U) != 0U;
+      any_valid = any_valid || (f & 4U) != 0U;
+    }
+    (group.size() == 1U ? pg_single : pg_multi) += 1U;
+    if (!in_file_any) continue;
+    ++pg_in_file;
+    pg_decoded_all += all_decoded ? 1U : 0U;
+    pg_valid_all += all_valid ? 1U : 0U;
+    pg_valid_any += any_valid ? 1U : 0U;
+    if (group.size() == 1U) {
+      pg_single_valid += all_valid ? 1U : 0U;
+      if (!all_valid) {
+        const auto it = probe_flags.find(group.front());
+        if (it != probe_flags.end()) ++pg_missed_defect[(it->second >> 4U) & 7U];
+      }
+    }
+    else { pg_multi_valid_all += all_valid ? 1U : 0U; pg_multi_valid_any += any_valid ? 1U : 0U; }
+  }
+  out << "{\"ok\":true,\"identity\":\"" << loaded.disc->identity() << "\",\"files\":" << list.files.size() << ",\"directories\":" << list.directories
+      << ",\"file_bytes\":" << total_bytes << ",\"max_file_bytes\":" << max_bytes << ",\"oversize_files\":" << oversize_files
+      << ",\"oversize_bytes\":" << oversize_bytes << ",\"unreadable_files\":" << unreadable << ",\"lowered_files\":" << lowered_files
+      << ",\"lowered_bytes\":" << lowered_bytes << ",\"census\":" << (census ? "true" : "false") << ",\"structural\":" << (structural ? "true" : "false")
+      << ",\"decodable_offsets\":" << total_decodable << ",\"closure_valid_offsets\":" << total_closure_valid
+      << ",\"oracle\":{\"modules\":" << oc.modules << ",\"size_mismatch\":" << oc.size_mismatch << ",\"instruction_starts\":" << oc.starts << ",\"starts_decoded\":" << oc.starts_decodable
+      << ",\"starts_in_closure\":" << oc.starts_valid << ",\"modules_with_full_recall\":" << oc.modules_full_recall << ",\"min_module_recall_ppm\":" << (oc.modules ? oc.min_recall_ppm : 0U)
+      << ",\"closure_valid_total\":" << oc.valid_total << ",\"closure_valid_on_start\":" << oc.valid_on_start << ",\"closure_valid_on_continuation\":" << oc.valid_on_continuation
+      << ",\"closure_valid_on_data\":" << oc.valid_on_data << ",\"closure_valid_on_unknown\":" << oc.valid_on_unknown << ",\"decodable_not_valid_on_data\":" << oc.decodable_on_data << ",\"missed_starts_by_defect\":{\"not_decoded\":" << oc.missed_by_defect[1]
+      << ",\"always_faults\":" << oc.missed_by_defect[2] << ",\"not_understood\":" << oc.missed_by_defect[3] << ",\"target_outside_file\":" << oc.missed_by_defect[4]
+      << ",\"target_odd\":" << oc.missed_by_defect[5] << ",\"fall_off_file\":" << oc.missed_by_defect[6] << "}}"
+      << ",\"probes\":{\"groups\":" << pg_total << ",\"attributable\":" << pg_single << ",\"overlaid\":" << pg_multi << ",\"in_lowered_files\":" << pg_in_file
+      << ",\"decoded_in_every_candidate\":" << pg_decoded_all << ",\"closure_valid_in_every_candidate\":" << pg_valid_all
+      << ",\"closure_valid_in_some_candidate\":" << pg_valid_any << ",\"attributable_closure_valid\":" << pg_single_valid
+      << ",\"overlaid_closure_valid_in_every_candidate\":" << pg_multi_valid_all << ",\"overlaid_closure_valid_in_some_candidate\":" << pg_multi_valid_any << ",\"attributable_missed_by_defect\":{\"not_decoded\":" << pg_missed_defect[1]
+      << ",\"always_faults\":" << pg_missed_defect[2] << ",\"not_understood\":" << pg_missed_defect[3] << ",\"target_outside_file\":" << pg_missed_defect[4]
+      << ",\"target_odd\":" << pg_missed_defect[5] << ",\"fall_off_file\":" << pg_missed_defect[6] << "}}"
+      << ",\"totals\":{\"even_offsets\":" << sum.even_offsets
+      << ",\"compiled\":" << sum.compiled << ",\"pc_dependent\":" << sum.pc_dependent << ",\"not_decoded\":" << sum.not_decoded
+      << ",\"not_lifted\":" << sum.not_lifted << ",\"not_lowered\":" << sum.not_lowered << ",\"redecode\":" << sum.redecode
+      << ",\"refused_token_structure\":" << sum.refused_token_structure << ",\"refused_literal_not_linear\":" << sum.refused_literal_not_linear
+      << ",\"refused_literal_suffix\":" << sum.refused_literal_suffix << ",\"refused_constant_context\":" << sum.refused_constant_context
+      << ",\"generated_text_bytes\":" << sum.generated_text_bytes << "}";
+  {
+    std::uint64_t unique_text = 0;
+    for (const auto &[raw, text] : unique_bodies) unique_text += text;
+    out << ",\"unique_encodings\":" << unique_bodies.size() << ",\"unique_text_bytes\":" << unique_text;
+  }
+  if (per_file) {
+    out << ",\"records\":[";
+    for (std::size_t i = 0; i < records.size(); ++i) {
+      const auto &r = records[i];
+      out << (i ? "," : "") << "{\"block\":" << list.files[i].extent.block << ",\"size\":" << list.files[i].extent.size << ",\"oversize\":" << (r.oversize ? 1 : 0)
+          << ",\"sha256\":\"" << r.sha256 << "\",\"even\":" << r.census.even_offsets << ",\"compiled\":" << r.census.compiled << ",\"decodable\":" << r.decodable << ",\"valid\":" << r.closure_valid
+          << ",\"pc_dependent\":" << r.census.pc_dependent << ",\"not_decoded\":" << r.census.not_decoded << ",\"refused\":"
+          << (r.census.refused_token_structure + r.census.refused_literal_not_linear + r.census.refused_literal_suffix + r.census.refused_constant_context + r.census.redecode + r.census.not_lifted + r.census.not_lowered)
+          << "}";
+    }
+    out << "]";
+  }
+  out << "}\n";
+  std::cout << out.str();
+  return 0;
+}
+
 }  // namespace
 
 int segarecomp_sega_cd_command(int argc, char **argv) {
@@ -816,6 +1128,7 @@ int segarecomp_sega_cd_command(int argc, char **argv) {
   if (argc >= 3 && std::string_view(argv[2]) == "emit") return emit(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "build") return segarecomp_sega_cd_build(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "resolve-source") return resolve_source_command(argc, argv);
+  if (argc >= 3 && std::string_view(argv[2]) == "file-survey") return file_survey_command(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "discover-modules") return discover_modules_command(argc, argv);
   std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
   return 2;

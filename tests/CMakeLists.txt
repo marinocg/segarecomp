@@ -1168,6 +1168,25 @@ target_link_libraries(sega_cd_overlay_emission_test PRIVATE segarecomp::machine_
 segarecomp_enable_warnings(sega_cd_overlay_emission_test)
 add_test(NAME sega_cd_overlay_emission_test COMMAND sega_cd_overlay_emission_test)
 set_property(TEST sega_cd_overlay_emission_test APPEND PROPERTY LABELS full fast)
+# SEG-100-T002 (ADR 0222): the processor-neutral source-offset instruction body for a guest base unknown at compile time.
+add_executable(sega_cd_dynamic_body_test sega_cd_dynamic_body_test.cpp)
+target_link_libraries(sega_cd_dynamic_body_test PRIVATE segarecomp::machine_sega_cd)
+segarecomp_enable_warnings(sega_cd_dynamic_body_test)
+add_test(NAME sega_cd_dynamic_body_test COMMAND sega_cd_dynamic_body_test)
+set_property(TEST sega_cd_dynamic_body_test APPEND PROPERTY LABELS full fast)
+# SEG-100-T001/T004 (ADR 0221, 0224): the structural candidate policy and the broad census.
+add_executable(sega_cd_file_candidates_test sega_cd_file_candidates_test.cpp)
+target_link_libraries(sega_cd_file_candidates_test PRIVATE segarecomp::machine_sega_cd)
+segarecomp_enable_warnings(sega_cd_file_candidates_test)
+add_test(NAME sega_cd_file_candidates_test COMMAND sega_cd_file_candidates_test)
+set_property(TEST sega_cd_file_candidates_test APPEND PROPERTY LABELS full fast)
+# SEG-100-T003 (ADR 0223): runtime binding of a file-first dynamic image to the guest memory the original game loaded it into.
+add_executable(sega_cd_dynamic_binding_test sega_cd_dynamic_binding_test.c)
+set_target_properties(sega_cd_dynamic_binding_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_link_libraries(sega_cd_dynamic_binding_test PRIVATE segarecomp::runtime_sega_cd)
+segarecomp_enable_warnings(sega_cd_dynamic_binding_test)
+add_test(NAME sega_cd_dynamic_binding_test COMMAND sega_cd_dynamic_binding_test)
+set_property(TEST sega_cd_dynamic_binding_test APPEND PROPERTY LABELS full fast)
 # SEG-062-T002 (ADR 0129, Checkpoint A): CUE/BIN ingestion and IP/SP images against an independent reader; fixture reproducibility.
 add_test(NAME sega_cd_disc_ingestion_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_disc_ingestion_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR})
@@ -1286,6 +1305,10 @@ set_property(TEST sega_cd_loader_survey_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_bios_unvisited_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_bios_unvisited_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_bios_unvisited_test APPEND PROPERTY LABELS full fast)
+# SEG-100 (ADR 0221-0224): file-first broad AOT and dynamic verified module mapping, end to end through the supported build.
+add_test(NAME sega_cd_file_first_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_file_first_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_file_first_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_loader_dispatch_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_loader_dispatch_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_loader_dispatch_test APPEND PROPERTY LABELS full fast)

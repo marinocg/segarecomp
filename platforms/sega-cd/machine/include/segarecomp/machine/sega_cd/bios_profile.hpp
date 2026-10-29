@@ -30,6 +30,7 @@
 
 #include "segarecomp/disc.hpp"
 #include "segarecomp/machine/sega_cd/boot_images.hpp"
+#include "segarecomp/machine/sega_cd/dynamic_images.hpp"
 #include "segarecomp/machine/sega_cd/epoch_recipe.hpp"
 #include "segarecomp/machine/sega_cd/selective_admission.hpp"
 #include "segarecomp/recompiler/executable_image.hpp"
@@ -106,6 +107,10 @@ struct BiosProfileInputs {
   std::vector<DiscImageSpec> disc_images;     // SEG-064-T004
   std::uint32_t application_entry{};          // SEG-064-T004: the main address whose first execution ends the run (0 = none)
   std::vector<Admission> admissions;  // in admission order
+  // SEG-100 (ADR 0221): file-first dynamic images - immutable disc files compiled to base-less native bodies and bound at run time. Needs a
+  // partitioned emission (a non-zero partition window). `dynamic_policy` names the build-time candidate policy and enters the program identity.
+  std::vector<DynamicImageSpec> dynamic_images;
+  std::string dynamic_policy;
   std::string aot_policy;                     // SEG-097-T003: the policy identity of an experimental request ("" = Compatibility); enters the program identity
 };
 
@@ -120,6 +125,7 @@ enum class BiosProfileError : std::uint8_t {
                           // JMP (xxx).L with an even operand, a run over kMaxTemplateRunSlots, or an overlap
   image_validation,
   partition_invalid,      // a partition window that is not a power of two in [kMinPartitionWindow, kMaxPartitionWindow]
+  dynamic_invalid,        // SEG-100: the dynamic image set does not validate (see BiosProfileEmission::dynamic_error), or no partition window was given
 };
 [[nodiscard]] const char *bios_profile_error_name(BiosProfileError error) noexcept;
 
@@ -146,6 +152,7 @@ inline constexpr std::uint32_t kMaxPartitionWindow = 0x01000000U;
 
 struct BiosProfileEmitOptions {
   std::uint32_t partition_window{};
+  unsigned jobs{};                   // SEG-100: worker threads for the dynamic images' derivation (0 = hardware concurrency, at most 16)
   // SEG-097-T003 (ADR 0208): the experimental selective admission. The producer scores each image's bytes once; aligned starts outside its validated
   // proposal are not compiled. Any failure emits the broad program (this call) and reports the reason in `BiosProfileEmission::admission`. The caller
   // must also set `BiosProfileInputs::aot_policy` to the same policy identity so the program identity (and the admission provenance chain) carries it.
@@ -173,6 +180,7 @@ struct BiosProfileEmission {
   std::uint32_t deduplicated{};      // identical variants merged at emission
   std::uint32_t templates{};
   SelectiveAdmissionOutcome admission;
+  DynamicEmission dynamic;           // SEG-100: statistics and identity of the dynamic images (their units are in `units`)
   BiosProfileError error{BiosProfileError::none};
   std::uint32_t error_index{};       // the failing copy/admission
   ImageValidationError validation{ImageValidationError::none};

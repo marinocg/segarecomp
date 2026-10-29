@@ -57,6 +57,18 @@ as *No program yet (can be built)*.
 The build does not invent controller input: it covers the path the console takes from reset with no button pressed. A title that waits for START at its
 first menu is therefore built up to that menu; the program stops with a typed stop (`entry_not_compiled`) when play reaches code the build never ran.
 
+### File-first broad AOT (experimental, opt-in; SEG-100, ADR 0221-0226)
+
+    segarecomp sega-cd build ... --file-first structural      (or `all`; also `emit ... --partition-window 8192 --file-first ...`)
+    segarecomp sega-cd file-survey --cue "<disc.cue>" [--structural]   (counts only: what a disc offers a file-first build)
+
+Besides everything above, the build compiles the disc's ISO9660 files (at most 512 KiB each) into base-less, processor-neutral native bodies **before any run**.
+When the original game later loads a module wherever its own code puts it, the program identifies the delivered file the live bytes are an exact copy of and
+serves the precompiled bodies for it; every instruction still verifies its own bytes, and anything it cannot identify is the same typed stop as before. The
+static and execution-derived producers keep precedence and remain the fallback; the Compatibility build is the unchanged reference. `status.json` gains
+`file_first` (what was compiled and what was not, typed) and the run report gains a `dynamic` section (bindings, refusals by reason, search cost). The
+launcher's build does not expose the option (adoption is not proposed); it can be passed through the documented `SEGARECOMP_SCD_BUILD_ARGS` seam.
+
 ## Code
 
 `machine/` (build time: boot images from `libs/media` disc ingestion, two-processor program emission over the generic M68K lowering, digest-checked
@@ -67,4 +79,4 @@ selection, driver, and `scd_live.c`, the interactive driver loop); `viewer/` (th
 **Reuse:** `libs/cpu/m68k` and the generic M68K emitter instantiated twice (one `ExecutableImageSet` and one `M68kRuntimeCEmitter` per processor
 instance, both `CpuVariant::mc68000`); the Genesis VDP device and frame export; the Genesis viewer's presenter, pacer and controller mapping.
 
-**Milestones:** SEG-062/063 (synthetic disc, dual M68K, modules/overlays), SEG-064..071 (authentic BIOS, checkpoints), SEG-078 (interactive play), SEG-097 (static discovery of modules no run has loaded, source-relative bodies, the experimental frozen-M3 policy; contract section 19).
+**Milestones:** SEG-100 (file-first broad AOT and dynamic verified module mapping), SEG-062/063 (synthetic disc, dual M68K, modules/overlays), SEG-064..071 (authentic BIOS, checkpoints), SEG-078 (interactive play), SEG-097 (static discovery of modules no run has loaded, source-relative bodies, the experimental frozen-M3 policy; contract section 19).
