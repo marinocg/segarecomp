@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cerrno>
+#include <cstdio>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -136,5 +137,24 @@ int run_process(const std::vector<std::string> &argv, const fs::path &log, const
 }
 #endif
 
+
+std::uint64_t available_memory_bytes() {
+#if defined(_WIN32)
+  MEMORYSTATUSEX status;
+  status.dwLength = sizeof status;
+  return GlobalMemoryStatusEx(&status) ? static_cast<std::uint64_t>(status.ullAvailPhys) : 0U;
+#elif defined(__linux__)
+  FILE *f = std::fopen("/proc/meminfo", "r");
+  if (f == nullptr) return 0U;
+  char line[256];
+  unsigned long long kb = 0;
+  while (std::fgets(line, sizeof line, f) != nullptr)
+    if (std::sscanf(line, "MemAvailable: %llu kB", &kb) == 1) break;
+  std::fclose(f);
+  return static_cast<std::uint64_t>(kb) * 1024U;
+#else
+  return 0U;
+#endif
+}
 
 }  // namespace segarecomp_cli
