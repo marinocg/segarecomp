@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """SEG-101 (ADR 0228, 0229): the multi-route runner on a project-authored disc. One frozen file-first program; the build route (A) defines the build-observed
-set; routes that load B and C are counted as previously unvisited; the program, its directory and the empty-PATH rule are checked by the tool.
+set; routes that load B and C are counted as previously unvisited; the program, its directory and the PATH=/nonexistent rule are checked by the tool.
 usage: sega_cd_m5_routes_test.py <segarecomp> <c-compiler> <source-root>
 """
 import json
@@ -48,7 +48,7 @@ def main():
         check(r["R2"]["images_previously_unvisited_executed"] == 1 and r["R2"]["unvisited_retired"] > 0 and r["R2"]["images_build_observed_executed"] == 0, "route 2: module B was compiled, never executed by the build route, and counts once")
         check(r["R3"]["images_previously_unvisited_executed"] == 1 and r["R3"]["binds"] == 2, "route 3: module C at two bases is one previously unvisited image")
         check(all(x["program_unchanged"] and x["empty_path"] and x["refusals"] == {} and x["retired_dynamic"] > 0 for x in r.values()) and res["program_unchanged_after_all_routes"],
-              "every route ran with an empty PATH, with no refusal, with dynamic bodies retiring, and the program directory unchanged")
+              "every route ran with PATH=/nonexistent, with no refusal, with dynamic bodies retiring, and the program directory unchanged")
         check("unvisited_ids" not in done.stdout and json.loads(private.read_text())["private"]["R2"]["unvisited_ids"], "aggregate output names no image id; the private file does")
     print("%d failure(s)" % len(failures))
     return 1 if failures else 0

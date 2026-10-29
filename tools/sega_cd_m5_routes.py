@@ -88,7 +88,8 @@ def main():
     pdir = args.program.parent
     program_hash = sha256(args.program)
     base_inventory = inventory(pdir)
-    observed = images(json.load(open(args.observed_from)), "exercised")
+    observed_report = json.load(open(args.observed_from))
+    observed = images(observed_report, "exercised")
     result = {"program_sha256": program_hash, "program_bytes": args.program.stat().st_size, "build_observed_images": len(observed), "routes": {}}
     private = {"build_observed_ids": sorted(observed)}
     for spec in args.route:
@@ -114,6 +115,9 @@ def main():
         done = subprocess.run(cmd, env={"PATH": "/nonexistent"}, cwd=str(out), capture_output=True, text=True, timeout=7200)
         wall = time.time() - start
         report = json.load(open(out / "report.json"))
+        if report.get("program_identity") != observed_report.get("program_identity"):
+            print("error: --observed-from is not a report of this program", file=sys.stderr)
+            return 4
         after = inventory(pdir)
         starts = executed_starts(out / "coverage.txt")
         dyn = report["dynamic"]
@@ -128,7 +132,7 @@ def main():
                  "images_previously_unvisited_executed": len(unvisited), "unvisited_retired": sum(per[i]["retired"] for i in unvisited), "unvisited_distinct_offsets": sum(per[i]["offsets"] for i in unvisited),
                  "executed_offsets_total": sum(e["offsets"] for e in dyn["exercised"]), "binds": dyn["binds"], "binds_main": dyn["binds_main"], "binds_sub": dyn["binds_sub"], "replacements": dyn["replacements"],
                  "invalidations": dyn["invalidations"], "refusals": dyn["refusals"], "last_refusal": dyn["last_refusal"], "recheck_failures": dyn["recheck_failures"],
-                 "scan_bytes": dyn["scan_bytes"], "program_unchanged": sha256(args.program) == program_hash and after == base_inventory, "empty_path": True}
+                 "scan_bytes": dyn["scan_bytes"], "program_unchanged": sha256(args.program) == program_hash and after == base_inventory, "empty_path": True, "env_path": "/nonexistent"}
         if refdir is not None and frames:
             route["frames"] = [compare_capture(out, refdir, args.base_onset, n) for n in frames]
             route["frames_equal"] = sum(1 for f in route["frames"] if f.get("frame_equal"))

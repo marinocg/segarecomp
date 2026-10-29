@@ -101,6 +101,7 @@ static void scd_dyn_account(ScdMachine *m, const ScdDynamicBinding *b, uint32_t 
   const uint32_t slot = scd_dyn_slot(b->image);
   const ScdDynamicImage *img = &scd_dyn_registered->images[b->image];
   const uint32_t offset = (pc - b->base) >> 1;
+  if (b->image >= SCD_DYN_MAX_IMAGES) return; /* the emitter refuses more images (too_many_images); never alias a slot */
   d->image_retired[slot] += 1U;
   if (d->image_seen[slot] == NULL) d->image_seen[slot] = (uint8_t *)calloc((img->length >> 4) + 2U, 1U);
   if (d->image_seen[slot] != NULL && (offset >> 3) < (img->length >> 4) + 2U && !scd_dyn_bit_get(d->image_seen[slot], offset)) {
