@@ -111,6 +111,8 @@ static uint64_t arm(uint32_t words, uint32_t source_byte, uint32_t increment, ui
   return m->main_dma_until == 0U ? 0U : (m->main_dma_until - m->now) / MASTER;
 }
 static uint16_t b0[0x10000], b1[0x10000];
+/* arm() at an absolute tick instead of the frame origin */
+static uint64_t arm_at_tick(uint64_t tick, uint32_t words, uint32_t source_byte, uint32_t increment, uint32_t first, uint32_t second);
 /* The oracle is written from the contract's word interleave, independently of scd_bank_offset: bank b word i is 2M-space word 2 * i + b. */
 static void store_banks(void) {
   uint32_t i;
@@ -121,6 +123,20 @@ static void store_banks(void) {
   }
 }
 static void fresh_banks(uint32_t reg1, uint32_t reg12) { fresh(reg1, reg12); store_banks(); }
+static uint64_t arm_at_tick(uint64_t tick, uint32_t words, uint32_t source_byte, uint32_t increment, uint32_t first, uint32_t second) {
+  const uint32_t src = source_byte >> 1;
+  vdp(2U, 0x8F00U | increment);
+  vdp(2U, 0x9300U | (words & 0xFFU));
+  vdp(2U, 0x9400U | ((words >> 8) & 0xFFU));
+  vdp(2U, 0x9500U | (src & 0xFFU));
+  vdp(2U, 0x9600U | ((src >> 8) & 0xFFU));
+  vdp(2U, 0x9700U | ((src >> 16) & 0x7FU));
+  m->now = tick;
+  m->main_dma_until = 0U;
+  vdp(2U, first);
+  if (scd_write(m, SCD_MAIN, 0xC00004U, 2U, second, 0xFF0100U) != 0) return UINT64_MAX;
+  return m->main_dma_until == 0U ? 0U : (m->main_dma_until - m->now) / MASTER;
+}
 static uint32_t reg(uint32_t index) { return host()->devices.vdp.registers[index]; }
 
 int main(void) {
@@ -526,6 +542,45 @@ int main(void) {
       m->ga.mode = SCD_MODE_RET;
       arm(4U, 0x200000U, 2U, 0x4000U | 0x0040U, 0x0080U, 0);
       row(m->vdp_dma_bank_count == 0U && m->main_dma_bank_until == 0U, "a 2M transfer is not a bank transfer");
+      /* a CDC transfer in flight into the bank that main now sees: the writer was latched on the sub's bank, the sub then flipped RET, so the
+       * bank main reads is the one the transfer is filling. The DMA arms at an instant inside the transfer: scd_cd_observe must bring the
+       * transfer up to that instant first, so exactly the bytes moved so far are in the staged words. */
+      {
+        static const ScdDiscTrack tracks[2] = {{1U, 0U, 0U, 2048U, 0U, 0U, 40U}, {2U, 2U, 1U, 2352U, 0U, 190U, 75U}};
+        static ScdDisc disc;
+        const uint64_t bt = SCD_DMA_SUB_CYCLES_PER_BYTE * SCD_SUB_CYCLE_TICKS;
+        uint32_t v, ga;
+        fresh_banks(0x54U, 0x00U);
+        sentinels();
+        disc.tracks = tracks;
+        disc.track_count = 2U;
+        m->disc = &disc;
+        m->ga.ctl = 0x02U;
+        m->ga.sub_halted = 1U;
+        m->ga.prg_window = 1U;
+        m->ga.mode = SCD_MODE_1M; /* RET 0: main sees bank 0, the sub (and the CDC writer) bank 1 */
+        scd_devices_power_on(m);
+        for (v = 0U; v < 32U; ++v) m->cdc.buffer[v] = (uint8_t)(0xA0U + v);
+        m->now = 1000U;
+        {
+          static const uint8_t seq[][2] = {{0x04U, 0x07U}, {0x05U, 0x01U}, {0x07U, 0x02U}, {0x07U, 0x0FU}, {0x07U, 0x00U}, {0x07U, 0x00U}, {0x07U, 0x00U}, {0x07U, 0x00U}};
+          for (v = 0U; v < sizeof seq / sizeof seq[0]; ++v) {
+            ga = seq[v][1];
+            scd_ga_sub_access(m, seq[v][0], 1U, 1, &ga, 0x6000U);
+          }
+        }
+        row(m->cdc.dma_state == SCD_DMA_RUNNING && m->cdc.dma_target == SCD_DMA_TARGET_BANK1, "setup: a CDC transfer of 16 bytes runs into the sub's bank (bank 1)");
+        ga = SCD_MODE_1M | SCD_MODE_RET; /* the sub flips RET: main now sees bank 1, the writer keeps its latched target */
+        scd_ga_sub_access(m, 0x03U, 1U, 1, &ga, 0x6000U);
+        m->stop.stop_class = SCD_STOP_NONE;
+        row((m->ga.mode & SCD_MODE_RET) != 0U && m->cdc.dma_target == SCD_DMA_TARGET_BANK1, "setup: main's bank is the transfer's target");
+        w = arm_at_tick(m->now + 8U * bt, 6U, 0x200000U, 2U, 0x4000U | 0x0200U, 0x0080U);
+        row(w != UINT64_MAX && m->cdc.dma_done == 8U && target_word(host()->devices.vdp.vram, 0x0200U) == 0xA55AU &&
+                target_word(host()->devices.vdp.vram, 0x0202U) == 0xA0A1U && target_word(host()->devices.vdp.vram, 0x0204U) == 0xA2A3U &&
+                target_word(host()->devices.vdp.vram, 0x0206U) == 0xA4A5U && target_word(host()->devices.vdp.vram, 0x0208U) == 0xA6A7U &&
+                target_word(host()->devices.vdp.vram, 0x020AU) == b1[4],
+            "a 1M transfer armed inside the CDC transfer sees exactly the 8 bytes moved so far (scd_cd_observe runs first); the rest is the old bank");
+      }
       /* the 1M deadline-independent behavior: staging is synchronous, so a DMA armed one instant later gives the same bytes and duration */
       /* refusals: length one, the cell image, the mirrors; nothing is mutated */
       {

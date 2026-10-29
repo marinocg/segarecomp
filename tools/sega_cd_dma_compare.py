@@ -49,15 +49,28 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("product_events")
     ap.add_argument("reference_dma")
-    ap.add_argument("--page", type=lambda x: int(x, 0), default=0x10, help="register #23 value of the class to report separately")
+    ap.add_argument("--page", type=lambda x: int(x, 0), default=0x10, help="register #23 value of the class whose durations must be exact")
     ap.add_argument("--skip-reference", type=int, default=0, help="reference transfers to skip (the product log starts later or the guest differs)")
+    ap.add_argument("--prefix", type=int, default=None,
+                    help="compare exactly this many leading transfers (fail if either stream is shorter); use it to evaluate an accepted prefix and to "
+                         "keep a known divergent suffix (e.g. R2 after its idle-transition divergence) out of the verdict")
+    ap.add_argument("--allow-product-suffix", action="store_true",
+                    help="the product ran past the end of the reference stream: the unpaired product transfers are reported, not failed")
     a = ap.parse_args()
     P, R = product(a.product_events), reference(a.reference_dma)[a.skip_reference:]
-    n = min(len(P), len(R))
+    n = min(len(P), len(R)) if a.prefix is None else a.prefix
+    failures = []
+    if a.prefix is not None and min(len(P), len(R)) < a.prefix:
+        failures.append("a stream is shorter than the declared prefix (%d product, %d reference, %d declared)" % (len(P), len(R), a.prefix))
+        n = min(len(P), len(R))
+    if n == 0:
+        failures.append("empty comparison: nothing was paired")
+    if a.prefix is None and len(P) > len(R) and not a.allow_product_suffix:
+        failures.append("the product has %d transfers the reference stream cannot verify (truncated reference); declare --prefix or --allow-product-suffix" % (len(P) - len(R)))
     out = {"product_transfers": len(P), "reference_transfers": len(R), "paired": n}
     for name, pred in (("all", lambda r: True), ("page", lambda r: r[4] == a.page)):
-        tot = srcs = lens = durs = durs1 = 0
-        first_bad = None
+        tot = srcs = lens = durs = 0
+        first_bad = first_bad_duration = None
         hist = {}
         for i in range(n):
             p, r = P[i], R[i]
@@ -71,11 +84,20 @@ def main():
             hist[d] = hist.get(d, 0) + 1
             if (p[1] != r[1] or p[2] != r[2]) and first_bad is None:
                 first_bad = i
+            if p[3] != r[3] and first_bad_duration is None:
+                first_bad_duration = i
         out[name] = {"compared": tot, "source_equal": srcs, "length_equal_after_delay": lens, "duration_equal": durs,
-                     "duration_difference_histogram": dict(sorted(hist.items(), key=lambda kv: -kv[1])[:6]), "first_mismatch_index": first_bad}
+                     "duration_difference_histogram": dict(sorted(hist.items(), key=lambda kv: -kv[1])[:6]), "first_mismatch_index": first_bad,
+                     "first_duration_mismatch_index": first_bad_duration}
+    if out["all"]["source_equal"] != out["all"]["compared"] or out["all"]["length_equal_after_delay"] != out["all"]["compared"]:
+        failures.append("a source or length differs (first at index %s)" % out["all"]["first_mismatch_index"])
+    if out["page"]["compared"] == 0:
+        failures.append("no transfer of the register-#23 class %#x was compared" % a.page)
+    elif out["page"]["duration_equal"] != out["page"]["compared"]:
+        failures.append("a duration of the class %#x differs (first at index %s)" % (a.page, out["page"]["first_duration_mismatch_index"]))
+    out["failures"] = failures
     print(json.dumps(out, indent=1))
-    ok = out["all"]["source_equal"] == out["all"]["compared"] and out["all"]["length_equal_after_delay"] == out["all"]["compared"]
-    return 0 if ok else 1
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

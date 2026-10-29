@@ -34,12 +34,12 @@ def reference(rows, ends=None):
     return "\n".join(lines) + "\n"
 
 
-def run(prod, ref):
+def run(prod, ref, *extra):
     with tempfile.TemporaryDirectory() as t:
         t = pathlib.Path(t)
         (t / "p.txt").write_text(prod)
         (t / "r.dma").write_text(ref)
-        done = subprocess.run([sys.executable, str(TOOL), str(t / "p.txt"), str(t / "r.dma")], capture_output=True, text=True)
+        done = subprocess.run([sys.executable, str(TOOL), str(t / "p.txt"), str(t / "r.dma"), *extra], capture_output=True, text=True)
         return done.returncode, done.stdout, done.stderr
 
 
@@ -47,8 +47,8 @@ REF_ROWS = [(5, 0x10, 0x0011, 2399, 1000, 8000), (6, 0x10, 0x0971, 2399, 2000, 7
 PROD = [(1, 0x100011, 2399, 8000), (2, 0x100971, 2399, 7000), (3, 0x7F8000, 100, 121)]
 code, out, _ = run(product(PROD), reference(REF_ROWS))
 data = json.loads(out)
-check(code == 0 and data["all"]["compared"] == 3 and data["all"]["source_equal"] == 3 and data["all"]["length_equal_after_delay"] == 3, "matching transfers pass")
-check(data["page"]["compared"] == 2 and data["page"]["duration_equal"] == 2 and data["all"]["duration_equal"] == 2, "durations counted: the 1-clock difference is reported, not hidden")
+check(code == 0 and data["failures"] == [] and data["all"]["compared"] == 3 and data["all"]["source_equal"] == 3 and data["all"]["length_equal_after_delay"] == 3, "matching transfers pass")
+check(data["page"]["compared"] == 2 and data["page"]["duration_equal"] == 2 and data["all"]["duration_equal"] == 2, "durations counted: the 1-clock difference of another class is reported, not hidden")
 bad = list(PROD)
 bad[1] = (2, 0x100972, 2399, 7000)
 code, out, _ = run(product(bad), reference(REF_ROWS))
@@ -59,5 +59,22 @@ code, out, _ = run(product(bad), reference(REF_ROWS))
 check(code == 1, "a different length fails")
 code, out, err = run(product(PROD), reference(REF_ROWS) + "E 9 9\n")
 check(code != 0 and "differ" in err, "unequal arm/end counts in the reference are refused")
+# strictness
+bad = list(PROD)
+bad[1] = (2, 0x100971, 2399, 7001)
+code, out, _ = run(product(bad), reference(REF_ROWS))
+check(code == 1 and "duration" in json.loads(out)["failures"][0], "a wrong duration of the admitted class fails")
+code, out, _ = run(product(bad), reference(REF_ROWS), "--prefix", "1", "--page", "0x10")
+check(code == 0, "a declared prefix excludes a known divergent suffix")
+code, out, _ = run("", reference(REF_ROWS))
+check(code == 1 and "empty" in json.loads(out)["failures"][0], "an empty product stream fails")
+code, out, _ = run(product(PROD[:2]), reference(REF_ROWS), "--prefix", "3")
+check(code == 1 and "shorter than the declared prefix" in json.loads(out)["failures"][0], "a truncated product stream fails against a declared prefix")
+code, out, _ = run(product(PROD), "".join(reference(REF_ROWS).splitlines(True)[:4]))
+check(code == 1 and any("truncated reference" in f for f in json.loads(out)["failures"]), "a truncated reference fails unless the suffix is declared")
+code, out, _ = run(product(PROD), "".join(reference(REF_ROWS).splitlines(True)[:4]), "--allow-product-suffix")
+check(code == 0, "--allow-product-suffix accepts the unpaired product tail")
+code, out, _ = run(product([PROD[2]]), reference(REF_ROWS[2:]))
+check(code == 1 and any("class 0x10" in f for f in json.loads(out)["failures"]), "a comparison with no transfer of the admitted class fails")
 print("%d failures" % len(failures))
 sys.exit(1 if failures else 0)
