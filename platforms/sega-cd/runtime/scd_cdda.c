@@ -22,6 +22,7 @@ void scd_cdda_interrupt(ScdMachine *m) {
   if (m->cdda.playing) {
     m->cdda.playing = 0U;
     m->cdda.interruptions += 1U;
+    if (m->cdda.log != NULL) fprintf(m->cdda.log, "stop frame=%llu tick=%llu next_lba=%ld\n", (unsigned long long)m->vdp_frames, (unsigned long long)m->now, (long)m->cdda.next_lba);
   }
 }
 
@@ -65,6 +66,11 @@ int scd_cdda_play(ScdMachine *m, int32_t lba, uint32_t track_index) {
   if (!c->playing) c->segments += 1U;
   else if (lba != c->next_lba) c->discontinuities += 1U;
   else if (track_index != c->last_index) c->track_changes += 1U;
+  if (c->log != NULL && (!c->playing || lba != c->next_lba || track_index != c->last_index))
+    fprintf(c->log, "%s frame=%llu tick=%llu lba=%ld track=%u\n", !c->playing ? "start" : lba != c->next_lba ? "jump" : "track", (unsigned long long)m->vdp_frames,
+            (unsigned long long)m->now, (long)lba, track_index + 1U);
+  if (c->sectors == 0U) c->first_frame = m->vdp_frames;
+  c->last_frame = m->vdp_frames;
   c->playing = 1U;
   c->next_lba = lba + 1;
   c->last_index = track_index;

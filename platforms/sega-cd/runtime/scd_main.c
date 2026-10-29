@@ -253,11 +253,12 @@ static void scd_write_cdda_report(FILE *out, const ScdMachine *m) {
   genesis_sha256_final(&sha, digest);
   fprintf(out, ",\"cdda\":{\"sectors\":%llu,\"frames\":%llu,\"sample_rate\":44100,\"segments\":%llu,\"interruptions\":%llu,"
                "\"discontinuities\":%llu,\"track_changes\":%llu,\"pregap_ticks\":%llu,\"suppressed_pending\":%llu,\"sink_refused\":%llu,"
-               "\"io_errors\":%llu,\"commands\":{\"stop\":%llu,\"play\":%llu,\"seek\":%llu,\"pause\":%llu,\"resume\":%llu,\"jump\":%llu},"
+               "\"first_frame\":%llu,\"last_frame\":%llu,\"io_errors\":%llu,\"commands\":{\"stop\":%llu,\"play\":%llu,\"seek\":%llu,\"pause\":%llu,\"resume\":%llu,\"jump\":%llu},"
                "\"fader\":{\"register\":%u,\"target\":%u,\"volume\":%u},\"pcm_sha256\":\"",
           (unsigned long long)c->sectors, (unsigned long long)c->frames, (unsigned long long)c->segments, (unsigned long long)c->interruptions,
           (unsigned long long)c->discontinuities, (unsigned long long)c->track_changes, (unsigned long long)c->pregap_ticks,
-          (unsigned long long)c->suppressed_pending, (unsigned long long)c->sink_refused, (unsigned long long)g_cdda_tap.io_errors,
+          (unsigned long long)c->suppressed_pending, (unsigned long long)c->sink_refused, (unsigned long long)c->first_frame, (unsigned long long)c->last_frame,
+          (unsigned long long)g_cdda_tap.io_errors,
           (unsigned long long)c->commands[1], (unsigned long long)c->commands[3], (unsigned long long)c->commands[4],
           (unsigned long long)c->commands[6], (unsigned long long)c->commands[7], (unsigned long long)c->commands[10], c->fader_register,
           c->fader_target, c->fader_volume);
@@ -533,7 +534,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   uint64_t capture_onsets[8];
   unsigned capture_count = 0U;
   const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *wlog_path = NULL, *event_path = NULL, *backup_ram_path = NULL, *pcm_trace_path = NULL;
-  const char *input_script_path = NULL, *input_log_path = NULL, *record_path = NULL, *cdda_pcm_path = NULL;
+  const char *input_script_path = NULL, *input_log_path = NULL, *record_path = NULL, *cdda_pcm_path = NULL, *cdda_log_path = NULL;
   int cdda_requested = 0;
   const ScdLiveHost *const live_host = scd_live_host_registered; /* SEG-078-T001: a viewer registered its host */
   ScdLiveSummary live_summary;
@@ -580,6 +581,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     else if (strcmp(flag, "--event-log") == 0) event_path = value;
     else if (strcmp(flag, "--pcm-trace") == 0) pcm_trace_path = value; /* SEG-102 diagnostic (local only) */
     else if (strcmp(flag, "--cdda-pcm") == 0) { cdda_pcm_path = value; cdda_requested = 1; } /* SEG-104: canonical CD-DA stream (S16LE stereo, 44.1 kHz) */
+    else if (strcmp(flag, "--cdda-log") == 0) cdda_log_path = value; /* SEG-104 diagnostic (local only): CD-DA run starts and interruptions */
     else if (strcmp(flag, "--cdda-digest") == 0) cdda_requested = strcmp(value, "1") == 0; /* SEG-104: `1` = produce CD-DA and report its digest and counters */
     else if (strcmp(flag, "--ram-write-log") == 0) wlog_path = value;     /* SEG-079 diagnostic (local only) */
     else if (authentic != NULL && strcmp(flag, "--bios") == 0) bios_path = value;           /* SEG-064-T002 */
@@ -663,6 +665,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
       g_cdda_tap.pcm = fopen(cdda_pcm_path, "wb");
       if (g_cdda_tap.pcm == NULL) return 1;
     }
+    if (cdda_log_path != NULL && (machine.cdda.log = fopen(cdda_log_path, "w")) == NULL) return 1;
     machine.cdda.sink = scd_cdda_tap;
     machine.cdda.sink_context = &g_cdda_tap;
     machine.cdda.enabled = 1U;
@@ -718,6 +721,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   scd_write_report(report, &machine, program, result, frame_digest, live_host != NULL ? &live_summary : NULL);
   if (report != stdout && fclose(report) != 0) return 1;
   if (g_cdda_tap.pcm != NULL && fclose(g_cdda_tap.pcm) != 0) return 1;
+  if (machine.cdda.log != NULL) fclose(machine.cdda.log);
   scd_trace_close(&machine);
   scd_wlog_close(&machine);
   scd_event_close(&machine);

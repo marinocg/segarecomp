@@ -547,6 +547,8 @@ typedef struct ScdCdda {
   uint64_t suppressed_pending;                  /* play ticks silenced because a play/seek command was pending */
   uint64_t sink_refused;                        /* sectors the sink refused (the machine is unaffected) */
   uint64_t commands[16];                        /* CDD commands received, by code (plain counters) */
+  uint64_t first_frame, last_frame;             /* vertical-blank onset counts at the first and the latest produced sector */
+  FILE *log;                                    /* local diagnostic (--cdda-log): one line per run start / interruption / discontinuity; never read back */
 } ScdCdda;
 
 typedef struct ScdMachine {
