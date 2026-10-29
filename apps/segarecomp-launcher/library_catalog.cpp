@@ -102,6 +102,9 @@ json::Value to_json(const LibraryEntry &e) {
     o.set("last_stop", json::Value::make_string(r.last_stop));
     if (r.experimental_m3) o.set("experimental_m3", json::Value::make_bool(true));          // SEG-097-T003: absent unless chosen, so older records are byte-identical
     if (r.program_experimental) o.set("program_experimental", json::Value::make_bool(true));
+    if (r.file_first && !r.experimental_m3) o.set("file_first", json::Value::make_bool(true));                                   // SEG-103-T007: absent unless chosen
+    if (!r.program_built_mode.empty()) o.set("program_built_mode", json::Value::make_string(r.program_built_mode));
+    if (!r.program_file_first_inventory.empty()) o.set("program_file_first_inventory", json::Value::make_string(r.program_file_first_inventory));
     v.set("sega_cd", std::move(o));
   }
   return v;
@@ -137,7 +140,7 @@ bool sega_cd_from_json(const json::Value *o, LibraryEntry &e) {
   if (const json::Value *p = o->get("program"); p != nullptr && p->is_object() && !p->str("path").empty()) {
     r.program.path = clamp_text(p->str("path"), 4096);
     r.program.size = size_field(*p, "size");
-    r.program.mtime = std::max(0LL, p->num("mtime"));
+    r.program.mtime = p->num("mtime");   // a file clock whose epoch is not the Unix epoch yields a negative stamp (libstdc++ before GCC 14): it must round-trip, or every reopened launcher reads a built program as changed
     r.program.sha256 = p->str("sha256");
     r.program.program_identity = p->str("program_identity");
     r.program.disc_identity = p->str("disc_identity");
@@ -149,6 +152,13 @@ bool sega_cd_from_json(const json::Value *o, LibraryEntry &e) {
   r.last_stop = clamp_text(o->str("last_stop"), 64);
   r.experimental_m3 = o->flag("experimental_m3");
   r.program_experimental = o->flag("program_experimental");
+  r.file_first = o->flag("file_first") && !r.experimental_m3;   // never both: the earlier-existing Optimized choice wins a hand-edited conflict
+  {
+    const std::string built = clamp_text(o->str("program_built_mode"), 16), inventory = clamp_text(o->str("program_file_first_inventory"), 16);
+    if (built == "compatibility" || built == "file_first" || built == "optimized") r.program_built_mode = built;   // anything else reads as unknown
+    if (r.program_built_mode.empty() && r.program_experimental) r.program_built_mode = "optimized";   // an earlier release recorded only this flag: its meaning is kept
+    if (r.program_built_mode == "file_first" && (inventory == "complete" || inventory == "incomplete")) r.program_file_first_inventory = inventory;
+  }
   e.sega_cd = std::move(r);
   if (e.rom_paths.empty() && !e.sega_cd.cue_path.empty()) e.rom_paths.push_back(e.sega_cd.cue_path);
   return true;
@@ -380,14 +390,19 @@ Catalog::ImportResult Catalog::import_sega_cd(const scd::EntryRecord &record, co
   const std::string keep_stop = entry->sega_cd.last_stop;
   const bool keep_program_experimental = entry->sega_cd.program_experimental;
   const bool keep_choice = entry->sega_cd.experimental_m3;  // the build option is the user's choice for this game; adding it again keeps it
+  const bool keep_file_first = entry->sega_cd.file_first;
+  const std::string keep_built_mode = entry->sega_cd.program_built_mode, keep_inventory = entry->sega_cd.program_file_first_inventory;
   entry->sega_cd = record;
   entry->sega_cd.experimental_m3 = keep_choice;
+  entry->sega_cd.file_first = keep_file_first;
   if (record.program.path.empty()) {
     entry->sega_cd.program = keep_program;
     entry->sega_cd.disc_files = keep_files;
     entry->sega_cd.disc_verified = keep_verified;
     entry->sega_cd.last_stop = keep_stop;
     entry->sega_cd.program_experimental = keep_program_experimental;
+    entry->sega_cd.program_built_mode = keep_built_mode;
+    entry->sega_cd.program_file_first_inventory = keep_inventory;
   }
   entry->rom_paths.assign(1, record.cue_path);
   entry->rom_path_unknown = false;

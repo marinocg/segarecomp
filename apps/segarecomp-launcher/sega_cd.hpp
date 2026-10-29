@@ -129,7 +129,18 @@ struct EntryRecord {
   // `program_experimental` is what the stored program was actually built with (the product's own effective policy). Both are written only when true.
   bool experimental_m3 = false;
   bool program_experimental = false;
+  // SEG-103-T007: the file-first (structural) build choice. SELECTED (what the next Build requests) is `experimental_m3` (Optimized), `file_first`, or neither
+  // (Compatibility); never both: use select_build_mode. BUILT (what the attached program was actually produced with, from the product's structured status.json,
+  // never from the selection) is `program_built_mode`: "" when unknown (an imported or older program: nothing is invented), else "compatibility" | "file_first" |
+  // "optimized"; `program_file_first_inventory` is "complete" | "incomplete" for a file-first program. Written only when set, so older records stay byte-identical.
+  bool file_first = false;
+  std::string program_built_mode;
+  std::string program_file_first_inventory;
 };
+// The selected mode as a stable code ("compatibility" | "file_first" | "optimized"), and its setter (an unknown code selects Compatibility). A record that
+// somehow holds both flags (hand-edited) reads as Optimized, the choice that existed first.
+[[nodiscard]] const char *selected_build_mode(const EntryRecord &record);
+void select_build_mode(EntryRecord &record, std::string_view code);
 
 // How the entry stands. Order matters for the library badge: the first failing check names the state.
 enum class State {

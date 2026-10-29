@@ -99,9 +99,9 @@ def iso_sectors(files):
     return {16: bytes(pvd), 17: bytes(term), 18: bytes(root.ljust(2048, b"\x00"))}
 
 
-def build(out, case="base", many=0, many_groups=4, many_nops=0, iso=False):
+def build(out, case="base", many=0, many_groups=4, many_nops=0, iso=False, pad=0):
     assert case in CASES, case
-    ip, sp, sectors, oracle = U.build({"unvisited_case": case, "sp_table": True, "bios": True, "many": many, "many_groups": many_groups, "many_nops": many_nops})
+    ip, sp, sectors, oracle = U.build({"unvisited_case": case, "sp_table": True, "bios": True, "many": many, "many_groups": many_groups, "many_nops": many_nops, "pad": pad})
     area, extents = F.system_area(ip, sp, "BIOSUNVIS")
     ip_off, ip_len = extents["ip"][0], extents["ip"][1]
     sp_off, sp_len = extents["sp"][0], extents["sp"][1]
@@ -156,8 +156,9 @@ def main(argv=None):
     parser.add_argument("--many-nops", type=int, default=0)
     parser.add_argument("--iso", action="store_true", help="SEG-100: add an ISO9660 volume naming the module sectors (the game never reads it)")
     parser.add_argument("--many", type=int, default=0, help="N distinct modules behind the dispatcher over 4 bases (SEG-098-T004)")
+    parser.add_argument("--pad", type=int, default=0, help="SEG-103-T007: START on pad 1 selects this module (2 = B, 3 = C) instead of the machine input")
     args = parser.parse_args(argv)
-    print(json.dumps(build(args.out, args.case, args.many, args.many_groups, args.many_nops, args.iso), sort_keys=True))
+    print(json.dumps(build(args.out, args.case, args.many, args.many_groups, args.many_nops, args.iso, args.pad), sort_keys=True))
     return 0
 
 

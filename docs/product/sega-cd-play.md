@@ -46,12 +46,35 @@ release. Several minutes the first time (a real disc compiles tens of millions o
 at any time (the whole tool tree is stopped and the attempt's files are removed; an earlier finished build is kept). The built program is then verified like an
 imported one (it must state that it was built for exactly your BIOS and disc). Progress shows the discovery round and its stages.
 
+### Build modes
+
+The details page offers three modes (one at a time; the choice is stored per game and applies at the **next** Build):
+
+| Mode | What it compiles | Use it when |
+|---|---|---|
+| **Compatibility** (the default of existing games) | the code the build's own no-input run reaches, plus the disc spans that run proves | you want the narrowest, long-established behaviour |
+| **File-first (structural)** (recommended for broader coverage) | Compatibility's code **and** the structurally supported instructions of the eligible files of the disc's ISO9660 volume, before the game runs | a title stops at `entry_not_compiled` after a menu choice, a START press or another transition the build never took |
+| **Optimized (experimental)** | a frozen model proposes which code to compile; it can omit code the game needs | experiments only |
+
+File-first is the product's `--file-first structural`; headless: `Segarecomp --sega-cd --bios ... --cue ... --build --file-first structural` (exclusive with
+`--aot-policy optimized`, as in the product CLI). It reports `build_mode_requested`, `build_mode_effective` and `file_first_inventory=complete|incomplete`.
+Files that are oversize, duplicated or without code structure are not compiled, so the inventory is often reported **incomplete**: code outside it still stops at
+an uncompiled entry. Compiled bodies are bound to the game only when the bytes the game itself loads match the disc file exactly (dynamic verified binding);
+nothing is decoded, compiled or guessed at run time. A disc without a readable ISO9660 volume cannot be inventoried: the build fails with that reason and
+nothing is substituted - choose Compatibility explicitly. File-first does **not** add sound and does not guarantee a complete game; code that is generated,
+decompressed or transformed at run time stays unsupported.
+
+The page shows the **selected** mode and, separately, how the **current program was built** (read from the build's structured result; a program you imported, or built
+by an earlier release, shows "not recorded" - nothing is invented). Changing the selection never changes an existing program: **Build** again to apply it. When a
+program built with Compatibility ends at an uncompiled entry, the page offers *Rebuild with File-first*.
+
 How it works, in one paragraph: the build runs the console from reset (a new console's empty backup RAM, **no controller input**) and watches which code the CPUs
 execute. When a CPU stops at code in RAM that the build has not compiled, the build asks which part of your disc that RAM is a byte-for-byte copy of, among
 only the disc blocks the console itself read (so a coincidental match elsewhere on the disc is never used); an unambiguous, long enough match becomes an
 executable region of the program and the pass repeats. Code that is **generated, decompressed or modified at run time**, or that matches the disc in more than one
 place, is refused with a reason and never guessed: the build finishes, says where the program stops, and the program ends with a typed stop at that point.
-Because no button is pressed, a title that waits for START is covered up to its first menu; code behind input the build never saw stops with `entry_not_compiled`.
+In Compatibility mode no button is pressed, so a title that waits for START is covered up to its first menu and code behind input the build never saw stops with
+`entry_not_compiled`; File-first can precompile eligible disc files that code lives in.
 
 ## What "verified" does and does not mean
 

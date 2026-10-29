@@ -341,7 +341,9 @@ private:
   std::unique_ptr<ScdBuildJob> scd_build_;             // SEG-078-T003: the automatic Sega CD build of one game (independent of the Genesis/SMS queue)
   std::string scd_build_id_;
   std::map<std::string, std::string> scd_build_notes_; // id -> what the last successful build of this session covers (plain language)
-  std::map<std::string, bool> scd_built_experimental_;   // SEG-097-T003: what a finished build's effective policy was, until its program is bound to the entry
+  // SEG-097-T003 / SEG-103-T007: what a finished build actually was (the product's structured status), until its program is bound to the entry
+  struct ScdBuiltInfo { bool experimental = false; std::string mode, inventory; };
+  std::map<std::string, ScdBuiltInfo> scd_built_;
   void scd_start_build(const std::string &id);
   void scd_cancel_build();
   void scd_finish_build();
