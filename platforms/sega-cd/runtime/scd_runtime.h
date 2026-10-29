@@ -381,6 +381,12 @@ typedef struct ScdDynamicState {
   ScdDynamicEvent log[SCD_DYN_LOG];
   uint8_t bound_ever[SCD_DYN_MAX_IMAGES / 8U];   /* images identified at least once */
   uint8_t exercised[SCD_DYN_MAX_IMAGES / 8U];    /* images through which at least one instruction retired */
+  /* SEG-101 (ADR 0227): per-image accounting of what actually retired. Observer-only (written after the body returned, read only by the report): the number
+   * of instructions that retired through the image's bodies and the number of distinct even source offsets among them. `seen` is allocated on an image's
+   * first retired instruction and released by scd_dynamic_release. */
+  uint64_t image_retired[SCD_DYN_MAX_IMAGES];
+  uint32_t image_offsets[SCD_DYN_MAX_IMAGES];
+  uint8_t *image_seen[SCD_DYN_MAX_IMAGES];
   uint32_t cache_lba[SCD_DYN_CACHE_SECTORS];     /* a small direct-mapped cache of image sectors for the instruction and granule comparisons */
   uint8_t cache_valid[SCD_DYN_CACHE_SECTORS];
   uint8_t cache[SCD_DYN_CACHE_SECTORS][2048];
@@ -640,6 +646,7 @@ void scd_dynamic_note_view_change(ScdMachine *m);
 /* A program with dynamic images registers them before it starts (generated main); the field is not part of ScdProgram so that every other program is unchanged. */
 void scd_dynamic_register(const ScdDynamicProgram *program);
 void scd_dynamic_attach(ScdMachine *m);
+void scd_dynamic_release(ScdMachine *m);
 void scd_dynamic_report(const ScdMachine *m, FILE *out);
 
 /* --- machine ---------------------------------------------------------------------------------------------------------------- */

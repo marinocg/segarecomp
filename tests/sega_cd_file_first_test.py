@@ -119,6 +119,24 @@ def main():
               "the run report names the policy and the compiled inventory (candidate bytes, compiled offsets)")
         check(d3["events"][0]["kind"] == "bound" and d3["scan_bytes"] <= 8192 * 3, "binding cost is bounded by the delivered candidate bytes searched (no per-instruction scan)")
 
+        # ---- SEG-101 (ADR 0228): compiled / bound / executed / previously unvisited are different facts; the per-image account is observer-only ----
+        def ids(report, key="exercised"):
+            return {e["image"] for e in report["dynamic"][key]} if key == "exercised" else set(report["dynamic"][key])
+        observed = ids(r0)                      # what the build pass (route 0, no input) executed: the build-observed set
+        check(len(observed) == 1 and ids(r0, "bound_images") == observed and d0["images"] == 4, "accounting: four images compiled before the run, one bound and executed by the build route (A)")
+        for name, rep in (("0", r0), ("2", r2), ("3", r3)):
+            ex = rep["dynamic"]["exercised"]
+            check(sum(e["retired"] for e in ex) == rep["dynamic"]["retired"] and len(ex) == rep["dynamic"]["distinct_images_exercised"] and all(0 < e["offsets"] <= e["retired"] for e in ex),
+                  "accounting, route %s: the per-image retired counts sum to the dynamic total, every executed image retired at least one instruction at one or more distinct source offsets" % name)
+        unvisited2, unvisited3 = ids(r2) - observed, ids(r3) - observed
+        check(len(ids(r2)) == 1 and len(unvisited2) == 1 and ids(r2, "bound_images") == ids(r2), "accounting, route 2: module B was compiled, never executed by the build route, and is counted as previously unvisited (one image)")
+        check(len(ids(r3)) == 1 and len(unvisited3) == 1 and unvisited3 != unvisited2 and d3["binds"] == 2, "accounting, route 3: module C bound at two bases is ONE previously unvisited image, not two")
+        check(not (ids(r0) - observed), "accounting: re-executing the build route's own module is not counted as new")
+        rebind = [e for e in r3["dynamic"]["events"] if e["kind"] == "bound"]
+        check(len(rebind) == 2 and len({e["image"] for e in rebind}) == 1, "accounting: the same image mapped at another base is a second binding of one identity")
+        ref0, _ = run(rprog, fx, 0)
+        check("exercised" not in ref0.get("dynamic", {}) and same_machine_state(ref0, r0), "accounting is observer-only: a program without the dynamic images reports no account, and the machine state is the reference's")
+
         # ---- the policy 'all' compiles every even offset of every file: more bodies, same behaviour ----
         done, fa = build(fx, tmp / "n-all", cache, "--static-discovery", "0", "--file-first", "all")
         aprog = tmp / "n-all" / ("program" + EXE)
@@ -184,6 +202,8 @@ def main():
         done, s3 = build(f3, tmp / "n-ow", cache, "--static-discovery", "0", "--file-first", "structural")
         a, wa = run(tmp / "n-ow" / ("program" + EXE), f3, 0)
         check(a["stop"]["class"] != "none" and wa[:3] == [0, 0, 0], "overwritten: a changed instruction inside the module is a typed stop (%s); the module's effect never happens" % a["stop"]["class"])
+        check(sum(e["retired"] for e in a["dynamic"]["exercised"]) == a["dynamic"]["retired"] and a["dynamic"]["distinct_images_exercised"] <= a["dynamic"]["distinct_images_bound"],
+              "overwritten: only instructions that retired are counted as executed (an identified image is not an executed one)")
 
         # ---- the loader cases the static scan refuses (ADR 0215-0220): the file-first build does not consult the scan, and fails closed where the loader does ----
         for case in ("unknown_lba", "unknown_dest", "prg_dest", "dispatch_unknown"):

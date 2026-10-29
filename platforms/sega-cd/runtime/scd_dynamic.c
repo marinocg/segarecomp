@@ -95,6 +95,29 @@ static void scd_dyn_bit_set(uint8_t *bits, uint32_t bit) { bits[bit >> 3] = (uin
 static void scd_dyn_bit_clear(uint8_t *bits, uint32_t bit) { bits[bit >> 3] = (uint8_t)(bits[bit >> 3] & ~(1U << (bit & 7U))); }
 static int scd_dyn_bit_get(const uint8_t *bits, uint32_t bit) { return (bits[bit >> 3] >> (bit & 7U)) & 1U; }
 
+/* SEG-101: count one retired instruction against the image that served it and note its source offset (observer-only). */
+static void scd_dyn_account(ScdMachine *m, const ScdDynamicBinding *b, uint32_t pc) {
+  ScdDynamicState *d = &m->dyn;
+  const uint32_t slot = scd_dyn_slot(b->image);
+  const ScdDynamicImage *img = &scd_dyn_registered->images[b->image];
+  const uint32_t offset = (pc - b->base) >> 1;
+  if (b->image >= SCD_DYN_MAX_IMAGES) return; /* the emitter refuses more images (too_many_images); never alias a slot */
+  d->image_retired[slot] += 1U;
+  if (d->image_seen[slot] == NULL) d->image_seen[slot] = (uint8_t *)calloc((img->length >> 4) + 2U, 1U);
+  if (d->image_seen[slot] != NULL && (offset >> 3) < (img->length >> 4) + 2U && !scd_dyn_bit_get(d->image_seen[slot], offset)) {
+    scd_dyn_bit_set(d->image_seen[slot], offset);
+    d->image_offsets[slot] += 1U;
+  }
+}
+
+void scd_dynamic_release(ScdMachine *m) {
+  uint32_t i;
+  for (i = 0; i < SCD_DYN_MAX_IMAGES; ++i) {
+    free(m->dyn.image_seen[i]);
+    m->dyn.image_seen[i] = NULL;
+  }
+}
+
 /* The image bytes [offset, offset + length) into `out`, or 0 when a sector cannot be read. */
 static int scd_dyn_image_read(ScdMachine *m, const ScdDynamicImage *img, uint32_t offset, uint32_t length, uint8_t *out) {
   uint32_t done = 0U;
@@ -499,6 +522,7 @@ int scd_dynamic_dispatch(ScdMachine *m, uint32_t cpu, ScdStopClass refusal_stop)
     b->retired += 1U;
     m->dyn.retired += 1U;
     scd_dyn_bit_set(m->dyn.exercised, scd_dyn_slot(b->image));
+    scd_dyn_account(m, b, pc);
   }
   return result;
 }
@@ -577,6 +601,20 @@ void scd_dynamic_report(const ScdMachine *m, FILE *out) {
       if (!b->active) continue;
       fprintf(out, "%s{\"cpu\":%u,\"image\":%u,\"base\":%u,\"lo\":%u,\"hi\":%u,\"run_lo\":%u,\"run_hi\":%u,\"retired\":%llu}", first ? "" : ",", cpu, p->images[b->image].id,
               b->base, b->lo, b->hi, b->run_lo, b->run_hi, (unsigned long long)b->retired);
+      first = 0U;
+    }
+  fprintf(out, "],\"exercised\":[");
+  first = 1U;
+  for (i = 0; i < p->image_count && i < SCD_DYN_MAX_IMAGES; ++i)
+    if (d->image_retired[i] != 0U) {
+      fprintf(out, "%s{\"image\":%u,\"retired\":%llu,\"offsets\":%u}", first ? "" : ",", p->images[i].id, (unsigned long long)d->image_retired[i], d->image_offsets[i]);
+      first = 0U;
+    }
+  fprintf(out, "],\"bound_images\":[");
+  first = 1U;
+  for (i = 0; i < p->image_count && i < SCD_DYN_MAX_IMAGES; ++i)
+    if (scd_dyn_bit_get(d->bound_ever, i)) {
+      fprintf(out, "%s%u", first ? "" : ",", p->images[i].id);
       first = 0U;
     }
   fprintf(out, "],\"event_count\":%u,\"events\":[", d->events);

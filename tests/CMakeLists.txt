@@ -1309,6 +1309,9 @@ set_property(TEST sega_cd_bios_unvisited_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_file_first_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_file_first_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_file_first_test APPEND PROPERTY LABELS full fast)
+add_test(NAME sega_cd_m5_routes_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_m5_routes_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_m5_routes_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_loader_dispatch_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_loader_dispatch_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_loader_dispatch_test APPEND PROPERTY LABELS full fast)
