@@ -651,6 +651,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   scd_wlog_close(&machine);
   scd_event_close(&machine);
   scd_coverage_release(&machine);
+  scd_dynamic_release(&machine);
   scd_machine_release(&machine);
   scd_disc_close(&disc);
   if (live_exit != 0) return live_exit;
