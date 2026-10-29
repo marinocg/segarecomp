@@ -20,6 +20,8 @@
 static uint32_t scd_bank_offset(uint32_t bank, uint32_t offset) { return (offset >> 1) * 4U + bank * 2U + (offset & 1U); }
 static uint32_t scd_main_bank(const ScdMachine *m) { return (m->ga.mode & SCD_MODE_RET) ? 1U : 0U; }
 
+uint32_t scd_word_ram_main_bank_physical(const ScdMachine *m, uint32_t offset) { return scd_bank_offset(scd_main_bank(m), offset); }
+
 static int scd_word_ram_main_mode_apply(ScdMachine *m, uint32_t value);
 static int scd_word_ram_sub_mode_apply(ScdMachine *m, uint32_t value);
 

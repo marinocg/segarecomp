@@ -829,6 +829,8 @@ int scd_pcm_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write,
 int scd_word_ram_access(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 /* Word RAM ownership changes driven by the Gate Array (scd_word_ram.c). */
 int scd_word_ram_main_mode_write(ScdMachine *m, uint32_t value, uint32_t pc);
+/* SEG-103-T002: in 1M mode, the 2M-layout byte offset of the main processor's bank at 128 KiB bank offset `offset` (the view of scd_word_ram_access). */
+uint32_t scd_word_ram_main_bank_physical(const ScdMachine *m, uint32_t offset);
 int scd_word_ram_sub_mode_write(ScdMachine *m, uint32_t value, uint32_t pc);
 /* CDC DMA control shared with the Word RAM logic (scd_cd.c). */
 void scd_cdc_dma_halt_2m(ScdMachine *m);

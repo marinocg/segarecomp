@@ -47,6 +47,10 @@ typedef struct ScdFrameCapture {
 typedef struct ScdVdpHost {
   GenesisRuntime host; /* first member: m->vdp_host points at it */
   GenesisOwnedCartridgeRegion regions[2]; /* [0] the BIOS image; [1] 2M Word RAM as the main processor sees it (SEG-064-T004) */
+  /* SEG-103-T002 (ADR 0239): the 1M Word RAM bank as the main processor sees it, staged for ONE synchronous transfer (at most one 128 KiB DMA
+   * window): a read-only data copy of the guest-visible bank words in source order, with the VDP's window wrap. */
+  GenesisOwnedCartridgeRegion stage_region;
+  uint8_t stage[SCD_WORD_RAM_BYTES / 2U];
   /* SEG-065-T003: frame capture (a pure observer: line instants are extra device-event boundaries, no guest state changes) */
   const char *capture_dir;
   uint32_t capture_count;
@@ -121,8 +125,8 @@ static GenesisAccessWidth scd_genesis_width(uint32_t width) {
  * 68K->VDP DMA when its CD5 is set, DMA is enabled (register #1 bit 4) and register #23 selects the memory family (bit 7 clear) - the
  * host's own arming rule. The host then reads the source through its own memory map, so the source must first be made the Sega CD's:
  * the BIOS image is the host's read-only region and main work RAM is mirrored into the host's work RAM. 2M Word RAM owned by main is a second
- * read-only region (SEG-064-T004). Any other source (1M or unowned Word RAM and the PRG-RAM window, whose Sega CD DMA timing differs) is the
- * typed stop vdp_dma_unsupported. Fill is the host's VRAM fill; copy
+ * read-only region (SEG-064-T004); the 1M bank assigned to main ($200000-$21FFFF) is staged for the one transfer (SEG-103-T002). Any other source (the
+ * 1M cell image and mirrors, unowned 2M Word RAM and the PRG-RAM window, whose Sega CD DMA timing differs) is the typed stop vdp_dma_unsupported. Fill is the host's VRAM fill; copy
  * stays fail-closed in the host. */
 /* SEG-065-T002 (ADR 0147): the end tick of a 68K->VDP DMA of `words` words starting at tick `start`, by GPGX's slot model
  * (core/vdp_ctrl.c vdp_dma_update with system.c system_frame_scd): per line 16 (H32) / 18 (H40) access slots in the active display
@@ -176,6 +180,7 @@ static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t fir
   if (length == 0U) length = 0x10000U;
   source = ((uint32_t)(r[23] & 0x7FU) << 17) | ((uint32_t)(r[22] & 0xFFU) << 9) | ((uint32_t)(r[21] & 0xFFU) << 1);
   end = source + 2U * length;
+  host->owned_regions = ((ScdVdpHost *)host)->regions;
   host->owned_region_count = 1U;
   if (source >= UINT32_C(0x00FF0000) && end <= UINT32_C(0x01000000)) {
     memcpy(host->work_ram, m->work_ram, sizeof host->work_ram);
@@ -194,6 +199,31 @@ static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t fir
     length -= 1U;
     r[19] = (uint16_t)(length & 0xFFU);
     r[20] = (uint16_t)((length >> 8) & 0xFFU);
+  } else if (source >= UINT32_C(0x00200000) && source < UINT32_C(0x00220000) && (m->ga.mode & SCD_MODE_1M)) {
+    /* SEG-103-T002 (ADR 0238, 0239): the bank assigned to main in 1M mode - register #23 = $10, the $200000-$21FFFF window - is read through the
+     * ordinary main view (scd_word_ram_access) with the same source delay as the 2M path (GPGX applies it to every $200000-$3FFFFF source) and
+     * the VDP's 128 KiB source-window wrap (the counter increments only the low and middle address bytes: hardware documented, GPGX). The
+     * host reads its source linearly, so the words are staged in source order. Every refusal precedes every mutation. The $220000-$23FFFF cell
+     * image and the mirrors stay outside this branch (typed stop below). */
+    ScdVdpHost *const h = (ScdVdpHost *)host;
+    uint32_t i;
+    if (length == 1U) return scd_fail(m, SCD_MAIN, SCD_STOP_VDP_DMA_UNSUPPORTED, pc, source); /* no source word left, as in 2M */
+    if (scd_cd_observe(m) != 0) return 1;
+    length -= 1U;
+    for (i = 0U; i < length; ++i) {
+      const uint32_t at = scd_word_ram_main_bank_physical(m, ((source - UINT32_C(0x00200000)) + 2U * i) & 0x1FFFEU);
+      h->stage[2U * i] = m->word_ram[at];
+      h->stage[2U * i + 1U] = m->word_ram[at + 1U];
+    }
+    h->stage_region.begin = source;
+    h->stage_region.end = source + 2U * length;
+    h->stage_region.data = h->stage;
+    h->stage_region.length = 2U * length;
+    host->owned_regions = &h->stage_region;
+    host->owned_region_count = 1U;
+    r[19] = (uint16_t)(length & 0xFFU);
+    r[20] = (uint16_t)((length >> 8) & 0xFFU);
+    *word_ram_lag = 1U;
   } else if (!(end <= m->bios_size)) {
     return scd_fail(m, SCD_MAIN, SCD_STOP_VDP_DMA_UNSUPPORTED, pc, source);
   }
@@ -242,6 +272,10 @@ static void scd_vdp_dma_registers_done(GenesisRuntime *host) {
   uint16_t *r = host->devices.vdp.registers;
   uint32_t end;
   if (!((ScdVdpHost *)host)->dma_armed) return;
+  if (host->owned_regions == &((ScdVdpHost *)host)->stage_region) { /* SEG-103-T002: the staged 1M bank copy served one transfer only */
+    host->owned_regions = ((ScdVdpHost *)host)->regions;
+    host->owned_region_count = 1U;
+  }
   end = ((uint32_t)(r[21] & 0xFFU) | ((uint32_t)(r[22] & 0xFFU) << 8)) + ((uint32_t)(r[19] & 0xFFU) | ((uint32_t)(r[20] & 0xFFU) << 8));
   r[21] = (uint16_t)(end & 0xFFU);
   r[22] = (uint16_t)((end >> 8) & 0xFFU);
