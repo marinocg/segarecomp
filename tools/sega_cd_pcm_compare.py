@@ -7,6 +7,7 @@ the absolute sub-processor time in the reference's 50 MHz-domain cycles (four pe
 (scd_pcm.c). The tool prints only counts and classes: nothing here may contain a pointer value, an address or an instant of an authentic run.
 
 Checks (all aggregate):
+  * the whole product trace is consumed (a longer reference is a prefix comparison; extra or, with --expect-product-operations, missing product operations fail);
   * the sequence of PCM operations (kind, chip offset, written value) is identical operation for operation from the last chip reset on;
   * for every pointer read: the difference in sample events applied since the chip reset (reference minus product) - a histogram;
   * the CPU-timeline skew between the two machines at those operations (reference sub cycles minus product sub cycles, relative to the reset): its range;
@@ -25,6 +26,7 @@ def main():
     ap.add_argument("--trace", required=True)
     ap.add_argument("--reference", required=True)
     ap.add_argument("--sub-cycle-ticks", type=int, default=2148241)
+    ap.add_argument("--expect-product-operations", type=int, help="fail unless the product trace holds exactly this many operations (detects truncation)")
     args = ap.parse_args()
 
     ref = []  # (kind, abs, chip offset, value, a0)
@@ -53,7 +55,15 @@ def main():
     # last reset that is not the power-on one.
     ref = ref[resets[-1]:] if len(resets) > 1 else ref[resets[0]:]
     anchor = ref[0][1]
-    n = min(len(ref), len(mine))
+    # The whole product trace must be consumed: a longer reference is a legitimate comparison of a prefix, but a product trace longer than the reference
+    # (extra operations) or different from the declared length (truncation) is a failure, never a silent pass.
+    n = len(mine)
+    length_errors = []
+    if len(mine) > len(ref):
+        length_errors.append("product trace has %d operations after the reset, the reference only %d" % (len(mine), len(ref)))
+        n = len(ref)
+    if args.expect_product_operations is not None and len(mine) != args.expect_product_operations:
+        length_errors.append("product trace has %d operations, %d expected" % (len(mine), args.expect_product_operations))
     sequence_mismatch = 0
     for i in range(n):
         a, b = ref[i], mine[i]
@@ -76,6 +86,9 @@ def main():
     read_skews = [skews[i] for i in reads]
     out = {
         "operations_compared": n,
+        "product_operations": len(mine),
+        "reference_operations_after_reset": len(ref),
+        "length_errors": length_errors,
         "operation_sequence_mismatches": sequence_mismatch,
         "pointer_reads": len(reads),
         "pointer_reads_equal": len(reads) - differing,
@@ -87,7 +100,7 @@ def main():
     }
     for k, v in out.items():
         print("%s: %s" % (k, v))
-    return 0 if sequence_mismatch == 0 else 1
+    return 0 if sequence_mismatch == 0 and not length_errors else 1
 
 
 if __name__ == "__main__":
