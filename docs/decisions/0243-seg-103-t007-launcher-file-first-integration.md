@@ -33,3 +33,7 @@ Authentic Sonic CD through the launcher was **not** run here (the launcher needs
 ## Limits
 
 The inventory is structural and bounded (oversize, duplicate and structureless files are not compiled); file-first can not compile code the disc does not contain verbatim; there is no sound; the headless path stores no import stamp refresh of its own (a first launch refreshes it, as before).
+
+## Independent review
+
+A separate reviewer attacked argument forwarding, mode exclusivity, record migration, built-versus-selected labelling, failure preservation, headless exit codes, the stamp fix and the fixture. One confirmed medium defect: replacing the program with a different one kept the earlier program's built-mode label (and a refused just-built import could leave a stale result); fixed (an imported different program has an unknown mode; leftovers are cleared on a new build and on a refused import; window G test). Minor: the failure text no longer doubles a full stop. 11 mutants of the change were killed by the new tests; one survives - removing the guard that refuses a file-first request whose product result has no `file_first` member - because no fixture makes the product succeed without it (documented, guarded by code review).

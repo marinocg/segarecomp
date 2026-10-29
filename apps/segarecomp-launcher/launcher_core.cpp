@@ -932,6 +932,7 @@ void ScdBuildJob::run() {
   if (request_.mode == ScdBuildMode::file_first)   // SEG-103-T007: no silent fallback; the user decides whether to try Compatibility
   {
     if (failure.find("\"error\":\"iso9660\"") != std::string::npos) failure = "this disc has no ISO9660 file system the product can read, so its files cannot be inventoried";
+    while (!failure.empty() && (failure.back() == '.' || failure.back() == ' ')) failure.pop_back();
     failure = "File-first build failed: " + failure + ". Nothing was substituted; choose Compatibility to build this game without file-first.";
   }
   set_message(failure);

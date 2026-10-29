@@ -133,6 +133,7 @@ void App::scd_start_build(const std::string &id) {
   failures_.erase(id);
   diagnostics_.erase(id);
   scd_build_notes_.erase(id);
+  scd_built_.erase(id);   // a leftover result of an earlier build whose import was refused must never label another program
   trace(std::string("build=started platform=sega-cd mode=") + scd_build_mode_code(request_mode));
 }
 
@@ -223,12 +224,17 @@ void App::scd_poll() {
           entry->sega_cd.program_experimental = keep_experimental;
           entry->sega_cd.program_built_mode = keep_mode;
           entry->sega_cd.program_file_first_inventory = keep_inventory;
-        }   // else: an imported different program - its build mode is unknown and is not invented
+        } else {   // an imported different program: how it was built is unknown and is not invented (the earlier program's label must not carry over)
+          entry->sega_cd.program_experimental = false;
+          entry->sega_cd.program_built_mode.clear();
+          entry->sega_cd.program_file_first_inventory.clear();
+        }
         save_catalog();
         request_status_refresh();
         toast("Program verified and bound to this game.");
         trace("scd=program_attached");
       } else {
+        scd_built_.erase(target);   // the just-built program was refused: its build result describes nothing
         if (scd_import_reverify_) {  // "Verify again" found a difference: the earlier verification no longer stands
           entry->sega_cd.disc_verified = false;
           save_catalog();

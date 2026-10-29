@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -172,6 +173,17 @@ def main():
               "window F: a failed file-first build is reported as a file-first failure that offers Compatibility, nothing is substituted (%s)" % (bad or [l for l in trace if "build=" in l]))
         check(prog.is_file() and hashlib.sha256(prog.read_bytes()).hexdigest() == before and not (scd_dir / "build.partial").exists(),
               "window F: the previous completed program is untouched by the failed build and no partial folder remains")
+        # window G: replacing the program with a different one never carries the earlier program's built-mode label (it is unknown, not "compatibility")
+        a_copy = tmp / "program-A-copy"
+        shutil.copyfile(prog, a_copy)
+        os.chmod(a_copy, 0o755)
+        trace, lib = run_window(tmp, "e", ["frames 12", "focus_card 0", "frames 4", "key Return", "frames 8", "expect page=details", "expect scd_built_mode=file_first",
+                                           "play", "frames 4", "wait_scd", "wait_play_end", "frames 10",
+                                           "scd_mode compatibility", "build", "frames 6", "wait_scd", "frames 20", "expect scd_built_mode=compatibility", "expect scd_built_inventory=-",
+                                           "scd_attach %s" % a_copy, "frames 6", "wait_scd", "frames 20", "expect scd_built_mode=-", "expect scd_built_inventory=-", "expect scd_selected_mode=compatibility", "quit"],
+                                {"SEGARECOMP_HOME": str(package), "SEGARECOMP_SCD_BUILD_ARGS": "--budget 3000000"})
+        bad = [l for l in trace if l.startswith("expect FAIL")]
+        check(not bad and sum(l.startswith("expect ok") for l in trace) >= 7, "window G: an imported different program has an unknown build mode, not the previous program's (%s)" % (bad or "ok"))
     print("%d failures" % len(failures))
     return 1 if failures else 0
 
