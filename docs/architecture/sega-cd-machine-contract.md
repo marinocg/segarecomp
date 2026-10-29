@@ -50,7 +50,7 @@ Every claim carries one tag:
 | boot | **synthetic post-BIOS fixture profile**: no BIOS byte is present or executed; the runtime establishes the documented post-load placement of IP and SP (section 9) and then runs generated code | C |
 | cartridge | none (mode 1 cartridge boot is out of scope) | C |
 | TV standard | NTSC timing for the main CPU (MCLK 53,693,175 Hz / 7) | V2 (GPGX `system_clock`, repository Genesis runtime) |
-| audio | none: PCM and CD-DA playback are typed stops; fader writes have no modelled effect | C |
+| audio | none: no sound is generated; the PCM chip's CPU-visible running pointers are modelled (SEG-102, section 17); CD-DA playback is a typed stop; fader writes have no modelled effect | C |
 | graphics ASIC | none: stamp/rotation registers are typed stops | C |
 | backup RAM | a machine input (`--backup-ram FILE`, exactly 8 KiB; SEG-065-T002, ADR 0147); without it: typed stop | C (input), V2 (access shape) |
 
@@ -114,7 +114,7 @@ MAME maps the first 1 MiB only).
 | `$80000-$BFFFF` while main owns 2M Word RAM | | DTACK is withheld: the sub **waits**; its instruction is abandoned with its registers as before it (bytes written earlier in the same instruction stay) and retried from its start when main writes `DMNA` = 1 in 2M mode. With no such write the machine ends `idle` with the sub waiting (the hang) | wait: V2 (GPGX `s68k_lockup_*`, MAME silent); retry semantics **G** (GPGX `s68k_pulse_wait` / `s68k_clear_wait`) |
 | `$C0000-$DFFFF` | 1M mode: bank assigned to sub; 2M mode: nothing | 1M: linear 128 KiB; 2M: reads open bus, writes ignored | V2 mapping; 2M behaviour **G** (GPGX `s68k_read_bus_8`) |
 | `$E0000-$EFFFF` | 8 KiB internal backup RAM on the odd byte lane, repeated every 16 KiB of address (cell = A1-A13) | with the machine input: odd byte reads/writes the cell, even byte reads `$FF` and its write is ignored, a word reads `$FF00 \| cell` and its write stores the low byte, a long is two words; without it: typed stop `backup_ram_unsupported` | access V2 (GPGX `bram_read_byte/word`, `bram_write_byte/word`: `scd.bram[(address >> 1) & 0x1fff]`); presence C |
-| `$F0000-$F7FFF` | PCM | typed stop `pcm_unsupported` | C |
+| `$F0000-$F7FFF` | PCM | write state and channel pointer reads (section 17); other reads typed stop `pcm_unsupported` | C |
 | `$F8000-$FFFFF` | Gate Array, sub side (section 5); A1-A8 decode (`$FF8000-$FF81FF` repeated) | per register | V2 registers; repetition G |
 
 The sub CPU's exception vectors live in PRG RAM `$000000-$0003FF` (the sub CPU's address 0), so the vector table is
@@ -469,7 +469,7 @@ synthetic post-BIOS profile.
 | sub-side boot hardware (SEG-064-T004) | the stopwatch, PCM write state, graphics ASIC with its level-1 interrupt, the CDD TOC/seek/pause/resume/jump commands and the CDC host-data transfer (sections 7, 8 and 17); 2M Word RAM owned by main as a VDP DMA source | G; C for the routing |
 | application handoff and after (SEG-064-T005) | without `--application-entry` the application runs through normal generated-native dispatch (section 18); `--until-tick <ticks>` ends a run at a machine-time instant with the result `deadline` (exit 11, no typed stop, resumable: identical under any deadline partition) | C (ADR 0145) |
 | timed standard-pad input (SEG-070-T002, ADR 0149) | `--input-script FILE` (optional; `--input-log FILE` writes the observation log): a text script of `<tick> <port> <press|release> <BUTTON>[,...]` lines under the header `segarecomp-input-script 1`, ticks absolute since reset (500,000 per master clock, 448,020,000,000 per NTSC frame), validated whole before any guest instruction (`input_refused`, exit 23, with the refusal class and line; also refused in the synthetic profile); a transition is a device event that sets the host's pad mask, processed before every other device event and before any processor instruction or interrupt acceptance at or after its tick, in script order, whatever the deadline partition; the Genesis controller pin model serves the pad (TH multiplexing, CTRL direction, data latch, 0 = pressed), so a processor access observes the state in force at its instruction's start tick; without the option no pad is ever pressed and every report is unchanged; with it the report gains an `input` object (events, applied, pad masks, data-port byte reads per port, observation count and FNV digest of the log) | rule C; protocol V2 (GTO1 I/O section, the Genesis hardware notes cited by the controller-I/O policy); the 3-button pad only (6-button and multitap protocols not modelled); a press the independent reference schedules at "frame entry + N" takes effect at the onset that opens that frame (ADR 0176 decision 3; onset numbering equals the reference's frame numbering, ADR 0177 decision 4) |
-| not modelled in this profile yet | the H-interrupt line counter, Z80 execution, 1M/sub-owned Word RAM VDP DMA, PCM sound and register reads, the font registers, CD-DA, and any application behaviour past the interval of section 18 | - |
+| not modelled in this profile yet | the H-interrupt line counter, Z80 execution, 1M/sub-owned Word RAM VDP DMA, PCM sound output and every PCM read except the channel pointers, the font registers, CD-DA, and any application behaviour past the interval of section 18 | - |
 
 ## 17. Sub-side boot hardware (SEG-064-T004, ADR 0144)
 
@@ -483,12 +483,20 @@ the last peripheral reset; a read returns `(units since the anchor - units at th
 the count and keeps the grid phase (G, GPGX `scd_write_word` case `$0C`: `scd.stopwatch += ticks * RATIO`). Byte accesses and word
 accesses at `$FF800D` are typed stops `gate_array_register_unsupported`. A read observes the machine time of its instruction (section 12).
 
-**PCM (`$FF0000-$FF7FFF`).** The power-on and the peripheral reset clear the chip and its wave RAM, select channel 0 and bank 0 and set every panning to `$FF` (GPGX `pcm_reset`, called at the end of `scd_reset`). The area is decoded on /LDS only: a byte write at an odd address, or the low byte of a word write, reaches
+**PCM (`$FF0000-$FF7FFF`).** The power-on and the peripheral reset clear the chip and its wave RAM, select channel 0 and bank 0, set every panning to `$FF`, switch every channel off and restart the sample grid at the reset instant (GPGX `pcm_reset`, called at the end of `scd_reset`). The area is decoded on /LDS only: a byte write at an odd address, or the low byte of a word write, reaches
 the chip at `(address >> 1) & $1FFF` (an even-address byte write is an unused-area write: dropped, counted). Chip offsets `$0-$8` are the
 registers (`ENV`, `PAN`, `FD` low/high, `LS` low/high, `ST` per channel; `CTRL` at 7: bit 6 selects the channel (bits 2-0), otherwise the
-wave RAM bank (bits 3-0), bit 7 the chip enable; `ON/OFF` at 8); other offsets below `$1000` are ignored; `$1000-$1FFF` is the selected
-4 KiB bank of the 64 KiB wave RAM. State is stored only; no sound is generated. Every read (channel address pointers need running
-channels; the RAM read path is unverified) is the typed stop `pcm_unsupported` (G, GPGX `pcm_write`).
+wave RAM bank (bits 3-0), bit 7 the chip enable; `ON/OFF` at 8: a clear bit turns the channel on); other offsets below `$1000` are ignored; `$1000-$1FFF` is the selected
+4 KiB bank of the 64 KiB wave RAM. No sound is generated. SEG-102 (ADR 0233) models what the processor can read back: each channel's running
+wave address (16.11 fixed point, 27 bits) and the sample clock that advances it - one sample event per 384 sub cycles (the stopwatch's unit) at
+`reset instant + k x period`, k = 0, 1, ...; an access at tick t sees exactly the events strictly before t. Per event, every channel that is on
+(and only while the chip is enabled) reads its wave byte at address bits 26-11: `$FF` replaces the address by `LS << 11` (no step on that event),
+anything else adds FD. An ST write reloads a channel that is off; an ON/OFF write reloads every channel whose bit is set (off). A state-changing write and every
+pointer read synchronize the chip to the access instant first. **Reads:** chip offsets `$10-$1F` return the running address of channel `(offset >> 1) & 7` - an even
+offset bits 18-11, an odd offset bits 26-19 - to a byte read at an odd address or to a word read (the byte in the low lane, zero above it: the reference's
+convention, not hardware-verified); a byte read at an even address and every other read (the other registers, the wave RAM read path) is the typed stop
+`pcm_unsupported`, taken before any state changes. CDC DMA into PCM RAM stays a typed stop. (G for the registers and the pointer split, GPGX `pcm_write`/`pcm_read`
+and MAME `rf5c68`; C for the grid anchor, the equal-instant ordering and the loop step.)
 
 **Graphics ASIC (`$FF8058-$FF8066`, word access, 2M Word RAM only).** `$58` control (bit 0 map repeat; bits 2-1 size: 0 = 16x16-dot stamps in a 16x16-stamp map (256x256 dots), 1 = 32x32-dot stamps, 8x8-stamp map (256x256 dots), 2 = 16x16-dot stamps, 256x256-stamp map (4096x4096 dots), 3 = 32x32-dot stamps, 128x128-stamp map (4096x4096 dots); bit 15 reads busy); `$5A` stamp map base (words, `<< 2`
 masked by the map size); `$5C` image buffer height in cells - 1 (bits 4-0); `$5E` image buffer start (`<< 3` dots, bits 18-6) and `$60`

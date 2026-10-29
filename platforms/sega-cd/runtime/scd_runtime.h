@@ -478,8 +478,10 @@ typedef struct ScdCdd {
   uint64_t delivered;       /* data blocks read while playing */
 } ScdCdd;
 
-/* SEG-064-T004: the RF5C164 PCM chip's host-visible write state (scd_pcm.c): register storage and the 64 KiB wave RAM, with no audio
- * generation. Reads that would observe a running channel or the unverified RAM read path are typed stops. */
+/* SEG-064-T004 / SEG-102 (ADR 0233): the RF5C164 PCM chip's CPU-visible state (scd_pcm.c): the register file, the 64 KiB wave RAM and,
+ * since SEG-102, the running wave-address pointer of each channel and the sample clock that advances them. No audio is generated (no
+ * mixer, output buffer or callback exists); only state the sub processor can read back is kept exact. Reads other than the channel
+ * pointers and the unverified RAM read path remain the typed stop pcm_unsupported. */
 typedef struct ScdPcm {
   uint8_t env[8], pan[8], st[8];
   uint16_t fd[8], ls[8];
@@ -487,6 +489,11 @@ typedef struct ScdPcm {
   uint8_t bank;             /* CTRL: wave RAM bank (0-15, 4 KiB each) */
   uint8_t enabled;          /* CTRL bit 7 */
   uint8_t onoff;            /* ON/OFF register as written (a set bit turns the channel off) */
+  uint8_t running;          /* channel run mask: bit n set = channel n ON (the complement of the last ON/OFF write; 0 after a reset) */
+  uint32_t addr[8];         /* running wave address of each channel: 16.11 fixed point (bits 26-11 the wave RAM byte, 10-0 the fraction) */
+  uint64_t origin;          /* tick of the last chip reset: sample events fall at origin + k x period (k = 0, 1, ...) */
+  uint64_t samples;         /* sample events already applied (events strictly before the last synchronization instant) */
+  uint64_t syncs, advanced, channel_steps, max_catchup; /* cost accounting (kept across a reset) */
   uint8_t ram[0x10000];
 } ScdPcm;
 
@@ -564,6 +571,7 @@ typedef struct ScdMachine {
   ScdGfx gfx;
   void *access_trace;                     /* SEG-064-T004 diagnostic (--access-trace): run-length-coded sub Gate Array accesses, or NULL */
   void *write_log;                        /* SEG-079 diagnostic (--ram-write-log): main BIOS reads and PRG/work RAM writes with the writer PC, or NULL */
+  void *pcm_trace;                        /* SEG-102 diagnostic (--pcm-trace): one line per pointer read, or NULL */
   void *event_log;                        /* SEG-064-T004 diagnostic (--event-log): "<vblank count> <event>" lines, or NULL */
   uint8_t verify_only;                    /* SEG-064-T004: the generated variants verify their bytes and return (the handoff entry check) */
   void *coverage;                         /* SEG-064-T004 diagnostic (--coverage): executed instruction starts per processor, or NULL */
@@ -813,6 +821,10 @@ int scd_gfx_can_raise(const ScdMachine *m);
 void scd_gfx_reset(ScdMachine *m);
 /* SEG-064-T004: the sub's PCM area ($FF0000-$FF7FFF; offset within it). */
 void scd_pcm_reset(ScdMachine *m);
+/* Apply every sample event strictly before `tick` (ADR 0233). Exposed for the focused device test; the machine calls it from each access. */
+void scd_pcm_sync(ScdMachine *m, uint64_t tick);
+int scd_pcm_trace_open(ScdMachine *m, const char *path);
+void scd_pcm_trace_close(ScdMachine *m);
 int scd_pcm_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 int scd_word_ram_access(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 /* Word RAM ownership changes driven by the Gate Array (scd_word_ram.c). */

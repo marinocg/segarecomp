@@ -364,13 +364,41 @@
     "size": 176400
    }
   },
+  "pcm/cooked": {
+   "disc.cue": {
+    "sha256": "c9f9fb7a2e4f822fbde6cbec755276c27ef58b8463ab00492bb5ef89e2b74a8b",
+    "size": 155
+   },
+   "track01.bin": {
+    "sha256": "9abde4a64a2234ddf69c88cd09dfbe5c10bf7c940f33d68904ab427f87f8fa2d",
+    "size": 81920
+   },
+   "track02.bin": {
+    "sha256": "70eed6a39b2a89208d0eca36a263607330e75d90f84782e219815a6f2308e97c",
+    "size": 176400
+   }
+  },
+  "pcm/raw": {
+   "disc.cue": {
+    "sha256": "5fa3a4651cb2fc4ac46764ab064ea52156716992c3601ace906f1d4173aac667",
+    "size": 155
+   },
+   "track01.bin": {
+    "sha256": "22468890b9bf081407a424aeeb48ab28527ff69987938b7b548c2f9319a3be46",
+    "size": 94080
+   },
+   "track02.bin": {
+    "sha256": "70eed6a39b2a89208d0eca36a263607330e75d90f84782e219815a6f2308e97c",
+    "size": 176400
+   }
+  },
   "subside/cooked": {
    "disc.cue": {
     "sha256": "c9f9fb7a2e4f822fbde6cbec755276c27ef58b8463ab00492bb5ef89e2b74a8b",
     "size": 155
    },
    "track01.bin": {
-    "sha256": "365042c5005b827d27519340b5a307199e079b226e90056b5e1b03c189e65a34",
+    "sha256": "bc2324d155210756491c0e525c8830467abf4539607a5bb202150a224ee86578",
     "size": 81920
    },
    "track02.bin": {
@@ -384,7 +412,7 @@
     "size": 155
    },
    "track01.bin": {
-    "sha256": "a7845217ecbf5bf7b41f5827c07a239a1b298ffbb368869abce3da9c5d225393",
+    "sha256": "47457633eb55a4b3747dd69817472387a594ee571802a03c786880c6ffab7346",
     "size": 94080
    },
    "track02.bin": {

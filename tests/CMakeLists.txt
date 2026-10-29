@@ -1181,6 +1181,19 @@ segarecomp_enable_warnings(sega_cd_file_candidates_test)
 add_test(NAME sega_cd_file_candidates_test COMMAND sega_cd_file_candidates_test)
 set_property(TEST sega_cd_file_candidates_test APPEND PROPERTY LABELS full fast)
 # SEG-100-T003 (ADR 0223): runtime binding of a file-first dynamic image to the guest memory the original game loaded it into.
+add_executable(sega_cd_pcm_test sega_cd_pcm_test.c)
+set_target_properties(sega_cd_pcm_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_link_libraries(sega_cd_pcm_test PRIVATE segarecomp::runtime_sega_cd)
+segarecomp_enable_warnings(sega_cd_pcm_test)
+add_test(NAME sega_cd_pcm_test COMMAND sega_cd_pcm_test)
+set_property(TEST sega_cd_pcm_test APPEND PROPERTY LABELS full fast)
+
+# Local diagnostic (not a test; built on request): replays recorded PCM operation sequences through the chip model (ADR 0236).
+add_executable(sega_cd_pcm_replay EXCLUDE_FROM_ALL sega_cd_pcm_replay.c)
+set_target_properties(sega_cd_pcm_replay PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_link_libraries(sega_cd_pcm_replay PRIVATE segarecomp::runtime_sega_cd)
+segarecomp_enable_warnings(sega_cd_pcm_replay)
+
 add_executable(sega_cd_dynamic_binding_test sega_cd_dynamic_binding_test.c)
 set_target_properties(sega_cd_dynamic_binding_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
 target_link_libraries(sega_cd_dynamic_binding_test PRIVATE segarecomp::runtime_sega_cd)
@@ -1207,6 +1220,11 @@ set_property(TEST sega_cd_word_ram_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_subside_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_subside_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_subside_test APPEND PROPERTY LABELS full fast)
+add_test(NAME sega_cd_pcm_compare_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_pcm_compare_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_pcm_compare_test APPEND PROPERTY LABELS full fast)
+add_test(NAME sega_cd_pcm_native_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_pcm_native_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_pcm_native_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_bios_bootarea_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_bios_bootarea_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_bios_bootarea_test APPEND PROPERTY LABELS full fast)

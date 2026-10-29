@@ -143,10 +143,12 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
           m->cdc.head[0][3]);
   /* SEG-064-T004: the sub-side devices of the boot path (stopwatch, graphics ASIC, PCM write state, CDC host register). */
   fprintf(out, ",\"sub_devices\":{\"stopwatch\":{\"origin\":%llu,\"base\":%u},\"gfx\":{\"busy\":%u,\"ctl\":%u,\"lines_left\":%u,"
-               "\"operations\":%llu,\"lines_rendered\":%llu},\"pcm\":{\"index\":%u,\"bank\":%u,\"enabled\":%u,\"onoff\":%u,\"ram\":\"",
+               "\"operations\":%llu,\"lines_rendered\":%llu},\"pcm\":{\"index\":%u,\"bank\":%u,\"enabled\":%u,\"onoff\":%u,\"running\":%u,\"origin\":%llu,\"samples\":%llu,\"syncs\":%llu,\"channel_steps\":%llu,\"max_catchup\":%llu,\"addr\":[%u,%u,%u,%u,%u,%u,%u,%u],\"ram\":\"",
           (unsigned long long)m->ga.stopwatch_origin, m->ga.stopwatch_base, m->gfx.busy, m->gfx.ctl, m->gfx.lines_left,
           (unsigned long long)m->gfx.operations, (unsigned long long)m->gfx.lines_rendered, m->pcm.index, m->pcm.bank, m->pcm.enabled,
-          m->pcm.onoff);
+          m->pcm.onoff, m->pcm.running, (unsigned long long)m->pcm.origin, (unsigned long long)m->pcm.samples,
+          (unsigned long long)m->pcm.syncs, (unsigned long long)m->pcm.channel_steps, (unsigned long long)m->pcm.max_catchup,
+          m->pcm.addr[0], m->pcm.addr[1], m->pcm.addr[2], m->pcm.addr[3], m->pcm.addr[4], m->pcm.addr[5], m->pcm.addr[6], m->pcm.addr[7]);
   scd_sha_hex(m->pcm.ram, sizeof m->pcm.ram, digest);
   fprintf(out, "%s\"},\"cdc_host_word\":%u}", digest, m->cdc.host_word);
   fprintf(out, ",\"cdd\":{\"status\":%u,\"lba\":%ld,\"index\":%u,\"latency\":%u,\"pending\":%u,\"delivered\":%llu,\"rx\":[",
@@ -480,7 +482,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   const char *capture_dir = NULL;
   uint64_t capture_onsets[8];
   unsigned capture_count = 0U;
-  const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *wlog_path = NULL, *event_path = NULL, *backup_ram_path = NULL;
+  const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *wlog_path = NULL, *event_path = NULL, *backup_ram_path = NULL, *pcm_trace_path = NULL;
   const char *input_script_path = NULL, *input_log_path = NULL, *record_path = NULL;
   const ScdLiveHost *const live_host = scd_live_host_registered; /* SEG-078-T001: a viewer registered its host */
   ScdLiveSummary live_summary;
@@ -525,6 +527,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     else if (strcmp(flag, "--coverage") == 0) coverage_path = value;
     else if (strcmp(flag, "--access-trace") == 0) trace_path = value;
     else if (strcmp(flag, "--event-log") == 0) event_path = value;
+    else if (strcmp(flag, "--pcm-trace") == 0) pcm_trace_path = value; /* SEG-102 diagnostic (local only) */
     else if (strcmp(flag, "--ram-write-log") == 0) wlog_path = value;     /* SEG-079 diagnostic (local only) */
     else if (authentic != NULL && strcmp(flag, "--bios") == 0) bios_path = value;           /* SEG-064-T002 */
     else if (authentic != NULL && strcmp(flag, "--materialize-dir") == 0) materialize_dir = value;
@@ -595,6 +598,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   if (trace_path != NULL && scd_trace_open(&machine, trace_path) != 0) return 1;
   if (wlog_path != NULL && scd_wlog_open(&machine, wlog_path) != 0) return 1;
   if (event_path != NULL && scd_event_open(&machine, event_path) != 0) return 1;
+  if (pcm_trace_path != NULL && scd_pcm_trace_open(&machine, pcm_trace_path) != 0) return 1;
   for (i = 0; i < set_count; ++i)
     if (!scd_apply_set(&machine, sets[i])) return 2;
   memset(&live_summary, 0, sizeof live_summary);
@@ -650,6 +654,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   scd_trace_close(&machine);
   scd_wlog_close(&machine);
   scd_event_close(&machine);
+  scd_pcm_trace_close(&machine);
   scd_coverage_release(&machine);
   scd_dynamic_release(&machine);
   scd_machine_release(&machine);
