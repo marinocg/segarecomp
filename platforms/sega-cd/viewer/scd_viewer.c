@@ -6,11 +6,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "genesis_audio_policy.h"
 #include "scd_live.h"
 #include "viewer.h"
 #include "viewer_sdl3.h"
 
 #define KEY_SCRIPT_MAX 4096U
+#define CDDA_PENDING_FRAMES 4096U /* about 93 ms: several video frames of CD-DA (a frame carries 1 or 2 sectors, 588 frames each) */
 
 /* Automation seam (like the launcher's SEGARECOMP_GUI_SCRIPT): SEGARECOMP_VIEWER_KEY_SCRIPT names a file of `<poll> down|up <SDL key name>` (or `<poll> quit x`)
  * lines; at the start of that poll of the driver the key event is pushed onto SDL's queue, so the REAL keyboard mapping, settings and
@@ -30,6 +32,13 @@ typedef struct ScdSdlHost {
   GenesisPacer pacer;
   int opened, failed;
   int paused;
+  /* SEG-104 (ADR 0244): the CD-DA stream. The machine hands over one drive sector at a time (scd_live.h `audio`); the frames wait here
+   * until the end of the video frame and are then presented under the Genesis audio policy (queue limit, underrun, mute counters). A one-way
+   * flow: nothing here is read by the machine, and a frame that does not fit is counted and dropped, never waited for. */
+  GenesisAudioPresenter presenter;
+  int16_t pending[CDDA_PENDING_FRAMES * 2U];
+  uint32_t pending_frames;
+  uint64_t pending_dropped, delivered;
 } ScdSdlHost;
 
 static ScdSdlHost g_host;
@@ -85,6 +94,13 @@ static int ensure_open(ScdSdlHost *h) {
     }
     genesis_sdl3_viewer_host(h->sdl, &h->host);
     genesis_pacer_init(&h->pacer, unthrottled != NULL && strcmp(unthrottled, "1") == 0);
+    {
+      const char *mute = getenv("SEGARECOMP_VIEWER_MUTE");
+      const int muted = mute != NULL && strcmp(mute, "1") == 0;
+      /* A failed open, a missing audio subsystem or mute leaves the viewer silent; the stream is still consumed so it never accumulates. */
+      genesis_audio_presenter_init(&h->presenter, muted ? NULL : genesis_sdl3_viewer_audio_open(h->sdl), muted);
+      genesis_sdl3_viewer_report_audio_drops(h->sdl, &h->presenter.overrun_dropped);
+    }
     h->opened = 1;
     load_key_script(h);
   }
@@ -125,8 +141,28 @@ static int sdl_present(void *ctx, const struct GenesisFrameArtifact *frame, uint
   return ensure_open(h) == 0 ? h->host.present(h->host.ctx, frame) : -1;
 }
 
+static void flush_cdda(ScdSdlHost *h) {
+  if (h->pending_frames == 0U) return;
+  genesis_audio_present_chunk(&h->presenter, h->pending, h->pending_frames);
+  h->delivered += h->pending_frames;
+  h->pending_frames = 0U;
+}
+
+/* SEG-104: called by the machine for every CD-DA sector the guest's drive plays. */
+static int sdl_audio(void *ctx, const int16_t *frames, uint32_t count) {
+  ScdSdlHost *h = (ScdSdlHost *)ctx;
+  if (!h->opened || count > CDDA_PENDING_FRAMES - h->pending_frames) {
+    h->pending_dropped += count;
+    return 1;
+  }
+  memcpy(h->pending + 2U * h->pending_frames, frames, (size_t)count * 4U);
+  h->pending_frames += count;
+  return 0;
+}
+
 static int sdl_pace(void *ctx, uint64_t frame_ticks, uint64_t ticks_per_second) {
   ScdSdlHost *h = (ScdSdlHost *)ctx;
+  if (h->opened) flush_cdda(h); /* the frame's CD-DA reaches the device before the pacer waits */
   return ensure_open(h) == 0 ? genesis_pacer_wait_period(&h->pacer, &h->host, frame_ticks, ticks_per_second) : -1;
 }
 
@@ -134,6 +170,12 @@ static void sdl_finished(void *ctx, const struct ScdLiveSummary *summary, const 
   ScdSdlHost *h = (ScdSdlHost *)ctx;
   char detail[240];
   if (!h->opened) return;
+  flush_cdda(h);
+  if (h->delivered + h->pending_dropped != 0U)
+    fprintf(stderr, "viewer: cdda frames offered=%llu submitted=%llu overrun_dropped=%llu refused=%llu discarded=%llu underruns=%llu pending_dropped=%llu\n",
+            (unsigned long long)(h->delivered + h->pending_dropped), (unsigned long long)h->presenter.submitted,
+            (unsigned long long)h->presenter.overrun_dropped, (unsigned long long)h->presenter.refused, (unsigned long long)h->presenter.discarded,
+            (unsigned long long)h->presenter.underruns, (unsigned long long)h->pending_dropped);
   if (summary->outcome == SCD_LIVE_MACHINE_STOP && summary->result == SCD_RUN_STOPPED) {
     snprintf(detail, sizeof detail,
              "The generated program stopped with the typed stop %s on the %s processor. Nothing was lost: the machine fails closed rather than guess.",
@@ -156,6 +198,7 @@ int scd_viewer_main_bios(const ScdProgram *program, const ScdAuthentic *authenti
   live.present = sdl_present;
   live.pace = sdl_pace;
   live.finished = sdl_finished;
+  live.audio = sdl_audio;
   scd_live_host_registered = &live;
   rc = scd_program_main_bios(program, authentic, argc, argv);
   scd_live_host_registered = NULL;
