@@ -720,8 +720,9 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
       << "static const ScdProgram scd_program = {\n  {{scd_p0_entries, " << result.entries[0] << "U, scd_p0_dispatch, UINT32_C(0x"
       << hex(inputs.bios.reset_pc) << "), 0U, 0U, 0U},\n   {scd_p1_entries, " << result.entries[1] << "U, scd_p1_dispatch, 0U, 0U, 0U, 0U}},\n"
       << "  {scd_disc_files, " << disc.files().size() << "U, scd_disc_tracks, " << disc.tracks().size() << "U, \"" << disc.identity()
-      << "\", {0}},\n  UINT32_C(0x" << hex(inputs.bios.reset_ssp) << "),\n  \"" << result.program_identity << "\"" << (dynamic_present ? ",\n  &scd_dynamic_program" : "") << "\n};\n\n"
-      << "int main(int argc, char **argv) { return scd_program_main_bios(&scd_program, &scd_bios_profile, argc, argv); }\n";
+      << "\", {0}},\n  UINT32_C(0x" << hex(inputs.bios.reset_ssp) << "),\n  \"" << result.program_identity << "\"" << "" << "\n};\n\n"
+      << (dynamic_present ? "int main(int argc, char **argv) { scd_dynamic_register(&scd_dynamic_program); return scd_program_main_bios(&scd_program, &scd_bios_profile, argc, argv); }\n"
+                          : "int main(int argc, char **argv) { return scd_program_main_bios(&scd_program, &scd_bios_profile, argc, argv); }\n");
   if (dynamic_present) {
     for (auto &unit : dynamic.units) {
       BiosProfileUnit u;

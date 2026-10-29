@@ -313,7 +313,7 @@ int scd_compiled(const ScdMachine *m, uint32_t cpu, uint32_t address) {
     else hi = mid;
   }
   /* SEG-100 (ADR 0221): an address inside a verified dynamic binding with a precompiled body is a compiled entry as well. */
-  return m->program->dynamic != NULL && scd_dynamic_lookup(cpu, address) != NULL;
+  return m->dyn.enabled && scd_dynamic_lookup(cpu, address) != NULL;
 }
 
 static void scd_trace(ScdCpu *c) {

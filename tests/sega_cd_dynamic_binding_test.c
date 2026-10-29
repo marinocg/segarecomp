@@ -196,7 +196,7 @@ int main(void) {
   dynamic_program.body_count = 1U;
   dynamic_program.body_lengths = body_lengths;
   dynamic_program.policy = "test";
-  program.dynamic = &dynamic_program;
+  scd_dynamic_register(&dynamic_program);
   memset(bios, 0, sizeof bios);
   bios[1] = 0xFFU; /* SSP */
   bios[5] = 0x02U; /* reset PC $000200 */
@@ -266,6 +266,12 @@ int main(void) {
   put(SCD_MAIN, 0xFF0000U, img[0], 64U);           /* bytes no delivered image has */
   check(dispatch(SCD_MAIN, 0xFF0000U) != 0 && machine->dyn.refused[SCD_DYN_REFUSE_NO_SOURCE] == 1U && machine->dyn.refused[SCD_DYN_REFUSE_AMBIGUOUS] == 0U,
         "an anchor before the PC is taken only from the PC's own memory: the mirror's zeros never make a lookup ambiguous");
+
+  /* the tail of an image at the bottom of memory: its byte 0 would lie below address 0, so there is no base (and no out-of-range bookkeeping) */
+  reset_machine();
+  deliver_image(0);
+  put(SCD_SUB, 0x0000U, img[0] + 2048U, 952U);
+  check(dispatch(SCD_SUB, 0x40U) != 0 && machine->dyn.binds == 0U && machine->dyn.refused[SCD_DYN_REFUSE_NO_SOURCE] == 1U, "an image whose byte 0 would lie below address 0 is not bound (and nothing is written out of range)");
 
   /* ---- evidence and typing of refusals ---- */
   reset_machine();

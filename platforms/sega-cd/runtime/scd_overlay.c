@@ -126,7 +126,7 @@ void scd_overlay_note_write(ScdMachine *m, uint32_t memory, uint32_t offset, uin
 
 void scd_overlay_note_view_change(ScdMachine *m) {
   uint32_t g;
-  if (m->program != NULL && m->program->dynamic != NULL) scd_dynamic_note_view_change(m); /* SEG-100 */
+  if (m->dyn.enabled) scd_dynamic_note_view_change(m); /* SEG-100 */
   if (m->overlays == NULL) return;
   for (g = 0; g < m->overlays->group_count; ++g) {
     m->overlay[g].all_dirty = 1U;

@@ -788,7 +788,7 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     }
   }
   if (!have_cue || !have_bios || !have_output || !have_runtime || o.cc.empty() || o.budget == 0 || (argc - 3) % 2 != 0 ||
-      ((o.aot_model_given || o.aot_all_images) && o.aot_policy != "optimized")) {
+      ((o.aot_model_given || o.aot_all_images) && o.aot_policy != "optimized") || (!o.file_first.empty() && o.aot_policy == "optimized")) {
     std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
     return 2;
   }

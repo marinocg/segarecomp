@@ -367,6 +367,7 @@ typedef struct ScdDynamicEvent {
 #define SCD_DYN_CACHE_SECTORS 4U
 
 typedef struct ScdDynamicState {
+  uint8_t enabled;         /* the program registered dynamic images (scd_dynamic_register); idle otherwise */
   uint32_t cpu;            /* the processor whose instruction the dispatched body executes (read by the body into its `scd_k`) */
   ScdDynamicBinding binding[2][SCD_DYN_MAX_BINDINGS];
   uint64_t order;
@@ -390,7 +391,6 @@ typedef struct ScdProgram {
   ScdDisc disc;
   uint32_t main_initial_ssp;
   const char *program_identity;   /* build identity: disc identity + generator version */
-  const ScdDynamicProgram *dynamic;  /* SEG-100: file-first dynamic images, or NULL (every earlier program) */
 } ScdProgram;
 
 /* --- Gate Array / devices ------------------------------------------------------------------------------------------------ */
@@ -623,7 +623,7 @@ void scd_overlay_note_view_change(ScdMachine *m);
 #define SCD_OVERLAY_NOTE_WRITE(m, memory, offset, length) \
   do { \
     if ((m)->overlays != NULL) scd_overlay_note_write((m), (memory), (offset), (length)); \
-    if ((m)->program != NULL && (m)->program->dynamic != NULL) scd_dynamic_note_write((m), (memory), (offset), (length)); \
+    if ((m)->dyn.enabled) scd_dynamic_note_write((m), (memory), (offset), (length)); \
   } while (0)
 void scd_overlay_attach(ScdMachine *m, const ScdOverlayProgram *overlays);
 /* The address at which processor `cpu` sees byte `offset` of `memory`; *visible = 0 when it does not see it (scd_overlay.c). */
@@ -637,6 +637,8 @@ const uint32_t *scd_dynamic_lookup(uint32_t cpu, uint32_t pc);
 int scd_dynamic_known(ScdMachine *m, uint32_t cpu, uint32_t pc);
 void scd_dynamic_note_write(ScdMachine *m, uint32_t memory, uint32_t offset, uint32_t length);
 void scd_dynamic_note_view_change(ScdMachine *m);
+/* A program with dynamic images registers them before it starts (generated main); the field is not part of ScdProgram so that every other program is unchanged. */
+void scd_dynamic_register(const ScdDynamicProgram *program);
 void scd_dynamic_attach(ScdMachine *m);
 void scd_dynamic_report(const ScdMachine *m, FILE *out);
 

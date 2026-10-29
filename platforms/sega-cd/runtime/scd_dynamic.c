@@ -48,12 +48,17 @@ static void scd_dyn_event(ScdMachine *m, uint32_t cpu, uint32_t kind, uint32_t p
   d->events += 1U;
 }
 
+static const ScdDynamicProgram *scd_dyn_registered;
+
+void scd_dynamic_register(const ScdDynamicProgram *program) { scd_dyn_registered = program; }
+
 void scd_dynamic_attach(ScdMachine *m) {
   memset(&m->dyn, 0, sizeof m->dyn);
-  scd_dyn_machine = (m->program != NULL && m->program->dynamic != NULL) ? m : NULL;
+  m->dyn.enabled = scd_dyn_registered != NULL ? 1U : 0U;
+  scd_dyn_machine = scd_dyn_registered != NULL ? m : NULL;
 }
 
-static const ScdDynamicProgram *scd_dyn_program(const ScdMachine *m) { return m->program != NULL ? m->program->dynamic : NULL; }
+static const ScdDynamicProgram *scd_dyn_program(const ScdMachine *m) { (void)m; return scd_dyn_registered; }
 
 static uint32_t scd_dyn_sectors(const ScdDynamicImage *img) { return (img->length + 2047U) / 2048U; }
 
@@ -271,7 +276,7 @@ static uint32_t scd_dyn_search_anchor(ScdMachine *m, uint32_t cpu, uint32_t pc, 
       }
       /* the source offset of PC under this alignment must be an even instruction start inside the image */
       pc_off = at + (pc - anchor_at);
-      if (pc_off >= img->length || (pc_off & 1U) != 0U) continue;
+      if (pc_off >= img->length || (pc_off & 1U) != 0U || pc_off > pc) continue;   /* the image's byte 0 would lie below address 0 */
       lo_i = at;
       hi_i = at + SCD_DYN_ANCHOR_BYTES;
       while (lo_i > 0U && anchor_at - (at - lo_i) > 0U) { /* extend back while the live bytes equal the image and the block was delivered */
@@ -353,7 +358,11 @@ static ScdDynamicBinding *scd_dyn_install(ScdMachine *m, uint32_t cpu, const Scd
   const ScdDynamicImage *img = &p->images[c->image];
   ScdDynamicBinding *slot = NULL;
   uint32_t k, g;
-  const uint32_t lo = c->base, hi = c->base + img->length;
+  uint32_t lo = c->base, hi = c->base + img->length, rlo = 0U, rhi = 0U;
+  if (scd_dyn_region(cpu, pc, &rlo, &rhi)) {   /* what the binding serves never leaves the memory it was found in (the image's un-loaded head may lie before it) */
+    if (lo < rlo) lo = rlo;
+    if (hi > rhi) hi = rhi;
+  }
   int overlaps_other = 0;
   for (k = 0; k < SCD_DYN_MAX_BINDINGS; ++k) {
     ScdDynamicBinding *b = &m->dyn.binding[cpu][k];

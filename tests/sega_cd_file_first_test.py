@@ -162,6 +162,12 @@ def main():
         done = subprocess.run([SEGARECOMP, "sega-cd", "emit", "--cue", str(fx / "disc" / "disc.cue"), "--bios", str(fx / "bios.bin"), "--out", str(tmp / "e5.c"), "--file-first", "structural"],
                               capture_output=True, text=True, timeout=300)
         check(done.returncode != 0, "file-first without a partition window is refused (the bodies are separate translation units)")
+        done = subprocess.run([SEGARECOMP, "sega-cd", "emit", "--cue", str(fx / "disc" / "disc.cue"), "--bios", str(fx / "bios.bin"), "--out", str(tmp / "e8.c"), "--partition-window", "8192",
+                               "--file-first", "structural", "--aot-policy", "optimized"], capture_output=True, text=True, timeout=300)
+        check(done.returncode != 0 and "incompatible_with_experimental_aot_policy" in done.stdout, "dynamic images are not combined with the experimental M3+B35 selector (it is never an image authority)")
+        done = subprocess.run([SEGARECOMP, "sega-cd", "build", "--cue", str(fx / "disc" / "disc.cue"), "--bios", str(fx / "bios.bin"), "--output", str(tmp / "n-both"), "--runtime-dir", str(ROOT),
+                               "--cc", CC, "--file-first", "structural", "--aot-policy", "optimized"], capture_output=True, text=True, timeout=300)
+        check(done.returncode == 2, "the supported build refuses the same combination up front")
         fx_noiso, _ = fixture(tmp, "base", iso=False)
         done, jn = emit(fx_noiso, tmp / "e6", "--file-first", "structural")
         check(done.returncode != 0 and jn and jn.get("ok") is False and jn.get("stage") == "file_first" and jn.get("error") == "iso9660",

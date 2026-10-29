@@ -468,6 +468,7 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     inputs.admissions.push_back(std::move(a));
   }
   scd::FileFirstSelection selection;
+  if (file_first.enabled && aot_request) return bad("file_first", "incompatible_with_experimental_aot_policy");   // the experimental selector is never an image authority and is not combined with dynamic images
   if (file_first.enabled) {  // SEG-100: the candidate files are chosen from the verified disc by the generic policy, compiled before launch, bound at run time
     selection = scd::select_file_first_images(disc, file_first.policy, file_first.limits);
     if (selection.enumeration != scd::FileCandidateError::none) return bad("file_first", scd::file_candidate_error_name(selection.enumeration));
