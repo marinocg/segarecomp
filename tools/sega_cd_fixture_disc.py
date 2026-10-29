@@ -671,7 +671,7 @@ def fixture_bootarea(options):
 # subside (SEG-064-T004) -----------------------------------------------------------------------------------------------------
 # The stopwatch and the graphics-completion interrupt (level 1) on the CPU. Expected values come from a hand-written MC68000 cycle table
 # (MC68000 User's Manual, instruction execution times), not from the runtime's timing core.
-CYCLES = {"move_b_imm_abs": 20, "move_w_abs_dn": 16, "move_w_imm_dn": 8, "move_w_dn_abs": 16}
+CYCLES = {"move_b_imm_abs": 20, "move_w_abs_dn": 16, "move_b_abs_dn": 16, "move_w_imm_dn": 8, "move_w_dn_abs": 16}
 
 
 def dbra_cycles(n):
@@ -688,7 +688,7 @@ def fixture_subside(options):
     negative_cases = [
         (1, "gate_array_register_unsupported", 0xFF800D, 1, 0, "stopwatch byte read", lambda: sub.move("b", absl(GA_SUB + 0x0D), d(0))),
         (2, "gate_array_register_unsupported", 0xFF800C, 1, 1, "stopwatch byte write", lambda: sub.move("b", imm(1), absl(GA_SUB + 0x0C))),
-        (3, "pcm_unsupported", 0xFF0021, 1, 0, "PCM register read", lambda: sub.move("b", absl(0xFF0021), d(0))),
+        (3, "pcm_unsupported", 0xFF0001, 1, 0, "PCM register read (ENV; only the address pointers are readable)", lambda: sub.move("b", absl(0xFF0001), d(0))),
         (4, "gate_array_register_unsupported", 0xFF805A, 1, 1, "graphics byte write", lambda: sub.move("b", imm(1), absl(GA_SUB + 0x5A))),
         (5, "gate_array_register_unsupported", 0xFF805A, 2, 0, "graphics parameter read", lambda: sub.move("w", absl(GA_SUB + 0x5A), d(0))),
         (6, "cdc_destination_unsupported", 0xFF8008, 0, 0, "CDC host-data byte write", lambda: sub.move("b", imm(1), absl(GA_SUB + 0x08))),
@@ -810,6 +810,69 @@ def fixture_subside(options):
                 "comstat": [0, 0, 1, 1, 2, 4, 3, 3], "interrupts": {"1": 3, "2": 1}, "negatives": negatives,
                 "wake": {"comstat0": 1, "sub_flag": 2, "level1": 1}}
     return main.assemble(), sub.assemble(), {}, expected
+
+
+# pcm (SEG-102) -------------------------------------------------------------------------------------------------------------
+# The RF5C164 pointer registers on the CPU. RES0 = 0 restarts the chip's sample grid at that instruction (time 0); every later access instant
+# comes from the MC68000 cycle table (not from the runtime's timing core), so the expected pointer values are hand-derived: the grid's events fall at
+# multiples of 384 sub cycles, an access observes the events strictly before its start, and a channel started by the ON write at time T counts the
+# events at or after T.
+def fixture_pcm(options):
+    sub = Asm(SP_BASE)
+    state = {"t": 0, "pad": 0}
+
+    def at(cycles):
+        state["t"] += cycles
+
+    def pad_to(target):
+        """Delay so that the next instruction starts exactly at `target` sub cycles: MOVE.W #n,D1 (8) + DBRA loop (10 n + 14) + p NOPs (4)."""
+        rem = target - state["t"]
+        for p in range(5):
+            r = rem - 22 - 4 * p
+            if r >= 0 and r % 10 == 0:
+                n = r // 10
+                break
+        else:
+            raise ValueError("cannot pad %d cycles" % rem)
+        label = "pad%d" % state["pad"]
+        state["pad"] += 1
+        sub.move("w", imm(n), d(1))
+        sub.label(label)
+        sub.dbra(1, label)
+        for _ in range(p):
+            sub.nop()
+        state["t"] = target
+
+    def write_b(address, value):
+        sub.move("b", imm(value), absl(address))
+        at(CYCLES["move_b_imm_abs"])
+
+    write_b(GA_SUB + 0x01, 0x00)          # t = 0: RES0 = 0, the peripheral reset: the PCM sample grid restarts here
+    write_b(0xFF000F, 0x40)               # CTRL: select channel 0 (the chip enable bit is clear)
+    write_b(0xFF0005, 0x00)               # FD low
+    write_b(0xFF0007, 0x08)               # FD high: $0800 = exactly one wave byte per sample
+    write_b(0xFF000F, 0x80)               # CTRL: bank 0, chip enabled
+    assert state["t"] == 100
+    write_b(0xFF0011, 0xFE)               # ON/OFF: channel 0 ON at t = 100 (the event at t = 0 is behind it)
+    reads = {}
+    pad_to(3840)                           # = 10 x 384: exactly on a sample event
+    sub.move("b", absl(0xFF0021), d(2)); at(CYCLES["move_b_abs_dn"]); reads["d2"] = 9     # events 1..9 (the event at 3840 is not yet seen)
+    sub.move("b", absl(0xFF0023), d(3)); at(CYCLES["move_b_abs_dn"]); reads["d3"] = 0     # high byte
+    sub.move("w", absl(0xFF0020), d(4)); at(CYCLES["move_w_abs_dn"]); reads["d4"] = 10    # word read at 3872: events 1..10, the low byte only
+    pad_to(7676)                           # 4 cycles before the event at 7680
+    sub.move("b", absl(0xFF0021), d(5)); at(CYCLES["move_b_abs_dn"]); reads["d5"] = 19
+    pad_to(11520)                          # exactly on the event at 11520
+    sub.move("b", absl(0xFF0021), d(6)); at(CYCLES["move_b_abs_dn"]); reads["d6"] = 29
+    pad_to(15364)                          # 4 cycles after the event at 15360
+    sub.move("b", absl(0xFF0021), d(7)); at(CYCLES["move_b_abs_dn"]); reads["d7"] = 40
+    sub.move("b", imm(0x02), absl(GA_SUB + 0x0F))
+    sub.stop(0x2700)
+
+    main = Asm(IP_BASE)
+    main_start_sub(main, SP_BASE)
+    wait_flag(main, GA_MAIN + 0x0F, 2, "w_done")
+    main_finish(main)
+    return main.assemble(), sub.assemble(), {}, {"d": reads}
 
 
 # cdframe ---------------------------------------------------------------------------------------------------------------------
@@ -1285,6 +1348,7 @@ FIXTURES = {
     "wordram_wait": fixture_wordram_wait,
     "timer": fixture_timer,
     "subside": fixture_subside,
+    "pcm": fixture_pcm,
     "bootarea": fixture_bootarea,
     "cdframe": fixture_cdframe,
     "modules": fixture_modules,

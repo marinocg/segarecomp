@@ -21,6 +21,7 @@
  * bits 26-19 (channel = (offset >> 1) & 7). */
 #include "scd_runtime.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* GPGX scd_reset() ends with pcm_reset() for the power-on and the peripheral reset alike: the chip clears with the external wave RAM, the
@@ -28,6 +29,7 @@
 void scd_pcm_reset(ScdMachine *m) {
   uint32_t c;
   const uint64_t syncs = m->pcm.syncs, advanced = m->pcm.advanced, steps = m->pcm.channel_steps, catchup = m->pcm.max_catchup;
+  if (m->pcm_trace != NULL) fprintf((FILE *)m->pcm_trace, "Z %llu %llu\n", (unsigned long long)m->vdp_frames, (unsigned long long)m->now);
   memset(&m->pcm, 0, sizeof m->pcm);
   for (c = 0; c < 8U; ++c) m->pcm.pan[c] = 0xFFU;
   m->pcm.origin = m->now; /* the sample grid restarts at the reset instant (power-on: tick 0) */
@@ -105,8 +107,26 @@ static void scd_pcm_write_chip(ScdMachine *m, uint32_t address, uint32_t data) {
   }
 }
 
+/* The pointer registers (chip offsets $10-$1F) are the only independently verified reads (ADR 0233). */
+static int scd_pcm_is_pointer(uint32_t chip_offset) { return chip_offset >= 0x10U && chip_offset < 0x20U; }
+
 int scd_pcm_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
-  if (!is_write) return scd_pcm_unsupported(m, offset, width, 0, pc); /* the readback is SEG-102-T003 */
+  if (!is_write) {
+    /* Only /LDS carries the chip (contract section 17): a byte read at an even address is the unused lane, whose open-bus value is not
+     * modelled. A word read returns the chip byte in its low lane; the upper lane is the reference's zero (not hardware-verified). A refused
+     * read changes nothing (no synchronization). */
+    const uint32_t chip = (offset >> 1) & 0x1FFFU;
+    uint32_t byte;
+    if ((width == 1U && !(offset & 1U)) || !scd_pcm_is_pointer(chip)) return scd_pcm_unsupported(m, offset, width, 0, pc);
+    scd_pcm_sync(m, m->now);
+    byte = (m->pcm.addr[(chip >> 1) & 7U] >> ((chip & 1U) ? 19 : 11)) & 0xFFU;
+    *value = byte;
+    scd_log(m, 0x3AU, offset, byte);
+    if (m->pcm_trace != NULL) /* SEG-102 diagnostic: onsets so far, machine tick, bus offset, width, value, channel address, samples applied */
+      fprintf((FILE *)m->pcm_trace, "R %llu %llu %X %u %X %X %llu\n", (unsigned long long)m->vdp_frames, (unsigned long long)m->now, offset, width, byte,
+              m->pcm.addr[(chip >> 1) & 7U], (unsigned long long)m->pcm.samples);
+    return 0;
+  }
   if (width == 1U && !(offset & 1U)) { /* /LDS not asserted: an unused-area write */
     ++m->ignored_writes;
     scd_log(m, 0x51U, 0xFF0000U + offset, *value);
@@ -114,6 +134,19 @@ int scd_pcm_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write,
   }
   scd_log(m, 0x39U, offset, *value);
   scd_pcm_sync(m, m->now);
+  if (m->pcm_trace != NULL) /* SEG-102 diagnostic: onsets so far, machine tick, chip offset, value, samples applied (before the write) */
+    fprintf((FILE *)m->pcm_trace, "W %llu %llu %X %X %llu\n", (unsigned long long)m->vdp_frames, (unsigned long long)m->now, (offset >> 1) & 0x1FFFU,
+            (unsigned)(*value & 0xFFU), (unsigned long long)m->pcm.samples);
   scd_pcm_write_chip(m, (offset >> 1) & 0x1FFFU, *value & 0xFFU);
   return 0;
+}
+
+int scd_pcm_trace_open(ScdMachine *m, const char *path) {
+  m->pcm_trace = fopen(path, "w");
+  return m->pcm_trace == NULL;
+}
+
+void scd_pcm_trace_close(ScdMachine *m) {
+  if (m->pcm_trace != NULL) fclose((FILE *)m->pcm_trace);
+  m->pcm_trace = NULL;
 }

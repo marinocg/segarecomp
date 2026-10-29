@@ -482,7 +482,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   const char *capture_dir = NULL;
   uint64_t capture_onsets[8];
   unsigned capture_count = 0U;
-  const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *wlog_path = NULL, *event_path = NULL, *backup_ram_path = NULL;
+  const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *wlog_path = NULL, *event_path = NULL, *backup_ram_path = NULL, *pcm_trace_path = NULL;
   const char *input_script_path = NULL, *input_log_path = NULL, *record_path = NULL;
   const ScdLiveHost *const live_host = scd_live_host_registered; /* SEG-078-T001: a viewer registered its host */
   ScdLiveSummary live_summary;
@@ -527,6 +527,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     else if (strcmp(flag, "--coverage") == 0) coverage_path = value;
     else if (strcmp(flag, "--access-trace") == 0) trace_path = value;
     else if (strcmp(flag, "--event-log") == 0) event_path = value;
+    else if (strcmp(flag, "--pcm-trace") == 0) pcm_trace_path = value; /* SEG-102 diagnostic (local only) */
     else if (strcmp(flag, "--ram-write-log") == 0) wlog_path = value;     /* SEG-079 diagnostic (local only) */
     else if (authentic != NULL && strcmp(flag, "--bios") == 0) bios_path = value;           /* SEG-064-T002 */
     else if (authentic != NULL && strcmp(flag, "--materialize-dir") == 0) materialize_dir = value;
@@ -597,6 +598,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   if (trace_path != NULL && scd_trace_open(&machine, trace_path) != 0) return 1;
   if (wlog_path != NULL && scd_wlog_open(&machine, wlog_path) != 0) return 1;
   if (event_path != NULL && scd_event_open(&machine, event_path) != 0) return 1;
+  if (pcm_trace_path != NULL && scd_pcm_trace_open(&machine, pcm_trace_path) != 0) return 1;
   for (i = 0; i < set_count; ++i)
     if (!scd_apply_set(&machine, sets[i])) return 2;
   memset(&live_summary, 0, sizeof live_summary);
@@ -652,6 +654,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   scd_trace_close(&machine);
   scd_wlog_close(&machine);
   scd_event_close(&machine);
+  scd_pcm_trace_close(&machine);
   scd_coverage_release(&machine);
   scd_dynamic_release(&machine);
   scd_machine_release(&machine);

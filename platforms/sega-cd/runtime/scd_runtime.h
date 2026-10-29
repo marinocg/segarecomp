@@ -571,6 +571,7 @@ typedef struct ScdMachine {
   ScdGfx gfx;
   void *access_trace;                     /* SEG-064-T004 diagnostic (--access-trace): run-length-coded sub Gate Array accesses, or NULL */
   void *write_log;                        /* SEG-079 diagnostic (--ram-write-log): main BIOS reads and PRG/work RAM writes with the writer PC, or NULL */
+  void *pcm_trace;                        /* SEG-102 diagnostic (--pcm-trace): one line per pointer read, or NULL */
   void *event_log;                        /* SEG-064-T004 diagnostic (--event-log): "<vblank count> <event>" lines, or NULL */
   uint8_t verify_only;                    /* SEG-064-T004: the generated variants verify their bytes and return (the handoff entry check) */
   void *coverage;                         /* SEG-064-T004 diagnostic (--coverage): executed instruction starts per processor, or NULL */
@@ -822,6 +823,8 @@ void scd_gfx_reset(ScdMachine *m);
 void scd_pcm_reset(ScdMachine *m);
 /* Apply every sample event strictly before `tick` (ADR 0233). Exposed for the focused device test; the machine calls it from each access. */
 void scd_pcm_sync(ScdMachine *m, uint64_t tick);
+int scd_pcm_trace_open(ScdMachine *m, const char *path);
+void scd_pcm_trace_close(ScdMachine *m);
 int scd_pcm_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 int scd_word_ram_access(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
 /* Word RAM ownership changes driven by the Gate Array (scd_word_ram.c). */

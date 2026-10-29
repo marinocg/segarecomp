@@ -271,14 +271,16 @@ int main(void) {
   {
     const ScdPcm before = m->pcm;
     int stop;
-    stop = bus_read(0xFF0021U, 1U, &v);
+    stop = bus_read(0xFF0001U, 1U, &v);
     row(stop == SCD_STOP_PCM_UNSUPPORTED && memcmp(&before, &m->pcm, sizeof before) == 0,
-        "PCM: a register read (channel address pointers need running channels) is the typed stop pcm_unsupported and mutates nothing");
+        "PCM: a read of any register but the channel address pointers (ENV, $FF0001) is the typed stop pcm_unsupported and mutates nothing");
     scd_read(m, SCD_SUB, 0xFF2001U, 1U, &v, 0x6B00U);
     row(m->stop.stop_class == SCD_STOP_PCM_UNSUPPORTED && m->stop.cpu == SCD_SUB && m->stop.pc == 0x6B00U && m->stop.address == 0xFF2001U &&
             m->stop.width == 1U && m->stop.is_write == 0U,
         "PCM: a wave RAM read stops typed with the sub, pc, address, width and direction");
     m->stop.stop_class = SCD_STOP_NONE;
+    row(bus_read(0xFF0021U, 1U, &v) == 0 && v == 0U && bus_read(0xFF0023U, 1U, &v) == 0 && v == 0U && bus_read(0xFF0020U, 2U, &v) == 0 && v == 0U,
+        "PCM: the channel 0 address pointer reads (SEG-102, ADR 0233: byte low, byte high, word) are served; 0 for a channel that never ran (ST was not written)");
   }
 
   /* GPGX scd_reset() ends with pcm_reset(): power-on and peripheral reset clear the chip and the wave RAM, select channel 0 and bank 0,
