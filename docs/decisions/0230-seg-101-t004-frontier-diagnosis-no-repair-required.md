@@ -1,6 +1,6 @@
 # ADR 0230: SEG-101-T004 - frontier diagnosis; no repair was required
 
-- Status: Accepted. Milestone SEG-101 (M5), task T004. Related: ADR 0227, 0229; the PCM contract of ADR 0095-class (`scd_pcm.c`: only write-only state is modelled).
+- Status: Accepted. Milestone SEG-101 (M5), task T004. Related: ADR 0227, 0229; `platforms/sega-cd/runtime/scd_pcm.c` (only write-only chip state is modelled).
 - Privacy: classes, counts and widths only; no address of the commercial image appears (the chip offsets below are hardware register offsets).
 
 ## What the three routes found
