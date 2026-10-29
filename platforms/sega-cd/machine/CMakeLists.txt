@@ -12,6 +12,7 @@ add_library(segarecomp_machine_sega_cd
   src/source_resolve.cpp
   src/dynamic_body.cpp
   src/file_candidates.cpp
+  src/dynamic_images.cpp
 )
 add_library(segarecomp::machine_sega_cd ALIAS segarecomp_machine_sega_cd)
 target_link_libraries(segarecomp_machine_sega_cd PUBLIC segarecomp::media segarecomp::recompiler segarecomp::codegen_c11_m68k)

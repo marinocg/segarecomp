@@ -1168,6 +1168,12 @@ target_link_libraries(sega_cd_overlay_emission_test PRIVATE segarecomp::machine_
 segarecomp_enable_warnings(sega_cd_overlay_emission_test)
 add_test(NAME sega_cd_overlay_emission_test COMMAND sega_cd_overlay_emission_test)
 set_property(TEST sega_cd_overlay_emission_test APPEND PROPERTY LABELS full fast)
+# SEG-100-T002 (ADR 0222): the processor-neutral source-offset instruction body for a guest base unknown at compile time.
+add_executable(sega_cd_dynamic_body_test sega_cd_dynamic_body_test.cpp)
+target_link_libraries(sega_cd_dynamic_body_test PRIVATE segarecomp::machine_sega_cd)
+segarecomp_enable_warnings(sega_cd_dynamic_body_test)
+add_test(NAME sega_cd_dynamic_body_test COMMAND sega_cd_dynamic_body_test)
+set_property(TEST sega_cd_dynamic_body_test APPEND PROPERTY LABELS full fast)
 # SEG-100-T001/T004 (ADR 0221, 0224): the structural candidate policy and the broad census.
 add_executable(sega_cd_file_candidates_test sega_cd_file_candidates_test.cpp)
 target_link_libraries(sega_cd_file_candidates_test PRIVATE segarecomp::machine_sega_cd)
