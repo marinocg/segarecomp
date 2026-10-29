@@ -235,10 +235,17 @@ static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t fir
     const uint64_t end = scd_vdp_dma_end(m, host, m->now, length, (code & 0x06U) == 0U, &windows);
     m->main_dma_until = end;
     m->main_dma_multi = windows > 1U ? 1U : 0U;
+    m->main_dma_bank_until = host->owned_regions == &((ScdVdpHost *)host)->stage_region ? end : 0U;
     ((ScdVdpHost *)m->vdp_host)->dma_armed = 1U;
     m->vdp_dma_count += 1U;
+    if (m->main_dma_bank_until != 0U) m->vdp_dma_bank_count += 1U;
     m->vdp_dma_stall_ticks += end - m->now;
     scd_log(m, 0x48U, (uint32_t)((end - m->now) / SCD_MASTER_TICK_TICKS), code); /* SEG-065-T002: DMA duration */
+    if (m->event_log != NULL) { /* SEG-103-T004: observer-only diagnostic (--event-log): source word address, transferred words, duration in master clocks */
+      scd_event(m, "dma_src", ((uint32_t)(r[23] & 0x7FU) << 16) | ((uint32_t)(r[22] & 0xFFU) << 8) | (uint32_t)(r[21] & 0xFFU));
+      scd_event(m, "dma_len", length);
+      scd_event(m, "dma_dur", (uint32_t)((end - m->now) / SCD_MASTER_TICK_TICKS));
+    }
   }
   return 0;
 }

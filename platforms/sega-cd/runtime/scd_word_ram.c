@@ -69,7 +69,13 @@ int scd_word_ram_sub_mode_write(ScdMachine *m, uint32_t value, uint32_t pc) {
   (void)pc;
   if (scd_cd_observe(m) != 0) return 1;
   status = scd_word_ram_sub_mode_apply(m, value);
-  if ((m->ga.mode ^ mode_before) & (SCD_MODE_1M | SCD_MODE_RET)) scd_overlay_note_view_change(m);
+  if ((m->ga.mode ^ mode_before) & (SCD_MODE_1M | SCD_MODE_RET)) {
+    scd_overlay_note_view_change(m);
+    if (m->main_dma_bank_until > m->now) { /* SEG-103: the bank the waiting transfer read changed owner while it waited (counted, not modelled) */
+      ++m->wordram_mode_changes_in_dma;
+      if (m->event_log != NULL) scd_event(m, "wordram_mode_in_dma", m->ga.mode);
+    }
+  }
   return status;
 }
 

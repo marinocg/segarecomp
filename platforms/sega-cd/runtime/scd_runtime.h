@@ -581,6 +581,9 @@ typedef struct ScdMachine {
    * vdp_dma_update: m68k.cycles = dma_endCycles); the instruction that armed it then completes from that tick. */
   uint64_t main_dma_until;                /* 0, or the tick at which the armed DMA ends */
   uint8_t main_dma_multi;                 /* the transfer spans more than one slot window (GPGX re-anchors at its end) */
+  uint64_t main_dma_bank_until;           /* SEG-103: end tick of the last transfer read from the 1M bank (0: the last transfer was not); observer for RET/MODE changes during the wait */
+  uint64_t vdp_dma_bank_count;            /* SEG-103: transfers read from the 1M bank */
+  uint64_t wordram_mode_changes_in_dma;   /* SEG-103: sub-side RET/MODE changes that took effect while such a transfer waited (an unmodelled hazard, ADR 0238 question 11) */
   uint64_t vdp_dma_count, vdp_dma_stall_ticks;
   uint8_t backup_ram_present;
   uint8_t backup_ram[SCD_BACKUP_RAM_BYTES];

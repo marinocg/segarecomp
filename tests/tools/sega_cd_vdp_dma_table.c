@@ -507,6 +507,23 @@ int main(void) {
         arm_offset = 0U;
         row(w == 42750U, "1M, H32 active line 10, 100 words after the delay: 42750 (the hand-derived value of the 2M table)");
       }
+      /* the observer of the unmodelled hazard (ADR 0238 question 11): a sub-side RET change while a 1M-bank transfer waits is counted, not modelled */
+      fresh_banks(0x54U, 0x00U);
+      sentinels();
+      m->ga.mode = SCD_MODE_1M;
+      w = arm(4U, 0x200000U, 2U, 0x4000U | 0x0040U, 0x0080U, 0);
+      row(w == 123U && m->vdp_dma_bank_count == 1U && m->main_dma_bank_until == m->main_dma_until && m->wordram_mode_changes_in_dma == 0U,
+          "a 1M-bank transfer is counted and its wait end recorded");
+      m->now += 1U; /* the sub processor's instruction inside the wait: RET 0 -> 1 */
+      scd_word_ram_sub_mode_write(m, SCD_MODE_1M | SCD_MODE_RET, 0x1000U);
+      row(m->wordram_mode_changes_in_dma == 1U, "a RET change by the sub inside the wait is counted");
+      m->now = m->main_dma_bank_until + 1U; /* after the wait */
+      scd_word_ram_sub_mode_write(m, SCD_MODE_1M, 0x1000U);
+      row(m->wordram_mode_changes_in_dma == 1U, "a RET change after the wait is not");
+      fresh_banks(0x54U, 0x00U);
+      m->ga.mode = SCD_MODE_RET;
+      arm(4U, 0x200000U, 2U, 0x4000U | 0x0040U, 0x0080U, 0);
+      row(m->vdp_dma_bank_count == 0U && m->main_dma_bank_until == 0U, "a 2M transfer is not a bank transfer");
       /* the 1M deadline-independent behavior: staging is synchronous, so a DMA armed one instant later gives the same bytes and duration */
       /* refusals: length one, the cell image, the mirrors; nothing is mutated */
       {
