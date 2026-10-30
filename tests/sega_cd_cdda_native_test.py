@@ -134,7 +134,8 @@ def main():
             vexe = pathlib.Path(summary["viewer"]["program"])
             dev = tmp / "device.raw"
             env = {"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "disk", "SDL_AUDIO_DISK_OUTPUT_FILE": str(dev), "SEGARECOMP_VIEWER_NO_STOP_SCREEN": "1",
-                   "SEGARECOMP_VIEWER_SETTINGS": str(tmp / "settings.cfg")}
+                   "SEGARECOMP_VIEWER_SETTINGS": str(tmp / "settings.cfg"),
+                   "SDL_AUDIO_DISK_TIMESCALE": "0.8"}  # SEG-107: the viewer now streams the continuous mixed timeline; a device draining 25 % faster never overruns
             vrep, vpcm = tmp / "v.json", tmp / "v.pcm"
             code, out = run(vexe, base + ["--cdda-pcm", vpcm, "--report", vrep], env)
             vr = json.loads(vrep.read_text()) if vrep.exists() else {}
@@ -142,14 +143,17 @@ def main():
             check(vr.get("cdda", {}).get("pcm_sha256") == cdda["pcm_sha256"] and vpcm.read_bytes() == data,
                   "viewer: the machine produced the identical canonical stream and digest as the headless run")
             stat = re.search(r"cdda frames offered=(\d+) submitted=(\d+) overrun_dropped=(\d+) refused=(\d+) discarded=(\d+) underruns=(\d+) pending_dropped=(\d+)", out.stderr)
-            check(stat is not None and int(stat.group(1)) == cdda["frames"] and int(stat.group(2)) == cdda["frames"] and int(stat.group(3)) == 0 and
+            mixed_frames = vr.get("audio", {}).get("frames", -1)  # SEG-107: the viewer plays the mixed timeline (this fixture has no PCM: CD-DA plus silence)
+            check(stat is not None and int(stat.group(1)) == mixed_frames and int(stat.group(2)) == mixed_frames and int(stat.group(3)) == 0 and
                   int(stat.group(4)) == 0 and int(stat.group(5)) == 0 and int(stat.group(7)) == 0,
                   "viewer: every canonical frame was submitted to the SDL3 stream (none dropped, refused or discarded): %s" % (stat.group(0) if stat else out.stderr[-200:]))
             played = dev.read_bytes() if dev.exists() else b""
             frames = [played[i:i + 4] for i in range(0, len(played) - len(played) % 4, 4)]
             nonzero = b"".join(f for f in frames if f != b"\0\0\0\0")
             wanted = b"".join(data[i:i + 4] for i in range(0, len(data), 4) if data[i:i + 4] != b"\0\0\0\0")
-            check(len(played) > 0 and nonzero == wanted, "viewer: the samples SDL played (device file, silence removed) are the canonical stream (%d bytes played)" % len(played))
+            tail = len(wanted) - len(nonzero)  # frames still queued in the device when the window closes
+            check(len(played) > 0 and wanted.startswith(nonzero) and 0 <= tail <= 4 * 4410,
+                  "viewer: the samples SDL played (device file, silence removed) are the canonical stream up to the frames still queued at exit (%d bytes played)" % len(played))
             # mute: the stream is consumed, nothing reaches the device
             dev2 = tmp / "device2.raw"
             code, out = run(vexe, base + ["--report", tmp / "m.json"], {**env, "SDL_AUDIO_DISK_OUTPUT_FILE": str(dev2), "SEGARECOMP_VIEWER_MUTE": "1"})

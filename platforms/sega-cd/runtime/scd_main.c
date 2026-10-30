@@ -78,6 +78,7 @@ static int scd_apply_set(ScdMachine *m, const char *spec) {
 }
 
 static void scd_write_cdda_report(FILE *out, const ScdMachine *m);
+static void scd_write_audio_report(FILE *out, const ScdMachine *m);
 
 static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *program, ScdRunResult result, const char *frame_sha,
                              const ScdLiveSummary *live) {
@@ -215,6 +216,7 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
   }
   scd_dynamic_report(m, out); /* SEG-100: absent for a program without dynamic images (reports unchanged) */
   if (m->cdda.enabled) scd_write_cdda_report(out, m); /* SEG-104: absent unless CD-DA output was requested (reports unchanged) */
+  if (m->mix.enabled) scd_write_audio_report(out, m); /* SEG-107: absent unless the mixed PCM + CD-DA output was requested (reports unchanged) */
   fprintf(out, "}\n");
 }
 
@@ -262,6 +264,47 @@ static void scd_write_cdda_report(FILE *out, const ScdMachine *m) {
           (unsigned long long)c->commands[1], (unsigned long long)c->commands[3], (unsigned long long)c->commands[4],
           (unsigned long long)c->commands[6], (unsigned long long)c->commands[7], (unsigned long long)c->commands[10], c->fader_register,
           c->fader_target, c->fader_volume);
+  for (i = 0; i < 32U; ++i) fprintf(out, "%02x", digest[i]);
+  fprintf(out, "\"}");
+}
+
+/* SEG-107 (ADR 0251): the mixed-output tap, the same shape as the CD-DA tap but for any frame count: it hashes the canonical stream (little-endian S16
+ * stereo at 44.1 kHz), optionally writes it, and forwards it to a live host's sink. */
+typedef struct ScdMixTap {
+  GenesisSha256 sha;
+  FILE *pcm;
+  const ScdLiveHost *host;
+  uint64_t io_errors;
+} ScdMixTap;
+
+static ScdMixTap g_mix_tap;
+
+static int scd_mix_tap(void *context, const int16_t *frames, uint32_t count) {
+  ScdMixTap *const tap = (ScdMixTap *)context;
+  uint8_t bytes[4U * SCD_MIX_CHUNK_FRAMES];
+  uint32_t i;
+  if (count > SCD_MIX_CHUNK_FRAMES) return 1;
+  for (i = 0; i < 2U * count; ++i) {
+    bytes[2U * i] = (uint8_t)((uint16_t)frames[i] & 0xFFU);
+    bytes[2U * i + 1U] = (uint8_t)((uint16_t)frames[i] >> 8);
+  }
+  genesis_sha256_update(&tap->sha, bytes, 4U * count);
+  if (tap->pcm != NULL && fwrite(bytes, 1U, 4U * count, tap->pcm) != 4U * count) tap->io_errors += 1U;
+  return tap->host != NULL && tap->host->audio != NULL ? tap->host->audio(tap->host->ctx, frames, count) : 0;
+}
+
+static void scd_write_audio_report(FILE *out, const ScdMachine *m) {
+  GenesisSha256 sha = g_mix_tap.sha;
+  uint8_t digest[32];
+  unsigned i;
+  const ScdMix *const x = &m->mix;
+  genesis_sha256_final(&sha, digest);
+  fprintf(out, ",\"audio\":{\"sample_rate\":44100,\"frames\":%llu,\"pcm_events\":%llu,\"pcm_frames\":%llu,\"pcm_peak\":%u,\"cdda_queued\":%llu,"
+               "\"cdda_mixed\":%llu,\"cdda_dropped\":%llu,\"cdda_gaps\":%llu,\"cdda_readahead\":%llu,\"cdda_skipped\":%llu,\"saturated\":%llu,\"sink_refused\":%llu,\"io_errors\":%llu,\"pcm_sha256\":\"",
+          (unsigned long long)x->frames, (unsigned long long)x->pcm_events, (unsigned long long)x->pcm_frames, x->peak, (unsigned long long)x->cdda_frames,
+          (unsigned long long)x->cdda_mixed, (unsigned long long)x->cdda_dropped, (unsigned long long)x->cdda_gaps, (unsigned long long)x->cdda_readahead,
+          (unsigned long long)x->cdda_skipped, (unsigned long long)x->saturated,
+          (unsigned long long)x->sink_refused, (unsigned long long)g_mix_tap.io_errors);
   for (i = 0; i < 32U; ++i) fprintf(out, "%02x", digest[i]);
   fprintf(out, "\"}");
 }
@@ -535,7 +578,8 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   unsigned capture_count = 0U;
   const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *wlog_path = NULL, *event_path = NULL, *backup_ram_path = NULL, *pcm_trace_path = NULL;
   const char *input_script_path = NULL, *input_log_path = NULL, *record_path = NULL, *cdda_pcm_path = NULL, *cdda_log_path = NULL;
-  int cdda_requested = 0;
+  int cdda_requested = 0, mix_requested = -1; /* SEG-107: -1 = default (on for a viewer with audio), 0 = off, 1 = on */
+  const char *mix_pcm_path = NULL;
   const ScdLiveHost *const live_host = scd_live_host_registered; /* SEG-078-T001: a viewer registered its host */
   ScdLiveSummary live_summary;
   int live_exit = 0;
@@ -583,6 +627,9 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     else if (strcmp(flag, "--cdda-pcm") == 0) { cdda_pcm_path = value; cdda_requested = 1; } /* SEG-104: canonical CD-DA stream (S16LE stereo, 44.1 kHz) */
     else if (strcmp(flag, "--cdda-log") == 0) cdda_log_path = value; /* SEG-104 diagnostic (local only): CD-DA run starts and interruptions */
     else if (strcmp(flag, "--cdda-digest") == 0) cdda_requested = strcmp(value, "1") == 0; /* SEG-104: `1` = produce CD-DA and report its digest and counters */
+    else if (strcmp(flag, "--audio-pcm") == 0) { mix_pcm_path = value; mix_requested = 1; } /* SEG-107: canonical mixed PCM + CD-DA stream (S16LE stereo, 44.1 kHz) */
+    else if (strcmp(flag, "--audio-digest") == 0) mix_requested = strcmp(value, "1") == 0;  /* SEG-107: `1` = synthesize PCM, mix with CD-DA, report the digest */
+    else if (strcmp(flag, "--pcm-audio") == 0) mix_requested = strcmp(value, "1") == 0;     /* SEG-107: `0` turns the viewer's mixing off (CD-DA only, as SEG-104) */
     else if (strcmp(flag, "--ram-write-log") == 0) wlog_path = value;     /* SEG-079 diagnostic (local only) */
     else if (authentic != NULL && strcmp(flag, "--bios") == 0) bios_path = value;           /* SEG-064-T002 */
     else if (authentic != NULL && strcmp(flag, "--materialize-dir") == 0) materialize_dir = value;
@@ -656,11 +703,22 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   if (pcm_trace_path != NULL && scd_pcm_trace_open(&machine, pcm_trace_path) != 0) return 1;
   for (i = 0; i < set_count; ++i)
     if (!scd_apply_set(&machine, sets[i])) return 2;
+  if (mix_requested < 0) mix_requested = live_host != NULL && live_host->audio != NULL ? 1 : 0;
+  if (mix_requested) cdda_requested = 1; /* the mix carries CD-DA: the CD-DA tap and report stay (and their digest is the legacy one) */
   if (cdda_requested && authentic == NULL) return 2; /* SEG-104: CD-DA is a BIOS-image profile output (the synthetic profile keeps its typed stop) */
   if (authentic != NULL && (cdda_requested || (live_host != NULL && live_host->audio != NULL))) { /* SEG-104: attach the CD-DA tap */
     memset(&g_cdda_tap, 0, sizeof g_cdda_tap);
     genesis_sha256_init(&g_cdda_tap.sha);
-    g_cdda_tap.host = live_host;
+    g_cdda_tap.host = mix_requested ? NULL : live_host; /* with the mix the host receives the mixed frames instead */
+    if (mix_requested) {
+      memset(&g_mix_tap, 0, sizeof g_mix_tap);
+      genesis_sha256_init(&g_mix_tap.sha);
+      g_mix_tap.host = live_host;
+      if (mix_pcm_path != NULL && (g_mix_tap.pcm = fopen(mix_pcm_path, "wb")) == NULL) return 1;
+      machine.mix.sink = scd_mix_tap;
+      machine.mix.sink_context = &g_mix_tap;
+      machine.mix.enabled = 1U;
+    }
     if (cdda_pcm_path != NULL) {
       g_cdda_tap.pcm = fopen(cdda_pcm_path, "wb");
       if (g_cdda_tap.pcm == NULL) return 1;
@@ -721,6 +779,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   scd_write_report(report, &machine, program, result, frame_digest, live_host != NULL ? &live_summary : NULL);
   if (report != stdout && fclose(report) != 0) return 1;
   if (g_cdda_tap.pcm != NULL && fclose(g_cdda_tap.pcm) != 0) return 1;
+  if (g_mix_tap.pcm != NULL && fclose(g_mix_tap.pcm) != 0) return 1;
   if (machine.cdda.log != NULL) fclose(machine.cdda.log);
   scd_trace_close(&machine);
   scd_wlog_close(&machine);

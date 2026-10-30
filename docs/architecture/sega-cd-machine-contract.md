@@ -50,7 +50,7 @@ Every claim carries one tag:
 | boot | **synthetic post-BIOS fixture profile**: no BIOS byte is present or executed; the runtime establishes the documented post-load placement of IP and SP (section 9) and then runs generated code | C |
 | cartridge | none (mode 1 cartridge boot is out of scope) | C |
 | TV standard | NTSC timing for the main CPU (MCLK 53,693,175 Hz / 7) | V2 (GPGX `system_clock`, repository Genesis runtime) |
-| audio | CD-DA only (BIOS-image profile, SEG-104, section 22): the drive's audible sectors become canonical stereo S16 samples at 44.1 kHz; no RF5C164 sound, FM, PSG or Z80 sound (the PCM chip's CPU-visible running pointers are modelled, SEG-102, section 17); the synthetic profile keeps the typed stop `cd_read_audio_track` | C / V1 (see section 22) |
+| audio | CD-DA (SEG-104, section 22) and RF5C164 PCM (SEG-107, section 23) mixed on one 44.1 kHz stereo S16 guest-time timeline (BIOS-image profile, optional); no FM, PSG or Z80 sound; the synthetic profile keeps the typed stop `cd_read_audio_track` | C / V1 (see section 22) |
 | graphics ASIC | none: stamp/rotation registers are typed stops | C |
 | backup RAM | a machine input (`--backup-ram FILE`, exactly 8 KiB; SEG-065-T002, ADR 0147); without it: typed stop | C (input), V2 (access shape) |
 
@@ -487,7 +487,7 @@ accesses at `$FF800D` are typed stops `gate_array_register_unsupported`. A read 
 the chip at `(address >> 1) & $1FFF` (an even-address byte write is an unused-area write: dropped, counted). Chip offsets `$0-$8` are the
 registers (`ENV`, `PAN`, `FD` low/high, `LS` low/high, `ST` per channel; `CTRL` at 7: bit 6 selects the channel (bits 2-0), otherwise the
 wave RAM bank (bits 3-0), bit 7 the chip enable; `ON/OFF` at 8: a clear bit turns the channel on); other offsets below `$1000` are ignored; `$1000-$1FFF` is the selected
-4 KiB bank of the 64 KiB wave RAM. No sound is generated. SEG-102 (ADR 0233) models what the processor can read back: each channel's running
+4 KiB bank of the 64 KiB wave RAM. Sound generation is optional and one-way (section 23). SEG-102 (ADR 0233) models what the processor can read back: each channel's running
 wave address (16.11 fixed point, 27 bits) and the sample clock that advances it - one sample event per 384 sub cycles (the stopwatch's unit) at
 `reset instant + k x period`, k = 0, 1, ...; an access at tick t sees exactly the events strictly before t. Per event, every channel that is on
 (and only while the chip is enabled) reads its wave byte at address bits 26-11: `$FF` replaces the address by `LS << 11` (no step on that event),
@@ -596,3 +596,21 @@ without changing the drive. Applies to the BIOS-image profile; the synthetic pro
 | refusals | a disc read failing at run time while output is enabled is the typed stop `cd_read_failed`; a missing or modified disc file never starts (disc open). A missing or failing audio device only silences the viewer | ADR 0244 |
 
 Not modelled: the hardware fader's real ramp, CD-DA emphasis, subcode, RF5C164/FM/PSG mixing, and audio of compressed or WAV tracks.
+
+## 23. RF5C164 PCM output and the mixed timeline (SEG-107, ADR 0251)
+
+Optional (`--audio-pcm FILE`, `--audio-digest 1`, and by default in the viewer; `--pcm-audio 0` turns it off). Off, nothing below exists and every report is as before. On, the guest-visible state is unchanged (only the chip's lazily synchronized diagnostic position moves in the report: `pcm.samples`, `channel_steps`, `max_catchup` and `addr`).
+
+| Item | Behaviour | Basis |
+|---|---|---|
+| sample | one stereo sample per sample event of section 17, taken before the channel's address advances: a wave byte is sign-magnitude, bit 7 set = positive; `$FF` is the loop marker (the address becomes `LS << 11` and the byte at LS is read instead; a loop onto a marker is silent) | G (GPGX `pcm_run`) / V (MAME `rf5c68`) |
+| gain | per channel and side `(value x ENV x PAN-nibble) >> 5` (left = PAN bits 3-0, right = bits 7-4), rounding toward minus infinity; all running channels are summed per side and clamped to 16 bits; the chip enable (CTRL bit 7) off is silence | G / V; MAME rounds the magnitude (<= 1 LSB per negative channel apart) |
+| native rate | 12,500,000 / 384 = 32,552.08 Hz (one event per 384 sub cycles of the profile-aware sub clock) | G / V |
+| 44.1 kHz timeline | frame `n` is at guest tick `floor(n x ticks_per_second / 44100)` from tick 0 (exact integer arithmetic) and takes the latest sample event at or before it (zero-order hold; no interpolation, no host resampler) | design (host policy, not hardware) |
+| CD-DA | a run starts at the drive tick that first plays a sector and then advances one frame per output frame; the queue (2,048 frames) is refilled from the disc ahead of the 75 Hz drive tick (the model tick is about 340 ppm slower than 588 frames) with the next contiguous sector of the track, stopping at the track end, an unreadable sector and the drive's interruption; the fader (section 22) is applied per frame from the instant of the write | design; fader G |
+| run ends | the queue is not flushed at an interruption: up to one sector (13 ms) of the run still plays after a stop, pause or seek, and a resume re-delivers the drive's current sector, so up to one sector may repeat; read-ahead stops at the track end even when the next track is audio and contiguous (about two frames of silence) | design |
+| mix | saturating sum of CD-DA and PCM; with one silent the other passes unchanged | G / V |
+| advancement | only at guest events (register access, reset, video-frame event, sector delivery or interruption, fader write); independent of slicing | design |
+| consumers | a sink for mixed chunks of up to 1,024 frames; the headless canonical artifact (S16LE stereo, tick 0, silence included) and digest; the viewer's existing presenter | ADR 0251 |
+
+Not modelled: the analog output stage and its filtering, the RF5C164's relative level against CD-DA on hardware, the CDC-to-PCM-RAM DMA, YM2612/PSG/Z80.

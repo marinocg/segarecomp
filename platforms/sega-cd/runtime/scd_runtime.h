@@ -487,9 +487,9 @@ typedef struct ScdCdd {
 } ScdCdd;
 
 /* SEG-064-T004 / SEG-102 (ADR 0233): the RF5C164 PCM chip's CPU-visible state (scd_pcm.c): the register file, the 64 KiB wave RAM and,
- * since SEG-102, the running wave-address pointer of each channel and the sample clock that advances them. No audio is generated (no
- * mixer, output buffer or callback exists); only state the sub processor can read back is kept exact. Reads other than the channel
- * pointers and the unverified RAM read path remain the typed stop pcm_unsupported. */
+ * since SEG-102, the running wave-address pointer of each channel and the sample clock that advances them. Since SEG-107 (ADR 0251) the same
+ * clock optionally produces the chip's output into ScdMix; the state the sub processor can read back is unchanged. Reads other than the
+ * channel pointers and the unverified RAM read path remain the typed stop pcm_unsupported. */
 typedef struct ScdPcm {
   uint8_t env[8], pan[8], st[8];
   uint16_t fd[8], ls[8];
@@ -551,6 +551,44 @@ typedef struct ScdCdda {
   uint64_t first_frame, last_frame;             /* vertical-blank onset counts at the first and the latest produced sector */
   FILE *log;                                    /* local diagnostic (--cdda-log): one line per run start / interruption / discontinuity; never read back */
 } ScdCdda;
+
+/* SEG-107 (ADR 0251): the one audio output timeline. 44.1 kHz frame n is at guest tick T_n = floor(n x SCD_TICKS_PER_SECOND / 44100). Each frame is the
+ * saturating sum of the latest RF5C164 sample whose event time is <= T_n (zero-order hold) and the next CD-DA frame of the run in progress. The
+ * machine advances the timeline only at guest events, so the stream is independent of scheduler slicing; the sink is one-way (nothing reaches the
+ * machine). Inert unless a host enabled it: with `enabled` clear no sample is computed and nothing in the machine or its reports changes.
+ *
+ * CD-DA on the timeline: a run starts at the drive tick that first plays a sector and then advances one frame per output frame, like the DAC of a real
+ * drive. The drive model's 75 Hz tick is a little slower than 588 frames per tick (a few hundred ppm), so the queue is refilled from the disc ahead of
+ * the drive tick (the next contiguous sector of the same track, read with the same disc reader) whenever it runs dry while the drive still reports
+ * the run; the drive's own later delivery of such a sector is recognised and not queued twice. The drive state the guest observes is not touched.
+ * The CD-DA volume fader is applied here per output frame (one step per frame toward the register's target, as for the sector path). */
+#define SCD_MIX_QUEUE_FRAMES 2048U
+#define SCD_MIX_CHUNK_FRAMES 1024U
+typedef struct ScdMix {
+  ScdCddaSink sink;         /* host output of mixed frames (any count up to SCD_MIX_CHUNK_FRAMES), or NULL */
+  void *sink_context;
+  uint8_t enabled;
+  uint64_t tick;            /* guest tick T_n of the next output frame n (= frames) */
+  uint32_t rem;             /* exact remainder of n x SCD_TICKS_PER_SECOND / 44100 */
+  uint64_t frames;          /* output frames produced so far */
+  int16_t held[2];          /* the latest native PCM sample (L, R) */
+  uint32_t q_head, q_count; /* unscaled CD-DA frames waiting for their output frame */
+  uint8_t cd_active;        /* a run is in progress: the queue may be refilled from the disc */
+  int32_t cd_next, cd_end;  /* the next LBA to queue; the end (exclusive) of the run's track */
+  uint16_t fader_volume;    /* the mix's own CD-DA fader volume (0-1024) */
+  int16_t queue[2U * SCD_MIX_QUEUE_FRAMES];
+  uint32_t chunk_count;
+  int16_t chunk[2U * SCD_MIX_CHUNK_FRAMES];
+  uint64_t pcm_events;      /* native PCM samples produced (running chip) */
+  uint64_t pcm_frames;      /* output frames whose PCM part was not silent */
+  uint64_t cdda_frames;     /* CD-DA frames queued (delivered by the drive or read ahead) */
+  uint64_t cdda_mixed, cdda_dropped, cdda_gaps; /* frames mixed / lost for lack of queue room / output frames with a run in progress but nothing queued */
+  uint64_t cdda_readahead;  /* sectors queued from the disc ahead of the drive tick */
+  uint64_t cdda_skipped;    /* drive deliveries of sectors already read ahead */
+  uint64_t saturated;       /* native PCM sums and output sums that hit a clamp */
+  uint64_t sink_refused;
+  uint32_t peak;            /* largest absolute PCM-only sample value */
+} ScdMix;
 
 typedef struct ScdMachine {
   ScdCpu cpu[2];
@@ -636,6 +674,7 @@ typedef struct ScdMachine {
   uint32_t delivered_count;
   uint8_t delivered_overflow;             /* more ranges than the ledger holds: the evidence is incomplete and is never used */
   ScdCdda cdda;                           /* SEG-104: CD-DA output (inert unless a host enabled it) */
+  ScdMix mix;                             /* SEG-107: PCM synthesis and the mixed output timeline (inert unless a host enabled it) */
 } ScdMachine;
 
 /* The duration of one sub cycle in ticks for this machine's profile (ADR 0177). */
@@ -867,6 +906,13 @@ void scd_gfx_reset(ScdMachine *m);
 void scd_pcm_reset(ScdMachine *m);
 /* Apply every sample event strictly before `tick` (ADR 0233). Exposed for the focused device test; the machine calls it from each access. */
 void scd_pcm_sync(ScdMachine *m, uint64_t tick);
+/* SEG-107 (scd_pcm.c): bring the PCM chip and the output timeline up to guest `tick` (frames with T_n < tick are produced and handed to the sink). */
+void scd_mix_advance(ScdMachine *m, uint64_t tick);
+/* The drive delivered audio sector `lba` of `track_index` (unscaled frames) at m->now; `new_run` = it does not continue the run in progress. */
+void scd_mix_cdda(ScdMachine *m, const int16_t *raw, int32_t lba, uint32_t track_index, int new_run);
+/* The drive stopped reporting the run (SEG-104 interruption) at m->now. */
+void scd_mix_cdda_end(ScdMachine *m);
+int32_t scd_cdda_scale(int32_t sample, uint32_t volume);
 int scd_pcm_trace_open(ScdMachine *m, const char *path);
 void scd_pcm_trace_close(ScdMachine *m);
 int scd_pcm_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
