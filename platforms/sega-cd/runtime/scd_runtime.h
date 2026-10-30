@@ -516,6 +516,7 @@ typedef struct ScdGfx {
   uint64_t base;               /* tick from which the next line's cost is counted */
   uint64_t line_ticks;
   uint64_t operations, lines_rendered;
+  uint64_t vdot_reads;         /* byte reads of $FF8065 (an observation counter, no behavior) */
 } ScdGfx;
 
 /* SEG-078-T003 (ADR 0205): the delivery ledger - the disc blocks the CDC decoder has read into its buffer, as merged LBA ranges. A fact of the

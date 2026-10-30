@@ -196,6 +196,7 @@ int scd_gfx_register_access(ScdMachine *m, uint32_t offset, uint32_t width, int 
     }
     if (!is_write && offset == 0x65U && width == 1U) { /* SEG-105: the live vertical-dot counter (low byte of $64; ADR 0249) */
       *value = g->lines_left;
+      g->vdot_reads += 1U;
       return 0;
     }
     return scd_gfx_stop(m, offset, width, is_write, pc);
