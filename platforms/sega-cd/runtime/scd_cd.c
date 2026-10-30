@@ -846,7 +846,7 @@ void scd_devices_advance(ScdMachine *m, uint64_t until) {
     uint64_t other = scd_timer_next_event(m);
     if (m->bios != NULL && m->vdp_onset < other) other = m->vdp_onset;
     if (m->bios != NULL && m->vint_at != 0U && m->vint_at < other) other = m->vint_at; /* SEG-071-T002 (ADR 0177) */
-    if (m->bios != NULL && m->hint_at < other) other = m->hint_at; /* SEG-106 */
+    if (m->bios != NULL && m->hint_at != 0U && m->hint_at < other) other = m->hint_at; /* SEG-106 */
     if (scd_input_next_event(m) < other) other = scd_input_next_event(m);
     if (scd_gfx_next_event(m) < other) other = scd_gfx_next_event(m);
     if (scd_cdd_active(m) && m->cdd.next_tick < other) other = m->cdd.next_tick;

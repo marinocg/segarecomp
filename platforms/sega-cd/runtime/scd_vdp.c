@@ -89,7 +89,7 @@ int scd_vdp_init(ScdMachine *m) {
   h->capture_line = -1; /* SEG-065-T003: no line sampling until a requested frame begins */
   m->hint_counter = 0xFFU; /* GPGX vdp_reset: h_counter = 0xFF, hint_pending = 0 */
   m->hint_next = scd_hint_line_of(0U);
-  m->hint_at = UINT64_MAX;
+  m->hint_at = 0U;
   if (m->bios != NULL) {
     h->regions[0].begin = 0U;
     h->regions[0].end = m->bios_size;
@@ -818,7 +818,7 @@ static void scd_hint_arm(ScdMachine *m) {
   uint8_t counter = m->hint_counter;
   uint64_t line = m->hint_next;
   uint32_t i;
-  m->hint_at = UINT64_MAX;
+  m->hint_at = 0U;
   if (!(host->devices.vdp.registers[0] & 0x0010U) || m->hint_pending) return;
   for (i = 0; i < 2U * SCD_HINT_FRAME_LINES; ++i, ++line)
     if (scd_hint_step(&counter, (uint32_t)(line % SCD_HINT_FRAME_LINES), reload)) {
@@ -856,14 +856,14 @@ uint64_t scd_vdp_next_event(const ScdMachine *m) {
   if (m->bios == NULL) return UINT64_MAX;
   if (m->vint_at != 0U && m->vint_at < next) next = m->vint_at;
   if (h != NULL && h->capture_line >= 0 && h->capture_line_tick < next) next = h->capture_line_tick;
-  if (m->hint_at < next) next = m->hint_at; /* SEG-106: the line that latches the H-interrupt request (IE1 set) */
+  if (m->hint_at != 0U && m->hint_at < next) next = m->hint_at; /* SEG-106: the line that latches the H-interrupt request (IE1 set) */
   return next;
 }
 
 void scd_vdp_event(ScdMachine *m) {
   GenesisRuntime *host = scd_host(m);
   ScdVdpHost *h = (ScdVdpHost *)m->vdp_host;
-  if (m->hint_at <= m->vdp_onset && (m->vint_at == 0U || m->hint_at <= m->vint_at) &&
+  if (m->hint_at != 0U && m->hint_at <= m->vdp_onset && (m->vint_at == 0U || m->hint_at <= m->vint_at) &&
       (h->capture_line < 0 || m->hint_at <= h->capture_line_tick)) {
     scd_hint_sync(m, m->hint_at); /* SEG-106: ties with the onset go to the line check, as GPGX checks the counter before the vertical interrupt */
     scd_hint_arm(m);

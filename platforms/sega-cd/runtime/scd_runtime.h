@@ -601,7 +601,7 @@ typedef struct ScdMachine {
   uint8_t hint_counter;                   /* SEG-106 (ADR 0250): the H-interrupt line counter (reloaded from VDP register #10) */
   uint8_t hint_pending;                   /* the H-interrupt request is latched (requests level 4 while register #0 IE1 is set) */
   uint64_t hint_next;                     /* the next scan line (absolute index on the first-onset grid) the counter has not stepped */
-  uint64_t hint_at;                       /* tick of the next line that latches the request while one could rise, else UINT64_MAX */
+  uint64_t hint_at;                       /* tick of the next line that latches the request while one could rise, else 0 */
   uint64_t hint_latched;                  /* requests latched (rising edges of hint_pending) */
   uint16_t hint_vector;                   /* $A12006: the low word of the main level-4 autovector (BIOS ROM $72) */
   uint64_t vdp_frames;                    /* vertical-blank onsets processed */
