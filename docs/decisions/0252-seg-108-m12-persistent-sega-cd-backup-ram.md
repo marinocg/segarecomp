@@ -43,4 +43,4 @@ Gate: **`BACKUP_PERSISTENCE_CONTRACT_GO`**.
 
 ## Not supported
 
-Save states, rewind, cloud sync, several slots/profiles, external RAM cartridges, game-specific editing, saving from a recorded session, saving after a typed stop or a budget-limited run, fsync-level durability across power loss, and concurrent launcher instances playing the same game (the busy-run guard already forbids it inside one launcher).
+Save states, rewind, cloud sync, several slots/profiles, external RAM cartridges, game-specific editing, saving from a recorded session, closing the launcher window during play (the child is killed, so that session's progress is not stored and the previous save is kept), saving after a typed stop or a budget-limited run, fsync-level durability across power loss, and concurrent launcher instances playing the same game (the busy-run guard already forbids it inside one launcher).

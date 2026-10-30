@@ -384,8 +384,8 @@ void test_run_arguments_and_outcomes(const fs::path &base, const fs::path &fake)
   spit(base / "quit.json", R"({"result":"deadline","live":{"outcome":"quit","frames":9,"presented":8}})");
   o = scd::read_outcome(base / "quit.json", 0);
   expect(scd::describe_outcome(o) == "Closed." && !scd::is_refusal_exit(0), "outcome: the user closing the viewer is Closed");
-  for (int code : {20, 21, 22, 23, 24, 25, 26, 27}) expect(scd::is_refusal_exit(code) && !scd::describe_outcome(scd::read_outcome({}, code)).empty(), "typed exit " + std::to_string(code) + " has a plain message");
-  expect(!scd::is_refusal_exit(10) && !scd::is_refusal_exit(11) && !scd::is_refusal_exit(19) && !scd::is_refusal_exit(28), "stops and budgets are not refusals");
+  for (int code : {20, 21, 22, 23, 24, 25, 26, 27, 28}) expect(scd::is_refusal_exit(code) && !scd::describe_outcome(scd::read_outcome({}, code)).empty(), "typed exit " + std::to_string(code) + " has a plain message");
+  expect(!scd::is_refusal_exit(10) && !scd::is_refusal_exit(11) && !scd::is_refusal_exit(19) && !scd::is_refusal_exit(29), "stops and budgets are not refusals");
   expect(scd::describe_outcome(scd::read_outcome({}, 139)).find("139") != std::string::npos, "an unknown status is shown as it is");
   spit(base / "bad.json", "{{{");
   expect(!scd::read_outcome(base / "bad.json", 0).report_read, "a damaged report is not trusted");

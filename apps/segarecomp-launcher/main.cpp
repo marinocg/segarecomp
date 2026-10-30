@@ -299,16 +299,17 @@ int sega_cd_headless(int argc, char **argv) {
   while (!game.poll()) SDL_Delay(50);
   const scd::Outcome outcome = scd::read_outcome(options.report, game.exit_code());
   emit("run=exited code=" + std::to_string(game.exit_code()));
+  bool save_failed = false;
   switch (scd::finish_backup_ram(options, game.exit_code())) {
     case scd::SaveOutcome::stored: emit("save=stored"); break;
     case scd::SaveOutcome::kept_run_failed: emit("save=kept_previous"); break;
-    case scd::SaveOutcome::kept_commit_failed: emit("save=not_stored_previous_kept"); break;
+    case scd::SaveOutcome::kept_commit_failed: emit("save=not_stored_previous_kept"); save_failed = true; break;
     case scd::SaveOutcome::not_requested: break;
   }
   emit("outcome=" + scd::describe_outcome(outcome));
   if (!outcome.stop_class.empty()) emit("stop=" + outcome.stop_class);
   if (!outcome.live_outcome.empty()) emit("live=" + outcome.live_outcome + " frames=" + std::to_string(outcome.frames) + " presented=" + std::to_string(outcome.presented) + " input_events=" + std::to_string(outcome.input_events));
-  return finish(game.exit_code() == 0 || game.exit_code() == 10 || game.exit_code() == 11 ? 0 : 4);
+  return finish(!save_failed && (game.exit_code() == 0 || game.exit_code() == 10 || game.exit_code() == 11) ? 0 : 4);
 }
 
 // ---- `Segarecomp --input-report`: the input diagnostics without a window (package smoke test, support) ----
