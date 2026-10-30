@@ -78,7 +78,9 @@ def derive(tmp, out, summary, name, verified=True, ledger=True, rerun=True, deli
         cap_path = work / "pass" / "capture.json"
     cmd = [sys.executable, str(TOOL), "--cue", str(out / "disc" / "disc.cue"), "--capture", str(cap_path), "--region", str(work / "pass" / "region.bin"), "--write-log", str(log)]
     if verified:
-        cmd += ["--verified", "sub:%d:%d" % (524288, 4096)]
+        for spec in summary["extents"]:      # the admitted images of the build (cpu offset base length), never the ground truth
+            _, _, b, n = spec.split(":")
+            cmd += ["--verified", "sub:%s:%s" % (b, n)]
     done = subprocess.run(cmd, capture_output=True, text=True)
     return done.returncode, json.loads(done.stdout)
 
