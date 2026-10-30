@@ -201,6 +201,7 @@ struct ImportResult {
 // large but finite (a viewer session is bounded by the user; the program never runs unbounded).
 struct RunOptions {
   std::filesystem::path backup_ram;    // --backup-ram: the formatted, empty internal backup RAM image (see ensure_backup_ram)
+  std::filesystem::path backup_ram_out; // --backup-ram-out: the candidate the program exports at the end (empty = none; never the canonical save)
   std::filesystem::path report;
   std::filesystem::path record_to;     // --record-input
   std::filesystem::path replay_from;   // --input-script (replay in the viewer)
@@ -210,12 +211,30 @@ struct RunOptions {
 // The machine tick at which a replay of `script` ends: its last event plus `margin_frames` frames (the first onset plus the margin for an empty script).
 [[nodiscard]] std::uint64_t replay_end_tick(const std::filesystem::path &script, unsigned margin_frames = 120);
 [[nodiscard]] std::vector<std::string> run_arguments(const Plan &plan, const RunOptions &options);
-// The BIOS reads the console's internal backup RAM, and the program stops with a typed stop when no image is supplied. The launcher supplies the state
+// The BIOS reads the console's internal backup RAM, and the program stops with a typed stop when no image is supplied. A new game starts from the state
 // of a new console: 8 KiB, zero except for the public 64-byte format trailer (ADR 0147; identical to tools/sega_cd_backup_ram.py). It holds no
-// software-derived byte. The program does not write it back: saves are not persisted yet.
+// software-derived byte. Saves persist (ADR 0252): `<game folder>/backup-ram.bin` is the player's data and is never reformatted.
 [[nodiscard]] std::vector<std::uint8_t> formatted_backup_ram();
-// Writes that image to `path` unless the file already holds exactly it (a changed file is replaced: it is not user data). False when it cannot be written.
-[[nodiscard]] bool ensure_backup_ram(const std::filesystem::path &path);
+enum class BackupStatus { ok, created, wrong_size, unreadable, not_writable };
+// An existing regular file of exactly 8 KiB is accepted unchanged whatever it contains; a missing one is created formatted; a wrong-size or unreadable
+// one is reported and never replaced.
+[[nodiscard]] BackupStatus ensure_backup_ram(const std::filesystem::path &path);
+// Writes `bytes` through a temporary file and one rename, so the previous file survives any failure. False when it could not be written.
+[[nodiscard]] bool write_file_atomic(const std::filesystem::path &path, const std::vector<std::uint8_t> &bytes);
+// The scratch image of a build pass or replay: always the formatted one, rewritten each time (not user data).
+[[nodiscard]] bool write_pristine_backup_ram(const std::filesystem::path &path);
+// Fills backup_ram / backup_ram_out for a run in `dir`. persistent: the canonical save is the input and a candidate the output; otherwise (replay,
+// recording) a pristine scratch image is the input and nothing is exported. A status other than ok/created means the game must not be started.
+[[nodiscard]] BackupStatus prepare_backup_ram(RunOptions &options, const std::filesystem::path &dir, bool persistent);
+[[nodiscard]] std::string describe_backup(BackupStatus status);
+enum class CommitStatus { committed, no_candidate, invalid_candidate, replace_failed };
+// After a successful run: validates the candidate (a regular file of exactly 8 KiB) and replaces the canonical save by rename, keeping one `.prev`
+// generation. On any failure the canonical save is untouched. The candidate is consumed in every case.
+[[nodiscard]] CommitStatus commit_backup_ram(const std::filesystem::path &canonical, const std::filesystem::path &candidate);
+// What to do with the candidate when a run has ended: only a clean exit (status 0) is committed; any other end (typed stop, budget, refusal, crash, kill)
+// discards the candidate and keeps the previous save. `not_requested` for a replay or recording.
+enum class SaveOutcome { not_requested, stored, kept_run_failed, kept_commit_failed };
+[[nodiscard]] SaveOutcome finish_backup_ram(const RunOptions &options, int exit_code);
 
 // The outcome of a finished run, from the program's exit status and its --report file (a stable, sanitized subset).
 struct Outcome {

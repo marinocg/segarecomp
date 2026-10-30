@@ -484,24 +484,101 @@ std::vector<std::uint8_t> formatted_backup_ram() {
   return image;
 }
 
-bool ensure_backup_ram(const fs::path &path) {
-  const std::vector<std::uint8_t> want = formatted_backup_ram();
+namespace {
+bool read_all(const fs::path &path, std::vector<std::uint8_t> &bytes) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return false;
+  bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  return !in.bad();
+}
+}  // namespace
+
+// Temporary file in the same folder, then one rename over the target: a failure at any step leaves the previous target exactly as it was.
+// (std::filesystem::rename replaces an existing file on POSIX and on Windows. Power-loss durability beyond the OS's own ordering is not claimed.)
+bool write_file_atomic(const fs::path &path, const std::vector<std::uint8_t> &bytes) {
   std::error_code ec;
-  if (fs::is_regular_file(path, ec) && fs::file_size(path, ec) == want.size()) {
-    std::ifstream in(path, std::ios::binary);
-    std::vector<std::uint8_t> have((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (have == want) return true;
-  }
   fs::create_directories(path.parent_path(), ec);
-  std::ofstream out(path, std::ios::binary | std::ios::trunc);
-  out.write(reinterpret_cast<const char *>(want.data()), static_cast<std::streamsize>(want.size()));
-  out.flush();
-  return static_cast<bool>(out);
+  const fs::path tmp = fs::path(path).concat(".tmp");
+  {
+    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    out.flush();
+    if (!out) { fs::remove(tmp, ec); return false; }
+  }
+  fs::rename(tmp, path, ec);
+  if (ec) { fs::remove(tmp, ec); return false; }
+  return true;
+}
+
+BackupStatus ensure_backup_ram(const fs::path &path) {
+  std::error_code ec;
+  const fs::file_status status = fs::status(path, ec);
+  if (fs::exists(status)) {
+    // A save already exists: it is player data. Any 8 KiB content is loaded unchanged; anything else is an error, never replaced.
+    if (!fs::is_regular_file(status)) return BackupStatus::unreadable;
+    std::vector<std::uint8_t> have;
+    if (!read_all(path, have)) return BackupStatus::unreadable;
+    return have.size() == formatted_backup_ram().size() ? BackupStatus::ok : BackupStatus::wrong_size;
+  }
+  if (status.type() != fs::file_type::not_found) return BackupStatus::unreadable;
+  return write_file_atomic(path, formatted_backup_ram()) ? BackupStatus::created : BackupStatus::not_writable;
+}
+
+bool write_pristine_backup_ram(const fs::path &path) { return write_file_atomic(path, formatted_backup_ram()); }
+
+CommitStatus commit_backup_ram(const fs::path &canonical, const fs::path &candidate) {
+  std::error_code ec;
+  if (!fs::is_regular_file(candidate, ec)) return CommitStatus::no_candidate;
+  std::vector<std::uint8_t> bytes;
+  if (!read_all(candidate, bytes) || bytes.size() != formatted_backup_ram().size()) { fs::remove(candidate, ec); return CommitStatus::invalid_candidate; }
+  // One previous generation is kept beside the save (best effort; the atomic rename below is what protects the save itself).
+  if (fs::is_regular_file(canonical, ec)) fs::copy_file(canonical, fs::path(canonical).concat(".prev"), fs::copy_options::overwrite_existing, ec);
+  fs::rename(candidate, canonical, ec);
+  if (ec) { fs::remove(candidate, ec); return CommitStatus::replace_failed; }
+  return CommitStatus::committed;
+}
+
+SaveOutcome finish_backup_ram(const RunOptions &options, int exit_code) {
+  if (options.backup_ram_out.empty()) return SaveOutcome::not_requested;
+  if (exit_code != 0) {
+    std::error_code ec;
+    fs::remove(options.backup_ram_out, ec);
+    return SaveOutcome::kept_run_failed;
+  }
+  return commit_backup_ram(options.backup_ram, options.backup_ram_out) == CommitStatus::committed ? SaveOutcome::stored : SaveOutcome::kept_commit_failed;
+}
+
+std::string describe_backup(BackupStatus status) {
+  switch (status) {
+    case BackupStatus::ok: case BackupStatus::created: return "";
+    case BackupStatus::wrong_size: return "This game's save file is not a valid 8 KiB Sega CD save, so it was left untouched and the game was not started. Move or delete backup-ram.bin in the game's folder to start a new save.";
+    case BackupStatus::unreadable: return "This game's save file cannot be read, so it was left untouched and the game was not started.";
+    case BackupStatus::not_writable: return "The folder for this game's save cannot be written.";
+  }
+  return "";
+}
+
+BackupStatus prepare_backup_ram(RunOptions &options, const fs::path &dir, bool persistent) {
+  options.backup_ram_out.clear();
+  if (!persistent) {
+    // Replays, recordings: a defined input every time, and the player's save is never an input or an output.
+    options.backup_ram = dir / "replay-backup-ram.bin";
+    return write_pristine_backup_ram(options.backup_ram) ? BackupStatus::created : BackupStatus::not_writable;
+  }
+  options.backup_ram = dir / "backup-ram.bin";
+  const BackupStatus status = ensure_backup_ram(options.backup_ram);
+  if (status == BackupStatus::ok || status == BackupStatus::created) {
+    options.backup_ram_out = dir / "backup-ram.next";
+    std::error_code ec;
+    fs::remove(options.backup_ram_out, ec);  // a candidate left by an earlier crash is never mistaken for this run's
+  }
+  return status;
 }
 
 std::vector<std::string> run_arguments(const Plan &plan, const RunOptions &o) {
   std::vector<std::string> args{"--disc-dir", u8(plan.disc_dir), "--bios", u8(plan.bios), "--instruction-budget", std::to_string(o.instruction_budget)};
   if (!o.backup_ram.empty()) { args.emplace_back("--backup-ram"); args.push_back(u8(o.backup_ram)); }
+  if (!o.backup_ram_out.empty() && !o.backup_ram.empty()) { args.emplace_back("--backup-ram-out"); args.push_back(u8(o.backup_ram_out)); }
   if (!o.report.empty()) { args.emplace_back("--report"); args.push_back(u8(o.report)); }
   if (o.until_tick != 0) { args.emplace_back("--until-tick"); args.push_back(std::to_string(o.until_tick)); }
   if (!o.record_to.empty()) { args.emplace_back("--record-input"); args.push_back(u8(o.record_to)); }
@@ -530,7 +607,7 @@ Outcome read_outcome(const fs::path &report, int exit_code) {
   return o;
 }
 
-bool is_refusal_exit(int exit_code) { return exit_code >= 20 && exit_code <= 27; }
+bool is_refusal_exit(int exit_code) { return exit_code >= 20 && exit_code <= 28; }
 
 std::string describe_outcome(const Outcome &o) {
   switch (o.exit_code) {
@@ -547,6 +624,7 @@ std::string describe_outcome(const Outcome &o) {
     case 25: return "The input recording reached its size limit; the part recorded so far was kept.";
     case 26: return "The input recorder refused a transition.";
     case 27: return "The input recording could not be written.";
+    case 28: return "The game's backup RAM could not be exported; the previous save was kept.";
     default: return "The program ended unexpectedly (status " + std::to_string(o.exit_code) + ").";
   }
 }

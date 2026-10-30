@@ -284,8 +284,8 @@ int sega_cd_headless(int argc, char **argv) {
   std::error_code ec;
   fs::create_directories(dir, ec);
   options.report = dir / "last-report.json";
-  options.backup_ram = dir / "backup-ram.bin";
-  if (!scd::ensure_backup_ram(options.backup_ram)) { emit("run=failed_to_prepare"); return finish(6); }
+  const scd::BackupStatus save = scd::prepare_backup_ram(options, dir, record.empty() && replay.empty());
+  if (save != scd::BackupStatus::ok && save != scd::BackupStatus::created) { emit("run=failed_to_prepare"); emit("save=" + scd::describe_backup(save)); return finish(6); }
   options.record_to = record;
   options.replay_from = replay;
   if (windowless && !replay.empty()) options.until_tick = scd::replay_end_tick(replay);
@@ -299,6 +299,12 @@ int sega_cd_headless(int argc, char **argv) {
   while (!game.poll()) SDL_Delay(50);
   const scd::Outcome outcome = scd::read_outcome(options.report, game.exit_code());
   emit("run=exited code=" + std::to_string(game.exit_code()));
+  switch (scd::finish_backup_ram(options, game.exit_code())) {
+    case scd::SaveOutcome::stored: emit("save=stored"); break;
+    case scd::SaveOutcome::kept_run_failed: emit("save=kept_previous"); break;
+    case scd::SaveOutcome::kept_commit_failed: emit("save=not_stored_previous_kept"); break;
+    case scd::SaveOutcome::not_requested: break;
+  }
   emit("outcome=" + scd::describe_outcome(outcome));
   if (!outcome.stop_class.empty()) emit("stop=" + outcome.stop_class);
   if (!outcome.live_outcome.empty()) emit("live=" + outcome.live_outcome + " frames=" + std::to_string(outcome.frames) + " presented=" + std::to_string(outcome.presented) + " input_events=" + std::to_string(outcome.input_events));

@@ -764,7 +764,7 @@ void ScdBuildJob::run() {
   // The build pass runs the console as the launcher will: from a new console's formatted, empty internal backup RAM (a BIOS with an unformatted one stops at its
   // backup manager instead of starting the disc) and with no controller input (the build does not invent input).
   const fs::path backup_ram = request_.out_dir.parent_path() / "build-backup-ram.bin";
-  if (!scd::ensure_backup_ram(backup_ram)) { set_message("Cannot prepare the backup RAM image for the build."); finish(false); return; }
+  if (!scd::write_pristine_backup_ram(backup_ram)) { set_message("Cannot prepare the backup RAM image for the build."); finish(false); return; }
   const fs::path objects = cache_root() / "sega-cd-objects";
   std::vector<std::string> args{utf8(layout_.cli), "sega-cd", "build", "--cue", utf8(request_.cue), "--bios", utf8(request_.bios), "--output", utf8(partial),
                                 "--cc", utf8(layout_.cc), "--cc-arg", "cc", "--cc-arg", "-target", "--cc-arg", zig_target(),
