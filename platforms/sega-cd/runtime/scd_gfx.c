@@ -9,14 +9,15 @@
  *        Only bits 2-0 are stored (bit 15 is the read-only busy flag).
  *   $5A  stamp map base address (word address)       $5C  image buffer vertical size in cells - 1 (bits 4-0)
  *   $5E  image buffer start address                  $60  image buffer offset (bits 5-0 horizontal dot offset)
- *   $62  image buffer horizontal dot size (bits 8-0) $64  image buffer vertical dot size (lines, bits 7-0; counts down)
+ *   $62  image buffer horizontal dot size (bits 8-0) $64  image buffer vertical dot size (lines, bits 7-0; the live counter: counts down while
+ *        running, 0 when an operation has finished; the ONE copy is ScdGfx::lines_left; the byte at $65 is readable, ADR 0249)
  *   $66  trace vector base address; writing it starts the operation.
  * Each line reads four trace words (start x, start y, x step, y step; the start in 13.3, steps in 5.11 fixed point), then renders
  * `$62` dots into the image buffer through the stamp map and the stamp data, in the priority mode of the memory-mode register
  * (PM1/PM0: 0 normal, 1 underwrite, 2 overwrite, 3 invalid = keep). The operation runs only while the sub owns 2M Word RAM; it takes
  * 3 * (4 + 2 * W + ((W + (offset & 3) + 3) >> 2)) sub cycles per line (3 sub cycles per Word RAM access: 4 initial reads, 2 per dot, 1 write per 4 dots) (W = horizontal dot size), a line being rendered as soon as it
  * starts (GPGX: ceil), and ends with level 1 pending when IEN1 is set. Everything else about the ASIC (1M Word RAM, byte accesses,
- * register reads other than $58, the font generator) is a typed stop. */
+ * register reads other than $58 and the byte $65, the font generator) is a typed stop. */
 #include "scd_runtime.h"
 
 #include <string.h>
@@ -178,7 +179,6 @@ static int scd_gfx_start(ScdMachine *m, uint32_t trace_base, uint32_t pc) {
   h = (uint32_t)(g->h_dots & 0x1FFU);
   offset = (uint32_t)(g->offset & 3U);
   g->line_ticks = (uint64_t)SCD_GFX_CYCLES_PER_ACCESS * (4U + 2U * h + ((h + offset + 3U) >> 2)) * scd_sub_cycle_ticks(m);
-  g->lines_left = (uint8_t)(g->v_lines & 0xFFU);
   g->busy = 1U;
   scd_log(m, 0xB1U, trace_base, g->lines_left);
   if (m->event_log != NULL) scd_event(m, "gfx_start", g->lines_left);
@@ -192,6 +192,10 @@ int scd_gfx_register_access(ScdMachine *m, uint32_t offset, uint32_t width, int 
   if (width != 2U) {
     if (!is_write && offset == 0x58U && width == 1U) { /* the busy byte (GPGX scd_read_byte case 0x58) */
       *value = g->busy ? 0x80U : 0U;
+      return 0;
+    }
+    if (!is_write && offset == 0x65U && width == 1U) { /* SEG-105: the live vertical-dot counter (low byte of $64; ADR 0249) */
+      *value = g->lines_left;
       return 0;
     }
     return scd_gfx_stop(m, offset, width, is_write, pc);
@@ -208,7 +212,7 @@ int scd_gfx_register_access(ScdMachine *m, uint32_t offset, uint32_t width, int 
   case 0x5E: g->buffer_origin = (uint16_t)*value; return 0;
   case 0x60: g->offset = (uint16_t)*value; return 0;
   case 0x62: g->h_dots = (uint16_t)*value; return 0;
-  case 0x64: g->v_lines = (uint16_t)*value; if (g->busy) g->lines_left = (uint8_t)(*value & 0xFFU); return 0; /* the live line counter (GPGX) */
+  case 0x64: g->lines_left = (uint8_t)(*value & 0xFFU); return 0; /* the live counter, also while idle and while running (GPGX regs[0x32].byte.l) */
   case 0x66: g->trace_base = (uint16_t)*value; return scd_gfx_start(m, *value & 0xFFFFU, pc);
   default: break;
   }

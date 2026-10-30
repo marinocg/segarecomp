@@ -585,6 +585,210 @@ int main(void) {
     run_devices_until(m->now + 3U * 3U * (4U + 16U + ((8U + 3U) >> 2)) * SCD_SUB_CYCLE_TICKS);
     row(m->gfx.busy == 0U && m->gfx.lines_rendered == 13U, "graphics: ... and the operation ends after those lines (13 rendered in all)");
 
+    /* -- SEG-105 (ADR 0249): $FF8065 is the live vertical-dot counter ---------------------------------------------------------- */
+    {
+      /* The oracle is derived from the documented rule, not from the implementation: an operation started at tick T0 with N programmed
+       * lines and a cost of Lt ticks per line has started ceil((t - T0) / Lt) lines at t > T0 (a line is rendered as soon as it starts),
+       * so the register reads N - that, floored at 0; at t <= T0 it reads N. */
+      const uint64_t lt = 120U * SCD_SUB_CYCLE_TICKS; /* H = 16: 3 * (4 + 2 * 16 + ((16 + 0 + 3) >> 2)) = 120 sub cycles */
+#define VDOT_ORACLE(n, t0, t) ((uint32_t)(((t) <= (t0)) ? (n) : ((((t) - (t0) + lt - 1U) / lt) >= (n) ? 0U : (n) - (((t) - (t0) + lt - 1U) / lt))))
+      uint64_t t0, t;
+      uint32_t k, bad, rd;
+      uint32_t sums[4];
+      int pass;
+
+      /* 1-2: power-on, programmed value readable while idle (any time, not only while running); other forms stay typed stops */
+      fresh();
+      m->ga.mode = 0U;
+      row(sub_read(0x65U, 1U) == 0U && m->gfx.busy == 0U, "vdot: power-on reads 0");
+      sub_write(0x64U, 2U, 0x1234U);
+      row(sub_read(0x65U, 1U) == 0x34U && m->gfx.busy == 0U, "vdot: a word write of $FF8064 is read back at $FF8065 as its low byte while idle");
+      sub_write(0x64U, 2U, 20U);
+      row(sub_read(0x65U, 1U) == 20U, "vdot: reprogramming while idle replaces the value");
+
+      /* 3-7: start, boundaries, completion (N = 20, H = 16) */
+      fresh();
+      m->ga.mode = 0U;
+      store_stamp16(1U, stamp16);
+      put_map_entries(0x20000U, map);
+      for (i = 0; i < 20U; ++i) put_trace_line(0x30000U, i, 0U, (i % 16U) * 8U, 0x0800, 0);
+      t0 = 5000U;
+      m->now = t0;
+      gfx_registers(0x0000U, 0x8000U, 1U, BUFFER_ORIGIN_REG, 0U, 16U, 20U);
+      row(sub_write(0x66U, 2U, 0xC000U) == 0, "vdot: the operation starts");
+      row(sub_read(0x65U, 1U) == 20U && m->gfx.lines_rendered == 0U, "vdot: at the start tick no line has started: 20");
+      m->now = t0 + 1U;
+      row(sub_read(0x65U, 1U) == 19U && m->gfx.lines_rendered == 1U, "vdot: one tick later the first line has started: 19 (decrement at line start)");
+      m->now = t0 + lt - 1U;
+      row(sub_read(0x65U, 1U) == 19U, "vdot: immediately before the first line boundary: 19");
+      m->now = t0 + lt;
+      row(sub_read(0x65U, 1U) == 19U, "vdot: at the first line boundary: 19 (the second line starts one tick later)");
+      m->now = t0 + lt + 1U;
+      row(sub_read(0x65U, 1U) == 18U && m->gfx.lines_rendered == 2U, "vdot: immediately after the boundary: 18");
+      row(sub_read(0x65U, 1U) == 18U && sub_read(0x65U, 1U) == 18U && m->gfx.lines_rendered == 2U && m->gfx.operations == 0U,
+          "vdot: repeated reads without passage of time change nothing and render no extra line");
+      m->now = t0 + 5U * lt + 1U;
+      row(sub_read(0x65U, 1U) == 14U && m->gfx.lines_rendered == 6U, "vdot: several lines later: 14");
+      bad = 0U;
+      for (k = 0U; k < 20U * 120U; ++k) { /* a read at every 1/6 line from here to the end, against the oracle (a read advances the clock to its tick) */
+        t = t0 + 5U * lt + 1U + (uint64_t)k * (lt / 6U);
+        if (t >= t0 + 19U * lt + 1U) break;
+        m->now = t;
+        rd = sub_read(0x65U, 1U);
+        if (rd != VDOT_ORACLE(20U, t0, t)) ++bad;
+      }
+      row(bad == 0U, "vdot: every sampled read equals the independent oracle");
+      m->now = t0 + 19U * lt;
+      row(sub_read(0x65U, 1U) == 1U && m->gfx.busy == 1U && (m->ga.pending & 0x02U) == 0U, "vdot: one tick before the end: 1, still busy, nothing pending");
+      m->now = t0 + 19U * lt + 1U;
+      row(sub_read(0x65U, 1U) == 0U && m->gfx.busy == 0U && m->gfx.operations == 1U && m->gfx.lines_rendered == 20U, "vdot: at the end tick: 0, idle, 20 lines rendered, one operation");
+      m->now += 100U * lt;
+      row(sub_read(0x65U, 1U) == 0U && sub_read(0x65U, 1U) == 0U && m->gfx.operations == 1U && m->gfx.lines_rendered == 20U, "vdot: after completion it stays 0 (no wrap, no extra operation)");
+
+      /* 9-11: a second start without rewriting renders nothing (the counter is the programmed count: 0), a rewrite starts a new operation */
+      m->now += 10U;
+      t0 = m->now;
+      sub_write(0x66U, 2U, 0xC000U);
+      row(sub_read(0x65U, 1U) == 0U && m->gfx.busy == 1U, "vdot: a start without reprogramming runs zero lines (busy until the next tick)");
+      m->now = t0 + 1U;
+      row(sub_read(0x65U, 1U) == 0U && m->gfx.busy == 0U && m->gfx.operations == 2U && m->gfx.lines_rendered == 20U, "vdot: ... and completes at once without rendering a line");
+      sub_write(0x64U, 2U, 7U);
+      row(sub_read(0x65U, 1U) == 7U, "vdot: reprogramming after completion: 7");
+      t0 = m->now;
+      sub_write(0x66U, 2U, 0xC000U);
+      m->now = t0 + 2U * lt + 1U;
+      row(sub_read(0x65U, 1U) == 4U, "vdot: the second operation counts down from 7 (3 lines started: 4)");
+
+      /* 12: a rewrite during an active operation replaces the remaining count (also 0 = finish at the next tick) */
+      row(sub_write(0x64U, 2U, 9U) == 0 && sub_read(0x65U, 1U) == 9U, "vdot: rewriting during an operation replaces the remaining count: 9");
+      t = m->now;
+      m->now = t + lt;
+      row(sub_read(0x65U, 1U) == 8U, "vdot: ... and the new count runs down from the rewrite (one line started: 8)");
+      row(sub_write(0x64U, 2U, 0U) == 0 && sub_read(0x65U, 1U) == 0U && m->gfx.busy == 1U, "vdot: rewriting 0 during an operation: 0, still busy until the next tick");
+      m->now = scd_gfx_next_event(m) - 1U;
+      row(sub_read(0x65U, 1U) == 0U && m->gfx.busy == 1U, "vdot: ... it completes only once the line in progress has ended (one tick before: still busy)");
+      m->now += 1U;
+      row(sub_read(0x65U, 1U) == 0U && m->gfx.busy == 0U && m->gfx.operations == 3U, "vdot: ... then it completes");
+
+      /* 13: halting by Word RAM ownership freezes the counter; resuming counts from the hand-over */
+      fresh();
+      m->ga.mode = 0U;
+      store_stamp16(1U, stamp16);
+      put_map_entries(0x20000U, map);
+      for (i = 0; i < 16U; ++i) put_trace_line(0x30000U, i, 0U, i * 8U, 0x0800, 0);
+      t0 = 1000U;
+      m->now = t0;
+      gfx_registers(0x0000U, 0x8000U, 1U, BUFFER_ORIGIN_REG, 0U, 16U, 16U);
+      sub_write(0x66U, 2U, 0xC000U);
+      m->now = t0 + 2U * lt;
+      row(sub_write(0x03U, 1U, 0x01U) == 0 && sub_read(0x65U, 1U) == 14U, "vdot: handing Word RAM back (RET = 1) first brings the counter up to date: 14");
+      m->now = 9000000U;
+      row(sub_read(0x65U, 1U) == 14U && sub_read(0x65U, 1U) == 14U && m->gfx.lines_rendered == 2U, "vdot: halted, the counter does not move however much time passes");
+      v = 0x02U;
+      clear_stop(scd_ga_main_access(m, 0x03U, 1U, 1, &v, 0xFF0000U));
+      t0 = m->now;
+      row(sub_read(0x65U, 1U) == 14U, "vdot: resumed at the hand-over tick: 14");
+      m->now = t0 + 1U;
+      row(sub_read(0x65U, 1U) == 13U, "vdot: ... one tick later 13");
+      m->now = t0 + 13U * lt + 1U;
+      row(sub_read(0x65U, 1U) == 0U && m->gfx.operations == 1U && m->gfx.lines_rendered == 16U, "vdot: the remaining lines finish: 0, 16 lines rendered in all");
+
+      /* 14: the peripheral reset clears it, also when idle with a programmed value */
+      sub_write(0x64U, 2U, 5U);
+      row(sub_read(0x65U, 1U) == 5U && sub_write(0x01U, 1U, 0x00U) == 0 && sub_read(0x65U, 1U) == 0U, "vdot: the peripheral reset clears the counter");
+      m->now += 1U;
+      fresh();
+      m->ga.mode = 0U;
+      m->now = 10U;
+      gfx_registers(0x0000U, 0x8000U, 1U, BUFFER_ORIGIN_REG, 0U, 16U, 30U);
+      sub_write(0x66U, 2U, 0xC000U);
+      m->now += lt;
+      row(sub_read(0x65U, 1U) == 29U && sub_write(0x01U, 1U, 0x00U) == 0 && sub_read(0x65U, 1U) == 0U && m->gfx.busy == 0U,
+          "vdot: the peripheral reset abandons a running operation and clears the counter");
+
+      /* 15-16: reads never move the level-1 request (IEN1 on and off): one request at the end, none early, none duplicated */
+      for (pass = 0; pass < 2; ++pass) {
+        fresh();
+        m->ga.mode = 0U;
+        store_stamp16(1U, stamp16);
+        put_map_entries(0x20000U, map);
+        for (i = 0; i < 4U; ++i) put_trace_line(0x30000U, i, 0U, i * 8U, 0x0800, 0);
+        sub_write(0x33U, 1U, pass ? 0x02U : 0x00U);
+        t0 = 100U;
+        m->now = t0;
+        gfx_registers(0x0000U, 0x8000U, 1U, BUFFER_ORIGIN_REG, 0U, 16U, 4U);
+        sub_write(0x66U, 2U, 0xC000U);
+        bad = 0U;
+        for (t = t0 + 1U; t <= t0 + 3U * lt; t += lt / 4U) { /* polls only, no device advance: the scheduled event stays authoritative */
+          m->now = t;
+          if (sub_read(0x65U, 1U) != VDOT_ORACLE(4U, t0, t) || (m->ga.pending & 0x02U) != 0U || m->gfx.operations != 0U) ++bad;
+        }
+        row(bad == 0U, pass ? "vdot: IEN1 = 1: polling raises no request before the end" : "vdot: IEN1 = 0: polling raises no request");
+        m->now = t0 + 3U * lt + 1U;
+        row(sub_read(0x65U, 1U) == 0U && m->gfx.operations == 1U && (((m->ga.pending & 0x02U) != 0U) == (pass == 1)),
+            pass ? "vdot: IEN1 = 1: the poll that sees 0 finds exactly the one completion request pending" : "vdot: IEN1 = 0: completion, never a request");
+        sub_write(0x33U, 1U, 0x00U);
+        run_devices_until(m->now + 50U * lt);
+        row(m->gfx.operations == 1U, "vdot: no duplicate completion afterwards");
+      }
+
+      /* negative: every other form stays a typed stop and mutates nothing */
+      fresh();
+      m->ga.mode = 0U;
+      m->now = 77U;
+      gfx_registers(0x0000U, 0x8000U, 1U, BUFFER_ORIGIN_REG, 0U, 16U, 9U);
+      {
+        ScdGfx before = m->gfx;
+        const uint8_t pend = m->ga.pending;
+        int ok = 1;
+        static const struct { uint32_t off, width; int wr; } cases[] = {
+          {0x64U, 2U, 0}, {0x64U, 1U, 0}, {0x65U, 1U, 1}, {0x64U, 1U, 1}, {0x66U, 1U, 0}, {0x67U, 1U, 0},
+          {0x66U, 2U, 0}, {0x5BU, 1U, 0}, {0x5DU, 1U, 0}, {0x63U, 1U, 0}, {0x62U, 2U, 0}, {0x60U, 2U, 0}, {0x5EU, 2U, 0}, {0x5CU, 2U, 0}, {0x5AU, 2U, 0}};
+        for (k = 0U; k < sizeof cases / sizeof cases[0]; ++k) {
+          uint32_t val = 0x55U;
+          const int st = sub_access(cases[k].off, cases[k].width, cases[k].wr, &val);
+          if (st != SCD_STOP_GATE_ARRAY_REGISTER_UNSUPPORTED) { ok = 0; printf("  case %u: status %d\n", k, st); }
+        }
+        row(ok, "vdot: unsupported reads/writes of the graphics block ($FF8064 word and byte, $FF8065 word, $FF8065 byte write, ...) stay typed stops");
+        row(memcmp(&before, &m->gfx, sizeof before) == 0 && m->ga.pending == pend && sub_read(0x65U, 1U) == 9U,
+            "vdot: the refused accesses changed no graphics state, the counter still reads 9");
+      }
+
+      /* determinism: the same scenario, with the devices advanced in different deadline partitions between fixed observation instants,
+       * gives the same reads, graphics state and Word RAM */
+      for (pass = 0; pass < 4; ++pass) {
+        const uint64_t slice[4] = {lt / 97U + 1U, lt / 11U + 3U, lt / 3U, 40U * lt};
+        uint32_t digest = 2166136261U, x2;
+        fresh();
+        m->ga.mode = 0U;
+        store_stamp16(1U, stamp16);
+        put_map_entries(0x20000U, map);
+        for (i = 0; i < 12U; ++i) put_trace_line(0x30000U, i, 0U, i * 8U, 0x0800, 0);
+        sub_write(0x33U, 1U, 0x02U);
+        m->now = 300U;
+        gfx_registers(0x0000U, 0x8000U, 1U, BUFFER_ORIGIN_REG, 0U, 16U, 12U);
+        sub_write(0x66U, 2U, 0xC000U);
+        for (k = 1U; k <= 28U; ++k) { /* observe every half line, 28 instants */
+          const uint64_t obs = 300U + (uint64_t)k * (lt / 2U);
+          while (m->now < obs) {
+            uint64_t next = m->now + slice[pass];
+            const uint64_t ev = scd_devices_next_event(m);
+            if (next > obs) next = obs;
+            if (ev > m->now && ev < next) next = ev;
+            m->now = next;
+            scd_devices_advance(m, next);
+          }
+          digest = (digest ^ sub_read(0x65U, 1U)) * 16777619U;
+          digest = (digest ^ (uint32_t)m->gfx.busy ^ ((uint32_t)m->ga.pending << 4)) * 16777619U;
+        }
+        for (x2 = 0U; x2 < 0x40000U; ++x2) digest = (digest ^ m->word_ram[x2]) * 16777619U;
+        sums[pass] = digest ^ ((uint32_t)m->gfx.operations << 3) ^ ((uint32_t)m->gfx.lines_rendered << 12);
+        if (pass == 0) row(m->gfx.operations == 1U && m->gfx.lines_rendered == 12U, "vdot: the determinism scenario completes (12 lines, one operation)");
+      }
+      row(sums[0] == sums[1] && sums[1] == sums[2] && sums[2] == sums[3], "vdot: deadline partitions (line/97, line/11, line/3, 40 lines) give identical reads, graphics state and Word RAM");
+#undef VDOT_ORACLE
+    }
+
     /* -- unsupported shapes: typed, nothing mutated -- */
     fresh();
     m->ga.mode = SCD_MODE_1M;
