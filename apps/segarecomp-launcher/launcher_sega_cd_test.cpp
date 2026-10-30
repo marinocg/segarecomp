@@ -399,9 +399,107 @@ void test_backup_ram(const fs::path &base) {
   expect(std::all_of(image.begin(), image.end() - 64, [](std::uint8_t b) { return b == 0; }) && text.substr(8192 - 16) == "RAM_CARTRIDGE___" && text.substr(8192 - 64, 11) == std::string(11, '_'),
          "it is zero except its last 64 bytes: the volume name, the free-block counts and the format signatures");
   const fs::path file = base / "bram" / "backup-ram.bin";
-  expect(scd::ensure_backup_ram(file) && slurp(file) == text, "ensure_backup_ram writes the image (and its folder)");
-  spit(file, "changed");
-  expect(scd::ensure_backup_ram(file) && slurp(file) == text, "a changed file is replaced: it is not user data");
+  expect(scd::ensure_backup_ram(file) == scd::BackupStatus::created && slurp(file) == text, "ensure_backup_ram creates the formatted image for a new game (and its folder)");
+  expect(!fs::exists(fs::path(file).concat(".tmp")), "no temporary file is left behind");
+  expect(scd::ensure_backup_ram(file) == scd::BackupStatus::ok && slurp(file) == text, "an existing formatted image is accepted as it is");
+}
+
+std::string save_bytes(unsigned seed) {  // 8 KiB of project-authored bytes, not a valid-looking format
+  std::string s(8192, '\0');
+  for (std::size_t i = 0; i < s.size(); ++i) s[i] = static_cast<char>((i * 31U + seed * 17U + (i >> 7)) & 0xFFU);
+  return s;
+}
+
+void test_backup_persistence(const fs::path &base, const fs::path &fake) {
+  const std::vector<std::uint8_t> formatted_image = scd::formatted_backup_ram();
+  const std::string formatted(formatted_image.begin(), formatted_image.end());
+  const fs::path dir = base / "save" / "gameA";
+  // 1-3. an existing valid-length save is loaded unchanged whatever it contains (including all zero and not formatted); the contract's save is never reformatted
+  for (const std::string &content : {save_bytes(1), std::string(8192, '\0'), std::string(8192, '\xFF')}) {
+    spit(dir / "backup-ram.bin", content);
+    scd::RunOptions o;
+    expect(scd::prepare_backup_ram(o, dir, true) == scd::BackupStatus::ok && slurp(dir / "backup-ram.bin") == content, "an existing 8 KiB save is loaded unchanged");
+    expect(o.backup_ram == dir / "backup-ram.bin" && o.backup_ram_out == dir / "backup-ram.next", "a persistent run reads the save and exports to a candidate beside it");
+  }
+  // 4. invalid length / unreadable: an error, never a silent replacement, and no candidate is requested
+  for (const std::string &content : {std::string("changed"), std::string(), save_bytes(2) + "x", save_bytes(2).substr(0, 8191)}) {
+    spit(dir / "backup-ram.bin", content);
+    scd::RunOptions o;
+    expect(scd::prepare_backup_ram(o, dir, true) == scd::BackupStatus::wrong_size && slurp(dir / "backup-ram.bin") == content && o.backup_ram_out.empty(),
+           "a save of the wrong length is reported and kept byte for byte");
+    expect(!scd::describe_backup(scd::BackupStatus::wrong_size).empty(), "the wrong-length error has a message");
+  }
+  fs::remove(dir / "backup-ram.bin");
+  fs::create_directories(dir / "backup-ram.bin");
+  { scd::RunOptions o; expect(scd::prepare_backup_ram(o, dir, true) == scd::BackupStatus::unreadable && fs::is_directory(dir / "backup-ram.bin"), "a save that is not a regular file is unreadable and untouched"); }
+  fs::remove(dir / "backup-ram.bin");
+  spit(base / "save" / "afile", "x");
+  { scd::RunOptions o; expect(scd::prepare_backup_ram(o, base / "save" / "afile" / "sub", true) == scd::BackupStatus::not_writable, "an unwritable destination is reported (a missing save cannot be created)"); }
+  // 3. a missing save is created with the formatter
+  { scd::RunOptions o; expect(scd::prepare_backup_ram(o, dir, true) == scd::BackupStatus::created && slurp(dir / "backup-ram.bin") == formatted, "a new game starts from the formatted image"); }
+
+  // run arguments: the candidate is passed only with an input
+  {
+    Fixture f(base, fake, "savearg");
+    const scd::EntryRecord rec = imported(f);
+    const scd::Plan plan = scd::prepare_launch(rec, true);
+    scd::RunOptions o;
+    expect(scd::prepare_backup_ram(o, dir, true) == scd::BackupStatus::ok, "prepare for the arguments");
+    const auto args = scd::run_arguments(plan, o);
+    const auto at = std::find(args.begin(), args.end(), "--backup-ram-out");
+    expect(at != args.end() && *(at + 1) == u8(dir / "backup-ram.next") && std::find(args.begin(), args.end(), "--backup-ram") < at, "a persistent run requests --backup-ram-out beside --backup-ram");
+    scd::RunOptions r;
+    expect(scd::prepare_backup_ram(r, dir, false) == scd::BackupStatus::created, "a replay prepares its scratch image");
+    const auto rargs = scd::run_arguments(plan, r);
+    expect(std::find(rargs.begin(), rargs.end(), "--backup-ram-out") == rargs.end() && r.backup_ram == dir / "replay-backup-ram.bin", "a replay never exports and never reads the save");
+  }
+
+  // 5-7. normal play persists; repeated cycles; the previous generation is kept
+  const std::string first = save_bytes(3), second = save_bytes(4);
+  { scd::RunOptions o; expect(scd::prepare_backup_ram(o, dir, true) == scd::BackupStatus::ok, "cycle 1: the canonical save exists"); spit(o.backup_ram_out, first);
+    expect(scd::commit_backup_ram(o.backup_ram, o.backup_ram_out) == scd::CommitStatus::committed && slurp(dir / "backup-ram.bin") == first && !fs::exists(o.backup_ram_out), "cycle 1: the candidate replaces the save and is consumed");
+    expect(slurp(fs::path(dir / "backup-ram.bin").concat(".prev")) == formatted, "the previous generation is kept"); }
+  { scd::RunOptions o; expect(scd::prepare_backup_ram(o, dir, true) == scd::BackupStatus::ok && slurp(dir / "backup-ram.bin") == first, "cycle 2 starts from the persisted save"); spit(o.backup_ram_out, second);
+    expect(scd::commit_backup_ram(o.backup_ram, o.backup_ram_out) == scd::CommitStatus::committed && slurp(dir / "backup-ram.bin") == second && slurp(fs::path(dir / "backup-ram.bin").concat(".prev")) == first, "cycle 2: committed, one generation behind"); }
+  // 7. failed candidate validation / no candidate / failed replacement: the last valid save survives
+  { scd::RunOptions o; (void)scd::prepare_backup_ram(o, dir, true);
+    expect(scd::commit_backup_ram(o.backup_ram, o.backup_ram_out) == scd::CommitStatus::no_candidate && slurp(dir / "backup-ram.bin") == second, "no candidate: the save is untouched");
+    spit(o.backup_ram_out, second.substr(0, 4000));
+    expect(scd::commit_backup_ram(o.backup_ram, o.backup_ram_out) == scd::CommitStatus::invalid_candidate && slurp(dir / "backup-ram.bin") == second && !fs::exists(o.backup_ram_out), "a truncated candidate is refused, discarded, and the save survives");
+    spit(o.backup_ram_out, std::string());
+    expect(scd::commit_backup_ram(o.backup_ram, o.backup_ram_out) == scd::CommitStatus::invalid_candidate && slurp(dir / "backup-ram.bin") == second, "an empty candidate is refused");
+    fs::create_directories(o.backup_ram_out);
+    expect(scd::commit_backup_ram(o.backup_ram, o.backup_ram_out) == scd::CommitStatus::no_candidate && slurp(dir / "backup-ram.bin") == second, "a candidate that is not a regular file is refused");
+    fs::remove_all(o.backup_ram_out); }
+  { const fs::path blocked = base / "save" / "blocked";  // the replacement itself fails: the target is a non-empty directory
+    fs::create_directories(blocked / "backup-ram.bin" / "x");
+    spit(blocked / "backup-ram.next", save_bytes(5));
+    expect(scd::commit_backup_ram(blocked / "backup-ram.bin", blocked / "backup-ram.next") == scd::CommitStatus::replace_failed && fs::is_directory(blocked / "backup-ram.bin" / "x"), "a failed replacement is reported and changes nothing"); }
+  // a stale candidate from a crashed earlier run is never taken for this run's
+  { spit(dir / "backup-ram.next", save_bytes(6)); scd::RunOptions o; (void)scd::prepare_backup_ram(o, dir, true); expect(!fs::exists(dir / "backup-ram.next") && slurp(dir / "backup-ram.bin") == second, "a stale candidate is removed before the run"); }
+  // atomic writer: failing leaves the previous file
+  { const fs::path f = base / "save" / "atomic.bin"; spit(f, "old"); fs::create_directories(fs::path(f).concat(".tmp"));
+    expect(!scd::write_file_atomic(f, {1, 2, 3}) && slurp(f) == "old", "a write that cannot start leaves the previous file"); fs::remove_all(fs::path(f).concat(".tmp"));
+    expect(scd::write_file_atomic(f, {1, 2, 3}) && slurp(f) == std::string("\1\2\3") && !fs::exists(fs::path(f).concat(".tmp")), "the atomic write replaces the file"); }
+  // 6/8. replays and recordings never touch the player's save; the scratch input is the same defined image every time; games are independent
+  {
+    const fs::path other = base / "save" / "gameB";
+    scd::RunOptions o1, o2, r1, r2;
+    expect(scd::prepare_backup_ram(r1, dir, false) == scd::BackupStatus::created && slurp(r1.backup_ram) == formatted && r1.backup_ram_out.empty(), "a replay starts from the formatted image");
+    spit(r1.backup_ram, "scribbled by a previous replay");
+    expect(scd::prepare_backup_ram(r2, dir, false) == scd::BackupStatus::created && slurp(r2.backup_ram) == formatted, "and again: a defined input every time");
+    expect(slurp(dir / "backup-ram.bin") == second, "the player's save is unchanged by replays");
+    expect(scd::prepare_backup_ram(o1, other, true) == scd::BackupStatus::created && slurp(other / "backup-ram.bin") == formatted && slurp(dir / "backup-ram.bin") == second, "another game has its own, independent save");
+    spit(o1.backup_ram_out, save_bytes(7));
+    expect(scd::commit_backup_ram(o1.backup_ram, o1.backup_ram_out) == scd::CommitStatus::committed && slurp(other / "backup-ram.bin") == save_bytes(7) && slurp(dir / "backup-ram.bin") == second, "saving one game does not touch the other");
+    (void)o2;
+  }
+  // 8. a legacy pristine image left by an earlier launcher is a valid save
+  { const fs::path legacy = base / "save" / "legacy"; spit(legacy / "backup-ram.bin", formatted); scd::RunOptions o; expect(scd::prepare_backup_ram(o, legacy, true) == scd::BackupStatus::ok && slurp(legacy / "backup-ram.bin") == formatted, "a legacy pristine image is loaded as the save"); }
+  // build pass scratch: always the pristine image
+  { const fs::path scratch = base / "save" / "build-backup-ram.bin"; spit(scratch, "stale"); expect(scd::write_pristine_backup_ram(scratch) && slurp(scratch) == formatted, "a build pass always starts from the formatted image"); }
+  // exit 28
+  expect(scd::is_refusal_exit(28) && !scd::is_refusal_exit(29), "status 28 is a typed program status");
 }
 
 void test_catalog(const fs::path &base, const fs::path &fake) {
@@ -631,6 +729,7 @@ int main(int argc, char **argv) {
   test_claims_against_files(base, fake);
   test_run_arguments_and_outcomes(base, fake);
   test_backup_ram(base);
+  test_backup_persistence(base, fake);
   test_catalog(base, fake);
   test_experimental_policy(base, fake);
   std::cout << failures << " failures\n";
