@@ -225,6 +225,9 @@ others show the placeholder paintings.
   its log, Master System ready), import with real results (added, duplicate, refused), the empty library, storage and its cleanup confirmation, all settings
   sections, lower-page views and a real build in progress. `launcher-hidpi/` - the same layout at a forced 2x UI scale in 2160x1480 output pixels (a
   simulation, not an OS HiDPI test). `screenshots/launcher-capture.json` records the captured binary SHA-256 and the exact file list.
+* `screenshots/parity/` - Genesis, Master System and Sega CD side by side (SEG-109 / ADR 0253): a ready game's Details page at 1080x740 and 720x520 and a running
+  build at 1080x740, from project-authored fixtures (synthetic ROM headers, a synthetic BIOS/disc, the build and game doubles; placeholder art only). They come
+  from `launcher_parity_gui_test.py` (`SEGARECOMP_PARITY_SHOTS=<dir>`), which also compares the three pages structurally (sections, reading order, columns, menus).
 * `screenshots/review/before/` - the principal screens of the previous binary (branch commit 034393d) captured the same way, for before/after review.
 * `screenshots/viewer-*` - the shared viewer (Genesis, Master System 192 and 224 lines) at 1080x740 with `-small/` 720x520 counterparts; see
   [viewer UI review](viewer-ui.md) and `screenshots/viewer-capture.json`.
