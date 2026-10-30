@@ -1,5 +1,33 @@
 {
  "fixtures": {
+  "backup_ram/cooked": {
+   "disc.cue": {
+    "sha256": "c9f9fb7a2e4f822fbde6cbec755276c27ef58b8463ab00492bb5ef89e2b74a8b",
+    "size": 155
+   },
+   "track01.bin": {
+    "sha256": "a428ca1066f5028fe8b9ae2a283f24aae0e6e8c735bb2a3e6473755439f3020d",
+    "size": 81920
+   },
+   "track02.bin": {
+    "sha256": "70eed6a39b2a89208d0eca36a263607330e75d90f84782e219815a6f2308e97c",
+    "size": 176400
+   }
+  },
+  "backup_ram/raw": {
+   "disc.cue": {
+    "sha256": "5fa3a4651cb2fc4ac46764ab064ea52156716992c3601ace906f1d4173aac667",
+    "size": 155
+   },
+   "track01.bin": {
+    "sha256": "c623ef460cd2f503a7286c4f619ad6bc1826dbcc1c8d7fae0661f4b0ebe4d18c",
+    "size": 94080
+   },
+   "track02.bin": {
+    "sha256": "70eed6a39b2a89208d0eca36a263607330e75d90f84782e219815a6f2308e97c",
+    "size": 176400
+   }
+  },
   "bootarea/cooked": {
    "disc.cue": {
     "sha256": "c9f9fb7a2e4f822fbde6cbec755276c27ef58b8463ab00492bb5ef89e2b74a8b",

@@ -3,14 +3,14 @@
  * (optionally in deadline slices: the result must not depend on them), and writes a JSON report and, on request, the VDP frame.
  *
  *   program --disc-dir DIR --instruction-budget N [--report FILE] [--frame FILE.ppm] [--slice-ticks T | --slice-seed S]
- *           [--set main|sub:dN|aN=VALUE]... [--until-tick T] [--backup-ram FILE]
+ *           [--set main|sub:dN|aN=VALUE]... [--until-tick T] [--backup-ram FILE [--backup-ram-out FILE]]
  *           [--capture-onset N]... --capture-dir DIR   (BIOS-image profile; SEG-065-T003)
  *           [--input-script FILE [--input-log FILE]]   (BIOS-image profile; SEG-070-T002, ADR 0149)
  *           [--record-input FILE]   (live programs only, SEG-078-T001, ADR 0204: the script the live run recorded)
  *
  * Exit status: 0 idle (success), 10 typed stop, 11 budget exhausted or deadline (read `result`), 20 disc refused at start-up, 22 backup RAM input refused, 23 input script refused, 2 usage.
  * A live program (a viewer registered a host, SEG-078-T001) additionally: 24 host failure, 25 recording capacity reached (the valid prefix is
- * recorded), 26 recorder refused, 27 recording could not be written; leaving by the host's quit is 0. */
+ * recorded), 26 recorder refused, 27 recording could not be written, 28 the backup RAM output (SEG-108) could not be written; leaving by the host's quit is 0. */
 #include "scd_runtime.h"
 
 #include "scd_live.h"
@@ -500,6 +500,15 @@ static const char *scd_load_backup_ram(ScdMachine *m, const char *path) {
   return scd_backup_ram_install(m, bytes, n) == 0 ? NULL : "length";
 }
 
+/* SEG-108 (ADR 0252): export exactly the machine's 8 KiB backup RAM bytes, nothing else. Only called when an image was installed. */
+static int scd_write_backup_ram(const ScdMachine *m, const char *path) {
+  FILE *f = fopen(path, "wb");
+  size_t n;
+  if (f == NULL) return 1;
+  n = fwrite(m->backup_ram, 1U, sizeof m->backup_ram, f);
+  return (fclose(f) != 0 || n != sizeof m->backup_ram) ? 1 : 0;
+}
+
 /* SEG-070-T002 (ADR 0149): read, validate and install the input script before any guest instruction; a refusal is typed. */
 static int scd_load_input_script(ScdMachine *m, const char *path, int log, int bios_profile) {
   static char text[SCD_INPUT_MAX_SCRIPT_BYTES + 1U];
@@ -576,7 +585,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   const char *capture_dir = NULL;
   uint64_t capture_onsets[8];
   unsigned capture_count = 0U;
-  const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *wlog_path = NULL, *event_path = NULL, *backup_ram_path = NULL, *pcm_trace_path = NULL;
+  const char *dump_dir = NULL, *coverage_path = NULL, *trace_path = NULL, *wlog_path = NULL, *event_path = NULL, *backup_ram_path = NULL, *backup_ram_out_path = NULL, *pcm_trace_path = NULL;
   const char *input_script_path = NULL, *input_log_path = NULL, *record_path = NULL, *cdda_pcm_path = NULL, *cdda_log_path = NULL;
   int cdda_requested = 0, mix_requested = -1; /* SEG-107: -1 = default (on for a viewer with audio), 0 = off, 1 = on */
   const char *mix_pcm_path = NULL;
@@ -616,6 +625,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
       capture_count += 1U;
     } else if (strcmp(flag, "--capture-dir") == 0) capture_dir = value;
     else if (strcmp(flag, "--backup-ram") == 0) backup_ram_path = value; /* SEG-065-T002: the backup RAM machine input */
+    else if (strcmp(flag, "--backup-ram-out") == 0) backup_ram_out_path = value; /* SEG-108: the final 8 KiB image, a candidate for the launcher to validate and commit */
     else if (strcmp(flag, "--input-script") == 0) input_script_path = value; /* SEG-070-T002: the timed pad machine input */
     else if (strcmp(flag, "--input-log") == 0) input_log_path = value;       /* its read log (local diagnostic) */
     else if (live_host != NULL && strcmp(flag, "--record-input") == 0) record_path = value; /* SEG-078-T001 */
@@ -635,6 +645,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     else if (authentic != NULL && strcmp(flag, "--materialize-dir") == 0) materialize_dir = value;
     else return 2;
   }
+  if (backup_ram_out_path != NULL && backup_ram_path == NULL) return 2; /* SEG-108: output only exists for a valid installed image */
   if (disc_dir == NULL || budget == 0U) {
     fprintf(stderr, "usage: %s --disc-dir DIR --instruction-budget N [--report FILE] [--frame FILE] [--slice-ticks T | --slice-seed S]\n",
             argc > 0 ? argv[0] : "program");
@@ -771,6 +782,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
   }
   if (coverage_path != NULL && scd_coverage_write(&machine, coverage_path) != 0) return 1;
   if (dump_dir != NULL && scd_dump_state(&machine, dump_dir) != 0) return 1;
+  if (backup_ram_out_path != NULL && (!machine.backup_ram_present || scd_write_backup_ram(&machine, backup_ram_out_path) != 0)) return 28; /* SEG-108 */
   if (input_log_path != NULL && scd_input_write_log(&machine, input_log_path) != 0) return 1;
   if (record_path != NULL && scd_input_live_write(&machine, record_path) != 0) return 27; /* SEG-078-T001: the recorded script, also after a quit or a stop */
   if (materialize_dir != NULL && result == SCD_RUN_STOPPED && !scd_capture(&machine, program, materialize_dir)) return 1;

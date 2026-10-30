@@ -875,6 +875,34 @@ def fixture_pcm(options):
     return main.assemble(), sub.assemble(), {}, {"d": reads}
 
 
+# backup_ram (SEG-108) -------------------------------------------------------------------------------------------------------
+# The sub CPU reads internal backup RAM cells through the real bus (byte, word, mirror, both ends of the part) into D0-D6, then writes the pattern of
+# the selected phase: "read" nothing, "write" pattern A, "update" pattern B. Run once per phase against a persisted image, the reads of one run are
+# the writes of an earlier one.  Cells live on the odd byte lane of $FE0000, 8192 cells, mirrored every $4000 bytes of address.
+BACKUP_READS = (("b", 0xFE0001), ("b", 0xFE3FFF), ("w", 0xFE0010), ("b", 0xFE0003), ("b", 0xFE4001), ("b", 0xFE2001), ("b", 0xFE3FFD))
+BACKUP_WRITES = {
+    "write": (("b", 0xFE0001, 0x5A), ("b", 0xFE3FFF, 0xA5), ("w", 0xFE0010, 0x12C3), ("b", 0xFE4003, 0x77), ("b", 0xFE2001, 0x3C), ("b", 0xFE3FFD, 0x81)),
+    "update": (("b", 0xFE4001, 0x11), ("b", 0xFE3FFD, 0xEE), ("w", 0xFE0010, 0xFF09)),
+    "read": (),
+}
+
+
+def fixture_backup_ram(options):
+    phase = options.get("backup_phase", "write")
+    sub = Asm(SP_BASE)
+    for index, (size, address) in enumerate(BACKUP_READS):
+        sub.move(size, absl(address), d(index))
+    for size, address, value in BACKUP_WRITES[phase]:
+        sub.move(size, imm(value), absl(address))
+    sub.move("b", imm(0x02), absl(GA_SUB + 0x0F))
+    sub.stop(0x2700)
+    main = Asm(IP_BASE)
+    main_start_sub(main, SP_BASE)
+    wait_flag(main, GA_MAIN + 0x0F, 2, "w_done")
+    main_finish(main)
+    return main.assemble(), sub.assemble(), {}, {"phase": phase}
+
+
 # cdframe ---------------------------------------------------------------------------------------------------------------------
 PALETTE_BYTES = 32
 TILE_COUNT = 16
@@ -1349,6 +1377,7 @@ FIXTURES = {
     "timer": fixture_timer,
     "subside": fixture_subside,
     "pcm": fixture_pcm,
+    "backup_ram": fixture_backup_ram,
     "bootarea": fixture_bootarea,
     "cdframe": fixture_cdframe,
     "modules": fixture_modules,
@@ -1452,6 +1481,8 @@ def options_from(args):
         options["abort_dma"] = True
     if args.bad_cdc_register:
         options["bad_cdc_register"] = True
+    if args.backup_phase is not None:
+        options["backup_phase"] = args.backup_phase
     if args.module_case is not None:
         options["module_case"] = args.module_case
     if args.iso_defect is not None:
@@ -1475,6 +1506,7 @@ def main(argv=None):
     parser.add_argument("--bad-checksum", action="store_true")
     parser.add_argument("--abort-dma", action="store_true")
     parser.add_argument("--bad-cdc-register", action="store_true")
+    parser.add_argument("--backup-phase", choices=("read", "write", "update"))
     parser.add_argument("--no-audio", action="store_true")
     parser.add_argument("--module-case", choices=MODULE_CASES)
     parser.add_argument("--iso-defect", choices=ISO_DEFECTS)
