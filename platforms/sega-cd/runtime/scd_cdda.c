@@ -49,7 +49,9 @@ int scd_cdda_play(ScdMachine *m, int32_t lba, uint32_t track_index) {
   int16_t frames[2U * SCD_CDDA_SECTOR_FRAMES];
   ScdCdda *const c = &m->cdda;
   uint32_t i;
+  const int continues = c->playing && lba == c->next_lba; /* SEG-107: this sector continues the run in progress */
   if (!c->enabled) return 0;
+  scd_mix_advance(m, m->now); /* SEG-107: everything before this sector's arrival is on the timeline before the run state changes */
   {
     const ScdDiscError error = scd_disc_read_cdda(m->disc, (uint32_t)lba, frames);
     if (error != SCD_DISC_OK) {
@@ -77,5 +79,6 @@ int scd_cdda_play(ScdMachine *m, int32_t lba, uint32_t track_index) {
   c->sectors += 1U;
   c->frames += SCD_CDDA_SECTOR_FRAMES;
   if (c->sink != NULL && c->sink(c->sink_context, frames, SCD_CDDA_SECTOR_FRAMES) != 0) c->sink_refused += 1U;
+  scd_mix_cdda(m, frames, SCD_CDDA_SECTOR_FRAMES, !continues); /* SEG-107: the same sector joins the mixed timeline (a no-op unless the mix is enabled) */
   return 0;
 }

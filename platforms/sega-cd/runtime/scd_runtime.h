@@ -552,6 +552,35 @@ typedef struct ScdCdda {
   FILE *log;                                    /* local diagnostic (--cdda-log): one line per run start / interruption / discontinuity; never read back */
 } ScdCdda;
 
+/* SEG-107 (ADR 0251): the one audio output timeline. 44.1 kHz frame n is at guest tick T_n = floor(n x SCD_TICKS_PER_SECOND / 44100). Each frame is the
+ * saturating sum of the latest RF5C164 sample whose event time is <= T_n (zero-order hold) and the next queued CD-DA frame. The machine advances the
+ * timeline only at guest events, so the stream is independent of scheduler slicing; the sink is one-way (nothing reaches the machine). Inert unless
+ * a host enabled it: with `enabled` clear no sample is computed and nothing in the machine or its reports changes. */
+#define SCD_MIX_QUEUE_FRAMES 2048U
+#define SCD_MIX_CHUNK_FRAMES 1024U
+typedef struct ScdMix {
+  ScdCddaSink sink;         /* host output of mixed frames (any count up to SCD_MIX_CHUNK_FRAMES), or NULL */
+  void *sink_context;
+  uint8_t enabled;
+  uint64_t tick;            /* guest tick T_n of the next output frame n (= frames) */
+  uint32_t rem;             /* exact remainder of n x SCD_TICKS_PER_SECOND / 44100 */
+  uint64_t frames;          /* output frames produced so far */
+  int16_t held[2];          /* the latest native PCM sample (L, R) */
+  uint32_t q_head, q_count; /* CD-DA frames waiting for their output frame */
+  uint64_t gate;            /* queued CD-DA frames play only from this tick: a run that starts on an empty queue is held back one sector period, which
+                               absorbs the drive tick's arrival jitter (a few video lines) so a contiguous run is seamless */
+  int16_t queue[2U * SCD_MIX_QUEUE_FRAMES];
+  uint32_t chunk_count;
+  int16_t chunk[2U * SCD_MIX_CHUNK_FRAMES];
+  uint64_t pcm_events;      /* native PCM samples produced (running chip) */
+  uint64_t pcm_frames;      /* output frames whose PCM part was not silent */
+  uint64_t cdda_frames;     /* CD-DA frames queued / mixed / lost for lack of queue room / output frames without CD-DA while a run was playing */
+  uint64_t cdda_mixed, cdda_dropped, cdda_gaps;
+  uint64_t saturated;       /* native PCM sums and output sums that hit a clamp */
+  uint64_t sink_refused;
+  uint32_t peak;            /* largest absolute PCM-only sample value */
+} ScdMix;
+
 typedef struct ScdMachine {
   ScdCpu cpu[2];
   const ScdProgram *program;
@@ -636,6 +665,7 @@ typedef struct ScdMachine {
   uint32_t delivered_count;
   uint8_t delivered_overflow;             /* more ranges than the ledger holds: the evidence is incomplete and is never used */
   ScdCdda cdda;                           /* SEG-104: CD-DA output (inert unless a host enabled it) */
+  ScdMix mix;                             /* SEG-107: PCM synthesis and the mixed output timeline (inert unless a host enabled it) */
 } ScdMachine;
 
 /* The duration of one sub cycle in ticks for this machine's profile (ADR 0177). */
@@ -867,6 +897,10 @@ void scd_gfx_reset(ScdMachine *m);
 void scd_pcm_reset(ScdMachine *m);
 /* Apply every sample event strictly before `tick` (ADR 0233). Exposed for the focused device test; the machine calls it from each access. */
 void scd_pcm_sync(ScdMachine *m, uint64_t tick);
+/* SEG-107 (scd_pcm.c): bring the PCM chip and the output timeline up to guest `tick` (frames with T_n < tick are produced and handed to the sink). */
+void scd_mix_advance(ScdMachine *m, uint64_t tick);
+/* Queue one fader-scaled CD-DA sector for mixing at its guest arrival instant (m->now). */
+void scd_mix_cdda(ScdMachine *m, const int16_t *frames, uint32_t count, int new_run);
 int scd_pcm_trace_open(ScdMachine *m, const char *path);
 void scd_pcm_trace_close(ScdMachine *m);
 int scd_pcm_access(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t *value, uint32_t pc);
