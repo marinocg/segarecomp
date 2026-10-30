@@ -777,6 +777,17 @@ static void t_wave_rewrite_reset_clock(void) {
   W(42U * P + 1U, 7, 0xC0U);
   W(42U * P + 1U, 0, 50U);
   script_case("ENV changed one tick before, on, and one tick after a sample instant", 60U * P, 0, 1);
+  /* a sample event that falls exactly on an output frame's instant is heard by that frame (the "latest event at or before" rule): reset the grid so
+   * that event 5 coincides with frame 2000 and let the waveform change at every event */
+  {
+    const uint64_t t0 = frame_time(2000U) - 5U * P;
+    n_ops = 0U;
+    RESET(t0);
+    wave(t0, 0, 0, w, 30U);
+    chan(t0, 0, 0xFF, 0xFF, 0x0800, 0, 0);
+    onoff(t0, 0x01U);
+    script_case("a sample event exactly on an output frame's instant is heard by that frame", frame_time(2000U) + 20U * P, 0, 1);
+  }
 }
 
 static void t_long(void) {
@@ -837,6 +848,16 @@ static void t_mixing(void) {
   check(legacy_frames == 588U * n_arrivals, "the legacy sink still sees every drive-delivered sector, unchanged");
   check(machine->mix.cdda_gaps == 0U && machine->mix.cdda_dropped == 0U && machine->mix.cdda_readahead > 0U && machine->mix.cdda_skipped > 0U,
         "no gap and no drop; the slower drive tick is covered by read-ahead and its later deliveries are not queued twice");
+  /* a run into the end of its track: nothing past the track is read ahead (the INDEX 00 pregap of the next track is never heard) */
+  fresh(1, 1);
+  n_ops = 0U;
+  cdd_command(3U, T4); /* the last audio track: a data track follows */
+  drive_until(machine->now + 30U * SCD_CDD_TICK_TICKS);
+  scd_mix_advance(machine, machine->now);
+  cd = ref_cd(T4 + T4_N);
+  ref_n = ref_render(machine->now, ref_buf, &cd);
+  bad = ref_n == out_frames ? differing(ref_buf, out_buf, ref_n) : 1U;
+  check(ref_n == out_frames && bad == 0U && stop_tick != UINT64_MAX, "a run to the end of its track equals the reference and stops at the track end");
   /* PCM only while CD-DA is stopped */
   fresh(1, 1);
   n_ops = 0U;

@@ -599,7 +599,7 @@ Not modelled: the hardware fader's real ramp, CD-DA emphasis, subcode, RF5C164/F
 
 ## 23. RF5C164 PCM output and the mixed timeline (SEG-107, ADR 0251)
 
-Optional (`--audio-pcm FILE`, `--audio-digest 1`, and by default in the viewer; `--pcm-audio 0` turns it off). Off, nothing below exists and every report is as before. On, the guest-visible state is unchanged (only the chip's lazily synchronized diagnostic position in the report moves).
+Optional (`--audio-pcm FILE`, `--audio-digest 1`, and by default in the viewer; `--pcm-audio 0` turns it off). Off, nothing below exists and every report is as before. On, the guest-visible state is unchanged (only the chip's lazily synchronized diagnostic position moves in the report: `pcm.samples`, `channel_steps`, `max_catchup` and `addr`).
 
 | Item | Behaviour | Basis |
 |---|---|---|
@@ -608,6 +608,7 @@ Optional (`--audio-pcm FILE`, `--audio-digest 1`, and by default in the viewer; 
 | native rate | 12,500,000 / 384 = 32,552.08 Hz (one event per 384 sub cycles of the profile-aware sub clock) | G / V |
 | 44.1 kHz timeline | frame `n` is at guest tick `floor(n x ticks_per_second / 44100)` from tick 0 (exact integer arithmetic) and takes the latest sample event at or before it (zero-order hold; no interpolation, no host resampler) | design (host policy, not hardware) |
 | CD-DA | a run starts at the drive tick that first plays a sector and then advances one frame per output frame; the queue (2,048 frames) is refilled from the disc ahead of the 75 Hz drive tick (the model tick is about 340 ppm slower than 588 frames) with the next contiguous sector of the track, stopping at the track end, an unreadable sector and the drive's interruption; the fader (section 22) is applied per frame from the instant of the write | design; fader G |
+| run ends | the queue is not flushed at an interruption: up to one sector (13 ms) of the run still plays after a stop, pause or seek, and a resume re-delivers the drive's current sector, so up to one sector may repeat; read-ahead stops at the track end even when the next track is audio and contiguous (about two frames of silence) | design |
 | mix | saturating sum of CD-DA and PCM; with one silent the other passes unchanged | G / V |
 | advancement | only at guest events (register access, reset, video-frame event, sector delivery or interruption, fader write); independent of slicing | design |
 | consumers | a sink for mixed chunks of up to 1,024 frames; the headless canonical artifact (S16LE stereo, tick 0, silence included) and digest; the viewer's existing presenter | ADR 0251 |
