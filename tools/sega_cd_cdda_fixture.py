@@ -92,16 +92,48 @@ def vdp_reg(m, reg, value):
     m.move("w", F.imm(0x8000 | (reg << 8) | value), F.absl(VDP_CTRL))
 
 
-def sub_program():
+# SEG-107 (ADR 0251): the PCM variant. The same CD-DA script, preceded by RF5C164 setup (a positive-only wave with $FF loop markers, two channels)
+# and with the channels switched off and on again while the CD-DA runs. Positive-only samples keep the independent reference exact.
+PCM_BASE = 0xFF0000
+PCM_WAVE = bytes([0x80 | ((i * 3) & 0x7E) for i in range(63)] + [0xFF] + [0x80 | ((i * 5 + 9) & 0x7E) for i in range(31)] + [0xFF])
+SCRIPT_PCM = [("play", T2_FIRST, 40), ("pcm_off", 0, 6), ("pause", 0, 10), ("pcm_on", 0, 8), ("resume", 0, 20), ("play", T2_FIRST + T2_N - 5, 190),
+              ("seek", T3_FIRST + 20, 10), ("play", T3_FIRST + 20, 25), ("stop", 0, 10)]
+PCM_CHANNELS = [  # channel, ENV, PAN, FD, LS, ST
+    (0, 0xFF, 0xFF, 0x0800, 0x0000, 0x00),
+    (1, 0x90, 0x3C, 0x0555, 0x0040, 0x00),
+]
+
+
+def pcm_reg(s, reg, value):
+    s.move("b", F.imm(value), F.absl(PCM_BASE + 2 * reg + 1))
+
+
+def pcm_setup(s):
+    pcm_reg(s, 7, 0x80)  # chip enabled, bank 0
+    for i, b in enumerate(PCM_WAVE):
+        pcm_reg(s, 0x1000 + i, b)
+    for ch, env, pan, fd, ls, st in PCM_CHANNELS:
+        pcm_reg(s, 7, 0xC0 | ch)
+        for reg, v in ((0, env), (1, pan), (2, fd & 0xFF), (3, fd >> 8), (4, ls & 0xFF), (5, ls >> 8), (6, st)):
+            pcm_reg(s, reg, v)
+    pcm_reg(s, 8, 0xFC)  # channels 0 and 1 ON
+
+
+def sub_program(pcm=False):
     s = F.Asm(0)
     s.lw(SUB_SSP)
     s.lw(SUB_ENTRY)
     while s.pc < SUB_ENTRY:
         s.w(0)
-    for n, (name, lba, wait) in enumerate(SCRIPT):
-        command = {"play": 3, "seek": 4, "pause": 6, "resume": 7, "stop": 1}[name]
-        for i, word in enumerate(cdd_tx(command, lba)):
-            s.move("w", F.imm(word), F.absl(GA_SUB + 0x42 + 2 * i))  # the word write to $FF804A sends the command
+    if pcm:
+        pcm_setup(s)
+    for n, (name, lba, wait) in enumerate(SCRIPT_PCM if pcm else SCRIPT):
+        if name in ("pcm_off", "pcm_on"):
+            pcm_reg(s, 8, 0xFF if name == "pcm_off" else 0xFC)
+        else:
+            command = {"play": 3, "seek": 4, "pause": 6, "resume": 7, "stop": 1}[name]
+            for i, word in enumerate(cdd_tx(command, lba)):
+                s.move("w", F.imm(word), F.absl(GA_SUB + 0x42 + 2 * i))  # the word write to $FF804A sends the command
         s.move("w", F.imm(wait - 1), F.d(6))                          # `wait` outer rounds of ~160,000 cycles (about one drive period)
         s.label("o%d" % n)
         s.move("w", F.imm(15999), F.d(7))
@@ -155,10 +187,11 @@ def handler_program():
     return h.assemble()
 
 
-def build_bios():
-    sub = sub_program()
+def build_bios(pcm=False):
+    sub = sub_program(pcm)
     sub_len = (len(sub) + 1) & ~1
-    rom = bytearray(ROM_SIZE)
+    rom_size = 0x2000 if pcm else ROM_SIZE
+    rom = bytearray(rom_size)
     struct.pack_into(">II", rom, 0, 0x00FFFE00, MAIN)
     for v in range(2, 64):
         struct.pack_into(">I", rom, 4 * v, FAULT)
@@ -172,7 +205,7 @@ def build_bios():
     fault.move("w", F.imm(0xDEAD), F.absl(RESULT + 0xF0))
     fault.stop(0x2700)
     rom[FAULT:FAULT + len(fault.assemble())] = fault.assemble()
-    assert SUB_SRC + len(sub) <= ROM_SIZE
+    assert SUB_SRC + len(sub) <= rom_size
     rom[SUB_SRC:SUB_SRC + len(sub)] = sub
     return bytes(rom)
 
@@ -197,9 +230,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["build"])
     parser.add_argument("--out", type=pathlib.Path, required=True)
+    parser.add_argument("--pcm", action="store_true", help="SEG-107: the variant that also drives the RF5C164 PCM chip")
     args = parser.parse_args(argv)
     args.out.mkdir(parents=True, exist_ok=True)
-    (args.out / "bios.bin").write_bytes(build_bios())
+    (args.out / "bios.bin").write_bytes(build_bios(args.pcm))
     build_disc(args.out / "disc")
     exp = expected()
     (args.out / "expected.json").write_text(json.dumps(exp, indent=1, sort_keys=True) + "\n")
