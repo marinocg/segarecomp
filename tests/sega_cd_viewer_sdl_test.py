@@ -112,7 +112,17 @@ def main():
         (tmp / "a.rec").write_text(rec)
         code, rrep = run(exe, base + ["--input-script", tmp / "a.rec", "--capture-dir", capdir, "--capture-onset", 8, "--capture-onset", 17, "--report", tmp / "r.json"], {})
         replay = json.loads((tmp / "r.json").read_text())
-        check(code == 0 and {k: v for k, v in rep.items() if k not in ("live", "cdda")} == replay, "viewer: the recording replays headlessly to the identical report and captured frames")
+        # SEG-107: the viewer mixes PCM and CD-DA by default (an `audio` block; the chip is synchronized to every video frame, so its lazily synchronized position
+        # fields differ from a headless replay without the mix); everything the guest can observe is equal
+        def guest_view(report):
+            view = {k: v for k, v in report.items() if k not in ("live", "cdda", "audio")}
+            if "sub_devices" in view and "pcm" in view["sub_devices"]:
+                view = json.loads(json.dumps(view))
+                for key in ("samples", "channel_steps", "max_catchup", "addr"):
+                    view["sub_devices"]["pcm"].pop(key, None)
+            return view
+
+        check(code == 0 and guest_view(rep) == guest_view(replay), "viewer: the recording replays headlessly to the identical report and captured frames")
 
         # F6 holds, F7 steps: same recording and report as the same keys without the pause
         pk = "3 down Right\n4 down F6\n4 up F6\n6 down F7\n6 up F7\n8 down F7\n8 up F7\n9 down F6\n9 up F6\n13 up Right\n14 down Up\n18 up Up\n"
