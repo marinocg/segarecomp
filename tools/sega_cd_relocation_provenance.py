@@ -45,7 +45,7 @@ class Track1:
     def __init__(self, cue):
         text = open(cue, encoding="latin-1").read()
         self.path = os.path.join(os.path.dirname(cue), re.search(r'FILE\s+"([^"]+)"', text).group(1))
-        raw = "MODE1/2352" in text or "MODE2/2352" in text
+        raw = "MODE1/2352" in text   # MODE2 is not supported by the product either
         self.stride, self.start = (2352, 16) if raw else (2048, 0)
 
     def blocks(self, first, count):
@@ -138,7 +138,12 @@ def main(argv=None):
     if not any(c == cpu_name and b <= s["pc"] < b + n for c, b, n in verified):
         return fail("writer_not_verified")
     fragment = bytes(live(a) for a in range(lo, lo + length))
-    ledger = [(int(a), int(b)) for a, b in cap["region"]["delivered"]]
+    ledger = []                                   # merged like the product resolver: contiguous or overlapping ranges are one segment, so a copy straddling two entries is found
+    for first, count in sorted((int(a), int(b)) for a, b in cap["region"]["delivered"]):
+        if ledger and first <= ledger[-1][0] + ledger[-1][1]:
+            ledger[-1] = (ledger[-1][0], max(ledger[-1][1], first + count - ledger[-1][0]))
+        else:
+            ledger.append((first, count))
     if cap["region"].get("delivered_overflow") or not ledger:
         return fail("no_delivery_evidence")
     track, found = Track1(args.cue), []

@@ -1,7 +1,7 @@
 # ADR 0254: SEG-110 (M14) - the Earthworm Jim SE executable-code frontier is a relocated fragment; derived-image feasibility
 
 - Status: Accepted. Milestone SEG-110 (M14). Related: ADR 0142 (verified broad AOT, bounded image materialization), 0205 (reference-independent extent discovery), 0220 (authentic loader discovery), 0221 (file-first AOT), 0223 (dynamic source-to-RAM binding), 0225 (authentic evaluation).
-- Privacy: processor, memory class, counts, sizes and times only. No address, disc offset, LBA, hash, name or byte of a disc, BIOS or backup RAM appears here. The authentic runs and the derived extent are local and ephemeral.
+- Privacy: processor, memory class, counts, sizes and times only. No address, disc offset, LBA, hash, file name or byte of a disc, BIOS or backup RAM appears here. The authentic runs and the derived extent are local and ephemeral.
 - Decision: **`M14_DERIVED_IMAGE_FEASIBLE`** - but the frontier is not a derived (decompressed, decoded or generated) image. It is a short relocated fragment of an already-verified image, and the missing piece is a provenance-qualified identity rule, not a producer.
 
 ## 1. Authentic frontier, reproduced (T001)
@@ -64,6 +64,7 @@ The old `no_source` frontier is explained; the original generated-native program
 ## 6. Limits and what is NOT claimed
 
 - The extent is the **exact-copy run visible at the stop epoch**, not "everything the stage will ever execute": the file-first arm saw a 16 KiB prefix of the 48 KiB stage and was still machine-equal only because nothing beyond it ran before the stop. A later route stage may need another round (existing discovery behaviour).
+- The stream check covers sub-processor and main Work RAM writes in the log; main-processor writes into PRG RAM are not streams (a changed value is still caught by comparing the stream with the live window). The M15 port must merge the delivery ledger exactly as `resolve-source` does (review finding, fixed in the diagnostic).
 - Only main Work RAM and sub PRG RAM have write evidence. Word RAM relocation (a sub program copying its own module through Word RAM) and Z80 RAM uploads are not covered; they need their own evidence design.
 - A second title was not available with this frontier class; generality is argued from the idiom (copy-and-run trampolines) and shown on the project fixture, not demonstrated on a second authentic disc.
 - Playability is not claimed: the next stop is a Z80-window read; ADR 0225's separate developer-controlled Z80 experiments are unrelated to this mechanism.
