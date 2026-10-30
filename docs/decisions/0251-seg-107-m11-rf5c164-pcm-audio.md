@@ -1,6 +1,6 @@
 # ADR 0251: SEG-107 M11 - Sega CD RF5C164 PCM audio and sound effects
 
-- Status: Accepted (T001 contract, T002-T004 implementation and validation, T005 decision, in the same PR (SEG-107 / M11, one combined PR; internal tasks T001-T005). Decision: **`M11_PCM_AUDIO_GO`** (see "Decision").
+- Status: Accepted (T001 contract, T002-T004 implementation and validation, T005 decision; SEG-107 / M11, one combined PR, internal tasks T001-T005). Decision: **`M11_PCM_AUDIO_GO`** (see "Decision").
 - Related: ADR 0233 and 0237 (SEG-102: PCM sample clock and wave-address readback, unchanged), ADR 0244-0248 (SEG-104: CD-DA), ADR 0250 (M10; its `M10_HINT_PARTIAL` and the accepted R2 three-frame lag are not touched). Product PR #171 and harness PR #117 were verified merged before this work began.
 - Privacy: counts, relative frame numbers and classes only; no ROM bytes, samples, soundtrack data or traces are committed. Full evidence is in the ignored `.cache/seg107`.
 
