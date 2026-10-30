@@ -1188,6 +1188,16 @@ segarecomp_enable_warnings(sega_cd_pcm_test)
 add_test(NAME sega_cd_pcm_test COMMAND sega_cd_pcm_test)
 set_property(TEST sega_cd_pcm_test APPEND PROPERTY LABELS full fast)
 
+# SEG-104 (ADR 0244): CD-DA sector reader, canonical samples and drive-timed playback
+add_executable(sega_cd_cdda_test sega_cd_cdda_test.c)
+set_target_properties(sega_cd_cdda_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_link_libraries(sega_cd_cdda_test PRIVATE segarecomp::runtime_sega_cd)
+segarecomp_enable_warnings(sega_cd_cdda_test)
+add_test(NAME sega_cd_cdda_test COMMAND sega_cd_cdda_test)
+set_property(TEST sega_cd_cdda_test APPEND PROPERTY LABELS full fast)
+add_test(NAME sega_cd_cdda_compare_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_cdda_compare_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_cdda_compare_test APPEND PROPERTY LABELS full fast)
+
 # Local diagnostic (not a test; built on request): replays recorded PCM operation sequences through the chip model (ADR 0236).
 add_executable(sega_cd_pcm_replay EXCLUDE_FROM_ALL sega_cd_pcm_replay.c)
 set_target_properties(sega_cd_pcm_replay PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
@@ -1286,6 +1296,15 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST sega_cd_viewer_sdl_test APPEND PROPERTY LABELS full fast)
   set_property(TEST sega_cd_viewer_sdl_test APPEND PROPERTY ENVIRONMENT "SDL3_PREFIX=${_scd_sdl_prefix}")
   set_property(TEST sega_cd_viewer_sdl_test PROPERTY TIMEOUT 600)
+endif()
+# SEG-104 (ADR 0246): CD-DA end to end on a generated-native fixture program - the headless canonical artifact against an independent oracle, then (with
+# the SDL3 viewer) the real viewer with SDL's disk audio driver. The viewer part skips itself without SDL3.
+add_test(NAME sega_cd_cdda_native_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_cdda_native_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_cdda_native_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sega_cd_cdda_native_test PROPERTY TIMEOUT 900)
+if(SEGARECOMP_ENABLE_SDL3_VIEWER)
+  set_property(TEST sega_cd_cdda_native_test APPEND PROPERTY ENVIRONMENT "SDL3_PREFIX=${_scd_sdl_prefix}")
 endif()
 # SEG-071-T002 (ADR 0177): the sub clock, drive grid, main bus, VDP port and video-phase conventions of the BIOS-image profile.
 add_test(NAME sega_cd_timing_convention_test COMMAND ${Python3_EXECUTABLE}

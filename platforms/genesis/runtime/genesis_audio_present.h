@@ -14,24 +14,10 @@
 
 #include <stdint.h>
 
-#include "genesis_audio_sink.h"
+#include "genesis_audio_policy.h"
 #include "genesis_mixer.h"
 
-#define GENESIS_AUDIO_QUEUE_LIMIT_FRAMES 4410U
-#define GENESIS_AUDIO_PRESENT_CHUNK_FRAMES 1024U
-
-typedef struct GenesisAudioPresenter {
-  const GenesisAudioSink *sink; /* NULL = no audio device */
-  int muted;
-  int started;
-  uint64_t submitted;       /* frames accepted by the sink */
-  uint64_t overrun_dropped; /* frames dropped because the host queue was full */
-  uint64_t refused;         /* frames the sink refused */
-  uint64_t discarded;       /* frames drained while muted or without a sink */
-  uint64_t underruns;       /* times the host queue was found empty after the first accepted chunk */
-} GenesisAudioPresenter;
-
-void genesis_audio_presenter_init(GenesisAudioPresenter *presenter, const GenesisAudioSink *sink, int muted);
+/* The presenter state, the queue limit and genesis_audio_present_chunk (the per-chunk policy) live in genesis_audio_policy.h. */
 /* Drains everything the mixer produced since the last call. */
 void genesis_audio_present(GenesisAudioPresenter *presenter, GenesisMixer *mixer);
 

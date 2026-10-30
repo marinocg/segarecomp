@@ -315,7 +315,7 @@ static int scd_ga_sub_write_byte_plain(ScdMachine *m, uint32_t offset, uint32_t 
   case 0x32: m->ga.reg32_hi = (uint8_t)value; return 0;
   case 0x33: scd_ga_interrupt_enable(m, value); return 0;
   case 0x34:
-  case 0x35: return 0; /* fader: acts on CD-DA output only, which is not modelled */
+  case 0x35: scd_cdda_fader_write(m, offset, 1U, value); return 0; /* SEG-104: the CD-DA fader (scd_cdda.c) */
   default: break;
   }
   if (offset >= 0x10U && offset < 0x20U) {
@@ -392,7 +392,7 @@ static int scd_ga_sub_access_inner(ScdMachine *m, uint32_t offset, uint32_t widt
     if (offset == 0x32U) scd_ga_interrupt_enable(m, *value & 0xFFU); /* LSB only */
     else if (offset >= 0x20U && offset < 0x30U) m->ga.comstat[(offset - 0x20U) >> 1] = (uint16_t)*value;
     else if (offset >= 0x10U && offset < 0x20U) scd_ga_ignored(m, 0xFF8000U + offset, *value);
-    else if (offset == 0x34U) plain = 0; /* fader */
+    else if (offset == 0x34U) scd_cdda_fader_write(m, offset, 2U, *value & 0xFFFFU); /* SEG-104 fader */
     else if (offset >= 0x68U && offset < 0x100U) {
       m->ga.scratch[offset - 0x68U] = (uint8_t)(*value >> 8);
       m->ga.scratch[offset + 1U - 0x68U] = (uint8_t)*value;

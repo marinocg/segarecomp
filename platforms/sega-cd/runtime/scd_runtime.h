@@ -196,7 +196,8 @@ typedef enum ScdDiscError {
   SCD_DISC_LBA_OUT_OF_RANGE,
   SCD_DISC_LBA_AUDIO,
   SCD_DISC_RAW_SECTOR_INVALID,
-  SCD_DISC_IO
+  SCD_DISC_IO,
+  SCD_DISC_CDDA_FORMAT /* SEG-104: the sector is not in a 2,352-byte audio track */
 } ScdDiscError;
 
 const char *scd_disc_error_name(ScdDiscError error);
@@ -204,6 +205,13 @@ ScdDiscError scd_disc_open(ScdDisc *disc, const char *directory);
 void scd_disc_close(ScdDisc *disc);
 /* One Mode-1 user block by LBA (2048 bytes); raw sectors are checked for sync and header. */
 ScdDiscError scd_disc_read_user_data(ScdDisc *disc, uint32_t lba, uint8_t out[2048]);
+/* SEG-104 (ADR 0244): one CD-DA sector (2,352 bytes = 588 stereo frames) of an audio track by LBA, as canonical interleaved L0,R0,L1,R1,...
+ * signed 16-bit samples (the file's little-endian pairs decoded explicitly, so the result is host-endianness independent). Refused with a
+ * typed error for an LBA outside every track (SCD_DISC_LBA_OUT_OF_RANGE), a data track (SCD_DISC_CDDA_FORMAT: a Mode-1 sector is never
+ * interpreted as audio), a track that is not 2,352-byte, a range beyond the verified file (SCD_DISC_IO) or a short read (SCD_DISC_IO). */
+#define SCD_CDDA_SECTOR_BYTES 2352U
+#define SCD_CDDA_SECTOR_FRAMES 588U
+ScdDiscError scd_disc_read_cdda(ScdDisc *disc, uint32_t lba, int16_t out[1176]);
 /* The track containing lba, or NULL. */
 const ScdDiscTrack *scd_disc_track_of(const ScdDisc *disc, uint32_t lba);
 
@@ -517,6 +525,32 @@ typedef struct ScdLedgerRange {
   uint32_t first_lba, count;
 } ScdLedgerRange;
 
+/* SEG-104 (ADR 0244): the CD-DA output derived from the CD drive's own 75 Hz tick (scd_cdda.c). Each tick that plays an audio sector
+ * (drive status PLAY, an audio track at/after its INDEX 01, no command pending) produces exactly that sector's 588 stereo frames, scaled by the
+ * fader, and hands them to the optional host sink. The sink is a one-way output: nothing it does is visible to the machine, and with no sink and
+ * `enabled` clear nothing is read from the disc at all. No clock, queue or host state enters the machine. */
+typedef int (*ScdCddaSink)(void *context, const int16_t *frames, uint32_t count); /* interleaved L,R frames; 0 = accepted */
+
+typedef struct ScdCdda {
+  ScdCddaSink sink;         /* host output, or NULL */
+  void *sink_context;
+  uint8_t enabled;          /* produce samples (set by the host with a sink or an artifact); clear = the drive state alone, as before SEG-104 */
+  uint8_t playing;          /* the last audio tick produced a sector */
+  int32_t next_lba;         /* the LBA a contiguous continuation would play */
+  uint32_t last_index;      /* track index of the last produced sector */
+  uint16_t fader_register;  /* $FF8034 as written (12-bit volume in bits 15-4) */
+  uint16_t fader_target;    /* 0-1024 (1024 = unity) */
+  uint16_t fader_volume;    /* current volume; moves one step per produced sample frame toward the target */
+  uint64_t sectors, frames;                     /* produced */
+  uint64_t segments, interruptions, discontinuities, track_changes; /* playback runs started / ended / non-contiguous sectors / track boundaries crossed */
+  uint64_t pregap_ticks;                        /* audio-track ticks before INDEX 01 (the drive reports "no audio playing": silent) */
+  uint64_t suppressed_pending;                  /* play ticks silenced because a play/seek command was pending */
+  uint64_t sink_refused;                        /* sectors the sink refused (the machine is unaffected) */
+  uint64_t commands[16];                        /* CDD commands received, by code (plain counters) */
+  uint64_t first_frame, last_frame;             /* vertical-blank onset counts at the first and the latest produced sector */
+  FILE *log;                                    /* local diagnostic (--cdda-log): one line per run start / interruption / discontinuity; never read back */
+} ScdCdda;
+
 typedef struct ScdMachine {
   ScdCpu cpu[2];
   const ScdProgram *program;
@@ -595,6 +629,7 @@ typedef struct ScdMachine {
   ScdLedgerRange delivered[SCD_LEDGER_MAX];
   uint32_t delivered_count;
   uint8_t delivered_overflow;             /* more ranges than the ledger holds: the evidence is incomplete and is never used */
+  ScdCdda cdda;                           /* SEG-104: CD-DA output (inert unless a host enabled it) */
 } ScdMachine;
 
 /* The duration of one sub cycle in ticks for this machine's profile (ADR 0177). */
@@ -846,6 +881,13 @@ void scd_cdd_refresh(ScdMachine *m, int was_active);
 void scd_cdd_anchor(ScdMachine *m, uint64_t at);
 uint64_t scd_cdd_grid_after(const ScdMachine *m, uint64_t t);
 void scd_devices_power_on(ScdMachine *m);
+/* SEG-104 (scd_cdda.c). Reset restores the fader and ends playback; the host's sink and `enabled` survive. */
+void scd_cdda_reset(ScdMachine *m);
+void scd_cdda_fader_write(ScdMachine *m, uint32_t offset, uint32_t width, uint32_t value);
+/* Called by the drive tick: produce `lba` (an audio sector). Returns 1 on a typed stop (the sector could not be read). */
+int scd_cdda_play(ScdMachine *m, int32_t lba, uint32_t track_index);
+void scd_cdda_silent_tick(ScdMachine *m);
+void scd_cdda_interrupt(ScdMachine *m);
 
 /* Program driver: parses argv, opens the disc, runs, writes the report and the frame. */
 int scd_program_main(const ScdProgram *program, int argc, char **argv);

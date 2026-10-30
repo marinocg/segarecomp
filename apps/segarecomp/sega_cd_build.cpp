@@ -144,7 +144,13 @@ class Builder {
     log_.open(o_.output / "build.log", std::ios::trunc);
     if (o_.cache_dir.empty()) o_.cache_dir = o_.output / "objects";
     fs::create_directories(o_.cache_dir, ec);
-    if (o_.jobs == 0) o_.jobs = std::max(1U, std::thread::hardware_concurrency());
+    if (o_.jobs == 0) {
+      o_.jobs = std::max(1U, std::thread::hardware_concurrency());
+      // The largest generated units need about 0.6 GB of compiler memory each at -O1: unlimited threads on a many-core machine with little free memory
+      // end in "out of memory" / "SystemResources" compile failures. Bound the default by the memory available now (1 GiB per job).
+      if (const std::uint64_t available = segarecomp_cli::available_memory_bytes(); available != 0U)
+        o_.jobs = std::max(1U, std::min<unsigned>(o_.jobs, static_cast<unsigned>(std::min<std::uint64_t>(available >> 30U, 1024U))));
+    }
     const std::string bios_text = read_text(o_.bios, 0x20001U);
     const std::string cue_text = read_text(o_.cue, 1U << 20U);
     if (bios_text.empty() || cue_text.empty()) return fail({"setup", "the BIOS or the CUE file cannot be read"});
@@ -447,6 +453,18 @@ class Builder {
     for (unsigned n = 1; n < std::min<unsigned>(o_.jobs, static_cast<unsigned>(sources.size())); ++n) pool.emplace_back(worker);
     worker();
     for (auto &t : pool) t.join();
+    if (failure && o_.jobs > 1U) {
+      // A parallel compile failure may be resource exhaustion (memory, handles) rather than the source: the units already built stay cached, so
+      // the remainder is retried once on one thread, where a real error fails again with its own log.
+      log_ << "parallel compile failed; retrying on one thread" << std::endl;
+      failure.reset();
+      next.store(0);
+      for (std::size_t i = 0; i < sources.size() && !failure; ++i) {
+        bool built = false;
+        if (const auto f = object_for(sources[i], extra, viewer, objects[i], built)) failure = f;
+        else if (built) count.fetch_add(1);
+      }
+    }
     rebuilt = count.load();
     return failure;
   }

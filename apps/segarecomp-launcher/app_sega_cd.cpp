@@ -476,7 +476,7 @@ float App::draw_scd_details(LibraryEntry &entry, const StatusInfo &info, float w
          r.program.viewer && r.program.runtime_abi == scd::supported_runtime_abi ? col::text : col::warn);
     fact("Verified", fmt_date(r.program.verified_at) + "  -  the program's own statement matches your BIOS and disc; it is not signed or compiled by Segarecomp", col::text2);
   }
-  fact("Audio", "Not available: sound is not part of this viewer.", col::text2);
+  fact("Audio", "CD music (CD-DA) plays through the viewer's volume and mute. Sound effects (PCM), FM and PSG sound are not available.", col::text2);
   // ---- actions ----
   ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
   const bool busy = scd_import_job_.valid() || scd_launch_job_.valid() || game_ != nullptr;

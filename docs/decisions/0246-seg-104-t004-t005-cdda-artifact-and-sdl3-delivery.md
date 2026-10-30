@@ -1,0 +1,25 @@
+# ADR 0246: SEG-104-T004/T005 - the headless CD-DA artifact and delivery through the existing SDL3 viewer (gates `CDDA_AUDIO_ARTIFACT_GO`, `CDDA_SDL3_PLAYBACK_GO`)
+
+- Status: Accepted (SEG-104 / M8, combined PR; internal tasks T004 and T005).
+- Related: ADR 0070 / 0075 (Genesis audio policy and artifacts), 0204 (interactive viewer), 0244 / 0245.
+
+## T004 - the artifact
+
+The generated program gains three flags of the BIOS-image profile (`--cdda-pcm FILE`, `--cdda-digest 1`, `--cdda-log FILE`; a synthetic program refuses them with the usage exit). A *tap* between the machine and its consumers hashes the canonical stream (little-endian S16 bytes written explicitly), optionally writes it, and forwards each sector to a live host. The report gains a `cdda` block **only when output is enabled** (every earlier report is byte-identical): sectors, frames, sample rate, runs started / ended, discontinuities, track changes, silent pregap ticks, silenced pending ticks, refused sectors, the first and last vertical-blank onset, I/O errors, the command counters (stop, play, seek, pause, resume, jump), the fader state and the SHA-256 of the whole stream. No sample or LBA appears in a report; the optional log (a local diagnostic) holds run boundaries only. The digest is the machine's: whatever a viewer drops, the digest describes what the guest's drive produced.
+
+Verification (`sega_cd_cdda_native_test`): a project-authored BIOS-like image whose sub program drives the real CDD command registers over a disc with closed-form audio. The expected stream is built by the test from the product's logged run boundaries and the fixture's own `sector(lba)` bytes, so left/right order, sample byte order, run starts and the silent INDEX 00 region are checked against an oracle that shares no code with the runtime. Also: deadline slices (1e9 and 7e11 ticks) and two seeded partitions produce the identical stream and report; the same run without output has the identical report apart from the `cdda` block. `sega_cd_cdda_compare_test` covers the comparison tool (`tools/sega_cd_cdda_compare.py`, ADR 0247): exact equality, a one-sample difference, a swapped-channel stream, an unequal tail, per-run alignment.
+
+## T005 - the viewer
+
+`ScdLiveHost` gains an optional `audio(ctx, frames, count)`; the machine's tap forwards each drive sector (588 frames) to it. The Sega CD viewer (`scd_viewer.c`) reuses what Genesis built, and adds no framework:
+- **Sink and device.** `genesis_sdl3_viewer_audio_open` (the one SDL3 audio stream, 44.1 kHz stereo S16, the viewer's gain and mute) when the window opens; failure to open leaves a silent viewer; `SEGARECOMP_VIEWER_MUTE=1` opens nothing.
+- **Policy.** The queue limit (4,410 frames), underrun, refused and discarded counters moved from `genesis_audio_present.c` into the mixer-free header `genesis_audio_policy.h`, which both the Genesis mixer ring and the Sega CD stream apply (`genesis_audio_present_chunk`); no behaviour of the Genesis path changed (`genesis_audio_*` tests pass).
+- **Frame flush.** The frames of a video frame wait in a 4,096-frame buffer and are presented before the pacer waits; a frame that does not fit is counted and dropped, never waited for. Into an empty queue a run's first frames wait for a second sector (at most two video frames): one sector (13.3 ms) is shorter than a video frame (16.7 ms) and would otherwise leave a gap each frame.
+- **One-way.** Guest execution never reads the device, the queue depth or the clock for audio. Pause (F6 and the menu) holds the machine; nothing is produced meanwhile, and at most the 100 ms already queued is still heard.
+- **Consumer.** Nothing is needed from the user: launcher playback starts the same viewer and the audio opens with the window. The launcher's Sega CD page says "CD music (CD-DA) plays through the viewer's volume and mute; sound effects (PCM), FM and PSG are not available" (previously "Not available"); README, `platforms/sega-cd/README.md`, `docs/product/sega-cd-play.md` and contract section 22 say the same.
+
+Verification: `sega_cd_cdda_native_test` runs the real viewer with SDL's `disk` audio driver (no speakers needed): exit 0; the canonical digest and stream are identical to the headless run; every frame the machine produced was submitted to the SDL3 stream (no drop, refusal or discard); the samples SDL played (the device file, silence removed) are exactly the canonical stream; `SEGARECOMP_VIEWER_MUTE=1` plays no sample and does not change the run; an unavailable audio driver leaves the viewer silent with the machine's stream unchanged. On the authentic route see ADR 0247 (pause, resume, queue behaviour).
+
+## Honest limits
+
+A dummy or disk device is not speakers: no claim is made here that music was *heard* by a person; the user-facing manual check is recorded separately in the decision (ADR 0248). Clock drift between a host device and the guest is handled by the established bounded-queue policy (drop on overrun, silence on underrun), not by resampling.

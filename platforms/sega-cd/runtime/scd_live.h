@@ -44,6 +44,10 @@ typedef struct ScdLiveHost {
   int (*pace)(void *ctx, uint64_t frame_ticks, uint64_t ticks_per_second);
   /* Once, when the loop ends for any reason (after the last frame): a host shows why the machine stopped. Optional. */
   void (*finished)(void *ctx, const struct ScdLiveSummary *summary, const ScdMachine *machine);
+  /* SEG-104 (ADR 0244): optional CD-DA output. One drive sector's frames (588 interleaved L,R S16 frames, valid only during the call) at the
+   * moment the guest's drive plays it; the host queues them for its device. A one-way sink: nothing it returns or does reaches the machine
+   * (a nonzero return is only counted). NULL = the viewer is silent and no CD-DA is read. */
+  int (*audio)(void *ctx, const int16_t *frames, uint32_t count);
 } ScdLiveHost;
 
 typedef struct ScdLiveConfig {

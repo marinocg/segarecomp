@@ -8,7 +8,7 @@ machine contract: [sega-cd-machine-contract.md](../architecture/sega-cd-machine-
 
 Segarecomp can run a **generated-native Sega CD program** (a program compiled ahead of time from your own BIOS image and disc) in the same
 window as Genesis and Master System games. It has been checked on one commercial title (Sonic CD, USA) through the title screen, two START presses and
-the first level - checkpoint evidence, **not** a compatibility claim - and a second title has only experimental observations. **There is no sound.**
+the first level - checkpoint evidence, **not** a compatibility claim - and a second title has only experimental observations. **Only the CD music (CD-DA) is audible**; there are no sound effects (PCM), FM or PSG sounds.
 **Segarecomp can build a program for you from your own BIOS and disc** (the launcher's *Build*, experimental; ADR 0205): it discovers by itself which disc
 spans the console loads into RAM and executes, and compiles them. It can run only the code its build proved to come from the disc (anything else stops with a
 typed stop such as `entry_not_compiled`), so coverage of a given title is partial until the obstacles listed below are removed. A program built elsewhere with
@@ -84,5 +84,5 @@ launcher speaks. **Not verified**: that the program is a faithful translation of
 
 ## Not supported
 
-Audio (no Z80 execution, no PCM or CD-DA output); saving (each run starts from a new console's empty internal backup RAM, which the launcher supplies, and nothing is written back); complete compilation of every title (code that is generated or decompressed at run time, code reached only after input the build never saw, and computed jump destinations the build never observed stop with a typed stop); any code region a program's build did not admit; 6-button pads and
+Other audio (no Z80 execution, no RF5C164 PCM sound effects, no FM or PSG; CD-DA tracks other than 2,352-byte BIN audio - compressed or WAV-backed tracks - are not supported); saving (each run starts from a new console's empty internal backup RAM, which the launcher supplies, and nothing is written back); complete compilation of every title (code that is generated or decompressed at run time, code reached only after input the build never saw, and computed jump destinations the build never observed stop with a typed stop); any code region a program's build did not admit; 6-button pads and
 player 2 input in the Sega CD viewer; other titles' compatibility.

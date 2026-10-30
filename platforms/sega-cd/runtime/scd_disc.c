@@ -19,6 +19,7 @@ const char *scd_disc_error_name(ScdDiscError error) {
   case SCD_DISC_LBA_AUDIO: return "disc_lba_audio";
   case SCD_DISC_RAW_SECTOR_INVALID: return "disc_raw_sector_invalid";
   case SCD_DISC_IO: return "disc_io";
+  case SCD_DISC_CDDA_FORMAT: return "disc_cdda_format";
   }
   return "unknown";
 }
@@ -119,4 +120,26 @@ ScdDiscError scd_disc_read_user_data(ScdDisc *disc, uint32_t lba, uint8_t out[20
       return SCD_DISC_RAW_SECTOR_INVALID;
   }
   return fread(out, 1U, 2048U, file) == 2048U ? SCD_DISC_OK : SCD_DISC_IO;
+}
+
+/* SEG-104: the CD-DA sector reader. It reuses the verified handles of scd_disc_open and reads exactly one 2,352-byte sector into a stack
+ * buffer: no track is ever cached whole. */
+ScdDiscError scd_disc_read_cdda(ScdDisc *disc, uint32_t lba, int16_t out[1176]) {
+  const ScdDiscTrack *track = scd_disc_track_of(disc, lba);
+  uint8_t raw[SCD_CDDA_SECTOR_BYTES];
+  FILE *file;
+  uint64_t offset;
+  uint32_t i;
+  if (track == NULL) return SCD_DISC_LBA_OUT_OF_RANGE;
+  if (track->type != 2U || track->sector_size != SCD_CDDA_SECTOR_BYTES) return SCD_DISC_CDDA_FORMAT;
+  file = (FILE *)disc->handles[track->file_index];
+  if (file == NULL) return SCD_DISC_IO;
+  offset = track->file_offset + (uint64_t)(lba - track->first_lba) * SCD_CDDA_SECTOR_BYTES;
+  if (offset + SCD_CDDA_SECTOR_BYTES > disc->files[track->file_index].size || offset > (uint64_t)0x7FFFFFFF - SCD_CDDA_SECTOR_BYTES ||
+      fseek(file, (long)offset, SEEK_SET) != 0)
+    return SCD_DISC_IO;
+  if (fread(raw, 1U, sizeof raw, file) != sizeof raw) return SCD_DISC_IO;
+  for (i = 0; i < 2U * SCD_CDDA_SECTOR_FRAMES; ++i) /* sample order L,R; each sample least-significant byte first (Red Book / BIN audio) */
+    out[i] = (int16_t)(uint16_t)((uint16_t)raw[2U * i] | (uint16_t)((uint16_t)raw[2U * i + 1U] << 8));
+  return SCD_DISC_OK;
 }
