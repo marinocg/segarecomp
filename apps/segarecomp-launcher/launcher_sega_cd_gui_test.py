@@ -133,7 +133,7 @@ def main():
             "build", "frames 20", "expect scd_building=1", "cancel_build", "wait_scd", "frames 10", "expect scd_building=0", "expect scd_state=No program yet (can be built)",
             "build", "frames 6", "expect scd_building=1", "wait_scd", "frames 20",
             "expect scd_building=0", "expect scd_state=Ready to play", "expect can_play=1", "expect scd_build_note=Built in 4 round(s).", "play", "frames 4", "wait_scd", "wait_play_end", "frames 10",
-            "expect scd_outcome=The program finished.", "quit"], env)
+            "expect scd_outcome=The program finished. Save data stored.", "quit"], env)
         bad = [l for l in trace if l.startswith("expect FAIL")]
         check(not bad and sum(l.startswith("expect ok") for l in trace) >= 12, "window D: Build cancels cleanly, then builds, verifies and plays (%s)" % (bad or "%d ok" % sum(l.startswith("expect ok") for l in trace)))
         text = "\n".join(trace)
