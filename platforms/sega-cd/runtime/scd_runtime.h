@@ -509,13 +509,14 @@ typedef struct ScdPcm {
 typedef struct ScdGfx {
   uint8_t busy;
   uint8_t ctl;                 /* $FF8058 bits 2-0 */
-  uint16_t map_base, cell_v, buffer_origin, offset, h_dots, v_lines, trace_base; /* $5A, $5C, $5E, $60, $62, $64, $66 as written */
+  uint16_t map_base, cell_v, buffer_origin, offset, h_dots, trace_base; /* $5A, $5C, $5E, $60, $62, $66 as written */
   uint32_t trace_ptr, map_ptr, dot_mask, buffer_offset, buffer_start;
   uint8_t stamp_shift, map_shift;
-  uint8_t lines_left;          /* lines not yet rendered (the live $FF8064 low byte) */
+  uint8_t lines_left;          /* the live $FF8064 low byte: written by the sub CPU (any time), counts down while running, 0 after completion (ADR 0249) */
   uint64_t base;               /* tick from which the next line's cost is counted */
   uint64_t line_ticks;
   uint64_t operations, lines_rendered;
+  uint64_t vdot_reads;         /* byte reads of $FF8065 (an observation counter, no behavior) */
 } ScdGfx;
 
 /* SEG-078-T003 (ADR 0205): the delivery ledger - the disc blocks the CDC decoder has read into its buffer, as merged LBA ranges. A fact of the
