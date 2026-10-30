@@ -33,6 +33,7 @@ bool nav_button(const char *id, ImVec2 size);
 // cross from a parent window into its (flattened) child reliably.
 struct ZoneEntry { ImGuiID id = 0; ImGuiWindow *window = nullptr; ImRect rect; };
 extern bool zone_capture;
+extern std::vector<std::string> menu_log;   // test aid (GUI script `menu_items`): the labels of the menu items drawn in the current frame
 extern ZoneEntry zone_first;
 
 // The id of the control that has keyboard/gamepad focus (the widget's own id, "#n" for the n-th tile/segment); empty before any focus. Read by the GUI test script.

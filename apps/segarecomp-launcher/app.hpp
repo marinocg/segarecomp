@@ -184,10 +184,24 @@ private:
   void cancel_build(const std::string &id);
   // The one entry point of the Cancel/Remove affordances (button, menu, controller): cancels the running build or removes the queued one.
   void stop_or_dequeue_build(const std::string &id);
-  [[nodiscard]] bool is_stopping(const std::string &id) const { return job_ && job_id_ == id && job_->cancel_requested(); }
-  [[nodiscard]] bool is_building(const std::string &id) const { return job_ && job_id_ == id; }
+  // SEG-109-T003: one build lifecycle for every platform. A native game's BuildJob and a Sega CD game's ScdBuildJob occupy the same single "running build" slot
+  // of the same FIFO; every UI question below is answered for either job.
+  [[nodiscard]] bool is_stopping(const std::string &id) const {
+    return (job_ && job_id_ == id && job_->cancel_requested()) || (scd_build_ && scd_build_id_ == id && scd_build_->cancel_requested());
+  }
+  [[nodiscard]] bool is_building(const std::string &id) const { return (job_ && job_id_ == id) || (scd_build_ && scd_build_id_ == id); }
   [[nodiscard]] bool is_queued(const std::string &id) const { return build_queue_.contains(id); }
-  [[nodiscard]] int build_count() const { return (job_ ? 1 : 0) + static_cast<int>(build_queue_.size()); }
+  [[nodiscard]] bool build_running() const { return job_ != nullptr || scd_build_ != nullptr; }
+  [[nodiscard]] int build_count() const { return (build_running() ? 1 : 0) + static_cast<int>(build_queue_.size()); }
+  // The stage chips of the running build of `id` (4 stages for a native game, 6 for a Sega CD game).
+  [[nodiscard]] int build_stage_count(const std::string &id) const { return scd_build_ && scd_build_id_ == id ? ScdBuildJob::stage_count : BuildJob::stage_count; }
+  [[nodiscard]] const char *build_stage_label(const std::string &id, int i) const {
+    static const char *native[BuildJob::stage_count] = {"Analyze", "Generate C", "Compile", "Link"};
+    return scd_build_ && scd_build_id_ == id ? ScdBuildJob::stage_label(i) : native[i];
+  }
+  [[nodiscard]] StageState build_stage(const std::string &id, int i) const { return scd_build_ && scd_build_id_ == id ? scd_build_->stage(i) : job_->stage(i); }
+  // The file the running build writes its log to (read live by the Details page).
+  [[nodiscard]] std::filesystem::path build_live_log(const std::string &id) const;
   // Library badge of a game: Building / Queued while in the build flow, else the stored build status (+ spinner for Building).
   struct Badge { std::string label; ImU32 color; bool spinner; };
   [[nodiscard]] Badge badge_for(const LibraryEntry &entry, const StatusInfo &info) const;
@@ -339,20 +353,22 @@ private:
   scd::RunOptions game_scd_options_;
   std::string game_scd_note_;
   std::unique_ptr<ScdBuildJob> scd_build_;             // SEG-078-T003: the automatic Sega CD build of one game (independent of the Genesis/SMS queue)
-  std::string scd_build_id_;
+  std::string scd_build_id_, scd_build_key_;           // key: the BusyGuard name of the running build ("scd-<id16>")
   std::map<std::string, std::string> scd_build_notes_; // id -> what the last successful build of this session covers (plain language)
   // SEG-097-T003 / SEG-103-T007: what a finished build actually was (the product's structured status), until its program is bound to the entry
   struct ScdBuiltInfo { bool experimental = false; std::string mode, inventory; };
   std::map<std::string, ScdBuiltInfo> scd_built_;
   void scd_start_build(const std::string &id);
-  void scd_cancel_build();
   void scd_finish_build();
   [[nodiscard]] bool scd_can_build(const LibraryEntry &entry, const StatusInfo &info) const;
   std::map<std::string, std::string> scd_last_outcome_;  // id -> the plain-language end of the last run of this session
   [[nodiscard]] std::filesystem::path scd_dir(const LibraryEntry &entry) const;
   [[nodiscard]] std::vector<std::filesystem::path> scd_recordings(const LibraryEntry &entry) const;
   void draw_scd_import(float w);
-  float draw_scd_details(LibraryEntry &entry, const StatusInfo &info, float w);
+  // The Sega CD games' extra Details section (input recording and replay): a product-specific feature, drawn as a section card after the shared ones.
+  float draw_scd_recordings(LibraryEntry &entry, const StatusInfo &info, float w);
+  // The fields of the shared Details cards that only a Sega CD game has (BIOS, disc, program, build mode, save data), drawn into the same card slots.
+  [[nodiscard]] std::string scd_save_summary(const LibraryEntry &entry) const;
   void scd_browse(const std::string &purpose, const std::string &id);
   void scd_dialog_result(const std::string &purpose, const std::string &id, const std::vector<std::string> &paths);
   void scd_start_import(const std::string &target_id, const std::filesystem::path &bios, const std::filesystem::path &cue, const std::filesystem::path &program);
@@ -419,6 +435,15 @@ private:
   std::string details_refocus_;                  // "" | "after_build" | "build"
   int details_refocus_ttl_ = 0;                  // frames the request stays valid (a refused build must not leave it pending)
   void take_details_focus(const char *id);
+  // SEG-109-T005 test aids (GUI script `layout`, `scroll_page`, `open_more`, `menu_items`): where the Details page drew its sections and actions this frame, relative to
+  // the page's top-left, so three platforms' pages can be compared structurally. Never a user feature.
+  struct LayoutRect { std::string name; ImRect rect; };
+  std::vector<LayoutRect> details_layout_;
+  ImVec2 details_origin_{0, 0};
+  float script_page_scroll_ = -1.0F;      // >= 0: set the page scroll once; 1e9 = the end
+  bool script_open_more_ = false;
+  void note_layout(const char *name, ImVec2 a, ImVec2 b) { details_layout_.push_back({name, ImRect(ImVec2(a.x - details_origin_.x, a.y - details_origin_.y), ImVec2(b.x - details_origin_.x, b.y - details_origin_.y))}); }
+  void note_item_layout(const char *name) { note_layout(name, ImGui::GetItemRectMin(), ImGui::GetItemRectMax()); }
   int seek_left_ = -1;       // script `pad_seek`: presses left (-1 idle)
   bool seek_pressed_ = false;
   std::string focus_label_;  // the sidebar entry holding keyboard/gamepad focus (script `expect focus=`)

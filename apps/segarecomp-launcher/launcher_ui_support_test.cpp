@@ -146,7 +146,7 @@ int run_tests() {
   }
   step("Libretro naming");
   {  // Libretro naming: system trees and https URLs
-    expect(libretro_system_dir("genesis") == "Sega - Mega Drive - Genesis" && libretro_system_dir("master-system") == "Sega - Master System - Mark III" && libretro_system_dir("saturn").empty(), "system trees");
+    expect(libretro_system_dir("genesis") == "Sega - Mega Drive - Genesis" && libretro_system_dir("master-system") == "Sega - Master System - Mark III" && libretro_system_dir("sega-cd") == "Sega - Mega-CD - Sega CD" && libretro_system_dir("saturn").empty(), "system trees");
     expect(libretro_candidate_url("genesis", "Fictional Game (USA)") == "https://thumbnails.libretro.com/Sega%20-%20Mega%20Drive%20-%20Genesis/Named_Boxarts/Fictional%20Game%20%28USA%29.png", "percent-encoded https URL");
     expect(libretro_candidate_url("saturn", "x").empty() && libretro_candidate_url("genesis", "").empty(), "unusable inputs give no URL");
     expect(libretro_candidate_url("genesis", "a b").rfind("https://", 0) == 0, "only https is ever produced");

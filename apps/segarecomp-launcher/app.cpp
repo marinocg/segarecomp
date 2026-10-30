@@ -39,9 +39,14 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
       info.sega_cd = true;
       info.scd = scd::quick_status(e.sega_cd);
       info.key = "scd-" + e.sha256.substr(0, 16);
+      info.entry = library_root() / "sega-cd" / e.sha256.substr(0, 16) / "build";   // the build folder (log, status, program), like a native game's entry_dir
       info.rom_missing = info.scd.state == scd::State::inputs_not_configured;
+      std::error_code scd_ec;
+      info.has_failed_dir = fs::is_directory(info.entry.parent_path() / "build.failed", scd_ec);
       info.status = info.scd.state == scd::State::ready ? GameStatus::ready
                     : (info.scd.state == scd::State::inputs_not_configured || info.scd.state == scd::State::no_program) ? GameStatus::not_built : GameStatus::stale;
+      // A build removed on purpose by Storage cleanup (archive): the library keeps the game, a new build restores it. Never a save: user data is not part of a build.
+      if (e.archived && info.scd.refusal == scd::Refusal::program_file_missing) info.status = GameStatus::metadata_only;
       out[e.id()] = info;
       continue;
     }
@@ -246,7 +251,7 @@ void App::init_ui() {
 void App::shutdown() {
   trace("shutdown=workers");
   if (job_) job_->wait();
-  if (scd_build_) { scd_build_->request_cancel(); scd_build_->wait(); scd_build_.reset(); }   // a quit never leaves a build running without a window
+  if (scd_build_) scd_build_->wait();   // SEG-109-T003: like a native build, closing the launcher waits for the running build (Cancel build stops it first)
   game_.reset();
   sv_diag_reclaim_exclusive_devices(diag_);
   scan_cancel_ = true;
@@ -404,6 +409,7 @@ void App::evaluate_policy_after_scan() {
   if (settings_.cleanup.mode != "keep_last_n" || maintenance_running_) return;
   std::set<std::string> active;
   if (!job_id_.empty()) active.insert(job_id_);
+  if (!scd_build_id_.empty()) active.insert(scd_build_id_);
   if (!game_id_.empty()) active.insert(game_id_);
   const auto victims = policy_eviction_candidates(catalog_, report_, settings_.cleanup, active);
   if (victims.empty()) return;
@@ -420,7 +426,7 @@ void App::run_plan(const Plan &plan) {
   if (!busy_.try_begin_maintenance()) { toast("Cleanup is not possible while a build or game is running.", true); return; }
   maintenance_running_ = true;
   maint_plan_ = plan;
-  maint_job_ = std::async(std::launch::async, [plan, cache = cache_dir_, this] { return execute_plan(plan, cache, busy_); });
+  maint_job_ = std::async(std::launch::async, [plan, cache = cache_dir_, library = library_dir_, this] { return execute_plan(plan, cache, busy_, library); });
 }
 
 void App::poll_maintenance() {
@@ -665,11 +671,11 @@ void App::go(Page page) {
 bool App::start_build(const std::string &id, bool restart_after) {
   LibraryEntry *entry = catalog_.find_id(id);
   if (entry == nullptr) return false;
-  if (entry->platform_id == "sega-cd") {  // SEG-078-T003 (ADR 0205): the automatic Sega CD build (its own job; typed refusal when this installation cannot)
+  if (build_running()) { toast("A build is already running.", true); return false; }
+  if (entry->platform_id == "sega-cd") {  // SEG-078-T003 (ADR 0205): the automatic Sega CD build (a typed refusal when this installation cannot)
     scd_start_build(id);
     return scd_build_ != nullptr;
   }
-  if (job_) { toast("A build is already running.", true); return false; }
   if (!layout_.problem.empty()) { show_message("Installation incomplete", {layout_.problem}); return false; }
   const fs::path rom_path = usable_rom_path(*entry);
   if (rom_path.empty()) {
@@ -710,6 +716,13 @@ bool App::start_build(const std::string &id, bool restart_after) {
   return true;
 }
 
+fs::path App::build_live_log(const std::string &id) const {
+  const auto partial_log = [](const fs::path &entry) { return entry.parent_path() / (u8s(entry.filename()) + ".partial") / "build.log"; };
+  if (scd_build_ && scd_build_id_ == id) return partial_log(scd_build_->out_dir());
+  if (job_ && job_id_ == id) return partial_log(job_->entry());
+  return {};
+}
+
 void App::dequeue_build(const std::string &id) {
   // A queued entry owns nothing yet (no process, no folder), so removing it touches nothing but the FIFO.
   if (!build_queue_.remove(id)) return;
@@ -718,7 +731,13 @@ void App::dequeue_build(const std::string &id) {
 }
 
 void App::cancel_build(const std::string &id) {
-  if (!is_building(id) || job_->cancel_requested()) return;  // a second request while stopping is ignored
+  if (!is_building(id) || is_stopping(id)) return;  // a second request while stopping is ignored
+  if (scd_build_ && scd_build_id_ == id) {
+    trace("build=cancel_requested platform=sega-cd");
+    if (scd_build_->request_cancel()) toast("Stopping the build...");
+    else toast("The build has just finished; it was not cancelled.");
+    return;
+  }
   trace("build=cancel_requested");
   if (job_->request_cancel()) {
     // The cancelled attempt must not auto-continue into a play or a restart.
@@ -737,8 +756,7 @@ void App::stop_or_dequeue_build(const std::string &id) {
 
 void App::request_build(const std::string &id) {
   if (is_building(id) || is_queued(id)) return;
-  if (const LibraryEntry *e = catalog_.find_id(id); e != nullptr && e->platform_id == "sega-cd") { start_build(id); return; }  // the Sega CD build is its own job
-  if (job_ || !build_queue_.empty() || maintenance_running_) {
+  if (build_running() || !build_queue_.empty() || maintenance_running_ || scd_import_job_.valid()) {
     build_queue_.push(id);
     if (const LibraryEntry *e = catalog_.find_id(id)) toast("Queued: " + e->title() + " (build " + std::to_string(build_count()) + ").");
     return;
@@ -747,7 +765,7 @@ void App::request_build(const std::string &id) {
 }
 
 App::Badge App::badge_for(const LibraryEntry &entry, const StatusInfo &info) const {
-  if (is_building(entry.id()) || (scd_build_ && scd_build_id_ == entry.id())) return {"Building", ui::col::warn, true};
+  if (is_building(entry.id())) return {"Building", ui::col::warn, true};
   if (is_queued(entry.id())) return {"Queued", ui::col::info, false};
   if (info.sega_cd && game_ && game_id_ == entry.id()) return {"Running", ui::col::ok, false};
   if (info.rom_missing && !info.runnable() && !info.sega_cd) return {"ROM missing", ui::col::warn, false};
@@ -796,6 +814,7 @@ void App::finish_build() {
       record.toolchain = std::string("zig ") + SEGARECOMP_ZIG_VERSION;
       catalog_.record_build(*entry, record);
       save_catalog();
+      toast("Build finished: " + entry->title() + ".");
     }
     request_status_refresh();
     request_scan();
@@ -973,7 +992,7 @@ void App::update_jobs() {
   if (job_ && job_->finished()) finish_build();
   if (game_ && game_->poll()) finish_run();
   pump_cleanup();
-  if (!job_ && !build_queue_.empty() && !maintenance_running_ && modal_.kind == Modal::Kind::none) {
+  if (!build_running() && !scd_import_job_.valid() && !build_queue_.empty() && !maintenance_running_ && modal_.kind == Modal::Kind::none) {
     const std::string next = build_queue_.pop_front();
     start_build(next);
   }
@@ -1217,14 +1236,30 @@ void App::run_script() {
   } else if (cmd == "wait_play_end") {  // hold the script until no game is running
     if (game_) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "cancel_build") {  // the Cancel build / Unqueue action for the open game
-    if (!detail_id_.empty() && scd_build_ && scd_build_id_ == detail_id_) scd_cancel_build();
-    else if (!detail_id_.empty()) stop_or_dequeue_build(detail_id_);
+    if (!detail_id_.empty()) stop_or_dequeue_build(detail_id_);
   } else if (cmd == "wait_idle") {  // hold the script until no build is running or queued
-    if (job_ || !build_queue_.empty() || status_pending_) { --script_at_; script_wait_ = 2; }
+    if (build_running() || scd_import_job_.valid() || !build_queue_.empty() || status_pending_) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "wait_file") {  // hold the script until a file exists (at most ~20 s of frames)
     std::error_code ec;
     if (!fs::exists(fs::path(arg), ec) && ++script_wait_file_frames_ < 1200) { --script_at_; script_wait_ = 1; }
     else script_wait_file_frames_ = 0;
+  } else if (cmd == "scroll_page") {   // SEG-109-T005: scroll the current page (`end` = to the bottom)
+    script_page_scroll_ = arg == "end" ? 1e9F : static_cast<float>(std::atof(arg.c_str()));
+  } else if (cmd == "open_more") {     // open the More menu of the open game
+    script_open_more_ = true;
+  } else if (cmd == "menu_items") {    // trace the items of the menu drawn in the previous frame
+    std::string items;
+    for (const auto &label : ui::menu_log) items += (items.empty() ? "" : "|") + label;
+    trace("menu_items " + items);
+  } else if (cmd == "layout") {        // trace where the Details page drew its sections and actions (relative to its origin)
+    std::string text;
+    for (const auto &item : details_layout_) {
+      char rect[96];
+      std::snprintf(rect, sizeof rect, "%s:%d,%d,%d,%d", item.name.c_str(), static_cast<int>(std::lround(item.rect.Min.x)), static_cast<int>(std::lround(item.rect.Min.y)),
+                    static_cast<int>(std::lround(item.rect.GetWidth())), static_cast<int>(std::lround(item.rect.GetHeight())));
+      text += (text.empty() ? "" : ";") + std::string(rect);
+    }
+    trace("layout " + text);
   } else if (cmd == "scroll_library") {
     library_scroll_ = static_cast<float>(std::atof(arg.c_str()));
     restore_library_scroll_ = true;

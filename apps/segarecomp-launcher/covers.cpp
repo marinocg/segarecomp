@@ -65,6 +65,7 @@ std::string existing_cover_for(const fs::path &covers_dir, const std::string &sh
 std::string libretro_system_dir(const std::string &platform_id) {
   if (platform_id == "genesis") return "Sega - Mega Drive - Genesis";
   if (platform_id == "master-system") return "Sega - Master System - Mark III";
+  if (platform_id == "sega-cd") return "Sega - Mega-CD - Sega CD";   // SEG-109-T004: the same Libretro box-art workflow as the cartridge platforms
   return {};
 }
 

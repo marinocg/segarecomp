@@ -130,7 +130,7 @@ They survive cleanup and re-import. There are three ways to get one:
 
 * **Change cover** picks a local image.
 * **Download cover (Libretro)** (a game's *More* / context menu) and **Download missing covers** (Settings > Metadata) fetch the box art from the
-  public Libretro thumbnail trees (`Sega - Mega Drive - Genesis`, `Sega - Master System - Mark III`, `Named_Boxarts`). This happens **only on that
+  public Libretro thumbnail trees (`Sega - Mega Drive - Genesis`, `Sega - Master System - Mark III`, `Sega - Mega-CD - Sega CD`, `Named_Boxarts`). This happens **only on that
   explicit action**, on a worker thread, and the downloaded file goes through the same validation as a local image before it is used.
 * **Find cover online** opens your browser at the likeliest Libretro name.
 

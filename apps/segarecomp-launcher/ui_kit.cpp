@@ -412,7 +412,10 @@ void end_menu() {
   ImGui::PopStyleColor(2);
 }
 
+std::vector<std::string> menu_log;
+
 bool menu_item(Ctx &ctx, const char *id, const char *label, const char *hint, SDL_Texture *icon, float width, bool enabled, bool danger) {
+  menu_log.push_back(std::string(label) + (enabled ? "" : " [disabled]"));
   const float h = ctx.u(hint != nullptr ? 42.0F : 30.0F);
   ImGui::PushID(id);
   if (!enabled) ImGui::BeginDisabled();

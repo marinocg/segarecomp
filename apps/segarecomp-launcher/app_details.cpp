@@ -27,6 +27,12 @@ namespace launcher {
 
 namespace {
 
+fs::path path_from_text(const std::string &text) { return fs::path(std::u8string(reinterpret_cast<const char8_t *>(text.c_str()))); }
+std::string short_hash(const std::string &digest) { return digest.size() >= 16 ? digest.substr(0, 16) + "..." : digest; }
+std::string file_name_text(const std::string &path) { return path.empty() ? std::string("not chosen") : u8s(path_from_text(path).filename()); }
+// The product-facing name of a Sega CD build mode code.
+std::string scd_mode_name(const std::string &code) { return code == "file_first" ? "File-first" : code == "optimized" ? "Optimized (experimental)" : "Compatibility"; }
+
 const char *run_label(const std::string &run) {
   if (run == "clean") return "ended normally";
   if (run == "failed") return "stopped with an error";
@@ -89,7 +95,7 @@ bool App::can_build(const LibraryEntry &entry, const StatusInfo &info) const {
 }
 
 bool App::can_play(const StatusInfo &info) const {
-  if (info.sega_cd) return info.scd.state == scd::State::ready && !game_ && !maintenance_running_ && !scd_launch_job_.valid() && !scd_import_job_.valid() && !scd_build_;
+  if (info.sega_cd) return info.scd.state == scd::State::ready && !game_ && !maintenance_running_ && !scd_launch_job_.valid() && !scd_import_job_.valid() && !(scd_build_ && scd_build_key_ == info.key);
   return info.runnable() && !game_ && !maintenance_running_ && !(job_ && job_key_ == info.key); }
 
 void App::play(const std::string &id) {
@@ -119,7 +125,7 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
   if (include_details) {
     if (menu_item(ctx_, "m_details", "Details", nullptr, ctx_.icon("info"), mw)) open_details(id);
     if (menu_item(ctx_, "m_play", "Play", nullptr, ctx_.icon("play"), mw, can_play(info))) play(id);
-    if (entry->platform_id != "sega-cd" && menu_item(ctx_, "m_build", build_action_label(info).c_str(), nullptr, ctx_.icon("reset"), mw, can_build(*entry, info))) { notices_.erase(id); request_build(id); }
+    if (menu_item(ctx_, "m_build", build_action_label(info).c_str(), nullptr, ctx_.icon("reset"), mw, can_build(*entry, info))) { notices_.erase(id); request_build(id); }
     if (is_queued(id) && menu_item(ctx_, "m_unqueue", "Remove from build queue", nullptr, ctx_.icon("trash"), mw)) dequeue_build(id);
     if (is_building(id) && menu_item(ctx_, "m_cancel_build", is_stopping(id) ? "Stopping build..." : "Cancel build", nullptr, ctx_.icon("close"), mw, !is_stopping(id))) cancel_build(id);
     if (menu_item(ctx_, "m_fav", entry->favorite ? "Remove from favorites" : "Add to favorites", nullptr, ctx_.icon("star"), mw)) { entry->favorite = !entry->favorite; save_catalog(); }
@@ -130,13 +136,16 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
     if (is_queued(id) && menu_item(ctx_, "m_unqueue", "Remove from build queue", nullptr, ctx_.icon("trash"), mw)) dequeue_build(id);
     if (is_building(id) && menu_item(ctx_, "m_cancel_build", is_stopping(id) ? "Stopping build..." : "Cancel build", nullptr, ctx_.icon("close"), mw, !is_stopping(id))) cancel_build(id);
   }
-  if (menu_item(ctx_, "m_logs", entry->platform_id == "sega-cd" ? (show_log_ && !include_details ? "Hide run log" : "View run log") : (show_log_ && !include_details ? "Hide build log" : "View build log"), nullptr, ctx_.icon("file"), mw)) { if (include_details) open_details(id); show_log_ = include_details ? true : !show_log_; }
-  if (entry->platform_id != "sega-cd") {
-    if (menu_item(ctx_, "m_folder", "Open build folder", nullptr, ctx_.icon("folder"), mw, fs::is_directory(info.entry, ec))) SDL_OpenURL(("file://" + u8s(info.entry)).c_str());
-    if (menu_item(ctx_, "m_storage", "Manage storage...", "Cleanup options for this game", ctx_.icon("storage"), mw)) { storage_selected_ = {id}; go(Page::storage); }
-  } else if (menu_item(ctx_, "m_folder", "Open recordings folder", nullptr, ctx_.icon("folder"), mw, fs::is_directory(scd_dir(*entry) / "recordings", ec))) {
-    SDL_OpenURL(("file://" + u8s(scd_dir(*entry) / "recordings")).c_str());
+  const bool scd_game = entry->platform_id == "sega-cd";
+  if (menu_item(ctx_, "m_logs", show_log_ && !include_details ? "Hide build log" : "View build log", nullptr, ctx_.icon("file"), mw)) { if (include_details) open_details(id); show_log_ = include_details ? true : !show_log_; }
+  if (menu_item(ctx_, "m_folder", "Open build folder", nullptr, ctx_.icon("folder"), mw, fs::is_directory(info.entry, ec))) SDL_OpenURL(("file://" + u8s(info.entry)).c_str());
+  if (scd_game) {   // SEG-109: the Sega CD game's own extras, beside the shared items
+    if (menu_item(ctx_, "m_recordings", "Open recordings folder", nullptr, ctx_.icon("folder"), mw, fs::is_directory(scd_dir(*entry) / "recordings", ec))) SDL_OpenURL(("file://" + u8s(scd_dir(*entry) / "recordings")).c_str());
+    const bool scd_busy = scd_import_job_.valid() || scd_launch_job_.valid() || game_ != nullptr;
+    if (menu_item(ctx_, "m_scd_attach", entry->sega_cd.program.path.empty() ? "Import program..." : "Replace program...", "A verified prebuilt viewer program", ctx_.icon("import"), mw, !scd_busy)) scd_browse("scd_attach", id);
+    if (menu_item(ctx_, "m_scd_verify", "Verify again", "Hashes the program and the disc files", ctx_.icon("check"), mw, !scd_busy && !entry->sega_cd.program.path.empty())) scd_start_import(id, {}, {}, {});
   }
+  if (menu_item(ctx_, "m_storage", "Manage storage...", "Cleanup options for this game", ctx_.icon("storage"), mw)) { storage_selected_ = {id}; go(Page::storage); }
   menu_separator(ctx_, mw);
   if (menu_item(ctx_, "m_cover", "Change cover...", "Choose a local PNG or JPEG", ctx_.icon("edit"), mw)) browse_cover(id);
   if (!entry->cover.empty() && menu_item(ctx_, "m_cover_rm", "Remove cover", nullptr, ctx_.icon("close"), mw)) {
@@ -156,9 +165,11 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
     if (menu_item(ctx_, "m_web", "Find cover online", "Opens your web browser", ctx_.icon("search"), mw, !url.empty())) SDL_OpenURL(url.c_str());
   }
   if (menu_item(ctx_, "m_sha", entry->platform_id == "sega-cd" ? "Copy game identity" : "Copy ROM SHA-256", nullptr, ctx_.icon("file"), mw)) { SDL_SetClipboardText(entry->sha256.c_str()); toast("SHA-256 copied."); }
-  if (info.rom_missing && entry->platform_id != "sega-cd" && menu_item(ctx_, "m_locate", "Locate ROM...", "Re-link a moved ROM (same SHA-256)", ctx_.icon("folder"), mw)) browse_locate(id);
+  if (info.rom_missing && !scd_game && menu_item(ctx_, "m_locate", "Locate ROM...", "Re-link a moved ROM (same SHA-256)", ctx_.icon("folder"), mw)) browse_locate(id);
+  if (scd_game && info.scd.refusal == scd::Refusal::bios_missing && menu_item(ctx_, "m_locate_bios", "Locate BIOS...", "Re-link a moved BIOS (same SHA-256)", ctx_.icon("folder"), mw)) scd_browse("scd_locate_bios", id);
+  if (scd_game && info.scd.refusal == scd::Refusal::cue_missing && menu_item(ctx_, "m_locate_cue", "Locate disc...", "Re-link a moved CUE file (same SHA-256)", ctx_.icon("folder"), mw)) scd_browse("scd_locate_cue", id);
   menu_separator(ctx_, mw);
-  if (menu_item(ctx_, "m_remove", "Remove from library...", "ROM files and extracted copies stay", ctx_.icon("trash"), mw, !game_ || game_id_ != id, true)) ask_remove(*entry);
+  if (menu_item(ctx_, "m_remove", "Remove from library...", scd_game ? "BIOS, disc files and saves stay" : "ROM files and extracted copies stay", ctx_.icon("trash"), mw, !game_ || game_id_ != id, true)) ask_remove(*entry);
   end_menu();
 }
 
@@ -167,7 +178,7 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
 void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, float w, float cover_w) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 top = ImGui::GetCursorScreenPos();
-  const bool is_building = job_ && job_id_ == entry.id(), is_running = game_ && game_id_ == entry.id();
+  const bool is_building = this->is_building(entry.id()), is_running = game_ && game_id_ == entry.id();
   const float cover_h = std::floor(cover_w * 1.33F);
   {  // cover, with a discoverable change-cover button on its corner
     const ImVec2 a = top, b(top.x + cover_w, top.y + cover_h);
@@ -233,6 +244,8 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     const bool mapper_needed = entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty();
     if (info.sega_cd) {
       if (is_running) { line = "Running in the viewer. Close its window to return here."; color = col::ok; }
+      else if (is_building) { line = "Building with " + mode + ". This can take several minutes the first time."; color = col::warn; }
+      else if (info.status == GameStatus::metadata_only) { line = "Build removed on purpose: history, saves and recordings kept, a new build is needed to play."; color = col::info; }
       else if (scd_launch_job_.valid() && scd_launch_id_ == entry.id()) { line = "Checking the BIOS, the program and the disc files before launch..."; color = col::warn; }
       else if (info.scd.state == scd::State::ready) { line = "Ready to play. Last played " + fmt_relative(entry.last_played_at, std::time(nullptr)) + "."; color = col::text2; }
       else { line = scd_hint(info); color = col::warn; }
@@ -256,12 +269,11 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
   const float bh = ctx_.u(44.0F);
   ImGui::SetCursorScreenPos(ImVec2(x0, y));
   if (is_building) {
-    static const char *names[BuildJob::stage_count] = {"Analyze", "Generate C", "Compile", "Link"};
     float sx = x0;
-    for (int i = 0; i < BuildJob::stage_count; ++i) {
+    for (int i = 0; i < build_stage_count(entry.id()); ++i) {
       float cw = 0.0F;
       if (sx + ctx_.u(110.0F) > x0 + tw) { sx = x0; y += ctx_.u(32.0F); }
-      stage_chip(ctx_, dl, ImVec2(sx, y + ctx_.u(8.0F)), names[i], job_->stage(i), &cw);
+      stage_chip(ctx_, dl, ImVec2(sx, y + ctx_.u(8.0F)), build_stage_label(entry.id(), i), build_stage(entry.id(), i), &cw);
       sx += cw + ctx_.u(6.0F);
     }
     y += ctx_.u(8.0F) + ctx_.u(26.0F) + ctx_.u(10.0F);  // clear gap below the stage chips
@@ -269,16 +281,22 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     ImGui::SetCursorScreenPos(ImVec2(x0, y));
     const bool stopping = is_stopping(entry.id());
     const bool cancel_pressed = button(ctx_, "cancel_build", stopping ? "Stopping..." : "Cancel build", ImVec2(std::min(ctx_.u(180.0F), tw), bh), Style::secondary, !stopping, ctx_.icon("close"));
+    note_item_layout("build");
     take_details_focus("cancel_build");
     if (cancel_pressed) { details_refocus_ = ImGui::IsItemFocused() ? "build" : std::string(); details_refocus_ttl_ = 30; cancel_build(entry.id()); }
     if (ImGui::IsItemHovered()) tooltip(ctx_, "Stop this build and discard its partial files. A previously built program is kept.");
     y += bh;
   } else {
-    const bool locate_primary = info.rom_missing && !info.runnable() && !entry.rom_paths.empty() && !info.sega_cd;  // a playable build needs no ROM: Play stays primary
+    const bool scd_locate = info.sega_cd && (info.scd.refusal == scd::Refusal::bios_missing || info.scd.refusal == scd::Refusal::cue_missing);   // the Sega CD "Locate ROM"
+    const bool locate_primary = (info.rom_missing && !info.runnable() && !entry.rom_paths.empty() && !info.sega_cd) || scd_locate;  // a playable build needs no ROM: Play stays primary
     const float play_w = std::min(ctx_.u(150.0F), (tw - ctx_.u(16.0F)) * 0.36F), build_w = std::min(ctx_.u(148.0F), (tw - ctx_.u(16.0F)) * 0.36F), more_w = std::min(ctx_.u(96.0F), tw - play_w - build_w - ctx_.u(16.0F));
     if (locate_primary) {
-      if (button(ctx_, "locate", "Locate ROM...", ImVec2(play_w, bh), Style::primary, true, ctx_.icon("folder"))) browse_locate(entry.id());
+      if (button(ctx_, "locate", scd_locate ? (info.scd.refusal == scd::Refusal::bios_missing ? "Locate BIOS..." : "Locate disc...") : "Locate ROM...", ImVec2(play_w, bh), Style::primary, true, ctx_.icon("folder"))) {
+        if (scd_locate) scd_browse(info.scd.refusal == scd::Refusal::bios_missing ? "scd_locate_bios" : "scd_locate_cue", entry.id());
+        else browse_locate(entry.id());
+      }
     } else if (button(ctx_, "play", is_running ? "Playing" : "Play", ImVec2(play_w, bh), Style::primary, can_play(info), ctx_.icon("play"))) play(entry.id());
+    note_item_layout("play");
     if (ImGui::IsItemHovered() && !can_play(info) && !locate_primary) {
       const std::string why = info.sega_cd ? (info.scd.state == scd::State::ready ? std::string("Wait for the running game or check to finish.") : scd::message(info.scd.refusal, info.scd.detail))
                               : info.status == GameStatus::ready ? std::string("Wait for the running game or build to finish.") : std::string("No executable matches the current build configuration yet.");
@@ -286,18 +304,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     }
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     const bool prominent_build = info.status != GameStatus::ready && !info.older.playable;  // Play stays the dominant action while an earlier build is playable
-    if (info.sega_cd) {
-      // SEG-078-T003 (ADR 0205): Build (or Rebuild) runs the product's self-service Sega CD build; Import stays in the panel below.
-      const bool mine = scd_build_ && scd_build_id_ == entry.id();
-      if (mine) {
-        if (button(ctx_, "scd_cancel_build", scd_build_->cancel_requested() ? "Stopping..." : "Cancel build", ImVec2(build_w + ctx_.u(20.0F), bh), Style::secondary, !scd_build_->cancel_requested(), ctx_.icon("close"))) scd_cancel_build();
-        if (ImGui::IsItemHovered()) tooltip(ctx_, "Stop this build and discard its partial files. A previously built program is kept.");
-      } else {
-        const bool has_program = !entry.sega_cd.program.path.empty();
-        if (button(ctx_, "scd_build", has_program ? "Rebuild" : "Build", ImVec2(build_w + ctx_.u(20.0F), bh), has_program && info.scd.state == scd::State::ready ? Style::secondary : Style::primary, scd_can_build(entry, info), ctx_.icon("reset"))) { notices_.erase(entry.id()); scd_start_build(entry.id()); }
-        if (ImGui::IsItemHovered()) tooltip(ctx_, scd_can_build(entry, info) ? "Build a playable program from your BIOS and disc on this computer (several minutes the first time)." : "A build needs a free viewer, the BIOS and the disc in place and no other running check.");
-      }
-    } else if (is_queued(entry.id())) {
+    if (is_queued(entry.id())) {
       // SEG-069-T001: a queued game's build action is its way out of the queue (it owns no process or folder yet).
       const bool unqueue_pressed = button(ctx_, "unqueue", "Unqueue", ImVec2(build_w, bh), Style::secondary, true, ctx_.icon("close"));
       take_details_focus("unqueue");
@@ -307,9 +314,15 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
       take_details_focus("build");
       if (build_pressed) { details_refocus_ = ImGui::IsItemFocused() ? "after_build" : std::string(); details_refocus_ttl_ = 30; notices_.erase(entry.id()); request_build(entry.id()); }
     }
-    if (ImGui::IsItemHovered()) tooltip(ctx_, is_queued(entry.id()) ? "Remove this game from the build queue; nothing has been built yet." : info.status == GameStatus::ready ? "Recompile the native program with the current configuration." : "Recompile with the configuration below.");
+    if (ImGui::IsItemHovered())
+      tooltip(ctx_, is_queued(entry.id()) ? "Remove this game from the build queue; nothing has been built yet."
+                    : info.sega_cd && !can_build(entry, info) ? "A build needs a free viewer, the BIOS and the disc in place."
+                    : info.sega_cd ? "Build a playable program from your BIOS and disc on this computer (several minutes the first time)."
+                    : info.status == GameStatus::ready ? "Recompile the native program with the current configuration." : "Recompile with the configuration below.");
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
-    if (button(ctx_, "more", "More", ImVec2(more_w, bh), Style::ghost, true, ctx_.icon("more"))) ImGui::OpenPopup("##details_more");
+    note_item_layout("build");   // Build / Rebuild / Unqueue: the item drawn just before this line
+    if (button(ctx_, "more", "More", ImVec2(more_w, bh), Style::ghost, true, ctx_.icon("more")) || std::exchange(script_open_more_, false)) ImGui::OpenPopup("##details_more");
+    note_item_layout("more");
     if (ImGui::IsItemHovered()) tooltip(ctx_, "More: logs, build folder, storage, cover, remove");
     if (ImGui::IsItemFocused()) focus_label_ = "More";
     draw_game_menu("##details_more", entry.id(), false);
@@ -341,7 +354,16 @@ static std::string older_build_description(const OlderBuild &older) {
   return text;
 }
 
+// The player's save of a Sega CD game (ADR 0252): size and last-stored time of the canonical backup RAM image, never its content.
+std::string App::scd_save_summary(const LibraryEntry &entry) const {
+  const fs::path save = scd_dir(entry) / "backup-ram.bin";
+  SDL_PathInfo path_info;
+  if (!SDL_GetPathInfo(u8s(save).c_str(), &path_info) || path_info.type != SDL_PATHTYPE_FILE) return "No save yet: the game's internal backup RAM is created on the first play.";
+  return format_bytes(static_cast<std::uintmax_t>(path_info.size)) + " internal backup RAM, last stored " + fmt_date(static_cast<long long>(path_info.modify_time / 1000000000LL)) + ".";
+}
+
 std::string App::selected_mode_label(const LibraryEntry &entry) const {
+  if (entry.platform_id == "sega-cd") return scd_mode_name(scd::selected_build_mode(entry.sega_cd));
   if (entry.aot_policy != "optimized") return "Compatibility";
   if (entry.platform_id == "master-system" && !sms_probe_.valid() && !sms_optimized_available_) return "Compatibility";
   return "Optimized";
@@ -350,13 +372,15 @@ std::string App::selected_mode_label(const LibraryEntry &entry) const {
 float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float w) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetCursorScreenPos();
-  const bool busy_now = is_building(entry.id()) || is_queued(entry.id()) || game_ != nullptr || maintenance_running_;  // other games' builds never lock this game's options
+  const bool scd_game = entry.platform_id == "sega-cd";
+  const bool busy_now = is_building(entry.id()) || is_queued(entry.id()) || game_ != nullptr || maintenance_running_ ||
+                        (scd_game && (scd_import_job_.valid() || scd_launch_job_.valid()));  // other games' builds never lock this game's options
   const bool sms = entry.platform_id == "master-system";
-  const RomView probe = view_for(entry);
+  const RomView probe = scd_game ? RomView{} : view_for(entry);
   const float pad = ctx_.u(16.0F), inner = w - 2 * pad;
   const bool side_labels = inner > ctx_.u(470.0F);
   const float label_w = side_labels ? ctx_.u(112.0F) : 0.0F, ctl_w = inner - label_w;
-  const float tile_h = ctx_.u(64.0F);
+  const float tile_h = scd_game ? ctx_.u(84.0F) : ctx_.u(64.0F);
   bool changed = false;
   // The card is drawn behind its content: content first on a channel above, then the frame with the measured height.
   dl->ChannelsSplit(2);
@@ -373,6 +397,25 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     y += ctx_.u(20.0F);
   };
   const float cx = a.x + pad + label_w;
+  // ---- Sega CD: the BIOS and the disc come first, because nothing can be built without them (the counterpart of the Master System mapper) ----
+  if (scd_game) {
+    const scd::EntryRecord &r = entry.sega_cd;
+    const auto input_row = [&](const char *label, const char *sub_label, const std::string &value, ImU32 color) {
+      stacked_label(label);
+      row_label(label, sub_label, y, ctx_.u(34.0F));
+      ImGui::SetCursorScreenPos(ImVec2(cx, y));
+      const float used = paragraph(ctx_, ctx_.regular, ctx_.u(12.5F), color, ctl_w, value);
+      y += std::max(ctx_.u(34.0F), used + ctx_.u(8.0F));
+    };
+    const bool bios_bad = info.scd.refusal == scd::Refusal::bios_missing || info.scd.refusal == scd::Refusal::bios_changed || info.scd.refusal == scd::Refusal::bios_unreadable || info.scd.refusal == scd::Refusal::bios_too_large;
+    input_row("BIOS", bios_bad ? "needs attention" : "verified", file_name_text(r.bios_path) + "  (" + format_bytes(r.bios_size) + ", SHA-256 " + short_hash(r.bios_sha256) + ")", bios_bad ? col::warn : col::text);
+    const bool cue_bad = info.scd.refusal == scd::Refusal::cue_missing || info.scd.refusal == scd::Refusal::cue_changed;
+    input_row("Disc (CUE)", cue_bad ? "needs attention" : (r.disc_verified ? "verified" : "linked"),
+              file_name_text(r.cue_path) + "  (SHA-256 " + short_hash(r.cue_sha256) + "), " +
+                  (r.disc_files.empty() ? std::string("track files are listed once a program is verified") : std::to_string(r.disc_files.size()) + " track file(s) beside it; " + (r.disc_verified ? "sizes and SHA-256 verified" : "not verified")),
+              cue_bad || (!r.disc_files.empty() && !r.disc_verified) ? col::warn : col::text);
+    y += ctx_.u(4.0F);
+  }
   // ---- Master System: the cartridge mapper comes first, because nothing can be built until it is declared ----
   if (sms) {
     stacked_label("Cartridge mapper");
@@ -409,10 +452,33 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     y += ctx_.u(6.0F);
   }
   // ---- Build mode ----
-  stacked_label("Build mode");
-  row_label("Build mode", "part of the build", y, tile_h);
+  if (scd_game) {   // three tiles need the whole card width: the label sits above them
+    draw_text(dl, ctx_.bold, ctx_.u(12.5F), col::text, ImVec2(a.x + pad, y), "Build mode");
+    y += ctx_.u(20.0F);
+  } else {
+    stacked_label("Build mode");
+    row_label("Build mode", "part of the build", y, tile_h);
+  }
   {
     ImGui::SetCursorScreenPos(ImVec2(cx, y));
+    if (scd_game) {   // SEG-097-T003 / SEG-103-T007: Compatibility stays the default; File-first is the recommended broader choice; Optimized is EXPERIMENTAL
+      const std::string selected_code = scd::selected_build_mode(entry.sega_cd);
+      int sel = selected_code == "file_first" ? 1 : selected_code == "optimized" ? 2 : 0;
+      const bool narrow = inner < ctx_.u(560.0F);   // short labels so no tile title or recommendation is cut off at the narrowest widths
+      ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+      ImGui::BeginDisabled(busy_now);
+      if (option_tiles(ctx_, "scd_policy",
+                       narrow ? std::vector<std::string>{"Compatibility", "File-first", "Optimized (exp.)"} : std::vector<std::string>{"Compatibility", "File-first (structural)", "Optimized (experimental)"},
+                       narrow ? std::vector<std::string>{"Run-reached code only.", "Recommended. Adds disc files.", "Model-picked; may omit code."}
+                              : std::vector<std::string>{"Compiles what the build's run reaches. May miss later play.", "Recommended. Also precompiles eligible disc files.", "A model picks the code; may omit code the game needs."},
+                       &sel, inner, tile_h, {true, true, true})) {
+        scd::select_build_mode(entry.sega_cd, sel == 1 ? "file_first" : sel == 2 ? "optimized" : "compatibility");
+        trace(std::string("scd=policy_selected mode=") + scd::selected_build_mode(entry.sega_cd) + (sel == 2 ? " policy=experimental_optimized" : " policy=other"));
+        changed = true;
+      }
+      ImGui::EndDisabled();
+      y += tile_h + ctx_.u(8.0F);
+    } else {
     int sel = entry.aot_policy == "optimized" && probe.supports_optimized() ? 1 : 0;
     const bool optimized_offered = probe.supports_optimized();
     const std::string compat_desc = "Broad, conservative recompilation.";
@@ -433,6 +499,7 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
       if (sms_probe_.valid()) y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, ctl_w, "Checking whether this product build offers Optimized for Master System...") + ctx_.u(4.0F);
       else if (!optimized_offered) y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::warn, ctl_w, "Optimized is the default, but this product build does not offer it for Master System, so this game builds as Compatibility.") + ctx_.u(4.0F);
     }
+    }
   }
   // what the executable actually is, versus what is selected
   {
@@ -441,7 +508,20 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     std::string text;
     ImU32 color = col::text2;
     const char *icon = "info";
-    if (job_ && job_id_ == entry.id()) { text = "Building the " + selected + " executable..."; color = col::warn; icon = "reset"; }
+    const std::string scd_sel_code = scd_game ? std::string(scd::selected_build_mode(entry.sega_cd)) : std::string(), scd_built_code = scd_game ? entry.sega_cd.program_built_mode : std::string();
+    if (scd_game) {   // the same slot says what the program is, versus what is selected
+      if (is_building(entry.id())) { text = "Building the " + selected + " program..."; color = col::warn; icon = "reset"; }
+      else if (scd_import_job_.valid() && scd_import_target_ == entry.id()) { text = "Verifying: " + format_bytes(scd_done_.load()) + (scd_total_ > 0 ? " of " + format_bytes(scd_total_) : std::string()); color = col::warn; icon = "reset"; }
+      else if (info.status == GameStatus::metadata_only) { text = "No program (build removed on purpose). Build to play with " + selected + "."; color = col::info; }
+      else if (info.scd.state == scd::State::ready && scd_built_code.empty())
+        text = scd_sel_code == "compatibility" ? "Program ready. How it was built is not recorded (it was imported or built by an earlier release)."
+                                               : "Program ready. How it was built is not recorded: Build to apply " + selected + ".";
+      else if (info.scd.state == scd::State::ready && scd_built_code == scd_sel_code) { text = "Program built with " + selected + ": matches this selection, ready to play."; color = col::ok; icon = "check"; }
+      else if (info.scd.state == scd::State::ready) { text = "The program was built with " + scd_mode_name(scd_built_code) + ". " + selected + " is selected: Build to apply it. Changing the selection does not change the current program."; color = col::warn; icon = "warning"; }
+      else if (info.scd.state == scd::State::no_program) text = layout_.scd_build_problem.empty() ? "Not built yet. Build creates the " + selected + " program, or import a verified prebuilt one under Advanced build options." : scd::message(scd::Refusal::unsupported_build);
+      else { text = scd_hint(info); color = col::warn; icon = "warning"; }
+    }
+    else if (is_building(entry.id())) { text = "Building the " + selected + " executable..."; color = col::warn; icon = "reset"; }
     else if (info.status == GameStatus::ready && info.policy.present && info.policy.fallback) { text = "Optimized was requested; this executable fell back to Compatibility (see Build provenance)."; color = col::warn; icon = "warning"; }
     else if (info.status == GameStatus::ready) { text = "Executable built as " + (info.policy.present ? std::string(effective_mode(info.policy) == "optimized" ? "Optimized" : "Compatibility") : selected) + ": matches this selection, ready to play."; color = col::ok; icon = "check"; }
     else if (info.status == GameStatus::playable_older) { text = "Playing an earlier build: " + older_build_description(info.older) + ". It keeps its own settings; Recompile applies this release and the " + selected + " selection."; color = col::warn; icon = "warning"; }
@@ -461,6 +541,46 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     for (const auto &l : lines) { draw_text(dl, ctx_.regular, ctx_.u(12.0F), color, ImVec2(cx + ctx_.u(22.0F), y), l.c_str()); y += ctx_.u(15.0F); }
     y += ctx_.u(10.0F);
   }
+  // ---- Sega CD: what the selected mode means and what the last run says (the same notes slot the Master System uses for its mapper) ----
+  if (scd_game) {
+    const std::string selected_code = scd::selected_build_mode(entry.sega_cd), built = entry.sega_cd.program_built_mode;
+    const bool has_program = !entry.sega_cd.program.path.empty();
+    const auto note = [&](ImU32 color, const std::string &text, float size = 11.5F) {
+      ImGui::SetCursorScreenPos(ImVec2(cx, y));
+      y += paragraph(ctx_, ctx_.regular, ctx_.u(size), color, ctl_w, text) + ctx_.u(4.0F);
+    };
+    if (selected_code == "optimized")
+      note(col::warn, "Experimental: the program built this way can stop at an uncompiled entry, and the model has no proven complete coverage on Sega CD games. It applies at the next Build; Compatibility stays the safe choice.");
+    else if (selected_code == "file_first")
+      note(col::text2, "File-first compiles the structurally supported instructions of eligible disc files before the game runs; the game's own loads are still verified byte for byte before any of that code runs. "
+                       "Files that are oversize, duplicated or without code structure are not covered, and transformed or generated code is never guessed. It applies at the next Build.");
+    if (has_program && built == "file_first")
+      note(col::text2, std::string("The disc inventory of the current program is ") + (entry.sega_cd.program_file_first_inventory == "complete" ? "complete." : "incomplete (a structurally filtered subset): code outside it still stops at an uncompiled entry."));
+    if (has_program && scd::is_uncompiled_entry_stop(entry.sega_cd.last_stop)) {
+      const auto rebuild = [&](const char *id, const char *label, const char *mode_code, const char *trace_line) {
+        ImGui::SetCursorScreenPos(ImVec2(cx, y));
+        if (button(ctx_, id, label, ImVec2(std::min(ctx_.u(240.0F), ctl_w), ctx_.u(32.0F)), Style::primary, can_build(entry, info), ctx_.icon("reset"))) {
+          scd::select_build_mode(entry.sega_cd, mode_code);
+          trace(trace_line);
+          notices_.erase(entry.id());
+          changed = true;
+          request_build(entry.id());
+        }
+        y += ctx_.u(38.0F);
+      };
+      if (built == "file_first")
+        note(col::warn, "The last run ended at an uncompiled entry (" + entry.sega_cd.last_stop + ") even with File-first: that code is probably not in an eligible disc file (oversize, duplicated, without structure, transformed or generated at run time), so rebuilding will not change it.", 12.0F);
+      else if (built == "optimized") {
+        note(col::warn, "The last run ended at an uncompiled entry (" + entry.sega_cd.last_stop + "): the experimental build omitted code the game needed. A full Compatibility rebuild starts the game again from reset.", 12.0F);
+        rebuild("scd_rebuild_compat", "Rebuild with Compatibility", "compatibility", "scd=compat_rebuild_after_uncompiled_entry");
+      } else {
+        note(col::warn, "The last run ended at an uncompiled entry (" + entry.sega_cd.last_stop + "): the build only compiled the code its own run reached. Rebuilding with File-first (structural) can precompile eligible disc files; it does not fix transformed or unavailable code.", 12.0F);
+        rebuild("scd_rebuild_file_first", "Rebuild with File-first", "file_first", "scd=file_first_rebuild_after_uncompiled_entry");
+      }
+    }
+    if (const auto last = scd_build_notes_.find(entry.id()); last != scd_build_notes_.end()) note(col::text, "Last build: " + last->second, 12.0F);
+    y += ctx_.u(4.0F);
+  }
   // ---- Console region (Genesis): a run-time choice, never part of the build identity ----
   if (probe.supports_region()) {
     stacked_label("Console region");
@@ -479,6 +599,12 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     if (info.status == GameStatus::ready) if (const std::string c = region_coverage_note(info.observed_region, entry.region); !c.empty()) note += " " + c;
     for (const auto &l : wrap(ctx_.regular, ctx_.u(11.5F), ctl_w, note)) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), entry.region == "europe" ? col::warn : col::dim, ImVec2(cx, y), l.c_str()); y += ctx_.u(14.5F); }
     y += ctx_.u(8.0F);
+  } else if (scd_game) {
+    stacked_label("Console audio");
+    row_label("Console audio", nullptr, y, ctx_.u(34.0F));
+    ImGui::SetCursorScreenPos(ImVec2(cx, y));
+    const float used = paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, ctl_w, "CD music (CD-DA) and PCM sound effects play through the viewer's volume and mute. FM and PSG sound are not available.");
+    y += std::max(ctx_.u(34.0F), used + ctx_.u(6.0F));
   } else if (sms) {
     stacked_label("Console profile");
     row_label("Console profile", nullptr, y, ctx_.u(20.0F));
@@ -501,7 +627,8 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     else dl->AddTriangleFilled(ImVec2(c.x - ctx_.u(3.0F), c.y - ctx_.u(5.0F)), ImVec2(c.x + ctx_.u(4.0F), c.y), ImVec2(c.x - ctx_.u(3.0F), c.y + ctx_.u(5.0F)), col::text2);
     draw_text(dl, ctx_.bold, ctx_.u(12.5F), col::text, ImVec2(ra.x + ctx_.u(24.0F), c.y - ctx_.u(7.5F)), "Advanced build options");
     std::string summary;
-    if (!sms) summary = entry.hint_alias_discovery ? "H-int discovery on" : "H-int discovery off";
+    if (scd_game) summary = entry.sega_cd.program.path.empty() ? "no program imported" : "program: " + file_name_text(entry.sega_cd.program.path);
+    else if (!sms) summary = entry.hint_alias_discovery ? "H-int discovery on" : "H-int discovery off";
     else summary = "none for this console";
     const std::string sum_shown = ellipsize(ctx_.regular, ctx_.u(11.5F), inner * 0.5F, summary);
     draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::dim, ImVec2(rb.x - ctx_.u(8.0F) - text_width(ctx_.regular, ctx_.u(11.5F), sum_shown.c_str()), c.y - ctx_.u(7.0F)), sum_shown.c_str());
@@ -509,7 +636,18 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     if (pressed) show_advanced_ = !show_advanced_;
     y += ctx_.u(32.0F);
     if (show_advanced_) {
-      if (sms) {
+      if (scd_game) {   // the verified program: import one built elsewhere, or check the current one again (Locate BIOS / disc: the More menu and the provenance rows)
+        const scd::EntryRecord &r = entry.sega_cd;
+        const bool scd_busy = scd_import_job_.valid() || scd_launch_job_.valid() || game_ != nullptr;
+        ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+        if (button(ctx_, "scd_attach", r.program.path.empty() ? "Import program..." : "Replace program...", ImVec2(ctx_.u(180.0F), ctx_.u(32.0F)), Style::secondary, !scd_busy, ctx_.icon("import"))) scd_browse("scd_attach", entry.id());
+        ImGui::SameLine(0.0F, ctx_.u(8.0F));
+        if (button(ctx_, "scd_verify", "Verify again", ImVec2(ctx_.u(140.0F), ctx_.u(32.0F)), Style::secondary, !scd_busy && !r.program.path.empty(), ctx_.icon("check"))) scd_start_import(entry.id(), {}, {}, {});
+        if (ImGui::IsItemHovered()) tooltip(ctx_, "Hashes the program and every disc file again (takes a few seconds for a full disc).");
+        y = ImGui::GetCursorScreenPos().y + ctx_.u(6.0F);
+        ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+        y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner, "A program is checked against exactly this BIOS and disc; it is not signed or compiled by Segarecomp when imported. Importing or replacing a program never changes the build mode you chose.") + ctx_.u(4.0F);
+      } else if (sms) {
         draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::text2, ImVec2(a.x + pad, y), "Master System builds have no further options: the mapper and build mode above are the build identity.");
         y += ctx_.u(22.0F);
       } else {
@@ -523,7 +661,8 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
         y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner, "Default off. For games whose raster / H-interrupt effects fail otherwise: the build stops on a RAM-resident H-interrupt vector to derive its alias. Builds may take longer. It changes the build.") + ctx_.u(4.0F);
       }
       ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, "Build mode, H-interrupt discovery and the mapper are part of the build identity: changing them needs a new build, and the previous executable is kept until Storage cleans it. Region applies at launch.") + ctx_.u(4.0F);
+      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, scd_game ? "The BIOS, the disc and the build mode are part of the build identity: changing the mode needs a new build, and the current program is kept until the new one is verified. Saves and recordings are never touched by a build."
+                                                                     : "Build mode, H-interrupt discovery and the mapper are part of the build identity: changing them needs a new build, and the previous executable is kept until Storage cleans it. Region applies at launch.") + ctx_.u(4.0F);
     }
   }
   if (probe.optimized() && rom_policy_identity_cached(layout_, probe).empty() && !status_pending_) {
@@ -533,9 +672,12 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
   const float h = y - a.y + ctx_.u(10.0F);
   dl->ChannelsSetCurrent(0);
   section_card(ctx_, dl, a, ImVec2(a.x + w, a.y + h), "BUILD CONFIGURATION", rgba(9, 22, 54, 245));
+  note_layout("config", a, ImVec2(a.x + w, a.y + h));
   dl->AddRectFilled(ImVec2(a.x + ctx_.u(1.0F), a.y + ctx_.u(2.0F)), ImVec2(a.x + ctx_.u(4.0F), a.y + h - ctx_.u(2.0F)), col::btn_top, ctx_.u(2.0F));
   {
-    const bool ready = info.status == GameStatus::ready;
+    // A Sega CD program is "up to date" only when it was built with the selected mode (an imported program of unknown mode matches Compatibility only).
+    const std::string scd_built = entry.sega_cd.program_built_mode, scd_sel = scd_game ? std::string(scd::selected_build_mode(entry.sega_cd)) : std::string();
+    const bool ready = info.status == GameStatus::ready && (!scd_game || (scd_built.empty() ? scd_sel == "compatibility" : scd_built == scd_sel));
     const std::string sel = selected_mode_label(entry);
     state_dot_text(ctx_, dl, ImVec2(a.x + w - pad, a.y + ctx_.u(13.0F)), ready ? sel + " - up to date" : (info.older.playable ? sel + " - recompile recommended" : sel + " - build required"), ready ? col::ok : col::warn, w * 0.5F);
   }
@@ -578,6 +720,31 @@ void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) 
     return pressed;
   };
   const long long now = std::time(nullptr);
+  const bool scd_game = entry.platform_id == "sega-cd";
+  if (scd_game) {   // SEG-109: the Sega CD counterparts of the ROM rows (the BIOS and the disc are the game's inputs), then the program
+    const scd::EntryRecord &r = entry.sega_cd;
+    const auto input_file = [&](const char *label, const std::string &path, std::uint64_t size, const std::string &digest, const char *purpose, const char *action_id) {
+      std::error_code ec;
+      const fs::path file = path_from_text(path);
+      const bool exists = !path.empty() && fs::is_regular_file(file, ec);
+      const std::string value = file_name_text(path) + (exists ? "  (" + (size > 0 ? format_bytes(size) + ", " : std::string()) + "SHA-256 " + short_hash(digest) + ", linked)" : "  (missing)");
+      if (row(label, value, exists ? col::text : col::warn, u8s(file.parent_path()), exists ? "Folder" : "Locate", action_id)) {
+        if (exists) SDL_OpenURL(("file://" + u8s(file.parent_path())).c_str());
+        else scd_browse(purpose, entry.id());
+      }
+    };
+    input_file("BIOS", r.bios_path, r.bios_size, r.bios_sha256, "scd_locate_bios", "bios_action");
+    input_file("Disc (CUE)", r.cue_path, r.cue_size, r.cue_sha256, "scd_locate_cue", "cue_action");
+    if (row("Game identity", entry.sha256.substr(0, 16) + " ... " + entry.sha256.substr(48), col::text, "Identifies the game: derived from the BIOS and disc digests; the library never matches by name.", "Copy", "copy_sha")) { SDL_SetClipboardText(entry.sha256.c_str()); toast("SHA-256 copied."); }
+    if (r.program.path.empty()) row("Program", "none yet", col::text2, "Build one, or import a verified prebuilt program (Advanced build options).");
+    else {
+      const fs::path program = path_from_text(r.program.path);
+      row("Program", file_name_text(r.program.path) + "  (" + format_bytes(r.program.size) + ", SHA-256 " + short_hash(r.program.sha256) + ")", col::text, u8s(program.parent_path()));
+      row("Program kind", std::string(r.program.viewer ? "Viewer build (playable)" : "Headless-only build (not playable in the viewer)") + ", runtime contract " + std::to_string(r.program.runtime_abi),
+          r.program.viewer && r.program.runtime_abi == scd::supported_runtime_abi ? col::text : col::warn);
+      row("Verified", fmt_date(r.program.verified_at), col::text2, "The program's own statement matches your BIOS and disc; it is not signed or compiled by Segarecomp when imported.");
+    }
+  } else {
   if (row("ROM SHA-256", entry.sha256.substr(0, 16) + " ... " + entry.sha256.substr(48), col::text, "Identifies the game: the library never matches by name.", "Copy", "copy_sha")) { SDL_SetClipboardText(entry.sha256.c_str()); toast("SHA-256 copied."); }
   if (entry.rom_paths.empty()) {
     if (row("ROM file", entry.rom_path_unknown ? "Location not recorded (older cache record)" : "No location", col::warn, "Locate the ROM to rebuild; the SHA-256 must match.", "Locate", "locate_rom")) browse_locate(entry.id());
@@ -595,6 +762,7 @@ void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) 
     }
     ImGui::PopID();
   }
+  }
   {
     std::string built = entry.last_built_at > 0 ? fmt_date(entry.last_built_at) + "  (" + fmt_relative(entry.last_built_at, now) + ")" : "never recorded";
     if (info.build_known && info.build.version.empty() && entry.last_built_at > 0) built += "  (file time)";
@@ -602,10 +770,25 @@ void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) 
   }
   row("Last played", entry.last_played_at > 0 ? fmt_date(entry.last_played_at) + "  (" + fmt_relative(entry.last_played_at, now) + ")" : "never", col::text,
       entry.last_run == "failed" ? "Exit code " + std::to_string(entry.last_exit_code) : std::string());
-  if (info.build_known && (!info.build.version.empty() || !info.build.toolchain.empty()))
+  if (scd_game) {}
+  else if (info.build_known && (!info.build.version.empty() || !info.build.toolchain.empty()))
     row("Build version", (info.build.version.empty() ? std::string("unknown release") : "Segarecomp " + info.build.version) + (info.build.toolchain.empty() ? std::string() : "  -  " + info.build.toolchain), col::text);
   else row("Build version", info.status == GameStatus::ready ? "unknown (adopted build)" : "no current build", col::text2, std::string("This release: Segarecomp ") + SEGARECOMP_LAUNCHER_VERSION + ", zig " + SEGARECOMP_ZIG_VERSION);
-  {
+  if (scd_game) {
+    const scd::EntryRecord &r = entry.sega_cd;
+    std::error_code ec;
+    const std::string built = r.program_built_mode;
+    const std::string inventory = built == "file_first" ? std::string("; disc inventory ") + (r.program_file_first_inventory == "complete" ? "complete" : "incomplete (a structurally filtered subset)") : std::string();
+    if (row("Build identity", r.program.program_identity.empty() ? std::string("-") : short_hash(r.program.program_identity), col::text,
+            scd_mode_name(scd::selected_build_mode(r)) + " selected", fs::is_directory(info.entry, ec) ? "Open" : nullptr, "open_build")) SDL_OpenURL(("file://" + u8s(info.entry)).c_str());
+    if (!r.program.path.empty())
+      row("Executable", built.empty() ? std::string("built mode not recorded") : scd_mode_name(built) + inventory, built.empty() ? col::text2 : col::text,
+          built.empty() ? "Imported or built by an earlier release: nothing is invented." : std::string());
+    if (row("Save data", scd_save_summary(entry), col::text, "Protected player data: cleanup, rebuilds, program replacement and library removal never delete or reset it.", "Folder", "open_save")) {
+      std::error_code sec;
+      if (fs::is_directory(scd_dir(entry), sec)) SDL_OpenURL(("file://" + u8s(scd_dir(entry))).c_str());
+    }
+  } else {
     std::string identity = info.key.empty() ? std::string("-") : info.key.substr(0, 16) + "...";
     std::string detail = selected_mode_label(entry) + " selected";
     if (entry.platform_id == "genesis") detail += entry.hint_alias_discovery ? ", H-int discovery on" : ", H-int discovery off";
@@ -629,12 +812,18 @@ void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) 
   } else if (info.status == GameStatus::stale && info.older.candidate_seen) {
     row("Earlier build", "cannot be played", col::warn, "Rebuild required: " + info.older.reason + ".");
   }
-  row("Last run status", entry.last_played_at > 0 ? std::string(run_label(entry.last_run)) : "never played", entry.last_run == "failed" ? col::err : col::text);
+  row("Last run status", entry.last_played_at > 0 ? std::string(run_label(entry.last_run)) : "never played", entry.last_run == "failed" ? col::err : col::text,
+      scd_game && scd_last_outcome_.count(entry.id()) != 0 ? scd_last_outcome_.at(entry.id()) : std::string());
+  if (scd_game)
+    row("Diagnostics", entry.sega_cd.last_stop.empty() ? std::string("No typed execution stop recorded.") : "Last typed execution stop: " + entry.sega_cd.last_stop + ".", col::text2,
+        info.has_failed_dir ? "A failed build folder with its sanitized log is kept for review." : std::string());
+  else
   row("Diagnostics", info.compat_known ? "Experimental analysis metadata for this ROM ships with this release." : "No ROM-specific analysis metadata ships with this release.", col::text2,
       info.has_failed_dir ? "A failed build folder with its sanitized log is kept for review." : std::string());
   const float h = y - a.y + ctx_.u(10.0F);
   dl->ChannelsSetCurrent(0);
   section_card(ctx_, dl, a, ImVec2(a.x + w, a.y + h), "BUILD PROVENANCE");
+  note_layout("provenance", a, ImVec2(a.x + w, a.y + h));
   dl->ChannelsMerge();
   ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + h));
   ImGui::Dummy(ImVec2(w, 0.0F));
@@ -651,11 +840,16 @@ float App::draw_storage_rail(const LibraryEntry &entry, const StatusInfo &info, 
                           {"Object files", rgba(80, 200, 160), u ? u->total.objects : 0}, {"Logs", rgba(240, 170, 60), u ? u->total.logs : 0},
                           {"Metadata", rgba(120, 210, 90), u ? u->total.metadata : 0}, {"Other build files", rgba(150, 165, 200), u ? u->total.other : 0}};
   const bool archived = info.status == GameStatus::metadata_only;
-  const auto note_lines = wrap(ctx_.regular, ctx_.u(11.5F), w - 2 * pad, archived ? "Metadata only: the library entry, history and cover are kept. A new build is needed to play."
-                                                                               : (u != nullptr && u->total.total() == 0 ? "No build files on disk for this game." : "Measured from this game's build folders. ROM files and covers are not counted."));
-  const float h = ctx_.u(52.0F) + ctx_.u(14.0F) + 6.0F * row + ctx_.u(8.0F) + static_cast<float>(note_lines.size()) * ctx_.u(14.5F) + ctx_.u(12.0F) + 2.0F * ctx_.u(38.0F) + ctx_.u(8.0F);
+  const bool scd_game = entry.platform_id == "sega-cd";
+  const auto note_lines = wrap(ctx_.regular, ctx_.u(11.5F), w - 2 * pad, archived ? (scd_game ? "Metadata only: the library entry, history, saves and recordings are kept. A new build is needed to play."
+                                                                                              : "Metadata only: the library entry, history and cover are kept. A new build is needed to play.")
+                                                                               : (u != nullptr && u->total.total() == 0 ? "No build files on disk for this game."
+                                                                                  : scd_game ? "Measured from this game's build folders. The BIOS, disc files and covers are not counted; saves and recordings are shown apart and are never removed by cleanup."
+                                                                                             : "Measured from this game's build folders. ROM files and covers are not counted."));
+  const float h = ctx_.u(52.0F) + ctx_.u(14.0F) + (scd_game ? 7.0F : 6.0F) * row + ctx_.u(8.0F) + static_cast<float>(note_lines.size()) * ctx_.u(14.5F) + ctx_.u(12.0F) + 2.0F * ctx_.u(38.0F) + ctx_.u(8.0F);
   const ImVec2 b(a.x + w, a.y + h);
   section_card(ctx_, dl, a, b, "STORAGE");
+  note_layout("storage", a, b);
   const std::string total = u ? format_bytes(u->total.total()) : (scanning_ ? "measuring..." : "-");
   draw_text(dl, ctx_.bold, ctx_.u(20.0F), col::info, ImVec2(a.x + pad, a.y + ctx_.u(36.0F)), total.c_str());
   float y = a.y + ctx_.u(66.0F);
@@ -676,6 +870,13 @@ float App::draw_storage_rail(const LibraryEntry &entry, const StatusInfo &info, 
     draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text2, ImVec2(b.x - pad - text_width(ctx_.regular, ctx_.u(12.5F), v.c_str()), y + ctx_.u(1.0F)), v.c_str());
     y += row;
   }
+  if (scd_game) {   // SEG-109-T004: the player's own data, reported apart from the removable build files and never offered to a cleanup action
+    dl->AddRectFilled(ImVec2(a.x + pad, y + ctx_.u(4.0F)), ImVec2(a.x + pad + ctx_.u(10.0F), y + ctx_.u(14.0F)), col::ok, ctx_.u(2.0F));
+    draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text, ImVec2(a.x + pad + ctx_.u(18.0F), y + ctx_.u(1.0F)), "Saves & recordings");
+    const std::string v = u ? format_bytes(u->user_data) : "-";
+    draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::ok, ImVec2(b.x - pad - text_width(ctx_.regular, ctx_.u(12.5F), v.c_str()), y + ctx_.u(1.0F)), v.c_str());
+    y += row;
+  }
   y += ctx_.u(4.0F);
   for (const auto &l : note_lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), archived ? col::info : col::dim, ImVec2(a.x + pad, y), l.c_str()); y += ctx_.u(14.5F); }
   y += ctx_.u(10.0F);
@@ -693,6 +894,50 @@ float App::draw_storage_rail(const LibraryEntry &entry, const StatusInfo &info, 
   return h;
 }
 
+
+// ---------------------------------------------------------------- Sega CD: input recording (the one section a native game does not have)
+
+float App::draw_scd_recordings(LibraryEntry &entry, const StatusInfo &info, float w) {
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const ImVec2 a = ImGui::GetCursorScreenPos();
+  const float pad = ctx_.u(16.0F), inner = w - 2 * pad;
+  dl->ChannelsSplit(2);
+  dl->ChannelsSetCurrent(1);
+  const bool busy = scd_import_job_.valid() || scd_launch_job_.valid() || game_ != nullptr;
+  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, a.y + ctx_.u(38.0F)));
+  checkbox(ctx_, "scd_record", "Record this session's controller input when I press Play", &scd_record_);
+  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y + ctx_.u(2.0F)));
+  paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner,
+            "A recording is a small text script of button presses at exact frame boundaries; replaying it reproduces the session exactly. It holds no game data. "
+            "The viewer's Pause menu is Esc; F6 holds the machine and F7 steps one frame while it is held.");
+  const auto recordings = scd_recordings(entry);
+  if (recordings.empty()) {
+    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y + ctx_.u(2.0F)));
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, inner, "No recordings yet.");
+  }
+  for (std::size_t i = 0; i < recordings.size(); ++i) {
+    ImGui::PushID(static_cast<int>(i));
+    std::error_code ec;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const std::string name = u8s(recordings[i].filename());
+    draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::text, ImVec2(a.x + pad, p.y + ctx_.u(8.0F)), (name + "  (" + format_bytes(fs::file_size(recordings[i], ec)) + ")").c_str());
+    ImGui::SetCursorScreenPos(ImVec2(a.x + w - pad - ctx_.u(250.0F), p.y));
+    if (button(ctx_, "replay", "Replay", ImVec2(ctx_.u(120.0F), ctx_.u(28.0F)), Style::secondary, !busy && info.scd.state == scd::State::ready)) scd_play(entry.id(), 1, recordings[i]);
+    ImGui::SameLine(0.0F, ctx_.u(6.0F));
+    if (button(ctx_, "replay_fast", "No window", ImVec2(ctx_.u(120.0F), ctx_.u(28.0F)), Style::ghost, !busy && info.scd.state == scd::State::ready)) scd_play(entry.id(), 2, recordings[i]);
+    if (ImGui::IsItemHovered()) tooltip(ctx_, "Replays the recording as fast as possible without a window and reports the result.");
+    ImGui::PopID();
+  }
+  const float h = ImGui::GetCursorScreenPos().y - a.y + ctx_.u(14.0F);
+  dl->ChannelsSetCurrent(0);
+  section_card(ctx_, dl, a, ImVec2(a.x + w, a.y + h), "INPUT RECORDING");
+  note_layout("recording", a, ImVec2(a.x + w, a.y + h));
+  dl->ChannelsMerge();
+  ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + h));
+  ImGui::Dummy(ImVec2(w, 0.0F));
+  return h;
+}
+
 // ---------------------------------------------------------------- the page
 
 void App::draw_details(float w, float h) {
@@ -700,7 +945,9 @@ void App::draw_details(float w, float h) {
   if (entry == nullptr) { page_ = Page::library; return; }
   const StatusInfo info = status_of(detail_id_);
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const bool is_building = job_ && job_id_ == detail_id_;
+  const bool is_building = this->is_building(detail_id_);
+  details_layout_.clear();
+  details_origin_ = ImGui::GetCursorScreenPos();
   {  // breadcrumb: Back returns to the exact library state it came from
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const Page back_to = previous_page_ == Page::details ? Page::library : previous_page_;
@@ -716,7 +963,7 @@ void App::draw_details(float w, float h) {
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + ctx_.u(42.0F)));
   }
   const bool sega_cd = entry->platform_id == "sega-cd";
-  const bool rail = w > ctx_.u(700.0F) && !sega_cd;  // a Sega CD game has no build folders to measure
+  const bool rail = w > ctx_.u(700.0F);
   const float gap = ctx_.u(16.0F), rail_w = rail ? std::clamp(w * 0.29F, ctx_.u(220.0F), ctx_.u(262.0F)) : 0.0F;
   const float main_w = rail ? w - rail_w - gap : w;
   const ImVec2 top = ImGui::GetCursorScreenPos();
@@ -725,8 +972,7 @@ void App::draw_details(float w, float h) {
   ImGui::SetCursorScreenPos(top);
   const float cover_w = std::clamp(main_w * 0.24F, ctx_.u(96.0F), ctx_.u(136.0F));
   draw_details_identity(*entry, info, main_w, cover_w);
-  if (sega_cd) draw_scd_details(*entry, info, main_w);
-  else draw_build_config(*entry, info, main_w);
+  draw_build_config(*entry, info, main_w);
   ImGui::Dummy(ImVec2(1, ctx_.u(12.0F)));
   // notices of this session (restart, failure) sit right under the configuration
   const auto banner = [&](ImU32 color, const char *icon, const std::string &text) {
@@ -746,6 +992,8 @@ void App::draw_details(float w, float h) {
     if (button(ctx_, "dismiss_fail", "Dismiss", ImVec2(ctx_.u(100.0F), ctx_.u(26.0F)), Style::ghost)) failures_.erase(failure);
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
   }
+  if (!is_building && info.rom_missing && sega_cd)
+    banner(col::warn, "warning", scd::message(info.scd.refusal, info.scd.detail) + " Playing is unavailable until it is located again; the game's library data, saves and recordings are unchanged.");
   if (!is_building && info.rom_missing && !sega_cd)
     banner(col::warn, "warning", entry->rom_path_unknown ? "The original ROM location was never recorded (this entry came from an older cache record). Locate ROM to enable rebuilding; playing an existing build still works."
                                                          : "The original ROM is not at its recorded location. Playing an existing build still works; Locate ROM re-links it (the SHA-256 must match).");
@@ -755,18 +1003,15 @@ void App::draw_details(float w, float h) {
     if (is_building) {
       if (SDL_GetTicks() - live_log_at_ > 700U) {
         live_log_at_ = SDL_GetTicks();
-        live_log_ = read_tail(fs::path(job_->entry()).parent_path() / (u8s(job_->entry().filename()) + ".partial") / "build.log", 1400);
+        live_log_ = read_tail(build_live_log(entry->id()), 1400);
       }
       text = live_log_.empty() ? "Waiting for the build tool's first message..." : live_log_;
     } else if (const auto d = diagnostics_.find(entry->id()); d != diagnostics_.end()) text = d->second;
-    else if (sega_cd) {
-      text = read_tail(scd_dir(*entry) / "run.log", 6000);
-      if (text.empty()) text = "No run log exists for this game yet.";
-    } else {
-      const fs::path failed = info.entry.parent_path() / (info.key + ".failed");
+    else {
+      const fs::path failed = info.entry.parent_path() / (sega_cd ? std::string("build.failed") : info.key + ".failed");
       text = read_tail(info.entry / "build.log", 6000);
       if (text.empty()) text = read_tail(failed / "build.log", 6000);
-      const std::string run = read_tail(info.entry / "run.log", 2000);
+      const std::string run = read_tail(sega_cd ? scd_dir(*entry) / "run.log" : info.entry / "run.log", 2000);
       if (!run.empty()) text += "\n--- last run ---\n" + run;
     }
     if (text.empty()) text = "No log exists for this game's current build.";
@@ -790,13 +1035,17 @@ void App::draw_details(float w, float h) {
     ImGui::Dummy(ImVec2(main_w, box_h + ctx_.u(12.0F)));
     if (is_building) { paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, main_w, "The build reports stages, not a percentage. Cancel build stops it and discards its partial files; closing the launcher waits for it."); ImGui::Dummy(ImVec2(1, ctx_.u(10.0F))); }
   }
-  if (!rail && !sega_cd) {  // narrow window: the storage card follows the configuration
+  if (!rail) {  // narrow window: the storage card follows the configuration
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float sh = draw_storage_rail(*entry, info, p, main_w);
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + sh + ctx_.u(12.0F)));
     ImGui::Dummy(ImVec2(main_w, 0.0F));
   }
-  if (!sega_cd) draw_provenance(*entry, info, main_w);
+  draw_provenance(*entry, info, main_w);
+  if (sega_cd) {   // the one section only a Sega CD game has: its input recordings and replays (SEG-078), in the same section-card presentation
+    ImGui::Dummy(ImVec2(1, ctx_.u(12.0F)));
+    draw_scd_recordings(*entry, info, main_w);
+  }
   const float bottom = std::max(rail_bottom, ImGui::GetCursorScreenPos().y);
   ImGui::SetCursorScreenPos(ImVec2(top.x, bottom));
   ImGui::Dummy(ImVec2(w, ctx_.u(12.0F)));
