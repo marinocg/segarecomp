@@ -1,6 +1,6 @@
 # ADR 0251: SEG-107 M11 - Sega CD RF5C164 PCM audio and sound effects
 
-- Status: Accepted contract (T001); implementation and decision follow in the same PR (SEG-107 / M11, one combined PR; internal tasks T001-T005). Decision: see "Decision" (filled at T005).
+- Status: Accepted (T001 contract, T002-T004 implementation and validation, T005 decision, in the same PR (SEG-107 / M11, one combined PR; internal tasks T001-T005). Decision: **`M11_PCM_AUDIO_GO`** (see "Decision").
 - Related: ADR 0233 and 0237 (SEG-102: PCM sample clock and wave-address readback, unchanged), ADR 0244-0248 (SEG-104: CD-DA), ADR 0250 (M10; its `M10_HINT_PARTIAL` and the accepted R2 three-frame lag are not touched). Product PR #171 and harness PR #117 were verified merged before this work began.
 - Privacy: counts, relative frame numbers and classes only; no ROM bytes, samples, soundtrack data or traces are committed. Full evidence is in the ignored `.cache/seg107`.
 
@@ -57,3 +57,23 @@ A defect found by the independent expectation on the first authentic run (not by
 | viewer on the authentic program (SDL3 disk driver, dummy video, 16,000 frames, real-time pacing) | report and mixed digest equal to the headless run; all 11,774,943 frames submitted, 0 overrun, 0 refused, 0 discarded, 0 pending drops; the device file's non-silent samples equal the mixed stream except the 890 frames still queued at exit; RSS 35 MB |
 | sanitizers | ASan + UBSan: both C tests and the native test (generated program and runtime compiled with the sanitizers) clean |
 | local gate | fast preset 194/194, focused `sega_cd_pcm|sega_cd_cdda|sega_cd_dual|sega_cd_bios` 2/2 on exact head 13b900b; full gate and exact-head CI are CI's |
+
+## T005 - independent review and decision
+
+An independent adversarial reviewer (`DELIVERY: PASS`, no blocker, no major) read the whole diff and ran 28 mutations against the C test and 8 against the native test. Caught: sign convention, pointer advance before sampling, missing clamps, rounding, pan swap, missing silence clearing, dropped tick remainder, inclusive event bound, loop onto loop, duplicate-delivery skip, read-ahead past the track end, shared legacy fader, missing output clamp, frame limit `<=`, missing ENV, fader reset, fader-write ordering, reset ordering, carry. Survivors and their disposition: an event time shifted by one tick (no frame/event tie occurred in the tests: **fixed**, a directed tie test now resets the grid so an event falls exactly on a frame instant), a run to a track end (never exercised: **fixed**, a last-audio-track run is compared with the reference), the redundant `scd_mix_advance` calls at delivery and interruption (mutually redundant; documented, not pinned), fader double-stepping on the native test only (one C check; accepted), an equivalent mutant (held-sample clear at reset). Findings accepted and documented in the contract: up to one sector of a run plays after an interruption and a resume may repeat up to one sector; read-ahead stops at a track end even when the next track is audio and contiguous (about two frames of silence); four report fields name the chip's lazily synchronized position. Documentation wording was reduced to what is evidenced (stream delivered to the audio device, reference-checked, not listening-verified). The reviewer's recollection that GPGX increments the address after a loop was checked against the source text read in T001 (`pcm_run` increments only in the non-loop branch): the ADR is right.
+
+Exact-head CI on the pushed head: all Linux, macOS and Windows shards and the three SDL3 viewer jobs green (two earlier heads failed for a clang unused-variable error in the new test and for the existing viewer replay test, which now compares the guest view because the viewer mixes by default; both fixed in this PR).
+
+### Decision: `M11_PCM_AUDIO_GO`
+
+PCM sound effects are produced, deterministic and combined with CD-DA on one guest-time timeline, with independent reference evidence and passing validation: the stream of a generated-native fixture and of authentic Sonic CD (16,000 frames, 11.77 M output frames, two PCM sounds, one inside a CD-DA run) equals an expectation rebuilt from the access trace, the disc and the run log in every frame; the report with audio off is identical to the SEG-106 program's; every pre-registered R0 record is reproduced with audio on; the SDL3 viewer delivers every frame to its device. No guest-visible state depends on the audio.
+
+### What is not claimed
+
+- **Nobody has listened.** The device was SDL's disk driver; the project owner's listening is the remaining confirmation that the effects are audible and well balanced.
+- The relative level of the PCM chip against CD-DA on hardware and the analog stage are not established; the 44.1 kHz conversion is a zero-order hold chosen for determinism (it is not band-limited, so it can alias).
+- Authentic evidence is one route (two sounds). Other effects, a later level, and loops that straddle a bank switch were not exercised on the real game; no complete-game or bit-exact whole-session claim is made.
+- No FM, PSG or Z80 sound; no CDC-to-PCM-RAM DMA (the wave RAM is written by the sub CPU only, as in every observed route).
+- The viewer now streams the whole timeline (silence included) instead of CD-DA sectors only; a device that drains slower than real time drops whole chunks under the existing policy.
+
+The PR stays open, unmerged, auto-merge disabled. No successor milestone is created.
