@@ -52,6 +52,7 @@ struct BuildDirUsage {
   bool has_symlink = false;       // contains a link: reported, never followed or removed
   bool truncated = false;         // the bounded traversal stopped early (sizes are lower bounds)
   bool valid_build = false;       // executable + status ok
+  std::string busy_key;           // the BusyGuard name that protects this folder ("<32 hex>" for a native game, "scd-<16 hex>" for a Sega CD game)
 };
 
 struct EntryUsage {
@@ -59,12 +60,16 @@ struct EntryUsage {
   std::vector<BuildDirUsage> dirs;
   UsageBreakdown total;
   std::uintmax_t intermediates = 0;   // what "Remove build intermediates" would reclaim
+  // SEG-109-T004 (ADR 0253): the player's own per-game data (a Sega CD game's backup RAM and input recordings). Reported, never part of `total` and never
+  // reachable from a Plan: plans are built from `dirs` only, and execute_plan refuses every path that is not a generated build folder.
+  std::uintmax_t user_data = 0;
 };
 
 struct StorageReport {
   std::vector<EntryUsage> entries;     // parallel to the catalog order at scan time
   std::vector<BuildDirUsage> unlinked; // folders no library entry owns (shown, never deleted except failed/partial ones)
   std::uintmax_t zig_cache = 0;
+  std::uintmax_t scd_object_cache = 0;   // SEG-109-T004: the shared Sega CD object cache (<cache>/sega-cd-objects), an accelerator like zig-cache
   bool zig_truncated = false;
   std::uintmax_t failed_partial = 0;
   std::uintmax_t catalog_and_covers = 0;
@@ -115,9 +120,11 @@ struct ExecResult {
   bool ok() const { return problems.empty(); }
 };
 
-// Re-validates every item against the canonical cache root and removes it. Must run with BusyGuard::try_begin_maintenance() held by the
+// Re-validates every item against the canonical cache root (or the library root for Sega CD build folders) and removes it. Must run with BusyGuard::try_begin_maintenance() held by the
 // caller. Items that are busy, symlinks, outside the managed set or of an unexpected type are skipped and reported.
-[[nodiscard]] ExecResult execute_plan(const Plan &plan, const std::filesystem::path &cache_root, const BusyGuard &busy);
+// `library_root` (optional): where a Sega CD game's generated build folders (<library>/sega-cd/<id16>/{build,build.partial,build.failed}) live; the library
+// folder may be outside the cache. Nothing else under it is ever removable (saves, recordings, logs are refused by shape).
+[[nodiscard]] ExecResult execute_plan(const Plan &plan, const std::filesystem::path &cache_root, const BusyGuard &busy, const std::filesystem::path &library_root = {});
 
 // Applies the catalog-side consequence of a plan after a successful execution (marks entries archived, removes library records).
 void apply_plan_to_catalog(const Plan &plan, Catalog &catalog);

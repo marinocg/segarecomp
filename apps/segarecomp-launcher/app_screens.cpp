@@ -95,6 +95,7 @@ void App::draw() {
   // The focus labels describe the CURRENT frame only (an item sets them while it holds focus): a control without a label can then never leave a stale one.
   ui::focus_id.clear();
   focus_label_.clear();
+  ui::menu_log.clear();
   int ww = 0, wh = 0;
   SDL_GetWindowSize(window_, &ww, &wh);
   win_w_ = static_cast<float>(ww);
@@ -155,6 +156,7 @@ void App::draw() {
   card_entry_ = ui::ZoneEntry{};
   ImGui::BeginChild("##content", ImVec2(cw, ch), ImGuiChildFlags_AlwaysUseWindowPadding | ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
   if (SDL_getenv("SEGARECOMP_SHOT_SCROLL") && page_ != Page::settings) ImGui::SetScrollY(ImGui::GetScrollMaxY());  // review aid: lower part of a long page
+  if (script_page_scroll_ >= 0.0F) { ImGui::SetScrollY(script_page_scroll_ > 1e8F ? ImGui::GetScrollMaxY() : script_page_scroll_); script_page_scroll_ = -1.0F; }
   const float inner_w = cw - ctx_.u(36.0F) - ctx_.u(8.0F);
   switch (page_) {
     case Page::library: draw_library(inner_w, ch); break;
@@ -337,7 +339,7 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     by -= ctx_.u(34.0F);
     {
       // Build activity (running + queued) sits directly above the free-space bar; builds never lock the rest of the UI.
-      const int running = job_ ? 1 : 0, queued = static_cast<int>(build_queue_.size());
+      const int running = build_running() ? 1 : 0, queued = static_cast<int>(build_queue_.size());
       // One short line per fact so nothing is truncated: what is running, then how many wait.
       std::vector<std::string> lines;
       if (running > 0) lines.push_back("Building 1 game");
@@ -795,9 +797,16 @@ void App::draw_modal(float w, float h) {
   } else if (modal_.kind == Modal::Kind::remove_entries) {
     subtitle = "The selected games are removed from the library (titles, history, settings, last played).";
     keeps = {"Your ROM files (never deleted)", "ROM copies extracted from ZIP archives (kept in the library's roms folder)", "Cover images in the covers folder"};
+    // SEG-109-T004: what is generated (removable) versus what is the player's own (kept) for a Sega CD game.
+    const bool any_scd = std::any_of(modal_.ids.begin(), modal_.ids.end(), [&](const std::string &id) { const LibraryEntry *e = catalog_.find_id(id); return e != nullptr && e->platform_id == "sega-cd"; });
+    if (any_scd) {
+      keeps.push_back("A Sega CD game's BIOS and disc files (referenced, never copied or deleted)");
+      keeps.push_back("Save data and input recordings of Sega CD games (kept in the library folder; adding the same BIOS and disc again finds them)");
+      notes.push_back("Only generated build files can be deleted with a game; its saves and recordings are never deleted by Segarecomp.");
+    }
   } else if (modal_.kind == Modal::Kind::clear_library) {
     subtitle = "Every game is removed from the library and the launcher forgets its history.";
-    keeps = {"Build folders in the cache (use Storage to delete them)", "Your ROM files", "ROM copies extracted from ZIP archives"};
+    keeps = {"Build folders in the cache (use Storage to delete them)", "Your ROM files", "ROM copies extracted from ZIP archives", "Save data and input recordings of Sega CD games"};
   } else if (modal_.kind == Modal::Kind::first_run_intermediates) {
     subtitle = "While building, Segarecomp creates intermediate files: generated C, object files and logs. They help with debugging but take disk space. Removing them after a successful build keeps the playable game and its essential metadata and diagnostics.";
     keeps = {"Your ROM files (never touched)", "The playable game and its metadata after each build"};
@@ -869,7 +878,7 @@ void App::draw_modal(float w, float h) {
   }
   for (const auto &l : note_lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::dim, ImVec2(lx, y), l.c_str()); y += ctx_.u(11.5F) + ctx_.u(4.0F); }
   y += ctx_.u(6.0F);
-  if (modal_.kind == Modal::Kind::remove_entries) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_cache", "Also delete their build folders from the cache", &modal_.delete_cache); y += ctx_.u(34.0F); }
+  if (modal_.kind == Modal::Kind::remove_entries) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_cache", "Also delete their generated build folders", &modal_.delete_cache); y += ctx_.u(34.0F); }
   if (is_plan && modal_.plan.kind == PlanKind::failed_partial) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_logs", "Keep build.log and status.json of failed builds", &modal_.keep_logs); y += ctx_.u(34.0F); }
   if (is_plan) {
     draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text2, ImVec2(lx, y + ctx_.u(10.0F)), "Total space to free:");

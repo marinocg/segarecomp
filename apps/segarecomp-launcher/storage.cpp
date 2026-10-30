@@ -69,7 +69,7 @@ bool is_pdb(const std::string &name) {
 }
 
 Category categorize(const std::string &name) {
-  if (name == "game" || name == "game.exe") return Category::executable;
+  if (name == "game" || name == "game.exe" || name == "program" || name == "program.exe" || name == "program-viewer" || name == "program-viewer.exe") return Category::executable;
   if (name == "generated.c" || name == "generated" || name == "generated-z80") return Category::generated_c;
   if (name == "obj" || is_pdb(name)) return Category::objects;
   if (name == "build.log" || name == "run.log") return Category::logs;
@@ -190,6 +190,71 @@ const EntryUsage *StorageReport::find(const std::string &id) const {
   return nullptr;
 }
 
+namespace {
+
+// SEG-109-T004 (ADR 0253): the Sega CD games' folders under <library>/sega-cd/<id16>/. The generated build folders become ordinary BuildDirUsage rows of the
+// owning entry (so every report, rail and plan treats them like a native game's build); the loose generated files are only counted; the player's own
+// data (backup RAM, input recordings) is measured into EntryUsage::user_data and nothing else.
+void scan_sega_cd_games(StorageReport &report, const Catalog &catalog, const fs::path &library_root, const std::atomic<bool> *cancel) {
+  for (std::size_t i = 0; i < catalog.entries().size() && i < report.entries.size(); ++i) {
+    const LibraryEntry &entry = catalog.entries()[i];
+    if (entry.platform_id != "sega-cd" || entry.sha256.size() < 16) continue;
+    if (cancel != nullptr && cancel->load()) return;
+    const std::string id16 = entry.sha256.substr(0, 16);
+    const fs::path folder = library_root / "sega-cd" / id16;
+    if (!is_dir_real(folder)) continue;
+    EntryUsage &usage = report.entries[i];
+    struct Spec { const char *name; DirKind kind; };
+    for (const Spec &spec : {Spec{"build", DirKind::current}, Spec{"build.partial", DirKind::partial}, Spec{"build.failed", DirKind::failed}}) {
+      BuildDirUsage dir;
+      dir.name = spec.name;
+      dir.path = folder / spec.name;
+      if (!is_dir_real(dir.path)) continue;
+      dir.kind = spec.kind;
+      dir.owner_id = usage.id;
+      dir.busy_key = "scd-" + id16;
+      std::error_code ec;
+      dir.valid_build = spec.kind == DirKind::current && (fs::is_regular_file(dir.path / "program-viewer", ec) || fs::is_regular_file(dir.path / "program-viewer.exe", ec));
+      measure_build_dir(dir, cancel);
+      if (dir.kind != DirKind::current) report.failed_partial += dir.use.total();
+      usage.total.add(dir.use);
+      usage.dirs.push_back(std::move(dir));
+    }
+    // Loose generated files of the game's folder: counted (logs / other), not removable here.
+    for (const char *name : {"run.log", "last-report.json"}) usage.total.logs += measure_path(folder / name);
+    for (const char *name : {"build-backup-ram.bin", "replay-backup-ram.bin", "backup-ram.next"}) usage.total.other += measure_path(folder / name);
+    usage.user_data = measure_path(folder / "backup-ram.bin") + measure_path(folder / "backup-ram.bin.prev") + measure_path(folder / "recordings");
+  }
+  // Folders of games no longer in the library: their generated build folders stay visible (as unlinked rows) so they can still be reclaimed; their user data
+  // is left alone and unreported.
+  std::set<std::string> owned;
+  for (const auto &entry : catalog.entries())
+    if (entry.platform_id == "sega-cd" && entry.sha256.size() >= 16) owned.insert(entry.sha256.substr(0, 16));
+  std::error_code ec;
+  const fs::path base = library_root / "sega-cd";
+  if (!is_dir_real(base)) return;
+  std::size_t visited = 0;
+  for (fs::directory_iterator it(base, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end && visited < 10000; it.increment(ec), ++visited) {
+    if (cancel != nullptr && cancel->load()) return;
+    const std::string id16 = utf8_of(it->path().filename());
+    if (!is_hex_digest(id16, 16) || owned.count(id16) != 0 || !is_dir_real(it->path())) continue;
+    struct Spec { const char *name; DirKind kind; };
+    for (const Spec &spec : {Spec{"build", DirKind::unlinked}, Spec{"build.partial", DirKind::partial}, Spec{"build.failed", DirKind::failed}}) {
+      BuildDirUsage dir;
+      dir.name = spec.name;
+      dir.path = it->path() / spec.name;
+      if (!is_dir_real(dir.path)) continue;
+      dir.kind = spec.kind;
+      dir.busy_key = "scd-" + id16;
+      measure_build_dir(dir, cancel);
+      if (dir.kind != DirKind::unlinked) report.failed_partial += dir.use.total();
+      report.unlinked.push_back(std::move(dir));
+    }
+  }
+}
+
+} // namespace
+
 StorageReport scan_storage(const Catalog &catalog, const fs::path &cache_root, const fs::path &library_root, const std::atomic<bool> *cancel) {
   StorageReport report;
   std::map<std::string, std::size_t> owner_of_key;  // build key -> entry index
@@ -215,6 +280,7 @@ StorageReport scan_storage(const Catalog &catalog, const fs::path &cache_root, c
       std::size_t owner = report.entries.size();
       if (parsed.valid) {
         dir.kind = parsed.kind;
+        dir.busy_key = parsed.key;
         if (const auto found = owner_of_key.find(parsed.key); found != owner_of_key.end()) owner = found->second;
         if (parsed.kind == DirKind::current) {
           if (owner < report.entries.size()) dir.kind = catalog.entries()[owner].current_build_key == parsed.key ? DirKind::current : DirKind::superseded;
@@ -248,6 +314,15 @@ StorageReport scan_storage(const Catalog &catalog, const fs::path &cache_root, c
     report.zig_cache = m.bytes;
     report.zig_truncated = m.truncated;
   }
+  scan_sega_cd_games(report, catalog, library_root, cancel);
+  {
+    const fs::path objects = cache_root / "sega-cd-objects";
+    if (is_dir_real(objects)) {
+      Measure m;
+      measure_tree(objects, m, 0, cancel);
+      report.scd_object_cache = m.bytes;
+    }
+  }
   report.catalog_and_covers = measure_path(library_root / "covers");
   for (const char *name : {"library.json", "library.json.bak"}) report.catalog_and_covers += measure_path(library_root / name);
   const auto space = fs::space(fs::exists(cache_root, ec) ? cache_root : cache_root.parent_path(), ec);
@@ -265,7 +340,7 @@ void add_item(Plan &plan, const fs::path &path, bool directory, std::uintmax_t b
 
 const BuildDirUsage *busy_dir(const EntryUsage &entry, const BusyGuard &busy) {
   for (const auto &d : entry.dirs)
-    if (busy.entry_busy(parse_dir_name(d.name).key)) return &d;
+    if (busy.entry_busy(d.busy_key)) return &d;
   return nullptr;
 }
 
@@ -361,8 +436,8 @@ Plan plan_failed_partial(const StorageReport &report, bool keep_diagnostics, con
   plan.keep_diagnostics = keep_diagnostics;
   const auto consider = [&](const BuildDirUsage &d) {
     if (d.kind != DirKind::partial && d.kind != DirKind::failed) return;
-    if (!parse_dir_name(d.name).valid) return;
-    if (busy.entry_busy(parse_dir_name(d.name).key)) { plan.excluded.push_back(d.name + " (in progress)"); return; }
+    if (d.busy_key.empty()) return;   // an unrecognized folder name is never touched
+    if (busy.entry_busy(d.busy_key)) { plan.excluded.push_back(d.name + " (in progress)"); return; }
     if (!keep_diagnostics || d.kind == DirKind::partial) {
       add_item(plan, d.path, true, d.use.total());
       return;
@@ -399,8 +474,18 @@ Plan plan_zig_cache(const StorageReport &report, const fs::path &cache_root, con
       add_item(plan, it->path(), status.type() == fs::file_type::directory, measure_path(it->path()));
     }
   }
+  const fs::path objects = cache_root / "sega-cd-objects";   // the Sega CD builds' shared object cache: an accelerator as well
+  if (is_dir_real(objects)) {
+    std::error_code ec;
+    for (fs::directory_iterator it(objects, ec), end; !ec && it != end; it.increment(ec)) {
+      std::error_code sec;
+      const auto status = it->symlink_status(sec);
+      if (sec || (status.type() != fs::file_type::regular && status.type() != fs::file_type::directory)) continue;
+      add_item(plan, it->path(), status.type() == fs::file_type::directory, measure_path(it->path()));
+    }
+  }
   (void)report;
-  plan.remains = {"All built games and their executables", "Library entries, covers and settings"};
+  plan.remains = {"All built games and their executables", "Library entries, covers and settings", "Save data and input recordings (never part of a cleanup)"};
   plan.notes = {"Shared compiler cache is deleted; it is only an accelerator.", "The next Recompile of any game is slower while the cache is rebuilt."};
   return plan;
 }
@@ -418,6 +503,14 @@ Plan plan_remove_from_library(const StorageReport &report, const std::vector<std
   }
   plan.remains = {"Original ROM files (never touched)", "Cover images in the covers folder", delete_cache ? "Nothing else of these games" : "Their build folders in the cache (unlinked until removed)"};
   plan.notes = {"The library entries, titles, history and settings of these games are deleted."};
+  // SEG-109-T004: a Sega CD game's save data and input recordings are the player's own and are never removed; adding the same BIOS and disc again finds them.
+  std::size_t with_user_data = 0;
+  for (const auto &id : plan.entry_ids)
+    if (const EntryUsage *entry = report.find(id); entry != nullptr && entry->user_data > 0) ++with_user_data;
+  if (with_user_data > 0) {
+    plan.remains.push_back("Save data and input recordings of " + std::to_string(with_user_data) + (with_user_data == 1 ? " Sega CD game" : " Sega CD games") + " (protected: kept in the library folder; adding the same BIOS and disc again finds them)");
+    plan.notes.push_back("Only generated build files can be deleted here; saves and recordings are never deleted by Segarecomp.");
+  }
   return plan;
 }
 
@@ -433,7 +526,7 @@ bool item_shape_allowed(const fs::path &relative) {
   if (parts.empty() || parts.size() > 3) return false;
   for (const auto &p : parts)
     if (p.empty() || p == "." || p == "..") return false;
-  if (parts[0] == "zig-cache") return parts.size() <= 2;
+  if (parts[0] == "zig-cache" || parts[0] == "sega-cd-objects") return parts.size() <= 2;
   if (parts[0] == "games") {
     if (parts.size() < 2 || !parse_dir_name(parts[1]).valid) return false;
     return parts.size() <= 3;
@@ -441,21 +534,54 @@ bool item_shape_allowed(const fs::path &relative) {
   return false;
 }
 
+// SEG-109-T004 (ADR 0253): the only shapes a plan item may take relative to the LIBRARY root: a Sega CD game's generated build folders (or one of their
+// children). The game's backup RAM, recordings, logs and every other file are not on this list, so no plan - forged or not - can remove them.
+bool library_item_shape_allowed(const fs::path &relative) {
+  std::vector<std::string> parts;
+  for (const auto &p : relative) parts.push_back(utf8_of(p));
+  if (parts.size() < 3 || parts.size() > 4) return false;
+  for (const auto &p : parts)
+    if (p.empty() || p == "." || p == "..") return false;
+  if (parts[0] != "sega-cd" || !is_hex_digest(parts[1], 16)) return false;
+  return parts[2] == "build" || parts[2] == "build.partial" || parts[2] == "build.failed";
+}
+
+// The parent of `root` is resolved (macOS /tmp and the like); `root` itself and every descendant are opened without following links.
+fs::path anchored(const fs::path &root) {
+  std::error_code ec;
+  const fs::path absolute_root = fs::absolute(root, ec).lexically_normal();
+  const fs::path parent_root = fs::canonical(absolute_root.parent_path(), ec);
+  if (ec || parent_root.empty()) return {};
+  return parent_root / absolute_root.filename();
+}
+
 } // namespace
 
-ExecResult execute_plan(const Plan &plan, const fs::path &cache_root, const BusyGuard &busy) {
+ExecResult execute_plan(const Plan &plan, const fs::path &cache_root, const BusyGuard &busy, const fs::path &library_root) {
   ExecResult result;
-  std::error_code ec;
-  // Resolve only the trusted prefix OUTSIDE the cache (e.g. macOS /tmp).
-  // The cache itself and every descendant must be opened without following links.
-  const fs::path absolute_root = fs::absolute(cache_root, ec).lexically_normal();
-  const fs::path parent_root = fs::canonical(absolute_root.parent_path(), ec);
-  if (ec || parent_root.empty()) { result.problems.push_back("the cache folder cannot be resolved"); return result; }
-  const fs::path anchored_root = parent_root / absolute_root.filename();
+  const fs::path anchored_cache = anchored(cache_root);
+  if (anchored_cache.empty()) { result.problems.push_back("the cache folder cannot be resolved"); return result; }
   if (!busy.maintenance()) { result.problems.push_back("internal: cleanup must hold the maintenance lock"); return result; }
   for (const auto &item : plan.items) {
     const std::string label = utf8_of(item.path.filename());
     const fs::path normal = item.path.lexically_normal();
+    const auto under_library = [&] {   // only a Sega CD game's folder is a library-branch item; everything else (a native build in an overlapping cache) takes the cache branch
+      if (library_root.empty() || !is_within(library_root.lexically_normal(), normal)) return false;
+      const fs::path rel = normal.lexically_relative(library_root.lexically_normal());
+      return !rel.empty() && *rel.begin() == "sega-cd";
+    }();
+    if (under_library) {
+      const fs::path relative = normal.lexically_relative(library_root.lexically_normal());
+      if (!library_item_shape_allowed(relative)) { result.problems.push_back("refused (not a managed item): " + label); continue; }
+      auto it = relative.begin();
+      ++it;
+      if (busy.entry_busy("scd-" + utf8_of(*it))) { result.problems.push_back("busy: " + utf8_of(*it)); continue; }
+      const fs::path anchored_library = anchored(library_root);
+      if (anchored_library.empty()) { result.problems.push_back("the library folder cannot be resolved"); continue; }
+      Remover remover{result};
+      remover.remove(anchored_library, relative, item.directory);
+      continue;
+    }
     if (!is_within(cache_root.lexically_normal(), normal)) { result.problems.push_back("refused (outside the cache): " + label); continue; }
     const fs::path relative = normal.lexically_relative(cache_root.lexically_normal());
     if (!item_shape_allowed(relative)) { result.problems.push_back("refused (not a managed item): " + label); continue; }
@@ -470,7 +596,7 @@ ExecResult execute_plan(const Plan &plan, const fs::path &cache_root, const Busy
       continue;
     }
     Remover remover{result};
-    remover.remove(anchored_root, relative, item.directory);
+    remover.remove(anchored_cache, relative, item.directory);
   }
   return result;
 }

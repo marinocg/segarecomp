@@ -117,7 +117,7 @@ void App::draw_storage(float w, float h) {
     const float tile_w = (w - ctx_.u(8.0F) * 3) / 4.0F, tile_h = ctx_.u(54.0F);
     const ImVec2 o = ImGui::GetCursorScreenPos();
     const std::pair<std::string, std::string> tiles[] = {{"Builds", report_valid_ ? format_bytes(report_.builds_total()) : (scanning_ ? "measuring..." : "-")},
-                                                         {"Compiler cache", report_valid_ ? format_bytes(report_.zig_cache) + (report_.zig_truncated ? "+" : "") : "-"},
+                                                         {"Compiler cache", report_valid_ ? format_bytes(report_.zig_cache + report_.scd_object_cache) + (report_.zig_truncated ? "+" : "") : "-"},
                                                          {"Library data", report_valid_ ? format_bytes(report_.catalog_and_covers) : "-"}, {"Free disk", report_valid_ ? format_bytes(report_.free_bytes) : "-"}};
     for (int i = 0; i < 4; ++i) {
       const ImVec2 a(o.x + static_cast<float>(i) * (tile_w + ctx_.u(8.0F)), o.y), b(a.x + tile_w, a.y + tile_h);
@@ -420,7 +420,7 @@ void App::draw_settings(float full_w, float h) {
     }
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Provider");
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text, w - lw, "Libretro thumbnails (thumbnails.libretro.com, or its libretro-thumbnails mirror on raw.githubusercontent.com when it cannot be reached): Named_Boxarts under 'Sega - Mega Drive - Genesis' and 'Sega - Master System - Mark III'. Images belong to their rights holders and the provider's terms apply; Segarecomp bundles none.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text, w - lw, "Libretro thumbnails (thumbnails.libretro.com, or its libretro-thumbnails mirror on raw.githubusercontent.com when it cannot be reached): Named_Boxarts under 'Sega - Mega Drive - Genesis', 'Sega - Master System - Mark III' and 'Sega - Mega-CD - Sega CD'. Images belong to their rights holders and the provider's terms apply; Segarecomp bundles none.");
     row_label("Preferred regions");
     {
       std::string text;

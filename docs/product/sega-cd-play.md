@@ -43,7 +43,9 @@ by path, never copied, never uploaded and never part of a release.
 **Build** (the details page, or `Segarecomp --sega-cd --bios ... --cue ... --build` without a window) runs `segarecomp sega-cd build` with the compiler bundled in the
 release. Several minutes the first time (a real disc compiles tens of millions of lines of generated C; later builds reuse the compiled objects), cancellable
 at any time (the whole tool tree is stopped and the attempt's files are removed; an earlier finished build is kept). The built program is then verified like an
-imported one (it must state that it was built for exactly your BIOS and disc). Progress shows the discovery round and its stages.
+imported one (it must state that it was built for exactly your BIOS and disc). A Sega CD build uses the launcher's one build flow: it joins the same queue as every
+other game (one build at a time), shows its stages as chips (generate, compile, link, discovery pass, confirm, viewer) with a live log, **Cancel build** (or
+**Unqueue**) sits where a native build's does, and a previous successful program is kept when a build fails or is cancelled (the new program is bound to the game only after it is verified against your BIOS and disc).
 
 ### Build modes
 

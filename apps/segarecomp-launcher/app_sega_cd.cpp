@@ -20,11 +20,16 @@ namespace {
 
 fs::path from_u8(const std::string &text) { return fs::path(std::u8string(reinterpret_cast<const char8_t *>(text.c_str()))); }
 
-std::string short_digest(const std::string &digest) { return digest.size() >= 16 ? digest.substr(0, 16) + "..." : digest; }
-
-std::string file_name_of(const std::string &path) { return path.empty() ? std::string("not chosen") : u8s(from_u8(path).filename()); }
-
 long long unix_now() { return static_cast<long long>(std::time(nullptr)); }
+
+// The refusals that mean the BIOS or the disc itself is not usable (a build cannot start); every other refusal is about the program, which a build replaces.
+bool inputs_unusable(scd::Refusal refusal) {
+  switch (refusal) {
+    case scd::Refusal::inputs_missing: case scd::Refusal::bios_missing: case scd::Refusal::bios_unreadable: case scd::Refusal::bios_too_large: case scd::Refusal::bios_changed:
+    case scd::Refusal::cue_missing: case scd::Refusal::cue_changed: return true;
+    default: return false;
+  }
+}
 
 }  // namespace
 
@@ -92,12 +97,10 @@ void App::scd_start_import(const std::string &target_id, const fs::path &bios, c
 
 bool App::scd_can_build(const LibraryEntry &entry, const StatusInfo &info) const {
   if (!info.sega_cd || !layout_.scd_build_problem.empty() || !layout_.problem.empty()) return false;
-  if (scd_build_ || game_ || scd_import_job_.valid() || scd_launch_job_.valid() || maintenance_running_) return false;
-  switch (info.scd.refusal) {   // the inputs must be in place; a program problem (missing, mismatched, stale) is what a build fixes
-    case scd::Refusal::inputs_missing: case scd::Refusal::bios_missing: case scd::Refusal::bios_unreadable: case scd::Refusal::bios_too_large: case scd::Refusal::bios_changed:
-    case scd::Refusal::cue_missing: case scd::Refusal::cue_changed: return false;
-    default: break;
-  }
+  // SEG-109-T003: like a native game, Build is offered while another build runs or a check/cleanup is busy (the request joins the FIFO); only this game's own
+  // running/queued build and a running or starting game refuse it.
+  if (is_building(entry.id()) || is_queued(entry.id()) || game_ || scd_launch_job_.valid()) return false;
+  if (inputs_unusable(info.scd.refusal)) return false;   // the inputs must be in place; a program problem (missing, mismatched, stale) is what a build fixes
   return !entry.sega_cd.bios_path.empty() && !entry.sega_cd.cue_path.empty();
 }
 
@@ -111,8 +114,12 @@ void App::scd_start_build(const std::string &id) {
     return;
   }
   if (scd_build_ || game_ || scd_import_job_.valid() || scd_launch_job_.valid()) { toast("Wait for the running game, build or check to finish.", true); return; }
+  scd_build_key_ = "scd-" + entry->sha256.substr(0, 16);
+  if (!busy_.try_begin_build(scd_build_key_)) { scd_build_key_.clear(); toast("Cleanup is running; try again in a moment.", true); return; }
   const scd::Status quick = scd::quick_status(entry->sega_cd);
-  if (!quick.bios_ok || quick.refusal == scd::Refusal::cue_missing || quick.refusal == scd::Refusal::cue_changed || quick.refusal == scd::Refusal::inputs_missing) {
+  if (inputs_unusable(quick.refusal)) {
+    busy_.end_build(scd_build_key_);
+    scd_build_key_.clear();
     show_message("The BIOS or the disc is not available", {scd::message(quick.refusal, quick.detail), "Locate the file first; the build reads both."});
     trace(std::string("build=refused reason=") + scd::code(quick.refusal) + " platform=sega-cd");
     return;
@@ -137,13 +144,6 @@ void App::scd_start_build(const std::string &id) {
   trace(std::string("build=started platform=sega-cd mode=") + scd_build_mode_code(request_mode));
 }
 
-void App::scd_cancel_build() {
-  if (!scd_build_ || scd_build_->cancel_requested()) return;
-  trace("build=cancel_requested platform=sega-cd");
-  if (scd_build_->request_cancel()) toast("Stopping the build...");
-  else toast("The build has just finished; it was not cancelled.");
-}
-
 void App::scd_finish_build() {
   scd_build_->wait();
   const BuildOutcome outcome = scd_build_->outcome();
@@ -153,22 +153,29 @@ void App::scd_finish_build() {
   const ScdFileFirstReport inventory = scd_build_->file_first_report();
   const fs::path program = scd_build_->program(), out_dir = scd_build_->out_dir();
   const std::string id = scd_build_id_;
+  busy_.end_build(scd_build_key_);
   scd_build_.reset();
   scd_build_id_.clear();
+  scd_build_key_.clear();
   if (outcome == BuildOutcome::cancelled) {
+    last_build_outcome_ = "cancelled";
     trace("build=cancelled platform=sega-cd");
     toast("Build cancelled.");
     request_status_refresh();
+    request_scan();
     return;
   }
   if (outcome != BuildOutcome::succeeded) {
+    last_build_outcome_ = "failed";
     failures_[id] = message;
     diagnostics_[id] = read_tail(fs::path(out_dir.parent_path() / (out_dir.filename().string() + ".failed")) / "build.log", 24000);
     trace("build=failed platform=sega-cd message=" + message);
     toast("Build failed: " + message, true);
     request_status_refresh();
+    request_scan();
     return;
   }
+  last_build_outcome_ = "ok";
   scd_build_notes_[id] = summary;
   scd_built_[id] = ScdBuiltInfo{built_experimental, built_mode, built_mode == "file_first" ? (inventory.complete ? "complete" : "incomplete") : ""};
   trace(std::string("build=ok platform=sega-cd policy=") + (built_experimental ? "experimental_optimized" : "compatibility") + " mode=" + built_mode +
@@ -201,6 +208,7 @@ void App::scd_poll() {
           scd_form_ = ScdForm{};
           if (!result.program_attached && result.refusal != scd::Refusal::none)
             show_message("The game was added, but the program was not accepted", {scd::message(result.refusal, result.detail), "The game stays in the library without a program."});
+          if (added.added) queue_auto_covers({id});   // like a newly added ROM: an automatic, silent Libretro lookup (never in automation)
           open_details(id);
           toast(result.program_attached ? "Added. Verified prebuilt program available." : "Added. Import a verified program to play it.");
         }
@@ -215,6 +223,13 @@ void App::scd_poll() {
         entry->sega_cd.experimental_m3 = keep_choice;
         entry->sega_cd.file_first = keep_file_first;
         const auto built = scd_built_.find(target);   // a program the launcher just built carries the product's structured result
+        const bool just_built = built != scd_built_.end();
+        if (just_built) {
+          entry->last_built_at = now_seconds();   // the same "Last recompiled" fact a native build records
+          entry->archived = false;
+          // The keep-last-N / soft-limit policies run as after a native build (they only ever remove generated build folders, never a save; see storage.hpp).
+          if (settings_.cleanup.mode == "keep_last_n" || settings_.cleanup.mode == "soft_limit") policy_eval_pending_ = true;
+        }
         if (built != scd_built_.end()) {
           entry->sega_cd.program_experimental = built->second.experimental;
           entry->sega_cd.program_built_mode = built->second.mode;
@@ -231,10 +246,12 @@ void App::scd_poll() {
         }
         save_catalog();
         request_status_refresh();
-        toast("Program verified and bound to this game.");
+        request_scan();
+        toast(just_built ? "Build finished: " + entry->title() + "." : "Program verified and bound to this game.");
         trace("scd=program_attached");
       } else {
         scd_built_.erase(target);   // the just-built program was refused: its build result describes nothing
+        request_scan();
         if (scd_import_reverify_) {  // "Verify again" found a difference: the earlier verification no longer stands
           entry->sega_cd.disc_verified = false;
           save_catalog();
@@ -266,7 +283,7 @@ void App::scd_poll() {
 void App::scd_play(const std::string &id, int mode, const fs::path &script) {
   LibraryEntry *entry = catalog_.find_id(id);
   if (entry == nullptr || entry->platform_id != "sega-cd") return;
-  if (game_ || scd_launch_job_.valid() || scd_import_job_.valid() || scd_build_) { toast("Wait for the running game, build or check to finish.", true); return; }
+  if (game_ || scd_launch_job_.valid() || scd_import_job_.valid() || (scd_build_ && scd_build_id_ == id)) { toast("Wait for the running game, build or check to finish.", true); return; }
   {
     std::error_code ec;
     fs::create_directories(scd_dir(*entry) / "recordings", ec);
@@ -368,6 +385,7 @@ void App::scd_finish_run() {
     diagnostics_[id] = read_tail(game_dir_ / "run.log", 24000);
   }
   request_status_refresh();
+  request_scan();   // the run may have stored a save: the storage measurements follow
 }
 
 // ---------------------------------------------------------------- dialogs
@@ -410,7 +428,7 @@ void App::draw_scd_import(float w) {
             "files on this computer (experimental; code the disc does not contain verbatim is never guessed), or import a verified prebuilt program. A program is checked "
             "against exactly these two files.");
   ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-  const bool busy = scd_import_job_.valid();
+  const bool busy = scd_import_job_.valid() || scd_build_ != nullptr;
   const auto row = [&](const char *id, const char *label, const std::string &path, const char *purpose, const char *hint) {
     const ImVec2 a = ImGui::GetCursorScreenPos();
     const float rh = ctx_.u(40.0F), bw = ctx_.u(120.0F);
@@ -448,197 +466,6 @@ void App::draw_scd_import(float w) {
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), scd_form_.error ? col::err : col::ok, w, scd_form_.message);
   }
   ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
-}
-
-// ---------------------------------------------------------------- the Details panel
-
-float App::draw_scd_details(LibraryEntry &entry, const StatusInfo &info, float w) {
-  ImDrawList *dl = ImGui::GetWindowDrawList();
-  const scd::EntryRecord &r = entry.sega_cd;
-  const ImVec2 a = ImGui::GetCursorScreenPos();
-  const float pad = ctx_.u(16.0F), inner = w - 2 * pad, lw = std::min(ctx_.u(110.0F), inner * 0.3F), vw = inner - lw;
-  dl->ChannelsSplit(2);
-  dl->ChannelsSetCurrent(1);
-  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, a.y + ctx_.u(14.0F)));
-  heading(ctx_, "SEGA CD");
-  // ---- state ----
-  {
-    const ImU32 color = info.scd.state == scd::State::ready ? col::ok : (info.scd.state == scd::State::mismatched ? col::err : col::warn);
-    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-    paragraph(ctx_, ctx_.bold, ctx_.u(13.0F), color, inner, scd_label(info));
-    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y + ctx_.u(2.0F)));
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, inner, scd_hint(info));
-    ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
-  }
-  const auto fact = [&](const char *label, const std::string &value, ImU32 color = col::text) {
-    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-    label_value(ctx_, lw, vw, label, value, color);
-  };
-  fact("BIOS", file_name_of(r.bios_path) + "  (" + format_bytes(r.bios_size) + ", SHA-256 " + short_digest(r.bios_sha256) + ")", info.scd.refusal == scd::Refusal::bios_missing || info.scd.refusal == scd::Refusal::bios_changed ? col::warn : col::text);
-  fact("Disc (CUE)", file_name_of(r.cue_path) + "  (SHA-256 " + short_digest(r.cue_sha256) + ")");
-  if (r.disc_files.empty()) fact("Disc files", "Known once a program is imported (the program names the track files it was built from).", col::text2);
-  else fact("Disc files", std::to_string(r.disc_files.size()) + " track file(s) beside the CUE; " + (r.disc_verified ? "sizes and SHA-256 verified when the program was imported" : "not verified"), r.disc_verified ? col::text : col::warn);
-  if (r.program.path.empty()) fact("Program", "none imported", col::text2);
-  else {
-    fact("Program", file_name_of(r.program.path) + "  (" + format_bytes(r.program.size) + ", SHA-256 " + short_digest(r.program.sha256) + ")");
-    fact("Program kind", std::string(r.program.viewer ? "Viewer build (playable)" : "Headless-only build (not playable in the viewer)") + ", runtime contract " + std::to_string(r.program.runtime_abi),
-         r.program.viewer && r.program.runtime_abi == scd::supported_runtime_abi ? col::text : col::warn);
-    fact("Verified", fmt_date(r.program.verified_at) + "  -  the program's own statement matches your BIOS and disc; it is not signed or compiled by Segarecomp", col::text2);
-  }
-  fact("Audio", "CD music (CD-DA) plays through the viewer's volume and mute. Sound effects (PCM), FM and PSG sound are not available.", col::text2);
-  // ---- actions ----
-  ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-  const bool busy = scd_import_job_.valid() || scd_launch_job_.valid() || game_ != nullptr;
-  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-  if (button(ctx_, "scd_attach", r.program.path.empty() ? "Import program..." : "Replace program...", ImVec2(ctx_.u(180.0F), ctx_.u(32.0F)), Style::secondary, !busy, ctx_.icon("import"))) scd_browse("scd_attach", entry.id());
-  ImGui::SameLine(0.0F, ctx_.u(8.0F));
-  if (button(ctx_, "scd_verify", "Verify again", ImVec2(ctx_.u(140.0F), ctx_.u(32.0F)), Style::secondary, !busy && !r.program.path.empty(), ctx_.icon("check"))) scd_start_import(entry.id(), {}, {}, {});
-  if (ImGui::IsItemHovered()) tooltip(ctx_, "Hashes the program and every disc file again (takes a few seconds for a full disc).");
-  if (info.scd.refusal == scd::Refusal::bios_missing) { ImGui::SameLine(0.0F, ctx_.u(8.0F)); if (button(ctx_, "scd_locate_bios", "Locate BIOS...", ImVec2(ctx_.u(150.0F), ctx_.u(32.0F)), Style::secondary)) scd_browse("scd_locate_bios", entry.id()); }
-  if (info.scd.refusal == scd::Refusal::cue_missing) { ImGui::SameLine(0.0F, ctx_.u(8.0F)); if (button(ctx_, "scd_locate_cue", "Locate disc...", ImVec2(ctx_.u(150.0F), ctx_.u(32.0F)), Style::secondary)) scd_browse("scd_locate_cue", entry.id()); }
-  if (scd_import_job_.valid() && scd_import_target_ == entry.id()) {
-    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y + ctx_.u(4.0F)));
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    spinner(ctx_, dl, ImVec2(p.x + ctx_.u(8.0F), p.y + ctx_.u(9.0F)), ctx_.u(7.0F), col::info);
-    draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text, ImVec2(p.x + ctx_.u(26.0F), p.y), ("Verifying: " + format_bytes(scd_done_.load()) + (scd_total_ > 0 ? " of " + format_bytes(scd_total_) : std::string())).c_str());
-    ImGui::Dummy(ImVec2(w, ctx_.u(22.0F)));
-  }
-  // ---- recordings ----
-  ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
-  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-  heading(ctx_, "INPUT RECORDING");
-  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-  checkbox(ctx_, "scd_record", "Record this session's controller input when I press Play", &scd_record_);
-  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-  paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner,
-            "A recording is a small text script of button presses at exact frame boundaries; replaying it reproduces the session exactly. It holds no game data. "
-            "The viewer's Pause menu is Esc; F6 holds the machine and F7 steps one frame while it is held.");
-  const auto recordings = scd_recordings(entry);
-  if (recordings.empty()) {
-    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, inner, "No recordings yet.");
-  }
-  for (std::size_t i = 0; i < recordings.size(); ++i) {
-    ImGui::PushID(static_cast<int>(i));
-    std::error_code ec;
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, p.y));
-    const std::string name = u8s(recordings[i].filename());
-    draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::text, ImVec2(a.x + pad, p.y + ctx_.u(8.0F)), (name + "  (" + format_bytes(fs::file_size(recordings[i], ec)) + ")").c_str());
-    ImGui::SetCursorScreenPos(ImVec2(a.x + w - pad - ctx_.u(250.0F), p.y));
-    if (button(ctx_, "replay", "Replay", ImVec2(ctx_.u(120.0F), ctx_.u(28.0F)), Style::secondary, !busy && info.scd.state == scd::State::ready)) scd_play(entry.id(), 1, recordings[i]);
-    ImGui::SameLine(0.0F, ctx_.u(6.0F));
-    if (button(ctx_, "replay_fast", "No window", ImVec2(ctx_.u(120.0F), ctx_.u(28.0F)), Style::ghost, !busy && info.scd.state == scd::State::ready)) scd_play(entry.id(), 2, recordings[i]);
-    if (ImGui::IsItemHovered()) tooltip(ctx_, "Replays the recording as fast as possible without a window and reports the result.");
-    ImGui::PopID();
-  }
-  // ---- last run, build note ----
-  if (const auto last = scd_last_outcome_.find(entry.id()); last != scd_last_outcome_.end()) {
-    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-    heading(ctx_, "LAST RUN");
-    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.5F), col::text, inner, last->second);
-  } else if (!entry.sega_cd.last_stop.empty()) {
-    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, inner, "Last run: typed execution stop " + entry.sega_cd.last_stop + ".");
-  }
-  ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-  heading(ctx_, "BUILDING");
-  const auto line = [&](ImU32 color, const std::string &text, float size = 12.0F) {
-    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-    paragraph(ctx_, ctx_.regular, ctx_.u(size), color, inner, text);
-  };
-  // ---- SEG-097-T003 (ADR 0208) / SEG-103-T007: the build mode. Compatibility stays the default of an existing game; File-first (structural) is the recommended
-  // choice for broader coverage; Optimized is EXPERIMENTAL. Selected (the next Build) and built (what the attached program is) are different facts. ----
-  {
-    const bool building_this = scd_build_ && scd_build_id_ == entry.id();
-    const std::string selected = scd::selected_build_mode(entry.sega_cd), built = entry.sega_cd.program_built_mode;
-    const bool has_program = !entry.sega_cd.program.path.empty();
-    int sel = selected == "file_first" ? 1 : selected == "optimized" ? 2 : 0;
-    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-    ImGui::BeginDisabled(building_this || busy);
-    const bool narrow = inner < ctx_.u(700.0F);   // the window's minimum width: shorter labels so no tile title or recommendation is cut off
-    if (option_tiles(ctx_, "scd_policy",
-                     narrow ? std::vector<std::string>{"Compatibility", "File-first", "Optimized (exp.)"} : std::vector<std::string>{"Compatibility", "File-first (structural)", "Optimized (experimental)"},
-                     narrow ? std::vector<std::string>{"Run-reached code only.", "Recommended. Adds disc files.", "Model-picked; may omit code."}
-                            : std::vector<std::string>{"Compiles what the build's run reaches. May miss later play.", "Recommended. Also precompiles eligible disc files.",
-                                                       "A model picks the code; may omit code the game needs."},
-                     &sel, inner, ctx_.u(88.0F), {true, true, true})) {
-      scd::select_build_mode(entry.sega_cd, sel == 1 ? "file_first" : sel == 2 ? "optimized" : "compatibility");
-      save_catalog();
-      trace(std::string("scd=policy_selected mode=") + scd::selected_build_mode(entry.sega_cd) + (sel == 2 ? " policy=experimental_optimized" : " policy=other"));
-    }
-    ImGui::EndDisabled();
-    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-    if (selected == "optimized")
-      line(col::warn, "Experimental: the program built this way can stop at an uncompiled entry, and the model has no proven complete coverage on Sega CD games. It applies at the next Build; Compatibility stays the safe choice.", 11.5F);
-    else if (selected == "file_first")
-      line(col::text2, "File-first compiles the structurally supported instructions of eligible disc files before the game runs; the game's own loads are still verified byte for byte before any of that code runs. "
-                       "Files that are oversize, duplicated or without code structure are not covered, and transformed or generated code is never guessed. It applies at the next Build.", 11.5F);
-    if (has_program) {
-      if (built.empty()) line(col::text2, "How the current program was built is not recorded (it was imported or built by an earlier release).", 11.5F);
-      else if (built == "compatibility") line(col::text2, "The current program was built with Compatibility.", 11.5F);
-      else if (built == "optimized") line(col::text2, "The current program was built with the experimental Optimized policy.", 11.5F);
-      else line(col::text2, std::string("The current program was built with File-first (structural). The disc inventory is ") +
-                              (entry.sega_cd.program_file_first_inventory == "complete" ? "complete." : "incomplete (a structurally filtered subset): code outside it still stops at an uncompiled entry."), 11.5F);
-      if ((!built.empty() && built != selected) || (built.empty() && selected != "compatibility"))
-        line(col::info, "The selected mode differs from the one the current program was built with: Build to apply it. Changing the selection does not change the current program.", 11.5F);
-      if (scd::is_uncompiled_entry_stop(entry.sega_cd.last_stop)) {
-        if (built == "file_first") {
-          line(col::warn, "The last run ended at an uncompiled entry (" + entry.sega_cd.last_stop + ") even with File-first: that code is probably not in an eligible disc file "
-                          "(oversize, duplicated, without structure, transformed or generated at run time), so rebuilding will not change it.", 12.0F);
-        } else if (built == "optimized") {
-          line(col::warn, "The last run ended at an uncompiled entry (" + entry.sega_cd.last_stop + "): the experimental build omitted code the game needed. A full Compatibility rebuild starts the game again from reset.", 12.0F);
-          ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-          if (button(ctx_, "scd_rebuild_compat", "Rebuild with Compatibility", ImVec2(ctx_.u(240.0F), ctx_.u(32.0F)), Style::primary, scd_can_build(entry, info), ctx_.icon("reset"))) {
-            scd::select_build_mode(entry.sega_cd, "compatibility");
-            save_catalog();
-            trace("scd=compat_rebuild_after_uncompiled_entry");
-            notices_.erase(entry.id());
-            scd_start_build(entry.id());
-          }
-          ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-        } else {
-          line(col::warn, "The last run ended at an uncompiled entry (" + entry.sega_cd.last_stop + "): the build only compiled the code its own run reached. Rebuilding with File-first "
-                          "(structural) can precompile eligible disc files; it does not fix transformed or unavailable code.", 12.0F);
-          ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y));
-          if (button(ctx_, "scd_rebuild_file_first", "Rebuild with File-first", ImVec2(ctx_.u(240.0F), ctx_.u(32.0F)), Style::primary, scd_can_build(entry, info), ctx_.icon("reset"))) {
-            scd::select_build_mode(entry.sega_cd, "file_first");
-            save_catalog();
-            trace("scd=file_first_rebuild_after_uncompiled_entry");
-            notices_.erase(entry.id());
-            scd_start_build(entry.id());
-          }
-          ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-        }
-      }
-    }
-  }
-  if (scd_build_ && scd_build_id_ == entry.id()) {
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    spinner(ctx_, dl, ImVec2(a.x + pad + ctx_.u(8.0F), p.y + ctx_.u(9.0F)), ctx_.u(7.0F), col::info);
-    draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text, ImVec2(a.x + pad + ctx_.u(26.0F), p.y), (scd_build_->message().empty() ? std::string("Starting the build...") : scd_build_->message()).c_str());
-    ImGui::Dummy(ImVec2(w, ctx_.u(24.0F)));
-    for (int i = 0; i < ScdBuildJob::stage_count; ++i) {
-      const StageState st = scd_build_->stage(i);
-      line(st == StageState::done ? col::ok : (st == StageState::running ? col::text : col::dim), std::string(st == StageState::done ? "[done] " : (st == StageState::running ? "[....] " : "[    ] ")) + ScdBuildJob::stage_label(i));
-    }
-    line(col::text2, "The build runs the game from reset to find which code the disc loads and executes, compiles it (File-first also compiles eligible disc files) and checks its own result. It can be cancelled at any time.", 11.5F);
-  } else {
-    line(col::text2, !layout_.scd_build_problem.empty() ? scd::message(scd::Refusal::unsupported_build)
-                     : "Build compiles a program from your BIOS and disc on this computer; nothing is downloaded and no game data leaves it. The first build takes several minutes. "
-                       "Code the disc does not contain verbatim (generated or decompressed at run time) is never guessed: the program then stops with a typed stop and the build says so.");
-    if (const auto note = scd_build_notes_.find(entry.id()); note != scd_build_notes_.end()) line(col::text, "Last build: " + note->second);
-  }
-  const float h = ImGui::GetCursorScreenPos().y - a.y + ctx_.u(14.0F);
-  dl->ChannelsSetCurrent(0);
-  card(ctx_, dl, a, ImVec2(a.x + w, a.y + h), false, false, rgba(8, 19, 46, 240));
-  dl->ChannelsMerge();
-  ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + h));
-  ImGui::Dummy(ImVec2(w, 0.0F));
-  return h;
 }
 
 }  // namespace launcher
