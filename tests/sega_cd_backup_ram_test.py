@@ -87,6 +87,30 @@ def main():
             code, report = common.run(exe, disc, 6000000, "--backup-ram", str(tmp / path))
             check(code == 22 and report == {"result": "backup_ram_refused", "error": error},
                   "refused before any guest instruction: %s -> exit %d %s" % (label, code, report))
+
+        # SEG-108 (ADR 0252): the opt-in export of the final image (`--backup-ram-out`), from a program whose sub CPU writes backup RAM through the real bus
+        disc2, exe2, _, _ = builder.program("brwrite", "backup_ram", "cooked", "--backup-phase", "write")
+        sys.path.insert(0, str(ROOT / "tools"))
+        import sega_cd_fixture_disc as fx  # noqa: E402
+        expected = bytearray(data)
+        for _size, address, value in fx.BACKUP_WRITES["write"]:
+            expected[(((address & ~1) - 0xFE0000) >> 1) & 0x1FFF] = value & 0xFF  # odd lane, 8192 cells, mirrored every $4000 of address
+        out = tmp / "out.bin"
+        code_p, plain2 = common.run(exe2, disc2, 6000000, "--backup-ram", str(image))
+        code_o, with_out = common.run(exe2, disc2, 6000000, "--backup-ram", str(image), "--backup-ram-out", str(out))
+        check(code_p == 0 and code_o == 0, "export: the writing program runs")
+        check(out.read_bytes() == bytes(expected) and out.stat().st_size == 8192, "export: exactly the 8 KiB machine bytes, the guest's writes included, no header")
+        check(image.read_bytes() == data, "export: the input image is never modified")
+        check(with_out == plain2 and plain2["backup_ram"]["writes"] > 0, "export: the report is identical with and without --backup-ram-out (writes %s)" % plain2["backup_ram"]["writes"])
+        out.unlink()
+        common.run(exe2, disc2, 6000000, "--backup-ram", str(image))
+        check(not out.exists(), "export: nothing is written unless requested")
+        code, report = common.run(exe2, disc2, 6000000, "--backup-ram-out", str(out))
+        check(code == 2 and not out.exists(), "export: refused without a valid installed image (usage status %d)" % code)
+        code, report = common.run(exe2, disc2, 6000000, "--backup-ram", str(image), "--backup-ram-out", str(tmp))
+        check(code == 28 and image.read_bytes() == data, "export: an unwritable destination is exit 28 and the input is untouched")
+        code, report = common.run(exe2, disc2, 20, "--backup-ram", str(image), "--backup-ram-out", str(out))
+        check(code == 11 and out.exists() and out.stat().st_size == 8192, "export: also written when the run is cut short (the launcher decides what to keep)")
     print("%d failures" % len(failures))
     return 1 if failures else 0
 

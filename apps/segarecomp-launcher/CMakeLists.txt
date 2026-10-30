@@ -175,6 +175,18 @@ if(BUILD_TESTING)
   set_property(TEST launcher_sega_cd_test PROPERTY TIMEOUT 300)
 endif()
 
+# SEG-108 (ADR 0252): the save functions over a command line, so the generated-native persistence test drives the launcher's own code.
+add_executable(scd_save_tool scd_save_tool.cpp)
+target_link_libraries(scd_save_tool PRIVATE segarecomp_launcher_core)
+target_compile_features(scd_save_tool PRIVATE cxx_std_20)
+segarecomp_enable_warnings(scd_save_tool)
+if(BUILD_TESTING)
+  add_test(NAME launcher_sega_cd_save_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_sega_cd_save_test.py
+    $<TARGET_FILE:scd_save_tool> $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+  set_property(TEST launcher_sega_cd_save_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_sega_cd_save_test PROPERTY TIMEOUT 900)
+endif()
+
 if(BUILD_TESTING AND SEGARECOMP_ENABLE_SDL3_VIEWER)
   # The whole flow without a window: launcher -> verified program (the real viewer variant of a project-authored fixture) -> SDL3 viewer under the dummy
   # drivers -> scripted keys -> close / typed stop, plus the typed refusals. Skips itself without SDL3 or off Linux.

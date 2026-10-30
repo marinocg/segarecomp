@@ -274,8 +274,9 @@ void App::scd_play(const std::string &id, int mode, const fs::path &script) {
   }
   scd::RunOptions options;
   options.report = scd_dir(*entry) / "last-report.json";
-  options.backup_ram = scd_dir(*entry) / "backup-ram.bin";
-  if (!scd::ensure_backup_ram(options.backup_ram)) { show_message("The game could not be prepared", {"The folder for this game's run files cannot be written."}); return; }
+  // Normal play loads and persists the player's save; a replay or a recording starts from a defined image and never touches it (ADR 0252).
+  const scd::BackupStatus save = scd::prepare_backup_ram(options, scd_dir(*entry), mode == 0 && !scd_record_);
+  if (save != scd::BackupStatus::ok && save != scd::BackupStatus::created) { show_message("The game could not be prepared", {scd::describe_backup(save)}); return; }
   if (mode == 0 && scd_record_) options.record_to = scd_dir(*entry) / "recordings" / ("session-" + std::to_string(unix_now()) + ".txt");
   if (mode != 0) options.replay_from = script;
   if (mode == 2) options.until_tick = scd::replay_end_tick(script);  // nobody closes a window that is not there: the replay ends shortly after its last event
@@ -339,6 +340,13 @@ void App::scd_finish_run() {
   game_is_scd_ = false;
   const scd::Outcome outcome = scd::read_outcome(options.report, exit_code);
   std::string text = scd::describe_outcome(outcome);
+  std::string save_problem;
+  switch (scd::finish_backup_ram(options, exit_code)) {
+    case scd::SaveOutcome::stored: text += " Save data stored."; break;
+    case scd::SaveOutcome::kept_run_failed: text += " The run did not end cleanly, so its save data was not stored; the previous save was kept."; break;
+    case scd::SaveOutcome::kept_commit_failed: save_problem = "The game's save data could not be stored; the previous save was kept."; break;
+    case scd::SaveOutcome::not_requested: break;
+  }
   if (outcome.report_read && !options.replay_from.empty()) text += " Replay: " + std::to_string(outcome.frames) + " frames, " + std::to_string(outcome.input_events) + " input events.";
   trace("scd=run_exited code=" + std::to_string(exit_code) + " stop=" + (outcome.stop_class.empty() ? std::string("none") : outcome.stop_class) + " live=" + (outcome.live_outcome.empty() ? std::string("none") : outcome.live_outcome));
   LibraryEntry *entry = catalog_.find_id(id);
@@ -351,6 +359,7 @@ void App::scd_finish_run() {
       if (fs::is_regular_file(options.record_to, ec)) toast("Input recording saved (" + std::to_string(outcome.input_events) + " events).");
     }
   }
+  if (!save_problem.empty()) { text += " " + save_problem; failures_[id] = save_problem; toast(save_problem, true); }
   scd_last_outcome_[id] = text;
   // A clean close and a typed execution stop are shown as the end of the run; a refusal or an unexpected status is a failure with its log.
   const bool typed_stop = exit_code == 10;
