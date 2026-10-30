@@ -300,9 +300,10 @@ static void scd_write_audio_report(FILE *out, const ScdMachine *m) {
   const ScdMix *const x = &m->mix;
   genesis_sha256_final(&sha, digest);
   fprintf(out, ",\"audio\":{\"sample_rate\":44100,\"frames\":%llu,\"pcm_events\":%llu,\"pcm_frames\":%llu,\"pcm_peak\":%u,\"cdda_queued\":%llu,"
-               "\"cdda_mixed\":%llu,\"cdda_dropped\":%llu,\"cdda_gaps\":%llu,\"saturated\":%llu,\"sink_refused\":%llu,\"io_errors\":%llu,\"pcm_sha256\":\"",
+               "\"cdda_mixed\":%llu,\"cdda_dropped\":%llu,\"cdda_gaps\":%llu,\"cdda_readahead\":%llu,\"cdda_skipped\":%llu,\"saturated\":%llu,\"sink_refused\":%llu,\"io_errors\":%llu,\"pcm_sha256\":\"",
           (unsigned long long)x->frames, (unsigned long long)x->pcm_events, (unsigned long long)x->pcm_frames, x->peak, (unsigned long long)x->cdda_frames,
-          (unsigned long long)x->cdda_mixed, (unsigned long long)x->cdda_dropped, (unsigned long long)x->cdda_gaps, (unsigned long long)x->saturated,
+          (unsigned long long)x->cdda_mixed, (unsigned long long)x->cdda_dropped, (unsigned long long)x->cdda_gaps, (unsigned long long)x->cdda_readahead,
+          (unsigned long long)x->cdda_skipped, (unsigned long long)x->saturated,
           (unsigned long long)x->sink_refused, (unsigned long long)g_mix_tap.io_errors);
   for (i = 0; i < 32U; ++i) fprintf(out, "%02x", digest[i]);
   fprintf(out, "\"}");

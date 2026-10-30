@@ -44,9 +44,11 @@ typedef struct ScdLiveHost {
   int (*pace)(void *ctx, uint64_t frame_ticks, uint64_t ticks_per_second);
   /* Once, when the loop ends for any reason (after the last frame): a host shows why the machine stopped. Optional. */
   void (*finished)(void *ctx, const struct ScdLiveSummary *summary, const ScdMachine *machine);
-  /* SEG-104 (ADR 0244): optional CD-DA output. One drive sector's frames (588 interleaved L,R S16 frames, valid only during the call) at the
-   * moment the guest's drive plays it; the host queues them for its device. A one-way sink: nothing it returns or does reaches the machine
-   * (a nonzero return is only counted). NULL = the viewer is silent and no CD-DA is read. */
+  /* SEG-104 (ADR 0244) / SEG-107 (ADR 0251): optional audio output of the 44.1 kHz stereo S16 timeline (interleaved L,R frames, valid only during
+   * the call). By default the host receives the mixed RF5C164 PCM + CD-DA timeline in chunks of up to 1,024 frames, delivered as guest time passes
+   * (the whole stream, silence included); with `--pcm-audio 0` it receives one drive sector (588 frames) of CD-DA at the moment the guest's drive plays
+   * it, as before. A one-way sink: nothing it returns or does reaches the machine (a nonzero return is only counted). NULL = the viewer is silent
+   * and no CD-DA is read. */
   int (*audio)(void *ctx, const int16_t *frames, uint32_t count);
 } ScdLiveHost;
 

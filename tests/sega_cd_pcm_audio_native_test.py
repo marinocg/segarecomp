@@ -7,8 +7,8 @@ closed-form audio. The expectation is rebuilt from external evidence only, with 
 
   * the PCM stream from the runtime's own register-access trace (`--pcm-trace`: every chip write with its machine tick) replayed through a Python model
     of the chip (published GPGX/MAME behavior) on the 44.1 kHz guest-time timeline (frame n at floor(n x ticks_per_second / 44100), zero-order hold);
-  * the CD-DA stream from the legacy `--cdda-pcm` artifact and the run starts of `--cdda-log`: a run that starts on an empty queue is placed one sector
-    period after its start tick, contiguous afterwards;
+  * the CD-DA stream from the run log (`--cdda-log`) and the fixture's closed-form sectors: a run starts at its first delivery and then advances one
+    frame per output frame (the drive tick is slower than 588 frames, so later sectors come from the disc ahead of it), ending with the drive's stop;
   * mixed = saturating sum. The runtime's `--audio-pcm` artifact must equal it frame for frame.
 
 Also: the legacy CD-DA digest and artifact are unchanged by the mix; the mix is deterministic under every scheduler partition; the machine report apart
@@ -30,15 +30,12 @@ sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "tools"))
 import sega_cd_bios_build as build_driver  # noqa: E402
 import sega_cd_cdda_fixture as fx  # noqa: E402
+from sega_cd_audio_expect import cdda_placement, pcm_reference  # noqa: E402
 
 DRIVER = ROOT / "tools" / "sega_cd_bios_build.py"
 FIXTURE = ROOT / "tools" / "sega_cd_cdda_fixture.py"
 BUDGET = 200_000_000
 FRAMES = 400
-TPS = 26846587500000          # machine ticks per second
-SUB_CYCLE = 2148241           # ticks per sub cycle, BIOS-image profile
-CDD_TICK = 357954500000       # one 75 Hz drive tick = one CD-DA sector period
-PERIOD = 384 * SUB_CYCLE      # one RF5C164 sample
 failures = []
 
 
@@ -53,156 +50,8 @@ def run(exe, args, env=None, timeout=900):
     return out.returncode, out
 
 
-def frame_time(n):
-    return (n // 44100) * TPS + ((n % 44100) * TPS) // 44100
-
-
 def clamp16(v):
     return max(-32768, min(32767, v))
-
-
-class Chip:
-    """The published RF5C164 behavior, written independently of the runtime."""
-
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.ram = bytearray(65536)
-        self.env = [0] * 8
-        self.pan = [0xFF] * 8
-        self.st = [0] * 8
-        self.fd = [0] * 8
-        self.ls = [0] * 8
-        self.addr = [0] * 8
-        self.running = [False] * 8
-        self.idx = self.bank = self.enabled = 0
-
-    def write(self, reg, v):
-        c = self.idx
-        if reg >= 0x1000:
-            self.ram[(self.bank << 12) | (reg & 0xFFF)] = v
-        elif reg == 0:
-            self.env[c] = v
-        elif reg == 1:
-            self.pan[c] = v
-        elif reg == 2:
-            self.fd[c] = (self.fd[c] & 0xFF00) | v
-        elif reg == 3:
-            self.fd[c] = (self.fd[c] & 0x00FF) | (v << 8)
-        elif reg == 4:
-            self.ls[c] = (self.ls[c] & 0xFF00) | v
-        elif reg == 5:
-            self.ls[c] = (self.ls[c] & 0x00FF) | (v << 8)
-        elif reg == 6:
-            self.st[c] = v
-            if not self.running[c]:
-                self.addr[c] = v << 19
-        elif reg == 7:
-            if v & 0x40:
-                self.idx = v & 7
-            else:
-                self.bank = v & 15
-            self.enabled = (v >> 7) & 1
-        elif reg == 8:
-            for k in range(8):
-                self.running[k] = not (v >> k) & 1
-                if not self.running[k]:
-                    self.addr[k] = self.st[k] << 19
-
-    def sample(self):
-        left = right = 0
-        if not self.enabled:
-            return 0, 0
-        for c in range(8):
-            if not self.running[c]:
-                continue
-            b = self.ram[(self.addr[c] >> 11) & 0xFFFF]
-            if b == 0xFF:
-                self.addr[c] = self.ls[c] << 11
-                b = self.ram[self.ls[c]]
-                if b == 0xFF:
-                    continue
-            else:
-                self.addr[c] = (self.addr[c] + self.fd[c]) & 0x7FFFFFF
-            mag = b & 0x7F
-            sign = 1 if b & 0x80 else -1
-            left += sign * ((mag * (self.pan[c] & 15) * self.env[c]) >> 5)
-            right += sign * ((mag * (self.pan[c] >> 4) * self.env[c]) >> 5)
-        return clamp16(left), clamp16(right)
-
-
-def pcm_reference(trace_text, frames):
-    """Per-frame (L, R) PCM samples for `frames` output frames from the runtime's access trace."""
-    ops = []
-    for line in trace_text.splitlines():
-        p = line.split()
-        if p and p[0] == "W":
-            ops.append((int(p[2]), 0, int(p[3], 16), int(p[4], 16)))
-        elif p and p[0] == "Z":
-            ops.append((int(p[2]), 1, 0, 0))
-    chip, origin, k, oi = Chip(), 0, 0, 0
-    samples = []
-    end = frame_time(frames)
-    while True:
-        e = origin + k * PERIOD
-        while oi < len(ops) and ops[oi][0] <= e:
-            t, kind, reg, v = ops[oi]
-            if kind:
-                chip.reset()
-                origin, k, e = t, 0, t
-            else:
-                chip.write(reg, v)
-            oi += 1
-        if e >= end:
-            break
-        samples.append((e, *chip.sample()))
-        k += 1
-    out, j = [], 0
-    for n in range(frames):
-        t = frame_time(n)
-        while j < len(samples) and samples[j][0] <= t:
-            j += 1
-        out.append((samples[j - 1][1], samples[j - 1][2]) if j else (0, 0))
-    return out
-
-
-def cdda_placement(log_text, cdda_bytes, frames):
-    """Per-frame CD-DA (L, R): each logged run (start tick) begins one sector period later on the timeline and continues contiguously."""
-    starts = [int(m.group(1)) for m in re.finditer(r"^(?:start|jump) frame=\d+ tick=(\d+)", log_text, re.M)]
-    runs_len = []
-    # run lengths from the logged lba ranges: start/jump open, stop closes with next_lba
-    cur = None
-    for line in log_text.splitlines():
-        m = re.match(r"(start|jump|track|stop) frame=\d+ tick=\d+ (?:lba=(-?\d+)|next_lba=(-?\d+))", line)
-        if not m:
-            continue
-        if m.group(1) in ("start", "jump"):
-            if cur is not None:
-                runs_len.append(cur[1] - cur[0])
-            cur = [int(m.group(2)), None]
-        elif m.group(1) == "stop":
-            cur[1] = int(m.group(3))
-            runs_len.append(cur[1] - cur[0])
-            cur = None
-    out = [(0, 0)] * frames
-    pos = 0
-    for tick, sectors in zip(starts, runs_len):
-        n0 = 0
-        lo, hi = 0, frames
-        while lo < hi:  # first n with T_n >= tick + one sector period
-            mid = (lo + hi) // 2
-            if frame_time(mid) >= tick + CDD_TICK:
-                hi = mid
-            else:
-                lo = mid + 1
-        n0 = lo
-        for f in range(sectors * 588):
-            if n0 + f < frames:
-                l, r = struct.unpack_from("<hh", cdda_bytes, 4 * (pos + f))
-                out[n0 + f] = (l, r)
-        pos += sectors * 588
-    return out
 
 
 def main():
@@ -231,8 +80,9 @@ def main():
         check(audio.get("frames") == n_frames and len(data) == 4 * n_frames and audio.get("sample_rate") == 44100, "the artifact holds exactly the reported frames")
         check(hashlib.sha256(data).hexdigest() == audio.get("pcm_sha256"), "the report digest is the digest of the artifact")
         check(audio.get("pcm_events", 0) > 1000 and audio.get("pcm_frames", 0) > 1000, "PCM was synthesized (events and audible frames)")
-        check(audio.get("cdda_mixed", 0) > 0 and audio.get("cdda_dropped") == 0 and audio.get("cdda_gaps") == 0 and audio.get("sink_refused") == 0 and audio.get("io_errors") == 0,
-              "CD-DA was mixed without a drop, a gap or a refused chunk")
+        check(audio.get("cdda_mixed", 0) > 0 and audio.get("cdda_dropped") == 0 and audio.get("cdda_gaps", 1 << 30) <= 588 and audio.get("sink_refused") == 0 and
+              audio.get("io_errors") == 0 and audio.get("cdda_readahead", 0) > 0,
+              "CD-DA was mixed without a drop or a refused chunk, with read-ahead covering the slower drive tick, and at most one sector of silence while a run waits for the drive's next tick (%s)" % {k: audio.get(k) for k in ("cdda_gaps", "cdda_readahead", "cdda_skipped")})
         # the legacy CD-DA artifact and digest are unchanged by the mix
         legacy = tmp / "legacy.pcm"
         rl = tmp / "legacy.json"
@@ -243,7 +93,10 @@ def main():
 
         # the independent expectation
         pcm_ref = pcm_reference(trace.read_text(), n_frames)
-        cd_ref = cdda_placement(log.read_text(), cdda_file.read_bytes(), n_frames)
+        def cap(lba):  # the end of the fixture track holding `lba` (the product's track end: first LBA + sectors)
+            return fx.T2_FIRST + fx.T2_N if lba < fx.T3_FIRST else fx.T3_FIRST + fx.T3_N
+
+        cd_ref = cdda_placement(log.read_text(), fx.sector, cap, n_frames)
         got = [struct.unpack_from("<hh", data, 4 * i) for i in range(n_frames)]
         want = [(clamp16(p[0] + c[0]), clamp16(p[1] + c[1])) for p, c in zip(pcm_ref, cd_ref)]
         bad = [i for i in range(n_frames) if got[i] != want[i]]

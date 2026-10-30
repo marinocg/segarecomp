@@ -119,11 +119,12 @@ static size_t out_frames;
 typedef struct Arrival {
   uint64_t tick;
   int32_t lba;
-  int new_run; /* the sector began a playback run (the drive reported no run in progress, or a non-contiguous one) */
 } Arrival;
 static Arrival arrivals[4096];
 static unsigned n_arrivals;
-static uint64_t legacy_frames, seen_runs;
+static uint64_t legacy_frames;
+static uint64_t stop_tick;      /* the instant the drive stopped reporting the run (UINT64_MAX = still reported) */
+static uint8_t was_playing;
 
 static int mix_put(void *context, const int16_t *frames, uint32_t count) {
   (void)context;
@@ -146,8 +147,6 @@ static int legacy_put(void *context, const int16_t *frames, uint32_t count) {
   if (n_arrivals < 4096U) {
     arrivals[n_arrivals].tick = machine->now;
     arrivals[n_arrivals].lba = machine->cdda.next_lba - 1;
-    arrivals[n_arrivals].new_run = (machine->cdda.segments + machine->cdda.discontinuities) != seen_runs;
-    seen_runs = machine->cdda.segments + machine->cdda.discontinuities;
     ++n_arrivals;
   }
   legacy_frames += count;
@@ -162,7 +161,8 @@ static void fresh(int cdda, int mix) {
   out_frames = 0U;
   n_arrivals = 0U;
   legacy_frames = 0U;
-  seen_runs = 0U;
+  stop_tick = UINT64_MAX;
+  was_playing = 0U;
   scd_disc_close(&disc);
   if (scd_disc_open(&disc, ".") != SCD_DISC_OK) {
     printf("FAIL  disc open\n");
@@ -203,12 +203,19 @@ static void sub_write(uint32_t reg, uint32_t width, uint32_t value) {
   }
 }
 
+/* the instant `playing` falls is the interrupt: the run is no longer reported by the drive */
+static void watch_playing(void) {
+  if (was_playing && !machine->cdda.playing && stop_tick == UINT64_MAX) stop_tick = machine->now;
+  was_playing = machine->cdda.playing;
+}
+
 static void drive_until(uint64_t until) {
   for (;;) {
     const uint64_t next = scd_devices_next_event(machine);
     if (next == UINT64_MAX || next >= until || machine->stop.stop_class != SCD_STOP_NONE) break;
     machine->now = next;
     scd_devices_advance(machine, next);
+    watch_playing();
   }
   if (machine->now < until && machine->stop.stop_class == SCD_STOP_NONE) machine->now = until;
 }
@@ -220,6 +227,7 @@ static void cdd_command(unsigned command, int32_t lba) {
   unsigned i;
   for (i = 0; i < 8U; ++i) sub_write(0x42U + i, 1U, tx[i]);
   sub_write(0x4AU, 2U, 0U);
+  watch_playing();
 }
 
 /* ---- scripts --------------------------------------------------------------------------------------------------------------------- */
@@ -322,10 +330,18 @@ static uint64_t frame_time(uint64_t n) { return (n / 44100U) * SCD_TICKS_PER_SEC
 static int32_t clamp16(int32_t v) { return v < -32768 ? -32768 : v > 32767 ? 32767 : v; }
 
 /* The reference stream for the script up to `end`, mixed with `n_cd` CD-DA sectors (arrival ticks and LBAs) when given. */
-static size_t ref_render(uint64_t end, int16_t *out, const Arrival *cd, unsigned n_cd) {
+typedef struct RefCd {
+  const Arrival *arr;          /* the sectors the drive delivered, in order (one contiguous run) */
+  unsigned n_arr;
+  int32_t cap;                 /* end (exclusive) of the run's track */
+  uint64_t stop;               /* the instant the drive stopped reporting the run */
+  uint64_t fader_tick;         /* the CD-DA fader register write (target 1024 before it) */
+  unsigned fader_target;
+} RefCd;
+
+static size_t ref_render(uint64_t end, int16_t *out, const RefCd *cd) {
   uint64_t origin = 0U, k = 0U, e, n;
-  unsigned opi = 0U, j = 0U, s = 0U, s_in = 0U, f = 0U, c;
-  uint64_t gate = 0U;
+  unsigned opi = 0U, j = 0U, c;
   const uint64_t per = period();
   ref_reset();
   memset(R_running, 0, sizeof R_running);
@@ -374,26 +390,51 @@ static size_t ref_render(uint64_t end, int16_t *out, const Arrival *cd, unsigned
     }
     ++k;
   }
-  for (n = 0U; frame_time(n) < end && n < MAXF; ++n) {
-    const uint64_t T = frame_time(n);
-    int32_t l, r;
-    while (j < n_smp && smp[j].t <= T) ++j;
-    l = j == 0U ? 0 : smp[j - 1U].l;
-    r = j == 0U ? 0 : smp[j - 1U].r;
-    while (s_in < n_cd && cd[s_in].tick <= T) { /* the sector arrives: a run that finds the queue empty starts one sector period later */
-      if (cd[s_in].new_run && s == s_in) gate = cd[s_in].tick + SCD_CDD_TICK_TICKS;
-      ++s_in;
+  {
+    /* the CD-DA run: it starts at the first frame at or after the first delivery and then advances one frame per output frame. Sector j begins at frame
+     * n0 + 588 j and is heard if the drive had delivered it by then, or if the drive still reports the run at that instant and the track goes on
+     * (then it is read ahead). A fader write moves the volume one step per CD-DA frame toward its target. */
+    uint64_t n0 = UINT64_MAX;
+    unsigned vol = 1024U, target = 1024U;
+    uint64_t cdn = 0U; /* CD-DA frames consumed */
+    int ended = 0;
+    if (cd != NULL && cd->n_arr != 0U) {
+      for (n0 = 0U; frame_time(n0) < cd->arr[0].tick; ++n0) {}
     }
-    if (s < s_in && T >= gate) {
-      l += sample_of((uint32_t)cd[s].lba, f, 0);
-      r += sample_of((uint32_t)cd[s].lba, f, 1);
-      if (++f == 588U) {
-        f = 0U;
-        ++s;
+    for (n = 0U; frame_time(n) < end && n < MAXF; ++n) {
+      const uint64_t T = frame_time(n);
+      int32_t l, r;
+      while (j < n_smp && smp[j].t <= T) ++j;
+      l = j == 0U ? 0 : smp[j - 1U].l;
+      r = j == 0U ? 0 : smp[j - 1U].r;
+      if (cd != NULL && n0 != UINT64_MAX && n >= n0 && !ended) {
+        const uint64_t pos = n - n0;
+        const unsigned sec = (unsigned)(pos / 588U), fr = (unsigned)(pos % 588U);
+        if (fr == 0U && sec > 0U) {
+          const int delivered = sec < cd->n_arr && cd->arr[sec].tick <= T;
+          const int ahead = T < cd->stop && cd->arr[0].lba + (int32_t)sec < cd->cap;
+          if (!delivered && !ahead) ended = 1;
+        }
+        if (!ended) {
+          int32_t cl, cr;
+          if (T >= cd->fader_tick) target = cd->fader_target;
+          cl = sample_of((uint32_t)(cd->arr[0].lba + (int32_t)sec), fr, 0);
+          cr = sample_of((uint32_t)(cd->arr[0].lba + (int32_t)sec), fr, 1);
+          {
+            const unsigned mult = (vol & 0x7FCU) != 0U ? (vol & 0x7FCU) : (vol & 3U);
+            cl = (cl * (int32_t)mult) / 1024;
+            cr = (cr * (int32_t)mult) / 1024;
+          }
+          if (vol < target) ++vol;
+          else if (vol > target) --vol;
+          ++cdn;
+          l += cl;
+          r += cr;
+        }
       }
+      out[2U * n] = (int16_t)clamp16(l);
+      out[2U * n + 1U] = (int16_t)clamp16(r);
     }
-    out[2U * n] = (int16_t)clamp16(l);
-    out[2U * n + 1U] = (int16_t)clamp16(r);
   }
   return (size_t)n;
 }
@@ -449,7 +490,7 @@ static int script_case(const char *label, uint64_t end, int tol, int expect_soun
   run_script(end, 0);
   digest_plain = fnv(out_buf, out_frames);
   frames_plain = out_frames;
-  ref_n = ref_render(end, ref_buf, NULL, 0U);
+  ref_n = ref_render(end, ref_buf, NULL);
   if (ref_n != out_frames) {
     printf("FAIL  %s: frame count %zu vs reference %zu\n", label, out_frames, ref_n);
     ++failures;
@@ -756,29 +797,46 @@ static void t_long(void) {
 }
 
 /* ---- CD-DA and mixing -------------------------------------------------------------------------------------------------------------- */
+static RefCd ref_cd(int32_t cap) {
+  RefCd cd;
+  cd.arr = arrivals;
+  cd.n_arr = n_arrivals;
+  cd.cap = cap;
+  cd.stop = stop_tick;
+  cd.fader_tick = UINT64_MAX;
+  cd.fader_target = 1024U;
+  return cd;
+}
+
+static size_t differing(const int16_t *a, const int16_t *b, size_t frames) {
+  size_t n, bad = 0U;
+  for (n = 0U; n < 2U * frames; ++n)
+    if (a[n] != b[n]) ++bad;
+  return bad;
+}
+
 static void t_mixing(void) {
   const uint64_t P = period();
   uint8_t w[30];
   unsigned i;
-  size_t ref_n, bad = 0U, n;
-  int maxd = 0;
+  size_t ref_n, bad;
+  RefCd cd;
   for (i = 0; i < 29U; ++i) w[i] = (uint8_t)(0x80U | (i * 4U));
   w[29] = 0xFFU;
-  /* CD-DA only, mix on: the stream is the CD-DA sectors on the timeline (silence before the first sector); no PCM */
+  /* CD-DA only, mix on: one run at the DAC rate on the guest timeline (silence before it); the drive tick is slower than 588 frames, so the queue is
+   * refilled from the disc ahead of it and nothing is lost or heard twice */
   n_ops = 0U;
   fresh(1, 1);
-  machine->mix.sink = mix_put;
   cdd_command(3U, T2);
-  drive_until(machine->now + 40U * SCD_CDD_TICK_TICKS);
+  drive_until(machine->now + 60U * SCD_CDD_TICK_TICKS);
   scd_mix_advance(machine, machine->now);
-  ref_n = ref_render(machine->now, ref_buf, arrivals, n_arrivals);
-  if (0) printf("dbg cdda-only ref_n=%zu out=%zu arrivals=%u now=%llu\n", ref_n, out_frames, n_arrivals, (unsigned long long)machine->now);
-  check(ref_n == out_frames && memcmp(ref_buf, out_buf, 4U * ref_n) == 0 && n_arrivals >= 8U, "CD-DA only: the mixed stream is the CD-DA sectors on the guest timeline");
-  check(legacy_frames == 588U * n_arrivals && machine->mix.cdda_mixed + machine->mix.cdda_gaps <= out_frames, "the legacy sink still sees every sector");
-  /* contiguous sectors are seamless: no gap between consecutive 75 Hz sectors once playing */
-  if (0) { unsigned q; printf("dbg gaps=%llu dropped=%llu\n", (unsigned long long)machine->mix.cdda_gaps, (unsigned long long)machine->mix.cdda_dropped);
-    for (q = 1; q < 6 && q < n_arrivals; ++q) printf("dbg arrival delta %llu lba %d\n", (unsigned long long)(arrivals[q].tick - arrivals[q-1].tick), arrivals[q].lba); }
-  check(machine->mix.cdda_gaps == 0U && machine->mix.cdda_dropped == 0U, "contiguous 75 Hz sectors have no gap and no drop");
+  cd = ref_cd(T2 + T2_N);
+  ref_n = ref_render(machine->now, ref_buf, &cd);
+  bad = ref_n == out_frames ? differing(ref_buf, out_buf, ref_n) : 1U;
+  check(ref_n == out_frames && bad == 0U && n_arrivals >= 8U, "CD-DA only: the mixed stream is one continuous run on the guest timeline, equal to the reference");
+  check(legacy_frames == 588U * n_arrivals, "the legacy sink still sees every drive-delivered sector, unchanged");
+  check(machine->mix.cdda_gaps == 0U && machine->mix.cdda_dropped == 0U && machine->mix.cdda_readahead > 0U && machine->mix.cdda_skipped > 0U,
+        "no gap and no drop; the slower drive tick is covered by read-ahead and its later deliveries are not queued twice");
   /* PCM only while CD-DA is stopped */
   fresh(1, 1);
   n_ops = 0U;
@@ -786,9 +844,9 @@ static void t_mixing(void) {
   chan(200U, 0, 0xFF, 0xFF, 0x0800, 0, 0);
   onoff(300U, 0x01U);
   run_script(300U * P, 0);
-  ref_n = ref_render(300U * P, ref_buf, NULL, 0U);
+  ref_n = ref_render(300U * P, ref_buf, NULL);
   check(ref_n == out_frames && memcmp(ref_buf, out_buf, 4U * ref_n) == 0 && machine->mix.pcm_frames > 0U, "PCM only, CD-DA enabled but stopped: exactly the PCM reference");
-  /* both: a CD-DA run mixed with a PCM channel that stops and starts during it, with device events and accesses interleaved in time order */
+  /* both, with the PCM channel stopped and started inside the run; then the drive is stopped and the run ends */
   fresh(1, 1);
   n_ops = 0U;
   wave(100U, 0, 0, w, 30U);
@@ -797,12 +855,16 @@ static void t_mixing(void) {
   W(25U * SCD_CDD_TICK_TICKS + SCD_CDD_TICK_TICKS / 2U, 8, 0xFFU);
   W(30U * SCD_CDD_TICK_TICKS + SCD_CDD_TICK_TICKS / 7U, 8, 0xFEU);
   {
-    unsigned oi = 0U;
-    const uint64_t end = 40U * SCD_CDD_TICK_TICKS;
+    unsigned oi = 0U, stopped = 0U;
+    const uint64_t end = 60U * SCD_CDD_TICK_TICKS;
     cdd_command(3U, T2);
     while (machine->now < end && machine->stop.stop_class == SCD_STOP_NONE) {
       const uint64_t next_op = oi < n_ops ? ops[oi].t : UINT64_MAX;
       const uint64_t next_dev = scd_devices_next_event(machine);
+      if (!stopped && machine->now >= 45U * SCD_CDD_TICK_TICKS) {
+        cdd_command(1U, 0); /* the drive stops: the run ends within the sector in progress */
+        stopped = 1U;
+      }
       if (next_op <= next_dev && next_op < end) {
         machine->now = next_op > machine->now ? next_op : machine->now;
         chip_write(ops[oi].reg, ops[oi].value);
@@ -810,23 +872,37 @@ static void t_mixing(void) {
       } else if (next_dev < end) {
         machine->now = next_dev;
         scd_devices_advance(machine, next_dev);
+        watch_playing();
       } else {
         break;
       }
     }
     machine->now = end;
     scd_mix_advance(machine, end);
-    ref_n = ref_render(end, ref_buf, arrivals, n_arrivals);
-    for (n = 0U; n < ref_n && n < out_frames; ++n) {
-      const int d = abs((int)out_buf[2U * n] - (int)ref_buf[2U * n]) > abs((int)out_buf[2U * n + 1U] - (int)ref_buf[2U * n + 1U])
-                        ? abs((int)out_buf[2U * n] - (int)ref_buf[2U * n])
-                        : abs((int)out_buf[2U * n + 1U] - (int)ref_buf[2U * n + 1U]);
-      if (d > maxd) maxd = d;
-      if (d != 0) ++bad;
-    }
-    check(ref_n == out_frames && bad == 0U && n_arrivals >= 8U && machine->mix.pcm_frames > 0U && machine->mix.cdda_mixed > 0U,
-          "PCM and CD-DA mixed on one timeline: equal to the reference, including PCM stopping and starting during the CD-DA run");
-    if (bad != 0U) printf("      %zu differing frames (max %d) of %zu\n", bad, maxd, ref_n);
+    cd = ref_cd(T2 + T2_N);
+    ref_n = ref_render(end, ref_buf, &cd);
+    bad = ref_n == out_frames ? differing(ref_buf, out_buf, ref_n) : 1U;
+    check(ref_n == out_frames && bad == 0U && stop_tick != UINT64_MAX && machine->mix.pcm_frames > 0U && machine->mix.cdda_mixed > 0U,
+          "PCM and CD-DA mixed on one timeline: equal to the reference, PCM stopping and starting during the run, the run ending at the stop");
+    if (bad != 0U) printf("      %zu differing samples of %zu frames\n", bad, ref_n);
+    check(machine->mix.cdda_gaps == 0U, "no silence gap inside the run");
+  }
+  /* the CD-DA fader inside the mix: a register write moves the volume one step per CD-DA frame toward the target, from the instant of the write */
+  fresh(1, 1);
+  n_ops = 0U;
+  cdd_command(3U, T2);
+  drive_until(machine->now + 30U * SCD_CDD_TICK_TICKS);
+  sub_write(0x34U, 2U, 0x2000U); /* target 0x200 = 512 */
+  {
+    const uint64_t write_tick = machine->now;
+    drive_until(machine->now + 30U * SCD_CDD_TICK_TICKS);
+    scd_mix_advance(machine, machine->now);
+    cd = ref_cd(T2 + T2_N);
+    cd.fader_tick = write_tick;
+    cd.fader_target = 512U;
+    ref_n = ref_render(machine->now, ref_buf, &cd);
+    bad = ref_n == out_frames ? differing(ref_buf, out_buf, ref_n) : 1U;
+    check(ref_n == out_frames && bad == 0U && machine->mix.fader_volume == 512U, "the fader ramps per CD-DA frame inside the mix from the instant of the register write");
   }
 }
 

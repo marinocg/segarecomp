@@ -1,7 +1,9 @@
-/* SEG-064-T004 / SEG-102: the sub's PCM sound chip (RF5C164). SEG-064 modelled the register file and wave RAM; SEG-102 (ADR 0233) adds
+/* SEG-064-T004 / SEG-102 / SEG-107: the sub's PCM sound chip (RF5C164). SEG-064 modelled the register file and wave RAM; SEG-102 (ADR 0233) adds
  * the per-channel running wave address and the sample clock that advances it, so the wave-address-pointer registers can be read back.
- * Sound generation is still not modelled (no audio output exists in this runtime): only state the sub processor can observe is
- * exact. Every access not independently verified is the typed stop pcm_unsupported.
+ * SEG-107 (ADR 0251) produces the chip's stereo samples from that same clock and state - one sample per sample event, taken before the address
+ * advances - and places them on the single 44.1 kHz guest-time output timeline together with CD-DA (see ScdMix in scd_runtime.h). Generation is
+ * optional and one-way: it reads the chip state and never changes it, so what the sub processor can observe is exactly as before. Every access
+ * not independently verified is the typed stop pcm_unsupported.
  *
  * Source: Genesis Plus GX core/cd_hw/pcm.c (consulted only) and the SEG-064-T001 reference's boot access inventory (write-only).
  * Layout (GPGX scd_write_byte/scd_write_word, scd.c): the PCM area $FF0000-$FF7FFF is decoded on /LDS only: a byte write at an odd
@@ -28,12 +30,15 @@
  * default bank and channel 0 are selected and every channel's panning is $FF. */
 void scd_pcm_reset(ScdMachine *m) {
   uint32_t c;
+  uint64_t syncs, advanced, steps, catchup;
   if (m->mix.enabled) {
     scd_mix_advance(m, m->now); /* the old chip's output up to the reset instant */
     m->mix.held[0] = m->mix.held[1] = 0;
   }
-  {
-  const uint64_t syncs = m->pcm.syncs, advanced = m->pcm.advanced, steps = m->pcm.channel_steps, catchup = m->pcm.max_catchup;
+  syncs = m->pcm.syncs;
+  advanced = m->pcm.advanced;
+  steps = m->pcm.channel_steps;
+  catchup = m->pcm.max_catchup;
   if (m->pcm_trace != NULL) fprintf((FILE *)m->pcm_trace, "Z %llu %llu\n", (unsigned long long)m->vdp_frames, (unsigned long long)m->now);
   memset(&m->pcm, 0, sizeof m->pcm);
   for (c = 0; c < 8U; ++c) m->pcm.pan[c] = 0xFFU;
@@ -42,7 +47,6 @@ void scd_pcm_reset(ScdMachine *m) {
   m->pcm.advanced = advanced;
   m->pcm.channel_steps = steps;
   m->pcm.max_catchup = catchup;
-  }
 }
 
 #define SCD_PCM_ADDR_MASK UINT32_C(0x7FFFFFF)
@@ -76,6 +80,35 @@ static void scd_mix_flush_chunk(ScdMachine *m) {
   x->chunk_count = 0U;
 }
 
+static void scd_mix_enqueue(ScdMix *x, const int16_t *raw, uint32_t count) {
+  uint32_t i, tail = (x->q_head + x->q_count) % SCD_MIX_QUEUE_FRAMES;
+  if (count > SCD_MIX_QUEUE_FRAMES - x->q_count) {
+    x->cdda_dropped += count;
+    return;
+  }
+  for (i = 0; i < count; ++i) {
+    x->queue[2U * tail] = raw[2U * i];
+    x->queue[2U * tail + 1U] = raw[2U * i + 1U];
+    tail = (tail + 1U) % SCD_MIX_QUEUE_FRAMES;
+  }
+  x->q_count += count;
+  x->cdda_frames += count;
+}
+
+/* The queue ran dry while the drive still reports the run: queue the next contiguous sector of the track from the disc. */
+static void scd_mix_read_ahead(ScdMachine *m) {
+  ScdMix *const x = &m->mix;
+  int16_t raw[2U * SCD_CDDA_SECTOR_FRAMES];
+  if (!x->cd_active || x->cd_next >= x->cd_end) return;
+  if (scd_disc_read_cdda(m->disc, (uint32_t)x->cd_next, raw) != SCD_DISC_OK) { /* not audio, or unreadable: the drive tick decides what happens next */
+    x->cd_active = 0U;
+    return;
+  }
+  scd_mix_enqueue(x, raw, SCD_CDDA_SECTOR_FRAMES);
+  x->cd_next += 1;
+  x->cdda_readahead += 1U;
+}
+
 /* Produce every output frame n with T_n < limit from the held PCM sample and the CD-DA queue. */
 static void scd_mix_emit_until(ScdMachine *m, uint64_t limit) {
   ScdMix *const x = &m->mix;
@@ -86,13 +119,16 @@ static void scd_mix_emit_until(ScdMachine *m, uint64_t limit) {
     const uint32_t pcm_abs = (uint32_t)(l < 0 ? -l : l) > (uint32_t)(r < 0 ? -r : r) ? (uint32_t)(l < 0 ? -l : l) : (uint32_t)(r < 0 ? -r : r);
     if (pcm_abs != 0U) x->pcm_frames += 1U;
     if (pcm_abs > x->peak) x->peak = pcm_abs;
-    if (x->q_count != 0U && x->tick >= x->gate) {
-      l += x->queue[2U * x->q_head];
-      r += x->queue[2U * x->q_head + 1U];
+    if (x->q_count == 0U) scd_mix_read_ahead(m);
+    if (x->q_count != 0U) {
+      l += scd_cdda_scale(x->queue[2U * x->q_head], x->fader_volume);
+      r += scd_cdda_scale(x->queue[2U * x->q_head + 1U], x->fader_volume);
+      if (x->fader_volume < m->cdda.fader_target) x->fader_volume = (uint16_t)(x->fader_volume + 1U);
+      else if (x->fader_volume > m->cdda.fader_target) x->fader_volume = (uint16_t)(x->fader_volume - 1U);
       x->q_head = (x->q_head + 1U) % SCD_MIX_QUEUE_FRAMES;
       x->q_count -= 1U;
       x->cdda_mixed += 1U;
-    } else if (x->q_count == 0U && m->cdda.playing) {
+    } else if (x->cd_active) {
       x->cdda_gaps += 1U;
     }
     scd_mix_clamp16(&l, &x->saturated);
@@ -166,24 +202,24 @@ void scd_mix_advance(ScdMachine *m, uint64_t tick) {
   scd_mix_flush_chunk(m);
 }
 
-void scd_mix_cdda(ScdMachine *m, const int16_t *frames, uint32_t count, int new_run) {
+void scd_mix_cdda(ScdMachine *m, const int16_t *raw, int32_t lba, uint32_t track_index, int new_run) {
   ScdMix *const x = &m->mix;
-  uint32_t i, tail;
   if (!x->enabled) return;
   scd_mix_advance(m, m->now); /* everything before the sector's arrival is already on the timeline */
-  if (count > SCD_MIX_QUEUE_FRAMES - x->q_count) {
-    x->cdda_dropped += count;
+  if (!new_run && x->cd_active && lba < x->cd_next) { /* already read ahead */
+    x->cdda_skipped += 1U;
     return;
   }
-  if (new_run && x->q_count == 0U) x->gate = m->now + SCD_CDD_TICK_TICKS; /* the queue is empty: the new run starts one sector period after its first sector */
-  tail = (x->q_head + x->q_count) % SCD_MIX_QUEUE_FRAMES;
-  for (i = 0; i < count; ++i) {
-    x->queue[2U * tail] = frames[2U * i];
-    x->queue[2U * tail + 1U] = frames[2U * i + 1U];
-    tail = (tail + 1U) % SCD_MIX_QUEUE_FRAMES;
-  }
-  x->q_count += count;
-  x->cdda_frames += count;
+  x->cd_active = 1U;
+  x->cd_next = lba + 1;
+  x->cd_end = (int32_t)(m->disc->tracks[track_index].first_lba + m->disc->tracks[track_index].sector_count);
+  scd_mix_enqueue(x, raw, SCD_CDDA_SECTOR_FRAMES);
+}
+
+void scd_mix_cdda_end(ScdMachine *m) {
+  if (!m->mix.enabled) return;
+  scd_mix_advance(m, m->now); /* the run still fed the frames before this instant */
+  m->mix.cd_active = 0U;
 }
 
 static int scd_pcm_unsupported(ScdMachine *m, uint32_t offset, uint32_t width, int is_write, uint32_t pc) {
