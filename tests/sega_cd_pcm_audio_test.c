@@ -396,7 +396,6 @@ static size_t ref_render(uint64_t end, int16_t *out, const RefCd *cd) {
      * (then it is read ahead). A fader write moves the volume one step per CD-DA frame toward its target. */
     uint64_t n0 = UINT64_MAX;
     unsigned vol = 1024U, target = 1024U;
-    uint64_t cdn = 0U; /* CD-DA frames consumed */
     int ended = 0;
     if (cd != NULL && cd->n_arr != 0U) {
       for (n0 = 0U; frame_time(n0) < cd->arr[0].tick; ++n0) {}
@@ -427,7 +426,6 @@ static size_t ref_render(uint64_t end, int16_t *out, const RefCd *cd) {
           }
           if (vol < target) ++vol;
           else if (vol > target) --vol;
-          ++cdn;
           l += cl;
           r += cr;
         }
