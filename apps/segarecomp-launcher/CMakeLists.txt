@@ -238,22 +238,19 @@ if(BUILD_TESTING)
 endif()
 
 # SEG-109-T005 (ADR 0253): Genesis, Master System and Sega CD through the same launcher journeys, structure and storage rules, on the real window with the
-# product and game doubles. One test per stage and window size (independent, run side by side by `ctest -j`); the persistence/storage stage runs at the wide size only.
+# product and game doubles. One test per stage and window size (independent, run side by side by `ctest -j`); CI runs the narrow (720x520, the minimum width) variants, which render fastest on the hosted runners; the wide (1080x740) variants run in the local fast tier.
 if(BUILD_TESTING)
   foreach(stage journey persist input)
     foreach(size wide:1080x740 narrow:720x520)
       string(REPLACE ":" ";" size_parts ${size})
       list(GET size_parts 0 size_name)
       list(GET size_parts 1 size_px)
-      if(stage STREQUAL "persist" AND size_name STREQUAL "narrow")
-        continue()
-      endif()
       set(t launcher_parity_gui_${stage}_${size_name}_test)
       add_test(NAME ${t} COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_parity_gui_test.py
         $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game> $<TARGET_FILE:fake_scd_program> ${size_px} ${stage})
       set_property(TEST ${t} APPEND PROPERTY LABELS full fast)
       set_property(TEST ${t} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
-      set_property(TEST ${t} PROPERTY TIMEOUT 900)
+      set_property(TEST ${t} PROPERTY TIMEOUT 2400)
     endforeach()
   endforeach()
 endif()

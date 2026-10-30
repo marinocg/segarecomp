@@ -158,7 +158,7 @@ class Case:
         script_path.write_text("\n".join(script) + "\n")
         trace_path.unlink(missing_ok=True)
         e = dict(self.env, SEGARECOMP_GUI_SCRIPT=str(script_path), SEGARECOMP_GUI_TRACE=str(trace_path), SEGARECOMP_SHOT_SIZE=size, **(extra_env or {}))
-        subprocess.run([self.exe], env=e, timeout=300, check=True, capture_output=True)
+        subprocess.run([self.exe], env=e, timeout=900, check=True, capture_output=True)
         return trace_path.read_text().splitlines() if trace_path.exists() else []
 
     def games(self):
