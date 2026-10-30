@@ -141,7 +141,7 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
   if (menu_item(ctx_, "m_folder", "Open build folder", nullptr, ctx_.icon("folder"), mw, fs::is_directory(info.entry, ec))) SDL_OpenURL(("file://" + u8s(info.entry)).c_str());
   if (scd_game) {   // SEG-109: the Sega CD game's own extras, beside the shared items
     if (menu_item(ctx_, "m_recordings", "Open recordings folder", nullptr, ctx_.icon("folder"), mw, fs::is_directory(scd_dir(*entry) / "recordings", ec))) SDL_OpenURL(("file://" + u8s(scd_dir(*entry) / "recordings")).c_str());
-    const bool scd_busy = scd_import_job_.valid() || scd_launch_job_.valid() || game_ != nullptr;
+    const bool scd_busy = scd_import_job_.valid() || scd_launch_job_.valid() || game_ != nullptr || scd_build_ != nullptr;
     if (menu_item(ctx_, "m_scd_attach", entry->sega_cd.program.path.empty() ? "Import program..." : "Replace program...", "A verified prebuilt viewer program", ctx_.icon("import"), mw, !scd_busy)) scd_browse("scd_attach", id);
     if (menu_item(ctx_, "m_scd_verify", "Verify again", "Hashes the program and the disc files", ctx_.icon("check"), mw, !scd_busy && !entry->sega_cd.program.path.empty())) scd_start_import(id, {}, {}, {});
   }
@@ -160,6 +160,7 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
   {
     CoverQuery q{entry->platform_id, {entry->title(), entry->detected_title}, {}, settings_.preferred_regions};
     for (const auto &rom : entry->rom_paths) q.rom_names.push_back(rom);  // only the file name is used
+    if (scd_game && !entry->sega_cd.cue_path.empty()) q.rom_names.push_back(entry->sega_cd.cue_path);
     const auto names = libretro_cover_candidates(q, 1);
     const std::string url = names.empty() ? std::string() : libretro_candidate_url(entry->platform_id, names.front());
     if (menu_item(ctx_, "m_web", "Find cover online", "Opens your web browser", ctx_.icon("search"), mw, !url.empty())) SDL_OpenURL(url.c_str());
@@ -638,7 +639,7 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     if (show_advanced_) {
       if (scd_game) {   // the verified program: import one built elsewhere, or check the current one again (Locate BIOS / disc: the More menu and the provenance rows)
         const scd::EntryRecord &r = entry.sega_cd;
-        const bool scd_busy = scd_import_job_.valid() || scd_launch_job_.valid() || game_ != nullptr;
+        const bool scd_busy = scd_import_job_.valid() || scd_launch_job_.valid() || game_ != nullptr || scd_build_ != nullptr;
         ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
         if (button(ctx_, "scd_attach", r.program.path.empty() ? "Import program..." : "Replace program...", ImVec2(ctx_.u(180.0F), ctx_.u(32.0F)), Style::secondary, !scd_busy, ctx_.icon("import"))) scd_browse("scd_attach", entry.id());
         ImGui::SameLine(0.0F, ctx_.u(8.0F));
@@ -903,7 +904,7 @@ float App::draw_scd_recordings(LibraryEntry &entry, const StatusInfo &info, floa
   const float pad = ctx_.u(16.0F), inner = w - 2 * pad;
   dl->ChannelsSplit(2);
   dl->ChannelsSetCurrent(1);
-  const bool busy = scd_import_job_.valid() || scd_launch_job_.valid() || game_ != nullptr;
+  const bool busy = scd_import_job_.valid() || scd_launch_job_.valid() || game_ != nullptr || scd_build_ != nullptr;
   ImGui::SetCursorScreenPos(ImVec2(a.x + pad, a.y + ctx_.u(38.0F)));
   checkbox(ctx_, "scd_record", "Record this session's controller input when I press Play", &scd_record_);
   ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y + ctx_.u(2.0F)));

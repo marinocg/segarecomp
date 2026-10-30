@@ -227,7 +227,7 @@ void App::scd_poll() {
         if (just_built) {
           entry->last_built_at = now_seconds();   // the same "Last recompiled" fact a native build records
           entry->archived = false;
-          // The same automatic policies as after a native build (a policy only ever removes generated build folders, never a save; see storage.hpp).
+          // The keep-last-N / soft-limit policies run as after a native build (they only ever remove generated build folders, never a save; see storage.hpp).
           if (settings_.cleanup.mode == "keep_last_n" || settings_.cleanup.mode == "soft_limit") policy_eval_pending_ = true;
         }
         if (built != scd_built_.end()) {
@@ -428,7 +428,7 @@ void App::draw_scd_import(float w) {
             "files on this computer (experimental; code the disc does not contain verbatim is never guessed), or import a verified prebuilt program. A program is checked "
             "against exactly these two files.");
   ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-  const bool busy = scd_import_job_.valid();
+  const bool busy = scd_import_job_.valid() || scd_build_ != nullptr;
   const auto row = [&](const char *id, const char *label, const std::string &path, const char *purpose, const char *hint) {
     const ImVec2 a = ImGui::GetCursorScreenPos();
     const float rh = ctx_.u(40.0F), bw = ctx_.u(120.0F);

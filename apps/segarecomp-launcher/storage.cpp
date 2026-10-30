@@ -223,7 +223,7 @@ void scan_sega_cd_games(StorageReport &report, const Catalog &catalog, const fs:
     // Loose generated files of the game's folder: counted (logs / other), not removable here.
     for (const char *name : {"run.log", "last-report.json"}) usage.total.logs += measure_path(folder / name);
     for (const char *name : {"build-backup-ram.bin", "replay-backup-ram.bin", "backup-ram.next"}) usage.total.other += measure_path(folder / name);
-    usage.user_data = measure_path(folder / "backup-ram.bin") + measure_path(folder / "recordings");
+    usage.user_data = measure_path(folder / "backup-ram.bin") + measure_path(folder / "backup-ram.bin.prev") + measure_path(folder / "recordings");
   }
   // Folders of games no longer in the library: their generated build folders stay visible (as unlinked rows) so they can still be reclaimed; their user data
   // is left alone and unreported.
@@ -565,7 +565,12 @@ ExecResult execute_plan(const Plan &plan, const fs::path &cache_root, const Busy
   for (const auto &item : plan.items) {
     const std::string label = utf8_of(item.path.filename());
     const fs::path normal = item.path.lexically_normal();
-    if (!library_root.empty() && is_within(library_root.lexically_normal(), normal)) {
+    const auto under_library = [&] {   // only a Sega CD game's folder is a library-branch item; everything else (a native build in an overlapping cache) takes the cache branch
+      if (library_root.empty() || !is_within(library_root.lexically_normal(), normal)) return false;
+      const fs::path rel = normal.lexically_relative(library_root.lexically_normal());
+      return !rel.empty() && *rel.begin() == "sega-cd";
+    }();
+    if (under_library) {
       const fs::path relative = normal.lexically_relative(library_root.lexically_normal());
       if (!library_item_shape_allowed(relative)) { result.problems.push_back("refused (not a managed item): " + label); continue; }
       auto it = relative.begin();

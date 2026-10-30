@@ -314,6 +314,17 @@ def stage_journey(r, c, size):
     size_before = hold.stat().st_size if hold.exists() else 0
     time.sleep(0.5)
     r.ok((hold.stat().st_size if hold.exists() else 0) == size_before, f"{size}: no process of a cancelled build is still running")
+    # 3b. ONE build queue across platforms: a game of the other kind waits behind the running build, can be taken out of the queue, and starts when the first ends
+    for first, second in (("genesis", "sega-cd"), ("sega-cd", "master-system"), ("master-system", "sega-cd")):
+        started.unlink(missing_ok=True)
+        script = list(START) + open_game(first) + ["build", "frames 40", "expect building=1"] + BACK
+        script += open_game(second) + ["build", "frames 8", "expect queued=1", "expect build_count=2", "layout", "cancel_build", "frames 8", "expect queued=0", "expect build_count=1"] + BACK
+        script += open_game(first) + ["cancel_build", "wait_idle", "frames 6", "expect building=0", "expect build_count=0", "expect build_outcome=cancelled"] + BACK + ["quit"]
+        trace = c.run(script, {"FAKE_BUILD_HOLD": str(hold), "FAKE_HOLD_MS": "240000"}, size)
+        r.trace(f"{size} queue {first} then {second}", trace)
+        qlayout = parse_layout(trace[[i for i, l in enumerate(trace) if l.startswith("layout ")][0]:][:1]) if any(l.startswith("layout ") for l in trace) else {}
+        r.ok("build" in qlayout, f"{size}: a queued {second} game shows Unqueue in the Build slot: {qlayout}")
+    r.ok(not [x for x in c.leftovers() if x.name.endswith(".partial")], f"{size}: nothing partial after the queue scenarios")
     # 4. retry after the cancel and the failure
     trace, _ = window(c, size, lambda p: open_game(p) + ["build", "wait_idle", "frames 6", "expect build_outcome=ok", "expect can_play=1"] + BACK)
     r.trace(f"{size} retry", trace)

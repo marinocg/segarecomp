@@ -73,7 +73,7 @@ def main():
         # ---- window A: add with a program, play with a recording, replay, filter, unsupported build ----
         trace, lib = run_window(tmp, "a", [
             "frames 8", "page import", "frames 6", "scd_form %s|%s|%s" % (bios, cue, viewer), "frames 4", "scd_add", "wait_scd", "frames 10",
-            "expect page=details", "expect scd_state=Ready to play", "expect status=Ready to play", "expect can_play=1", "expect detail=disc",
+            "expect page=details", "expect scd_state=Ready to play", "expect status=Ready", "expect can_play=1", "expect detail=disc",
             "scd_record on", "play", "frames 4", "wait_scd", "wait_play_end", "frames 10",
             "expect scd_outcome=Closed.", "expect scd_recordings=1", "expect playing=0",
             "scd_replay windowless", "frames 4", "wait_scd", "wait_play_end", "frames 10",

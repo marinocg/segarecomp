@@ -71,3 +71,11 @@ difference (kept, but shown inside the shared structure); **OK** already shared.
 ## Consequences
 
 The parity decision (T006) reports GO only when every row above is OK/HW or fixed with evidence; remaining GAP rows are named in a PARTIAL decision.
+
+## Result and decision (T006)
+
+Independent review (adversarial validator, no blocker; data-loss paths probed with symlinked build/game folders, `..` and forged plans: all refused, saves intact). Findings fixed in this PR: mixed-platform queue test added (running native build + queued Sega CD game, Unqueue, and the reverse), native cleanup when the library root overlaps the cache root, Libretro matching by the CUE file name, `backup-ram.bin.prev` reported as user data, program import/verify disabled while a build runs, unified status words ("Ready", "Not built"), doc wording.
+
+Known, accepted differences (hardware/product-specific or pre-existing): the BIOS/disc/program rows and Import/Verify program; the INPUT RECORDING section; a Sega CD build folder holds `src/`, `pass/`, `objects/` and epoch files rather than `generated.c`/`obj`, so *Remove build intermediates* reclaims little for it (the shared object cache and the whole build are removable); the post-build "remove intermediates" policy therefore has nothing to do for a Sega CD game (keep-newest-N and soft limit do apply); a crash during a build publish can leave `build.old`, replaced by the next build.
+
+**Decision: `M13_LAUNCHER_PARITY_GO`** (subject to exact-head CI of the final head; manual merge).

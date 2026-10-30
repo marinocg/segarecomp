@@ -304,7 +304,12 @@ const StatusInfo &App::status_of(const std::string &id) const {
 }
 
 std::string App::status_label(const StatusInfo &info) const {
-  if (info.sega_cd) return scd_label(info);
+  if (info.sega_cd) {   // the same words as a native game where the state is the same; the BIOS/disc/program diagnostics keep their own
+    if (info.status == GameStatus::metadata_only) return "Metadata only";
+    if (info.scd.state == scd::State::ready) return "Ready";
+    if (info.scd.state == scd::State::no_program) return "Not built";
+    return scd_label(info);
+  }
   switch (info.status) {
     case GameStatus::ready: return "Ready";
     case GameStatus::metadata_only: return "Metadata only";
@@ -501,6 +506,7 @@ void App::start_cover_download(const std::vector<std::string> &ids, bool silent)
     if (!entry->display_title.empty()) q.titles.push_back(entry->display_title);
     if (!entry->detected_title.empty()) q.titles.push_back(entry->detected_title);
     for (const auto &rom : entry->rom_paths) q.rom_names.push_back(rom);  // only the file name is used
+    if (entry->platform_id == "sega-cd" && !entry->sega_cd.cue_path.empty()) q.rom_names.push_back(entry->sega_cd.cue_path);   // the disc's CUE name carries its region/disc tags
     q.preferred_regions = settings_.preferred_regions;
     work.push_back({id, {entry->sha256, std::move(q)}});
   }

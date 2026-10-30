@@ -399,6 +399,31 @@ int main() {
       expect(refused.problems.size() == forged.items.size() && refused.removed == 0, "Sega CD: every forged item is refused");
       expect(fs::exists(folder / "backup-ram.bin") && fs::exists(folder / "recordings" / "session-1.txt") && fs::exists(folder / "run.log"), "Sega CD: the save, the recording and the log survive a forged plan");
     }
+    {  // a symlinked build folder or game folder is never followed; a library root that overlaps the cache root does not stop native cleanup
+#if !defined(_WIN32)
+      const fs::path outside_dir = dir / "scd_outside";
+      spit(outside_dir / "keep.txt", "outside");
+      fs::remove_all(folder / "build");
+      fs::create_symlink(outside_dir, folder / "build");
+      Plan forged;
+      forged.items = {{folder / "build", 0, true}, {folder / "build" / "keep.txt", 7, false}};
+      expect(bg.try_begin_maintenance(), "maintenance lock for the symlink probe");
+      const ExecResult linked = execute_plan(forged, cch, bg, lib);
+      bg.end_maintenance();
+      expect(fs::exists(outside_dir / "keep.txt") && linked.removed == 0, "Sega CD: a symlinked build folder is refused, the target survives");
+      fs::remove(folder / "build");
+#endif
+      const fs::path same = dir / "overlap";
+      fs::remove_all(same);
+      spit(same / "games" / key32('7') / "generated.c", "x");
+      Plan native;
+      native.items = {{same / "games" / key32('7') / "generated.c", 1, false}};
+      expect(bg.try_begin_maintenance(), "maintenance lock for the overlap probe");
+      const ExecResult overlapped = execute_plan(native, same, bg, same);
+      bg.end_maintenance();
+      expect(overlapped.ok() && !fs::exists(same / "games" / key32('7') / "generated.c"), "a native item is still removable when the library root equals the cache root");
+      lay_out();
+    }
     {  // archive: the build folders go, the player's data stays; a running game or build protects its folders
       bg.try_begin_run("scd-" + id16);
       const Plan blocked = plan_archive(r, {g.id()}, bg);

@@ -120,7 +120,7 @@ Never touched: original ROMs, ROM copies extracted from ZIP archives (`library/r
 **Protected user data (Sega CD).** A Sega CD game's save (its internal backup RAM) and its input recordings are the player's own data. The Storage report and the
 game's Storage rail list them apart ("Saves & recordings"), outside every total that a cleanup can reclaim, and no cleanup action can contain them: the plans
 are built from the generated build folders only, and the deletion backend refuses any other path under a game's folder, even in a forged plan. Rebuilding,
-replacing the program, *Keep metadata only*, *Clean failed / abandoned builds*, the automatic policies and *Remove from library* never delete or reset a save; a
+replacing the program, *Keep metadata only*, *Clean failed / abandoned builds*, the automatic keep-newest-N / soft-limit policies and *Remove from library* never delete or reset a save; a
 removed game's save is found again when the same BIOS and disc are added again. The removal sheet says what is removed and what is kept. Cleanup is
 refused while a build or game runs (one busy guard). Settings > Build & Runtime offers an **automatic policy** after a successful build: never,
 remove intermediates, keep the newest N playable games (older ones are reduced to metadata only; favorites, running games and the game being built
