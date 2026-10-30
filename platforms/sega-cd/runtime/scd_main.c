@@ -166,7 +166,7 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
   if (authentic != NULL) { /* SEG-064-T005: per-level interrupt acceptances of the main processor (the sub's are reported above) */
     fprintf(out, ",\"main_interrupts_taken\":[");
     for (i = 0; i < 8U; ++i) fprintf(out, "%s%llu", i ? "," : "", (unsigned long long)m->main_interrupts_taken[i]);
-    fprintf(out, "]");
+    fprintf(out, "],\"hint_latched\":%llu", (unsigned long long)m->hint_latched);
   }
   scd_vdp_capture_report(m, out); /* SEG-065-T003: absent without --capture-onset */
   if (m->vdp_dma_count != 0U) /* SEG-065-T002: 68K->VDP DMA transfers and the main processor's total wait (absent without one) */

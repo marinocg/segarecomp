@@ -74,12 +74,22 @@ typedef struct ScdVdpHost {
   uint64_t present_rendered, present_skipped, present_rejected;
 } ScdVdpHost;
 
+#define SCD_HINT_FRAME_LINES GENESIS_NTSC_LINES_PER_FRAME
+#define SCD_HINT_ANCHOR ((uint64_t)SCD_BIOS_FIRST_ONSET_MCLK * SCD_MASTER_TICK_TICKS)
+#define SCD_HINT_BIAS ((uint64_t)GENESIS_NTSC_VBLANK_ONSET_LINE * SCD_LINE_TICKS + SCD_FRAME_TICKS * (SCD_HINT_ANCHOR / SCD_FRAME_TICKS + 1U) - SCD_HINT_ANCHOR)
+
+static uint64_t scd_hint_line_of(uint64_t t) { return (t + SCD_HINT_BIAS) / SCD_LINE_TICKS; }
+static uint64_t scd_hint_line_start(uint64_t line) { return line * SCD_LINE_TICKS - SCD_HINT_BIAS; }
+
 int scd_vdp_init(ScdMachine *m) {
   ScdVdpHost *h = (ScdVdpHost *)calloc(1U, sizeof(ScdVdpHost));
   m->vdp_host = h;
   m->vdp_onset = m->bios != NULL ? SCD_BIOS_FIRST_ONSET_MCLK * SCD_MASTER_TICK_TICKS : SCD_ONSET_TICKS;
   if (h == NULL) return 1;
   h->capture_line = -1; /* SEG-065-T003: no line sampling until a requested frame begins */
+  m->hint_counter = 0xFFU; /* GPGX vdp_reset: h_counter = 0xFF, hint_pending = 0 */
+  m->hint_next = scd_hint_line_of(0U);
+  m->hint_at = UINT64_MAX;
   if (m->bios != NULL) {
     h->regions[0].begin = 0U;
     h->regions[0].end = m->bios_size;
@@ -250,7 +260,8 @@ static int scd_vdp_dma_prepare(ScdMachine *m, GenesisRuntime *host, uint16_t fir
   return 0;
 }
 
-/* Classifies a control-port write (a word, or a long as two words high first): 1 when it contains a register-#0 write with IE1 set, 2
+/* Classifies a control-port write (a word, or a long as two words high first): 1 when it contains a register-#0 write with IE1 set (now
+ * admitted, SEG-106; kept as the classifier's second result), 2
  * when it contains a word of the form 101x xxxx outside a pending command - a register write for GPGX (vdp_68k_ctrl_w decodes
  * (w & $C000) == $8000, register (w >> 8) & $1F) but the first word of a command for the Genesis device host: the two disagree, so it is
  * not modelled - and 0 otherwise. A word written while the VDP awaits a command's second word is that second word; otherwise a word
@@ -364,7 +375,7 @@ static uint64_t scd_vdp_fill_end(const ScdMachine *m, const GenesisRuntime *host
   return frame_start + (frames * frame_lines * line + cyc) * SCD_MASTER_TICK_TICKS;
 }
 
-int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
+static int scd_vdp_access_inner(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
   GenesisRuntime *host = scd_host(m);
   GenesisRuntimeStop stop = {0};
   uint32_t routed = is_write ? *value : 0U;
@@ -386,10 +397,8 @@ int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write
   if (m->bios != NULL) {
     if (is_write && (address & ~3U) == 0xC00004U && width != 1U) {
       const int awaiting = host->devices.vdp.control_port_awaiting_second_word != 0U;
-      /* The H-interrupt: register #0 IE1 (bit 4) would let the line counter (not modelled; GPGX latches it on active lines whether or
-       * not IE1 is set) request level 4. Setting it is the typed stop interrupt_source_unsupported at the write, before any line. */
+      /* SEG-106 (ADR 0250): register #0 IE1 is admitted - the H-interrupt counter (scd_hint_*) is the level-4 source. */
       const int shape = scd_vdp_sets_ie1(awaiting, width, *value);
-      if (shape == 1) return scd_fail_access(m, SCD_MAIN, SCD_STOP_INTERRUPT_SOURCE_UNSUPPORTED, pc, address, width, 1);
       if (shape == 2) return scd_fail_access(m, SCD_MAIN, SCD_STOP_VDP_ACCESS_UNSUPPORTED, pc, address, width, 1);
       uint32_t second = UINT32_MAX, first = host->devices.vdp.control_port_first_word;
       if (width == 2U && awaiting) second = *value & 0xFFFFU;
@@ -752,18 +761,114 @@ int scd_vdp_capture_line_due(const ScdMachine *m, uint64_t until) {
 
 uint64_t scd_frame_ticks_since_origin(const ScdMachine *m, uint64_t t) { return t + SCD_FRAME_TICKS - m->vdp_onset; }
 
+/* ---- SEG-106 (ADR 0250): the VDP horizontal-interrupt counter ------------------------------------------------------------- *
+ * One 8-bit counter and one pending latch, stepped once per scan line in GPGX's order (system_frame_scd): an active line (0-223) reloads
+ * the counter from register #10 and latches the request when it is 0, otherwise decrements it; the first vertical-blank line (224)
+ * latches without a reload when it is 0; the last line (261) reloads. The latch is independent of register #0 IE1; IE1 only gates the
+ * level-4 request. Lines are a pure function of the deterministic tick (a grid anchored at the first onset, whose lines are the
+ * frame's lines 224...261, 0...223), the counter is brought up to date lazily - before every control-port write and acknowledgement,
+ * and by one scheduled event (`hint_at`) while the request could rise - so no sampling partition changes the result. */
+/* One line: updates the counter and returns 1 when the line latches the request. */
+static int scd_hint_step(uint8_t *counter, uint32_t frame_line, uint8_t reload) {
+  if (frame_line < GENESIS_NTSC_VBLANK_ONSET_LINE) {
+    if (*counter == 0U) {
+      *counter = reload;
+      return 1;
+    }
+    *counter = (uint8_t)(*counter - 1U);
+  } else if (frame_line == GENESIS_NTSC_VBLANK_ONSET_LINE) {
+    return *counter == 0U;
+  } else if (frame_line == SCD_HINT_FRAME_LINES - 1U) {
+    *counter = reload;
+  }
+  return 0;
+}
+
+static void scd_hint_latch(ScdMachine *m, uint32_t frame_line) {
+  if (!m->hint_pending) {
+    m->hint_pending = 1U;
+    m->hint_latched += 1U;
+    scd_log(m, 0x92U, frame_line, ((GenesisRuntime *)m->vdp_host)->devices.vdp.registers[10]);
+  }
+}
+
+/* Brings the counter up to date for every line that has started by tick `t`. */
+static void scd_hint_sync(ScdMachine *m, uint64_t t) {
+  const uint8_t reload = (uint8_t)(((GenesisRuntime *)m->vdp_host)->devices.vdp.registers[10] & 0xFFU);
+  const uint64_t target = scd_hint_line_of(t);
+  while (m->hint_next <= target) {
+    const uint32_t frame_line = (uint32_t)(m->hint_next % SCD_HINT_FRAME_LINES);
+    /* A whole frame from its line 0 with the counter at the reload value is a fixed transition (it latches iff the reload value is at
+     * most 224 and ends reloaded): long idle skips cost one step per frame, not per line. */
+    if (frame_line == 0U && m->hint_counter == reload && target - m->hint_next + 1U >= SCD_HINT_FRAME_LINES) {
+      const uint64_t frames = (target - m->hint_next + 1U) / SCD_HINT_FRAME_LINES;
+      if (reload <= GENESIS_NTSC_VBLANK_ONSET_LINE) scd_hint_latch(m, reload);
+      m->hint_next += frames * SCD_HINT_FRAME_LINES;
+      continue;
+    }
+    if (scd_hint_step(&m->hint_counter, frame_line, reload)) scd_hint_latch(m, frame_line);
+    m->hint_next += 1U;
+  }
+}
+
+/* The tick of the next line that would latch the request, while a request could still rise (IE1 set, none pending); else none. */
+static void scd_hint_arm(ScdMachine *m) {
+  const GenesisRuntime *host = (const GenesisRuntime *)m->vdp_host;
+  const uint8_t reload = (uint8_t)(host->devices.vdp.registers[10] & 0xFFU);
+  uint8_t counter = m->hint_counter;
+  uint64_t line = m->hint_next;
+  uint32_t i;
+  m->hint_at = UINT64_MAX;
+  if (!(host->devices.vdp.registers[0] & 0x0010U) || m->hint_pending) return;
+  for (i = 0; i < 2U * SCD_HINT_FRAME_LINES; ++i, ++line)
+    if (scd_hint_step(&counter, (uint32_t)(line % SCD_HINT_FRAME_LINES), reload)) {
+      m->hint_at = scd_hint_line_start(line);
+      return;
+    }
+}
+
+/* The control-port write wrapper: the counter is current before a register can change, and re-armed when register #0 or #10 did. */
+int scd_vdp_access(ScdMachine *m, uint32_t address, uint32_t width, int is_write, uint32_t *value, uint32_t pc) {
+  const GenesisRuntime *host = (const GenesisRuntime *)m->vdp_host;
+  uint16_t r0, r1, r10;
+  int rc;
+  if (m->bios == NULL || !is_write || (address & ~3U) != 0xC00004U) return scd_vdp_access_inner(m, address, width, is_write, value, pc);
+  scd_hint_sync(m, m->now);
+  r0 = host->devices.vdp.registers[0];
+  r1 = host->devices.vdp.registers[1];
+  r10 = host->devices.vdp.registers[10];
+  rc = scd_vdp_access_inner(m, address, width, is_write, value, pc);
+  if (rc != 0) return rc;
+  if (host->devices.vdp.registers[0] != r0 || host->devices.vdp.registers[10] != r10) {
+    /* GPGX m68k_set_irq_delay (reg_w case 0): enabling IE1 while a request is latched, from a MOVE that is not a MOVE.L and while no
+     * enabled vertical interrupt is pending, lets the next instruction execute before the interrupt is recognised. */
+    if (!(r0 & 0x10U) && (host->devices.vdp.registers[0] & 0x10U) && m->hint_pending && width != 4U &&
+        !((host->devices.vdp.registers[1] & 0x20U) && m->vint_pending) && r1 == host->devices.vdp.registers[1])
+      m->main_irq_delay = 1U;
+    scd_hint_arm(m);
+  }
+  return 0;
+}
+
 uint64_t scd_vdp_next_event(const ScdMachine *m) {
   const ScdVdpHost *h = (const ScdVdpHost *)m->vdp_host;
   uint64_t next = m->vdp_onset;
   if (m->bios == NULL) return UINT64_MAX;
   if (m->vint_at != 0U && m->vint_at < next) next = m->vint_at;
   if (h != NULL && h->capture_line >= 0 && h->capture_line_tick < next) next = h->capture_line_tick;
+  if (m->hint_at < next) next = m->hint_at; /* SEG-106: the line that latches the H-interrupt request (IE1 set) */
   return next;
 }
 
 void scd_vdp_event(ScdMachine *m) {
   GenesisRuntime *host = scd_host(m);
   ScdVdpHost *h = (ScdVdpHost *)m->vdp_host;
+  if (m->hint_at <= m->vdp_onset && (m->vint_at == 0U || m->hint_at <= m->vint_at) &&
+      (h->capture_line < 0 || m->hint_at <= h->capture_line_tick)) {
+    scd_hint_sync(m, m->hint_at); /* SEG-106: ties with the onset go to the line check, as GPGX checks the counter before the vertical interrupt */
+    scd_hint_arm(m);
+    return;
+  }
   if (h->capture_line >= 0 && h->capture_line_tick < m->vdp_onset && (m->vint_at == 0U || h->capture_line_tick < m->vint_at)) {
     scd_capture_line(m); /* SEG-065-T003: an active line of a captured frame begins */
     return;
@@ -796,14 +901,16 @@ void scd_vdp_event(ScdMachine *m) {
 uint32_t scd_main_request_level(const ScdMachine *m) {
   const GenesisRuntime *host = (const GenesisRuntime *)m->vdp_host;
   if (m->bios == NULL || host == NULL) return 0U;
-  return (m->vint_pending && (host->devices.vdp.registers[1] & 0x20U)) ? 6U : 0U;
+  if (m->vint_pending && (host->devices.vdp.registers[1] & 0x20U)) return 6U;
+  return (m->hint_pending && (host->devices.vdp.registers[0] & 0x10U)) ? 4U : 0U; /* SEG-106: level 6 has priority */
 }
 
 /* The highest level that could still wake a stopped main processor (for the STOP and idle rules). */
 uint32_t scd_main_wake_level(const ScdMachine *m) {
   const GenesisRuntime *host = (const GenesisRuntime *)m->vdp_host;
   if (m->bios == NULL || host == NULL) return 0U;
-  return (host->devices.vdp.registers[1] & 0x20U) ? 6U : 0U;
+  if (host->devices.vdp.registers[1] & 0x20U) return 6U;
+  return (host->devices.vdp.registers[0] & 0x10U) ? 4U : 0U;
 }
 
 void scd_main_interrupt_acknowledge(ScdMachine *m, uint32_t level) {
@@ -811,5 +918,9 @@ void scd_main_interrupt_acknowledge(ScdMachine *m, uint32_t level) {
   if (level == 6U) {
     m->vint_pending = 0U;
     host->devices.vdp.status_register = (uint16_t)(host->devices.vdp.status_register & ~0x0080U);
+  } else if (level == 4U) {
+    scd_hint_sync(m, m->now); /* a line between the latch and the acknowledgement merges into it (GPGX vdp_68k_irq_ack clears hint_pending) */
+    m->hint_pending = 0U;
+    scd_hint_arm(m);
   }
 }

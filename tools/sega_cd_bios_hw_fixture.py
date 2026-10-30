@@ -20,6 +20,13 @@ observes in a result block, then builds a small sub program in PRG RAM and relea
   +$22..+$25 MOVE.L $400100,D0 on the empty cartridge slot: the next instruction word twice (GPGX open bus)
   +$26 TST.B-style byte read $400001: the low byte of the next instruction word
   +$28 VRAM words $1300-$1306 after a 68K->VDP DMA from 2M Word RAM owned by main (SEG-064-T004; checksum)
+  SEG-106 (ADR 0250) - the VDP H-interrupt (register #0 IE1, level 4), delivered through the same RAM thunk (the H-INT vector register
+  $A12006 = the thunk's low word; the handler tells the level from the stacked SR mask):
+  +$2A level-4 handlers run while IE1 is clear and register #10 = 0 (a request is latched every line) across three level-6 frames (0)
+  +$2C level-4 handlers between the level-6 handlers of frames 1 and 3 with register #10 = 9 (2 x 22 = 44)
+  +$2E the same with register #10 = 0 (2 x 225 = 450: the active lines and the first vertical-blank line)
+  +$30 three STOPs each woken by one level-4 interrupt (3)    +$32 the level taken first when level 6 and 4 are both pending (6)
+  +$34 level-4 handlers run while the SR mask is 4 (0)         +$36 1 when the pending request was delivered once the mask fell to 3
   +$FF $A5 when main reached the epoch
 The sub program writes COMSTAT0 = $C0DE and stops.
 
@@ -27,7 +34,7 @@ Handoff (main d7 = 11): after the epoch the main program calls the documented IP
 application_handoff before any instruction there runs (SEG-064-T004).
 Negatives (main d7): 1 an open-bus read by a MOVE whose destination still has extension words (prefetch not established); 2 a Z80
 RAM read after the Z80 has been runnable; 3 a 68K->VDP DMA from the PRG-RAM window; 10 a 68K->VDP DMA from Word RAM after DMNA handed
-it to the sub; 4 the H-interrupt enabled (line counter not modelled: stops at the write); 8 the same by a long write that also clears it again; 9 a
+it to the sub; 9 a
 control word 101x xxxx (GPGX: a register write; the device host: a command word) is not modelled;
 5 a VDP copy DMA (not modelled by the device); 6 one byte of the sub image corrupted before the release; 7 the image copied into
 PRG-RAM bank 1 (the wrong mapping) - both stop at the epoch before the sub retires anything.
@@ -53,6 +60,10 @@ ENTRY_ROM = 0x0F80  # two NOPs: the code the handoff case places at the applicat
 RESULT = 0xFFC000
 THUNK = 0xFFF900
 FRAMES = 0xFFC080
+HCOUNT = 0xFFC082   # SEG-106: level-4 handlers run
+HSNAP = 0xFFC084    # HCOUNT as the last level-6 handler saw it
+FIRST = 0xFFC086    # the level the handler took first (0 until one runs)
+THUNK_VECTOR = THUNK & 0xFFFF
 DMA_RAM = 0xFF8000
 GA = 0xA12000
 WINDOW = 0x020000
@@ -105,6 +116,80 @@ def negative(m, case, body):
     body(m)
     NEG_RANGES[case] = [start, m.pc]
     m.label("neg%d" % case)
+
+
+def delay(m, name, loops):
+    """About loops x 10 main cycles of straight-line time (a DBRA loop)."""
+    m.move("w", F.imm(loops), F.d(0))
+    m.label(name)
+    m.dbra(0, name)
+
+
+def hint_window(m, tag, reg10, slot):
+    """Level-4 handlers run between the level-6 handlers of frames 1 and 3 (two whole frames) with register #10 = reg10."""
+    vdp_reg(m, 10, reg10)
+    m.clr("w", F.absl(FRAMES))
+    vdp_reg(m, 0, 0x14)                                   # IE1
+    vdp_reg(m, 1, 0x34)                                   # IE0
+    m.move_sr(0x2000)
+    m.label("hw1" + tag)
+    m.immop("cmp", "w", 1, F.absl(FRAMES))
+    m.bcc("lt", "hw1" + tag)
+    m.move("w", F.absl(HSNAP), F.d(5))
+    m.label("hw3" + tag)
+    m.immop("cmp", "w", 3, F.absl(FRAMES))
+    m.bcc("lt", "hw3" + tag)
+    m.move("w", F.absl(HSNAP), F.d(4))
+    m.move_sr(0x2700)
+    vdp_reg(m, 0, 0x04)
+    vdp_reg(m, 1, 0x14)
+    m.alu("sub", "w", F.d(5), 4)
+    m.move("w", F.d(4), F.absl(RESULT + slot))
+
+
+def hint_section(m):
+    """SEG-106 (ADR 0250): the H-interrupt counter, the level-4 request and its delivery (see the module docstring)."""
+    hint_window(m, "a", 9, 0x2C)
+    hint_window(m, "b", 0, 0x2E)
+    # level 6 and 4 both pending (register #10 = 0 latches a request every line; the vertical interrupt is pending from the last onset):
+    # lowering the mask takes level 6 first
+    vdp_reg(m, 10, 0)
+    delay(m, "d_p2", 14000)                               # about 285 lines: through an active display and the next onset (IE0 clear: both stay pending)
+    m.clr("w", F.absl(FIRST))
+    vdp_reg(m, 0, 0x14)
+    vdp_reg(m, 1, 0x34)
+    m.move_sr(0x2000)
+    m.nop()
+    m.nop()
+    m.move_sr(0x2700)
+    m.move("w", F.absl(FIRST), F.absl(RESULT + 0x32))
+    # a mask of 4 holds level 4 pending; the fall to 3 delivers it
+    vdp_reg(m, 1, 0x14)                                   # IE0 clear: level 6 out of the picture
+    m.clr("w", F.absl(HCOUNT))
+    m.move_sr(0x2400)
+    delay(m, "d_p3", 14000)                              # a whole frame: the request is latched while the mask holds it
+    m.move("w", F.absl(HCOUNT), F.absl(RESULT + 0x34))
+    m.move_sr(0x2300)
+    m.nop()
+    m.nop()
+    m.move_sr(0x2700)
+    m.move("w", F.absl(HCOUNT), F.d(0))
+    m.immop("cmp", "w", 2, F.d(0))
+    m.bcc("lt", "p3_one")
+    m.moveq(1, 0)
+    m.label("p3_one")
+    m.move("w", F.d(0), F.absl(RESULT + 0x36))
+    # STOP wakes on a future level-4 interrupt (register #10 = 20: one every 21 lines)
+    vdp_reg(m, 10, 20)
+    m.move_sr(0x2000)
+    m.clr("w", F.absl(HCOUNT))                            # a request pending at the unmask was delivered before this instruction
+    m.stop(0x2000)
+    m.stop(0x2000)
+    m.stop(0x2000)
+    m.move_sr(0x2700)
+    m.move("w", F.absl(HCOUNT), F.absl(RESULT + 0x30))
+    vdp_reg(m, 0, 0x04)                                   # IE1 clear again
+    m.clr("w", F.absl(HCOUNT))
 
 
 def main_program(sub_len, layout):
@@ -185,9 +270,10 @@ def main_program(sub_len, layout):
     m.move("w", F.imm(0x4EF9), F.absl(THUNK))
     m.move("l", F.imm(VINT_HANDLER), F.absl(THUNK + 2))
     m.clr("w", F.absl(FRAMES))
-    negative(m, 4, lambda n: vdp_reg(n, 0, 0x14))         # IE1: the H-interrupt
-    negative(m, 8, lambda n: vdp_cmd(n, 0x80148004))      # IE1 set and cleared again by one long write (two register writes)
     negative(m, 9, lambda n: n.move("w", F.imm(0xA014), F.absl(VDP_CTRL)))  # 101x: a register write for GPGX, a command for the host
+    vdp_reg(m, 10, 0)                                     # SEG-106: a request would be latched every line; IE1 stays clear
+    m.move("w", F.imm(THUNK_VECTOR), F.absl(GA + 0x06))   # the level-4 vector: $FFFF:$A12006 = the thunk
+    m.clr("w", F.absl(HCOUNT))
     vdp_reg(m, 1, 0x34)                                   # IE0
     m.move_sr(0x2000)
     m.label("frames")
@@ -196,6 +282,8 @@ def main_program(sub_len, layout):
     m.move_sr(0x2700)
     vdp_reg(m, 1, 0x14)
     m.move("w", F.absl(FRAMES), F.absl(RESULT + 0x1A))
+    m.move("w", F.absl(HCOUNT), F.absl(RESULT + 0x2A))    # IE1 clear: latched every line, never requested
+    hint_section(m)
     # ---- H-INT vector register ----
     m.move("w", F.imm(0x1234), F.absl(GA + 0x06))
     m.move("w", F.absl(GA + 0x06), F.absl(RESULT + 0x1C))
@@ -261,15 +349,44 @@ def build():
     fault.stop(0x2700)
     rom[FAULT:FAULT + len(fault.assemble())] = fault.assemble()
     handler = F.Asm(VINT_HANDLER)
+    handler.w(0x40C6)                                       # MOVE SR,D6: the stacked mask is the interrupt level
+    handler.immop("and", "w", 0x0700, F.d(6))
+    handler.immop("cmp", "w", 0x0400, F.d(6))
+    handler.bcc("ne", "vint")
+    handler.quick("add", "w", 1, F.absl(HCOUNT))           # level 4
+    handler.tst("w", F.absl(FIRST))
+    handler.bcc("ne", "h4done")
+    handler.move("w", F.imm(4), F.absl(FIRST))
+    handler.label("h4done")
+    handler.rte()
+    handler.label("vint")                                   # level 6
+    handler.move("w", F.absl(HCOUNT), F.absl(HSNAP))
     handler.quick("add", "w", 1, F.absl(FRAMES))
+    handler.tst("w", F.absl(FIRST))
+    handler.bcc("ne", "v6done")
+    handler.move("w", F.imm(6), F.absl(FIRST))
+    handler.label("v6done")
     handler.rte()
     rom[VINT_HANDLER:VINT_HANDLER + len(handler.assemble())] = handler.assemble()
+    assert VINT_HANDLER + len(handler.assemble()) <= SUB_SRC
     assert SUB_SRC + len(sub) <= DMA_ROM
     rom[SUB_SRC:SUB_SRC + len(sub)] = sub
     for i, word in enumerate(ROM_DMA_WORDS):
         struct.pack_into(">H", rom, DMA_ROM + 2 * i, word)
     struct.pack_into(">I", rom, ENTRY_ROM, 0x4E714E71)
     return bytes(rom), sub, layout
+
+
+def hint_lines(reload):
+    """Level-4 requests per frame in steady state, from the counter rules of ADR 0250 (an independent re-statement for the fixture):
+    each active line reloads and requests at 0 else counts down; the first vertical-blank line requests at 0 without a reload."""
+    counter, count = reload, 0
+    for _ in range(224):
+        if counter == 0:
+            counter, count = reload, count + 1
+        else:
+            counter -= 1
+    return count + (1 if counter == 0 else 0)
 
 
 def word_at(rom, address):
@@ -287,7 +404,8 @@ def expected(rom, sub, layout):
         "0": 0x80, "2": 0x8080, "4": 0x40, "6": 0x7F, "8": 0x33,
         "10": ((free_next >> 8) | 0x01) << 8, "12": ((held_next >> 8) & 0xFE) << 8,
         "14": 0xC35A, "16": 0x5A5A, "18": 0, "20": be(sum(DMA_WORDS), 2), "22": be(sum(ROM_DMA_WORDS), 2), "40": be(sum(WORD_DMA_WORDS[:-1]), 2), "24": 1, "26": 3,
-        "28": 0x1234, "30": 0x1234, "32": 0xFFFF, "34": cart_next, "36": cart_next, "38": (byte_next & 0xFF) << 8,
+        "28": 0x1234, "30": 0x1234, "32": 0xFFFF,
+        "42": 0, "44": 2 * hint_lines(9), "46": 2 * hint_lines(0), "48": 3, "50": 6, "52": 0, "54": 1, "34": cart_next, "36": cart_next, "38": (byte_next & 0xFF) << 8,
     }
     padded = sub.ljust((len(sub) + 0xFF) & ~0xFF, b"\0")
     return {
@@ -300,14 +418,11 @@ def expected(rom, sub, layout):
             "main:d7=2": {"range": NEG_RANGES[2], "address": 0xA00000, "width": 1, "write": 0},    # MOVE.B from Z80 RAM after it ran
             "main:d7=3": {"range": NEG_RANGES[3], "address": WINDOW, "width": 0, "write": 0},      # the DMA source (detail) in the PRG-RAM window
             "main:d7=10": {"range": NEG_RANGES[10], "address": 0x200000, "width": 0, "write": 0},  # ... in Word RAM handed to the sub
-            "main:d7=4": {"range": NEG_RANGES[4], "address": VDP_CTRL, "width": 2, "write": 1},    # register #0 write with IE1
-            "main:d7=8": {"range": NEG_RANGES[8], "address": VDP_CTRL, "width": 4, "write": 1},    # the same inside a long write
             "main:d7=9": {"range": NEG_RANGES[9], "address": VDP_CTRL, "width": 2, "write": 1},    # a 101x control word
             "main:d7=5": {"range": NEG_RANGES[5], "address": VDP_CTRL, "width": 4, "write": 1},    # the copy-DMA command (long control write)
         },
         "negatives": {
             "main:d7=1": ["open_bus_read", 0], "main:d7=2": ["main_device_unsupported", 0], "main:d7=3": ["vdp_dma_unsupported", 0], "main:d7=10": ["vdp_dma_unsupported", 0],
-            "main:d7=4": ["interrupt_source_unsupported", 0], "main:d7=8": ["interrupt_source_unsupported", 0],
             "main:d7=9": ["vdp_access_unsupported", 0], "main:d7=5": ["vdp_access_unsupported", 0],
             "main:d7=6": ["materialized_image_unverified", 1], "main:d7=7": ["materialized_image_unverified", 1],
         },
