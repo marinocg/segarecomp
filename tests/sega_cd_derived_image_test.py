@@ -13,6 +13,7 @@ guard keeps every wrong case fail-closed.
   relocated_short      incomplete output: the derived extent is the produced prefix; the program stops at the first uncompiled instruction (typed)
   relocated_patched    the copy was rewritten after it was produced: the diagnostic refuses (stream_overwritten)
   relocated_duplicate  two identical delivered sources: ambiguous_source
+  malformed evidence   a truncated write log is refused
   refusals             a window nobody wrote from a stream (generated), an unverified writer, a missing ledger
 
 usage: sega_cd_derived_image_test.py <segarecomp> <c-compiler> <source-root>
@@ -58,13 +59,18 @@ def run_program(summary, out, *extra):
     return done.returncode, report, report["ga"]["comstat"][2]      # the module's marker word (COMSTAT2)
 
 
-def derive(tmp, out, summary, name, verified=True, ledger=True):
+def derive(tmp, out, summary, name, verified=True, ledger=True, rerun=True, delivered=None):
     """Run the stopped program once more with its RAM write log (deterministic: the same run as the pass) and ask the diagnostic."""
     work = tmp / name
     log = tmp / (name + ".wlog")
-    run_program(summary, out, "--ram-write-log", str(log))
+    if rerun:
+        run_program(summary, out, "--ram-write-log", str(log))
     capture = json.loads((work / "pass" / "capture.json").read_text())
-    if not ledger:
+    if delivered is not None:
+        capture["region"]["delivered"] = delivered
+        (tmp / (name + ".capture.json")).write_text(json.dumps(capture))
+        cap_path = tmp / (name + ".capture.json")
+    elif not ledger:
         capture["region"]["delivered"] = []
         (tmp / (name + ".capture.json")).write_text(json.dumps(capture))
         cap_path = tmp / (name + ".capture.json")
@@ -178,6 +184,15 @@ def main():
         check(rc == 8 and ans["error"] == "writer_not_verified", "unproven producer: a stream written by code that is not an admitted image is refused (writer_not_verified)")
         rc, ans = derive(tmp, out, base, "w-base", ledger=False)
         check(rc == 8 and ans["error"] == "no_delivery_evidence", "unproven source: without a delivery ledger nothing is claimed (no_delivery_evidence)")
+        for ranges in ([[0, 1], [40, 1], [41, 1]], [[0, 1], [40, 2], [40, 2], [41, 1]]):
+            rc, ans = derive(tmp, out, base, "w-base", rerun=False, delivered=ranges)
+            check(rc == 0 and ans.get("extent") == want, "ledger: adjacent or overlapping delivery ranges are merged like the product resolver (%d entries)" % len(ranges))
+        log = tmp / "w-base.wlog"
+        saved_log = log.read_bytes()
+        log.write_bytes(saved_log + b"\x02\x01\x01")     # a partial trailing record: refused, not dropped
+        rc, ans = derive(tmp, out, base, "w-base", rerun=False)
+        check(rc == 8 and ans["error"] == "bad_evidence", "malformed evidence: a truncated write log is refused (bad_evidence), never silently shortened")
+        log.write_bytes(saved_log)
         out_g, _ = fixture(tmp, "generated")
         gen = build(tmp, out_g, "w-gen")
         rc, ans = derive(tmp, out_g, gen, "w-gen")

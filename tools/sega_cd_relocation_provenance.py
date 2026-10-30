@@ -17,6 +17,12 @@ Evidence chain, all required (each failure is a typed refusal, nothing is guesse
                 code: values computed by instructions are not a delivered run), `ambiguous_source` for several (never decided by order). Equality alone never
                 classifies anything: the stream and the verified writer say where the bytes came from, uniqueness says whether the answer is single.
   4. bounds     an even base and length of at least MIN_RUN bytes; the extent never exceeds the stream.
+AUTHORITY. The result is a *candidate*, never executable-image authority. A writer program counter, a contiguous stream and equal bytes do not prove that the writer
+read THAT source: the write log carries no read addresses. `--verified` ranges are the caller's diagnostic assertions, not authority established by the build. What
+makes a candidate safe to execute is only the generated code's per-instruction byte guard against the admitted (disc-digest-verified) bytes.
+LIMITS. Offline Python research helper, not a production disc reader (M15 uses the validated C++ disc reader): the CUE is read with a regular expression (first FILE entry,
+MODE1/2048 or MODE1/2352 only); the whole write log (<= 1 GiB) and one ascending stream's bytes are held in memory; up to 256 MiB of delivered blocks are read into
+memory; a log whose size is not a multiple of 16 is refused (`bad_evidence`), never truncated.
 Only main Work RAM and sub PRG RAM are covered (the write log carries no Word RAM writes): `unsupported_region` otherwise.
 
 usage: sega_cd_relocation_provenance.py --cue DISC.cue --capture CAPTURE.json --region REGION.bin --write-log W.bin [--verified cpu:base:length]...
@@ -33,6 +39,7 @@ import sys
 MAX_STREAM = 4096     # a produced fragment, not a program: larger streams are not claimed by this diagnostic
 MIN_RUN = 8           # four words
 MAX_LOG_BYTES = 1 << 30
+MAX_DELIVERED = 256 << 20     # the product resolver's bound (kResolveMaxDeliveredBytes)
 WORK_RAM = 0xFF0000
 
 
@@ -101,7 +108,9 @@ def main(argv=None):
             return fail("unsupported_region")
     window_ram = to_ram(base)                     # RAM offset of window[0]
     log = open(args.write_log, "rb").read()
-    streams = write_streams(log[:len(log) // 16 * 16], kind, log_cpu, mask)
+    if len(log) % 16 != 0:
+        return fail("bad_evidence", detail="truncated_write_log")      # never drop a partial trailing record silently
+    streams = write_streams(log, kind, log_cpu, mask)
     last = {}                                     # RAM offset -> (stream index, byte) of the final write
     for index, s in enumerate(streams):
         for j, byte in enumerate(s["data"]):
@@ -146,6 +155,8 @@ def main(argv=None):
             ledger.append((first, count))
     if cap["region"].get("delivered_overflow") or not ledger:
         return fail("no_delivery_evidence")
+    if sum(c for _, c in ledger) * 2048 > MAX_DELIVERED:
+        return fail("delivered_too_large")
     track, found = Track1(args.cue), []
     for first, count in ledger:
         data = track.blocks(first, count)
@@ -160,7 +171,8 @@ def main(argv=None):
     if len(found) > 1:
         return fail("ambiguous_source", occurrences=len(found))
     address = (WORK_RAM + lo) if cpu_name == "main" else lo
-    print(json.dumps({"ok": True, "extent": "%s:%d:%d:%d" % (cpu_name, found[0], address, length), "stream_bytes": s["end"] - s["start"], "occurrences": 1, "cut_by_later_writes": cut},
+    print(json.dumps({"ok": True, "extent": "%s:%d:%d:%d" % (cpu_name, found[0], address, length), "stream_bytes": s["end"] - s["start"], "occurrences": 1, "cut_by_later_writes": cut,
+                      "authority": "diagnostic_candidate", "source_relation": "unproven_equal_bytes_unique_source"},
                      sort_keys=True))
     return 0
 
