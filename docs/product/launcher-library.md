@@ -26,12 +26,14 @@ file, the build cache or the product: no placeholder values.
   the `roms` folder yourself if you want). The same ROM zipped or not is one game.
   Works for drag and drop, Browse, Locate ROM and the headless `--import` / `--build`. A sidecar `.mapper.json` inside a zip is not read (declare the
   Master System mapper on the game's page).
-* **Sega CD** - a different kind of game: **Import ROMs > Add Sega CD game...** takes your BIOS image, the disc's CUE file and (optionally) a verified viewer
+* **Sega CD** - only its **import** is different: **Import ROMs > Add Sega CD game...** takes your BIOS image, the disc's CUE file and (optionally) a verified viewer
   program built with the developer procedure. All three are referenced by path (never copied or bundled) and only paths, sizes and SHA-256 values are stored.
-  The details page offers **Build** (SEG-078-T003: compiles a viewer program from the two files on this computer, with progress and Cancel; experimental, see the
-  coverage notes) next to **Import program...**, shows the verification (BIOS, disc files, program) and
-  the honest state (inputs not configured, no program yet, headless-only build, stale program, mismatched, ready), and Play opens the shared viewer. See
-  [sega-cd-play.md](sega-cd-play.md).
+  After that a Sega CD game is an ordinary library game: the same cards, search, filters and sorting, the same **Details** page (its BIOS and disc are rows of
+  *Build configuration*, the build mode is a row of three tiles, the verified program, the save data and the build identity are rows of *Build provenance*, its
+  measured footprint is in the *Storage* rail), the same **Play / Build / Cancel / More** buttons and menus, the same one-at-a-time build queue with stage chips,
+  live build log, Cancel and notifications (experimental, see the coverage notes), the same cover workflow (Libretro's *Sega - Mega-CD - Sega CD* set, or your
+  own image) and the same Storage actions. Only fields that exist for a disc differ (BIOS/disc rows, Import / Verify program under *Advanced build options*,
+  and an *Input recording* section). See [sega-cd-play.md](sega-cd-play.md).
 * **Details** - top to bottom, inside the first 1080x740 view: the cover (change from its corner), editable display name (the header name is kept),
   favorite, platform, build state and ROM link health, one sentence of what matters now, and the two dominant actions **Play** (only for an executable whose
   identity matches the configuration exactly) and **Build / Recompile / Rebuild / Try again** (a missing ROM makes **Locate ROM** the primary action instead).
@@ -74,7 +76,9 @@ file, the build cache or the product: no placeholder values.
 | Data | Location | Cleaned by Storage? |
 |---|---|---|
 | Built games, logs | `<cache>/games/<id>[.partial|.failed]/` | yes (by plan) |
-| Shared Zig compiler cache | `<cache>/zig-cache/` | yes (Clear shared compiler cache) |
+| A Sega CD game's generated build | `<library>/sega-cd/<id16>/build[.partial|.failed]/` (`program-viewer`, `status.json`, `build.log`) | yes (the same plans as a native build) |
+| A Sega CD game's **save data** and **input recordings** | `<library>/sega-cd/<id16>/backup-ram.bin`, `recordings/` | **never** (protected user data, see below) |
+| Shared Zig compiler cache and the Sega CD object cache | `<cache>/zig-cache/`, `<cache>/sega-cd-objects/` | yes (Clear shared compiler cache) |
 | Library, covers, ROMs unpacked from zips, launcher + viewer settings, screenshots dir default | `<cache>/library/` (`library.json`, `covers/`, `roms/`, `launcher-settings.json`, `viewer-settings.cfg`) | never |
 | Your ROMs | where they are | never |
 
@@ -111,7 +115,13 @@ the exact scope, reclaimable bytes, what stays and what cannot be undone.
 | Clear shared compiler cache | the contents of `zig-cache/` | all builds; the next Recompile is slower |
 | Remove from library | the library entry (optionally also its build folders) | the ROM, covers |
 
-Never touched: original ROMs, ROM copies extracted from ZIP archives (`library/roms/`), covers, screenshots, `library.json`, unknown folders in the cache (reported, not deleted), a running game or build. Cleanup is
+Never touched: original ROMs, ROM copies extracted from ZIP archives (`library/roms/`), covers, screenshots, `library.json`, unknown folders in the cache (reported, not deleted), a running game or build.
+
+**Protected user data (Sega CD).** A Sega CD game's save (its internal backup RAM) and its input recordings are the player's own data. The Storage report and the
+game's Storage rail list them apart ("Saves & recordings"), outside every total that a cleanup can reclaim, and no cleanup action can contain them: the plans
+are built from the generated build folders only, and the deletion backend refuses any other path under a game's folder, even in a forged plan. Rebuilding,
+replacing the program, *Keep metadata only*, *Clean failed / abandoned builds*, the automatic policies and *Remove from library* never delete or reset a save; a
+removed game's save is found again when the same BIOS and disc are added again. The removal sheet says what is removed and what is kept. Cleanup is
 refused while a build or game runs (one busy guard). Settings > Build & Runtime offers an **automatic policy** after a successful build: never,
 remove intermediates, keep the newest N playable games (older ones are reduced to metadata only; favorites, running games and the game being built
 are excluded) or a soft limit that only reminds you. The default is *never*.

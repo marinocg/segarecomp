@@ -17,7 +17,7 @@
 #
 # Shard count: wall time of one CI job ~ setup/build (~2 min) + shard cost / 4 cores. Six shards keep the slowest host under ~7 min.
 set(SEGARECOMP_CI_SHARD_COUNT 6)
-set(SEGARECOMP_CI_SHARD_BUDGET_SECONDS 2600)
+set(SEGARECOMP_CI_SHARD_BUDGET_SECONDS 2700)   # SEG-109-T005: 2600 -> 2700; the SDL3 job registers every launcher/viewer suite, and the five launcher parity tests (~680 s contended) add ~110 s per shard there
 set(SEGARECOMP_CI_MAX_TEST_SECONDS 600)
 set(SEGARECOMP_CI_DEFAULT_COST 3)
 set(SEGARECOMP_CI_TEST_COSTS
@@ -41,7 +41,8 @@ set(SEGARECOMP_CI_TEST_COSTS
   segarecomp_ml_v3_test=1 segarecomp_ml_v3_sgdk_test=1 segarecomp_ml_v3_train_test=1 segarecomp_ml_v3_diagnose_test=1
   segarecomp_oracle_bench_test=1 segarecomp_oracle_bench_fixture_test=15 segarecomp_xplat_qualify_test=1 segarecomp_xplat_handoff_test=2 segarecomp_xplat_corpus_test=1 segarecomp_xplat_design_test=1 segarecomp_xplat_models_test=1 segarecomp_xplat_final_test=1 segarecomp_xplat_explore_test=1 segarecomp_xplat_stability_test=1 segarecomp_xplat_cv2_test=1 segarecomp_xplat_seg076_final_test=1
   segarecomp_oracle_bench_fixture_test=600 sega_cd_bios_bootarea_test=578 sms_native_build_policy_test=561 sega_cd_native_build_test=476 sega_cd_bios_unvisited_test=423 sega_cd_bios_wordram_extent_test=418 sega_cd_services_loader_test=382 sega_cd_file_first_test=364 z80_owner_group_differential_test_slice3=346 sms_optimized_policy_test_cli=318 sega_cd_extent_discovery_test=316 sega_cd_recursive_discovery_test=310 sms_bank_crossing_test=271 sega_cd_bios_partition_test=269 sega_cd_epoch_recipe_build_test=248 sms_owner_group_equivalence_test=235 m68k_pipeline_tests=234 sega_cd_bios_sub_wordram_extent_test=233 z80_selective_admission_test_slice2=203 sms_render_native_test=198 genesis_z80_build_pipeline_bound_test=197 m68k_conformance_harness_test=181 sega_cd_bios_posthandoff_test=180 z80_execution_coverage_test=160 genesis_z80_build_pipeline_test=155 sms_ml_region_z80_test=147 z80_generated_pipeline_test=135 z80_selective_admission_test=132 sms_viewer_equivalence_test=109 sega_cd_epoch_recipe_test=83 sega_cd_template_run_test=67 z80_live_operand_test=62 sega_cd_live_test=61  # SEG-104: re-measured on the Linux GCC shard runner (PR #169 run 40979276169, contended seconds; capped at the per-test maximum). Many Sega CD and Z80 tests were unlisted (3 s) or stale, which put several 400-600 s tests into one shard (shard 2: 18.5 min against 8-16 min elsewhere)
-  launcher_input_diagnostics_test=25 launcher_sms_policy_test=20 launcher_gui_navigation_test=12)  # SDL3 viewer/launcher suites (only registered when SDL3 is enabled)  # RUN_SERIAL: sonic_startup_inventory_adapter_failure_test runs alone, so it occupies all four cores
+  launcher_input_diagnostics_test=25 launcher_sms_policy_test=20 launcher_gui_navigation_test=12
+  launcher_parity_gui_journey_wide_test=160 launcher_parity_gui_journey_narrow_test=80 launcher_parity_gui_persist_wide_test=180 launcher_parity_gui_input_wide_test=170 launcher_parity_gui_input_narrow_test=90)  # SEG-109-T005: measured locally (150-170 s alone), x2-3 for a contended 4-core runner  # SDL3 viewer/launcher suites (only registered when SDL3 is enabled)  # RUN_SERIAL: sonic_startup_inventory_adapter_failure_test runs alone, so it occupies all four cores
 
 # The guard runs inside the shard it is assigned to (it only lists tests, so it is cheap) and must exist before the partition below.
 add_test(NAME ci_shard_guard_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/ci_shard_guard_test.py

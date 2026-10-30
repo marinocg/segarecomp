@@ -1074,7 +1074,7 @@ void App::run_script() {
     SDL_Keymod mod = SDL_KMOD_NONE;
     if (arg == "Tab") sc = SDL_SCANCODE_TAB; else if (arg == "Return") sc = SDL_SCANCODE_RETURN; else if (arg == "Escape") sc = SDL_SCANCODE_ESCAPE;
     else if (arg == "Down") sc = SDL_SCANCODE_DOWN; else if (arg == "Up") sc = SDL_SCANCODE_UP; else if (arg == "Left") sc = SDL_SCANCODE_LEFT;
-    else if (arg == "Right") sc = SDL_SCANCODE_RIGHT; else if (arg == "Space") sc = SDL_SCANCODE_SPACE; else if (arg == "F") { sc = SDL_SCANCODE_F; mod = ImGui::GetIO().ConfigMacOSXBehaviors ? SDL_KMOD_LGUI : SDL_KMOD_LCTRL; }  // the shortcut modifier: Cmd on macOS (ImGui swaps Ctrl/Cmd), Ctrl elsewhere
+    else if (arg == "Right") sc = SDL_SCANCODE_RIGHT; else if (arg == "Space") sc = SDL_SCANCODE_SPACE; else if (arg == "Menu") sc = SDL_SCANCODE_APPLICATION; else if (arg == "F") { sc = SDL_SCANCODE_F; mod = ImGui::GetIO().ConfigMacOSXBehaviors ? SDL_KMOD_LGUI : SDL_KMOD_LCTRL; }  // the shortcut modifier: Cmd on macOS (ImGui swaps Ctrl/Cmd), Ctrl elsewhere
     if (sc == SDL_SCANCODE_UNKNOWN) { trace("script=unknown_key " + arg); return; }
     const SDL_Scancode mod_key = mod == SDL_KMOD_LGUI ? SDL_SCANCODE_LGUI : SDL_SCANCODE_LCTRL;
     if (mod != SDL_KMOD_NONE) push_key(mod_key, true, mod);
@@ -1149,6 +1149,31 @@ void App::run_script() {
         SDL_PushEvent(&e);
       } else trace("script=no_rect " + cmd + " " + arg);
     }
+  } else if (cmd == "mouse_action") {  // SEG-109-T005: move the pointer to the centre of the open game's Play / Build / More button (then `click`)
+    const auto found = std::find_if(details_layout_.begin(), details_layout_.end(), [&](const LayoutRect &item) { return item.name == arg; });
+    if (found != details_layout_.end()) {
+      const ImVec2 centre(details_origin_.x + found->rect.GetCenter().x, details_origin_.y + found->rect.GetCenter().y);
+      script_mouse_ = centre;
+      SDL_Event e;
+      SDL_zero(e);
+      e.type = SDL_EVENT_MOUSE_MOTION;
+      e.common.timestamp = SDL_GetTicksNS();
+      e.motion.windowID = SDL_GetWindowID(window_);
+      e.motion.x = centre.x;
+      e.motion.y = centre.y;
+      SDL_PushEvent(&e);
+    } else trace("script=no_rect mouse_action " + arg);
+  } else if (cmd == "mode") {          // select the build mode of the open game as its tile would: compatibility | optimized | file_first
+    if (LibraryEntry *e = catalog_.find_id(detail_id_)) {
+      if (e->platform_id == "sega-cd") scd::select_build_mode(e->sega_cd, arg);
+      else { e->aot_policy = arg == "optimized" ? "optimized" : "compatibility"; e->aot_model = e->platform_id == "master-system" ? "v1" : "gen2"; }
+      save_catalog();
+      request_status_refresh();
+    }
+  } else if (cmd == "report") {        // trace the measured storage of the open game
+    const EntryUsage *u = report_valid_ ? report_.find(detail_id_) : nullptr;
+    trace(u != nullptr ? "storage total=" + std::to_string(u->total.total()) + " user=" + std::to_string(u->user_data) + " intermediates=" + std::to_string(u->intermediates) + " dirs=" + std::to_string(u->dirs.size())
+                       : std::string("storage unavailable"));
   } else if (cmd == "click") {  // a left click at the pointer: press now, release a few frames later
     for (const bool down : {true, false}) {
       SDL_Event e;
@@ -1238,11 +1263,33 @@ void App::run_script() {
   } else if (cmd == "cancel_build") {  // the Cancel build / Unqueue action for the open game
     if (!detail_id_.empty()) stop_or_dequeue_build(detail_id_);
   } else if (cmd == "wait_idle") {  // hold the script until no build is running or queued
-    if (build_running() || scd_import_job_.valid() || !build_queue_.empty() || status_pending_) { --script_at_; script_wait_ = 2; }
+    if (build_running() || scd_import_job_.valid() || !build_queue_.empty() || status_pending_ || maintenance_running_) { --script_at_; script_wait_ = 2; }
   } else if (cmd == "wait_file") {  // hold the script until a file exists (at most ~20 s of frames)
     std::error_code ec;
     if (!fs::exists(fs::path(arg), ec) && ++script_wait_file_frames_ < 1200) { --script_at_; script_wait_ = 1; }
     else script_wait_file_frames_ = 0;
+  } else if (cmd == "cover") {         // SEG-109-T005: choose a local cover image for the open game, exactly as the file chooser's result would
+    if (!detail_id_.empty()) {
+      std::lock_guard<std::mutex> lock(dialog_mutex_);
+      dialog_events_.push_back(DialogEvent{"cover", detail_id_, {arg}, {}});
+    }
+  } else if (cmd == "scan") {          // a fresh storage measurement; `wait_scan` holds the script until it is done
+    report_valid_ = false;
+    request_scan();
+  } else if (cmd == "wait_scan") {
+    if (scanning_ || scan_again_ || !report_valid_) { --script_at_; script_wait_ = 2; }
+  } else if (cmd == "cleanup") {       // run the Storage plan of the open game (the plan the confirmation sheet would run): archive | failed | cache | intermediates | remove
+    const LibraryEntry *e = catalog_.find_id(detail_id_);
+    if (e != nullptr && report_valid_) {
+      Plan plan;
+      if (arg == "archive") plan = plan_archive(report_, {e->id()}, busy_);
+      else if (arg == "failed") plan = plan_failed_partial(report_, false, busy_);
+      else if (arg == "cache") plan = plan_zig_cache(report_, cache_dir_, busy_);
+      else if (arg == "intermediates") plan = plan_intermediates(report_, {e->id()}, busy_);
+      else if (arg == "remove") plan = plan_remove_from_library(report_, {e->id()}, true, busy_);
+      trace("cleanup=" + arg + " items=" + std::to_string(plan.items.size()));
+      run_plan(plan);
+    } else trace("cleanup=refused");
   } else if (cmd == "scroll_page") {   // SEG-109-T005: scroll the current page (`end` = to the bottom)
     script_page_scroll_ = arg == "end" ? 1e9F : static_cast<float>(std::atof(arg.c_str()));
   } else if (cmd == "open_more") {     // open the More menu of the open game
@@ -1328,6 +1375,12 @@ void App::run_script() {
     else if (key == "queued") actual = !detail_id_.empty() && is_queued(detail_id_) ? "1" : "0";
     else if (key == "build_count") actual = std::to_string(build_count());
     else if (key == "build_outcome") actual = last_build_outcome_;
+    else if (key == "storage_bytes") actual = !detail_id_.empty() && report_valid_ && report_.find(detail_id_) != nullptr ? std::to_string(report_.find(detail_id_)->total.total()) : "-";
+    else if (key == "user_data_bytes") actual = !detail_id_.empty() && report_valid_ && report_.find(detail_id_) != nullptr ? std::to_string(report_.find(detail_id_)->user_data) : "-";
+    else if (key == "failure") actual = failures_.count(detail_id_) != 0 ? "1" : "0";
+    else if (key == "maintenance") actual = maintenance_running_ ? "1" : "0";
+    else if (key == "cover") actual = !detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr && !catalog_.find_id(detail_id_)->cover.empty() ? "1" : "0";
+    else if (key == "menu_has") actual = [&] { const std::string want = value; for (const auto &l : ui::menu_log) if (l == want) return std::string(value); return std::string("-"); }();
     else if (key == "menu") actual = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) ? "1" : "0";
     trace(std::string("expect ") + (actual == value ? "ok " : "FAIL ") + arg + " actual=" + actual);
   } else if (cmd == "dump") {

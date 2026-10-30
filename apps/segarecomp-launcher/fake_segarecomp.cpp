@@ -5,11 +5,13 @@
 //                         executable takes precedence (it models the model that is SHIPPED with this tool, and reaches children spawned by SDL)
 //   FAKE_GAME_BIN=<path>  the program a successful build installs as <output>/game
 //   FAKE_BUILD_LOG=<file> one line is appended per `build`: "<requested policy>"
-//   FAKE_BUILD_FAIL=compatibility|optimized  that policy's build fails
+//   FAKE_BUILD_FAIL=compatibility|optimized|sega-cd[,...]  those builds fail
 //   FAKE_OPT_FALLBACK=1   an Optimized request builds the broad program and reports a fallback
 //   FAKE_BUILD_ARGS_LOG=<file>  (SEG-069-T002) one line is appended per `build`: its argument list from `--rom` on, space separated
 //   FAKE_IDENTITY_DELAY_MS=<n>  (SEG-069-T002) every `aot-policy-identity` answer is delayed (models a slow capability probe)
 //   FAKE_BUILD_INTERMEDIATES=1  (SEG-069-T003) a successful build also leaves `generated.c` and `obj/` (what the launcher's intermediates cleanup removes)
+//   FAKE_SCD_PROGRAM=<path> / FAKE_SCD_DESCRIBE=<path>  (SEG-109-T005) `sega-cd build`: installs <output>/program-viewer (a copy of the Sega CD program double) and its
+//                         `.describe` statement; FAKE_BUILD_HOLD and FAKE_BUILD_FAIL=sega-cd behave as for a native build.
 //   FAKE_BUILD_HOLD=<hb>  (SEG-069-T001) the build never finishes by itself: it starts a grandchild (this binary as `--sleeper <hb>`) that appends one
 //                         byte to <hb> every 20 ms, writes <output>/hold_started and <hb>.started, and then idles. Cancel tests assert the whole tree stops.
 #include <chrono>
@@ -52,6 +54,12 @@ static std::string shipped_model(const char *argv0) {
   std::string model;
   std::ifstream(fs::path(argv0).parent_path() / "model.txt") >> model;
   return model.empty() ? env("FAKE_MODEL", "m1") : model;
+}
+
+// FAKE_BUILD_FAIL is one policy or a comma-separated list of them ("optimized,sega-cd").
+static bool fail_listed(const std::string &policy) {
+  const std::string list = "," + env("FAKE_BUILD_FAIL") + ",";
+  return list.find("," + policy + ",") != std::string::npos;
 }
 
 static std::string g_model;
@@ -124,7 +132,7 @@ int main(int argc, char **argv) {
       for (int waited = 0; waited < hold_ms; waited += 20) std::this_thread::sleep_for(std::chrono::milliseconds(20));
       return 1;
     }
-    if (env("FAKE_BUILD_FAIL") == policy) {
+    if (fail_listed(policy)) {
       std::puts("@result failed stage=compile message=The fake build failed on request.");
       return 1;
     }
@@ -151,6 +159,50 @@ int main(int argc, char **argv) {
     fs::copy_file(env("FAKE_GAME_BIN"), out / (std::string("game") + suffix), fs::copy_options::overwrite_existing, ec);
     if (ec) { std::puts("@result failed stage=link message=The fake game could not be installed."); return 1; }
     std::puts("@stage compile begin\n@stage compile done\n@stage link begin\n@stage link done");
+    return 0;
+  }
+  if (command == "sega-cd" && !args.empty() && args[0] == "build") {   // SEG-109-T005: the Sega CD self-service build of the launcher, without a compiler or a disc run
+    const fs::path out = option("--output");
+    fs::create_directories(out);
+    if (!env("FAKE_BUILD_ARGS_LOG").empty()) {
+      std::ofstream line(env("FAKE_BUILD_ARGS_LOG"), std::ios::app);
+      line << "sega-cd";
+      for (const auto &arg : args) line << ' ' << arg;
+      line << '\n';
+    }
+    std::puts("@round 0\n@stage generate begin\n@stage generate done");
+    if (!env("FAKE_BUILD_HOLD").empty()) {
+      std::puts("@stage compile begin");
+      std::fflush(stdout);
+      std::ofstream(out / "partial_object.o") << "work in progress";
+      start_sleeper(argv[0], env("FAKE_BUILD_HOLD"));
+      std::ofstream(out / "build.log") << "fake sega-cd build: compiling\n";
+      std::ofstream(env("FAKE_BUILD_HOLD") + ".started") << "1";
+      const int hold_ms = env("FAKE_HOLD_MS").empty() ? 60000 : std::atoi(env("FAKE_HOLD_MS").c_str());
+      for (int waited = 0; waited < hold_ms; waited += 20) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      return 1;
+    }
+    std::ofstream(out / "build.log") << "fake sega-cd build\n";
+    if (fail_listed("sega-cd")) {
+      std::puts("@result failed stage=compile message=The fake Sega CD build failed on request.");
+      return 1;
+    }
+#if defined(_WIN32)
+    const char *suffix = ".exe";
+#else
+    const char *suffix = "";
+#endif
+    std::error_code ec;
+    fs::copy_file(env("FAKE_SCD_PROGRAM"), out / (std::string("program-viewer") + suffix), fs::copy_options::overwrite_existing, ec);
+    if (!ec && !env("FAKE_SCD_DESCRIBE").empty()) fs::copy_file(env("FAKE_SCD_DESCRIBE"), out / (std::string("program-viewer") + suffix + ".describe"), fs::copy_options::overwrite_existing, ec);
+    if (ec) { std::puts("@result failed stage=link message=The fake program could not be installed."); return 1; }
+    bool file_first = false;
+    for (const auto &arg : args) file_first = file_first || arg == "--file-first";
+    // a file-first build reports its inventory in the product's structured status (the launcher never accepts the request alone)
+    std::ofstream(out / "status.json") << "{\"status\":\"ok\",\"rounds\":1"
+                                       << (file_first ? ",\"file_first\":{\"policy\":\"structural\",\"complete\":true,\"files\":2,\"images\":2,\"oversize_files\":0,\"no_structure_files\":0,\"duplicate_files\":0,\"compiled_offsets\":4}" : "")
+                                       << "}\n";
+    std::puts("@stage compile begin\n@stage compile done\n@stage link begin\n@stage link done\n@stage pass begin\n@stage pass done\n@stage confirm begin\n@stage confirm done\n@stage viewer begin\n@stage viewer done");
     return 0;
   }
   return 2;

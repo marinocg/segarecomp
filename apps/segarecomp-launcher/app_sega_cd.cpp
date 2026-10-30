@@ -22,6 +22,15 @@ fs::path from_u8(const std::string &text) { return fs::path(std::u8string(reinte
 
 long long unix_now() { return static_cast<long long>(std::time(nullptr)); }
 
+// The refusals that mean the BIOS or the disc itself is not usable (a build cannot start); every other refusal is about the program, which a build replaces.
+bool inputs_unusable(scd::Refusal refusal) {
+  switch (refusal) {
+    case scd::Refusal::inputs_missing: case scd::Refusal::bios_missing: case scd::Refusal::bios_unreadable: case scd::Refusal::bios_too_large: case scd::Refusal::bios_changed:
+    case scd::Refusal::cue_missing: case scd::Refusal::cue_changed: return true;
+    default: return false;
+  }
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- labels
@@ -91,11 +100,7 @@ bool App::scd_can_build(const LibraryEntry &entry, const StatusInfo &info) const
   // SEG-109-T003: like a native game, Build is offered while another build runs or a check/cleanup is busy (the request joins the FIFO); only this game's own
   // running/queued build and a running or starting game refuse it.
   if (is_building(entry.id()) || is_queued(entry.id()) || game_ || scd_launch_job_.valid()) return false;
-  switch (info.scd.refusal) {   // the inputs must be in place; a program problem (missing, mismatched, stale) is what a build fixes
-    case scd::Refusal::inputs_missing: case scd::Refusal::bios_missing: case scd::Refusal::bios_unreadable: case scd::Refusal::bios_too_large: case scd::Refusal::bios_changed:
-    case scd::Refusal::cue_missing: case scd::Refusal::cue_changed: return false;
-    default: break;
-  }
+  if (inputs_unusable(info.scd.refusal)) return false;   // the inputs must be in place; a program problem (missing, mismatched, stale) is what a build fixes
   return !entry.sega_cd.bios_path.empty() && !entry.sega_cd.cue_path.empty();
 }
 
@@ -112,7 +117,7 @@ void App::scd_start_build(const std::string &id) {
   scd_build_key_ = "scd-" + entry->sha256.substr(0, 16);
   if (!busy_.try_begin_build(scd_build_key_)) { scd_build_key_.clear(); toast("Cleanup is running; try again in a moment.", true); return; }
   const scd::Status quick = scd::quick_status(entry->sega_cd);
-  if (!quick.bios_ok || quick.refusal == scd::Refusal::cue_missing || quick.refusal == scd::Refusal::cue_changed || quick.refusal == scd::Refusal::inputs_missing) {
+  if (inputs_unusable(quick.refusal)) {
     busy_.end_build(scd_build_key_);
     scd_build_key_.clear();
     show_message("The BIOS or the disc is not available", {scd::message(quick.refusal, quick.detail), "Locate the file first; the build reads both."});
@@ -222,6 +227,8 @@ void App::scd_poll() {
         if (just_built) {
           entry->last_built_at = now_seconds();   // the same "Last recompiled" fact a native build records
           entry->archived = false;
+          // The same automatic policies as after a native build (a policy only ever removes generated build folders, never a save; see storage.hpp).
+          if (settings_.cleanup.mode == "keep_last_n" || settings_.cleanup.mode == "soft_limit") policy_eval_pending_ = true;
         }
         if (built != scd_built_.end()) {
           entry->sega_cd.program_experimental = built->second.experimental;
@@ -378,6 +385,7 @@ void App::scd_finish_run() {
     diagnostics_[id] = read_tail(game_dir_ / "run.log", 24000);
   }
   request_status_refresh();
+  request_scan();   // the run may have stored a save: the storage measurements follow
 }
 
 // ---------------------------------------------------------------- dialogs

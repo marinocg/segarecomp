@@ -236,6 +236,18 @@ int run_tests() {
     f = fetch_libretro_cover(q, work, down);
     expect(!f.ok && calls.size() == 3 && f.error.find("could not be reached") != std::string::npos, "both hosts down: three requests, then a plain reason");
     expect(!fetch_libretro_cover(CoverQuery{"saturn", {"X"}, {}, {}}, work, down).ok, "unknown platform refused");
+    {  // SEG-109-T004: the same Libretro workflow serves a Sega CD game: its own thumbnail tree, matched by title / CUE file name, listing cached per platform
+      std::vector<std::string> scd_calls;
+      const std::string scd_listing = "https://thumbnails.libretro.com/Sega%20-%20Mega-CD%20-%20Sega%20CD/Named_Boxarts/";
+      const HttpGet scd_fake = [&](const std::string &url, const fs::path &out) {
+        scd_calls.push_back(url);
+        if (url == scd_listing) { spit(out, "<a href=\"Sample%20Disc%20%28USA%29.png\">"); return 0; }
+        if (url == scd_listing + "Sample%20Disc%20%28USA%29.png") { spit(out, "PNG"); return 0; }
+        return 1;
+      };
+      const CoverFetch scd = fetch_libretro_cover(CoverQuery{"sega-cd", {"Sample Disc"}, {"Sample Disc (USA).cue"}, {"USA"}}, work, scd_fake);
+      expect(scd.ok && scd.matched_name == "Sample Disc (USA)" && slurp(scd.image) == "PNG" && scd_calls.size() == 2 && fs::exists(work / "libretro-sega-cd.txt"), "a Sega CD cover is matched in its own Libretro tree: " + scd.error);
+    }
     fs::remove_all(work);
   }
   step("launcher settings");
