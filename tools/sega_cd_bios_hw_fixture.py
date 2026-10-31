@@ -50,13 +50,13 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sega_cd_fixture_disc as F  # noqa: E402  (the shared project-authored MC68000 encoder)
 
-ROM_SIZE = 0x1000
+ROM_SIZE = 0x1200
 MAIN = 0x0200
-FAULT = 0x0C00
-VINT_HANDLER = 0x0C40
-SUB_SRC = 0x0D00
-DMA_ROM = 0x0F00
-ENTRY_ROM = 0x0F80  # two NOPs: the code the handoff case places at the application entry $FF0000 (a verbatim ROM copy image)
+FAULT = 0x0E00
+VINT_HANDLER = 0x0E40
+SUB_SRC = 0x0F00
+DMA_ROM = 0x1100
+ENTRY_ROM = 0x1180  # two NOPs: the code the handoff case places at the application entry $FF0000 (a verbatim ROM copy image)
 RESULT = 0xFFC000
 THUNK = 0xFFF900
 FRAMES = 0xFFC080
@@ -145,6 +145,84 @@ def z80_run_and_read(n, program, slot, tag):
     n.move("w", F.imm(0x0100), F.absl(0xA11100))          # BUSREQ again
     n.move("b", F.absl(0xA00100), F.absl(RESULT + slot))
     n.move("w", F.imm(0x0000), F.absl(0xA11100))
+
+
+# SEG-115 (ADR 0259): image epochs of the main-side Z80 - project-authored programs, hand-assembled. Every program writes its marker to Z80 RAM $0100 and
+# parks in a `JR $` loop at $0040, so a bus hold in the middle of an upload never resumes the Z80 over bytes that are being rewritten.
+Z80_EPOCH_SLOTS = 0x64   # case 15: four marker bytes at +0, +2, +4, +6; case 16: two at +0, +2 (+8 / +10: the faulting and the healthy marker)
+Z80_ONE = bytes([0x3E, 0x5A, 0x32, 0x00, 0x01, 0xC3, 0x40, 0x00])                       # LD A,$5A / LD ($0100),A / JP $0040
+Z80_COUNT = bytes([0x3A, 0x00, 0x01, 0x3C, 0x32, 0x00, 0x01, 0xC3, 0x40, 0x00])         # LD A,($0100) / INC A / LD ($0100),A / JP $0040 (a counter: one run per restart)
+Z80_PARK = bytes([0x18, 0xFE])                                                          # JR $ at $0040
+# case 16: the first image rewrites an opcode it will execute (isolated), the second is a fresh healthy image that writes $0101
+Z80_FAULTY = bytes([0x3E, 0x5A, 0x32, 0x00, 0x01, 0x3E, 0x00, 0x32, 0x0A, 0x00, 0x18, 0xFE])
+Z80_HEALTHY = bytes([0x06, 0x6B, 0x78, 0x32, 0x01, 0x01, 0xC3, 0x40, 0x00])             # LD B,$6B / LD A,B / LD ($0101),A / JP $0040
+
+
+def z80_bus(n, requested):
+    n.move("w", F.imm(0x0100 if requested else 0x0000), F.absl(0xA11100))
+
+
+def z80_upload(n, program, at=0):
+    for i, byte in enumerate(program):
+        n.move("b", F.imm(byte), F.absl(0xA00000 + at + i))
+
+
+def z80_restart(n):
+    """BUSREQ held, /RESET pulsed, BUSREQ released: the Z80 starts again from the code in RAM (an image epoch when it has been reset since it last ran)."""
+    z80_bus(n, True)
+    n.move("w", F.imm(0x0000), F.absl(0xA11200))
+    n.move("w", F.imm(0x0100), F.absl(0xA11200))
+
+
+def z80_read(n, address, slot, tag):
+    delay(n, "z80r" + tag, 300)
+    z80_bus(n, True)
+    n.move("b", F.absl(0xA00000 + address), F.absl(RESULT + slot))
+    z80_bus(n, False)
+
+
+def z80_epochs_body(n):
+    """Case 15: an upload, a program uploaded in two bus holds while the previous image runs and restarted afterwards, a restart without change, and the same program again."""
+    z80_bus(n, True)
+    n.move("w", F.imm(0x0000), F.absl(0xA11200))
+    n.move("w", F.imm(0x0100), F.absl(0xA11200))
+    z80_upload(n, Z80_ONE)
+    z80_upload(n, Z80_PARK, 0x40)
+    z80_bus(n, False)                                      # epoch 1: the first image
+    z80_read(n, 0x100, Z80_EPOCH_SLOTS, "e1")
+    z80_bus(n, True)                                       # the second image is written in two holds, the Z80 runs in between
+    z80_upload(n, Z80_COUNT[:5])
+    z80_bus(n, False)
+    delay(n, "z80mid", 300)
+    z80_bus(n, True)
+    z80_upload(n, Z80_COUNT[5:], 5)
+    z80_bus(n, False)
+    delay(n, "z80mid2", 300)
+    z80_restart(n)
+    z80_bus(n, False)                                      # epoch 2: a restart with nothing written in its own hold; the image is the upload of both earlier holds
+    z80_read(n, 0x100, Z80_EPOCH_SLOTS + 2, "e2")
+    z80_restart(n)
+    z80_bus(n, False)                                      # epoch 3: a plain restart, nothing written since the previous epoch
+    z80_read(n, 0x100, Z80_EPOCH_SLOTS + 4, "e3")
+    z80_restart(n)
+    z80_upload(n, Z80_COUNT)                               # the same second image again; Z80 RAM $0100 holds a different (irrelevant) counter
+    z80_bus(n, False)                                      # epoch 4: the same signature as epoch 2
+    z80_read(n, 0x100, Z80_EPOCH_SLOTS + 6, "e4")
+
+
+def z80_rearm_body(n):
+    """Case 16: an isolated Z80 is re-armed by the next image epoch (a fresh reset Z80 running a registered image)."""
+    z80_bus(n, True)
+    n.move("w", F.imm(0x0000), F.absl(0xA11200))
+    n.move("w", F.imm(0x0100), F.absl(0xA11200))
+    z80_upload(n, Z80_FAULTY)
+    z80_bus(n, False)                                      # epoch 1: the image rewrites its own opcode and is isolated
+    z80_read(n, 0x100, Z80_EPOCH_SLOTS, "f1")
+    z80_restart(n)
+    z80_upload(n, Z80_HEALTHY)
+    z80_upload(n, Z80_PARK, 0x40)
+    z80_bus(n, False)                                      # epoch 2: a registered image on a reset Z80
+    z80_read(n, 0x101, Z80_EPOCH_SLOTS + 2, "f2")
 
 
 def hint_window(m, tag, reg10, slot):
@@ -339,6 +417,8 @@ def main_program(sub_len, layout):
                                n.move("w", F.imm(0x0100), F.absl(0xA11100)),
                                n.move("b", F.absl(0xA00100), F.absl(RESULT + Z80_SLOT_AFTER)),
                                n.move("w", F.imm(0x0000), F.absl(0xA11100))))
+    negative(m, 15, z80_epochs_body)                                                                # SEG-115: upload while running, restarts, an equivalent re-upload
+    negative(m, 16, z80_rearm_body)                                                                 # SEG-115: an isolated Z80 is re-armed by the next image epoch
     negative(m, 14, lambda n: z80_run_and_read(n, Z80_OTHER, Z80_SLOT, "c"))                        # an image no build pass saw: the executable program stops
     # SEG-064-T004: the transfer to the application entry is the handoff, but only to an entry that is compiled and whose live bytes match
     # the declared copy image: the main program places the two NOPs at $FF0000 and calls them

@@ -7,6 +7,9 @@ Project-authored fixture (tools/sega_cd_bios_hw_fixture.py cases 12-14; hand-ass
     for an epoch a pass already saw), compiles them, and the program observes the Z80's write; deterministic for every scheduler partition;
   - case 13: a Z80 that rewrites an opcode it will execute is isolated (muted, Genesis contract section 18); the main program is not stopped and reads the sound RAM as it stands;
   - case 14: an executable program meeting an image no build pass saw stops with the typed `z80_unsupported` (diagnostic 56, z80_unknown_image), never interpreting it;
+  - case 15 (SEG-115, ADR 0259): image epochs - a program uploaded in two bus holds while the previous image runs and then restarted (empty hold of its own), a restart
+    without change, and the same program again with different irrelevant Z80 data: the correct image is selected each time (no stale image, no new image for the repeat);
+  - case 16 (SEG-115): an isolated Z80 is re-armed by the next image epoch and runs the registered image of a fresh reset (recoveries = 1);
   - control `--main-z80 0`: the previous rule - the read after the Z80 ran is the typed stop main_device_unsupported - and no `z80` object in the report.
 usage: sega_cd_main_z80_test.py <segarecomp> <c-compiler> <source-root>
 """
@@ -24,6 +27,7 @@ import sega_cd_common as common  # noqa: E402
 FIXTURE = ROOT / "tools" / "sega_cd_bios_hw_fixture.py"
 EXE = ".exe" if os.name == "nt" else ""
 SLOT, SLOT_AFTER = 0x60, 0x62
+EPOCH_SLOT = 0x64
 failures = []
 
 
@@ -37,7 +41,7 @@ def build(tmp, disc, bios, name, case, *extra):
     out = tmp / name
     done = subprocess.run([SEGARECOMP, "sega-cd", "build", "--cue", str(disc / "disc.cue"), "--bios", str(bios), "--output", str(out), "--runtime-dir", str(ROOT), "--cc", CC,
                            "--budget", "3000000", "--jobs", "4", "--cache-dir", str(tmp / "cache"), "--pass-set", "main:d7=%d" % case,
-                           "--emit-arg", "--application-entry", "--emit-arg", "0xFF0000", "--emit-arg", "--copy-image", "--emit-arg", "main:0xFF0000:0xF80:4", *extra],
+                           "--emit-arg", "--application-entry", "--emit-arg", "0xFF0000", "--emit-arg", "--copy-image", "--emit-arg", "main:0xFF0000:0x1180:4", *extra],
                           capture_output=True, text=True, timeout=1800)
     status = out / "status.json"
     return done, (json.loads(status.read_text()) if status.exists() else None), out / ("program" + EXE)
@@ -84,6 +88,31 @@ def main():
         check(r13["result"] == "idle" and r13["stop"]["class"] == "none", "case 13: a Z80 that rewrites its own opcode does not stop the main processor (%s)" % r13["stop"])
         check(r13["z80"]["state"] == "faulted" and r13["z80"]["fault"] == 57, "case 13: the Z80 is isolated by the structural mutation (z80_code_mismatch)")
         check(b13[SLOT] == 0x5A and b13[SLOT_AFTER] == 0x5A, "case 13: the main program reads sound RAM as it stands before and after the isolation")
+
+        done, status, exe15 = build(tmp, disc, bios, "c15", 15)
+        check(done.returncode == 0 and status and status["status"] == "ok", "case 15: the build succeeds")
+        z15 = status["z80"]
+        check(z15["images"] == 3, "case 15: three Z80 images (the fixture's earlier upload and the two programs; the repeated upload is not a new image) (%s)" % z15["images"])
+        r15 = run(exe15, disc, bios, 15)
+        b15 = bytes.fromhex(r15["result_block"])
+        check(r15["result"] == "idle", "case 15: the program runs to its end (%s)" % r15["stop"])
+        got = [b15[EPOCH_SLOT + 2 * i] for i in range(4)]
+        check(got == [0x5A, 0x5B, 0x5C, 0x5D], "case 15: each epoch ran its own image - first image, restart of the two-hold upload, restart without change, same program again (%s)" % got)
+        zr15 = r15["z80"]
+        check(zr15["state"] == "modelled" and zr15["fault"] == 0 and zr15["recoveries"] == 0 and zr15["unknown_epochs"] == 0 and zr15["epochs"] == 5,
+              "case 15: healthy, five epochs, no fault, no recovery (%s)" % {k: v for k, v in zr15.items() if k != "epoch_log"})
+        for extra in (("--slice-seed", 5), ("--slice-ticks", 4321)):
+            other = run(exe15, disc, bios, 15, *extra)
+            check(other["z80"]["digest"] == zr15["digest"] and other["result_block"] == r15["result_block"], "case 15: identical Z80 state and result for the partition %s" % (extra,))
+
+        done, status, exe16 = build(tmp, disc, bios, "c16", 16)
+        check(done.returncode == 0 and status and status["status"] == "ok" and status["z80"]["images"] == 3, "case 16: the build succeeds with three images")
+        r16 = run(exe16, disc, bios, 16)
+        b16 = bytes.fromhex(r16["result_block"])
+        zr16 = r16["z80"]
+        check(r16["result"] == "idle" and zr16["state"] == "modelled" and zr16["fault"] == 0 and zr16["recoveries"] == 1 and zr16["fault_epoch"] == 2,
+              "case 16: the isolated Z80 is re-armed by the next epoch (%s)" % {k: v for k, v in zr16.items() if k != "epoch_log"})
+        check(b16[EPOCH_SLOT] == 0x5A and b16[EPOCH_SLOT + 2] == 0x6B, "case 16: the first image ran before its isolation and the registered second image ran after the re-arm (%02x %02x)" % (b16[EPOCH_SLOT], b16[EPOCH_SLOT + 2]))
 
         done, status, exe0 = build(tmp, disc, bios, "c12-off", 12, "--main-z80", "0")
         check(done.returncode == 0 and status and status["z80"]["enabled"] is False, "control: --main-z80 0 builds without the Z80")

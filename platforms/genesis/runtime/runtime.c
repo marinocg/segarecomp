@@ -1535,7 +1535,8 @@ static int genesis_z80_bus_write(GenesisRuntime *runtime, uint32_t address, int 
                                     tracker->written, stop))
     return 1;
   if (epoch) tracker->executed = 1U;
-  if (transition) memset(tracker->written, 0, sizeof(tracker->written)); /* the hold window ends at every runnable transition */
+  if (transition && (epoch || !tracker->accumulate_until_epoch)) /* the hold window ends at every runnable transition (SEG-115: at an epoch only, when accumulating) */
+    memset(tracker->written, 0, sizeof(tracker->written));
   return 0;
 }
 

@@ -110,6 +110,8 @@ static int scd_z80_attach(ScdMachine *m) {
   z->machine.isolate_view_stops = 1U;
   z->machine.on_unknown_image = scd_z80_on_unknown;
   z->machine.unknown_image_context = z;
+  z->machine.rearm_faulted_on_epoch = 1U;       /* SEG-115 (ADR 0259): a fresh image epoch re-arms an isolated Z80 */
+  host->z80_epoch.accumulate_until_epoch = 1U;  /* SEG-115: an upload spread over several bus holds belongs to the next epoch */
   host->z80_epoch.on_epoch = scd_z80_on_epoch;
   host->z80_epoch.context = z;
   m->z80 = z;
@@ -121,6 +123,7 @@ static void scd_z80_detach(ScdMachine *m) {
   GenesisRuntime *host = (GenesisRuntime *)m->vdp_host;
   if (host != NULL) {
     host->z80_hooks = NULL;
+    host->z80_epoch.accumulate_until_epoch = 0U;
     host->z80_epoch.on_epoch = NULL;
     host->z80_epoch.context = NULL;
   }
@@ -195,11 +198,11 @@ static void scd_z80_report(const ScdMachine *m, FILE *out) {
   uint32_t i;
   genesis_z80_machine_state_digest(machine, digest);
   for (i = 0U; i < 32U; ++i) snprintf(hex + 2U * i, 3U, "%02x", digest[i]);
-  fprintf(out, "\"state\":\"%s\",\"images\":%u,\"epochs\":%u,\"unknown_epochs\":%u,\"bound\":%u,\"fault\":%u,\"fault_epoch\":%u,\"fault_tick\":%llu,\"finish_fault\":%u,\"cycles\":%llu,"
+  fprintf(out, "\"state\":\"%s\",\"images\":%u,\"epochs\":%u,\"unknown_epochs\":%u,\"bound\":%u,\"recoveries\":%u,\"fault\":%u,\"fault_epoch\":%u,\"fault_tick\":%llu,\"finish_fault\":%u,\"cycles\":%llu,"
                "\"reset_assert\":%llu,\"reset_release\":%llu,\"busreq_assert\":%llu,\"busreq_release\":%llu,\"bank_writes\":%llu,\"banked_reads\":%llu,"
                "\"digest\":\"%s\"",
           z->unmodelled ? "unmodelled" : genesis_z80_machine_sound_faulted(machine) ? "faulted" : "modelled", (unsigned)genesis_z80_image_count,
-          (unsigned)host->z80_epoch.epoch_count, z->unknown_count, machine->bound_ordinal, (unsigned)machine->sound_fault,
+          (unsigned)host->z80_epoch.epoch_count, z->unknown_count, machine->bound_ordinal, machine->sound_recoveries, (unsigned)machine->sound_fault,
           machine->sound_fault_epoch, (unsigned long long)machine->sound_fault_master_ticks,
           z->finish_fault ? z->finish_diagnostic : 0U, (unsigned long long)machine->cpu.state.cycles,
           (unsigned long long)machine->count_reset_assert, (unsigned long long)machine->count_reset_release,
