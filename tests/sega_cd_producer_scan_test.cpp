@@ -431,6 +431,22 @@ int main() {
     for (const auto &f : r.fragments) second = second || f.base == kDest + 0x100U;
     check(!second, std::string("the second proof is not trusted after produced code overwrote its source (ending ") + std::to_string(ending) + ")");
   }
+  {   // review: a branch around the image-overwriting loop, then a pushed return into the overwritten image resuming at a walked label
+    for (int variant = 0; variant < 2; ++variant) {
+      Builder b;
+      b.a.moveq(7, 0); const std::size_t skip = b.a.bcc(7);                                  // BEQ L
+      b.a.lea_abs(2, 0xFFB000U); b.a.movea_l(3, kIp + 0xF0U); b.a.move_w_imm(1, 63);          // W: RAM over the image (stub and the later source)
+      const std::uint32_t hw = b.a.here(); b.a.copy_post('b', 2, 3); b.a.dbra(1, hw);
+      if (variant == 0) { b.a.w(0x4879U); const std::size_t pea = b.a.out.size(); b.a.l(0); b.a.jmp(kIp + 0xF8U); b.a.patch(skip, b.a.here()); const std::uint32_t at = b.a.here(); for (int i = 0; i < 4; ++i) b.a.out[pea + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(at >> (24 - 8 * i)); }
+      else { b.a.w(0x4E40U); b.a.patch(skip, b.a.here()); }                                   // TRAP #0, then L
+      b.a.lea_abs(0, kFrag + 0x40U); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+      const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jmp(kDest);
+      b.a.pad_to(kIp + 0x100U);
+      Bytes frag = fragment_code(kDest); frag.resize(0x40, 0x4E); const Bytes src = fragment_code(kDest); frag.insert(frag.end(), src.begin(), src.end());
+      b.tail = frag;
+      check(scan(b.finish(), none).fragments.empty(), std::string("a lost exit after an image-overwriting loop claims no proof (") + (variant == 0 ? "pushed return + jump into the image" : "trap") + ")");
+    }
+  }
   {   // garbage / data in the boot images: no candidates, no fragment, no crash
     Bytes junk(0x300);
     for (std::size_t i = 0; i < junk.size(); ++i) junk[i] = static_cast<std::uint8_t>(i * 37U + 11U);

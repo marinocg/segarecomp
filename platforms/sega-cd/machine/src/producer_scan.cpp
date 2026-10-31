@@ -205,7 +205,12 @@ class Walker {
     cur_pc_ = pc;
     transfers_[pc].clear();
     if (pc >= image_base_ && pc - image_base_ < image_.size() && (entry_state.ran & image_writers_) != 0U) {   // the boot image was overwritten on this path: its old bytes are not the code that runs here, and a call that reaches it may return having run these loops
-      if (from_image_.count(pc) != 0U) returned(entry_state.ran);   // the routine went on in code it had overwritten (a jump from produced code into the new image is not that)
+      // exempt only a fresh entry into code a recognised loop wrote (the new image); anything else - the routine going on in code it had overwritten, or produced
+      // code jumping into the untouched old image - is a lost exit that may resume other code
+      const bool fresh_entry = from_image_.count(pc) == 0U && std::any_of(loop_writes_.begin(), loop_writes_.end(), [&](const LoopWrite &w) {
+        return ((entry_state.ran >> w.id) & 1U) != 0U && ((image_writers_ >> w.id) & 1U) != 0U && pc >= w.range.lo && pc < w.range.hi;
+      });
+      if (!fresh_entry) returned(entry_state.ran);
       return;
     }
     if (try_loop(pc, s)) return;
@@ -240,7 +245,7 @@ class Walker {
       return;
     }
     if (op->kind == M68kIrKind::return_from_subroutine) returned(entry_state.ran);
-    if (control.dynamic != M68kDynamicControlFamily::none || control.always_raises_exception) { returned(entry_state.ran); return; }   // rts / rte / computed: the path ends - and may have returned to a caller
+    if (control.dynamic != M68kDynamicControlFamily::none || control.always_raises_exception || control.successors.empty()) { returned(entry_state.ran); return; }   // rts / rte / computed: the path ends - and may have returned to a caller
     for (const auto &succ : control.successors) {
       if (succ.kind == M68kControlSuccessorKind::fallthrough || succ.kind == M68kControlSuccessorKind::conditional_fallthrough) seed(succ.target & 0x00FFFFFFU, s);
       else if (succ.kind == M68kControlSuccessorKind::branch_target || succ.kind == M68kControlSuccessorKind::conditional_target) {
@@ -538,8 +543,8 @@ class Walker {
         if (c.refused) continue;
         if (!out_.complete) { refuse(c, ProducerRefusal::budget_exhausted); continue; }
         // A walked routine returns by RTS, RTE, a computed or tail jump, a trap handler or by running off its end; whichever way a path of produced code ends, the caller's
-        // code may have been overwritten by then. With any call into walked code present and any loop that overwrites the boot image, no proof is claimed.
-        if ((image_overwritten_in_call_ || image_writers_ != 0U) && !continuations_.empty()) { refuse(c, ProducerRefusal::source_written); continue; }
+        // code may have been overwritten by then. A path that, after a loop overwrote the boot image, ends by any route that can resume other code (return, trap, computed or out-of-walk jump, undecodable, a jump back from the image itself) therefore claims no proof; the one exempt route is the produced code's own fresh entry into the new image from outside the image.
+        if (image_overwritten_in_call_) { refuse(c, ProducerRefusal::source_written); continue; }
         if (inside_refused(c.head_pc)) { refuse(c, ProducerRefusal::not_executed); continue; }   // produced by code that is itself not proven
         const auto against = [&](const Range &w) {
           if (w.overlaps(image)) return std::optional<ProducerRefusal>(ProducerRefusal::source_written);   // a located store into the walked image (self-patching): its operands cannot be trusted
