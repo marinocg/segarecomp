@@ -49,6 +49,7 @@ static uint8_t z80_view_read(void *context, uint16_t address, uint64_t cycles) {
   (void)cycles;
   if (address < Z80_RAM_END) return machine->runtime->devices.z80_bus.z80_ram[address & (GENESIS_Z80_RAM_BYTES - 1U)];
   if (address < Z80_YM_END) {
+    ++machine->count_ym_reads;
     if (!genesis_ym2612_port_read(machine->runtime, address & 3U, access_master_ticks(machine), &value)) {
       latch_stop(machine, GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS);
       return 0xFFU;
@@ -78,6 +79,7 @@ static void z80_view_write(void *context, uint16_t address, uint8_t value, uint6
     return;
   }
   if (address < Z80_YM_END) {
+    ++machine->count_ym_writes;
     if (!genesis_ym2612_port_write(machine->runtime, address & 3U, value, access_master_ticks(machine)))
       latch_stop(machine, GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS);
     return;
@@ -92,6 +94,8 @@ static void z80_view_write(void *context, uint16_t address, uint8_t value, uint6
     if ((address & 0xFFU) < 0x11U || (address & 0xFFU) > 0x17U || ((address & 1U) == 0U) ||
         !genesis_psg_port_write(machine->runtime, value, access_master_ticks(machine)))
       latch_stop(machine, GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS);
+    else
+      ++machine->count_psg_writes;
     return;
   }
   if (address < Z80_BANKED) {

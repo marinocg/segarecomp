@@ -311,7 +311,9 @@ static void scd_write_audio_report(FILE *out, const ScdMachine *m) {
           (unsigned long long)x->cdda_skipped, (unsigned long long)x->saturated,
           (unsigned long long)x->sink_refused, (unsigned long long)g_mix_tap.io_errors);
   for (i = 0; i < 32U; ++i) fprintf(out, "%02x", digest[i]);
-  fprintf(out, "\"}");
+  fprintf(out, "\"");
+  if (m->z80 != NULL && scd_z80_registered_ops()->audio_frame != NULL) fprintf(out, ",\"fm_frames\":%llu", (unsigned long long)x->fm_frames); /* SEG-115: output frames that carried YM2612/PSG */
+  fprintf(out, "}");
 }
 
 const ScdLiveHost *scd_live_host_registered = NULL;

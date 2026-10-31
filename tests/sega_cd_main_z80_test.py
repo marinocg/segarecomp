@@ -29,6 +29,7 @@ import sega_cd_common as common  # noqa: E402
 FIXTURE = ROOT / "tools" / "sega_cd_bios_hw_fixture.py"
 EXE = ".exe" if os.name == "nt" else ""
 SLOT, SLOT_AFTER = 0x60, 0x62
+FM_SLOT = 0x68
 EPOCH_SLOT = 0x64
 failures = []
 
@@ -39,11 +40,11 @@ def check(ok, label):
         failures.append(label)
 
 
-def build(tmp, disc, bios, name, case, *extra):
+def build(tmp, disc, bios, name, case, *extra, audio=False):
     out = tmp / name
     done = subprocess.run([SEGARECOMP, "sega-cd", "build", "--cue", str(disc / "disc.cue"), "--bios", str(bios), "--output", str(out), "--runtime-dir", str(ROOT), "--cc", CC,
-                           "--budget", "3000000", "--jobs", "4", "--cache-dir", str(tmp / "cache"), "--pass-set", "main:d7=%d" % case,
-                           "--emit-arg", "--application-entry", "--emit-arg", "0xFF0000", "--emit-arg", "--copy-image", "--emit-arg", "main:0xFF0000:0x1280:4", *extra],
+                           "--budget", "3000000", "--jobs", "4", "--cache-dir", str(tmp / "cache"), "--pass-set", "main:d7=%d" % case, "--z80-audio", "1" if audio else "0",
+                           "--emit-arg", "--application-entry", "--emit-arg", "0xFF0000", "--emit-arg", "--copy-image", "--emit-arg", "main:0xFF0000:0x1780:4", *extra],
                           capture_output=True, text=True, timeout=1800)
     status = out / "status.json"
     return done, (json.loads(status.read_text()) if status.exists() else None), out / ("program" + EXE)
@@ -135,6 +136,43 @@ def main():
         c17 = run(exe17c, disc, bios, 17)
         check(c17["z80"]["state"] == "faulted" and c17["z80"]["fault"] == 57 and bytes.fromhex(c17["result_block"])[EPOCH_SLOT] != 0x5A,
               "case 17 control: without alternatives the patched routine is the isolating structural mismatch")
+
+        # ---- SEG-115 T006: the shared YM2612 + PSG ----
+        done, status, exe18 = build(tmp, disc, bios, "c18", 18, audio=True)
+        check(done.returncode == 0 and status and status["status"] == "ok" and status["z80"]["audio"] is True, "case 18: the build with the sound devices succeeds")
+        pcm = tmp / "c18.pcm"
+        r18 = run(exe18, disc, bios, 18, "--audio-digest", "1", "--audio-pcm", pcm)
+        fm = r18["z80"]["fm_psg"]
+        b18 = bytes.fromhex(r18["result_block"])
+        check(r18["result"] == "idle" and r18["z80"]["state"] == "modelled" and b18[FM_SLOT] == 0x5A, "case 18: the Z80 driver ran to its marker (%s)" % r18["stop"])
+        check(fm["z80_ym_writes"] == 62 and fm["z80_psg_writes"] == 3 and fm["ym_writes"] == 62 and fm["psg_writes"] == 4,
+              "case 18: the YM2612 received exactly the Z80's 62 writes (31 register/value pairs) and the PSG its 3 plus the fixture BIOS's own single 68000 write: %s" % {k: fm[k] for k in ("z80_ym_writes", "z80_psg_writes", "ym_writes", "psg_writes")})
+        check(fm["z80_ym_reads"] >= 31, "case 18: the driver polled the YM2612 busy flag after every write (%d status reads)" % fm["z80_ym_reads"])
+        check(fm["non_silent"] is True and fm["mixer_fault"] == 0 and fm["fm_missing"] == 0 and fm["fm_overrun"] == 0 and fm["ym_samples"] > 100,
+              "case 18: the devices produced a non-silent stream without a mixer fault (%s)" % {k: fm[k] for k in ("ym_samples", "mixer_frames", "non_silent", "mixer_fault", "fm_missing")})
+        samples = pcm.read_bytes()
+        nonzero = sum(1 for i in range(0, len(samples) - 1, 2) if samples[i] or samples[i + 1])
+        check(r18["audio"]["fm_frames"] > 100 and nonzero > 100, "case 18: the Sega CD output stream carries the FM/PSG frames (%d mixed frames, %d non-zero samples)" % (r18["audio"]["fm_frames"], nonzero))
+        for extra in (("--slice-seed", 3), ("--slice-ticks", 12345)):
+            other = run(exe18, disc, bios, 18, "--audio-digest", "1", *extra)
+            check(other["audio"]["pcm_sha256"] == r18["audio"]["pcm_sha256"] and other["z80"]["fm_psg"] == fm and other["z80"]["digest"] == r18["z80"]["digest"],
+                  "case 18: identical mixed stream, device state and Z80 state for the partition %s" % (extra,))
+        quiet = run(exe18, disc, bios, 18)
+        check("audio" not in quiet and quiet["z80"]["digest"] == r18["z80"]["digest"] and quiet["result_block"] == r18["result_block"] and quiet["device_log"] == r18["device_log"] and quiet["ticks"] == r18["ticks"],
+              "case 18: with the output disabled the guest state (Z80 digest, result block, device log, time) is the same")
+        done, status, exe18p = build(tmp, disc, bios, "c18-plain", 18, "--z80-audio", "0")
+        plain = run(exe18p, disc, bios, 18, "--audio-digest", "1")
+        check(plain["audio"]["pcm_sha256"] != r18["audio"]["pcm_sha256"] and plain["audio"]["pcm_peak"] == 0 and "fm_psg" not in plain["z80"] and "fm_frames" not in plain["audio"],
+              "case 18 control: without the devices (--z80-audio 0) the stream is the PCM-only silence and the report has no fm_psg")
+
+        done, status, exe19 = build(tmp, disc, bios, "c19", 19, audio=True)
+        r19 = run(exe19, disc, bios, 19)
+        b19 = bytes.fromhex(r19["result_block"])
+        check(r19["result"] == "idle" and b19[FM_SLOT] & 0x80 != 0 and b19[FM_SLOT + 2] & 0x80 == 0 and b19[FM_SLOT + 2] & 0x01 != 0 and b19[FM_SLOT + 4] == 0,
+              "case 19: the 68000 sees busy right after a data write, a cleared busy flag with timer A overflowed after a delay, and a cleared status after the Z80 /RESET (%02x %02x %02x)" %
+              (b19[FM_SLOT], b19[FM_SLOT + 2], b19[FM_SLOT + 4]))
+        r19b = run(exe19, disc, bios, 19, "--slice-seed", 5)
+        check(r19b["z80"]["fm_psg"] == r19["z80"]["fm_psg"] and r19b["result_block"] == r19["result_block"], "case 19: identical for another scheduler partition")
 
         done, status, exe0 = build(tmp, disc, bios, "c12-off", 12, "--main-z80", "0")
         check(done.returncode == 0 and status and status["z80"]["enabled"] is False, "control: --main-z80 0 builds without the Z80")

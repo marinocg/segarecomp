@@ -120,6 +120,14 @@ static void scd_mix_emit_until(ScdMachine *m, uint64_t limit) {
     if (pcm_abs != 0U) x->pcm_frames += 1U;
     if (pcm_abs > x->peak) x->peak = pcm_abs;
     if (x->q_count == 0U) scd_mix_read_ahead(m);
+    if (m->z80 != NULL && scd_z80_registered_ops()->audio_frame != NULL) { /* SEG-115: the shared YM2612 + PSG, a fixed two frames behind (their window must have closed) */
+      int32_t fm[2];
+      if (scd_z80_registered_ops()->audio_frame(m, x->frames, fm) != 0) {
+        l += fm[0];
+        r += fm[1];
+        x->fm_frames += 1U;
+      }
+    }
     if (x->q_count != 0U) {
       l += scd_cdda_scale(x->queue[2U * x->q_head], x->fader_volume);
       r += scd_cdda_scale(x->queue[2U * x->q_head + 1U], x->fader_volume);
@@ -197,6 +205,7 @@ void scd_pcm_sync(ScdMachine *m, uint64_t tick) {
 
 void scd_mix_advance(ScdMachine *m, uint64_t tick) {
   if (!m->mix.enabled) return;
+  if (m->z80 != NULL && scd_z80_registered_ops()->audio_sync != NULL) scd_z80_registered_ops()->audio_sync(m, tick); /* SEG-115: the FM/PSG frames up to this instant exist */
   scd_pcm_run(m, tick);
   scd_mix_emit_until(m, tick);
   scd_mix_flush_chunk(m);

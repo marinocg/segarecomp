@@ -63,6 +63,7 @@ typedef struct GenesisZ80Machine {
 
   /* Opt-in aggregate evidence (counts only; never an address or value; SEG-032-T010). */
   uint64_t count_reset_assert, count_reset_release, count_busreq_assert, count_busreq_release, count_bank_writes, count_banked_reads;
+  uint64_t count_ym_writes, count_ym_reads, count_psg_writes;  /* SEG-115: accesses ORIGINATING in the Z80 (the 68000's are the device's own counts) */
 } GenesisZ80Machine;
 
 /* Non-zero once the sound CPU is faulted (isolated). */
