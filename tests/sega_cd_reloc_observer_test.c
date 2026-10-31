@@ -44,7 +44,8 @@ static void next(uint32_t cpu) { machine->cpu[cpu].retired += 1U; } /* the instr
 static char json[1U << 16];
 
 static const char *report(void) {
-  FILE *f = tmpfile();
+  static const char name[] = "scd_reloc_observer_test.tmp"; /* a named scratch file: tmpfile() needs the drive root on some Windows C runtimes */
+  FILE *f = fopen(name, "w+b");
   size_t n;
   if (f == NULL) exit(1);
   scd_reloc_report(machine, f);
@@ -52,6 +53,7 @@ static const char *report(void) {
   n = fread(json, 1U, sizeof json - 1U, f);
   json[n] = 0;
   fclose(f);
+  remove(name);
   return json;
 }
 

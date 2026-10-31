@@ -10,6 +10,7 @@ Relocation (Class A)
   relocated_short      incomplete output: the produced prefix is admitted; the program stops, typed, at the first byte never produced
   relocated_duplicate  the fragment occurs twice on the disc: the causal read, not the byte pattern, selects the source
   relocated_patched    rewritten after the copy: refused (stream_overwritten); the fragment never runs
+  relocated_main       the main processor copies a fragment of its Word RAM module into main Work RAM (the other supported RAM class)
   relocated_staged     copied through a data register (no causal read): equal bytes are NOT a relocation extent (they are, at most, a produced image)
   derivation matrix    the evidence of the frontier pass is mutated one fact at a time: each is a typed refusal
 Produced code (Class B)
@@ -194,6 +195,14 @@ def main():
         code, report, marker = pat.run(out_p)
         check(st["frontier"] and st["frontier"].get("relocation") == "stream_overwritten" and marker == 0 and report["stop"]["class"] == "entry_not_compiled",
               "destination overwritten: refused (stream_overwritten); the fragment's first instruction never retires")
+        mn = Case(tmp, "relocated_main")
+        out_m, st, _ = mn.build("a")
+        tm = mn.truth["relocation"]
+        done = subprocess.run([str(out_m / ("program" + EXE)), "--disc-dir", str(mn.dir / "disc"), "--bios", str(mn.bios), "--instruction-budget", "3000000"], capture_output=True, text=True, timeout=300)
+        rep = json.loads(done.stdout)
+        check(st["frontier"] is None and "main:%d:%d:%d" % (tm["offset"], tm["base"], tm["length"]) in st["extents"] and st["reconstruction"]["relocated_extents"] == 1 and
+              rep["result"] == "idle" and rep["result_block"][0x20 * 2:0x20 * 2 + 4] == "a001",
+              "main Work RAM: a fragment the main processor copied from its Word RAM module into Work RAM is explained and runs natively (the other supported RAM class)")
         stg = Case(tmp, "relocated_staged")
         out_g, st, _ = stg.build("a")
         code, report, marker = stg.run(out_g)

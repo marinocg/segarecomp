@@ -26,6 +26,7 @@ Cases (each builds its own image and disc):
   decoded_volatile  the decoder takes its key from a Gate Array register read inside the loop (input the build cannot account for)
   decoded_large     8,192 decoded bytes (over the 4 KiB bound)
   decoded_input     the decoder's key is read once from the machine's backup RAM before the loop (input the build declares; a run with other backup RAM produces other bytes)
+  relocated_main    SEG-111: the module is loaded into Word RAM and run by the MAIN processor, which copies a fragment of it into main Work RAM and runs it there
   relocated_staged  the fragment is copied through a data register (read and write are different instructions): equal bytes, no causal read
   decoded_corrupt   one byte of the encoded payload is flipped on the disc (the producer is intact, its input is not)
   jump_unwritten    the sub jumps into PRG RAM nothing ever wrote (no producer at all)
@@ -59,8 +60,11 @@ FIRST_MODULE_LBA = 40
 BLOB_AT = 0x1000
 CASES = ("direct", "siblings", "duplicates", "overlay", "late_flip", "generated", "transformed", "undelivered",
          "relocated", "relocated_short", "relocated_patched", "relocated_duplicate",
-         "decoded", "decoded_add", "decoded_partial", "decoded_patched", "decoded_volatile", "decoded_large", "decoded_corrupt", "decoded_input", "relocated_staged", "jump_unwritten")
+         "decoded", "decoded_add", "decoded_partial", "decoded_patched", "decoded_volatile", "decoded_large", "decoded_corrupt", "decoded_input", "relocated_staged", "relocated_main", "jump_unwritten")
 PRODUCED_LEN = 64
+MAIN_DEST = 0xFFA000        # SEG-111: where the main-side relocated fragment runs (main Work RAM)
+MAIN_MARK = 0xFFC020        # its marker (RESULT + 0x20: part of the report's result block)
+WORD_RAM_MAIN = 0x200000
 RELOC_DEST = 0x030000       # SEG-110: where the relocated fragment runs (sub PRG RAM)
 RELOC_AT = 0x200            # the fragment's offset inside its module
 RELOC_LEN = 24
@@ -80,10 +84,10 @@ def module_bytes(base, mark_addr, mark, nops, size, seed, flip_after=None):
     return code + bytes(rng.randrange(256) for _ in range(size - len(code)))
 
 
-def relocating_module(base, seed, copy_len=RELOC_LEN, patch=False, duplicate=False, staged=False):
+def relocating_module(base, seed, copy_len=RELOC_LEN, patch=False, duplicate=False, staged=False, dest=RELOC_DEST, mark=MARK):
     """SEG-110: a module whose driver copies a position-independent-by-construction fragment (absolute operands only) from its own image to RELOC_DEST and runs it."""
-    frag = F.Asm(RELOC_DEST)
-    frag.move("w", F.imm(0xA001), F.absl(MARK))
+    frag = F.Asm(dest)
+    frag.move("w", F.imm(0xA001), F.absl(mark))
     for _ in range(7):
         frag.nop()
     frag.rts()
@@ -91,7 +95,7 @@ def relocating_module(base, seed, copy_len=RELOC_LEN, patch=False, duplicate=Fal
     assert len(fragment) == RELOC_LEN, len(fragment)
     d = F.Asm(base)
     d.move("l", F.imm(base + RELOC_AT), F.a(0))
-    d.move("l", F.imm(RELOC_DEST), F.a(1))
+    d.move("l", F.imm(dest), F.a(1))
     d.move("w", F.imm(copy_len // 2 - 1), F.d(1))
     d.label("cp")
     if staged:      # SEG-111: through a data register: the read and the write are different instructions, so the pair cannot be established
@@ -101,8 +105,8 @@ def relocating_module(base, seed, copy_len=RELOC_LEN, patch=False, duplicate=Fal
         d.move("w", ("inc", 0), ("inc", 1))
     d.dbra(1, "cp")
     if patch:
-        d.move("b", F.imm(0x02), F.absl(RELOC_DEST + 3))      # the immediate's low byte: 0xA001 -> 0xA002
-    d.jsr(F.absl(RELOC_DEST))
+        d.move("b", F.imm(0x02), F.absl(dest + 3))      # the immediate's low byte: 0xA001 -> 0xA002
+    d.jsr(F.absl(dest))
     d.rts()
     driver = d.assemble()
     assert len(driver) < RELOC_AT
@@ -253,7 +257,7 @@ class Sub:
         return s.assemble()
 
 
-def main_program(sub_len):
+def main_program(sub_len, run_word_ram=False):
     m = F.Asm(MAIN)
     m.move("l", F.imm(SUB_SRC), F.a(0))
     m.move("l", F.imm(WINDOW), F.a(1))
@@ -266,6 +270,8 @@ def main_program(sub_len):
     m.move("b", F.imm(0x02), F.absl(GA + 0x03))          # DMNA: Word RAM to the sub
     m.move("b", F.imm(0x01), F.absl(GA + 0x0E))          # go
     F.wait_flag(m, GA + 0x0F, 0x02, "w_done")
+    if run_word_ram:
+        m.jsr(F.absl(WORD_RAM_MAIN))                 # SEG-111: the module the sub loaded runs on the main processor
     for i in range(3):
         m.move("w", F.absl(GA + 0x24 + 2 * i), F.absl(RESULT + 0x10 + 2 * i))
     m.move("b", F.imm(0xA5), F.absl(RESULT + 0xFF))
@@ -384,6 +390,14 @@ def plan(case):
         truth["produced"] = {"processor": "sub", "base": RELOC_DEST, "length": 32 if case == "decoded_partial" else count, "plain": data[:count].hex()}
         truth["backup_ram_key"] = 0x5A if case == "decoded_input" else None
         truth["markers"] = [0 if case in ("decoded_patched", "jump_unwritten", "decoded_volatile", "decoded_large") else 0xA001, 0, 0]
+    elif case == "relocated_main":
+        data, fragment = relocating_module(WORD_RAM_MAIN, 21, dest=MAIN_DEST, mark=MAIN_MARK)
+        put(L, data)
+        sub.load(L, 2, 0)                            # loaded into Word RAM by the sub; the main processor runs it
+        truth["extents"].append({"processor": "main", "offset": L * 2048, "base": WORD_RAM_MAIN, "length": 4096})
+        truth["relocation"] = {"processor": "main", "offset": L * 2048 + RELOC_AT, "base": MAIN_DEST, "length": RELOC_LEN}
+        truth["markers"] = [0, 0, 0]
+        truth["main_marker"] = 0xA001
     elif case.startswith("relocated"):
         data, fragment = relocating_module(base, 21, copy_len=16 if case == "relocated_short" else RELOC_LEN, patch=case == "relocated_patched", duplicate=case == "relocated_duplicate", staged=case == "relocated_staged")
         put(L, data)
@@ -426,7 +440,7 @@ def build(case, out):
     for v in range(2, 64):
         struct.pack_into(">I", rom, 4 * v, FAULT)
     rom[0x100:0x120] = b"SEGA BIOS-IMAGE LOADER FIXTURE  "
-    main = main_program(sub_len)
+    main = main_program(sub_len, run_word_ram=case == "relocated_main")
     rom[MAIN:MAIN + len(main)] = main
     fault = F.Asm(FAULT)
     fault.move("w", F.imm(0xDEAD), F.absl(RESULT + 0xF0))
