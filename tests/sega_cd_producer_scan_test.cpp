@@ -1,0 +1,458 @@
+// SEG-112 (ADR 0256): generation-time recognition of executable-image producers, on hand-assembled boot images (no disc, no game, no execution).
+//
+// Positive: the same counted-copy / byte-transform semantics are recognised with different registers, widths, destinations (main Work RAM, sub PRG RAM), control
+// transfers (JSR/JMP), several fragments from one image, a transform chain, and a produced trampoline that itself produces (bounded closure).
+// Negative: every operand the walk does not know, a source outside the immutable image, a provably rewritten source or destination, an unsupported destination,
+// an unexecuted destination, an oversized or aliasing range, an unsupported loop body, a register-keyed transform and contradictory proofs are typed refusals that
+// admit nothing. Determinism: the same images give the identical result.
+#include <algorithm>
+#include <cstdint>
+#include <iostream>
+#include <string>
+#include <vector>
+
+#include "segarecomp/machine/sega_cd/producer_scan.hpp"
+
+namespace scd = segarecomp::machine::sega_cd;
+using Bytes = std::vector<std::uint8_t>;
+
+namespace {
+
+int failures = 0;
+void check(bool ok, const std::string &label) {
+  std::cout << (ok ? "ok    " : "FAIL  ") << label << "\n";
+  if (!ok) ++failures;
+}
+
+// A tiny big-endian assembler for the forms the producers use. Addresses are guest addresses of the image being assembled.
+struct Asm {
+  std::uint32_t base;
+  Bytes out;
+  explicit Asm(std::uint32_t b) : base(b) {}
+  std::uint32_t here() const { return base + static_cast<std::uint32_t>(out.size()); }
+  void w(std::uint32_t v) { out.push_back(static_cast<std::uint8_t>(v >> 8)); out.push_back(static_cast<std::uint8_t>(v)); }
+  void l(std::uint32_t v) { w(v >> 16); w(v & 0xFFFFU); }
+  void movea_l(unsigned an, std::uint32_t v) { w(0x207CU | (an << 9)); l(v); }
+  void lea_abs(unsigned an, std::uint32_t v) { w(0x41F9U | (an << 9)); l(v); }
+  void move_w_imm(unsigned dn, std::uint32_t v) { w(0x303CU | (dn << 9)); w(v); }
+  void moveq(unsigned dn, unsigned v) { w(0x7000U | (dn << 9) | v); }
+  void copy_post(char size, unsigned x, unsigned y) { w(((size == 'b' ? 1U : size == 'w' ? 3U : 2U) << 12) | (y << 9) | (3U << 6) | (3U << 3) | x); }
+  void load_b(unsigned x, unsigned t) { w(0x1018U | (t << 9) | x); }
+  void store_b(unsigned t, unsigned y) { w(0x10C0U | (y << 9) | t); }
+  void eori_b(unsigned dn, unsigned k) { w(0x0A00U | dn); w(k); }
+  void addi_b(unsigned dn, unsigned k) { w(0x0600U | dn); w(k); }
+  void subi_b(unsigned dn, unsigned k) { w(0x0400U | dn); w(k); }
+  void eor_dn(unsigned src, unsigned dn) { w(0xB100U | (src << 9) | dn); }   // EOR.B Ds,Dn
+  void addq_w(unsigned dn) { w(0x5240U | dn); }
+  void dbra(unsigned dn, std::uint32_t head) { w(0x51C8U | dn); w(head - here()); }
+  void jsr(std::uint32_t a) { w(0x4EB9U); l(a); }
+  void jmp(std::uint32_t a) { w(0x4EF9U); l(a); }
+  void rts() { w(0x4E75U); }
+  void nop() { w(0x4E71U); }
+  void move_b_imm_abs(unsigned v, std::uint32_t a) { w(0x13FCU); w(v); l(a); }
+  void movea_l_ind(unsigned an, unsigned src) { w(0x2050U | (an << 9) | src); }   // MOVEA.L (As),An
+  void move_w_ind(unsigned dn, unsigned src) { w(0x3010U | (dn << 9) | src); }     // MOVE.W (As),Dn
+  void lea_d16(unsigned am, unsigned an, unsigned disp) { w(0x41E8U | (am << 9) | an); w(disp); }
+  void movem_l_store(unsigned an, unsigned mask) { w(0x48D0U | an); w(mask); }
+  void store_predec_b(unsigned dn, unsigned am) { w(0x1100U | (am << 9) | dn); }
+  void movea_w(unsigned an, unsigned v) { w(0x307CU | (an << 9)); w(v); }
+  void addq_l8(unsigned an) { w(0x5088U | an); }
+  void move_l_imm_abs(std::uint32_t v, std::uint32_t a) { w(0x23FCU); l(v); l(a); }
+  std::size_t bcc(unsigned cond) { w(0x6000U | (cond << 8)); w(0); return out.size() - 2U; }   // Bcc.W with a patched displacement
+  void patch(std::size_t at, std::uint32_t target) { const std::uint32_t d = target - (base + static_cast<std::uint32_t>(at)); out[at] = static_cast<std::uint8_t>(d >> 8); out[at + 1U] = static_cast<std::uint8_t>(d); }
+  void pad_to(std::uint32_t at) { while (here() < at) nop(); }
+};
+
+constexpr std::uint32_t kIp = 0xFF0000U;
+constexpr std::uint32_t kSp = 0x6000U;
+
+scd::ProducerScan scan(const Bytes &ip, const Bytes &sp) {
+  Bytes area(32768, 0);
+  const std::string id = "SEGADISCSYSTEM  ";
+  std::copy(id.begin(), id.end(), area.begin());
+  const auto put32 = [&](std::size_t at, std::uint32_t v) { for (int i = 0; i < 4; ++i) area[at + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(v >> (24 - 8 * i)); };
+  const std::uint32_t ip_size = static_cast<std::uint32_t>((ip.size() + 1U) & ~std::size_t{1});
+  const std::uint32_t sp_size = static_cast<std::uint32_t>((sp.size() + 1U) & ~std::size_t{1});
+  put32(0x30, 0x200); put32(0x34, std::max<std::uint32_t>(ip_size, 2U)); put32(0x38, 0); put32(0x3C, 0);
+  put32(0x40, 0x1000); put32(0x44, std::max<std::uint32_t>(sp_size, 2U)); put32(0x48, 0); put32(0x4C, 0);
+  std::copy(ip.begin(), ip.end(), area.begin() + 0x200);
+  std::copy(sp.begin(), sp.end(), area.begin() + 0x1000);
+  const auto header = segarecomp::parse_sega_cd_system_area(area);
+  if (!header.header) { std::cout << "FAIL  header\n"; ++failures; return {}; }
+  const auto boot = scd::produce_boot_images(*header.header, area);
+  if (!boot.images) { std::cout << "FAIL  boot images\n"; ++failures; return {}; }
+  return scd::scan_static_producers(area, *boot.images);
+}
+
+// IP: <setup> loop <transfer>; the fragment bytes sit at kIp + 0x100.
+Bytes fragment_code(std::uint32_t at) {   // a few NOPs and RTS at `at`
+  Asm f(at);
+  for (int i = 0; i < 11; ++i) f.nop();
+  f.rts();
+  return f.out;
+}
+constexpr std::uint32_t kFrag = kIp + 0x100U;
+constexpr std::uint32_t kDest = 0xFFA000U;
+
+struct Builder {
+  Asm a{kIp};
+  Bytes tail;   // data at kFrag
+  Bytes finish() { Bytes ip = a.out; ip.resize(0x100, 0x00); ip.insert(ip.end(), tail.begin(), tail.end()); return ip; }
+};
+
+std::size_t refused(const scd::ProducerScan &s, scd::ProducerRefusal r) { const auto it = s.refusals.find(r); return it == s.refusals.end() ? 0U : it->second; }
+
+// the canonical copy producer with overridable parts
+Bytes copy_ip(char size = 'b', unsigned ra = 0, unsigned rb = 1, unsigned rc = 0, std::uint32_t count_minus_one = 23, std::uint32_t src = kFrag, std::uint32_t dst = kDest,
+              bool transfer = true, bool use_jmp = false) {
+  Builder b;
+  b.a.lea_abs(ra, src);
+  b.a.movea_l(rb, dst);
+  b.a.move_w_imm(rc, count_minus_one);
+  const std::uint32_t head = b.a.here();
+  b.a.copy_post(size, ra, rb);
+  b.a.dbra(rc, head);
+  if (transfer) { if (use_jmp) b.a.jmp(dst); else b.a.jsr(dst); }
+  b.a.rts();
+  b.tail = fragment_code(dst);
+  b.tail.resize(64, 0x4E);
+  return b.finish();
+}
+
+}  // namespace
+
+int main() {
+  const Bytes none(64, 0);
+  const Bytes expect24 = fragment_code(kDest);
+
+  // ---------------- positive ----------------
+  auto s = scan(copy_ip(), none);
+  check(s.fragments.size() == 1 && s.fragments[0].copy && s.fragments[0].base == kDest && s.fragments[0].length == 24 && s.fragments[0].bytes == expect24 &&
+            s.fragments[0].disc_offset == 0x200U + 0x100U && s.fragments[0].processor == scd::Processor::main && s.candidates == 1,
+        "byte copy loop (A0/A1/D0): source, destination, count, bytes and disc offset are derived from the code alone");
+  check(scan(copy_ip(), none).fragments.size() == 1 && scan(copy_ip(), none).fragments[0].bytes == s.fragments[0].bytes, "the result is deterministic");
+  s = scan(copy_ip('b', 3, 5, 6), none);
+  check(s.fragments.size() == 1 && s.fragments[0].bytes == expect24, "different registers (A3/A5/D6): the same semantics are recognised, nothing depends on A0/A1/D0");
+  s = scan(copy_ip('w', 2, 4, 7, 11), none);
+  check(s.fragments.size() == 1 && s.fragments[0].length == 24 && s.fragments[0].bytes == expect24, "word copy loop (12 words)");
+  s = scan(copy_ip('l', 0, 1, 0, 5), none);
+  check(s.fragments.size() == 1 && s.fragments[0].length == 24 && s.fragments[0].bytes == expect24, "long copy loop (6 longs)");
+  s = scan(copy_ip('b', 0, 1, 0, 23, kFrag, kDest, true, true), none);
+  check(s.fragments.size() == 1, "a JMP to the destination proves executable use as well as a JSR");
+  s = scan(copy_ip('b', 0, 1, 0, 20), none);
+  check(s.fragments.size() == 1 && s.fragments[0].length == 20 && s.fragments[0].bytes == Bytes(expect24.begin(), expect24.begin() + 20), "a short fragment (21 bytes copied): the even prefix is claimed");
+  {   // sub PRG RAM destination
+    Asm a(kSp);
+    a.lea_abs(0, kSp + 0x100); a.movea_l(1, 0x30000); a.move_w_imm(0, 23);
+    const std::uint32_t head = a.here();
+    a.copy_post('b', 0, 1); a.dbra(0, head); a.jsr(0x30000); a.rts();
+    Bytes sp = a.out; sp.resize(0x100, 0);
+    const Bytes frag = fragment_code(0x30000);
+    sp.insert(sp.end(), frag.begin(), frag.end()); sp.resize(0x180, 0x4E);
+    s = scan(none, sp);
+    check(s.fragments.size() == 1 && s.fragments[0].processor == scd::Processor::sub && s.fragments[0].base == 0x30000U && s.fragments[0].bytes == frag && s.fragments[0].disc_offset == 0x1000U + 0x100U,
+          "sub PRG RAM destination (SP image)");
+  }
+  {   // two fragments from one image
+    Builder b;
+    for (int k = 0; k < 2; ++k) {
+      b.a.lea_abs(0, kFrag + 32U * static_cast<unsigned>(k)); b.a.movea_l(1, kDest + 0x100U * static_cast<unsigned>(k)); b.a.move_w_imm(0, 15);
+      const std::uint32_t head = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, head); b.a.jsr(kDest + 0x100U * static_cast<unsigned>(k));
+    }
+    b.a.rts();
+    Asm t(kFrag); for (int i = 0; i < 7; ++i) t.nop(); t.rts(); for (int i = 0; i < 8; ++i) t.nop(); t.rts();
+    b.tail = t.out;
+    s = scan(b.finish(), none);
+    check(s.fragments.size() == 2 && s.candidates == 2, "two copies from one immutable image: both proven");
+    if (s.fragments.size() != 2) { std::cout << "      got " << s.fragments.size() << " cand " << s.candidates << ":"; for (const auto &[k, n] : s.refusals) std::cout << " " << scd::producer_refusal_name(k) << "=" << n; std::cout << "\n"; }
+  }
+  {   // transforms
+    const auto xform = [&](int op, unsigned key, bool chain) {
+      Builder b;
+      b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+      const std::uint32_t head = b.a.here();
+      b.a.load_b(0, 2);
+      if (op == 0) b.a.eori_b(2, key); else if (op == 1) b.a.addi_b(2, key); else b.a.subi_b(2, key);
+      if (chain) b.a.addi_b(2, 3);
+      b.a.store_b(2, 1);
+      b.a.dbra(0, head); b.a.jsr(kDest); b.a.rts();
+      Bytes stored = expect24;
+      for (auto &x : stored) {
+        if (chain) x = static_cast<std::uint8_t>(x - 3);
+        x = static_cast<std::uint8_t>(op == 0 ? (x ^ key) : op == 1 ? (x - key) : (x + key));
+      }
+      b.tail = stored; b.tail.resize(64, 0x4E);
+      return scan(b.finish(), none);
+    };
+    for (int op = 0; op < 3; ++op) {
+      s = xform(op, 0x5A, false);
+      check(s.fragments.size() == 1 && !s.fragments[0].copy && s.fragments[0].bytes == expect24 && s.fragments[0].disc_offset == 0,
+            std::string("byte transform recognised from the code and evaluated at generation time: ") + (op == 0 ? "eor" : op == 1 ? "add" : "sub") + " (output is on no disc span)");
+    }
+    s = xform(0, 0x33, true);
+    check(s.fragments.size() == 1 && s.fragments[0].bytes == expect24 && s.fragments[0].transform.find(',') != std::string::npos, "a two-operation chain (eor then add) is evaluated");
+  }
+  {   // closure: the produced trampoline itself produces a second image
+    Builder b;
+    b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 63);
+    const std::uint32_t head = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, head); b.a.jsr(kDest); b.a.rts();
+    Asm t(kDest);   // the trampoline: copies the bytes at kFrag + 64 to 0xFFB000 and calls them
+    t.lea_abs(2, kFrag + 64); t.movea_l(3, 0xFFB000U); t.move_w_imm(1, 7);
+    const std::uint32_t th = t.here(); t.copy_post('b', 2, 3); t.dbra(1, th); t.jsr(0xFFB000U); t.rts();
+    Bytes tramp = t.out; tramp.resize(64, 0x4E);
+    Bytes inner = fragment_code(0xFFB000U); inner.resize(8, 0x4E);
+    b.tail = tramp; b.tail.insert(b.tail.end(), inner.begin(), inner.end());
+    s = scan(b.finish(), none);
+    check(s.fragments.size() == 2 && s.fragments[0].base == kDest && s.fragments[1].base == 0xFFB000U, "bounded closure: a produced trampoline that produces a second image is analysed before any code is generated");
+  }
+
+  // ---------------- negative ----------------
+  const auto none_proven = [&](const scd::ProducerScan &r, scd::ProducerRefusal why, const std::string &label) {
+    check(r.fragments.empty() && refused(r, why) >= 1, label + " -> " + scd::producer_refusal_name(why));
+    if (!(r.fragments.empty() && refused(r, why) >= 1)) {
+      std::cout << "      got " << r.fragments.size() << " fragments, refusals:";
+      for (const auto &[k, n] : r.refusals) std::cout << " " << scd::producer_refusal_name(k) << "=" << n;
+      std::cout << "\n";
+    }
+  };
+  {   // unknown source / destination / count
+    Builder b; b.a.movea_l_ind(0, 6); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::loop_operand_unknown, "unknown source pointer");
+  }
+  {
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l_ind(1, 6); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::loop_operand_unknown, "unknown destination pointer");
+  }
+  {
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_ind(0, 5);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::loop_operand_unknown, "unknown (input-dependent) loop count");
+  }
+  none_proven(scan(copy_ip('b', 0, 1, 0, 23, 0xFF8000U), none), scd::ProducerRefusal::source_not_immutable, "source in mutable RAM outside the boot image");
+  none_proven(scan(copy_ip('b', 0, 1, 0, 23, 0x00000100U), none), scd::ProducerRefusal::source_not_immutable, "source in the BIOS window, not the immutable boot image");
+  none_proven(scan(copy_ip('b', 0, 1, 0, 23, kFrag, 0xC00000U), none), scd::ProducerRefusal::destination_unsupported, "destination is a device (VDP)");
+  none_proven(scan(copy_ip('b', 0, 1, 0, 23, kFrag, 0x200000U), none), scd::ProducerRefusal::destination_unsupported, "destination in Word RAM (no bank justified)");
+  none_proven(scan(copy_ip('b', 0, 1, 0, 23, kFrag, kDest + 1U), none), scd::ProducerRefusal::destination_unsupported, "odd destination");
+  none_proven(scan(copy_ip('b', 0, 1, 0, 23, kFrag, kDest, false), none), scd::ProducerRefusal::not_executed, "destination never executed (no control transfer lands in it)");
+  none_proven(scan(copy_ip('b', 0, 1, 0, 4999), none), scd::ProducerRefusal::too_large, "more than the 4 KiB bound");
+  none_proven(scan(copy_ip('b', 0, 1, 0, 23, kFrag, kFrag + 8U), none), scd::ProducerRefusal::aliasing, "source and destination overlap (aliasing)");
+  none_proven(scan(copy_ip('b', 0, 1, 0, 23, kFrag, kIp + 0x400U), none), scd::ProducerRefusal::aliasing, "destination inside the immutable image (self-modification)");
+  {   // source written before the copy
+    Builder b; b.a.move_b_imm_abs(0x11, kFrag + 3);
+    b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::source_written, "the source is provably modified before the producer reads it");
+  }
+  {   // destination overwritten after the copy
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.move_b_imm_abs(0x22, kDest + 4); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::destination_overwritten, "a previously produced image is provably overwritten");
+  }
+  {   // unsupported loop body
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.addq_w(3); b.a.dbra(0, h); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::loop_body_unsupported, "a loop body with an extra effect");
+  }
+  {   // register-keyed (input-dependent) transform
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.load_b(0, 2); b.a.eor_dn(3, 2); b.a.store_b(2, 1); b.a.dbra(0, h); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::loop_body_unsupported, "a transform whose key is a register value, not an immediate");
+  }
+  {   // the element register is the loop counter
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.load_b(0, 0); b.a.store_b(0, 1); b.a.dbra(0, h); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::loop_body_unsupported, "the body rewrites the loop counter");
+  }
+  {   // contradictory proofs for one destination
+    Builder b;
+    for (int k = 0; k < 2; ++k) {
+      b.a.lea_abs(0, kFrag + 32U * static_cast<unsigned>(k)); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 15);
+      const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(kDest);
+    }
+    b.a.rts();
+    Asm t(kFrag); for (int i = 0; i < 7; ++i) t.nop(); t.rts(); for (int i = 0; i < 7; ++i) t.nop(); t.w(0x4E70);   // second span differs
+    b.tail = t.out;
+    s = scan(b.finish(), none);
+    check(refused(s, scd::ProducerRefusal::overlapping_fragments) >= 1 || refused(s, scd::ProducerRefusal::destination_overwritten) >= 1, "two proofs claim the same bytes differently: refused");
+  }
+
+  // ---------------- review regressions (ADR 0256 review) ----------------
+  {   // LEA must not leave a stale constant when its source is not known
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23); b.a.lea_d16(1, 2, 4);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::loop_operand_unknown, "LEA with an unknown base invalidates the destination register (no stale constant)");
+  }
+  {   // a MOVEM store covers popcount x size bytes
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.movea_l(3, kDest + 16U - 16U + 8U); b.a.movem_l_store(3, 0x00FF); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::destination_overwritten, "a MOVEM store overwrites the produced bytes (popcount x size)");
+  }
+  {   // predecrement store into the produced range, and a mirrored absolute store
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.movea_l(3, kDest + 24U); b.a.store_predec_b(0, 3); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::destination_overwritten, "a pre-decrement store with a known pointer is located");
+    Builder m; m.a.lea_abs(0, kFrag); m.a.movea_l(1, kDest); m.a.move_w_imm(0, 23);
+    const std::uint32_t h2 = m.a.here(); m.a.copy_post('b', 0, 1); m.a.dbra(0, h2); m.a.move_b_imm_abs(0x55, 0xE0A004U); m.a.jsr(kDest); m.a.rts(); m.tail = fragment_code(kDest);
+    none_proven(scan(m.finish(), none), scd::ProducerRefusal::destination_overwritten, "a store through the Work RAM mirror ($E0xxxx) hits the same cell");
+  }
+  {   // a located store into the walked code itself (self-patching) cannot be trusted
+    Builder b; b.a.move_l_imm_abs(kFrag + 0x40U, kIp + 0x0CU); b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::source_written, "a known store into the boot image invalidates every proof from it");
+  }
+  none_proven(scan(copy_ip('w', 0, 1, 0, 11, kFrag + 1U), none), scd::ProducerRefusal::destination_unsupported, "a word copy from an odd source is an address error on hardware");
+  {
+    Asm a(kSp); a.lea_abs(0, kSp + 0x100); a.movea_l(1, 0x1000); a.move_w_imm(0, 23);
+    const std::uint32_t h = a.here(); a.copy_post('b', 0, 1); a.dbra(0, h); a.jsr(0x1000); a.rts();
+    Bytes sp = a.out; sp.resize(0x100, 0); const Bytes frag = fragment_code(0x1000); sp.insert(sp.end(), frag.begin(), frag.end());
+    none_proven(scan(none, sp), scd::ProducerRefusal::destination_unsupported, "a sub destination below the SP image is BIOS-resident PRG RAM");
+  }
+  {   // path-correlated executable use: a path that skips the producer does not prove executable use
+    Builder b;
+    const std::size_t skip = b.a.bcc(6);   // BNE produce
+    for (int i = 0; i < 12; ++i) b.a.nop();
+    const std::size_t over = b.a.bcc(0);   // BRA join
+    b.a.patch(skip, b.a.here());
+    b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h);
+    b.a.patch(over, b.a.here());
+    b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    none_proven(scan(b.finish(), none), scd::ProducerRefusal::not_executed, "executable use reached only on a path that skips the producer is not executable use");
+    Builder g;   // the transfer follows the producer on every path
+    const std::size_t sk = g.a.bcc(6);
+    g.a.nop();
+    g.a.patch(sk, g.a.here());
+    g.a.lea_abs(0, kFrag); g.a.movea_l(1, kDest); g.a.move_w_imm(0, 23);
+    const std::uint32_t h2 = g.a.here(); g.a.copy_post('b', 0, 1); g.a.dbra(0, h2); g.a.jsr(kDest); g.a.rts(); g.tail = fragment_code(kDest);
+    check(scan(g.finish(), none).fragments.size() == 1, "a transfer after the producer on the walked path is executable use");
+  }
+  {   // joins: equal constants on both arms still prove; different ones do not; a call between set-up and loop forgets everything
+    for (int same = 0; same < 2; ++same) {
+      Builder b;
+      const std::size_t br = b.a.bcc(6);
+      b.a.movea_l(1, kDest); const std::size_t over = b.a.bcc(0);
+      b.a.patch(br, b.a.here()); b.a.movea_l(1, same ? kDest : kDest + 0x100U);
+      b.a.patch(over, b.a.here());
+      b.a.lea_abs(0, kFrag); b.a.move_w_imm(0, 23);
+      const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+      const auto r = scan(b.finish(), none);
+      if (same) { check(r.fragments.size() == 1, "a merge of equal constants keeps them"); for (const auto &[k, n] : r.refusals) std::cout << "      " << scd::producer_refusal_name(k) << "=" << n << " cand=" << r.candidates << "\n"; }
+      else none_proven(r, scd::ProducerRefusal::loop_operand_unknown, "a merge of different constants forgets them");
+    }
+    Builder c; c.a.lea_abs(0, kFrag); c.a.movea_l(1, kDest); c.a.move_w_imm(0, 23); c.a.jsr(0x364);
+    const std::uint32_t h = c.a.here(); c.a.copy_post('b', 0, 1); c.a.dbra(0, h); c.a.jsr(kDest); c.a.rts(); c.tail = fragment_code(kDest);
+    none_proven(scan(c.finish(), none), scd::ProducerRefusal::loop_operand_unknown, "after a call every register is unknown");
+  }
+  {   // register arithmetic: MOVEA.W sign extension, ADDQ #8, MOVEQ
+    Builder b; b.a.lea_abs(0, kFrag - 8U); b.a.addq_l8(0); b.a.movea_w(1, 0x8000); b.a.moveq(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(0xFF8000U); b.a.rts(); b.tail = fragment_code(0xFF8000U);
+    const auto r = scan(b.finish(), none);
+    check(r.fragments.size() == 1 && r.fragments[0].base == 0xFF8000U && r.fragments[0].disc_offset == 0x300U && r.fragments[0].length == 24, "MOVEA.W sign-extends, ADDQ.L #8 adds eight, MOVEQ sets the count");
+  }
+
+  {   // a refused loop's writes are still facts against other proofs
+    const auto two_loops = [&](std::uint32_t dst2, std::uint32_t src2, std::uint32_t count2, bool other_first = false) {
+      Builder b;
+      const auto other = [&] {
+        b.a.lea_abs(2, src2); b.a.movea_l(3, dst2); b.a.move_w_imm(1, count2);
+        const std::uint32_t h2 = b.a.here(); b.a.copy_post('b', 2, 3); b.a.dbra(1, h2);
+      };
+      if (other_first) other();
+      b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+      const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h);
+      if (!other_first) other();
+      b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+      return scan(b.finish(), none);
+    };
+    none_proven(two_loops(kDest, 0xFFB000U, 23), scd::ProducerRefusal::destination_overwritten, "a refused loop (mutable source) that writes the produced bytes between production and use overwrites them");
+    none_proven(two_loops(kDest + 4U, 0xFFB000U, 2), scd::ProducerRefusal::destination_overwritten, "a refused loop that writes part of the produced bytes");
+    check(two_loops(kIp + 0x20U, kFrag + 0x40U, 7, true).fragments.empty(), "a loop that patches the boot image BEFORE the producer: nothing is proven from the overwritten image (self-patching)");
+    check(two_loops(kIp + 0x20U, kFrag + 0x40U, 7, false).fragments.empty(), "after a loop patches the image the old bytes are not walked: nothing downstream of it is proven (conservative)");
+    check(two_loops(kDest + 0x400U, kFrag + 0x40U, 7).fragments.size() == 1, "an unrelated second loop does not disturb a proof");
+  }
+  {   // a producer inside a refused parent is not proven either
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 63);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.move_b_imm_abs(0x33, kDest + 2U); b.a.jsr(kDest); b.a.rts();
+    Asm t(kDest); t.lea_abs(2, kFrag + 64); t.movea_l(3, 0xFFB000U); t.move_w_imm(1, 7);
+    const std::uint32_t th = t.here(); t.copy_post('b', 2, 3); t.dbra(1, th); t.jsr(0xFFB000U); t.rts();
+    Bytes tramp = t.out; tramp.resize(64, 0x4E); Bytes inner = fragment_code(0xFFB000U); inner.resize(8, 0x4E);
+    b.tail = tramp; b.tail.insert(b.tail.end(), inner.begin(), inner.end());
+    check(scan(b.finish(), none).fragments.empty(), "a parent that is overwritten also invalidates the producer it contains");
+  }
+  {   // the element width belongs to its own loop: a word loop before a byte loop from an odd source must not make the byte loop look misaligned
+    Builder b; b.a.lea_abs(2, kFrag); b.a.movea_l(3, kDest + 0x100U); b.a.move_w_imm(1, 7);
+    const std::uint32_t h2 = b.a.here(); b.a.copy_post('w', 2, 3); b.a.dbra(1, h2);
+    b.a.lea_abs(0, kFrag + 1U); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 15);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h);
+    b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    const auto r = scan(b.finish(), none);
+    check(r.fragments.size() == 1 && r.fragments[0].base == kDest && refused(r, scd::ProducerRefusal::destination_unsupported) == 0, "a byte loop from an odd source is not refused because of an earlier word loop");
+  }
+  {   // an overwriting loop inside a called routine between production and use is not lost by the call
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h);
+    const std::size_t call_at = b.a.out.size();
+    b.a.w(0x4EB9U); b.a.l(0);                                    // JSR routine (patched below)
+    b.a.jsr(kDest); b.a.rts();
+    const std::uint32_t routine = b.a.here();
+    b.a.lea_abs(2, kFrag + 0x40U); b.a.movea_l(3, kDest + 4U); b.a.move_w_imm(1, 3);
+    const std::uint32_t h2 = b.a.here(); b.a.copy_post('b', 2, 3); b.a.dbra(1, h2); b.a.rts();
+    for (int i = 0; i < 4; ++i) b.a.out[call_at + 2U + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(routine >> (24 - 8 * i));
+    b.tail = fragment_code(kDest);
+    check(scan(b.finish(), none).fragments.empty(), "a callee that overwrites the produced bytes before the use is not forgotten at the return");
+  }
+  {   // a loop inside a called routine that patches the source of a LATER proof (the routine's code is overwritten before its return)
+    Builder b; const std::size_t call_at = b.a.out.size(); b.a.w(0x4EB9U); b.a.l(0);
+    b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(kDest); b.a.rts();
+    const std::uint32_t routine = b.a.here();
+    b.a.lea_abs(2, kFrag + 32U); b.a.movea_l(3, kFrag); b.a.move_w_imm(1, 23);
+    const std::uint32_t h2 = b.a.here(); b.a.copy_post('b', 2, 3); b.a.dbra(1, h2); b.a.rts();
+    for (int i = 0; i < 4; ++i) b.a.out[call_at + 2U + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(routine >> (24 - 8 * i));
+    b.tail = fragment_code(kDest);
+    check(scan(b.finish(), none).fragments.empty(), "a callee loop that patches a later proof's source is not forgotten at the return");
+  }
+  for (int ending = 0; ending < 6; ++ending) {   // produced code that overwrites the image and leaves WITHOUT an RTS still returns to its caller's overwritten code
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 63);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(kDest);
+    b.a.lea_abs(0, kFrag + 0x40U); b.a.movea_l(1, kDest + 0x100U); b.a.move_w_imm(0, 23);
+    const std::uint32_t h2 = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h2); b.a.jsr(kDest + 0x100U); b.a.rts();
+    Asm t(kDest); t.lea_abs(2, 0xFFB000U); t.movea_l(3, kFrag + 0x40U); t.move_w_imm(1, 23);
+    const std::uint32_t th = t.here(); t.copy_post('b', 2, 3); t.dbra(1, th);
+    if (ending == 0) t.rts(); else if (ending == 1) t.w(0x4E73U); else if (ending == 2) t.jmp(0x00000364U); else if (ending == 3) t.w(0x4AFCU); else if (ending == 4) t.jmp(kIp + 0xE0U); else { t.w(0x4E40U); t.rts(); }   // RTS, RTE, tail JMP out, illegal, JMP into the untouched image, TRAP then RTS
+    Bytes frag = t.out; frag.resize(64, 0x4E);
+    const Bytes second_src = fragment_code(kDest + 0x100U);
+    frag.insert(frag.end(), second_src.begin(), second_src.end());
+    b.tail = frag;
+    const auto r = scan(b.finish(), none);
+    bool second = false;
+    for (const auto &f : r.fragments) second = second || f.base == kDest + 0x100U;
+    check(!second, std::string("the second proof is not trusted after produced code overwrote its source (ending ") + std::to_string(ending) + ")");
+  }
+  {   // review: a branch around the image-overwriting loop, then a pushed return into the overwritten image resuming at a walked label
+    for (int variant = 0; variant < 2; ++variant) {
+      Builder b;
+      b.a.moveq(7, 0); const std::size_t skip = b.a.bcc(7);                                  // BEQ L
+      b.a.lea_abs(2, 0xFFB000U); b.a.movea_l(3, kIp + 0xF0U); b.a.move_w_imm(1, 63);          // W: RAM over the image (stub and the later source)
+      const std::uint32_t hw = b.a.here(); b.a.copy_post('b', 2, 3); b.a.dbra(1, hw);
+      if (variant == 0) { b.a.w(0x4879U); const std::size_t pea = b.a.out.size(); b.a.l(0); b.a.jmp(kIp + 0xF8U); b.a.patch(skip, b.a.here()); const std::uint32_t at = b.a.here(); for (int i = 0; i < 4; ++i) b.a.out[pea + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(at >> (24 - 8 * i)); }
+      else { b.a.w(0x4E40U); b.a.patch(skip, b.a.here()); }                                   // TRAP #0, then L
+      b.a.lea_abs(0, kFrag + 0x40U); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+      const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jmp(kDest);
+      b.a.pad_to(kIp + 0x100U);
+      Bytes frag = fragment_code(kDest); frag.resize(0x40, 0x4E); const Bytes src = fragment_code(kDest); frag.insert(frag.end(), src.begin(), src.end());
+      b.tail = frag;
+      check(scan(b.finish(), none).fragments.empty(), std::string("a lost exit after an image-overwriting loop claims no proof (") + (variant == 0 ? "pushed return + jump into the image" : "trap") + ")");
+    }
+  }
+  {   // garbage / data in the boot images: no candidates, no fragment, no crash
+    Bytes junk(0x300);
+    for (std::size_t i = 0; i < junk.size(); ++i) junk[i] = static_cast<std::uint8_t>(i * 37U + 11U);
+    s = scan(junk, junk);
+    check(s.fragments.empty(), "arbitrary bytes admit nothing");
+  }
+  std::cout << failures << " failures\n";
+  return failures != 0;
+}

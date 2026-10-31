@@ -139,6 +139,8 @@ std::string identity_text(const DiscImage &disc, const BiosProfileInputs &inputs
     else if (a.kind == AdmissionKind::disc_extent)  // SEG-078-T003: coordinates and a digest of the bytes, like a manual extent, in chain order
       t << "discextent " << a.pass_identity << " " << processor_name(a.processor) << " " << a.track_offset << " " << a.address << " " << a.bytes.size() << " "
         << sha256_hex(a.bytes) << "\n";
+    else if (a.kind == AdmissionKind::static_fragment)  // SEG-112: no pass; the generation-time proof is recomputed by the caller from the disc
+      t << "staticfragment " << processor_name(a.processor) << " " << a.address << " " << a.bytes.size() << " " << sha256_hex(a.bytes) << "\n";
     else if (a.kind == AdmissionKind::produced_image)  // SEG-111: processor, base and a digest of the produced bytes, in chain order
       t << "produced " << a.pass_identity << " " << processor_name(a.processor) << " " << a.address << " " << a.bytes.size() << " " << sha256_hex(a.bytes) << "\n";
     else if (a.kind == AdmissionKind::epoch)
@@ -170,6 +172,7 @@ const char *bios_profile_error_name(BiosProfileError error) noexcept {
   case BiosProfileError::provenance_mismatch: return "provenance_mismatch";
   case BiosProfileError::epoch_invalid: return "epoch_invalid";
   case BiosProfileError::epoch_recipe_invalid: return "epoch_recipe_invalid";
+  case BiosProfileError::static_fragment_invalid: return "static_fragment_invalid";
   case BiosProfileError::produced_invalid: return "produced_invalid";
   case BiosProfileError::template_invalid: return "template_invalid";
   case BiosProfileError::image_validation: return "image_validation";
@@ -321,7 +324,7 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
   }
   std::vector<Template> templates;
   std::uint32_t epochs = 0;
-  std::size_t disc_extents = 0, produced = 0;
+  std::size_t disc_extents = 0, produced = 0, static_fragments = 0;
   for (std::size_t i = 0; i < inputs.admissions.size(); ++i) {
     const auto &a = inputs.admissions[i];
     if (a.kind == AdmissionKind::epoch_recipe) {
@@ -336,8 +339,17 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
       images.push_back(std::move(image));
       continue;
     }
-    const bool is_static = a.kind == AdmissionKind::static_disc_extent;
+    const bool is_static = a.kind == AdmissionKind::static_disc_extent || a.kind == AdmissionKind::static_fragment;
     if (!is_static && a.pass_identity != bios_profile_identity(disc, inputs, i)) return fail(BiosProfileError::provenance_mismatch, i);
+    if (a.kind == AdmissionKind::static_fragment) {
+      // SEG-112 (ADR 0256): bytes proven at generation time from immutable boot images and MC68000 semantics; static_proof authority, byte_identity verification.
+      if (++static_fragments > kMaxStaticFragments || a.bytes.empty() || a.bytes.size() > kMaxProducedBytes || ((a.address | a.bytes.size()) & 1U) != 0U ||
+          !ram_of(a.processor, a.address, static_cast<std::uint32_t>(a.bytes.size())))
+        return fail(BiosProfileError::static_fragment_invalid, i);
+      images.push_back(Image{a.processor, "fragment" + std::to_string(static_fragments - 1U), "bytes:" + std::to_string(a.bytes.size()), ImageAuthority::static_proof, true, a.address, a.bytes});
+      images.back().role = "static_fragment";
+      continue;
+    }
     if (a.kind == AdmissionKind::produced_image) {
       // SEG-111 (ADR 0255): bytes computed by verified guest code in a build pass, bounded to main Work RAM / sub PRG RAM (no Word RAM, no disc offset). The
       // authority is the epoch image's: bounded build-time materialization verified by byte identity at run time.
@@ -410,10 +422,11 @@ BiosProfileEmission emit_bios_once(const DiscImage &disc, const BiosProfileInput
       e.provenance.producer = image.name == "bios" ? "sega_cd.bios_image"
                               : image.name.rfind("disc", 0) == 0 ? "sega_cd.disc_extent"
                               : image.name.rfind("produced", 0) == 0 ? "sega_cd.produced_image"
+                              : image.name.rfind("fragment", 0) == 0 ? "sega_cd.static_fragment"
                               : image.epoch && image.authority == ImageAuthority::static_proof ? "sega_cd.sub_epoch_recipe"
                               : image.authority == ImageAuthority::static_proof ? "sega_cd.bios_copy"
                                                                                 : "sega_cd.sub_epoch";
-      if (!image.extent.empty()) e.provenance.evidence = {{image.epoch ? "epoch.recipe" : image.name.rfind("produced", 0) == 0 ? "produced.stream" : "disc.extent", image.extent}};
+      if (!image.extent.empty()) e.provenance.evidence = {{image.epoch ? "epoch.recipe" : image.name.rfind("produced", 0) == 0 ? "produced.stream" : image.name.rfind("fragment", 0) == 0 ? "static.producer" : "disc.extent", image.extent}};
       e.verification = image.guarded ? ImageVerification::byte_identity : ImageVerification::none;
       set.images.push_back(std::move(e));
     }

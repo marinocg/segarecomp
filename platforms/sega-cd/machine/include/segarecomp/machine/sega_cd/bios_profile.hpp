@@ -45,7 +45,8 @@ inline constexpr std::uint32_t kMaxTemplateRunSlots = 128U;   // slots in one ru
 inline constexpr std::uint32_t kTemplateSlotBytes = 6U;       // JMP (xxx).L
 inline constexpr std::uint32_t kMaxCopyImages = 8U;
 inline constexpr std::uint32_t kMaxProducedImages = 8U;        // SEG-111 (ADR 0255): produced-code images per program
-inline constexpr std::uint32_t kMaxProducedBytes = 4096U;       // SEG-111: one produced image is a bounded stream, not a program
+inline constexpr std::uint32_t kMaxProducedBytes = 4096U;
+inline constexpr std::uint32_t kMaxStaticFragments = 8U;        // SEG-112: static producer fragments per program       // SEG-111: one produced image is a bounded stream, not a program
 inline constexpr std::uint32_t kMaxDiscImages = 64U;           // SEG-064-T004 (16); SEG-098-T004 (ADR 0213): 64, measured
 inline constexpr std::uint32_t kEpochGranule = 0x100U;        // snapshot length granule (scd_prg_snapshot_length)
 inline constexpr const char *kSegaCdBiosGeneratorVersion = "segarecomp.sega_cd.bios_profile.v2";
@@ -87,9 +88,10 @@ struct DiscImageSpec {
   std::vector<std::uint8_t> bytes;  // the extent as read from the verified disc at build time (length bytes)
 };
 
-enum class AdmissionKind : std::uint8_t { epoch, operand_template, epoch_recipe, disc_extent, static_disc_extent, produced_image };  // epoch_recipe: SEG-079 (ADR 0179), a static producer;
+enum class AdmissionKind : std::uint8_t { epoch, operand_template, epoch_recipe, disc_extent, static_disc_extent, produced_image, static_fragment };  // epoch_recipe: SEG-079 (ADR 0179), a static producer;
                                                                                                  // disc_extent: SEG-078-T003 (ADR 0205), a discovered extent;
                                                                                                  // static_disc_extent: SEG-098-T002 (ADR 0211), an extent proven by the static loader scan (no pass identity)
+                                                                                                 // static_fragment: SEG-112 (ADR 0256), bytes a generation-time producer proof evaluated from the boot images (no pass identity, no disc extent)
                                                                                                  // produced_image: SEG-111 (ADR 0255), bytes a verified producer computed in a build pass (no disc offset)
 
 struct Admission {
@@ -124,6 +126,7 @@ enum class BiosProfileError : std::uint8_t {
   provenance_mismatch,    // an admission's pass identity is not the identity of the program before it
   epoch_recipe_invalid,   // SEG-079: the recipe does not reconstruct a whole-snapshot image from the BIOS image (index = admission)
   epoch_invalid,          // empty, longer than PRG RAM, not a whole snapshot (granule / trailing zero rule) or too many
+  static_fragment_invalid,// SEG-112: a static fragment that is empty, odd, over the bound, outside main Work RAM / sub PRG RAM, or too many
   produced_invalid,       // SEG-111: a produced image that is empty, odd, over kMaxProducedBytes, outside main Work RAM / sub PRG RAM, or too many
   template_invalid,       // not exactly one JMP (xxx).W/.L at an even RAM address of its processor, duplicate, or too many; a run: any slot not
                           // JMP (xxx).L with an even operand, a run over kMaxTemplateRunSlots, or an overlap

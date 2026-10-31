@@ -1169,6 +1169,12 @@ segarecomp_enable_warnings(sega_cd_overlay_emission_test)
 add_test(NAME sega_cd_overlay_emission_test COMMAND sega_cd_overlay_emission_test)
 set_property(TEST sega_cd_overlay_emission_test APPEND PROPERTY LABELS full fast)
 # SEG-100-T002 (ADR 0222): the processor-neutral source-offset instruction body for a guest base unknown at compile time.
+add_executable(sega_cd_producer_scan_test sega_cd_producer_scan_test.cpp)
+target_link_libraries(sega_cd_producer_scan_test PRIVATE segarecomp::machine_sega_cd)
+segarecomp_enable_warnings(sega_cd_producer_scan_test)
+add_test(NAME sega_cd_producer_scan_test COMMAND sega_cd_producer_scan_test)
+set_property(TEST sega_cd_producer_scan_test APPEND PROPERTY LABELS full fast)
+
 add_executable(sega_cd_dynamic_body_test sega_cd_dynamic_body_test.cpp)
 target_link_libraries(sega_cd_dynamic_body_test PRIVATE segarecomp::machine_sega_cd)
 segarecomp_enable_warnings(sega_cd_dynamic_body_test)
@@ -1285,6 +1291,10 @@ set_property(TEST sega_cd_extent_discovery_test APPEND PROPERTY LABELS full fast
 add_test(NAME sega_cd_derived_image_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_derived_image_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_derived_image_test APPEND PROPERTY LABELS full fast)
+# SEG-112 (ADR 0256): generation-time producer recognition in the product build (rounds, fallback, emitter recomputation).
+add_test(NAME sega_cd_static_producer_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_static_producer_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_static_producer_test APPEND PROPERTY LABELS full fast)
 # SEG-111 (ADR 0255): automatic relocated-fragment and produced-code admission in the product build, derivation matrix, determinism, fail-closed cases.
 add_test(NAME sega_cd_reconstruction_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_reconstruction_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

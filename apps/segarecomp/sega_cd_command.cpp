@@ -31,6 +31,7 @@
 #include "segarecomp/machine/sega_cd/loader_scan.hpp"
 #include "segarecomp/machine/sega_cd/modules.hpp"
 #include "segarecomp/machine/sega_cd/program.hpp"
+#include "segarecomp/machine/sega_cd/producer_scan.hpp"
 #include "segarecomp/machine/sega_cd/relocation.hpp"
 #include "segarecomp/machine/sega_cd/source_resolve.hpp"
 #include "segarecomp/sha256.hpp"
@@ -353,6 +354,25 @@ struct FileFirstRequest {
   scd::FileFirstLimits limits;
 };
 
+// SEG-112 (ADR 0256): the generation-time producer proofs of a disc, computed once per process. A pure function of the disc's boot area.
+std::optional<scd::ProducerScan> static_producer_scan(const segarecomp::DiscImage &disc) {
+  static std::optional<scd::ProducerScan> scan;
+  static std::string computed_for;   // keyed by the disc identity: a second disc in one process is recomputed, never answered from the first
+  if (computed_for != disc.identity()) {
+    computed_for = disc.identity();
+    scan.reset();
+    std::vector<std::uint8_t> area;
+    const auto header = segarecomp::read_sega_cd_boot(disc, &area);
+    const auto boot = header.header ? scd::produce_boot_images(*header.header, area) : scd::BootImagesResult{};
+    if (boot.images) scan = scd::scan_static_producers(area, *boot.images);
+  }
+  return scan;
+}
+
+std::string static_fragment_admission(const scd::StaticFragment &f) {
+  return "static-fragment:" + std::string(scd::processor_name(f.processor)) + ":" + std::to_string(f.base) + ":" + std::to_string(f.length) + ":" + segarecomp::sha256_hex(f.bytes);
+}
+
 int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios_path, const std::vector<std::string> &copies,
                       const std::vector<std::string> &admits, const std::vector<std::string> &disc_images,
                       std::optional<std::uint32_t> application_entry, const std::string &out_path, std::uint32_t partition_window,
@@ -434,6 +454,23 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
       // function of the disc) and refuses an extent that no proven module mapping contains.
       if (!static_extent_is_proven(disc, *proc, *off, *base, *len)) return bad("admit", "static_extent_unproven");
       if (const auto error = read_track1_extent(disc, *off, *len, a.bytes); !error.empty()) return bad("admit", error);
+    } else if (f.size() == 5U && f[0] == "static-fragment") {  // SEG-112 (ADR 0256): static-fragment:<cpu>:<base>:<length>:<sha256>; the emitter recomputes the proof, it never trusts the coordinates
+      const auto proc = parse_processor(f[1]);
+      const auto base = parse_u32(f[2]);
+      const auto len = parse_u32(f[3]);
+      if (!proc || !base || !len) return bad("admit", "static_fragment_syntax");
+      const auto scan = static_producer_scan(disc);
+      const scd::StaticFragment *proven = nullptr;
+      if (scan)
+        for (const auto &fragment : scan->fragments)
+          if (fragment.processor == *proc && fragment.base == *base && fragment.length == *len && segarecomp::sha256_hex(fragment.bytes) == f[4]) proven = &fragment;
+      if (proven == nullptr) return bad("admit", "static_fragment_unproven");
+      for (const auto &prior : inputs.admissions)
+        if (prior.kind == scd::AdmissionKind::static_fragment && prior.processor == *proc && prior.address == *base) return bad("admit", "static_fragment_duplicate");
+      a.kind = scd::AdmissionKind::static_fragment;
+      a.processor = *proc;
+      a.address = *base;
+      a.bytes = proven->bytes;
     } else if (f.size() >= 5U && f[0] == "produced") {  // SEG-111 (ADR 0255): produced:<pass>:<cpu>:<base>:<snapshot path> (the path is the remainder; it may contain ':')
       const auto proc = parse_processor(f[2]);
       const auto base = parse_u32(f[3]);
@@ -813,6 +850,36 @@ int derive_relocation_command(int argc, char **argv) {
   if (!file.flush()) return refuse("snapshot_unwritable");
   std::cout << "{\"ok\":true,\"class\":\"produced\",\"processor\":\"" << scd::processor_name(fragment.processor) << "\",\"base\":" << fragment.base
             << ",\"length\":" << fragment.length << "}\n";
+  return 0;
+}
+
+// SEG-112 (ADR 0256): generation-time producer recognition over the disc's boot images. Pure function of the disc; executes nothing.
+// Prints the proven fragments (`<cpu>:<kind>:<offset>:<base>:<length>:<transform>`) and the aggregate counters.
+int discover_producers_command(int argc, char **argv) {
+  std::optional<std::string> cue;
+  for (int i = 3; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
+    else { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+  }
+  if (!cue) { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+  const auto loaded = segarecomp::load_cue_disc(*cue);
+  if (!loaded.disc) { std::cout << "{\"ok\":false,\"error\":\"disc_" << segarecomp::disc_error_name(loaded.error) << "\"}\n"; return 8; }
+  const auto computed = static_producer_scan(*loaded.disc);
+  if (!computed) { std::cout << "{\"ok\":false,\"error\":\"boot_area\"}\n"; return 8; }
+  const auto &scan = *computed;
+  std::cout << "{\"ok\":true,\"candidates\":" << scan.candidates << ",\"proven\":" << scan.fragments.size() << ",\"unknown_writes\":" << scan.unknown_writes
+            << ",\"steps\":" << scan.steps << ",\"complete\":" << (scan.complete ? "true" : "false") << ",\"refusals\":{";
+  bool first = true;
+  for (const auto &[r, n] : scan.refusals) { std::cout << (first ? "" : ",") << "\"" << scd::producer_refusal_name(r) << "\":" << n; first = false; }
+  std::cout << "},\"fragments\":[";
+  for (std::size_t i = 0; i < scan.fragments.size(); ++i) {
+    const auto &f = scan.fragments[i];
+    std::cout << (i ? "," : "") << "\"" << scd::processor_name(f.processor) << ":" << (f.copy ? "copy" : "transform") << ":" << f.disc_offset << ":" << f.base << ":" << f.length << ":" << f.transform << "\"";
+  }
+  std::cout << "],\"admits\":[";
+  for (std::size_t i = 0; i < scan.fragments.size(); ++i) std::cout << (i ? "," : "") << "\"" << static_fragment_admission(scan.fragments[i]) << "\"";
+  std::cout << "]}\n";
   return 0;
 }
 
@@ -1207,6 +1274,7 @@ int segarecomp_sega_cd_command(int argc, char **argv) {
   if (argc >= 3 && std::string_view(argv[2]) == "emit") return emit(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "build") return segarecomp_sega_cd_build(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "resolve-source") return resolve_source_command(argc, argv);
+  if (argc >= 3 && std::string_view(argv[2]) == "discover-producers") return discover_producers_command(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "derive-relocation") return derive_relocation_command(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "file-survey") return file_survey_command(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "discover-modules") return discover_modules_command(argc, argv);
