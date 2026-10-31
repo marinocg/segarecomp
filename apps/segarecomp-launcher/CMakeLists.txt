@@ -240,7 +240,10 @@ endif()
 # SEG-109-T005 (ADR 0253): Genesis, Master System and Sega CD through the same launcher journeys, structure and storage rules, on the real window with the
 # product and game doubles. One test per stage and window size (independent, run side by side by `ctest -j`); CI runs the narrow (720x520, the minimum width) variants, which render fastest on the hosted runners; the wide (1080x740) variants run in the local fast tier.
 if(BUILD_TESTING)
-  foreach(stage journey persist input)
+  # The `input` stage (mouse and controller only) is not registered: on the macOS and Windows SDL3 CI hosts it failed intermittently in several different ways (focus lost after a
+  # long build, a fake build reported failed, seeks landing on other controls) across several PRs, and main itself failed it. Its script is kept (`launcher_parity_gui_test.py ... input`)
+  # for manual runs; keyboard, gamepad and mouse paths stay covered by the journey, persist and launcher_gamepad_journey_* tests.
+  foreach(stage journey persist)
     foreach(size wide:1080x740 narrow:720x520)
       string(REPLACE ":" ";" size_parts ${size})
       list(GET size_parts 0 size_name)
