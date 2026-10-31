@@ -1169,6 +1169,12 @@ segarecomp_enable_warnings(sega_cd_overlay_emission_test)
 add_test(NAME sega_cd_overlay_emission_test COMMAND sega_cd_overlay_emission_test)
 set_property(TEST sega_cd_overlay_emission_test APPEND PROPERTY LABELS full fast)
 # SEG-100-T002 (ADR 0222): the processor-neutral source-offset instruction body for a guest base unknown at compile time.
+add_executable(sega_cd_producer_scan_test sega_cd_producer_scan_test.cpp)
+target_link_libraries(sega_cd_producer_scan_test PRIVATE segarecomp::machine_sega_cd)
+segarecomp_enable_warnings(sega_cd_producer_scan_test)
+add_test(NAME sega_cd_producer_scan_test COMMAND sega_cd_producer_scan_test)
+set_property(TEST sega_cd_producer_scan_test APPEND PROPERTY LABELS full fast)
+
 add_executable(sega_cd_dynamic_body_test sega_cd_dynamic_body_test.cpp)
 target_link_libraries(sega_cd_dynamic_body_test PRIVATE segarecomp::machine_sega_cd)
 segarecomp_enable_warnings(sega_cd_dynamic_body_test)
