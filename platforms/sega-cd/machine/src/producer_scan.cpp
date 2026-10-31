@@ -226,13 +226,17 @@ class Walker {
         if (code_at(*target).size() != 0U) seed(*target, op->kind == M68kIrKind::call_general ? entry_state : s);
       }
       if (op->kind == M68kIrKind::jump_general && (!target || code_at(*target).size() == 0U)) returned(entry_state.ran);   // a jump out of the walked code may be a tail jump back to a caller
-      if (op->kind == M68kIrKind::call_general) call_continuation(next, entry_state.ran);
+      if (op->kind == M68kIrKind::call_general && (!target || code_at(*target).size() != 0U)) call_continuation(next, entry_state.ran);
+      else if (op->kind == M68kIrKind::call_general) seed(next, St{});   // a foreign callee runs no walked loop
       return;
     }
     if (op->kind == M68kIrKind::bsr_call) {
       for (const auto &succ : control.successors)
         if (succ.kind == M68kControlSuccessorKind::call_target) { note_transfer(norm(succ.target), s.made); seed(norm(succ.target), s); }
-      call_continuation(next, entry_state.ran);
+      bool walkable = false;
+      for (const auto &succ : control.successors)
+        if (succ.kind == M68kControlSuccessorKind::call_target) walkable = walkable || code_at(norm(succ.target)).size() != 0U;
+      if (walkable) call_continuation(next, entry_state.ran); else seed(next, St{});
       return;
     }
     if (op->kind == M68kIrKind::return_from_subroutine) returned(entry_state.ran);
@@ -533,7 +537,9 @@ class Walker {
         Candidate &c = cands_[ci];
         if (c.refused) continue;
         if (!out_.complete) { refuse(c, ProducerRefusal::budget_exhausted); continue; }
-        if (image_overwritten_in_call_ && !continuations_.empty()) { refuse(c, ProducerRefusal::source_written); continue; }   // the image was overwritten inside a call whose return path is walked: the code after it is not the walked bytes
+        // A walked routine returns by RTS, RTE, a computed or tail jump, a trap handler or by running off its end; whichever way a path of produced code ends, the caller's
+        // code may have been overwritten by then. With any call into walked code present and any loop that overwrites the boot image, no proof is claimed.
+        if ((image_overwritten_in_call_ || image_writers_ != 0U) && !continuations_.empty()) { refuse(c, ProducerRefusal::source_written); continue; }
         if (inside_refused(c.head_pc)) { refuse(c, ProducerRefusal::not_executed); continue; }   // produced by code that is itself not proven
         const auto against = [&](const Range &w) {
           if (w.overlaps(image)) return std::optional<ProducerRefusal>(ProducerRefusal::source_written);   // a located store into the walked image (self-patching): its operands cannot be trusted

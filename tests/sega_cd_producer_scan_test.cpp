@@ -414,14 +414,14 @@ int main() {
     b.tail = fragment_code(kDest);
     check(scan(b.finish(), none).fragments.empty(), "a callee loop that patches a later proof's source is not forgotten at the return");
   }
-  for (int ending = 0; ending < 4; ++ending) {   // produced code that overwrites the image and leaves WITHOUT an RTS still returns to its caller's overwritten code
+  for (int ending = 0; ending < 6; ++ending) {   // produced code that overwrites the image and leaves WITHOUT an RTS still returns to its caller's overwritten code
     Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 63);
     const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(kDest);
     b.a.lea_abs(0, kFrag + 0x40U); b.a.movea_l(1, kDest + 0x100U); b.a.move_w_imm(0, 23);
     const std::uint32_t h2 = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h2); b.a.jsr(kDest + 0x100U); b.a.rts();
     Asm t(kDest); t.lea_abs(2, 0xFFB000U); t.movea_l(3, kFrag + 0x40U); t.move_w_imm(1, 23);
     const std::uint32_t th = t.here(); t.copy_post('b', 2, 3); t.dbra(1, th);
-    if (ending == 0) t.rts(); else if (ending == 1) t.w(0x4E73U); else if (ending == 2) t.jmp(0x00000364U); else t.w(0x4AFCU);   // RTS, RTE, tail JMP out, illegal
+    if (ending == 0) t.rts(); else if (ending == 1) t.w(0x4E73U); else if (ending == 2) t.jmp(0x00000364U); else if (ending == 3) t.w(0x4AFCU); else if (ending == 4) t.jmp(kIp + 0xE0U); else { t.w(0x4E40U); t.rts(); }   // RTS, RTE, tail JMP out, illegal, JMP into the untouched image, TRAP then RTS
     Bytes frag = t.out; frag.resize(64, 0x4E);
     const Bytes second_src = fragment_code(kDest + 0x100U);
     frag.insert(frag.end(), second_src.begin(), second_src.end());
