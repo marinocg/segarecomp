@@ -55,7 +55,7 @@ and `build.log`. The launcher's **Build** button runs exactly this command with 
 as *No program yet (can be built)*.
 
 **Static boot images (SEG-113, ADR 0257).** Before the first emission the build asks `segarecomp sega-cd boot-contract` which executable boot images the BIOS places in RAM (the main
-boot area and the sub boot program). It answers only for a *verified profile* - an exact BIOS image and the header form its placement was observed with, (`verified_authentic`; project fixture BIOS tags are honoured only with the test-only `--boot-fixture-profiles 1` and are labelled `test_assumed_fixture`) - and then the images are in the first generated program (`static-boot:` admissions, recomputed by the emitter, still byte-guarded at every instruction), so the two rounds that would
+boot area and the sub boot program). It answers only for a *verified profile* - an exact BIOS image and the header form its placement was observed with (`verified_authentic`; project fixture BIOS tags are honoured only with the test-only `--boot-fixture-profiles 1` and are labelled `test_assumed_fixture`) - and then the images are in the first generated program (`static-boot:` admissions, recomputed by the emitter, still byte-guarded at every instruction), so the two rounds that would
 only discover them by running disappear. For any other BIOS or header form nothing is offered and the images are discovered by execution as before (`--static-boot 0` forces that).
 `status.json` reports `static_boot` (state, `authority`, profile, per-image class `conditional`, `contradictions`, `internal_sources`, `later_overlays`, `unresolved_mismatches`).
 
