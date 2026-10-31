@@ -61,7 +61,8 @@ static uint8_t z80_view_read(void *context, uint16_t address, uint64_t cycles) {
   }
   machine->cpu.state.cycles += GENESIS_Z80_BUS_WAIT_CYCLES;
   ++machine->count_banked_reads;
-  if (!bank_rom_read(machine, banked_address(machine, address), &value)) {
+  if (machine->bank_view != NULL ? !machine->bank_view->read(machine->bank_view->context, banked_address(machine, address), &value)
+                                 : !bank_rom_read(machine, banked_address(machine, address), &value)) {
     latch_stop(machine, GENESIS_DIAG_Z80_BANK_TARGET_UNSUPPORTED);  /* open bus, work-RAM reads (open fact U3), the Z80 area itself */
     return 0xFFU;
   }
@@ -100,7 +101,9 @@ static void z80_view_write(void *context, uint16_t address, uint8_t value, uint6
   machine->cpu.state.cycles += GENESIS_Z80_BUS_WAIT_CYCLES;
   {
     const uint32_t target = banked_address(machine, address);
-    if (target >= BANK_WORK_RAM) {
+    if (machine->bank_view != NULL) {
+      if (machine->bank_view->write(machine->bank_view->context, target, value)) return;
+    } else if (target >= BANK_WORK_RAM) {
       machine->runtime->work_ram[target & 0xFFFFU] = value;
       return;
     }
@@ -212,8 +215,16 @@ int genesis_z80_machine_run_to(GenesisZ80Machine *machine, uint64_t master_ticks
     steps = (segment_end - now + GENESIS_Z80_CLOCK_DIVIDER - 1U) / GENESIS_Z80_CLOCK_DIVIDER;
     machine->cpu.state.int_line = (uint8_t)int_level_at(now);
     outcome = z80_run(&machine->cpu, machine->cpu.state.cycles + steps);
-    if (machine->view_stop != (GenesisDiagnosticCategory)0)
+    if (machine->view_stop != (GenesisDiagnosticCategory)0) {
+      if (machine->isolate_view_stops) {  /* SEG-114: isolate the sound CPU (muted); the main processor continues */
+        machine->sound_fault = machine->view_stop;
+        machine->sound_fault_epoch = machine->runtime->z80_epoch.epoch_count;
+        machine->sound_fault_master_ticks = access_master_ticks(machine);
+        machine->bound_ordinal = 0U;
+        return 0;
+      }
       return stop_with(stop, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, machine->view_stop);
+    }
     if (outcome == Z80_ERROR_CODE_MISMATCH) {  /* structural mutation: isolate the sound CPU, never interpret the bytes */
       machine->sound_fault = GENESIS_DIAG_Z80_CODE_MISMATCH;
       machine->sound_fault_epoch = machine->runtime->z80_epoch.epoch_count;
@@ -266,6 +277,7 @@ static int activate_image(GenesisZ80Machine *machine, const uint8_t *written, Ge
       machine->on_unknown_image(machine->unknown_image_context, machine->runtime->z80_epoch.epoch_count,
                                 machine->runtime->devices.z80_bus.z80_ram, written);
     machine->bound_ordinal = 0U;
+    if (machine->quiesce_unknown_image) return 0; /* SEG-114: recorded by the callback; the host keeps the Z80 unexecuted */
     return stop_with(stop, GENESIS_STOP_UNSUPPORTED_Z80_EXECUTION, GENESIS_DIAG_Z80_UNKNOWN_IMAGE);
   }
   machine->bound_ordinal = machine->last_bound = ordinal;

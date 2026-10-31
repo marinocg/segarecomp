@@ -117,6 +117,7 @@ struct BiosProfileInputs {
   std::vector<DynamicImageSpec> dynamic_images;
   std::string dynamic_policy;
   std::string aot_policy;                     // SEG-097-T003: the policy identity of an experimental request ("" = Compatibility); enters the program identity
+  bool main_z80 = false;                      // SEG-114 (ADR 0258): the generated main registers the main-side Z80 (scd_z80_ops); the build supplies the Z80 units. Not part of the program identity
 };
 
 enum class BiosProfileError : std::uint8_t {

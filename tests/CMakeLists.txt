@@ -1299,6 +1299,9 @@ set_property(TEST sega_cd_static_producer_test APPEND PROPERTY LABELS full fast)
 add_test(NAME sega_cd_static_boot_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_static_boot_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_static_boot_test APPEND PROPERTY LABELS full fast)
+add_test(NAME sega_cd_main_z80_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_main_z80_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_main_z80_test APPEND PROPERTY LABELS full fast)
 # SEG-111 (ADR 0255): automatic relocated-fragment and produced-code admission in the product build, derivation matrix, determinism, fail-closed cases.
 add_test(NAME sega_cd_reconstruction_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_reconstruction_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

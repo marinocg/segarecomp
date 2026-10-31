@@ -295,6 +295,7 @@ std::vector<std::string> split(const std::string &text, char sep) {
 
 // SEG-113: fixture BIOS profiles are test-only: selected only by an explicit `--boot-fixture-profiles 1`, never by default.
 scd::BootProfileScope g_boot_scope = scd::BootProfileScope::authentic;
+bool g_main_z80 = false;   // SEG-114 (ADR 0258): `sega-cd emit --main-z80 1`
 
 std::optional<scd::Processor> parse_processor(const std::string &text) {
   if (text == "main") return scd::Processor::main;
@@ -554,6 +555,7 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     inputs.dynamic_images = std::move(selection.images);
     inputs.dynamic_policy = selection.policy;
   }
+  inputs.main_z80 = g_main_z80;
   scd::BiosProfileEmitOptions bios_options{partition_window};
   bios_options.jobs = file_first.limits.jobs;
   if (aot_request) {  // SEG-097-T003 (ADR 0208): the experimental request enters the program identity and the provenance chain
@@ -675,6 +677,7 @@ int emit(int argc, char **argv) {
         return 2;
       }
     } else if (arg == "--boot-fixture-profiles" && i + 1 < argc) g_boot_scope = std::string_view(argv[++i]) == "1" ? scd::BootProfileScope::with_test_fixtures : scd::BootProfileScope::authentic;   // SEG-113, tests only
+    else if (arg == "--main-z80" && i + 1 < argc) g_main_z80 = std::string_view(argv[++i]) == "1";   // SEG-114 (ADR 0258): the generated main registers the main-side Z80
     else if (arg == "--admit" && i + 1 < argc) admits.emplace_back(argv[++i]);
     else if (arg == "--partition-window" && i + 1 < argc && !partition_window) {
       partition_window = parse_u32(argv[++i]);
