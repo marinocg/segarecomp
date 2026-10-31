@@ -14,6 +14,11 @@ Cases (each builds its own image and disc):
   generated    the sub writes instructions into PRG RAM with immediate moves and runs them (no disc span)
   transformed  an XOR-encoded module is loaded and decoded in place before it runs (the live bytes are not a disc span)
   undelivered  the sub image carries bytes identical to a disc module that is never read; they are copied to PRG RAM and run
+  relocated    SEG-110 (ADR 0254): a loaded module copies a 24-byte fragment of its own (verified) image to PRG RAM and runs it there; the window after the fragment
+               is not the source's, so the exact-copy resolver (32-byte anchor, 64-byte run) refuses it
+  relocated_short       only the first 16 bytes of the fragment are copied (incomplete output)
+  relocated_patched     one instruction byte of the copy is rewritten after the copy (the copy is no longer the source)
+  relocated_duplicate   the fragment occurs twice in the delivered blocks (ambiguous source)
 
 usage: sega_cd_bios_loader_fixture.py build --case NAME --out DIR   ->   DIR/bios.bin, DIR/disc/{disc.cue,track01.bin}, DIR/expected.json
 """
@@ -42,7 +47,11 @@ WORD_RAM_SUB = 0x080000
 TRACK1_SECTORS = 160
 FIRST_MODULE_LBA = 40
 BLOB_AT = 0x1000
-CASES = ("direct", "siblings", "duplicates", "overlay", "late_flip", "generated", "transformed", "undelivered")
+CASES = ("direct", "siblings", "duplicates", "overlay", "late_flip", "generated", "transformed", "undelivered",
+         "relocated", "relocated_short", "relocated_patched", "relocated_duplicate")
+RELOC_DEST = 0x030000       # SEG-110: where the relocated fragment runs (sub PRG RAM)
+RELOC_AT = 0x200            # the fragment's offset inside its module
+RELOC_LEN = 24
 MARK = GA_SUB + 0x24        # COMSTAT2: written by the modules
 MARK2 = GA_SUB + 0x26       # COMSTAT3
 
@@ -57,6 +66,36 @@ def module_bytes(base, mark_addr, mark, nops, size, seed, flip_after=None):
     code = m.assemble()
     rng = random.Random(seed)
     return code + bytes(rng.randrange(256) for _ in range(size - len(code)))
+
+
+def relocating_module(base, seed, copy_len=RELOC_LEN, patch=False, duplicate=False):
+    """SEG-110: a module whose driver copies a position-independent-by-construction fragment (absolute operands only) from its own image to RELOC_DEST and runs it."""
+    frag = F.Asm(RELOC_DEST)
+    frag.move("w", F.imm(0xA001), F.absl(MARK))
+    for _ in range(7):
+        frag.nop()
+    frag.rts()
+    fragment = frag.assemble()
+    assert len(fragment) == RELOC_LEN, len(fragment)
+    d = F.Asm(base)
+    d.move("l", F.imm(base + RELOC_AT), F.a(0))
+    d.move("l", F.imm(RELOC_DEST), F.a(1))
+    d.move("w", F.imm(copy_len // 2 - 1), F.d(1))
+    d.label("cp")
+    d.move("w", ("inc", 0), ("inc", 1))
+    d.dbra(1, "cp")
+    if patch:
+        d.move("b", F.imm(0x02), F.absl(RELOC_DEST + 3))      # the immediate's low byte: 0xA001 -> 0xA002
+    d.jsr(F.absl(RELOC_DEST))
+    d.rts()
+    driver = d.assemble()
+    assert len(driver) < RELOC_AT
+    rng = random.Random(seed)
+    body = bytearray(driver + bytes(rng.randrange(1, 256) for _ in range(4096 - len(driver))))   # nonzero filler: the source never continues like zeroed RAM
+    body[RELOC_AT:RELOC_AT + RELOC_LEN] = fragment
+    if duplicate:
+        body[RELOC_AT + 0x200:RELOC_AT + 0x200 + RELOC_LEN] = fragment
+    return bytes(body), fragment
 
 
 class Sub:
@@ -283,6 +322,14 @@ def plan(case):
         sub.copy_blob(BLOB_AT, 0x030000, 2048)    # the blob rides in the sub image at a fixed place
         sub.run(0x030000)
         truth["markers"] = [0xA001, 0, 0]
+    elif case.startswith("relocated"):
+        data, fragment = relocating_module(base, 21, copy_len=16 if case == "relocated_short" else RELOC_LEN, patch=case == "relocated_patched", duplicate=case == "relocated_duplicate")
+        put(L, data)
+        sub.load(L, 2, 0)
+        sub.run(base)
+        truth["extents"].append({"processor": "sub", "offset": L * 2048, "base": base, "length": 4096})
+        truth["relocation"] = {"processor": "sub", "offset": L * 2048 + RELOC_AT, "base": RELOC_DEST, "length": 16 if case == "relocated_short" else RELOC_LEN}
+        truth["markers"] = [0 if case == "relocated_patched" else 0xA001, 0, 0]   # the short copy still runs its first move before it leaves the admitted bytes
     else:
         raise SystemExit("unknown case " + case)
     return sub, blocks, truth
