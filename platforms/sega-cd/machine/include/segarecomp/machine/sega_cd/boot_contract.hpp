@@ -7,8 +7,9 @@
 // entered there) and the sub boot program (the disc's SP, placed at sub PRG RAM $6000). Neither is proven from first principles - the
 // main side's Word RAM -> Work RAM copy is an immediate-operand loop of the BIOS, but the disc -> Word RAM delivery is the sub BIOS's -
 // so each is offered only under a *verified profile*: an exact BIOS image (SHA-256) whose placement has been observed on authentic discs
-// with an exact header form, or a project-authored fixture BIOS (a tag in its header) that implements the same contract. Every
-// other BIOS or header form yields no image and the build keeps the execution-observed admission (ADR 0205). A profile only proposes
+// with an exact header form (authority `verified_authentic`), or - ONLY on an explicit test-only request - a project-authored fixture BIOS
+// (a tag in its header) whose contract is merely *assumed* (authority `test_assumed_fixture`; a tag proves nothing about what the BIOS does, so the
+// production path never selects it). Every other BIOS or header form yields no image and the build keeps the execution-observed admission (ADR 0205). A profile only proposes
 // bytes: the emitter recomputes them from the disc and the BIOS, and every executed instruction is still compared with the live bytes.
 
 #include <cstdint>
@@ -45,14 +46,18 @@ struct BootContractImage {
   std::vector<std::uint8_t> bytes;
 };
 
+// Which profiles may match. `authentic` is the production scope; `with_test_fixtures` additionally lets a tagged project fixture BIOS match (tests only).
+enum class BootProfileScope : std::uint8_t { authentic, with_test_fixtures };
+
 struct BootContract {
+  std::string authority;                        // "verified_authentic" | "test_assumed_fixture" | "" (no profile matched)
   std::string profile;                          // the verified profile that matched ("" = none)
   BootContractRefusal refusal{BootContractRefusal::none};
   std::vector<BootContractImage> images;        // main boot area first, then the sub boot program; empty on refusal
 };
 
 // Pure function of the BIOS image and the (verified) disc.
-[[nodiscard]] BootContract derive_boot_contract(const BiosImage &bios, const DiscImage &disc);
+[[nodiscard]] BootContract derive_boot_contract(const BiosImage &bios, const DiscImage &disc, BootProfileScope scope = BootProfileScope::authentic);
 // `static-boot:<cpu>:<track-1 offset>:<base>:<length>:<sha256 of the bytes>` - the form the emitter recomputes and compares (coordinates are never trusted).
 [[nodiscard]] std::string static_boot_admission(const BootContractImage &image);
 

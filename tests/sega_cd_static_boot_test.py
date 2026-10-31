@@ -8,7 +8,7 @@ profile tag; the product offers the main boot area and the sub boot program from
                                                        build admits (differential), the programs end in the identical machine state, identity is deterministic
   no_profile / form_other                              no verified profile / header form: nothing is offered, the build is the execution-observed one (4 rounds)
   sp_source                                            the descriptor names other bytes than the BIOS reads: the static SP image does not explain the live bytes - the
-                                                       guard stops, the disagreement is reported, the observed fallback admits the real bytes, the SP still runs
+                                                       guard stops, the contradiction is reported, the observed fallback admits the real bytes, the SP still runs
   ip_patched / ip_trailing                             a byte rewritten before the call: no wrong instruction retires; a partial placement is harmless
   emitter                                              a `static-boot:` admission is recomputed from the BIOS and the disc: wrong offset/base/length/cpu/digest, malformed,
                                                        duplicate, unverified BIOS, other header form, a changed disc are refused
@@ -42,7 +42,9 @@ class Case:
         self.truth = json.loads(subprocess.run([sys.executable, str(FIXTURE), "build", "--case", name, "--out", str(self.dir)], check=True, capture_output=True, text=True).stdout)
         self.cue, self.bios = self.dir / "disc" / "disc.cue", self.dir / "bios.bin"
 
-    def build(self, label, *extra, jobs=8):
+    def build(self, label, *extra, jobs=8, fixture=True):
+        if fixture:
+            extra = ("--boot-fixture-profiles", "1", *extra)   # the test-only switch: without it a tagged BIOS is never selected
         out = self.tmp / ("o-%s-%s" % (self.name, label))
         subprocess.run([SEGARECOMP, "sega-cd", "build", "--cue", str(self.cue), "--bios", str(self.bios), "--output", str(out), "--runtime-dir", str(ROOT), "--cc", CC,
                         "--budget", "3000000", "--jobs", str(jobs), "--cache-dir", str(self.tmp / "cache"), *extra], capture_output=True, text=True, timeout=1800)
@@ -53,12 +55,12 @@ class Case:
         done = subprocess.run([str(out / ("program" + EXE)), "--disc-dir", str(self.dir / "disc"), "--bios", str(self.bios), "--instruction-budget", "3000000"], capture_output=True, text=True, timeout=300)
         return json.loads(done.stdout)
 
-    def contract(self):
-        done = subprocess.run([SEGARECOMP, "sega-cd", "boot-contract", "--cue", str(self.cue), "--bios", str(self.bios)], capture_output=True, text=True)
+    def contract(self, fixture=True):
+        done = subprocess.run([SEGARECOMP, "sega-cd", "boot-contract", "--cue", str(self.cue), "--bios", str(self.bios), *(("--boot-fixture-profiles", "1") if fixture else ())], capture_output=True, text=True)
         return done.returncode, json.loads(done.stdout)
 
-    def emit(self, *admits, cue=None):
-        cmd = [SEGARECOMP, "sega-cd", "emit", "--cue", str(cue or self.cue), "--bios", str(self.bios), "--out", str(self.tmp / "x.c")]
+    def emit(self, *admits, cue=None, fixture=True):
+        cmd = [SEGARECOMP, "sega-cd", "emit", "--cue", str(cue or self.cue), "--bios", str(self.bios), "--out", str(self.tmp / "x.c"), *(("--boot-fixture-profiles", "1") if fixture else ())]
         for a in admits:
             cmd += ["--admit", a]
         return subprocess.run(cmd, capture_output=True, text=True)
@@ -89,7 +91,7 @@ def main():
             out, st = c.build("static")
             rep = c.run(out)
             sb = st["static_boot"]
-            check(st["status"] == "ok" and st["rounds"] == 2 and st["extents"] == [] and sb["state"] == "admitted" and sb["disagreements"] == 0 and st["frontier"] is None and
+            check(st["status"] == "ok" and st["rounds"] == 2 and st["extents"] == [] and sb["state"] == "admitted" and sb["contradictions"] == 0 and st["frontier"] is None and
                   rep["result"] == "idle" and markers(rep) == ("a001", "b002"),
                   "%s: both boot images are in the first emission - 2 rounds (epoch, final), no observed extent, the IP and the SP ran natively" % name)
             check([h.get("admitted") for h in st["history"]] == ["epoch", None], "%s: the history has no image-discovery round" % name)
@@ -147,10 +149,10 @@ def main():
                 data = bytearray(track.read_bytes())
                 data[0x44:0x48] = (0x8000).to_bytes(4, "big")
                 track.write_bytes(bytes(data))
-            done = subprocess.run([SEGARECOMP, "sega-cd", "boot-contract", "--cue", str(bad / "disc" / "disc.cue"), "--bios", str(bad / "bios.bin")], capture_output=True, text=True)
+            done = subprocess.run([SEGARECOMP, "sega-cd", "boot-contract", "--cue", str(bad / "disc" / "disc.cue"), "--bios", str(bad / "bios.bin"), "--boot-fixture-profiles", "1"], capture_output=True, text=True)
             found = json.loads(done.stdout)
             check(done.returncode == 0 and found["refusal"] == "disc_boot_area" and found["images"] == [], "%s: no boot image is offered (disc_boot_area)" % label)
-            done = subprocess.run([SEGARECOMP, "sega-cd", "emit", "--cue", str(bad / "disc" / "disc.cue"), "--bios", str(bad / "bios.bin"), "--out", str(tmp / "z.c"), "--admit", ip_spec],
+            done = subprocess.run([SEGARECOMP, "sega-cd", "emit", "--cue", str(bad / "disc" / "disc.cue"), "--bios", str(bad / "bios.bin"), "--out", str(tmp / "z.c"), "--boot-fixture-profiles", "1", "--admit", ip_spec],
                                   capture_output=True, text=True)
             check(done.returncode != 0 and "static_boot_unverified" in done.stdout, "%s: the emitter refuses the old admission" % label)
         # a changed disc: the old admission's digest no longer matches what the disc and BIOS prove
@@ -160,11 +162,11 @@ def main():
         data = bytearray(track.read_bytes())
         data[0x400] ^= 0xFF
         track.write_bytes(bytes(data))
-        done = subprocess.run([SEGARECOMP, "sega-cd", "emit", "--cue", str(changed / "disc" / "disc.cue"), "--bios", str(changed / "bios.bin"), "--out", str(tmp / "y.c"), "--admit", ip_spec],
+        done = subprocess.run([SEGARECOMP, "sega-cd", "emit", "--cue", str(changed / "disc" / "disc.cue"), "--bios", str(changed / "bios.bin"), "--out", str(tmp / "y.c"), "--boot-fixture-profiles", "1", "--admit", ip_spec],
                               capture_output=True, text=True)
         check(done.returncode != 0 and "static_boot_unproven" in done.stdout, "emitter: a changed disc refuses the old admission (the input identity is recomputed)")
         changed_cue = changed / "disc" / "disc.cue"
-        done = subprocess.run([SEGARECOMP, "sega-cd", "build", "--cue", str(changed_cue), "--bios", str(changed / "bios.bin"), "--output", str(tmp / "o-changed"), "--runtime-dir", str(ROOT), "--cc", CC,
+        done = subprocess.run([SEGARECOMP, "sega-cd", "build", "--cue", str(changed_cue), "--bios", str(changed / "bios.bin"), "--output", str(tmp / "o-changed"), "--runtime-dir", str(ROOT), "--cc", CC, "--boot-fixture-profiles", "1",
                                "--budget", "3000000", "--jobs", "8", "--cache-dir", str(tmp / "cache")], capture_output=True, text=True, timeout=1800)
         st_changed = json.loads((tmp / "o-changed" / "status.json").read_text())
         st_first = json.loads((tmp / "o-contract-static" / "status.json").read_text())
@@ -176,12 +178,52 @@ def main():
         out, st = c.build("static")
         rep = c.run(out)
         sb = st["static_boot"]
-        check(st["status"] == "ok" and sb["state"] == "admitted" and sb["disagreements"] == 1 and "static_boot_disagreement" in st["inventory"]["unresolved"] and st["rounds"] == 3 and
+        check(st["status"] == "ok" and sb["state"] == "admitted" and sb["contradictions"] == 1 and sb["unresolved_mismatches"] == 0 and "static_boot_contradicted" in st["inventory"]["unresolved"] and st["rounds"] == 3 and
               markers(rep) == ("a001", "b002") and rep["result"] == "idle",
-              "sp_source: the static SP image does not explain the live bytes - the guard stops it, the disagreement is reported, the observed fallback admits the real bytes (3 rounds), the SP runs")
+              "sp_source: the static SP image does not explain the live bytes - the guard stops it, the contradiction is reported, the observed fallback admits the real bytes (3 rounds), the SP runs")
         out_b, st_b = c.build("control", "--static-boot", "0")
         rep_b = c.run(out_b)
         check(all(rep[k] == rep_b[k] for k in KEYS) and markers(rep_b) == ("a001", "b002"), "sp_source: the final machine state equals the observed build's (the static image was never preferred over the live bytes)")
+
+        # ---- observed extents against the static mapping: partial overlap, unrelated later overlay -------------------------------------------------------------------------
+        c = cases["sp_shifted"] = Case(tmp, "sp_shifted")
+        out, st = c.build("static")
+        rep = c.run(out)
+        sb = st["static_boot"]
+        check(st["status"] == "ok" and sb["contradictions"] == 1 and sb["later_overlays"] == 0 and len(st["extents"]) == 1 and markers(rep) == ("a001", "b002") and rep["result"] == "idle",
+              "sp_shifted: an observed extent overlapping the static SP image only in part, from boot-area bytes mapped differently, is a contradiction (the base is not covered)")
+        c = cases["stage_overlay"] = Case(tmp, "stage_overlay")
+        out, st = c.build("static")
+        rep = c.run(out)
+        sb = st["static_boot"]
+        check(st["status"] == "ok" and sb["contradictions"] == 0 and sb["later_overlays"] == 1 and sb["unresolved_mismatches"] == 0 and st["rounds"] == 3 and "static_boot_contradicted" not in st["inventory"]["unresolved"],
+              "stage_overlay: a later stage from unrelated disc content over the boot area is a later overlay - not a contradiction")
+
+        # ---- the production path never selects a tagged BIOS ------------------------------------------------------------------------------------------------------------
+        c = cases["contract"]
+        rc, none = c.contract(fixture=False)
+        check(rc == 0 and none["authority"] == "" and none["refusal"] == "bios_not_verified" and none["images"] == [] and none["admits"] == [],
+              "production path: a BIOS carrying a fixture tag gets no profile (no static boot images)")
+        done = c.emit(ip_spec, fixture=False)
+        check(done.returncode != 0 and "static_boot_unverified" in done.stdout, "production path: the emitter refuses a static boot admission for a tagged BIOS")
+        out, st = c.build("production", fixture=False)
+        check(st["status"] == "ok" and st["rounds"] == 4 and st["static_boot"]["state"] == "not_offered" and st["static_boot"]["authority"] == "" and len(st["extents"]) == 2,
+              "production path: the build of a tagged BIOS is the execution-observed one (4 rounds)")
+        _, with_flag = c.contract()
+        check(with_flag["authority"] == "test_assumed_fixture", "test-only path: the fixture contract is labelled test_assumed_fixture, never verified_authentic")
+        # a BIOS that is tagged but behaviourally unrelated (another fixture's BIOS with the tag written into its header)
+        unrelated = tmp / "f-unrelated"
+        subprocess.run([sys.executable, str(ROOT / "tools" / "sega_cd_bios_loader_fixture.py"), "build", "--case", "direct", "--out", str(unrelated)], check=True, capture_output=True, text=True)
+        plain_build = subprocess.run([SEGARECOMP, "sega-cd", "build", "--cue", str(unrelated / "disc" / "disc.cue"), "--bios", str(unrelated / "bios.bin"), "--output", str(tmp / "o-plain"),
+                                      "--runtime-dir", str(ROOT), "--cc", CC, "--budget", "3000000", "--jobs", "8", "--cache-dir", str(tmp / "cache")], capture_output=True, text=True, timeout=1800)
+        bios = bytearray((unrelated / "bios.bin").read_bytes())
+        bios[0x100:0x120] = b"SEGA BOOT-CONTRACT FIXTURE 1    "
+        (unrelated / "bios.bin").write_bytes(bytes(bios))
+        subprocess.run([SEGARECOMP, "sega-cd", "build", "--cue", str(unrelated / "disc" / "disc.cue"), "--bios", str(unrelated / "bios.bin"), "--output", str(tmp / "o-tagged"),
+                        "--runtime-dir", str(ROOT), "--cc", CC, "--budget", "3000000", "--jobs", "8", "--cache-dir", str(tmp / "cache")], capture_output=True, text=True, timeout=1800)
+        st_plain, st_tag = (json.loads((tmp / n / "status.json").read_text()) for n in ("o-plain", "o-tagged"))
+        check(st_tag["status"] == "ok" and st_tag["static_boot"]["state"] == "not_offered" and st_tag["rounds"] == st_plain["rounds"] and st_tag["extents"] == st_plain["extents"],
+              "production path: a tagged but behaviourally unrelated BIOS admits no speculative boot image; the build equals the untagged one")
 
         # ---- a byte rewritten before the call; a partial placement -----------------------------------------------------------------------------------------------------
         c = cases["ip_patched"] = Case(tmp, "ip_patched")
@@ -193,12 +235,12 @@ def main():
         check(rep["stop"]["pc"] == rep_b["stop"]["pc"] == 0xFF0000 + 0x40 and rep["stop"]["tick"] == rep_b["stop"]["tick"] and all(rep[k] == rep_b[k] for k in same) and
               rep["stop"]["class"] in ("code_bytes_mismatch", "entry_not_compiled") and rep_b["stop"]["class"] in ("code_bytes_mismatch", "entry_not_compiled") and rep["result"] != "idle",
               "ip_patched: both builds stop at the patched instruction before it retires, at the same tick and in the same machine state (the static image is never executed where the live bytes differ)")
-        check(st["static_boot"]["disagreements"] == 0 and st["frontier"] is not None and st["frontier"]["refusal"] in ("no_source", "too_short"),
-              "ip_patched: the bytes that run are on no disc span, so the resolver refuses them (typed) - no wrong admission, no disagreement claimed")
+        check(st["static_boot"]["contradictions"] == 0 and st["frontier"] is not None and st["frontier"]["refusal"] in ("no_source", "too_short"),
+              "ip_patched: the bytes that run are on no disc span, so the resolver refuses them (typed) - no wrong admission; an unresolved mismatch is counted as such, never as a BIOS contradiction")
         c = cases["ip_trailing"] = Case(tmp, "ip_trailing")
         out, st = c.build("static")
         rep = c.run(out)
-        check(st["status"] == "ok" and st["rounds"] == 2 and rep["result"] == "idle" and markers(rep) == ("a001", "b002") and st["static_boot"]["disagreements"] == 0,
+        check(st["status"] == "ok" and st["rounds"] == 2 and rep["result"] == "idle" and markers(rep) == ("a001", "b002") and st["static_boot"]["contradictions"] == 0,
               "ip_trailing: a partial placement (the rest of the span stale) is harmless - the image covers more than was placed, the executed bytes still match")
     print("%d failures" % len(failures))
     return 1 if failures else 0

@@ -47,10 +47,10 @@ constexpr Profile kProfiles[] = {
     {"project_fixture_boot_contract_3", nullptr, "SEGA BOOT-CONTRACT FIXTURE 3    ", 0x8000U, true, 0x200U, 0x600U, 0x1000U, 0x400U},
 };
 
-const Profile *match_profile(const BiosImage &bios) {
+const Profile *match_profile(const BiosImage &bios, BootProfileScope scope) {
   for (const auto &p : kProfiles) {
     if (p.bios_sha256 != nullptr && bios.sha256 == p.bios_sha256) return &p;
-    if (p.bios_tag != nullptr && std::strlen(p.bios_tag) == kBiosTagBytes && bios.bytes.size() >= kBiosTagOffset + kBiosTagBytes &&
+    if (p.bios_tag != nullptr && scope == BootProfileScope::with_test_fixtures && std::strlen(p.bios_tag) == kBiosTagBytes && bios.bytes.size() >= kBiosTagOffset + kBiosTagBytes &&
         std::memcmp(bios.bytes.data() + kBiosTagOffset, p.bios_tag, kBiosTagBytes) == 0)
       return &p;
   }
@@ -77,14 +77,15 @@ bool read_track1(const DiscImage &disc, std::uint32_t offset, std::uint32_t leng
 
 }  // namespace
 
-BootContract derive_boot_contract(const BiosImage &bios, const DiscImage &disc) {
+BootContract derive_boot_contract(const BiosImage &bios, const DiscImage &disc, BootProfileScope scope) {
   BootContract out;
-  const Profile *profile = match_profile(bios);
+  const Profile *profile = match_profile(bios, scope);
   if (profile == nullptr) {
     out.refusal = BootContractRefusal::bios_not_verified;
     return out;
   }
-  out.profile = profile->name;   // reported with every outcome, refusals included
+  out.profile = profile->name;
+  out.authority = profile->bios_tag != nullptr ? "test_assumed_fixture" : "verified_authentic";   // reported with every outcome, refusals included
   const auto boot = read_sega_cd_boot(disc);
   if (!boot.header) {
     out.refusal = BootContractRefusal::disc_boot_area;

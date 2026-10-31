@@ -38,6 +38,7 @@ using segarecomp_cli::run_process;
 
 namespace {
 
+constexpr std::uint64_t kSystemAreaBytes = 0x8000;   // the Sega CD system area (the boot area lies in it)
 constexpr unsigned kMaxEpochs = 4, kMaxTemplates = 64, kMaxTemplateSlots = 256, kMaxRunSlots = 128, kMaxExtents = 64;   // SEG-098-T004 (ADR 0213): 16 -> 64, measured
 constexpr unsigned kMaxStaticExtents = 48;   // SEG-098-T002 (12), T004 (48, ADR 0213): of the 64 disc-image slots (shared with the resolved extents); more is the typed static_extent_bound_exceeded, admitting none
 constexpr unsigned kMaxProduced = 8;   // SEG-111 (ADR 0255): produced-code images admitted from build passes (kMaxProducedImages of the emitter)
@@ -63,6 +64,7 @@ struct Options {
   std::vector<std::string> emit_args;   // tests only: extra arguments forwarded to every `emit` (e.g. a manual `--disc-image` extent that shadows an address)
   std::string file_first;   // SEG-100 (ADR 0221): "" = off, else the candidate policy (all|structural) of the file-first dynamic images
   std::string file_first_max_bytes, file_first_max_offsets;
+  bool boot_fixtures = false;     // SEG-113, tests only: `--boot-fixture-profiles 1` lets a tagged project fixture BIOS match (an assumed, unverified contract); never set by the product
   bool static_boot = true;        // SEG-113 (ADR 0257): `--static-boot 0` is the control: the boot images are discovered by execution (M16 behaviour)
   bool static_producers = true;   // SEG-112 (ADR 0256): `--static-producers 0` is the control: no generation-time producer proofs (the M15 observed fallback only)
   bool reconstruction = true;     // SEG-111 (ADR 0255): `--reconstruction 0` is the control (and the escape hatch): the build as it was before relocated-fragment and produced-image admission
@@ -242,13 +244,14 @@ class Builder {
           }
         }
         if (spec.extent) {
-          if (!relocated) note_boot_disagreement(*spec.extent);
+          if (!relocated) note_boot_extent(*spec.extent);
           extents_.push_back(*spec.extent);
           admits.push_back("extent:" + program_identity + ":" + *spec.extent);
           if (relocated) ++relocated_count_;
           history_ += relocated ? ",\"admitted\":\"relocated_extent\"}" : ",\"admitted\":\"extent\"}";
           continue;
         }
+        note_boot_unresolved(cpu, pc);
         frontier_ = "{\"cpu\":\"" + cpu + "\",\"pc\":" + std::to_string(pc) + ",\"refusal\":\"" + spec.refusal + "\"" +
                     (relocation_error.empty() ? std::string() : ",\"relocation\":\"" + relocation_error + "\"") + "}";
         history_ += ",\"frontier\":" + frontier_;
@@ -365,7 +368,7 @@ class Builder {
     else if (static_status_ != "admitted" && static_status_ != "no_modules") reasons.push_back("static:" + static_status_);
     for (const auto &[k, n] : static_refusals_) { (void)n; reasons.push_back("static_refusal:" + k); }
     if (!extents_.empty()) reasons.push_back("execution_derived_extents");
-    if (boot_disagreements_ != 0U) reasons.push_back("static_boot_disagreement");
+    if (boot_contradictions_ != 0U) reasons.push_back("static_boot_contradicted");
     if (!o_.file_first.empty()) {   // SEG-100 (ADR 0224): a filtered subset is never called a complete executable inventory; the mappings are decided at run time
       reasons.push_back("file_first_runtime_binding");
       if (o_.file_first == "structural") reasons.push_back("file_first_structural_filter");
@@ -554,6 +557,7 @@ class Builder {
     }
     for (const auto &a : admits) { cmd.push_back("--admit"); cmd.push_back(a); }
     cmd.insert(cmd.end(), o_.emit_args.begin(), o_.emit_args.end());
+    if (o_.boot_fixtures) cmd.insert(cmd.end(), {"--boot-fixture-profiles", "1"});
     const fs::path out = o_.output / "emit.json";
     if (run_process(cmd, out, {}, o_.compile_timeout) != 0) return Failure{"generate", "the program could not be generated: " + read_text(out, 4096)};
     const std::string text = read_text(out);
@@ -819,10 +823,13 @@ class Builder {
     const fs::path out = o_.output / "boot-contract.json";
     std::error_code rm_ec;
     fs::remove(out, rm_ec);
-    if (run_process({self_, "sega-cd", "boot-contract", "--cue", o_.cue.string(), "--bios", o_.bios.string()}, out, {}, 300) < 0) { boot_state_ = "tool_failed"; return; }
+    std::vector<std::string> contract_cmd{self_, "sega-cd", "boot-contract", "--cue", o_.cue.string(), "--bios", o_.bios.string()};
+    if (o_.boot_fixtures) contract_cmd.insert(contract_cmd.end(), {"--boot-fixture-profiles", "1"});
+    if (run_process(contract_cmd, out, {}, 300) < 0) { boot_state_ = "tool_failed"; return; }
     const std::string text = read_text(out);
     if (raw_value(text, "ok").value_or("") != "true") { boot_state_ = "tool_failed"; return; }
     boot_profile_ = raw_value(text, "profile").value_or("");
+    boot_authority_ = raw_value(text, "authority").value_or("");
     boot_refusal_ = raw_value(text, "refusal").value_or("unknown");
     const auto images = text.find("\"images\":[");
     const auto list = text.find("\"admits\":[");
@@ -850,43 +857,57 @@ class Builder {
     log_ << "static boot: " << boot_state_ << " (" << boot_profile_ << ", " << boot_refusal_ << "), " << boot_extents_.size() << " image(s)" << std::endl;
   }
 
-  // A resolved (execution-observed) extent that covers the base (the entry) of a statically admitted boot image AND whose source is the boot area itself says the BIOS placed
-  // boot-area bytes differently from the static contract: that is a disagreement, reported and counted (the dynamic extent is still admitted: the live-byte guard never prefers the static
-  // image over different live bytes). A later stage loaded over the same guest span from elsewhere on the disc is an ordinary overlay, not a disagreement.
-  void note_boot_disagreement(const std::string &spec) {
-    const auto parse = [](const std::string &text) {
-      std::vector<std::string> f;
-      std::stringstream ss(text);
-      for (std::string part; std::getline(ss, part, ':');) f.push_back(part);
-      return f;
-    };
-    const auto f = parse(spec);
+  // What an execution-observed extent says about a statically admitted boot image (same CPU, destination ranges overlapping, even partially):
+  //  - source inside the boot area (the system area / the image's own source span) but at a different source-to-destination offset: **contradiction** - the exact-copy resolver
+  //    found the live bytes in boot-area bytes mapped differently from the contract;
+  //  - source elsewhere on the disc: a **later overlay** (not a statement about the boot mapping);
+  //  - destination not overlapping: unrelated.
+  // A live mismatch for which the resolver found no source at all is neither: it is counted as an *unresolved mismatch* and never as a BIOS disagreement.
+  // Limited observation: without write tracing a boot area that copies parts of itself over its own span is indistinguishable from a differing placement.
+  void note_boot_extent(const std::string &spec) {
+    const auto f = split_spec(spec);
     if (f.size() != 4U) return;
-    std::uint64_t offset = 0, base = 0, length = 0, boot_end = 0;
+    std::uint64_t offset = 0, base = 0, length = 0;
     try { offset = std::stoull(f[1]); base = std::stoull(f[2]); length = std::stoull(f[3]); } catch (const std::exception &) { return; }
     for (const auto &b : boot_extents_) {
-      const auto g = parse(b);
-      if (g.size() != 4U) continue;
-      try { boot_end = std::max<std::uint64_t>(boot_end, std::stoull(g[1]) + std::stoull(g[3])); } catch (const std::exception &) { return; }
-    }
-    for (const auto &b : boot_extents_) {
-      const auto g = parse(b);
+      const auto g = split_spec(b);
       if (g.size() != 4U || g[0] != f[0]) continue;
-      std::uint64_t gbase = 0;
-      try { gbase = std::stoull(g[2]); } catch (const std::exception &) { return; }
-      if (base <= gbase && gbase < base + length && offset < boot_end) { ++boot_disagreements_; return; }   // covers the image's entry (its base) with boot-area bytes
+      std::uint64_t goff = 0, gbase = 0, glen = 0;
+      try { goff = std::stoull(g[1]); gbase = std::stoull(g[2]); glen = std::stoull(g[3]); } catch (const std::exception &) { return; }
+      if (!(base < gbase + glen && gbase < base + length)) continue;   // destinations do not overlap
+      const std::uint64_t boot_area_end = std::max<std::uint64_t>(goff + glen, kSystemAreaBytes);
+      const bool from_boot_area = offset < boot_area_end;
+      const bool same_mapping = static_cast<std::int64_t>(offset) - static_cast<std::int64_t>(base) == static_cast<std::int64_t>(goff) - static_cast<std::int64_t>(gbase);
+      if (from_boot_area && !same_mapping) ++boot_contradictions_;
+      else if (!from_boot_area) ++boot_overlays_;
     }
+  }
+
+  // A frontier at a pc inside a static boot image's destination for which the resolver found no source relationship at all.
+  void note_boot_unresolved(const std::string &cpu, std::uint64_t pc) {
+    for (const auto &b : boot_extents_) {
+      const auto g = split_spec(b);
+      if (g.size() != 4U || g[0] != cpu) continue;
+      try { if (pc >= std::stoull(g[2]) && pc < std::stoull(g[2]) + std::stoull(g[3])) { ++boot_unresolved_; return; } } catch (const std::exception &) { return; }
+    }
+  }
+
+  static std::vector<std::string> split_spec(const std::string &text) {
+    std::vector<std::string> f;
+    std::stringstream ss(text);
+    for (std::string part; std::getline(ss, part, ':');) f.push_back(part);
+    return f;
   }
 
   std::string static_boot_json() const {
     std::ostringstream out;
-    out << "{\"enabled\":" << (o_.static_boot ? "true" : "false") << ",\"state\":\"" << (o_.static_boot ? boot_state_ : "disabled") << "\",\"profile\":\"" << boot_profile_
+    out << "{\"enabled\":" << (o_.static_boot ? "true" : "false") << ",\"state\":\"" << (o_.static_boot ? boot_state_ : "disabled") << "\",\"authority\":\"" << boot_authority_ << "\",\"profile\":\"" << boot_profile_
         << "\",\"refusal\":\"" << boot_refusal_ << "\",\"images\":[";
     for (std::size_t i = 0; i < boot_classes_.size(); ++i) {
       const auto colon = boot_classes_[i].find(':');
       out << (i ? "," : "") << "{\"cpu\":\"" << boot_classes_[i].substr(0, colon) << "\",\"class\":\"" << boot_classes_[i].substr(colon + 1U) << "\"}";
     }
-    out << "],\"disagreements\":" << boot_disagreements_ << "}";
+    out << "],\"contradictions\":" << boot_contradictions_ << ",\"later_overlays\":" << boot_overlays_ << ",\"unresolved_mismatches\":" << boot_unresolved_ << "}";
     return out.str();
   }
 
@@ -964,7 +985,8 @@ class Builder {
   std::map<std::string, unsigned> relocation_refusals_;
   std::vector<std::string> boot_extents_, boot_classes_;   // SEG-113: "<cpu>:<offset>:<base>:<length>" / "<cpu>:<class>" of the statically admitted boot images
   std::string boot_state_ = "not_run", boot_profile_, boot_refusal_ = "none";
-  unsigned boot_disagreements_ = 0;
+  std::string boot_authority_;
+  unsigned boot_contradictions_ = 0, boot_overlays_ = 0, boot_unresolved_ = 0;
   std::string static_status_ = "not_run";
   bool static_joined_ = false;
   std::map<std::string, unsigned> static_refusals_;
@@ -1010,6 +1032,7 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--aot-model" && value == "gen2" && !o.aot_model_given) o.aot_model_given = true;
     else if (key == "--file-first" && (value == "all" || value == "structural")) o.file_first = value;   // SEG-100 (ADR 0221)
     else if (key == "--emit-arg") o.emit_args.push_back(value);   // tests only
+    else if (key == "--boot-fixture-profiles" && (value == "0" || value == "1")) o.boot_fixtures = value == "1";
     else if (key == "--static-boot" && (value == "0" || value == "1")) o.static_boot = value == "1";
     else if (key == "--static-producers" && (value == "0" || value == "1")) o.static_producers = value == "1";
     else if (key == "--reconstruction" && (value == "0" || value == "1")) o.reconstruction = value == "1";

@@ -293,6 +293,9 @@ std::vector<std::string> split(const std::string &text, char sep) {
   return out;
 }
 
+// SEG-113: fixture BIOS profiles are test-only: selected only by an explicit `--boot-fixture-profiles 1`, never by default.
+scd::BootProfileScope g_boot_scope = scd::BootProfileScope::authentic;
+
 std::optional<scd::Processor> parse_processor(const std::string &text) {
   if (text == "main") return scd::Processor::main;
   if (text == "sub") return scd::Processor::sub;
@@ -462,7 +465,7 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
       const auto base = parse_u32(f[3]);
       const auto len = parse_u32(f[4]);
       if (!proc || !off || !base || !len || *len == 0U) return bad("admit", "static_boot_syntax");
-      const auto contract = scd::derive_boot_contract(inputs.bios, disc);
+      const auto contract = scd::derive_boot_contract(inputs.bios, disc, g_boot_scope);
       if (contract.images.empty()) return bad("admit", "static_boot_unverified");   // no verified profile for this BIOS / header form: the eligibility check
       const scd::BootContractImage *proven = nullptr;
       for (const auto &image : contract.images)
@@ -671,7 +674,8 @@ int emit(int argc, char **argv) {
         std::cerr << "segarecomp: --application-entry must be an even address in $200000-$FFFFFF (Word RAM or work RAM)\n";
         return 2;
       }
-    } else if (arg == "--admit" && i + 1 < argc) admits.emplace_back(argv[++i]);
+    } else if (arg == "--boot-fixture-profiles" && i + 1 < argc) g_boot_scope = std::string_view(argv[++i]) == "1" ? scd::BootProfileScope::with_test_fixtures : scd::BootProfileScope::authentic;   // SEG-113, tests only
+    else if (arg == "--admit" && i + 1 < argc) admits.emplace_back(argv[++i]);
     else if (arg == "--partition-window" && i + 1 < argc && !partition_window) {
       partition_window = parse_u32(argv[++i]);
       if (!partition_window || !scd::valid_partition_window(*partition_window)) {
@@ -915,6 +919,7 @@ int boot_contract_command(int argc, char **argv) {
     const std::string_view arg = argv[i];
     if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
     else if (arg == "--bios" && i + 1 < argc) bios_path = argv[++i];
+    else if (arg == "--boot-fixture-profiles" && i + 1 < argc) g_boot_scope = std::string_view(argv[++i]) == "1" ? scd::BootProfileScope::with_test_fixtures : scd::BootProfileScope::authentic;   // tests only
     else { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
   }
   if (!cue || !bios_path) { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
@@ -924,8 +929,8 @@ int boot_contract_command(int argc, char **argv) {
   if (!bios_bytes) { std::cout << "{\"ok\":false,\"error\":\"bios_unreadable\"}\n"; return 8; }
   const auto admitted = scd::admit_bios(*bios_bytes);
   if (!admitted.bios) { std::cout << "{\"ok\":false,\"error\":\"" << scd::bios_error_name(admitted.error) << "\"}\n"; return 8; }
-  const auto contract = scd::derive_boot_contract(*admitted.bios, *loaded.disc);
-  std::cout << "{\"ok\":true,\"profile\":\"" << contract.profile << "\",\"refusal\":\"" << scd::boot_contract_refusal_name(contract.refusal) << "\",\"images\":[";
+  const auto contract = scd::derive_boot_contract(*admitted.bios, *loaded.disc, g_boot_scope);
+  std::cout << "{\"ok\":true,\"authority\":\"" << contract.authority << "\",\"profile\":\"" << contract.profile << "\",\"refusal\":\"" << scd::boot_contract_refusal_name(contract.refusal) << "\",\"images\":[";
   for (std::size_t i = 0; i < contract.images.size(); ++i) {
     const auto &image = contract.images[i];
     std::cout << (i ? "," : "") << "{\"cpu\":\"" << scd::processor_name(image.processor) << "\",\"class\":\"" << scd::boot_proof_name(image.proof) << "\",\"offset\":" << image.track_offset

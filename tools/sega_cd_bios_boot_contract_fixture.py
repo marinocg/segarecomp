@@ -14,6 +14,8 @@ Cases (every case builds its own BIOS and disc):
   sp_source     the disc's SP descriptor names $1000 but the BIOS reads the SP from $1800 (descriptor/source disagreement: the static SP image is wrong)
   ip_patched    the BIOS patches one IP byte in Work RAM after the placement and before the call (the static IP image is not what runs)
   ip_trailing   the BIOS places only the first $2000 bytes of the IP span (a partial placement; the rest of the work RAM is stale)
+  sp_shifted    the descriptor names $1000 but the BIOS places the SP read from $1800 at $6200 (the observed extent overlaps the static SP image only in part)
+  stage_overlay after the IP, the BIOS loads a later stage (disc sectors 60..61, outside the boot area) over the same Work RAM span and calls it (an unrelated later overlay)
   no_profile    the same BIOS and disc without the profile tag (an unverified BIOS: nothing is offered)
   form_ok       tag 3: a profile verified only for one header form; the disc has that form (offered)
   form_other    tag 3 with another SP descriptor (the BIOS still places it): the profile does not apply (header_not_verified), execution-observed admission
@@ -32,7 +34,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sega_cd_fixture_disc as F  # noqa: E402
 import sega_cd_bios_loader_fixture as L  # noqa: E402
 
-CASES = ("contract", "ip_short", "sp_long", "sp_moved", "sp_source", "ip_patched", "ip_trailing", "no_profile", "form_ok", "form_other")
+CASES = ("contract", "ip_short", "sp_long", "sp_moved", "sp_source", "ip_patched", "ip_trailing", "no_profile", "form_ok", "form_other", "sp_shifted", "stage_overlay")
 TAGS = {1: b"SEGA BOOT-CONTRACT FIXTURE 1    ", 2: b"SEGA BOOT-CONTRACT FIXTURE 2    ", 3: b"SEGA BOOT-CONTRACT FIXTURE 3    "}
 IP_BASE = 0xFF0000
 SP_PRG = 0x006000
@@ -52,10 +54,19 @@ def ip_code(marker):
     return a.assemble()
 
 
-def sp_code(marker):
-    a = F.Asm(SP_PRG)
+def sp_code(marker, base=SP_PRG):
+    a = F.Asm(base)
     a.move("w", F.imm(marker), F.absl(SP_MARK))
     for _ in range(16):
+        a.nop()
+    a.rts()
+    return a.assemble()
+
+
+def stage_code(marker):
+    a = F.Asm(IP_BASE)
+    a.move("w", F.imm(marker), F.absl(IP_MARK + 4))
+    for _ in range(32):
         a.nop()
     a.rts()
     return a.assemble()
@@ -76,8 +87,9 @@ def filler(start, length, seed):
 def build(case, out):
     tag, ip_span, sp_addr, sp_len = geometry(case)
     ip = ip_code(0xA001)
-    sp = sp_code(0xB002)
-    sp_read = 0x1800 if case == "sp_source" else sp_addr      # what the BIOS actually reads; the descriptor says sp_addr
+    sp = sp_code(0xB002, SP_PRG + 0x200 if case == "sp_shifted" else SP_PRG)
+    sp_read = 0x1800 if case in ("sp_source", "sp_shifted") else sp_addr
+    sp_dest = SP_PRG + 0x200 if case == "sp_shifted" else SP_PRG      # what the BIOS actually reads; the descriptor says sp_addr
     placed = 0x2000 if case == "ip_trailing" else ip_span
     area = bytearray(16 * 2048)
     area[0x000:0x010] = b"SEGADISCSYSTEM  "
@@ -98,6 +110,8 @@ def build(case, out):
     for lba in range(TRACK1):
         if lba < 16:
             users.append(bytes(area[lba * 2048:(lba + 1) * 2048]))
+        elif lba in (60, 61) and case == "stage_overlay":
+            users.append(stage_code(0xC003).ljust(2048, b"\0") if lba == 60 else filler(0, 2048, 0x6100))
         elif lba == 16:
             users.append(filler(0, 2048, 0x1610))                 # sector 16: the span beyond the system area the IP placement reaches
         else:
@@ -114,8 +128,10 @@ def build(case, out):
     first = sp_read // 2048
     count = (sp_read % 2048 + sp_len + 2047) // 2048
     sub.load(first, count, 0x20000)
-    sub.copy_blob(L.WORD_RAM_SUB + 0x20000 + sp_read % 2048, SP_PRG, sp_len)
-    sub.run(SP_PRG)
+    sub.copy_blob(L.WORD_RAM_SUB + 0x20000 + sp_read % 2048, sp_dest, sp_len)
+    if case == "stage_overlay":
+        sub.load(60, 2, 0x30000)
+    sub.run(sp_dest)
     code = sub.finish()
     sub_len = (len(code) + 1) & ~1
 
@@ -141,6 +157,14 @@ def build(case, out):
     if case == "ip_patched":
         m.move("b", F.imm(0x5A), F.absl(IP_BASE + PATCH_AT))
     m.jsr(F.absl(IP_BASE))
+    if case == "stage_overlay":
+        m.move("l", F.imm(WORD_RAM_MAIN_VIEW + 0x30000), F.a(0))
+        m.move("l", F.imm(IP_BASE), F.a(1))
+        m.move("w", F.imm(0x1000 // 2 - 1), F.d(0))
+        m.label("copy_stage")
+        m.move("w", ("inc", 0), ("inc", 1))
+        m.dbra(0, "copy_stage")
+        m.jsr(F.absl(IP_BASE))
     for i in range(3):
         m.move("w", F.absl(L.GA + 0x24 + 2 * i), F.absl(L.RESULT + 0x10 + 2 * i))
     m.move("b", F.imm(0xA5), F.absl(L.RESULT + 0xFF))
