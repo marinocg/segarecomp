@@ -177,6 +177,15 @@ int main(void) {
   put_byte(SCD_SUB, 0x30003U, 0x77U);
   check(has("\"clobbered\":1"), "a later bus write inside a stream marks it clobbered");
 
+  fresh(1); /* a read of a Gate Array register and a write of the same value in one instruction is not a copy of anything admitted */
+  for (i = 0; i < 4U; ++i) {
+    uint32_t v = 0U;
+    (void)scd_read(machine, SCD_SUB, 0xFF8020U, 2U, &v, 0x200U);
+    (void)scd_write(machine, SCD_SUB, 0x30000U + 2U * i, 2U, v, 0x200U);
+    next(SCD_SUB);
+  }
+  check(streams() == 1 && has("\"paired\":0"), "a device read is never the source of a pair");
+
   fresh(1);
   fill_source(0x1000U, 16U);
   for (i = 0; i < 8U; ++i) move(SCD_SUB, 0x1000U + i, 0x30000U + i, 1U, 0x200U);

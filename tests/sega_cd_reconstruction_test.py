@@ -140,6 +140,8 @@ def main():
         refused("the extent belongs to the other processor", "source_not_admitted", extents=["main:" + modules[0].split(":", 1)[1]])
         b = modules[0].split(":")
         refused("an extent that does not reach the source", "source_not_admitted", extents=["sub:%s:%s:%d" % (b[1], b[2], 0x80)])
+        refused("the source was read from ROM (class 4)", "source_not_admitted", text=mutated("srcrom", flag("source_class", 4)))
+        refused("the source was read from a device (class 5)", "source_not_admitted", text=mutated("srcdev", flag("source_class", 5)))
         refused("a stream fed from several source runs", "source_discontiguous", text=mutated("gap", flag("source_gap")))
         refused("the stream was written over after it was produced", "stream_overwritten", text=mutated("clobbered", flag("clobbered")))
         refused("a write was dropped by write protect", "stream_dropped", text=mutated("dropped", flag("dropped")))
