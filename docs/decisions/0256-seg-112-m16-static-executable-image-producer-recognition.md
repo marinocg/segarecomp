@@ -1,0 +1,67 @@
+# ADR 0256: SEG-112 (M16) - static executable-image producer recognition and pre-compilation reconstruction
+
+- Status: Accepted. Milestone SEG-112 (M16), stacked on SEG-111 (ADR 0255, product PR #176). Related: ADR 0142 (verified broad AOT), 0178 (provenance), 0206/0211-0219 (static loader scan, static extents), 0254/0255 (relocated fragments; execution-observed reconstruction).
+- Privacy: classes, counts and sizes only. No address, offset, hash or byte of a commercial disc, BIOS or RAM appears here; the authentic analysis is local and ephemeral.
+- Question: can segarecomp understand a verified game's executable-image-producing instructions early enough to reconstruct their output **before** the first generated-native program is compiled? Answer for a small generic mechanism: **yes** (section 5).
+
+## 1. Audit (T001)
+
+1. **Can the loader scanner analyse main-CPU IP code?** No. `loader_scan.cpp` is a path-sensitive walk of the *sub* SP image whose abstract state is the CD interface (CDD/CDC registers, DBC, DMA address, delivery bookkeeping, a Word RAM page model). It models no main-CPU state and its output is a module list, not RAM images. The main boot IP is not walked at all.
+2. **Is the authentic 21-byte copy's source/destination/count recoverable?** Yes, from the IP image alone: a pointer load, a pointer load and a 16-bit count load immediately before a single `MOVE.B (Ax)+,(Ay)+ ; DBF Dn` loop (the same triple M14 derived by hand from execution coverage - which was used only as a cross-check, never as an input).
+3. **What kept the scanner from summarising it?** It does not try: it only *counts* `(An)+,(Am)+` moves (`copy_loop_candidates`) and `DBcc` sites as survey statistics. It has no loop summary, no RAM destination, and its states are CD-specific.
+4. **Is the loop reached by a static walk?** Yes. A flat-lattice data-flow walk from the IP entry reaches it in about 50 steps (one foreign BIOS call returns with unknown registers; the set-up that matters is the straight-line block right before the loop).
+5. **Are the boot image and source bytes available before compilation?** Yes: the system area of the disc. The synthetic post-BIOS profile's IP *descriptor* does not describe what the real BIOS loads (for the authentic disc it names a different span than the one the build pass later proved loaded), so the recognizer uses the Sega CD BIOS boot contract instead: the system area from byte `$200` is placed at `$FF0000` and entered there; the SP is taken as declared. This is a recorded assumption, recomputed by the emitter and checked by the run-time byte guard.
+6. **Can the following 48 KiB stage be proven too?** No. Its source is Word RAM filled by the *sub* CPU's CDC transfer; the loader scan's own refusal for this disc (`destination_unknown`, independent of this work) is what stops a static proof, and the recognizer refuses the loop it sees (`source_not_immutable`). That stage stays an ordinary M15 resolver round.
+7. **Is `destination_unknown` relevant?** Independent: it concerns the sub SP's load operations, not the main IP's relocation.
+8. **Is a small extension of the value propagation enough?** Extending the scanner's state was not: its state cannot be reused for the main CPU without untangling the CD model. The recognizer therefore reuses what is *CPU-owned* (`decode_m68k_instruction`, `lift_m68k_instruction`, `m68k_operation_effect`, `m68k_control_successors`, EA helpers) and adds only a register-constant lattice (~450 lines). It is not a second guest interpreter: it walks control flow once per program counter, never iterates a loop and never executes memory.
+9. **Do loops need a bounded semantic summary?** Yes, and that is the whole mechanism (section 2).
+10. **Is there an existing admission for the result?** `static_disc_extent` proves disc-to-RAM *module mappings* by recomputing the loader scan and represents a disc span at its load address; a relocated fragment is a span of the boot image at a *different* RAM address whose proof is another function. A new minimal kind, `static_fragment`, carries processor, base and bytes; like `static_disc_extent` it is **recomputed by the emitter** (`static-fragment:<cpu>:<base>:<length>:<sha256>` must equal a fragment the recognizer proves from the disc; coordinates are never trusted), has `static_proof` authority and `byte_identity` verification, and no pass identity.
+
+Decision gate: passed on the project fixture and on the authentic boot code (a run of the recognizer with no input from M14 or M15 proves exactly the fragment M15 discovers by execution).
+
+## 2. The recognizer (T002)
+
+`producer_scan.cpp`: a flat-lattice data-flow walk per processor from the image entry (main: the BIOS-loaded IP; sub: the SP). One state per program counter (per register: value plus known-bit mask; joins keep only bits equal on every path), both arms of every conditional, constant `JSR/JMP/BSR/BRA` targets followed, a call's continuation continues with every register unknown, `RTS/RTE` and computed transfers end the path. Bounds: 100,000 steps, 16,384 program counters, one 4 KiB fragment, eight fragments; exhaustion is a typed refusal, never silent.
+
+**Loop idiom** (recognised from instruction semantics, not bytes or registers): at a program counter whose instructions up to a `DBF Dn` (condition `never`) that branches back to it form one load from `(Ax)+`, optional byte operations on a data register with *immediate* operands (`EORI.B`, `ADDI.B`, `SUBI.B`) and one store to `(Ay)+` - or the memory-to-memory `MOVE.<b|w|l> (Ax)+,(Ay)+` form - with `Ax`, `Ay` and the low word of `Dn` constants on the walked path, the loop is *summarised*: `output[i] = f(source[i])`, `Ax += n*size`, `Ay += n*size`, `Dn.w = $FFFF`, and the walk continues after it. The produced bytes are evaluated from the boot image at generation time; the loop is never iterated.
+
+**A candidate is proven only if**: the destination is main Work RAM or sub PRG RAM, even, at least 4 bytes, at most 4 KiB; the whole source range lies in the processor's boot image (immutable authority); source and destination (and the image) do not overlap; no write the walk can *locate* overlaps the source or the produced bytes (a known-address store before or after is `source_written` / `destination_overwritten`); a control transfer with a constant target (including `JMP (An)` with a known `An`) lands in the produced range - the "executable use" - after which the produced bytes are walked as code (bounded closure: a produced trampoline that itself produces is analysed before any code is generated); and no other proof claims the same bytes differently. Everything else is a counted, typed refusal (`loop_operand_unknown`, `loop_body_unsupported`, `destination_unsupported`, `source_not_immutable`, `too_large`, `aliasing`, `source_written`, `destination_overwritten`, `not_executed`, `overlapping_fragments`, `budget_exhausted`).
+
+**Honest limit of the class.** Stores through a pointer the walk does not know are *counted* (`unknown_writes`), not assumed absent: a proof says "if the boot image is as loaded when the loop reads it". That is the same assumption ADR 0212 makes for immutable tables and it is bounded the same way: the emitted image is checked against the live bytes before every instruction, so a wrong proof stops the program (and the M15 observed fallback can still admit the real bytes as a variant); it can never execute wrong code.
+
+## 3. Admission and build integration (T003)
+
+The native build driver runs `segarecomp sega-cd discover-producers` once, after the static loader scan and **before the first emission**, and puts the proven `static-fragment:` admissions at the head of the chain (no pass identity, so no round and no later admission's identity depends on a pass). The emitter recomputes the proof from the disc and creates an ordinary `ExecutableImage` (producer `sega_cd.static_fragment`) that flows through the existing decoding, lowering, C11 emission, byte guards, variant selection and object cache. `--static-producers 0|1` (default 1) is the control; the M15 execution-observed fallback is untouched and still handles every producer the recognizer does not prove (verified on the `decoded` and `relocated` fixtures with static producers enabled).
+
+## 4. Transforms and compression (T004)
+
+The same machinery proves byte transforms with constant operands: a loop that loads a byte, applies `EORI.B`/`ADDI.B`/`SUBI.B` (a chain of them) and stores it is recognised *from the code*, with its parameters taken from the immediates, and evaluated at generation time (fixtures `static_xor`, `static_add`, `static_sub`, and a chain in the unit test). A key held in a register (input-dependent) is `loop_body_unsupported`. **Compression:** an RLE/LZ decoder needs a data-dependent output length and back-references into its own output; the idiom above is a fixed-count, element-wise map with an immutable source and a closed-form output, and a general decoder is outside "a bounded semantic summary" without a second interpreter. It is therefore **not implemented**: such a producer is reported as unrecognised (`loop_body_unsupported` or no candidate) and left to the M15 fallback. This is recorded as the capability boundary, not as coverage.
+
+## 5. Results (T005)
+
+Authentic Earthworm Jim SE (local disc and Model 1 BIOS, no manual hint, cold caches, 16 jobs, Compatibility). A = M15 reconstruction off; B = M15 observed fallback only (`--static-producers 0`); C = static recognition on (fallback still available).
+
+| | A baseline | B dynamic fallback | **C static** |
+|---|---|---|---|
+| static producer candidates / proven / refused | - | - | 2 / 1 / 1 (`source_not_immutable`: the Word RAM stage) |
+| images reconstructed before the first emission | 0 | 0 | **1 (the 20-byte fragment)** |
+| rounds (execution/refinement) | 6 | 8 | **7** |
+| round classes | epoch, 2 template, IP, SP, final(no_source) | epoch, 2 template, IP, SP, **fragment**, stage, final | epoch, 2 template, IP, SP, stage, final |
+| distinct native objects built | 67 | 75 | **74** |
+| functions / generated C | 150,048 / 142 MB | 166,222 / 160 MB | 166,222 / 160 MB (identical to B) |
+| program | 42.5 MB | 47.5 MB | 47.5 MB |
+| build wall / CPU / peak memory | 138 s / 528 CPU-s / 540 MiB | 191 s / 639 CPU-s / 558 MiB | **171 s / 601 CPU-s / 559 MiB** |
+| stop | `entry_not_compiled` `no_source` | `main_device_unsupported` | `main_device_unsupported` |
+| instructions (main / sub), frame digest, device log | 13,154,366 / 15,264,462 (earlier stop) | 13,197,846 / 15,335,793, same digests | **identical to B** |
+
+(A's wall time here is the cold run of this session; ADR 0255 recorded 79 s on a warm cache.) `--file-first structural` with static recognition: 7 rounds, 224 s wall, 630 MiB, machine state equal to Compatibility in every field except the dynamic-image counters.
+
+**Rounds eliminated: exactly one** - the round that M15 spends discovering the relocated fragment by running the program, stopping at it, and rebuilding. Its source, destination and bytes are established before the first emission, the fragment is in the initial native program, and the round is gone (B 8 -> C 7); the final machine state equals B's, and the generated functions and C size are identical (the program identities differ because the image authority differs: `static_proof` versus an observed extent). **The build is not one-shot**: the remaining rounds are the BIOS epoch, two operand-template batches, the IP and SP images, and the Word RAM stage. The stage cannot be proven statically (its source is delivered by the sub CPU's CDC transfer). The IP and SP extents are boot-area spans the BIOS contract determines; admitting them statically is an obvious next step that is *not* part of producer recognition and is not claimed here.
+
+Project fixtures (`tests/sega_cd_static_producer_test.py`, 40 checks): copy, XOR, add and subtract producers are in the first emission (3 rounds versus 4 with the fallback), run to the oracle, are deterministic across builds and job counts, and end in a machine state identical to the fallback's; the emitter refuses wrong digest/base/length/processor, malformed specs and discs without the producer; producers outside the boot images are untouched. `tests/sega_cd_producer_scan_test.cpp` (35 checks): copy loops over other registers and widths, sub PRG RAM, JMP/JSR, several fragments, transform chains, bounded closure; 17 negative classes.
+
+## 6. Limits
+
+- Only fixed-count element-wise producers over immutable boot images; no decompression format; no Word RAM, no CDC-sourced or device-dependent data; no unrolled (many-store) producers; no conditional output selection; the walk is not a whole-program analysis (computed transfers end a path; a call's continuation forgets registers).
+- The main-IP model is the BIOS boot contract assumption of section 1 item 5; stores through unknown pointers are counted, not excluded (section 2).
+- A proof is a proposal: the emitter recomputes it, the byte guard checks every executed instruction, the M15 fallback remains.
