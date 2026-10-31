@@ -675,6 +675,7 @@ typedef struct ScdMachine {
   uint8_t delivered_overflow;             /* more ranges than the ledger holds: the evidence is incomplete and is never used */
   ScdCdda cdda;                           /* SEG-104: CD-DA output (inert unless a host enabled it) */
   ScdMix mix;                             /* SEG-107: PCM synthesis and the mixed output timeline (inert unless a host enabled it) */
+  struct ScdReloc *reloc;                 /* SEG-111 (ADR 0255): the build pass's bounded write-stream observer, or NULL (final programs never attach it) */
 } ScdMachine;
 
 /* The duration of one sub cycle in ticks for this machine's profile (ADR 0177). */
@@ -885,6 +886,20 @@ int scd_event_open(ScdMachine *m, const char *path);
 void scd_event(ScdMachine *m, const char *kind, uint32_t detail);
 void scd_event_close(ScdMachine *m);
 int scd_trace_open(ScdMachine *m, const char *path);
+/* SEG-111 (ADR 0255, scd_reloc.c): build-pass-only observer of bounded RAM write streams. Classes of a data read, in the reading processor's space. */
+#define SCD_RELOC_CLASS_NONE 0U
+#define SCD_RELOC_CLASS_WORK 1U
+#define SCD_RELOC_CLASS_PRG 2U
+#define SCD_RELOC_CLASS_WORD 3U
+#define SCD_RELOC_CLASS_ROM 4U
+#define SCD_RELOC_CLASS_DEVICE 5U
+int scd_reloc_attach(ScdMachine *m);
+void scd_reloc_release(ScdMachine *m);
+void scd_reloc_note_read(ScdMachine *m, uint32_t cpu, uint32_t klass, uint32_t address, uint32_t width, uint32_t value);
+void scd_reloc_note_write(ScdMachine *m, uint32_t cpu, uint32_t memory, uint32_t offset, uint32_t destination_address, uint32_t width,
+                          uint32_t value, int dropped, uint32_t pc);
+void scd_reloc_note_foreign(ScdMachine *m, uint32_t memory, uint32_t offset, uint32_t length);
+void scd_reloc_report(const ScdMachine *m, FILE *out);
 /* SEG-079 diagnostic (--ram-write-log, local only, outside the program identity): 16-byte little-endian records
  * {u8 kind, u8 width, u8 cpu, u8 0, u32 offset, u32 value, u32 pc}; kind 1 = PRG RAM write, 2 = work RAM write, 3 = main BIOS-window read. */
 int scd_wlog_open(ScdMachine *m, const char *path);

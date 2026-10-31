@@ -1210,6 +1210,13 @@ set_target_properties(sega_cd_pcm_replay PROPERTIES C_STANDARD 11 C_STANDARD_REQ
 target_link_libraries(sega_cd_pcm_replay PRIVATE segarecomp::runtime_sega_cd)
 segarecomp_enable_warnings(sega_cd_pcm_replay)
 
+add_executable(sega_cd_reloc_observer_test sega_cd_reloc_observer_test.c)
+set_target_properties(sega_cd_reloc_observer_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_link_libraries(sega_cd_reloc_observer_test PRIVATE segarecomp::runtime_sega_cd)
+segarecomp_enable_warnings(sega_cd_reloc_observer_test)
+add_test(NAME sega_cd_reloc_observer_test COMMAND sega_cd_reloc_observer_test)
+set_property(TEST sega_cd_reloc_observer_test APPEND PROPERTY LABELS full fast)
+
 add_executable(sega_cd_dynamic_binding_test sega_cd_dynamic_binding_test.c)
 set_target_properties(sega_cd_dynamic_binding_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
 target_link_libraries(sega_cd_dynamic_binding_test PRIVATE segarecomp::runtime_sega_cd)

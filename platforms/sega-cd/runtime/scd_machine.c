@@ -254,8 +254,51 @@ static int scd_is_vdp_long(uint32_t cpu, uint32_t address, uint32_t width) {
   return cpu == SCD_MAIN && width == 4U && address >= UINT32_C(0x00C00000) && address < UINT32_C(0x00C00008);
 }
 
-int scd_read(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint32_t *value, uint32_t pc) {
-  address &= UINT32_C(0x00FFFFFF);
+/* SEG-111 (ADR 0255): classify a data access in the accessing processor's space and normalise mirrors (observer only). */
+static uint32_t scd_reloc_classify(uint32_t cpu, uint32_t address, uint32_t *normal) {
+  if (cpu == SCD_MAIN) {
+    if (address >= UINT32_C(0x00E00000)) { *normal = UINT32_C(0x00FF0000) | (address & 0xFFFFU); return SCD_RELOC_CLASS_WORK; }
+    if (address < UINT32_C(0x00200000)) {
+      *normal = address & UINT32_C(0x3FFFF);
+      return *normal < UINT32_C(0x20000) ? SCD_RELOC_CLASS_ROM : SCD_RELOC_CLASS_PRG;
+    }
+    if (address < UINT32_C(0x00400000)) { *normal = UINT32_C(0x00200000) | (address & UINT32_C(0x3FFFF)); return SCD_RELOC_CLASS_WORD; }
+  } else {
+    *normal = address & UINT32_C(0xFFFFF);
+    if (*normal < SCD_PRG_RAM_BYTES) return SCD_RELOC_CLASS_PRG;
+    if (*normal < UINT32_C(0xE0000)) return SCD_RELOC_CLASS_WORD;
+  }
+  *normal = address;
+  return SCD_RELOC_CLASS_DEVICE;
+}
+
+static void scd_reloc_after_read(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint32_t value) {
+  uint32_t normal = 0U;
+  const uint32_t klass = scd_reloc_classify(cpu, address, &normal);
+  scd_reloc_note_read(m, cpu, klass, normal, width, value);
+}
+
+static void scd_reloc_after_write(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint32_t value, uint32_t pc) {
+  const uint8_t *p = scd_ram_byte(m, cpu, address);
+  uint32_t memory, offset, normal = 0U, k;
+  int dropped = 0;
+  if (p == NULL) return; /* Word RAM, a device or nothing: not a supported stream destination */
+  if (p >= m->work_ram && p < m->work_ram + SCD_WORK_RAM_BYTES) {
+    memory = SCD_MEMORY_WORK;
+    offset = (uint32_t)(p - m->work_ram);
+  } else {
+    memory = SCD_MEMORY_PRG;
+    offset = (uint32_t)(p - m->prg_ram);
+  }
+  (void)scd_reloc_classify(cpu, address, &normal);
+  for (k = 0; k < width; ++k) { /* a write the machine dropped (write protect) left a different live byte */
+    const uint8_t *live = scd_ram_byte(m, cpu, address + k);
+    if (live == NULL || *live != (uint8_t)(value >> (8U * (width - 1U - k)))) dropped = 1;
+  }
+  scd_reloc_note_write(m, cpu, memory, offset, normal, width, value, dropped, pc);
+}
+
+static int scd_read_cycles(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint32_t *value, uint32_t pc) {
   if (width != 1U && (address & 1U) != 0U) return scd_fail_access(m, cpu, SCD_STOP_ADDRESS_ERROR, pc, address, width, 0);
   if (scd_is_vdp_long(cpu, address, width)) return scd_vdp_access(m, address, 4U, 0, value, pc);
   if (width == 4U) {
@@ -268,8 +311,14 @@ int scd_read(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint
   return scd_bus(m, cpu, address, width, 0, value, pc);
 }
 
-int scd_write(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint32_t value, uint32_t pc) {
+int scd_read(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint32_t *value, uint32_t pc) {
   address &= UINT32_C(0x00FFFFFF);
+  if (scd_read_cycles(m, cpu, address, width, value, pc) != 0) return 1;
+  if (m->reloc != NULL) scd_reloc_after_read(m, cpu, address, width, *value);
+  return 0;
+}
+
+static int scd_write_cycles(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint32_t value, uint32_t pc) {
   if (width != 1U && (address & 1U) != 0U) return scd_fail_access(m, cpu, SCD_STOP_ADDRESS_ERROR, pc, address, width, 1);
   if (scd_is_vdp_long(cpu, address, width)) return scd_vdp_access(m, address, 4U, 1, &value, pc);
   if (width == 4U) {
@@ -279,6 +328,13 @@ int scd_write(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uin
   }
   value &= width == 1U ? 0xFFU : 0xFFFFU;
   return scd_bus(m, cpu, address, width, 1, &value, pc);
+}
+
+int scd_write(ScdMachine *m, uint32_t cpu, uint32_t address, uint32_t width, uint32_t value, uint32_t pc) {
+  address &= UINT32_C(0x00FFFFFF);
+  if (scd_write_cycles(m, cpu, address, width, value, pc) != 0) return 1;
+  if (m->reloc != NULL) scd_reloc_after_write(m, cpu, address, width, width == 1U ? (value & 0xFFU) : width == 2U ? (value & 0xFFFFU) : value, pc);
+  return 0;
 }
 
 int scd_code_guard(ScdMachine *m, uint32_t cpu, uint32_t address, const uint8_t *expected, uint32_t length) {
@@ -390,10 +446,13 @@ static void scd_hook_frame_write(void *context, uint32_t address, uint32_t size,
     uint8_t *byte = scd_ram_byte(x->m, x->cpu, address + i);
     if (byte != NULL) {
       *byte = (uint8_t)(value >> (8U * (size - 1U - i)));
-      if (byte >= x->m->prg_ram && byte < x->m->prg_ram + SCD_PRG_RAM_BYTES)
+      if (byte >= x->m->prg_ram && byte < x->m->prg_ram + SCD_PRG_RAM_BYTES) {
         SCD_OVERLAY_NOTE_WRITE(x->m, SCD_MEMORY_PRG, (uint32_t)(byte - x->m->prg_ram), 1U);
-      else if (byte >= x->m->work_ram && byte < x->m->work_ram + SCD_WORK_RAM_BYTES)
+        if (x->m->reloc != NULL) scd_reloc_note_foreign(x->m, SCD_MEMORY_PRG, (uint32_t)(byte - x->m->prg_ram), 1U);
+      } else if (byte >= x->m->work_ram && byte < x->m->work_ram + SCD_WORK_RAM_BYTES) {
         SCD_OVERLAY_NOTE_WRITE(x->m, SCD_MEMORY_WORK, (uint32_t)(byte - x->m->work_ram), 1U);
+        if (x->m->reloc != NULL) scd_reloc_note_foreign(x->m, SCD_MEMORY_WORK, (uint32_t)(byte - x->m->work_ram), 1U);
+      }
     }
   }
 }
@@ -814,6 +873,7 @@ int scd_machine_init_bios(ScdMachine *m, const ScdProgram *program, const ScdAut
 }
 
 void scd_machine_release(ScdMachine *m) {
+  scd_reloc_release(m);
   scd_input_release(m);
   scd_vdp_release(m);
 }

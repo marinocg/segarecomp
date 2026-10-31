@@ -446,6 +446,7 @@ static int scd_capture(ScdMachine *m, const ScdProgram *program, const char *dir
       fclose(f);
       return 0;
     }
+    if (m->reloc != NULL) scd_reloc_report(m, f); /* SEG-111 (ADR 0255): bounded RAM write streams at the frontier */
     fprintf(f, "}\n");
     return fclose(f) == 0;
   }
@@ -671,6 +672,10 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
       return 1;
     }
     machine.materialize = materialize_dir != NULL ? 1U : 0U;
+    if (machine.materialize && scd_reloc_attach(&machine) != 0) { /* SEG-111 (ADR 0255): the build pass's bounded write-stream observer */
+      scd_disc_close(&disc);
+      return 1;
+    }
   } else if (scd_machine_init(&machine, program, &disc, budget) != 0) {
     printf("{\"result\":\"disc_refused\",\"error\":\"system_area\",\"disc_identity\":\"%s\"}\n", program->disc.identity);
     scd_disc_close(&disc);
