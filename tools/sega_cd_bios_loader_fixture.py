@@ -27,6 +27,9 @@ Cases (each builds its own image and disc):
   decoded_large     8,192 decoded bytes (over the 4 KiB bound)
   decoded_input     the decoder's key is read once from the machine's backup RAM before the loop (input the build declares; a run with other backup RAM produces other bytes)
   relocated_main    SEG-111: the module is loaded into Word RAM and run by the MAIN processor, which copies a fragment of it into main Work RAM and runs it there
+  static_copy   SEG-112 (ADR 0256): the disc's IP (boot code the fixture BIOS copies to main Work RAM and calls) copies a fragment of itself to Work RAM with a counted byte loop and calls it;
+                the fragment is provable from the IP and the loop's semantics alone
+  static_xor    the same producer with an XOR byte-transform loop (the key is an immediate of the code), static_add: an add-constant transform, static_sub: subtract
   relocated_staged  the fragment is copied through a data register (read and write are different instructions): equal bytes, no causal read
   decoded_corrupt   one byte of the encoded payload is flipped on the disc (the producer is intact, its input is not)
   jump_unwritten    the sub jumps into PRG RAM nothing ever wrote (no producer at all)
@@ -60,7 +63,9 @@ FIRST_MODULE_LBA = 40
 BLOB_AT = 0x1000
 CASES = ("direct", "siblings", "duplicates", "overlay", "late_flip", "generated", "transformed", "undelivered",
          "relocated", "relocated_short", "relocated_patched", "relocated_duplicate",
-         "decoded", "decoded_add", "decoded_partial", "decoded_patched", "decoded_volatile", "decoded_large", "decoded_corrupt", "decoded_input", "relocated_staged", "relocated_main", "jump_unwritten")
+         "decoded", "decoded_add", "decoded_partial", "decoded_patched", "decoded_volatile", "decoded_large", "decoded_corrupt", "decoded_input", "relocated_staged", "relocated_main", "jump_unwritten", "static_copy", "static_xor", "static_add", "static_sub")
+IP_ROM = 0x3800              # SEG-112: the IP's copy in the fixture BIOS ROM (the real BIOS reads it from the disc's system area)
+IP_FRAG_AT = 0x100           # the fragment's offset inside the IP image
 PRODUCED_LEN = 64
 MAIN_DEST = 0xFFA000        # SEG-111: where the main-side relocated fragment runs (main Work RAM)
 MAIN_MARK = 0xFFC020        # its marker (RESULT + 0x20: part of the report's result block)
@@ -257,7 +262,42 @@ class Sub:
         return s.assemble()
 
 
-def main_program(sub_len, run_word_ram=False):
+def static_ip(kind, key=0x5A):
+    """SEG-112: the disc's IP (assembled at main Work RAM $FF0000): a counted loop copies or transforms a fragment of the IP itself into main Work RAM and calls it."""
+    frag = F.Asm(MAIN_DEST)
+    frag.move("w", F.imm(0xA001), F.absl(MAIN_MARK))
+    for _ in range(7):
+        frag.nop()
+    frag.rts()
+    fragment = frag.assemble()
+    stored = bytes(fragment)
+    if kind == "static_xor":
+        stored = bytes(b ^ key for b in fragment)
+    elif kind == "static_add":
+        stored = bytes((b - key) & 0xFF for b in fragment)
+    elif kind == "static_sub":
+        stored = bytes((b + key) & 0xFF for b in fragment)
+    a = F.Asm(0xFF0000)
+    a.move("l", F.imm(0xFF0000 + IP_FRAG_AT), F.a(0))
+    a.move("l", F.imm(MAIN_DEST), F.a(1))
+    a.move("w", F.imm(len(fragment) - 1), F.d(0))
+    a.label("cp")
+    if kind == "static_copy":
+        a.move("b", ("inc", 0), ("inc", 1))
+    else:
+        a.move("b", ("inc", 0), F.d(2))
+        a.immop({"static_xor": "eor", "static_add": "add", "static_sub": "sub"}[kind], "b", key, F.d(2))
+        a.move("b", F.d(2), ("inc", 1))
+    a.dbra(0, "cp")
+    a.jsr(F.absl(MAIN_DEST))
+    a.rts()
+    code = a.assemble()
+    assert len(code) < IP_FRAG_AT, len(code)
+    ip = code + bytes(IP_FRAG_AT - len(code)) + stored
+    return ip, fragment
+
+
+def main_program(sub_len, run_word_ram=False, ip_len=0):
     m = F.Asm(MAIN)
     m.move("l", F.imm(SUB_SRC), F.a(0))
     m.move("l", F.imm(WINDOW), F.a(1))
@@ -270,6 +310,14 @@ def main_program(sub_len, run_word_ram=False):
     m.move("b", F.imm(0x02), F.absl(GA + 0x03))          # DMNA: Word RAM to the sub
     m.move("b", F.imm(0x01), F.absl(GA + 0x0E))          # go
     F.wait_flag(m, GA + 0x0F, 0x02, "w_done")
+    if ip_len:                                         # SEG-112: the fixture BIOS plays the boot ROM: the IP is copied to Work RAM $FF0000 and called
+        m.move("l", F.imm(IP_ROM), F.a(0))
+        m.move("l", F.imm(0xFF0000), F.a(1))
+        m.move("w", F.imm(ip_len // 2 - 1), F.d(0))
+        m.label("copy_ip")
+        m.move("w", ("inc", 0), ("inc", 1))
+        m.dbra(0, "copy_ip")
+        m.jsr(F.absl(0xFF0000))
     if run_word_ram:
         m.jsr(F.absl(WORD_RAM_MAIN))                 # SEG-111: the module the sub loaded runs on the main processor
     for i in range(3):
@@ -390,6 +438,15 @@ def plan(case):
         truth["produced"] = {"processor": "sub", "base": RELOC_DEST, "length": 32 if case == "decoded_partial" else count, "plain": data[:count].hex()}
         truth["backup_ram_key"] = 0x5A if case == "decoded_input" else None
         truth["markers"] = [0 if case in ("decoded_patched", "jump_unwritten", "decoded_volatile", "decoded_large") else 0xA001, 0, 0]
+    elif case.startswith("static_"):
+        ip, fragment = static_ip(case)
+        sub.load(0, 1, 0x20000)                      # delivers sector 0 (the IP) so that the observed fallback has delivery evidence
+        truth["ip"] = ip
+        truth["extents"] = []
+        truth["relocation"] = {"processor": "main", "offset": 0x200 + IP_FRAG_AT, "base": MAIN_DEST, "length": len(fragment)}
+        truth["static_fragment"] = fragment.hex()
+        truth["markers"] = [0, 0, 0]
+        truth["main_marker"] = 0xA001
     elif case == "relocated_main":
         data, fragment = relocating_module(WORD_RAM_MAIN, 21, dest=MAIN_DEST, mark=MAIN_MARK)
         put(L, data)
@@ -411,8 +468,8 @@ def plan(case):
     return sub, blocks, truth
 
 
-def build_disc(out, blocks):
-    area, _ = F.system_area(bytes(64), bytes(64), "LOADERFIX")
+def build_disc(out, blocks, ip=bytes(64)):
+    area, _ = F.system_area(ip, bytes(64), "LOADERFIX")
     users = []
     rng = random.Random(0x7003)
     for lba in range(TRACK1_SECTORS):
@@ -430,6 +487,7 @@ def build_disc(out, blocks):
 def build(case, out):
     sub, blocks, truth = plan(case)
     blob = truth.pop("blob", None)
+    ip = truth.pop("ip", None)
     code = sub.finish()
     if blob is not None:                            # the undelivered case: the blob rides in the sub image at BLOB_AT
         assert len(code) <= BLOB_AT, hex(len(code))
@@ -440,7 +498,7 @@ def build(case, out):
     for v in range(2, 64):
         struct.pack_into(">I", rom, 4 * v, FAULT)
     rom[0x100:0x120] = b"SEGA BIOS-IMAGE LOADER FIXTURE  "
-    main = main_program(sub_len, run_word_ram=case == "relocated_main")
+    main = main_program(sub_len, run_word_ram=case == "relocated_main", ip_len=len(ip) if ip else 0)
     rom[MAIN:MAIN + len(main)] = main
     fault = F.Asm(FAULT)
     fault.move("w", F.imm(0xDEAD), F.absl(RESULT + 0xF0))
@@ -449,8 +507,11 @@ def build(case, out):
     assert SUB_SRC + sub_len <= ROM_SIZE, hex(SUB_SRC + sub_len)
     rom[SUB_SRC:SUB_SRC + len(code)] = code
     out.mkdir(parents=True, exist_ok=True)
+    if ip:
+        assert IP_ROM + len(ip) <= ROM_SIZE and SUB_SRC + sub_len <= IP_ROM
+        rom[IP_ROM:IP_ROM + len(ip)] = ip
     (out / "bios.bin").write_bytes(bytes(rom))
-    build_disc(out / "disc", blocks)
+    build_disc(out / "disc", blocks, ip or bytes(64))
     truth.update({"case": case, "rom_sha256": hashlib.sha256(bytes(rom)).hexdigest(), "sub_length": sub_len, "track1_sectors": TRACK1_SECTORS})
     (out / "expected.json").write_text(json.dumps(truth, indent=1, sort_keys=True) + "\n")
     return truth

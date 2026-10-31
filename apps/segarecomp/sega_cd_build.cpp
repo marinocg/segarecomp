@@ -63,6 +63,7 @@ struct Options {
   std::vector<std::string> emit_args;   // tests only: extra arguments forwarded to every `emit` (e.g. a manual `--disc-image` extent that shadows an address)
   std::string file_first;   // SEG-100 (ADR 0221): "" = off, else the candidate policy (all|structural) of the file-first dynamic images
   std::string file_first_max_bytes, file_first_max_offsets;
+  bool static_producers = true;   // SEG-112 (ADR 0256): `--static-producers 0` is the control: no generation-time producer proofs (the M15 observed fallback only)
   bool reconstruction = true;     // SEG-111 (ADR 0255): `--reconstruction 0` is the control (and the escape hatch): the build as it was before relocated-fragment and produced-image admission
   bool keep_passes = false;       // SEG-111 diagnostics/tests: keep each round's frontier capture (capture.json, region.bin) under <output>/passes/<round>/
   bool static_discovery = true;   // SEG-098-T002: `--static-discovery 0` is the control (and the escape hatch): the build as it was before the static producer
@@ -164,6 +165,7 @@ class Builder {
     std::vector<std::string> admits;
     if (!o_.static_discovery) static_status_ = "disabled";
     if (o_.static_discovery) static_discovery(admits);   // SEG-098-T002: first in the chain, so every later admission's identity includes them
+    if (o_.static_producers) static_producers(admits);   // SEG-112: proven before the first emission: no pass identity, no round
     unsigned epochs = 0, templates = 0, slot_total = 0;
     for (unsigned round = 0; round < kMaxRounds; ++round) {
       std::cout << "@round " << round << " start" << std::endl;
@@ -777,6 +779,32 @@ class Builder {
     return {std::nullopt, raw_value(text, "error").value_or("resolver_failed")};
   }
 
+  // ---- SEG-112 (ADR 0256): executable images proven at generation time from the boot images and MC68000 semantics ----
+  void static_producers(std::vector<std::string> &admits) {
+    const fs::path out = o_.output / "producers.json";
+    std::error_code rm_ec;
+    fs::remove(out, rm_ec);
+    if (run_process({self_, "sega-cd", "discover-producers", "--cue", o_.cue.string()}, out, {}, 600) < 0) return;
+    const std::string text = read_text(out);
+    if (raw_value(text, "ok").value_or("") != "true") return;
+    producer_candidates_ = static_cast<unsigned>(number_value(text, "candidates").value_or(0));
+    const auto refusals = text.find("\"refusals\":{");
+    if (refusals != std::string::npos) producer_refusals_ = text.substr(refusals + 11U, text.find('}', refusals) - refusals - 10U);
+    const auto list = text.find("\"admits\":[");
+    if (list == std::string::npos) return;
+    for (std::size_t p = list + 10U; p < text.size() && text[p] != ']';) {
+      if (text[p] == '"') {
+        const auto end = text.find('"', p + 1U);
+        if (end == std::string::npos) break;
+        admits.push_back(text.substr(p + 1U, end - p - 1U));
+        ++static_producer_count_;
+        p = end + 1U;
+      } else {
+        ++p;
+      }
+    }
+  }
+
   // ---- SEG-111 (ADR 0255): executable images made by verified guest code ----
   struct Relocation {
     std::optional<std::string> extent;     // "<cpu>:<offset>:<base>:<length>" (an exact copy of admitted disc bytes)
@@ -829,7 +857,7 @@ class Builder {
 
   // Counts and classes only (never an address, offset or byte).
   std::string reconstruction_json() const {
-    std::string out = "{\"relocated_extents\":" + std::to_string(relocated_count_) + ",\"produced_images\":" + std::to_string(produced_count_) + ",\"refusals\":{";
+    std::string out = "{\"static_producer_candidates\":" + std::to_string(producer_candidates_) + ",\"static_fragments\":" + std::to_string(static_producer_count_) + ",\"static_producer_refusals\":" + producer_refusals_ + ",\"relocated_extents\":" + std::to_string(relocated_count_) + ",\"produced_images\":" + std::to_string(produced_count_) + ",\"refusals\":{";
     bool first = true;
     for (const auto &[error, n] : relocation_refusals_) {
       out += std::string(first ? "" : ",") + "\"" + error + "\":" + std::to_string(n);
@@ -845,7 +873,8 @@ class Builder {
   std::atomic<unsigned> counter_{0};
   std::vector<std::string> extents_, static_extents_, static_windows_;
   std::vector<std::string> produced_;   // SEG-111: the bytes of every produced image admitted so far (hex, keyed by processor and base)
-  unsigned relocated_count_ = 0, produced_count_ = 0;
+  unsigned relocated_count_ = 0, produced_count_ = 0, static_producer_count_ = 0, producer_candidates_ = 0;
+  std::string producer_refusals_ = "{}";
   std::map<std::string, unsigned> relocation_refusals_;
   std::string static_status_ = "not_run";
   bool static_joined_ = false;
@@ -892,6 +921,7 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--aot-model" && value == "gen2" && !o.aot_model_given) o.aot_model_given = true;
     else if (key == "--file-first" && (value == "all" || value == "structural")) o.file_first = value;   // SEG-100 (ADR 0221)
     else if (key == "--emit-arg") o.emit_args.push_back(value);   // tests only
+    else if (key == "--static-producers" && (value == "0" || value == "1")) o.static_producers = value == "1";
     else if (key == "--reconstruction" && (value == "0" || value == "1")) o.reconstruction = value == "1";
     else if (key == "--keep-passes" && (value == "0" || value == "1")) o.keep_passes = value == "1";   // SEG-111: diagnostics/tests
     else if (key == "--file-first-max-bytes") o.file_first_max_bytes = value;
