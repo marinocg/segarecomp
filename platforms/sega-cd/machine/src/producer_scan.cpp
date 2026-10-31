@@ -56,6 +56,7 @@ Reg meet(const Reg &x, const Reg &y) {
 
 struct St {
   std::array<Reg, 8> d{}, a{};
+  std::uint32_t ran{};    // recognised loops that have run on SOME path reaching here (a bit per loop head): their writes can precede what follows
   std::uint32_t made{};   // candidates whose producer loop has run on EVERY path that reaches here (a bit per candidate): executable use must follow its producer
   bool operator==(const St &) const = default;
 };
@@ -67,6 +68,7 @@ St join(const St &x, const St &y) {
     out.a[i] = meet(x.a[i], y.a[i]);
   }
   out.made = x.made & y.made;
+  out.ran = x.ran | y.ran;
   return out;
 }
 
@@ -94,6 +96,15 @@ struct Candidate {
   bool executed{};
   std::uint32_t entry{};
   std::optional<ProducerRefusal> refused;
+  Width element{Width::byte};
+};
+
+// A write performed by a recognised loop (whether or not its own proof stands): a fact against every other proof.
+struct LoopWrite {
+  std::uint32_t head{};
+  std::uint32_t id{};
+  Range range;
+  std::optional<std::size_t> candidate;
 };
 
 class Walker {
@@ -268,6 +279,7 @@ class Walker {
     } else if (!effect.register_write_footprint_complete) {
       s = St{};
       s.made = before.made;
+      s.ran = before.ran;
     } else {
       for (unsigned r = 0; r < 8; ++r) {
         if ((effect.data_register_write_mask >> r) & 1U) s.d[r] = Reg{};
@@ -363,7 +375,7 @@ class Walker {
       const Width w = op.size;
       if (op.kind == M68kIrKind::write_move && op.source_ea.mode == M68kEaMode::address_postinc && op.destination_ea.mode == M68kEaMode::address_postinc) {
         if (src_reg || stored) return refuse(ProducerRefusal::loop_body_unsupported);
-        src_reg = op.source_ea.reg & 7U; dst_reg = op.destination_ea.reg & 7U; element = w; element_ = w; stored = true; c.copy = true;
+        src_reg = op.source_ea.reg & 7U; dst_reg = op.destination_ea.reg & 7U; element = w; c.element = w; stored = true; c.copy = true;
         continue;
       }
       if (op.kind == M68kIrKind::write_move && op.source_ea.mode == M68kEaMode::address_postinc && op.destination_ea.mode == M68kEaMode::data_register && w == Width::byte) {
@@ -408,7 +420,15 @@ class Walker {
     post.d[counter] = Reg{(rc.v & 0xFFFF0000U) | 0xFFFFU, rc.mask};
     for (unsigned r = 0; r < 8; ++r) if (sym[r].kind != Sym::Kind::unknown && r != counter) post.d[r] = Reg{};
     post.a[7] = Reg{};
-    // one candidate per loop head: a head re-evaluated with other operands (a later-joining path) makes the earlier proof unstable
+    // loop identity (a bit in the path state) and its write, a fact for whatever it can precede
+    auto id_it = loop_ids_.find(pc);
+    if (id_it == loop_ids_.end()) {
+      if (loop_ids_.size() >= 32U) { out_.complete = false; ++out_.refusals[ProducerRefusal::budget_exhausted]; seed(at, post); return true; }
+      id_it = loop_ids_.emplace(pc, static_cast<std::uint32_t>(loop_ids_.size())).first;
+    }
+    const std::uint32_t loop_id = id_it->second;
+    post.ran |= (1U << loop_id);
+    // one candidate per loop head: a head re-evaluated with other operands makes the earlier proof unstable
     std::size_t index = cands_.size();
     for (std::size_t i = 0; i < cands_.size(); ++i) {
       if (cands_[i].head_pc != pc) continue;
@@ -416,10 +436,16 @@ class Walker {
       if (!cands_[i].refused) cands_[i].refused = ProducerRefusal::loop_operand_unknown;
     }
     if (index == cands_.size()) {
-      if (index >= 32U) { ++out_.refusals[ProducerRefusal::too_many_fragments]; seed(at, post); return true; }
+      if (index >= 32U) {   // over the candidate cap: not a candidate, but its write is still a fact against the others
+        if (overflow_heads_.insert(pc).second) ++out_.refusals[ProducerRefusal::too_many_fragments];
+        loop_writes_.push_back({pc, loop_id, c.destination, std::nullopt});
+        seed(at, post);
+        return true;
+      }
       if (!classify(c)) c.refused = last_refusal_;
       cands_.push_back(std::move(c));
     }
+    loop_writes_.push_back({pc, loop_id, cands_[index].destination, index});
     if (!cands_[index].refused) post.made |= (1U << index);
     seed(at, post);
     return true;
@@ -439,7 +465,7 @@ class Walker {
     const bool ram = main_cpu ? (c.destination.lo >= kMainWorkRamBegin && c.destination.hi <= kMainWorkRamEnd) : (c.destination.lo >= image_base_ && c.destination.hi <= kPrgRamBytes);   // sub: at or above the SP image (below it is BIOS-resident)
     if (!ram || (c.destination.lo & 1U) != 0U || length < 4U) return refuse(ProducerRefusal::destination_unsupported);
     if (c.source.lo < image_base_ || c.source.hi > image_base_ + image_.size()) return refuse(ProducerRefusal::source_not_immutable);
-    if (element_ != Width::byte && (c.source.lo & 1U) != 0U) return refuse(ProducerRefusal::destination_unsupported);   // a word/long access at an odd address is an address error on hardware
+    if (c.element != Width::byte && (c.source.lo & 1U) != 0U) return refuse(ProducerRefusal::destination_unsupported);   // a word/long access at an odd address is an address error on hardware
     if (length > kProducerMaxBytes) return refuse(ProducerRefusal::too_large);
     if (c.source.overlaps(c.destination)) return refuse(ProducerRefusal::aliasing);
     if (c.destination.overlaps(Range{image_base_, image_base_ + static_cast<std::uint32_t>(image_.size())})) return refuse(ProducerRefusal::aliasing);
@@ -460,31 +486,71 @@ class Walker {
       for (const auto &[kind, k] : ops) b = static_cast<std::uint8_t>(kind == 'x' ? (b ^ k) : kind == '+' ? (b + k) : (b - k));
   }
 
+  // Refusals only ever grow, so the evaluation is repeated until it is stable: a refused producer's code is not code (its transfers and loops prove nothing),
+  // and every write a recognised loop performs - refused or not - is a fact against the other proofs.
   void finish() {
-    // every known write of the walk against every proof
-    for (const auto &[at, targets] : transfers_) {
-      const auto state = states_.find(at);
-      if (state == states_.end()) continue;
-      for (const std::uint32_t target : targets)
-        for (std::size_t i = 0; i < cands_.size() && i < 32U; ++i)
-          if (!cands_[i].refused && !cands_[i].executed && ((state->second.made >> i) & 1U) != 0U && target >= cands_[i].destination.lo && target < cands_[i].destination.hi) { cands_[i].executed = true; cands_[i].entry = target; }
-    }
     const Range image{image_base_, image_base_ + static_cast<std::uint32_t>(image_.size())};
-    for (Candidate &c : cands_) {
-      if (c.refused) continue;
-      if (!out_.complete) { c.refused = ProducerRefusal::budget_exhausted; continue; }
-      for (const Range &w : known_writes_) {
-        if (w.overlaps(image)) { c.refused = ProducerRefusal::source_written; break; }   // a located store into the walked image (self-patching): its operands cannot be trusted
-        if (w.overlaps(c.source)) { c.refused = ProducerRefusal::source_written; break; }
-        if (w.overlaps(c.destination)) { c.refused = ProducerRefusal::destination_overwritten; break; }
+    const auto inside_refused = [&](std::uint32_t pc) {   // produced code (not the boot image, which the walk prefers) of a proof that does not stand
+      if (pc >= image.lo && pc < image.hi) return false;
+      return std::any_of(cands_.begin(), cands_.end(), [&](const Candidate &p) { return p.refused && pc >= p.destination.lo && pc < p.destination.hi; });
+    };
+    for (std::size_t round = 0; round <= cands_.size() + 1U; ++round) {
+      bool changed = false;
+      for (Candidate &c : cands_) { c.executed = false; c.entry = 0; }
+      for (const auto &[at, targets] : transfers_) {
+        const auto state = states_.find(at);
+        if (state == states_.end() || inside_refused(at)) continue;
+        for (const std::uint32_t target : targets)
+          for (std::size_t i = 0; i < cands_.size() && i < 32U; ++i)
+            if (!cands_[i].refused && !cands_[i].executed && ((state->second.made >> i) & 1U) != 0U && target >= cands_[i].destination.lo && target < cands_[i].destination.hi) { cands_[i].executed = true; cands_[i].entry = target; }
       }
-      if (!c.refused && !c.executed) c.refused = ProducerRefusal::not_executed;
+      const auto refuse = [&](Candidate &c, ProducerRefusal why) { if (!c.refused) { c.refused = why; changed = true; } };
+      for (std::size_t ci = 0; ci < cands_.size(); ++ci) {
+        Candidate &c = cands_[ci];
+        if (c.refused) continue;
+        if (!out_.complete) { refuse(c, ProducerRefusal::budget_exhausted); continue; }
+        if (inside_refused(c.head_pc)) { refuse(c, ProducerRefusal::not_executed); continue; }   // produced by code that is itself not proven
+        const auto against = [&](const Range &w) {
+          if (w.overlaps(image)) return std::optional<ProducerRefusal>(ProducerRefusal::source_written);   // a located store into the walked image (self-patching): its operands cannot be trusted
+          if (w.overlaps(c.source)) return std::optional<ProducerRefusal>(ProducerRefusal::source_written);
+          if (w.overlaps(c.destination)) return std::optional<ProducerRefusal>(ProducerRefusal::destination_overwritten);
+          return std::optional<ProducerRefusal>();
+        };
+        for (const Range &w : known_writes_)
+          if (const auto why = against(w)) { refuse(c, *why); break; }
+        if (c.refused) continue;
+        // the writes of other recognised loops, by order: those that may run before this loop can change its source or the code it was read from; those that may run
+        // between its production and its use can overwrite the produced bytes (a write that can only come later is no fact about this proof)
+        const auto head_state = states_.find(c.head_pc);
+        const std::uint32_t before = head_state == states_.end() ? 0U : head_state->second.ran;
+        std::uint32_t at_use = before;
+        for (const auto &[at, targets] : transfers_) {
+          const auto st = states_.find(at);
+          if (st == states_.end() || inside_refused(at) || ((st->second.made >> ci) & 1U) == 0U) continue;
+          for (const std::uint32_t target : targets)
+            if (target >= c.destination.lo && target < c.destination.hi) at_use |= st->second.ran;
+        }
+        for (const LoopWrite &lw : loop_writes_) {
+          if (lw.head == c.head_pc) continue;
+          const bool same = lw.candidate && !cands_[*lw.candidate].refused && cands_[*lw.candidate].destination.lo == c.destination.lo && cands_[*lw.candidate].destination.hi == c.destination.hi &&
+                            cands_[*lw.candidate].bytes == c.bytes;   // the same bytes written again: not a contradiction
+          if (same) continue;
+          const bool precedes = ((before >> lw.id) & 1U) != 0U, may_overwrite = ((at_use >> lw.id) & 1U) != 0U;
+          if (precedes && (lw.range.overlaps(c.source) || lw.range.overlaps(image))) { refuse(c, ProducerRefusal::source_written); break; }
+          if (may_overwrite && lw.range.overlaps(c.destination)) { refuse(c, ProducerRefusal::destination_overwritten); break; }
+        }
+        if (c.refused) continue;
+        if (!c.refused && !c.executed) refuse(c, ProducerRefusal::not_executed);
+      }
+      for (std::size_t i = 0; i < cands_.size(); ++i)
+        for (std::size_t j = i + 1; j < cands_.size(); ++j)
+          if (!cands_[i].refused && !cands_[j].refused && cands_[i].destination.overlaps(cands_[j].destination) &&
+              (cands_[i].destination.lo != cands_[j].destination.lo || cands_[i].bytes != cands_[j].bytes)) {
+            refuse(cands_[i], ProducerRefusal::overlapping_fragments);
+            refuse(cands_[j], ProducerRefusal::overlapping_fragments);
+          }
+      if (!changed) break;
     }
-    for (std::size_t i = 0; i < cands_.size(); ++i)
-      for (std::size_t j = i + 1; j < cands_.size(); ++j)
-        if (!cands_[i].refused && !cands_[j].refused && cands_[i].destination.overlaps(cands_[j].destination) &&
-            (cands_[i].destination.lo != cands_[j].destination.lo || cands_[i].bytes != cands_[j].bytes))
-          cands_[i].refused = cands_[j].refused = ProducerRefusal::overlapping_fragments;
     for (const Candidate &c : cands_) {
       if (c.refused) { ++out_.refusals[*c.refused]; continue; }
       const bool duplicate = std::any_of(out_.fragments.begin(), out_.fragments.end(), [&](const StaticFragment &f) { return f.processor == c.processor && f.base == c.destination.lo && f.bytes == c.bytes; });
@@ -515,7 +581,9 @@ class Walker {
   std::uint32_t walker_steps_{};
   std::uint32_t cur_pc_{};
   std::map<std::uint32_t, std::vector<std::uint32_t>> transfers_;
-  Width element_{Width::byte};
+  std::vector<LoopWrite> loop_writes_;
+  std::map<std::uint32_t, std::uint32_t> loop_ids_;   // loop head -> bit
+  std::set<std::uint32_t> overflow_heads_;
   ProducerRefusal last_refusal_{ProducerRefusal::loop_operand_unknown};
   std::vector<Range> known_writes_;
 };

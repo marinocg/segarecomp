@@ -350,6 +350,45 @@ int main() {
     const auto r = scan(b.finish(), none);
     check(r.fragments.size() == 1 && r.fragments[0].base == 0xFF8000U && r.fragments[0].disc_offset == 0x300U && r.fragments[0].length == 24, "MOVEA.W sign-extends, ADDQ.L #8 adds eight, MOVEQ sets the count");
   }
+
+  {   // a refused loop's writes are still facts against other proofs
+    const auto two_loops = [&](std::uint32_t dst2, std::uint32_t src2, std::uint32_t count2, bool other_first = false) {
+      Builder b;
+      const auto other = [&] {
+        b.a.lea_abs(2, src2); b.a.movea_l(3, dst2); b.a.move_w_imm(1, count2);
+        const std::uint32_t h2 = b.a.here(); b.a.copy_post('b', 2, 3); b.a.dbra(1, h2);
+      };
+      if (other_first) other();
+      b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+      const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h);
+      if (!other_first) other();
+      b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+      return scan(b.finish(), none);
+    };
+    none_proven(two_loops(kDest, 0xFFB000U, 23), scd::ProducerRefusal::destination_overwritten, "a refused loop (mutable source) that writes the produced bytes between production and use overwrites them");
+    none_proven(two_loops(kDest + 4U, 0xFFB000U, 2), scd::ProducerRefusal::destination_overwritten, "a refused loop that writes part of the produced bytes");
+    none_proven(two_loops(kIp + 0x20U, kFrag + 0x40U, 7, true), scd::ProducerRefusal::source_written, "a loop that patches the boot image BEFORE the producer invalidates the proof (self-patching)");
+    check(two_loops(kIp + 0x20U, kFrag + 0x40U, 7, false).fragments.size() == 1, "a loop that patches the image only AFTER the producer has read it is no fact about that proof");
+    check(two_loops(kDest + 0x400U, kFrag + 0x40U, 7).fragments.size() == 1, "an unrelated second loop does not disturb a proof");
+  }
+  {   // a producer inside a refused parent is not proven either
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 63);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.move_b_imm_abs(0x33, kDest + 2U); b.a.jsr(kDest); b.a.rts();
+    Asm t(kDest); t.lea_abs(2, kFrag + 64); t.movea_l(3, 0xFFB000U); t.move_w_imm(1, 7);
+    const std::uint32_t th = t.here(); t.copy_post('b', 2, 3); t.dbra(1, th); t.jsr(0xFFB000U); t.rts();
+    Bytes tramp = t.out; tramp.resize(64, 0x4E); Bytes inner = fragment_code(0xFFB000U); inner.resize(8, 0x4E);
+    b.tail = tramp; b.tail.insert(b.tail.end(), inner.begin(), inner.end());
+    check(scan(b.finish(), none).fragments.empty(), "a parent that is overwritten also invalidates the producer it contains");
+  }
+  {   // the element width belongs to its own loop: a word loop before a byte loop from an odd source must not make the byte loop look misaligned
+    Builder b; b.a.lea_abs(2, kFrag); b.a.movea_l(3, kDest + 0x100U); b.a.move_w_imm(1, 7);
+    const std::uint32_t h2 = b.a.here(); b.a.copy_post('w', 2, 3); b.a.dbra(1, h2);
+    b.a.lea_abs(0, kFrag + 1U); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 15);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h);
+    b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
+    const auto r = scan(b.finish(), none);
+    check(r.fragments.size() == 1 && r.fragments[0].base == kDest && refused(r, scd::ProducerRefusal::destination_unsupported) == 0, "a byte loop from an odd source is not refused because of an earlier word loop");
+  }
   {   // garbage / data in the boot images: no candidates, no fragment, no crash
     Bytes junk(0x300);
     for (std::size_t i = 0; i < junk.size(); ++i) junk[i] = static_cast<std::uint8_t>(i * 37U + 11U);
