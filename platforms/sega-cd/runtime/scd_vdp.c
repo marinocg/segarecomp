@@ -8,7 +8,7 @@
  * access the host's master clock is set to the machine time (one master clock = 500,000 ticks), so the VDP status and HV counter
  * are the Genesis runtime's projections of the executed schedule. The vertical-blank onset is a machine device event; the VDP's
  * vertical interrupt is the main processor's level-6 request (GPGX `vint_pending`: set at every onset, requested while register #1
- * IE0 is set, cleared by the acknowledge). The Z80 never executes here: once it has been runnable, any main read of the Z80 area (its
+ * IE0 is set, cleared by the acknowledge). Without an attached Z80 (SEG-114, ADR 0258: scd_z80.c) the Z80 never executes here: once it has been runnable, any main read of the Z80 area (its
  * RAM, YM2612) is the typed stop main_device_unsupported. What a running Z80 would do on the 68000 side through its bank window (work
  * RAM, VDP/PSG writes) is not modelled and cannot be detected here: a recorded deviation (contract sections 12 and 16). Setting the
  * H-interrupt enable is a typed stop at the write (the line counter is not modelled). */
@@ -516,7 +516,10 @@ int scd_main_device_access(ScdMachine *m, uint32_t address, uint32_t width, int 
   uint32_t routed = is_write ? *value : 0U;
   scd_log(m, is_write ? 0x45U : 0x44U, address, routed);
   if (address >= UINT32_C(0x00A00000) && address < UINT32_C(0x00A10000)) m->main_extra_ticks += SCD_MAIN_Z80_ACCESS_TICKS;
-  if (!is_write && address < UINT32_C(0x00A10000) && m->z80_ran)
+  /* SEG-114 (ADR 0258): with an attached Z80 whose every executed epoch is modelled the read is served (the Z80 is run to this instant first,
+   * by the host route); otherwise the legacy rule - a read that would observe an unmodelled Z80 execution is the typed stop. */
+  const ScdZ80Ops *const z80 = m->z80 != NULL ? scd_z80_registered_ops() : NULL;
+  if (!is_write && address < UINT32_C(0x00A10000) && m->z80_ran && !(z80 != NULL && z80->readable(m)))
     return scd_fail_access(m, SCD_MAIN, SCD_STOP_MAIN_DEVICE_UNSUPPORTED, pc, address, width, 0); /* would observe the Z80 */
   /* Version register: a Mega-CD is attached, so bit 5 (DISK, "expansion unit") reads 0 (GTO1 I/O section; GPGX io_reset sets it only
    * when system_hw != SYSTEM_MCD). The region bits are the host's configured profile, as on the Genesis. */
@@ -543,8 +546,12 @@ int scd_main_device_access(ScdMachine *m, uint32_t address, uint32_t width, int 
     return 0;
   }
   if (genesis_route_access(host, address, scd_genesis_width(width), is_write ? GENESIS_ACCESS_WRITE : GENESIS_ACCESS_READ, &routed,
-                           &stop) != GENESIS_ACCESS_OK)
+                           &stop) != GENESIS_ACCESS_OK) {
+    uint32_t detail = 0U;
+    if (z80 != NULL && z80->classify_stop(m, (uint32_t)stop.stop_class, (uint32_t)stop.diagnostic_category, &detail))
+      return scd_fail_access(m, SCD_MAIN, SCD_STOP_Z80_UNSUPPORTED, pc, detail, width, is_write);
     return scd_fail_access(m, SCD_MAIN, SCD_STOP_MAIN_DEVICE_UNSUPPORTED, pc, address, width, is_write);
+  }
   if (is_write) scd_note_z80(m, host);
   else {
     *value = routed;

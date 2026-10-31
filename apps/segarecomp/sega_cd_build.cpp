@@ -30,9 +30,11 @@
 #include <vector>
 
 #include "process_run.hpp"
+#include "segarecomp/machine/genesis/z80_images.hpp"
 #include "segarecomp/sha256.hpp"
 
 namespace fs = std::filesystem;
+namespace gz80 = segarecomp::machine::genesis::z80;
 using segarecomp_cli::kProcessTimedOut;
 using segarecomp_cli::run_process;
 
@@ -65,6 +67,7 @@ struct Options {
   std::string file_first;   // SEG-100 (ADR 0221): "" = off, else the candidate policy (all|structural) of the file-first dynamic images
   std::string file_first_max_bytes, file_first_max_offsets;
   bool boot_fixtures = false;     // SEG-113, tests only: `--boot-fixture-profiles 1` lets a tagged project fixture BIOS match (an assumed, unverified contract); never set by the product
+  bool main_z80 = true;           // SEG-114 (ADR 0258): `--main-z80 0` is the control: no main-side Z80 (the legacy rule: a main read of the Z80 area after it ran is a typed stop)
   bool static_boot = true;        // SEG-113 (ADR 0257): `--static-boot 0` is the control: the boot images are discovered by execution (M16 behaviour)
   bool static_producers = true;   // SEG-112 (ADR 0256): `--static-producers 0` is the control: no generation-time producer proofs (the M15 observed fallback only)
   bool reconstruction = true;     // SEG-111 (ADR 0255): `--reconstruction 0` is the control (and the escape hatch): the build as it was before relocated-fragment and produced-image admission
@@ -173,6 +176,7 @@ class Builder {
     unsigned epochs = 0, templates = 0, slot_total = 0;
     for (unsigned round = 0; round < kMaxRounds; ++round) {
       std::cout << "@round " << round << " start" << std::endl;
+      frontier_.clear();   // SEG-114: a round that is repeated for new Z80 images must not leave the previous round's candidate frontier behind
       const fs::path src = o_.output / "src";
       std::string program_identity;
       if (const auto f = emit(admits, src, program_identity)) return fail(*f);
@@ -187,6 +191,11 @@ class Builder {
       stage("pass", "done");
       std::map<std::string, std::string> entry{{"round", std::to_string(round)}};
       history_ += (history_.empty() ? "" : ",") + std::string("{\"round\":") + std::to_string(round) + ",\"program_identity\":\"" + program_identity + "\",\"stop\":\"" + stop_class(report) + "\"";
+      unsigned z80_added = 0;   // SEG-114 (ADR 0258): image epochs this pass recorded that the program did not know
+      if (const auto f = ingest_z80(o_.output / "pass", z80_added)) return fail(*f);
+      if (z80_added != 0) history_ += ",\"z80_added\":" + std::to_string(z80_added);
+      const auto saved_refusals = relocation_refusals_;   // a round repeated only for Z80 images must not count the same refusal twice
+      const unsigned saved_unresolved = boot_unresolved_;
       if (o_.keep_passes) {
         const fs::path keep = o_.output / "passes" / std::to_string(round);
         fs::create_directories(keep, ec);
@@ -257,6 +266,12 @@ class Builder {
         history_ += ",\"frontier\":" + frontier_;
       }
       history_ += "}";
+      if (z80_added != 0) {   // SEG-114: the candidate must run with every Z80 image it executes: rebuild with the registry before confirming
+        relocation_refusals_ = saved_refusals;
+        boot_unresolved_ = saved_unresolved;
+        frontier_.clear();
+        continue;
+      }
       // the candidate: a confirming pass must reproduce its outcome exactly
       stage("confirm", "running");
       std::string confirm_report, confirm_capture;
@@ -298,7 +313,7 @@ class Builder {
         << ",\"program_identity\":\"" << program_identity << "\",\"bios_sha256\":\"" << bios_sha_ << "\",\"rounds\":" << rounds << ",\"extents\":[";
     for (std::size_t i = 0; i < extents_.size(); ++i) out << (i ? "," : "") << "\"" << extents_[i] << "\"";
     out << "],\"static_extents\":" << static_extents_.size() << ",\"static_discovery\":" << static_json_ << ",\"inventory\":" << inventory_json(report) << ",\"final_stop\":" << final_stop_json(report) << ",\"aot_policy\":" << (aot_policy_json_.empty() ? "null" : aot_policy_json_) << ",\"file_first\":" << (file_first_json_.empty() ? "null" : file_first_json_) << ",\"frontier\":" << (frontier_.empty() ? "null" : frontier_)
-        << ",\"reconstruction\":" << reconstruction_json() << ",\"static_boot\":" << static_boot_json()
+        << ",\"reconstruction\":" << reconstruction_json() << ",\"static_boot\":" << static_boot_json() << ",\"z80\":" << z80_json()
         << ",\"result\":\"" << raw_value(report, "result").value_or("") << "\",\"stop\":\"" << stop_class(report)
         << "\",\"viewer\":" << (o_.viewer ? "true" : "false") << ",\"history\":[" << history_ << "]}\n";
     std::ofstream(o_.output / "status.json", std::ios::binary | std::ios::trunc) << out.str();
@@ -436,7 +451,7 @@ class Builder {
     for (const char *flag : {"-std=c11", "-w"}) c.push_back(flag);
     c.push_back("-O" + o_.optimize);
     const fs::path rt = o_.runtime_dir;
-    for (const fs::path &inc : {rt / "platforms/sega-cd/runtime", rt / "platforms/genesis/runtime"}) c.push_back("-I" + inc.string());
+    for (const fs::path &inc : {rt / "platforms/sega-cd/runtime", rt / "platforms/genesis/runtime", rt / "libs/codegen/c11/include"}) c.push_back("-I" + inc.string());
     if (viewer) {
       for (const fs::path &inc : {rt / "platforms/sega-cd/viewer", rt / "platforms/genesis/viewer", rt / "libs/viewer/include", rt / "libs/viewer/src"}) c.push_back("-I" + inc.string());
       if (!o_.sdl3_include.empty()) c.push_back("-I" + o_.sdl3_include.string());
@@ -517,6 +532,10 @@ class Builder {
       if (it->path().extension() == ".c") out.push_back(it->path());
     std::sort(out.begin(), out.end());
     for (const char *n : {"runtime.c", "vdp_render.c", "frame_export.c"}) out.push_back(o_.runtime_dir / "platforms/genesis/runtime" / n);
+    if (o_.main_z80) {   // SEG-114 (ADR 0258): the Genesis Z80 machine and the Sega CD attach; the generated image units are per round (prepare_z80)
+      out.push_back(o_.runtime_dir / "platforms/genesis/runtime/z80_machine.c");
+      out.push_back(o_.runtime_dir / "platforms/sega-cd/runtime/z80/scd_z80.c");
+    }
     return out;
   }
 
@@ -556,6 +575,7 @@ class Builder {
       if (o_.jobs != 0U) cmd.insert(cmd.end(), {"--jobs", std::to_string(o_.jobs)});
     }
     for (const auto &a : admits) { cmd.push_back("--admit"); cmd.push_back(a); }
+    if (o_.main_z80) cmd.insert(cmd.end(), {"--main-z80", "1"});   // SEG-114
     cmd.insert(cmd.end(), o_.emit_args.begin(), o_.emit_args.end());
     if (o_.boot_fixtures) cmd.insert(cmd.end(), {"--boot-fixture-profiles", "1"});
     const fs::path out = o_.output / "emit.json";
@@ -596,10 +616,12 @@ class Builder {
     unit_sources_ = sources;
     unit_objects_ = objects;
     if (const auto f = runtime_objects(rt)) return f;
+    if (const auto f = prepare_z80()) return f;
     stage("compile", "done");
     stage("link", "running");
     std::vector<fs::path> all = objects;
     all.insert(all.end(), rt.begin(), rt.end());
+    all.insert(all.end(), z80_objects_.begin(), z80_objects_.end());
     if (run_process(link_command(all, exe, false), o_.output / "link.log", {}, 600) != 0) return Failure{"link", "linking failed: " + read_text(o_.output / "link.log", 2048)};
     stage("link", "done");
     return std::nullopt;
@@ -627,9 +649,73 @@ class Builder {
     std::vector<fs::path> all(unit_objects_.begin(), unit_objects_.end() - 1);
     all.push_back(program_object);
     all.insert(all.end(), rt_objects.begin(), rt_objects.end());
+    all.insert(all.end(), z80_objects_.begin(), z80_objects_.end());
     all.insert(all.end(), viewer_objects.begin(), viewer_objects.end());
     if (run_process(link_command(all, viewer, !host), o_.output / "link-viewer.log", {}, 600) != 0) return Failure{"viewer", "linking the viewer failed: " + read_text(o_.output / "link-viewer.log", 2048)};
     return std::nullopt;
+  }
+
+  // ---- SEG-114 (ADR 0258): the main-side Z80 images ----
+  // The Z80 images are the image epochs of the Genesis machine (ADR 0073): the 8 KiB sound-RAM snapshot at a runnable transition after an upload, selected at run time by the
+  // activation signature of the 68000-written extents. A build pass records every epoch it cannot activate (its image is not compiled yet) and goes on; the images are emitted
+  // by the existing broad Z80 AOT into per-round units and the program is rebuilt. A candidate is confirmed only when its pass recorded no unknown epoch.
+  std::optional<Failure> prepare_z80() {
+    z80_objects_.clear();
+    if (!o_.main_z80) return std::nullopt;
+    std::error_code ec;
+    const fs::path dir = o_.output / "generated-z80";
+    fs::remove_all(dir, ec);
+    gz80::EmitRequest request;
+    request.directory = dir;
+    const gz80::EmitOutcome emitted = gz80::emit_registry(z80_registry_, request);
+    if (!emitted.ok()) return Failure{"z80", "the Z80 image code could not be generated"};
+    std::vector<fs::path> sources;
+    {
+      std::ifstream list(dir / "genesis_z80.units");
+      for (std::string line; std::getline(list, line);)
+        if (!line.empty()) sources.push_back(dir / line);
+    }
+    unsigned rebuilt = 0;
+    if (const auto f = objects_for(sources, {}, false, z80_objects_, rebuilt)) return f;
+    return std::nullopt;
+  }
+
+  // Reads the unknown epochs a pass wrote (z80_epochs.txt and the numbered snapshot files) and registers their images. `added` = images new to the registry.
+  std::optional<Failure> ingest_z80(const fs::path &dir, unsigned &added) {
+    added = 0;
+    if (!o_.main_z80) return std::nullopt;
+    const std::string text = read_text(dir / "z80_epochs.txt", 4096);
+    if (text.empty()) return std::nullopt;
+    const auto field = [&](const char *name) -> std::optional<unsigned> {
+      const auto at = text.find(std::string(name) + " ");
+      if (at == std::string::npos) return std::nullopt;
+      return static_cast<unsigned>(std::strtoul(text.c_str() + at + std::string(name).size() + 1U, nullptr, 10));
+    };
+    const unsigned unknown = field("unknown").value_or(0U);
+    if (field("overflow").value_or(0U) != 0U || unknown > gz80::kMaxImages) return Failure{"pass", "z80_epoch_bound_exceeded"};
+    for (unsigned k = 0; k < unknown; ++k) {
+      const std::string ram = read_text(dir / ("z80_epoch_ram_" + std::to_string(k)), gz80::kRamBytes + 1U);
+      const std::string written = read_text(dir / ("z80_epoch_written_" + std::to_string(k)), gz80::kBitmapBytes + 1U);
+      if (ram.size() != gz80::kRamBytes || written.size() != gz80::kBitmapBytes) return Failure{"pass", "z80_epoch_unreadable"};
+      gz80::Epoch epoch;
+      std::copy(ram.begin(), ram.end(), epoch.ram.begin());
+      std::copy(written.begin(), written.end(), epoch.written.begin());
+      std::uint32_t bound = 0;
+      const gz80::AddOutcome outcome = z80_registry_.add(epoch, bound);
+      if (outcome == gz80::AddOutcome::bound_exceeded) return Failure{"pass", "z80_image_bound_exceeded"};
+      if (outcome == gz80::AddOutcome::added) {
+        ++added;
+      }
+    }
+    if (unknown != 0U && added == 0U) return Failure{"pass", "z80_no_progress"};   // epochs the registry already explains cannot be unknown to a program built with it
+    return std::nullopt;
+  }
+
+  std::string z80_json() const {
+    if (!o_.main_z80) return "{\"enabled\":false}";
+    std::string digests;
+    for (const auto &image : z80_registry_.images()) digests += gz80::to_hex(image.content);
+    return "{\"enabled\":true,\"images\":" + std::to_string(z80_registry_.images().size()) + ",\"registry_identity\":\"" + sha_of(digests) + "\"}";
   }
 
   std::optional<Failure> pass_run(const fs::path &exe, const fs::path &dir, std::string &report, std::string &capture) {
@@ -999,6 +1085,8 @@ class Builder {
   std::string file_first_json_;   // SEG-100: the last emission's file_first object (status.json), or empty
   std::string aot_policy_json_;   // SEG-097-T003: the last emission's machine-readable aot_policy object (status.json)
   std::vector<fs::path> unit_sources_, unit_objects_, runtime_objects_;
+  gz80::Registry z80_registry_;           // SEG-114: the Z80 images discovered so far (first-activation order)
+  std::vector<fs::path> z80_objects_;     // SEG-114: the generated image units of the current round
 };
 
 }  // namespace
@@ -1039,6 +1127,7 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--boot-fixture-profiles" && (value == "0" || value == "1")) o.boot_fixtures = value == "1";
     else if (key == "--static-boot" && (value == "0" || value == "1")) o.static_boot = value == "1";
     else if (key == "--static-producers" && (value == "0" || value == "1")) o.static_producers = value == "1";
+    else if (key == "--main-z80" && (value == "0" || value == "1")) o.main_z80 = value == "1";   // SEG-114 (ADR 0258)
     else if (key == "--reconstruction" && (value == "0" || value == "1")) o.reconstruction = value == "1";
     else if (key == "--keep-passes" && (value == "0" || value == "1")) o.keep_passes = value == "1";   // SEG-111: diagnostics/tests
     else if (key == "--file-first-max-bytes") o.file_first_max_bytes = value;

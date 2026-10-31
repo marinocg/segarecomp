@@ -125,6 +125,28 @@ def delay(m, name, loops):
     m.dbra(0, name)
 
 
+# SEG-114 (ADR 0258): the main-side Z80 - project-authored Z80 programs (hand-assembled bytes, no commercial content).
+Z80_SLOT = 0x60          # the byte the main program reads back from Z80 RAM $0100
+Z80_SLOT_AFTER = 0x62    # case 15: the byte read again after the Z80 has been isolated
+Z80_HANDSHAKE = bytes([0x3E, 0x5A, 0x32, 0x00, 0x01, 0x18, 0xFE])                           # LD A,$5A / LD ($0100),A / JR $
+Z80_SELF_REWRITE = bytes([0x3E, 0x5A, 0x32, 0x00, 0x01, 0x3E, 0x00, 0x32, 0x0A, 0x00, 0x18, 0xFE])  # ... then LD ($000A),A overwrites the JR opcode it will execute
+Z80_OTHER = bytes([0x3E, 0x11, 0x32, 0x00, 0x01, 0x18, 0xFE])                               # a different image: LD A,$11 ...
+
+
+def z80_run_and_read(n, program, slot, tag):
+    """Upload `program` with the bus held, let the Z80 run for a while, take the bus back and read RAM byte $0100 into `slot`."""
+    n.move("w", F.imm(0x0100), F.absl(0xA11100))          # BUSREQ
+    n.move("w", F.imm(0x0000), F.absl(0xA11200))          # /RESET asserted
+    n.move("w", F.imm(0x0100), F.absl(0xA11200))          # /RESET released: the bus is granted
+    for i, byte in enumerate(program):
+        n.move("b", F.imm(byte), F.absl(0xA00000 + i))
+    n.move("w", F.imm(0x0000), F.absl(0xA11100))          # the Z80 becomes runnable: an image epoch
+    delay(n, "z80d" + tag, 300)                           # a few thousand main cycles: far more than the programs need
+    n.move("w", F.imm(0x0100), F.absl(0xA11100))          # BUSREQ again
+    n.move("b", F.absl(0xA00100), F.absl(RESULT + slot))
+    n.move("w", F.imm(0x0000), F.absl(0xA11100))
+
+
 def hint_window(m, tag, reg10, slot):
     """Level-4 handlers run between the level-6 handlers of frames 1 and 3 (two whole frames) with register #10 = reg10."""
     vdp_reg(m, 10, reg10)
@@ -311,6 +333,13 @@ def main_program(sub_len, layout):
     m.move("b", F.imm(0xA5), F.absl(RESULT + 0xFF))
     m.move("b", F.imm(0x01), F.absl(GA + 0x01))           # SRES 1, SBRQ 0
     F.wait_flag(m, GA + 0x0F, 0x01, "wait_sub")
+    negative(m, 12, lambda n: z80_run_and_read(n, Z80_HANDSHAKE, Z80_SLOT, "a"))                    # the Z80 writes a byte the main program reads
+    negative(m, 13, lambda n: (z80_run_and_read(n, Z80_SELF_REWRITE, Z80_SLOT, "b"),              # the Z80 rewrites its own opcode: isolated, the main program goes on
+                               n.move("b", F.absl(0xA11100), F.d(1)),
+                               n.move("w", F.imm(0x0100), F.absl(0xA11100)),
+                               n.move("b", F.absl(0xA00100), F.absl(RESULT + Z80_SLOT_AFTER)),
+                               n.move("w", F.imm(0x0000), F.absl(0xA11100))))
+    negative(m, 14, lambda n: z80_run_and_read(n, Z80_OTHER, Z80_SLOT, "c"))                        # an image no build pass saw: the executable program stops
     # SEG-064-T004: the transfer to the application entry is the handoff, but only to an entry that is compiled and whose live bytes match
     # the declared copy image: the main program places the two NOPs at $FF0000 and calls them
     negative(m, 11, lambda n: (n.move("l", F.imm(0x4E714E71), F.absl(0xFF0000)), n.jsr(F.absl(0xFF0000))))

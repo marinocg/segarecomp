@@ -12,7 +12,8 @@ static const char *const scd_stop_names[SCD_STOP_CLASS_COUNT] = {
     "exception_vector_not_compiled", "exception_stack_invalid", "trace_unsupported", "interrupt_source_unsupported",
     "cdc_destination_unsupported", "cdd_command_unsupported", "cd_read_audio_track", "cd_read_failed", "internal", "image_unknown",
     "image_bytes_mismatch", "image_partially_overwritten", "ambiguous_image", "image_entry_not_compiled", "stale_image_selection",
-    "materialized_image_unverified", "materialization_captured", "main_device_unsupported", "application_handoff"};
+    "materialized_image_unverified", "materialization_captured", "main_device_unsupported", "application_handoff",
+    "z80_unsupported"};
 
 const char *scd_stop_class_name(ScdStopClass stop_class) {
   return (unsigned)stop_class < SCD_STOP_CLASS_COUNT ? scd_stop_names[stop_class] : "unknown";
@@ -872,7 +873,13 @@ int scd_machine_init_bios(ScdMachine *m, const ScdProgram *program, const ScdAut
   return scd_vdp_init(m);
 }
 
+static const ScdZ80Ops *scd_z80_ops_registered;
+void scd_z80_register(const ScdZ80Ops *ops) { scd_z80_ops_registered = ops; }
+const ScdZ80Ops *scd_z80_registered_ops(void) { return scd_z80_ops_registered; }
+
 void scd_machine_release(ScdMachine *m) {
+  if (m->z80 != NULL && scd_z80_ops_registered != NULL) scd_z80_ops_registered->detach(m);
+  m->z80 = NULL;
   scd_reloc_release(m);
   scd_input_release(m);
   scd_vdp_release(m);

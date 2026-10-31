@@ -23,6 +23,16 @@
  * with z80_unknown_image after the callback returns. */
 typedef void (*GenesisZ80UnknownImageFunction)(void *context, uint32_t epoch_ordinal, const uint8_t *ram, const uint8_t *written);
 
+/* SEG-114 (ADR 0258): an alternative 68K-side view for the Z80's banked window ($8000-$FFFF). The Genesis machine reads the owned cartridge
+ * regions and writes its own work RAM; a machine whose 68K bus is not the Genesis one (the Sega CD main bus) supplies this view instead.
+ * `read` returns 1 and the byte, or 0 for an access the machine does not support (typed stop z80_bank_target_unsupported); `write` the
+ * same. Neither may have a side effect on an unsupported access. NULL = the Genesis view (unchanged). */
+typedef struct GenesisZ80BankView {
+  void *context;
+  int (*read)(void *context, uint32_t address24, uint8_t *value);
+  int (*write)(void *context, uint32_t address24, uint8_t value);
+} GenesisZ80BankView;
+
 typedef struct GenesisZ80Machine {
   Z80Runtime cpu;
   GenesisRuntime *runtime;
@@ -38,6 +48,13 @@ typedef struct GenesisZ80Machine {
   uint64_t sound_fault_master_ticks;      /* guest master time at the fault (the Z80 clock position) */
   GenesisZ80UnknownImageFunction on_unknown_image;
   void *unknown_image_context;
+  const GenesisZ80BankView *bank_view;    /* SEG-114: NULL = the Genesis cartridge/work-RAM view */
+  /* SEG-114: a build pass records an unknown image (on_unknown_image) and goes on with the Z80 quiesced instead of stopping; the host owns
+   * the consequence (it must not let the 68K observe the unexecuted Z80). 0 = the Genesis behaviour (typed stop z80_unknown_image). */
+  uint8_t quiesce_unknown_image;
+  /* SEG-114: 1 = an unsupported Z80-side access (view stop) isolates the Z80 like a structural mutation (sound muted, the machine continues). 0 = typed stop. */
+  uint8_t isolate_view_stops;
+
   /* Opt-in aggregate evidence (counts only; never an address or value; SEG-032-T010). */
   uint64_t count_reset_assert, count_reset_release, count_busreq_assert, count_busreq_release, count_bank_writes, count_banked_reads;
 } GenesisZ80Machine;

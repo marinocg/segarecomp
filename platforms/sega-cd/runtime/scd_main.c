@@ -215,6 +215,11 @@ static void scd_write_report(FILE *out, const ScdMachine *m, const ScdProgram *p
     fprintf(out, "]}");
   }
   scd_dynamic_report(m, out); /* SEG-100: absent for a program without dynamic images (reports unchanged) */
+  if (m->z80 != NULL) { /* SEG-114 (ADR 0258): absent for a program without the main-side Z80 (reports unchanged) */
+    fprintf(out, ",\"z80\":{");
+    scd_z80_registered_ops()->report(m, out);
+    fprintf(out, "}");
+  }
   if (m->cdda.enabled) scd_write_cdda_report(out, m); /* SEG-104: absent unless CD-DA output was requested (reports unchanged) */
   if (m->mix.enabled) scd_write_audio_report(out, m); /* SEG-107: absent unless the mixed PCM + CD-DA output was requested (reports unchanged) */
   fprintf(out, "}\n");
@@ -712,6 +717,7 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
     if (scd_vdp_capture_request(&machine, capture_onsets[i], capture_dir) != 0) return 2;
   scd_overlay_attach(&machine, overlays);
   scd_dynamic_attach(&machine); /* SEG-100: idle for a program without dynamic images */
+  if (authentic != NULL && scd_z80_registered_ops() != NULL && scd_z80_registered_ops()->attach(&machine) != 0) return 1; /* SEG-114 (ADR 0258) */
   if (coverage_path != NULL && scd_coverage_enable(&machine) != 0) return 1;
   if (trace_path != NULL && scd_trace_open(&machine, trace_path) != 0) return 1;
   if (wlog_path != NULL && scd_wlog_open(&machine, wlog_path) != 0) return 1;
@@ -785,11 +791,13 @@ static int scd_program_run(const ScdProgram *program, const ScdOverlayProgram *o
       }
     }
   }
+  if (machine.z80 != NULL) scd_z80_registered_ops()->finish(&machine); /* SEG-114: the Z80 at the instant of the report */
   if (coverage_path != NULL && scd_coverage_write(&machine, coverage_path) != 0) return 1;
   if (dump_dir != NULL && scd_dump_state(&machine, dump_dir) != 0) return 1;
   if (backup_ram_out_path != NULL && (!machine.backup_ram_present || scd_write_backup_ram(&machine, backup_ram_out_path) != 0)) return 28; /* SEG-108 */
   if (input_log_path != NULL && scd_input_write_log(&machine, input_log_path) != 0) return 1;
   if (record_path != NULL && scd_input_live_write(&machine, record_path) != 0) return 27; /* SEG-078-T001: the recorded script, also after a quit or a stop */
+  if (materialize_dir != NULL && machine.z80 != NULL && scd_z80_registered_ops()->export_epochs(&machine, materialize_dir) != 0) return 1;
   if (materialize_dir != NULL && result == SCD_RUN_STOPPED && !scd_capture(&machine, program, materialize_dir)) return 1;
   report = report_path != NULL ? fopen(report_path, "w") : stdout;
   if (report == NULL) return 1;
