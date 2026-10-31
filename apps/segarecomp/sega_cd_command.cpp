@@ -31,6 +31,7 @@
 #include "segarecomp/machine/sega_cd/loader_scan.hpp"
 #include "segarecomp/machine/sega_cd/modules.hpp"
 #include "segarecomp/machine/sega_cd/program.hpp"
+#include "segarecomp/machine/sega_cd/relocation.hpp"
 #include "segarecomp/machine/sega_cd/source_resolve.hpp"
 #include "segarecomp/sha256.hpp"
 
@@ -433,6 +434,19 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
       // function of the disc) and refuses an extent that no proven module mapping contains.
       if (!static_extent_is_proven(disc, *proc, *off, *base, *len)) return bad("admit", "static_extent_unproven");
       if (const auto error = read_track1_extent(disc, *off, *len, a.bytes); !error.empty()) return bad("admit", error);
+    } else if (f.size() >= 5U && f[0] == "produced") {  // SEG-111 (ADR 0255): produced:<pass>:<cpu>:<base>:<snapshot path> (the path is the remainder; it may contain ':')
+      const auto proc = parse_processor(f[2]);
+      const auto base = parse_u32(f[3]);
+      std::size_t at = 0;
+      for (int colon = 0; colon < 4 && at != std::string::npos; ++colon) at = text.find(':', at == 0 && colon == 0 ? 0 : at + 1U);
+      const auto bytes = at == std::string::npos ? std::nullopt : read_file(text.substr(at + 1U), scd::kMaxProducedBytes);
+      if (!proc || !base) return bad("admit", "produced_syntax");
+      if (!bytes) return bad("admit", "snapshot_unreadable");
+      a.kind = scd::AdmissionKind::produced_image;
+      a.pass_identity = f[1];
+      a.processor = *proc;
+      a.address = *base;
+      a.bytes = *bytes;
     } else if (f.size() == 6U && f[0] == "extent") {  // SEG-078-T003 (ADR 0205): extent:<pass>:<cpu>:<track-1 offset>:<base>:<length>
       const auto proc = parse_processor(f[2]);
       const auto off = parse_u32(f[3]);
@@ -734,6 +748,71 @@ int resolve_source_command(int argc, char **argv) {
   if (!result.source) return refuse(scd::resolve_error_name(result.error));
   std::cout << "{\"ok\":true,\"processor\":\"" << scd::processor_name(*processor) << "\",\"offset\":" << result.source->disc_offset
             << ",\"base\":" << result.source->base << ",\"length\":" << result.source->length << ",\"candidates\":" << result.source->candidates << "}\n";
+  return 0;
+}
+
+// SEG-111 (ADR 0255): derive the executable image a verified producer made at a RAM frontier from the build pass's bounded write streams.
+int derive_relocation_command(int argc, char **argv) {
+  std::optional<std::string> cue, capture_path, region_path, pass, snapshot;
+  std::vector<scd::VerifiedExtent> extents;
+  for (int i = 3; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
+    else if (arg == "--capture" && i + 1 < argc) capture_path = argv[++i];
+    else if (arg == "--region" && i + 1 < argc) region_path = argv[++i];
+    else if (arg == "--pass" && i + 1 < argc) pass = argv[++i];
+    else if (arg == "--snapshot" && i + 1 < argc) snapshot = argv[++i];
+    else if (arg == "--extent" && i + 1 < argc) {
+      const auto f = split(argv[++i], ':');
+      const auto proc = f.size() == 4U ? parse_processor(f[0]) : std::nullopt;
+      const auto off = f.size() == 4U ? parse_u32(f[1]) : std::nullopt;
+      const auto base = f.size() == 4U ? parse_u32(f[2]) : std::nullopt;
+      const auto len = f.size() == 4U ? parse_u32(f[3]) : std::nullopt;
+      if (!proc || !off || !base || !len || extents.size() >= 256U) {
+        std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+        return 2;
+      }
+      extents.push_back({*proc, *off, *base, *len});
+    } else {
+      std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+      return 2;
+    }
+  }
+  if (!cue || !capture_path || !region_path || !pass) {
+    std::cerr << "usage:\n" << segarecomp_sega_cd_usage;
+    return 2;
+  }
+  const auto refuse = [](const std::string &error) {
+    std::cout << "{\"ok\":false,\"error\":\"" << error << "\"}\n";
+    return 8;
+  };
+  const auto region = read_file(*region_path, 0x80000U);
+  const auto capture = read_file(*capture_path, UINT64_C(16) << 20U);
+  if (!region || !capture) return refuse("bad_evidence");
+  const std::string_view text(reinterpret_cast<const char *>(capture->data()), capture->size());
+  auto parsed = scd::parse_frontier_capture(text, *region);
+  if (!parsed) return refuse("bad_evidence");
+  if (parsed->pass_identity != *pass) return refuse("pass_mismatch");   // evidence of another program is never admitted into this one
+  const auto streams = scd::parse_stream_evidence(text);
+  if (!streams) return refuse("bad_evidence");
+  const auto loaded = segarecomp::load_cue_disc(*cue);
+  if (!loaded.disc) return refuse(std::string("disc_") + segarecomp::disc_error_name(loaded.error));
+  auto result = scd::derive_relocation(*loaded.disc, parsed->frontier, *streams, extents);
+  const bool computed = !result.fragment && result.error == scd::FragmentError::not_a_copy;
+  if (computed) result = scd::derive_produced_image(parsed->frontier, *streams);   // a computed stream is a produced image, never a copy
+  if (!result.fragment) return refuse(scd::fragment_error_name(result.error));
+  const scd::Fragment &fragment = *result.fragment;
+  if (fragment.copy) {
+    std::cout << "{\"ok\":true,\"class\":\"copy\",\"processor\":\"" << scd::processor_name(fragment.processor) << "\",\"offset\":" << fragment.disc_offset
+              << ",\"base\":" << fragment.base << ",\"length\":" << fragment.length << "}\n";
+    return 0;
+  }
+  if (!snapshot) return refuse("not_a_copy");   // a produced image is only offered to a caller that can admit it
+  std::ofstream file(*snapshot, std::ios::binary | std::ios::trunc);
+  file.write(reinterpret_cast<const char *>(fragment.bytes.data()), static_cast<std::streamsize>(fragment.bytes.size()));
+  if (!file.flush()) return refuse("snapshot_unwritable");
+  std::cout << "{\"ok\":true,\"class\":\"produced\",\"processor\":\"" << scd::processor_name(fragment.processor) << "\",\"base\":" << fragment.base
+            << ",\"length\":" << fragment.length << "}\n";
   return 0;
 }
 
@@ -1128,6 +1207,7 @@ int segarecomp_sega_cd_command(int argc, char **argv) {
   if (argc >= 3 && std::string_view(argv[2]) == "emit") return emit(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "build") return segarecomp_sega_cd_build(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "resolve-source") return resolve_source_command(argc, argv);
+  if (argc >= 3 && std::string_view(argv[2]) == "derive-relocation") return derive_relocation_command(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "file-survey") return file_survey_command(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "discover-modules") return discover_modules_command(argc, argv);
   std::cerr << "usage:\n" << segarecomp_sega_cd_usage;

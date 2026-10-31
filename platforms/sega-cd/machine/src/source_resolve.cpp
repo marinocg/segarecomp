@@ -39,16 +39,9 @@ struct Candidate {
 
 }  // namespace
 
-ResolveResult resolve_source(const DiscImage &disc, const SourceEvidence &e) {
-  const auto fail = [](ResolveError error) { return ResolveResult{std::nullopt, error}; };
-  const std::uint64_t n = e.region.size();
-  if (e.pc < e.region_base || e.pc - e.region_base >= n || n < kResolveAnchorBytes) return fail(ResolveError::bad_evidence);
-  if (e.delivered_overflow) return fail(ResolveError::ledger_overflow);
-  if (disc.tracks().empty() || disc.tracks().front().type == DiscTrackType::audio) return fail(ResolveError::first_track_not_data);
-  const DiscTrack &track = disc.tracks().front();
-  // The delivered blocks of track 1, clipped to it, sorted, merged into contiguous segments.
+std::vector<LedgerRange> merge_delivered(const DiscTrack &track, const std::vector<LedgerRange> &delivered) {
   std::vector<LedgerRange> ranges;
-  for (const LedgerRange &r : e.delivered) {
+  for (const LedgerRange &r : delivered) {
     const std::uint64_t lo = std::max<std::uint64_t>(r.first_lba, track.first_lba);
     const std::uint64_t hi = std::min<std::uint64_t>(static_cast<std::uint64_t>(r.first_lba) + r.count, static_cast<std::uint64_t>(track.first_lba) + track.sector_count);
     if (lo < hi) ranges.push_back({static_cast<std::uint32_t>(lo), static_cast<std::uint32_t>(hi - lo)});
@@ -63,6 +56,18 @@ ResolveResult resolve_source(const DiscImage &disc, const SourceEvidence &e) {
       merged.push_back(r);
     }
   }
+  return merged;
+}
+
+ResolveResult resolve_source(const DiscImage &disc, const SourceEvidence &e) {
+  const auto fail = [](ResolveError error) { return ResolveResult{std::nullopt, error}; };
+  const std::uint64_t n = e.region.size();
+  if (e.pc < e.region_base || e.pc - e.region_base >= n || n < kResolveAnchorBytes) return fail(ResolveError::bad_evidence);
+  if (e.delivered_overflow) return fail(ResolveError::ledger_overflow);
+  if (disc.tracks().empty() || disc.tracks().front().type == DiscTrackType::audio) return fail(ResolveError::first_track_not_data);
+  const DiscTrack &track = disc.tracks().front();
+  // The delivered blocks of track 1, clipped to it, sorted, merged into contiguous segments.
+  const std::vector<LedgerRange> merged = merge_delivered(track, e.delivered);
   std::uint64_t total = 0;
   for (const LedgerRange &r : merged) total += static_cast<std::uint64_t>(r.count) * kDiscUserBytes;
   if (total == 0) return fail(ResolveError::no_delivery_evidence);

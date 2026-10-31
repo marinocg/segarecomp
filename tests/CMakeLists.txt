@@ -1210,6 +1210,13 @@ set_target_properties(sega_cd_pcm_replay PROPERTIES C_STANDARD 11 C_STANDARD_REQ
 target_link_libraries(sega_cd_pcm_replay PRIVATE segarecomp::runtime_sega_cd)
 segarecomp_enable_warnings(sega_cd_pcm_replay)
 
+add_executable(sega_cd_reloc_observer_test sega_cd_reloc_observer_test.c)
+set_target_properties(sega_cd_reloc_observer_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_link_libraries(sega_cd_reloc_observer_test PRIVATE segarecomp::runtime_sega_cd)
+segarecomp_enable_warnings(sega_cd_reloc_observer_test)
+add_test(NAME sega_cd_reloc_observer_test COMMAND sega_cd_reloc_observer_test)
+set_property(TEST sega_cd_reloc_observer_test APPEND PROPERTY LABELS full fast)
+
 add_executable(sega_cd_dynamic_binding_test sega_cd_dynamic_binding_test.c)
 set_target_properties(sega_cd_dynamic_binding_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
 target_link_libraries(sega_cd_dynamic_binding_test PRIVATE segarecomp::runtime_sega_cd)
@@ -1278,6 +1285,10 @@ set_property(TEST sega_cd_extent_discovery_test APPEND PROPERTY LABELS full fast
 add_test(NAME sega_cd_derived_image_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_derived_image_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sega_cd_derived_image_test APPEND PROPERTY LABELS full fast)
+# SEG-111 (ADR 0255): automatic relocated-fragment and produced-code admission in the product build, derivation matrix, determinism, fail-closed cases.
+add_test(NAME sega_cd_reconstruction_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_reconstruction_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_reconstruction_test APPEND PROPERTY LABELS full fast)
 # SEG-078-T003 (ADR 0205): the product `segarecomp sega-cd build` equals the Python driver; progress, object cache, viewer variant, typed failures.
 add_test(NAME sega_cd_native_build_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_native_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

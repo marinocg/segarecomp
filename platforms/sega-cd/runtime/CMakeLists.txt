@@ -17,6 +17,7 @@ add_library(segarecomp_runtime_sega_cd STATIC
   scd_main.c
   scd_overlay.c
   scd_pcm.c
+  scd_reloc.c
   scd_vdp.c
   scd_word_ram.c
 )
