@@ -126,7 +126,7 @@ def main():
             o = cases[other] = Case(tmp, other)
             rc, none = o.contract()
             want = "bios_not_verified" if other == "no_profile" else "header_not_verified"
-            check(rc == 0 and none["refusal"] == want and none["images"] == [] and none["admits"] == [] and none["profile"] == ("" if other == "no_profile" else none["profile"]),
+            check(rc == 0 and none["refusal"] == want and none["images"] == [] and none["admits"] == [] and (none["profile"] == "") == (other == "no_profile"),
                   "%s: the eligibility check offers nothing (%s)" % (other, want))
             done = o.emit(ip_spec)
             check(done.returncode != 0 and "static_boot_unverified" in done.stdout, "%s: the emitter refuses a static boot admission on an unverified BIOS / header form" % other)
@@ -134,6 +134,25 @@ def main():
             rep = o.run(out)
             check(st["status"] == "ok" and st["rounds"] == 4 and st["static_boot"]["state"] == "not_offered" and st["static_boot"]["refusal"] == want and len(st["extents"]) == 2 and
                   markers(rep) == ("a001", "b002"), "%s: the build is the execution-observed one (4 rounds), the dynamic fallback is intact" % other)
+        # a disc whose boot area cannot be used: an audio first track, a descriptor leaving the system area (invalid source span)
+        for label, patch in (("audio first track", "audio"), ("SP descriptor outside the system area", "descriptor")):
+            bad = tmp / ("bad-" + patch)
+            shutil.copytree(cases["contract"].dir, bad)
+            if patch == "audio":
+                track = bad / "disc" / "track01.bin"
+                track.write_bytes(track.read_bytes().ljust(2352 * 140, b"\0"))
+                (bad / "disc" / "disc.cue").write_text('FILE "track01.bin" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n', newline="\n")
+            else:
+                track = bad / "disc" / "track01.bin"
+                data = bytearray(track.read_bytes())
+                data[0x44:0x48] = (0x8000).to_bytes(4, "big")
+                track.write_bytes(bytes(data))
+            done = subprocess.run([SEGARECOMP, "sega-cd", "boot-contract", "--cue", str(bad / "disc" / "disc.cue"), "--bios", str(bad / "bios.bin")], capture_output=True, text=True)
+            found = json.loads(done.stdout)
+            check(done.returncode == 0 and found["refusal"] == "disc_boot_area" and found["images"] == [], "%s: no boot image is offered (disc_boot_area)" % label)
+            done = subprocess.run([SEGARECOMP, "sega-cd", "emit", "--cue", str(bad / "disc" / "disc.cue"), "--bios", str(bad / "bios.bin"), "--out", str(tmp / "z.c"), "--admit", ip_spec],
+                                  capture_output=True, text=True)
+            check(done.returncode != 0 and "static_boot_unverified" in done.stdout, "%s: the emitter refuses the old admission" % label)
         # a changed disc: the old admission's digest no longer matches what the disc and BIOS prove
         changed = tmp / "changed"
         shutil.copytree(c.dir, changed)

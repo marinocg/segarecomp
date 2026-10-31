@@ -850,8 +850,8 @@ class Builder {
     log_ << "static boot: " << boot_state_ << " (" << boot_profile_ << ", " << boot_refusal_ << "), " << boot_extents_.size() << " image(s)" << std::endl;
   }
 
-  // A resolved (execution-observed) extent that lands on a statically admitted boot image AND whose source is the boot area itself says the BIOS placed boot-area bytes
-  // differently from the static contract: that is a disagreement, reported and counted (the dynamic extent is still admitted: the live-byte guard never prefers the static
+  // A resolved (execution-observed) extent that covers the base (the entry) of a statically admitted boot image AND whose source is the boot area itself says the BIOS placed
+  // boot-area bytes differently from the static contract: that is a disagreement, reported and counted (the dynamic extent is still admitted: the live-byte guard never prefers the static
   // image over different live bytes). A later stage loaded over the same guest span from elsewhere on the disc is an ordinary overlay, not a disagreement.
   void note_boot_disagreement(const std::string &spec) {
     const auto parse = [](const std::string &text) {
@@ -872,9 +872,9 @@ class Builder {
     for (const auto &b : boot_extents_) {
       const auto g = parse(b);
       if (g.size() != 4U || g[0] != f[0]) continue;
-      std::uint64_t gbase = 0, glen = 0;
-      try { gbase = std::stoull(g[2]); glen = std::stoull(g[3]); } catch (const std::exception &) { return; }
-      if (base < gbase + glen && gbase < base + length && offset < boot_end) { ++boot_disagreements_; return; }
+      std::uint64_t gbase = 0;
+      try { gbase = std::stoull(g[2]); } catch (const std::exception &) { return; }
+      if (base <= gbase && gbase < base + length && offset < boot_end) { ++boot_disagreements_; return; }   // covers the image's entry (its base) with boot-area bytes
     }
   }
 

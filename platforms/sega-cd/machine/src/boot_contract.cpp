@@ -1,5 +1,6 @@
 #include "segarecomp/machine/sega_cd/boot_contract.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <span>
@@ -35,8 +36,10 @@ struct Profile {
 };
 
 constexpr Profile kProfiles[] = {
-    // Authentic US Model 1 BIOS: ADR 0257 section 2 (observed on two commercial discs with this header form; the main-side copy of 8192 longs is an immediate of the BIOS).
+    // Authentic US Model 1 BIOS: ADR 0257 sections 1 and 4 (observed on two commercial discs with this header form; the main-side Word RAM -> Work RAM copy is an immediate-operand loop of the BIOS).
     {"sega_cd_model1_v110_us", "807384678ef259494d943eddb6954dfc7069693d0dde0c424e2028488d88e81a", nullptr, 0x8000U, true, 0x800U, 0x800U, 0x1000U, 0x7000U},
+    // Authentic US Model 2 BIOS: the same placement, observed on the same two discs (ADR 0257 section 4).
+    {"sega_cd_model2_v200w_us", "b1c2036b79467514eaaa69c76e5ba83801621e821059caa53cb921a0b21e3af4", nullptr, 0x8000U, true, 0x800U, 0x800U, 0x1000U, 0x7000U},
     // Project-authored fixture BIOS images (tools/sega_cd_bios_boot_contract_fixture.py): the same contract with a shorter or the full IP.
     {"project_fixture_boot_contract_1", nullptr, "SEGA BOOT-CONTRACT FIXTURE 1    ", 0x8000U, false, 0U, 0U, 0U, 0U},
     {"project_fixture_boot_contract_2", nullptr, "SEGA BOOT-CONTRACT FIXTURE 2    ", 0x4000U, false, 0U, 0U, 0U, 0U},
@@ -81,6 +84,7 @@ BootContract derive_boot_contract(const BiosImage &bios, const DiscImage &disc) 
     out.refusal = BootContractRefusal::bios_not_verified;
     return out;
   }
+  out.profile = profile->name;   // reported with every outcome, refusals included
   const auto boot = read_sega_cd_boot(disc);
   if (!boot.header) {
     out.refusal = BootContractRefusal::disc_boot_area;
@@ -100,7 +104,6 @@ BootContract derive_boot_contract(const BiosImage &bios, const DiscImage &disc) 
     out.refusal = BootContractRefusal::boot_area_short;
     return out;
   }
-  out.profile = profile->name;
   out.images.push_back(std::move(ip));
   out.images.push_back(std::move(sp));
   return out;
