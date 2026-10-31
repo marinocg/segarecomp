@@ -439,7 +439,9 @@ def stage_input(r, c, size):
     script = list(pad_start)
     for p in PLATFORMS:
         script += pad_open(p) + seek("build", "dpad_right", 3) + press("south") + ["wait_idle", "wait_scd", "frames 20"] + expect(build_outcome="ok", can_play=1)   # a Sega CD build is followed by an asynchronous verification; Play is not focusable until it finished
-        script += seek("play", "dpad_left", 3) + press("south") + ["frames 10", "wait_play_end", "frames 10"] + expect(playing=0)
+        # A long build outlives the Details page's focus-restoring window, so where the focus is after it depends on the host's speed: reopen the game for a defined focus.
+        script += press("east") + expect(page="library") + pad_open(p)
+        script += press("south") + ["frames 10", "wait_play_end", "frames 10"] + expect(playing=0)
         script += seek("more", "dpad_right", 4) + press("south") + ["frames 6", "menu_items"] + press("east") + press("east") + expect(page="library")
     script.append("quit")
     trace = c.run(script, {}, size)
