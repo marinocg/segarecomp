@@ -218,7 +218,7 @@ int genesis_z80_machine_run_to(GenesisZ80Machine *machine, uint64_t master_ticks
     if (machine->view_stop != (GenesisDiagnosticCategory)0) {
       if (machine->isolate_view_stops) {  /* SEG-114: isolate the sound CPU (muted); the main processor continues */
         machine->sound_fault = machine->view_stop;
-          machine->sound_fault_epoch = machine->runtime->z80_epoch.epoch_count;
+        machine->sound_fault_epoch = machine->runtime->z80_epoch.epoch_count;
         machine->sound_fault_master_ticks = access_master_ticks(machine);
         machine->bound_ordinal = 0U;
         return 0;

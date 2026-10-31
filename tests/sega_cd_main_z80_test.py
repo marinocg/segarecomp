@@ -61,7 +61,7 @@ def main():
         check(done.returncode == 0 and status and status["status"] == "ok", "case 12: the build succeeds")
         z = status["z80"]
         check(z["enabled"] is True and z["images"] == 2, "case 12: two Z80 image epochs were discovered by the build passes (the earlier fixture upload and the handshake program)")
-        check(status["rounds"] <= 4, "case 12: the Z80 images cost no round of their own (%s rounds)" % status["rounds"])
+        check(status["rounds"] <= 4, "case 12: the Z80 images add at most one round to the previous build (%s rounds)" % status["rounds"])
         report = run(exe, disc, bios, 12)
         block = bytes.fromhex(report["result_block"])
         check(report["result"] == "idle", "case 12: the program runs to its end (%s)" % report["stop"])

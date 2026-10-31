@@ -124,8 +124,7 @@ typedef enum ScdStopClass {
   /* SEG-064-T004: the BIOS-image profile's accepted boundary (a deliberate end, not a failure). */
   SCD_STOP_APPLICATION_HANDOFF,        /* the main processor is about to execute its first instruction at the documented IP entry */
   /* SEG-114 (ADR 0258): the main-side Z80 (a program built with Z80 images). `address` carries the typed Genesis diagnostic category. */
-  SCD_STOP_Z80_UNSUPPORTED,            /* the Z80 reached an unsupported access, an unknown image or a code mismatch, or the main processor
-                                          would observe a Z80 whose execution is not modelled */
+  SCD_STOP_Z80_UNSUPPORTED,            /* the Z80 met an image epoch no build pass saw, or another Z80 outcome the machine cannot continue (diagnostics 56-61) */
   SCD_STOP_CLASS_COUNT
 } ScdStopClass;
 
@@ -638,7 +637,7 @@ typedef struct ScdMachine {
   uint64_t vint_at;                       /* BIOS-image profile: tick at which the vertical interrupt of the last onset is requested (0: none due) */
   uint64_t vdp_onset;                     /* tick of the next VDP vertical-blank onset */
   uint8_t vint_pending;                   /* the VDP vertical interrupt is pending (requests level 6 while register #1 IE0 is set) */
-  uint8_t z80_ran;                        /* the Z80 has been runnable (reset released, bus not requested): its RAM is not modelled */
+  uint8_t z80_ran;                        /* the Z80 has been runnable (reset released, bus not requested): without an attached Z80 its RAM is not modelled */
   void *z80;                              /* SEG-114 (ADR 0258): the attached main-side Z80 (scd_z80.c), or NULL: the legacy rule above applies */
   uint8_t hint_counter;                   /* SEG-106 (ADR 0250): the H-interrupt line counter (reloaded from VDP register #10) */
   uint8_t hint_pending;                   /* the H-interrupt request is latched (requests level 4 while register #0 IE1 is set) */
@@ -773,7 +772,7 @@ void scd_machine_release(ScdMachine *m);
 typedef struct ScdZ80Ops {
   int (*attach)(ScdMachine *m);                           /* 0 = attached; called once, before the first instruction */
   void (*detach)(ScdMachine *m);
-  int (*readable)(const ScdMachine *m);                   /* may the main processor observe the Z80 area (every executed epoch modelled)? */
+  int (*readable)(const ScdMachine *m);                   /* may the main processor read the Z80 area? (always: an isolated or quiesced Z80 is read as it stands) */
   int (*classify_stop)(const ScdMachine *m, uint32_t stop_class, uint32_t diagnostic, uint32_t *detail); /* a host route stop that is the Z80's */
   void (*finish)(ScdMachine *m);                          /* bring the Z80 to the machine time (report/digest) */
   int (*export_epochs)(ScdMachine *m, const char *dir);   /* build pass: write the unknown image epochs; 0 = ok */

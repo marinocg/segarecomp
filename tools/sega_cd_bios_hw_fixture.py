@@ -127,7 +127,7 @@ def delay(m, name, loops):
 
 # SEG-114 (ADR 0258): the main-side Z80 - project-authored Z80 programs (hand-assembled bytes, no commercial content).
 Z80_SLOT = 0x60          # the byte the main program reads back from Z80 RAM $0100
-Z80_SLOT_AFTER = 0x62    # case 15: the byte read again after the Z80 has been isolated
+Z80_SLOT_AFTER = 0x62    # case 13: the byte read again after the Z80 has been isolated
 Z80_HANDSHAKE = bytes([0x3E, 0x5A, 0x32, 0x00, 0x01, 0x18, 0xFE])                           # LD A,$5A / LD ($0100),A / JR $
 Z80_SELF_REWRITE = bytes([0x3E, 0x5A, 0x32, 0x00, 0x01, 0x3E, 0x00, 0x32, 0x0A, 0x00, 0x18, 0xFE])  # ... then LD ($000A),A overwrites the JR opcode it will execute
 Z80_OTHER = bytes([0x3E, 0x11, 0x32, 0x00, 0x01, 0x18, 0xFE])                               # a different image: LD A,$11 ...

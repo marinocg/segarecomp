@@ -12,8 +12,10 @@
  *    synchronised follower without a causality rule this milestone does not define (ADR 0072 decision 1);
  *  - the sound devices are not attached: a YM2612 read answers 0 (absent hardware) and PSG/YM writes are discarded, as the Genesis machine does
  *    without an audio attach;
- *  - a build pass (--materialize-dir) records an unknown image epoch and goes on with the Z80 unexecuted, but from then on a main read of the Z80 area is
- *    the legacy typed stop (the unexecuted Z80 cannot be observed); the executable program stops at an unknown epoch instead (z80_unknown_image).
+ *  - a build pass (--materialize-dir) records an unknown image epoch and goes on with the Z80 quiesced (state `unmodelled`); the main processor reads sound RAM
+ *    as it stands, so such a pass is never a confirmed candidate (the build registers the image and runs again); the executable program stops at an
+ *    unknown epoch instead (z80_unsupported / z80_unknown_image);
+ *  - when a Z80-side access isolates the Z80 the faulting instruction has already completed (a read returned $FF, later effects of that instruction land).
  *
  * This file is compiled only into programs built with Z80 support (`segarecomp sega-cd build`); runtime sources in the directory above never
  * reference it. */
@@ -25,8 +27,8 @@
 #include "z80_machine.h"
 #include "z80_registry.h"
 
-#define SCD_Z80_MAX_UNKNOWN 16U
-#define SCD_Z80_LOG 32U /* image epochs kept in the report (diagnostic; counts and an identity prefix only) */ /* unknown image epochs one build pass records (the build's image bound is smaller) */
+#define SCD_Z80_MAX_UNKNOWN 16U /* unknown image epochs one build pass records (the build's image bound is smaller) */
+#define SCD_Z80_LOG 32U        /* image epochs kept in the report (diagnostic: time, extent count, image) */ /* unknown image epochs one build pass records (the build's image bound is smaller) */
 
 typedef struct ScdZ80Unknown {
   uint8_t ram[GENESIS_Z80_RAM_BYTES];
@@ -117,7 +119,11 @@ static int scd_z80_attach(ScdMachine *m) {
 static void scd_z80_detach(ScdMachine *m) {
   ScdZ80 *z = scd_z80_of(m);
   GenesisRuntime *host = (GenesisRuntime *)m->vdp_host;
-  if (host != NULL) host->z80_hooks = NULL;
+  if (host != NULL) {
+    host->z80_hooks = NULL;
+    host->z80_epoch.on_epoch = NULL;
+    host->z80_epoch.context = NULL;
+  }
   free(z);
   m->z80 = NULL;
 }
@@ -132,8 +138,8 @@ static int scd_z80_readable(const ScdMachine *m) {
 static int scd_z80_classify_stop(const ScdMachine *m, uint32_t stop_class, uint32_t diagnostic, uint32_t *detail) {
   (void)m;
   if (stop_class != (uint32_t)GENESIS_STOP_UNSUPPORTED_Z80_EXECUTION &&
-      !(diagnostic >= (uint32_t)GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS && diagnostic <= (uint32_t)GENESIS_DIAG_Z80_UNSUPPORTED_ACKNOWLEDGE))
-    return 0;
+      !(diagnostic >= (uint32_t)GENESIS_DIAG_Z80_UNKNOWN_IMAGE && diagnostic <= (uint32_t)GENESIS_DIAG_Z80_UNSUPPORTED_ACKNOWLEDGE))
+    return 0; /* only the Z80's own outcomes (56-61); a main access without the bus or to an unmapped address stays main_device_unsupported */
   *detail = diagnostic;
   return 1;
 }

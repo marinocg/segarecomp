@@ -41,15 +41,14 @@ integration is an attach, not a second Z80, scheduler or discovery pipeline.
    (`sega-cd emit --main-z80 1`, exactly like the dynamic-image registry). The runtime core only knows `ScdZ80Ops`; without a registration nothing changes.
 2. **Image discovery rides the existing rounds.** A build pass records every Z80 image epoch it cannot activate (`z80_epoch_*` files; the Z80 is left
    unexecuted, and a pass is never a confirmed candidate while it recorded one); `segarecomp sega-cd build` registers them in the Genesis `Registry`, emits and
-   compiles them with the existing `emit_registry`, and the next round links them. Epochs a pass sees before it stops cost no round of their own: authentic Earthworm
-   Jim and Sonic CD keep their previous round counts (5/10 before the next frontiers).
+   compiles them with the existing `emit_registry`, and the next round links them. A pass that ends in another admission (epoch, extent, template) absorbs the Z80 rebuild; only a pass that would otherwise be the candidate costs one extra round. Measured: Sonic CD keeps its 10 rounds; Earthworm Jim's 11 rounds are the previous rounds plus the sub-side extents the backup-RAM input uncovers.
 3. **Banked window.** `GenesisZ80BankView` (new, optional) replaces the Genesis cartridge/work-RAM view: the Z80 reads the immutable BIOS image; every other 68000-bus
    target and every banked write is unsupported (a mutable 68000 bus cannot be read by a lazily synchronised follower without a causality rule this milestone does not define).
 4. **Fail-soft, like the Genesis (audio contract section 18).** A structural self-rewrite of Z80 code (ADR 0134), an unsupported Z80-side access (the new
-   `isolate_view_stops` option) or an uncompiled image in a build pass isolates (mutes) the Z80; the **main processor is never stopped by it** and reads sound RAM as it
+   `isolate_view_stops` option) or a Z80 isolated this way finishes the faulting instruction first (a read has returned $FF); an uncompiled image in a build pass quiesces the Z80 (`z80.state = unmodelled`; such a pass is never a confirmed candidate); the **main processor is never stopped by it** and reads sound RAM as it
    stands. The recorded deviation: whatever the isolated Z80 would have written is absent. The report says so (`z80.state = faulted`, fault diagnostic, epoch, tick).
 5. **Fail-closed where it matters.** An executable program (not a build pass) that meets an image epoch no pass saw stops `z80_unsupported`
-   (new stop class; the `address` field carries the typed Genesis diagnostic, 56 = `z80_unknown_image`); the Z80 never interprets a byte. A Z80 that has no attached
+   (new stop class; the `address` field carries the typed Genesis diagnostic, 56-61 only; 56 = `z80_unknown_image`; a main access without the bus or to an unmapped Z80-area address stays `main_device_unsupported`); the Z80 never interprets a byte. A Z80 that has no attached
    machine (hand-built programs, `--main-z80 0`) keeps the previous rule.
 6. **Not attached:** YM2612 and PSG (a YM read answers 0, writes are discarded, as the Genesis machine does without an audio attach). No sound is produced; adding the
    shared ymfm/SN76489 devices to the Sega CD machine is a separate, optional step.
@@ -68,7 +67,7 @@ integration is an attach, not a second Z80, scheduler or discovery pipeline.
 
 | Measure | Result |
 | --- | --- |
-| build | 11 rounds (5 extents), no final stop; cold-cache build 10 min wall, 1.2 GB peak; Sonic CD 10 rounds, identical program identity and report (except the new `z80` object) to M17 |
+| build | 11 rounds (5 extents), no final stop; cold-cache build 10 min wall, 1.2 GB peak; Sonic CD 10 rounds, identical program identity and report (except the new `z80` object) to M17; note the program identity names the 68000 programs only - `z80.registry_identity` in status.json names the Z80 images |
 | scripted discovery (T006) | a build whose passes replay START/RIGHT yields the **same** 11 rounds, extents and program identity: the no-input discovery already covers the whole path |
 | experiment A (no input) | SEGA logo (~frame 3,000), Interplay logo (~5,000), title with "PRESS START / OPTIONS" (~5,800-6,600), then without input the game loads "New Junk City" (~7,400) and plays its attract demo (self-playing, lives 3, health falling); 26,627 frames at 600 M instructions without a stop |
 | experiment B (START only; press at onset 6,000, hold 5) | the guest's TH-multiplexed pad reads show Start low (`$13` vs `$33`) for frames 6,000-6,004 (input log), the title is replaced, the loading screen appears ~1,100 frames earlier than in A, and the first level starts at ~7,000 with full health and the player idle (distinct from the demo) |
@@ -87,6 +86,8 @@ timing against hardware, or anything beyond frame 19,999 (the verified bounded w
 program reads; images discovered without an extra round; identical state/digest/device log for three scheduler partitions; a Z80 rewriting its own opcode is isolated
 and the main program continues; an unseen image is the typed `z80_unsupported`/56 stop; `--main-z80 0` keeps `main_device_unsupported` and no `z80` report object.
 The pre-existing Sega CD and Genesis Z80/audio suites run unchanged.
+
+Untested paths (recorded gap): Z80 banked BIOS reads, banked non-BIOS isolation (diagnostic 54), YM/PSG accesses, the `z80_epoch_bound_exceeded`/`z80_no_progress` failures and the viewer link are covered by code review only.
 
 ## 7. Consequences, limits and follow-on
 

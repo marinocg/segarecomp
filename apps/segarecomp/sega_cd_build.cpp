@@ -138,7 +138,7 @@ std::uint64_t process_token() {
 // An explicit list (runtime stop names, platforms/sega-cd/runtime/scd_machine.c): `instruction_unsupported`, `trace_unsupported` and the exception classes are CPU stops, not device stops.
 bool is_device_stop_class(const std::string &cls) {
   static const char *const kDevice[] = {"wordram_cell_image_unsupported", "wordram_dot_image_unsupported", "backup_ram_unsupported", "pcm_unsupported", "gate_array_register_unsupported",
-                                        "vdp_access_unsupported", "vdp_dma_unsupported", "cdc_destination_unsupported", "cdd_command_unsupported", "main_device_unsupported"};
+                                        "vdp_access_unsupported", "vdp_dma_unsupported", "cdc_destination_unsupported", "cdd_command_unsupported", "main_device_unsupported", "z80_unsupported"};
   for (const char *name : kDevice) if (cls == name) return true;
   return false;
 }
