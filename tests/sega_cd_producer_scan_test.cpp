@@ -403,6 +403,17 @@ int main() {
     b.tail = fragment_code(kDest);
     check(scan(b.finish(), none).fragments.empty(), "a callee that overwrites the produced bytes before the use is not forgotten at the return");
   }
+  {   // a loop inside a called routine that patches the source of a LATER proof (the routine's code is overwritten before its return)
+    Builder b; const std::size_t call_at = b.a.out.size(); b.a.w(0x4EB9U); b.a.l(0);
+    b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h); b.a.jsr(kDest); b.a.rts();
+    const std::uint32_t routine = b.a.here();
+    b.a.lea_abs(2, kFrag + 32U); b.a.movea_l(3, kFrag); b.a.move_w_imm(1, 23);
+    const std::uint32_t h2 = b.a.here(); b.a.copy_post('b', 2, 3); b.a.dbra(1, h2); b.a.rts();
+    for (int i = 0; i < 4; ++i) b.a.out[call_at + 2U + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(routine >> (24 - 8 * i));
+    b.tail = fragment_code(kDest);
+    check(scan(b.finish(), none).fragments.empty(), "a callee loop that patches a later proof's source is not forgotten at the return");
+  }
   {   // garbage / data in the boot images: no candidates, no fragment, no crash
     Bytes junk(0x300);
     for (std::size_t i = 0; i < junk.size(); ++i) junk[i] = static_cast<std::uint8_t>(i * 37U + 11U);

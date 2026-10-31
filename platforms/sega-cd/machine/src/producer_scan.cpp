@@ -152,6 +152,7 @@ class Walker {
   }
 
   void seed(std::uint32_t pc, const St &s) {
+    if (cur_pc_ >= image_base_ && cur_pc_ - image_base_ < image_.size()) from_image_.insert(pc);   // reached from the walked image itself (not from produced code)
     auto it = states_.find(pc);
     if (it == states_.end()) {
       states_.emplace(pc, s);
@@ -203,7 +204,10 @@ class Walker {
     St s = entry_state;
     cur_pc_ = pc;
     transfers_[pc].clear();
-    if (pc >= image_base_ && pc - image_base_ < image_.size() && (entry_state.ran & image_writers_) != 0U) return;   // the boot image was overwritten on this path: its old bytes are not the code that runs here
+    if (pc >= image_base_ && pc - image_base_ < image_.size() && (entry_state.ran & image_writers_) != 0U) {   // the boot image was overwritten on this path: its old bytes are not the code that runs here, and a call that reaches it may return having run these loops
+      if (from_image_.count(pc) != 0U) returned(entry_state.ran);   // the routine went on in code it had overwritten (a jump from produced code into the new image is not that)
+      return;
+    }
     if (try_loop(pc, s)) return;
     const auto op = decode(pc);
     if (!op) return;   // not decodable here (data, outside the walked code): the path ends
@@ -230,10 +234,7 @@ class Walker {
       call_continuation(next, entry_state.ran);
       return;
     }
-    if (op->kind == M68kIrKind::return_from_subroutine && (rts_ran_ | entry_state.ran) != rts_ran_) {   // loops that ran before a return may have run inside the call
-      rts_ran_ |= entry_state.ran;
-      for (const auto &[at, ran] : continuations_) { St after; after.ran = ran | rts_ran_; seed(at, after); }
-    }
+    if (op->kind == M68kIrKind::return_from_subroutine) returned(entry_state.ran);
     if (control.dynamic != M68kDynamicControlFamily::none || control.always_raises_exception) return;   // rts / rte / computed: the path ends
     for (const auto &succ : control.successors) {
       if (succ.kind == M68kControlSuccessorKind::fallthrough || succ.kind == M68kControlSuccessorKind::conditional_fallthrough) seed(succ.target & 0x00FFFFFFU, s);
@@ -253,6 +254,14 @@ class Walker {
     St after;
     after.ran = continuations_[next] | rts_ran_;
     seed(next, after);
+  }
+
+  // Loops that ran before a return may have run inside the call: every call continuation inherits them.
+  void returned(std::uint32_t ran) {
+    if ((ran & image_writers_) != 0U) image_overwritten_in_call_ = true;   // the code that follows a call may have been replaced inside it
+    if ((rts_ran_ | ran) == rts_ran_) return;
+    rts_ran_ |= ran;
+    for (const auto &[at, caller_ran] : continuations_) { St after; after.ran = caller_ran | rts_ran_; seed(at, after); }
   }
 
   void note_transfer(std::uint32_t target, std::uint32_t) { transfers_[cur_pc_].push_back(target); }
@@ -523,6 +532,7 @@ class Walker {
         Candidate &c = cands_[ci];
         if (c.refused) continue;
         if (!out_.complete) { refuse(c, ProducerRefusal::budget_exhausted); continue; }
+        if (image_overwritten_in_call_ && !continuations_.empty()) { refuse(c, ProducerRefusal::source_written); continue; }   // the image was overwritten inside a call whose return path is walked: the code after it is not the walked bytes
         if (inside_refused(c.head_pc)) { refuse(c, ProducerRefusal::not_executed); continue; }   // produced by code that is itself not proven
         const auto against = [&](const Range &w) {
           if (w.overlaps(image)) return std::optional<ProducerRefusal>(ProducerRefusal::source_written);   // a located store into the walked image (self-patching): its operands cannot be trusted
@@ -597,6 +607,8 @@ class Walker {
   std::map<std::uint32_t, std::vector<std::uint32_t>> transfers_;
   std::vector<LoopWrite> loop_writes_;
   std::set<std::uint32_t> counted_heads_;
+  std::set<std::uint32_t> from_image_;
+  bool image_overwritten_in_call_{};
   std::uint32_t rts_ran_{};
   std::uint32_t image_writers_{};   // loops whose destination overlaps the boot image
   std::map<std::uint32_t, std::uint32_t> continuations_;
