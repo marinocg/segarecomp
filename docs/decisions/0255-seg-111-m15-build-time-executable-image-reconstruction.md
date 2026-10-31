@@ -87,6 +87,41 @@ The Python builder (`tools/sega_cd_bios_build.py`) is untouched and remains a te
 - **B2** Negatives: corrupted payload; partial output; changed after capture; producer code changed; device-dependent output (`volatile`); output beyond RAM; arbitrary RAM bytes with no stream; different pass identity; runtime byte mismatch stops before retirement.
 - **R** The observer is inert when absent (final programs unchanged: identical generated C and program identity for every existing case; measured null-check cost); existing Sega CD tests and Sonic CD routes are unchanged and admit no spurious relocation.
 
-## 6. Results
+## 6. Results (T003-T006)
 
-Filled in by checkpoints T003-T007 (below).
+### Implementation as built (deviations from the plan above are stated here)
+
+- The stream table is `scd_reloc.c` (8 slots x 4 KiB, attached only for `--materialize-dir`). Pairing is exactly as in section 2: one data read per instruction instance with the same width and value, from a cell other than the one written. A retried instruction repeats the same read; that is one read. This is sound for the 68000 because only the MOVE family has one memory read of cell X and a memory write of cell Y != X whose value is the value read; every read-modify-write instruction reads and writes the same cell, and instructions with two memory reads (ABCD/SBCD/ADDX/SUBX/CMPM) are excluded by the "exactly one read" rule.
+- `derive_relocation` / `derive_produced_image` (`platforms/sega-cd/machine/src/relocation.cpp`) are shared by the CLI (`sega-cd derive-relocation`, used by the native build in a subprocess exactly like `resolve-source`) and tested through it. A copy additionally requires the mapped disc blocks to be in the delivered ledger (merged like the exact-source resolver, which now shares `merge_delivered`) and the ledger to be complete; the extent list is the build's admitted extents of the frontier processor (discovered, static, and the testing hook's manual ones).
+- **A stream that cannot be proven a copy is not refused, it is a produced image.** Equal bytes with no causal read (a register-staged copy, a computation) are admitted, when the stream is otherwise clean, as `produced:` - a claim about the producer, never a disc span, never an `extent:`. This keeps one rule for "bytes made by verified code" and removes the temptation to special-case copies.
+- The confirm step compares the full capture (streams included), not only its presence; `--reconstruction 0|1` (default 1) is the control that reproduces the previous build; `--keep-passes 1` keeps each round's frontier capture for diagnosis and the tests. Per-round program identities are recorded in `status.json` history; the report adds counts and refusal classes only.
+- Streams are single-writer-instruction by design: a producer made of many store instructions (unrolled generated code) overflows the table and is `stream_evicted`, which is the honest "insufficient evidence", not a reason to enlarge it.
+
+### Fixtures (project-authored; `tests/sega_cd_reconstruction_test.py`, 62 checks, plus `sega_cd_reloc_observer_test`, 24 checks)
+
+Relocation: a 24-byte fragment (below the resolver's floors) is explained and admitted automatically (`sub` PRG RAM, 4 rounds: epoch, module, fragment, final), runs natively, program identity identical across repeats and job counts; incomplete output stops typed at the first byte nobody produced; a fragment that also occurs elsewhere on the disc resolves to the copied one; a rewritten copy, a register-staged copy, many writers, Word RAM destination, over-long stream, device-fed producer and an unwritten target are each refused or reduced to a produced image with a typed class, and in every one the wrong instruction never retires. The derivation matrix mutates the frontier evidence one fact at a time (pass identity, extent list, processor, writer, clobbered, dropped, volatile, evicted, alignment, ledger overflow/empty/undelivered, malformed, live bytes, another disc, modified disc, ambiguous extents): 17 distinct typed refusals.
+
+Produced code: an XOR decoder and an add-constant decoder (two transformations, no per-transformation code) run by the sub's verified code produce bytes that occur on no disc span; they are admitted as `produced:`, compiled, run and reproduce the independent oracle marker. Corrupt payload: the corrupt output is what is produced and the program stops typed at the first instruction nobody can compile. Machine input: with another backup RAM the producer writes other bytes and the program stops with `code_bytes_mismatch` at the first byte of the produced image, before any of its instructions retires. Emitter: wrong pass identity, odd base/length, Word RAM base, oversized and unreadable images are refused.
+
+### Authentic Earthworm Jim SE (operator's disc and Model 1 BIOS; local, ephemeral; no manual input, no `--disc-image`, no per-title data)
+
+| arm | rounds | build (cold cache, 16 jobs) | peak memory | program | run | stop |
+|---|---|---|---|---|---|---|
+| M14 baseline, reproduced here (`--reconstruction 0`) | 6 | 79 s wall (warm cache) | 443 MiB | - | - | `entry_not_compiled` / `no_source`, main Work RAM |
+| M14 manual 20-byte extent (reported in ADR 0254) | 7 | 164 s | - | 47.5 MB | 5.7 s | `main_device_unsupported` |
+| **M15 Compatibility** | **8** | **192 s wall / 622 CPU-s** (warm cache, 4 jobs: 116 s wall / 121 CPU-s) | 559 MiB | 47.5 MB | 5.4 s, 28,533,639 instructions (main 13,197,846 / sub 15,335,793) | `main_device_unsupported` (Z80-window read) |
+| **M15 `--file-first structural`** | **8** | 240 s wall / 1,112 CPU-s | 614 MiB | 87.3 MB | same | the same |
+
+Admitted before the stop: 1 epoch, 78 operand templates (2 rounds), 2 boot-area extents, **1 relocated fragment (main Work RAM, 20 bytes, found by the observer)**, 1 stage extent (49,152 bytes in Compatibility; the 16,140-byte exact-copy prefix in file-first, as in M14); 6 images, 160 MB of C (Compatibility). The stage extent is found in the next round by the unchanged exact-source resolver. Round efficiency: the evidence is collected in the pass that stops at the frontier and resolved at the existing frontier - there is no discovery, provenance or transformation round. Of 8 rounds every one compiled new executable instructions (epoch, two template batches, the IP and SP extents, the fragment, the stage); the only addition relative to the previous build is the fragment round, which replaces M14's manual input. The stage cannot be admitted in the fragment's round because the bytes that make it reachable are copied only after the fragment executes; sequential admission is inherent to a fixed point that must compile code before it can run it, and was not found avoidable without weakening the executable-image authority. Main and sub retired counts, the stop, the device log and the frame digest equal M14's manual-extent run exactly; Compatibility and file-first equal each other in every machine-state field (only the dynamic-image counters and the program identity differ).
+
+Determinism: repeated Compatibility builds at 16 and 4 jobs give the identical program identity.
+
+Control and cost: `--reconstruction 0` reproduces the M14 `no_source` stop (6 rounds). The observer costs about 5% of pass run time when attached (5.7-5.9 s versus 5.4-5.5 s for the same final program); when absent the cost is a null-pointer test on the bus entry points (5.4-5.5 s for the new program versus 5.6-5.9 s for the M14 program, whose stop is the same). Capture artifacts: 2-10 KB `capture.json` per frontier round (+ the existing region window), 34 KiB of table memory, no durable address.
+
+### Sonic CD regression (same disc, Model 1 BIOS, no backup RAM input; Compatibility)
+
+`--reconstruction 0` and 1 give the **identical program identity, extents (8), 12 rounds and stop (`backup_ram_unsupported`)**: no relocated and no produced image is admitted, previously proven source bindings are unchanged, and the emitted output is byte-for-byte the same program.
+
+### Existing suites
+
+All 58 Sega CD CTest suites pass (BIOS profile, operand templates, extent discovery, file-first, dynamic binding, overlay/variants, source resolution, native build, M12 backup RAM, derived-image diagnostic).

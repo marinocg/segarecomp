@@ -63,6 +63,7 @@ struct Options {
   std::vector<std::string> emit_args;   // tests only: extra arguments forwarded to every `emit` (e.g. a manual `--disc-image` extent that shadows an address)
   std::string file_first;   // SEG-100 (ADR 0221): "" = off, else the candidate policy (all|structural) of the file-first dynamic images
   std::string file_first_max_bytes, file_first_max_offsets;
+  bool reconstruction = true;     // SEG-111 (ADR 0255): `--reconstruction 0` is the control (and the escape hatch): the build as it was before relocated-fragment and produced-image admission
   bool keep_passes = false;       // SEG-111 diagnostics/tests: keep each round's frontier capture (capture.json, region.bin) under <output>/passes/<round>/
   bool static_discovery = true;   // SEG-098-T002: `--static-discovery 0` is the control (and the escape hatch): the build as it was before the static producer
 };
@@ -219,7 +220,7 @@ class Builder {
         // build pass's bounded write streams - evidence collected during this very pass, resolved here, admitted through the existing machinery.
         std::string relocation_error;
         bool relocated = false;
-        if (!spec.extent && (spec.refusal == "no_source" || spec.refusal == "too_short")) {
+        if (o_.reconstruction && !spec.extent && (spec.refusal == "no_source" || spec.refusal == "too_short")) {
           const auto rel = relocate(cpu, program_identity, extents_.size() + static_extents_.size());
           if (rel.extent) {
             spec.extent = rel.extent;
@@ -891,6 +892,7 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--aot-model" && value == "gen2" && !o.aot_model_given) o.aot_model_given = true;
     else if (key == "--file-first" && (value == "all" || value == "structural")) o.file_first = value;   // SEG-100 (ADR 0221)
     else if (key == "--emit-arg") o.emit_args.push_back(value);   // tests only
+    else if (key == "--reconstruction" && (value == "0" || value == "1")) o.reconstruction = value == "1";
     else if (key == "--keep-passes" && (value == "0" || value == "1")) o.keep_passes = value == "1";   // SEG-111: diagnostics/tests
     else if (key == "--file-first-max-bytes") o.file_first_max_bytes = value;
     else if (key == "--file-first-max-offsets") o.file_first_max_offsets = value;
