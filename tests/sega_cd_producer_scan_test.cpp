@@ -164,6 +164,7 @@ int main() {
     b.tail = t.out;
     s = scan(b.finish(), none);
     check(s.fragments.size() == 2 && s.candidates == 2, "two copies from one immutable image: both proven");
+    if (s.fragments.size() != 2) { std::cout << "      got " << s.fragments.size() << " cand " << s.candidates << ":"; for (const auto &[k, n] : s.refusals) std::cout << " " << scd::producer_refusal_name(k) << "=" << n; std::cout << "\n"; }
   }
   {   // transforms
     const auto xform = [&](int op, unsigned key, bool chain) {
@@ -367,8 +368,8 @@ int main() {
     };
     none_proven(two_loops(kDest, 0xFFB000U, 23), scd::ProducerRefusal::destination_overwritten, "a refused loop (mutable source) that writes the produced bytes between production and use overwrites them");
     none_proven(two_loops(kDest + 4U, 0xFFB000U, 2), scd::ProducerRefusal::destination_overwritten, "a refused loop that writes part of the produced bytes");
-    none_proven(two_loops(kIp + 0x20U, kFrag + 0x40U, 7, true), scd::ProducerRefusal::source_written, "a loop that patches the boot image BEFORE the producer invalidates the proof (self-patching)");
-    check(two_loops(kIp + 0x20U, kFrag + 0x40U, 7, false).fragments.size() == 1, "a loop that patches the image only AFTER the producer has read it is no fact about that proof");
+    check(two_loops(kIp + 0x20U, kFrag + 0x40U, 7, true).fragments.empty(), "a loop that patches the boot image BEFORE the producer: nothing is proven from the overwritten image (self-patching)");
+    check(two_loops(kIp + 0x20U, kFrag + 0x40U, 7, false).fragments.empty(), "after a loop patches the image the old bytes are not walked: nothing downstream of it is proven (conservative)");
     check(two_loops(kDest + 0x400U, kFrag + 0x40U, 7).fragments.size() == 1, "an unrelated second loop does not disturb a proof");
   }
   {   // a producer inside a refused parent is not proven either
@@ -388,6 +389,19 @@ int main() {
     b.a.jsr(kDest); b.a.rts(); b.tail = fragment_code(kDest);
     const auto r = scan(b.finish(), none);
     check(r.fragments.size() == 1 && r.fragments[0].base == kDest && refused(r, scd::ProducerRefusal::destination_unsupported) == 0, "a byte loop from an odd source is not refused because of an earlier word loop");
+  }
+  {   // an overwriting loop inside a called routine between production and use is not lost by the call
+    Builder b; b.a.lea_abs(0, kFrag); b.a.movea_l(1, kDest); b.a.move_w_imm(0, 23);
+    const std::uint32_t h = b.a.here(); b.a.copy_post('b', 0, 1); b.a.dbra(0, h);
+    const std::size_t call_at = b.a.out.size();
+    b.a.w(0x4EB9U); b.a.l(0);                                    // JSR routine (patched below)
+    b.a.jsr(kDest); b.a.rts();
+    const std::uint32_t routine = b.a.here();
+    b.a.lea_abs(2, kFrag + 0x40U); b.a.movea_l(3, kDest + 4U); b.a.move_w_imm(1, 3);
+    const std::uint32_t h2 = b.a.here(); b.a.copy_post('b', 2, 3); b.a.dbra(1, h2); b.a.rts();
+    for (int i = 0; i < 4; ++i) b.a.out[call_at + 2U + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(routine >> (24 - 8 * i));
+    b.tail = fragment_code(kDest);
+    check(scan(b.finish(), none).fragments.empty(), "a callee that overwrites the produced bytes before the use is not forgotten at the return");
   }
   {   // garbage / data in the boot images: no candidates, no fragment, no crash
     Bytes junk(0x300);

@@ -203,6 +203,7 @@ class Walker {
     St s = entry_state;
     cur_pc_ = pc;
     transfers_[pc].clear();
+    if (pc >= image_base_ && pc - image_base_ < image_.size() && (entry_state.ran & image_writers_) != 0U) return;   // the boot image was overwritten on this path: its old bytes are not the code that runs here
     if (try_loop(pc, s)) return;
     const auto op = decode(pc);
     if (!op) return;   // not decodable here (data, outside the walked code): the path ends
@@ -220,14 +221,18 @@ class Walker {
         note_transfer(*target, entry_state.made);
         if (code_at(*target).size() != 0U) seed(*target, op->kind == M68kIrKind::call_general ? entry_state : s);
       }
-      if (op->kind == M68kIrKind::call_general) seed(next, St{});   // after a call every register is unknown
+      if (op->kind == M68kIrKind::call_general) call_continuation(next, entry_state.ran);
       return;
     }
     if (op->kind == M68kIrKind::bsr_call) {
       for (const auto &succ : control.successors)
         if (succ.kind == M68kControlSuccessorKind::call_target) { note_transfer(norm(succ.target), s.made); seed(norm(succ.target), s); }
-      seed(next, St{});
+      call_continuation(next, entry_state.ran);
       return;
+    }
+    if (op->kind == M68kIrKind::return_from_subroutine && (rts_ran_ | entry_state.ran) != rts_ran_) {   // loops that ran before a return may have run inside the call
+      rts_ran_ |= entry_state.ran;
+      for (const auto &[at, ran] : continuations_) { St after; after.ran = ran | rts_ran_; seed(at, after); }
     }
     if (control.dynamic != M68kDynamicControlFamily::none || control.always_raises_exception) return;   // rts / rte / computed: the path ends
     for (const auto &succ : control.successors) {
@@ -242,6 +247,14 @@ class Walker {
   // Constant control transfers are recorded per instruction (the last evaluation, i.e. the one under the final joined state wins); whether a transfer is
   // executable use of a produced range is decided at the fixed point (finish), from the `made` bits that survive every join: a path that skips the
   // producer clears the bit, so use that does not follow the producer on every path is never proof.
+  // After a call every register is unknown and any loop of a callee that returned may have run: the continuation's `ran` is the caller's plus the loops seen before any return.
+  void call_continuation(std::uint32_t next, std::uint32_t caller_ran) {
+    continuations_[next] |= caller_ran;
+    St after;
+    after.ran = continuations_[next] | rts_ran_;
+    seed(next, after);
+  }
+
   void note_transfer(std::uint32_t target, std::uint32_t) { transfers_[cur_pc_].push_back(target); }
 
   // Stores whose destination the walk knows are facts against a proof; stores through a pointer it does not know are counted.
@@ -360,7 +373,7 @@ class Walker {
       at += static_cast<std::uint32_t>(op->raw_bytes.size());
     }
     if (!dbra || body.empty() || dbra->condition != M68kCondition::never) return false;
-    ++out_.candidates;
+    if (counted_heads_.insert(pc).second) ++out_.candidates;   // loop idioms, once per head however often the fixed point re-evaluates it
     Candidate c;
     c.processor = processor_;
     c.head_pc = pc;
@@ -428,6 +441,7 @@ class Walker {
     }
     const std::uint32_t loop_id = id_it->second;
     post.ran |= (1U << loop_id);
+    if (c.destination.overlaps(Range{image_base_, image_base_ + static_cast<std::uint32_t>(image_.size())})) image_writers_ |= (1U << loop_id);
     // one candidate per loop head: a head re-evaluated with other operands makes the earlier proof unstable
     std::size_t index = cands_.size();
     for (std::size_t i = 0; i < cands_.size(); ++i) {
@@ -582,6 +596,10 @@ class Walker {
   std::uint32_t cur_pc_{};
   std::map<std::uint32_t, std::vector<std::uint32_t>> transfers_;
   std::vector<LoopWrite> loop_writes_;
+  std::set<std::uint32_t> counted_heads_;
+  std::uint32_t rts_ran_{};
+  std::uint32_t image_writers_{};   // loops whose destination overlaps the boot image
+  std::map<std::uint32_t, std::uint32_t> continuations_;
   std::map<std::uint32_t, std::uint32_t> loop_ids_;   // loop head -> bit
   std::set<std::uint32_t> overflow_heads_;
   ProducerRefusal last_refusal_{ProducerRefusal::loop_operand_unknown};
