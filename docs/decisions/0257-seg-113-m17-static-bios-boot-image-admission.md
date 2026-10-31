@@ -89,7 +89,7 @@ The authentic profile is keyed by the SHA-256 of the exact BIOS image. No BIOS b
 
 ## 7. Independent review
 
-REVIEW-PLACEHOLDER
+One independent adversarial review (HEAD 6822208): **PASS, no blocker, no major**; `agent_verify.py fast` with the static-boot, producer, reconstruction, native-build, extent-discovery and file-first suites: 200/200 passed. Minor findings, handled: (F1) ADR placeholders filled; (F2) the authentic rows' constants are exercised only locally (both BIOS images against both discs return the expected profile and images) - the exact-form logic itself is covered by fixture profile 3; the disagreement criterion has only the `sp_source` positive test; (F3) the criterion is a report, not a safety mechanism: it uses the largest boot-area end rather than the matching image's, and misses an observed extent covering only the middle of a misplaced image; (F4) the fixture tag is a **self-asserted selector**: a BIOS carrying it gets images proposed, which costs at most wasted rounds (bytes are recomputed from the disc and every instruction is guarded); the tag length is now checked in code.
 
 ## 8. Next investigation: the 48 KiB Earthworm Jim stage (not implemented)
 
@@ -101,4 +101,4 @@ So the stage depends on (1) a **loop-carried pointer** (a stride-aware abstract 
 
 ## 9. Decision
 
-DECISION-PLACEHOLDER
+**`STATIC_BOOT_GO`**, with the stated qualification: both authentic boot images (main boot area, sub boot program) are admitted before the first emission under a verified profile, class `conditional` (never `proven`), and **exactly two native build rounds are eliminated** in every measured configuration (Earthworm Jim 7 -> 5 in Compatibility and file-first; Sonic CD 12 -> 10 and 7 -> 5; both verified BIOS images), with identical final machine state, frame and device digests. Any other BIOS or header form keeps the execution-observed route. The Earthworm Jim stage stays an M15 fallback round (section 8). Exact-head CI is recorded in the SEG-113 record.

@@ -29,7 +29,7 @@ namespace {
 struct Profile {
   const char *name;
   const char *bios_sha256;      // exact image, or nullptr
-  const char *bios_tag;         // exactly kBiosTagBytes characters at kBiosTagOffset, or nullptr
+  const char *bios_tag;         // exactly kBiosTagBytes characters at kBiosTagOffset, or nullptr (a self-asserted selector for project fixtures, never authority)
   std::uint32_t ip_length;      // bytes the BIOS places from kBootIpTrackOffset at kIpBase
   bool header_exact;            // the disc's IP/SP descriptors must equal the verified form below
   std::uint32_t ip_descriptor_address, ip_descriptor_size, sp_descriptor_address, sp_descriptor_size;
@@ -50,7 +50,7 @@ constexpr Profile kProfiles[] = {
 const Profile *match_profile(const BiosImage &bios) {
   for (const auto &p : kProfiles) {
     if (p.bios_sha256 != nullptr && bios.sha256 == p.bios_sha256) return &p;
-    if (p.bios_tag != nullptr && bios.bytes.size() >= kBiosTagOffset + kBiosTagBytes &&
+    if (p.bios_tag != nullptr && std::strlen(p.bios_tag) == kBiosTagBytes && bios.bytes.size() >= kBiosTagOffset + kBiosTagBytes &&
         std::memcmp(bios.bytes.data() + kBiosTagOffset, p.bios_tag, kBiosTagBytes) == 0)
       return &p;
   }
