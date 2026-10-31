@@ -418,7 +418,7 @@ def stage_input(r, c, size):
     # mouse only: open from the card, Build, Play and More with the pointer
     def mouse(p):
         s = [f"platform_filter {FILTER[p]}", "frames 4", "mouse_card 0", "frames 3", "click", "frames 10", "expect page=details", f"expect detail={TITLE[p]}", "layout"]
-        s += ["mouse_action build", "frames 3", "click", "frames 6", "wait_idle", "frames 8", "expect build_outcome=ok", "layout", "mouse_action play", "frames 3", "click", "frames 6", "wait_play_end", "frames 10", "expect playing=0"]
+        s += ["mouse_action build", "frames 3", "click", "frames 6", "wait_idle", "wait_scd", "frames 8", "expect build_outcome=ok", "layout", "mouse_action play", "frames 3", "click", "frames 6", "wait_play_end", "frames 10", "expect playing=0"]
         return s + ["layout", "mouse_action more", "frames 3", "click", "frames 6", "menu_items", "key Escape", "frames 8", "expect page=library"]
     trace, parts = window(c, size, mouse)
     r.trace("mouse", trace)
@@ -438,7 +438,7 @@ def stage_input(r, c, size):
     r.trace("gamepad cancel", trace)
     script = list(pad_start)
     for p in PLATFORMS:
-        script += pad_open(p) + seek("build", "dpad_right", 3) + press("south") + ["wait_idle", "frames 20"] + expect(build_outcome="ok", can_play=1)
+        script += pad_open(p) + seek("build", "dpad_right", 3) + press("south") + ["wait_idle", "wait_scd", "frames 20"] + expect(build_outcome="ok", can_play=1)   # a Sega CD build is followed by an asynchronous verification; Play is not focusable until it finished
         script += seek("play", "dpad_left", 3) + press("south") + ["frames 10", "wait_play_end", "frames 10"] + expect(playing=0)
         script += seek("more", "dpad_right", 4) + press("south") + ["frames 6", "menu_items"] + press("east") + press("east") + expect(page="library")
     script.append("quit")
