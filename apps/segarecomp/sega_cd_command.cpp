@@ -25,6 +25,7 @@
 #include "segarecomp/disc.hpp"
 #include "segarecomp/iso9660.hpp"
 #include "segarecomp/machine/sega_cd/bios_profile.hpp"
+#include "segarecomp/machine/sega_cd/boot_contract.hpp"
 #include "segarecomp/machine/sega_cd/boot_images.hpp"
 #include "segarecomp/machine/sega_cd/file_candidates.hpp"
 #include "segarecomp/machine/sega_cd/file_first.hpp"
@@ -410,6 +411,7 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
     inputs.disc_images.push_back(std::move(spec));
   }
   if (application_entry) inputs.application_entry = *application_entry;
+  std::vector<std::tuple<scd::Processor, std::uint32_t, std::uint32_t>> static_boots;   // SEG-113: the static boot images admitted so far (duplicate / overlap refusal)
   for (const auto &text : admits) {
     auto f = split(text, ':');
     scd::Admission a;
@@ -454,6 +456,29 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
       // function of the disc) and refuses an extent that no proven module mapping contains.
       if (!static_extent_is_proven(disc, *proc, *off, *base, *len)) return bad("admit", "static_extent_unproven");
       if (const auto error = read_track1_extent(disc, *off, *len, a.bytes); !error.empty()) return bad("admit", error);
+    } else if (f.size() == 6U && f[0] == "static-boot") {  // SEG-113 (ADR 0257): static-boot:<cpu>:<track-1 offset>:<base>:<length>:<sha256>; recomputed from the BIOS and the disc, never trusted
+      const auto proc = parse_processor(f[1]);
+      const auto off = parse_u32(f[2]);
+      const auto base = parse_u32(f[3]);
+      const auto len = parse_u32(f[4]);
+      if (!proc || !off || !base || !len || *len == 0U) return bad("admit", "static_boot_syntax");
+      const auto contract = scd::derive_boot_contract(inputs.bios, disc);
+      if (contract.images.empty()) return bad("admit", "static_boot_unverified");   // no verified profile for this BIOS / header form: the eligibility check
+      const scd::BootContractImage *proven = nullptr;
+      for (const auto &image : contract.images)
+        if (image.processor == *proc && image.track_offset == *off && image.base == *base && image.length == *len && segarecomp::sha256_hex(image.bytes) == f[5]) proven = &image;
+      if (proven == nullptr) return bad("admit", "static_boot_unproven");
+      for (const auto &[prior_proc, prior_base, prior_len] : static_boots) {
+        if (prior_proc != *proc) continue;
+        if (prior_base == *base && prior_len == *len) return bad("admit", "static_boot_duplicate");
+        if (*base < prior_base + prior_len && prior_base < *base + *len) return bad("admit", "static_boot_overlap");
+      }
+      static_boots.emplace_back(*proc, *base, *len);
+      a.kind = scd::AdmissionKind::static_disc_extent;
+      a.processor = *proc;
+      a.address = *base;
+      a.track_offset = *off;
+      a.bytes = proven->bytes;
     } else if (f.size() == 5U && f[0] == "static-fragment") {  // SEG-112 (ADR 0256): static-fragment:<cpu>:<base>:<length>:<sha256>; the emitter recomputes the proof, it never trusts the coordinates
       const auto proc = parse_processor(f[1]);
       const auto base = parse_u32(f[2]);
@@ -883,6 +908,35 @@ int discover_producers_command(int argc, char **argv) {
   return 0;
 }
 
+// SEG-113 (ADR 0257): the static BIOS boot-image contract of a BIOS and a disc. Pure function of both; executes nothing.
+int boot_contract_command(int argc, char **argv) {
+  std::optional<std::string> cue, bios_path;
+  for (int i = 3; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--cue" && i + 1 < argc) cue = argv[++i];
+    else if (arg == "--bios" && i + 1 < argc) bios_path = argv[++i];
+    else { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+  }
+  if (!cue || !bios_path) { std::cerr << "usage:\n" << segarecomp_sega_cd_usage; return 2; }
+  const auto loaded = segarecomp::load_cue_disc(*cue);
+  if (!loaded.disc) { std::cout << "{\"ok\":false,\"error\":\"disc_" << segarecomp::disc_error_name(loaded.error) << "\"}\n"; return 8; }
+  const auto bios_bytes = read_file(*bios_path, scd::kBiosWindowBytes);
+  if (!bios_bytes) { std::cout << "{\"ok\":false,\"error\":\"bios_unreadable\"}\n"; return 8; }
+  const auto admitted = scd::admit_bios(*bios_bytes);
+  if (!admitted.bios) { std::cout << "{\"ok\":false,\"error\":\"" << scd::bios_error_name(admitted.error) << "\"}\n"; return 8; }
+  const auto contract = scd::derive_boot_contract(*admitted.bios, *loaded.disc);
+  std::cout << "{\"ok\":true,\"profile\":\"" << contract.profile << "\",\"refusal\":\"" << scd::boot_contract_refusal_name(contract.refusal) << "\",\"images\":[";
+  for (std::size_t i = 0; i < contract.images.size(); ++i) {
+    const auto &image = contract.images[i];
+    std::cout << (i ? "," : "") << "{\"cpu\":\"" << scd::processor_name(image.processor) << "\",\"class\":\"" << scd::boot_proof_name(image.proof) << "\",\"offset\":" << image.track_offset
+              << ",\"base\":" << image.base << ",\"length\":" << image.length << "}";
+  }
+  std::cout << "],\"admits\":[";
+  for (std::size_t i = 0; i < contract.images.size(); ++i) std::cout << (i ? "," : "") << "\"" << scd::static_boot_admission(contract.images[i]) << "\"";
+  std::cout << "]}\n";
+  return 0;
+}
+
 // SEG-097-T001 (ADR 0206): static discovery of disc-loaded modules. Pure function of the disc; executes nothing.
 int discover_modules_command(int argc, char **argv) {
   std::optional<std::string> cue, out_path, extents_path, windows_path;
@@ -1275,6 +1329,7 @@ int segarecomp_sega_cd_command(int argc, char **argv) {
   if (argc >= 3 && std::string_view(argv[2]) == "build") return segarecomp_sega_cd_build(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "resolve-source") return resolve_source_command(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "discover-producers") return discover_producers_command(argc, argv);
+  if (argc >= 3 && std::string_view(argv[2]) == "boot-contract") return boot_contract_command(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "derive-relocation") return derive_relocation_command(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "file-survey") return file_survey_command(argc, argv);
   if (argc >= 3 && std::string_view(argv[2]) == "discover-modules") return discover_modules_command(argc, argv);

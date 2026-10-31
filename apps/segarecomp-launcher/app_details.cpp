@@ -270,6 +270,12 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
   const float bh = ctx_.u(44.0F);
   ImGui::SetCursorScreenPos(ImVec2(x0, y));
   if (is_building) {
+    // SEG-113-T006: the Sega CD build repeats generate / compile / run in rounds; the round number tells the player the build is advancing, not restarting.
+    if (scd_build_ && scd_build_id_ == entry.id() && scd_build_->round() > 0) {
+      const std::string round_text = "Round " + std::to_string(scd_build_->round());
+      draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text2, ImVec2(x0, y), round_text.c_str());
+      y += ctx_.u(18.0F);
+    }
     float sx = x0;
     for (int i = 0; i < build_stage_count(entry.id()); ++i) {
       float cw = 0.0F;
