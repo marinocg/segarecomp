@@ -56,3 +56,34 @@ activation, a different image uploaded across two holds *while the previous imag
 the same program again with different irrelevant Z80 data (the same image, not a new one), an isolated Z80 re-armed by a registered image, identical state for scheduler
 partitions; the existing unregistered-image stop (case 14) is unchanged. Negative control (both options off): case 15 faults with `z80_code_mismatch` at the restart and
 runs the old image; case 16 stays isolated.
+
+## 4. Feasibility gate for structural variants (T003) - decision **STRUCTURAL_VARIANTS_GO** (bounded; no closure claim)
+
+State after T002 (authentic, local): the epochs of the disc select six distinct images, the BIOS driver's isolation (epoch 3) no longer ends the run (2 recoveries, a Z80 resumed over code the
+68000 had just rewritten is isolated once more, the game driver is bound at its epoch), and the **game driver executes ~1,000 Z80 cycles and then meets its own
+self-modification**: the first mismatch is a Z80-written byte (a RET) stored over the first byte of a `JR` that the driver executes next. This is fault B, now isolated from fault A.
+
+Evidence for the decision, each from the existing static spike (ADR 0135 tool, run on the epoch-6 snapshot; nothing executed):
+
+- The analyzer, given only the 8 KiB image and the reset vector, lists the actual first modification (the store site that wrote the observed byte, its exact destination and exact value) among 11 candidates over three destination bytes (values `RET`/`EXX`/`NOP`/`EX AF,AF'`; the family ADR 0134 observed). The other bytes the driver writes near it are word *variables* in dead space (`LD (nn),HL`), never code: they correctly are not candidates.
+- Completeness is still **not** established and is not claimed: of 481 stores 390 have an unknown destination (62 % because the CPU effect footprint lacks the unsupported forms, 37 % because
+  of a call return continuation, the rest memory-loaded pointers). A CPU-owned write footprint would remove the first class but not the second (interprocedural) nor pointers loaded from RAM, so it
+  **does not materially change the closure result**; none is built (it is a CPU-semantic extension this milestone must not make merely to improve a workload).
+- The emitter fact that makes a small mechanism possible: the broad Z80 AOT already emits **one exact entry for every address** of an image (not only for instruction starts of one decode), so a
+  one-byte change alters at most four existing entries (the starts covering that byte) and creates no entry that does not already exist. A variant is therefore **an additional compiled form of an
+  existing entry**, selected at that entry by the structural bytes it snapshots anyway; no dispatcher, no discovery loop, no new owner structure.
+
+Soundness argument (why closure is not a precondition). A variant form is the generation-time decode, through the unchanged frontend and lowering rows, of concrete bytes. Selecting it requires the live
+structural bytes of that instruction to equal those bytes, checked before any instruction effect, with the same boundary and rejection order as the current guard. Executing the form that matches the live
+bytes is exactly executing those bytes. A write the analysis did not list produces live bytes that match no compiled form and the entry fails with the existing `z80_code_mismatch` isolation (ADR 0134 /
+contract section 18), so an incomplete candidate set can only lose coverage, never produce a wrong execution. This **amends the revisit condition of ADR 0134** ("a measured closed set"): the NO-GO of
+ADR 0134 stays for *observation-driven* variant discovery (execute, fault, compile the observed form, repeat), which is not used; closure of the set is not claimed and `candidate_set_complete` stays false
+in every report. ADR 0135's finding (existence of exact-valued writes, not their completeness) is used exactly as stated.
+
+Pre-registered (before the mechanism existed; not adjusted after measurement): per image at most 32 alternative destination bytes (candidates, mirrors counted once) and at most 8 alternative forms per entry;
+exceeding either drops *all* alternatives of that image (deterministically, reported) - the image then behaves as today. Only candidate destinations of an exact destination and a finite
+value set are used. Alternatives are an input of the generated code and are part of the image's provenance and of the registry identity. Opt-in: the Sega CD build only; the Genesis build and its
+emission stay byte-identical.
+
+Stop rules: if the authentic driver then faults at a write that is not a candidate, or the mechanism needs a new dispatcher/owner structure, the result is recorded as `STRUCTURAL_VARIANTS_PARTIAL`
+and nothing is widened (no candidate is added from observation, no bound is raised for the workload).
