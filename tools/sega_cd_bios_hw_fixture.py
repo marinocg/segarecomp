@@ -50,13 +50,13 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sega_cd_fixture_disc as F  # noqa: E402  (the shared project-authored MC68000 encoder)
 
-ROM_SIZE = 0x1200
+ROM_SIZE = 0x1300
 MAIN = 0x0200
-FAULT = 0x0E00
-VINT_HANDLER = 0x0E40
-SUB_SRC = 0x0F00
-DMA_ROM = 0x1100
-ENTRY_ROM = 0x1180  # two NOPs: the code the handoff case places at the application entry $FF0000 (a verbatim ROM copy image)
+FAULT = 0x0F00
+VINT_HANDLER = 0x0F40
+SUB_SRC = 0x1000
+DMA_ROM = 0x1200
+ENTRY_ROM = 0x1280  # two NOPs: the code the handoff case places at the application entry $FF0000 (a verbatim ROM copy image)
 RESULT = 0xFFC000
 THUNK = 0xFFF900
 FRAMES = 0xFFC080
@@ -208,6 +208,32 @@ def z80_epochs_body(n):
     z80_upload(n, Z80_COUNT)                               # the same second image again; Z80 RAM $0100 holds a different (irrelevant) counter
     z80_bus(n, False)                                      # epoch 4: the same signature as epoch 2
     z80_read(n, 0x100, Z80_EPOCH_SLOTS + 6, "e4")
+
+
+# case 17 (ADR 0259): a driver that patches the first byte of a routine it calls - a JR (the routine runs) to a RET (it returns at once) and back - the
+# self-modification of the Sega driver family in miniature. The routine counts its runs at $0102; the patch value is a constant the static analysis proves.
+Z80_PATCHER = [
+    (0x00, bytes([0x31, 0x00, 0x20, 0xCD, 0x30, 0x00, 0x3E, 0xC9, 0x32, 0x30, 0x00, 0xCD, 0x30, 0x00, 0x3E, 0x18, 0x32, 0x30, 0x00, 0xCD, 0x30, 0x00,
+                  0x3E, 0x5A, 0x32, 0x00, 0x01, 0xC3, 0x60, 0x00])),     # LD SP,$2000 / CALL R / LD A,$C9 / LD (R),A / CALL R / LD A,$18 / LD (R),A / CALL R / marker / JP park
+    (0x30, bytes([0x18, 0x0E])),                                         # R: JR $0040 (patched to RET and back)
+    (0x40, bytes([0x3A, 0x02, 0x01, 0x3C, 0x32, 0x02, 0x01, 0xC9])),     # LD A,($0102) / INC A / LD ($0102),A / RET
+    (0x60, bytes([0x18, 0xFE])),                                         # park
+]
+Z80_PATCHER_RUNS = 0x66  # the routine's run count (result slot)
+
+
+def z80_patcher_body(n):
+    """Case 17: an upload of Z80_PATCHER, a delay, and the marker ($0100) and the routine's run count ($0102) read back."""
+    z80_bus(n, True)
+    n.move("w", F.imm(0x0000), F.absl(0xA11200))
+    n.move("w", F.imm(0x0100), F.absl(0xA11200))
+    for at, program in Z80_PATCHER:
+        z80_upload(n, program, at)
+    z80_bus(n, False)
+    z80_read(n, 0x100, Z80_EPOCH_SLOTS, "p1")
+    z80_bus(n, True)
+    n.move("b", F.absl(0xA00102), F.absl(RESULT + Z80_PATCHER_RUNS))
+    z80_bus(n, False)
 
 
 def z80_rearm_body(n):
@@ -418,6 +444,7 @@ def main_program(sub_len, layout):
                                n.move("b", F.absl(0xA00100), F.absl(RESULT + Z80_SLOT_AFTER)),
                                n.move("w", F.imm(0x0000), F.absl(0xA11100))))
     negative(m, 15, z80_epochs_body)                                                                # SEG-115: upload while running, restarts, an equivalent re-upload
+    negative(m, 17, z80_patcher_body)                                                               # SEG-115: self-patched routine entry (alternative forms)
     negative(m, 16, z80_rearm_body)                                                                 # SEG-115: an isolated Z80 is re-armed by the next image epoch
     negative(m, 14, lambda n: z80_run_and_read(n, Z80_OTHER, Z80_SLOT, "c"))                        # an image no build pass saw: the executable program stops
     # SEG-064-T004: the transfer to the application entry is the handoff, but only to an entry that is compiled and whose live bytes match

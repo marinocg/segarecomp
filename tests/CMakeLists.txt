@@ -1058,18 +1058,14 @@ add_executable(z80_capability_probe tools/z80_capability_probe.cpp)
 target_link_libraries(z80_capability_probe PRIVATE segarecomp::cpu_z80)
 segarecomp_enable_warnings(z80_capability_probe)
 # SEG-068-T008 (ADR 0135): static-first Z80 mutation-proof feasibility spike (research; no product target links it).
-add_library(z80_static_mutation STATIC tools/z80_static_mutation.cpp)
-target_include_directories(z80_static_mutation PUBLIC tools)
-target_link_libraries(z80_static_mutation PUBLIC segarecomp::cpu_z80 segarecomp::base)
-segarecomp_enable_warnings(z80_static_mutation)
 add_executable(z80_static_mutation_tests z80_static_mutation_test.cpp)
 target_include_directories(z80_static_mutation_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(z80_static_mutation_tests PRIVATE z80_static_mutation)
+target_link_libraries(z80_static_mutation_tests PRIVATE segarecomp::cpu_z80)
 segarecomp_enable_warnings(z80_static_mutation_tests)
 add_test(NAME z80_static_mutation_tests COMMAND z80_static_mutation_tests)
 set_property(TEST z80_static_mutation_tests APPEND PROPERTY LABELS full fast)
 add_executable(z80_static_mutation_cli tools/z80_static_mutation_cli.cpp)
-target_link_libraries(z80_static_mutation_cli PRIVATE z80_static_mutation)
+target_link_libraries(z80_static_mutation_cli PRIVATE segarecomp::cpu_z80)
 segarecomp_enable_warnings(z80_static_mutation_cli)
 # (the T003 stages also need the lowering probe, the image emitter and a C compiler; targets defined further below)
 add_test(NAME cpu_z80_dependency_test COMMAND ${Python3_EXECUTABLE}
@@ -1563,6 +1559,9 @@ add_test(NAME z80_conformance_oracle_test COMMAND ${Python3_EXECUTABLE}
 # SEG-032-T003 (ADR 0073): the RAM-backed Z80 guard and the Genesis materialized-image registry.
 add_test(NAME z80_live_guard_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/z80_live_guard_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-115 (ADR 0259): alternative compiled forms of RAM-backed entries, selected by the live structural bytes.
+add_test(NAME z80_live_alternatives_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_live_alternatives_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 # SEG-032-T012 (ADR 0073): shape-stable live operands of RAM-backed images (payload matrix, structural matrix, self-patching).
 add_test(NAME z80_live_operand_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/z80_live_operand_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
@@ -1614,10 +1613,10 @@ set_property(TEST packaging_sdl_check_test APPEND PROPERTY LABELS full fast)
 add_test(NAME packaging_windows_sdl_recipe_test COMMAND ${Python3_EXECUTABLE} -I
   ${CMAKE_CURRENT_SOURCE_DIR}/packaging_windows_sdl_recipe_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST packaging_windows_sdl_recipe_test APPEND PROPERTY LABELS full fast)
-set_property(TEST z80_live_guard_test z80_live_operand_test genesis_z80_images_test genesis_z80_view_test genesis_z80_machine_test genesis_audio_psg_test
+set_property(TEST z80_live_guard_test z80_live_alternatives_test z80_live_operand_test genesis_z80_images_test genesis_z80_view_test genesis_z80_machine_test genesis_audio_psg_test
   genesis_ym2612_device_test genesis_audio_ym_test APPEND PROPERTY LABELS full)
 set_property(TEST codegen_c11_z80_dependency_test z80_generated_pipeline_test z80_conformance_harness_test
-  z80_conformance_oracle_test z80_capability_ratchet_test z80_live_guard_test z80_live_operand_test genesis_z80_images_test genesis_z80_view_test genesis_z80_machine_test genesis_audio_psg_test
+  z80_conformance_oracle_test z80_capability_ratchet_test z80_live_guard_test z80_live_alternatives_test z80_live_operand_test genesis_z80_images_test genesis_z80_view_test genesis_z80_machine_test genesis_audio_psg_test
   genesis_ym2612_device_test genesis_audio_ym_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # The vendored YM2612 core objects (tools/genesis_ym2612_build.py) are content-addressed in the shared test cache: the first test of a build tree
 # that needs them compiles them, the others link the same objects.

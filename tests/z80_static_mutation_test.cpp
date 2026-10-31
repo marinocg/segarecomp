@@ -4,9 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "tools/z80_static_mutation.hpp"
+#include "segarecomp/cpu/z80/mutation.hpp"
 
-namespace zm = segarecomp::experiments::z80_mutation;
+namespace zm = segarecomp::cpu::z80::mutation;
 using Image = std::vector<std::uint8_t>;
 
 namespace {

@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include "segarecomp/codegen/c11/z80_executable_image.hpp"
+#include "segarecomp/cpu/z80/mutation.hpp"
 #include "segarecomp/sha256.hpp"
 
 namespace segarecomp::machine::genesis::z80 {
@@ -122,8 +123,11 @@ AddOutcome Registry::add(const Epoch& epoch, std::uint32_t& bound_ordinal) {
   return AddOutcome::added;
 }
 
-ExecutableImageSet executable_images(const Registry& registry, const ImageProducer& producer) {
+ExecutableImageSet executable_images(const Registry& registry, const ImageProducer& producer, bool structural_alternatives,
+                                     AlternativesSummary* summary) {
   ExecutableImageSet set;
+  std::vector<std::uint8_t> identity_bytes;
+  AlternativesSummary totals;
   set.cpu = CpuVariant::z80;
   set.platform_selector = true;  // every image maps $0000; the activation signature selects the live one (ADR 0073)
   for (const Image& image : registry.images()) {
@@ -140,8 +144,35 @@ ExecutableImageSet executable_images(const Registry& registry, const ImageProduc
     out.provenance.evidence.push_back({"signature_digest", to_hex(image.signature)});
     out.provenance.evidence.push_back({"ram_mirrors", std::to_string(kWindowBytes / kRamBytes)});
     out.verification = ImageVerification::structural;
+    if (structural_alternatives) {
+      const cpu::z80::mutation::AlternativeSet found =
+          cpu::z80::mutation::static_byte_alternatives(std::vector<std::uint8_t>(image.ram.begin(), image.ram.end()));
+      if (found.bound_exceeded) ++totals.images_over_bound;
+      if (!found.bytes.empty()) {
+        for (std::size_t mirror = 0; mirror < kWindowBytes / kRamBytes; ++mirror)
+          for (const cpu::z80::mutation::ByteAlternative& alt : found.bytes)
+            out.byte_alternatives.push_back({static_cast<std::uint32_t>(mirror * kRamBytes + alt.offset), alt.value});
+        ++totals.images_with;
+        totals.bytes += found.bytes.size();
+        out.provenance.evidence.push_back({"byte_alternatives", std::to_string(found.bytes.size())});
+        append_u32(identity_bytes, image.ordinal);
+        for (const cpu::z80::mutation::ByteAlternative& alt : found.bytes) {
+          append_u16(identity_bytes, alt.offset);
+          identity_bytes.push_back(alt.value);
+        }
+      } else if (found.bound_exceeded) {
+        out.provenance.evidence.push_back({"byte_alternatives", "dropped_over_bound"});
+      }
+    }
     set.images.push_back(std::move(out));
   }
+  if (structural_alternatives) {
+    std::vector<std::uint8_t> tagged;
+    append_tag(tagged, "segarecomp.genesis.z80.alternatives.v1");
+    tagged.insert(tagged.end(), identity_bytes.begin(), identity_bytes.end());
+    totals.identity = hash_bytes(tagged);
+  }
+  if (summary != nullptr) *summary = totals;
   return set;
 }
 
@@ -172,7 +203,7 @@ EmitOutcome emit_registry(const Registry& registry, const EmitRequest& request) 
     codegen::z80::EmitOptions options = request.codegen;
     options.directory = request.directory;
     options.stem = request.stem;
-    const ExecutableImageSet images = executable_images(registry);
+    const ExecutableImageSet images = executable_images(registry, {}, request.structural_alternatives, &outcome.alternatives);
     const std::vector<codegen::z80::ImageKind> kinds(images.images.size(), codegen::z80::ImageKind::banked);
     const codegen::z80::ImageProjection projected = codegen::z80::project_executable_images(images, kinds);
     if (!projected.ok()) {

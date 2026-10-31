@@ -481,6 +481,8 @@ def emit_image(tc, spec_text, workdir, stem="z80_image", list_owners=False):
             stats = {k: int(v) for k, v in (t.split("=") for t in line.split()[1:])}
         elif line.startswith("shape "):
             stats.update({"shape_" + k: int(v) for k, v in (t.split("=") for t in line.split()[1:])})
+        elif line.startswith("alternatives "):  # SEG-115: RAM-backed alternative forms
+            stats.update({"alt_" + k: int(v) for k, v in (t.split("=") for t in line.split()[1:])})
         elif line.startswith("admission "):  # SEG-057: selective emission only
             stats.update({"adm_" + k: int(v) for k, v in (t.split("=") for t in line.split()[1:])})
         elif line.startswith("owner "):

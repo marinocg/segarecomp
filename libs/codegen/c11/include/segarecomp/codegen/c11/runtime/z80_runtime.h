@@ -228,6 +228,33 @@ static inline int z80_live_guard(Z80Runtime *rt, uint16_t pc, unsigned length, u
   return 1;
 }
 
+/* Entries with alternative forms (SEG-115, ADR 0259). The live bytes are snapshotted once (`z80_live_fetch`, the same code_fetch and the same
+ * mismatch outcome as the guard above), then each compiled form tests them (`z80_live_is`: every structural byte equal) before any effect; the form
+ * that matches runs after the shared instruction-begin bookkeeping (`z80_live_enter`), none matching is the same typed mismatch (`z80_live_reject`:
+ * PC at the instruction start, no architectural state change, boundary state intact). Nothing here decodes a byte. */
+static inline int z80_live_fetch(Z80Runtime *rt, uint16_t pc, unsigned length) {
+  if (rt->host.code_fetch != NULL && rt->host.code_fetch(rt->host.context, pc, rt->live_code, length)) return 0;
+  rt->state.pc = pc;
+  rt->outcome = Z80_ERROR_CODE_MISMATCH;
+  return 1;
+}
+static inline int z80_live_is(const Z80Runtime *rt, unsigned length, unsigned structural, unsigned b0, unsigned b1, unsigned b2, unsigned b3) {
+  const uint8_t expected[4] = {(uint8_t)b0, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3};
+  unsigned i;
+  for (i = 0; i < length; ++i)
+    if (((structural >> i) & 1u) && rt->live_code[i] != expected[i]) return 0;
+  return 1;
+}
+static inline void z80_live_enter(Z80Runtime *rt, uint16_t pc) {
+  (void)pc;
+  Z80_OBSERVE_PC(rt, pc);
+  z80_owner_begin(rt);
+}
+static inline void z80_live_reject(Z80Runtime *rt, uint16_t pc) {
+  rt->state.pc = pc;
+  rt->outcome = Z80_ERROR_CODE_MISMATCH;
+}
+
 /* Prefix-lock owner entry (ADR 0058 section 5). Entered with in-prefix-run clear it runs the ordinary prologue and
  * then sets the bit. With the bit set (resume) interrupts are never considered; only the deadline is. */
 static inline int z80_lock_enter(Z80Runtime *rt, uint16_t pc) {

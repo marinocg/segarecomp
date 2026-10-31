@@ -10,6 +10,8 @@ Project-authored fixture (tools/sega_cd_bios_hw_fixture.py cases 12-14; hand-ass
   - case 15 (SEG-115, ADR 0259): image epochs - a program uploaded in two bus holds while the previous image runs and then restarted (empty hold of its own), a restart
     without change, and the same program again with different irrelevant Z80 data: the correct image is selected each time (no stale image, no new image for the repeat);
   - case 16 (SEG-115): an isolated Z80 is re-armed by the next image epoch and runs the registered image of a fresh reset (recoveries = 1);
+  - case 17 (SEG-115, ADR 0259): a Z80 program that patches the first byte of a routine it calls (JR -> RET -> JR) runs the form each live byte sequence is, because the static analysis
+    proved the store and the entry compiled the RET alternative; the control `--z80-alternatives 0` is the isolating mismatch;
   - control `--main-z80 0`: the previous rule - the read after the Z80 ran is the typed stop main_device_unsupported - and no `z80` object in the report.
 usage: sega_cd_main_z80_test.py <segarecomp> <c-compiler> <source-root>
 """
@@ -41,7 +43,7 @@ def build(tmp, disc, bios, name, case, *extra):
     out = tmp / name
     done = subprocess.run([SEGARECOMP, "sega-cd", "build", "--cue", str(disc / "disc.cue"), "--bios", str(bios), "--output", str(out), "--runtime-dir", str(ROOT), "--cc", CC,
                            "--budget", "3000000", "--jobs", "4", "--cache-dir", str(tmp / "cache"), "--pass-set", "main:d7=%d" % case,
-                           "--emit-arg", "--application-entry", "--emit-arg", "0xFF0000", "--emit-arg", "--copy-image", "--emit-arg", "main:0xFF0000:0x1180:4", *extra],
+                           "--emit-arg", "--application-entry", "--emit-arg", "0xFF0000", "--emit-arg", "--copy-image", "--emit-arg", "main:0xFF0000:0x1280:4", *extra],
                           capture_output=True, text=True, timeout=1800)
     status = out / "status.json"
     return done, (json.loads(status.read_text()) if status.exists() else None), out / ("program" + EXE)
@@ -113,6 +115,26 @@ def main():
         check(r16["result"] == "idle" and zr16["state"] == "modelled" and zr16["fault"] == 0 and zr16["recoveries"] == 1 and zr16["fault_epoch"] == 2,
               "case 16: the isolated Z80 is re-armed by the next epoch (%s)" % {k: v for k, v in zr16.items() if k != "epoch_log"})
         check(b16[EPOCH_SLOT] == 0x5A and b16[EPOCH_SLOT + 2] == 0x6B, "case 16: the first image ran before its isolation and the registered second image ran after the re-arm (%02x %02x)" % (b16[EPOCH_SLOT], b16[EPOCH_SLOT + 2]))
+
+        done, status, exe17 = build(tmp, disc, bios, "c17", 17)
+        check(done.returncode == 0 and status and status["status"] == "ok", "case 17: the build succeeds")
+        alt = status["z80"]["alternatives"]
+        check(alt["images"] >= 1 and alt["entries"] >= 1 and alt["forms"] >= 1 and alt["images_dropped"] == 0 and alt["complete"] is False,
+              "case 17: the static analysis proved a code write and an entry carries an alternative form (%s); completeness is never claimed" % (alt,))
+        r17 = run(exe17, disc, bios, 17)
+        b17 = bytes.fromhex(r17["result_block"])
+        z17 = r17["z80"]
+        check(r17["result"] == "idle" and z17["state"] == "modelled" and z17["fault"] == 0,
+              "case 17: the Z80 ran through the patched routine without isolation (%s)" % {k: v for k, v in z17.items() if k != "epoch_log"})
+        check(b17[EPOCH_SLOT] == 0x5A and b17[0x66] == 2,
+              "case 17: JR form, RET form, JR form again, each executed as what the live bytes are (marker %02x, routine runs %d)" % (b17[EPOCH_SLOT], b17[0x66]))
+        other = run(exe17, disc, bios, 17, "--slice-seed", 9)
+        check(other["z80"]["digest"] == z17["digest"] and other["result_block"] == r17["result_block"], "case 17: identical Z80 state and result for another scheduler partition")
+        done, status, exe17c = build(tmp, disc, bios, "c17-plain", 17, "--z80-alternatives", "0")
+        check(done.returncode == 0 and status and status["z80"]["alternatives"]["forms"] == 0, "case 17 control: --z80-alternatives 0 compiles no alternative form")
+        c17 = run(exe17c, disc, bios, 17)
+        check(c17["z80"]["state"] == "faulted" and c17["z80"]["fault"] == 57 and bytes.fromhex(c17["result_block"])[EPOCH_SLOT] != 0x5A,
+              "case 17 control: without alternatives the patched routine is the isolating structural mismatch")
 
         done, status, exe0 = build(tmp, disc, bios, "c12-off", 12, "--main-z80", "0")
         check(done.returncode == 0 and status and status["z80"]["enabled"] is False, "control: --main-z80 0 builds without the Z80")

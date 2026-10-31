@@ -77,6 +77,16 @@ struct ImageProvenance {
   friend bool operator==(const ImageProvenance &, const ImageProvenance &) = default;
 };
 
+// SEG-115 (ADR 0259): a statically justified alternative value of ONE byte of a `structural` image (a RAM-backed image whose bytes the
+// platform may change). The consumer may additionally compile the forms the image's instructions take when these bytes hold the alternative
+// values (any combination); a live form that matches no compiled form stays the verification failure. The list is evidence of possibility,
+// never a claim of completeness.
+struct ImageByteAlternative {
+  std::uint32_t offset = 0;
+  std::uint8_t value = 0;
+  friend bool operator==(const ImageByteAlternative &, const ImageByteAlternative &) = default;
+};
+
 struct ExecutableImage {
   ImageId id{};
   std::vector<std::uint8_t> bytes;              // owned bytes; empty when `source` is set
@@ -84,6 +94,7 @@ struct ExecutableImage {
   std::vector<ImageMapping> mappings;           // non-empty
   ImageProvenance provenance;
   ImageVerification verification = ImageVerification::none;
+  std::vector<ImageByteAlternative> byte_alternatives;  // only with `structural` verification; sorted by (offset, value), unique
   friend bool operator==(const ExecutableImage &, const ExecutableImage &) = default;
 };
 
@@ -110,6 +121,7 @@ enum class ImageValidationError : std::uint8_t {
   mapping_outside_bytes,       // first_offset + length exceeds the image bytes
   mapping_wraps,               // the execution range leaves the 32-bit execution space
   overlapping_mappings,        // two mappings of one image, or of two images without a platform selector, share an execution address
+  alternatives_invalid,        // byte alternatives without structural verification, outside the bytes, unsorted or duplicated
 };
 
 [[nodiscard]] constexpr std::string_view image_validation_error_name(ImageValidationError error) noexcept {
@@ -128,6 +140,7 @@ enum class ImageValidationError : std::uint8_t {
   case ImageValidationError::mapping_outside_bytes: return "mapping_outside_bytes";
   case ImageValidationError::mapping_wraps: return "mapping_wraps";
   case ImageValidationError::overlapping_mappings: return "overlapping_mappings";
+  case ImageValidationError::alternatives_invalid: return "alternatives_invalid";
   }
   return "unknown";
 }
@@ -199,6 +212,15 @@ struct ExecutionRange {
     }
     if (image.mappings.empty()) return fail(ImageValidationError::no_mappings);
     const std::size_t size = executable_image_size(image);
+    if (!image.byte_alternatives.empty() && image.verification != ImageVerification::structural) return fail(ImageValidationError::alternatives_invalid);
+    for (std::size_t k = 0; k < image.byte_alternatives.size(); ++k) {
+      const ImageByteAlternative &alt = image.byte_alternatives[k];
+      if (alt.offset >= size) return fail(ImageValidationError::alternatives_invalid);
+      if (k != 0U) {
+        const ImageByteAlternative &prev = image.byte_alternatives[k - 1U];
+        if (alt.offset < prev.offset || (alt.offset == prev.offset && alt.value <= prev.value)) return fail(ImageValidationError::alternatives_invalid);
+      }
+    }
     const std::size_t first_range = ranges.size();
     for (const ImageMapping &mapping : image.mappings) {
       if (mapping.length == 0U) return fail(ImageValidationError::empty_mapping);

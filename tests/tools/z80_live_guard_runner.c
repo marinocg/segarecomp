@@ -107,6 +107,8 @@ static void apply_init(Z80State *s, const char *arg) {
 static int run_one(int argc, char **argv) {
   Z80Runtime rt;
   unsigned long max_steps, mutate_after = (unsigned long)-1, mutate_offset = 0, mutate_xor = 0, int_after = (unsigned long)-1;
+  unsigned long extra_after[3], extra_offset[3], extra_xor[3]; /* SEG-115: further `mutate-after` options (the first one drives `repair`) */
+  int extra_count = 0, extra_done[3] = {0, 0, 0};
   int matcher = 1, i;
   unsigned long step;
   unsigned long start_pc = 0, dump_address = 0, dump_length = 0;
@@ -128,7 +130,10 @@ static int run_one(int argc, char **argv) {
   }
   max_steps = strtoul(argv[3], NULL, 10);
   for (i = 4; i < argc; ++i) {
-    if (strcmp(argv[i], "mutate-after") == 0 && i + 3 < argc) {
+    if (strcmp(argv[i], "mutate-after") == 0 && i + 3 < argc && mutate_after != (unsigned long)-1 && extra_count < 3) {
+      extra_after[extra_count] = strtoul(argv[i + 1], NULL, 10); extra_offset[extra_count] = strtoul(argv[i + 2], NULL, 16);
+      extra_xor[extra_count] = strtoul(argv[i + 3], NULL, 16); ++extra_count; i += 3;
+    } else if (strcmp(argv[i], "mutate-after") == 0 && i + 3 < argc) {
       mutate_after = strtoul(argv[i + 1], NULL, 10); mutate_offset = strtoul(argv[i + 2], NULL, 16);
       mutate_xor = strtoul(argv[i + 3], NULL, 16); i += 3;
     } else if (strcmp(argv[i], "int-after") == 0 && i + 1 < argc) {
@@ -166,6 +171,11 @@ static int run_one(int argc, char **argv) {
     if (step == mutate_after && !mutate_done) {
       ram[mutate_offset & 0x1FFFu] ^= (uint8_t)mutate_xor;
       mutate_done = 1;
+    }
+    {
+      int k;
+      for (k = 0; k < extra_count; ++k)
+        if (step == extra_after[k] && !extra_done[k]) { ram[extra_offset[k] & 0x1FFFu] ^= (uint8_t)extra_xor[k]; extra_done[k] = 1; }
     }
     if (step == int_after) { rt.state.int_line = 1u; rt.state.iff1 = 1u; rt.state.im = 1u; int_active = 1; }
     outcome = z80_run(&rt, rt.state.cycles + 1u);

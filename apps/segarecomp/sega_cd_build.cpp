@@ -11,6 +11,7 @@
 #include "sega_cd_command.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -67,6 +68,7 @@ struct Options {
   std::string file_first;   // SEG-100 (ADR 0221): "" = off, else the candidate policy (all|structural) of the file-first dynamic images
   std::string file_first_max_bytes, file_first_max_offsets;
   bool boot_fixtures = false;     // SEG-113, tests only: `--boot-fixture-profiles 1` lets a tagged project fixture BIOS match (an assumed, unverified contract); never set by the product
+  bool z80_alternatives = true;   // SEG-115 (ADR 0259): `--z80-alternatives 0` is the control: the plain RAM guard (no alternative forms)
   bool main_z80 = true;           // SEG-114 (ADR 0258): `--main-z80 0` is the control: no main-side Z80 (the legacy rule: a main read of the Z80 area after it ran is a typed stop)
   bool static_boot = true;        // SEG-113 (ADR 0257): `--static-boot 0` is the control: the boot images are discovered by execution (M16 behaviour)
   bool static_producers = true;   // SEG-112 (ADR 0256): `--static-producers 0` is the control: no generation-time producer proofs (the M15 observed fallback only)
@@ -667,8 +669,11 @@ class Builder {
     fs::remove_all(dir, ec);
     gz80::EmitRequest request;
     request.directory = dir;
+    request.structural_alternatives = o_.z80_alternatives;  // SEG-115 (ADR 0259): the statically justified alternative forms of the driver code
     const gz80::EmitOutcome emitted = gz80::emit_registry(z80_registry_, request);
     if (!emitted.ok()) return Failure{"z80", "the Z80 image code could not be generated"};
+    z80_alternatives_ = emitted.alternatives;
+    z80_alt_stats_ = {emitted.stats.alternative_entries, emitted.stats.alternative_forms, emitted.stats.alternative_images_dropped};
     std::vector<fs::path> sources;
     {
       std::ifstream list(dir / "genesis_z80.units");
@@ -715,7 +720,11 @@ class Builder {
     if (!o_.main_z80) return "{\"enabled\":false}";
     std::string digests;
     for (const auto &image : z80_registry_.images()) digests += gz80::to_hex(image.content);
-    return "{\"enabled\":true,\"images\":" + std::to_string(z80_registry_.images().size()) + ",\"registry_identity\":\"" + sha_of(digests) + "\"}";
+    digests += gz80::to_hex(z80_alternatives_.identity);  // the alternative forms are part of the generated code (ADR 0259)
+    return "{\"enabled\":true,\"images\":" + std::to_string(z80_registry_.images().size()) + ",\"registry_identity\":\"" + sha_of(digests) +
+           "\",\"alternatives\":{\"images\":" + std::to_string(z80_alternatives_.images_with) + ",\"bytes\":" + std::to_string(z80_alternatives_.bytes) +
+           ",\"images_over_bound\":" + std::to_string(z80_alternatives_.images_over_bound) + ",\"entries\":" + std::to_string(z80_alt_stats_[0]) +
+           ",\"forms\":" + std::to_string(z80_alt_stats_[1]) + ",\"images_dropped\":" + std::to_string(z80_alt_stats_[2]) + ",\"complete\":false}}";
   }
 
   std::optional<Failure> pass_run(const fs::path &exe, const fs::path &dir, std::string &report, std::string &capture) {
@@ -1086,6 +1095,8 @@ class Builder {
   std::string aot_policy_json_;   // SEG-097-T003: the last emission's machine-readable aot_policy object (status.json)
   std::vector<fs::path> unit_sources_, unit_objects_, runtime_objects_;
   gz80::Registry z80_registry_;           // SEG-114: the Z80 images discovered so far (first-activation order)
+  gz80::AlternativesSummary z80_alternatives_;  // SEG-115 (ADR 0259): the alternative forms of the last emission
+  std::array<std::size_t, 3> z80_alt_stats_{};  // entries with alternatives, forms added, images dropped by the per-entry bound
   std::vector<fs::path> z80_objects_;     // SEG-114: the generated image units of the current round
 };
 
@@ -1127,6 +1138,7 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--boot-fixture-profiles" && (value == "0" || value == "1")) o.boot_fixtures = value == "1";
     else if (key == "--static-boot" && (value == "0" || value == "1")) o.static_boot = value == "1";
     else if (key == "--static-producers" && (value == "0" || value == "1")) o.static_producers = value == "1";
+    else if (key == "--z80-alternatives" && (value == "0" || value == "1")) o.z80_alternatives = value == "1";   // SEG-115 (ADR 0259)
     else if (key == "--main-z80" && (value == "0" || value == "1")) o.main_z80 = value == "1";   // SEG-114 (ADR 0258)
     else if (key == "--reconstruction" && (value == "0" || value == "1")) o.reconstruction = value == "1";
     else if (key == "--keep-passes" && (value == "0" || value == "1")) o.keep_passes = value == "1";   // SEG-111: diagnostics/tests

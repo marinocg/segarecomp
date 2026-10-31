@@ -40,6 +40,14 @@ struct CodeWindow {
   std::uint32_t length = 0x10000;
 };
 
+// SEG-115 (ADR 0259): a statically justified alternative value of one byte of a RAM-backed image (image offset, value).
+struct CodeAlternative {
+  std::uint32_t offset = 0;
+  std::uint8_t value = 0;
+};
+// Alternative forms one entry may carry besides its snapshot form; an image whose alternatives would exceed it loses ALL of them (fail closed).
+inline constexpr std::size_t kMaxAlternativeFormsPerEntry = 8;
+
 struct CodeImage {
   std::uint32_t identity = 0;  // unique, <= 0xFFFF (the high half of the 32-bit entry key)
   ImageKind kind = ImageKind::banked;
@@ -53,6 +61,11 @@ struct CodeImage {
   // exactly one window (the platform reports which image is bound, so no direct binding or in-group chaining exists), and
   // emits endless DD/FD runs as typed `mutable_code` stubs. Immutable images (false) emit exactly as before.
   bool live_bytes = false;
+  // RAM-backed images only: finite alternative byte values (sorted by (offset, value), unique, offsets inside the bytes). Besides the form the
+  // snapshot decodes to, every entry that covers an alternative byte also compiles the forms that the existing frontend decodes from each
+  // combination of the alternatives, selecting among them by the live structural bytes before any effect. Mirrors are explicit (the producer lists
+  // each offset). Empty = the plain guard, byte for byte.
+  std::vector<CodeAlternative> alternatives;
 };
 
 struct ImageSet {
@@ -137,6 +150,10 @@ struct EmitStats {
   std::size_t admitted_offsets = 0;  // offsets named by the plan
   std::size_t omitted_offsets = 0;   // exposed offsets the plan omitted
   std::size_t omitted_ranges = 0;    // maximal runs of omitted offsets (size of the generated rejection table)
+  // SEG-115: entries with alternative forms, the forms they add, and images whose alternatives were dropped for exceeding the per-entry bound.
+  std::size_t alternative_entries = 0;
+  std::size_t alternative_forms = 0;
+  std::size_t alternative_images_dropped = 0;
 };
 
 struct EmitResult {

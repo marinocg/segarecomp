@@ -1,5 +1,5 @@
 // SEG-068-T008 (ADR 0135): D0 static Z80 code-write discovery. See the header. No guest instruction is executed.
-#include "z80_static_mutation.hpp"
+#include "segarecomp/cpu/z80/mutation.hpp"
 
 #include <algorithm>
 #include <array>
@@ -11,7 +11,7 @@
 #include "segarecomp/cpu/z80/decode.hpp"
 #include "segarecomp/cpu/z80/effects.hpp"
 
-namespace segarecomp::experiments::z80_mutation {
+namespace segarecomp::cpu::z80::mutation {
 namespace {
 
 using namespace segarecomp::cpu::z80;
@@ -518,4 +518,31 @@ std::string format_report(const Report& r, bool detail) {
   return out;
 }
 
-}  // namespace segarecomp::experiments::z80_mutation
+AlternativeSet static_byte_alternatives(const std::vector<std::uint8_t>& ram, const AlternativeLimits& limits) {
+  AlternativeSet out;
+  if (ram.size() != kRamBytes) return out;
+  const Report report = analyze(ram, hardware_roots());
+  std::set<std::pair<std::uint16_t, std::uint8_t>> pairs;
+  std::set<std::uint16_t> destinations;
+  for (const Candidate& c : report.candidates) {
+    if (c.changed_starts == 0) continue;  // the write does not alter any decoded start (e.g. the byte already holds the value)
+    ++out.candidates;
+    for (unsigned b = 0; b < c.width; ++b) {
+      const std::uint32_t dest = (static_cast<std::uint32_t>(c.destination) + b) & 0xFFFFU;
+      if (dest >= kCodeWindow) continue;  // outside the mirrored RAM window: not RAM-backed code
+      const auto offset = static_cast<std::uint16_t>(dest & (kRamBytes - 1));
+      const auto value = static_cast<std::uint8_t>(c.value >> (8U * b));
+      if (value == ram[offset]) continue;
+      pairs.emplace(offset, value);
+      destinations.insert(offset);
+    }
+  }
+  if (destinations.size() > limits.max_destination_bytes) {
+    out.bound_exceeded = true;
+    return out;
+  }
+  for (const auto& [offset, value] : pairs) out.bytes.push_back(ByteAlternative{offset, value});
+  return out;
+}
+
+}  // namespace segarecomp::cpu::z80::mutation
