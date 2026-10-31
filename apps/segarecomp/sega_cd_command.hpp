@@ -42,7 +42,7 @@ inline constexpr const char *segarecomp_sega_cd_usage =
     "  segarecomp sega-cd discover-producers --cue <disc.cue>\n"
     "      (SEG-112, ADR 0256: recognise counted-copy / byte-transform executable-image producers in the disc's boot images before any code is generated;\n"
     "       prints the proven fragments and aggregate counters; exit 0, 8 on a disc without a usable boot area)\n"
-    "  segarecomp sega-cd boot-contract --cue <disc.cue> --bios <image>\n"
+    "  segarecomp sega-cd boot-contract --cue <disc.cue> --bios <image> [--boot-fixture-profiles 1 (tests only: honour a project fixture BIOS tag; assumed, never verified)]\n"
     "      (SEG-113, ADR 0257: the executable boot images the BIOS places in RAM before the application runs, derived from a verified BIOS profile and the\n"
     "       disc alone - the main boot area and the sub boot program - as `static-boot:` admissions; an unverified BIOS or header form yields none, never a guess;\n"
     "       prints the profile, the refusal and the images; exit 0, 8 on an unreadable disc or BIOS)\n"

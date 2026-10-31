@@ -55,10 +55,9 @@ and `build.log`. The launcher's **Build** button runs exactly this command with 
 as *No program yet (can be built)*.
 
 **Static boot images (SEG-113, ADR 0257).** Before the first emission the build asks `segarecomp sega-cd boot-contract` which executable boot images the BIOS places in RAM (the main
-boot area and the sub boot program). It answers only for a *verified profile* - an exact BIOS image and the header form its placement was observed with, or a project-authored fixture
-BIOS - and then the images are in the first generated program (`static-boot:` admissions, recomputed by the emitter, still byte-guarded at every instruction), so the two rounds that would
+boot area and the sub boot program). It answers only for a *verified profile* - an exact BIOS image and the header form its placement was observed with, (`verified_authentic`; project fixture BIOS tags are honoured only with the test-only `--boot-fixture-profiles 1` and are labelled `test_assumed_fixture`) - and then the images are in the first generated program (`static-boot:` admissions, recomputed by the emitter, still byte-guarded at every instruction), so the two rounds that would
 only discover them by running disappear. For any other BIOS or header form nothing is offered and the images are discovered by execution as before (`--static-boot 0` forces that).
-`status.json` reports `static_boot` (state, profile, per-image class `conditional`, `disagreements`).
+`status.json` reports `static_boot` (state, `authority`, profile, per-image class `conditional`, `contradictions`, `internal_sources`, `later_overlays`, `unresolved_mismatches`).
 
 The build does not invent controller input: it covers the path the console takes from reset with no button pressed. A title that waits for START at its
 first menu is therefore built up to that menu; the program stops with a typed stop (`entry_not_compiled`) when play reaches code the build never ran.

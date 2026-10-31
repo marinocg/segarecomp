@@ -16,6 +16,7 @@ Cases (every case builds its own BIOS and disc):
   ip_trailing   the BIOS places only the first $2000 bytes of the IP span (a partial placement; the rest of the work RAM is stale)
   sp_shifted    the descriptor names $1000 but the BIOS places the SP read from $1800 at $6200 (the observed extent overlaps the static SP image only in part)
   stage_overlay after the IP, the BIOS loads a later stage (disc sectors 60..61, outside the boot area) over the same Work RAM span and calls it (an unrelated later overlay)
+  ip_selfcopy   after the call the BIOS copies 0x44 bytes of the placed IP to another place inside the same Work RAM span and calls it (an internal source: relocation, not a contradiction)
   no_profile    the same BIOS and disc without the profile tag (an unverified BIOS: nothing is offered)
   form_ok       tag 3: a profile verified only for one header form; the disc has that form (offered)
   form_other    tag 3 with another SP descriptor (the BIOS still places it): the profile does not apply (header_not_verified), execution-observed admission
@@ -34,7 +35,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sega_cd_fixture_disc as F  # noqa: E402
 import sega_cd_bios_loader_fixture as L  # noqa: E402
 
-CASES = ("contract", "ip_short", "sp_long", "sp_moved", "sp_source", "ip_patched", "ip_trailing", "no_profile", "form_ok", "form_other", "sp_shifted", "stage_overlay")
+CASES = ("contract", "ip_short", "sp_long", "sp_moved", "sp_source", "ip_patched", "ip_trailing", "no_profile", "form_ok", "form_other", "sp_shifted", "stage_overlay", "ip_selfcopy")
 TAGS = {1: b"SEGA BOOT-CONTRACT FIXTURE 1    ", 2: b"SEGA BOOT-CONTRACT FIXTURE 2    ", 3: b"SEGA BOOT-CONTRACT FIXTURE 3    "}
 IP_BASE = 0xFF0000
 SP_PRG = 0x006000
@@ -157,6 +158,14 @@ def build(case, out):
     if case == "ip_patched":
         m.move("b", F.imm(0x5A), F.absl(IP_BASE + PATCH_AT))
     m.jsr(F.absl(IP_BASE))
+    if case == "ip_selfcopy":
+        m.move("l", F.imm(IP_BASE + 0x48), F.a(0))
+        m.move("l", F.imm(IP_BASE + 0x1000), F.a(1))
+        m.move("w", F.imm(0x44 // 2 - 1), F.d(0))
+        m.label("copy_self")
+        m.move("w", ("inc", 0), ("inc", 1))
+        m.dbra(0, "copy_self")
+        m.jsr(F.absl(IP_BASE + 0x1000))
     if case == "stage_overlay":
         m.move("l", F.imm(WORD_RAM_MAIN_VIEW + 0x30000), F.a(0))
         m.move("l", F.imm(IP_BASE), F.a(1))

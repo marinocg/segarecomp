@@ -858,8 +858,10 @@ class Builder {
   }
 
   // What an execution-observed extent says about a statically admitted boot image (same CPU, destination ranges overlapping, even partially):
-  //  - source inside the boot area (the system area / the image's own source span) but at a different source-to-destination offset: **contradiction** - the exact-copy resolver
-  //    found the live bytes in boot-area bytes mapped differently from the contract;
+  //  - source in the boot area, outside this image's own source span, mapped over the image's destination: **contradiction** - the exact-copy resolver found the live bytes in
+  //    boot-area bytes the contract does not place there;
+  //  - source wholly inside this image's own source span but at a different source-to-destination offset: **internal source** (a copy of the image's own bytes elsewhere in its
+  //    span, or a shifted placement - undecidable without write tracing); not a contradiction;
   //  - source elsewhere on the disc: a **later overlay** (not a statement about the boot mapping);
   //  - destination not overlapping: unrelated.
   // A live mismatch for which the resolver found no source at all is neither: it is counted as an *unresolved mismatch* and never as a BIOS disagreement.
@@ -878,7 +880,9 @@ class Builder {
       const std::uint64_t boot_area_end = std::max<std::uint64_t>(goff + glen, kSystemAreaBytes);
       const bool from_boot_area = offset < boot_area_end;
       const bool same_mapping = static_cast<std::int64_t>(offset) - static_cast<std::int64_t>(base) == static_cast<std::int64_t>(goff) - static_cast<std::int64_t>(gbase);
-      if (from_boot_area && !same_mapping) ++boot_contradictions_;
+      const bool inside_own_source = offset >= goff && offset + length <= goff + glen;   // bytes the contract already places in this image: a copy of them elsewhere is a relocation or a shifted placement, which this observation cannot tell apart
+      if (from_boot_area && !same_mapping && inside_own_source) ++boot_internal_;
+      else if (from_boot_area && !same_mapping) ++boot_contradictions_;
       else if (!from_boot_area) ++boot_overlays_;
     }
   }
@@ -907,7 +911,7 @@ class Builder {
       const auto colon = boot_classes_[i].find(':');
       out << (i ? "," : "") << "{\"cpu\":\"" << boot_classes_[i].substr(0, colon) << "\",\"class\":\"" << boot_classes_[i].substr(colon + 1U) << "\"}";
     }
-    out << "],\"contradictions\":" << boot_contradictions_ << ",\"later_overlays\":" << boot_overlays_ << ",\"unresolved_mismatches\":" << boot_unresolved_ << "}";
+    out << "],\"contradictions\":" << boot_contradictions_ << ",\"internal_sources\":" << boot_internal_ << ",\"later_overlays\":" << boot_overlays_ << ",\"unresolved_mismatches\":" << boot_unresolved_ << "}";
     return out.str();
   }
 
@@ -986,7 +990,7 @@ class Builder {
   std::vector<std::string> boot_extents_, boot_classes_;   // SEG-113: "<cpu>:<offset>:<base>:<length>" / "<cpu>:<class>" of the statically admitted boot images
   std::string boot_state_ = "not_run", boot_profile_, boot_refusal_ = "none";
   std::string boot_authority_;
-  unsigned boot_contradictions_ = 0, boot_overlays_ = 0, boot_unresolved_ = 0;
+  unsigned boot_contradictions_ = 0, boot_internal_ = 0, boot_overlays_ = 0, boot_unresolved_ = 0;
   std::string static_status_ = "not_run";
   bool static_joined_ = false;
   std::map<std::string, unsigned> static_refusals_;

@@ -192,6 +192,12 @@ def main():
         sb = st["static_boot"]
         check(st["status"] == "ok" and sb["contradictions"] == 1 and sb["later_overlays"] == 0 and len(st["extents"]) == 1 and markers(rep) == ("a001", "b002") and rep["result"] == "idle",
               "sp_shifted: an observed extent overlapping the static SP image only in part, from boot-area bytes mapped differently, is a contradiction (the base is not covered)")
+        c = cases["ip_selfcopy"] = Case(tmp, "ip_selfcopy")
+        out, st = c.build("static")
+        rep = c.run(out)
+        sb = st["static_boot"]
+        check(st["status"] == "ok" and sb["contradictions"] == 0 and sb["internal_sources"] == 1 and sb["unresolved_mismatches"] == 0 and markers(rep) == ("a001", "b002"),
+              "ip_selfcopy: a copy of the image's own bytes elsewhere inside its span is an internal source (a relocation), not a contradiction")
         c = cases["stage_overlay"] = Case(tmp, "stage_overlay")
         out, st = c.build("static")
         rep = c.run(out)
