@@ -40,7 +40,8 @@ namespace {
 
 constexpr unsigned kMaxEpochs = 4, kMaxTemplates = 64, kMaxTemplateSlots = 256, kMaxRunSlots = 128, kMaxExtents = 64;   // SEG-098-T004 (ADR 0213): 16 -> 64, measured
 constexpr unsigned kMaxStaticExtents = 48;   // SEG-098-T002 (12), T004 (48, ADR 0213): of the 64 disc-image slots (shared with the resolved extents); more is the typed static_extent_bound_exceeded, admitting none
-constexpr unsigned kMaxRounds = 1 + kMaxEpochs + kMaxTemplates + kMaxExtents;
+constexpr unsigned kMaxProduced = 8;   // SEG-111 (ADR 0255): produced-code images admitted from build passes (kMaxProducedImages of the emitter)
+constexpr unsigned kMaxRounds = 1 + kMaxEpochs + kMaxTemplates + kMaxExtents + kMaxProduced;
 constexpr const char *kCacheVersion = "segarecomp.sega_cd_build.objects.v1";
 constexpr const char *kViewerFoundation[] = {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c", "sv_host.c", "sv_pages.c", "sv_draw.c"};
 
@@ -62,6 +63,7 @@ struct Options {
   std::vector<std::string> emit_args;   // tests only: extra arguments forwarded to every `emit` (e.g. a manual `--disc-image` extent that shadows an address)
   std::string file_first;   // SEG-100 (ADR 0221): "" = off, else the candidate policy (all|structural) of the file-first dynamic images
   std::string file_first_max_bytes, file_first_max_offsets;
+  bool keep_passes = false;       // SEG-111 diagnostics/tests: keep each round's frontier capture (capture.json, region.bin) under <output>/passes/<round>/
   bool static_discovery = true;   // SEG-098-T002: `--static-discovery 0` is the control (and the escape hatch): the build as it was before the static producer
 };
 
@@ -177,7 +179,12 @@ class Builder {
       if (const auto f = pass_run(exe, o_.output / "pass", report, capture_text)) return fail(*f);
       stage("pass", "done");
       std::map<std::string, std::string> entry{{"round", std::to_string(round)}};
-      history_ += (history_.empty() ? "" : ",") + std::string("{\"round\":") + std::to_string(round) + ",\"stop\":\"" + stop_class(report) + "\"";
+      history_ += (history_.empty() ? "" : ",") + std::string("{\"round\":") + std::to_string(round) + ",\"program_identity\":\"" + program_identity + "\",\"stop\":\"" + stop_class(report) + "\"";
+      if (o_.keep_passes) {
+        const fs::path keep = o_.output / "passes" / std::to_string(round);
+        fs::create_directories(keep, ec);
+        for (const char *name : {"capture.json", "region.bin"}) fs::copy_file(o_.output / "pass" / name, keep / name, fs::copy_options::overwrite_existing, ec);
+      }
       const bool have_capture = !capture_text.empty();
       const std::string kind = have_capture ? raw_value(capture_text, "kind").value_or("") : "";
       if (have_capture && raw_value(capture_text, "pass_identity").value_or("") != program_identity) return fail({"pass", "the build pass reports another program identity"});
@@ -208,13 +215,35 @@ class Builder {
           spec.extent.reset();
           spec.refusal = "uncompiled_entry_in_admitted_extent";
         }
+        // SEG-111 (ADR 0255): only when the exact-source resolver found nothing (its 32/64-byte floors are unchanged), explain the frontier from the
+        // build pass's bounded write streams - evidence collected during this very pass, resolved here, admitted through the existing machinery.
+        std::string relocation_error;
+        bool relocated = false;
+        if (!spec.extent && (spec.refusal == "no_source" || spec.refusal == "too_short")) {
+          const auto rel = relocate(cpu, program_identity, extents_.size() + static_extents_.size());
+          if (rel.extent) {
+            spec.extent = rel.extent;
+            relocated = true;
+          } else if (rel.produced) {
+            produced_.push_back(rel.produced_key);
+            admits.push_back("produced:" + program_identity + ":" + *rel.produced);
+            ++produced_count_;
+            history_ += ",\"admitted\":\"produced\"}";
+            continue;
+          } else {
+            relocation_error = rel.error;
+            ++relocation_refusals_[rel.error];
+          }
+        }
         if (spec.extent) {
           extents_.push_back(*spec.extent);
           admits.push_back("extent:" + program_identity + ":" + *spec.extent);
-          history_ += ",\"admitted\":\"extent\"}";
+          if (relocated) ++relocated_count_;
+          history_ += relocated ? ",\"admitted\":\"relocated_extent\"}" : ",\"admitted\":\"extent\"}";
           continue;
         }
-        frontier_ = "{\"cpu\":\"" + cpu + "\",\"pc\":" + std::to_string(pc) + ",\"refusal\":\"" + spec.refusal + "\"}";
+        frontier_ = "{\"cpu\":\"" + cpu + "\",\"pc\":" + std::to_string(pc) + ",\"refusal\":\"" + spec.refusal + "\"" +
+                    (relocation_error.empty() ? std::string() : ",\"relocation\":\"" + relocation_error + "\"") + "}";
         history_ += ",\"frontier\":" + frontier_;
       }
       history_ += "}";
@@ -222,7 +251,7 @@ class Builder {
       stage("confirm", "running");
       std::string confirm_report, confirm_capture;
       if (const auto f = pass_run(exe, o_.output / "confirm", confirm_report, confirm_capture)) return fail(*f);
-      if (confirm_report != report || confirm_capture.empty() != capture_text.empty()) return fail({"confirm", "materialization_nondeterministic"});
+      if (confirm_report != report || confirm_capture != capture_text) return fail({"confirm", "materialization_nondeterministic"});   // SEG-111: the evidence itself (streams included) must reproduce, not only its presence
       stage("confirm", "done");
       return finish(exe, program_identity, report, round + 1U);
     }
@@ -259,6 +288,7 @@ class Builder {
         << ",\"program_identity\":\"" << program_identity << "\",\"bios_sha256\":\"" << bios_sha_ << "\",\"rounds\":" << rounds << ",\"extents\":[";
     for (std::size_t i = 0; i < extents_.size(); ++i) out << (i ? "," : "") << "\"" << extents_[i] << "\"";
     out << "],\"static_extents\":" << static_extents_.size() << ",\"static_discovery\":" << static_json_ << ",\"inventory\":" << inventory_json(report) << ",\"final_stop\":" << final_stop_json(report) << ",\"aot_policy\":" << (aot_policy_json_.empty() ? "null" : aot_policy_json_) << ",\"file_first\":" << (file_first_json_.empty() ? "null" : file_first_json_) << ",\"frontier\":" << (frontier_.empty() ? "null" : frontier_)
+        << ",\"reconstruction\":" << reconstruction_json()
         << ",\"result\":\"" << raw_value(report, "result").value_or("") << "\",\"stop\":\"" << stop_class(report)
         << "\",\"viewer\":" << (o_.viewer ? "true" : "false") << ",\"history\":[" << history_ << "]}\n";
     std::ofstream(o_.output / "status.json", std::ios::binary | std::ios::trunc) << out.str();
@@ -746,12 +776,76 @@ class Builder {
     return {std::nullopt, raw_value(text, "error").value_or("resolver_failed")};
   }
 
+  // ---- SEG-111 (ADR 0255): executable images made by verified guest code ----
+  struct Relocation {
+    std::optional<std::string> extent;     // "<cpu>:<offset>:<base>:<length>" (an exact copy of admitted disc bytes)
+    std::optional<std::string> produced;   // "<cpu>:<base>:<snapshot path>" (bytes a verified producer computed)
+    std::string produced_key, error;
+  };
+
+  // The admitted disc extents a copy's source may lie in: discovered, static and the testing hook's manual ones.
+  std::vector<std::string> source_extents() const {
+    std::vector<std::string> out = extents_;
+    out.insert(out.end(), static_extents_.begin(), static_extents_.end());
+    for (std::size_t i = 0; i + 1U < o_.emit_args.size(); ++i) {
+      if (o_.emit_args[i] != "--disc-image") continue;
+      out.push_back(o_.emit_args[i + 1U]);
+    }
+    return out;
+  }
+
+  Relocation relocate(const std::string &cpu, const std::string &program_identity, std::size_t have) {
+    Relocation out;
+    if (have >= kMaxExtents) { out.error = "extent_bound_exceeded"; return out; }
+    const fs::path snapshot = o_.output / ("produced" + std::to_string(produced_count_) + ".bin");
+    std::vector<std::string> cmd{self_, "sega-cd", "derive-relocation", "--cue", o_.cue.string(), "--capture", (o_.output / "pass" / "capture.json").string(), "--region",
+                                 (o_.output / "pass" / "region.bin").string(), "--pass", program_identity, "--snapshot", snapshot.string()};
+    for (const auto &e : source_extents()) { cmd.push_back("--extent"); cmd.push_back(e); }
+    const fs::path result = o_.output / "relocate.json";
+    std::error_code rm_ec;
+    fs::remove(result, rm_ec);   // never read an earlier round's answer
+    fs::remove(snapshot, rm_ec);
+    if (run_process(cmd, result, {}, 600) < 0) { out.error = "relocation_failed"; return out; }
+    const std::string text = read_text(result);
+    if (raw_value(text, "ok").value_or("") != "true") { out.error = raw_value(text, "error").value_or("relocation_failed"); return out; }
+    const std::string base = raw_value(text, "base").value_or("0"), length = raw_value(text, "length").value_or("0");
+    if (raw_value(text, "class").value_or("") == "copy") {
+      const std::string spec = cpu + ":" + raw_value(text, "offset").value_or("0") + ":" + base + ":" + length;
+      const auto known = source_extents();
+      if (std::find(known.begin(), known.end(), spec) != known.end()) { out.error = "no_progress"; return out; }   // the same extent proposed again explains nothing new
+      out.extent = spec;
+      return out;
+    }
+    if (produced_.size() >= kMaxProduced) { out.error = "produced_bound_exceeded"; return out; }
+    const std::string bytes = read_text(snapshot, 4096U);
+    std::string key = cpu + ":" + base + ":";
+    for (const char ch : bytes) { static const char *const digits = "0123456789abcdef"; const auto c = static_cast<unsigned char>(ch); key.push_back(digits[c >> 4U]); key.push_back(digits[c & 15U]); }
+    if (bytes.empty() || std::find(produced_.begin(), produced_.end(), key) != produced_.end()) { out.error = "no_progress"; return out; }
+    out.produced = cpu + ":" + base + ":" + snapshot.string();
+    out.produced_key = key;
+    return out;
+  }
+
+  // Counts and classes only (never an address, offset or byte).
+  std::string reconstruction_json() const {
+    std::string out = "{\"relocated_extents\":" + std::to_string(relocated_count_) + ",\"produced_images\":" + std::to_string(produced_count_) + ",\"refusals\":{";
+    bool first = true;
+    for (const auto &[error, n] : relocation_refusals_) {
+      out += std::string(first ? "" : ",") + "\"" + error + "\":" + std::to_string(n);
+      first = false;
+    }
+    return out + "}}";
+  }
+
   Options o_;
   std::string self_, bios_sha_, key_base_, history_, frontier_;
   std::ofstream log_;
   std::mutex log_mutex_;
   std::atomic<unsigned> counter_{0};
   std::vector<std::string> extents_, static_extents_, static_windows_;
+  std::vector<std::string> produced_;   // SEG-111: the bytes of every produced image admitted so far (hex, keyed by processor and base)
+  unsigned relocated_count_ = 0, produced_count_ = 0;
+  std::map<std::string, unsigned> relocation_refusals_;
   std::string static_status_ = "not_run";
   bool static_joined_ = false;
   std::map<std::string, unsigned> static_refusals_;
@@ -797,6 +891,7 @@ int segarecomp_sega_cd_build(int argc, char **argv) {
     else if (key == "--aot-model" && value == "gen2" && !o.aot_model_given) o.aot_model_given = true;
     else if (key == "--file-first" && (value == "all" || value == "structural")) o.file_first = value;   // SEG-100 (ADR 0221)
     else if (key == "--emit-arg") o.emit_args.push_back(value);   // tests only
+    else if (key == "--keep-passes" && (value == "0" || value == "1")) o.keep_passes = value == "1";   // SEG-111: diagnostics/tests
     else if (key == "--file-first-max-bytes") o.file_first_max_bytes = value;
     else if (key == "--file-first-max-offsets") o.file_first_max_offsets = value;
     else if (key == "--aot-scope" && value == "all-images") o.aot_all_images = true;   // historical M1 scope, evidence only

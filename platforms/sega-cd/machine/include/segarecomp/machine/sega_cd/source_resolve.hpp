@@ -72,6 +72,9 @@ struct ResolveResult {
   ResolveError error{ResolveError::none};
 };
 
+// The delivered ranges clipped to track 1, sorted and merged into contiguous runs (shared by every consumer of the ledger).
+[[nodiscard]] std::vector<LedgerRange> merge_delivered(const DiscTrack &track, const std::vector<LedgerRange> &delivered);
+
 [[nodiscard]] ResolveResult resolve_source(const DiscImage &disc, const SourceEvidence &evidence);
 
 }  // namespace segarecomp::machine::sega_cd

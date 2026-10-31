@@ -10,6 +10,7 @@ add_library(segarecomp_machine_sega_cd
   src/bios_profile.cpp
   src/epoch_recipe.cpp
   src/source_resolve.cpp
+  src/relocation.cpp
   src/dynamic_body.cpp
   src/file_candidates.cpp
   src/dynamic_images.cpp
