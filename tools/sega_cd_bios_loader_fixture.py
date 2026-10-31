@@ -18,7 +18,17 @@ Cases (each builds its own image and disc):
                is not the source's, so the exact-copy resolver (32-byte anchor, 64-byte run) refuses it
   relocated_short       only the first 16 bytes of the fragment are copied (incomplete output)
   relocated_patched     one instruction byte of the copy is rewritten after the copy (the copy is no longer the source)
-  relocated_duplicate   the fragment occurs twice in the delivered blocks (ambiguous source)
+  relocated_duplicate   the fragment occurs twice in the delivered blocks (the causal read, not the byte pattern, identifies the source)
+  decoded      SEG-111 (ADR 0255): the sub's own (verified) code XOR-decodes 64 loaded bytes from Word RAM into PRG RAM and runs them there (a produced image: the bytes are on no disc span)
+  decoded_add  the same with a different transformation (add a constant), to show the mechanism does not depend on the operation
+  decoded_partial   only the first 32 of the 64 bytes are decoded before the jump (incomplete output)
+  decoded_patched   one decoded byte is rewritten after decoding (the stream no longer owns the final bytes)
+  decoded_volatile  the decoder takes its key from a Gate Array register read inside the loop (input the build cannot account for)
+  decoded_large     8,192 decoded bytes (over the 4 KiB bound)
+  decoded_input     the decoder's key is read once from the machine's backup RAM before the loop (input the build declares; a run with other backup RAM produces other bytes)
+  relocated_staged  the fragment is copied through a data register (read and write are different instructions): equal bytes, no causal read
+  decoded_corrupt   one byte of the encoded payload is flipped on the disc (the producer is intact, its input is not)
+  jump_unwritten    the sub jumps into PRG RAM nothing ever wrote (no producer at all)
 
 usage: sega_cd_bios_loader_fixture.py build --case NAME --out DIR   ->   DIR/bios.bin, DIR/disc/{disc.cue,track01.bin}, DIR/expected.json
 """
@@ -48,7 +58,9 @@ TRACK1_SECTORS = 160
 FIRST_MODULE_LBA = 40
 BLOB_AT = 0x1000
 CASES = ("direct", "siblings", "duplicates", "overlay", "late_flip", "generated", "transformed", "undelivered",
-         "relocated", "relocated_short", "relocated_patched", "relocated_duplicate")
+         "relocated", "relocated_short", "relocated_patched", "relocated_duplicate",
+         "decoded", "decoded_add", "decoded_partial", "decoded_patched", "decoded_volatile", "decoded_large", "decoded_corrupt", "decoded_input", "relocated_staged", "jump_unwritten")
+PRODUCED_LEN = 64
 RELOC_DEST = 0x030000       # SEG-110: where the relocated fragment runs (sub PRG RAM)
 RELOC_AT = 0x200            # the fragment's offset inside its module
 RELOC_LEN = 24
@@ -68,7 +80,7 @@ def module_bytes(base, mark_addr, mark, nops, size, seed, flip_after=None):
     return code + bytes(rng.randrange(256) for _ in range(size - len(code)))
 
 
-def relocating_module(base, seed, copy_len=RELOC_LEN, patch=False, duplicate=False):
+def relocating_module(base, seed, copy_len=RELOC_LEN, patch=False, duplicate=False, staged=False):
     """SEG-110: a module whose driver copies a position-independent-by-construction fragment (absolute operands only) from its own image to RELOC_DEST and runs it."""
     frag = F.Asm(RELOC_DEST)
     frag.move("w", F.imm(0xA001), F.absl(MARK))
@@ -82,7 +94,11 @@ def relocating_module(base, seed, copy_len=RELOC_LEN, patch=False, duplicate=Fal
     d.move("l", F.imm(RELOC_DEST), F.a(1))
     d.move("w", F.imm(copy_len // 2 - 1), F.d(1))
     d.label("cp")
-    d.move("w", ("inc", 0), ("inc", 1))
+    if staged:      # SEG-111: through a data register: the read and the write are different instructions, so the pair cannot be established
+        d.move("w", ("inc", 0), F.d(2))
+        d.move("w", F.d(2), ("inc", 1))
+    else:
+        d.move("w", ("inc", 0), ("inc", 1))
     d.dbra(1, "cp")
     if patch:
         d.move("b", F.imm(0x02), F.absl(RELOC_DEST + 3))      # the immediate's low byte: 0xA001 -> 0xA002
@@ -190,6 +206,28 @@ class Sub:
         s.move("b", ("ind", 0), F.d(2))
         s.immop("eor", "b", key, F.d(2))
         s.move("b", F.d(2), ("inc", 0))
+        s.dbra(1, p + "x")
+
+    def decode_to(self, source, destination, length, key, op="eor", volatile=False, key_from_backup=False):
+        """SEG-111: decode `length` bytes from `source` into `destination` with a byte loop (move.b (A0)+,D2 / op / move.b D2,(A1)+): the store is a computed value, not a copy."""
+        s = self.s
+        p = "T%d_" % self.n
+        self.n += 1
+        s.move("l", F.imm(source), F.a(0))
+        s.move("l", F.imm(destination), F.a(1))
+        s.move("w", F.imm(length - 1), F.d(1))
+        if key_from_backup:
+            s.move("b", F.absl(0xE0001), F.d(3))            # SEG-111: the key is machine input (internal backup RAM cell 0), read once before the loop
+        s.label(p + "x")
+        s.move("b", ("inc", 0), F.d(2))
+        if key_from_backup:
+            s.eor("b", 3, F.d(2))
+        elif volatile:
+            s.move("b", F.absl(GA_SUB + 0x0F), F.d(3))      # a device register read inside the production window
+            s.eor("b", 3, F.d(2))
+        else:
+            s.immop(op, "b", key, F.d(2))
+        s.move("b", F.d(2), ("inc", 1))
         s.dbra(1, p + "x")
 
     def generate(self, address, words):
@@ -322,8 +360,32 @@ def plan(case):
         sub.copy_blob(BLOB_AT, 0x030000, 2048)    # the blob rides in the sub image at a fixed place
         sub.run(0x030000)
         truth["markers"] = [0xA001, 0, 0]
+    elif case.startswith("decoded") or case == "jump_unwritten":
+        size = 8192 if case == "decoded_large" else 2048
+        data = module_bytes(RELOC_DEST, MARK, 0xA001, 24, size, 31)
+        op = "add" if case == "decoded_add" else "eor"
+        key = 0x01 if case == "decoded_volatile" else 0x5A if op == "eor" else 0x11
+        count = size if case == "decoded_large" else PRODUCED_LEN
+        enc = bytearray(data)
+        for i in range(count):
+            enc[i] = (data[i] ^ key) & 0xFF if op == "eor" else (data[i] - key) & 0xFF
+        if case == "decoded_corrupt":
+            enc[PRODUCED_LEN // 2] ^= 0x04                    # flipped on the disc
+        put(L, bytes(enc))
+        sub.load(L, size // 2048, 0)
+        if case == "jump_unwritten":
+            sub.run(0x040000)
+        else:
+            sub.decode_to(WORD_RAM_SUB, RELOC_DEST, 32 if case == "decoded_partial" else count, key, op, volatile=case == "decoded_volatile", key_from_backup=case == "decoded_input")
+            if case == "decoded_patched":
+                sub.flip(RELOC_DEST + 3, 0x02)               # the marker's immediate low byte: 0xA001 -> 0xA002, after the decode
+            sub.run(RELOC_DEST)
+        truth["extents"] = []
+        truth["produced"] = {"processor": "sub", "base": RELOC_DEST, "length": 32 if case == "decoded_partial" else count, "plain": data[:count].hex()}
+        truth["backup_ram_key"] = 0x5A if case == "decoded_input" else None
+        truth["markers"] = [0 if case in ("decoded_patched", "jump_unwritten", "decoded_volatile", "decoded_large") else 0xA001, 0, 0]
     elif case.startswith("relocated"):
-        data, fragment = relocating_module(base, 21, copy_len=16 if case == "relocated_short" else RELOC_LEN, patch=case == "relocated_patched", duplicate=case == "relocated_duplicate")
+        data, fragment = relocating_module(base, 21, copy_len=16 if case == "relocated_short" else RELOC_LEN, patch=case == "relocated_patched", duplicate=case == "relocated_duplicate", staged=case == "relocated_staged")
         put(L, data)
         sub.load(L, 2, 0)
         sub.run(base)
