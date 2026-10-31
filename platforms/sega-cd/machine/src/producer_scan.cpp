@@ -210,7 +210,7 @@ class Walker {
     }
     if (try_loop(pc, s)) return;
     const auto op = decode(pc);
-    if (!op) return;   // not decodable here (data, outside the walked code): the path ends
+    if (!op) { returned(entry_state.ran); return; }   // not decodable here (data, outside the walked code): the path ends, and may have been a return
     const std::uint32_t next = pc + static_cast<std::uint32_t>(op->raw_bytes.size());
     note_writes(s, *op);
     const auto control = m68k_control_successors(*op);
@@ -225,6 +225,7 @@ class Walker {
         note_transfer(*target, entry_state.made);
         if (code_at(*target).size() != 0U) seed(*target, op->kind == M68kIrKind::call_general ? entry_state : s);
       }
+      if (op->kind == M68kIrKind::jump_general && (!target || code_at(*target).size() == 0U)) returned(entry_state.ran);   // a jump out of the walked code may be a tail jump back to a caller
       if (op->kind == M68kIrKind::call_general) call_continuation(next, entry_state.ran);
       return;
     }
@@ -235,7 +236,7 @@ class Walker {
       return;
     }
     if (op->kind == M68kIrKind::return_from_subroutine) returned(entry_state.ran);
-    if (control.dynamic != M68kDynamicControlFamily::none || control.always_raises_exception) return;   // rts / rte / computed: the path ends
+    if (control.dynamic != M68kDynamicControlFamily::none || control.always_raises_exception) { returned(entry_state.ran); return; }   // rts / rte / computed: the path ends - and may have returned to a caller
     for (const auto &succ : control.successors) {
       if (succ.kind == M68kControlSuccessorKind::fallthrough || succ.kind == M68kControlSuccessorKind::conditional_fallthrough) seed(succ.target & 0x00FFFFFFU, s);
       else if (succ.kind == M68kControlSuccessorKind::branch_target || succ.kind == M68kControlSuccessorKind::conditional_target) {
