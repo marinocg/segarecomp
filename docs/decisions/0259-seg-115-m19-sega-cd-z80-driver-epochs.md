@@ -87,3 +87,24 @@ emission stay byte-identical.
 
 Stop rules: if the authentic driver then faults at a write that is not a candidate, or the mechanism needs a new dispatcher/owner structure, the result is recorded as `STRUCTURAL_VARIANTS_PARTIAL`
 and nothing is widened (no candidate is added from observation, no bound is raised for the workload).
+
+## 5. Alternative forms (T004) and what the authentic driver does now (T005)
+
+Mechanism (as implemented; ~250 lines of emitter, ~40 of runtime header, ~60 of producer): the static mutation analysis moved from `tests/tools` to `libs/cpu/z80/mutation.{hpp,cpp}` (still report-only logic, plus
+`static_byte_alternatives`); an executable image may carry `byte_alternatives` (structural images only, sorted, unique, validated); the Z80 projection hands them to the emitter as
+`CodeImage::alternatives`; for every entry whose four fetched bytes include an alternative byte the emitter decodes, through the unchanged frontend, each combination of the alternative values, lowers
+the forms that decode and have a lowering row (a longer than 4 byte form, a prefix lock or an unlowered form is simply not a form), removes forms whose statically defining bytes equal an existing form
+(operand bytes stay live), and emits `z80_live_fetch` (one code_fetch of the longest form), then `if (z80_live_is(...)) { z80_live_enter(); <body> }` for the snapshot form and each alternative, then the
+typed mismatch (or, for a snapshot form that is itself a typed stub, that stub). Entries without alternatives, and images without alternatives, are emitted byte for byte as before. More than 8 forms for
+an entry drops all alternatives of that image (reported). Mirrors are explicit, because the image is the 8 KiB RAM twice. The Sega CD build opts in (`--z80-alternatives`, default 1; the control 0 is the plain guard); the Genesis build does not;
+the generated registry identity includes the alternatives (`z80.alternatives` in `status.json` reports images, bytes, entries, forms, dropped images and `complete:false`).
+
+Tests: `tests/z80_live_alternatives_test.py` (differential against the immutable image of the live bytes: RET/EXX/NOP at one byte; 3-byte -> 1- and 2-byte; overlapping entries started at both; JR NZ -> JR Z; IM 1 handler and RETI -> RETN; operand
+mutation live with no form; mutate after the original form executed and a toggle back, hand-derived registers; unknown replacement = typed mismatch before any effect; the per-entry bound), fixture case 17 end to end (a
+program patching a routine's first byte JR -> RET -> JR, the control `--z80-alternatives 0` isolates), `z80_static_mutation_tests`, executable-image validation tests.
+
+Authentic Earthworm Jim SE (local; probe on the final runtime, nothing fabricated): the build is 11 rounds as before; the static analysis supplies 4 alternative destination-byte values to exactly one of the six images (the game driver; 6
+entries, 8 forms, none dropped); **the Z80 stays healthy through 200 M main instructions** (446 M Z80 cycles, fault 0, 2 recoveries earlier in the run, 6 epochs, 6 images).
+T005 evidence (aggregate counters of the ephemeral probe; epoch 6 = the game driver): the Z80 read 4,045 distinct bytes the 68000 had written after its previous read (sound commands), the 68000 wrote 6,454
+bytes, the Z80 wrote 18 M RAM bytes (its working state and mailbox), 11,954 YM2612 register-port writes, 371 PSG writes and 5,977 YM status reads, and the 68000 read 1,748 bytes the Z80 had written (the handshake/status mailbox)
+- the polling that kept M18's flag permanently unwritten now terminates. No reference emulator is available here, so this is observed behaviour, not reference-verified behaviour.
