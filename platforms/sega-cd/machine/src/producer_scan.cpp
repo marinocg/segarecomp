@@ -56,6 +56,7 @@ Reg meet(const Reg &x, const Reg &y) {
 
 struct St {
   std::array<Reg, 8> d{}, a{};
+  std::uint32_t made{};   // candidates whose producer loop has run on EVERY path that reaches here (a bit per candidate): executable use must follow its producer
   bool operator==(const St &) const = default;
 };
 
@@ -65,6 +66,7 @@ St join(const St &x, const St &y) {
     out.d[i] = meet(x.d[i], y.d[i]);
     out.a[i] = meet(x.a[i], y.a[i]);
   }
+  out.made = x.made & y.made;
   return out;
 }
 
@@ -102,7 +104,7 @@ class Walker {
   void run() {
     seed(entry_, St{});
     while (!work_.empty()) {
-      if (out_.steps >= kProducerMaxSteps || states_.size() > kProducerMaxPcs) {
+      if (walker_steps_ >= kProducerMaxSteps || states_.size() > kProducerMaxPcs) {
         out_.complete = false;
         ++out_.refusals[ProducerRefusal::budget_exhausted];
         break;
@@ -111,6 +113,7 @@ class Walker {
       work_.pop_front();
       queued_.erase(pc);
       ++out_.steps;
+      ++walker_steps_;
       step(pc, states_.at(pc));
     }
     finish();
@@ -159,17 +162,24 @@ class Walker {
     }
   }
 
+  // Main Work RAM is mirrored through $E00000-$FFFFFF: one cell, one address.
+  std::uint32_t norm(std::uint32_t a) const {
+    a &= 0x00FFFFFFU;
+    return processor_ == Processor::main && a >= 0x00E00000U ? (0x00FF0000U | (a & 0xFFFFU)) : a;
+  }
+
   // The address a memory operand denotes when the walk knows it (no side effect applied).
-  std::optional<std::uint32_t> address_of(const St &s, const M68kEffectiveAddress &ea) const {
+  std::optional<std::uint32_t> address_of(const St &s, const M68kEffectiveAddress &ea, std::uint32_t size = 2U) const {
     switch (ea.mode) {
       case M68kEaMode::absolute_word:
-      case M68kEaMode::absolute_long: return m68k_data_access_ea_address(ea) & 0x00FFFFFFU;
-      case M68kEaMode::pc_disp16: return ea.absolute_address & 0x00FFFFFFU;
+      case M68kEaMode::absolute_long: return norm(m68k_data_access_ea_address(ea));
+      case M68kEaMode::pc_disp16: return norm(ea.absolute_address);
       case M68kEaMode::address_indirect:
-      case M68kEaMode::address_postinc: return s.a[ea.reg & 7U].full() ? std::optional<std::uint32_t>(s.a[ea.reg & 7U].v & 0x00FFFFFFU) : std::nullopt;
+      case M68kEaMode::address_postinc: return s.a[ea.reg & 7U].full() ? std::optional<std::uint32_t>(norm(s.a[ea.reg & 7U].v)) : std::nullopt;
+      case M68kEaMode::address_predec: return s.a[ea.reg & 7U].full() ? std::optional<std::uint32_t>(norm(s.a[ea.reg & 7U].v - (ea.reg == 7U ? 2U : size))) : std::nullopt;
       case M68kEaMode::address_disp16:
-        return s.a[ea.reg & 7U].full() ? std::optional<std::uint32_t>((s.a[ea.reg & 7U].v + static_cast<std::uint32_t>(static_cast<std::int32_t>(ea.displacement))) & 0x00FFFFFFU) : std::nullopt;
-      default: return std::nullopt;   // -(An) and indexed forms: not tracked
+        return s.a[ea.reg & 7U].full() ? std::optional<std::uint32_t>(norm(s.a[ea.reg & 7U].v + static_cast<std::uint32_t>(static_cast<std::int32_t>(ea.displacement)))) : std::nullopt;
+      default: return std::nullopt;   // indexed forms: not tracked
     }
   }
 
@@ -180,6 +190,8 @@ class Walker {
   // ---- one instruction ---------------------------------------------------------------------------------------------------
   void step(std::uint32_t pc, const St &entry_state) {
     St s = entry_state;
+    cur_pc_ = pc;
+    transfers_[pc].clear();
     if (try_loop(pc, s)) return;
     const auto op = decode(pc);
     if (!op) return;   // not decodable here (data, outside the walked code): the path ends
@@ -191,10 +203,10 @@ class Walker {
     if (op->kind == M68kIrKind::jump_general || op->kind == M68kIrKind::call_general) {
       std::optional<std::uint32_t> target;
       const auto &ea = op->source_ea;
-      if (ea.mode == M68kEaMode::absolute_long || ea.mode == M68kEaMode::absolute_word) target = m68k_data_access_ea_address(ea) & 0x00FFFFFFU;
-      else if (ea.mode == M68kEaMode::address_indirect && entry_state.a[ea.reg & 7U].full()) target = entry_state.a[ea.reg & 7U].v & 0x00FFFFFFU;
+      if (ea.mode == M68kEaMode::absolute_long || ea.mode == M68kEaMode::absolute_word) target = norm(m68k_data_access_ea_address(ea));
+      else if (ea.mode == M68kEaMode::address_indirect && entry_state.a[ea.reg & 7U].full()) target = norm(entry_state.a[ea.reg & 7U].v);
       if (target) {
-        note_transfer(*target);
+        note_transfer(*target, entry_state.made);
         if (code_at(*target).size() != 0U) seed(*target, op->kind == M68kIrKind::call_general ? entry_state : s);
       }
       if (op->kind == M68kIrKind::call_general) seed(next, St{});   // after a call every register is unknown
@@ -202,7 +214,7 @@ class Walker {
     }
     if (op->kind == M68kIrKind::bsr_call) {
       for (const auto &succ : control.successors)
-        if (succ.kind == M68kControlSuccessorKind::call_target) { note_transfer(succ.target & 0x00FFFFFFU); seed(succ.target & 0x00FFFFFFU, s); }
+        if (succ.kind == M68kControlSuccessorKind::call_target) { note_transfer(norm(succ.target), s.made); seed(norm(succ.target), s); }
       seed(next, St{});
       return;
     }
@@ -210,16 +222,16 @@ class Walker {
     for (const auto &succ : control.successors) {
       if (succ.kind == M68kControlSuccessorKind::fallthrough || succ.kind == M68kControlSuccessorKind::conditional_fallthrough) seed(succ.target & 0x00FFFFFFU, s);
       else if (succ.kind == M68kControlSuccessorKind::branch_target || succ.kind == M68kControlSuccessorKind::conditional_target) {
-        note_transfer(succ.target & 0x00FFFFFFU);
-        seed(succ.target & 0x00FFFFFFU, s);
+        note_transfer(norm(succ.target), s.made);
+        seed(norm(succ.target), s);
       }
     }
   }
 
-  void note_transfer(std::uint32_t target) {
-    for (Candidate &c : cands_)
-      if (!c.refused && !c.executed && target >= c.destination.lo && target < c.destination.hi) { c.executed = true; c.entry = target; }
-  }
+  // Constant control transfers are recorded per instruction (the last evaluation, i.e. the one under the final joined state wins); whether a transfer is
+  // executable use of a produced range is decided at the fixed point (finish), from the `made` bits that survive every join: a path that skips the
+  // producer clears the bit, so use that does not follow the producer on every path is never proof.
+  void note_transfer(std::uint32_t target, std::uint32_t) { transfers_[cur_pc_].push_back(target); }
 
   // Stores whose destination the walk knows are facts against a proof; stores through a pointer it does not know are counted.
   void note_writes(const St &s, const M68kIrOperation &op) {
@@ -231,7 +243,14 @@ class Walker {
         return;
       default: break;
     }
-    if (const auto at = address_of(s, ea)) known_writes_.push_back({*at, *at + (op.size == Width::long_word ? 4U : nbytes(op.size))});
+    std::uint32_t bytes = nbytes(op.size);
+    if (op.kind == M68kIrKind::movem_transfer) {
+      if (op.movem_direction != M68kMovemDirection::registers_to_memory) return;
+      std::uint32_t n = 0;
+      for (unsigned bit = 0; bit < 16; ++bit) n += (op.movem_register_mask >> bit) & 1U;
+      bytes = n * nbytes(op.size);
+    }
+    if (const auto at = address_of(s, ea, bytes)) known_writes_.push_back({*at, *at + bytes});
     else if (!(ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_postinc || ea.mode == M68kEaMode::address_indirect) || (ea.reg & 7U) != 7U) ++out_.unknown_writes;
   }
 
@@ -243,11 +262,12 @@ class Walker {
         op.kind == M68kIrKind::compare || op.kind == M68kIrKind::compare_immediate || op.kind == M68kIrKind::compare_address || op.kind == M68kIrKind::test_operand ||
         op.kind == M68kIrKind::bit_test || op.kind == M68kIrKind::no_operation || op.kind == M68kIrKind::general_branch || op.kind == M68kIrKind::branch_ne_short ||
         op.kind == M68kIrKind::branch_always_short || op.kind == M68kIrKind::bsr_call || op.kind == M68kIrKind::jump_general || op.kind == M68kIrKind::call_general ||
-        op.kind == M68kIrKind::return_from_subroutine || op.kind == M68kIrKind::write_moveq || op.kind == M68kIrKind::load_effective_address;
+        op.kind == M68kIrKind::return_from_subroutine || op.kind == M68kIrKind::write_moveq || op.kind == M68kIrKind::load_effective_address;   // LEA clears its own destination below (its footprint is not advertised)
     if (no_register_write) {
       // registers survive (written explicitly below where modelled)
     } else if (!effect.register_write_footprint_complete) {
       s = St{};
+      s.made = before.made;
     } else {
       for (unsigned r = 0; r < 8; ++r) {
         if ((effect.data_register_write_mask >> r) & 1U) s.d[r] = Reg{};
@@ -276,6 +296,7 @@ class Walker {
         const unsigned r = op.destination_ea.reg & 7U;
         const auto &ea = op.source_ea;
         if (r == 7U) return;
+        s.a[r] = Reg{};   // unknown unless a form below defines it (never the previous constant)
         if (ea.mode == M68kEaMode::absolute_word || ea.mode == M68kEaMode::absolute_long || ea.mode == M68kEaMode::pc_disp16) s.a[r] = K(ea.absolute_address);
         else if (ea.mode == M68kEaMode::address_indirect && before.a[ea.reg & 7U].full()) s.a[r] = before.a[ea.reg & 7U];
         else if (ea.mode == M68kEaMode::address_disp16 && before.a[ea.reg & 7U].full())
@@ -342,7 +363,7 @@ class Walker {
       const Width w = op.size;
       if (op.kind == M68kIrKind::write_move && op.source_ea.mode == M68kEaMode::address_postinc && op.destination_ea.mode == M68kEaMode::address_postinc) {
         if (src_reg || stored) return refuse(ProducerRefusal::loop_body_unsupported);
-        src_reg = op.source_ea.reg & 7U; dst_reg = op.destination_ea.reg & 7U; element = w; stored = true; c.copy = true;
+        src_reg = op.source_ea.reg & 7U; dst_reg = op.destination_ea.reg & 7U; element = w; element_ = w; stored = true; c.copy = true;
         continue;
       }
       if (op.kind == M68kIrKind::write_move && op.source_ea.mode == M68kEaMode::address_postinc && op.destination_ea.mode == M68kEaMode::data_register && w == Width::byte) {
@@ -370,13 +391,14 @@ class Walker {
     }
     if (!src_reg || !dst_reg || !stored || *src_reg == *dst_reg || *src_reg == 7U || *dst_reg == 7U) return refuse(ProducerRefusal::loop_body_unsupported);
     const unsigned counter = dbra->destination_ea.reg & 7U;
+    if (sym[counter].kind != Sym::Kind::unknown) return refuse(ProducerRefusal::loop_body_unsupported);   // the body rewrites the loop counter: the count is not the entry value
     const auto &rs = s.a[*src_reg];
     const auto &rd = s.a[*dst_reg];
     const auto &rc = s.d[counter];
     if (!rs.full() || !rd.full() || !rc.has(0xFFFFU)) return refuse(ProducerRefusal::loop_operand_unknown);
     const std::uint32_t count = (rc.v & 0xFFFFU) + 1U;
     const std::uint32_t total = count * nbytes(*element);
-    const std::uint32_t src = rs.v & 0x00FFFFFFU, dst = rd.v & 0x00FFFFFFU;
+    const std::uint32_t src = norm(rs.v), dst = norm(rd.v);
     c.source = {src, src + total};
     c.destination = {dst, dst + total};
     // post-state of the summarised loop (always applied: the path continues after the loop with these values)
@@ -386,8 +408,19 @@ class Walker {
     post.d[counter] = Reg{(rc.v & 0xFFFF0000U) | 0xFFFFU, rc.mask};
     for (unsigned r = 0; r < 8; ++r) if (sym[r].kind != Sym::Kind::unknown && r != counter) post.d[r] = Reg{};
     post.a[7] = Reg{};
-    if (!classify(c)) { seed(at, post); return true; }
-    cands_.push_back(std::move(c));
+    // one candidate per loop head: a head re-evaluated with other operands (a later-joining path) makes the earlier proof unstable
+    std::size_t index = cands_.size();
+    for (std::size_t i = 0; i < cands_.size(); ++i) {
+      if (cands_[i].head_pc != pc) continue;
+      if (cands_[i].source.lo == c.source.lo && cands_[i].source.hi == c.source.hi && cands_[i].destination.lo == c.destination.lo && cands_[i].destination.hi == c.destination.hi && cands_[i].transform == c.transform) { index = i; break; }
+      if (!cands_[i].refused) cands_[i].refused = ProducerRefusal::loop_operand_unknown;
+    }
+    if (index == cands_.size()) {
+      if (index >= 32U) { ++out_.refusals[ProducerRefusal::too_many_fragments]; seed(at, post); return true; }
+      if (!classify(c)) c.refused = last_refusal_;
+      cands_.push_back(std::move(c));
+    }
+    if (!cands_[index].refused) post.made |= (1U << index);
     seed(at, post);
     return true;
   }
@@ -400,12 +433,13 @@ class Walker {
 
   // Destination, source and bounds; evaluates the produced bytes. A failed check is a counted refusal.
   bool classify(Candidate &c) {
-    const auto refuse = [&](ProducerRefusal r) { ++out_.refusals[r]; return false; };
+    const auto refuse = [&](ProducerRefusal r) { last_refusal_ = r; return false; };   // counted when the candidate is finished
     const std::uint32_t length = c.destination.hi - c.destination.lo;
     const bool main_cpu = processor_ == Processor::main;
-    const bool ram = main_cpu ? (c.destination.lo >= kMainWorkRamBegin && c.destination.hi <= kMainWorkRamEnd) : c.destination.hi <= kPrgRamBytes;
+    const bool ram = main_cpu ? (c.destination.lo >= kMainWorkRamBegin && c.destination.hi <= kMainWorkRamEnd) : (c.destination.lo >= image_base_ && c.destination.hi <= kPrgRamBytes);   // sub: at or above the SP image (below it is BIOS-resident)
     if (!ram || (c.destination.lo & 1U) != 0U || length < 4U) return refuse(ProducerRefusal::destination_unsupported);
     if (c.source.lo < image_base_ || c.source.hi > image_base_ + image_.size()) return refuse(ProducerRefusal::source_not_immutable);
+    if (element_ != Width::byte && (c.source.lo & 1U) != 0U) return refuse(ProducerRefusal::destination_unsupported);   // a word/long access at an odd address is an address error on hardware
     if (length > kProducerMaxBytes) return refuse(ProducerRefusal::too_large);
     if (c.source.overlaps(c.destination)) return refuse(ProducerRefusal::aliasing);
     if (c.destination.overlaps(Range{image_base_, image_base_ + static_cast<std::uint32_t>(image_.size())})) return refuse(ProducerRefusal::aliasing);
@@ -428,9 +462,19 @@ class Walker {
 
   void finish() {
     // every known write of the walk against every proof
+    for (const auto &[at, targets] : transfers_) {
+      const auto state = states_.find(at);
+      if (state == states_.end()) continue;
+      for (const std::uint32_t target : targets)
+        for (std::size_t i = 0; i < cands_.size() && i < 32U; ++i)
+          if (!cands_[i].refused && !cands_[i].executed && ((state->second.made >> i) & 1U) != 0U && target >= cands_[i].destination.lo && target < cands_[i].destination.hi) { cands_[i].executed = true; cands_[i].entry = target; }
+    }
+    const Range image{image_base_, image_base_ + static_cast<std::uint32_t>(image_.size())};
     for (Candidate &c : cands_) {
       if (c.refused) continue;
+      if (!out_.complete) { c.refused = ProducerRefusal::budget_exhausted; continue; }
       for (const Range &w : known_writes_) {
+        if (w.overlaps(image)) { c.refused = ProducerRefusal::source_written; break; }   // a located store into the walked image (self-patching): its operands cannot be trusted
         if (w.overlaps(c.source)) { c.refused = ProducerRefusal::source_written; break; }
         if (w.overlaps(c.destination)) { c.refused = ProducerRefusal::destination_overwritten; break; }
       }
@@ -468,6 +512,11 @@ class Walker {
   std::deque<std::uint32_t> work_;
   std::set<std::uint32_t> queued_;
   std::vector<Candidate> cands_;
+  std::uint32_t walker_steps_{};
+  std::uint32_t cur_pc_{};
+  std::map<std::uint32_t, std::vector<std::uint32_t>> transfers_;
+  Width element_{Width::byte};
+  ProducerRefusal last_refusal_{ProducerRefusal::loop_operand_unknown};
   std::vector<Range> known_writes_;
 };
 

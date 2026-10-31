@@ -357,9 +357,10 @@ struct FileFirstRequest {
 // SEG-112 (ADR 0256): the generation-time producer proofs of a disc, computed once per process. A pure function of the disc's boot area.
 std::optional<scd::ProducerScan> static_producer_scan(const segarecomp::DiscImage &disc) {
   static std::optional<scd::ProducerScan> scan;
-  static bool computed = false;
-  if (!computed) {
-    computed = true;
+  static std::string computed_for;   // keyed by the disc identity: a second disc in one process is recomputed, never answered from the first
+  if (computed_for != disc.identity()) {
+    computed_for = disc.identity();
+    scan.reset();
     std::vector<std::uint8_t> area;
     const auto header = segarecomp::read_sega_cd_boot(disc, &area);
     const auto boot = header.header ? scd::produce_boot_images(*header.header, area) : scd::BootImagesResult{};
@@ -464,6 +465,8 @@ int emit_bios_profile(const segarecomp::DiscImage &disc, const std::string &bios
         for (const auto &fragment : scan->fragments)
           if (fragment.processor == *proc && fragment.base == *base && fragment.length == *len && segarecomp::sha256_hex(fragment.bytes) == f[4]) proven = &fragment;
       if (proven == nullptr) return bad("admit", "static_fragment_unproven");
+      for (const auto &prior : inputs.admissions)
+        if (prior.kind == scd::AdmissionKind::static_fragment && prior.processor == *proc && prior.address == *base) return bad("admit", "static_fragment_duplicate");
       a.kind = scd::AdmissionKind::static_fragment;
       a.processor = *proc;
       a.address = *base;

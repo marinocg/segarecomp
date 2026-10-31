@@ -102,6 +102,8 @@ def main():
                                   ("malformed", "static-fragment:main:xx:%d:%s" % (c.truth["relocation"]["length"], digest), "static_fragment_syntax")):
             done = c.emit(spec)
             check(done.returncode != 0 and want in done.stdout, "emitter: %s is refused (%s)" % (label, want))
+        done = c.emit(good + digest, good + digest)
+        check(done.returncode != 0 and "static_fragment_duplicate" in done.stdout, "emitter: a duplicate static fragment is refused (static_fragment_duplicate)")
         other = Case(tmp, "direct")
         done = other.emit(good + digest)
         check(done.returncode != 0 and "static_fragment_unproven" in done.stdout, "emitter: a disc whose boot area has no such producer refuses the same spec")

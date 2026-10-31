@@ -788,6 +788,7 @@ class Builder {
     const std::string text = read_text(out);
     if (raw_value(text, "ok").value_or("") != "true") return;
     producer_candidates_ = static_cast<unsigned>(number_value(text, "candidates").value_or(0));
+    producer_unknown_writes_ = static_cast<unsigned>(number_value(text, "unknown_writes").value_or(0));
     const auto refusals = text.find("\"refusals\":{");
     if (refusals != std::string::npos) producer_refusals_ = text.substr(refusals + 11U, text.find('}', refusals) - refusals - 10U);
     const auto list = text.find("\"admits\":[");
@@ -857,7 +858,7 @@ class Builder {
 
   // Counts and classes only (never an address, offset or byte).
   std::string reconstruction_json() const {
-    std::string out = "{\"static_producer_candidates\":" + std::to_string(producer_candidates_) + ",\"static_fragments\":" + std::to_string(static_producer_count_) + ",\"static_producer_refusals\":" + producer_refusals_ + ",\"relocated_extents\":" + std::to_string(relocated_count_) + ",\"produced_images\":" + std::to_string(produced_count_) + ",\"refusals\":{";
+    std::string out = "{\"static_producer_candidates\":" + std::to_string(producer_candidates_) + ",\"static_fragments\":" + std::to_string(static_producer_count_) + ",\"static_producer_unknown_writes\":" + std::to_string(producer_unknown_writes_) + ",\"static_producer_refusals\":" + producer_refusals_ + ",\"relocated_extents\":" + std::to_string(relocated_count_) + ",\"produced_images\":" + std::to_string(produced_count_) + ",\"refusals\":{";
     bool first = true;
     for (const auto &[error, n] : relocation_refusals_) {
       out += std::string(first ? "" : ",") + "\"" + error + "\":" + std::to_string(n);
@@ -873,7 +874,7 @@ class Builder {
   std::atomic<unsigned> counter_{0};
   std::vector<std::string> extents_, static_extents_, static_windows_;
   std::vector<std::string> produced_;   // SEG-111: the bytes of every produced image admitted so far (hex, keyed by processor and base)
-  unsigned relocated_count_ = 0, produced_count_ = 0, static_producer_count_ = 0, producer_candidates_ = 0;
+  unsigned relocated_count_ = 0, produced_count_ = 0, static_producer_count_ = 0, producer_candidates_ = 0, producer_unknown_writes_ = 0;
   std::string producer_refusals_ = "{}";
   std::map<std::string, unsigned> relocation_refusals_;
   std::string static_status_ = "not_run";
