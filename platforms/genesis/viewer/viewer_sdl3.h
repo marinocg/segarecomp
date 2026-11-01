@@ -17,7 +17,7 @@ const GenesisAudioSink *genesis_sdl3_viewer_audio_open(GenesisSdl3Viewer *viewer
 void genesis_sdl3_viewer_report_audio_drops(GenesisSdl3Viewer *viewer, const uint64_t *overrun_dropped);
 /* Shows why the guest stopped instead of a blank window; blocks until dismissed (no-op on a headless video driver). */
 void genesis_sdl3_viewer_stop_screen(GenesisSdl3Viewer *viewer, const char *title, const char *detail);
-/* SEG-118 (ADR 0262): Level 2 extended backgrounds. Returns the adapter-owned, preallocated extension target the caller attaches to
+/* SEG-118 (ADR 0262) / SEG-121: Level 2 extended backgrounds and Level 3 sprites. Returns the adapter-owned, preallocated extension target the caller attaches to
  * `GenesisRasterCapture::extension`; `frame_sequence` must point at the live-frame observer's `sequence` (it identifies the frame being presented) and,
  * with the target, must outlive the viewer. The viewer sets the target's `request` from the saved Widescreen Mode once per host slice (never inside a
  * frame) and presents the surface only when its stamped sequence/geometry/status are valid; otherwise the original picture is shown. Not calling this

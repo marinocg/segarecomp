@@ -28,6 +28,14 @@ extern "C" {
 #define GENESIS_EXT_MAX_WIDTH (GENESIS_FRAME_MAX_WIDTH + 2U * GENESIS_EXT_MAX_SIDE)
 #define GENESIS_EXT_SURFACE_BYTES ((size_t)GENESIS_EXT_MAX_WIDTH * GENESIS_FRAME_MAX_HEIGHT * 3U)
 
+/* SEG-121: what the adapter asks for (`request`) and what a frame actually contains (`result.mode`). A completed frame is Level 3 only when its own
+ * result says so; the saved preference never decides that. Level 2 callers (request == 1) are unchanged. */
+typedef enum GenesisExtensionMode {
+  GENESIS_EXT_MODE_NONE = 0,
+  GENESIS_EXT_MODE_BACKGROUNDS = 1, /* Level 2: Plane A/B scenery and backdrop only */
+  GENESIS_EXT_MODE_SPRITES = 2      /* Level 3: Level 2 plus sprites the frame's own SAT state places over the extra columns */
+} GenesisExtensionMode;
+
 typedef enum GenesisExtensionStatus {
   GENESIS_EXT_NONE = 0,        /* not requested for this frame: no work was done */
   GENESIS_EXT_UNAVAILABLE = 1, /* requested but not produced (see reason); the surface is meaningless */
@@ -41,23 +49,28 @@ typedef enum GenesisExtensionReason {
   GENESIS_EXT_REASON_NO_PLAN = 2,         /* the adapter's plan callback is absent or asked for no extension */
   GENESIS_EXT_REASON_TARGET_TOO_SMALL = 3,
   GENESIS_EXT_REASON_NATIVE_GEOMETRY = 4, /* the native artifact and the raster state disagree, or an unsupported display mode */
-  GENESIS_EXT_REASON_NO_RASTER = 5        /* extension needs the scanline-aware raster capture */
+  GENESIS_EXT_REASON_NO_RASTER = 5,       /* extension needs the scanline-aware raster capture */
+  GENESIS_EXT_REASON_SPRITE_STATE = 6     /* only in `sprite_reason`: a Level 3 request was served as Level 2 because a line's sprite state was invalid/ambiguous */
 } GenesisExtensionReason;
 
 /* Caveats of a PARTIAL result (bit mask). Each means "the extension is real VDP data but a part of it cannot be derived exactly". */
 #define GENESIS_EXT_FLAG_WINDOW_EDGE 0x01U     /* the window plane covers a native edge on some rows: Plane A is omitted off-screen on those rows */
 #define GENESIS_EXT_FLAG_COLUMN_VSCROLL 0x02U  /* per-column vertical scroll differs across columns: the nearest edge column's value is used */
 #define GENESIS_EXT_FLAG_NO_VRAM_JOURNAL 0x04U /* no VRAM journal: mid-frame VRAM changes cannot be replayed (same limit as the native render) */
+#define GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT 0x08U /* Level 3: sprites appear only where the game's own SAT places them; a generic producer never reports Available */
 
 typedef struct GenesisExtensionResult {
   uint64_t sequence;   /* the frame sequence this result belongs to (stamped by the runtime at publication) */
   uint8_t status;      /* GenesisExtensionStatus */
   uint8_t reason;      /* GenesisExtensionReason (UNAVAILABLE) */
   uint8_t flags;       /* GENESIS_EXT_FLAG_* (PARTIAL) */
-  uint8_t reserved;
+  uint8_t mode;        /* GenesisExtensionMode actually produced (AVAILABLE/PARTIAL only): the identity of the frame's content */
   uint16_t native_w, native_h; /* the native picture the surface was built around */
   uint16_t side;       /* extension width in source pixels on EACH side; surface width = native_w + 2 * side */
+  uint8_t sprite_reason; /* a Level 3 request served as Level 2: GENESIS_EXT_REASON_SPRITE_STATE; else 0 */
+  uint8_t reserved;
   uint32_t pitch;      /* bytes per surface row */
+  uint32_t sprite_pixels; /* Level 3: visible sprite pixels in the extra columns of this frame (0 = none placed there; not a failure) */
 } GenesisExtensionResult;
 
 struct GenesisFrameExtension;
@@ -68,7 +81,7 @@ typedef int (*GenesisExtensionProducerFunction)(const uint8_t vram[GENESIS_VDP_V
 
 typedef struct GenesisFrameExtension {
   /* Adapter-owned inputs, changed only between guest slices (the runtime reads `request` once per publication). */
-  uint8_t request;                  /* 0 = no work; 1 = produce Level 2 scenery for the next completed frame */
+  uint8_t request;                  /* GenesisExtensionMode: 0 = no work; 1 = Level 2 scenery; 2 = Level 3 (scenery + sprites) for the next completed frame */
   GenesisExtensionProducerFunction producer; /* normally genesis_vdp_produce_extension */
   /* Extension width per side for a native size (the adapter calls its layout math); returns nonzero for "no extension". */
   int (*plan)(void *ctx, unsigned native_w, unsigned native_h, unsigned *side_out);
@@ -102,6 +115,16 @@ static inline void genesis_frame_extension_run(const GenesisFrameExtension *ext,
     memset(out, 0, sizeof(*out));
     out->status = GENESIS_EXT_UNAVAILABLE;
     out->reason = reason;
+  } else if (out->mode == GENESIS_EXT_MODE_NONE) {
+    out->mode = GENESIS_EXT_MODE_BACKGROUNDS; /* a Level 2-only producer predating the typed mode */
+  }
+  if (out->status == GENESIS_EXT_PARTIAL || out->status == GENESIS_EXT_AVAILABLE) {
+    /* A frame can never contain more than was asked for, and Level 3 content is never Available (a generic producer cannot know the game submits objects). */
+    if (out->mode > ext->request || out->mode > GENESIS_EXT_MODE_SPRITES || (out->mode == GENESIS_EXT_MODE_SPRITES && out->status != GENESIS_EXT_PARTIAL)) {
+      memset(out, 0, sizeof(*out));
+      out->status = GENESIS_EXT_UNAVAILABLE;
+      out->reason = GENESIS_EXT_REASON_INVALID_REQUEST;
+    }
   }
 }
 

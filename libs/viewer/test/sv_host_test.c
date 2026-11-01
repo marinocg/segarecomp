@@ -230,7 +230,7 @@ static int ws_hook(void *ctx, SvHost *host, int iteration) {
         break;
       case 8:
         it = ws_item(host);
-        w->hint_l3_ok = it != NULL && strcmp(it->text, "Enhanced (Level 3)") == 0 && strstr(it->hint, "Expands the playable view where supported.") != NULL;
+        w->hint_l3_ok = it != NULL && strcmp(it->text, "Enhanced (Level 3)") == 0 && strstr(it->hint, "Also shows sprites the game already places beside the picture") != NULL;
         if (it != NULL) snprintf(w->l3_hint, sizeof w->l3_hint, "%s", it->hint);
         ws_move(w, SV_KEY_ESCAPE, SDL_GAMEPAD_BUTTON_EAST);
         break;

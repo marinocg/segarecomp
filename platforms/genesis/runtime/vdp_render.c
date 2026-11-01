@@ -810,10 +810,13 @@ static GenesisVdpCandidatePixel genesis_vdp_plane_candidate(const GenesisVdpRend
 
 /* The sprites that reach one output row, with the hardware per-line limits (H40: 20 sprites / 40 cells; H32: 16 / 32)
  * applied in list order, written as the first-opaque-wins sprite candidate of every x. See the Sprite-limit citation
- * in vdp_render.h. */
+ * in vdp_render.h.
+ *
+ * SEG-121: the evaluation (SAT walk, per-line sprite limit, cell budget, flips, priority) does not depend on x, so the SAME code serves the native row
+ * (`x_origin` 0, `span` = picture width) and the Level 3 extension (`x_origin` = -side, `span` = picture width + 2 * side): `out[i]` is screen column
+ * `x_origin + i`. Selection and budget are identical in both, so the extension can never show a sprite the native line's evaluation would drop. */
 static int genesis_vdp_build_sprite_row(const GenesisVdpRenderContext *ctx, const GenesisRasterLine *line,
-                                        unsigned row, GenesisVdpCandidatePixel *out) {
-  const unsigned width = ctx->geometry.width;
+                                        unsigned row, int x_origin, unsigned span, GenesisVdpCandidatePixel *out) {
   const unsigned max_sprites = ctx->geometry.h40 ? GENESIS_VDP_SAT_H40_MAX_SPRITES : GENESIS_VDP_SAT_H32_MAX_SPRITES;
   const unsigned per_line_limit = ctx->geometry.h40 ? 20U : 16U;
   const unsigned cell_budget_start = ctx->geometry.h40 ? 40U : 32U;
@@ -823,7 +826,7 @@ static int genesis_vdp_build_sprite_row(const GenesisVdpRenderContext *ctx, cons
   uint32_t sat_base = 0U;
   unsigned current = 0U;
   unsigned cell_budget = cell_budget_start;
-  memset(out, 0, (size_t)width * sizeof(out[0]));
+  memset(out, 0, (size_t)span * sizeof(out[0]));
   if (genesis_vdp_sat_base_address(line->registers, &sat_base) != 0) return -1;
   for (unsigned step = 0U; step < max_sprites; ++step) {
     GenesisVdpSpriteEntry entry;
@@ -851,10 +854,10 @@ static int genesis_vdp_build_sprite_row(const GenesisVdpRenderContext *ctx, cons
     unsigned mirrored_y = sprite->v_flip ? (height_px - 1U - local_y) : local_y;
     cell_budget -= drawn_cells;
     for (unsigned local_x = 0U; local_x < drawn_cells * GENESIS_VDP_TILE_WIDTH; ++local_x) {
-      const int64_t screen_x = (int64_t)sprite->x + (int64_t)local_x;
+      const int64_t screen_x = (int64_t)sprite->x + (int64_t)local_x - (int64_t)x_origin;
       unsigned mirrored_x;
       uint8_t pattern;
-      if (screen_x < 0 || screen_x >= (int64_t)width || out[screen_x].opaque) continue;
+      if (screen_x < 0 || screen_x >= (int64_t)span || out[screen_x].opaque) continue;
       mirrored_x = sprite->h_flip ? (width_px - 1U - local_x) : local_x;
       pattern = genesis_vdp_sprite_pattern_pixel(sprite, ctx->vram, mirrored_x, mirrored_y);
       if (pattern == GENESIS_VDP_TRANSPARENT_PALETTE_INDEX) continue;
@@ -902,7 +905,7 @@ static void genesis_vdp_render_row(const GenesisVdpRenderContext *ctx, const Gen
   (void)genesis_vdp_backdrop_cram_index(line->registers, &backdrop);
   genesis_vdp_prepare_row_plane(ctx, line, GENESIS_VDP_PLANE_A, row, &plane_a_state);
   genesis_vdp_prepare_row_plane(ctx, line, GENESIS_VDP_PLANE_B, row, &plane_b_state);
-  (void)genesis_vdp_build_sprite_row(ctx, line, row, sprites);
+  (void)genesis_vdp_build_sprite_row(ctx, line, row, 0, width, sprites);
   for (unsigned x = 0U; x < width; ++x) {
     GenesisVdpCandidatePixel plane_a;
     GenesisVdpCandidatePixel plane_b;
@@ -1081,8 +1084,8 @@ int genesis_vdp_produce_frame(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
 }
 
 /* --- SEG-118 (ADR 0262): Level 2 extended backgrounds. Presentation only: reads the same raster state/VRAM journal the native render used and the
- * finished native artifact, writes only the caller's RGB24 surface. Only Plane A, Plane B and the backdrop exist off-screen; sprites are not
- * extended (Level 3). Every off-screen pixel is sampled by the same plane code as the visible columns, so scenery is real VDP data, never invented. --- */
+ * finished native artifact, writes only the caller's RGB24 surface. Only Plane A, Plane B and the backdrop exist off-screen; sprites join them
+ * only for a Level 3 request (SEG-121, `request == 2`) and only as the frame's own SAT places them. Every off-screen pixel is sampled by the same plane code as the visible columns, so scenery is real VDP data, never invented. --- */
 
 static void genesis_ext_unavailable(GenesisExtensionResult *out, GenesisExtensionReason reason) {
   memset(out, 0, sizeof(*out));
@@ -1099,6 +1102,27 @@ static int genesis_ext_vscroll_differs(const GenesisVdpRowPlane *plane, unsigned
   return 0;
 }
 
+/* Level 3 pre-check, before anything is written: every captured line the frame uses must carry a decodable SAT base and the picture's own horizontal
+ * resolution (the sprite limits and the SAT size depend on it). Returns 0 when the sprite state of the whole frame is unambiguous. The native render
+ * silently draws no sprites on a line it cannot decode; the extension instead serves the whole frame as Level 2, never half a sprite layer. */
+static int genesis_ext_sprite_state_ok(const GenesisRasterFrameState *raster, const GenesisVdpDisplayGeometry *geometry, unsigned height) {
+  const unsigned lines = geometry->im2 ? (height + 1U) / 2U : height;
+  for (unsigned l = 0U; l < lines; ++l) {
+    uint32_t sat_base;
+    const uint16_t *registers = raster->lines[l].registers;
+    if (genesis_vdp_sat_base_address(registers, &sat_base) != 0) return -1;
+    if ((genesis_vdp_hres_is_h40(registers) != 0) != (geometry->h40 != 0)) return -1;
+  }
+  return 0;
+}
+
+/* Does the sprite candidate `s` win the pixel over the two plane candidates (the same order genesis_vdp_select_cram_index applies)? */
+static int genesis_ext_sprite_wins(const GenesisVdpCandidatePixel *a, const GenesisVdpCandidatePixel *b, const GenesisVdpCandidatePixel *s) {
+  if (!s->opaque) return 0;
+  if (s->priority) return 1;
+  return !((a->opaque && a->priority) || (b->opaque && b->priority));
+}
+
 int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
                                   const GenesisFrameArtifact *native, const GenesisFrameExtension *target,
                                   GenesisExtensionResult *out) {
@@ -1108,7 +1132,10 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   unsigned side = 0U, applied = 0U, width, height, groups;
   size_t pitch, needed;
   uint8_t flags = 0U;
-  int journaled;
+  uint8_t sprite_reason = 0U;
+  uint32_t sprite_pixels = 0U;
+  int journaled, sprites;
+  GenesisVdpCandidatePixel sprite_row[GENESIS_EXT_MAX_WIDTH]; /* Level 3: the row's sprite layer over columns -side .. width + side - 1 */
   if (out == NULL) return -1;
   if (vram == NULL || raster == NULL || native == NULL || target == NULL || target->pixels == NULL) {
     if (out != NULL) genesis_ext_unavailable(out, GENESIS_EXT_REASON_INVALID_REQUEST);
@@ -1135,6 +1162,11 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     genesis_ext_unavailable(out, GENESIS_EXT_REASON_TARGET_TOO_SMALL);
     return -1;
   }
+  sprites = target->request >= GENESIS_EXT_MODE_SPRITES;
+  if (sprites && genesis_ext_sprite_state_ok(raster, &geometry, height) != 0) {
+    sprites = 0; /* ambiguous sprite state: serve the whole frame as Level 2 (nothing of the sprite layer is drawn) */
+    sprite_reason = (uint8_t)GENESIS_EXT_REASON_SPRITE_STATE;
+  }
   journaled = raster->has_vram_journal != 0U && raster->vram_write_count <= GENESIS_RASTER_VRAM_WRITE_CAPACITY;
   if (!journaled) flags |= GENESIS_EXT_FLAG_NO_VRAM_JOURNAL;
   ctx.vram = vram;
@@ -1159,6 +1191,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     (void)genesis_vdp_backdrop_cram_index(line->registers, &backdrop);
     genesis_vdp_prepare_row_plane(&ctx, line, GENESIS_VDP_PLANE_A, row, &plane_a);
     genesis_vdp_prepare_row_plane(&ctx, line, GENESIS_VDP_PLANE_B, row, &plane_b);
+    if (sprites) (void)genesis_vdp_build_sprite_row(&ctx, line, row, -(int)side, width + 2U * side, sprite_row); /* pre-checked: cannot fail */
     if (genesis_ext_vscroll_differs(&plane_a, groups) || genesis_ext_vscroll_differs(&plane_b, groups)) flags |= GENESIS_EXT_FLAG_COLUMN_VSCROLL;
     /* The native centre is copied verbatim from the finished artifact (the host also re-uploads it from the native picture). */
     if (genesis_vdp_frame_row_rgb888(native, row, dst + (size_t)side * 3U) != 0) {
@@ -1182,7 +1215,11 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
         if (window_edge) a = none;
         else a = genesis_vdp_plane_candidate_at(&ctx, &plane_a, x, plane_a.per_column ? group : 0U, row);
         b = genesis_vdp_plane_candidate_at(&ctx, &plane_b, x, plane_b.per_column ? group : 0U, row);
-        index = genesis_vdp_select_cram_index(&a, &b, &none, backdrop);
+        {
+          const GenesisVdpCandidatePixel *spr = sprites ? &sprite_row[left ? i : (size_t)side + width + i] : &none;
+          if (genesis_ext_sprite_wins(&a, &b, spr)) ++sprite_pixels;
+          index = genesis_vdp_select_cram_index(&a, &b, spr, backdrop);
+        }
         if (genesis_vdp_decode_cram_entry(line->cram, index, &color) != 0) {
           genesis_ext_unavailable(out, GENESIS_EXT_REASON_NATIVE_GEOMETRY);
           return -1;
@@ -1194,9 +1231,13 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
       }
     }
   }
+  if (sprites) flags |= GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT;
   memset(out, 0, sizeof(*out));
   out->status = flags == 0U ? GENESIS_EXT_AVAILABLE : GENESIS_EXT_PARTIAL;
   out->flags = flags;
+  out->mode = (uint8_t)(sprites ? GENESIS_EXT_MODE_SPRITES : GENESIS_EXT_MODE_BACKGROUNDS);
+  out->sprite_reason = sprite_reason;
+  out->sprite_pixels = sprite_pixels;
   out->native_w = (uint16_t)width;
   out->native_h = (uint16_t)height;
   out->side = (uint16_t)side;

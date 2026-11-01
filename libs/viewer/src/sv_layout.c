@@ -87,7 +87,7 @@ SvExtCheck sv_extended_surface_check(const SvExtendedSurface *e, int native_w, i
   int64_t row_bytes, needed;
   if (e == NULL || e->rgb24 == NULL) return SV_EXT_NO_SURFACE;
   if (e->status != SV_WS_PARTIAL && e->status != SV_WS_AVAILABLE) return SV_EXT_STATUS;
-  if (e->mode != SV_WIDESCREEN_EXTENDED_BACKGROUNDS) return SV_EXT_MODE;
+  if (e->mode != SV_WIDESCREEN_EXTENDED_BACKGROUNDS && e->mode != SV_WIDESCREEN_ENHANCED_GAMEPLAY) return SV_EXT_MODE;
   if (e->sequence != native_sequence) return SV_EXT_SEQUENCE;
   if (native_w <= 0 || native_h <= 0 || max_w <= 0 || native_w > max_w || native_w > 4096 || native_h > 4096) return SV_EXT_GEOMETRY;
   if (e->side <= 0 || e->side > SV_EXT_MAX_SIDE || e->height != native_h || e->width != native_w + 2 * e->side) return SV_EXT_GEOMETRY;
