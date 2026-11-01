@@ -169,9 +169,15 @@ bool App::apply_intermediates_choice(bool remove_after_build) {
 // edit can have happened (a game exited; the Settings screen is entered) so a later launcher save never writes back stale values. A missing or damaged
 // file keeps what the launcher holds.
 void App::reload_viewer_settings() {
+  // sv_settings_load reports success for any file it can open (a damaged one parses to defaults), so the content must hold at least one recognised key.
+  std::ifstream in(viewer_settings_file_, std::ios::binary);
+  if (!in) return;
+  std::string text(32768, '\0');
+  in.read(text.data(), static_cast<std::streamsize>(text.size()));
+  text.resize(static_cast<std::size_t>(in.gcount()));
   SvSettings fresh;
   sv_settings_defaults(&fresh);
-  if (sv_settings_load(&fresh, u8s(viewer_settings_file_).c_str()) == 0) viewer_settings_ = fresh;
+  if (sv_settings_parse(&fresh, text.data(), text.size()) > 0) viewer_settings_ = fresh;
 }
 
 void App::viewer_settings_changed() {

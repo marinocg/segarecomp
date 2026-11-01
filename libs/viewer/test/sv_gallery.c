@@ -64,8 +64,10 @@ typedef struct Step { const char *capture; int keys[10]; } Step;
 
 static const Step script[] = {
     {"02_pause_menu", {SV_KEY_DOWN, SV_KEY_RETURN, 0}},                          /* -> Quick Settings */
-    {"03_quick_settings", {SV_KEY_ESCAPE, SV_KEY_DOWN, SV_KEY_RETURN, 0}},        /* back, -> Video & Display */
-    {"04_video_display", {SV_KEY_ESCAPE, SV_KEY_DOWN, SV_KEY_RETURN, 0}},         /* back, -> Controls */
+    {"03_quick_settings", {SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_RIGHT, SV_KEY_RIGHT, 0}}, /* -> Widescreen Mode, select Level 3 (SEG-117 review) */
+    {"03b_quick_widescreen_l3", {SV_KEY_ESCAPE, SV_KEY_DOWN, SV_KEY_RETURN, 0}},  /* back, -> Video & Display */
+    {"04_video_display", {SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN, 0}},             /* -> Widescreen Mode (Level 3 requested: description + status note) */
+    {"04b_video_widescreen_l3", {SV_KEY_ESCAPE, SV_KEY_DOWN, SV_KEY_RETURN, 0}},  /* back, -> Controls */
     {"05_controls", {SV_KEY_DOWN, SV_KEY_RETURN, 0}},                             /* Player -> Controller status & test */
     {"05b_controller_status", {SV_KEY_ESCAPE, SV_KEY_ESCAPE, SV_KEY_DOWN, SV_KEY_RETURN, 0}}, /* back, back, -> Audio */
     {"06_audio", {SV_KEY_ESCAPE, SV_KEY_DOWN, SV_KEY_RETURN, 0}},                 /* back, -> System */

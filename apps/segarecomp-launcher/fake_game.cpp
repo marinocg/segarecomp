@@ -16,6 +16,8 @@ int main(int, char **argv) {
     in.close();
     std::ofstream(file, std::ios::trunc) << kept << "video.widescreen=" << mode << '\n';
   }
+  if (std::getenv("FAKE_VIEWER_DAMAGE") != nullptr && std::getenv("SEGARECOMP_VIEWER_SETTINGS") != nullptr)  // a truncated / garbage file
+    std::ofstream(std::getenv("SEGARECOMP_VIEWER_SETTINGS"), std::ios::trunc) << "garbage \xff\xfe\n\n=\n";
   std::string policy;
   std::ifstream(std::filesystem::path(argv[0]).parent_path() / "policy.txt") >> policy;
   const char *code = std::getenv(policy == "optimized" ? "FAKE_OPT_EXIT" : "FAKE_COMPAT_EXIT");

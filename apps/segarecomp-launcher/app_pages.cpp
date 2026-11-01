@@ -497,7 +497,7 @@ void App::draw_settings(float full_w, float h) {
     int wide = static_cast<int>(v.widescreen);
     if (segmented(ctx_, "ws", {"Original", "Extended Backgrounds", "Enhanced Widescreen"}, &wide, 0.0F)) { v.widescreen = static_cast<SvWidescreenMode>(wide); v_changed = true; }
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::text2, w, sv_widescreen_description(v.widescreen));
-    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Widescreen changes the presentation only, not the console's native resolution. Support depends on the platform and the game; where a mode is not available the game falls back to the original picture, and the game's Video page says so. Enhanced gameplay support varies by game. A program built before widescreen support keeps working in Original mode and needs rebuilding to use the other modes.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Widescreen changes the presentation only, not the console's native resolution. Support depends on the platform and the game; an unsupported mode falls back to the original picture, and the game's Video page says so. A program built before widescreen support needs rebuilding to use it.");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Display preset");
     int preset = static_cast<int>(std::min<int>(v.preset, SV_CRT_ARCADE));

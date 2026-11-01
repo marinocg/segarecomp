@@ -26,7 +26,7 @@ for a platform to say what it can honestly show, and the UI that exposes both, w
    The launcher's Settings > Video & Controls has the same selector with a short explanation. There is no widescreen toggle, indicator or message on the game picture. A bounded saturating
    counter (`sv_host_widescreen_fallbacks`) records selections that could not be honoured; there is no log growth.
 5. **One shared file, no stale writes.** The launcher edits the same `viewer-settings.cfg` through `viewer_settings_` (no `LauncherSettings` field). Because the viewer is a separate process that
-   writes the file, the launcher re-reads it at the two seams where an in-game change can have happened, game exit and entering Settings, and keeps its copy if the file is missing or damaged. No polling.
+   writes the file, the launcher re-reads it at the two seams where an in-game change can have happened, game exit and entering Settings, and keeps its copy if the file is missing, unreadable or holds no recognised setting (a damaged file parses to defaults, so the content is checked, not the open result). No polling.
 6. **Prebuilt programs.** Viewer code is statically linked into each generated program. A widescreen-capable build switches modes without rebuilding; an older prebuilt cannot gain extended
    rendering from a setting, stays usable in Original mode (it ignores the unknown key) and needs rebuilding. This applies to Sega CD prebuilts too and does not change their verification.
 7. **Rendering is deferred on purpose.** Showing a selectable but non-functional mode as working would mislead, so the UI states the truth and the Original picture is untouched. The

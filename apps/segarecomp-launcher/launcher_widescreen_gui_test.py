@@ -114,6 +114,14 @@ def main():
         expect(key_of(settings(g), "video.widescreen") == "enhanced_gameplay" and key_of(settings(g), "video.scale") == "1",
                f"a launcher edit after a game keeps the in-game widescreen choice: {settings(g)!r}")
 
+        # 6. a damaged settings file at game return keeps the launcher's own state (not defaults)
+        h = base.Case(tmp, "damaged", exe, fake_cli, fake_game)
+        base.genesis_rom(h.dir / "g.md")
+        h.import_rom(h.dir / "g.md")
+        (h.lib / "viewer-settings.cfg").write_text("video.widescreen=extended_backgrounds\nvideo.scale=1\naudio.volume=40\n")
+        run("damaged", h, base.OPEN_AND_BUILD + ["build", "wait_idle", "frames 6", "expect build_outcome=ok", "expect widescreen=extended_backgrounds", "play", "frames 4", "wait_play_end", "frames 10",
+                                                 "expect playing=0", "expect widescreen=extended_backgrounds", "quit"], {"FAKE_VIEWER_DAMAGE": "1"})
+
     if failures:
         print("\n".join(failures))
         return 1

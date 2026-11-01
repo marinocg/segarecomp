@@ -223,14 +223,14 @@ static int ws_hook(void *ctx, SvHost *host, int iteration) {
         break;
       case 7:
         it = ws_item(host);
-        w->hint_l2_ok = it != NULL && strncmp(it->text, "Extended Backgrounds (Level 2)", 30) == 0 &&
+        w->hint_l2_ok = it != NULL && strcmp(it->text, "Extended (Level 2)") == 0 &&
                         strstr(it->hint, "Shows more background scenery at the sides.") != NULL && strstr(it->hint, "Not yet available for this game. Showing the original picture.") != NULL;
         w->note_ok = ws_has_note(host, "Not yet available for this game. Showing the original picture.");
         ws_move(w, SV_KEY_RIGHT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
         break;
       case 8:
         it = ws_item(host);
-        w->hint_l3_ok = it != NULL && strncmp(it->text, "Enhanced Widescreen (Level 3)", 29) == 0 && strstr(it->hint, "Expands the playable view where supported.") != NULL;
+        w->hint_l3_ok = it != NULL && strcmp(it->text, "Enhanced (Level 3)") == 0 && strstr(it->hint, "Expands the playable view where supported.") != NULL;
         if (it != NULL) snprintf(w->l3_hint, sizeof w->l3_hint, "%s", it->hint);
         ws_move(w, SV_KEY_ESCAPE, SDL_GAMEPAD_BUTTON_EAST);
         break;
