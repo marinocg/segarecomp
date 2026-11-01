@@ -619,6 +619,7 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
       v->widescreen = (SvWidescreenMode)ev.value;
       sv_settings_sanitize(&h->settings);
       if (v->widescreen != sv_host_widescreen_effective(h) && h->widescreen_fallbacks != UINT32_MAX) h->widescreen_fallbacks++;
+      sv_host_restyle(h);
       sv_host_mark_dirty(h);
       sv_pages_rebuild(h); /* refresh the explanation and the support status for the new selection */
       return;

@@ -914,11 +914,12 @@ static int upload_picture(SvHost *h) {
   }
   centre.x = side; centre.y = 0; centre.w = w; centre.h = hgt;
   t = sv_side_treatment(h->settings.video.widescreen_side_style, h->ext_source);
+  h->side_blocked = 0;
   vis = sv_host_visible_side(h);
   if (t != SV_TREAT_PASSTHROUGH && vis > 0 &&
       (hgt > SV_SIDE_MAX_ROWS || (size_t)2u * (size_t)vis * (size_t)hgt * 3u > h->side_buf_cap ||
        sv_side_fill(t, h->last_rgb, w, hgt, w * 3, vis, h->side_buf, h->side_buf + (size_t)vis * (size_t)hgt * 3u, h->side_scratch) != 0))
-    t = SV_TREAT_PASSTHROUGH; /* unreachable for validated geometry */
+    { h->side_blocked = 1; t = SV_TREAT_PASSTHROUGH; vis = 0; } /* unreachable for validated geometry; fail closed: no side is shown rather than the raw extension */
   if (t == SV_TREAT_PASSTHROUGH) {
     if (!SDL_UpdateTexture(h->frame_tex, NULL, h->ext_raw, (w + 2 * side) * 3)) return 0;
   } else if (vis > 0) {
@@ -937,11 +938,12 @@ static int upload_picture(SvHost *h) {
  * under a higher level than the one now requested is not re-exposed. */
 void sv_host_restyle(SvHost *h) {
   if (h == NULL || h->ext_side <= 0 || h->last_w <= 0) return;
-  if ((int)h->ext_prod_mode > (int)h->settings.video.widescreen) return;
   (void)upload_picture(h);
 }
 int sv_host_visible_side(const SvHost *h) {
-  if (h == NULL || h->ext_side <= 0 || h->last_w <= 0) return 0;
+  if (h == NULL || h->ext_side <= 0 || h->last_w <= 0 || h->side_blocked) return 0;
+  /* a retained surface produced above the currently requested level is never shown (stepping down to Level 2 or Original hides the extension at once) */
+  if ((int)h->ext_prod_mode > (int)h->settings.video.widescreen) return 0;
   return sv_layout_visible_side(h->last_w, h->last_h, h->settings.video.aspect, h->settings.video.widescreen_width, h->ext_side);
 }
 int sv_host_profile_active(const SvHost *h) { return h != NULL && h->profile_path[0] != '\0'; }

@@ -57,6 +57,7 @@ struct SvHost {
   char profile_path[1100];     /* per-game widescreen profile file ('' = none: no trustworthy game identity) */
   SvVideoSettings global_ws;   /* the three widescreen fields as the GLOBAL file states them (written back unchanged) */
   SvVideoSettings profile_ws;  /* the three fields as last loaded/saved for this game */
+  int side_blocked;            /* the treatment could not be built: show no side (fail closed) */
   SvSideTreatment side_applied;   /* what the last uploaded frame shows at the sides (PASSTHROUGH when there is no extension) */
   uint8_t *last_rgb;           /* copy of the last presented picture (tightly packed RGB24) */
   int last_w, last_h;

@@ -475,12 +475,21 @@ static void behaviour_tests(const char *settings_file) {
     a = shoot(host); CHECK(!region_has_colour(a, left, 255, 255, 0), "Comfort: no stale sprite pixels after the switch"); SDL_DestroySurface(a);
     style(host, SV_SIDE_BORDERS, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
     a = shoot(host); CHECK(!region_has_colour(a, left, 255, 255, 0), "Borders: no stale sprite pixels after the switch"); SDL_DestroySurface(a);
-    /* one edit: Level 2 + Raw while the retained surface was produced as Level 3 -> the retained frame must not be re-exposed */
+    /* the sprite really is on screen in Raw + Level 3, then stepping down (menu path and one-edit path) must hide it at once, with no new frame */
+    style(host, SV_SIDE_RAW, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+    a = shoot(host); CHECK(region_has_colour(a, left, 255, 255, 0), "precondition: the Raw Level 3 sprite is on screen"); SDL_DestroySurface(a);
+    { SvSettings s = *sv_host_settings(host);
+      s.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; sv_host_apply_settings(host, &s); }
+    a = shoot(host); CHECK(!region_has_colour(a, left, 255, 255, 0) && sv_host_visible_side(host) == 0, "stepping down to Level 2 hides the retained Level 3 sprite pixels at once (Raw)"); SDL_DestroySurface(a);
+    style(host, SV_SIDE_RAW, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+    a = shoot(host); CHECK(region_has_colour(a, left, 255, 255, 0), "stepping back up re-shows the same retained frame"); SDL_DestroySurface(a);
+    style(host, SV_SIDE_RAW, SV_WIDESCREEN_ORIGINAL, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+    a = shoot(host); CHECK(!region_has_colour(a, left, 255, 255, 0) && !region_has_colour(a, left, 255, 0, 255) && sv_host_visible_side(host) == 0, "selecting Original hides the retained extension at once"); SDL_DestroySurface(a);
     style(host, SV_SIDE_COMFORT, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
     { SvSettings s = *sv_host_settings(host);
       s.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; s.video.widescreen_side_style = SV_SIDE_RAW;
       sv_host_apply_settings(host, &s); }
-    a = shoot(host); CHECK(!region_has_colour(a, left, 255, 255, 0), "a retained Level 3 surface is not re-exposed after stepping down to Level 2"); SDL_DestroySurface(a);
+    a = shoot(host); CHECK(!region_has_colour(a, left, 255, 255, 0), "a retained Level 3 surface is not re-exposed after stepping down to Level 2 with Raw in one edit"); SDL_DestroySurface(a);
     /* and the next Level 3 surface produced for the old request is stale for presentation */
     e = describe(ext, W, SIDE, H, PITCH, ++seq, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_EXTSRC_GENERIC);
     CHECK(sv_host_present_extended(host, native, W, H, W * 3, seq, &e) == 0 && sv_host_extension_side(host) == 0, "a surface produced above the requested level falls back to the original picture"); }
