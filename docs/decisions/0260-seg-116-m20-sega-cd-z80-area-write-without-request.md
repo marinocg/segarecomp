@@ -28,6 +28,8 @@ Fixture case 20 (`tools/sega_cd_bios_hw_fixture.py`, `tests/sega_cd_main_z80_tes
 survives, the word target is untouched), exactly two writes are counted, the Z80 stays healthy, a write under a bus hold (control) lands, and the digest and result are identical for
 another scheduler partition. Cases 12-19 and the Sega CD BIOS suites are unchanged.
 
+Authentic regression (local, classes and counts only): the Sega CD program rebuilt with `--file-first structural` runs the 600 M-instruction budget unattended to `budget_exhausted` (24,496 vertical-blank onsets, Z80 modelled, fault 0, `main_ignored_writes` 0): the rule does not fire on the attract path and changes nothing there.
+
 ## Limits
 
 The interactive Sonic CD session cannot be replayed (no input log), so the authentic evidence is a bounded regression run of the rebuilt program plus the classified cause above; whether the
