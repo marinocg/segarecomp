@@ -806,6 +806,19 @@ void sv_host_set_audio(SvHost *h, SDL_AudioStream *stream) {
 
 const SvSettings *sv_host_settings(const SvHost *h) { return &h->settings; }
 
+void sv_host_widescreen_caps(const SvHost *h, SvWidescreenCaps *out) {
+  if (out == NULL) return;
+  memset(out, 0, sizeof *out); /* nothing reported == Unavailable */
+  if (h != NULL && h->cfg.widescreen_caps != NULL) h->cfg.widescreen_caps(h->cfg.widescreen_ctx, out);
+}
+SvWidescreenMode sv_host_widescreen_effective(const SvHost *h) {
+  SvWidescreenCaps caps;
+  if (h == NULL) return SV_WIDESCREEN_ORIGINAL;
+  sv_host_widescreen_caps(h, &caps);
+  return sv_widescreen_effective(h->settings.video.widescreen, &caps);
+}
+uint32_t sv_host_widescreen_fallbacks(const SvHost *h) { return h != NULL ? h->widescreen_fallbacks : 0u; }
+
 void sv_host_apply_settings(SvHost *h, const SvSettings *settings) {
   h->settings = *settings;
   sv_settings_sanitize(&h->settings);

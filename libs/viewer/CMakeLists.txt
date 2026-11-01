@@ -53,4 +53,5 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER AND BUILD_TESTING)
   segarecomp_enable_warnings(sv_gallery)
   add_test(NAME sv_host_test COMMAND sv_host_test)
   set_property(TEST sv_host_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST sv_host_test PROPERTY TIMEOUT 240)  # a stuck overlay loop must fail with its output, not hang the job
 endif()

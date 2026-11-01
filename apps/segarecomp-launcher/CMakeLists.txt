@@ -132,6 +132,15 @@ if(BUILD_TESTING)
   set_property(TEST launcher_default_mode_test PROPERTY TIMEOUT 600)
 endif()
 
+# SEG-117: the Widescreen Mode selector of Settings -> Video & Controls (shared viewer settings, relaunch, game-return reload).
+if(BUILD_TESTING)
+  add_test(NAME launcher_widescreen_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_widescreen_gui_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_widescreen_gui_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_widescreen_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_widescreen_gui_test PROPERTY TIMEOUT 600)
+endif()
+
 # SEG-069-T003: the one-time first-run question about build intermediates (real window, virtual gamepad).
 if(BUILD_TESTING)
   add_test(NAME launcher_first_run_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_first_run_test.py

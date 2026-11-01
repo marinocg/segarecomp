@@ -245,6 +245,7 @@ private:
   [[nodiscard]] std::vector<const LibraryEntry *> visible_entries() const;
   SDL_Texture *cover_texture(const LibraryEntry &entry);
   void viewer_settings_changed();
+  void reload_viewer_settings();
 
   // ---- window ----
   SDL_Window *window_ = nullptr;

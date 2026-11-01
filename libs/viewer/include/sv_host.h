@@ -42,6 +42,10 @@ typedef struct SvHostConfig {
   const char *rom_sha256;      /* optional, 64 hex characters, shown in System */
   SvDiagnosticsFn diagnostics; /* optional */
   void *diagnostics_ctx;
+  /* Optional (NULL = the platform extends nothing: both enhanced levels are Unavailable and the picture stays Original). Called from the
+   * menu/presentation thread between guest slices; it only reports what the viewer can currently do and must not touch guest state. */
+  void (*widescreen_caps)(void *ctx, SvWidescreenCaps *out);
+  void *widescreen_ctx;
 } SvHostConfig;
 
 /* Opens SDL video (+ gamepad when available), the window and the renderer, and loads the persistent settings. NULL on failure. */
@@ -68,6 +72,12 @@ void sv_host_stop_screen(SvHost *host, const char *title, const char *detail);
 /* Transient on-screen message (screenshot saved, binding changed, ...). */
 void sv_host_toast(SvHost *host, const char *text);
 const SvSettings *sv_host_settings(const SvHost *host);
+/* Widescreen. REQUESTED is `sv_host_settings(host)->video.widescreen` (the saved preference, kept even when unsupported); CAPABILITY is what
+ * the platform reports per level; EFFECTIVE is the fallback Level 3 -> Level 2 -> Original of the two. None of them is visible to the guest. */
+void sv_host_widescreen_caps(const SvHost *host, SvWidescreenCaps *out);
+SvWidescreenMode sv_host_widescreen_effective(const SvHost *host);
+/* Bounded diagnostic: how many times a requested mode was selected that the platform could not honour (saturating). */
+uint32_t sv_host_widescreen_fallbacks(const SvHost *host);
 /* Replaces the settings as if they were edited in the menu (applies fullscreen/VSync/gain, sanitizes, persists). For automation and tests. */
 void sv_host_apply_settings(SvHost *host, const SvSettings *settings);
 /* Automation seam: `hook` is called once per frame while the pause overlay (or stop screen) is shown, with the finished overlay in the
