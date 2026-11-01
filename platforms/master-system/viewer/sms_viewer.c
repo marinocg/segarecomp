@@ -97,11 +97,19 @@ int sms_viewer_options_parse(int argc, const char *const *argv, SmsViewerOptions
 void sms_viewer_rig_reset(SmsViewerRig *rig) {
   sms_renderer_init(&rig->renderer, &rig->vdp, rig->records, SMS_VIEWER_FRAME_RECORDS);
   sms_renderer_attach(&rig->renderer);
+  rig->renderer.ext = rig->extension;
+  sms_extension_reset(rig->extension);
   sn76489_ring_clear(&rig->ring);
   rig->event_count = 0;
   memset(&rig->recorded, 0, sizeof rig->recorded);
   sms_machine_set_input(&rig->machine, rig->events, 0);
   sms_machine_reset(&rig->machine);
+}
+
+void sms_viewer_rig_set_extension(SmsViewerRig *rig, SmsExtension *extension) {
+  rig->extension = extension;
+  rig->renderer.ext = extension;
+  sms_extension_reset(extension);
 }
 
 int sms_viewer_rig_init(SmsViewerRig *rig, const uint8_t *rom, uint32_t rom_size, SmsMapperFamily family, SmsError *error) {

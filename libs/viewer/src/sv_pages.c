@@ -72,7 +72,7 @@ static void build_video_core(SvHost *h, SvPage *p, int full) {
   static const char *const preset[] = {"Pixel Perfect", "CRT Soft", "CRT Classic", "CRT Arcade", "Custom"};
   static const char *const wsname[] = {"Original", "Extended (Level 2)", "Enhanced (Level 3)"};
   const SvVideoSettings *v = &h->settings.video;
-  char ws_hint[300];
+  char ws_hint[400], ws_full[300];
   const char *ws_status;
   SvWidescreenCaps caps;
   int k;
@@ -83,6 +83,12 @@ static void build_video_core(SvHost *h, SvPage *p, int full) {
   /* Widescreen Mode: the description of the selected mode and the honest requested-vs-effective status live only here, never on the game picture */
   sv_host_widescreen_caps(h, &caps);
   ws_status = sv_widescreen_status(v->widescreen, &caps);
+  /* Level 3 falling back to a Partial Level 2 must still carry the platform's limitation wording (SEG-120: Master System repeats scenery) */
+  if (v->widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY && sv_widescreen_effective(v->widescreen, &caps) == SV_WIDESCREEN_EXTENDED_BACKGROUNDS &&
+      caps.extended == SV_WS_PARTIAL && caps.partial_note != NULL && caps.partial_note[0] != '\0') {
+    snprintf(ws_full, sizeof ws_full, "%s %s", ws_status, caps.partial_note);
+    ws_status = ws_full;
+  }
   /* the honest support status first: the footer shows two lines and cuts the rest, and the status must never be the part that is cut */
   snprintf(ws_hint, sizeof ws_hint, "%s%s%s", ws_status, ws_status[0] != '\0' ? " " : "", sv_widescreen_description(v->widescreen));
   add_choice(p, I_WIDESCREEN, "Widescreen Mode", (int)v->widescreen, SV_WIDESCREEN_COUNT, wsname, ws_hint);

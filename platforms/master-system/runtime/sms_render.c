@@ -43,6 +43,96 @@ typedef struct SpriteHit {
   uint8_t row;     /* row within the (zoomed-down) sprite */
 } SpriteHit;
 
+void sms_extension_reset(SmsExtension *ext) {
+  if (ext == NULL) return;
+  ext->side = 0u;
+  ext->ok_lines = 0u;
+  ext->geometry_fail = 0u;
+  ext->first_reason = SMS_EXT_REASON_NONE;
+  memset(&ext->result, 0, sizeof ext->result);
+  ext->unsupported_frames = 0u;
+}
+
+const char *sms_ext_class_name(SmsExtClass cls) {
+  switch (cls) {
+    case SMS_EXT_NONE: return "none";
+    case SMS_EXT_WRAPPED: return "wrapped";
+    case SMS_EXT_DISTINCT: return "distinct";
+    case SMS_EXT_UNAVAILABLE: return "unavailable";
+  }
+  return "invalid";
+}
+
+const char *sms_ext_reason_name(SmsExtReason reason) {
+  switch (reason) {
+    case SMS_EXT_REASON_NONE: return "none";
+    case SMS_EXT_REASON_LEFT_MASK: return "left_column_mask";
+    case SMS_EXT_REASON_VSCROLL_LOCK: return "vscroll_lock";
+    case SMS_EXT_REASON_GEOMETRY: return "geometry";
+    case SMS_EXT_REASON_INCOMPLETE: return "incomplete_frame";
+  }
+  return "invalid";
+}
+
+/* line 0: latch the requested side for the frame height (a mid-frame request change applies to the next frame) */
+static void ext_begin_frame(SmsExtension *e, unsigned height) {
+  const uint32_t want = height == 224u ? e->request_side_224 : e->request_side_192;
+  e->ok_lines = 0u;
+  e->first_reason = SMS_EXT_REASON_NONE;
+  e->geometry_fail = (uint8_t)(want > SMS_EXT_MAX_SIDE);
+  e->side = e->geometry_fail ? 0u : want;
+}
+
+static void ext_fail_line(SmsExtension *e, unsigned line, SmsExtReason reason) {
+  memset(e->work_left[line], 0, sizeof e->work_left[line]);
+  memset(e->work_right[line], 0, sizeof e->work_right[line]);
+  if (e->first_reason == SMS_EXT_REASON_NONE) e->first_reason = reason;
+}
+
+/* One line of extension from the line's own background samples: the sample at screen x outside [0, 256) is the one at x & 255 (name-table wrap),
+ * so the left side is the last `side` source samples and the right side the first `side`. `color`/`pal` NULL = display disabled (backdrop). */
+static void ext_emit_line(SmsExtension *e, const SmsVdp *v, unsigned line, unsigned r0, const uint8_t *color, const uint8_t *pal,
+                          uint8_t backdrop) {
+  const unsigned side = e->side;
+  unsigned i;
+  if (color != NULL && (r0 & R0_LEFT_BLANK) != 0u) {
+    ext_fail_line(e, line, SMS_EXT_REASON_LEFT_MASK);
+    return;
+  }
+  if (color != NULL && (r0 & R0_VSCROLL_LOCK) != 0u) {
+    ext_fail_line(e, line, SMS_EXT_REASON_VSCROLL_LOCK);
+    return;
+  }
+  for (i = 0; i < side; ++i) {
+    const unsigned l = SMS_FB_WIDTH - side + i, rr = i;
+    e->work_left[line][i] = color == NULL || pal[l] == 255u ? backdrop : (uint8_t)(v->cram[(unsigned)pal[l] * 16u + color[l]] & 0x3Fu);
+    e->work_right[line][i] = color == NULL || pal[rr] == 255u ? backdrop : (uint8_t)(v->cram[(unsigned)pal[rr] * 16u + color[rr]] & 0x3Fu);
+  }
+  ++e->ok_lines;
+}
+
+static void ext_finish_frame(SmsRenderer *r) {
+  SmsExtension *e = r->ext;
+  SmsExtResult *res = &e->result;
+  memset(res, 0, sizeof *res);
+  res->sequence = r->frames_completed;
+  res->height = r->height;
+  if (e->geometry_fail) {
+    res->cls = SMS_EXT_UNAVAILABLE;
+    res->reason = SMS_EXT_REASON_GEOMETRY;
+  } else if (e->side == 0u) {
+    res->cls = SMS_EXT_NONE;
+  } else if (e->ok_lines == r->height) {
+    res->cls = SMS_EXT_WRAPPED; /* see the block comment in sms_render.h: no Mode 4 line can be DISTINCT */
+    res->side = e->side;
+    memcpy(e->left, e->work_left, sizeof e->left);
+    memcpy(e->right, e->work_right, sizeof e->right);
+  } else {
+    res->cls = SMS_EXT_UNAVAILABLE;
+    res->reason = e->first_reason != SMS_EXT_REASON_NONE ? e->first_reason : SMS_EXT_REASON_INCOMPLETE;
+  }
+}
+
 static void finish_frame(SmsRenderer *r) {
   SmsSha256 sha;
   SmsFrameRecord *rec;
@@ -62,6 +152,7 @@ static void finish_frame(SmsRenderer *r) {
   } else {
     ++r->record_dropped;
   }
+  if (r->ext != NULL) ext_finish_frame(r);
 }
 
 void sms_render_line(SmsRenderer *r, const SmsVdp *v, uint32_t line, uint64_t frame) {
@@ -72,18 +163,25 @@ void sms_render_line(SmsRenderer *r, const SmsVdp *v, uint32_t line, uint64_t fr
   const unsigned r0 = v->reg[0], r1 = v->reg[1];
   unsigned x;
   (void)frame;
-  if (mode == SMS_VDP_MODE_UNSUPPORTED) return; /* never rendered: T004 reports the typed stop */
+  if (mode == SMS_VDP_MODE_UNSUPPORTED) {
+    /* never rendered: T004 reports the typed stop; the extension does not accept the mode either */
+    if (line == 0u && r->ext != NULL && (r->ext->request_side_192 != 0u || r->ext->request_side_224 != 0u)) ++r->ext->unsupported_frames;
+    return;
+  }
   if (line == 0u) {
     r->height = sms_vdp_active_lines(mode);
     r->vscroll = v->reg[9];
     r->in_frame = 1u;
+    if (r->ext != NULL) ext_begin_frame(r->ext, r->height);
   }
   if (!r->in_frame || line >= r->height) return;
   out = &r->pixels[line * SMS_FB_WIDTH];
   {
     const uint8_t backdrop = (uint8_t)(v->cram[16u + (v->reg[7] & 15u)] & 0x3Fu);
+    const int ext_on = r->ext != NULL && r->ext->side != 0u;
     if ((r1 & R1_DISPLAY) == 0u) {
       memset(out, backdrop, SMS_FB_WIDTH);
+      if (ext_on) ext_emit_line(r->ext, v, line, r0, NULL, NULL, backdrop);
     } else {
       /* ---- background ---- */
       const int tall = r->height == 224u;
@@ -118,6 +216,7 @@ void sms_render_line(SmsRenderer *r, const SmsVdp *v, uint32_t line, uint64_t fr
         bg_prio[x] = (uint8_t)((entry >> 12) & 1u);
         bg_pal[x] = (uint8_t)((entry >> 11) & 1u);
       }
+      if (ext_on) ext_emit_line(r->ext, v, line, r0, bg_color, bg_pal, backdrop); /* background only; sprites are not extended */
       /* ---- sprites ---- */
       memset(spr_color, 0, sizeof spr_color);
       {

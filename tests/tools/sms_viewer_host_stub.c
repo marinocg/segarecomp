@@ -33,6 +33,10 @@ void sms_sdl3_viewer_host(SmsSdl3Viewer *viewer, SmsViewerHost *host) {
   host->poll = stub_poll;
   host->present = stub_present;
 }
+int sms_sdl3_viewer_attach_extension(SmsSdl3Viewer *viewer, SmsViewerRig *rig) {
+  (void)viewer; (void)rig; /* no window, no extension: the stub viewer stays Original */
+  return -1;
+}
 void sms_sdl3_viewer_stop_screen(SmsSdl3Viewer *viewer, const char *title, const char *detail) {
   (void)viewer; (void)title; (void)detail; /* no window: nothing to show */
 }

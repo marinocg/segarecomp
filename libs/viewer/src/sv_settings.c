@@ -358,6 +358,9 @@ const char *sv_widescreen_status(SvWidescreenMode requested, const SvWidescreenC
   if (requested == SV_WIDESCREEN_ORIGINAL || (unsigned)requested >= SV_WIDESCREEN_COUNT) return "";
   if (eff == SV_WIDESCREEN_ORIGINAL) return "Not yet available for this game. Showing the original picture.";
   if (eff != requested) return "Level 3 is not available for this game. Showing Extended Backgrounds instead.";
-  if ((eff == SV_WIDESCREEN_ENHANCED_GAMEPLAY ? caps->enhanced : caps->extended) == SV_WS_PARTIAL) return "Partly available for this game: some of the extra picture may be missing.";
+  if ((eff == SV_WIDESCREEN_ENHANCED_GAMEPLAY ? caps->enhanced : caps->extended) == SV_WS_PARTIAL) {
+    if (caps->partial_note != NULL && caps->partial_note[0] != '\0') return caps->partial_note;
+    return "Partly available for this game: some of the extra picture may be missing.";
+  }
   return "Available for this game.";
 }

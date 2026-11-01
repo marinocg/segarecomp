@@ -47,6 +47,7 @@ typedef struct SmsViewerRig {
   SmsInputEvent events[SMS_VIEWER_INPUT_CAPACITY];
   uint32_t event_count;
   SmsInputState recorded; /* the last recorded input state */
+  SmsExtension *extension; /* SEG-120: optional presentation-only Level 2 target, re-attached to the renderer by every reset (never serialized); sms_viewer_rig_init leaves it alone, so a rig must start zero-initialized (static) or have it set */
 } SmsViewerRig;
 
 /* Composes the machine with the VDP, renderer, PSG (PCM into the ring) and pad exactly as the headless driver does and
@@ -54,6 +55,9 @@ typedef struct SmsViewerRig {
 int sms_viewer_rig_init(SmsViewerRig *rig, const uint8_t *rom, uint32_t rom_size, SmsMapperFamily family, SmsError *error);
 /* Deterministic machine reset with every viewer-side record (renderer records, ring, input recording) restarted. */
 void sms_viewer_rig_reset(SmsViewerRig *rig);
+
+/* SEG-120 (ADR 0263): attaches (or, with NULL, detaches) the presentation-only extension target. It survives resets. The caller owns the memory. */
+void sms_viewer_rig_set_extension(SmsViewerRig *rig, SmsExtension *extension);
 
 /* Script text of the recorded input (`<frame> <p1> <p2> <pause>` per event, sms_input.h). Returns the byte count written
  * (no terminator), or 0 when `cap` is too small. */
