@@ -47,7 +47,7 @@ typedef struct SmsViewerRig {
   SmsInputEvent events[SMS_VIEWER_INPUT_CAPACITY];
   uint32_t event_count;
   SmsInputState recorded; /* the last recorded input state */
-  SmsExtension *extension; /* SEG-120: optional presentation-only Level 2 target, re-attached to the renderer by every reset (never serialized) */
+  SmsExtension *extension; /* SEG-120: optional presentation-only Level 2 target, re-attached to the renderer by every reset (never serialized); sms_viewer_rig_init leaves it alone, so a rig must start zero-initialized (static) or have it set */
 } SmsViewerRig;
 
 /* Composes the machine with the VDP, renderer, PSG (PCM into the ring) and pad exactly as the headless driver does and

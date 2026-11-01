@@ -586,7 +586,7 @@ void widescreen_tests() {
       char text[8192]; sv_settings_format(&u, text, sizeof text); SvSettings w = defaults(); sv_settings_parse(&w, text, std::strlen(text));
       check(w.video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "the value is system independent (one video block for Genesis, SMS and Sega CD)"); } }
   // effective-mode fallback Level 3 -> Level 2 -> Original; absence of a provider means Original
-  { SvWidescreenCaps none = {SV_WS_UNAVAILABLE, SV_WS_UNAVAILABLE}, l2 = {SV_WS_AVAILABLE, SV_WS_UNAVAILABLE}, partial3 = {SV_WS_AVAILABLE, SV_WS_PARTIAL}, l3only = {SV_WS_UNAVAILABLE, SV_WS_AVAILABLE};
+  { SvWidescreenCaps none = {SV_WS_UNAVAILABLE, SV_WS_UNAVAILABLE, nullptr}, l2 = {SV_WS_AVAILABLE, SV_WS_UNAVAILABLE, nullptr}, partial3 = {SV_WS_AVAILABLE, SV_WS_PARTIAL, nullptr}, l3only = {SV_WS_UNAVAILABLE, SV_WS_AVAILABLE, nullptr};
     check(sv_widescreen_effective(SV_WIDESCREEN_ENHANCED_GAMEPLAY, nullptr) == SV_WIDESCREEN_ORIGINAL && sv_widescreen_effective(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, nullptr) == SV_WIDESCREEN_ORIGINAL, "no capability provider: Original");
     check(sv_widescreen_effective(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &none) == SV_WIDESCREEN_ORIGINAL && sv_widescreen_effective(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, &none) == SV_WIDESCREEN_ORIGINAL, "Unavailable levels stay Original");
     check(sv_widescreen_effective(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &l2) == SV_WIDESCREEN_EXTENDED_BACKGROUNDS, "Level 3 falls back to Level 2");
