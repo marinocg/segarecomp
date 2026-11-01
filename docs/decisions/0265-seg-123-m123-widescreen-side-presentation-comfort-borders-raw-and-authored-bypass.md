@@ -35,8 +35,35 @@ concern, and a future verified per-title widescreen implementation must be able 
    notes) and presentation treatment are reported separately: a Comfort frame is described as a decorative fill that "does not create new gameplay visibility", and an authored surface under Comfort
    says its full content is preserved.
 7. **Automation seams (read-only, environment-gated).** `SEGARECOMP_VIEWER_CAPTURE_DIR` + `SEGARECOMP_VIEWER_CAPTURE_FRAMES` save the composed window output of chosen presented frames as BMP, and
-   `SEGARECOMP_VIEWER_CAPTURE_ALL_STYLES` additionally saves the same frame in every style from the retained data. They never modify the guest, the picture or a setting and exist to compare the styles on real
+   `SEGARECOMP_VIEWER_CAPTURE_ALL_STYLES` additionally saves the same frame in every style (and, with `SEGARECOMP_VIEWER_CAPTURE_WIDTHS`, every width) from the retained data. They never modify the guest, the picture or a setting and exist to compare the styles on real
    programs independent of timing.
+
+## Amendment: Widescreen Width and per-game profiles (same PR)
+
+8. **Target-ratio semantics.** `video.widescreen_width` is an integer 0..100 (default 100, so existing installations keep the 16:9 target): the target display aspect is
+   `(300 + width) / 225` (0 = 4:3, 100 = 16:9, linear in the ratio, integer arithmetic only, no floating-point text). `sv_layout_visible_side` converts it, with the native
+   size and pixel aspect (square or 4:3-corrected), to a whole number of source pixels per side (floored, symmetric, bounded by `SV_EXT_MAX_SIDE`). If the native display
+   aspect is already at least as wide as the target the visible side is 0: the picture is never stretched, rescaled independently or cropped, and the menu reports the actual
+   aspect. At 100 the result equals `sv_layout_extension_side`.
+9. **Produced versus visible side.** The producers are unchanged and keep supplying the maximum 16:9 extension (so the paused guest never has to supply wider data). The host
+   keeps `ext_side` = the validated produced side and derives `visible = min(width-derived side, produced side)`; Raw never shows more than the validated columns. One
+   stable maximum-size texture is used: the draw takes a centred source crop of it and the layout is computed for the visible side (CRT, fit/integer, fullscreen and resize
+   unchanged), so a slider step never recreates a texture. Comfort and Borders rebuild their side fill for the CURRENT visible width (the fade ends at that width's outer edge).
+   An authored surface is displayed in full at 100 and cropped only by an explicit narrower choice; the native centre is never touched. A frame with no accepted extension
+   shows no side at all at any width (Original picture): unvalidated pixels are never displayed and none are fabricated.
+10. **Live preview.** The slider is the ordinary pause-menu slider (`add_slider`, `sv_pages_apply`). A width (or aspect) change calls `sv_host_restyle`, which re-treats the
+    retained native picture and raw extension and re-lays out the frame behind the menu at once; no guest frame, producer request, texture creation or presented frame is
+    involved. With Original selected the value is kept and the hint says it only applies with an extended mode.
+11. **Per-game profile ownership.** The three preferences `video.widescreen`, `video.widescreen_side_style`, `video.widescreen_width` belong to a profile keyed by platform id +
+    the full SHA-256 (`SvHostConfig::platform_id`, `profile_id`, falling back to `rom_sha256`; Genesis `genesis`, Master System `master-system`, Sega CD `sega-cd` through
+    `genesis_sdl3_viewer_open_platform`; the launcher supplies the Sega CD entry identity as `SEGARECOMP_PROFILE_ID`, never as a ROM digest). Both parts are strictly validated
+    (`[a-z0-9-]{1,24}`, 64 hex, lowercased) before any path is built: `<settings dir>/viewer-widescreen/<platform>-<sha256>.cfg`. A profile holds only the three keys; loading
+    overlays only the keys it states onto the global values (missing, partial and damaged files are safe), writes are atomic (temporary file + rename) and bounded. At close the
+    host writes the profile only when the three values differ from what it loaded/saved, and always writes the GLOBAL file with the global three values it read at open, so a
+    per-game change never leaks into the global defaults or another game, and a game without a trustworthy identity falls back to the global file (the menu says "saved for all
+    games"). The launcher's Video & Controls Defaults edit only the global defaults (including the new width), and the launcher never rewrites a profile.
+12. **Authored-widescreen compatibility.** Unchanged by the amendment: `source = SV_EXTSRC_AUTHORED` is a visual-treatment hint only, validation is untouched, and a future
+    verified implementation shows its full width at 100 under Comfort/Raw with no cropping, fading or loss.
 
 ## Consequences
 
@@ -47,5 +74,5 @@ concern, and a future verified per-title widescreen implementation must be able 
 ## Verification
 
 `sv_side_style_test` (SDL readback on H32/H40/interlace/SMS 192/224, square and 4:3, fit and integer, 720p and 1080p, CRT, fullscreen, resize; hostile synthetic scenes; Raw/authored bit-identical;
-Comfort smooth and subdued; Borders flat; stale-sprite and invalid-surface cases; no texture churn), `sv_viewer_core_test` (setting, decision table, pure fill), the style probe inside the real
+Comfort smooth and subdued; Borders flat; stale-sprite and invalid-surface cases; no texture churn), `sv_viewer_core_test` (settings, decision table, pure fill, width math, profile identity/path/overlay), `sv_width_profile_test` (live width through the real menu without a frame, produced vs visible, authored crop, per-game persistence), the style probe inside the real
 Genesis, Sega CD and Master System adapter suites, and the launcher widescreen GUI test. Local real-program visual comparison is summarised in the task record (observations only).

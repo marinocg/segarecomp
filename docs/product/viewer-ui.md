@@ -156,3 +156,8 @@ Video & Display has **Side Presentation** beside Widescreen Mode, a presentation
 
 The native picture is never changed, and the choice applies immediately without a reset. A future verified game-specific widescreen mode is shown in full under Comfort and Raw
 (only Borders, which you explicitly choose, replaces it).
+
+**Widescreen Width** (SEG-123) sits under Widescreen Mode: a slider for the target aspect from 4:3 to 16:9 (shown as, for example, `1.50:1 (37%)`). It is applied at once to the picture
+behind the pause menu, works with all three side styles, never stretches or crops the game picture, and keeps its value when Original is selected. **Widescreen Mode, Side
+Presentation and Width are saved per game** (platform + the game's SHA-256, in `viewer-widescreen/` next to the settings file); everything else stays global, and a game with no
+profile uses the launcher's defaults.
