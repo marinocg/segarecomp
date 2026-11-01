@@ -243,6 +243,115 @@ static void geometry_matrix(const char *settings_file) {
   }
 }
 
+/* ---- the pause page: Side Presentation next to Widescreen Mode, immediate application, content vs presentation wording ---- */
+static void key_event(int scancode, int down) {
+  SDL_Event e;
+  SDL_zero(e);
+  e.type = (Uint32)(down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP);
+  e.common.timestamp = SDL_GetTicksNS();
+  e.key.scancode = (SDL_Scancode)scancode;
+  e.key.down = down != 0;
+  SDL_PushEvent(&e);
+}
+static void tap(int scancode) { key_event(scancode, 1); key_event(scancode, 0); }
+typedef struct MenuScript {
+  int step;
+  char label[3][64], text[3][64], hint[3][320];
+  SvSideStyle style_seen[3];
+  SvSideTreatment treat_seen[3];
+  int row_after_widescreen;
+} MenuScript;
+static SvItem *menu_item(SvHost *host, int id) {
+  SvPage *p = sv_menu_top(&host->menu);
+  int i;
+  if (p == NULL) return NULL;
+  for (i = 0; i < p->count; ++i) if (p->items[i].id == id) return &p->items[i];
+  return NULL;
+}
+static void menu_record(MenuScript *m, SvHost *host, int slot) {
+  SvItem *it = menu_item(host, I_SIDE_STYLE);
+  if (it == NULL) return;
+  snprintf(m->label[slot], sizeof m->label[slot], "%s", it->label);
+  snprintf(m->text[slot], sizeof m->text[slot], "%s", it->text);
+  snprintf(m->hint[slot], sizeof m->hint[slot], "%s", it->hint);
+  m->style_seen[slot] = sv_host_settings(host)->video.widescreen_side_style;
+  m->treat_seen[slot] = sv_host_side_treatment(host);
+}
+static int menu_hook(void *ctx, SvHost *host, int iteration) {
+  MenuScript *m = (MenuScript *)ctx;
+  SvPage *p = sv_menu_top(&host->menu);
+  (void)iteration;
+  switch (m->step) {
+    case 0: case 1: tap(SV_KEY_DOWN); break;
+    case 2: tap(SV_KEY_RETURN); break; /* Video & Display */
+    case 3: case 4: case 5: tap(SV_KEY_DOWN); break; /* Fullscreen -> Scaling -> Aspect -> Widescreen Mode */
+    case 6: /* the row after Widescreen Mode is Side Presentation */
+      if (p != NULL) { /* only the (non-focusable) status note may lie between the two rows */
+        int i, j;
+        for (i = 0; i < p->count; ++i)
+          if (p->items[i].id == I_WIDESCREEN) {
+            for (j = i + 1; j < p->count && p->items[j].kind == SV_ITEM_LABEL; ++j) {}
+            if (j < p->count && p->items[j].id == I_SIDE_STYLE) m->row_after_widescreen = 1;
+          }
+      }
+      tap(SV_KEY_DOWN); break;
+    case 7: case 8: break; /* let focus settle */
+    case 9: menu_record(m, host, 0); tap(SV_KEY_RIGHT); break;
+    case 10: case 11: break;
+    case 12: menu_record(m, host, 1); tap(SV_KEY_RIGHT); break;
+    case 13: case 14: break;
+    case 15: menu_record(m, host, 2); tap(SV_KEY_ESCAPE); break;
+    case 16: tap(SV_KEY_ESCAPE); break;
+    default: return 1;
+  }
+  m->step++;
+  return 0;
+}
+static void menu_tests(const char *settings_file) {
+  enum { W = 320, H = 224, SIDE = 39, PITCH = (W + 2 * SIDE) * 3 };
+  uint8_t *native = (uint8_t *)malloc((size_t)W * H * 3u), *ext = (uint8_t *)malloc((size_t)PITCH * H);
+  SvHost *host = open_host(SV_SYSTEM_GENESIS, settings_file, W, 240, W, H);
+  MenuScript m;
+  SvSample smp;
+  SvExtendedSurface e;
+  CHECK(host != NULL && native != NULL && ext != NULL, "menu: setup");
+  if (host == NULL || native == NULL || ext == NULL) { free(native); free(ext); if (host != NULL) sv_host_close(host); return; }
+  make_native(native, W, H, 0);
+  make_ext(ext, W, SIDE, H, PITCH);
+  style(host, SV_SIDE_COMFORT, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+  e = describe(ext, W, SIDE, H, PITCH, 1, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_EXTSRC_GENERIC);
+  CHECK(sv_host_present_extended(host, native, W, H, W * 3, 1, &e) == 0, "menu: frame");
+  memset(&m, 0, sizeof m);
+  memset(&smp, 0, sizeof smp);
+  sv_host_set_loop_hook(host, menu_hook, &m);
+  tap(SV_KEY_ESCAPE);
+  sv_host_service(host, &smp);
+  sv_host_set_loop_hook(host, NULL, NULL);
+  CHECK(m.row_after_widescreen, "the Video page offers Side Presentation directly after Widescreen Mode");
+  CHECK(strcmp(m.label[0], "Side Presentation") == 0 && strcmp(m.text[0], "Comfort") == 0 && m.style_seen[0] == SV_SIDE_COMFORT && m.treat_seen[0] == SV_TREAT_COMFORT, "Comfort is selected by default");
+  CHECK(strstr(m.hint[0], "does not create new gameplay visibility") != NULL && strstr(m.hint[0], "decorative fill, not extra game content") != NULL, "Comfort help: hides extra data, creates no gameplay visibility");
+  CHECK(strcmp(m.text[1], "Borders") == 0 && m.style_seen[1] == SV_SIDE_BORDERS && m.treat_seen[1] == SV_TREAT_BORDERS, "Right selects Borders and applies it at once");
+  CHECK(strcmp(m.text[2], "Raw Extension") == 0 && m.style_seen[2] == SV_SIDE_RAW && m.treat_seen[2] == SV_TREAT_PASSTHROUGH, "Right selects Raw Extension and applies it at once");
+  CHECK(sv_host_settings(host)->video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "the menu change left the requested Level 3 mode alone");
+  /* an authored surface under Comfort says its content is preserved */
+  style(host, SV_SIDE_COMFORT, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+  e = describe(ext, W, SIDE, H, PITCH, 2, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_EXTSRC_AUTHORED);
+  CHECK(sv_host_present_extended(host, native, W, H, W * 3, 2, &e) == 0, "menu: authored frame");
+  memset(&m, 0, sizeof m);
+  sv_host_set_loop_hook(host, menu_hook, &m);
+  tap(SV_KEY_ESCAPE);
+  sv_host_service(host, &smp);
+  sv_host_set_loop_hook(host, NULL, NULL);
+  CHECK(strstr(m.hint[0], "widescreen content is preserved in full") != NULL, "an authored surface under Comfort: the help says its full content is preserved");
+  /* the settings file keeps the choice */
+  sv_host_close(host);
+  { char buf[16384]; FILE *f = fopen(settings_file, "rb"); size_t n = f != NULL ? fread(buf, 1, sizeof buf - 1, f) : 0;
+    if (f != NULL) fclose(f);
+    buf[n] = '\0';
+    CHECK(strstr(buf, "video.widescreen_side_style=raw") != NULL && strstr(buf, "video.widescreen=enhanced_gameplay") != NULL, "the side style is persisted next to the Level 3 preference"); }
+  free(native); free(ext);
+}
+
 static void behaviour_tests(const char *settings_file) {
   enum { W = 320, H = 224, SIDE = 39, PITCH = (W + 2 * SIDE) * 3 };
   uint8_t *native = (uint8_t *)malloc((size_t)W * H * 3u), *ext = (uint8_t *)malloc((size_t)PITCH * H), *n2 = (uint8_t *)malloc(400u * H * 3u);
@@ -316,6 +425,27 @@ static void behaviour_tests(const char *settings_file) {
     CHECK(seen[0] == seen[3] && seen[0] != seen[1] && seen[1] != seen[2] && seen[0] != seen[2], "Comfort -> Raw -> Borders -> Comfort is deterministic and distinct"); }
   sv_host_extension_stats(host, &acc1, &rej1, &tex1);
   CHECK(acc1 == acc0 && rej1 == rej0 && tex1 == tex0, "style switching changes no producer-facing counter and creates no texture");
+
+  /* the native screenshot (game pixels only) is identical whatever the side style */
+  { uint64_t sh[3];
+    int k;
+    for (k = 0; k < 3; ++k) {
+      SvSettings st = *sv_host_settings(host);
+      char path[1024];
+      FILE *f;
+      st.video.widescreen_side_style = (SvSideStyle)k;
+      sv_host_apply_settings(host, &st);
+      path[0] = '\0';
+      sh[k] = 0u;
+      if (sv_host_screenshot(host, path, sizeof path) == 0 && (f = fopen(path, "rb")) != NULL) {
+        uint64_t hh = 1469598103934665603ull;
+        int c;
+        while ((c = fgetc(f)) != EOF) hh = (hh ^ (uint64_t)(unsigned)c) * 1099511628211ull;
+        fclose(f);
+        sh[k] = hh;
+      }
+    }
+    CHECK(sh[0] != 0u && sh[0] == sh[1] && sh[1] == sh[2], "native screenshots are identical in every side style"); }
 
   /* steady state: many frames at stable geometry, any style: no texture churn */
   for (i = 0; i < 40; ++i) {
@@ -417,7 +547,10 @@ int main(void) {
   SDL_setenv_unsafe("SDL_AUDIODRIVER", "dummy", 1);
   SDL_setenv_unsafe("SDL_RENDER_DRIVER", "software", 1);
   SDL_setenv_unsafe("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1", 1);
+  { char shots[700]; snprintf(shots, sizeof shots, "%s/shots", dir); SDL_setenv_unsafe("SEGARECOMP_SCREENSHOT_DIR", shots, 1); }
   behaviour_tests(settings_file);
+  remove(settings_file);
+  menu_tests(settings_file);
   remove(settings_file);
   geometry_matrix(settings_file);
   remove(settings_file);
