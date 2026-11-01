@@ -124,8 +124,8 @@ def main():
 
         check(code == 0 and guest_view(rep) == guest_view(replay), "viewer: the recording replays headlessly to the identical report and captured frames")
 
-        # SEG-117: the Sega CD viewer reads the same shared Widescreen Mode setting as the Genesis one. No extended rendering exists yet, so a saved Level 3
-        # request leaves the run (reports, presented frames, captured frames, the recording) identical to Original and the viewer does not rewrite the file.
+        # SEG-117: the Sega CD viewer reads the same shared Widescreen Mode setting as the Genesis one. A saved Level 3 request is shown as Level 2 (the
+        # extension is presentation only), so it leaves the run (reports, presented frames, captured frames, the recording) identical to Original and the viewer does not rewrite the file.
         ws_file = tmp / "settings.cfg"
         ws_text = "video.widescreen=enhanced_gameplay\n"
         ws_file.write_text(ws_text)
@@ -133,6 +133,20 @@ def main():
         check(wcode == 0 and guest_view(wrep) == guest_view(rep) and wrep["live"]["presented"] == rep["live"]["presented"] and wrec == rec,
               "widescreen: a saved Level 3 request leaves the Sega CD run, frames and input recording identical to Original" + ("" if wcode == 0 else " (%s)" % wout.stderr[-300:]))
         check(ws_file.read_text() == ws_text, "widescreen: the Sega CD viewer reads the shared setting and does not rewrite it")
+        # SEG-119 (ADR 0262): Level 2 on the real driver. The extension is produced by the Sega CD frame path (scd_present_frame) for every presented
+        # frame (the viewer reports its counters on exit, only for a run that requested it); the Sega CD machine is untouched: the whole report (guest state,
+        # scheduler counters, CD-DA / PCM / audio blocks and the live counters), the recorded input and the headless replay equal the Original run.
+        ws_file.write_text("video.widescreen=extended_backgrounds\n")
+        l2code, l2rep, l2rec, l2out = live("l2", keys.read_text())
+        check(l2code == 0 and l2rep == rep and l2rec == rec,
+              "level 2: report (guest, scheduler, audio, live counters) and input recording identical to Original" + ("" if l2code == 0 else " (%s)" % l2out.stderr[-300:]))
+        stats = [ln for ln in l2out.stderr.splitlines() if ln.startswith("viewer: level2 extension")]
+        check(len(stats) == 1 and "produced=%d failed=0" % rep["live"]["presented"] in stats[0], "level 2: one extension per presented frame, none failed (%s)" % stats)
+        check(not [ln for ln in out.stderr.splitlines() if ln.startswith("viewer: level2 extension")], "original: no extension work reported")
+        check(guest_view(l2rep) == guest_view(rep), "level 2: the machine's observable state equals Original")
+        (tmp / "l2.rec").write_text(l2rec)
+        code, _ = run(exe, base + ["--input-script", tmp / "l2.rec", "--capture-dir", capdir, "--capture-onset", 8, "--capture-onset", 17, "--report", tmp / "r2.json"], {})
+        check(code == 0 and guest_view(json.loads((tmp / "r2.json").read_text())) == guest_view(replay), "level 2: the recording replays headlessly to the Original report")
         ws_file.unlink()
 
         # F6 holds, F7 steps: same recording and report as the same keys without the pause

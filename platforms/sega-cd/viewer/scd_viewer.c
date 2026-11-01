@@ -33,6 +33,10 @@ typedef struct ScdSdlHost {
   GenesisPacer pacer;
   int opened, failed;
   int paused;
+  /* SEG-119 (ADR 0262): Level 2. The Genesis adapter owns the surface and the request sampling; `frame_sequence` is the number of the frame being
+   * presented (the onset number the driver hands over), which the adapter compares with the stamp the machine put on the extension result. */
+  GenesisFrameExtension *extension;
+  uint64_t frame_sequence;
   /* SEG-104 (ADR 0244): the CD-DA stream. The machine hands over one drive sector at a time (scd_live.h `audio`); the frames wait here
    * until the end of the video frame and are then presented under the Genesis audio policy (queue limit, underrun, mute counters). A one-way
    * flow: nothing here is read by the machine, and a frame that does not fit is counted and dropped, never waited for. */
@@ -94,6 +98,7 @@ static int ensure_open(ScdSdlHost *h) {
       return -1;
     }
     genesis_sdl3_viewer_host(h->sdl, &h->host);
+    h->extension = genesis_sdl3_viewer_extension(h->sdl, &h->frame_sequence); /* NULL: the viewer stays Original, reporting Unavailable */
     genesis_pacer_init(&h->pacer, unthrottled != NULL && strcmp(unthrottled, "1") == 0);
     {
       const char *mute = getenv("SEGARECOMP_VIEWER_MUTE");
@@ -138,9 +143,12 @@ static int sdl_poll(void *ctx, uint64_t boundary, ScdLivePoll *out) {
 
 static int sdl_present(void *ctx, const struct GenesisFrameArtifact *frame, uint64_t onset) {
   ScdSdlHost *h = (ScdSdlHost *)ctx;
-  (void)onset;
-  return ensure_open(h) == 0 ? h->host.present(h->host.ctx, frame) : -1;
+  if (ensure_open(h) != 0) return -1;
+  h->frame_sequence = onset;
+  return h->host.present(h->host.ctx, frame);
 }
+
+static GenesisFrameExtension *sdl_extension(void *ctx) { return ((ScdSdlHost *)ctx)->extension; }
 
 static void flush_cdda(ScdSdlHost *h, int force) {
   if (h->pending_frames == 0U) {
@@ -183,6 +191,9 @@ static void sdl_finished(void *ctx, const struct ScdLiveSummary *summary, const 
   char detail[240];
   if (!h->opened) return;
   flush_cdda(h, 1);
+  if (h->extension != NULL && h->extension->produced + h->extension->failed != 0U) /* only a run that requested Level 2 */
+    fprintf(stderr, "viewer: level2 extension produced=%llu failed=%llu\n", (unsigned long long)h->extension->produced,
+            (unsigned long long)h->extension->failed);
   if (h->delivered + h->pending_dropped != 0U)
     fprintf(stderr, "viewer: cdda frames offered=%llu submitted=%llu overrun_dropped=%llu refused=%llu discarded=%llu underruns=%llu pending_dropped=%llu\n",
             (unsigned long long)(h->delivered + h->pending_dropped), (unsigned long long)h->presenter.submitted,
@@ -200,17 +211,23 @@ static void sdl_finished(void *ctx, const struct ScdLiveSummary *summary, const 
   }
 }
 
+/* The host this viewer registers with the live driver (a function of its own so the viewer tests drive exactly the registered callbacks). */
+static void fill_live_host(ScdLiveHost *live) {
+  memset(live, 0, sizeof *live);
+  live->ctx = &g_host;
+  live->poll = sdl_poll;
+  live->present = sdl_present;
+  live->pace = sdl_pace;
+  live->finished = sdl_finished;
+  live->audio = sdl_audio;
+  live->extension = sdl_extension;
+}
+
 int scd_viewer_main_bios(const ScdProgram *program, const ScdAuthentic *authentic, int argc, char **argv) {
   static ScdLiveHost live;
   int rc;
   memset(&g_host, 0, sizeof g_host);
-  memset(&live, 0, sizeof live);
-  live.ctx = &g_host;
-  live.poll = sdl_poll;
-  live.present = sdl_present;
-  live.pace = sdl_pace;
-  live.finished = sdl_finished;
-  live.audio = sdl_audio;
+  fill_live_host(&live);
   scd_live_host_registered = &live;
   rc = scd_program_main_bios(program, authentic, argc, argv);
   scd_live_host_registered = NULL;

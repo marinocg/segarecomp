@@ -174,9 +174,9 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
 * **Widescreen Mode** (Quick Settings and Video & Display, next to scaling and aspect; also in the launcher's Settings > Video & Controls): *Original* (default),
   *Extended Backgrounds (Level 2)* or *Enhanced Widescreen (Level 3)*. It is a presentation preference shared by the launcher and every viewer (Genesis, Master System
   and Sega CD) through the one `video.widescreen` key of `viewer-settings.cfg`; the pause menu applies a change to the next frame without a restart, reset or any
-  change to the guest, and shows the description of the selected mode plus an honest support line. **Extended rendering is not implemented yet** (SEG-118 onward):
-  until a platform reports support, either experimental choice is saved but reads "Not yet available for this game. Showing the original picture." and the picture
-  stays Original. There is no widescreen control or message on the game picture itself. A program built before widescreen support keeps working in Original mode;
+  change to the guest, and shows the description of the selected mode plus an honest support line. **Extended Backgrounds (Level 2) is implemented for Genesis (SEG-118) and Sega CD (SEG-119; always reported as Partial, see `platforms/sega-cd/README.md`);** a platform that does not
+  report support (Master System until SEG-120, and any program built before this support) saves either experimental choice but reads "Not yet available for this game. Showing the original picture." and the picture
+  stays Original; Enhanced Widescreen shows as Level 2 where Level 2 exists. There is no widescreen control or message on the game picture itself. A program built before widescreen support keeps working in Original mode;
   it needs rebuilding to gain extended rendering (ADR 0261).
 * Display presets: **Pixel Perfect** (the untouched nearest-neighbour picture), **CRT Soft** (scanline gaps + glow), **CRT Classic** (adds the RGB
   aperture mask and slight curvature), **CRT Arcade** (stronger everything). Editing a slider makes the preset *Custom*.

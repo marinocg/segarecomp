@@ -2778,26 +2778,11 @@ static void genesis_raster_advance(GenesisRuntime *runtime, uint64_t now_ticks) 
 #endif
 
 /* SEG-118: the optional presentation-only extension. Runs only after the native frame rendered successfully, with the frame's raster state and
- * VRAM journal still valid, and only when the adapter asked for it. It reads `native` and writes nothing but the adapter's own surface/result; the
- * result is returned (not stored) so the caller can stamp it with the sequence published by the same call. */
+ * VRAM journal still valid, and only when the adapter asked for it (the dispatch itself is the shared genesis_frame_extension_run, also used by the
+ * Sega CD frame path). The result is returned (not stored) so the caller can stamp it with the sequence published by the same call. */
 static void genesis_run_frame_extension(GenesisRasterCapture *capture, const uint8_t *vram, const GenesisFrameArtifact *native,
                                         GenesisExtensionResult *out) {
-  GenesisFrameExtension *ext = capture->extension;
-  memset(out, 0, sizeof(*out));
-  if (ext == 0 || ext->request == 0U) {
-    out->status = GENESIS_EXT_NONE;
-    return;
-  }
-  if (ext->producer == 0 || ext->pixels == 0) {
-    out->status = GENESIS_EXT_UNAVAILABLE;
-    out->reason = GENESIS_EXT_REASON_INVALID_REQUEST;
-  } else if (ext->producer(vram, &capture->frame, native, ext, out) != 0 ||
-             (out->status != GENESIS_EXT_PARTIAL && out->status != GENESIS_EXT_AVAILABLE)) {
-    const uint8_t reason = out->status == GENESIS_EXT_UNAVAILABLE && out->reason != 0U ? out->reason : (uint8_t)GENESIS_EXT_REASON_INVALID_REQUEST;
-    memset(out, 0, sizeof(*out));
-    out->status = GENESIS_EXT_UNAVAILABLE;
-    out->reason = reason;
-  }
+  genesis_frame_extension_run(capture->extension, vram, &capture->frame, native, out);
 }
 
 /* Renders the frame that just ended and publishes it atomically (a failed render publishes nothing and mutates

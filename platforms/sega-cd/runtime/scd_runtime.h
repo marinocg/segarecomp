@@ -884,6 +884,12 @@ int scd_vdp_capture_request(ScdMachine *m, uint64_t onset, const char *dir);
 int scd_vdp_present_enable(ScdMachine *m);
 /* The frame completed at the latest onset (valid until the machine next runs), or NULL when none is new since the last call. */
 const struct GenesisFrameArtifact *scd_vdp_present_take(ScdMachine *m, uint64_t *onset);
+/* SEG-119 (ADR 0262): attach (or, with NULL, detach) the viewer's presentation-only Level 2 extension target (frame_extension.h). While attached and
+ * `request` is set, every successfully composed presentation frame is followed by one producer call on the frame's own VRAM and per-line state; the
+ * result is stamped with that frame's number (the `onset` scd_vdp_present_take returns). Nothing here touches guest state; no target = no work.
+ * -1 when the machine has no VDP host. */
+struct GenesisFrameExtension;
+int scd_vdp_present_set_extension(ScdMachine *m, struct GenesisFrameExtension *extension);
 void scd_vdp_present_counts(const ScdMachine *m, uint64_t *rendered, uint64_t *skipped, uint64_t *rejected);
 /* The canonical frame digest (ADR 0146 decision 5), the same SHA-256 as a capture report's `sha256`. */
 void scd_frame_sha256(const struct GenesisFrameArtifact *frame, char out[65]);
