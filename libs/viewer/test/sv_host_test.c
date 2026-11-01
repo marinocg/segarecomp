@@ -308,6 +308,7 @@ static void widescreen_tests(const char *dir, uint8_t *frame) {
   remove(file);
   SDL_setenv_unsafe("SEGARECOMP_VIEWER_SETTINGS", file, 1);
 
+  printf("phase: ws 1 no provider\n"); fflush(stdout);
   /* 1. no capability provider (every platform in this milestone): Level 2 and Level 3 are selectable, persisted, and the effective mode stays Original */
   host = open_host(SV_SYSTEM_GENESIS, file, 0);
   CHECK(host != NULL, "widescreen: host opens");
@@ -356,6 +357,7 @@ static void widescreen_tests(const char *dir, uint8_t *frame) {
     sv_host_close(host);
   }
 
+  printf("phase: ws 2 provider\n"); fflush(stdout);
   /* 2. a provider: fallback Level 3 -> Level 2 -> Original, status text, requested preserved */
   { WsCaps wc;
     SvHostConfig cfg;
@@ -379,6 +381,7 @@ static void widescreen_tests(const char *dir, uint8_t *frame) {
     }
   }
 
+  printf("phase: ws 3 gamepad\n"); fflush(stdout);
   /* 3. gamepad: the same selector is reachable and cycles with a virtual pad (D-pad, South to enter, East to go back) */
   remove(file);
   host = open_host(SV_SYSTEM_GENESIS, file, 0);
@@ -406,6 +409,7 @@ static void widescreen_tests(const char *dir, uint8_t *frame) {
     sv_host_close(host);
   }
 
+  printf("phase: ws 4 defaults\n"); fflush(stdout);
   /* 4. restore video defaults restores Original; existing aspect/scale untouched by the new field */
   host = open_host(SV_SYSTEM_GENESIS, file, 0);
   if (host != NULL) {
@@ -883,7 +887,9 @@ int main(void) {
       host = NULL;
     } else if (host != NULL) sv_host_close(host);
   }
+  printf("phase: %s\n", "widescreen_tests(dir, frame"); fflush(stdout);
   widescreen_tests(dir, frame);
+  printf("phase: %s\n", "widescreen_live_tests(dir, frame"); fflush(stdout);
   widescreen_live_tests(dir, frame);
   free(frame);
   if (failures != 0) { printf("sv_host_test: %d failure(s)\n", failures); return 1; }
