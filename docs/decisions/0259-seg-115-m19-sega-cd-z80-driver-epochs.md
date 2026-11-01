@@ -54,7 +54,7 @@ stale stub-era image at epoch 6).
 `tools/sega_cd_bios_hw_fixture.py` cases 15-16 (hand-assembled Z80 programs; the fixture ROM is 0x200 bytes larger) and `tests/sega_cd_main_z80_test.py`: first upload and
 activation, a different image uploaded across two holds *while the previous image runs* and restarted (the case that selected the stale image), a restart without change,
 the same program again with different irrelevant Z80 data (the same image, not a new one), an isolated Z80 re-armed by a registered image, identical state for scheduler
-partitions; the existing unregistered-image stop (case 14) is unchanged. Negative control (both options off): case 15 faults with `z80_code_mismatch` at the restart and
+partitions; the existing unregistered-image stop (case 14) is unchanged. Negative control (an ephemeral local build with both options off, not a committed test - the options are fixed in the Sega CD attach; the Genesis rule itself is pinned by `genesis_z80_epoch_signature_test`): case 15 faults with `z80_code_mismatch` at the restart and
 runs the old image; case 16 stays isolated.
 
 ## 4. Feasibility gate for structural variants (T003) - decision **STRUCTURAL_VARIANTS_GO** (bounded; no closure claim)
@@ -135,6 +135,8 @@ Earthworm Jim SE, Model 1 BIOS V1.10, formatted-empty backup RAM, the M18 determ
 | Sonic CD | build 10 rounds with the same program identity as M18; with and without backup RAM the stop, instruction count and frame hash equal M18's (the existing `backup_ram_unsupported` / `code_bytes_mismatch` frontiers are unchanged); its Z80 driver now runs (8 M Z80 cycles, 3,759 YM writes) |
 
 ## 8. Limits and remaining blockers
+
+- Review findings accepted as recorded limits (no blocker): typed Z80 stops met during run-ahead are latched and re-raised at the next main access or at the final synchronisation, but no committed test exercises that path; `fm_missing`/`fm_overrun` mix no FM rather than failing closed (asserted 0 only by fixture case 18 and the authentic runs); a typed-stub snapshot form stops the run rather than isolating; the report's mixer digest is not at the report instant when a final Z80 stop was met; the default `--z80-audio 1` makes a C++ driver a prerequisite of every Sega CD build (`--z80-audio 0` avoids it); vendored ymfm headers are not in the object cache key; `SCD_Z80_MASTER_TICK_TICKS` and `resolve_cxx` duplicate existing definitions. A 337-trial differential fuzz by the reviewer (random programs and alternatives against the immutable image of the live bytes) found no wrong execution.
 
 - No reference emulator ran here: the Z80 behaviour is *observed*, the audio is not reference-checked or verified by listening, and the level of FM/PSG against CD-DA/PCM is the Genesis devices' own scaling summed with theirs (not established).
 - The candidate set is not complete (ADR 0135 limits unchanged); a write the analysis did not list isolates the Z80 until the next image epoch (e.g. the BIOS driver's own rewrite at epoch 3, which the analysis does not list). Whether the game driver performs other modifications later in a longer play session is not known; the run above covers 19,999 frames (~5.5 min of guest time).
