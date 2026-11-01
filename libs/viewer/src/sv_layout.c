@@ -44,6 +44,22 @@ int sv_layout_extension_side(int src_w, int src_h, SvAspect aspect) {
   return extra > SV_EXT_MAX_SIDE ? SV_EXT_MAX_SIDE : (int)extra;
 }
 
+int sv_layout_visible_side(int src_w, int src_h, SvAspect aspect, int width_pct, int produced_side) {
+  int64_t an, ad, total, extra, num, den;
+  int side;
+  int n, d;
+  if (src_w <= 0 || src_h <= 0 || src_w > 4096 || src_h > 4096 || produced_side <= 0) return 0;
+  sv_widescreen_width_ratio(width_pct, &n, &d);
+  num = n; den = d;
+  ext_native_display(src_w, src_h, aspect, &an, &ad);
+  total = ((int64_t)src_h * num * (int64_t)src_w * ad) / (den * an);
+  extra = total - src_w;
+  if (extra <= 1) return 0;
+  extra /= 2;
+  side = extra > SV_EXT_MAX_SIDE ? SV_EXT_MAX_SIDE : (int)extra;
+  return side > produced_side ? produced_side : side;
+}
+
 void sv_layout_extension_max(int max_w, int max_h, int *width_out, int *height_out) {
   const int ok = max_w > 0 && max_h > 0 && max_w <= 4096 && max_h <= 4096;
   if (width_out != NULL) *width_out = ok ? max_w + 2 * SV_EXT_MAX_SIDE : 0;

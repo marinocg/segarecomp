@@ -477,7 +477,7 @@ void App::draw_settings(float full_w, float h) {
   } else if (settings_tab_ == 3) {
     section("VIDEO & CONTROLS DEFAULTS");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, "SDL_Renderer presentation; SDL_GPU is not implemented. Audio uses the default output device; device selection is not implemented.");
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "These are the same settings as the game's in-game menu (Esc), stored in the viewer settings file. They apply the next time a game starts. Key and gamepad bindings are remapped in the game's Controls page.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "These are the same settings as the game's in-game menu (Esc), stored in the viewer settings file. They apply the next time a game starts. Widescreen choices here are only the defaults for games that have none of their own; changing them in a game's menu saves them for that game only. Key and gamepad bindings are remapped in the game's Controls page.");
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     bool v_changed = false;
     SvVideoSettings &v = viewer_settings_.video;
@@ -498,6 +498,14 @@ void App::draw_settings(float full_w, float h) {
     if (segmented(ctx_, "ws", {"Original", "Extended Backgrounds", "Enhanced Widescreen"}, &wide, 0.0F)) { v.widescreen = static_cast<SvWidescreenMode>(wide); v_changed = true; }
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::text2, w, sv_widescreen_description(v.widescreen));
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Widescreen changes the presentation only, not the console's native resolution. Support depends on the platform and the game; an unsupported mode falls back to the original picture, and the game's Video page says so. A program built before widescreen support needs rebuilding to use it.");
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    row_label("Widescreen width");
+    if (button(ctx_, "wsw_minus", "-", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { v.widescreen_width = std::max(0, v.widescreen_width - 5); v_changed = true; }
+    ImGui::SameLine(0.0F, ctx_.u(6.0F));
+    { char ratio[24]; const ImVec2 p = ImGui::GetCursorScreenPos(); sv_widescreen_width_text(v.widescreen_width, ratio, sizeof ratio);
+      draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(p.x, p.y + ctx_.u(7.0F)), (std::string(ratio) + " (" + std::to_string(v.widescreen_width) + "%)").c_str()); ImGui::SetCursorScreenPos(ImVec2(p.x + ctx_.u(150.0F), p.y)); }
+    if (button(ctx_, "wsw_plus", "+", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { v.widescreen_width = std::min(100, v.widescreen_width + 5); v_changed = true; }
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Target aspect between 4:3 and 16:9 when a widescreen mode is on. This is the default for games without their own setting; each game keeps its own Widescreen Mode, Side Presentation and Width from its in-game Video & Display page.");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Side presentation");
     int side_style = static_cast<int>(v.widescreen_side_style);

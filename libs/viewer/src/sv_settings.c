@@ -36,6 +36,7 @@ void sv_video_defaults(SvVideoSettings *v) {
   v->aspect = SV_ASPECT_ORIGINAL;
   v->preset = SV_CRT_PIXEL_PERFECT;
   v->brightness = 100;
+  v->widescreen_width = SV_WS_WIDTH_DEFAULT;
 }
 
 void sv_apply_crt_preset(SvVideoSettings *v, SvCrtPreset preset) {
@@ -94,6 +95,7 @@ void sv_settings_sanitize(SvSettings *s) {
   v->aspect = (v->aspect == SV_ASPECT_4_3) ? SV_ASPECT_4_3 : SV_ASPECT_ORIGINAL;
   if ((unsigned)v->widescreen >= SV_WIDESCREEN_COUNT) v->widescreen = SV_WIDESCREEN_ORIGINAL;
   if ((unsigned)v->widescreen_side_style >= SV_SIDE_COUNT) v->widescreen_side_style = SV_SIDE_COMFORT;
+  v->widescreen_width = clampi(v->widescreen_width, 0, 100);
   if ((unsigned)v->preset >= SV_CRT_COUNT) v->preset = SV_CRT_PIXEL_PERFECT;
   v->scanlines = clampi(v->scanlines, 0, 100);
   v->mask = clampi(v->mask, 0, 100);
@@ -178,6 +180,7 @@ static int apply_pair(SvSettings *s, const char *key, const char *value) {
   if (strcmp(key, "pad_name") == 0) { strncpy(s->pad_name, value, sizeof s->pad_name - 1u); s->pad_name[sizeof s->pad_name - 1u] = '\0'; return 1; }
   if (!parse_int(value, &v)) return 0;
   if (strcmp(key, "video.fullscreen") == 0) s->video.fullscreen = v;
+  else if (strcmp(key, "video.widescreen_width") == 0) s->video.widescreen_width = v;
   else if (strcmp(key, "video.scale") == 0) s->video.scale = (SvScaleMode)v;
   else if (strcmp(key, "video.aspect") == 0) s->video.aspect = (SvAspect)v;
   else if (strcmp(key, "video.preset") == 0) s->video.preset = (SvCrtPreset)v;
@@ -233,6 +236,7 @@ size_t sv_settings_format(const SvSettings *s, char *out, size_t cap) {
        s->video.vsync, s->video.show_fps, s->video.window_w, s->video.window_h);
   EMIT("video.widescreen=%s\n", widescreen_keys[(unsigned)s->video.widescreen < SV_WIDESCREEN_COUNT ? s->video.widescreen : SV_WIDESCREEN_ORIGINAL]);
   EMIT("video.widescreen_side_style=%s\n", side_style_keys[(unsigned)s->video.widescreen_side_style < SV_SIDE_COUNT ? s->video.widescreen_side_style : SV_SIDE_COMFORT]);
+  EMIT("video.widescreen_width=%d\n", s->video.widescreen_width);
   EMIT("audio.volume=%d\naudio.muted=%d\ninput.deadzone=%d\ninput.menu_key=%d\n", s->audio.volume, s->audio.muted, s->deadzone, s->menu_key);
   if (s->pad_name[0] != '\0') EMIT("pad_name=%s\n", s->pad_name);
   for (sys = 0; sys < SV_SYSTEM_COUNT; ++sys)
@@ -390,4 +394,120 @@ const char *sv_side_style_description(SvSideStyle style) {
     case SV_SIDE_RAW: return "Shows the extension exactly as the game produced it, including distracting extra data. Useful for debugging.";
     default: return "Hides distracting extra game data with a soft ambient fill. It does not create new gameplay visibility.";
   }
+}
+
+void sv_widescreen_width_ratio(int width, int *num, int *den) {
+  if (width < 0) width = 0;
+  if (width > 100) width = 100;
+  if (num != NULL) *num = 300 + width;
+  if (den != NULL) *den = 225;
+}
+
+int sv_ratio_milli(int w, int h, SvAspect aspect) {
+  if (w <= 0 || h <= 0 || w > 100000 || h > 100000) return 0;
+  if (aspect == SV_ASPECT_4_3) return 1333;
+  return (int)(((int64_t)w * 1000 + h / 2) / h);
+}
+
+const char *sv_ratio_text(int milli, char *buf, size_t cap) {
+  if (buf == NULL || cap == 0) return "";
+  if (milli >= 1332 && milli <= 1334) snprintf(buf, cap, "4:3");
+  else if (milli >= 1777 && milli <= 1778) snprintf(buf, cap, "16:9");
+  else snprintf(buf, cap, "%d.%02d:1", milli / 1000, (milli % 1000 + 5) / 10 > 99 ? 99 : (milli % 1000 + 5) / 10);
+  return buf;
+}
+
+const char *sv_widescreen_width_text(int width, char *buf, size_t cap) {
+  int n, d;
+  sv_widescreen_width_ratio(width, &n, &d);
+  if (width <= 0) { if (buf != NULL && cap > 0) snprintf(buf, cap, "4:3"); return buf != NULL ? buf : ""; }
+  if (width >= 100) { if (buf != NULL && cap > 0) snprintf(buf, cap, "16:9"); return buf != NULL ? buf : ""; }
+  return sv_ratio_text((int)(((int64_t)n * 1000 + d / 2) / d), buf, cap);
+}
+
+/* ---- per-game widescreen profile ---- */
+
+static int profile_token_valid(const char *t, size_t min, size_t max, int hex) {
+  size_t n = 0;
+  if (t == NULL) return 0;
+  for (; t[n] != '\0'; ++n) {
+    const char c = t[n];
+    const int ok = hex ? ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) : ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-');
+    if (!ok || n >= max) return 0;
+  }
+  return n >= min && (!hex || n == 64u);
+}
+
+int sv_profile_identity_valid(const char *platform, const char *sha256) {
+  return profile_token_valid(platform, 1, 24, 0) && profile_token_valid(sha256, 64, 64, 1);
+}
+
+int sv_profile_path(const char *settings_path, const char *platform, const char *sha256, char *out, size_t cap) {
+  const char *slash, *slash2;
+  size_t dir_len;
+  char sha[65];
+  size_t i;
+  int n;
+  if (out == NULL || cap == 0 || settings_path == NULL || !sv_profile_identity_valid(platform, sha256)) return -1;
+  for (i = 0; i < 64; ++i) sha[i] = (char)((sha256[i] >= 'A' && sha256[i] <= 'F') ? sha256[i] - 'A' + 'a' : sha256[i]);
+  sha[64] = '\0';
+  slash = strrchr(settings_path, '/');
+  slash2 = strrchr(settings_path, '\\');
+  if (slash2 != NULL && (slash == NULL || slash2 > slash)) slash = slash2;
+  dir_len = slash != NULL ? (size_t)(slash - settings_path) : 0u;
+  if (dir_len > 900u) return -1;
+  if (slash != NULL) n = snprintf(out, cap, "%.*s/viewer-widescreen/%s-%s.cfg", (int)dir_len, settings_path, platform, sha);
+  else n = snprintf(out, cap, "viewer-widescreen/%s-%s.cfg", platform, sha);
+  return n > 0 && (size_t)n < cap ? 0 : -1;
+}
+
+size_t sv_profile_load(SvSettings *settings, const char *path) {
+  static char buffer[4096];
+  SvSettings tmp;
+  FILE *f;
+  size_t n, applied = 0;
+  const char *p;
+  if (settings == NULL || path == NULL || *path == '\0') return 0;
+  f = fopen(path, "rb");
+  if (f == NULL) return 0;
+  n = fread(buffer, 1, sizeof buffer - 1u, f);
+  fclose(f);
+  buffer[n] = '\0';
+  tmp = *settings;
+  (void)sv_settings_parse(&tmp, buffer, n);
+  /* only the three keys that the file actually states override; everything else (and every key it does not state) keeps the global value */
+  for (p = buffer; *p != '\0';) {
+    const char *eol = strchr(p, '\n');
+    const size_t len = eol != NULL ? (size_t)(eol - p) : strlen(p);
+    if (len >= 17u && strncmp(p, "video.widescreen=", 17) == 0) { settings->video.widescreen = tmp.video.widescreen; ++applied; }
+    else if (len >= 28u && strncmp(p, "video.widescreen_side_style=", 28) == 0) { settings->video.widescreen_side_style = tmp.video.widescreen_side_style; ++applied; }
+    else if (len >= 23u && strncmp(p, "video.widescreen_width=", 23) == 0) { settings->video.widescreen_width = tmp.video.widescreen_width; ++applied; }
+    p = eol != NULL ? eol + 1 : p + len;
+  }
+  sv_settings_sanitize(settings);
+  return applied;
+}
+
+int sv_profile_save(const SvVideoSettings *video, const char *path) {
+  char text[256], temporary[1100];
+  int n;
+  FILE *f;
+  SvVideoSettings v;
+  if (video == NULL || path == NULL || *path == '\0' || strlen(path) > 1000u) return -1;
+  v = *video;
+  n = snprintf(text, sizeof text, "video.widescreen=%s\nvideo.widescreen_side_style=%s\nvideo.widescreen_width=%d\n",
+               widescreen_keys[(unsigned)v.widescreen < SV_WIDESCREEN_COUNT ? v.widescreen : SV_WIDESCREEN_ORIGINAL],
+               side_style_keys[(unsigned)v.widescreen_side_style < SV_SIDE_COUNT ? v.widescreen_side_style : SV_SIDE_COMFORT],
+               v.widescreen_width < 0 ? 0 : (v.widescreen_width > 100 ? 100 : v.widescreen_width));
+  if (n <= 0 || (size_t)n >= sizeof text) return -1;
+  snprintf(temporary, sizeof temporary, "%s.tmp", path);
+  f = fopen(temporary, "wb");
+  if (f == NULL) return -1;
+  if (fwrite(text, 1, (size_t)n, f) != (size_t)n || fflush(f) != 0) { fclose(f); remove(temporary); return -1; }
+  if (fclose(f) != 0) { remove(temporary); return -1; }
+#if defined(_WIN32)
+  remove(path);
+#endif
+  if (rename(temporary, path) != 0) { remove(temporary); return -1; }
+  return 0;
 }

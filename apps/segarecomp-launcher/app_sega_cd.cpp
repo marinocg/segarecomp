@@ -321,6 +321,7 @@ bool App::scd_spawn(const std::string &id, const scd::Plan &plan) {
   if (scd_launch_windowless_) {
     environment = {{"SDL_VIDEODRIVER", "dummy"}, {"SDL_AUDIODRIVER", "dummy"}, {"SEGARECOMP_VIEWER_UNTHROTTLED", "1"}, {"SEGARECOMP_VIEWER_NO_STOP_SCREEN", "1"}};
   }
+  if (entry->sha256.size() == 64U) environment.emplace_back("SEGARECOMP_PROFILE_ID", entry->sha256);  // SEG-123: the per-game widescreen profile key (platform sega-cd + this identity)
   RomView view = view_from_entry(*entry);
   view.sha256.clear();  // the entry identity is not a ROM digest: the viewer's System page must not present it as one
   sv_diag_yield_exclusive_devices(diag_);  // a libusb-driven controller can be opened by one process only: free it for the viewer

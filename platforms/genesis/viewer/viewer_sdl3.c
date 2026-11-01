@@ -189,9 +189,12 @@ const GenesisAudioSink *genesis_sdl3_viewer_audio_open(GenesisSdl3Viewer *v) {
   return &v->sink;
 }
 
-GenesisSdl3Viewer *genesis_sdl3_viewer_open(const char *title, int scale) {
+GenesisSdl3Viewer *genesis_sdl3_viewer_open(const char *title, int scale) { return genesis_sdl3_viewer_open_platform(title, scale, "genesis"); }
+
+GenesisSdl3Viewer *genesis_sdl3_viewer_open_platform(const char *title, int scale, const char *platform_id) {
   SvHostConfig cfg;
   const char *sha = SDL_getenv("SEGARECOMP_ROM_SHA256");
+  const char *profile = SDL_getenv("SEGARECOMP_PROFILE_ID");
   GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)calloc(1, sizeof(*v));
   if (v == NULL) return NULL;
   memset(&cfg, 0, sizeof cfg);
@@ -204,6 +207,9 @@ GenesisSdl3Viewer *genesis_sdl3_viewer_open(const char *title, int scale) {
   cfg.default_scale = scale >= 1 ? scale : 3;
   cfg.can_reset = 0; /* the Genesis viewer has no proven safe reset seam */
   cfg.rom_sha256 = sha != NULL && strlen(sha) == 64U ? sha : NULL;
+  /* SEG-123: the per-game widescreen profile key is platform + full SHA-256; a Sega CD launch supplies its disc identity (never shown as a ROM digest) */
+  cfg.platform_id = platform_id;
+  cfg.profile_id = cfg.rom_sha256 != NULL ? cfg.rom_sha256 : (profile != NULL && strlen(profile) == 64U ? profile : NULL);
   cfg.diagnostics = sdl_diagnostics;
   cfg.diagnostics_ctx = v;
   cfg.widescreen_caps = sdl_widescreen_caps;

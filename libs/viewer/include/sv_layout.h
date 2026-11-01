@@ -30,6 +30,11 @@ SvRect sv_layout_dest(int win_w, int win_h, int src_w, int src_h, SvAspect aspec
  * 0 for an invalid size or a native picture already at least as wide as 16:9 (extension adds nothing). Depends only on the native geometry and the
  * aspect policy, never on the window, so a window resize does not change what the producer must make. */
 int sv_layout_extension_side(int src_w, int src_h, SvAspect aspect);
+/* SEG-123 amendment: VISIBLE side width per side in source pixels for the user's target aspect `width_pct` (0 = 4:3 .. 100 = 16:9, sv_widescreen_width_ratio),
+ * never more than `produced_side` (what the validated producer supplied) and never more than SV_EXT_MAX_SIDE. 0 when the native display aspect is already at least as
+ * wide as the target (the picture is never shrunk or stretched; report the effective aspect with sv_ratio_milli). At width 100 and produced_side >= the 16:9 side this is
+ * exactly sv_layout_extension_side. Symmetric by construction. */
+int sv_layout_visible_side(int src_w, int src_h, SvAspect aspect, int width_pct, int produced_side);
 /* Largest extended surface any picture up to `max_w` x `max_h` can need: width max_w + 2 * SV_EXT_MAX_SIDE, height max_h (0 for invalid input). */
 void sv_layout_extension_max(int max_w, int max_h, int *width_out, int *height_out);
 

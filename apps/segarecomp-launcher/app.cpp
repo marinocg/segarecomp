@@ -1387,6 +1387,7 @@ void App::run_script() {
     else if (key == "want_text") actual = ImGui::GetIO().WantTextInput ? "1" : "0";
     else if (key == "settings_tab") actual = std::to_string(settings_tab_);
     else if (key == "widescreen") actual = viewer_settings_.video.widescreen == SV_WIDESCREEN_EXTENDED_BACKGROUNDS ? "extended_backgrounds" : (viewer_settings_.video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY ? "enhanced_gameplay" : "original");
+    else if (key == "ws_width") actual = std::to_string(viewer_settings_.video.widescreen_width);
     else if (key == "side_style") actual = viewer_settings_.video.widescreen_side_style == SV_SIDE_BORDERS ? "borders" : (viewer_settings_.video.widescreen_side_style == SV_SIDE_RAW ? "raw" : "comfort");
     else if (key == "picker") actual = picker_.open ? "1" : "0";
     else if (key == "picker_chosen") actual = std::to_string(picker_.chosen.size());

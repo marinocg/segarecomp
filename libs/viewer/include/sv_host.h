@@ -41,6 +41,10 @@ typedef struct SvHostConfig {
   int default_scale;           /* initial window = picture * scale when no window size was saved; 0 = 3 */
   int can_reset;               /* 1 only where the adapter has a proven safe reset seam */
   const char *rom_sha256;      /* optional, 64 hex characters, shown in System */
+  /* SEG-123: per-game widescreen profile identity. `platform_id` ([a-z0-9-], e.g. "genesis", "master-system", "sega-cd") and `profile_id` (the full 64-hex SHA-256
+   * of the game; NULL falls back to rom_sha256). Without a valid pair there is no per-game profile and the widescreen preferences are the global ones. */
+  const char *platform_id;
+  const char *profile_id;
   SvDiagnosticsFn diagnostics; /* optional */
   void *diagnostics_ctx;
   /* Optional (NULL = the platform extends nothing: both enhanced levels are Unavailable and the picture stays Original). Called from the
@@ -79,6 +83,11 @@ void sv_host_extension_stats(const SvHost *host, uint32_t *accepted, uint32_t *r
  * and the provenance of the extension on screen (GENERIC when there is none). The treatment follows `video.widescreen_side_style` and the provenance
  * the producer declared, never the mode, the status or the pixels. Applied at once when the style changes; presentation only. */
 SvSideTreatment sv_host_side_treatment(const SvHost *host);
+/* Visible side width of the frame on screen in source pixels per side (<= the produced `sv_host_extension_side`), from `video.widescreen_width` and the native geometry. */
+int sv_host_visible_side(const SvHost *host);
+/* 1 when this game has a valid identity (widescreen preferences are saved per game); path of its profile file (NULL when none). */
+int sv_host_profile_active(const SvHost *host);
+const char *sv_host_profile_path(const SvHost *host);
 SvExtSource sv_host_extension_source(const SvHost *host);
 /* Re-applies the side style to the frame already shown (also done by sv_host_apply_settings and by the menu). */
 void sv_host_restyle(SvHost *host);

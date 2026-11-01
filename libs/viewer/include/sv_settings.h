@@ -48,6 +48,15 @@ typedef enum SvSideStyle { SV_SIDE_COMFORT = 0, SV_SIDE_BORDERS = 1, SV_SIDE_RAW
 const char *sv_side_style_name(SvSideStyle style);        /* menu / launcher label */
 const char *sv_side_style_description(SvSideStyle style); /* one-sentence explanation */
 
+/* SEG-123 amendment: the widescreen width is the target display aspect (300 + width) / 225: 0 = 4:3, 100 = 16:9, linear between (bounded integer arithmetic). */
+#define SV_WS_WIDTH_DEFAULT 100
+void sv_widescreen_width_ratio(int width, int *num, int *den);
+/* "4:3", "16:9" or "1.50:1" for the target aspect of `width` (readable value for the menu/launcher). Returns `buf`. */
+const char *sv_widescreen_width_text(int width, char *buf, size_t cap);
+/* Display aspect times 1000 of a picture `w` x `h` source pixels (pixel aspect `aspect`), for reporting the effective aspect. */
+int sv_ratio_milli(int w, int h, SvAspect aspect);
+const char *sv_ratio_text(int milli, char *buf, size_t cap);
+
 /* What a platform viewer observes it can do for the running game, per enhanced level. Reporting nothing means UNAVAILABLE. */
 typedef enum SvWidescreenSupport { SV_WS_UNAVAILABLE = 0, SV_WS_PARTIAL = 1, SV_WS_AVAILABLE = 2 } SvWidescreenSupport;
 /* `partial_note` (optional, NULL = the generic wording) is a static platform sentence shown when the selected level is Partial, for a platform whose
@@ -65,6 +74,7 @@ typedef struct SvVideoSettings {
   int vsync, show_fps;
   SvWidescreenMode widescreen;  /* requested mode, default Original */
   SvSideStyle widescreen_side_style; /* SEG-123: side-area presentation of a generic extension, default Comfort */
+  int widescreen_width;         /* SEG-123: target presentation aspect 0 (4:3) .. 100 (16:9), linear in the ratio; default 100 */
   int window_w, window_h;                /* last windowed size in points, 0 = default */
 } SvVideoSettings;
 
@@ -130,6 +140,16 @@ size_t sv_settings_format(const SvSettings *settings, char *out, size_t cap);
 /* File helpers: load keeps defaults when the file is missing or damaged; save is atomic (temporary file + rename). 0 == ok. */
 int sv_settings_load(SvSettings *settings, const char *path);
 int sv_settings_save(const SvSettings *settings, const char *path);
+
+/* ---- SEG-123 amendment: per-game widescreen profile (video.widescreen, video.widescreen_side_style, video.widescreen_width only) ----
+ * Identity: platform id ([a-z0-9-], 1..24, e.g. genesis, master-system, sega-cd) + the full 64-hex SHA-256 of the game; anything else is refused and no path is built. */
+int sv_profile_identity_valid(const char *platform, const char *sha256);
+/* `<directory of settings_path>/viewer-widescreen/<platform>-<lowercase sha256>.cfg`; 0 ok, -1 invalid identity/too long. The directory name is `viewer-widescreen`. */
+int sv_profile_path(const char *settings_path, const char *platform, const char *sha256, char *out, size_t cap);
+/* Reads the file (bounded, damaged content ignored) and overlays ONLY the three keys that are present onto `settings`. Returns the number of keys applied (0 = missing/empty). */
+size_t sv_profile_load(SvSettings *settings, const char *path);
+/* Atomically writes the three keys of `video`. 0 ok. The directory must exist. */
+int sv_profile_save(const SvVideoSettings *video, const char *path);
 
 /* Conflicts. A key or pad button may drive only one action of one player of a console. Returns 1 and fills the owner when `code` is
  * already bound to something other than (player, action). */

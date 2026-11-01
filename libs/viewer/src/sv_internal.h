@@ -54,6 +54,9 @@ struct SvHost {
   uint64_t capture_frames[8];  /* automation seam: 1-based presented-frame numbers whose composed output is saved (SEGARECOMP_VIEWER_CAPTURE_FRAMES) */
   int capture_count, capture_all_styles;
   char capture_dir[512];
+  char profile_path[1100];     /* per-game widescreen profile file ('' = none: no trustworthy game identity) */
+  SvVideoSettings global_ws;   /* the three widescreen fields as the GLOBAL file states them (written back unchanged) */
+  SvVideoSettings profile_ws;  /* the three fields as last loaded/saved for this game */
   SvSideTreatment side_applied;   /* what the last uploaded frame shows at the sides (PASSTHROUGH when there is no extension) */
   uint8_t *last_rgb;           /* copy of the last presented picture (tightly packed RGB24) */
   int last_w, last_h;
@@ -117,7 +120,7 @@ enum {
 };
 enum {
   I_RESUME = 1, I_GO_QUICK, I_GO_VIDEO, I_GO_CONTROLS, I_GO_AUDIO, I_GO_SYSTEM, I_QUIT,
-  I_FULLSCREEN, I_SCALE, I_ASPECT, I_WIDESCREEN, I_SIDE_STYLE, I_PRESET, I_VSYNC, I_FPS, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
+  I_FULLSCREEN, I_SCALE, I_ASPECT, I_WIDESCREEN, I_WS_WIDTH, I_SIDE_STYLE, I_PRESET, I_VSYNC, I_FPS, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
   I_VOLUME, I_MUTE, I_AUDIO_NOTE, I_AUDIO_DEFAULTS,
   I_SHOT, I_RESET, I_INFO,
   I_PLAYER, I_PAD, I_PAD_ASSIGNED, I_DEADZONE, I_MENUKEY, I_CTRL_DEFAULTS, I_GO_PADSTATUS, I_PAD_RESCAN, I_PAD_HID,
