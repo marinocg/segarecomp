@@ -171,6 +171,13 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
   **Return to Launcher** (or Quit outside the launcher), with a confirmation.
 * Scaling: *Fit* or *Integer* (whole-number multiples, falling back to fit below 1x); aspect *Original* (square pixels) or *4:3 corrected*; windowed
   or borderless fullscreen (never a display-mode change, so there is nothing to revert); HiDPI aware; the Master System's 192/224-line picture keeps its aspect.
+* **Widescreen Mode** (Quick Settings and Video & Display, next to scaling and aspect; also in the launcher's Settings > Video & Controls): *Original* (default),
+  *Extended Backgrounds (Level 2)* or *Enhanced Widescreen (Level 3)*. It is a presentation preference shared by the launcher and every viewer (Genesis, Master System
+  and Sega CD) through the one `video.widescreen` key of `viewer-settings.cfg`; the pause menu applies a change to the next frame without a restart, reset or any
+  change to the guest, and shows the description of the selected mode plus an honest support line. **Extended rendering is not implemented yet** (SEG-118 onward):
+  until a platform reports support, either experimental choice is saved but reads "Not yet available for this game. Showing the original picture." and the picture
+  stays Original. There is no widescreen control or message on the game picture itself. A program built before widescreen support keeps working in Original mode;
+  it needs rebuilding to gain extended rendering (ADR 0261).
 * Display presets: **Pixel Perfect** (the untouched nearest-neighbour picture), **CRT Soft** (scanline gaps + glow), **CRT Classic** (adds the RGB
   aperture mask and slight curvature), **CRT Arcade** (stronger everything). Editing a slider makes the preset *Custom*.
 * **Controls**: Player 1 and Player 2 (both consoles), keyboard and SDL3 gamepad bindings, gamepad hot-plug, device choice, analog dead zone (the left
@@ -181,7 +188,7 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
 * Hotkeys: F11 / Alt+Enter fullscreen, F12 screenshot (the game picture only, PNG, in `Pictures/Segarecomp` or `SEGARECOMP_SCREENSHOT_DIR`).
 * Capability matrix: Genesis is a three-button pad (A/B/C/Start; no X/Y/Z/Mode), two ports, no Reset. Master System has two buttons, the console's
   **Pause** button (an NMI edge, distinct from the host menu) and Reset in the System page. Audio device selection follows the OS default.
-* Settings persist in `viewer-settings.cfg` (`SEGARECOMP_VIEWER_SETTINGS`); the launcher's Settings > Video & Controls edits the same file.
+* Settings persist in `viewer-settings.cfg` (`SEGARECOMP_VIEWER_SETTINGS`); the launcher's Settings > Video & Controls edits the same file (it re-reads the file when a game exits and when Settings is opened, so a change made in the game's menu is never overwritten by a stale launcher copy).
 * When a guest stops with a typed error the window shows why instead of closing silently (not for the automatic Optimized -> Compatibility restart).
 
 Environment variables the launcher sets for the game: `SEGARECOMP_LAUNCHED`, `SEGARECOMP_VIEWER_SETTINGS`, `SEGARECOMP_ROM_SHA256`, `SEGARECOMP_GAME_TITLE`,

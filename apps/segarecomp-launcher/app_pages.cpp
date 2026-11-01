@@ -493,6 +493,12 @@ void App::draw_settings(float full_w, float h) {
     int aspect = v.aspect == SV_ASPECT_4_3 ? 1 : 0;
     if (segmented(ctx_, "as", {"Original", "4:3 corrected"}, &aspect, ctx_.u(140.0F))) { v.aspect = aspect == 1 ? SV_ASPECT_4_3 : SV_ASPECT_ORIGINAL; v_changed = true; }
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    row_label("Widescreen");
+    int wide = static_cast<int>(v.widescreen);
+    if (segmented(ctx_, "ws", {"Original", "Extended Backgrounds", "Enhanced Widescreen"}, &wide, 0.0F)) { v.widescreen = static_cast<SvWidescreenMode>(wide); v_changed = true; }
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::text2, w, sv_widescreen_description(v.widescreen));
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Widescreen changes the presentation only, not the console's native resolution. Support depends on the platform and the game; where a mode is not available the game falls back to the original picture, and the game's Video page says so. Enhanced gameplay support varies by game. A program built before widescreen support keeps working in Original mode and needs rebuilding to use the other modes.");
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Display preset");
     int preset = static_cast<int>(std::min<int>(v.preset, SV_CRT_ARCADE));
     if (segmented(ctx_, "pr", {"Pixel Perfect", "CRT Soft", "CRT Classic", "CRT Arcade"}, &preset, 0.0F)) { sv_apply_crt_preset(&v, static_cast<SvCrtPreset>(preset)); v_changed = true; }

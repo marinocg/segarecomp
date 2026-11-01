@@ -92,6 +92,7 @@ void sv_settings_sanitize(SvSettings *s) {
   v->fullscreen = v->fullscreen != 0;
   v->scale = (v->scale == SV_SCALE_INTEGER) ? SV_SCALE_INTEGER : SV_SCALE_FIT;
   v->aspect = (v->aspect == SV_ASPECT_4_3) ? SV_ASPECT_4_3 : SV_ASPECT_ORIGINAL;
+  if ((unsigned)v->widescreen >= SV_WIDESCREEN_COUNT) v->widescreen = SV_WIDESCREEN_ORIGINAL;
   if ((unsigned)v->preset >= SV_CRT_COUNT) v->preset = SV_CRT_PIXEL_PERFECT;
   v->scanlines = clampi(v->scanlines, 0, 100);
   v->mask = clampi(v->mask, 0, 100);
@@ -154,8 +155,17 @@ static int match_binding(const char *key, int *sys, int *player, int *action, in
   return 0;
 }
 
+/* Stable text names of the widescreen modes (the settings file stores these, never the enum number). */
+static const char *const widescreen_keys[SV_WIDESCREEN_COUNT] = {"original", "extended_backgrounds", "enhanced_gameplay"};
+
 static int apply_pair(SvSettings *s, const char *key, const char *value) {
   int v, sys = 0, player = 0, action = 0, is_pad = 0;
+  if (strcmp(key, "video.widescreen") == 0) { /* an unknown value is recognised and becomes Original */
+    int m;
+    s->video.widescreen = SV_WIDESCREEN_ORIGINAL;
+    for (m = 0; m < SV_WIDESCREEN_COUNT; ++m) if (strcmp(value, widescreen_keys[m]) == 0) s->video.widescreen = (SvWidescreenMode)m;
+    return 1;
+  }
   if (strcmp(key, "pad_name") == 0) { strncpy(s->pad_name, value, sizeof s->pad_name - 1u); s->pad_name[sizeof s->pad_name - 1u] = '\0'; return 1; }
   if (!parse_int(value, &v)) return 0;
   if (strcmp(key, "video.fullscreen") == 0) s->video.fullscreen = v;
@@ -212,6 +222,7 @@ size_t sv_settings_format(const SvSettings *s, char *out, size_t cap) {
        s->video.fullscreen, (int)s->video.scale, (int)s->video.aspect, (int)s->video.preset, s->video.scanlines, s->video.mask, s->video.curvature);
   EMIT("video.bloom=%d\nvideo.brightness=%d\nvideo.vsync=%d\nvideo.show_fps=%d\nvideo.window_w=%d\nvideo.window_h=%d\n", s->video.bloom, s->video.brightness,
        s->video.vsync, s->video.show_fps, s->video.window_w, s->video.window_h);
+  EMIT("video.widescreen=%s\n", widescreen_keys[(unsigned)s->video.widescreen < SV_WIDESCREEN_COUNT ? s->video.widescreen : SV_WIDESCREEN_ORIGINAL]);
   EMIT("audio.volume=%d\naudio.muted=%d\ninput.deadzone=%d\ninput.menu_key=%d\n", s->audio.volume, s->audio.muted, s->deadzone, s->menu_key);
   if (s->pad_name[0] != '\0') EMIT("pad_name=%s\n", s->pad_name);
   for (sys = 0; sys < SV_SYSTEM_COUNT; ++sys)
@@ -314,4 +325,39 @@ int sv_axis_direction(int value, int deadzone_percent) {
   if ((long)value > threshold) return 1;
   if ((long)value < -threshold) return -1;
   return 0;
+}
+
+SvWidescreenMode sv_widescreen_effective(SvWidescreenMode requested, const SvWidescreenCaps *caps) {
+  if (caps == NULL) return SV_WIDESCREEN_ORIGINAL;
+  if (requested == SV_WIDESCREEN_ENHANCED_GAMEPLAY && caps->enhanced != SV_WS_UNAVAILABLE) return SV_WIDESCREEN_ENHANCED_GAMEPLAY;
+  if (requested != SV_WIDESCREEN_ORIGINAL && (unsigned)requested < SV_WIDESCREEN_COUNT && caps->extended != SV_WS_UNAVAILABLE)
+    return SV_WIDESCREEN_EXTENDED_BACKGROUNDS;
+  return SV_WIDESCREEN_ORIGINAL;
+}
+
+const char *sv_widescreen_name(SvWidescreenMode mode) {
+  switch (mode) {
+    case SV_WIDESCREEN_EXTENDED_BACKGROUNDS: return "Extended Backgrounds (Level 2)";
+    case SV_WIDESCREEN_ENHANCED_GAMEPLAY: return "Enhanced Widescreen (Level 3)";
+    default: return "Original";
+  }
+}
+
+const char *sv_widescreen_description(SvWidescreenMode mode) {
+  switch (mode) {
+    case SV_WIDESCREEN_EXTENDED_BACKGROUNDS:
+      return "Shows more background scenery at the sides. Gameplay stays in the original area; some scenery may be incomplete.";
+    case SV_WIDESCREEN_ENHANCED_GAMEPLAY:
+      return "Expands the playable view where supported. Some games need special adjustments and may show visual glitches.";
+    default: return "Original game picture. Preserves the intended display area and compatibility.";
+  }
+}
+
+const char *sv_widescreen_status(SvWidescreenMode requested, const SvWidescreenCaps *caps) {
+  const SvWidescreenMode eff = sv_widescreen_effective(requested, caps);
+  if (requested == SV_WIDESCREEN_ORIGINAL || (unsigned)requested >= SV_WIDESCREEN_COUNT) return "";
+  if (eff == SV_WIDESCREEN_ORIGINAL) return "Not yet available for this game. Showing the original picture.";
+  if (eff != requested) return "Level 3 is not available for this game. Showing Extended Backgrounds instead.";
+  if ((eff == SV_WIDESCREEN_ENHANCED_GAMEPLAY ? caps->enhanced : caps->extended) == SV_WS_PARTIAL) return "Partly available for this game: some of the extra picture may be missing.";
+  return "Available for this game.";
 }

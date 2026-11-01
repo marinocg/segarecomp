@@ -36,6 +36,7 @@ struct SvHost {
   SvSettings settings;
   char settings_path[1024];
   int settings_dirty;
+  uint32_t widescreen_fallbacks; /* saturating count of selections the platform could not honour */
   SDL_Window *window;
   SDL_Renderer *renderer;
   SDL_Texture *frame_tex;      /* RGB24 streaming picture */
@@ -102,7 +103,7 @@ enum {
 };
 enum {
   I_RESUME = 1, I_GO_QUICK, I_GO_VIDEO, I_GO_CONTROLS, I_GO_AUDIO, I_GO_SYSTEM, I_QUIT,
-  I_FULLSCREEN, I_SCALE, I_ASPECT, I_PRESET, I_VSYNC, I_FPS, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
+  I_FULLSCREEN, I_SCALE, I_ASPECT, I_WIDESCREEN, I_PRESET, I_VSYNC, I_FPS, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
   I_VOLUME, I_MUTE, I_AUDIO_NOTE, I_AUDIO_DEFAULTS,
   I_SHOT, I_RESET, I_INFO,
   I_PLAYER, I_PAD, I_PAD_ASSIGNED, I_DEADZONE, I_MENUKEY, I_CTRL_DEFAULTS, I_GO_PADSTATUS, I_PAD_RESCAN, I_PAD_HID,

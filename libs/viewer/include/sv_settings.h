@@ -32,6 +32,19 @@ typedef enum SvScaleMode { SV_SCALE_FIT = 0, SV_SCALE_INTEGER = 1 } SvScaleMode;
 typedef enum SvAspect { SV_ASPECT_ORIGINAL = 0, SV_ASPECT_4_3 = 1 } SvAspect;
 typedef enum SvCrtPreset { SV_CRT_PIXEL_PERFECT = 0, SV_CRT_SOFT, SV_CRT_CLASSIC, SV_CRT_ARCADE, SV_CRT_CUSTOM, SV_CRT_COUNT } SvCrtPreset;
 
+/* Widescreen Mode: ONE mutually exclusive presentation preference (never a set of booleans). Level 2 extends background scenery at the
+ * sides, Level 3 additionally attempts enhanced gameplay. It is only the REQUESTED mode; what is actually shown (the effective mode) is
+ * derived from the platform's reported capability (sv_widescreen_effective) and is Original wherever the platform cannot honour it. */
+typedef enum SvWidescreenMode {
+  SV_WIDESCREEN_ORIGINAL = 0,
+  SV_WIDESCREEN_EXTENDED_BACKGROUNDS = 1, /* Level 2 */
+  SV_WIDESCREEN_ENHANCED_GAMEPLAY = 2,    /* Level 3 */
+  SV_WIDESCREEN_COUNT
+} SvWidescreenMode;
+/* What a platform viewer observes it can do for the running game, per enhanced level. Reporting nothing means UNAVAILABLE. */
+typedef enum SvWidescreenSupport { SV_WS_UNAVAILABLE = 0, SV_WS_PARTIAL = 1, SV_WS_AVAILABLE = 2 } SvWidescreenSupport;
+typedef struct SvWidescreenCaps { SvWidescreenSupport extended, enhanced; } SvWidescreenCaps;
+
 typedef struct SvVideoSettings {
   int fullscreen;               /* borderless desktop fullscreen (never a display mode change) */
   SvScaleMode scale;
@@ -40,6 +53,7 @@ typedef struct SvVideoSettings {
   int scanlines, mask, curvature, bloom; /* 0..100 */
   int brightness;                        /* 50..150 percent */
   int vsync, show_fps;
+  SvWidescreenMode widescreen;  /* requested mode, default Original */
   int window_w, window_h;                /* last windowed size in points, 0 = default */
 } SvVideoSettings;
 
@@ -86,6 +100,13 @@ void sv_video_defaults(SvVideoSettings *video);
 /* Loads the CRT tuning of `preset` into the video settings (and selects it). SV_CRT_CUSTOM leaves the numbers untouched. */
 void sv_apply_crt_preset(SvVideoSettings *video, SvCrtPreset preset);
 const char *sv_crt_preset_name(SvCrtPreset preset);
+
+/* Fallback Level 3 -> Level 2 -> Original: the mode that is actually rendered. NULL `caps` (no provider) means nothing is supported. */
+SvWidescreenMode sv_widescreen_effective(SvWidescreenMode requested, const SvWidescreenCaps *caps);
+const char *sv_widescreen_name(SvWidescreenMode mode);        /* menu / launcher label */
+const char *sv_widescreen_description(SvWidescreenMode mode); /* one-sentence explanation shown beneath the selector */
+/* Honest per-selection support text (requested vs capability); empty string for Original with nothing to explain. */
+const char *sv_widescreen_status(SvWidescreenMode requested, const SvWidescreenCaps *caps);
 
 /* Clamps every field into its documented range. Called after every parse and every edit. */
 void sv_settings_sanitize(SvSettings *settings);

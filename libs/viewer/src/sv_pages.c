@@ -64,16 +64,28 @@ static void add_choice(SvPage *p, int id, const char *label, int value, int coun
   sv_item_set_hint(i, hint);
 }
 
+static void add_note(SvPage *p, const char *text);
+
 static void build_video_core(SvHost *h, SvPage *p, int full) {
   SvItem *item;
   static const char *const scale[] = {"Fit to Window", "Integer"}, *const aspect[] = {"Square pixels", "4:3 (corrected)"};
   static const char *const preset[] = {"Pixel Perfect", "CRT Soft", "CRT Classic", "CRT Arcade", "Custom"};
+  static const char *const wsname[] = {"Original", "Extended Backgrounds (Level 2)", "Enhanced Widescreen (Level 3)"};
   const SvVideoSettings *v = &h->settings.video;
+  char ws_hint[300];
+  const char *ws_status;
+  SvWidescreenCaps caps;
   int k;
   /* the picture and the window first, the CRT effect and its strengths after (a section of their own on the full page) */
   add_toggle(p, I_FULLSCREEN, "Fullscreen", v->fullscreen, "Borderless desktop fullscreen; no display mode change. F11 also toggles.");
   add_choice(p, I_SCALE, "Scaling", (int)v->scale, 2, scale, "Fit uses any size; Integer keeps whole-number pixel multiples when they fit.");
   add_choice(p, I_ASPECT, "Aspect Ratio", (int)v->aspect, 2, aspect, "Original keeps square pixels; 4:3 stretches to the aspect of a TV picture.");
+  /* Widescreen Mode: the description of the selected mode and the honest requested-vs-effective status live only here, never on the game picture */
+  sv_host_widescreen_caps(h, &caps);
+  ws_status = sv_widescreen_status(v->widescreen, &caps);
+  snprintf(ws_hint, sizeof ws_hint, "%s%s%s", sv_widescreen_description(v->widescreen), ws_status[0] != '\0' ? " " : "", ws_status);
+  add_choice(p, I_WIDESCREEN, "Widescreen Mode", (int)v->widescreen, SV_WIDESCREEN_COUNT, wsname, ws_hint);
+  if (full && ws_status[0] != '\0') add_note(p, ws_status);
   if (full) {
     add_toggle(p, I_VSYNC, "VSync", v->vsync, "Syncs presentation to the display. Game speed is paced by the console clock either way.");
     add_toggle(p, I_FPS, "Show FPS Counter", v->show_fps, "Shows the presentation rate on the game screen.");
@@ -96,7 +108,7 @@ static void build_video_core(SvHost *h, SvPage *p, int full) {
   add_toggle(p, I_FPS, "Show FPS Counter", v->show_fps, "Shows the presentation rate on the game screen.");
   for (k = 0; k < p->count; ++k) {
     const int id = p->items[k].id;
-    sv_item_set_icon(&p->items[k], id == I_FULLSCREEN ? "fullscreen" : (id == I_SCALE || id == I_ASPECT ? "video" : (id == I_PRESET ? "settings" : (id == I_VSYNC ? "reset" : "info"))));
+    sv_item_set_icon(&p->items[k], id == I_FULLSCREEN ? "fullscreen" : (id == I_SCALE || id == I_ASPECT || id == I_WIDESCREEN ? "video" : (id == I_PRESET ? "settings" : (id == I_VSYNC ? "reset" : "info"))));
   }
 }
 
@@ -555,6 +567,13 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
     case I_FULLSCREEN: v->fullscreen = ev.value; sv_host_apply_video(h); break;
     case I_SCALE: v->scale = (SvScaleMode)ev.value; break;
     case I_ASPECT: v->aspect = (SvAspect)ev.value; break;
+    case I_WIDESCREEN: /* a presentation preference only: nothing here touches the guest, the run loop or the recording */
+      v->widescreen = (SvWidescreenMode)ev.value;
+      sv_settings_sanitize(&h->settings);
+      if (v->widescreen != sv_host_widescreen_effective(h) && h->widescreen_fallbacks != UINT32_MAX) h->widescreen_fallbacks++;
+      sv_host_mark_dirty(h);
+      sv_pages_rebuild(h); /* refresh the explanation and the support status for the new selection */
+      return;
     case I_PRESET: sv_apply_crt_preset(v, (SvCrtPreset)ev.value); sv_host_toast(h, sv_crt_preset_name(v->preset)); break;
     case I_VSYNC: v->vsync = ev.value; sv_host_apply_video(h); break;
     case I_FPS: v->show_fps = ev.value; break;

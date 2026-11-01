@@ -124,6 +124,17 @@ def main():
 
         check(code == 0 and guest_view(rep) == guest_view(replay), "viewer: the recording replays headlessly to the identical report and captured frames")
 
+        # SEG-117: the Sega CD viewer reads the same shared Widescreen Mode setting as the Genesis one. No extended rendering exists yet, so a saved Level 3
+        # request leaves the run (reports, presented frames, captured frames, the recording) identical to Original and the viewer does not rewrite the file.
+        ws_file = tmp / "settings.cfg"
+        ws_text = "video.widescreen=enhanced_gameplay\n"
+        ws_file.write_text(ws_text)
+        wcode, wrep, wrec, wout = live("w", keys.read_text())
+        check(wcode == 0 and guest_view(wrep) == guest_view(rep) and wrep["live"]["presented"] == rep["live"]["presented"] and wrec == rec,
+              "widescreen: a saved Level 3 request leaves the Sega CD run, frames and input recording identical to Original" + ("" if wcode == 0 else " (%s)" % wout.stderr[-300:]))
+        check(ws_file.read_text() == ws_text, "widescreen: the Sega CD viewer reads the shared setting and does not rewrite it")
+        ws_file.unlink()
+
         # F6 holds, F7 steps: same recording and report as the same keys without the pause
         pk = "3 down Right\n4 down F6\n4 up F6\n6 down F7\n6 up F7\n8 down F7\n8 up F7\n9 down F6\n9 up F6\n13 up Right\n14 down Up\n18 up Up\n"
         code, prep, prec, _ = live("b", pk)

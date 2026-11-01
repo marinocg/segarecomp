@@ -167,6 +167,261 @@ static int menu_hook(void *ctx, SvHost *host, int iteration) {
   return s->quit_after ? 0 : 1;
 }
 
+
+/* ---- Widescreen Mode (SEG-117): requested vs capability vs effective, the Video page, keyboard and gamepad, persistence, no gameplay overlay ---- */
+typedef struct WsCaps { SvWidescreenCaps caps; int calls; } WsCaps;
+static void ws_caps_fn(void *ctx, SvWidescreenCaps *out) { WsCaps *c = (WsCaps *)ctx; c->calls++; *out = c->caps; }
+
+typedef struct WsScript {
+  int step;
+  SDL_Joystick *joy;       /* NULL: keyboard script */
+  int saw_row, label_ok, hint_original_ok, hint_l2_ok, hint_l3_ok, note_ok, quick_row;
+  char l3_hint[320];
+} WsScript;
+static SvItem *ws_item(SvHost *host) {
+  SvPage *p = sv_menu_top(&host->menu);
+  int i;
+  if (p == NULL) return NULL;
+  for (i = 0; i < p->count; ++i) if (p->items[i].id == I_WIDESCREEN) return &p->items[i];
+  return NULL;
+}
+static int ws_has_note(SvHost *host, const char *text) {
+  SvPage *p = sv_menu_top(&host->menu);
+  int i;
+  if (p == NULL) return 0;
+  for (i = 0; i < p->count; ++i) if (p->items[i].kind == SV_ITEM_LABEL && strcmp(p->items[i].icon, "note") == 0 && strcmp(p->items[i].hint, text) == 0) return 1;
+  return 0;
+}
+static void ws_move(WsScript *w, int key, int pad_button_id) {
+  if (w->joy == NULL) { tap(key); return; }
+  SDL_SetJoystickVirtualButton(w->joy, pad_button_id, true);
+}
+/* Opens Video & Display (Main: Resume, Quick settings, Video & Display) -> Fullscreen, Scaling, Aspect, then Widescreen -> Right, Right. */
+static int ws_hook(void *ctx, SvHost *host, int iteration) {
+  WsScript *w = (WsScript *)ctx;
+  SvItem *it;
+  (void)iteration;
+  if (w->joy != NULL) { /* a gamepad press is held for one drawn frame and released on the next */
+    int b;
+    for (b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; ++b) SDL_SetJoystickVirtualButton(w->joy, b, false);
+    SDL_UpdateJoysticks();
+    if (w->step % 2 == 1) { ++w->step; return 0; }
+  }
+  {
+    const int s = w->joy != NULL ? w->step / 2 : w->step;
+    switch (s) {
+      case 0: ws_move(w, SV_KEY_DOWN, SDL_GAMEPAD_BUTTON_DPAD_DOWN); break;
+      case 1: ws_move(w, SV_KEY_DOWN, SDL_GAMEPAD_BUTTON_DPAD_DOWN); break;
+      case 2: ws_move(w, SV_KEY_RETURN, SDL_GAMEPAD_BUTTON_SOUTH); break; /* Video & Display */
+      case 3: case 4: case 5: ws_move(w, SV_KEY_DOWN, SDL_GAMEPAD_BUTTON_DPAD_DOWN); break; /* -> Widescreen Mode */
+      case 6:
+        it = ws_item(host);
+        w->saw_row = it != NULL;
+        w->label_ok = it != NULL && strcmp(it->label, "Widescreen Mode") == 0 && strcmp(it->text, "Original") == 0;
+        w->hint_original_ok = it != NULL && strcmp(it->hint, "Original game picture. Preserves the intended display area and compatibility.") == 0;
+        ws_move(w, SV_KEY_RIGHT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+        break;
+      case 7:
+        it = ws_item(host);
+        w->hint_l2_ok = it != NULL && strncmp(it->text, "Extended Backgrounds (Level 2)", 30) == 0 &&
+                        strstr(it->hint, "Shows more background scenery at the sides.") != NULL && strstr(it->hint, "Not yet available for this game. Showing the original picture.") != NULL;
+        w->note_ok = ws_has_note(host, "Not yet available for this game. Showing the original picture.");
+        ws_move(w, SV_KEY_RIGHT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+        break;
+      case 8:
+        it = ws_item(host);
+        w->hint_l3_ok = it != NULL && strncmp(it->text, "Enhanced Widescreen (Level 3)", 29) == 0 && strstr(it->hint, "Expands the playable view where supported.") != NULL;
+        if (it != NULL) snprintf(w->l3_hint, sizeof w->l3_hint, "%s", it->hint);
+        ws_move(w, SV_KEY_ESCAPE, SDL_GAMEPAD_BUTTON_EAST);
+        break;
+      case 9: ws_move(w, SV_KEY_ESCAPE, SDL_GAMEPAD_BUTTON_EAST); break;
+      default: return 1;
+    }
+  }
+  if (w->joy != NULL) SDL_UpdateJoysticks();
+  ++w->step;
+  return 0;
+}
+
+/* A fake guest: counts frames, folds the sampled pad masks into a digest and presents a deterministic picture. `change_at` (>= 0) selects Level 3 through
+ * the real pause menu at that frame; the result must equal an uninterrupted run (the menu blocks sv_host_service, so the guest does not advance meanwhile; opening it releases held keys by design, so the held key ends before). */
+typedef struct FakeGuest { uint64_t frames, pad_hash, presented; } FakeGuest;
+static int pick_l3_hook(void *ctx, SvHost *host, int iteration) {
+  int *step = (int *)ctx;
+  static const int keys[] = {SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_RETURN, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_RIGHT, SV_KEY_RIGHT, SV_KEY_ESCAPE, SV_KEY_ESCAPE};
+  (void)host; (void)iteration;
+  if (*step < (int)(sizeof keys / sizeof keys[0])) { tap(keys[(*step)++]); return 0; }
+  return 1;
+}
+static FakeGuest run_fake_guest(SvHost *host, uint8_t *frame, int change_at, uint64_t *out_hash) {
+  FakeGuest g = {0, 1469598103934665603ull, 0};
+  int i;
+  for (i = 0; i < 30; ++i) {
+    SvSample smp;
+    if (i == change_at) { int step = 0; tap(SV_KEY_ESCAPE); sv_host_set_loop_hook(host, pick_l3_hook, &step); }
+    sv_host_service(host, &smp);
+    if (i == change_at) sv_host_set_loop_hook(host, NULL, NULL);
+    if (i == 5) key_event(SV_KEY_RIGHT, 1, 0);
+    if (i == 12) key_event(SV_KEY_RIGHT, 0, 0);
+    g.pad_hash = (g.pad_hash ^ smp.pad[0]) * 1099511628211ull;
+    g.pad_hash = (g.pad_hash ^ smp.pad[1]) * 1099511628211ull;
+    g.frames++;
+    fill_pattern(frame, 320, 224);
+    frame[0] = (uint8_t)i;
+    if (sv_host_present(host, frame, 320, 224, 320 * 3) == 0) g.presented++;
+  }
+  { SDL_Surface *o = sv_host_capture_output(host); *out_hash = o != NULL ? surface_hash(o) : 0; if (o != NULL) SDL_DestroySurface(o); }
+  return g;
+}
+
+static void widescreen_live_tests(const char *dir, uint8_t *frame) {
+  char file[600];
+  SvHost *host;
+  FakeGuest control, live;
+  uint64_t hc = 0, hl = 0;
+  snprintf(file, sizeof file, "%s/ws-live.cfg", dir);
+  remove(file);
+  host = open_host(SV_SYSTEM_GENESIS, file, 0);
+  if (host == NULL) { CHECK(0, "widescreen live: host opens"); return; }
+  control = run_fake_guest(host, frame, -1, &hc);
+  sv_host_close(host);
+  remove(file);
+  host = open_host(SV_SYSTEM_GENESIS, file, 0);
+  if (host == NULL) { CHECK(0, "widescreen live: host reopens"); return; }
+  live = run_fake_guest(host, frame, 14, &hl);
+  CHECK(sv_host_settings(host)->video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "widescreen live: the mid-run menu change took effect");
+  CHECK(live.frames == control.frames && live.presented == control.presented, "widescreen live: guest frame count and presented frames are unchanged by the switch");
+  CHECK(live.pad_hash == control.pad_hash, "widescreen live: the sampled input stream (the recording source) is unchanged by the switch");
+  CHECK(hl == hc, "widescreen live: the next presented frame is the Original picture while no extension exists");
+  sv_host_close(host);
+  remove(file);
+}
+
+static void widescreen_tests(const char *dir, uint8_t *frame) {
+  char file[600];
+  SvHost *host;
+  SvSettings st;
+  SvSample smp;
+  WsScript w;
+  int r, g, b;
+  snprintf(file, sizeof file, "%s/ws-settings.cfg", dir);
+  remove(file);
+  SDL_setenv_unsafe("SEGARECOMP_VIEWER_SETTINGS", file, 1);
+
+  /* 1. no capability provider (every platform in this milestone): Level 2 and Level 3 are selectable, persisted, and the effective mode stays Original */
+  host = open_host(SV_SYSTEM_GENESIS, file, 0);
+  CHECK(host != NULL, "widescreen: host opens");
+  if (host == NULL) return;
+  CHECK(sv_host_settings(host)->video.widescreen == SV_WIDESCREEN_ORIGINAL && sv_host_widescreen_effective(host) == SV_WIDESCREEN_ORIGINAL, "widescreen: default is Original (requested and effective)");
+  { SvWidescreenCaps caps; sv_host_widescreen_caps(host, &caps);
+    CHECK(caps.extended == SV_WS_UNAVAILABLE && caps.enhanced == SV_WS_UNAVAILABLE, "widescreen: no provider means both enhanced levels are Unavailable"); }
+  fill_pattern(frame, 320, 224);
+  CHECK(sv_host_present(host, frame, 320, 224, 320 * 3) == 0, "widescreen: present");
+  { SDL_Surface *base = sv_host_capture_output(host);
+    uint64_t h0 = base != NULL ? surface_hash(base) : 0;
+    memset(&w, 0, sizeof w);
+    sv_host_set_loop_hook(host, ws_hook, &w);
+    tap(SV_KEY_ESCAPE);
+    sv_host_service(host, &smp);
+    sv_host_set_loop_hook(host, NULL, NULL);
+    CHECK(w.saw_row && w.label_ok, "widescreen: the Video page offers 'Widescreen Mode' (Original selected by default)");
+    CHECK(w.hint_original_ok, "widescreen: the Original description is shown");
+    CHECK(w.hint_l2_ok, "widescreen: Level 2 description and the honest Unavailable message are shown");
+    CHECK(w.note_ok, "widescreen: the status note row carries the Unavailable message on the Video page");
+    CHECK(w.hint_l3_ok, "widescreen: Level 3 description is shown");
+    CHECK(strstr(w.l3_hint, "Not yet available for this game. Showing the original picture.") != NULL, "widescreen: Level 3 reports Unavailable with the original picture");
+    CHECK(sv_host_settings(host)->video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "widescreen: keyboard Right twice selects Level 3 immediately");
+    CHECK(sv_host_widescreen_effective(host) == SV_WIDESCREEN_ORIGINAL, "widescreen: requested Level 3 stays Original effectively (preference preserved)");
+    CHECK(sv_host_widescreen_fallbacks(host) == 2u, "widescreen: each unsupported selection is counted (bounded counter)");
+    if (smp.menu_was_open) { /* the gameplay frame carries no widescreen text or control: pixel-identical to the Original-mode frame */
+      SDL_Surface *after = sv_host_capture_output(host);
+      CHECK(after != NULL && base != NULL && surface_hash(after) == h0, "widescreen: with the menu closed the output equals the Original output (no overlay)");
+      if (after != NULL) SDL_DestroySurface(after);
+    }
+    if (base != NULL) SDL_DestroySurface(base);
+  }
+  sv_host_close(host); /* saves */
+  { char buf[16384]; FILE *f = fopen(file, "rb"); size_t n = f != NULL ? fread(buf, 1, sizeof buf - 1, f) : 0;
+    if (f != NULL) fclose(f);
+    buf[n] = '\0';
+    CHECK(strstr(buf, "video.widescreen=enhanced_gameplay") != NULL, "widescreen: the selection is persisted by the in-game menu"); }
+  host = open_host(SV_SYSTEM_SMS, file, 1);
+  CHECK(host != NULL && sv_host_settings(host)->video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY && sv_host_widescreen_effective(host) == SV_WIDESCREEN_ORIGINAL,
+        "widescreen: the same saved value is read by the Master System host, effective Original");
+  if (host != NULL) {
+    st = *sv_host_settings(host);
+    st.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS;
+    sv_host_apply_settings(host, &st); /* live change through the host */
+    CHECK(sv_host_settings(host)->video.widescreen == SV_WIDESCREEN_EXTENDED_BACKGROUNDS && sv_host_widescreen_effective(host) == SV_WIDESCREEN_ORIGINAL, "widescreen: live change keeps Original effective");
+    sv_host_close(host);
+  }
+
+  /* 2. a provider: fallback Level 3 -> Level 2 -> Original, status text, requested preserved */
+  { WsCaps wc;
+    SvHostConfig cfg;
+    memset(&wc, 0, sizeof wc);
+    memset(&cfg, 0, sizeof cfg);
+    cfg.system = SV_SYSTEM_GENESIS; cfg.title = "widescreen caps"; cfg.picture_w = 320; cfg.picture_h = 224; cfg.max_w = 320; cfg.max_h = 240; cfg.default_scale = 3;
+    cfg.widescreen_caps = ws_caps_fn; cfg.widescreen_ctx = &wc;
+    wc.caps.extended = SV_WS_AVAILABLE; wc.caps.enhanced = SV_WS_UNAVAILABLE;
+    host = sv_host_open(&cfg);
+    CHECK(host != NULL, "widescreen: host with a provider opens");
+    if (host != NULL) {
+      st = *sv_host_settings(host);
+      st.video.widescreen = SV_WIDESCREEN_ENHANCED_GAMEPLAY;
+      sv_host_apply_settings(host, &st);
+      CHECK(sv_host_widescreen_effective(host) == SV_WIDESCREEN_EXTENDED_BACKGROUNDS && wc.calls > 0, "widescreen: Level 3 requested, only Level 2 available -> effective Level 2");
+      wc.caps.extended = SV_WS_PARTIAL; wc.caps.enhanced = SV_WS_PARTIAL;
+      CHECK(sv_host_widescreen_effective(host) == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "widescreen: Partial Level 3 is effective Level 3");
+      wc.caps.extended = SV_WS_UNAVAILABLE; wc.caps.enhanced = SV_WS_UNAVAILABLE;
+      CHECK(sv_host_widescreen_effective(host) == SV_WIDESCREEN_ORIGINAL && sv_host_settings(host)->video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "widescreen: capability loss falls back to Original and keeps the preference");
+      sv_host_close(host);
+    }
+  }
+
+  /* 3. gamepad: the same selector is reachable and cycles with a virtual pad (D-pad, South to enter, East to go back) */
+  remove(file);
+  host = open_host(SV_SYSTEM_GENESIS, file, 0);
+  if (host != NULL) {
+    SDL_VirtualJoystickDesc desc;
+    SDL_JoystickID id;
+    SDL_Joystick *joy;
+    SDL_INIT_INTERFACE(&desc);
+    desc.type = SDL_JOYSTICK_TYPE_GAMEPAD; desc.naxes = SDL_GAMEPAD_AXIS_COUNT; desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT; desc.name = "Fictional Widescreen Pad";
+    id = SDL_AttachVirtualJoystick(&desc);
+    joy = id ? SDL_OpenJoystick(id) : NULL;
+    CHECK(joy != NULL, "widescreen: virtual gamepad opens");
+    if (joy != NULL) {
+      sv_host_service(host, &smp);
+      memset(&w, 0, sizeof w);
+      w.joy = joy;
+      sv_host_set_loop_hook(host, ws_hook, &w);
+      tap(SV_KEY_ESCAPE);
+      sv_host_service(host, &smp);
+      sv_host_set_loop_hook(host, NULL, NULL);
+      CHECK(w.saw_row && w.hint_l2_ok && w.hint_l3_ok && sv_host_settings(host)->video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "widescreen: all three modes are reachable and selectable with a gamepad");
+      SDL_CloseJoystick(joy);
+    }
+    if (id) SDL_DetachVirtualJoystick(id);
+    sv_host_close(host);
+  }
+
+  /* 4. restore video defaults restores Original; existing aspect/scale untouched by the new field */
+  host = open_host(SV_SYSTEM_GENESIS, file, 0);
+  if (host != NULL) {
+    st = *sv_host_settings(host);
+    st.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; st.video.aspect = SV_ASPECT_4_3; st.video.scale = SV_SCALE_INTEGER;
+    sv_host_apply_settings(host, &st);
+    CHECK(sv_host_settings(host)->video.aspect == SV_ASPECT_4_3 && sv_host_settings(host)->video.scale == SV_SCALE_INTEGER, "widescreen: aspect and scaling still apply independently");
+    sv_video_defaults(&st.video);
+    sv_host_apply_settings(host, &st);
+    CHECK(sv_host_settings(host)->video.widescreen == SV_WIDESCREEN_ORIGINAL, "widescreen: video defaults restore Original");
+    sv_host_close(host);
+  }
+  (void)r; (void)g; (void)b;
+  remove(file);
+}
+
 int main(void) {
   char dir[512], settings_file[600], shots[600];
   uint8_t *frame = (uint8_t *)malloc(320u * 240u * 3u);
@@ -324,8 +579,8 @@ int main(void) {
   }
 
   /* ---- pause overlay: scripted navigation (the guest does not advance: service() does not return until the menu closes) ---- */
-  { static const int to_video_and_back[] = {SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_RETURN /* Video & Display */, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN,
-                                            SV_KEY_RIGHT /* Video Effect: after Fullscreen, Scaling, Aspect, VSync, FPS (the "CRT effect" heading is not focusable) */,
+  { static const int to_video_and_back[] = {SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_RETURN /* Video & Display */, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN,
+                                            SV_KEY_RIGHT /* Video Effect: after Fullscreen, Scaling, Aspect, Widescreen Mode, VSync, FPS (the "CRT effect" heading is not focusable) */,
                                             SV_KEY_ESCAPE /* back to main */, SV_KEY_ESCAPE /* resume */};
     Script sc;
     SvSample smp;
@@ -628,6 +883,8 @@ int main(void) {
       host = NULL;
     } else if (host != NULL) sv_host_close(host);
   }
+  widescreen_tests(dir, frame);
+  widescreen_live_tests(dir, frame);
   free(frame);
   if (failures != 0) { printf("sv_host_test: %d failure(s)\n", failures); return 1; }
   printf("sv_host_test: ok\n");

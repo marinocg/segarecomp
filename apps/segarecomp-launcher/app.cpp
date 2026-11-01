@@ -165,6 +165,15 @@ bool App::apply_intermediates_choice(bool remove_after_build) {
   return true;
 }
 
+// The viewer (a separate process) owns edits made in its in-game menu and writes the same file. The launcher re-reads it at the two seams where such an
+// edit can have happened (a game exited; the Settings screen is entered) so a later launcher save never writes back stale values. A missing or damaged
+// file keeps what the launcher holds.
+void App::reload_viewer_settings() {
+  SvSettings fresh;
+  sv_settings_defaults(&fresh);
+  if (sv_settings_load(&fresh, u8s(viewer_settings_file_).c_str()) == 0) viewer_settings_ = fresh;
+}
+
 void App::viewer_settings_changed() {
   sv_settings_sanitize(&viewer_settings_);
   std::error_code ec;
@@ -667,6 +676,7 @@ void App::go(Page page) {
   if (page_ == Page::details && page == previous_page_) { close_details(); return; }
   if (page_ != Page::details) previous_page_ = page_;
   page_ = page;
+  if (page == Page::settings) reload_viewer_settings();
   nav_reset_ = true;
   editing_title_ = false;
   if (page == Page::storage) request_scan();
@@ -889,6 +899,7 @@ bool App::launch(const std::string &id, bool restarted) {
 }
 
 void App::finish_run() {
+  reload_viewer_settings();
   if (game_is_scd_) { scd_finish_run(); return; }
   const int exit_code = game_->exit_code();
   const std::string id = game_id_;
@@ -1369,6 +1380,7 @@ void App::run_script() {
     else if (key == "hints") actual = gamepad_is_last_input() && modal_.kind == Modal::Kind::none && !picker_.open ? "1" : "0";
     else if (key == "want_text") actual = ImGui::GetIO().WantTextInput ? "1" : "0";
     else if (key == "settings_tab") actual = std::to_string(settings_tab_);
+    else if (key == "widescreen") actual = viewer_settings_.video.widescreen == SV_WIDESCREEN_EXTENDED_BACKGROUNDS ? "extended_backgrounds" : (viewer_settings_.video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY ? "enhanced_gameplay" : "original");
     else if (key == "picker") actual = picker_.open ? "1" : "0";
     else if (key == "picker_chosen") actual = std::to_string(picker_.chosen.size());
     else if (key == "picker_level") actual = !picker_.open ? "-" : (picker_.root.empty() ? "locations" : (picker_.dir == picker_.root ? "root" : "sub"));

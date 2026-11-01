@@ -424,8 +424,79 @@ void input_state_tests() {
 
 } // namespace
 
+// An out-of-range enumerator (what a corrupted in-memory value would look like) without an unspecified conversion.
+SvWidescreenMode raw_mode(int v) { SvWidescreenMode m; static_assert(sizeof(m) == sizeof(int), "enum is int-sized"); std::memcpy(&m, &v, sizeof m); return m; }
+
+void widescreen_tests() {
+  // default and per-system behaviour
+  SvSettings s = defaults();
+  check(s.video.widescreen == SV_WIDESCREEN_ORIGINAL, "Widescreen Mode defaults to Original");
+  // every mode round-trips through the text form with a stable name (not the enum number)
+  for (int m = 0; m < SV_WIDESCREEN_COUNT; ++m) {
+    SvSettings a = defaults();
+    a.video.widescreen = static_cast<SvWidescreenMode>(m);
+    char text[8192];
+    const size_t n = sv_settings_format(&a, text, sizeof text);
+    check(n > 0 && std::strstr(text, "video.widescreen=") != nullptr && std::strstr(text, "video.widescreen=0") == nullptr && std::strstr(text, "video.widescreen=1") == nullptr, "widescreen is persisted textually, not as a number");
+    SvSettings b = defaults();
+    b.video.widescreen = m == 0 ? SV_WIDESCREEN_ENHANCED_GAMEPLAY : SV_WIDESCREEN_ORIGINAL; // parse must overwrite either way
+    sv_settings_parse(&b, text, n);
+    check(b.video.widescreen == a.video.widescreen, "each Widescreen Mode round-trips");
+  }
+  { SvSettings a = defaults(); a.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; char text[8192]; sv_settings_format(&a, text, sizeof text);
+    check(std::strstr(text, "video.widescreen=extended_backgrounds\n") != nullptr, "stable key/value for Level 2");
+    a.video.widescreen = SV_WIDESCREEN_ENHANCED_GAMEPLAY; sv_settings_format(&a, text, sizeof text);
+    check(std::strstr(text, "video.widescreen=enhanced_gameplay\n") != nullptr, "stable key/value for Level 3"); }
+  // an older file (written before the key existed) loads unchanged: Original, every other field intact
+  { const char *old = "video.fullscreen=1\nvideo.scale=1\nvideo.aspect=1\nvideo.preset=2\nvideo.vsync=1\naudio.volume=35\ninput.deadzone=40\nbind.sms.p1.key.b1=20\n";
+    SvSettings fresh = defaults();
+    sv_settings_parse(&fresh, old, std::strlen(old));
+    check(fresh.video.widescreen == SV_WIDESCREEN_ORIGINAL && fresh.video.fullscreen == 1 && fresh.video.scale == SV_SCALE_INTEGER && fresh.video.aspect == SV_ASPECT_4_3 && fresh.video.preset == SV_CRT_CLASSIC &&
+              fresh.video.vsync == 1 && fresh.audio.volume == 35 && fresh.deadzone == 40 && fresh.bind[SV_SYSTEM_SMS].key[0][SV_ACT_BUTTON1] == 20,
+          "an older settings file loads as Original and keeps every previous field"); }
+  // invalid / hostile values become Original; the line is still recognised, nothing else changes
+  { const char *vals[] = {"", "bogus", "2", "1", "EXTENDED_BACKGROUNDS", "enhanced_gameplay\x01", "extended backgrounds", "-1", "99999999999999999999"};
+    for (const char *v : vals) {
+      SvSettings t = defaults(); t.video.widescreen = SV_WIDESCREEN_ENHANCED_GAMEPLAY;
+      const std::string line = std::string("audio.volume=12\nvideo.widescreen=") + v + "\n";
+      sv_settings_parse(&t, line.c_str(), line.size());
+      check(t.video.widescreen == SV_WIDESCREEN_ORIGINAL && t.audio.volume == 12, std::string("unknown widescreen value falls back to Original: '") + v + "'");
+    } }
+  { std::string big = "video.widescreen=" + std::string(200000, 'x') + "\naudio.volume=33\n";
+    SvSettings t = defaults(); sv_settings_parse(&t, big.data(), big.size());
+    check(t.video.widescreen == SV_WIDESCREEN_ORIGINAL, "an oversized widescreen value is bounded and ignored"); }
+  { SvSettings t = defaults(); t.video.widescreen = raw_mode(77); sv_settings_sanitize(&t);
+    check(t.video.widescreen == SV_WIDESCREEN_ORIGINAL, "sanitize clamps an out-of-range enum to Original");
+    t.video.widescreen = raw_mode(-3); sv_settings_sanitize(&t);
+    check(t.video.widescreen == SV_WIDESCREEN_ORIGINAL, "sanitize clamps a negative enum to Original"); }
+  // Restore video defaults resets it, and an SvSystem makes no difference to the shared value
+  { SvSettings t = defaults(); t.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; sv_video_defaults(&t.video);
+    check(t.video.widescreen == SV_WIDESCREEN_ORIGINAL, "sv_video_defaults restores Original");
+    for (int sys = 0; sys < SV_SYSTEM_COUNT; ++sys) { SvSettings u = defaults(); sv_bindings_defaults(&u, static_cast<SvSystem>(sys)); u.video.widescreen = SV_WIDESCREEN_ENHANCED_GAMEPLAY;
+      char text[8192]; sv_settings_format(&u, text, sizeof text); SvSettings w = defaults(); sv_settings_parse(&w, text, std::strlen(text));
+      check(w.video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "the value is system independent (one video block for Genesis, SMS and Sega CD)"); } }
+  // effective-mode fallback Level 3 -> Level 2 -> Original; absence of a provider means Original
+  { SvWidescreenCaps none = {SV_WS_UNAVAILABLE, SV_WS_UNAVAILABLE}, l2 = {SV_WS_AVAILABLE, SV_WS_UNAVAILABLE}, partial3 = {SV_WS_AVAILABLE, SV_WS_PARTIAL}, l3only = {SV_WS_UNAVAILABLE, SV_WS_AVAILABLE};
+    check(sv_widescreen_effective(SV_WIDESCREEN_ENHANCED_GAMEPLAY, nullptr) == SV_WIDESCREEN_ORIGINAL && sv_widescreen_effective(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, nullptr) == SV_WIDESCREEN_ORIGINAL, "no capability provider: Original");
+    check(sv_widescreen_effective(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &none) == SV_WIDESCREEN_ORIGINAL && sv_widescreen_effective(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, &none) == SV_WIDESCREEN_ORIGINAL, "Unavailable levels stay Original");
+    check(sv_widescreen_effective(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &l2) == SV_WIDESCREEN_EXTENDED_BACKGROUNDS, "Level 3 falls back to Level 2");
+    check(sv_widescreen_effective(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, &l2) == SV_WIDESCREEN_EXTENDED_BACKGROUNDS, "Level 2 is honoured when available");
+    check(sv_widescreen_effective(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &partial3) == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "Partial counts as supported for the effective mode");
+    check(sv_widescreen_effective(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, &l3only) == SV_WIDESCREEN_ORIGINAL, "Level 2 never falls UP to Level 3");
+    check(sv_widescreen_effective(SV_WIDESCREEN_ORIGINAL, &partial3) == SV_WIDESCREEN_ORIGINAL, "Original stays Original");
+    check(sv_widescreen_effective(raw_mode(9), &partial3) == SV_WIDESCREEN_ORIGINAL, "an invalid request is Original");
+    check(std::strcmp(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &none), "Not yet available for this game. Showing the original picture.") == 0 &&
+              std::strcmp(sv_widescreen_status(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, nullptr), "Not yet available for this game. Showing the original picture.") == 0,
+          "the unavailable message is the specified text");
+    check(sv_widescreen_status(SV_WIDESCREEN_ORIGINAL, &none)[0] == '\0', "Original has no status text");
+    check(std::strstr(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &l2), "Extended Backgrounds") != nullptr, "a Level 3 request served by Level 2 says so");
+    check(std::strstr(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &partial3), "Partly") != nullptr, "Partial support is reported as partial");
+    for (int m = 0; m < SV_WIDESCREEN_COUNT; ++m) check(std::strlen(sv_widescreen_description(static_cast<SvWidescreenMode>(m))) > 20 && std::strlen(sv_widescreen_name(static_cast<SvWidescreenMode>(m))) < 40, "every mode has a label and description"); }
+}
+
 int main() {
   settings_tests();
+  widescreen_tests();
   binding_tests();
   layout_tests();
   crt_tests();
