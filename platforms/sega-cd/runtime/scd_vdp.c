@@ -72,6 +72,9 @@ typedef struct ScdVdpHost {
   uint8_t present_ready;       /* a completed frame awaits scd_vdp_present_take */
   uint64_t present_onset;      /* the onset number of the awaiting frame */
   uint64_t present_rendered, present_skipped, present_rejected;
+  /* SEG-119 (ADR 0262): the viewer's optional presentation-only extension target (frame_extension.h). Host-side only: never serialized, hashed or
+   * read by guest semantics. NULL = absent = exactly the unextended behaviour (no extension code runs). */
+  GenesisFrameExtension *extension;
 } ScdVdpHost;
 
 #define SCD_HINT_FRAME_LINES GENESIS_NTSC_LINES_PER_FRAME
@@ -720,6 +723,13 @@ int scd_vdp_present_enable(ScdMachine *m) {
   return 0;
 }
 
+int scd_vdp_present_set_extension(ScdMachine *m, GenesisFrameExtension *extension) {
+  ScdVdpHost *h = (ScdVdpHost *)m->vdp_host;
+  if (h == NULL) return -1;
+  h->extension = extension;
+  return 0;
+}
+
 const GenesisFrameArtifact *scd_vdp_present_take(ScdMachine *m, uint64_t *onset) {
   ScdVdpHost *h = (ScdVdpHost *)m->vdp_host;
   if (h == NULL || !h->present_ready) return NULL;
@@ -751,6 +761,22 @@ static void scd_present_frame(ScdMachine *m, ScdVdpHost *h) {
   h->present_rendered += 1U;
   h->present_ready = 1U;
   h->present_onset = m->vdp_frames;
+  /* SEG-119: the presentation-only extension, produced right after the native frame composed successfully while the VRAM and the per-line state
+   * are still the frame's (the same inputs the native render just used; nothing runs between). The raster state has no VRAM journal here, so the
+   * producer truthfully reports PARTIAL (NO_VRAM_JOURNAL): it samples the frame's final VRAM and never invents mid-frame history. The result is
+   * stamped with this frame's identity (the onset number that scd_vdp_present_take returns), so a consumer can never pair it with another frame.
+   * It reads the artifact and writes only the adapter's own surface and result. */
+  if (h->extension != NULL) {
+    GenesisExtensionResult result;
+    genesis_frame_extension_run(h->extension, vdp->vram, &h->raster, &h->frame, &result);
+    result.sequence = h->present_onset;
+    h->extension->result = result;
+    if (result.status == GENESIS_EXT_AVAILABLE || result.status == GENESIS_EXT_PARTIAL) {
+      if (h->extension->produced != UINT64_MAX) ++h->extension->produced;
+    } else if (result.status == GENESIS_EXT_UNAVAILABLE && h->extension->failed != UINT64_MAX) {
+      ++h->extension->failed;
+    }
+  }
 }
 
 void scd_vdp_capture_report(const ScdMachine *m, FILE *out) {

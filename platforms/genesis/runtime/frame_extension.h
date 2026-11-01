@@ -16,6 +16,7 @@
  */
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "checkpoint_evidence.h"
 
@@ -79,6 +80,30 @@ typedef struct GenesisFrameExtension {
   uint64_t produced;                /* AVAILABLE/PARTIAL results */
   uint64_t failed;                  /* UNAVAILABLE results of requested frames (bounded counters; saturate at UINT64_MAX) */
 } GenesisFrameExtension;
+
+/* SEG-119: the one dispatch around the producer, shared by every frame path that publishes an extension (the Genesis live frame and the Sega CD
+ * presentation frame). Header-only so a translation unit that links no producer (tests compile runtime.c alone) needs nothing new. `ext` NULL or not
+ * requested -> NONE, no work at all; requested but not produced -> UNAVAILABLE with a typed reason; else the producer's PARTIAL/AVAILABLE result.
+ * Writes nothing but `*out` and the adapter's own surface; the caller stamps the sequence. */
+static inline void genesis_frame_extension_run(const GenesisFrameExtension *ext, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
+                                               const GenesisFrameArtifact *native, GenesisExtensionResult *out) {
+  if (out == NULL) return;
+  memset(out, 0, sizeof(*out));
+  if (ext == NULL || ext->request == 0U) {
+    out->status = GENESIS_EXT_NONE;
+    return;
+  }
+  if (ext->producer == NULL || ext->pixels == NULL) {
+    out->status = GENESIS_EXT_UNAVAILABLE;
+    out->reason = GENESIS_EXT_REASON_INVALID_REQUEST;
+  } else if (ext->producer(vram, raster, native, ext, out) != 0 ||
+             (out->status != GENESIS_EXT_PARTIAL && out->status != GENESIS_EXT_AVAILABLE)) {
+    const uint8_t reason = out->status == GENESIS_EXT_UNAVAILABLE && out->reason != 0U ? out->reason : (uint8_t)GENESIS_EXT_REASON_INVALID_REQUEST;
+    memset(out, 0, sizeof(*out));
+    out->status = GENESIS_EXT_UNAVAILABLE;
+    out->reason = reason;
+  }
+}
 
 #ifdef __cplusplus
 }

@@ -25,6 +25,7 @@ extern "C" {
 #endif
 
 struct ScdLiveSummary;
+struct GenesisFrameExtension;
 
 typedef struct ScdLivePoll {
   uint8_t pad1;   /* GENESIS_PAD_* mask held now (the standard three-button pad of port 1) */
@@ -50,6 +51,10 @@ typedef struct ScdLiveHost {
    * it, as before. A one-way sink: nothing it returns or does reaches the machine (a nonzero return is only counted). NULL = the viewer is silent
    * and no CD-DA is read. */
   int (*audio)(void *ctx, const int16_t *frames, uint32_t count);
+  /* SEG-119 (ADR 0262): optional presentation-only Level 2 target (frame_extension.h), queried after each poll (the window may open at the first
+   * poll). The driver attaches the returned target to the machine's presentation path (scd_vdp_present_set_extension); NULL detaches. The host
+   * sets `request` between frames only. NULL callback = no extension work at all (an older-style host). Nothing here reaches guest state. */
+  struct GenesisFrameExtension *(*extension)(void *ctx);
 } ScdLiveHost;
 
 typedef struct ScdLiveConfig {

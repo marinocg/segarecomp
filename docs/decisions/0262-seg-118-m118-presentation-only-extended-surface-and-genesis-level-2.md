@@ -44,9 +44,16 @@ are still available, and it must never influence what the console does or what i
    slices) and sets `request` (any mode above Original asks for Level 2 scenery); a frame is produced wholly under one value, and presentation uses the mode stamped with that frame's result, never the live
    preference, so a switch takes effect on the next completed frame and never mixes modes. Capability: Level 2 is Available/Partial/Unavailable from the latest requested frame's outcome (Available until a
    frame says otherwise), Level 3 stays Unavailable and falls back to Level 2 through `sv_widescreen_effective`. A failed frame is Original for that frame and recovers on the next. Nothing in guest
-   execution, scheduling, input or audio reads requested or effective mode. A viewer that never attaches the target (Sega CD, Master System, tools) reports Level 2 Unavailable and stays Original.
+   execution, scheduling, input or audio reads requested or effective mode. A viewer that never attaches the target (Master System, tools, and any program built before SEG-119 on Sega CD) reports Level 2 Unavailable and stays Original.
 8. **Reuse.** The target, plan callback, result record, host entry point and geometry are platform-neutral. Sega CD reuses `genesis_vdp_produce_extension` and the adapter code but owns its
-   own frame boundary and attachment (SEG-119); Master System supplies its own producer (SEG-120). No universal VDP abstraction was introduced.
+   own frame boundary and attachment (SEG-119, below); Master System supplies its own producer (SEG-120). No universal VDP abstraction was introduced.
+
+9. **Sega CD (SEG-119).** The Sega CD VDP presentation host (`scd_vdp.c`) holds the same optional target (`scd_vdp_present_set_extension`, queried by the live driver through the optional
+   `ScdLiveHost::extension` hook after each poll). `scd_present_frame` calls the shared dispatch `genesis_frame_extension_run` (also used by the Genesis live frame) right after the native frame composed
+   successfully, with that frame's VRAM and per-line state, and stamps the result with the presented frame's onset number, which the Sega CD viewer hands to the adapter as the frame sequence. A skipped
+   (incomplete) or rejected native frame produces nothing. `scd_present_frame` keeps no VRAM journal (`has_vram_journal` is 0), so the producer's truthful classification is always PARTIAL with the
+   `NO_VRAM_JOURNAL` caveat: the scenery is sampled from the frame's final VRAM, and no mid-frame history is invented or journaled. VRAM contents delivered by stamp rendering into Word RAM and DMA are
+   plain VRAM contents at frame time and need no special case. Requested/effective/fallback behaviour is exactly 7; `GenesisFrameArtifact`, guest state, scheduling, audio, DMA, Word RAM and CDC are untouched.
 
 ## Consequences
 
@@ -60,3 +67,7 @@ surfaces: scenery on both sides, exact centre, rejection of stale/short/mismatch
 reference sampler over synthetic scenes: wrap, per-line/per-tile scroll, column vscroll, window, priority, palettes, H32/H40, interlace, mid-frame CRAM/register/VRAM changes, missing journal,
 undersized buffers, register fuzzing; runtime stamping, mode switching, native artifact/VDP/scheduler identity with and without the target, steady-state heap), and
 `tests/genesis_viewer_extension_sdl_test.c` (the real SDL3 adapter and host: rendered output read back, live Original/Level 2/Level 3, H32<->H40, CRT, forced failures with recovery, guest invariance).
+
+SEG-119 evidence: `tests/sega_cd_viewer_extension_sdl_test.c` (a device-level Sega CD machine behind the real Sega CD viewer callbacks and the real SDL3 adapter: independent scene model for direct, graphics-ASIC (stamp) plus Word-RAM-DMA
+sourced tiles in H32/H40, scrolling, priority/palette/transparency, window and column-scroll caveats, mid-frame CRAM/VRAM changes, Level 3 fallback, forced failures with recovery, guest-state and native-frame identity against a
+viewer-less run with live mode switching, an older-style viewer that never attaches the target) and `tests/sega_cd_viewer_sdl_test.py` (the real driver on the generated live fixture: report, audio blocks and recording identical to Original).

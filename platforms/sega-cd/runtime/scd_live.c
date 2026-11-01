@@ -69,6 +69,7 @@ static ScdLiveSummary scd_live_loop(ScdMachine *m, const ScdLiveHost *host, cons
       s.outcome = SCD_LIVE_QUIT;
       return s;
     }
+    if (host->extension != NULL) (void)scd_vdp_present_set_extension(m, host->extension(host->ctx));
     if (poll.pause && !poll.step) { /* held: the machine, its input and its recording are untouched */
       s.paused_polls += 1U;
       continue;
