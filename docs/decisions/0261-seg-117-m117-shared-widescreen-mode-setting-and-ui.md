@@ -30,7 +30,7 @@ for a platform to say what it can honestly show, and the UI that exposes both, w
 6. **Prebuilt programs.** Viewer code is statically linked into each generated program. A widescreen-capable build switches modes without rebuilding; an older prebuilt cannot gain extended
    rendering from a setting, stays usable in Original mode (it ignores the unknown key) and needs rebuilding. This applies to Sega CD prebuilts too and does not change their verification.
 7. **Rendering is deferred on purpose.** Showing a selectable but non-functional mode as working would mislead, so the UI states the truth and the Original picture is untouched. The
-   extended-surface producer/viewer contract is SEG-118's ADR; Genesis, Sega CD, Master System and Level 3 follow in SEG-118-121 without a universal VDP abstraction. Game Gear, 32X and
+   extended-surface producer/viewer contract is ADR 0262 (SEG-118); Genesis, Sega CD, Master System and Level 3 follow in SEG-118-121 without a universal VDP abstraction. Game Gear, 32X and
    Saturn only need to supply capability and a platform-owned extension later.
 
 ## Consequences

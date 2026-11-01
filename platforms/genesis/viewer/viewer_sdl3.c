@@ -7,6 +7,7 @@
 
 #include "genesis_audio_format.h"
 #include "sv_host.h"
+#include "sv_layout.h"
 #include "vdp_render.h"
 
 struct GenesisSdl3Viewer {
@@ -15,7 +16,18 @@ struct GenesisSdl3Viewer {
   GenesisAudioSink sink;
   SvSample sample;         /* the input sampled by the latest window_closed() call (once per host slice, as before) */
   const uint64_t *audio_dropped;
+  /* SEG-118: Level 2 extension (see viewer_sdl3.h). The surface is preallocated for the widest geometry; no per-frame allocation. */
+  GenesisFrameExtension ext;
+  const uint64_t *frame_sequence;
+  int ext_attached;
+  SvAspect plan_aspect;               /* sampled with the requested mode once per host slice */
+  SvWidescreenSupport l2_support;     /* the outcome of the latest frame produced under a request */
 };
+
+/* the runtime's and the viewer library's bounds must agree (the runtime does not depend on the viewer) */
+typedef char genesis_ext_side_bound_matches_layout[(GENESIS_EXT_MAX_SIDE == (unsigned)SV_EXT_MAX_SIDE) ? 1 : -1];
+
+static uint8_t g_extension_surface[GENESIS_EXT_SURFACE_BYTES];
 
 static uint64_t sdl_now(void *ctx) { (void)ctx; return SDL_GetTicksNS(); }
 static void sdl_sleep(void *ctx, uint64_t ns) { (void)ctx; SDL_DelayNS(ns); }
@@ -25,6 +37,11 @@ static void sdl_sleep(void *ctx, uint64_t ns) { (void)ctx; SDL_DelayNS(ns); }
 static int sdl_closed(void *ctx) {
   GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
   sv_host_service(v->host, &v->sample);
+  if (v->ext_attached) { /* the requested mode is sampled here, between guest slices: a frame is produced wholly under one value */
+    const SvVideoSettings *video = &sv_host_settings(v->host)->video;
+    v->ext.request = video->widescreen != SV_WIDESCREEN_ORIGINAL ? 1U : 0U;
+    v->plan_aspect = video->aspect;
+  }
   return v->sample.quit;
 }
 
@@ -52,8 +69,67 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
   for (unsigned row = 0; row < height; ++row) {
     if (genesis_vdp_frame_row_rgb888(frame, row, &rgb[(size_t)row * width * 3U]) != 0) return -1;
   }
+  if (v->ext_attached && v->frame_sequence != NULL) {
+    const GenesisExtensionResult *r = &v->ext.result;
+    const uint64_t sequence = *v->frame_sequence;
+    SvExtendedSurface surface;
+    memset(&surface, 0, sizeof surface);
+    if (r->sequence == sequence && (r->status == GENESIS_EXT_AVAILABLE || r->status == GENESIS_EXT_PARTIAL)) {
+      v->l2_support = r->status == GENESIS_EXT_AVAILABLE ? SV_WS_AVAILABLE : SV_WS_PARTIAL;
+    } else if (r->sequence == sequence && r->status == GENESIS_EXT_UNAVAILABLE) {
+      v->l2_support = SV_WS_UNAVAILABLE;
+    }
+    if (r->status != GENESIS_EXT_NONE) {
+      surface.rgb24 = v->ext.pixels;
+      surface.size = v->ext.capacity;
+      surface.width = (int)r->native_w + 2 * (int)r->side;
+      surface.height = (int)r->native_h;
+      surface.pitch = (int)r->pitch;
+      surface.side = (int)r->side;
+      surface.sequence = r->sequence;
+      surface.mode = SV_WIDESCREEN_EXTENDED_BACKGROUNDS;
+      surface.status = r->status == GENESIS_EXT_AVAILABLE ? SV_WS_AVAILABLE : (r->status == GENESIS_EXT_PARTIAL ? SV_WS_PARTIAL : SV_WS_UNAVAILABLE);
+      return sv_host_present_extended(v->host, rgb, (int)width, (int)height, (int)(width * 3U), sequence, &surface);
+    }
+  }
   return sv_host_present(v->host, rgb, (int)width, (int)height, (int)(width * 3U));
 }
+
+/* Reports what the producer last achieved (Genesis Level 2 only; Level 3 is Unavailable until the sprite milestone). */
+static void sdl_widescreen_caps(void *ctx, SvWidescreenCaps *out) {
+  const GenesisSdl3Viewer *v = (const GenesisSdl3Viewer *)ctx;
+  out->extended = v->ext_attached ? v->l2_support : SV_WS_UNAVAILABLE;
+  out->enhanced = SV_WS_UNAVAILABLE;
+}
+
+static int sdl_extension_plan(void *ctx, unsigned native_w, unsigned native_h, unsigned *side_out) {
+  const GenesisSdl3Viewer *v = (const GenesisSdl3Viewer *)ctx;
+  const int side = sv_layout_extension_side((int)native_w, (int)native_h, v->plan_aspect);
+  if (side <= 0) return -1;
+  *side_out = (unsigned)side;
+  return 0;
+}
+
+GenesisFrameExtension *genesis_sdl3_viewer_extension(GenesisSdl3Viewer *v, const uint64_t *frame_sequence) {
+  int w = 0, h = 0;
+  if (v == NULL || frame_sequence == NULL) return NULL;
+  sv_layout_extension_max((int)GENESIS_FRAME_MAX_WIDTH, (int)GENESIS_FRAME_MAX_HEIGHT, &w, &h);
+  if ((size_t)w * (size_t)h * 3U > sizeof g_extension_surface) return NULL;
+  memset(&v->ext, 0, sizeof v->ext);
+  v->ext.producer = genesis_vdp_produce_extension;
+  v->ext.plan = sdl_extension_plan;
+  v->ext.plan_ctx = v;
+  v->ext.pixels = g_extension_surface;
+  v->ext.capacity = sizeof g_extension_surface;
+  v->frame_sequence = frame_sequence;
+  v->ext_attached = 1;
+  v->l2_support = SV_WS_AVAILABLE; /* capable until a produced frame says otherwise */
+  v->plan_aspect = sv_host_settings(v->host)->video.aspect;
+  v->ext.request = sv_host_settings(v->host)->video.widescreen != SV_WIDESCREEN_ORIGINAL ? 1U : 0U;
+  return &v->ext;
+}
+
+struct SvHost *genesis_sdl3_viewer_sv_host(GenesisSdl3Viewer *v) { return v != NULL ? v->host : NULL; }
 
 static void sdl_diagnostics(void *ctx, SvDiagnostics *out) {
   const GenesisSdl3Viewer *v = (const GenesisSdl3Viewer *)ctx;
@@ -116,6 +192,8 @@ GenesisSdl3Viewer *genesis_sdl3_viewer_open(const char *title, int scale) {
   cfg.rom_sha256 = sha != NULL && strlen(sha) == 64U ? sha : NULL;
   cfg.diagnostics = sdl_diagnostics;
   cfg.diagnostics_ctx = v;
+  cfg.widescreen_caps = sdl_widescreen_caps;
+  cfg.widescreen_ctx = v;
   v->host = sv_host_open(&cfg);
   if (v->host == NULL) { free(v); return NULL; }
   return v;

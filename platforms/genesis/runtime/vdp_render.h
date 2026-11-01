@@ -1175,6 +1175,17 @@ int genesis_vdp_frame_row_rgb888(const GenesisFrameArtifact *frame, unsigned row
 int genesis_vdp_produce_frame_raster(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
                                      const GenesisRasterFrameState *raster, GenesisFrameArtifact *frame_out);
 
+/*
+ * SEG-118 (ADR 0262): Level 2 extended backgrounds. Builds an RGB24 surface `native_w + 2 * side` wide: the native picture in the centre
+ * (copied from `native`) and `side` columns of real Plane A/B scenery (and the backdrop) on each side, sampled with the same scroll, wrap,
+ * priority and palette rules and the same per-line state/VRAM journal as the native render. `target->plan` chooses `side`; `target->pixels`
+ * must hold `(native_w + 2 * side) * 3 * native_h` bytes. Returns 0 with status AVAILABLE or PARTIAL (caveat flags), or nonzero with status
+ * UNAVAILABLE and a reason; the native artifact is never modified. Sprites are not extended.
+ */
+int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
+                                  const GenesisFrameArtifact *native, const GenesisFrameExtension *target,
+                                  GenesisExtensionResult *out);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

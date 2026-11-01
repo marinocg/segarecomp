@@ -71,18 +71,19 @@ def main() -> int:
         require(summary["outcome"] == "guest_stop", "guest stop stays a guest stop: " + line[0])
         require(summary["execution"] == "generated-native", "generated-native")
 
-        # SEG-117: a saved Widescreen Mode (Level 3) is read by the real viewer, changes nothing the guest or the presenter can observe (no platform
-        # supplies extended rendering yet: the effective mode is Original) and the viewer does not rewrite the file.
-        ws_file = tmp / "viewer-settings.cfg"
-        ws_text = "video.widescreen=enhanced_gameplay\n"
-        ws_file.write_text(ws_text)
-        ws = subprocess.run([str(viewer_exe), "--instruction-budget", "8"], text=True, capture_output=True, cwd=root,
-                            env=dict(env, SEGARECOMP_VIEWER_SETTINGS=str(ws_file)))
-        ws_line = [l for l in ws.stderr.splitlines() if l.startswith("VIEWER_SUMMARY ")]
-        require(len(ws_line) == 1 and json.loads(ws_line[0].split(" ", 1)[1]) == summary,
-                "a saved Widescreen Mode leaves the viewer summary (frames, outcome) identical to Original: " + ws.stderr[-200:])
-        require(ws.stdout == run.stdout and ws.returncode == run.returncode, "a saved Widescreen Mode leaves the sanitized guest report identical")
-        require(ws_file.read_text() == ws_text, "the viewer does not rewrite an unchanged settings file")
+        # SEG-117/SEG-118: a saved Widescreen Mode is read by the real viewer. Level 2 produces real extended backgrounds (presentation only) and Level 3
+        # falls back to Level 2; neither changes anything the guest or the frame publication can observe, and the viewer does not rewrite the file.
+        for mode in ("extended_backgrounds", "enhanced_gameplay"):
+            ws_file = tmp / f"viewer-settings-{mode}.cfg"
+            ws_text = f"video.widescreen={mode}\n"
+            ws_file.write_text(ws_text)
+            ws = subprocess.run([str(viewer_exe), "--instruction-budget", "8"], text=True, capture_output=True, cwd=root,
+                                env=dict(env, SEGARECOMP_VIEWER_SETTINGS=str(ws_file)))
+            ws_line = [l for l in ws.stderr.splitlines() if l.startswith("VIEWER_SUMMARY ")]
+            require(len(ws_line) == 1 and json.loads(ws_line[0].split(" ", 1)[1]) == summary,
+                    f"a saved Widescreen Mode ({mode}) leaves the viewer summary (frames, outcome) identical to Original: " + ws.stderr[-200:])
+            require(ws.stdout == run.stdout and ws.returncode == run.returncode, f"a saved Widescreen Mode ({mode}) leaves the sanitized guest report identical")
+            require(ws_file.read_text() == ws_text, "the viewer does not rewrite an unchanged settings file")
 
         bad = subprocess.run([str(viewer_exe), "--instruction-budget", "8"], text=True, capture_output=True,
                              cwd=root, env=dict(env, SEGARECOMP_VIEWER_SLICE="0"))

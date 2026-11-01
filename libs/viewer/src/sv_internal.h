@@ -41,6 +41,8 @@ struct SvHost {
   SDL_Renderer *renderer;
   SDL_Texture *frame_tex;      /* RGB24 streaming picture */
   int tex_w, tex_h;
+  int ext_side;                /* SEG-118: the frame texture holds an extended picture (native + ext_side px each side); 0 = the original picture */
+  uint32_t ext_accepted, ext_rejected, tex_creations; /* saturating, bounded diagnostics */
   uint8_t *last_rgb;           /* copy of the last presented picture (tightly packed RGB24) */
   int last_w, last_h;
   uint64_t frames_presented;

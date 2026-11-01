@@ -784,13 +784,13 @@ static void genesis_vdp_prepare_row_plane(const GenesisVdpRenderContext *ctx, co
   }
 }
 
-/* Plane A or B candidate at (x, row) from the plane's per-row constants. */
-static GenesisVdpCandidatePixel genesis_vdp_plane_candidate(const GenesisVdpRenderContext *ctx,
-                                                            const GenesisVdpRowPlane *plane, unsigned x,
-                                                            unsigned row) {
-  const unsigned group = plane->per_column ? x / 16U : 0U;
+/* Plane A or B candidate at screen column `x` (which may lie outside [0, width): SEG-118 samples the same plane beyond the picture, wrapping
+ * through the plane exactly as the visible columns do) and row, using vertical-scroll group `group` of the plane's per-row constants. */
+static GenesisVdpCandidatePixel genesis_vdp_plane_candidate_at(const GenesisVdpRenderContext *ctx,
+                                                               const GenesisVdpRowPlane *plane, int64_t x, unsigned group,
+                                                               unsigned row) {
   const int32_t vscroll = plane->vscroll[group < GENESIS_VDP_VSRAM_GROUP_COUNT ? group : 0U];
-  const unsigned plane_x = genesis_vdp_plane_x(x, plane->hscroll, plane->width_px);
+  const unsigned plane_x = genesis_vdp_wrap_coordinate(x - (int64_t)plane->hscroll, plane->width_px);
   const unsigned plane_y = genesis_vdp_plane_y(row, vscroll, plane->height_px);
   const unsigned cell_col = plane_x / GENESIS_VDP_TILE_WIDTH;
   const unsigned cell_row = plane_y / ctx->geometry.cell_height;
@@ -799,6 +799,13 @@ static GenesisVdpCandidatePixel genesis_vdp_plane_candidate(const GenesisVdpRend
       genesis_vdp_decode_nametable_word((uint16_t)genesis_vdp_be16(ctx->vram, addr));
   return genesis_vdp_fetch_cell_pixel(ctx, entry, plane_x % GENESIS_VDP_TILE_WIDTH,
                                       plane_y % ctx->geometry.cell_height);
+}
+
+/* Plane A or B candidate at (x, row) from the plane's per-row constants. */
+static GenesisVdpCandidatePixel genesis_vdp_plane_candidate(const GenesisVdpRenderContext *ctx,
+                                                            const GenesisVdpRowPlane *plane, unsigned x,
+                                                            unsigned row) {
+  return genesis_vdp_plane_candidate_at(ctx, plane, (int64_t)x, plane->per_column ? x / 16U : 0U, row);
 }
 
 /* The sprites that reach one output row, with the hardware per-line limits (H40: 20 sprites / 40 cells; H32: 16 / 32)
@@ -1071,6 +1078,130 @@ int genesis_vdp_produce_frame(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
   memcpy(uniform.cram, cram, sizeof(uniform.cram));
   memcpy(uniform.vsram, vsram, sizeof(uniform.vsram));
   return genesis_vdp_render_frame(vram, NULL, &uniform, frame_out);
+}
+
+/* --- SEG-118 (ADR 0262): Level 2 extended backgrounds. Presentation only: reads the same raster state/VRAM journal the native render used and the
+ * finished native artifact, writes only the caller's RGB24 surface. Only Plane A, Plane B and the backdrop exist off-screen; sprites are not
+ * extended (Level 3). Every off-screen pixel is sampled by the same plane code as the visible columns, so scenery is real VDP data, never invented. --- */
+
+static void genesis_ext_unavailable(GenesisExtensionResult *out, GenesisExtensionReason reason) {
+  memset(out, 0, sizeof(*out));
+  out->status = GENESIS_EXT_UNAVAILABLE;
+  out->reason = (uint8_t)reason;
+}
+
+/* Do the 2-cell vertical-scroll groups of this plane disagree? (If not, the edge columns are exactly the off-screen columns' value.) */
+static int genesis_ext_vscroll_differs(const GenesisVdpRowPlane *plane, unsigned groups) {
+  if (!plane->per_column) return 0;
+  for (unsigned g = 1U; g < groups && g < GENESIS_VDP_VSRAM_GROUP_COUNT; ++g) {
+    if (plane->vscroll[g] != plane->vscroll[0]) return 1;
+  }
+  return 0;
+}
+
+int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
+                                  const GenesisFrameArtifact *native, const GenesisFrameExtension *target,
+                                  GenesisExtensionResult *out) {
+  GenesisVdpRenderContext ctx;
+  GenesisVdpDisplayGeometry geometry;
+  uint8_t work_vram[GENESIS_VDP_VRAM_BYTES];
+  unsigned side = 0U, applied = 0U, width, height, groups;
+  size_t pitch, needed;
+  uint8_t flags = 0U;
+  int journaled;
+  if (out == NULL) return -1;
+  if (vram == NULL || raster == NULL || native == NULL || target == NULL || target->pixels == NULL) {
+    if (out != NULL) genesis_ext_unavailable(out, GENESIS_EXT_REASON_INVALID_REQUEST);
+    return -1;
+  }
+  width = GENESIS_FRAME_ARTIFACT_WIDTH(native);
+  height = GENESIS_FRAME_ARTIFACT_HEIGHT(native);
+  if (genesis_vdp_display_geometry(raster->lines[0].registers, &geometry) != 0 || geometry.width != width || geometry.height != height ||
+      width == 0U || width > GENESIS_FRAME_MAX_WIDTH || height == 0U || height > GENESIS_FRAME_MAX_HEIGHT) {
+    genesis_ext_unavailable(out, GENESIS_EXT_REASON_NATIVE_GEOMETRY);
+    return -1;
+  }
+  if (target->plan == NULL || target->plan(target->plan_ctx, width, height, &side) != 0 || side == 0U) {
+    genesis_ext_unavailable(out, GENESIS_EXT_REASON_NO_PLAN);
+    return -1;
+  }
+  if (side > GENESIS_EXT_MAX_SIDE) {
+    genesis_ext_unavailable(out, GENESIS_EXT_REASON_INVALID_REQUEST);
+    return -1;
+  }
+  pitch = ((size_t)width + 2U * side) * 3U;
+  needed = pitch * height;
+  if (needed > target->capacity) {
+    genesis_ext_unavailable(out, GENESIS_EXT_REASON_TARGET_TOO_SMALL);
+    return -1;
+  }
+  journaled = raster->has_vram_journal != 0U && raster->vram_write_count <= GENESIS_RASTER_VRAM_WRITE_CAPACITY;
+  if (!journaled) flags |= GENESIS_EXT_FLAG_NO_VRAM_JOURNAL;
+  ctx.vram = vram;
+  ctx.geometry = geometry;
+  if (journaled) {
+    memcpy(work_vram, raster->vram_start, sizeof(work_vram));
+    ctx.vram = work_vram;
+  }
+  groups = width / 16U;
+  for (unsigned row = 0U; row < height; ++row) {
+    const unsigned field_line = geometry.im2 ? row / 2U : row;
+    const GenesisRasterLine *line = &raster->lines[field_line];
+    uint8_t *dst = target->pixels + (size_t)row * pitch;
+    GenesisVdpRowPlane plane_a, plane_b;
+    unsigned backdrop = 0U;
+    if (journaled) {
+      while (applied < raster->vram_write_count && (unsigned)raster->vram_writes[applied].line < field_line) {
+        work_vram[raster->vram_writes[applied].address] = raster->vram_writes[applied].value;
+        ++applied;
+      }
+    }
+    (void)genesis_vdp_backdrop_cram_index(line->registers, &backdrop);
+    genesis_vdp_prepare_row_plane(&ctx, line, GENESIS_VDP_PLANE_A, row, &plane_a);
+    genesis_vdp_prepare_row_plane(&ctx, line, GENESIS_VDP_PLANE_B, row, &plane_b);
+    if (genesis_ext_vscroll_differs(&plane_a, groups) || genesis_ext_vscroll_differs(&plane_b, groups)) flags |= GENESIS_EXT_FLAG_COLUMN_VSCROLL;
+    /* The native centre is copied verbatim from the finished artifact (the host also re-uploads it from the native picture). */
+    if (genesis_vdp_frame_row_rgb888(native, row, dst + (size_t)side * 3U) != 0) {
+      genesis_ext_unavailable(out, GENESIS_EXT_REASON_NATIVE_GEOMETRY);
+      return -1;
+    }
+    for (int s = 0; s < 2; ++s) {
+      /* s == 0: the `side` columns left of the picture (x = -side .. -1); s == 1: the `side` columns right of it (x = width .. width + side - 1). */
+      const int left = s == 0;
+      const unsigned edge_x = left ? 0U : width - 1U;
+      const int window_edge = genesis_vdp_window_covers(line->registers, &geometry, edge_x, row);
+      const unsigned group = left ? 0U : (groups != 0U ? groups - 1U : 0U);
+      if (window_edge) flags |= GENESIS_EXT_FLAG_WINDOW_EDGE;
+      for (unsigned i = 0U; i < side; ++i) {
+        const int64_t x = left ? (int64_t)i - (int64_t)side : (int64_t)width + (int64_t)i;
+        GenesisVdpCandidatePixel a, b, none;
+        GenesisRgb888 color;
+        unsigned index;
+        memset(&none, 0, sizeof(none));
+        /* The window plane does not exist off-screen: on rows where it owns the edge, Plane A is left out there (never repeated or guessed). */
+        if (window_edge) a = none;
+        else a = genesis_vdp_plane_candidate_at(&ctx, &plane_a, x, plane_a.per_column ? group : 0U, row);
+        b = genesis_vdp_plane_candidate_at(&ctx, &plane_b, x, plane_b.per_column ? group : 0U, row);
+        index = genesis_vdp_select_cram_index(&a, &b, &none, backdrop);
+        if (genesis_vdp_decode_cram_entry(line->cram, index, &color) != 0) {
+          genesis_ext_unavailable(out, GENESIS_EXT_REASON_NATIVE_GEOMETRY);
+          return -1;
+        }
+        {
+          uint8_t *px = dst + (left ? (size_t)i : (size_t)side + width + i) * 3U;
+          px[0] = color.r; px[1] = color.g; px[2] = color.b;
+        }
+      }
+    }
+  }
+  memset(out, 0, sizeof(*out));
+  out->status = flags == 0U ? GENESIS_EXT_AVAILABLE : GENESIS_EXT_PARTIAL;
+  out->flags = flags;
+  out->native_w = (uint16_t)width;
+  out->native_h = (uint16_t)height;
+  out->side = (uint16_t)side;
+  out->pitch = (uint32_t)pitch;
+  return 0;
 }
 
 /* SEG-055: the single artifact -> RGB conversion shared by every consumer (PPM export, SDL presentation, tests), so

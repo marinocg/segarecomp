@@ -235,6 +235,13 @@ add_test(NAME reachability_coverage_compare_test COMMAND ${Python3_EXECUTABLE}
 add_test(NAME genesis_frame_capture_bridge_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_frame_capture_bridge_test.py ${PROJECT_SOURCE_DIR})
 # SEG-007-T254: optional viewer core; deliberately not linked by runtime_genesis.
+# SEG-118: Level 2 extended backgrounds (independent reference sampler, native invariance, runtime stamping).
+add_executable(genesis_extension_tests genesis_extension_test.cpp)
+target_link_libraries(genesis_extension_tests PRIVATE segarecomp::runtime_genesis)
+segarecomp_enable_warnings(genesis_extension_tests)
+add_test(NAME genesis_extension_tests COMMAND genesis_extension_tests)
+set_property(TEST genesis_extension_tests APPEND PROPERTY LABELS full fast)
+
 add_executable(genesis_viewer_tests genesis_viewer_test.cpp ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/viewer.c)
 target_include_directories(genesis_viewer_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer)
 target_link_libraries(genesis_viewer_tests PRIVATE segarecomp::runtime_genesis)
@@ -1329,6 +1336,16 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST sega_cd_viewer_sdl_test APPEND PROPERTY LABELS full fast)
   set_property(TEST sega_cd_viewer_sdl_test APPEND PROPERTY ENVIRONMENT "SDL3_PREFIX=${_scd_sdl_prefix}")
   set_property(TEST sega_cd_viewer_sdl_test PROPERTY TIMEOUT 600)
+endif()
+# SEG-118 (ADR 0262): the real SDL3 Genesis viewer adapter + shared host showing Level 2 extended backgrounds (dummy video driver, software renderer).
+if(SEGARECOMP_ENABLE_SDL3_VIEWER)
+  add_executable(genesis_viewer_extension_sdl_test genesis_viewer_extension_sdl_test.c)
+  target_link_libraries(genesis_viewer_extension_sdl_test PRIVATE segarecomp_viewer_genesis_sdl3)
+  set_target_properties(genesis_viewer_extension_sdl_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  segarecomp_enable_warnings(genesis_viewer_extension_sdl_test)
+  add_test(NAME genesis_viewer_extension_sdl_test COMMAND genesis_viewer_extension_sdl_test)
+  set_property(TEST genesis_viewer_extension_sdl_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST genesis_viewer_extension_sdl_test PROPERTY TIMEOUT 240)
 endif()
 add_test(NAME sega_cd_pcm_audio_native_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_pcm_audio_native_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

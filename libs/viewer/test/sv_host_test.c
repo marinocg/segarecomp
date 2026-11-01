@@ -426,6 +426,222 @@ static void widescreen_tests(const char *dir, uint8_t *frame) {
   remove(file);
 }
 
+/* ---- SEG-118: the extended (Level 2) presentation path, with a project-authored synthetic surface ---- */
+static void ext_fill(uint8_t *surf, int w, int side, int h, int pitch) {
+  int x, y;
+  for (y = 0; y < h; ++y)
+    for (x = 0; x < w + 2 * side; ++x) {
+      uint8_t *p = surf + (size_t)y * (size_t)pitch + (size_t)x * 3u;
+      if (x < side) { p[0] = (uint8_t)(200 - (x & 15)); p[1] = (uint8_t)(y & 31); p[2] = 10; }                 /* left scenery: red-ish */
+      else if (x >= side + w) { p[0] = 10; p[1] = (uint8_t)(y & 31); p[2] = (uint8_t)(200 - (x & 15)); }       /* right scenery: blue-ish */
+      else { p[0] = 77; p[1] = 77; p[2] = 77; }                                                              /* garbage centre: the host must not show it */
+    }
+}
+static SvExtendedSurface ext_desc(const uint8_t *surf, size_t size, int w, int side, int h, int pitch, uint64_t seq) {
+  SvExtendedSurface e;
+  memset(&e, 0, sizeof e);
+  e.rgb24 = surf; e.size = size; e.width = w + 2 * side; e.height = h; e.pitch = pitch; e.side = side; e.sequence = seq;
+  e.mode = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; e.status = SV_WS_AVAILABLE;
+  return e;
+}
+static int shot_is_red(SDL_Surface *a, int x, int y) { int r, g, b; return px(a, x, y, &r, &g, &b) && r >= 180 && b == 10; }
+static int shot_is_blue(SDL_Surface *a, int x, int y) { int r, g, b; return px(a, x, y, &r, &g, &b) && b >= 180 && r == 10; }
+
+static void extension_tests(const char *settings_file) {
+  enum { W = 320, H = 224, SIDE = 39, SW = W + 2 * SIDE };
+  const int pitch = SW * 3 + 12; /* a padded pitch: rows are not tightly packed */
+  uint8_t *native = (uint8_t *)malloc((size_t)W * H * 3u);
+  uint8_t *surf = (uint8_t *)calloc((size_t)pitch * H, 1u);
+  SvHost *host = open_host(SV_SYSTEM_GENESIS, settings_file, 0);
+  SvSettings st;
+  SvExtendedSurface e;
+  SDL_Surface *a, *b;
+  SvExtendedLayout lay;
+  uint32_t acc, rej, tex, tex0;
+  int i, x, y, r, g, bl, ok;
+  CHECK(host != NULL && native != NULL && surf != NULL, "extension: host opens");
+  if (host == NULL || native == NULL || surf == NULL) { free(native); free(surf); return; }
+  fill_pattern(native, W, H);
+  ext_fill(surf, W, SIDE, H, pitch);
+  st = *sv_host_settings(host);
+  st.video.scale = SV_SCALE_INTEGER; st.video.aspect = SV_ASPECT_ORIGINAL; st.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS;
+  sv_host_apply_settings(host, &st);
+
+  /* the Original path first (unchanged API): the reference output */
+  CHECK(sv_host_present(host, native, W, H, W * 3) == 0, "extension: original present");
+  sv_host_toast(host, "");
+  a = sv_host_capture_output(host);
+  CHECK(a != NULL && sv_host_extension_side(host) == 0, "extension: the original picture has no extension");
+  if (a == NULL) { sv_host_close(host); free(native); free(surf); return; }
+  { const uint64_t original_hash = surface_hash(a);
+    const int ow = a->w, oh = a->h;
+    SDL_DestroySurface(a);
+
+    /* a valid extended frame: scenery on both sides, native centre exact, centred */
+    e = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 5);
+    CHECK(sv_host_present_extended(host, native, W, H, W * 3, 5, &e) == 0 && sv_host_extension_side(host) == SIDE, "extension: valid surface accepted");
+    sv_host_toast(host, "");
+    a = sv_host_capture_output(host);
+    CHECK(a != NULL && a->w == ow && a->h == oh, "extension: the output size is the window's");
+    if (a != NULL) {
+      int k, left_probe, right_probe;
+      CHECK(sv_layout_extended_dest(a->w, a->h, W, H, SIDE, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER, &lay) == 0, "extension: layout");
+      k = lay.native.w / W;
+      CHECK(k >= 2 && lay.native.w == W * k && lay.surface.w == SW * k && lay.native.x == lay.surface.x + SIDE * k, "extension: whole-number scale, native exactly centred");
+      left_probe = lay.surface.x + (SIDE * k) / 2; right_probe = lay.surface.x + lay.surface.w - (SIDE * k) / 2;
+      CHECK(shot_is_red(a, left_probe, lay.surface.y + lay.surface.h / 2), "extension: real scenery left of the picture");
+      CHECK(shot_is_blue(a, right_probe, lay.surface.y + lay.surface.h / 2), "extension: real scenery right of the picture");
+      CHECK(shot_is_red(a, lay.surface.x, lay.surface.y + 1) && shot_is_blue(a, lay.surface.x + lay.surface.w - 1, lay.surface.y + 1), "extension: the outermost columns are scenery");
+      ok = 1;
+      for (y = 0; y < H && ok; y += 5)
+        for (x = 0; x < W && ok; x += 7) {
+          int er, eg, eb, rr, gg, bb;
+          px(a, lay.native.x + x * k + k / 2, lay.native.y + y * k + k / 2, &rr, &gg, &bb);
+          er = (uint8_t)(x * 5 + 7); eg = (uint8_t)(y * 9 + 3); eb = (uint8_t)((x ^ y) * 11 + 1);
+          ok = rr == er && gg == eg && bb == eb;
+        }
+      CHECK(ok, "extension: the native pixels in the centre are byte-exact (never the surface's centre)");
+      px(a, 0, 0, &r, &g, &bl);
+      CHECK(lay.surface.x > 0 || lay.surface.y > 0 ? (r == 0 && g == 0 && bl == 0) : 1, "extension: letterbox is black");
+      SDL_DestroySurface(a);
+    }
+
+    /* rejections: each presents exactly the original picture for that frame, never a partial one */
+    sv_host_extension_stats(host, &acc, &rej, &tex0);
+    {
+      struct { const char *name; SvExtendedSurface s; uint64_t seq; } bad[8];
+      int n = 0;
+      bad[n].name = "stale sequence"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 4); bad[n++].seq = 6;
+      bad[n].name = "future sequence"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 7); bad[n++].seq = 6;
+      bad[n].name = "short pitch"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, SW * 3 - 3, 6); bad[n++].seq = 6;
+      bad[n].name = "short buffer"; bad[n].s = ext_desc(surf, (size_t)pitch * H - 40, W, SIDE, H, pitch, 6); bad[n++].seq = 6;
+      bad[n].name = "wrong width"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 6); bad[n].s.width -= 1; bad[n++].seq = 6;
+      bad[n].name = "null buffer"; bad[n].s = ext_desc(NULL, 0, W, SIDE, H, pitch, 6); bad[n++].seq = 6;
+      bad[n].name = "produced as Original"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 6); bad[n].s.mode = SV_WIDESCREEN_ORIGINAL; bad[n++].seq = 6;
+      bad[n].name = "huge side"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SV_EXT_MAX_SIDE + 1, H, pitch, 6); bad[n++].seq = 6;
+      for (i = 0; i < n; ++i) {
+        char what[96];
+        snprintf(what, sizeof what, "extension: %s presents the original", bad[i].name);
+        CHECK(sv_host_present_extended(host, native, W, H, W * 3, bad[i].seq, &bad[i].s) == 0 && sv_host_extension_side(host) == 0, what);
+        sv_host_toast(host, "");
+        a = sv_host_capture_output(host);
+        CHECK(a != NULL && surface_hash(a) == original_hash, what);
+        if (a != NULL) SDL_DestroySurface(a);
+      }
+      { SvExtendedSurface un = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 6); un.status = SV_WS_UNAVAILABLE;
+        CHECK(sv_host_present_extended(host, native, W, H, W * 3, 6, &un) == 0 && sv_host_extension_side(host) == 0, "extension: an UNAVAILABLE surface is the original");
+        CHECK(sv_host_present_extended(host, native, W, H, W * 3, 6, NULL) == 0 && sv_host_extension_side(host) == 0, "extension: a NULL surface is the original"); }
+      sv_host_extension_stats(host, &acc, &rej, &tex);
+      CHECK(rej == (uint32_t)n && acc == 1u, "extension: the rejection counter is bounded and counts offered refusals");
+      CHECK(sv_host_present_extended(host, native, 0, H, W * 3, 6, NULL) != 0, "extension: invalid native geometry still fails like sv_host_present");
+    }
+
+    /* recovery on the very next valid frame, without carried state */
+    e = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 9);
+    CHECK(sv_host_present_extended(host, native, W, H, W * 3, 9, &e) == 0 && sv_host_extension_side(host) == SIDE, "extension: recovers on the next valid frame");
+    sv_host_extension_stats(host, &acc, &rej, &tex0);
+    for (i = 0; i < 30; ++i) {
+      e.sequence = (uint64_t)(10 + i);
+      CHECK(sv_host_present_extended(host, native, W, H, W * 3, e.sequence, &e) == 0, "extension: steady frame");
+    }
+    sv_host_extension_stats(host, &acc, &rej, &tex);
+    CHECK(tex == tex0, "extension: no texture churn at unchanged geometry");
+    /* back to Original and again to extended: one texture change each way, none per frame */
+    for (i = 0; i < 10; ++i) sv_host_present(host, native, W, H, W * 3);
+    sv_host_extension_stats(host, &acc, &rej, &tex);
+    CHECK(tex == tex0 + 1u && sv_host_extension_side(host) == 0, "extension: Original after extended is one texture change");
+    sv_host_toast(host, "");
+    a = sv_host_capture_output(host);
+    CHECK(a != NULL && surface_hash(a) == original_hash, "extension: Original output is byte-identical after a round trip");
+    if (a != NULL) SDL_DestroySurface(a);
+
+    /* the borrowed surface is not retained: scribbling over it after the call changes nothing already presented */
+    e = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 100);
+    sv_host_present_extended(host, native, W, H, W * 3, 100, &e);
+    sv_host_toast(host, "");
+    a = sv_host_capture_output(host);
+    memset(surf, 0, (size_t)pitch * H);
+    b = sv_host_capture_output(host);
+    CHECK(a != NULL && b != NULL && surface_hash(a) == surface_hash(b), "extension: the host keeps no pointer into the borrowed surface");
+    if (a != NULL) SDL_DestroySurface(a);
+    if (b != NULL) SDL_DestroySurface(b);
+    ext_fill(surf, W, SIDE, H, pitch);
+  }
+
+  /* CRT presets, fit scaling, aspect and window resize all apply to the extended picture */
+  {
+    static const SvCrtPreset presets[] = {SV_CRT_PIXEL_PERFECT, SV_CRT_SOFT, SV_CRT_CLASSIC, SV_CRT_ARCADE};
+    uint64_t seq = 200;
+    for (i = 0; i < 4; ++i) {
+      SvExtendedLayout l2;
+      int scn;
+      st = *sv_host_settings(host);
+      sv_apply_crt_preset(&st.video, presets[i]);
+      for (scn = 0; scn < 2; ++scn) {
+        st.video.scale = scn ? SV_SCALE_FIT : SV_SCALE_INTEGER;
+        sv_host_apply_settings(host, &st);
+        e = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, ++seq);
+        CHECK(sv_host_present_extended(host, native, W, H, W * 3, seq, &e) == 0 && sv_host_extension_side(host) == SIDE, "extension: presents under every CRT preset");
+        sv_host_toast(host, "");
+        a = sv_host_capture_output(host);
+        CHECK(a != NULL, "extension: capture under a CRT preset");
+        if (a != NULL) {
+          int sr, sg, sb, cr, cg, cb;
+          sv_layout_extended_dest(a->w, a->h, W, H, SIDE, st.video.aspect, st.video.scale, &l2);
+          px(a, l2.surface.x + 4, l2.surface.y + l2.surface.h / 2, &sr, &sg, &sb);
+          px(a, l2.native.x + l2.native.w / 2, l2.native.y + l2.native.h / 2, &cr, &cg, &cb);
+          CHECK(sr > sb && (sr + sg + sb) > 30, "extension: scenery is visible through the preset on the left");
+          CHECK(cr + cg + cb > 0, "extension: native centre is visible through the preset");
+          SDL_DestroySurface(a);
+        }
+      }
+    }
+    sv_apply_crt_preset(&st.video, SV_CRT_PIXEL_PERFECT);
+    st.video.scale = SV_SCALE_FIT; st.video.aspect = SV_ASPECT_4_3;
+    sv_host_apply_settings(host, &st);
+    e = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 300);
+    sv_host_present_extended(host, native, W, H, W * 3, 300, &e);
+    sv_host_toast(host, "");
+    a = sv_host_capture_output(host);
+    if (a != NULL) {
+      sv_layout_extended_dest(a->w, a->h, W, H, SIDE, SV_ASPECT_4_3, SV_SCALE_FIT, &lay);
+      CHECK(lay.native.w * 3 >= lay.native.h * 4 - 4 && lay.native.w * 3 <= lay.native.h * 4 + 4, "extension: 4:3 content stays 4:3 inside the wider picture");
+      SDL_DestroySurface(a);
+    }
+    /* a different H32 geometry through the same host: the texture follows the geometry */
+    { enum { W2 = 256, SIDE2 = 71 };
+      uint8_t *n2 = (uint8_t *)malloc((size_t)W2 * H * 3u);
+      uint8_t *s2 = (uint8_t *)calloc((size_t)(W2 + 2 * SIDE2) * 3u * H, 1u);
+      if (n2 != NULL && s2 != NULL) {
+        SvExtendedSurface e2;
+        fill_pattern(n2, W2, H);
+        ext_fill(s2, W2, SIDE2, H, (W2 + 2 * SIDE2) * 3);
+        e2 = ext_desc(s2, (size_t)(W2 + 2 * SIDE2) * 3u * H, W2, SIDE2, H, (W2 + 2 * SIDE2) * 3, 301);
+        CHECK(sv_host_present_extended(host, n2, W2, H, W2 * 3, 301, &e2) == 0 && sv_host_extension_side(host) == SIDE2, "extension: H32 surface follows an H40 one");
+        e = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 302);
+        CHECK(sv_host_present_extended(host, native, W, H, W * 3, 302, &e) == 0 && sv_host_extension_side(host) == SIDE, "extension: and back to H40");
+      }
+      free(n2); free(s2);
+    }
+    /* resize: the same frame laid out in another window size */
+    st.video.aspect = SV_ASPECT_ORIGINAL;
+    sv_host_apply_settings(host, &st);
+    SDL_SetWindowSize(host->window, 1280, 720);
+    sv_host_present_extended(host, native, W, H, W * 3, 302, &e);
+    sv_host_toast(host, "");
+    a = sv_host_capture_output(host);
+    CHECK(a != NULL, "extension: capture after resize");
+    if (a != NULL) {
+      sv_layout_extended_dest(a->w, a->h, W, H, SIDE, SV_ASPECT_ORIGINAL, SV_SCALE_FIT, &lay);
+      CHECK(shot_is_red(a, lay.surface.x + 3, lay.surface.y + lay.surface.h / 2) || a->w != 1280, "extension: scenery follows the resized window");
+      SDL_DestroySurface(a);
+    }
+  }
+  sv_host_close(host);
+  free(native);
+  free(surf);
+}
+
 int main(void) {
   char dir[512], settings_file[600], shots[600];
   uint8_t *frame = (uint8_t *)malloc(320u * 240u * 3u);
@@ -891,6 +1107,8 @@ int main(void) {
   widescreen_tests(dir, frame);
   printf("phase: %s\n", "widescreen_live_tests(dir, frame"); fflush(stdout);
   widescreen_live_tests(dir, frame);
+  printf("phase: extension_tests\n"); fflush(stdout);
+  extension_tests(settings_file);
   free(frame);
   if (failures != 0) { printf("sv_host_test: %d failure(s)\n", failures); return 1; }
   printf("sv_host_test: ok\n");
