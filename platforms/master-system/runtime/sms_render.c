@@ -46,6 +46,8 @@ typedef struct SpriteHit {
 void sms_extension_reset(SmsExtension *ext) {
   if (ext == NULL) return;
   ext->side = 0u;
+  ext->sprites = 0u;
+  ext->work_sprite_pixels = 0u;
   ext->ok_lines = 0u;
   ext->geometry_fail = 0u;
   ext->first_reason = SMS_EXT_REASON_NONE;
@@ -81,6 +83,8 @@ static void ext_begin_frame(SmsExtension *e, unsigned height) {
   e->first_reason = SMS_EXT_REASON_NONE;
   e->geometry_fail = (uint8_t)(want > SMS_EXT_MAX_SIDE);
   e->side = e->geometry_fail ? 0u : want;
+  e->sprites = (uint8_t)(e->side != 0u && e->request_sprites != 0u);
+  e->work_sprite_pixels = 0u;
 }
 
 static void ext_fail_line(SmsExtension *e, unsigned line, SmsExtReason reason) {
@@ -91,17 +95,17 @@ static void ext_fail_line(SmsExtension *e, unsigned line, SmsExtReason reason) {
 
 /* One line of extension from the line's own background samples: the sample at screen x outside [0, 256) is the one at x & 255 (name-table wrap),
  * so the left side is the last `side` source samples and the right side the first `side`. `color`/`pal` NULL = display disabled (backdrop). */
-static void ext_emit_line(SmsExtension *e, const SmsVdp *v, unsigned line, unsigned r0, const uint8_t *color, const uint8_t *pal,
-                          uint8_t backdrop) {
+static int ext_emit_line(SmsExtension *e, const SmsVdp *v, unsigned line, unsigned r0, const uint8_t *color, const uint8_t *pal,
+                         uint8_t backdrop) {
   const unsigned side = e->side;
   unsigned i;
   if (color != NULL && (r0 & R0_LEFT_BLANK) != 0u) {
     ext_fail_line(e, line, SMS_EXT_REASON_LEFT_MASK);
-    return;
+    return 0;
   }
   if (color != NULL && (r0 & R0_VSCROLL_LOCK) != 0u) {
     ext_fail_line(e, line, SMS_EXT_REASON_VSCROLL_LOCK);
-    return;
+    return 0;
   }
   for (i = 0; i < side; ++i) {
     const unsigned l = SMS_FB_WIDTH - side + i, rr = i;
@@ -109,6 +113,35 @@ static void ext_emit_line(SmsExtension *e, const SmsVdp *v, unsigned line, unsig
     e->work_right[line][i] = color == NULL || pal[rr] == 255u ? backdrop : (uint8_t)(v->cram[(unsigned)pal[rr] * 16u + color[rr]] & 0x3Fu);
   }
   ++e->ok_lines;
+  return 1;
+}
+
+/* SEG-121: composes the spilled sprite pixels of one line over the line's WRAPPED background samples already in the work arrays. `left[k]` is the sprite
+ * colour (0 = none) at screen column k - SMS_EXT_SPILL_LEFT, `right[k]` at column 256 + k. A spill pixel sits `i` columns into the extension: left side
+ * i -> column i - side (source sample 256 - side + i), right side i -> column 256 + i (source sample i). The native rule applies: a sprite is hidden
+ * only by a background pixel that has priority and a non-zero colour. Columns beyond the requested side are not part of the surface. */
+static void ext_spill_sprites(SmsExtension *e, const SmsVdp *v, unsigned line, const uint8_t *bg_color, const uint8_t *bg_prio, const uint8_t *bg_pal,
+                              const uint8_t *left, const uint8_t *right) {
+  const unsigned side = e->side;
+  unsigned i;
+  for (i = 0; i < side; ++i) {
+    const int dx = (int)i - (int)side;
+    const unsigned src = SMS_FB_WIDTH - side + i;
+    if (dx >= -(int)SMS_EXT_SPILL_LEFT) {
+      const uint8_t c = left[(unsigned)(dx + (int)SMS_EXT_SPILL_LEFT)];
+      if (c != 0u && !(bg_prio[src] != 0u && bg_color[src] != 0u && bg_pal[src] != 255u)) {
+        e->work_left[line][i] = (uint8_t)(v->cram[16u + c] & 0x3Fu);
+        ++e->work_sprite_pixels;
+      }
+    }
+    if (i < SMS_EXT_SPILL_RIGHT) {
+      const uint8_t c = right[i];
+      if (c != 0u && !(bg_prio[i] != 0u && bg_color[i] != 0u && bg_pal[i] != 255u)) {
+        e->work_right[line][i] = (uint8_t)(v->cram[16u + c] & 0x3Fu);
+        ++e->work_sprite_pixels;
+      }
+    }
+  }
 }
 
 static void ext_finish_frame(SmsRenderer *r) {
@@ -125,6 +158,8 @@ static void ext_finish_frame(SmsRenderer *r) {
   } else if (e->ok_lines == r->height) {
     res->cls = SMS_EXT_WRAPPED; /* see the block comment in sms_render.h: no Mode 4 line can be DISTINCT */
     res->side = e->side;
+    res->sprites = e->sprites;
+    res->sprite_pixels = e->sprites ? e->work_sprite_pixels : 0u;
     memcpy(e->left, e->work_left, sizeof e->left);
     memcpy(e->right, e->work_right, sizeof e->right);
   } else {
@@ -159,6 +194,7 @@ void sms_render_line(SmsRenderer *r, const SmsVdp *v, uint32_t line, uint64_t fr
   const SmsVdpMode mode = sms_vdp_mode(v);
   uint8_t bg_color[SMS_FB_WIDTH], bg_prio[SMS_FB_WIDTH], bg_pal[SMS_FB_WIDTH];
   uint8_t spr_color[SMS_FB_WIDTH];
+  uint8_t spill_left[SMS_EXT_SPILL_LEFT], spill_right[SMS_EXT_SPILL_RIGHT + 1u]; /* SEG-121: sprite colours at columns -8..-1 and 256..271 */
   uint8_t *out;
   const unsigned r0 = v->reg[0], r1 = v->reg[1];
   unsigned x;
@@ -179,6 +215,7 @@ void sms_render_line(SmsRenderer *r, const SmsVdp *v, uint32_t line, uint64_t fr
   {
     const uint8_t backdrop = (uint8_t)(v->cram[16u + (v->reg[7] & 15u)] & 0x3Fu);
     const int ext_on = r->ext != NULL && r->ext->side != 0u;
+    int ext_line_ok = 0;
     if ((r1 & R1_DISPLAY) == 0u) {
       memset(out, backdrop, SMS_FB_WIDTH);
       if (ext_on) ext_emit_line(r->ext, v, line, r0, NULL, NULL, backdrop);
@@ -216,9 +253,11 @@ void sms_render_line(SmsRenderer *r, const SmsVdp *v, uint32_t line, uint64_t fr
         bg_prio[x] = (uint8_t)((entry >> 12) & 1u);
         bg_pal[x] = (uint8_t)((entry >> 11) & 1u);
       }
-      if (ext_on) ext_emit_line(r->ext, v, line, r0, bg_color, bg_pal, backdrop); /* background only; sprites are not extended */
+      if (ext_on) ext_line_ok = ext_emit_line(r->ext, v, line, r0, bg_color, bg_pal, backdrop);
       /* ---- sprites ---- */
       memset(spr_color, 0, sizeof spr_color);
+      memset(spill_left, 0, sizeof spill_left);
+      memset(spill_right, 0, sizeof spill_right);
       {
         const unsigned sat = (v->reg[5] & 0x7Eu) << 7;
         const unsigned zoom = (r1 & R1_SPRITE_ZOOM) != 0u ? 2u : 1u;
@@ -254,7 +293,15 @@ void sms_render_line(SmsRenderer *r, const SmsVdp *v, uint32_t line, uint64_t fr
             for (px = 0; px < 8u * zoom; ++px) {
               const int dx = sx + (int)px;
               unsigned color;
-              if (dx < 0 || dx > 255) continue;
+              if (dx < 0 || dx > 255) {
+                /* SEG-121: the few columns just outside the picture, from the same selected hit; never part of the native frame or the flags */
+                if (ext_line_ok && r->ext->sprites && ((dx < 0 && dx >= -(int)SMS_EXT_SPILL_LEFT) || (dx > 255 && dx <= 255 + (int)SMS_EXT_SPILL_RIGHT))) {
+                  uint8_t *slot = dx < 0 ? &spill_left[dx + (int)SMS_EXT_SPILL_LEFT] : &spill_right[dx - 256];
+                  color = pattern_pixel(v->vram, t, row & 7u, px / zoom);
+                  if (color != 0u && *slot == 0u) *slot = (uint8_t)color; /* first opaque pixel in SAT order wins, as natively */
+                }
+                continue;
+              }
               color = pattern_pixel(v->vram, t, row & 7u, px / zoom);
               if (color == 0u) continue;
               if (spr_color[dx] != 0u) collision = 1;
@@ -263,6 +310,7 @@ void sms_render_line(SmsRenderer *r, const SmsVdp *v, uint32_t line, uint64_t fr
           }
         }
         sms_vdp_set_sprite_flags(r->vdp, overflow, collision);
+        if (ext_line_ok && r->ext->sprites) ext_spill_sprites(r->ext, v, line, bg_color, bg_prio, bg_pal, spill_left, spill_right);
       }
       /* ---- compose ---- */
       for (x = 0; x < SMS_FB_WIDTH; ++x) {

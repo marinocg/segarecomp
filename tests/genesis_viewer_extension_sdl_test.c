@@ -1,4 +1,4 @@
-/* SEG-118 (ADR 0262): the real SDL3 Genesis viewer adapter showing Level 2 extended backgrounds, read back from the rendered output.
+/* SEG-118 (ADR 0262) / SEG-121 (ADR 0264): the real SDL3 Genesis viewer adapter showing Level 2 extended backgrounds and Level 3 sprites, read back from the rendered output.
  *
  * Project-authored synthetic VDP scene (Plane B columns of solid colour tiles; no ROM, no clock). A real GenesisRuntime publishes frames through
  * the real live-frame/raster path with the adapter's extension target attached; the adapter's own request sampling, present callback, capability
@@ -47,10 +47,21 @@ static void build_scene(GenesisRuntime *r, int h40, int window_left) {
   regs[1] = 0x04; regs[2] = 0x30; regs[3] = 0x34; regs[4] = 0x07; regs[5] = 0x7C; regs[11] = 0x00;
   regs[12] = (uint16_t)(h40 ? 0x81 : 0x00); regs[13] = 0x3F; regs[16] = 0x01;
   if (window_left) regs[17] = 2; /* the window plane owns the left columns */
+  /* SEG-121: two solid magenta sprites (colour index 5, high priority) on rows 108..115: one crosses the left edge (x = -12..3), one lies wholly in the
+   * right extension (x = 324..339). The table sits at 0xF800 (register 5 = 0x7C), clear of Plane B (0xE000..0xEFFF). */
+  memset(&r->devices.vdp.vram[5 * 32], 0x55, 64);
+  put_be16(r->devices.vdp.cram, 5 * 2, (7 << 9) | (0 << 5) | (7 << 1));
+  { static const unsigned sat[2][4] = {{236, 0x0401, 0x8005, 116}, {236, 0x0400, 0x8005, 452}}; /* y+128 | size,link | attr | x+128 */
+    for (i = 0; i < 2; ++i) { put_be16(r->devices.vdp.vram, 0xF800 + i * 8, sat[i][0]); put_be16(r->devices.vdp.vram, 0xF802 + i * 8, sat[i][1]);
+      put_be16(r->devices.vdp.vram, 0xF804 + i * 8, sat[i][2]); put_be16(r->devices.vdp.vram, 0xF806 + i * 8, sat[i][3]); } }
 }
 
-static void expected_rgb(int x, uint8_t out[3]) { /* screen column x (any integer) -> colour of the scene, hscroll 0, 64 cells wide */
+/* screen column x (any integer) on the sprite rows -> colour of the scene, hscroll 0, 64 cells wide. The sprites are part of the native picture where
+ * they overlap it; beside it they exist only for a Level 3 frame (`level3`). */
+static void expected_rgb(int x, int native_w, int level3, uint8_t out[3]) {
   int px = x % 512; if (px < 0) px += 512;
+  { const int in_native = x >= 0 && x < native_w;
+    if (((x >= -12 && x < 4) || (x >= 324 && x < 340)) && (in_native || level3)) { out[0] = 255; out[1] = 0; out[2] = 255; return; } }
   { const unsigned t = 1 + (unsigned)(px / 8) % 4;
     out[0] = (uint8_t)(kColors[t][0] * 255 / 7); out[1] = (uint8_t)(kColors[t][1] * 255 / 7); out[2] = (uint8_t)(kColors[t][2] * 255 / 7); }
 }
@@ -114,7 +125,7 @@ static uint64_t surface_hash(SDL_Surface *s) {
 }
 
 /* Checks the rendered output: the native picture exactly centred at whole-number scale, and the scenery on both sides. */
-static int check_extended_output(Rig *g, const char *name, int native_w, int side) {
+static int check_extended_output(Rig *g, const char *name, int native_w, int side, int level3) {
   SvHost *h = genesis_sdl3_viewer_sv_host(g->viewer);
   SvExtendedLayout lay;
   SDL_Surface *a;
@@ -134,7 +145,7 @@ static int check_extended_output(Rig *g, const char *name, int native_w, int sid
     uint8_t got[3], want[3];
     const int sx = lay.native.x + x * k + k / 2;
     const int sy = lay.surface.y + lay.surface.h / 2;
-    expected_rgb(x, want);
+    expected_rgb(x, native_w, level3, want);
     if (!pixel(a, sx, sy, got) || memcmp(got, want, 3) != 0) { if (x < 0 || x >= native_w) scenery_ok = 0; else ok = 0; }
   }
   snprintf(what, sizeof what, "%s: real scenery on both sides of the picture", name);
@@ -165,9 +176,9 @@ int main(void) {
   if (rig_open(&g, 1, 0) != 0) { printf("FAIL: the viewer and its extension open\n"); return 1; }
   host = genesis_sdl3_viewer_sv_host(g.viewer);
 
-  /* a viewer that attached an extension reports Level 2 capable, Level 3 never (this milestone) */
+  /* a viewer that attached an extension reports Level 2 capable and Level 3 at best Partial (a game may place no object beside the picture) */
   sv_host_widescreen_caps(host, &caps);
-  CHECK(caps.extended == SV_WS_AVAILABLE && caps.enhanced == SV_WS_UNAVAILABLE, "caps: Level 2 capable, Level 3 unavailable");
+  CHECK(caps.extended == SV_WS_AVAILABLE && caps.enhanced == SV_WS_PARTIAL, "caps: Level 2 capable, Level 3 Partial");
 
   /* ---- Original: nothing is produced, the output is the plain picture ---- */
   set_mode(&g, SV_WIDESCREEN_ORIGINAL, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
@@ -182,15 +193,26 @@ int main(void) {
   set_mode(&g, SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
   CHECK(run_frame(&g) == 0 && sv_host_extension_side(host) == 39, "Level 2: H40 gets 39 source pixels on each side");
   CHECK(g.ext->result.status == GENESIS_EXT_AVAILABLE && g.ext->result.sequence == g.observer.sequence, "Level 2: Available, stamped with the presented frame");
-  check_extended_output(&g, "Level 2 H40", 320, 39);
+  check_extended_output(&g, "Level 2 H40", 320, 39, 0);
   sv_host_widescreen_caps(host, &caps);
   CHECK(caps.extended == SV_WS_AVAILABLE, "caps: Available after a clean frame");
   CHECK(sv_host_widescreen_effective(host) == SV_WIDESCREEN_EXTENDED_BACKGROUNDS, "effective mode is Level 2");
 
-  /* ---- the requested Level 3 falls back to Level 2 honestly ---- */
+  /* ---- Level 3: the sprites beside the picture appear, wholly under one produced mode ---- */
   set_mode(&g, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
-  CHECK(run_frame(&g) == 0 && sv_host_extension_side(host) == 39 && sv_host_widescreen_effective(host) == SV_WIDESCREEN_EXTENDED_BACKGROUNDS, "Level 3 requested: Level 2 effective, scenery still extended");
+  CHECK(run_frame(&g) == 0 && sv_host_extension_side(host) == 39 && sv_host_widescreen_effective(host) == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "Level 3: effective Level 3, scenery extended");
+  CHECK(g.ext->result.mode == GENESIS_EXT_MODE_SPRITES && g.ext->result.status == GENESIS_EXT_PARTIAL && g.ext->result.sprite_pixels > 0, "Level 3: a Partial frame carrying sprite pixels");
+  check_extended_output(&g, "Level 3 H40", 320, 39, 1);
+  sv_host_widescreen_caps(host, &caps);
+  CHECK(caps.enhanced == SV_WS_PARTIAL && strstr(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &caps), "Sprites appear beside the picture only where the game places them") != NULL, "Level 3: Partial with the explanatory note");
   CHECK(sv_host_settings(host)->video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "the Level 3 preference is kept");
+  /* a Level 3 surface left over while the user steps down to Level 2 is never shown: the host refuses content above the requested level */
+  set_mode(&g, SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+  CHECK(g.host.present(g.host.ctx, g.frame) == 0 && sv_host_extension_side(host) == 0, "a pending Level 3 frame is refused once Level 2 is requested");
+  CHECK(run_frame(&g) == 0 && sv_host_extension_side(host) == 39 && g.ext->result.mode == GENESIS_EXT_MODE_BACKGROUNDS && g.ext->result.sprite_pixels == 0, "Level 2 again: the next frame is background only");
+  check_extended_output(&g, "Level 2 after Level 3 (no stale sprite pixels)", 320, 39, 0);
+  set_mode(&g, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+  CHECK(run_frame(&g) == 0 && g.ext->result.mode == GENESIS_EXT_MODE_SPRITES, "Level 3 again");
 
   /* ---- 4:3 pixel shape: more extension, native stays 4:3 ---- */
   set_mode(&g, SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_4_3, SV_SCALE_FIT);
@@ -211,7 +233,7 @@ int main(void) {
   g.r->devices.vdp.registers[12] = 0x00; /* the guest switches to H32 */
   for (i = 0; i < 2; ++i) CHECK(run_frame(&g) == 0, "frame after the H32 switch");
   CHECK(sv_host_extension_side(host) == 71, "H32 gets its own, larger extension (71)");
-  check_extended_output(&g, "Level 2 H32", 256, 71);
+  check_extended_output(&g, "Level 2 H32", 256, 71, 0);
   g.r->devices.vdp.registers[12] = 0x81;
   for (i = 0; i < 2; ++i) CHECK(run_frame(&g) == 0, "frame after returning to H40");
   CHECK(sv_host_extension_side(host) == 39, "and back to H40");
@@ -235,6 +257,7 @@ int main(void) {
     CHECK(run_frame(&g) == 0 && sv_host_extension_side(host) == 0 && g.ext->result.status == GENESIS_EXT_UNAVAILABLE && g.ext->result.reason == GENESIS_EXT_REASON_TARGET_TOO_SMALL, "undersized surface: Original for that frame");
     sv_host_widescreen_caps(host, &caps);
     CHECK(caps.extended == SV_WS_UNAVAILABLE && sv_host_widescreen_effective(host) == SV_WIDESCREEN_ORIGINAL, "caps: Unavailable while it fails");
+    CHECK(caps.enhanced == SV_WS_UNAVAILABLE, "caps: Level 3 is Unavailable too when no surface can be produced");
     sv_host_toast(host, "");
     a = sv_host_capture_output(host);
     CHECK(a != NULL && surface_hash(a) == original_hash, "the failed frame is the exact Original picture");
@@ -243,6 +266,9 @@ int main(void) {
     CHECK(run_frame(&g) == 0 && sv_host_extension_side(host) == 39, "recovers on the next frame");
     sv_host_widescreen_caps(host, &caps);
     CHECK(caps.extended == SV_WS_AVAILABLE, "caps: Available again after recovery");
+    CHECK(run_frame(&g) == 0, "frame");
+    sv_host_widescreen_caps(host, &caps);
+    CHECK(caps.enhanced == SV_WS_UNAVAILABLE || caps.enhanced == SV_WS_PARTIAL, "caps: Level 3 reflects the next produced frame");
     /* 2. a stale result (sequence mismatch): rejected by the host, the frame is Original */
     { const uint64_t vf = g.r->virtual_frame_count;
       g.host.window_closed(g.host.ctx);
@@ -291,7 +317,7 @@ int main(void) {
     plain->live_frame_observer = &plain_obs; plain->live_raster = plain_capture;
     for (frame_no = 0; frame_no < 12; ++frame_no) {
       const uint64_t vf = plain->virtual_frame_count;
-      set_mode(&g, (frame_no / 3) % 2 ? SV_WIDESCREEN_EXTENDED_BACKGROUNDS : SV_WIDESCREEN_ORIGINAL, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+      set_mode(&g, (SvWidescreenMode)((frame_no / 2) % 3), SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
       CHECK(run_frame(&g) == 0, "toggled frame");
       while (plain->virtual_frame_count == vf) plain_pc = genesis_runtime_retire_m68k_instruction(plain, 4u, plain_pc).next_pc;
       CHECK(memcmp(g.frame, plain_frame, sizeof *plain_frame) == 0, "native artifact (incl. digest) identical to the extension-less run");

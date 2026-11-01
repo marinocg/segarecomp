@@ -49,7 +49,17 @@ typedef struct SmsFrameRecord {
  * but the Mode 4 model has no case that produces it (it would need a name table wider than the viewport); nothing upgrades WRAPPED to DISTINCT.
  * Lines whose extension would need hardware behaviour the model leaves undefined outside the physical screen (left-column mask, the right-hand
  * vertical-scroll lock of columns 24-31) are not extended: the frame is UNAVAILABLE with a typed reason and the host presents the Original picture.
- * Sprites are not extended (SEG-121). The 240-line mode stays unsupported (the renderer renders nothing in it, extension included). */
+ * The 240-line mode stays unsupported (the renderer renders nothing in it, extension included).
+ *
+ * SEG-121 (ADR 0264) Level 3: when `request_sprites` is set (latched at line 0 like the side) the same line pass also lets the sprites spill into the extra
+ * columns. The SMS sprite X coordinate is an 8-bit field (the shift-left bit subtracts 8), so a sprite can leave the 256-pixel picture by at most 8 pixels
+ * on the left (X = 0 with the shift bit, columns -8 .. -1) and by 15 on the right (X = 255 and a 16-pixel zoomed width, columns 256 .. 270): there is no
+ * far-outside position and nothing is wrapped or biased. The spilled pixels come from the SAME per-line selected sprite hits the native line uses (the
+ * 64-entry SAT walk, the Y terminator, the 8-per-line limit, first-opaque-wins order), are composed over the WRAPPED background of that line with the
+ * native priority rule, and never touch the VDP's overflow/collision flags. A frame is a Level 3 frame only if every line was produced as WRAPPED; any
+ * unsupported line makes the whole frame UNAVAILABLE (no background is invented for sprites). */
+#define SMS_EXT_SPILL_LEFT 8u  /* the farthest a sprite can reach left of x = 0 (X = 0 with the shift bit) */
+#define SMS_EXT_SPILL_RIGHT 15u /* the farthest right of x = 255 (X = 255, 16 pixels wide when zoomed) */
 #define SMS_EXT_MAX_SIDE 80u /* source pixels per side; the widest 16:9 need is 71 (224 lines, square pixels) */
 
 typedef enum SmsExtClass {
@@ -73,13 +83,18 @@ typedef struct SmsExtResult {
   uint32_t side;     /* columns per side */
   SmsExtClass cls;
   SmsExtReason reason;
+  uint8_t sprites;         /* SEG-121: 1 when this frame's content includes the sprite spill (Level 3), 0 for background only (Level 2) */
+  uint32_t sprite_pixels;  /* visible spilled sprite pixels (0 = none crossed an edge: still a Level 3 frame, not a failure) */
 } SmsExtResult;
 
 typedef struct SmsExtension {
   /* host request, written between guest frames only; 0 = no extension for that frame height. Latched at line 0 of each frame. */
   uint32_t request_side_192, request_side_224;
+  uint8_t request_sprites; /* SEG-121: also spill the edge-crossing sprites (Level 3); latched at line 0 with the side */
   /* producer state of the frame in progress */
   uint32_t side;
+  uint8_t sprites;              /* the frame in progress produces the sprite spill */
+  uint32_t work_sprite_pixels;  /* visible spilled sprite pixels so far */
   uint32_t ok_lines;
   uint8_t geometry_fail;
   SmsExtReason first_reason;

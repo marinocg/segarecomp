@@ -1,4 +1,4 @@
-/* SEG-119 (ADR 0262): Level 2 extended backgrounds in the Sega CD viewer, read back from the rendered output.
+/* SEG-119 (ADR 0262) / SEG-121 (ADR 0264): Level 2 extended backgrounds and Level 3 sprites in the Sega CD viewer, read back from the rendered output.
  *
  * A real ScdMachine (BIOS-image profile, device level: no processor program, no disc) is driven through the runtime's own bus ABI exactly as in
  * tests/tools/sega_cd_live_table.c: VDP registers and CRAM by control/data-port writes, background tiles by the graphics ASIC (stamp rendering into 2M
@@ -26,6 +26,11 @@ static int failures = 0;
 #define FRAME_TICKS (LINE_TICKS * 262U)
 #define ONSET(k) (SCD_BIOS_FIRST_ONSET_MCLK * MASTER + ((uint64_t)(k)-1U) * FRAME_TICKS)
 
+typedef struct { int x, y; unsigned cw, ch, tile, pal, pri; } ModelSprite;
+static ModelSprite spr[32];
+static unsigned spr_n;
+static int spr_level3;
+
 /* ---------------------------------------------------------------- the machine ------------------------------------------------------------ */
 static ScdMachine *m;
 static uint8_t bios[0x20000];
@@ -35,6 +40,7 @@ static uint64_t frame_no; /* the onset number of the next frame to complete */
 static GenesisRuntime *vdp_host(void) { return (GenesisRuntime *)m->vdp_host; }
 
 static void fresh(ScdMachine *machine) {
+  spr_n = 0U; spr_level3 = 0;
   if (machine->vdp_host != NULL) scd_vdp_release(machine);
   memset(machine, 0, sizeof *machine);
   machine->bios = bios;
@@ -98,12 +104,34 @@ static int plane_at(const Entry grid[32][64], const Scene *s, int hs, int x, uns
   *pri = e->pri;
   return 1;
 }
+/* SEG-121: the sprite layer of the model. Entry i of `spr` is SAT entry i (linked i -> i + 1); a sprite is cw x ch cells of solid/half tiles stored
+ * column-major from `tile`. At most 20 (H40) sprites reach one row in list order; the first opaque pixel in list order wins. Sprites exist in the native
+ * picture always, and beside it only in a Level 3 frame (`spr_level3`). */
+static int model_native_w = 320;
+static int sprite_at(int x, unsigned row, unsigned *cram, unsigned *pri) {
+  unsigned on_row = 0;
+  if ((x < 0 || x >= model_native_w) && !spr_level3) return 0;
+  for (unsigned i = 0; i < spr_n; ++i) {
+    const ModelSprite *q = &spr[i];
+    unsigned cx, cy, fx, idx;
+    if ((int)row < q->y || (int)row >= q->y + (int)(8U * q->ch)) continue;
+    if (++on_row > 20U) break; /* the per-line sprite limit: later sprites of the row are dropped everywhere */
+    if (x < q->x || x >= q->x + (int)(8U * q->cw)) continue;
+    cx = (unsigned)(x - q->x) / 8U; cy = (row - (unsigned)q->y) / 8U; fx = (unsigned)(x - q->x) % 8U;
+    idx = tile_pixel(&scene.tiles[q->tile + cx * q->ch + cy], fx);
+    if (idx == 0U) continue;
+    *cram = q->pal * 16U + idx; *pri = q->pri;
+    return 1;
+  }
+  return 0;
+}
 static void ref_rgb(const Scene *s, int x, unsigned row, uint8_t out[3]) {
-  unsigned ca = 0, cb = 0, pa = 0, pb = 0, idx = 0;
+  unsigned ca = 0, cb = 0, pa = 0, pb = 0, cs = 0, ps = 0, idx = 0;
   const unsigned cell_row = row / 8U;
   const int a = plane_at(s->a, s, s->hs_a, x, cell_row, &ca, &pa);
   const int b = plane_at(s->b, s, s->hs_b, x, cell_row, &cb, &pb);
-  if (a && pa) idx = ca; else if (b && pb) idx = cb; else if (a) idx = ca; else if (b) idx = cb; else idx = 0U;
+  const int sp = spr_n != 0U && sprite_at(x, row, &cs, &ps);
+  if (sp && ps) idx = cs; else if (a && pa) idx = ca; else if (b && pb) idx = cb; else if (sp) idx = cs; else if (a) idx = ca; else if (b) idx = cb; else idx = 0U;
   for (int c = 0; c < 3; ++c) out[c] = (uint8_t)(s->rgb[idx][c] * 255U / 7U);
 }
 
@@ -329,11 +357,16 @@ static uint64_t capture_hash(void) {
   return h;
 }
 
+static const unsigned *probe_rows;
+static unsigned probe_row_count;
+
 /* Probes the rendered output against the scene model: the side columns (`want_sides`) and the native centre; native centre also against the artifact. */
 static int check_output(const char *name, int native_w, int side, int want_sides) {
   SvExtendedLayout lay;
   SDL_Surface *a;
-  static const unsigned rows[] = {4, 60, 111, 200, 219};
+  static const unsigned default_rows[] = {4, 60, 111, 200, 219};
+  const unsigned *rows = probe_rows != NULL ? probe_rows : default_rows;
+  const unsigned row_count = probe_rows != NULL ? probe_row_count : (unsigned)(sizeof default_rows / sizeof default_rows[0]);
   int ok_sides = 1, ok_centre = 1, ok_native = 1, scale;
   char what[160];
   sv_host_toast(sv(), "");
@@ -350,7 +383,8 @@ static int check_output(const char *name, int native_w, int side, int want_sides
   scale = lay.native.w / native_w;
   snprintf(what, sizeof what, "%s: whole-number scale and exact centre", name);
   CHECK(scale >= 1 && lay.native.w == native_w * scale && lay.native.x == lay.surface.x + side * scale && lay.surface.w == (native_w + 2 * side) * scale, what);
-  for (unsigned i = 0; i < sizeof rows / sizeof rows[0]; ++i) {
+  model_native_w = native_w;
+  for (unsigned i = 0; i < row_count; ++i) {
     uint8_t native_row[GENESIS_FRAME_MAX_WIDTH * 3U];
     const int sy = lay.surface.y + (int)rows[i] * scale + scale / 2;
     if (genesis_vdp_frame_row_rgb888(last_native, rows[i], native_row) != 0) { ok_native = 0; continue; }
@@ -403,6 +437,57 @@ static int same_guest(const ScdMachine *a, const ScdMachine *b) {
          memcmp(&ha->devices.vdp, &hb->devices.vdp, sizeof ha->devices.vdp) == 0 && memcmp(&a->stop, &b->stop, sizeof a->stop) == 0;
 }
 
+
+/* ---------------------------------------------------------------- SEG-121: sprites in the Sega CD scene ---------------------------------------- */
+/* Tiles 20..27 and 30: solid colours (indexes 8..15), tile 22 half transparent; the table sits at 0xF800 (register 5 = 0x7C), entry i links to i + 1. */
+static void define_sprite_tiles(void) {
+  uint8_t *vram = vdp_host()->devices.vdp.vram;
+  for (unsigned t = 20; t <= 31; ++t) {
+    scene.tiles[t].kind = (t == 22U) ? T_HALF : T_SOLID;
+    scene.tiles[t].idx = 8U + (t % 8U);
+    write_tile(vram, t, &scene.tiles[t]);
+  }
+}
+static void write_sat(void) {
+  uint8_t *vram = vdp_host()->devices.vdp.vram;
+  memset(&vram[0xF800U], 0, 640U);
+  for (unsigned i = 0; i < spr_n; ++i) {
+    const ModelSprite *q = &spr[i];
+    put_be16(vram, 0xF800U + i * 8U + 0U, (unsigned)(q->y + 128) & 0x1FFU);
+    put_be16(vram, 0xF800U + i * 8U + 2U, (((q->cw - 1U) << 2) | (q->ch - 1U)) << 8 | (i + 1U < spr_n ? i + 1U : 0U));
+    put_be16(vram, 0xF800U + i * 8U + 4U, (q->pri << 15) | (q->pal << 13) | q->tile);
+    put_be16(vram, 0xF800U + i * 8U + 6U, (unsigned)(q->x + 128) & 0x1FFU);
+  }
+}
+/* A producer whose sprite pass is rejected: it serves the Level 3 request as Level 2 (the same scenery, no sprite layer), as the real producer does for an
+ * ambiguous sprite state; the dispatch and the viewer must treat that as a valid Level 2 frame and report Level 3 as not delivered. */
+static int level2_only_producer(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster, const GenesisFrameArtifact *native,
+                                const GenesisFrameExtension *target, GenesisExtensionResult *out) {
+  GenesisFrameExtension as_level2 = *target;
+  as_level2.request = GENESIS_EXT_MODE_BACKGROUNDS;
+  return genesis_vdp_produce_extension(vram, raster, native, &as_level2, out);
+}
+static uint64_t guest_digest(void) {
+  uint64_t h = UINT64_C(1469598103934665603);
+  const unsigned char *vdpb = (const unsigned char *)&((GenesisRuntime *)m->vdp_host)->devices.vdp;
+  for (size_t b = 0; b < sizeof(GenesisVdpState); ++b) h = (h ^ vdpb[b]) * UINT64_C(1099511628211);
+  for (size_t b = 0; b < sizeof m->word_ram; b += 7U) h = (h ^ m->word_ram[b]) * UINT64_C(1099511628211);
+  h = (h ^ m->now) * UINT64_C(1099511628211); h = (h ^ m->vdp_frames) * UINT64_C(1099511628211); h = (h ^ m->device_log) * UINT64_C(1099511628211);
+  h = (h ^ m->vdp_dma_count) * UINT64_C(1099511628211); h = (h ^ m->main_dma_until) * UINT64_C(1099511628211); h = (h ^ m->vdp_dma_stall_ticks) * UINT64_C(1099511628211);
+  return h;
+}
+static void build_sprite_scene(void) {
+  build_direct_scene(1);
+  define_sprite_tiles();
+  spr_n = 0U;
+  spr[spr_n++] = (ModelSprite){-12, 88, 2, 1, 20, 1, 1};     /* crosses the left edge; high priority; tiles 20 and 21 (column-major cells) */
+  spr[spr_n++] = (ModelSprite){326, 88, 2, 1, 22, 2, 0};     /* wholly in the right extension; low priority; tile 22 is half transparent */
+  spr[spr_n++] = (ModelSprite){-30, 96, 1, 1, 24, 0, 0};     /* wholly in the left extension; low priority (planes of high priority win) */
+  spr[spr_n++] = (ModelSprite){-28, 96, 2, 1, 25, 3, 1};     /* overlaps the previous one: the earlier entry wins the overlap */
+  spr[spr_n++] = (ModelSprite){316, 120, 2, 2, 28, 1, 1};    /* crosses the right edge, 2 x 2 cells */
+  write_sat();
+}
+
 int main(void) {
   SDL_Surface *a;
   SvWidescreenCaps caps;
@@ -440,7 +525,7 @@ int main(void) {
   CHECK(check_output("Original", 320, 0, 0), "Original output");
   original_hash = capture_hash();
   sv_host_widescreen_caps(sv(), &caps);
-  CHECK(caps.extended == SV_WS_AVAILABLE && caps.enhanced == SV_WS_UNAVAILABLE, "caps before any Level 2 frame: Level 2 capable, Level 3 unavailable");
+  CHECK(caps.extended == SV_WS_AVAILABLE && caps.enhanced == SV_WS_PARTIAL, "caps before any extension frame: Level 2 capable, Level 3 Partial at best");
 
   /* ---- Level 2 (requested live): real scenery both sides; truthfully Partial (no VRAM journal), never Available ---- */
   set_mode(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
@@ -468,10 +553,12 @@ int main(void) {
     write_scroll();
   }
 
-  /* ---- Level 3 requested: Level 2 is what is shown; the request is kept ---- */
+  /* ---- Level 3 requested on a scene whose sprite table is empty: a Level 3 frame (Partial, no sprite pixel) with the Level 2 scenery ---- */
   set_mode(SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
-  CHECK(frame() == 0 && sv_host_extension_side(sv()) == 39 && sv_host_widescreen_effective(sv()) == SV_WIDESCREEN_EXTENDED_BACKGROUNDS, "Level 3 requested: Level 2 effective");
-  check_output("Level 3 falls back to Level 2", 320, 39, 1);
+  CHECK(frame() == 0 && sv_host_extension_side(sv()) == 39 && sv_host_widescreen_effective(sv()) == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "Level 3 requested: Level 3 effective");
+  CHECK(adapter()->result.mode == GENESIS_EXT_MODE_SPRITES && adapter()->result.sprite_pixels == 0 && adapter()->result.status == GENESIS_EXT_PARTIAL &&
+            (adapter()->result.flags & GENESIS_EXT_FLAG_NO_VRAM_JOURNAL) != 0, "Level 3 without sprites beside the picture: Partial, no journal caveat, zero sprite pixels (not a failure)");
+  check_output("Level 3, no sprite state", 320, 39, 1);
   CHECK(sv_host_settings(sv())->video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "the Level 3 preference is never overwritten");
   set_mode(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_4_3, SV_SCALE_FIT);
   CHECK(frame() == 0 && sv_host_extension_side(sv()) == 53, "4:3 pixel shape: 53 source pixels per side");
@@ -754,6 +841,167 @@ int main(void) {
     CHECK(frame_finish() == 1, "onset 1 (the power-on run-in): no frame is presented");
     CHECK(adapter()->produced == produced_before && adapter()->failed == failed_before, "incomplete first frame: no extension is produced for it");
     CHECK(frame() == 0 && sv_host_extension_side(sv()) == 39 && adapter()->result.sequence == last_onset, "the first complete frame is extended and stamped with its own number"); }
+
+  /* ================================ part 7 (SEG-121): Level 3 sprites through the real Sega CD frame path ================================ */
+  {
+    static const unsigned rows7[] = {4, 90, 99, 124, 130, 162, 200};
+    uint64_t orig7, l3_hash;
+    SvWidescreenCaps c3;
+    fresh(m);
+    scd_vdp_present_enable(m);
+    run_to(m, ONSET(1));
+    frame_no = 2U;
+    build_sprite_scene();
+    probe_rows = rows7; probe_row_count = (unsigned)(sizeof rows7 / sizeof rows7[0]);
+    set_mode(SV_WIDESCREEN_ORIGINAL, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+    frame_begin();
+    for (i = 0; i < 3; ++i) CHECK(frame() == 0, "sprite scene: Original frame");
+    orig7 = capture_hash();
+    CHECK(sv_host_extension_side(sv()) == 0 && adapter()->result.status == GENESIS_EXT_NONE, "sprite scene Original: nothing extended");
+
+    /* Level 2: scenery only, the sprites exist in the native picture alone */
+    set_mode(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+    CHECK(frame() == 0 && adapter()->result.mode == GENESIS_EXT_MODE_BACKGROUNDS && adapter()->result.sprite_pixels == 0, "Level 2 frame carries no sprite content");
+    spr_level3 = 0;
+    check_output("Level 2 with sprites in the scene (background only)", 320, 39, 1);
+
+    /* Level 3: the sprites straddling and beside the picture appear, over the Level 2 scenery; Partial because the capture has no VRAM journal */
+    set_mode(SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+    spr_level3 = 1;
+    CHECK(frame() == 0 && sv_host_extension_side(sv()) == 39, "Level 3 sprite frame");
+    CHECK(adapter()->result.mode == GENESIS_EXT_MODE_SPRITES && adapter()->result.sprite_pixels > 0 && adapter()->result.status == GENESIS_EXT_PARTIAL &&
+              (adapter()->result.flags & GENESIS_EXT_FLAG_NO_VRAM_JOURNAL) != 0 && (adapter()->result.flags & GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT) != 0,
+          "Level 3: Partial, sprite pixels in the extension, journal caveat kept (never upgraded to Available)");
+    CHECK(adapter()->result.sequence == last_onset && last_onset == frame_no, "the Level 3 result is stamped with the presented Sega CD frame number");
+    check_output("Level 3 sprites vs independent model", 320, 39, 1);
+    sv_host_widescreen_caps(sv(), &c3);
+    CHECK(c3.enhanced == SV_WS_PARTIAL && c3.extended == SV_WS_PARTIAL && sv_host_widescreen_effective(sv()) == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "caps: Level 3 and Level 2 Partial");
+    l3_hash = capture_hash();
+
+    /* Level 3 -> Level 2: no sprite pixel survives beside the picture */
+    set_mode(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+    spr_level3 = 0;
+    CHECK(frame() == 0 && adapter()->result.mode == GENESIS_EXT_MODE_BACKGROUNDS, "back to Level 2");
+    check_output("Level 2 after Level 3 (no stale sprite pixels)", 320, 39, 1);
+    CHECK(capture_hash() != l3_hash, "the Level 2 output differs from the Level 3 output");
+
+    /* the sprite pass is rejected for a frame: Level 2 content is shown, the Level 3 preference kept, Level 3 reported not delivered, then it recovers */
+    { GenesisExtensionProducerFunction good = adapter()->producer;
+      set_mode(SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+      adapter()->producer = level2_only_producer;
+      CHECK(frame() == 0 && adapter()->result.mode == GENESIS_EXT_MODE_BACKGROUNDS && sv_host_extension_side(sv()) == 39, "rejected sprite pass: a valid Level 2 frame");
+      check_output("rejected Level 3 sprite pass shows Level 2", 320, 39, 1);
+      sv_host_widescreen_caps(sv(), &c3);
+      CHECK(c3.enhanced == SV_WS_UNAVAILABLE && c3.extended == SV_WS_PARTIAL && sv_host_widescreen_effective(sv()) == SV_WIDESCREEN_EXTENDED_BACKGROUNDS &&
+                sv_host_settings(sv())->video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY,
+            "caps: Level 3 not delivered, effective Level 2, preference kept");
+      adapter()->producer = good;
+      spr_level3 = 1;
+      CHECK(frame() == 0 && adapter()->result.mode == GENESIS_EXT_MODE_SPRITES, "Level 3 recovers on the next frame");
+      check_output("Level 3 after recovery", 320, 39, 1);
+      CHECK(capture_hash() == l3_hash, "the recovered Level 3 output is byte-identical to the first");
+    }
+
+    /* a failed Level 3 producer and a missing target: Original for those frames only */
+    { GenesisExtensionProducerFunction good = adapter()->producer;
+      adapter()->producer = failing_producer;
+      injected_reason = GENESIS_EXT_REASON_NO_RASTER;
+      CHECK(frame() == 0 && sv_host_extension_side(sv()) == 0, "failed Level 3 producer: Original for that frame");
+      sv_host_widescreen_caps(sv(), &c3);
+      CHECK(c3.enhanced == SV_WS_UNAVAILABLE && c3.extended == SV_WS_UNAVAILABLE && sv_host_widescreen_effective(sv()) == SV_WIDESCREEN_ORIGINAL, "caps: nothing deliverable -> Original, preference kept");
+      adapter()->producer = good;
+      frame_begin();
+      scd_vdp_present_set_extension(m, NULL);
+      CHECK(frame_finish() == 0 && sv_host_extension_side(sv()) == 0, "missing target: Original for that frame");
+      CHECK(frame() == 0 && sv_host_extension_side(sv()) == 39 && adapter()->result.mode == GENESIS_EXT_MODE_SPRITES, "and Level 3 returns");
+      injected_reason = 0;
+    }
+
+    /* a stale Level 3 result and a result claiming a mode above the request are refused by the presenter */
+    frame_begin();
+    run_to(m, ONSET(frame_no + 1U));
+    ++frame_no;
+    { uint64_t onset = 0;
+      const GenesisFrameArtifact *f = scd_vdp_present_take(m, &onset);
+      last_native = f;
+      adapter()->result.sequence = onset - 1U;
+      CHECK(f != NULL && live.present(live.ctx, f, onset) == 0 && sv_host_extension_side(sv()) == 0, "stale Level 3 sequence: Original for that frame"); }
+    frame_begin();
+    run_to(m, ONSET(frame_no + 1U));
+    ++frame_no;
+    { uint64_t onset = 0;
+      const GenesisFrameArtifact *f = scd_vdp_present_take(m, &onset);
+      last_native = f;
+      set_mode(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER); /* the user stepped down while this Level 3 frame was pending */
+      CHECK(f != NULL && adapter()->result.mode == GENESIS_EXT_MODE_SPRITES && live.present(live.ctx, f, onset) == 0 && sv_host_extension_side(sv()) == 0,
+            "a pending Level 3 frame is not shown once Level 2 is requested"); }
+    set_mode(SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+    CHECK(frame() == 0 && adapter()->result.mode == GENESIS_EXT_MODE_SPRITES, "Level 3 again");
+
+    /* the per-line sprite limit holds in the extension: a 21st sprite on a row never appears beside the picture */
+    spr_n = 0U;
+    for (unsigned k = 0; k < 20U; ++k) spr[spr_n++] = (ModelSprite){8 + (int)k * 15, 160, 1, 1, 24, 0, 1};
+    spr[spr_n++] = (ModelSprite){-20, 160, 2, 1, 20, 1, 1};
+    write_sat();
+    CHECK(frame() == 0 && adapter()->result.mode == GENESIS_EXT_MODE_SPRITES, "limit scene frame");
+    check_output("per-line sprite limit (the 21st sprite is dropped, extension included)", 320, 39, 1);
+    CHECK(adapter()->result.sprite_pixels == 0, "no sprite pixel beside the picture from a dropped sprite");
+
+    /* an empty sprite table: still a Level 3 frame, equal to the Level 2 scenery */
+    spr_n = 0U;
+    write_sat();
+    CHECK(frame() == 0 && adapter()->result.mode == GENESIS_EXT_MODE_SPRITES && adapter()->result.sprite_pixels == 0, "empty table: Level 3 frame with no extra sprite");
+    check_output("empty sprite table", 320, 39, 1);
+
+    /* Original once more is byte-identical to the first Original capture of the scene (sprite table restored) */
+    build_sprite_scene();
+    set_mode(SV_WIDESCREEN_ORIGINAL, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+    CHECK(frame() == 0 && sv_host_extension_side(sv()) == 0, "Original frame after Level 3");
+    CHECK(capture_hash() == orig7, "Original after Level 3 is byte-identical to Original before");
+    probe_rows = NULL;
+  }
+
+  /* ---- part 7b: guest invariance with Level 3: the viewer-less run versus live Original / Level 2 / Level 3 switching on the sprite scene ---- */
+  {
+    enum { N = 12 };
+    static const SvWidescreenMode plan[N] = {SV_WIDESCREEN_ORIGINAL, SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_WIDESCREEN_ENHANCED_GAMEPLAY,
+                                              SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_WIDESCREEN_ORIGINAL, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_WIDESCREEN_ORIGINAL,
+                                              SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_WIDESCREEN_ORIGINAL};
+    static GenesisFrameArtifact ref_native[N];
+    static uint64_t ref_digest[N];
+    ScdMachine *machines[2];
+    unsigned run;
+    machines[0] = (ScdMachine *)calloc(1U, sizeof *machines[0]);
+    machines[1] = m;
+    for (run = 0; run < 2U; ++run) {
+      m = machines[run];
+      use_viewer = (int)run;
+      fresh(m);
+      scd_vdp_present_enable(m);
+      run_to(m, ONSET(1));
+      frame_no = 2U;
+      build_sprite_scene();
+      set_mode(SV_WIDESCREEN_ORIGINAL, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+      if (run == 1U) frame_begin();
+      for (i = 0; i < N; ++i) {
+        if (run == 1U) set_mode(plan[i], SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+        if (frame_begin() != 0) { CHECK(0, "Level 3 invariance frame begin"); break; }
+        if (i == 5) { cram_word(m, 9, 1, 2, 3); spr[0].x = -20; write_sat(); } /* a guest-visible VDP event in the middle of the switching */
+        CHECK(frame_finish() == 0, "Level 3 invariance frame");
+        if (run == 0U) { ref_native[i] = *last_native; ref_digest[i] = guest_digest(); }
+        else {
+          CHECK(guest_digest() == ref_digest[i], "guest state (VDP, Word RAM, scheduler counters, DMA) identical to the viewer-less run under Level 3 switching");
+          CHECK(memcmp(last_native, &ref_native[i], sizeof ref_native[i]) == 0, "native frame artifact (digest included) identical to the viewer-less run under Level 3 switching");
+          CHECK(adapter()->result.mode == (plan[i] == SV_WIDESCREEN_ORIGINAL ? 0 : (unsigned)plan[i]), "each frame is produced wholly under the mode requested at its boundary");
+        }
+      }
+    }
+    CHECK(same_guest(machines[0], m), "final guest state identical between the viewer-less run and the Level 3 live-switched run");
+    scd_vdp_release(machines[0]);
+    free(machines[0]);
+    m = machines[1];
+    use_viewer = 1;
+  }
 
   SDL_RemovePath(file);
   genesis_sdl3_viewer_close(g_host.sdl);
