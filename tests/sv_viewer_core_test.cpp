@@ -153,6 +153,116 @@ void layout_tests() {
   check(r.w == 0, "an empty picture gives an empty rectangle");
 }
 
+// SEG-118 (ADR 0262): the 16:9 extension geometry, with exact numbers rather than "non-zero".
+void extension_layout_tests() {
+  struct Side { int w, h; SvAspect a; int side; } sides[] = {
+    {320, 224, SV_ASPECT_ORIGINAL, 39},   // H40: 398 wide = 16:9 of 224 lines
+    {256, 224, SV_ASPECT_ORIGINAL, 71},   // H32 needs more than H40: never a constant extra
+    {320, 224, SV_ASPECT_4_3, 53},        // 4:3 pixel shape: 426 wide
+    {256, 224, SV_ASPECT_4_3, 42},
+    {256, 192, SV_ASPECT_ORIGINAL, 42},   // Master System height
+    {256, 240, SV_ASPECT_ORIGINAL, 85},
+    {320, 448, SV_ASPECT_ORIGINAL, 238},  // interlace mode 2 (square pixels, as the existing policy shows it)
+    {256, 448, SV_ASPECT_ORIGINAL, 256},  // clamped at SV_EXT_MAX_SIDE
+    {1000, 100, SV_ASPECT_ORIGINAL, 0},   // already wider than 16:9: nothing to add
+    {0, 224, SV_ASPECT_ORIGINAL, 0}, {320, 0, SV_ASPECT_ORIGINAL, 0}, {-1, 224, SV_ASPECT_ORIGINAL, 0}, {100000, 224, SV_ASPECT_ORIGINAL, 0},
+  };
+  for (const Side &c : sides)
+    check(sv_layout_extension_side(c.w, c.h, c.a) == c.side, "extension side for " + std::to_string(c.w) + "x" + std::to_string(c.h) + " aspect " + std::to_string((int)c.a));
+  check(sv_layout_extension_side(320, 224, SV_ASPECT_ORIGINAL) != sv_layout_extension_side(256, 224, SV_ASPECT_ORIGINAL), "H32 and H40 get different extensions");
+  {
+    int w = -1, h = -1;
+    sv_layout_extension_max(320, 448, &w, &h);
+    check(w == 320 + 2 * SV_EXT_MAX_SIDE && h == 448, "maximum allocation");
+    sv_layout_extension_max(0, 448, &w, &h);
+    check(w == 0 && h == 0, "invalid maximum");
+    // every geometry the producers use fits the maximum
+    for (int hh = 1; hh <= 448; hh += 7)
+      for (int ww : {160, 256, 320})
+        check(ww + 2 * sv_layout_extension_side(ww, hh, SV_ASPECT_ORIGINAL) <= 320 + 2 * SV_EXT_MAX_SIDE, "bounded");
+  }
+  SvExtendedLayout l;
+  struct Place { int ww, wh, w, h, side; SvAspect a; SvScaleMode sc; SvRect surface, native; } places[] = {
+    // H40 on a 1080p display: fit and integer
+    {1920, 1080, 320, 224, 39, SV_ASPECT_ORIGINAL, SV_SCALE_FIT, {0, 0, 1919, 1080}, {188, 0, 1543, 1080}},
+    {1920, 1080, 320, 224, 39, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER, {164, 92, 1592, 896}, {320, 92, 1280, 896}},
+    {1280, 720, 320, 224, 39, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER, {43, 24, 1194, 672}, {160, 24, 960, 672}},
+    // a 4:3 window letterboxes the 16:9 surface; a 960x672 default window too
+    {1024, 768, 320, 224, 39, SV_ASPECT_ORIGINAL, SV_SCALE_FIT, {0, 96, 1024, 576}, {100, 96, 823, 576}},
+    {960, 672, 320, 224, 39, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER, {82, 112, 796, 448}, {160, 112, 640, 448}},
+    // below 1x integer falls back to fit
+    {398, 224, 320, 224, 39, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER, {0, 0, 398, 224}, {39, 0, 320, 224}},
+    {199, 112, 320, 224, 39, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER, {0, 0, 199, 112}, {19, 0, 160, 112}},
+    // 4:3 content is never stretched to 16:9: the native rectangle is exactly 4:3
+    {1920, 1080, 320, 224, 53, SV_ASPECT_4_3, SV_SCALE_FIT, {1, 0, 1917, 1080}, {239, 0, 1440, 1080}},
+    // tiny window
+    {1, 1, 320, 224, 39, SV_ASPECT_ORIGINAL, SV_SCALE_FIT, {0, 0, 1, 1}, {0, 0, 1, 1}},
+    // zero extension degenerates to the ordinary layout
+    {960, 720, 320, 224, 0, SV_ASPECT_4_3, SV_SCALE_FIT, {0, 0, 960, 720}, {0, 0, 960, 720}},
+  };
+  for (const Place &c : places) {
+    const int rc = sv_layout_extended_dest(c.ww, c.wh, c.w, c.h, c.side, c.a, c.sc, &l);
+    const std::string name = "placement " + std::to_string(c.ww) + "x" + std::to_string(c.wh) + " side " + std::to_string(c.side);
+    check(rc == 0, name + " ok");
+    check(l.surface.x == c.surface.x && l.surface.y == c.surface.y && l.surface.w == c.surface.w && l.surface.h == c.surface.h, name + " surface");
+    check(l.native.x == c.native.x && l.native.y == c.native.y && l.native.w == c.native.w && l.native.h == c.native.h, name + " native");
+    // the native picture is centred on the surface (to within one display pixel) and never larger than it
+    check(std::abs((l.native.x * 2 + l.native.w) - (l.surface.x * 2 + l.surface.w)) <= 1, name + " centred");
+    check(l.native.y == l.surface.y && l.native.h == l.surface.h && l.native.w <= l.surface.w, name + " vertical");
+    if (c.sc == SV_SCALE_INTEGER && l.surface.h >= c.h) check(l.native.w % c.w == 0 && l.native.h % c.h == 0, name + " integer scale keeps whole multiples");
+  }
+  // the native picture keeps the scale of the extension-less layout whenever the extension does not force a smaller one
+  l = SvExtendedLayout();
+  sv_layout_extended_dest(1920, 1080, 320, 224, 39, SV_ASPECT_ORIGINAL, SV_SCALE_FIT, &l);
+  check(l.native.h == sv_layout_dest(1920, 1080, 320, 224, SV_ASPECT_ORIGINAL, SV_SCALE_FIT).h, "the native picture keeps its height on a 16:9 display");
+  // invalid input -> empty rectangles, no overflow
+  struct Bad { int ww, wh, w, h, side; } bad[] = {{0, 100, 320, 224, 39}, {100, 0, 320, 224, 39}, {100, 100, 0, 224, 39}, {100, 100, 320, 0, 39}, {100, 100, 320, 224, -1},
+                                                  {100, 100, 320, 224, SV_EXT_MAX_SIDE + 1}, {2147483647, 2147483647, 320, 224, 39}, {100, 100, 2147483647, 224, 39}};
+  for (const Bad &b : bad) {
+    l.surface = SvRect{7, 7, 7, 7};
+    l.native = SvRect{7, 7, 7, 7};
+    check(sv_layout_extended_dest(b.ww, b.wh, b.w, b.h, b.side, SV_ASPECT_ORIGINAL, SV_SCALE_FIT, &l) == -1 && l.surface.w == 0 && l.native.w == 0, "invalid placement rejected");
+  }
+  check(sv_layout_extended_dest(100, 100, 320, 224, 39, SV_ASPECT_ORIGINAL, SV_SCALE_FIT, nullptr) == -1, "null output rejected");
+  // integer scale exactly 1x for every window size sweep stays inside the window
+  for (int ww = 1; ww < 2200; ww += 97)
+    for (int wh = 1; wh < 1300; wh += 89)
+      for (int sc = 0; sc < 2; ++sc) {
+        sv_layout_extended_dest(ww, wh, 320, 224, 39, SV_ASPECT_ORIGINAL, sc ? SV_SCALE_INTEGER : SV_SCALE_FIT, &l);
+        check(l.surface.x >= 0 && l.surface.y >= 0 && l.surface.x + l.surface.w <= ww && l.surface.y + l.surface.h <= wh && l.native.x >= l.surface.x &&
+              l.native.x + l.native.w <= l.surface.x + l.surface.w, "inside the window");
+      }
+}
+
+void extension_surface_check_tests() {
+  static uint8_t px[(320 + 2 * 39) * 3 * 224];
+  SvExtendedSurface e;
+  std::memset(&e, 0, sizeof e);
+  e.rgb24 = px; e.size = sizeof px; e.width = 398; e.height = 224; e.pitch = 398 * 3; e.side = 39; e.sequence = 9;
+  e.mode = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; e.status = SV_WS_AVAILABLE;
+  check(sv_extended_surface_check(&e, 320, 224, 9, 320) == SV_EXT_OK, "a consistent surface is accepted");
+  e.status = SV_WS_PARTIAL;
+  check(sv_extended_surface_check(&e, 320, 224, 9, 320) == SV_EXT_OK, "a partial surface is accepted");
+  e.status = SV_WS_UNAVAILABLE;
+  check(sv_extended_surface_check(&e, 320, 224, 9, 320) == SV_EXT_STATUS, "unavailable is refused");
+  e.status = SV_WS_AVAILABLE;
+  check(sv_extended_surface_check(nullptr, 320, 224, 9, 320) == SV_EXT_NO_SURFACE, "null surface");
+  { SvExtendedSurface f = e; f.rgb24 = nullptr; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_NO_SURFACE, "null buffer"); }
+  { SvExtendedSurface f = e; f.mode = SV_WIDESCREEN_ORIGINAL; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_MODE, "produced as Original"); }
+  check(sv_extended_surface_check(&e, 320, 224, 8, 320) == SV_EXT_SEQUENCE, "stale sequence");
+  check(sv_extended_surface_check(&e, 320, 224, 10, 320) == SV_EXT_SEQUENCE, "future sequence");
+  { SvExtendedSurface f = e; f.width = 397; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_GEOMETRY, "width not symmetric"); }
+  { SvExtendedSurface f = e; f.height = 223; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_GEOMETRY, "height mismatch"); }
+  { SvExtendedSurface f = e; f.side = 0; f.width = 320; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_GEOMETRY, "no extension"); }
+  { SvExtendedSurface f = e; f.side = SV_EXT_MAX_SIDE + 1; f.width = 320 + 2 * f.side; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_GEOMETRY, "side beyond bound"); }
+  check(sv_extended_surface_check(&e, 321, 224, 9, 320) == SV_EXT_GEOMETRY, "native wider than the host accepts");
+  check(sv_extended_surface_check(&e, 0, 224, 9, 320) == SV_EXT_GEOMETRY, "empty native");
+  { SvExtendedSurface f = e; f.pitch = 398 * 3 - 1; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_PITCH, "insufficient pitch"); }
+  { SvExtendedSurface f = e; f.pitch = -5; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_PITCH, "negative pitch"); }
+  { SvExtendedSurface f = e; f.size = sizeof px - 1; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_SIZE, "one byte short"); }
+  { SvExtendedSurface f = e; f.pitch = 2000000000; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_SIZE, "huge pitch cannot overflow into acceptance"); }
+}
+
 void crt_tests() {
   SvVideoSettings v;
   sv_video_defaults(&v);
@@ -499,6 +609,8 @@ int main() {
   widescreen_tests();
   binding_tests();
   layout_tests();
+  extension_layout_tests();
+  extension_surface_check_tests();
   crt_tests();
   menu_tests();
   font_tests();

@@ -22,6 +22,7 @@
 
 #include "../machine/include/segarecomp/machine/genesis/address_space_contract.h"
 #include "checkpoint_evidence.h"
+#include "frame_extension.h"
 /* SEG-021-T020: the M68K-owned interrupt/STOP state record (SegarecompM68kInterruptState). */
 #include "../../../libs/cpu/m68k/include/segarecomp/cpu/m68k/exception_core.h"
 /* SEG-021-T022: the CPU-owned data-dependent cycle rules (MULU/MULS/DIVU/DIVS, exception entry) generated
@@ -568,6 +569,8 @@ typedef struct GenesisRasterCapture {
   uint8_t captured[GENESIS_RASTER_MAX_LINES];
   uint64_t render_rejections;
   uint64_t vram_journal_overflows; /* frames whose VRAM journal overflowed and fell back to the frame-end image */
+  /* SEG-118: optional presentation-only extended-surface target (frame_extension.h). NULL = absent = exactly today's behaviour. Never serialized. */
+  GenesisFrameExtension *extension;
 } GenesisRasterCapture;
 
 typedef struct GenesisLiveFrameObserver {

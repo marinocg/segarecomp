@@ -14,6 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "sv_layout.h"
 #include "sv_settings.h"
 
 struct SDL_AudioStream;
@@ -64,6 +65,16 @@ typedef struct SvSample {
 void sv_host_service(SvHost *host, SvSample *out);
 /* Presents one finished frame (RGB24, `pitch` bytes per row). Returns 0 on success. */
 int sv_host_present(SvHost *host, const uint8_t *rgb24, int width, int height, int pitch);
+/* SEG-118: presents one finished frame like sv_host_present, optionally with a borrowed extended surface built around it (Level 2). The native picture
+ * is always the authority: when `ext` is NULL or fails sv_extended_surface_check against this frame (identity, geometry, pitch, size, status, mode) the
+ * original picture is presented unchanged for this frame and a bounded rejection counter is incremented; nothing from a rejected surface is read beyond
+ * the check. The surface is read only during this call. CRT presets, fit/integer scaling, fullscreen and resize apply to the extended picture exactly as
+ * to the original, and the native pixels in the centre are always taken from `rgb24`, never from the surface. Returns 0 on success. */
+int sv_host_present_extended(SvHost *host, const uint8_t *rgb24, int width, int height, int pitch, uint64_t sequence, const SvExtendedSurface *ext);
+/* Extension of the last presented frame in source pixels per side (0 = the original picture was shown), and bounded counters: surfaces accepted,
+ * surfaces offered but rejected, and frame-texture (re)creations (constant at unchanged geometry). Test/diagnostic seams. */
+int sv_host_extension_side(const SvHost *host);
+void sv_host_extension_stats(const SvHost *host, uint32_t *accepted, uint32_t *rejected, uint32_t *texture_creations);
 /* Registers the adapter's playback stream so volume/mute (gain only) and pause apply; NULL unregisters. */
 void sv_host_set_audio(SvHost *host, struct SDL_AudioStream *stream);
 /* Shows the final state of a stopped guest instead of a blank window and waits for a key/button/close. Returns immediately on a

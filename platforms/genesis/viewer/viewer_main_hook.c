@@ -77,6 +77,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   runtime->live_frame_observer = &observer;
   memset(&g_raster_capture, 0, sizeof(g_raster_capture));
   g_raster_capture.producer = genesis_vdp_produce_frame_raster; /* SEG-055: scanline-aware frames */
+  g_raster_capture.extension = genesis_sdl3_viewer_extension(sdl, &observer.sequence); /* SEG-118: Level 2 extended backgrounds (presentation only) */
   runtime->live_raster = &g_raster_capture;
 
   GenesisViewerHost host;

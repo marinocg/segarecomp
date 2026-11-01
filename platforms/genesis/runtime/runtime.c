@@ -2777,12 +2777,38 @@ static void genesis_raster_advance(GenesisRuntime *runtime, uint64_t now_ticks) 
 #define GENESIS_NOINLINE
 #endif
 
+/* SEG-118: the optional presentation-only extension. Runs only after the native frame rendered successfully, with the frame's raster state and
+ * VRAM journal still valid, and only when the adapter asked for it. It reads `native` and writes nothing but the adapter's own surface/result; the
+ * result is returned (not stored) so the caller can stamp it with the sequence published by the same call. */
+static void genesis_run_frame_extension(GenesisRasterCapture *capture, const uint8_t *vram, const GenesisFrameArtifact *native,
+                                        GenesisExtensionResult *out) {
+  GenesisFrameExtension *ext = capture->extension;
+  memset(out, 0, sizeof(*out));
+  if (ext == 0 || ext->request == 0U) {
+    out->status = GENESIS_EXT_NONE;
+    return;
+  }
+  if (ext->producer == 0 || ext->pixels == 0) {
+    out->status = GENESIS_EXT_UNAVAILABLE;
+    out->reason = GENESIS_EXT_REASON_INVALID_REQUEST;
+  } else if (ext->producer(vram, &capture->frame, native, ext, out) != 0 ||
+             (out->status != GENESIS_EXT_PARTIAL && out->status != GENESIS_EXT_AVAILABLE)) {
+    const uint8_t reason = out->status == GENESIS_EXT_UNAVAILABLE && out->reason != 0U ? out->reason : (uint8_t)GENESIS_EXT_REASON_INVALID_REQUEST;
+    memset(out, 0, sizeof(*out));
+    out->status = GENESIS_EXT_UNAVAILABLE;
+    out->reason = reason;
+  }
+}
+
 /* Renders the frame that just ended and publishes it atomically (a failed render publishes nothing and mutates
  * nothing but the observer's rejection counter). Kept out of line: its artifact is large and the scheduler is hot. */
 static GENESIS_NOINLINE void genesis_publish_live_frame(GenesisRuntime *runtime) {
   GenesisLiveFrameObserver *observer = runtime->live_frame_observer;
   GenesisFrameArtifact produced;
+  GenesisExtensionResult extension_result;
   int status;
+  int have_extension = 0;
+  memset(&extension_result, 0, sizeof(extension_result));
   if (observer == 0 || observer->latest == 0 || observer->sequence == UINT64_MAX) return;
   memset(&produced, 0, sizeof(produced));
   if (runtime->live_raster != 0 && runtime->live_raster->producer != 0) {
@@ -2797,6 +2823,10 @@ static GENESIS_NOINLINE void genesis_publish_live_frame(GenesisRuntime *runtime)
       capture->captured[line] = 1U;
     }
     status = capture->producer(runtime->devices.vdp.vram, &capture->frame, &produced);
+    if (status == 0 && capture->extension != 0) {
+      genesis_run_frame_extension(capture, runtime->devices.vdp.vram, &produced, &extension_result);
+      have_extension = 1;
+    }
     capture->frame.has_vram_journal = 0U; /* closed until the next frame's line 0 (VBlank writes are in its snapshot) */
   } else if (observer->producer != 0) {
     status = observer->producer(runtime->devices.vdp.vram, runtime->devices.vdp.vsram, runtime->devices.vdp.cram,
@@ -2807,6 +2837,16 @@ static GENESIS_NOINLINE void genesis_publish_live_frame(GenesisRuntime *runtime)
   if (status == 0) {
     *observer->latest = produced;
     ++observer->sequence;
+    if (have_extension) {
+      GenesisFrameExtension *ext = runtime->live_raster->extension;
+      extension_result.sequence = observer->sequence;
+      ext->result = extension_result;
+      if (extension_result.status == GENESIS_EXT_AVAILABLE || extension_result.status == GENESIS_EXT_PARTIAL) {
+        if (ext->produced != UINT64_MAX) ++ext->produced;
+      } else if (extension_result.status == GENESIS_EXT_UNAVAILABLE && ext->failed != UINT64_MAX) {
+        ++ext->failed;
+      }
+    }
   } else {
     if (runtime->live_raster != 0) ++runtime->live_raster->render_rejections;
   }

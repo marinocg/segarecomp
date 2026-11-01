@@ -194,7 +194,11 @@ void sv_host_draw_picture(SvHost *h, float x, float y, float w, float hh) {
   SDL_SetTextureColorMod(h->frame_tex, 255, 255, 255);
   SDL_SetTextureAlphaMod(h->frame_tex, 255);
   SDL_SetTextureBlendMode(h->frame_tex, SDL_BLENDMODE_NONE);
-  SDL_RenderTexture(h->renderer, h->frame_tex, NULL, &d);
+  { /* menu thumbnails show the native picture even when the texture holds an extended one */
+    SDL_FRect src;
+    src.x = (float)h->ext_side; src.y = 0.0f; src.w = (float)h->last_w; src.h = (float)h->last_h;
+    SDL_RenderTexture(h->renderer, h->frame_tex, h->ext_side > 0 ? &src : NULL, &d);
+  }
 }
 
 /* Whole-number UI scale from the OUTPUT size in pixels (so a 4K or a 1.5x-DPI window grows its text with the display): 13-pixel body text at 1x up to 540 px of
@@ -362,6 +366,7 @@ static void ensure_texture(SvHost *h, int w, int hgt) {
   if (h->frame_tex != NULL && h->tex_w == w && h->tex_h == hgt) return;
   if (h->frame_tex != NULL) SDL_DestroyTexture(h->frame_tex);
   h->frame_tex = SDL_CreateTexture(h->renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, w, hgt);
+  if (h->tex_creations != UINT32_MAX) h->tex_creations++;
   h->tex_w = w;
   h->tex_h = hgt;
   if (h->frame_tex != NULL) SDL_SetTextureScaleMode(h->frame_tex, SDL_SCALEMODE_NEAREST);
@@ -523,7 +528,13 @@ static void render_game(SvHost *h, int out_w, int out_h) {
   SvRect dest;
   SDL_FRect d;
   if (h->frame_tex == NULL || h->last_w <= 0) return;
-  dest = sv_layout_dest(out_w, out_h, h->last_w, h->last_h, v->aspect, v->scale);
+  if (h->ext_side > 0) {
+    SvExtendedLayout el;
+    if (sv_layout_extended_dest(out_w, out_h, h->last_w, h->last_h, h->ext_side, v->aspect, v->scale, &el) != 0) return;
+    dest = el.surface;
+  } else {
+    dest = sv_layout_dest(out_w, out_h, h->last_w, h->last_h, v->aspect, v->scale);
+  }
   d.x = (float)dest.x; d.y = (float)dest.y; d.w = (float)dest.w; d.h = (float)dest.h;
   render_picture(h, &h->crt, NULL, d, h->last_h);
 }
@@ -538,7 +549,7 @@ void sv_host_draw_preview(SvHost *h, int x, int y, int w, int hh) {
   ch = (int)((double)cw * (double)hh / (double)w + 0.5);
   if (ch > h->last_h) { ch = h->last_h; cw = (int)((double)ch * (double)w / (double)hh + 0.5); if (cw > h->last_w) cw = h->last_w; }
   if (ch < 1) ch = 1;
-  src.x = (float)((h->last_w - cw) / 2); src.y = (float)((h->last_h - ch) / 2); src.w = (float)cw; src.h = (float)ch;
+  src.x = (float)(h->ext_side + (h->last_w - cw) / 2); src.y = (float)((h->last_h - ch) / 2); src.w = (float)cw; src.h = (float)ch;
   d.x = (float)x; d.y = (float)y; d.w = (float)w; d.h = (float)hh;
   render_picture(h, &h->crt_preview, &src, d, ch);
 }
@@ -836,13 +847,22 @@ SDL_Surface *sv_host_capture_output(SvHost *h) {
 
 /* ------------------------------------------------------------------------------------------------------------------ present */
 
-int sv_host_present(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch) {
+static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, const SvExtendedSurface *ext) {
   int y;
   const Uint64 now = SDL_GetTicksNS();
+  const int side = ext != NULL ? ext->side : 0;
   if (rgb == NULL || w <= 0 || hgt <= 0 || w > (h->cfg.max_w > 0 ? h->cfg.max_w : 320) || hgt > (h->cfg.max_h > 0 ? h->cfg.max_h : 240) || pitch < w * 3) return -1;
-  ensure_texture(h, w, hgt);
+  ensure_texture(h, w + 2 * side, hgt);
   if (h->frame_tex == NULL) return -1;
-  if (!SDL_UpdateTexture(h->frame_tex, NULL, rgb, pitch)) return -1;
+  if (ext != NULL) {
+    SDL_Rect centre;
+    centre.x = side; centre.y = 0; centre.w = w; centre.h = hgt;
+    if (!SDL_UpdateTexture(h->frame_tex, NULL, ext->rgb24, ext->pitch)) return -1;
+    if (!SDL_UpdateTexture(h->frame_tex, &centre, rgb, pitch)) return -1; /* the native pixels always come from the native picture */
+  } else if (!SDL_UpdateTexture(h->frame_tex, NULL, rgb, pitch)) {
+    return -1;
+  }
+  h->ext_side = side;
   for (y = 0; y < hgt; ++y) memcpy(h->last_rgb + (size_t)y * (size_t)w * 3u, rgb + (size_t)y * (size_t)pitch, (size_t)w * 3u);
   h->last_w = w;
   h->last_h = hgt;
@@ -865,6 +885,27 @@ int sv_host_present(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch) {
   }
   draw_scene(h, 0);
   return SDL_RenderPresent(h->renderer) ? 0 : -1;
+}
+
+int sv_host_present(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch) { return present_frame(h, rgb, w, hgt, pitch, NULL); }
+
+int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, uint64_t sequence, const SvExtendedSurface *ext) {
+  if (ext != NULL) {
+    if (sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK) {
+      if (h->ext_accepted != UINT32_MAX) h->ext_accepted++;
+      return present_frame(h, rgb, w, hgt, pitch, ext);
+    }
+    /* An UNAVAILABLE surface that was not even requested is the normal Original case; anything else offered and refused is a rejection. */
+    if (ext->status != SV_WS_UNAVAILABLE && h->ext_rejected != UINT32_MAX) h->ext_rejected++;
+  }
+  return present_frame(h, rgb, w, hgt, pitch, NULL);
+}
+
+int sv_host_extension_side(const SvHost *h) { return h != NULL ? h->ext_side : 0; }
+void sv_host_extension_stats(const SvHost *h, uint32_t *accepted, uint32_t *rejected, uint32_t *texture_creations) {
+  if (accepted != NULL) *accepted = h != NULL ? h->ext_accepted : 0u;
+  if (rejected != NULL) *rejected = h != NULL ? h->ext_rejected : 0u;
+  if (texture_creations != NULL) *texture_creations = h != NULL ? h->tex_creations : 0u;
 }
 
 /* ------------------------------------------------------------------------------------------------------------------ service + menu loop */
