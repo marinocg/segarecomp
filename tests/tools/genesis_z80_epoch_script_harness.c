@@ -1,7 +1,7 @@
 /*
  * SEG-032-T002 (ADR 0073): replays a raw 68K access script through the REAL Genesis runtime router
  * (genesis_route_access) with the generic Z80 image-epoch observer installed, and prints every epoch.
- *   genesis_z80_epoch_script_harness <script> [fill]
+ *   genesis_z80_epoch_script_harness <script> [fill [accumulate]]   (accumulate=1: SEG-115, the hold window ends at an image epoch only)
  * script lines: `w16 <hex-address> <hex-value>` or `w8 <hex-address> <hex-value>`; `#` starts a comment.
  * output lines: `EPOCH <ordinal> <ram hex> <written-bitmap hex>`; then `END <epoch count>`.
  * Test tool only: the hex dumps are of project-authored synthetic data.
@@ -29,6 +29,7 @@ int main(int argc, char **argv) {
   unsigned long fill = 0;
   if (argc < 2) return 2;
   if (argc > 2) fill = strtoul(argv[2], NULL, 16);
+  if (argc > 3) runtime.z80_epoch.accumulate_until_epoch = (uint8_t)(strtoul(argv[3], NULL, 10) != 0);
   script = fopen(argv[1], "r");
   if (script == NULL) return 2;
   memset(runtime.devices.z80_bus.z80_ram, (int)fill, GENESIS_Z80_RAM_BYTES);

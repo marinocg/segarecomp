@@ -64,8 +64,8 @@ def bitmap_set(bitmap):
     return {o for o in range(probe.RAM_BYTES) if (bitmap[o >> 3] >> (o & 7)) & 1}
 
 
-def run_harness(binary, script, fill):
-    out = subprocess.run([str(binary), str(script), "%02X" % fill], text=True, capture_output=True, check=True).stdout
+def run_harness(binary, script, fill, accumulate=False):
+    out = subprocess.run([str(binary), str(script), "%02X" % fill] + (["1"] if accumulate else []), text=True, capture_output=True, check=True).stdout
     epochs = []
     for line in out.splitlines():
         if line.startswith("EPOCH "):
@@ -142,6 +142,14 @@ def main():
         leaked = sig_from_sets(model(lines, "epoch_only"))
         check(classes(leaked) != classes(sigs[0x00]),
               "control: clearing only at an epoch (not at a resume) leaks command writes into later signatures (rejected)")
+        # SEG-115 (ADR 0259): the opt-in rule of the Sega CD machine. The window ends at an image epoch only, so the runtime bitmap equals the independent
+        # model's `epoch_only` definition; the default (Genesis) rule is untouched by the option (checked above against the hold-window model).
+        accumulated = run_harness(binary, script, 0x00, accumulate=True)
+        epoch_only = model(lines, "epoch_only")
+        check(len(accumulated) == 6 and all(bitmap_set(accumulated[i][1]) == epoch_only[i] for i in range(6)),
+              "accumulate_until_epoch: the runtime bitmap equals the model that clears the window at an image epoch only")
+        check(any(bitmap_set(accumulated[i][1]) != bitmap_set(base[i][1]) for i in range(6)) and bitmap_set(accumulated[0][1]) == bitmap_set(base[0][1]),
+              "accumulate_until_epoch: it differs from the Genesis rule exactly where a plain resume ended a hold window")
     print("genesis z80 epoch signature: %s" % ("FAILED (%d)" % len(failures) if failures else "ok"))
     return 1 if failures else 0
 
