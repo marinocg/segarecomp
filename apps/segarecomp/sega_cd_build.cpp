@@ -608,7 +608,15 @@ class Builder {
   std::vector<std::string> link_command(const std::vector<fs::path> &objects, const fs::path &exe, bool with_sdl) const {
     std::vector<std::string> c{o_.cc};
     c.insert(c.end(), o_.cc_args.begin(), o_.cc_args.end());
-    for (const auto &obj : objects) c.push_back(obj.string());
+    // The thousands of object paths go through a response file: a Windows command line is limited to 32,767 characters, and a longer one makes CreateProcess fail with no
+    // output at all (the viewer link, whose paths are longer, failed that way). Forward slashes and quotes keep the file portable across gcc, clang and zig.
+    {
+      const fs::path rsp = exe.string() + ".rsp";
+      std::ofstream list(rsp, std::ios::trunc);
+      for (const auto &obj : objects) list << '"' << obj.generic_string() << "\"\n";
+      list.close();
+      c.push_back("@" + rsp.generic_string());
+    }
     c.insert(c.end(), {"-o", exe.string()});
     if (with_sdl && !o_.sdl3_lib.empty()) c.push_back("-L" + o_.sdl3_lib.string());
     if (with_sdl) c.push_back("-lSDL3");
