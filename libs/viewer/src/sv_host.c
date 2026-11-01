@@ -891,7 +891,10 @@ int sv_host_present(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch) { 
 
 int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, uint64_t sequence, const SvExtendedSurface *ext) {
   if (ext != NULL) {
-    if (sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK) {
+    /* SEG-121: a surface produced under a higher level than the one now requested (the user stepped down while a frame was pending) is stale
+     * for presentation: the picture shown must never contain Level 3 sprites once Level 2 or Original is selected. */
+    if ((int)ext->mode <= (int)h->settings.video.widescreen &&
+        sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK) {
       if (h->ext_accepted != UINT32_MAX) h->ext_accepted++;
       return present_frame(h, rgb, w, hgt, pitch, ext);
     }

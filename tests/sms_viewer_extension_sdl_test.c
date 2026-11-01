@@ -1,4 +1,4 @@
-/* SEG-120 (ADR 0263): the real SDL3 Master System viewer adapter showing the Level 2 background extension, read back from the rendered output.
+/* SEG-120 (ADR 0263) / SEG-121 (ADR 0264): the real SDL3 Master System viewer adapter showing the Level 2 background extension and the Level 3 edge-sprite spill, read back from the rendered output.
  *
  * Project-authored synthetic scene (a name table of solid-colour tiles, one distinct colour/palette per column, poked straight into the VDP of a real
  * SmsViewerRig whose CPU is a fake that only retires cycles). The real scanline hook, renderer, adapter request sampling, present callback, capability
@@ -26,6 +26,12 @@ static SmsViewerRig rig;
 static uint8_t rom[32768];
 
 static const char kNote[] = "Background repeats existing scenery; this does not reveal more of the game world.";
+static const char kSpriteNote[] = "Background repeats existing scenery. Only sprites crossing the screen edges can extend; this does not expand the game world.";
+
+/* 0: the scene has no sprites; 1: it has two edge sprites that exist in the native picture only; 2: ... and they also spill beside it (a Level 3 frame).
+ * The shift bit (x - 8) and zoom (16 x 16 pixels) are on. Sprite A: X = 255 (columns 247 .. 262), solid colour 15; sprite B: X = 4 (columns -4 .. 11),
+ * solid colour 13; both on lines 91..106. */
+static int scene_sprites;
 
 /* column c shows pattern 1 + c % 15 (a solid colour index) in palette (c / 15) & 1: 30 distinct (palette, colour) pairs over the 32 columns */
 static void build_scene(int tall, int hscroll) {
@@ -45,9 +51,15 @@ static void build_scene(int tall, int hscroll) {
       }
   }
   for (i = 0; i < 64; ++i) v->vram[0x3F00 + i] = 0xD0; /* no sprites */
+  if (scene_sprites && !tall) {
+    for (i = 0; i < 4; ++i) { v->vram[16 * 32 + i * 4 + 0] = 0xFF; }
+    for (row = 0; row < 8; ++row) for (i = 0; i < 4; ++i) { v->vram[16 * 32 + row * 4 + i] = 0xFF; v->vram[17 * 32 + row * 4 + i] = (uint8_t)((13u >> i) & 1u ? 0xFF : 0x00); }
+    v->vram[0x3F00] = 90; v->vram[0x3F80] = 255; v->vram[0x3F81] = 16;
+    v->vram[0x3F01] = 90; v->vram[0x3F82] = 4;   v->vram[0x3F83] = 17;
+  }
   for (i = 0; i < 32; ++i) v->cram[i] = (uint8_t)((i * 7u + 5u) & 63u);
-  v->reg[0] = (uint8_t)(tall ? 0x06 : 0x04);
-  v->reg[1] = (uint8_t)(tall ? 0x50 : 0x40);
+  v->reg[0] = (uint8_t)((tall ? 0x06 : 0x04) | (scene_sprites ? 0x08 : 0));
+  v->reg[1] = (uint8_t)((tall ? 0x50 : 0x40) | ((scene_sprites && !tall) ? 0x01 : 0));
   v->reg[2] = (uint8_t)(tall ? 0xFF : 0xFF);
   v->reg[5] = 0xFF;
   v->reg[7] = 0;
@@ -57,6 +69,11 @@ static void build_scene(int tall, int hscroll) {
 
 static void expected_rgb(int x, int hscroll, uint8_t out[3]) {
   const int fine = hscroll & 7;
+  if (scene_sprites && ((x >= 247 && x < 263) || (x >= -4 && x < 12)) && (scene_sprites == 2 || (x >= 0 && x < 256))) {
+    const unsigned c = rig.vdp.cram[16u + ((x >= 247) ? 15u : 13u)] & 63u;
+    out[0] = (uint8_t)((c & 3u) * 85u); out[1] = (uint8_t)(((c >> 2) & 3u) * 85u); out[2] = (uint8_t)(((c >> 4) & 3u) * 85u);
+    return;
+  }
   const int xm = ((x % 256) + 256) % 256;
   const int src = (((x - hscroll) % 256) + 256) % 256;
   const unsigned col = (unsigned)(src / 8);
@@ -183,11 +200,14 @@ static void run_schedule(int toggling, Digest *d) {
   /* a sprite pair that collides and an overflowing row, so the status flags are part of the digest */
   { unsigned i; SmsVdp *v = &rig.vdp;
     for (i = 0; i < 10; ++i) { v->vram[0x3F00 + i] = 40; v->vram[0x3F80 + 2 * i] = (uint8_t)(100 + i); v->vram[0x3F80 + 2 * i + 1] = 3; }
-    v->vram[0x3F00 + 10] = 0xD0; }
+    v->vram[0x3F00 + 10] = 80; v->vram[0x3F80 + 20] = 255; v->vram[0x3F80 + 21] = 3;
+    v->vram[0x3F00 + 11] = 80; v->vram[0x3F80 + 22] = 250; v->vram[0x3F80 + 23] = 4;
+    v->vram[0x3F00 + 12] = 0xD0; }
   for (f = 0; f < 40; ++f) {
     SvWidescreenMode m = SV_WIDESCREEN_ORIGINAL;
     if (toggling) m = (f / 5) % 3 == 0 ? SV_WIDESCREEN_ORIGINAL : ((f / 5) % 3 == 1 ? SV_WIDESCREEN_EXTENDED_BACKGROUNDS : SV_WIDESCREEN_ENHANCED_GAMEPLAY);
     set_mode(m, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+    if (f == 11) rig.vdp.reg[0] = (uint8_t)(rig.vdp.reg[0] | 0x08); /* the shift bit: an X = 4 sprite would spill left */
     if (f == 17) rig.vdp.reg[8] = 77; /* identical guest-side scene changes in both runs */
     if (f == 23) rig.vdp.reg[0] = (uint8_t)(rig.vdp.reg[0] | 0x20); /* mask: the extension is unavailable for a while */
     if (f == 29) rig.vdp.reg[0] = (uint8_t)(rig.vdp.reg[0] & ~0x20);
@@ -225,8 +245,9 @@ int main(void) {
   build_scene(0, 0);
 
   sv_host_widescreen_caps(host_h, &caps);
-  CHECK(caps.extended == SV_WS_PARTIAL && caps.enhanced == SV_WS_UNAVAILABLE, "caps: Level 2 at best Partial, Level 3 unavailable");
+  CHECK(caps.extended == SV_WS_PARTIAL && caps.enhanced == SV_WS_PARTIAL, "caps: Level 2 and Level 3 at best Partial");
   CHECK(caps.partial_note != NULL && strcmp(caps.partial_note, kNote) == 0, "caps carry the repetition wording");
+  CHECK(caps.enhanced_note != NULL && strcmp(caps.enhanced_note, kSpriteNote) == 0, "caps carry the edge-sprite wording for Level 3");
 
   /* ---- Original: nothing is produced ---- */
   set_mode(SV_WIDESCREEN_ORIGINAL, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
@@ -252,12 +273,46 @@ int main(void) {
   check_output("Level 2 / hscroll 21", 192, 42, 21, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
   build_scene(0, 0);
 
-  /* ---- Level 3 requested: falls back to Level 2, keeping the preference ---- */
-  set_mode(SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+  /* ---- Level 3: the sprites crossing the screen edges spill over the wrapped background; Partial, wording says what it is ---- */
+  scene_sprites = 1;
+  build_scene(0, 0);
   step(2);
-  CHECK(sv_host_extension_side(host_h) == 42 && sv_host_widescreen_effective(host_h) == SV_WIDESCREEN_EXTENDED_BACKGROUNDS, "Level 3 requested: Level 2 shown");
+  CHECK(ext->result.sprites == 0 && ext->result.sprite_pixels == 0, "Level 2 frame carries no sprite spill");
+  check_output("Level 2 with edge sprites in the scene", 192, 42, 0, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+  set_mode(SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+  scene_sprites = 2;
+  step(2);
+  CHECK(ext->request_sprites == 1 && ext->result.cls == SMS_EXT_WRAPPED && ext->result.sprites == 1, "Level 3: a WRAPPED frame carrying the sprite spill");
+  CHECK(ext->result.sprite_pixels == 16u * (4u + 7u), "Level 3: 4 columns left and 7 columns right of the picture, 16 lines each");
+  ext_state("Level 3", 42);
+  check_output("Level 3 / edge sprites", 192, 42, 0, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+  sv_host_widescreen_caps(host_h, &caps);
+  CHECK(caps.enhanced == SV_WS_PARTIAL && sv_host_widescreen_effective(host_h) == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "caps: Level 3 Partial and effective");
+  CHECK(strcmp(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &caps), kSpriteNote) == 0, "menu status: edge-sprites wording");
   CHECK(sv_host_settings(host_h)->video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "the Level 3 preference is kept");
-  CHECK(strstr(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &caps), "Level 3 is not available") != NULL, "Level 3 status says it is unavailable");
+  /* a pending Level 3 frame is refused once the user steps down to Level 2, and the next frame has no sprite pixel beside the picture */
+  set_mode(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+  CHECK(host.present(host.ctx, rig.renderer.last, rig.renderer.last_height) == 0 && sv_host_extension_side(host_h) == 0, "a pending Level 3 frame is not shown at Level 2");
+  scene_sprites = 1;
+  step(2);
+  CHECK(ext->result.sprites == 0 && sv_host_extension_side(host_h) == 42, "Level 2 again: background only");
+  check_output("Level 2 after Level 3 (no stale sprite pixels)", 192, 42, 0, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+  /* Level 3 over an unavailable background (left-column mask) shows the Original picture and reports both levels unavailable, preference kept */
+  set_mode(SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+  rig.vdp.reg[0] = (uint8_t)(rig.vdp.reg[0] | 0x20);
+  step(2);
+  sv_host_widescreen_caps(host_h, &caps);
+  CHECK(ext->result.cls == SMS_EXT_UNAVAILABLE && ext->result.sprites == 0 && sv_host_extension_side(host_h) == 0 && caps.extended == SV_WS_UNAVAILABLE &&
+            caps.enhanced == SV_WS_UNAVAILABLE && sv_host_widescreen_effective(host_h) == SV_WIDESCREEN_ORIGINAL,
+        "Level 3 without a Level 2 background: Original, nothing invented for the sprites");
+  rig.vdp.reg[0] = (uint8_t)(rig.vdp.reg[0] & ~0x20);
+  scene_sprites = 2;
+  step(2);
+  CHECK(ext->result.sprites == 1 && sv_host_extension_side(host_h) == 42, "Level 3 recovers");
+  set_mode(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+  scene_sprites = 0;
+  build_scene(0, 0);
+  step(2);
 
   /* ---- integer scaling, 4:3 pixel shape, CRT preset, fullscreen ---- */
   set_mode(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);

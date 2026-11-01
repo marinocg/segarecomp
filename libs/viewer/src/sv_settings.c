@@ -348,7 +348,7 @@ const char *sv_widescreen_description(SvWidescreenMode mode) {
     case SV_WIDESCREEN_EXTENDED_BACKGROUNDS:
       return "Shows more background scenery at the sides. Gameplay stays in the original area; some scenery may be incomplete.";
     case SV_WIDESCREEN_ENHANCED_GAMEPLAY:
-      return "Expands the playable view where supported. Some games need special adjustments and may show visual glitches.";
+      return "Also shows sprites the game already places beside the picture, where supported. It does not make the game world wider.";
     default: return "Original game picture. Preserves the intended display area and compatibility.";
   }
 }
@@ -359,6 +359,7 @@ const char *sv_widescreen_status(SvWidescreenMode requested, const SvWidescreenC
   if (eff == SV_WIDESCREEN_ORIGINAL) return "Not yet available for this game. Showing the original picture.";
   if (eff != requested) return "Level 3 is not available for this game. Showing Extended Backgrounds instead.";
   if ((eff == SV_WIDESCREEN_ENHANCED_GAMEPLAY ? caps->enhanced : caps->extended) == SV_WS_PARTIAL) {
+    if (eff == SV_WIDESCREEN_ENHANCED_GAMEPLAY && caps->enhanced_note != NULL && caps->enhanced_note[0] != '\0') return caps->enhanced_note;
     if (caps->partial_note != NULL && caps->partial_note[0] != '\0') return caps->partial_note;
     return "Partly available for this game: some of the extra picture may be missing.";
   }

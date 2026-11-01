@@ -1,4 +1,5 @@
 // SEG-118 (ADR 0262): Level 2 extended backgrounds produced from authentic VDP state, presentation only.
+// SEG-121 (ADR 0264): Level 3 adds the sprite layer of the frame's own SAT over the extra columns; checked against an independent sprite reference below.
 //
 // Project-authored synthetic VDP scenes (random but deterministic tiles, nametables, scroll tables, palettes), no ROM and no clock.
 // The extension pixels are compared with a SMALL INDEPENDENT REFERENCE SAMPLER written from the documented hardware rules in this file; it does
@@ -48,6 +49,13 @@ struct Cfg {
   bool midframe = false;      // per-line CRAM / scroll-mode / plane-size changes after line 90, and a journaled VRAM write at line 120
   bool journal = true;
   uint32_t seed = 1;
+  // SEG-121: an authored sprite attribute table (entry i = sprites[i]; link chains i -> i+1 unless `link` is set explicitly) over deterministic
+  // partly-transparent patterns in tiles 480..511. When `author_sat` is false the SAT is whatever the random scene put there.
+  bool author_sat = false;
+  struct Spr { int x, y; unsigned w, h, tile; bool hf, vf; unsigned pal; bool prio; int link; };
+  std::vector<Spr> sprites;
+  unsigned sat_edit_line = 0;  // > 0: sprite 0's X changes by +20 from this line on (a journaled VRAM write when `journal`)
+  int tail_h32_from = -1;      // >= 0: lines from here claim the other horizontal resolution (ambiguous sprite state)
 };
 
 struct Scene {
@@ -104,6 +112,27 @@ void build_scene(const Cfg &c, Scene &sc) {
     std::memcpy(line.cram, cram, sizeof(line.cram));
     std::memcpy(line.vsram, vsram, sizeof(line.vsram));
   }
+  if (c.author_sat) {
+    for (unsigned t = 480; t < 512; ++t)
+      for (unsigned row = 0; row < 8; ++row)
+        for (unsigned col = 0; col < 8; col += 2) {
+          const unsigned n0 = ((row + col + t) % 3 == 0) ? 0u : 1u + (t * 7 + row * 5 + col * 3) % 15;
+          const unsigned n1 = ((row + col + 1 + t) % 3 == 0) ? 0u : 1u + (t * 7 + row * 5 + (col + 1) * 3) % 15;
+          sc.vram[t * 32 + row * 4 + col / 2] = (uint8_t)((n0 << 4) | n1);
+        }
+    for (uint32_t i = 0; i < 640; ++i) sc.vram[0xF800 + i] = 0;
+    for (size_t i = 0; i < c.sprites.size(); ++i) {
+      const Cfg::Spr &sp = c.sprites[i];
+      const int ybias = c.im2 ? 256 : 128;
+      const unsigned wy = (unsigned)(sp.y + ybias) & (c.im2 ? 0x3FFu : 0x1FFu);
+      const unsigned wp = ((unsigned)sp.prio << 15) | (sp.pal << 13) | ((unsigned)sp.vf << 12) | ((unsigned)sp.hf << 11) | sp.tile;
+      const unsigned wx = (unsigned)(sp.x + 128) & 0x1FFu;
+      const unsigned link = sp.link >= 0 ? (unsigned)sp.link : (i + 1 < c.sprites.size() ? (unsigned)i + 1 : 0u);
+      uint8_t *e = &sc.vram[0xF800 + i * 8];
+      e[0] = (uint8_t)(wy >> 8); e[1] = (uint8_t)wy; e[2] = (uint8_t)(((sp.w - 1) << 2) | (sp.h - 1)); e[3] = (uint8_t)link;
+      e[4] = (uint8_t)(wp >> 8); e[5] = (uint8_t)wp; e[6] = (uint8_t)(wx >> 8); e[7] = (uint8_t)wx;
+    }
+  }
   sc.vram_start = sc.vram;
   if (c.midframe) {
     uint8_t cram2[GENESIS_VDP_CRAM_BYTES];
@@ -125,6 +154,17 @@ void build_scene(const Cfg &c, Scene &sc) {
       }
     }
   }
+  if (c.sat_edit_line != 0 && !c.sprites.empty()) {
+    const unsigned wx = (unsigned)(c.sprites[0].x + 20 + 128) & 0x1FFu;
+    for (unsigned b = 0; b < 2; ++b) {
+      const uint16_t addr = (uint16_t)(0xF800 + 6 + b);
+      const uint8_t v = (uint8_t)(b == 0 ? wx >> 8 : wx);
+      sc.vram[addr] = v;
+      if (c.journal) sc.raster->vram_writes[sc.raster->vram_write_count++] = {addr, v, (uint8_t)c.sat_edit_line};
+    }
+  }
+  if (c.tail_h32_from >= 0)
+    for (unsigned l = (unsigned)c.tail_h32_from; l < GENESIS_RASTER_MAX_LINES; ++l) sc.raster->lines[l].registers[12] = (uint16_t)(c.h40 ? 0x00u : 0x81u);
   sc.raster->has_vram_journal = c.journal ? 1 : 0;
   std::memcpy(sc.raster->vram_start, sc.vram_start.data(), GENESIS_VDP_VRAM_BYTES);
 }
@@ -184,13 +224,64 @@ bool ref_window(const Ref &r, const GenesisRasterLine &ln, unsigned x, unsigned 
   return horiz || vert;
 }
 
-unsigned ref_index(const Ref &r, const GenesisRasterLine &ln, const std::vector<uint8_t> &vram, long long x, unsigned row, bool left, unsigned groups) {
+// ---- SEG-121: the independent sprite-layer reference (written from the documented hardware rules, not from the production helpers) ----
+// Fills layer[x + side] for the screen columns -side .. W + side - 1 of one output row: SAT linked-list walk from sprite 0 (stops at link 0, a link
+// beyond the table, or a revisit), at most 20 (H40) / 16 (H32) sprites on the row (the next one ends the walk), 40 / 32 cells of sprite width per row in
+// list order, patterns stored column-major, and the first opaque pixel of the earlier sprite wins.
+void ref_sprite_layer(const Ref &r, const GenesisRasterLine &ln, const std::vector<uint8_t> &vram, unsigned row, unsigned side, std::vector<Pix> &layer) {
+  const bool h40 = r.c.h40, im2 = r.c.im2;
+  const unsigned maxs = h40 ? 80 : 64, lim = h40 ? 20 : 16, cellh = im2 ? 16 : 8;
+  const unsigned base = ((unsigned)ln.registers[5] << 9) & (h40 ? 0xFC00u : 0xFE00u);
+  layer.assign(r.width() + 2 * side, Pix{false, 0, 0, 0});
+  struct Sel { int x, y; unsigned w, h, tile, pal, prio; bool hf, vf; };
+  std::vector<Sel> sel;
+  std::vector<bool> seen(128, false);
+  unsigned idx = 0;
+  for (unsigned n = 0; n < maxs; ++n) {
+    if (seen[idx] || base + idx * 8 + 8 > 0x10000) break;
+    seen[idx] = true;
+    const uint8_t *e = &vram[base + idx * 8];
+    const int y = (int)(((e[0] << 8) | e[1]) & (im2 ? 0x3FF : 0x1FF)) - (im2 ? 256 : 128);
+    const unsigned hc = (e[2] & 3) + 1, wc = ((e[2] >> 2) & 3) + 1, link = e[3] & 0x7F;
+    const unsigned attr = (e[4] << 8) | e[5];
+    const int x = (int)(((e[6] << 8) | e[7]) & 0x1FF) - 128;
+    if ((int)row >= y && (int)row < y + (int)(hc * cellh)) {
+      if (sel.size() == lim) break;
+      sel.push_back({x, y, wc, hc, attr & 0x7FF, (attr >> 13) & 3, (attr >> 15) & 1, ((attr >> 11) & 1) != 0, ((attr >> 12) & 1) != 0});
+    }
+    if (link == 0 || link >= maxs) break;
+    idx = link;
+  }
+  unsigned budget = h40 ? 40 : 32;
+  for (const Sel &sp : sel) {
+    if (budget == 0) break;
+    const unsigned cells = sp.w < budget ? sp.w : budget;
+    budget -= cells;
+    for (unsigned px = 0; px < cells * 8; ++px) {
+      const int sx = sp.x + (int)px;
+      if (sx < -(int)side || sx >= (int)r.width() + (int)side) continue;
+      Pix &dst = layer[(size_t)(sx + (int)side)];
+      if (dst.opaque) continue;
+      const unsigned ly = row - (unsigned)sp.y;
+      const unsigned my = sp.vf ? sp.h * cellh - 1 - ly : ly;
+      const unsigned mx = sp.hf ? sp.w * 8 - 1 - px : px;
+      const unsigned tile = (sp.tile + (mx / 8) * sp.h + my / cellh) & 0x7FF;
+      const unsigned addr = (tile * (im2 ? 64 : 32) + (my % cellh) * 4 + (mx % 8) / 2) & 0xFFFF;
+      const unsigned nib = ((mx % 8) & 1) ? (vram[addr] & 15) : (vram[addr] >> 4);
+      if (nib != 0) dst = Pix{true, sp.prio, sp.pal, nib};
+    }
+  }
+}
+
+unsigned ref_index(const Ref &r, const GenesisRasterLine &ln, const std::vector<uint8_t> &vram, long long x, unsigned row, bool left, unsigned groups, const Pix *spr = nullptr) {
   const bool wedge = ref_window(r, ln, left ? 0u : r.width() - 1u, row);
   const unsigned g = left ? 0u : groups - 1u;
   Pix a = wedge ? Pix{false, 0, 0, 0} : ref_plane(r, ln, vram, false, x, row, g);
   Pix b = ref_plane(r, ln, vram, true, x, row, g);
+  if (spr != nullptr && spr->opaque && spr->prio) return spr->pal * 16 + spr->idx;
   if (a.opaque && a.prio) return a.pal * 16 + a.idx;
   if (b.opaque && b.prio) return b.pal * 16 + b.idx;
+  if (spr != nullptr && spr->opaque) return spr->pal * 16 + spr->idx;
   if (a.opaque) return a.pal * 16 + a.idx;
   if (b.opaque) return b.pal * 16 + b.idx;
   return ln.registers[7] & 0x3F;
@@ -221,7 +312,8 @@ std::vector<uint8_t> g_surface(GENESIS_EXT_SURFACE_BYTES);
 struct Outcome { int rc; GenesisExtensionResult res; bool native_ok; };
 
 // Runs the production producer for a scene and verifies every pixel against the reference. Returns the production result.
-Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true) {
+// `level` 1 = Level 2 request, 2 = Level 3 request. `expect_sprites` = the Level 3 sprite layer must have been produced (else it must have fallen back to Level 2).
+Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true, unsigned level = 1, bool expect_sprites = true) {
   Scene sc;
   build_scene(c, sc);
   auto native = std::make_unique<GenesisFrameArtifact>();
@@ -232,6 +324,7 @@ Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true) {
   auto before = std::make_unique<GenesisFrameArtifact>(*native);
   PlanCtx pc{c.side};
   GenesisFrameExtension ext{};
+  ext.request = (uint8_t)level;
   ext.plan = plan_fn;
   ext.plan_ctx = &pc;
   ext.pixels = g_surface.data();
@@ -239,13 +332,18 @@ Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true) {
   std::memset(g_surface.data(), 0xA5, g_surface.size());
   out.rc = genesis_vdp_produce_extension(sc.vram.data(), sc.raster.get(), native.get(), &ext, &out.res);
   check(std::memcmp(before.get(), native.get(), sizeof(*native)) == 0, "the native artifact is not modified by the extension call");
-  if (out.rc != 0) { check(!expect_ok, name); return out; }
+  if (out.rc != 0) { if (expect_ok) std::printf("  producer refused: reason %u status %u\n", out.res.reason, out.res.status); check(!expect_ok, name); return out; }
   check(out.res.status == GENESIS_EXT_AVAILABLE || out.res.status == GENESIS_EXT_PARTIAL, name);
   Ref ref{&sc, c};
   const unsigned W = native->width, H = native->height, S = c.side, pitch = (W + 2 * S) * 3;
   checkf(out.res.native_w == W && out.res.native_h == H && out.res.side == S && out.res.pitch == pitch, "result geometry", out.res.native_w, out.res.side, out.res.pitch);
   bool window_edge = false, colvs = false;
-  unsigned bad = 0, bad_centre = 0;
+  unsigned bad = 0, bad_centre = 0, ref_sprite_pixels = 0;
+  const bool sprites = level >= 2 && expect_sprites;
+  checkf(out.res.mode == (sprites ? GENESIS_EXT_MODE_SPRITES : GENESIS_EXT_MODE_BACKGROUNDS), "result mode is the produced content", out.res.mode);
+  check(sprites || level < 2 || out.res.sprite_reason == GENESIS_EXT_REASON_SPRITE_STATE, "a Level 3 request served as Level 2 says why");
+  check(!sprites || out.res.status == GENESIS_EXT_PARTIAL, "Level 3 content is never Available");
+  std::vector<Pix> layer;
   for (unsigned row = 0; row < H; ++row) {
     const unsigned fl = c.im2 ? row / 2 : row;
     const GenesisRasterLine &ln = sc.raster->lines[fl];
@@ -258,13 +356,23 @@ Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true) {
           if (std::memcmp(&ln.vsram[plane * 2], &ln.vsram[plane * 2], 2) == 0 &&
               (ln.vsram[plane * 2 + g * 4] != ln.vsram[plane * 2] || ln.vsram[plane * 2 + g * 4 + 1] != ln.vsram[plane * 2 + 1])) colvs = true;
     }
+    if (sprites) ref_sprite_layer(ref, ln, vram, row, S, layer);
     for (unsigned i = 0; i < S; ++i) {
       for (int left = 1; left >= 0; --left) {
         const long long x = left ? (long long)i - (long long)S : (long long)W + i;
         uint8_t want[3];
-        rgb_of(ln.cram, ref_index(ref, ln, vram, x, row, left != 0, groups), want);
+        const Pix *sp = sprites ? &layer[(size_t)(x + (long long)S)] : nullptr;
+        rgb_of(ln.cram, ref_index(ref, ln, vram, x, row, left != 0, groups, sp), want);
+        if (sp != nullptr && sp->opaque) {
+          const Pix a = ref_window(ref, ln, left ? 0u : W - 1u, row) ? Pix{false, 0, 0, 0} : ref_plane(ref, ln, vram, false, x, row, left ? 0u : groups - 1u);
+          const Pix b = ref_plane(ref, ln, vram, true, x, row, left ? 0u : groups - 1u);
+          if (sp->prio || !((a.opaque && a.prio) || (b.opaque && b.prio))) ++ref_sprite_pixels;
+        }
         const uint8_t *got = g_surface.data() + (size_t)row * pitch + (left ? i : S + W + i) * 3;
-        if (std::memcmp(want, got, 3) != 0) ++bad;
+        if (std::memcmp(want, got, 3) != 0) {
+          if (bad == 0) std::printf("  first mismatch: row %u x %lld want %u,%u,%u got %u,%u,%u sprite %d\n", row, x, want[0], want[1], want[2], got[0], got[1], got[2], sp != nullptr ? (int)sp->opaque : -1);
+          ++bad;
+        }
       }
     }
     for (unsigned x = 0; x < W; ++x) {
@@ -275,10 +383,12 @@ Outcome run_and_compare(const Cfg &c, const char *name, bool expect_ok = true) {
   }
   checkf(bad == 0, name, bad);
   checkf(bad_centre == 0, "the surface centre equals the native picture", bad_centre);
+  checkf(!sprites || out.res.sprite_pixels == ref_sprite_pixels, "visible extension sprite pixels match the reference count", out.res.sprite_pixels, ref_sprite_pixels);
   const uint8_t want_flags = (uint8_t)((window_edge ? GENESIS_EXT_FLAG_WINDOW_EDGE : 0) | (colvs ? GENESIS_EXT_FLAG_COLUMN_VSCROLL : 0) |
-                                       (c.journal ? 0 : GENESIS_EXT_FLAG_NO_VRAM_JOURNAL));
+                                       (c.journal ? 0 : GENESIS_EXT_FLAG_NO_VRAM_JOURNAL) | (sprites ? GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT : 0));
   checkf(out.res.flags == want_flags, "partial caveat flags", out.res.flags, want_flags);
   check((out.res.status == GENESIS_EXT_AVAILABLE) == (want_flags == 0), "AVAILABLE exactly when there is no caveat");
+  check(level >= 2 || out.res.mode == GENESIS_EXT_MODE_BACKGROUNDS, "a Level 2 request produces Level 2 content");
   return out;
 }
 
@@ -335,6 +445,145 @@ void synthetic_fixtures() {
   { Cfg c = base; c.midframe = true; c.journal = false; const Outcome o = run_and_compare(c, "nojournal"); check(o.res.status == GENESIS_EXT_PARTIAL && (o.res.flags & GENESIS_EXT_FLAG_NO_VRAM_JOURNAL), "missing journal is Partial"); }
 }
 
+
+// ---- SEG-121: Level 3 sprite fixtures ---------------------------------------------------------------------------------------
+using Spr = Cfg::Spr;
+Spr mk(int x, int y, unsigned w, unsigned h, unsigned tile, bool hf = false, bool vf = false, unsigned pal = 0, bool prio = false, int link = -1) {
+  return Spr{x, y, w, h, tile, hf, vf, pal, prio, link};
+}
+
+std::vector<uint8_t> surface_copy(const Cfg &c) {
+  const unsigned W = c.h40 ? 320u : 256u, H = c.im2 ? 448u : 224u;
+  return std::vector<uint8_t>(g_surface.begin(), g_surface.begin() + (size_t)(W + 2 * c.side) * 3 * H);
+}
+
+// Runs the Level 3 request against the reference; returns the L3 surface and checks the L2 surface of the same scene differs exactly where sprites show.
+struct L3Run { Outcome o; std::vector<uint8_t> l3, l2; };
+L3Run run_l3(const Cfg &c, const char *name, bool expect_sprites = true) {
+  L3Run r;
+  r.o = run_and_compare(c, name, true, 2, expect_sprites);
+  r.l3 = surface_copy(c);
+  const Outcome o2 = run_and_compare(c, name, true, 1);
+  (void)o2;
+  r.l2 = surface_copy(c);
+  return r;
+}
+
+void expect_visible(const Cfg &c, const char *name) {
+  const L3Run r = run_l3(c, name);
+  checkf(r.o.res.sprite_pixels > 0, name, r.o.res.sprite_pixels);
+  check(r.l2 != r.l3, "Level 3 content differs from Level 2 where a sprite is visible");
+}
+
+void expect_same_as(const Cfg &a, const Cfg &b, const char *name) {
+  const L3Run ra = run_l3(a, name), rb = run_l3(b, name);
+  check(ra.l3 == rb.l3 && ra.o.res.sprite_pixels == rb.o.res.sprite_pixels, name);
+}
+
+Cfg authored(std::vector<Spr> v, bool h40 = true) {
+  Cfg c;
+  c.author_sat = true;
+  c.h40 = h40;
+  c.side = h40 ? 39 : 71;
+  c.sprites = std::move(v);
+  return c;
+}
+
+void level3_fixtures() {
+  // 1. edges: crossing the left / right native boundary, fully outside left / right, H40 and H32
+  expect_visible(authored({mk(-12, 40, 2, 2, 480)}), "L3: sprite crossing the left edge");
+  expect_visible(authored({mk(315, 60, 3, 2, 484)}), "L3: sprite crossing the right edge");
+  expect_visible(authored({mk(-30, 80, 1, 1, 481)}), "L3: sprite fully outside on the left");
+  expect_visible(authored({mk(330, 90, 1, 2, 482, false, false, 0, true)}), "L3: sprite fully outside on the right");
+  expect_visible(authored({mk(-20, 50, 2, 2, 480), mk(256 + 30, 70, 2, 1, 486)}, false), "L3: H32 left and right");
+  // a sprite entirely outside the extension surface adds nothing
+  { const L3Run r = run_l3(authored({mk(-100, 40, 2, 2, 480), mk(380, 40, 2, 2, 480)}), "L3: sprites beyond the surface");
+    check(r.o.res.sprite_pixels == 0 && r.l2 == r.l3, "L3: sprites beyond the extension surface leave Level 2 untouched"); }
+  // a sprite wholly inside the native picture adds nothing to the extension
+  { const L3Run r = run_l3(authored({mk(100, 40, 4, 4, 480)}), "L3: native-only sprite");
+    check(r.o.res.sprite_pixels == 0 && r.l2 == r.l3 && r.o.res.mode == GENESIS_EXT_MODE_SPRITES, "L3: a frame with no extra sprite is still Level 3 and equals Level 2"); }
+  // 2. flips
+  for (unsigned f = 0; f < 4; ++f) expect_visible(authored({mk(-14, 30, 3, 2, 480, (f & 1) != 0, (f & 2) != 0)}), "L3: flips across the left edge");
+  for (unsigned f = 0; f < 4; ++f) expect_visible(authored({mk(312, 30, 3, 3, 484, (f & 1) != 0, (f & 2) != 0)}), "L3: flips across the right edge");
+  // 3. every size, one per row band
+  { std::vector<Spr> v; for (unsigned w = 1; w <= 4; ++w) for (unsigned h = 1; h <= 4; ++h) v.push_back(mk(-6, 4 + (int)((w - 1) * 4 + (h - 1)) * 13, w, h, 480 + (w * h) % 8));
+    expect_visible(authored(v), "L3: all sixteen sprite sizes"); }
+  // 4. palette lines and priority against the planes
+  { std::vector<Spr> v; for (unsigned p = 0; p < 4; ++p) { v.push_back(mk(-20, 10 + (int)p * 40, 2, 2, 480, false, false, p, false)); v.push_back(mk(322, 10 + (int)p * 40, 2, 2, 482, false, false, p, true)); }
+    expect_visible(authored(v), "L3: palette lines and both priorities"); }
+  // 5. sprite vs sprite: the earlier entry wins an overlap; transparent pixels let the later one show through
+  expect_visible(authored({mk(-10, 40, 2, 2, 480), mk(-8, 42, 2, 2, 486)}), "L3: overlapping sprites");
+  // 6. link list: termination, cycles, links beyond the table, entries past the end
+  { Cfg a = authored({mk(100, 10, 1, 1, 480, false, false, 0, false, 1), mk(120, 10, 1, 1, 480, false, false, 0, false, 0), mk(-20, 10, 2, 2, 482)});
+    Cfg b = authored({mk(100, 10, 1, 1, 480, false, false, 0, false, 1), mk(120, 10, 1, 1, 480, false, false, 0, false, 0)});
+    expect_same_as(a, b, "L3: a sprite after the link terminator is not drawn"); }
+  { Cfg a = authored({mk(100, 10, 1, 1, 480, false, false, 0, false, 1), mk(-20, 10, 2, 2, 482, false, false, 0, false, 2), mk(130, 10, 1, 1, 480, false, false, 0, false, 1), mk(-24, 12, 2, 2, 486)});
+    Cfg b = authored({mk(100, 10, 1, 1, 480, false, false, 0, false, 1), mk(-20, 10, 2, 2, 482, false, false, 0, false, 2), mk(130, 10, 1, 1, 480, false, false, 0, false, 1)});
+    expect_same_as(a, b, "L3: a link cycle ends the walk (no endless loop, nothing beyond it is drawn)"); }
+  { Cfg a = authored({mk(100, 10, 1, 1, 480, false, false, 0, false, 100), mk(-20, 10, 2, 2, 482)});
+    Cfg b = authored({mk(100, 10, 1, 1, 480, false, false, 0, false, 100)});
+    expect_same_as(a, b, "L3: a link beyond the table ends the walk"); }
+  // H32 table holds 64 sprites; a chain 0..63 with the next entry past the end is not walked
+  { std::vector<Spr> v; for (int i = 0; i < 64; ++i) v.push_back(mk(8 + (i % 28) * 8, 4 + (i / 28) * 30, 1, 1, 480 + i % 8));
+    v.back().link = 64; v.push_back(mk(-20, 10, 2, 2, 482));
+    std::vector<Spr> w(v.begin(), v.end() - 1);
+    expect_same_as(authored(v, false), authored(w, false), "L3: entry 64 of an H32 table is unreachable"); }
+  // 7. hardware limits apply to the extension exactly as to the native line
+  { std::vector<Spr> v; for (int i = 0; i < 20; ++i) v.push_back(mk(8 + i * 14, 40, 1, 1, 480 + i % 8));
+    std::vector<Spr> w = v;
+    v.push_back(mk(-20, 40, 2, 1, 482));   // the 21st sprite on the row: dropped by the per-line limit
+    const L3Run r = run_l3(authored(v), "L3: per-line sprite limit");
+    check(r.o.res.sprite_pixels == 0, "L3: the 21st sprite of an H40 row never appears in the extension");
+    expect_same_as(authored(v), authored(w), "L3: the dropped sprite changes nothing"); }
+  { std::vector<Spr> v; for (int i = 0; i < 16; ++i) v.push_back(mk(8 + i * 14, 40, 1, 1, 480 + i % 8));
+    std::vector<Spr> w = v; v.push_back(mk(-20, 40, 2, 1, 482));
+    expect_same_as(authored(v, false), authored(w, false), "L3: H32 allows only 16 sprites per row"); }
+  { std::vector<Spr> v; for (int i = 0; i < 10; ++i) v.push_back(mk(-30 + i * 30, 50, 4, 2, 480 + i % 8));
+    std::vector<Spr> w = v; v.push_back(mk(-30, 52, 4, 1, 484)); v.push_back(mk(340, 52, 4, 1, 484));
+    // ten 4-cell sprites use the whole 40-cell budget: the later ones are not drawn anywhere on the row, extension included
+    expect_same_as(authored(v), authored(w), "L3: sprites after the cell budget is exhausted do not appear"); }
+  { std::vector<Spr> v; for (int i = 0; i < 9; ++i) v.push_back(mk(20 + i * 30, 50, 4, 1, 480 + i % 8));
+    v.push_back(mk(150, 50, 3, 1, 480)); v.push_back(mk(-24, 50, 4, 1, 484));   // 39 cells used: only the first cell of the next sprite is drawn
+    expect_visible(authored(v), "L3: a sprite trimmed by the remaining cell budget"); }
+  // 8. interlace mode 2 geometry
+  { Cfg c = authored({mk(-14, 100, 2, 2, 240), mk(322, 200, 3, 2, 244, true, true)}); c.im2 = true; c.side = 100; expect_visible(c, "L3: interlace mode 2"); }
+  { Cfg c = authored({mk(-14, 100, 2, 2, 240, false, true), mk(-30, 300, 1, 4, 244)}, false); c.im2 = true; c.side = 100; expect_visible(c, "L3: H32 interlace mode 2"); }
+  // 9. raster changes mid-frame: the SAT edit lands at the journal line (replayed), or the missing journal is Partial
+  { Cfg c = authored({mk(-14, 60, 3, 4, 480)}); c.sat_edit_line = 100; const L3Run r = run_l3(c, "L3: SAT edit mid-frame, journaled"); check(r.o.res.sprite_pixels > 0 && !(r.o.res.flags & GENESIS_EXT_FLAG_NO_VRAM_JOURNAL), "L3: journaled mid-frame sprite edit is replayed"); }
+  { Cfg c = authored({mk(-14, 60, 3, 4, 480)}); c.sat_edit_line = 100; c.journal = false; const L3Run r = run_l3(c, "L3: SAT edit mid-frame, no journal"); check((r.o.res.flags & GENESIS_EXT_FLAG_NO_VRAM_JOURNAL) != 0, "L3: without a journal the result carries the caveat"); }
+  // 10. ambiguous sprite state (a later line claims the other horizontal resolution; the native render refuses such a frame, so the native artifact
+  // comes from the clean state): the producer serves the whole frame as Level 2, with no sprite pixel and a typed reason
+  for (int im2 = 0; im2 < 2; ++im2) {
+  for (unsigned from : {100u, 223u}) {
+  { Cfg c = authored({mk(-14, 60, 3, 4, 480, false, false, 0, true)}); c.im2 = im2 != 0; if (c.im2) c.side = 100;
+    Scene sc; build_scene(c, sc);
+    auto native = std::make_unique<GenesisFrameArtifact>(); std::memset(native.get(), 0, sizeof(*native));
+    check(genesis_vdp_produce_frame_raster(sc.vram.data(), sc.raster.get(), native.get()) == 0, "L3 ambiguity: clean native render");
+    for (unsigned l = from; l < GENESIS_RASTER_MAX_LINES; ++l) sc.raster->lines[l].registers[12] = 0x00;
+    PlanCtx pc{c.side};
+    GenesisFrameExtension ext{}; ext.plan = plan_fn; ext.plan_ctx = &pc; ext.pixels = g_surface.data(); ext.capacity = g_surface.size();
+    GenesisExtensionResult r3{}, r2{};
+    ext.request = GENESIS_EXT_MODE_SPRITES;
+    check(genesis_vdp_produce_extension(sc.vram.data(), sc.raster.get(), native.get(), &ext, &r3) == 0, "L3 ambiguity: produced");
+    const std::vector<uint8_t> s3 = surface_copy(c);
+    ext.request = GENESIS_EXT_MODE_BACKGROUNDS;
+    check(genesis_vdp_produce_extension(sc.vram.data(), sc.raster.get(), native.get(), &ext, &r2) == 0, "L3 ambiguity: Level 2 produced");
+    check(r3.mode == GENESIS_EXT_MODE_BACKGROUNDS && r3.sprite_reason == GENESIS_EXT_REASON_SPRITE_STATE && r3.sprite_pixels == 0 &&
+              !(r3.flags & GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT) && s3 == surface_copy(c),
+          "L3 ambiguity: served as Level 2, identical to the Level 2 surface of the same state"); }
+  }
+  }
+  // 11. random SAT scenes (random sprites, links, sizes) against the reference, on top of every Level 2 variation
+  for (uint32_t seed = 101; seed < 141; ++seed) {
+    Cfg c; c.seed = seed;
+    c.h40 = seed % 2 == 0; c.side = c.h40 ? 39 : 71;
+    c.hmode = seed % 3 == 0 ? 0u : (seed % 3 == 1 ? 2u : 3u); c.window = (int)(seed % 5); c.im2 = seed % 9 == 0; if (c.im2) c.side = 100;
+    c.column_vscroll = seed % 4 == 0; c.midframe = seed % 2 == 1; c.journal = seed % 5 != 0;
+    const L3Run r = run_l3(c, "L3: random SAT vs reference");
+    (void)r;
+  }
+}
+
 void failures_and_edges() {
   Cfg c;
   Scene sc;
@@ -359,6 +608,12 @@ void failures_and_edges() {
   }
   ext.capacity = need;
   check(genesis_vdp_produce_extension(sc.vram.data(), sc.raster.get(), native.get(), &ext, &r) == 0 && r.status == GENESIS_EXT_AVAILABLE, "exactly sized buffer works");
+  { // Level 3 on an undersized target: nothing is written and no sprite mode is reported
+    GenesisFrameExtension e3 = ext; e3.request = GENESIS_EXT_MODE_SPRITES; e3.capacity = need - 1;
+    std::memset(g_surface.data(), 0x5A, need);
+    check(genesis_vdp_produce_extension(sc.vram.data(), sc.raster.get(), native.get(), &e3, &r) != 0 && r.status == GENESIS_EXT_UNAVAILABLE && r.mode == 0, "Level 3: undersized buffer is Unavailable");
+    bool untouched = true; for (size_t i = 0; i < need; ++i) untouched &= g_surface[i] == 0x5A;
+    check(untouched, "Level 3: an undersized buffer is never written"); }
   // exact-size guard bytes after the surface are untouched
   g_surface[need] = 0xEE; g_surface[need + 1] = 0xEF;
   ext.capacity = need;
@@ -385,6 +640,45 @@ void failures_and_edges() {
   { Scene s2; build_scene(c, s2); for (auto &l : s2.raster->lines) l.registers[12] = 0x80; auto f = std::make_unique<GenesisFrameArtifact>();
     std::memset(f.get(), 0, sizeof(*f));
     check(genesis_vdp_produce_extension(s2.vram.data(), s2.raster.get(), native.get(), &ext, &r) != 0, "reserved display mode is refused by the extension too"); }
+}
+
+// SEG-121: the typed request/mode contract around the producer (the dispatch shared by the Genesis and Sega CD frame paths).
+GenesisExtensionResult fake_result;
+int fake_producer(const uint8_t *, const GenesisRasterFrameState *, const GenesisFrameArtifact *, const GenesisFrameExtension *, GenesisExtensionResult *out) {
+  *out = fake_result;
+  return 0;
+}
+void mode_contract() {
+  GenesisFrameExtension ext{};
+  ext.producer = fake_producer;
+  ext.pixels = g_surface.data();
+  ext.capacity = g_surface.size();
+  GenesisExtensionResult r{};
+  uint8_t vram[GENESIS_VDP_VRAM_BYTES] = {};
+  GenesisRasterFrameState raster{};
+  GenesisFrameArtifact native{};
+  auto run = [&](unsigned request, unsigned status, unsigned mode) {
+    std::memset(&fake_result, 0, sizeof fake_result);
+    fake_result.status = (uint8_t)status; fake_result.mode = (uint8_t)mode;
+    ext.request = (uint8_t)request;
+    genesis_frame_extension_run(&ext, vram, &raster, &native, &r);
+  };
+  run(0, GENESIS_EXT_PARTIAL, 1);
+  check(r.status == GENESIS_EXT_NONE, "request 0: no work, NONE");
+  run(1, GENESIS_EXT_PARTIAL, 0);
+  check(r.status == GENESIS_EXT_PARTIAL && r.mode == GENESIS_EXT_MODE_BACKGROUNDS, "a producer predating the typed mode is Level 2");
+  run(2, GENESIS_EXT_AVAILABLE, 0);
+  check(r.status == GENESIS_EXT_AVAILABLE && r.mode == GENESIS_EXT_MODE_BACKGROUNDS, "a Level 3 request served by a Level 2-only producer is Level 2");
+  run(2, GENESIS_EXT_PARTIAL, 2);
+  check(r.status == GENESIS_EXT_PARTIAL && r.mode == GENESIS_EXT_MODE_SPRITES, "Level 3 content, Partial, passes");
+  run(2, GENESIS_EXT_AVAILABLE, 2);
+  check(r.status == GENESIS_EXT_UNAVAILABLE && r.mode == 0, "Level 3 content can never be Available");
+  run(1, GENESIS_EXT_PARTIAL, 2);
+  check(r.status == GENESIS_EXT_UNAVAILABLE, "a Level 2 request can never receive Level 3 content");
+  run(2, GENESIS_EXT_PARTIAL, 3);
+  check(r.status == GENESIS_EXT_UNAVAILABLE, "an unknown mode is refused");
+  run(2, GENESIS_EXT_UNAVAILABLE, 0);
+  check(r.status == GENESIS_EXT_UNAVAILABLE && r.mode == 0, "an unavailable result carries no mode");
 }
 
 // Register fuzzing: whatever the registers say, no out-of-bounds access (run under sanitizers in CI) and a typed answer.
@@ -524,13 +818,64 @@ void runtime_integration() {
 #endif
 }
 
+// SEG-121: live Original -> Level 2 -> Level 3 -> Level 2 -> Original on the real frame path. Every frame is produced wholly under the request sampled at its
+// boundary, the stamped mode is the content, and the native frame / guest state never differ from a run that has no extension at all.
+void runtime_level3() {
+  Cfg c = authored({mk(-14, 20, 4, 4, 480, false, false, 0, true), mk(322, 100, 3, 2, 484, false, false, 1, true)});
+  c.hmode = 3;
+  PlanCtx pc{39};
+  GenesisFrameExtension ext{};
+  ext.plan = plan_fn; ext.plan_ctx = &pc; ext.producer = genesis_vdp_produce_extension; ext.pixels = g_surface.data(); ext.capacity = g_surface.size();
+  Rig with(c, &ext), without(c, nullptr);
+  const unsigned plan[] = {0, 1, 2, 2, 1, 0, 2, 0, 2};
+  std::vector<uint8_t> l2_surface, l3_surface;
+  unsigned frame = 0;
+  for (unsigned request : plan) {
+    ext.request = (uint8_t)request;
+    with.run_frame(); without.run_frame();
+    ++frame;
+    const GenesisExtensionResult &r = ext.result;
+    checkf(r.sequence == frame && with.observer.sequence == frame, "L3 live: result stamped with its frame", (unsigned)r.sequence, frame);
+    if (request == 0) check(r.status == GENESIS_EXT_NONE && r.mode == 0, "L3 live: Original frame carries no extension");
+    else check((r.status == GENESIS_EXT_PARTIAL || r.status == GENESIS_EXT_AVAILABLE) && r.mode == request, "L3 live: the stamped mode is the requested content");
+    if (request == 1) { check(r.sprite_pixels == 0 && !(r.flags & GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT), "L3 live: a Level 2 frame has no sprite content"); l2_surface.assign(g_surface.begin(), g_surface.begin() + (size_t)r.pitch * r.native_h); }
+    if (request == 2) { check(r.sprite_pixels > 0 && r.status == GENESIS_EXT_PARTIAL, "L3 live: a Level 3 frame shows the sprites beside the picture"); l3_surface.assign(g_surface.begin(), g_surface.begin() + (size_t)r.pitch * r.native_h); }
+    check(std::memcmp(&with.frame, &without.frame, sizeof(with.frame)) == 0 && std::memcmp(with.frame.frame_digest, without.frame.frame_digest, 32) == 0,
+          "L3 live: native artifact and digest identical to a run without extension");
+    check(with.r->scheduler.master_ticks == without.r->scheduler.master_ticks && with.r->pc == without.r->pc &&
+              std::memcmp(&with.r->devices.vdp, &without.r->devices.vdp, sizeof(with.r->devices.vdp)) == 0,
+          "L3 live: guest time, pc and VDP state identical");
+  }
+  check(!l2_surface.empty() && l2_surface.size() == l3_surface.size() && l2_surface != l3_surface, "L3 live: Level 3 differs from Level 2 for the same guest scene");
+  // a Level 3 request whose sprite pass cannot run (undersized surface) gives a typed Unavailable frame and recovers
+  const size_t good = ext.capacity;
+  ext.request = 2; ext.capacity = 1000;
+  with.run_frame(); without.run_frame();
+  check(ext.result.status == GENESIS_EXT_UNAVAILABLE && ext.result.mode == 0 && std::memcmp(&with.frame, &without.frame, sizeof(with.frame)) == 0, "L3 live: failed frame is Unavailable and the native frame is untouched");
+  ext.capacity = good;
+  with.run_frame(); without.run_frame();
+  check(ext.result.mode == GENESIS_EXT_MODE_SPRITES, "L3 live: recovers on the next frame");
+#if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 33)
+  { with.run_frame();
+    const struct mallinfo2 a = mallinfo2();
+    for (int i = 0; i < 6; ++i) with.run_frame();
+    const struct mallinfo2 b = mallinfo2();
+    check(a.uordblks == b.uordblks && a.arena == b.arena, "L3 live: no heap allocation in the steady state"); }
+#endif
+#endif
+}
+
 }  // namespace
 
 int main() {
   synthetic_fixtures();
+  level3_fixtures();
+  mode_contract();
   failures_and_edges();
   fuzz_registers();
   runtime_integration();
+  runtime_level3();
   if (failures != 0) { std::printf("genesis_extension_test: %d failure(s)\n", failures); return 1; }
   std::printf("genesis_extension_test: ok\n");
   return 0;

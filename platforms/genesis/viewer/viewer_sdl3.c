@@ -22,12 +22,20 @@ struct GenesisSdl3Viewer {
   int ext_attached;
   SvAspect plan_aspect;               /* sampled with the requested mode once per host slice */
   SvWidescreenSupport l2_support;     /* the outcome of the latest frame produced under a request */
+  SvWidescreenSupport l3_support;     /* SEG-121: whether the latest Level 3 request produced sprites (never Available: games may place none beside the picture) */
 };
 
 /* the runtime's and the viewer library's bounds must agree (the runtime does not depend on the viewer) */
 typedef char genesis_ext_side_bound_matches_layout[(GENESIS_EXT_MAX_SIDE == (unsigned)SV_EXT_MAX_SIDE) ? 1 : -1];
 
 static uint8_t g_extension_surface[GENESIS_EXT_SURFACE_BYTES];
+
+/* The saved mode as the typed producer request (0 none, 1 Level 2, 2 Level 3); sampled once per host slice. */
+static uint8_t request_of(SvWidescreenMode mode) {
+  return mode == SV_WIDESCREEN_ENHANCED_GAMEPLAY ? (uint8_t)GENESIS_EXT_MODE_SPRITES : (mode == SV_WIDESCREEN_EXTENDED_BACKGROUNDS ? (uint8_t)GENESIS_EXT_MODE_BACKGROUNDS : 0U);
+}
+
+static const char k_sprite_note[] = "Sprites appear beside the picture only where the game places them; this does not widen the game world.";
 
 static uint64_t sdl_now(void *ctx) { (void)ctx; return SDL_GetTicksNS(); }
 static void sdl_sleep(void *ctx, uint64_t ns) { (void)ctx; SDL_DelayNS(ns); }
@@ -39,7 +47,7 @@ static int sdl_closed(void *ctx) {
   sv_host_service(v->host, &v->sample);
   if (v->ext_attached) { /* the requested mode is sampled here, between guest slices: a frame is produced wholly under one value */
     const SvVideoSettings *video = &sv_host_settings(v->host)->video;
-    v->ext.request = video->widescreen != SV_WIDESCREEN_ORIGINAL ? 1U : 0U;
+    v->ext.request = request_of(video->widescreen);
     v->plan_aspect = video->aspect;
   }
   return v->sample.quit;
@@ -76,8 +84,10 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
     memset(&surface, 0, sizeof surface);
     if (r->sequence == sequence && (r->status == GENESIS_EXT_AVAILABLE || r->status == GENESIS_EXT_PARTIAL)) {
       v->l2_support = r->status == GENESIS_EXT_AVAILABLE ? SV_WS_AVAILABLE : SV_WS_PARTIAL;
+      if (v->ext.request >= GENESIS_EXT_MODE_SPRITES) v->l3_support = r->mode == GENESIS_EXT_MODE_SPRITES ? SV_WS_PARTIAL : SV_WS_UNAVAILABLE;
     } else if (r->sequence == sequence && r->status == GENESIS_EXT_UNAVAILABLE) {
       v->l2_support = SV_WS_UNAVAILABLE;
+      if (v->ext.request >= GENESIS_EXT_MODE_SPRITES) v->l3_support = SV_WS_UNAVAILABLE;
     }
     if (r->status != GENESIS_EXT_NONE) {
       surface.rgb24 = v->ext.pixels;
@@ -87,7 +97,9 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
       surface.pitch = (int)r->pitch;
       surface.side = (int)r->side;
       surface.sequence = r->sequence;
-      surface.mode = SV_WIDESCREEN_EXTENDED_BACKGROUNDS;
+      /* the produced frame's own identity, never the saved preference */
+      surface.mode = r->mode == GENESIS_EXT_MODE_SPRITES ? SV_WIDESCREEN_ENHANCED_GAMEPLAY
+                     : (r->mode == GENESIS_EXT_MODE_BACKGROUNDS ? SV_WIDESCREEN_EXTENDED_BACKGROUNDS : SV_WIDESCREEN_ORIGINAL);
       surface.status = r->status == GENESIS_EXT_AVAILABLE ? SV_WS_AVAILABLE : (r->status == GENESIS_EXT_PARTIAL ? SV_WS_PARTIAL : SV_WS_UNAVAILABLE);
       return sv_host_present_extended(v->host, rgb, (int)width, (int)height, (int)(width * 3U), sequence, &surface);
     }
@@ -95,11 +107,12 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
   return sv_host_present(v->host, rgb, (int)width, (int)height, (int)(width * 3U));
 }
 
-/* Reports what the producer last achieved (Genesis Level 2 only; Level 3 is Unavailable until the sprite milestone). */
+/* Reports what the producer last achieved: Level 2 scenery, and Level 3 (Partial at best) when the sprite layer was produced. */
 static void sdl_widescreen_caps(void *ctx, SvWidescreenCaps *out) {
   const GenesisSdl3Viewer *v = (const GenesisSdl3Viewer *)ctx;
   out->extended = v->ext_attached ? v->l2_support : SV_WS_UNAVAILABLE;
-  out->enhanced = SV_WS_UNAVAILABLE;
+  out->enhanced = v->ext_attached && v->l2_support != SV_WS_UNAVAILABLE ? v->l3_support : SV_WS_UNAVAILABLE;
+  out->enhanced_note = k_sprite_note;
 }
 
 static int sdl_extension_plan(void *ctx, unsigned native_w, unsigned native_h, unsigned *side_out) {
@@ -124,8 +137,9 @@ GenesisFrameExtension *genesis_sdl3_viewer_extension(GenesisSdl3Viewer *v, const
   v->frame_sequence = frame_sequence;
   v->ext_attached = 1;
   v->l2_support = SV_WS_AVAILABLE; /* capable until a produced frame says otherwise */
+  v->l3_support = SV_WS_PARTIAL;
   v->plan_aspect = sv_host_settings(v->host)->video.aspect;
-  v->ext.request = sv_host_settings(v->host)->video.widescreen != SV_WIDESCREEN_ORIGINAL ? 1U : 0U;
+  v->ext.request = request_of(sv_host_settings(v->host)->video.widescreen);
   return &v->ext;
 }
 

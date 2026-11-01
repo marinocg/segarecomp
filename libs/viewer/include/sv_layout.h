@@ -44,7 +44,7 @@ int sv_layout_extended_dest(int win_w, int win_h, int src_w, int src_h, int side
 
 /* The borrowed extended surface a platform adapter hands to the host for ONE frame (never retained, never written by the host). The native picture sits
  * `side` pixels in from the left edge and `side` from the right edge; `sequence` is the frame identity the producer stamped, `mode` the Widescreen
- * mode that was actually produced for that frame, `status` the typed outcome (UNAVAILABLE = ignore the surface). */
+ * mode that was actually produced for that frame (Level 2 = background only, Level 3 = background + sprites; never merely the saved preference), `status` the typed outcome (UNAVAILABLE = ignore the surface). */
 typedef struct SvExtendedSurface {
   const uint8_t *rgb24;
   size_t size;      /* readable bytes at rgb24 */
@@ -59,7 +59,7 @@ typedef enum SvExtCheck {
   SV_EXT_OK = 0,
   SV_EXT_NO_SURFACE,  /* absent surface/buffer */
   SV_EXT_STATUS,      /* status UNAVAILABLE (or unknown) */
-  SV_EXT_MODE,        /* the frame was produced as Original */
+  SV_EXT_MODE,        /* the frame was produced as Original (or an unknown mode) */
   SV_EXT_SEQUENCE,    /* identity differs from the frame being presented (stale/mismatched) */
   SV_EXT_GEOMETRY,    /* size/side inconsistent with the native picture, not centred, or beyond the bound */
   SV_EXT_PITCH,

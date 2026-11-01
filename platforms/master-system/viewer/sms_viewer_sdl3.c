@@ -24,11 +24,13 @@ struct SmsSdl3Viewer {
   int ext_attached;
   SvAspect plan_aspect;     /* sampled with the requested mode once per guest frame */
   SvWidescreenSupport l2_support; /* the outcome of the latest frame produced under a request */
+  SvWidescreenSupport l3_support; /* SEG-121: whether the latest Level 3 request produced the sprite spill (never Available) */
 };
 
 #define EXT_SURFACE_W (SMS_FB_WIDTH + 2u * SMS_EXT_MAX_SIDE)
 static uint8_t g_ext_rgb[EXT_SURFACE_W * SMS_FB_MAX_HEIGHT * 3u];
 static const char k_wrapped_note[] = "Background repeats existing scenery; this does not reveal more of the game world.";
+static const char k_sprite_note[] = "Background repeats existing scenery. Only sprites crossing the screen edges can extend; this does not expand the game world.";
 
 static uint64_t sdl_now(void *ctx) { (void)ctx; return SDL_GetTicksNS(); }
 static void sdl_sleep(void *ctx, uint64_t ns) { (void)ctx; SDL_DelayNS(ns); }
@@ -51,6 +53,7 @@ static int sdl_poll(void *ctx, SmsViewerInput *in) {
   if (v->ext_attached) { /* the requested mode is sampled here, between guest frames: a frame is produced wholly under one value */
     const SvVideoSettings *video = &sv_host_settings(v->host)->video;
     const int on = video->widescreen != SV_WIDESCREEN_ORIGINAL;
+    v->ext.request_sprites = (uint8_t)(video->widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY);
     v->plan_aspect = video->aspect;
     v->ext.request_side_192 = on ? (uint32_t)sv_layout_extension_side((int)SMS_FB_WIDTH, 192, video->aspect) : 0u;
     v->ext.request_side_224 = on ? (uint32_t)sv_layout_extension_side((int)SMS_FB_WIDTH, 224, video->aspect) : 0u;
@@ -84,6 +87,7 @@ static int build_extension(SmsSdl3Viewer *v, const uint8_t *rgb, uint32_t height
   if (r->height != height) return 1; /* geometry the adapter will not offer: Original for this frame */
   if (r->cls == SMS_EXT_UNAVAILABLE) {
     v->l2_support = SV_WS_UNAVAILABLE;
+    if (v->ext.request_sprites != 0u) v->l3_support = SV_WS_UNAVAILABLE; /* no background, so no sprite spill either */
     return 1;
   }
   if ((r->cls != SMS_EXT_WRAPPED && r->cls != SMS_EXT_DISTINCT) || r->side == 0u || r->side > SMS_EXT_MAX_SIDE) return 1;
@@ -104,6 +108,9 @@ static int build_extension(SmsSdl3Viewer *v, const uint8_t *rgb, uint32_t height
     /* WRAPPED is real tilemap data that repeats the native picture: Partial, never Available. DISTINCT (no Mode 4 case) would be Available. */
     out->status = r->cls == SMS_EXT_DISTINCT ? SV_WS_AVAILABLE : SV_WS_PARTIAL;
     v->l2_support = out->status;
+    /* the identity of the content is the producer's own: Level 3 only when this frame's result says it carries the sprite spill (never Available) */
+    out->mode = r->sprites ? SV_WIDESCREEN_ENHANCED_GAMEPLAY : SV_WIDESCREEN_EXTENDED_BACKGROUNDS;
+    if (v->ext.request_sprites != 0u) v->l3_support = r->sprites ? SV_WS_PARTIAL : SV_WS_UNAVAILABLE;
   }
   return 1;
 }
@@ -124,12 +131,13 @@ static int sdl_present(void *ctx, const uint8_t *fb, uint32_t height) {
   return sv_host_present(v->host, rgb, (int)SMS_FB_WIDTH, (int)height, (int)SMS_FB_WIDTH * 3);
 }
 
-/* What the producer last achieved. Master System Level 2 can be at best Partial (the name table wraps); Level 3 is Unavailable until SEG-121. */
+/* What the producer last achieved. Master System Level 2 can be at best Partial (the name table wraps); Level 3 adds only the sprites that cross the screen edges, also at best Partial. */
 static void sdl_widescreen_caps(void *ctx, SvWidescreenCaps *out) {
   const SmsSdl3Viewer *v = (const SmsSdl3Viewer *)ctx;
   out->extended = v->ext_attached ? v->l2_support : SV_WS_UNAVAILABLE;
-  out->enhanced = SV_WS_UNAVAILABLE;
+  out->enhanced = v->ext_attached && v->l2_support != SV_WS_UNAVAILABLE ? v->l3_support : SV_WS_UNAVAILABLE;
   out->partial_note = k_wrapped_note;
+  out->enhanced_note = k_sprite_note;
 }
 
 static int sdl_audio(void *ctx, const int16_t *samples, uint32_t count) {
@@ -189,6 +197,7 @@ int sms_sdl3_viewer_attach_extension(SmsSdl3Viewer *v, SmsViewerRig *rig) {
   memset(&v->ext, 0, sizeof v->ext);
   v->sequence = &rig->renderer.frames_completed;
   v->l2_support = SV_WS_PARTIAL; /* capable (at best Partial) until a produced frame says otherwise */
+  v->l3_support = SV_WS_PARTIAL;
   v->plan_aspect = sv_host_settings(v->host)->video.aspect;
   v->ext_attached = 1;
   sms_viewer_rig_set_extension(rig, &v->ext);
