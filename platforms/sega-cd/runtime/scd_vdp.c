@@ -545,6 +545,14 @@ int scd_main_device_access(ScdMachine *m, uint32_t address, uint32_t width, int 
     scd_log(m, 0x46U, address, *value);
     return 0;
   }
+  /* SEG-116 (ADR 0260): with the attached Z80 a 68000 write to the Z80 area ($A00000-$A0FFFF) while the Z80 runs and the 68000 has not requested its bus is discarded and counted, as GPGX and ARES do
+   * (the area is open bus and a write is ignored without the grant). A write during /RESET or with a pending request, and the Genesis product, keep the typed stop (genesis-z80-audio-contract section 3); a read keeps the rule above. */
+  if (is_write && z80 != NULL && address >= UINT32_C(0x00A00000) && address < UINT32_C(0x00A10000) &&
+      host->devices.z80_bus.reset_released && !host->devices.z80_bus.bus_requested) {
+    ++m->z80_area_ignored_writes;
+    ++m->ignored_writes;
+    return 0;
+  }
   if (genesis_route_access(host, address, scd_genesis_width(width), is_write ? GENESIS_ACCESS_WRITE : GENESIS_ACCESS_READ, &routed,
                            &stop) != GENESIS_ACCESS_OK) {
     uint32_t detail = 0U;

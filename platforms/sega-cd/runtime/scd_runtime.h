@@ -638,6 +638,7 @@ typedef struct ScdMachine {
   uint64_t vint_at;                       /* BIOS-image profile: tick at which the vertical interrupt of the last onset is requested (0: none due) */
   uint64_t vdp_onset;                     /* tick of the next VDP vertical-blank onset */
   uint8_t vint_pending;                   /* the VDP vertical interrupt is pending (requests level 6 while register #1 IE0 is set) */
+  uint64_t z80_area_ignored_writes;       /* SEG-116 (ADR 0260): 68000 writes to the Z80 area while the 68000 did not hold the Z80 bus (discarded, as GPGX/ARES) */
   uint8_t z80_ran;                        /* the Z80 has been runnable (reset released, bus not requested): without an attached Z80 its RAM is not modelled */
   void *z80;                              /* SEG-114 (ADR 0258): the attached main-side Z80 (scd_z80.c), or NULL: the legacy rule above applies */
   uint8_t hint_counter;                   /* SEG-106 (ADR 0250): the H-interrupt line counter (reloaded from VDP register #10) */

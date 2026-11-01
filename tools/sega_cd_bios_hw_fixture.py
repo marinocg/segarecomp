@@ -149,6 +149,7 @@ def z80_run_and_read(n, program, slot, tag):
 
 # SEG-115 (ADR 0259): image epochs of the main-side Z80 - project-authored programs, hand-assembled. Every program writes its marker to Z80 RAM $0100 and
 # parks in a `JR $` loop at $0040, so a bus hold in the middle of an upload never resumes the Z80 over bytes that are being rewritten.
+Z80_NOGRANT_SLOT = 0x70  # case 20: three bytes at +0, +2, +4
 Z80_EPOCH_SLOTS = 0x64   # case 15: four marker bytes at +0, +2, +4, +6; case 16: two at +0, +2 (+8 / +10: the faulting and the healthy marker)
 Z80_ONE = bytes([0x3E, 0x5A, 0x32, 0x00, 0x01, 0xC3, 0x40, 0x00])                       # LD A,$5A / LD ($0100),A / JP $0040
 Z80_COUNT = bytes([0x3A, 0x00, 0x01, 0x3C, 0x32, 0x00, 0x01, 0xC3, 0x40, 0x00])         # LD A,($0100) / INC A / LD ($0100),A / JP $0040 (a counter: one run per restart)
@@ -290,6 +291,26 @@ def ym_main_body(n):
     n.move("w", F.imm(0x0100), F.absl(0xA11200))
     z80_bus(n, False)
     ym_status(n, FM_SLOT + 4)                  # reset: the flag is gone
+
+
+def z80_nograb_body(n):
+    """Case 20 (SEG-116, ADR 0260): the 68000 writes to the Z80 area while the Z80 runs and the bus is not requested (a byte, a word): both are discarded, the Z80's own marker
+    survives; a write under a bus hold (the control) lands."""
+    z80_bus(n, True)
+    n.move("w", F.imm(0x0000), F.absl(0xA11200))
+    n.move("w", F.imm(0x0100), F.absl(0xA11200))
+    z80_upload(n, Z80_ONE)
+    z80_upload(n, Z80_PARK, 0x40)
+    z80_bus(n, False)                                      # the Z80 runs: marker $5A at $0100
+    delay(n, "z80ng", 300)
+    n.move("b", F.imm(0xA5), F.absl(0xA00100))             # no bus request: ignored
+    n.move("w", F.imm(0xA5A5), F.absl(0xA00102))           # a word write: ignored
+    z80_bus(n, True)
+    n.move("b", F.absl(0xA00100), F.absl(RESULT + Z80_NOGRANT_SLOT))
+    n.move("b", F.absl(0xA00102), F.absl(RESULT + Z80_NOGRANT_SLOT + 2))
+    n.move("b", F.imm(0x77), F.absl(0xA00104))             # the control: under the hold the write lands
+    n.move("b", F.absl(0xA00104), F.absl(RESULT + Z80_NOGRANT_SLOT + 4))
+    z80_bus(n, False)
 
 
 def z80_rearm_body(n):
@@ -503,6 +524,7 @@ def main_program(sub_len, layout):
     negative(m, 18, z80_fm_body)                                                                    # SEG-115: a Z80 driver programs the YM2612 and the PSG
     negative(m, 19, ym_main_body)                                                                   # SEG-115: the 68000 reaches the same devices
     negative(m, 17, z80_patcher_body)                                                               # SEG-115: self-patched routine entry (alternative forms)
+    negative(m, 20, z80_nograb_body)                                                                # SEG-116: a 68000 write to the Z80 area without a bus request
     negative(m, 16, z80_rearm_body)                                                                 # SEG-115: an isolated Z80 is re-armed by the next image epoch
     negative(m, 14, lambda n: z80_run_and_read(n, Z80_OTHER, Z80_SLOT, "c"))                        # an image no build pass saw: the executable program stops
     # SEG-064-T004: the transfer to the application entry is the handoff, but only to an entry that is compiled and whose live bytes match

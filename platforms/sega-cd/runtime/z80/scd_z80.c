@@ -263,14 +263,15 @@ static void scd_z80_report(const ScdMachine *m, FILE *out) {
   for (i = 0U; i < 32U; ++i) snprintf(hex + 2U * i, 3U, "%02x", digest[i]);
   fprintf(out, "\"state\":\"%s\",\"images\":%u,\"epochs\":%u,\"unknown_epochs\":%u,\"bound\":%u,\"recoveries\":%u,\"fault\":%u,\"fault_epoch\":%u,\"fault_tick\":%llu,\"finish_fault\":%u,\"cycles\":%llu,"
                "\"reset_assert\":%llu,\"reset_release\":%llu,\"busreq_assert\":%llu,\"busreq_release\":%llu,\"bank_writes\":%llu,\"banked_reads\":%llu,"
-               "\"digest\":\"%s\"",
+               "\"main_ignored_writes\":%llu,\"digest\":\"%s\"",
           z->unmodelled ? "unmodelled" : genesis_z80_machine_sound_faulted(machine) ? "faulted" : "modelled", (unsigned)genesis_z80_image_count,
           (unsigned)host->z80_epoch.epoch_count, z->unknown_count, machine->bound_ordinal, machine->sound_recoveries, (unsigned)machine->sound_fault,
           machine->sound_fault_epoch, (unsigned long long)machine->sound_fault_master_ticks,
           z->finish_fault ? z->finish_diagnostic : 0U, (unsigned long long)machine->cpu.state.cycles,
           (unsigned long long)machine->count_reset_assert, (unsigned long long)machine->count_reset_release,
           (unsigned long long)machine->count_busreq_assert, (unsigned long long)machine->count_busreq_release,
-          (unsigned long long)machine->count_bank_writes, (unsigned long long)machine->count_banked_reads, hex);
+          (unsigned long long)machine->count_bank_writes, (unsigned long long)machine->count_banked_reads,
+          (unsigned long long)m->z80_area_ignored_writes, hex);
 #ifdef SCD_Z80_AUDIO
   {
     const GenesisMixer *mixer = &z->audio.mixer;
