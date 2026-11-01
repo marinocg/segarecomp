@@ -49,6 +49,7 @@ static uint8_t z80_view_read(void *context, uint16_t address, uint64_t cycles) {
   (void)cycles;
   if (address < Z80_RAM_END) return machine->runtime->devices.z80_bus.z80_ram[address & (GENESIS_Z80_RAM_BYTES - 1U)];
   if (address < Z80_YM_END) {
+    ++machine->count_ym_reads;
     if (!genesis_ym2612_port_read(machine->runtime, address & 3U, access_master_ticks(machine), &value)) {
       latch_stop(machine, GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS);
       return 0xFFU;
@@ -78,6 +79,7 @@ static void z80_view_write(void *context, uint16_t address, uint8_t value, uint6
     return;
   }
   if (address < Z80_YM_END) {
+    ++machine->count_ym_writes;
     if (!genesis_ym2612_port_write(machine->runtime, address & 3U, value, access_master_ticks(machine)))
       latch_stop(machine, GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS);
     return;
@@ -92,6 +94,8 @@ static void z80_view_write(void *context, uint16_t address, uint8_t value, uint6
     if ((address & 0xFFU) < 0x11U || (address & 0xFFU) > 0x17U || ((address & 1U) == 0U) ||
         !genesis_psg_port_write(machine->runtime, value, access_master_ticks(machine)))
       latch_stop(machine, GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS);
+    else
+      ++machine->count_psg_writes;
     return;
   }
   if (address < Z80_BANKED) {
@@ -265,7 +269,7 @@ void genesis_z80_activation_signature(const uint8_t *ram, const uint8_t *written
 static int activate_image(GenesisZ80Machine *machine, const uint8_t *written, GenesisRuntimeStop *stop) {
   uint8_t signature[32];
   uint32_t extents, ordinal;
-  if (genesis_z80_machine_sound_faulted(machine)) return 0;  /* a fault is permanent: no re-activation, no image lookup */
+  if (genesis_z80_machine_sound_faulted(machine)) return 0;  /* a fault is permanent unless re-armed by the epoch (hook_bus_event): no image lookup */
   genesis_z80_activation_signature(machine->runtime->devices.z80_bus.z80_ram, written, &extents, signature);
   if (extents == 0U && machine->last_bound != 0U) {  /* a plain restart: the code already in RAM, i.e. the previously bound image */
     machine->bound_ordinal = machine->last_bound;
@@ -303,7 +307,7 @@ static int hook_bus_event(void *context, GenesisRuntime *runtime, GenesisZ80Even
     case GENESIS_Z80_EVENT_RESET_RELEASE:  /* the architectural reset happens at release (contract section 4.6) */
       genesis_ym2612_port_reset(runtime, master_ticks);
       ++machine->count_reset_release;
-      if (genesis_z80_machine_sound_faulted(machine)) break;  /* the YM reset above is a device effect; the Z80 stays faulted */
+      if (genesis_z80_machine_sound_faulted(machine) && !machine->rearm_faulted_on_epoch) break;  /* the YM reset above is a device effect; the Z80 stays faulted */
       z80_reset(&machine->cpu.state);
       machine->view_stop = (GenesisDiagnosticCategory)0;
       machine->cycle_base_master_ticks = aligned;
@@ -314,6 +318,11 @@ static int hook_bus_event(void *context, GenesisRuntime *runtime, GenesisZ80Even
     case GENESIS_Z80_EVENT_BUSREQ_ASSERT:
       ++machine->count_busreq_assert;
       break;
+  }
+  if (epoch && machine->rearm_faulted_on_epoch && genesis_z80_machine_sound_faulted(machine)) {  /* SEG-115: a fresh image epoch re-arms the isolated Z80 */
+    machine->sound_fault = (GenesisDiagnosticCategory)0;
+    machine->view_stop = (GenesisDiagnosticCategory)0;
+    ++machine->sound_recoveries;
   }
   if (transition && !genesis_z80_machine_sound_faulted(machine)) {  /* resume: time held on the bus is not made up (GPGX: the Z80 restarts at the next multiple of 15 ticks) */
     const uint64_t z80_time = access_master_ticks(machine);
@@ -352,6 +361,12 @@ void genesis_z80_machine_state_digest(const GenesisZ80Machine *machine, uint8_t 
     uint32_t b;
     for (b = 0U; b < 8U; ++b) word[b] = (uint8_t)(values[i] >> (8U * b));
     genesis_sha256_update(&sha, word, 8U);
+  }
+  if (machine->sound_recoveries != 0U) {  /* SEG-115: only a re-armed run differs from the pre-existing digest */
+    uint8_t word[4];
+    word[0] = (uint8_t)machine->sound_recoveries; word[1] = (uint8_t)(machine->sound_recoveries >> 8);
+    word[2] = (uint8_t)(machine->sound_recoveries >> 16); word[3] = (uint8_t)(machine->sound_recoveries >> 24);
+    genesis_sha256_update(&sha, word, 4U);
   }
   genesis_sha256_final(&sha, out);
 }

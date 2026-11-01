@@ -27,6 +27,7 @@ ImageProjection project_executable_images(const ExecutableImageSet &images, std:
     code.live_bytes = image.verification == ImageVerification::structural;
     const auto bytes = executable_image_bytes(images, image);
     code.bytes.assign(bytes.begin(), bytes.end());
+    for (const ImageByteAlternative &alt : image.byte_alternatives) code.alternatives.push_back(CodeAlternative{alt.offset, alt.value});
     for (const ImageMapping &mapping : image.mappings) {
       if (mapping.execution_base > 0xFFFFU) return fail(where + "window base exceeds the 16-bit logical space");
       code.windows.push_back(CodeWindow{static_cast<std::uint16_t>(mapping.execution_base), mapping.first_offset, mapping.length});

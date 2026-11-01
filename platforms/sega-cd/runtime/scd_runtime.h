@@ -585,6 +585,7 @@ typedef struct ScdMix {
   uint64_t pcm_frames;      /* output frames whose PCM part was not silent */
   uint64_t cdda_frames;     /* CD-DA frames queued (delivered by the drive or read ahead) */
   uint64_t cdda_mixed, cdda_dropped, cdda_gaps; /* frames mixed / lost for lack of queue room / output frames with a run in progress but nothing queued */
+  uint64_t fm_frames;       /* SEG-115: output frames that carried a YM2612/PSG frame */
   uint64_t cdda_readahead;  /* sectors queued from the disc ahead of the drive tick */
   uint64_t cdda_skipped;    /* drive deliveries of sectors already read ahead */
   uint64_t saturated;       /* native PCM sums and output sums that hit a clamp */
@@ -777,6 +778,9 @@ typedef struct ScdZ80Ops {
   void (*finish)(ScdMachine *m);                          /* bring the Z80 to the machine time (report/digest) */
   int (*export_epochs)(ScdMachine *m, const char *dir);   /* build pass: write the unknown image epochs; 0 = ok */
   void (*report)(const ScdMachine *m, FILE *out);         /* the "z80" JSON object's members, after the opening brace */
+  /* SEG-115 (ADR 0259): the shared YM2612 and PSG. Both are NULL for a program built without the sound devices (their accesses are then accepted and discarded, as in M18). */
+  void (*audio_sync)(ScdMachine *m, uint64_t tick);       /* run the Z80 and the devices to guest time `tick` (never beyond a time a main access can still precede) */
+  int (*audio_frame)(ScdMachine *m, uint64_t frame, int32_t out[2]); /* the FM/PSG part of mixed output frame `frame` (L, R); 0 = none yet */
 } ScdZ80Ops;
 void scd_z80_register(const ScdZ80Ops *ops);
 const ScdZ80Ops *scd_z80_registered_ops(void);

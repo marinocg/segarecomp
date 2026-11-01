@@ -87,7 +87,18 @@ struct ImageProducer {
   ImageAuthority authority = ImageAuthority::bounded_build_time_materialization;
   std::string name = "genesis.z80_materializer";
 };
-[[nodiscard]] ExecutableImageSet executable_images(const Registry& registry, const ImageProducer& producer = {});
+//
+// SEG-115 (ADR 0259): `structural_alternatives` additionally attaches to every image the finite alternative byte values that the static mutation analysis
+// (libs/cpu/z80 mutation.hpp) proves some store of the image can write over its own code (both RAM mirrors), so the emitter compiles the forms those
+// bytes allow. It never claims completeness; false (the default, and the Genesis build) leaves the images exactly as before.
+struct AlternativesSummary {
+  std::size_t images_with = 0;      // images carrying alternatives
+  std::size_t bytes = 0;            // alternative byte values over all images (mirrors counted once)
+  std::size_t images_over_bound = 0;  // images whose candidate bytes exceeded the pre-registered bound (they carry none)
+  Digest identity{};                // SHA-256 over every image's (ordinal, offset, value) list; zero when unused
+};
+[[nodiscard]] ExecutableImageSet executable_images(const Registry& registry, const ImageProducer& producer = {},
+                                                   bool structural_alternatives = false, AlternativesSummary* summary = nullptr);
 
 // Registry equality (the replacement proof): the same ordered images with the same ordinal, content hash, signature and snapshot.
 [[nodiscard]] bool registries_equal(const Registry& left, const Registry& right);
@@ -99,12 +110,14 @@ struct ImageProducer {
 struct EmitRequest {
   std::filesystem::path directory;
   std::string stem = "genesis_z80";
+  bool structural_alternatives = false;  // SEG-115: see executable_images; the Sega CD build only
   codegen::z80::EmitOptions codegen;  // `directory` and `stem` above override the nested values
 };
 
 struct EmitOutcome {
   std::string error;  // non-empty on any failure
   codegen::z80::EmitStats stats;
+  AlternativesSummary alternatives;
   [[nodiscard]] bool ok() const noexcept { return error.empty(); }
 };
 

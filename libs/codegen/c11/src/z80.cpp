@@ -53,7 +53,16 @@ struct Variant {
   Flow flow = Flow::fallthrough;
 };
 
+// SEG-115 (ADR 0259): one alternative compiled form of a RAM-backed entry - the decode, through the unchanged frontend, of the live bytes the image's alternative
+// byte values allow. `guard`/`structural` are as for the snapshot form (statically defining bytes verified, payload bytes live).
+struct AltForm {
+  std::vector<std::uint8_t> guard;
+  unsigned structural = 0;
+  Variant variant;
+};
+
 struct Plan {
+  std::vector<AltForm> alts;       // RAM-backed entries only: forms besides variants.front() (the snapshot form)
   std::vector<std::uint8_t> guard;  // RAM-backed image: the compiled instruction bytes (snapshotted live, structural ones verified)
   unsigned structural = 0;          // RAM-backed image: bit i set = byte i is statically defining (not a displacement/immediate payload)
   bool live = false;                // RAM-backed image entry
@@ -130,6 +139,29 @@ const char* error_name(const Variant& v) {
     case StartKind::excluded_form: return "Z80_ERROR_EXCLUDED_FORM";
     default: return "Z80_ERROR_NO_OWNER";  // an absent (unlowered) variant of a window-relative owner
   }
+}
+
+// The image mapping with a few bytes replaced (an alternative combination); a pure function of the address, like every LogicalFetch.
+class OverlayFetch final : public cpu::z80::LogicalFetch {
+ public:
+  explicit OverlayFetch(const TableFetch& base) : base_(base) {}
+  void put(std::uint16_t address, const cpu::z80::FetchedByte& byte) { overrides_.emplace_back(address, byte); }
+  cpu::z80::FetchedByte fetch(std::uint16_t address) const override {
+    for (const auto& [at, byte] : overrides_)
+      if (at == address) return byte;
+    return base_.fetch(address);
+  }
+
+ private:
+  const TableFetch& base_;
+  std::vector<std::pair<std::uint16_t, cpu::z80::FetchedByte>> overrides_;
+};
+
+// Identity of a guard: its length, its statically defining bytes (payload positions are live and never part of it).
+std::string guard_key(const std::vector<std::uint8_t>& guard, unsigned structural) {
+  std::string key = std::to_string(guard.size()) + ":" + std::to_string(structural);
+  for (std::size_t i = 0; i < guard.size(); ++i) key += ((structural >> i) & 1u) ? ":" + std::to_string(guard[i]) : ":-";
+  return key;
 }
 
 // Distinct shared bodies in first-use order (plan order, so deterministic). The text is the function body below the
@@ -245,6 +277,32 @@ bool emit_variant_body(std::ostream& out, const Plan& plan, const Variant& v, st
   return false;  // unreachable: every Flow is handled above (GCC's -Wreturn-type does not see through the enum switch)
 }
 
+// SEG-115 (ADR 0259): a RAM-backed entry with alternative forms. The live bytes are snapshotted once, each compiled form tests its statically defining bytes (the snapshot
+// form first, then the alternatives) and the one that matches runs after the instruction-begin bookkeeping; a live form that matches none is the typed code mismatch of the
+// plain guard (a snapshot form that is itself a typed stub stays that stub). Selection precedes every effect; nothing decodes a byte at run time.
+bool emit_alternative_entry(std::ostream& out, const Plan& plan, const std::string& indent, std::set<std::size_t>& bodies) {
+  const Variant& base = plan.variants.front();
+  const Pcs pc = pcs_for(plan, base.classification, plan.key);
+  std::size_t fetch_length = plan.guard.size();
+  for (const AltForm& f : plan.alts) fetch_length = std::max(fetch_length, f.guard.size());
+  out << indent << "if (z80_live_fetch(rt, " << pc.start << ", " << fetch_length << "u)) return Z80_OWNER_STOP;\n";
+  const auto emit_form = [&](const std::vector<std::uint8_t>& guard, unsigned structural, const Variant& v) {
+    out << indent << "if (z80_live_is(rt, " << guard.size() << "u, " << structural << "u";
+    for (std::size_t i = 0; i < 4; ++i) out << ", " << (i < guard.size() ? static_cast<unsigned>(guard[i]) : 0u) << "u";
+    out << ")) {\n" << indent << "  z80_live_enter(rt, " << pc.start << ");\n";
+    emit_variant_body(out, plan, v, plan.key, indent + "  ", Successor{}, bodies);
+    out << indent << "}\n";
+  };
+  if (!plan.guard.empty()) emit_form(plan.guard, plan.structural, base);
+  for (const AltForm& f : plan.alts) emit_form(f.guard, f.structural, f.variant);
+  if (!plan.guard.empty()) {
+    out << indent << "z80_live_reject(rt, " << pc.start << ");\n" << indent << "return Z80_OWNER_STOP;\n";
+    return false;
+  }
+  emit_variant_body(out, plan, base, plan.key, indent, Successor{}, bodies);  // the snapshot form is a typed stub: it is the outcome when no alternative matches
+  return false;
+}
+
 // The part of one entry after the function header: owner prologue and the variant body (or the per-window-base switch).
 // Returns true when the entry ends in the in-group `goto` of its successor's label.
 bool emit_entry(std::ostream& out, const Plan& plan, const std::string& indent, const Successor& successor,
@@ -256,6 +314,7 @@ bool emit_entry(std::ostream& out, const Plan& plan, const std::string& indent, 
     // RAM-backed image: boundary acceptance, then the live snapshot + structural guard, then instruction-begin bookkeeping, so a
     // rejected instruction consumes no boundary state (int_deferral, LD A,I/R marker).
     out << indent << "if (z80_owner_boundary(rt, " << pc.start << ")) return Z80_OWNER_STOP;\n";
+    if (!plan.alts.empty()) return emit_alternative_entry(out, plan, indent, bodies);
     if (!plan.guard.empty()) {
       out << indent << "if (z80_live_guard(rt, " << pc.start << ", " << plan.guard.size() << "u, " << plan.structural << "u";
       for (std::size_t i = 0; i < 4; ++i) out << ", " << (i < plan.guard.size() ? static_cast<unsigned>(plan.guard[i]) : 0u) << "u";
@@ -383,6 +442,14 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
     if (image.kind == ImageKind::invariant && image.windows.size() != 1) return fail("an invariant image has exactly one window");
     if (image.live_bytes && (image.kind != ImageKind::banked || image.windows.size() != 1))
       return fail("a RAM-backed image is a banked image with exactly one window");
+    if (!image.alternatives.empty() && !image.live_bytes) return fail("byte alternatives require a RAM-backed image");
+    for (std::size_t k = 0; k < image.alternatives.size(); ++k) {
+      const CodeAlternative& alt = image.alternatives[k];
+      if (alt.offset >= image.bytes.size()) return fail("a byte alternative lies outside the image");
+      if (k != 0 && (alt.offset < image.alternatives[k - 1].offset ||
+                     (alt.offset == image.alternatives[k - 1].offset && alt.value <= image.alternatives[k - 1].value)))
+        return fail("byte alternatives must be sorted by (offset, value) and unique");
+    }
     for (const CodeWindow& w : image.windows) {
       if (w.length == 0 || w.first_offset + w.length > kSpace || static_cast<std::uint32_t>(w.base) + w.first_offset + w.length > kSpace)
         return fail("code window leaves the 16-bit logical address space");
@@ -549,6 +616,15 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
       std::vector<std::vector<StartClassification>> classes;
       for (const CodeWindow& w : image.windows) classes.push_back(cpu::z80::classify_all(window_fetch(image, w)));
       const bool relative = image.windows.size() > 1;
+      // SEG-115 (ADR 0259): the alternative byte values of a RAM-backed image, and the unmodified mapping the alternative combinations overlay.
+      std::map<std::uint32_t, std::vector<std::uint8_t>> alt_values;
+      if (image.live_bytes)
+        for (const CodeAlternative& alt : image.alternatives)
+          if (alt.value != image.bytes[alt.offset]) alt_values[alt.offset].push_back(alt.value);
+      const bool has_alternatives = !alt_values.empty();
+      const TableFetch alt_table = has_alternatives ? window_fetch(image, image.windows.front()) : TableFetch();
+      bool alt_exceeded = false;
+      const std::size_t image_first_plan = plans.size();
       // One owner per (image, offset) over the union of the offsets any window exposes; a window contributes a variant
       // only for the offsets it actually exposes.
       std::uint32_t lo = image.windows.front().first_offset;
@@ -601,6 +677,68 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
           if (std::ranges::find(same->bases, w.base) == same->bases.end()) same->bases.push_back(w.base);  // no duplicate case labels
         }
         if (plan.variants.empty()) continue;  // an offset no window exposes
+        if (has_alternatives && !alt_exceeded) {
+          // The forms the frontend decodes from this entry's bytes when some of them hold their alternative values (any combination). The odometer
+          // enumerates the combinations; the all-snapshot combination is the snapshot form itself.
+          const CodeWindow& w = image.windows.front();
+          struct Position {
+            std::uint32_t offset;
+            std::vector<std::uint8_t> values;  // [0] = the snapshot byte
+          };
+          std::vector<Position> positions;
+          for (std::uint32_t k = 0; k < 4 && o + k < image.bytes.size(); ++k) {
+            const auto found = alt_values.find(o + k);
+            if (found == alt_values.end()) continue;
+            Position position{o + k, {image.bytes[o + k]}};
+            position.values.insert(position.values.end(), found->second.begin(), found->second.end());
+            positions.push_back(std::move(position));
+          }
+          if (!positions.empty()) {
+            std::set<std::string> seen;
+            if (!plan.guard.empty()) seen.insert(guard_key(plan.guard, plan.structural));
+            std::vector<std::size_t> choice(positions.size(), 0);
+            const auto advance = [&] {
+              for (std::size_t i = 0; i < choice.size(); ++i) {
+                if (++choice[i] < positions[i].values.size()) return true;
+                choice[i] = 0;
+              }
+              return false;
+            };
+            while (advance()) {
+              OverlayFetch overlay(alt_table);
+              const auto byte_at = [&](std::uint32_t offset) {
+                for (std::size_t i = 0; i < positions.size(); ++i)
+                  if (positions[i].offset == offset) return positions[i].values[choice[i]];
+                return image.bytes[offset];
+              };
+              for (std::size_t i = 0; i < positions.size(); ++i)
+                overlay.put(static_cast<std::uint16_t>(w.base + positions[i].offset),
+                            {cpu::z80::FetchKind::byte, positions[i].values[choice[i]], image.identity, positions[i].offset});
+              const StartClassification c = cpu::z80::decode_at(overlay, static_cast<std::uint16_t>(w.base + o));
+              if (c.kind != StartKind::decoded) continue;  // not a supported RAM instruction: the live form stays the typed mismatch
+              const std::uint32_t length = c.instruction.provenance.logical_byte_count;
+              if (length == 0 || length > 4 || o + length > image.bytes.size()) continue;
+              Variant v = make_variant(c);
+              if (v.absent) continue;
+              AltForm form;
+              for (std::uint32_t i = 0; i < length; ++i) form.guard.push_back(byte_at(o + i));
+              const cpu::z80::FormDescriptor& descriptor = cpu::z80::form_descriptor(c.instruction.form);
+              const std::uint32_t extra = c.instruction.extra_prefix_count;
+              form.structural = (1u << length) - 1u;
+              if (descriptor.displacement_index != cpu::z80::kNoIndex) form.structural &= ~(1u << (extra + descriptor.displacement_index));
+              if (descriptor.immediate_index != cpu::z80::kNoIndex)
+                for (unsigned k = 0; k < descriptor.immediate_size; ++k) form.structural &= ~(1u << (extra + descriptor.immediate_index + k));
+              if (!seen.insert(guard_key(form.guard, form.structural)).second) continue;  // the same structural bytes: one form
+              form.variant = std::move(v);
+              plan.alts.push_back(std::move(form));
+              if (plan.alts.size() > kMaxAlternativeFormsPerEntry) {
+                alt_exceeded = true;
+                break;
+              }
+            }
+          }
+          if (alt_exceeded) plan.alts.clear();
+        }
         std::size_t exposing = 0;  // distinct window bases exposing this offset vs all of the image's distinct bases
         for (const Variant& v : plan.variants) exposing += v.bases.size();
         std::vector<std::uint16_t> all_bases;
@@ -609,11 +747,15 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
         plan.partial = relative && exposing < all_bases.size();  // a base that does not expose this offset must fail closed
         if (relative && std::ranges::any_of(plan.variants, [](const Variant& v) { return v.classification.kind == StartKind::prefix_lock; }))
           return fail("a prefix_lock start cannot occur in a window-relative owner");
-        if (std::ranges::all_of(plan.variants, [](const Variant& v) { return v.absent; })) {
+        if (plan.alts.empty() && std::ranges::all_of(plan.variants, [](const Variant& v) { return v.absent; })) {
           ++result.stats.unlowered_starts;
           continue;
         }
         plans.push_back(std::move(plan));
+      }
+      if (alt_exceeded) {  // fail closed for the whole image: it behaves exactly as without alternatives
+        for (std::size_t i = image_first_plan; i < plans.size(); ++i) plans[i].alts.clear();
+        ++result.stats.alternative_images_dropped;
       }
       dense += selective ? rank : hi - lo;
       continue;
@@ -667,10 +809,12 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
   // Shared bodies (SEG-033-T005): decided before emission so the body translation units can be sized.
   BodyPool pool;
   if (options.share_bodies)
-    for (Plan& plan : plans)
+    for (Plan& plan : plans) {
       if (plan.variants.size() == 1 && !plan.partial && plan.variants.front().classification.kind == StartKind::decoded &&
           !plan.variants.front().absent)
         share_body(plan, plan.variants.front(), pool);
+      for (AltForm& form : plan.alts) share_body(plan, form.variant, pool);  // alternative forms are decoded, lowered and not absent by construction
+    }
 
   // ---- emission ----
   std::size_t shards = static_cast<std::size_t>((dense + 2047) / 2048);
@@ -731,6 +875,10 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
     record.bound_successor = plan.successor != Plan::kNoSuccessor;
     record.group_entries = static_cast<std::uint32_t>(groups[group_of[i]].count);
     ++result.stats.entries;
+    if (!plan.alts.empty()) {
+      ++result.stats.alternative_entries;
+      result.stats.alternative_forms += plan.alts.size();
+    }
     if (plan.variants.size() > 1) ++result.stats.variant_owners;
     if (record.bound_successor) ++result.stats.bound_successors;
     switch (record.kind) {

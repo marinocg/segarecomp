@@ -601,6 +601,10 @@ typedef struct GenesisZ80EpochObserver {
   void *context;
   uint32_t epoch_count;                       /* epochs reported so far */
   uint8_t executed;                           /* the Z80 has begun executing since its last /RESET release (zero-init: pristine) */
+  /* SEG-115 (ADR 0259): 1 = the hold window is cleared at an image epoch only, so 68000 writes made across several bus holds (and plain
+   * resumes) since the previous epoch are all part of the next epoch's window (an upload made while the Z80 is still being resumed).
+   * 0 (zero-init) = the Genesis rule: the window ends at every runnable transition. */
+  uint8_t accumulate_until_epoch;
   uint8_t written[GENESIS_Z80_RAM_BYTES / 8U];
 } GenesisZ80EpochObserver;
 

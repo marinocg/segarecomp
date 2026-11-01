@@ -353,7 +353,7 @@ Faulted state, frozen semantics:
 3. **M68K-visible state keeps its behaviour.** Z80 RAM reads and writes through the granted bus, M68K-originated YM2612/PSG accesses and the bank register are
    the ordinary mapped accesses. Devices continue on their own clocks (PCM may be silent or degraded; no audio claim is made).
 4. **Permanent for the run.** A /RESET release does not run `z80_reset`; a later image epoch (also of an unregistered image) neither binds an image nor stops with
-   `z80_unknown_image`. Reactivation after a proven-safe image is a future decision and is not implemented.
+   `z80_unknown_image`. Reactivation after a proven-safe image is a future decision and is not implemented for the Genesis machine; the Sega CD main-side Z80 re-arms an isolated Z80 at the next image epoch (SEG-115, ADR 0259), opt-in per machine (`rearm_faulted_on_epoch`).
 5. **Observable.** `SOUND_SUMMARY` carries `sound_fault` (the diagnostic, 0 = healthy) and `sound_fault_epoch`; the state digest includes the fault only when set
    (a healthy digest is unchanged).
 

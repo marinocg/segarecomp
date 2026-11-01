@@ -172,6 +172,24 @@ void every_error() {
          [](auto& s) { s.images[1].mappings[1].execution_base = 0x8000 - 0x10; });
   mutant(ImageValidationError::overlapping_mappings, 2, "borrower overlaps its source's range",
          [](auto& s) { s.images[2].mappings[0].execution_base = 0x1000; });
+  // SEG-115: byte alternatives belong to structural (RAM-backed) images, inside the bytes, sorted and unique.
+  mutant(ImageValidationError::none, 0, "valid byte alternatives on a structural image", [](auto& s) {
+    s.images[0].verification = ImageVerification::structural;
+    s.images[0].byte_alternatives = {{0x10, 1}, {0x10, 2}, {0x20, 0}};
+  });
+  mutant(ImageValidationError::alternatives_invalid, 0, "alternatives without structural verification", [](auto& s) { s.images[0].byte_alternatives = {{0x10, 1}}; });
+  mutant(ImageValidationError::alternatives_invalid, 0, "alternative outside the bytes", [](auto& s) {
+    s.images[0].verification = ImageVerification::structural;
+    s.images[0].byte_alternatives = {{0x100, 1}};
+  });
+  mutant(ImageValidationError::alternatives_invalid, 0, "unsorted alternatives", [](auto& s) {
+    s.images[0].verification = ImageVerification::structural;
+    s.images[0].byte_alternatives = {{0x20, 1}, {0x10, 1}};
+  });
+  mutant(ImageValidationError::alternatives_invalid, 0, "duplicate alternative", [](auto& s) {
+    s.images[0].verification = ImageVerification::structural;
+    s.images[0].byte_alternatives = {{0x10, 1}, {0x10, 1}};
+  });
   // the selector admits inter-image overlap only.
   mutant(ImageValidationError::none, 0, "image 2 overlaps image 1 under a selector", [](auto& s) {
     s.images[1].mappings[0].execution_base = 0x10F0;
@@ -194,13 +212,13 @@ void every_error() {
 
   // Every non-none error value is exercised above; the names are distinct and an out-of-range value is "unknown".
   std::vector<std::string> names;
-  for (unsigned e = 0; e <= static_cast<unsigned>(ImageValidationError::overlapping_mappings); ++e)
+  for (unsigned e = 0; e <= static_cast<unsigned>(ImageValidationError::alternatives_invalid); ++e)
     names.emplace_back(image_validation_error_name(static_cast<ImageValidationError>(e)));
   bool distinct = true;
   for (std::size_t i = 0; i < names.size(); ++i)
     for (std::size_t j = i + 1; j < names.size(); ++j) distinct = distinct && names[i] != names[j] && names[i] != "unknown";
-  check(distinct && names.size() == 14U, "14 distinct error names");
-  check(image_validation_error_name(static_cast<ImageValidationError>(14)) == "unknown", "error 14 is unknown");
+  check(distinct && names.size() == 15U, "15 distinct error names");
+  check(image_validation_error_name(static_cast<ImageValidationError>(15)) == "unknown", "error 15 is unknown");
   check(image_authority_name(static_cast<ImageAuthority>(3)) == "unknown", "authority 3 name is unknown");
   check(image_verification_name(static_cast<ImageVerification>(3)) == "unknown", "verification 3 name is unknown");
   check(image_authority_name(ImageAuthority::bounded_build_time_materialization) == "bounded_build_time_materialization" &&

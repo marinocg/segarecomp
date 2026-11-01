@@ -12,6 +12,7 @@
 //   bytes  <identity> <hex-bytes>          (appended; may repeat)
 //   fill   <identity> <byte-hex> <count-hex>
 //   live   <identity>                      (SEG-032-T003: mark a banked one-window image RAM-backed: every entry is byte-guarded)
+//   alt    <identity> <offset-hex> <value-hex>  (SEG-115: an alternative byte value of a RAM-backed image; the mirror at offset + 0x2000 is added too)
 //   selective 0                            (SEG-057: selective emission; an image without `admit` lines admits nothing)
 //   admit  <identity> <lo-hex> [<hi-hex>]  (admit image offsets [lo, hi), or just lo; repeatable, merged, sorted)
 //   admit_bad_digest <identity>            (test hook: corrupt the plan's content digest of that image)
@@ -53,6 +54,7 @@ int main(int argc, char** argv) {
   std::set<unsigned long> bad_digest, omit_image, extra_image, duplicate_image;
   std::map<unsigned long, std::vector<std::uint32_t>> literal_offsets;
   std::map<unsigned long, std::size_t> index;
+  std::map<unsigned long, std::set<std::pair<std::uint32_t, std::uint8_t>>> alternatives;  // SEG-115
   const auto image_of = [&](unsigned long identity) -> CodeImage& { return set.images.at(index.at(identity)); };
   for (std::string line; std::getline(spec, line);) {
     if (const auto hash = line.find('#'); hash != std::string::npos) line.resize(hash);
@@ -107,6 +109,13 @@ int main(int argc, char** argv) {
       while (in >> value) literal_offsets[identity].push_back(static_cast<std::uint32_t>(std::stoul(value, nullptr, 16)));
     } else if (verb == "live") {
       image_of(identity).live_bytes = true;
+    } else if (verb == "alt") {  // `alt <identity> <offset> <value>`: both 8 KiB mirrors of a 16 KiB RAM window
+      std::string offset, value;
+      in >> offset >> value;
+      const auto o = static_cast<std::uint32_t>(std::stoul(offset, nullptr, 16));
+      const auto v = static_cast<std::uint8_t>(std::stoul(value, nullptr, 16));
+      alternatives[identity].emplace(o, v);
+      alternatives[identity].emplace(o + 0x2000U, v);
     } else if (verb == "fill") {
       std::string value, count;
       in >> value >> count;
@@ -117,6 +126,8 @@ int main(int argc, char** argv) {
       return 2;
     }
   }
+  for (CodeImage& image : set.images)
+    for (const auto& [offset, value] : alternatives[image.identity]) image.alternatives.push_back(CodeAlternative{offset, value});
   EmitOptions options;
   options.directory = argv[2];
   options.stem = argv[3];
@@ -153,6 +164,8 @@ int main(int argc, char** argv) {
               result.stats.full_owners, result.stats.prefix_lock_owners, result.stats.stub_owners,
               result.stats.unlowered_starts, result.stats.variant_owners, result.stats.bound_successors,
               result.stats.translation_units);
+  std::printf("alternatives entries=%zu forms=%zu dropped=%zu\n", result.stats.alternative_entries, result.stats.alternative_forms,
+              result.stats.alternative_images_dropped);
   std::printf("shape entries=%zu owners=%zu max_group=%zu shared_bodies=%zu\n", result.stats.entries, result.stats.owners,
               result.stats.max_group_entries, result.stats.shared_bodies);
   if (selective)

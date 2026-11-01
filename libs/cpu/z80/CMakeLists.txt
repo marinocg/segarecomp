@@ -4,6 +4,7 @@ add_library(segarecomp_cpu_z80
   src/decode.cpp
   src/effects.cpp
   src/token_report.cpp
+  src/mutation.cpp
 )
 add_library(segarecomp::cpu_z80 ALIAS segarecomp_cpu_z80)
 target_link_libraries(segarecomp_cpu_z80 PUBLIC segarecomp::base)

@@ -54,9 +54,16 @@ typedef struct GenesisZ80Machine {
   uint8_t quiesce_unknown_image;
   /* SEG-114: 1 = an unsupported Z80-side access (view stop) isolates the Z80 like a structural mutation (sound muted, the machine continues). 0 = typed stop. */
   uint8_t isolate_view_stops;
+  /* SEG-115 (ADR 0259): 1 = a faulted (isolated) sound CPU is re-armed by the next genuine image epoch (a /RESET release that starts a
+   * pristine Z80 from RAM that the epoch's signature selects), counted in `sound_recoveries`. The fault describes the *executing* image, not
+   * the next one: the reset Z80 runs the registered image from its architectural reset state and the RAM-backed guard is unchanged. 0 = the
+   * Genesis behaviour (the fault is permanent for the run, contract section 18). */
+  uint8_t rearm_faulted_on_epoch;
+  uint32_t sound_recoveries;
 
   /* Opt-in aggregate evidence (counts only; never an address or value; SEG-032-T010). */
   uint64_t count_reset_assert, count_reset_release, count_busreq_assert, count_busreq_release, count_bank_writes, count_banked_reads;
+  uint64_t count_ym_writes, count_ym_reads, count_psg_writes;  /* SEG-115: accesses ORIGINATING in the Z80 (the 68000's are the device's own counts) */
 } GenesisZ80Machine;
 
 /* Non-zero once the sound CPU is faulted (isolated). */

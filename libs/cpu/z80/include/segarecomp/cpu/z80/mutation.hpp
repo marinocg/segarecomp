@@ -1,16 +1,18 @@
 #pragma once
 
-// SEG-068-T008 (ADR 0135): research spike. D0 = static Z80 code-write discovery over a KNOWN immutable 8 KiB image.
+// SEG-068-T008 (ADR 0135), promoted by SEG-115 (ADR 0259): D0 = static Z80 code-write discovery over a KNOWN 8 KiB RAM image.
 // It executes no guest instruction. It only combines the CPU-owned decoder (decode_at / classify_all), the CPU-owned effect
 // projection (project_effect) and a small bounded finite-value propagation. Unknown or unsupported never becomes a guessed value.
-// Not a product facility: it lives under tests/tools and is linked by no compiler, runtime or application target.
+// The analysis proves the EXISTENCE of exact-valued code writes, never their completeness (`candidate_set_complete` is false for every
+// real image); `static_byte_alternatives` below turns the exact candidates into the finite alternative bytes a RAM-backed Z80 image may
+// additionally compile (soundness does not depend on completeness: an unlisted write matches no compiled form and keeps the fault isolation).
 
 #include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
 
-namespace segarecomp::experiments::z80_mutation {
+namespace segarecomp::cpu::z80::mutation {
 
 inline constexpr std::size_t kRamBytes = 8192;     // the Genesis Z80 sound RAM (mirrored twice in the 16 KiB code window)
 inline constexpr std::uint32_t kCodeWindow = 0x4000;
@@ -102,4 +104,25 @@ std::vector<Root> hardware_roots();  // reset only: NMI is not connected on the 
 // Deterministic aggregate text (no address, byte or snippet unless `detail`).
 std::string format_report(const Report& report, bool detail);
 
-}  // namespace segarecomp::experiments::z80_mutation
+// One byte a RAM-backed image may hold in addition to its snapshot value (offset in the 8 KiB RAM, value).
+struct ByteAlternative {
+  std::uint16_t offset{};
+  std::uint8_t value{};
+  friend bool operator==(const ByteAlternative&, const ByteAlternative&) = default;
+};
+
+struct AlternativeLimits {  // pre-registered in ADR 0259 section 4; exceeding the byte bound drops ALL alternatives of the image
+  unsigned max_destination_bytes = 32;
+};
+
+struct AlternativeSet {
+  std::vector<ByteAlternative> bytes;  // sorted by (offset, value), unique, never equal to the snapshot value
+  unsigned candidates{};               // exact candidates that changed some decoded start
+  bool bound_exceeded{};               // too many destination bytes: `bytes` is empty and the image keeps the plain guard
+};
+
+// Runs `analyze` with the hardware roots and keeps the exact (destination, value) candidates that change some start of the image.
+// A width-2 store contributes both bytes. Deterministic; executes nothing.
+AlternativeSet static_byte_alternatives(const std::vector<std::uint8_t>& ram, const AlternativeLimits& limits = {});
+
+}  // namespace segarecomp::cpu::z80::mutation

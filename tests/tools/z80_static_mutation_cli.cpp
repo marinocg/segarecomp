@@ -7,14 +7,14 @@
 #include <iterator>
 #include <vector>
 
-#include "z80_static_mutation.hpp"
+#include "segarecomp/cpu/z80/mutation.hpp"
 
 int main(int argc, char** argv) {
   if (argc < 2) { std::fprintf(stderr, "usage: %s <image> [--detail]\n", argv[0]); return 2; }
   std::ifstream in(argv[1], std::ios::binary);
   const std::vector<std::uint8_t> image((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
   const bool detail = argc > 2 && std::strcmp(argv[2], "--detail") == 0;
-  namespace zm = segarecomp::experiments::z80_mutation;
+  namespace zm = segarecomp::cpu::z80::mutation;
   const zm::Report report = zm::analyze(image, zm::hardware_roots());
   std::fputs(zm::format_report(report, detail).c_str(), stdout);
   return image.size() == zm::kRamBytes ? 0 : 3;

@@ -44,6 +44,6 @@ segarecomp_enable_warnings(segarecomp_machine_genesis_copy_alias)
 add_library(segarecomp_machine_genesis_z80 src/z80_images.cpp src/z80_materialization.cpp)
 add_library(segarecomp::machine_genesis_z80 ALIAS segarecomp_machine_genesis_z80)
 target_link_libraries(segarecomp_machine_genesis_z80 PUBLIC segarecomp::codegen_c11_z80 segarecomp::codegen_c11_z80_image segarecomp::media
-  segarecomp::machine_genesis_copy_alias)
+  segarecomp::machine_genesis_copy_alias segarecomp::cpu_z80)
 target_include_directories(segarecomp_machine_genesis_z80 PUBLIC include)
 segarecomp_enable_warnings(segarecomp_machine_genesis_z80)

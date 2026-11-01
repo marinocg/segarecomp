@@ -890,6 +890,7 @@ void scd_vdp_event(ScdMachine *m) {
   }
   m->vdp_onset += SCD_FRAME_TICKS;
   m->vdp_frames += 1U;
+  if (m->z80 != NULL && scd_z80_registered_ops()->audio_sync != NULL) scd_z80_registered_ops()->audio_sync(m, m->now); /* SEG-115: the sound devices follow guest time at least once per frame */
   scd_mix_advance(m, m->now); /* SEG-107: the audio timeline follows guest time (a no-op unless the mix is enabled) */
   m->vint_at = (m->vdp_onset - SCD_FRAME_TICKS) + ((host->devices.vdp.registers[12] & 1U) ? SCD_VINT_H40_MCLK : SCD_VINT_H32_MCLK) * SCD_MASTER_TICK_TICKS;
   memset(h->fifo_cycles, 0, sizeof h->fifo_cycles); /* GPGX system_frame_scd: the VDP FIFO is empty at the frame's start */
