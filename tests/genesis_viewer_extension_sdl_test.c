@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "runtime.h"
+#include "sv_style_probe.h"
 #include "sv_host.h"
 #include "sv_layout.h"
 #include "vdp_render.h"
@@ -214,6 +215,14 @@ int main(void) {
   set_mode(&g, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
   CHECK(run_frame(&g) == 0 && g.ext->result.mode == GENESIS_EXT_MODE_SPRITES, "Level 3 again");
 
+  /* ---- SEG-123: the side styles on this real adapter frame (Level 3 on screen), H40 and H32, then Level 2 ---- */
+  CHECK(sv_style_probe(host, "Genesis Level 3 H40 styles", 320, 224, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER) == 0, "Genesis Level 3 H40: the side styles behave");
+  set_mode(&g, SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+  CHECK(run_frame(&g) == 0 && sv_host_extension_side(host) == 39, "Level 2 frame for the style probe");
+  CHECK(sv_style_probe(host, "Genesis Level 2 H40 styles", 320, 224, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER) == 0, "Genesis Level 2 H40: the side styles behave");
+  set_mode(&g, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
+  CHECK(run_frame(&g) == 0, "Level 3 frame");
+
   /* ---- 4:3 pixel shape: more extension, native stays 4:3 ---- */
   set_mode(&g, SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_4_3, SV_SCALE_FIT);
   CHECK(run_frame(&g) == 0 && sv_host_extension_side(host) == 53, "4:3 aspect: 53 source pixels per side");
@@ -234,6 +243,7 @@ int main(void) {
   for (i = 0; i < 2; ++i) CHECK(run_frame(&g) == 0, "frame after the H32 switch");
   CHECK(sv_host_extension_side(host) == 71, "H32 gets its own, larger extension (71)");
   check_extended_output(&g, "Level 2 H32", 256, 71, 0);
+  CHECK(sv_style_probe(host, "Genesis Level 2 H32 styles", 256, 224, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER) == 0, "Genesis Level 2 H32: the side styles behave");
   g.r->devices.vdp.registers[12] = 0x81;
   for (i = 0; i < 2; ++i) CHECK(run_frame(&g) == 0, "frame after returning to H40");
   CHECK(sv_host_extension_side(host) == 39, "and back to H40");

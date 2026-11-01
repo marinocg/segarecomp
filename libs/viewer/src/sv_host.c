@@ -907,6 +907,7 @@ SvExtSource sv_host_extension_source(const SvHost *h) { return h != NULL && h->e
 static void capture_parse(SvHost *h) {
   const char *dir = SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_DIR"), *list = SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_FRAMES");
   h->capture_count = 0;
+  h->capture_all_styles = SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_ALL_STYLES") != NULL;
   if (dir == NULL || list == NULL || *dir == '\0' || strlen(dir) >= sizeof h->capture_dir) return;
   snprintf(h->capture_dir, sizeof h->capture_dir, "%s", dir);
   while (*list != '\0' && h->capture_count < 8) {
@@ -918,16 +919,31 @@ static void capture_parse(SvHost *h) {
     if (*end != ',') break;
   }
 }
+static void capture_save(SvHost *h, const char *suffix) {
+  SDL_Surface *s = SDL_RenderReadPixels(h->renderer, NULL);
+  char path[700];
+  if (s == NULL) return;
+  snprintf(path, sizeof path, "%s/frame-%llu%s.bmp", h->capture_dir, (unsigned long long)h->frames_presented, suffix);
+  (void)SDL_SaveBMP(s, path);
+  SDL_DestroySurface(s);
+}
 static void capture_if_requested(SvHost *h) {
   int k;
   for (k = 0; k < h->capture_count; ++k)
     if (h->capture_frames[k] == h->frames_presented) {
-      SDL_Surface *s = SDL_RenderReadPixels(h->renderer, NULL);
-      char path[640];
-      if (s != NULL) {
-        snprintf(path, sizeof path, "%s/frame-%llu.bmp", h->capture_dir, (unsigned long long)h->frames_presented);
-        (void)SDL_SaveBMP(s, path);
-        SDL_DestroySurface(s);
+      capture_save(h, "");
+      if (h->capture_all_styles && h->ext_side > 0) {
+        /* the SAME frame in every side style (and the current one restored), from the retained picture and extension: a timing-independent comparison */
+        static const char *const suffix[SV_SIDE_COUNT] = {"-comfort", "-borders", "-raw"};
+        const SvSideStyle keep = h->settings.video.widescreen_side_style;
+        int st;
+        for (st = 0; st < SV_SIDE_COUNT; ++st) {
+          h->settings.video.widescreen_side_style = (SvSideStyle)st;
+          if (upload_picture(h)) { draw_scene(h, 0); capture_save(h, suffix[st]); }
+        }
+        h->settings.video.widescreen_side_style = keep;
+        (void)upload_picture(h);
+        draw_scene(h, 0);
       }
     }
 }

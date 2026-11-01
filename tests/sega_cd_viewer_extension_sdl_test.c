@@ -15,6 +15,7 @@
 
 #include "scd_viewer.c" /* the unit under test: ScdSdlHost g_host, fill_live_host, sdl_* callbacks */
 #include "sv_host.h"
+#include "sv_style_probe.h"
 #include "sv_layout.h"
 #include "vdp_render.h"
 
@@ -537,6 +538,7 @@ int main(void) {
   sv_host_widescreen_caps(sv(), &caps);
   CHECK(caps.extended == SV_WS_PARTIAL, "caps: Partial");
   check_output("Level 2 H40 direct scene", 320, 39, 1);
+  CHECK(sv_style_probe(sv(), "Sega CD Level 2 H40 styles", 320, 224, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER) == 0, "Sega CD Level 2 H40: the side styles behave");
   CHECK(sv_host_widescreen_effective(sv()) == SV_WIDESCREEN_EXTENDED_BACKGROUNDS, "effective mode is Level 2");
 
   /* ---- palette / priority / transparency are in the model (cases by cell column) and already probed; scrolling across the edges ---- */
@@ -577,6 +579,7 @@ int main(void) {
   for (i = 0; i < 2; ++i) CHECK(frame() == 0, "frame after the H32 switch");
   CHECK(sv_host_extension_side(sv()) == 71, "H32 gets its own, larger extension (71)");
   check_output("Level 2 H32", 256, 71, 1);
+  CHECK(sv_style_probe(sv(), "Sega CD Level 2 H32 styles", 256, 224, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER) == 0, "Sega CD Level 2 H32: the side styles behave");
   vdp_reg(m, 12, 0x81);
   for (i = 0; i < 2; ++i) CHECK(frame() == 0, "frame after returning to H40");
   CHECK(sv_host_extension_side(sv()) == 39, "and back to H40");
@@ -874,6 +877,7 @@ int main(void) {
           "Level 3: Partial, sprite pixels in the extension, journal caveat kept (never upgraded to Available)");
     CHECK(adapter()->result.sequence == last_onset && last_onset == frame_no, "the Level 3 result is stamped with the presented Sega CD frame number");
     check_output("Level 3 sprites vs independent model", 320, 39, 1);
+    CHECK(sv_style_probe(sv(), "Sega CD Level 3 sprites styles", 320, 224, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER) == 0, "Sega CD Level 3: the side styles behave");
     sv_host_widescreen_caps(sv(), &c3);
     CHECK(c3.enhanced == SV_WS_PARTIAL && c3.extended == SV_WS_PARTIAL && sv_host_widescreen_effective(sv()) == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "caps: Level 3 and Level 2 Partial");
     l3_hash = capture_hash();

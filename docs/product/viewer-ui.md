@@ -143,3 +143,16 @@ Full/fast final gates, SMS generated replay equivalence, packaged consumer smoke
 real-display pacing and hardware input were not rerun in this phase. Console
 execution, adapters, state/PCM production and pacing code are untouched. The
 validator owns the final local fast gate and targeted falsification.
+
+## Widescreen side presentation (SEG-123)
+
+Video & Display has **Side Presentation** beside Widescreen Mode, a presentation-only choice for the extra side area of a Level 2 / Level 3 picture (the saved key is
+`video.widescreen_side_style`):
+
+- **Comfort** (default) replaces the generic extension with a soft ambient fill taken from the picture's own edges that fades to a dark neutral. It hides distracting extra game
+  data; it is decorative and does **not** create new gameplay visibility.
+- **Borders** shows plain neutral side panels around the unchanged picture.
+- **Raw Extension** shows the extension exactly as produced (useful for debugging and for judging the extension itself).
+
+The native picture is never changed, and the choice applies immediately without a reset. A future verified game-specific widescreen mode is shown in full under Comfort and Raw
+(only Borders, which you explicitly choose, replaces it).

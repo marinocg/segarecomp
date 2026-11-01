@@ -155,6 +155,16 @@ static void check_geometry(SvHost *host, const Geo *g, SvAspect asp, SvScaleMode
   if (raw == NULL || com == NULL || bor == NULL || aut == NULL || aut_b == NULL) goto done;
   CHECK(raw->w == com->w && raw->h == com->h && raw->w == bor->w, "same output size for every style");
   if (sv_layout_extended_dest(raw->w, raw->h, g->w, g->h, side, asp, sc, &lay) != 0) { CHECK(0, "layout"); goto done; }
+  { /* review aid: SEGARECOMP_SIDE_STYLE_DUMP=<dir> writes the four presented outputs of the 1280x720 square-pixel integer H40 case */
+    const char *dump = SDL_getenv("SEGARECOMP_SIDE_STYLE_DUMP");
+    if (dump != NULL && g->w == 320 && g->h == 224 && strncmp(tag, "1280x720 square integer", 23) == 0) {
+      char path[700];
+      snprintf(path, sizeof path, "%s/raw.bmp", dump); SDL_SaveBMP(raw, path);
+      snprintf(path, sizeof path, "%s/comfort.bmp", dump); SDL_SaveBMP(com, path);
+      snprintf(path, sizeof path, "%s/borders.bmp", dump); SDL_SaveBMP(bor, path);
+      snprintf(path, sizeof path, "%s/authored.bmp", dump); SDL_SaveBMP(aut, path);
+    }
+  }
   nat = lay.native;
   /* a fractional (Fit) scale rounds the seams by an output pixel: every rectangle keeps a 2-pixel margin from the seam and from the outer letterbox */
   left.x = lay.surface.x + 1; left.y = nat.y + 2; left.w = nat.x - lay.surface.x - 3; left.h = nat.h - 4;
