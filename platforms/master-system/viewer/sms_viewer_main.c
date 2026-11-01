@@ -39,6 +39,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "cannot open the SDL3 window\n");
     return 5;
   }
+  sms_sdl3_viewer_attach_extension(viewer, &rig); /* Level 2 (presentation only); a failure leaves the viewer Original */
   sms_sdl3_viewer_host(viewer, &host);
   sms_pacer_init(&pacer, options.unthrottled);
   result = sms_viewer_run(&rig, &host, &pacer, options.frames);

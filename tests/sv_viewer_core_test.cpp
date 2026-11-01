@@ -601,6 +601,16 @@ void widescreen_tests() {
     check(sv_widescreen_status(SV_WIDESCREEN_ORIGINAL, &none)[0] == '\0', "Original has no status text");
     check(std::strstr(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &l2), "Extended Backgrounds") != nullptr, "a Level 3 request served by Level 2 says so");
     check(std::strstr(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &partial3), "Partly") != nullptr, "Partial support is reported as partial");
+    { // SEG-120: a platform-specific Partial sentence replaces the generic one for Level 2 only when it is the effective, Partial level
+      static const char note[] = "Background repeats existing scenery; this does not reveal more of the game world.";
+      SvWidescreenCaps wrapped = {SV_WS_PARTIAL, SV_WS_UNAVAILABLE, note}, plain = {SV_WS_PARTIAL, SV_WS_UNAVAILABLE, nullptr}, avail = {SV_WS_AVAILABLE, SV_WS_UNAVAILABLE, note};
+      check(std::strcmp(sv_widescreen_status(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, &wrapped), note) == 0, "Partial with a platform note shows the note");
+      check(std::strstr(sv_widescreen_status(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, &plain), "Partly") != nullptr, "Partial without a note keeps the generic text");
+      check(std::strcmp(sv_widescreen_status(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, &avail), "Available for this game.") == 0, "an Available level never shows the Partial note");
+      check(std::strstr(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &wrapped), "Level 3 is not available") != nullptr, "a Level 3 request served by a Partial Level 2 says so");
+      SvWidescreenCaps off = {SV_WS_UNAVAILABLE, SV_WS_UNAVAILABLE, note};
+      check(std::strstr(sv_widescreen_status(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, &off), "original picture") != nullptr, "Unavailable never shows the note");
+    }
     for (int m = 0; m < SV_WIDESCREEN_COUNT; ++m) check(std::strlen(sv_widescreen_description(static_cast<SvWidescreenMode>(m))) > 20 && std::strlen(sv_widescreen_name(static_cast<SvWidescreenMode>(m))) < 40, "every mode has a label and description"); }
 }
 

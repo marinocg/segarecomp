@@ -43,7 +43,9 @@ typedef enum SvWidescreenMode {
 } SvWidescreenMode;
 /* What a platform viewer observes it can do for the running game, per enhanced level. Reporting nothing means UNAVAILABLE. */
 typedef enum SvWidescreenSupport { SV_WS_UNAVAILABLE = 0, SV_WS_PARTIAL = 1, SV_WS_AVAILABLE = 2 } SvWidescreenSupport;
-typedef struct SvWidescreenCaps { SvWidescreenSupport extended, enhanced; } SvWidescreenCaps;
+/* `partial_note` (optional, NULL = the generic wording) is a static platform sentence shown when the selected level is Partial, for a platform whose
+ * limitation is specific (Master System: the extension repeats scenery). It must outlive the call and never promise more than the capability. */
+typedef struct SvWidescreenCaps { SvWidescreenSupport extended, enhanced; const char *partial_note; } SvWidescreenCaps;
 
 typedef struct SvVideoSettings {
   int fullscreen;               /* borderless desktop fullscreen (never a display mode change) */

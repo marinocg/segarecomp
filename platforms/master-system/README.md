@@ -18,3 +18,13 @@ identity. See [the machine contract](../../docs/architecture/master-system-machi
 library `libs/device/sega/psg` (ADR 0063).
 
 **Milestone:** SEG-009.
+
+## Widescreen (Level 2, SEG-120)
+
+The viewer's Widescreen Mode *Extended Backgrounds* (shared `video.widescreen` setting, ADR 0263) is presentation only and **always Partial**. The Mode 4 background name table is 32 columns = 256 pixels and
+wraps horizontally, so the columns shown left and right of the picture (42 per side for 192 lines, 71 for 224 with square pixels) are the same scenery that is already inside the 256-pixel viewport, wrapped
+around: the Video menu says *"Background repeats existing scenery; this does not reveal more of the game world."* It does not give a game a larger gameplay view. The extension is written by the VDP line hook
+from each line's own state (scroll, horizontal-scroll lock of the top two tile rows, CRAM, name table, patterns, display enable), published with the frame number next to the native frame, and never enters the
+guest state, the frame records or the SHA-256. Frames whose lines use the left-column mask or the right-hand vertical-scroll lock (off-screen behaviour is undefined) are Unavailable and show the Original
+picture, as does any stale or inconsistent result. Sprites are not extended; 192- and 224-line modes only (240 lines stay the existing typed unsupported stop); Enhanced Widescreen (Level 3) shows as Level 2.
+A program built before this support keeps playing in Original mode and needs rebuilding to gain it.
