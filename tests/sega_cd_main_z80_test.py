@@ -174,6 +174,17 @@ def main():
         r19b = run(exe19, disc, bios, 19, "--slice-seed", 5)
         check(r19b["z80"]["fm_psg"] == r19["z80"]["fm_psg"] and r19b["result_block"] == r19["result_block"], "case 19: identical for another scheduler partition")
 
+        done, status, exe20 = build(tmp, disc, bios, "c20", 20)
+        check(done.returncode == 0 and status and status["status"] == "ok", "case 20: the build succeeds")
+        r20 = run(exe20, disc, bios, 20)
+        b20 = bytes.fromhex(r20["result_block"])
+        z20 = r20["z80"]
+        check(r20["result"] == "idle" and r20["stop"]["class"] == "none", "case 20: a 68000 write to the Z80 area without a bus request is not a stop (%s)" % r20["stop"])
+        check(b20[0x70] == 0x5A and b20[0x72] == 0 and b20[0x74] == 0x77, "case 20: the byte and word writes were discarded (Z80 marker kept, word target untouched), the write under a hold landed (%02x %02x %02x)" % (b20[0x70], b20[0x72], b20[0x74]))
+        check(z20["main_ignored_writes"] == 2 and z20["state"] == "modelled" and z20["fault"] == 0, "case 20: exactly the two writes are counted and the Z80 is healthy (%s)" % {k: v for k, v in z20.items() if k != "epoch_log"})
+        r20b = run(exe20, disc, bios, 20, "--slice-seed", 5)
+        check(r20b["z80"]["digest"] == z20["digest"] and r20b["result_block"] == r20["result_block"], "case 20: identical for another scheduler partition")
+
         done, status, exe0 = build(tmp, disc, bios, "c12-off", 12, "--main-z80", "0")
         check(done.returncode == 0 and status and status["z80"]["enabled"] is False, "control: --main-z80 0 builds without the Z80")
         r0 = run(exe0, disc, bios, 12)
