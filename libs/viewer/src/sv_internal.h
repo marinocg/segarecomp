@@ -51,6 +51,9 @@ struct SvHost {
   size_t side_buf_cap;
   SvExtSource ext_source;      /* provenance of the retained surface */
   SvWidescreenMode ext_prod_mode; /* mode the retained surface was produced as */
+  uint64_t capture_frames[8];  /* automation seam: 1-based presented-frame numbers whose composed output is saved (SEGARECOMP_VIEWER_CAPTURE_FRAMES) */
+  int capture_count;
+  char capture_dir[512];
   SvSideTreatment side_applied;   /* what the last uploaded frame shows at the sides (PASSTHROUGH when there is no extension) */
   uint8_t *last_rgb;           /* copy of the last presented picture (tightly packed RGB24) */
   int last_w, last_h;

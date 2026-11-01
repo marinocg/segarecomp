@@ -362,6 +362,8 @@ static uint16_t sample_player(SvHost *h, int player) {
 
 /* ------------------------------------------------------------------------------------------------------------------ video */
 
+static void capture_parse(SvHost *h);
+
 static void ensure_texture(SvHost *h, int w, int hgt) {
   if (h->frame_tex != NULL && h->tex_w == w && h->tex_h == hgt) return;
   if (h->frame_tex != NULL) SDL_DestroyTexture(h->frame_tex);
@@ -791,6 +793,7 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
     if (h->ext_raw == NULL || h->side_buf == NULL || h->side_scratch == NULL) { sv_host_close(h); return NULL; }
   }
   sv_host_apply_video(h);
+  capture_parse(h);
   preload_ui_assets(h);
   h->session_start = SDL_GetTicks();
   sv_diag_scan(h->diag);
@@ -899,6 +902,36 @@ void sv_host_restyle(SvHost *h) {
 SvSideTreatment sv_host_side_treatment(const SvHost *h) { return h != NULL ? h->side_applied : SV_TREAT_PASSTHROUGH; }
 SvExtSource sv_host_extension_source(const SvHost *h) { return h != NULL && h->ext_side > 0 ? h->ext_source : SV_EXTSRC_GENERIC; }
 
+/* Automation seam (SEG-123): SEGARECOMP_VIEWER_CAPTURE_DIR + SEGARECOMP_VIEWER_CAPTURE_FRAMES="n,n,..." save the composed window output (picture, side style,
+ * CRT; no overlay) of those presented frames as BMP. Read-only: it never touches the guest, the picture or any setting. */
+static void capture_parse(SvHost *h) {
+  const char *dir = SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_DIR"), *list = SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_FRAMES");
+  h->capture_count = 0;
+  if (dir == NULL || list == NULL || *dir == '\0' || strlen(dir) >= sizeof h->capture_dir) return;
+  snprintf(h->capture_dir, sizeof h->capture_dir, "%s", dir);
+  while (*list != '\0' && h->capture_count < 8) {
+    char *end = NULL;
+    const unsigned long long n = strtoull(list, &end, 10);
+    if (end == list) break;
+    if (n > 0) h->capture_frames[h->capture_count++] = (uint64_t)n;
+    list = *end == ',' ? end + 1 : end;
+    if (*end != ',') break;
+  }
+}
+static void capture_if_requested(SvHost *h) {
+  int k;
+  for (k = 0; k < h->capture_count; ++k)
+    if (h->capture_frames[k] == h->frames_presented) {
+      SDL_Surface *s = SDL_RenderReadPixels(h->renderer, NULL);
+      char path[640];
+      if (s != NULL) {
+        snprintf(path, sizeof path, "%s/frame-%llu.bmp", h->capture_dir, (unsigned long long)h->frames_presented);
+        (void)SDL_SaveBMP(s, path);
+        SDL_DestroySurface(s);
+      }
+    }
+}
+
 static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, const SvExtendedSurface *ext) {
   int y;
   const Uint64 now = SDL_GetTicksNS();
@@ -937,6 +970,7 @@ static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitc
     h->fps_window_start = now;
   }
   draw_scene(h, 0);
+  if (h->capture_count > 0) capture_if_requested(h);
   return SDL_RenderPresent(h->renderer) ? 0 : -1;
 }
 

@@ -1,6 +1,8 @@
 // SEG-058: the SDL-free logic of the shared viewer foundation (libs/viewer): settings persistence, bindings and conflicts, layout math,
 // CRT profiles and the menu model. Everything is driven by synthetic values; no window, no clock.
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -623,6 +625,97 @@ void widescreen_tests() {
     for (int m = 0; m < SV_WIDESCREEN_COUNT; ++m) check(std::strlen(sv_widescreen_description(static_cast<SvWidescreenMode>(m))) > 20 && std::strlen(sv_widescreen_name(static_cast<SvWidescreenMode>(m))) < 40, "every mode has a label and description"); }
 }
 
+// SEG-123: side style setting, provenance decision table and the pure comfort/borders fill.
+template <class E> E enum_from_int(int v) { E e{}; static_assert(sizeof(E) == sizeof(int), "enum width"); std::memcpy(&e, &v, sizeof e); return e; }
+size_t ix(int y, int x, int stride, int c) { return static_cast<size_t>((y * stride + x) * 3 + c); }
+
+void side_style_tests() {
+  SvSettings s;
+  sv_settings_defaults(&s);
+  check(s.video.widescreen_side_style == SV_SIDE_COMFORT, "SEG-123: the default side style is Comfort");
+  SvSettings zero{};
+  check(zero.video.widescreen_side_style == SV_SIDE_COMFORT, "SEG-123: a zero-initialised settings struct is Comfort");
+  const char *names[] = {"comfort", "borders", "raw"};
+  for (int i = 0; i < 3; ++i) {
+    SvSettings t;
+    sv_settings_defaults(&t);
+    t.video.widescreen_side_style = static_cast<SvSideStyle>(i);
+    char text[4096];
+    check(sv_settings_format(&t, text, sizeof text) > 0 && std::strstr(text, (std::string("video.widescreen_side_style=") + names[i] + "\n").c_str()) != nullptr, "SEG-123: the style is persisted by name");
+    SvSettings u;
+    sv_settings_defaults(&u);
+    sv_settings_parse(&u, text, std::strlen(text));
+    check(u.video.widescreen_side_style == static_cast<SvSideStyle>(i), "SEG-123: the style round-trips");
+  }
+  SvSettings bad;
+  sv_settings_defaults(&bad);
+  bad.video.widescreen_side_style = enum_from_int<SvSideStyle>(99);
+  sv_settings_sanitize(&bad);
+  check(bad.video.widescreen_side_style == SV_SIDE_COMFORT, "SEG-123: an out-of-range style sanitizes to Comfort");
+  // the decision table
+  check(sv_side_treatment(SV_SIDE_COMFORT, SV_EXTSRC_GENERIC) == SV_TREAT_COMFORT, "SEG-123: Comfort + generic = comfort treatment");
+  check(sv_side_treatment(SV_SIDE_COMFORT, SV_EXTSRC_AUTHORED) == SV_TREAT_PASSTHROUGH, "SEG-123: Comfort + authored = pass-through");
+  check(sv_side_treatment(SV_SIDE_RAW, SV_EXTSRC_GENERIC) == SV_TREAT_PASSTHROUGH && sv_side_treatment(SV_SIDE_RAW, SV_EXTSRC_AUTHORED) == SV_TREAT_PASSTHROUGH, "SEG-123: Raw is pass-through for both sources");
+  check(sv_side_treatment(SV_SIDE_BORDERS, SV_EXTSRC_GENERIC) == SV_TREAT_BORDERS && sv_side_treatment(SV_SIDE_BORDERS, SV_EXTSRC_AUTHORED) == SV_TREAT_BORDERS, "SEG-123: Borders overrides both sources");
+  check(sv_side_treatment(SV_SIDE_COMFORT, enum_from_int<SvExtSource>(7)) == SV_TREAT_COMFORT, "SEG-123: only the explicit authored value bypasses Comfort");
+  check(sv_side_treatment(enum_from_int<SvSideStyle>(9), SV_EXTSRC_GENERIC) == SV_TREAT_COMFORT, "SEG-123: an unknown style behaves as the default");
+  SvExtendedSurface zeroed{};
+  check(zeroed.source == SV_EXTSRC_GENERIC, "SEG-123: a zero-initialised surface is a generic extension");
+
+  // the fill: deterministic, bounded, leaves the native picture alone, subdued and smooth
+  const int w = 256, h = 192, side = 40, pitch = w * 3 + 3;
+  std::vector<uint8_t> native(static_cast<size_t>(pitch * h));
+  for (int y = 0; y < h; ++y)
+    for (int x = 0; x < w; ++x)
+      for (int c = 0; c < 3; ++c) native[static_cast<size_t>(y * pitch + x * 3 + c)] = static_cast<uint8_t>(((x / 4 + y / 3 + c) & 1) ? 250 : 5);
+  const std::vector<uint8_t> before = native;
+  std::vector<uint8_t> left(static_cast<size_t>(side * h * 3)), right(left.size()), left2(left.size()), right2(left.size());
+  std::vector<int32_t> scratch(sv_side_scratch_bytes(h) / sizeof(int32_t) + 1);
+  check(sv_side_scratch_bytes(0) == 0 && sv_side_scratch_bytes(SV_SIDE_MAX_ROWS + 1) == 0 && sv_side_scratch_bytes(h) > 0, "SEG-123: scratch size is bounded");
+  check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, h, pitch, side, left.data(), right.data(), scratch.data()) == 0, "SEG-123: comfort fill succeeds");
+  check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, h, pitch, side, left2.data(), right2.data(), scratch.data()) == 0 && left == left2 && right == right2, "SEG-123: the fill is deterministic");
+  check(native == before, "SEG-123: the native picture is never written");
+  int max_step = 0, max_v = 0, hi = 0;
+  for (int y = 0; y < h; ++y)
+    for (int x = 0; x < side; ++x) {
+      const int v = left[ix(y, x, side, 1)];
+      if (v > hi) hi = v;
+      if (x + 1 < side) max_step = std::max(max_step, std::abs(left[ix(y, x + 1, side, 1)] - v));
+      if (y + 1 < h) max_v = std::max(max_v, std::abs(left[ix(y + 1, x, side, 1)] - v));
+    }
+  check(max_step <= 12 && max_v <= 4, "SEG-123: the comfort field is smooth in both directions");
+  check(hi < 200, "SEG-123: the comfort field is subdued (never as bright as the brightest native edge)");
+  check(left[ix(h / 2, 0, side, 1)] <= 14 && right[ix(h / 2, side - 1, side, 1)] <= 14, "SEG-123: the field fades to the dark neutral at the outer boundary");
+  // mirror symmetry of the fade: the outermost column on each side is the dark neutral, the innermost the strongest
+  check(left[ix(h / 2, side - 1, side, 1)] >= left[ix(h / 2, side / 2, side, 1)], "SEG-123: strongest next to the picture");
+  // Lipschitz: a one-level change of the edge strip changes the field by at most that much (no amplified flashing)
+  std::vector<uint8_t> flat1(static_cast<size_t>(pitch * h), 100), flat2(static_cast<size_t>(pitch * h), 100);
+  for (int y = 0; y < h; ++y) for (int x = 0; x < 8; ++x) for (int c = 0; c < 3; ++c) flat2[static_cast<size_t>(y * pitch + x * 3 + c)] = 140;
+  std::vector<uint8_t> la(left.size()), ra(left.size()), lb(left.size()), rb(left.size());
+  sv_side_fill(SV_TREAT_COMFORT, flat1.data(), w, h, pitch, side, la.data(), ra.data(), scratch.data());
+  sv_side_fill(SV_TREAT_COMFORT, flat2.data(), w, h, pitch, side, lb.data(), rb.data(), scratch.data());
+  int worst = 0;
+  for (size_t i = 0; i < la.size(); ++i) worst = std::max(worst, std::abs(static_cast<int>(la[i]) - static_cast<int>(lb[i])));
+  check(worst <= 40, "SEG-123: a 40-level edge change never changes the field by more than 40 levels");
+  // borders
+  check(sv_side_fill(SV_TREAT_BORDERS, native.data(), w, h, pitch, side, left.data(), right.data(), scratch.data()) == 0, "SEG-123: borders fill succeeds");
+  bool flat = true;
+  for (size_t i = 0; i < left.size(); ++i) flat = flat && left[i] == left[0] && right[i] == left[0];
+  check(flat && left[0] < 40, "SEG-123: borders are flat and dark");
+  // invalid inputs fail closed
+  check(sv_side_fill(SV_TREAT_PASSTHROUGH, native.data(), w, h, pitch, side, left.data(), right.data(), scratch.data()) == -1, "SEG-123: pass-through has no fill");
+  check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, h, pitch, 0, left.data(), right.data(), scratch.data()) == -1, "SEG-123: zero side rejected");
+  check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, h, pitch, SV_EXT_MAX_SIDE + 1, left.data(), right.data(), scratch.data()) == -1, "SEG-123: oversized side rejected");
+  check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, SV_SIDE_MAX_ROWS + 1, pitch, side, left.data(), right.data(), scratch.data()) == -1, "SEG-123: too many rows rejected");
+  check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, h, w * 3 - 1, side, left.data(), right.data(), scratch.data()) == -1, "SEG-123: short pitch rejected");
+  check(sv_side_fill(SV_TREAT_COMFORT, nullptr, w, h, pitch, side, left.data(), right.data(), scratch.data()) == -1, "SEG-123: null picture rejected");
+  // a picture narrower than the edge strip still works (bounded)
+  std::vector<uint8_t> tiny(static_cast<size_t>(3 * 3 * 4), 200);
+  std::vector<uint8_t> tl(static_cast<size_t>(side * 4 * 3)), tr(tl.size());
+  std::vector<int32_t> ts(sv_side_scratch_bytes(4) / sizeof(int32_t) + 1);
+  check(sv_side_fill(SV_TREAT_COMFORT, tiny.data(), 3, 4, 9, side, tl.data(), tr.data(), ts.data()) == 0, "SEG-123: a very narrow picture is handled");
+}
+
 int main() {
   settings_tests();
   widescreen_tests();
@@ -630,6 +723,7 @@ int main() {
   layout_tests();
   extension_layout_tests();
   extension_surface_check_tests();
+  side_style_tests();
   crt_tests();
   menu_tests();
   font_tests();

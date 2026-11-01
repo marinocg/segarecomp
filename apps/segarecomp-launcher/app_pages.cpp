@@ -499,6 +499,12 @@ void App::draw_settings(float full_w, float h) {
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::text2, w, sv_widescreen_description(v.widescreen));
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Widescreen changes the presentation only, not the console's native resolution. Support depends on the platform and the game; an unsupported mode falls back to the original picture, and the game's Video page says so. A program built before widescreen support needs rebuilding to use it.");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    row_label("Side presentation");
+    int side_style = static_cast<int>(v.widescreen_side_style);
+    if (segmented(ctx_, "ss", {"Comfort", "Borders", "Raw Extension"}, &side_style, 0.0F)) { v.widescreen_side_style = static_cast<SvSideStyle>(side_style); v_changed = true; }
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::text2, w, sv_side_style_description(v.widescreen_side_style));
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Only the extra side area is affected, never the game picture or the game. Comfort and Borders are decorative and do not add gameplay visibility; a verified game-specific widescreen mode is always shown in full under Comfort.");
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Display preset");
     int preset = static_cast<int>(std::min<int>(v.preset, SV_CRT_ARCADE));
     if (segmented(ctx_, "pr", {"Pixel Perfect", "CRT Soft", "CRT Classic", "CRT Arcade"}, &preset, 0.0F)) { sv_apply_crt_preset(&v, static_cast<SvCrtPreset>(preset)); v_changed = true; }
