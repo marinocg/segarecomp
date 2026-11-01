@@ -249,6 +249,8 @@ void extension_surface_check_tests() {
   check(sv_extended_surface_check(nullptr, 320, 224, 9, 320) == SV_EXT_NO_SURFACE, "null surface");
   { SvExtendedSurface f = e; f.rgb24 = nullptr; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_NO_SURFACE, "null buffer"); }
   { SvExtendedSurface f = e; f.mode = SV_WIDESCREEN_ORIGINAL; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_MODE, "produced as Original"); }
+  { SvExtendedSurface f = e; f.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_OK, "SEG-121: a surface produced as Level 3 is accepted"); }
+  { SvExtendedSurface f = e; f.mode = static_cast<SvWidescreenMode>(SV_WIDESCREEN_COUNT); check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_MODE, "SEG-121: an unknown produced mode is refused"); }
   check(sv_extended_surface_check(&e, 320, 224, 8, 320) == SV_EXT_SEQUENCE, "stale sequence");
   check(sv_extended_surface_check(&e, 320, 224, 10, 320) == SV_EXT_SEQUENCE, "future sequence");
   { SvExtendedSurface f = e; f.width = 397; check(sv_extended_surface_check(&f, 320, 224, 9, 320) == SV_EXT_GEOMETRY, "width not symmetric"); }
@@ -608,6 +610,13 @@ void widescreen_tests() {
       check(std::strstr(sv_widescreen_status(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, &plain), "Partly") != nullptr, "Partial without a note keeps the generic text");
       check(std::strcmp(sv_widescreen_status(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, &avail), "Available for this game.") == 0, "an Available level never shows the Partial note");
       check(std::strstr(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &wrapped), "Level 3 is not available") != nullptr, "a Level 3 request served by a Partial Level 2 says so");
+      // SEG-121: a Level 3 note is shown for an effective Partial Level 3 only; it falls back to the Level 2 note, and never replaces an Available level's text
+      static const char sprites[] = "Only sprites crossing the screen edges can extend; this does not expand the game world.";
+      SvWidescreenCaps l3 = {SV_WS_PARTIAL, SV_WS_PARTIAL, note, sprites}, l3_plain = {SV_WS_PARTIAL, SV_WS_PARTIAL, note, nullptr}, l3_avail = {SV_WS_PARTIAL, SV_WS_AVAILABLE, note, sprites};
+      check(std::strcmp(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &l3), sprites) == 0, "Partial Level 3 shows its own note");
+      check(std::strcmp(sv_widescreen_status(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, &l3), note) == 0, "Level 2 keeps its note when Level 3 has one");
+      check(std::strcmp(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &l3_plain), note) == 0, "Level 3 without its own note falls back to the platform note");
+      check(std::strcmp(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &l3_avail), "Available for this game.") == 0, "an Available Level 3 never shows a note");
       SvWidescreenCaps off = {SV_WS_UNAVAILABLE, SV_WS_UNAVAILABLE, note, nullptr};
       check(std::strstr(sv_widescreen_status(SV_WIDESCREEN_EXTENDED_BACKGROUNDS, &off), "original picture") != nullptr, "Unavailable never shows the note");
     }

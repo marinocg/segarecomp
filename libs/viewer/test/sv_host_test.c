@@ -509,7 +509,7 @@ static void extension_tests(const char *settings_file) {
     /* rejections: each presents exactly the original picture for that frame, never a partial one */
     sv_host_extension_stats(host, &acc, &rej, &tex0);
     {
-      struct { const char *name; SvExtendedSurface s; uint64_t seq; } bad[8];
+      struct { const char *name; SvExtendedSurface s; uint64_t seq; } bad[10];
       int n = 0;
       bad[n].name = "stale sequence"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 4); bad[n++].seq = 6;
       bad[n].name = "future sequence"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 7); bad[n++].seq = 6;
@@ -518,6 +518,8 @@ static void extension_tests(const char *settings_file) {
       bad[n].name = "wrong width"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 6); bad[n].s.width -= 1; bad[n++].seq = 6;
       bad[n].name = "null buffer"; bad[n].s = ext_desc(NULL, 0, W, SIDE, H, pitch, 6); bad[n++].seq = 6;
       bad[n].name = "produced as Original"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 6); bad[n].s.mode = SV_WIDESCREEN_ORIGINAL; bad[n++].seq = 6;
+      bad[n].name = "Level 3 content while Level 2 is requested"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 6); bad[n].s.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY; bad[n++].seq = 6;
+      bad[n].name = "unknown produced mode"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 6); bad[n].s.mode = (SvWidescreenMode)SV_WIDESCREEN_COUNT; bad[n++].seq = 6;
       bad[n].name = "huge side"; bad[n].s = ext_desc(surf, (size_t)pitch * H, W, SV_EXT_MAX_SIDE + 1, H, pitch, 6); bad[n++].seq = 6;
       for (i = 0; i < n; ++i) {
         char what[96];
@@ -535,6 +537,26 @@ static void extension_tests(const char *settings_file) {
       CHECK(rej == (uint32_t)n && acc == 1u, "extension: the rejection counter is bounded and counts offered refusals");
       CHECK(sv_host_present_extended(host, native, 0, H, W * 3, 6, NULL) != 0, "extension: invalid native geometry still fails like sv_host_present");
     }
+
+    /* SEG-121: a Level 3 surface is shown when Level 3 is requested, and never once a lower level is requested again */
+    { SvSettings l3 = *sv_host_settings(host);
+      SvExtendedSurface s3 = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 8);
+      s3.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY;
+      l3.video.widescreen = SV_WIDESCREEN_ENHANCED_GAMEPLAY;
+      sv_host_apply_settings(host, &l3);
+      CHECK(sv_host_present_extended(host, native, W, H, W * 3, 8, &s3) == 0 && sv_host_extension_side(host) == SIDE, "extension: a Level 3 surface is accepted when Level 3 is requested");
+      s3.mode = SV_WIDESCREEN_EXTENDED_BACKGROUNDS;
+      CHECK(sv_host_present_extended(host, native, W, H, W * 3, 8, &s3) == 0 && sv_host_extension_side(host) == SIDE, "extension: a Level 2 surface is accepted under a Level 3 request");
+      l3.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS;
+      sv_host_apply_settings(host, &l3);
+      s3.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY;
+      CHECK(sv_host_present_extended(host, native, W, H, W * 3, 8, &s3) == 0 && sv_host_extension_side(host) == 0, "extension: a pending Level 3 surface is not shown after stepping down");
+      l3.video.widescreen = SV_WIDESCREEN_ORIGINAL;
+      sv_host_apply_settings(host, &l3);
+      s3.mode = SV_WIDESCREEN_EXTENDED_BACKGROUNDS;
+      CHECK(sv_host_present_extended(host, native, W, H, W * 3, 8, &s3) == 0 && sv_host_extension_side(host) == 0, "extension: nothing is shown when Original is requested");
+      l3.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS;
+      sv_host_apply_settings(host, &l3); }
 
     /* recovery on the very next valid frame, without carried state */
     e = ext_desc(surf, (size_t)pitch * H, W, SIDE, H, pitch, 9);
