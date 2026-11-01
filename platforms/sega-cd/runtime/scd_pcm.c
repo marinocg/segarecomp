@@ -112,6 +112,7 @@ static void scd_mix_read_ahead(ScdMachine *m) {
 /* Produce every output frame n with T_n < limit from the held PCM sample and the CD-DA queue. */
 static void scd_mix_emit_until(ScdMachine *m, uint64_t limit) {
   ScdMix *const x = &m->mix;
+  if (m->z80 != NULL && scd_z80_registered_ops()->audio_sync != NULL) scd_z80_registered_ops()->audio_sync(m, limit); /* SEG-115: every FM/PSG frame this output frame needs has closed (monotone: earlier limits do nothing) */
   const uint64_t quotient = SCD_TICKS_PER_SECOND / SCD_MIX_RATE;
   const uint32_t remainder = (uint32_t)(SCD_TICKS_PER_SECOND % SCD_MIX_RATE);
   while (x->tick < limit) {
@@ -205,7 +206,6 @@ void scd_pcm_sync(ScdMachine *m, uint64_t tick) {
 
 void scd_mix_advance(ScdMachine *m, uint64_t tick) {
   if (!m->mix.enabled) return;
-  if (m->z80 != NULL && scd_z80_registered_ops()->audio_sync != NULL) scd_z80_registered_ops()->audio_sync(m, tick); /* SEG-115: the FM/PSG frames up to this instant exist */
   scd_pcm_run(m, tick);
   scd_mix_emit_until(m, tick);
   scd_mix_flush_chunk(m);
