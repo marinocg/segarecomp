@@ -93,6 +93,20 @@ static void build_video_core(SvHost *h, SvPage *p, int full) {
   snprintf(ws_hint, sizeof ws_hint, "%s%s%s", ws_status, ws_status[0] != '\0' ? " " : "", sv_widescreen_description(v->widescreen));
   add_choice(p, I_WIDESCREEN, "Widescreen Mode", (int)v->widescreen, SV_WIDESCREEN_COUNT, wsname, ws_hint);
   if (full && ws_status[0] != '\0') add_note(p, ws_status);
+  /* Side Presentation: how the extra side area looks, separate from what the platform can produce. A treated side is decorative, never game content. */
+  {
+    static const char *const sidename[] = {"Comfort", "Borders", "Raw Extension"};
+    char side_hint[300];
+    const char *what = "";
+    if (sv_host_extension_side(h) > 0) {
+      if (sv_host_extension_source(h) == SV_EXTSRC_AUTHORED && sv_host_side_treatment(h) == SV_TREAT_PASSTHROUGH && v->widescreen_side_style == SV_SIDE_COMFORT)
+        what = "This game's widescreen content is preserved in full. ";
+      else if (sv_host_side_treatment(h) == SV_TREAT_COMFORT) what = "The sides are a decorative fill, not extra game content. ";
+      else if (sv_host_side_treatment(h) == SV_TREAT_BORDERS) what = "Neutral panels are shown; no extra game content. ";
+    }
+    snprintf(side_hint, sizeof side_hint, "%s%s", what, sv_side_style_description(v->widescreen_side_style));
+    add_choice(p, I_SIDE_STYLE, "Side Presentation", (int)v->widescreen_side_style, SV_SIDE_COUNT, sidename, side_hint);
+  }
   if (full) {
     add_toggle(p, I_VSYNC, "VSync", v->vsync, "Syncs presentation to the display. Game speed is paced by the console clock either way.");
     add_toggle(p, I_FPS, "Show FPS Counter", v->show_fps, "Shows the presentation rate on the game screen.");
@@ -115,7 +129,7 @@ static void build_video_core(SvHost *h, SvPage *p, int full) {
   add_toggle(p, I_FPS, "Show FPS Counter", v->show_fps, "Shows the presentation rate on the game screen.");
   for (k = 0; k < p->count; ++k) {
     const int id = p->items[k].id;
-    sv_item_set_icon(&p->items[k], id == I_FULLSCREEN ? "fullscreen" : (id == I_SCALE || id == I_ASPECT || id == I_WIDESCREEN ? "video" : (id == I_PRESET ? "settings" : (id == I_VSYNC ? "reset" : "info"))));
+    sv_item_set_icon(&p->items[k], id == I_FULLSCREEN ? "fullscreen" : (id == I_SCALE || id == I_ASPECT || id == I_WIDESCREEN || id == I_SIDE_STYLE ? "video" : (id == I_PRESET ? "settings" : (id == I_VSYNC ? "reset" : "info"))));
   }
 }
 
@@ -548,7 +562,7 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
             sv_video_defaults(&h->settings.video);
             h->settings.video.window_w = keep.window_w;
             h->settings.video.window_h = keep.window_h;
-            sv_host_apply_video(h); sv_host_mark_dirty(h); sv_host_toast(h, "Video settings restored");
+            sv_host_apply_video(h); sv_host_restyle(h); sv_host_mark_dirty(h); sv_host_toast(h, "Video settings restored");
             sv_menu_pop(&h->menu); sv_pages_rebuild(h);
             break;
           }
@@ -580,6 +594,13 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
       if (v->widescreen != sv_host_widescreen_effective(h) && h->widescreen_fallbacks != UINT32_MAX) h->widescreen_fallbacks++;
       sv_host_mark_dirty(h);
       sv_pages_rebuild(h); /* refresh the explanation and the support status for the new selection */
+      return;
+    case I_SIDE_STYLE: /* presentation only; applied at once to the frame on screen, no guest, producer or recording involvement */
+      v->widescreen_side_style = (SvSideStyle)ev.value;
+      sv_settings_sanitize(&h->settings);
+      sv_host_restyle(h);
+      sv_host_mark_dirty(h);
+      sv_pages_rebuild(h);
       return;
     case I_PRESET: sv_apply_crt_preset(v, (SvCrtPreset)ev.value); sv_host_toast(h, sv_crt_preset_name(v->preset)); break;
     case I_VSYNC: v->vsync = ev.value; sv_host_apply_video(h); break;

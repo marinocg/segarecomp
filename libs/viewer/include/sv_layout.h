@@ -45,6 +45,12 @@ int sv_layout_extended_dest(int win_w, int win_h, int src_w, int src_h, int side
 /* The borrowed extended surface a platform adapter hands to the host for ONE frame (never retained, never written by the host). The native picture sits
  * `side` pixels in from the left edge and `side` from the right edge; `sequence` is the frame identity the producer stamped, `mode` the Widescreen
  * mode that was actually produced for that frame (Level 2 = background only, Level 3 = background + sprites; never merely the saved preference), `status` the typed outcome (UNAVAILABLE = ignore the surface). */
+/* SEG-123: where the extra side pixels come from, for PRESENTATION only (it never grants memory access or relaxes sv_extended_surface_check).
+ * GENERIC (0, the default of a zero-initialised surface): hardware-derived Level 2/3 data whose visual coherence is not guaranteed.
+ * AUTHORED: extended content explicitly supplied by a verified, opt-in widescreen compatibility implementation. Never inferred from mode, status,
+ * pixels, size or the title; only such an implementation declares it. */
+typedef enum SvExtSource { SV_EXTSRC_GENERIC = 0, SV_EXTSRC_AUTHORED = 1 } SvExtSource;
+
 typedef struct SvExtendedSurface {
   const uint8_t *rgb24;
   size_t size;      /* readable bytes at rgb24 */
@@ -53,6 +59,7 @@ typedef struct SvExtendedSurface {
   uint64_t sequence;
   SvWidescreenMode mode;
   SvWidescreenSupport status;
+  SvExtSource source; /* SEG-123, last member: zero-initialised callers stay GENERIC */
 } SvExtendedSurface;
 
 typedef enum SvExtCheck {
@@ -68,6 +75,22 @@ typedef enum SvExtCheck {
 /* Validates `surface` as an extension of the `native_w` x `native_h` picture with identity `native_sequence`, for hosts that accept at most `max_w` native
  * pixels per row. SV_EXT_OK means every pixel the host will read is inside `size`. Pure; no overflow for any input. */
 SvExtCheck sv_extended_surface_check(const SvExtendedSurface *surface, int native_w, int native_h, uint64_t native_sequence, int max_w);
+
+/* ---- SEG-123: side-area treatment (pure, SDL-free, deterministic, no allocation) ----
+ * The native picture is never read for writing and never changed; only the two side regions of an accepted extension are replaced. */
+typedef enum SvSideTreatment {
+  SV_TREAT_PASSTHROUGH = 0, /* the surface is displayed exactly as supplied */
+  SV_TREAT_COMFORT,         /* side regions replaced by a smoothed ambient fill that fades to a dark neutral */
+  SV_TREAT_BORDERS          /* side regions replaced by a flat neutral panel */
+} SvSideTreatment;
+/* The decision table. RAW: passthrough for both sources. COMFORT: generic -> comfort, authored -> passthrough. BORDERS: borders for both (the user explicitly asked). */
+SvSideTreatment sv_side_treatment(SvSideStyle style, SvExtSource source);
+/* Bytes of scratch sv_side_fill needs for a native picture `h` rows high (0 for an invalid height). */
+size_t sv_side_scratch_bytes(int h);
+#define SV_SIDE_MAX_ROWS 480
+/* Fills `left` and `right` (each `side` x `h` RGB24 pixels, tightly packed, pitch side*3) for the COMFORT or BORDERS treatment from the native picture.
+ * `scratch` must hold sv_side_scratch_bytes(h) bytes (suitably aligned for int32). Returns 0, or -1 for invalid input or SV_TREAT_PASSTHROUGH. */
+int sv_side_fill(SvSideTreatment treatment, const uint8_t *native, int w, int h, int pitch, int side, uint8_t *left, uint8_t *right, void *scratch);
 
 /* Barrel distortion of a normalized coordinate pair in [-1, 1] (curvature 0..100). Maps the undistorted position of a mesh vertex to its
  * position on the curved tube; 0 is the identity. `vignette` receives a 0..1 brightness factor for the corner falloff. */

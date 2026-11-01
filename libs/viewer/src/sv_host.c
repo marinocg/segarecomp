@@ -782,6 +782,14 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
   if (h->renderer == NULL) { SDL_DestroyWindow(h->window); sv_diag_destroy(h->diag); SDL_Quit(); free(h); return NULL; }
   h->last_rgb = (uint8_t *)malloc((size_t)(cfg->max_w > 0 ? cfg->max_w : 320) * (size_t)(cfg->max_h > 0 ? cfg->max_h : 240) * 3u);
   if (h->last_rgb == NULL) { sv_host_close(h); return NULL; }
+  {
+    const size_t mw = (size_t)(cfg->max_w > 0 ? cfg->max_w : 320), mh = (size_t)(cfg->max_h > 0 ? cfg->max_h : 240);
+    h->ext_raw = (uint8_t *)malloc((mw + 2u * SV_EXT_MAX_SIDE) * mh * 3u);
+    h->side_buf_cap = 2u * SV_EXT_MAX_SIDE * mh * 3u;
+    h->side_buf = (uint8_t *)malloc(h->side_buf_cap);
+    h->side_scratch = malloc(sv_side_scratch_bytes((int)mh) > 0 ? sv_side_scratch_bytes((int)mh) : 1u);
+    if (h->ext_raw == NULL || h->side_buf == NULL || h->side_scratch == NULL) { sv_host_close(h); return NULL; }
+  }
   sv_host_apply_video(h);
   preload_ui_assets(h);
   h->session_start = SDL_GetTicks();
@@ -806,6 +814,9 @@ void sv_host_close(SvHost *h) {
   if (h->renderer != NULL) SDL_DestroyRenderer(h->renderer);
   if (h->window != NULL) SDL_DestroyWindow(h->window);
   free(h->last_rgb);
+  free(h->ext_raw);
+  free(h->side_buf);
+  free(h->side_scratch);
   SDL_Quit();
   free(h);
 }
@@ -835,6 +846,7 @@ void sv_host_apply_settings(SvHost *h, const SvSettings *settings) {
   sv_settings_sanitize(&h->settings);
   sv_host_apply_video(h);
   sv_host_apply_audio(h);
+  sv_host_restyle(h);
   sv_host_mark_dirty(h);
 }
 const char *sv_host_renderer_name(const SvHost *h) { const char *n = SDL_GetRendererName(h->renderer); return n != NULL ? n : "unknown"; }
@@ -847,6 +859,46 @@ SDL_Surface *sv_host_capture_output(SvHost *h) {
 
 /* ------------------------------------------------------------------------------------------------------------------ present */
 
+/* SEG-123: builds the frame texture from the retained native picture (+ retained raw extension). Deterministic in (style, source, native pixels, raw
+ * extension); the native pixels are always the centre; no allocation. Returns 1 on success. */
+static int upload_picture(SvHost *h) {
+  const int w = h->last_w, hgt = h->last_h, side = h->ext_side;
+  SDL_Rect centre, l, r;
+  SvSideTreatment t = SV_TREAT_PASSTHROUGH;
+  if (h->frame_tex == NULL || w <= 0 || hgt <= 0) return 0;
+  if (side <= 0) {
+    h->side_applied = SV_TREAT_PASSTHROUGH;
+    return SDL_UpdateTexture(h->frame_tex, NULL, h->last_rgb, w * 3) ? 1 : 0;
+  }
+  centre.x = side; centre.y = 0; centre.w = w; centre.h = hgt;
+  t = sv_side_treatment(h->settings.video.widescreen_side_style, h->ext_source);
+  if (t != SV_TREAT_PASSTHROUGH &&
+      (hgt > SV_SIDE_MAX_ROWS || (size_t)2u * (size_t)side * (size_t)hgt * 3u > h->side_buf_cap ||
+       sv_side_fill(t, h->last_rgb, w, hgt, w * 3, side, h->side_buf, h->side_buf + (size_t)side * (size_t)hgt * 3u, h->side_scratch) != 0))
+    t = SV_TREAT_PASSTHROUGH; /* unreachable for validated geometry */
+  if (t == SV_TREAT_PASSTHROUGH) {
+    if (!SDL_UpdateTexture(h->frame_tex, NULL, h->ext_raw, (w + 2 * side) * 3)) return 0;
+  } else {
+    l.x = 0; l.y = 0; l.w = side; l.h = hgt;
+    r.x = side + w; r.y = 0; r.w = side; r.h = hgt;
+    if (!SDL_UpdateTexture(h->frame_tex, &l, h->side_buf, side * 3)) return 0;
+    if (!SDL_UpdateTexture(h->frame_tex, &r, h->side_buf + (size_t)side * (size_t)hgt * 3u, side * 3)) return 0;
+  }
+  if (!SDL_UpdateTexture(h->frame_tex, &centre, h->last_rgb, w * 3)) return 0; /* the native pixels always come from the native picture */
+  h->side_applied = t;
+  return 1;
+}
+
+/* Re-applies the current side style to the frame already shown (a style change while the pause menu holds the guest). A retained surface produced
+ * under a higher level than the one now requested is not re-exposed. */
+void sv_host_restyle(SvHost *h) {
+  if (h == NULL || h->ext_side <= 0 || h->last_w <= 0) return;
+  if ((int)h->ext_prod_mode > (int)h->settings.video.widescreen) return;
+  (void)upload_picture(h);
+}
+SvSideTreatment sv_host_side_treatment(const SvHost *h) { return h != NULL ? h->side_applied : SV_TREAT_PASSTHROUGH; }
+SvExtSource sv_host_extension_source(const SvHost *h) { return h != NULL && h->ext_side > 0 ? h->ext_source : SV_EXTSRC_GENERIC; }
+
 static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, const SvExtendedSurface *ext) {
   int y;
   const Uint64 now = SDL_GetTicksNS();
@@ -854,18 +906,19 @@ static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitc
   if (rgb == NULL || w <= 0 || hgt <= 0 || w > (h->cfg.max_w > 0 ? h->cfg.max_w : 320) || hgt > (h->cfg.max_h > 0 ? h->cfg.max_h : 240) || pitch < w * 3) return -1;
   ensure_texture(h, w + 2 * side, hgt);
   if (h->frame_tex == NULL) return -1;
-  if (ext != NULL) {
-    SDL_Rect centre;
-    centre.x = side; centre.y = 0; centre.w = w; centre.h = hgt;
-    if (!SDL_UpdateTexture(h->frame_tex, NULL, ext->rgb24, ext->pitch)) return -1;
-    if (!SDL_UpdateTexture(h->frame_tex, &centre, rgb, pitch)) return -1; /* the native pixels always come from the native picture */
-  } else if (!SDL_UpdateTexture(h->frame_tex, NULL, rgb, pitch)) {
-    return -1;
-  }
-  h->ext_side = side;
+  /* the native picture and (when accepted) a private copy of the extension are retained first: the texture is then built from them by upload_picture,
+   * the same code that re-applies the side style at once when it changes in the paused menu */
   for (y = 0; y < hgt; ++y) memcpy(h->last_rgb + (size_t)y * (size_t)w * 3u, rgb + (size_t)y * (size_t)pitch, (size_t)w * 3u);
   h->last_w = w;
   h->last_h = hgt;
+  h->ext_side = side;
+  if (ext != NULL) {
+    const size_t row = (size_t)(w + 2 * side) * 3u;
+    for (y = 0; y < hgt; ++y) memcpy(h->ext_raw + (size_t)y * row, ext->rgb24 + (size_t)y * (size_t)ext->pitch, row);
+    h->ext_source = ext->source == SV_EXTSRC_AUTHORED ? SV_EXTSRC_AUTHORED : SV_EXTSRC_GENERIC;
+    h->ext_prod_mode = ext->mode;
+  }
+  if (!upload_picture(h)) return -1;
   h->frames_presented++;
   if (h->frames_presented == 1) { /* first picture: say once how to reach the pause menu (the keys that actually open it); shown beside any other toast */
     const char *custom = h->settings.menu_key > 0 && h->settings.menu_key != SV_KEY_ESCAPE ? SDL_GetScancodeName((SDL_Scancode)h->settings.menu_key) : NULL;

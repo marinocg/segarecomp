@@ -106,7 +106,7 @@ static int run_frame(Rig *g) {
 static void set_mode(Rig *g, SvWidescreenMode m, SvAspect aspect, SvScaleMode scale) {
   SvHost *h = genesis_sdl3_viewer_sv_host(g->viewer);
   SvSettings s = *sv_host_settings(h);
-  s.video.widescreen = m; s.video.aspect = aspect; s.video.scale = scale;
+  s.video.widescreen = m; s.video.widescreen_side_style = SV_SIDE_RAW; /* SEG-123: these suites verify the raw extension pixels */ s.video.aspect = aspect; s.video.scale = scale;
   sv_host_apply_settings(h, &s);
 }
 

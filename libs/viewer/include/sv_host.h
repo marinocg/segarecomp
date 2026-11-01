@@ -75,6 +75,13 @@ int sv_host_present_extended(SvHost *host, const uint8_t *rgb24, int width, int 
  * surfaces offered but rejected, and frame-texture (re)creations (constant at unchanged geometry). Test/diagnostic seams. */
 int sv_host_extension_side(const SvHost *host);
 void sv_host_extension_stats(const SvHost *host, uint32_t *accepted, uint32_t *rejected, uint32_t *texture_creations);
+/* SEG-123: what the last presented frame shows at its sides: PASSTHROUGH (original picture, Raw, or an AUTHORED surface under Comfort), COMFORT or BORDERS;
+ * and the provenance of the extension on screen (GENERIC when there is none). The treatment follows `video.widescreen_side_style` and the provenance
+ * the producer declared, never the mode, the status or the pixels. Applied at once when the style changes; presentation only. */
+SvSideTreatment sv_host_side_treatment(const SvHost *host);
+SvExtSource sv_host_extension_source(const SvHost *host);
+/* Re-applies the side style to the frame already shown (also done by sv_host_apply_settings and by the menu). */
+void sv_host_restyle(SvHost *host);
 /* Registers the adapter's playback stream so volume/mute (gain only) and pause apply; NULL unregisters. */
 void sv_host_set_audio(SvHost *host, struct SDL_AudioStream *stream);
 /* Shows the final state of a stopped guest instead of a blank window and waits for a key/button/close. Returns immediately on a

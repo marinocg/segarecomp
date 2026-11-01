@@ -332,7 +332,7 @@ static int frame(void) { return frame_begin() != 0 ? -1 : frame_finish(); }
 
 static void set_mode(SvWidescreenMode mode, SvAspect aspect, SvScaleMode scale) {
   SvSettings s = *sv_host_settings(sv());
-  s.video.widescreen = mode; s.video.aspect = aspect; s.video.scale = scale;
+  s.video.widescreen = mode; s.video.widescreen_side_style = SV_SIDE_RAW; /* SEG-123: these suites verify the raw extension pixels */ s.video.aspect = aspect; s.video.scale = scale;
   sv_host_apply_settings(sv(), &s);
 }
 
@@ -1021,7 +1021,7 @@ int main(void) {
       genesis_sdl3_viewer_host(old, &oh);
       h = genesis_sdl3_viewer_sv_host(old);
       { SvSettings st = *sv_host_settings(h);
-        st.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS;
+        st.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; st.video.widescreen_side_style = SV_SIDE_RAW;
         sv_host_apply_settings(h, &st); }
       fresh(m);
       scd_vdp_present_enable(m);

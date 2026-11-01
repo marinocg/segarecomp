@@ -41,6 +41,13 @@ typedef enum SvWidescreenMode {
   SV_WIDESCREEN_ENHANCED_GAMEPLAY = 2,    /* Level 3 */
   SV_WIDESCREEN_COUNT
 } SvWidescreenMode;
+/* SEG-123: how the EXTRA side area of a generic Level 2/3 extension is displayed. Presentation only: it never reaches the producer, the guest or the
+ * native pixels. COMFORT (default, value 0 so an unconfigured/zeroed struct is Comfort) subdues the side regions, BORDERS shows neutral panels and RAW
+ * shows the extension exactly as produced. */
+typedef enum SvSideStyle { SV_SIDE_COMFORT = 0, SV_SIDE_BORDERS = 1, SV_SIDE_RAW = 2, SV_SIDE_COUNT } SvSideStyle;
+const char *sv_side_style_name(SvSideStyle style);        /* menu / launcher label */
+const char *sv_side_style_description(SvSideStyle style); /* one-sentence explanation */
+
 /* What a platform viewer observes it can do for the running game, per enhanced level. Reporting nothing means UNAVAILABLE. */
 typedef enum SvWidescreenSupport { SV_WS_UNAVAILABLE = 0, SV_WS_PARTIAL = 1, SV_WS_AVAILABLE = 2 } SvWidescreenSupport;
 /* `partial_note` (optional, NULL = the generic wording) is a static platform sentence shown when the selected level is Partial, for a platform whose
@@ -57,6 +64,7 @@ typedef struct SvVideoSettings {
   int brightness;                        /* 50..150 percent */
   int vsync, show_fps;
   SvWidescreenMode widescreen;  /* requested mode, default Original */
+  SvSideStyle widescreen_side_style; /* SEG-123: side-area presentation of a generic extension, default Comfort */
   int window_w, window_h;                /* last windowed size in points, 0 = default */
 } SvVideoSettings;
 

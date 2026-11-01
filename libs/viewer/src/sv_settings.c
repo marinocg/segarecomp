@@ -93,6 +93,7 @@ void sv_settings_sanitize(SvSettings *s) {
   v->scale = (v->scale == SV_SCALE_INTEGER) ? SV_SCALE_INTEGER : SV_SCALE_FIT;
   v->aspect = (v->aspect == SV_ASPECT_4_3) ? SV_ASPECT_4_3 : SV_ASPECT_ORIGINAL;
   if ((unsigned)v->widescreen >= SV_WIDESCREEN_COUNT) v->widescreen = SV_WIDESCREEN_ORIGINAL;
+  if ((unsigned)v->widescreen_side_style >= SV_SIDE_COUNT) v->widescreen_side_style = SV_SIDE_COMFORT;
   if ((unsigned)v->preset >= SV_CRT_COUNT) v->preset = SV_CRT_PIXEL_PERFECT;
   v->scanlines = clampi(v->scanlines, 0, 100);
   v->mask = clampi(v->mask, 0, 100);
@@ -158,12 +159,20 @@ static int match_binding(const char *key, int *sys, int *player, int *action, in
 /* Stable text names of the widescreen modes (the settings file stores these, never the enum number). */
 static const char *const widescreen_keys[SV_WIDESCREEN_COUNT] = {"original", "extended_backgrounds", "enhanced_gameplay"};
 
+static const char *const side_style_keys[SV_SIDE_COUNT] = {"comfort", "borders", "raw"};
+
 static int apply_pair(SvSettings *s, const char *key, const char *value) {
   int v, sys = 0, player = 0, action = 0, is_pad = 0;
   if (strcmp(key, "video.widescreen") == 0) { /* an unknown value is recognised and becomes Original */
     int m;
     s->video.widescreen = SV_WIDESCREEN_ORIGINAL;
     for (m = 0; m < SV_WIDESCREEN_COUNT; ++m) if (strcmp(value, widescreen_keys[m]) == 0) s->video.widescreen = (SvWidescreenMode)m;
+    return 1;
+  }
+  if (strcmp(key, "video.widescreen_side_style") == 0) { /* an unknown value is recognised and becomes the default Comfort */
+    int m;
+    s->video.widescreen_side_style = SV_SIDE_COMFORT;
+    for (m = 0; m < SV_SIDE_COUNT; ++m) if (strcmp(value, side_style_keys[m]) == 0) s->video.widescreen_side_style = (SvSideStyle)m;
     return 1;
   }
   if (strcmp(key, "pad_name") == 0) { strncpy(s->pad_name, value, sizeof s->pad_name - 1u); s->pad_name[sizeof s->pad_name - 1u] = '\0'; return 1; }
@@ -223,6 +232,7 @@ size_t sv_settings_format(const SvSettings *s, char *out, size_t cap) {
   EMIT("video.bloom=%d\nvideo.brightness=%d\nvideo.vsync=%d\nvideo.show_fps=%d\nvideo.window_w=%d\nvideo.window_h=%d\n", s->video.bloom, s->video.brightness,
        s->video.vsync, s->video.show_fps, s->video.window_w, s->video.window_h);
   EMIT("video.widescreen=%s\n", widescreen_keys[(unsigned)s->video.widescreen < SV_WIDESCREEN_COUNT ? s->video.widescreen : SV_WIDESCREEN_ORIGINAL]);
+  EMIT("video.widescreen_side_style=%s\n", side_style_keys[(unsigned)s->video.widescreen_side_style < SV_SIDE_COUNT ? s->video.widescreen_side_style : SV_SIDE_COMFORT]);
   EMIT("audio.volume=%d\naudio.muted=%d\ninput.deadzone=%d\ninput.menu_key=%d\n", s->audio.volume, s->audio.muted, s->deadzone, s->menu_key);
   if (s->pad_name[0] != '\0') EMIT("pad_name=%s\n", s->pad_name);
   for (sys = 0; sys < SV_SYSTEM_COUNT; ++sys)
@@ -364,4 +374,20 @@ const char *sv_widescreen_status(SvWidescreenMode requested, const SvWidescreenC
     return "Partly available for this game: some of the extra picture may be missing.";
   }
   return "Available for this game.";
+}
+
+const char *sv_side_style_name(SvSideStyle style) {
+  switch (style) {
+    case SV_SIDE_BORDERS: return "Borders";
+    case SV_SIDE_RAW: return "Raw Extension";
+    default: return "Comfort";
+  }
+}
+
+const char *sv_side_style_description(SvSideStyle style) {
+  switch (style) {
+    case SV_SIDE_BORDERS: return "Plain neutral side panels around the original picture. No extra game data is shown.";
+    case SV_SIDE_RAW: return "Shows the extension exactly as the game produced it, including distracting extra data. Useful for debugging.";
+    default: return "Hides distracting extra game data with a soft ambient fill. It does not create new gameplay visibility.";
+  }
 }

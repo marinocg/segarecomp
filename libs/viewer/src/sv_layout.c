@@ -2,6 +2,8 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <string.h>
 
 SvRect sv_layout_dest(int win_w, int win_h, int src_w, int src_h, SvAspect aspect, SvScaleMode scale) {
   SvRect r = {0, 0, 0, 0};
@@ -137,4 +139,81 @@ uint8_t sv_crt_mask_value(int col, int channel, int strength) {
 
 int sv_crt_is_identity(const SvVideoSettings *v) {
   return v->scanlines == 0 && v->mask == 0 && v->curvature == 0 && v->bloom == 0 && v->brightness == 100;
+}
+
+/* ---- SEG-123: side-area treatment ---- */
+
+SvSideTreatment sv_side_treatment(SvSideStyle style, SvExtSource source) {
+  if (style == SV_SIDE_RAW) return SV_TREAT_PASSTHROUGH;
+  if (style == SV_SIDE_BORDERS) return SV_TREAT_BORDERS;
+  /* COMFORT (and any unknown style, which is the default): only an explicitly AUTHORED surface bypasses; every other source value is generic */
+  return source == SV_EXTSRC_AUTHORED ? SV_TREAT_PASSTHROUGH : SV_TREAT_COMFORT;
+}
+
+#define SV_SIDE_EDGE_COLS 8   /* native columns averaged along each edge */
+#define SV_SIDE_BLUR_RADIUS 12 /* vertical smoothing radius in rows */
+#define SV_SIDE_MAX_FADE 257
+
+size_t sv_side_scratch_bytes(int h) {
+  if (h <= 0 || h > SV_SIDE_MAX_ROWS) return 0;
+  return ((size_t)h * 12u + SV_SIDE_MAX_FADE) * sizeof(int32_t);
+}
+
+int sv_side_fill(SvSideTreatment treatment, const uint8_t *native, int w, int h, int pitch, int side, uint8_t *left, uint8_t *right, void *scratch) {
+  static const int dark[3] = {6, 6, 8}, panel = 14;
+  int32_t *raw, *smooth, *fade;
+  int y, k, c, e, d;
+  if (treatment != SV_TREAT_COMFORT && treatment != SV_TREAT_BORDERS) return -1;
+  if (native == NULL || left == NULL || right == NULL || scratch == NULL || w <= 0 || h <= 0 || h > SV_SIDE_MAX_ROWS || side <= 0 || side > SV_EXT_MAX_SIDE ||
+      pitch < w * 3)
+    return -1;
+  if (treatment == SV_TREAT_BORDERS) {
+    memset(left, panel, (size_t)side * (size_t)h * 3u);
+    memset(right, panel, (size_t)side * (size_t)h * 3u);
+    return 0;
+  }
+  raw = (int32_t *)scratch;          /* [2][h][3]: left edge average, right edge average */
+  smooth = raw + (size_t)h * 6u;     /* [2][h][3] */
+  fade = smooth + (size_t)h * 6u;    /* [side]: 0..1024 intensity by distance from the native edge */
+  e = w < SV_SIDE_EDGE_COLS ? w : SV_SIDE_EDGE_COLS;
+  for (y = 0; y < h; ++y) {
+    const uint8_t *row = native + (size_t)y * (size_t)pitch;
+    for (c = 0; c < 3; ++c) {
+      int32_t a = 0, b = 0;
+      for (k = 0; k < e; ++k) { a += row[k * 3 + c]; b += row[(w - 1 - k) * 3 + c]; }
+      raw[(size_t)y * 3u + (size_t)c] = a / e;
+      raw[(size_t)h * 3u + (size_t)y * 3u + (size_t)c] = b / e;
+    }
+  }
+  for (k = 0; k < 2; ++k) {
+    const int32_t *src = raw + (size_t)k * (size_t)h * 3u;
+    int32_t *dst = smooth + (size_t)k * (size_t)h * 3u;
+    for (y = 0; y < h; ++y)
+      for (c = 0; c < 3; ++c) {
+        int32_t acc = 0;
+        for (d = -SV_SIDE_BLUR_RADIUS; d <= SV_SIDE_BLUR_RADIUS; ++d) {
+          int yy = y + d;
+          yy = yy < 0 ? 0 : (yy >= h ? h - 1 : yy);
+          acc += src[(size_t)yy * 3u + (size_t)c];
+        }
+        dst[(size_t)y * 3u + (size_t)c] = acc / (2 * SV_SIDE_BLUR_RADIUS + 1);
+      }
+  }
+  /* distance d = 0 at the native edge: quadratic fade from 0.6 of the edge colour down to the dark neutral at the outer boundary */
+  for (d = 0; d < side; ++d) {
+    const int32_t u = 1024 - (int32_t)(((int64_t)(2 * d + 1) * 1024) / (2 * side));
+    fade[d] = (int32_t)(((int64_t)u * u / 1024) * 614 / 1024);
+  }
+  for (y = 0; y < h; ++y)
+    for (k = 0; k < side; ++k) {
+      uint8_t *lp = left + ((size_t)y * (size_t)side + (size_t)k) * 3u;   /* k = side-1 is next to the native picture */
+      uint8_t *rp = right + ((size_t)y * (size_t)side + (size_t)k) * 3u;  /* k = 0 is next to the native picture */
+      const int32_t fl = fade[side - 1 - k], fr = fade[k];
+      for (c = 0; c < 3; ++c) {
+        const int32_t sl = smooth[(size_t)y * 3u + (size_t)c], sr = smooth[(size_t)h * 3u + (size_t)y * 3u + (size_t)c];
+        lp[c] = (uint8_t)(dark[c] + ((sl - dark[c]) * fl) / 1024);
+        rp[c] = (uint8_t)(dark[c] + ((sr - dark[c]) * fr) / 1024);
+      }
+    }
+  return 0;
 }

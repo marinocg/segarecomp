@@ -100,7 +100,7 @@ static void step(unsigned n) {
 static void set_mode(SvWidescreenMode m, SvAspect aspect, SvScaleMode scale) {
   SvHost *h = sms_sdl3_viewer_sv_host(viewer);
   SvSettings s = *sv_host_settings(h);
-  s.video.widescreen = m;
+  s.video.widescreen = m; s.video.widescreen_side_style = SV_SIDE_RAW; /* SEG-123: these suites verify the raw extension pixels */
   s.video.aspect = aspect;
   s.video.scale = scale;
   sv_host_apply_settings(h, &s);
