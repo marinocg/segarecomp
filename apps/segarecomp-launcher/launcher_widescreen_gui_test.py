@@ -122,6 +122,42 @@ def main():
         run("damaged", h, base.OPEN_AND_BUILD + ["build", "wait_idle", "frames 6", "expect build_outcome=ok", "expect widescreen=extended_backgrounds", "play", "frames 4", "wait_play_end", "frames 10",
                                                  "expect playing=0", "expect widescreen=extended_backgrounds", "quit"], {"FAKE_VIEWER_DAMAGE": "1"})
 
+        # 7. SEG-123: Side presentation. Comfort by default (also for an older file without the key and for an invalid value), selectable with a gamepad,
+        #    persisted in the same shared file, and independent from the widescreen mode
+        sd = base.Case(tmp, "sidestyle", exe, fake_cli, fake_game)
+        sd.env["SEGARECOMP_SHOT_SIZE"] = "1080x740"
+        sd.lib.mkdir(parents=True, exist_ok=True)
+        (sd.lib / "viewer-settings.cfg").write_text("video.widescreen=enhanced_gameplay\n")
+        run("sidestyle", sd, TO_BODY + ["expect side_style=comfort", "expect widescreen=enhanced_gameplay"] + seek("ss#0", "dpad_down", 30) + seek("ss#2", "dpad_right", 3) + press("south")
+            + ["expect side_style=raw", "expect widescreen=enhanced_gameplay"] + seek("ss#1", "dpad_left", 3) + press("south") + ["expect side_style=borders", "quit"])
+        expect(key_of(settings(sd), "video.widescreen_side_style") == "borders" and key_of(settings(sd), "video.widescreen") == "enhanced_gameplay",
+               f"the side style is persisted in the shared file and the Level 3 preference is kept: {settings(sd)!r}")
+        for name, text in (("ss-older", "video.widescreen=enhanced_gameplay\n"), ("ss-invalid", "video.widescreen_side_style=sparkly\n"), ("ss-empty", "video.widescreen_side_style=\n")):
+            o = base.Case(tmp, name, exe, fake_cli, fake_game)
+            o.lib.mkdir(parents=True, exist_ok=True)
+            (o.lib / "viewer-settings.cfg").write_text(text)
+            run(name, o, VIDEO + ["expect side_style=comfort", "quit"])
+        rr = base.Case(tmp, "ss-raw", exe, fake_cli, fake_game)
+        rr.lib.mkdir(parents=True, exist_ok=True)
+        (rr.lib / "viewer-settings.cfg").write_text("video.widescreen_side_style=raw\n")
+        run("ss-raw", rr, VIDEO + ["expect side_style=raw", "quit"])
+
+        # 8. SEG-123 amendment: Widescreen Width is a global DEFAULT edited in the launcher; a game's own profile (written by the in-game menu) is never touched
+        wd = base.Case(tmp, "width", exe, fake_cli, fake_game)
+        wd.env["SEGARECOMP_SHOT_SIZE"] = "1080x740"
+        wd.lib.mkdir(parents=True, exist_ok=True)
+        profile = wd.lib / "viewer-widescreen" / ("genesis-" + "a" * 64 + ".cfg")
+        profile.parent.mkdir(parents=True, exist_ok=True)
+        profile.write_text("video.widescreen=enhanced_gameplay\nvideo.widescreen_side_style=raw\nvideo.widescreen_width=41\n")
+        before = profile.read_text()
+        run("width", wd, TO_BODY + ["expect ws_width=100"] + seek("wsw_minus", "dpad_down", 40) + press("south") + press("south") + ["expect ws_width=90", "quit"])
+        expect(key_of(settings(wd), "video.widescreen_width") == "90", f"the launcher stores the default width in the global file: {settings(wd)!r}")
+        expect(profile.read_text() == before, "the launcher never rewrites a game's widescreen profile")
+        wo = base.Case(tmp, "width-old", exe, fake_cli, fake_game)
+        wo.lib.mkdir(parents=True, exist_ok=True)
+        (wo.lib / "viewer-settings.cfg").write_text("video.widescreen=extended_backgrounds\n")
+        run("width-old", wo, VIDEO + ["expect ws_width=100", "expect widescreen=extended_backgrounds", "quit"])
+
     if failures:
         print("\n".join(failures))
         return 1

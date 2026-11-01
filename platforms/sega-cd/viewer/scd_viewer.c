@@ -91,7 +91,7 @@ static int ensure_open(ScdSdlHost *h) {
     const char *unthrottled = getenv("SEGARECOMP_VIEWER_UNTHROTTLED");
     if (game != NULL && *game != '\0') snprintf(title, sizeof title, "%.100s - Segarecomp", game);
     else snprintf(title, sizeof title, "segarecomp Sega CD viewer");
-    h->sdl = genesis_sdl3_viewer_open(title, 3);
+    h->sdl = genesis_sdl3_viewer_open_platform(title, 3, "sega-cd");
     if (h->sdl == NULL) {
       fprintf(stderr, "viewer: SDL3 window could not be opened\n");
       h->failed = 1;

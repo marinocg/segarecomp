@@ -1,8 +1,11 @@
 // SEG-058: the SDL-free logic of the shared viewer foundation (libs/viewer): settings persistence, bindings and conflicts, layout math,
 // CRT profiles and the menu model. Everything is driven by synthetic values; no window, no clock.
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -623,6 +626,176 @@ void widescreen_tests() {
     for (int m = 0; m < SV_WIDESCREEN_COUNT; ++m) check(std::strlen(sv_widescreen_description(static_cast<SvWidescreenMode>(m))) > 20 && std::strlen(sv_widescreen_name(static_cast<SvWidescreenMode>(m))) < 40, "every mode has a label and description"); }
 }
 
+// SEG-123: side style setting, provenance decision table and the pure comfort/borders fill.
+template <class E> E enum_from_int(int v) { E e{}; static_assert(sizeof(E) == sizeof(int), "enum width"); std::memcpy(&e, &v, sizeof e); return e; }
+size_t ix(int y, int x, int stride, int c) { return static_cast<size_t>((y * stride + x) * 3 + c); }
+
+void side_style_tests() {
+  SvSettings s;
+  sv_settings_defaults(&s);
+  check(s.video.widescreen_side_style == SV_SIDE_COMFORT, "SEG-123: the default side style is Comfort");
+  SvSettings zero{};
+  check(zero.video.widescreen_side_style == SV_SIDE_COMFORT, "SEG-123: a zero-initialised settings struct is Comfort");
+  const char *names[] = {"comfort", "borders", "raw"};
+  for (int i = 0; i < 3; ++i) {
+    SvSettings t;
+    sv_settings_defaults(&t);
+    t.video.widescreen_side_style = static_cast<SvSideStyle>(i);
+    char text[4096];
+    check(sv_settings_format(&t, text, sizeof text) > 0 && std::strstr(text, (std::string("video.widescreen_side_style=") + names[i] + "\n").c_str()) != nullptr, "SEG-123: the style is persisted by name");
+    SvSettings u;
+    sv_settings_defaults(&u);
+    sv_settings_parse(&u, text, std::strlen(text));
+    check(u.video.widescreen_side_style == static_cast<SvSideStyle>(i), "SEG-123: the style round-trips");
+  }
+  SvSettings bad;
+  sv_settings_defaults(&bad);
+  bad.video.widescreen_side_style = enum_from_int<SvSideStyle>(99);
+  sv_settings_sanitize(&bad);
+  check(bad.video.widescreen_side_style == SV_SIDE_COMFORT, "SEG-123: an out-of-range style sanitizes to Comfort");
+  // the decision table
+  check(sv_side_treatment(SV_SIDE_COMFORT, SV_EXTSRC_GENERIC) == SV_TREAT_COMFORT, "SEG-123: Comfort + generic = comfort treatment");
+  check(sv_side_treatment(SV_SIDE_COMFORT, SV_EXTSRC_AUTHORED) == SV_TREAT_PASSTHROUGH, "SEG-123: Comfort + authored = pass-through");
+  check(sv_side_treatment(SV_SIDE_RAW, SV_EXTSRC_GENERIC) == SV_TREAT_PASSTHROUGH && sv_side_treatment(SV_SIDE_RAW, SV_EXTSRC_AUTHORED) == SV_TREAT_PASSTHROUGH, "SEG-123: Raw is pass-through for both sources");
+  check(sv_side_treatment(SV_SIDE_BORDERS, SV_EXTSRC_GENERIC) == SV_TREAT_BORDERS && sv_side_treatment(SV_SIDE_BORDERS, SV_EXTSRC_AUTHORED) == SV_TREAT_BORDERS, "SEG-123: Borders overrides both sources");
+  check(sv_side_treatment(SV_SIDE_COMFORT, enum_from_int<SvExtSource>(7)) == SV_TREAT_COMFORT, "SEG-123: only the explicit authored value bypasses Comfort");
+  check(sv_side_treatment(enum_from_int<SvSideStyle>(9), SV_EXTSRC_GENERIC) == SV_TREAT_COMFORT, "SEG-123: an unknown style behaves as the default");
+  SvExtendedSurface zeroed{};
+  check(zeroed.source == SV_EXTSRC_GENERIC, "SEG-123: a zero-initialised surface is a generic extension");
+
+  // the fill: deterministic, bounded, leaves the native picture alone, subdued and smooth
+  const int w = 256, h = 192, side = 40, pitch = w * 3 + 3;
+  std::vector<uint8_t> native(static_cast<size_t>(pitch * h));
+  for (int y = 0; y < h; ++y)
+    for (int x = 0; x < w; ++x)
+      for (int c = 0; c < 3; ++c) native[static_cast<size_t>(y * pitch + x * 3 + c)] = static_cast<uint8_t>(((x / 4 + y / 3 + c) & 1) ? 250 : 5);
+  const std::vector<uint8_t> before = native;
+  std::vector<uint8_t> left(static_cast<size_t>(side * h * 3)), right(left.size()), left2(left.size()), right2(left.size());
+  std::vector<int32_t> scratch(sv_side_scratch_bytes(h) / sizeof(int32_t) + 1);
+  check(sv_side_scratch_bytes(0) == 0 && sv_side_scratch_bytes(SV_SIDE_MAX_ROWS + 1) == 0 && sv_side_scratch_bytes(h) > 0, "SEG-123: scratch size is bounded");
+  check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, h, pitch, side, left.data(), right.data(), scratch.data()) == 0, "SEG-123: comfort fill succeeds");
+  check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, h, pitch, side, left2.data(), right2.data(), scratch.data()) == 0 && left == left2 && right == right2, "SEG-123: the fill is deterministic");
+  check(native == before, "SEG-123: the native picture is never written");
+  int max_step = 0, max_v = 0, hi = 0;
+  for (int y = 0; y < h; ++y)
+    for (int x = 0; x < side; ++x) {
+      const int v = left[ix(y, x, side, 1)];
+      if (v > hi) hi = v;
+      if (x + 1 < side) max_step = std::max(max_step, std::abs(left[ix(y, x + 1, side, 1)] - v));
+      if (y + 1 < h) max_v = std::max(max_v, std::abs(left[ix(y + 1, x, side, 1)] - v));
+    }
+  check(max_step <= 12 && max_v <= 4, "SEG-123: the comfort field is smooth in both directions");
+  check(hi < 200, "SEG-123: the comfort field is subdued (never as bright as the brightest native edge)");
+  check(left[ix(h / 2, 0, side, 1)] <= 14 && right[ix(h / 2, side - 1, side, 1)] <= 14, "SEG-123: the field fades to the dark neutral at the outer boundary");
+  // mirror symmetry of the fade: the outermost column on each side is the dark neutral, the innermost the strongest
+  check(left[ix(h / 2, side - 1, side, 1)] >= left[ix(h / 2, side / 2, side, 1)], "SEG-123: strongest next to the picture");
+  // Lipschitz: a one-level change of the edge strip changes the field by at most that much (no amplified flashing)
+  std::vector<uint8_t> flat1(static_cast<size_t>(pitch * h), 100), flat2(static_cast<size_t>(pitch * h), 100);
+  for (int y = 0; y < h; ++y) for (int x = 0; x < 8; ++x) for (int c = 0; c < 3; ++c) flat2[static_cast<size_t>(y * pitch + x * 3 + c)] = 140;
+  std::vector<uint8_t> la(left.size()), ra(left.size()), lb(left.size()), rb(left.size());
+  sv_side_fill(SV_TREAT_COMFORT, flat1.data(), w, h, pitch, side, la.data(), ra.data(), scratch.data());
+  sv_side_fill(SV_TREAT_COMFORT, flat2.data(), w, h, pitch, side, lb.data(), rb.data(), scratch.data());
+  int worst = 0;
+  for (size_t i = 0; i < la.size(); ++i) worst = std::max(worst, std::abs(static_cast<int>(la[i]) - static_cast<int>(lb[i])));
+  check(worst <= 40, "SEG-123: a 40-level edge change never changes the field by more than 40 levels");
+  // borders
+  check(sv_side_fill(SV_TREAT_BORDERS, native.data(), w, h, pitch, side, left.data(), right.data(), scratch.data()) == 0, "SEG-123: borders fill succeeds");
+  bool flat = true;
+  for (size_t i = 0; i < left.size(); ++i) flat = flat && left[i] == left[0] && right[i] == left[0];
+  check(flat && left[0] < 40, "SEG-123: borders are flat and dark");
+  // invalid inputs fail closed
+  check(sv_side_fill(SV_TREAT_PASSTHROUGH, native.data(), w, h, pitch, side, left.data(), right.data(), scratch.data()) == -1, "SEG-123: pass-through has no fill");
+  check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, h, pitch, 0, left.data(), right.data(), scratch.data()) == -1, "SEG-123: zero side rejected");
+  check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, h, pitch, SV_EXT_MAX_SIDE + 1, left.data(), right.data(), scratch.data()) == -1, "SEG-123: oversized side rejected");
+  check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, SV_SIDE_MAX_ROWS + 1, pitch, side, left.data(), right.data(), scratch.data()) == -1, "SEG-123: too many rows rejected");
+  check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, h, w * 3 - 1, side, left.data(), right.data(), scratch.data()) == -1, "SEG-123: short pitch rejected");
+  check(sv_side_fill(SV_TREAT_COMFORT, nullptr, w, h, pitch, side, left.data(), right.data(), scratch.data()) == -1, "SEG-123: null picture rejected");
+  // a picture narrower than the edge strip still works (bounded)
+  std::vector<uint8_t> tiny(static_cast<size_t>(3 * 3 * 4), 200);
+  std::vector<uint8_t> tl(static_cast<size_t>(side * 4 * 3)), tr(tl.size());
+  std::vector<int32_t> ts(sv_side_scratch_bytes(4) / sizeof(int32_t) + 1);
+  check(sv_side_fill(SV_TREAT_COMFORT, tiny.data(), 3, 4, 9, side, tl.data(), tr.data(), ts.data()) == 0, "SEG-123: a very narrow picture is handled");
+}
+
+// SEG-123 amendment: target aspect (width), visible side, per-game profile.
+void width_and_profile_tests() {
+  SvSettings d;
+  sv_settings_defaults(&d);
+  check(d.video.widescreen_width == 100, "SEG-123: the default width is 100 (16:9, the previous behaviour)");
+  { SvSettings t; sv_settings_defaults(&t); t.video.widescreen_width = 37; char text[4096];
+    check(sv_settings_format(&t, text, sizeof text) > 0 && std::strstr(text, "video.widescreen_width=37\n") != nullptr, "SEG-123: the width is stored as an integer");
+    SvSettings u; sv_settings_defaults(&u); sv_settings_parse(&u, text, std::strlen(text)); check(u.video.widescreen_width == 37, "SEG-123: the width round-trips");
+    const char *bad = "video.widescreen_width=900\n"; sv_settings_parse(&u, bad, std::strlen(bad)); check(u.video.widescreen_width == 100, "SEG-123: an out-of-range width clamps");
+    const char *neg = "video.widescreen_width=-5\n"; sv_settings_parse(&u, neg, std::strlen(neg)); check(u.video.widescreen_width == 0, "SEG-123: a negative width clamps to 4:3");
+    const char *junk = "video.widescreen_width=abc\n"; u.video.widescreen_width = 50; sv_settings_parse(&u, junk, std::strlen(junk)); check(u.video.widescreen_width == 50, "SEG-123: a non-numeric width leaves the value"); }
+  int n = 0, dn = 0;
+  sv_widescreen_width_ratio(0, &n, &dn); check(n * 3 == 4 * dn, "SEG-123: width 0 is 4:3");
+  sv_widescreen_width_ratio(100, &n, &dn); check(n * 9 == 16 * dn, "SEG-123: width 100 is 16:9");
+  char buf[32];
+  check(std::string(sv_widescreen_width_text(0, buf, sizeof buf)) == "4:3" && std::string(sv_widescreen_width_text(100, buf, sizeof buf)) == "16:9", "SEG-123: endpoint labels");
+  check(std::string(sv_widescreen_width_text(37, buf, sizeof buf)) == "1.50:1" && std::string(sv_widescreen_width_text(60, buf, sizeof buf)) == "1.60:1", "SEG-123: intermediate labels");
+  // the visible side: endpoints, monotonic, symmetric bound, equals the 16:9 side at 100
+  const int geos[][2] = {{256, 224}, {320, 224}, {320, 448}, {256, 192}};
+  for (const auto &g : geos)
+    for (int a = 0; a < 2; ++a) {
+      const SvAspect asp = a ? SV_ASPECT_4_3 : SV_ASPECT_ORIGINAL;
+      const int full = sv_layout_extension_side(g[0], g[1], asp);
+      check(sv_layout_visible_side(g[0], g[1], asp, 100, full) == full, "SEG-123: width 100 equals the 16:9 side");
+      check(sv_layout_visible_side(g[0], g[1], asp, 100, 1000) == full, "SEG-123: the produced side may be larger than needed");
+      int prev = -1;
+      for (int w = 0; w <= 100; ++w) {
+        const int v = sv_layout_visible_side(g[0], g[1], asp, w, full);
+        check(v >= 0 && v <= full && v >= prev, "SEG-123: visible side is bounded and non-decreasing in the width");
+        prev = v;
+      }
+      check(sv_layout_visible_side(g[0], g[1], asp, 50, 0) == 0, "SEG-123: nothing is visible when nothing was produced (never invent columns)");
+    }
+  // 4:3 endpoint: a square-pixel 320x224 (1.43:1) is already wider than 4:3 -> nothing added, never shrunk
+  check(sv_layout_visible_side(320, 224, SV_ASPECT_ORIGINAL, 0, 39) == 0, "SEG-123: native wider than the 4:3 target adds nothing");
+  check(sv_layout_visible_side(256, 192, SV_ASPECT_ORIGINAL, 0, 42) == 0, "SEG-123: SMS 192 is exactly 4:3: nothing added");
+  check(sv_layout_visible_side(256, 224, SV_ASPECT_ORIGINAL, 0, 71) == 21, "SEG-123: H32 square pixels (1.14:1) is narrower than 4:3 -> at 4:3 it gets side columns");
+  // corrected pixels: the native display is 4:3 already: 4:3 target adds nothing, 16:9 adds the usual
+  check(sv_layout_visible_side(320, 224, SV_ASPECT_4_3, 0, 53) == 0, "SEG-123: corrected 4:3 native at the 4:3 target adds nothing");
+  check(sv_layout_visible_side(320, 224, SV_ASPECT_4_3, 100, 100) == 53, "SEG-123: corrected 4:3 native at 16:9 adds 53 per side");
+  { const int mid = sv_layout_visible_side(320, 224, SV_ASPECT_4_3, 50, 100);
+    check(mid > 0 && mid < 53, "SEG-123: an intermediate width adds an intermediate side"); }
+  check(sv_ratio_milli(320, 224, SV_ASPECT_ORIGINAL) == 1429 && sv_ratio_milli(320, 224, SV_ASPECT_4_3) == 1333, "SEG-123: effective aspect reporting");
+  // profile identity and path
+  const std::string sha(64, 'a');
+  check(sv_profile_identity_valid("genesis", sha.c_str()) && sv_profile_identity_valid("sega-cd", sha.c_str()) && sv_profile_identity_valid("master-system", sha.c_str()), "SEG-123: valid identities");
+  check(!sv_profile_identity_valid("genesis", "abc") && !sv_profile_identity_valid("genesis", std::string(63, 'a').c_str()) && !sv_profile_identity_valid("genesis", std::string(65, 'a').c_str()), "SEG-123: a short or long digest is refused");
+  check(!sv_profile_identity_valid("genesis", (std::string(63, 'a') + "g").c_str()) && !sv_profile_identity_valid("genesis", (std::string(60, 'a') + "../x").c_str()), "SEG-123: a non-hex digest is refused");
+  check(!sv_profile_identity_valid("../genesis", sha.c_str()) && !sv_profile_identity_valid("Genesis", sha.c_str()) && !sv_profile_identity_valid("", sha.c_str()) && !sv_profile_identity_valid(nullptr, sha.c_str()) &&
+            !sv_profile_identity_valid("gen/esis", sha.c_str()) && !sv_profile_identity_valid(std::string(40, 'a').c_str(), sha.c_str()),
+        "SEG-123: a platform id outside [a-z0-9-]{1,24} is refused");
+  char path[1200];
+  check(sv_profile_path("/tmp/x/viewer-settings.cfg", "genesis", sha.c_str(), path, sizeof path) == 0 && std::string(path) == "/tmp/x/viewer-widescreen/genesis-" + sha + ".cfg", "SEG-123: profile path next to the settings file");
+  check(sv_profile_path("/tmp/x/viewer-settings.cfg", "sega-cd", sha.c_str(), path, sizeof path) == 0 && std::string(path).find("/sega-cd-") != std::string::npos, "SEG-123: Sega CD has its own namespace");
+  { std::string up(64, 'A'); check(sv_profile_path("/tmp/x/s.cfg", "genesis", up.c_str(), path, sizeof path) == 0 && std::string(path) == "/tmp/x/viewer-widescreen/genesis-" + std::string(64, 'a') + ".cfg", "SEG-123: the digest is lowercased"); }
+  check(sv_profile_path("/tmp/x/s.cfg", "genesis", "../../etc/passwd", path, sizeof path) == -1 && sv_profile_path("/tmp/x/s.cfg", "genesis", sha.c_str(), path, 10) == -1, "SEG-123: invalid identity or small buffer builds no path");
+  // load overlays only the stated keys, ignores everything else, survives damage
+  const std::string dir = "/tmp/sv_core_profile_" + std::to_string(static_cast<long>(std::time(nullptr)));
+  std::string cmd = "mkdir -p " + dir;
+  check(std::system(cmd.c_str()) == 0, "SEG-123: temp dir");
+  const std::string file = dir + "/p.cfg";
+  SvSettings g;
+  sv_settings_defaults(&g);
+  g.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; g.video.widescreen_side_style = SV_SIDE_BORDERS; g.video.widescreen_width = 20; g.video.scale = SV_SCALE_INTEGER; g.audio.volume = 33;
+  { SvSettings x = g; check(sv_profile_load(&x, (dir + "/missing.cfg").c_str()) == 0 && x.video.widescreen_width == 20 && x.video.widescreen == SV_WIDESCREEN_EXTENDED_BACKGROUNDS, "SEG-123: a missing profile inherits the global values"); }
+  SvVideoSettings pv = g.video; pv.widescreen = SV_WIDESCREEN_ENHANCED_GAMEPLAY; pv.widescreen_side_style = SV_SIDE_RAW; pv.widescreen_width = 71;
+  check(sv_profile_save(&pv, file.c_str()) == 0, "SEG-123: profile saved");
+  { SvSettings x = g; check(sv_profile_load(&x, file.c_str()) == 3 && x.video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY && x.video.widescreen_side_style == SV_SIDE_RAW && x.video.widescreen_width == 71 &&
+                              x.video.scale == SV_SCALE_INTEGER && x.audio.volume == 33, "SEG-123: the profile overlays only the three widescreen preferences"); }
+  { std::FILE *f = std::fopen(file.c_str(), "wb"); std::fputs("video.widescreen_width=44\nvideo.scale=0\naudio.volume=5\nbinding.garbage\n\xff\xfe=\n", f); std::fclose(f);
+    SvSettings x = g; check(sv_profile_load(&x, file.c_str()) == 1 && x.video.widescreen_width == 44 && x.video.widescreen == SV_WIDESCREEN_EXTENDED_BACKGROUNDS && x.video.widescreen_side_style == SV_SIDE_BORDERS &&
+                              x.video.scale == SV_SCALE_INTEGER && x.audio.volume == 33, "SEG-123: a partial profile overrides only what it states; other settings in it are ignored"); }
+  { std::FILE *f = std::fopen(file.c_str(), "wb"); std::string junk(20000, '\x01'); std::fwrite(junk.data(), 1, junk.size(), f); std::fclose(f);
+    SvSettings x = g; sv_profile_load(&x, file.c_str()); check(x.video.widescreen_width == 20 && x.audio.volume == 33, "SEG-123: a corrupted profile changes nothing"); }
+  check(sv_profile_save(&pv, "") == -1 && sv_profile_save(nullptr, file.c_str()) == -1, "SEG-123: invalid save arguments are refused");
+  cmd = "rm -rf " + dir;
+  (void)std::system(cmd.c_str());
+}
+
 int main() {
   settings_tests();
   widescreen_tests();
@@ -630,6 +803,8 @@ int main() {
   layout_tests();
   extension_layout_tests();
   extension_surface_check_tests();
+  side_style_tests();
+  width_and_profile_tests();
   crt_tests();
   menu_tests();
   font_tests();

@@ -162,6 +162,7 @@ SmsSdl3Viewer *sms_sdl3_viewer_open(const char *title, int scale, int want_audio
   SmsSdl3Viewer *v;
   SvHostConfig cfg;
   const char *sha = SDL_getenv("SEGARECOMP_ROM_SHA256");
+  const char *profile = SDL_getenv("SEGARECOMP_PROFILE_ID");
   if (scale < 1) scale = 3;
   if (scale > INT_MAX / (int)SMS_FB_WIDTH || scale > INT_MAX / (int)SMS_FB_MAX_HEIGHT) return NULL;
   v = (SmsSdl3Viewer *)calloc(1, sizeof *v);
@@ -176,6 +177,8 @@ SmsSdl3Viewer *sms_sdl3_viewer_open(const char *title, int scale, int want_audio
   cfg.default_scale = scale;
   cfg.can_reset = 1; /* sms_viewer_rig_reset is the proven deterministic reset seam (it restarts the input recording) */
   cfg.rom_sha256 = sha != NULL && strlen(sha) == 64u ? sha : NULL;
+  cfg.platform_id = "master-system"; /* SEG-123: per-game widescreen profile namespace */
+  cfg.profile_id = cfg.rom_sha256 != NULL ? cfg.rom_sha256 : (profile != NULL && strlen(profile) == 64u ? profile : NULL);
   cfg.widescreen_caps = sdl_widescreen_caps;
   cfg.widescreen_ctx = v;
   cfg.diagnostics = sdl_diagnostics;

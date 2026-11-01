@@ -43,6 +43,22 @@ struct SvHost {
   int tex_w, tex_h;
   int ext_side;                /* SEG-118: the frame texture holds an extended picture (native + ext_side px each side); 0 = the original picture */
   uint32_t ext_accepted, ext_rejected, tex_creations; /* saturating, bounded diagnostics */
+  /* SEG-123: host-owned buffers allocated once at open (never per frame): the retained RAW accepted extension (so a style change in the paused menu is
+   * applied at once and Raw is exact), the two treated side strips and the pure helper's scratch. */
+  uint8_t *ext_raw;            /* (max_w + 2*SV_EXT_MAX_SIDE) x max_h RGB24, tightly packed at (last_w + 2*ext_side) * 3 */
+  uint8_t *side_buf;           /* left strip then right strip, each ext_side x last_h RGB24 */
+  void *side_scratch;
+  size_t side_buf_cap;
+  SvExtSource ext_source;      /* provenance of the retained surface */
+  SvWidescreenMode ext_prod_mode; /* mode the retained surface was produced as */
+  uint64_t capture_frames[8];  /* automation seam: 1-based presented-frame numbers whose composed output is saved (SEGARECOMP_VIEWER_CAPTURE_FRAMES) */
+  int capture_count, capture_all_styles;
+  char capture_dir[512];
+  char profile_path[1100];     /* per-game widescreen profile file ('' = none: no trustworthy game identity) */
+  SvVideoSettings global_ws;   /* the three widescreen fields as the GLOBAL file states them (written back unchanged) */
+  SvVideoSettings profile_ws;  /* the three fields as last loaded/saved for this game */
+  int side_blocked;            /* the treatment could not be built: show no side (fail closed) */
+  SvSideTreatment side_applied;   /* what the last uploaded frame shows at the sides (PASSTHROUGH when there is no extension) */
   uint8_t *last_rgb;           /* copy of the last presented picture (tightly packed RGB24) */
   int last_w, last_h;
   uint64_t frames_presented;
@@ -105,7 +121,7 @@ enum {
 };
 enum {
   I_RESUME = 1, I_GO_QUICK, I_GO_VIDEO, I_GO_CONTROLS, I_GO_AUDIO, I_GO_SYSTEM, I_QUIT,
-  I_FULLSCREEN, I_SCALE, I_ASPECT, I_WIDESCREEN, I_PRESET, I_VSYNC, I_FPS, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
+  I_FULLSCREEN, I_SCALE, I_ASPECT, I_WIDESCREEN, I_WS_WIDTH, I_SIDE_STYLE, I_PRESET, I_VSYNC, I_FPS, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
   I_VOLUME, I_MUTE, I_AUDIO_NOTE, I_AUDIO_DEFAULTS,
   I_SHOT, I_RESET, I_INFO,
   I_PLAYER, I_PAD, I_PAD_ASSIGNED, I_DEADZONE, I_MENUKEY, I_CTRL_DEFAULTS, I_GO_PADSTATUS, I_PAD_RESCAN, I_PAD_HID,

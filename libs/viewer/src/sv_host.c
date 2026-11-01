@@ -26,7 +26,25 @@ void sv_host_mark_dirty(SvHost *h) { h->settings_dirty = 1; }
 
 static void save_settings_if_dirty(SvHost *h) {
   if (h->settings_dirty && h->settings_path[0] != '\0') {
-    if (sv_settings_save(&h->settings, h->settings_path) != 0) SDL_Log("viewer: could not save settings to %s", h->settings_path);
+    SvSettings out = h->settings;
+    if (h->profile_path[0] != '\0') {
+      /* SEG-123: the three widescreen preferences belong to this game: a changed set goes to its profile, and the GLOBAL file keeps the global values */
+      const SvVideoSettings *c = &h->settings.video, *p = &h->profile_ws;
+      if (c->widescreen != p->widescreen || c->widescreen_side_style != p->widescreen_side_style || c->widescreen_width != p->widescreen_width) {
+        char dir[1100];
+        const char *slash = strrchr(h->profile_path, '/');
+        if (slash != NULL && (size_t)(slash - h->profile_path) < sizeof dir) {
+          snprintf(dir, sizeof dir, "%.*s", (int)(slash - h->profile_path), h->profile_path);
+          SDL_CreateDirectory(dir);
+        }
+        if (sv_profile_save(c, h->profile_path) == 0) h->profile_ws = *c;
+        else SDL_Log("viewer: could not save the game's widescreen profile");
+      }
+      out.video.widescreen = h->global_ws.widescreen;
+      out.video.widescreen_side_style = h->global_ws.widescreen_side_style;
+      out.video.widescreen_width = h->global_ws.widescreen_width;
+    }
+    if (sv_settings_save(&out, h->settings_path) != 0) SDL_Log("viewer: could not save settings to %s", h->settings_path);
   }
   h->settings_dirty = 0;
 }
@@ -362,6 +380,8 @@ static uint16_t sample_player(SvHost *h, int player) {
 
 /* ------------------------------------------------------------------------------------------------------------------ video */
 
+static void capture_parse(SvHost *h);
+
 static void ensure_texture(SvHost *h, int w, int hgt) {
   if (h->frame_tex != NULL && h->tex_w == w && h->tex_h == hgt) return;
   if (h->frame_tex != NULL) SDL_DestroyTexture(h->frame_tex);
@@ -526,17 +546,25 @@ static void render_picture(SvHost *h, SvCrtState *c, const SDL_FRect *src, SDL_F
 static void render_game(SvHost *h, int out_w, int out_h) {
   const SvVideoSettings *v = &h->settings.video;
   SvRect dest;
-  SDL_FRect d;
+  SDL_FRect d, src;
+  int use_src = 0;
   if (h->frame_tex == NULL || h->last_w <= 0) return;
   if (h->ext_side > 0) {
+    const int vis = sv_host_visible_side(h);
     SvExtendedLayout el;
-    if (sv_layout_extended_dest(out_w, out_h, h->last_w, h->last_h, h->ext_side, v->aspect, v->scale, &el) != 0) return;
-    dest = el.surface;
+    if (vis > 0) {
+      if (sv_layout_extended_dest(out_w, out_h, h->last_w, h->last_h, vis, v->aspect, v->scale, &el) != 0) return;
+      dest = el.surface;
+    } else {
+      dest = sv_layout_dest(out_w, out_h, h->last_w, h->last_h, v->aspect, v->scale); /* the native picture only (width at or below the native aspect) */
+    }
+    src.x = (float)(h->ext_side - vis); src.y = 0.0f; src.w = (float)(h->last_w + 2 * vis); src.h = (float)h->last_h; /* a centred crop of the stable maximum-size texture */
+    use_src = 1;
   } else {
     dest = sv_layout_dest(out_w, out_h, h->last_w, h->last_h, v->aspect, v->scale);
   }
   d.x = (float)dest.x; d.y = (float)dest.y; d.w = (float)dest.w; d.h = (float)dest.h;
-  render_picture(h, &h->crt, NULL, d, h->last_h);
+  render_picture(h, &h->crt, use_src ? &src : NULL, d, h->last_h);
 }
 
 /* The Video page's live preview: a centre crop of the picture (about 112 source pixels wide, so the scanlines and the mask are resolved) rendered with the
@@ -755,6 +783,18 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
   sv_settings_defaults(&h->settings);
   resolve_settings_path(h);
   (void)sv_settings_load(&h->settings, h->settings_path);
+  h->global_ws = h->settings.video;
+  { /* per-game widescreen overlay (only with a trustworthy identity; never a title, a filename or an unvalidated string) */
+    const char *id = cfg->profile_id != NULL ? cfg->profile_id : cfg->rom_sha256;
+    h->profile_path[0] = '\0';
+    if (id != NULL && cfg->platform_id != NULL && h->settings_path[0] != '\0' &&
+        sv_profile_path(h->settings_path, cfg->platform_id, id, h->profile_path, sizeof h->profile_path) == 0) {
+      (void)sv_profile_load(&h->settings, h->profile_path);
+    } else {
+      h->profile_path[0] = '\0';
+    }
+    h->profile_ws = h->settings.video;
+  }
   h->diag = sv_diag_create();
   if (h->diag == NULL) { free(h); return NULL; }
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
@@ -782,7 +822,16 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
   if (h->renderer == NULL) { SDL_DestroyWindow(h->window); sv_diag_destroy(h->diag); SDL_Quit(); free(h); return NULL; }
   h->last_rgb = (uint8_t *)malloc((size_t)(cfg->max_w > 0 ? cfg->max_w : 320) * (size_t)(cfg->max_h > 0 ? cfg->max_h : 240) * 3u);
   if (h->last_rgb == NULL) { sv_host_close(h); return NULL; }
+  {
+    const size_t mw = (size_t)(cfg->max_w > 0 ? cfg->max_w : 320), mh = (size_t)(cfg->max_h > 0 ? cfg->max_h : 240);
+    h->ext_raw = (uint8_t *)malloc((mw + 2u * SV_EXT_MAX_SIDE) * mh * 3u);
+    h->side_buf_cap = 2u * SV_EXT_MAX_SIDE * mh * 3u;
+    h->side_buf = (uint8_t *)malloc(h->side_buf_cap);
+    h->side_scratch = malloc(sv_side_scratch_bytes((int)mh) > 0 ? sv_side_scratch_bytes((int)mh) : 1u);
+    if (h->ext_raw == NULL || h->side_buf == NULL || h->side_scratch == NULL) { sv_host_close(h); return NULL; }
+  }
   sv_host_apply_video(h);
+  capture_parse(h);
   preload_ui_assets(h);
   h->session_start = SDL_GetTicks();
   sv_diag_scan(h->diag);
@@ -806,6 +855,9 @@ void sv_host_close(SvHost *h) {
   if (h->renderer != NULL) SDL_DestroyRenderer(h->renderer);
   if (h->window != NULL) SDL_DestroyWindow(h->window);
   free(h->last_rgb);
+  free(h->ext_raw);
+  free(h->side_buf);
+  free(h->side_scratch);
   SDL_Quit();
   free(h);
 }
@@ -835,6 +887,7 @@ void sv_host_apply_settings(SvHost *h, const SvSettings *settings) {
   sv_settings_sanitize(&h->settings);
   sv_host_apply_video(h);
   sv_host_apply_audio(h);
+  sv_host_restyle(h);
   sv_host_mark_dirty(h);
 }
 const char *sv_host_renderer_name(const SvHost *h) { const char *n = SDL_GetRendererName(h->renderer); return n != NULL ? n : "unknown"; }
@@ -847,6 +900,123 @@ SDL_Surface *sv_host_capture_output(SvHost *h) {
 
 /* ------------------------------------------------------------------------------------------------------------------ present */
 
+/* SEG-123: builds the frame texture from the retained native picture (+ retained raw extension). Deterministic in (style, source, native pixels, raw
+ * extension); the native pixels are always the centre; no allocation. Returns 1 on success. */
+static int upload_picture(SvHost *h) {
+  const int w = h->last_w, hgt = h->last_h, side = h->ext_side;
+  SDL_Rect centre, l, r;
+  int vis;
+  SvSideTreatment t = SV_TREAT_PASSTHROUGH;
+  if (h->frame_tex == NULL || w <= 0 || hgt <= 0) return 0;
+  if (side <= 0) {
+    h->side_applied = SV_TREAT_PASSTHROUGH;
+    return SDL_UpdateTexture(h->frame_tex, NULL, h->last_rgb, w * 3) ? 1 : 0;
+  }
+  centre.x = side; centre.y = 0; centre.w = w; centre.h = hgt;
+  t = sv_side_treatment(h->settings.video.widescreen_side_style, h->ext_source);
+  h->side_blocked = 0;
+  vis = sv_host_visible_side(h);
+  if (t != SV_TREAT_PASSTHROUGH && vis > 0 &&
+      (hgt > SV_SIDE_MAX_ROWS || (size_t)2u * (size_t)vis * (size_t)hgt * 3u > h->side_buf_cap ||
+       sv_side_fill(t, h->last_rgb, w, hgt, w * 3, vis, h->side_buf, h->side_buf + (size_t)vis * (size_t)hgt * 3u, h->side_scratch) != 0))
+    { h->side_blocked = 1; t = SV_TREAT_PASSTHROUGH; vis = 0; } /* unreachable for validated geometry; fail closed: no side is shown rather than the raw extension */
+  if (t == SV_TREAT_PASSTHROUGH) {
+    if (!SDL_UpdateTexture(h->frame_tex, NULL, h->ext_raw, (w + 2 * side) * 3)) return 0;
+  } else if (vis > 0) {
+    /* only the visible columns are treated: the filler is built for the CURRENT visible width and sits next to the native picture; the produced columns beyond it are never sampled */
+    l.x = side - vis; l.y = 0; l.w = vis; l.h = hgt;
+    r.x = side + w; r.y = 0; r.w = vis; r.h = hgt;
+    if (!SDL_UpdateTexture(h->frame_tex, &l, h->side_buf, vis * 3)) return 0;
+    if (!SDL_UpdateTexture(h->frame_tex, &r, h->side_buf + (size_t)vis * (size_t)hgt * 3u, vis * 3)) return 0;
+  }
+  if (!SDL_UpdateTexture(h->frame_tex, &centre, h->last_rgb, w * 3)) return 0; /* the native pixels always come from the native picture */
+  h->side_applied = t;
+  return 1;
+}
+
+/* Re-applies the current side style to the frame already shown (a style change while the pause menu holds the guest). A retained surface produced
+ * under a higher level than the one now requested is not re-exposed. */
+void sv_host_restyle(SvHost *h) {
+  if (h == NULL || h->ext_side <= 0 || h->last_w <= 0) return;
+  (void)upload_picture(h);
+}
+int sv_host_visible_side(const SvHost *h) {
+  if (h == NULL || h->ext_side <= 0 || h->last_w <= 0 || h->side_blocked) return 0;
+  /* a retained surface produced above the currently requested level is never shown (stepping down to Level 2 or Original hides the extension at once) */
+  if ((int)h->ext_prod_mode > (int)h->settings.video.widescreen) return 0;
+  return sv_layout_visible_side(h->last_w, h->last_h, h->settings.video.aspect, h->settings.video.widescreen_width, h->ext_side);
+}
+int sv_host_profile_active(const SvHost *h) { return h != NULL && h->profile_path[0] != '\0'; }
+const char *sv_host_profile_path(const SvHost *h) { return h != NULL && h->profile_path[0] != '\0' ? h->profile_path : NULL; }
+SvSideTreatment sv_host_side_treatment(const SvHost *h) { return h != NULL ? h->side_applied : SV_TREAT_PASSTHROUGH; }
+SvExtSource sv_host_extension_source(const SvHost *h) { return h != NULL && h->ext_side > 0 ? h->ext_source : SV_EXTSRC_GENERIC; }
+
+/* Automation seam (SEG-123): SEGARECOMP_VIEWER_CAPTURE_DIR + SEGARECOMP_VIEWER_CAPTURE_FRAMES="n,n,..." save the composed window output (picture, side style,
+ * CRT; no overlay) of those presented frames as BMP. Read-only: it never touches the guest, the picture or any setting. */
+static void capture_parse(SvHost *h) {
+  const char *dir = SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_DIR"), *list = SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_FRAMES");
+  h->capture_count = 0;
+  h->capture_all_styles = SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_ALL_STYLES") != NULL;
+  if (dir == NULL || list == NULL || *dir == '\0' || strlen(dir) >= sizeof h->capture_dir) return;
+  snprintf(h->capture_dir, sizeof h->capture_dir, "%s", dir);
+  while (*list != '\0' && h->capture_count < 8) {
+    char *end = NULL;
+    const unsigned long long n = strtoull(list, &end, 10);
+    if (end == list) break;
+    if (n > 0) h->capture_frames[h->capture_count++] = (uint64_t)n;
+    list = *end == ',' ? end + 1 : end;
+    if (*end != ',') break;
+  }
+}
+static void capture_save(SvHost *h, const char *suffix) {
+  SDL_Surface *s = SDL_RenderReadPixels(h->renderer, NULL);
+  char path[700];
+  if (s == NULL) return;
+  snprintf(path, sizeof path, "%s/frame-%llu%s.bmp", h->capture_dir, (unsigned long long)h->frames_presented, suffix);
+  (void)SDL_SaveBMP(s, path);
+  SDL_DestroySurface(s);
+}
+static void capture_if_requested(SvHost *h) {
+  int k;
+  for (k = 0; k < h->capture_count; ++k)
+    if (h->capture_frames[k] == h->frames_presented) {
+      capture_save(h, "");
+      if (h->capture_all_styles && h->ext_side > 0) {
+        /* the SAME frame in every side style (and, with SEGARECOMP_VIEWER_CAPTURE_WIDTHS="a,b,..", at each Widescreen Width), the current setting restored afterwards,
+         * from the retained picture and extension: a timing-independent comparison */
+        static const char *const suffix[SV_SIDE_COUNT] = {"-comfort", "-borders", "-raw"};
+        const SvSideStyle keep = h->settings.video.widescreen_side_style;
+        const int keep_width = h->settings.video.widescreen_width;
+        int widths[8], nw = 0, st, wi;
+        const char *wl = SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_WIDTHS");
+        while (wl != NULL && *wl != '\0' && nw < 8) {
+          char *end = NULL;
+          const long v = strtol(wl, &end, 10);
+          if (end == wl) break;
+          widths[nw++] = v < 0 ? 0 : (v > 100 ? 100 : (int)v);
+          wl = *end == ',' ? end + 1 : end;
+          if (*end != ',') break;
+        }
+        if (nw == 0) { widths[0] = keep_width; nw = 1; }
+        for (wi = 0; wi < nw; ++wi)
+          for (st = 0; st < SV_SIDE_COUNT; ++st) {
+            char tag[32];
+            h->settings.video.widescreen_side_style = (SvSideStyle)st;
+            h->settings.video.widescreen_width = widths[wi];
+            if (upload_picture(h)) {
+              draw_scene(h, 0);
+              if (nw > 1 || SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_WIDTHS") != NULL) snprintf(tag, sizeof tag, "%s-w%d", suffix[st], widths[wi]); else snprintf(tag, sizeof tag, "%s", suffix[st]);
+              capture_save(h, tag);
+            }
+          }
+        h->settings.video.widescreen_side_style = keep;
+        h->settings.video.widescreen_width = keep_width;
+        (void)upload_picture(h);
+        draw_scene(h, 0);
+      }
+    }
+}
+
 static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, const SvExtendedSurface *ext) {
   int y;
   const Uint64 now = SDL_GetTicksNS();
@@ -854,18 +1024,19 @@ static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitc
   if (rgb == NULL || w <= 0 || hgt <= 0 || w > (h->cfg.max_w > 0 ? h->cfg.max_w : 320) || hgt > (h->cfg.max_h > 0 ? h->cfg.max_h : 240) || pitch < w * 3) return -1;
   ensure_texture(h, w + 2 * side, hgt);
   if (h->frame_tex == NULL) return -1;
-  if (ext != NULL) {
-    SDL_Rect centre;
-    centre.x = side; centre.y = 0; centre.w = w; centre.h = hgt;
-    if (!SDL_UpdateTexture(h->frame_tex, NULL, ext->rgb24, ext->pitch)) return -1;
-    if (!SDL_UpdateTexture(h->frame_tex, &centre, rgb, pitch)) return -1; /* the native pixels always come from the native picture */
-  } else if (!SDL_UpdateTexture(h->frame_tex, NULL, rgb, pitch)) {
-    return -1;
-  }
-  h->ext_side = side;
+  /* the native picture and (when accepted) a private copy of the extension are retained first: the texture is then built from them by upload_picture,
+   * the same code that re-applies the side style at once when it changes in the paused menu */
   for (y = 0; y < hgt; ++y) memcpy(h->last_rgb + (size_t)y * (size_t)w * 3u, rgb + (size_t)y * (size_t)pitch, (size_t)w * 3u);
   h->last_w = w;
   h->last_h = hgt;
+  h->ext_side = side;
+  if (ext != NULL) {
+    const size_t row = (size_t)(w + 2 * side) * 3u;
+    for (y = 0; y < hgt; ++y) memcpy(h->ext_raw + (size_t)y * row, ext->rgb24 + (size_t)y * (size_t)ext->pitch, row);
+    h->ext_source = ext->source == SV_EXTSRC_AUTHORED ? SV_EXTSRC_AUTHORED : SV_EXTSRC_GENERIC;
+    h->ext_prod_mode = ext->mode;
+  }
+  if (!upload_picture(h)) return -1;
   h->frames_presented++;
   if (h->frames_presented == 1) { /* first picture: say once how to reach the pause menu (the keys that actually open it); shown beside any other toast */
     const char *custom = h->settings.menu_key > 0 && h->settings.menu_key != SV_KEY_ESCAPE ? SDL_GetScancodeName((SDL_Scancode)h->settings.menu_key) : NULL;
@@ -884,6 +1055,7 @@ static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitc
     h->fps_window_start = now;
   }
   draw_scene(h, 0);
+  if (h->capture_count > 0) capture_if_requested(h);
   return SDL_RenderPresent(h->renderer) ? 0 : -1;
 }
 
