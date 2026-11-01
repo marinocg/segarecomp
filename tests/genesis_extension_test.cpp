@@ -553,11 +553,13 @@ void level3_fixtures() {
   { Cfg c = authored({mk(-14, 60, 3, 4, 480)}); c.sat_edit_line = 100; c.journal = false; const L3Run r = run_l3(c, "L3: SAT edit mid-frame, no journal"); check((r.o.res.flags & GENESIS_EXT_FLAG_NO_VRAM_JOURNAL) != 0, "L3: without a journal the result carries the caveat"); }
   // 10. ambiguous sprite state (a later line claims the other horizontal resolution; the native render refuses such a frame, so the native artifact
   // comes from the clean state): the producer serves the whole frame as Level 2, with no sprite pixel and a typed reason
-  { Cfg c = authored({mk(-14, 60, 3, 4, 480, false, false, 0, true)});
+  for (int im2 = 0; im2 < 2; ++im2) {
+  for (unsigned from : {100u, 223u}) {
+  { Cfg c = authored({mk(-14, 60, 3, 4, 480, false, false, 0, true)}); c.im2 = im2 != 0; if (c.im2) c.side = 100;
     Scene sc; build_scene(c, sc);
     auto native = std::make_unique<GenesisFrameArtifact>(); std::memset(native.get(), 0, sizeof(*native));
     check(genesis_vdp_produce_frame_raster(sc.vram.data(), sc.raster.get(), native.get()) == 0, "L3 ambiguity: clean native render");
-    for (unsigned l = 100; l < GENESIS_RASTER_MAX_LINES; ++l) sc.raster->lines[l].registers[12] = 0x00;
+    for (unsigned l = from; l < GENESIS_RASTER_MAX_LINES; ++l) sc.raster->lines[l].registers[12] = 0x00;
     PlanCtx pc{c.side};
     GenesisFrameExtension ext{}; ext.plan = plan_fn; ext.plan_ctx = &pc; ext.pixels = g_surface.data(); ext.capacity = g_surface.size();
     GenesisExtensionResult r3{}, r2{};
@@ -569,6 +571,8 @@ void level3_fixtures() {
     check(r3.mode == GENESIS_EXT_MODE_BACKGROUNDS && r3.sprite_reason == GENESIS_EXT_REASON_SPRITE_STATE && r3.sprite_pixels == 0 &&
               !(r3.flags & GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT) && s3 == surface_copy(c),
           "L3 ambiguity: served as Level 2, identical to the Level 2 surface of the same state"); }
+  }
+  }
   // 11. random SAT scenes (random sprites, links, sizes) against the reference, on top of every Level 2 variation
   for (uint32_t seed = 101; seed < 141; ++seed) {
     Cfg c; c.seed = seed;
