@@ -980,15 +980,35 @@ static void capture_if_requested(SvHost *h) {
     if (h->capture_frames[k] == h->frames_presented) {
       capture_save(h, "");
       if (h->capture_all_styles && h->ext_side > 0) {
-        /* the SAME frame in every side style (and the current one restored), from the retained picture and extension: a timing-independent comparison */
+        /* the SAME frame in every side style (and, with SEGARECOMP_VIEWER_CAPTURE_WIDTHS="a,b,..", at each Widescreen Width), the current setting restored afterwards,
+         * from the retained picture and extension: a timing-independent comparison */
         static const char *const suffix[SV_SIDE_COUNT] = {"-comfort", "-borders", "-raw"};
         const SvSideStyle keep = h->settings.video.widescreen_side_style;
-        int st;
-        for (st = 0; st < SV_SIDE_COUNT; ++st) {
-          h->settings.video.widescreen_side_style = (SvSideStyle)st;
-          if (upload_picture(h)) { draw_scene(h, 0); capture_save(h, suffix[st]); }
+        const int keep_width = h->settings.video.widescreen_width;
+        int widths[8], nw = 0, st, wi;
+        const char *wl = SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_WIDTHS");
+        while (wl != NULL && *wl != '\0' && nw < 8) {
+          char *end = NULL;
+          const long v = strtol(wl, &end, 10);
+          if (end == wl) break;
+          widths[nw++] = v < 0 ? 0 : (v > 100 ? 100 : (int)v);
+          wl = *end == ',' ? end + 1 : end;
+          if (*end != ',') break;
         }
+        if (nw == 0) { widths[0] = keep_width; nw = 1; }
+        for (wi = 0; wi < nw; ++wi)
+          for (st = 0; st < SV_SIDE_COUNT; ++st) {
+            char tag[32];
+            h->settings.video.widescreen_side_style = (SvSideStyle)st;
+            h->settings.video.widescreen_width = widths[wi];
+            if (upload_picture(h)) {
+              draw_scene(h, 0);
+              if (nw > 1 || SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_WIDTHS") != NULL) snprintf(tag, sizeof tag, "%s-w%d", suffix[st], widths[wi]); else snprintf(tag, sizeof tag, "%s", suffix[st]);
+              capture_save(h, tag);
+            }
+          }
         h->settings.video.widescreen_side_style = keep;
+        h->settings.video.widescreen_width = keep_width;
         (void)upload_picture(h);
         draw_scene(h, 0);
       }

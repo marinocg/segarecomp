@@ -87,6 +87,38 @@ static int sv_style_probe(SvHost *host, const char *name, int native_w, int nati
   SV_PROBE(mean[0] <= mean[1] + 1e-9, "Comfort is not brighter than Raw");
   sv_host_extension_stats(host, &acc1, &rej1, &tex1);
   SV_PROBE(acc1 == acc0 && rej1 == rej0 && tex1 == tex0, "no producer-facing counter and no texture changed");
+  { /* SEG-123 amendment: the Widescreen Width re-lays out the frame on screen at once: narrower picture, same native centre, nothing produced or presented */
+    const int width0 = sv_host_settings(host)->video.widescreen_width;
+    static const int widths[] = {0, 50, 100};
+    int prev_vis = -1, wi;
+    unsigned long long nat_ref = 0;
+    for (wi = 0; wi < 3; ++wi) {
+      SvSettings s = *sv_host_settings(host);
+      SDL_Surface *a;
+      int vis;
+      s.video.widescreen_width = widths[wi];
+      sv_host_apply_settings(host, &s);
+      vis = sv_host_visible_side(host);
+      SV_PROBE(vis <= side && vis >= prev_vis, "the visible side grows with the width and never exceeds the produced side");
+      prev_vis = vis;
+      sv_host_toast(host, "");
+      a = sv_host_capture_output(host);
+      SV_PROBE(a != NULL, "capture at this width");
+      if (a != NULL) {
+        SvExtendedLayout l;
+        if (vis > 0 && sv_layout_extended_dest(a->w, a->h, native_w, native_h, vis, aspect, scale, &l) == 0) {
+          const unsigned long long hh = sv_probe_hash(a, l.native.x + 2, l.native.y + 2, l.native.w - 4, l.native.h - 4);
+          if (nat_ref == 0 && l.native.w == nw + 4) nat_ref = hh;
+          SV_PROBE(l.native.w != nw + 4 || hh == nat_ref || nat_ref == 0, "the native centre is identical at every width");
+        }
+        SDL_DestroySurface(a);
+      }
+    }
+    SV_PROBE(sv_host_visible_side(host) == sv_layout_visible_side(native_w, native_h, aspect, 100, side), "width 100 shows the full produced extension");
+    { SvSettings s = *sv_host_settings(host); s.video.widescreen_width = width0; sv_host_apply_settings(host, &s); }
+    sv_host_extension_stats(host, &acc1, &rej1, &tex1);
+    SV_PROBE(acc1 == acc0 && rej1 == rej0 && tex1 == tex0, "no width change touched a producer-facing counter or a texture");
+  }
   { SvSettings s = *sv_host_settings(host); s.video.widescreen_side_style = original_style; sv_host_apply_settings(host, &s); }
   return bad;
 }

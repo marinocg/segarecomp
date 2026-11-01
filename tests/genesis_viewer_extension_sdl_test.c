@@ -217,6 +217,14 @@ int main(void) {
 
   /* ---- SEG-123: the side styles on this real adapter frame (Level 3 on screen), H40 and H32, then Level 2 ---- */
   CHECK(sv_style_probe(host, "Genesis Level 3 H40 styles", 320, 224, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER) == 0, "Genesis Level 3 H40: the side styles behave");
+  /* SEG-123 amendment: a width change touches neither the guest nor the producer */
+  { const uint64_t vf = g.r->virtual_frame_count, ob = g.observer.sequence;
+    const uint64_t pc0 = (uint64_t)g.pc;
+    SvSettings s = *sv_host_settings(host);
+    s.video.widescreen_width = 40; sv_host_apply_settings(host, &s);
+    CHECK(sv_host_visible_side(host) < 39 && sv_host_extension_side(host) == 39, "the width narrows the visible side, the produced side stays");
+    s.video.widescreen_width = 100; sv_host_apply_settings(host, &s);
+    CHECK(vf == g.r->virtual_frame_count && ob == g.observer.sequence && pc0 == (uint64_t)g.pc && sv_host_visible_side(host) == 39, "a width change executes nothing and produces nothing"); }
   set_mode(&g, SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER);
   CHECK(run_frame(&g) == 0 && sv_host_extension_side(host) == 39, "Level 2 frame for the style probe");
   CHECK(sv_style_probe(host, "Genesis Level 2 H40 styles", 320, 224, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER) == 0, "Genesis Level 2 H40: the side styles behave");

@@ -142,6 +142,22 @@ def main():
         (rr.lib / "viewer-settings.cfg").write_text("video.widescreen_side_style=raw\n")
         run("ss-raw", rr, VIDEO + ["expect side_style=raw", "quit"])
 
+        # 8. SEG-123 amendment: Widescreen Width is a global DEFAULT edited in the launcher; a game's own profile (written by the in-game menu) is never touched
+        wd = base.Case(tmp, "width", exe, fake_cli, fake_game)
+        wd.env["SEGARECOMP_SHOT_SIZE"] = "1080x740"
+        wd.lib.mkdir(parents=True, exist_ok=True)
+        profile = wd.lib / "viewer-widescreen" / ("genesis-" + "a" * 64 + ".cfg")
+        profile.parent.mkdir(parents=True, exist_ok=True)
+        profile.write_text("video.widescreen=enhanced_gameplay\nvideo.widescreen_side_style=raw\nvideo.widescreen_width=41\n")
+        before = profile.read_text()
+        run("width", wd, TO_BODY + ["expect ws_width=100"] + seek("wsw_minus", "dpad_down", 40) + press("south") + press("south") + ["expect ws_width=90", "quit"])
+        expect(key_of(settings(wd), "video.widescreen_width") == "90", f"the launcher stores the default width in the global file: {settings(wd)!r}")
+        expect(profile.read_text() == before, "the launcher never rewrites a game's widescreen profile")
+        wo = base.Case(tmp, "width-old", exe, fake_cli, fake_game)
+        wo.lib.mkdir(parents=True, exist_ok=True)
+        (wo.lib / "viewer-settings.cfg").write_text("video.widescreen=extended_backgrounds\n")
+        run("width-old", wo, VIDEO + ["expect ws_width=100", "expect widescreen=extended_backgrounds", "quit"])
+
     if failures:
         print("\n".join(failures))
         return 1
