@@ -124,8 +124,8 @@ Earthworm Jim SE, Model 1 BIOS V1.10, formatted-empty backup RAM, the M18 determ
 
 | Check | Result |
 | --- | --- |
-| Build | 11 rounds, as M18; one extra image kind: the same six Z80 images; alternatives on exactly one image (4 alternative byte values, 6 entries, 8 forms, none dropped) |
-| Frames | All 30 captured frames (experiments B, C, D0, D2: 22; E: 8 including frame 19,999) are byte-identical to M18's; the final-frame hashes of C, D0, D2 and E (frame 19,999) equal M18's |
+| Build | 11 rounds, as M18; the same six Z80 images; alternatives on exactly one image (4 alternative byte values, 6 entries, 8 forms, none dropped) |
+| Frames | All 29 captured frames (experiments B, C, D0, D2: 21; E: 8 including frame 19,999) are byte-identical to M18's; the final-frame hashes of C, D0, D2 and E (frame 19,999) equal M18's |
 | Input | The pad read sequence (onset, port, value) is identical to M18 in all four experiments (48,472 / 65,536 logged reads); only the read *ticks* differ |
 | Instructions | E: main 167,487,109 -> 167,495,117 (+8,008), sub 285,068,534 -> 285,068,626 (+92), total +8,100 (+0.002 %); C +3,882, D0 +3,520, D2 +3,568. Cause: the sound handshake the driver now writes ends the 68000's polling earlier and the YM/status accesses cost their normal bus time; the video and the input stream are unchanged |
 | Z80 | healthy to the end of every run (E: 1.11 x 10^9 Z80 cycles, vs 143,605 before isolation; 6 epochs; 2 recoveries: the BIOS driver's own rewrite at epoch 3 - no alternatives were proven for that image - and the stale-image interval of epoch 5); 84,105 BUSREQ cycles |
