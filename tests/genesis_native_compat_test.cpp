@@ -671,7 +671,7 @@ void sonic1_provider() {
     check(d.accepted == 0 && d.reason == GENESIS_COMPAT_BAD_STATE, "no RAM / raster / VRAM pointer: declined"); }
   // the validated scenery scope, zone by zone and act by act (independent table; a widening of the provider's table must be mirrored here, with its validation evidence recorded in the backlog)
   {
-    static const unsigned expected[6] = {0x07, 0x00, 0x07, 0x00, 0x00, 0x00};   // Green Hill acts 1-3
+    static const unsigned expected[6] = {0x07, 0x0F, 0x07, 0x00, 0x00, 0x00};   // Green Hill acts 1-3
     unsigned served = 0, total = 0;
     for (unsigned zone = 0; zone < 8; ++zone)
       for (unsigned act = 0; act < 6; ++act) {

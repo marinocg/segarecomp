@@ -26,7 +26,10 @@ right, down, left, down, right, up, left; guard-declined frames excluded). Numbe
 | 0/1 (Green Hill acts 1-3) | 2415 | 7871 | 0/2703680 | 17572/2327748 |
 | 0/2 (Green Hill acts 1-3) | 2416 | 8592 | 0/2691360 | 2588/2354879 || 2/0 (Marble acts 1-3) | 2422 | 6079 | 0/2712640 | 7/2712640 |
 | 2/1 (Marble acts 1-3) | 2422 | 6079 | 0/2712640 | 0/2712640 |
-| 2/2 (Marble acts 1-3) | 2422 | 6144 | 0/2712640 | 0/2712640 |
+| 2/2 (Marble acts 1-3) | 2422 | 6144 | 0/2712640 | 0/2712640 || 1/0 (Labyrinth acts 1-3 and the fourth-slot act (Scrap Brain 3)) | 2435 | 6591 | 0/2727200 | 0/2727200 |
+| 1/1 (Labyrinth acts 1-3 and the fourth-slot act (Scrap Brain 3)) | 2434 | 4271 | 3/2726080 | 0/2726080 |
+| 1/2 (Labyrinth acts 1-3 and the fourth-slot act (Scrap Brain 3)) | 2435 | 8239 | 672/2721600 | 0/2721600 |
+| 1/3 (Labyrinth acts 1-3 and the fourth-slot act (Scrap Brain 3)) | 2434 | 8383 | 0/2720480 | 0/2720480 |
 
 ## Frame validation and fallback
 

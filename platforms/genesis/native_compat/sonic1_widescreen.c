@@ -79,7 +79,7 @@ static int unwrap(int v, int ref, int period) {
 
 /* The zones and acts the scenery component is validated for: bit `act` of entry `zone` (zone ids: 0 Green Hill, 1 Labyrinth, 2 Marble, 3 Star Light, 4 Spring Yard, 5 Scrap Brain; Labyrinth's
  * act 3 slot is the third Scrap Brain act). Every frame is additionally identity-checked, so an entry only widens the scope; it never relaxes a check. */
-static const uint8_t k_scenery_acts[6] = {0x07, 0x00, 0x07, 0x00, 0x00, 0x00};   /* Green Hill acts 1-3 */
+static const uint8_t k_scenery_acts[6] = {0x07, 0x0F, 0x07, 0x00, 0x00, 0x00};   /* Green Hill acts 1-3 */
 
 int sonic1_scenery_scope(unsigned zone, unsigned act) { return zone < 6U && act < 8U && ((k_scenery_acts[zone] >> act) & 1U) != 0U; }
 
