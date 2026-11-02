@@ -36,6 +36,15 @@ right, down, left, down, right, up, left; guard-declined frames excluded). Numbe
 | 4/2 (Spring Yard acts 1-3) | 2421 | 8624 | 0/2711520 | 0/2711520 || 5/0 (Scrap Brain acts 1-2 (Final Zone excluded)) | 2431 | 8512 | 0/2694720 | 0/2694720 |
 | 5/1 (Scrap Brain acts 1-2 (Final Zone excluded)) | 2430 | 7744 | 0/2716000 | 0/2716000 |
 
+## Extended object activation (optional package `sonic1-native-widescreen-gameplay`)
+
+The game submits an object to the sprite table only when its horizontal extent intersects the 320-pixel screen, so nothing beside a 16:9 picture ever reaches the Level 3 sprite layer (the game's own
+object activation and despawn windows, about -128..+512 pixels around the camera, already cover the strips). The optional package adds a second BPS change: the sprite builder's width term is
+increased by 64 through a 12-byte routine in unused padding space, so objects reach the sprite table (and get the on-screen render flag) up to 64 pixels beyond the picture. Measured on level-select
+debug traversals of four acts (about 15,000 frames): 20-80% more sprite pieces beside the picture, and no native-picture sprite lost to the 20-per-line limit in any frame. Objects that wait for the
+on-screen flag start acting up to 64 pixels earlier (where the widescreen picture shows them); this is a deliberate guest behaviour change, hence a separate opt-in package. A natural-play bot route that
+finishes Green Hill act 1 without the change did not finish it with the change (it stuck against an obstacle), which shows the timing/behaviour difference; no claim is made that play is identical.
+
 ## Frame validation and fallback
 
 A frame is served only if (1) the game mode is a running level, (2) the camera, layout and chunk indices are in range, (3) the VDP is in the verified configuration and the scroll it applies equals the game's
