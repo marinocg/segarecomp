@@ -480,7 +480,8 @@ FileApplied apply_package_file(const std::filesystem::path &package, const std::
   r.target_sha256 = pkg.info.target_sha256;
   if (!out.empty()) {
     std::error_code ec;
-    const std::filesystem::path tmp = out.string() + ".partial";
+    std::filesystem::path tmp = out;
+    tmp += ".partial";   // path-level concatenation: no narrow-string round trip of a non-ASCII path
     std::filesystem::remove(tmp, ec);
     {
       std::ofstream f(tmp, std::ios::binary | std::ios::trunc);

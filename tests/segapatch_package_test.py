@@ -295,6 +295,31 @@ huge_target += struct.pack("<II", zlib.crc32(hs), 0)
 huge_target += struct.pack("<I", zlib.crc32(huge_target))
 refused_bps(hs, ht, huge_target, "BPS oversized target (allocation refused)")
 
+# ---- bounded mutation fuzz: a flipped byte anywhere in a valid package is either refused or (never) accepted with a different image ----
+import random
+rng = random.Random(122)
+data = good.read_bytes()
+fuzz_ok = fuzz_refused = 0
+for n in range(400):
+    mutated_bytes = bytearray(data)
+    for _ in range(rng.choice((1, 1, 2, 3))):
+        mutated_bytes[rng.randrange(len(mutated_bytes))] ^= 1 << rng.randrange(8)
+    if rng.random() < 0.1:
+        del mutated_bytes[rng.randrange(len(mutated_bytes)):]
+    fz = tmp / "fuzz.segapatch"
+    fz.write_bytes(bytes(mutated_bytes))
+    fout = tmp / "fuzz.out"
+    fout.unlink(missing_ok=True)
+    proc = subprocess.run([CLI, "patch", "apply", str(fz), "--rom", str(tmp / "src.bin"), "--out", str(fout)], capture_output=True, text=True, timeout=60)
+    check(proc.returncode in (0, 1), f"fuzz {n}: the importer ended with a signal or an unexpected status {proc.returncode}")
+    if proc.returncode == 0:
+        fuzz_ok += 1
+        check(fout.read_bytes() == TGT, f"fuzz {n}: an accepted mutated package must still produce exactly the intended image")
+    else:
+        fuzz_refused += 1
+        check(not fout.exists(), f"fuzz {n}: a refused package left an output file")
+check(fuzz_refused > 300, f"the mutations were mostly refused ({fuzz_refused} refused, {fuzz_ok} equivalent)")
+
 # ---- atomic behaviour: an existing destination is untouched by a failed attempt ----
 keep = tmp / "keep.bin"; keep.write_bytes(b"previous")
 code, doc = run("apply", junk, "--rom", tmp / "src.bin", "--out", keep)
