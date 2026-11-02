@@ -41,7 +41,7 @@ invented hardware modes or raised hardware limits; deterministic, fail-closed; n
    between presentation modes of the same variant (verified), not between variants.
 5. **Variants and identities.** Three concepts stay separate: the *library game identity* (platform + original SHA-256: the catalog key, the build metadata's `rom_sha256`, the per-game widescreen
    profile), the *effective compiled image* (`SEGARECOMP_ROM_SHA256` = the digest of what the program was built from, the verified patched image for a Patched program) and the *selected variant*
-   (package identity). A new explicit field, `SEGARECOMP_LIBRARY_SHA256`, carries the original identity to the viewer for the profile; the meaning of every existing SHA-256 field is unchanged. The cache key
+   (package identity). No new field is needed: the existing explicit `SEGARECOMP_PROFILE_ID` carries the original identity to the viewer for the per-game profile of a Patched program (ADR 0265's seam, also used by Sega CD); the meaning of every existing SHA-256 field is unchanged. The cache key
    of a Patched build appends the package identity and patched-image digest to the existing key (platform, build policy and model, toolchain, host, CLI identity are already in it), so a native-only or
    changed package can never share an entry; a Vanilla key is byte-for-byte unchanged. Build metadata records the variant, `entry_ready_for` and the older-build check require the recorded variant to
    equal the requested one, and a Patched build is never adopted as a game of its own. Cancellation and failure never touch a published build (the existing publish-by-rename discipline).

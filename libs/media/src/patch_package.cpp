@@ -456,7 +456,7 @@ Applied apply_package(const Package &package, std::span<const std::uint8_t> rom)
 namespace {
 bool read_bounded(const std::filesystem::path &path, std::size_t limit, std::vector<std::uint8_t> &bytes, std::string &error) {
   std::error_code ec;
-  if (!std::filesystem::is_regular_file(path, ec) || std::filesystem::is_symlink(path, ec)) { error = "the file is not a regular file"; return false; }
+  if (!std::filesystem::is_regular_file(path, ec)) { error = "the file is not a regular file"; return false; }   // a user-chosen input may be reached through a link; the bytes read are what is verified
   const std::uintmax_t size = std::filesystem::file_size(path, ec);
   if (ec) { error = "the file cannot be read"; return false; }
   if (size > limit) { error = "the file is larger than allowed"; return false; }

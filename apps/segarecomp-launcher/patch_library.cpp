@@ -14,8 +14,7 @@ namespace {
 
 bool read_bounded(const fs::path &path, std::size_t limit, std::vector<std::uint8_t> &bytes, std::string &error) {
   std::error_code ec;
-  const auto status = fs::symlink_status(path, ec);
-  if (ec || status.type() != fs::file_type::regular) { error = "the file is not a regular file"; return false; }
+  if (!fs::is_regular_file(path, ec)) { error = "the file is not a regular file"; return false; }   // user-chosen inputs may be reached through a link; what is read is what is verified
   const std::uintmax_t size = fs::file_size(path, ec);
   if (ec || size > limit) { error = "the file is larger than allowed"; return false; }
   bytes.resize(static_cast<std::size_t>(size));

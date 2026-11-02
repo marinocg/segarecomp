@@ -239,11 +239,11 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
       if (fs::is_directory(candidate / "ui", ec)) { SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ASSETS", utf8(candidate).c_str(), true); break; }
   }
   // SEGARECOMP_ROM_SHA256 is the digest of the image the program was built from (for a Patched variant: the verified patched image, never the original
-  // digest passed off as patched bytes). SEGARECOMP_LIBRARY_SHA256 (SEG-122) is the ORIGINAL library game identity: the viewer keys the per-game widescreen
-  // profile on it, so Vanilla and Patched share one set of preferences.
+  // digest passed off as patched bytes). The viewer keys the per-game widescreen profile on SEGARECOMP_PROFILE_ID when present (the existing explicit identity
+  // field, also used for Sega CD): a Patched variant sets it to the ORIGINAL library game, so Vanilla and Patched share one set of preferences.
   if (rom.effective_sha256().size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ROM_SHA256", rom.effective_sha256().c_str(), true);
-  if (rom.patched() && rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_LIBRARY_SHA256", rom.sha256.c_str(), true);
-  else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_LIBRARY_SHA256");
+  if (rom.patched() && rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID", rom.sha256.c_str(), true);
+  else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID");
   if (!rom.title.empty()) {  // the window title names the version that runs: a Patched program is never presented as plain Vanilla
     const std::string title = rom.patched() ? rom.title + " (Patched: " + rom.patch_label + ")" : rom.title;
     SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GAME_TITLE", title.c_str(), true);
