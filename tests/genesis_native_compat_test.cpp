@@ -420,15 +420,24 @@ void make_level(Level &L, uint32_t seed) {
   L.w16(0xFE20, 37);          // rings
 }
 
-// A consistent frame: camera (camx, camy), background camera (bgx, bgy), per-line scroll tables in RAM and VDP agreeing.
-void set_scroll(Level &L, Scene &sc, int camx, int camy, int bgx, int bgy, int band_step = 3) {
-  L.w16(0xF700, camx); L.w16(0xF704, camy); L.w16(0xF708, bgx); L.w16(0xF70C, bgy);
+// A consistent frame: camera (camx, camy), background camera (bgx, bgy), per-line scroll tables in RAM and VDP agreeing, and the VDP nametables holding exactly the world
+// cells the picture shows (what the game would have drawn there); `fill_rest` decides what every other ring cell holds (0 = left as it is).
+void set_scroll(Level &L, Scene &sc, int camx, int camy, int bgx, int bgy, int band_step = 3, bool paint = true) {
+  L.w16(0xF700, camx); L.w16(0xF704, camy); L.w16(0xF708, bgx); L.w16(0xF70C, bgy); L.w16(0xF710, bgx); L.w16(0xF7F0, 0x70);
   for (unsigned l = 0; l < 224; ++l) {
     const int a = -camx, b = -(bgx + (int)(l / 8) * band_step);
     L.w16(0xCC00 + l * 4, (unsigned)a & 0xFFFF); L.w16(0xCC00 + l * 4 + 2, (unsigned)b & 0xFFFF);
     sc.vram[0xFC00 + l * 4] = (uint8_t)(((unsigned)a & 0x3FF) >> 8); sc.vram[0xFC00 + l * 4 + 1] = (uint8_t)a;
     sc.vram[0xFC00 + l * 4 + 2] = (uint8_t)(((unsigned)b & 0x3FF) >> 8); sc.vram[0xFC00 + l * 4 + 3] = (uint8_t)b;
   }
+  if (paint)
+    for (unsigned l = 0; l < 224; ++l)
+      for (int x = 0; x < 320; ++x) {
+        const int offb = bgx + (int)(l / 8) * band_step;
+        const int fgw = expected_word(L, 0, (x + camx) / 8, ((int)l + camy) / 8), bgw = x + offb >= 0 ? expected_word(L, 1, (x + offb) / 8, ((int)l + bgy) / 8) : 0;
+        const unsigned fa = 0xC000 + (((((int)l + camy) & 255) / 8) * 64 + (((x + camx) & 511) / 8)) * 2, ba = 0xE000 + (((((int)l + bgy) & 255) / 8) * 64 + (((x + offb) & 511) / 8)) * 2;
+        sc.vram[fa] = (uint8_t)(fgw >> 8); sc.vram[fa + 1] = (uint8_t)fgw; sc.vram[ba] = (uint8_t)(bgw >> 8); sc.vram[ba + 1] = (uint8_t)bgw;
+      }
   std::memcpy(sc.raster->vram_start, sc.vram.data(), GENESIS_VDP_VRAM_BYTES);
   for (auto &line : sc.raster->lines) { line.vsram[0] = (uint8_t)(camy >> 8 & 3); line.vsram[1] = (uint8_t)camy; line.vsram[2] = (uint8_t)(bgy >> 8 & 3); line.vsram[3] = (uint8_t)bgy; }
 }
@@ -490,14 +499,17 @@ void sonic1_provider() {
         }
     checkf(wrong == 0 && total > 5000, "scenery words equal the independent derivation for off-screen columns", wrong, total);
   }
-  // THE reconstruction test: the provider's output does not depend on the (wrapped) VDP nametable at all. Two frames whose nametables are totally different
-  // (random garbage vs all zero vs the exact world content) give identical scenery words; the VDP's nametable is not consulted for world content.
+  // THE reconstruction test: the provider's scenery words do not depend on the (wrapped) VDP nametable. The VDP ring buffer is made to hold the exact world content only for the cells in
+  // VIEW (what the frame-identity guard looks at) and, everywhere else (all the off-screen columns the extension would read), garbage in one scene, blank in another and the true content in a third:
+  // the off-screen words are identical in all three; they are derived from the level data, never from the wrapped map. Wholesale disagreement INSIDE the view is a different scene and is declined.
   {
-    auto collect = [&](Scene &scene) {
+    auto collect = [&](Scene &scene, unsigned *accepted = nullptr, unsigned *reason = nullptr, unsigned requested = 3) {
       void *st = nullptr; const GenesisNativeCompat *pp = nullptr;
-      Frame f = prepare_frame(L, scene, st, pp);
+      Frame f = prepare_frame(L, scene, st, pp, requested);
+      if (accepted) *accepted = f.d.accepted;
+      if (reason) *reason = f.d.reason;
       std::vector<uint32_t> words;
-      if (f.d.accepted != 3) return words;
+      if ((f.d.accepted & 2) == 0) return words;
       for (unsigned plane = 0; plane < 2; ++plane)
         for (unsigned row = 0; row < 224; row += 2)
           for (int x = -39; x < 359; ++x) {
@@ -508,25 +520,48 @@ void sonic1_provider() {
           }
       return words;
     };
+    auto in_view = [&](Scene &scene, int fill_mode) {   // fill_mode 0: garbage elsewhere (kept), 1: blank elsewhere
+      std::vector<uint8_t> keep = scene.vram;
+      for (uint32_t base : {0xC000u, 0xE000u}) { if (fill_mode == 1) std::memset(&scene.vram[base], 0, 0x2000); }
+      set_scroll(L, scene, 1234, 100, 400, 14);    // paints the in-view cells exactly
+      std::memcpy(scene.raster->vram_start, scene.vram.data(), GENESIS_VDP_VRAM_BYTES);
+    };
     Scene garbage; build_scene(garbage, 999);
-    Scene blank; build_scene(blank, 1); for (uint32_t base : {0xC000u, 0xE000u}) std::memset(&blank.vram[base], 0, 0x2000);
+    Scene blank; build_scene(blank, 1);
     Scene exact; build_scene(exact, 2);
-    for (unsigned plane = 0; plane < 2; ++plane)   // the ring buffer filled with the TRUE world content around the camera
+    in_view(garbage, 0); in_view(blank, 1); in_view(exact, 0);
+    for (unsigned plane = 0; plane < 2; ++plane)   // the ring buffer filled with the TRUE world content around the camera (the off-screen cells too)
       for (int cy = 0; cy < 32; ++cy)
         for (int cx = 0; cx < 64; ++cx) {
-          const int wcx = (plane == 0 ? 1234 : 400) / 8 - 20 + cx % 64, wcy = ((plane == 0 ? 100 : 14) / 8 + cy);
-          const int want = expected_word(L, plane, wcx, wcy);
+          const int wcx = (plane == 0 ? 1234 : 400) / 8 - 20 + cx, wcy = ((plane == 0 ? 100 : 14) / 8 + cy);
           const uint32_t a = (plane == 0 ? 0xC000u : 0xE000u) + (((wcy & 31) * 64) + (wcx & 63)) * 2;
-          exact.vram[a] = (uint8_t)(want >> 8); exact.vram[a + 1] = (uint8_t)want;
+          const int want = expected_word(L, plane, wcx, wcy);
+          const int vx = wcx * 8 - (plane == 0 ? 1234 : 400);   // only cells that are NOT in view: the in-view paint stays authoritative
+          if (vx < -16 || vx >= 336) { exact.vram[a] = (uint8_t)(want >> 8); exact.vram[a + 1] = (uint8_t)want; }
         }
-    for (Scene *scene : {&garbage, &blank, &exact}) set_scroll(L, *scene, 1234, 100, 400, 14);
-    const std::vector<uint8_t> garbage_before = garbage.vram, garbage_start_before(garbage.raster->vram_start, garbage.raster->vram_start + GENESIS_VDP_VRAM_BYTES);
-    const std::vector<uint32_t> a = collect(garbage), b = collect(blank), c = collect(exact);
-    check(a.size() > 1000 && a == b && a == c, "scenery words are identical over garbage, blank and exact nametables: not a redisplay of the VDP's wrapped map");
+    std::memcpy(exact.raster->vram_start, exact.vram.data(), GENESIS_VDP_VRAM_BYTES);
+    unsigned acc_a = 0, acc_b = 0, acc_c = 0, rs = 0;
+    const std::vector<uint32_t> a = collect(garbage, &acc_a), b = collect(blank, &acc_b), c = collect(exact, &acc_c);
+    checkf(acc_a == 3 && acc_b == 3 && acc_c == 3, "the frame is accepted over garbage, blank and exact off-screen nametable content", acc_a, acc_b);
+    check(a.size() > 1000 && a == b && a == c, "off-screen scenery words are identical over garbage, blank and exact nametable content: not a redisplay of the VDP's wrapped map");
     unsigned unresolved = 0; for (uint32_t w : a) unresolved += w > 0xFFFF;
     check(unresolved == 0, "every off-screen cell is answered");
-    // the diagnostic never touches guest VRAM: the scenes are only read
-    check(garbage.vram == garbage_before && std::memcmp(garbage.raster->vram_start, garbage_start_before.data(), GENESIS_VDP_VRAM_BYTES) == 0, "the provider left the VRAM it was given untouched");
+    // wholesale disagreement in view (another scene's nametables): declined with the identity reason, nothing is served
+    Scene other; build_scene(other, 4242);
+    set_scroll(L, other, 1234, 100, 400, 14, 3, false);
+    const std::vector<uint32_t> d = collect(other, &acc_a, &rs, GENESIS_COMPAT_SCENERY);
+    checkf(d.empty() && acc_a == 0 && rs == GENESIS_COMPAT_MISMATCH, "a picture that is not this world state is declined as MISMATCH", acc_a, rs);
+    // a few differing in-view cells (a one-frame streaming lag) stay served; many do not
+    { Scene lag; build_scene(lag, 5); set_scroll(L, lag, 1234, 100, 400, 14);
+      for (int i = 0; i < 12; ++i) lag.vram[0xC000 + (size_t)(i * 7 % 64) * 2 + (size_t)(i / 8) * 128 + 1] ^= 0x13;
+      std::memcpy(lag.raster->vram_start, lag.vram.data(), GENESIS_VDP_VRAM_BYTES);
+      collect(lag, &acc_a); check(acc_a == 3, "a handful of lagging in-view cells does not decline the frame");
+      for (uint32_t i = 0; i < 0x1000; i += 2) lag.vram[0xC000 + i + 1] ^= 0x55;
+      std::memcpy(lag.raster->vram_start, lag.vram.data(), GENESIS_VDP_VRAM_BYTES);
+      collect(lag, &acc_a, &rs, GENESIS_COMPAT_SCENERY); checkf(acc_a == 0 && rs == GENESIS_COMPAT_MISMATCH, "most in-view foreground cells wrong: declined", acc_a, rs); }
+    // the provider never changes the VRAM it is given
+    { Scene keep; build_scene(keep, 77); set_scroll(L, keep, 1234, 100, 400, 14); const std::vector<uint8_t> before = keep.vram; collect(keep);
+      check(keep.vram == before, "the provider left the VRAM it was given untouched"); }
     set_scroll(L, sc, 1234, 100, 400, 14);   // restore the main scene
     fr = prepare_frame(L, sc, state, p);
   }
@@ -614,7 +649,7 @@ void sonic1_provider() {
     lv = L; lv.ram[0xFE26] = 0xFF; f = prepare_frame(lv, sc, st, pp); check(f.d.accepted == GENESIS_COMPAT_SCENERY, "an impossible score: no HUD"); }
   { Level lv = L; lv.ram[0xF600] = 0x04; declined("title screen is declined", lv, sc, GENESIS_COMPAT_UNSUPPORTED_SCENE); }
   { Level lv = L; lv.ram[0xFE10] = 1; declined("another zone is declined", lv, sc, GENESIS_COMPAT_UNSUPPORTED_SCENE); }
-  { Level lv = L; lv.ram[0xFE11] = 1; declined("another act is declined", lv, sc, GENESIS_COMPAT_UNSUPPORTED_SCENE); }
+  { Level lv = L; lv.ram[0xFE11] = 2; declined("another act is declined", lv, sc, GENESIS_COMPAT_UNSUPPORTED_SCENE); }
   { Level lv = L; lv.w16(0xF700, 0x4001); declined("a camera outside the level is declined", lv, sc, GENESIS_COMPAT_BAD_STATE); }
   { Level lv = L; lv.w16(0xF704, 0x800); declined("a camera row outside the layout is declined", lv, sc, GENESIS_COMPAT_BAD_STATE); }
   { Level lv = L; lv.ram[0xA400 + 7] = 0x60; declined("a layout byte past the chunk table is declined", lv, sc, GENESIS_COMPAT_BAD_STATE); }

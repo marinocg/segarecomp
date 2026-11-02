@@ -42,7 +42,8 @@ typedef enum GenesisCompatReason {
   GENESIS_COMPAT_UNSUPPORTED_SCENE = 2, /* a game mode, zone or screen this provider is not verified for */
   GENESIS_COMPAT_BAD_STATE = 3,      /* the game state is inconsistent or out of range */
   GENESIS_COMPAT_BAD_SCROLL = 4,     /* the VDP scroll/plane configuration is not the verified one, or disagrees with the camera */
-  GENESIS_COMPAT_FAULT = 5           /* the provider failed to answer for a cell it accepted (never expected; fails the frame's authored claim) */
+  GENESIS_COMPAT_FAULT = 5,          /* the provider failed to answer for a cell it accepted (never expected; fails the frame's authored claim) */
+  GENESIS_COMPAT_MISMATCH = 6        /* the frame's own picture (the VDP nametables in view) disagrees with the world state: a fade, a transition or another level */
 } GenesisCompatReason;
 
 typedef struct GenesisCompatFrame {

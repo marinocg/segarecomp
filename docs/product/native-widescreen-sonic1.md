@@ -7,12 +7,28 @@ original image (Genesis, USA/Europe REV00, SHA-256 `46160baa...f2a6`); Vanilla, 
 
 ## Components
 
-* **scenery** (Green Hill Zone act 1 while the level runs): the extra side columns come from the level layout, the 256x256 chunk table and the 16x16 block table the game itself decompressed
+* **scenery** (Green Hill Zone acts 1 and 2 while the level runs; act 1 validated start to finish, act 2 over the part explored in validation; every frame is identity-checked): the extra side columns come from the level layout, the 256x256 chunk table and the 16x16 block table the game itself decompressed
   into work RAM, looked up at the world coordinates of the game's own per-line scroll (not from the wrapped plane nametable). The generic VDP code decodes patterns, palettes, flips,
   priority and sprites exactly as for visible columns. Outside the level layout a cell is blank (the backdrop shows); nothing is mirrored, repeated or invented.
 * **hud**: a replacement for the game's own HUD. The patch removes the original HUD sprites (two `jmp DisplaySprite` become `rts`; every counter and update routine keeps running) and the product draws
   SCORE / TIME / RINGS / SONIC x lives in the original's colours in the left side space, or at the replaced HUD's place inside the picture when the visible side is too narrow (4:3, a low Widescreen Width,
   Original). The numbers are the displayed frame's own counters; the original on-screen digits lag the counters by one frame at a change (the game updates its HUD lazily).
+
+## Frame validation and fallback
+
+A frame is served only if (1) the game mode is a running level, (2) the camera, layout and chunk indices are in range, (3) the VDP is in the verified configuration and the scroll it applies equals the game's
+own per-line scroll in work RAM (so RAM and VDP describe the same frame), and (4) the provider's own cells for the part of the world in view agree with what the VDP nametables hold there (a gross
+disagreement, e.g. a fade, a level transition or another level, declines the frame). Anything else (another zone, the level start sequence, title, special stage, a different revision) is served by the generic
+extension with its accurate status, or not at all; Vanilla and BPS-only builds are never affected. A background band's world position is only defined modulo the 512-pixel plane: the provider uses the alias nearest the
+camera of the region the game streams it from (the upper region from the first background camera, the region below the game's split from the second one); cells left of world x 0 are blank (the backdrop shows).
+
+## Known limits (stated, not hidden)
+
+* At the very start of an act the camera sits at x 0, so the strip left of the level (and right of its end) is the backdrop colour: there is no world there and nothing is invented.
+* Sprites beside the picture exist only where the game submits them (Level 3 is Partial); the game does not activate objects beyond its own window.
+* The level start sequence (title card) is not extended. Zones other than Green Hill Zone acts 1 and 2, special stages, bonus screens and the ending are not extended (the HUD still replaces the game's own in every running level).
+* The patched program runs the game with the HUD sprites not queued (slightly different guest timing from Vanilla by design); between presentation modes of the same variant guest state and audio are identical (tested).
+* On a ring loss the original on-screen digits update one frame later than the counter; the native HUD shows the counter of the displayed frame.
 
 ## Provenance
 

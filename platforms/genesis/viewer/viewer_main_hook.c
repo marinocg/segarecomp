@@ -144,10 +144,10 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
     void *unused_state = NULL;
     const GenesisNativeCompat *selected = genesis_native_compat_select(SEGARECOMP_NATIVE_PROVIDER, SEGARECOMP_NATIVE_IMPLEMENTATION, &unused_state);
     genesis_sdl3_viewer_native_compat_stats(sdl, &stats);
-    fprintf(stderr, "VIEWER_NATIVE_SUMMARY {\"capability\":\"%s\",\"frames\":%llu,\"authored\":%llu,\"hud_frames\":%llu,\"declined\":[%llu,%llu,%llu,%llu,%llu,%llu]}\n", selected != NULL ? selected->capability : "none",
+    fprintf(stderr, "VIEWER_NATIVE_SUMMARY {\"capability\":\"%s\",\"frames\":%llu,\"authored\":%llu,\"hud_frames\":%llu,\"declined\":[%llu,%llu,%llu,%llu,%llu,%llu,%llu]}\n", selected != NULL ? selected->capability : "none",
             (unsigned long long)stats.frames, (unsigned long long)stats.authored, (unsigned long long)stats.hud_frames, (unsigned long long)stats.declined[0],
             (unsigned long long)stats.declined[1], (unsigned long long)stats.declined[2], (unsigned long long)stats.declined[3], (unsigned long long)stats.declined[4],
-            (unsigned long long)stats.declined[5]);
+            (unsigned long long)stats.declined[5], (unsigned long long)stats.declined[6]);
   }
 #endif
   genesis_sdl3_viewer_close(sdl);

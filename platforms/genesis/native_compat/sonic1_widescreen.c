@@ -22,6 +22,9 @@
 #define S1_FRAMECOUNT_FLASH 0xFE05U  /* byte: bit 3 is the flash phase the original HUD uses */
 #define S1_TIME 0xFE22U         /* long: 0, minutes (binary), seconds (binary), frames (binary) */
 #define S1_SCORE 0xFE26U        /* long, binary */
+#define S1_BG2X 0xF710U         /* word: the second background camera (the lower background region is streamed from it) */
+#define S1_BG_SPLIT 0xF7F0U     /* word: world y (background layout) where the lower background region starts */
+#define S1_LAST_ACT 1U          /* Green Hill Zone acts 1 and 2 (the same level format; act 1 validated start to finish, act 2 over the explored part; every frame is also identity-checked) */
 #define S1_ZONE 0xFE10U         /* bytes: zone, act */
 #define S1_LIVES 0xFE12U        /* byte */
 #define S1_RINGS 0xFE20U        /* word */
@@ -82,10 +85,10 @@ static int layout_valid(const uint8_t *ram) {
 
 /* Scenery verification (Green Hill Zone act 1 only): returns GENESIS_COMPAT_OK or the reason it is declined. */
 static unsigned scenery_check(Sonic1Frame *f, const GenesisCompatFrame *frame, const uint8_t *ram) {
-  if (ram[S1_ZONE] != 0U || ram[S1_ZONE + 1U] != 0U) return GENESIS_COMPAT_UNSUPPORTED_SCENE;
+  if (ram[S1_ZONE] != 0U || ram[S1_ZONE + 1U] > S1_LAST_ACT) return GENESIS_COMPAT_UNSUPPORTED_SCENE;
   f->camy = (int)u16(ram, S1_CAMY);
   f->bgy = (int)u16(ram, S1_BGY);
-  if (frame->height > S1_HSCROLL_LINES || f->camy >= (int)(S1_LAYOUT_ROWS * 256U) || f->bgy >= (int)(S1_LAYOUT_ROWS * 256U) || u16(ram, S1_CAMX) >= S1_WORLD_W || u16(ram, S1_BGX) >= S1_WORLD_W)
+  if (frame->height > S1_HSCROLL_LINES || f->camy >= (int)(S1_LAYOUT_ROWS * 256U) || f->bgy >= (int)(S1_LAYOUT_ROWS * 256U) || u16(ram, S1_CAMX) >= S1_WORLD_W || u16(ram, S1_BGX) >= S1_WORLD_W || u16(ram, S1_BG2X) >= S1_WORLD_W)
     return GENESIS_COMPAT_BAD_STATE;
   if (!layout_valid(ram)) return GENESIS_COMPAT_BAD_STATE;
   /* The display must be the verified configuration (64x32 planes, per-line scroll, full-screen vertical scroll) and the scroll the VDP applies (copied from the game's buffer at the
@@ -101,7 +104,39 @@ static unsigned scenery_check(Sonic1Frame *f, const GenesisCompatFrame *frame, c
       return GENESIS_COMPAT_BAD_SCROLL;
     if ((((int)ha - ram_a) & 0x3FF) != 0 || (((int)hb - ram_b) & 0x3FF) != 0 || (((int)va - f->camy) & 0x3FF) != 0 || (((int)vb - f->bgy) & 0x3FF) != 0) return GENESIS_COMPAT_BAD_SCROLL;
     f->off_fg[l] = -ram_a;                                       /* the foreground scrolls exactly with the camera */
-    f->off_bg[l] = unwrap(-ram_b, (int)u16(ram, S1_BGX), 512);   /* a background band is only defined modulo the 512-pixel plane: the alias nearest the background camera */
+    /* A background band is only defined modulo the 512-pixel plane. The game streams the upper background region from the first background camera and the region below
+     * `S1_BG_SPLIT` from the second one, so the band's world position is the alias nearest the camera of ITS region. */
+    f->off_bg[l] = unwrap(-ram_b, (int)(((int)l + f->bgy) >= (int)u16(ram, S1_BG_SPLIT) ? u16(ram, S1_BG2X) : u16(ram, S1_BGX)), 512);
+  }
+  /* Frame identity: the provider's own cells for the part of the world the picture shows must agree with what the VDP nametables hold there (the game drew them). A gross disagreement
+   * (a fade, a level transition, another level than the state claims) means RAM and picture are not the same scene: the frame is declined, never half-served. Cells the game has not (yet)
+   * streamed (a background band beyond its window, left of the layout) are not compared. */
+  {
+    unsigned fg_total = 0U, fg_bad = 0U, bg_total = 0U, bg_bad = 0U;
+    for (unsigned l = 0U; l < frame->height; l += 8U) {
+      const GenesisRasterLine *line = &frame->raster->lines[l];
+      int32_t hs[2] = {0, 0};
+      (void)genesis_vdp_read_hscroll(frame->vram, line->registers, GENESIS_VDP_PLANE_A, l, &hs[0]);
+      (void)genesis_vdp_read_hscroll(frame->vram, line->registers, GENESIS_VDP_PLANE_B, l, &hs[1]);
+      for (unsigned plane = 0U; plane < 2U; ++plane) {
+        const unsigned base = plane == 0U ? (unsigned)(line->registers[2] & 0x38U) << 10 : (unsigned)(line->registers[4] & 7U) << 13;
+        const int off = plane == 0U ? f->off_fg[l] : f->off_bg[l];
+        const int ycam = plane == 0U ? f->camy : f->bgy;
+        const int cam = plane == 0U ? (int)u16(ram, S1_CAMX) : (((int)l + f->bgy) >= (int)u16(ram, S1_BG_SPLIT) ? (int)u16(ram, S1_BG2X) : (int)u16(ram, S1_BGX));
+        for (int x = 0; x < (int)frame->width; x += 8) {
+          const int wx = x + off, wy = (int)l + ycam;
+          unsigned px = (unsigned)(x - (int)hs[plane]) & 511U, py = (unsigned)(wy) & 255U, vw;
+          int w;
+          if (wx < 0 || wx < cam - 16 || wx >= cam + 336) continue;   /* outside what the game streams for this plane/region */
+          w = sonic1_world_cell(ram, plane, wx / 8, wy / 8);
+          vw = ((unsigned)frame->vram[(base + ((py >> 3) * 64U + (px >> 3)) * 2U) & 0xFFFFU] << 8) | frame->vram[(base + ((py >> 3) * 64U + (px >> 3)) * 2U + 1U) & 0xFFFFU];
+          if (w < 0) return GENESIS_COMPAT_BAD_STATE;
+          if (plane == 0U) { ++fg_total; if ((unsigned)w != vw && !((vw & 0x7FFU) == 0U && ((unsigned)w & 0x7FFU) == 0U)) ++fg_bad; }
+          else { ++bg_total; if ((unsigned)w != vw && !((vw & 0x7FFU) == 0U && ((unsigned)w & 0x7FFU) == 0U)) ++bg_bad; }
+        }
+      }
+    }
+    if (fg_total == 0U || fg_bad * 10U > fg_total || bg_bad * 7U > bg_total) return GENESIS_COMPAT_MISMATCH;
   }
   return GENESIS_COMPAT_OK;
 }

@@ -51,6 +51,8 @@ resident in guest RAM. That is the capability this ADR admits, for one game, wit
 * **HUD replacement.** The patch removes the game's own HUD sprites (BPS; counters untouched) and the `hud` component replaces them: in the left side space while the visible side holds it
   (`SV_OVERLAY_MARGIN`), otherwise at the replaced HUD's place inside the picture (also at 4:3 and in Original, where the producer runs for the HUD only). The native centre therefore
   intentionally differs from Vanilla's HUD area; every other native pixel is unchanged (tested). The HUD is offered in any running level, scenery only in the verified zone.
+* **Frame identity.** Besides the RAM/VDP scroll agreement, `prepare` compares its own cells for the part of the world in view with the VDP nametables (decline on gross disagreement), which makes the
+  scenery scope safe to extend to a second act of the same level format; the HUD needs only plausible counters in any running level.
 * **Background bands.** A parallax band's position is only defined modulo the 512-pixel plane; the provider uses the alias nearest the background camera and leaves cells left of world x 0 blank.
 * **Fixture capability.** `genesis.fixture.native-widescreen.v1` exists only under `SEGARECOMP_ALLOW_FIXTURE_CAPABILITIES=1` (synthetic tests), is never buildable and has no provider.
 
