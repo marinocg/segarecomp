@@ -352,6 +352,15 @@ struct GenesisSoundBuild {
     std::vector<std::vector<std::string>> commands;
     std::vector<fs::path> logs;
     for (const CompileJob &job : batch) {
+      if (job.isolated) {   // the provider source is re-hashed immediately before it is compiled (it lives in this build's own folder; nothing may have replaced it since extraction)
+        std::ifstream check(job.source, std::ios::binary);
+        std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
+        if (!check.eof() || segarecomp::sha256_hex(bytes) != options.native_source_sha256) {
+          failure_detail = "The provider source changed after it was verified.";
+          failure_diagnostic = "PATCH_SOURCE_DIGEST";
+          return static_cast<int>(&job - batch.data());
+        }
+      }
       auto command = job.isolated ? c_isolated : (job.cxx ? cxx_base : c_base);
       command.insert(command.end(), job.extra.begin(), job.extra.end());
       command.insert(command.end(), {"-c", "-o", job.object.string(), job.source.string()});
@@ -1112,6 +1121,8 @@ int segarecomp_build_command(int argc, char **argv) {
       std::error_code native_ec;
       const fs::path native_dir = options.output / "native";
       fs::create_directories(native_dir, native_ec);
+      if (native_ec) return fail(options, log, sha, "analyze", 1, "The provider folder could not be created.", "PATCH_EXTRACT_FAILED");
+      { std::error_code rm_ec; fs::remove(native_dir / segarecomp::patch::kProviderFileName, rm_ec); }   // never write through a pre-existing file or link
       options.native_source = native_dir / segarecomp::patch::kProviderFileName;
       {
         std::ofstream out(options.native_source, std::ios::binary | std::ios::trunc);

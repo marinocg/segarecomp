@@ -219,7 +219,7 @@ struct SvHost *genesis_sdl3_viewer_sv_host(GenesisSdl3Viewer *v) { return v != N
 int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *v, GenesisFrameExtension *ext, const GenesisNativeCompat *compat, void *state, unsigned caps) {
   const unsigned known = GENESIS_CAP_FRAME_WORK_RAM | GENESIS_CAP_FRAME_VDP | GENESIS_CAP_SCENERY_WORDS | GENESIS_CAP_OVERLAY_RGBA;
   const unsigned components = ((caps & GENESIS_CAP_SCENERY_WORDS) != 0U ? GENESIS_COMPAT_SCENERY : 0U) | ((caps & GENESIS_CAP_OVERLAY_RGBA) != 0U ? GENESIS_COMPAT_HUD : 0U);
-  if (v == NULL || ext == NULL || compat == NULL || ext != &v->ext || compat->abi_version != GENESIS_NATIVE_COMPAT_ABI || compat->prepare == NULL || (caps & ~known) != 0U ||
+  if (v == NULL || ext == NULL || compat == NULL || ext != &v->ext || compat->abi_version != GENESIS_NATIVE_COMPAT_ABI || compat->prepare == NULL || ((components & GENESIS_COMPAT_SCENERY) != 0U && compat->scenery_word == NULL) || (caps & ~known) != 0U ||
       components == 0U || (components & compat->components) == 0U)
     return -1;
   ext->compat = compat;
