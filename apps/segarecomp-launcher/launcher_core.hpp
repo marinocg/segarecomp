@@ -68,6 +68,17 @@ struct RomView {
   // can be derived (ADR 0049) instead of the interrupt being counted and dropped. Forwarded as `segarecomp build --hint-alias-discovery 1`.
   bool hint_alias_discovery = false;
   [[nodiscard]] bool supports_hint_alias_discovery() const { return platform_id == "genesis"; }
+  // SEG-122 (ADR 0266): the selected VARIANT of this library game. Vanilla (`patch_identity` empty) behaves exactly as before. For a Patched variant
+  // `path` and `sha256` still name the ORIGINAL game (library identity, per-game widescreen preferences; the file is never modified); the build
+  // materializes the verified patched image from `patch_package` into its own partial folder and compiles THAT, and the identity of what was compiled
+  // is `patch_target_sha256`. Nothing here is a ROM digest of the patched bytes except that field.
+  std::string patch_identity;                  // SHA-256 of the installed package's manifest (empty = Vanilla)
+  std::filesystem::path patch_package;         // the installed copy of the .segapatch
+  std::string patch_target_sha256;             // verified digest of the patched image
+  std::string patch_label;                     // "<name> <version>" (UI and logs only)
+  [[nodiscard]] bool patched() const { return !patch_identity.empty(); }
+  // The digest of the image that is actually compiled and run: the verified patched image for a Patched variant, else the original.
+  [[nodiscard]] const std::string &effective_sha256() const { return patched() ? patch_target_sha256 : sha256; }
   bool compat_known = false;          // ROM-hash-bound analysis metadata ships with this release
   std::string error;                  // non-empty: unreadable/too large
 };
@@ -146,6 +157,8 @@ void reset_policy_identity_memo_for_tests();
 // A finished entry is reusable only when it exists AND its recorded request/identity still equal the current request (a stale or foreign
 // entry that somehow shares a directory is rebuilt, never reused).
 [[nodiscard]] bool entry_ready_for(const std::filesystem::path &entry, const RomView &rom, const Layout &layout);
+// SEG-122: the package identity a finished build recorded in metadata.json ("" for a Vanilla build).
+[[nodiscard]] std::string read_variant_identity(const std::filesystem::path &entry);
 // ---- SEG-057-T002 (ADR 0119): the Optimized -> Compatibility restart contract (shared by the window and the headless `--run`) ----
 // A generated Master System program that stops on the typed selective-admission outcome (Z80_ERROR_UNADMITTED_PC) exits with this status
 // (platforms/master-system/runtime/sms_machine.h SMS_EXIT_Z80_UNADMITTED_PC; pinned equal by launcher_policy_test). No other end of a run

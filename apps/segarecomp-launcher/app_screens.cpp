@@ -816,6 +816,13 @@ void App::draw_modal(float w, float h) {
   } else if (modal_.kind == Modal::Kind::restore_defaults) {
     subtitle = "Launcher preferences (view, sort, compact mode, cleanup policy, region order) return to their defaults.";
     keeps = {"The library and builds", "Viewer controls and video settings"};
+  } else if (modal_.kind == Modal::Kind::install_patch) {
+    subtitle = "The package was verified against your original game. Installing it only adds the patch to this game; nothing is built or switched yet.";
+    keeps = {"Your original ROM file (never modified)", "The Vanilla build and its settings", "Your widescreen preferences for this game"};
+    notes = {"The patched version is a separate program built from the patched image. Choose Patched, then Build patched version, when you want it."};
+  } else if (modal_.kind == Modal::Kind::remove_patch) {
+    subtitle = "The patch package is removed from this game. Vanilla stays exactly as it is.";
+    keeps = {"Your original ROM file (never modified)", "The Vanilla build and its settings", "Your widescreen preferences, recordings and saves"};
   }
   const std::vector<std::string> wrapped_sub = modal_.kind == Modal::Kind::message ? std::vector<std::string>{} : wrap(ctx_.regular, px, inner - ctx_.u(54.0F), subtitle);
   std::vector<std::string> msg_lines, note_lines;
@@ -826,7 +833,7 @@ void App::draw_modal(float w, float h) {
   if (!cats.empty()) ph += static_cast<float>(cats.size()) * ctx_.u(26.0F) + ctx_.u(14.0F);
   if (!keeps.empty()) ph += ctx_.u(28.0F) + static_cast<float>(keeps.size()) * ctx_.u(21.0F);
   ph += static_cast<float>(note_lines.size()) * (ctx_.u(11.5F) + ctx_.u(4.0F)) + ctx_.u(8.0F);
-  if (modal_.kind == Modal::Kind::remove_entries || (is_plan && modal_.plan.kind == PlanKind::failed_partial)) ph += ctx_.u(34.0F);
+  if (modal_.kind == Modal::Kind::remove_entries || modal_.kind == Modal::Kind::remove_patch || (is_plan && modal_.plan.kind == PlanKind::failed_partial)) ph += ctx_.u(34.0F);
   if (is_plan) ph += ctx_.u(46.0F);
   ph += ctx_.u(70.0F);
   ph = std::min(ph, h - ctx_.u(24.0F));
@@ -842,7 +849,7 @@ void App::draw_modal(float w, float h) {
   dl = ImGui::GetWindowDrawList();
   float y = ImGui::GetCursorScreenPos().y;
   if (modal_.kind != Modal::Kind::message) {
-    const bool destructive = is_plan || modal_.kind == Modal::Kind::remove_entries || modal_.kind == Modal::Kind::clear_library;
+    const bool destructive = is_plan || modal_.kind == Modal::Kind::remove_entries || modal_.kind == Modal::Kind::clear_library || modal_.kind == Modal::Kind::remove_patch;
     const float isz = ctx_.u(40.0F);
     dl->AddRectFilled(ImVec2(lx, y), ImVec2(lx + isz, y + isz), destructive ? rgba(60, 20, 30) : rgba(14, 40, 92), ctx_.u(6.0F));
     icon_image(dl, ctx_.icon(destructive ? "trash" : "info"), ImVec2(lx + ctx_.u(8.0F), y + ctx_.u(8.0F)), ctx_.u(24.0F), destructive ? col::err : col::info);
@@ -879,6 +886,7 @@ void App::draw_modal(float w, float h) {
   for (const auto &l : note_lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::dim, ImVec2(lx, y), l.c_str()); y += ctx_.u(11.5F) + ctx_.u(4.0F); }
   y += ctx_.u(6.0F);
   if (modal_.kind == Modal::Kind::remove_entries) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_cache", "Also delete their generated build folders", &modal_.delete_cache); y += ctx_.u(34.0F); }
+  if (modal_.kind == Modal::Kind::remove_patch) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_cache", "Also delete the patched build (generated files only)", &modal_.delete_cache); y += ctx_.u(34.0F); }
   if (is_plan && modal_.plan.kind == PlanKind::failed_partial) { ImGui::SetCursorScreenPos(ImVec2(lx, y)); checkbox(ctx_, "mod_logs", "Keep build.log and status.json of failed builds", &modal_.keep_logs); y += ctx_.u(34.0F); }
   if (is_plan) {
     draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text2, ImVec2(lx, y + ctx_.u(10.0F)), "Total space to free:");
@@ -900,11 +908,12 @@ void App::draw_modal(float w, float h) {
     ImGui::SetCursorScreenPos(ImVec2(lx + bw + ctx_.u(12.0F), by));
     choose_remove = button(ctx_, "mod_remove", "Remove after builds", ImVec2(bw, bh), Style::secondary);
   } else if (modal_.kind != Modal::Kind::message) {
-    const char *confirm_label = is_plan ? "Remove Files" : (modal_.kind == Modal::Kind::restore_defaults ? "Restore" : "Remove");
+    const bool primary_confirm = modal_.kind == Modal::Kind::restore_defaults || modal_.kind == Modal::Kind::install_patch;
+    const char *confirm_label = is_plan ? "Remove Files" : (modal_.kind == Modal::Kind::restore_defaults ? "Restore" : (modal_.kind == Modal::Kind::install_patch ? "Install patch" : "Remove"));
     ImGui::SetCursorScreenPos(ImVec2(lx, by));
     cancel = button(ctx_, "mod_cancel", "Cancel", ImVec2(bw, bh), Style::secondary);
     ImGui::SetCursorScreenPos(ImVec2(lx + bw + ctx_.u(12.0F), by));
-    confirm = button(ctx_, "mod_ok", confirm_label, ImVec2(bw, bh), modal_.kind == Modal::Kind::restore_defaults ? Style::primary : Style::danger, !is_plan || !modal_.plan.items.empty(), modal_.kind == Modal::Kind::restore_defaults ? nullptr : ctx_.icon("trash"));
+    confirm = button(ctx_, "mod_ok", confirm_label, ImVec2(bw, bh), primary_confirm ? Style::primary : Style::danger, !is_plan || !modal_.plan.items.empty(), primary_confirm ? nullptr : ctx_.icon("trash"));
   } else {
     ImGui::SetCursorScreenPos(ImVec2(b.x - ctx_.u(24.0F) - ctx_.u(150.0F), by));
     cancel = button(ctx_, "mod_ok", "OK", ImVec2(ctx_.u(150.0F), bh), Style::primary);
@@ -946,6 +955,10 @@ void App::draw_modal(float w, float h) {
       request_scan();
       page_ = Page::library;
       toast("Library cleared (" + std::to_string(n) + " entries). Builds and ROMs were not touched.");
+    } else if (m.kind == Modal::Kind::install_patch) {
+      patch_install_confirmed(m.ids.empty() ? std::string() : m.ids.front(), u8s(patch_pending_));
+    } else if (m.kind == Modal::Kind::remove_patch) {
+      patch_remove_confirmed(m);
     } else if (m.kind == Modal::Kind::restore_defaults) {
       settings_ = default_launcher_settings();
       settings_.intermediates_choice_made = true;  // restoring defaults never re-asks the one-time first-run question

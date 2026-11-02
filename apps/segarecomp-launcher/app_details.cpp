@@ -77,6 +77,15 @@ void state_dot_text(Ctx &ctx, ImDrawList *dl, ImVec2 right_top, const std::strin
 // ---------------------------------------------------------------- shared game actions
 
 std::string App::build_action_label(const StatusInfo &info) const {
+  if (!info.variant.empty()) {   // SEG-122: the selected variant is a Patched one
+    switch (info.status) {
+      case GameStatus::ready: return "Rebuild patched";
+      case GameStatus::failed: return "Try again";
+      case GameStatus::stale:
+      case GameStatus::playable_older: return "Rebuild patched";
+      default: return "Build patched version";
+    }
+  }
   switch (info.status) {
     case GameStatus::ready: return "Rebuild";
     case GameStatus::metadata_only: return "Rebuild";
@@ -251,7 +260,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
       else if (info.scd.state == scd::State::ready) { line = "Ready to play. Last played " + fmt_relative(entry.last_played_at, std::time(nullptr)) + "."; color = col::text2; }
       else { line = scd_hint(info); color = col::warn; }
     }
-    else if (is_running) { line = running_label(game_report_, restarted_this_play_); color = col::ok; }
+    else if (is_running) { line = running_label(game_report_, restarted_this_play_) + (game_view_.patched() ? " Version: Patched - " + game_view_.patch_label + "." : (entry.patches.empty() ? std::string() : std::string(" Version: Vanilla."))); color = col::ok; }
     else if (is_building) { line = "Recompiling with " + mode + ". This can take several minutes the first time."; color = col::warn; }
     else if (mapper_needed) { line = "Declare the cartridge mapper below before building."; color = col::warn; }
     else if (info.status == GameStatus::playable_older) { line = "Playable: an earlier release built this game. Recompile is recommended, not required."; color = col::warn; }
@@ -302,7 +311,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
         if (scd_locate) scd_browse(info.scd.refusal == scd::Refusal::bios_missing ? "scd_locate_bios" : "scd_locate_cue", entry.id());
         else browse_locate(entry.id());
       }
-    } else if (button(ctx_, "play", is_running ? "Playing" : "Play", ImVec2(play_w, bh), Style::primary, can_play(info), ctx_.icon("play"))) play(entry.id());
+    } else if (button(ctx_, "play", is_running ? "Playing" : (entry.patches.empty() ? "Play" : (info.variant.empty() ? "Play Vanilla" : "Play Patched")), ImVec2(play_w, bh), Style::primary, can_play(info), ctx_.icon("play"))) play(entry.id());
     note_item_layout("play");
     if (ImGui::IsItemHovered() && !can_play(info) && !locate_primary) {
       const std::string why = info.sega_cd ? (info.scd.state == scd::State::ready ? std::string("Wait for the running game or check to finish.") : scd::message(info.scd.refusal, info.scd.detail))
@@ -695,6 +704,84 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
   return h;
 }
 
+// ---------------------------------------------------------------- B2. patches / variants (SEG-122, ADR 0266)
+
+float App::draw_variants(LibraryEntry &entry, const StatusInfo &info, float w) {
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const ImVec2 a = ImGui::GetCursorScreenPos();
+  const float pad = ctx_.u(16.0F), inner = w - 2 * pad;
+  const bool busy_now = is_building(entry.id()) || is_queued(entry.id()) || game_ != nullptr || maintenance_running_;
+  dl->ChannelsSplit(2);
+  dl->ChannelsSetCurrent(1);
+  float y = a.y + ctx_.u(40.0F);
+  const InstalledPatch *selected = entry.selected_patch();
+  const auto built_of = [&](const std::string &identity) {
+    for (const auto &p : info.patches) if (p.identity == identity) return p.built;
+    return false;
+  };
+  // ---- the choice: Vanilla or one installed patch ----
+  if (!entry.patches.empty()) {
+    std::vector<std::string> titles{"Vanilla"}, descriptions{info.vanilla_ready ? "Original verified game. Built." : "Original verified game. Not built."};
+    int sel = 0;
+    for (std::size_t i = 0; i < entry.patches.size(); ++i) {
+      const InstalledPatch &p = entry.patches[i];
+      titles.push_back("Patched - " + p.name);
+      descriptions.push_back(patch_label(p) + (built_of(p.identity) ? ". Built." : ". Not built."));
+      if (selected != nullptr && selected->identity == p.identity) sel = static_cast<int>(i) + 1;
+    }
+    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+    ImGui::BeginDisabled(busy_now);
+    if (option_tiles(ctx_, "variant_tiles", titles, descriptions, &sel, inner, ctx_.u(58.0F))) select_variant(entry.id(), sel == 0 ? std::string() : entry.patches[static_cast<std::size_t>(sel - 1)].identity);
+    ImGui::EndDisabled();
+    y += ctx_.u(66.0F);
+    std::string line = selected == nullptr ? "Selected: Vanilla - the original game and its existing program." : "Selected: Patched - " + patch_label(*selected) + ", a separate program built from the patched image.";
+    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+    y += paragraph(ctx_, ctx_.bold, ctx_.u(12.0F), col::text, inner, line) + ctx_.u(4.0F);
+    if (selected != nullptr) {
+      std::string note = built_of(selected->identity) ? "The patched program is built. Play Patched starts it; Play Vanilla stays available by selecting Vanilla above."
+                                                      : "The patched version is not built yet: use Build patched version. Vanilla stays playable meanwhile; nothing falls back silently.";
+      if (selected->width_max >= 0) note += " The package states a validated Widescreen Width of up to " + std::to_string(selected->width_max) + ".";
+      ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, note) + ctx_.u(4.0F);
+    }
+  } else {
+    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+    y += paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, inner, "No patch is installed. A patch package (.segapatch) adds an optional, separately built version of this game; the original game and its program are never changed.") + ctx_.u(6.0F);
+  }
+  // ---- actions ----
+  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+  const float bh = ctx_.u(32.0F);
+  ImGui::BeginDisabled(busy_now || info.rom_missing);
+  if (button(ctx_, "patch_install", "Install patch...", ImVec2(ctx_.u(170.0F), bh), Style::secondary, true, ctx_.icon("import"))) browse_patch(entry.id());
+  ImGui::EndDisabled();
+  if (ImGui::IsItemHovered()) tooltip(ctx_, info.rom_missing ? "The original ROM file is needed to verify a patch. Locate it first." : "Choose a .segapatch package. It is verified against your original game before anything is installed.");
+  for (std::size_t i = 0; i < entry.patches.size(); ++i) {
+    ImGui::SameLine(0.0F, ctx_.u(8.0F));
+    const std::string id = "patch_remove_" + std::to_string(i);
+    const std::string label = entry.patches.size() == 1 ? std::string("Remove patch") : "Remove " + entry.patches[i].name;
+    ImGui::BeginDisabled(busy_now);
+    if (button(ctx_, id.c_str(), label.c_str(), ImVec2(std::min(ctx_.u(200.0F), std::max(ctx_.u(130.0F), text_width(ctx_.bold, ctx_.u(13.0F), label.c_str()) + ctx_.u(44.0F))), bh), Style::ghost, true, ctx_.icon("trash"))) ask_remove_patch(entry, entry.patches[i].identity);
+    ImGui::EndDisabled();
+  }
+  y = ImGui::GetCursorScreenPos().y + ctx_.u(8.0F);
+  if (const auto note = patch_notices_.find(entry.id()); note != patch_notices_.end() && !note->second.empty()) {
+    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+    y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::info, inner, note->second) + ctx_.u(4.0F);
+  }
+  ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+  y += paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, inner, "Installing a patch does not by itself make the picture authored widescreen: the Widescreen settings (mode, width, side style) apply unchanged, and Vanilla keeps the generic widescreen. A patch changes the game's own behaviour in the patched program only.") + ctx_.u(4.0F);
+  const float h = y - a.y + ctx_.u(10.0F);
+  dl->ChannelsSetCurrent(0);
+  section_card(ctx_, dl, a, ImVec2(a.x + w, a.y + h), "PATCHES / VARIANTS", rgba(9, 22, 54, 245));
+  note_layout("variants", a, ImVec2(a.x + w, a.y + h));
+  dl->AddRectFilled(ImVec2(a.x + ctx_.u(1.0F), a.y + ctx_.u(2.0F)), ImVec2(a.x + ctx_.u(4.0F), a.y + h - ctx_.u(2.0F)), col::btn_top, ctx_.u(2.0F));
+  state_dot_text(ctx_, dl, ImVec2(a.x + w - pad, a.y + ctx_.u(13.0F)), selected == nullptr ? std::string("Vanilla selected") : "Patched selected: " + selected->name, selected == nullptr ? col::text2 : col::info, w * 0.5F);
+  dl->ChannelsMerge();
+  ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + h));
+  ImGui::Dummy(ImVec2(w, 0.0F));
+  return h;
+}
+
 // ---------------------------------------------------------------- C. provenance
 
 void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) {
@@ -980,6 +1067,10 @@ void App::draw_details(float w, float h) {
   const float cover_w = std::clamp(main_w * 0.24F, ctx_.u(96.0F), ctx_.u(136.0F));
   draw_details_identity(*entry, info, main_w, cover_w);
   draw_build_config(*entry, info, main_w);
+  if (entry->platform_id == "genesis") {   // SEG-122: patches are a Genesis feature in this release
+    ImGui::Dummy(ImVec2(1, ctx_.u(12.0F)));
+    draw_variants(*entry, info, main_w);
+  }
   ImGui::Dummy(ImVec2(1, ctx_.u(12.0F)));
   // notices of this session (restart, failure) sit right under the configuration
   const auto banner = [&](ImU32 color, const char *icon, const std::string &text) {

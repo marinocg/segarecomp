@@ -7,6 +7,11 @@
 
 int main(int, char **argv) {
   if (const char *log = std::getenv("FAKE_GAME_LOG")) std::ofstream(log, std::ios::app) << argv[0] << '\n';  // SEG-069-T005: which executable was started
+  // SEG-122: which identities the launcher handed to the program (the effective image digest, the original library digest, the window title).
+  if (const char *log = std::getenv("FAKE_GAME_ENV_LOG")) {
+    const auto get = [](const char *name) { const char *v = std::getenv(name); return std::string(v != nullptr ? v : "-"); };
+    std::ofstream(log, std::ios::app) << "rom=" << get("SEGARECOMP_ROM_SHA256") << " library=" << get("SEGARECOMP_LIBRARY_SHA256") << " title=" << get("SEGARECOMP_GAME_TITLE") << '\n';
+  }
   // SEG-117: models the in-game Video menu changing the shared viewer settings file during a play (the real viewer rewrites the same file on exit).
   if (const char *mode = std::getenv("FAKE_VIEWER_WIDESCREEN"); mode != nullptr && std::getenv("SEGARECOMP_VIEWER_SETTINGS") != nullptr) {
     const std::filesystem::path file = std::getenv("SEGARECOMP_VIEWER_SETTINGS");

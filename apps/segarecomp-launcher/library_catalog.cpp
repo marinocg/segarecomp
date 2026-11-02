@@ -11,6 +11,9 @@
 namespace fs = std::filesystem;
 
 namespace launcher {
+
+RomView view_from_entry_vanilla(const LibraryEntry &entry);  // defined below; the variant logic wraps it
+
 namespace {
 
 std::string utf8_of(const fs::path &path) {
@@ -65,9 +68,27 @@ json::Value to_json(const LibraryEntry &e) {
     o.set("mode", json::Value::make_string(b.mode));
     o.set("version", json::Value::make_string(b.version));
     o.set("toolchain", json::Value::make_string(b.toolchain));
+    if (!b.variant.empty()) o.set("variant", json::Value::make_string(b.variant));   // absent for Vanilla: a library without patches is byte-identical
     builds.push(std::move(o));
   }
   v.set("builds", std::move(builds));
+  if (!e.patches.empty()) {
+    json::Value list = json::Value::make_array();
+    for (const auto &p : e.patches) {
+      json::Value o = json::Value::make_object();
+      o.set("identity", json::Value::make_string(p.identity));
+      o.set("id", json::Value::make_string(p.id));
+      o.set("version", json::Value::make_string(p.version));
+      o.set("name", json::Value::make_string(p.name));
+      o.set("target_sha256", json::Value::make_string(p.target_sha256));
+      o.set("width_max", json::Value::make_int(p.width_max));
+      o.set("installed_at", json::Value::make_int(p.installed_at));
+      o.set("build_key", json::Value::make_string(p.build_key));
+      list.push(std::move(o));
+    }
+    v.set("patches", std::move(list));
+    if (!e.selected_variant.empty()) v.set("selected_variant", json::Value::make_string(e.selected_variant));
+  }
   if (e.platform_id == "sega-cd") {  // ADR 0204: only these records carry the member
     const scd::EntryRecord &r = e.sega_cd;
     json::Value o = json::Value::make_object();
@@ -216,9 +237,29 @@ bool entry_from_json(const json::Value &v, LibraryEntry &e) {
       r.mode = b.str("mode") == "optimized" ? "optimized" : "compatibility";
       r.version = clamp_text(b.str("version"), 64);
       r.toolchain = clamp_text(b.str("toolchain"), 64);
+      r.variant = b.str("variant");
+      if (!r.variant.empty() && !is_hex_digest(r.variant, 64)) r.variant.clear();
       e.builds.push_back(r);
     }
   if (e.builds.size() > Catalog::max_builds) e.builds.erase(e.builds.begin(), e.builds.end() - static_cast<std::ptrdiff_t>(Catalog::max_builds));
+  if (const json::Value *patches = v.get("patches"); patches != nullptr && patches->is_array() && e.platform_id == "genesis")
+    for (const auto &p : patches->items) {
+      if (!p.is_object() || e.patches.size() >= Catalog::max_patches) continue;
+      InstalledPatch ip;
+      ip.identity = p.str("identity");
+      ip.target_sha256 = p.str("target_sha256");
+      if (!is_hex_digest(ip.identity, 64) || !is_hex_digest(ip.target_sha256, 64) || e.find_patch(ip.identity) != nullptr) continue;  // a damaged record is dropped
+      ip.id = clamp_text(p.str("id"), 64);
+      ip.version = clamp_text(p.str("version"), 32);
+      ip.name = clamp_text(p.str("name"), 64);
+      ip.width_max = static_cast<int>(std::clamp(p.num("width_max", -1), -1LL, 100LL));
+      ip.installed_at = std::max(0LL, p.num("installed_at"));
+      ip.build_key = p.str("build_key");
+      if (!is_hex_digest(ip.build_key, 32)) ip.build_key.clear();
+      e.patches.push_back(std::move(ip));
+    }
+  e.selected_variant = v.str("selected_variant");
+  if (e.find_patch(e.selected_variant) == nullptr) e.selected_variant.clear();   // a selection must name an installed patch, else Vanilla
   if (e.platform_id == "sega-cd" && !sega_cd_from_json(v.get("sega_cd"), e)) return false;
   return true;
 }
@@ -294,7 +335,8 @@ bool Catalog::save(std::string *error) {
   if (read_only_) { if (error) *error = "the library is read-only"; return false; }
   json::Value root = json::Value::make_object();
   const bool has_sega_cd = std::any_of(entries_.begin(), entries_.end(), [](const LibraryEntry &e) { return e.platform_id == "sega-cd"; });
-  root.set("schema", json::Value::make_int(has_sega_cd ? 2 : 1));  // schema 1 stays byte-compatible for every library without a Sega CD game
+  const bool has_patches = std::any_of(entries_.begin(), entries_.end(), [](const LibraryEntry &e) { return !e.patches.empty(); });
+  root.set("schema", json::Value::make_int(has_patches ? 3 : (has_sega_cd ? 2 : 1)));  // schema 1 stays byte-compatible for every library without a Sega CD game or patch
   json::Value games = json::Value::make_array();
   for (const auto &e : entries_) games.push(to_json(e));
   root.set("games", std::move(games));
@@ -428,11 +470,29 @@ bool Catalog::remove(const std::string &id) {
   return true;
 }
 
+const InstalledPatch *LibraryEntry::find_patch(const std::string &identity) const {
+  if (identity.empty()) return nullptr;
+  for (const auto &p : patches)
+    if (p.identity == identity) return &p;
+  return nullptr;
+}
+
+bool LibraryEntry::is_current_key(const std::string &key) const {
+  if (key.empty()) return false;
+  if (key == current_build_key) return true;
+  return std::any_of(patches.begin(), patches.end(), [&](const InstalledPatch &p) { return p.build_key == key; });
+}
+
 void Catalog::record_build(LibraryEntry &entry, const BuildRecord &record) {
   entry.builds.erase(std::remove_if(entry.builds.begin(), entry.builds.end(), [&](const BuildRecord &b) { return b.key == record.key; }), entry.builds.end());
   entry.builds.push_back(record);
   if (entry.builds.size() > max_builds) entry.builds.erase(entry.builds.begin(), entry.builds.end() - static_cast<std::ptrdiff_t>(max_builds));
-  entry.current_build_key = record.key;
+  if (record.variant.empty()) {
+    entry.current_build_key = record.key;
+  } else {  // a Patched build never replaces the Vanilla build: it becomes the published build of exactly its package
+    for (auto &p : entry.patches)
+      if (p.identity == record.variant) p.build_key = record.key;
+  }
   if (record.built_at > 0) entry.last_built_at = record.built_at;  // an adopted build whose time is unknown never erases a recorded one
   entry.archived = false;
 }
@@ -464,6 +524,7 @@ std::size_t Catalog::migrate_cache(const fs::path &cache_root, long long now) {
     if (!read_file(meta_path, text)) continue;
     const auto meta = json::parse(text);
     if (!meta || !meta->is_object()) continue;
+    if (!meta->str("patch_identity").empty()) continue;   // SEG-122: a Patched build is never a game of its own; it is adopted only through its library entry
     const std::string platform = meta->str("platform", "genesis");
     const std::string sha = meta->str("rom_sha256");
     if ((platform != "genesis" && platform != "master-system") || !is_hex_digest(sha, 64)) continue;
@@ -496,7 +557,22 @@ std::size_t Catalog::migrate_cache(const fs::path &cache_root, long long now) {
   return added;
 }
 
-RomView view_from_entry(const LibraryEntry &entry) {
+std::filesystem::path patch_package_path(const std::string &identity) { return library_root() / "patches" / (identity + ".segapatch"); }
+
+RomView view_for_variant(const LibraryEntry &entry, const std::string &identity) {
+  RomView view = view_from_entry_vanilla(entry);
+  if (const InstalledPatch *p = entry.find_patch(identity); p != nullptr && entry.platform_id == "genesis") {
+    view.patch_identity = p->identity;
+    view.patch_package = patch_package_path(p->identity);
+    view.patch_target_sha256 = p->target_sha256;
+    view.patch_label = p->name + (p->version.empty() ? std::string() : " " + p->version);
+  }
+  return view;
+}
+
+RomView view_from_entry(const LibraryEntry &entry) { return view_for_variant(entry, entry.selected_variant); }
+
+RomView view_from_entry_vanilla(const LibraryEntry &entry) {
   RomView view;
   if (!entry.rom_paths.empty()) view.path = fs::path(std::u8string(reinterpret_cast<const char8_t *>(entry.rom_paths.front().c_str())));
   view.sha256 = entry.sha256;

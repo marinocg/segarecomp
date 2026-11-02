@@ -264,6 +264,8 @@ StorageReport scan_storage(const Catalog &catalog, const fs::path &cache_root, c
     usage.id = e.id();
     report.entries.push_back(std::move(usage));
     if (!e.current_build_key.empty()) owner_of_key[e.current_build_key] = i;
+    for (const auto &p : e.patches)
+      if (!p.build_key.empty()) owner_of_key[p.build_key] = i;  // SEG-122: a Patched build belongs to its game and is current while its patch is installed
     for (const auto &b : e.builds) owner_of_key.emplace(b.key, i);
   }
   std::error_code ec;
@@ -283,7 +285,7 @@ StorageReport scan_storage(const Catalog &catalog, const fs::path &cache_root, c
         dir.busy_key = parsed.key;
         if (const auto found = owner_of_key.find(parsed.key); found != owner_of_key.end()) owner = found->second;
         if (parsed.kind == DirKind::current) {
-          if (owner < report.entries.size()) dir.kind = catalog.entries()[owner].current_build_key == parsed.key ? DirKind::current : DirKind::superseded;
+          if (owner < report.entries.size()) dir.kind = catalog.entries()[owner].is_current_key(parsed.key) ? DirKind::current : DirKind::superseded;
           else dir.kind = DirKind::unlinked;
         }
         dir.valid_build = parsed.kind == DirKind::current && entry_ready(dir.path);

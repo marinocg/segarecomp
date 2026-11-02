@@ -238,7 +238,9 @@ GenesisSdl3Viewer *genesis_sdl3_viewer_open(const char *title, int scale) { retu
 
 GenesisSdl3Viewer *genesis_sdl3_viewer_open_platform(const char *title, int scale, const char *platform_id) {
   SvHostConfig cfg;
-  const char *sha = SDL_getenv("SEGARECOMP_ROM_SHA256");
+  /* SEG-122: the per-game profile belongs to the ORIGINAL library game; a Patched variant is launched with its identity in SEGARECOMP_LIBRARY_SHA256 */
+  const char *sha = SDL_getenv("SEGARECOMP_LIBRARY_SHA256");
+  if (sha == NULL || *sha == '\0') sha = SDL_getenv("SEGARECOMP_ROM_SHA256");
   const char *profile = SDL_getenv("SEGARECOMP_PROFILE_ID");
   GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)calloc(1, sizeof(*v));
   if (v == NULL) return NULL;
