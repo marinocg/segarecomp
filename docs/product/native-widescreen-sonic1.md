@@ -31,7 +31,9 @@ right, down, left, down, right, up, left; guard-declined frames excluded). Numbe
 | 1/2 (Labyrinth acts 1-3 and the fourth-slot act (Scrap Brain 3)) | 2435 | 8239 | 672/2721600 | 0/2721600 |
 | 1/3 (Labyrinth acts 1-3 and the fourth-slot act (Scrap Brain 3)) | 2434 | 8383 | 0/2720480 | 0/2720480 || 3/0 (Star Light acts 1-3) | 2431 | 8127 | 0/2722720 | 0/2406873 |
 | 3/1 (Star Light acts 1-3) | 2431 | 8127 | 0/2722720 | 0/2415766 |
-| 3/2 (Star Light acts 1-3) | 2431 | 8192 | 0/2722720 | 0/1940332 |
+| 3/2 (Star Light acts 1-3) | 2431 | 8192 | 0/2722720 | 0/1940332 || 4/0 (Spring Yard acts 1-3) | 2421 | 8624 | 0/2711520 | 0/2711520 |
+| 4/1 (Spring Yard acts 1-3) | 2421 | 8624 | 246/2711520 | 0/2711520 |
+| 4/2 (Spring Yard acts 1-3) | 2421 | 8624 | 0/2711520 | 0/2711520 |
 
 ## Frame validation and fallback
 
