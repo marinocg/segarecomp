@@ -1300,7 +1300,10 @@ int run_cli(int argc, char **argv) {
   }
 }
 
+int segarecomp_patch_command(int argc, char **argv);
+
 int main(int argc, char **argv) {
+  if (argc >= 2 && std::string_view(argv[1]) == "patch") return segarecomp_patch_command(argc, argv);
   if (argc >= 2 && std::string_view(argv[1]) == "build") return segarecomp_build_command(argc, argv);
   if (argc >= 2 && std::string_view(argv[1]) == "sega-cd") return segarecomp_sega_cd_command(argc, argv);
   return run_cli(argc, argv);
