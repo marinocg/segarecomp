@@ -7,7 +7,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <map>
+#include <utility>
 #include <string_view>
 
 namespace segarecomp::patch {
@@ -249,7 +251,12 @@ struct Value {
   std::vector<Value> items;
   std::string text;
   std::uint64_t number = 0;
-  std::map<std::string, Value> members;
+  std::vector<std::pair<std::string, Value>> members;   // insertion order; a vector of an incomplete type is valid C++17 (a map of one is not portable)
+  [[nodiscard]] const Value *find(const std::string &key) const {
+    for (const auto &m : members) if (m.first == key) return &m.second;
+    return nullptr;
+  }
+  [[nodiscard]] const Value &at(const std::string &key) const { return *find(key); }   // callers check presence first
 };
 
 class JsonReader {
@@ -316,7 +323,8 @@ class JsonReader {
       skip();
       Value v;
       if (!value(v, depth + 1)) return false;
-      if (!out.members.emplace(std::move(key), std::move(v)).second) { error = "the manifest repeats a key"; return false; }
+      if (out.find(key) != nullptr || out.members.size() >= 16) { error = "the manifest repeats a key or has too many members"; return false; }
+      out.members.emplace_back(std::move(key), std::move(v));
       skip();
       if (pos_ >= t_.size()) return false;
       if (t_[pos_] == ',') { ++pos_; continue; }
@@ -340,15 +348,15 @@ bool token(const std::string &s, std::size_t max, bool allow_upper_and_dot) {
 }
 
 bool take_string(const Value &obj, const char *key, std::string &out) {
-  const auto it = obj.members.find(key);
-  if (it == obj.members.end() || it->second.kind != Value::Kind::string) return false;
-  out = it->second.text;
+  const Value *it = obj.find(key);
+  if (it == nullptr || it->kind != Value::Kind::string) return false;
+  out = it->text;
   return true;
 }
 
 bool only_keys(const Value &obj, std::initializer_list<const char *> keys) {
   if (obj.members.size() != keys.size()) return false;
-  for (const char *k : keys) if (obj.members.count(k) == 0) return false;
+  for (const char *k : keys) if (obj.find(k) == nullptr) return false;
   return true;
 }
 
@@ -371,7 +379,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
   if (!reader.parse(root) || root.kind != Value::Kind::object) return bad(reader.error);
   static const char *const required[] = {"format", "schema_version", "id", "version", "name", "platform", "purpose", "source_sha256", "payloads"};
   static const char *const optional[] = {"requires", "widescreen_width_max"};
-  for (const char *k : required) if (root.members.count(k) == 0) return bad(std::string("the manifest is missing \"") + k + "\"");
+  for (const char *k : required) if (root.find(k) == nullptr) return bad(std::string("the manifest is missing \"") + k + "\"");
   for (const auto &[k, v] : root.members) {
     (void)v;
     bool known = false;
@@ -382,7 +390,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
   PackageInfo info;
   std::string format;
   if (!take_string(root, "format", format) || format != "segarecomp-patch") return bad("the manifest is not a segarecomp patch manifest");
-  const Value &ver = root.members.at("schema_version");
+  const Value &ver = root.at("schema_version");
   if (ver.kind != Value::Kind::number) return bad("the manifest schema_version is invalid");
   if (ver.number != 1) return bad("unsupported patch package schema version " + std::to_string(ver.number));
   if (!take_string(root, "id", info.id) || !token(info.id, 64, false)) return bad("the manifest id is invalid");
@@ -391,13 +399,13 @@ Package read_package(std::span<const std::uint8_t> zip) {
   if (!take_string(root, "platform", info.platform) || info.platform != "genesis") return bad("the manifest platform is not supported");
   if (!take_string(root, "purpose", info.purpose) || info.purpose != "widescreen") return bad("the manifest purpose is not supported");
   if (!take_string(root, "source_sha256", info.source_sha256) || !is_hex64(info.source_sha256)) return bad("the manifest source_sha256 is invalid");
-  if (const auto w = root.members.find("widescreen_width_max"); w != root.members.end()) {
-    if (w->second.kind != Value::Kind::number || w->second.number > 100) return bad("the manifest widescreen_width_max must be an integer from 0 to 100");
-    info.widescreen_width_max = static_cast<int>(w->second.number);
+  if (const Value *w = root.find("widescreen_width_max"); w != nullptr) {
+    if (w->kind != Value::Kind::number || w->number > 100) return bad("the manifest widescreen_width_max must be an integer from 0 to 100");
+    info.widescreen_width_max = static_cast<int>(w->number);
   }
-  if (const auto r = root.members.find("requires"); r != root.members.end()) {
-    if (r->second.kind != Value::Kind::array || r->second.items.size() > 8) return bad("the manifest requires list is invalid");
-    for (const Value &item : r->second.items) {
+  if (const Value *r = root.find("requires"); r != nullptr) {
+    if (r->kind != Value::Kind::array || r->items.size() > 8) return bad("the manifest requires list is invalid");
+    for (const Value &item : r->items) {
       if (item.kind != Value::Kind::string || !token(item.text, 48, false)) return bad("the manifest requires list is invalid");
       bool supported = false;
       for (const char *const *c = kSupportedCapabilities; *c != nullptr; ++c) supported = supported || item.text == *c;
@@ -405,13 +413,13 @@ Package read_package(std::span<const std::uint8_t> zip) {
       info.requires_capabilities.push_back(item.text);
     }
   }
-  const Value &payloads = root.members.at("payloads");
+  const Value &payloads = root.at("payloads");
   if (payloads.kind != Value::Kind::object || payloads.members.empty()) return bad("the manifest payloads are invalid");
   for (const auto &[name, v] : payloads.members) {
     (void)v;
     if (name != "rom") return bad("the manifest names an unsupported payload type \"" + name + "\"");
   }
-  const Value &rom = payloads.members.at("rom");
+  const Value &rom = payloads.at("rom");
   if (rom.kind != Value::Kind::object || !only_keys(rom, {"format", "file", "sha256", "target_sha256"})) return bad("the rom payload is invalid");
   std::string pformat;
   if (!take_string(rom, "format", pformat) || pformat != "bps") return bad("the rom payload format is not supported");

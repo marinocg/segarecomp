@@ -197,8 +197,8 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
 
 Environment variables the launcher sets for the game: `SEGARECOMP_LAUNCHED`, `SEGARECOMP_VIEWER_SETTINGS`, `SEGARECOMP_ROM_SHA256` (the digest of the image the program was
 built from), `SEGARECOMP_GAME_TITLE`, and (Genesis) `SEGARECOMP_GENESIS_REGION`. A Patched variant (see Patches and variants below) additionally sets
-`SEGARECOMP_LIBRARY_SHA256` (the ORIGINAL library game, which keys the per-game widescreen profile so Vanilla and Patched share one set of preferences) and
-`SEGARECOMP_VARIANT` (its label). Unchanged: `SEGARECOMP_VIEWER_UNTHROTTLED`, `SEGARECOMP_VIEWER_SLICE`, `SEGARECOMP_VIEWER_MUTE`, the Master System
+`SEGARECOMP_LIBRARY_SHA256` (the ORIGINAL library game, which keys the per-game widescreen profile so Vanilla and Patched share one set of preferences); the window
+title names the patch. Unchanged: `SEGARECOMP_VIEWER_UNTHROTTLED`, `SEGARECOMP_VIEWER_SLICE`, `SEGARECOMP_VIEWER_MUTE`, the Master System
 `--viewer-*` options including `--viewer-record`.
 
 ## Operating the launcher with a gamepad only

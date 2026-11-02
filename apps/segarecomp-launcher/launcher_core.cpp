@@ -244,8 +244,6 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
   if (rom.effective_sha256().size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ROM_SHA256", rom.effective_sha256().c_str(), true);
   if (rom.patched() && rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_LIBRARY_SHA256", rom.sha256.c_str(), true);
   else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_LIBRARY_SHA256");
-  if (rom.patched()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_VARIANT", rom.patch_label.c_str(), true);
-  else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_VARIANT");
   if (!rom.title.empty()) {  // the window title names the version that runs: a Patched program is never presented as plain Vanilla
     const std::string title = rom.patched() ? rom.title + " (Patched: " + rom.patch_label + ")" : rom.title;
     SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GAME_TITLE", title.c_str(), true);
