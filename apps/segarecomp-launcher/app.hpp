@@ -179,6 +179,7 @@ private:
   void patch_remove_confirmed(const Modal &sheet);     // the confirmed "Remove patch" sheet (also what the GUI script runs)
   void patch_modal_confirm();                          // the confirm button of whichever patch sheet is open (also what the GUI script runs)
   std::map<std::string, std::string> patch_notices_;   // id -> the last patch install / removal outcome (plain language)
+  std::string patch_expected_identity_;               // the identity the open install sheet showed
   std::filesystem::path patch_pending_;                // the package the open "Install patch" sheet is about
   float draw_storage_rail(const LibraryEntry &entry, const StatusInfo &info, ImVec2 a, float w);
   void draw_game_menu(const std::string &popup_id, const std::string &id, bool include_details);

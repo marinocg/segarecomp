@@ -22,10 +22,10 @@ invented hardware modes or raised hardware limits; deterministic, fail-closed; n
    fundamentally unavailable information (stay Partial, keep the Comfort/Borders fallback, never fabricate gameplay visibility). Only the payload types proven necessary are implemented.
 2. **Classification of the two games (real local evidence, class level).**
    * **Sonic the Hedgehog (Genesis, USA/Europe REV00): B.** The level streaming routines keep one 16-pixel block of scenery beyond each screen edge of Plane A and Plane B, redraw rows 22
-     blocks wide, and the initial level fill starts at the camera origin. The 512-pixel planes hold 416 pixels of valid scenery at three blocks per side, so the VDP can represent the 16:9
+     blocks wide, and the initial level fill starts at the camera origin. The patch widens the streamed margins and row redraws only; the initial fill is shared with the title and ending screens (which scroll the plane without streaming) and is deliberately left unchanged, so a spawn/respawn left margin becomes valid only as the camera moves (documented limitation). The 512-pixel planes hold 416 pixels of valid scenery at three blocks per side, so the VDP can represent the 16:9
      extent (39 px per side) without any hardware extension: this is not class C. The unproven alternative, a presentation-side reconstruction of scenery from level data, is therefore not needed and not built.
-   * **Streets of Rage 2 (Genesis, USA): B.** The sprite attribute table of a real play session contains no sprite piece whose x origin is below -32 or at/above 320 (all of 150k pieces
-     observed), while the game keeps those objects alive and updated; three sprite-piece submission routines drop every piece outside exactly that window before it reaches the table. The Level 3
+   * **Streets of Rage 2 (Genesis, USA): B.** The sprite attribute table of a real play session contains no sprite piece whose x origin is below -32 or at/above 320 (across a long real
+     play session), while the game keeps those objects alive and updated; three sprite-piece submission routines drop every piece outside exactly that window before it reaches the table. The Level 3
      compositor shows what the table holds (it uses the native sprite evaluation, per-line limits and priority), so this is not class A. No hardware limit prevents the 39 px beside the picture: this is
      not class C. SoR2's identity was verified from the local image (Streets of Rage 1 is a different image and is not patched).
    Neither game needed a native widescreen descriptor or a native compatibility component, so none is implemented (the manifest's `payloads` object is typed so one can be added when a game proves

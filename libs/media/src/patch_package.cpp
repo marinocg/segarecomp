@@ -251,9 +251,10 @@ struct Value {
   std::vector<Value> items;
   std::string text;
   std::uint64_t number = 0;
-  std::vector<std::pair<std::string, Value>> members;   // insertion order; a vector of an incomplete type is valid C++17 (a map of one is not portable)
+  std::vector<std::string> keys;   // insertion order, parallel to `members` (a vector of an incomplete type is valid C++17; a pair or map of one is not portable)
+  std::vector<Value> members;
   [[nodiscard]] const Value *find(const std::string &key) const {
-    for (const auto &m : members) if (m.first == key) return &m.second;
+    for (std::size_t i = 0; i < keys.size(); ++i) if (keys[i] == key) return &members[i];
     return nullptr;
   }
   [[nodiscard]] const Value &at(const std::string &key) const { return *find(key); }   // callers check presence first
@@ -324,7 +325,8 @@ class JsonReader {
       Value v;
       if (!value(v, depth + 1)) return false;
       if (out.find(key) != nullptr || out.members.size() >= 16) { error = "the manifest repeats a key or has too many members"; return false; }
-      out.members.emplace_back(std::move(key), std::move(v));
+      out.keys.push_back(std::move(key));
+      out.members.push_back(std::move(v));
       skip();
       if (pos_ >= t_.size()) return false;
       if (t_[pos_] == ',') { ++pos_; continue; }
@@ -380,8 +382,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
   static const char *const required[] = {"format", "schema_version", "id", "version", "name", "platform", "purpose", "source_sha256", "payloads"};
   static const char *const optional[] = {"requires", "widescreen_width_max"};
   for (const char *k : required) if (root.find(k) == nullptr) return bad(std::string("the manifest is missing \"") + k + "\"");
-  for (const auto &[k, v] : root.members) {
-    (void)v;
+  for (const std::string &k : root.keys) {
     bool known = false;
     for (const char *r : required) known = known || k == r;
     for (const char *o : optional) known = known || k == o;
@@ -415,8 +416,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
   }
   const Value &payloads = root.at("payloads");
   if (payloads.kind != Value::Kind::object || payloads.members.empty()) return bad("the manifest payloads are invalid");
-  for (const auto &[name, v] : payloads.members) {
-    (void)v;
+  for (const std::string &name : payloads.keys) {
     if (name != "rom") return bad("the manifest names an unsupported payload type \"" + name + "\"");
   }
   const Value &rom = payloads.at("rom");
@@ -488,6 +488,8 @@ FileApplied apply_package_file(const std::filesystem::path &package, const std::
   r.target_sha256 = pkg.info.target_sha256;
   if (!out.empty()) {
     std::error_code ec;
+    if (out == rom || std::filesystem::equivalent(out, rom, ec)) { r.error = "the output would overwrite the original image"; return r; }
+    ec.clear();
     std::filesystem::path tmp = out;
     tmp += ".partial";   // path-level concatenation: no narrow-string round trip of a non-ASCII path
     std::filesystem::remove(tmp, ec);

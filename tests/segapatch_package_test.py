@@ -320,6 +320,11 @@ for n in range(400):
         check(not fout.exists(), f"fuzz {n}: a refused package left an output file")
 check(fuzz_refused > 300, f"the mutations were mostly refused ({fuzz_refused} refused, {fuzz_ok} equivalent)")
 
+# the original image is never an output
+(tmp / "inplace.bin").write_bytes(SRC)
+code, doc = run("apply", good, "--rom", tmp / "inplace.bin", "--out", tmp / "inplace.bin")
+check(code == 1 and (tmp / "inplace.bin").read_bytes() == SRC, "apply refuses to overwrite the original image")
+
 # ---- atomic behaviour: an existing destination is untouched by a failed attempt ----
 keep = tmp / "keep.bin"; keep.write_bytes(b"previous")
 code, doc = run("apply", junk, "--rom", tmp / "src.bin", "--out", keep)

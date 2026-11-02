@@ -553,7 +553,8 @@ std::string unadmitted_restart_notice() {
 std::string read_variant_identity(const fs::path &entry) {
   std::error_code ec;
   const fs::path file = entry / "metadata.json";
-  if (!fs::is_regular_file(file, ec) || fs::file_size(file, ec) > 16384U) return {};
+  if (!fs::is_regular_file(file, ec)) return {};
+  if (fs::file_size(file, ec) > 16384U) return "?oversized";   // never equal to any identity: such a record is not reusable
   const auto meta = json::parse(read_all(file));
   return meta && meta->is_object() ? meta->str("patch_identity") : std::string();  // an unreadable record has no variant, exactly as before this existed
 }

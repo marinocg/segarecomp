@@ -22,6 +22,7 @@ std::string short_hash(const std::string &digest) { return digest.size() >= 16 ?
 void App::patch_chosen(const std::string &id, const std::string &path) {
   LibraryEntry *entry = catalog_.find_id(id);
   if (entry == nullptr || entry->platform_id != "genesis") return;
+  if (catalog_.read_only()) { show_message("The library is read-only", {"This library was written by a newer Segarecomp, so patches cannot be installed or changed here."}); return; }
   const fs::path rom = usable_rom_path(*entry);
   const PatchPreview preview = preview_patch(*entry, from_u8(path), rom);
   if (!preview.ok) {
@@ -31,6 +32,7 @@ void App::patch_chosen(const std::string &id, const std::string &path) {
     return;
   }
   patch_pending_ = from_u8(path);
+  patch_expected_identity_ = preview.info.identity;
   modal_ = Modal{};
   modal_.kind = Modal::Kind::install_patch;
   modal_.title = "Install " + preview.info.name + " " + preview.info.version + "?";
@@ -46,8 +48,15 @@ void App::patch_chosen(const std::string &id, const std::string &path) {
 
 void App::patch_install_confirmed(const std::string &id, const std::string &package) {
   LibraryEntry *entry = catalog_.find_id(id);
-  if (entry == nullptr) return;
+  if (entry == nullptr || catalog_.read_only()) return;
   const PatchInstall result = install_patch(*entry, from_u8(package), usable_rom_path(*entry), library_dir_, now_seconds());
+  if (result.ok && !patch_expected_identity_.empty() && result.identity != patch_expected_identity_) {
+    // the file changed between the preview and the confirmation: what would be installed is not what was shown
+    if (result.added) { std::string ignored; (void)remove_patch(*entry, result.identity, library_dir_, &ignored); }
+    patch_notices_[id] = "The package changed after it was verified; it was not installed. Choose it again.";
+    show_message("This patch cannot be installed", {patch_notices_[id]});
+    return;
+  }
   if (!result.ok) {
     patch_notices_[id] = result.error;
     trace("patch=install_failed");
@@ -63,7 +72,7 @@ void App::patch_install_confirmed(const std::string &id, const std::string &pack
 
 void App::select_variant(const std::string &id, const std::string &identity) {
   LibraryEntry *entry = catalog_.find_id(id);
-  if (entry == nullptr || entry->selected_variant == identity) return;
+  if (entry == nullptr || entry->selected_variant == identity || catalog_.read_only()) return;
   if (!identity.empty() && entry->find_patch(identity) == nullptr) return;   // only an installed patch can be selected
   if (is_building(id) || is_queued(id) || (game_ && game_id_ == id)) { toast("Wait for the running build or game to finish before switching version.", true); return; }
   entry->selected_variant = identity;
@@ -86,7 +95,7 @@ void App::ask_remove_patch(const LibraryEntry &entry, const std::string &identit
 void App::patch_remove_confirmed(const Modal &sheet) {
   if (sheet.ids.empty()) return;
   LibraryEntry *entry = catalog_.find_id(sheet.ids.front());
-  if (entry == nullptr) return;
+  if (entry == nullptr || catalog_.read_only()) return;
   if (is_building(entry->id()) || is_queued(entry->id()) || (game_ && game_id_ == entry->id())) { toast("Wait for the running build or game to finish first.", true); return; }
   // The build folder of the patched variant, remembered before the record disappears: only this one folder can be offered for deletion.
   fs::path built_dir;
