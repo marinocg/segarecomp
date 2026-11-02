@@ -292,6 +292,7 @@ int sega_cd_headless(int argc, char **argv) {
   fs::remove(options.report, ec);
   std::vector<std::pair<std::string, std::string>> environment;
   if (windowless) environment = {{"SDL_VIDEODRIVER", "dummy"}, {"SDL_AUDIODRIVER", "dummy"}, {"SEGARECOMP_VIEWER_UNTHROTTLED", "1"}, {"SEGARECOMP_VIEWER_NO_STOP_SCREEN", "1"}};
+  if (added.entry->sha256.size() == 64U) environment.emplace_back("SEGARECOMP_PROFILE_ID", added.entry->sha256);  // SEG-123
   RomView run_view = view_from_entry(*added.entry);
   run_view.sha256.clear();
   GameRun game(run_view, layout, plan.program, dir / "run.log", scd::run_arguments(plan, options), environment, true);

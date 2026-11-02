@@ -178,6 +178,10 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
   report support (and any program built before this support) saves either experimental choice but reads "Not yet available for this game. Showing the original picture." and the picture
   stays Original. **Enhanced Widescreen (Level 3) is implemented for Genesis, Sega CD and Master System (SEG-121, ADR 0264):** it adds the sprites the game's own VDP state already places over the extra columns (at most a few edge-crossing pixels on the Master System), is always reported Partial, and shows as Level 2 where the sprite layer cannot be produced; it does not widen the game world. There is no widescreen control or message on the game picture itself. A program built before widescreen support keeps working in Original mode;
   it needs rebuilding to gain extended rendering (ADR 0261).
+* **Side Presentation** (SEG-123, ADR 0265; same places, under Widescreen Mode): how the extra side area of a Level 2 / Level 3 picture looks. *Comfort* (default) shows a soft
+  ambient fill taken from the picture's edges instead of the raw extension, *Borders* plain neutral panels, *Raw Extension* the extension exactly as produced. It is
+  stored in the same file as `video.widescreen_side_style`, applies at once without a restart or reset, never changes the game picture, the game or a recording, and
+  does not create new gameplay visibility. A verified game-specific widescreen mode (none exists yet) is shown in full under Comfort and Raw.
 * Display presets: **Pixel Perfect** (the untouched nearest-neighbour picture), **CRT Soft** (scanline gaps + glow), **CRT Classic** (adds the RGB
   aperture mask and slight curvature), **CRT Arcade** (stronger everything). Editing a slider makes the preset *Custom*.
 * **Controls**: Player 1 and Player 2 (both consoles), keyboard and SDL3 gamepad bindings, gamepad hot-plug, device choice, analog dead zone (the left

@@ -10,6 +10,8 @@ extern "C" {
 typedef struct GenesisSdl3Viewer GenesisSdl3Viewer;
 /* Returns NULL on failure (SDL unavailable etc.). */
 GenesisSdl3Viewer *genesis_sdl3_viewer_open(const char *title, int scale);
+/* SEG-123: the same viewer for another platform namespace of the per-game widescreen profile ("sega-cd"). */
+GenesisSdl3Viewer *genesis_sdl3_viewer_open_platform(const char *title, int scale, const char *platform_id);
 /* SEG-032-T009: opens the audio output (stereo s16, the mixer's frozen rate) when the audio subsystem and a device are available.
  * Returns NULL (a silent viewer) on any failure; never fatal. The sink stays valid until genesis_sdl3_viewer_close. */
 const GenesisAudioSink *genesis_sdl3_viewer_audio_open(GenesisSdl3Viewer *viewer);

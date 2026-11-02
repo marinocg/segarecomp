@@ -11,6 +11,7 @@
 
 #include "sms_viewer_sdl3.h"
 #include "sv_host.h"
+#include "sv_style_probe.h"
 #include "sv_layout.h"
 
 static int failures = 0;
@@ -100,7 +101,7 @@ static void step(unsigned n) {
 static void set_mode(SvWidescreenMode m, SvAspect aspect, SvScaleMode scale) {
   SvHost *h = sms_sdl3_viewer_sv_host(viewer);
   SvSettings s = *sv_host_settings(h);
-  s.video.widescreen = m;
+  s.video.widescreen = m; s.video.widescreen_side_style = SV_SIDE_RAW; /* SEG-123: these suites verify the raw extension pixels */
   s.video.aspect = aspect;
   s.video.scale = scale;
   sv_host_apply_settings(h, &s);
@@ -271,6 +272,7 @@ int main(void) {
   build_scene(0, 21);
   step(2);
   check_output("Level 2 / hscroll 21", 192, 42, 21, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+  CHECK(sv_style_probe(host_h, "SMS Level 2 192 styles", 256, 192, SV_ASPECT_ORIGINAL, SV_SCALE_FIT) == 0, "SMS Level 2: the side styles behave");
   build_scene(0, 0);
 
   /* ---- Level 3: the sprites crossing the screen edges spill over the wrapped background; Partial, wording says what it is ---- */
@@ -286,6 +288,7 @@ int main(void) {
   CHECK(ext->result.sprite_pixels == 16u * (4u + 7u), "Level 3: 4 columns left and 7 columns right of the picture, 16 lines each");
   ext_state("Level 3", 42);
   check_output("Level 3 / edge sprites", 192, 42, 0, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+  CHECK(sv_style_probe(host_h, "SMS Level 3 192 styles", 256, 192, SV_ASPECT_ORIGINAL, SV_SCALE_FIT) == 0, "SMS Level 3: the side styles behave");
   sv_host_widescreen_caps(host_h, &caps);
   CHECK(caps.enhanced == SV_WS_PARTIAL && sv_host_widescreen_effective(host_h) == SV_WIDESCREEN_ENHANCED_GAMEPLAY, "caps: Level 3 Partial and effective");
   CHECK(strcmp(sv_widescreen_status(SV_WIDESCREEN_ENHANCED_GAMEPLAY, &caps), kSpriteNote) == 0, "menu status: edge-sprites wording");
