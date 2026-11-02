@@ -469,7 +469,7 @@ void sonic1_provider() {
           const int want = expected_word(L, plane, cx, cy), got = sonic1_world_cell(L.ram.data(), plane, cx, cy);
           ++total; wrong += want != got; nonzero += want > 0;
         }
-    checkf(wrong == 0 && nonzero > 1000, "world cells equal the independent derivation (layout, chunks, blocks, flips)", wrong, nonzero);
+    checkf(wrong == 0 && nonzero > 1000 && total == 2U * 73U * 335U, "world cells equal the independent derivation (layout, chunks, blocks, flips)", wrong, nonzero);
     check(sonic1_world_cell(L.ram.data(), 0, -1, 10) == 0 && sonic1_world_cell(L.ram.data(), 0, 2048, 10) == 0 && sonic1_world_cell(L.ram.data(), 0, 10, 256) == 0 && sonic1_world_cell(L.ram.data(), 1, 10, -1) == 0, "outside the level is a blank cell");
     check(sonic1_world_cell(nullptr, 0, 0, 0) == -1 && sonic1_world_cell(L.ram.data(), 2, 0, 0) == -1, "null image / bad plane");
     Level bad = L; bad.ram[0xA400 + 5] = 0x53;
