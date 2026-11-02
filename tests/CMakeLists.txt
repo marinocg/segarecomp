@@ -2079,6 +2079,9 @@ set_property(TEST segapatch_package_test APPEND PROPERTY ENVIRONMENT_MODIFICATIO
 add_test(NAME segapatch_native_package_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segapatch_native_package_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/tools/segapatch.py)
 set_property(TEST segapatch_native_package_test APPEND PROPERTY LABELS full fast)
 set_property(TEST segapatch_native_package_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+add_test(NAME segarecomp_native_build_args_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_native_build_args_test.py $<TARGET_FILE:segarecomp>)
+set_property(TEST segarecomp_native_build_args_test APPEND PROPERTY LABELS full fast)
+set_property(TEST segarecomp_native_build_args_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
 # CI sharding (see ci_shards.cmake, which also registers its guard test): must come after the LAST add_test and label assignment so
 # every tier test is partitioned.
