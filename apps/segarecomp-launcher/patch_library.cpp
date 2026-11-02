@@ -93,7 +93,13 @@ PatchInstall install_patch(LibraryEntry &entry, const fs::path &package, const f
   p.id = checked.info.id;
   p.version = checked.info.version;
   p.name = checked.info.name;
-  p.target_sha256 = checked.info.target_sha256;
+  p.target_sha256 = checked.info.has_rom ? checked.info.target_sha256 : entry.sha256;   // a native-only package compiles the unchanged original image
+  if (checked.info.has_native) {
+    p.native_capability = checked.info.native_capability;
+    p.native_implementation = checked.info.native_implementation;
+    p.native_components = checked.info.native_components;
+    p.native_descriptor_sha256 = checked.info.native_payload_sha256;
+  }
   p.width_max = checked.info.widescreen_width_max;
   p.widescreen = checked.info.default_widescreen;
   p.side_style = checked.info.default_side_style;

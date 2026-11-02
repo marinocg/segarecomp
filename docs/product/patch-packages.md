@@ -1,4 +1,4 @@
-# Patch packages (`.segapatch`, schema 1)
+# Patch packages (`.segapatch`, schema 1 and 2)
 
 A patch package is a small, portable, **data-only** file that describes one optional modification of one verified game. Segarecomp never executes anything from a package: no code,
 scripts, shared libraries or plugins, and no runtime memory injection. A verified package produces a *patched input image*; the normal static recompilation pipeline then processes
@@ -66,3 +66,32 @@ One JSON object on stdout (`{"ok":true,...}` or `{"ok":false,"error":"..."}`); e
 
 `tools/segapatch.py create --source <original> --target <patched> --id ... --name ... --version ... [--width-max N] [--default-widescreen NAME] [--default-side-style NAME] --out <file>` writes a deterministic package (fixed timestamps and
 entry order). Packages for commercial games are authored in the private harness; no ROM, patched ROM or reconstructable game data is ever committed here.
+
+## Schema 2: native-only and combined packages (ADR 0267)
+
+Schema 1 packages stay readable and unchanged. Schema 2 adds the typed payload `native`, next to or instead of the BPS `rom` payload:
+
+```text
+sonic1-native-widescreen.segapatch
+├── manifest.json        (schema_version 2; "requires": ["genesis.sonic1.native-widescreen.v1"])
+├── game.bps             (optional `rom` payload; absent in a native-only package)
+└── widescreen.json      (the `native` payload: a closed descriptor, never code)
+```
+
+```json
+{"format": "segarecomp-native-descriptor", "schema_version": 1, "capability": "genesis.sonic1.native-widescreen.v1",
+ "source_sha256": "<exact original image>", "min_implementation": 1, "components": ["hud", "scenery"], "width_max": 100}
+```
+
+The descriptor only SELECTS an audited capability of this release: `capability` must be in the release's table (`segarecomp::patch::kNativeCapabilities`), `source_sha256` must be the one image
+that capability is verified for and equal the manifest's, `min_implementation` may not exceed the implementation built in, `components` is a non-empty set of that capability's components,
+`width_max` (optional, 0..100) must agree with the manifest's `widescreen_width_max`. The manifest must `require` exactly that capability, so a release without it refuses the package at
+install and build instead of ignoring the payload. Unknown fields, malformed or oversized (> 4 KiB) descriptors, another revision, a repeated or unknown component and every payload type
+other than `rom` and `native` are refused. A native-only package leaves the image bytes unchanged (the effective image is the original) and is still a separate variant: the package identity
+(digest of the manifest, which names the descriptor digest) is part of the cache key, together with the capability id, its implementation version and the descriptor digest. A package may
+carry both payloads (combined): the BPS is applied first, the native capability then serves the patched image.
+
+`tools/segapatch.py create --source ROM [--target PATCHED] ... --native-capability ID --native-components hud,scenery` authors schema 2 packages deterministically.
+`segarecomp patch inspect|verify|apply` reports `schema_version`, `has_rom`, `has_native`, `native_capability`, `native_components`, `native_implementation` and `native_descriptor_sha256`.
+`segarecomp build` accepts `--native-capability --native-implementation --native-components --native-source-sha256 --native-descriptor-sha256` (the launcher passes the values of the verified
+package; the build re-checks them against its own table and links the matching provider; any mismatch, a headless build or a test fixture capability is refused).

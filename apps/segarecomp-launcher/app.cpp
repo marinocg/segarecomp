@@ -743,6 +743,10 @@ bool App::start_build(const std::string &id, bool restart_after) {
     view.patch_identity = variant.patch_identity;
     view.patch_package = variant.patch_package;
     view.patch_target_sha256 = variant.patch_target_sha256;
+    view.patch_native_capability = variant.patch_native_capability;
+    view.patch_native_implementation = variant.patch_native_implementation;
+    view.patch_native_components = variant.patch_native_components;
+    view.patch_native_descriptor_sha256 = variant.patch_native_descriptor_sha256;
     view.patch_label = variant.patch_label;
     view.patch_widescreen = variant.patch_widescreen;
     view.patch_side_style = variant.patch_side_style;

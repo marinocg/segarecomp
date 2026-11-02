@@ -2780,9 +2780,22 @@ static void genesis_raster_advance(GenesisRuntime *runtime, uint64_t now_ticks) 
 /* SEG-118: the optional presentation-only extension. Runs only after the native frame rendered successfully, with the frame's raster state and
  * VRAM journal still valid, and only when the adapter asked for it (the dispatch itself is the shared genesis_frame_extension_run, also used by the
  * Sega CD frame path). The result is returned (not stored) so the caller can stamp it with the sequence published by the same call. */
-static void genesis_run_frame_extension(GenesisRasterCapture *capture, const uint8_t *vram, const GenesisFrameArtifact *native,
+static void genesis_run_frame_extension(const GenesisRuntime *runtime, GenesisRasterCapture *capture, const uint8_t *vram, const GenesisFrameArtifact *native,
                                         GenesisExtensionResult *out) {
-  genesis_frame_extension_run(capture->extension, vram, &capture->frame, native, out);
+  GenesisFrameExtension *extension = capture->extension;
+  /* SEG-124 (ADR 0267): the provider may use the work-RAM snapshot only if it was taken at the previous publication (the state the game used to prepare this frame). */
+  extension->compat_ram_valid = (uint8_t)(extension->compat_ram != 0 && extension->compat_ram_stamp != 0U && extension->compat_ram_stamp + 1U == runtime->virtual_frame_count);
+  genesis_frame_extension_run(extension, vram, &capture->frame, native, out);
+}
+
+/* SEG-124: after a frame was published at the VBlank onset (before the VBlank handler runs) the work RAM is copied for the NEXT frame's provider. A read-only copy;
+ * absent without a verified provider. The stamp is the virtual frame counter of this onset. */
+static void genesis_compat_snapshot(GenesisRuntime *runtime) {
+  const GenesisRasterCapture *capture = runtime->live_raster;
+  GenesisFrameExtension *extension = capture != 0 ? capture->extension : 0;
+  if (extension == 0 || extension->compat == 0 || extension->compat_ram == 0) return;
+  memcpy(extension->compat_ram, runtime->work_ram, sizeof(runtime->work_ram));
+  extension->compat_ram_stamp = runtime->virtual_frame_count;
 }
 
 /* Renders the frame that just ended and publishes it atomically (a failed render publishes nothing and mutates
@@ -2809,7 +2822,7 @@ static GENESIS_NOINLINE void genesis_publish_live_frame(GenesisRuntime *runtime)
     }
     status = capture->producer(runtime->devices.vdp.vram, &capture->frame, &produced);
     if (status == 0 && capture->extension != 0) {
-      genesis_run_frame_extension(capture, runtime->devices.vdp.vram, &produced, &extension_result);
+      genesis_run_frame_extension(runtime, capture, runtime->devices.vdp.vram, &produced, &extension_result);
       have_extension = 1;
     }
     capture->frame.has_vram_journal = 0U; /* closed until the next frame's line 0 (VBlank writes are in its snapshot) */
@@ -3039,6 +3052,7 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
        render outcome -- it, not publication, is what a host paces on. */
     ++runtime->virtual_frame_count;
     genesis_publish_live_frame(runtime);
+    genesis_compat_snapshot(runtime);
     /* §3: VDP register #1 bit 5 (IE0) gating -- the real, already-persisted
        register state, mirroring the existing DMA-enable (bit 4) precedent. */
     if ((runtime->devices.vdp.registers[1] & UINT16_C(0x0020)) != 0U &&

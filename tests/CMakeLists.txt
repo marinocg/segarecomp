@@ -242,6 +242,15 @@ segarecomp_enable_warnings(genesis_extension_tests)
 add_test(NAME genesis_extension_tests COMMAND genesis_extension_tests)
 set_property(TEST genesis_extension_tests APPEND PROPERTY LABELS full fast)
 
+# SEG-124 (ADR 0267): the generic native-compatibility hook (mock provider), the work-RAM snapshot timing, and the Sonic 1 provider on a synthetic RAM image.
+add_executable(genesis_native_compat_tests genesis_native_compat_test.cpp
+  ${PROJECT_SOURCE_DIR}/platforms/genesis/native_compat/sonic1_widescreen.c ${PROJECT_SOURCE_DIR}/platforms/genesis/native_compat/native_compat_registry.c)
+target_include_directories(genesis_native_compat_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/native_compat)
+target_link_libraries(genesis_native_compat_tests PRIVATE segarecomp::runtime_genesis segarecomp::media)
+segarecomp_enable_warnings(genesis_native_compat_tests)
+add_test(NAME genesis_native_compat_tests COMMAND genesis_native_compat_tests)
+set_property(TEST genesis_native_compat_tests APPEND PROPERTY LABELS full fast)
+
 add_executable(genesis_viewer_tests genesis_viewer_test.cpp ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/viewer.c)
 target_include_directories(genesis_viewer_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer)
 target_link_libraries(genesis_viewer_tests PRIVATE segarecomp::runtime_genesis)
@@ -1343,6 +1352,14 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   target_link_libraries(genesis_viewer_extension_sdl_test PRIVATE segarecomp_viewer_genesis_sdl3)
   set_target_properties(genesis_viewer_extension_sdl_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
   segarecomp_enable_warnings(genesis_viewer_extension_sdl_test)
+  # SEG-124: a verified native compatibility provider on the real SDL3 adapter (provenance, scenery cells, HUD overlay, counters).
+  add_executable(genesis_native_compat_viewer_sdl_test genesis_native_compat_viewer_sdl_test.c)
+  target_link_libraries(genesis_native_compat_viewer_sdl_test PRIVATE segarecomp_viewer_genesis_sdl3)
+  set_target_properties(genesis_native_compat_viewer_sdl_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  segarecomp_enable_warnings(genesis_native_compat_viewer_sdl_test)
+  add_test(NAME genesis_native_compat_viewer_sdl_test COMMAND genesis_native_compat_viewer_sdl_test)
+  set_property(TEST genesis_native_compat_viewer_sdl_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST genesis_native_compat_viewer_sdl_test PROPERTY TIMEOUT 240)
   add_test(NAME genesis_viewer_extension_sdl_test COMMAND genesis_viewer_extension_sdl_test)
   set_property(TEST genesis_viewer_extension_sdl_test APPEND PROPERTY LABELS full fast)
   set_property(TEST genesis_viewer_extension_sdl_test PROPERTY TIMEOUT 240)
@@ -2058,6 +2075,10 @@ set_property(TEST viewer_foundation_layout_test APPEND PROPERTY ENVIRONMENT_MODI
 add_test(NAME segapatch_package_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segapatch_package_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/tools/segapatch.py)
 set_property(TEST segapatch_package_test APPEND PROPERTY LABELS full fast)
 set_property(TEST segapatch_package_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-124 (ADR 0267): schema 2 (native-only / combined) through the same CLI seam, synthetic fixture image and capability.
+add_test(NAME segapatch_native_package_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segapatch_native_package_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/tools/segapatch.py)
+set_property(TEST segapatch_native_package_test APPEND PROPERTY LABELS full fast)
+set_property(TEST segapatch_native_package_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
 # CI sharding (see ci_shards.cmake, which also registers its guard test): must come after the LAST add_test and label assignment so
 # every tier test is partitioned.

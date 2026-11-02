@@ -19,6 +19,9 @@
 #include "vdp_render.h"
 #include "viewer.h"
 #include "viewer_sdl3.h"
+#ifdef SEGARECOMP_NATIVE_PROVIDER
+#include "native_compat_registry.h" /* SEG-124: linked only into a program built from a verified package that selects a native capability */
+#endif
 #ifdef SEGARECOMP_GENESIS_SOUND
 #include "genesis_audio_present.h" /* SEG-032-T009: the shared mixer is presented, never advanced, by the viewer */
 #include "genesis_sound.h"         /* SEG-032-T008: the sound-carrying link set of `segarecomp build` */
@@ -79,6 +82,17 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   g_raster_capture.producer = genesis_vdp_produce_frame_raster; /* SEG-055: scanline-aware frames */
   g_raster_capture.extension = genesis_sdl3_viewer_extension(sdl, &observer.sequence); /* SEG-118: Level 2 extended backgrounds (presentation only) */
   runtime->live_raster = &g_raster_capture;
+#ifdef SEGARECOMP_NATIVE_PROVIDER
+  /* SEG-124 (ADR 0267): the build selected exactly one audited capability (provider index, implementation version and enabled components are compile-time constants derived from the verified
+   * package). A provider that does not match the build, or an extension target that is unavailable, leaves the viewer generic: it never guesses. */
+  {
+    void *compat_state = NULL;
+    const GenesisNativeCompat *compat = genesis_native_compat_select(SEGARECOMP_NATIVE_PROVIDER, SEGARECOMP_NATIVE_IMPLEMENTATION, &compat_state);
+    if (compat == NULL || g_raster_capture.extension == NULL ||
+        genesis_sdl3_viewer_attach_native_compat(sdl, g_raster_capture.extension, compat, compat_state, SEGARECOMP_NATIVE_COMPONENTS) != 0)
+      fprintf(stderr, "viewer: native compatibility provider not attached; presenting generically\n");
+  }
+#endif
 
   GenesisViewerHost host;
   GenesisPacer pacer;
@@ -124,6 +138,18 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
              (int)r.transfer.kind, (unsigned)runtime->pc);
     genesis_sdl3_viewer_stop_screen(sdl, r.outcome == GENESIS_VIEWER_GUEST_STOP ? "The game stopped" : "The viewer stopped", detail);
   }
+#ifdef SEGARECOMP_NATIVE_PROVIDER
+  {
+    GenesisNativeCompatStats stats;
+    void *unused_state = NULL;
+    const GenesisNativeCompat *selected = genesis_native_compat_select(SEGARECOMP_NATIVE_PROVIDER, SEGARECOMP_NATIVE_IMPLEMENTATION, &unused_state);
+    genesis_sdl3_viewer_native_compat_stats(sdl, &stats);
+    fprintf(stderr, "VIEWER_NATIVE_SUMMARY {\"capability\":\"%s\",\"frames\":%llu,\"authored\":%llu,\"hud_frames\":%llu,\"declined\":[%llu,%llu,%llu,%llu,%llu,%llu]}\n", selected != NULL ? selected->capability : "none",
+            (unsigned long long)stats.frames, (unsigned long long)stats.authored, (unsigned long long)stats.hud_frames, (unsigned long long)stats.declined[0],
+            (unsigned long long)stats.declined[1], (unsigned long long)stats.declined[2], (unsigned long long)stats.declined[3], (unsigned long long)stats.declined[4],
+            (unsigned long long)stats.declined[5]);
+  }
+#endif
   genesis_sdl3_viewer_close(sdl);
 
   const char *name = r.outcome == GENESIS_VIEWER_GUEST_STOP        ? "guest_stop"

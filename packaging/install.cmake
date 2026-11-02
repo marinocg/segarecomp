@@ -26,6 +26,8 @@ set(_src ${PROJECT_SOURCE_DIR})
 set(_rt ${_res}/runtime)
 install(DIRECTORY ${_src}/platforms/genesis/runtime/ DESTINATION ${_rt}/platforms/genesis/runtime FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
 install(DIRECTORY ${_src}/platforms/genesis/viewer/ DESTINATION ${_rt}/platforms/genesis/viewer FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
+# SEG-124 (ADR 0267): the audited native compatibility providers, linked only into a program built from a verified package that selects one.
+install(DIRECTORY ${_src}/platforms/genesis/native_compat/ DESTINATION ${_rt}/platforms/genesis/native_compat FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
 install(DIRECTORY ${_src}/platforms/genesis/compat/ DESTINATION ${_rt}/platforms/genesis/compat FILES_MATCHING PATTERN "*.json")
 install(DIRECTORY ${_src}/platforms/genesis/machine/include/ DESTINATION ${_rt}/platforms/genesis/machine/include FILES_MATCHING PATTERN "*.h")
 install(DIRECTORY ${_src}/libs/device/sega/genesis/include/ DESTINATION ${_rt}/libs/device/sega/genesis/include FILES_MATCHING PATTERN "*.h")

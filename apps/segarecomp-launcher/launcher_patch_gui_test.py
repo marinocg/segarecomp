@@ -60,7 +60,7 @@ def sha(data):
 
 
 class Profile:
-    def __init__(self, tmp, name, exe, fake_cli, fake_game):
+    def __init__(self, tmp, name, exe, fake_cli, fake_game, fixture=False):
         self.exe = exe
         self.dir = tmp / name
         self.dir.mkdir()
@@ -74,6 +74,8 @@ class Profile:
                         FAKE_GAME_BIN=fake_game, FAKE_GAME_LOG=str(self.game_log), FAKE_GAME_ENV_LOG=str(self.env_log), FAKE_ROM_LOG=str(self.rom_log),
                         FAKE_BUILD_ARGS_LOG=str(self.args_log))
         self.source = synthetic_rom(1)
+        if fixture:   # SEG-124: the project-owned fixture capability, bound to this artificial game (never available in a release)
+            self.env.update(SEGARECOMP_ALLOW_FIXTURE_CAPABILITIES="1", SEGARECOMP_FIXTURE_CAPABILITY_SHA256=sha(self.source))
         self.rom = self.dir / "game.md"
         self.rom.write_bytes(self.source)
         done = subprocess.run([exe, "--import", str(self.rom)], env=self.env, timeout=60, capture_output=True, text=True)
@@ -302,6 +304,87 @@ def main():
         (van / "metadata.json").write_text(json.dumps(mv))
         trace = q.run(OPEN + ["variant vanilla", "frames 30", "expect variant=vanilla", "expect can_play=0", "quit"])
         check("vanilla record claiming a variant", trace)
+
+    # 13. SEG-124 (ADR 0267): native-only and combined packages (fixture capability): a distinct variant even though the image bytes are the original's.
+    CAP = "genesis.fixture.native-widescreen.v1"
+    with tempfile.TemporaryDirectory() as d:
+        tmp = pathlib.Path(d)
+        n = Profile(tmp, "native", exe, fake_cli, fake_game, fixture=True)
+        src = n.source
+        pkg_native = tmp / "native-only.segapatch"
+        sp.create(src, None, pkg_native, id_="synthetic-native", name="Synthetic Native", version="1.0.0", width_max=100, native_capability=CAP,
+                  native_components=["hud", "scenery"], presentation_defaults={"widescreen": "enhanced_gameplay", "side_style": "raw"})
+        widened = bytearray(src)
+        widened[0x1000:0x1008] = b"WIDENED!"
+        pkg_both = tmp / "combined.segapatch"
+        sp.create(src, bytes(widened), pkg_both, id_="synthetic-native", name="Synthetic Native", version="2.0.0", width_max=100, native_capability=CAP,
+                  native_components=["hud", "scenery"])
+        pkg_hud = tmp / "hud-only.segapatch"
+        sp.create(src, None, pkg_hud, id_="synthetic-native", name="Synthetic Native", version="1.0.0", width_max=100, native_capability=CAP, native_components=["hud"])
+        ident_n, ident_c, ident_h = manifest_identity(pkg_native), manifest_identity(pkg_both), manifest_identity(pkg_hud)
+        with zipfile.ZipFile(pkg_native) as z:
+            descriptor_sha = sha(z.read("widescreen.json"))
+        check("native vanilla build", n.run(OPEN + ["build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", "quit"]))
+        vdir = n.builds()[0]
+        expect(not any("--native" in line for line in n.lines(n.args_log)), f"a Vanilla build carries no native option: {n.lines(n.args_log)}")
+        # install both packages; installing never builds or selects
+        trace = n.run(OPEN + [f"patch_pick {pkg_native}", "frames 12", "expect modal=1", "patch_confirm", "frames 20", "expect patches=1", "expect variant=vanilla", "quit"])
+        check("native-only install", trace)
+        expect(not any("build=started" in l for l in trace), "installing a native package must not start a build")
+        catalog = json.loads((n.lib / "library.json").read_text()) if (n.lib / "library.json").exists() else {}
+        text = json.dumps(catalog)
+        expect(CAP in text and descriptor_sha in text, f"the catalog records the installed package's native capability and descriptor digest ({'library.json' if catalog else 'missing'})")
+        trace = n.run(OPEN + ["variant patched", "frames 10", "expect status=Not built", "expect can_play=0", "build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", "expect patch_built=1", "quit"])
+        check("native-only build", trace)
+        dirs = n.builds()
+        expect(len(dirs) == 2 and vdir in dirs, f"a native-only variant is a separate build although the image is the original's: {dirs}")
+        ndir = next(x for x in dirs if x != vdir)
+        nmeta = json.loads((ndir / "metadata.json").read_text())
+        expect(nmeta.get("patch_identity") == ident_n and nmeta.get("patch_target_sha256") == sha(src) and nmeta.get("native_capability") == CAP and nmeta.get("native_implementation") == 1
+               and nmeta.get("native_components") == 3 and nmeta.get("native_descriptor_sha256") == descriptor_sha, f"native build metadata: {nmeta}")
+        expect(n.lines(n.rom_log) == [fnv(src), fnv(src)], f"the native-only build compiled the ORIGINAL image bytes: {n.lines(n.rom_log)}")
+        last = n.lines(n.args_log)[-1]
+        want = f"--native-capability {CAP} --native-implementation 1 --native-components 3 --native-source-sha256 {sha(src)} --native-descriptor-sha256 {descriptor_sha}"
+        expect(want in last, f"the build received exactly the verified native selection: {last}")
+        expect("native_capability" not in (vdir / "metadata.json").read_text(), "the Vanilla record carries no native member")
+        # a recorded variant that lost or changed its native record is not reusable
+        good = (ndir / "metadata.json").read_text()
+        m = json.loads(good); m.pop("native_capability")
+        (ndir / "metadata.json").write_text(json.dumps(m))
+        check("native record stripped", n.run(OPEN + ["variant patched", "frames 30", "expect can_play=0", "quit"]))
+        m = json.loads(good); m["native_implementation"] = 2
+        (ndir / "metadata.json").write_text(json.dumps(m))
+        check("native implementation changed", n.run(OPEN + ["variant patched", "frames 30", "expect can_play=0", "quit"]))
+        m = json.loads(good); m["native_descriptor_sha256"] = "0" * 64
+        (ndir / "metadata.json").write_text(json.dumps(m))
+        check("native descriptor changed", n.run(OPEN + ["variant patched", "frames 30", "expect can_play=0", "quit"]))
+        (ndir / "metadata.json").write_text(good)
+        check("native record restored", n.run(OPEN + ["variant patched", "frames 30", "expect can_play=1", "quit"]))
+        # launching: the native variant starts from its own folder with the original image identity and the patch's presentation defaults
+        n.run(OPEN + ["variant patched", "frames 10", "play", "frames 20", "wait_play_end", "frames 6", "quit"])
+        env_lines = n.lines(n.env_log)
+        expect(any(f"patch={ident_n} pws=enhanced_gameplay pside=raw" in l and f"rom={sha(src)} library={sha(src)}" in l for l in env_lines), f"native variant launch identities (the image is the original's, the patch identity is the variant's): {env_lines}")
+        # a second and a third package: their own identities and builds (a different component set, and a BPS + native combination)
+        trace = n.run(OPEN + [f"patch_pick {pkg_hud}", "frames 12", "patch_confirm", "frames 20", f"patch_pick {pkg_both}", "frames 12", "patch_confirm", "frames 20", "expect patches=3", "quit"])
+        check("more packages", trace)
+        expect(len(n.builds()) == 2, "installing packages builds nothing")
+        for index in (1, 2):
+            trace = n.run(OPEN + [f"variant patched={index}", "frames 10", "expect status=Not built", "build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", "quit"])
+            check(f"package {index} build", trace)
+        expect(len(n.builds()) == 4, f"each native package has its own build: {n.builds()}")
+        rom_lines = n.lines(n.rom_log)
+        expect(rom_lines[-2:] == [fnv(src), fnv(bytes(widened))], f"the HUD-only package built the original, the combined one the patched image: {rom_lines}")
+        expect(f"--native-components 1" in n.lines(n.args_log)[-2], f"the HUD-only package requests only the HUD component: {n.lines(n.args_log)[-2]}")
+        metas = {json.loads((x / "metadata.json").read_text()).get("patch_identity"): json.loads((x / "metadata.json").read_text()) for x in n.builds()}
+        expect(metas[ident_c].get("patch_target_sha256") == sha(bytes(widened)) and metas[ident_c].get("native_capability") == CAP and metas[ident_h].get("native_components") == 1, f"combined / HUD-only metadata: {metas}")
+        # restart persistence, removal and reinstallation
+        check("native persistence", n.run(OPEN + ["frames 20", "expect patches=3", "quit"]))
+        trace = n.run(OPEN + ["patch_remove 0", "frames 6", "expect modal=1", "patch_confirm delete", "frames 40", "expect patches=2", "expect variant=patched", "quit"])   # another patch stays selected
+        check("native removal", trace)
+        expect(vdir in n.builds() and ndir not in n.builds(), f"removing the native-only patch deleted only its build: {n.builds()}")
+        expect(n.rom.read_bytes() == src, "the original ROM is untouched by native packages")
+        trace = n.run(OPEN + [f"patch_pick {pkg_native}", "frames 12", "patch_confirm", "frames 20", "expect patches=3", "variant patched=2", "frames 10", "expect status=Not built", "quit"])
+        check("native reinstall", trace)
 
     if failures:
         print("\n".join(failures))

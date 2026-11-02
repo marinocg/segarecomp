@@ -43,6 +43,10 @@ void App::patch_chosen(const std::string &id, const std::string &path) {
   modal_.lines = {"Compatible with this game: yes. It matches the exact original image (SHA-256 verified), the patch applied cleanly and the result matches its published digest.",
                   "Purpose: " + preview.info.purpose + ". Validated width: " + range + ".",
                   std::string(preview.already_installed ? "This exact package is already installed on this game." : "Package identity " + short_hash(preview.info.identity) + ".")};
+  if (preview.info.has_native)   // SEG-124: a data-only descriptor that selects an audited component of this release; nothing from the package is ever executed
+    modal_.lines.push_back(std::string("Native widescreen component: ") + ((preview.info.native_components & segarecomp::patch::kNativeComponentHud) != 0U ? "HUD " : "") +
+                           ((preview.info.native_components & segarecomp::patch::kNativeComponentScenery) != 0U ? "world scenery " : "") +
+                           "(" + preview.info.native_capability + ", built into this release). The package only selects it; no code is loaded from it.");
   trace("patch=preview_ok");
 }
 

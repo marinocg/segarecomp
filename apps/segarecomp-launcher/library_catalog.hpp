@@ -27,7 +27,12 @@ struct BuildRecord {
 struct InstalledPatch {
   std::string identity;       // SHA-256 of the package manifest (names every payload and target digest)
   std::string id, version, name;
-  std::string target_sha256;  // verified digest of the patched image
+  std::string target_sha256;  // verified digest of the patched image (a native-only package leaves the image unchanged: this is the original's digest)
+  // SEG-124 (ADR 0267): the package's native capability, if it has a `native` payload. Recorded at install from the verified package; the build re-checks them.
+  std::string native_capability;
+  unsigned native_implementation = 0, native_components = 0;
+  std::string native_descriptor_sha256;
+  [[nodiscard]] bool has_native() const { return !native_capability.empty(); }
   std::string widescreen, side_style;   // the package's typed presentation defaults (closed name sets, "" = none)
   int width_max = -1;         // the package's stated validated Widescreen Width (0..100), -1 = not stated; informational only (never drives capability)
   long long installed_at = 0;

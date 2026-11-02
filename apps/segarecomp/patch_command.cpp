@@ -17,6 +17,9 @@ std::string esc(const std::string &s) {
 }
 
 void info_fields(const segarecomp::patch::PackageInfo &i) {
+  std::cout << "\"schema_version\":" << i.schema_version << ",\"has_rom\":" << (i.has_rom ? "true" : "false") << ",\"has_native\":" << (i.has_native ? "true" : "false")
+            << ",\"native_capability\":\"" << esc(i.native_capability) << "\",\"native_components\":" << i.native_components << ",\"native_implementation\":" << i.native_implementation
+            << ",\"native_descriptor_sha256\":\"" << i.native_payload_sha256 << "\",\"native_width_max\":" << i.native_width_max << ",";
   std::cout << "\"id\":\"" << esc(i.id) << "\",\"version\":\"" << esc(i.version) << "\",\"name\":\"" << esc(i.name) << "\",\"platform\":\"" << i.platform
             << "\",\"purpose\":\"" << i.purpose << "\",\"source_sha256\":\"" << i.source_sha256 << "\",\"target_sha256\":\"" << i.target_sha256
             << "\",\"payload_sha256\":\"" << i.rom_payload_sha256 << "\",\"widescreen_width_max\":" << i.widescreen_width_max << ",\"default_widescreen\":\"" << i.default_widescreen << "\",\"default_side_style\":\"" << i.default_side_style << "\""

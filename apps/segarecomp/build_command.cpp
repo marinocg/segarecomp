@@ -9,6 +9,7 @@
 #include "segarecomp/machine/genesis/z80_materialization.hpp"
 #include "segarecomp/machine/master_system/emit.hpp"
 #include "segarecomp/machine/master_system/ml_region_z80_producer.hpp"
+#include "segarecomp/patch.hpp"
 #include "segarecomp/rom.hpp"
 #include "segarecomp/sha256.hpp"
 
@@ -105,6 +106,11 @@ struct Options {
   // H-interrupt whose RAM-resident vector has no compiled handler STOPS the pass and ADR 0049 can derive its copy alias / RAM thunk.
   // Default off: the default policy counts and drops such an interrupt. Genesis only; it changes the generated program.
   bool hint_alias_discovery = false;
+  // SEG-124 (ADR 0267): a verified package selected one audited native compatibility capability. These come from the launcher/CLI after the package was verified; the build
+  // re-checks them against the audited capability table and links the matching provider statically. Empty capability = none (Vanilla and BPS-only builds contain no provider).
+  std::string native_capability, native_source_sha256, native_descriptor_sha256;
+  unsigned native_implementation = 0, native_components = 0;
+  int native_index = -1;
 };
 
 enum class Target { genesis, master_system };
@@ -183,6 +189,11 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--admission-plan" && !options.admission_plan) options.admission_plan = fs::path(value);
     else if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) options.aot_policy = value;
     else if (key == "--hint-alias-discovery" && (value == "0" || value == "1")) options.hint_alias_discovery = value == "1";
+    else if (key == "--native-capability") options.native_capability = value;
+    else if (key == "--native-implementation") options.native_implementation = static_cast<unsigned>(std::max(0, std::atoi(value.c_str())));
+    else if (key == "--native-components") options.native_components = static_cast<unsigned>(std::max(0, std::atoi(value.c_str())));
+    else if (key == "--native-source-sha256") options.native_source_sha256 = value;
+    else if (key == "--native-descriptor-sha256") options.native_descriptor_sha256 = value;
     else if (key == "--aot-model" && !aot_model_given && (value == "v1" || value == "gen2")) { options.aot_model = value; aot_model_given = true; }
     else return std::nullopt;
   }
@@ -192,6 +203,19 @@ std::optional<Options> parse_options(int argc, char **argv) {
   if (options.sdl3_include.has_value() != options.sdl3_lib.has_value()) return std::nullopt;
   if (options.aot_model == "gen2" && options.aot_policy != "optimized") return std::nullopt;  // gen2 is an opt-in of Optimized, never a policy
   if (!options.platform.empty() && options.platform != "genesis" && options.platform != "master-system") return std::nullopt;
+  if (!options.native_capability.empty()) {
+    // fail closed: an unknown capability, another implementation, components the capability does not have, a source other than the one it is verified for, a missing
+    // descriptor digest, another platform or a headless (no viewer) build is refused, never ignored
+    options.native_index = segarecomp::patch::native_capability_index(options.native_capability);
+    if (options.native_index < 0 || segarecomp::patch::kNativeCapabilities[options.native_index].test_fixture) return std::nullopt;   // a fixture capability is never buildable
+    const segarecomp::patch::NativeCapability &cap = segarecomp::patch::kNativeCapabilities[options.native_index];
+    const auto hex64 = [](const std::string &s) { return s.size() == 64 && std::all_of(s.begin(), s.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
+    if (options.native_implementation != cap.implementation_version || options.native_components == 0 || (options.native_components & ~cap.components) != 0 ||
+        options.native_source_sha256 != cap.source_sha256 || !hex64(options.native_descriptor_sha256) || options.platform == "master-system" || !options.sdl3_include.has_value())
+      return std::nullopt;
+  } else if (!options.native_source_sha256.empty() || !options.native_descriptor_sha256.empty() || options.native_implementation != 0 || options.native_components != 0) {
+    return std::nullopt;
+  }
   return options;
 }
 
@@ -864,7 +888,16 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     // SEG-058 (ADR 0120): the shared SDL3 viewer foundation (settings, layout/CRT math, menu model, host, pause pages), strict C11 like the rest.
     for (const char *name : kViewerFoundationSources)
       add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name);
-    add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND"});
+    if (options.native_index >= 0) {
+      // SEG-124: the closed, audited provider set is linked only into a program built from a verified package that selects a capability.
+      const fs::path native_dir = options.runtime_dir / "native_compat";
+      for (const char *name : {"native_compat_registry.c", "sonic1_widescreen.c"}) add(final_only, native_dir / name, std::string("native-") + name);
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook",
+          {"-DSEGARECOMP_GENESIS_SOUND", "-I", native_dir.string(), "-DSEGARECOMP_NATIVE_PROVIDER=" + std::to_string(options.native_index),
+           "-DSEGARECOMP_NATIVE_IMPLEMENTATION=" + std::to_string(options.native_implementation), "-DSEGARECOMP_NATIVE_COMPONENTS=" + std::to_string(options.native_components)});
+    } else {
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND"});
+    }
   } else {
     add(final_only, build.runtime / "genesis_sound_hook.c", "hook-sound");
     // SEG-068-T007: the sound hook delegates its run loop to the existing headless frame capture when SEGARECOMP_CAPTURE_DIR is
@@ -1183,6 +1216,9 @@ int segarecomp_build_command(int argc, char **argv) {
       const int rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
                                            m68k_images, executable, status_extra, sound_degraded);
       if (rc != 0) return rc;
+      if (options.native_index >= 0)
+        status_extra += ",\"native\":{\"capability\":\"" + options.native_capability + "\",\"implementation\":" + std::to_string(options.native_implementation) +
+                        ",\"components\":" + std::to_string(options.native_components) + ",\"descriptor_sha256\":\"" + options.native_descriptor_sha256 + "\"}";
       if (!options.keep_work) fs::remove_all(options.output / "obj", ec);
       stage("link", "done");
       write_status(options, sha, "ok", "done", "", status_extra);

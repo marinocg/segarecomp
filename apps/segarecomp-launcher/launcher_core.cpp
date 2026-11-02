@@ -330,7 +330,11 @@ fs::path entry_dir(const RomView &rom, const Layout &layout) {
   const auto cli_time = fs::last_write_time(layout.cli, ec).time_since_epoch().count();
   // SEG-122: a Patched variant adds its full identity (package manifest digest, which names every payload digest, and the verified patched image
   // digest). A Vanilla key is byte-for-byte what it always was.
-  const std::string variant = rom.patched() ? "|patch=" + rom.patch_identity + ":" + rom.patch_target_sha256 : std::string();
+  // SEG-124: a native variant also names the capability, its implementation version and the descriptor digest (the package identity already covers the descriptor; the explicit
+  // fields keep a changed provider or descriptor from ever sharing an entry with an older build).
+  std::string variant = rom.patched() ? "|patch=" + rom.patch_identity + ":" + rom.patch_target_sha256 : std::string();
+  if (rom.patch_native())
+    variant += "|native=" + rom.patch_native_capability + "@" + std::to_string(rom.patch_native_implementation) + "/" + std::to_string(rom.patch_native_components) + ":" + rom.patch_native_descriptor_sha256;
   const std::string key = rom.sha256 + variant + "|cli-" + std::to_string(static_cast<unsigned long long>(cli_size)) + "-" + std::to_string(static_cast<long long>(cli_time)) + "|" SEGARECOMP_LAUNCHER_VERSION "|" + platform_key(rom, &layout) + "|" + host_arch() + "|" +
                           SDL_GetPlatform() + "|zig-" SEGARECOMP_ZIG_VERSION "|O2|" + utf8(layout.root);
   const std::string digest = segarecomp::sha256_hex({reinterpret_cast<const std::uint8_t *>(key.data()), key.size()});
@@ -571,11 +575,33 @@ std::string read_variant_identity(const fs::path &entry) {
   return meta && meta->is_object() ? meta->str("patch_identity") : std::string();  // an unreadable record has no variant, exactly as before this existed
 }
 
+// SEG-124: a native variant's recorded capability, implementation version, components and descriptor digest must be exactly the requested ones; any other build (including a
+// BPS-only or Vanilla one that records none) is not reusable for it, and a variant without a native capability never accepts a program that records one.
+bool native_record_matches(const fs::path &entry, const RomView &rom) {
+  std::error_code ec;
+  const fs::path file = entry / "metadata.json";
+  std::string capability, descriptor;
+  long long implementation = 0, components = 0;
+  if (fs::is_regular_file(file, ec) && fs::file_size(file, ec) <= 16384U) {
+    const auto meta = json::parse(read_all(file));
+    if (meta && meta->is_object()) {
+      capability = meta->str("native_capability");
+      implementation = meta->num("native_implementation");
+      components = meta->num("native_components");
+      descriptor = meta->str("native_descriptor_sha256");
+    }
+  }
+  if (!rom.patch_native()) return capability.empty();
+  return capability == rom.patch_native_capability && implementation == static_cast<long long>(rom.patch_native_implementation) &&
+         components == static_cast<long long>(rom.patch_native_components) && descriptor == rom.patch_native_descriptor_sha256;
+}
+
 bool entry_ready_for(const fs::path &entry, const RomView &rom, const Layout &layout) {
   if (!entry_ready(entry)) return false;
   // SEG-122: defence in depth on top of the cache key. A build is reusable only for the variant it records: a Vanilla request never accepts a patched
   // program and a Patched request accepts only the program of exactly this package.
   if (read_variant_identity(entry) != rom.patch_identity) return false;
+  if (!native_record_matches(entry, rom)) return false;
   const PolicyReport report = read_policy_report(entry);
   if (!report.present) return !rom.optimized();  // an older entry without the member is a Compatibility build
   if (report.requested != (rom.optimized() ? "optimized" : "compatibility")) return false;
@@ -1065,6 +1091,10 @@ void BuildJob::run() {
     else if (!applied.ok) refusal = "The patch cannot be applied: " + applied.error + ".";
     else if (applied.info.identity != rom_.patch_identity) refusal = "The installed patch package is not the one selected (its identity changed).";
     else if (applied.rom_sha256 != rom_.sha256 || applied.target_sha256 != rom_.patch_target_sha256) refusal = "The original game or the patched image does not match the installed patch.";
+    else if (applied.info.has_native != rom_.patch_native() ||
+             (applied.info.has_native && (applied.info.native_capability != rom_.patch_native_capability || applied.info.native_implementation != rom_.patch_native_implementation ||
+                                          applied.info.native_components != rom_.patch_native_components || applied.info.native_payload_sha256 != rom_.patch_native_descriptor_sha256)))
+      refusal = "The native capability of the installed patch does not match what is selected.";
     if (!refusal.empty()) {
       fs::remove_all(partial, ec);
       set_message(refusal);
@@ -1084,6 +1114,9 @@ void BuildJob::run() {
     if (!rom_.mapper_manifest.empty()) args.insert(args.end(), {"--mapper-manifest", utf8(rom_.mapper_manifest)});
   }
   if (rom_.supports_hint_alias_discovery() && rom_.hint_alias_discovery) args.insert(args.end(), {"--hint-alias-discovery", "1"});
+  if (rom_.patch_native())   // SEG-124 (ADR 0267): the verified package selected an audited native capability; the build re-checks every value against its own table and refuses any mismatch
+    args.insert(args.end(), {"--native-capability", rom_.patch_native_capability, "--native-implementation", std::to_string(rom_.patch_native_implementation), "--native-components",
+                             std::to_string(rom_.patch_native_components), "--native-source-sha256", rom_.sha256, "--native-descriptor-sha256", rom_.patch_native_descriptor_sha256});
   if (rom_.optimized()) args.insert(args.end(), {"--aot-policy", "optimized"});
   if (rom_.optimized_gen2()) args.insert(args.end(), {"--aot-model", "gen2"});
 #if defined(_WIN32)
@@ -1182,6 +1215,9 @@ void BuildJob::run() {
     meta << "\"runtime_contract\":" << runtime_contract << ",\"hint_alias_discovery\":" << (rom_.supports_hint_alias_discovery() && rom_.hint_alias_discovery ? "true" : "false") << ",";
     if (rom_.patched())  // SEG-122: the variant this program was built for (checked again by entry_ready_for; absent for Vanilla)
       meta << "\"patch_identity\":\"" << rom_.patch_identity << "\",\"patch_target_sha256\":\"" << rom_.patch_target_sha256 << "\",\"patch_label\":\"" << json_safe(rom_.patch_label) << "\",";
+    if (rom_.patch_native())   // SEG-124: what native capability this program was built with (checked again by entry_ready_for)
+      meta << "\"native_capability\":\"" << rom_.patch_native_capability << "\",\"native_implementation\":" << rom_.patch_native_implementation << ",\"native_components\":" << rom_.patch_native_components
+           << ",\"native_descriptor_sha256\":\"" << rom_.patch_native_descriptor_sha256 << "\",";
     meta << "\"host\":\"" << host_description() << "\",\"toolchain\":\"zig " SEGARECOMP_ZIG_VERSION "\",\"rom_path\":\"referenced, not copied\"}\n";
     meta.close();
     fs::remove_all(partial / "input", ec);  // the materialized patched image is derivative game data: it never outlives the build

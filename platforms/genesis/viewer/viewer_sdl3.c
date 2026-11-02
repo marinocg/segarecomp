@@ -28,6 +28,8 @@ struct GenesisSdl3Viewer {
   struct PadLine { uint64_t poll; uint16_t actions; } pad_script[1024];
   size_t pad_count, pad_next;
   uint64_t polls;
+  GenesisNativeCompatStats compat_stats;   /* SEG-124 */
+  unsigned compat_enabled;                 /* SEG-124: the components the verified descriptor enables */
   SvWidescreenSupport l3_support;     /* SEG-121: whether the latest Level 3 request produced sprites (never Available: games may place none beside the picture) */
 };
 
@@ -35,8 +37,15 @@ struct GenesisSdl3Viewer {
 typedef char genesis_ext_side_bound_matches_layout[(GENESIS_EXT_MAX_SIDE == (unsigned)SV_EXT_MAX_SIDE) ? 1 : -1];
 
 static uint8_t g_extension_surface[GENESIS_EXT_SURFACE_BYTES];
+static uint8_t g_compat_ram[GENESIS_COMPAT_RAM_BYTES];          /* SEG-124: work-RAM snapshot for the verified provider (written by the runtime at each publication) */
+static uint8_t g_compat_overlay[GENESIS_COMPAT_OVERLAY_BYTES];  /* SEG-124: the provider's HUD overlay for the frame being presented */
 
 /* The saved mode as the typed producer request (0 none, 1 Level 2, 2 Level 3); sampled once per host slice. */
+static uint8_t request_of_compat(SvWidescreenMode mode, unsigned compat_hud) {
+  /* a verified native HUD replaces the game's own (which the patch removed): the producer must also run for Original, so the HUD is drawn (inside the picture there) */
+  if (mode == SV_WIDESCREEN_ORIGINAL && compat_hud != 0U) return (uint8_t)GENESIS_EXT_MODE_BACKGROUNDS;
+  return mode == SV_WIDESCREEN_ENHANCED_GAMEPLAY ? (uint8_t)GENESIS_EXT_MODE_SPRITES : (mode == SV_WIDESCREEN_EXTENDED_BACKGROUNDS ? (uint8_t)GENESIS_EXT_MODE_BACKGROUNDS : 0U);
+}
 static uint8_t request_of(SvWidescreenMode mode) {
   return mode == SV_WIDESCREEN_ENHANCED_GAMEPLAY ? (uint8_t)GENESIS_EXT_MODE_SPRITES : (mode == SV_WIDESCREEN_EXTENDED_BACKGROUNDS ? (uint8_t)GENESIS_EXT_MODE_BACKGROUNDS : 0U);
 }
@@ -61,7 +70,8 @@ static int sdl_closed(void *ctx) {
   v->polls += 1U;
   if (v->ext_attached) { /* the requested mode is sampled here, between guest slices: a frame is produced wholly under one value */
     const SvVideoSettings *video = &sv_host_settings(v->host)->video;
-    v->ext.request = request_of(video->widescreen);
+    v->ext.request = request_of_compat(video->widescreen, v->compat_enabled & GENESIS_COMPAT_HUD);
+    if (v->ext.compat != NULL) v->ext.compat_components = video->widescreen == SV_WIDESCREEN_ORIGINAL ? (v->compat_enabled & GENESIS_COMPAT_HUD) : v->compat_enabled;   /* Original: the HUD only */
     v->plan_aspect = video->aspect;
   }
   return v->sample.quit;
@@ -146,6 +156,22 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
       surface.mode = r->mode == GENESIS_EXT_MODE_SPRITES ? SV_WIDESCREEN_ENHANCED_GAMEPLAY
                      : (r->mode == GENESIS_EXT_MODE_BACKGROUNDS ? SV_WIDESCREEN_EXTENDED_BACKGROUNDS : SV_WIDESCREEN_ORIGINAL);
       surface.status = r->status == GENESIS_EXT_AVAILABLE ? SV_WS_AVAILABLE : (r->status == GENESIS_EXT_PARTIAL ? SV_WS_PARTIAL : SV_WS_UNAVAILABLE);
+      if (v->ext.compat != NULL && r->sequence == sequence) {   /* SEG-124: only the frame's own provider verdict; never inferred from the title, mode or pixels */
+        v->compat_stats.frames += 1U;
+        if (r->compat_accepted != 0U && r->compat_reason == 0U) {
+          if (r->authored) { surface.source = SV_EXTSRC_AUTHORED; v->compat_stats.authored += 1U; }
+          if (r->overlay_w > 0U && r->overlay_h > 0U && r->overlay_w <= GENESIS_COMPAT_OVERLAY_MAX_W && r->overlay_h <= GENESIS_COMPAT_OVERLAY_MAX_H) {
+            surface.overlay_rgba = v->ext.overlay_rgba;
+            surface.overlay_w = (int)r->overlay_w;
+            surface.overlay_h = (int)r->overlay_h;
+            surface.overlay_fx = (int)r->overlay_fx;
+            surface.overlay_fy = (int)r->overlay_fy;
+            v->compat_stats.hud_frames += 1U;
+          }
+        } else if (r->compat_reason < 8U) {
+          v->compat_stats.declined[r->compat_reason] += 1U;
+        }
+      }
       return sv_host_present_extended(v->host, rgb, (int)width, (int)height, (int)(width * 3U), sequence, &surface);
     }
   }
@@ -189,6 +215,27 @@ GenesisFrameExtension *genesis_sdl3_viewer_extension(GenesisSdl3Viewer *v, const
 }
 
 struct SvHost *genesis_sdl3_viewer_sv_host(GenesisSdl3Viewer *v) { return v != NULL ? v->host : NULL; }
+
+int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *v, GenesisFrameExtension *ext, const GenesisNativeCompat *compat, void *state, unsigned components) {
+  if (v == NULL || ext == NULL || compat == NULL || ext != &v->ext || compat->abi_version != GENESIS_NATIVE_COMPAT_ABI || compat->prepare == NULL || (components & ~compat->components) != 0U ||
+      components == 0U)
+    return -1;
+  ext->compat = compat;
+  ext->compat_state = state;
+  ext->compat_components = components;
+  v->compat_enabled = components;
+  ext->request = request_of_compat(sv_host_settings(v->host)->video.widescreen, components & GENESIS_COMPAT_HUD);
+  ext->compat_ram = g_compat_ram;
+  ext->compat_ram_stamp = 0U;
+  ext->overlay_rgba = g_compat_overlay;
+  return 0;
+}
+
+void genesis_sdl3_viewer_native_compat_stats(const GenesisSdl3Viewer *v, GenesisNativeCompatStats *out) {
+  if (out == NULL) return;
+  memset(out, 0, sizeof *out);
+  if (v != NULL) *out = v->compat_stats;
+}
 
 static void sdl_diagnostics(void *ctx, SvDiagnostics *out) {
   const GenesisSdl3Viewer *v = (const GenesisSdl3Viewer *)ctx;

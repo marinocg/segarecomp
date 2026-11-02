@@ -81,6 +81,12 @@ json::Value to_json(const LibraryEntry &e) {
       o.set("version", json::Value::make_string(p.version));
       o.set("name", json::Value::make_string(p.name));
       o.set("target_sha256", json::Value::make_string(p.target_sha256));
+      if (p.has_native()) {   // absent for a BPS-only package: such records are byte-identical to the ones older releases wrote
+        o.set("native_capability", json::Value::make_string(p.native_capability));
+        o.set("native_implementation", json::Value::make_int(p.native_implementation));
+        o.set("native_components", json::Value::make_int(p.native_components));
+        o.set("native_descriptor_sha256", json::Value::make_string(p.native_descriptor_sha256));
+      }
       o.set("width_max", json::Value::make_int(p.width_max));
       if (!p.widescreen.empty()) o.set("widescreen", json::Value::make_string(p.widescreen));
       if (!p.side_style.empty()) o.set("side_style", json::Value::make_string(p.side_style));
@@ -254,6 +260,13 @@ bool entry_from_json(const json::Value &v, LibraryEntry &e) {
       ip.id = clamp_text(p.str("id"), 64);
       ip.version = clamp_text(p.str("version"), 32);
       ip.name = clamp_text(p.str("name"), 64);
+      ip.native_capability = clamp_text(p.str("native_capability"), 64);
+      if (!ip.native_capability.empty()) {   // a damaged native record is dropped with the patch: a native package never degrades into a BPS-only one
+        ip.native_implementation = static_cast<unsigned>(std::clamp(p.num("native_implementation"), 0LL, 1000LL));
+        ip.native_components = static_cast<unsigned>(std::clamp(p.num("native_components"), 0LL, 3LL));
+        ip.native_descriptor_sha256 = p.str("native_descriptor_sha256");
+        if (ip.native_implementation == 0 || ip.native_components == 0 || !is_hex_digest(ip.native_descriptor_sha256, 64)) continue;
+      }
       ip.width_max = static_cast<int>(std::clamp(p.num("width_max", -1), -1LL, 100LL));
       ip.installed_at = std::max(0LL, p.num("installed_at"));
       ip.widescreen = p.str("widescreen");
@@ -571,6 +584,10 @@ RomView view_for_variant(const LibraryEntry &entry, const std::string &identity)
     view.patch_identity = p->identity;
     view.patch_package = patch_package_path(p->identity);
     view.patch_target_sha256 = p->target_sha256;
+    view.patch_native_capability = p->native_capability;
+    view.patch_native_implementation = p->native_implementation;
+    view.patch_native_components = p->native_components;
+    view.patch_native_descriptor_sha256 = p->native_descriptor_sha256;
     view.patch_label = p->name + (p->version.empty() ? std::string() : " " + p->version);
     view.patch_widescreen = p->widescreen;
     view.patch_side_style = p->side_style;

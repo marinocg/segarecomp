@@ -124,7 +124,7 @@ def mutated(**kw):
     return m
 
 
-expect_refused(pack(mutated(schema_version=2)), SRC, "unsupported schema version")
+expect_refused(pack(mutated(schema_version=3)), SRC, "unsupported schema version")
 expect_refused(pack(mutated(schema_version="1")), SRC, "schema version as string")
 expect_refused(pack(mutated(format="other")), SRC, "wrong format")
 expect_refused(pack(mutated(platform="saturn")), SRC, "unsupported platform")
