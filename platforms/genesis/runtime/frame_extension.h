@@ -102,7 +102,8 @@ typedef struct GenesisFrameExtension {
    * one frame old. `overlay_rgba` (GENESIS_COMPAT_OVERLAY_BYTES, adapter-owned) receives the HUD. */
   const GenesisNativeCompat *compat;
   void *compat_state;
-  unsigned compat_components;       /* GENESIS_COMPAT_* the verified descriptor enables */
+  unsigned compat_components;       /* GENESIS_COMPAT_* components the host will use (derived from the granted capabilities) */
+  unsigned compat_caps;             /* GENESIS_CAP_* the verified package declared and the host grants */
   uint8_t *compat_ram;
   uint64_t compat_ram_stamp;
   uint8_t compat_ram_valid;

@@ -89,6 +89,7 @@ struct Modal {
   bool delete_cache = false;      // remove_entries: also delete the owned build folders
   bool keep_logs = false;
   std::string target;             // install_patch / remove_patch: the package identity
+  bool code_bearing = false;      // install_patch: the package carries executable source and the sheet is the user's approval of its exact identity
 };
 
 class App {
@@ -175,7 +176,7 @@ private:
   bool script_open_play_menu_ = false;
   void browse_patch(const std::string &id);
   void patch_chosen(const std::string &id, const std::string &path);   // the file chooser's result: verify, then ask
-  void patch_install_confirmed(const std::string &id, const std::string &package);
+  void patch_install_confirmed(const std::string &id, const std::string &package, bool trust_native = false);
   void select_variant(const std::string &id, const std::string &identity);   // "" = Vanilla
   void ask_remove_patch(const LibraryEntry &entry, const std::string &identity);
   void patch_remove_confirmed(const Modal &sheet);     // the confirmed "Remove patch" sheet (also what the GUI script runs)

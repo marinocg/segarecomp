@@ -910,7 +910,7 @@ void App::draw_modal(float w, float h) {
     choose_remove = button(ctx_, "mod_remove", "Remove after builds", ImVec2(bw, bh), Style::secondary);
   } else if (modal_.kind != Modal::Kind::message) {
     const bool primary_confirm = modal_.kind == Modal::Kind::restore_defaults || modal_.kind == Modal::Kind::install_patch;
-    const char *confirm_label = is_plan ? "Remove Files" : (modal_.kind == Modal::Kind::restore_defaults ? "Restore" : (modal_.kind == Modal::Kind::install_patch ? "Install patch" : "Remove"));
+    const char *confirm_label = is_plan ? "Remove Files" : (modal_.kind == Modal::Kind::restore_defaults ? "Restore" : (modal_.kind == Modal::Kind::install_patch ? (modal_.code_bearing ? "Approve and install" : "Install patch") : "Remove"));
     ImGui::SetCursorScreenPos(ImVec2(lx, by));
     cancel = button(ctx_, "mod_cancel", "Cancel", ImVec2(bw, bh), Style::secondary);
     ImGui::SetCursorScreenPos(ImVec2(lx + bw + ctx_.u(12.0F), by));

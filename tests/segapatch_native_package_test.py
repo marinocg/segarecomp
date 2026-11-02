@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""SEG-124-T001 (ADR 0267): patch package schema 2 (native-only, combined BPS + native) through the product CLI seam (`segarecomp patch ...`), cross-checked against the independent
-Python reference in tools/segapatch.py. Synthetic fixture image and the project-owned fixture capability (visible only with SEGARECOMP_ALLOW_FIXTURE_CAPABILITIES=1; never buildable).
-Every malformed or unsupported input must be refused with a readable error and no output file.
-usage: segapatch_native_package_test.py <segarecomp-cli> <tools/segapatch.py>"""
+"""SEG-124 (ADR 0267): patch package schema 2 with a source-bearing native payload (trusted native-source patch), through the product CLI seam (`segarecomp patch ...`),
+cross-checked against the independent Python reference in tools/segapatch.py. Synthetic fixture image and the project-authored sample provider (docs/product/sdk-sample).
+Every malformed or unsupported input must be refused with a readable error and no output file; schema 1 (BPS-only) stays byte-compatible.
+usage: segapatch_native_package_test.py <segarecomp-cli> <tools/segapatch.py> <sample provider.c>"""
 import hashlib
 import importlib.util
 import json
-import os
 import struct
 import subprocess
 import sys
@@ -18,8 +17,8 @@ CLI = sys.argv[1]
 spec = importlib.util.spec_from_file_location("segapatch", sys.argv[2])
 sp = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sp)
-CAP = "genesis.fixture.native-widescreen.v1"
-SONIC = "genesis.sonic1.native-widescreen.v1"
+PROVIDER = Path(sys.argv[3]).read_bytes()
+CAPS = ["frame.work_ram", "frame.vdp", "scenery.words", "overlay.rgba"]
 failures = []
 
 
@@ -29,12 +28,8 @@ def check(cond, what):
         print("FAIL:", what)
 
 
-def run(*args, fixtures=True):
-    env = dict(os.environ)
-    env.pop("SEGARECOMP_ALLOW_FIXTURE_CAPABILITIES", None)
-    if fixtures:
-        env["SEGARECOMP_ALLOW_FIXTURE_CAPABILITIES"] = "1"
-    p = subprocess.run([CLI, "patch", *map(str, args)], capture_output=True, text=True, timeout=60, env=env)
+def run(*args):
+    p = subprocess.run([CLI, "patch", *map(str, args)], capture_output=True, text=True, timeout=60)
     try:
         doc = json.loads(p.stdout) if p.stdout.strip() else None
     except ValueError:
@@ -51,197 +46,141 @@ def rom(n=0x10000, seed=7):
     return bytes(out[:n])
 
 
+sha = lambda b: hashlib.sha256(b).hexdigest()
 SRC = rom()
 TGT = bytearray(SRC)
 TGT[0x1000:0x1010] = b"PATCHED-WIDE-FIX"
 TGT = bytes(TGT)
-sha = lambda b: hashlib.sha256(b).hexdigest()
 tmp = Path(tempfile.mkdtemp(prefix="segapatch-native-test-"))
 (tmp / "src.bin").write_bytes(SRC)
 
 
-def refused(pkg, what, rom_bytes=SRC, fixtures=True, package_valid=False):
+def make(name, **kw):
+    out = tmp / name
+    base = dict(id_="synthetic-pkg", name="Synthetic", version="1.0.0", native_source=PROVIDER, native_caps=CAPS, author="Test Author", license_="MIT")
+    base.update(kw)
+    sp.create(SRC, base.pop("target", None), out, **base)
+    return out
+
+
+def rezip(src, name, edit):
+    """Rewrites a package: edit(files: dict[name -> bytes]) -> files (or a list of (name, bytes))."""
+    with zipfile.ZipFile(src) as z:
+        files = {n: z.read(n) for n in z.namelist()}
+    result = edit(files)
+    out = tmp / name
+    sp.write_zip(out, list(result.items()) if isinstance(result, dict) else result)
+    return out
+
+
+def with_manifest(src, name, fn):
+    def edit(files):
+        m = json.loads(files["manifest.json"])
+        fn(m)
+        files["manifest.json"] = (json.dumps(m, indent=2) + "\n").encode()
+        return files
+    return rezip(src, name, edit)
+
+
+def refused(pkg, what, rom_bytes=SRC, package_valid=False):
     r = tmp / "rom.bin"
     r.write_bytes(rom_bytes)
     out = tmp / "refused.out"
     if out.exists():
         out.unlink()
-    code, doc = run("apply", pkg, "--rom", r, "--out", out, fixtures=fixtures)
+    code, doc = run("apply", pkg, "--rom", r, "--out", out)
     check(code == 1 and doc and doc["ok"] is False and doc.get("error"), f"{what}: refused with a readable error (code={code} doc={doc})")
     check(not out.exists() and not Path(str(out) + ".partial").exists(), f"{what}: no output or partial file")
-    check(run("verify", pkg, "--rom", r, fixtures=fixtures)[0] == 1, f"{what}: verify refuses")
-    check((run("inspect", pkg, fixtures=fixtures)[0] == 0) == package_valid, f"{what}: inspect {'accepts' if package_valid else 'refuses'} the package itself")
+    check((run("inspect", pkg)[0] == 0) == package_valid, f"{what}: inspect {'accepts' if package_valid else 'refuses'} the package itself")
 
 
-def desc(**kw):
-    d = {"format": "segarecomp-native-descriptor", "schema_version": 1, "capability": CAP, "source_sha256": sha(SRC), "min_implementation": 1, "components": ["hud", "scenery"]}
-    for k, v in kw.items():
-        if v is None:
-            d.pop(k, None)
-        else:
-            d[k] = v
-    return json.dumps(d).encode()
-
-
-def manifest(native=None, rom_payload=None, **kw):
-    payloads = {}
-    files = []
-    if rom_payload is not None:
-        payloads["rom"] = {"format": "bps", "file": "game.bps", "sha256": sha(rom_payload), "target_sha256": sha(TGT)}
-        files.append(("game.bps", rom_payload))
-    if native is not None:
-        payloads["native"] = {"format": "descriptor", "file": "widescreen.json", "sha256": sha(native)}
-        files.append(("widescreen.json", native))
-    m = {"format": "segarecomp-patch", "schema_version": 2, "id": "synthetic-native", "version": "1.0.0", "name": "Synthetic Native", "platform": "genesis", "purpose": "widescreen",
-         "source_sha256": sha(SRC), "payloads": payloads, "requires": [CAP]}
-    for k, v in kw.items():
-        if v is None:
-            m.pop(k, None)
-        else:
-            m[k] = v
-    return m, files
-
-
-def pack(m, files, name="mod.segapatch"):
-    p = tmp / name
-    sp.write_zip(p, [("manifest.json", json.dumps(m).encode()), *files])
-    return p
-
-
-# ---- native-only: image unchanged, distinct identity ----
-nat = tmp / "native-only.segapatch"
-sp.create(SRC, None, nat, id_="synthetic-native", name="Synthetic Native", version="1.0.0", native_capability=CAP, native_components=["hud", "scenery"], width_max=100)
-nat2 = tmp / "native-only2.segapatch"
-sp.create(SRC, None, nat2, id_="synthetic-native", name="Synthetic Native", version="1.0.0", native_capability=CAP, native_components=["hud", "scenery"], width_max=100)
-check(nat.read_bytes() == nat2.read_bytes(), "native-only authoring is deterministic")
+# ---- accepted shapes ------------------------------------------------------------------------------------------------------------
+nat = make("native-only.segapatch")
 code, doc = run("inspect", nat)
-check(code == 0 and doc["ok"] and doc["schema_version"] == 2 and doc["has_native"] and not doc["has_rom"] and doc["native_capability"] == CAP and doc["native_components"] == 3
-      and doc["native_implementation"] == 1 and doc["native_width_max"] == 100 and doc["widescreen_width_max"] == 100 and doc["requires"] == [CAP], f"native-only inspect {doc}")
-check(doc["target_sha256"] == "" and doc["payload_sha256"] == "" and len(doc["native_descriptor_sha256"]) == 64, "native-only has no BPS digests, has the descriptor digest")
+check(code == 0 and doc and doc["ok"] and doc["schema_version"] == 2 and doc["has_native"] and not doc["has_rom"] and doc["executable_code"] is True, f"native-only inspect ({doc})")
+check(doc and doc["native_source_sha256"] == sha(PROVIDER) and doc["author"] == "Test Author" and doc["license"] == "MIT" and doc["native_abi"] == 1 and doc["native_capabilities"] == 15, "inspect reports digest, author, ABI, capabilities")
 nat_id = doc["package_identity"]
-code, doc = run("verify", nat, "--rom", tmp / "src.bin")
-check(code == 0 and doc["ok"] and doc["rom_sha256"] == sha(SRC), f"native-only verify {doc}")
 out = tmp / "native.out"
 code, doc = run("apply", nat, "--rom", tmp / "src.bin", "--out", out)
-check(code == 0 and out.read_bytes() == SRC, "native-only apply leaves the original bytes unchanged")
-check(sp.apply_package(nat, SRC) == SRC, "the independent Python reference agrees (native-only)")
-refused(nat, "native-only with another image", rom_bytes=SRC[:-1], package_valid=True)
-refused(nat, "native-only with a one-bit different image", rom_bytes=bytes([SRC[0] ^ 1]) + SRC[1:], package_valid=True)
-refused(nat, "native-only without the fixture switch (capability unknown to this release)", fixtures=False)
+check(code == 0 and out.read_bytes() == SRC, "a native-only package leaves the image byte-identical")
+code, doc = run("verify", nat, "--rom", tmp / "src.bin")
+check(code == 0, "verify native-only")
+ref = tmp / "ref.out"
+check(sp.apply_package(nat, SRC) == SRC, "the independent reference reader agrees on the native-only package")
 
-# ---- combined: BPS + native ----
-both = tmp / "combined.segapatch"
-sp.create(SRC, TGT, both, id_="synthetic-native", name="Synthetic Native", version="1.0.0", native_capability=CAP, native_components=["hud", "scenery"], width_max=100)
+both = make("both.segapatch", target=TGT)
 code, doc = run("inspect", both)
-check(code == 0 and doc["has_native"] and doc["has_rom"] and doc["target_sha256"] == sha(TGT) and len(doc["payload_sha256"]) == 64, f"combined inspect {doc}")
-both_id = doc["package_identity"]
-out = tmp / "combined.out"
+check(code == 0 and doc and doc["has_rom"] and doc["has_native"], "combined package inspect")
+check(sp.apply_package(both, SRC) == TGT, "the independent reference reader agrees on the combined package")
+out = tmp / "both.out"
 code, doc = run("apply", both, "--rom", tmp / "src.bin", "--out", out)
-check(code == 0 and out.read_bytes() == TGT and doc["target_sha256"] == sha(TGT), "combined apply produces the patched image")
-check(sp.apply_package(both, SRC) == TGT, "the independent Python reference agrees (combined)")
-# BPS-only still works as schema 1 and as a schema 2 manifest without a native payload
-bps_only = tmp / "bps-only.segapatch"
-sp.create(SRC, TGT, bps_only, id_="synthetic-native", name="Synthetic Native", version="1.0.0")
-code, doc = run("inspect", bps_only)
-check(code == 0 and doc["schema_version"] == 1 and doc["has_rom"] and not doc["has_native"] and doc["native_capability"] == "", f"BPS-only inspect {doc}")
-bps_id = doc["package_identity"]
-check(len({nat_id, both_id, bps_id}) == 3, "native-only, combined and BPS-only packages have three distinct identities")
-bps_payload = zipfile.ZipFile(bps_only).read("game.bps")
-m, files = manifest(rom_payload=bps_payload, requires=None)
-m["payloads"]["rom"]["target_sha256"] = sha(TGT)
-v2_rom_only = pack(m, files, "v2-rom-only.segapatch")
-code, doc = run("apply", v2_rom_only, "--rom", tmp / "src.bin", "--out", tmp / "v2.out")
-check(code == 0 and (tmp / "v2.out").read_bytes() == TGT, "a schema 2 package with only a rom payload applies")
-# the descriptor content is part of the identity
-hud_only = tmp / "hud-only.segapatch"
-sp.create(SRC, None, hud_only, id_="synthetic-native", name="Synthetic Native", version="1.0.0", native_capability=CAP, native_components=["hud"], width_max=100)
-code, doc = run("inspect", hud_only)
-check(code == 0 and doc["native_components"] == 1 and doc["package_identity"] != nat_id, "a different component set is a different package identity")
-w60 = tmp / "w60.segapatch"
-sp.create(SRC, None, w60, id_="synthetic-native", name="Synthetic Native", version="1.0.0", native_capability=CAP, native_components=["hud", "scenery"], width_max=60)
-check(run("inspect", w60)[1]["package_identity"] != nat_id, "a different validated width is a different package identity")
+check(code == 0 and out.read_bytes() == TGT, "combined package applies the BPS")
+check(run("inspect", both)[1]["package_identity"] != nat_id, "BPS adds to the package identity")
 
-# ---- schema 1 stays closed ----
-m, files = manifest(native=desc())
-m["schema_version"] = 1
-refused(pack(m, files), "a schema 1 manifest naming a native payload")
-m, files = manifest(native=desc(), schema_version=3)
-refused(pack(m, files), "unsupported schema version 3")
-m, files = manifest(native=desc(), schema_version="2")
-refused(pack(m, files), "schema version as a string")
+# schema 1, BPS only: unchanged
+bps = tmp / "bps.segapatch"
+sp.create(SRC, TGT, bps, id_="bps-only", name="Bps", version="1.0.0")
+code, doc = run("inspect", bps)
+check(code == 0 and doc and doc["schema_version"] == 1 and not doc["has_native"] and doc["executable_code"] is False, "BPS-only schema 1 still works and carries no code")
+code, doc = run("apply", bps, "--rom", tmp / "src.bin", "--out", tmp / "bps.out")
+check(code == 0 and (tmp / "bps.out").read_bytes() == TGT, "BPS-only applies")
+# deterministic packaging
+check(make("again.segapatch").read_bytes() == nat.read_bytes(), "packaging is deterministic")
+# different source -> different identity (source change invalidates)
+changed = make("changed.segapatch", native_source=PROVIDER + b"\n/* v2 */\n")
+check(run("inspect", changed)[1]["package_identity"] != nat_id, "a provider source change changes the package identity")
+# a different version string
+check(run("inspect", make("v2.segapatch", version="1.0.1"))[1]["package_identity"] != nat_id, "a version change changes the identity")
 
-# ---- descriptor refusals ----
-for what, d in (
-    ("unknown capability", desc(capability="genesis.other.native-widescreen.v1")),
-    ("a real capability bound to another image", desc(capability=SONIC)),
-    ("descriptor for another source image", desc(source_sha256="11" * 32)),
-    ("min_implementation newer than this release", desc(min_implementation=2)),
-    ("min_implementation zero", desc(min_implementation=0)),
-    ("min_implementation not a number", desc(min_implementation="1")),
-    ("empty components", desc(components=[])),
-    ("unknown component", desc(components=["hud", "audio"])),
-    ("repeated component", desc(components=["hud", "hud"])),
-    ("components not a list", desc(components="hud")),
-    ("too many components", desc(components=["hud", "scenery", "hud"])),
-    ("width_max above 100", desc(width_max=101)),
-    ("width_max negative text", desc(width_max="100")),
-    ("unknown field", desc(address_map={"x": 1})),
-    ("missing capability", desc(capability=None)),
-    ("missing components", desc(components=None)),
-    ("wrong format", desc(format="other")),
-    ("wrong descriptor schema", desc(schema_version=2)),
-    ("malformed JSON", b'{"format": '),
-    ("not an object", b"[1,2,3]"),
-    ("expression-like value", desc(capability="1+1")),
-):
-    m, files = manifest(native=d)
-    refused(pack(m, files), "descriptor: " + what)
-m, files = manifest(native=desc(width_max=40), widescreen_width_max=60)
-refused(pack(m, files), "manifest and descriptor disagree about the validated width")
-m, files = manifest(native=b" " * 5000 + desc())
-refused(pack(m, files), "oversized descriptor")
-dup = desc()
-m, files = manifest(native=dup)
-m["payloads"]["native"]["sha256"] = "22" * 32
-refused(pack(m, files), "descriptor digest mismatch")
-m, files = manifest(native=desc(), requires=None)
-refused(pack(m, files), "native payload without the requires entry")
-m, files = manifest(native=desc(), requires=[CAP, CAP])
-refused(pack(m, files), "requires repeats the capability")
-m, files = manifest(native=desc(), requires=[SONIC])
-refused(pack(m, files), "requires names another capability than the descriptor")
-m, files = manifest(native=desc(), requires=["frame-hooks"])
-refused(pack(m, files), "requires an unknown capability")
-m, files = manifest(rom_payload=bps_payload)
-refused(pack(m, files), "requires without a native payload")
-m, files = manifest(native=desc())
-m["payloads"]["native"]["format"] = "script"
-refused(pack(m, files), "native payload format is not a descriptor")
-m, files = manifest(native=desc())
-m["payloads"]["native"]["file"] = "game.bps"
-refused(pack(m, files), "native file name collides")
-m, files = manifest(native=desc())
-m["payloads"]["native"]["file"] = "manifest.json"
-refused(pack(m, files), "native file named manifest.json")
-m, files = manifest(native=desc())
-m["payloads"]["native"]["extra"] = 1
-refused(pack(m, files), "native payload with an unknown key")
-m, files = manifest(native=desc())
-m["payloads"]["plugin"] = {"format": "so", "file": "x.so", "sha256": "00" * 32}
-refused(pack(m, files + [("x.so", b"\x7fELF")]), "an executable payload type")
-m, files = manifest()
-refused(pack(m, files), "no payload at all")
-m, files = manifest(native=desc())
-refused(pack(m, files + [("extra.txt", b"x")]), "unexpected extra entry")
-m, files = manifest(native=desc())
-p = tmp / "missing.segapatch"
-sp.write_zip(p, [("manifest.json", json.dumps(m).encode())])
-refused(p, "missing descriptor entry")
+# ---- refusals ------------------------------------------------------------------------------------------------------------------
+refused(nat, "wrong original image", rom_bytes=rom(0x10000, 9), package_valid=True)
+refused(with_manifest(nat, "abi2.segapatch", lambda m: m["payloads"]["native"].__setitem__("abi", 2)), "ABI mismatch")
+refused(with_manifest(nat, "abi0.segapatch", lambda m: m["payloads"]["native"].__setitem__("abi", 0)), "ABI zero")
+refused(with_manifest(nat, "capx.segapatch", lambda m: m["payloads"]["native"].__setitem__("capabilities", ["frame.work_ram", "scenery.words", "memory.write"])), "unknown capability")
+refused(with_manifest(nat, "capdup.segapatch", lambda m: m["payloads"]["native"].__setitem__("capabilities", ["scenery.words", "scenery.words"])), "repeated capability")
+refused(with_manifest(nat, "capnone.segapatch", lambda m: m["payloads"]["native"].__setitem__("capabilities", ["frame.work_ram"])), "a provider that contributes nothing")
+refused(with_manifest(nat, "capempty.segapatch", lambda m: m["payloads"]["native"].__setitem__("capabilities", [])), "no capabilities")
+refused(with_manifest(nat, "badhash.segapatch", lambda m: m["payloads"]["native"].__setitem__("sha256", "0" * 64)), "invalid source hash")
+refused(with_manifest(nat, "noexec.segapatch", lambda m: m["payloads"]["native"].pop("executable")), "missing executable-code declaration")
+refused(with_manifest(nat, "execno.segapatch", lambda m: m["payloads"]["native"].__setitem__("executable", "no")), "false executable-code declaration")
+refused(with_manifest(nat, "noauthor.segapatch", lambda m: m.pop("author")), "code without an author")
+refused(with_manifest(nat, "fmt.segapatch", lambda m: m["payloads"]["native"].__setitem__("format", "wasm")), "unsupported payload format")
+refused(with_manifest(nat, "file.segapatch", lambda m: m["payloads"]["native"].__setitem__("file", "../evil.c")), "unsafe source file name")
+refused(with_manifest(nat, "file2.segapatch", lambda m: m["payloads"]["native"].__setitem__("file", "other.c")), "source file name other than provider.c")
+refused(with_manifest(nat, "extra.segapatch", lambda m: m["payloads"]["native"].__setitem__("flags", "-O3")), "unknown field in the native payload (no compiler flags)")
+refused(with_manifest(nat, "buildkey.segapatch", lambda m: m.__setitem__("build", {"cflags": "-fplugin=x"})), "unknown top-level build field")
+refused(with_manifest(nat, "req.segapatch", lambda m: m.__setitem__("requires", ["genesis.sonic1.native-widescreen.v1"])), "a requires entry (no built-in game capability exists)")
+refused(with_manifest(nat, "type.segapatch", lambda m: m["payloads"].__setitem__("binary", {"format": "elf", "file": "a.out", "sha256": "0" * 64})), "unsupported payload type (prebuilt binary)")
+refused(rezip(nat, "missing.segapatch", lambda f: {k: v for k, v in f.items() if k != "provider.c"}), "missing provider source")
+refused(rezip(nat, "undeclared.segapatch", lambda f: {**f, "build.sh": b"#!/bin/sh\nrm -rf /\n"}), "undeclared file (build script)")
+refused(rezip(nat, "undeclared2.segapatch", lambda f: {**f, "extra.c": b"int x;"}), "undeclared extra source")
+refused(rezip(nat, "traversal.segapatch", lambda f: [("manifest.json", f["manifest.json"]), ("provider.c", f["provider.c"]), ("../escape.c", b"x")]), "path traversal entry")
+refused(rezip(nat, "abs.segapatch", lambda f: [("manifest.json", f["manifest.json"]), ("provider.c", f["provider.c"]), ("/etc/passwd", b"x")]), "absolute path entry")
+refused(rezip(nat, "tampered.segapatch", lambda f: {**f, "provider.c": f["provider.c"] + b"\n"}), "source modified after packaging (digest mismatch)")
+refused(rezip(nat, "empty.segapatch", lambda f: {**f, "provider.c": b""}), "empty source")
+refused(rezip(nat, "nul.segapatch", lambda f: {**f, "provider.c": f["provider.c"] + b"\0"}), "source containing NUL")
 
-# ---- release-visible capability list is exactly the audited one (the fixture is hidden) ----
-m, files = manifest(native=desc())
-fx = pack(m, files, "fixture.segapatch")
-refused(fx, "a fixture capability without the test switch", fixtures=False)
 
-print("failures:", len(failures))
-sys.exit(1 if failures else 0)
+def oversize(f):
+    big = b"/* " + b"A" * (300 * 1024) + b" */\n"
+    m = json.loads(f["manifest.json"])
+    m["payloads"]["native"]["sha256"] = sha(big)
+    return {"manifest.json": (json.dumps(m) + "\n").encode(), "provider.c": big}
+
+
+refused(rezip(nat, "oversize.segapatch", oversize), "oversized source entry")
+dup = tmp / "dup.segapatch"
+with zipfile.ZipFile(dup, "w") as z:
+    z.writestr("manifest.json", zipfile.ZipFile(nat).read("manifest.json"))
+    z.writestr("provider.c", PROVIDER)
+    z.writestr("provider.c", PROVIDER)
+refused(dup, "duplicate entry")
+# schema 1 cannot carry native source
+refused(with_manifest(nat, "s1native.segapatch", lambda m: m.__setitem__("schema_version", 1)), "native payload in a schema 1 package")
+# the old schema-2 built-in-Sonic descriptor payload is explicitly refused (no migration of a built-in capability)
+refused(with_manifest(nat, "olddesc.segapatch", lambda m: m["payloads"]["native"].update({"format": "descriptor", "file": "widescreen.json"})), "old descriptor-style schema 2 package")
+
+if failures:
+    print(f"segapatch_native_package_test: {len(failures)} failure(s)")
+    sys.exit(1)
+print("segapatch_native_package_test: ok")

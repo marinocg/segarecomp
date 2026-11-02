@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Deterministic .segapatch authoring and an INDEPENDENT reference reader (ADR 0266).
 
-A package is a ZIP of `manifest.json` and its declared payload file(s): schema 1 one BPS `rom` payload; schema 2 (ADR 0267) a BPS `rom` payload and/or a typed
-`native` descriptor payload (`widescreen.json`; a native-only package has no BPS and leaves the image unchanged). This tool shares no code with the C++ importer
+A package is a ZIP of `manifest.json` and its declared payload file(s): schema 1 one BPS `rom` payload; schema 2 (ADR 0267) a BPS `rom` payload and/or ONE C11 provider source
+(`provider.c`, a trusted native-source patch that is compiled into the separate Patched program through the public SDK; a native-only package has no BPS and leaves the image unchanged). This tool shares no code with the C++ importer
 (libs/media/src/patch_*.cpp): the BPS encoder/decoder, CRC use and ZIP writer are separate implementations so the tests can
 cross-check both. It never reads or writes anything outside the paths it is given.
 
   segapatch.py create --source ROM [--target PATCHED] --id ID --name NAME --version V --out FILE [--width-max N]
-                      [--native-capability CAP --native-components hud,scenery]   (schema 2; omit --target for a native-only package)
+                      [--native-source provider.c --native-caps frame.work_ram,frame.vdp,scenery.words,overlay.rgba --author NAME [--license SPDX]]   (schema 2; omit --target for native-only)
   segapatch.py apply  PACKAGE --source ROM --out FILE      (reference implementation; verifies everything)
   segapatch.py bps-create SOURCE TARGET OUT.bps
   segapatch.py bps-apply  PATCH SOURCE OUT
@@ -112,23 +112,18 @@ def bps_apply(patch: bytes, source: bytes) -> bytes:
     return bytes(out)
 
 
-def native_descriptor_bytes(source: bytes, capability: str, components: list[str], *, min_implementation: int = 1, width_max: int | None = None) -> bytes:
-    d = {"format": "segarecomp-native-descriptor", "schema_version": 1, "capability": capability, "source_sha256": hashlib.sha256(source).hexdigest(),
-         "min_implementation": min_implementation, "components": components}
-    if width_max is not None:
-        d["width_max"] = width_max
-    return (json.dumps(d, indent=2) + "\n").encode("ascii")
+NATIVE_ABI = 1
 
 
 def manifest_bytes(source: bytes, target: bytes | None, payload: bytes | None, *, id_: str, name: str, version: str, platform: str = "genesis",
-                   width_max: int | None = None, requires: list[str] | None = None,
-                   presentation_defaults: dict | None = None, native: bytes | None = None, native_capability: str | None = None) -> bytes:
+                   width_max: int | None = None, presentation_defaults: dict | None = None, native: bytes | None = None,
+                   native_caps: list[str] | None = None, author: str | None = None, license_: str | None = None) -> bytes:
     payloads: dict = {}
     if payload is not None:
         payloads["rom"] = {"format": "bps", "file": "game.bps", "sha256": hashlib.sha256(payload).hexdigest(), "target_sha256": hashlib.sha256(target).hexdigest()}
     if native is not None:
-        payloads["native"] = {"format": "descriptor", "file": "widescreen.json", "sha256": hashlib.sha256(native).hexdigest()}
-        requires = [native_capability]
+        payloads["native"] = {"format": "c11-source", "file": "provider.c", "sha256": hashlib.sha256(native).hexdigest(), "abi": NATIVE_ABI,
+                              "capabilities": native_caps or [], "executable": "yes"}
     manifest = {
         "format": "segarecomp-patch",
         "schema_version": 2 if native is not None else 1,
@@ -140,8 +135,10 @@ def manifest_bytes(source: bytes, target: bytes | None, payload: bytes | None, *
         "source_sha256": hashlib.sha256(source).hexdigest(),
         "payloads": payloads,
     }
-    if requires:
-        manifest["requires"] = requires
+    if author:
+        manifest["author"] = author
+    if license_:
+        manifest["license"] = license_
     if width_max is not None:
         manifest["widescreen_width_max"] = width_max
     if presentation_defaults:
@@ -160,19 +157,17 @@ def write_zip(path: Path, files: list[tuple[str, bytes]], *, method: int = zipfi
 
 
 def create(source: bytes, target: bytes | None, out: Path, *, id_: str, name: str, version: str, width_max: int | None = None,
-           presentation_defaults: dict | None = None, native_capability: str | None = None, native_components: list[str] | None = None,
-           native_min_implementation: int = 1) -> None:
+           presentation_defaults: dict | None = None, native_source: bytes | None = None, native_caps: list[str] | None = None, author: str | None = None,
+           license_: str | None = None) -> None:
     payload = bps_create(source, target) if target is not None else None
-    native = native_descriptor_bytes(source, native_capability, native_components or [], min_implementation=native_min_implementation,
-                                     width_max=width_max) if native_capability else None
-    if payload is None and native is None:
+    if payload is None and native_source is None:
         raise ValueError("a package needs a rom payload and/or a native payload")
-    files = [("manifest.json", manifest_bytes(source, target, payload, id_=id_, name=name, version=version, width_max=width_max,
-                                              presentation_defaults=presentation_defaults, native=native, native_capability=native_capability))]
+    files = [("manifest.json", manifest_bytes(source, target, payload, id_=id_, name=name, version=version, width_max=width_max, presentation_defaults=presentation_defaults,
+                                              native=native_source, native_caps=native_caps, author=author, license_=license_))]
     if payload is not None:
         files.append(("game.bps", payload))
-    if native is not None:
-        files.append(("widescreen.json", native))
+    if native_source is not None:
+        files.append(("provider.c", native_source))
     write_zip(out, files)
 
 
@@ -187,7 +182,7 @@ def apply_package(package: Path, source: bytes) -> bytes:
             raise ValueError("unexpected entries")
         payload = z.read(rom["file"]) if rom else None
         native = z.read(nat["file"]) if nat else None
-    if nat and hashlib.sha256(native).hexdigest() != nat["sha256"]:
+    if nat and (hashlib.sha256(native).hexdigest() != nat["sha256"] or nat["file"] != "provider.c"):
         raise ValueError("native sha256")
     if hashlib.sha256(source).hexdigest() != manifest["source_sha256"]:
         raise ValueError("source sha256")
@@ -207,8 +202,10 @@ def main(argv: list[str]) -> int:
     c = sub.add_parser("create")
     c.add_argument("--source", type=Path, required=True)
     c.add_argument("--target", type=Path)
-    c.add_argument("--native-capability")
-    c.add_argument("--native-components", default="")
+    c.add_argument("--native-source", type=Path)
+    c.add_argument("--native-caps", default="")
+    c.add_argument("--author")
+    c.add_argument("--license")
     c.add_argument("--id", required=True)
     c.add_argument("--name", required=True)
     c.add_argument("--version", required=True)
@@ -226,8 +223,8 @@ def main(argv: list[str]) -> int:
     ba.add_argument("patch", type=Path); ba.add_argument("source", type=Path); ba.add_argument("out", type=Path)
     args = ap.parse_args(argv)
     if args.cmd == "create":
-        create(args.source.read_bytes(), args.target.read_bytes() if args.target else None, args.out, native_capability=args.native_capability,
-               native_components=[c for c in args.native_components.split(",") if c], id_=args.id, name=args.name, version=args.version, width_max=args.width_max,
+        create(args.source.read_bytes(), args.target.read_bytes() if args.target else None, args.out, native_source=args.native_source.read_bytes() if args.native_source else None,
+               native_caps=[c for c in args.native_caps.split(",") if c], author=args.author, license_=args.license, id_=args.id, name=args.name, version=args.version, width_max=args.width_max,
                presentation_defaults={k: v for k, v in (("widescreen", args.default_widescreen), ("side_style", args.default_side_style)) if v} or None)
     elif args.cmd == "apply":
         args.out.write_bytes(apply_package(args.package, args.source.read_bytes()))

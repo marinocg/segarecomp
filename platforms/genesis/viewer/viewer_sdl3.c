@@ -216,15 +216,18 @@ GenesisFrameExtension *genesis_sdl3_viewer_extension(GenesisSdl3Viewer *v, const
 
 struct SvHost *genesis_sdl3_viewer_sv_host(GenesisSdl3Viewer *v) { return v != NULL ? v->host : NULL; }
 
-int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *v, GenesisFrameExtension *ext, const GenesisNativeCompat *compat, void *state, unsigned components) {
-  if (v == NULL || ext == NULL || compat == NULL || ext != &v->ext || compat->abi_version != GENESIS_NATIVE_COMPAT_ABI || compat->prepare == NULL || (components & ~compat->components) != 0U ||
-      components == 0U)
+int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *v, GenesisFrameExtension *ext, const GenesisNativeCompat *compat, void *state, unsigned caps) {
+  const unsigned known = GENESIS_CAP_FRAME_WORK_RAM | GENESIS_CAP_FRAME_VDP | GENESIS_CAP_SCENERY_WORDS | GENESIS_CAP_OVERLAY_RGBA;
+  const unsigned components = ((caps & GENESIS_CAP_SCENERY_WORDS) != 0U ? GENESIS_COMPAT_SCENERY : 0U) | ((caps & GENESIS_CAP_OVERLAY_RGBA) != 0U ? GENESIS_COMPAT_HUD : 0U);
+  if (v == NULL || ext == NULL || compat == NULL || ext != &v->ext || compat->abi_version != GENESIS_NATIVE_COMPAT_ABI || compat->prepare == NULL || (caps & ~known) != 0U ||
+      components == 0U || (components & compat->components) == 0U)
     return -1;
   ext->compat = compat;
   ext->compat_state = state;
-  ext->compat_components = components;
-  v->compat_enabled = components;
-  ext->request = request_of_compat(sv_host_settings(v->host)->video.widescreen, components & GENESIS_COMPAT_HUD);
+  ext->compat_caps = caps;
+  ext->compat_components = components & compat->components;
+  v->compat_enabled = ext->compat_components;
+  ext->request = request_of_compat(sv_host_settings(v->host)->video.widescreen, ext->compat_components & GENESIS_COMPAT_HUD);
   ext->compat_ram = g_compat_ram;
   ext->compat_ram_stamp = 0U;
   ext->overlay_rgba = g_compat_overlay;

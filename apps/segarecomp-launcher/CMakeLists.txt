@@ -315,7 +315,7 @@ include(${PROJECT_SOURCE_DIR}/packaging/install.cmake)
 # SEG-122-T001 (ADR 0266): Vanilla / Patched variants of one game through the real window and the product doubles.
 if(BUILD_TESTING)
   add_test(NAME launcher_patch_gui_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_patch_gui_test.py
-    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game> ${PROJECT_SOURCE_DIR}/tools/segapatch.py)
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game> ${PROJECT_SOURCE_DIR}/tools/segapatch.py ${PROJECT_SOURCE_DIR}/docs/product/sdk-sample/provider.c)
   set_property(TEST launcher_patch_gui_test APPEND PROPERTY LABELS full fast)
   set_property(TEST launcher_patch_gui_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST launcher_patch_gui_test PROPERTY TIMEOUT 900)

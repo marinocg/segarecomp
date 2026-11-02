@@ -107,7 +107,7 @@ static int mock_hud(void *state, GenesisCompatOverlay *o) {
   for (i = 0; i < 12U * 9U; ++i) { o->rgba[i * 4] = 10; o->rgba[i * 4 + 1] = 200; o->rgba[i * 4 + 2] = 233; o->rgba[i * 4 + 3] = 255; }
   return 1;
 }
-static const GenesisNativeCompat k_mock = {GENESIS_NATIVE_COMPAT_ABI, "genesis.fixture.native-widescreen.v1", 1, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD, mock_prepare, mock_word, mock_hud};
+static const GenesisNativeCompat k_mock = {GENESIS_NATIVE_COMPAT_ABI, "synthetic.mock", 1, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD, mock_prepare, mock_word, mock_hud};
 
 static int rgb_at(SDL_Surface *a, int x, int y, int *r, int *g, int *b) {
   Uint8 rr = 0, gg = 0, bb = 0, aa = 0;
@@ -144,15 +144,15 @@ int main(void) {
   mock.accept = GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD;
 
   /* attachment is validated: nothing but the viewer's own extension target, an ABI-1 provider and a subset of its components */
-  CHECK(genesis_sdl3_viewer_attach_native_compat(NULL, g.ext, &k_mock, &mock, 3) != 0 && genesis_sdl3_viewer_attach_native_compat(g.viewer, NULL, &k_mock, &mock, 3) != 0 &&
-            genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, NULL, &mock, 3) != 0 && genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, &k_mock, &mock, 0) != 0 &&
-            genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, &k_mock, &mock, 4) != 0,
+  CHECK(genesis_sdl3_viewer_attach_native_compat(NULL, g.ext, &k_mock, &mock, 15U) != 0 && genesis_sdl3_viewer_attach_native_compat(g.viewer, NULL, &k_mock, &mock, 15U) != 0 &&
+            genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, NULL, &mock, 15U) != 0 && genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, &k_mock, &mock, 0) != 0 &&
+            genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, &k_mock, &mock, 16U) != 0,
         "attachment refuses missing arguments, no component and an unknown component");
   { GenesisFrameExtension other; GenesisNativeCompat bad = k_mock; memset(&other, 0, sizeof other);
-    CHECK(genesis_sdl3_viewer_attach_native_compat(g.viewer, &other, &k_mock, &mock, 3) != 0, "a foreign extension target is refused");
+    CHECK(genesis_sdl3_viewer_attach_native_compat(g.viewer, &other, &k_mock, &mock, 15U) != 0, "a foreign extension target is refused");
     bad.abi_version = 7;
-    CHECK(genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, &bad, &mock, 3) != 0 && g.ext->compat == NULL, "another ABI version is refused and nothing is attached"); }
-  CHECK(genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, &k_mock, &mock, 3) == 0 && g.ext->compat == &k_mock && g.ext->compat_ram != NULL && g.ext->overlay_rgba != NULL, "a valid provider attaches");
+    CHECK(genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, &bad, &mock, 15U) != 0 && g.ext->compat == NULL, "another ABI version is refused and nothing is attached"); }
+  CHECK(genesis_sdl3_viewer_attach_native_compat(g.viewer, g.ext, &k_mock, &mock, 15U) == 0 && g.ext->compat == &k_mock && g.ext->compat_ram != NULL && g.ext->overlay_rgba != NULL, "a valid provider attaches");
 
   /* Level 3 + Comfort (the default style): frame 1 has no snapshot (declined: generic + Comfort); from frame 2 the provider serves the frame: authored, Comfort bypassed */
   set_mode(&g, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_SIDE_COMFORT, 100);

@@ -33,8 +33,10 @@ struct PatchInstall {
 
 // Verifies exactly like preview_patch, then publishes a copy of the very bytes that were verified to `<library_root>/patches/<identity>.segapatch`
 // (temporary file + rename) and records it on the entry. A failure leaves neither a file nor a record behind.
+// A package that carries executable source (a trusted native-source patch) is installed only with `trust_native` (the user's explicit approval of that exact package identity, given by the
+// code-bearing install sheet); installing the same package again with `trust_native` approves an unapproved record. The approval never transfers to another identity.
 PatchInstall install_patch(LibraryEntry &entry, const std::filesystem::path &package, const std::filesystem::path &original_rom,
-                           const std::filesystem::path &library_root, long long now);
+                           const std::filesystem::path &library_root, long long now, bool trust_native = false);
 
 // Removes the record and the installed package file; selects Vanilla if this patch was selected. The original ROM, the Vanilla build, the
 // user's settings and recordings are untouched. Its published build stays in the cache until storage cleanup removes it (it is no longer current).

@@ -287,7 +287,7 @@ class JsonReader {
     return false;
   }
   bool value(Value &out, int depth) {
-    if (depth > 3 || pos_ >= t_.size()) return false;
+    if (depth > 4 || pos_ >= t_.size()) return false;
     if (t_[pos_] == '"') { out.kind = Value::Kind::string; return string(out.text); }
     if (t_[pos_] >= '0' && t_[pos_] <= '9') {
       out.kind = Value::Kind::number;
@@ -339,6 +339,10 @@ class JsonReader {
   std::size_t pos_ = 0;
 };
 
+bool printable(const std::string &s) {
+  return std::all_of(s.begin(), s.end(), [](char c) { return static_cast<unsigned char>(c) >= 0x20 && static_cast<unsigned char>(c) < 0x7F; });
+}
+
 bool is_hex64(const std::string &s) {
   return s.size() == 64 && std::all_of(s.begin(), s.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
 }
@@ -363,53 +367,12 @@ bool only_keys(const Value &obj, std::initializer_list<const char *> keys) {
   return true;
 }
 
-// The closed native descriptor (ADR 0267): {"format","schema_version","capability","source_sha256","min_implementation","components"[,"width_max"]}. Everything is validated against
-// the audited capability table of THIS release; nothing in it is interpreted beyond selecting that capability.
-bool parse_native_descriptor(const std::vector<std::uint8_t> &bytes, PackageInfo &info, std::string &why) {
-  Value root;
-  JsonReader reader(std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size()));
-  if (!reader.parse(root) || root.kind != Value::Kind::object) { why = "the native descriptor is not valid: " + reader.error; return false; }
-  static const char *const required[] = {"format", "schema_version", "capability", "source_sha256", "min_implementation", "components"};
-  for (const char *k : required) if (root.find(k) == nullptr) { why = std::string("the native descriptor is missing \"") + k + "\""; return false; }
-  for (const std::string &k : root.keys) {
-    bool known = k == "width_max";
-    for (const char *r : required) known = known || k == r;
-    if (!known) { why = "the native descriptor has an unknown field \"" + k + "\""; return false; }
-  }
-  std::string format, capability, source;
-  if (!take_string(root, "format", format) || format != "segarecomp-native-descriptor") { why = "the native descriptor format is not supported"; return false; }
-  const Value &ver = root.at("schema_version");
-  if (ver.kind != Value::Kind::number || ver.number != 1) { why = "unsupported native descriptor schema version"; return false; }
-  if (!take_string(root, "capability", capability) || !token(capability, 64, true)) { why = "the native descriptor capability is invalid"; return false; }
-  const NativeCapability *cap = find_native_capability(capability);
-  if (cap == nullptr) { why = "this segarecomp does not provide the native capability \"" + capability + "\""; return false; }
-  if (!take_string(root, "source_sha256", source) || !is_hex64(source) || source != cap->source_sha256 || source != info.source_sha256) {
-    why = "the native descriptor is not for the exact original image this capability is verified for";
-    return false;
-  }
-  const Value &minimum = root.at("min_implementation");
-  if (minimum.kind != Value::Kind::number || minimum.number < 1) { why = "the native descriptor min_implementation is invalid"; return false; }
-  if (minimum.number > cap->implementation_version) { why = "this segarecomp provides an older implementation of the native capability than the patch needs"; return false; }
-  const Value &components = root.at("components");
-  if (components.kind != Value::Kind::array || components.items.empty() || components.items.size() > 2) { why = "the native descriptor components are invalid"; return false; }
-  unsigned mask = 0;
-  for (const Value &item : components.items) {
-    unsigned bit = 0;
-    if (item.kind == Value::Kind::string && item.text == "hud") bit = kNativeComponentHud;
-    else if (item.kind == Value::Kind::string && item.text == "scenery") bit = kNativeComponentScenery;
-    if (bit == 0 || (mask & bit) != 0 || (cap->components & bit) == 0) { why = "the native descriptor names an unsupported or repeated component"; return false; }
-    mask |= bit;
-  }
-  if (const Value *w = root.find("width_max"); w != nullptr) {
-    if (w->kind != Value::Kind::number || w->number > 100) { why = "the native descriptor width_max must be an integer from 0 to 100"; return false; }
-    info.native_width_max = static_cast<int>(w->number);
-    if (info.widescreen_width_max >= 0 && info.widescreen_width_max != info.native_width_max) { why = "the manifest and descriptor disagree about the validated width"; return false; }
-  }
-  info.native_capability = capability;
-  info.native_min_implementation = static_cast<std::uint32_t>(minimum.number);
-  info.native_implementation = cap->implementation_version;
-  info.native_components = mask;
-  return true;
+unsigned capability_bit(const std::string &name) {
+  if (name == "frame.work_ram") return kCapFrameWorkRam;
+  if (name == "frame.vdp") return kCapFrameVdp;
+  if (name == "scenery.words") return kCapSceneryWords;
+  if (name == "overlay.rgba") return kCapOverlayRgba;
+  return 0U;
 }
 
 Package bad(std::string why) {
@@ -420,29 +383,7 @@ Package bad(std::string why) {
 
 }  // namespace
 
-// Test-only: a fixture capability exists only with SEGARECOMP_ALLOW_FIXTURE_CAPABILITIES=1 (never set by a release) and may be bound to a synthetic image by
-// SEGARECOMP_FIXTURE_CAPABILITY_SHA256 (the launcher tests use their own artificial game). The fixture can never be built: no provider is linked for it.
-const NativeCapability *find_native_capability(const std::string &id) {
-  const char *allow = std::getenv("SEGARECOMP_ALLOW_FIXTURE_CAPABILITIES");
-  const bool fixtures = allow != nullptr && std::string_view(allow) == "1";
-  for (const NativeCapability &c : kNativeCapabilities) {
-    if (id != c.id || (c.test_fixture && !fixtures)) continue;
-    if (!c.test_fixture) return &c;
-    static NativeCapability fixture;
-    static std::string bound;
-    fixture = c;
-    const char *override_sha = std::getenv("SEGARECOMP_FIXTURE_CAPABILITY_SHA256");
-    if (override_sha != nullptr && is_hex64(override_sha)) { bound = override_sha; fixture.source_sha256 = bound.c_str(); }
-    return &fixture;
-  }
-  return nullptr;
-}
-
-int native_capability_index(const std::string &id) {
-  if (find_native_capability(id) == nullptr) return -1;
-  for (std::size_t i = 0; i < sizeof(kNativeCapabilities) / sizeof(kNativeCapabilities[0]); ++i) if (id == kNativeCapabilities[i].id) return static_cast<int>(i);
-  return -1;
-}
+unsigned native_capability_bit(const std::string &name) { return capability_bit(name); }
 
 Package read_package(std::span<const std::uint8_t> zip) {
   std::map<std::string, ZipEntry> entries;
@@ -454,7 +395,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
   JsonReader reader(std::string_view(reinterpret_cast<const char *>(man->second.data.data()), man->second.data.size()));
   if (!reader.parse(root) || root.kind != Value::Kind::object) return bad(reader.error);
   static const char *const required[] = {"format", "schema_version", "id", "version", "name", "platform", "purpose", "source_sha256", "payloads"};
-  static const char *const optional[] = {"requires", "widescreen_width_max", "presentation_defaults"};
+  static const char *const optional[] = {"requires", "widescreen_width_max", "presentation_defaults", "author", "license"};
   for (const char *k : required) if (root.find(k) == nullptr) return bad(std::string("the manifest is missing \"") + k + "\"");
   for (const std::string &k : root.keys) {
     bool known = false;
@@ -491,15 +432,17 @@ Package read_package(std::span<const std::uint8_t> zip) {
         return bad("the manifest presentation_defaults side_style value is not supported");
     }
   }
-  if (const Value *r = root.find("requires"); r != nullptr) {
+  if (const Value *r = root.find("requires"); r != nullptr) {   // no capability is named here (ADR 0267): a provider's needs live in its `native` payload; any entry is refused, as in schema 1
     if (r->kind != Value::Kind::array || r->items.size() > 8) return bad("the manifest requires list is invalid");
-    for (const Value &item : r->items) {
-      if (item.kind != Value::Kind::string || !token(item.text, 64, true)) return bad("the manifest requires list is invalid");
-      // schema 1 knows no capability; schema 2 knows exactly the native capabilities of this release
-      if (info.schema_version < 2 || find_native_capability(item.text) == nullptr) return bad("this segarecomp does not provide the required capability \"" + item.text + "\"");
-      for (const std::string &seen : info.requires_capabilities) if (seen == item.text) return bad("the manifest requires list repeats a capability");
-      info.requires_capabilities.push_back(item.text);
-    }
+    if (!r->items.empty()) return bad("this segarecomp does not provide the required capability \"" + (r->items[0].kind == Value::Kind::string ? r->items[0].text : std::string("?")) + "\"");
+  }
+  if (const Value *au = root.find("author"); au != nullptr) {
+    if (au->kind != Value::Kind::string || au->text.empty() || au->text.size() > 64 || !printable(au->text)) return bad("the manifest author is invalid");
+    info.author = au->text;
+  }
+  if (const Value *li = root.find("license"); li != nullptr) {
+    if (li->kind != Value::Kind::string || !token(li->text, 32, true)) return bad("the manifest license is invalid");
+    info.license = li->text;
   }
   const Value &payloads = root.at("payloads");
   if (payloads.kind != Value::Kind::object || payloads.members.empty()) return bad("the manifest payloads are invalid");
@@ -519,12 +462,25 @@ Package read_package(std::span<const std::uint8_t> zip) {
     ++expected_entries;
   }
   if (const Value *nat = payloads.find("native"); nat != nullptr) {
-    if (nat->kind != Value::Kind::object || !only_keys(*nat, {"format", "file", "sha256"})) return bad("the native payload is invalid");
-    std::string pformat;
-    if (!take_string(*nat, "format", pformat) || pformat != "descriptor") return bad("the native payload format is not supported");
-    if (!take_string(*nat, "file", info.native_file) || !safe_name(info.native_file) || info.native_file == "manifest.json" || (info.has_rom && info.native_file == info.rom_file))
-      return bad("the native payload file name is invalid");
-    if (!take_string(*nat, "sha256", info.native_payload_sha256) || !is_hex64(info.native_payload_sha256)) return bad("the native payload sha256 is invalid");
+    if (nat->kind != Value::Kind::object || !only_keys(*nat, {"format", "file", "sha256", "abi", "capabilities", "executable"})) return bad("the native payload is invalid");
+    std::string pformat, executable;
+    if (!take_string(*nat, "format", pformat) || pformat != "c11-source") return bad("the native payload format is not supported");
+    if (!take_string(*nat, "executable", executable) || executable != "yes") return bad("a native payload must declare that it contains executable source (\"executable\": \"yes\")");
+    if (!take_string(*nat, "file", info.native_file) || info.native_file != kProviderFileName || (info.has_rom && info.native_file == info.rom_file)) return bad("the native payload file name must be provider.c");
+    if (!take_string(*nat, "sha256", info.native_sha256) || !is_hex64(info.native_sha256)) return bad("the native payload sha256 is invalid");
+    const Value &abi = nat->at("abi");
+    if (abi.kind != Value::Kind::number || abi.number != kNativeAbiVersion) return bad("this segarecomp does not provide native patch ABI version " + (abi.kind == Value::Kind::number ? std::to_string(abi.number) : std::string("?")));
+    info.native_abi = static_cast<unsigned>(abi.number);
+    const Value &caps = nat->at("capabilities");
+    if (caps.kind != Value::Kind::array || caps.items.empty() || caps.items.size() > 4) return bad("the native payload capabilities are invalid");
+    for (const Value &c : caps.items) {
+      const unsigned bit = c.kind == Value::Kind::string ? capability_bit(c.text) : 0U;
+      if (bit == 0U) return bad("this segarecomp does not provide the capability \"" + (c.kind == Value::Kind::string ? c.text : std::string("?")) + "\"");
+      if ((info.native_caps & bit) != 0U) return bad("the native payload repeats a capability");
+      info.native_caps |= bit;
+    }
+    if ((info.native_caps & (kCapSceneryWords | kCapOverlayRgba)) == 0U) return bad("the native payload contributes nothing (it needs scenery.words or overlay.rgba)");
+    if (info.author.empty()) return bad("a package with executable source must name its author");
     info.has_native = true;
     ++expected_entries;
   }
@@ -540,16 +496,11 @@ Package read_package(std::span<const std::uint8_t> zip) {
   if (info.has_native) {
     const auto nit = entries.find(info.native_file);
     if (nit == entries.end()) return bad("the native payload named by the manifest is missing from the package");
-    if (nit->second.data.size() > kMaxNativeDescriptorBytes) return bad("the native descriptor is larger than allowed");
-    if (sha256_hex(nit->second.data) != info.native_payload_sha256) return bad("the native descriptor SHA-256 does not match the manifest");
-    std::string why;
-    if (!parse_native_descriptor(nit->second.data, info, why)) return bad(why);
-    bool listed = false;
-    for (const std::string &c : info.requires_capabilities) listed = listed || c == info.native_capability;
-    if (!listed || info.requires_capabilities.size() != 1) return bad("the manifest must require exactly the native capability its descriptor selects");
+    const std::vector<std::uint8_t> &src = nit->second.data;
+    if (src.empty() || src.size() > kMaxProviderSourceBytes) return bad("the provider source is empty or larger than allowed");
+    if (std::find(src.begin(), src.end(), static_cast<std::uint8_t>(0)) != src.end()) return bad("the provider source contains a NUL byte");
+    if (sha256_hex(src) != info.native_sha256) return bad("the provider source SHA-256 does not match the manifest");
     out.native = std::move(nit->second.data);
-  } else if (!info.requires_capabilities.empty()) {
-    return bad("the manifest requires a capability without a native payload");
   }
   info.identity = sha256_hex(man->second.data);
   out.ok = true;

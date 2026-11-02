@@ -801,6 +801,32 @@ static GenesisVdpCandidatePixel genesis_vdp_plane_candidate_at(const GenesisVdpR
                                       plane_y % ctx->geometry.cell_height);
 }
 
+/* SEG-124 (ADR 0267): the host helper table of the native patch ABI: the runtime's own VDP functions behind a fixed, SDK-visible signature. */
+_Static_assert(sizeof(GenesisCompatLine) == sizeof(GenesisRasterLine) && offsetof(GenesisCompatLine, cram) == offsetof(GenesisRasterLine, cram) &&
+                   offsetof(GenesisCompatLine, vsram) == offsetof(GenesisRasterLine, vsram) && GENESIS_COMPAT_REGISTERS == GENESIS_VDP_REGISTER_COUNT &&
+                   GENESIS_COMPAT_CRAM_BYTES == GENESIS_VDP_CRAM_BYTES && GENESIS_COMPAT_VSRAM_BYTES == GENESIS_VDP_VSRAM_BYTES && GENESIS_COMPAT_VRAM_BYTES == GENESIS_VDP_VRAM_BYTES &&
+                   GENESIS_COMPAT_MAX_LINES == GENESIS_RASTER_MAX_LINES,
+               "the SDK's line layout is the runtime's raster line layout");
+static int genesis_compat_host_hscroll(const uint8_t vram[GENESIS_COMPAT_VRAM_BYTES], const uint16_t registers[GENESIS_COMPAT_REGISTERS], unsigned plane, unsigned line, int32_t *value) {
+  if (plane > 1U) return -1;
+  return genesis_vdp_read_hscroll(vram, registers, plane == 0U ? GENESIS_VDP_PLANE_A : GENESIS_VDP_PLANE_B, line, value);
+}
+static int genesis_compat_host_vscroll(const uint8_t vsram[GENESIS_COMPAT_VSRAM_BYTES], const uint16_t registers[GENESIS_COMPAT_REGISTERS], unsigned plane, unsigned cell_column, int32_t *value) {
+  if (plane > 1U) return -1;
+  return genesis_vdp_read_vscroll(vsram, registers, plane == 0U ? GENESIS_VDP_PLANE_A : GENESIS_VDP_PLANE_B, cell_column, value);
+}
+static int genesis_compat_host_vscroll_per_column(const uint16_t registers[GENESIS_COMPAT_REGISTERS]) { return genesis_vdp_vscroll_mode_is_2cell(registers); }
+static int genesis_compat_host_cram_rgb(const uint8_t cram[GENESIS_COMPAT_CRAM_BYTES], unsigned index, uint8_t rgb[3]) {
+  GenesisRgb888 color;
+  if (genesis_vdp_decode_cram_entry(cram, index, &color) != 0) return -1;
+  rgb[0] = color.r; rgb[1] = color.g; rgb[2] = color.b;
+  return 0;
+}
+const GenesisCompatHost *genesis_native_compat_host(void) {
+  static const GenesisCompatHost host = {sizeof(GenesisCompatHost), genesis_compat_host_hscroll, genesis_compat_host_vscroll, genesis_compat_host_vscroll_per_column, genesis_compat_host_cram_rgb};
+  return &host;
+}
+
 /* SEG-124 (ADR 0267): the same candidate as genesis_vdp_plane_candidate_at, but the name-table word of the world cell beneath an off-screen column comes from a verified
  * native compatibility provider instead of the (wrapped) nametable. Pattern, flips, palette line and priority are decoded exactly as for any cell. */
 static GenesisVdpCandidatePixel genesis_vdp_plane_candidate_from_word(const GenesisVdpRenderContext *ctx, const GenesisVdpRowPlane *plane, int64_t x,
@@ -1198,12 +1224,17 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     cf.requested = target->compat_components & target->compat->components;
     if (target->compat->abi_version != GENESIS_NATIVE_COMPAT_ABI || target->compat->prepare == NULL || cf.requested == 0U) {
       compat_reason = (uint8_t)GENESIS_COMPAT_FAULT;
-    } else if (!target->compat_ram_valid || target->compat_ram == NULL) {
+    } else if ((target->compat_caps & GENESIS_CAP_FRAME_WORK_RAM) != 0U && (!target->compat_ram_valid || target->compat_ram == NULL)) {
       compat_reason = (uint8_t)GENESIS_COMPAT_STALE_STATE;
     } else {
-      cf.work_ram = target->compat_ram;
-      cf.raster = raster;
-      cf.vram = journaled ? raster->vram_start : vram;
+      /* the host grants exactly the capabilities the verified package declared; everything is a read-only view */
+      cf.host = genesis_native_compat_host();
+      cf.work_ram = (target->compat_caps & GENESIS_CAP_FRAME_WORK_RAM) != 0U ? target->compat_ram : NULL;
+      if ((target->compat_caps & GENESIS_CAP_FRAME_VDP) != 0U) {
+        cf.lines = (const GenesisCompatLine *)(const void *)raster->lines;
+        cf.line_count = height < GENESIS_RASTER_MAX_LINES ? height : GENESIS_RASTER_MAX_LINES;
+        cf.vram = journaled ? raster->vram_start : vram;
+      }
       cf.width = width;
       cf.height = height;
       cf.side = side;

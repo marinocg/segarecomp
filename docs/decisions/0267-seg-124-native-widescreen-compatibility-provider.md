@@ -1,63 +1,56 @@
-# ADR 0267: SEG-124 - verified native widescreen compatibility provider (Sonic the Hedgehog 1), package schema 2
+# ADR 0267: SEG-124 - self-contained trusted native-source patch providers, package schema 2
 
 ## Status
 
-Accepted (SEG-124-T001, one product PR with three internal checkpoints). Builds on ADR 0262-0266. It does not replace BPS patches (ADR 0266) and adds no generic widescreen
-feature; it adds one title-specific, statically compiled component behind a small generic interface.
+Accepted (SEG-124, one product PR). Builds on ADR 0262-0266. It does not replace BPS patches (ADR 0266). The first revision of this ADR admitted one title-specific provider built into the product; that
+ownership was corrected in the same PR (still unreleased, so schema 2 is revised in place): **segarecomp provides the generic patch ABI, frame access, validated build integration and rendering hooks; a patch package
+owns all game-specific implementation.**
 
 ## Context
 
-ADR 0266 classified game problems as A (renderer defect), B (game logic limitation: BPS), C (original hardware capacity limit: a statically compiled, game-aware presentation
-extension may be considered) and D (unavailable information). The Sonic 1 streaming patch (class B) widens what the game submits to the VDP, but it cannot make the VDP show
-world the game never prepared (the initial fill and a respawn leave one side of the 512-pixel plane unprepared, and every plane ring buffer stays a ring buffer), and it cannot
-add a HUD beyond the original viewport. A generated-native program can present authentic information the hardware never displayed because the game's own level data is
-resident in guest RAM. That is the capability this ADR admits, for one game, without turning the runtime into a scripting or plugin host.
+ADR 0266 classified game problems as A (renderer defect), B (game logic limitation: BPS), C (original hardware capacity limit: a game-aware presentation extension may be considered) and D (unavailable information). A BPS patch
+cannot make the VDP show world the game never prepared, nor add a HUD beyond the original viewport; a generated-native program can present authentic information the hardware never displayed because the game's own level data
+is resident in guest RAM. That knowledge is per game. Baking one game into the product would make every further game a product release, and community patch authors could not contribute.
 
 ## Decision
 
-1. **Three sources stay separate.**
-   * *Original guest execution*: the recompiled 68000/Z80 code of the original or BPS-patched image, guest RAM/VRAM/CRAM and normal device semantics. Unchanged by this ADR.
-   * *Generic presentation*: the existing VDP-backed Level 2/3 extended surface (ADR 0262-0265). It reads VRAM, CRAM, scroll state and the SAT only.
-   * *Verified native compatibility provider*: a statically compiled component, selected by a verified patch, that reads a bounded, frame-synchronized, read-only snapshot of guest
-     work RAM and reports presentation data (extra name-table words, an overlay). It never writes guest state, never runs guest code, never changes CPU/VDP/Z80 semantics and never
-     supplies hardware state; the generic VDP still decodes patterns, palettes, flips, priorities and sprites.
-2. **Interface (generic, game-independent).** `platforms/genesis/runtime/native_compat.h` defines ABI version 1: a provider has a capability id, an implementation version, a component
-   mask, `prepare(frame)` (validates ALL inputs for one frame and fails closed), `scenery_word(plane,row,x,hscroll,vscroll)` (the authentic name-table word of the world cell under an
-   off-screen column) and `hud(overlay)`. The generic extension producer calls the hook only for a requested frame whose provider accepted the frame. The generic M68K/Z80/VDP code contains
-   no Sonic knowledge. The Sonic 1 provider lives in `platforms/genesis/native_compat/` and is linked into a program only when a verified package names its capability.
-3. **Frame synchronization.** The frame is published at the VBlank onset, before the VBlank handler runs. The state the game used to prepare the displayed frame is therefore the work RAM
-   at the PREVIOUS onset (before that handler). The runtime copies the 64 KiB work RAM into an adapter-owned buffer right after each publication and stamps it with the virtual frame counter;
-   the provider receives it only if it was taken exactly one frame earlier, otherwise the frame is served by the generic path. The camera is additionally cross-checked against the VDP's
-   own per-line scroll values, which are the authority for what is displayed.
-4. **No second renderer.** Scenery is delivered as name-table words, never as pixels. The generic code fetches patterns from the frame's VRAM and colours from the line's CRAM, applies flips, priority
-   and the sprite layer exactly as for visible columns. The provider derives a word from verified level data (layout, chunk, block tables the game decompressed into RAM), not from the wrapped nametable.
-5. **Package schema 2 (`docs/product/patch-packages.md`).** `schema_version` 2 adds the typed payload `native` (a closed JSON descriptor, `widescreen.json`) next to the optional `rom` (BPS). Schema 1 is
-   read unchanged. Packages contain data only; the descriptor names a capability, the exact original image, the minimum implementation version, the enabled components and the validated width.
-   Unknown capabilities, other revisions, malformed or oversized descriptors and a `requires` capability this release lacks are refused at install and build, never ignored. A native-only package leaves the image
-   bytes unchanged (effective image == original) and is still a distinct variant.
-6. **Identities.** The variant cache key additionally contains the capability id, its implementation version and the descriptor digest. The package identity (digest of the manifest, which names
-   every payload digest) is already part of the key, so a native-only package can never share a build with Vanilla, with a BPS-only package or with another descriptor. No new meaning is given to existing digests.
-7. **Provenance.** Only a frame whose scenery came from a provider that accepted that frame is labelled `SV_EXTSRC_AUTHORED`; a frame served by the generic path (unsupported scene, rejected state, no provider)
-   stays `GENERIC` and receives the normal Comfort treatment. The HUD is a separate overlay (RGBA, drawn by the host after side treatment, only into visible side space, never over the native picture) so
-   it neither forces nor depends on the provenance of the scenery.
-8. **Failure.** Wrong revision, a scene or zone the provider does not support, a bad state pointer, inconsistent camera/scroll, a stale snapshot or an out-of-range world coordinate produce the generic
-   result with an accurate status; the provider never invents scenery for a world coordinate outside the level (those cells are blank, showing the backdrop), never reads outside the snapshot and never crashes.
-   Vanilla and BPS-only builds contain no provider code.
-9. **Non-goals.** No interpreter, JIT, expression language, plugin loader, runtime-loaded executable payload, generic introspection of guest RAM, second VDP, scene engine, or claim for any game, zone or
-   scene that is not individually validated.
+1. **Three sources stay separate.** Original guest execution (unchanged); generic presentation (the VDP-backed Level 2/3 extended surface, ADR 0262-0265); and a *native patch provider* that reads a bounded, frame-synchronized,
+   read-only view of guest state and reports presentation data (extra name-table words, an overlay). A provider never writes guest state, never runs guest code, never changes CPU/VDP/Z80 semantics; the generic VDP still decodes
+   patterns, palettes, flips, priorities and sprites.
+2. **Stable generic ABI (version 1).** `platforms/genesis/sdk/segarecomp_genesis_patch.h` is the one public header (stdint/stddef only). A provider exports `segarecomp_patch_provider`, returning a table with `prepare`,
+   `scenery_word` and `hud`. Host abilities are **capabilities** (`frame.work_ram`, `frame.vdp`, `scenery.words`, `overlay.rgba`), never a game name. The host grants exactly the capabilities the verified package declared
+   (an undeclared one is passed as NULL), supplies pure VDP helper functions (`GenesisCompatHost`) instead of cloning VDP decoding, and offers no memory-write or device-control API. The runtime has no game switch and no
+   provider index; the runtime-internal `native_compat.h` only includes the SDK header and declares the host table.
+3. **Frame synchronization.** The frame is published at the VBlank onset, before the VBlank handler runs, so the state the game used to prepare the displayed frame is the work RAM at the PREVIOUS onset. The runtime copies the
+   64 KiB work RAM into an adapter-owned buffer right after each publication and stamps it; a provider that needs it receives it only if it was taken exactly one frame earlier, otherwise the frame is served by the generic path.
+4. **No second renderer.** Scenery is delivered as name-table words, never pixels. Provenance: only a frame whose scenery came from a provider that accepted that frame is `SV_EXTSRC_AUTHORED`; a declined or partially
+   failed frame is `GENERIC` and receives the normal Comfort treatment. The HUD is a separate RGBA overlay drawn by the host after side treatment.
+5. **Package schema 2 (`docs/product/patch-packages.md`).** The `native` payload is ONE portable C11 source file `provider.c` (`format: "c11-source"`, SHA-256, ABI version, required capabilities, explicit
+   `executable: "yes"`), next to or instead of the BPS. The manifest also carries author and optional license. No compiler arguments, linker flags, header paths, scripts, binaries or fetch URLs exist in the format; only the
+   declared payload types are accepted; the retired descriptor-style schema 2 (a built-in capability table) is refused explicitly. Schema 1 is unchanged.
+6. **Build integration.** `segarecomp build --patch-package P --patch-identity ID` takes a *reference*. The build re-reads and re-verifies the package (shared parser), checks the approved identity (digest of the manifest) and the
+   image digest (a preview in the launcher is not trusted: files may change), extracts `provider.c` into `<output>/native/`, re-hashes it, compiles it with isolated flags (`-std=c11 -I <sdk dir>` plus the bundled compiler's own
+   arguments; the runtime/viewer private headers are not on its include path) and links it into that variant's program; the viewer hook calls `segarecomp_patch_provider`. No dynamic library, JIT, interpreter or runtime plugin;
+   no product rebuild. A failed provider compile/link fails that variant's build only (the launcher publishes builds atomically).
+7. **Identities.** The variant cache key and the build record contain the original and effective image digests, the package identity, the provider source digest, the ABI version and the capability set. A provider source change
+   invalidates the build; another ABI is refused or rebuilt; Vanilla never resolves to a patched program; removing a patch touches no Vanilla build or global setting.
+8. **Trust.** This is a **trusted native-source patch** mechanism and it is **not a sandbox**. Bounded archive parsing, source hashes, a restricted interface and compiler flags are NOT a security sandbox and must never be
+   described as one. The launcher shows an explicit sheet (executable source, author, license, package identity, source digest, declared capabilities, "not sandboxed, install only from a trusted source"), installs a
+   code-bearing package only after the user approves that exact package identity, never compiles a new code-bearing patch from scanning or updates, revalidates the identity at build and refuses an unapproved record. Archive strings
+   are data and never reach a command line. If a deployment required patches that are safe to run untrusted, trusted C cannot satisfy it; a separately designed sandboxed format (WebAssembly AOT) would be a different capability and
+   is not part of this ADR.
+9. **Failure.** A provider that declines a frame, reports a fault for a cell it accepted, or returns another ABI version produces the generic result with an accurate status; Vanilla and BPS-only builds contain no provider code.
+10. **Non-goals.** No dynamic-library loader, JIT, interpreter, scripting VM, opcode decoder, second VDP renderer, universal guest-state introspection, game-specific behaviour in the generic runtime, marketplace, dependency
+    resolution, package build scripts, automatic execution of untrusted C or universal gameplay API.
 
 ## Amendments (SEG-124, same PR)
 
-* **HUD replacement.** The patch removes the game's own HUD sprites (BPS; counters and update logic untouched) and the `hud` component draws the SAME sprite pieces from the frame's own VRAM tiles and CRAM
-  (identical look, no background, same rows) as an overlay anchored at the left edge of the visible surface, or at the original place inside the picture when there is no visible side (4:3, Original, where the
-  producer runs for the HUD only). The native centre therefore intentionally differs from Vanilla's HUD area only by the HUD's horizontal position; every other native pixel is unchanged (tested). The HUD is
-  offered in any running level, scenery only in the verified zone.
-* **Frame identity.** Besides the RAM/VDP scroll agreement, `prepare` compares its own cells for the part of the world in view with the VDP nametables (decline on gross disagreement), which makes the
-  scenery scope safe to extend to a second act of the same level format; the HUD needs only plausible counters in any running level.
-* **Background bands.** A parallax band's position is only defined modulo the 512-pixel plane; the provider uses the alias nearest the background camera and leaves cells left of world x 0 blank.
-* **Fixture capability.** `genesis.fixture.native-widescreen.v1` exists only under `SEGARECOMP_ALLOW_FIXTURE_CAPABILITIES=1` (synthetic tests), is never buildable and has no provider.
+* **First delivered provider.** Sonic the Hedgehog 1 (native widescreen scenery, relocated HUD) is the first package written against this ABI. Its source, authoring tooling and real-game evidence live in the private harness; the product
+  ships no Sonic source, capability, ROM digest or registry. Verifying it is the harness's job; the product tests use synthetic providers.
+* **HUD replacement.** A package may remove the game's own HUD sprites with its BPS (counters and update logic untouched) and redraw the same pieces from the frame's VRAM tiles and CRAM through `overlay.rgba`, anchored to the left
+  edge of the visible side or at the original place inside the picture when there is no visible side.
 
 ## Consequences
 
-The first native-compat title adds title-specific code to the product, kept in one directory with a capability table and tests. Each further title needs its own investigation and provider. Authored
-provenance stays a per-frame claim of a verified provider, never a mode setting.
+Further titles need only their own investigation and package, not a product release. The price is that code-bearing packages need an explicit trust decision, which the launcher makes unavoidable and honest. The ABI is versioned;
+a change that cannot be expressed compatibly gets a new version, which packages must declare.

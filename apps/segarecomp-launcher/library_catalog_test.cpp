@@ -311,10 +311,10 @@ int main() {
     // SEG-124 (ADR 0267): a native-only package's record (capability, implementation, components, descriptor digest) round-trips, reaches only its own Patched view, and a
     // BPS-only record stays byte-free of the native members; a damaged native record drops the whole patch (it never degrades into a BPS-only one).
     {
-      expect(slurp(pfile).find("native_capability") == std::string::npos, "a BPS-only patch record carries no native member");
+      expect(slurp(pfile).find("native_source_sha256") == std::string::npos, "a BPS-only patch record carries no native member");
       InstalledPatch n1;
-      n1.identity = digest('d'); n1.id = "nat"; n1.version = "1.0.0"; n1.name = "Native"; n1.target_sha256 = digest('a'); n1.native_capability = "genesis.sonic1.native-widescreen.v1";
-      n1.native_implementation = 1; n1.native_components = 3; n1.native_descriptor_sha256 = digest('e'); n1.installed_at = 11;
+      n1.identity = digest('d'); n1.id = "nat"; n1.version = "1.0.0"; n1.name = "Native"; n1.target_sha256 = digest('a'); n1.native_source_sha256 = digest('e'); n1.author = "Tester";
+      n1.native_abi = 1; n1.native_caps = 7; n1.native_approved = true; n1.installed_at = 11;
       Catalog nc(dir / "patches" / "native.json");
       nc.load();
       LibraryEntry &ne = *nc.import_rom(rom("genesis", 'a', "/games/g.md", "Patch Game"), 5).entry;
@@ -323,19 +323,19 @@ int main() {
       ne.selected_variant = n1.identity;
       expect(nc.save(), "native library saved");
       const std::string saved = slurp(dir / "patches" / "native.json");
-      expect(saved.find("native_capability") != std::string::npos && saved.find(digest('e')) != std::string::npos, "the native record is persisted");
+      expect(saved.find("native_source_sha256") != std::string::npos && saved.find(digest('e')) != std::string::npos, "the native record is persisted");
       Catalog back(dir / "patches" / "native.json");
       back.load();
       const LibraryEntry *br = back.find("genesis", digest('a'));
-      expect(br != nullptr && br->patches.size() == 2 && !br->patches[0].has_native() && br->patches[1].has_native() && br->patches[1].native_implementation == 1 && br->patches[1].native_components == 3 &&
-                 br->patches[1].native_descriptor_sha256 == digest('e') && br->patches[1].target_sha256 == digest('a'),
+      expect(br != nullptr && br->patches.size() == 2 && !br->patches[0].has_native() && br->patches[1].has_native() && br->patches[1].native_abi == 1 && br->patches[1].native_caps == 7 && br->patches[1].native_approved &&
+                 br->patches[1].native_source_sha256 == digest('e') && br->patches[1].target_sha256 == digest('a'),
              "native fields round-trip; the BPS-only patch stays BPS-only");
       const RomView nv = view_from_entry(*br), bv = view_for_variant(*br, p1.identity);
-      expect(nv.patched() && nv.patch_native() && nv.patch_native_capability == "genesis.sonic1.native-widescreen.v1" && nv.patch_native_implementation == 1 && nv.patch_native_components == 3 &&
-                 nv.patch_native_descriptor_sha256 == digest('e') && nv.effective_sha256() == digest('a') && nv.patch_identity == n1.identity,
+      expect(nv.patched() && nv.patch_native() && nv.patch_native_source_sha256 == digest('e') && nv.patch_native_abi == 1 && nv.patch_native_caps == 7 && nv.patch_native_approved &&
+                 nv.effective_sha256() == digest('a') && nv.patch_identity == n1.identity,
              "a native-only variant compiles the original image digest and carries its capability");
-      expect(!bv.patch_native() && bv.patch_native_capability.empty() && bv.patch_identity == p1.identity, "a BPS-only variant carries no native capability");
-      for (const char *broken : {"\"native_implementation\": 1", "\"native_components\": 3"}) {
+      expect(!bv.patch_native() && bv.patch_native_source_sha256.empty() && bv.patch_identity == p1.identity, "a BPS-only variant carries no native capability");
+      for (const char *broken : {"\"native_abi\": 1", "\"native_caps\": 7"}) {
         std::string t = saved;
         const auto at = t.find(broken);
         if (at != std::string::npos) t.replace(at, std::string(broken).size(), std::string(broken).substr(0, std::string(broken).find(':') + 2) + "0");
