@@ -68,8 +68,8 @@ int main() {
 
   Catalog catalog(library / "library.json");
   catalog.load();
-  LibraryEntry a = entry('a'); a.rom_paths = {rom_path}; a.current_build_key = key32('1'); a.builds = {{key32('2'), 1, "compatibility", "", ""}, {key32('1'), 2, "compatibility", "", ""}};
-  LibraryEntry b = entry('b'); b.current_build_key = key32('3'); b.builds = {{key32('3'), 3, "compatibility", "", ""}}; b.favorite = true;
+  LibraryEntry a = entry('a'); a.rom_paths = {rom_path}; a.current_build_key = key32('1'); a.builds = {{key32('2'), 1, "compatibility", "", "", ""}, {key32('1'), 2, "compatibility", "", "", ""}};
+  LibraryEntry b = entry('b'); b.current_build_key = key32('3'); b.builds = {{key32('3'), 3, "compatibility", "", "", ""}}; b.favorite = true;
   catalog.entries() = {a, b};
   const std::string ida = a.id(), idb = b.id();
 
@@ -311,7 +311,7 @@ int main() {
   }
   {  // remove from library, with and without the owned cache
     make_build(cache / "games" / key32('5'));
-    LibraryEntry c = entry('c'); c.current_build_key = key32('5'); c.builds = {{key32('5'), 1, "compatibility", "", ""}};
+    LibraryEntry c = entry('c'); c.current_build_key = key32('5'); c.builds = {{key32('5'), 1, "compatibility", "", "", ""}};
     catalog.entries().push_back(c);
     report = scan_storage(catalog, cache, library);
     Plan keep = plan_remove_from_library(report, {c.id()}, false, busy);
@@ -330,7 +330,7 @@ int main() {
 #if !defined(_WIN32)
   if (geteuid() != 0) {  // read-only tree: denial is reported, nothing crashes, nothing outside is touched
     make_build(cache / "games" / key32('6'));
-    LibraryEntry d = entry('d'); d.current_build_key = key32('6'); d.builds = {{key32('6'), 1, "compatibility", "", ""}};
+    LibraryEntry d = entry('d'); d.current_build_key = key32('6'); d.builds = {{key32('6'), 1, "compatibility", "", "", ""}};
     catalog.entries().push_back(d);
     fs::permissions(cache / "games" / key32('6') / "obj", fs::perms::owner_read | fs::perms::owner_exec);
     report = scan_storage(catalog, cache, library);

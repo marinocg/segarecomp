@@ -14,12 +14,12 @@
 namespace launcher {
 
 struct BuildRecord {
-  std::string variant;    // SEG-122: package identity of a Patched build (empty = the Vanilla build); recorded so no build can pass for another variant
   std::string key;        // cache directory name (entry_dir(...).filename()), 32 hex characters
   long long built_at = 0; // unix seconds of the successful build (0 when unknown)
   std::string mode;       // compatibility | optimized
   std::string version;    // launcher/product version that produced it
   std::string toolchain;  // e.g. "zig 0.15.2"
+  std::string variant;    // SEG-122: package identity of a Patched build (empty = the Vanilla build); recorded so no build can pass for another variant
 };
 
 // SEG-122 (ADR 0266): one installed widescreen patch package of a game. The package file itself lives in `<library>/patches/<identity>.segapatch`; this
