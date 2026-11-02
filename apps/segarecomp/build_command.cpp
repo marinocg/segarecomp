@@ -891,7 +891,11 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     if (options.native_index >= 0) {
       // SEG-124: the closed, audited provider set is linked only into a program built from a verified package that selects a capability.
       const fs::path native_dir = options.runtime_dir / "native_compat";
-      for (const char *name : {"native_compat_registry.c", "sonic1_widescreen.c"}) add(final_only, native_dir / name, std::string("native-") + name);
+      std::vector<std::string> native_sources;   // every provider source of the audited set, in a fixed order (the registry selects by index)
+      for (const auto &entry : fs::directory_iterator(native_dir, ec))
+        if (entry.is_regular_file(ec) && entry.path().extension() == ".c") native_sources.push_back(entry.path().filename().string());
+      std::sort(native_sources.begin(), native_sources.end());
+      for (const std::string &name : native_sources) add(final_only, native_dir / name, "native-" + name);
       add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook",
           {"-DSEGARECOMP_GENESIS_SOUND", "-I", native_dir.string(), "-DSEGARECOMP_NATIVE_PROVIDER=" + std::to_string(options.native_index),
            "-DSEGARECOMP_NATIVE_IMPLEMENTATION=" + std::to_string(options.native_implementation), "-DSEGARECOMP_NATIVE_COMPONENTS=" + std::to_string(options.native_components)});
