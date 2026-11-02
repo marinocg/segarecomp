@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <filesystem>
-#include <system_error>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -776,14 +774,13 @@ void width_and_profile_tests() {
   { std::string up(64, 'A'); check(sv_profile_path("/tmp/x/s.cfg", "genesis", up.c_str(), path, sizeof path) == 0 && std::string(path) == "/tmp/x/viewer-widescreen/genesis-" + std::string(64, 'a') + ".cfg", "SEG-123: the digest is lowercased"); }
   check(sv_profile_path("/tmp/x/s.cfg", "genesis", "../../etc/passwd", path, sizeof path) == -1 && sv_profile_path("/tmp/x/s.cfg", "genesis", sha.c_str(), path, 10) == -1, "SEG-123: invalid identity or small buffer builds no path");
   // load overlays only the stated keys, ignores everything else, survives damage
-  std::error_code ec;
-  const std::string dir = (std::filesystem::temp_directory_path(ec) / ("sv_core_profile_" + std::to_string(static_cast<long>(std::time(nullptr))))).generic_string();
-  check(std::filesystem::create_directories(dir, ec) || std::filesystem::is_directory(dir), "SEG-123: temp dir");
-  const std::string file = dir + "/p.cfg";
+  const char *tmp = std::getenv("TMPDIR") != nullptr ? std::getenv("TMPDIR") : (std::getenv("TEMP") != nullptr ? std::getenv("TEMP") : (std::getenv("TMP") != nullptr ? std::getenv("TMP") : "."));
+  const std::string dir = std::string(tmp) + "/sv_core_profile_" + std::to_string(static_cast<long>(std::time(nullptr)));  // files only: no directory is needed
+  const std::string file = dir + "_p.cfg";
   SvSettings g;
   sv_settings_defaults(&g);
   g.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; g.video.widescreen_side_style = SV_SIDE_BORDERS; g.video.widescreen_width = 20; g.video.scale = SV_SCALE_INTEGER; g.audio.volume = 33;
-  { SvSettings x = g; check(sv_profile_load(&x, (dir + "/missing.cfg").c_str()) == 0 && x.video.widescreen_width == 20 && x.video.widescreen == SV_WIDESCREEN_EXTENDED_BACKGROUNDS, "SEG-123: a missing profile inherits the global values"); }
+  { SvSettings x = g; check(sv_profile_load(&x, (dir + "_missing.cfg").c_str()) == 0 && x.video.widescreen_width == 20 && x.video.widescreen == SV_WIDESCREEN_EXTENDED_BACKGROUNDS, "SEG-123: a missing profile inherits the global values"); }
   SvVideoSettings pv = g.video; pv.widescreen = SV_WIDESCREEN_ENHANCED_GAMEPLAY; pv.widescreen_side_style = SV_SIDE_RAW; pv.widescreen_width = 71;
   check(sv_profile_save(&pv, file.c_str()) == 0, "SEG-123: profile saved");
   { SvSettings x = g; check(sv_profile_load(&x, file.c_str()) == 3 && x.video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY && x.video.widescreen_side_style == SV_SIDE_RAW && x.video.widescreen_width == 71 &&
@@ -794,7 +791,8 @@ void width_and_profile_tests() {
   { std::FILE *f = std::fopen(file.c_str(), "wb"); std::string junk(20000, '\x01'); std::fwrite(junk.data(), 1, junk.size(), f); std::fclose(f);
     SvSettings x = g; sv_profile_load(&x, file.c_str()); check(x.video.widescreen_width == 20 && x.audio.volume == 33, "SEG-123: a corrupted profile changes nothing"); }
   check(sv_profile_save(&pv, "") == -1 && sv_profile_save(nullptr, file.c_str()) == -1, "SEG-123: invalid save arguments are refused");
-  std::filesystem::remove_all(dir, ec);
+  std::remove(file.c_str());
+  std::remove((file + ".tmp").c_str());
 }
 
 int main() {
