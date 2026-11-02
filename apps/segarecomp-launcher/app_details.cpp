@@ -271,6 +271,10 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     else if (info.status == GameStatus::failed) { line = "The last build failed. See the build log, then try again."; color = col::err; }
     else if (info.status == GameStatus::stale) { line = info.other_mode_ready ? "No " + mode + " build yet; the other build mode's executable is still available." : "The stored build is from another release or option set. Recompile to play."; color = col::warn; }
     else { line = "Imported, not built yet. Build creates the native program (" + mode + ")."; }
+    if (!entry.patches.empty() && !info.sega_cd && !is_running && !is_building) {   // SEG-122: always say which version Play starts
+      const InstalledPatch *sel = entry.selected_patch();
+      line += sel == nullptr ? " Play starts Vanilla." : " Play starts Patched.";
+    }
     const auto lines = wrap(ctx_.regular, ctx_.u(12.5F), tw, line);
     for (std::size_t i = 0; i < lines.size() && i < 2; ++i) { draw_text(dl, ctx_.regular, ctx_.u(12.5F), color, ImVec2(x0, y), lines[i].c_str()); y += ctx_.u(16.0F); }
     y += ctx_.u(8.0F);
@@ -311,12 +315,31 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
         if (scd_locate) scd_browse(info.scd.refusal == scd::Refusal::bios_missing ? "scd_locate_bios" : "scd_locate_cue", entry.id());
         else browse_locate(entry.id());
       }
-    } else if (button(ctx_, "play", is_running ? "Playing" : (entry.patches.empty() ? "Play" : (info.variant.empty() ? "Play Vanilla" : "Play Patched")), ImVec2(play_w, bh), Style::primary, can_play(info), ctx_.icon("play"))) play(entry.id());
-    note_item_layout("play");
-    if (ImGui::IsItemHovered() && !can_play(info) && !locate_primary) {
-      const std::string why = info.sega_cd ? (info.scd.state == scd::State::ready ? std::string("Wait for the running game or check to finish.") : scd::message(info.scd.refusal, info.scd.detail))
-                              : info.status == GameStatus::ready ? std::string("Wait for the running game or build to finish.") : std::string("No executable matches the current build configuration yet.");
-      tooltip(ctx_, why.c_str());
+      note_item_layout("play");
+    } else {
+      // SEG-122: with an installed patch Play becomes a split button: the main part plays the selected variant, the chevron opens "Play Vanilla / Play Patched / Build patched version"
+      const bool split = !entry.patches.empty() && !info.sega_cd;
+      const float chev_w = split ? ctx_.u(34.0F) : 0.0F;
+      const char *play_label = is_running ? "Playing" : (entry.patches.empty() ? "Play" : (info.variant.empty() ? "Play Vanilla" : "Play Patched"));
+      if (split && text_width(ctx_.bold, ctx_.u(13.0F), play_label) + ctx_.u(58.0F) > play_w - chev_w) play_label = is_running ? "Playing" : "Play";   // never a truncated label: the menu and the state line name the version
+      if (button(ctx_, "play", play_label, ImVec2(play_w - chev_w, bh), Style::primary, can_play(info), ctx_.icon("play"))) play(entry.id());
+      note_item_layout("play");
+      if (ImGui::IsItemHovered() && !can_play(info) && !locate_primary) {
+        const std::string why = info.sega_cd ? (info.scd.state == scd::State::ready ? std::string("Wait for the running game or check to finish.") : scd::message(info.scd.refusal, info.scd.detail))
+                                : info.status == GameStatus::ready ? std::string("Wait for the running game or build to finish.") : std::string("No executable matches the current build configuration yet.");
+        tooltip(ctx_, why.c_str());
+      }
+      if (split) {
+        ImGui::SameLine(0.0F, ctx_.u(2.0F));
+        const bool open = button(ctx_, "play_variants", "", ImVec2(chev_w, bh), Style::primary, !game_ && !is_building && !maintenance_running_) || std::exchange(script_open_play_menu_, false);
+        const ImVec2 ra = ImGui::GetItemRectMin(), rb = ImGui::GetItemRectMax(), c((ra.x + rb.x) * 0.5F, (ra.y + rb.y) * 0.5F);
+        const float k = ctx_.u(4.5F);
+        dl->AddTriangleFilled(ImVec2(c.x - k, c.y - k * 0.5F), ImVec2(c.x + k, c.y - k * 0.5F), ImVec2(c.x, c.y + k * 0.6F), IM_COL32_WHITE);   // chevron
+        if (ImGui::IsItemHovered()) tooltip(ctx_, "Choose which version to play: Vanilla or a patched version");
+        if (open) ImGui::OpenPopup("##play_variants");
+        if (ImGui::IsPopupOpen("##play_variants")) ImGui::SetNextWindowPos(ImVec2(x0, rb.y + ctx_.u(4.0F)));   // hangs under the split button, right edges aligned
+        draw_play_variants_menu("##play_variants", entry, info);
+      }
     }
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     const bool prominent_build = info.status != GameStatus::ready && !info.older.playable;  // Play stays the dominant action while an earlier build is playable
@@ -347,6 +370,31 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
   }
   ImGui::SetCursorScreenPos(ImVec2(top.x, std::max(top.y + cover_h, y) + ctx_.u(14.0F)));
   ImGui::Dummy(ImVec2(w, 0.0F));
+}
+
+// SEG-122: the dropdown of the Play button: pick the version to start. Choosing a built version selects it and starts it; an unbuilt Patched version offers its build instead
+// (never a silent fall back to Vanilla).
+void App::draw_play_variants_menu(const char *popup_id, LibraryEntry &entry, const StatusInfo &info) {
+  if (!begin_menu(ctx_, popup_id)) return;
+  const float mw = ctx_.u(270.0F);
+  const bool idle = !game_ && !maintenance_running_ && !is_building(entry.id()) && !is_queued(entry.id());
+  const std::string vsub = entry.selected_variant.empty() ? "selected" : "";
+  if (menu_item(ctx_, "pv_vanilla", "Play Vanilla", info.vanilla_ready ? vsub.c_str() : "not built", ctx_.icon("play"), mw, idle && info.vanilla_ready)) { select_variant(entry.id(), std::string()); play(entry.id()); }
+  for (std::size_t i = 0; i < entry.patches.size(); ++i) {
+    const InstalledPatch &p = entry.patches[i];
+    bool built = false;
+    for (const auto &b : info.patches) if (b.identity == p.identity) built = b.built;
+    const std::string tag = entry.patches.size() == 1 ? std::string() : " " + std::to_string(i + 1);   // same numbering as the variant tiles; the name rides in the hint line
+    const std::string hint = ellipsize(ctx_.regular, ctx_.u(11.5F), ctx_.u(210.0F), patch_label(p) + (entry.selected_variant == p.identity ? ", selected" : (built ? "" : ", not built")));
+    if (built) {
+      if (menu_item(ctx_, ("pv_play_" + p.identity.substr(0, 8)).c_str(), ("Play Patched" + tag).c_str(), hint.c_str(), ctx_.icon("play"), mw, idle)) { select_variant(entry.id(), p.identity); play(entry.id()); }
+    } else if (menu_item(ctx_, ("pv_build_" + p.identity.substr(0, 8)).c_str(), ("Build patched version" + tag).c_str(), hint.c_str(), ctx_.icon("reset"), mw, idle && can_build(entry, info))) {
+      select_variant(entry.id(), p.identity);
+      notices_.erase(entry.id());
+      request_build(entry.id());
+    }
+  }
+  end_menu();
 }
 
 void App::take_details_focus(const char *id) {

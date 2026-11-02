@@ -200,6 +200,11 @@ def main():
             expect(f"rom={sha(patched)} library={sha(src)}" in env_lines[0] and "(Patched: Synthetic Wide 1.0.0)" in env_lines[0], f"patched launch identities: {env_lines[0]}")
             expect(f"rom={sha(src)} library=-" in env_lines[1] and "(Patched" not in env_lines[1], f"vanilla launch identities: {env_lines[1]}")
 
+        # 6b. The Play button's dropdown lists both versions (and offers a build for an unbuilt one).
+        trace = p.run(OPEN + ["variant vanilla", "frames 10", "open_play_menu", "frames 12", "menu_items", "quit"])
+        items = next((l for l in trace if l.startswith("menu_items")), "")
+        expect("Play Vanilla" in items and "Play Patched" in items, f"the Play dropdown names both versions: {items}")
+
         # 7. Persistence: the selection survives a restart.
         check("select patched", p.run(OPEN + ["variant patched", "frames 10", "quit"]))
         trace = p.run(OPEN + ["frames 20", "expect variant=patched", "expect patches=1", "expect status=Ready", "expect can_play=1", "quit"])

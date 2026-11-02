@@ -171,6 +171,8 @@ private:
   void draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w);
   // SEG-122 (ADR 0266): the Patches / Variants card of a Genesis game's Details page and its actions.
   float draw_variants(LibraryEntry &entry, const StatusInfo &info, float w);
+  void draw_play_variants_menu(const char *popup_id, LibraryEntry &entry, const StatusInfo &info);
+  bool script_open_play_menu_ = false;
   void browse_patch(const std::string &id);
   void patch_chosen(const std::string &id, const std::string &path);   // the file chooser's result: verify, then ask
   void patch_install_confirmed(const std::string &id, const std::string &package);

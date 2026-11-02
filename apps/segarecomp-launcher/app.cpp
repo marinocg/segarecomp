@@ -1366,6 +1366,8 @@ void App::run_script() {
     } else trace("cleanup=refused");
   } else if (cmd == "scroll_page") {   // SEG-109-T005: scroll the current page (`end` = to the bottom)
     script_page_scroll_ = arg == "end" ? 1e9F : static_cast<float>(std::atof(arg.c_str()));
+  } else if (cmd == "open_play_menu") {   // SEG-122: open the Play button's version dropdown of the open game
+    script_open_play_menu_ = true;
   } else if (cmd == "open_more") {     // open the More menu of the open game
     script_open_more_ = true;
   } else if (cmd == "menu_items") {    // trace the items of the menu drawn in the previous frame
