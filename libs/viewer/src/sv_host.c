@@ -959,11 +959,21 @@ static void capture_parse(SvHost *h) {
   h->capture_all_styles = SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_ALL_STYLES") != NULL;
   if (dir == NULL || list == NULL || *dir == '\0' || strlen(dir) >= sizeof h->capture_dir) return;
   snprintf(h->capture_dir, sizeof h->capture_dir, "%s", dir);
-  while (*list != '\0' && h->capture_count < 8) {
+  while (*list != '\0' && h->capture_count < SV_CAPTURE_MAX) {
     char *end = NULL;
     const unsigned long long n = strtoull(list, &end, 10);
     if (end == list) break;
     if (n > 0) h->capture_frames[h->capture_count++] = (uint64_t)n;
+    /* SEG-122: `first:last:step` expands to first, first+step, ... <= last (bounded by SV_CAPTURE_MAX) */
+    if (*end == ':') {
+      char *end2 = NULL, *end3 = NULL;
+      const unsigned long long last = strtoull(end + 1, &end2, 10);
+      const unsigned long long step = *end2 == ':' ? strtoull(end2 + 1, &end3, 10) : 1ULL;
+      if (end2 != end + 1 && step > 0) {
+        for (unsigned long long f = n + step; f <= last && h->capture_count < SV_CAPTURE_MAX; f += step) h->capture_frames[h->capture_count++] = (uint64_t)f;
+        end = *end2 == ':' && end3 != NULL ? end3 : end2;
+      }
+    }
     list = *end == ',' ? end + 1 : end;
     if (*end != ',') break;
   }

@@ -57,6 +57,7 @@ static int sdl_closed(void *ctx) {
     v->pad_next += 1U;
   }
   if (v->pad_count != 0U && v->pad_next > 0U) v->sample.pad[0] = v->pad_script[v->pad_next - 1U].actions;
+  if ((v->sample.pad[0] & 0x8000U) != 0U) { v->sample.pad[0] = (uint16_t)(v->sample.pad[0] & 0x7FFFU); v->sample.quit = 1; }
   v->polls += 1U;
   if (v->ext_attached) { /* the requested mode is sampled here, between guest slices: a frame is produced wholly under one value */
     const SvVideoSettings *video = &sv_host_settings(v->host)->video;
@@ -86,6 +87,7 @@ static void load_pad_script(GenesisSdl3Viewer *v) {
         case 'B': actions |= SV_ACTION_BIT(SV_ACT_BUTTON2); break;
         case 'C': actions |= SV_ACTION_BIT(SV_ACT_BUTTON3); break;
         case 'S': actions |= SV_ACTION_BIT(SV_ACT_START); break;
+        case 'Q': actions |= 0x8000U; break;  /* end the run (the window's close): lets a scripted capture finish without a wall-clock timeout */
         default: break;
       }
     }
