@@ -8,6 +8,7 @@
 #include "launcher_settings.hpp"
 #include "library_catalog.hpp"
 #include "older_build.hpp"
+#include "patch_library.hpp"
 #include "sega_cd.hpp"
 #include "library_view.hpp"
 #include "storage.hpp"
@@ -62,6 +63,12 @@ struct StatusInfo {
   // SEG-078-T002: a Sega CD game is judged by scd::quick_status (no cache entry, no build): `status` is only its coarse mapping (ready / needs attention).
   bool sega_cd = false;
   scd::Status scd;
+  // SEG-122: `variant` is the package identity of the variant this status describes (empty = Vanilla); `vanilla_ready` and `patches` give the build state of
+  // every variant, so the Patches / Variants card can show each one independently of which is selected.
+  std::string variant;
+  bool vanilla_ready = false;
+  struct PatchBuilt { std::string identity; bool built = false; };
+  std::vector<PatchBuilt> patches;
   [[nodiscard]] bool runnable() const { return status == GameStatus::ready || older.playable; }
 };
 
@@ -74,13 +81,14 @@ struct ImportItem {
 };
 
 struct Modal {
-  enum class Kind { none, message, plan, remove_entries, clear_library, restore_defaults, first_run_intermediates } kind = Kind::none;
+  enum class Kind { none, message, plan, remove_entries, clear_library, restore_defaults, first_run_intermediates, install_patch, remove_patch } kind = Kind::none;
   std::string title;
   std::vector<std::string> lines;
   Plan plan;
   std::vector<std::string> ids;   // remove_entries
   bool delete_cache = false;      // remove_entries: also delete the owned build folders
   bool keep_logs = false;
+  std::string target;             // install_patch / remove_patch: the package identity
 };
 
 class App {
@@ -161,6 +169,20 @@ private:
   void draw_details_identity(LibraryEntry &entry, const StatusInfo &info, float w, float cover_w);
   float draw_build_config(LibraryEntry &entry, const StatusInfo &info, float w);
   void draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w);
+  // SEG-122 (ADR 0266): the Patches / Variants card of a Genesis game's Details page and its actions.
+  float draw_variants(LibraryEntry &entry, const StatusInfo &info, float w);
+  void draw_play_variants_menu(const char *popup_id, LibraryEntry &entry, const StatusInfo &info);
+  bool script_open_play_menu_ = false;
+  void browse_patch(const std::string &id);
+  void patch_chosen(const std::string &id, const std::string &path);   // the file chooser's result: verify, then ask
+  void patch_install_confirmed(const std::string &id, const std::string &package);
+  void select_variant(const std::string &id, const std::string &identity);   // "" = Vanilla
+  void ask_remove_patch(const LibraryEntry &entry, const std::string &identity);
+  void patch_remove_confirmed(const Modal &sheet);     // the confirmed "Remove patch" sheet (also what the GUI script runs)
+  void patch_modal_confirm();                          // the confirm button of whichever patch sheet is open (also what the GUI script runs)
+  std::map<std::string, std::string> patch_notices_;   // id -> the last patch install / removal outcome (plain language)
+  std::string patch_expected_identity_;               // the identity the open install sheet showed
+  std::filesystem::path patch_pending_;                // the package the open "Install patch" sheet is about
   float draw_storage_rail(const LibraryEntry &entry, const StatusInfo &info, ImVec2 a, float w);
   void draw_game_menu(const std::string &popup_id, const std::string &id, bool include_details);
   [[nodiscard]] std::string build_action_label(const StatusInfo &info) const;

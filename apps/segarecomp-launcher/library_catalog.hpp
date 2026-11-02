@@ -19,6 +19,19 @@ struct BuildRecord {
   std::string mode;       // compatibility | optimized
   std::string version;    // launcher/product version that produced it
   std::string toolchain;  // e.g. "zig 0.15.2"
+  std::string variant;    // SEG-122: package identity of a Patched build (empty = the Vanilla build); recorded so no build can pass for another variant
+};
+
+// SEG-122 (ADR 0266): one installed widescreen patch package of a game. The package file itself lives in `<library>/patches/<identity>.segapatch`; this
+// record is what was verified at install time (the original game's exact digest matched, the BPS applied, every digest agreed).
+struct InstalledPatch {
+  std::string identity;       // SHA-256 of the package manifest (names every payload and target digest)
+  std::string id, version, name;
+  std::string target_sha256;  // verified digest of the patched image
+  std::string widescreen, side_style;   // the package's typed presentation defaults (closed name sets, "" = none)
+  int width_max = -1;         // the package's stated validated Widescreen Width (0..100), -1 = not stated; informational only (never drives capability)
+  long long installed_at = 0;
+  std::string build_key;      // the published patched build (entry_dir name), "" = not built
 };
 
 struct LibraryEntry {
@@ -46,6 +59,14 @@ struct LibraryEntry {
   int last_exit_code = 0;
   std::string current_build_key;       // the build the entry last produced or adopted
   std::vector<BuildRecord> builds;     // history, oldest first, bounded
+  // SEG-122: installed patch packages (Genesis only, at most max_patches) and the selected launch variant ("" = Vanilla, else an installed identity).
+  // Per-game widescreen preferences stay keyed by this entry's original identity and are shared by every variant.
+  std::vector<InstalledPatch> patches;
+  std::string selected_variant;
+  [[nodiscard]] const InstalledPatch *find_patch(const std::string &identity) const;
+  [[nodiscard]] const InstalledPatch *selected_patch() const { return selected_variant.empty() ? nullptr : find_patch(selected_variant); }
+  // Is `key` the build the entry currently stands behind (Vanilla's current build or an installed patch's published build)?
+  [[nodiscard]] bool is_current_key(const std::string &key) const;
   // SEG-078-T002 (ADR 0204): Sega CD only (platform_id "sega-cd"): the referenced BIOS and disc, the imported program and the last typed stop.
   // Never written for another platform, so a Genesis / Master System record is byte-for-byte what it was before.
   scd::EntryRecord sega_cd;
@@ -60,8 +81,8 @@ class Catalog {
 public:
   // The newest schema this release reads and writes. A library without a Sega CD game is still written as schema 1 (byte-compatible with every earlier
   // release); the first Sega CD game makes it schema 2, which an older release opens read-only instead of damaging (ADR 0204).
-  static constexpr int schema_version = 2;
-  static constexpr std::size_t max_entries = 5000, max_paths = 8, max_builds = 16;
+  static constexpr int schema_version = 3;  // 3: a library with an installed patch (SEG-122); older releases open it read-only
+  static constexpr std::size_t max_entries = 5000, max_paths = 8, max_builds = 16, max_patches = 4;
 
   explicit Catalog(std::filesystem::path file);
   // Reads the catalog. A missing file is a new empty library; a corrupt file is moved aside (`.corrupt`) after trying `.bak`, never
@@ -102,8 +123,13 @@ private:
   [[nodiscard]] bool parse_text(const std::string &text, std::string *error);
 };
 
-// A RomView for the entry built from stored fields only (no file access). `path` is the first tracked location.
+// A RomView for the entry built from stored fields only (no file access). `path` is the first tracked location. SEG-122: when the entry has a
+// selected installed patch the view is that Patched variant (`library_root` locates the installed package); otherwise it is Vanilla.
 [[nodiscard]] RomView view_from_entry(const LibraryEntry &entry);
+// The same view forced to a variant (identity "" = Vanilla; an identity that is not installed yields Vanilla).
+[[nodiscard]] RomView view_for_variant(const LibraryEntry &entry, const std::string &identity);
+// The installed copy of a package: `<library_root>/patches/<identity>.segapatch`.
+[[nodiscard]] std::filesystem::path patch_package_path(const std::string &identity);
 [[nodiscard]] bool is_hex_digest(const std::string &text, std::size_t length);
 
 } // namespace launcher

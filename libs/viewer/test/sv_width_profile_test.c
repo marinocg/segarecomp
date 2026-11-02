@@ -456,6 +456,127 @@ static void profile_tests(void) {
     } }
 }
 
+
+/* ---------------------------------------------------------------- SEG-122: a verified Patched variant's presentation defaults and its own profile */
+static SvHost *open_patched(const char *id, const char *patch, const char *ws, const char *side) {
+  SvHostConfig cfg;
+  memset(&cfg, 0, sizeof cfg);
+  cfg.system = SV_SYSTEM_GENESIS; cfg.title = "patch test"; cfg.picture_w = 320; cfg.picture_h = 224; cfg.max_w = 400; cfg.max_h = 480; cfg.default_scale = 3;
+  cfg.platform_id = "genesis"; cfg.profile_id = id;
+  cfg.patch_id = patch; cfg.patch_widescreen = ws; cfg.patch_side_style = side;
+  SDL_setenv_unsafe("SEGARECOMP_VIEWER_SETTINGS", g_settings, 1);
+  return sv_host_open(&cfg);
+}
+static Prefs patched_prefs(const char *id, const char *patch, const char *ws, const char *side, int *active) {
+  SvHost *h = open_patched(id, patch, ws, side);
+  Prefs p = {SV_WIDESCREEN_ORIGINAL, SV_SIDE_COMFORT, -1};
+  if (h == NULL) { CHECK(0, "patch: host opens"); return p; }
+  p = get_prefs(h);
+  if (active != NULL) *active = sv_host_patch_defaults_active(h);
+  sv_host_close(h);
+  return p;
+}
+static void patched_edit(const char *id, const char *patch, const char *ws, const char *side, Prefs p) {
+  SvHost *h = open_patched(id, patch, ws, side);
+  if (h == NULL) { CHECK(0, "patch: host opens for edit"); return; }
+  put_prefs(h, p);
+  sv_host_close(h);
+}
+typedef struct NoteScript { int step, found; char text[300]; } NoteScript;
+static int note_hook(void *ctx, SvHost *host, int iteration) {
+  NoteScript *s = (NoteScript *)ctx;
+  SvPage *p = sv_menu_top(&host->menu);
+  int i;
+  (void)iteration;
+  switch (s->step) {
+    case 0: case 1: tap(SV_KEY_DOWN); break;
+    case 2: tap(SV_KEY_RETURN); break;
+    case 3:
+      if (p != NULL) for (i = 0; i < p->count; ++i) if (p->items[i].hint[0] != '\0' && strstr(p->items[i].hint, "Patch defaults:") != NULL) { s->found = 1; snprintf(s->text, sizeof s->text, "%s", p->items[i].hint); }
+      tap(SV_KEY_ESCAPE); tap(SV_KEY_ESCAPE);
+      break;
+    default: return 1;
+  }
+  s->step++;
+  return 0;
+}
+static int video_menu_note(const char *id, const char *patch, const char *ws, const char *side, char *text, size_t cap) {
+  SvHost *h = open_patched(id, patch, ws, side);
+  NoteScript s;
+  SvSample smp;
+  if (h == NULL) return -1;
+  memset(&s, 0, sizeof s); memset(&smp, 0, sizeof smp);
+  sv_host_set_loop_hook(h, note_hook, &s);
+  tap(SV_KEY_ESCAPE);
+  sv_host_service(h, &smp);
+  sv_host_set_loop_hook(h, NULL, NULL);
+  sv_host_close(h);
+  if (s.found) snprintf(text, cap, "%s", s.text);
+  return s.found;
+}
+static void patch_tests(void) {
+  static const char *const P1 = "1111111111111111111111111111111111111111111111111111111111111111", *const P2 = "2222222222222222222222222222222222222222222222222222222222222222";
+  const Prefs orig = {SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_SIDE_BORDERS, 55}, mine = {SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_SIDE_COMFORT, 20}, van = {SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_SIDE_BORDERS, 88};
+  char dir[800], file[1100], variant1[1100], variant2[1100];
+  char *before_global, *before_orig, *after;
+  int act = 0;
+  Prefs got;
+  snprintf(g_settings, sizeof g_settings, "%s/viewer-settings.cfg", g_dir);
+  snprintf(dir, sizeof dir, "%s/viewer-widescreen", g_dir);
+  snprintf(file, sizeof file, "%s/genesis-%s.cfg", dir, kB);
+  snprintf(variant1, sizeof variant1, "%s/genesis-%s+%s.cfg", dir, kB, P1);
+  snprintf(variant2, sizeof variant2, "%s/genesis-%s+%s.cfg", dir, kB, P2);
+  write_text(g_settings, "video.widescreen=original\nvideo.widescreen_side_style=comfort\nvideo.widescreen_width=77\naudio.volume=40\n");
+  remove(file); remove(variant1); remove(variant2);
+  edit_game(SV_SYSTEM_GENESIS, "genesis", kB, orig);
+  before_global = read_text(g_settings); before_orig = read_text(file);
+  CHECK(before_global != NULL && before_orig != NULL, "patch: setup files");
+  /* Vanilla is exactly what it was */
+  got = open_prefs(SV_SYSTEM_GENESIS, "genesis", kB, NULL); CHECK(same(got, orig), "patch: Vanilla launches with exactly its previous settings");
+  /* the Patched variant starts in Level 3 + Raw at once, the width is inherited from the original game's profile, nothing is written by opening */
+  got = patched_prefs(kB, P1, "enhanced_gameplay", "raw", &act);
+  CHECK(act == 1 && got.ws == SV_WIDESCREEN_ENHANCED_GAMEPLAY && got.st == SV_SIDE_RAW && got.width == 55, "patch: Patched starts Level 3 + Raw with the inherited width");
+  CHECK(!file_exists(variant1), "patch: opening a Patched variant creates no profile");
+  { SvHost *h = open_patched(kB, P1, "enhanced_gameplay", "raw"); CHECK(h != NULL && sv_host_profile_path(h) != NULL && strstr(sv_host_profile_path(h), P1) != NULL, "patch: the variant profile is keyed by the full patch identity"); if (h != NULL) sv_host_close(h); }
+  { char note[300] = "";
+    CHECK(video_menu_note(kB, P1, "enhanced_gameplay", "raw", note, sizeof note) == 1 && strstr(note, "Patch defaults: Level 3 + Raw Extension") != NULL, "patch: the Video menu says where the starting values came from");
+    CHECK(video_menu_note(kB, NULL, NULL, NULL, note, sizeof note) == 0, "patch: Vanilla's Video menu has no patch note");
+    CHECK(video_menu_note(kB, P1, "turbo", "raw", note, sizeof note) == 0, "patch: an invalid override shows no patch note"); }
+  /* a user change while Patched goes to the variant profile only */
+  patched_edit(kB, P1, "enhanced_gameplay", "raw", mine);
+  CHECK(file_exists(variant1), "patch: the change is saved in the variant's own profile");
+  after = read_text(file); CHECK(after != NULL && strcmp(after, before_orig) == 0, "patch: the original game's profile is untouched by a Patched edit");
+  after = read_text(g_settings); CHECK(after != NULL && strcmp(after, before_global) == 0, "patch: the global file is untouched by a Patched edit");
+  got = open_prefs(SV_SYSTEM_GENESIS, "genesis", kB, NULL); CHECK(same(got, orig), "patch: preferences changed while Patched never leak into Vanilla");
+  got = patched_prefs(kB, P1, "enhanced_gameplay", "raw", &act); CHECK(act == 1 && same(got, mine), "patch: the user's patched preferences survive a restart");
+  /* a user change while Vanilla does not reach the Patched variant */
+  edit_game(SV_SYSTEM_GENESIS, "genesis", kB, van);
+  got = patched_prefs(kB, P1, "enhanced_gameplay", "raw", NULL); CHECK(same(got, mine), "patch: a Vanilla edit never overwrites the patched preferences");
+  /* a second patch has its own independent preferences and defaults, and inherits the (new) original width */
+  got = patched_prefs(kB, P2, "extended_backgrounds", "borders", &act);
+  CHECK(act == 1 && got.ws == SV_WIDESCREEN_EXTENDED_BACKGROUNDS && got.st == SV_SIDE_BORDERS && got.width == 88, "patch: a second patch starts from its own defaults");
+  patched_edit(kB, P2, "extended_backgrounds", "borders", (Prefs){SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_SIDE_RAW, 5});
+  got = patched_prefs(kB, P1, "enhanced_gameplay", "raw", NULL); CHECK(same(got, mine), "patch: two patches keep independent preferences");
+  CHECK(file_exists(variant2) && file_exists(variant1), "patch: one profile file per variant");
+  /* only one default stated: the other setting is inherited */
+  got = patched_prefs("9999999999999999999999999999999999999999999999999999999999999999", P1, "enhanced_gameplay", NULL, &act);
+  CHECK(act == 1 && got.ws == SV_WIDESCREEN_ENHANCED_GAMEPLAY && got.st == SV_SIDE_COMFORT && got.width == 77, "patch: a default that is not stated is inherited (global values for a game without a profile)");
+  /* invalid or missing metadata cannot activate anything */
+  { static const char *const bad_id[] = {"short", "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ", "", "1111111111111111111111111111111111111111111111111111111111111111/../x"};
+    size_t i;
+    for (i = 0; i < sizeof bad_id / sizeof bad_id[0]; ++i) {
+      got = patched_prefs(kB, bad_id[i], "enhanced_gameplay", "raw", &act);
+      CHECK(act == 0 && same(got, van), "patch: an invalid patch identity activates nothing");
+    }
+    got = patched_prefs(kB, P1, "turbo", "raw", &act); CHECK(act == 0 && same(got, van), "patch: an unknown widescreen name activates nothing");
+    got = patched_prefs(kB, P1, "enhanced_gameplay", "sparkly", &act); CHECK(act == 0 && same(got, van), "patch: an unknown side style activates nothing");
+    got = patched_prefs(kB, P1, NULL, NULL, &act); CHECK(act == 0 && same(got, van), "patch: a patch without presentation defaults activates nothing");
+    got = patched_prefs(kB, NULL, "enhanced_gameplay", "raw", &act); CHECK(act == 0 && same(got, van), "patch: defaults without a patch identity activate nothing");
+    got = patched_prefs(NULL, P1, "enhanced_gameplay", "raw", &act); CHECK(act == 0, "patch: without a game identity nothing is overridden (and nothing is saved globally)");
+    after = read_text(g_settings); CHECK(after != NULL && strcmp(after, before_global) == 0, "patch: the global file is still untouched");
+  }
+}
+
 int main(void) {
   char dir[512];
   const char *tmp = SDL_getenv("TMPDIR") ? SDL_getenv("TMPDIR") : (SDL_getenv("TEMP") ? SDL_getenv("TEMP") : "/tmp");
@@ -476,6 +597,7 @@ int main(void) {
   slider_tests();
   remove(g_settings);
   profile_tests();
+  patch_tests();
   if (failures != 0) { printf("sv_width_profile_test: %d failure(s)\n", failures); return 1; }
   printf("sv_width_profile_test: OK\n");
   return 0;

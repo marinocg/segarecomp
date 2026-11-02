@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -22,6 +23,11 @@ struct GenesisSdl3Viewer {
   int ext_attached;
   SvAspect plan_aspect;               /* sampled with the requested mode once per host slice */
   SvWidescreenSupport l2_support;     /* the outcome of the latest frame produced under a request */
+  /* SEG-122 automation seam (like the Sega CD viewer's SEGARECOMP_VIEWER_KEY_SCRIPT): SEGARECOMP_VIEWER_PAD_SCRIPT names a file of `<frame> <buttons>` lines (buttons: any of
+   * U D L R A B C S, or `-` for none) that replaces player 1's sampled pad from that guest frame on (the published frame number). Deterministic input for repeatable real-game comparisons; unset in every shipped use. */
+  struct PadLine { uint64_t poll; uint16_t actions; } pad_script[1024];
+  size_t pad_count, pad_next;
+  uint64_t polls;
   SvWidescreenSupport l3_support;     /* SEG-121: whether the latest Level 3 request produced sprites (never Available: games may place none beside the picture) */
 };
 
@@ -45,12 +51,51 @@ static void sdl_sleep(void *ctx, uint64_t ns) { (void)ctx; SDL_DelayNS(ns); }
 static int sdl_closed(void *ctx) {
   GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
   sv_host_service(v->host, &v->sample);
+  const uint64_t clock = v->frame_sequence != NULL ? *v->frame_sequence : v->polls;  /* guest frames: identical input timing in every build */
+  while (v->pad_next < v->pad_count && v->pad_script[v->pad_next].poll <= clock) {
+    v->sample.pad[0] = v->pad_script[v->pad_next].actions;  /* persists until the next line */
+    v->pad_next += 1U;
+  }
+  if (v->pad_count != 0U && v->pad_next > 0U) v->sample.pad[0] = v->pad_script[v->pad_next - 1U].actions;
+  if ((v->sample.pad[0] & 0x8000U) != 0U) { v->sample.pad[0] = (uint16_t)(v->sample.pad[0] & 0x7FFFU); v->sample.quit = 1; }
+  v->polls += 1U;
   if (v->ext_attached) { /* the requested mode is sampled here, between guest slices: a frame is produced wholly under one value */
     const SvVideoSettings *video = &sv_host_settings(v->host)->video;
     v->ext.request = request_of(video->widescreen);
     v->plan_aspect = video->aspect;
   }
   return v->sample.quit;
+}
+
+static void load_pad_script(GenesisSdl3Viewer *v) {
+  const char *path = SDL_getenv("SEGARECOMP_VIEWER_PAD_SCRIPT");
+  FILE *f = path != NULL ? fopen(path, "r") : NULL;
+  char text[96];
+  if (f == NULL) return;
+  while (v->pad_count < sizeof v->pad_script / sizeof v->pad_script[0] && fgets(text, sizeof text, f) != NULL) {
+    unsigned long long poll = 0U;
+    char keys[32] = "";
+    uint16_t actions = 0U;
+    if (sscanf(text, "%llu %31s", &poll, keys) != 2) continue;
+    for (const char *c = keys; *c != '\0'; ++c) {
+      switch (*c) {
+        case 'U': actions |= SV_ACTION_BIT(SV_ACT_UP); break;
+        case 'D': actions |= SV_ACTION_BIT(SV_ACT_DOWN); break;
+        case 'L': actions |= SV_ACTION_BIT(SV_ACT_LEFT); break;
+        case 'R': actions |= SV_ACTION_BIT(SV_ACT_RIGHT); break;
+        case 'A': actions |= SV_ACTION_BIT(SV_ACT_BUTTON1); break;
+        case 'B': actions |= SV_ACTION_BIT(SV_ACT_BUTTON2); break;
+        case 'C': actions |= SV_ACTION_BIT(SV_ACT_BUTTON3); break;
+        case 'S': actions |= SV_ACTION_BIT(SV_ACT_START); break;
+        case 'Q': actions |= 0x8000U; break;  /* end the run (the window's close): lets a scripted capture finish without a wall-clock timeout */
+        default: break;
+      }
+    }
+    v->pad_script[v->pad_count].poll = (uint64_t)poll;
+    v->pad_script[v->pad_count].actions = actions;
+    v->pad_count += 1U;
+  }
+  fclose(f);
 }
 
 /* Console mapping of the shared action masks: BUTTON1/2/3 are the Genesis A/B/C buttons. */
@@ -209,11 +254,17 @@ GenesisSdl3Viewer *genesis_sdl3_viewer_open_platform(const char *title, int scal
   cfg.rom_sha256 = sha != NULL && strlen(sha) == 64U ? sha : NULL;
   /* SEG-123: the per-game widescreen profile key is platform + full SHA-256; a Sega CD launch supplies its disc identity (never shown as a ROM digest) */
   cfg.platform_id = platform_id;
-  cfg.profile_id = cfg.rom_sha256 != NULL ? cfg.rom_sha256 : (profile != NULL && strlen(profile) == 64U ? profile : NULL);
+  /* SEG-122: only the launcher sets these, and only for a verified, selected Patched program (the host validates every value and ignores the lot when one is invalid) */
+  cfg.patch_id = SDL_getenv("SEGARECOMP_PATCH_ID");
+  cfg.patch_widescreen = SDL_getenv("SEGARECOMP_PATCH_WIDESCREEN");
+  cfg.patch_side_style = SDL_getenv("SEGARECOMP_PATCH_SIDE_STYLE");
+  /* SEG-122: an explicit identity wins over the image digest: a Patched program was built from a different image than the library game its preferences belong to */
+  cfg.profile_id = profile != NULL && strlen(profile) == 64U ? profile : cfg.rom_sha256;
   cfg.diagnostics = sdl_diagnostics;
   cfg.diagnostics_ctx = v;
   cfg.widescreen_caps = sdl_widescreen_caps;
   cfg.widescreen_ctx = v;
+  load_pad_script(v);
   v->host = sv_host_open(&cfg);
   if (v->host == NULL) { free(v); return NULL; }
   return v;

@@ -12,9 +12,11 @@
 //   FAKE_BUILD_INTERMEDIATES=1  (SEG-069-T003) a successful build also leaves `generated.c` and `obj/` (what the launcher's intermediates cleanup removes)
 //   FAKE_SCD_PROGRAM=<path> / FAKE_SCD_DESCRIBE=<path>  (SEG-109-T005) `sega-cd build`: installs <output>/program-viewer (a copy of the Sega CD program double) and its
 //                         `.describe` statement; FAKE_BUILD_HOLD and FAKE_BUILD_FAIL=sega-cd behave as for a native build.
+//   FAKE_ROM_LOG=<file>   (SEG-122) one line is appended per `build`: "<size> <FNV-1a 64 of the bytes of --rom>" (what image the build was asked to compile)
 //   FAKE_BUILD_HOLD=<hb>  (SEG-069-T001) the build never finishes by itself: it starts a grandchild (this binary as `--sleeper <hb>`) that appends one
 //                         byte to <hb> every 20 ms, writes <output>/hold_started and <hb>.started, and then idles. Cancel tests assert the whole tree stops.
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
@@ -118,6 +120,15 @@ int main(int argc, char **argv) {
       line << '\n';
     }
     if (!env("FAKE_BUILD_LOG").empty()) std::ofstream(env("FAKE_BUILD_LOG"), std::ios::app) << policy << '\n';
+    if (!env("FAKE_ROM_LOG").empty()) {
+      std::ifstream rom(option("--rom"), std::ios::binary);
+      std::uint64_t h = 1469598103934665603ULL;
+      std::size_t n = 0;
+      for (char c; rom.get(c); ++n) { h ^= static_cast<unsigned char>(c); h *= 1099511628211ULL; }
+      char text[64];
+      std::snprintf(text, sizeof text, "%zu %016llx", n, static_cast<unsigned long long>(h));
+      std::ofstream(env("FAKE_ROM_LOG"), std::ios::app) << text << '\n';
+    }
     fs::create_directories(out);
     if (!env("FAKE_SPAWN_FIRST").empty()) start_sleeper(argv[0], env("FAKE_SPAWN_FIRST"));  // a descendant that exists before anything else happens
     std::puts("@stage analyze begin\n@stage analyze done\n@stage generate begin\n@stage generate done");

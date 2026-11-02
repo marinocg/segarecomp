@@ -174,8 +174,16 @@ int main(void) {
   SDL_setenv_unsafe("SDL_RENDER_DRIVER", "software", 1);
   SDL_setenv_unsafe("SEGARECOMP_VIEWER_SETTINGS", file, 1);
 
+  /* SEG-122: a Patched program carries the digest of the image it was built from in SEGARECOMP_ROM_SHA256 and the ORIGINAL library game in SEGARECOMP_PROFILE_ID:
+   * the per-game widescreen profile must follow the library game (shared by Vanilla and Patched), not the patched image. */
+  SDL_setenv_unsafe("SEGARECOMP_ROM_SHA256", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1);
+  SDL_setenv_unsafe("SEGARECOMP_PROFILE_ID", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1);
   if (rig_open(&g, 1, 0) != 0) { printf("FAIL: the viewer and its extension open\n"); return 1; }
   host = genesis_sdl3_viewer_sv_host(g.viewer);
+  CHECK(sv_host_profile_path(host) != NULL && strstr(sv_host_profile_path(host), "genesis-aaaaaaaa") != NULL && strstr(sv_host_profile_path(host), "bbbbbbbb") == NULL,
+        "SEG-122: the per-game profile follows SEGARECOMP_PROFILE_ID (the library game), not the digest of the patched image");
+  SDL_unsetenv_unsafe("SEGARECOMP_ROM_SHA256");
+  SDL_unsetenv_unsafe("SEGARECOMP_PROFILE_ID");
 
   /* a viewer that attached an extension reports Level 2 capable and Level 3 at best Partial (a game may place no object beside the picture) */
   sv_host_widescreen_caps(host, &caps);

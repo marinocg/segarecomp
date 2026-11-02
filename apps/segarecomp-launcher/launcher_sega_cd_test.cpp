@@ -557,10 +557,10 @@ void test_catalog(const fs::path &base, const fs::path &fake) {
     expect(g.load() == CatalogLoad::loaded && g.entries().size() == 2, "a Sega CD record with an unknown identity layout is dropped");
     // a library from a newer release stays read-only
     text = slurp(file);
-    text.replace(text.find("\"schema\": 2"), 11, "\"schema\": 3");
+    text.replace(text.find("\"schema\": 2"), 11, "\"schema\": 4");  // one past the newest schema this release writes (3: a library with an installed patch)
     spit(base / "cat" / "newer.json", text);
     Catalog n(base / "cat" / "newer.json");
-    expect(n.load() == CatalogLoad::read_only_newer && n.read_only() && !n.save(), "schema 3 is opened read-only");
+    expect(n.load() == CatalogLoad::read_only_newer && n.read_only() && !n.save(), "a newer schema is opened read-only");
     // removing the Sega CD game returns to schema 1, and the file is the pre-change one again
     expect(c.remove("sega-cd:" + key) && c.save() && slurp(file) == library_fixture(), "without a Sega CD game the library is again byte-identical to the pre-change file");
   }

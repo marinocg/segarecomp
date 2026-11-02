@@ -42,6 +42,6 @@ struct OlderBuild {
 // Classifies the catalog-recorded builds of `entry` other than `current_key`, newest first, and returns the first that can be played (or the refusal
 // of the newest candidate). `requested_policy` is the mode the game currently requests ("optimized"/"compatibility"). Reads only small files.
 [[nodiscard]] OlderBuild find_playable_older_build(const LibraryEntry &entry, const std::string &current_key, const std::string &requested_policy,
-                                                   const Layout &layout, const std::filesystem::path &games_root);
+                                                   const Layout &layout, const std::filesystem::path &games_root, const std::string &variant = {});  // SEG-122: only builds of this variant (package identity; "" = Vanilla) are candidates
 
 } // namespace launcher

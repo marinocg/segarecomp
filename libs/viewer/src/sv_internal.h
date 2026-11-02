@@ -31,6 +31,7 @@ typedef struct SvCrtState {
 
 typedef enum SvListenKind { SV_LISTEN_NONE = 0, SV_LISTEN_KEY, SV_LISTEN_PAD, SV_LISTEN_MENU_KEY } SvListenKind;
 
+#define SV_CAPTURE_MAX 96  /* SEG-122: bounded list of automation-capture frames */
 struct SvHost {
   SvHostConfig cfg;
   SvSettings settings;
@@ -51,11 +52,12 @@ struct SvHost {
   size_t side_buf_cap;
   SvExtSource ext_source;      /* provenance of the retained surface */
   SvWidescreenMode ext_prod_mode; /* mode the retained surface was produced as */
-  uint64_t capture_frames[8];  /* automation seam: 1-based presented-frame numbers whose composed output is saved (SEGARECOMP_VIEWER_CAPTURE_FRAMES) */
+  uint64_t capture_frames[SV_CAPTURE_MAX];  /* automation seam: 1-based presented-frame numbers whose composed output is saved (SEGARECOMP_VIEWER_CAPTURE_FRAMES) */
   int capture_count, capture_all_styles;
   char capture_dir[512];
   char profile_path[1100];     /* per-game widescreen profile file ('' = none: no trustworthy game identity) */
   SvVideoSettings global_ws;   /* the three widescreen fields as the GLOBAL file states them (written back unchanged) */
+  int patch_defaults;          /* SEG-122: a verified patch's presentation defaults are in effect (profile_path then names the variant's own profile) */
   SvVideoSettings profile_ws;  /* the three fields as last loaded/saved for this game */
   int side_blocked;            /* the treatment could not be built: show no side (fail closed) */
   SvSideTreatment side_applied;   /* what the last uploaded frame shows at the sides (PASSTHROUGH when there is no extension) */

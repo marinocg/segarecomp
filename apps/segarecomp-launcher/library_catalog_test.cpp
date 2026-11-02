@@ -242,6 +242,76 @@ int main() {
     const RomView legacy_view = view_from_entry(*pick("genesis", '1'));
     expect(legacy_view.aot_model == "gen2", "the legacy v1 selection builds gen2");
   }
+
+  // SEG-122: installed patches and the selected variant (ADR 0266). The original identity never changes; Vanilla's key and record are untouched by a Patched build.
+  {
+    const fs::path pfile = dir / "patches" / "library.json";
+    Catalog pc(pfile);
+    pc.load();
+    const auto added = pc.import_rom(rom("genesis", 'a', "/games/g.md", "Patch Game"), 5);
+    LibraryEntry &e = *added.entry;
+    expect(pc.save() && slurp(pfile).find("\"schema\": 1") != std::string::npos && slurp(pfile).find("patches") == std::string::npos, "a library without patches stays schema 1, byte-free of the new members");
+    InstalledPatch p1;
+    p1.identity = digest('b'); p1.id = "wide"; p1.version = "1.0.0"; p1.name = "Wide"; p1.target_sha256 = digest('c'); p1.width_max = 80; p1.installed_at = 9; p1.widescreen = "enhanced_gameplay"; p1.side_style = "raw";
+    e.patches.push_back(p1);
+    e.selected_variant = p1.identity;
+    BuildRecord vanilla; vanilla.key = key32('1'); vanilla.mode = "compatibility";
+    pc.record_build(e, vanilla);
+    BuildRecord patched; patched.key = key32('2'); patched.mode = "compatibility"; patched.variant = p1.identity;
+    pc.record_build(e, patched);
+    expect(e.current_build_key == key32('1') && e.patches[0].build_key == key32('2'), "a Patched build never replaces the Vanilla build; it becomes its patch's build");
+    expect(e.is_current_key(key32('1')) && e.is_current_key(key32('2')) && !e.is_current_key(key32('3')), "both published builds are current");
+    expect(pc.save() && slurp(pfile).find("\"schema\": 3") != std::string::npos, "a library with a patch is schema 3");
+    Catalog again(pfile);
+    expect(again.load() == CatalogLoad::loaded, "schema 3 loads");
+    const LibraryEntry *r = again.find("genesis", digest('a'));
+    expect(r != nullptr && r->patches.size() == 1 && r->patches[0].identity == p1.identity && r->patches[0].width_max == 80 && r->patches[0].build_key == key32('2') && r->selected_variant == p1.identity, "patch records and the selection round-trip");
+    expect(r != nullptr && r->builds.size() == 2 && r->builds[1].variant == p1.identity && r->builds[0].variant.empty(), "build records keep their variant");
+    const RomView pv = view_from_entry(*r), vv = view_for_variant(*r, std::string());
+    expect(pv.patched() && pv.sha256 == digest('a') && pv.patch_identity == p1.identity && pv.patch_target_sha256 == digest('c') && pv.effective_sha256() == digest('c') && pv.patch_package.filename() == p1.identity + ".segapatch", "the Patched view keeps the original identity and names the verified image");
+    expect(!vv.patched() && vv.effective_sha256() == digest('a') && vv.patch_widescreen.empty() && vv.patch_side_style.empty(), "the Vanilla view is untouched by an installed patch");
+    expect(pv.patch_widescreen == "enhanced_gameplay" && pv.patch_side_style == "raw" && r->patches[0].widescreen == "enhanced_gameplay", "presentation defaults round-trip and reach only the Patched view");
+    { std::string bad = slurp(pfile);   // a value outside the closed sets is no default at all
+      const auto w = bad.find("\"widescreen\": \"enhanced_gameplay\"");
+      expect(w != std::string::npos, "the defaults are stored");
+      bad.replace(w, std::string("\"widescreen\": \"enhanced_gameplay\"").size(), "\"widescreen\": \"turbo\"");
+      spit(dir / "patches" / "baddefault.json", bad);
+      Catalog bc(dir / "patches" / "baddefault.json"); bc.load();
+      expect(bc.entries().size() == 1 && bc.entries()[0].patches.size() == 1 && bc.entries()[0].patches[0].widescreen.empty() && bc.entries()[0].patches[0].side_style == "raw", "an unknown default name is dropped, the rest survives"); }
+    // a selection of something that is not installed, and damaged patch records, fall back to Vanilla / are dropped
+    std::string text = slurp(pfile);
+    const auto at = text.find("\"selected_variant\": \"" + p1.identity + "\"");
+    expect(at != std::string::npos, "the selection is stored");
+    text.replace(at, std::string("\"selected_variant\": \"" + p1.identity + "\"").size(), "\"selected_variant\": \"" + digest('d') + "\"");
+    spit(dir / "patches" / "badsel.json", text);
+    Catalog badsel(dir / "patches" / "badsel.json");
+    badsel.load();
+    expect(badsel.entries().size() == 1 && badsel.entries()[0].selected_variant.empty() && !view_from_entry(badsel.entries()[0]).patched(), "a selection naming no installed patch means Vanilla");
+    std::string damaged = slurp(pfile);
+    const auto id_at = damaged.find("\"identity\": \"" + p1.identity + "\"");
+    damaged.replace(id_at, std::string("\"identity\": \"" + p1.identity + "\"").size(), "\"identity\": \"nothex\"");
+    spit(dir / "patches" / "damaged.json", damaged);
+    Catalog dam(dir / "patches" / "damaged.json");
+    dam.load();
+    expect(dam.entries().size() == 1 && dam.entries()[0].patches.empty() && dam.entries()[0].selected_variant.empty(), "a damaged patch record is dropped and the game survives");
+    // an older release (schema 2) opens the schema 3 file read-only: simulate it with the next schema number
+    std::string future = slurp(pfile);
+    future.replace(future.find("\"schema\": 3"), 11, "\"schema\": 4");
+    spit(dir / "patches" / "future.json", future);
+    Catalog fut(dir / "patches" / "future.json");
+    expect(fut.load() == CatalogLoad::read_only_newer && !fut.save(), "a newer schema is read-only");
+    // a Patched build record in the cache is never adopted as a game of its own
+    const fs::path cache = dir / "patches" / "cache";
+    spit(cache / "games" / key32('2') / "game", "x");
+    spit(cache / "games" / key32('2') / "status.json", "{\"status\":\"ok\"}");
+    spit(cache / "games" / key32('2') / "metadata.json", "{\"rom_sha256\":\"" + digest('c') + "\",\"platform\":\"genesis\",\"patch_identity\":\"" + p1.identity + "\"}");
+    Catalog fresh(dir / "patches" / "fresh.json");
+    fresh.load();
+    expect(fresh.migrate_cache(cache, 1) == 0 && fresh.entries().empty(), "cache migration never turns a Patched build into a game");
+    // removing the record of a patch
+    e.patches.clear(); e.selected_variant.clear();
+    expect(!e.is_current_key(key32('2')) && e.is_current_key(key32('1')), "once the patch is gone its build is no longer current");
+  }
   fs::remove_all(dir);
   if (failures != 0) return 1;
   std::cout << "library_catalog_test: ok\n";

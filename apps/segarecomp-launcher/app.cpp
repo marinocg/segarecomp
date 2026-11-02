@@ -59,6 +59,14 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
     info.compat_known = fs::is_regular_file(layout.runtime / "compat" / (e.sha256 + ".json"), ec);
     info.entry = entry_dir(view, layout);
     info.key = u8s(info.entry.filename());
+    info.variant = view.patch_identity;
+    if (e.platform_id == "genesis") {  // SEG-122: every variant's build state, whichever is selected
+      info.vanilla_ready = entry_ready_for(entry_dir(view_for_variant(e, std::string()), layout), view_for_variant(e, std::string()), layout);
+      for (const auto &p : e.patches) {
+        const RomView pv = view_for_variant(e, p.identity);
+        info.patches.push_back({p.identity, entry_ready_for(entry_dir(pv, layout), pv, layout)});
+      }
+    }
     info.has_failed_dir = fs::is_directory(info.entry.parent_path() / (info.key + ".failed"), ec);
     for (const auto &b : e.builds)
       if (b.key == info.key) { info.build = b; info.build_known = true; }
@@ -76,15 +84,15 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
       info.status = GameStatus::metadata_only;
     } else if (info.has_failed_dir && !mapper_needed) {
       info.status = GameStatus::failed;
-    } else if (!e.builds.empty() || !e.current_build_key.empty()) {
-      info.status = GameStatus::stale;
+    } else if (std::any_of(e.builds.begin(), e.builds.end(), [&](const BuildRecord &b) { return b.variant == view.patch_identity; }) || (!view.patched() && !e.current_build_key.empty())) {
+      info.status = GameStatus::stale;   // SEG-122: only a build of THIS variant makes it stale; a Patched variant that was never built is simply not built
     } else {
       info.status = GameStatus::not_built;
     }
     // SEG-069-T005: no ready build of the CURRENT identity. An executable an earlier release built may still be playable; this is a separate,
     // fail-closed question (older_build.hpp) and never relaxes the exact identity check above.
     if (!mapper_needed && !e.archived && info.status != GameStatus::ready && !e.builds.empty()) {
-      info.older = find_playable_older_build(e, info.key, view.optimized() ? "optimized" : "compatibility", layout, cache_root() / "games");
+      info.older = find_playable_older_build(e, info.key, view.optimized() ? "optimized" : "compatibility", layout, cache_root() / "games", view.patch_identity);
       if (info.older.playable && info.status == GameStatus::stale) info.status = GameStatus::playable_older;
     }
     if (!mapper_needed && view.supports_optimized()) {
@@ -365,6 +373,7 @@ void App::poll_status_refresh() {
     if (LibraryEntry *entry = catalog_.find_id(id)) {
       BuildRecord record;
       record.key = info.key;
+      record.variant = info.variant;
       record.built_at = info.file_time;
       record.mode = info.policy.present && info.policy.requested == "optimized" ? "optimized" : "compatibility";
       catalog_.record_build(*entry, record);
@@ -497,6 +506,12 @@ void App::browse_cover(const std::string &id) {
   if (use_builtin_picker()) { open_picker("cover", id); return; }
   static const SDL_DialogFileFilter filters[] = {{"Images (PNG, JPEG)", "png;jpg;jpeg"}};
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "cover", id}, window_, filters, 1, nullptr, false);
+}
+
+void App::browse_patch(const std::string &id) {
+  if (use_builtin_picker()) { open_picker("patch", id); return; }
+  static const SDL_DialogFileFilter filters[] = {{"Segarecomp patch packages", "segapatch"}, {"All files", "*"}};
+  SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "patch", id}, window_, filters, 2, nullptr, false);
 }
 
 bool App::cover_download_possible(const LibraryEntry &entry) const {
@@ -723,6 +738,19 @@ bool App::start_build(const std::string &id, bool restart_after) {
   if (view.supports_optimized() && view.platform_id == "genesis") { view.aot_policy = entry->aot_policy; view.aot_model = "gen2"; }  // Genesis Optimized is always the gen2 model
   if (view.supports_hint_alias_discovery()) view.hint_alias_discovery = entry->hint_alias_discovery;
   if (view.supports_region()) view.region = entry->region;
+  {  // SEG-122: the selected variant. The ROM file itself stays the original; a Patched variant is materialized by the build from the installed package.
+    const RomView variant = view_from_entry(*entry);
+    view.patch_identity = variant.patch_identity;
+    view.patch_package = variant.patch_package;
+    view.patch_target_sha256 = variant.patch_target_sha256;
+    view.patch_label = variant.patch_label;
+    view.patch_widescreen = variant.patch_widescreen;
+    view.patch_side_style = variant.patch_side_style;
+    if (view.patched()) {
+      std::error_code pec;
+      if (!fs::is_regular_file(view.patch_package, pec)) { show_message("The patch is missing", {"The installed copy of the selected patch cannot be found in the library, so the patched version cannot be built.", "Select Vanilla, or install the patch package again."}); return false; }
+    }
+  }
   if (view.needs_mapper()) { show_message("Declare the cartridge mapper", {"The Master System header never identifies the mapper, so it is not guessed.", "Choose Sega mapper or ROM only (32 KiB) in the game's build options."}); return false; }
   const fs::path dir = entry_dir(view, layout_);
   const std::string key = u8s(dir.filename());
@@ -734,7 +762,7 @@ bool App::start_build(const std::string &id, bool restart_after) {
   job_restart_after_ = restart_after;
   failures_.erase(id);
   diagnostics_.erase(id);
-  trace(std::string("build=started mode=") + (view.optimized() ? "optimized" : "compatibility"));
+  trace(std::string("build=started mode=") + (view.optimized() ? "optimized" : "compatibility") + (view.patched() ? " variant=patched" : " variant=vanilla"));
   return true;
 }
 
@@ -830,6 +858,7 @@ void App::finish_build() {
     if (entry != nullptr) {
       BuildRecord record;
       record.key = u8s(entry_path.filename());
+      record.variant = job_view_.patch_identity;
       record.built_at = now_seconds();
       record.mode = job_view_.optimized() ? "optimized" : "compatibility";
       record.version = SEGARECOMP_LAUNCHER_VERSION;
@@ -868,7 +897,7 @@ bool App::launch(const std::string &id, bool restarted) {
   if (!entry_ready_for(dir, view, layout_)) {
     // Never start an executable that does not match the entry's current identity (stale, foreign or removed) -- except an earlier release's build that
     // is verified playable RIGHT NOW (not from the possibly outdated status list): it runs exactly as recorded, never relabelled as the current request.
-    const OlderBuild older = find_playable_older_build(*entry, u8s(dir.filename()), view.optimized() ? "optimized" : "compatibility", layout_, cache_root() / "games");
+    const OlderBuild older = find_playable_older_build(*entry, u8s(dir.filename()), view.optimized() ? "optimized" : "compatibility", layout_, cache_root() / "games", view.patch_identity);
     if (!older.playable) {
       show_message("This build cannot be played", {"The stored build no longer matches this game's current identity (a different release, option set or a removed build).",
                                                    older.candidate_seen ? "An earlier build cannot be used: " + older.reason + "." : std::string("There is no earlier build to fall back on."), "Recompile the game to play it."});
@@ -967,11 +996,12 @@ void App::update_jobs() {
     for (auto &e : events) {
       if (!e.error.empty() && e.paths.empty()) {
         // No native chooser is available (no portal under WSL, a minimal desktop): the built-in picker does the same job.
-        if (e.purpose == "import" || e.purpose == "locate" || e.purpose == "cover" || e.purpose.rfind("scd_", 0) == 0) { toast("The system file chooser is not available; using the built-in picker."); open_picker(e.purpose, e.key); continue; }
+        if (e.purpose == "import" || e.purpose == "locate" || e.purpose == "cover" || e.purpose == "patch" || e.purpose.rfind("scd_", 0) == 0) { toast("The system file chooser is not available; using the built-in picker."); open_picker(e.purpose, e.key); continue; }
         show_message("The file picker could not be opened", {"SDL: " + e.error, "On Linux this usually means no file-chooser service (XDG Desktop Portal) is available - common under WSL/WSLg.", "Drop the file onto this window instead."});
         continue;
       }
       if (e.purpose == "import") start_import(e.paths, import_build_option_);
+      else if (e.purpose == "patch" && !e.paths.empty()) patch_chosen(e.key, e.paths[0]);
       else if (e.purpose.rfind("scd_", 0) == 0) scd_dialog_result(e.purpose, e.key, e.paths);
       else if (e.purpose == "locate" && !e.paths.empty()) {
         const RomView view = inspect_rom_or_zip(from_u8(e.paths[0]), layout_, library_dir_ / "roms");
@@ -1296,6 +1326,29 @@ void App::run_script() {
       std::lock_guard<std::mutex> lock(dialog_mutex_);
       dialog_events_.push_back(DialogEvent{"cover", detail_id_, {arg}, {}});
     }
+  } else if (cmd == "patch_pick") {    // SEG-122: choose a .segapatch for the open game, exactly as the file chooser's result would
+    if (!detail_id_.empty()) {
+      std::lock_guard<std::mutex> lock(dialog_mutex_);
+      dialog_events_.push_back(DialogEvent{"patch", detail_id_, {arg}, {}});
+    }
+  } else if (cmd == "patch_confirm") {   // the confirm button of the open patch sheet: `patch_confirm` | `patch_confirm delete` (remove sheet: also delete the patched build)
+    if (modal_.kind == Modal::Kind::remove_patch && arg == "delete") modal_.delete_cache = true;
+    patch_modal_confirm();
+  } else if (cmd == "patch_install_open") {   // the "Install patch..." button: opens the chooser
+    if (!detail_id_.empty()) browse_patch(detail_id_);
+  } else if (cmd == "variant") {       // select a variant of the open game as its tile would: vanilla | patched (the first installed patch) | patched=<n>
+    if (const LibraryEntry *e = catalog_.find_id(detail_id_); e != nullptr) {
+      if (arg == "vanilla") select_variant(e->id(), std::string());
+      else if (!e->patches.empty()) {
+        const std::size_t n = arg.rfind("patched=", 0) == 0 ? static_cast<std::size_t>(std::max(0, std::atoi(arg.c_str() + 8))) : 0U;
+        if (n < e->patches.size()) select_variant(e->id(), e->patches[n].identity);
+      }
+    }
+  } else if (cmd == "patch_remove") {  // the Remove button of the n-th installed patch of the open game (opens the sheet)
+    if (const LibraryEntry *e = catalog_.find_id(detail_id_); e != nullptr) {
+      const std::size_t n = static_cast<std::size_t>(std::max(0, std::atoi(arg.c_str())));
+      if (n < e->patches.size()) ask_remove_patch(*e, e->patches[n].identity);
+    }
   } else if (cmd == "scan") {          // a fresh storage measurement; `wait_scan` holds the script until it is done
     report_valid_ = false;
     request_scan();
@@ -1315,6 +1368,8 @@ void App::run_script() {
     } else trace("cleanup=refused");
   } else if (cmd == "scroll_page") {   // SEG-109-T005: scroll the current page (`end` = to the bottom)
     script_page_scroll_ = arg == "end" ? 1e9F : static_cast<float>(std::atof(arg.c_str()));
+  } else if (cmd == "open_play_menu") {   // SEG-122: open the Play button's version dropdown of the open game
+    script_open_play_menu_ = true;
   } else if (cmd == "open_more") {     // open the More menu of the open game
     script_open_more_ = true;
   } else if (cmd == "menu_items") {    // trace the items of the menu drawn in the previous frame
@@ -1389,6 +1444,11 @@ void App::run_script() {
     else if (key == "widescreen") actual = viewer_settings_.video.widescreen == SV_WIDESCREEN_EXTENDED_BACKGROUNDS ? "extended_backgrounds" : (viewer_settings_.video.widescreen == SV_WIDESCREEN_ENHANCED_GAMEPLAY ? "enhanced_gameplay" : "original");
     else if (key == "ws_width") actual = std::to_string(viewer_settings_.video.widescreen_width);
     else if (key == "side_style") actual = viewer_settings_.video.widescreen_side_style == SV_SIDE_BORDERS ? "borders" : (viewer_settings_.video.widescreen_side_style == SV_SIDE_RAW ? "raw" : "comfort");
+    else if (key == "variant") { const LibraryEntry *e = catalog_.find_id(detail_id_); actual = e == nullptr ? "-" : (e->selected_patch() != nullptr ? "patched" : "vanilla"); }
+    else if (key == "patches") { const LibraryEntry *e = catalog_.find_id(detail_id_); actual = e == nullptr ? "-" : std::to_string(e->patches.size()); }
+    else if (key == "patch_built") { const StatusInfo &si = status_of(detail_id_); actual = si.patches.empty() ? "-" : (si.patches.front().built ? "1" : "0"); }
+    else if (key == "vanilla_ready") actual = !detail_id_.empty() && status_of(detail_id_).vanilla_ready ? "1" : "0";
+    else if (key == "patch_notice") actual = patch_notices_.count(detail_id_) != 0 ? patch_notices_.at(detail_id_).substr(0, 12) : "-";
     else if (key == "picker") actual = picker_.open ? "1" : "0";
     else if (key == "picker_chosen") actual = std::to_string(picker_.chosen.size());
     else if (key == "picker_level") actual = !picker_.open ? "-" : (picker_.root.empty() ? "locations" : (picker_.dir == picker_.root ? "root" : "sub"));

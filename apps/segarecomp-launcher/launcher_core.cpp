@@ -2,8 +2,10 @@
 
 #include <cctype>
 
+#include "json_lite.hpp"
 #include "sega_cd.hpp"
 #include "segarecomp/rom.hpp"
+#include "segarecomp/patch.hpp"
 #include "segarecomp/sha256.hpp"
 
 #include <algorithm>
@@ -236,8 +238,28 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
     for (const fs::path &candidate : {exe_dir.parent_path() / "Resources" / "assets", exe_dir / "assets"})
       if (fs::is_directory(candidate / "ui", ec)) { SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ASSETS", utf8(candidate).c_str(), true); break; }
   }
-  if (rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ROM_SHA256", rom.sha256.c_str(), true);
-  if (!rom.title.empty()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GAME_TITLE", rom.title.c_str(), true);
+  // SEGARECOMP_ROM_SHA256 is the digest of the image the program was built from (for a Patched variant: the verified patched image, never the original
+  // digest passed off as patched bytes). The viewer keys the per-game widescreen profile on SEGARECOMP_PROFILE_ID when present (the existing explicit identity
+  // field, also used for Sega CD): a Patched variant sets it to the ORIGINAL library game, so Vanilla and Patched share one set of preferences.
+  if (rom.effective_sha256().size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ROM_SHA256", rom.effective_sha256().c_str(), true);
+  if (rom.patched() && rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID", rom.sha256.c_str(), true);
+  else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID");
+  // SEG-122: the patch's presentation defaults reach the viewer only for a selected Patched variant (the launch path has already required its verified build); Vanilla clears them.
+  if (rom.patched() && (!rom.patch_widescreen.empty() || !rom.patch_side_style.empty())) {
+    SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_ID", rom.patch_identity.c_str(), true);
+    if (!rom.patch_widescreen.empty()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN", rom.patch_widescreen.c_str(), true);
+    else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN");
+    if (!rom.patch_side_style.empty()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE", rom.patch_side_style.c_str(), true);
+    else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE");
+  } else {
+    SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_ID");
+    SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN");
+    SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE");
+  }
+  if (!rom.title.empty()) {  // the window title names the version that runs: a Patched program is never presented as plain Vanilla
+    const std::string title = rom.patched() ? rom.title + " (Patched: " + rom.patch_label + ")" : rom.title;
+    SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GAME_TITLE", title.c_str(), true);
+  }
 }
 
 RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
@@ -306,7 +328,10 @@ fs::path entry_dir(const RomView &rom, const Layout &layout) {
   std::error_code ec;
   const auto cli_size = fs::is_regular_file(layout.cli, ec) ? fs::file_size(layout.cli, ec) : 0U;
   const auto cli_time = fs::last_write_time(layout.cli, ec).time_since_epoch().count();
-  const std::string key = rom.sha256 + "|cli-" + std::to_string(static_cast<unsigned long long>(cli_size)) + "-" + std::to_string(static_cast<long long>(cli_time)) + "|" SEGARECOMP_LAUNCHER_VERSION "|" + platform_key(rom, &layout) + "|" + host_arch() + "|" +
+  // SEG-122: a Patched variant adds its full identity (package manifest digest, which names every payload digest, and the verified patched image
+  // digest). A Vanilla key is byte-for-byte what it always was.
+  const std::string variant = rom.patched() ? "|patch=" + rom.patch_identity + ":" + rom.patch_target_sha256 : std::string();
+  const std::string key = rom.sha256 + variant + "|cli-" + std::to_string(static_cast<unsigned long long>(cli_size)) + "-" + std::to_string(static_cast<long long>(cli_time)) + "|" SEGARECOMP_LAUNCHER_VERSION "|" + platform_key(rom, &layout) + "|" + host_arch() + "|" +
                           SDL_GetPlatform() + "|zig-" SEGARECOMP_ZIG_VERSION "|O2|" + utf8(layout.root);
   const std::string digest = segarecomp::sha256_hex({reinterpret_cast<const std::uint8_t *>(key.data()), key.size()});
   return cache_root() / "games" / digest.substr(0, 32);
@@ -537,8 +562,20 @@ std::string unadmitted_restart_notice() {
   return "Optimized stopped: the game reached code outside the selected set. Restarting from the beginning in Compatibility.";
 }
 
+std::string read_variant_identity(const fs::path &entry) {
+  std::error_code ec;
+  const fs::path file = entry / "metadata.json";
+  if (!fs::is_regular_file(file, ec)) return {};
+  if (fs::file_size(file, ec) > 16384U) return "?oversized";   // never equal to any identity: such a record is not reusable
+  const auto meta = json::parse(read_all(file));
+  return meta && meta->is_object() ? meta->str("patch_identity") : std::string();  // an unreadable record has no variant, exactly as before this existed
+}
+
 bool entry_ready_for(const fs::path &entry, const RomView &rom, const Layout &layout) {
   if (!entry_ready(entry)) return false;
+  // SEG-122: defence in depth on top of the cache key. A build is reusable only for the variant it records: a Vanilla request never accepts a patched
+  // program and a Patched request accepts only the program of exactly this package.
+  if (read_variant_identity(entry) != rom.patch_identity) return false;
   const PolicyReport report = read_policy_report(entry);
   if (!report.present) return !rom.optimized();  // an older entry without the member is a Compatibility build
   if (report.requested != (rom.optimized() ? "optimized" : "compatibility")) return false;
@@ -1015,7 +1052,29 @@ void BuildJob::run() {
   if (cancel_.load()) { finish_cancelled(partial); return; }  // cancelled before the build tool was started: it never spawns
 
   const bool sms = rom_.platform_id == "master-system";
-  std::vector<std::string> args{utf8(layout_.cli), "build", "--rom", utf8(rom_.path), "--output", utf8(partial),
+  // SEG-122: a Patched variant compiles the verified patched image, materialized from the original file and the installed package inside this attempt's own
+  // partial folder (removed again before publishing). The original ROM is only read; the previous published build is never touched.
+  fs::path build_rom = rom_.path;
+  if (rom_.patched()) {
+    std::error_code input_ec;
+    const fs::path input = partial / "input";
+    fs::create_directories(input, input_ec);
+    const auto applied = segarecomp::patch::apply_package_file(rom_.patch_package, rom_.path, input / "patched.rom");
+    std::string refusal;
+    if (input_ec) refusal = "Cannot create the Segarecomp cache folder.";
+    else if (!applied.ok) refusal = "The patch cannot be applied: " + applied.error + ".";
+    else if (applied.info.identity != rom_.patch_identity) refusal = "The installed patch package is not the one selected (its identity changed).";
+    else if (applied.rom_sha256 != rom_.sha256 || applied.target_sha256 != rom_.patch_target_sha256) refusal = "The original game or the patched image does not match the installed patch.";
+    if (!refusal.empty()) {
+      fs::remove_all(partial, ec);
+      set_message(refusal);
+      finish(false);
+      return;
+    }
+    build_rom = input / "patched.rom";
+    if (cancel_.load()) { finish_cancelled(partial); return; }
+  }
+  std::vector<std::string> args{utf8(layout_.cli), "build", "--rom", utf8(build_rom), "--output", utf8(partial),
                                 "--cc", utf8(layout_.cc), "--cc-arg", "cc", "--cc-arg", "-target",
                                 "--cc-arg", zig_target(), "--runtime-dir", utf8(sms ? layout_.runtime_sms : layout_.runtime),
                                 "--sdl3-include", utf8(layout_.sdl_include), "--sdl3-lib", utf8(layout_.sdl_lib)};
@@ -1121,8 +1180,11 @@ void BuildJob::run() {
            << (rom_.mapper.empty() ? "manifest" : "option") << "\",\"mapper_manifest_sha256\":\"" << (rom_.mapper.empty() ? rom_.mapper_manifest_sha256 : std::string()) << "\",";
     // SEG-069-T005: what a later release needs to decide that this program can still be played (see older_build.hpp).
     meta << "\"runtime_contract\":" << runtime_contract << ",\"hint_alias_discovery\":" << (rom_.supports_hint_alias_discovery() && rom_.hint_alias_discovery ? "true" : "false") << ",";
+    if (rom_.patched())  // SEG-122: the variant this program was built for (checked again by entry_ready_for; absent for Vanilla)
+      meta << "\"patch_identity\":\"" << rom_.patch_identity << "\",\"patch_target_sha256\":\"" << rom_.patch_target_sha256 << "\",\"patch_label\":\"" << json_safe(rom_.patch_label) << "\",";
     meta << "\"host\":\"" << host_description() << "\",\"toolchain\":\"zig " SEGARECOMP_ZIG_VERSION "\",\"rom_path\":\"referenced, not copied\"}\n";
     meta.close();
+    fs::remove_all(partial / "input", ec);  // the materialized patched image is derivative game data: it never outlives the build
     fs::remove_all(entry_, ec);
     fs::rename(partial, entry_, ec);
     if (ec) { set_message("Cannot store the build in the Segarecomp cache folder."); finish(false); return; }
@@ -1131,6 +1193,7 @@ void BuildJob::run() {
   }
   // Keep the failed attempt's diagnostics (build.log) where "View diagnostics" can find them.
   const fs::path failed = entry_.parent_path() / (entry_.filename().string() + ".failed");
+  fs::remove_all(partial / "input", ec);
   fs::remove_all(failed, ec);
   fs::rename(partial, failed, ec);
   set_message(result_line.empty() ? "The build failed unexpectedly." : result_line);

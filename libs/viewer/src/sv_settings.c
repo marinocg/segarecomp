@@ -461,6 +461,36 @@ int sv_profile_path(const char *settings_path, const char *platform, const char 
   return n > 0 && (size_t)n < cap ? 0 : -1;
 }
 
+int sv_patch_profile_path(const char *settings_path, const char *platform, const char *sha256, const char *patch_identity, char *out, size_t cap) {
+  char base[1100];
+  size_t n;
+  if (out == NULL || cap == 0 || !sv_profile_identity_valid(platform, patch_identity) /* the patch identity is a full lowercase hex digest as well */ ||
+      sv_profile_path(settings_path, platform, sha256, base, sizeof base) != 0)
+    return -1;
+  n = strlen(base);
+  if (n < 5u || strcmp(base + n - 4u, ".cfg") != 0) return -1;
+  base[n - 4u] = '\0';
+  if (snprintf(out, cap, "%s+%s.cfg", base, patch_identity) <= 0 || strlen(base) + 70u >= cap) { out[0] = '\0'; return -1; }
+  return 0;
+}
+
+int sv_patch_defaults_apply(SvSettings *settings, const char *widescreen, const char *side_style) {
+  int ws = -1, ss = -1, m;
+  if (settings == NULL) return -1;
+  if (widescreen != NULL && *widescreen != '\0') {
+    for (m = 0; m < SV_WIDESCREEN_COUNT; ++m) if (strcmp(widescreen, widescreen_keys[m]) == 0) ws = m;
+    if (ws < 0) return -1;
+  }
+  if (side_style != NULL && *side_style != '\0') {
+    for (m = 0; m < SV_SIDE_COUNT; ++m) if (strcmp(side_style, side_style_keys[m]) == 0) ss = m;
+    if (ss < 0) return -1;
+  }
+  if (ws < 0 && ss < 0) return -1;
+  if (ws >= 0) settings->video.widescreen = (SvWidescreenMode)ws;
+  if (ss >= 0) settings->video.widescreen_side_style = (SvSideStyle)ss;
+  return 0;
+}
+
 size_t sv_profile_load(SvSettings *settings, const char *path) {
   static char buffer[4096];
   SvSettings tmp;

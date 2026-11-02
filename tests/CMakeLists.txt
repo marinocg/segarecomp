@@ -2053,6 +2053,13 @@ add_test(NAME viewer_foundation_layout_test COMMAND ${Python3_EXECUTABLE} ${CMAK
 set_property(TEST viewer_foundation_layout_test APPEND PROPERTY LABELS full fast)
 set_property(TEST viewer_foundation_layout_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
+# SEG-122-T001 (ADR 0266): the portable patch package (manifest, ZIP bounds, strict BPS, atomic failure) through the product CLI seam, cross-checked against the
+# independent Python reference in tools/segapatch.py.
+add_test(NAME segapatch_package_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segapatch_package_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/tools/segapatch.py)
+set_property(TEST segapatch_package_test APPEND PROPERTY LABELS full fast)
+set_property(TEST segapatch_package_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
 # CI sharding (see ci_shards.cmake, which also registers its guard test): must come after the LAST add_test and label assignment so
 # every tier test is partitioned.
 include(${CMAKE_CURRENT_SOURCE_DIR}/ci_shards.cmake)
+

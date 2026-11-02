@@ -330,10 +330,10 @@ def stage_journey(r, c, size):
     r.trace(f"{size} retry", trace)
     # ---- structural comparison: same sections, same order, same columns, same menus ----
     def order(layout):
-        return [n for n, _ in sorted(layout.items(), key=lambda kv: (kv[1][1] // 8, kv[1][0])) if n != "recording"]
+        return [n for n, _ in sorted(layout.items(), key=lambda kv: (kv[1][1] // 8, kv[1][0])) if n not in ("recording", "variants")]   # platform-specific cards: Sega CD recordings, Genesis patches / variants (SEG-122)
     ref = PLATFORMS[0]
     for p in PLATFORMS[1:]:
-        r.ok(set(layouts[p]) - {"recording"} == set(layouts[ref]), f"{p} {size}: the same sections as {ref}: {sorted(layouts[p])} vs {sorted(layouts[ref])}")
+        r.ok(set(layouts[p]) - {"recording", "variants"} == set(layouts[ref]) - {"variants"}, f"{p} {size}: the same sections as {ref}: {sorted(layouts[p])} vs {sorted(layouts[ref])}")
         r.ok(order(layouts[p]) == order(layouts[ref]), f"{p} {size}: the sections are in the same reading order: {order(layouts[p])} vs {order(layouts[ref])}")
         for name in ("play", "build", "more", "config", "provenance"):
             if name in layouts[p] and name in layouts[ref]:

@@ -789,7 +789,19 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
     h->profile_path[0] = '\0';
     if (id != NULL && cfg->platform_id != NULL && h->settings_path[0] != '\0' &&
         sv_profile_path(h->settings_path, cfg->platform_id, id, h->profile_path, sizeof h->profile_path) == 0) {
-      (void)sv_profile_load(&h->settings, h->profile_path);
+      (void)sv_profile_load(&h->settings, h->profile_path);   /* 2: the original game's profile (never written while a patch is active) */
+      if (cfg->patch_id != NULL) {
+        /* SEG-122: 3: the verified patch's defaults, 4: this variant's own profile. Fail closed: a bad identity or value means no override and the Vanilla behaviour. */
+        char variant[1100];
+        SvSettings probe = h->settings;
+        if (sv_patch_profile_path(h->settings_path, cfg->platform_id, id, cfg->patch_id, variant, sizeof variant) == 0 &&
+            sv_patch_defaults_apply(&probe, cfg->patch_widescreen, cfg->patch_side_style) == 0) {
+          h->settings = probe;
+          (void)sv_profile_load(&h->settings, variant);
+          snprintf(h->profile_path, sizeof h->profile_path, "%s", variant);   /* changes made now are saved here, not to the game's profile */
+          h->patch_defaults = 1;
+        }
+      }
     } else {
       h->profile_path[0] = '\0';
     }
@@ -946,6 +958,7 @@ int sv_host_visible_side(const SvHost *h) {
   if ((int)h->ext_prod_mode > (int)h->settings.video.widescreen) return 0;
   return sv_layout_visible_side(h->last_w, h->last_h, h->settings.video.aspect, h->settings.video.widescreen_width, h->ext_side);
 }
+int sv_host_patch_defaults_active(const SvHost *h) { return h != NULL && h->patch_defaults != 0; }
 int sv_host_profile_active(const SvHost *h) { return h != NULL && h->profile_path[0] != '\0'; }
 const char *sv_host_profile_path(const SvHost *h) { return h != NULL && h->profile_path[0] != '\0' ? h->profile_path : NULL; }
 SvSideTreatment sv_host_side_treatment(const SvHost *h) { return h != NULL ? h->side_applied : SV_TREAT_PASSTHROUGH; }
@@ -959,11 +972,21 @@ static void capture_parse(SvHost *h) {
   h->capture_all_styles = SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_ALL_STYLES") != NULL;
   if (dir == NULL || list == NULL || *dir == '\0' || strlen(dir) >= sizeof h->capture_dir) return;
   snprintf(h->capture_dir, sizeof h->capture_dir, "%s", dir);
-  while (*list != '\0' && h->capture_count < 8) {
+  while (*list != '\0' && h->capture_count < SV_CAPTURE_MAX) {
     char *end = NULL;
     const unsigned long long n = strtoull(list, &end, 10);
     if (end == list) break;
     if (n > 0) h->capture_frames[h->capture_count++] = (uint64_t)n;
+    /* SEG-122: `first:last:step` expands to first, first+step, ... <= last (bounded by SV_CAPTURE_MAX) */
+    if (*end == ':') {
+      char *end2 = NULL, *end3 = NULL;
+      const unsigned long long last = strtoull(end + 1, &end2, 10);
+      const unsigned long long step = *end2 == ':' ? strtoull(end2 + 1, &end3, 10) : 1ULL;
+      if (end2 != end + 1 && step > 0) {
+        for (unsigned long long f = n + step; f <= last && h->capture_count < SV_CAPTURE_MAX; f += step) h->capture_frames[h->capture_count++] = (uint64_t)f;
+        end = *end2 == ':' && end3 != NULL ? end3 : end2;
+      }
+    }
     list = *end == ',' ? end + 1 : end;
     if (*end != ',') break;
   }

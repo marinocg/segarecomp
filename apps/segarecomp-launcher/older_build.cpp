@@ -42,7 +42,8 @@ bool sdl3_runtime_present(const Layout &layout) {
 
 // Empty when the candidate is playable; otherwise the plain-language reason it is not.
 std::string evaluate(const LibraryEntry &entry, const std::string &requested_policy, const Layout &layout, const fs::path &games_root, const BuildRecord &record,
-                     OlderBuild &out) {
+                     const std::string &variant, OlderBuild &out) {
+  if (record.variant != variant) return "it belongs to a different variant of this game";
   if (!is_build_key(record.key)) return "its build record is not a valid build identity";
   const fs::path dir = games_root / record.key;
   std::error_code ec;
@@ -55,6 +56,7 @@ std::string evaluate(const LibraryEntry &entry, const std::string &requested_pol
   const auto meta = json::parse(meta_text);
   if (!meta || !meta->is_object()) return "its build metadata is unreadable";
   if (meta->str("rom_sha256") != entry.sha256) return "its build metadata names a different ROM";
+  if (meta->str("patch_identity") != variant) return "its build metadata names a different variant of this game";
   if (meta->str("platform", "genesis") != entry.platform_id) return "it was built for a different platform";
   if (meta->str("host") != host_description()) return "it was built for a different operating system or processor (" + meta->str("host", "unknown") + ")";
   if (entry.platform_id == "master-system") {
@@ -126,12 +128,12 @@ const std::vector<std::string> &legacy_contract_releases() {
 }
 
 OlderBuild find_playable_older_build(const LibraryEntry &entry, const std::string &current_key, const std::string &requested_policy, const Layout &layout,
-                                     const fs::path &games_root) {
+                                     const fs::path &games_root, const std::string &variant) {
   OlderBuild first_refusal;
   for (auto it = entry.builds.rbegin(); it != entry.builds.rend(); ++it) {  // history is oldest first
-    if (it->key == current_key) continue;
+    if (it->key == current_key || it->variant != variant) continue;   // another variant's builds are never candidates (SEG-122)
     OlderBuild candidate;
-    const std::string refusal = evaluate(entry, requested_policy, layout, games_root, *it, candidate);
+    const std::string refusal = evaluate(entry, requested_policy, layout, games_root, *it, variant, candidate);
     if (refusal.empty()) {
       candidate.candidate_seen = true;
       return candidate;

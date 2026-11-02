@@ -195,8 +195,10 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
 * Settings persist in `viewer-settings.cfg` (`SEGARECOMP_VIEWER_SETTINGS`); the launcher's Settings > Video & Controls edits the same file (it re-reads the file when a game exits and when Settings is opened, so a change made in the game's menu is never overwritten by a stale launcher copy).
 * When a guest stops with a typed error the window shows why instead of closing silently (not for the automatic Optimized -> Compatibility restart).
 
-Environment variables the launcher sets for the game: `SEGARECOMP_LAUNCHED`, `SEGARECOMP_VIEWER_SETTINGS`, `SEGARECOMP_ROM_SHA256`, `SEGARECOMP_GAME_TITLE`,
-and (Genesis) `SEGARECOMP_GENESIS_REGION`. Unchanged: `SEGARECOMP_VIEWER_UNTHROTTLED`, `SEGARECOMP_VIEWER_SLICE`, `SEGARECOMP_VIEWER_MUTE`, the Master System
+Environment variables the launcher sets for the game: `SEGARECOMP_LAUNCHED`, `SEGARECOMP_VIEWER_SETTINGS`, `SEGARECOMP_ROM_SHA256` (the digest of the image the program was
+built from), `SEGARECOMP_GAME_TITLE`, and (Genesis) `SEGARECOMP_GENESIS_REGION`. A Patched variant (see Patches and variants below) additionally sets
+`SEGARECOMP_PROFILE_ID` (the existing explicit profile identity field, here the ORIGINAL library game, so Vanilla and Patched share one set of per-game widescreen preferences); the
+window title names the patch. Unchanged: `SEGARECOMP_VIEWER_UNTHROTTLED`, `SEGARECOMP_VIEWER_SLICE`, `SEGARECOMP_VIEWER_MUTE`, the Master System
 `--viewer-*` options including `--viewer-record`.
 
 ## Operating the launcher with a gamepad only
@@ -274,3 +276,24 @@ Remaining differences from the concepts, with reasons: long pages still scroll a
 secondary by design); there are no invented compatibility ratings, build percentages, storage figures or bundled commercial covers. Cover
 downloads happen only on an explicit request (see *Covers and metadata provider*). **SDL_GPU is not implemented**; SDL_Renderer remains the presenter.
 **Audio device selection is not implemented**. Cancelling a build is implemented (see *Build*); closing the window still waits for a running build.
+
+
+## Patches and variants (SEG-122, ADR 0266)
+
+A Genesis game's Details page has a **Patches / Variants** card. A patch is an optional, verified `.segapatch` package (format: `docs/product/patch-packages.md`) that adds a
+second, separately built version of the same library game. The game stays one library entry.
+
+* **Install patch...** opens the file chooser (native dialog, or the built-in picker). The package is verified completely against the game's exact original image before
+  anything is installed (ZIP structure, manifest, payload digest, source SHA-256, the delta, the patched image's SHA-256); the sheet shows the name, version, compatibility and
+  the verification result. A package for another game or revision is refused with a plain message. Installing never selects Patched, never builds and never touches the ROM.
+* **Vanilla / Patched** is a selection on the card. Vanilla is exactly the previous behaviour (same build identity, same program). Patched is a separate program built from the
+  verified patched image; it has its own cache entry (the key adds the package identity and the patched image digest), its own build record and its own provenance. The Play
+  button says **Play Vanilla** or **Play Patched** once a patch is installed; **Build patched version** / **Rebuild patched** act on the selected variant. A Patched selection that
+  is not built is simply not playable: nothing falls back to Vanilla while a Patched label is shown.
+* The patched image is materialized inside the build attempt's own `.partial` folder and removed again; the original ROM is only read. A cancelled or failed build never touches a
+  published build (Vanilla's or the patch's).
+* **Remove patch** removes the package and its record and selects Vanilla. The original ROM, the Vanilla build, widescreen preferences, recordings and saves are untouched; the
+  patched build is deleted only when the sheet's checkbox asks for it (the same validated storage executor, restricted to that one build folder).
+* The library file becomes schema 3 once a game has an installed patch (an earlier release opens it read-only instead of damaging it).
+* A patch's presentation defaults (for example Level 3 + Raw Extension) apply automatically while its Patched variant runs and only then; installing, selecting or removing a patch never writes a preference file.
+* Installing a patch does not make the picture "authored widescreen": the Widescreen mode / width / side style settings apply to both variants unchanged.
