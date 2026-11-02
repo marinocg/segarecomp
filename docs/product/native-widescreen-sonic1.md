@@ -24,7 +24,9 @@ right, down, left, down, right, up, left; guard-declined frames excluded). Numbe
 | zone / act | frames | camera x max | foreground | background |
 |---|---|---|---|---|| 0/0 (Green Hill acts 1-3) | 2415 | 8640 | 0/2700320 | 2663/2353674 |
 | 0/1 (Green Hill acts 1-3) | 2415 | 7871 | 0/2703680 | 17572/2327748 |
-| 0/2 (Green Hill acts 1-3) | 2416 | 8592 | 0/2691360 | 2588/2354879 |
+| 0/2 (Green Hill acts 1-3) | 2416 | 8592 | 0/2691360 | 2588/2354879 || 2/0 (Marble acts 1-3) | 2422 | 6079 | 0/2712640 | 7/2712640 |
+| 2/1 (Marble acts 1-3) | 2422 | 6079 | 0/2712640 | 0/2712640 |
+| 2/2 (Marble acts 1-3) | 2422 | 6144 | 0/2712640 | 0/2712640 |
 
 ## Frame validation and fallback
 
