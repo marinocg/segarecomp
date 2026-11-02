@@ -819,7 +819,8 @@ void App::draw_modal(float w, float h) {
   } else if (modal_.kind == Modal::Kind::install_patch) {
     subtitle = "The package was verified against your original game. Installing it only adds the patch to this game; nothing is built or switched yet.";
     keeps = {"Your original ROM file (never modified)", "The Vanilla build and its settings", "Your widescreen preferences for this game"};
-    notes = {"The patched version is a separate program built from the patched image. Choose Patched, then Build patched version, when you want it."};
+    notes = modal_.lines;   // what was verified: compatibility, purpose, validated width, identity
+    notes.push_back("The patched version is a separate program built from the patched image. Choose Patched, then Build patched version, when you want it.");
   } else if (modal_.kind == Modal::Kind::remove_patch) {
     subtitle = "The patch package is removed from this game. Vanilla stays exactly as it is.";
     keeps = {"Your original ROM file (never modified)", "The Vanilla build and its settings", "Your widescreen preferences, recordings and saves"};

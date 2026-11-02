@@ -79,11 +79,11 @@ void state_dot_text(Ctx &ctx, ImDrawList *dl, ImVec2 right_top, const std::strin
 std::string App::build_action_label(const StatusInfo &info) const {
   if (!info.variant.empty()) {   // SEG-122: the selected variant is a Patched one
     switch (info.status) {
-      case GameStatus::ready: return "Rebuild patched";
+      case GameStatus::ready: return "Rebuild";   // short on purpose: the Play button already says Patched and the tooltip names the variant
       case GameStatus::failed: return "Try again";
       case GameStatus::stale:
-      case GameStatus::playable_older: return "Rebuild patched";
-      default: return "Build patched version";
+      case GameStatus::playable_older: return "Rebuild";
+      default: return "Build patched";
     }
   }
   switch (info.status) {
@@ -334,6 +334,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
       tooltip(ctx_, is_queued(entry.id()) ? "Remove this game from the build queue; nothing has been built yet."
                     : info.sega_cd && !can_build(entry, info) ? "A build needs a free viewer, the BIOS and the disc in place."
                     : info.sega_cd ? "Build a playable program from your BIOS and disc on this computer (several minutes the first time)."
+                    : !info.variant.empty() ? (info.status == GameStatus::ready ? "Rebuild the patched version (a separate program; Vanilla is not touched)." : "Build patched version: a separate program built from the verified patched image. Vanilla is not touched.")
                     : info.status == GameStatus::ready ? "Recompile the native program with the current configuration." : "Recompile with the configuration below.");
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     note_item_layout("build");   // Build / Rebuild / Unqueue: the item drawn just before this line
@@ -725,7 +726,7 @@ float App::draw_variants(LibraryEntry &entry, const StatusInfo &info, float w) {
     int sel = 0;
     for (std::size_t i = 0; i < entry.patches.size(); ++i) {
       const InstalledPatch &p = entry.patches[i];
-      titles.push_back("Patched - " + p.name);
+      titles.push_back(entry.patches.size() == 1 ? std::string("Patched") : "Patched " + std::to_string(i + 1));   // the name goes in the description: tile titles must never truncate
       descriptions.push_back(patch_label(p) + (built_of(p.identity) ? ". Built." : ". Not built."));
       if (selected != nullptr && selected->identity == p.identity) sel = static_cast<int>(i) + 1;
     }
@@ -755,13 +756,12 @@ float App::draw_variants(LibraryEntry &entry, const StatusInfo &info, float w) {
   if (button(ctx_, "patch_install", "Install patch...", ImVec2(ctx_.u(170.0F), bh), Style::secondary, true, ctx_.icon("import"))) browse_patch(entry.id());
   ImGui::EndDisabled();
   if (ImGui::IsItemHovered()) tooltip(ctx_, info.rom_missing ? "The original ROM file is needed to verify a patch. Locate it first." : "Choose a .segapatch package. It is verified against your original game before anything is installed.");
-  for (std::size_t i = 0; i < entry.patches.size(); ++i) {
+  if (!entry.patches.empty()) {   // one button for the SELECTED patch: it never outgrows the card, whatever the names are
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
-    const std::string id = "patch_remove_" + std::to_string(i);
-    const std::string label = entry.patches.size() == 1 ? std::string("Remove patch") : "Remove " + entry.patches[i].name;
-    ImGui::BeginDisabled(busy_now);
-    if (button(ctx_, id.c_str(), label.c_str(), ImVec2(std::min(ctx_.u(200.0F), std::max(ctx_.u(130.0F), text_width(ctx_.bold, ctx_.u(13.0F), label.c_str()) + ctx_.u(44.0F))), bh), Style::ghost, true, ctx_.icon("trash"))) ask_remove_patch(entry, entry.patches[i].identity);
+    ImGui::BeginDisabled(busy_now || selected == nullptr);
+    if (button(ctx_, "patch_remove", "Remove patch", ImVec2(ctx_.u(150.0F), bh), Style::ghost, true, ctx_.icon("trash"))) ask_remove_patch(entry, selected->identity);
     ImGui::EndDisabled();
+    if (ImGui::IsItemHovered()) tooltip(ctx_, selected == nullptr ? "Select the patched version above to remove its patch. Vanilla is never removed." : "Remove the selected patch. The original game and Vanilla are untouched.");
   }
   y = ImGui::GetCursorScreenPos().y + ctx_.u(8.0F);
   if (const auto note = patch_notices_.find(entry.id()); note != patch_notices_.end() && !note->second.empty()) {
