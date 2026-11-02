@@ -254,6 +254,10 @@ GenesisSdl3Viewer *genesis_sdl3_viewer_open_platform(const char *title, int scal
   cfg.rom_sha256 = sha != NULL && strlen(sha) == 64U ? sha : NULL;
   /* SEG-123: the per-game widescreen profile key is platform + full SHA-256; a Sega CD launch supplies its disc identity (never shown as a ROM digest) */
   cfg.platform_id = platform_id;
+  /* SEG-122: only the launcher sets these, and only for a verified, selected Patched program (the host validates every value and ignores the lot when one is invalid) */
+  cfg.patch_id = SDL_getenv("SEGARECOMP_PATCH_ID");
+  cfg.patch_widescreen = SDL_getenv("SEGARECOMP_PATCH_WIDESCREEN");
+  cfg.patch_side_style = SDL_getenv("SEGARECOMP_PATCH_SIDE_STYLE");
   /* SEG-122: an explicit identity wins over the image digest: a Patched program was built from a different image than the library game its preferences belong to */
   cfg.profile_id = profile != NULL && strlen(profile) == 64U ? profile : cfg.rom_sha256;
   cfg.diagnostics = sdl_diagnostics;

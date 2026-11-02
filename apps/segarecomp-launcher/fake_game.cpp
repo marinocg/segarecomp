@@ -10,7 +10,7 @@ int main(int, char **argv) {
   // SEG-122: which identities the launcher handed to the program (the effective image digest, the profile identity (the original library digest of a Patched variant), the window title).
   if (const char *log = std::getenv("FAKE_GAME_ENV_LOG")) {
     const auto get = [](const char *name) { const char *v = std::getenv(name); return std::string(v != nullptr ? v : "-"); };
-    std::ofstream(log, std::ios::app) << "rom=" << get("SEGARECOMP_ROM_SHA256") << " library=" << get("SEGARECOMP_PROFILE_ID") << " title=" << get("SEGARECOMP_GAME_TITLE") << '\n';
+    std::ofstream(log, std::ios::app) << "rom=" << get("SEGARECOMP_ROM_SHA256") << " library=" << get("SEGARECOMP_PROFILE_ID") << " title=" << get("SEGARECOMP_GAME_TITLE") << " patch=" << get("SEGARECOMP_PATCH_ID") << " pws=" << get("SEGARECOMP_PATCH_WIDESCREEN") << " pside=" << get("SEGARECOMP_PATCH_SIDE_STYLE") << '\n';
   }
   // SEG-117: models the in-game Video menu changing the shared viewer settings file during a play (the real viewer rewrites the same file on exit).
   if (const char *mode = std::getenv("FAKE_VIEWER_WIDESCREEN"); mode != nullptr && std::getenv("SEGARECOMP_VIEWER_SETTINGS") != nullptr) {

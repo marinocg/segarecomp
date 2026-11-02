@@ -82,6 +82,8 @@ json::Value to_json(const LibraryEntry &e) {
       o.set("name", json::Value::make_string(p.name));
       o.set("target_sha256", json::Value::make_string(p.target_sha256));
       o.set("width_max", json::Value::make_int(p.width_max));
+      if (!p.widescreen.empty()) o.set("widescreen", json::Value::make_string(p.widescreen));
+      if (!p.side_style.empty()) o.set("side_style", json::Value::make_string(p.side_style));
       o.set("installed_at", json::Value::make_int(p.installed_at));
       o.set("build_key", json::Value::make_string(p.build_key));
       list.push(std::move(o));
@@ -254,6 +256,10 @@ bool entry_from_json(const json::Value &v, LibraryEntry &e) {
       ip.name = clamp_text(p.str("name"), 64);
       ip.width_max = static_cast<int>(std::clamp(p.num("width_max", -1), -1LL, 100LL));
       ip.installed_at = std::max(0LL, p.num("installed_at"));
+      ip.widescreen = p.str("widescreen");
+      if (ip.widescreen != "original" && ip.widescreen != "extended_backgrounds" && ip.widescreen != "enhanced_gameplay") ip.widescreen.clear();   // closed sets: anything else is no default
+      ip.side_style = p.str("side_style");
+      if (ip.side_style != "comfort" && ip.side_style != "borders" && ip.side_style != "raw") ip.side_style.clear();
       ip.build_key = p.str("build_key");
       if (!is_hex_digest(ip.build_key, 32)) ip.build_key.clear();
       e.patches.push_back(std::move(ip));
@@ -566,6 +572,8 @@ RomView view_for_variant(const LibraryEntry &entry, const std::string &identity)
     view.patch_package = patch_package_path(p->identity);
     view.patch_target_sha256 = p->target_sha256;
     view.patch_label = p->name + (p->version.empty() ? std::string() : " " + p->version);
+    view.patch_widescreen = p->widescreen;
+    view.patch_side_style = p->side_style;
   }
   return view;
 }

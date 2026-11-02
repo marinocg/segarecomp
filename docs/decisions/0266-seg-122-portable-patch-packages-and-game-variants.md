@@ -56,6 +56,15 @@ invented hardware modes or raised hardware limits; deterministic, fail-closed; n
 9. **Authoring stays private.** Byte-level knowledge lives in the private harness (`tools/seg122_authoring/`), exported deterministically; the product repository contains the format, the importer,
    the launcher and synthetic tests only.
 
+10. **Patch presentation defaults (addendum).** A manifest may carry `presentation_defaults {widescreen, side_style}` (closed name sets, validated by the strict parser; part of the package identity). The launcher stores
+    them with the verified installed patch and, only when it launches that selected Patched variant, passes `SEGARECOMP_PATCH_ID` (the full package identity) and the two names to the viewer; Vanilla clears all three.
+    The viewer layers settings as: global file < original-game profile < the patch's defaults (width is never touched: it is inherited) < this variant's own profile
+    (`viewer-widescreen/<platform>-<sha>+<patch identity>.cfg`, the same three keys). The override is active from the first frame, needs no menu visit, and fails closed: an invalid identity or name, a missing game
+    identity or a package without defaults means no override at all. Changes made while Patched are saved to the variant profile only, so the original-game profile and the global file are never rewritten and
+    Vanilla never reads the variant file; two patches keep separate profiles. Installing, selecting or removing a patch writes no preference file. The Video menu says "Patch defaults: Level 3 + Raw Extension"
+    (the values are ordinary settings, a default and not a lock). This is configuration only: it grants no authored provenance and changes no capability report (Level 3 stays Partial at best, and the existing
+    frame validation and fallback apply unchanged).
+
 ## Consequences
 
 Users can install a small portable file, get an additional separately built version of one game, and keep Vanilla untouched. Two real titles gain real, measurable improvements within stated scene

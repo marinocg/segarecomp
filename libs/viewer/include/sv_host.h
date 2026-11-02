@@ -45,6 +45,11 @@ typedef struct SvHostConfig {
    * of the game; NULL falls back to rom_sha256). Without a valid pair there is no per-game profile and the widescreen preferences are the global ones. */
   const char *platform_id;
   const char *profile_id;
+  /* SEG-122: a verified, selected Patched variant (set by the launcher only for such a program): its full identity (64 hex) and the patch's typed presentation defaults
+   * (stable setting names). Honoured only with a valid per-game identity above; anything invalid or incomplete means no override at all. NULL = Vanilla / no patch. */
+  const char *patch_id;
+  const char *patch_widescreen;
+  const char *patch_side_style;
   SvDiagnosticsFn diagnostics; /* optional */
   void *diagnostics_ctx;
   /* Optional (NULL = the platform extends nothing: both enhanced levels are Unavailable and the picture stays Original). Called from the
@@ -88,6 +93,8 @@ int sv_host_visible_side(const SvHost *host);
 /* 1 when this game has a valid identity (widescreen preferences are saved per game); path of its profile file (NULL when none). */
 int sv_host_profile_active(const SvHost *host);
 const char *sv_host_profile_path(const SvHost *host);
+/* SEG-122: 1 when a verified patch's presentation defaults are active for this run (the Video menu says so). */
+int sv_host_patch_defaults_active(const SvHost *host);
 SvExtSource sv_host_extension_source(const SvHost *host);
 /* Re-applies the side style to the frame already shown (also done by sv_host_apply_settings and by the menu). */
 void sv_host_restyle(SvHost *host);

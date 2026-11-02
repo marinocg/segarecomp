@@ -252,7 +252,7 @@ int main() {
     LibraryEntry &e = *added.entry;
     expect(pc.save() && slurp(pfile).find("\"schema\": 1") != std::string::npos && slurp(pfile).find("patches") == std::string::npos, "a library without patches stays schema 1, byte-free of the new members");
     InstalledPatch p1;
-    p1.identity = digest('b'); p1.id = "wide"; p1.version = "1.0.0"; p1.name = "Wide"; p1.target_sha256 = digest('c'); p1.width_max = 80; p1.installed_at = 9;
+    p1.identity = digest('b'); p1.id = "wide"; p1.version = "1.0.0"; p1.name = "Wide"; p1.target_sha256 = digest('c'); p1.width_max = 80; p1.installed_at = 9; p1.widescreen = "enhanced_gameplay"; p1.side_style = "raw";
     e.patches.push_back(p1);
     e.selected_variant = p1.identity;
     BuildRecord vanilla; vanilla.key = key32('1'); vanilla.mode = "compatibility";
@@ -269,7 +269,15 @@ int main() {
     expect(r != nullptr && r->builds.size() == 2 && r->builds[1].variant == p1.identity && r->builds[0].variant.empty(), "build records keep their variant");
     const RomView pv = view_from_entry(*r), vv = view_for_variant(*r, std::string());
     expect(pv.patched() && pv.sha256 == digest('a') && pv.patch_identity == p1.identity && pv.patch_target_sha256 == digest('c') && pv.effective_sha256() == digest('c') && pv.patch_package.filename() == p1.identity + ".segapatch", "the Patched view keeps the original identity and names the verified image");
-    expect(!vv.patched() && vv.effective_sha256() == digest('a'), "the Vanilla view is untouched by an installed patch");
+    expect(!vv.patched() && vv.effective_sha256() == digest('a') && vv.patch_widescreen.empty() && vv.patch_side_style.empty(), "the Vanilla view is untouched by an installed patch");
+    expect(pv.patch_widescreen == "enhanced_gameplay" && pv.patch_side_style == "raw" && r->patches[0].widescreen == "enhanced_gameplay", "presentation defaults round-trip and reach only the Patched view");
+    { std::string bad = slurp(pfile);   // a value outside the closed sets is no default at all
+      const auto w = bad.find("\"widescreen\": \"enhanced_gameplay\"");
+      expect(w != std::string::npos, "the defaults are stored");
+      bad.replace(w, std::string("\"widescreen\": \"enhanced_gameplay\"").size(), "\"widescreen\": \"turbo\"");
+      spit(dir / "patches" / "baddefault.json", bad);
+      Catalog bc(dir / "patches" / "baddefault.json"); bc.load();
+      expect(bc.entries().size() == 1 && bc.entries()[0].patches.size() == 1 && bc.entries()[0].patches[0].widescreen.empty() && bc.entries()[0].patches[0].side_style == "raw", "an unknown default name is dropped, the rest survives"); }
     // a selection of something that is not installed, and damaged patch records, fall back to Vanilla / are dropped
     std::string text = slurp(pfile);
     const auto at = text.find("\"selected_variant\": \"" + p1.identity + "\"");

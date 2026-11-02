@@ -295,4 +295,5 @@ second, separately built version of the same library game. The game stays one li
 * **Remove patch** removes the package and its record and selects Vanilla. The original ROM, the Vanilla build, widescreen preferences, recordings and saves are untouched; the
   patched build is deleted only when the sheet's checkbox asks for it (the same validated storage executor, restricted to that one build folder).
 * The library file becomes schema 3 once a game has an installed patch (an earlier release opens it read-only instead of damaging it).
+* A patch's presentation defaults (for example Level 3 + Raw Extension) apply automatically while its Patched variant runs and only then; installing, selecting or removing a patch never writes a preference file.
 * Installing a patch does not make the picture "authored widescreen": the Widescreen mode / width / side style settings apply to both variants unchanged.

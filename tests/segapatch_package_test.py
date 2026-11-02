@@ -156,6 +156,21 @@ sp.create(SRC, TGT, width_ok, id_="synthetic-wide", name="Synthetic Widescreen",
 code, doc = run("inspect", width_ok)
 check(code == 0 and doc["widescreen_width_max"] == 60 and doc["requires"] == [], f"width range reported {doc}")
 check(run("inspect", good)[1]["widescreen_width_max"] == -1, "unstated width range reported as -1")
+# typed presentation defaults (closed names; never a free-form override language)
+pd_ok = tmp / "pd.segapatch"
+sp.create(SRC, TGT, pd_ok, id_="synthetic-wide", name="Synthetic Widescreen", version="1.0.0", presentation_defaults={"widescreen": "enhanced_gameplay", "side_style": "raw"})
+code, doc = run("inspect", pd_ok)
+check(code == 0 and doc["default_widescreen"] == "enhanced_gameplay" and doc["default_side_style"] == "raw", f"presentation defaults parsed {doc}")
+check(run("apply", pd_ok, "--rom", tmp / "src.bin", "--out", tmp / "pd.out")[0] == 0 and (tmp / "pd.out").read_bytes() == TGT, "a package with defaults still applies")
+check(run("inspect", good)[1]["default_widescreen"] == "" and run("inspect", good)[1]["default_side_style"] == "", "no defaults stated -> empty")
+only_ws = tmp / "pd2.segapatch"
+sp.create(SRC, TGT, only_ws, id_="synthetic-wide", name="Synthetic Widescreen", version="1.0.0", presentation_defaults={"widescreen": "extended_backgrounds"})
+check(run("inspect", only_ws)[1]["default_widescreen"] == "extended_backgrounds" and run("inspect", only_ws)[1]["default_side_style"] == "", "one default alone is accepted")
+check(run("inspect", pd_ok)[1]["package_identity"] != run("inspect", good)[1]["package_identity"], "the defaults are part of the package identity")
+for what, value in (("unknown widescreen name", {"widescreen": "turbo"}), ("unknown side style", {"side_style": "sparkly"}), ("unknown key", {"widescreen": "raw", "width": 5}),
+                    ("empty object", {}), ("not an object", "enhanced_gameplay"), ("number", {"widescreen": 3}), ("list", ["raw"]), ("wrong case", {"side_style": "Raw"}),
+                    ("nested", {"widescreen": {"mode": "enhanced_gameplay"}}), ("widescreen name given as side style", {"side_style": "enhanced_gameplay"})):
+    expect_refused(pack(mutated(presentation_defaults=value)), SRC, "presentation_defaults: " + what)
 bad_target = mutated(rom={"target_sha256": "11" * 32})
 expect_refused(pack(bad_target), SRC, "target digest mismatch")
 corrupt = bytearray(bps); corrupt[len(corrupt) // 2] ^= 0xFF

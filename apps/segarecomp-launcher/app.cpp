@@ -744,6 +744,8 @@ bool App::start_build(const std::string &id, bool restart_after) {
     view.patch_package = variant.patch_package;
     view.patch_target_sha256 = variant.patch_target_sha256;
     view.patch_label = variant.patch_label;
+    view.patch_widescreen = variant.patch_widescreen;
+    view.patch_side_style = variant.patch_side_style;
     if (view.patched()) {
       std::error_code pec;
       if (!fs::is_regular_file(view.patch_package, pec)) { show_message("The patch is missing", {"The installed copy of the selected patch cannot be found in the library, so the patched version cannot be built.", "Select Vanilla, or install the patch package again."}); return false; }

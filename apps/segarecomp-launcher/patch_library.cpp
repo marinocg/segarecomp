@@ -95,6 +95,8 @@ PatchInstall install_patch(LibraryEntry &entry, const fs::path &package, const f
   p.name = checked.info.name;
   p.target_sha256 = checked.info.target_sha256;
   p.width_max = checked.info.widescreen_width_max;
+  p.widescreen = checked.info.default_widescreen;
+  p.side_style = checked.info.default_side_style;
   p.installed_at = now;
   entry.patches.push_back(std::move(p));
   result.ok = true;

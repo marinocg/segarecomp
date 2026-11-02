@@ -30,6 +30,7 @@ sonic1-widescreen.segapatch      (ZIP; stored or deflate; classic ZIP, no encryp
   "source_sha256": "<SHA-256 of the exact original image>",
   "requires": [],
   "widescreen_width_max": 100,
+  "presentation_defaults": { "widescreen": "enhanced_gameplay", "side_style": "raw" },
   "payloads": {
     "rom": { "format": "bps", "file": "game.bps", "sha256": "<SHA-256 of game.bps>", "target_sha256": "<SHA-256 of the patched image>" }
   }
@@ -38,7 +39,8 @@ sonic1-widescreen.segapatch      (ZIP; stored or deflate; classic ZIP, no encryp
 
 The manifest is strict: a closed JSON subset (objects, ASCII strings, one small integer, one array), duplicate or unknown keys are errors, every string is bounded.
 `requires` lists compatibility capabilities the package needs from this segarecomp (none exist in v1: any entry is refused, so a future package cannot be silently half-applied).
-`widescreen_width_max` (0..100, optional) states the highest Widescreen Width the author validated; it is informational and never drives the capability report. `payloads` holds
+`widescreen_width_max` (0..100, optional) states the highest Widescreen Width the author validated; it is informational and never drives the capability report. `presentation_defaults` (optional; `widescreen`: `original` | `extended_backgrounds` | `enhanced_gameplay`, `side_style`: `comfort` | `borders` | `raw`; either one or both) are the starting
+widescreen presentation of the Patched variant only: a default the user can change (saved per patched variant), never a lock and never provenance. `payloads` holds
 the payload types this release understands (closed list; v1: `rom`). A package naming another payload type is refused, not ignored. The package **identity** is the SHA-256 of the manifest
 bytes (it names every payload and target digest), independent of ZIP layout and timestamps.
 
@@ -62,5 +64,5 @@ One JSON object on stdout (`{"ok":true,...}` or `{"ok":false,"error":"..."}`); e
 
 ## Authoring
 
-`tools/segapatch.py create --source <original> --target <patched> --id ... --name ... --version ... [--width-max N] --out <file>` writes a deterministic package (fixed timestamps and
+`tools/segapatch.py create --source <original> --target <patched> --id ... --name ... --version ... [--width-max N] [--default-widescreen NAME] [--default-side-style NAME] --out <file>` writes a deterministic package (fixed timestamps and
 entry order). Packages for commercial games are authored in the private harness; no ROM, patched ROM or reconstructable game data is ever committed here.

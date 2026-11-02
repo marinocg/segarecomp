@@ -101,6 +101,15 @@ LAST_EXPECT = 0
 OPEN = ["frames 10", "focus_card 0", "frames 4", "key Return", "frames 8", "expect page=details"]
 
 
+def settings_snapshot(lib):
+    """Every viewer preference file of the library (global file and per-game profiles) with its digest."""
+    out = {}
+    for path in [lib / "viewer-settings.cfg", *sorted((lib / "viewer-widescreen").glob("*"))]:
+        if path.is_file():
+            out[path.name] = sha(path.read_bytes())
+    return out
+
+
 def manifest_identity(package):
     with zipfile.ZipFile(package) as z:
         return sha(z.read("manifest.json"))
@@ -130,15 +139,24 @@ def main():
         patched[0x2000:0x2004] = b"\xde\xad\xbe\xef"
         patched = bytes(patched)
         pkg_a = tmp / "a-widescreen.segapatch"
-        sp.create(src, patched, pkg_a, id_="synthetic-wide", name="Synthetic Wide", version="1.0.0", width_max=100)
+        sp.create(src, patched, pkg_a, id_="synthetic-wide", name="Synthetic Wide", version="1.0.0", width_max=100,
+                  presentation_defaults={"widescreen": "enhanced_gameplay", "side_style": "raw"})
         patched_b = bytearray(src)
         patched_b[0x1000:0x1008] = b"PATCHED2"
         pkg_b = tmp / "b-widescreen.segapatch"
-        sp.create(src, bytes(patched_b), pkg_b, id_="synthetic-wide", name="Synthetic Wide", version="2.0.0", width_max=60)
+        sp.create(src, bytes(patched_b), pkg_b, id_="synthetic-wide", name="Synthetic Wide", version="2.0.0", width_max=60,
+                  presentation_defaults={"widescreen": "extended_backgrounds", "side_style": "borders"})
         other = bytearray(synthetic_rom(2))
         pkg_other = tmp / "other-game.segapatch"
         sp.create(bytes(other), bytes(other[:0x300]) + b"X" + bytes(other[0x301:]), pkg_other, id_="other", name="Other", version="1.0.0")
         ident_a, ident_b = manifest_identity(pkg_a), manifest_identity(pkg_b)
+
+        # the user's existing preferences (global file and this game's profile) must survive everything below byte for byte
+        (p.lib).mkdir(parents=True, exist_ok=True)
+        (p.lib / "viewer-settings.cfg").write_text("video.widescreen=extended_backgrounds\nvideo.widescreen_side_style=comfort\nvideo.widescreen_width=77\n")
+        (p.lib / "viewer-widescreen").mkdir(exist_ok=True)
+        (p.lib / "viewer-widescreen" / f"genesis-{sha(src)}.cfg").write_text("video.widescreen=extended_backgrounds\nvideo.widescreen_side_style=borders\nvideo.widescreen_width=55\n")
+        prefs_before = settings_snapshot(p.lib)
 
         # 1. Vanilla first: a normal build, untouched by everything below.
         check("vanilla build", p.run(OPEN + ["build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", "expect variant=vanilla", "expect patches=0", "quit"]))
@@ -198,7 +216,10 @@ def main():
         expect(len(env_lines) == 2, f"two launches logged: {env_lines}")
         if len(env_lines) == 2:
             expect(f"rom={sha(patched)} library={sha(src)}" in env_lines[0] and "(Patched: Synthetic Wide 1.0.0)" in env_lines[0], f"patched launch identities: {env_lines[0]}")
+            expect(f"patch={ident_a} pws=enhanced_gameplay pside=raw" in env_lines[0], f"the verified patch's presentation defaults reach the viewer: {env_lines[0]}")
             expect(f"rom={sha(src)} library=-" in env_lines[1] and "(Patched" not in env_lines[1], f"vanilla launch identities: {env_lines[1]}")
+            expect("patch=- pws=- pside=-" in env_lines[1], f"Vanilla gets no patch environment at all: {env_lines[1]}")
+        expect(settings_snapshot(p.lib) == prefs_before, "installing, selecting, building, launching a patch never rewrites the global or the original game's preference files")
 
         # 6b. The Play button's dropdown lists both versions (and offers a build for an unbuilt one).
         trace = p.run(OPEN + ["variant vanilla", "frames 10", "open_play_menu", "frames 12", "menu_items", "quit"])
@@ -243,6 +264,8 @@ def main():
         trace = p.run(OPEN + ["play", "frames 20", "wait_play_end", "frames 6", "quit"])
         expect(len(p.lines(p.game_log)) == 3 and str(vdir) in p.lines(p.game_log)[-1], "Vanilla still plays after every patch is removed")
 
+        expect(settings_snapshot(p.lib) == prefs_before, "removing patches (with and without their builds) never rewrites the global or the original game's preference files")
+
         # 11. A missing package file: building Patched is refused with a reason; nothing else is started.
         trace = p.run(OPEN + [f"patch_pick {pkg_a}", "frames 12", "patch_confirm", "frames 20", "expect patches=1", "variant patched", "frames 10", "quit"])
         check("reinstall", trace)
@@ -261,6 +284,8 @@ def main():
         pkg = tmp / "t.segapatch"
         sp.create(q.source, bytes(patched2), pkg, id_="t", name="T", version="1")
         check("tamper setup", q.run(OPEN + ["build", "wait_idle", "frames 10", f"patch_pick {pkg}", "frames 12", "patch_confirm", "frames 20", "variant patched", "frames 10", "build", "wait_idle", "frames 30", "expect status=Ready", "quit"]))
+        q.run(OPEN + ["variant patched", "frames 10", "play", "frames 20", "wait_play_end", "frames 6", "quit"])
+        expect(any("title=" in l and "(Patched: T 1)" in l and "patch=- pws=- pside=-" in l for l in q.lines(q.env_log)), f"a patch that states no presentation defaults sets no override: {q.lines(q.env_log)}")
         a_dir, b_dir = q.builds()
         pat = next(x for x in (a_dir, b_dir) if "patch_identity" in json.loads((x / "metadata.json").read_text()))
         van = a_dir if pat == b_dir else b_dir

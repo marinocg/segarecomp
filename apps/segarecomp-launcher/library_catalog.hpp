@@ -28,6 +28,7 @@ struct InstalledPatch {
   std::string identity;       // SHA-256 of the package manifest (names every payload and target digest)
   std::string id, version, name;
   std::string target_sha256;  // verified digest of the patched image
+  std::string widescreen, side_style;   // the package's typed presentation defaults (closed name sets, "" = none)
   int width_max = -1;         // the package's stated validated Widescreen Width (0..100), -1 = not stated; informational only (never drives capability)
   long long installed_at = 0;
   std::string build_key;      // the published patched build (entry_dir name), "" = not built

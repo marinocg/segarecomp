@@ -244,6 +244,18 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
   if (rom.effective_sha256().size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ROM_SHA256", rom.effective_sha256().c_str(), true);
   if (rom.patched() && rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID", rom.sha256.c_str(), true);
   else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID");
+  // SEG-122: the patch's presentation defaults reach the viewer only for a selected Patched variant (the launch path has already required its verified build); Vanilla clears them.
+  if (rom.patched() && (!rom.patch_widescreen.empty() || !rom.patch_side_style.empty())) {
+    SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_ID", rom.patch_identity.c_str(), true);
+    if (!rom.patch_widescreen.empty()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN", rom.patch_widescreen.c_str(), true);
+    else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN");
+    if (!rom.patch_side_style.empty()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE", rom.patch_side_style.c_str(), true);
+    else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE");
+  } else {
+    SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_ID");
+    SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN");
+    SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE");
+  }
   if (!rom.title.empty()) {  // the window title names the version that runs: a Patched program is never presented as plain Vanilla
     const std::string title = rom.patched() ? rom.title + " (Patched: " + rom.patch_label + ")" : rom.title;
     SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GAME_TITLE", title.c_str(), true);

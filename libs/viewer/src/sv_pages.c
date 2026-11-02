@@ -93,6 +93,15 @@ static void build_video_core(SvHost *h, SvPage *p, int full) {
   snprintf(ws_hint, sizeof ws_hint, "%s%s%s", ws_status, ws_status[0] != '\0' ? " " : "", sv_widescreen_description(v->widescreen));
   add_choice(p, I_WIDESCREEN, "Widescreen Mode", (int)v->widescreen, SV_WIDESCREEN_COUNT, wsname, ws_hint);
   if (full && ws_status[0] != '\0') add_note(p, ws_status);
+  if (sv_host_patch_defaults_active(h)) {   /* SEG-122: say where the starting values came from; they remain ordinary settings the user can change */
+    char note[200], parts[80];
+    const char *w = h->cfg.patch_widescreen, *sd = h->cfg.patch_side_style;
+    const char *wn = w == NULL || *w == '\0' ? NULL : (strcmp(w, "enhanced_gameplay") == 0 ? "Level 3" : (strcmp(w, "extended_backgrounds") == 0 ? "Level 2" : "Original"));
+    const char *sn = sd == NULL || *sd == '\0' ? NULL : (strcmp(sd, "raw") == 0 ? "Raw Extension" : (strcmp(sd, "borders") == 0 ? "Borders" : "Comfort"));
+    snprintf(parts, sizeof parts, "%s%s%s", wn != NULL ? wn : "", wn != NULL && sn != NULL ? " + " : "", sn != NULL ? sn : "");
+    snprintf(note, sizeof note, "Patch defaults: %s (change them freely; saved for this patched version).", parts);
+    add_note(p, note);
+  }
   /* Widescreen Width: the target aspect between 4:3 and 16:9, applied at once to the frame behind the menu (the host keeps the maximum extension) */
   {
     char ratio[24], hint[400], eff[24];

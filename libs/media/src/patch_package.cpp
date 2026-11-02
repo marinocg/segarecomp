@@ -380,7 +380,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
   JsonReader reader(std::string_view(reinterpret_cast<const char *>(man->second.data.data()), man->second.data.size()));
   if (!reader.parse(root) || root.kind != Value::Kind::object) return bad(reader.error);
   static const char *const required[] = {"format", "schema_version", "id", "version", "name", "platform", "purpose", "source_sha256", "payloads"};
-  static const char *const optional[] = {"requires", "widescreen_width_max"};
+  static const char *const optional[] = {"requires", "widescreen_width_max", "presentation_defaults"};
   for (const char *k : required) if (root.find(k) == nullptr) return bad(std::string("the manifest is missing \"") + k + "\"");
   for (const std::string &k : root.keys) {
     bool known = false;
@@ -403,6 +403,18 @@ Package read_package(std::span<const std::uint8_t> zip) {
   if (const Value *w = root.find("widescreen_width_max"); w != nullptr) {
     if (w->kind != Value::Kind::number || w->number > 100) return bad("the manifest widescreen_width_max must be an integer from 0 to 100");
     info.widescreen_width_max = static_cast<int>(w->number);
+  }
+  if (const Value *d = root.find("presentation_defaults"); d != nullptr) {
+    if (d->kind != Value::Kind::object || d->members.empty() || d->members.size() > 2) return bad("the manifest presentation_defaults are invalid");
+    for (const std::string &k : d->keys) if (k != "widescreen" && k != "side_style") return bad("the manifest presentation_defaults have an unknown field \"" + k + "\"");
+    if (d->find("widescreen") != nullptr) {
+      if (!take_string(*d, "widescreen", info.default_widescreen) || (info.default_widescreen != "original" && info.default_widescreen != "extended_backgrounds" && info.default_widescreen != "enhanced_gameplay"))
+        return bad("the manifest presentation_defaults widescreen value is not supported");
+    }
+    if (d->find("side_style") != nullptr) {
+      if (!take_string(*d, "side_style", info.default_side_style) || (info.default_side_style != "comfort" && info.default_side_style != "borders" && info.default_side_style != "raw"))
+        return bad("the manifest presentation_defaults side_style value is not supported");
+    }
   }
   if (const Value *r = root.find("requires"); r != nullptr) {
     if (r->kind != Value::Kind::array || r->items.size() > 8) return bad("the manifest requires list is invalid");

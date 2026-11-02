@@ -39,6 +39,9 @@ struct PackageInfo {
   bool has_rom = false;                 // payloads.rom present
   std::string rom_file, rom_payload_sha256, target_sha256;   // target_sha256 = the patched image digest (set when has_rom)
   std::vector<std::string> requires_capabilities;
+  // Optional typed presentation defaults (closed value sets, validated by the parser): applied by the viewer only while this verified Patched variant runs, as a default
+  // the user can change. They are never provenance: a patch that prefers Level 3 does not make any frame authored.
+  std::string default_widescreen, default_side_style;   // "" = not stated
   int widescreen_width_max = -1;        // highest validated Widescreen Width (0..100) the author claims, -1 = not stated
   std::string identity;  // SHA-256 of the manifest bytes: the package identity. The manifest names every payload digest, so it covers ALL variant inputs
 };

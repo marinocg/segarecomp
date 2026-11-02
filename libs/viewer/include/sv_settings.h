@@ -151,6 +151,15 @@ size_t sv_profile_load(SvSettings *settings, const char *path);
 /* Atomically writes the three keys of `video`. 0 ok. The directory must exist. */
 int sv_profile_save(const SvVideoSettings *video, const char *path);
 
+/* ---- SEG-122 (ADR 0266): the widescreen profile of one verified PATCHED variant ----
+ * Precedence: global file < original-game profile < the patch's typed presentation defaults < this variant's own profile. The variant profile lives next to the
+ * original-game one as `viewer-widescreen/<platform>-<sha256>+<patch identity>.cfg` (same three keys), so a change made while playing Patched never touches the
+ * original game's profile or the global file, and Vanilla never reads it. */
+int sv_patch_profile_path(const char *settings_path, const char *platform, const char *sha256, const char *patch_identity, char *out, size_t cap);
+/* Applies the patch defaults (either name may be NULL/empty = not stated) to settings->video.widescreen / widescreen_side_style by their exact stable names; the width is
+ * never touched (it is inherited). Returns 0 when something valid was applied, -1 (nothing changed) for an unknown name or when nothing is stated. */
+int sv_patch_defaults_apply(SvSettings *settings, const char *widescreen, const char *side_style);
+
 /* Conflicts. A key or pad button may drive only one action of one player of a console. Returns 1 and fills the owner when `code` is
  * already bound to something other than (player, action). */
 typedef struct SvBindingOwner { int player; SvAction action; } SvBindingOwner;

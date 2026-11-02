@@ -57,6 +57,7 @@ struct SvHost {
   char capture_dir[512];
   char profile_path[1100];     /* per-game widescreen profile file ('' = none: no trustworthy game identity) */
   SvVideoSettings global_ws;   /* the three widescreen fields as the GLOBAL file states them (written back unchanged) */
+  int patch_defaults;          /* SEG-122: a verified patch's presentation defaults are in effect (profile_path then names the variant's own profile) */
   SvVideoSettings profile_ws;  /* the three fields as last loaded/saved for this game */
   int side_blocked;            /* the treatment could not be built: show no side (fail closed) */
   SvSideTreatment side_applied;   /* what the last uploaded frame shows at the sides (PASSTHROUGH when there is no extension) */

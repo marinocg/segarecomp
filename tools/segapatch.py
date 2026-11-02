@@ -111,7 +111,8 @@ def bps_apply(patch: bytes, source: bytes) -> bytes:
 
 
 def manifest_bytes(source: bytes, target: bytes, payload: bytes, *, id_: str, name: str, version: str, platform: str = "genesis",
-                   width_max: int | None = None, requires: list[str] | None = None) -> bytes:
+                   width_max: int | None = None, requires: list[str] | None = None,
+                   presentation_defaults: dict | None = None) -> bytes:
     manifest = {
         "format": "segarecomp-patch",
         "schema_version": 1,
@@ -128,6 +129,8 @@ def manifest_bytes(source: bytes, target: bytes, payload: bytes, *, id_: str, na
         manifest["requires"] = requires
     if width_max is not None:
         manifest["widescreen_width_max"] = width_max
+    if presentation_defaults:
+        manifest["presentation_defaults"] = presentation_defaults
     return (json.dumps(manifest, indent=2) + "\n").encode("ascii")
 
 
@@ -141,9 +144,11 @@ def write_zip(path: Path, files: list[tuple[str, bytes]], *, method: int = zipfi
             z.writestr(info, data, compresslevel=9)
 
 
-def create(source: bytes, target: bytes, out: Path, *, id_: str, name: str, version: str, width_max: int | None = None) -> None:
+def create(source: bytes, target: bytes, out: Path, *, id_: str, name: str, version: str, width_max: int | None = None,
+           presentation_defaults: dict | None = None) -> None:
     payload = bps_create(source, target)
-    write_zip(out, [("manifest.json", manifest_bytes(source, target, payload, id_=id_, name=name, version=version, width_max=width_max)), ("game.bps", payload)])
+    write_zip(out, [("manifest.json", manifest_bytes(source, target, payload, id_=id_, name=name, version=version, width_max=width_max,
+                                                          presentation_defaults=presentation_defaults)), ("game.bps", payload)])
 
 
 def apply_package(package: Path, source: bytes) -> bytes:
@@ -175,6 +180,8 @@ def main(argv: list[str]) -> int:
     c.add_argument("--version", required=True)
     c.add_argument("--out", type=Path, required=True)
     c.add_argument("--width-max", type=int)
+    c.add_argument("--default-widescreen", choices=("original", "extended_backgrounds", "enhanced_gameplay"))
+    c.add_argument("--default-side-style", choices=("comfort", "borders", "raw"))
     a = sub.add_parser("apply")
     a.add_argument("package", type=Path)
     a.add_argument("--source", type=Path, required=True)
@@ -185,7 +192,8 @@ def main(argv: list[str]) -> int:
     ba.add_argument("patch", type=Path); ba.add_argument("source", type=Path); ba.add_argument("out", type=Path)
     args = ap.parse_args(argv)
     if args.cmd == "create":
-        create(args.source.read_bytes(), args.target.read_bytes(), args.out, id_=args.id, name=args.name, version=args.version, width_max=args.width_max)
+        create(args.source.read_bytes(), args.target.read_bytes(), args.out, id_=args.id, name=args.name, version=args.version, width_max=args.width_max,
+               presentation_defaults={k: v for k, v in (("widescreen", args.default_widescreen), ("side_style", args.default_side_style)) if v} or None)
     elif args.cmd == "apply":
         args.out.write_bytes(apply_package(args.package, args.source.read_bytes()))
     elif args.cmd == "bps-create":

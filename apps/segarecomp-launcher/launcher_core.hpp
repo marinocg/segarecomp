@@ -76,6 +76,7 @@ struct RomView {
   std::filesystem::path patch_package;         // the installed copy of the .segapatch
   std::string patch_target_sha256;             // verified digest of the patched image
   std::string patch_label;                     // "<name> <version>" (UI and logs only)
+  std::string patch_widescreen, patch_side_style;   // the verified package's typed presentation defaults ("" = none); handed to the viewer, never provenance
   [[nodiscard]] bool patched() const { return !patch_identity.empty(); }
   // The digest of the image that is actually compiled and run: the verified patched image for a Patched variant, else the original.
   [[nodiscard]] const std::string &effective_sha256() const { return patched() ? patch_target_sha256 : sha256; }
