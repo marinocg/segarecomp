@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
+#include <system_error>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -774,9 +776,9 @@ void width_and_profile_tests() {
   { std::string up(64, 'A'); check(sv_profile_path("/tmp/x/s.cfg", "genesis", up.c_str(), path, sizeof path) == 0 && std::string(path) == "/tmp/x/viewer-widescreen/genesis-" + std::string(64, 'a') + ".cfg", "SEG-123: the digest is lowercased"); }
   check(sv_profile_path("/tmp/x/s.cfg", "genesis", "../../etc/passwd", path, sizeof path) == -1 && sv_profile_path("/tmp/x/s.cfg", "genesis", sha.c_str(), path, 10) == -1, "SEG-123: invalid identity or small buffer builds no path");
   // load overlays only the stated keys, ignores everything else, survives damage
-  const std::string dir = "/tmp/sv_core_profile_" + std::to_string(static_cast<long>(std::time(nullptr)));
-  std::string cmd = "mkdir -p " + dir;
-  check(std::system(cmd.c_str()) == 0, "SEG-123: temp dir");
+  std::error_code ec;
+  const std::string dir = (std::filesystem::temp_directory_path(ec) / ("sv_core_profile_" + std::to_string(static_cast<long>(std::time(nullptr))))).generic_string();
+  check(std::filesystem::create_directories(dir, ec) || std::filesystem::is_directory(dir), "SEG-123: temp dir");
   const std::string file = dir + "/p.cfg";
   SvSettings g;
   sv_settings_defaults(&g);
@@ -792,8 +794,7 @@ void width_and_profile_tests() {
   { std::FILE *f = std::fopen(file.c_str(), "wb"); std::string junk(20000, '\x01'); std::fwrite(junk.data(), 1, junk.size(), f); std::fclose(f);
     SvSettings x = g; sv_profile_load(&x, file.c_str()); check(x.video.widescreen_width == 20 && x.audio.volume == 33, "SEG-123: a corrupted profile changes nothing"); }
   check(sv_profile_save(&pv, "") == -1 && sv_profile_save(nullptr, file.c_str()) == -1, "SEG-123: invalid save arguments are refused");
-  cmd = "rm -rf " + dir;
-  (void)std::system(cmd.c_str());
+  std::filesystem::remove_all(dir, ec);
 }
 
 int main() {
