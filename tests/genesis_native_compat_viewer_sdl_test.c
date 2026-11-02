@@ -175,19 +175,19 @@ int main(void) {
     CHECK(count_colour(a, lay.surface.x, ly, lw, 1, 0, 255, 0) == lw && count_colour(a, rx, ly, rw, 1, 0, 255, 0) == rw, "the side columns are the provider's cells (solid green), not the VDP's wrapped red");
     rgb_at(a, lay.native.x + lay.native.w / 2, ly, &r, &gg, &b);
     CHECK(r == 255 && gg == 0 && b == 0, "the native centre is the game's own picture");
-    /* the HUD overlay replaces the game's own: inside the LEFT side, centred in it, 8 source rows from the top */
+    /* the HUD overlay replaces the game's own: left edge at the left edge of the visible side, picture rows 1:1 (row 0 here) */
     {
-      const int sx = (39 - 12) / 2, ox = lay.surface.x + sx * k, oy = lay.native.y + 8 * k;
-      CHECK(count_colour(a, ox, oy, 12 * k, 9 * k, 10, 200, 233) == 12 * k * 9 * k, "the HUD overlay is at its computed place in the left side");
+      const int ox = lay.surface.x, oy = lay.native.y;
+      CHECK(count_colour(a, ox, oy, 12 * k, 9 * k, 10, 200, 233) == 12 * k * 9 * k, "the HUD overlay is at the left edge of the visible side");
       CHECK(count_colour(a, rx, lay.native.y, rw, lay.native.h, 10, 200, 233) == 0 && count_colour(a, lay.native.x, lay.native.y, lay.native.w, lay.native.h, 10, 200, 233) == 0,
-            "no overlay pixel on the right side or over the native picture");
+            "no overlay pixel on the right side or over the native picture (it is narrower than the side)");
     }
     SDL_DestroySurface(a);
   }
   /* the same frame retained: Borders replaces the sides (explicit user request) but the overlay stays; Raw shows the provider's cells */
   set_mode(&g, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_SIDE_BORDERS, 100);
   sv_host_toast(host, ""); a = sv_host_capture_output(host);
-  CHECK(a != NULL && sv_host_side_treatment(host) == SV_TREAT_BORDERS && count_colour(a, lay.surface.x, lay.native.y + 8 * k, lay.native.x - lay.surface.x, 9 * k, 10, 200, 233) > 0,
+  CHECK(a != NULL && sv_host_side_treatment(host) == SV_TREAT_BORDERS && count_colour(a, lay.surface.x, lay.native.y, lay.native.x - lay.surface.x, 9 * k, 10, 200, 233) > 0,
         "Borders keeps the HUD overlay");
   if (a != NULL) SDL_DestroySurface(a);
 

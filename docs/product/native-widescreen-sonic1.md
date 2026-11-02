@@ -10,9 +10,11 @@ original image (Genesis, USA/Europe REV00, SHA-256 `46160baa...f2a6`); Vanilla, 
 * **scenery** (Green Hill Zone acts 1 and 2 while the level runs; act 1 validated start to finish, act 2 over the part explored in validation; every frame is identity-checked): the extra side columns come from the level layout, the 256x256 chunk table and the 16x16 block table the game itself decompressed
   into work RAM, looked up at the world coordinates of the game's own per-line scroll (not from the wrapped plane nametable). The generic VDP code decodes patterns, palettes, flips,
   priority and sprites exactly as for visible columns. Outside the level layout a cell is blank (the backdrop shows); nothing is mirrored, repeated or invented.
-* **hud**: a replacement for the game's own HUD. The patch removes the original HUD sprites (two `jmp DisplaySprite` become `rts`; every counter and update routine keeps running) and the product draws
-  SCORE / TIME / RINGS / SONIC x lives in the original's colours in the left side space, or at the replaced HUD's place inside the picture when the visible side is too narrow (4:3, a low Widescreen Width,
-  Original). The numbers are the displayed frame's own counters; the original on-screen digits lag the counters by one frame at a change (the game updates its HUD lazily).
+* **hud**: the game's own HUD, relocated. The patch stops the HUD object queueing its sprites (two `jmp DisplaySprite` become `rts`; every counter and update routine keeps running) and the product draws the very
+  same sprite pieces from the displayed frame's own VRAM tiles and CRAM palettes: identical font, size, colours, digits and layout (SCORE / TIME / RINGS on top, the Sonic icon with the lives at the bottom), no
+  background, the same rows. Only the horizontal position differs: the overlay's left edge is the left edge of the visible surface (it covers the left side and the first picture columns it needs), or, with no visible
+  side (4:3, a zero Widescreen Width, Original), the original's own place inside the picture. The label flash (RINGS with no rings, TIME at nine minutes) follows the object's own rule. Because the digits are the game's own
+  tiles, the numbers are always exactly what the original would show for that frame.
 
 ## Frame validation and fallback
 
@@ -28,7 +30,7 @@ camera of the region the game streams it from (the upper region from the first b
 * Sprites beside the picture exist only where the game submits them (Level 3 is Partial); the game does not activate objects beyond its own window.
 * The level start sequence (title card) is not extended. Zones other than Green Hill Zone acts 1 and 2, special stages, bonus screens and the ending are not extended (the HUD still replaces the game's own in every running level).
 * The patched program runs the game with the HUD sprites not queued (slightly different guest timing from Vanilla by design); between presentation modes of the same variant guest state and audio are identical (tested).
-* On a ring loss the original on-screen digits update one frame later than the counter; the native HUD shows the counter of the displayed frame.
+* The 16:9 side is 39 pixels wide while the original HUD is 96 pixels wide, so the relocated HUD still covers the first picture columns (about 57 of the 96, against the 16 + 96 the original used).
 
 ## Provenance
 

@@ -565,71 +565,77 @@ void sonic1_provider() {
     set_scroll(L, sc, 1234, 100, 400, 14);   // restore the main scene
     fr = prepare_frame(L, sc, state, p);
   }
-  // HUD content and clamping
+  // HUD: the game's own HUD pieces, rasterized from the frame's VRAM tiles and CRAM (independent reference below), no panel, rows 1:1, flash by the object's own rule
   {
-    GenesisCompatOverlay o{}; o.rgba = g_overlay.data(); o.capacity = g_overlay.size();
-    std::memset(g_overlay.data(), 0, g_overlay.size());
-    check(p->hud(state, &o) == 1 && o.width > 0 && o.width <= GENESIS_COMPAT_OVERLAY_MAX_W && o.height > 0 && o.height <= GENESIS_COMPAT_OVERLAY_MAX_H, "the HUD fits the overlay bounds");
-    std::set<std::vector<uint8_t>> images;
-    unsigned drawn = 0;
-    for (unsigned rings : {0u, 1u, 9u, 10u, 37u, 99u, 100u, 101u, 999u}) {
-      Level lv = L; lv.w16(0xFE20, rings);
-      void *s3; const GenesisNativeCompat *p3; Frame f3 = prepare_frame(lv, sc, s3, p3);
-      GenesisCompatOverlay o3{}; std::vector<uint8_t> buf(GENESIS_COMPAT_OVERLAY_BYTES, 0); o3.rgba = buf.data(); o3.capacity = buf.size();
-      if (f3.d.accepted && p3->hud(s3, &o3)) { ++drawn; images.insert(std::vector<uint8_t>(buf.begin(), buf.begin() + (size_t)o3.width * o3.height * 4)); }
+    struct Piece { unsigned x, y, cw, ch, tile, group; };
+    static const Piece pieces[] = {{16, 8, 4, 2, 0x6CA, 0}, {48, 8, 4, 2, 0x6E2, 0}, {80, 8, 4, 2, 0x6EA, 0}, {16, 24, 4, 2, 0x6DA, 1}, {56, 24, 4, 2, 0x6F2, 0},
+                                   {16, 40, 4, 2, 0x6D2, 2}, {48, 40, 1, 2, 0x6CA, 2}, {64, 40, 3, 2, 0x6FA, 0}, {16, 200, 2, 2, 0x7D4, 0}, {32, 200, 4, 2, 0x7D8, 0}};
+    Scene hs; build_scene(hs, 31);
+    Lcg rnd(99);
+    for (uint32_t i = 0x6CAu * 32; i < 0x7E0u * 32; ++i) hs.vram[i] = (uint8_t)rnd.next();   // the HUD's art as the game left it (random nibbles; index 0 = transparent)
+    for (unsigned l = 0; l < 224; ++l) for (unsigned i = 0; i < 128; ++i) hs.raster->lines[l].cram[i] = (uint8_t)((i * 37 + l * 11) & 0xEE);   // per-line palettes
+    set_scroll(L, hs, 1234, 100, 400, 14);
+    std::memcpy(hs.raster->vram_start, hs.vram.data(), GENESIS_VDP_VRAM_BYTES);
+    auto render = [&](Level &lv, std::vector<uint8_t> &out, unsigned *w = nullptr, unsigned *h = nullptr, unsigned *fx = nullptr, unsigned *fy = nullptr) {
+      void *st; const GenesisNativeCompat *pp; Frame f = prepare_frame(lv, hs, st, pp);
+      out.assign(GENESIS_COMPAT_OVERLAY_BYTES, 0xCD);
+      GenesisCompatOverlay o{}; o.rgba = out.data(); o.capacity = out.size();
+      const int ok = (f.d.accepted & GENESIS_COMPAT_HUD) != 0 && pp->hud(st, &o);
+      if (ok) { if (w) *w = o.width; if (h) *h = o.height; if (fx) *fx = o.fallback_x; if (fy) *fy = o.fallback_y; }
+      return ok != 0;
+    };
+    // the independent reference: expected RGBA of the overlay for a given palette-line choice
+    auto reference = [&](unsigned red_mask) {
+      std::vector<uint8_t> ref((size_t)96 * 224 * 4, 0);
+      for (const Piece &pc : pieces)
+        for (unsigned cx = 0; cx < pc.cw; ++cx) for (unsigned cy = 0; cy < pc.ch; ++cy) for (unsigned row = 0; row < 8; ++row) for (unsigned col = 0; col < 8; ++col) {
+          const unsigned tile = pc.tile + cx * pc.ch + cy, y = pc.y + cy * 8 + row, x = pc.x + cx * 8 + col;
+          const uint8_t byte = hs.vram[tile * 32 + row * 4 + col / 2];
+          const unsigned idx = (col & 1) ? (byte & 15u) : (byte >> 4);
+          const unsigned pal = (pc.group != 0 && (red_mask & (1u << pc.group))) ? 1 : 0;
+          if (idx == 0) continue;
+          const uint8_t *cram = hs.raster->lines[y].cram;
+          const unsigned e = (cram[(pal * 16 + idx) * 2] << 8) | cram[(pal * 16 + idx) * 2 + 1];
+          uint8_t *d = &ref[((size_t)y * 96 + (x - 16)) * 4];
+          d[0] = (uint8_t)(((e >> 1) & 7) * 36); d[1] = (uint8_t)(((e >> 5) & 7) * 36); d[2] = (uint8_t)(((e >> 9) & 7) * 36); d[3] = 255;
+        }
+      return ref;
+    };
+    std::vector<uint8_t> img; unsigned w = 0, h = 0, fx = 0, fy = 0;
+    Level base = L; base.w16(0xFE20, 25); base.ram[0xFE05] = 0;     // rings: no flash
+    check(render(base, img, &w, &h, &fx, &fy) && w == 96 && h == 224 && fx == 16 && fy == 0, "the HUD overlay covers picture rows 1:1 and the columns the original used, with the original's place as its fallback");
+    std::vector<uint8_t> ref0 = reference(0);
+    unsigned wrong = 0, opaque = 0, transparent_wrong = 0;
+    for (size_t i = 0; i < ref0.size(); i += 4) {
+      const bool ro = ref0[i + 3] != 0, po = img[i + 3] != 0;
+      if (ro) { ++opaque; for (int k = 0; k < 3; ++k) wrong += (std::abs((int)ref0[i + k] - (int)img[i + k]) > 36); wrong += !po; }
+      else transparent_wrong += po;
     }
-    checkf(drawn == 9 && images.size() == 9, "every distinct ring count renders a distinct HUD", drawn, (long)images.size());
-    images.clear();
-    for (unsigned lives = 0; lives <= 99; ++lives) {
-      Level lv = L; lv.ram[0xFE12] = (uint8_t)lives;
-      void *s3; const GenesisNativeCompat *p3; Frame f3 = prepare_frame(lv, sc, s3, p3);
-      GenesisCompatOverlay o3{}; std::vector<uint8_t> buf(GENESIS_COMPAT_OVERLAY_BYTES, 0); o3.rgba = buf.data(); o3.capacity = buf.size();
-      if (f3.d.accepted && p3->hud(s3, &o3)) images.insert(std::vector<uint8_t>(buf.begin(), buf.begin() + (size_t)o3.width * o3.height * 4));
-    }
-    checkf(images.size() == 100, "every lives count 0..99 renders a distinct HUD", (long)images.size());
-    Level big = L; big.w16(0xFE20, 5000); big.ram[0xFE12] = 200;
-    void *s4; const GenesisNativeCompat *p4; Frame f4 = prepare_frame(big, sc, s4, p4);
-    Level top = L; top.w16(0xFE20, 999); top.ram[0xFE12] = 99;
-    void *s5; const GenesisNativeCompat *p5; Frame f5 = prepare_frame(top, sc, s5, p5);
-    std::vector<uint8_t> b4(GENESIS_COMPAT_OVERLAY_BYTES, 0), b5(GENESIS_COMPAT_OVERLAY_BYTES, 0);
-    GenesisCompatOverlay o4{}, o5{}; o4.rgba = b4.data(); o4.capacity = b4.size(); o5.rgba = b5.data(); o5.capacity = b5.size();
-    check(f4.d.accepted && f5.d.accepted && p4->hud(s4, &o4) && p5->hud(s5, &o5) && b4 == b5, "out-of-range counters clamp to the displayable maximum");
-    {   // score and clock render distinct images too, and the flash phase changes only the label colours
-      std::set<std::vector<uint8_t>> sc_images, tm_images;
-      for (unsigned score : {0u, 1u, 10u, 123456u, 999999u}) {
-        Level lv = L; lv.ram[0xFE26] = (uint8_t)(score >> 24); lv.ram[0xFE27] = (uint8_t)(score >> 16); lv.ram[0xFE28] = (uint8_t)(score >> 8); lv.ram[0xFE29] = (uint8_t)score;
-        void *s3; const GenesisNativeCompat *p3; Frame f3 = prepare_frame(lv, sc, s3, p3);
-        GenesisCompatOverlay o3{}; std::vector<uint8_t> buf(GENESIS_COMPAT_OVERLAY_BYTES, 0); o3.rgba = buf.data(); o3.capacity = buf.size();
-        if (f3.d.accepted && p3->hud(s3, &o3)) sc_images.insert(buf);
+    checkf(opaque > 500 && wrong == 0 && transparent_wrong == 0, "the overlay equals the independent rasterization of the game's HUD pieces (tiles, palette lines, rows), with nothing drawn elsewhere (no panel)", wrong, transparent_wrong);
+    for (size_t i = 3; i < ref0.size(); i += 4) if (img[i] != 0 && img[i] != 255) { check(false, "overlay alpha is 0 or 255 only"); break; }
+    auto same = [&](const std::vector<uint8_t> &x, const std::vector<uint8_t> &y) {   // the 96x224 overlay, colours within the decoder's rounding
+      for (size_t i = 0; i < ref0.size(); i += 4) {
+        if (x[i + 3] != y[i + 3]) return false;
+        if (x[i + 3] != 0) for (int k = 0; k < 3; ++k) if (std::abs((int)x[i + k] - (int)y[i + k]) > 36) return false;
       }
-      for (unsigned m = 0; m < 10; ++m) for (unsigned sec : {0u, 5u, 59u}) {
-        Level lv = L; lv.ram[0xFE23] = (uint8_t)m; lv.ram[0xFE24] = (uint8_t)sec;
-        void *s3; const GenesisNativeCompat *p3; Frame f3 = prepare_frame(lv, sc, s3, p3);
-        GenesisCompatOverlay o3{}; std::vector<uint8_t> buf(GENESIS_COMPAT_OVERLAY_BYTES, 0); o3.rgba = buf.data(); o3.capacity = buf.size();
-        if (f3.d.accepted && p3->hud(s3, &o3)) tm_images.insert(buf);
-      }
-      checkf(sc_images.size() == 5 && tm_images.size() == 30, "score and clock render distinct HUD images", (long)sc_images.size(), (long)tm_images.size());
-      Level a0 = L, a1 = L; a0.w16(0xFE20, 0); a1.w16(0xFE20, 0); a0.ram[0xFE05] = 0; a1.ram[0xFE05] = 8;
-      void *s6; const GenesisNativeCompat *p6;
-      std::vector<uint8_t> b0(GENESIS_COMPAT_OVERLAY_BYTES, 0), b1(GENESIS_COMPAT_OVERLAY_BYTES, 0);
-      GenesisCompatOverlay o0{}, o1{}; o0.rgba = b0.data(); o0.capacity = b0.size(); o1.rgba = b1.data(); o1.capacity = b1.size();
-      Frame g0 = prepare_frame(a0, sc, s6, p6); const int r0 = p6->hud(s6, &o0); Frame g1 = prepare_frame(a1, sc, s6, p6); const int r1 = p6->hud(s6, &o1);
-      check(g0.d.accepted && g1.d.accepted && r0 && r1 && b0 != b1, "with no rings the label flashes with the original's phase");
-      a1.w16(0xFE20, 5); Frame g2 = prepare_frame(a1, sc, s6, p6); std::vector<uint8_t> b2(GENESIS_COMPAT_OVERLAY_BYTES, 0); GenesisCompatOverlay o2{}; o2.rgba = b2.data(); o2.capacity = b2.size();
-      p6->hud(s6, &o2); a0.w16(0xFE20, 5); Frame g3 = prepare_frame(a0, sc, s6, p6); std::vector<uint8_t> b3(GENESIS_COMPAT_OVERLAY_BYTES, 0); GenesisCompatOverlay o3{}; o3.rgba = b3.data(); o3.capacity = b3.size(); p6->hud(s6, &o3);
-      check(g2.d.accepted && g3.d.accepted && b2 == b3, "with rings the flash phase changes nothing");
-      GenesisCompatOverlay oo{}; std::vector<uint8_t> bb(GENESIS_COMPAT_OVERLAY_BYTES, 0); oo.rgba = bb.data(); oo.capacity = bb.size(); Frame g4 = prepare_frame(L, sc, s6, p6); p6->hud(s6, &oo);
-      check(oo.width == 32 && oo.height == 58 && oo.fallback_x + oo.width <= 320 && oo.fallback_y + oo.height <= 224, "the HUD panel size and its in-picture fallback place");
-      (void)g4;
-    }
-    // too small a buffer: nothing drawn
-    GenesisCompatOverlay tiny{}; uint8_t small[16]; tiny.rgba = small; tiny.capacity = sizeof small;
-    check(p->hud(state, &tiny) == 0, "an undersized overlay buffer draws nothing");
-    // HUD component not requested: not accepted
-    Frame fh = prepare_frame(L, sc, state, p, GENESIS_COMPAT_SCENERY);
-    GenesisCompatOverlay o6{}; o6.rgba = g_overlay.data(); o6.capacity = g_overlay.size();
-    check(fh.d.accepted == GENESIS_COMPAT_SCENERY && p->hud(state, &o6) == 0, "an unrequested HUD is never drawn");
-    // restore state for later checks
+      return true;
+    };
+    // the digits are the game's tiles: changing the counters in RAM changes nothing, changing the tile art changes the overlay
+    { Level v = base; v.w16(0xFE20, 77); v.ram[0xFE12] = 9; v.ram[0xFE26 + 3] = 5; std::vector<uint8_t> other; check(render(v, other) && same(other, img), "the digits come from the frame's own tiles: RAM counters do not change the picture"); }
+    { hs.vram[0x6FAu * 32 + 5] ^= 0x1F; std::memcpy(hs.raster->vram_start, hs.vram.data(), GENESIS_VDP_VRAM_BYTES); std::vector<uint8_t> other; check(render(base, other) && !same(other, img), "a changed digit tile changes the overlay"); hs.vram[0x6FAu * 32 + 5] ^= 0x1F; std::memcpy(hs.raster->vram_start, hs.vram.data(), GENESIS_VDP_VRAM_BYTES); }
+    // flash: with no rings the RINGS label uses palette line 1 in the flash phase's low state, TIME too at nine minutes; never with rings
+    { Level a0 = L; a0.w16(0xFE20, 0); a0.ram[0xFE05] = 0; std::vector<uint8_t> r1, r2, r3, r4;
+      const std::vector<uint8_t> red_rings = reference(1u << 2), red_both = reference((1u << 2) | (1u << 1));
+      check(render(a0, r1) && same(r1, red_rings) && !same(r1, ref0), "no rings, flash phase low: the RINGS label is on the red palette line");
+      Level a1 = a0; a1.ram[0xFE05] = 8; check(render(a1, r2) && same(r2, ref0), "no rings, flash phase high: normal colours");
+      Level a2 = a0; a2.ram[0xFE23] = 9; check(render(a2, r3) && same(r3, red_both) && !same(r3, red_rings), "no rings at nine minutes: TIME and RINGS labels red");
+      Level a3 = base; a3.ram[0xFE23] = 9; check(render(a3, r4) && same(r4, ref0), "with rings nothing flashes (even at nine minutes)"); }
+    // the HUD is offered in a running level only and only with plausible counters; unsupported zones keep it
+    { Level z = base; z.ram[0xFE10] = 3; check(render(z, img), "another zone: the HUD is still drawn (no scenery)"); }
+    { Level z = base; z.ram[0xF600] = 0x8C; check(!render(z, img), "the level start sequence: no HUD"); }
+    // too small a buffer: nothing drawn; an unrequested HUD is never drawn
+    { void *st; const GenesisNativeCompat *pp; Frame f = prepare_frame(base, hs, st, pp); GenesisCompatOverlay tiny{}; uint8_t small[16]; tiny.rgba = small; tiny.capacity = sizeof small; check(f.d.accepted && pp->hud(st, &tiny) == 0, "an undersized overlay buffer draws nothing");
+      Frame fh = prepare_frame(base, hs, st, pp, GENESIS_COMPAT_SCENERY); GenesisCompatOverlay o6{}; o6.rgba = g_overlay.data(); o6.capacity = g_overlay.size(); check(fh.d.accepted == GENESIS_COMPAT_SCENERY && pp->hud(st, &o6) == 0, "an unrequested HUD is never drawn"); }
     fr = prepare_frame(L, sc, state, p);
   }
   // declines: every unverified situation falls back, with the right reason and no half-state

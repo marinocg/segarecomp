@@ -912,38 +912,34 @@ SDL_Surface *sv_host_capture_output(SvHost *h) {
 
 /* ------------------------------------------------------------------------------------------------------------------ present */
 
-/* SEG-124: draws the retained HUD overlay into the frame texture after the side treatment. In the left side space (centred in it) while the visible side holds the panel with its margins;
- * otherwise inside the native picture at the replaced HUD's place (also when there is no extension at all). Hidden when it fits nowhere. Returns 0 only on a texture failure. */
+/* SEG-124: draws the retained overlay (the relocated HUD) into the frame texture after the side treatment: left edge at the left edge of the visible side, or, with no visible side, inside the
+ * picture at the place of the HUD it replaces; clipped to the texture; fully transparent pixels keep what is there. Returns 0 only on a texture failure. */
 static int draw_overlay(SvHost *h, SvSideTreatment t, int vis, int side, int w, int hgt) {
-  int ox, oy, i, j;
-  const uint8_t *bg_base;
-  size_t bg_row;      /* bytes per background row */
-  int in_side;
+  const int tex_w = w + 2 * side;
+  int ox, oy, cw, ch, i, j;
   SDL_Rect o;
   if (h->ovl_w <= 0 || h->ovl_h <= 0) return 1;
-  in_side = side > 0 && vis >= h->ovl_w + 2 * SV_OVERLAY_MARGIN && hgt >= h->ovl_h + SV_OVERLAY_TOP + 8;
-  if (in_side) {
-    const int sx = (vis - h->ovl_w) / 2;
-    ox = side - vis + sx; oy = SV_OVERLAY_TOP;
-    if (t == SV_TREAT_PASSTHROUGH) { bg_base = h->ext_raw + (size_t)oy * (size_t)(w + 2 * side) * 3u + (size_t)ox * 3u; bg_row = (size_t)(w + 2 * side) * 3u; }
-    else { bg_base = h->side_buf + (size_t)sx * 3u + (size_t)oy * (size_t)vis * 3u; bg_row = (size_t)vis * 3u; }
-  } else {
-    if (h->ovl_fx < 0 || h->ovl_fy < 0 || h->ovl_fx + h->ovl_w > w || h->ovl_fy + h->ovl_h > hgt) return 1;   /* fits nowhere: hidden */
-    ox = side + h->ovl_fx; oy = h->ovl_fy;
-    bg_base = h->last_rgb + (size_t)h->ovl_fy * (size_t)w * 3u + (size_t)h->ovl_fx * 3u; bg_row = (size_t)w * 3u;
-  }
-  o.x = ox; o.y = oy; o.w = h->ovl_w; o.h = h->ovl_h;
-  for (j = 0; j < h->ovl_h; ++j)
-    for (i = 0; i < h->ovl_w; ++i) {
+  if (side > 0 && vis > 0) { ox = side - vis; oy = 0; }
+  else { ox = side + h->ovl_fx; oy = h->ovl_fy; }
+  if (ox < 0 || oy < 0 || ox >= tex_w || oy >= hgt) return 1;
+  cw = h->ovl_w < tex_w - ox ? h->ovl_w : tex_w - ox;
+  ch = h->ovl_h < hgt - oy ? h->ovl_h : hgt - oy;
+  for (j = 0; j < ch; ++j)
+    for (i = 0; i < cw; ++i) {
+      const int tx = ox + i, ty = oy + j;
       const uint8_t *c = h->ovl_rgba + ((size_t)j * (size_t)h->ovl_w + (size_t)i) * 4u;
-      const uint8_t *bg = bg_base + (size_t)j * bg_row + (size_t)i * 3u;
-      uint8_t *d = h->ovl_scratch + ((size_t)j * (size_t)h->ovl_w + (size_t)i) * 3u;
-      const unsigned a = c[3];
-      d[0] = (uint8_t)((bg[0] * (255u - a) + c[0] * a + 127u) / 255u);
-      d[1] = (uint8_t)((bg[1] * (255u - a) + c[1] * a + 127u) / 255u);
-      d[2] = (uint8_t)((bg[2] * (255u - a) + c[2] * a + 127u) / 255u);
+      const uint8_t *bg;
+      uint8_t *d = h->ovl_scratch + ((size_t)j * (size_t)cw + (size_t)i) * 3u;
+      if (tx < side) bg = (t == SV_TREAT_PASSTHROUGH || vis <= 0) ? h->ext_raw + ((size_t)ty * (size_t)tex_w + (size_t)tx) * 3u
+                                                                   : h->side_buf + ((size_t)ty * (size_t)vis + (size_t)(tx - (side - vis))) * 3u;
+      else if (tx < side + w) bg = h->last_rgb + ((size_t)ty * (size_t)w + (size_t)(tx - side)) * 3u;
+      else bg = (t == SV_TREAT_PASSTHROUGH || vis <= 0) ? h->ext_raw + ((size_t)ty * (size_t)tex_w + (size_t)tx) * 3u
+                                                         : h->side_buf + (size_t)vis * (size_t)hgt * 3u + ((size_t)ty * (size_t)vis + (size_t)(tx - side - w)) * 3u;
+      if (c[3] == 0u) { d[0] = bg[0]; d[1] = bg[1]; d[2] = bg[2]; }
+      else { const unsigned a = c[3]; d[0] = (uint8_t)((bg[0] * (255u - a) + c[0] * a + 127u) / 255u); d[1] = (uint8_t)((bg[1] * (255u - a) + c[1] * a + 127u) / 255u); d[2] = (uint8_t)((bg[2] * (255u - a) + c[2] * a + 127u) / 255u); }
     }
-  return SDL_UpdateTexture(h->frame_tex, &o, h->ovl_scratch, h->ovl_w * 3) ? 1 : 0;
+  o.x = ox; o.y = oy; o.w = cw; o.h = ch;
+  return SDL_UpdateTexture(h->frame_tex, &o, h->ovl_scratch, cw * 3) ? 1 : 0;
 }
 
 /* SEG-123: builds the frame texture from the retained native picture (+ retained raw extension). Deterministic in (style, source, native pixels, raw

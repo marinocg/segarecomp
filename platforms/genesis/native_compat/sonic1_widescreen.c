@@ -64,6 +64,8 @@ typedef struct Sonic1Frame {
   int camy, bgy;
   int off_fg[S1_HSCROLL_LINES], off_bg[S1_HSCROLL_LINES];   /* world x of screen column 0 per output line (exact: the game's own unwrapped scroll) */
   unsigned rings, lives, score, minutes, seconds, flash;
+  const uint8_t *vram;                    /* the frame's own VRAM (the HUD tiles) and raster state (its palettes): valid while the producer calls hud() */
+  const GenesisRasterFrameState *raster;
 } Sonic1Frame;
 
 static Sonic1Frame g_frame;
@@ -151,6 +153,8 @@ static void sonic1_prepare(void *state, const GenesisCompatFrame *frame, Genesis
   if (ram == NULL || frame->raster == NULL || frame->vram == NULL || frame->height == 0U || frame->height > GENESIS_FRAME_MAX_HEIGHT) return;
   /* verified scope: a running level (0x0C). The level start sequence (0x8C: title card over a level that is still being drawn), the title, special stage and every other screen are declined. */
   if (ram[S1_GAMEMODE] != 0x0CU) { out->reason = GENESIS_COMPAT_UNSUPPORTED_SCENE; return; }
+  f->vram = frame->vram;
+  f->raster = frame->raster;
   f->rings = u16(ram, S1_RINGS);
   f->lives = ram[S1_LIVES];
   f->score = (unsigned)((u16(ram, S1_SCORE) << 16) | u16(ram, S1_SCORE + 2U));
@@ -183,78 +187,59 @@ static int sonic1_scenery_word(void *state, unsigned plane, unsigned row, int x,
   return 1;
 }
 
-/* ---------------------------------------------------------------------------------------------------------------- HUD (3x5 glyphs) */
-/* A compact version of the original HUD (yellow labels, white counters, the label turning red while there are no rings or the clock is at 9 minutes, in the original's flash phase),
- * sized for the side strip of a 16:9 picture. The panel is translucent so it reads over any scenery. */
+/* ---------------------------------------------------------------------------------------------------------------- HUD */
+/* The game's own HUD, relocated: the patch stops the HUD object queueing its sprites, and this draws exactly the same sprite pieces (same tiles, same palette lines, same rows) from the frame's
+ * own VRAM and CRAM, so the font, the layout (SCORE / TIME / RINGS on top, the Sonic icon with the lives at the bottom) and the digits are the original's and there is no panel behind them. Only the
+ * horizontal position differs: the host anchors the overlay at the left edge of the visible surface (or at the original place when there is no side). The overlay covers the picture rows 1:1
+ * (row y of the overlay is picture row y) and the picture columns from HUD_X0 (the original's left edge). The pieces' geometry (position, size, first tile) is the HUD object's own layout. */
 
-static const uint8_t k_digits[10][5] = {{7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7, 1, 7, 4, 7}, {7, 1, 7, 1, 7}, {5, 5, 7, 1, 1},
-                                        {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 1, 1, 1}, {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7}};
-/* letters used by the labels */
-static const uint8_t k_C[5] = {3, 4, 4, 4, 3}, k_E[5] = {7, 4, 6, 4, 7}, k_G[5] = {3, 4, 5, 5, 3}, k_I[5] = {7, 2, 2, 2, 7}, k_M[5] = {5, 7, 7, 5, 5}, k_N[5] = {6, 5, 5, 5, 5}, k_O[5] = {2, 5, 5, 5, 2},
-                              k_R[5] = {6, 5, 6, 5, 5}, k_S[5] = {3, 4, 2, 1, 6}, k_T[5] = {7, 2, 2, 2, 2}, k_X[5] = {5, 5, 2, 5, 5}, k_COLON[5] = {0, 2, 0, 2, 0};
+#define HUD_X0 16U
+#define HUD_W 96U     /* picture columns 16..111 */
+#define HUD_H 224U    /* picture rows 0..223 */
 
-#define HUD_W 32U
-#define HUD_H 58U
-
-static void px(GenesisCompatOverlay *o, unsigned x, unsigned y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-  uint8_t *p;
-  if (x >= o->width || y >= o->height) return;
-  p = o->rgba + ((size_t)y * o->width + x) * 4U;
-  p[0] = r; p[1] = g; p[2] = b; p[3] = a;
-}
-static void glyph(GenesisCompatOverlay *o, const uint8_t rows[5], unsigned x, unsigned y, const uint8_t c[3]) {
-  for (unsigned j = 0U; j < 5U; ++j)
-    for (unsigned i = 0U; i < 3U; ++i)
-      if ((rows[j] >> (2U - i)) & 1U) px(o, x + i, y + j, c[0], c[1], c[2], 255U);
-}
-static void label(GenesisCompatOverlay *o, const uint8_t *const *letters, unsigned count, unsigned y, int red) {
-  static const uint8_t yellow[3] = {255, 204, 0}, red_c[3] = {224, 32, 32};
-  for (unsigned i = 0U; i < count; ++i) glyph(o, letters[i], 2U + i * 4U, y, red ? red_c : yellow);
-}
-/* Right-aligned in a field of `digits` cells with the leading zeros left blank (the last digit is always drawn), like the original's counters. */
-static void number(GenesisCompatOverlay *o, unsigned value, unsigned digits, unsigned x, unsigned y) {
-  static const uint8_t white[3] = {255, 255, 255};
-  unsigned div = 1U;
-  int started = 0;
-  for (unsigned i = 1U; i < digits; ++i) div *= 10U;
-  for (unsigned i = 0U; i < digits; ++i, div /= 10U) {
-    const unsigned d = (value / div) % 10U;
-    if (d != 0U || i + 1U == digits) started = 1;
-    if (started) glyph(o, k_digits[d], x + i * 4U, y, white);
-  }
-}
-/* A fixed-width number (the clock's seconds keep their leading zero). */
-static void number_zero(GenesisCompatOverlay *o, unsigned value, unsigned digits, unsigned x, unsigned y) {
-  static const uint8_t white[3] = {255, 255, 255};
-  unsigned div = 1U;
-  for (unsigned i = 1U; i < digits; ++i) div *= 10U;
-  for (unsigned i = 0U; i < digits; ++i, div /= 10U) glyph(o, k_digits[(value / div) % 10U], x + i * 4U, y, white);
-}
+typedef struct HudPiece { uint8_t x, y; uint8_t cells_w, cells_h; uint16_t tile; uint8_t red_group; } HudPiece;   /* red_group: 1 = the TIME label, 2 = the RINGS label */
+static const HudPiece k_hud_pieces[] = {
+    {16, 8, 4, 2, 0x6CAU, 0}, {48, 8, 4, 2, 0x6E2U, 0}, {80, 8, 4, 2, 0x6EAU, 0},    /* SCORE and its digits */
+    {16, 24, 4, 2, 0x6DAU, 1}, {56, 24, 4, 2, 0x6F2U, 0},                              /* TIME and its digits */
+    {16, 40, 4, 2, 0x6D2U, 2}, {48, 40, 1, 2, 0x6CAU, 2}, {64, 40, 3, 2, 0x6FAU, 0},  /* RINGS and its digits */
+    {16, 200, 2, 2, 0x7D4U, 0}, {32, 200, 4, 2, 0x7D8U, 0},                            /* the Sonic icon, "SONIC x" and the lives */
+};
 
 static int sonic1_hud(void *state, GenesisCompatOverlay *o) {
   const Sonic1Frame *f = (const Sonic1Frame *)state;
-  static const uint8_t white[3] = {255, 255, 255};
-  const unsigned rings = f->rings > 999U ? 999U : f->rings, lives = f->lives > 99U ? 99U : f->lives, score = f->score > 999999U ? 9999990U : f->score * 10U;   /* the game keeps the score divided by ten; the original shows it with the trailing zero */
-  if ((f->accepted & GENESIS_COMPAT_HUD) == 0U || o->rgba == NULL || o->capacity < (size_t)HUD_W * HUD_H * 4U) return 0;
+  /* the object's frame selection: with rings none; otherwise the labels flash red in the flash phase (TIME too at 9 minutes) */
+  unsigned red = 0U;
+  if ((f->accepted & GENESIS_COMPAT_HUD) == 0U || o->rgba == NULL || f->vram == NULL || f->raster == NULL || o->capacity < (size_t)HUD_W * HUD_H * 4U) return 0;
+  if (f->rings == 0U && !f->flash) red = (1U << 2) | (f->minutes == 9U ? (1U << 1) : 0U);   /* bit 2: RINGS label, bit 1: TIME label */
   o->width = (uint16_t)HUD_W;
   o->height = (uint16_t)HUD_H;
-  o->fallback_x = 4U;
-  o->fallback_y = 4U;
-  for (unsigned y = 0U; y < HUD_H; ++y)
-    for (unsigned x = 0U; x < HUD_W; ++x) px(o, x, y, 0U, 0U, 24U, 150U);   /* translucent panel */
-  {
-    const uint8_t *const score_l[5] = {k_S, k_C, k_O, k_R, k_E}, *const time_l[4] = {k_T, k_I, k_M, k_E}, *const rings_l[5] = {k_R, k_I, k_N, k_G, k_S}, *const lives_l[5] = {k_S, k_O, k_N, k_I, k_C};
-    label(o, score_l, 5U, 3U, 0);
-    number(o, score, 7U, 2U, 9U);
-    label(o, time_l, 4U, 16U, f->minutes == 9U && f->flash);                 /* the original flashes the label red at 9 minutes */
-    number(o, f->minutes, 1U, 2U, 22U);
-    glyph(o, k_COLON, 6U, 22U, white);
-    number_zero(o, f->seconds, 2U, 10U, 22U);
-    label(o, rings_l, 5U, 29U, rings == 0U && f->flash);                      /* ... and the RINGS label while there are none */
-    number(o, rings, 3U, 2U, 35U);
-    label(o, lives_l, 5U, 43U, 0);
-    glyph(o, k_X, 2U, 50U, white);
-    number(o, lives, 2U, 8U, 50U);
+  o->fallback_x = (uint16_t)HUD_X0;
+  o->fallback_y = 0U;
+  memset(o->rgba, 0, (size_t)HUD_W * HUD_H * 4U);   /* fully transparent: no background */
+  for (unsigned n = 0U; n < sizeof(k_hud_pieces) / sizeof(k_hud_pieces[0]); ++n) {
+    const HudPiece *pc = &k_hud_pieces[n];
+    const unsigned pal = ((pc->red_group == 2U && (red & 4U) != 0U) || (pc->red_group == 1U && (red & 2U) != 0U)) ? 1U : 0U;
+    for (unsigned cx = 0U; cx < pc->cells_w; ++cx)
+      for (unsigned cy = 0U; cy < pc->cells_h; ++cy) {
+        const unsigned tile = pc->tile + cx * pc->cells_h + cy;   /* a sprite's cells are numbered down each column */
+        for (unsigned row = 0U; row < 8U; ++row) {
+          const unsigned py = pc->y + cy * 8U + row;
+          const GenesisRasterLine *line;
+          if (py >= HUD_H) continue;
+          line = &f->raster->lines[py < GENESIS_RASTER_MAX_LINES ? py : GENESIS_RASTER_MAX_LINES - 1U];
+          for (unsigned col = 0U; col < 8U; ++col) {
+            const unsigned px_ = pc->x + cx * 8U + col;
+            const uint8_t byte = f->vram[(tile * 32U + row * 4U + col / 2U) & 0xFFFFU];
+            const unsigned index = (col & 1U) == 0U ? (unsigned)(byte >> 4) : (unsigned)(byte & 0x0FU);
+            GenesisRgb888 c;
+            uint8_t *d;
+            if (index == 0U || px_ < HUD_X0 || px_ - HUD_X0 >= HUD_W) continue;
+            if (genesis_vdp_decode_cram_entry(line->cram, pal * 16U + index, &c) != 0) continue;
+            d = o->rgba + ((size_t)py * HUD_W + (px_ - HUD_X0)) * 4U;
+            d[0] = c.r; d[1] = c.g; d[2] = c.b; d[3] = 255U;
+          }
+        }
+      }
   }
   return 1;
 }

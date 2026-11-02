@@ -27,8 +27,8 @@ extern "C" {
 
 #define GENESIS_NATIVE_COMPAT_ABI 1U
 #define GENESIS_COMPAT_RAM_BYTES 65536U
-#define GENESIS_COMPAT_OVERLAY_MAX_W 64U
-#define GENESIS_COMPAT_OVERLAY_MAX_H 64U
+#define GENESIS_COMPAT_OVERLAY_MAX_W 128U
+#define GENESIS_COMPAT_OVERLAY_MAX_H 256U
 #define GENESIS_COMPAT_OVERLAY_BYTES (GENESIS_COMPAT_OVERLAY_MAX_W * GENESIS_COMPAT_OVERLAY_MAX_H * 4U)
 
 /* Component bits; identical to segarecomp::patch::kNativeComponent* (libs/media/include/segarecomp/patch.hpp). */
@@ -63,7 +63,7 @@ typedef struct GenesisCompatOverlay {
   uint8_t *rgba;                        /* adapter-owned, GENESIS_COMPAT_OVERLAY_BYTES */
   size_t capacity;
   uint16_t width, height;               /* written by the provider; 0 = nothing to draw */
-  uint16_t fallback_x, fallback_y;      /* where (native picture pixels) the host draws the panel INSIDE the picture when the visible side is too narrow for it: the place of the HUD it replaces */
+  uint16_t fallback_x, fallback_y;      /* picture pixels where the overlay's top-left sits when the host draws it inside the picture (no visible side): the place of the HUD it replaces */
 } GenesisCompatOverlay;
 
 typedef struct GenesisNativeCompat {
