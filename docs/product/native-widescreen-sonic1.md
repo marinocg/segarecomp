@@ -33,7 +33,8 @@ right, down, left, down, right, up, left; guard-declined frames excluded). Numbe
 | 3/1 (Star Light acts 1-3) | 2431 | 8127 | 0/2722720 | 0/2415766 |
 | 3/2 (Star Light acts 1-3) | 2431 | 8192 | 0/2722720 | 0/1940332 || 4/0 (Spring Yard acts 1-3) | 2421 | 8624 | 0/2711520 | 0/2711520 |
 | 4/1 (Spring Yard acts 1-3) | 2421 | 8624 | 246/2711520 | 0/2711520 |
-| 4/2 (Spring Yard acts 1-3) | 2421 | 8624 | 0/2711520 | 0/2711520 |
+| 4/2 (Spring Yard acts 1-3) | 2421 | 8624 | 0/2711520 | 0/2711520 || 5/0 (Scrap Brain acts 1-2 (Final Zone excluded)) | 2431 | 8512 | 0/2694720 | 0/2694720 |
+| 5/1 (Scrap Brain acts 1-2 (Final Zone excluded)) | 2430 | 7744 | 0/2716000 | 0/2716000 |
 
 ## Frame validation and fallback
 
