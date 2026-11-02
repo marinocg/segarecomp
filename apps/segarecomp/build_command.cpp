@@ -355,7 +355,7 @@ struct GenesisSoundBuild {
       if (job.isolated) {   // the provider source is re-hashed immediately before it is compiled (it lives in this build's own folder; nothing may have replaced it since extraction)
         std::ifstream check(job.source, std::ios::binary);
         std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
-        if (!check.eof() || segarecomp::sha256_hex(bytes) != options.native_source_sha256) {
+        if (segarecomp::sha256_hex(bytes) != options.native_source_sha256) {
           failure_detail = "The provider source changed after it was verified.";
           failure_diagnostic = "PATCH_SOURCE_DIGEST";
           return static_cast<int>(&job - batch.data());
