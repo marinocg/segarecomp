@@ -16,6 +16,16 @@ original image (Genesis, USA/Europe REV00, SHA-256 `46160baa...f2a6`); Vanilla, 
   side (4:3, a zero Widescreen Width, Original), the original's own place inside the picture. The label flash (RINGS with no rings, TIME at nine minutes) follows the object's own rule. Because the digits are the game's own
   tiles, the numbers are always exactly what the original would show for that frame.
 
+## Validated scenery scope
+
+Per zone and act: the scenery component is enabled only where the provider's cells were measured against the game's own picture in view (level select jump, then the game's debug fly mode crossing the level
+right, down, left, down, right, up, left; guard-declined frames excluded). Numbers are mismatching cells / compared cells over the traversal (foreground, background inside the game-streamed window).
+
+| zone / act | frames | camera x max | foreground | background |
+|---|---|---|---|---|| 0/0 (Green Hill acts 1-3) | 2415 | 8640 | 0/2700320 | 2663/2353674 |
+| 0/1 (Green Hill acts 1-3) | 2415 | 7871 | 0/2703680 | 17572/2327748 |
+| 0/2 (Green Hill acts 1-3) | 2416 | 8592 | 0/2691360 | 2588/2354879 |
+
 ## Frame validation and fallback
 
 A frame is served only if (1) the game mode is a running level, (2) the camera, layout and chunk indices are in range, (3) the VDP is in the verified configuration and the scroll it applies equals the game's

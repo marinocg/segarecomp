@@ -23,6 +23,9 @@ extern "C" {
 /* The provider for the capability and its (static) state; NULL for any other id. */
 const GenesisNativeCompat *sonic1_widescreen_provider(void **state_out);
 
+/* Whether the scenery component is validated for (zone id, act index) (the HUD is offered in every running level). */
+int sonic1_scenery_scope(unsigned zone, unsigned act);
+
 /* Test seam: the pure level lookup used by `scenery_word` (layout plane 0 = foreground, 1 = background). Returns the name-table word of 8x8 cell (cx, cy) or
  * -1 when the RAM image is not a valid level image; a coordinate outside the layout is a blank cell (0). */
 int sonic1_world_cell(const uint8_t *ram, unsigned plane, int cx, int cy);

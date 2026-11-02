@@ -24,7 +24,6 @@
 #define S1_SCORE 0xFE26U        /* long, binary */
 #define S1_BG2X 0xF710U         /* word: the second background camera (the lower background region is streamed from it) */
 #define S1_BG_SPLIT 0xF7F0U     /* word: world y (background layout) where the lower background region starts */
-#define S1_LAST_ACT 1U          /* Green Hill Zone acts 1 and 2 (the same level format; act 1 validated start to finish, act 2 over the explored part; every frame is also identity-checked) */
 #define S1_ZONE 0xFE10U         /* bytes: zone, act */
 #define S1_LIVES 0xFE12U        /* byte */
 #define S1_RINGS 0xFE20U        /* word */
@@ -78,6 +77,12 @@ static int unwrap(int v, int ref, int period) {
   return ref + d;
 }
 
+/* The zones and acts the scenery component is validated for: bit `act` of entry `zone` (zone ids: 0 Green Hill, 1 Labyrinth, 2 Marble, 3 Star Light, 4 Spring Yard, 5 Scrap Brain; Labyrinth's
+ * act 3 slot is the third Scrap Brain act). Every frame is additionally identity-checked, so an entry only widens the scope; it never relaxes a check. */
+static const uint8_t k_scenery_acts[6] = {0x07, 0x00, 0x00, 0x00, 0x00, 0x00};   /* Green Hill acts 1-3 */
+
+int sonic1_scenery_scope(unsigned zone, unsigned act) { return zone < 6U && act < 8U && ((k_scenery_acts[zone] >> act) & 1U) != 0U; }
+
 static int layout_valid(const uint8_t *ram) {
   for (unsigned row = 0U; row < S1_LAYOUT_ROWS; ++row)
     for (unsigned i = 0U; i < 0x80U; ++i)
@@ -85,9 +90,9 @@ static int layout_valid(const uint8_t *ram) {
   return 1;
 }
 
-/* Scenery verification (Green Hill Zone act 1 only): returns GENESIS_COMPAT_OK or the reason it is declined. */
+/* Scenery verification: returns GENESIS_COMPAT_OK or the reason it is declined. */
 static unsigned scenery_check(Sonic1Frame *f, const GenesisCompatFrame *frame, const uint8_t *ram) {
-  if (ram[S1_ZONE] != 0U || ram[S1_ZONE + 1U] > S1_LAST_ACT) return GENESIS_COMPAT_UNSUPPORTED_SCENE;
+  if (!sonic1_scenery_scope(ram[S1_ZONE], ram[S1_ZONE + 1U])) return GENESIS_COMPAT_UNSUPPORTED_SCENE;
   f->camy = (int)u16(ram, S1_CAMY);
   f->bgy = (int)u16(ram, S1_BGY);
   if (frame->height > S1_HSCROLL_LINES || f->camy >= (int)(S1_LAYOUT_ROWS * 256U) || f->bgy >= (int)(S1_LAYOUT_ROWS * 256U) || u16(ram, S1_CAMX) >= S1_WORLD_W || u16(ram, S1_BGX) >= S1_WORLD_W || u16(ram, S1_BG2X) >= S1_WORLD_W)

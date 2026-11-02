@@ -631,7 +631,7 @@ void sonic1_provider() {
       Level a2 = a0; a2.ram[0xFE23] = 9; check(render(a2, r3) && same(r3, red_both) && !same(r3, red_rings), "no rings at nine minutes: TIME and RINGS labels red");
       Level a3 = base; a3.ram[0xFE23] = 9; check(render(a3, r4) && same(r4, ref0), "with rings nothing flashes (even at nine minutes)"); }
     // the HUD is offered in a running level only and only with plausible counters; unsupported zones keep it
-    { Level z = base; z.ram[0xFE10] = 3; check(render(z, img), "another zone: the HUD is still drawn (no scenery)"); }
+    { Level z = base; z.ram[0xFE10] = 6; check(render(z, img), "another zone: the HUD is still drawn (no scenery)"); }
     { Level z = base; z.ram[0xF600] = 0x8C; check(!render(z, img), "the level start sequence: no HUD"); }
     // too small a buffer: nothing drawn; an unrequested HUD is never drawn
     { void *st; const GenesisNativeCompat *pp; Frame f = prepare_frame(base, hs, st, pp); GenesisCompatOverlay tiny{}; uint8_t small[16]; tiny.rgba = small; tiny.capacity = sizeof small; check(f.d.accepted && pp->hud(st, &tiny) == 0, "an undersized overlay buffer draws nothing");
@@ -648,14 +648,14 @@ void sonic1_provider() {
   { Level lv = L; lv.ram[0xF600] = 0x8C; declined("level start sequence is declined", lv, sc, GENESIS_COMPAT_UNSUPPORTED_SCENE);
     void *st; const GenesisNativeCompat *pp; Frame f = prepare_frame(lv, sc, st, pp); check(f.d.accepted == 0, "the level start sequence gets neither scenery nor HUD"); }
   { // the HUD needs only plausible counters in any running level; the scenery needs the verified zone
-    Level lv = L; lv.ram[0xFE10] = 3; void *st; const GenesisNativeCompat *pp; Frame f = prepare_frame(lv, sc, st, pp);
+    Level lv = L; lv.ram[0xFE10] = 6; void *st; const GenesisNativeCompat *pp; Frame f = prepare_frame(lv, sc, st, pp);
     check(f.d.accepted == GENESIS_COMPAT_HUD && f.d.reason == 0, "another zone: HUD only, no scenery");
     lv = L; lv.ram[0xFE24] = 60; f = prepare_frame(lv, sc, st, pp); check(f.d.accepted == GENESIS_COMPAT_SCENERY, "an impossible clock: no HUD, scenery unaffected");
     lv = L; lv.ram[0xFE23] = 10; f = prepare_frame(lv, sc, st, pp); check(f.d.accepted == GENESIS_COMPAT_SCENERY, "an impossible minute count: no HUD");
     lv = L; lv.ram[0xFE26] = 0xFF; f = prepare_frame(lv, sc, st, pp); check(f.d.accepted == GENESIS_COMPAT_SCENERY, "an impossible score: no HUD"); }
   { Level lv = L; lv.ram[0xF600] = 0x04; declined("title screen is declined", lv, sc, GENESIS_COMPAT_UNSUPPORTED_SCENE); }
-  { Level lv = L; lv.ram[0xFE10] = 1; declined("another zone is declined", lv, sc, GENESIS_COMPAT_UNSUPPORTED_SCENE); }
-  { Level lv = L; lv.ram[0xFE11] = 2; declined("another act is declined", lv, sc, GENESIS_COMPAT_UNSUPPORTED_SCENE); }
+  { Level lv = L; lv.ram[0xFE10] = 7; declined("another zone is declined", lv, sc, GENESIS_COMPAT_UNSUPPORTED_SCENE); }
+  { Level lv = L; lv.ram[0xFE11] = 4; declined("another act is declined", lv, sc, GENESIS_COMPAT_UNSUPPORTED_SCENE); }
   { Level lv = L; lv.w16(0xF700, 0x4001); declined("a camera outside the level is declined", lv, sc, GENESIS_COMPAT_BAD_STATE); }
   { Level lv = L; lv.w16(0xF704, 0x800); declined("a camera row outside the layout is declined", lv, sc, GENESIS_COMPAT_BAD_STATE); }
   { Level lv = L; lv.ram[0xA400 + 7] = 0x60; declined("a layout byte past the chunk table is declined", lv, sc, GENESIS_COMPAT_BAD_STATE); }
@@ -669,6 +669,20 @@ void sonic1_provider() {
   { declined("an interlaced-height frame is declined", L, sc, GENESIS_COMPAT_BAD_STATE, 448); }
   { void *st; const GenesisNativeCompat *pp = sonic1_widescreen_provider(&st); GenesisCompatFrame f{}; GenesisCompatDecision d{0xFF, 0xFF}; f.requested = 3; f.height = 224; pp->prepare(st, &f, &d);
     check(d.accepted == 0 && d.reason == GENESIS_COMPAT_BAD_STATE, "no RAM / raster / VRAM pointer: declined"); }
+  // the validated scenery scope, zone by zone and act by act (independent table; a widening of the provider's table must be mirrored here, with its validation evidence recorded in the backlog)
+  {
+    static const unsigned expected[6] = {0x07, 0x00, 0x00, 0x00, 0x00, 0x00};   // Green Hill acts 1-3
+    unsigned served = 0, total = 0;
+    for (unsigned zone = 0; zone < 8; ++zone)
+      for (unsigned act = 0; act < 6; ++act) {
+        Level lv = L; lv.ram[0xFE10] = (uint8_t)zone; lv.ram[0xFE11] = (uint8_t)act;
+        void *st; const GenesisNativeCompat *pp; Frame f = prepare_frame(lv, sc, st, pp);
+        const bool want = zone < 6 && ((expected[zone] >> act) & 1u) != 0;
+        ++total; served += (f.d.accepted & GENESIS_COMPAT_SCENERY) != 0;
+        checkf(((f.d.accepted & GENESIS_COMPAT_SCENERY) != 0) == want && (f.d.accepted & GENESIS_COMPAT_HUD) != 0 && sonic1_scenery_scope(zone, act) == (want ? 1 : 0), "scenery scope per zone/act", zone, act);
+      }
+    checkf(served > 0 && total == 48, "the scope table is exercised", served, total);
+  }
   // the audited identity
   check(std::strcmp(p->capability, "genesis.sonic1.native-widescreen.v1") == 0 && p->implementation_version == SONIC1_NATIVE_IMPLEMENTATION && p->abi_version == GENESIS_NATIVE_COMPAT_ABI &&
             p->components == (GENESIS_COMPAT_HUD | GENESIS_COMPAT_SCENERY),
