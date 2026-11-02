@@ -19,7 +19,10 @@ std::string esc(const std::string &s) {
 void info_fields(const segarecomp::patch::PackageInfo &i) {
   std::cout << "\"id\":\"" << esc(i.id) << "\",\"version\":\"" << esc(i.version) << "\",\"name\":\"" << esc(i.name) << "\",\"platform\":\"" << i.platform
             << "\",\"purpose\":\"" << i.purpose << "\",\"source_sha256\":\"" << i.source_sha256 << "\",\"target_sha256\":\"" << i.target_sha256
-            << "\",\"payload_sha256\":\"" << i.payload_sha256 << "\",\"package_identity\":\"" << i.identity << "\"";
+            << "\",\"payload_sha256\":\"" << i.rom_payload_sha256 << "\",\"widescreen_width_max\":" << i.widescreen_width_max
+            << ",\"requires\":[";
+  for (std::size_t n = 0; n < i.requires_capabilities.size(); ++n) std::cout << (n ? "," : "") << "\"" << esc(i.requires_capabilities[n]) << "\"";
+  std::cout << "],\"package_identity\":\"" << i.identity << "\"";
 }
 
 }  // namespace

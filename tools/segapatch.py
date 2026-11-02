@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Deterministic .segapatch authoring and an INDEPENDENT reference reader (ADR 0266).
 
-A package is a ZIP of `manifest.json` and one BPS payload. This tool shares no code with the C++ importer
+A package is a ZIP of `manifest.json` and its declared payload file(s) (v1: one BPS `rom` payload). This tool shares no code with the C++ importer
 (libs/media/src/patch_*.cpp): the BPS encoder/decoder, CRC use and ZIP writer are separate implementations so the tests can
 cross-check both. It never reads or writes anything outside the paths it is given.
 
-  segapatch.py create --source ROM --target PATCHED --id ID --name NAME --version V --out FILE [--no-metadata]
+  segapatch.py create --source ROM --target PATCHED --id ID --name NAME --version V --out FILE [--width-max N]
   segapatch.py apply  PACKAGE --source ROM --out FILE      (reference implementation; verifies everything)
   segapatch.py bps-create SOURCE TARGET OUT.bps
   segapatch.py bps-apply  PATCH SOURCE OUT
@@ -110,7 +110,8 @@ def bps_apply(patch: bytes, source: bytes) -> bytes:
     return bytes(out)
 
 
-def manifest_bytes(source: bytes, target: bytes, payload: bytes, *, id_: str, name: str, version: str, platform: str = "genesis") -> bytes:
+def manifest_bytes(source: bytes, target: bytes, payload: bytes, *, id_: str, name: str, version: str, platform: str = "genesis",
+                   width_max: int | None = None, requires: list[str] | None = None) -> bytes:
     manifest = {
         "format": "segarecomp-patch",
         "schema_version": 1,
@@ -120,9 +121,13 @@ def manifest_bytes(source: bytes, target: bytes, payload: bytes, *, id_: str, na
         "platform": platform,
         "purpose": "widescreen",
         "source_sha256": hashlib.sha256(source).hexdigest(),
-        "target_sha256": hashlib.sha256(target).hexdigest(),
-        "payload": {"format": "bps", "file": "patch.bps", "sha256": hashlib.sha256(payload).hexdigest()},
+        "payloads": {"rom": {"format": "bps", "file": "game.bps", "sha256": hashlib.sha256(payload).hexdigest(),
+                             "target_sha256": hashlib.sha256(target).hexdigest()}},
     }
+    if requires:
+        manifest["requires"] = requires
+    if width_max is not None:
+        manifest["widescreen_width_max"] = width_max
     return (json.dumps(manifest, indent=2) + "\n").encode("ascii")
 
 
@@ -136,24 +141,25 @@ def write_zip(path: Path, files: list[tuple[str, bytes]], *, method: int = zipfi
             z.writestr(info, data, compresslevel=9)
 
 
-def create(source: bytes, target: bytes, out: Path, *, id_: str, name: str, version: str) -> None:
+def create(source: bytes, target: bytes, out: Path, *, id_: str, name: str, version: str, width_max: int | None = None) -> None:
     payload = bps_create(source, target)
-    write_zip(out, [("manifest.json", manifest_bytes(source, target, payload, id_=id_, name=name, version=version)), ("patch.bps", payload)])
+    write_zip(out, [("manifest.json", manifest_bytes(source, target, payload, id_=id_, name=name, version=version, width_max=width_max)), ("game.bps", payload)])
 
 
 def apply_package(package: Path, source: bytes) -> bytes:
     with zipfile.ZipFile(package) as z:
         names = [i.filename for i in z.infolist()]
-        if sorted(names) != ["manifest.json", "patch.bps"]:
-            raise ValueError("unexpected entries")
         manifest = json.loads(z.read("manifest.json"))
-        payload = z.read("patch.bps")
-    if hashlib.sha256(payload).hexdigest() != manifest["payload"]["sha256"]:
+        rom = manifest["payloads"]["rom"]
+        if sorted(names) != sorted(["manifest.json", rom["file"]]):
+            raise ValueError("unexpected entries")
+        payload = z.read(rom["file"])
+    if hashlib.sha256(payload).hexdigest() != rom["sha256"]:
         raise ValueError("payload sha256")
     if hashlib.sha256(source).hexdigest() != manifest["source_sha256"]:
         raise ValueError("source sha256")
     out = bps_apply(payload, source)
-    if hashlib.sha256(out).hexdigest() != manifest["target_sha256"]:
+    if hashlib.sha256(out).hexdigest() != rom["target_sha256"]:
         raise ValueError("target sha256")
     return out
 
@@ -168,6 +174,7 @@ def main(argv: list[str]) -> int:
     c.add_argument("--name", required=True)
     c.add_argument("--version", required=True)
     c.add_argument("--out", type=Path, required=True)
+    c.add_argument("--width-max", type=int)
     a = sub.add_parser("apply")
     a.add_argument("package", type=Path)
     a.add_argument("--source", type=Path, required=True)
@@ -178,7 +185,7 @@ def main(argv: list[str]) -> int:
     ba.add_argument("patch", type=Path); ba.add_argument("source", type=Path); ba.add_argument("out", type=Path)
     args = ap.parse_args(argv)
     if args.cmd == "create":
-        create(args.source.read_bytes(), args.target.read_bytes(), args.out, id_=args.id, name=args.name, version=args.version)
+        create(args.source.read_bytes(), args.target.read_bytes(), args.out, id_=args.id, name=args.name, version=args.version, width_max=args.width_max)
     elif args.cmd == "apply":
         args.out.write_bytes(apply_package(args.package, args.source.read_bytes()))
     elif args.cmd == "bps-create":

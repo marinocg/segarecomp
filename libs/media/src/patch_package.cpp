@@ -245,7 +245,8 @@ bool read_zip(std::span<const std::uint8_t> z, std::map<std::string, ZipEntry> &
 
 // ---- strict manifest parser (a closed JSON subset: objects, ASCII strings, one integer; duplicate or unknown keys are errors) ----
 struct Value {
-  enum class Kind { string, number, object } kind = Kind::string;
+  enum class Kind { string, number, object, array } kind = Kind::string;
+  std::vector<Value> items;
   std::string text;
   std::uint64_t number = 0;
   std::map<std::string, Value> members;
@@ -277,7 +278,7 @@ class JsonReader {
     return false;
   }
   bool value(Value &out, int depth) {
-    if (depth > 2 || pos_ >= t_.size()) return false;
+    if (depth > 3 || pos_ >= t_.size()) return false;
     if (t_[pos_] == '"') { out.kind = Value::Kind::string; return string(out.text); }
     if (t_[pos_] >= '0' && t_[pos_] <= '9') {
       out.kind = Value::Kind::number;
@@ -285,6 +286,22 @@ class JsonReader {
       int digits = 0;
       while (pos_ < t_.size() && t_[pos_] >= '0' && t_[pos_] <= '9') { out.number = out.number * 10 + static_cast<std::uint64_t>(t_[pos_++] - '0'); if (++digits > 9) return false; }
       return true;
+    }
+    if (t_[pos_] == '[') {
+      out.kind = Value::Kind::array;
+      ++pos_; skip();
+      if (pos_ < t_.size() && t_[pos_] == ']') { ++pos_; return true; }
+      for (;;) {
+        skip();
+        Value v;
+        if (out.items.size() >= 16 || !value(v, depth + 1)) return false;
+        out.items.push_back(std::move(v));
+        skip();
+        if (pos_ >= t_.size()) return false;
+        if (t_[pos_] == ',') { ++pos_; continue; }
+        if (t_[pos_] == ']') { ++pos_; return true; }
+        return false;
+      }
     }
     if (t_[pos_] != '{') return false;
     out.kind = Value::Kind::object;
@@ -349,12 +366,19 @@ Package read_package(std::span<const std::uint8_t> zip) {
   if (!read_zip(zip, entries, error)) return bad(error);
   const auto man = entries.find("manifest.json");
   if (man == entries.end()) return bad("the package has no manifest.json");
-  if (entries.size() != 2) return bad("the package must contain exactly manifest.json and one payload");
   Value root;
   JsonReader reader(std::string_view(reinterpret_cast<const char *>(man->second.data.data()), man->second.data.size()));
   if (!reader.parse(root) || root.kind != Value::Kind::object) return bad(reader.error);
-  if (!only_keys(root, {"format", "schema_version", "id", "version", "name", "platform", "purpose", "source_sha256", "target_sha256", "payload"}))
-    return bad("the manifest has missing or unknown fields");
+  static const char *const required[] = {"format", "schema_version", "id", "version", "name", "platform", "purpose", "source_sha256", "payloads"};
+  static const char *const optional[] = {"requires", "widescreen_width_max"};
+  for (const char *k : required) if (root.members.count(k) == 0) return bad(std::string("the manifest is missing \"") + k + "\"");
+  for (const auto &[k, v] : root.members) {
+    (void)v;
+    bool known = false;
+    for (const char *r : required) known = known || k == r;
+    for (const char *o : optional) known = known || k == o;
+    if (!known) return bad("the manifest has an unknown field \"" + k + "\"");
+  }
   PackageInfo info;
   std::string format;
   if (!take_string(root, "format", format) || format != "segarecomp-patch") return bad("the manifest is not a segarecomp patch manifest");
@@ -367,18 +391,39 @@ Package read_package(std::span<const std::uint8_t> zip) {
   if (!take_string(root, "platform", info.platform) || info.platform != "genesis") return bad("the manifest platform is not supported");
   if (!take_string(root, "purpose", info.purpose) || info.purpose != "widescreen") return bad("the manifest purpose is not supported");
   if (!take_string(root, "source_sha256", info.source_sha256) || !is_hex64(info.source_sha256)) return bad("the manifest source_sha256 is invalid");
-  if (!take_string(root, "target_sha256", info.target_sha256) || !is_hex64(info.target_sha256)) return bad("the manifest target_sha256 is invalid");
-  if (info.source_sha256 == info.target_sha256) return bad("the manifest source and target are identical");
-  const Value &payload = root.members.at("payload");
-  if (payload.kind != Value::Kind::object || !only_keys(payload, {"format", "file", "sha256"})) return bad("the manifest payload is invalid");
+  if (const auto w = root.members.find("widescreen_width_max"); w != root.members.end()) {
+    if (w->second.kind != Value::Kind::number || w->second.number > 100) return bad("the manifest widescreen_width_max must be an integer from 0 to 100");
+    info.widescreen_width_max = static_cast<int>(w->second.number);
+  }
+  if (const auto r = root.members.find("requires"); r != root.members.end()) {
+    if (r->second.kind != Value::Kind::array || r->second.items.size() > 8) return bad("the manifest requires list is invalid");
+    for (const Value &item : r->second.items) {
+      if (item.kind != Value::Kind::string || !token(item.text, 48, false)) return bad("the manifest requires list is invalid");
+      bool supported = false;
+      for (const char *const *c = kSupportedCapabilities; *c != nullptr; ++c) supported = supported || item.text == *c;
+      if (!supported) return bad("this segarecomp does not provide the required capability \"" + item.text + "\"");
+      info.requires_capabilities.push_back(item.text);
+    }
+  }
+  const Value &payloads = root.members.at("payloads");
+  if (payloads.kind != Value::Kind::object || payloads.members.empty()) return bad("the manifest payloads are invalid");
+  for (const auto &[name, v] : payloads.members) {
+    (void)v;
+    if (name != "rom") return bad("the manifest names an unsupported payload type \"" + name + "\"");
+  }
+  const Value &rom = payloads.members.at("rom");
+  if (rom.kind != Value::Kind::object || !only_keys(rom, {"format", "file", "sha256", "target_sha256"})) return bad("the rom payload is invalid");
   std::string pformat;
-  if (!take_string(payload, "format", pformat) || pformat != "bps") return bad("the payload format is not supported");
-  if (!take_string(payload, "file", info.payload_file) || !safe_name(info.payload_file) || info.payload_file == "manifest.json")
-    return bad("the payload file name is invalid");
-  if (!take_string(payload, "sha256", info.payload_sha256) || !is_hex64(info.payload_sha256)) return bad("the payload sha256 is invalid");
-  const auto pit = entries.find(info.payload_file);
+  if (!take_string(rom, "format", pformat) || pformat != "bps") return bad("the rom payload format is not supported");
+  if (!take_string(rom, "file", info.rom_file) || !safe_name(info.rom_file) || info.rom_file == "manifest.json") return bad("the rom payload file name is invalid");
+  if (!take_string(rom, "sha256", info.rom_payload_sha256) || !is_hex64(info.rom_payload_sha256)) return bad("the rom payload sha256 is invalid");
+  if (!take_string(rom, "target_sha256", info.target_sha256) || !is_hex64(info.target_sha256)) return bad("the rom payload target_sha256 is invalid");
+  if (info.source_sha256 == info.target_sha256) return bad("the manifest source and target are identical");
+  info.has_rom = true;
+  if (entries.size() != 2) return bad("the package must contain exactly manifest.json and the declared payload");
+  const auto pit = entries.find(info.rom_file);
   if (pit == entries.end()) return bad("the payload named by the manifest is missing from the package");
-  if (sha256_hex(pit->second.data) != info.payload_sha256) return bad("the payload SHA-256 does not match the manifest");
+  if (sha256_hex(pit->second.data) != info.rom_payload_sha256) return bad("the payload SHA-256 does not match the manifest");
   info.identity = sha256_hex(man->second.data);
   Package out;
   out.ok = true;

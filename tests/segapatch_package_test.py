@@ -90,7 +90,7 @@ check(code == 0, "verify ok")
 sp.create(SRC, TGT, tmp / "other.segapatch", id_="synthetic-wide", name="Synthetic Widescreen", version="1.0.1")
 check(run("inspect", tmp / "other.segapatch")[1]["package_identity"] != identity, "identity changes with the package")
 # stored (no compression) archives are accepted too
-sp.write_zip(tmp / "stored.segapatch", [("manifest.json", zipfile.ZipFile(good).read("manifest.json")), ("patch.bps", zipfile.ZipFile(good).read("patch.bps"))], method=zipfile.ZIP_STORED)
+sp.write_zip(tmp / "stored.segapatch", [("manifest.json", zipfile.ZipFile(good).read("manifest.json")), ("game.bps", zipfile.ZipFile(good).read("game.bps"))], method=zipfile.ZIP_STORED)
 check(run("apply", tmp / "stored.segapatch", "--rom", tmp / "src.bin", "--out", tmp / "stored.out")[0] == 0, "stored entries accepted")
 
 # ---- ROM identity ----
@@ -101,13 +101,14 @@ expect_refused(good, SRC + b"\0", "extended ROM")
 
 # ---- manifest ----
 man = json.loads(zipfile.ZipFile(good).read("manifest.json"))
-bps = zipfile.ZipFile(good).read("patch.bps")
+man = json.loads(json.dumps(man))
+bps = zipfile.ZipFile(good).read("game.bps")
 
 
 def pack(manifest_obj=None, payload=bps, manifest_raw=None, name="mod.segapatch", extra=()):
     raw = manifest_raw if manifest_raw is not None else json.dumps(manifest_obj).encode()
     p = tmp / name
-    sp.write_zip(p, [("manifest.json", raw), ("patch.bps", payload), *extra])
+    sp.write_zip(p, [("manifest.json", raw), ("game.bps", payload), *extra])
     return p
 
 
@@ -116,8 +117,8 @@ def mutated(**kw):
     for k, v in kw.items():
         if v is None:
             m.pop(k)
-        elif isinstance(v, dict) and k == "payload":
-            m["payload"].update(v)
+        elif isinstance(v, dict) and k == "rom":
+            m["payloads"]["rom"].update(v)
         else:
             m[k] = v
     return m
@@ -134,18 +135,31 @@ expect_refused(pack(mutated(id="Bad Id")), SRC, "invalid id")
 expect_refused(pack(mutated(name="x" * 200)), SRC, "oversized name")
 expect_refused(pack(mutated(extra_field="x")), SRC, "unknown manifest field")
 expect_refused(pack(mutated(version=None)), SRC, "missing field")
-expect_refused(pack(mutated(payload={"format": "ips"})), SRC, "unsupported payload format")
-expect_refused(pack(mutated(payload={"file": "../patch.bps"})), SRC, "traversal payload name")
-expect_refused(pack(mutated(payload={"file": "manifest.json"})), SRC, "payload names the manifest")
-expect_refused(pack(mutated(payload={"sha256": "00" * 32})), SRC, "payload digest mismatch")
+expect_refused(pack(mutated(rom={"format": "ips"})), SRC, "unsupported payload format")
+expect_refused(pack(mutated(rom={"file": "../game.bps"})), SRC, "traversal payload name")
+expect_refused(pack(mutated(rom={"file": "manifest.json"})), SRC, "payload names the manifest")
+expect_refused(pack(mutated(rom={"sha256": "00" * 32})), SRC, "payload digest mismatch")
 expect_refused(pack(manifest_raw=b"{not json"), SRC, "invalid JSON")
 dup = json.dumps(man).replace('"id"', '"id": "a", "id"', 1).encode()
 expect_refused(pack(manifest_raw=dup), SRC, "duplicate manifest key")
 expect_refused(pack(manifest_raw=b"\xef\xbb\xbf" + json.dumps(man).encode()), SRC, "BOM / non-ASCII manifest")
-bad_target = mutated(target_sha256="11" * 32)
+expect_refused(pack(mutated(requires=["frame-hooks"])), SRC, "unsupported required capability")
+expect_refused(pack(mutated(requires="x")), SRC, "requires is not a list")
+expect_refused(pack(mutated(widescreen_width_max=101)), SRC, "width range above 100")
+expect_refused(pack(mutated(widescreen_width_max=-1)), SRC, "negative width range")
+expect_refused(pack(mutated(payloads={"widescreen": {"file": "widescreen.json"}})), SRC, "native descriptor payload not supported by this release")
+m_both = mutated(); m_both["payloads"]["widescreen"] = {"file": "widescreen.json"}
+expect_refused(pack(m_both, extra=[("widescreen.json", b"{}")]), SRC, "unsupported payload type next to a valid rom payload")
+expect_refused(pack(mutated(payloads={})), SRC, "no payload at all")
+width_ok = tmp / "width.segapatch"
+sp.create(SRC, TGT, width_ok, id_="synthetic-wide", name="Synthetic Widescreen", version="1.0.0", width_max=60)
+code, doc = run("inspect", width_ok)
+check(code == 0 and doc["widescreen_width_max"] == 60 and doc["requires"] == [], f"width range reported {doc}")
+check(run("inspect", good)[1]["widescreen_width_max"] == -1, "unstated width range reported as -1")
+bad_target = mutated(rom={"target_sha256": "11" * 32})
 expect_refused(pack(bad_target), SRC, "target digest mismatch")
 corrupt = bytearray(bps); corrupt[len(corrupt) // 2] ^= 0xFF
-m2 = mutated(payload={"sha256": sha(bytes(corrupt))})
+m2 = mutated(rom={"sha256": sha(bytes(corrupt))})
 expect_refused(pack(m2, bytes(corrupt)), SRC, "payload corrupted (BPS patch checksum)")
 expect_refused(pack(mutated(), bytes(corrupt)), SRC, "payload corrupted (manifest digest)")
 
@@ -156,23 +170,23 @@ def raw_zip(entries, *, symlink=False):
         for name, data in entries:
             zi = zipfile.ZipInfo(name, sp.FIXED_TIME)
             zi.create_system = 3
-            zi.external_attr = (0o120777 if symlink and name == "patch.bps" else 0o100644) << 16
+            zi.external_attr = (0o120777 if symlink and name == "game.bps" else 0o100644) << 16
             z.writestr(zi, data)
     return p
 
 
 mj = json.dumps(man).encode()
-expect_refused(raw_zip([("manifest.json", mj), ("patch.bps", bps), ("extra.txt", b"x")]), SRC, "unexpected extra entry")
+expect_refused(raw_zip([("manifest.json", mj), ("game.bps", bps), ("extra.txt", b"x")]), SRC, "unexpected extra entry")
 expect_refused(raw_zip([("manifest.json", mj)]), SRC, "missing payload")
-expect_refused(raw_zip([("../manifest.json", mj), ("patch.bps", bps)]), SRC, "traversal entry name")
-expect_refused(raw_zip([("/manifest.json", mj), ("patch.bps", bps)]), SRC, "absolute entry name")
-expect_refused(raw_zip([("C:\\manifest.json", mj), ("patch.bps", bps)]), SRC, "drive-letter entry name")
-expect_refused(raw_zip([("dir/manifest.json", mj), ("patch.bps", bps)]), SRC, "nested entry name")
-expect_refused(raw_zip([("manifest.json", mj), ("patch.bps", bps)], symlink=True), SRC, "symlink entry")
+expect_refused(raw_zip([("../manifest.json", mj), ("game.bps", bps)]), SRC, "traversal entry name")
+expect_refused(raw_zip([("/manifest.json", mj), ("game.bps", bps)]), SRC, "absolute entry name")
+expect_refused(raw_zip([("C:\\manifest.json", mj), ("game.bps", bps)]), SRC, "drive-letter entry name")
+expect_refused(raw_zip([("dir/manifest.json", mj), ("game.bps", bps)]), SRC, "nested entry name")
+expect_refused(raw_zip([("manifest.json", mj), ("game.bps", bps)], symlink=True), SRC, "symlink entry")
 import warnings
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    expect_refused(raw_zip([("manifest.json", mj), ("patch.bps", bps), ("patch.bps", bps)]), SRC, "duplicate entry")
+    expect_refused(raw_zip([("manifest.json", mj), ("game.bps", bps), ("game.bps", bps)]), SRC, "duplicate entry")
 junk = tmp / "junk.segapatch"; junk.write_bytes(b"not a zip at all" * 8)
 expect_refused(junk, SRC, "not an archive")
 empty = tmp / "empty.segapatch"; empty.write_bytes(b"")
@@ -188,7 +202,7 @@ expect_refused(trailing, SRC, "trailing byte after archive")
 # decompression bomb: tiny deflate stream that expands far past the declared size
 def patched_usize(path, fake_usize):
     data = bytearray(path.read_bytes())
-    # rewrite the uncompressed size in the central directory entry of patch.bps and its local header
+    # rewrite the uncompressed size in the central directory entry of game.bps and its local header
     out = bytearray(data)
     pos = 0
     while True:
@@ -197,7 +211,7 @@ def patched_usize(path, fake_usize):
             break
         nlen = struct.unpack_from("<H", out, i + 28)[0]
         name = bytes(out[i + 46:i + 46 + nlen])
-        if name == b"patch.bps":
+        if name == b"game.bps":
             struct.pack_into("<I", out, i + 24, fake_usize)
         pos = i + 4
     return bytes(out)
@@ -206,14 +220,14 @@ def patched_usize(path, fake_usize):
 big = bytes(5_000_000)  # compresses to a few KiB
 bomb_payload = big
 bomb = tmp / "bomb.segapatch"
-sp.write_zip(bomb, [("manifest.json", mj), ("patch.bps", bomb_payload)])
+sp.write_zip(bomb, [("manifest.json", mj), ("game.bps", bomb_payload)])
 bomb.write_bytes(patched_usize(bomb, 1000))
 expect_refused(bomb, SRC, "decompression bomb (expands past declared size)")
 huge = tmp / "huge.segapatch"
-sp.write_zip(huge, [("manifest.json", mj), ("patch.bps", bytes(20 * 1024 * 1024))])
+sp.write_zip(huge, [("manifest.json", mj), ("game.bps", bytes(20 * 1024 * 1024))])
 expect_refused(huge, SRC, "oversized payload entry")
 bigman = tmp / "bigman.segapatch"
-sp.write_zip(bigman, [("manifest.json", b" " * 40000 + mj), ("patch.bps", bps)])
+sp.write_zip(bigman, [("manifest.json", b" " * 40000 + mj), ("game.bps", bps)])
 expect_refused(bigman, SRC, "oversized manifest entry")
 
 # ---- BPS (hand assembled, all four actions; independent of the encoder) ----
@@ -230,8 +244,8 @@ def bps_file(source, target, commands, metadata=b"", fix=None):
 
 def package_with(source, target, payload, *, name):
     m = {"format": "segarecomp-patch", "schema_version": 1, "id": "hand", "version": "1", "name": "hand", "platform": "genesis",
-         "purpose": "widescreen", "source_sha256": sha(source), "target_sha256": sha(target),
-         "payload": {"format": "bps", "file": "patch.bps", "sha256": sha(payload)}}
+         "purpose": "widescreen", "source_sha256": sha(source),
+         "payloads": {"rom": {"format": "bps", "file": "game.bps", "sha256": sha(payload), "target_sha256": sha(target)}}}
     return pack(m, payload, name=name)
 
 

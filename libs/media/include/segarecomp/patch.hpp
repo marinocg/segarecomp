@@ -30,11 +30,17 @@ struct BpsResult {
 // and the exact end of the command stream. The output never exceeds `max_output`.
 [[nodiscard]] BpsResult apply_bps(std::span<const std::uint8_t> patch, std::span<const std::uint8_t> source, std::size_t max_output = kMaxImageBytes);
 
+// Payload types this release understands (closed list; a package naming another type, or requiring a capability not listed in
+// `kSupportedCapabilities`, is refused with a readable error). Only the payload types proven necessary are implemented: the `rom`
+// payload (a BPS delta producing a patched input image). A native widescreen descriptor payload is deliberately NOT defined yet.
 struct PackageInfo {
   std::string id, version, name, platform, purpose;
-  std::string source_sha256, target_sha256, payload_sha256;
-  std::string payload_file;
-  std::string identity;  // SHA-256 of the manifest bytes: the package identity (independent of ZIP layout and timestamps)
+  std::string source_sha256;
+  bool has_rom = false;                 // payloads.rom present
+  std::string rom_file, rom_payload_sha256, target_sha256;   // target_sha256 = the patched image digest (set when has_rom)
+  std::vector<std::string> requires_capabilities;
+  int widescreen_width_max = -1;        // highest validated Widescreen Width (0..100) the author claims, -1 = not stated
+  std::string identity;  // SHA-256 of the manifest bytes: the package identity. The manifest names every payload digest, so it covers ALL variant inputs
 };
 
 struct Package {
@@ -43,6 +49,8 @@ struct Package {
   PackageInfo info;
   std::vector<std::uint8_t> payload;  // the BPS bytes, SHA-256 verified against the manifest
 };
+
+inline constexpr const char *const kSupportedCapabilities[] = {nullptr};  // none required by any supported payload today
 
 // Validates the ZIP structure (entries, names, sizes, CRC), the manifest schema and the payload SHA-256.
 [[nodiscard]] Package read_package(std::span<const std::uint8_t> zip);
