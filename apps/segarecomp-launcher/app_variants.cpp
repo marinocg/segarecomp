@@ -40,7 +40,7 @@ void App::patch_chosen(const std::string &id, const std::string &path) {
   modal_.target = preview.info.identity;
   modal_.lines = {};
   const std::string range = preview.info.widescreen_width_max < 0 ? std::string("not stated by the author") : "up to " + std::to_string(preview.info.widescreen_width_max) + " on the Widescreen Width scale";
-  modal_.lines = {"Compatible with this game: yes. It matches the exact original image (SHA-256 verified), the patch applied cleanly and the result matches its published digest.",
+  modal_.lines = {"Compatible with this game: yes. It matches the exact original image (SHA-256 verified) and every payload verified (a patch's result matches its published digest).",
                   "Purpose: " + preview.info.purpose + ". Validated width: " + range + ".",
                   std::string(preview.already_installed ? "This exact package is already installed on this game." : "Package identity " + short_hash(preview.info.identity) + ".")};
   if (preview.info.has_native)   // SEG-124: a data-only descriptor that selects an audited component of this release; nothing from the package is ever executed

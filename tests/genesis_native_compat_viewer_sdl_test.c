@@ -200,7 +200,7 @@ int main(void) {
   if (a != NULL) SDL_DestroySurface(a);
   set_mode(&g, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_SIDE_RAW, 100);
 
-  /* Level 2 keeps the provider (scenery authored) and the HUD; Original produces nothing and draws nothing */
+  /* Level 2 keeps the provider (scenery authored) and the HUD; Original shows no extra scenery but keeps the HUD */
   set_mode(&g, SV_WIDESCREEN_EXTENDED_BACKGROUNDS, SV_SIDE_COMFORT, 100);
   CHECK(run_frame(&g) == 0 && g.ext->result.authored == 1 && sv_host_extension_source(host) == SV_EXTSRC_AUTHORED, "Level 2 frame served by the provider");
   set_mode(&g, SV_WIDESCREEN_ORIGINAL, SV_SIDE_COMFORT, 100);

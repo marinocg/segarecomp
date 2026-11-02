@@ -189,9 +189,12 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--admission-plan" && !options.admission_plan) options.admission_plan = fs::path(value);
     else if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) options.aot_policy = value;
     else if (key == "--hint-alias-discovery" && (value == "0" || value == "1")) options.hint_alias_discovery = value == "1";
-    else if (key == "--native-capability") options.native_capability = value;
-    else if (key == "--native-implementation") options.native_implementation = static_cast<unsigned>(std::max(0, std::atoi(value.c_str())));
-    else if (key == "--native-components") options.native_components = static_cast<unsigned>(std::max(0, std::atoi(value.c_str())));
+    else if (key == "--native-capability") { if (!options.native_capability.empty()) return std::nullopt; options.native_capability = value; }
+    else if (key == "--native-implementation" || key == "--native-components") {
+      // strict decimal: digits only, 1..3 of them, no sign, space or leading text
+      if (value.empty() || value.size() > 3 || !std::all_of(value.begin(), value.end(), [](char c) { return c >= '0' && c <= '9'; }) || (value.size() > 1 && value[0] == '0')) return std::nullopt;
+      (key == "--native-implementation" ? options.native_implementation : options.native_components) = static_cast<unsigned>(std::stoul(value));
+    }
     else if (key == "--native-source-sha256") options.native_source_sha256 = value;
     else if (key == "--native-descriptor-sha256") options.native_descriptor_sha256 = value;
     else if (key == "--aot-model" && !aot_model_given && (value == "v1" || value == "gen2")) { options.aot_model = value; aot_model_given = true; }
@@ -1108,6 +1111,8 @@ int segarecomp_build_command(int argc, char **argv) {
       else if (info.outcome == segarecomp::ClassificationOutcome::recognized && info.platform == segarecomp::Platform::game_gear)
         return fail(options, log, sha, "analyze", 1, "Game Gear images are not supported.", "PLATFORM_UNSUPPORTED");
     }
+    if (target != Target::genesis && options.native_index >= 0)   // fail closed: a native capability is a Genesis provider, never silently dropped
+      return fail(options, log, sha, "analyze", 1, "A native compatibility capability applies only to Genesis images.", "NATIVE_NOT_APPLICABLE");
     sms::IngestOptions ingest_options;
     if (target == Target::master_system && options.admission)
       return fail(options, log, sha, "analyze", 1, "A hybrid admission plan applies only to Genesis images.", "ADMISSION_NOT_APPLICABLE");

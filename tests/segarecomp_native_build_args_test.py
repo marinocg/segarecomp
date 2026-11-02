@@ -46,6 +46,10 @@ expect(2, native(cap="genesis.other.native-widescreen.v1"), "unknown capability"
 expect(2, native(cap=""), "empty capability id with other options")
 expect(2, native(impl="2"), "another implementation version")
 expect(2, native(impl="0"), "implementation zero")
+for bad in ("1abc", " 1", "+1", "01", "-1", "", "1000", "0x1"):
+    expect(2, native(impl=bad), f"lenient implementation value {bad!r}")
+    expect(2, native(comps=bad), f"lenient components value {bad!r}")
+expect(2, native() + ["--native-capability", CAP], "a repeated capability option")
 expect(2, native(comps="0"), "no component")
 expect(2, native(comps="4"), "unknown component bit")
 expect(2, native(comps="7"), "a component the capability does not have")

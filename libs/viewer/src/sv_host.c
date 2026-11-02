@@ -1138,7 +1138,7 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
       return present_frame(h, rgb, w, hgt, pitch, ext, ext);
     }
     /* An UNAVAILABLE surface that was not even requested is the normal Original case; anything else offered and refused is a rejection. */
-    if (ext->status != SV_WS_UNAVAILABLE && h->ext_rejected != UINT32_MAX) h->ext_rejected++;
+    if (ext->status != SV_WS_UNAVAILABLE && (ext->overlay_rgba == NULL || (int)ext->mode <= (int)h->settings.video.widescreen) && h->ext_rejected != UINT32_MAX) h->ext_rejected++;   /* a surface that only carries the HUD in Original is expected, not a refusal */
   }
   /* the extension is not shown (Original, a stale surface, a refusal): the overlay of a surface that is otherwise about THIS frame is still the HUD that replaces the game's own */
   return present_frame(h, rgb, w, hgt, pitch, NULL, ext != NULL && ext->status != SV_WS_UNAVAILABLE && ext->sequence == sequence ? ext : NULL);

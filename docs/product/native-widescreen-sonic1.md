@@ -17,8 +17,8 @@ original image (Genesis, USA/Europe REV00, SHA-256 `46160baa...f2a6`); Vanilla, 
 ## Frame validation and fallback
 
 A frame is served only if (1) the game mode is a running level, (2) the camera, layout and chunk indices are in range, (3) the VDP is in the verified configuration and the scroll it applies equals the game's
-own per-line scroll in work RAM (so RAM and VDP describe the same frame), and (4) the provider's own cells for the part of the world in view agree with what the VDP nametables hold there (a gross
-disagreement, e.g. a fade, a level transition or another level, declines the frame). Anything else (another zone, the level start sequence, title, special stage, a different revision) is served by the generic
+own per-line scroll in work RAM (so RAM and VDP describe the same frame), and (4) the provider's own cells for the part of the world in view agree with what the VDP nametables hold there, sampled every 8 pixels, tolerating up to 10% foreground and 14% background disagreement for the
+streaming lag the game itself has (a gross disagreement, e.g. a fade, a level transition or another level, declines the frame). Anything else (another zone, the level start sequence, title, special stage, a different revision) is served by the generic
 extension with its accurate status, or not at all; Vanilla and BPS-only builds are never affected. A background band's world position is only defined modulo the 512-pixel plane: the provider uses the alias nearest the
 camera of the region the game streams it from (the upper region from the first background camera, the region below the game's split from the second one); cells left of world x 0 are blank (the backdrop shows).
 

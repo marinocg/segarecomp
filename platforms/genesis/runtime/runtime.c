@@ -2794,7 +2794,8 @@ static void genesis_compat_snapshot(GenesisRuntime *runtime) {
   const GenesisRasterCapture *capture = runtime->live_raster;
   GenesisFrameExtension *extension = capture != 0 ? capture->extension : 0;
   if (extension == 0 || extension->compat == 0 || extension->compat_ram == 0) return;
-  memcpy(extension->compat_ram, runtime->work_ram, sizeof(runtime->work_ram));
+  _Static_assert(sizeof(runtime->work_ram) == GENESIS_COMPAT_RAM_BYTES, "the provider snapshot is exactly the work RAM");
+  memcpy(extension->compat_ram, runtime->work_ram, GENESIS_COMPAT_RAM_BYTES);
   extension->compat_ram_stamp = runtime->virtual_frame_count;
 }
 
