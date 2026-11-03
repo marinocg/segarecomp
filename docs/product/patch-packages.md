@@ -1,8 +1,12 @@
 # Patch packages (`.segapatch`, schema 1 and 2)
 
-A patch package is a small, portable, **data-only** file that describes one optional modification of one verified game. Segarecomp never executes anything from a package: no code,
-scripts, shared libraries or plugins, and no runtime memory injection. A verified package produces a *patched input image*; the normal static recompilation pipeline then processes
-that image into a separate generated-native program (Patched variant). Vanilla is never modified.
+A patch package is a small, portable file that describes one optional modification of one verified game. There are two kinds, and they have very different trust properties:
+
+* **Schema 1: data only.** One BPS delta. Segarecomp never executes anything from it: no code, scripts, shared libraries or plugins, and no runtime memory injection. A verified package produces a *patched input
+  image*; the normal static recompilation pipeline then processes that image into a separate generated-native program (Patched variant). Vanilla is never modified.
+* **Schema 2: optional BPS plus trusted C11 source.** A schema 2 package may carry one `provider.c` (see "Schema 2" below). That source is **executable code**: the build compiles it into the generated-native Patched program,
+  where it runs with that program's operating-system permissions. **It is not sandboxed.** The SHA-256 digests in the manifest establish *integrity* (the bytes are the ones the manifest names), not *trust* and not
+  *author authenticity*: there are no signatures. Install such a package only if you trust whoever gave it to you.
 
 Format ADR: `docs/decisions/0266-seg-122-portable-patch-packages-and-game-variants.md`. Implementation: `libs/media/src/patch_bps.cpp`, `patch_package.cpp`
 (`segarecomp/patch.hpp`), the CLI seam `segarecomp patch ...` and the launcher (`apps/segarecomp-launcher/patch_library.*`) which calls the same functions.
@@ -105,6 +109,10 @@ a restricted interface and compiler flags are NOT a security sandbox and must ne
 identity, source digest, declared capabilities, "contains executable source, not sandboxed") and installs/builds it only after the user approves THAT exact package; a changed package has another identity and needs a new
 approval; library scanning and updates never compile a new code-bearing patch; the build re-verifies the package and the approved identity before extracting anything. A future, separately designed sandboxed
 format (for example WebAssembly ahead-of-time compiled) would be a different capability; none exists today.
+
+**Approval boundary.** The launcher records an explicit user approval of one exact package identity (the sheet's "Approve and install" button). The CLI's `--patch-identity` is only a consistency check: the build verifies that the
+supplied value equals the identity of the package it reads (so a package changed after it was shown or approved is refused). An identity typed or scripted by a CLI caller is **not** independently authenticated user consent;
+whoever runs `segarecomp build` directly has already chosen to compile that package. There are no signatures, certificates or identity service.
 
 ### Authoring and CLI
 

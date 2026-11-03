@@ -176,6 +176,7 @@ private:
   bool script_open_play_menu_ = false;
   void browse_patch(const std::string &id);
   void patch_chosen(const std::string &id, const std::string &path);   // the file chooser's result: verify, then ask
+  void patch_install_from_sheet(const Modal &sheet);   // the ONE install path of the confirm button and of the scripted patch_confirm: the approval is the sheet's own code_bearing flag
   void patch_install_confirmed(const std::string &id, const std::string &package, bool trust_native);
   void select_variant(const std::string &id, const std::string &identity);   // "" = Vanilla
   void ask_remove_patch(const LibraryEntry &entry, const std::string &identity);

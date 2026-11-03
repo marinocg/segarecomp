@@ -133,11 +133,15 @@ void App::patch_remove_confirmed(const Modal &sheet) {
   toast("Patch removed.");
 }
 
+void App::patch_install_from_sheet(const Modal &sheet) {
+  patch_install_confirmed(sheet.ids.empty() ? std::string() : sheet.ids.front(), u8s(patch_pending_), sheet.code_bearing);
+}
+
 void App::patch_modal_confirm() {
   const Modal m = modal_;
   if (m.kind == Modal::Kind::install_patch) {
     modal_ = Modal{};
-    patch_install_confirmed(m.ids.empty() ? std::string() : m.ids.front(), u8s(patch_pending_), m.code_bearing);
+    patch_install_from_sheet(m);
   } else if (m.kind == Modal::Kind::remove_patch) {
     modal_ = Modal{};
     patch_remove_confirmed(m);

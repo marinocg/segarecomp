@@ -4,7 +4,7 @@ Segarecomp provides a **generic** native-patch interface; a patch package owns e
 modifying or recompiling segarecomp**: the launcher compiles the package's `provider.c` with the bundled C11 toolchain into a separate generated-native Patched program. The product contains no game-specific provider, registry or
 capability table.
 
-This is a **trusted native-source patch** mechanism, not a sandbox (see `patch-packages.md#trust`). A future sandboxed format (e.g. WebAssembly) would be a separate capability.
+The provider runs with the generated program's operating-system permissions. This is a **trusted native-source patch** mechanism, not a sandbox; hashes give integrity, not author authenticity (see `patch-packages.md#trust`). A future sandboxed format (e.g. WebAssembly) would be a separate capability.
 
 ## What the host gives a provider
 
@@ -41,7 +41,7 @@ Distribute that single file. A user imports it in the launcher (Game -> Install 
 
 ## Build and identity
 
-`segarecomp build --patch-package P --patch-identity ID` re-verifies the package (archive, manifest, source digest, ABI, capabilities, that `ID` is the approved identity, that the image is the one the package declares),
+`segarecomp build --patch-package P --patch-identity ID` re-verifies the package (archive, manifest, source digest, ABI, capabilities, that `ID` equals the identity of the package it read (the launcher passes the identity the user approved; on the CLI this is a consistency check, not authenticated consent), that the image is the one the package declares),
 extracts `provider.c` into the variant's own build folder, re-hashes it, compiles it with isolated flags (`-std=c11 -I <sdk>` only) and links it into that variant's program; the viewer calls `segarecomp_patch_provider` and attaches
 the table only if the ABI version matches (otherwise the program presents generically). The variant cache key and the build record contain the original and effective image digests, the package identity, the provider source
 digest, the ABI version and the capability set. A failed provider compile or link fails that build only; Vanilla and previously published builds are untouched.
@@ -49,3 +49,8 @@ digest, the ABI version and the capability set. A failed provider compile or lin
 ## Non-goals
 
 No dynamic-library loader, JIT, interpreter, scripting VM, second VDP renderer, universal guest-state API, package build scripts, dependency resolution, marketplace or automatic execution of untrusted code.
+
+## Platform coverage
+
+The sample provider is compiled as strict C11 against the SDK header on every CI platform. The complete package-to-generated-native-executable build (`genesis_patch_provider_build_test`) currently runs on Linux only;
+the other platforms validate provider compilation, the launcher/package tests and release packaging. End-to-end portability of the package build is therefore not claimed for Windows and macOS.

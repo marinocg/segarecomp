@@ -817,7 +817,9 @@ void App::draw_modal(float w, float h) {
     subtitle = "Launcher preferences (view, sort, compact mode, cleanup policy, region order) return to their defaults.";
     keeps = {"The library and builds", "Viewer controls and video settings"};
   } else if (modal_.kind == Modal::Kind::install_patch) {
-    subtitle = "The package was verified against your original game. Installing it only adds the patch to this game; nothing is built or switched yet.";
+    subtitle = modal_.code_bearing
+                   ? "WARNING: this patch contains executable C source code that will run, unsandboxed, with this program's permissions once you build it. Approve it only if you trust where it came from."
+                   : "The package was verified against your original game. Installing it only adds the patch to this game; nothing is built or switched yet.";
     keeps = {"Your original ROM file (never modified)", "The Vanilla build and its settings", "Your widescreen preferences for this game"};
     notes = modal_.lines;   // what was verified: compatibility, purpose, validated width, identity
     notes.push_back("The patched version is a separate program built from the patched image. Choose Patched, then Build patched version, when you want it.");
@@ -957,7 +959,7 @@ void App::draw_modal(float w, float h) {
       page_ = Page::library;
       toast("Library cleared (" + std::to_string(n) + " entries). Builds and ROMs were not touched.");
     } else if (m.kind == Modal::Kind::install_patch) {
-      patch_install_confirmed(m.ids.empty() ? std::string() : m.ids.front(), u8s(patch_pending_), m.code_bearing);
+      patch_install_from_sheet(m);
     } else if (m.kind == Modal::Kind::remove_patch) {
       patch_remove_confirmed(m);
     } else if (m.kind == Modal::Kind::restore_defaults) {
