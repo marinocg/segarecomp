@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "checkpoint_evidence.h"
+#include "native_compat.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -71,6 +72,13 @@ typedef struct GenesisExtensionResult {
   uint8_t reserved;
   uint32_t pitch;      /* bytes per surface row */
   uint32_t sprite_pixels; /* Level 3: visible sprite pixels in the extra columns of this frame (0 = none placed there; not a failure) */
+  /* SEG-124 (ADR 0267): what a verified native compatibility provider contributed to THIS frame. All zero without a provider or when it declined the frame. */
+  uint8_t compat_accepted; /* GENESIS_COMPAT_* components served for this frame */
+  uint8_t compat_reason;   /* GenesisCompatReason when a provider was attached but declined (or partially failed) the frame */
+  uint8_t authored;        /* 1 = both sides' scenery came from the provider AND nothing else degraded the frame: the only case presented as authored */
+  uint8_t reserved2;
+  uint16_t overlay_w, overlay_h; /* HUD overlay in the adapter's overlay buffer (0 = none) */
+  uint16_t overlay_fx, overlay_fy; /* where the host draws it inside the native picture when the visible side cannot hold it */
 } GenesisExtensionResult;
 
 struct GenesisFrameExtension;
@@ -88,6 +96,18 @@ typedef struct GenesisFrameExtension {
   void *plan_ctx;
   uint8_t *pixels;                  /* RGB24, `capacity` bytes, owned by the adapter */
   size_t capacity;
+  /* SEG-124: the optional verified native compatibility provider (NULL = none = exactly the previous behaviour). Selected statically by the build from a verified
+   * package; `compat_state` is the provider's own storage. `compat_ram` (GENESIS_COMPAT_RAM_BYTES, adapter-owned) receives a work-RAM snapshot at every publication
+   * and `compat_ram_stamp` the virtual frame counter it was taken at; the runtime sets `compat_ram_valid` for the frame being produced only when the stamp is exactly
+   * one frame old. `overlay_rgba` (GENESIS_COMPAT_OVERLAY_BYTES, adapter-owned) receives the HUD. */
+  const GenesisNativeCompat *compat;
+  void *compat_state;
+  unsigned compat_components;       /* GENESIS_COMPAT_* components the host will use (derived from the granted capabilities) */
+  unsigned compat_caps;             /* GENESIS_CAP_* the verified package declared and the host grants */
+  uint8_t *compat_ram;
+  uint64_t compat_ram_stamp;
+  uint8_t compat_ram_valid;
+  uint8_t *overlay_rgba;
   /* Runtime-written. */
   GenesisExtensionResult result;    /* the latest publication's result */
   uint64_t produced;                /* AVAILABLE/PARTIAL results */

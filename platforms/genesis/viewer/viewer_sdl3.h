@@ -25,6 +25,16 @@ void genesis_sdl3_viewer_stop_screen(GenesisSdl3Viewer *viewer, const char *titl
  * frame) and presents the surface only when its stamped sequence/geometry/status are valid; otherwise the original picture is shown. Not calling this
  * keeps the viewer Original and reports Level 2 as Unavailable (Sega CD, Master System and tools never call it). */
 GenesisFrameExtension *genesis_sdl3_viewer_extension(GenesisSdl3Viewer *viewer, const uint64_t *frame_sequence);
+/* SEG-124 (ADR 0267): attaches the native compatibility provider the build linked from a verified package to the extension target returned by genesis_sdl3_viewer_extension.
+ * `caps` is the GENESIS_CAP_* set the package declared (the host grants exactly those). Allocation-free (adapter-owned snapshot and overlay buffers). Returns 0, or -1 for an
+ * invalid argument or a provider with another ABI version (the viewer then stays generic). */
+int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *viewer, GenesisFrameExtension *extension, const GenesisNativeCompat *compat, void *state, unsigned caps);
+/* Counters over the presented frames of a run, for the end-of-run summary: frames the provider served (authored), declined by reason, and HUD frames. */
+typedef struct GenesisNativeCompatStats {
+  uint64_t frames, authored, hud_frames;
+  uint64_t declined[8];   /* indexed by GenesisCompatReason */
+} GenesisNativeCompatStats;
+void genesis_sdl3_viewer_native_compat_stats(const GenesisSdl3Viewer *viewer, GenesisNativeCompatStats *out);
 /* The shared host (tests and automation only). */
 struct SvHost *genesis_sdl3_viewer_sv_host(GenesisSdl3Viewer *viewer);
 /* Fills `host` with SDL3-backed callbacks bound to `viewer`. */

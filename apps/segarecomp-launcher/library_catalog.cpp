@@ -81,6 +81,14 @@ json::Value to_json(const LibraryEntry &e) {
       o.set("version", json::Value::make_string(p.version));
       o.set("name", json::Value::make_string(p.name));
       o.set("target_sha256", json::Value::make_string(p.target_sha256));
+      if (p.has_native()) {   // absent for a BPS-only package: such records are byte-identical to the ones older releases wrote
+        o.set("native_source_sha256", json::Value::make_string(p.native_source_sha256));
+        o.set("native_abi", json::Value::make_int(p.native_abi));
+        o.set("native_caps", json::Value::make_int(p.native_caps));
+        o.set("author", json::Value::make_string(p.author));
+        if (!p.license.empty()) o.set("license", json::Value::make_string(p.license));
+        o.set("native_approved", json::Value::make_int(p.native_approved ? 1 : 0));
+      }
       o.set("width_max", json::Value::make_int(p.width_max));
       if (!p.widescreen.empty()) o.set("widescreen", json::Value::make_string(p.widescreen));
       if (!p.side_style.empty()) o.set("side_style", json::Value::make_string(p.side_style));
@@ -254,6 +262,15 @@ bool entry_from_json(const json::Value &v, LibraryEntry &e) {
       ip.id = clamp_text(p.str("id"), 64);
       ip.version = clamp_text(p.str("version"), 32);
       ip.name = clamp_text(p.str("name"), 64);
+      ip.native_source_sha256 = p.str("native_source_sha256");
+      if (!ip.native_source_sha256.empty() || p.get("native_abi") != nullptr) {   // a damaged native record is dropped with the patch: a native package never degrades into a BPS-only one
+        ip.native_abi = static_cast<unsigned>(std::clamp(p.num("native_abi"), 0LL, 1000LL));
+        ip.native_caps = static_cast<unsigned>(std::clamp(p.num("native_caps"), 0LL, 15LL));
+        ip.author = clamp_text(p.str("author"), 64);
+        ip.license = clamp_text(p.str("license"), 32);
+        ip.native_approved = p.num("native_approved") == 1;
+        if (ip.native_abi == 0 || ip.native_caps == 0 || ip.author.empty() || !is_hex_digest(ip.native_source_sha256, 64)) continue;
+      }
       ip.width_max = static_cast<int>(std::clamp(p.num("width_max", -1), -1LL, 100LL));
       ip.installed_at = std::max(0LL, p.num("installed_at"));
       ip.widescreen = p.str("widescreen");
@@ -571,6 +588,10 @@ RomView view_for_variant(const LibraryEntry &entry, const std::string &identity)
     view.patch_identity = p->identity;
     view.patch_package = patch_package_path(p->identity);
     view.patch_target_sha256 = p->target_sha256;
+    view.patch_native_source_sha256 = p->native_source_sha256;
+    view.patch_native_abi = p->native_abi;
+    view.patch_native_caps = p->native_caps;
+    view.patch_native_approved = p->native_approved;
     view.patch_label = p->name + (p->version.empty() ? std::string() : " " + p->version);
     view.patch_widescreen = p->widescreen;
     view.patch_side_style = p->side_style;

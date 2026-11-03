@@ -27,7 +27,14 @@ struct BuildRecord {
 struct InstalledPatch {
   std::string identity;       // SHA-256 of the package manifest (names every payload and target digest)
   std::string id, version, name;
-  std::string target_sha256;  // verified digest of the patched image
+  std::string target_sha256;  // verified digest of the patched image (a native-only package leaves the image unchanged: this is the original's digest)
+  // SEG-124 (ADR 0267): a package with a `native` payload CARRIES EXECUTABLE SOURCE (a trusted native-source patch). Recorded at install from the verified package; the build re-verifies the
+  // package itself. `native_approved` is the user's explicit approval of THIS exact package identity (set only by the code-bearing install sheet; another package never inherits it).
+  std::string native_source_sha256;
+  unsigned native_abi = 0, native_caps = 0;
+  std::string author, license;
+  bool native_approved = false;
+  [[nodiscard]] bool has_native() const { return !native_source_sha256.empty(); }
   std::string widescreen, side_style;   // the package's typed presentation defaults (closed name sets, "" = none)
   int width_max = -1;         // the package's stated validated Widescreen Width (0..100), -1 = not stated; informational only (never drives capability)
   long long installed_at = 0;

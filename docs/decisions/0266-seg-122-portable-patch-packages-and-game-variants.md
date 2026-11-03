@@ -34,7 +34,7 @@ invented hardware modes or raised hardware limits; deterministic, fail-closed; n
    patched-image SHA-256, optional `requires` (refused when unknown) and `widescreen_width_max` (informational, never drives capability). Standard BPS1 with source, target and patch CRC-32, range-checked copy
    offsets, exact command-stream end and a bounded output. The ZIP reader is bounded and conservative (entry count, names, sizes enforced while inflating, CRC, overlap, no links, no encryption, no ZIP64,
    no trailing data). The package identity is the SHA-256 of the manifest bytes (it names every payload and target digest). One implementation (`libs/media/src/patch_*.cpp`) serves the CLI seam
-   (`segarecomp patch inspect|verify|apply`) and the launcher; nothing in a package is ever executed; there is no scripting, plugin, hook or dependency mechanism.
+   (`segarecomp patch inspect|verify|apply`) and the launcher; nothing in a schema 1 package is ever executed (schema 2, ADR 0267, adds an explicitly trusted native-source payload); there is no scripting, plugin, hook or dependency mechanism.
 4. **Mechanism boundary: an input image modification before the normal static pipeline.** A Patched build materializes the verified patched image inside the build attempt's own partial folder (removed
    before publishing; never in a published build; the original file is only read) and the unchanged recompiler processes it. There is no runtime memory injection, no host code from packages, no change to
    the generic M68K, Z80 or VDP, and no title string heuristic: selection is by full source SHA-256. The patched game may execute different guest logic from Vanilla; guest equivalence is required

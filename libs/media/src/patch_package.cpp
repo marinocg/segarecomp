@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -286,7 +287,7 @@ class JsonReader {
     return false;
   }
   bool value(Value &out, int depth) {
-    if (depth > 3 || pos_ >= t_.size()) return false;
+    if (depth > 4 || pos_ >= t_.size()) return false;
     if (t_[pos_] == '"') { out.kind = Value::Kind::string; return string(out.text); }
     if (t_[pos_] >= '0' && t_[pos_] <= '9') {
       out.kind = Value::Kind::number;
@@ -338,6 +339,10 @@ class JsonReader {
   std::size_t pos_ = 0;
 };
 
+bool printable(const std::string &s) {
+  return std::all_of(s.begin(), s.end(), [](char c) { return static_cast<unsigned char>(c) >= 0x20 && static_cast<unsigned char>(c) < 0x7F; });
+}
+
 bool is_hex64(const std::string &s) {
   return s.size() == 64 && std::all_of(s.begin(), s.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
 }
@@ -362,6 +367,14 @@ bool only_keys(const Value &obj, std::initializer_list<const char *> keys) {
   return true;
 }
 
+unsigned capability_bit(const std::string &name) {
+  if (name == "frame.work_ram") return kCapFrameWorkRam;
+  if (name == "frame.vdp") return kCapFrameVdp;
+  if (name == "scenery.words") return kCapSceneryWords;
+  if (name == "overlay.rgba") return kCapOverlayRgba;
+  return 0U;
+}
+
 Package bad(std::string why) {
   Package p;
   p.error = std::move(why);
@@ -369,6 +382,8 @@ Package bad(std::string why) {
 }
 
 }  // namespace
+
+unsigned native_capability_bit(const std::string &name) { return capability_bit(name); }
 
 Package read_package(std::span<const std::uint8_t> zip) {
   std::map<std::string, ZipEntry> entries;
@@ -380,7 +395,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
   JsonReader reader(std::string_view(reinterpret_cast<const char *>(man->second.data.data()), man->second.data.size()));
   if (!reader.parse(root) || root.kind != Value::Kind::object) return bad(reader.error);
   static const char *const required[] = {"format", "schema_version", "id", "version", "name", "platform", "purpose", "source_sha256", "payloads"};
-  static const char *const optional[] = {"requires", "widescreen_width_max", "presentation_defaults"};
+  static const char *const optional[] = {"requires", "widescreen_width_max", "presentation_defaults", "author", "license"};
   for (const char *k : required) if (root.find(k) == nullptr) return bad(std::string("the manifest is missing \"") + k + "\"");
   for (const std::string &k : root.keys) {
     bool known = false;
@@ -393,7 +408,8 @@ Package read_package(std::span<const std::uint8_t> zip) {
   if (!take_string(root, "format", format) || format != "segarecomp-patch") return bad("the manifest is not a segarecomp patch manifest");
   const Value &ver = root.at("schema_version");
   if (ver.kind != Value::Kind::number) return bad("the manifest schema_version is invalid");
-  if (ver.number != 1) return bad("unsupported patch package schema version " + std::to_string(ver.number));
+  if (ver.number != 1 && ver.number != 2) return bad("unsupported patch package schema version " + std::to_string(ver.number));
+  info.schema_version = static_cast<int>(ver.number);
   if (!take_string(root, "id", info.id) || !token(info.id, 64, false)) return bad("the manifest id is invalid");
   if (!take_string(root, "version", info.version) || !token(info.version, 32, true)) return bad("the manifest version is invalid");
   if (!take_string(root, "name", info.name) || info.name.empty() || info.name.size() > 64) return bad("the manifest name is invalid");
@@ -416,39 +432,80 @@ Package read_package(std::span<const std::uint8_t> zip) {
         return bad("the manifest presentation_defaults side_style value is not supported");
     }
   }
-  if (const Value *r = root.find("requires"); r != nullptr) {
+  if (const Value *r = root.find("requires"); r != nullptr) {   // no capability is named here (ADR 0267): a provider's needs live in its `native` payload; any entry is refused, as in schema 1
     if (r->kind != Value::Kind::array || r->items.size() > 8) return bad("the manifest requires list is invalid");
-    for (const Value &item : r->items) {
-      if (item.kind != Value::Kind::string || !token(item.text, 48, false)) return bad("the manifest requires list is invalid");
-      bool supported = false;
-      for (const char *const *c = kSupportedCapabilities; *c != nullptr; ++c) supported = supported || item.text == *c;
-      if (!supported) return bad("this segarecomp does not provide the required capability \"" + item.text + "\"");
-      info.requires_capabilities.push_back(item.text);
-    }
+    if (!r->items.empty()) return bad("this segarecomp does not provide the required capability \"" + (r->items[0].kind == Value::Kind::string ? r->items[0].text : std::string("?")) + "\"");
+  }
+  if (info.schema_version < 2 && (root.find("author") != nullptr || root.find("license") != nullptr)) return bad("the manifest has an unknown field (author and license need schema 2)");
+  if (const Value *au = root.find("author"); au != nullptr) {
+    if (au->kind != Value::Kind::string || au->text.empty() || au->text.size() > 64 || !printable(au->text)) return bad("the manifest author is invalid");
+    info.author = au->text;
+  }
+  if (const Value *li = root.find("license"); li != nullptr) {
+    if (li->kind != Value::Kind::string || !token(li->text, 32, true)) return bad("the manifest license is invalid");
+    info.license = li->text;
   }
   const Value &payloads = root.at("payloads");
   if (payloads.kind != Value::Kind::object || payloads.members.empty()) return bad("the manifest payloads are invalid");
   for (const std::string &name : payloads.keys) {
-    if (name != "rom") return bad("the manifest names an unsupported payload type \"" + name + "\"");
+    if (name != "rom" && !(name == "native" && info.schema_version >= 2)) return bad("the manifest names an unsupported payload type \"" + name + "\"");
   }
-  const Value &rom = payloads.at("rom");
-  if (rom.kind != Value::Kind::object || !only_keys(rom, {"format", "file", "sha256", "target_sha256"})) return bad("the rom payload is invalid");
-  std::string pformat;
-  if (!take_string(rom, "format", pformat) || pformat != "bps") return bad("the rom payload format is not supported");
-  if (!take_string(rom, "file", info.rom_file) || !safe_name(info.rom_file) || info.rom_file == "manifest.json") return bad("the rom payload file name is invalid");
-  if (!take_string(rom, "sha256", info.rom_payload_sha256) || !is_hex64(info.rom_payload_sha256)) return bad("the rom payload sha256 is invalid");
-  if (!take_string(rom, "target_sha256", info.target_sha256) || !is_hex64(info.target_sha256)) return bad("the rom payload target_sha256 is invalid");
-  if (info.source_sha256 == info.target_sha256) return bad("the manifest source and target are identical");
-  info.has_rom = true;
-  if (entries.size() != 2) return bad("the package must contain exactly manifest.json and the declared payload");
-  const auto pit = entries.find(info.rom_file);
-  if (pit == entries.end()) return bad("the payload named by the manifest is missing from the package");
-  if (sha256_hex(pit->second.data) != info.rom_payload_sha256) return bad("the payload SHA-256 does not match the manifest");
-  info.identity = sha256_hex(man->second.data);
+  std::size_t expected_entries = 1;
+  if (const Value *rom = payloads.find("rom"); rom != nullptr) {
+    if (rom->kind != Value::Kind::object || !only_keys(*rom, {"format", "file", "sha256", "target_sha256"})) return bad("the rom payload is invalid");
+    std::string pformat;
+    if (!take_string(*rom, "format", pformat) || pformat != "bps") return bad("the rom payload format is not supported");
+    if (!take_string(*rom, "file", info.rom_file) || !safe_name(info.rom_file) || info.rom_file == "manifest.json") return bad("the rom payload file name is invalid");
+    if (!take_string(*rom, "sha256", info.rom_payload_sha256) || !is_hex64(info.rom_payload_sha256)) return bad("the rom payload sha256 is invalid");
+    if (!take_string(*rom, "target_sha256", info.target_sha256) || !is_hex64(info.target_sha256)) return bad("the rom payload target_sha256 is invalid");
+    if (info.source_sha256 == info.target_sha256) return bad("the manifest source and target are identical");
+    info.has_rom = true;
+    ++expected_entries;
+  }
+  if (const Value *nat = payloads.find("native"); nat != nullptr) {
+    if (nat->kind != Value::Kind::object || !only_keys(*nat, {"format", "file", "sha256", "abi", "capabilities", "executable"})) return bad("the native payload is invalid");
+    std::string pformat, executable;
+    if (!take_string(*nat, "format", pformat) || pformat != "c11-source") return bad("the native payload format is not supported");
+    if (!take_string(*nat, "executable", executable) || executable != "yes") return bad("a native payload must declare that it contains executable source (\"executable\": \"yes\")");
+    if (!take_string(*nat, "file", info.native_file) || info.native_file != kProviderFileName || (info.has_rom && info.native_file == info.rom_file)) return bad("the native payload file name must be provider.c");
+    if (!take_string(*nat, "sha256", info.native_sha256) || !is_hex64(info.native_sha256)) return bad("the native payload sha256 is invalid");
+    const Value &abi = nat->at("abi");
+    if (abi.kind != Value::Kind::number || abi.number != kNativeAbiVersion) return bad("this segarecomp does not provide native patch ABI version " + (abi.kind == Value::Kind::number ? std::to_string(abi.number) : std::string("?")));
+    info.native_abi = static_cast<unsigned>(abi.number);
+    const Value &caps = nat->at("capabilities");
+    if (caps.kind != Value::Kind::array || caps.items.empty() || caps.items.size() > 4) return bad("the native payload capabilities are invalid");
+    for (const Value &c : caps.items) {
+      const unsigned bit = c.kind == Value::Kind::string ? capability_bit(c.text) : 0U;
+      if (bit == 0U) return bad("this segarecomp does not provide the capability \"" + (c.kind == Value::Kind::string ? c.text : std::string("?")) + "\"");
+      if ((info.native_caps & bit) != 0U) return bad("the native payload repeats a capability");
+      info.native_caps |= bit;
+    }
+    if ((info.native_caps & (kCapSceneryWords | kCapOverlayRgba)) == 0U) return bad("the native payload contributes nothing (it needs scenery.words or overlay.rgba)");
+    if (info.author.empty()) return bad("a package with executable source must name its author");
+    info.has_native = true;
+    ++expected_entries;
+  }
+  if (!info.has_rom && !info.has_native) return bad("the manifest payloads are invalid");
+  if (entries.size() != expected_entries) return bad("the package must contain exactly manifest.json and the declared payloads");
   Package out;
+  if (info.has_rom) {
+    const auto pit = entries.find(info.rom_file);
+    if (pit == entries.end()) return bad("the payload named by the manifest is missing from the package");
+    if (pit->second.data.size() > kMaxPatchBytes || sha256_hex(pit->second.data) != info.rom_payload_sha256) return bad("the payload SHA-256 does not match the manifest");
+    out.payload = std::move(pit->second.data);
+  }
+  if (info.has_native) {
+    const auto nit = entries.find(info.native_file);
+    if (nit == entries.end()) return bad("the native payload named by the manifest is missing from the package");
+    const std::vector<std::uint8_t> &src = nit->second.data;
+    if (src.empty() || src.size() > kMaxProviderSourceBytes) return bad("the provider source is empty or larger than allowed");
+    if (std::find(src.begin(), src.end(), static_cast<std::uint8_t>(0)) != src.end()) return bad("the provider source contains a NUL byte");
+    if (sha256_hex(src) != info.native_sha256) return bad("the provider source SHA-256 does not match the manifest");
+    out.native = std::move(nit->second.data);
+  }
+  info.identity = sha256_hex(man->second.data);
   out.ok = true;
   out.info = std::move(info);
-  out.payload = std::move(pit->second.data);
   return out;
 }
 
@@ -457,6 +514,11 @@ Applied apply_package(const Package &package, std::span<const std::uint8_t> rom)
   if (!package.ok) { a.error = "the package was not verified"; return a; }
   if (rom.size() > kMaxImageBytes) { a.error = "the original image is too large"; return a; }
   if (sha256_hex(rom) != package.info.source_sha256) { a.error = "the original image is not the exact image this patch was made for"; return a; }
+  if (!package.info.has_rom) {   // native-only: the original image is the effective image, byte for byte
+    a.ok = true;
+    a.image.assign(rom.begin(), rom.end());
+    return a;
+  }
   BpsResult r = apply_bps(package.payload, rom);
   if (!r.ok) { a.error = r.error; return a; }
   if (sha256_hex(r.output) != package.info.target_sha256) { a.error = "the patched image does not match the manifest target SHA-256"; return a; }
@@ -497,7 +559,7 @@ FileApplied apply_package_file(const std::filesystem::path &package, const std::
   r.rom_sha256 = sha256_hex(rom_bytes);
   Applied applied = apply_package(pkg, rom_bytes);
   if (!applied.ok) { r.error = applied.error; return r; }
-  r.target_sha256 = pkg.info.target_sha256;
+  r.target_sha256 = pkg.info.has_rom ? pkg.info.target_sha256 : r.rom_sha256;
   if (!out.empty()) {
     std::error_code ec;
     if (out == rom || std::filesystem::equivalent(out, rom, ec)) { r.error = "the output would overwrite the original image"; return r; }

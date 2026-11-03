@@ -9,6 +9,7 @@
 #include "segarecomp/machine/genesis/z80_materialization.hpp"
 #include "segarecomp/machine/master_system/emit.hpp"
 #include "segarecomp/machine/master_system/ml_region_z80_producer.hpp"
+#include "segarecomp/patch.hpp"
 #include "segarecomp/rom.hpp"
 #include "segarecomp/sha256.hpp"
 
@@ -105,6 +106,15 @@ struct Options {
   // H-interrupt whose RAM-resident vector has no compiled handler STOPS the pass and ADR 0049 can derive its copy alias / RAM thunk.
   // Default off: the default policy counts and drops such an interrupt. Genesis only; it changes the generated program.
   bool hint_alias_discovery = false;
+  // SEG-124 (ADR 0267): a trusted native-source package. The build takes a REFERENCE to the package (never source text, paths of source or capability strings from the caller): it reads the
+  // package itself, re-verifies it (archive, manifest, source digest, that its identity is the one the user approved, that the image being built is the one it declares), extracts the
+  // provider source into a private area of this build and compiles it against the public SDK only. Empty = Vanilla / BPS-only build: no provider code at all.
+  fs::path patch_package;
+  std::string patch_identity;
+  // resolved by the verification step
+  fs::path native_source;            // <output>/native/provider.c, re-hashed after extraction
+  unsigned native_caps = 0;
+  std::string native_source_sha256;
 };
 
 enum class Target { genesis, master_system };
@@ -183,6 +193,8 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--admission-plan" && !options.admission_plan) options.admission_plan = fs::path(value);
     else if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) options.aot_policy = value;
     else if (key == "--hint-alias-discovery" && (value == "0" || value == "1")) options.hint_alias_discovery = value == "1";
+    else if (key == "--patch-package") { if (!options.patch_package.empty()) return std::nullopt; options.patch_package = fs::path(value); }
+    else if (key == "--patch-identity") { if (!options.patch_identity.empty()) return std::nullopt; options.patch_identity = value; }
     else if (key == "--aot-model" && !aot_model_given && (value == "v1" || value == "gen2")) { options.aot_model = value; aot_model_given = true; }
     else return std::nullopt;
   }
@@ -192,6 +204,11 @@ std::optional<Options> parse_options(int argc, char **argv) {
   if (options.sdl3_include.has_value() != options.sdl3_lib.has_value()) return std::nullopt;
   if (options.aot_model == "gen2" && options.aot_policy != "optimized") return std::nullopt;  // gen2 is an opt-in of Optimized, never a policy
   if (!options.platform.empty() && options.platform != "genesis" && options.platform != "master-system") return std::nullopt;
+  if (options.patch_package.empty() != options.patch_identity.empty()) return std::nullopt;   // a package reference and the identity the user approved travel together
+  if (!options.patch_package.empty()) {
+    const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
+    if (!hex64(options.patch_identity) || options.platform == "master-system" || !options.sdl3_include.has_value()) return std::nullopt;   // a presentation provider needs the Genesis viewer build
+  }
   return options;
 }
 
@@ -235,6 +252,7 @@ struct CompileJob {
   fs::path object;
   std::vector<std::string> extra;
   bool cxx = false;
+  bool isolated = false;   // a package's provider source: compiled with the SDK include directory ONLY (never the runtime's or the viewer's private headers)
 };
 
 // Derives the C++ driver from the C driver when `--cxx` was not given: `<zig> cc ...` -> `<zig> c++ ...`; `cc`, `gcc`, `clang`
@@ -296,7 +314,7 @@ struct GenesisSoundBuild {
   Log &log;
   std::string pass_region = "usa";  // SEGARECOMP_GENESIS_REGION of every observation pass (genesis_pass_region)
   fs::path root, runtime, viewer, psg, ym, object_dir, pass_dir, z80_dir;
-  std::vector<std::string> c_base, cxx_base;
+  std::vector<std::string> c_base, cxx_base, c_isolated;   // c_isolated: the compiler and the SDK-only flags of a package provider
   unsigned jobs = 1;
   bool play = false;
   // Aggregates (sanitized): the Z80 part of the build.
@@ -334,7 +352,16 @@ struct GenesisSoundBuild {
     std::vector<std::vector<std::string>> commands;
     std::vector<fs::path> logs;
     for (const CompileJob &job : batch) {
-      auto command = job.cxx ? cxx_base : c_base;
+      if (job.isolated) {   // the provider source is re-hashed immediately before it is compiled (it lives in this build's own folder; nothing may have replaced it since extraction)
+        std::ifstream check(job.source, std::ios::binary);
+        std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
+        if (segarecomp::sha256_hex(bytes) != options.native_source_sha256) {
+          failure_detail = "The provider source changed after it was verified.";
+          failure_diagnostic = "PATCH_SOURCE_DIGEST";
+          return static_cast<int>(&job - batch.data());
+        }
+      }
+      auto command = job.isolated ? c_isolated : (job.cxx ? cxx_base : c_base);
       command.insert(command.end(), job.extra.begin(), job.extra.end());
       command.insert(command.end(), {"-c", "-o", job.object.string(), job.source.string()});
       commands.push_back(std::move(command));
@@ -830,6 +857,11 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   if (build.play)
     build.c_base.insert(build.c_base.end(), {"-I", build.viewer.string(), "-I", (build.root / "libs" / "viewer" / "include").string(), "-I",
                                              (build.root / "libs" / "viewer" / "src").string(), "-I", options.sdl3_include->string()});
+  if (!options.native_source.empty()) {
+    build.c_isolated = {options.cc};
+    build.c_isolated.insert(build.c_isolated.end(), options.cc_args.begin(), options.cc_args.end());
+    build.c_isolated.insert(build.c_isolated.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", opt, "-I", (options.runtime_dir / "sdk").string()});
+  }
   build.cxx_base = {options.cxx};
   build.cxx_base.insert(build.cxx_base.end(), options.cxx_args.begin(), options.cxx_args.end());
   build.cxx_base.insert(build.cxx_base.end(), {"-std=c++14", "-fno-exceptions", "-fno-rtti", opt, "-I", (build.ym / "include").string()});
@@ -864,7 +896,14 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     // SEG-058 (ADR 0120): the shared SDL3 viewer foundation (settings, layout/CRT math, menu model, host, pause pages), strict C11 like the rest.
     for (const char *name : kViewerFoundationSources)
       add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name);
-    add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND"});
+    if (!options.native_source.empty()) {
+      // SEG-124: the provider of the verified package, compiled from the private copy extracted for THIS build and linked into this program only.
+      add(final_only, options.native_source, "native-provider");
+      stable.back().isolated = true;
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::to_string(options.native_caps) + "U"});
+    } else {
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND"});
+    }
   } else {
     add(final_only, build.runtime / "genesis_sound_hook.c", "hook-sound");
     // SEG-068-T007: the sound hook delegates its run loop to the existing headless frame capture when SEGARECOMP_CAPTURE_DIR is
@@ -1071,6 +1110,32 @@ int segarecomp_build_command(int argc, char **argv) {
       else if (info.outcome == segarecomp::ClassificationOutcome::recognized && info.platform == segarecomp::Platform::game_gear)
         return fail(options, log, sha, "analyze", 1, "Game Gear images are not supported.", "PLATFORM_UNSUPPORTED");
     }
+    if (!options.patch_package.empty()) {   // SEG-124: independent re-verification of the package reference (a preview in the launcher is not enough: files may change before compilation)
+      if (target != Target::genesis) return fail(options, log, sha, "analyze", 1, "A native compatibility provider applies only to Genesis images.", "NATIVE_NOT_APPLICABLE");
+      const auto package = segarecomp::patch::read_package_file(options.patch_package);
+      if (!package.ok) return fail(options, log, sha, "analyze", 1, "The patch package is not valid: " + package.error, "PATCH_PACKAGE_INVALID");
+      if (!package.info.has_native) return fail(options, log, sha, "analyze", 1, "The patch package carries no native provider.", "PATCH_NO_PROVIDER");
+      if (package.info.identity != options.patch_identity) return fail(options, log, sha, "analyze", 1, "The patch package changed after it was approved.", "PATCH_IDENTITY_CHANGED");
+      const std::string expected_image = package.info.has_rom ? package.info.target_sha256 : package.info.source_sha256;
+      if (sha != expected_image) return fail(options, log, sha, "analyze", 1, "The image being built is not the one the patch package declares.", "PATCH_IMAGE_MISMATCH");
+      std::error_code native_ec;
+      const fs::path native_dir = options.output / "native";
+      fs::create_directories(native_dir, native_ec);
+      if (native_ec) return fail(options, log, sha, "analyze", 1, "The provider folder could not be created.", "PATCH_EXTRACT_FAILED");
+      { std::error_code rm_ec; fs::remove(native_dir / segarecomp::patch::kProviderFileName, rm_ec); }   // never write through a pre-existing file or link
+      options.native_source = native_dir / segarecomp::patch::kProviderFileName;
+      {
+        std::ofstream out(options.native_source, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char *>(package.native.data()), static_cast<std::streamsize>(package.native.size()));
+        if (!out) return fail(options, log, sha, "analyze", 1, "The provider source could not be written.", "PATCH_EXTRACT_FAILED");
+      }
+      std::ifstream check(options.native_source, std::ios::binary);
+      std::vector<std::uint8_t> written((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
+      if (segarecomp::sha256_hex(written) != package.info.native_sha256) return fail(options, log, sha, "analyze", 1, "The extracted provider source does not match its digest.", "PATCH_SOURCE_DIGEST");
+      options.native_caps = package.info.native_caps;
+      options.native_source_sha256 = package.info.native_sha256;
+      log.line("native provider: package=" + package.info.identity + " source_sha256=" + package.info.native_sha256 + " abi=" + std::to_string(package.info.native_abi) + " capabilities=" + std::to_string(package.info.native_caps));
+    }
     sms::IngestOptions ingest_options;
     if (target == Target::master_system && options.admission)
       return fail(options, log, sha, "analyze", 1, "A hybrid admission plan applies only to Genesis images.", "ADMISSION_NOT_APPLICABLE");
@@ -1183,6 +1248,9 @@ int segarecomp_build_command(int argc, char **argv) {
       const int rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
                                            m68k_images, executable, status_extra, sound_degraded);
       if (rc != 0) return rc;
+      if (!options.native_source.empty())
+        status_extra += ",\"native\":{\"package_identity\":\"" + options.patch_identity + "\",\"provider_sha256\":\"" + options.native_source_sha256 + "\",\"abi\":" + std::to_string(segarecomp::patch::kNativeAbiVersion) +
+                        ",\"capabilities\":" + std::to_string(options.native_caps) + "}";
       if (!options.keep_work) fs::remove_all(options.output / "obj", ec);
       stage("link", "done");
       write_status(options, sha, "ok", "done", "", status_extra);

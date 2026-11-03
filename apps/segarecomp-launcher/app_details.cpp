@@ -783,7 +783,11 @@ float App::draw_variants(LibraryEntry &entry, const StatusInfo &info, float w) {
     if (option_tiles(ctx_, "variant_tiles", titles, descriptions, &sel, inner, ctx_.u(58.0F))) select_variant(entry.id(), sel == 0 ? std::string() : entry.patches[static_cast<std::size_t>(sel - 1)].identity);
     ImGui::EndDisabled();
     y += ctx_.u(66.0F);
-    std::string line = selected == nullptr ? "Selected: Vanilla - the original game and its existing program." : "Selected: Patched - " + patch_label(*selected) + ", a separate program built from the patched image.";
+    // SEG-124: a native-only package compiles the unchanged original image together with an audited native widescreen component; a combined package does both
+    const bool patched_image = selected != nullptr && selected->target_sha256 != entry.sha256;
+    std::string line = selected == nullptr ? "Selected: Vanilla - the original game and its existing program."
+                       : "Selected: Patched - " + patch_label(*selected) + (selected->has_native() ? (patched_image ? ", a separate program built from the patched image with a native widescreen component." : ", a separate program with a native widescreen component (the game image is unchanged).")
+                                                                                              : ", a separate program built from the patched image.");
     ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
     y += paragraph(ctx_, ctx_.bold, ctx_.u(12.0F), col::text, inner, line) + ctx_.u(4.0F);
     if (selected != nullptr) {

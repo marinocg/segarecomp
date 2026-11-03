@@ -52,6 +52,10 @@ struct SvHost {
   size_t side_buf_cap;
   SvExtSource ext_source;      /* provenance of the retained surface */
   SvWidescreenMode ext_prod_mode; /* mode the retained surface was produced as */
+  uint8_t ovl_rgba[SV_OVERLAY_MAX * SV_OVERLAY_MAX * 4];   /* SEG-124: the retained HUD overlay of the accepted surface (private copy) */
+  uint8_t ovl_scratch[SV_OVERLAY_MAX * SV_OVERLAY_MAX * 3];
+  int ovl_w, ovl_h;                                         /* 0 = none */
+  int ovl_fx, ovl_fy;                                       /* in-picture position when the visible side cannot hold it */
   uint64_t capture_frames[SV_CAPTURE_MAX];  /* automation seam: 1-based presented-frame numbers whose composed output is saved (SEGARECOMP_VIEWER_CAPTURE_FRAMES) */
   int capture_count, capture_all_styles;
   char capture_dir[512];

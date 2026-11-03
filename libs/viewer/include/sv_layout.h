@@ -64,8 +64,17 @@ typedef struct SvExtendedSurface {
   uint64_t sequence;
   SvWidescreenMode mode;
   SvWidescreenSupport status;
-  SvExtSource source; /* SEG-123, last member: zero-initialised callers stay GENERIC */
+  SvExtSource source; /* SEG-123: zero-initialised callers stay GENERIC */
+  /* SEG-124 (ADR 0267): an optional overlay supplied by a verified native compatibility implementation: the game's HUD, relocated (it replaces the game's own). RGBA8, tightly packed
+   * (pitch overlay_w * 4), at most SV_OVERLAY_MAX x SV_OVERLAY_MAX. Its rows are picture rows 1:1 (overlay row y is picture row y). The host draws it after the side treatment with its
+   * left edge at the left edge of the VISIBLE side (so only the horizontal position differs from where the game drew it), clipped to the surface; when there is no visible side
+   * (4:3, Original) it is drawn inside the picture with its top-left at (overlay_fx, overlay_fy), the place of the HUD it replaces. Fully transparent pixels leave the picture alone (no
+   * panel). It is independent of `source`; it is also drawn when the extension itself is not shown (Original). NULL / 0 = none. */
+  const uint8_t *overlay_rgba;
+  int overlay_w, overlay_h;
+  int overlay_fx, overlay_fy;
 } SvExtendedSurface;
+#define SV_OVERLAY_MAX 256
 
 typedef enum SvExtCheck {
   SV_EXT_OK = 0,

@@ -40,16 +40,27 @@ void App::patch_chosen(const std::string &id, const std::string &path) {
   modal_.target = preview.info.identity;
   modal_.lines = {};
   const std::string range = preview.info.widescreen_width_max < 0 ? std::string("not stated by the author") : "up to " + std::to_string(preview.info.widescreen_width_max) + " on the Widescreen Width scale";
-  modal_.lines = {"Compatible with this game: yes. It matches the exact original image (SHA-256 verified), the patch applied cleanly and the result matches its published digest.",
+  modal_.lines = {"Compatible with this game: yes. It matches the exact original image (SHA-256 verified) and every payload verified (a patch's result matches its published digest).",
                   "Purpose: " + preview.info.purpose + ". Validated width: " + range + ".",
                   std::string(preview.already_installed ? "This exact package is already installed on this game." : "Package identity " + short_hash(preview.info.identity) + ".")};
+  if (preview.info.has_native) {   // SEG-124 (ADR 0267): this package CARRIES EXECUTABLE SOURCE; the sheet is the user's approval of its exact identity
+    std::string caps;
+    for (const auto &c : {std::pair<unsigned, const char *>{segarecomp::patch::kCapFrameWorkRam, "work RAM snapshot"}, {segarecomp::patch::kCapFrameVdp, "VDP state"},
+                          {segarecomp::patch::kCapSceneryWords, "scenery"}, {segarecomp::patch::kCapOverlayRgba, "overlay"}})
+      if ((preview.info.native_caps & c.first) != 0U) caps += (caps.empty() ? "" : ", ") + std::string(c.second);
+    modal_.code_bearing = true;
+    modal_.lines.push_back("WARNING: this patch contains executable C source code by " + preview.info.author + (preview.info.license.empty() ? std::string() : " (" + preview.info.license + ")") +
+                           ". Segarecomp will compile it into the separate Patched program and it runs with that program's full permissions. It is NOT sandboxed. Install it only if you trust its source.");
+    modal_.lines.push_back("Source SHA-256 " + short_hash(preview.info.native_sha256) + ". Package identity " + short_hash(preview.info.identity) + ". Reads: " + caps + ". Native patch ABI " + std::to_string(preview.info.native_abi) + ".");
+    modal_.lines.push_back("Approving applies to this exact package only; a changed package must be approved again. Vanilla is never affected.");
+  }
   trace("patch=preview_ok");
 }
 
-void App::patch_install_confirmed(const std::string &id, const std::string &package) {
+void App::patch_install_confirmed(const std::string &id, const std::string &package, bool trust_native) {
   LibraryEntry *entry = catalog_.find_id(id);
   if (entry == nullptr || catalog_.read_only()) return;
-  const PatchInstall result = install_patch(*entry, from_u8(package), usable_rom_path(*entry), library_dir_, now_seconds());
+  const PatchInstall result = install_patch(*entry, from_u8(package), usable_rom_path(*entry), library_dir_, now_seconds(), trust_native);
   if (result.ok && !patch_expected_identity_.empty() && result.identity != patch_expected_identity_) {
     // the file changed between the preview and the confirmation: what would be installed is not what was shown
     if (result.added) { std::string ignored; (void)remove_patch(*entry, result.identity, library_dir_, &ignored); }
@@ -122,11 +133,15 @@ void App::patch_remove_confirmed(const Modal &sheet) {
   toast("Patch removed.");
 }
 
+void App::patch_install_from_sheet(const Modal &sheet) {
+  patch_install_confirmed(sheet.ids.empty() ? std::string() : sheet.ids.front(), u8s(patch_pending_), sheet.code_bearing);
+}
+
 void App::patch_modal_confirm() {
   const Modal m = modal_;
   if (m.kind == Modal::Kind::install_patch) {
     modal_ = Modal{};
-    patch_install_confirmed(m.ids.empty() ? std::string() : m.ids.front(), u8s(patch_pending_));
+    patch_install_from_sheet(m);
   } else if (m.kind == Modal::Kind::remove_patch) {
     modal_ = Modal{};
     patch_remove_confirmed(m);

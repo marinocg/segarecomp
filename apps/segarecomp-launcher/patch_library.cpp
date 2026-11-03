@@ -64,14 +64,19 @@ std::string patch_label(const InstalledPatch &patch) { return patch.name + (patc
 
 PatchPreview preview_patch(const LibraryEntry &entry, const fs::path &package, const fs::path &original_rom) { return verify(entry, package, original_rom, nullptr); }
 
-PatchInstall install_patch(LibraryEntry &entry, const fs::path &package, const fs::path &original_rom, const fs::path &library_root, long long now) {
+PatchInstall install_patch(LibraryEntry &entry, const fs::path &package, const fs::path &original_rom, const fs::path &library_root, long long now, bool trust_native) {
   PatchInstall result;
   std::vector<std::uint8_t> bytes;
   const PatchPreview checked = verify(entry, package, original_rom, &bytes);
   if (!checked.ok) { result.error = checked.error; return result; }
   result.identity = checked.info.identity;
+  if (checked.info.has_native && !trust_native) { result.error = "This patch contains executable code. It is installed only after you approve it."; return result; }
   if (entry.platform_id != "genesis") { result.error = "Patches are supported for Genesis / Mega Drive games only."; return result; }
-  if (entry.find_patch(checked.info.identity) != nullptr) { result.ok = true; return result; }  // the identical package: nothing to do
+  if (InstalledPatch *existing = const_cast<InstalledPatch *>(entry.find_patch(checked.info.identity)); existing != nullptr) {   // the identical package
+    if (existing->has_native() && trust_native && !existing->native_approved) { existing->native_approved = true; result.added = true; }   // an unapproved record is approved by the user's explicit action
+    result.ok = true;
+    return result;
+  }
   if (entry.patches.size() >= Catalog::max_patches) { result.error = "This game already has the maximum number of installed patches; remove one first."; return result; }
   std::error_code ec;
   const fs::path dir = library_root / "patches";
@@ -93,7 +98,15 @@ PatchInstall install_patch(LibraryEntry &entry, const fs::path &package, const f
   p.id = checked.info.id;
   p.version = checked.info.version;
   p.name = checked.info.name;
-  p.target_sha256 = checked.info.target_sha256;
+  p.target_sha256 = checked.info.has_rom ? checked.info.target_sha256 : entry.sha256;   // a native-only package compiles the unchanged original image
+  if (checked.info.has_native) {
+    p.native_source_sha256 = checked.info.native_sha256;
+    p.native_abi = checked.info.native_abi;
+    p.native_caps = checked.info.native_caps;
+    p.author = checked.info.author;
+    p.license = checked.info.license;
+    p.native_approved = trust_native;   // set only by the code-bearing install sheet (the user's approval of this exact package identity)
+  }
   p.width_max = checked.info.widescreen_width_max;
   p.widescreen = checked.info.default_widescreen;
   p.side_style = checked.info.default_side_style;

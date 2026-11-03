@@ -19,6 +19,9 @@
 #include "vdp_render.h"
 #include "viewer.h"
 #include "viewer_sdl3.h"
+#ifdef SEGARECOMP_NATIVE_PROVIDER_CAPS
+#include "native_compat.h" /* SEG-124: the provider of a verified package is linked only into a program built from it */
+#endif
 #ifdef SEGARECOMP_GENESIS_SOUND
 #include "genesis_audio_present.h" /* SEG-032-T009: the shared mixer is presented, never advanced, by the viewer */
 #include "genesis_sound.h"         /* SEG-032-T008: the sound-carrying link set of `segarecomp build` */
@@ -79,6 +82,16 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   g_raster_capture.producer = genesis_vdp_produce_frame_raster; /* SEG-055: scanline-aware frames */
   g_raster_capture.extension = genesis_sdl3_viewer_extension(sdl, &observer.sequence); /* SEG-118: Level 2 extended backgrounds (presentation only) */
   runtime->live_raster = &g_raster_capture;
+#ifdef SEGARECOMP_NATIVE_PROVIDER_CAPS
+  /* SEG-124 (ADR 0267): the build compiled the provider source of ONE verified package and linked it here; the capabilities it declared are a compile-time constant. A provider that
+   * declines to run, has another ABI version or cannot be attached leaves the viewer generic: it never guesses. */
+  {
+    void *compat_state = NULL;
+    const GenesisNativeCompat *compat = segarecomp_patch_provider(&compat_state);
+    if (compat == NULL || g_raster_capture.extension == NULL || genesis_sdl3_viewer_attach_native_compat(sdl, g_raster_capture.extension, compat, compat_state, SEGARECOMP_NATIVE_PROVIDER_CAPS) != 0)
+      fprintf(stderr, "viewer: native compatibility provider not attached; presenting generically\n");
+  }
+#endif
 
   GenesisViewerHost host;
   GenesisPacer pacer;
@@ -124,6 +137,18 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
              (int)r.transfer.kind, (unsigned)runtime->pc);
     genesis_sdl3_viewer_stop_screen(sdl, r.outcome == GENESIS_VIEWER_GUEST_STOP ? "The game stopped" : "The viewer stopped", detail);
   }
+#ifdef SEGARECOMP_NATIVE_PROVIDER_CAPS
+  {
+    GenesisNativeCompatStats stats;
+    void *unused_state = NULL;
+    const GenesisNativeCompat *selected = segarecomp_patch_provider(&unused_state);
+    genesis_sdl3_viewer_native_compat_stats(sdl, &stats);
+    fprintf(stderr, "VIEWER_NATIVE_SUMMARY {\"capability\":\"%s\",\"frames\":%llu,\"authored\":%llu,\"hud_frames\":%llu,\"declined\":[%llu,%llu,%llu,%llu,%llu,%llu,%llu]}\n", selected != NULL && selected->name != NULL ? selected->name : "none",
+            (unsigned long long)stats.frames, (unsigned long long)stats.authored, (unsigned long long)stats.hud_frames, (unsigned long long)stats.declined[0],
+            (unsigned long long)stats.declined[1], (unsigned long long)stats.declined[2], (unsigned long long)stats.declined[3], (unsigned long long)stats.declined[4],
+            (unsigned long long)stats.declined[5], (unsigned long long)stats.declined[6]);
+  }
+#endif
   genesis_sdl3_viewer_close(sdl);
 
   const char *name = r.outcome == GENESIS_VIEWER_GUEST_STOP        ? "guest_stop"

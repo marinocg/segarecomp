@@ -801,6 +801,42 @@ static GenesisVdpCandidatePixel genesis_vdp_plane_candidate_at(const GenesisVdpR
                                       plane_y % ctx->geometry.cell_height);
 }
 
+/* SEG-124 (ADR 0267): the host helper table of the native patch ABI: the runtime's own VDP functions behind a fixed, SDK-visible signature. */
+_Static_assert(sizeof(GenesisCompatLine) == sizeof(GenesisRasterLine) && offsetof(GenesisCompatLine, cram) == offsetof(GenesisRasterLine, cram) &&
+                   offsetof(GenesisCompatLine, vsram) == offsetof(GenesisRasterLine, vsram) && GENESIS_COMPAT_REGISTERS == GENESIS_VDP_REGISTER_COUNT &&
+                   GENESIS_COMPAT_CRAM_BYTES == GENESIS_VDP_CRAM_BYTES && GENESIS_COMPAT_VSRAM_BYTES == GENESIS_VDP_VSRAM_BYTES && GENESIS_COMPAT_VRAM_BYTES == GENESIS_VDP_VRAM_BYTES &&
+                   GENESIS_COMPAT_MAX_LINES == GENESIS_RASTER_MAX_LINES,
+               "the SDK's line layout is the runtime's raster line layout");
+static int genesis_compat_host_hscroll(const uint8_t vram[GENESIS_COMPAT_VRAM_BYTES], const uint16_t registers[GENESIS_COMPAT_REGISTERS], unsigned plane, unsigned line, int32_t *value) {
+  if (plane > 1U) return -1;
+  return genesis_vdp_read_hscroll(vram, registers, plane == 0U ? GENESIS_VDP_PLANE_A : GENESIS_VDP_PLANE_B, line, value);
+}
+static int genesis_compat_host_vscroll(const uint8_t vsram[GENESIS_COMPAT_VSRAM_BYTES], const uint16_t registers[GENESIS_COMPAT_REGISTERS], unsigned plane, unsigned cell_column, int32_t *value) {
+  if (plane > 1U) return -1;
+  return genesis_vdp_read_vscroll(vsram, registers, plane == 0U ? GENESIS_VDP_PLANE_A : GENESIS_VDP_PLANE_B, cell_column, value);
+}
+static int genesis_compat_host_vscroll_per_column(const uint16_t registers[GENESIS_COMPAT_REGISTERS]) { return genesis_vdp_vscroll_mode_is_2cell(registers); }
+static int genesis_compat_host_cram_rgb(const uint8_t cram[GENESIS_COMPAT_CRAM_BYTES], unsigned index, uint8_t rgb[3]) {
+  GenesisRgb888 color;
+  if (genesis_vdp_decode_cram_entry(cram, index, &color) != 0) return -1;
+  rgb[0] = color.r; rgb[1] = color.g; rgb[2] = color.b;
+  return 0;
+}
+const GenesisCompatHost *genesis_native_compat_host(void) {
+  static const GenesisCompatHost host = {sizeof(GenesisCompatHost), genesis_compat_host_hscroll, genesis_compat_host_vscroll, genesis_compat_host_vscroll_per_column, genesis_compat_host_cram_rgb};
+  return &host;
+}
+
+/* SEG-124 (ADR 0267): the same candidate as genesis_vdp_plane_candidate_at, but the name-table word of the world cell beneath an off-screen column comes from a verified
+ * native compatibility provider instead of the (wrapped) nametable. Pattern, flips, palette line and priority are decoded exactly as for any cell. */
+static GenesisVdpCandidatePixel genesis_vdp_plane_candidate_from_word(const GenesisVdpRenderContext *ctx, const GenesisVdpRowPlane *plane, int64_t x,
+                                                                      unsigned group, unsigned row, uint16_t word) {
+  const int32_t vscroll = plane->vscroll[group < GENESIS_VDP_VSRAM_GROUP_COUNT ? group : 0U];
+  const unsigned plane_x = genesis_vdp_wrap_coordinate(x - (int64_t)plane->hscroll, plane->width_px);
+  const unsigned plane_y = genesis_vdp_plane_y(row, vscroll, plane->height_px);
+  return genesis_vdp_fetch_cell_pixel(ctx, genesis_vdp_decode_nametable_word(word), plane_x % GENESIS_VDP_TILE_WIDTH, plane_y % ctx->geometry.cell_height);
+}
+
 /* Plane A or B candidate at (x, row) from the plane's per-row constants. */
 static GenesisVdpCandidatePixel genesis_vdp_plane_candidate(const GenesisVdpRenderContext *ctx,
                                                             const GenesisVdpRowPlane *plane, unsigned x,
@@ -1135,6 +1171,10 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   uint8_t sprite_reason = 0U;
   uint32_t sprite_pixels = 0U;
   int journaled, sprites;
+  unsigned compat_accepted = 0U;
+  uint8_t compat_reason = 0U;
+  uint32_t compat_faults = 0U;
+  uint16_t compat_overlay_w = 0U, compat_overlay_h = 0U, compat_overlay_fx = 0U, compat_overlay_fy = 0U;
   GenesisVdpCandidatePixel sprite_row[GENESIS_EXT_MAX_WIDTH]; /* Level 3: the row's sprite layer over columns -side .. width + side - 1 */
   if (out == NULL) return -1;
   if (vram == NULL || raster == NULL || native == NULL || target == NULL || target->pixels == NULL) {
@@ -1175,6 +1215,34 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     memcpy(work_vram, raster->vram_start, sizeof(work_vram));
     ctx.vram = work_vram;
   }
+  /* SEG-124: ask the verified provider (if any) whether it serves this frame. It sees only the frame's own raster state and the snapshot taken at the previous onset. */
+  if (target->compat != NULL && target->compat_components != 0U) {
+    GenesisCompatFrame cf;
+    GenesisCompatDecision decision;
+    memset(&cf, 0, sizeof(cf));
+    memset(&decision, 0, sizeof(decision));
+    cf.requested = target->compat_components & target->compat->components;
+    if (target->compat->abi_version != GENESIS_NATIVE_COMPAT_ABI || target->compat->prepare == NULL || cf.requested == 0U) {
+      compat_reason = (uint8_t)GENESIS_COMPAT_FAULT;
+    } else if ((target->compat_caps & GENESIS_CAP_FRAME_WORK_RAM) != 0U && (!target->compat_ram_valid || target->compat_ram == NULL)) {
+      compat_reason = (uint8_t)GENESIS_COMPAT_STALE_STATE;
+    } else {
+      /* the host grants exactly the capabilities the verified package declared; everything is a read-only view */
+      cf.host = genesis_native_compat_host();
+      cf.work_ram = (target->compat_caps & GENESIS_CAP_FRAME_WORK_RAM) != 0U ? target->compat_ram : NULL;
+      if ((target->compat_caps & GENESIS_CAP_FRAME_VDP) != 0U) {
+        cf.lines = (const GenesisCompatLine *)(const void *)raster->lines;
+        cf.line_count = height < GENESIS_RASTER_MAX_LINES ? height : GENESIS_RASTER_MAX_LINES;
+        cf.vram = journaled ? raster->vram_start : vram;
+      }
+      cf.width = width;
+      cf.height = height;
+      cf.side = side;
+      target->compat->prepare(target->compat_state, &cf, &decision);
+      compat_accepted = decision.accepted & cf.requested;
+      compat_reason = compat_accepted != 0U ? (uint8_t)GENESIS_COMPAT_OK : decision.reason;
+    }
+  }
   groups = width / 16U;
   for (unsigned row = 0U; row < height; ++row) {
     const unsigned field_line = geometry.im2 ? row / 2U : row;
@@ -1212,9 +1280,28 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
         unsigned index;
         memset(&none, 0, sizeof(none));
         /* The window plane does not exist off-screen: on rows where it owns the edge, Plane A is left out there (never repeated or guessed). */
-        if (window_edge) a = none;
-        else a = genesis_vdp_plane_candidate_at(&ctx, &plane_a, x, plane_a.per_column ? group : 0U, row);
-        b = genesis_vdp_plane_candidate_at(&ctx, &plane_b, x, plane_b.per_column ? group : 0U, row);
+        if (window_edge) {
+          a = none;
+        } else {
+          const unsigned ga = plane_a.per_column ? group : 0U;
+          uint16_t word = 0U;
+          if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && target->compat->scenery_word(target->compat_state, 0U, row, (int)x, (int)plane_a.hscroll, (int)plane_a.vscroll[ga], &word) != 0)
+            a = genesis_vdp_plane_candidate_from_word(&ctx, &plane_a, x, ga, row, word);
+          else {
+            if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U) ++compat_faults;
+            a = genesis_vdp_plane_candidate_at(&ctx, &plane_a, x, ga, row);
+          }
+        }
+        {
+          const unsigned gb = plane_b.per_column ? group : 0U;
+          uint16_t word = 0U;
+          if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && target->compat->scenery_word(target->compat_state, 1U, row, (int)x, (int)plane_b.hscroll, (int)plane_b.vscroll[gb], &word) != 0)
+            b = genesis_vdp_plane_candidate_from_word(&ctx, &plane_b, x, gb, row, word);
+          else {
+            if ((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U) ++compat_faults;
+            b = genesis_vdp_plane_candidate_at(&ctx, &plane_b, x, gb, row);
+          }
+        }
         {
           const GenesisVdpCandidatePixel *spr = sprites ? &sprite_row[left ? i : (size_t)side + width + i] : &none;
           if (genesis_ext_sprite_wins(&a, &b, spr)) ++sprite_pixels;
@@ -1232,12 +1319,39 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     }
   }
   if (sprites) flags |= GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT;
+  /* SEG-124: the provider's HUD overlay (a separate layer the host draws after side treatment; it never enters the extension surface). */
+  {
+    GenesisCompatOverlay overlay;
+    memset(&overlay, 0, sizeof(overlay));
+    if ((compat_accepted & GENESIS_COMPAT_HUD) != 0U && target->overlay_rgba != NULL) {
+      overlay.rgba = target->overlay_rgba;
+      overlay.capacity = GENESIS_COMPAT_OVERLAY_BYTES;
+      memset(overlay.rgba, 0, GENESIS_COMPAT_OVERLAY_BYTES);
+      if (target->compat->hud == NULL || target->compat->hud(target->compat_state, &overlay) == 0 || overlay.width == 0U || overlay.height == 0U ||
+          overlay.width > GENESIS_COMPAT_OVERLAY_MAX_W || overlay.height > GENESIS_COMPAT_OVERLAY_MAX_H) {
+        overlay.width = 0U;
+        overlay.height = 0U;
+      }
+    }
+    compat_overlay_w = overlay.width;
+    compat_overlay_h = overlay.height;
+    compat_overlay_fx = overlay.fallback_x;
+    compat_overlay_fy = overlay.fallback_y;
+  }
   memset(out, 0, sizeof(*out));
   out->status = flags == 0U ? GENESIS_EXT_AVAILABLE : GENESIS_EXT_PARTIAL;
   out->flags = flags;
   out->mode = (uint8_t)(sprites ? GENESIS_EXT_MODE_SPRITES : GENESIS_EXT_MODE_BACKGROUNDS);
   out->sprite_reason = sprite_reason;
   out->sprite_pixels = sprite_pixels;
+  out->compat_accepted = (uint8_t)compat_accepted;
+  out->compat_reason = compat_faults != 0U ? (uint8_t)GENESIS_COMPAT_FAULT : compat_reason;
+  /* Authored provenance: scenery came from the provider on every off-screen cell AND nothing degraded the frame. The sprite layer is whatever the game submitted (Level 3 stays Partial). */
+  out->authored = (uint8_t)((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && compat_faults == 0U && (flags & (GENESIS_EXT_FLAG_WINDOW_EDGE | GENESIS_EXT_FLAG_COLUMN_VSCROLL | GENESIS_EXT_FLAG_NO_VRAM_JOURNAL)) == 0U);
+  out->overlay_w = compat_overlay_w;
+  out->overlay_h = compat_overlay_h;
+  out->overlay_fx = compat_overlay_fx;
+  out->overlay_fy = compat_overlay_fy;
   out->native_w = (uint16_t)width;
   out->native_h = (uint16_t)height;
   out->side = (uint16_t)side;

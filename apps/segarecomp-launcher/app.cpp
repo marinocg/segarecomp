@@ -743,6 +743,10 @@ bool App::start_build(const std::string &id, bool restart_after) {
     view.patch_identity = variant.patch_identity;
     view.patch_package = variant.patch_package;
     view.patch_target_sha256 = variant.patch_target_sha256;
+    view.patch_native_source_sha256 = variant.patch_native_source_sha256;
+    view.patch_native_abi = variant.patch_native_abi;
+    view.patch_native_caps = variant.patch_native_caps;
+    view.patch_native_approved = variant.patch_native_approved;
     view.patch_label = variant.patch_label;
     view.patch_widescreen = variant.patch_widescreen;
     view.patch_side_style = variant.patch_side_style;
@@ -1334,6 +1338,8 @@ void App::run_script() {
   } else if (cmd == "patch_confirm") {   // the confirm button of the open patch sheet: `patch_confirm` | `patch_confirm delete` (remove sheet: also delete the patched build)
     if (modal_.kind == Modal::Kind::remove_patch && arg == "delete") modal_.delete_cache = true;
     patch_modal_confirm();
+  } else if (cmd == "patch_cancel") {   // the Cancel button of the open patch sheet
+    if (modal_.kind == Modal::Kind::install_patch || modal_.kind == Modal::Kind::remove_patch) modal_ = Modal{};
   } else if (cmd == "patch_install_open") {   // the "Install patch..." button: opens the chooser
     if (!detail_id_.empty()) browse_patch(detail_id_);
   } else if (cmd == "variant") {       // select a variant of the open game as its tile would: vanilla | patched (the first installed patch) | patched=<n>
@@ -1448,6 +1454,8 @@ void App::run_script() {
     else if (key == "patches") { const LibraryEntry *e = catalog_.find_id(detail_id_); actual = e == nullptr ? "-" : std::to_string(e->patches.size()); }
     else if (key == "patch_built") { const StatusInfo &si = status_of(detail_id_); actual = si.patches.empty() ? "-" : (si.patches.front().built ? "1" : "0"); }
     else if (key == "vanilla_ready") actual = !detail_id_.empty() && status_of(detail_id_).vanilla_ready ? "1" : "0";
+    else if (key == "modal_code") actual = modal_.kind == Modal::Kind::install_patch && modal_.code_bearing ? "1" : "0";
+    else if (key == "approved") { const LibraryEntry *e = catalog_.find_id(detail_id_); const InstalledPatch *ip = e == nullptr ? nullptr : e->find_patch(e->selected_variant); actual = ip == nullptr ? "-" : (!ip->has_native() ? "n/a" : (ip->native_approved ? "1" : "0")); }
     else if (key == "patch_notice") actual = patch_notices_.count(detail_id_) != 0 ? patch_notices_.at(detail_id_).substr(0, 12) : "-";
     else if (key == "picker") actual = picker_.open ? "1" : "0";
     else if (key == "picker_chosen") actual = std::to_string(picker_.chosen.size());

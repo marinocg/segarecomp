@@ -75,6 +75,12 @@ struct RomView {
   std::string patch_identity;                  // SHA-256 of the installed package's manifest (empty = Vanilla)
   std::filesystem::path patch_package;         // the installed copy of the .segapatch
   std::string patch_target_sha256;             // verified digest of the patched image
+  // SEG-124 (ADR 0267): the package's native provider source (a trusted native-source patch; empty = none). The build re-verifies the package itself and compiles the source it carries;
+  // the source digest, the ABI version and the required host capabilities are part of the build identity. `patch_native_approved` is the user's approval of this exact package.
+  std::string patch_native_source_sha256;
+  unsigned patch_native_abi = 0, patch_native_caps = 0;
+  bool patch_native_approved = false;
+  [[nodiscard]] bool patch_native() const { return !patch_native_source_sha256.empty(); }
   std::string patch_label;                     // "<name> <version>" (UI and logs only)
   std::string patch_widescreen, patch_side_style;   // the verified package's typed presentation defaults ("" = none); handed to the viewer, never provenance
   [[nodiscard]] bool patched() const { return !patch_identity.empty(); }

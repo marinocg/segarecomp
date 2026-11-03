@@ -12,6 +12,8 @@ inline constexpr const char *segarecomp_build_usage =
     "                   [--aot-model <v1|gen2>] (EXPERIMENTAL opt-in, only with --aot-policy optimized; default v1 = the SEG-047 producer)\n"
     "                   (Master System: optimized = EXPERIMENTAL native D512HP selective admission, SEG-057; any failure builds the broad program;\n"
     "                    --aot-model is a Genesis option and is refused for Master System; a start the build omitted stops the program with a typed outcome)\n"
+    "                   [--patch-package <file.segapatch> --patch-identity <sha256>] (Genesis viewer builds, SEG-124: a trusted native-source package the user approved by identity;\n"
+    "                    the build re-verifies the package, extracts and compiles its provider against the public SDK only and links it into this program; --rom is the image the package declares)\n"
     "                   (Master System: --runtime-dir is <root>/platforms/master-system; the mapper is never inferred)\n";
 
 int run_cli(int argc, char **argv);

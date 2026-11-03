@@ -912,6 +912,36 @@ SDL_Surface *sv_host_capture_output(SvHost *h) {
 
 /* ------------------------------------------------------------------------------------------------------------------ present */
 
+/* SEG-124: draws the retained overlay (the relocated HUD) into the frame texture after the side treatment: left edge at the left edge of the visible side, or, with no visible side, inside the
+ * picture at the place of the HUD it replaces; clipped to the texture; fully transparent pixels keep what is there. Returns 0 only on a texture failure. */
+static int draw_overlay(SvHost *h, SvSideTreatment t, int vis, int side, int w, int hgt) {
+  const int tex_w = w + 2 * side;
+  int ox, oy, cw, ch, i, j;
+  SDL_Rect o;
+  if (h->ovl_w <= 0 || h->ovl_h <= 0) return 1;
+  if (side > 0 && vis > 0) { ox = side - vis; oy = 0; }
+  else { ox = side + h->ovl_fx; oy = h->ovl_fy; }
+  if (ox < 0 || oy < 0 || ox >= tex_w || oy >= hgt) return 1;
+  cw = h->ovl_w < tex_w - ox ? h->ovl_w : tex_w - ox;
+  ch = h->ovl_h < hgt - oy ? h->ovl_h : hgt - oy;
+  for (j = 0; j < ch; ++j)
+    for (i = 0; i < cw; ++i) {
+      const int tx = ox + i, ty = oy + j;
+      const uint8_t *c = h->ovl_rgba + ((size_t)j * (size_t)h->ovl_w + (size_t)i) * 4u;
+      const uint8_t *bg;
+      uint8_t *d = h->ovl_scratch + ((size_t)j * (size_t)cw + (size_t)i) * 3u;
+      if (tx < side) bg = (t == SV_TREAT_PASSTHROUGH || vis <= 0) ? h->ext_raw + ((size_t)ty * (size_t)tex_w + (size_t)tx) * 3u
+                                                                   : h->side_buf + ((size_t)ty * (size_t)vis + (size_t)(tx - (side - vis))) * 3u;
+      else if (tx < side + w) bg = h->last_rgb + ((size_t)ty * (size_t)w + (size_t)(tx - side)) * 3u;
+      else bg = (t == SV_TREAT_PASSTHROUGH || vis <= 0) ? h->ext_raw + ((size_t)ty * (size_t)tex_w + (size_t)tx) * 3u
+                                                         : h->side_buf + (size_t)vis * (size_t)hgt * 3u + ((size_t)ty * (size_t)vis + (size_t)(tx - side - w)) * 3u;
+      if (c[3] == 0u) { d[0] = bg[0]; d[1] = bg[1]; d[2] = bg[2]; }
+      else { const unsigned a = c[3]; d[0] = (uint8_t)((bg[0] * (255u - a) + c[0] * a + 127u) / 255u); d[1] = (uint8_t)((bg[1] * (255u - a) + c[1] * a + 127u) / 255u); d[2] = (uint8_t)((bg[2] * (255u - a) + c[2] * a + 127u) / 255u); }
+    }
+  o.x = ox; o.y = oy; o.w = cw; o.h = ch;
+  return SDL_UpdateTexture(h->frame_tex, &o, h->ovl_scratch, cw * 3) ? 1 : 0;
+}
+
 /* SEG-123: builds the frame texture from the retained native picture (+ retained raw extension). Deterministic in (style, source, native pixels, raw
  * extension); the native pixels are always the centre; no allocation. Returns 1 on success. */
 static int upload_picture(SvHost *h) {
@@ -922,7 +952,8 @@ static int upload_picture(SvHost *h) {
   if (h->frame_tex == NULL || w <= 0 || hgt <= 0) return 0;
   if (side <= 0) {
     h->side_applied = SV_TREAT_PASSTHROUGH;
-    return SDL_UpdateTexture(h->frame_tex, NULL, h->last_rgb, w * 3) ? 1 : 0;
+    if (!SDL_UpdateTexture(h->frame_tex, NULL, h->last_rgb, w * 3)) return 0;
+    return draw_overlay(h, SV_TREAT_PASSTHROUGH, 0, 0, w, hgt);
   }
   centre.x = side; centre.y = 0; centre.w = w; centre.h = hgt;
   t = sv_side_treatment(h->settings.video.widescreen_side_style, h->ext_source);
@@ -942,6 +973,7 @@ static int upload_picture(SvHost *h) {
     if (!SDL_UpdateTexture(h->frame_tex, &r, h->side_buf + (size_t)vis * (size_t)hgt * 3u, vis * 3)) return 0;
   }
   if (!SDL_UpdateTexture(h->frame_tex, &centre, h->last_rgb, w * 3)) return 0; /* the native pixels always come from the native picture */
+  if (!draw_overlay(h, t, vis, side, w, hgt)) return 0;
   h->side_applied = t;
   return 1;
 }
@@ -1040,7 +1072,7 @@ static void capture_if_requested(SvHost *h) {
     }
 }
 
-static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, const SvExtendedSurface *ext) {
+static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, const SvExtendedSurface *ext, const SvExtendedSurface *ovl) {
   int y;
   const Uint64 now = SDL_GetTicksNS();
   const int side = ext != NULL ? ext->side : 0;
@@ -1053,6 +1085,14 @@ static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitc
   h->last_w = w;
   h->last_h = hgt;
   h->ext_side = side;
+  h->ovl_w = h->ovl_h = 0;
+  if (ovl != NULL && ovl->overlay_rgba != NULL && ovl->overlay_w > 0 && ovl->overlay_w <= SV_OVERLAY_MAX && ovl->overlay_h > 0 && ovl->overlay_h <= SV_OVERLAY_MAX) {
+    memcpy(h->ovl_rgba, ovl->overlay_rgba, (size_t)ovl->overlay_w * (size_t)ovl->overlay_h * 4u);
+    h->ovl_w = ovl->overlay_w;
+    h->ovl_h = ovl->overlay_h;
+    h->ovl_fx = ovl->overlay_fx;
+    h->ovl_fy = ovl->overlay_fy;
+  }
   if (ext != NULL) {
     const size_t row = (size_t)(w + 2 * side) * 3u;
     for (y = 0; y < hgt; ++y) memcpy(h->ext_raw + (size_t)y * row, ext->rgb24 + (size_t)y * (size_t)ext->pitch, row);
@@ -1082,7 +1122,7 @@ static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitc
   return SDL_RenderPresent(h->renderer) ? 0 : -1;
 }
 
-int sv_host_present(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch) { return present_frame(h, rgb, w, hgt, pitch, NULL); }
+int sv_host_present(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch) { return present_frame(h, rgb, w, hgt, pitch, NULL, NULL); }
 
 int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, uint64_t sequence, const SvExtendedSurface *ext) {
   if (ext != NULL) {
@@ -1091,12 +1131,13 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     if ((int)ext->mode <= (int)h->settings.video.widescreen &&
         sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK) {
       if (h->ext_accepted != UINT32_MAX) h->ext_accepted++;
-      return present_frame(h, rgb, w, hgt, pitch, ext);
+      return present_frame(h, rgb, w, hgt, pitch, ext, ext);
     }
     /* An UNAVAILABLE surface that was not even requested is the normal Original case; anything else offered and refused is a rejection. */
-    if (ext->status != SV_WS_UNAVAILABLE && h->ext_rejected != UINT32_MAX) h->ext_rejected++;
+    if (ext->status != SV_WS_UNAVAILABLE && (ext->overlay_rgba == NULL || (int)ext->mode <= (int)h->settings.video.widescreen) && h->ext_rejected != UINT32_MAX) h->ext_rejected++;   /* a surface that only carries the HUD in Original is expected, not a refusal */
   }
-  return present_frame(h, rgb, w, hgt, pitch, NULL);
+  /* the extension is not shown (Original, a stale surface, a refusal): the overlay of a surface that is otherwise about THIS frame is still the HUD that replaces the game's own */
+  return present_frame(h, rgb, w, hgt, pitch, NULL, ext != NULL && ext->status != SV_WS_UNAVAILABLE && ext->sequence == sequence ? ext : NULL);
 }
 
 int sv_host_extension_side(const SvHost *h) { return h != NULL ? h->ext_side : 0; }

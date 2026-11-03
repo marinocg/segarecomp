@@ -296,4 +296,9 @@ second, separately built version of the same library game. The game stays one li
   patched build is deleted only when the sheet's checkbox asks for it (the same validated storage executor, restricted to that one build folder).
 * The library file becomes schema 3 once a game has an installed patch (an earlier release opens it read-only instead of damaging it).
 * A patch's presentation defaults (for example Level 3 + Raw Extension) apply automatically while its Patched variant runs and only then; installing, selecting or removing a patch never writes a preference file.
-* Installing a patch does not make the picture "authored widescreen": the Widescreen mode / width / side style settings apply to both variants unchanged.
+* Installing a BPS-only patch does not make the picture "authored widescreen": the Widescreen mode / width / side style settings apply to both variants unchanged.
+* A schema 2 package (SEG-124, ADR 0267) may carry **executable native source** (`patch-packages.md`, `native-patch-sdk.md`). The install sheet then warns that the patch contains executable C code that is NOT sandboxed, names the author,
+  license, package identity, source digest and the capabilities it reads, and installs only after the user approves it ("Approve and install"); cancelling installs nothing. The approval belongs to that exact package identity (a changed
+  package is a new package), is stored in the library record and is re-checked before every build; a record without it is never built. A native-only package compiles the unchanged original image as its own variant; a combined package
+  applies its BPS first. The build receives a reference to the package and the approved identity (not source, flags or capabilities) and re-verifies them. The cache key and the build record add the provider source digest, the ABI version and the
+  capability set; a recorded build with another source, ABI or capability set is never reused. Only frames the provider validated are presented as authored (Comfort is bypassed for those frames only). Vanilla never contains provider code.
