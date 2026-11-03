@@ -175,6 +175,7 @@ with zipfile.ZipFile(dup, "w") as z:
     z.writestr("provider.c", PROVIDER)
     z.writestr("provider.c", PROVIDER)
 refused(dup, "duplicate entry")
+refused(with_manifest(bps, "s1author.segapatch", lambda m: m.__setitem__("author", "x")), "author in a schema 1 package")
 # schema 1 cannot carry native source
 refused(with_manifest(nat, "s1native.segapatch", lambda m: m.__setitem__("schema_version", 1)), "native payload in a schema 1 package")
 # the old schema-2 built-in-Sonic descriptor payload is explicitly refused (no migration of a built-in capability)

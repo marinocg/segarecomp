@@ -436,6 +436,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
     if (r->kind != Value::Kind::array || r->items.size() > 8) return bad("the manifest requires list is invalid");
     if (!r->items.empty()) return bad("this segarecomp does not provide the required capability \"" + (r->items[0].kind == Value::Kind::string ? r->items[0].text : std::string("?")) + "\"");
   }
+  if (info.schema_version < 2 && (root.find("author") != nullptr || root.find("license") != nullptr)) return bad("the manifest has an unknown field (author and license need schema 2)");
   if (const Value *au = root.find("author"); au != nullptr) {
     if (au->kind != Value::Kind::string || au->text.empty() || au->text.size() > 64 || !printable(au->text)) return bad("the manifest author is invalid");
     info.author = au->text;
