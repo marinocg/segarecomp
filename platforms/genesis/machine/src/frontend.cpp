@@ -3864,7 +3864,10 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   if (irq6_handler_entry_value)
     analysis.irq6_handler_entry = M68kProgramAddress{TargetAddressSpace::m68k_program, *irq6_handler_entry_value};
   analysis.irq6_vector_in_work_ram = irq6_vector_in_work_ram;
-  analysis.cartridge_sram = parse_genesis_cartridge_sram_header(program.image.bytes).descriptor;
+  analysis.cartridge_sram = program.genesis_lock_on ? parse_genesis_lock_on_extra_memory_header(program.image.bytes).descriptor
+                                                     : parse_genesis_cartridge_sram_header(program.image.bytes).descriptor;
+  analysis.genesis_lock_on = program.genesis_lock_on;
+  analysis.cartridge_empty_upper_slot = program.genesis_lock_on && program.image.bytes.size() == genesis_lock_on_slot_bytes;
   analysis.irq6_vector_ram_entry = irq6_vector_ram_entry_value;
   analysis.hint_vector_in_work_ram = hint_vector_in_work_ram;
   analysis.hint_vector_ram_entry = hint_vector_ram_entry_value;

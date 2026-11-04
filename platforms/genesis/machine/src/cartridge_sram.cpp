@@ -91,4 +91,17 @@ bool genesis_cartridge_sram_access_supported(const GenesisCartridgeSramDescripto
                                                      width_bytes) == SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_BYTE;
 }
 
+GenesisCartridgeSramHeader parse_genesis_lock_on_extra_memory_header(std::span<const std::uint8_t> image) noexcept {
+  if (image.size() != genesis_lock_on_slot_bytes && image.size() != 2U * genesis_lock_on_slot_bytes) return {};
+  GenesisCartridgeSramHeader base = parse_genesis_cartridge_sram_header(image);
+  if (base.status != GenesisCartridgeSramHeaderStatus::absent || image.size() != 2U * genesis_lock_on_slot_bytes) return base;
+  GenesisCartridgeSramHeader attached = parse_genesis_cartridge_sram_header(image.subspan(genesis_lock_on_slot_bytes));
+  if (attached.descriptor) {
+    attached.descriptor->always_mapped = image.size() <= attached.descriptor->start;
+    // ADR 0136's EEPROM is supported only with nothing beneath it; the attached ROM always lies beneath here.
+    if (attached.descriptor->kind == GenesisCartridgeExtraMemoryKind::serial_eeprom_x24c01) attached.descriptor->supported = false;
+  }
+  return attached;
+}
+
 }  // namespace segarecomp

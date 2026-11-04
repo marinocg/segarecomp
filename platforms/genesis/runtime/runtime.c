@@ -1717,6 +1717,15 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
           return GENESIS_ACCESS_OK;
         }
       }
+      /* ADR 0268: an empty lock-on pass-through slot (declared by the build, never inferred). DATA reads only; the read
+         must lie wholly inside the slot. */
+      if (runtime->cartridge_empty_upper_slot != 0U && address >= SEGARECOMP_GENESIS_LOCK_ON_SLOT_BEGIN &&
+          address < SEGARECOMP_GENESIS_LOCK_ON_SLOT_END && byte_count <= SEGARECOMP_GENESIS_LOCK_ON_SLOT_END - address) {
+        result = 0U;
+        for (index = 0U; index < byte_count; ++index) result = (result << 8U) | SEGARECOMP_GENESIS_EMPTY_SLOT_BYTE;
+        *value = result;
+        return GENESIS_ACCESS_OK;
+      }
     }
     *stop_out = genesis_access_stop(direction == GENESIS_ACCESS_WRITE ? GENESIS_STOP_UNSUPPORTED_MEMORY_REGION
                                                                        : GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,

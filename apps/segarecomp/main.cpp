@@ -48,7 +48,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n  segarecomp ml-gen2-cell-logits --rom <image> --output <path>\n  segarecomp ml-gen2-probe-report --synthetic\n  segarecomp patch <inspect|verify|apply> ... (portable .segapatch packages; see docs/product/patch-packages.md)\n  segarecomp aot-policy-identity --aot-policy <compatibility|optimized> [--aot-model <v1|gen2>] [--platform <genesis|master-system|sega-cd>]\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--ml-gen2-region-proposal-output <path> [--ml-gen2-logits-output <path>]] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path> [--region-proposal-closure <prune|close>]] [--legacy-aot-entries] [--shared-return-targets] [--aot-operand-sharing] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission | --immutable-rom-aot-ml-gen2-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--ml-gen2-region-proposal-output <path> [--ml-gen2-logits-output <path>]] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path> [--region-proposal-closure <prune|close>]] [--genesis-lock-on] [--legacy-aot-entries] [--shared-return-targets] [--aot-operand-sharing] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission | --immutable-rom-aot-ml-gen2-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp classify-ram-jump-thunk <execution-hex8> <hex-bytes>\n"
@@ -163,6 +163,7 @@ int run_cli(int argc, char **argv) {
       bool aot_direct_entries = true;
       bool shared_return_targets = false;
       bool aot_operand_sharing = false;
+      bool genesis_lock_on = false;  // ADR 0268: declared lock-on composite (`build --mapper lock_on`)
       for (int index = 4; index < argc;) {
         const std::string_view option = argv[index];
         if (option == "--reset-entry") {
@@ -171,6 +172,10 @@ int run_cli(int argc, char **argv) {
         } else if (option == "--immutable-rom-aot") {
           if (immutable_rom_aot) { print_usage(std::cerr); return 2; }
           immutable_rom_aot = true;
+          ++index;
+        } else if (option == "--genesis-lock-on") {
+          if (genesis_lock_on) { print_usage(std::cerr); return 2; }
+          genesis_lock_on = true;
           ++index;
         } else if (option == "--immutable-copy-alias") {
           if (index + 1 >= argc) { print_usage(std::cerr); return 2; }
@@ -357,6 +362,13 @@ int run_cli(int argc, char **argv) {
             bytes, *mapping_base, *entry_address, synthetic_completion);
       }
       if (!program) { std::cerr << "segarecomp: bridge mapping overflows\n"; return 2; }
+      if (genesis_lock_on) {
+        if (bytes.size() != segarecomp::genesis_lock_on_slot_bytes && bytes.size() != 2U * segarecomp::genesis_lock_on_slot_bytes) {
+          std::cerr << "segarecomp: --genesis-lock-on needs a 2 MiB base cartridge image, optionally followed by a 2 MiB attached cartridge\n";
+          return 2;
+        }
+        program->genesis_lock_on = true;
+      }
       // SEG-007-T164 / ADR-0023: parse the optional, explicitly opted-in
       // external hints file. Any hints file content that does not pass
       // `parse_genesis_external_hints`'s own schema/ROM-hash validation

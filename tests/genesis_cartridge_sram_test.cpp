@@ -1,5 +1,6 @@
 // ADR 0098: the header-declared cartridge SRAM descriptor and the shared access classifier.  Project-authored synthetic
 // headers only; no commercial bytes.
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -138,6 +139,35 @@ int main() {
   check(genesis_cartridge_sram_touches(d, 0x200002U, 1U) && !genesis_cartridge_sram_access_supported(d, 0x200002U, 1U) &&
             genesis_cartridge_sram_access_supported(d, 0x200003U, 1U),
         "descriptor helpers agree with the shared classifier");
+  // ADR 0268: a declared lock-on composite. The attached cartridge's own header (at $2001B0) declares the extra memory when
+  // the base declares none; its bus addresses are unchanged and the attached ROM lies beneath it ($A130F1 selects).
+  {
+    std::vector<std::uint8_t> composite(0x400000U, 0U);
+    const auto attached = image(0x200000U, true, 0xF8, 0x20, 0x200001, 0x2003FF);
+    std::copy(attached.begin(), attached.end(), composite.begin() + 0x200000);
+    const auto parsed = parse_genesis_lock_on_extra_memory_header(composite);
+    check(parsed.status == Status::declared && parsed.descriptor && parsed.descriptor->start == 0x200001U &&
+              parsed.descriptor->end == 0x2003FFU && parsed.descriptor->odd_lane && parsed.descriptor->supported &&
+              !parsed.descriptor->always_mapped,
+          "lock-on composite: the attached header declares the SRAM, ROM beneath it");
+    check(parse_genesis_cartridge_sram_header(composite).status == Status::absent,
+          "without the lock-on declaration the attached header is not consulted");
+    const auto base = image(0x200000U, true, 0xF0, 0x20, 0x200000, 0x2003FE);
+    std::copy(base.begin(), base.end(), composite.begin());
+    const auto base_wins = parse_genesis_lock_on_extra_memory_header(composite);
+    check(base_wins.descriptor && !base_wins.descriptor->odd_lane && base_wins.descriptor->end == 0x2003FEU,
+          "lock-on composite: a base-cartridge declaration takes precedence");
+    std::vector<std::uint8_t> eeprom_composite(0x400000U, 0U);
+    const auto eeprom = image(0x200000U, true, 0xE8, 0x40, 0x200001, 0x200001);
+    std::copy(eeprom.begin(), eeprom.end(), eeprom_composite.begin() + 0x200000);
+    const auto ee = parse_genesis_lock_on_extra_memory_header(eeprom_composite);
+    check(ee.descriptor && !ee.descriptor->supported, "lock-on composite: an attached EEPROM over ROM is declared unsupported");
+    check(parse_genesis_lock_on_extra_memory_header(image(0x200000U, false, 0, 0, 0, 0)).status == Status::absent,
+          "lock-on base alone (empty slot) without a declaration is absent");
+    check(parse_genesis_lock_on_extra_memory_header(image(0x300000U, true, 0xF8, 0x20, 0x200001, 0x2003FF)).status == Status::absent,
+          "lock-on declaration with another image size declares nothing");
+  }
+
   std::printf("%d failure(s)\n", failures);
   return failures == 0 ? 0 : 1;
 }

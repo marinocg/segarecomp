@@ -157,6 +157,14 @@ static inline int segarecomp_genesis_idle_control_register(uint32_t address) {
 #define SEGARECOMP_GENESIS_CARTRIDGE_EEPROM_SDA_BIT UINT32_C(0x01) /* D0: SDA in and out */
 #define SEGARECOMP_GENESIS_CARTRIDGE_EEPROM_SCL_BIT UINT32_C(0x02) /* D1: SCL in */
 
+/* ADR 0268: the pass-through slot of a declared lock-on cartridge ($200000-$3FFFFF, the upper half of the cartridge window)
+ * and the byte a DATA read of an EMPTY slot answers. On hardware nothing drives the data bus there (open bus, whose value
+ * depends on the bus history); this project answers a fixed $FF per byte as a deterministic compatibility policy. The only
+ * property a cartridge can rely on is the one the hardware guarantees: no cartridge header is visible in an empty slot. */
+#define SEGARECOMP_GENESIS_LOCK_ON_SLOT_BEGIN UINT32_C(0x00200000)
+#define SEGARECOMP_GENESIS_LOCK_ON_SLOT_END UINT32_C(0x00400000)
+#define SEGARECOMP_GENESIS_EMPTY_SLOT_BYTE UINT32_C(0xFF)
+
 #define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_OUTSIDE 0  /* does not touch the extent: not this device's access */
 #define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_BYTE 1     /* BYTE on a lane address of the extent */
 #define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_REJECTED 2 /* touches the extent with an unsupported width or lane */

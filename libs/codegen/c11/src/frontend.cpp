@@ -6677,7 +6677,9 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
       // data array, so no data is duplicated and the runtime's bounds-checked read path is unchanged. Any other
       // shape (non-power-of-two size, non-zero base) gets no mirror and keeps failing closed.
       const std::uint64_t chip_size = fact.claim.target_end.value - fact.claim.target_begin.value;
-      if (fact.claim.target_begin.value == 0U && chip_size >= UINT64_C(0x10000) &&
+      // ADR 0268: a declared lock-on composite is never mirrored: $200000-$3FFFFF is the pass-through slot (the attached
+      // cartridge, or an empty slot), not a decode alias of the base chip.
+      if (!partial.accepted_prefix.genesis_lock_on && fact.claim.target_begin.value == 0U && chip_size >= UINT64_C(0x10000) &&
           (chip_size & (chip_size - 1U)) == 0U && fact.resolved_bytes.size() == chip_size)
         for (std::uint64_t mirror = chip_size; mirror < UINT64_C(0x00400000); mirror += chip_size) {
           owned_region_table << ",\n  { UINT32_C(" << hex(mirror, 8) << "), UINT32_C(" << hex(mirror + chip_size, 8)
@@ -6798,6 +6800,8 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
     sink << "  runtime.owned_regions = genesis_owned_cartridge_regions;\n";
     sink << "  runtime.owned_region_count = UINT32_C(" + std::to_string(owned_region_count) + ");\n";
   }
+  // ADR 0268: the lock-on pass-through slot holds no cartridge: reads there answer the documented empty-slot value.
+  if (partial.accepted_prefix.cartridge_empty_upper_slot) sink << "  runtime.cartridge_empty_upper_slot = 1;\n";
   if (cartridge_sram)
     sink << "  genesis_cartridge_sram_install(&runtime, &genesis_cartridge_sram_config, "
          << (cartridge_sram->supported && cartridge_sram->storage_bytes() != 0U ? "genesis_cartridge_sram_storage" : "0")

@@ -682,6 +682,10 @@ add_test(NAME genesis_startup_bridge_owned_cartridge_region_test COMMAND ${Pytho
 add_test(NAME genesis_cartridge_mirror_region_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_cartridge_mirror_region_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# ADR 0268: the declared lock-on pass-through cartridge (no mirror into the slot; empty-slot reads; attached composite).
+add_test(NAME genesis_lock_on_cartridge_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_lock_on_cartridge_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_startup_bridge_mapping_preparation_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_startup_bridge_mapping_preparation_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
