@@ -44,7 +44,7 @@ Only non-reconstructable classifications are recorded; nothing from any commerci
 ## 3. Non-goals
 
 No bank switching, no lock-on patch ROM (a third chip some boards map only through `$A130F1`), no combining of separate images (the
-composite is the user's own single image), no detection of the board from image contents, no Z80 banked view of an empty slot (a Z80 bank read there stays fail-closed with the existing typed bank stop; only 68000 DATA reads answer the empty-slot value), no other cartridge sizes, no
+composite is the user's own single image), no detection of the board from image contents, no translation-time folding of empty-slot reads (an absolute-operand DATA read inside an empty slot stays fail-closed at translation time, as the ADR 0049 mirror rows already are; register-addressed reads answer the empty-slot value at runtime), no Z80 banked view of an empty slot (a Z80 bank read there stays fail-closed with the existing typed bank stop; only 68000 DATA reads answer the empty-slot value), no other cartridge sizes, no
 battery persistence (unchanged from ADR 0098). The launcher does not yet carry the declaration for Genesis (its catalog keeps only the
 Master System mapper families); `segarecomp build --mapper lock_on` does.
 

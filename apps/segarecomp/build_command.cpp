@@ -1266,7 +1266,7 @@ int segarecomp_build_command(int argc, char **argv) {
                         ",\"capabilities\":" + std::to_string(options.native_caps) + "}";
       if (!options.keep_work) fs::remove_all(options.output / "obj", ec);
       stage("link", "done");
-      write_status(options, sha, "ok", "done", "", status_extra);
+      write_status(options, sha, "ok", "done", "", sms_provenance + status_extra);   // ADR 0268: a Genesis board declaration (lock_on) is recorded too
       std::cout << "@result ok executable=" << executable.string()
                 << (sound_degraded ? " genesis_audio=degraded z80_audio_outcome=structural_code_mismatch" : "") << std::endl;
       return 0;
