@@ -641,7 +641,7 @@ std::optional<DirectFlowDiagnostic> m68k_classify_general_memory_access(
     M68kMemoryAccessDirection direction, const InstructionProvenance &provenance) {
   // ADR 0098: an access touching the header-declared cartridge SRAM extent is never immutable ROM and never a generic ROM
   // write: the runtime SRAM owner answers it (including its typed rejection of an unsupported width or lane).
-  if (const auto sram = parse_genesis_cartridge_sram_header(program.image.bytes).descriptor;
+  if (const auto sram = genesis_program_extra_memory(program);
       sram && genesis_cartridge_sram_touches(*sram, address, static_cast<std::uint32_t>(width)))
     return std::nullopt;
   if (direction == M68kMemoryAccessDirection::write) {
@@ -3864,8 +3864,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   if (irq6_handler_entry_value)
     analysis.irq6_handler_entry = M68kProgramAddress{TargetAddressSpace::m68k_program, *irq6_handler_entry_value};
   analysis.irq6_vector_in_work_ram = irq6_vector_in_work_ram;
-  analysis.cartridge_sram = program.genesis_lock_on ? parse_genesis_lock_on_extra_memory_header(program.image.bytes).descriptor
-                                                     : parse_genesis_cartridge_sram_header(program.image.bytes).descriptor;
+  analysis.cartridge_sram = genesis_program_extra_memory(program);
   analysis.genesis_lock_on = program.genesis_lock_on;
   analysis.cartridge_empty_upper_slot = program.genesis_lock_on && program.image.bytes.size() == genesis_lock_on_slot_bytes;
   analysis.irq6_vector_ram_entry = irq6_vector_ram_entry_value;
@@ -6868,5 +6867,11 @@ std::string format_m68k_frontend_result(const FrontendResult &result) {
   return format_m68k_frontend_result_legacy(result);
 }
 
+
+// ADR 0098 / ADR 0268: the program's extra memory (declared in frontend.hpp): the one rule of the gate, the analysis and the emitter.
+std::optional<GenesisCartridgeSramDescriptor> genesis_program_extra_memory(const FrontendProgram &program) {
+  return program.genesis_lock_on ? parse_genesis_lock_on_extra_memory_header(program.image.bytes).descriptor
+                                 : parse_genesis_cartridge_sram_header(program.image.bytes).descriptor;
+}
 
 } // namespace segarecomp

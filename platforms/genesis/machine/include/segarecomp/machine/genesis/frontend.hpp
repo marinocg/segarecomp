@@ -382,6 +382,10 @@ struct GenesisM68kExecutableImages {
 };
 [[nodiscard]] std::optional<GenesisM68kExecutableImages> genesis_m68k_executable_images(const FrontendProgram &program);
 
+// ADR 0098 / ADR 0268: the program's extra-memory descriptor, the ONE rule shared by the translation-time memory gate, the analysis and the
+// emitter: the lock-on rule (the attached cartridge's header may declare it) for a declared lock-on program, the image's own header otherwise.
+[[nodiscard]] std::optional<GenesisCartridgeSramDescriptor> genesis_program_extra_memory(const FrontendProgram &program);
+
 // SEG-007-T204 / ADR-0033 (re-homed by the 2026-09-11 operator correction):
 // promotes zero or more `external_address_table_candidates` into ordinary
 // `external_code_entry_candidates` PROPOSALS -- exactly the same trust class

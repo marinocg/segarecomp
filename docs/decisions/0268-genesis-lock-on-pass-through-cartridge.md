@@ -34,7 +34,9 @@ Only non-reconstructable classifications are recorded; nothing from any commerci
    history); the fixed value is a deterministic project compatibility policy, not reconstructed open bus. The one property software
    can rely on, that no cartridge header is visible in an empty slot, holds. Writes and instruction fetches in the slot stay
    fail-closed.
-5. **Attached extra memory.** For a 4 MiB composite whose base header declares no extra memory, the attached cartridge's own header
+5. **One rule everywhere.** The translation-time memory gate (absolute operands touching the extent are routed to the runtime SRAM owner),
+   the analysis and the emitter derive the extra memory from one shared function (`genesis_program_extra_memory`).
+6. **Attached extra memory.** For a 4 MiB composite whose base header declares no extra memory, the attached cartridge's own header
    (at `$2001B0`) declares it, with its bus addresses unchanged. The extent then lies over the attached ROM, so ADR 0098's
    `$A130F1` map bit selects SRAM or ROM there (never "always mapped"); ADR 0136's EEPROM form over ROM is recorded as declared but
    unsupported (typed fail-closed). A base-cartridge declaration takes precedence.
@@ -42,7 +44,7 @@ Only non-reconstructable classifications are recorded; nothing from any commerci
 ## 3. Non-goals
 
 No bank switching, no lock-on patch ROM (a third chip some boards map only through `$A130F1`), no combining of separate images (the
-composite is the user's own single image), no detection of the board from image contents, no other cartridge sizes, no
+composite is the user's own single image), no detection of the board from image contents, no Z80 banked view of an empty slot (a Z80 bank read there stays fail-closed with the existing typed bank stop; only 68000 DATA reads answer the empty-slot value), no other cartridge sizes, no
 battery persistence (unchanged from ADR 0098). The launcher does not yet carry the declaration for Genesis (its catalog keeps only the
 Master System mapper families); `segarecomp build --mapper lock_on` does.
 
@@ -51,6 +53,7 @@ Master System mapper families); `segarecomp build --mapper lock_on` does.
 - `genesis_cartridge_sram_test` (the lock-on extra-memory rule: attached declaration, ROM beneath, base precedence, EEPROM over ROM
   unsupported, other sizes declare nothing) and `genesis_lock_on_cartridge_test` (project-authored images through the production
   driver: the undeclared mirror, the declared empty slot answering `$FF` with no mirror rows, the attached composite's bytes, the
-  fail-closed write into the empty slot, the refused 1 MiB declaration).
+  fail-closed write into the empty slot, the refused 1 MiB declaration, the attached cartridge's SRAM reached by absolute operands with and
+  without the declaration) and `sms_native_build_test` (`build --mapper lock_on`: exact name, size refusal, recorded declaration, forwarding to the emitter).
 - Two locally held images of the board class (class-level evidence only): the 2 MiB base alone boots to its own title and gameplay
   instead of the attached-cartridge path; the 4 MiB composite runs past the former stop through the save-slot screen into gameplay.

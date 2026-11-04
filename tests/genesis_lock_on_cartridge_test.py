@@ -7,8 +7,10 @@ slot answers $FF per byte, where the same image without the declaration reads it
 attached cartridge's bytes there. Negative fixtures: a write into the empty slot and an image of another size fail
 closed.
 """
+import hashlib
 import json
 import pathlib
+import struct
 import subprocess
 import sys
 import tempfile
@@ -77,7 +79,28 @@ def main() -> int:
         odd = work / "odd.bin"
         odd.write_bytes(image(0x100000, read_slot))
         result = run(driver, binary, compiler, odd, root, work, "odd", True, expect_ok=False)
-        assert result.returncode != 0
+        assert result.returncode != 0 and "--genesis-lock-on needs a 2 MiB base cartridge image" in result.stderr, result.stderr[-500:]
+        # The attached cartridge's header-declared SRAM, reached by ABSOLUTE operands: the translation-time gate and the runtime owner
+        # use the same lock-on rule (map it through $A130F1, store, load back).
+        sys.path.insert(0, str(root / "tests"))
+        import genesis_cartridge_sram_generated_test as t  # noqa: E402  (project-authored SRAM program helpers)
+        code = t.move_b_imm_abs(1, 0xA130F1) + t.move_b_imm_abs(0xA5, 0x200001) + t.move_b_abs_dn(0x200001, 1)
+        rom = bytearray(t.build_rom(code, size=0x400000, header=None))
+        rom[0x2001B0:0x2001B4] = b"RA" + bytes([0xF8, 0x20])
+        rom[0x2001B4:0x2001BC] = struct.pack(">II", 0x200001, 0x2003FF)
+        sram_image = work / "attached_sram.bin"
+        sram_image.write_bytes(bytes(rom))
+        source = work / "attached_sram.c"
+        r = subprocess.run([str(binary), "emit-general-startup-bridge-c", "--rom", str(sram_image), "--reset-entry", "--rom-sha256",
+                            hashlib.sha256(bytes(rom)).hexdigest(), "--genesis-lock-on", "--generated-c-output", str(source)],
+                           text=True, capture_output=True)
+        assert r.returncode == 0 and "genesis_cartridge_sram_install" in source.read_text(), r.stderr[-500:]
+        stop, full = t.run_program(str(compiler), root, source, work, "attached_sram", 4000)
+        assert full and full["runtime"]["d"][1].endswith("a5"), (stop, full and full["runtime"]["d"])
+        # without the declaration the attached header is not consulted: the absolute store is an ordinary ROM write (rejected)
+        r = subprocess.run([str(binary), "emit-general-startup-bridge-c", "--rom", str(sram_image), "--reset-entry", "--rom-sha256",
+                            hashlib.sha256(bytes(rom)).hexdigest(), "--generated-c-output", str(work / "undeclared.c")], text=True, capture_output=True)
+        assert r.returncode != 0 and "rom_write_prohibited" in (r.stdout + r.stderr), (r.returncode, r.stdout[-300:])
     print("genesis_lock_on_cartridge_test: ok")
     return 0
 

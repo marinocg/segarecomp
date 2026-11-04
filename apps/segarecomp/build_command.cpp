@@ -1087,7 +1087,7 @@ int segarecomp_build_command(int argc, char **argv) {
     }
   }
   std::string sha;
-  std::string sms_provenance;  // status.json members recording the SMS identity (empty for Genesis)
+  std::string sms_provenance;  // status.json members recording the SMS identity, or a Genesis board declaration (ADR 0268); empty otherwise
   std::string sms_images;      // SMS: the status.json executable_images member
   std::string m68k_images;     // Genesis: sanitized provenance JSON of the M68K executable images
   std::optional<segarecomp::GenesisResetImageReport> genesis_reset;  // Genesis: the accepted reset analysis
