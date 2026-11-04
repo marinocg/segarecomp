@@ -43,8 +43,8 @@ Only non-reconstructable classifications are recorded; nothing from any commerci
 
 No bank switching, no lock-on patch ROM (a third chip some boards map only through `$A130F1`), no combining of separate images (the
 composite is the user's own single image), no detection of the board from image contents, no other cartridge sizes, no
-battery persistence (unchanged from ADR 0098). The launcher's Genesis build configuration does not yet offer the declaration; the
-CLI and headless `--build --mapper lock_on` paths do.
+battery persistence (unchanged from ADR 0098). The launcher does not yet carry the declaration for Genesis (its catalog keeps only the
+Master System mapper families); `segarecomp build --mapper lock_on` does.
 
 ## 4. Evidence
 
