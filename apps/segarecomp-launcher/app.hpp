@@ -71,6 +71,7 @@ struct StatusInfo {
   std::vector<PatchBuilt> patches;
   // SEG-122-T009: the original ROM's cartridge examination, applied to the catalog on the main thread; and that the last build was made for other cartridge hardware.
   CartridgeCheck cartridge;
+  unsigned cartridge_generation = 0;   // of the snapshot the examination read
   bool hardware_changed = false;
   [[nodiscard]] bool runnable() const { return status == GameStatus::ready || older.playable; }
 };

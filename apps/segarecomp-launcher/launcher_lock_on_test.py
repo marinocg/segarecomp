@@ -125,7 +125,7 @@ def report(done):
 
 
 OPEN = ["frames 10", "focus_card 0", "frames 4", "key Return", "frames 8", "expect page=details"]
-SETTLE = ["frames 40"]  # the status refresh runs off the main thread
+SETTLE = ["wait_idle", "frames 6"]  # the status refresh runs off the main thread; wait_idle holds until it answered
 
 
 def headless(tmp, exe, fake_cli, fake_game):
@@ -190,6 +190,10 @@ def headless(tmp, exe, fake_cli, fake_game):
     done = p.cli("--build", sms, "--mapper", "sega")
     expect(done.returncode == 0 and report(done).get("mapper") == "sega" and "--mapper sega" in p.builds()[-1] and "cartridge" not in report(done), f"Master System declaration intact: {done.stdout}")
 
+    # --mapper belongs to --build: it must not look as if it had been stored by an import.
+    done = p.cli("--import", combined, "--mapper", "standard")
+    expect(done.returncode == 2 and not (p.lib / "library.json").exists(), f"--import with --mapper: rc={done.returncode} {done.stdout}")
+
     # The window-side import uses the same recognition.
     done = p.cli("--import", combined)
     expect("import=added" in done.stdout and p.game().get("mapper") == "lock_on" and "mapper_explicit" not in p.game(), f"import: {done.stdout} {p.game()}")
@@ -199,7 +203,7 @@ def window_journey(tmp, exe, fake_cli, fake_game):
     p = Profile(tmp, "window", exe, fake_cli, fake_game)
     rom = p.write("game.bin", cartridge(BASE, 1) + cartridge(ATTACHED, 2))
     assert "import=added" in p.cli("--import", rom).stdout
-    p.run("first build", OPEN + SETTLE + ["expect cartridge=lock_on:auto", "build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", "expect hardware_changed=0", "quit"])
+    p.run("first build", OPEN + SETTLE + ["expect cartridge=lock_on:auto", "build", "wait_idle", "wait_idle", "frames 6", "expect build_outcome=ok", "expect status=Ready", "expect hardware_changed=0", "quit"])
     expect(len(p.builds()) == 1 and "--mapper lock_on" in p.builds()[0], f"built correctly on the first attempt: {p.builds()}")
     games = lambda: sorted(d.name for d in (p.cache / "games").iterdir() if d.is_dir())
     locked = games()
@@ -207,19 +211,19 @@ def window_journey(tmp, exe, fake_cli, fake_game):
     expect(len(p.builds()) == 1, "a restart builds nothing")
 
     # A manual Standard: the lock-on build is not reused, the reason is stated, the Standard build is separate.
-    p.run("manual standard", OPEN + SETTLE + ["cartridge standard", "frames 40", "expect cartridge=standard:manual", "expect can_play=0", "expect hardware_changed=1",
-                                              "build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", "quit"])
+    p.run("manual standard", OPEN + SETTLE + ["cartridge standard", "wait_idle", "frames 6", "expect cartridge=standard:manual", "expect can_play=0", "expect hardware_changed=1",
+                                              "build", "wait_idle", "wait_idle", "frames 6", "expect build_outcome=ok", "expect status=Ready", "quit"])
     expect(len(p.builds()) == 2 and "--mapper" not in p.builds()[1] and games() != locked, f"the Standard build has its own identity: {p.builds()} {games()} {locked}")
     # It survives a reimport, a restart and a rescan.
     done = p.cli("--import", rom)
     expect(p.game().get("mapper_explicit") is True and p.game().get("mapper") == "", f"reimport keeps a manual Standard: {done.stdout} {p.game()}")
     p.run("manual standard restart", OPEN + SETTLE + ["scan", "wait_scan", "frames 20", "expect cartridge=standard:manual", "expect status=Ready", "quit"])
     # Back to Automatic: recognition again, and (the default setting removed the older folder at the recompile) a build that is not for this hardware does not count.
-    p.run("back to auto", OPEN + SETTLE + ["cartridge auto", "frames 60", "expect cartridge=lock_on:auto", "expect can_play=0", "expect hardware_changed=1",
-                                           "build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", "quit"])
+    p.run("back to auto", OPEN + SETTLE + ["cartridge auto", "wait_idle", "frames 6", "expect cartridge=lock_on:auto", "expect can_play=0", "expect hardware_changed=1",
+                                           "build", "wait_idle", "wait_idle", "frames 6", "expect build_outcome=ok", "expect status=Ready", "quit"])
     expect(len(p.builds()) == 3 and "--mapper lock_on" in p.builds()[2] and "mapper_explicit" not in p.game() and games() == locked, f"Automatic: same identity as the first build: {p.builds()} {p.game()} {games()}")
     # A manual Lock-on is the same identity as the automatic one (a choice is not hardware), and it survives a reimport.
-    p.run("manual lock-on", OPEN + SETTLE + ["cartridge lock_on", "frames 40", "expect cartridge=lock_on:manual", "expect status=Ready", "quit"])
+    p.run("manual lock-on", OPEN + SETTLE + ["cartridge lock_on", "wait_idle", "frames 6", "expect cartridge=lock_on:manual", "expect status=Ready", "quit"])
     done = p.cli("--import", rom)
     expect(p.game().get("mapper_explicit") is True and p.game().get("mapper") == "lock_on", f"reimport keeps a manual Lock-on: {p.game()}")
     expect(len(p.builds()) == 3, f"no rebuild: {p.builds()}")
@@ -231,7 +235,7 @@ def older_library(tmp, exe, fake_cli, fake_game):
     rom = p.write("game.bin", cartridge(BASE, 1))
     assert "import=added" in p.cli("--import", rom).stdout
     p.edit_game(mapper="", mapper_explicit=True)
-    p.run("standard build", OPEN + SETTLE + ["build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", "quit"])
+    p.run("standard build", OPEN + SETTLE + ["build", "wait_idle", "wait_idle", "frames 6", "expect build_outcome=ok", "expect status=Ready", "quit"])
     expect(len(p.builds()) == 1 and "--mapper" not in p.builds()[0], f"standard build: {p.builds()}")
     p.edit_game(mapper_explicit=None)     # exactly the record an earlier release wrote
     untouched = {k: v for k, v in p.game().items() if k != "mapper"}
@@ -239,7 +243,7 @@ def older_library(tmp, exe, fake_cli, fake_game):
     game = p.game()
     expect(game.get("mapper") == "lock_on", f"the recognition is saved: {game}")
     expect({k: v for k, v in game.items() if k != "mapper"} == untouched, f"no other setting moved: {untouched} -> {game}")
-    p.run("rebuild", OPEN + SETTLE + ["build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", "expect hardware_changed=0", "quit"])
+    p.run("rebuild", OPEN + SETTLE + ["build", "wait_idle", "wait_idle", "frames 6", "expect build_outcome=ok", "expect status=Ready", "expect hardware_changed=0", "quit"])
     expect(len(p.builds()) == 2 and "--mapper lock_on" in p.builds()[1], f"rebuild: {p.builds()}")
 
     # A missing ROM keeps what is stored, whichever it is, and the build still reads as its own.
@@ -264,7 +268,7 @@ def older_library(tmp, exe, fake_cli, fake_game):
     q = Profile(tmp, "ordinary", exe, fake_cli, fake_game)
     assert "import=added" in q.cli("--import", q.write("o.bin", cartridge(ORDINARY, 3))).stdout
     before = q.game()
-    q.run("ordinary", OPEN + SETTLE + ["expect cartridge=standard:auto", "build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", "quit"])
+    q.run("ordinary", OPEN + SETTLE + ["expect cartridge=standard:auto", "build", "wait_idle", "wait_idle", "frames 6", "expect build_outcome=ok", "expect status=Ready", "quit"])
     expect(len(q.builds()) == 1 and "--mapper" not in q.builds()[0], f"ordinary command: {q.builds()}")
     after = q.game()
     expect("mapper_explicit" not in after and after.get("mapper") == "" and after.get("aot_policy") == before.get("aot_policy"), f"ordinary record: {after}")
@@ -281,12 +285,12 @@ def native_patch(tmp, exe, fake_cli, fake_game):
     sp.create(source, None, package, id_="synthetic-native", name="Synthetic Native", version="1.0.0", width_max=100, native_source=provider,
               native_caps=["frame.work_ram", "frame.vdp", "scenery.words", "overlay.rgba"], author="Test Author")
     p.run("install", OPEN + SETTLE + [f"patch_pick {package}", "frames 12", "expect modal=1", "patch_confirm", "frames 20", "expect patches=1", "expect cartridge=lock_on:auto", "quit"])
-    p.run("select and build", OPEN + SETTLE + ["variant patched", "frames 30", "expect variant=patched", "expect cartridge=lock_on:auto", "build", "wait_idle", "frames 40", "expect build_outcome=ok", "quit"])
+    p.run("select and build", OPEN + SETTLE + ["variant patched", "wait_idle", "frames 6", "expect variant=patched", "expect cartridge=lock_on:auto", "build", "wait_idle", "wait_idle", "frames 6", "expect build_outcome=ok", "quit"])
     builds = p.builds()
     expect(len(builds) == 1 and "--mapper lock_on" in builds[0] and "--patch-package" in builds[0], f"the patched build carries the declaration: {builds}")
     # A manual choice is independent of the variant too, and removing the patch moves nothing.
-    p.run("override with patch", OPEN + SETTLE + ["cartridge standard", "frames 40", "expect cartridge=standard:manual", "variant vanilla", "frames 30", "expect cartridge=standard:manual", "cartridge auto", "frames 60", "expect cartridge=lock_on:auto", "quit"])
-    p.run("remove patch", OPEN + SETTLE + ["patch_remove 0", "frames 12", "patch_confirm", "frames 30", "expect patches=0", "expect cartridge=lock_on:auto", "quit"])
+    p.run("override with patch", OPEN + SETTLE + ["cartridge standard", "wait_idle", "frames 6", "expect cartridge=standard:manual", "variant vanilla", "wait_idle", "frames 6", "expect cartridge=standard:manual", "cartridge auto", "wait_idle", "frames 6", "expect cartridge=lock_on:auto", "quit"])
+    p.run("remove patch", OPEN + SETTLE + ["patch_remove 0", "frames 12", "patch_confirm", "wait_idle", "frames 6", "expect patches=0", "expect cartridge=lock_on:auto", "quit"])
     expect(p.game().get("mapper") == "lock_on", "a patch never changes the cartridge hardware")
 
 
@@ -297,9 +301,12 @@ def gamepad_control(tmp, exe, fake_cli, fake_game):
         press = lambda button: [f"pad {button} down", f"pad {button} up", "frames 6"]
         # D-pad through the expanded tiles: Standard, Lock-on, back to Automatic, each a real gamepad press.
         steps = ["frames 10", "pad_attach", "frames 20", "focus_card 0", "frames 4", "key Return", "frames 8"] + SETTLE + ["advanced 1", "frames 6"] + press("dpad_right")
-        steps += ["pad_seek cartridge#0 dpad_down 40"] + press("dpad_right") + ["expect focus_id=cartridge#1"] + press("south") + ["frames 30", "expect cartridge=standard:manual"]
-        steps += press("dpad_right") + ["expect focus_id=cartridge#2"] + press("south") + ["frames 30", "expect cartridge=lock_on:manual"]
-        steps += press("dpad_left") + press("dpad_left") + ["expect focus_id=cartridge#0"] + press("south") + ["frames 60", "expect cartridge=lock_on:auto", "quit"]
+        steps += ["pad_seek cartridge#0 dpad_down 40"] + press("dpad_right") + ["expect focus_id=cartridge#1"] + press("south") + ["wait_idle", "frames 6", "expect cartridge=standard:manual", "quit"]
+        p.run("pad standard " + size, steps)
+        expect(p.game().get("mapper_explicit") is True and p.game().get("mapper") == "", f"{size}: the real control saved a manual Standard: {p.game()}")
+        steps = ["frames 10", "pad_attach", "frames 20", "focus_card 0", "frames 4", "key Return", "frames 8"] + SETTLE + ["advanced 1", "frames 6"] + press("dpad_right")
+        steps += ["pad_seek cartridge#0 dpad_down 40"] + press("dpad_right") + press("dpad_right") + ["expect focus_id=cartridge#2"] + press("south") + ["wait_idle", "frames 6", "expect cartridge=lock_on:manual"]
+        steps += press("dpad_left") + press("dpad_left") + ["expect focus_id=cartridge#0"] + press("south") + ["wait_idle", "frames 6", "expect cartridge=lock_on:auto", "quit"]
         p.run("pad select " + size, steps)
         expect("mapper_explicit" not in p.game(), f"{size}: Automatic is stored as no explicit choice: {p.game()}")
 

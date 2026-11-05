@@ -186,9 +186,11 @@ void persistence(const fs::path &dir) {
       const fs::path &path = choice == 1 ? rom_path : ordinary_path;
       expect(again.import_rom(view_of(bytes, path), 2).entry == e && e->mapper_explicit && e->mapper == wanted, "a manual choice survives a duplicate import");
       expect(!apply_cartridge_finding(*e, recognize_genesis_cartridge(bytes)) && e->mapper == wanted, "recognition never overrides a manual choice");
-      // Back to Automatic: the next check restores the recognized result.
+      // Back to Automatic: the next check restores the recognized result; until then nothing claims a detection.
+      const unsigned generation = e->cartridge_generation;
       select_cartridge(*e, 0);
-      expect(!e->mapper_explicit && !e->cartridge_examined, "Automatic asks for a new examination");
+      expect(!e->mapper_explicit && !e->cartridge_examined && e->cartridge_generation != generation, "Automatic asks for a new examination");
+      if (!e->mapper.empty()) expect(cartridge_status_text(*e).find("detected") == std::string::npos, "an unconfirmed declaration is not called detected");
       const CartridgeCheck check = check_entry_cartridge(*e);
       if (check.verified) apply_cartridge_finding(*e, check.finding);
       expect(e->mapper == recognize_genesis_cartridge(bytes).mapper(), "Automatic follows the ROM again");
@@ -247,6 +249,35 @@ void persistence(const fs::path &dir) {
     back.load();
     expect(back.entries().size() == 1 && back.entries()[0].mapper.empty(), "lock_on is not a Master System declaration");
   }
+}
+
+// The exact-reuse check, on top of the key: a record declaring other hardware is not reusable even in the requested entry.
+void exact_reuse(const fs::path &dir) {
+  const fs::path entry = dir / "exact";
+  fs::create_directories(entry);
+#if defined(_WIN32)
+  std::ofstream(entry / "game.exe") << "x";
+#else
+  std::ofstream(entry / "game") << "x";
+#endif
+  std::ofstream(entry / "status.json") << "{\"status\":\"ok\"}";
+  RomView r;
+  r.platform_id = "genesis";
+  r.aot_policy = "compatibility";
+  const Layout layout;
+  const auto record = [&](const std::string &members) { std::ofstream(entry / "metadata.json") << "{" << members << "\"platform\":\"genesis\"}"; };
+  record("");
+  expect(entry_ready_for(entry, r, layout), "a standard record serves a standard request");
+  r.mapper = "lock_on";
+  expect(!entry_ready_for(entry, r, layout), "a standard record never serves a lock-on request");
+  record("\"mapper\":\"lock_on\",");
+  expect(entry_ready_for(entry, r, layout), "a lock-on record serves a lock-on request");
+  r.mapper.clear();
+  expect(!entry_ready_for(entry, r, layout), "a lock-on record never serves a standard request");
+  r.platform_id = "master-system";
+  record("\"mapper\":\"sega\",");
+  r.mapper = "sega";
+  expect(entry_ready_for(entry, r, layout), "the Master System path is not affected");
 }
 
 // An ordinary game's key segment is exactly the historical string; a declaration always selects another.
@@ -321,6 +352,7 @@ int main() {
   persistence(dir);
   older_builds(dir);
   cache_keys();
+  exact_reuse(dir);
   fs::remove_all(dir);
   if (failures != 0) { std::cerr << failures << " failure(s)\n"; return 1; }
   std::cout << "cartridge_recognition_test: ok\n";

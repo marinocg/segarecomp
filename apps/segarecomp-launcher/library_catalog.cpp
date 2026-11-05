@@ -520,6 +520,7 @@ CartridgeFinding finding_of(const RomView &rom) {
 bool apply_cartridge_finding(LibraryEntry &entry, const CartridgeFinding &finding) {
   if (entry.platform_id != "genesis" || entry.mapper_explicit) return false;
   entry.cartridge_note = finding.note;
+  entry.cartridge_unconfirmed = false;
   if (entry.mapper == finding.mapper()) return false;
   entry.mapper = finding.mapper();
   return true;
@@ -528,20 +529,27 @@ bool apply_cartridge_finding(LibraryEntry &entry, const CartridgeFinding &findin
 void select_cartridge(LibraryEntry &entry, int choice) {
   entry.cartridge_note.clear();
   entry.mapper_explicit = choice != 0;
-  if (choice == 0) entry.cartridge_examined = false;
-  else entry.mapper = choice == 2 ? "lock_on" : "";
+  if (choice == 0) {
+    entry.cartridge_examined = false;
+    entry.cartridge_unconfirmed = true;
+    ++entry.cartridge_generation;
+  } else {
+    entry.cartridge_unconfirmed = false;
+    entry.mapper = choice == 2 ? "lock_on" : "";
+  }
 }
 
 std::string cartridge_status_text(const LibraryEntry &entry) {
   if (entry.platform_id != "genesis") return {};
   if (entry.mapper_explicit) return entry.mapper.empty() ? "Standard cartridge - chosen manually" : "Lock-on cartridge - chosen manually";
-  if (!entry.mapper.empty()) return "Lock-on cartridge - automatically detected";
+  if (!entry.mapper.empty()) return entry.cartridge_unconfirmed ? "Lock-on cartridge - kept until the original ROM can be checked" : "Lock-on cartridge - automatically detected";
   return entry.cartridge_note.empty() ? std::string() : "Standard cartridge. " + entry.cartridge_note + " You can choose Lock-on in Advanced build options.";
 }
 
 bool Catalog::relocate(LibraryEntry &entry, const fs::path &path, const std::string &sha256_of_file) {
   if (sha256_of_file != entry.sha256) return false;  // identity is the content, never the name
   entry.cartridge_examined = false;   // SEG-122-T009: the original is available again
+  ++entry.cartridge_generation;
   const std::string text = utf8_of(path);
   entry.rom_paths.erase(std::remove(entry.rom_paths.begin(), entry.rom_paths.end(), text), entry.rom_paths.end());
   entry.rom_paths.insert(entry.rom_paths.begin(), text);

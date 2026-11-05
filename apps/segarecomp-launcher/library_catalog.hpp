@@ -81,9 +81,12 @@ struct LibraryEntry {
   // SEG-078-T002 (ADR 0204): Sega CD only (platform_id "sega-cd"): the referenced BIOS and disc, the imported program and the last typed stop.
   // Never written for another platform, so a Genesis / Master System record is byte-for-byte what it was before.
   scd::EntryRecord sega_cd;
-  // SEG-122-T009: session state, never saved. The ROM was already examined for its cartridge hardware, and why a look-alike image was not recognized.
+  // SEG-122-T009: session state, never saved. The ROM was already examined for its cartridge hardware; why a look-alike image was not recognized; that Automatic was just chosen and
+  // the stored declaration is not yet confirmed by the ROM; and a counter that lets a status worker's older result recognize that a new examination was requested after its snapshot.
   bool cartridge_examined = false;
   std::string cartridge_note;
+  bool cartridge_unconfirmed = false;
+  unsigned cartridge_generation = 0;
 
   [[nodiscard]] std::string id() const { return platform_id + ":" + sha256; }
   [[nodiscard]] const std::string &title() const { return display_title.empty() ? detected_title : display_title; }

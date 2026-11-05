@@ -301,7 +301,6 @@ if(BUILD_TESTING)
   set_property(TEST library_catalog_test APPEND PROPERTY LABELS full fast)
 endif()
 
-# SEG-058: cache maintenance on fake trees (symlink escapes, forged plans, busy entries).
 # SEG-122-T009: the launcher's lock-on recognition and its persistence (synthetic images, no window).
 add_executable(cartridge_recognition_test cartridge_recognition_test.cpp)
 target_link_libraries(cartridge_recognition_test PRIVATE segarecomp_launcher_core)
@@ -316,6 +315,7 @@ if(BUILD_TESTING)
   set_property(TEST launcher_lock_on_test PROPERTY TIMEOUT 600)
 endif()
 
+# SEG-058: cache maintenance on fake trees (symlink escapes, forged plans, busy entries).
 add_executable(storage_test storage_test.cpp)
 target_link_libraries(storage_test PRIVATE segarecomp_launcher_core)
 segarecomp_enable_warnings(storage_test)

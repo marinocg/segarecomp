@@ -38,6 +38,7 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
     // SEG-122-T009: once per session per game, off the main thread, and before anything derives the build identity from this copy, so one refresh gives the correct status.
     if (e.platform_id == "genesis" && !e.mapper_explicit && !e.cartridge_examined) {
       info.cartridge = check_entry_cartridge(e);
+      info.cartridge_generation = e.cartridge_generation;
       if (info.cartridge.verified) apply_cartridge_finding(e, info.cartridge.finding);
     }
     if (e.platform_id == "sega-cd") {  // SEG-078-T002: no cache entry and no build; the cheap checks of sega_cd.hpp decide
@@ -382,7 +383,8 @@ void App::poll_status_refresh() {
   bool changed = false;
   for (auto &[id, info] : statuses_) {
     if (info.cartridge.examined) {
-      if (LibraryEntry *entry = catalog_.find_id(id)) {
+      // A newer request (Automatic chosen, ROM located) after this snapshot stands: the queued refresh examines again.
+      if (LibraryEntry *entry = catalog_.find_id(id); entry != nullptr && entry->cartridge_generation == info.cartridge_generation) {
         entry->cartridge_examined = true;
         if (info.cartridge.verified && apply_cartridge_finding(*entry, info.cartridge.finding)) changed = true;
       }

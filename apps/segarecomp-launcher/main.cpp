@@ -82,6 +82,7 @@ int headless(int argc, char **argv) {
     else { std::fprintf(stderr, "usage: Segarecomp [--import <rom>]... [--build <rom> [--mapper <sega|rom_only|lock_on|standard>] [--aot-policy <compatibility|optimized> [--aot-model <v1|gen2>]] [--hint-alias-discovery] [--run [--region <usa|japan|europe>] [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
   }
   if (aot_model != "v1" && aot_policy != "optimized") { std::fprintf(stderr, "--aot-model requires --aot-policy optimized\n"); return 2; }
+  if (!mapper.empty() && rom_path.empty()) { std::fprintf(stderr, "--mapper applies to --build\n"); return 2; }
   std::string report;
   const auto emit = [&](const std::string &line) { report += line + "\n"; std::puts(line.c_str()); };
   if (!imports.empty()) {
