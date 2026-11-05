@@ -153,13 +153,14 @@ struct GenesisRegionPruneResult {
     const std::vector<FrontendProgram::ImmutableRomAotRange> &regions,
     std::size_t max_rounds = genesis_region_prune_default_max_rounds);
 
-// SEG-074-T001 (ADR 0156): REPORT-ONLY least structurally closed SUPERSET of an externally proposed region, the dual of the prune
+// SEG-074-T001 (ADR 0156): least structurally closed SUPERSET of an externally proposed region, the dual of the prune
 // above. `K0 = U ∩ R` (the same ADR 0111 alias rule); `K` is the least subset of `U` that contains `K0`, every machine root that is a
 // broad identity and every ADR 0049 materialized identity, and is closed under exactly the validator's structural obligations (fixed
 // control successors and stacked call continuations that are themselves broad identities). Closure only adds broad identities
 // (`K0 ⊆ K ⊆ U`): it never invents an address outside the broad universe, never follows a dynamic transfer, and the least fixed point is
-// unique (independent of iteration order). It exists to measure a diagnostic oracle (a source-backed start set plus the entries the
-// execution model independently demands); it is not a producer of executable authority. `pruned_count` is 0; `added_count` = |K \ K0|
+// unique (independent of iteration order). It was built to measure a diagnostic oracle (a source-backed start set plus the entries the
+// execution model independently demands). Production uses it only through `genesis_ml_admission`, for a gen2 emission holding a materialized RAM thunk
+// after its prune rejected (SEG-122-T010, ADR 0270). Closure is structural: it proves nothing about dynamic targets, which stay fail-closed at run time. `pruned_count` is 0; `added_count` = |K \ K0|
 // and `root_added_count` counts the mandatory roots/materialized identities absent from K0. A resource cap (rounds) is exhausted =>
 // REJECTED. The product is an ordinary hybrid plan that the unchanged validator must accept.
 enum class GenesisRegionAdmissionClosure : std::uint8_t { prune, close };

@@ -41,11 +41,11 @@ effective producer and the admitted-set digest (`k_sha256`); it is what `status.
 | representation / feature schema | feature-schema SHA `d2e7c829...f570` | representation SHA `cf43e758...0c67` (`seg049-gen2-repr-v1`) |
 | CPU token contract | not used | token-schema SHA `9a1f4f4f...1d75` (`segarecomp.m68k_decode_tokens.v1`) |
 | rank / selection policy | frozen logit threshold | `B35` (rank plan SHA `8c4d98b9...1e29`) |
-| analysis contract | `segarecomp.admission_contract.v1` (the prune + validator semantics both producers feed) | same |
+| analysis contract | `segarecomp.admission_contract.v2` (the prune + validator semantics both producers feed; v2: SEG-122-T010, gen2 closes a thunk-bearing emission after a prune rejection, ADR 0270) | same |
 | weight table | folded-weight digest pinned | binary32 weight-table SHA `72699dbc...7d98` |
 
 Any change to any component is a **new** identity: it must change the pinned constants, the generated table and the golden digests together, and the cache identity changes with it.
-The analysis-contract string is bumped by any change to the structural prune or the validator that can alter an admitted set.
+The analysis-contract string is bumped by any change to the structural prune, the admission route or the validator that can alter an admitted set.
 
 ## 4. Compatibility, deprecation and incompatible models
 

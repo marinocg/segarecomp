@@ -54,12 +54,17 @@ struct Fixture {
   std::vector<std::uint32_t> seeds;
 };
 
-Fixture fixture() {
+Fixture fixture(bool ram_thunk = false, bool copy_alias = false) {
   Fixture f;
   f.bytes = image_bytes();
   auto program = make_genesis_bridge_startup_program(f.bytes, 0U, 0x200U, std::nullopt);
   f.program = *program;
   (void)apply_genesis_immutable_rom_aot(f.program);
+  if (copy_alias) expect(apply_genesis_immutable_copy_alias(f.program, 0xFF0200U, 0x400U, 4U), "fixture: copy alias accepted");
+  if (ram_thunk) {
+    const std::uint8_t jmp[] = {0x4EU, 0xF9U, 0x00U, 0x00U, 0x06U, 0x00U};  // JMP $000600.L: a target the proposal below leaves out
+    expect(apply_genesis_materialized_ram_thunk(f.program, 0xFF0100U, jmp), "fixture: RAM thunk accepted");
+  }
   const auto analysis = analyze_m68k_frontend(f.program);
   const FrontendAnalysis *direct = nullptr;
   if (const auto *accepted = std::get_if<FrontendAnalysis>(&analysis)) direct = accepted;
@@ -200,6 +205,97 @@ void test_validator_remains_authority() {
   }
 }
 
+bool holds(const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries, std::uint32_t pc) {
+  const auto a = addresses(entries);
+  return std::find(a.begin(), a.end(), pc) != a.end();
+}
+
+// SEG-122-T010 (ADR 0270): closure of a thunk-bearing gen2 emission after a prune rejection, and every case that must not use it.
+void test_ram_thunk_closure() {
+  const auto gen2 = synthetic(&no_failure, &propose_reachable_only);
+  const Fixture t = fixture(true);
+  expect(holds(t.entries, 0xFF0100U) && holds(t.entries, 0x600U), "fixture: thunk and its target are broad identities");
+  GenesisRegionPruneResult direct;
+  expect(!plan_genesis_region_admission(t.program, sha, t.entries, *propose_reachable_only(t.bytes, sha, t.entries, t.seeds).proposal, direct) &&
+             direct.failure_class == "outside_region", "the unchanged prune still rejects the thunk emission");
+  {
+    auto entries = t.entries;
+    const auto o = genesis_ml_admission(gen2, t.program, sha, t.bytes, entries, t.seeds);
+    expect(o.admitted && o.closure_used && o.validator == "accepted" && o.reason == "none", "gen2: a thunk emission stays selective: " + o.reason);
+    expect(holds(entries, 0xFF0100U) && holds(entries, 0x600U) && holds(entries, 0x602U), "the thunk and the fixed flow of its target are admitted");
+    expect(entries.size() < t.entries.size() && o.pruned == 0U && o.thunks == 1U && o.k == o.k0 + o.added && o.roots_added >= 1U && o.roots_added <= o.added, "closure counts");
+    auto again = t.entries;
+    const auto second = genesis_ml_admission(gen2, t.program, sha, t.bytes, again, t.seeds);
+    expect(second.k_sha256 == o.k_sha256 && addresses(again) == addresses(entries), "closure is deterministic across runs");
+    const auto line = genesis_ml_admission_report_line(gen2, o);
+    expect(line.find(" closure=close added=" + std::to_string(o.added) + " roots_added=" + std::to_string(o.roots_added) + " thunks=1") != std::string::npos &&
+               line.find("fallback=0") != std::string::npos && line.find("0xff") == std::string::npos, "closure report line: " + line);
+    GenesisMlAdmissionOutcome plain = o;
+    plain.closure_used = false;
+    expect(genesis_ml_admission_report_line(gen2, plain).find("closure=") == std::string::npos, "a non-closed line has no closure fields");
+  }
+  {  // v1 stays prune-only.
+    GenesisMlProducer v1 = gen2;
+    v1.family = GenesisMlModelFamily::v1;
+    auto entries = t.entries;
+    const auto o = genesis_ml_admission(v1, t.program, sha, t.bytes, entries, t.seeds);
+    expect(!o.admitted && !o.closure_used && o.reason == "prune_rejected" && o.detail == "outside_region" && addresses(entries) == addresses(t.entries), "v1: broad fallback, unchanged");
+  }
+  {  // An exhausted cap is the broad fallback, never a partial program.
+    auto entries = t.entries;
+    const auto o = genesis_ml_admission(gen2, t.program, sha, t.bytes, entries, t.seeds, 1U);
+    expect(!o.admitted && !o.closure_used && o.reason == "prune_rejected" && o.detail == "closure_rejected" && o.validator == "not_run" && addresses(entries) == addresses(t.entries), "cap: broad fallback");
+  }
+  {  // A proposal for another image is not closed.
+    auto entries = t.entries;
+    const auto o = genesis_ml_admission(synthetic(&no_failure, &propose_wrong_rom), t.program, sha, t.bytes, entries, t.seeds);
+    expect(!o.admitted && !o.closure_used && addresses(entries) == addresses(t.entries), "wrong ROM: broad fallback");
+  }
+  {  // No thunk: a rejected prune stays the broad fallback, also with a copy alias whose source is outside the proposal.
+    const Fixture plain = fixture();
+    auto entries = plain.entries;
+    const auto o = genesis_ml_admission(synthetic(&no_failure, &propose_unreachable_only), plain.program, sha, plain.bytes, entries, plain.seeds);
+    expect(!o.admitted && !o.closure_used && o.reason == "prune_rejected" && addresses(entries) == addresses(plain.entries), "no thunk: broad fallback");
+    const Fixture alias = fixture(false, true);
+    auto alias_entries = alias.entries;
+    const auto a = genesis_ml_admission(synthetic(&no_failure, &propose_unreachable_only), alias.program, sha, alias.bytes, alias_entries, alias.seeds);
+    expect(!a.admitted && !a.closure_used && a.reason == "prune_rejected" && addresses(alias_entries) == addresses(alias.entries), "alias without thunk: broad fallback");
+  }
+  {  // A successful prune does not change: same K as the plain prune, no closure fields.
+    const Fixture plain = fixture();
+    auto entries = plain.entries;
+    const auto o = genesis_ml_admission(gen2, plain.program, sha, plain.bytes, entries, plain.seeds);
+    GenesisRegionPruneResult prune;
+    expect(plan_genesis_region_admission(plain.program, sha, plain.entries, *propose_reachable_only(plain.bytes, sha, plain.entries, plain.seeds).proposal, prune).has_value(), "plain prune accepts");
+    expect(o.admitted && !o.closure_used && o.added == 0U && o.k == prune.admitted.size() && o.k_sha256 == genesis_hybrid_admission_universe_digest(prune.admitted), "a successful prune is unchanged");
+  }
+  {  // A closed plan is an ordinary plan: wrong ROM, alias set or universe is refused by the unchanged validator.
+    GenesisRegionPruneResult closed;
+    const auto proposal = *propose_reachable_only(t.bytes, sha, t.entries, t.seeds).proposal;
+    const auto plan = plan_genesis_region_admission(t.program, sha, t.entries, proposal, closed, genesis_region_prune_default_max_rounds, GenesisRegionAdmissionClosure::close);
+    expect(plan.has_value(), "closed plan produced");
+    if (plan) {
+      auto wrong_rom = *plan; wrong_rom.rom_sha256 = std::string(64U, 'c');
+      auto wrong_universe = *plan; wrong_universe.universe_sha256 = std::string(64U, 'c');
+      auto wrong_alias = *plan; wrong_alias.aliases.push_back({0xFF0300U, 0x400U, 4U});
+      auto missing_thunk = *plan;
+      for (auto &range : missing_thunk.ranges)
+        if (range.end_address > 0xFF0100U) range.end_address = 0xFF0100U;  // the run holding the thunk now ends before it
+      for (const auto *bad : {&wrong_rom, &wrong_universe, &wrong_alias, &missing_thunk}) {
+        auto entries = t.entries;
+        expect(apply_genesis_hybrid_admission(t.program, sha, *bad, entries).has_value() && addresses(entries) == addresses(t.entries), "the validator refuses a tampered closed plan");
+      }
+    }
+  }
+  // The byte-identity proof gate is before admission: a descriptor that is not a verbatim copy never becomes an identity.
+  {
+    Fixture bad = fixture();
+    expect(!apply_genesis_immutable_copy_alias(bad.program, 0xFF0200U, 0x7FEU, 4U), "an alias whose source leaves the image is refused");
+    const std::uint8_t not_jmp[] = {0x4EU, 0x71U, 0x4EU, 0x71U, 0x4EU, 0x71U};
+    expect(!apply_genesis_materialized_ram_thunk(bad.program, 0xFF0100U, not_jmp), "bytes that are not exactly one JMP are refused as a thunk");
+  }
+}
+
 void test_classification_table() {
   for (const char *reason : {"rom_size", "token_range", "non_finite_score", "empty_proposal", "no_analysis", "no_report", "whatever"})
     expect(genesis_ml_fallback_class(reason) == "producer_input", std::string("class of ") + reason);
@@ -272,6 +368,7 @@ int main() {
   test_classification_table();
   test_fallbacks_leave_entries_untouched();
   test_validator_remains_authority();
+  test_ram_thunk_closure();
   test_identities();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";

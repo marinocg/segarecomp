@@ -705,6 +705,8 @@ std::string aot_policy_json(const Options &options, const Log &log, const std::s
     };
     json += ",\"selected_ppm\":" + std::to_string(ppm("ml_selected", v1 ? "windows" : "cells")) + ",\"admitted_ppm\":" + std::to_string(ppm("k", "universe"));
     json += ",\"k_sha256\":\"" + safe(kv["k_sha256"]) + "\"";
+    if (kv.count("closure") != 0U)  // SEG-122-T010: K is the closure of the proposal (RAM-thunk emission); aggregates only
+      json += ",\"region_closure\":\"" + safe(kv["closure"]) + "\",\"added\":" + number("added") + ",\"roots_added\":" + number("roots_added") + ",\"ram_thunks\":" + number("thunks");
   }
   json += ",\"validator\":\"" + (ml_effective ? safe(kv["validator"]) : (kv.count("validator") != 0U ? safe(kv["validator"]) : std::string("not_run"))) + "\"";
   // Stable compatibility identity (ADR 0103): a pure function of the image, the requested policy/model, the effective producer and the admitted set.

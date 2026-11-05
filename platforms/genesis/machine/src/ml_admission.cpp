@@ -2,6 +2,8 @@
 
 #include "segarecomp/machine/genesis/ml_admission.hpp"
 
+#include <algorithm>
+
 #include "segarecomp/machine/genesis/ml_region_gen2_producer.hpp"
 #include "segarecomp/machine/genesis/ml_region_producer.hpp"
 #include "segarecomp/sha256.hpp"
@@ -70,7 +72,7 @@ std::string_view genesis_ml_fallback_class(std::string_view reason) noexcept {
 
 GenesisMlAdmissionOutcome genesis_ml_admission(const GenesisMlProducer &producer, const FrontendProgram &program, std::string_view rom_sha256,
                                                std::span<const std::uint8_t> rom, std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
-                                               std::span<const std::uint32_t> seed_addresses) {
+                                               std::span<const std::uint32_t> seed_addresses, std::size_t closure_max_rounds) {
   GenesisMlAdmissionOutcome out;
   out.broad = entries.size();
   if (producer.identity_failure == nullptr || producer.propose == nullptr || !producer.identity_failure().empty()) {
@@ -86,20 +88,37 @@ GenesisMlAdmissionOutcome genesis_ml_admission(const GenesisMlProducer &producer
     return out;
   }
   GenesisRegionPruneResult pruned;
-  const auto plan = plan_genesis_region_admission(program, rom_sha256, entries, *proposal.proposal, pruned);
+  auto plan = plan_genesis_region_admission(program, rom_sha256, entries, *proposal.proposal, pruned);
+  // SEG-122-T010 (ADR 0270): a gen2 emission whose prune rejected and which holds a materialized RAM thunk gets the existing least closed superset of the
+  // same proposal. The unchanged validator below still decides; any failure stays the broad fallback, classified as a prune rejection.
+  std::string prune_detail = pruned.failure_class;
+  if (!plan && producer.family == GenesisMlModelFamily::gen2 &&
+      std::any_of(entries.begin(), entries.end(), [](const auto &entry) { return entry.materialized_ram_thunk; })) {
+    GenesisRegionCloseCounts counts;
+    plan = plan_genesis_region_admission(program, rom_sha256, entries, *proposal.proposal, pruned, closure_max_rounds, GenesisRegionAdmissionClosure::close, &counts);
+    if (plan) {
+      out.closure_used = true;
+      out.added = counts.added_count;
+      out.roots_added = counts.root_added_count;
+      out.thunks = static_cast<std::size_t>(std::count_if(entries.begin(), entries.end(), [](const auto &entry) { return entry.materialized_ram_thunk; }));
+    } else {
+      prune_detail = "closure_rejected";
+    }
+  }
   out.universe = pruned.universe_count;
   out.k0 = pruned.k0_count;
   out.pruned = pruned.pruned_count;
   out.rounds = pruned.rounds;
   if (!plan) {
     out.reason = "prune_rejected";
-    out.detail = pruned.failure_class.empty() ? "unclassified" : pruned.failure_class;
+    out.detail = prune_detail.empty() ? "unclassified" : prune_detail;
     return out;
   }
   auto scratch = entries;
   if (apply_genesis_hybrid_admission(program, rom_sha256, *plan, scratch).has_value()) {
     out.reason = "validator_rejected";
     out.validator = "rejected";
+    out.closure_used = false;
     return out;
   }
   out.k = pruned.admitted.size();
@@ -127,7 +146,10 @@ std::string genesis_ml_admission_report_line(const GenesisMlProducer &producer, 
           (v1 ? " seed_windows=" : " seed_cells=") + std::to_string(o.seed_units) + " universe=" + std::to_string(o.universe) + " k0=" + std::to_string(o.k0) +
           " k=" + std::to_string(o.k) + " pruned=" + std::to_string(o.pruned) + " rounds=" + std::to_string(o.rounds) + " broad=" + std::to_string(o.broad) +
           " admitted=" + std::to_string(o.admitted_count) + " k_sha256=" + o.k_sha256 + " validator=accepted model_family=" + family +
-          " fallback_class=none contract=" + std::string(genesis_admission_analysis_contract) + '\n';
+          " fallback_class=none contract=" + std::string(genesis_admission_analysis_contract);
+  if (o.closure_used)
+    line += " closure=close added=" + std::to_string(o.added) + " roots_added=" + std::to_string(o.roots_added) + " thunks=" + std::to_string(o.thunks);
+  line += '\n';
   return line;
 }
 

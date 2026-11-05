@@ -4,7 +4,8 @@
 // SEG-049 gen2 producer. Normative contract: docs/architecture/admission-authority-and-model-lifecycle-contract.md.
 //
 // A producer only PROPOSES an executable region `R` (plain ranges + ROM digest). This owner then applies the UNCHANGED structural prune and
-// the UNCHANGED production validator; only a validator-accepted plan replaces the broad identities. Any failure is a classified fallback to
+// the UNCHANGED production validator; only a validator-accepted plan replaces the broad identities. SEG-122-T010 (ADR 0270): for gen2 only, when the prune
+// rejects an emission holding a materialized RAM thunk, the existing least closed superset of the same proposal goes to the same validator. Any failure is a classified fallback to
 // the broad universe and leaves the entries untouched. Producers cannot read or write validator state, and no ML type crosses this boundary.
 
 #include <cstddef>
@@ -20,7 +21,7 @@
 namespace segarecomp {
 
 // The semantics of the structural prune + admission validator that every producer feeds. Bump on any change that can alter an admitted set.
-inline constexpr std::string_view genesis_admission_analysis_contract = "segarecomp.admission_contract.v1";
+inline constexpr std::string_view genesis_admission_analysis_contract = "segarecomp.admission_contract.v2";
 
 enum class GenesisMlModelFamily { v1, gen2 };
 [[nodiscard]] std::string_view genesis_ml_model_family_name(GenesisMlModelFamily family) noexcept;  // "v1" | "gen2"
@@ -65,6 +66,8 @@ struct GenesisMlAdmissionOutcome {
   std::size_t units{}, selected{}, seed_units{};
   std::size_t universe{}, k0{}, k{}, pruned{}, rounds{}, broad{}, admitted_count{};
   std::string k_sha256;
+  bool closure_used{};             // SEG-122-T010: `k` is the closure of the proposal, not its prune; the counts below apply
+  std::size_t added{}, roots_added{}, thunks{};
 };
 
 // Runs the producer and, on a proposal, the prune and the validator against `program`/`entries`. `entries` is replaced ONLY when
@@ -72,7 +75,8 @@ struct GenesisMlAdmissionOutcome {
 [[nodiscard]] GenesisMlAdmissionOutcome genesis_ml_admission(const GenesisMlProducer &producer, const FrontendProgram &program,
                                                              std::string_view rom_sha256, std::span<const std::uint8_t> rom,
                                                              std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
-                                                             std::span<const std::uint32_t> seed_addresses);
+                                                             std::span<const std::uint32_t> seed_addresses,
+                                                             std::size_t closure_max_rounds = genesis_region_prune_default_max_rounds);
 
 // The sanitized one-line machine-readable report (stderr `segarecomp: m68k admission: requested=optimized ...`); no address, byte or per-unit datum.
 [[nodiscard]] std::string genesis_ml_admission_report_line(const GenesisMlProducer &producer, const GenesisMlAdmissionOutcome &outcome);
