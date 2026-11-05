@@ -98,13 +98,13 @@ The delivered code was rebuilt on all six workloads. `k_sha256` and generated C 
 ## 7. Identity and compatibility consequences
 
 - `genesis_admission_analysis_contract` is now `segarecomp.admission_contract.v2`. Policy identity changes for every Genesis request, so the launcher's Optimized cache keys change and **every Genesis Optimized library entry needs one rebuild to be current**, including v1 entries and Sonic 3 or Golden Axe, whose admitted sets did not change. Exact-key reuse of a build made under the previous policy is refused; the launcher can still offer such a same-mode build as a playable older build until then.
-- Genesis Compatibility: generated output, its frozen build `identity` and its launcher cache key are unchanged. Only the `policy_identity` string in its `status.json` changes.
+- Genesis Compatibility: its frozen build `identity` and its launcher cache key are unchanged, and the delivered CLI reproduced the base CLI's generated C digest on T1 and Golden Axe (the two rebuilt). Only the `policy_identity` string in its `status.json` changes.
 - v1 stays prune-only: not evaluated. Master System and Sega CD have their own identities and do not use this route. The explicit `--admission-plan` route stays broad on a thunk emission.
 - `status.json` adds `region_closure`, `added`, `roots_added` and `ram_thunks` only when closure ran; `pruned` is 0 then. Existing keys stay.
 
 ## 8. Consequence for players
 
-Sonic & Knuckles and Sonic 3 & Knuckles were broad under the T009 fallback. They now run about 37 % of the broad universe. If play leaves the measured route and a dynamic transfer reaches a start outside K, the program stops with a typed stop, and the player sees that the game stopped. The automatic restart in Compatibility exists for Master System only, so a Genesis Optimized build does not recover by itself; the player can switch the Mode to Compatibility. This already holds for every selective Genesis title. The gates permit it, the routes do not show it, and later zones remain unmeasured.
+Sonic & Knuckles and Sonic 3 & Knuckles were broad under the T009 fallback. They now run about 37 % of the broad universe. If play leaves the measured route and a dynamic transfer reaches a start outside K, the program stops with a typed stop. The viewer shows a "The game stopped" screen that does not mention Mode or Compatibility. The stops observed here exited with status 0 (with a full-report path set; the launcher's path to its exit was not traced), and the launcher treats exit 0 as clean, so the library would then show that the game ended normally rather than flag the stop. The automatic restart in Compatibility exists for Master System only, so a Genesis Optimized build does not recover by itself. A player can switch the Mode to Compatibility unprompted; that restarts from reset and needs a full broad build if none exists (about 390 s wall for T2 at `-O1`). Optimized is the launcher's default for Genesis, so these titles reach this path by default. This already holds for every selective Genesis title. The gates permit it, the routes do not show it, and later zones remain unmeasured.
 
 ## 9. Additional observation: every act of the combined image (not a gate)
 
@@ -118,11 +118,14 @@ Method: the delivered selective program of the combined image with one byte reta
 | played start: run right with jumps | 28 | 110,460 | 0 |
 | fly to the act's end, leave debug mode, play on | 28 | 217,215 | 2 |
 
-The three stopping routes were replayed on a broad build of the same image. **All three stop identically in broad:** same stop class, same virtual frame (1,582, 3,488 and 1,497), and equal registers, SR, PC and final work RAM. The classes are `unresolved_indirect_target`, and `unsupported_memory_region` with `rom_write_prohibited` and with `odd_effective_address`. **No stop on these routes is attributable to selective admission.** They are existing broad behaviour on routes that fly a debug cursor through a level; whether normal play can reach them is unknown, and they were not diagnosed here.
+The three stopping routes were replayed on a broad build of the same image. **All three stop identically in broad:** same stop class, same virtual frame (1,582, 3,488 and 1,497), and equal registers, SR, PC, final work RAM and report. The classes are `unresolved_indirect_target` with `reached_unresolved_direct_edge`, and `unsupported_memory_region` with `rom_write_prohibited` and with `odd_effective_address`. The broad program was built by the pre-change CLI, which supports "existing behaviour". **No stop on these routes is attributable to selective admission.** They are existing broad behaviour on routes that fly a debug cursor through a level; whether normal play can reach them is unknown, and they were not diagnosed here. Identical stops show admission independence, not correctness: a defect shared by both programs is not excluded, and a ROM write or odd access that stops the program may differ from hardware.
 
 Limits:
 
-- Only the stopping routes were replayed in broad. The other 81 runs show the absence of a typed stop, not equality with broad.
+- Only the stopping routes were replayed in broad. The other 81 runs show the absence of a typed stop, not equality with broad. Their VRAM, CRAM and VSRAM are not in these reports.
+- The three stopped routes ended at about 20 %, 41 % and 54 % of their planned frames, so the remainder was never exercised.
+- Flight coverage is unmeasured, with no per-frame trace. On 22 of 28 acts the sweep's final camera height is above a height another route of that act reached, which suggests the camera bounds clamp the descent, so a sweep may not cover its whole act.
+- Not all frames are in the named act: 26 of 28 played routes and 23 of 28 end-of-act routes ended in the correct act; the others ended at the title screen, a demo, a loading state or the stop above.
 - Debug flight activates objects along its path but mostly does not exercise player physics. The played routes are short, and many end in a level rather than at its boss. Boss fights and act transitions happen on these routes only incidentally, and were not counted.
 - Not exercised: Knuckles and Tails alone, special and bonus stages, the ending, save paths, and most object interactions. Standalone S&K and the patched image were not swept.
 
