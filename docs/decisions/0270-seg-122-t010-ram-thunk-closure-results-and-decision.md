@@ -14,6 +14,8 @@ Reproduced on standalone Sonic & Knuckles (T1), combined Sonic 3 & Knuckles (T2)
 3. The next emission's universe has one more identity. The validator makes every materialized identity mandatory, and a thunk has no cartridge source, so it is never in the model's cartridge ranges.
 4. The prune therefore rejects with `materialized_image_not_admitted` / `outside_region`, reported as `prune_rejected` / `proposal_rejected`, and the program is broad. The proposal digest is the same in both emissions: only the thunk identity changed the outcome.
 
+The frozen trigger is wider than this cause: closure runs on any prune rejection once a thunk exists. A proposal the prune would reject for another reason, for example one missing the machine roots, is completed instead of falling back. This is the pre-registered candidate, so it was not narrowed; a synthetic test pins it.
+
 ## 2. Closure statistics
 
 `CLOSE`, final emission. Rounds are closure waves. `added` is `|K \ K0|`; `roots_added` is the part of it that the mandatory rule adds directly.
@@ -25,7 +27,7 @@ Reproduced on standalone Sonic & Knuckles (T1), combined Sonic 3 & Knuckles (T2)
 | T3 combined + patch | 1,981,349 | 711,060 | 733,857 | 37.0 % | 1 | 22,796 | 1,740 | 1 | 0 | accepted | `ml_region_gen2` |
 | Flicky | 87,967 | 38,544 | 46,133 | 52.4 % | 7,463 | 126 | 13 | 14 | 49,152 | accepted | `ml_region_gen2` |
 
-- **Verified ROM-copy aliases:** none on T1-T3. Flicky has one 49,152-byte mixed code/data copy; its 7,449 copy identities outside K0 are mandatory, as before. Runtime byte-identity guards are unchanged.
+- **Verified ROM-copy aliases:** none on T1-T3. Flicky has one 49,152-byte mixed code/data copy, whose identities are mandatory, as before; `roots_added` minus its 14 thunks is 7,449, which assumes no machine root fell outside K0 (not separately checked). Runtime byte-identity guards are unchanged.
 - **Materialized thunks:** 1 on T1-T3, 14 on Flicky (Flicky's `roots_added` includes them). Runtime whole-instruction guards are unchanged.
 - **Fixed structural successors:** the "other structural" column. It holds the fixed targets and call continuations of K0, of the mandatory identities and of each thunk's `JMP`. The counts do not attribute them separately. Most K0 false decodes the prune would remove stay in K. That was the concern before measurement; it cost little here.
 - **Parent copy:** T1-T3 have no parent copy, so a thunk there brings only its fixed `JMP` target. On Flicky, whose thunks are called from the copy, closure admits the whole mandatory copy and the validator accepts. Admitting the thunk alone would not have been enough there.
@@ -78,13 +80,14 @@ Frame-exact pad route (`SEGARECOMP_VIEWER_SLICE=1`, instruction budget 4,294,967
 | Golden Axe | 11,303 | 8,318,309 | route end | none | gameplay, capture inspected |
 | Flicky | 501 | 368,649 | typed stop `known_but_unemitted_target` | none: broad stops the same way | early prefix only: **weak** |
 
-Stop classes on T1-T3 are none. Limits:
+Stop classes on T1-T3 are none. "Route end" is the pad script's quit: the report says `runner_resource_limit` with viewer outcome `window_closed`, which is not budget exhaustion. Limits:
 
 - The route does not enter bosses, later zones, the ending, or every code path.
 - The Sonic 3 control's local exact 2 MiB image is a Japan/Korea one, which stops at a region screen on the route's USA console. Its generated C is byte-identical to `INC`, so the route adds little.
-- Flicky's route ends early, in both arms, at an existing limit that this change neither causes nor fixes.
-- Dispatch count is the available progress measure; the report has no retired-instruction counter.
+- Flicky's route ends early, in both arms, at an existing limit that this change neither causes nor fixes. It stops before the first capture and its report has no dispatch count, so those two fields compare empty with empty.
+- Typed deviation from "instruction progress": dispatch count is the available measure; the report has no retired-instruction counter.
 - Not run: the Windows and macOS builds with commercial images, a human at the window, and the packaged launcher's compiler (not installed here).
+- Typed deviation from "launcher-equivalent": ADR 0269 fixed `--optimize 1`, the existing lock-on tooling's setting, for host memory. The launcher passes no `--optimize`, so its builds use the default `2`. G3 is therefore established at `-O1` only. T2's CPU margin is 2.6 points, and the launcher's reduction was not measured.
 
 ## 6. Delivered code
 
@@ -94,11 +97,19 @@ The delivered code was rebuilt on all six workloads. `k_sha256` and generated C 
 
 ## 7. Identity and compatibility consequences
 
-- `genesis_admission_analysis_contract` is now `segarecomp.admission_contract.v2`. Policy identity changes for every Genesis request, so the launcher's Optimized cache keys change and **every Genesis Optimized library entry rebuilds once**, including v1 entries and Sonic 3 or Golden Axe, whose admitted sets did not change. A fresh build cannot reuse a build made under the previous policy.
+- `genesis_admission_analysis_contract` is now `segarecomp.admission_contract.v2`. Policy identity changes for every Genesis request, so the launcher's Optimized cache keys change and **every Genesis Optimized library entry needs one rebuild to be current**, including v1 entries and Sonic 3 or Golden Axe, whose admitted sets did not change. Exact-key reuse of a build made under the previous policy is refused; the launcher can still offer such a same-mode build as a playable older build until then.
 - Genesis Compatibility: generated output, its frozen build `identity` and its launcher cache key are unchanged. Only the `policy_identity` string in its `status.json` changes.
 - v1 stays prune-only: not evaluated. Master System and Sega CD have their own identities and do not use this route. The explicit `--admission-plan` route stays broad on a thunk emission.
 - `status.json` adds `region_closure`, `added`, `roots_added` and `ram_thunks` only when closure ran; `pruned` is 0 then. Existing keys stay.
 
-## 8. Not answered
+## 8. Consequence for players
+
+Sonic & Knuckles and Sonic 3 & Knuckles were broad under the T009 fallback. They now run about 37 % of the broad universe. If play leaves the measured route and a dynamic transfer reaches a start outside K, the program stops with a typed stop, and the player sees that the game stopped. The automatic restart in Compatibility exists for Master System only, so a Genesis Optimized build does not recover by itself; the player can switch the Mode to Compatibility. This already holds for every selective Genesis title. The gates permit it, the routes do not show it, and later zones remain unmeasured.
+
+## 9. Test coverage limits
+
+Synthetic tests cover the trigger and every case that must not use it, the cap, tampered closed plans, alias plus thunk, determinism, the typed dynamic stop of a program built from a closed plan, and strict C11 of the real gen2 route with a thunk. Not synthetic: the `status.json` closure members, a run of a thunk-bearing selective program and its guards, and `--admission-plan` on a thunk emission (unchanged code). These were checked on the local images or by inspection. A byte mismatch at run time stays covered by the existing generated alias tests, whose code is unchanged.
+
+## 10. Not answered
 
 ADR 0114's `O3` (mandatory identities as K0 members, then a downward prune) stays unevaluated. It is not needed for this result. Whether a smaller K is possible, or whether the second compile pass could be avoided, was not investigated.

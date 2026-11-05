@@ -6,7 +6,7 @@
 | policy | behaviour | default |
 | --- | --- | --- |
 | `compatibility` | the broad immutable-ROM universe (every decodable instruction start is translated) | yes (through SEG-047) |
-| `optimized` | Genesis M68K selective admission: a frozen, statically embedded region model proposes an executable region, structural pruning derives the admitted set, and the unchanged admission validator decides; any failure builds the broad program instead | no |
+| `optimized` | Genesis M68K selective admission: a frozen, statically embedded region model proposes an executable region, structural pruning derives the admitted set (or, for a gen2 RAM-thunk emission whose prune rejected, structural closure: see below), and the unchanged admission validator decides; any failure builds the broad program instead | no |
 
 Optimized never weakens correctness: the generated program is still static native code (no interpreter, JIT or runtime decoder, no ML at
 run time); a region that misses code makes the program stop fail-closed (typed stop), never execute wrongly. An explicit
@@ -94,6 +94,6 @@ is widened; every alias identity remains a mandatory root of the unchanged valid
 
 A gen2 emission holding a materialized RAM thunk, whose prune rejected, stays selective through the least structurally closed superset of the same proposal: the
 proposal, every machine root, every materialized identity and their fixed successors and call continuations (ADR 0270). The unchanged validator decides; any failure,
-including the closure's resource cap, is the broad fallback (`prune_rejected`). `status.json` then adds `region_closure`, `added`, `roots_added` and `ram_thunks`, and
+including the closure's resource cap, is the broad fallback (`prune_rejected`, sanitized detail `closure_rejected` in the build log). `status.json` then adds `region_closure`, `added`, `roots_added` and `ram_thunks`, and
 `pruned` is 0. A successful prune, an emission without a thunk, a v1 request and an explicit `--admission-plan` (broad on a thunk emission, as before) do not use it.
-Closure is structural: it proves nothing about dynamic targets. A dynamic transfer to a start outside the admitted set stops fail-closed with its typed stop.
+Closure runs on any prune rejection of such an emission, so a proposal that the prune would reject for another reason is also completed rather than falling back. Closure is structural: it proves nothing about dynamic targets. A dynamic transfer to a start outside the admitted set stops fail-closed with its typed stop; a Genesis program does not restart itself in Compatibility.

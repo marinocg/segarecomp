@@ -159,7 +159,7 @@ struct GenesisRegionPruneResult {
 // control successors and stacked call continuations that are themselves broad identities). Closure only adds broad identities
 // (`K0 ⊆ K ⊆ U`): it never invents an address outside the broad universe, never follows a dynamic transfer, and the least fixed point is
 // unique (independent of iteration order). It was built to measure a diagnostic oracle (a source-backed start set plus the entries the
-// execution model independently demands). Production uses it only through `genesis_ml_admission`, for a gen2 emission holding a materialized RAM thunk
+// execution model independently demands). Production uses it only through the Genesis admission owner, for a gen2 emission holding a materialized RAM thunk
 // after its prune rejected (SEG-122-T010, ADR 0270). Closure is structural: it proves nothing about dynamic targets, which stay fail-closed at run time. `pruned_count` is 0; `added_count` = |K \ K0|
 // and `root_added_count` counts the mandatory roots/materialized identities absent from K0. A resource cap (rounds) is exhausted =>
 // REJECTED. The product is an ordinary hybrid plan that the unchanged validator must accept.

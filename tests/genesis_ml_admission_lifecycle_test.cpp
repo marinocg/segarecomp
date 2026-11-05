@@ -261,6 +261,15 @@ void test_ram_thunk_closure() {
     const auto a = genesis_ml_admission(synthetic(&no_failure, &propose_unreachable_only), alias.program, sha, alias.bytes, alias_entries, alias.seeds);
     expect(!a.admitted && !a.closure_used && a.reason == "prune_rejected" && addresses(alias_entries) == addresses(alias.entries), "alias without thunk: broad fallback");
   }
+  {  // The trigger is any prune rejection once a thunk exists (frozen in ADR 0269), not only the thunk's own: a proposal missing every machine root is completed too.
+    auto entries = t.entries;
+    const auto o = genesis_ml_admission(synthetic(&no_failure, &propose_unreachable_only), t.program, sha, t.bytes, entries, t.seeds);
+    expect(o.admitted && o.closure_used && o.validator == "accepted" && holds(entries, 0x200U) && holds(entries, 0x600U) && o.roots_added >= 2U, "a thunk emission closes a rootless proposal");
+    const Fixture alias_thunk = fixture(true, true);  // copy alias + thunk: both are mandatory, and the alias source need not be proposed
+    auto both = alias_thunk.entries;
+    const auto b = genesis_ml_admission(synthetic(&no_failure, &propose_unreachable_only), alias_thunk.program, sha, alias_thunk.bytes, both, alias_thunk.seeds);
+    expect(b.admitted && b.closure_used && holds(both, 0xFF0100U) && holds(both, 0xFF0200U) && b.k == b.k0 + b.added, "alias and thunk are both admitted by closure");
+  }
   {  // A successful prune does not change: same K as the plain prune, no closure fields.
     const Fixture plain = fixture();
     auto entries = plain.entries;
