@@ -106,10 +106,32 @@ The delivered code was rebuilt on all six workloads. `k_sha256` and generated C 
 
 Sonic & Knuckles and Sonic 3 & Knuckles were broad under the T009 fallback. They now run about 37 % of the broad universe. If play leaves the measured route and a dynamic transfer reaches a start outside K, the program stops with a typed stop, and the player sees that the game stopped. The automatic restart in Compatibility exists for Master System only, so a Genesis Optimized build does not recover by itself; the player can switch the Mode to Compatibility. This already holds for every selective Genesis title. The gates permit it, the routes do not show it, and later zones remain unmeasured.
 
-## 9. Test coverage limits
+## 9. Additional observation: every act of the combined image (not a gate)
+
+Requested after the decision, to look for stops caused by missing code. It is not part of ADR 0269: it changes no gate and no decision.
+
+Method: the delivered selective program of the combined image with one byte retargeted to re-enable the game's own level select and debug checks. Its `k_sha256` equals the real image's, so it admits the same set. All 28 acts in the level select, three routes each, 84 runs and 685,978 virtual frames, frame exact, finite instruction budget and wall timeout:
+
+| route | runs | virtual frames | runs with a typed stop |
+|---|---|---|---|
+| debug-mode serpentine flight over the act | 28 | 358,303 | 1 |
+| played start: run right with jumps | 28 | 110,460 | 0 |
+| fly to the act's end, leave debug mode, play on | 28 | 217,215 | 2 |
+
+The three stopping routes were replayed on a broad build of the same image. **All three stop identically in broad:** same stop class, same virtual frame (1,582, 3,488 and 1,497), and equal registers, SR, PC and final work RAM. The classes are `unresolved_indirect_target`, and `unsupported_memory_region` with `rom_write_prohibited` and with `odd_effective_address`. **No stop on these routes is attributable to selective admission.** They are existing broad behaviour on routes that fly a debug cursor through a level; whether normal play can reach them is unknown, and they were not diagnosed here.
+
+Limits:
+
+- Only the stopping routes were replayed in broad. The other 81 runs show the absence of a typed stop, not equality with broad.
+- Debug flight activates objects along its path but mostly does not exercise player physics. The played routes are short, and many end in a level rather than at its boss. Boss fights and act transitions happen on these routes only incidentally, and were not counted.
+- Not exercised: Knuckles and Tails alone, special and bonus stages, the ending, save paths, and most object interactions. Standalone S&K and the patched image were not swept.
+
+The stop risk in section 8 stands: this lowers it for the covered paths and does not remove it.
+
+## 10. Test coverage limits
 
 Synthetic tests cover the trigger and every case that must not use it, the cap, tampered closed plans, alias plus thunk, determinism, the typed dynamic stop of a program built from a closed plan, and strict C11 of the real gen2 route with a thunk. Not synthetic: the `status.json` closure members, a run of a thunk-bearing selective program and its guards, and `--admission-plan` on a thunk emission (unchanged code). These were checked on the local images or by inspection. A byte mismatch at run time stays covered by the existing generated alias tests, whose code is unchanged.
 
-## 10. Not answered
+## 11. Not answered
 
 ADR 0114's `O3` (mandatory identities as K0 members, then a downward prune) stays unevaluated. It is not needed for this result. Whether a smaller K is possible, or whether the second compile pass could be avoided, was not investigated.
