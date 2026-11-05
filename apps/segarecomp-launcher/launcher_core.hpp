@@ -39,7 +39,10 @@ struct RomView {
   bool supported_platform = false;
   // Master System only. The header never identifies the mapper: it is declared by the user (selection control or the
   // headless --mapper option) or by a sidecar manifest `<rom>.mapper.json`, and never defaulted.
+  // Genesis (SEG-122-T009, ADR 0268): "lock_on" when this image is recognized as a lock-on cartridge (or an explicit choice overrides it, see LibraryEntry::mapper_explicit),
+  // "" for the standard cartridge. It is a build option of the one ROM: it joins the cache identity and the metadata, and a standard record is byte-for-byte what it was.
   std::string mapper;                 // "sega" / "rom_only" (empty until declared)
+  std::string cartridge_note;         // Genesis: why an image that resembles a lock-on cartridge was not recognized as one ("" otherwise)
   std::filesystem::path mapper_manifest;  // sidecar manifest when present
   std::string mapper_manifest_sha256;
   [[nodiscard]] bool needs_mapper() const { return platform_id == "master-system" && mapper.empty() && mapper_manifest.empty(); }
@@ -117,6 +120,10 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom);
 // build folders (`games/`, `zig-cache/`) that cache maintenance is allowed to touch. SEGARECOMP_LIBRARY_DIR overrides it.
 [[nodiscard]] std::filesystem::path library_root();
 [[nodiscard]] RomView inspect_rom_file(const std::filesystem::path &path, const Layout &layout);
+// SEG-122-T009: the Genesis cartridge declaration a finished build recorded in its metadata ("" = standard, also for a build older than the record).
+[[nodiscard]] std::string recorded_cartridge_mapper(const std::filesystem::path &entry);
+// The segment of the cache key that names a game's build options (without a product policy identity): what tests pin so an ordinary game's identity can never move.
+[[nodiscard]] std::string build_options_key(const RomView &rom);
 // SEG-069-T005: the version of the host interface a generated program relies on (environment/arguments the launcher passes, the SDL3 major version, the
 // package layout). Recorded in a finished build's metadata.json; bump it only when a change would stop an already-built program from running (older_build.hpp).
 inline constexpr int runtime_contract = 1;

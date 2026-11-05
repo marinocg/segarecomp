@@ -1,4 +1,5 @@
 #include "launcher_core.hpp"
+#include "cartridge_recognition.hpp"
 
 #include <cctype>
 
@@ -295,6 +296,9 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
       view.region_ambiguous = hint.ambiguous;
       // A Japan-only cartridge shows its domestic name first; every other one the international (overseas) name.
       view.title = genesis_header_title(std::vector<std::uint8_t>(bytes.begin(), bytes.end()), hint.region == "japan", utf8(path.stem()));
+      const CartridgeFinding cartridge = recognize_genesis_cartridge(std::span<const std::uint8_t>(bytes.data(), bytes.size()));  // the one recognition, for the window and headless alike
+      view.mapper = cartridge.mapper();
+      view.cartridge_note = cartridge.note;
     }
     view.compat_known = fs::is_regular_file(layout.runtime / "compat" / (view.sha256 + ".json"), ec);
   } catch (const std::exception &error) {
@@ -308,7 +312,8 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
 std::string platform_key(const RomView &rom, const Layout *layout_for_key) {
   // Compatibility keeps the historical Genesis key; Optimized adds the policy, so the two never share a cache entry (ADR 0096).
   if (rom.platform_id != "master-system") {
-    const std::string discovery = rom.hint_alias_discovery ? ":hint-alias-discovery=1" : "";  // changes the generated program
+    // SEG-122-T009: a lock-on build never shares an entry with a standard one; a standard key stays exactly the historical key.
+    const std::string discovery = (rom.hint_alias_discovery ? std::string(":hint-alias-discovery=1") : std::string()) + (rom.mapper.empty() ? std::string() : ":mapper=" + rom.mapper);  // both change the generated program
     if (!rom.optimized()) return "genesis" + discovery;
     // The model family and the product-provided policy identity (which binds model, schema, token contract, rank policy and analysis contract) are part
     // of the key: a different request or a changed shipped model can never select the same entry.
@@ -320,6 +325,8 @@ std::string platform_key(const RomView &rom, const Layout *layout_for_key) {
   if (!rom.optimized()) return base;
   return base + ":aot=optimized:pid=" + (layout_for_key != nullptr ? rom_policy_identity(*layout_for_key, rom) : std::string());
 }
+
+std::string build_options_key(const RomView &rom) { return platform_key(rom, nullptr); }
 
 fs::path entry_dir(const RomView &rom, const Layout &layout) {
   // Everything that changes the produced binary is part of the key; a mismatch selects a fresh directory.
@@ -566,6 +573,15 @@ std::string unadmitted_restart_notice() {
   return "Optimized stopped: the game reached code outside the selected set. Restarting from the beginning in Compatibility.";
 }
 
+std::string recorded_cartridge_mapper(const fs::path &entry) {
+  std::error_code ec;
+  const fs::path file = entry / "metadata.json";
+  if (!fs::is_regular_file(file, ec)) return {};
+  if (fs::file_size(file, ec) > 16384U) return "?oversized";   // never equal to a declaration: such a record is not reusable
+  const auto meta = json::parse(read_all(file));
+  return meta && meta->is_object() ? meta->str("mapper") : std::string();
+}
+
 std::string read_variant_identity(const fs::path &entry) {
   std::error_code ec;
   const fs::path file = entry / "metadata.json";
@@ -600,6 +616,7 @@ bool entry_ready_for(const fs::path &entry, const RomView &rom, const Layout &la
   // program and a Patched request accepts only the program of exactly this package.
   if (read_variant_identity(entry) != rom.patch_identity) return false;
   if (!native_record_matches(entry, rom)) return false;
+  if (rom.platform_id == "genesis" && recorded_cartridge_mapper(entry) != rom.mapper) return false;  // SEG-122-T009: never a standard build as a lock-on one, or the reverse
   const PolicyReport report = read_policy_report(entry);
   if (!report.present) return !rom.optimized();  // an older entry without the member is a Compatibility build
   if (report.requested != (rom.optimized() ? "optimized" : "compatibility")) return false;
@@ -1111,6 +1128,8 @@ void BuildJob::run() {
     // The platform is selected by the recognized header; the mapper only by an explicit declaration (never a default).
     if (!rom_.mapper.empty()) args.insert(args.end(), {"--mapper", rom_.mapper});
     if (!rom_.mapper_manifest.empty()) args.insert(args.end(), {"--mapper-manifest", utf8(rom_.mapper_manifest)});
+  } else if (!rom_.mapper.empty()) {
+    args.insert(args.end(), {"--mapper", rom_.mapper});  // SEG-122-T009: the launcher's selection, explicit to the build tool (ADR 0268); a standard cartridge passes nothing, as ever
   }
   if (rom_.supports_hint_alias_discovery() && rom_.hint_alias_discovery) args.insert(args.end(), {"--hint-alias-discovery", "1"});
   if (rom_.patch_native())   // SEG-124 (ADR 0267): a REFERENCE to the installed package and the identity the user approved; the build re-verifies the package itself and extracts the provider from it
@@ -1209,6 +1228,8 @@ void BuildJob::run() {
     if (sms)
       meta << "\"profile\":\"" << sms_profile << "\",\"mapper\":\"" << json_safe(rom_.mapper) << "\",\"mapper_declaration\":\""
            << (rom_.mapper.empty() ? "manifest" : "option") << "\",\"mapper_manifest_sha256\":\"" << (rom_.mapper.empty() ? rom_.mapper_manifest_sha256 : std::string()) << "\",";
+    else if (!rom_.mapper.empty())  // SEG-122-T009: absent for a standard Genesis cartridge, so its metadata is unchanged
+      meta << "\"mapper\":\"" << json_safe(rom_.mapper) << "\",\"mapper_declaration\":\"option\",";
     // SEG-069-T005: what a later release needs to decide that this program can still be played (see older_build.hpp).
     meta << "\"runtime_contract\":" << runtime_contract << ",\"hint_alias_discovery\":" << (rom_.supports_hint_alias_discovery() && rom_.hint_alias_discovery ? "true" : "false") << ",";
     if (rom_.patched())  // SEG-122: the variant this program was built for (checked again by entry_ready_for; absent for Vanilla)

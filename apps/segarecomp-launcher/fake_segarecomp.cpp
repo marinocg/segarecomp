@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
   if (command == "build") {
     const std::string policy = option("--aot-policy").empty() ? "compatibility" : option("--aot-policy");
     const fs::path out = option("--output");
-    const std::string platform = option("--mapper").empty() && option("--mapper-manifest").empty() ? "genesis" : "master-system";
+    const std::string platform = (option("--mapper").empty() || option("--mapper") == "lock_on") && option("--mapper-manifest").empty() ? "genesis" : "master-system";
     if (!env("FAKE_BUILD_ARGS_LOG").empty()) {
       std::ofstream line(env("FAKE_BUILD_ARGS_LOG"), std::ios::app);
       for (const auto &arg : args) line << arg << ' ';

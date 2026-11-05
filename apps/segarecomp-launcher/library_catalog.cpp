@@ -1,12 +1,14 @@
 #include "library_catalog.hpp"
 
 #include "json_lite.hpp"
+#include "segarecomp/sha256.hpp"
 
 #include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -46,6 +48,7 @@ json::Value to_json(const LibraryEntry &e) {
   v.set("rom_paths", std::move(paths));
   v.set("rom_path_unknown", json::Value::make_bool(e.rom_path_unknown));
   v.set("mapper", json::Value::make_string(e.mapper));
+  if (e.mapper_explicit) v.set("mapper_explicit", json::Value::make_bool(true));  // absent unless the user chose: every other record is byte-for-byte what it was
   v.set("mapper_manifest_sha256", json::Value::make_string(e.mapper_manifest_sha256));
   v.set("aot_policy", json::Value::make_string(e.aot_policy));
   v.set("aot_model", json::Value::make_string(e.aot_model));
@@ -211,7 +214,9 @@ bool entry_from_json(const json::Value &v, LibraryEntry &e) {
         e.rom_paths.push_back(p.string);
   e.rom_path_unknown = v.flag("rom_path_unknown") && e.rom_paths.empty();
   e.mapper = v.str("mapper");
-  if (e.mapper != "sega" && e.mapper != "rom_only") e.mapper.clear();
+  const bool mapper_known = e.platform_id == "genesis" ? e.mapper == "lock_on" : (e.platform_id == "master-system" && (e.mapper == "sega" || e.mapper == "rom_only"));
+  if (!mapper_known) e.mapper.clear();
+  e.mapper_explicit = e.platform_id == "genesis" && v.flag("mapper_explicit");
   e.mapper_manifest_sha256 = v.str("mapper_manifest_sha256");
   if (!is_hex_digest(e.mapper_manifest_sha256, 64)) e.mapper_manifest_sha256.clear();
   // A stored selection is honoured (an explicit Compatibility stays Compatibility); only a record without the member takes the default.
@@ -419,7 +424,11 @@ Catalog::ImportResult Catalog::import_rom(const RomView &rom, long long now) {
     entry->rom_path_unknown = false;
     result.path_added = !result.added;
   }
-  if (!rom.mapper.empty()) entry->mapper = rom.mapper;
+  if (rom.platform_id == "genesis") {
+    // SEG-122-T009: the digest matched, so this inspection describes this game. It refreshes the automatic result (an older entry gains it); an explicit choice survives any reimport.
+    apply_cartridge_finding(*entry, finding_of(rom));
+    entry->cartridge_examined = true;
+  } else if (!rom.mapper.empty()) entry->mapper = rom.mapper;
   if (!rom.mapper_manifest_sha256.empty()) entry->mapper_manifest_sha256 = rom.mapper_manifest_sha256;
   result.entry = entry;
   return result;
@@ -476,8 +485,71 @@ Catalog::ImportResult Catalog::import_sega_cd(const scd::EntryRecord &record, co
   return result;
 }
 
+CartridgeCheck check_entry_cartridge(const LibraryEntry &entry) {
+  CartridgeCheck check;
+  if (entry.platform_id != "genesis") return check;
+  for (const auto &text : entry.rom_paths) {
+    const fs::path path(std::u8string(reinterpret_cast<const char8_t *>(text.c_str())));
+    std::error_code ec;
+    if (!fs::is_regular_file(path, ec)) continue;
+    const auto size = fs::file_size(path, ec);
+    if (ec) continue;
+    std::ifstream in(path, std::ios::binary);
+    std::vector<std::uint8_t> bytes(std::min<std::uintmax_t>(size, cartridge_header_bytes));
+    if (!in.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) continue;
+    check.examined = true;
+    // An ordinary game stays ordinary without hashing it: only an image that could change the stored declaration is read whole.
+    if (entry.mapper.empty() && !cartridge_header_resembles_lock_on(bytes)) continue;
+    if (size > (std::uintmax_t{64} << 20U)) continue;   // no Genesis image is near this: a stray file is not read into memory
+    bytes.resize(static_cast<std::size_t>(size));
+    in.seekg(0);
+    if (!in.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) continue;
+    if (segarecomp::sha256_hex(bytes) != entry.sha256) continue;   // the file changed: it says nothing about this game
+    check.verified = true;
+    check.finding = recognize_genesis_cartridge(bytes);
+    return check;
+  }
+  return check;
+}
+
+CartridgeFinding finding_of(const RomView &rom) {
+  if (rom.mapper == "lock_on") return {CartridgeKind::lock_on, {}};
+  return {rom.cartridge_note.empty() ? CartridgeKind::standard : CartridgeKind::ambiguous, rom.cartridge_note};
+}
+
+bool apply_cartridge_finding(LibraryEntry &entry, const CartridgeFinding &finding) {
+  if (entry.platform_id != "genesis" || entry.mapper_explicit) return false;
+  entry.cartridge_note = finding.note;
+  entry.cartridge_unconfirmed = false;
+  if (entry.mapper == finding.mapper()) return false;
+  entry.mapper = finding.mapper();
+  return true;
+}
+
+void select_cartridge(LibraryEntry &entry, int choice) {
+  entry.cartridge_note.clear();
+  entry.mapper_explicit = choice != 0;
+  if (choice == 0) {
+    entry.cartridge_examined = false;
+    entry.cartridge_unconfirmed = true;
+    ++entry.cartridge_generation;
+  } else {
+    entry.cartridge_unconfirmed = false;
+    entry.mapper = choice == 2 ? "lock_on" : "";
+  }
+}
+
+std::string cartridge_status_text(const LibraryEntry &entry) {
+  if (entry.platform_id != "genesis") return {};
+  if (entry.mapper_explicit) return entry.mapper.empty() ? "Standard cartridge - chosen manually" : "Lock-on cartridge - chosen manually";
+  if (!entry.mapper.empty()) return entry.cartridge_unconfirmed ? "Lock-on cartridge - kept until the original ROM can be checked" : "Lock-on cartridge - automatically detected";
+  return entry.cartridge_note.empty() ? std::string() : "Standard cartridge. " + entry.cartridge_note + " You can choose Lock-on in Advanced build options.";
+}
+
 bool Catalog::relocate(LibraryEntry &entry, const fs::path &path, const std::string &sha256_of_file) {
   if (sha256_of_file != entry.sha256) return false;  // identity is the content, never the name
+  entry.cartridge_examined = false;   // SEG-122-T009: the original is available again
+  ++entry.cartridge_generation;
   const std::string text = utf8_of(path);
   entry.rom_paths.erase(std::remove(entry.rom_paths.begin(), entry.rom_paths.end(), text), entry.rom_paths.end());
   entry.rom_paths.insert(entry.rom_paths.begin(), text);
@@ -561,7 +633,7 @@ std::size_t Catalog::migrate_cache(const fs::path &cache_root, long long now) {
       fresh.aot_model = platform == "genesis" ? "gen2" : "v1";
       fresh.rom_path_unknown = true;  // older metadata only says "referenced, not copied": a path is never invented
       fresh.added_at = now;
-      fresh.mapper = meta->str("mapper") == "sega" || meta->str("mapper") == "rom_only" ? meta->str("mapper") : std::string();
+      fresh.mapper = (platform == "master-system" && (meta->str("mapper") == "sega" || meta->str("mapper") == "rom_only")) || (platform == "genesis" && meta->str("mapper") == "lock_on") ? meta->str("mapper") : std::string();
       entries_.push_back(std::move(fresh));
       entry = &entries_.back();
       ++added;
