@@ -308,11 +308,14 @@ segarecomp_enable_warnings(cartridge_recognition_test)
 if(BUILD_TESTING)
   add_test(NAME cartridge_recognition_test COMMAND cartridge_recognition_test)
   set_property(TEST cartridge_recognition_test APPEND PROPERTY LABELS full fast)
-  add_test(NAME launcher_lock_on_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_lock_on_test.py
-    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game> ${PROJECT_SOURCE_DIR}/tools/segapatch.py ${PROJECT_SOURCE_DIR}/docs/product/sdk-sample/provider.c)
-  set_property(TEST launcher_lock_on_test APPEND PROPERTY LABELS full fast)
-  set_property(TEST launcher_lock_on_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
-  set_property(TEST launcher_lock_on_test PROPERTY TIMEOUT 600)
+  # Split like the parity suite: CI's hosts run a GUI step several times slower than a developer machine, and one test is held to a time limit.
+  foreach(part headless window library patch gamepad)
+    add_test(NAME launcher_lock_on_${part}_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_lock_on_test.py
+      $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game> ${PROJECT_SOURCE_DIR}/tools/segapatch.py ${PROJECT_SOURCE_DIR}/docs/product/sdk-sample/provider.c ${part})
+    set_property(TEST launcher_lock_on_${part}_test APPEND PROPERTY LABELS full fast)
+    set_property(TEST launcher_lock_on_${part}_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+    set_property(TEST launcher_lock_on_${part}_test PROPERTY TIMEOUT 600)
+  endforeach()
 endif()
 
 # SEG-058: cache maintenance on fake trees (symlink escapes, forged plans, busy entries).

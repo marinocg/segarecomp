@@ -5,7 +5,7 @@ Project-authored images only: pseudo-random bytes behind headers carrying the pu
 build metadata, headless reports and overrides, invalid platform/mapper combinations, persistence of manual choices, an entry imported before recognition existed, a missing ROM, native patch
 independence, and the Advanced control with a gamepad at a small and a normal window size.
 
-usage: launcher_lock_on_test.py <Segarecomp> <fake_segarecomp> <fake_game> <tools/segapatch.py> <provider.c>
+usage: launcher_lock_on_test.py <Segarecomp> <fake_segarecomp> <fake_game> <tools/segapatch.py> <provider.c> <headless|window|library|patch|gamepad>
 """
 import importlib.util
 import json
@@ -311,19 +311,18 @@ def gamepad_control(tmp, exe, fake_cli, fake_game):
         expect("mapper_explicit" not in p.game(), f"{size}: Automatic is stored as no explicit choice: {p.game()}")
 
 
+PARTS = {"headless": headless, "window": window_journey, "library": older_library, "patch": native_patch, "gamepad": gamepad_control}
+
+
 def main():
-    exe, fake_cli, fake_game = sys.argv[1:4]
+    exe, fake_cli, fake_game, part = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[6]
     with tempfile.TemporaryDirectory() as d:
         tmp = pathlib.Path(d)
-        headless(tmp, exe, fake_cli, fake_game)
-        window_journey(tmp, exe, fake_cli, fake_game)
-        older_library(tmp, exe, fake_cli, fake_game)
-        native_patch(tmp, exe, fake_cli, fake_game)
-        gamepad_control(tmp, exe, fake_cli, fake_game)
+        PARTS[part](tmp, exe, fake_cli, fake_game)
     if failures:
         print("\n".join(failures))
         return 1
-    print("launcher_lock_on_test: ok")
+    print(f"launcher_lock_on_test {part}: ok")
     return 0
 
 
