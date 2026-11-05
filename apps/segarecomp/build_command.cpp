@@ -729,6 +729,7 @@ bool emit_genesis_m68k(const Options &options, Log &log, const std::string &sha,
   const fs::path hints = options.runtime_dir / "compat" / (sha + ".json");
   std::vector<std::string> emit_args{"segarecomp", "emit-general-startup-bridge-c", "--rom", options.rom.string(),
                                      "--reset-entry", "--rom-sha256", sha, "--immutable-rom-aot"};
+  if (options.mapper == "lock_on") emit_args.push_back("--genesis-lock-on");  // ADR 0268 (validated in the analyze stage)
   for (const m68k_alias::CopyAlias &alias : aliases) {
     char text[32];
     std::snprintf(text, sizeof(text), "%08x:%08x:%08x", static_cast<unsigned>(alias.execution), static_cast<unsigned>(alias.source),
@@ -1086,7 +1087,7 @@ int segarecomp_build_command(int argc, char **argv) {
     }
   }
   std::string sha;
-  std::string sms_provenance;  // status.json members recording the SMS identity (empty for Genesis)
+  std::string sms_provenance;  // status.json members recording the SMS identity, or a Genesis board declaration (ADR 0268); empty otherwise
   std::string sms_images;      // SMS: the status.json executable_images member
   std::string m68k_images;     // Genesis: sanitized provenance JSON of the M68K executable images
   std::optional<segarecomp::GenesisResetImageReport> genesis_reset;  // Genesis: the accepted reset analysis
@@ -1176,8 +1177,20 @@ int segarecomp_build_command(int argc, char **argv) {
                        sms::mapper_family_name(id.mapper) + "\",\"mapper_source\":\"" +
                        sms::declaration_source_name(id.declaration_source) + "\",\"toolchain\":\"" + json_escape(options.cc) + "\"";
     } else {
-      if (!options.mapper.empty() || options.mapper_manifest)
+      // ADR 0268: the one Genesis board declaration is `lock_on` (a lock-on pass-through cartridge: a 2 MiB base image, alone or
+      // followed by the attached cartridge's 2 MiB image). It is never inferred; every other declaration is Master System only.
+      if (options.mapper_manifest || (!options.mapper.empty() && options.mapper != "lock_on"))
         return fail(options, log, sha, "analyze", 1, "A mapper declaration applies only to Master System images.", "MAPPER_NOT_APPLICABLE");
+      if (options.mapper == "lock_on") {
+        if (bytes.size() != segarecomp::genesis_lock_on_slot_bytes && bytes.size() != 2U * segarecomp::genesis_lock_on_slot_bytes)
+          return fail(options, log, sha, "analyze", 1,
+                      "A lock-on cartridge image is a 2 MiB base cartridge, optionally followed by the 2 MiB attached cartridge.",
+                      "LOCK_ON_IMAGE_SIZE");
+        log.line("mapper=lock_on");
+        log.line(std::string("lock_on_slot=") + (bytes.size() == segarecomp::genesis_lock_on_slot_bytes ? "empty" : "attached"));
+        sms_provenance = std::string(",\"mapper\":\"lock_on\",\"lock_on_slot\":\"") +
+                         (bytes.size() == segarecomp::genesis_lock_on_slot_bytes ? "empty" : "attached") + "\"";
+      }
       genesis_reset = segarecomp::analyze_genesis_reset_image(bytes);
       const auto &reset = *genesis_reset;
       if (reset.outcome != segarecomp::ResetOutcome::accepted) {
@@ -1253,7 +1266,7 @@ int segarecomp_build_command(int argc, char **argv) {
                         ",\"capabilities\":" + std::to_string(options.native_caps) + "}";
       if (!options.keep_work) fs::remove_all(options.output / "obj", ec);
       stage("link", "done");
-      write_status(options, sha, "ok", "done", "", status_extra);
+      write_status(options, sha, "ok", "done", "", sms_provenance + status_extra);   // ADR 0268: a Genesis board declaration (lock_on) is recorded too
       std::cout << "@result ok executable=" << executable.string()
                 << (sound_degraded ? " genesis_audio=degraded z80_audio_outcome=structural_code_mismatch" : "") << std::endl;
       return 0;

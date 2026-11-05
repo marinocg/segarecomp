@@ -1,6 +1,7 @@
 #ifndef SEGARECOMP_MACHINE_GENESIS_CARTRIDGE_SRAM_HPP
 #define SEGARECOMP_MACHINE_GENESIS_CARTRIDGE_SRAM_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -48,6 +49,15 @@ struct GenesisCartridgeSramHeader {
 
 // Parses the extra-memory descriptor of a whole cartridge image (header at $1B0).
 [[nodiscard]] GenesisCartridgeSramHeader parse_genesis_cartridge_sram_header(std::span<const std::uint8_t> image) noexcept;
+
+// ADR 0268: the extra memory of a declared lock-on composite (`--mapper lock_on`): a 2 MiB base cartridge at $000000 and,
+// for a 4 MiB image, the attached cartridge's 2 MiB image at $200000 (the pass-through slot). The base header's declaration
+// applies when it declares anything; otherwise, for a 4 MiB composite, the attached cartridge's own header (at $2001B0)
+// declares the extra memory, with its bus addresses unchanged. `always_mapped` is decided against the whole composite: the
+// attached ROM lies beneath an extent inside $200000-$3FFFFF, so $A130F1 selects SRAM or ROM there. Any other image size
+// declares nothing (the build rejects such a lock-on declaration before analysis).
+inline constexpr std::size_t genesis_lock_on_slot_bytes = 0x200000U;
+[[nodiscard]] GenesisCartridgeSramHeader parse_genesis_lock_on_extra_memory_header(std::span<const std::uint8_t> image) noexcept;
 
 // True when the access touches the descriptor's extent at all (the cartridge SRAM owner, not the ROM, then answers it).
 [[nodiscard]] bool genesis_cartridge_sram_touches(const GenesisCartridgeSramDescriptor &descriptor, std::uint32_t address,

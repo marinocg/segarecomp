@@ -310,6 +310,9 @@ struct FrontendProgram {
   struct ImmutableRomAotRange { std::uint32_t begin_address{}; std::uint32_t end_address{}; };
   std::vector<ImmutableRomAotRange> immutable_rom_aot_ranges{};
   bool immutable_rom_aot_enabled{false};
+  // ADR 0268: explicit build declaration (`--mapper lock_on`, never inferred) that the image is a lock-on pass-through
+  // cartridge: a 2 MiB base cartridge alone (empty slot) or followed by the attached cartridge's 2 MiB image.
+  bool genesis_lock_on{false};
   // SEG-021-T041 / ADR 0049: generated-data proposals that a work-RAM span is (or may become) a verbatim copy of
   // an immutable cartridge span. Each proposal is only a request to compile the SAME immutable source bytes a
   // second time for the alternate execution base; the runtime byte-identity guard emitted with every such body
@@ -379,6 +382,10 @@ struct GenesisM68kExecutableImages {
 };
 [[nodiscard]] std::optional<GenesisM68kExecutableImages> genesis_m68k_executable_images(const FrontendProgram &program);
 
+// ADR 0098 / ADR 0268: the program's extra-memory descriptor, the ONE rule shared by the translation-time memory gate, the analysis and the
+// emitter: the lock-on rule (the attached cartridge's header may declare it) for a declared lock-on program, the image's own header otherwise.
+[[nodiscard]] std::optional<GenesisCartridgeSramDescriptor> genesis_program_extra_memory(const FrontendProgram &program);
+
 // SEG-007-T204 / ADR-0033 (re-homed by the 2026-09-11 operator correction):
 // promotes zero or more `external_address_table_candidates` into ordinary
 // `external_code_entry_candidates` PROPOSALS -- exactly the same trust class
@@ -441,6 +448,10 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
   // ADR 0098: the cartridge's header-declared SRAM (derived from the immutable image). Absolute operands touching its extent are
   // routed to the runtime SRAM owner instead of being folded as immutable ROM.
   std::optional<GenesisCartridgeSramDescriptor> cartridge_sram;
+  // ADR 0268: a declared lock-on composite (FrontendProgram::genesis_lock_on). The base image is never mirrored into the
+  // pass-through slot ($200000-$3FFFFF); with a 2 MiB image the slot is empty (reads answer the documented empty-slot value).
+  bool genesis_lock_on{false};
+  bool cartridge_empty_upper_slot{false};
   std::uint32_t irq6_vector_ram_entry{0};  // the work-RAM address the slot points at (valid iff the flag is set)
   // SEG-055: the same RAM jump-table convention for the H-interrupt (vector 28, offset 0x70): no handler is rooted, the
   // work-RAM stub address is retained so a materialized byte-guarded JMP thunk can become the compiled handler entry.

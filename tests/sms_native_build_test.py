@@ -217,6 +217,17 @@ def main():
             genesis = tmp / "genesis.bin"
             genesis.write_bytes(bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x70, 0x00, 0x4E, 0x70)))
             expect_failure(tmp, "genesis_mapper", genesis, "--mapper", "sega", diagnostic="MAPPER_NOT_APPLICABLE")
+            # ADR 0268: the one Genesis board declaration (lock_on) is exact (case-sensitive) and needs a 2 MiB (+2 MiB) image
+            expect_failure(tmp, "genesis_lock_on_case", genesis, "--mapper", "LOCK_ON", diagnostic="MAPPER_NOT_APPLICABLE")
+            expect_failure(tmp, "genesis_lock_on_size", genesis, "--mapper", "lock_on", diagnostic="LOCK_ON_IMAGE_SIZE")
+            base = tmp / "lock_on_base.bin"
+            base.write_bytes(genesis.read_bytes() + bytes(0x200000 - len(genesis.read_bytes())))
+            r = build(base, tmp / "lock_on_ok", "--mapper", "lock_on", platform_dir=ROOT / "platforms" / "genesis")
+            st = status(tmp / "lock_on_ok") if (tmp / "lock_on_ok" / "status.json").exists() else {}
+            sources = "".join(p.read_text(errors="replace") for p in (tmp / "lock_on_ok" / "generated").glob("*main*.c")) if (tmp / "lock_on_ok" / "generated").is_dir() else ""
+            check(r.returncode == 0 and st.get("mapper") == "lock_on" and st.get("lock_on_slot") == "empty",
+                  "a declared lock-on base cartridge must build and record the declaration: %s %s" % (r.stdout[-300:], st))
+            check("runtime.cartridge_empty_upper_slot = 1;" in sources, "build --mapper lock_on must reach the emitter (empty-slot runtime flag)")
             bad_usage = subprocess.run([CLI, "build", "--rom", str(rom), "--output", str(tmp / "u"), "--cc", CC, "--runtime-dir", str(tmp),
                                         "--platform", "saturn"], capture_output=True, text=True)
             check(bad_usage.returncode == 2, "unknown --platform must be a usage error")

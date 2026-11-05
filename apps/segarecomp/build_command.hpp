@@ -6,7 +6,8 @@
 inline constexpr const char *segarecomp_build_usage =
     "  segarecomp build --rom <image> --output <dir> --cc <compiler> [--cc-arg <arg>]... [--link-arg <arg>]...\n                   [--cxx <compiler> [--cxx-arg <arg>]...] [--keep-work 1]\n                   --runtime-dir <dir>\n"
     "                   [--sdl3-include <dir> --sdl3-lib <dir>] [--optimize <0|1|2>] [--runtime-optimize <0|1|2>] [--jobs <n>]\n"
-    "                   [--platform <genesis|master-system>] [--mapper <sega|rom_only>] [--mapper-manifest <file>]\n"
+    "                   [--platform <genesis|master-system>] [--mapper <sega|rom_only|lock_on>] [--mapper-manifest <file>]\n"
+    "                   (Genesis: --mapper lock_on declares a lock-on pass-through cartridge, ADR 0268; never inferred)\n"
     "                   [--admission-plan <file>] (Genesis M68K hybrid admission candidate, SEG-031; broad by default)\n"
     "                   [--aot-policy <compatibility|optimized>] (default compatibility; optimized = native selective admission, broad fallback)\n"
     "                   [--aot-model <v1|gen2>] (EXPERIMENTAL opt-in, only with --aot-policy optimized; default v1 = the SEG-047 producer)\n"

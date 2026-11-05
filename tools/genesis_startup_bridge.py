@@ -1530,7 +1530,7 @@ ALIAS_INCOMPLETE_TERMINATIONS = (ALIAS_TERMINATION_MAX_ROUNDS, ALIAS_TERMINATION
 ALIAS_MAX_ROUNDS_ENV = "SEGARECOMP_TEST_ALIAS_MAX_ROUNDS"  # test-only override of GENESIS_ALIAS_MAX_ROUNDS
 GENESIS_EXIT_ALIAS_PREPARATION_INCOMPLETE = 11
 # SEG-074-T002 / ADR 0158: opt-in emitter compaction switches the bridge may forward (all default off).
-EMITTER_OPT_IN_FLAGS = ("--shared-return-targets", "--aot-operand-sharing")
+EMITTER_OPT_IN_FLAGS = ("--shared-return-targets", "--aot-operand-sharing", "--genesis-lock-on")  # ADR 0268: lock-on declaration
 
 
 def alias_max_rounds() -> int:

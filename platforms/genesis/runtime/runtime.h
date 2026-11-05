@@ -820,6 +820,10 @@ typedef struct GenesisRuntime {
      fail-closed ROM-read behavior. */
   const GenesisOwnedCartridgeRegion *owned_regions;
   uint32_t owned_region_count;
+  /* ADR 0268: a declared lock-on cartridge (`--mapper lock_on`) whose pass-through slot ($200000-$3FFFFF) holds no cartridge.
+     A DATA read wholly inside the slot answers SEGARECOMP_GENESIS_EMPTY_SLOT_BYTE in every byte (project policy, not
+     reconstructed open bus); writes and instruction fetches stay fail-closed. Zero (the default) changes nothing. */
+  uint8_t cartridge_empty_upper_slot;
   /* ADR 0098: the cartridge's header-declared SRAM; NULL by default (no SRAM). See GenesisCartridgeSramConfig. */
   const GenesisCartridgeSramConfig *cartridge_sram;
   uint8_t *cartridge_sram_storage;
