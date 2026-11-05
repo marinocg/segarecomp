@@ -263,6 +263,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     else if (is_running) { line = running_label(game_report_, restarted_this_play_) + (game_view_.patched() ? " Version: Patched - " + game_view_.patch_label + "." : (entry.patches.empty() ? std::string() : std::string(" Version: Vanilla."))); color = col::ok; }
     else if (is_building) { line = "Recompiling with " + mode + ". This can take several minutes the first time."; color = col::warn; }
     else if (mapper_needed) { line = "Declare the cartridge mapper below before building."; color = col::warn; }
+    else if (info.hardware_changed && !info.older.playable && !info.rom_missing) { line = "The cartridge hardware changed, so the previous build cannot be used. Recompile to play."; color = col::warn; }
     else if (info.status == GameStatus::playable_older) { line = "Playable: an earlier release built this game. Recompile is recommended, not required."; color = col::warn; }
     else if (info.older.playable) { line = "The last build did not finish, but an earlier build is still playable."; color = col::warn; }
     else if (info.rom_missing && !info.runnable()) { line = "The ROM is not at its recorded location. Locate it to build."; color = col::warn; }
@@ -676,6 +677,11 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     draw_text(dl, ctx_.regular, ctx_.u(12.5F), col::text2, ImVec2(cx, y + ctx_.u(2.0F)), ellipsize(ctx_.regular, ctx_.u(12.5F), ctl_w, std::string("Master System II, NTSC (") + sms_profile + ")").c_str());
     y += ctx_.u(28.0F);
   }
+  // SEG-122-T009: a subtle confirmation of an unusual cartridge; an ordinary game shows nothing here.
+  if (const std::string hardware = cartridge_status_text(entry); !hardware.empty()) {
+    ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+    y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), !entry.mapper_explicit && entry.mapper.empty() ? col::warn : col::text2, inner, hardware) + ctx_.u(6.0F);
+  }
   // ---- Advanced build options (expander) ----
   {
     const float rule_y = std::floor(y);
@@ -693,7 +699,7 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     draw_text(dl, ctx_.bold, ctx_.u(12.5F), col::text, ImVec2(ra.x + ctx_.u(24.0F), c.y - ctx_.u(7.5F)), "Advanced build options");
     std::string summary;
     if (scd_game) summary = entry.sega_cd.program.path.empty() ? "no program imported" : "program: " + file_name_text(entry.sega_cd.program.path);
-    else if (!sms) summary = entry.hint_alias_discovery ? "H-int discovery on" : "H-int discovery off";
+    else if (!sms) summary = std::string(entry.hint_alias_discovery ? "H-int discovery on" : "H-int discovery off") + (entry.mapper.empty() ? "" : ", lock-on cartridge");
     else summary = "none for this console";
     const std::string sum_shown = ellipsize(ctx_.regular, ctx_.u(11.5F), inner * 0.5F, summary);
     draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::dim, ImVec2(rb.x - ctx_.u(8.0F) - text_width(ctx_.regular, ctx_.u(11.5F), sum_shown.c_str()), c.y - ctx_.u(7.0F)), sum_shown.c_str());
@@ -716,6 +722,22 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
         draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::text2, ImVec2(a.x + pad, y), "Master System builds have no further options: the mapper and build mode above are the build identity.");
         y += ctx_.u(22.0F);
       } else {
+        // SEG-122-T009: the cartridge hardware. Automatic is the recommendation; an explicit choice outranks recognition and survives reimports and restarts.
+        draw_text(dl, ctx_.bold, ctx_.u(12.0F), col::text, ImVec2(a.x + pad, y), "Cartridge hardware");
+        y += ctx_.u(20.0F);
+        ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+        int cartridge_choice = !entry.mapper_explicit ? 0 : (entry.mapper.empty() ? 1 : 2);
+        if (option_tiles(ctx_, "cartridge", {"Automatic", "Standard", "Lock-on"}, {"Recommended", "Ordinary cartridge", "Pass-through cartridge"}, &cartridge_choice, inner, ctx_.u(46.0F),
+                         {!busy_now, !busy_now, !busy_now})) {
+          select_cartridge(entry, cartridge_choice);
+          changed = true;
+        }
+        y += ctx_.u(52.0F);
+        {
+          const std::string hardware = cartridge_status_text(entry);
+          ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
+          y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner, hardware.empty() ? std::string("Standard cartridge - automatically selected") : hardware) + ctx_.u(8.0F);
+        }
         ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
         bool on = entry.hint_alias_discovery;
         ImGui::BeginDisabled(busy_now);
@@ -727,7 +749,7 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
       }
       ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
       y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, scd_game ? "The BIOS, the disc and the build mode are part of the build identity: changing the mode needs a new build, and the current program is kept until the new one is verified. Saves and recordings are never touched by a build."
-                                                                     : "Build mode, H-interrupt discovery and the mapper are part of the build identity: changing them needs a new build, and the previous executable is kept until Storage cleans it. Region applies at launch.") + ctx_.u(4.0F);
+                                                                     : "Build mode, H-interrupt discovery and the cartridge hardware are part of the build identity: changing them needs a new build, and the previous executable is kept until Storage cleans it. Region applies at launch.") + ctx_.u(4.0F);
     }
   }
   if (probe.optimized() && rom_policy_identity_cached(layout_, probe).empty() && !status_pending_) {
@@ -938,6 +960,7 @@ void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) 
     std::string identity = info.key.empty() ? std::string("-") : info.key.substr(0, 16) + "...";
     std::string detail = selected_mode_label(entry) + " selected";
     if (entry.platform_id == "genesis") detail += entry.hint_alias_discovery ? ", H-int discovery on" : ", H-int discovery off";
+    if (entry.platform_id == "genesis" && !entry.mapper.empty()) detail += ", lock-on cartridge";
     if (entry.platform_id == "master-system") detail += ", mapper " + (entry.mapper.empty() ? (entry.mapper_manifest_sha256.empty() ? std::string("undeclared") : std::string("from manifest")) : entry.mapper);
     std::error_code ec;
     if (row("Build identity", identity, col::text, detail, fs::is_directory(info.entry, ec) ? "Open" : nullptr, "open_build")) SDL_OpenURL(("file://" + u8s(info.entry)).c_str());

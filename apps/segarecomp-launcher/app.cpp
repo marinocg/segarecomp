@@ -33,8 +33,13 @@ struct DialogCtx { App *app; std::string purpose, key; };
 
 std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> entries, Layout layout, bool sms_optimized) {
   std::map<std::string, StatusInfo> out;
-  for (const auto &e : entries) {
+  for (auto &e : entries) {
     StatusInfo info;
+    // SEG-122-T009: once per session per game, off the main thread, and before anything derives the build identity from this copy, so one refresh gives the correct status.
+    if (e.platform_id == "genesis" && !e.mapper_explicit && !e.cartridge_examined) {
+      info.cartridge = check_entry_cartridge(e);
+      if (info.cartridge.verified) apply_cartridge_finding(e, info.cartridge.finding);
+    }
     if (e.platform_id == "sega-cd") {  // SEG-078-T002: no cache entry and no build; the cheap checks of sega_cd.hpp decide
       info.sega_cd = true;
       info.scd = scd::quick_status(e.sega_cd);
@@ -94,6 +99,13 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
     if (!mapper_needed && !e.archived && info.status != GameStatus::ready && !e.builds.empty()) {
       info.older = find_playable_older_build(e, info.key, view.optimized() ? "optimized" : "compatibility", layout, cache_root() / "games", view.patch_identity);
       if (info.older.playable && info.status == GameStatus::stale) info.status = GameStatus::playable_older;
+    }
+    if (e.platform_id == "genesis" && (info.status == GameStatus::stale || info.status == GameStatus::playable_older)) {
+      // SEG-122-T009: say so when the reason a build no longer counts is the cartridge hardware.
+      const InstalledPatch *selected = e.selected_patch();
+      const std::string last_key = selected != nullptr ? selected->build_key : e.current_build_key;
+      const fs::path last = cache_root() / "games" / last_key;
+      info.hardware_changed = !last_key.empty() && entry_ready(last) && recorded_cartridge_mapper(last) != e.mapper;
     }
     if (!mapper_needed && view.supports_optimized()) {
       RomView other = view;
@@ -369,6 +381,12 @@ void App::poll_status_refresh() {
   status_pending_ = false;
   bool changed = false;
   for (auto &[id, info] : statuses_) {
+    if (info.cartridge.examined) {
+      if (LibraryEntry *entry = catalog_.find_id(id)) {
+        entry->cartridge_examined = true;
+        if (info.cartridge.verified && apply_cartridge_finding(*entry, info.cartridge.finding)) changed = true;
+      }
+    }
     if (!info.adopt) continue;
     if (LibraryEntry *entry = catalog_.find_id(id)) {
       BuildRecord record;
@@ -736,6 +754,12 @@ bool App::start_build(const std::string &id, bool restart_after) {
   view.sms_optimized_available = sms_optimized_available_;
   if (view.platform_id == "master-system") { if (!entry->mapper.empty()) view.mapper = entry->mapper; if (view.sms_optimized_available) view.aot_policy = entry->aot_policy; }
   if (view.supports_optimized() && view.platform_id == "genesis") { view.aot_policy = entry->aot_policy; view.aot_model = "gen2"; }  // Genesis Optimized is always the gen2 model
+  if (view.platform_id == "genesis") {
+    // SEG-122-T009: this file's digest was just verified, so its recognition describes this game; an explicit choice still wins. A patch never takes part: it is not read here.
+    entry->cartridge_examined = true;
+    if (apply_cartridge_finding(*entry, finding_of(view))) save_catalog();
+    view.mapper = entry->mapper;
+  }
   if (view.supports_hint_alias_discovery()) view.hint_alias_discovery = entry->hint_alias_discovery;
   if (view.supports_region()) view.region = entry->region;
   {  // SEG-122: the selected variant. The ROM file itself stays the original; a Patched variant is materialized by the build from the installed package.
@@ -1227,6 +1251,10 @@ void App::run_script() {
       save_catalog();
       request_status_refresh();
     }
+  } else if (cmd == "advanced") {      // SEG-122-T009: open or close the Advanced build options expander of the open game: 1 | 0
+    show_advanced_ = arg == "1";
+  } else if (cmd == "cartridge") {     // SEG-122-T009: select the cartridge hardware of the open game as its tile would: auto | standard | lock_on
+    if (LibraryEntry *e = catalog_.find_id(detail_id_)) { select_cartridge(*e, arg == "lock_on" ? 2 : (arg == "standard" ? 1 : 0)); save_catalog(); request_status_refresh(); }
   } else if (cmd == "report") {        // trace the measured storage of the open game
     const EntryUsage *u = report_valid_ ? report_.find(detail_id_) : nullptr;
     trace(u != nullptr ? "storage total=" + std::to_string(u->total.total()) + " user=" + std::to_string(u->user_data) + " intermediates=" + std::to_string(u->intermediates) + " dirs=" + std::to_string(u->dirs.size())
@@ -1417,6 +1445,8 @@ void App::run_script() {
     else if (key == "visible") actual = std::to_string(visible_entries().size());
     else if (key == "focus") actual = focus_label_;
     else if (key == "focus_id") actual = ui::focus_id;
+    else if (key == "cartridge") { const LibraryEntry *e = catalog_.find_id(detail_id_); actual = e == nullptr ? "-" : (e->mapper.empty() ? "standard" : e->mapper) + (e->mapper_explicit ? ":manual" : ":auto"); }
+    else if (key == "hardware_changed") actual = statuses_.count(detail_id_) != 0 && statuses_[detail_id_].hardware_changed ? "1" : "0";
     else if (key == "modal") actual = modal_.kind == Modal::Kind::none ? "0" : "1";
     else if (key == "input_state") actual = sv_pad_state_code(input_state());
     else if (key == "pad_count") actual = std::to_string(sv_diag_count(diag_));

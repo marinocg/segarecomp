@@ -73,6 +73,8 @@ std::string evaluate(const LibraryEntry &entry, const std::string &requested_pol
       return "its cartridge mapper declaration is not recorded";
     }
   }
+  // SEG-122-T009: the cartridge hardware is part of what the program is: a standard build is never offered as a lock-on one, or the reverse. A build older than the record is standard.
+  if (entry.platform_id == "genesis" && meta->str("mapper") != entry.mapper) return "it was built for different cartridge hardware";
   // The one build option the metadata may not record in older builds: a build made with H-interrupt discovery changes the generated program.
   const bool want_hint = entry.hint_alias_discovery && entry.platform_id == "genesis";
   if (meta->get("hint_alias_discovery") != nullptr) {

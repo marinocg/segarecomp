@@ -25,7 +25,7 @@ target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
 # The launcher's non-UI core (layout, cache identity, `segarecomp build` orchestration, status reading) is a separate target so its
 # policy/cache-identity contract is unit-testable without a window.
-add_library(segarecomp_launcher_core STATIC launcher_core.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp patch_library.cpp storage.cpp launcher_settings.cpp sega_cd.cpp)
+add_library(segarecomp_launcher_core STATIC launcher_core.cpp cartridge_recognition.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp patch_library.cpp storage.cpp launcher_settings.cpp sega_cd.cpp)
 target_include_directories(segarecomp_launcher_core PUBLIC .)
 target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media)
 # Linux only: the glibc the generated programs link against (release default 2.35 = the bundled SDL3's baseline; a developer who built SDL3 on a
@@ -302,6 +302,20 @@ if(BUILD_TESTING)
 endif()
 
 # SEG-058: cache maintenance on fake trees (symlink escapes, forged plans, busy entries).
+# SEG-122-T009: the launcher's lock-on recognition and its persistence (synthetic images, no window).
+add_executable(cartridge_recognition_test cartridge_recognition_test.cpp)
+target_link_libraries(cartridge_recognition_test PRIVATE segarecomp_launcher_core)
+segarecomp_enable_warnings(cartridge_recognition_test)
+if(BUILD_TESTING)
+  add_test(NAME cartridge_recognition_test COMMAND cartridge_recognition_test)
+  set_property(TEST cartridge_recognition_test APPEND PROPERTY LABELS full fast)
+  add_test(NAME launcher_lock_on_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_lock_on_test.py
+    $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game> ${PROJECT_SOURCE_DIR}/tools/segapatch.py ${PROJECT_SOURCE_DIR}/docs/product/sdk-sample/provider.c)
+  set_property(TEST launcher_lock_on_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_lock_on_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST launcher_lock_on_test PROPERTY TIMEOUT 600)
+endif()
+
 add_executable(storage_test storage_test.cpp)
 target_link_libraries(storage_test PRIVATE segarecomp_launcher_core)
 segarecomp_enable_warnings(storage_test)

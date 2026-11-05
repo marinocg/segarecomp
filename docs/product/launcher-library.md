@@ -57,7 +57,7 @@ file, the build cache or the product: no placeholder values.
   used to force a recompile before anything could be played. The exact identity is still what decides whether generated output may be *reused* by a new build,
   but a finished executable can additionally be *played* when the launcher can establish from the build's own records that it still runs here: a real build
   folder inside the cache with an executable and a successful `status.json`; `metadata.json` that names this library ROM (SHA-256), the platform, this operating
-  system and processor and, for Master System, the same declared mapper and profile; a complete recorded policy for the *same mode* (Compatibility/Optimized) the
+  system and processor and, for Master System, the same declared mapper and profile, for Genesis the same cartridge hardware; a complete recorded policy for the *same mode* (Compatibility/Optimized) the
   game requests now (an Optimized build keeps being reported with its own model, e.g. v1, never relabelled as the new gen2); an H-interrupt discovery setting that
   matches; an installed SDL3 library; and the host-interface marker `runtime_contract` (recorded by every new build; bumped only when a change would stop an
   already built program from running). Builds made before the marker existed are accepted only from the explicitly listed release (`0.5.0`); a version number
@@ -70,6 +70,16 @@ file, the build cache or the product: no placeholder values.
   attempt's own `.partial` folder is removed, no *Build failed* state or `.failed` diagnostics are created, and an earlier completed build of the game stays playable. A cancel that
   arrives after the build has been published or has failed is refused (that outcome stands). A *queued* game is removed with **Unqueue** / *Remove from build queue*; it has
   started nothing. Closing the window still waits for a running build.
+
+
+## Cartridge hardware (Genesis)
+
+The default is: import the game, build it, play it. The launcher recognizes the supported Sonic & Knuckles lock-on images from their contents (a 2 MiB Sonic & Knuckles, or the 4 MiB image of Sonic & Knuckles followed by Sonic 3), selects
+Lock-on pass-through automatically, saves that with the library entry, and Game Details says `Lock-on cartridge - automatically detected`. There is no dialog. Every other Genesis game is a standard cartridge, its build command and identity are unchanged, and nothing about hardware is shown outside Advanced build options.
+
+* **Automatic recognition** reads header fields only (ADR 0268 section 5 lists them). File names, library titles, ZIP names and patches are never consulted. An image that resembles a lock-on cartridge but cannot be identified (modified, another size, an unknown attached cartridge) stays standard, and the page says why.
+* **Manual override**: Advanced build options, *Cartridge hardware*: Automatic (recommended), Standard (an ordinary cartridge), Lock-on (a pass-through cartridge). An explicit choice outranks recognition and survives reimports, restarts and rescans. Headless: `--mapper lock_on` or `--mapper standard` (`--build` does not read the library, so a choice stored there does not apply to it; its own option does).
+* A library entry from an earlier release is examined when its original ROM is available; a missing ROM keeps what is stored. If that changes the hardware, the earlier build is not reused (the page says why) and a rebuild is needed. The hardware is a build option of the one game, not a separate game, and installing, selecting or removing a patch never changes it.
 
 ## Where data lives
 
@@ -215,7 +225,7 @@ See `docs/testing/input-diagnostics.md` for the A-F diagnostic states, the Switc
 
 ## Headless
 
-`Segarecomp --build <rom> [--mapper ...] [--run ...]` is unchanged. `Segarecomp --import <rom>...` adds ROMs to the library without building. Review aids
+`Segarecomp --build <rom> [--mapper ...] [--run ...]` is unchanged, except that a Genesis image now takes the same automatic cartridge recognition as the window and `--mapper` also accepts `lock_on` or `standard` for Genesis (a mapper of the other platform is refused; the report states `cartridge=` and `cartridge_source=`). `Segarecomp --import <rom>...` adds ROMs to the library without building. Review aids
 (not features): `SEGARECOMP_SHOT=<file.bmp>` with `SEGARECOMP_SHOT_PAGE` (`library|list|details:<n>|import|storage|settings<tab>`) and `SEGARECOMP_SHOT_SIZE=WxH`
 (`SEGARECOMP_SHOT_SCALE` forces a UI scale, `SEGARECOMP_SHOT_LOG` expands the build log, `SEGARECOMP_SHOT_MENU` opens the first game's context menu);
 the Master System/Genesis review hooks (`SEGARECOMP_SHOT_ROM`, `..._POLICY`, `..._MODEL`, `..._REGION`, `SEGARECOMP_GUI_AUTOPLAY`, `SEGARECOMP_GUI_TRACE`) behave as before.

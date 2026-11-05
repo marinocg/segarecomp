@@ -1,6 +1,6 @@
 # ADR 0268: Declared Genesis lock-on pass-through cartridge
 
-- Status: Accepted.
+- Status: Accepted; section 5 added by SEG-122-T009.
 - Predecessors: ADR 0049 (cartridge mirroring for reads past a power-of-two chip), ADR 0097 (compatibility repairs; its non-goal
   "lock-on/bank-switched mappers"), ADR 0098 (header-declared cartridge SRAM), ADR 0065 (Master System: the mapper is declared,
   never inferred).
@@ -22,9 +22,10 @@ Only non-reconstructable classifications are recorded; nothing from any commerci
 
 ## 2. Decision
 
-1. **Declared, never inferred.** `segarecomp build --mapper lock_on` (Genesis only; the emitter's `--genesis-lock-on`) declares the
-   board. Nothing about a title, a checksum or a header text selects it; without the declaration every image keeps ADR 0049/0098
-   behavior byte for byte. Any other Genesis mapper declaration is still refused (`MAPPER_NOT_APPLICABLE`).
+1. **Declared, never inferred, by the build tool.** `segarecomp build --mapper lock_on` (Genesis only; the emitter's `--genesis-lock-on`)
+   declares the board. Nothing about a title, a checksum or a header text selects it in the build tool, the recompiler or the runtime; without the
+   declaration every image keeps ADR 0049/0098 behavior byte for byte. Any other Genesis mapper declaration is still refused (`MAPPER_NOT_APPLICABLE`).
+   The consumer launcher may choose to pass the declaration (section 5).
 2. **Image shapes.** A declared lock-on image is exactly 2 MiB (the base alone: an empty slot) or exactly 4 MiB (the base followed by
    the attached cartridge). Any other size is refused at build time (`LOCK_ON_IMAGE_SIZE`).
 3. **No mirror into the slot.** The base image is never mirrored into `$200000-$3FFFFF` (the slot is not a decode alias of the base
@@ -44,9 +45,8 @@ Only non-reconstructable classifications are recorded; nothing from any commerci
 ## 3. Non-goals
 
 No bank switching, no lock-on patch ROM (a third chip some boards map only through `$A130F1`), no combining of separate images (the
-composite is the user's own single image), no detection of the board from image contents, no translation-time folding of empty-slot reads (an absolute-operand DATA read inside an empty slot stays fail-closed at translation time, as the ADR 0049 mirror rows already are; register-addressed reads answer the empty-slot value at runtime), no Z80 banked view of an empty slot (a Z80 bank read there stays fail-closed with the existing typed bank stop; only 68000 DATA reads answer the empty-slot value), no other cartridge sizes, no
-battery persistence (unchanged from ADR 0098). The launcher does not yet carry the declaration for Genesis (its catalog keeps only the
-Master System mapper families); `segarecomp build --mapper lock_on` does.
+composite is the user's own single image), no detection of the board from image contents in the build tool, recompiler or runtime (the launcher's narrow recognition is section 5), no translation-time folding of empty-slot reads (an absolute-operand DATA read inside an empty slot stays fail-closed at translation time, as the ADR 0049 mirror rows already are; register-addressed reads answer the empty-slot value at runtime), no Z80 banked view of an empty slot (a Z80 bank read there stays fail-closed with the existing typed bank stop; only 68000 DATA reads answer the empty-slot value), no other cartridge sizes, no
+battery persistence (unchanged from ADR 0098).
 
 ## 4. Evidence
 
@@ -57,3 +57,27 @@ Master System mapper families); `segarecomp build --mapper lock_on` does.
   without the declaration) and `sms_native_build_test` (`build --mapper lock_on`: exact name, size refusal, recorded declaration, forwarding to the emitter).
 - Two locally held images of the board class (class-level evidence only): the 2 MiB base alone boots to its own title and gameplay
   instead of the attached-cartridge path; the 4 MiB composite runs past the former stop through the save-slot screen into gameplay.
+
+## 5. Launcher recognition and overrides (SEG-122-T009)
+
+The operator superseded the earlier instruction that the launcher never infers lock-on hardware: a consumer should import the game, build it and play it without knowing what a lock-on cartridge is.
+
+Three layers, three rules:
+
+- **The build tool never guesses.** `segarecomp build` still acts only on an explicit `--mapper lock_on`. The hardware support stays game-agnostic; no title knowledge exists below the launcher.
+- **The launcher may select the explicit declaration from conservative, documented ROM recognition.** `apps/segarecomp-launcher/cartridge_recognition.cpp` is the one implementation, shared by the window, `--build` and `--import`. It
+  reads the image's own header fields and returns standard, lock-on or ambiguous. The narrow idea follows Genesis Plus GX (`core/cart_hw/md_cart.c`), which recognizes this board from the header title rather than the image length; the launcher is stricter because the result selects a build declaration.
+- **The user outranks both.** Advanced build options offers Automatic (recommended), Standard cartridge and Lock-on pass-through; headless `--mapper lock_on|standard` does the same. `standard` is the launcher's word for "no declaration" and is never forwarded. An explicit choice survives reimports, restarts and rescans.
+
+| Image | Evidence required | Result |
+| --- | --- | --- |
+| Sonic & Knuckles | exactly 2 MiB; both title fields and the product code name it; the header declares one 2 MiB ROM; the header checksum holds | lock-on |
+| Sonic & Knuckles + Sonic 3 | exactly 4 MiB; the first 2 MiB as above; the second 2 MiB has its own Genesis header naming Sonic 3 in both title fields and the product code, one declared 2 MiB ROM, and its own valid checksum | lock-on |
+| Resembles the base (a title with both names, or the product code) but anything above fails: other size, disagreeing fields, failed checksum, another or no attached cartridge | none | ambiguous: standard behavior, the reason is shown, the user may choose Lock-on |
+| Anything else, at any size, including an ordinary image with a second apparent header | none | standard |
+
+Never consulted: file name, library title, ZIP name, a generic SEGA header alone, a second header without a verified base, an installed patch. There is no digest list, title database or region list.
+
+**Persistence.** `LibraryEntry.mapper` holds the effective declaration; the one added member, `mapper_explicit`, is written only when the user chose (so `mapper` empty with it means an explicit Standard). A library entry from an earlier release is examined once per session when its original ROM is available and its digest matches; a missing or changed file leaves the stored declaration alone. Only an image whose header could change the outcome is read whole.
+
+**Identity.** The declaration joins the cache key (`:mapper=lock_on`), `metadata.json`, the older-build check and the exact-reuse check; a build recording another declaration is never reused, in either direction, and Game Details says when that is why a rebuild is needed. An ordinary game's key, command and metadata are byte-for-byte unchanged. The original ROM stays the library identity: the mapper is a build option, not a separate game. A patched variant takes the declaration from the entry and never influences it.

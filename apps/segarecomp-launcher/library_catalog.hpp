@@ -4,6 +4,7 @@
 // `platform + ROM SHA-256` (never by a title); build identities (the cache directory names produced by entry_dir()) are only
 // recorded against it. Original ROMs are referenced by path and never copied. Orchestration data only: no recompilation logic.
 
+#include "cartridge_recognition.hpp"
 #include "launcher_core.hpp"
 #include "sega_cd.hpp"
 
@@ -49,7 +50,10 @@ struct LibraryEntry {
   std::vector<std::string> rom_paths;  // tracked locations (references); the first is the primary
   bool rom_path_unknown = false;       // migrated from a cache record that never stored a path
   // Last-used per-game build options (the identity-relevant ones are re-derived through entry_dir()).
-  std::string mapper;           // Master System: declared mapper ("" until declared)
+  // Master System: the declared mapper ("" until declared). Genesis (SEG-122-T009, ADR 0268): the effective cartridge declaration, "lock_on" or "" for the standard cartridge.
+  std::string mapper;
+  // Genesis: the user chose `mapper` in Advanced build options, so "" means an explicit Standard and no recognition may change it. Otherwise `mapper` is the last automatic result.
+  bool mapper_explicit = false;
   std::string mapper_manifest_sha256;
   // SEG-069-T002: Optimized is the launcher default for both platforms (the intent is kept even while the Master System capability is still
   // unknown or unsupported: availability is resolved separately and never rewrites this field). Genesis Optimized means the former
@@ -77,10 +81,31 @@ struct LibraryEntry {
   // SEG-078-T002 (ADR 0204): Sega CD only (platform_id "sega-cd"): the referenced BIOS and disc, the imported program and the last typed stop.
   // Never written for another platform, so a Genesis / Master System record is byte-for-byte what it was before.
   scd::EntryRecord sega_cd;
+  // SEG-122-T009: session state, never saved. The ROM was already examined for its cartridge hardware, and why a look-alike image was not recognized.
+  bool cartridge_examined = false;
+  std::string cartridge_note;
 
   [[nodiscard]] std::string id() const { return platform_id + ":" + sha256; }
   [[nodiscard]] const std::string &title() const { return display_title.empty() ? detected_title : display_title; }
 };
+
+// SEG-122-T009: what the original ROM says about a Genesis entry's cartridge hardware. `verified` only for a file whose SHA-256 is this entry's: a changed or missing file says nothing.
+struct CartridgeCheck {
+  bool examined = false;   // some recorded location could be read
+  bool verified = false;   // `finding` describes this game
+  CartridgeFinding finding;
+};
+// Reads small headers only, unless an image could change the stored declaration. Safe off the main thread; touches nothing.
+[[nodiscard]] CartridgeCheck check_entry_cartridge(const LibraryEntry &entry);
+// What an inspection of the original file found (inspect_rom_file ran the recognition).
+[[nodiscard]] CartridgeFinding finding_of(const RomView &rom);
+// Stores a finding unless the user's explicit choice outranks it. True when the declaration changed, which selects a different build identity.
+bool apply_cartridge_finding(LibraryEntry &entry, const CartridgeFinding &finding);
+
+// The Advanced "Cartridge hardware" control: 0 = Automatic (the next status refresh examines the ROM again; a missing ROM keeps the stored declaration), 1 = Standard, 2 = Lock-on.
+void select_cartridge(LibraryEntry &entry, int choice);
+// The one line that names the effective cartridge hardware; "" for an ordinary game whose hardware needs no mention.
+[[nodiscard]] std::string cartridge_status_text(const LibraryEntry &entry);
 
 enum class CatalogLoad { created, loaded, recovered_from_backup, recovered_empty, read_only_newer };
 

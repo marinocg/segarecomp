@@ -59,7 +59,7 @@ fs::path from_u8(const char *text) { return fs::path(std::u8string(reinterpret_c
 
 int headless(int argc, char **argv) {
   fs::path rom_path, report_path;
-  std::string mapper;                  // Master System: explicit mapper declaration (never defaulted)
+  std::string mapper;                  // an explicit choice. Master System: sega | rom_only (never defaulted). Genesis: lock_on | standard, over the automatic recognition (SEG-122-T009)
   std::string aot_policy = "compatibility";  // compatibility | optimized (Genesis); Compatibility is the default
   std::string aot_model = "v1";              // experimental opt-in of Optimized (v1 | gen2); forwarded verbatim to the product
   bool hint_discovery_arg = false;     // --hint-alias-discovery: advanced strict-H-interrupt preparation (default off)
@@ -79,7 +79,7 @@ int headless(int argc, char **argv) {
     else if (arg == "--region" && i + 1 < argc && (std::string(argv[i + 1]) == "usa" || std::string(argv[i + 1]) == "japan" || std::string(argv[i + 1]) == "europe")) region_arg = argv[++i];
     else if (arg == "--hint-alias-discovery") hint_discovery_arg = true;
     else if (arg == "--game-arg" && i + 1 < argc) game_args.emplace_back(argv[++i]);
-    else { std::fprintf(stderr, "usage: Segarecomp [--import <rom>]... [--build <rom> [--mapper <sega|rom_only>] [--aot-policy <compatibility|optimized> [--aot-model <v1|gen2>]] [--hint-alias-discovery] [--run [--region <usa|japan|europe>] [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
+    else { std::fprintf(stderr, "usage: Segarecomp [--import <rom>]... [--build <rom> [--mapper <sega|rom_only|lock_on|standard>] [--aot-policy <compatibility|optimized> [--aot-model <v1|gen2>]] [--hint-alias-discovery] [--run [--region <usa|japan|europe>] [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
   }
   if (aot_model != "v1" && aot_policy != "optimized") { std::fprintf(stderr, "--aot-model requires --aot-policy optimized\n"); return 2; }
   std::string report;
@@ -107,7 +107,15 @@ int headless(int argc, char **argv) {
   if (!layout.problem.empty()) { emit("result=failed problem=" + layout.problem); rc = 1; }
   else {
     RomView rom = inspect_rom_or_zip(rom_path, layout, library_root() / "roms");
-    if (rom.platform_id == "master-system" && !mapper.empty()) rom.mapper = mapper;
+    if (rom.platform_id == "master-system" && !mapper.empty()) {
+      rom.mapper = mapper;
+      if (mapper != "sega" && mapper != "rom_only") { emit("result=failed problem=--mapper " + mapper + " does not apply to Master System (use sega or rom_only)"); rc = 2; }
+    }
+    if (rom.platform_id == "genesis" && !mapper.empty()) {
+      // `standard` is the launcher's own word for "no declaration": it is never forwarded to the product.
+      if (mapper == "lock_on" || mapper == "standard") { rom.mapper = mapper == "lock_on" ? mapper : std::string(); rom.cartridge_note.clear(); }
+      else { emit("result=failed problem=--mapper " + mapper + " does not apply to Genesis (use lock_on or standard)"); rc = 2; }
+    }
     // The product CLI states whether the experimental Master System Optimized policy exists; a request for it is honoured only then.
     if (rom.platform_id == "master-system" && aot_model != "v1") { emit("result=failed problem=--aot-model is a Genesis option"); rc = 2; }
     if (rc == 0 && rom.platform_id == "master-system" && aot_policy == "optimized") rom.sms_optimized_available = sms_optimized_available_blocking(layout);
@@ -120,6 +128,11 @@ int headless(int argc, char **argv) {
     else {
       emit("rom_sha256=" + rom.sha256);
       emit("platform=" + (rom.platform_id.empty() ? std::string("unsupported") : rom.platform_id));
+      if (rom.platform_id == "genesis") {
+        emit(std::string("cartridge=") + (rom.mapper.empty() ? "standard" : rom.mapper));
+        emit(std::string("cartridge_source=") + (mapper.empty() ? "automatic" : "explicit"));
+        if (!rom.cartridge_note.empty()) emit("cartridge_note=" + rom.cartridge_note);
+      }
       if (rom.platform_id == "master-system")
         emit(std::string("mapper=") + (!rom.mapper.empty() ? rom.mapper : rom.mapper_manifest.empty() ? "undeclared" : "manifest"));
       // Build (or reuse) the entry of `view` and report its machine-readable policy; returns the entry or an empty path on failure.

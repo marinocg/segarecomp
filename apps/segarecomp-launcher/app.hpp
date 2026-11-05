@@ -69,6 +69,9 @@ struct StatusInfo {
   bool vanilla_ready = false;
   struct PatchBuilt { std::string identity; bool built = false; };
   std::vector<PatchBuilt> patches;
+  // SEG-122-T009: the original ROM's cartridge examination, applied to the catalog on the main thread; and that the last build was made for other cartridge hardware.
+  CartridgeCheck cartridge;
+  bool hardware_changed = false;
   [[nodiscard]] bool runnable() const { return status == GameStatus::ready || older.playable; }
 };
 
