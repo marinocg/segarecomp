@@ -34,10 +34,50 @@ def spin_rom(root):
     return fx.build_rom(spin.resolve())
 
 
-def timed(cmd, env=None, timeout=600):
+PIN = ["taskset", "-c", os.environ.get("PERF_BENCH_CPU", "2")] if sys.platform.startswith("linux") and subprocess.run(["which", "taskset"], capture_output=True).returncode == 0 else []
+
+
+def timed(cmd, env=None, timeout=600, pin=True):
+    """Wall time of the child; on Linux the child is pinned to one CPU (PERF_BENCH_CPU, default 2) to remove scheduler migration noise."""
     t0 = time.perf_counter()
-    r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
+    r = subprocess.run((PIN if pin else []) + cmd, capture_output=True, text=True, env=env, timeout=timeout)
     return time.perf_counter() - t0, r
+
+
+MICRO_C = r"""
+#define _POSIX_C_SOURCE 200809L
+#include <stdio.h>
+#include <time.h>
+#include "sv_perf.h"
+static uint64_t clk(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec + 1U; }
+static SvPerf p;
+int main(void) {
+  const unsigned N = 2000000U; unsigned i; uint64_t t0, t1, sink = 0;
+  sv_perf_init(&p, clk, 16683333U, 1);
+  t0 = clk(); for (i = 0; i < N; ++i) sink += clk(); t1 = clk();
+  printf("clock_read_ns %.1f\n", (double)(t1 - t0) / N);
+  sv_perf_enable(&p);
+  t0 = clk(); for (i = 0; i < N; ++i) { uint64_t b = sv_perf_span_begin(&p); sv_perf_span_end(&p, SV_SPAN_EMULATION, b); } t1 = clk();
+  printf("span_pair_ns %.1f\n", (double)(t1 - t0) / N);
+  t0 = clk(); for (i = 0; i < N; ++i) sv_perf_frames(&p, i, 1, 0); t1 = clk();
+  printf("frame_boundary_ns %.1f\n", (double)(t1 - t0) / N);
+  p.active = 0;
+  t0 = clk(); for (i = 0; i < N; ++i) { uint64_t b = sv_perf_span_begin(&p); sv_perf_span_end(&p, SV_SPAN_EMULATION, b); sv_perf_frames(&p, i, 1, 0); } t1 = clk();
+  printf("idle_call_ns %.2f (sink %llu)\n", (double)(t1 - t0) / N, (unsigned long long)(sink & 1U));
+  return 0;
+}
+"""
+
+
+def microbench(root, cc, tmp):
+    src = tmp / "micro.c"
+    src.write_text(MICRO_C)
+    exe = tmp / "micro"
+    r = subprocess.run([cc, "-std=gnu11", "-O2", "-I", str(root / "libs" / "viewer" / "include"), str(src), "-o", str(exe)], capture_output=True, text=True)
+    if r.returncode != 0:
+        return {"error": r.stderr[-300:]}
+    out = subprocess.run((PIN) + [str(exe)], capture_output=True, text=True).stdout
+    return {k: float(v.split()[0]) for k, v in (line.split(" ", 1) for line in out.splitlines() if line)}
 
 
 def stats(values):
@@ -78,6 +118,8 @@ def main():
     out = {"workload": "synthetic spin image", "guest_instructions": args.budget, "host_os": sys.platform}
     with tempfile.TemporaryDirectory(prefix="perf-bench-") as d:
         tmp = pathlib.Path(d)
+        if sys.platform != "win32":
+            out["collector_microbench_ns"] = microbench(root, args.cc, tmp)
         rom = tmp / "spin.bin"
         rom.write_bytes(spin_rom(root))
         common = ["--rom", str(rom), "--cc", args.cc, "--runtime-dir", str(root / "platforms" / "genesis"), "--optimize", "2", "--runtime-optimize", "2"]
@@ -87,7 +129,7 @@ def main():
             cmd = [args.cli, "build", *common, "--output", str(tmp / f"b-{name}-{time.monotonic_ns()}")]
             if name == "profiled":
                 cmd += ["--performance-report", str(tmp / "build.json")]
-            t, r = timed(cmd)
+            t, r = timed(cmd, pin=False)   # a build runs a compiler worker pool: not pinned
             if r.returncode != 0:
                 raise SystemExit("build failed: " + r.stdout + r.stderr)
             return t
@@ -112,6 +154,12 @@ def main():
         rep = json.loads((tmp / "run.json").read_text())
         out["headless_frames_per_run"] = rep["runtime"]["frames"]["virtual"]
         out["headless_slices_per_run"] = rep["runtime"]["counters"]["runner_slices"]
+        micro = out.get("collector_microbench_ns", {})
+        if "span_pair_ns" in micro:
+            frames, slices = rep["runtime"]["frames"]["virtual"], rep["runtime"]["counters"]["runner_slices"]
+            cost_ns = slices * micro["span_pair_ns"] + frames * micro["frame_boundary_ns"]
+            out["headless_collector_cost_ns_per_frame"] = cost_ns / frames
+            out["headless_collector_cost_pct_of_frame_time"] = cost_ns / (rep["runtime"]["frame_interval"]["avg_ns"] * frames) * 100.0
 
         # ---- viewer (optional)
         if args.sdl3_include and args.sdl3_lib:
