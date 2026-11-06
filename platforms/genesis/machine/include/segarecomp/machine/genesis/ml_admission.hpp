@@ -21,7 +21,7 @@
 namespace segarecomp {
 
 // The semantics of the structural prune + admission validator that every producer feeds. Bump on any change that can alter an admitted set.
-inline constexpr std::string_view genesis_admission_analysis_contract = "segarecomp.admission_contract.v2";
+inline constexpr std::string_view genesis_admission_analysis_contract = "segarecomp.admission_contract.v3";
 
 enum class GenesisMlModelFamily { v1, gen2 };
 [[nodiscard]] std::string_view genesis_ml_model_family_name(GenesisMlModelFamily family) noexcept;  // "v1" | "gen2"

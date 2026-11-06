@@ -77,7 +77,11 @@ The handler entry is resolved at build time from the cartridge vector table at o
   installed for a majority of them (a majority of them).
 
 A vector slot that points into work RAM (the common RAM jump-table convention) retains the stub address (`hint_vector_in_work_ram`) so that the existing build-time preparation (`--discover-copy-aliases`: byte-guarded JMP thunks and verbatim
-immutable-copy aliases, ADR 0049/0097) can turn it into an ordinary compiled handler entry guarded by the runtime byte-identity check. **RAM-resident code that the game constructs at run time (a handler written into work RAM instruction by instruction is not a copy of cartridge bytes) can never be compiled by this architecture** (no interpreter/JIT).
+immutable-copy aliases, ADR 0049/0097) can turn it into an ordinary compiled handler entry guarded by the runtime byte-identity check. A work-RAM `JMP (xxx).L` stub that the
+cartridge's own reachable code constructs with constant stores (the opcode word, then the operand) is established **statically** (ADR 0271): the first M68K emission contains a
+precompiled `JMP (xxx).L` entry guarded on its opcode word only; its 32-bit destination is read live from RAM on every entry and must be a member of the final compiled-entry set
+(otherwise the typed `unresolved_indirect_target` stop), so a stub the game retargets during play keeps working. The recognition is positive evidence only (no proof that the opcode is
+installed before the first interrupt; the runtime guard refuses an uninstalled or mutated form with nothing committed). **RAM-resident code that the game constructs at run time (a handler written into work RAM instruction by instruction is not a copy of cartridge bytes) can never be compiled by this architecture** (no interpreter/JIT).
 
 When an enabled H-interrupt fires with no resolved handler the default compatibility policy **counts and drops it** (`raster.hint_undelivered`; the capture/viewer hooks print a `RUNTIME_NOTES {...}` line when anything was dropped, a non-default region was used, frames were
 rejected or a VRAM journal overflowed) -- precisely what every earlier build did with the interrupt, now observable -- so titles that never needed the handler keep running. `SEGARECOMP_GENESIS_HINT=strict` (or `genesis_runtime_set_hint_strict`) makes it stop fail-closed with

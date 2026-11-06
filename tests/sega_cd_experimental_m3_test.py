@@ -26,7 +26,7 @@ import sega_cd_common as common  # noqa: E402
 
 failures = []
 checks = [0]
-GENESIS_GEN2_IDENTITY = "policy_identity=017209303699b6c50b7aeb0c06a825e8c2368de77933c95835d545afe9f311b8 requested=optimized requested_model=gen2 contract=segarecomp.admission_contract.v2"
+GENESIS_GEN2_IDENTITY = "policy_identity=dea4126db3a030314b2f0d0c5b8b16350c2286622d100fe3d29a9fab87490654 requested=optimized requested_model=gen2 contract=segarecomp.admission_contract.v3"
 
 
 def check(ok, label):
@@ -46,7 +46,7 @@ def main():
         tmp = pathlib.Path(tmp)
         # ---- vocabulary and identities -------------------------------------------------------------------------------------------
         rc, out, _ = cli("aot-policy-identity", "--aot-policy", "optimized", "--aot-model", "gen2")
-        check(rc == 0 and out.strip() == GENESIS_GEN2_IDENTITY, "the Genesis gen2 policy identity is the pinned one (contract v2, SEG-122-T010)")
+        check(rc == 0 and out.strip() == GENESIS_GEN2_IDENTITY, "the Genesis gen2 policy identity is the pinned one (contract v3, SEG-122-T011)")
         rc, scd_out, _ = cli("aot-policy-identity", "--platform", "sega-cd", "--aot-policy", "optimized", "--aot-model", "gen2")
         fields = dict(f.split("=", 1) for f in scd_out.split())
         check(rc == 0 and fields.get("platform") == "sega-cd" and fields.get("experimental") == "1" and fields["policy_identity"] != GENESIS_GEN2_IDENTITY.split()[0].split("=")[1],

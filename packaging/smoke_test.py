@@ -147,7 +147,7 @@ def expected_policy_identity(policy, model):
     frozen = json.loads((tools / "segarecomp_ml_region_gen2.frozen.json").read_text())
     inc = (pathlib.Path(__file__).resolve().parent.parent / "platforms/genesis/machine/src/ml_region_gen2_model_data.inc").read_text()
     weights = re.search(r'g2_weight_table_sha256 = "([0-9a-f]{64})"', inc).group(1)
-    text = f"segarecomp.aot_policy_identity.v1|contract=segarecomp.admission_contract.v2|requested={policy}"
+    text = f"segarecomp.aot_policy_identity.v1|contract=segarecomp.admission_contract.v3|requested={policy}"
     if policy == "optimized" and model == "gen2":
         text += (f"|family=gen2|producer=ml_region_gen2|model={frozen['model_artifact']['sha256']}|schema={frozen['representation_sha256']}"
                  f"|tokens={frozen['token_schema_sha256']}|rank=B35:{frozen['rank_plan_sha256']}|weights={weights}")
@@ -184,7 +184,7 @@ def smoke_optimized(tmp, launch):
         require(got["aot_policy_policy_identity"] == expected_policy_identity("optimized", name), f"{name}: policy identity differs from the development contract: {got}")
         status = json.loads((pathlib.Path(entries[name]) / "status.json").read_text())["aot_policy"]
         require(status["k_sha256"] == want["k_sha256"], f"{name}: admitted-set digest differs from the development build (cross-platform determinism)")
-        require(status["analysis_contract"] == "segarecomp.admission_contract.v2" and status["cache_reuse"] == "none", f"{name}: status: {status}")
+        require(status["analysis_contract"] == "segarecomp.admission_contract.v3" and status["cache_reuse"] == "none", f"{name}: status: {status}")
     gen2 = json.loads((pathlib.Path(entries["gen2"]) / "status.json").read_text())["aot_policy"]
     frozen = json.loads((pathlib.Path(__file__).resolve().parent.parent / "tools/segarecomp_ml_region_gen2.frozen.json").read_text())
     require(gen2["model"] == frozen["model_artifact"]["sha256"] and gen2["schema_sha256"] == frozen["representation_sha256"] and
