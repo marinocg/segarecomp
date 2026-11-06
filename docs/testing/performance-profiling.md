@@ -134,24 +134,26 @@ the workload is a spinning guest, i.e. the *worst case* for a relative figure (a
 
 | variant (median of 11 / 5) | time | vs off | run-to-run spread |
 |---|---|---|---|
-| headless, collector off | 5.876 s | - | 8.6% |
-| headless, summary | 5.920 s | +0.75% | 5.4% |
-| headless, detailed | 5.867 s | -0.15% | 8.8% |
-| viewer (unthrottled, dummy driver), off | 1.553 s | - | 14.1% |
-| viewer, report summary | 1.541 s | -0.79% | 10.3% |
-| viewer, report detailed | 1.578 s | +1.60% | 11.5% |
-| viewer, overlay player | 1.544 s | -0.60% | 12.1% |
-| viewer, overlay developer | 1.542 s | -0.74% | 13.5% |
-| `segarecomp build`, off | 4.012 s | - | 7.9% |
-| `segarecomp build --performance-report` | 4.063 s | +1.27% | 6.9% |
+| headless, collector off | 5.720 s | - | 6.4% |
+| headless, summary | 5.809 s | +1.56% | 2.9% |
+| headless, detailed | 5.821 s | +1.77% | 5.5% |
+| viewer (unthrottled, dummy driver), off | 1.470 s | - | 12.7% |
+| viewer, report summary | 1.514 s | +3.01% | 10.9% |
+| viewer, report detailed | 1.478 s | +0.54% | 10.9% |
+| viewer, overlay player | 1.472 s | +0.11% | 10.7% |
+| viewer, overlay developer | 1.428 s | -2.90% | 9.7% |
+| `segarecomp build`, off | 3.855 s | - | 2.4% |
+| `segarecomp build --performance-report` | 3.926 s | +1.84% | 4.9% |
 
-Reading: every difference is smaller than the spread between repeated runs of the *same* variant, so this method cannot resolve an overhead below about 2%. The targets
-(profiling disabled: no regression; summary <= 1%; detailed <= 3-5%) are therefore met within measurement resolution, and the resolution is stated rather than tuned away.
-The direct cost is measured instead: on this machine a clock read is ~18 ns, a begin/end span pair ~38 ns, a frame boundary ~24 ns, and an *idle* collector (nothing requested)
-~0.4 ns per frame-loop visit (one branch each). The headless run above makes 9,766 slices for 3,125 frames, i.e. ~142 ns of collector work per frame = **0.008%** of a
-frame's host time (0.0076% reported by the bench). The viewer adds ~4 clock reads per slice (500 dispatches) plus the host's own present/upload spans; at the same arithmetic
-that is ~0.1% of a 2 ms frame. "Disabled" means the wrapper callbacks are installed but idle: no clock is read and no memory is written (verified by `sv_perf_test`
-and `sv_perf_overlay_test`: zero clock reads, bit-identical picture).
+Platform: Linux x86-64 (16 hardware threads), GCC 13.3, otherwise idle; the same benchmark run before the correction commits (previous table in the PR history) gave headless summary +0.75% / detailed -0.15%
+and an earlier repetition -1.10% / -1.95%: the sign of every difference changes between repetitions.
+
+Reading: every difference is within the spread between repeated runs of the *same* variant (2-13%), so this method cannot resolve an overhead below roughly 2-3%, and it does **not** show
+that the 1% summary target is met - only that no overhead above the noise floor is observable. The direct cost is measured instead: a clock read is ~18 ns, a begin/end span pair ~36 ns,
+a frame-boundary observation ~23 ns, an *idle* collector (nothing requested) ~0.2 ns per frame-loop visit. The headless run makes 9,766 slices for 3,125 frames, i.e. ~134 ns of
+collector work per frame = **0.0075%** of a frame's host time. The viewer adds ~4 clock reads per slice (500 dispatches) plus the host's own present/upload spans: ~0.1% of a 2 ms frame by the
+same arithmetic. "Disabled" means the wrapper callbacks are installed but idle: no clock is read and no memory is written (verified by `sv_perf_test` and `sv_perf_overlay_test`: zero clock
+reads, bit-identical picture).
 
 Not measured: Windows/macOS, a hardware (non-software) renderer, or a real game; none of those was available. Run the bench there before relying on the numbers.
 

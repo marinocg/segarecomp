@@ -59,10 +59,11 @@ int main(void) {
   sv_perf_enable(&p);
   t0 = clk(); for (i = 0; i < N; ++i) { uint64_t b = sv_perf_span_begin(&p); sv_perf_span_end(&p, SV_SPAN_EMULATION, b); } t1 = clk();
   printf("span_pair_ns %.1f\n", (double)(t1 - t0) / N);
-  t0 = clk(); for (i = 0; i < N; ++i) sv_perf_frames(&p, i, 1, 0); t1 = clk();
+  sv_perf_observe_begin(&p, 0U);
+  t0 = clk(); for (i = 0; i < N; ++i) sv_perf_observe_end(&p, (uint64_t)i + 1U, 0U); t1 = clk();
   printf("frame_boundary_ns %.1f\n", (double)(t1 - t0) / N);
   p.active = 0;
-  t0 = clk(); for (i = 0; i < N; ++i) { uint64_t b = sv_perf_span_begin(&p); sv_perf_span_end(&p, SV_SPAN_EMULATION, b); sv_perf_frames(&p, i, 1, 0); } t1 = clk();
+  t0 = clk(); for (i = 0; i < N; ++i) { uint64_t b = sv_perf_span_begin(&p); sv_perf_span_end(&p, SV_SPAN_EMULATION, b); sv_perf_observe_begin(&p, i); sv_perf_observe_end(&p, (uint64_t)i + 1U, 0U); } t1 = clk();
   printf("idle_call_ns %.2f (sink %llu)\n", (double)(t1 - t0) / N, (unsigned long long)(sink & 1U));
   return 0;
 }

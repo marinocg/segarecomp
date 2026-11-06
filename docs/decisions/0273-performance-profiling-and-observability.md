@@ -140,8 +140,8 @@ A generic event/trace bus, per-instruction counters, sampling profilers, backgro
 ## 12. Consequences and measured cost
 
 - The collector is compiled into every Genesis/Master System/Sega CD viewer and headless program (header-only, ~55 KiB of static data) but is idle unless a report or the
-  overlay is requested; idle cost is one branch per slice/frame/present. Measured end-to-end overhead is below the run-to-run noise of the method (about 2%) and the direct
-  collector cost is ~0.01% of a frame (method, table and limits: `docs/testing/performance-profiling.md`).
+  overlay is requested; idle cost is one branch per slice/frame/present. Measured end-to-end overhead is below the run-to-run noise of the method (about 2-3%; it cannot prove a 1% bound) and the direct
+  collector cost is ~0.0075% of a frame (method, table and limits: `docs/testing/performance-profiling.md`).
 - Generated programs built by an older `segarecomp` do not read the new environment variables; a report is produced only by a program built after this change.
 - `SvPerf` and `BuildProfile` are the only new stateful pieces; `perf_report.py` is stateless. Future consumers (GPU-acceleration studies, CI trend checks) read the
   versioned JSON; they do not get hooks into the collectors.
