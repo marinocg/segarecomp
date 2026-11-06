@@ -72,6 +72,7 @@ typedef struct SvVideoSettings {
   int scanlines, mask, curvature, bloom; /* 0..100 */
   int brightness;                        /* 50..150 percent */
   int vsync, show_fps;
+  int perf_overlay;             /* SEG-125: 0 off (default), 1 player view, 2 developer view; only offered when the console adapter attached a collector */
   SvWidescreenMode widescreen;  /* requested mode, default Original */
   SvSideStyle widescreen_side_style; /* SEG-123: side-area presentation of a generic extension, default Comfort */
   int widescreen_width;         /* SEG-123: target presentation aspect 0 (4:3) .. 100 (16:9), linear in the ratio; default 100 */

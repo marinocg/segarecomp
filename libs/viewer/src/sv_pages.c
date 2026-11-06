@@ -139,6 +139,10 @@ static void build_video_core(SvHost *h, SvPage *p, int full) {
   if (full) {
     add_toggle(p, I_VSYNC, "VSync", v->vsync, "Syncs presentation to the display. Game speed is paced by the console clock either way.");
     add_toggle(p, I_FPS, "Show FPS Counter", v->show_fps, "Shows the presentation rate on the game screen.");
+    if (h->perf != NULL) {   /* SEG-125: only a viewer that attached a collector offers it */
+      static const char *const perf_names[] = {"Off", "Player", "Developer"};
+      add_choice(p, I_PERF, "Performance Overlay", v->perf_overlay, 3, perf_names, "Host speed, frame times and subsystem timings. Measured on this computer only; never changes the game. F3 cycles it.");
+    }
     item = sv_page_add(p, SV_ITEM_LABEL, 0, "CRT effect");
     if (item != NULL) sv_item_set_icon(item, "section");
   }
@@ -515,7 +519,7 @@ void sv_pages_listen_key(SvHost *h, int sc) {
     int sys, p, a;
     if (sc == SDL_SCANCODE_BACKSPACE || sc == SDL_SCANCODE_DELETE) { h->settings.menu_key = SV_KEY_ESCAPE; sv_host_toast(h, "Menu key restored to Esc"); }
     else {
-      if (sc == SDL_SCANCODE_F10 || sc == SDL_SCANCODE_F11 || sc == SDL_SCANCODE_F12) { sv_host_toast(h, "That key is a host hotkey"); h->listen.kind = SV_LISTEN_NONE; return; }
+      if (sc == SDL_SCANCODE_F3 || sc == SDL_SCANCODE_F10 || sc == SDL_SCANCODE_F11 || sc == SDL_SCANCODE_F12) { sv_host_toast(h, "That key is a host hotkey"); h->listen.kind = SV_LISTEN_NONE; return; }
       h->settings.menu_key = sc;
       for (sys = 0; sys < SV_SYSTEM_COUNT; ++sys)
         for (p = 0; p < SV_PLAYERS; ++p)
@@ -642,6 +646,7 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
     case I_PRESET: sv_apply_crt_preset(v, (SvCrtPreset)ev.value); sv_host_toast(h, sv_crt_preset_name(v->preset)); break;
     case I_VSYNC: v->vsync = ev.value; sv_host_apply_video(h); break;
     case I_FPS: v->show_fps = ev.value; break;
+    case I_PERF: v->perf_overlay = ev.value; break;
     case I_SCANLINES: v->scanlines = ev.value; reclassify_preset(v); break;
     case I_MASK: v->mask = ev.value; reclassify_preset(v); break;
     case I_CURVE: v->curvature = ev.value; reclassify_preset(v); break;

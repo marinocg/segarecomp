@@ -119,6 +119,10 @@ void sv_host_apply_settings(SvHost *host, const SvSettings *settings);
 void sv_host_set_loop_hook(SvHost *host, int (*hook)(void *ctx, SvHost *host, int iteration), void *ctx);
 /* Test/automation seams. */
 const char *sv_host_renderer_name(const SvHost *host);
+/* SEG-125 (ADR 0273): attaches the console adapter's performance collector (sv_perf.h). The host times its present call and texture upload into it
+ * and draws the optional performance overlay from it; it never changes what is presented. NULL detaches. */
+struct SvPerf;
+void sv_host_set_perf(SvHost *host, struct SvPerf *perf);
 /* The drawn rectangle (x, y, w, h) of the Video page's preset button `index` (0..3); returns 0 when that page is not on screen. */
 int sv_host_ui_preset_rect(const SvHost *host, int index, int rect[4]);
 /* The whole-number UI scale used for an output of this size in pixels (text is 13 px * scale). */

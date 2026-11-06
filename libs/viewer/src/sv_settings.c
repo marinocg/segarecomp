@@ -104,6 +104,7 @@ void sv_settings_sanitize(SvSettings *s) {
   v->brightness = clampi(v->brightness, 50, 150);
   v->vsync = v->vsync != 0;
   v->show_fps = v->show_fps != 0;
+  v->perf_overlay = clampi(v->perf_overlay, 0, 2);
   v->window_w = (v->window_w >= 160 && v->window_w <= 16384) ? v->window_w : 0;
   v->window_h = (v->window_h >= 120 && v->window_h <= 16384) ? v->window_h : 0;
   s->audio.volume = clampi(s->audio.volume, 0, 100);
@@ -191,6 +192,7 @@ static int apply_pair(SvSettings *s, const char *key, const char *value) {
   else if (strcmp(key, "video.brightness") == 0) s->video.brightness = v;
   else if (strcmp(key, "video.vsync") == 0) s->video.vsync = v;
   else if (strcmp(key, "video.show_fps") == 0) s->video.show_fps = v;
+  else if (strcmp(key, "video.perf_overlay") == 0) s->video.perf_overlay = v;
   else if (strcmp(key, "video.window_w") == 0) s->video.window_w = v;
   else if (strcmp(key, "video.window_h") == 0) s->video.window_h = v;
   else if (strcmp(key, "audio.volume") == 0) s->audio.volume = v;
@@ -234,6 +236,7 @@ size_t sv_settings_format(const SvSettings *s, char *out, size_t cap) {
        s->video.fullscreen, (int)s->video.scale, (int)s->video.aspect, (int)s->video.preset, s->video.scanlines, s->video.mask, s->video.curvature);
   EMIT("video.bloom=%d\nvideo.brightness=%d\nvideo.vsync=%d\nvideo.show_fps=%d\nvideo.window_w=%d\nvideo.window_h=%d\n", s->video.bloom, s->video.brightness,
        s->video.vsync, s->video.show_fps, s->video.window_w, s->video.window_h);
+  if (s->video.perf_overlay != 0) EMIT("video.perf_overlay=%d\n", s->video.perf_overlay);   /* SEG-125: written only when on, so existing settings files are byte-identical */
   EMIT("video.widescreen=%s\n", widescreen_keys[(unsigned)s->video.widescreen < SV_WIDESCREEN_COUNT ? s->video.widescreen : SV_WIDESCREEN_ORIGINAL]);
   EMIT("video.widescreen_side_style=%s\n", side_style_keys[(unsigned)s->video.widescreen_side_style < SV_SIDE_COUNT ? s->video.widescreen_side_style : SV_SIDE_COMFORT]);
   EMIT("video.widescreen_width=%d\n", s->video.widescreen_width);

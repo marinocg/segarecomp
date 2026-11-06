@@ -16,11 +16,20 @@
  * summary. The capture only observes already-current VDP state and applies a host pad mask between runner slices; the sound devices,
  * the mixer and the SOUND_SUMMARY below are exactly those of the capture-free run.
  */
+#if !defined(_WIN32)
+#define _POSIX_C_SOURCE 200809L /* clock_gettime for the optional performance clock (SEG-125) */
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <time.h>
+#endif
 
 #include "frame_capture.h"
+#include "sv_perf.h"
 #include "genesis_sound.h"
 
 #define C(x) (unsigned long long)(x)
@@ -67,8 +76,101 @@ static void hex(const uint8_t digest[32], char out[65]) {
   out[64] = '\0';
 }
 
+/* ---- SEG-125 (ADR 0273): the opt-in headless performance session. SEGARECOMP_PERF_REPORT=<file> runs the SAME runner in bounded slices (the re-entrant
+ * contract the viewer uses) and reads the host clock once per slice; SEGARECOMP_PERF_MODE=summary|detailed, SEGARECOMP_PERF_PRIVACY=private|shareable and
+ * SEGARECOMP_PERF_SLICE=<dispatches> are optional. The guest sees nothing of it: no host time flows into the machine, and the sound summary, digests and stop
+ * class are those of the unprofiled run (verified by tests/perf_equivalence_test.py). Without the variable none of this code runs. ---- */
+static uint64_t perf_clock(void) {
+#if defined(_WIN32)
+  LARGE_INTEGER counter, frequency;
+  QueryPerformanceCounter(&counter);
+  QueryPerformanceFrequency(&frequency);
+  return (uint64_t)((double)counter.QuadPart * 1.0e9 / (double)frequency.QuadPart) + 1U;
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec + 1U; /* never 0: 0 means "span not started" */
+#endif
+}
+
+static void perf_write(const SvPerf *perf, const char *path, const char *status, const char *outcome, const char *privacy, uint64_t slice, const GenesisRuntime *runtime,
+                       uint64_t dispatches, uint64_t slices) {
+  SvPerfMeta meta;
+  SvPerf copy = *perf;
+  FILE *f;
+  const GenesisMixer *mixer = genesis_sound_mixer();
+  memset(&meta, 0, sizeof meta);
+  meta.platform = "genesis";
+  meta.entry = "headless";
+  meta.status = status;
+  meta.outcome = outcome;
+  meta.privacy = privacy;
+  meta.paced = 0;
+  meta.slice_dispatches = slice;
+  copy.counters[0] = dispatches;
+  copy.counters[1] = slices;
+  copy.counters[2] = runtime->z80_epoch.epoch_count;
+  copy.counters[3] = mixer != NULL ? mixer->frames : 0U;
+  copy.guest_master_ticks = runtime->scheduler.master_ticks;
+  meta.counter_names[0] = "m68k_dispatches";
+  meta.counter_names[1] = "runner_slices";
+  meta.counter_names[2] = "z80_epochs";
+  meta.counter_names[3] = "audio_frames";
+  meta.unavailable[0][0] = "m68k_time"; meta.unavailable[0][1] = "aggregated in emulation: timing it would need a clock read per instruction";
+  meta.unavailable[1][0] = "z80_time"; meta.unavailable[1][1] = "aggregated in emulation: the Z80 is synchronized inside M68K retirement";
+  meta.unavailable[2][0] = "vdp_compose"; meta.unavailable[2][1] = "headless runs do not compose frames unless capture is requested";
+  meta.unavailable[3][0] = "present"; meta.unavailable[3][1] = "headless: there is no presentation";
+  meta.unavailable[4][0] = "dma_interrupt_counts"; meta.unavailable[4][1] = "no existing inexpensive counter";
+  f = fopen(path, "wb");
+  if (f == NULL) { fprintf(stderr, "perf: cannot write the performance report\n"); return; }
+  sv_perf_write_json(&copy, &meta, f);
+  if (fclose(f) != 0) fprintf(stderr, "perf: the performance report could not be written completely\n");
+}
+
+static GenesisControlTransfer run_profiled(GenesisRuntime *runtime, GenesisDispatchFunction dispatch, uint32_t dispatch_allowance, const char *path) {
+  static SvPerf perf; /* ~100 KiB: static, never on the stack */
+  const char *mode = getenv("SEGARECOMP_PERF_MODE"), *privacy = getenv("SEGARECOMP_PERF_PRIVACY"), *slice_text = getenv("SEGARECOMP_PERF_SLICE");
+  uint64_t slice_size = 4096U, total, dispatches = 0U, slices = 0U, last_vf;
+  GenesisControlTransfer t;
+  if ((mode != NULL && strcmp(mode, "summary") != 0 && strcmp(mode, "detailed") != 0) || (privacy != NULL && strcmp(privacy, "private") != 0 && strcmp(privacy, "shareable") != 0) ||
+      (slice_text != NULL && (!parse_u64(slice_text, strlen(slice_text), &slice_size) || slice_size == 0U || slice_size > UINT32_MAX))) {
+    fprintf(stderr, "perf: malformed SEGARECOMP_PERF_MODE / SEGARECOMP_PERF_PRIVACY / SEGARECOMP_PERF_SLICE\n");
+    exit(3);
+  }
+  if (privacy == NULL) privacy = "private";
+  sv_perf_init(&perf, perf_clock, 16683333U /* NTSC frame, a documented constant (3420 * 262 master ticks at 53.693175 MHz); PAL runs are compared per console */,
+               mode != NULL && strcmp(mode, "detailed") == 0);
+  sv_perf_enable(&perf);
+  perf_write(&perf, path, "incomplete", "running", privacy, slice_size, runtime, 0U, 0U); /* a killed session still leaves a marked report */
+  total = dispatch_allowance == UINT32_MAX ? UINT64_MAX : dispatch_allowance;
+  last_vf = runtime->virtual_frame_count;
+  for (;;) {
+    const uint64_t remaining = total - dispatches;
+    const uint32_t slice = remaining < slice_size ? (uint32_t)remaining : (uint32_t)slice_size;
+    const uint64_t t0 = sv_perf_span_begin(&perf);
+    uint64_t crossed;
+    if (remaining == 0U) { memset(&t, 0, sizeof t); t.kind = GENESIS_RUNNER_RESOURCE_LIMIT; t.next_pc = runtime->pc; break; }
+    t = genesis_runtime_run(runtime, dispatch, slice);
+    sv_perf_span_end(&perf, SV_SPAN_EMULATION, t0);
+    ++slices;
+    dispatches += t.kind == GENESIS_RUNNER_RESOURCE_LIMIT ? t.runner_dispatch_count : 1U;
+    crossed = runtime->virtual_frame_count - last_vf;
+    last_vf = runtime->virtual_frame_count;
+    sv_perf_frames(&perf, runtime->virtual_frame_count, crossed, 0);
+    if (t.kind != GENESIS_RUNNER_RESOURCE_LIMIT) break;
+  }
+  sv_perf_finish(&perf);
+  {
+    const char *outcome = t.kind == GENESIS_STOP ? "guest_stop" : (t.kind == GENESIS_COMPLETE ? "guest_complete" : "runner_resource_limit");
+    perf_write(&perf, path, t.kind == GENESIS_STOP ? "incomplete" : "complete", outcome, privacy, slice_size, runtime, dispatches, slices);
+  }
+  if (t.kind == GENESIS_RUNNER_RESOURCE_LIMIT) t.runner_dispatch_count = (uint32_t)(dispatches >= UINT32_MAX ? UINT32_MAX - 1U : dispatches); /* UINT32_MAX is reserved: "allowance exhausted" */
+  return t;
+}
+
 GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch, uint32_t dispatch_allowance) {
   GenesisControlTransfer transfer;
+  const char *perf_path = getenv("SEGARECOMP_PERF_REPORT");
   const GenesisZ80Machine *machine = genesis_sound_attach(runtime);
   GenesisMixer *mixer = genesis_sound_mixer();
   const char *pcm_path = getenv("SEGARECOMP_AUDIO_PCM_OUT");
@@ -90,8 +192,13 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
       genesis_mixer_set_sink(mixer, pcm_sink, &g_pcm);
     }
   }
+  if (perf_path != NULL && *perf_path != '\0' && genesis_frame_capture_requested()) {
+    fprintf(stderr, "perf: a frame-capture run is not measured; no performance report is written\n");
+    perf_path = NULL;
+  }
   transfer = genesis_frame_capture_requested() ? genesis_frame_capture_run_from_environment(runtime, dispatch, dispatch_allowance)
-                                               : genesis_runtime_run(runtime, dispatch, dispatch_allowance);
+             : (perf_path != NULL && *perf_path != '\0') ? run_profiled(runtime, dispatch, dispatch_allowance, perf_path)
+                                                          : genesis_runtime_run(runtime, dispatch, dispatch_allowance);
   genesis_sound_finish(runtime, transfer.kind == GENESIS_STOP);
   if (g_pcm.file != NULL && fflush(g_pcm.file) != 0) ++g_pcm.write_errors;
   /* Opt-in aggregate counters (counts only: never a byte, address or identity). */

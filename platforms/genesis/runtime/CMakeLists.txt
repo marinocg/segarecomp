@@ -41,6 +41,6 @@ add_library(segarecomp_runtime_genesis_materialize_hook OBJECT genesis_materiali
 foreach(_t segarecomp_runtime_genesis_sound segarecomp_runtime_genesis_materialize_hook)
   set_target_properties(${_t} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
   target_include_directories(${_t} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../viewer ${PROJECT_SOURCE_DIR}/libs/codegen/c11/include
-    ${PROJECT_SOURCE_DIR}/libs/device/sega/psg/include ${PROJECT_SOURCE_DIR}/libs/device/sega/ym2612/include)
+    ${PROJECT_SOURCE_DIR}/libs/device/sega/psg/include ${PROJECT_SOURCE_DIR}/libs/device/sega/ym2612/include ${PROJECT_SOURCE_DIR}/libs/viewer/include)
   segarecomp_enable_warnings(${_t})
 endforeach()

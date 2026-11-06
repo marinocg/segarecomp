@@ -856,7 +856,8 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   build.c_base.insert(build.c_base.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", opt, "-I", build.runtime.string(),
                                            "-I", build.viewer.string(),
                                            "-I", (build.root / "libs" / "codegen" / "c11" / "include").string(),
-                                           "-I", (build.psg / "include").string(), "-I", (build.ym / "include").string()});
+                                           "-I", (build.psg / "include").string(), "-I", (build.ym / "include").string(),
+                                           "-I", (build.root / "libs" / "viewer" / "include").string()});   // SEG-125: the header-only performance collector (sv_perf.h), used by the headless hook too
   if (build.play)
     build.c_base.insert(build.c_base.end(), {"-I", build.viewer.string(), "-I", (build.root / "libs" / "viewer" / "include").string(), "-I",
                                              (build.root / "libs" / "viewer" / "src").string(), "-I", options.sdl3_include->string()});

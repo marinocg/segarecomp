@@ -254,6 +254,12 @@ target_include_directories(genesis_viewer_tests PRIVATE ${PROJECT_SOURCE_DIR}/pl
 target_link_libraries(genesis_viewer_tests PRIVATE segarecomp::runtime_genesis)
 segarecomp_enable_warnings(genesis_viewer_tests)
 add_test(NAME genesis_viewer_tests COMMAND genesis_viewer_tests)
+# SEG-125 (ADR 0273): the header-only runtime performance collector with a fake clock (percentiles, bounded history, idle = no clock reads, report shape).
+add_executable(sv_perf_test sv_perf_test.c)
+target_include_directories(sv_perf_test PRIVATE ${PROJECT_SOURCE_DIR}/libs/viewer/include)
+set_target_properties(sv_perf_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+segarecomp_enable_warnings(sv_perf_test)
+add_test(NAME sv_perf_test COMMAND sv_perf_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME genesis_viewer_generated_integration_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_viewer_generated_integration_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
@@ -1016,7 +1022,7 @@ set(SEGARECOMP_EXTENDED_TESTS ghidra_mcp_smoke_test
 set(SEGARECOMP_FAST_TESTS segarecomp_tests segarecomp_build_command_test moveq_tests direct_flow_tests m68k_timing_tests m68k_dynamic_timing_tests
     genesis_runtime_run_tests genesis_vdp_render_frame_tests genesis_raster_display_modes_tests genesis_hint_region_controller_tests genesis_frame_export_tests
     m68k_frontend_rejection_tests genesis_general_startup_cli_test architecture_dependency_test
-    codegen_c11_emitter_ownership_test codegen_c11_translation_units_tests codegen_c11_shard_selection_tests restricted_files_test genesis_viewer_tests
+    codegen_c11_emitter_ownership_test codegen_c11_translation_units_tests codegen_c11_shard_selection_tests restricted_files_test genesis_viewer_tests sv_perf_test
     cpu_m68k_static_discovery_tests genesis_startup_runtime_c2_test recompiler_fake_cpu_tests recompiler_no_genesis_policy_dependency_test
     genesis_bridge_defaults_test m68k_exception_contract_doc_test
     genesis_execution_coverage_tests reachability_challenger_tests reachability_pc_index_recovery_tests)
