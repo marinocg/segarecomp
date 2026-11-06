@@ -15,8 +15,14 @@
 #include <string.h>
 
 #define SV_PERF_SCHEMA_VERSION 1
-#define SV_PERF_BUCKET_NS 50000U      /* 50 us resolution of the frame-time histograms */
-#define SV_PERF_BUCKETS 1281U         /* 0 .. 64 ms in 50 us steps, the last bucket is "64 ms or more" */
+/* Frame-time histogram (fixed memory, no sample storage): 1280 linear buckets of 50 us cover 0..64 ms (a percentile there is within one bucket, <= 50 us above the true value);
+ * 28 tail buckets, 4 per octave (ratio 2^(1/4)), cover 64 ms..8.192 s (a percentile there is at most 19% above the true value); the last bucket holds everything >= 8.192 s,
+ * where a percentile is reported as the exact observed maximum. Bucket counters are 64-bit and cannot saturate in practice (2^64 samples); min, max, sum and count are exact. */
+#define SV_PERF_BUCKET_NS 50000U
+#define SV_PERF_LIN_BUCKETS 1280U
+#define SV_PERF_TAIL_BUCKETS 28U
+#define SV_PERF_BUCKETS (SV_PERF_LIN_BUCKETS + SV_PERF_TAIL_BUCKETS + 1U)
+#define SV_PERF_RANGE_NS 8192000000ULL /* the largest duration with its own bucket */
 #define SV_PERF_HISTORY 1024U         /* fixed-size recent-frame history (power of two) */
 #define SV_PERF_COUNTERS 16U
 
@@ -39,16 +45,21 @@ typedef struct SvPerfSpan {
 } SvPerfSpan;
 
 typedef struct SvPerfHistogram {
-  uint32_t bucket[SV_PERF_BUCKETS];
+  uint64_t bucket[SV_PERF_BUCKETS];
   uint64_t count, sum_ns, min_ns, max_ns;
 } SvPerfHistogram;
 
+/* One OBSERVATION: the wall time between two observed points of the loop. `frames` == 1 and `partial` == 0: exactly one virtual frame, the interval is that frame's measured
+ * time. Otherwise the observation covered `frames` virtual frames (a slice crossed several boundaries) or started inside a frame (profiling switched on mid-frame): `interval_us` is the
+ * whole observed wall time and no per-frame time is claimed - a consumer may show interval/frames as an average, labelled as such. */
 typedef struct SvPerfFrame {
-  uint64_t frame;       /* virtual frame ordinal at the boundary */
-  uint32_t interval_us; /* wall time since the previous boundary (saturating) */
+  uint64_t frame;       /* virtual frame ordinal at the end of the observation */
+  uint32_t interval_us; /* wall time of the whole observation (saturating) */
   uint32_t work_us;     /* interval minus pacing wait */
   uint32_t emulation_us, present_us;
-  uint8_t missed;       /* the pacer did not wait: the deadline had already passed */
+  uint32_t frames;      /* virtual frames covered */
+  uint32_t missed;      /* of those frames, boundaries whose pacer wait did not sleep (deadline already past); settled when the pacer has run */
+  uint32_t partial;     /* 1: began inside a frame, so not an exact frame time even if frames == 1 */
 } SvPerfFrame;
 
 typedef struct SvPerf {
@@ -57,7 +68,14 @@ typedef struct SvPerf {
   SvPerfClock now;
   uint64_t target_period_ns; /* the console's native frame period at 1.0x (documented constant, not measured) */
   uint64_t start_ns, last_boundary_ns, end_ns;
-  uint64_t virtual_frames, frames_presented, coalesced_frames, missed_deadlines, resyncs, pacing_waits;
+  uint64_t virtual_frames, frames_presented, missed_deadlines, resyncs, pacing_waits;
+  uint64_t estimated_frames;   /* virtual frames inside multi-frame/partial observations: counted, but not individually timed (not in the histograms) */
+  uint64_t est_observations, est_wall_ns, est_max_wall_ns;
+  /* observation state (a window starts when the collector becomes active; time while inactive is never attributed) */
+  int observing;
+  uint64_t vf_last;            /* virtual frame count at the end of the previous observation */
+  int partial_next;            /* the window began inside a frame: the first boundary is not an exact frame time */
+  uint64_t pending_frames, sleep_mark; /* boundaries whose pacer verdict is still to be settled; the pacer's sleep count when they were crossed */
   uint64_t paused_ns, pauses;  /* time spent in the pause menu: not part of any frame interval */
   int pinned;                  /* 1 = a report was requested: stays active; 0 = active only while the overlay is shown */
   uint64_t guest_master_ticks; /* deterministic guest time; reported separately from every host duration */
@@ -66,7 +84,7 @@ typedef struct SvPerf {
   SvPerfSpan span[SV_SPAN_COUNT];
   uint64_t frame_pacing_ns, frame_emulation_ns, frame_present_ns; /* accumulated since the last boundary */
   SvPerfFrame history[SV_PERF_HISTORY];
-  uint64_t history_total; /* frames ever recorded; the ring holds the last SV_PERF_HISTORY */
+  uint64_t history_total; /* observations ever recorded; the ring holds the last SV_PERF_HISTORY */
 } SvPerf;
 
 static const char *const sv_perf_span_names[SV_SPAN_COUNT] = {"emulation", "vdp_compose", "rgb_convert", "texture_upload", "present", "audio_present", "pacing_wait"};
@@ -78,28 +96,29 @@ static inline void sv_perf_hist_reset(SvPerfHistogram *h) {
   h->min_ns = UINT64_MAX;
 }
 
-/* `n` identical samples in O(1) (a slice that crossed several frame boundaries shares one interval among them). Bucket counters saturate instead of wrapping. */
-static inline void sv_perf_hist_add_n(SvPerfHistogram *h, uint64_t ns, uint64_t n) {
-  uint64_t b = ns / SV_PERF_BUCKET_NS;
-  if (b >= SV_PERF_BUCKETS) b = SV_PERF_BUCKETS - 1U;
-  h->bucket[b] = (uint64_t)h->bucket[b] + n > UINT32_MAX ? UINT32_MAX : (uint32_t)(h->bucket[b] + n);
-  h->count += n;
-  h->sum_ns += ns * n;
-  if (ns < h->min_ns) h->min_ns = ns;
-  if (ns > h->max_ns) h->max_ns = ns;
+static const uint64_t sv_perf_tail_edge[SV_PERF_TAIL_BUCKETS + 1U] = {
+    64000000ULL,   76109255ULL,   90509668ULL,   107634741ULL,  128000000ULL,  152218511ULL,  181019336ULL,  215269482ULL,  256000000ULL,  304437021ULL,
+    362038672ULL,  430538965ULL,  512000000ULL,  608874043ULL,  724077344ULL,  861077929ULL,  1024000000ULL, 1217748086ULL, 1448154688ULL, 1722155858ULL,
+    2048000000ULL, 2435496172ULL, 2896309376ULL, 3444311717ULL, 4096000000ULL, 4870992343ULL, 5792618751ULL, 6888623434ULL, 8192000000ULL};
+
+static inline uint32_t sv_perf_bucket_of(uint64_t ns) {
+  uint32_t j;
+  if (ns < (uint64_t)SV_PERF_LIN_BUCKETS * SV_PERF_BUCKET_NS) return (uint32_t)(ns / SV_PERF_BUCKET_NS);
+  for (j = 0U; j < SV_PERF_TAIL_BUCKETS; ++j)
+    if (ns < sv_perf_tail_edge[j + 1U]) return SV_PERF_LIN_BUCKETS + j;
+  return SV_PERF_BUCKETS - 1U;
 }
 
 static inline void sv_perf_hist_add(SvPerfHistogram *h, uint64_t ns) {
-  uint64_t b = ns / SV_PERF_BUCKET_NS;
-  if (b >= SV_PERF_BUCKETS) b = SV_PERF_BUCKETS - 1U;
-  ++h->bucket[b];
+  ++h->bucket[sv_perf_bucket_of(ns)];
   ++h->count;
   h->sum_ns += ns;
   if (ns < h->min_ns) h->min_ns = ns;
   if (ns > h->max_ns) h->max_ns = ns;
 }
 
-/* The smallest value v (upper edge of a bucket, clamped to the observed max) such that at least ceil(q * count) samples are <= v. q in (0,1]. */
+/* The upper edge of the bucket holding the ceil(q * count)-th smallest sample, clamped to the observed [min, max]: never below the true value, at most one bucket above it
+ * (<= 50 us below 64 ms, <= 19% in the tail); in the overflow bucket (>= 8.192 s) the exact maximum. q in (0,1]. */
 static inline uint64_t sv_perf_hist_percentile(const SvPerfHistogram *h, double q) {
   uint64_t need, seen = 0U, v;
   uint32_t i;
@@ -111,7 +130,9 @@ static inline uint64_t sv_perf_hist_percentile(const SvPerfHistogram *h, double 
     seen += h->bucket[i];
     if (seen >= need) break;
   }
-  v = i >= SV_PERF_BUCKETS - 1U ? h->max_ns : ((uint64_t)i + 1U) * SV_PERF_BUCKET_NS; /* the overflow bucket has no upper edge: report the exact max */
+  if (i < SV_PERF_LIN_BUCKETS) v = ((uint64_t)i + 1U) * SV_PERF_BUCKET_NS;
+  else if (i < SV_PERF_BUCKETS - 1U) v = sv_perf_tail_edge[i - SV_PERF_LIN_BUCKETS + 1U];
+  else v = h->max_ns;
   if (v > h->max_ns) v = h->max_ns;
   if (v < h->min_ns) v = h->min_ns;
   return v;
@@ -151,31 +172,74 @@ static inline void sv_perf_span_end(SvPerf *p, SvPerfSpanId id, uint64_t began) 
 
 static inline uint32_t sv_perf_us(uint64_t ns) { return ns / 1000U > UINT32_MAX ? UINT32_MAX : (uint32_t)(ns / 1000U); }
 
-/* `crossed` (>0) virtual-frame boundaries were crossed since the last call (a slice can cross several: the interval is shared evenly and
- * the extra frames are counted as coalesced). `missed` = the pacer had no time to wait for the deadline of the last frame. */
-static inline void sv_perf_frames(SvPerf *p, uint64_t virtual_frame, uint64_t crossed, int missed) {
-  uint64_t t, interval, work, per, per_work;
-  if (!p->active || crossed == 0U) return;
+/* ---- observation API: one begin/end pair per guest slice (Genesis) or one end per poll (Master System, Sega CD) --------------------------------------------------------
+ * begin: establishes the window's baseline BEFORE the guest runs (first call after the collector became active, so the first slice is counted and nothing that happened while it
+ *        was inactive is attributed). A window that starts while the guest already has frames behind it begins inside a frame: its first boundary is not an exact frame time.
+ * end:   the guest advanced to virtual frame `vf_now`. No boundary crossed: nothing is recorded (emulation/present time keeps accumulating toward the next boundary). One boundary
+ *        crossed (and the window did not start mid-frame): an exact frame time goes into the histograms. Several crossed, or a partial first frame: the observation is recorded
+ *        ONCE, the frames are counted as `estimated`, and no per-frame time is claimed or put in a histogram.
+ * pace_settle: called after the pacer has run for the boundaries of the previous observation (the start of the next one, and the end of the session): each of those boundaries
+ *        whose pacer wait did not sleep (`sleep_calls` unchanged) missed its deadline. The pacer's decisions are only observed, never influenced. */
+static inline void sv_perf_observe_begin(SvPerf *p, uint64_t vf_now) {
+  if (!p->active) { p->observing = 0; return; }
+  if (p->observing) return;
+  p->observing = 1;
+  p->vf_last = vf_now;
+  p->partial_next = vf_now != 0U;
+  p->pending_frames = 0U;
+  p->last_boundary_ns = p->now();   /* start_ns belongs to sv_perf_start / sv_perf_enable (the session), not to each window */
+  p->frame_pacing_ns = p->frame_emulation_ns = p->frame_present_ns = 0U;
+}
+
+static inline void sv_perf_pace_settle(SvPerf *p, uint64_t sleep_calls, int unthrottled) {
+  if (!p->active || !p->observing || p->pending_frames == 0U) return;
+  if (!unthrottled) {
+    const uint64_t slept = sleep_calls - p->sleep_mark;
+    const uint64_t missed = p->pending_frames > slept ? p->pending_frames - slept : 0U;
+    if (missed != 0U && p->history_total != 0U) {
+      SvPerfFrame *f = &p->history[(p->history_total - 1U) % SV_PERF_HISTORY];
+      f->missed = missed > UINT32_MAX ? UINT32_MAX : (uint32_t)missed;
+    }
+    p->missed_deadlines += missed;
+  }
+  p->pending_frames = 0U;
+}
+
+static inline void sv_perf_observe_end(SvPerf *p, uint64_t vf_now, uint64_t sleep_calls) {
+  uint64_t t, interval, work, crossed;
+  int exact;
+  SvPerfFrame *f;
+  if (!p->active) { p->observing = 0; return; }
+  if (!p->observing || vf_now <= p->vf_last) return;
+  crossed = vf_now - p->vf_last;
+  p->vf_last = vf_now;
   t = p->now();
   interval = t > p->last_boundary_ns ? t - p->last_boundary_ns : 0U;
   work = interval > p->frame_pacing_ns ? interval - p->frame_pacing_ns : 0U;
-  per = interval / crossed;
-  per_work = work / crossed;
-  sv_perf_hist_add_n(&p->interval, per, crossed);
-  sv_perf_hist_add_n(&p->work, per_work, crossed);
+  exact = crossed == 1U && !p->partial_next;
+  p->partial_next = 0;
   p->virtual_frames += crossed;
-  if (crossed > 1U) p->coalesced_frames += crossed - 1U;
-  if (missed) ++p->missed_deadlines;
-  { /* the fixed-size history is always kept (the live overlay reads it); only the report decides whether it is exported */
-    SvPerfFrame *f = &p->history[p->history_total % SV_PERF_HISTORY];
-    f->frame = virtual_frame;
-    f->interval_us = sv_perf_us(interval);
-    f->work_us = sv_perf_us(work);
-    f->emulation_us = sv_perf_us(p->frame_emulation_ns);
-    f->present_us = sv_perf_us(p->frame_present_ns);
-    f->missed = missed ? 1U : 0U;
-    ++p->history_total;
+  if (exact) {
+    sv_perf_hist_add(&p->interval, interval);
+    sv_perf_hist_add(&p->work, work);
+  } else {
+    p->estimated_frames += crossed;
+    ++p->est_observations;
+    p->est_wall_ns += interval;
+    if (interval > p->est_max_wall_ns) p->est_max_wall_ns = interval;
   }
+  f = &p->history[p->history_total % SV_PERF_HISTORY]; /* the fixed-size history is always kept (the overlay reads it); only the report decides whether it is exported */
+  f->frame = vf_now;
+  f->interval_us = sv_perf_us(interval);
+  f->work_us = sv_perf_us(work);
+  f->emulation_us = sv_perf_us(p->frame_emulation_ns);
+  f->present_us = sv_perf_us(p->frame_present_ns);
+  f->frames = crossed > UINT32_MAX ? UINT32_MAX : (uint32_t)crossed;
+  f->missed = 0U;
+  f->partial = exact ? 0U : (crossed == 1U ? 1U : 0U);
+  ++p->history_total;
+  p->pending_frames = crossed;
+  p->sleep_mark = sleep_calls;
   p->last_boundary_ns = t;
   p->frame_pacing_ns = p->frame_emulation_ns = p->frame_present_ns = 0U;
 }
@@ -188,6 +252,7 @@ static inline void sv_perf_resync(SvPerf *p, uint64_t paused_from) {
   p->paused_ns += t - paused_from;
   ++p->pauses;
   p->last_boundary_ns = t;
+  p->partial_next = 1; /* the frame in progress was interrupted: the next boundary is not an exact frame time */
   p->frame_pacing_ns = p->frame_emulation_ns = p->frame_present_ns = 0U;
 }
 
@@ -200,18 +265,6 @@ static inline void sv_perf_enable(SvPerf *p) {
 
 static inline void sv_perf_finish(SvPerf *p) {
   if (p->active) p->end_ns = p->now();
-}
-
-/* Recent window for a live view (the overlay): average interval of the last `n` recorded frames, in ns; 0 without detail history. */
-static inline uint64_t sv_perf_recent_interval_ns(const SvPerf *p, uint32_t n) {
-  uint64_t sum = 0U, got = 0U, k;
-  if (p->history_total == 0U) return 0U;
-  if (n > SV_PERF_HISTORY) n = SV_PERF_HISTORY;
-  for (k = 0U; k < n && k < p->history_total; ++k) {
-    sum += (uint64_t)p->history[(p->history_total - 1U - k) % SV_PERF_HISTORY].interval_us * 1000U;
-    ++got;
-  }
-  return got == 0U ? 0U : sum / got;
 }
 
 /* ---- request from the environment (shared by every console adapter) ------------------------------------------------------------------------ */
@@ -252,10 +305,10 @@ typedef struct SvPerfMeta {
 } SvPerfMeta;
 
 static inline void sv_perf_json_hist(FILE *f, const char *name, const SvPerfHistogram *h) {
-  fprintf(f, "\"%s\":{\"count\":%llu,\"min_ns\":%llu,\"avg_ns\":%llu,\"p50_ns\":%llu,\"p95_ns\":%llu,\"p99_ns\":%llu,\"max_ns\":%llu,\"resolution_ns\":%u}", name,
+  fprintf(f, "\"%s\":{\"count\":%llu,\"min_ns\":%llu,\"avg_ns\":%llu,\"p50_ns\":%llu,\"p95_ns\":%llu,\"p99_ns\":%llu,\"max_ns\":%llu,\"resolution_ns\":%u,\"range_ns\":%llu}", name,
           (unsigned long long)h->count, (unsigned long long)(h->count ? h->min_ns : 0U), (unsigned long long)(h->count ? h->sum_ns / h->count : 0U),
           (unsigned long long)sv_perf_hist_percentile(h, 0.50), (unsigned long long)sv_perf_hist_percentile(h, 0.95),
-          (unsigned long long)sv_perf_hist_percentile(h, 0.99), (unsigned long long)h->max_ns, SV_PERF_BUCKET_NS);
+          (unsigned long long)sv_perf_hist_percentile(h, 0.99), (unsigned long long)h->max_ns, SV_PERF_BUCKET_NS, (unsigned long long)SV_PERF_RANGE_NS);
 }
 
 /* Writes one versioned report document. The runtime section only: no path, no title, no address, no ROM identity (ADR 0273). */
@@ -280,8 +333,10 @@ static inline void sv_perf_write_json(const SvPerf *p, const SvPerfMeta *m, FILE
   );
   fprintf(f, "\"runtime\":{\"outcome\":\"%s\",\"wall_ns\":%llu,\"paused_ns\":%llu,\"pauses\":%llu,", m->outcome,
           (unsigned long long)(p->end_ns > p->start_ns ? p->end_ns - p->start_ns : 0U), (unsigned long long)p->paused_ns, (unsigned long long)p->pauses);
-  fprintf(f, "\"frames\":{\"virtual\":%llu,\"presented\":%llu,\"coalesced\":%llu},", (unsigned long long)p->virtual_frames, (unsigned long long)p->frames_presented,
-          (unsigned long long)p->coalesced_frames);
+  /* frames.estimated: virtual frames inside multi-frame or partial observations - counted, never individually timed, absent from the histograms (virtual = histogram count + estimated). */
+  fprintf(f, "\"frames\":{\"virtual\":%llu,\"presented\":%llu,\"estimated\":%llu},\"estimated_observations\":{\"count\":%llu,\"wall_ns\":%llu,\"max_wall_ns\":%llu},",
+          (unsigned long long)p->virtual_frames, (unsigned long long)p->frames_presented, (unsigned long long)p->estimated_frames, (unsigned long long)p->est_observations,
+          (unsigned long long)p->est_wall_ns, (unsigned long long)p->est_max_wall_ns);
   sv_perf_json_hist(f, "frame_interval", &p->interval);
   fputc(',', f);
   sv_perf_json_hist(f, "frame_work", &p->work);
@@ -302,9 +357,9 @@ static inline void sv_perf_write_json(const SvPerf *p, const SvPerfMeta *m, FILE
     fprintf(f, ",\"timeline\":{\"capacity\":%u,\"recorded\":%llu,\"dropped_oldest\":%llu,\"frames\":[", SV_PERF_HISTORY, (unsigned long long)n, (unsigned long long)first);
     for (i = 0U; i < n; ++i) {
       const SvPerfFrame *x = &p->history[(first + i) % SV_PERF_HISTORY];
-      fprintf(f, "%s[%llu,%u,%u,%u,%u,%u]", i ? "," : "", (unsigned long long)x->frame, x->interval_us, x->work_us, x->emulation_us, x->present_us, (unsigned)x->missed);
+      fprintf(f, "%s[%llu,%u,%u,%u,%u,%u,%u]", i ? "," : "", (unsigned long long)x->frame, x->interval_us, x->work_us, x->emulation_us, x->present_us, x->frames, x->missed);
     }
-    fputs("],\"columns\":[\"frame\",\"interval_us\",\"work_us\",\"emulation_us\",\"present_us\",\"missed\"]}", f);
+    fputs("],\"columns\":[\"frame\",\"interval_us\",\"work_us\",\"emulation_us\",\"present_us\",\"frames\",\"missed\"],\"note\":\"one row per observation; frames > 1 rows cover several virtual frames and carry no per-frame time\"}", f);
   }
   fputs("},\"unavailable\":[", f);
   for (i = 0U; i < 8U && m->unavailable[i][0] != NULL; ++i)

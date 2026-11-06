@@ -52,11 +52,13 @@ static void set_overlay(SvHost *h, int mode) { SvSettings s = *sv_host_settings(
 static void service(SvHost *h) { SvSample sample; sv_host_service(h, &sample); }
 static void feed(SvPerf *p, int frames) {
   int i;
+  sv_perf_observe_begin(p, 0U);
   for (i = 0; i < frames; ++i) {
     uint64_t t = sv_perf_span_begin(p);
     sv_perf_span_end(p, SV_SPAN_EMULATION, t);
     g_ns += (i % 11 == 10) ? 30000000u : 16000000u; /* one slow frame in eleven */
-    sv_perf_frames(p, (uint64_t)i + 1u, 1, i % 11 == 10);
+    sv_perf_observe_end(p, (uint64_t)i + 1u, 0U);
+    if (i % 11 == 10) { p->missed_deadlines += 1U; p->history[(p->history_total - 1U) % SV_PERF_HISTORY].missed = 1U; }
   }
 }
 
@@ -148,7 +150,7 @@ int main(void) {
     g_ns += 60000000000ULL;
     sv_perf_resync(&perf, t);
     g_ns += 16000000U;
-    sv_perf_frames(&perf, 9999, 1, 0);
+    sv_perf_observe_end(&perf, 9999, 0U);
     CHECK(perf.interval.max_ns <= before + 1000000ULL && perf.paused_ns >= 60000000000ULL, "the pause is excluded from the frame interval");
   }
   SDL_DestroySurface(plain); SDL_DestroySurface(off); SDL_DestroySurface(player); SDL_DestroySurface(dev); SDL_DestroySurface(after_off);

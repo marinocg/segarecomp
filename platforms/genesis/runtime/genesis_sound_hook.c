@@ -128,9 +128,9 @@ static void perf_write(const SvPerf *perf, const char *path, const char *status,
 }
 
 static GenesisControlTransfer run_profiled(GenesisRuntime *runtime, GenesisDispatchFunction dispatch, uint32_t dispatch_allowance, const char *path) {
-  static SvPerf perf; /* ~55 KiB: static, never on the stack */
+  static SvPerf perf; /* ~65 KiB: static, never on the stack */
   const char *mode = getenv("SEGARECOMP_PERF_MODE"), *privacy = getenv("SEGARECOMP_PERF_PRIVACY"), *slice_text = getenv("SEGARECOMP_PERF_SLICE");
-  uint64_t slice_size = 4096U, total, dispatches = 0U, slices = 0U, last_vf;
+  uint64_t slice_size = 4096U, total, dispatches = 0U, slices = 0U;
   GenesisControlTransfer t;
   if ((mode != NULL && strcmp(mode, "summary") != 0 && strcmp(mode, "detailed") != 0) || (privacy != NULL && strcmp(privacy, "private") != 0 && strcmp(privacy, "shareable") != 0) ||
       (slice_text != NULL && (!parse_u64(slice_text, strlen(slice_text), &slice_size) || slice_size == 0U || slice_size > UINT32_MAX))) {
@@ -143,20 +143,18 @@ static GenesisControlTransfer run_profiled(GenesisRuntime *runtime, GenesisDispa
   sv_perf_enable(&perf);
   perf_write(&perf, path, "incomplete", "running", privacy, slice_size, runtime, 0U, 0U); /* a killed session still leaves a marked report */
   total = dispatch_allowance == UINT32_MAX ? UINT64_MAX : dispatch_allowance;
-  last_vf = runtime->virtual_frame_count;
   for (;;) {
     const uint64_t remaining = total - dispatches;
     const uint32_t slice = remaining < slice_size ? (uint32_t)remaining : (uint32_t)slice_size;
-    const uint64_t t0 = sv_perf_span_begin(&perf);
-    uint64_t crossed;
+    uint64_t t0;
     if (remaining == 0U) { memset(&t, 0, sizeof t); t.kind = GENESIS_RUNNER_RESOURCE_LIMIT; t.next_pc = runtime->pc; break; }
+    sv_perf_observe_begin(&perf, runtime->virtual_frame_count); /* before the guest runs: the first slice is counted */
+    t0 = sv_perf_span_begin(&perf);
     t = genesis_runtime_run(runtime, dispatch, slice);
     sv_perf_span_end(&perf, SV_SPAN_EMULATION, t0);
     ++slices;
     dispatches += t.kind == GENESIS_RUNNER_RESOURCE_LIMIT ? t.runner_dispatch_count : 1U;
-    crossed = runtime->virtual_frame_count - last_vf;
-    last_vf = runtime->virtual_frame_count;
-    sv_perf_frames(&perf, runtime->virtual_frame_count, crossed, 0);
+    sv_perf_observe_end(&perf, runtime->virtual_frame_count, 0U); /* free-running: no pacer, so no deadlines */
     if (t.kind != GENESIS_RUNNER_RESOURCE_LIMIT) break;
   }
   sv_perf_finish(&perf);

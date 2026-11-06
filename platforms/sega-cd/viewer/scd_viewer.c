@@ -50,8 +50,8 @@ typedef struct ScdSdlHost {
   SvPerf perf;
   SvPerfRequest perf_request;
   char renderer[48];
-  uint64_t emu_t0, frame, sleep_mark;
-  int seen, target_set;
+  uint64_t emu_t0, frame;
+  int target_set;
 } ScdSdlHost;
 
 static ScdSdlHost g_host;
@@ -62,13 +62,10 @@ static void perf_emulation_done(ScdSdlHost *h) {
   h->emu_t0 = 0U;
 }
 static void perf_boundary(ScdSdlHost *h) {
-  if (!h->perf.active) { h->seen = 0; h->emu_t0 = 0U; return; }
-  if (h->seen) {
-    if (!h->pacer.unthrottled && h->pacer.sleep_calls == h->sleep_mark) ++h->perf.missed_deadlines; /* the pacer found the frame's deadline already passed */
-    sv_perf_frames(&h->perf, ++h->frame, 1U, 0);
-  }
-  h->seen = 1;
-  h->sleep_mark = h->pacer.sleep_calls;
+  if (!h->perf.active) { h->perf.observing = 0; h->emu_t0 = 0U; return; }
+  sv_perf_pace_settle(&h->perf, h->pacer.sleep_calls, h->pacer.unthrottled); /* the previous frame's pacer verdict */
+  if (!h->perf.observing) { h->frame = 0U; sv_perf_observe_begin(&h->perf, 0U); }   /* the window starts at this poll: the next poll is one whole frame later */
+  else sv_perf_observe_end(&h->perf, ++h->frame, h->pacer.sleep_calls);              /* one frame boundary per poll: an exact frame time */
   h->emu_t0 = h->perf.now();
 }
 static void perf_write(ScdSdlHost *h, const char *status, const char *outcome, const ScdLiveSummary *summary) {
@@ -275,6 +272,7 @@ static void sdl_finished(void *ctx, const struct ScdLiveSummary *summary, const 
   char detail[240];
   if (!h->opened) return;
   flush_cdda(h, 1);
+  sv_perf_pace_settle(&h->perf, h->pacer.sleep_calls, h->pacer.unthrottled);
   sv_perf_finish(&h->perf);
   if (h->perf_request.path != NULL) {
     const int stopped = summary->outcome == SCD_LIVE_MACHINE_STOP && summary->result == SCD_RUN_STOPPED;

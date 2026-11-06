@@ -602,28 +602,30 @@ static void draw_perf_overlay(SvHost *h, int out_w, int out_h, int top) {
   const SDL_Color text = {220, 232, 255, 255}, dim = {169, 183, 221, 255}, box = {5, 12, 30, 224}, edge = {35, 62, 120, 255}, light = {77, 103, 167, 255};
   const int u = sv_host_ui_scale(out_w, out_h), lh = sv_ui_line_h(SV_FONT_BODY, u), dev = h->settings.video.perf_overlay == 2;
   uint32_t recent[SV_PERF_GRAPH], sorted[SV_PERF_GRAPH];
-  uint64_t n, k, sum = 0, tgt;
-  unsigned missed = 0;
+  uint8_t kind[SV_PERF_GRAPH]; /* 0 exact frame, 1 coalesced/partial observation (average only), 2 missed a deadline */
+  uint64_t n, k, sum_us = 0, sum_frames = 0, tgt, exact = 0, missed = 0;
   char line[3 + 8][72];
   int lines = 0, w = 0, i, gw = SV_PERF_GRAPH * u, gh = 28 * u, bx = 8 * u, bh, tw;
   SDL_FRect bar;
   if (p == NULL || !p->active || h->menu_open) return;
   n = p->history_total < SV_PERF_GRAPH ? p->history_total : SV_PERF_GRAPH;
-  for (k = 0; k < n; ++k) {
+  for (k = 0; k < n; ++k) {   /* one entry per OBSERVATION; a coalesced one has no exact per-frame time, only an average, and is drawn differently */
     const SvPerfFrame *f = &p->history[(p->history_total - n + k) % SV_PERF_HISTORY];
-    recent[k] = f->interval_us;
-    sorted[k] = f->interval_us;
-    sum += f->interval_us;
+    const uint32_t frames = f->frames != 0U ? f->frames : 1U;
+    recent[k] = f->interval_us / frames;
+    kind[k] = f->missed != 0U ? 2U : ((frames > 1U || f->partial) ? 1U : 0U);
+    if (frames == 1U && !f->partial) sorted[exact++] = f->interval_us;
+    sum_us += f->interval_us;
+    sum_frames += frames;
     missed += f->missed;
   }
   tgt = p->target_period_ns / 1000U;
-  if (n > 0) qsort(sorted, (size_t)n, sizeof sorted[0], cmp_u32);
-  if (n == 0 || tgt == 0) snprintf(line[lines++], sizeof line[0], "Collecting...");
+  if (exact > 0) qsort(sorted, (size_t)exact, sizeof sorted[0], cmp_u32);
+  if (n == 0 || tgt == 0 || sum_us == 0) snprintf(line[lines++], sizeof line[0], "Collecting...");
   else {
-    const double avg = (double)sum / (double)n;
-    const double p95 = (double)sorted[(n * 95 + 99) / 100 - 1] / 1000.0;
-    snprintf(line[lines++], sizeof line[0], "Speed %.0f%%   Presented %.0f FPS", 100.0 * (double)tgt / avg, h->fps);
-    snprintf(line[lines++], sizeof line[0], "Frame p95 %.1f ms   Missed %u/%u", p95, missed, (unsigned)n);
+    snprintf(line[lines++], sizeof line[0], "Speed %.0f%%   Presented %.0f FPS", 100.0 * (double)tgt * (double)sum_frames / (double)sum_us, h->fps);
+    if (exact > 0) snprintf(line[lines++], sizeof line[0], "Frame p95 %.1f ms   Missed %u/%u", (double)sorted[(exact * 95 + 99) / 100 - 1] / 1000.0, (unsigned)missed, (unsigned)sum_frames);
+    else snprintf(line[lines++], sizeof line[0], "Frame p95 n/a   Missed %u/%u", (unsigned)missed, (unsigned)sum_frames);
     snprintf(line[lines++], sizeof line[0], "Renderer: %s", sv_host_renderer_name(h));
     if (dev && p->virtual_frames > 0) {
       const double vf = (double)p->virtual_frames;
@@ -649,7 +651,9 @@ static void draw_perf_overlay(SvHost *h, int out_w, int out_h, int top) {
       ph = (int)(v * gh);
       if (ph < 1) ph = 1;
       bar.x = (float)gx + (float)k * (float)gw / (float)SV_PERF_GRAPH; bar.y = (float)(gy + gh - ph); bar.w = (float)gw / (float)SV_PERF_GRAPH + 0.5f; bar.h = (float)ph;
-      if (recent[k] > tgt + tgt / 8) SDL_SetRenderDrawColor(h->renderer, 235, 120, 90, 255); else SDL_SetRenderDrawColor(h->renderer, 110, 200, 140, 255);
+      if (kind[k] == 2U || (kind[k] == 0U && recent[k] > tgt + tgt / 8)) SDL_SetRenderDrawColor(h->renderer, 235, 120, 90, 255);   /* missed deadline or slow exact frame */
+      else if (kind[k] == 1U) SDL_SetRenderDrawColor(h->renderer, 125, 145, 185, 255);                                                /* coalesced: an average, not a measured frame */
+      else SDL_SetRenderDrawColor(h->renderer, 110, 200, 140, 255);
       SDL_RenderFillRect(h->renderer, &bar);
     }
     SDL_SetRenderDrawColor(h->renderer, 220, 232, 255, 160);

@@ -25,8 +25,7 @@ static char script[SMS_VIEWER_INPUT_CAPACITY * 40u];
 static SvPerf g_perf;
 static SmsViewerHost g_inner;
 static SmsPacer g_pacer;
-static uint64_t g_emu_t0, g_frame, g_sleep_mark;
-static int g_seen;
+static uint64_t g_emu_t0, g_frame;
 
 static uint64_t perf_clock(void) { return g_inner.now_ns(g_inner.ctx); }
 static void emulation_done(void) {
@@ -35,13 +34,10 @@ static void emulation_done(void) {
 }
 static int perf_poll(void *ctx, SmsViewerInput *in) {
   const int rc = g_inner.poll(ctx, in);
-  if (!g_perf.active) { g_seen = 0; g_emu_t0 = 0U; return rc; }
-  if (g_seen) {
-    if (!g_pacer.unthrottled && g_pacer.sleep_calls == g_sleep_mark) ++g_perf.missed_deadlines; /* the pacer found the frame's deadline already passed */
-    sv_perf_frames(&g_perf, ++g_frame, 1U, 0);
-  }
-  g_seen = 1;
-  g_sleep_mark = g_pacer.sleep_calls;
+  if (!g_perf.active) { g_perf.observing = 0; g_emu_t0 = 0U; return rc; }
+  sv_perf_pace_settle(&g_perf, g_pacer.sleep_calls, g_pacer.unthrottled); /* the previous frame's pacer verdict */
+  if (!g_perf.observing) { g_frame = 0U; sv_perf_observe_begin(&g_perf, 0U); }   /* the window starts at this poll: the next poll is one whole frame later */
+  else sv_perf_observe_end(&g_perf, ++g_frame, g_pacer.sleep_calls);              /* one guest frame per poll: an exact frame time */
   g_emu_t0 = g_perf.now();
   return rc;
 }
@@ -135,6 +131,7 @@ int main(int argc, char **argv) {
     perf_write(&perf_request, "incomplete", "running", NULL, renderer, options.unthrottled); /* a killed session still leaves a marked report */
   }
   result = sms_viewer_run(&rig, &host, &g_pacer, options.frames);
+  sv_perf_pace_settle(&g_perf, g_pacer.sleep_calls, g_pacer.unthrottled);
   sv_perf_finish(&g_perf);
   if (perf_request.path != NULL) {
     const char *name = result.outcome == SMS_VIEWER_FRAME_LIMIT ? "frame_limit" : result.outcome == SMS_VIEWER_QUIT ? "window_closed" : result.outcome == SMS_VIEWER_GUEST_ERROR ? "guest_stop"

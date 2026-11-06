@@ -54,14 +54,23 @@ static SvPerf g_perf;
 static GenesisViewerHost g_inner;     /* the SDL host's own callbacks, wrapped below */
 static GenesisPacer g_pacer;
 static char g_renderer[48];
-static uint64_t g_slice_t0, g_last_vf, g_sleep_mark;
-static int g_paced_pending, g_perf_seen_active;
+static GenesisRuntime *g_runtime;
+static uint64_t g_slice_t0;
 
 static uint64_t perf_clock(void) { return g_inner.now_ns(g_inner.ctx); }
 
+/* Slice start (the host's once-per-slice poll): the previous boundaries' pacer verdicts are settled, the observation window is established BEFORE the guest runs (so the first
+ * slice is counted, and nothing from while the collector was inactive is attributed), and the emulation clock starts. */
 static int perf_window_closed(void *ctx) {
   const int closed = g_inner.window_closed(ctx);
-  g_slice_t0 = g_perf.active ? g_perf.now() : 0U;
+  if (g_perf.active) {
+    sv_perf_pace_settle(&g_perf, g_pacer.sleep_calls, g_pacer.unthrottled);
+    sv_perf_observe_begin(&g_perf, g_runtime->virtual_frame_count);
+    g_slice_t0 = g_perf.now();
+  } else {
+    g_perf.observing = 0;
+    g_slice_t0 = 0U;
+  }
   return closed;
 }
 
@@ -78,19 +87,13 @@ static int perf_raster_producer(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], cons
   return rc;
 }
 
-/* End of every guest slice: emulation time of the slice, then the virtual frame boundaries it crossed (the pacing authority of the loop). */
+/* End of every guest slice: emulation time of the slice, then the observation (frame boundaries crossed, if any). */
 static void perf_slice_done(GenesisRuntime *runtime) {
-  uint64_t crossed;
-  if (!g_perf.active) { g_perf_seen_active = 0; return; }
-  if (!g_perf_seen_active) { g_perf_seen_active = 1; g_last_vf = runtime->virtual_frame_count; g_paced_pending = 0; g_sleep_mark = g_pacer.sleep_calls; return; }
+  if (!g_perf.active) { g_perf.observing = 0; return; }
   if (g_slice_t0 != 0U) sv_perf_span_end(&g_perf, SV_SPAN_EMULATION, g_slice_t0);
-  if (g_paced_pending && !g_pacer.unthrottled && g_pacer.sleep_calls == g_sleep_mark) ++g_perf.missed_deadlines; /* the last boundary found its deadline already passed */
-  crossed = runtime->virtual_frame_count - g_last_vf;
-  g_last_vf = runtime->virtual_frame_count;
+  g_slice_t0 = 0U;
   g_perf.guest_master_ticks = runtime->scheduler.master_ticks;
-  sv_perf_frames(&g_perf, runtime->virtual_frame_count, crossed, 0);
-  g_paced_pending = crossed != 0U;
-  g_sleep_mark = g_pacer.sleep_calls;
+  sv_perf_observe_end(&g_perf, runtime->virtual_frame_count, g_pacer.sleep_calls);
 }
 
 #ifdef SEGARECOMP_GENESIS_SOUND
@@ -216,6 +219,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   genesis_pacer_init(&g_pacer, options.unthrottled);
   /* SEG-125: the collector wraps the host callbacks (see above); the viewer loop itself is untouched. */
   g_inner = host;
+  g_runtime = runtime;
   sv_perf_init(&g_perf, perf_clock, genesis_pacer_period_floor_ns(), perf_request.detailed);
   host.window_closed = perf_window_closed;
   if (host.sleep_ns != NULL) host.sleep_ns = perf_sleep; /* NULL is legal only when unthrottled: keep the pacer's own contract */
@@ -228,6 +232,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   }
   GenesisViewerResult r = genesis_viewer_run(runtime, dispatch, &options, &host, &g_pacer,
                                                 dispatch_allowance == UINT32_MAX ? UINT64_MAX : dispatch_allowance);
+  sv_perf_pace_settle(&g_perf, g_pacer.sleep_calls, g_pacer.unthrottled); /* the last boundaries' pacer verdicts */
   sv_perf_finish(&g_perf); /* before the window closes: the session ends when the guest does, not when a stop screen is dismissed */
   runtime->live_frame_observer = NULL;
   genesis_runtime_write_notes(runtime, g_raster_capture.render_rejections, g_raster_capture.vram_journal_overflows, stderr);
