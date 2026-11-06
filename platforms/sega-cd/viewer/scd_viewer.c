@@ -253,7 +253,11 @@ static int sdl_pace(void *ctx, uint64_t frame_ticks, uint64_t ticks_per_second) 
   int rc;
   uint64_t t;
   if (h->opened) {
-    if (!h->target_set && ticks_per_second != 0U) { h->perf.target_period_ns = frame_ticks * 1000000000ULL / ticks_per_second; h->target_set = 1; } /* the machine's own frame length */
+    if (!h->target_set) {   /* the machine's own frame length, by the pacer's overflow-safe exact reduction */
+      uint64_t num = 0U, den = 1U;
+      if (genesis_pacer_period(frame_ticks, ticks_per_second, &num, &den) == 0) h->perf.target_period_ns = num / den;
+      h->target_set = 1;
+    }
     perf_emulation_done(h);
     t = sv_perf_span_begin(&h->perf);
     flush_cdda(h, 0); /* the frame's CD-DA reaches the device before the pacer waits */

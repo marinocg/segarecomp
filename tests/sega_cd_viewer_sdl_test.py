@@ -88,11 +88,11 @@ def main():
         # RIGHT (arrow key) held from poll 3 to poll 11; UP from poll 14 to 18
         keys.write_text("3 down Right\n11 up Right\n14 down Up\n18 up Up\n")
 
-        def live(name, key_text, extra=()):
+        def live(name, key_text, extra=(), env_extra=None):
             (tmp / (name + ".keys")).write_text(key_text)
             rec, rep = tmp / (name + ".rec"), tmp / (name + ".json")
             code, out = run(vexe, base + ["--record-input", rec, "--report", rep, "--capture-dir", capdir, "--capture-onset", 8, "--capture-onset", 17, *extra],
-                            {**env, "SEGARECOMP_VIEWER_KEY_SCRIPT": str(tmp / (name + ".keys"))})
+                            {**env, "SEGARECOMP_VIEWER_KEY_SCRIPT": str(tmp / (name + ".keys")), **(env_extra or {})})
             return code, json.loads(rep.read_text()) if rep.exists() else {}, rec.read_text() if rec.exists() else None, out
 
         code, rep, rec, out = live("a", keys.read_text())
@@ -123,6 +123,26 @@ def main():
             return view
 
         check(code == 0 and guest_view(rep) == guest_view(replay), "viewer: the recording replays headlessly to the identical report and captured frames")
+
+        # SEG-125 (ADR 0273): the opt-in performance collector at the Sega CD frame loop. A requested report changes nothing the guest can observe (report, captured frames and the
+        # input recording equal the unprofiled run), names the platform, counts every frame boundary and declares what the machine cannot yet say (main/sub CPU split).
+        sys.path.insert(0, str(ROOT / "tools"))
+        import perf_report  # noqa: E402
+        perf_file = tmp / "perf-report.json"
+        pcode, prep, prec, pout = live("perf", keys.read_text(), env_extra={"SEGARECOMP_PERF_REPORT": str(perf_file), "SEGARECOMP_PERF_MODE": "detailed"})
+        check(pcode == 0 and guest_view(prep) == guest_view(rep) and prec == rec, "perf: a requested performance report changes nothing the guest, the captures or the recording show")
+        try:
+            perf = perf_report.load(perf_file)
+        except perf_report.ReportError as exc:
+            perf = None
+            check(False, "perf: the Sega CD report is valid: %s [%s]" % (exc, perf_file.read_text()[:300] if perf_file.exists() else "no file"))
+        if perf is not None:
+            pr = perf["runtime"]
+            spans = {x["name"]: x for x in pr["spans"]}
+            check(perf["platform"] == "sega_cd" and perf["config"]["entry"] == "viewer" and perf["status"] in ("complete", "incomplete"), "perf: Sega CD report identity (%s)" % perf["status"])
+            check(pr["frames"]["virtual"] >= 30 and spans["emulation"]["count"] > 0 and spans["present"]["count"] > 0, "perf: Sega CD frames and spans are measured: %s" % json.dumps(pr["frames"]))
+            check(pr["counters"]["boundaries"] >= 39 and any(u["metric"] == "main_sub_cpu_split" for u in perf["unavailable"]), "perf: Sega CD counters and the declared main/sub limitation")
+            check(perf["config"]["target_frame_ns"] > 16_000_000 and perf["config"]["target_frame_ns"] < 17_500_000, "perf: the target rate is the machine's own frame length (%d ns)" % perf["config"]["target_frame_ns"])
 
         # SEG-117: the Sega CD viewer reads the same shared Widescreen Mode setting as the Genesis one. A saved Level 3 request is shown as Level 2 (the
         # extension is presentation only), so it leaves the run (reports, presented frames, captured frames, the recording) identical to Original and the viewer does not rewrite the file.

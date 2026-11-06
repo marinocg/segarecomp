@@ -119,11 +119,33 @@ marker of a session that never finished. `failed`: the build or the host failed 
 
 ## Measured cost of the collector
 
-See the table in ADR 0273 follow-up evidence and `tools/perf_overhead_bench.py`, which reproduces it:
+Method (`tools/perf_overhead_bench.py`, reproduces everything below): one synthetic spinning Genesis image built at `-O2`; every variant is run interleaved
+(off, summary, detailed, ... rotated each round, 11 rounds for runs, 5 for builds) so host drift hits all variants alike; runtime children are pinned to one CPU; the median
+and the min-max spread of each variant are reported, and a collector microbenchmark gives its direct cost. Linux x86-64, GCC, 16 hardware threads, otherwise idle;
+the workload is a spinning guest, i.e. the *worst case* for a relative figure (a real game spends longer per frame in the same emulation).
 
-```
-python3 tools/perf_overhead_bench.py --cli build/apps/segarecomp/segarecomp --cc cc --root . --reps 7 [--sdl3-include DIR --sdl3-lib DIR] -o bench.json
-```
+| variant (median of 11 / 5) | time | vs off | run-to-run spread |
+|---|---|---|---|
+| headless, collector off | 5.876 s | - | 8.6% |
+| headless, summary | 5.920 s | +0.75% | 5.4% |
+| headless, detailed | 5.867 s | -0.15% | 8.8% |
+| viewer (unthrottled, dummy driver), off | 1.553 s | - | 14.1% |
+| viewer, report summary | 1.541 s | -0.79% | 10.3% |
+| viewer, report detailed | 1.578 s | +1.60% | 11.5% |
+| viewer, overlay player | 1.544 s | -0.60% | 12.1% |
+| viewer, overlay developer | 1.542 s | -0.74% | 13.5% |
+| `segarecomp build`, off | 4.012 s | - | 7.9% |
+| `segarecomp build --performance-report` | 4.063 s | +1.27% | 6.9% |
+
+Reading: every difference is smaller than the spread between repeated runs of the *same* variant, so this method cannot resolve an overhead below about 2%. The targets
+(profiling disabled: no regression; summary <= 1%; detailed <= 3-5%) are therefore met within measurement resolution, and the resolution is stated rather than tuned away.
+The direct cost is measured instead: on this machine a clock read is ~18 ns, a begin/end span pair ~38 ns, a frame boundary ~24 ns, and an *idle* collector (nothing requested)
+~0.4 ns per frame-loop visit (one branch each). The headless run above makes 9,766 slices for 3,125 frames, i.e. ~142 ns of collector work per frame = **0.008%** of a
+frame's host time (0.0076% reported by the bench). The viewer adds ~4 clock reads per slice (500 dispatches) plus the host's own present/upload spans; at the same arithmetic
+that is ~0.1% of a 2 ms frame. "Disabled" means the wrapper callbacks are installed but idle: no clock is read and no memory is written (verified by `sv_perf_test`
+and `sv_perf_overlay_test`: zero clock reads, bit-identical picture).
+
+Not measured: Windows/macOS, a hardware (non-software) renderer, or a real game; none of those was available. Run the bench there before relying on the numbers.
 
 ## For developers
 

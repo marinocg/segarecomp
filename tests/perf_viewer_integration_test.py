@@ -97,6 +97,32 @@ def main():
         # robustness: malformed option fails closed before the window opens
         bad = run(1000, {"SEGARECOMP_PERF_MODE": "turbo", "SEGARECOMP_PERF_REPORT": str(tmp / "bad.json")})
         require(bad.returncode == 3, "malformed viewer perf option exits 3")
+
+        # ---- Master System: the same collector at its own frame loop, its own counter names (cross-platform fields)
+        sys.path.insert(0, str(ROOT / "tests"))
+        import sms_e2e_common as c   # noqa: E402
+        from sms_e2e_common import builder   # noqa: E402
+        builder.main(["--out", str(tmp / "sms"), "--fixture", c.FIXTURE])
+        sms_rom = tmp / "sms" / (c.FIXTURE + ".sms")
+        built = subprocess.run([cli, "build", "--rom", str(sms_rom), "--output", str(tmp / "sms-out"), "--cc", cc, "--optimize", "1", "--runtime-dir", str(ROOT / "platforms" / "master-system"),
+                                "--mapper", "sega", "--sdl3-include", sdl_include, "--sdl3-lib", sdl_lib], text=True, capture_output=True)
+        require(built.returncode == 0, "SMS viewer build: " + built.stdout + built.stderr)
+        sms_report = tmp / "sms.json"
+
+        def run_sms(extra=None):
+            env = {**base, "SEGARECOMP_VIEWER_SETTINGS": str(tmp / "sms-settings.cfg"), **(extra or {})}
+            return subprocess.run([str(tmp / "sms-out" / "game"), "--viewer-unthrottled", "--viewer-mute", "--viewer-frames", "150"], text=True, capture_output=True, env=env, timeout=120)
+        sms_plain, sms_prof = run_sms(), run_sms({"SEGARECOMP_PERF_REPORT": str(sms_report), "SEGARECOMP_PERF_MODE": "detailed"})
+        line = lambda r: next(l for l in r.stdout.splitlines() if l.startswith("viewer outcome"))   # noqa: E731
+        require(sms_plain.returncode == sms_prof.returncode and line(sms_plain) == line(sms_prof), "SMS: the guest-visible result is identical with the collector on")
+        sd = pr.load(sms_report)
+        sr = sd["runtime"]
+        require(sd["platform"] == "master_system" and sd["status"] == "complete" and sr["outcome"] == "frame_limit" and sd["config"]["entry"] == "viewer", "SMS report identity")
+        require(sr["frames"]["virtual"] >= 140 and sr["frames"]["presented"] >= 140, "SMS frames: " + json.dumps(sr["frames"]))
+        require(sr["counters"]["guest_frames"] == 150 and sr["counters"]["z80_cycles"] > 0, "SMS counters use SMS names: " + json.dumps(sr["counters"]))
+        sspans = {x["name"]: x for x in sr["spans"]}
+        require(sspans["emulation"]["count"] > 0 and sspans["present"]["count"] > 0 and sspans["texture_upload"]["count"] > 0, "SMS spans measured")
+        require(any(u["metric"] == "guest_master_ticks" for u in sd["unavailable"]), "SMS: unavailable fields are explicit, not zero-filled")
         print("perf_viewer_integration_test: ok")
 
 
