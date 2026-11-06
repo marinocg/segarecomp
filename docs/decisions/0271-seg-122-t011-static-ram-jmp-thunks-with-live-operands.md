@@ -112,3 +112,21 @@ GCC as in ADR 0270, `--jobs 4`, one build at a time, cold caches; finite instruc
 - Economics (reported only): M68K emissions, thunks found statically vs by observation, extra M68K rounds, generated C (per emission and cumulative), build CPU and wall, executable size,
   compiled instruction count and admission ratio. The claim is limited to "no materialization-driven M68K recompilation for the two thunks".
 - Hygiene: aggregates, classes and digests only; no ROM bytes, RAM dumps or generated artifacts containing protected data.
+
+## Frozen routes and measurement detail (addendum, recorded before the first route run on a commercial image; tightens, never relaxes)
+
+The candidate T1 build (cold, GCC, `-O1`, `--jobs 4`, `--aot-policy optimized --aot-model gen2 --mapper lock_on`) and its static-entry check were made before this addendum;
+no candidate **route** has been run yet. From here on:
+
+- **Arms.** `CAND`: this branch. `BASE`: product `main` (SEG-122-T010 merged, tree-identical to the T010 PR head), same options. `BROAD-CAND`: this branch with `--aot-policy compatibility`.
+  Baseline and candidate use identical flags, compiler, `--jobs 4`, fresh work directories, one build at a time. One cold build per arm (not the median of three used in ADR 0270; stated as a
+  deviation, economics are report-only).
+- **Route R1 (both targets, every arm).** Headless frame-keyed pad script `SEGARECOMP_PAD_SCRIPT=300:1:0x80,310:1:0,500:1:0x80,510:1:0,800:1:0x80,810:1:0,1100:1:0x80,1110:1:0,1400:1:0x80,1410:1:0,2000:1:0x80,2010:1:0`
+  (Start taps), `--instruction-budget 4294967295`, wall timeout 1800 s, captures at virtual frames 3000, 4500, 6000, 7500 (the run ends when the window completes), `SEGARECOMP_SOUND_SUMMARY=1`.
+  A route that does not reach gameplay is recorded as an evidence-limited bounded route; it is not retuned after seeing a result.
+- **Compared fields (CAND vs BASE vs BROAD-CAND):** result and stop class, dispatch count, virtual frames, audio frame count and digest, `RUNTIME_NOTES` (dropped H-interrupt count), frame digests.
+  Differences between CAND and BASE are expected where BASE dropped level-4 interrupts; they are explained from the dropped count, not hidden. CAND must equal BROAD-CAND on every field,
+  with zero typed stops on code BROAD-CAND compiled (a selective build omitting a live destination is reported, not accepted as a pass).
+- **Interrupt classes reported:** level-4 (H) undelivered/dropped count, level-6 (V) behaviour, typed stops by class.
+- **Independent reference.** No pinned Genesis-level emulator harness exists in the repository; the pinned Musashi comparison covers instruction/exception semantics only (C4). Per C6 the
+  verdict cannot exceed `STATIC_THUNKS_ONLY` unless a Genesis reference is run on the same route; a locally installed emulator without a scriptable state/RAM interface is recorded as a gap, not used as proof.
