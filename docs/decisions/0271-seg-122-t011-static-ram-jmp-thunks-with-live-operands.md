@@ -146,3 +146,19 @@ A stop in `CAND` is reported with a broad replay, not retuned away. This remains
 R2 (played start, all 28 acts) arms debug mode but does not use it. R3 uses the retained debug-mode serpentine flight (`tools/seg122_t005_s3k/sweep.py`, one part, about 17,000 polls) on the three acts where R2's `BASE`
 dropped the most level-4 interrupts: AIZ2, CNZ2 and LBZ2. Same arms, image, flags, frame-exact slice, headless drivers, finite budget and 600 s wall timeout as R2; captures at polls 4000, 9000, 14000 and 16500.
 Assertions: `CAND` has no typed stop and 0 undelivered level-4 interrupts; `BASE` differences are explained by its undelivered count; a `CAND` stop is replayed on a broad build, not retuned.
+
+## Frozen route R4 (fourth addendum: independent Genesis Plus GX reference route, recorded before any R4 run; tightens, never relaxes)
+
+Reference: the pinned Genesis Plus GX (`tests/genesis_oracle/pins.py`, exact revision, clean tree, built in a temporary copy) driven by the existing libretro host extended with optional, inert-by-default `--pad` and
+`--capture` modes (original Z80 smoke unchanged). Native arms `CAND` and `BASE` are non-viewer (capture-hook) Optimized gen2 builds of the same validation image. Region USA/NTSC-U in both. The reference compares
+only against `CAND`/`BASE`, never against a Compatibility build of this branch.
+
+Route: the retained played-start route of R2 for CNZ2, LBZ2 and AIZ2 (identical frame-keyed pad events in both machines; frame number = native virtual frame / libretro `retro_run` index), finite frame budget (route end + 20), 600 s wall
+timeout. Captures at frame ordinals Start+500 to Start+1080 every 20 frames (30 frames) as raw 320x224 RGB, plus the 64 KiB work RAM at the same ordinals.
+
+Canonical observable (renderer independent): per frame, per row `t(y) = mean(B) - mean(R)` over the 320 columns of that row; a **water-line row** exists at `y` when `|median t(y..y+7) - median t(y-8..y-1)| >= 24` with the
+largest such step chosen. Comparison per frame: reference present/absent versus native present/absent, and the row within +-3.
+Pass for the independent-reference gate on real routes (all required): (1) CNZ2 and LBZ2: in every captured frame the reference and `CAND` agree on presence, and rows within +-3 where both are present, and the reference
+shows a water line in at least 5 of the 30 frames (else the route is non-discriminating and recorded as such); (2) `BASE` disagrees with the reference in at least one frame of those acts (the metric must discriminate the old behaviour);
+(3) AIZ2 is reported, not gated; (4) work-RAM byte differences are reported as an aggregate (count) only, not gated, because the machines are not cycle-identical; (5) no typed stop in `CAND`. If the machines' game progress diverges so
+that frames cannot be paired by the above, the route fails closed (C6 stays unmet); a result is never tuned afterwards.
