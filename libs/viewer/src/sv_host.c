@@ -636,6 +636,7 @@ static void draw_perf_overlay(SvHost *h, int out_w, int out_h, int top) {
   for (i = 0; i < lines; ++i) { tw = sv_ui_text_w(SV_FONT_BODY, u, line[i]); if (tw > w) w = tw; }
   if (gw > w) w = gw;
   w += 16 * u;
+  gw = w - 16 * u;   /* the graph spans the box (float bar width below) */
   bh = lines * lh + 12 * u + (n > 0 ? gh + 6 * u : 0);
   sv_ui_frame(h, bx, top, w, bh, u, box, edge, light, 0);
   for (i = 0; i < lines; ++i) sv_ui_text_shadow(h, SV_FONT_BODY, u, bx + 8 * u, top + 6 * u + i * lh, i == 0 ? text : dim, line[i]);
@@ -647,7 +648,7 @@ static void draw_perf_overlay(SvHost *h, int out_w, int out_h, int top) {
       if (v > 1.0) v = 1.0;
       ph = (int)(v * gh);
       if (ph < 1) ph = 1;
-      bar.x = (float)(gx + (int)k * u); bar.y = (float)(gy + gh - ph); bar.w = (float)u; bar.h = (float)ph;
+      bar.x = (float)gx + (float)k * (float)gw / (float)SV_PERF_GRAPH; bar.y = (float)(gy + gh - ph); bar.w = (float)gw / (float)SV_PERF_GRAPH + 0.5f; bar.h = (float)ph;
       if (recent[k] > tgt + tgt / 8) SDL_SetRenderDrawColor(h->renderer, 235, 120, 90, 255); else SDL_SetRenderDrawColor(h->renderer, 110, 200, 140, 255);
       SDL_RenderFillRect(h->renderer, &bar);
     }
