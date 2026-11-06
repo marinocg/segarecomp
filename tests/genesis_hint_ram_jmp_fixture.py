@@ -125,3 +125,80 @@ def build(variant="normal"):
     code = a.assemble(0x200)
     rom[0x200:0x200 + len(code)] = code
     return bytes(rom)
+
+
+def build_raster(h_interrupt_enabled=True):
+    """SEG-122-T011 raster variant (ADR 0271 check F1): backdrop colour CRAM[0] starts blue; the level-4 stub (work-RAM `JMP`) first reaches handler A,
+    which writes red and retargets the stub to handler B, which writes green and disables the H-interrupt. H-interrupt every 80 lines. With the
+    interrupt left disabled the screen stays blue. No result block: the observable is the picture."""
+    VDP_CTRL, VDP_DATA = [0x00C0, 0x0004], [0x00C0, 0x0000]
+    rom = bytearray(0x4000)
+    rom[0:4] = struct.pack(">I", 0x00FFFE00)
+    rom[4:8] = struct.pack(">I", 0x200)
+    for vector in range(2, 64):
+        rom[vector * 4:vector * 4 + 4] = struct.pack(">I", RTE_ROM)
+    rom[0x70:0x74] = struct.pack(">I", 0x00FF0000 | STUB)
+    rom[0x100:0x110] = b"SEGA GENESIS    "
+    rom[RTE_ROM:RTE_ROM + 2] = struct.pack(">H", 0x4E73)
+    set_cram0 = lambda a, color: (a.w(0x23FC, 0xC000, 0x0000, *VDP_CTRL), a.w(0x33FC, color, *VDP_DATA))  # CRAM write address 0, then the colour word
+    a = Asm()
+    set_cram0(a, 0x000E)                                       # handler A: red
+    a.w(0x21FC, HANDLER_B >> 16, HANDLER_B & 0xFFFF, STUB + 2)  # retarget the stub operand to handler B
+    a.w(0x4E73)
+    rom[HANDLER_A:HANDLER_A + len(a.assemble(HANDLER_A))] = a.assemble(HANDLER_A)
+    b = Asm()
+    set_cram0(b, 0x00E0)                                       # handler B: green
+    b.w(0x33FC, 0x8004, *VDP_CTRL)                             # VDP reg 0: H-interrupt off
+    b.w(0x4E73)
+    rom[HANDLER_B:HANDLER_B + len(b.assemble(HANDLER_B))] = b.assemble(HANDLER_B)
+    m = Asm()
+    m.w(0x31FC, 0x4EF9, STUB)                                  # build the stub from constant stores
+    m.w(0x21FC, HANDLER_A >> 16, HANDLER_A & 0xFFFF, STUB + 2)
+    m.w(0x33FC, 0x8144, *VDP_CTRL)                             # display on, mode 5 (CRAM writes before mode 5 are Mode 4 writes on the reference)
+    set_cram0(m, 0x0E00)                                       # backdrop starts blue
+    m.w(0x263C, 0x0001, 0x8000)                                # MOVE.L #$18000,D3: let a few blue frames be published before the first interrupt
+    m.label("delay")
+    m.w(0x5383)                                                # SUBQ.L #1,D3
+    m.branch(0x66, "delay")                                    # BNE.S delay
+    m.w(0x33FC, 0x8A4F, *VDP_CTRL)                             # H counter 79: an interrupt every 80 lines
+    m.w(0x33FC, 0x8014 if h_interrupt_enabled else 0x8004, *VDP_CTRL)
+    m.w(0x46FC, 0x2000)
+    spin = 0x200 + len(m.assemble(0x200))
+    m.w(0x207C, 0x0000, spin, 0x4ED0)                          # MOVEA.L #spin,A0 ; JMP (A0): spin (keeps the program on the generated C4 route)
+    code = m.assemble(0x200)
+    rom[0x200:0x200 + len(code)] = code
+    return bytes(rom)
+
+
+def build_raster_cycle(h_interrupt_enabled=True):
+    """ADR 0271 check F1b: steady-state raster. Handler A writes CRAM[0] red and retargets the stub to B; B writes green and retargets to A. H counter 79
+    (two interrupts per frame at about lines 79 and 159). H-interrupt enabled from the start (the one-shot enable edge is avoided on purpose)."""
+    VDP_CTRL, VDP_DATA = [0x00C0, 0x0004], [0x00C0, 0x0000]
+    rom = bytearray(0x4000)
+    rom[0:4] = struct.pack(">I", 0x00FFFE00)
+    rom[4:8] = struct.pack(">I", 0x200)
+    for vector in range(2, 64):
+        rom[vector * 4:vector * 4 + 4] = struct.pack(">I", RTE_ROM)
+    rom[0x70:0x74] = struct.pack(">I", 0x00FF0000 | STUB)
+    rom[0x100:0x110] = b"SEGA GENESIS    "
+    rom[RTE_ROM:RTE_ROM + 2] = struct.pack(">H", 0x4E73)
+    for origin, color, nxt in ((HANDLER_A, 0x000E, HANDLER_B), (HANDLER_B, 0x00E0, HANDLER_A)):
+        h = Asm()
+        h.w(0x23FC, 0xC000, 0x0000, *VDP_CTRL)
+        h.w(0x33FC, color, *VDP_DATA)
+        h.w(0x21FC, nxt >> 16, nxt & 0xFFFF, STUB + 2)
+        h.w(0x4E73)
+        code = h.assemble(origin)
+        rom[origin:origin + len(code)] = code
+    m = Asm()
+    m.w(0x31FC, 0x4EF9, STUB)
+    m.w(0x21FC, HANDLER_A >> 16, HANDLER_A & 0xFFFF, STUB + 2)
+    m.w(0x33FC, 0x8144, *VDP_CTRL)
+    m.w(0x33FC, 0x8A4F, *VDP_CTRL)
+    m.w(0x33FC, 0x8014 if h_interrupt_enabled else 0x8004, *VDP_CTRL)
+    m.w(0x46FC, 0x2000)
+    spin = 0x200 + len(m.assemble(0x200))
+    m.w(0x207C, 0x0000, spin, 0x4ED0)
+    code = m.assemble(0x200)
+    rom[0x200:0x200 + len(code)] = code
+    return bytes(rom)

@@ -187,3 +187,13 @@ the existing host `--capture`). Pass (all required): (1) in both machines some c
 large count on the same route (R2 numbers). (b) The water palette split appears in `CAND`: some frames of the played-start capture contain a horizontal band boundary where the lower part is predominantly blue-tinted (mean blue minus mean red rises by at least 24
 across a single scanline boundary at full width), and `BASE` shows no such boundary in the same frames. (c) Where the reference's game state is aligned (the same level, same camera region, visible via the same boundary measure), report the reference's boundary row next to the candidate's;
 no pixel-identity or physics requirement. If the machines cannot be aligned with the existing captures that is documented and the check stops. Nothing here changes C6: it is supporting evidence unless the operator accepts it.
+
+## Frozen check F1b (seventh addendum, recorded before it was run; F1's failure is preserved in ADR 0272)
+
+F1 as written failed: the one-shot fixture enables the H-interrupt mid-frame with a stale H counter, and the generated scheduler and Genesis Plus GX differ at that enable edge (the generated program delivers an interrupt at the enabling line; the reference does
+not), so the first red and green rows were not within 3 scanlines. That edge belongs to the existing H-interrupt scheduler (it applies to ROM handlers equally), not to the RAM `JMP` mechanism, and is not investigated further here. F1b removes the edge by testing
+the **steady state**: the same fixture family (`raster_cycle`), H counter 79 and the interrupt enabled from the start; handler A writes CRAM[0] = red and retargets the stub operand to B; handler B writes green and retargets it back to A, never disabling. In steady state two
+interrupts arrive per frame (lines about 79 and 159), so each frame is three bands whose boundaries are at about rows 80 and 160 and whose colours alternate red/green according to the handler order. Pass (all required), over the last 10 of the first 40 frames of each machine:
+(1) every such frame has exactly the two boundaries, each within 3 rows of 80 and 160 respectively in both machines and within 3 rows of each other between the machines; (2) the band colours are only red and green, alternate (band1 != band2, band3 == band1), and the
+red band is the middle band in every frame of at least one machine phase (a swapped phase, middle green, is accepted and reported: it depends on which handler took the first interrupt); (3) with the interrupt left disabled neither machine shows a boundary; (4) in both machines both handlers
+must have run (both colours present), which is only possible if the retarget selected handler B on alternate interrupts. No other thresholds.
