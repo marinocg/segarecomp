@@ -174,3 +174,16 @@ changes whole bands, a renderer difference changes few pixels).
 Gates for the independent real-route reference (all required, CNZ2 and LBZ2; AIZ2 reported): (1) `CAND`: median `f` <= 2 % and maximum `f` <= 10 % over the 64 frames; (2) discrimination: `BASE` has at least 3 frames with `f` >= 15 %
 where `CAND` has `f` < 5 % (else the route does not exercise the H-interrupt and is recorded as non-discriminating, C6 unmet by this route); (3) no typed stop in `CAND`; (4) if `CAND`'s median `f` exceeds 20 % the route is not paired and fails closed.
 Thresholds are fixed here and are not revised after the results.
+
+## Frozen checks F1 and F2 (sixth addendum, recorded before either was run; R4/R5 failures are preserved unchanged)
+
+**F1, synthetic raster effect against the pinned Genesis Plus GX.** A project-authored ROM (`raster` variant of `tests/genesis_hint_ram_jmp_fixture.py`) enables the H-interrupt every 80 lines with the level-4 vector at the work-RAM `JMP` stub.
+Handler A writes backdrop colour CRAM[0] = red and retargets the stub operand to handler B, which writes CRAM[0] = green and disables the H-interrupt; CRAM[0] starts blue. Frames of both machines are captured (the generated program through the existing capture hook, the reference through
+the existing host `--capture`). Pass (all required): (1) in both machines some captured frame shows rows classified blue, then red, then green in that order (colour classes by nearest of the three pure backdrop colours, sampled at the middle column);
+(2) the first red row and the first green row of that frame differ between the machines by at most 3 scanlines (the generated scheduler is scanline granular; the reference is cycle based); (3) with the H-interrupt left disabled neither machine ever shows red or green;
+(4) the red-then-green order proves that the retarget selected handler B on the second interrupt in both. No other thresholds.
+
+**F2, one authentic-game sanity check (LBZ2, then CNZ2 if LBZ2 cannot be aligned), existing captures only, no new runs beyond what is needed to apply the measure.** (a) `CAND` executes the level-4 handlers: its run reports 0 undelivered level-4 interrupts and `BASE` reports a
+large count on the same route (R2 numbers). (b) The water palette split appears in `CAND`: some frames of the played-start capture contain a horizontal band boundary where the lower part is predominantly blue-tinted (mean blue minus mean red rises by at least 24
+across a single scanline boundary at full width), and `BASE` shows no such boundary in the same frames. (c) Where the reference's game state is aligned (the same level, same camera region, visible via the same boundary measure), report the reference's boundary row next to the candidate's;
+no pixel-identity or physics requirement. If the machines cannot be aligned with the existing captures that is documented and the check stops. Nothing here changes C6: it is supporting evidence unless the operator accepts it.
