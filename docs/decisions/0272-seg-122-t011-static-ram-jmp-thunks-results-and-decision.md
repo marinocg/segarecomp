@@ -1,0 +1,174 @@
+# ADR 0272: SEG-122-T011 static work-RAM `JMP (xxx).L` thunks with a live operand - results and decision
+
+- Status: Accepted. **Decision: `STATIC_THUNKS_ONLY`.** Static generation, the live-operand body, fail-closed behaviour and the one-shot build all pass their frozen gates
+  (ADR 0271, applied unchanged). `ONE_SHOT_RAM_JMP_ACCEPTED` is not claimed because gate C6 is not met: there is no independent, pinned Genesis-level reference for H-interrupt
+  delivery, so the correctness of the changed interrupt-delivery behaviour is not independently established. **Default-on promotion is withheld: the PR stays draft and must not be merged
+  on this evidence alone** (operator decision, or a Genesis reference run on the same routes, is required).
+- Limits: the routes below are evidence for those routes only. They show neither game compatibility nor that every dynamic H target is covered.
+
+## 1. What was built
+
+- Producer (`populate_immutable_rom_aot_entries`): bounded positive evidence from the discovered instruction graph (ADR 0271). Both investigated stubs were recognized on the
+  authorized standalone and combined images with no execution of guest code; no address, signature or title appears in the code.
+- Body: one precompiled `JMP (xxx).L` per admitted stub, guarded on the opcode word only, reading the operand live, masked to the 24-bit bus, checked against the one final compiled-entry
+  table, 12 cycles. Reuses the computed-jump branch of the M68K emitter; no second target authority.
+- Admission: the entry is a mandatory RAM-keyed identity; its representative operand yields no fixed successor in the validator, prune or closure. `genesis_admission_analysis_contract`
+  is now `segarecomp.admission_contract.v3` (policy identity and the launcher cache key change: every Genesis Optimized entry rebuilds once, as in ADR 0270).
+- Interrupt delivery is unchanged scheduler code: the existing wiring finds a compiled entry at the work-RAM vector address.
+
+## 2. Gates (ADR 0271, thresholds unchanged)
+
+| gate | result | evidence |
+|---|---|---|
+| C1 static | pass | T1 and T2: `ram_thunks=2`, `roots_added=2`, both stubs in the **first** emission (`m68k_alias_preparation rounds=0`); generated main installs the level-6 handler and vector 28 at the two stubs. Negative control (an unrelated RAM address with the same stores): no entry (synthetic fixture G) |
+| C2 one shot | pass | T1/T2 `CAND`: 1 M68K emission, 0 preparation rounds, 0 observed thunks. `BASE`: 2 emissions, 1 round, 1 observed thunk (the other stub never found). Observing the same address later is subsumed (fixture H), never a conflict |
+| C3 fail closed | pass | fixtures D-G (below): typed stop, no register, PC, SR, RAM or scheduler tick changed. Fixture H unchanged |
+| C4 CPU semantics | pass | pinned Musashi 313ebf1b: PC, SR, D0-D7, A0-A7 and cycle count equal for 7 live operands (including 24-bit masking and a high-byte-garbage operand) |
+| C5 interrupts | pass on measured routes | below |
+| C6 independent reference | **not met** | no pinned Genesis-level emulator harness exists in the repository (the only independent semantics oracle is Musashi, CPU only). A Mednafen binary is installed locally, but it is not pinned, no state/RAM extraction harness exists for it in the repository and it was not evaluated or used as proof |
+| C7 non-regression | pass | fast preset (209 tests) plus 13 focused suites at the validated head; strict-C11 compile of every synthetic generated program |
+
+### Synthetic fixtures (`genesis_static_ram_jmp_thunk_generated_test`, strict C11, deterministic)
+
+A both stubs in the first emission, opcode-only guard, no fixed target in the body. B real scheduler run (400,000-dispatch budget): the level-6 handler runs 36 times and the two level-4
+handlers 4,143 and 4,142 times through the one retargeted body, no stop. C construction behind a branch the preparation never takes: entries still emitted. D uninstalled thunk: refused. E JSR,
+JMP.W, NOP, JMP (A0), a different word over the opcode: refused. F odd, device-space, beyond-image, work-RAM and `$FFFFFFFF` operands: `unresolved_indirect_target`, nothing committed;
+`$AB002000` runs as `$002000`. G conflicting store, long store spanning the opcode, a different opcode, no operand constructor, `CLR.W`, unreached construction, register-indirect writer,
+unrelated address: no entry for the affected stub (the unaffected stub keeps its own). H subsumed materialization, refused different form, unrelated materialization works. Plus admission:
+a first-emission selective plan holds both stubs and follows no live operand; a destination outside the plan stops with the typed stop.
+
+### Real routes (R1, ADR 0271 addendum; headless, 7,504 virtual frames, finite budget, 1,800 s timeout)
+
+| image | arm | stop | H-interrupts undelivered | frames / audio digest | against `BROAD-CAND` |
+|---|---|---|---|---|---|
+| T1 | `CAND`, `BASE`, `BROAD-CAND` | none | 0, 0, 0 | all equal | `CAND` equal on every field |
+| T2 | `CAND` | none | 0 | equal to `BROAD-CAND` | equal on every field |
+| T2 | `BASE` | none (default skip policy) | **2** | frames equal; audio digest and YM write count differ | explained by the two dropped level-4 interrupts |
+| T2 | `BASE`, strict H-interrupt policy | `hint_handler_not_installed` at virtual frame 828 | - | - | `CAND` strict: runs all 7,504 frames, no stop |
+
+R1 reaches gameplay on both (inspected captures: standalone in a level, combined in an in-game scene), but it exercises few H-interrupts: T1 never enables one, T2 two. So the route shows
+that the previously dropped level-4 vector is now delivered and that `CAND` equals the broad program, not that H-interrupt effects (CRAM/VSRAM splits, water lines) are correct.
+The 84-act coverage of ADR 0270 was **not** re-run: its validation image and route scripts were local, were not retained, and re-creating them would have meant a derived ROM.
+`CAND` is also not independent of `BROAD-CAND` for the new behaviour (both use the new entries); only `BASE` is the independent older executable.
+
+H-target presence: the authorized image has 11 immediate store sites writing 7 distinct handler addresses into the level-4 operand; all 7 are in the emitted compiled-entry table of the
+selective `CAND` program (and of `BASE`), so a retarget to any of them dispatches. A retarget to an address outside the table stops with the typed stop; the destination set is not proven.
+
+## 3. Cost (report only; one cold build per arm, not the median of three; `segarecomp build`, GCC 13.3 `-O1`, `--jobs 4`, one build at a time)
+
+| image | arm | M68K emissions | CPU s (user+sys) | wall s | peak RSS MiB | final C MB | exe MB | K/U |
+|---|---|---|---|---|---|---|---|---|
+| T1 | `CAND` | 1 | 311 | 113 | 1,168 | 227.3 | 47.0 | 36.9 % |
+| T1 | `BASE` | 2 | 576 | 211 | 1,197 | 227.3 | 47.0 | 36.9 % |
+| T1 | `BROAD-CAND` | 1 | 704 | 223 | 1,999 | 515.1 | 110.1 | - |
+| T2 | `CAND` | 1 | 574 | 217 | 2,332 | 405.2 | 83.0 | 37.0 % |
+| T2 | `BASE` | 2 | 1,067 | 402 | 2,385 | 405.2 | 83.0 | 37.0 % |
+| T2 | `BROAD-CAND` | 1 | 1,245 | 408 | 3,858 | 883.9 | 193.4 | - |
+
+Identities: U 989,197 / K0 357,821 / K 365,269 (T1) and 1,981,349 / 711,028 / 733,828 (T2); `BASE` U is one lower and K one lower (the level-4 stub is absent). Thunks found statically 2/2, by
+observation 0 (`BASE`: 0 statically, 1 by observation). No materialization-driven M68K recompilation. Cumulative compiled C is not reported: the CLI does not expose per-round unit counts;
+`BASE` compiles its first emission and then the changed units, which is the CPU difference above (about -46 % on both images). Z80 materialization still runs (the build is not claimed one-shot overall).
+
+## 4. Proof authority and fail-closed review (summary)
+
+The producer proves only that the cartridge's reachable code contains the constant stores; it never proves installation order or the absence of other writers. The runtime opcode guard
+therefore stays authoritative and any mismatch refuses with nothing committed (an interrupt's own entry effects are not undone and are not claimed to be). A static identity never
+relaxes target authority: destinations are checked against the final compiled-entry table on every entry. Known limits: recognition is `JMP (xxx).L` from level-4/level-6 vector targets only;
+an odd destination stops instead of raising an address error; the legacy C3 emission route has no shared compiled-entry lookup, so it cannot emit such an entry (it yields a translation rejection; not exercised, since only the general-startup route resolves the vectors).
+
+## 5. Consequences and next steps
+
+- Product defaults: `STATIC_THUNKS_ONLY` withholds default-on promotion of the changed level-4 delivery. Merge needs an operator decision or a Genesis-level reference run on the same routes
+  (level-4 effects on CRAM/VSRAM, H-interrupt counts, RTE and timing) or on the retained all-acts coverage.
+- Identity: contract v3; every Genesis Optimized library entry rebuilds once.
+- Not done: `JMP (xxx).W`; other vectors; a Genesis-level reference.
+
+## 6. Addendum: level select and debug mode on the retained validation image (routes R2 and R3, ADR 0271 addenda, frozen before running)
+
+Image: the retained validation-only S3&K image (combined image, one byte retargeted to re-enable the title-screen level-select and debug input; local, never shipped). Arms `CAND` and `BASE` (product main), both Optimized gen2 selective;
+`CAND` reports `ram_thunks=2`, 0 preparation rounds. Headless viewer program, frame exact, finite budget and wall timeout, original 4:3.
+
+**R2, played start, all 28 acts (debug mode armed, not flown).** `CAND`: no typed stop, 0 undelivered level-4 interrupts on all 28 acts. `BASE`: 5,655 undelivered, on 7 acts (AIZ2 1,195, CNZ2 884, LBZ2 3,568, and 2-2 on AIZ1, HCZ1, HCZ2, ICZ2).
+Captures differ exactly on the three acts with hundreds of drops; the four acts with 2 drops, and the 21 with none, are bit-identical. No act differs without `BASE` having dropped interrupts.
+Inspected side by side (candidate left, base right): in CNZ2 and LBZ2 the candidate shows the water palette split below the water line (blue-tinted water and ground) that the base never shows; AIZ2's scene is the same but the level timer differs (0:20 vs 0:17), so the programs
+progress differently once interrupts are dropped. This is consistent with how those levels use the H-interrupt for the water line, but it is a visual plausibility check made by me, not a comparison with a reference.
+
+**R3, debug-mode serpentine flight, AIZ2, CNZ2, LBZ2 (about 15,400-17,300 polls each).** `CAND`: no typed stop, 0 undelivered. `BASE`: 321, 2 and 2 undelivered. All 11 captures (4,000-16,500) are bit-identical between arms: the
+base's drops fall between the capture points or are invisible there, so R3 shows the candidate is stable under debug flight and equals base where base lost little, not new visual evidence.
+
+**Effect on the decision.** Stronger evidence for C5 on a gameplay-wide set (28 acts, no stop, no dropped level-4 interrupt, differences confined to acts where the old executable dropped them). C6 is still not met: no independent Genesis reference, so the
+verdict stays `STATIC_THUNKS_ONLY` and the PR stays draft. The 84-act set of ADR 0270 (three routes per act) is partly covered (played start and a debug flight on three acts), not repeated in full.
+
+## 7. Addendum: independent Genesis-level reference (gate C6), review fixes and decision
+
+### 7.1 Reference infrastructure reused
+
+The pinned Genesis Plus GX of `tests/genesis_oracle/pins.py` (revision `939ce4f0...`, exact HEAD and clean tracked tree verified by the existing contract; built in a temporary copy) and the existing libretro host
+`tests/genesis_oracle/libretro_host.c`. The host gained two optional, inert-by-default modes (`--pad` frame-keyed player-1 input, `--capture` video frame and 64 KiB work RAM at chosen ordinals) and a per-button input
+fallback; its original use is unchanged (`tests/genesis_z80_oracle_smoke_test.py` passes as before). No second host, no new dependency; the checkout lives in the ignored `.tools/genesis-oracles/`.
+
+### 7.2 Synthetic H-interrupt differential (`tests/genesis_hint_ram_jmp_reference_test.py`, fixture `tests/genesis_hint_ram_jmp_fixture.py`, project-authored)
+
+The ROM builds a `JMP (xxx).L` in work RAM from constant stores, points the level-4 vector at it, enables the H-interrupt, runs handler A four times, retargets the operand to handler B (four times), back to A (four times), masks all
+interrupts and signals completion. **Result: the generated-native program and the pinned Genesis Plus GX agree exactly** on handler counts (A 8, B 4), the interrupt order (`AAAABBBBAAAA`), the SR stacked on entry (`$2000`), the SR inside
+the handler (`$2400`) and after the final mask (`$2700`), and the absence of phase timeouts. Controls: H-interrupt disabled and interrupt mask 4 agree on "no interrupt" (all three waits time out in both). An opcode other than `JMP` at the stub
+and an unsupported live target run no handler in either machine (the reference executes whatever follows and never completes; the generated program drops the unproven vector, or stops with its typed stop). **Discrimination:** the same test removes
+level-4 delivery from the generated program (the old behaviour) and requires the comparison to fail; it does. Expectations for the normal fixture are authored from the architecture in the test, not copied from either machine.
+
+### 7.3 Authentic combined image, validation image, routes R4 and R5 (frozen in ADR 0271, results as measured)
+
+Reference and generated-native arms ran the retained validation image (never shipped) with identical pad events, USA/NTSC-U, finite budgets and timeouts.
+
+- **R4** (played start, frame paired, water-line observable). **Failed its frozen gate.** The machines follow the route identically for a few hundred frames, then game physics diverges (different score and position at the same frame),
+  and the row-profile detector also fired on level graphics. Per its own rule the route fails closed.
+- **R5** (debug-mode flight, differing-pixel fraction). **Failed its frozen gates.** `CAND` and `BASE` were identical on CNZ2 and LBZ2 (the flight does not exercise the dropped level-4 interrupts at the captured frames: `BASE` and `CAND`
+  dispatch counts are equal), so the route does not discriminate; `CAND`'s median differing fraction against the reference was 5.3 % (CNZ2) and 7.1 % (LBZ2), above the 2 % bound (renderer representation differences between the machines), and AIZ2 was
+  unpaired (median 20 %).
+- **Exploratory, post-hoc (not a gate, not pre-registered; computed afterwards from the R4 captures with R5's fraction):** in the played-start route, the differing fraction against the reference stays at 0.02-0.18 for `CAND` on all 30 LBZ2
+  frames while `BASE` rises to 0.42-0.74 on 12 of them; on AIZ2 `BASE` is at 0.28-0.98 for the first 18 frames while `CAND` is at 0.12-0.24; on CNZ2 the arms are equal until the machines' game progress diverges (frame 22 on). This is encouraging
+  evidence that the candidate tracks the independent reference where the old executable does not, but it was chosen after seeing data and does not satisfy a frozen gate.
+
+### 7.4 Independent reviews and corrections
+
+Two independent adversarial reviews of the actual diff: both `PASS`, no blocker. Findings fixed in this PR: multi-register `MOVEM` stores are conflicting writers by register-count extent (regression fixture `conflicting_movem`); the precedence
+overlap test against existing entries is now an exact interval test (a descriptor ending before a static entry no longer conflicts). Notes carried: the Musashi differential only claims "verified against Musashi" when
+`SEGARECOMP_M68K_RAM_JMP_MUSASHI_CHECKOUT` points at the pinned checkout (CI without it runs the synthetic half only); mirror-address writers are absent from the conflict evidence because discovery cannot decode them as supported stores
+(they also cannot run); the recognizer remains positive evidence only, with the opcode guard authoritative.
+
+### 7.5 Decision
+
+**`STATIC_THUNKS_ONLY` is retained.** The independent reference now exists and agrees with the generated program exactly on the synthetic fixture, but the real-route gates registered for it (R4, R5) were not met, so frozen gate C6 is not satisfied by
+route evidence and is not reinterpreted as satisfied. The PR stays draft. What would settle it: a pre-registered, paired confirmation (for example the exploratory LBZ2/AIZ2 comparison, with its metric and thresholds fixed in advance) accepted by the operator,
+or a renderer-aligned comparison of palette/RAM state at game-state-defined sync points.
+
+## 8. Addendum: raster effect check (F1/F1b) and authentic sanity check (F2); final recommendation
+
+### 8.1 Synthetic raster effect against the pinned Genesis Plus GX
+
+- **F1 (one-shot, as first pre-registered): FAILED, kept as historical evidence.** Both machines ran handler A then handler B in order (blue, then red, then green), so the retarget selected the right handler in both, but the row alignment criterion failed: the fixture enables the
+  H-interrupt mid-frame with a stale H counter, and there the generated scheduler delivers an interrupt at the enabling line (first red band at row 217, green at row 80 of the next frame) while the reference delivers the first interrupt on the next frame's counter
+  (blue 0-78, red 79-158, green 159-223). That edge belongs to the existing H-interrupt scheduler and applies to ROM handlers equally; it is not part of the RAM `JMP` mechanism and was not investigated further. (A first fixture also wrote CRAM before VDP mode 5 was enabled, which the reference treats
+  as a Mode 4 write: a fixture bug, fixed, not an implementation defect.)
+- **F1b (steady state, pre-registered after F1's failure, before it was run): PASSED.** Handler A writes CRAM[0] red and retargets the stub to B; B writes green and retargets back; two interrupts per frame. Both machines show the same three-band frame (green, red, green):
+  boundaries at rows 80/160 in the generated program and 79/159 in the reference (within 1 row), the same band order, stable over the last 10 of 40 frames; with the H-interrupt disabled neither machine shows a boundary. The test
+  (`tests/genesis_hint_raster_reference_test.py`) executes its reference half when `SEGARECOMP_GENESIS_ORACLE_CHECKOUT` is set and fails when `SEGARECOMP_REQUIRE_GENESIS_REFERENCE=1` and the checkout is missing; without either it prints that the reference half was **not executed**.
+  Together with section 7.2 this is independent evidence for interrupt entry, retargeting through the live operand, `RTE`, resumption and the visible CRAM raster effect on a project-authored ROM.
+
+### 8.2 Authentic sanity check (F2), existing captures only
+
+- (a) Handlers executed: on the LBZ2 played-start route `CAND` reports 0 undelivered level-4 interrupts, `BASE` 3,568 (R2).
+- (b) As pre-registered, "a tint step of at least 24 across one row boundary" is **not discriminating**: busy level graphics produce such a step in every frame of every arm (30/30), so (b) is not satisfied as written and no claim is made from it.
+- (c) Post-hoc (not pre-registered, labelled as such): taking each frame's strongest tint-step row, `CAND` is within 3 rows of the reference's in 30/30 LBZ2 frames (`BASE` 26/30) and 18/30 AIZ2 frames (`BASE` 1/30); CNZ2 is 22/30 for both because game state diverges from the reference after about frame 22. The strongest-step row is a weak proxy for the
+  water line, and game states are only loosely aligned, so this is supporting evidence only. The machines cannot be aligned further with the existing instrumentation; the check stops here as instructed.
+
+### 8.3 Review and defects
+
+No new correctness defect in the feature. The only disagreements found were a fixture ordering bug (Mode 4 CRAM write) and the pre-existing enable-edge scheduler difference above.
+
+### 8.4 Decision and recommendation
+
+**`STATIC_THUNKS_ONLY` is retained: frozen gate C6 is not technically met.** What is met: an independent reference exists and agrees exactly with the generated program on the interrupt-semantics fixture and on the steady-state raster fixture, the old behaviour is detected, and gameplay evidence shows the candidate dropping no
+level-4 interrupts where the old executable dropped thousands and tracking the reference better than the old executable on two acts. What is not met: no pre-registered real-route comparison passed (R4, R5 failed; F2 (b) non-discriminating; F2 (c) post-hoc).
+**Recommendation: `MERGE_WITH_DOCUMENTED_LIMITATIONS`, an operator decision, not an automatic one.** An operator merging accepts: (1) level-4 delivery through RAM stubs becomes default-on for the cartridges the recognizer admits (known: the two S&K stubs), changing their behaviour from dropped interrupts to executed handlers, validated on synthetic
+fixtures against an independent emulator and on gameplay only by non-gated, partly post-hoc comparisons; (2) the pre-existing scheduler difference at the H-interrupt enable edge now matters for those games (it applied to every ROM-handler game before); (3) every Genesis Optimized library entry rebuilds once (contract v3); (4) CI does not exercise the reference half (checkout absent) or the Musashi half (checkout env unset).
+If the operator wants C6 met literally, a pre-registered real-route comparison must pass first.

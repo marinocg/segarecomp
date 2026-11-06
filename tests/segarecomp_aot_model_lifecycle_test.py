@@ -74,7 +74,7 @@ def main():
             require(fields["model"] == "11258708285e4427a3e38e02732e8f93b4c5d497883101f0629223d2366a98e1", line)
             require(re.fullmatch(r"[0-9a-f]{64}", fields["token_contract"]) and re.fullmatch(r"[0-9a-f]{64}", fields["weights"]), line)
             require(int(fields["cells"]) == (len(data) + 127) // 128 and int(fields["ml_selected"]) == -(-int(fields["cells"]) * 35 // 100), line)
-            require(int(fields["admitted"]) <= int(fields["broad"]) and fields["contract"] == "segarecomp.admission_contract.v2", line)
+            require(int(fields["admitted"]) <= int(fields["broad"]) and fields["contract"] == "segarecomp.admission_contract.v3", line)
         else:
             require(fields["producer"] == "broad" and fields["fallback"] == "1" and fields["validator"] in ("not_run", "rejected"), line)
             require(first.stdout == plain.stdout, "a fallback emission must be byte-identical to broad")
@@ -115,7 +115,7 @@ def main():
         sc, s1, s2 = status(compat_out), status(v1_out), status(g2_out)
         require(sc["requested_model"] == "none" and sc["model_family"] == "none" and sc["fallback_class"] == "none" and sc["validator"] == "not_run", str(sc))
         require(s1["requested_model"] == "v1" and s1["effective"] in ("ml_region", "broad"), "optimized alone is still v1: " + str(s1))
-        require(s2["requested_model"] == "gen2" and s2["effective"] in ("ml_region_gen2", "broad") and s2["analysis_contract"] == "segarecomp.admission_contract.v2", str(s2))
+        require(s2["requested_model"] == "gen2" and s2["effective"] in ("ml_region_gen2", "broad") and s2["analysis_contract"] == "segarecomp.admission_contract.v3", str(s2))
         require(s2["fallback_class"] in KNOWN_CLASSES and s2["reason"] in KNOWN_REASONS and s2["fallback"] == (s2["effective"] == "broad"), str(s2))
         require(len({sc["identity"], s1["identity"], s2["identity"]}) == 3, "identities never alias")
         require(s2["policy_identity"] == pid(g2_id) and s1["policy_identity"] == pid(v1_id) and sc["policy_identity"] == pid(compat_id),

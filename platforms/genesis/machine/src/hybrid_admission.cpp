@@ -19,6 +19,15 @@ namespace segarecomp {
 
 namespace {
 
+// ADR 0271: a statically established work-RAM `JMP (xxx).L` reads its destination live at run time. Its representative operand is not a
+// fixed successor, so closure, prune and validator obligations must never be derived from it; the target stays a dynamic transfer
+// guarded by the compiled-entry lookup (never claimed covered).
+M68kControlSuccessors genesis_entry_control_successors(const FrontendAnalysis::ImmutableRomAotEntry &entry) {
+  if (entry.ram_jmp_live_operand) return {};
+  return m68k_control_successors(entry.operation);
+}
+
+
 constexpr std::uint32_t bus_mask = UINT32_C(0x00FFFFFF);
 
 std::string hex8(std::uint32_t value) {
@@ -200,7 +209,7 @@ std::optional<std::string> apply_genesis_hybrid_admission(const FrontendProgram 
       continue;
     }
     ++admitted_count;
-    const auto control = m68k_control_successors(entry->operation);
+    const auto control = genesis_entry_control_successors(*entry);
     for (const auto &successor : control.successors) {
       const auto target = successor.target & bus_mask;
       if (broad.contains(target) && !admitted(target)) return "fixed_successor_not_admitted";
@@ -286,7 +295,7 @@ GenesisRegionPruneResult prune_genesis_region_admission(const FrontendProgram &p
   // materialized RAM thunk has no cartridge source (`alias_source_address` is its own RAM address) and so stays keyed by that RAM address.
   const auto in_region = [&](std::uint32_t address, const FrontendAnalysis::ImmutableRomAotEntry &entry) {
     if (genesis_hybrid_admission_contains(regions, address)) return true;
-    return entry.execution_alias && !entry.materialized_ram_thunk && genesis_hybrid_admission_contains(regions, entry.alias_source_address & bus_mask);
+    return entry.execution_alias && !entry.materialized_ram_thunk && !entry.ram_jmp_live_operand && genesis_hybrid_admission_contains(regions, entry.alias_source_address & bus_mask);
   };
   for (const auto &[address, entry] : broad)
     if (in_region(address, *entry)) {
@@ -303,7 +312,7 @@ GenesisRegionPruneResult prune_genesis_region_admission(const FrontendProgram &p
   std::vector<std::size_t> violating;                               // identities whose obligation leaves K0 outright
   for (std::size_t i = 0; i < nodes.size(); ++i) {
     std::vector<std::uint32_t> targets;
-    const auto control = m68k_control_successors(node_entry[i]->operation);
+    const auto control = genesis_entry_control_successors(*node_entry[i]);
     for (const auto &successor : control.successors) targets.push_back(successor.target & bus_mask);
     if (control.stacked == M68kStackedContinuationKind::call_continuation) targets.push_back(control.stacked_address & bus_mask);
     bool leaves = false;
@@ -379,7 +388,7 @@ GenesisRegionPruneResult close_genesis_region_admission(const FrontendProgram &p
   result.universe_count = broad.size();
   const auto in_region = [&](std::uint32_t address, const FrontendAnalysis::ImmutableRomAotEntry &entry) {
     if (genesis_hybrid_admission_contains(regions, address)) return true;
-    return entry.execution_alias && !entry.materialized_ram_thunk && genesis_hybrid_admission_contains(regions, entry.alias_source_address & bus_mask);
+    return entry.execution_alias && !entry.materialized_ram_thunk && !entry.ram_jmp_live_operand && genesis_hybrid_admission_contains(regions, entry.alias_source_address & bus_mask);
   };
   std::set<std::uint32_t> admitted;
   std::vector<std::uint32_t> wave;
@@ -404,7 +413,7 @@ GenesisRegionPruneResult close_genesis_region_admission(const FrontendProgram &p
     if (++result.rounds > max_rounds) return reject("region_close_cap_exhausted");
     std::vector<std::uint32_t> next;
     for (const auto address : wave) {
-      const auto control = m68k_control_successors(broad.at(address)->operation);
+      const auto control = genesis_entry_control_successors(*broad.at(address));
       std::vector<std::uint32_t> targets;
       for (const auto &successor : control.successors) targets.push_back(successor.target & bus_mask);
       if (control.stacked == M68kStackedContinuationKind::call_continuation) targets.push_back(control.stacked_address & bus_mask);

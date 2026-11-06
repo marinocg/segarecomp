@@ -104,7 +104,7 @@ def main():
     fields = dict(token.split("=", 1) for token in line.split()[3:])
     assert fields["producer"] == "ml_region_gen2" and fields["closure"] == "close" and fields["validator"] == "accepted" and fields["thunks"] == "1", line
     assert fields["pruned"] == "0" and int(fields["k"]) == int(fields["k0"]) + int(fields["added"]) and int(fields["roots_added"]) >= 1, line
-    assert fields["contract"] == "segarecomp.admission_contract.v2", line
+    assert fields["contract"] == "segarecomp.admission_contract.v3", line
     units = lambda name: sorted((shard / name).glob("*"))
     assert [(u.name, u.read_bytes()) for u in units("a")] == [(u.name, u.read_bytes()) for u in units("b")], "deterministic generated C"
     strict = run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-fsyntax-only", "-I", str(pathlib.Path(source) / "platforms/genesis/runtime"),

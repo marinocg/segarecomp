@@ -42,7 +42,7 @@ Every successful build writes `status.json` with an always-present `aot_policy` 
                                        // non_finite_score | empty_proposal | prune_rejected | validator_rejected | no_analysis | no_report | plan_alias_set_mismatch
   "fallback_class": "none",            // none | producer_incompatible | producer_input | proposal_rejected | validator_rejected | not_applicable | exact_map
   "model_family": "gen2",              // none | v1 | gen2
-  "analysis_contract": "segarecomp.admission_contract.v2",
+  "analysis_contract": "segarecomp.admission_contract.v3",
   // only when an ML producer ran and was accepted:
   "model": "11258708…98e1", "schema_sha256": "cf43e758…",          // v1: "seg046-features-v1" / feature-schema digest
   "token_contract_sha256": "9a1f4f4f…", "rank_policy": "B35", "rank_plan_sha256": "8c4d98b9…", "weight_table_sha256": "72699dbc…",   // gen2 only
@@ -97,3 +97,8 @@ proposal, every machine root, every materialized identity and their fixed succes
 including the closure's resource cap, is the broad fallback (`prune_rejected`, sanitized detail `closure_rejected` in the build log). `status.json` then adds `region_closure`, `added`, `roots_added` and `ram_thunks`, and
 `pruned` is 0. A successful prune, an emission without a thunk, a v1 request and an explicit `--admission-plan` (broad on a thunk emission, as before) do not use it.
 Closure runs on any prune rejection of such an emission, so a proposal that the prune would reject for another reason is also completed rather than falling back. Closure is structural: it proves nothing about dynamic targets. A dynamic transfer to a start outside the admitted set stops fail-closed with its typed stop; a Genesis program does not restart itself in Compatibility.
+
+A work-RAM `JMP (xxx).L` that the cartridge's reachable code constructs for an immutable interrupt vector is a **static RAM thunk** (ADR 0271): it is in the first emission, so no
+observing round is needed, and it counts as a thunk (`ram_thunks`, `roots_added`) for the closure above. Its destination is a live operand: closure and the validator derive no
+fixed successor from it, so the destinations stay dynamic transfers (not covered by closure). A destination outside the admitted set stops with `unresolved_indirect_target`; the Compatibility build
+admits every decodable start and is unaffected by that limit.

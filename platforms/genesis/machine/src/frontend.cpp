@@ -11,6 +11,8 @@
 #include <limits>
 #include <map>
 #include <numeric>
+#include <array>
+#include <bit>
 #include <set>
 #include <sstream>
 #include <string>
@@ -6305,6 +6307,76 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
 
 namespace {
 
+// ADR 0271: static recognition of a work-RAM `JMP (xxx).L` thunk. Positive evidence only: the cartridge's own reachable (discovered)
+// instructions contain a constant store of the JMP opcode word at the address an immutable interrupt vector points to, and a long
+// store at the following operand address, and no other reachable operation with an absolute destination (MOVEM by its register count) overlapping the opcode word. This is never a proof that the form
+// is installed before its first use; the generated whole-opcode runtime guard stays authoritative. Writers the discovery cannot see
+// (register-indirect stores, DMA, unreached code) are not examined and are therefore never evidence.
+std::optional<std::uint32_t> genesis_work_ram_offset(std::uint32_t address) {
+  address &= UINT32_C(0x00FFFFFF);
+  if (address < UINT32_C(0x00E00000)) return std::nullopt;
+  return address & UINT32_C(0xFFFF);  // $E00000-$FFFFFF mirror the 64 KiB work RAM
+}
+
+std::optional<std::uint32_t> genesis_absolute_destination_offset(const M68kEffectiveAddress &ea) {
+  if (ea.mode != M68kEaMode::absolute_word && ea.mode != M68kEaMode::absolute_long) return std::nullopt;
+  return genesis_work_ram_offset(ea.absolute_address);
+}
+
+std::uint32_t genesis_access_bytes(M68kMemoryAccessWidth width) {
+  return width == M68kMemoryAccessWidth::byte ? 1U : width == M68kMemoryAccessWidth::word ? 2U : 4U;
+}
+
+// Bytes an operation may write from its absolute destination: one access, or (MOVEM to memory) one access per listed register.
+std::uint32_t genesis_write_extent(const M68kIrOperation &operation) {
+  const std::uint32_t width = genesis_access_bytes(operation.size);
+  if (operation.kind != M68kIrKind::movem_transfer) return width;
+  return width * std::max<std::uint32_t>(1U, static_cast<std::uint32_t>(std::popcount(operation.movem_register_mask)));
+}
+
+bool genesis_ranges_overlap(std::uint32_t first, std::uint32_t first_length, std::uint32_t second, std::uint32_t second_length) {
+  return first < second + second_length && second < first + first_length;
+}
+
+constexpr std::uint16_t genesis_jmp_absolute_long_opcode = 0x4EF9U;
+constexpr std::uint32_t genesis_ram_jmp_long_length = 6U;
+
+// The candidate execution addresses: immutable interrupt-vector targets in work RAM that carry a statically evidenced `JMP (xxx).L`.
+std::vector<Address> genesis_static_ram_jmp_thunk_candidates(const FrontendAnalysis &analysis) {
+  std::set<Address> roots;
+  if (analysis.irq6_vector_in_work_ram) roots.insert(analysis.irq6_vector_ram_entry);
+  if (analysis.hint_vector_in_work_ram) roots.insert(analysis.hint_vector_ram_entry);
+  std::vector<Address> result;
+  for (const Address root : roots) {
+    if ((root & 1U) != 0U || root < genesis_alias_work_ram_begin ||
+        static_cast<std::uint64_t>(root) + genesis_ram_jmp_long_length > genesis_alias_work_ram_end)
+      continue;
+    const std::uint32_t base = root & UINT32_C(0xFFFF);
+    bool opcode_store = false;
+    bool operand_store = false;
+    bool conflict = false;
+    for (const auto &operation : analysis.ir) {
+      const auto offset = genesis_absolute_destination_offset(operation.destination_ea);
+      if (!offset) continue;
+      const bool exact_opcode_store = operation.kind == M68kIrKind::write_move && operation.size == M68kMemoryAccessWidth::word &&
+                                      operation.source_ea.mode == M68kEaMode::immediate &&
+                                      (operation.source_ea.immediate_value & 0xFFFFU) == genesis_jmp_absolute_long_opcode && *offset == base;
+      if (exact_opcode_store)
+        opcode_store = true;
+      else if (genesis_ranges_overlap(*offset, genesis_write_extent(operation), base, 2U))
+        conflict = true;  // any other reachable operation naming the opcode word: ambiguous, never proof
+      if (operation.kind == M68kIrKind::write_move && operation.size == M68kMemoryAccessWidth::long_word && *offset == base + 2U)
+        operand_store = true;
+    }
+    if (opcode_store && operand_store && !conflict) result.push_back(root);
+  }
+  return result;
+}
+
+}  // namespace
+
+namespace {
+
 bool populate_immutable_rom_aot_entries(const FrontendProgram &program,
                                         FrontendAnalysis &analysis) {
   std::map<Address, FrontendAnalysis::ImmutableRomAotEntry> entries;
@@ -6422,6 +6494,33 @@ bool populate_immutable_rom_aot_entries(const FrontendProgram &program,
       }
     }
   }
+  // ADR 0271: statically established work-RAM `JMP (xxx).L` thunks with a live operand. The CPU-owned decoder verifies the exact form
+  // from a representative window (zero operand); the entry guards only the opcode word at run time. An address that an existing
+  // identity (alias or other entry) already overlaps acquires no static entry, so no existing authority is replaced or duplicated.
+  for (const Address execution : genesis_static_ram_jmp_thunk_candidates(analysis)) {
+    bool overlapped = false;  // exact interval test; the longest M68K instruction is 10 bytes, so no overlapping entry starts earlier than execution - 10
+    for (auto other = entries.lower_bound(execution >= 10U ? execution - 10U : 0U); other != entries.end() && other->first < execution + genesis_ram_jmp_long_length; ++other)
+      overlapped = overlapped || static_cast<std::uint64_t>(other->first) + other->second.decoded.provenance.length.value > execution;
+    if (overlapped) continue;
+    const std::array<std::uint8_t, 6> window{0x4EU, 0xF9U, 0U, 0U, 0U, 0U};
+    DecodeSource source{CpuVariant::mc68000, {TargetAddressSpace::m68k_program, execution}, MoveqImageOffset{0U}};
+    auto decoded_result = decode_m68k_instruction(window, source, M68kDecodeProfile::general_startup);
+    auto *decoded = std::get_if<M68kDecodedInstruction>(&decoded_result);
+    if (decoded == nullptr || decoded->kind != M68kInstructionKind::jmp || decoded->source_ea.mode != M68kEaMode::absolute_long ||
+        decoded->provenance.length.value != genesis_ram_jmp_long_length || decoded->raw_bytes.size() != genesis_ram_jmp_long_length)
+      return false;
+    auto operation = lift_m68k_instruction(*decoded);
+    if (!m68k_operation_is_immutable_rom_aot_safe(operation, return_target_authority_available)) return false;
+    MappingClaim claim;
+    claim.name = "static_work_ram_jmp_thunk";
+    claim.target_begin = {TargetAddressSpace::m68k_program, execution};
+    claim.target_end = {TargetAddressSpace::m68k_program, execution + genesis_ram_jmp_long_length};
+    claim.image_begin = {0U};
+    claim.image_end = {static_cast<std::uint64_t>(genesis_ram_jmp_long_length)};
+    FrontendAnalysis::ImmutableRomAotEntry candidate{*decoded, operation, claim, true, execution};
+    candidate.ram_jmp_live_operand = true;
+    entries.emplace(execution, std::move(candidate));
+  }
   // ADR 0097 amendment: materialized work-RAM JMP thunks. The bounded-build-time-materialization images own their exact bytes;
   // the CPU-owned decoder and lifter produce the identity (execution-relative provenance, semantics and timing), and the entry
   // keeps the runtime whole-instruction byte-identity guard every execution alias carries.
@@ -6434,6 +6533,20 @@ bool populate_immutable_rom_aot_entries(const FrontendProgram &program,
         continue;
       const std::uint32_t execution = image.mappings.front().execution_base;
       const auto bytes = executable_image_bytes(images->set, image);
+      // ADR 0271 precedence: an observed `JMP (xxx).L` over an address that already carries the static live-operand entry is the same
+      // structural identity with one more sample of the live operand. It is subsumed: the static entry stays, nothing is re-emitted.
+      bool subsumed = false;
+      for (auto statically = entries.lower_bound(execution >= 10U ? execution - 10U : 0U);
+           statically != entries.end() && statically->first < execution + bytes.size(); ++statically) {
+        if (!statically->second.ram_jmp_live_operand ||
+            static_cast<std::uint64_t>(statically->first) + statically->second.decoded.provenance.length.value <= execution)
+          continue;  // not a static thunk, or one that ends before this descriptor starts
+        if (statically->first == execution && bytes.size() == genesis_ram_jmp_long_length && bytes[0] == 0x4EU && bytes[1] == 0xF9U)
+          subsumed = true;
+        else
+          return false;  // a different or overlapping form over a statically established thunk: ambiguous, fail closed
+      }
+      if (subsumed) continue;
       DecodeSource source{CpuVariant::mc68000, {TargetAddressSpace::m68k_program, execution}, MoveqImageOffset{0U}};
       auto decoded_result = decode_m68k_instruction(bytes, source, M68kDecodeProfile::general_startup);
       auto *decoded = std::get_if<M68kDecodedInstruction>(&decoded_result);
