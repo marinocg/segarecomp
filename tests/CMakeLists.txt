@@ -339,6 +339,14 @@ add_test(NAME genesis_general_startup_cli_test COMMAND ${Python3_EXECUTABLE} ${C
 # Consumer build route: `segarecomp build` (ROM -> generated C -> C compiler -> executable) without Python tooling.
 add_test(NAME segarecomp_build_command_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_build_command_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-125 (ADR 0273): performance profiling. The build profiler with a fake clock and synthetic compiler jobs; tools/perf_report.py on synthetic reports; and the real
+# `segarecomp build --performance-report` / headless runtime report with profiler-on/off equivalence on project-authored images.
+add_executable(build_profile_test build_profile_test.cpp)
+target_include_directories(build_profile_test PRIVATE ${PROJECT_SOURCE_DIR}/apps/segarecomp)
+segarecomp_enable_warnings(build_profile_test)
+add_test(NAME build_profile_test COMMAND build_profile_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+add_test(NAME perf_report_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/perf_report_test.py)
+add_test(NAME perf_integration_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/perf_integration_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_startup_runtime_c2_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_startup_runtime_c2_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
@@ -1022,7 +1030,7 @@ set(SEGARECOMP_EXTENDED_TESTS ghidra_mcp_smoke_test
 set(SEGARECOMP_FAST_TESTS segarecomp_tests segarecomp_build_command_test moveq_tests direct_flow_tests m68k_timing_tests m68k_dynamic_timing_tests
     genesis_runtime_run_tests genesis_vdp_render_frame_tests genesis_raster_display_modes_tests genesis_hint_region_controller_tests genesis_frame_export_tests
     m68k_frontend_rejection_tests genesis_general_startup_cli_test architecture_dependency_test
-    codegen_c11_emitter_ownership_test codegen_c11_translation_units_tests codegen_c11_shard_selection_tests restricted_files_test genesis_viewer_tests sv_perf_test
+    codegen_c11_emitter_ownership_test codegen_c11_translation_units_tests codegen_c11_shard_selection_tests restricted_files_test genesis_viewer_tests sv_perf_test build_profile_test perf_report_test
     cpu_m68k_static_discovery_tests genesis_startup_runtime_c2_test recompiler_fake_cpu_tests recompiler_no_genesis_policy_dependency_test
     genesis_bridge_defaults_test m68k_exception_contract_doc_test
     genesis_execution_coverage_tests reachability_challenger_tests reachability_pc_index_recovery_tests)

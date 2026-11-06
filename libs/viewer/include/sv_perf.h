@@ -263,10 +263,7 @@ static inline void sv_perf_write_json(const SvPerf *p, const SvPerfMeta *m, FILE
   fprintf(f, "],\"guest\":{\"master_ticks\":%llu},\"counters\":{", (unsigned long long)p->guest_master_ticks);
   for (i = 0U; i < SV_PERF_COUNTERS && m->counter_names[i] != NULL; ++i)
     fprintf(f, "%s\"%s\":%llu", i ? "," : "", m->counter_names[i], (unsigned long long)p->counters[i]);
-  fputs("},\"unavailable\":[", f);
-  for (i = 0U; i < 8U && m->unavailable[i][0] != NULL; ++i)
-    fprintf(f, "%s{\"metric\":\"%s\",\"reason\":\"%s\"}", i ? "," : "", m->unavailable[i][0], m->unavailable[i][1]);
-  fputc(']', f);
+  fputc('}', f);
   if (p->detailed && strcmp(m->privacy, "private") == 0) {
     n = p->history_total < SV_PERF_HISTORY ? p->history_total : SV_PERF_HISTORY;
     first = p->history_total - n;
@@ -277,7 +274,10 @@ static inline void sv_perf_write_json(const SvPerf *p, const SvPerfMeta *m, FILE
     }
     fputs("],\"columns\":[\"frame\",\"interval_us\",\"work_us\",\"emulation_us\",\"present_us\",\"missed\"]}", f);
   }
-  fputs("}}\n", f);
+  fputs("},\"unavailable\":[", f);
+  for (i = 0U; i < 8U && m->unavailable[i][0] != NULL; ++i)
+    fprintf(f, "%s{\"metric\":\"%s\",\"reason\":\"%s\"}", i ? "," : "", m->unavailable[i][0], m->unavailable[i][1]);
+  fputs("]}\n", f);
 }
 
 #endif
