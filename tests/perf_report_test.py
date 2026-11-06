@@ -163,7 +163,9 @@ def test_compare_build():
     warn = pr.comparability(a, c)
     require(any("jobs" in w for w in warn) and any("optimize" in w for w in warn), "config differences warned: " + str(warn))
     d = build_report(); d["build"]["compile"]["units_total"] = 20; d["build"]["compile"]["reused"] = 12
-    require(any("different number of units" in w for w in pr.comparability(a, d)), "different program")
+    require(any("different number of units" in w and not w.startswith("INFO") for w in pr.comparability(a, d)), "different program")
+    modded = pr.comparability(a, d, mod=True)
+    require(any(w.startswith("INFO modded") for w in modded) and "WARNING the builds compile" not in pr.compare_text(a, d, mod=True), "a vanilla vs modded comparison notes the expected difference")
     f = build_report(status="failed", failure={"stage": "compile"})
     require(any("failed" in w for w in pr.comparability(a, f)), "failed side warned")
     require(pr.comparability(a, runtime_report())[0].startswith("INCOMPARABLE"), "build vs runtime")

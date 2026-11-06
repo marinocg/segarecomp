@@ -628,9 +628,9 @@ static void draw_perf_overlay(SvHost *h, int out_w, int out_h, int top) {
     if (dev && p->virtual_frames > 0) {
       const double vf = (double)p->virtual_frames;
       const SvPerfSpan *s = p->span;
-      snprintf(line[lines++], sizeof line[0], "Emulation %.2f ms (VDP %.2f)", s[SV_SPAN_EMULATION].total_ns / vf / 1e6, s[SV_SPAN_VDP_COMPOSE].total_ns / vf / 1e6);
-      snprintf(line[lines++], sizeof line[0], "Present %.2f ms (upload %.2f)", s[SV_SPAN_PRESENT].total_ns / vf / 1e6, s[SV_SPAN_TEXTURE_UPLOAD].total_ns / vf / 1e6);
-      snprintf(line[lines++], sizeof line[0], "Audio %.2f ms  Pacing wait %.2f ms", s[SV_SPAN_AUDIO_PRESENT].total_ns / vf / 1e6, s[SV_SPAN_PACING_WAIT].total_ns / vf / 1e6);
+      snprintf(line[lines++], sizeof line[0], "Emulation %.2f ms (VDP %.2f)", (double)s[SV_SPAN_EMULATION].total_ns / vf / 1e6, (double)s[SV_SPAN_VDP_COMPOSE].total_ns / vf / 1e6);
+      snprintf(line[lines++], sizeof line[0], "Present %.2f ms (upload %.2f)", (double)s[SV_SPAN_PRESENT].total_ns / vf / 1e6, (double)s[SV_SPAN_TEXTURE_UPLOAD].total_ns / vf / 1e6);
+      snprintf(line[lines++], sizeof line[0], "Audio %.2f ms  Pacing wait %.2f ms", (double)s[SV_SPAN_AUDIO_PRESENT].total_ns / vf / 1e6, (double)s[SV_SPAN_PACING_WAIT].total_ns / vf / 1e6);
     }
   }
   for (i = 0; i < lines; ++i) { tw = sv_ui_text_w(SV_FONT_BODY, u, line[i]); if (tw > w) w = tw; }

@@ -220,6 +220,9 @@ void sms_sdl3_viewer_host(SmsSdl3Viewer *viewer, SmsViewerHost *host) {
   host->audio = viewer->audio != NULL ? sdl_audio : NULL; /* muted or no device: the core only drains the ring */
 }
 
+void sms_sdl3_viewer_set_perf(SmsSdl3Viewer *v, struct SvPerf *perf) { if (v != NULL) sv_host_set_perf(v->host, perf); }
+const char *sms_sdl3_viewer_renderer_name(const SmsSdl3Viewer *v) { return v != NULL ? sv_host_renderer_name(v->host) : NULL; }
+
 int sms_sdl3_viewer_audio_active(const SmsSdl3Viewer *v, uint64_t *overruns) {
   if (overruns != NULL) *overruns = v->overruns;
   return v->audio != NULL;

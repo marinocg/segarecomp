@@ -327,7 +327,8 @@ def summary_text(d: dict) -> str:
 
 # --------------------------------------------------------------------------------------------------------------------------------- compare
 
-def comparability(a: dict, b: dict) -> list[str]:
+def comparability(a: dict, b: dict, mod: bool = False) -> list[str]:
+    """`mod`: the two builds are meant to differ in program (vanilla vs patched/modded), so a different unit count is expected and noted instead of warned."""
     warn = []
     if a["kind"] != b["kind"]:
         return [f"INCOMPARABLE: kinds differ ({a['kind']} vs {b['kind']})"]
@@ -346,7 +347,9 @@ def comparability(a: dict, b: dict) -> list[str]:
         elif a["config"].get("compiler", {}).get("version") != b["config"].get("compiler", {}).get("version") and "version" in a["config"].get("compiler", {}):
             warn.append("compiler version differs")
         if a["build"]["compile"]["units_total"] != b["build"]["compile"]["units_total"]:
-            warn.append(f"the builds compile a different number of units ({a['build']['compile']['units_total']} vs {b['build']['compile']['units_total']}): not the same program")
+            ua, ub = a["build"]["compile"]["units_total"], b["build"]["compile"]["units_total"]
+            warn.append(f"INFO modded/patched comparison: the builds compile a different number of units ({ua} vs {ub}), as expected" if mod
+                        else f"the builds compile a different number of units ({ua} vs {ub}): not the same program (use --mod to compare a vanilla and a modded build)")
     else:
         fa, fb = a["runtime"]["frames"]["virtual"], b["runtime"]["frames"]["virtual"]
         if min(fa, fb) == 0 or max(fa, fb) / max(min(fa, fb), 1) > 1.25:
@@ -406,12 +409,12 @@ def compare_rows(a: dict, b: dict) -> list[tuple[str, dict | None]]:
     return rows
 
 
-def compare_text(a: dict, b: dict) -> str:
+def compare_text(a: dict, b: dict, mod: bool = False) -> str:
     out = []
-    warn = comparability(a, b)
+    warn = comparability(a, b, mod)
     out.append(f"compare {a['kind']} reports: before={a['status']} after={b['status']}")
     for w in warn:
-        out.append(f"WARNING {w}")
+        out.append(w if w.startswith("INFO") else f"WARNING {w}")
     if any(w.startswith("INCOMPARABLE") for w in warn):
         return "\n".join(out)
     out.append("(all differences are [derived] from the two reports' measured values; 'significant' = both >= "
@@ -625,11 +628,11 @@ def report_section(d: dict, heading: str) -> str:
     return "\n".join(out)
 
 
-def html_report(reports: list[dict], names: list[str]) -> str:
+def html_report(reports: list[dict], names: list[str], mod: bool = False) -> str:
     body = ["<h1>segarecomp performance report</h1>",
             "<p class='meta'>Self-contained: no network, no external script or font. Values come only from the report file(s); derived values state their rule in the console summary.</p>"]
     if len(reports) == 2:
-        warn = comparability(*reports)
+        warn = comparability(reports[0], reports[1], mod)
         for w in warn:
             body.append(f"<div class='warn {'bad' if w.startswith('INCOMPARABLE') else ''}'>{e(w)}</div>")
         if not any(w.startswith("INCOMPARABLE") for w in warn):
@@ -655,7 +658,7 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("validate"); s.add_argument("reports", nargs="+")
     s = sub.add_parser("summary"); s.add_argument("report")
-    s = sub.add_parser("compare"); s.add_argument("before"); s.add_argument("after"); s.add_argument("--html")
+    s = sub.add_parser("compare"); s.add_argument("before"); s.add_argument("after"); s.add_argument("--html"); s.add_argument("--mod", action="store_true", help="vanilla vs modded/patched builds: a different program is expected")
     s = sub.add_parser("html"); s.add_argument("reports", nargs="+"); s.add_argument("-o", "--output", required=True)
     s = sub.add_parser("sanitize"); s.add_argument("report"); s.add_argument("-o", "--output", required=True)
     s = sub.add_parser("check-shareable"); s.add_argument("report")
@@ -669,11 +672,11 @@ def main(argv=None) -> int:
             print(summary_text(load(args.report)))
         elif args.cmd == "compare":
             a, b = load(args.before), load(args.after)
-            print(compare_text(a, b))
+            print(compare_text(a, b, args.mod))
             if args.html:
-                Path(args.html).write_text(html_report([a, b], [args.before, args.after]), encoding="utf-8")
+                Path(args.html).write_text(html_report([a, b], [args.before, args.after], args.mod), encoding="utf-8")
                 print(f"wrote {args.html}")
-            if any(w.startswith("INCOMPARABLE") for w in comparability(a, b)):
+            if any(w.startswith("INCOMPARABLE") for w in comparability(a, b, args.mod)):
                 return 3
         elif args.cmd == "html":
             if len(args.reports) > 2:

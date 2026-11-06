@@ -109,7 +109,6 @@ static void perf_after_slice(void *ctx, GenesisRuntime *runtime) { (void)ctx; pe
 static void perf_write_report(const char *path, const char *status, const char *outcome, const GenesisViewerResult *r, const GenesisRuntime *runtime, const GenesisLiveFrameObserver *observer,
                               const GenesisRasterCapture *raster, const char *renderer, int unthrottled, uint32_t slice, const char *privacy) {
   SvPerfMeta meta;
-  FILE *f;
   memset(&meta, 0, sizeof meta);
   meta.platform = "genesis";
   meta.entry = "viewer";
@@ -146,10 +145,7 @@ static void perf_write_report(const char *path, const char *status, const char *
   meta.unavailable[1][0] = "z80_time"; meta.unavailable[1][1] = "aggregated in emulation: the Z80 is synchronized inside M68K retirement";
   meta.unavailable[2][0] = "dma_interrupt_counts"; meta.unavailable[2][1] = "no existing inexpensive counter";
   meta.unavailable[3][0] = "gpu_time"; meta.unavailable[3][1] = "present is host submission time, not GPU execution time";
-  f = fopen(path, "wb");
-  if (f == NULL) { fprintf(stderr, "perf: cannot write the performance report\n"); return; }
-  sv_perf_write_json(&g_perf, &meta, f);
-  if (fclose(f) != 0) fprintf(stderr, "perf: the performance report could not be written completely\n");
+  (void)sv_perf_write_file(&g_perf, &meta, path);
 }
 
 GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
@@ -159,16 +155,12 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   const char *unthrottled = getenv("SEGARECOMP_VIEWER_UNTHROTTLED");
   const char *slice = getenv("SEGARECOMP_VIEWER_SLICE");
   GenesisViewerOptions options;
-  const char *perf_path = getenv("SEGARECOMP_PERF_REPORT");
-  const char *perf_mode = getenv("SEGARECOMP_PERF_MODE");
-  const char *perf_privacy = getenv("SEGARECOMP_PERF_PRIVACY");
-  if (perf_path != NULL && *perf_path == '\0') perf_path = NULL;
-  if ((perf_mode != NULL && strcmp(perf_mode, "summary") != 0 && strcmp(perf_mode, "detailed") != 0) ||
-      (perf_privacy != NULL && strcmp(perf_privacy, "private") != 0 && strcmp(perf_privacy, "shareable") != 0)) {
+  SvPerfRequest perf_request;
+  if (sv_perf_request_from_env(&perf_request) != 0) {
     fprintf(stderr, "viewer: malformed SEGARECOMP_PERF_MODE / SEGARECOMP_PERF_PRIVACY\n");
     exit(3);
   }
-  if (perf_privacy == NULL) perf_privacy = "private";
+  const char *perf_path = perf_request.path, *perf_privacy = perf_request.privacy;
   if (unthrottled != NULL && strcmp(unthrottled, "1") == 0) argv[argc++] = "--viewer-unthrottled";
   if (slice != NULL && *slice != '\0') { argv[argc++] = "--viewer-slice"; argv[argc++] = slice; }
   if (genesis_viewer_options_parse(argc, argv, &options) != 0) {
@@ -224,7 +216,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   genesis_pacer_init(&g_pacer, options.unthrottled);
   /* SEG-125: the collector wraps the host callbacks (see above); the viewer loop itself is untouched. */
   g_inner = host;
-  sv_perf_init(&g_perf, perf_clock, genesis_pacer_period_floor_ns(), perf_mode != NULL && strcmp(perf_mode, "detailed") == 0);
+  sv_perf_init(&g_perf, perf_clock, genesis_pacer_period_floor_ns(), perf_request.detailed);
   host.window_closed = perf_window_closed;
   host.sleep_ns = perf_sleep;
   host.after_slice = perf_after_slice;

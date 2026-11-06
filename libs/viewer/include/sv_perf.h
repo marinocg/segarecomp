@@ -11,6 +11,7 @@
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define SV_PERF_SCHEMA_VERSION 1
@@ -204,6 +205,28 @@ static inline uint64_t sv_perf_recent_interval_ns(const SvPerf *p, uint32_t n) {
   return got == 0U ? 0U : sum / got;
 }
 
+/* ---- request from the environment (shared by every console adapter) ------------------------------------------------------------------------ */
+
+typedef struct SvPerfRequest {
+  const char *path;     /* SEGARECOMP_PERF_REPORT, or NULL: no report requested */
+  int detailed;         /* SEGARECOMP_PERF_MODE=detailed (default summary) */
+  const char *privacy;  /* "private" (default) or "shareable" */
+} SvPerfRequest;
+
+/* Reads SEGARECOMP_PERF_REPORT / _MODE / _PRIVACY. Returns 0, or -1 when MODE or PRIVACY is malformed (the adapter then fails closed before the run, like every other
+ * malformed run option). An empty path means "no report". */
+static inline int sv_perf_request_from_env(SvPerfRequest *r) {
+  const char *path = getenv("SEGARECOMP_PERF_REPORT"), *mode = getenv("SEGARECOMP_PERF_MODE"), *privacy = getenv("SEGARECOMP_PERF_PRIVACY");
+  r->path = path != NULL && *path != '\0' ? path : NULL;
+  r->detailed = 0;
+  r->privacy = "private";
+  if (mode != NULL && strcmp(mode, "summary") != 0 && strcmp(mode, "detailed") != 0) return -1;
+  if (privacy != NULL && strcmp(privacy, "private") != 0 && strcmp(privacy, "shareable") != 0) return -1;
+  r->detailed = mode != NULL && strcmp(mode, "detailed") == 0;
+  if (privacy != NULL) r->privacy = privacy;
+  return 0;
+}
+
 /* ---- JSON report ------------------------------------------------------------------------------------------------------------------ */
 
 typedef struct SvPerfMeta {
@@ -278,6 +301,15 @@ static inline void sv_perf_write_json(const SvPerf *p, const SvPerfMeta *m, FILE
   for (i = 0U; i < 8U && m->unavailable[i][0] != NULL; ++i)
     fprintf(f, "%s{\"metric\":\"%s\",\"reason\":\"%s\"}", i ? "," : "", m->unavailable[i][0], m->unavailable[i][1]);
   fputs("]}\n", f);
+}
+
+/* Writes the report to `path`. A report that cannot be written is reported on stderr and never changes the guest's result. Returns 0 or -1. */
+static inline int sv_perf_write_file(const SvPerf *p, const SvPerfMeta *m, const char *path) {
+  FILE *f = fopen(path, "wb");
+  if (f == NULL) { fprintf(stderr, "perf: cannot write the performance report\n"); return -1; }
+  sv_perf_write_json(p, m, f);
+  if (fclose(f) != 0) { fprintf(stderr, "perf: the performance report could not be written completely\n"); return -1; }
+  return 0;
 }
 
 #endif

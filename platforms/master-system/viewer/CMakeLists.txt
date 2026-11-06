@@ -11,6 +11,7 @@ segarecomp_enable_warnings(segarecomp_viewer_master_system)
 add_library(segarecomp_viewer_master_system_main_check OBJECT sms_viewer_main.c)
 set_target_properties(segarecomp_viewer_master_system_main_check PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
 target_link_libraries(segarecomp_viewer_master_system_main_check PRIVATE segarecomp::viewer_master_system)
+target_include_directories(segarecomp_viewer_master_system_main_check PRIVATE ${PROJECT_SOURCE_DIR}/libs/viewer/include)   # sv_perf.h (SEG-125): header-only and SDL-free
 segarecomp_enable_warnings(segarecomp_viewer_master_system_main_check)
 
 if(SEGARECOMP_ENABLE_SDL3_VIEWER)
