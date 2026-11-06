@@ -88,7 +88,7 @@ def main():
 
         # paced: the pacer waits and the session runs at about the native rate (a 1.2 s guest span)
         paced_report = tmp / "paced.json"
-        paced_env = {"SEGARECOMP_PERF_REPORT": str(paced_report), "SEGARECOMP_VIEWER_UNTHROTTLED": "0"}
+        paced_env = {"SEGARECOMP_PERF_REPORT": str(paced_report), "SEGARECOMP_PERF_MODE": "detailed", "SEGARECOMP_VIEWER_UNTHROTTLED": "0"}
         paced = run(1_300_000, paced_env)
         require(paced.returncode == plain.returncode, "paced run: " + paced.stderr[-300:])
         p = pr.load(paced_report)
@@ -101,6 +101,9 @@ def main():
             require(0.8 < speed < 1.2, f"an on-time paced session runs at ~100%: {speed}")
         else:
             require(speed is not None and speed < 1.2, f"a session that missed deadlines never runs faster than native: {speed}")
+        tl = p["runtime"]["timeline"]
+        require(tl["dropped_oldest"] == 0 and sum(row[6] for row in tl["frames"]) == pacing["missed_deadlines"], "the timeline's missed deadlines are the aggregate's (one observed event): " + json.dumps(pacing))
+        require(sum(row[5] for row in tl["frames"]) == p["runtime"]["frames"]["virtual"], "the timeline covers every virtual frame of the session")
         require(p["runtime"]["frame_work"]["avg_ns"] <= p["runtime"]["frame_interval"]["avg_ns"] and (pacing["waits"] == 0 or p["runtime"]["frame_work"]["avg_ns"] < p["runtime"]["frame_interval"]["avg_ns"]), "work excludes the pacing wait")
         # robustness: malformed option fails closed before the window opens
         bad = run(1000, {"SEGARECOMP_PERF_MODE": "turbo", "SEGARECOMP_PERF_REPORT": str(tmp / "bad.json")})
