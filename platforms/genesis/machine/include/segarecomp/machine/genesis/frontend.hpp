@@ -426,6 +426,11 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
     std::uint32_t alias_source_address{};
     // A materialized work-RAM JMP thunk (guarded like an alias identity, but its bytes have no cartridge source).
     bool materialized_ram_thunk{false};
+    // ADR 0271: a statically established work-RAM `JMP (xxx).L` thunk. Its structural identity is the opcode word and the
+    // instruction form; the 32-bit destination is a live operand read from RAM at entry, so `decoded`/`operation` carry a
+    // representative (zero) operand that is never a fixed successor, never a guard byte and never an exact-PC obligation.
+    // Such an entry is also `execution_alias` (a RAM-keyed identity, mandatory for admission) but is not `materialized_ram_thunk`.
+    bool ram_jmp_live_operand{false};
   };
   // Independent executable identities. Provenance lives in `decoded` and
   // `operation`; `source_mapping` preserves the unique immutable byte owner.

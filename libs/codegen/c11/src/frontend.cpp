@@ -2071,6 +2071,25 @@ validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis) {
     // wholly in the 64 KiB work-RAM window (no wrap), the source and execution addresses must share parity and
     // the instruction length, and the raw bytes (the runtime guard's expected bytes) must be present in full.
     InstructionProvenance mapping_provenance = entry.decoded.provenance;
+    if (entry.ram_jmp_live_operand) {
+      // ADR 0271: a statically established work-RAM `JMP (xxx).L` with a live operand. Exactly one six-byte absolute-long JMP wholly
+      // inside work RAM; the opcode word is the only guarded structure. It is neither a materialized thunk nor a mapped alias.
+      const auto span = entry.decoded.provenance.length.value;
+      if (entry.materialized_ram_thunk || !entry.execution_alias || address < UINT32_C(0x00FF0000) || (address & 1U) != 0U ||
+          span != 6U || static_cast<std::uint64_t>(address) + span > UINT64_C(0x01000000) || entry.decoded.raw_bytes.size() != span ||
+          entry.decoded.raw_bytes[0] != 0x4EU || entry.decoded.raw_bytes[1] != 0xF9U ||
+          entry.decoded.kind != M68kInstructionKind::jmp || entry.decoded.source_ea.mode != M68kEaMode::absolute_long ||
+          entry.operation.kind != M68kIrKind::jump_general ||
+          !m68k_operation_is_immutable_rom_aot_safe(entry.operation, return_target_authority_available) ||
+          !m68k_operation_has_complete_c_emission(entry.operation) ||
+          !independently_decoded_and_lifted(entry.decoded, entry.operation))
+        return std::nullopt;
+      const auto [found, inserted] = result.emplace(address, &entry);
+      if (!inserted && (!same_decoded(found->second->decoded, entry.decoded) ||
+                        !same_ir(found->second->operation, entry.operation)))
+        return std::nullopt;
+      continue;
+    }
     if (entry.materialized_ram_thunk) {
       // ADR 0097 amendment: a materialized work-RAM JMP thunk has no cartridge mapping; its authority is the build-time image
       // plus the whole-instruction runtime byte guard. It must be exactly one statically foldable direct JMP wholly inside work
@@ -2140,6 +2159,9 @@ validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis) {
 std::optional<std::vector<Address>> immutable_rom_aot_exact_pc_obligations(
     const FrontendAnalysis::ImmutableRomAotEntry &entry) {
   const auto &operation = entry.operation;
+  // ADR 0271: a live-operand RAM JMP's destination is a runtime fact owned by the compiled-entry lookup; the representative
+  // operand of its identity is never an obligation.
+  if (entry.ram_jmp_live_operand) return std::vector<Address>{};
   const auto effect = m68k_operation_effect(operation);
   std::vector<Address> result;
   switch (effect.pc) {
@@ -2239,7 +2261,9 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   // copy that never happened or a later write, fails closed with the existing typed unemitted-target stop.
   if (entry.execution_alias) {
     out << "  if (";
-    for (std::size_t index = 0; index < entry.decoded.raw_bytes.size(); ++index) {
+    // ADR 0271: a live-operand RAM JMP guards only its structural bytes (the opcode word); the operand is read live by the body.
+    const std::size_t guarded_bytes = entry.ram_jmp_live_operand ? 2U : entry.decoded.raw_bytes.size();
+    for (std::size_t index = 0; index < guarded_bytes; ++index) {
       if (index != 0U) out << " || ";
       out << "runtime->work_ram[UINT32_C(" << std::dec << (address - UINT32_C(0x00FF0000) + index)
           << ")] != UINT8_C(" << hex(entry.decoded.raw_bytes[index], 2) << ")";
@@ -2291,6 +2315,11 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   // SEG-022-T006: the sharded/C4 caller supplies no site-local copy; membership queries the one final
   // compiled-entry table.
   if (use_shared_compiled_entry_lookup) memory.compiled_entry_lookup_symbol = "genesis_compiled_entry_lookup";
+  if (entry.ram_jmp_live_operand) {
+    if (!use_shared_compiled_entry_lookup) return "/* translation rejected: live-operand RAM JMP requires the shared compiled-entry lookup */\n";
+    memory.live_ram_jump_operand = true;
+    memory.live_ram_jump_operand_offset = address + 2U - UINT32_C(0x00FF0000);
+  }
   memory.return_target_is_computed_jump = factoring.computed_jump_return && use_shared_compiled_entry_lookup;
   memory.return_target_member_symbol = factoring.return_target_member_symbol;
   // SEG-021-T005: an isolated AOT candidate has no whole-program absolute-
@@ -6749,7 +6778,7 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
   bool irq6_vector_thunk_compiled = false;
   if (irq6_handler_hex.empty() && partial.accepted_prefix.irq6_vector_in_work_ram)
     for (const auto &aot_entry : partial.accepted_prefix.immutable_rom_aot_entries)
-      if (aot_entry.materialized_ram_thunk &&
+      if ((aot_entry.materialized_ram_thunk || aot_entry.ram_jmp_live_operand) &&
           aot_entry.decoded.provenance.source.address.value == partial.accepted_prefix.irq6_vector_ram_entry) {
         irq6_handler_hex = hex(partial.accepted_prefix.irq6_vector_ram_entry, 8);
         irq6_vector_thunk_compiled = true;

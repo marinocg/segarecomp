@@ -3381,6 +3381,25 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     const bool is_helper_ea_control = operation.source_ea.mode == M68kEaMode::address_disp16 ||
                                       operation.source_ea.mode == M68kEaMode::address_index8 ||
                                       (operation.source_ea.mode == M68kEaMode::pc_index8 && !is_word_dn_pc_index);
+    // ADR 0271: the live-operand work-RAM JMP (xxx).L. The opcode word has been verified by the caller's entry guard; the
+    // destination long word is read from the same work-RAM bytes, masked to the 24-bit program bus, and must be a member of the
+    // final compiled-entry authority (an odd or unrepresented value is the existing typed unresolved-indirect stop). No
+    // PC, register or memory effect happens before that membership check succeeds.
+    const bool is_live_ram_jump = operation.kind == M68kIrKind::jump_general && memory != nullptr && memory->live_ram_jump_operand &&
+                                  memory->runtime_routing && !memory->compiled_entry_lookup_symbol.empty() &&
+                                  operation.source_ea.mode == M68kEaMode::absolute_long;
+    if (is_live_ram_jump) {
+      const auto ram = std::string(memory->runtime_object) + "->work_ram";
+      const auto at = [&](std::uint32_t index) {
+        return "((uint32_t)" + ram + "[UINT32_C(" + std::to_string(memory->live_ram_jump_operand_offset + index) + ")]";
+      };
+      output << "{ const uint32_t m68k_indirect_ea = (" << at(0U) << " << 24U) | " << at(1U) << " << 16U) | " << at(2U)
+             << " << 8U) | " << at(3U) << ")) & UINT32_C(0x00FFFFFF);\n"
+             << "  if (" << memory->compiled_entry_lookup_symbol << "(m68k_indirect_ea) == NULL) "
+             << emit_runtime(*memory).unresolved_indirect_stop(*memory) << "  " << memory->program_counter
+             << " = m68k_indirect_ea;\n}\n";
+      break;
+    }
     if ((operation.kind == M68kIrKind::call_general || operation.kind == M68kIrKind::jump_general) &&
         (is_word_dn_pc_index || is_an_indirect_control || is_helper_ea_control)) {
       const auto &ea = operation.source_ea;

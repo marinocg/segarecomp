@@ -1573,6 +1573,15 @@ add_test(NAME genesis_ram_thunk_closure_generated_test COMMAND ${Python3_EXECUTA
   $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR} ${CMAKE_C_COMPILER})
 set_property(TEST genesis_ram_thunk_closure_generated_test APPEND PROPERTY LABELS full fast)
 set_property(TEST genesis_ram_thunk_closure_generated_test PROPERTY TIMEOUT 300)
+# SEG-122-T011 (ADR 0271): static work-RAM JMP thunks with a live operand.
+add_test(NAME genesis_static_ram_jmp_thunk_generated_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_static_ram_jmp_thunk_generated_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_static_ram_jmp_thunk_generated_test APPEND PROPERTY LABELS full fast)
+set_property(TEST genesis_static_ram_jmp_thunk_generated_test PROPERTY TIMEOUT 600)
+add_test(NAME m68k_ram_jmp_live_operand_musashi_differential_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_ram_jmp_live_operand_musashi_differential_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER})
+set_property(TEST m68k_ram_jmp_live_operand_musashi_differential_test APPEND PROPERTY LABELS full)
+set_property(TEST m68k_ram_jmp_live_operand_musashi_differential_test PROPERTY TIMEOUT 600)
 add_executable(genesis_m68k_executable_image_test genesis_m68k_executable_image_test.cpp)
 target_link_libraries(genesis_m68k_executable_image_test PRIVATE segarecomp::machine_genesis)
 segarecomp_enable_warnings(genesis_m68k_executable_image_test)

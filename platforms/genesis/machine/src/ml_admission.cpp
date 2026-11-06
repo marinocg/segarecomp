@@ -89,18 +89,18 @@ GenesisMlAdmissionOutcome genesis_ml_admission(const GenesisMlProducer &producer
   }
   GenesisRegionPruneResult pruned;
   auto plan = plan_genesis_region_admission(program, rom_sha256, entries, *proposal.proposal, pruned);
-  // SEG-122-T010 (ADR 0270): a gen2 emission whose prune rejected and which holds a materialized RAM thunk gets the existing least closed superset of the
+  // SEG-122-T010 (ADR 0270): a gen2 emission whose prune rejected and which holds a materialized or (ADR 0271) statically established RAM thunk gets the existing least closed superset of the
   // same proposal. The unchanged validator below still decides; any failure stays the broad fallback, classified as a prune rejection.
   std::string prune_detail = pruned.failure_class;
   if (!plan && producer.family == GenesisMlModelFamily::gen2 &&
-      std::any_of(entries.begin(), entries.end(), [](const auto &entry) { return entry.materialized_ram_thunk; })) {
+      std::any_of(entries.begin(), entries.end(), [](const auto &entry) { return entry.materialized_ram_thunk || entry.ram_jmp_live_operand; })) {
     GenesisRegionCloseCounts counts;
     plan = plan_genesis_region_admission(program, rom_sha256, entries, *proposal.proposal, pruned, closure_max_rounds, GenesisRegionAdmissionClosure::close, &counts);
     if (plan) {
       out.closure_used = true;
       out.added = counts.added_count;
       out.roots_added = counts.root_added_count;
-      out.thunks = static_cast<std::size_t>(std::count_if(entries.begin(), entries.end(), [](const auto &entry) { return entry.materialized_ram_thunk; }));
+      out.thunks = static_cast<std::size_t>(std::count_if(entries.begin(), entries.end(), [](const auto &entry) { return entry.materialized_ram_thunk || entry.ram_jmp_live_operand; }));
     } else {
       prune_detail = "closure_rejected";
     }

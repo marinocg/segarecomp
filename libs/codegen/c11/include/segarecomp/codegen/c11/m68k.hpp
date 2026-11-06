@@ -177,6 +177,12 @@ struct M68kMemoryEmissionContext {
   // (`Entry lookup(uint32_t) -> NULL when absent`). A runtime-computed JMP/JSR target is then checked
   // against it instead of a site-local array. Exclusive with a per-site proven `indirect_candidate_targets`.
   std::string_view compiled_entry_lookup_symbol;
+  // ADR 0271: a statically established work-RAM `JMP (xxx).L` whose 32-bit destination is read live from the work-RAM bytes at
+  // `live_ram_jump_operand_offset` (the offset of the operand's first byte). The target is checked against the same compiled-entry
+  // authority as any computed JMP; it is never recorded as a fixed successor. Meaningful only for `jump_general` with an
+  // absolute-long source EA, with `runtime_routing` and `compiled_entry_lookup_symbol` set; otherwise nothing is emitted.
+  bool live_ram_jump_operand{};
+  std::uint32_t live_ram_jump_operand_offset{};
   // SEG-021-T041 / ADR 0048: when true (and `compiled_entry_lookup_symbol` is non-empty) an RTS validates
   // its popped value against the final compiled-entry lookup instead of the whole-program JSR-continuation
   // set. The caller sets it only for an RTS whose immediately preceding instruction is a long push onto the
