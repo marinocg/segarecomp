@@ -76,12 +76,13 @@ The handler entry is resolved at build time from the cartridge vector table at o
 * the whole general-startup analysis is attempted with the root and, if that attempt is rejected for any reason, again without it (exactly the earlier analysis). Across the locally available images no analysis was rejected with the root, and the root was
   installed for a majority of them (a majority of them).
 
-A vector slot that points into work RAM (the common RAM jump-table convention) retains the stub address (`hint_vector_in_work_ram`) so that the existing build-time preparation (`--discover-copy-aliases`: byte-guarded JMP thunks and verbatim
-immutable-copy aliases, ADR 0049/0097) can turn it into an ordinary compiled handler entry guarded by the runtime byte-identity check. A work-RAM `JMP (xxx).L` stub that the
-cartridge's own reachable code constructs with constant stores (the opcode word, then the operand) is established **statically** (ADR 0271): the first M68K emission contains a
-precompiled `JMP (xxx).L` entry guarded on its opcode word only; its 32-bit destination is read live from RAM on every entry and must be a member of the final compiled-entry set
-(otherwise the typed `unresolved_indirect_target` stop), so a stub the game retargets during play keeps working. The recognition is positive evidence only (no proof that the opcode is
-installed before the first interrupt; the runtime guard refuses an uninstalled or mutated form with nothing committed). **RAM-resident code that the game constructs at run time (a handler written into work RAM instruction by instruction is not a copy of cartridge bytes) can never be compiled by this architecture** (no interpreter/JIT).
+A vector slot that points into work RAM (the common RAM jump-table convention) retains the stub address (`hint_vector_in_work_ram`). Three build-time mechanisms can turn that address into an ordinary
+compiled handler entry, each guarded at run time and never decoding RAM to choose a native body: a verbatim immutable-copy alias or an observed exact-byte `JMP` thunk (build-time preparation, `--discover-copy-aliases`, ADR 0049/0097), and,
+for a `JMP (xxx).L` stub that the cartridge's own reachable code constructs with constant stores (the opcode word, then the operand), **static recognition** (ADR 0271): the first M68K emission contains a precompiled `JMP (xxx).L` entry for it.
+Such an entry verifies only the opcode word at run time; its 32-bit destination is a **live operand** read from RAM on every entry and checked against the final compiled-entry table (an uncompiled or odd destination is the typed
+`unresolved_indirect_target` stop), so a stub the game retargets during play keeps working. The recognition is positive construction evidence, not a proof that the opcode is installed before the first interrupt and not a proof that
+no other writer exists; the opcode guard refuses an uninstalled or overwritten stub with nothing committed. Everything else stays outside support: instruction forms other than `JMP (xxx).L` constructed this way, arbitrary
+RAM-resident programs, handlers written into RAM instruction by instruction, and self-modifying code. The runtime never decodes an instruction to choose a new native body, and there is no interpreter or JIT.
 
 When an enabled H-interrupt fires with no resolved handler the default compatibility policy **counts and drops it** (`raster.hint_undelivered`; the capture/viewer hooks print a `RUNTIME_NOTES {...}` line when anything was dropped, a non-default region was used, frames were
 rejected or a VRAM journal overflowed) -- precisely what every earlier build did with the interrupt, now observable -- so titles that never needed the handler keep running. `SEGARECOMP_GENESIS_HINT=strict` (or `genesis_runtime_set_hint_strict`) makes it stop fail-closed with

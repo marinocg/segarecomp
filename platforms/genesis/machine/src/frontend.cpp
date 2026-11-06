@@ -6498,8 +6498,10 @@ bool populate_immutable_rom_aot_entries(const FrontendProgram &program,
   // from a representative window (zero operand); the entry guards only the opcode word at run time. An address that an existing
   // identity (alias or other entry) already overlaps acquires no static entry, so no existing authority is replaced or duplicated.
   for (const Address execution : genesis_static_ram_jmp_thunk_candidates(analysis)) {
-    const auto overlapped = entries.lower_bound(execution >= genesis_ram_jmp_long_length ? execution - (genesis_ram_jmp_long_length - 2U) : 0U);
-    if (overlapped != entries.end() && overlapped->first < execution + genesis_ram_jmp_long_length) continue;
+    bool overlapped = false;  // exact interval test; the longest M68K instruction is 10 bytes, so no overlapping entry starts earlier than execution - 10
+    for (auto other = entries.lower_bound(execution >= 10U ? execution - 10U : 0U); other != entries.end() && other->first < execution + genesis_ram_jmp_long_length; ++other)
+      overlapped = overlapped || static_cast<std::uint64_t>(other->first) + other->second.decoded.provenance.length.value > execution;
+    if (overlapped) continue;
     const std::array<std::uint8_t, 6> window{0x4EU, 0xF9U, 0U, 0U, 0U, 0U};
     DecodeSource source{CpuVariant::mc68000, {TargetAddressSpace::m68k_program, execution}, MoveqImageOffset{0U}};
     auto decoded_result = decode_m68k_instruction(window, source, M68kDecodeProfile::general_startup);
@@ -6534,9 +6536,11 @@ bool populate_immutable_rom_aot_entries(const FrontendProgram &program,
       // ADR 0271 precedence: an observed `JMP (xxx).L` over an address that already carries the static live-operand entry is the same
       // structural identity with one more sample of the live operand. It is subsumed: the static entry stays, nothing is re-emitted.
       bool subsumed = false;
-      for (auto statically = entries.lower_bound(execution >= genesis_ram_jmp_long_length ? execution - (genesis_ram_jmp_long_length - 2U) : 0U);
+      for (auto statically = entries.lower_bound(execution >= 10U ? execution - 10U : 0U);
            statically != entries.end() && statically->first < execution + bytes.size(); ++statically) {
-        if (!statically->second.ram_jmp_live_operand) continue;
+        if (!statically->second.ram_jmp_live_operand ||
+            static_cast<std::uint64_t>(statically->first) + statically->second.decoded.provenance.length.value <= execution)
+          continue;  // not a static thunk, or one that ends before this descriptor starts
         if (statically->first == execution && bytes.size() == genesis_ram_jmp_long_length && bytes[0] == 0x4EU && bytes[1] == 0xF9U)
           subsumed = true;
         else
