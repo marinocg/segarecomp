@@ -1582,6 +1582,11 @@ add_test(NAME m68k_ram_jmp_live_operand_musashi_differential_test COMMAND ${Pyth
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_ram_jmp_live_operand_musashi_differential_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER})
 set_property(TEST m68k_ram_jmp_live_operand_musashi_differential_test APPEND PROPERTY LABELS full)
 set_property(TEST m68k_ram_jmp_live_operand_musashi_differential_test PROPERTY TIMEOUT 600)
+# SEG-122-T011 (ADR 0272): independent whole-machine H-interrupt differential (generated-native always; pinned Genesis Plus GX when SEGARECOMP_GENESIS_ORACLE_CHECKOUT is set).
+add_test(NAME genesis_hint_ram_jmp_reference_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_hint_ram_jmp_reference_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_hint_ram_jmp_reference_test APPEND PROPERTY LABELS full fast)
+set_property(TEST genesis_hint_ram_jmp_reference_test PROPERTY TIMEOUT 900)
 add_executable(genesis_m68k_executable_image_test genesis_m68k_executable_image_test.cpp)
 target_link_libraries(genesis_m68k_executable_image_test PRIVATE segarecomp::machine_genesis)
 segarecomp_enable_warnings(genesis_m68k_executable_image_test)
