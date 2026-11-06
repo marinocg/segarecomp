@@ -82,3 +82,19 @@ an odd destination stops instead of raising an address error; the legacy C3 emis
   (level-4 effects on CRAM/VSRAM, H-interrupt counts, RTE and timing) or on the retained all-acts coverage.
 - Identity: contract v3; every Genesis Optimized library entry rebuilds once.
 - Not done: `JMP (xxx).W`; other vectors; a Genesis-level reference.
+
+## 6. Addendum: level select and debug mode on the retained validation image (routes R2 and R3, ADR 0271 addenda, frozen before running)
+
+Image: the retained validation-only S3&K image (combined image, one byte retargeted to re-enable the title-screen level-select and debug input; local, never shipped). Arms `CAND` and `BASE` (product main), both Optimized gen2 selective;
+`CAND` reports `ram_thunks=2`, 0 preparation rounds. Headless viewer program, frame exact, finite budget and wall timeout, original 4:3.
+
+**R2, played start, all 28 acts (debug mode armed, not flown).** `CAND`: no typed stop, 0 undelivered level-4 interrupts on all 28 acts. `BASE`: 5,655 undelivered, on 7 acts (AIZ2 1,195, CNZ2 884, LBZ2 3,568, and 2-2 on AIZ1, HCZ1, HCZ2, ICZ2).
+Captures differ exactly on the three acts with hundreds of drops; the four acts with 2 drops, and the 21 with none, are bit-identical. No act differs without `BASE` having dropped interrupts.
+Inspected side by side (candidate left, base right): in CNZ2 and LBZ2 the candidate shows the water palette split below the water line (blue-tinted water and ground) that the base never shows; AIZ2's scene is the same but the level timer differs (0:20 vs 0:17), so the programs
+progress differently once interrupts are dropped. This is consistent with how those levels use the H-interrupt for the water line, but it is a visual plausibility check made by me, not a comparison with a reference.
+
+**R3, debug-mode serpentine flight, AIZ2, CNZ2, LBZ2 (about 15,400-17,300 polls each).** `CAND`: no typed stop, 0 undelivered. `BASE`: 321, 2 and 2 undelivered. All 11 captures (4,000-16,500) are bit-identical between arms: the
+base's drops fall between the capture points or are invisible there, so R3 shows the candidate is stable under debug flight and equals base where base lost little, not new visual evidence.
+
+**Effect on the decision.** Stronger evidence for C5 on a gameplay-wide set (28 acts, no stop, no dropped level-4 interrupt, differences confined to acts where the old executable dropped them). C6 is still not met: no independent Genesis reference, so the
+verdict stays `STATIC_THUNKS_ONLY` and the PR stays draft. The 84-act set of ADR 0270 (three routes per act) is partly covered (played start and a debug flight on three acts), not repeated in full.
