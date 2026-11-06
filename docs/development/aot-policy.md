@@ -6,7 +6,7 @@
 | policy | behaviour | default |
 | --- | --- | --- |
 | `compatibility` | the broad immutable-ROM universe (every decodable instruction start is translated) | yes (through SEG-047) |
-| `optimized` | Genesis M68K selective admission: a frozen, statically embedded region model proposes an executable region, structural pruning derives the admitted set, and the unchanged admission validator decides; any failure builds the broad program instead | no |
+| `optimized` | Genesis M68K selective admission: a frozen, statically embedded region model proposes an executable region, structural pruning derives the admitted set (or, for a gen2 RAM-thunk emission whose prune rejected, structural closure: see below), and the unchanged admission validator decides; any failure builds the broad program instead | no |
 
 Optimized never weakens correctness: the generated program is still static native code (no interpreter, JIT or runtime decoder, no ML at
 run time); a region that misses code makes the program stop fail-closed (typed stop), never execute wrongly. An explicit
@@ -42,7 +42,7 @@ Every successful build writes `status.json` with an always-present `aot_policy` 
                                        // non_finite_score | empty_proposal | prune_rejected | validator_rejected | no_analysis | no_report | plan_alias_set_mismatch
   "fallback_class": "none",            // none | producer_incompatible | producer_input | proposal_rejected | validator_rejected | not_applicable | exact_map
   "model_family": "gen2",              // none | v1 | gen2
-  "analysis_contract": "segarecomp.admission_contract.v1",
+  "analysis_contract": "segarecomp.admission_contract.v2",
   // only when an ML producer ran and was accepted:
   "model": "11258708…98e1", "schema_sha256": "cf43e758…",          // v1: "seg046-features-v1" / feature-schema digest
   "token_contract_sha256": "9a1f4f4f…", "rank_policy": "B35", "rank_plan_sha256": "8c4d98b9…", "weight_table_sha256": "72699dbc…",   // gen2 only
@@ -89,6 +89,11 @@ stops with the typed `Z80_ERROR_UNADMITTED_PC` the moment it reaches one. Compat
 
 Games that copy cartridge code into work RAM add ADR 0049 alias identities (and possibly observed RAM `JMP` thunks) during the build-time preparation. Under
 Optimized, a copy-alias identity is admitted when the immutable cartridge source it is byte-identical to is inside the proposed executable region (no region
-is widened; every alias identity remains a mandatory root of the unchanged validator). A build that also needs RAM thunks still falls back to the broad program
-(`prune_rejected`). Compatibility, the default policy and the experimental status of `--aot-model gen2` are unchanged. ML selection inside a materialized image
-is not supported (ADR 0113: the validator admits no proper subset of an alias image).
+is widened; every alias identity remains a mandatory root of the unchanged validator). Compatibility, the default policy and the experimental status of
+`--aot-model gen2` are unchanged. ML selection inside a materialized image is not supported (ADR 0113: the validator admits no proper subset of an alias image).
+
+A gen2 emission holding a materialized RAM thunk, whose prune rejected, stays selective through the least structurally closed superset of the same proposal: the
+proposal, every machine root, every materialized identity and their fixed successors and call continuations (ADR 0270). The unchanged validator decides; any failure,
+including the closure's resource cap, is the broad fallback (`prune_rejected`, sanitized detail `closure_rejected` in the build log). `status.json` then adds `region_closure`, `added`, `roots_added` and `ram_thunks`, and
+`pruned` is 0. A successful prune, an emission without a thunk, a v1 request and an explicit `--admission-plan` (broad on a thunk emission, as before) do not use it.
+Closure runs on any prune rejection of such an emission, so a proposal that the prune would reject for another reason is also completed rather than falling back. Closure is structural: it proves nothing about dynamic targets. A dynamic transfer to a start outside the admitted set stops fail-closed with its typed stop; a Genesis program does not restart itself in Compatibility.

@@ -1569,6 +1569,10 @@ add_test(NAME genesis_ml_admission_cli_test COMMAND ${Python3_EXECUTABLE} ${CMAK
   $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_ml_admission_cli_test APPEND PROPERTY LABELS full fast)
 set_property(TEST genesis_ml_admission_cli_test PROPERTY TIMEOUT 300)
+add_test(NAME genesis_ram_thunk_closure_generated_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_ram_thunk_closure_generated_test.py
+  $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR} ${CMAKE_C_COMPILER})
+set_property(TEST genesis_ram_thunk_closure_generated_test APPEND PROPERTY LABELS full fast)
+set_property(TEST genesis_ram_thunk_closure_generated_test PROPERTY TIMEOUT 300)
 add_executable(genesis_m68k_executable_image_test genesis_m68k_executable_image_test.cpp)
 target_link_libraries(genesis_m68k_executable_image_test PRIVATE segarecomp::machine_genesis)
 segarecomp_enable_warnings(genesis_m68k_executable_image_test)
