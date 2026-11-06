@@ -140,3 +140,9 @@ wall timeout 600 s per run, captures at polls +425, +900, +1400 after the level-
 Compared per act: run exit and stop class, `RUNTIME_NOTES` (`hint_undelivered`, virtual frames), capture digests. Assertions: `CAND` has no typed stop and `hint_undelivered` 0 on every act; any `CAND`/`BASE`
 difference is explained by `BASE`'s undelivered level-4 interrupts (acts with `BASE` undelivered = 0 must be bit-identical); frames at the end of each act inspected for the acts with the largest `BASE` counts.
 A stop in `CAND` is reported with a broad replay, not retuned away. This remains evidence for these routes and still has no independent Genesis reference (gate C6 unchanged).
+
+## Frozen route R3 (third addendum, recorded before any R3 run; tightens, never relaxes)
+
+R2 (played start, all 28 acts) arms debug mode but does not use it. R3 uses the retained debug-mode serpentine flight (`tools/seg122_t005_s3k/sweep.py`, one part, about 17,000 polls) on the three acts where R2's `BASE`
+dropped the most level-4 interrupts: AIZ2, CNZ2 and LBZ2. Same arms, image, flags, frame-exact slice, headless drivers, finite budget and 600 s wall timeout as R2; captures at polls 4000, 9000, 14000 and 16500.
+Assertions: `CAND` has no typed stop and 0 undelivered level-4 interrupts; `BASE` differences are explained by its undelivered count; a `CAND` stop is replayed on a broad build, not retuned.
