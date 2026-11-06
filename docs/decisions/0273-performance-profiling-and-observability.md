@@ -56,10 +56,12 @@ Runtime (`runtime`):
 | metric | meaning | owner |
 |---|---|---|
 | `wall_ns`, `paused_ns`, `pauses` | session length; time in the pause menu (excluded from frame intervals) | `SvPerf` |
-| `frames.virtual / presented / coalesced` | guest frame boundaries crossed; host presents; boundaries that shared one slice (their interval is split evenly) | adapter |
-| `frame_interval` | wall time between virtual-frame boundaries (includes pacing wait): count, min, avg, p50, p95, p99, max; histogram resolution 50 us, top bucket 64 ms (max stays exact) | `SvPerf` |
-| `frame_work` | `frame_interval` minus pacing wait: the host headroom indicator | `SvPerf` |
-| `pacing.waits / wait_ns / missed_deadlines / resyncs` | pacer sleeps; boundaries whose deadline had already passed; the pacer's late-stall resynchronizations | adapter + `GenesisPacer` |
+| `frames.virtual / presented / estimated` | guest frame boundaries crossed in the observation window; host presents; virtual frames that lie in a multi-frame or partial observation and are therefore **counted but not individually timed**. `virtual = frame_interval.count + estimated` always | adapter |
+| `estimated_observations` | `{count, wall_ns, max_wall_ns}` of those observations (their whole wall time; no per-frame time is derived) | `SvPerf` |
+| `frame_interval` | wall time of ONE exactly observed frame (includes pacing wait): count, min, avg, p50, p95, p99, max. Histogram: 50 us buckets to 64 ms, then 4 buckets per octave to 8.192 s (`range_ns`), then one overflow bucket reporting the exact max. A percentile is never below the true value and at most one bucket above it: <= 50 us under 64 ms, <= 19% in the tail; 64-bit bucket counters, exact min/max/sum/count | `SvPerf` |
+| `frame_work` | `frame_interval` minus pacing wait, for the same frames: the host headroom indicator | `SvPerf` |
+| `pacing.waits / wait_ns / missed_deadlines / resyncs` | pacer sleeps; frame boundaries whose pacer wait did not sleep because the deadline had already passed (exact per boundary, also inside coalesced observations); the pacer's late-stall resynchronizations. Unthrottled sessions have no deadlines | adapter + pacer |
+| `timeline` (detailed, private) | one row per OBSERVATION `[frame, interval_us, work_us, emulation_us, present_us, frames, missed, partial]`; `frames > 1` or `partial = 1` rows carry the whole wall time of the observation and no per-frame time; `missed` is the same count that feeds `pacing.missed_deadlines` | `SvPerf` |
 | `spans[]` | `emulation` (all guest slices incl. CPU, Z80 sync, devices, sound synthesis; inclusive), `vdp_compose` (inclusive, contained in emulation), `rgb_convert`, `present` (inclusive: host submission, **not** GPU time), `texture_upload` (inclusive, contained in present), `audio_present`, `pacing_wait` (exclusive). Each row names its `class` and `parent`; inclusive rows must not be summed with their parent | adapter / viewer host |
 | `guest.master_ticks` | deterministic guest time at the end | runtime |
 | `counters{}` | existing counters: `m68k_dispatches`, `runner_slices`, `z80_epochs`, `audio_frames`, `audio_underruns`, `audio_overrun_dropped`, `frames_published`, `render_rejections` ... (platform-specific, explicit names) | runtime / mixer |
@@ -79,6 +81,7 @@ the machine exposes per-CPU counters).
 
 Each translation unit job yields `{category, wall_ms, source_bytes, object_bytes, round, disposition}`:
 
+- Every planned job has exactly one outcome: `compiled` (ran and succeeded: an object exists), `failed` (ran and returned an error: its wall time and CPU are real consumption and stay in `aggregate_job_ms` / `failed_ms` / the CPU figure, but no object was produced and it is never counted as compiled, final or superseded), `not_started` (the batch stopped before it began, or the compiler could not be launched), `reused`. `units_total = compiled + failed + not_started + reused`, `attempted = compiled + failed`. Failed jobs are listed with disposition `failed`; never-started jobs are only counted.
 - `compiled` jobs are timed by the worker that ran them (each worker writes only its own slot; the main thread reads after joining), together with child CPU time
   and peak RSS where the OS reports them (POSIX `wait4`; Windows CPU time only) - otherwise `null` and listed under `unavailable`.
 - `reused` units are those whose content key was already compiled (`reuse_saved_ms` = what their original compile cost).
@@ -143,3 +146,14 @@ A generic event/trace bus, per-instruction counters, sampling profilers, backgro
 - `SvPerf` and `BuildProfile` are the only new stateful pieces; `perf_report.py` is stateless. Future consumers (GPU-acceleration studies, CI trend checks) read the
   versioned JSON; they do not get hooks into the collectors.
 - Out of scope and unchanged: guest instruction-level profiling, execution-coverage integration (the existing coverage tooling is untouched), GPU timing.
+
+## 13. Corrections after review (same PR)
+
+- **Observation windows.** The frame accounting is a begin/end pair around each guest slice (a single end per poll for the poll-driven Master System and Sega CD loops). The window is
+  established before the first slice (the first slice is counted); frames the guest produced before profiling was switched on, or while it was switched off, are never attributed, and a
+  window that starts inside a frame treats its first boundary as partial. A pause also makes the next boundary partial.
+- **Truthful per-frame statistics.** Only a single-boundary observation yields a frame time. A slice that crossed several boundaries is one observation: its frames count as `estimated`, the
+  wall time is kept whole, nothing is divided, and nothing enters the percentiles. Readers state the limitation (summary, comparison, HTML).
+- **Report v1 semantics changed before release:** `frames.coalesced` is replaced by `frames.estimated` + `estimated_observations`; `frame_interval.count` is the number of exactly timed
+  frames; timeline rows gained `frames` and `partial`; histograms gained `range_ns`; compile units gained `attempted`, `failed`, `not_started`, `failed_ms`. The validators, the examples
+  and the tests changed together; there is no released v1 report to stay compatible with.

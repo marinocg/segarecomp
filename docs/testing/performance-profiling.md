@@ -103,6 +103,14 @@ timeline. Reports never contain ROM bytes, addresses, PCs, ROM paths or hashes, 
   the achieved parallelism. A serial build has a ratio near 1.
 - **Used vs discarded.** After the final link every compiled object is `final`, `pass_only` (needed by the build-time observation program) or `superseded` (replaced by a
   later alias-preparation round: discarded work, counted in `wasted_ms`).
+- **Exact frames vs estimated frames.** A frame time is only reported where one frame boundary was observed. When a guest slice crosses several boundaries (or profiling starts, or a pause
+  ends, mid-frame) the frames are counted under `estimated` and their wall time is kept whole; they are not in the percentiles, and the timeline/HTML draw them as an average labelled
+  "not a per-frame measurement". `frames.virtual = frame_interval.count + frames.estimated`. Percentiles are bucket upper edges: <= 50 us above the true value below 64 ms, <= 19% in
+  the 64 ms - 8.2 s tail, the exact maximum beyond.
+- **Missed deadlines** are paced frame boundaries whose pacer wait did not sleep; the aggregate, the timeline's `missed` column, the overlay's red bars and the HTML timeline all read that one
+  count. Unthrottled and headless sessions have none.
+- **Failed and skipped compiler jobs** are reported apart: `failed` jobs consumed real time/CPU (included in the aggregate and CPU figures) but produced no object; `not_started` jobs only
+  count; dispositions (final/pass_only/superseded) exist only for successfully compiled objects and only after the final link.
 - **Host time vs guest time.** `guest.master_ticks`, virtual frames and dispatch counts are deterministic guest quantities. Speed = virtual frames x the console's native
   frame period / host wall time. A headless or unthrottled run shows how much *faster* than real time this computer can emulate; a paced session shows ~100%.
 - **Frequency vs cost.** Counters (`m68k_dispatches`, `z80_epochs`, `audio_frames`, ...) say how often something happened; spans say how much host time a stage took.
