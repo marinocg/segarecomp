@@ -75,7 +75,9 @@ def main():
         r = d["runtime"]
         by_name = {s["name"]: s for s in r["spans"]}
         require(d["status"] == "complete" and d["config"]["entry"] == "viewer" and d["config"]["renderer"] == "software" and d["config"]["paced"] is False, "viewer report identity: " + json.dumps(d["config"]))
-        require(r["frames"]["virtual"] > 50 and r["frames"]["presented"] > 40, "frames: " + json.dumps(r["frames"]))
+        notes = next(l for l in profiled.stderr.splitlines() if l.startswith("RUNTIME_NOTES"))
+        require(r["frames"]["virtual"] == json.loads(notes.split(" ", 1)[1])["virtual_frames"] > 50 and r["frames"]["presented"] > 40, f"every guest frame is counted, the first slice included: {r['frames']} vs {notes}")
+        require(r["frame_interval"]["count"] + r["frames"]["estimated"] == r["frames"]["virtual"], "histogram + estimated frames == virtual frames")
         for name in ("emulation", "vdp_compose", "rgb_convert", "texture_upload", "present"):
             require(by_name[name]["count"] > 0 and by_name[name]["total_ns"] > 0, f"span {name} measured")
         require(by_name["vdp_compose"]["total_ns"] <= by_name["emulation"]["total_ns"], "vdp_compose is contained in emulation")

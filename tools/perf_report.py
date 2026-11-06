@@ -145,11 +145,17 @@ def validate(d, where: str = "report") -> None:
             _num(r.get(k), where, f"runtime.{k}", integer=True)
         f = r.get("frames")
         _need(isinstance(f, dict), where, "runtime.frames missing")
-        for k in ("virtual", "presented", "coalesced"):
+        for k in ("virtual", "presented", "estimated"):
             _num(f.get(k), where, f"frames.{k}", integer=True)
+        eo = r.get("estimated_observations")
+        _need(isinstance(eo, dict), where, "runtime.estimated_observations missing")
+        for k in ("count", "wall_ns", "max_wall_ns"):
+            _num(eo.get(k), where, f"estimated_observations.{k}", integer=True)
+        _need(eo["count"] <= f["estimated"] and (eo["count"] > 0) == (f["estimated"] > 0), where, "estimated frames and observations are inconsistent")
         _hist(r.get("frame_interval"), where, "frame_interval")
         _hist(r.get("frame_work"), where, "frame_work")
-        _need(r["frame_interval"]["count"] == f["virtual"], where, "frame_interval.count must equal frames.virtual")
+        _need(r["frame_interval"]["count"] + f["estimated"] == f["virtual"], where, "frames.virtual must equal the exactly-timed frames (frame_interval.count) plus frames.estimated")
+        _need(r["frame_work"]["count"] == r["frame_interval"]["count"], where, "frame_work and frame_interval must cover the same frames")
         p = r.get("pacing")
         _need(isinstance(p, dict), where, "runtime.pacing missing")
         for k in ("waits", "wait_ns", "missed_deadlines", "resyncs"):
@@ -170,7 +176,8 @@ def validate(d, where: str = "report") -> None:
             _need(isinstance(tl, dict) and isinstance(tl.get("frames"), list) and len(tl["frames"]) <= 1024, where, "timeline must hold at most 1024 frames")
             _need(d["privacy"] == "private", where, "a shareable report must not carry a timeline")
             for row in tl["frames"]:
-                _need(isinstance(row, list) and len(row) == 6 and all(isinstance(x, int) and x >= 0 for x in row), where, "malformed timeline row")
+                _need(isinstance(row, list) and len(row) == 8 and all(isinstance(x, int) and x >= 0 for x in row) and row[5] >= 1 and row[6] <= row[5] and row[7] in (0, 1),
+                  where, "malformed timeline row (frame, interval_us, work_us, emulation_us, present_us, frames, missed, partial)")
 
 
 # ------------------------------------------------------------------------------------------------------------------------------ derivations
@@ -186,8 +193,9 @@ def runtime_derived(d: dict) -> dict:
     out["fps_presented"] = r["frames"]["presented"] * 1e9 / wall if wall and r["frames"]["presented"] else None
     spans = {s["name"]: s for s in r["spans"]}
     out["per_frame_ns"] = {n: s["total_ns"] / frames for n, s in spans.items() if frames and s["count"]}
-    out["share_of_interval"] = {n: s["total_ns"] / (r["frame_interval"]["avg_ns"] * r["frame_interval"]["count"]) for n, s in spans.items()
-                                if r["frame_interval"]["count"] and r["frame_interval"]["avg_ns"] and s["count"]}
+    # shares of the observed wall time (pauses excluded): independent of how many frames could be timed individually
+    out["share_of_interval"] = {n: s["total_ns"] / wall for n, s in spans.items() if wall and s["count"]}
+    out["exact_share"] = r["frame_interval"]["count"] / frames if frames else None
     return out
 
 
@@ -298,7 +306,11 @@ def summary_text(d: dict) -> str:
             w(f"!! {d['status']}: outcome '{r['outcome']}'; figures cover the session up to it")
         f = r["frames"]
         w(f"\nsession {fmt_ns(r['wall_ns'])} (paused {fmt_ns(r['paused_ns'])}, {r['pauses']}x) outcome={r['outcome']} [measured]")
-        w(f"frames: virtual {f['virtual']}, presented {f['presented']}, coalesced {f['coalesced']} [measured]")
+        w(f"frames: virtual {f['virtual']}, presented {f['presented']}, estimated {f['estimated']} [measured]")
+        if f["estimated"]:
+            eo = r["estimated_observations"]
+            w(f"  {f['estimated']} of {f['virtual']} frames lie in {eo['count']} multi-frame or partial observations (wall {fmt_ns(eo['wall_ns'])}, longest {fmt_ns(eo['max_wall_ns'])}): "
+              "they are counted but not individually timed; the percentiles below cover the other " + str(r["frame_interval"]["count"]) + " frames only")
         if k["speed"] is not None:
             w(f"emulation speed {100 * k['speed']:.1f}% of native ({k['fps_virtual']:.1f} virtual FPS" + (f", {k['fps_presented']:.1f} presented FPS" if k["fps_presented"] else "") + ") [derived]")
         for name, key in (("frame interval", "frame_interval"), ("frame work (interval minus pacing wait)", "frame_work")):
@@ -314,10 +326,11 @@ def summary_text(d: dict) -> str:
             w(f"  {s['name']:<15} {s['class']:<9} total {fmt_ns(s['total_ns'])}  per frame {fmt_ns(per) if per is not None else 'n/a'}  max {fmt_ns(s['max_ns'])}  x{s['count']}")
         w(f"guest (separate from host time) [measured]: master_ticks={r['guest']['master_ticks']}  " + "  ".join(f"{a}={b}" for a, b in r["counters"].items()))
         if "timeline" in r:
-            worst = sorted(r["timeline"]["frames"], key=lambda x: -x[1])[:5]
-            w(f"worst frames of the last {len(r['timeline']['frames'])} (frame, interval, work, emulation, present) [measured]")
+            worst = sorted(r["timeline"]["frames"], key=lambda x: -x[1] / x[5])[:5]
+            w(f"worst of the last {len(r['timeline']['frames'])} observations, by time per frame [measured]")
             for row in worst:
-                w(f"  frame {row[0]}: {row[1] / 1000:.2f} ms, work {row[2] / 1000:.2f} ms, emulation {row[3] / 1000:.2f} ms, present {row[4] / 1000:.2f} ms")
+                what = f"{row[5]} frames, {row[1] / 1000:.2f} ms total = {row[1] / row[5] / 1000:.2f} ms average (not a per-frame measurement)" if row[5] > 1 or row[7] else f"{row[1] / 1000:.2f} ms"
+                w(f"  frame {row[0]}: {what}, work {row[2] / 1000:.2f} ms, emulation {row[3] / 1000:.2f} ms, present {row[4] / 1000:.2f} ms" + (f", {row[6]} missed deadline(s)" if row[6] else ""))
     for line in bottleneck_lines(d):
         w("* " + line)
     for u in d.get("unavailable", []):
@@ -354,6 +367,10 @@ def comparability(a: dict, b: dict, mod: bool = False) -> list[str]:
         fa, fb = a["runtime"]["frames"]["virtual"], b["runtime"]["frames"]["virtual"]
         if min(fa, fb) == 0 or max(fa, fb) / max(min(fa, fb), 1) > 1.25:
             warn.append(f"frame counts differ markedly ({fa} vs {fb}): different workloads or windows")
+        for side, r in (("before", a), ("after", b)):
+            est = r["runtime"]["frames"]["estimated"]
+            if est:
+                warn.append(f"INFO {side}: {est} of {r['runtime']['frames']['virtual']} frames were not individually timed (coalesced slices); its percentiles cover the others only")
         if a["runtime"]["outcome"] != b["runtime"]["outcome"]:
             warn.append(f"session outcomes differ ({a['runtime']['outcome']} vs {b['runtime']['outcome']})")
     return warn
@@ -437,11 +454,13 @@ def compare_text(a: dict, b: dict, mod: bool = False) -> str:
 def timeline_regions(a: dict, b: dict) -> str:
     """Frame-indexed comparison of the two recorded windows: the five frame offsets with the largest interval increase."""
     fa, fb = a["runtime"]["timeline"]["frames"], b["runtime"]["timeline"]["frames"]
+    exact = lambda rows: [r for r in rows if r[5] == 1 and not r[7]]   # noqa: E731  only individually timed frames are comparable position by position
+    fa, fb = exact(fa), exact(fb)
     n = min(len(fa), len(fb))
     if n == 0:
         return ""
     diffs = sorted(((fb[i][1] - fa[i][1], i) for i in range(n)), reverse=True)[:5]
-    lines = [f"frame-indexed comparison over the last {n} recorded frames (offset from window start) [derived]"]
+    lines = [f"comparison of the first {n} individually timed frames of each recorded window, by position (multi-frame observations skipped) [derived]"]
     for d, i in diffs:
         lines.append(f"  offset {i}: {fa[i][1] / 1000:.2f} ms -> {fb[i][1] / 1000:.2f} ms ({d / 1000:+.2f} ms)")
     return "\n".join(lines)
@@ -486,7 +505,7 @@ def sanitize(d: dict) -> dict:
         out["config"] = {"entry": _text(cfg.get("entry")), "mode": _text(cfg.get("mode")), "paced": bool(cfg.get("paced")), "slice_dispatches": int(cfg.get("slice_dispatches", 0)),
                          "target_frame_ns": int(cfg["target_frame_ns"]), "renderer": _text(cfg.get("renderer")) if cfg.get("renderer") else None, "host_os": _text(cfg.get("host_os"))}
         r = d["runtime"]
-        out["runtime"] = {"outcome": _text(r["outcome"]), "wall_ns": r["wall_ns"], "paused_ns": r["paused_ns"], "pauses": r["pauses"], "frames": dict(r["frames"]),
+        out["runtime"] = {"outcome": _text(r["outcome"]), "wall_ns": r["wall_ns"], "paused_ns": r["paused_ns"], "pauses": r["pauses"], "frames": dict(r["frames"]), "estimated_observations": dict(r["estimated_observations"]),
                           "frame_interval": {k: r["frame_interval"][k] for k in r["frame_interval"] if k.endswith("_ns") or k in ("count", "resolution_ns")},
                           "frame_work": {k: r["frame_work"][k] for k in r["frame_work"] if k.endswith("_ns") or k in ("count", "resolution_ns")},
                           "pacing": dict(r["pacing"]), "spans": [{k: s[k] for k in ("name", "class", "parent", "count", "total_ns", "max_ns") if k in s} for s in r["spans"]],
@@ -553,7 +572,8 @@ def stacked_svg(rows: list[tuple[str, float, str]], unit: str, title: str, width
 def timeline_svg(frames: list[list[int]], target_us: float, title: str, width=760, height=150) -> str:
     if not frames:
         return f"<p class='meta'>{e(title)}: this report carries no frame timeline (summary mode or shareable form)</p>"
-    top = max(max(r[1] for r in frames), target_us * 2) or 1
+    per = lambda r: r[1] / r[5]   # noqa: E731  a multi-frame observation is drawn at its AVERAGE per frame, in a different colour, with that said in its tooltip
+    top = max(max(per(r) for r in frames), target_us * 2) or 1
     n = len(frames)
     bw = (width - 50) / n
     parts = [f"<svg role='img' aria-label='{e(title)}' width='{width}' height='{height + 24}'><title>{e(title)}</title>"]
@@ -562,12 +582,15 @@ def timeline_svg(frames: list[list[int]], target_us: float, title: str, width=76
     ty = y0 - height * target_us / top
     parts.append(f"<line x1='40' x2='{width}' y1='{ty:.1f}' y2='{ty:.1f}' stroke='currentColor' stroke-dasharray='4 3' opacity='.5'/><text class='mut' x='2' y='{ty + 4:.1f}'>native</text>")
     for i, r in enumerate(frames):
-        h = height * r[1] / top
-        cls = "sbad" if r[5] or r[1] > target_us * 1.125 else "sc"
-        parts.append(f"<rect class='{cls}' x='{40 + i * bw:.2f}' y='{y0 - h:.1f}' width='{max(bw - 0.3, 0.5):.2f}' height='{h:.1f}'><title>frame {r[0]}: interval {r[1] / 1000:.2f} ms, work {r[2] / 1000:.2f} ms, emulation {r[3] / 1000:.2f} ms, present {r[4] / 1000:.2f} ms</title></rect>")
+        h = height * per(r) / top
+        est = r[5] > 1 or r[7]
+        cls = "sbad" if r[6] else ("sa" if est else ("sbad" if r[1] > target_us * 1.125 else "sc"))
+        what = (f"{r[5]} frames, {r[1] / 1000:.2f} ms total = {r[1] / r[5] / 1000:.2f} ms average (NOT a per-frame measurement)" if est else f"interval {r[1] / 1000:.2f} ms")
+        parts.append(f"<rect class='{cls}' x='{40 + i * bw:.2f}' y='{y0 - h:.1f}' width='{max(bw - 0.3, 0.5):.2f}' height='{h:.1f}'><title>frame {r[0]}: {what}, work {r[2] / 1000:.2f} ms, emulation {r[3] / 1000:.2f} ms, present {r[4] / 1000:.2f} ms"
+                     + (f", {r[6]} missed deadline(s)" if r[6] else "") + "</title></rect>")
     parts.append(f"<text class='mut' x='40' y='{y0 + 16}'>frame {frames[0][0]}</text><text class='mut' x='{width}' y='{y0 + 16}' text-anchor='end'>frame {frames[-1][0]}</text>"
                  f"<text class='mut' x='2' y='12'>{top / 1000:.1f} ms</text></svg>")
-    return f"<div class='card'><b>{e(title)}</b> <span class='meta'>red = missed deadline or &gt;12.5% over native frame time</span>{''.join(parts)}</div>"
+    return f"<div class='card'><b>{e(title)}</b> <span class='meta'>green = one frame, individually timed; red = missed deadline or &gt;12.5% over native frame time; blue = several frames in one observation (average per frame, not a measurement); one bar per observation</span>{''.join(parts)}</div>"
 
 
 def compare_svg(rows, title: str, width=760) -> str:

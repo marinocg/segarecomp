@@ -238,7 +238,7 @@ static void test_bounded_history_and_json(void) {
   CHECK(size > 0 && size < 64 * 1024);
   fseek(f, 0, SEEK_SET); got = fread(text, 1, sizeof text - 1, f); text[got] = '\0';
   CHECK(strstr(text, "\"schema\":\"segarecomp.performance\"") != NULL && strstr(text, "\"timeline\"") != NULL && strstr(text, "\"dropped_oldest\":") != NULL);
-  CHECK(strstr(text, "\"estimated\":0") != NULL && strstr(text, "\"range_ns\":8192000000") != NULL && strstr(text, "\"columns\":[\"frame\",\"interval_us\",\"work_us\",\"emulation_us\",\"present_us\",\"frames\",\"missed\"]") != NULL);
+  CHECK(strstr(text, "\"estimated\":0") != NULL && strstr(text, "\"range_ns\":8192000000") != NULL && strstr(text, "\"columns\":[\"frame\",\"interval_us\",\"work_us\",\"emulation_us\",\"present_us\",\"frames\",\"missed\",\"partial\"]") != NULL);
   CHECK(strstr(text, "\"unavailable\":[{\"metric\":\"gpu_time\"") != NULL);
   fclose(f);
   meta.privacy = "shareable";

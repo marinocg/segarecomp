@@ -55,14 +55,18 @@ def build_report(scale=1.0, **over):
     return d
 
 
-def runtime_report(factor=1.0, frames=600, paced=False, **over):
+def runtime_report(factor=1.0, frames=600, paced=False, estimated=0, **over):
     iv = [int(16_000_000 * factor) + (i % 7) * 100_000 for i in range(frames)]
     wk = [x - 3_000_000 if paced else x for x in iv]
-    tl = [[1000 + i, iv[i] // 1000, wk[i] // 1000, int(iv[i] * 0.6) // 1000, int(iv[i] * 0.2) // 1000, 1 if i % 100 == 99 else 0] for i in range(min(frames, 300))]
+    tl = [[1000 + i, iv[i] // 1000, wk[i] // 1000, int(iv[i] * 0.6) // 1000, int(iv[i] * 0.2) // 1000, 1, 1 if i % 100 == 99 else 0, 0] for i in range(min(frames, 300))]
+    if estimated:   # the first observation covers `estimated` frames: counted, not individually timed, not in the histograms
+        tl[0] = [1000, iv[0] * estimated // 1000, 0, 0, 0, estimated, 0, 0]
+        iv, wk = iv[estimated:], wk[estimated:]
     total_iv = sum(iv)
     d = {"schema": pr.SCHEMA, "schema_version": 1, "kind": "runtime", "status": "complete", "privacy": "private", "platform": "genesis",
          "config": {"entry": "viewer", "mode": "detailed", "paced": paced, "slice_dispatches": 500, "target_frame_ns": 16683333, "renderer": "software", "host_os": "linux"},
-         "runtime": {"outcome": "window_closed", "wall_ns": total_iv, "paused_ns": 0, "pauses": 0, "frames": {"virtual": frames, "presented": frames - 3, "coalesced": 0},
+         "runtime": {"outcome": "window_closed", "wall_ns": total_iv, "paused_ns": 0, "pauses": 0, "frames": {"virtual": frames, "presented": frames - 3, "estimated": estimated},
+                     "estimated_observations": {"count": 1 if estimated else 0, "wall_ns": 16_000_000 * estimated, "max_wall_ns": 16_000_000 * estimated},
                      "frame_interval": hist(iv), "frame_work": hist(wk),
                      "pacing": {"waits": frames if paced else 0, "wait_ns": 3_000_000 * frames if paced else 0, "missed_deadlines": 6, "resyncs": 0},
                      "spans": [{"name": "emulation", "class": "inclusive", "parent": "", "count": frames, "total_ns": int(total_iv * 0.6), "max_ns": 9_000_000},
@@ -104,7 +108,12 @@ def test_validate_accepts_and_rejects():
     d = build_report(status="failed"); rejects(d, "failed build without failure.stage")
     d = runtime_report(); d["runtime"]["frame_interval"]["p95_ns"] = 1; rejects(d, "unordered percentiles")
     d = runtime_report(); d["runtime"]["frames"]["virtual"] = 5; rejects(d, "histogram count vs frames")
-    d = runtime_report(); d["runtime"]["timeline"]["frames"] = [[0, 0, 0, 0, 0, 0]] * 1025; rejects(d, "oversized timeline")
+    pr.validate(runtime_report(estimated=3))
+    d = runtime_report(estimated=3); d["runtime"]["frames"]["estimated"] = 2; rejects(d, "virtual != exact + estimated")
+    d = runtime_report(); d["runtime"]["frames"]["estimated"] = 1; rejects(d, "estimated frames without an observation")
+    d = runtime_report(); d["runtime"]["timeline"]["frames"][0][6] = 5; rejects(d, "more missed deadlines than frames in a row")
+    d = runtime_report(); d["runtime"]["timeline"]["frames"][0][5] = 0; rejects(d, "zero frames in an observation")
+    d = runtime_report(); d["runtime"]["timeline"]["frames"] = [[0, 0, 0, 0, 0, 1, 0, 0]] * 1025; rejects(d, "oversized timeline")
     d = runtime_report(); d["runtime"]["timeline"]["frames"][0] = [1, 2]; rejects(d, "malformed timeline row")
     d = runtime_report(privacy="shareable"); rejects(d, "shareable report with a timeline")
     d = runtime_report(); d["runtime"]["spans"][0]["name"] = "mystery"; rejects(d, "unknown span")
@@ -142,7 +151,7 @@ def test_summary_labels_and_content():
     require("[unavailable] link_cpu_ms" in b and "genesis_secret_unit.c" in b, "unavailable + private units")
     r = pr.summary_text(runtime_report(paced=True))
     require("emulation speed" in r and "[derived]" in r and "vdp_compose is" in r and "not additive" in r, "runtime summary:\n" + r)
-    require("worst frames" in r and "[unavailable] gpu_time" in r, "timeline + unavailable")
+    require("worst of the last" in r and "[unavailable] gpu_time" in r, "timeline + unavailable")
     failed = build_report(status="failed", failure={"stage": "link"})
     require("failure in stage link" in pr.summary_text(failed), "failed build is called out")
     inc = runtime_report(status="incomplete")
@@ -176,7 +185,7 @@ def test_compare_build():
 def test_compare_runtime():
     a, b = runtime_report(), runtime_report(factor=1.4)
     text = pr.compare_text(a, b)
-    require("frame interval p95" in text and "SLOWER/WORSE" in text and "frame-indexed comparison" in text, "runtime slowdown + timeline:\n" + text)
+    require("frame interval p95" in text and "SLOWER/WORSE" in text and "individually timed frames" in text, "runtime slowdown + timeline:\n" + text)
     require("emulation speed (derived)" in text, "speed row")
     c = runtime_report(); c["config"]["renderer"] = "opengl"; c["config"]["paced"] = True
     require(any("renderer" in w for w in pr.comparability(a, c)) and any("paced" in w for w in pr.comparability(a, c)), "runtime config warnings")
@@ -184,6 +193,19 @@ def test_compare_runtime():
     require(any("frame counts differ" in w for w in pr.comparability(a, d)), "workload size")
     ex = pr.compare_text(a, build_report())
     require("INCOMPARABLE" in ex and "->" not in ex, "no numbers across kinds")
+
+
+def test_estimated_frames_are_not_presented_as_measured():
+    r = runtime_report(estimated=4)
+    text = pr.summary_text(r)
+    require("4 of 600 frames lie in 1 multi-frame or partial observations" in text and "percentiles below cover the other 596 frames only" in text, "summary states the limitation:\n" + text)
+    require("not a per-frame measurement" in text or "worst of the last" in text, "worst observations are labelled")
+    cmp_text = pr.compare_text(r, runtime_report())
+    require("INFO before: 4 of 600 frames were not individually timed" in cmp_text, "comparison states the limitation:\n" + cmp_text)
+    page = pr.html_report([r], ["r.json"])
+    require("NOT a per-frame measurement" in page and "several frames in one observation" in page, "HTML labels coalesced observations")
+    require(pr.sanitize(r)["runtime"]["frames"]["estimated"] == 4, "estimated frames survive sanitize")
+    require(pr.runtime_derived(r)["exact_share"] < 1.0, "exact share derived")
 
 
 def test_html_is_offline_and_escaped():
@@ -273,6 +295,7 @@ def main():
     test_summary_labels_and_content()
     test_compare_build()
     test_compare_runtime()
+    test_estimated_frames_are_not_presented_as_measured()
     test_html_is_offline_and_escaped()
     test_sanitize_allow_list()
     test_no_network_and_stdlib_only()

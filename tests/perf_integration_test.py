@@ -155,7 +155,9 @@ def main():
         rd = pr.load(runtime_report)
         r = rd["runtime"]
         require(rd["status"] == "complete" and r["outcome"] == "runner_resource_limit" and rd["config"]["entry"] == "headless" and rd["config"]["paced"] is False, "runtime identity")
-        require(r["frames"]["virtual"] > 100 and r["frame_interval"]["count"] == r["frames"]["virtual"], "frames counted: " + json.dumps(r["frames"]))
+        guest_frames = json.loads(sound_summary(on_run.stderr).split(" ", 1)[1])["virtual_frames"]
+        require(r["frames"]["virtual"] == guest_frames > 100, f"every guest frame of the session is counted, the first slice included ({r['frames']} vs {guest_frames})")
+        require(r["frame_interval"]["count"] + r["frames"]["estimated"] == r["frames"]["virtual"], "histogram + estimated frames == virtual frames: " + json.dumps(r["frames"]))
         require(r["counters"]["m68k_dispatches"] == 3_000_000, "guest dispatch count equals the budget")
         require(r["guest"]["master_ticks"] > 0 and r["wall_ns"] > 0, "guest time reported separately from host time")
         require(len(r["timeline"]["frames"]) <= 1024 and runtime_report.stat().st_size < 64 * 1024, "bounded report")

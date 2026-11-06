@@ -357,9 +357,9 @@ static inline void sv_perf_write_json(const SvPerf *p, const SvPerfMeta *m, FILE
     fprintf(f, ",\"timeline\":{\"capacity\":%u,\"recorded\":%llu,\"dropped_oldest\":%llu,\"frames\":[", SV_PERF_HISTORY, (unsigned long long)n, (unsigned long long)first);
     for (i = 0U; i < n; ++i) {
       const SvPerfFrame *x = &p->history[(first + i) % SV_PERF_HISTORY];
-      fprintf(f, "%s[%llu,%u,%u,%u,%u,%u,%u]", i ? "," : "", (unsigned long long)x->frame, x->interval_us, x->work_us, x->emulation_us, x->present_us, x->frames, x->missed);
+      fprintf(f, "%s[%llu,%u,%u,%u,%u,%u,%u,%u]", i ? "," : "", (unsigned long long)x->frame, x->interval_us, x->work_us, x->emulation_us, x->present_us, x->frames, x->missed, x->partial);
     }
-    fputs("],\"columns\":[\"frame\",\"interval_us\",\"work_us\",\"emulation_us\",\"present_us\",\"frames\",\"missed\"],\"note\":\"one row per observation; frames > 1 rows cover several virtual frames and carry no per-frame time\"}", f);
+    fputs("],\"columns\":[\"frame\",\"interval_us\",\"work_us\",\"emulation_us\",\"present_us\",\"frames\",\"missed\",\"partial\"],\"note\":\"one row per observation; frames > 1 rows cover several virtual frames and carry no per-frame time\"}", f);
   }
   fputs("},\"unavailable\":[", f);
   for (i = 0U; i < 8U && m->unavailable[i][0] != NULL; ++i)
