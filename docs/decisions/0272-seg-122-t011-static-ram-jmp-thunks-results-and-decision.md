@@ -140,3 +140,35 @@ overlap test against existing entries is now an exact interval test (a descripto
 **`STATIC_THUNKS_ONLY` is retained.** The independent reference now exists and agrees with the generated program exactly on the synthetic fixture, but the real-route gates registered for it (R4, R5) were not met, so frozen gate C6 is not satisfied by
 route evidence and is not reinterpreted as satisfied. The PR stays draft. What would settle it: a pre-registered, paired confirmation (for example the exploratory LBZ2/AIZ2 comparison, with its metric and thresholds fixed in advance) accepted by the operator,
 or a renderer-aligned comparison of palette/RAM state at game-state-defined sync points.
+
+## 8. Addendum: raster effect check (F1/F1b) and authentic sanity check (F2); final recommendation
+
+### 8.1 Synthetic raster effect against the pinned Genesis Plus GX
+
+- **F1 (one-shot, as first pre-registered): FAILED, kept as historical evidence.** Both machines ran handler A then handler B in order (blue, then red, then green), so the retarget selected the right handler in both, but the row alignment criterion failed: the fixture enables the
+  H-interrupt mid-frame with a stale H counter, and there the generated scheduler delivers an interrupt at the enabling line (first red band at row 217, green at row 80 of the next frame) while the reference delivers the first interrupt on the next frame's counter
+  (blue 0-78, red 79-158, green 159-223). That edge belongs to the existing H-interrupt scheduler and applies to ROM handlers equally; it is not part of the RAM `JMP` mechanism and was not investigated further. (A first fixture also wrote CRAM before VDP mode 5 was enabled, which the reference treats
+  as a Mode 4 write: a fixture bug, fixed, not an implementation defect.)
+- **F1b (steady state, pre-registered after F1's failure, before it was run): PASSED.** Handler A writes CRAM[0] red and retargets the stub to B; B writes green and retargets back; two interrupts per frame. Both machines show the same three-band frame (green, red, green):
+  boundaries at rows 80/160 in the generated program and 79/159 in the reference (within 1 row), the same band order, stable over the last 10 of 40 frames; with the H-interrupt disabled neither machine shows a boundary. The test
+  (`tests/genesis_hint_raster_reference_test.py`) executes its reference half when `SEGARECOMP_GENESIS_ORACLE_CHECKOUT` is set and fails when `SEGARECOMP_REQUIRE_GENESIS_REFERENCE=1` and the checkout is missing; without either it prints that the reference half was **not executed**.
+  Together with section 7.2 this is independent evidence for interrupt entry, retargeting through the live operand, `RTE`, resumption and the visible CRAM raster effect on a project-authored ROM.
+
+### 8.2 Authentic sanity check (F2), existing captures only
+
+- (a) Handlers executed: on the LBZ2 played-start route `CAND` reports 0 undelivered level-4 interrupts, `BASE` 3,568 (R2).
+- (b) As pre-registered, "a tint step of at least 24 across one row boundary" is **not discriminating**: busy level graphics produce such a step in every frame of every arm (30/30), so (b) is not satisfied as written and no claim is made from it.
+- (c) Post-hoc (not pre-registered, labelled as such): taking each frame's strongest tint-step row, `CAND` is within 3 rows of the reference's in 30/30 LBZ2 frames (`BASE` 26/30) and 18/30 AIZ2 frames (`BASE` 1/30); CNZ2 is 22/30 for both because game state diverges from the reference after about frame 22. The strongest-step row is a weak proxy for the
+  water line, and game states are only loosely aligned, so this is supporting evidence only. The machines cannot be aligned further with the existing instrumentation; the check stops here as instructed.
+
+### 8.3 Review and defects
+
+No new correctness defect in the feature. The only disagreements found were a fixture ordering bug (Mode 4 CRAM write) and the pre-existing enable-edge scheduler difference above.
+
+### 8.4 Decision and recommendation
+
+**`STATIC_THUNKS_ONLY` is retained: frozen gate C6 is not technically met.** What is met: an independent reference exists and agrees exactly with the generated program on the interrupt-semantics fixture and on the steady-state raster fixture, the old behaviour is detected, and gameplay evidence shows the candidate dropping no
+level-4 interrupts where the old executable dropped thousands and tracking the reference better than the old executable on two acts. What is not met: no pre-registered real-route comparison passed (R4, R5 failed; F2 (b) non-discriminating; F2 (c) post-hoc).
+**Recommendation: `MERGE_WITH_DOCUMENTED_LIMITATIONS`, an operator decision, not an automatic one.** An operator merging accepts: (1) level-4 delivery through RAM stubs becomes default-on for the cartridges the recognizer admits (known: the two S&K stubs), changing their behaviour from dropped interrupts to executed handlers, validated on synthetic
+fixtures against an independent emulator and on gameplay only by non-gated, partly post-hoc comparisons; (2) the pre-existing scheduler difference at the H-interrupt enable edge now matters for those games (it applied to every ROM-handler game before); (3) every Genesis Optimized library entry rebuilds once (contract v3); (4) CI does not exercise the reference half (checkout absent) or the Musashi half (checkout env unset).
+If the operator wants C6 met literally, a pre-registered real-route comparison must pass first.

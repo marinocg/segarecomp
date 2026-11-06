@@ -1587,6 +1587,10 @@ add_test(NAME genesis_hint_ram_jmp_reference_test COMMAND ${Python3_EXECUTABLE} 
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_hint_ram_jmp_reference_test APPEND PROPERTY LABELS full fast)
 set_property(TEST genesis_hint_ram_jmp_reference_test PROPERTY TIMEOUT 900)
+add_test(NAME genesis_hint_raster_reference_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_hint_raster_reference_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_hint_raster_reference_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_hint_raster_reference_test PROPERTY TIMEOUT 900)
 add_executable(genesis_m68k_executable_image_test genesis_m68k_executable_image_test.cpp)
 target_link_libraries(genesis_m68k_executable_image_test PRIVATE segarecomp::machine_genesis)
 segarecomp_enable_warnings(genesis_m68k_executable_image_test)

@@ -140,7 +140,10 @@ def main():
         print("generated-native half: ok (normal %s)" % json.dumps(fields(got["normal"])))
         checkout = pins.checkout(NAMES)
         if checkout is None:
-            print("SKIP reference half: " + pins.skip_reason(NAMES))
+            if os.environ.get("SEGARECOMP_REQUIRE_GENESIS_REFERENCE") == "1":
+                print("FAIL: reference required but unavailable: " + pins.skip_reason(NAMES))
+                return 1
+            print("SKIPPED reference half (NOT executed): " + pins.skip_reason(NAMES))
             return 0
         host = work / "host"
         subprocess.run([cc, "-std=c11", "-O1", "-Wall", "-Wextra", "-o", str(host), str(HERE / "genesis_oracle" / "libretro_host.c"), "-ldl"], check=True)
@@ -158,7 +161,7 @@ def main():
             print("%-4s %-9s reference ran no handler and did not complete; native stop=%s class=%s" % ("ok" if ok else "FAIL", v, got[v]["stop"], got[v]["stop_class"]))
             failed += 0 if ok else 1
         assert fields(mutated) != fields(ref["normal"]), "the comparison detects dropped level-4 delivery"
-        print("independent reference differential: %s" % ("FAILED (%d)" % failed if failed else "ok"))
+        print("independent reference differential: %s%s" % ("FAILED (%d)" % failed if failed else "ok", "" if failed else " (reference half executed)"))
         return 1 if failed else 0
 
 
