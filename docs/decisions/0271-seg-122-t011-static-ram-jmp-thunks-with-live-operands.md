@@ -130,3 +130,13 @@ no candidate **route** has been run yet. From here on:
 - **Interrupt classes reported:** level-4 (H) undelivered/dropped count, level-6 (V) behaviour, typed stops by class.
 - **Independent reference.** No pinned Genesis-level emulator harness exists in the repository; the pinned Musashi comparison covers instruction/exception semantics only (C4). Per C6 the
   verdict cannot exceed `STATIC_THUNKS_ONLY` unless a Genesis reference is run on the same route; a locally installed emulator without a scriptable state/RAM interface is recorded as a gap, not used as proof.
+
+## Frozen route R2 (second addendum, recorded before any R2 run; tightens, never relaxes)
+
+Operator request after the first decision: exercise level-4 delivery with the retained S3&K validation tooling (title input code, SOUND TEST, level select, debug mode armed by A held at level init;
+the validation image is the combined image with one byte retargeted, never shipped, local only). Route R2 = the retained "played start" route (`tools/seg122_t005_s3k/shots.sh` logic: level select to the act,
+wait 430 polls, run right with jumps until poll +1520), **all 28 acts**, frame exact (`SEGARECOMP_VIEWER_SLICE=1`), original 4:3, headless SDL dummy drivers, unthrottled, muted, finite `--instruction-budget 4294967295`,
+wall timeout 600 s per run, captures at polls +425, +900, +1400 after the level-select Start. Arms: `CAND` and `BASE` (product main), both Optimized gen2 selective builds of the validation image, same flags, built one at a time.
+Compared per act: run exit and stop class, `RUNTIME_NOTES` (`hint_undelivered`, virtual frames), capture digests. Assertions: `CAND` has no typed stop and `hint_undelivered` 0 on every act; any `CAND`/`BASE`
+difference is explained by `BASE`'s undelivered level-4 interrupts (acts with `BASE` undelivered = 0 must be bit-identical); frames at the end of each act inspected for the acts with the largest `BASE` counts.
+A stop in `CAND` is reported with a broad replay, not retuned away. This remains evidence for these routes and still has no independent Genesis reference (gate C6 unchanged).
