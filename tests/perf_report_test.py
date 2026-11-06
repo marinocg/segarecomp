@@ -230,6 +230,17 @@ def test_sanitize_allow_list():
         pass
 
 
+def test_no_network_and_stdlib_only():
+    import ast
+    tree = ast.parse((ROOT / "tools" / "perf_report.py").read_text())
+    imported = {n.names[0].name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import)} | {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+    require(imported <= {"__future__", "argparse", "html", "json", "math", "re", "sys", "pathlib"}, "perf_report.py imports only a small standard-library set: " + str(imported))
+    require(not (imported & {"socket", "urllib", "http", "requests", "ssl", "ftplib", "smtplib", "subprocess"}), "perf_report.py has no network or process access")
+    for path in ("libs/viewer/include/sv_perf.h", "apps/segarecomp/build_profile.hpp"):
+        text = (ROOT / path).read_text()
+        require(not any(w in text for w in ("socket", "curl", "http://", "https://", "connect(")), path + " has no network code")
+
+
 def test_cli(tmp):
     script = str(ROOT / "tools" / "perf_report.py")
     run = lambda *a: subprocess.run([sys.executable, "-I", script, *a], text=True, capture_output=True)  # noqa: E731
@@ -264,6 +275,7 @@ def main():
     test_compare_runtime()
     test_html_is_offline_and_escaped()
     test_sanitize_allow_list()
+    test_no_network_and_stdlib_only()
     with tempfile.TemporaryDirectory(prefix="perf-report-") as d:
         tmp = pathlib.Path(d)
         test_load_rejects_bad_files(tmp)

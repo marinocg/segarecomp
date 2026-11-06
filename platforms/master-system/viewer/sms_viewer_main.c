@@ -125,7 +125,7 @@ int main(int argc, char **argv) {
   g_inner = host;
   sv_perf_init(&g_perf, perf_clock, sms_pacer_period_floor_ns(), perf_request.detailed);
   host.poll = perf_poll;
-  host.sleep_ns = perf_sleep;
+  if (host.sleep_ns != NULL) host.sleep_ns = perf_sleep; /* NULL is legal only when unthrottled: keep the pacer's own contract */
   host.present = perf_present;
   if (host.audio != NULL) host.audio = perf_audio;
   sms_sdl3_viewer_set_perf(viewer, &g_perf);

@@ -151,7 +151,7 @@ def compile_program(emit_dir, work, viewer=False):
         [psg / "src/sn76489.c"] + ([vw / n for n in ("sms_viewer.c", "sms_viewer_main.c")] + [ROOT / "tests/tools/sms_viewer_host_stub.c"] if viewer else
                                    [hl / n for n in ("sms_audio.c", "sms_headless.c", "sms_devices_vdp.c")])
     base = [CC, "-std=c11", "-O0", "-w", "-I", str(ROOT / "libs/codegen/c11/include"), "-I", str(rt), "-I", str(psg / "include"), "-I", str(emit_dir),
-            *(["-I", str(vw)] if viewer else ["-I", str(hl)])]
+            *(["-I", str(vw), "-I", str(ROOT / "libs/viewer/include")] if viewer else ["-I", str(hl)])]   # SEG-125: sms_viewer_main.c includes the header-only sv_perf.h
     objects = [work / ("%d.o" % i) for i in range(len(sources))]
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         codes = list(pool.map(lambda p: subprocess.run(base + ["-c", "-o", str(p[1]), str(p[0])], capture_output=True).returncode, zip(sources, objects)))

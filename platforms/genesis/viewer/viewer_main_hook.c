@@ -218,7 +218,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   g_inner = host;
   sv_perf_init(&g_perf, perf_clock, genesis_pacer_period_floor_ns(), perf_request.detailed);
   host.window_closed = perf_window_closed;
-  host.sleep_ns = perf_sleep;
+  if (host.sleep_ns != NULL) host.sleep_ns = perf_sleep; /* NULL is legal only when unthrottled: keep the pacer's own contract */
   host.after_slice = perf_after_slice;
   genesis_sdl3_viewer_set_perf(sdl, &g_perf);
   snprintf(g_renderer, sizeof g_renderer, "%s", genesis_sdl3_viewer_renderer_name(sdl) != NULL ? genesis_sdl3_viewer_renderer_name(sdl) : "");

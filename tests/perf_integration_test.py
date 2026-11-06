@@ -108,6 +108,21 @@ def main():
         r_off, r_on = run_game(tmp / "off" / "game", 1000), run_game(tmp / "on" / "game", 1000)
         require(r_off.stdout == r_on.stdout and r_off.returncode == r_on.returncode, "the program behaves identically")
 
+        # ---- privacy: the sanitized forms of REAL reports hold no unit name, path or compiler version line
+        script = str(ROOT / "tools" / "perf_report.py")
+        for name, source in (("build", report), ("runtime", tmp / "none")):
+            if name == "runtime":
+                source = tmp / "runtime-for-privacy.json"
+                run_game(tmp / "off" / "game", 1000, {"SEGARECOMP_PERF_REPORT": str(source), "SEGARECOMP_PERF_MODE": "detailed"})
+            shared = tmp / f"{name}-shared.json"
+            res = subprocess.run([sys.executable, "-I", script, "sanitize", str(source), "-o", str(shared)], text=True, capture_output=True)
+            require(res.returncode == 0, f"sanitize {name}: " + res.stderr)
+            text = shared.read_text()
+            require(str(tmp) not in text and "/tmp" not in text and "/home" not in text, f"shareable {name} report holds no path")
+            require(".c\"" not in text and "label" not in text and "timeline" not in text and "slowest_units" not in text, f"shareable {name} report holds no unit names or timeline")
+            require(subprocess.run([sys.executable, "-I", script, "check-shareable", str(shared)], capture_output=True).returncode == 0, f"{name} shareable check")
+            require(subprocess.run([sys.executable, "-I", script, "check-shareable", str(source)], capture_output=True).returncode == 1, f"the private {name} report is not shareable")
+
         # ---- build report: failure is marked, status.json and exit code preserved
         failed_report = tmp / "failed.json"
         bad = build(cli, str(tmp / "no-such-compiler"), stop_rom, tmp / "bad", report=failed_report)

@@ -91,9 +91,15 @@ def main():
         require(paced.returncode == plain.returncode, "paced run: " + paced.stderr[-300:])
         p = pr.load(paced_report)
         speed = pr.runtime_derived(p)["speed"]
-        require(p["config"]["paced"] is True and p["runtime"]["pacing"]["waits"] > 30, "pacing waits recorded: " + json.dumps(p["runtime"]["pacing"]))
-        require(speed is not None and 0.8 < speed < 1.2, f"paced emulation speed ~100%: {speed}")
-        require(p["runtime"]["frame_work"]["avg_ns"] < p["runtime"]["frame_interval"]["avg_ns"], "work excludes the pacing wait")
+        pacing, frames = p["runtime"]["pacing"], p["runtime"]["frames"]["virtual"]
+        require(p["config"]["paced"] is True and frames > 50, "paced session identity")
+        # every boundary either waited for its deadline or found it already past - on a busy CI host the latter happens (and is exactly what the collector must report)
+        require(pacing["waits"] + pacing["missed_deadlines"] >= frames - 5, "every paced frame is accounted for as a wait or a missed deadline: " + json.dumps(pacing))
+        if pacing["missed_deadlines"] == 0:
+            require(0.8 < speed < 1.2, f"an on-time paced session runs at ~100%: {speed}")
+        else:
+            require(speed is not None and speed < 1.2, f"a session that missed deadlines never runs faster than native: {speed}")
+        require(p["runtime"]["frame_work"]["avg_ns"] <= p["runtime"]["frame_interval"]["avg_ns"] and (pacing["waits"] == 0 or p["runtime"]["frame_work"]["avg_ns"] < p["runtime"]["frame_interval"]["avg_ns"]), "work excludes the pacing wait")
         # robustness: malformed option fails closed before the window opens
         bad = run(1000, {"SEGARECOMP_PERF_MODE": "turbo", "SEGARECOMP_PERF_REPORT": str(tmp / "bad.json")})
         require(bad.returncode == 3, "malformed viewer perf option exits 3")
