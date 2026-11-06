@@ -78,6 +78,17 @@ static inline void sv_perf_hist_reset(SvPerfHistogram *h) {
   h->min_ns = UINT64_MAX;
 }
 
+/* `n` identical samples in O(1) (a slice that crossed several frame boundaries shares one interval among them). Bucket counters saturate instead of wrapping. */
+static inline void sv_perf_hist_add_n(SvPerfHistogram *h, uint64_t ns, uint64_t n) {
+  uint64_t b = ns / SV_PERF_BUCKET_NS;
+  if (b >= SV_PERF_BUCKETS) b = SV_PERF_BUCKETS - 1U;
+  h->bucket[b] = (uint64_t)h->bucket[b] + n > UINT32_MAX ? UINT32_MAX : (uint32_t)(h->bucket[b] + n);
+  h->count += n;
+  h->sum_ns += ns * n;
+  if (ns < h->min_ns) h->min_ns = ns;
+  if (ns > h->max_ns) h->max_ns = ns;
+}
+
 static inline void sv_perf_hist_add(SvPerfHistogram *h, uint64_t ns) {
   uint64_t b = ns / SV_PERF_BUCKET_NS;
   if (b >= SV_PERF_BUCKETS) b = SV_PERF_BUCKETS - 1U;
@@ -143,17 +154,15 @@ static inline uint32_t sv_perf_us(uint64_t ns) { return ns / 1000U > UINT32_MAX 
 /* `crossed` (>0) virtual-frame boundaries were crossed since the last call (a slice can cross several: the interval is shared evenly and
  * the extra frames are counted as coalesced). `missed` = the pacer had no time to wait for the deadline of the last frame. */
 static inline void sv_perf_frames(SvPerf *p, uint64_t virtual_frame, uint64_t crossed, int missed) {
-  uint64_t t, interval, work, per, per_work, i;
+  uint64_t t, interval, work, per, per_work;
   if (!p->active || crossed == 0U) return;
   t = p->now();
   interval = t > p->last_boundary_ns ? t - p->last_boundary_ns : 0U;
   work = interval > p->frame_pacing_ns ? interval - p->frame_pacing_ns : 0U;
   per = interval / crossed;
   per_work = work / crossed;
-  for (i = 0U; i < crossed; ++i) {
-    sv_perf_hist_add(&p->interval, per);
-    sv_perf_hist_add(&p->work, per_work);
-  }
+  sv_perf_hist_add_n(&p->interval, per, crossed);
+  sv_perf_hist_add_n(&p->work, per_work, crossed);
   p->virtual_frames += crossed;
   if (crossed > 1U) p->coalesced_frames += crossed - 1U;
   if (missed) ++p->missed_deadlines;

@@ -23,7 +23,7 @@ static uint64_t exact_percentile(uint64_t *v, size_t n, double q) {
   return v[rank - 1];
 }
 
-static SvPerf perf; /* static: the struct is ~100 KiB */
+static SvPerf perf; /* static: the struct is ~55 KiB */
 
 static void test_percentiles(void) {
   enum { N = 5000 };
@@ -136,6 +136,13 @@ static void test_coalesced_and_pause(void) {
   sv_perf_frames(&perf, 3, 3, 0);            /* one slice crossed three boundaries */
   CHECK(perf.virtual_frames == 3U && perf.coalesced_frames == 2U);
   CHECK(perf.interval.max_ns == 40000000U / 3U);
+  {   /* an absurd number of crossed boundaries is O(1) and cannot wrap a bucket */
+    SvPerfHistogram h;
+    sv_perf_hist_reset(&h);
+    sv_perf_hist_add_n(&h, 16000000U, UINT32_MAX);
+    sv_perf_hist_add_n(&h, 16000000U, 10U);
+    CHECK(h.count == (uint64_t)UINT32_MAX + 10U && h.bucket[16000000U / SV_PERF_BUCKET_NS] == UINT32_MAX);
+  }
   {
     const uint64_t from = sv_perf_span_begin(&perf);
     g_now += 5000000000ULL;                  /* a 5 s pause in the menu */

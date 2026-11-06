@@ -128,7 +128,7 @@ static void perf_write(const SvPerf *perf, const char *path, const char *status,
 }
 
 static GenesisControlTransfer run_profiled(GenesisRuntime *runtime, GenesisDispatchFunction dispatch, uint32_t dispatch_allowance, const char *path) {
-  static SvPerf perf; /* ~100 KiB: static, never on the stack */
+  static SvPerf perf; /* ~55 KiB: static, never on the stack */
   const char *mode = getenv("SEGARECOMP_PERF_MODE"), *privacy = getenv("SEGARECOMP_PERF_PRIVACY"), *slice_text = getenv("SEGARECOMP_PERF_SLICE");
   uint64_t slice_size = 4096U, total, dispatches = 0U, slices = 0U, last_vf;
   GenesisControlTransfer t;

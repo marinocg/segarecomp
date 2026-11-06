@@ -228,6 +228,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   }
   GenesisViewerResult r = genesis_viewer_run(runtime, dispatch, &options, &host, &g_pacer,
                                                 dispatch_allowance == UINT32_MAX ? UINT64_MAX : dispatch_allowance);
+  sv_perf_finish(&g_perf); /* before the window closes: the session ends when the guest does, not when a stop screen is dismissed */
   runtime->live_frame_observer = NULL;
   genesis_runtime_write_notes(runtime, g_raster_capture.render_rejections, g_raster_capture.vram_journal_overflows, stderr);
   runtime->live_raster = NULL;
@@ -280,7 +281,6 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
           "VIEWER_SUMMARY {\"viewer_opened\":true,\"frame_publication_observed\":%s,"
           "\"frame_presented\":%s,\"outcome\":\"%s\",\"execution\":\"generated-native\"}\n",
           observer.sequence > 0 ? "true" : "false", r.frames_presented > 0 ? "true" : "false", name);
-  sv_perf_finish(&g_perf);
   if (perf_path != NULL) {
     /* complete: the session ended as requested (window closed, budget reached, guest finished); incomplete: a typed guest stop ended it (the numbers are valid up to it); failed: a host error */
     const char *status = r.outcome == GENESIS_VIEWER_GUEST_STOP ? "incomplete" : (r.outcome == GENESIS_VIEWER_HOST_ERROR || r.outcome == GENESIS_VIEWER_INVALID_ARGUMENT ? "failed" : "complete");

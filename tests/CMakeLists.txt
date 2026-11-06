@@ -347,6 +347,12 @@ segarecomp_enable_warnings(build_profile_test)
 add_test(NAME build_profile_test COMMAND build_profile_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME perf_report_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/perf_report_test.py)
 add_test(NAME perf_integration_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/perf_integration_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+if(SEGARECOMP_ENABLE_SDL3_VIEWER AND NOT WIN32)
+  find_package(SDL3 REQUIRED CONFIG)   # imported targets are directory-scoped: the viewer libraries' find_package is not visible here
+  add_test(NAME perf_viewer_integration_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/perf_viewer_integration_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER}
+    ${PROJECT_SOURCE_DIR} $<TARGET_PROPERTY:SDL3::SDL3,INTERFACE_INCLUDE_DIRECTORIES> $<TARGET_FILE_DIR:SDL3::SDL3>)
+  set_property(TEST perf_viewer_integration_test PROPERTY TIMEOUT 300)
+endif()
 add_test(NAME genesis_startup_runtime_c2_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_startup_runtime_c2_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
