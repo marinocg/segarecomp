@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cerrno>
 #include <cstdio>
+#include <cstring>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -13,6 +14,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <spawn.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -53,7 +55,7 @@ std::wstring quote_argument(const std::wstring &arg) {
 
 // `timeout_seconds` 0 = wait forever; on expiry the process is killed and kProcessTimedOut returned. `environment` entries are
 // added to the child's environment.
-int run_process(const std::vector<std::string> &argv, const fs::path &log, const Environment &environment, unsigned timeout_seconds) {
+int run_process(const std::vector<std::string> &argv, const fs::path &log, const Environment &environment, unsigned timeout_seconds, ProcessUsage *usage) {
   for (const auto &entry : environment) SetEnvironmentVariableA(entry.first.c_str(), entry.second.c_str());
   std::wstring command;
   for (const auto &arg : argv) {
@@ -84,13 +86,21 @@ int run_process(const std::vector<std::string> &argv, const fs::path &log, const
   for (const auto &entry : environment) SetEnvironmentVariableA(entry.first.c_str(), nullptr);
   DWORD code = 1;
   GetExitCodeProcess(info.hProcess, &code);
+  if (usage != nullptr) {   // SEG-125: CPU time is available; the peak resident set would need psapi, so it is reported unavailable
+    FILETIME created, exited, kernel, user;
+    if (GetProcessTimes(info.hProcess, &created, &exited, &kernel, &user)) {
+      const auto ticks = [](const FILETIME &t) { return (static_cast<std::uint64_t>(t.dwHighDateTime) << 32U) | t.dwLowDateTime; };
+      usage->cpu_ms = (ticks(kernel) + ticks(user)) / 10000U;   // 100 ns units
+      usage->cpu_available = true;
+    }
+  }
   CloseHandle(info.hProcess);
   CloseHandle(info.hThread);
   return timed_out ? kProcessTimedOut : static_cast<int>(code);
 }
 #else
 
-int run_process(const std::vector<std::string> &argv, const fs::path &log, const Environment &environment, unsigned timeout_seconds) {
+int run_process(const std::vector<std::string> &argv, const fs::path &log, const Environment &environment, unsigned timeout_seconds, ProcessUsage *usage) {
   std::vector<std::string> env_storage;
   for (char **entry = environ; *entry != nullptr; ++entry) {
     const std::string text = *entry;
@@ -114,15 +124,20 @@ int run_process(const std::vector<std::string> &argv, const fs::path &log, const
   posix_spawn_file_actions_destroy(&actions);
   if (rc != 0) return -1;
   int status = 0;
+  struct rusage ru;
+  std::memset(&ru, 0, sizeof ru);
+  bool reaped = false;
   if (timeout_seconds == 0) {
-    while (waitpid(pid, &status, 0) < 0) {
+    pid_t done;
+    while ((done = wait4(pid, &status, 0, &ru)) < 0) {
       if (errno != EINTR) return -1;
     }
+    reaped = done == pid;
   } else {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
     for (;;) {
-      const pid_t done = waitpid(pid, &status, WNOHANG);
-      if (done == pid) break;
+      const pid_t done = wait4(pid, &status, WNOHANG, &ru);
+      if (done == pid) { reaped = true; break; }
       if (done < 0 && errno != EINTR) return -1;
       if (std::chrono::steady_clock::now() >= deadline) {
         kill(pid, SIGKILL);
@@ -132,6 +147,16 @@ int run_process(const std::vector<std::string> &argv, const fs::path &log, const
       const timespec pause{0, 5 * 1000 * 1000};
       nanosleep(&pause, nullptr);
     }
+  }
+  if (usage != nullptr && reaped) {   // SEG-125
+    usage->cpu_ms = static_cast<std::uint64_t>(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) * 1000U + static_cast<std::uint64_t>(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec) / 1000U;
+    usage->cpu_available = true;
+#if defined(__APPLE__)
+    usage->peak_rss_kib = static_cast<std::uint64_t>(ru.ru_maxrss) / 1024U;   // bytes on macOS
+#else
+    usage->peak_rss_kib = static_cast<std::uint64_t>(ru.ru_maxrss);           // KiB on Linux and the BSDs
+#endif
+    usage->rss_available = true;
   }
   return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + (WIFSIGNALED(status) ? WTERMSIG(status) : 0);
 }

@@ -1,4 +1,5 @@
 #include "build_command.hpp"
+#include "build_profile.hpp"
 #include "process_run.hpp"
 
 #include "segarecomp/machine/master_system/cartridge.hpp"
@@ -111,6 +112,8 @@ struct Options {
   // provider source into a private area of this build and compiles it against the public SDK only. Empty = Vanilla / BPS-only build: no provider code at all.
   fs::path patch_package;
   std::string patch_identity;
+  // SEG-125 (ADR 0273): write a versioned build performance report here (empty = profiling off: no collector is enabled and nothing changes).
+  fs::path performance_report;
   // resolved by the verification step
   fs::path native_source;            // <output>/native/provider.c, re-hashed after extraction
   unsigned native_caps = 0;
@@ -164,7 +167,16 @@ int fail(const Options &options, Log &log, const std::string &sha, const std::st
   return code;
 }
 
-void stage(const char *name, const char *state) { std::cout << "@stage " << name << ' ' << state << std::endl; }
+// SEG-125: the build's optional profiler (disabled unless --performance-report was given). The existing stage markers are its stage boundaries.
+segarecomp_cli::BuildProfile g_profile;
+
+void stage(const char *name, const char *state) {
+  std::cout << "@stage " << name << ' ' << state << std::endl;
+  if (g_profile.enabled()) {
+    if (std::string_view(state) == "begin") g_profile.begin(name, true);
+    else g_profile.end(name);
+  }
+}
 
 std::optional<Options> parse_options(int argc, char **argv) {
   Options options;
@@ -195,6 +207,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--hint-alias-discovery" && (value == "0" || value == "1")) options.hint_alias_discovery = value == "1";
     else if (key == "--patch-package") { if (!options.patch_package.empty()) return std::nullopt; options.patch_package = fs::path(value); }
     else if (key == "--patch-identity") { if (!options.patch_identity.empty()) return std::nullopt; options.patch_identity = value; }
+    else if (key == "--performance-report") { if (!options.performance_report.empty() || value.empty()) return std::nullopt; options.performance_report = fs::path(value); }
     else if (key == "--aot-model" && !aot_model_given && (value == "v1" || value == "gen2")) { options.aot_model = value; aot_model_given = true; }
     else return std::nullopt;
   }
@@ -213,16 +226,22 @@ std::optional<Options> parse_options(int argc, char **argv) {
 }
 
 // Runs every compile job with a small worker pool; returns the first failing job index or -1.
+struct JobTiming { double wall_ms = 0; segarecomp_cli::ProcessUsage usage; };
+
 int run_compiles(const std::vector<std::vector<std::string>> &commands, const std::vector<fs::path> &logs,
-                 unsigned jobs, std::vector<int> &codes) {
+                 unsigned jobs, std::vector<int> &codes, std::vector<JobTiming> *timings = nullptr) {
   codes.assign(commands.size(), 0);
+  if (timings != nullptr) timings->assign(commands.size(), JobTiming{});
   std::atomic<std::size_t> next{0};
   std::atomic<bool> stop{false};
   const auto worker = [&] {
     for (;;) {
       const std::size_t index = next.fetch_add(1);
       if (index >= commands.size() || stop.load()) return;
-      codes[index] = run_process(commands[index], logs[index]);
+      const auto started = std::chrono::steady_clock::now();
+      segarecomp_cli::ProcessUsage usage;
+      codes[index] = run_process(commands[index], logs[index], {}, 0, timings != nullptr ? &usage : nullptr);
+      if (timings != nullptr) (*timings)[index] = {std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count(), usage};  // each worker owns its index: no lock
       if (codes[index] != 0) stop.store(true);
     }
   };
@@ -368,7 +387,30 @@ struct GenesisSoundBuild {
       logs.push_back(job.object.string() + ".log");
     }
     std::vector<int> codes;
-    const int failed = run_compiles(commands, logs, jobs, codes);
+    std::vector<JobTiming> timings;
+    int failed;
+    {
+      segarecomp_cli::ProfileSpan span(&g_profile, "compile_batch");   // the batch's WALL time; the jobs' own times (concurrent) are recorded below
+      const auto batch_started = Clock::now();
+      failed = run_compiles(commands, logs, jobs, codes, g_profile.enabled() ? &timings : nullptr);
+      if (g_profile.enabled()) {
+        g_profile.record_batch_wall(std::chrono::duration<double, std::milli>(Clock::now() - batch_started).count(), jobs, batch.size());
+        std::error_code size_ec;
+        for (std::size_t i = 0; i < batch.size() && i < timings.size(); ++i) {   // only jobs that ran count (a failed batch stops early)
+          if (timings[i].wall_ms == 0.0) continue;   // never started
+          segarecomp_cli::BuildProfile::JobResult result;
+          result.object = batch[i].object.string();
+          result.label = batch[i].source.filename().string();
+          result.wall_ms = timings[i].wall_ms;
+          result.usage = timings[i].usage;
+          result.source_bytes = fs::file_size(batch[i].source, size_ec);
+          if (size_ec) result.source_bytes = 0;
+          result.object_bytes = codes[i] == 0 ? fs::file_size(batch[i].object, size_ec) : 0;
+          if (size_ec) result.object_bytes = 0;
+          g_profile.record_job(std::move(result));
+        }
+      }
+    }
     for (std::size_t i = 0; i < commands.size(); ++i) {
       std::string joined;
       for (const auto &arg : commands[i]) joined += arg + ' ';
@@ -388,7 +430,11 @@ struct GenesisSoundBuild {
     if (with_sdl) { command.push_back("-L" + options.sdl3_lib->string()); command.push_back("-lSDL3"); command.push_back("-lm"); }
     command.insert(command.end(), options.link_args.begin(), options.link_args.end());
     const fs::path link_log = object_dir / (executable.filename().string() + ".link.log");
-    const int rc = run_process(command, link_log);
+    segarecomp_cli::ProcessUsage link_usage;
+    segarecomp_cli::ProfileSpan link_span(&g_profile, "link_exec");
+    const auto link_started = Clock::now();
+    const int rc = run_process(command, link_log, {}, 0, g_profile.enabled() ? &link_usage : nullptr);
+    if (g_profile.enabled()) g_profile.record_link(link_usage, std::chrono::duration<double, std::milli>(Clock::now() - link_started).count());
     log.line("$ (link)");
     log.line("# link target=" + executable.filename().string());
     log.append_file(link_log);
@@ -434,6 +480,7 @@ struct GenesisSoundBuild {
       const bool pending = std::any_of(fresh.begin(), fresh.end(), [&](const auto &entry) { return entry.first == key; });
       if (m68k_objects.count(key) != 0 || pending) {
         ++m68k_reused_units;
+        if (g_profile.enabled()) { segarecomp_cli::BuildProfile::JobResult reuse; reuse.object = object.string(); reuse.label = source.filename().string(); reuse.compiled = false; g_profile.record_job(std::move(reuse)); }
       } else {
         CompileJob job;
         job.source = source;
@@ -471,8 +518,9 @@ struct GenesisSoundBuild {
     fs::remove_all(z80_dir, ec);
     gz80::EmitRequest request;
     request.directory = z80_dir;
+    g_profile.count("z80_prepare_iterations");
     const auto emit_started = Clock::now();
-    const gz80::EmitOutcome emitted = gz80::emit_registry(registry, request);
+    const gz80::EmitOutcome emitted = [&] { segarecomp_cli::ProfileSpan span(&g_profile, "z80_emit"); return gz80::emit_registry(registry, request); }();
     z80_emit_ms += millis_since(emit_started);
     if (!emitted.ok()) { log.line("z80 emit diagnostic: " + emitted.error); failure_detail = "The Z80 image code could not be generated."; failure_stage = "emit"; failure_diagnostic = emitted.error; return false; }
     std::vector<fs::path> sources;
@@ -494,7 +542,12 @@ struct GenesisSoundBuild {
       z80_generated_bytes += bytes.size();
       const std::string key = segarecomp::sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(bytes.data()), bytes.size()));
       const auto known = z80_objects.find(key);
-      if (known != z80_objects.end()) { z80_current.push_back(known->second); ++z80_reused_units; continue; }
+      if (known != z80_objects.end()) {
+        z80_current.push_back(known->second);
+        ++z80_reused_units;
+        if (g_profile.enabled()) { segarecomp_cli::BuildProfile::JobResult reuse; reuse.object = known->second.string(); reuse.label = source.filename().string(); reuse.compiled = false; g_profile.record_job(std::move(reuse)); }
+        continue;
+      }
       const fs::path object = object_dir / ("z80-" + key.substr(0, 20) + ".o");
       CompileJob job;
       job.source = source;
@@ -724,6 +777,8 @@ std::string aot_policy_json(const Options &options, const Log &log, const std::s
 bool emit_genesis_m68k(const Options &options, Log &log, const std::string &sha, const GenesisM68kRoute &route,
                        const std::vector<m68k_alias::CopyAlias> &aliases, const std::vector<m68k_alias::RamThunk> &thunks,
                        std::vector<fs::path> &units) {
+  segarecomp_cli::ProfileSpan profile_span(&g_profile, "m68k_emit");
+  g_profile.count("m68k_emissions");
   std::error_code ec;
   fs::remove(route.source, ec);
   fs::remove_all(route.shard_dir, ec);
@@ -934,6 +989,8 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   ProcessPassRunner runner(build);
   std::uint64_t materialize_ms = 0;
   const auto fixed_point = [&] {
+    segarecomp_cli::ProfileSpan span(&g_profile, "z80_materialize");   // exclusive time = running the observation programs; its prepare() work is the nested spans
+    g_profile.count("materialize_rounds");
     const auto started = Clock::now();
     gz80::MaterializationSummary result = gz80::materialize(registry, runner);
     const std::uint64_t ms = millis_since(started);
@@ -980,6 +1037,9 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
                                            bool &abort) override { return body(aliases, thunks, abort); }
   } rounds;
   rounds.body = [&](const std::vector<m68k_alias::CopyAlias> &aliases, const std::vector<m68k_alias::RamThunk> &thunks, bool &abort) {
+    segarecomp_cli::ProfileSpan round_span(&g_profile, "alias_round");
+    g_profile.next_round();   // units compiled from here on belong to a preparation round (repeated work), not the initial build
+    g_profile.count("alias_rounds");
     m68k_alias::RoundObservation observed;
     log.line("m68k alias preparation round: aliases=" + std::to_string(aliases.size()) + (thunks.empty() ? std::string() : " ram_thunks=" + std::to_string(thunks.size())));
     if (!emit_genesis_m68k(options, log, sha, route, aliases, thunks, units) || !units_complete(units)) { observed.tool_failure = true; return observed; }
@@ -1029,6 +1089,19 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
 #endif
   if (!build.link(executable, objects, build.play)) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
   const std::uint64_t exe_bytes = fs::file_size(executable, ec);
+  if (g_profile.enabled()) {
+    std::vector<std::string> final_set, pass_set;
+    for (const fs::path &o : objects) final_set.push_back(o.string());
+    for (const fs::path &o : build.m68k_pass) pass_set.push_back(o.string());
+    for (const fs::path &o : build.pass_runtime) pass_set.push_back(o.string());
+    g_profile.mark_final(final_set, pass_set);   // pass-only = used by the observation program, not by the executable (needed, not wasted)
+    std::uint64_t m68k_c = 0;
+    for (const fs::path &u : units) { std::error_code size_ec; const auto n = fs::file_size(u, size_ec); if (!size_ec) m68k_c += n; }
+    g_profile.set_size("generated_c_m68k", m68k_c);
+    g_profile.set_size("generated_c_z80", build.z80_generated_bytes);
+    g_profile.set_size("generated_c", m68k_c + build.z80_generated_bytes);
+    g_profile.set_size("executable", exe_bytes);
+  }
   // Machine-readable audio capability: a structural Z80 code mutation isolates the sound CPU (contract section 18) and the build
   // still succeeds; every other Z80 failure already failed the build above.
   status_extra = std::string(",\"genesis_audio\":\"") + (summary.sound_fault ? "degraded" : "supported") + "\"";
@@ -1065,10 +1138,49 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
 
 } // namespace
 
+namespace {
+int run_build(Options options);
+
+// The first line of `<cc> --version`: the compiler identity of the report (local diagnostic text only).
+std::string compiler_version_line(const Options &options) {
+  std::error_code ec;
+  const fs::path log = options.output / "compiler-version.tmp";
+  std::string line;
+  if (run_process({options.cc, "--version"}, log) == 0) { std::ifstream in(log); std::getline(in, line); }
+  fs::remove(log, ec);
+  return line;
+}
+}  // namespace
+
 int segarecomp_build_command(int argc, char **argv) {
   const auto parsed = parse_options(argc, argv);
   if (!parsed) { std::cerr << "usage:\n" << segarecomp_build_usage; return 2; }
   Options options = *parsed;
+  if (options.performance_report.empty()) return run_build(std::move(options));   // profiling off: exactly the unprofiled pipeline
+  // SEG-125: profiling on. The report is written on every exit of the pipeline, marked complete / failed; a report that could not be written never changes the build's result.
+  std::error_code mkdir_ec;
+  fs::create_directories(options.output, mkdir_ec);
+  g_profile.enable(options.performance_report);
+  {
+    segarecomp_cli::BuildProfile::Config config;
+    config.platform = options.platform == "master-system" ? "master_system" : (options.platform.empty() ? "auto" : options.platform);
+    config.optimize = options.optimize;
+    config.runtime_optimize = options.runtime_optimize;
+    config.aot_policy = options.aot_policy;
+    config.jobs = options.jobs != 0 ? options.jobs : std::min(8U, std::max(1U, std::thread::hardware_concurrency()));
+    config.viewer = options.sdl3_include.has_value();
+    config.compiler_name = fs::path(options.cc).filename().string();
+    config.compiler_version = compiler_version_line(options);
+    g_profile.set_config(std::move(config));
+  }
+  const int rc = run_build(options);
+  const std::string failed_stage = rc == 0 ? std::string() : g_profile.innermost_stage();
+  if (!g_profile.finish(rc == 0 ? "complete" : "failed", failed_stage)) std::cerr << "segarecomp: the performance report could not be written\n";
+  return rc;
+}
+
+namespace {
+int run_build(Options options) {
   std::error_code ec;
   fs::create_directories(options.output, ec);
   if (ec) { std::cerr << "segarecomp: cannot create output directory\n"; return 2; }
@@ -1114,6 +1226,7 @@ int segarecomp_build_command(int argc, char **argv) {
       else if (info.outcome == segarecomp::ClassificationOutcome::recognized && info.platform == segarecomp::Platform::game_gear)
         return fail(options, log, sha, "analyze", 1, "Game Gear images are not supported.", "PLATFORM_UNSUPPORTED");
     }
+    g_profile.set_platform(target == Target::master_system ? "master_system" : "genesis");
     if (!options.patch_package.empty()) {   // SEG-124: independent re-verification of the package reference (a preview in the launcher is not enough: files may change before compilation)
       if (target != Target::genesis) return fail(options, log, sha, "analyze", 1, "A native compatibility provider applies only to Genesis images.", "NATIVE_NOT_APPLICABLE");
       const auto package = segarecomp::patch::read_package_file(options.patch_package);
@@ -1223,7 +1336,7 @@ int segarecomp_build_command(int argc, char **argv) {
       request.directory = shard_dir;
       request.stem = "sms";
       request.propose_admission = options.aot_policy == "optimized";  // SEG-057-T002: experimental; any failure emits the broad AOT
-      const auto outcome = sms::emit_cartridge(bytes, ingest_options, request);
+      const auto outcome = [&] { segarecomp_cli::ProfileSpan span(&g_profile, "sms_emit"); return sms::emit_cartridge(bytes, ingest_options, request); }();
       if (!outcome.ok()) {
         log.line("emit diagnostic: " + outcome.error);
         fs::remove_all(shard_dir, ec);
@@ -1331,7 +1444,31 @@ int segarecomp_build_command(int argc, char **argv) {
     unsigned jobs = options.jobs != 0 ? options.jobs : std::min(8U, std::max(1U, std::thread::hardware_concurrency()));
     log.line("# compile jobs: " + std::to_string(jobs));
     std::vector<int> codes;
-    const int failed = run_compiles(commands, logs, jobs, codes);
+    std::vector<JobTiming> timings;
+    int failed;
+    {
+      segarecomp_cli::ProfileSpan span(&g_profile, "compile_batch");
+      const auto batch_started = Clock::now();
+      failed = run_compiles(commands, logs, jobs, codes, g_profile.enabled() ? &timings : nullptr);
+      if (g_profile.enabled()) {
+        g_profile.record_batch_wall(std::chrono::duration<double, std::milli>(Clock::now() - batch_started).count(), jobs, compile.size());
+        std::error_code size_ec;
+        for (std::size_t i = 0; i < compile.size() && i < timings.size(); ++i) {
+          if (timings[i].wall_ms == 0.0) continue;
+          segarecomp_cli::BuildProfile::JobResult result;
+          result.object = objects[i].string();
+          result.label = compile[i].source.filename().string();
+          result.category = compile[i].source.parent_path() == shard_dir ? "sms_generated" : "runtime";
+          result.wall_ms = timings[i].wall_ms;
+          result.usage = timings[i].usage;
+          result.source_bytes = fs::file_size(compile[i].source, size_ec);
+          if (size_ec) result.source_bytes = 0;
+          result.object_bytes = codes[i] == 0 ? fs::file_size(objects[i], size_ec) : 0;
+          if (size_ec) result.object_bytes = 0;
+          g_profile.record_job(std::move(result));
+        }
+      }
+    }
     for (std::size_t i = 0; i < commands.size(); ++i) {
       std::string joined;
       for (const auto &arg : commands[i]) joined += arg + ' ';
@@ -1358,11 +1495,27 @@ int segarecomp_build_command(int argc, char **argv) {
     if (play) { link.push_back("-L" + options.sdl3_lib->string()); link.push_back("-lSDL3"); link.push_back("-lm"); }
     link.insert(link.end(), options.link_args.begin(), options.link_args.end());
     const fs::path link_log = object_dir / "link.log";
-    const int link_rc = run_process(link, link_log);
+    segarecomp_cli::ProcessUsage link_usage;
+    const auto link_started = Clock::now();
+    int link_rc;
+    {
+      segarecomp_cli::ProfileSpan span(&g_profile, "link_exec");
+      link_rc = run_process(link, link_log, {}, 0, g_profile.enabled() ? &link_usage : nullptr);
+    }
+    if (g_profile.enabled()) g_profile.record_link(link_usage, std::chrono::duration<double, std::milli>(Clock::now() - link_started).count());
     log.line("$ (link)");
     log.line("# link target=" + executable.filename().string());
     log.append_file(link_log);
     if (link_rc != 0) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
+    if (g_profile.enabled()) {
+      std::vector<std::string> final_set;
+      std::uint64_t generated_c = 0;
+      for (const auto &object : objects) final_set.push_back(object.string());
+      for (const auto &unit : units) { std::error_code size_ec; const auto n = fs::file_size(unit, size_ec); if (!size_ec) generated_c += n; }
+      g_profile.mark_final(final_set, {});
+      g_profile.set_size("generated_c", generated_c);
+      g_profile.set_size("executable", fs::file_size(executable, ec));
+    }
     fs::remove_all(object_dir, ec);
     stage("link", "done");
     write_status(options, sha, "ok", "done", "", sms_provenance + sms_images + aot_policy_json(options, log, sha, false));
@@ -1372,3 +1525,4 @@ int segarecomp_build_command(int argc, char **argv) {
     return fail(options, log, sha, "analyze", 1, std::string("Cannot read the ROM: ") + error.what());
   }
 }
+}  // namespace
