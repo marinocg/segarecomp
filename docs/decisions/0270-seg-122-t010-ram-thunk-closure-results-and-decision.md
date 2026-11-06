@@ -138,3 +138,149 @@ Synthetic tests cover the trigger and every case that must not use it, the cap, 
 ## 11. Not answered
 
 ADR 0114's `O3` (mandatory identities as K0 members, then a downward prune) stays unevaluated. It is not needed for this result. Whether a smaller K is possible, or whether the second compile pass could be avoided, was not investigated.
+
+## 12. Post-decision, non-gating compilation-cost attribution
+
+**Everything in this section was measured after the `PROMOTE` decision. It is not part of ADR 0269, changes no gate and no decision, and reinterprets nothing above.** The delivered implementation is unchanged.
+
+**Answer:** selective admission does remove about 59 % of the compile cost of the final program. A thunk-bearing selective build then gives most of that back by compiling a complete first program it later discards, because re-emission shifts nearly every unit. Broad builds reuse their objects across the same round. Multi-pass compilation is the largest recoverable cost, not generated-C complexity.
+
+### 12.1 Method and limits
+
+- Inputs and settings: standalone S&K (T1) and combined S3&K (T2), delivered CLI, GCC 13.3, `--jobs 4`, one build at a time, clean directories, no shared object cache. `--optimize 1`, and `--optimize 2` for section 12.5.
+- External accounting, no production change: a temporary `--cc` wrapper logging each compiler invocation's `wait4` CPU, RSS, input and output bytes and a text digest; `wait4` on `segarecomp build` for the total; `/proc` self and waited-children CPU sampled at 5 Hz with stage and log timestamps. Each cost below is counted once: invocation CPU comes from the wrapper log, and "other children" is the remainder after in-process, compiler and link CPU.
+- Reproduction: fresh `-O1` totals are within 1 % of section 3 (T1 719.4 / 541.2 s, T2 1251.3 / 972.5 s).
+- **Limits:**
+  - Sections 12.2-12.4 and the counterfactual are single builds. CPU repeated within 1 % at `-O2` and 2.5 % at `-O1`, but they are not medians.
+  - `analyze` and ML run inside the in-process `generate` stage, so that split comes from separate timed CLI runs.
+  - Sampling can move about a second between stages, not between totals. Windows assign a compile to the stage it ended in.
+  - "Other children" also holds the wrapper's small overhead.
+  - The toolchain is not the packaged launcher's (Zig). Same `-O2` is not launcher equivalence.
+  - Peak compiler RSS is unchanged by optimization level, because it is set by one large unit.
+
+### 12.2 Stage accounting at `-O1`
+
+CPU seconds. Rows add up to the total.
+
+| stage | T1 broad | T1 selective | T2 broad | T2 selective |
+|---|---|---|---|---|
+| in-process, first emission (analysis, ML, planning, closure, emission) | 18.0 | 17.9 | 40.0 | 37.7 |
+| in-process, second emission and other | 24.5 | 21.9 | 50.0 | 45.1 |
+| M68K compile: objects in the final program | 603.2 | 234.0 | 1058.6 | 435.0 |
+| M68K compile: superseded objects | 26.1 | **220.6** | 53.1 | **408.2** |
+| Z80 generated-code compile | 37.4 | 38.3 | 37.1 | 37.0 |
+| runtime, device and viewer compile | 4.0 | 3.7 | 4.0 | 3.7 |
+| all linking (5 links) | 2.3 | 1.1 | 4.1 | 1.8 |
+| other children (preparation and Z80 pass runs, wrapper overhead) | 3.9 | 3.7 | 4.5 | 4.0 |
+| **total** | **719.4** | **541.2** | **1251.3** | **972.5** |
+
+- Timed separately on T2: analysis plus prune 4.6 s, analysis plus ML inference 24.8 s, so inference is about 20 s **per emission**, run twice. Closure and prune cost about the same. Emission of the closed set is about 21 s.
+- Running the preparation and Z80 pass programs costs almost nothing.
+- Work outside the two M68K compile rows is 11 % of the T2 broad build and 13 % of T2 selective. That includes ML and emission, which selective admission does not remove.
+
+### 12.3 Emissions and compiled volume
+
+T2, `-O1`. Emission 1 is the alias-less one; emission 2 holds the thunk. "Units" counts M68K compile invocations, including the two variants of the main unit.
+
+| | broad 1 | broad 2 | selective 1 | selective 2 |
+|---|---|---|---|---|
+| universe U | 1,981,347 | 1,981,348 | 1,981,347 | 1,981,348 |
+| admitted | all | all | 678,653 (prune) | 733,827 (closure) |
+| effective policy of that emission | broad | broad | `ml_region_gen2` | `ml_region_gen2` |
+| units compiled / reused | 57 / 0 | **4 / 53** | 57 / 0 | **57 / 0** |
+| C compiled | 935.4 MB | 227.7 MB | 436.8 MB | 456.7 MB |
+| compile CPU | 1063.3 s | 48.3 s | 408.2 s | 435.0 s |
+| objects carried to the final program | 53 | 4 | **0** | 57 |
+| superseded CPU | 53.1 s | | 408.2 s | |
+
+The 227.7 MB of broad's second round is mostly the main and entries units, which are cheap to compile, and only one AOT unit.
+
+| generated C | T1 broad | T1 selective | T2 broad | T2 selective |
+|---|---|---|---|---|
+| final program | 515.1 MB | 227.3 MB | 883.9 MB | 405.2 MB |
+| compiled over the whole build | 666.4 MB | 505.3 MB | 1180.6 MB | 910.9 MB |
+| reduction, final / lifetime | | -55.9 % / -24.2 % | | -54.2 % / -22.8 % |
+
+The lifetime reduction matches the CPU reduction. The final emission's size is not what the build compiles.
+
+### 12.4 Why unit reuse fails, and hotspots
+
+- **The content-keyed cache works when text is stable.** Broad reuses 53 of 57 units between rounds. Selective reuses none.
+- **Instruction text is not what changes.** On T2, 124,612 of the 126,577 labelled AOT entries present in both rounds (98.4 %) keep identical segment text, but only 62,956 (49.7 %) stay in the same shard. The admitted set grows from prune to closure (+55,174 identities), so positional shards shift and almost all unit text changes. Three units are textually identical but are recompiled anyway, because the key covers the changed shared header. That costs only 0.6 s. Closure is what changes K between the rounds; the single thunk identity is not. Emission-only check through the delivered CLI: a closed first emission without the thunk has 55 of the final emission's 58 generated files byte-identical, including the shared header and unit manifest.
+- **No small hotspot dominates.** Final T2 selective compile: largest unit 2.9 %, top 5 13.2 %, top 10 24.3 %. Within the largest AOT unit, the largest top-level function is about 0.1 % of its text. Spread across 56 units, there is no outlier to fix.
+- **Source size alone mispredicts cost.** T2 selective, final round, `-O1`:
+
+| family | units | CPU s | share | MB | s/MB |
+|---|---|---|---|---|---|
+| immutable-ROM AOT bodies | 32 | 265.3 | 61 % | 224.1 | 1.18 |
+| shared helpers | 16 | 124.8 | 29 % | 71.9 | 1.74 |
+| precise-discovery blocks | 4 | 24.7 | 6 % | 4.2 | 5.9 |
+| main | 2 | 15.4 | 4 % | 125.8 | 0.12 |
+| entry tables | 1 | 4.4 | 1 % | 30.6 | 0.14 |
+
+### 12.5 `-O2` (CLI default, the optimization level the launcher's builds use)
+
+Not a gate, and T010's `-O1` result stands. No compiler failure, and available memory stayed above 6 GB. T2 is the median of three cold builds per arm; T1 is one each, so preliminary.
+
+| workload | broad CPU / wall | selective CPU / wall | CPU reduction | C reduction | executable broad / selective | peak compiler RSS |
+|---|---|---|---|---|---|---|
+| T2 | 2040.3 s / 573.8 s | 1582.2 s / 440.9 s | -22.5 % | -54.2 % | 187.1 / 81.3 MB | 1,924 / 1,884 MiB |
+| T1 (preliminary) | 1166.5 s / 322.7 s | 878.4 s / 240.9 s | -24.7 % | -55.9 % | 106.7 / 46.1 MB | 815 / 789 MiB |
+
+T2 stage shape at `-O2`, first sample: final-object M68K compile 1813.1 s against 734.0 s (-59.5 %), superseded 73.1 s against 697.3 s, Z80 57.9 / 59.5 s. The pattern is the same as `-O1` and larger in absolute terms.
+
+### 12.6 Reconciliation of the discrepancy
+
+T2 at `-O1`, total difference selective minus broad, -278.8 s:
+
+| component | change |
+|---|---|
+| final-program M68K compile (-58.9 %, comparable to the C reduction) | **-623.6 s** |
+| extra superseded M68K compile | **+355.1 s** |
+| in-process work | -7.2 s |
+| Z80, runtime, linking and other children | -3.1 s |
+| total | -278.8 s |
+
+The same reconciliation on T1: -369.2, +194.5, -2.7, -0.8, total -178.2 s. **So about 57 % of the T2 saving is spent on superseded objects (53 % on T1), and non-M68K work dilutes the rest a little.** This is measured, not inferred.
+
+**Counterfactual (local scratch patch, never committed):** close every gen2 emission, so the first emission already holds the final set apart from the thunk. On T1 and T2 the final generated C and `k_sha256` are identical to the delivered build, and only 4 units recompile in round two. The executables differ in 12,385-12,390 bytes, unexplained; these programs were not route-tested, and the patch is a measurement, not a proposal.
+
+| workload | broad | delivered | counterfactual | vs broad | K, delivered / counterfactual |
+|---|---|---|---|---|---|
+| T1 `-O1` | 719.4 s | 541.2 s | **330.2 s** | -54.1 % | equal |
+| T2 `-O1` | 1251.3 s | 972.5 s | **602.1 s** | -51.9 % | equal |
+| T2 `-O2` | 2040.3 s | 1582.2 s | **932.2 s** | -54.3 % | equal |
+| Sonic 3 `-O1` (no thunk) | | 303.1 s | 317.1 s | +4.6 % vs delivered | 338,838 / 369,013 (+8.9 %) |
+| Golden Axe `-O1` (alias, no thunk) | | 195.7 s | 208.2 s | +6.4 % vs delivered | 83,924 / 93,188 (+11.0 %) |
+
+Golden Axe compiles everything twice in both, because its alias round also shifts the units. Flicky was not attributed.
+
+### 12.7 Existing opt-in switches
+
+`--aot-operand-sharing` and `--shared-return-targets` are accepted by the emit command and `tools/genesis_startup_bridge.py --emitter-flag`, but **`segarecomp build` does not forward them**, so the launcher's path cannot use them. Measured through the delivered emit command with the delivered thunk on T2, final emission only: the base arm's generated files equal the delivered build's. Objects were compiled with the same flags; **no program was linked or run**, so behaviour and executable size are unmeasured and object text stands in. One sample each.
+
+| arm | C MB | CPU `-O1` | CPU `-O2` | object text `-O1` | peak RSS |
+|---|---|---|---|---|---|
+| current | 400.6 | 433.2 s | 729.9 s | 74.9 MB | 1,883 MiB |
+| operand sharing | 344.8 (-13.9 %) | 363.2 s (-16.2 %) | 605.1 s (-17.1 %) | 66.3 MB | 1,891 MiB |
+| shared return targets | 396.3 (-1.1 %) | 406.7 s (-6.1 %) | 691.8 s (-5.2 %) | 73.7 MB | 1,884 MiB |
+| both | 340.5 (-15.0 %) | 335.3 s (-22.6 %) | 564.8 s (-22.6 %) | 65.2 MB | 1,891 MiB |
+
+### 12.8 Ranked hypotheses
+
+Bounds are upper limits, not predictions. T2 figures.
+
+| rank | hypothesis | observed cost | bound, `-O1` / `-O2` | scope and reuse | risk and evidence needed |
+|---|---|---|---|---|---|
+| 1 | **H1 repeated compilation** | 408.2 s / 697.3 s superseded, 42-44 % of the build | 408 / 697 s; the counterfactual actually recovered 370 / 650 s | Small: which set the first emission uses. Genesis gen2 thunk titles; alias titles need more | Changes K on thunk-less titles (+5-6 % CPU measured on two). K only grows, so no identity is lost. Needs its own pre-registration, wider title set, behaviour routes |
+| 2 | H2 generated-C representation | 390 s / 675 s final AOT and shared compile | measured 98 / 165 s on the final emission with both switches; multi-pass effect unmeasured | Small plumbing to expose existing switches; all Genesis | Behaviour on these titles and runtime speed unmeasured; ADR 0158 kept them opt-in. Needs a full-build and route comparison |
+| 3 | H3 admission precision | same 390 s pool | under half of it even if K halved, roughly 195 / 340 s, and only on stated assumptions | Model or policy work; cross-title | Highest risk: excluding code raises fail-closed stops. No exact-code evidence exists for these images |
+| 4 | H4 portable position-independent bodies (ADR 0221-0226) | none attributable | not above H1's bound | Large: bodies, binding and runtime dispatch | The cost is unit churn from a changed K, not RAM code: the thunk is one 6-byte instruction with no ROM source to key on. Sega CD solves late binding of ROM-copied code, a different problem, and adds runtime and size costs |
+
+H1 and H2 are not exclusive. H1 is the larger on every figure above, so it comes first. The second ML inference (about 20 s per build) is a small independent saving.
+
+### 12.9 Recommendation
+
+**Next task: pre-registered evaluation of a stable first emission for gen2 Optimized**, closing the first emission so a thunk discovered later recompiles only a few units. The evidence supports this as the smallest next step, and it reuses the T010 mechanism. Open questions for that task, none answered here: whether to accept +5-6 % on thunk-less titles or find a cheaper way to keep them unchanged; alias titles such as Golden Axe and Flicky; and route evidence. Exposing the switches (H2) is the follow-on, after a full-build comparison.
+
+Hypotheses versus established results: sections 12.2-12.7 are measurements, and the counterfactual measures a local patch; the "bound" column and the recommendation are judgement. None of it is implemented.
