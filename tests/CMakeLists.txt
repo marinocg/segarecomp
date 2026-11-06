@@ -343,6 +343,7 @@ add_test(NAME segarecomp_build_command_test COMMAND ${Python3_EXECUTABLE} ${CMAK
 # `segarecomp build --performance-report` / headless runtime report with profiler-on/off equivalence on project-authored images.
 add_executable(build_profile_test build_profile_test.cpp)
 target_include_directories(build_profile_test PRIVATE ${PROJECT_SOURCE_DIR}/apps/segarecomp)
+target_compile_features(build_profile_test PRIVATE cxx_std_20)
 segarecomp_enable_warnings(build_profile_test)
 add_test(NAME build_profile_test COMMAND build_profile_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 add_test(NAME perf_report_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/perf_report_test.py)
