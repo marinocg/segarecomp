@@ -107,7 +107,7 @@ static int pad_count;
 static unsigned pad_mask;  /* native GENESIS_PAD_* bits currently held by player 1 */
 static int16_t input_state(unsigned port, unsigned device, unsigned index, unsigned id) {
   (void)index;
-  if (port != 0 || device != 1 || id != 256) return 0;  /* RETRO_DEVICE_JOYPAD, RETRO_DEVICE_ID_JOYPAD_MASK */
+  if (port != 0 || device != 1) return 0;  /* player 1, RETRO_DEVICE_JOYPAD */
   /* native -> libretro joypad ids as the pinned core maps them: Genesis A = Y(1), B = B(0), C = A(8), Start = 3, Up 4, Down 5, Left 6, Right 7 */
   int16_t r = 0;
   if (pad_mask & 0x01U) r |= 1 << 4;
@@ -118,7 +118,8 @@ static int16_t input_state(unsigned port, unsigned device, unsigned index, unsig
   if (pad_mask & 0x20U) r |= 1 << 8;
   if (pad_mask & 0x40U) r |= 1 << 1;
   if (pad_mask & 0x80U) r |= 1 << 3;
-  return r;
+  if (id == 256) return r;                   /* RETRO_DEVICE_ID_JOYPAD_MASK (bitmask query) */
+  return id < 16 ? (int16_t)((r >> id) & 1) : 0;  /* per-button query when the host does not advertise bitmasks */
 }
 
 typedef void (*set_env_fn)(env_cb);

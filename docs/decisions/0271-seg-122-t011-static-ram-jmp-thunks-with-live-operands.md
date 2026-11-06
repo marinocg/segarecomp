@@ -162,3 +162,15 @@ Pass for the independent-reference gate on real routes (all required): (1) CNZ2 
 shows a water line in at least 5 of the 30 frames (else the route is non-discriminating and recorded as such); (2) `BASE` disagrees with the reference in at least one frame of those acts (the metric must discriminate the old behaviour);
 (3) AIZ2 is reported, not gated; (4) work-RAM byte differences are reported as an aggregate (count) only, not gated, because the machines are not cycle-identical; (5) no typed stop in `CAND`. If the machines' game progress diverges so
 that frames cannot be paired by the above, the route fails closed (C6 stays unmet); a result is never tuned afterwards.
+
+## Frozen route R5 (fifth addendum, recorded before any R5 run; R4's outcome is recorded in ADR 0272 and not altered)
+
+R4 (played-start route, frame-paired) was run first and failed closed as its own rule required: the three machines follow the same route for a few hundred frames, then game physics diverges (different score and position at
+the same frame), so frame-paired canonical observations cannot be compared. R5 uses the retained debug-mode serpentine flight (`tools/seg122_t005_s3k/sweep.py`, part 0) of CNZ2, LBZ2 and AIZ2: the camera path is a function of
+the held buttons only (no game physics), so the machines can be paired by frame. Same reference, native arms `CAND` and `BASE`, image, region, pad events (identical in both machines), finite budget and 900 s wall timeout as R4.
+Captures: 64 frames, ordinals Start+600 every 270 (covering the whole flight), raw 320x224 RGB.
+Observable: per paired frame the **differing-pixel fraction** `f` = share of the 71,680 pixels with `|dR|+|dG|+|dB| > 48` between the reference frame and the native frame (renderer-independent in the sense that a palette split
+changes whole bands, a renderer difference changes few pixels).
+Gates for the independent real-route reference (all required, CNZ2 and LBZ2; AIZ2 reported): (1) `CAND`: median `f` <= 2 % and maximum `f` <= 10 % over the 64 frames; (2) discrimination: `BASE` has at least 3 frames with `f` >= 15 %
+where `CAND` has `f` < 5 % (else the route does not exercise the H-interrupt and is recorded as non-discriminating, C6 unmet by this route); (3) no typed stop in `CAND`; (4) if `CAND`'s median `f` exceeds 20 % the route is not paired and fails closed.
+Thresholds are fixed here and are not revised after the results.
