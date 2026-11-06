@@ -98,3 +98,45 @@ base's drops fall between the capture points or are invisible there, so R3 shows
 
 **Effect on the decision.** Stronger evidence for C5 on a gameplay-wide set (28 acts, no stop, no dropped level-4 interrupt, differences confined to acts where the old executable dropped them). C6 is still not met: no independent Genesis reference, so the
 verdict stays `STATIC_THUNKS_ONLY` and the PR stays draft. The 84-act set of ADR 0270 (three routes per act) is partly covered (played start and a debug flight on three acts), not repeated in full.
+
+## 7. Addendum: independent Genesis-level reference (gate C6), review fixes and decision
+
+### 7.1 Reference infrastructure reused
+
+The pinned Genesis Plus GX of `tests/genesis_oracle/pins.py` (revision `939ce4f0...`, exact HEAD and clean tracked tree verified by the existing contract; built in a temporary copy) and the existing libretro host
+`tests/genesis_oracle/libretro_host.c`. The host gained two optional, inert-by-default modes (`--pad` frame-keyed player-1 input, `--capture` video frame and 64 KiB work RAM at chosen ordinals) and a per-button input
+fallback; its original use is unchanged (`tests/genesis_z80_oracle_smoke_test.py` passes as before). No second host, no new dependency; the checkout lives in the ignored `.tools/genesis-oracles/`.
+
+### 7.2 Synthetic H-interrupt differential (`tests/genesis_hint_ram_jmp_reference_test.py`, fixture `tests/genesis_hint_ram_jmp_fixture.py`, project-authored)
+
+The ROM builds a `JMP (xxx).L` in work RAM from constant stores, points the level-4 vector at it, enables the H-interrupt, runs handler A four times, retargets the operand to handler B (four times), back to A (four times), masks all
+interrupts and signals completion. **Result: the generated-native program and the pinned Genesis Plus GX agree exactly** on handler counts (A 8, B 4), the interrupt order (`AAAABBBBAAAA`), the SR stacked on entry (`$2000`), the SR inside
+the handler (`$2400`) and after the final mask (`$2700`), and the absence of phase timeouts. Controls: H-interrupt disabled and interrupt mask 4 agree on "no interrupt" (all three waits time out in both). An opcode other than `JMP` at the stub
+and an unsupported live target run no handler in either machine (the reference executes whatever follows and never completes; the generated program drops the unproven vector, or stops with its typed stop). **Discrimination:** the same test removes
+level-4 delivery from the generated program (the old behaviour) and requires the comparison to fail; it does. Expectations for the normal fixture are authored from the architecture in the test, not copied from either machine.
+
+### 7.3 Authentic combined image, validation image, routes R4 and R5 (frozen in ADR 0271, results as measured)
+
+Reference and generated-native arms ran the retained validation image (never shipped) with identical pad events, USA/NTSC-U, finite budgets and timeouts.
+
+- **R4** (played start, frame paired, water-line observable). **Failed its frozen gate.** The machines follow the route identically for a few hundred frames, then game physics diverges (different score and position at the same frame),
+  and the row-profile detector also fired on level graphics. Per its own rule the route fails closed.
+- **R5** (debug-mode flight, differing-pixel fraction). **Failed its frozen gates.** `CAND` and `BASE` were identical on CNZ2 and LBZ2 (the flight does not exercise the dropped level-4 interrupts at the captured frames: `BASE` and `CAND`
+  dispatch counts are equal), so the route does not discriminate; `CAND`'s median differing fraction against the reference was 5.3 % (CNZ2) and 7.1 % (LBZ2), above the 2 % bound (renderer representation differences between the machines), and AIZ2 was
+  unpaired (median 20 %).
+- **Exploratory, post-hoc (not a gate, not pre-registered; computed afterwards from the R4 captures with R5's fraction):** in the played-start route, the differing fraction against the reference stays at 0.02-0.18 for `CAND` on all 30 LBZ2
+  frames while `BASE` rises to 0.42-0.74 on 12 of them; on AIZ2 `BASE` is at 0.28-0.98 for the first 18 frames while `CAND` is at 0.12-0.24; on CNZ2 the arms are equal until the machines' game progress diverges (frame 22 on). This is encouraging
+  evidence that the candidate tracks the independent reference where the old executable does not, but it was chosen after seeing data and does not satisfy a frozen gate.
+
+### 7.4 Independent reviews and corrections
+
+Two independent adversarial reviews of the actual diff: both `PASS`, no blocker. Findings fixed in this PR: multi-register `MOVEM` stores are conflicting writers by register-count extent (regression fixture `conflicting_movem`); the precedence
+overlap test against existing entries is now an exact interval test (a descriptor ending before a static entry no longer conflicts). Notes carried: the Musashi differential only claims "verified against Musashi" when
+`SEGARECOMP_M68K_RAM_JMP_MUSASHI_CHECKOUT` points at the pinned checkout (CI without it runs the synthetic half only); mirror-address writers are absent from the conflict evidence because discovery cannot decode them as supported stores
+(they also cannot run); the recognizer remains positive evidence only, with the opcode guard authoritative.
+
+### 7.5 Decision
+
+**`STATIC_THUNKS_ONLY` is retained.** The independent reference now exists and agrees with the generated program exactly on the synthetic fixture, but the real-route gates registered for it (R4, R5) were not met, so frozen gate C6 is not satisfied by
+route evidence and is not reinterpreted as satisfied. The PR stays draft. What would settle it: a pre-registered, paired confirmation (for example the exploratory LBZ2/AIZ2 comparison, with its metric and thresholds fixed in advance) accepted by the operator,
+or a renderer-aligned comparison of palette/RAM state at game-state-defined sync points.
