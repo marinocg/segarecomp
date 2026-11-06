@@ -286,6 +286,7 @@ def main():
             "conflicting_long": stores() + [0x21FC, 0x4E71, 0x4E71, 0xFFF0] + KEEP_ON_C4,   # a long store overlapping the opcode word
             "different_opcode": stores(opcode_v=0x4EB9, opcode_h=0x4EB9) + KEEP_ON_C4,       # JSR is not a supported form
             "no_operand_constructor": stores(operand_v=False, operand_h=False) + KEEP_ON_C4,
+            "conflicting_movem": stores() + [0x48F9, 0x0007, 0x00FF, 0xFFE8] + KEEP_ON_C4,     # MOVEM.L D0-D2,($FFFFE8).L covers $FFFFF0-$FFFFF3 only
             "opcode_only_clr": [0x4278, 0xFFF0, 0x4278, 0xFFF6] + KEEP_ON_C4,                 # CLR.W over the stub: not the opcode
         }
         for name, code in negatives.items():
@@ -310,7 +311,6 @@ def main():
         same = emit(cli, work, "legacy_same", good, "--ram-thunk", f"00FFFFF0:4EF900001000")
         assert same.returncode == 0 and same.stdout == first.stdout, "a subsumed materialization changes nothing"
         differing = emit(cli, work, "legacy_other_form", good, "--ram-thunk", "00FFFFF0:4EF81000")
-        assert differing.returncode != 0 and "invalid materialized RAM thunk" not in differing.stderr or differing.returncode != 0, differing.stderr
         assert differing.returncode != 0, "a different form over a static thunk is refused"
         # (the same descriptor over an address with no static thunk is a valid legacy thunk, so the refusal is the precedence rule)
         legacy_word = emit(cli, work, "legacy_word_form", image(spin([0x31FC, 0x4EF8, 0xFF00] + [0x4E71])), "--ram-thunk", "00FF0100:4EF81000")

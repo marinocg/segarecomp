@@ -12,6 +12,7 @@
 #include <map>
 #include <numeric>
 #include <array>
+#include <bit>
 #include <set>
 #include <sstream>
 #include <string>
@@ -6308,7 +6309,7 @@ namespace {
 
 // ADR 0271: static recognition of a work-RAM `JMP (xxx).L` thunk. Positive evidence only: the cartridge's own reachable (discovered)
 // instructions contain a constant store of the JMP opcode word at the address an immutable interrupt vector points to, and a long
-// store at the following operand address, and nothing else reachable that names the opcode word. This is never a proof that the form
+// store at the following operand address, and no other reachable operation with an absolute destination (MOVEM by its register count) overlapping the opcode word. This is never a proof that the form
 // is installed before its first use; the generated whole-opcode runtime guard stays authoritative. Writers the discovery cannot see
 // (register-indirect stores, DMA, unreached code) are not examined and are therefore never evidence.
 std::optional<std::uint32_t> genesis_work_ram_offset(std::uint32_t address) {
@@ -6324,6 +6325,13 @@ std::optional<std::uint32_t> genesis_absolute_destination_offset(const M68kEffec
 
 std::uint32_t genesis_access_bytes(M68kMemoryAccessWidth width) {
   return width == M68kMemoryAccessWidth::byte ? 1U : width == M68kMemoryAccessWidth::word ? 2U : 4U;
+}
+
+// Bytes an operation may write from its absolute destination: one access, or (MOVEM to memory) one access per listed register.
+std::uint32_t genesis_write_extent(const M68kIrOperation &operation) {
+  const std::uint32_t width = genesis_access_bytes(operation.size);
+  if (operation.kind != M68kIrKind::movem_transfer) return width;
+  return width * std::max<std::uint32_t>(1U, static_cast<std::uint32_t>(std::popcount(operation.movem_register_mask)));
 }
 
 bool genesis_ranges_overlap(std::uint32_t first, std::uint32_t first_length, std::uint32_t second, std::uint32_t second_length) {
@@ -6355,7 +6363,7 @@ std::vector<Address> genesis_static_ram_jmp_thunk_candidates(const FrontendAnaly
                                       (operation.source_ea.immediate_value & 0xFFFFU) == genesis_jmp_absolute_long_opcode && *offset == base;
       if (exact_opcode_store)
         opcode_store = true;
-      else if (genesis_ranges_overlap(*offset, genesis_access_bytes(operation.size), base, 2U))
+      else if (genesis_ranges_overlap(*offset, genesis_write_extent(operation), base, 2U))
         conflict = true;  // any other reachable operation naming the opcode word: ambiguous, never proof
       if (operation.kind == M68kIrKind::write_move && operation.size == M68kMemoryAccessWidth::long_word && *offset == base + 2U)
         operand_store = true;
