@@ -38,8 +38,9 @@ def build_report(scale=1.0, **over):
                                   {"name": "link_exec", "count": 1, "inclusive_ms": 90.0, "exclusive_ms": 90.0}],
                    "accounting": {"exclusive_sum_ms": 910.0 * scale, "unattributed_ms": 5.0},
                    "counts": {"m68k_emissions": 2, "alias_rounds": 1}, "sizes": {"generated_c_bytes": 1000, "executable_bytes": 5000},
-                   "compile": {"batches": 2, "max_workers": 4, "units_total": 10, "compiled": 8, "reused": 2, "final": 6, "superseded": 1, "pass_only": 1, "final_marked": True,
-                               "batch_wall_ms": 700.0 * scale, "aggregate_job_ms": 2000.0 * scale, "wasted_ms": 200.0 * scale, "reuse_saved_ms": 150.0,
+                   "compile": {"batches": 2, "max_workers": 4, "units_total": 10, "attempted": 8, "compiled": 8, "failed": 0, "not_started": 0, "reused": 2, "final": 6, "superseded": 1,
+                               "pass_only": 1, "final_marked": True,
+                               "batch_wall_ms": 700.0 * scale, "aggregate_job_ms": 2000.0 * scale, "failed_ms": 0.0, "wasted_ms": 200.0 * scale, "reuse_saved_ms": 150.0,
                                "phases": {"initial": {"compiled": 6, "job_ms": 1500.0}, "preparation": {"compiled": 2, "job_ms": 500.0}},
                                "duration_ms": {"count": 8, "min": 1.0, "p50": 100.0, "p95": 600.0, "max": 600.0},
                                "categories": [{"category": "m68k_generated", "units": 6, "compiled": 4, "reused": 2, "job_ms": 1200.0 * scale, "wasted_ms": 200.0 * scale,
@@ -102,6 +103,10 @@ def test_validate_accepts_and_rejects():
     d = build_report(); d["build"]["wall_ms"] = True; rejects(d, "bool as number")
     d = build_report(); d["build"]["accounting"]["exclusive_sum_ms"] = 99999; rejects(d, "double counting")
     d = build_report(); d["build"]["compile"]["compiled"] = 99; rejects(d, "compiled + reused != total")
+    d = build_report(); c = d["build"]["compile"]; c.update(compiled=6, failed=2, attempted=8, failed_ms=300.0, final=5, superseded=1, pass_only=0); pr.validate(d)
+    d = build_report(); c = d["build"]["compile"]; c.update(compiled=6, failed=2, attempted=7, failed_ms=300.0, final=5, superseded=1, pass_only=0); rejects(d, "attempted != compiled + failed")
+    d = build_report(); c = d["build"]["compile"]; c.update(compiled=6, failed=1, not_started=1, attempted=7, failed_ms=300.0, final=5, superseded=1, pass_only=0); pr.validate(d)
+    d = build_report(); d["build"]["compile"]["failed_ms"] = 99999; rejects(d, "failed time beyond the aggregate")
     d = build_report(); d["build"]["compile"]["wasted_ms"] = 99999; rejects(d, "wasted > aggregate")
     d = build_report(); d["build"]["stages"][1]["exclusive_ms"] = 5000; rejects(d, "exclusive > inclusive")
     d = build_report(); d["build"]["compile"]["slowest_units"] = [{}] * 11; rejects(d, "unbounded unit list")
@@ -157,6 +162,18 @@ def test_summary_labels_and_content():
     inc = runtime_report(status="incomplete")
     inc["runtime"]["outcome"] = "guest_stop"
     require("incomplete" in pr.summary_text(inc), "incomplete session is called out")
+
+
+def test_failed_and_skipped_jobs_are_reported_apart():
+    d = build_report(status="failed", failure={"stage": "compile"})
+    c = d["build"]["compile"]
+    c.update(compiled=5, failed=2, not_started=1, reused=2, attempted=7, units_total=10, failed_ms=400.0, final=0, superseded=0, pass_only=0, final_marked=False)
+    pr.validate(d)
+    text = pr.summary_text(d)
+    require("failed 2, never started 1" in text and "2 compiler job(s) failed" in text and "no object produced" in text and "ATTEMPTED work" in text, "summary:\n" + text)
+    page = pr.html_report([d], ["f.json"])
+    require("failed jobs (no object produced)" in page and "never started" in page, "HTML shows failed work apart")
+    require(pr.sanitize(d)["build"]["compile"]["failed"] == 2, "failure counts survive sanitize")
 
 
 def test_compare_build():
@@ -221,7 +238,7 @@ def test_html_is_offline_and_escaped():
     page = pr.html_report([runtime_report(paced=True)], ["r"])
     require("Runtime subsystem breakdown" in page and "Frame interval timeline" in page and "inside emulation" in page, "runtime sections")
     page = pr.html_report([build_report()], ["b"])
-    for title in ("Build stages", "Compilation cost by category", "Slowest generated translation units", "kept versus discarded", "compiled versus reused"):
+    for title in ("Build stages", "Compilation cost by category", "Slowest generated translation units", "kept versus discarded", "compiled, reused from cache, failed"):
         require(title in page, "missing chart: " + title)
     cmp_page = pr.html_report([build_report(), build_report(scale=1.5)], ["a", "b"])
     require("Before / after" in cmp_page and "Largest changes" in cmp_page, "comparison section")
@@ -293,6 +310,7 @@ def test_cli(tmp):
 def main():
     test_validate_accepts_and_rejects()
     test_summary_labels_and_content()
+    test_failed_and_skipped_jobs_are_reported_apart()
     test_compare_build()
     test_compare_runtime()
     test_estimated_frames_are_not_presented_as_measured()

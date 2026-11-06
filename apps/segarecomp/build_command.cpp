@@ -226,7 +226,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
 }
 
 // Runs every compile job with a small worker pool; returns the first failing job index or -1.
-struct JobTiming { double wall_ms = 0; segarecomp_cli::ProcessUsage usage; };
+struct JobTiming { bool started = false; double wall_ms = 0; segarecomp_cli::ProcessUsage usage; };
 
 int run_compiles(const std::vector<std::vector<std::string>> &commands, const std::vector<fs::path> &logs,
                  unsigned jobs, std::vector<int> &codes, std::vector<JobTiming> *timings = nullptr) {
@@ -241,7 +241,7 @@ int run_compiles(const std::vector<std::vector<std::string>> &commands, const st
       const auto started = std::chrono::steady_clock::now();
       segarecomp_cli::ProcessUsage usage;
       codes[index] = run_process(commands[index], logs[index], {}, 0, timings != nullptr ? &usage : nullptr);
-      if (timings != nullptr) (*timings)[index] = {std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count(), usage};  // each worker owns its index: no lock
+      if (timings != nullptr) (*timings)[index] = {true, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count(), usage};  // each worker owns its index: no lock
       if (codes[index] != 0) stop.store(true);
     }
   };
@@ -396,16 +396,18 @@ struct GenesisSoundBuild {
       if (g_profile.enabled()) {
         g_profile.record_batch_wall(std::chrono::duration<double, std::milli>(Clock::now() - batch_started).count(), jobs, batch.size());
         std::error_code size_ec;
-        for (std::size_t i = 0; i < batch.size() && i < timings.size(); ++i) {   // only jobs that ran count (a failed batch stops early)
-          if (timings[i].wall_ms == 0.0) continue;   // never started
+        for (std::size_t i = 0; i < batch.size() && i < timings.size(); ++i) {   // every planned job is recorded: ok, failed, or never started (the batch stopped early)
           segarecomp_cli::BuildProfile::JobResult result;
           result.object = batch[i].object.string();
           result.label = batch[i].source.filename().string();
+          result.outcome = (!timings[i].started || codes[i] < 0) ? segarecomp_cli::BuildProfile::JobResult::Outcome::not_started
+                           : codes[i] == 0     ? segarecomp_cli::BuildProfile::JobResult::Outcome::compiled
+                                               : segarecomp_cli::BuildProfile::JobResult::Outcome::failed;
           result.wall_ms = timings[i].wall_ms;
           result.usage = timings[i].usage;
           result.source_bytes = fs::file_size(batch[i].source, size_ec);
           if (size_ec) result.source_bytes = 0;
-          result.object_bytes = codes[i] == 0 ? fs::file_size(batch[i].object, size_ec) : 0;
+          result.object_bytes = result.outcome == segarecomp_cli::BuildProfile::JobResult::Outcome::compiled ? fs::file_size(batch[i].object, size_ec) : 0;
           if (size_ec) result.object_bytes = 0;
           g_profile.record_job(std::move(result));
         }
@@ -480,7 +482,7 @@ struct GenesisSoundBuild {
       const bool pending = std::any_of(fresh.begin(), fresh.end(), [&](const auto &entry) { return entry.first == key; });
       if (m68k_objects.count(key) != 0 || pending) {
         ++m68k_reused_units;
-        if (g_profile.enabled()) { segarecomp_cli::BuildProfile::JobResult reuse; reuse.object = object.string(); reuse.label = source.filename().string(); reuse.compiled = false; g_profile.record_job(std::move(reuse)); }
+        if (g_profile.enabled()) { segarecomp_cli::BuildProfile::JobResult reuse; reuse.object = object.string(); reuse.label = source.filename().string(); reuse.outcome = segarecomp_cli::BuildProfile::JobResult::Outcome::reused; g_profile.record_job(std::move(reuse)); }
       } else {
         CompileJob job;
         job.source = source;
@@ -545,7 +547,7 @@ struct GenesisSoundBuild {
       if (known != z80_objects.end()) {
         z80_current.push_back(known->second);
         ++z80_reused_units;
-        if (g_profile.enabled()) { segarecomp_cli::BuildProfile::JobResult reuse; reuse.object = known->second.string(); reuse.label = source.filename().string(); reuse.compiled = false; g_profile.record_job(std::move(reuse)); }
+        if (g_profile.enabled()) { segarecomp_cli::BuildProfile::JobResult reuse; reuse.object = known->second.string(); reuse.label = source.filename().string(); reuse.outcome = segarecomp_cli::BuildProfile::JobResult::Outcome::reused; g_profile.record_job(std::move(reuse)); }
         continue;
       }
       const fs::path object = object_dir / ("z80-" + key.substr(0, 20) + ".o");
@@ -1454,16 +1456,18 @@ int run_build(Options options) {
         g_profile.record_batch_wall(std::chrono::duration<double, std::milli>(Clock::now() - batch_started).count(), jobs, compile.size());
         std::error_code size_ec;
         for (std::size_t i = 0; i < compile.size() && i < timings.size(); ++i) {
-          if (timings[i].wall_ms == 0.0) continue;
           segarecomp_cli::BuildProfile::JobResult result;
           result.object = objects[i].string();
           result.label = compile[i].source.filename().string();
           result.category = compile[i].source.parent_path() == shard_dir ? "sms_generated" : "runtime";
+          result.outcome = (!timings[i].started || codes[i] < 0) ? segarecomp_cli::BuildProfile::JobResult::Outcome::not_started
+                           : codes[i] == 0     ? segarecomp_cli::BuildProfile::JobResult::Outcome::compiled
+                                               : segarecomp_cli::BuildProfile::JobResult::Outcome::failed;
           result.wall_ms = timings[i].wall_ms;
           result.usage = timings[i].usage;
           result.source_bytes = fs::file_size(compile[i].source, size_ec);
           if (size_ec) result.source_bytes = 0;
-          result.object_bytes = codes[i] == 0 ? fs::file_size(objects[i], size_ec) : 0;
+          result.object_bytes = result.outcome == segarecomp_cli::BuildProfile::JobResult::Outcome::compiled ? fs::file_size(objects[i], size_ec) : 0;
           if (size_ec) result.object_bytes = 0;
           g_profile.record_job(std::move(result));
         }

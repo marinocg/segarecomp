@@ -42,7 +42,10 @@ class BuildProfile {
     std::string object;             // object path: local identity used to match the final link set; never exported
     std::string label;              // source basename (private reports only)
   std::string category;           // optional; derived from the object name when empty
-    bool compiled = true;           // false: reused from an earlier compile of the same content
+    // compiled: the compiler ran and succeeded (an object exists); failed: it ran and returned an error (its time and CPU are real consumption, but no object was produced);
+    // not_started: the batch stopped before this job began; reused: the content was already compiled earlier in this build.
+    enum class Outcome { compiled, failed, not_started, reused };
+    Outcome outcome = Outcome::compiled;
     double wall_ms = 0;
     ProcessUsage usage;
     std::uint64_t source_bytes = 0, object_bytes = 0;
@@ -88,7 +91,7 @@ class BuildProfile {
     u.job = std::move(job);
     u.round = round_;
     u.category = u.job.category.empty() ? category_of(u.job.object) : u.job.category;
-    if (u.job.compiled) compiled_wall_[u.job.object] = u.job.wall_ms;
+    if (u.job.outcome == JobResult::Outcome::compiled) compiled_wall_[u.job.object] = u.job.wall_ms;
     units_.push_back(std::move(u));
   }
   // One finished batch: its own wall time is the "compile_batch" span (opened by the caller); the batch contributes its job results here.
@@ -244,10 +247,10 @@ inline std::string BuildProfile::render(const std::string &status, const std::st
   }
   o << "}";
   // ---- compilation
-  struct Cat { std::uint64_t units = 0, compiled = 0, reused = 0, src = 0, obj = 0; double job_ms = 0, wasted_ms = 0, saved_ms = 0; };
+  struct Cat { std::uint64_t units = 0, compiled = 0, reused = 0, failed = 0, not_started = 0, src = 0, obj = 0; double job_ms = 0, wasted_ms = 0, saved_ms = 0; };
   std::map<std::string, Cat> cats;
-  double aggregate_ms = 0, wasted_ms = 0, saved_ms = 0, preparation_ms = 0, initial_ms = 0;
-  std::uint64_t compiled = 0, reused = 0, superseded = 0, pass_only = 0, finals = 0, prep_compiled = 0, init_compiled = 0;
+  double aggregate_ms = 0, wasted_ms = 0, saved_ms = 0, preparation_ms = 0, initial_ms = 0, failed_ms = 0;
+  std::uint64_t compiled = 0, failed = 0, not_started = 0, reused = 0, superseded = 0, pass_only = 0, finals = 0, prep_compiled = 0, init_compiled = 0;
   bool cpu_all = true, rss_all = true;
   double cpu_ms = 0;
   std::uint64_t peak_rss_kib = 0;
@@ -257,35 +260,37 @@ inline std::string BuildProfile::render(const std::string &status, const std::st
   for (const Unit &u : units_) {
     Cat &cat = cats[u.category];
     ++cat.units;
-    if (!u.job.compiled) {
+    if (u.job.outcome == JobResult::Outcome::not_started) { ++not_started; ++cat.not_started; continue; }
+    if (u.job.outcome == JobResult::Outcome::reused) {
       ++reused;
       ++cat.reused;
       const auto it = compiled_wall_.find(u.job.object);
       if (it != compiled_wall_.end()) { saved_ms += it->second; cat.saved_ms += it->second; }
       continue;
     }
-    ++compiled;
-    ++cat.compiled;
+    const bool ok = u.job.outcome == JobResult::Outcome::compiled;
+    if (ok) { ++compiled; ++cat.compiled; cat.obj += u.job.object_bytes; } else { ++failed; ++cat.failed; failed_ms += u.job.wall_ms; }
     cat.src += u.job.source_bytes;
-    cat.obj += u.job.object_bytes;
-    cat.job_ms += u.job.wall_ms;
+    cat.job_ms += u.job.wall_ms;        // attempted work: a failed job's time is real consumption, reported but never counted as a produced object
     aggregate_ms += u.job.wall_ms;
     durations.push_back(u.job.wall_ms);
+    if (u.job.usage.cpu_available) cpu_ms += static_cast<double>(u.job.usage.cpu_ms); else cpu_all = false;
+    if (u.job.usage.rss_available) peak_rss_kib = std::max(peak_rss_kib, u.job.usage.peak_rss_kib); else rss_all = false;
+    if (!ok) { rows.push_back({&u, "failed"}); continue; }
     std::string disposition;
     if (!final_marked_) disposition = "unknown";
     else if (final_.count(u.job.object)) { disposition = "final"; ++finals; }
     else if (pass_only_.count(u.job.object)) { disposition = "pass_only"; ++pass_only; }
     else { disposition = "superseded"; ++superseded; wasted_ms += u.job.wall_ms; cat.wasted_ms += u.job.wall_ms; }
     if (u.round > 0) { preparation_ms += u.job.wall_ms; ++prep_compiled; } else { initial_ms += u.job.wall_ms; ++init_compiled; }
-    if (u.job.usage.cpu_available) cpu_ms += static_cast<double>(u.job.usage.cpu_ms); else cpu_all = false;
-    if (u.job.usage.rss_available) peak_rss_kib = std::max(peak_rss_kib, u.job.usage.peak_rss_kib); else rss_all = false;
     rows.push_back({&u, disposition});
   }
   std::sort(durations.begin(), durations.end());
   const auto pct = [&](double q) { return durations.empty() ? 0.0 : durations[std::min(durations.size() - 1, static_cast<std::size_t>(q * static_cast<double>(durations.size())))]; };
-  o << ",\"compile\":{\"batches\":" << batches_ << ",\"max_workers\":" << max_workers_ << ",\"units_total\":" << units_.size() << ",\"compiled\":" << compiled << ",\"reused\":" << reused
+  o << ",\"compile\":{\"batches\":" << batches_ << ",\"max_workers\":" << max_workers_ << ",\"units_total\":" << units_.size() << ",\"attempted\":" << (compiled + failed) << ",\"compiled\":" << compiled << ",\"failed\":" << failed
+    << ",\"not_started\":" << not_started << ",\"reused\":" << reused
     << ",\"final\":" << finals << ",\"superseded\":" << superseded << ",\"pass_only\":" << pass_only << ",\"final_marked\":" << (final_marked_ ? "true" : "false")
-    << ",\"batch_wall_ms\":" << batch_wall_ms_ << ",\"aggregate_job_ms\":" << aggregate_ms << ",\"wasted_ms\":" << wasted_ms << ",\"reuse_saved_ms\":" << saved_ms
+    << ",\"batch_wall_ms\":" << batch_wall_ms_ << ",\"aggregate_job_ms\":" << aggregate_ms << ",\"failed_ms\":" << failed_ms << ",\"wasted_ms\":" << wasted_ms << ",\"reuse_saved_ms\":" << saved_ms
     << ",\"phases\":{\"initial\":{\"compiled\":" << init_compiled << ",\"job_ms\":" << initial_ms << "},\"preparation\":{\"compiled\":" << prep_compiled << ",\"job_ms\":" << preparation_ms << "}}"
     << ",\"duration_ms\":{\"count\":" << durations.size() << ",\"min\":" << (durations.empty() ? 0.0 : durations.front()) << ",\"p50\":" << pct(0.50) << ",\"p95\":" << pct(0.95)
     << ",\"max\":" << (durations.empty() ? 0.0 : durations.back()) << "}";
@@ -293,16 +298,16 @@ inline std::string BuildProfile::render(const std::string &status, const std::st
   {
     bool first = true;
     for (const auto &c : cats) {
-      o << (first ? "" : ",") << "{\"category\":\"" << c.first << "\",\"units\":" << c.second.units << ",\"compiled\":" << c.second.compiled << ",\"reused\":" << c.second.reused
+      o << (first ? "" : ",") << "{\"category\":\"" << c.first << "\",\"units\":" << c.second.units << ",\"compiled\":" << c.second.compiled << ",\"failed\":" << c.second.failed << ",\"not_started\":" << c.second.not_started << ",\"reused\":" << c.second.reused
         << ",\"job_ms\":" << c.second.job_ms << ",\"wasted_ms\":" << c.second.wasted_ms << ",\"reuse_saved_ms\":" << c.second.saved_ms << ",\"source_bytes\":" << c.second.src
         << ",\"object_bytes\":" << c.second.obj << "}";
       first = false;
     }
   }
   o << "],\"resources\":{\"compiler_cpu_ms\":";
-  if (cpu_all && compiled > 0) o << cpu_ms; else o << "null";
+  if (cpu_all && compiled + failed > 0) o << cpu_ms; else o << "null";
   o << ",\"compiler_peak_rss_kib\":";
-  if (rss_all && compiled > 0) o << peak_rss_kib; else o << "null";
+  if (rss_all && compiled + failed > 0) o << peak_rss_kib; else o << "null";
   o << ",\"link_cpu_ms\":";
   if (link_cpu_available_) o << link_cpu_ms_; else o << "null";
   o << ",\"link_wall_ms\":" << link_wall_ms_ << "}";
@@ -328,8 +333,8 @@ inline std::string BuildProfile::render(const std::string &status, const std::st
   {
     bool first = true;
     const auto miss = [&](const char *metric, const char *reason) { o << (first ? "" : ",") << "{\"metric\":\"" << metric << "\",\"reason\":\"" << reason << "\"}"; first = false; };
-    if (!cpu_all || compiled == 0) miss("compiler_cpu_ms", "the platform did not report child CPU time for every compiler job");
-    if (!rss_all || compiled == 0) miss("compiler_peak_rss_kib", "the platform did not report the peak resident set of every compiler job");
+    if (!cpu_all || compiled + failed == 0) miss("compiler_cpu_ms", "the platform did not report child CPU time for every attempted compiler job");
+    if (!rss_all || compiled + failed == 0) miss("compiler_peak_rss_kib", "the platform did not report the peak resident set of every compiler job");
     if (!link_cpu_available_) miss("link_cpu_ms", "the platform did not report child CPU time for the linker");
     if (!final_marked_) miss("unit_disposition", "the build ended before the final link set was known");
   }

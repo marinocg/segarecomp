@@ -130,6 +130,20 @@ def main():
         fd = pr.load(failed_report)
         require(fd["status"] == "failed" and fd["failure"]["stage"] == "compile", "failed report names the stage: " + json.dumps(fd.get("failure")))
         require(any(u["metric"] == "unit_disposition" for u in fd["unavailable"]), "unknown dispositions are explicit")
+        if sys.platform != "win32":   # a compiler that really runs and fails on one source: the failed job is attempted work, the jobs behind it never start
+            wrapper = tmp / "failing-cc.sh"
+            wrapper.write_text('#!/bin/sh\ncase "$*" in *runtime.c*) echo "synthetic compile error" >&2; sleep 0.2; exit 1;; esac\nexec %s "$@"\n' % cc)
+            wrapper.chmod(0o755)
+            part_report = tmp / "partial.json"
+            part = build(cli, str(wrapper), stop_rom, tmp / "part", extra=("--jobs", "1"), report=part_report)
+            require(part.returncode != 0, "the synthetic compiler failure fails the build")
+            pd = pr.load(part_report)
+            pc = pd["build"]["compile"]
+            require(pd["status"] == "failed" and pd["failure"]["stage"] == "compile", "failed build report")
+            require(pc["failed"] == 1 and pc["not_started"] >= 1 and pc["compiled"] >= 1, "failed and never-started jobs are separate from successes: " + json.dumps(pc)[:300])
+            require(pc["attempted"] == pc["compiled"] + pc["failed"] and pc["failed_ms"] >= 150 and pc["aggregate_job_ms"] >= pc["failed_ms"], "the failed job's time is attempted work: " + json.dumps(pc)[:300])
+            require(pc["final_marked"] is False and pc["final"] == 0 and pc["superseded"] == 0, "no disposition is claimed before the final link")
+            require(any(u["disposition"] == "failed" for u in pc["slowest_units"]) and all(u["label"] != "" for u in pc["slowest_units"]), "the failed job is visible among the units")
         unwritable = build(cli, cc, stop_rom, tmp / "unw", report=tmp / "no-dir" / "x" / "r.json")
         require(unwritable.returncode == ok.returncode, "an unwritable report path does not change the build result")
 

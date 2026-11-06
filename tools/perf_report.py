@@ -117,13 +117,15 @@ def validate(d, where: str = "report") -> None:
         _need(acc["exclusive_sum_ms"] <= b["wall_ms"] + 1.0, where, "exclusive times exceed the wall time (double counting)")
         c = b.get("compile")
         _need(isinstance(c, dict), where, "build.compile missing")
-        for k in ("units_total", "compiled", "reused", "final", "superseded", "pass_only"):
+        for k in ("units_total", "attempted", "compiled", "failed", "not_started", "reused", "final", "superseded", "pass_only"):
             _num(c.get(k), where, f"compile.{k}", integer=True)
-        for k in ("batch_wall_ms", "aggregate_job_ms", "wasted_ms", "reuse_saved_ms"):
+        for k in ("batch_wall_ms", "aggregate_job_ms", "failed_ms", "wasted_ms", "reuse_saved_ms"):
             _num(c.get(k), where, f"compile.{k}")
-        _need(c["compiled"] + c["reused"] == c["units_total"], where, "compiled + reused must equal units_total")
+        _need(c["compiled"] + c["failed"] + c["not_started"] + c["reused"] == c["units_total"], where, "compiled + failed + not_started + reused must equal units_total")
+        _need(c["attempted"] == c["compiled"] + c["failed"], where, "attempted must equal compiled + failed")
+        _need(c["failed"] == 0 or c["failed_ms"] > 0 or c["aggregate_job_ms"] >= 0, where, "failed jobs need failed_ms")
+        _need(c["wasted_ms"] + c["failed_ms"] <= c["aggregate_job_ms"] + 0.01, where, "wasted + failed time exceeds the aggregate job time")
         _need(c["final"] + c["superseded"] + c["pass_only"] <= c["compiled"], where, "dispositions exceed the compiled count")
-        _need(c["wasted_ms"] <= c["aggregate_job_ms"] + 0.01, where, "wasted_ms exceeds the aggregate job time")
         _need(isinstance(c.get("categories"), list), where, "compile.categories must be a list")
         for cat in c["categories"]:
             _need(isinstance(cat, dict) and isinstance(cat.get("category"), str), where, "bad compile category")
@@ -279,8 +281,10 @@ def summary_text(d: dict) -> str:
         c = b["compile"]
         k = build_derived(d)
         w("\ncompilation")
-        w(f"  units {c['units_total']}: compiled {c['compiled']}, reused {c['reused']} [measured]; of the compiled: final {c['final']}, pass-only {c['pass_only']}, superseded {c['superseded']}"
+        w(f"  units {c['units_total']}: compiled {c['compiled']}, failed {c['failed']}, never started {c['not_started']}, reused {c['reused']} [measured]; of the compiled: final {c['final']}, pass-only {c['pass_only']}, superseded {c['superseded']}"
           + ("" if c["final_marked"] else "  [unavailable: build ended before the final link]"))
+        if c["failed"] or c["not_started"]:
+            w(f"  !! {c['failed']} compiler job(s) failed ({fmt_ms(c['failed_ms'])} of real work, no object produced) and {c['not_started']} never started: aggregate job time covers ATTEMPTED work")
         w(f"  wall time of compile batches {fmt_ms(c['batch_wall_ms'])} vs aggregate job time {fmt_ms(c['aggregate_job_ms'])} [measured]"
           + (f"  -> effective parallelism {k['parallelism']:.2f}x [derived]" if k["parallelism"] else ""))
         w(f"  discarded work (superseded) {fmt_ms(c['wasted_ms'])}" + (f" = {100 * k['wasted_share']:.0f}% of job time [derived]" if k["wasted_share"] is not None else "")
@@ -496,9 +500,9 @@ def sanitize(d: dict) -> dict:
         out["build"] = {"wall_ms": b["wall_ms"], "stages": [row(s) for s in b["stages"]], "operations": [row(s) for s in b["operations"]],
                         "accounting": {k: b["accounting"][k] for k in ("exclusive_sum_ms", "unattributed_ms")},
                         "counts": {_text(k): v for k, v in b["counts"].items()}, "sizes": {_text(k): v for k, v in b["sizes"].items()},
-                        "compile": {k: c[k] for k in ("batches", "max_workers", "units_total", "compiled", "reused", "final", "superseded", "pass_only", "final_marked", "batch_wall_ms",
-                                                      "aggregate_job_ms", "wasted_ms", "reuse_saved_ms", "phases", "duration_ms") if k in c}}
-        out["build"]["compile"]["categories"] = [{k: v for k, v in cat.items() if k in ("units", "compiled", "reused", "job_ms", "wasted_ms", "reuse_saved_ms", "source_bytes", "object_bytes")}
+                        "compile": {k: c[k] for k in ("batches", "max_workers", "units_total", "attempted", "compiled", "failed", "not_started", "reused", "final", "superseded", "pass_only", "final_marked", "batch_wall_ms",
+                                                      "aggregate_job_ms", "failed_ms", "wasted_ms", "reuse_saved_ms", "phases", "duration_ms") if k in c}}
+        out["build"]["compile"]["categories"] = [{k: v for k, v in cat.items() if k in ("units", "compiled", "failed", "not_started", "reused", "job_ms", "wasted_ms", "reuse_saved_ms", "source_bytes", "object_bytes")}
                                                  | {"category": cat["category"] if cat["category"] in _CATEGORIES else "other"} for cat in c["categories"]]
         out["build"]["compile"]["resources"] = {k: c["resources"].get(k) for k in ("compiler_cpu_ms", "compiler_peak_rss_kib", "link_cpu_ms", "link_wall_ms")}
     else:
@@ -631,10 +635,11 @@ def report_section(d: dict, heading: str) -> str:
                                 note="red = superseded (discarded)"))
         else:
             out.append("<p class='meta'>Slowest units: not part of the shareable form.</p>")
-        used = c["aggregate_job_ms"] - c["wasted_ms"]
-        out.append(stacked_svg([("used by the executable or the build-time observation program", used, "sc"), ("discarded (superseded by a later round)", c["wasted_ms"], "sbad")], "ms",
+        used = c["aggregate_job_ms"] - c["wasted_ms"] - c["failed_ms"]
+        out.append(stacked_svg([("used by the executable or the build-time observation program", used, "sc"), ("discarded (superseded by a later round)", c["wasted_ms"], "sbad"),
+                                ("failed jobs (no object produced)", c["failed_ms"], "sg")], "ms",
                                "Compilation work: kept versus discarded"))
-        out.append(stacked_svg([("compiled", c["compiled"], "sa"), ("reused", c["reused"], "sc")], "units", "Units: compiled versus reused from cache"))
+        out.append(stacked_svg([("compiled", c["compiled"], "sa"), ("reused", c["reused"], "sc"), ("failed", c["failed"], "sbad"), ("never started", c["not_started"], "sg")], "units", "Units: compiled, reused from cache, failed, never started"))
     else:
         r, k = d["runtime"], runtime_derived(d)
         f = r["frames"]
