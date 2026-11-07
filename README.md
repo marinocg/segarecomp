@@ -83,6 +83,20 @@ Everything in this section is merged after v0.7.0 and ships with the next releas
   the scenes listed in the [ledger](docs/product/compatibility-ledger.json). Capabilities depend on the exact game, revision and package.
 * **Security.** A schema 2 patch is **executable code and is not sandboxed**. A hash proves the file is unchanged, not who wrote it or that it is safe. Install native patches only from sources you trust.
 
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/showcase/sonic-1-green-hill-patched-16x9.png" alt="Sonic the Hedgehog, Green Hill Zone 1, in generated-native 16:9 with reconstructed scenery on both sides and the original score, time and rings HUD moved to the left edge"><br><sub><b>Sonic the Hedgehog</b>: authored scenery and relocated HUD (private patch package).</sub></td>
+<td width="50%"><img src="docs/assets/showcase/sonic-2-emerald-hill-patched-16x9.png" alt="Sonic the Hedgehog 2, Emerald Hill Zone 1, in 16:9 with extended scenery, the relocated HUD and a Buzzer enemy drawn in the extended right margin"><br><sub><b>Sonic the Hedgehog 2</b>: scenery, relocated HUD and an actor in the extended margin (gameplay-affecting patch).</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/assets/showcase/sonic-3-knuckles-angel-island-patched-16x9.png" alt="Sonic 3 and Knuckles, Angel Island Zone 1, in 16:9 with extended jungle scenery and the relocated HUD"><br><sub><b>Sonic 3 &amp; Knuckles</b>: authored foreground, partly wrapped background, relocated HUD (gameplay-affecting patch).</sub></td>
+<td width="50%"><img src="docs/assets/showcase/streets-of-rage-2-stage-1-patched-16x9.png" alt="Streets of Rage 2, stage 1, in 16:9 with enemies drawn beside the native picture"><br><sub><b>Streets of Rage 2</b>: extra sprites beside the picture from a data-only patch plus generic Level 3; no authored scenery or HUD.</sub></td>
+</tr>
+</table>
+
+Real frames from generated-native programs (Enhanced Widescreen, 16:9, Raw Extension, validated first scenes only; details and attribution in the [showcase notes](docs/assets/showcase/README.md)). The patch packages are
+not bundled with any release, results depend on the exact game, revision and package, and native-code patches must come from trusted sources. Game artwork belongs to its owners.
+
 More: [widescreen and patches overview](docs/product/widescreen-and-patches.md), [patch packages](docs/product/patch-packages.md), [native patch SDK](docs/product/native-patch-sdk.md).
 
 ## Download and try segarecomp

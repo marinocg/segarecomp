@@ -70,7 +70,7 @@ STATUS_DOCS = (
     "packaging/README.md",
     "packaging/README.txt",
 )
-LINK_DOCS = STATUS_DOCS + ("docs/product/compatibility-ledger.md", "docs/testing/commercial-games.md", "CHANGELOG.md")
+LINK_DOCS = STATUS_DOCS + ("docs/product/compatibility-ledger.md", "docs/testing/commercial-games.md", "CHANGELOG.md", "docs/assets/showcase/README.md")
 
 # Contradictory or superseded assertions that must not reappear in a current-status page.
 FORBIDDEN = (
@@ -396,6 +396,33 @@ def check_consistency(ledger, texts):
     return problems
 
 
+SHOWCASE_DIR = "docs/assets/showcase"
+SHOWCASE_MAX_FILES = 6
+SHOWCASE_MAX_BYTES = 512 * 1024
+
+
+def check_showcase(root):
+    """The promotional screenshot exception (docs/testing/commercial-games.md) is closed: only listed, small PNG/WebP files."""
+    problems = []
+    directory = root / SHOWCASE_DIR
+    if not directory.is_dir():
+        return problems
+    listing = (directory / "README.md").read_text(encoding="utf-8") if (directory / "README.md").exists() else ""
+    images = sorted(p for p in directory.iterdir() if p.is_file() and p.name != "README.md")
+    if len(images) > SHOWCASE_MAX_FILES:
+        problems.append(f"{SHOWCASE_DIR}: more than {SHOWCASE_MAX_FILES} files")
+    if images and not listing:
+        problems.append(f"{SHOWCASE_DIR}: images require the README that records provenance and attribution")
+    for image in images:
+        if image.suffix.lower() not in (".png", ".webp"):
+            problems.append(f"{SHOWCASE_DIR}/{image.name}: only PNG or WebP is allowed")
+        if image.stat().st_size > SHOWCASE_MAX_BYTES:
+            problems.append(f"{SHOWCASE_DIR}/{image.name}: larger than {SHOWCASE_MAX_BYTES // 1024} KiB")
+        if f"`{image.name}`" not in listing:
+            problems.append(f"{SHOWCASE_DIR}/{image.name}: not listed in the showcase README")
+    return problems
+
+
 def run(root):
     ledger_file = root / LEDGER_PATH
     try:
@@ -407,6 +434,7 @@ def run(root):
     problems += check_links(root, LINK_DOCS)
     problems += check_forbidden(texts)
     problems += check_consistency(ledger, texts)
+    problems += check_showcase(root)
     return problems
 
 

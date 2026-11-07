@@ -57,6 +57,19 @@ For this policy, a “private diagnostic session” means the user-authorized, n
 
 For Ghidra, do not weaken the container mount policy or mount `games/` wholesale. A user must explicitly place an authorized analysis input in `.tools/ghidra/input/` under the security and evidence rules in `docs/testing/ghidra-analysis.md`.
 
+## Promotional screenshot exception (SEG-129)
+
+The prohibition on committing generated commercial-game screenshots above has **one narrow exception**. The maintainer, on his own responsibility, authorized publishing a small number of individually reviewed promotional
+captures of generated-native gameplay so the project's widescreen and patch capabilities are visible. The exception covers exactly the files listed in [`docs/assets/showcase/README.md`](../assets/showcase/README.md) and nothing else:
+
+- reduced-size, unmodified captures (cropping or uniform resizing only) from the real viewer output, each with its game, revision, patch, setting and attribution recorded in that README;
+- at most six images, each at most 512 KiB, PNG or WebP, with no overlay, local path or diagnostic text;
+- **not** permitted under it: ROMs, BIOS files, extracted sprite sheets, textures, tile or palette dumps, complete or sequential gameplay captures, video, framebuffers, RAM dumps, raw traces, disassembly, or any private-corpus
+  material; the exception does not extend to the private harness, to CI output or to any other screenshot. Adding an image requires a new individual review and an entry in the showcase README.
+- no upload to an external image host; the images live in this repository only. Game names and artwork remain the property of their owners and are credited there.
+
+`tests/product_truth_test.py` (through `tools/check_product_truth.py`) fails when `docs/assets/showcase/` holds a file that is not listed, is not PNG/WebP, exceeds the size or count limit, or when the README refers to a missing image.
+
 ## Efficient Frontier Diagnosis
 
 Use the sanitized commercial route for durable evidence and the diagnostic route for private

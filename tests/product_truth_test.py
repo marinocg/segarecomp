@@ -114,6 +114,30 @@ class LedgerRulesTest(unittest.TestCase):
         self.assertRejected(lambda l: l["features"][0].update(status="done"), "unsupported status")
 
 
+class ShowcaseRulesTest(unittest.TestCase):
+    def run_case(self, files):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            d = root / gate.SHOWCASE_DIR
+            d.mkdir(parents=True)
+            for name, data in files.items():
+                (d / name).write_bytes(data)
+            return gate.check_showcase(root)
+
+    def test_listed_small_png_is_accepted(self):
+        self.assertEqual(self.run_case({"a.png": b"x", "README.md": b"| `a.png` |"}), [])
+
+    def test_unlisted_oversize_and_wrong_type_are_rejected(self):
+        problems = self.run_case({"a.png": b"x" * (gate.SHOWCASE_MAX_BYTES + 1), "b.bmp": b"x", "README.md": b"| `a.png` |"})
+        self.assertTrue(any("larger than" in p for p in problems) and any("only PNG" in p for p in problems) and any("not listed" in p for p in problems), problems)
+
+    def test_images_need_provenance_readme_and_count_limit(self):
+        self.assertTrue(any("provenance" in p for p in self.run_case({"a.png": b"x"})))
+        many = {f"{i}.png": b"x" for i in range(gate.SHOWCASE_MAX_FILES + 1)}
+        many["README.md"] = " ".join(f"`{i}.png`" for i in range(gate.SHOWCASE_MAX_FILES + 1)).encode()
+        self.assertTrue(any("more than" in p for p in self.run_case(many)))
+
+
 class DocumentRulesTest(unittest.TestCase):
     def test_legacy_assertions_are_rejected(self):
         samples = {
