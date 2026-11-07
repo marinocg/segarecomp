@@ -3,7 +3,7 @@
 
 usage: check_product_truth.py [--root <repository root>]
 
-Standard library only. It reads public files of this repository: no network, no private harness, no commercial
+Standard library only. It reads public files of this repository: no network, no external repository, no commercial
 image. The ledger (docs/product/compatibility-ledger.json) is a REPORTING document; nothing here changes how the
 launcher detects capabilities or admits builds. Format and rules: docs/product/compatibility-ledger.md.
 
@@ -46,7 +46,7 @@ MAX_LEVEL = {
 FEATURE_STATUS = ("implemented", "partial", "experimental")
 BUILD_MODES = ("compatibility", "optimized", "file_first_structural", "unknown")
 INPUT_KINDS = ("original", "modified", "unknown")
-DISTRIBUTION = ("release", "private_harness_only")
+DISTRIBUTION = ("release", "maintained_outside_repository")
 PATCH_SCHEMAS = (1, 2)
 REF_PATTERN = re.compile(r"^(ADR (\d{4})|PR #\d+)$")
 
@@ -84,9 +84,9 @@ FORBIDDEN = (
     (r"a second title has only \*\*experimental observations\*\*", "the second Sega CD title is covered by the ledger"),
     (r"\*\*A second title\*\* \| Experimental observations only", "the second Sega CD title is covered by the ledger"),
     (r"\|\s*\[Master System\]\([^)]*\)\s*\|\s*no\s*\|", "Master System is implemented"),
-    (r"A verified game-specific widescreen mode \(none exists yet\)", "game-specific providers exist (private harness)"),
+    (r"A verified game-specific widescreen mode \(none exists yet\)", "game-specific providers exist (maintained outside this repository)"),
     (r"independently (reproduced|validated|replayed)[^.\n]{0,40}(playthrough|completion)", "human completion must not be described as independently validated"),
-    (r"segarecomp-harness|/root/dev/", "no private harness path or content in public documentation"),
+    (r"segarecomp-harness|/root/dev/|/home/[a-z]+/", "no private or local path in public documentation"),
 )
 
 
@@ -265,7 +265,7 @@ def validate_ledger(ledger, root):
         if entry.get("distribution") not in DISTRIBUTION:
             problems.append(f"{owner}: unsupported distribution {entry.get('distribution')!r}")
         elif entry.get("distribution") == "release":
-            problems.append(f"{owner}: 'release' distribution requires an actual release asset; none is recorded (use private_harness_only)")
+            problems.append(f"{owner}: 'release' distribution requires an actual release asset; none is recorded (use maintained_outside_repository)")
         expect_str_list(owner, entry, "provides", problems)
         expect_str_list(owner, entry, "untested", problems)
         if not entry.get("untested"):
@@ -307,6 +307,23 @@ def validate_ledger(ledger, root):
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
 
+def slug(heading):
+    text = re.sub(r"[`*_]", "", heading.strip().lower())
+    text = re.sub(r"[^\w\- ]", "", text)
+    return text.replace(" ", "-")
+
+
+def anchors(path):
+    found = set()
+    in_fence = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+        elif not in_fence and line.startswith("#"):
+            found.add(slug(line.lstrip("#")))
+    return found
+
+
 def check_links(root, files):
     problems = []
     for name in files:
@@ -321,11 +338,14 @@ def check_links(root, files):
             if in_fence:
                 continue
             for target in LINK_PATTERN.findall(line):
-                if re.match(r"^[a-z][a-z0-9+.-]*:", target) or target.startswith("#") or target.startswith("../../"):
-                    continue  # external URL, in-page anchor, or a GitHub-relative path such as ../../releases
-                local = target.split("#", 1)[0]
-                if local and not (path.parent / local).exists():
+                if re.match(r"^[a-z][a-z0-9+.-]*:", target) or re.match(r"^(\.\./)+(releases|issues)\b", target):
+                    continue  # external URL or a GitHub-relative page such as ../../releases
+                local, _, fragment = target.partition("#")
+                target_path = path if not local else path.parent / local
+                if not target_path.exists():
                     problems.append(f"{name}:{number}: broken local link {target!r}")
+                elif fragment and target_path.suffix == ".md" and slug(fragment) not in anchors(target_path):
+                    problems.append(f"{name}:{number}: broken anchor {target!r}")
     return problems
 
 
@@ -383,7 +403,7 @@ def run(root):
     except (OSError, ValueError) as error:
         return [f"{LEDGER_PATH}: cannot read ledger: {error}"]
     problems = validate_ledger(ledger, root)
-    texts = {name: (root / name).read_text(encoding="utf-8") for name in STATUS_DOCS if (root / name).exists()}
+    texts = {name: (root / name).read_text(encoding="utf-8") for name in STATUS_DOCS + ("CHANGELOG.md", LEDGER_PATH) if (root / name).exists()}
     problems += check_links(root, LINK_DOCS)
     problems += check_forbidden(texts)
     problems += check_consistency(ledger, texts)

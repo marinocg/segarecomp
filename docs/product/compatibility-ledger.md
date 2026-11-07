@@ -36,7 +36,7 @@ resting only on automated checkpoints, `completed` without a human report, and a
 * `platforms[]`: `id`, `name`, `status` (`implemented` | `experimental` | `planned`), `cpu_mode`, `capabilities`, `limitations`, `evidence`. A planned platform lists no capability and has `cpu_mode` `none`.
 * `games[]`: `id`, `platform`, `title`, `edition` (or `null` when unknown), `execution_level`, `evidence[]` (`category`, `scope`, `refs`), `build_mode` (`compatibility` | `optimized` | `file_first_structural` | `unknown`),
   `input` (`original`; a patched run is a `patch_packages` entry), `blockers`, `untested`, and `unknown_conditions` for human reports whose conditions were not recorded.
-* `patch_packages[]`: game-specific `.segapatch` packages. Their `distribution` is `private_harness_only` unless a package is actually attached to a release; the gate refuses `release` until a release asset is recorded.
+* `patch_packages[]`: game-specific `.segapatch` packages. Their `distribution` is `maintained_outside_repository` unless a package is actually attached to a release; the gate refuses `release` until a release asset is recorded.
   Each entry states what it provides, whether it changes gameplay, the validated scope and what was not tested.
 * `features[]`: optional product features with `status` (`implemented` | `partial` | `experimental`), `released_in` (the latest published release, or `null` when the feature exists only on `main`) and `available_on_main`.
 

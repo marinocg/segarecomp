@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for tools/check_product_truth.py: the real tree is clean and each rule rejects its own malformed fixture.
 
-Public files only: no network, no private harness, no commercial image.
+Public files only: no network, no external repository, no commercial image.
 """
 import copy
 import importlib.util
@@ -123,7 +123,7 @@ class DocumentRulesTest(unittest.TestCase):
             "d.md": "No sound is available for Sega CD.",
             "e.md": "a second title has only **experimental observations**",
             "f.md": "| [Master System](master-system/README.md) | no | none |",
-            "g.md": "See /root/dev/segarecomp-harness/patches",
+            "g.md": "See /home/user/private/patches",
             "h.md": "A human run that was independently validated completion.",
         }
         problems = gate.check_forbidden(samples)
@@ -141,6 +141,14 @@ class DocumentRulesTest(unittest.TestCase):
             problems = gate.check_links(root, ("README.md",))
         self.assertEqual(len(problems), 2, problems)
         self.assertTrue(any("missing.md" in p for p in problems) and any("none.png" in p for p in problems))
+
+    def test_broken_anchor_and_traversal_link_are_found(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "README.md").write_text("# Real heading **(x)**\n[a](#real-heading-x) [b](#nope) [c](../../docs/x.md) [d](../../releases)\n", encoding="utf-8")
+            problems = gate.check_links(root, ("README.md",))
+        self.assertEqual(len(problems), 2, problems)
+        self.assertTrue(any("#nope" in p for p in problems) and any("x.md" in p for p in problems))
 
     def test_ledger_and_status_pages_must_agree(self):
         texts = {

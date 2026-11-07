@@ -272,7 +272,7 @@
         {
           "category": "reference_comparison",
           "scope": "frame-for-frame checkpoints against an independent reference at pre-registered points: BIOS boot, title, first and second START, first level, a timed RIGHT input, special-stage attract demo and intro; checkpoint evidence only",
-          "refs": ["ADR 0176", "ADR 0177"]
+          "refs": ["ADR 0176", "ADR 0177", "ADR 0249"]
         }
       ],
       "build_mode": "unknown",
@@ -310,10 +310,10 @@
     {
       "id": "sonic1-native-widescreen",
       "game": "Sonic the Hedgehog (Genesis)",
-      "revision": "REV00 (exact image by SHA-256 prefix 46160baa)",
+      "revision": "REV00 (exact image, matched by SHA-256)",
       "schema": 2,
       "kind": "native provider plus BPS that moves the original HUD off screen",
-      "distribution": "private_harness_only",
+      "distribution": "maintained_outside_repository",
       "provides": ["authored scenery reconstruction", "relocated original HUD"],
       "gameplay_changes": "none beyond HUD sprites no longer queued; the optional sonic1-native-widescreen-gameplay package (EXPERIMENTAL) also widens object activation, which changes gameplay and diverges from natural play",
       "validated_scope": "running levels of Green Hill, Labyrinth, Marble, Star Light, Spring Yard, Scrap Brain 1-2 and the Final Zone, along scripted routes; the special stage background is the VDP's own wrapped plane",
@@ -326,7 +326,7 @@
       "revision": "REV00 (World) and REV01 (JUE), each by its own exact image and package",
       "schema": 2,
       "kind": "native provider plus BPS; a presentation-only variant leaves game variables identical to Vanilla",
-      "distribution": "private_harness_only",
+      "distribution": "maintained_outside_repository",
       "provides": ["authored scenery reconstruction", "relocated original HUD", "actors across the widened picture (standard package only)"],
       "gameplay_changes": "the standard package widens actor coverage, which changes gameplay slightly (earlier enemy activation, longer-lived objects); the presentation-only package does not",
       "validated_scope": "single-player running levels and demo scenes of the campaign inventory; title, special stages, split-screen, bonus screens and other scenes are declined and shown by the generic path",
@@ -336,10 +336,10 @@
     {
       "id": "sonic3k-native-widescreen",
       "game": "Sonic 3 & Knuckles (lock-on composite)",
-      "revision": "4 MiB composite image (exact image by SHA-256 prefix fba0677f)",
+      "revision": "4 MiB composite image (exact image, matched by SHA-256)",
       "schema": 2,
       "kind": "native provider plus BPS; a presentation-only variant exists",
-      "distribution": "private_harness_only",
+      "distribution": "maintained_outside_repository",
       "provides": ["authored foreground scenery reconstruction", "background reconstruction on some acts and the VDP's own wrapped plane elsewhere", "relocated original HUD", "actors in the margins (standard package only)"],
       "gameplay_changes": "the standard package widens actor activation, which changes gameplay slightly; the presentation-only package changes only the HUD sprite position",
       "validated_scope": "partial campaign: the Sonic-route acts were swept with 97.7 to 100 percent of level frames accepted; bosses, act transitions, the ending, Knuckles and Tails-alone routes are not verified",
@@ -349,10 +349,10 @@
     {
       "id": "sor2-widescreen",
       "game": "Streets of Rage 2 (Genesis)",
-      "revision": "USA (exact image by SHA-256 prefix 4a314edb)",
+      "revision": "USA (exact image, matched by SHA-256)",
       "schema": 1,
       "kind": "data-only BPS that widens the game's sprite-piece submission window; uses generic Level 3 rendering",
-      "distribution": "private_harness_only",
+      "distribution": "maintained_outside_repository",
       "provides": ["additional sprite pieces and objects visible beside the native picture"],
       "gameplay_changes": "none intended; the native picture was identical to Vanilla in all sampled frames",
       "validated_scope": "stage 1 opening screens and the attract demo only",

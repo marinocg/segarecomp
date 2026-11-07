@@ -78,7 +78,7 @@ Details: [native patch SDK](native-patch-sdk.md), [patch packages](patch-package
 
 ## 3. Game-specific packages that exist today
 
-The product contains **no** game-specific widescreen code. The packages below are authored and maintained in the project's **private harness** and are **not distributed with any release**; their status is recorded in the ledger
+The product contains **no** game-specific widescreen code. The packages below are authored and maintained **outside this repository** and are **not distributed with any release**; their status is recorded in the ledger
 (`patch_packages`). Each is bound to one exact image.
 
 | Game | Package | Provides | Gameplay | Validated scope | Not validated |
@@ -93,7 +93,7 @@ command-line builds must pass `--mapper lock_on`. Modified, resized or unidentif
 
 ### Installing a verified patch
 
-See [From install to a patched game](../../README.md#install-a-verified-patch) in the README for the short walk-through.
+See [From install to a patched game](../../README.md#install-a-verified-patch-main-only-genesis) in the README for the short walk-through.
 
 ## 4. Writing your own provider
 
