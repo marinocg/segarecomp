@@ -82,7 +82,7 @@ static void perf_sleep(void *ctx, uint64_t ns) {
 
 static int perf_raster_producer(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster, GenesisFrameArtifact *out) {
   const uint64_t t = sv_perf_span_begin(&g_perf);
-  const int rc = genesis_vdp_produce_frame_raster(vram, raster, out);
+  const int rc = genesis_vdp_produce_frame_raster_undigested(vram, raster, out); /* SEG-127-T003: presentation never reads frame_digest */
   sv_perf_span_end(&g_perf, SV_SPAN_VDP_COMPOSE, t);
   return rc;
 }

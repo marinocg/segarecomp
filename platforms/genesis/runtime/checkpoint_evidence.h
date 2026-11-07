@@ -95,6 +95,7 @@ typedef struct GenesisFrameArtifact {
   uint16_t width;
   uint16_t height;
   uint16_t palette_count;
+  uint8_t digest_omitted; /* SEG-127-T003: 1 = produced without a digest (frame_digest is all-zero by design); 0 (the zero-init value) = digest present */
   uint8_t row_palette[GENESIS_FRAME_MAX_HEIGHT];
   uint8_t extra_palettes[GENESIS_FRAME_MAX_PALETTES - 1U][GENESIS_VDP_CRAM_BYTES];
 } GenesisFrameArtifact;

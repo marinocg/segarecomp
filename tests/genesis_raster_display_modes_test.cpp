@@ -806,6 +806,49 @@ void test_row_rgb888_matches_per_pixel_decode() {
   check(genesis_vdp_frame_row_rgb888(frame.get(), 0, out) == -1, "width beyond the maximum is rejected");
 }
 
+// ---- SEG-127-T003: the digest-free live producer renders identically and never exposes a digest ----------------------
+void test_undigested_producer_contract() {
+  Scene s;
+  base_scene(s, 0x81);  // H40
+  s.regs[7] = 0x02;
+  auto raster = std::make_unique<GenesisRasterFrameState>();
+  for (unsigned l = 0; l < 224U; ++l) {
+    std::memcpy(raster->lines[l].registers, s.regs, sizeof(s.regs));
+    std::memcpy(raster->lines[l].vsram, s.vsram, sizeof(s.vsram));
+    fill_cram(raster->lines[l].cram, l < 100U ? 0 : 1);  // two palettes: the non-legacy digest shape
+  }
+  auto with = make_frame(), without = make_frame();
+  std::memset(without.get(), 0xA5, sizeof(*without));  // stale garbage must never leak through
+  check(genesis_vdp_produce_frame_raster(s.vram.data(), raster.get(), with.get()) == 0, "digesting producer renders");
+  check(genesis_vdp_produce_frame_raster_undigested(s.vram.data(), raster.get(), without.get()) == 0, "undigested producer renders");
+  check(with->digest_omitted == 0U && genesis_frame_artifact_is_populated(with.get()), "the public producer still publishes a populated digest");
+  uint8_t expect[32];
+  genesis_vdp_frame_digest(with.get(), expect);
+  check(std::memcmp(expect, with->frame_digest, 32) == 0, "the public producer digest equals genesis_vdp_frame_digest");
+  static const uint8_t zero[32] = {};
+  check(without->digest_omitted == 1U && std::memcmp(without->frame_digest, zero, 32) == 0, "the undigested artifact has an explicit all-zero digest and says so");
+  check(genesis_frame_artifact_is_populated(without.get()), "an undigested frame counts as populated (the viewer presents it)");
+  const bool same = with->width == without->width && with->height == without->height && with->palette_count == without->palette_count &&
+                    std::memcmp(with->pixels, without->pixels, (size_t)with->width * with->height) == 0 &&
+                    std::memcmp(with->palette_snapshot, without->palette_snapshot, sizeof(with->palette_snapshot)) == 0 &&
+                    std::memcmp(with->row_palette, without->row_palette, sizeof(with->row_palette)) == 0 &&
+                    std::memcmp(with->extra_palettes, without->extra_palettes, sizeof(with->extra_palettes)) == 0;
+  check(same, "pixels, geometry and every palette are identical with and without the digest");
+  // Re-using one artifact: a digest-producing render after an undigested one restores the digest and clears the flag.
+  check(genesis_vdp_produce_frame_raster(s.vram.data(), raster.get(), without.get()) == 0 && without->digest_omitted == 0U &&
+            std::memcmp(without->frame_digest, expect, 32) == 0, "re-rendering with the digest restores it on a reused artifact");
+  // Failure: nothing published, same fail-closed behaviour.
+  for (unsigned l = 0; l < 224U; ++l) raster->lines[l].registers[12] = l < 100U ? 0x81 : 0x00;
+  auto untouched = make_frame();
+  std::memset(untouched.get(), 0x5A, sizeof(*untouched));
+  auto copy = make_frame();
+  std::memcpy(copy.get(), untouched.get(), sizeof(*untouched));
+  check(genesis_vdp_produce_frame_raster_undigested(s.vram.data(), raster.get(), untouched.get()) != 0 && std::memcmp(untouched.get(), copy.get(), sizeof(*untouched)) == 0,
+        "an undigested render that fails closed leaves the artifact untouched");
+  check(genesis_vdp_produce_frame_raster_undigested(nullptr, raster.get(), copy.get()) != 0 && genesis_vdp_produce_frame_raster_undigested(s.vram.data(), nullptr, copy.get()) != 0 &&
+            genesis_vdp_produce_frame_raster_undigested(s.vram.data(), raster.get(), nullptr) != 0, "NULL arguments are rejected");
+}
+
 // ---- runtime: scanline capture, H-interrupt, STOP -------------------------------------------------------------------
 constexpr uint32_t kRamBegin = 0x00FF0000u;
 
@@ -1438,6 +1481,7 @@ int main() {
   test_scanline_palette_switch();
   test_export_and_presentation_agree();
   test_row_rgb888_matches_per_pixel_decode();
+  test_undigested_producer_contract();
   test_runtime_captures_scanline_palette_and_virtual_frames();
   test_vram_written_during_active_display_is_scanline_resolved();
   test_h40_sprite_limit_boundaries();

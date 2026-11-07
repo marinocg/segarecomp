@@ -1090,7 +1090,7 @@ void genesis_vdp_frame_digest(const GenesisFrameArtifact *frame, uint8_t digest_
  * journal, or is NULL with `uniform` describing a single static state for every line (the legacy snapshot producer).
  * Validation happens entirely up front, so a failure leaves `*frame_out` untouched and a success is never partial. */
 static int genesis_vdp_render_frame(const uint8_t *vram, const GenesisRasterFrameState *raster,
-                                    const GenesisRasterLine *uniform, GenesisFrameArtifact *frame_out) {
+                                    const GenesisRasterLine *uniform, GenesisFrameArtifact *frame_out, int with_digest) {
   GenesisVdpRenderContext ctx;
   GenesisVdpDisplayGeometry first;
   unsigned slot_of_line[GENESIS_RASTER_MAX_LINES];
@@ -1157,7 +1157,15 @@ static int genesis_vdp_render_frame(const uint8_t *vram, const GenesisRasterFram
   frame_out->width = (uint16_t)first.width;
   frame_out->height = (uint16_t)first.height;
   frame_out->palette_count = (uint16_t)palette_count;
-  genesis_vdp_frame_digest(frame_out, frame_out->frame_digest);
+  if (with_digest) {
+    frame_out->digest_omitted = 0U;
+    genesis_vdp_frame_digest(frame_out, frame_out->frame_digest);
+  } else {
+    /* SEG-127-T003: the caller asked for a digest-free frame (live presentation). The digest field is explicitly zeroed (never stale,
+     * never uninitialized) and the artifact says so, which keeps genesis_frame_artifact_is_populated() true. */
+    frame_out->digest_omitted = 1U;
+    memset(frame_out->frame_digest, 0, sizeof(frame_out->frame_digest));
+  }
   return 0;
 }
 
@@ -1166,7 +1174,15 @@ int genesis_vdp_produce_frame_raster(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
   if (vram == NULL || raster == NULL || frame_out == NULL) {
     return -1;
   }
-  return genesis_vdp_render_frame(vram, raster, NULL, frame_out);
+  return genesis_vdp_render_frame(vram, raster, NULL, frame_out, 1);
+}
+
+int genesis_vdp_produce_frame_raster_undigested(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
+                                                const GenesisRasterFrameState *raster, GenesisFrameArtifact *frame_out) {
+  if (vram == NULL || raster == NULL || frame_out == NULL) {
+    return -1;
+  }
+  return genesis_vdp_render_frame(vram, raster, NULL, frame_out, 0);
 }
 
 int genesis_vdp_produce_frame(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
@@ -1181,7 +1197,7 @@ int genesis_vdp_produce_frame(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
   memcpy(uniform.registers, registers, sizeof(uniform.registers));
   memcpy(uniform.cram, cram, sizeof(uniform.cram));
   memcpy(uniform.vsram, vsram, sizeof(uniform.vsram));
-  return genesis_vdp_render_frame(vram, NULL, &uniform, frame_out);
+  return genesis_vdp_render_frame(vram, NULL, &uniform, frame_out, 1);
 }
 
 /* --- SEG-118 (ADR 0262): Level 2 extended backgrounds. Presentation only: reads the same raster state/VRAM journal the native render used and the

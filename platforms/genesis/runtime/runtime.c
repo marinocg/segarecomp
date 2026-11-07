@@ -3759,7 +3759,8 @@ static int genesis_checkpoint_identity_is_valid(const GenesisCheckpointIdentity 
  * check. */
 int genesis_frame_artifact_is_populated(const GenesisFrameArtifact *frame) {
   static const uint8_t zero_digest[sizeof(frame->frame_digest)] = {0};
-  return memcmp(frame->frame_digest, zero_digest, sizeof(zero_digest)) != 0;
+  /* SEG-127-T003: a digest-free live frame (digest_omitted) was genuinely produced; its digest is zero by design. */
+  return frame->digest_omitted != 0U || memcmp(frame->frame_digest, zero_digest, sizeof(zero_digest)) != 0;
 }
 
 int genesis_write_checkpoint_evidence_summary(const GenesisCheckpointEvidenceBundle *bundle,
