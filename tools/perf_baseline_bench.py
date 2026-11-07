@@ -200,10 +200,11 @@ def cmd_runtime(args):
     for spec, opt in ((s, o) for s in args.image for o in args.opt_levels):   # opt "G" or "G/R": --optimize G [--runtime-optimize R]
         base_label, rest = spec.split("=", 1)
         label = f"{base_label}-O{opt.replace('/', '-R')}"
+        rest, _, root_override = rest.partition("@")   # LABEL=PATH[:platform][@PRODUCT_ROOT]: build this variant from another checkout (A/B of a runtime change)
         path, _, plat = rest.partition(":")
         plat = plat or "genesis"
         args.runtime_images.append(label)
-        rd = args.root / "platforms" / ("master-system" if plat == "master-system" else "genesis")
+        rd = pathlib.Path(root_override or args.root) / "platforms" / ("master-system" if plat == "master-system" else "genesis")
         for kind in ("headless", "viewer"):
             out = tmp / f"{label}-{kind}"
             g, _, rt = opt.partition("/")
@@ -244,7 +245,7 @@ def main():
         p.add_argument("--cli", type=pathlib.Path, required=True)
         p.add_argument("--root", type=pathlib.Path, required=True)
         p.add_argument("--cc", default="cc")
-        p.add_argument("--image", action="append", default=[], help="LABEL=PATH[:master-system]")
+        p.add_argument("--image", action="append", default=[], help="LABEL=PATH[:master-system][@PRODUCT_ROOT]")
         p.add_argument("--reps", type=int, default=5)
         p.add_argument("--jobs", type=int, default=8)
         p.add_argument("--variant", action="append")

@@ -837,13 +837,6 @@ static GenesisVdpCandidatePixel genesis_vdp_plane_candidate_from_word(const Gene
   return genesis_vdp_fetch_cell_pixel(ctx, genesis_vdp_decode_nametable_word(word), plane_x % GENESIS_VDP_TILE_WIDTH, plane_y % ctx->geometry.cell_height);
 }
 
-/* Plane A or B candidate at (x, row) from the plane's per-row constants. */
-static GenesisVdpCandidatePixel genesis_vdp_plane_candidate(const GenesisVdpRenderContext *ctx,
-                                                            const GenesisVdpRowPlane *plane, unsigned x,
-                                                            unsigned row) {
-  return genesis_vdp_plane_candidate_at(ctx, plane, (int64_t)x, plane->per_column ? x / 16U : 0U, row);
-}
-
 /* The sprites that reach one output row, with the hardware per-line limits (H40: 20 sprites / 40 cells; H32: 16 / 32)
  * applied in list order, written as the first-opaque-wins sprite candidate of every x. See the Sprite-limit citation
  * in vdp_render.h.
@@ -929,6 +922,74 @@ static unsigned genesis_vdp_select_cram_index(const GenesisVdpCandidatePixel *pl
   return backdrop;
 }
 
+/* SEG-126 (ADR 0274): the plane A/B pixel of the native row composer, evaluated per nametable CELL instead of per pixel. The nametable entry, its decode and the
+ * start address of the tile row change only when the plane column crosses a cell boundary (or the 2-cell vertical-scroll group changes), so they are fetched once
+ * per run; every pixel then costs one pattern-byte read. The result for each pixel is the one `genesis_vdp_plane_candidate` computes (same wrap, flip, mask and
+ * nibble rules), which the extension producer and the unit tests still use per pixel. */
+typedef struct GenesisVdpPlaneRun {
+  const GenesisVdpRowPlane *plane;
+  unsigned start;       /* plane_x of screen column 0: wrap(-hscroll) */
+  unsigned cell_col;    /* cached plane cell column, valid when `valid` */
+  unsigned group;       /* cached vertical-scroll group */
+  unsigned cell_row;
+  unsigned tile_y;
+  uint32_t row_base;    /* pre-mask byte address of the cached tile row (before the h_flip nibble offset) */
+  uint8_t priority;
+  uint8_t palette;
+  uint8_t h_flip;
+  int valid;
+} GenesisVdpPlaneRun;
+
+static void genesis_vdp_plane_run_init(GenesisVdpPlaneRun *run, const GenesisVdpRowPlane *plane) {
+  run->plane = plane;
+  run->start = genesis_vdp_wrap_coordinate(-(int64_t)plane->hscroll, plane->width_px);
+  run->valid = 0;
+}
+
+static GenesisVdpCandidatePixel genesis_vdp_plane_run_pixel(const GenesisVdpRenderContext *ctx, GenesisVdpPlaneRun *run, unsigned x, unsigned row) {
+  const GenesisVdpRowPlane *plane = run->plane;
+  const unsigned width_px = plane->width_px;
+  const unsigned cell_h = ctx->geometry.cell_height;
+  unsigned plane_x = run->start + x;
+  const unsigned group = plane->per_column ? (x / 16U) : 0U;
+  GenesisVdpCandidatePixel candidate;
+  unsigned tile_x;
+  uint8_t byte_value;
+  uint8_t pattern;
+  while (plane_x >= width_px) plane_x -= width_px;
+  if (!run->valid || run->group != group || run->cell_col != plane_x / GENESIS_VDP_TILE_WIDTH) {
+    unsigned cell_col = plane_x / GENESIS_VDP_TILE_WIDTH;
+    if (!run->valid || run->group != group) {
+      const int32_t vscroll = plane->vscroll[group < GENESIS_VDP_VSRAM_GROUP_COUNT ? group : 0U];
+      const unsigned plane_y = genesis_vdp_plane_y(row, vscroll, plane->height_px);
+      run->cell_row = plane_y / cell_h;
+      run->tile_y = plane_y % cell_h;
+      run->group = group;
+    }
+    {
+      const uint32_t addr = plane->base + ((uint32_t)run->cell_row * plane->width_cells + cell_col) * 2U;
+      const GenesisVdpNametableEntry entry = genesis_vdp_decode_nametable_word((uint16_t)genesis_vdp_be16(ctx->vram, addr));
+      const unsigned tile_y = entry.v_flip ? cell_h - 1U - run->tile_y : run->tile_y;
+      const uint32_t tile_bytes = ctx->geometry.im2 ? 2U * GENESIS_VDP_TILE_BYTES : GENESIS_VDP_TILE_BYTES;
+      run->row_base = (uint32_t)entry.tile_index * tile_bytes + tile_y * 4U;
+      run->priority = entry.priority;
+      run->palette = entry.palette;
+      run->h_flip = entry.h_flip;
+    }
+    run->cell_col = cell_col;
+    run->valid = 1;
+  }
+  tile_x = plane_x % GENESIS_VDP_TILE_WIDTH;
+  if (run->h_flip) tile_x = GENESIS_VDP_TILE_WIDTH - 1U - tile_x;
+  byte_value = ctx->vram[(run->row_base + tile_x / 2U) & (GENESIS_VDP_VRAM_BYTES - 1U)];
+  pattern = (tile_x % 2U == 0U) ? (uint8_t)(byte_value >> 4) : (uint8_t)(byte_value & 0x0FU);
+  candidate.opaque = (uint8_t)(pattern != GENESIS_VDP_TRANSPARENT_PALETTE_INDEX);
+  candidate.priority = run->priority;
+  candidate.palette = run->palette;
+  candidate.index = pattern;
+  return candidate;
+}
+
 /* Renders one output row of CRAM indices from the scanline state `line`. The state must have passed
  * genesis_vdp_validate_line. */
 static void genesis_vdp_render_row(const GenesisVdpRenderContext *ctx, const GenesisRasterLine *line, unsigned row,
@@ -941,7 +1002,11 @@ static void genesis_vdp_render_row(const GenesisVdpRenderContext *ctx, const Gen
   (void)genesis_vdp_backdrop_cram_index(line->registers, &backdrop);
   genesis_vdp_prepare_row_plane(ctx, line, GENESIS_VDP_PLANE_A, row, &plane_a_state);
   genesis_vdp_prepare_row_plane(ctx, line, GENESIS_VDP_PLANE_B, row, &plane_b_state);
+  GenesisVdpPlaneRun run_a;
+  GenesisVdpPlaneRun run_b;
   (void)genesis_vdp_build_sprite_row(ctx, line, row, 0, width, sprites);
+  genesis_vdp_plane_run_init(&run_a, &plane_a_state);
+  genesis_vdp_plane_run_init(&run_b, &plane_b_state);
   for (unsigned x = 0U; x < width; ++x) {
     GenesisVdpCandidatePixel plane_a;
     GenesisVdpCandidatePixel plane_b;
@@ -953,9 +1018,9 @@ static void genesis_vdp_render_row(const GenesisVdpRenderContext *ctx, const Gen
       plane_a = genesis_vdp_fetch_cell_pixel(ctx, genesis_vdp_window_entry(ctx, line->registers, x, row),
                                              x % GENESIS_VDP_TILE_WIDTH, row % ctx->geometry.cell_height);
     } else {
-      plane_a = genesis_vdp_plane_candidate(ctx, &plane_a_state, x, row);
+      plane_a = genesis_vdp_plane_run_pixel(ctx, &run_a, x, row);
     }
-    plane_b = genesis_vdp_plane_candidate(ctx, &plane_b_state, x, row);
+    plane_b = genesis_vdp_plane_run_pixel(ctx, &run_b, x, row);
     pixels_out[x] = (uint8_t)genesis_vdp_select_cram_index(&plane_a, &plane_b, &sprites[x], backdrop);
   }
 }
