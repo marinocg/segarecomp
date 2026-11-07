@@ -946,7 +946,13 @@ static void genesis_vdp_plane_run_init(GenesisVdpPlaneRun *run, const GenesisVdp
   run->valid = 0;
 }
 
-static GenesisVdpCandidatePixel genesis_vdp_plane_run_pixel(const GenesisVdpRenderContext *ctx, GenesisVdpPlaneRun *run, unsigned x, unsigned row) {
+/* SEG-127-T007: the per-pixel row-composer helpers are tiny and called twice per pixel; the compiler left plane_run_pixel out of line (struct-returning call per pixel). */
+#if defined(__GNUC__) || defined(__clang__)
+#define GENESIS_VDP_HOT static inline __attribute__((always_inline))
+#else
+#define GENESIS_VDP_HOT static inline
+#endif
+GENESIS_VDP_HOT GenesisVdpCandidatePixel genesis_vdp_plane_run_pixel(const GenesisVdpRenderContext *ctx, GenesisVdpPlaneRun *run, unsigned x, unsigned row) {
   const GenesisVdpRowPlane *plane = run->plane;
   const unsigned width_px = plane->width_px;
   const unsigned cell_h = ctx->geometry.cell_height;
