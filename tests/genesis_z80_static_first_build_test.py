@@ -11,7 +11,7 @@ runs), and only where the producer proved something. Groups (separate CTest entr
                 Kosinski-compressed driver, a Kosinski driver; exactly ONE Z80 compilation generation, one discovery run, the verification run;
                 a partial proof (A proven, a computed B refused): the materializer discovers B, order preserved
   fallback      predictions the verification run contradicts (an image never activated inside the observation window, a region-gated upload
-                the observation never reaches, an image first activated after an isolated sound CPU) fall back to the unchanged fixed point
+                the observation never reaches, a structural Z80 mutation, whose static snapshot cannot be verified outside the written extents) fall back to the unchanged fixed point
                 with a typed reason; refused shapes (unknown length/pointer, beyond-RAM output, unrecognised decompressor, a valid stream that is
                 not executable authority, computed upload) leave the fixed point untouched; a structural Z80 mutation keeps its typed degraded
                 audio outcome
@@ -88,7 +88,7 @@ EQUIVALENCE = {
 FALLBACK = {
     "sound_late_epoch": ("complete", "image_never_activated"),                         # the second driver is uploaded after the window
     "sound_domestic_gated_overseas_header": ("complete", "image_never_activated"),     # the region-gated upload is not reached as USA
-    "sound_smc_fault": ("complete", "image_after_sound_fault"),                        # the second epoch is after the sound CPU was isolated
+    "sound_smc_fault": ("complete", "sound_fault_requires_observed_registry"),    # an isolated sound CPU is only verifiable against the observed registry
     "static_kos_unrecognised": ("none", "none"),                                       # unrecognised decompressor: nothing proven, nothing changed
     "static_kos_staged_clobbered": ("none", "none"),                                   # the staged buffer is not a proven source after an unresolved store
     "static_ram_source": ("none", "none"),
@@ -97,7 +97,7 @@ FALLBACK = {
     "static_kos_beyond_ram": ("none", "none"),
     "sound_decoded": ("partial", "none"),                                              # computed upload of the same bytes: same signature
     "static_kos_work_ram": ("complete", "none"),                                       # a valid stream in WORK RAM is not executable authority
-    "sound_smc": ("complete", "none"),                                                 # structural mutation keeps its typed degraded outcome
+    "sound_smc": ("complete", "sound_fault_requires_observed_registry"),                # structural mutation: legacy registry is the reference; typed degraded outcome kept
 }
 
 

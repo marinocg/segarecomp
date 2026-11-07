@@ -32,8 +32,8 @@ immutable cartridge bytes. Goal: for fully provable cases one Z80 compilation ge
    *format-and-loader-contract* recognition (the digest identifies an algorithm used by many titles, not a title); it is deliberately a closed,
    two-entry catalogue, not a signature scanner, and adding a form requires evidence of use as a Z80 loader.
 5. **The prediction is verified by the existing machinery, and a contradiction is never absorbed.** The first fixed point runs with the preloaded
-   registry. The confirming run must activate exactly the registered images in registered order and (sound-fault rule) no image after an isolated
-   sound CPU; otherwise the static registry is discarded and the unchanged fixed point runs (`z80.static.fallback` names the reason). The
+   registry. The confirming run must activate exactly the registered images in registered order and did not isolate the sound CPU (carry-over bytes a Z80 wrote
+   can only be judged against an observed snapshot); otherwise the static registry is discarded and the unchanged fixed point runs (`z80.static.fallback` names the reason). The
    production is therefore never the *only* route, `--z80-static 0|1` selects it, and a wrong prediction costs work, never correctness.
 6. **Provenance is explicit.** Static images are `static_proof` / `genesis.z80_static_producer` with evidence `derivation=static_reconstruction`
    and `proof=rom_stores|rom_copy|kosinski`; they never claim `runnable_epoch_snapshot`. `registries_equal` stays strict; the new

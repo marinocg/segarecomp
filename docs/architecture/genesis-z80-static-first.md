@@ -100,11 +100,11 @@ fixed before the measurements, the context bound was raised once from 24 to 64 a
 
 The static registry is a *prediction*. After the first fixed point the build requires: the confirmed run activated exactly the registry's images
 (no registered image unactivated, none unregistered), in the registry's ordinal order (first activation, restarts of a bound image excluded), and
-no registered image is first activated after an isolated sound CPU's fault epoch. Otherwise (and when the pass fails for any reason other than a
+the run did not isolate the sound CPU (a structural fault is verifiable only against the observed registry: the static snapshot may differ from the observed one outside the written extents, which the signature cannot see). Otherwise (and when the pass fails for any reason other than a
 compile failure or an exhausted budget) the build logs `z80 static CONTRADICTED ... (<class>)`, replaces the registry with an empty one and runs the
 unchanged fixed point; `status.json` records `z80.static.fallback`. A genuinely nondeterministic input still ends in the typed
 `materialization_nondeterministic` failure of the legacy path. Later M68K alias-preparation rounds are unchanged: they re-run the fixed point on
-the same registry, so the registry is re-validated against every modified executable path.
+the same registry (the existing runtime guard and unknown-image detection apply to every modified executable path; the static contradiction check itself runs once, on the first fixed point).
 
 ## Provenance and identity
 

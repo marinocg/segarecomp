@@ -772,7 +772,8 @@ class Walker {
           const bool stack = (op.destination_ea.reg & 7U) == 7U &&
                              (op.destination_ea.mode == M68kEaMode::address_predec || op.destination_ea.mode == M68kEaMode::address_indirect);
           const auto at = address_of(r, op.destination_ea, w);
-          touch(c, at, 64U, stack);
+          if (!stack) c.stage.clear();  // a block store extends below a predecrement address: any non-stack MOVEM may reach the staged buffer
+          else touch(c, at, 64U, stack);
           if (at && *at >= kZ80Ram && *at < kZ80Window && c.busreq != 0U) { refuse(StaticRefusal::z80_store_form_unsupported); return; }
           if (!at && !stack && c.busreq != 0U) { refuse(StaticRefusal::z80_store_unknown_address); return; }
           if (at && *at >= kIoBegin && *at < kIoEnd) c.io_written = 1;
@@ -800,7 +801,20 @@ class Walker {
         break;
       }
       case M68kIrKind::no_operation: break;
-      case M68kIrKind::write_status_register: case M68kIrKind::read_status_register: case M68kIrKind::logical_immediate_to_sr:
+      case M68kIrKind::read_status_register:
+        if (is_memory(op.destination_ea)) {  // MOVE SR,<ea>: a word store the walk does not model
+          const bool stack = (op.destination_ea.reg & 7U) == 7U && op.destination_ea.mode != M68kEaMode::absolute_long &&
+                             op.destination_ea.mode != M68kEaMode::absolute_word;
+          const auto at = address_of(r, op.destination_ea, Width::word);
+          touch(c, at, 2U, stack);
+          if ((at && ((*at >= kZ80Ram && *at < kZ80Window) || (*at >= kBusRegionBegin && *at < kBusRegionEnd)) && c.busreq != 0U) ||
+              (!at && !stack && c.busreq != 0U)) {
+            refuse(StaticRefusal::z80_store_form_unsupported);
+            return;
+          }
+        }
+        break;
+      case M68kIrKind::write_status_register: case M68kIrKind::logical_immediate_to_sr:
       case M68kIrKind::logical_immediate_to_ccr: case M68kIrKind::write_user_stack_pointer: case M68kIrKind::read_user_stack_pointer:
         if (op.kind == M68kIrKind::logical_immediate_to_ccr || op.kind == M68kIrKind::write_status_register || op.kind == M68kIrKind::logical_immediate_to_sr)
           r.f = Flags{};
