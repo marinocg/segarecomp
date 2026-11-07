@@ -50,7 +50,7 @@ immutable cartridge bytes. Goal: for fully provable cases one Z80 compilation ge
   program never produces). Outside an open window, forks are explored and traces are reconciled by the common-prefix rule.
 * Wrong or unreachable predictions cannot reach the output: an epoch with a different content has a different activation signature, so the
   runtime reports it as unknown to the preloaded registry and the fixed point registers it; a predicted image that never activates, a different
-  order, or an image after a sound fault is detected by the build and discarded.
+  order, or an isolated sound CPU is detected by the build and discarded.
 * What is *not* proved and is therefore delegated to the existing guard: Z80-written carry-over bytes (the structural RAM-backed guard compares the
   executed code bytes at run time, as for observed images), asynchronous interrupt effects (any resulting difference is an activation difference,
   detected by the verifier).
