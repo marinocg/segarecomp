@@ -123,6 +123,10 @@ Sn76489WriteResult sn76489_write(Sn76489 *chip, uint8_t value);
 uint32_t sn76489_level(const Sn76489 *chip);
 /* Canonical little-endian state serialization for digests. */
 void sn76489_state_bytes(const Sn76489 *chip, uint8_t out[SN76489_STATE_BYTES]);
+/* SEG-131: the inverse of sn76489_state_bytes (save states and rewind). Returns non-zero and leaves the chip untouched when a value is outside what the chip can hold
+ * (period/counter > 10 bits, attenuation > 15, noise control > 7, a flag > 1, an LFSR wider than the configured width, a latch outside -1..7). The configuration
+ * (taps, width, divider, levels) is not part of the image: it stays the chip's own. */
+int sn76489_load_state_bytes(Sn76489 *chip, const uint8_t in[SN76489_STATE_BYTES]);
 
 /* ---- consumer ring -------------------------------------------------------------------------------------------- */
 
