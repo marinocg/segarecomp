@@ -58,7 +58,7 @@
 - Replaying inputs from power-on or deriving chip state from register-write history: not byte-exact and not bounded.
 - Committing cartridge saves on any exit 0: a budget or typed-stop exit would overwrite progress with an uncertain machine state.
 - Storing player data under the build hash: a rebuild or cache cleanup would lose it.
-- Delta/compressed rewind and a capture thread: measured unnecessary (a snapshot is ~150 KB and ~0.4 ms; a full minute is ~21 MiB; overhead ~1.2 %).
+- Delta/compressed rewind and a capture thread: measured unnecessary (a snapshot is ~150 KB and ~0.4 ms; a full minute is ~21 MiB; overhead a few percent at most, within run-to-run noise).
 - Authenticating states (signing): states are the player's own data, like a save; integrity (SHA-256) and value validation are the contract.
 
 ## Consequences and limitations

@@ -502,6 +502,9 @@ def main():
             "Z80 cycle base at an extreme": [("Z80", 47 + 7, 0xFF)],
             "YM sample count at an extreme": [("AUDIO", 82 + 7, 0xFF)],
             "PSG tick count at an extreme": [("PSG", 26 + 7, 0xFF)],
+            "YM clock prescale zeroed (ymfm blob)": [("YM", 48 + 10, 0x06)],
+            "YM chip clock far behind the guest clock": [("YM", 0 + 5, 0x40)],
+            "mixer window far from its watermark": [("MIXER", 0 + 5, 0x40)],
             "raster next_line_tick off its invariant": [("IO", 8242, 0x01)],
             "raster last_line at an extreme": [("IO", 8234 + 7, 0x7F)],
         }

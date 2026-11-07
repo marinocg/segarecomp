@@ -84,7 +84,7 @@ In the library folder (the same place as your library and settings: `SEGARECOMP_
 ## Rewind: limits and battery memory
 
 * By default a snapshot is taken every **500 ms of game time**, up to **60 seconds** back (about 120 moments), using at most **96 MiB**; the oldest moments are dropped first. On the synthetic workload measured for
-  this feature, a snapshot is about 150-180 KB (182,509 bytes for a patched Sonic the Hedgehog), so 120 moments are about **22 MiB** (measured 21.9 MiB on the synthetic workload); a game with larger cartridge memory needs more. If the memory limit is what bounds the history, the
+  this feature, a snapshot is about 150-180 KB (182,509 bytes for a patched Sonic the Hedgehog), so 120 moments are about **22 MiB** (measured 20.9 MiB on the synthetic workload); a game with larger cartridge memory needs more. If the memory limit is what bounds the history, the
   rewind screen says how many seconds are really kept. If a single moment cannot fit the limit at all, rewind is switched off with the reason and the game is unaffected.
 * Rewinding restores the **cartridge memory as it was at that moment**, including SRAM and EEPROM, in the running game. Your game-save **files** change only when a session ends cleanly, so browsing, cancelling
   and rewinding never touch the disk.
@@ -122,7 +122,7 @@ On a synthetic generated-native 68000 + Z80 program (PSG, FM and DAC playing), L
 | Capture latency inside the viewer (snapshot + thumbnail), observed | mean 0.77 ms, worst 0.90 ms per snapshot (about 0.7 % of run time at two per second) |
 | Rewind then resume | a confirmed rewind restores once and the session runs on to a normal end (checked in `genesis_rewind_session_test`, `genesis_production_states_test` and by the perf tool) |
 | Real game: widescreen-patched Sonic the Hedgehog (native provider), 3,600 guest frames unthrottled, software renderer, 3 runs each (measured earlier with a 10 s cadence and a 500 ms cadence) | rewind off 17.9-19.8 s; rewind on 17.9-19.9 s (10 s) and 18.1-19.9 s (500 ms): no difference beyond run-to-run noise; state file 182,509 bytes, so 120 moments are about 21 MiB |
-| Opening the rewind surface (119 moments listed) | about one 16 ms frame |
+| Opening the rewind surface (about 120 moments listed) | about one 16 ms frame |
 | One surface frame while the preview switches (software renderer) | median 2.3 / 4.4 / 9.0 / 19.9 ms at 720x520 / 1080x740 / 1440x1040 / 2560x1440 (a GPU renderer is faster) |
 
 Reproduce: `tests/tools/genesis_rewind_harness.c` (`bench`), `tools/genesis_state_perf.py` and `sv_state_bench`.

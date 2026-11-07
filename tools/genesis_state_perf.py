@@ -77,6 +77,7 @@ def main():
       _, st = run("%d Q\n" % (seconds * 60), {})
       memory[str(seconds)] = {"moments": st["history_entries"], "bytes": st["history_bytes"], "captures": st["captures"], "evictions": st["evictions"]}
     _, rew = run("%d Y\n%d Q\n" % (frames // 2, frames), {})
+    assert rew["restores"] == 1, rew
     wall_off = [w for w, _ in off]
     wall_on = [w for w, _ in on]
     stats_on = [st for _, st in on]
@@ -90,7 +91,7 @@ def main():
         "snapshots_taken_per_run_observed": [st["captures"] for st in stats_on],
         "capture_latency_ms_observed": {"mean": round(sum(st["capture_ns_total"] for st in stats_on) / max(caps, 1) / 1e6, 3), "worst": round(max(st["capture_ns_max"] for st in stats_on) / 1e6, 3)},
         "history_memory_observed": memory,
-        "resume_after_rewind": {"restores": rew["restores"], "completed_to_quit": True, "note": "Y = open the rewind surface, go back two moments, confirm, at guest frame %d; the session then ran on to frame %d and ended normally" % (frames // 2, frames)},
+        "resume_after_rewind": {"restores": rew["restores"], "note": "Y = open the rewind surface, go back two moments, confirm, at guest frame %d; the session then ran on to frame %d and ended normally" % (frames // 2, frames)},
     }, indent=2))
   return 0
 

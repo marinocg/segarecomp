@@ -422,6 +422,7 @@ static GenesisSnapshotStatus get_z80(Reader *r, GenesisZ80Machine *m) {
       s->int_line > 1U || s->nmi_pending > 1U || s->nmi_reject > 1U)
     return GENESIS_SNAPSHOT_INVALID_STATE;
   if (!ordinal_of_hash(bound, &m->bound_ordinal) || !ordinal_of_hash(last, &m->last_bound)) return GENESIS_SNAPSHOT_IMAGE_MISSING;
+  if (fault > 255U || (fault != 0U && !all_zero(bound, 32U))) return GENESIS_SNAPSHOT_INVALID_STATE;   /* a faulted sound CPU has no bound image */
   m->sound_fault = (GenesisDiagnosticCategory)fault;
   m->view_stop = (GenesisDiagnosticCategory)0;
   s->deadline = 0U;
@@ -904,7 +905,17 @@ static GenesisSnapshotStatus restore_impl(const GenesisSnapshotMachine *machine,
       if (runnable && master > slack + base && cycles < (master - slack - base) / GENESIS_Z80_CLOCK_DIVIDER) goto done;
       if (ym > (master + slack) / YM2612_MASTER_TICKS_PER_SAMPLE || (master > slack && ym < (master - slack) / YM2612_MASTER_TICKS_PER_SAMPLE)) goto done;
       if (psg > (master + slack) / GENESIS_MIXER_PSG_TICK_MASTER || (master > slack && psg < (master - slack) / GENESIS_MIXER_PSG_TICK_MASTER)) goto done;
-      if (stage_audio->mixer.ym.watermark > master + slack || stage_audio->mixer.psg.watermark > master + slack) goto done;
+      {  /* the YM2612's own clock and every mixer source sit at the guest clock (within the slack) from BOTH sides: a far-behind clock would make the next catch-up run for ages */
+        const uint8_t *ymb = views[SEC_YM].data;
+        const uint64_t ym_now = le64(ymb), ym_chip_samples = le64(ymb + 40);
+        const GenesisMixerSource *src[2];
+        unsigned k;
+        if (ym_chip_samples != ym || ym_now > (master + slack) / YM2612_MASTER_TICKS_PER_CLOCK || (master > slack && ym_now < (master - slack) / YM2612_MASTER_TICKS_PER_CLOCK)) goto done;
+        src[0] = &stage_audio->mixer.ym;
+        src[1] = &stage_audio->mixer.psg;
+        for (k = 0U; k < 2U; ++k)
+          if (src[k]->watermark > master + slack || src[k]->watermark + slack < master || src[k]->window_end > src[k]->watermark + slack || src[k]->window_end + slack < src[k]->watermark) goto done;
+      }
     }
 #endif
   }

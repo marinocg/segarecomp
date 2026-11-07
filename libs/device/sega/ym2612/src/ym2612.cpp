@@ -169,6 +169,9 @@ int ym2612_check(const Ym2612 *chip, const uint8_t *in, uint32_t length) {
     scratch.chip.save_restore(state);
     const std::vector<uint8_t> again = chip_blob(&scratch);
     if (again.size() != static_cast<size_t>(length - YM2612_SNAPSHOT_HOST_BYTES)) return 4;
+    // Engine configuration that is not guest state (the clock prescale lives at blob offset 10) must equal the live chip's: a crafted 0 would make a timer re-arm at the same instant forever.
+    const std::vector<uint8_t> live = chip_blob(chip);
+    if (live.size() != again.size() || again[10] != live[10]) return 6;
     for (size_t i = 0; i < again.size(); ++i)
       if (again[i] != in[YM2612_SNAPSHOT_HOST_BYTES + i]) return 5;
   }
