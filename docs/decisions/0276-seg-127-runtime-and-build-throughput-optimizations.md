@@ -41,7 +41,7 @@ the isolated savings within noise (85.3 - 2.1 - 6.4 = 76.8). The T005 change add
 * RGB LUT: exact equality with the per-pixel decode over seven shapes (H32/H40, interlace, 1-256 palettes, mid-frame slot changes, random palettes/indices) and the invalid-input
   behavior (index >= 64, row, slot, width, NULL) - `genesis_raster_display_modes_tests`.
 * Digest-free producer: public digest still equals `genesis_vdp_frame_digest`; undigested artifact has an explicit all-zero digest and `digest_omitted`, no stale bytes, same pixels/
-  geometry/palettes, fail-closed untouched, NULL rejected; capture, coverage, Sega CD, evidence and export keep the digest-producing functions.
+  geometry/palettes, fail-closed untouched, NULL rejected; capture, coverage, Sega CD, evidence and export keep the digest-producing functions. `genesis_write_checkpoint_evidence_summary` additionally requires `digest_omitted == 0`, so a digest-free artifact can never be checkpoint evidence even when a caller claims every category matched (regression test in `genesis_checkpoint_evidence_runtime_test.py`: zero-digest + `digest_omitted` + lying caller = `fail`, a genuinely digested frame = `pass`; mutation-verified).
 * Stable Z80 layout: 8 of 8 owner units recur byte-identically in a larger registry (0 of 8 with the option off); the sorted-line multiset of all generated Z80 C is identical to
   the baseline (11,408,886 bytes), identical `status.json` z80 block (images, epochs, runs, frames), and the Z80 build-pipeline, owner-group differential/mutation and registry tests pass.
 * M68K scaffold: 64 captured frames over 30 M dispatches, sound summary, stop class and exit code identical to the baseline (twice: T004+T005 build, and final vs baseline);
