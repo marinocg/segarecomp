@@ -2376,12 +2376,11 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
     out << ", runtime->pc, &frontier);\n"
         << "  }\n";
   }
-  out << "  { const uint32_t m68k_retirement_pc = runtime->pc; GenesisControlTransfer retired = "
-      << retire_call_open(address, entry.decoded.provenance.length.value, entry.operation.kind);
+  // SEG-127-T005: the terminal retirement of an entry returns the retired transfer on every path, so the former
+  // `if (retired...) return retired; return retired;` scaffolding was a no-op: return the call directly (smaller C, no struct copy).
+  out << "  return " << retire_call_open(address, entry.decoded.provenance.length.value, entry.operation.kind);
   out << *cycle_expression;
-  out << ", runtime->pc);\n"
-      << "    if (retired.kind != GENESIS_CONTINUE_AT_PC || retired.next_pc != m68k_retirement_pc) return retired;\n"
-      << "    return retired;\n  }\n";
+  out << ", runtime->pc);\n";
   if (factoring.source_symbol.empty()) out << "}\n";
   return out.str();
 }
