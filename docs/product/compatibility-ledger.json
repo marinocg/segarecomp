@@ -477,7 +477,7 @@
       "released_in": "v0.7.0",
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "launcher_sega_cd_save_test and backup-RAM unit tests", "refs": ["docs/product/launcher-library.md", "ADR 0253"]}
+        {"category": "synthetic_implementation_tests", "scope": "launcher_sega_cd_save_test and backup-RAM unit tests", "refs": ["docs/product/launcher-library.md", "ADR 0252"]}
       ],
       "limitations": ["internal 8 KiB backup RAM only; no RAM cartridge; the save workflow of any specific title is not claimed"]
     },
