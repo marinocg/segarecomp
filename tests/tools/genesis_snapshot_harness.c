@@ -173,6 +173,9 @@ int main(int argc, char **argv) {
       const GenesisSnapshotMachine m = snap_machine();
       const GenesisSnapshotStatus st = genesis_snapshot_restore(&m, &identity, slots[a % SLOTS].data, slots[a % SLOTS].size);
       printf("RESTORE %lu %d\n", a, (int)st);
+    } else if (strcmp(op, "validate") == 0) {
+      const GenesisSnapshotMachine m = snap_machine();
+      printf("VALIDATE %lu %d\n", a, (int)genesis_snapshot_validate(&m, &identity, slots[a % SLOTS].data, slots[a % SLOTS].size, NULL));
     } else if (strcmp(op, "eq") == 0) {
       const GenesisSnapshotBuffer *x = &slots[a % SLOTS], *y = &slots[b % SLOTS];
       printf("%s\n", x->size == y->size && x->size != 0U && memcmp(x->data, y->data, x->size) == 0 ? "EQ" : "NE");

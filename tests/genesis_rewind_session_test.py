@@ -68,6 +68,18 @@ def main():
     r, c = run("30 Y\n31 Y\n40 Q\n")
     check(c is not None and c < b, "rewinding twice goes back further (the new branch has its own history)")
 
+    # the SHIPPED defaults (nothing overridden): moments are closely spaced (500 ms of guest time), so a rewind a couple of seconds into the game has real history to go back to
+    for clock in (40, 130):
+      r, x[clock] = run("%d Q\n" % clock)
+    r = pt.session(counter, None, work, script_text="120 Y\n130 Q\n", extra_env={"SEGARECOMP_REWIND_INTERVAL_MS": ""})[0]
+    full = work / "full.json"
+    d = gs.counter_of(full)
+    stats = json.loads(next(l for l in r.stderr.splitlines() if l.startswith("VIEWER_REWIND_STATS ")).split(" ", 1)[1])
+    ev = [json.loads(l.split(" ", 1)[1]) for l in r.stderr.splitlines() if l.startswith("VIEWER_STATE")]
+    check(stats["captures"] >= 3 and ev and ev[0]["event"] == "rewind" and ev[0]["status"] == "ok",
+          "default policy: %d snapshots in the first ~2 s of guest time and a rewind at frame 120 restores one: %s" % (stats["captures"], ev))
+    check(x[40] < d < x[130], "the default rewind goes back only a second or two (counter %s between %s and %s)" % (d, x[40], x[130]))
+
   print("%d failure(s)" % len(failures))
   return 1 if failures else 0
 

@@ -9,7 +9,7 @@ Design: [ADR 0278](../decisions/0278-genesis-save-states-persistence-and-rewind.
 | --- | --- | --- | --- |
 | **Game save** (battery memory) | the cartridge's own SRAM, or the 128-byte EEPROM of the cartridges that have one: what the game itself saves | automatically, when **you** end the session (Return to Launcher / Quit / close the window) | `cartridge.srm` / `cartridge.eep` |
 | **Save state** | a snapshot of the **whole machine**: CPU, memory, video, sound chips, the cartridge memory | only when you choose it: *Save State* in the pause menu, or **F5** | `states/quick.sgstate`, `states/slot-1.sgstate` ... `slot-5.sgstate` |
-| **Rewind** | the last ten minutes of play, kept **in memory only**, as pictures you can go back to | never written to disk | nowhere (it is gone when the game closes) |
+| **Rewind** | the last minute of play, kept **in memory only**, as pictures you can go back to | never written to disk | nowhere (it is gone when the game closes) |
 
 A save state is **not** the game's own save and does not replace it: a state also captures the position of the game, music and everything in flight, and loading it is always your explicit
 choice. **A state is never loaded when a game starts.**
@@ -83,8 +83,8 @@ In the library folder (the same place as your library and settings: `SEGARECOMP_
 
 ## Rewind: limits and battery memory
 
-* By default a snapshot is taken every **10 seconds of game time**, up to **10 minutes** back (60 moments), using at most **96 MiB**; the oldest moments are dropped first. On the synthetic workload measured for
-  this feature, a snapshot is about 150-180 KB (182,509 bytes for a patched Sonic the Hedgehog), so 60 moments are about **9-11 MiB**; a game with larger cartridge memory needs more. If the memory limit is what bounds the history, the
+* By default a snapshot is taken every **500 ms of game time**, up to **60 seconds** back (about 120 moments), using at most **96 MiB**; the oldest moments are dropped first. On the synthetic workload measured for
+  this feature, a snapshot is about 150-180 KB (182,509 bytes for a patched Sonic the Hedgehog), so 120 moments are about **22 MiB** (measured 21.9 MiB on the synthetic workload); a game with larger cartridge memory needs more. If the memory limit is what bounds the history, the
   rewind screen says how many seconds are really kept. If a single moment cannot fit the limit at all, rewind is switched off with the reason and the game is unaffected.
 * Rewinding restores the **cartridge memory as it was at that moment**, including SRAM and EEPROM, in the running game. Your game-save **files** change only when a session ends cleanly, so browsing, cancelling
   and rewinding never touch the disk.
@@ -103,6 +103,12 @@ In the library folder (the same place as your library and settings: `SEGARECOMP_
 * *Your game data could not be saved ... The previous save was kept.* - the session ended normally but the new save could not replace the old one (disk full, no permission, the file is locked). Free space and play
   and quit again; the previous data (`.prev` included) is intact.
 
+## What a rewind picture shows
+
+Each moment's picture is the **latest completed frame** the game had published at the instant the snapshot was taken. A frame is published when the game's video timing crosses a frame boundary, and a snapshot is taken between two
+execution slices, so the picture can be at most the frame in progress behind the saved machine state (up to about one frame, 16.7 ms of game time, plus the part of a slice). This is a bound from how the frames are produced, not a
+measured per-frame comparison. After a restore the picture shown is drawn from the restored video state, and the game's next frame is its own.
+
 ## Measurements recorded for this feature
 
 On a synthetic generated-native 68000 + Z80 program (PSG, FM and DAC playing), Linux x86-64, `-O2`, observed values, not guarantees:
@@ -111,9 +117,11 @@ On a synthetic generated-native 68000 + Z80 program (PSG, FM and DAC playing), L
 | --- | --- |
 | Snapshot capture (no thumbnail) | median 0.42 ms, worst 0.71 ms (512 runs); 146,669 bytes |
 | Snapshot restore | median 0.42 ms, worst 0.71 ms |
-| Interactive play, rewind **off** vs **on** (20 guest seconds, unthrottled, software renderer, 5 runs) | 4.47 s vs 4.53 s median: about **+1.2 %** (40 snapshots) |
-| Retained history (500 ms test cadence) | 10 s: 19 moments, 3.3 MiB; 30 s: 59 moments, 10.3 MiB; 62 s: 120 moments, 20.9 MiB; the default policy keeps 60 moments (10 s apart, 10 minutes): about 11 MiB |
-| Real game: widescreen-patched Sonic the Hedgehog (native provider), 3,600 guest frames unthrottled, software renderer, 3 runs each | rewind off 17.9-19.8 s; rewind on (10 s cadence) 17.9-19.9 s; even a 500 ms cadence 18.1-19.9 s: no measurable difference beyond run-to-run noise |
+| Interactive play, rewind **off** vs **on with the shipped defaults** (20 guest seconds, unthrottled, software renderer, 5 runs; `tools/genesis_state_perf.py`) | 4.51 s vs 4.68 s median (+3.8 %, run-to-run ranges 4.30-4.61 s and 4.38-4.82 s overlap); the viewer observed exactly 40 snapshots per run |
+| Retained history, observed by the viewer with the defaults | 10 s: 20 moments, 3.5 MiB; 30 s: 60 moments, 10.4 MiB; 60 s: 120 moments, 20.9 MiB, no eviction |
+| Capture latency inside the viewer (snapshot + thumbnail), observed | mean 0.77 ms, worst 0.90 ms per snapshot (about 0.7 % of run time at two per second) |
+| Rewind then resume | a confirmed rewind restores once and the session runs on to a normal end (checked in `genesis_rewind_session_test`, `genesis_production_states_test` and by the perf tool) |
+| Real game: widescreen-patched Sonic the Hedgehog (native provider), 3,600 guest frames unthrottled, software renderer, 3 runs each (measured earlier with a 10 s cadence and a 500 ms cadence) | rewind off 17.9-19.8 s; rewind on 17.9-19.9 s (10 s) and 18.1-19.9 s (500 ms): no difference beyond run-to-run noise; state file 182,509 bytes, so 120 moments are about 21 MiB |
 | Opening the rewind surface (119 moments listed) | about one 16 ms frame |
 | One surface frame while the preview switches (software renderer) | median 2.3 / 4.4 / 9.0 / 19.9 ms at 720x520 / 1080x740 / 1440x1040 / 2560x1440 (a GPU renderer is faster) |
 

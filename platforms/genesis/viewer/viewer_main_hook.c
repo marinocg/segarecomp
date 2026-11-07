@@ -420,6 +420,13 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
             (unsigned long long)stats.declined[5], (unsigned long long)stats.declined[6]);
   }
 #endif
+  if (g_state != NULL) {   /* observed rewind statistics (counts, not estimates) for the measurement tools */
+    GenesisViewerStateStats st;
+    genesis_viewer_state_stats(g_state, &st);
+    fprintf(stderr, "VIEWER_REWIND_STATS {\"captures\":%llu,\"evictions\":%llu,\"failures\":%llu,\"history_entries\":%u,\"history_bytes\":%llu,\"capture_ns_total\":%llu,\"capture_ns_max\":%llu,\"restores\":%llu}\n",
+            (unsigned long long)st.captures, (unsigned long long)st.evictions, (unsigned long long)st.capture_failures, (unsigned)st.history_entries, (unsigned long long)st.history_bytes,
+            (unsigned long long)st.capture_ns_total, (unsigned long long)st.capture_ns_max, (unsigned long long)st.restores);
+  }
   genesis_viewer_state_destroy(g_state);
   g_state = NULL;
   genesis_sdl3_viewer_close(sdl);

@@ -494,6 +494,47 @@ def main():
             check(code == INVALID_STATE, "a valid-digest state with an impossible %s is refused as INVALID_STATE (got %d)" % (name, code))
         check(len(fh) == 2 and fh[0] == fh[1], "validation refusals never mutate the machine")
 
+        # extreme clock / scheduler values with a RECOMPUTED valid digest: refused by the same staged validation (restore AND the slot list's validate), machine untouched
+        hdr_ticks = 136
+        adversarial = {
+            "guest clock beyond 2^62 ticks": [("H", hdr_ticks + 7, 0x40), ("IO", 8225 + 7, 0x40)],
+            "Z80 cycle counter at an extreme": [("Z80", 39 + 7, 0xFF)],
+            "Z80 cycle base at an extreme": [("Z80", 47 + 7, 0xFF)],
+            "YM sample count at an extreme": [("AUDIO", 82 + 7, 0xFF)],
+            "PSG tick count at an extreme": [("PSG", 26 + 7, 0xFF)],
+            "raster next_line_tick off its invariant": [("IO", 8242, 0x01)],
+            "raster last_line at an extreme": [("IO", 8234 + 7, 0x7F)],
+        }
+        s = Script()
+        scenario_prefix(s, True)
+        s.raw("snap 1")
+        s.raw("fullhash")
+        s.raw("layout 1")
+        out = run(exes["full"], s, "eeprom")
+        secs, _ = sections(out)
+        s = Script()
+        scenario_prefix(s, True)
+        s.raw("snap 1")
+        s.raw("fullhash")
+        s.raw("validate 1")
+        for name, edits in adversarial.items():
+            s.raw("snap 2")
+            for sec, rel, mask in edits:
+                base = 0 if sec == "H" else secs[SECTION[sec]][0]
+                s.raw("tamper 2 %x %x" % (base + rel, mask))
+            s.raw("redigest 2")
+            s.raw("validate 2")
+            s.raw("restore 2")
+        s.raw("fullhash")
+        out = run(exes["full"], s, "eeprom")
+        codes = statuses(out, "RESTORE")
+        vcodes = [int(m.group(2)) for m in re.finditer(r"^VALIDATE (\d+) (-?\d+)", out, re.M)]
+        fh = full(out)
+        check(vcodes[0] == OK, "an untouched state validates (the slot list shows it as usable)")
+        for (name, _), code, vcode in zip(adversarial.items(), codes, vcodes[1:]):
+            check(code != OK and vcode == code, "extreme %s (valid digest): restore and slot validation both refuse it (%d / %d)" % (name, code, vcode))
+        check(len(fh) == 2 and fh[0] == fh[1], "extreme-value refusals never mutate the machine")
+
     print("%d failure(s)" % len(failures))
     return 1 if failures else 0
 

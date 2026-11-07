@@ -35,7 +35,7 @@
 9. **A machine-independent provider interface in the shared viewer** (`libs/viewer/include/sv_state.h`): availability and reason, six slots, history count / metadata / thumbnails, `restore_entry`,
    `rewind_opened/cancelled`, a history note. The viewer owns the pause-menu rows, slot pages with the focused slot's own thumbnail, overwrite / load confirmations focused on *No*, quick keys F5 / F8, the rewind
    surface (F7, the pause-menu row, a two-trigger chord) and never reads a machine. Master System and Sega CD register no provider and see accurate disabled rows.
-10. **Rewind** is the same snapshots in a bounded in-memory ring: every 10 s of **guest** time at the barrier, 10 minutes target (60 moments), **96 MiB** hard budget, oldest-first eviction by age and by bytes, no worker, no disk.
+10. **Rewind** is the same snapshots in a bounded in-memory ring: every 500 ms of **guest** time at the barrier, 60 s target (about 120 moments), **96 MiB** hard budget, oldest-first eviction by age and by bytes, no worker, no disk.
     Entering rewind freezes the guest and references the live machine as the anchor (cancel mutates nothing); confirming restores two-phase, drops every newer entry (a new branch) and runs one *sink reset*
     (host audio queue, presenter, pacing deadline, raster capture, published-frame baseline rendered from the restored VDP, held inputs). A slot load starts a fresh history.
 
@@ -49,6 +49,8 @@
 - The viewer loop gained one optional host callback (`discontinuity`) so pacing and presentation baselines are re-based after a restore instead of treating the clock jump as frames to wait for.
 
 - **Crafted-state hardening (review finding).** The ymfm blob is validated by restoring it into a scratch chip and comparing the re-saved bytes; the vendored restore path was given two bounds checks (an envelope state outside attack..release becomes release, a register address is clamped to 0x1ff), recorded in `third_party/ymfm/PROVENANCE.md`. Component clocks (Z80, YM2612, PSG, mixer windows, raster line) must agree with the guest clock, and mixer sums are bounded.
+
+- **Correction pass (review of the first PR head).** The rewind defaults were briefly changed to 10 s / 10 min and are back at the original product requirement: **500 ms / 60 s / 96 MiB** (observed: 120 moments, 20.9 MiB, 0.77 ms per capture). The slot list now runs the same staged validation as a restore (without committing), so a valid-digest state with impossible device fields is shown as unusable; the cross-component clock checks use division/subtraction only (guest clock capped at 2^62 ticks) and the raster scheduler's `next_line_tick` / `last_line` invariants are enforced. A rewind picture is the latest completed frame at the capture barrier, at most about one frame older than the CPU state (documented, not claimed exact). The state format is unchanged: version-1 `SGSTATE` files and existing `.srm`/`.eep` files remain usable (`state_schema` stays 1).
 
 ## Rejected alternatives
 

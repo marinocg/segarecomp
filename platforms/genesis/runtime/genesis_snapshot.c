@@ -807,15 +807,18 @@ static GenesisSnapshotStatus precheck(const GenesisSnapshotMachine *machine, con
   return GENESIS_SNAPSHOT_OK;
 }
 
+static GenesisSnapshotStatus restore_impl(const GenesisSnapshotMachine *machine, const GenesisSnapshotIdentity *identity, const uint8_t *data, size_t size, int commit);
+
 GenesisSnapshotStatus genesis_snapshot_validate(const GenesisSnapshotMachine *machine, const GenesisSnapshotIdentity *identity, const uint8_t *data, size_t size,
                                                 GenesisSnapshotInfo *info) {
   GenesisSnapshotInfo local;
   SectionView views[SEC_LAST + 1U];
-  return precheck(machine, identity, data, size, info != NULL ? info : &local, views);
+  const GenesisSnapshotStatus st = precheck(machine, identity, data, size, info != NULL ? info : &local, views);
+  if (st != GENESIS_SNAPSHOT_OK) return st;
+  return restore_impl(machine, identity, data, size, 0);   /* the same staged validation restore runs, without committing */
 }
 
-GenesisSnapshotStatus genesis_snapshot_restore(const GenesisSnapshotMachine *machine, const GenesisSnapshotIdentity *identity,
-                                               const uint8_t *data, size_t size) {
+static GenesisSnapshotStatus restore_impl(const GenesisSnapshotMachine *machine, const GenesisSnapshotIdentity *identity, const uint8_t *data, size_t size, int commit) {
   GenesisSnapshotInfo info;
   SectionView views[SEC_LAST + 1U];
   GenesisSnapshotStatus status;
@@ -879,20 +882,35 @@ GenesisSnapshotStatus genesis_snapshot_restore(const GenesisSnapshotMachine *mac
     if (stage_audio->ym_samples != 0U && stage_audio->ym_samples > UINT64_MAX / 2U) goto done;
   }
 #endif
+  {  /* Cross-component clocks. Every comparison is a division or a subtraction of already-bounded values, so no crafted extreme can overflow, and a gap between a component and the
+        guest clock (which the next catch-up loop would have to run through) is bounded to a few frames. */
+    const uint64_t master = stage_rt->scheduler.master_ticks;
 #ifdef SEGARECOMP_GENESIS_SOUND
-  if (machine->z80 != NULL) {  /* every component clock must sit at or just behind the guest clock: a crafted gap would make the next catch-up loop run for ages */
-    const uint64_t master = stage_rt->scheduler.master_ticks, slack = 4U * GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
-    const uint64_t z80_time = stage_z80->cycle_base_master_ticks + stage_z80->cpu.state.cycles * GENESIS_Z80_CLOCK_DIVIDER;
-    if (z80_time > master + slack || (stage_z80->bound_ordinal != 0U && z80_time + slack < master && stage_rt->devices.z80_bus.reset_released && !stage_rt->devices.z80_bus.bus_requested) ||
-        stage_audio->ym_samples * (uint64_t)YM2612_MASTER_TICKS_PER_SAMPLE > master + slack || stage_audio->ym_samples * (uint64_t)YM2612_MASTER_TICKS_PER_SAMPLE + slack < master ||
-        stage_audio->mixer.ym.watermark > master + slack || stage_audio->mixer.psg.watermark > master + slack ||
-        stage_audio->psg.ticks * (uint64_t)GENESIS_MIXER_PSG_TICK_MASTER > master + slack || stage_audio->psg.ticks * (uint64_t)GENESIS_MIXER_PSG_TICK_MASTER + slack < master)
-      goto done;
-  }
+    const uint64_t slack = 4U * GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
 #endif
-  if (stage_rt->raster.last_line > stage_rt->scheduler.master_ticks / GENESIS_NTSC_MASTER_TICKS_PER_LINE + 2U) goto done;
+    if (master > (UINT64_C(1) << 62)) goto done;
+    if (stage_rt->raster.initialized) {   /* the scheduler's own invariant: next_line_tick is the start of the line after last_line, which is at most a few lines behind the clock */
+      const uint64_t line_now = master / GENESIS_NTSC_MASTER_TICKS_PER_LINE;
+      if (stage_rt->raster.last_line > line_now || line_now - stage_rt->raster.last_line > 4U ||
+          stage_rt->raster.next_line_tick != (stage_rt->raster.last_line + 1U) * GENESIS_NTSC_MASTER_TICKS_PER_LINE)
+        goto done;
+    }
+#ifdef SEGARECOMP_GENESIS_SOUND
+    if (machine->z80 != NULL) {
+      const uint64_t base = stage_z80->cycle_base_master_ticks, cycles = stage_z80->cpu.state.cycles;
+      const uint64_t ym = stage_audio->ym_samples, psg = stage_audio->psg.ticks;
+      const int runnable = stage_z80->bound_ordinal != 0U && stage_rt->devices.z80_bus.reset_released && !stage_rt->devices.z80_bus.bus_requested;
+      if (base > master + slack || cycles > (master + slack - base) / GENESIS_Z80_CLOCK_DIVIDER) goto done;
+      if (runnable && master > slack + base && cycles < (master - slack - base) / GENESIS_Z80_CLOCK_DIVIDER) goto done;
+      if (ym > (master + slack) / YM2612_MASTER_TICKS_PER_SAMPLE || (master > slack && ym < (master - slack) / YM2612_MASTER_TICKS_PER_SAMPLE)) goto done;
+      if (psg > (master + slack) / GENESIS_MIXER_PSG_TICK_MASTER || (master > slack && psg < (master - slack) / GENESIS_MIXER_PSG_TICK_MASTER)) goto done;
+      if (stage_audio->mixer.ym.watermark > master + slack || stage_audio->mixer.psg.watermark > master + slack) goto done;
+    }
+#endif
+  }
 #undef SECTION_READER
 
+  if (!commit) { status = GENESIS_SNAPSHOT_OK; goto done; }   /* validation only: the staged copies are dropped, the machine is never touched */
   /* ---- commit: everything above passed; the copies below cannot fail ---- */
   memcpy(machine->runtime, stage_rt, sizeof *stage_rt);
   if (stage_storage != NULL) memcpy(machine->runtime->cartridge_sram_storage, stage_storage, machine->runtime->cartridge_sram->storage_bytes);
@@ -913,4 +931,8 @@ done:
   free(stage_storage);
   free(stage_rt);
   return status;
+}
+
+GenesisSnapshotStatus genesis_snapshot_restore(const GenesisSnapshotMachine *machine, const GenesisSnapshotIdentity *identity, const uint8_t *data, size_t size) {
+  return restore_impl(machine, identity, data, size, 1);
 }

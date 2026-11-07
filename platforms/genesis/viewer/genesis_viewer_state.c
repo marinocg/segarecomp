@@ -1,6 +1,7 @@
 #include "genesis_viewer_state.h"
 
 #include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -152,14 +153,22 @@ void genesis_viewer_state_after_slice(GenesisViewerState *s) {
   GenesisSnapshotInfo info;
   GenesisSnapshotStatus st;
   RewindEntry *entry;
+  struct timespec t0, t1;
   if (s == NULL || !rewind_enabled(s)) return;
   machine = &s->cfg.machine;
   now = machine->runtime->scheduler.master_ticks;
   if (now < s->last_capture_ticks) s->last_capture_ticks = now;               /* the guest clock never runs backwards except through a restore, which re-bases it */
   if (now - s->last_capture_ticks < s->interval_ticks) return;
   memset(&thumbnail, 0, sizeof thumbnail);
+  timespec_get(&t0, TIME_UTC);
   if (genesis_viewer_state_make_thumbnail(s->cfg.latest_frame, thumb, sizeof thumb, &thumbnail.width, &thumbnail.height)) thumbnail.rgb565 = thumb;
   st = genesis_snapshot_capture(machine, &s->cfg.identity, thumbnail.rgb565 != NULL ? &thumbnail : NULL, &buffer);
+  timespec_get(&t1, TIME_UTC);
+  {
+    const uint64_t ns = (uint64_t)(t1.tv_sec - t0.tv_sec) * 1000000000ULL + (uint64_t)(t1.tv_nsec - t0.tv_nsec);
+    s->stats.capture_ns_total += ns;
+    if (ns > s->stats.capture_ns_max) s->stats.capture_ns_max = ns;
+  }
   s->last_capture_ticks = now;   /* a failed attempt is not retried every slice */
   if (st == GENESIS_SNAPSHOT_NOT_CAPTURABLE) return;   /* a latched stop: the guest is about to fail closed anyway */
   if (st != GENESIS_SNAPSHOT_OK) {

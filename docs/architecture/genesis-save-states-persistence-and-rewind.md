@@ -219,8 +219,8 @@ file survives any failure. A state is never auto-loaded at boot.
 
 ## 7. Rewind
 
-- Rolling full snapshots (section 4 container without file IO) every 10 s of **guest** time (default; 60 moments) (`guest_master_ticks`), captured at the section 2
-  barrier; 10 min target; **96 MiB** hard budget for snapshots + thumbnails; oldest-first eviction by age and by budget; no worker thread;
+- Rolling full snapshots (section 4 container without file IO) every 500 ms of **guest** time (`guest_master_ticks`), captured at the section 2
+  barrier; 60 s target; **96 MiB** hard budget for snapshots + thumbnails; oldest-first eviction by age and by budget; no worker thread;
   no disk; allocations are bounded by the budget and made at capture time, failure marks rewind unavailable with a reason.
 - Entering rewind freezes guest execution (it runs inside `window_closed()`), captures/references a current-state anchor, and previews
   thumbnails/frames only. Cancel discards the selection and resumes untouched.
