@@ -1,0 +1,719 @@
+{
+ "builds": {
+  "lionking": {
+   "game_identical": true,
+   "reps": 1,
+   "rom": "lionking",
+   "st0": {
+    "compile_ms": 2496,
+    "compiled": 34,
+    "disc": 4,
+    "emit_ms": 961,
+    "exe": 121514064,
+    "gen_bytes": 16541771,
+    "gens": 4,
+    "images": 3,
+    "mat_ms": 8018,
+    "reused": 24,
+    "units": 27,
+    "ver": 1,
+    "wall": 175.68,
+    "walls": [
+     175.68
+    ]
+   },
+   "st1": {
+    "compile_ms": 2442,
+    "compiled": 34,
+    "disc": 4,
+    "emit_ms": 1908,
+    "exe": 121514064,
+    "gen_bytes": 16541771,
+    "gens": 7,
+    "images": 3,
+    "mat_ms": 12841,
+    "reused": 81,
+    "units": 27,
+    "ver": 1,
+    "wall": 180.72,
+    "walls": [
+     180.72
+    ]
+   },
+   "static": {
+    "candidates": 1,
+    "contexts": 16,
+    "copy_loops": 1,
+    "decoder_calls": 0,
+    "epochs": 1,
+    "fallback": "sound_fault_requires_observed_registry",
+    "horizon_paths": 2,
+    "images_final": 3,
+    "images_kept": 0,
+    "images_proven": 1,
+    "ms": 15,
+    "nodes": 144,
+    "outcome": "complete",
+    "refusals": {},
+    "staged_decodes": 0,
+    "steps": 2319,
+    "verified": false
+   },
+   "z80c_identical": true
+  },
+  "megaman": {
+   "game_identical": true,
+   "reps": 1,
+   "rom": "megaman",
+   "st0": {
+    "compile_ms": 1587,
+    "compiled": 23,
+    "disc": 3,
+    "emit_ms": 500,
+    "exe": 88314504,
+    "gen_bytes": 11349257,
+    "gens": 3,
+    "images": 2,
+    "mat_ms": 6474,
+    "reused": 8,
+    "units": 19,
+    "ver": 1,
+    "wall": 133.7,
+    "walls": [
+     133.7
+    ]
+   },
+   "st1": {
+    "compile_ms": 1585,
+    "compiled": 19,
+    "disc": 1,
+    "emit_ms": 364,
+    "exe": 88314504,
+    "gen_bytes": 11349257,
+    "gens": 1,
+    "images": 2,
+    "mat_ms": 5280,
+    "reused": 0,
+    "units": 19,
+    "ver": 1,
+    "wall": 132.79,
+    "walls": [
+     132.79
+    ]
+   },
+   "static": {
+    "candidates": 2,
+    "contexts": 44,
+    "copy_loops": 4,
+    "decoder_calls": 0,
+    "epochs": 2,
+    "fallback": "none",
+    "horizon_paths": 1,
+    "images_final": 2,
+    "images_kept": 2,
+    "images_proven": 2,
+    "ms": 14,
+    "nodes": 309,
+    "outcome": "complete",
+    "refusals": {},
+    "staged_decodes": 0,
+    "steps": 2034,
+    "verified": true
+   },
+   "z80c_identical": true
+  },
+  "outrun": {
+   "game_identical": true,
+   "reps": 1,
+   "rom": "outrun",
+   "st0": {
+    "compile_ms": 1677,
+    "compiled": 23,
+    "disc": 3,
+    "emit_ms": 494,
+    "exe": 48001344,
+    "gen_bytes": 11324063,
+    "gens": 3,
+    "images": 2,
+    "mat_ms": 5843,
+    "reused": 8,
+    "units": 19,
+    "ver": 1,
+    "wall": 64.28,
+    "walls": [
+     64.28
+    ]
+   },
+   "st1": {
+    "compile_ms": 1572,
+    "compiled": 19,
+    "disc": 1,
+    "emit_ms": 342,
+    "exe": 48001344,
+    "gen_bytes": 11324063,
+    "gens": 1,
+    "images": 2,
+    "mat_ms": 4888,
+    "reused": 0,
+    "units": 19,
+    "ver": 1,
+    "wall": 63.41,
+    "walls": [
+     63.41
+    ]
+   },
+   "static": {
+    "candidates": 2,
+    "contexts": 36,
+    "copy_loops": 2,
+    "decoder_calls": 0,
+    "epochs": 2,
+    "fallback": "none",
+    "horizon_paths": 1,
+    "images_final": 2,
+    "images_kept": 2,
+    "images_proven": 2,
+    "ms": 11,
+    "nodes": 235,
+    "outcome": "partial",
+    "refusals": {
+     "decompression_unproven": 1
+    },
+    "staged_decodes": 0,
+    "steps": 1780,
+    "verified": true
+   },
+   "z80c_identical": true
+  },
+  "ps4": {
+   "game_identical": true,
+   "reps": 1,
+   "rom": "ps4",
+   "st0": {
+    "compile_ms": 1565,
+    "compiled": 23,
+    "disc": 3,
+    "emit_ms": 466,
+    "exe": 172804912,
+    "gen_bytes": 10713148,
+    "gens": 3,
+    "images": 2,
+    "mat_ms": 6885,
+    "reused": 8,
+    "units": 19,
+    "ver": 1,
+    "wall": 272.44,
+    "walls": [
+     272.44
+    ]
+   },
+   "st1": {
+    "compile_ms": 1544,
+    "compiled": 22,
+    "disc": 2,
+    "emit_ms": 454,
+    "exe": 172804912,
+    "gen_bytes": 10713148,
+    "gens": 2,
+    "images": 2,
+    "mat_ms": 6160,
+    "reused": 8,
+    "units": 19,
+    "ver": 1,
+    "wall": 273.09,
+    "walls": [
+     273.09
+    ]
+   },
+   "static": {
+    "candidates": 1,
+    "contexts": 10,
+    "copy_loops": 1,
+    "decoder_calls": 0,
+    "epochs": 1,
+    "fallback": "none",
+    "horizon_paths": 0,
+    "images_final": 2,
+    "images_kept": 1,
+    "images_proven": 1,
+    "ms": 2,
+    "nodes": 63,
+    "outcome": "partial",
+    "refusals": {
+     "window_control_unknown": 1
+    },
+    "staged_decodes": 0,
+    "steps": 456,
+    "verified": true
+   },
+   "z80c_identical": true
+  },
+  "sonic1": {
+   "game_identical": true,
+   "reps": 1,
+   "rom": "sonic1",
+   "st0": {
+    "compile_ms": 1788,
+    "compiled": 23,
+    "disc": 3,
+    "emit_ms": 521,
+    "exe": 40538216,
+    "gen_bytes": 11408660,
+    "gens": 3,
+    "images": 2,
+    "mat_ms": 6013,
+    "reused": 8,
+    "units": 19,
+    "ver": 1,
+    "wall": 52.93,
+    "walls": [
+     52.93
+    ]
+   },
+   "st1": {
+    "compile_ms": 1605,
+    "compiled": 19,
+    "disc": 1,
+    "emit_ms": 375,
+    "exe": 40538216,
+    "gen_bytes": 11408660,
+    "gens": 1,
+    "images": 2,
+    "mat_ms": 5062,
+    "reused": 0,
+    "units": 19,
+    "ver": 1,
+    "wall": 51.29,
+    "walls": [
+     51.29
+    ]
+   },
+   "static": {
+    "candidates": 2,
+    "contexts": 22,
+    "copy_loops": 1,
+    "decoder_calls": 1,
+    "epochs": 2,
+    "fallback": "none",
+    "horizon_paths": 1,
+    "images_final": 2,
+    "images_kept": 2,
+    "images_proven": 2,
+    "ms": 9,
+    "nodes": 172,
+    "outcome": "complete",
+    "refusals": {},
+    "staged_decodes": 0,
+    "steps": 1409,
+    "verified": true
+   },
+   "z80c_identical": true
+  },
+  "sonic1-O2": {
+   "game_identical": true,
+   "reps": 3,
+   "rom": "sonic1-O2",
+   "st0": {
+    "compile_ms": 7462,
+    "compiled": 23,
+    "disc": 3,
+    "emit_ms": 524,
+    "exe": 38571592,
+    "gen_bytes": 11408660,
+    "gens": 3,
+    "images": 2,
+    "mat_ms": 11416,
+    "reused": 8,
+    "units": 19,
+    "ver": 1,
+    "wall": 84.25,
+    "walls": [
+     84.43,
+     83.32,
+     84.25
+    ]
+   },
+   "st1": {
+    "compile_ms": 7354,
+    "compiled": 19,
+    "disc": 1,
+    "emit_ms": 374,
+    "exe": 38571592,
+    "gen_bytes": 11408660,
+    "gens": 1,
+    "images": 2,
+    "mat_ms": 10499,
+    "reused": 0,
+    "units": 19,
+    "ver": 1,
+    "wall": 82.35,
+    "walls": [
+     82.13,
+     82.88,
+     82.35
+    ]
+   },
+   "static": {
+    "candidates": 2,
+    "contexts": 22,
+    "copy_loops": 1,
+    "decoder_calls": 1,
+    "epochs": 2,
+    "fallback": "none",
+    "horizon_paths": 1,
+    "images_final": 2,
+    "images_kept": 2,
+    "images_proven": 2,
+    "ms": 9,
+    "nodes": 172,
+    "outcome": "complete",
+    "refusals": {},
+    "staged_decodes": 0,
+    "steps": 1409,
+    "verified": true
+   },
+   "z80c_identical": true
+  },
+  "sonic2": {
+   "game_identical": true,
+   "reps": 1,
+   "rom": "sonic2",
+   "st0": {
+    "compile_ms": 1565,
+    "compiled": 23,
+    "disc": 3,
+    "emit_ms": 501,
+    "exe": 65356600,
+    "gen_bytes": 11202102,
+    "gens": 3,
+    "images": 2,
+    "mat_ms": 5830,
+    "reused": 8,
+    "units": 19,
+    "ver": 1,
+    "wall": 88.45,
+    "walls": [
+     88.45
+    ]
+   },
+   "st1": {
+    "compile_ms": 1700,
+    "compiled": 22,
+    "disc": 2,
+    "emit_ms": 501,
+    "exe": 65356600,
+    "gen_bytes": 11202102,
+    "gens": 2,
+    "images": 2,
+    "mat_ms": 5751,
+    "reused": 8,
+    "units": 19,
+    "ver": 1,
+    "wall": 88.58,
+    "walls": [
+     88.58
+    ]
+   },
+   "static": {
+    "candidates": 1,
+    "contexts": 13,
+    "copy_loops": 1,
+    "decoder_calls": 0,
+    "epochs": 1,
+    "fallback": "none",
+    "horizon_paths": 0,
+    "images_final": 2,
+    "images_kept": 1,
+    "images_proven": 1,
+    "ms": 8,
+    "nodes": 166,
+    "outcome": "partial",
+    "refusals": {
+     "decompression_unproven": 1
+    },
+    "staged_decodes": 0,
+    "steps": 1403,
+    "verified": true
+   },
+   "z80c_identical": true
+  },
+  "sonic3": {
+   "game_identical": true,
+   "reps": 1,
+   "rom": "sonic3",
+   "st0": {
+    "compile_ms": 1642,
+    "compiled": 23,
+    "disc": 3,
+    "emit_ms": 524,
+    "exe": 100949312,
+    "gen_bytes": 11547863,
+    "gens": 3,
+    "images": 2,
+    "mat_ms": 6743,
+    "reused": 8,
+    "units": 19,
+    "ver": 1,
+    "wall": 144.51,
+    "walls": [
+     144.51
+    ]
+   },
+   "st1": {
+    "compile_ms": 1657,
+    "compiled": 22,
+    "disc": 2,
+    "emit_ms": 525,
+    "exe": 100949312,
+    "gen_bytes": 11547863,
+    "gens": 2,
+    "images": 2,
+    "mat_ms": 6307,
+    "reused": 8,
+    "units": 19,
+    "ver": 1,
+    "wall": 144.81,
+    "walls": [
+     144.81
+    ]
+   },
+   "static": {
+    "candidates": 1,
+    "contexts": 19,
+    "copy_loops": 3,
+    "decoder_calls": 0,
+    "epochs": 1,
+    "fallback": "none",
+    "horizon_paths": 0,
+    "images_final": 2,
+    "images_kept": 1,
+    "images_proven": 1,
+    "ms": 20,
+    "nodes": 298,
+    "outcome": "partial",
+    "refusals": {
+     "window_control_unknown": 1
+    },
+    "staged_decodes": 0,
+    "steps": 3260,
+    "verified": true
+   },
+   "z80c_identical": true
+  },
+  "sor1": {
+   "game_identical": true,
+   "reps": 1,
+   "rom": "sor1",
+   "st0": {
+    "compile_ms": 1767,
+    "compiled": 23,
+    "disc": 3,
+    "emit_ms": 531,
+    "exe": 37466296,
+    "gen_bytes": 11583369,
+    "gens": 3,
+    "images": 2,
+    "mat_ms": 5878,
+    "reused": 8,
+    "units": 19,
+    "ver": 1,
+    "wall": 48.92,
+    "walls": [
+     48.92
+    ]
+   },
+   "st1": {
+    "compile_ms": 1670,
+    "compiled": 19,
+    "disc": 1,
+    "emit_ms": 383,
+    "exe": 37466296,
+    "gen_bytes": 11583369,
+    "gens": 1,
+    "images": 2,
+    "mat_ms": 5118,
+    "reused": 0,
+    "units": 19,
+    "ver": 1,
+    "wall": 48.94,
+    "walls": [
+     48.94
+    ]
+   },
+   "static": {
+    "candidates": 5,
+    "contexts": 58,
+    "copy_loops": 3,
+    "decoder_calls": 0,
+    "epochs": 3,
+    "fallback": "none",
+    "horizon_paths": 4,
+    "images_final": 2,
+    "images_kept": 2,
+    "images_proven": 2,
+    "ms": 37,
+    "nodes": 618,
+    "outcome": "complete",
+    "refusals": {},
+    "staged_decodes": 2,
+    "steps": 4939,
+    "verified": true
+   },
+   "z80c_identical": true
+  },
+  "sor2": {
+   "game_identical": true,
+   "reps": 1,
+   "rom": "sor2",
+   "st0": {
+    "compile_ms": 1744,
+    "compiled": 23,
+    "disc": 3,
+    "emit_ms": 517,
+    "exe": 86880312,
+    "gen_bytes": 11686768,
+    "gens": 3,
+    "images": 2,
+    "mat_ms": 6374,
+    "reused": 8,
+    "units": 19,
+    "ver": 1,
+    "wall": 121.33,
+    "walls": [
+     121.33
+    ]
+   },
+   "st1": {
+    "compile_ms": 1603,
+    "compiled": 19,
+    "disc": 1,
+    "emit_ms": 378,
+    "exe": 86880312,
+    "gen_bytes": 11686768,
+    "gens": 1,
+    "images": 2,
+    "mat_ms": 5010,
+    "reused": 0,
+    "units": 19,
+    "ver": 1,
+    "wall": 121.01,
+    "walls": [
+     121.01
+    ]
+   },
+   "static": {
+    "candidates": 2,
+    "contexts": 32,
+    "copy_loops": 2,
+    "decoder_calls": 0,
+    "epochs": 2,
+    "fallback": "none",
+    "horizon_paths": 0,
+    "images_final": 2,
+    "images_kept": 2,
+    "images_proven": 2,
+    "ms": 10,
+    "nodes": 309,
+    "outcome": "partial",
+    "refusals": {
+     "window_control_unknown": 1
+    },
+    "staged_decodes": 0,
+    "steps": 1577,
+    "verified": true
+   },
+   "z80c_identical": true
+  },
+  "tf4": {
+   "game_identical": true,
+   "reps": 1,
+   "rom": "tf4",
+   "st0": {
+    "compile_ms": 13,
+    "compiled": 1,
+    "disc": 1,
+    "emit_ms": 0,
+    "exe": 56769848,
+    "gen_bytes": 659,
+    "gens": 1,
+    "images": 0,
+    "mat_ms": 2325,
+    "reused": 0,
+    "units": 1,
+    "ver": 1,
+    "wall": 81.06,
+    "walls": [
+     81.06
+    ]
+   },
+   "st1": {
+    "compile_ms": 20,
+    "compiled": 1,
+    "disc": 1,
+    "emit_ms": 0,
+    "exe": 56769848,
+    "gen_bytes": 659,
+    "gens": 1,
+    "images": 0,
+    "mat_ms": 2340,
+    "reused": 0,
+    "units": 1,
+    "ver": 1,
+    "wall": 80.54,
+    "walls": [
+     80.54
+    ]
+   },
+   "static": {
+    "candidates": 3,
+    "contexts": 56,
+    "copy_loops": 3,
+    "decoder_calls": 0,
+    "epochs": 0,
+    "fallback": "none",
+    "horizon_paths": 0,
+    "images_final": 0,
+    "images_kept": 0,
+    "images_proven": 0,
+    "ms": 104,
+    "nodes": 880,
+    "outcome": "unsupported",
+    "refusals": {
+     "ambiguous_epoch_order": 1,
+     "window_control_unknown": 2
+    },
+    "staged_decodes": 0,
+    "steps": 14284,
+    "verified": false
+   },
+   "z80c_identical": true
+  }
+ },
+ "census": {
+  "images": 58,
+  "max_ms": 224.3,
+  "max_steps": 19188,
+  "median_ms": 82.4,
+  "outcomes": {
+   "complete": 7,
+   "none": 3,
+   "partial": 47,
+   "unsupported": 1
+  },
+  "proven_image_counts": {
+   "0": 4,
+   "1": 47,
+   "2": 7
+  },
+  "refusal_titles": {
+   "ambiguous_epoch_order": 1,
+   "decompression_unproven": 17,
+   "length_unknown": 9,
+   "state_bound": 6,
+   "window_control_unknown": 12,
+   "z80_store_form_unsupported": 2,
+   "z80_store_unknown_address": 2,
+   "z80_store_value_unknown": 3
+  }
+ }
+}
