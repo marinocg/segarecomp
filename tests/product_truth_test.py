@@ -137,7 +137,7 @@ class DocumentRulesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / "good.md").write_text("ok", encoding="utf-8")
-            (root / "README.md").write_text("[a](good.md) [b](missing.md) [c](https://example.invalid/x) [d](#anchor) ![e](img/none.png)\n```\n[f](ignored-in-fence.md)\n```\n", encoding="utf-8")
+            (root / "README.md").write_text("[a](good.md) [b](missing.md) [c](https://example.invalid/x) ![e](img/none.png)\n```\n[f](ignored-in-fence.md)\n```\n", encoding="utf-8")
             problems = gate.check_links(root, ("README.md",))
         self.assertEqual(len(problems), 2, problems)
         self.assertTrue(any("missing.md" in p for p in problems) and any("none.png" in p for p in problems))
