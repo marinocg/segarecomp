@@ -750,6 +750,62 @@ void test_export_and_presentation_agree() {
   check(is_color(*frame, 5, 0, 2U, 0) && is_color(*frame, 5, 200, 2U, 1), "export reflects the per-row palette");
 }
 
+// ---- SEG-127-T002: the per-row palette lookup table path equals the original per-pixel CRAM decode --------------------
+// Reference = the pre-optimization behavior: decode every pixel through genesis_vdp_decode_cram_entry on that row's palette.
+uint32_t lcg_state = 0x12345678u;
+uint32_t lcg() { lcg_state = lcg_state * 1664525u + 1013904223u; return lcg_state >> 8; }
+
+void test_row_rgb888_matches_per_pixel_decode() {
+  struct Shape { unsigned w, h, palettes; };
+  const Shape shapes[] = {{320U, 224U, 1U}, {256U, 224U, 1U}, {320U, 224U, 5U}, {256U, 224U, 7U}, {320U, 448U, 3U}, {256U, 448U, 2U}, {320U, 224U, 256U}};
+  unsigned mismatches = 0, rows_checked = 0;
+  for (const Shape &sh : shapes) {
+    auto frame = make_frame();
+    frame->width = (uint16_t)sh.w;
+    frame->height = (uint16_t)sh.h;
+    frame->palette_count = (uint16_t)sh.palettes;
+    for (size_t i = 0; i < (size_t)sh.w * sh.h; ++i) frame->pixels[i] = (uint8_t)(lcg() % GENESIS_VDP_CRAM_ENTRY_COUNT);
+    for (unsigned b = 0; b < GENESIS_VDP_CRAM_BYTES; ++b) frame->palette_snapshot[b] = (uint8_t)lcg();
+    for (unsigned k = 1; k < sh.palettes; ++k)
+      for (unsigned b = 0; b < GENESIS_VDP_CRAM_BYTES; ++b) frame->extra_palettes[k - 1U][b] = (uint8_t)lcg();
+    // mid-frame palette changes: the slot changes at pseudo-random rows (monotonic like the producer, and also revisiting slots)
+    for (unsigned row = 0; row < sh.h; ++row) frame->row_palette[row] = (uint8_t)((row * sh.palettes) / sh.h);
+    if (sh.palettes > 2U) for (unsigned row = 0; row < sh.h; row += 7U) frame->row_palette[row] = (uint8_t)(lcg() % sh.palettes);
+    for (unsigned row = 0; row < sh.h; ++row) {
+      const uint8_t *palette = frame->row_palette[row] == 0U ? frame->palette_snapshot : frame->extra_palettes[frame->row_palette[row] - 1U];
+      uint8_t got[GENESIS_FRAME_MAX_WIDTH * 3U], want[GENESIS_FRAME_MAX_WIDTH * 3U];
+      for (unsigned x = 0; x < sh.w; ++x) {
+        GenesisRgb888 c;
+        (void)genesis_vdp_decode_cram_entry(palette, frame->pixels[(size_t)row * sh.w + x], &c);
+        want[x * 3U] = c.r; want[x * 3U + 1U] = c.g; want[x * 3U + 2U] = c.b;
+      }
+      const int rc = genesis_vdp_frame_row_rgb888(frame.get(), row, got);
+      if (rc != 0 || std::memcmp(got, want, (size_t)sh.w * 3U) != 0) ++mismatches;
+      ++rows_checked;
+    }
+  }
+  check(mismatches == 0 && rows_checked > 1000U, "row RGB conversion is bit-exact against the per-pixel CRAM decode (random palettes/indices, H32/H40, interlace, mid-frame palettes)");
+
+  // Invalid inputs keep the original error behaviour (preceding pixels written, nothing past the bad index).
+  auto frame = make_frame();
+  frame->width = 256U;
+  frame->height = 224U;
+  frame->palette_count = 1U;
+  for (unsigned b = 0; b < GENESIS_VDP_CRAM_BYTES; ++b) frame->palette_snapshot[b] = (uint8_t)(b * 7U);
+  for (unsigned x = 0; x < 256U; ++x) frame->pixels[x] = (uint8_t)(x % 64U);
+  frame->pixels[100] = 64U;
+  uint8_t out[GENESIS_FRAME_MAX_WIDTH * 3U];
+  std::memset(out, 0xEE, sizeof(out));
+  check(genesis_vdp_frame_row_rgb888(frame.get(), 0, out) == -1, "pixel index >= 64 is rejected");
+  check(out[99U * 3U + 2U] != 0xEE && out[100U * 3U] == 0xEE, "an out-of-range index stops the row exactly at the bad pixel");
+  check(genesis_vdp_frame_row_rgb888(frame.get(), 224U, out) == -1, "row beyond the artifact height is rejected");
+  check(genesis_vdp_frame_row_rgb888(nullptr, 0, out) == -1 && genesis_vdp_frame_row_rgb888(frame.get(), 1, nullptr) == -1, "NULL frame / output rejected");
+  frame->row_palette[2] = 1U;  // slot 1 is not present (palette_count == 1)
+  check(genesis_vdp_frame_row_rgb888(frame.get(), 2, out) == -1, "a row selecting a palette slot beyond palette_count is rejected");
+  frame->width = 321U;
+  check(genesis_vdp_frame_row_rgb888(frame.get(), 0, out) == -1, "width beyond the maximum is rejected");
+}
+
 // ---- runtime: scanline capture, H-interrupt, STOP -------------------------------------------------------------------
 constexpr uint32_t kRamBegin = 0x00FF0000u;
 
@@ -1381,6 +1437,7 @@ int main() {
   test_window_plane();
   test_scanline_palette_switch();
   test_export_and_presentation_agree();
+  test_row_rgb888_matches_per_pixel_decode();
   test_runtime_captures_scanline_palette_and_virtual_frames();
   test_vram_written_during_active_display_is_scanline_resolved();
   test_h40_sprite_limit_boundaries();

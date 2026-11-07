@@ -1448,14 +1448,24 @@ int genesis_vdp_frame_row_rgb888(const GenesisFrameArtifact *frame, unsigned row
     return -1;
   }
   const uint8_t *pixels = &frame->pixels[(size_t)row * width];
+  /* SEG-127-T002: the palette has only 64 entries but a row has up to 320 pixels, so decode each entry once per row (the same
+   * genesis_vdp_decode_cram_word the per-pixel path used) and convert pixel indices through the resulting table. The table is a
+   * stack local (no persistent cache); an out-of-range index still fails after writing the preceding pixels, exactly as before. */
+  uint8_t lut[GENESIS_VDP_CRAM_ENTRY_COUNT * 3U];
+  for (unsigned i = 0U; i < GENESIS_VDP_CRAM_ENTRY_COUNT; ++i) {
+    const GenesisRgb888 color = genesis_vdp_decode_cram_word((uint16_t)(((uint16_t)palette[i * 2U] << 8) | (uint16_t)palette[i * 2U + 1U]));
+    lut[i * 3U] = color.r;
+    lut[i * 3U + 1U] = color.g;
+    lut[i * 3U + 2U] = color.b;
+  }
   for (unsigned x = 0U; x < width; ++x) {
-    GenesisRgb888 color;
-    if (pixels[x] >= GENESIS_VDP_CRAM_ENTRY_COUNT || genesis_vdp_decode_cram_entry(palette, pixels[x], &color) != 0) {
+    const unsigned index = pixels[x];
+    if (index >= GENESIS_VDP_CRAM_ENTRY_COUNT) {
       return -1;
     }
-    rgb_out[x * 3U] = color.r;
-    rgb_out[x * 3U + 1U] = color.g;
-    rgb_out[x * 3U + 2U] = color.b;
+    rgb_out[x * 3U] = lut[index * 3U];
+    rgb_out[x * 3U + 1U] = lut[index * 3U + 1U];
+    rgb_out[x * 3U + 2U] = lut[index * 3U + 2U];
   }
   return 0;
 }
