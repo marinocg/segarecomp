@@ -1,0 +1,11 @@
+{
+ "genesis_512k": {
+  "frames_compared": 64,
+  "identical": true,
+  "exit_codes": [
+   0,
+   0
+  ],
+  "notes_compared": 3
+ }
+}
