@@ -14,7 +14,7 @@ SV_PIN(SV_KEY_U, SDL_SCANCODE_U); SV_PIN(SV_KEY_X, SDL_SCANCODE_X); SV_PIN(SV_KE
 SV_PIN(SV_KEY_ESCAPE, SDL_SCANCODE_ESCAPE); SV_PIN(SV_KEY_BACKSPACE, SDL_SCANCODE_BACKSPACE); SV_PIN(SV_KEY_DELETE, SDL_SCANCODE_DELETE);
 SV_PIN(SV_KEY_F11, SDL_SCANCODE_F11); SV_PIN(SV_KEY_F12, SDL_SCANCODE_F12); SV_PIN(SV_KEY_RIGHT, SDL_SCANCODE_RIGHT); SV_PIN(SV_KEY_LEFT, SDL_SCANCODE_LEFT);
 SV_PIN(SV_KEY_DOWN, SDL_SCANCODE_DOWN); SV_PIN(SV_KEY_UP, SDL_SCANCODE_UP); SV_PIN(SV_KEY_RSHIFT, SDL_SCANCODE_RSHIFT); SV_PIN(SV_KEY_F1, SDL_SCANCODE_F1);
-SV_PIN(SV_KEY_F10, SDL_SCANCODE_F10);
+SV_PIN(SV_KEY_F10, SDL_SCANCODE_F10); SV_PIN(SV_KEY_F5, SDL_SCANCODE_F5); SV_PIN(SV_KEY_F7, SDL_SCANCODE_F7); SV_PIN(SV_KEY_F8, SDL_SCANCODE_F8);
 SV_PIN(SV_PAD_SOUTH, SDL_GAMEPAD_BUTTON_SOUTH); SV_PIN(SV_PAD_EAST, SDL_GAMEPAD_BUTTON_EAST); SV_PIN(SV_PAD_WEST, SDL_GAMEPAD_BUTTON_WEST);
 SV_PIN(SV_PAD_NORTH, SDL_GAMEPAD_BUTTON_NORTH); SV_PIN(SV_PAD_BACK, SDL_GAMEPAD_BUTTON_BACK); SV_PIN(SV_PAD_GUIDE, SDL_GAMEPAD_BUTTON_GUIDE);
 SV_PIN(SV_PAD_START, SDL_GAMEPAD_BUTTON_START); SV_PIN(SV_PAD_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_UP); SV_PIN(SV_PAD_DPAD_DOWN, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
@@ -339,6 +339,8 @@ static void common_event(SvHost *h, const SDL_Event *e) {
           if (e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX) h->pads[i].ax = e->gaxis.value;
           else if (e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY) h->pads[i].ay = e->gaxis.value;
         }
+      if (e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER) h->trigger_l = e->gaxis.value;       /* SEG-131: the two-trigger rewind shortcut */
+      else if (e->gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) h->trigger_r = e->gaxis.value;
       break;
     }
     default: break;
@@ -735,6 +737,7 @@ static void draw_scene(SvHost *h, int overlay) {
     if (!sv_pages_wants_preview(h)) sv_host_fill(h, 0, 0, out_w, out_h, dim);
     sv_pages_draw(h, out_w, out_h);
   }
+  if (h->rewind != NULL) sv_draw_rewind(h, out_w, out_h);   /* SEG-131: the rewind surface owns the whole window while it is open */
   draw_hud(h, out_w, out_h);
 }
 
@@ -942,6 +945,7 @@ void sv_host_close(SvHost *h) {
   if (h->frame_tex != NULL) SDL_DestroyTexture(h->frame_tex);
   crt_state_destroy(&h->crt);
   crt_state_destroy(&h->crt_preview);
+  if (h->slot_tex != NULL) { SDL_DestroyTexture(h->slot_tex); h->slot_tex = NULL; }
   sv_ui_destroy(h);
   { int k; for (k = 0; k < h->icon_count; ++k) if (h->icons[k] != NULL) SDL_DestroyTexture(h->icons[k]); }
   if (h->renderer != NULL) SDL_DestroyRenderer(h->renderer);
@@ -1392,9 +1396,215 @@ static void run_menu(SvHost *h) {
   sv_host_apply_audio(h);
 }
 
+/* ---- SEG-131: the visual rewind surface. A modal loop like the pause overlay: the adapter is blocked in sv_host_service, so the guest does not advance, no clock
+ * moves and nothing is written to disk while the player browses; audio is paused and its queue dropped. ---- */
+
+#define REWIND_ANIM_MS 220u
+
+static void rewind_free(SvHost *h) {
+  SvRewindUi *ui = h->rewind;
+  int i;
+  if (ui == NULL) return;
+  if (ui->tex != NULL)
+    for (i = 0; i < ui->count; ++i)
+      if (ui->tex[i] != NULL) SDL_DestroyTexture(ui->tex[i]);
+  free(ui->tex);
+  free(ui->entries);
+  free(ui);
+  h->rewind = NULL;
+}
+
+static void rewind_step_anim(SvRewindUi *ui) {
+  const float t = (float)(SDL_GetTicks() - ui->anim_start) / (float)REWIND_ANIM_MS;
+  ui->anim = ui->closing ? 1.0f - (t > 1.0f ? 1.0f : t) : (t > 1.0f ? 1.0f : t);
+}
+
+int sv_host_open_rewind(SvHost *h) {
+  SvRewindUi *ui;
+  SDL_Event e;
+  char why[160] = "";
+  int i, restored = 0, done = 0, stick_x = 0, iteration = 0, last_shot = -1, settle = 0;
+  const int shots = h->capture_dir[0] != '\0' && SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_OVERLAYS") != NULL;   /* automation: let the surface settle and take one key per frame */
+  if (h == NULL || h->quit) return 0;
+  if (!h->has_state || h->state.rewind_available == NULL || h->state.history_count == NULL || h->state.history_info == NULL || h->state.restore_entry == NULL) {
+    sv_host_toast(h, "Rewind is not available for this system yet");
+    return 0;
+  }
+  if (!h->state.rewind_available(h->state.ctx, why, sizeof why)) { sv_host_toast(h, why[0] != '\0' ? why : "Rewind is not available right now"); return 0; }
+  ui = (SvRewindUi *)calloc(1u, sizeof *ui);
+  if (ui == NULL) return 0;
+  ui->count = h->state.history_count(h->state.ctx);
+  if (ui->count < 0) ui->count = 0;
+  ui->entries = (SvRewindEntry *)calloc((size_t)ui->count + 1u, sizeof *ui->entries);
+  ui->tex = (SDL_Texture **)calloc((size_t)ui->count + 1u, sizeof *ui->tex);
+  if (ui->entries == NULL || ui->tex == NULL) { free(ui->entries); free(ui->tex); free(ui); sv_host_toast(h, "Rewind could not start: out of memory"); return 0; }
+  for (i = 0; i < ui->count; ++i)
+    if (h->state.history_info(h->state.ctx, i, &ui->entries[i]) != 0) memset(&ui->entries[i], 0, sizeof ui->entries[i]);
+  ui->span_ms = ui->count > 0 ? ui->entries[0].age_ms : 0;
+  if (h->state.history_note != NULL) (void)h->state.history_note(h->state.ctx, ui->note, sizeof ui->note);
+  sv_rewind_model_init(&ui->model, ui->count);
+  ui->hover = -1;
+  ui->anim_start = SDL_GetTicks();
+  h->rewind = ui;
+  if (h->state.rewind_opened != NULL) h->state.rewind_opened(h->state.ctx);
+  sv_host_release_inputs(h);
+  if (h->audio != NULL) { SDL_PauseAudioStreamDevice(h->audio); SDL_ClearAudioStream(h->audio); }
+  h->menu_open = 1;   /* held-input and pacing code treat the surface like the pause overlay */
+  while (!done && !h->quit) {
+    int got = shots && settle < 16 ? 0 : SDL_WaitEventTimeout(&e, 16);
+    int confirm = 0, cancel = 0;
+    if (shots && settle < 16) SDL_Delay(16);
+    while (got) {
+      common_event(h, &e);
+      if (ui->closing == 0) {
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+          const int sc = (int)e.key.scancode;
+          h->last_input_pad = 0;
+          if (sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_A) sv_rewind_move(&ui->model, -1);
+          else if (sc == SDL_SCANCODE_RIGHT || sc == SDL_SCANCODE_D) sv_rewind_move(&ui->model, 1);
+          else if (sc == SDL_SCANCODE_PAGEUP) sv_rewind_move(&ui->model, -SV_REWIND_JUMP);
+          else if (sc == SDL_SCANCODE_PAGEDOWN) sv_rewind_move(&ui->model, SV_REWIND_JUMP);
+          else if (sc == SDL_SCANCODE_HOME) sv_rewind_select(&ui->model, 0);
+          else if (sc == SDL_SCANCODE_END) sv_rewind_select(&ui->model, ui->model.history);
+          else if (!e.key.repeat && (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER || sc == SDL_SCANCODE_SPACE)) confirm = 1;
+          else if (!e.key.repeat && (sc == SDL_SCANCODE_ESCAPE || sc == SDL_SCANCODE_F7 || sc == h->settings.menu_key)) cancel = 1;
+          else if (!e.key.repeat && sc == SDL_SCANCODE_F11) sv_host_toggle_fullscreen(h);
+          else if (!e.key.repeat && sc == SDL_SCANCODE_F12) sv_host_take_screenshot(h);
+          ui->error[0] = '\0';
+        } else if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+          const int b = e.gbutton.button;
+          h->last_input_pad = 1;
+          if (b == SDL_GAMEPAD_BUTTON_DPAD_LEFT) sv_rewind_move(&ui->model, -1);
+          else if (b == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) sv_rewind_move(&ui->model, 1);
+          else if (b == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) sv_rewind_move(&ui->model, -SV_REWIND_JUMP);
+          else if (b == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) sv_rewind_move(&ui->model, SV_REWIND_JUMP);
+          else if (b == SDL_GAMEPAD_BUTTON_SOUTH) confirm = 1;        /* the south face button confirms whatever letter the controller prints on it */
+          else if (b == SDL_GAMEPAD_BUTTON_EAST || b == SDL_GAMEPAD_BUTTON_BACK || b == SDL_GAMEPAD_BUTTON_GUIDE) cancel = 1;
+          ui->error[0] = '\0';
+        } else if (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX) {
+          const int dir = sv_axis_direction(e.gaxis.value, h->settings.deadzone);
+          if (dir != stick_x) {
+            stick_x = dir;
+            h->last_input_pad = 1;
+            if (dir != 0) sv_rewind_move(&ui->model, dir < 0 ? -1 : 1);
+          }
+        } else if (e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+          float mx, my;
+          SDL_ConvertEventToRenderCoordinates(h->renderer, &e);
+          mx = e.type == SDL_EVENT_MOUSE_MOTION ? e.motion.x : e.button.x;
+          my = e.type == SDL_EVENT_MOUSE_MOTION ? e.motion.y : e.button.y;
+          ui->hover = sv_rewind_hit(&ui->layout, (int)mx, (int)my);
+          if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+            const SvRect *rb = &ui->layout.restore_button, *cb = &ui->layout.cancel_button;
+            if (ui->hover >= 0) { sv_rewind_select(&ui->model, ui->hover); ui->error[0] = '\0'; }   /* a click selects; confirming is explicit */
+            else if ((int)mx >= rb->x && (int)mx < rb->x + rb->w && (int)my >= rb->y && (int)my < rb->y + rb->h) confirm = 1;
+            else if ((int)mx >= cb->x && (int)mx < cb->x + cb->w && (int)my >= cb->y && (int)my < cb->y + cb->h) cancel = 1;
+          }
+        } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+          if (e.wheel.y > 0.0f) sv_rewind_move(&ui->model, -1); else if (e.wheel.y < 0.0f) sv_rewind_move(&ui->model, 1);
+        }
+      }
+      got = shots && e.type == SDL_EVENT_KEY_DOWN ? 0 : SDL_PollEvent(&e);
+    }
+    if (ui->closing == 0 && confirm) {
+      if (!sv_rewind_selection_is_moment(&ui->model)) {
+        cancel = 1;   /* confirming NOW is simply resuming */
+      } else {
+        char error[96] = "", label[24], text[96];
+        const int index = ui->model.selected;
+        sv_rewind_label(ui->entries[index].age_ms, 0, label, sizeof label);
+        if (h->state.restore_entry(h->state.ctx, index, error, sizeof error) == 0) {
+          snprintf(text, sizeof text, "Rewound to %s", label);
+          sv_host_toast(h, text);
+          sv_host_release_inputs(h);
+          restored = 1;
+          ui->closing = 2;
+          ui->anim_start = SDL_GetTicks();
+        } else {   /* stay in the surface: the running game is exactly as it was */
+          snprintf(ui->error, sizeof ui->error, "Could not rewind: %s", error[0] != '\0' ? error : "unknown error");
+        }
+      }
+    }
+    if (ui->closing == 0 && cancel) {
+      if (h->state.rewind_cancelled != NULL) h->state.rewind_cancelled(h->state.ctx);
+      ui->closing = 1;
+      ui->anim_start = SDL_GetTicks();
+    }
+    ++settle;
+    rewind_step_anim(ui);
+    if (ui->closing != 0 && ui->anim <= 0.0f) done = 1;
+    {
+      int out_w = 0, out_h = 0;
+      SDL_GetCurrentRenderOutputSize(h->renderer, &out_w, &out_h);
+      (void)out_w; (void)out_h;
+      draw_scene(h, 0);
+      if (h->capture_dir[0] != '\0' && SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_OVERLAYS") != NULL && ui->closing == 0 && ui->anim >= 1.0f && ui->model.selected != last_shot) {
+        char tag[32];   /* automation seam: the composed rewind surface, once per selection (read-only) */
+        last_shot = ui->model.selected;
+        snprintf(tag, sizeof tag, "-rewind-sel%d", last_shot);
+        capture_save(h, tag);
+      }
+      if (h->hook != NULL && h->hook(h->hook_ctx, h, iteration++) != 0 && ui->closing == 0) {   /* automation: close without a restore */
+        if (h->state.rewind_cancelled != NULL) h->state.rewind_cancelled(h->state.ctx);
+        ui->closing = 1;
+        ui->anim_start = SDL_GetTicks();
+      }
+      SDL_RenderPresent(h->renderer);
+    }
+  }
+  if (ui->closing == 0 && h->state.rewind_cancelled != NULL) h->state.rewind_cancelled(h->state.ctx);   /* the window was closed while browsing */
+  rewind_free(h);
+  h->menu_open = 0;
+  sv_host_release_inputs(h);
+  if (h->audio != NULL) { SDL_ClearAudioStream(h->audio); SDL_ResumeAudioStreamDevice(h->audio); }
+  sv_host_apply_audio(h);
+  return restored;
+}
+
+/* ---- SEG-131: whole-machine save states (the provider is the adapter's; the host only asks at its snapshot barrier) ---- */
+
+void sv_host_set_state_provider(SvHost *h, const SvStateProvider *provider) {
+  if (h == NULL) return;
+  if (provider != NULL) { h->state = *provider; h->has_state = 1; }
+  else { memset(&h->state, 0, sizeof h->state); h->has_state = 0; }
+}
+
+static void slot_label(int slot, char *out, size_t cap) {
+  if (slot == 0) snprintf(out, cap, "Quick Slot");
+  else snprintf(out, cap, "Slot %d", slot);
+}
+
+/* The quick slot is slot 0; every outcome is reported to the player and a failure never claims success. */
+static int quick_action(SvHost *h, int save) {
+  char why[96] = "", error[96] = "", text[128], name[16];
+  if (h == NULL) return -1;
+  if (!h->has_state || h->state.states_available == NULL || (save ? h->state.save_slot == NULL : h->state.load_slot == NULL)) {
+    sv_host_toast(h, "Save states are not available for this system yet");
+    return 0;
+  }
+  if (!h->state.states_available(h->state.ctx, why, sizeof why)) {
+    snprintf(text, sizeof text, "%s", why[0] != '\0' ? why : "Save states are not available right now");
+    sv_host_toast(h, text);
+    return 0;
+  }
+  slot_label(0, name, sizeof name);
+  if (save) {
+    if (h->state.save_slot(h->state.ctx, 0, error, sizeof error) == 0) snprintf(text, sizeof text, "State saved - %s", name);
+    else snprintf(text, sizeof text, "Save failed: %s", error[0] != '\0' ? error : "unknown error");
+  } else {
+    if (h->state.load_slot(h->state.ctx, 0, error, sizeof error) == 0) { sv_host_release_inputs(h); snprintf(text, sizeof text, "State loaded - %s", name); }
+    else snprintf(text, sizeof text, "Load failed: %s", error[0] != '\0' ? error : "unknown error");
+  }
+  sv_host_toast(h, text);
+  return 0;
+}
+
+int sv_host_quick_save(SvHost *h) { return quick_action(h, 1); }
+int sv_host_quick_load(SvHost *h) { return quick_action(h, 0); }
+
 void sv_host_service(SvHost *h, SvSample *out) {
   SDL_Event e;
-  int open_menu = 0, p;
+  int open_menu = 0, p, want_rewind = 0;
   memset(out, 0, sizeof *out);
   while (SDL_PollEvent(&e)) {
     common_event(h, &e);
@@ -1405,6 +1615,9 @@ void sv_host_service(SvHost *h, SvSample *out) {
         if (sc == SDL_SCANCODE_RETURN) { h->key_held[sc] = 0; h->key_latch[sc] = 0; }
         sv_host_toggle_fullscreen(h);
       } else if (sc == SDL_SCANCODE_F12) sv_host_take_screenshot(h);
+      else if (sc == SDL_SCANCODE_F5) (void)sv_host_quick_save(h);   /* SEG-131: quick save / quick load, at the adapter's snapshot barrier */
+      else if (sc == SDL_SCANCODE_F8) (void)sv_host_quick_load(h);
+      else if (sc == SDL_SCANCODE_F7) want_rewind = 1;
       else if (sc == SDL_SCANCODE_F3 && h->perf != NULL) {   /* SEG-125: cycle the performance overlay without leaving the game */
         static const char *const names[] = {"Performance overlay: off", "Performance overlay: player", "Performance overlay: developer"};
         h->settings.video.perf_overlay = (h->settings.video.perf_overlay + 1) % 3;
@@ -1418,7 +1631,20 @@ void sv_host_service(SvHost *h, SvSample *out) {
     const uint64_t paused_from = sv_perf_span_begin(h->perf);
     run_menu(h);
     out->menu_was_open = 1;
+    if (h->want_rewind) { want_rewind = 1; h->want_rewind = 0; }   /* the Rewind row of the pause menu: open the surface once the menu is gone */
     sv_perf_resync(h->perf, paused_from);   /* a pause is not a slow frame: the interval clock restarts and the pause is reported separately */
+  }
+  {  /* both analog triggers held for a short, debounced interval (a deliberate chord, never a game input); re-armed when a trigger is released */
+    const int both = h->trigger_l > 16000 && h->trigger_r > 16000;
+    if (!both) { h->trigger_since = 0u; if (h->trigger_l < 8000 || h->trigger_r < 8000) h->trigger_latched = 0; }
+    else if (h->trigger_since == 0u) h->trigger_since = SDL_GetTicks();
+    else if (!h->trigger_latched && SDL_GetTicks() - h->trigger_since >= 350u) { h->trigger_latched = 1; want_rewind = 1; }
+  }
+  if (want_rewind && !h->quit) {
+    const uint64_t paused_from = sv_perf_span_begin(h->perf);
+    (void)sv_host_open_rewind(h);
+    out->menu_was_open = 1;
+    sv_perf_resync(h->perf, paused_from);
   }
   perf_sync(h);
   if (h->quit) { out->quit = 1; return; }

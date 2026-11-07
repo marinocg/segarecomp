@@ -46,6 +46,7 @@ static void page_widths(int page_id, int *want, int *least) {
     case PAGE_AUDIO: *want = 600; *least = 400; break;
     case PAGE_SYSTEM: *want = 780; *least = 460; break;
     case PAGE_PADSTATUS: *want = 720; *least = 460; break;
+    case PAGE_STATE_SAVE: case PAGE_STATE_LOAD: *want = 780; *least = 460; break;
     default: *want = 500; *least = 330; break; /* confirmations */
   }
 }
@@ -333,7 +334,9 @@ static void draw_item(SvHost *h, const SvPage *page, int idx, int x, int y, int 
         }
         break;
       }
-      case SV_ITEM_BUTTON: break;
+      case SV_ITEM_BUTTON:   /* SEG-131: a slot row shows its state ("12:34 played", "Empty") at the right */
+        if (it->id >= I_SLOT && it->id < I_SLOT + SV_STATE_SLOTS && it->text[0] != '\0') text_right(h, u, right, ty, vw + w / 6, enabled ? K_TEXT2 : K_DIM, it->text);
+        break;
     }
   }
 }
@@ -391,6 +394,224 @@ static void draw_preview_column(SvHost *h, int x, int y, int w, int pic_h, int b
   }
 }
 
+/* ---- SEG-131: the focused save-state slot: its own thumbnail (the frame of the snapshot, never a later window capture) and its facts ---- */
+
+static void slot_playtime(uint64_t ms, char *out, size_t cap) {
+  const uint64_t seconds = ms / 1000u, hours = seconds / 3600u, minutes = (seconds / 60u) % 60u, secs = seconds % 60u;
+  if (hours > 0u) snprintf(out, cap, "%u:%02u:%02u", (unsigned)hours, (unsigned)minutes, (unsigned)secs);
+  else snprintf(out, cap, "%u:%02u", (unsigned)minutes, (unsigned)secs);
+}
+
+static void draw_slot_preview(SvHost *h, const SvPage *page, int x, int y, int w, int pic_h, int u) {
+  const SvItem *cur = page->focus >= 0 && page->focus < page->count ? &page->items[page->focus] : NULL;
+  const int slot = cur != NULL && cur->id >= I_SLOT && cur->id < I_SLOT + SV_STATE_SLOTS ? cur->id - I_SLOT : -1;
+  const SvStateSlotInfo *info = slot >= 0 ? &h->slot_info[slot] : NULL;
+  const int lh = sv_ui_line_h(SV_FONT_BODY, u);
+  char name[24], line[64];
+  int py = y;
+  if (slot < 0) return;
+  if (slot == 0) snprintf(name, sizeof name, "Quick Slot"); else snprintf(name, sizeof name, "Slot %d", slot);
+  text_bold(h, u, x, py, K_FOCUS, name);
+  py += lh + 6 * u;
+  sv_ui_chamfer(h, x, py, w, pic_h, 2 * u, K_SEL_EDGE);
+  sv_ui_chamfer(h, x + u, py + u, w - 2 * u, pic_h - 2 * u, u, K_OUTLINE);
+  if (info->thumb.w > 0 && info->thumb.rgb565 != NULL) {
+    if (h->slot_tex == NULL || h->slot_tex_slot != slot || h->slot_tex_w != info->thumb.w || h->slot_tex_h != info->thumb.h) {
+      if (h->slot_tex != NULL) SDL_DestroyTexture(h->slot_tex);
+      h->slot_tex = SDL_CreateTexture(h->renderer, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STATIC, info->thumb.w, info->thumb.h);
+      h->slot_tex_slot = slot; h->slot_tex_w = info->thumb.w; h->slot_tex_h = info->thumb.h;
+      if (h->slot_tex != NULL) SDL_SetTextureScaleMode(h->slot_tex, SDL_SCALEMODE_NEAREST);
+    }
+    if (h->slot_tex != NULL) {
+      SDL_FRect dst;
+      const float box_w = (float)(w - 6 * u), box_h = (float)(pic_h - 6 * u);
+      const float scale = box_w / (float)info->thumb.w < box_h / (float)info->thumb.h ? box_w / (float)info->thumb.w : box_h / (float)info->thumb.h;
+      SDL_UpdateTexture(h->slot_tex, NULL, info->thumb.rgb565, info->thumb.w * 2);
+      dst.w = (float)info->thumb.w * scale; dst.h = (float)info->thumb.h * scale;
+      dst.x = (float)x + 3.0f * (float)u + (box_w - dst.w) / 2.0f; dst.y = (float)py + 3.0f * (float)u + (box_h - dst.h) / 2.0f;
+      SDL_RenderTexture(h->renderer, h->slot_tex, NULL, &dst);
+    }
+  } else {
+    const char *empty = info->damaged ? "Unusable state" : "Empty";
+    sv_ui_text(h, SV_FONT_BODY, u, x + (w - sv_ui_text_w(SV_FONT_BODY, u, empty)) / 2, py + (pic_h - lh) / 2, K_DIM, empty);
+  }
+  py += pic_h + 8 * u;
+  if (info->occupied) {
+    char time_text[24];
+    slot_playtime(info->guest_ms, time_text, sizeof time_text);
+    snprintf(line, sizeof line, "Played %s", time_text);
+    sv_ui_text(h, SV_FONT_BODY, u, x, py, K_TEXT2, line);
+  } else if (info->damaged && info->note[0] != '\0') {
+    text_in(h, SV_FONT_BODY, u, x, py, w, K_ERR, info->note);
+  }
+}
+
+
+/* ---- SEG-131: the visual rewind surface ----
+ * A full-window dark surface in the project's blue/cyan pixel style: the game picture shrinks into a central preview (native aspect, letterboxed, nearest-neighbour
+ * pixels), a horizontally scrolling timeline of real historical pictures runs below it (oldest left, NOW right, the selected card larger), and the footer says how to
+ * navigate. Nothing here reads a machine: pictures are the provider's thumbnails and the host's own last presented frame. */
+
+static SDL_Texture *rewind_thumb(SvHost *h, SvRewindUi *ui, int index) {
+  const SvRewindEntry *e;
+  if (index < 0 || index >= ui->count || ui->tex == NULL) return NULL;
+  e = &ui->entries[index];
+  if (e->thumb.w <= 0 || e->thumb.h <= 0 || e->thumb.rgb565 == NULL) return NULL;
+  if (ui->tex[index] == NULL) {
+    ui->tex[index] = SDL_CreateTexture(h->renderer, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STATIC, e->thumb.w, e->thumb.h);
+    if (ui->tex[index] != NULL) {
+      SDL_SetTextureScaleMode(ui->tex[index], SDL_SCALEMODE_NEAREST);
+      SDL_UpdateTexture(ui->tex[index], NULL, e->thumb.rgb565, e->thumb.w * 2);
+    }
+  }
+  return ui->tex[index];
+}
+
+/* A picture (a moment's thumbnail, or the live NOW picture) fitted and letterboxed inside box (x, y, w, h). */
+static void rewind_picture(SvHost *h, SvRewindUi *ui, int index, int x, int y, int w, int hh) {
+  if (index >= ui->count) { sv_host_draw_picture(h, (float)x, (float)y, (float)w, (float)hh); return; }
+  {
+    SDL_Texture *tex = rewind_thumb(h, ui, index);
+    const SvRewindEntry *e = &ui->entries[index];
+    if (tex != NULL) {
+      const SvRect fit = sv_layout_dest(w, hh, e->thumb.w, e->thumb.h, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+      SDL_FRect d;
+      d.x = (float)(x + fit.x); d.y = (float)(y + fit.y); d.w = (float)fit.w; d.h = (float)fit.h;
+      SDL_RenderTexture(h->renderer, tex, NULL, &d);
+    } else {
+      sv_host_fill(h, x, y, w, hh, K_FIELD);   /* an entry without a thumbnail is a plain dark card, never a stale picture */
+    }
+  }
+}
+
+static void rewind_cues(SvHost *h, const SvRewindLayout *L, int u, int moment) {
+  const int pad_mode = h->last_input_pad, nin = pad_mode && nintendo_pad_present(h);
+  const SDL_Color green = {48, 176, 120, 255}, red = {214, 70, 78, 255};
+  const int cy = L->footer.y + L->footer.h / 2, margin = L->preview_area.x;
+  int x = L->cancel_button.x - 14 * u;
+  char hint[96];
+  /* physical-position meaning of the face buttons: south confirms, east cancels; the printed letter follows the layout (A/B on Xbox, B/A on Nintendo) */
+  x = draw_cue(h, x, cy, u, pad_mode, pad_mode ? (nin ? "A" : "B") : "Esc", red, "Cancel");
+  x = draw_cue(h, x - 14 * u, cy, u, pad_mode, pad_mode ? (nin ? "B" : "A") : "Enter", green, moment ? "Restore" : "Resume");
+  snprintf(hint, sizeof hint, "%s", pad_mode ? "D-Pad Browse    LB/RB Jump" : "Left/Right Browse    PgUp/PgDn Jump");
+  if (x - 14 * u - sv_ui_text_w(SV_FONT_BODY, u, hint) > margin) sv_ui_text(h, SV_FONT_BODY, u, margin, cy - 7 * u, K_TEXT2, hint);
+}
+
+static void rewind_button(SvHost *h, const SvRect *r, int u, const char *label, int primary, int enabled) {
+  const SDL_Color edge = primary ? K_SEL_EDGE : K_ROW_EDGE, fill = primary ? K_SEL : K_ROW;
+  sv_ui_chamfer(h, r->x, r->y, r->w, r->h, 2 * u, enabled ? edge : K_ROW_EDGE);
+  sv_ui_chamfer(h, r->x + u, r->y + u, r->w - 2 * u, r->h - 2 * u, u, enabled ? fill : K_FIELD);
+  sv_ui_text(h, SV_FONT_BODY, u, r->x + (r->w - sv_ui_text_w(SV_FONT_BODY, u, label)) / 2, text_top(r->y, r->h, u), enabled ? K_WHITE : K_DIM, label);
+}
+
+void sv_draw_rewind(SvHost *h, int out_w, int out_h) {
+  SvRewindUi *ui = h->rewind;
+  SvRewindLayout *L;
+  int u, i, lh, moment, pic_w, pic_h, selected;
+  float t, e;
+  char label[24], text[160];
+  if (ui == NULL) return;
+  L = &ui->layout;
+  u = sv_host_ui_scale(out_w, out_h);
+  lh = sv_ui_line_h(SV_FONT_BODY, u);
+  selected = ui->model.selected;
+  pic_w = h->last_w > 0 ? h->last_w : 320;
+  pic_h = h->last_h > 0 ? h->last_h : 224;
+  if (selected < ui->count && ui->entries[selected].thumb.w > 0) { pic_w = ui->entries[selected].thumb.w; pic_h = ui->entries[selected].thumb.h; }
+  sv_rewind_layout(L, out_w, out_h, u, &ui->model, pic_w, pic_h);
+  moment = sv_rewind_selection_is_moment(&ui->model);
+  t = ui->anim < 0.0f ? 0.0f : (ui->anim > 1.0f ? 1.0f : ui->anim);
+  e = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+
+  sv_host_fill(h, 0, 0, out_w, out_h, (SDL_Color){3, 9, 24, (Uint8)(238.0f * e)});
+
+  /* the live picture travels between the full-window picture and the preview; at rest, a historical selection shows its own thumbnail instead */
+  {
+    const SvRect full = sv_layout_dest(out_w, out_h, h->last_w > 0 ? h->last_w : 320, h->last_h > 0 ? h->last_h : 224, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+    const SvRect to = L->preview;
+    const int x = (int)((float)full.x + (float)(to.x - full.x) * e), y = (int)((float)full.y + (float)(to.y - full.y) * e);
+    const int w = (int)((float)full.w + (float)(to.w - full.w) * e), hh = (int)((float)full.h + (float)(to.h - full.h) * e);
+    if (t < 1.0f || !moment || ui->closing == 2) {   /* (after a restore the entries' pictures belong to the discarded future: only the live picture is drawn) */
+      sv_host_draw_picture(h, (float)x, (float)y, (float)w, (float)hh);
+    } else {
+      rewind_picture(h, ui, selected, to.x, to.y, to.w, to.h);
+    }
+    if (t >= 1.0f) {   /* crisp outline of the preview */
+      sv_ui_chamfer(h, to.x - 3 * u, to.y - 3 * u, to.w + 6 * u, 3 * u, u, K_SEL_EDGE);
+      sv_host_fill(h, to.x - 3 * u, to.y + to.h, to.w + 6 * u, 3 * u, K_SEL_EDGE);
+      sv_host_fill(h, to.x - 3 * u, to.y, 3 * u, to.h, K_SEL_EDGE);
+      sv_host_fill(h, to.x + to.w, to.y, 3 * u, to.h, K_SEL_EDGE);
+    }
+  }
+  if (t < 0.9f || ui->closing == 2) return;   /* the chrome appears as the picture settles, and is gone the moment a restore replaced the history it shows */
+
+  /* header */
+  sv_host_fill(h, 0, 0, out_w, L->header.h, K_HEADER);
+  sv_host_fill(h, 0, L->header.h - u, out_w, u, K_RULE);
+  text_bold(h, u + (L->header.h >= 56 ? 1 : 0), L->preview_area.x, text_top(0, L->header.h, u + (L->header.h >= 56 ? 1 : 0)), K_WHITE, "REWIND");
+  {
+    const int title_w = sv_ui_text_w(SV_FONT_BODY, u + (L->header.h >= 56 ? 1 : 0), "REWIND") + 18 * u;
+    const char *sub = moment ? "Enter restores the selected moment" : "Browse back through the last moments";
+    text_in(h, SV_FONT_BODY, u, L->preview_area.x + title_w, text_top(0, L->header.h, u), out_w / 2 - title_w, K_TEXT2, sub);
+    if (ui->count > 0) {
+      sv_rewind_label(ui->span_ms, 0, label, sizeof label);
+      snprintf(text, sizeof text, "%d moments - last %s", ui->count, label + 1);
+      text_right(h, u, out_w - L->preview_area.x, text_top(0, L->header.h, u), out_w / 2, K_FOCUS, text);
+    }
+  }
+  if (ui->note[0] != '\0') text_in(h, SV_FONT_BODY, u, L->preview_area.x, L->header.h + 2 * u, out_w - 2 * L->preview_area.x, K_WARN, ui->note);
+
+  /* what the preview shows */
+  {
+    const int y = L->preview_area.y + L->preview_area.h + 2 * u;
+    if (moment) {
+      sv_rewind_label(ui->entries[selected].age_ms, 0, label, sizeof label);
+      snprintf(text, sizeof text, "%s  -  moment %d of %d", label, selected + 1, ui->count);
+    } else {
+      snprintf(text, sizeof text, "NOW  -  where you are");
+    }
+    text_bold(h, u, (out_w - sv_ui_text_w(SV_FONT_BODY, u, text)) / 2, y, moment ? K_WHITE : K_FOCUS, text);
+    if (ui->count == 0) {
+      const char *none = "No earlier moments yet. Keep playing for a moment, then try again.";
+      sv_ui_text(h, SV_FONT_BODY, u, (out_w - sv_ui_text_w(SV_FONT_BODY, u, none)) / 2, y + lh + 2 * u, K_TEXT2, none);
+    }
+  }
+
+  /* timeline */
+  for (i = 0; i < L->card_count; ++i) {
+    const SvRewindCard *c = &L->cards[i];
+    const int now = c->index >= ui->count, sel = c->selected, hover = c->index == ui->hover;
+    const int b = sel ? 3 * u : u;
+    const SDL_Color edge = sel ? K_SEL_EDGE : (hover ? K_LIGHT : (now ? K_CYAN : K_ROW_EDGE));
+    if (sel) sv_ui_chamfer(h, c->rect.x - b - 2 * u, c->rect.y - b - 2 * u, c->rect.w + 2 * b + 4 * u, c->rect.h + 2 * b + 4 * u, 3 * u, K_SEL_SOFT);
+    sv_ui_chamfer(h, c->rect.x - b, c->rect.y - b, c->rect.w + 2 * b, c->rect.h + 2 * b, 2 * u, edge);
+    sv_host_fill(h, c->rect.x, c->rect.y, c->rect.w, c->rect.h, K_OUTLINE);
+    rewind_picture(h, ui, c->index, c->rect.x, c->rect.y, c->rect.w, c->rect.h);
+    if (now) sv_rewind_label(0, 1, label, sizeof label);
+    else sv_rewind_label(ui->entries[c->index].age_ms, 0, label, sizeof label);
+    {
+      const int lw = sv_ui_text_w(SV_FONT_BODY, u, label);
+      const SDL_Color lc = now ? K_FOCUS : (sel ? K_WHITE : K_TEXT2);
+      if (sel || now) text_bold(h, u, c->rect.x + (c->rect.w - lw) / 2, L->label_y, lc, label);
+      else sv_ui_text(h, SV_FONT_BODY, u, c->rect.x + (c->rect.w - lw) / 2, L->label_y, lc, label);
+    }
+  }
+  if (L->more_left) chevron(h, L->preview_area.x / 2, L->timeline.y + (L->timeline.h - L->label_h) / 2 - 3 * u, -1, u, K_FOCUS);
+  if (L->more_right) chevron(h, out_w - L->preview_area.x / 2 - 4 * u, L->timeline.y + (L->timeline.h - L->label_h) / 2 - 3 * u, 1, u, K_FOCUS);
+
+  /* footer */
+  sv_host_fill(h, 0, L->footer.y, out_w, L->footer.h, K_HEADER);
+  sv_host_fill(h, 0, L->footer.y, out_w, u, K_RULE);
+  if (ui->error[0] != '\0') {
+    const int ew = sv_ui_text_w(SV_FONT_BODY, u, ui->error);
+    sv_host_fill(h, (out_w - ew) / 2 - 8 * u, L->footer.y - lh - 8 * u, ew + 16 * u, lh + 6 * u, K_DANGER_SOFT);
+    sv_ui_text(h, SV_FONT_BODY, u, (out_w - ew) / 2, L->footer.y - lh - 5 * u, K_ERR, ui->error);
+  }
+  rewind_button(h, &L->cancel_button, u, "Cancel", 0, 1);
+  rewind_button(h, &L->restore_button, u, moment ? "Restore" : "Resume", 1, 1);
+  rewind_cues(h, L, u, moment);
+}
+
 /* ---- header ---- */
 
 static int header_h(int u) { return 44 * u; }
@@ -437,7 +658,9 @@ static int footer_h(int u, int out_h, int lh) { return out_h < 360 * u ? lh + 34
 
 /* Confirmations: warning icon and bold question, the consequence, then the two answers as full-width rows (No is the default focus). */
 static void draw_confirm(SvHost *h, SvPage *page, int out_w, int out_h, int u) {
-  const char *msg = page->page_id == PAGE_CONFIRM_QUIT ? (SDL_getenv("SEGARECOMP_LAUNCHED") != NULL ? "Any unsaved progress will be lost. Return to the launcher and close the game?" : "Any unsaved progress will be lost: there are no save states.") :
+  const char *msg = page->page_id == PAGE_CONFIRM_OVERWRITE ? "The state saved in this slot is replaced by the current game. The old state cannot be recovered." :
+                    page->page_id == PAGE_CONFIRM_LOADSTATE ? "The running game is replaced by this state. Progress since your last save is lost unless you save it to another slot first." :
+                    page->page_id == PAGE_CONFIRM_QUIT ? (SDL_getenv("SEGARECOMP_LAUNCHED") != NULL ? "Any unsaved progress will be lost. Return to the launcher and close the game?" : "Any unsaved progress will be lost: there are no save states.") :
                     page->page_id == PAGE_CONFIRM_RESET ? "Restart the game from power-on? Progress since the last power-on is lost." : "Reset these settings to their defaults? Your other settings are kept.";
   int want, least, panel_w, panel_h, x, y, pad = 18 * u, n, k, i, ty, title_s, lh = sv_ui_line_h(SV_FONT_BODY, u);
   int start[6], len[6], truncated;
@@ -481,12 +704,13 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
   const int preview = sv_pages_wants_preview(h);
   int u = sv_host_ui_scale(out_w, out_h);
   int want, least, panel_w, panel_h, x, y, pad, head_h, foot_h, body_w, body_y, body_h, i, k, drawn = 0, used = 0, avail_h, banner_h = 0, left_w, lh, gap;
-  int two_col, video, system, pic_h = 0;
+  int two_col, video, system, stateui, pic_h = 0;
   PageClass cls;
   if (page == NULL) return;
   cls = page_class(page->page_id);
   video = page->page_id == PAGE_VIDEO;
   system = page->page_id == PAGE_SYSTEM;
+  stateui = page->page_id == PAGE_STATE_SAVE || page->page_id == PAGE_STATE_LOAD;   /* SEG-131: slot list at the left, the focused slot's thumbnail at the right */
   page_widths(page->page_id, &want, &least);
   while (u > 1 && least * u > out_w - 16 * u) --u;
   s_first_bind = -1;
@@ -515,8 +739,8 @@ layout_retry:
   panel_w = want * u;
   if (panel_w > out_w - 16 * u) panel_w = out_w - 16 * u;
   body_w = panel_w - 2 * pad;
-  two_col = (video || system) && panel_w >= 440 * u;
-  left_w = video ? (body_w - gap) / 2 : (system ? (body_w - gap) * 44 / 100 : body_w);
+  two_col = (video || system || stateui) && panel_w >= 440 * u;
+  left_w = video || stateui ? (body_w - gap) / 2 : (system ? (body_w - gap) * 44 / 100 : body_w);
   if (h->conflict_msg[0] != '\0' && page->page_id == PAGE_CONTROLS) banner_h = 34 * u;
   avail_h = out_h - 12 * u - head_h - foot_h - 2 * pad - banner_h;
   if (avail_h < s_rh) avail_h = s_rh;
@@ -525,8 +749,8 @@ layout_retry:
     const int rw = body_w - left_w - gap;
     for (i = 0; i < page->count; ++i) {
       const SvItem *it = &page->items[i];
-      const int w = (video || !it->column) ? left_w : rw;
-      if (video || !it->column) lh_used += item_height(it, i, u, w); else rh_used += item_height(it, i, u, w);
+      const int w = (video || stateui || !it->column) ? left_w : rw;
+      if (video || stateui || !it->column) lh_used += item_height(it, i, u, w); else rh_used += item_height(it, i, u, w);
     }
     if (video) { /* the preview takes what the column allows: a 4:3-ish picture as wide as the column, smaller when the window is short */
       const int fixed = preview_column_h(u, 0);
@@ -534,6 +758,12 @@ layout_retry:
       if (pic_h + fixed > avail_h) pic_h = avail_h - fixed;
       if (pic_h < 60 * u) pic_h = 60 * u;
       rh_used = pic_h + fixed;
+    }
+    if (stateui) {   /* the slot picture: as wide as its column, in the 160:112 proportion of the stored thumbnails */
+      pic_h = rw * 112 / 160;
+      if (pic_h > avail_h - 2 * sv_ui_line_h(SV_FONT_BODY, u) - 14 * u) pic_h = avail_h - 2 * sv_ui_line_h(SV_FONT_BODY, u) - 14 * u;
+      if (pic_h < 40 * u) pic_h = 40 * u;
+      rh_used = pic_h + 2 * sv_ui_line_h(SV_FONT_BODY, u) + 14 * u;
     }
     used = lh_used > rh_used ? lh_used : rh_used;
     if (used > avail_h && u > 1) { --u; s_ls = u; s_rh = cls == CLASS_STANDARD ? 34 * u : 28 * u; goto layout_retry; }
@@ -563,7 +793,7 @@ layout_retry:
     for (i = 0; i < page->count; ++i) {
       int rect[4];
       const SvItem *it = &page->items[i];
-      if (video || !it->column) {
+      if (video || stateui || !it->column) {
         draw_item(h, page, i, lx, ly, left_w, u, rect);
         ly += item_height(it, i, u, left_w);
       } else {
@@ -574,6 +804,7 @@ layout_retry:
     }
     sv_host_fill(h, rx - gap / 2, body_y, u, body_h, K_RULE);
     if (video) draw_preview_column(h, rx, body_y, rw, pic_h, body_h, u);
+    else if (stateui) draw_slot_preview(h, page, rx, body_y, rw, pic_h, u);
   } else {
     int cy = body_y;
     for (i = 0; i < drawn; ++i) {

@@ -9,8 +9,26 @@
 #include "sv_layout.h"
 #include "sv_menu.h"
 #include "sv_perf.h"
+#include "sv_rewind.h"
 
 #define SV_MAX_PADS 4
+
+/* SEG-131: the open rewind surface (NULL while closed). Entries and thumbnails are BORROWED from the adapter's provider, which cannot change them while the
+ * guest is frozen; the textures are the host's and are destroyed with the surface. */
+typedef struct SvRewindUi {
+  SvRewindModel model;
+  SvRewindLayout layout;
+  SvRewindEntry *entries;       /* history entries, oldest first */
+  SDL_Texture **tex;            /* lazily created, one per entry */
+  int count;
+  char error[128];              /* the last restore failure, shown in the surface */
+  char note[128];               /* the retained history is shorter than the target (memory pressure) */
+  Uint64 anim_start;
+  float anim;                   /* 0 closed .. 1 open */
+  int closing;                  /* 0 open, 1 cancelled, 2 restored */
+  int hover;                    /* card index under the mouse, -1 none */
+  int64_t span_ms;              /* age of the oldest retained moment */
+} SvRewindUi;
 
 typedef struct SvPadSlot {
   SDL_JoystickID id;
@@ -121,11 +139,26 @@ struct SvHost {
   int (*hook)(void *ctx, SvHost *host, int iteration); /* test/automation: called with the finished overlay in the back buffer */
   void *hook_ctx;
   struct SvPerf *perf;         /* SEG-125: the adapter's collector (NULL = none); the host only appends spans and reads it for the overlay */
+  /* SEG-131: whole-machine states. The slot cache (including copies of the thumbnails) is refreshed when a slot page opens and after a save. */
+  SvStateProvider state;
+  int has_state;
+  SvStateSlotInfo slot_info[SV_STATE_SLOTS];
+  uint8_t slot_thumb[SV_STATE_SLOTS][SV_STATE_THUMB_MAX_W * SV_STATE_THUMB_MAX_H * 2];
+  int pending_slot;            /* the slot a confirmation page is about */
+  int want_rewind;             /* the Rewind row was chosen: the rewind surface opens when the pause menu has closed */
+  SvRewindUi *rewind;          /* the open rewind surface, or NULL */
+  int trigger_l, trigger_r;    /* analog trigger positions (SDL axis values) for the two-trigger rewind shortcut */
+  Uint64 trigger_since;        /* when both were last found held (0 = not both) */
+  int trigger_latched;         /* the shortcut fired for this hold: re-armed when a trigger is released */
+  SDL_Texture *slot_tex;       /* preview of the focused slot (recreated when the focus changes) */
+  int slot_tex_slot, slot_tex_w, slot_tex_h;
+  uint64_t slot_tex_stamp;
 };
 
 /* Page and item identifiers shared by the page builder (sv_pages.c) and the drawer (sv_draw.c). */
 enum {
-  PAGE_MAIN = 1, PAGE_QUICK, PAGE_VIDEO, PAGE_CONTROLS, PAGE_AUDIO, PAGE_SYSTEM, PAGE_PADSTATUS, PAGE_CONFIRM_QUIT, PAGE_CONFIRM_RESET, PAGE_CONFIRM_VIDEO, PAGE_CONFIRM_CONTROLS
+  PAGE_MAIN = 1, PAGE_QUICK, PAGE_VIDEO, PAGE_CONTROLS, PAGE_AUDIO, PAGE_SYSTEM, PAGE_PADSTATUS, PAGE_STATE_SAVE, PAGE_STATE_LOAD, PAGE_CONFIRM_QUIT, PAGE_CONFIRM_RESET, PAGE_CONFIRM_VIDEO, PAGE_CONFIRM_CONTROLS,
+  PAGE_CONFIRM_OVERWRITE, PAGE_CONFIRM_LOADSTATE
 };
 enum {
   I_RESUME = 1, I_GO_QUICK, I_GO_VIDEO, I_GO_CONTROLS, I_GO_AUDIO, I_GO_SYSTEM, I_QUIT,
@@ -134,6 +167,8 @@ enum {
   I_SHOT, I_RESET, I_INFO,
   I_PLAYER, I_PAD, I_PAD_ASSIGNED, I_DEADZONE, I_MENUKEY, I_CTRL_DEFAULTS, I_GO_PADSTATUS, I_PAD_RESCAN, I_PAD_HID,
   I_YES, I_NO,
+  I_STATE_SAVE, I_STATE_LOAD, I_REWIND,
+  I_SLOT = 300, /* + slot index (0 = quick) */
   I_BIND = 100 /* + action (one row per action: keyboard and gamepad columns) */
 };
 
@@ -150,6 +185,8 @@ void sv_pages_listen_cancel(SvHost *host, const char *why);
 void sv_pages_back(SvHost *host);
 void sv_pages_close(SvHost *host);
 int sv_pages_click(SvHost *host, float x, float y); /* handles a click on a non-row control (the preset buttons); 1 when consumed */
+void sv_pages_state_refresh(SvHost *host);
+void sv_draw_rewind(SvHost *host, int out_w, int out_h);   /* sv_draw.c: the rewind surface, drawn over the game picture */
 void sv_draw_stop_screen(SvHost *host, int out_w, int out_h, const char *title, const char *detail);
 
 /* sv_host.c */

@@ -69,6 +69,13 @@ notices. Only viewer `src/` and `include/` ship, not gallery/test sources.
 * **Text.** The body face stays ProggyClean (MIT) and headings Silkscreen (OFL): candidates were rendered and rejected (GNU Unifont as packaged here is GPL-2+
   only; Pixelify Sans draws 5 like S, unreadable in values). Fewer all-caps strings ("Live preview", "On/Off").
 
+**Save states and rewind (SEG-131, ADR 0278; user guide: [save-states.md](save-states.md)).** The pause menu lists *Save State*, *Load State* and *Rewind* right after *Resume Game* on every system; where an adapter
+registers no capability they are disabled and the focused row says why. The slot pages (*Save State*, *Load State*) are two columns: the six slots with their play time on the left and the focused slot's own picture on the
+right; an occupied slot asks before it is overwritten or loaded, always with *No* focused. The rewind surface is a full-window dark surface: a header, the live picture shrunk into a letterboxed, nearest-neighbour
+preview (upper ~58 % of the usable height), a strip of the real pictures of the last moments (oldest left, **NOW** right, the selected card larger and centered where the strip is long enough, labels like `-3.5s`), and a
+footer with the controller-layout-aware cues and Cancel / Restore buttons; the layout is computed by `libs/viewer/src/sv_rewind.c` and checked at 720x520, 1080x740, 1440x1040 and 2560x1440. F5, F7 and F8 are
+reserved host keys like F3, F11 and F12. The gallery screens come from `libs/viewer/test/sv_state_gallery.c` (a fictional picture and a fake provider; no game).
+
 **Start-up hint.** The first picture of a session shows a toast for six seconds saying how to open the pause menu ("Esc or the gamepad's Back
 button", plus the custom menu key when one is set). It uses the normal toast (top right, small) and never replaces a toast that is already showing.
 

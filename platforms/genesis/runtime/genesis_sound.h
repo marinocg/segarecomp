@@ -13,6 +13,9 @@
  * runner for unbounded runs). Returns the Z80 machine. */
 GenesisZ80Machine *genesis_sound_attach(GenesisRuntime *runtime);
 
+/* SEG-131: the same devices for the save-state service (it restores them at the snapshot barrier). NULL before the first attach. */
+struct GenesisAudio *genesis_sound_audio_mutable(void);
+
 /* The attached devices (NULL before the first attach): read-only access for aggregate counters. */
 const GenesisAudio *genesis_sound_audio(void);
 

@@ -134,6 +134,55 @@ int main(int argc, char **argv) {
     expect((after == nullptr) == (process_region_before == nullptr) && (after == nullptr || std::string(after) == process_region_before),
            "the launcher's own process environment is untouched by the seam");
 
+    // SEG-131: the player's data of a Genesis game -- full validated identities, in the library (never the build cache), vanilla and patched kept apart.
+    {
+      const fs::path library = fs::temp_directory_path() / "segarecomp-save-dir-test";
+      fs::remove_all(library);
+      SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "SEGARECOMP_LIBRARY_DIR", library.string().c_str(), true);
+      const std::string sha(64, 'a'), patch(64, 'b');
+      RomView vanilla = genesis;
+      vanilla.sha256 = sha;
+      RomView patched = vanilla;
+      patched.patch_identity = patch;
+      RomView bad = vanilla;
+      bad.sha256 = std::string(63, 'a');
+      RomView upper = vanilla;
+      upper.sha256 = std::string(64, 'A');
+      RomView badpatch = patched;
+      badpatch.patch_identity = "xyz";
+      expect(genesis_save_dir(vanilla) == library / "saves" / "genesis" / sha / "vanilla", "vanilla data: <library>/saves/genesis/<sha256>/vanilla");
+      expect(genesis_save_dir(patched) == library / "saves" / "genesis" / sha / "patches" / patch, "a patched version has its own data: .../patches/<patch identity>");
+      expect(genesis_save_dir(vanilla) != genesis_save_dir(patched), "vanilla and patched data never share a folder by default");
+      expect(genesis_save_dir(bad).empty() && genesis_save_dir(upper).empty() && genesis_save_dir(badpatch).empty() && genesis_save_dir(sms).empty(),
+             "a malformed identity (short, upper-case, non-hex) or a non-Genesis game has no data folder");
+      SDL_Environment *env = SDL_CreateEnvironment(true);
+      SDL_SetEnvironmentVariable(env, "SEGARECOMP_SAVE_DIR", "/inherited", true);
+      apply_game_environment(env, vanilla);
+      expect(std::string(SDL_GetEnvironmentVariable(env, "SEGARECOMP_SAVE_DIR")) == genesis_save_dir(vanilla).string() && std::string(SDL_GetEnvironmentVariable(env, "SEGARECOMP_SAVE_VARIANT")) == "vanilla",
+             "the child receives the folder and the 'vanilla' variant");
+      apply_game_environment(env, patched);
+      expect(std::string(SDL_GetEnvironmentVariable(env, "SEGARECOMP_SAVE_VARIANT")) == patch, "a patched child receives its patch identity as the variant");
+      apply_game_environment(env, bad);
+      expect(SDL_GetEnvironmentVariable(env, "SEGARECOMP_SAVE_DIR") == nullptr && SDL_GetEnvironmentVariable(env, "SEGARECOMP_SAVE_VARIANT") == nullptr,
+             "an invalid identity clears any inherited save folder: the game gets no persistence");
+      SDL_DestroyEnvironment(env);
+      {  // the viewer's reports in a finished session's run log
+        const fs::path log = library / "run.log";
+        { std::ofstream out(log); out << "noise\nVIEWER_PERSIST {\"event\":\"load\",\"status\":\"loaded\",\"detail\":\"cartridge.srm\"}\nVIEWER_PERSIST {\"event\":\"commit\",\"status\":\"stored\",\"detail\":\"cartridge.srm\"}\n"; }
+        SaveOutcome ok = read_save_outcome(log);
+        expect(ok.committed && !ok.commit_failed && !ok.load_refused, "a stored commit is reported");
+        { std::ofstream out(log); out << "VIEWER_PERSIST {\"event\":\"commit\",\"status\":\"kept_previous\",\"detail\":\"disk full\"}\nVIEWER_PERSIST {\"event\":\"commit\",\"status\":\"not_clean_exit\",\"detail\":\"guest_stop\"}\n"; }
+        SaveOutcome kept = read_save_outcome(log);
+        expect(!kept.committed && kept.commit_failed && kept.detail == "disk full", "a failed commit is reported with its reason and never as stored; not_clean_exit claims nothing");
+        { std::ofstream out(log); out << "VIEWER_PERSIST {\"event\":\"load\",\"status\":\"refused\",\"detail\":\"wrong size\"}\nVIEWER_PERSIST not json\n"; }
+        SaveOutcome refused = read_save_outcome(log);
+        expect(refused.load_refused && !refused.committed && refused.detail == "wrong size", "a refused save is reported; a malformed line is ignored");
+        expect(!read_save_outcome(library / "missing.log").committed, "a missing log reports nothing");
+      }
+      SDL_UnsetEnvironmentVariable(SDL_GetEnvironment(), "SEGARECOMP_LIBRARY_DIR");
+      fs::remove_all(library);
+    }
+
     // Header region hints: both documented encodings; the lone 'E' is intrinsically ambiguous and keeps the default (explicit selection overrides).
     const auto hint = [](const char *text) { return region_hint_from_header_field(std::string(text)); };
     expect(hint("J").region == "japan" && !hint("J").ambiguous, "J alone selects Japan NTSC");

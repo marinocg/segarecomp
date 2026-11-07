@@ -114,6 +114,21 @@ struct RegionHint { std::string region = "usa"; bool ambiguous = false; };
 // Applies the per-launch environment of the child game to `environment` (never the launcher's own process environment).
 void apply_game_environment(SDL_Environment *environment, const RomView &rom);
 
+// SEG-131 (ADR 0278): where a Genesis game's player data lives -- <library>/saves/genesis/<original sha256>/{vanilla | patches/<patch identity>}/ holding
+// cartridge.srm / cartridge.eep and states/{quick,slot-1..5}.sgstate. It is keyed on the full, validated identities (never on a title or a build hash), sits in the
+// library (never in the cache's disposable build folders), and vanilla and patched versions are separate by default. Empty when the game is not a Genesis cartridge
+// or an identity is not a 64-digit hex digest.
+[[nodiscard]] std::filesystem::path genesis_save_dir(const RomView &rom);
+// What the viewer reported about the player's data in the run log of a finished session (the VIEWER_PERSIST lines).
+struct SaveOutcome {
+  bool load_refused = false;      // the save file was refused before any guest instruction (wrong size / not a regular file / unreadable)
+  bool committed = false;         // the session ended cleanly and the new save replaced the old one
+  bool not_saved = false;         // the session did not end by the player (typed stop, budget, host error): nothing was written, the previous save was kept
+  bool commit_failed = false;     // the session ended cleanly but the previous save was kept
+  std::string detail;             // the viewer's reason, for the player
+};
+[[nodiscard]] SaveOutcome read_save_outcome(const std::filesystem::path &run_log);
+
 [[nodiscard]] Layout locate_layout();
 [[nodiscard]] std::filesystem::path cache_root();
 // Per-user persistent data: the library catalog, covers, viewer settings and screenshots. It lives beside, never inside, the disposable

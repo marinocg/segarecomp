@@ -54,6 +54,21 @@ void ym2612_write(Ym2612 *chip, uint32_t port, uint8_t value, uint64_t master_ti
 uint64_t ym2612_samples_generated(const Ym2612 *chip);
 uint64_t ym2612_state_digest(const Ym2612 *chip);
 
+/* SEG-131: complete, bounded, paired save/restore of the device (save states and rewind). The image holds the host-side clock fields (`now`, next sample start,
+ * both timer expiries, busy end, samples generated) AND ymfm's own register/phase/envelope/LFO/SSG state; nothing is derived by replaying register writes. The size is a
+ * property of the chip build and is the same for every chip, so a caller can size its buffer once. `ym2612_snapshot_bytes` is that exact size.
+ * Layout (little-endian, fixed): 6 x u64 host fields, then ymfm's blob (exactly `ym2612_snapshot_bytes() - 48` bytes). The sink is attached to the chip and is not part of the image. */
+#define YM2612_SNAPSHOT_HOST_BYTES 48u
+#define YM2612_SNAPSHOT_MAX_BYTES 16384u
+uint32_t ym2612_snapshot_bytes(const Ym2612 *chip);
+/* Writes exactly ym2612_snapshot_bytes() bytes; returns 0 on success, non-zero when `capacity` is smaller (nothing written). */
+int ym2612_save(const Ym2612 *chip, uint8_t *out, uint32_t capacity);
+/* Validates an image without touching the chip: exact length, and the host-clock invariants (next sample start = samples x 144 and not before `now`; each timer expiry is
+ * "none" or not before `now`). Returns 0 when the image can be loaded. */
+int ym2612_check(const Ym2612 *chip, const uint8_t *in, uint32_t length);
+/* Loads an image that passed ym2612_check (it re-checks and returns non-zero, leaving the chip untouched, otherwise). Cannot fail after the check. */
+int ym2612_load(Ym2612 *chip, const uint8_t *in, uint32_t length);
+
 #ifdef __cplusplus
 }
 #endif

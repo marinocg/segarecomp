@@ -342,6 +342,40 @@ int main() {
     fs::permissions(cache / "games" / key32('6') / "obj", fs::perms::owner_all);
   }
 #endif
+  {  // SEG-131 (ADR 0278): a Genesis game's cartridge saves and save states (<library>/saves/genesis/<sha256>/...) are the player's data: measured as user data,
+     // never part of the removable total, never reachable from a plan, and never deleted by build cleanup, archiving or removing the game from the library.
+    const fs::path lib = dir / "gen_library", cch = dir / "gen_cache";
+    fs::remove_all(lib);
+    fs::remove_all(cch);
+    fs::create_directories(cch / "games");
+    Catalog c(lib / "library.json");
+    c.load();
+    LibraryEntry g = entry('d');
+    c.entries() = {g};
+    const fs::path saves = lib / "saves" / "genesis" / digest('d');
+    spit(saves / "vanilla" / "cartridge.srm", std::string(512, 's'));
+    spit(saves / "vanilla" / "states" / "quick.sgstate", std::string(4000, 'q'));
+    spit(saves / "patches" / digest('e') / "cartridge.eep", std::string(128, 'e'));
+    spit(lib / "saves" / "genesis" / digest('f') / "vanilla" / "cartridge.srm", std::string(512, 'x'));   // another game: not this entry's data
+    BusyGuard bg;
+    StorageReport r = scan_storage(c, cch, lib);
+    const EntryUsage *u = r.find(g.id());
+    expect(u != nullptr && u->user_data == 512 + 4000 + 128 && u->genesis_saves, "Genesis: cartridge saves and states of every version of the game are measured as user data");
+    expect(u != nullptr && u->total.total() == 0, "Genesis: player data is not part of the removable total");
+    const Plan removal = plan_remove_from_library(r, {g.id()}, true, bg);
+    bool names_saves = false;
+    for (const auto &line : removal.remains) names_saves = names_saves || line.find("Game saves and save states of 1 Genesis game") == 0;
+    expect(names_saves, "Genesis: removing the game from the library says its saves and states are kept");
+    {
+      Plan forged;
+      forged.items = {{saves / "vanilla" / "cartridge.srm", 512, false}, {saves / "vanilla" / "states", 4000, true}, {saves, 0, true}, {lib / "saves", 0, true}};
+      expect(bg.try_begin_maintenance(), "maintenance lock");
+      const ExecResult refused = execute_plan(forged, cch, bg, lib);
+      bg.end_maintenance();
+      expect(refused.removed == 0 && fs::exists(saves / "vanilla" / "cartridge.srm") && fs::exists(saves / "vanilla" / "states" / "quick.sgstate") && fs::exists(saves / "patches" / digest('e') / "cartridge.eep"),
+             "Genesis: a forged plan naming player data is refused and the files survive");
+    }
+  }
   {  // SEG-109-T004 (ADR 0253): Sega CD games. Generated build folders are ordinary storage; the player's saves and recordings are protected user data that no
      // plan can contain and that execute_plan refuses by shape, even in a forged plan.
     const fs::path lib = dir / "scd_library", cch = dir / "scd_cache";

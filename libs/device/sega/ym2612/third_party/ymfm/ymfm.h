@@ -447,7 +447,7 @@ public:
 	void restore(uint16_t &data) { data = read(); data |= read() << 8; }
 	void restore(int32_t &data) { data = read(); data |= read() << 8; data |= read() << 16; data |= read() << 24; }
 	void restore(uint32_t &data) { data = read(); data |= read() << 8; data |= read() << 16; data |= read() << 24; }
-	void restore(envelope_state &data) { data = envelope_state(read()); }
+	void restore(envelope_state &data) { const uint8_t v = read(); data = (v >= EG_ATTACK && v <= EG_RELEASE) ? envelope_state(v) : EG_RELEASE; } /* SEG-131: an out-of-range byte of a crafted state can never index the rate tables */
 	template<typename DataType, int Count>
 	void restore(DataType (&data)[Count]) { for (uint32_t index = 0; index < Count; index++) restore(data[index]); }
 

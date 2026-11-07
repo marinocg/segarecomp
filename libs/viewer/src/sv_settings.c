@@ -123,7 +123,8 @@ void sv_settings_sanitize(SvSettings *s) {
 }
 
 int sv_key_reserved(const SvSettings *s, int key) {
-  return key == SV_KEY_ESCAPE || key == s->menu_key || key == SV_KEY_F11 || key == SV_KEY_F12 || key == SV_KEY_F10 || key == SV_KEY_F1;
+  return key == SV_KEY_ESCAPE || key == s->menu_key || key == SV_KEY_F11 || key == SV_KEY_F12 || key == SV_KEY_F10 || key == SV_KEY_F1 ||
+         key == SV_KEY_F5 || key == SV_KEY_F7 || key == SV_KEY_F8;  /* SEG-131: F5 quick save, F7 rewind, F8 quick load are host hotkeys, never game bindings */
 }
 
 /* ---- text form ---- */

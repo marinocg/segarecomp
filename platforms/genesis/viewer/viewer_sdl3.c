@@ -57,6 +57,20 @@ static const char k_sprite_note[] = "Sprites appear beside the picture only wher
 static uint64_t sdl_now(void *ctx) { (void)ctx; return SDL_GetTicksNS(); }
 static void sdl_sleep(void *ctx, uint64_t ns) { (void)ctx; SDL_DelayNS(ns); }
 
+/* SEG-131 automation: a key press as a queued SDL event, exactly what the keyboard would deliver. */
+static void push_script_key(SDL_Scancode scancode) {
+  SDL_Event e;
+  int down;
+  for (down = 1; down >= 0; --down) {
+    SDL_zero(e);
+    e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    e.common.timestamp = SDL_GetTicksNS();
+    e.key.scancode = scancode;
+    e.key.down = down != 0;
+    SDL_PushEvent(&e);
+  }
+}
+
 /* The host's once-per-slice poll: pumps events, samples the mapped input and, when the user opens the pause overlay, blocks here -- so
  * the guest does not advance while the menu is open and the host sleeps no wall time into guest state. */
 static int sdl_closed(void *ctx) {
@@ -65,6 +79,15 @@ static int sdl_closed(void *ctx) {
   const uint64_t clock = v->frame_sequence != NULL ? *v->frame_sequence : v->polls;  /* guest frames: identical input timing in every build */
   while (v->pad_next < v->pad_count && v->pad_script[v->pad_next].poll <= clock) {
     v->sample.pad[0] = v->pad_script[v->pad_next].actions;  /* persists until the next line */
+    /* SEG-131 automation: a line may press the quick-save (K) / quick-load (M) hotkey once, at this snapshot barrier, exactly as F5 / F8 do */
+    if ((v->sample.pad[0] & 0x4000U) != 0U) (void)sv_host_quick_save(v->host);
+    if ((v->sample.pad[0] & 0x2000U) != 0U) (void)sv_host_quick_load(v->host);
+    /* SEG-131 automation: Y = open the rewind surface, go back two moments with Left, confirm with Return; Z = go back three and cancel with Escape. The keys are
+     * real queued key events consumed by the real surface loop, so the whole keyboard path is exercised. */
+    if ((v->sample.pad[0] & 0x1000U) != 0U) { push_script_key(SDL_SCANCODE_LEFT); push_script_key(SDL_SCANCODE_LEFT); push_script_key(SDL_SCANCODE_RETURN); (void)sv_host_open_rewind(v->host); }
+    if ((v->sample.pad[0] & 0x0800U) != 0U) { push_script_key(SDL_SCANCODE_LEFT); push_script_key(SDL_SCANCODE_LEFT); push_script_key(SDL_SCANCODE_LEFT); push_script_key(SDL_SCANCODE_ESCAPE); (void)sv_host_open_rewind(v->host); }
+    v->pad_script[v->pad_next].actions = (uint16_t)(v->pad_script[v->pad_next].actions & 0x87FFU);
+    v->sample.pad[0] = (uint16_t)(v->sample.pad[0] & 0x87FFU);
     v->pad_next += 1U;
   }
   if (v->pad_count != 0U && v->pad_next > 0U) v->sample.pad[0] = v->pad_script[v->pad_next - 1U].actions;
@@ -99,6 +122,10 @@ static void load_pad_script(GenesisSdl3Viewer *v) {
         case 'B': actions |= SV_ACTION_BIT(SV_ACT_BUTTON2); break;
         case 'C': actions |= SV_ACTION_BIT(SV_ACT_BUTTON3); break;
         case 'S': actions |= SV_ACTION_BIT(SV_ACT_START); break;
+        case 'Y': actions |= 0x1000U; break;  /* SEG-131: rewind two moments and confirm */
+        case 'Z': actions |= 0x0800U; break;  /* SEG-131: browse three moments back and cancel */
+        case 'K': actions |= 0x4000U; break;  /* SEG-131: quick save (F5) */
+        case 'M': actions |= 0x2000U; break;  /* SEG-131: quick load (F8) */
         case 'Q': actions |= 0x8000U; break;  /* end the run (the window's close): lets a scripted capture finish without a wall-clock timeout */
         default: break;
       }
@@ -288,6 +315,10 @@ const GenesisAudioSink *genesis_sdl3_viewer_audio_open(GenesisSdl3Viewer *v) {
   v->sink.queued_frames = sdl_audio_queued;
   v->sink.put = sdl_audio_put;
   return &v->sink;
+}
+
+void genesis_sdl3_viewer_audio_clear(GenesisSdl3Viewer *v) {
+  if (v != NULL && v->audio != NULL) SDL_ClearAudioStream(v->audio);
 }
 
 GenesisSdl3Viewer *genesis_sdl3_viewer_open(const char *title, int scale) { return genesis_sdl3_viewer_open_platform(title, scale, "genesis"); }

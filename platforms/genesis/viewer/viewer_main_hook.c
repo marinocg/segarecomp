@@ -15,9 +15,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "genesis_persistence.h"
+#include "genesis_viewer_state.h"
 #include "runtime.h"
 #include "vdp_render.h"
 #include "viewer.h"
+#include "sv_host.h"
 #include "sv_perf.h"
 #include "viewer_sdl3.h"
 #ifdef SEGARECOMP_NATIVE_PROVIDER_CAPS
@@ -32,6 +35,12 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
                                                uint32_t dispatch_allowance);
 
 static GenesisFrameArtifact g_latest_frame;
+static GenesisSdl3Viewer *g_sdl;                 /* SEG-131: the session's window (the restore hook resets its audio queue) */
+static GenesisViewerOptions g_options;
+static GenesisLiveFrameObserver *g_observer;
+static GenesisViewerHost g_host;                 /* the final host table (the baseline frame is presented through it) */
+static int g_discontinuity;
+static GenesisViewerState *g_state;              /* SEG-131: slot files and the rewind timeline of this session */
 static GenesisRasterCapture g_raster_capture; /* SEG-055: host-owned per-scanline capture buffer */
 
 #ifdef SEGARECOMP_GENESIS_SOUND
@@ -104,9 +113,10 @@ static void perf_after_slice(void *ctx, GenesisRuntime *runtime) {
   t = sv_perf_span_begin(&g_perf);
   viewer_after_slice(ctx, runtime);
   sv_perf_span_end(&g_perf, SV_SPAN_AUDIO_PRESENT, t);
+  genesis_viewer_state_after_slice(g_state);   /* SEG-131: the rewind cadence (a bounded in-memory snapshot every 500 ms of guest time), at the snapshot barrier */
 }
 #else
-static void perf_after_slice(void *ctx, GenesisRuntime *runtime) { (void)ctx; perf_slice_done(runtime); }
+static void perf_after_slice(void *ctx, GenesisRuntime *runtime) { (void)ctx; perf_slice_done(runtime); genesis_viewer_state_after_slice(g_state); }
 #endif
 
 static void perf_write_report(const char *path, const char *status, const char *outcome, const GenesisViewerResult *r, const GenesisRuntime *runtime, const GenesisLiveFrameObserver *observer,
@@ -151,6 +161,81 @@ static void perf_write_report(const char *path, const char *status, const char *
   (void)sv_perf_write_file(&g_perf, &meta, path);
 }
 
+
+
+/* ---- SEG-131 (ADR 0278): whole-machine save states. The service owns the slot files and (from Checkpoint E) the rewind timeline; this hook only supplies what is
+ * session-specific: the trusted game identity from the launcher, the state directory, and what must be reset around a restored machine. ---- */
+/* A bounded numeric knob from the environment: out-of-range or malformed values keep the default. */
+static uint32_t env_u32(const char *name, uint32_t low, uint32_t high, uint32_t fallback) {
+  const char *text = getenv(name);
+  unsigned long value = 0UL;
+  size_t i;
+  if (text == NULL || *text == '\0' || strlen(text) > 9U) return fallback;
+  for (i = 0U; text[i] != '\0'; ++i) {
+    if (text[i] < '0' || text[i] > '9') return fallback;
+    value = value * 10UL + (unsigned long)(text[i] - '0');
+  }
+  return value >= low && value <= high ? (uint32_t)value : fallback;
+}
+
+static int parse_hex32(const char *text, uint8_t out[32]) {
+  unsigned i;
+  if (text == NULL || strlen(text) != 64U) return 0;
+  for (i = 0U; i < 32U; ++i) {
+    unsigned hi, lo;
+    const char a = text[2U * i], b = text[2U * i + 1U];
+    if (a >= '0' && a <= '9') hi = (unsigned)(a - '0'); else if (a >= 'a' && a <= 'f') hi = (unsigned)(a - 'a' + 10); else if (a >= 'A' && a <= 'F') hi = (unsigned)(a - 'A' + 10); else return 0;
+    if (b >= '0' && b <= '9') lo = (unsigned)(b - '0'); else if (b >= 'a' && b <= 'f') lo = (unsigned)(b - 'a' + 10); else if (b >= 'A' && b <= 'F') lo = (unsigned)(b - 'A' + 10); else return 0;
+    out[i] = (uint8_t)((hi << 4) | lo);
+  }
+  return 1;
+}
+
+/* Everything that belonged to the abandoned future is dropped here, at the barrier, before the guest runs again: queued host audio, the pacing deadline, the
+ * partially captured frame, the published-frame baseline and the held inputs. The picture shown is rendered from the RESTORED video state so the player never
+ * sees a stale frame. */
+static void viewer_after_restore(void *ctx) {
+  GenesisRuntime *runtime = (GenesisRuntime *)ctx;
+  const uint32_t sleeps = g_pacer.sleep_calls, resyncs = g_pacer.resyncs;
+  memset(g_raster_capture.captured, 0, sizeof g_raster_capture.captured);   /* the lines captured so far belong to the old timeline */
+  g_raster_capture.frame.has_vram_journal = 0U;
+#ifdef SEGARECOMP_GENESIS_SOUND
+  genesis_sdl3_viewer_audio_clear(g_sdl);
+  g_presenter.started = 0;   /* the next accepted chunk is a fresh start, not an underrun */
+#endif
+  genesis_pacer_init(&g_pacer, g_options.unthrottled);   /* the deadline restarts from the next boundary; the monitoring counters continue */
+  g_pacer.sleep_calls = sleeps;
+  g_pacer.resyncs = resyncs;
+  if (g_observer != NULL) {
+    if (genesis_vdp_produce_frame(runtime->devices.vdp.vram, runtime->devices.vdp.vsram, runtime->devices.vdp.cram, runtime->devices.vdp.registers, &g_latest_frame) == 0 &&
+        genesis_frame_artifact_is_populated(&g_latest_frame)) {
+      ++g_observer->sequence;
+      if (g_host.present != NULL) (void)g_host.present(g_host.ctx, &g_latest_frame);
+    }
+  }
+  g_discontinuity = 1;
+}
+
+static int viewer_discontinuity(void *ctx) {
+  const int flagged = g_discontinuity;
+  (void)ctx;
+  g_discontinuity = 0;
+  return flagged;
+}
+
+/* ---- SEG-131 (ADR 0278): battery-backed SRAM / X24C01 EEPROM persistence. The launcher names the directory of the running cartridge and variant in SEGARECOMP_SAVE_DIR for an
+ * interactive session only; replays, recordings and the build pass never receive it. The load happens after the generated main installed the cartridge memory and
+ * before the first guest instruction; the commit happens only when the player ended the session (Quit, Return to Launcher, window close). A typed guest stop, an
+ * exhausted runner budget, a host error, a crash or a kill never commits. Every outcome is reported on one stderr line the launcher reads from the run log. ---- */
+static void persist_report(const char *event, const char *status, const char *detail) {
+  fprintf(stderr, "VIEWER_PERSIST {\"event\":\"%s\",\"status\":\"%s\",\"detail\":\"%s\"}\n", event, status, detail);
+}
+
+static const char *persist_dir(void) {
+  const char *dir = getenv("SEGARECOMP_SAVE_DIR");
+  return dir != NULL && *dir != '\0' ? dir : NULL;
+}
+
 GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                                uint32_t dispatch_allowance) {
   const char *argv[3];
@@ -173,6 +258,16 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
 #ifdef SEGARECOMP_GENESIS_SOUND
   (void)genesis_sound_attach(runtime); /* the Z80 machine and the shared PSG/YM2612, identical to the headless program */
 #endif
+  if (persist_dir() != NULL && genesis_persist_file_name(runtime) != NULL) {
+    const GenesisPersistStatus loaded = genesis_persist_load(runtime, persist_dir());
+    if (loaded == GENESIS_PERSIST_OK) persist_report("load", "loaded", genesis_persist_file_name(runtime));
+    else if (loaded == GENESIS_PERSIST_FRESH) persist_report("load", "fresh", genesis_persist_file_name(runtime));
+    else {  /* an unreadable / wrong-size / non-regular save is never overwritten and never silently replaced by a blank one: refuse before any guest instruction */
+      persist_report("load", "refused", genesis_persist_status_text(loaded));
+      fprintf(stderr, "viewer: the save file %s was refused (%s); it was left untouched\n", genesis_persist_file_name(runtime), genesis_persist_status_text(loaded));
+      exit(6);
+    }
+  }
   char window_title[160];
   const char *game_title = getenv("SEGARECOMP_GAME_TITLE");
   GenesisSdl3Viewer *sdl;
@@ -224,7 +319,58 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   host.window_closed = perf_window_closed;
   if (host.sleep_ns != NULL) host.sleep_ns = perf_sleep; /* NULL is legal only when unthrottled: keep the pacer's own contract */
   host.after_slice = perf_after_slice;
+  host.discontinuity = viewer_discontinuity;
+  g_host = host;
   genesis_sdl3_viewer_set_perf(sdl, &g_perf);
+  /* SEG-131: whole-machine save states (and, from Checkpoint E, rewind) for this session. */
+  g_sdl = sdl;
+  g_options = options;
+  g_observer = &observer;
+  g_discontinuity = 0;
+  {
+    GenesisViewerStateConfig state_config;
+    SvStateProvider provider;
+    char state_dir[1100];
+    const char *reason = NULL;
+    memset(&state_config, 0, sizeof state_config);
+    state_config.machine.runtime = runtime;
+#ifdef SEGARECOMP_GENESIS_SOUND
+    state_config.machine.z80 = genesis_sound_attach(runtime);
+    state_config.machine.audio = genesis_sound_audio_mutable();
+#endif
+    state_config.rewind_budget_bytes = GENESIS_REWIND_BUDGET_BYTES;
+    state_config.rewind_interval_ms = GENESIS_REWIND_INTERVAL_MS;
+    state_config.rewind_target_ms = GENESIS_REWIND_TARGET_MS;
+    {  /* SEG-131: rewind is on by default for an interactive session; these knobs bound or turn it off (documented in docs/product/save-states.md) */
+      const char *off = getenv("SEGARECOMP_REWIND");
+      if (off != NULL && (strcmp(off, "0") == 0 || strcmp(off, "off") == 0)) state_config.rewind_budget_bytes = 0U;
+      state_config.rewind_budget_bytes = env_u32("SEGARECOMP_REWIND_BUDGET_MB", 1U, 1024U, state_config.rewind_budget_bytes / (1024U * 1024U)) * 1024U * 1024U * (state_config.rewind_budget_bytes != 0U);
+      state_config.rewind_interval_ms = env_u32("SEGARECOMP_REWIND_INTERVAL_MS", 50U, 60000U, state_config.rewind_interval_ms);
+      state_config.rewind_target_ms = env_u32("SEGARECOMP_REWIND_TARGET_MS", 500U, 3600000U, state_config.rewind_target_ms);
+    }
+    state_config.latest_frame = &g_latest_frame;
+    state_config.after_restore = viewer_after_restore;
+    state_config.after_restore_context = runtime;
+    if (persist_dir() == NULL) {
+      reason = "No save location is configured for this session: replays and recordings never use save states.";
+    } else if (!parse_hex32(getenv("SEGARECOMP_ROM_SHA256"), state_config.identity.source_sha256)) {
+      reason = "This game has no verified identity, so its states cannot be tied to it.";
+    } else {
+      const char *variant = getenv("SEGARECOMP_SAVE_VARIANT");   /* a patch package identity (64 hex), or absent / "vanilla" */
+      if (variant != NULL && *variant != '\0' && strcmp(variant, "vanilla") != 0 && !parse_hex32(variant, state_config.identity.variant_sha256))
+        reason = "The version of this game has no valid identity, so its states cannot be tied to it.";
+      else if (snprintf(state_dir, sizeof state_dir, "%s/states", persist_dir()) <= 0 || strlen(persist_dir()) + 8U >= sizeof state_dir)
+        reason = "The save location path is too long.";
+      else
+        state_config.state_dir = state_dir;
+    }
+    state_config.unavailable_reason = reason;
+    g_state = genesis_viewer_state_create(&state_config);
+    if (g_state != NULL) {
+      genesis_viewer_state_provider(g_state, &provider);
+      sv_host_set_state_provider(genesis_sdl3_viewer_sv_host(sdl), &provider);
+    }
+  }
   snprintf(g_renderer, sizeof g_renderer, "%s", genesis_sdl3_viewer_renderer_name(sdl) != NULL ? genesis_sdl3_viewer_renderer_name(sdl) : "");
   if (perf_path != NULL) {
     sv_perf_enable(&g_perf);
@@ -274,6 +420,15 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
             (unsigned long long)stats.declined[5], (unsigned long long)stats.declined[6]);
   }
 #endif
+  if (g_state != NULL) {   /* observed rewind statistics (counts, not estimates) for the measurement tools */
+    GenesisViewerStateStats st;
+    genesis_viewer_state_stats(g_state, &st);
+    fprintf(stderr, "VIEWER_REWIND_STATS {\"captures\":%llu,\"evictions\":%llu,\"failures\":%llu,\"history_entries\":%u,\"history_bytes\":%llu,\"capture_ns_total\":%llu,\"capture_ns_max\":%llu,\"restores\":%llu}\n",
+            (unsigned long long)st.captures, (unsigned long long)st.evictions, (unsigned long long)st.capture_failures, (unsigned)st.history_entries, (unsigned long long)st.history_bytes,
+            (unsigned long long)st.capture_ns_total, (unsigned long long)st.capture_ns_max, (unsigned long long)st.restores);
+  }
+  genesis_viewer_state_destroy(g_state);
+  g_state = NULL;
   genesis_sdl3_viewer_close(sdl);
 
   const char *name = r.outcome == GENESIS_VIEWER_GUEST_STOP        ? "guest_stop"
@@ -286,6 +441,15 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
           "VIEWER_SUMMARY {\"viewer_opened\":true,\"frame_publication_observed\":%s,"
           "\"frame_presented\":%s,\"outcome\":\"%s\",\"execution\":\"generated-native\"}\n",
           observer.sequence > 0 ? "true" : "false", r.frames_presented > 0 ? "true" : "false", name);
+  if (persist_dir() != NULL && genesis_persist_file_name(runtime) != NULL) {
+    if (r.outcome == GENESIS_VIEWER_WINDOW_CLOSED) {
+      GenesisPersistStatus stored = genesis_persist_ensure_dir(persist_dir());
+      if (stored == GENESIS_PERSIST_OK) stored = genesis_persist_commit(runtime, persist_dir());
+      persist_report("commit", stored == GENESIS_PERSIST_OK ? "stored" : "kept_previous", stored == GENESIS_PERSIST_OK ? genesis_persist_file_name(runtime) : genesis_persist_status_text(stored));
+    } else {
+      persist_report("commit", "not_clean_exit", name);  /* typed guest stop, runner budget, host error: the previous save stays as it was */
+    }
+  }
   if (perf_path != NULL) {
     /* complete: the session ended as requested (window closed, budget reached, guest finished); incomplete: a typed guest stop ended it (the numbers are valid up to it); failed: a host error */
     const char *status = r.outcome == GENESIS_VIEWER_GUEST_STOP ? "incomplete" : (r.outcome == GENESIS_VIEWER_HOST_ERROR || r.outcome == GENESIS_VIEWER_INVALID_ARGUMENT ? "failed" : "complete");

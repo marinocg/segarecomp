@@ -394,6 +394,93 @@ static void build_system(SvHost *h, SvPage *p) {
 
 static const char *exit_label(const SvHost *h) { (void)h; return SDL_getenv("SEGARECOMP_LAUNCHED") != NULL ? "Return to Launcher" : "Quit"; }
 
+/* ---- SEG-131: save states ---- */
+
+static void slot_name(int slot, char *out, size_t cap) {
+  if (slot == 0) snprintf(out, cap, "Quick Slot");
+  else snprintf(out, cap, "Slot %d", slot);
+}
+
+static void playtime_text(uint64_t ms, char *out, size_t cap) {
+  const uint64_t seconds = ms / 1000u, hours = seconds / 3600u, minutes = (seconds / 60u) % 60u, secs = seconds % 60u;
+  if (hours > 0u) snprintf(out, cap, "%u:%02u:%02u", (unsigned)hours, (unsigned)minutes, (unsigned)secs);
+  else snprintf(out, cap, "%u:%02u", (unsigned)minutes, (unsigned)secs);
+}
+
+void sv_pages_state_refresh(SvHost *h) {
+  int slot;
+  for (slot = 0; slot < SV_STATE_SLOTS; ++slot) {
+    SvStateSlotInfo *info = &h->slot_info[slot];
+    memset(info, 0, sizeof *info);
+    if (!h->has_state || h->state.slot_info == NULL) continue;
+    if (h->state.slot_info(h->state.ctx, slot, info) != 0) { memset(info, 0, sizeof *info); continue; }
+    if (info->thumb.w > 0 && info->thumb.h > 0 && info->thumb.w <= SV_STATE_THUMB_MAX_W && info->thumb.h <= SV_STATE_THUMB_MAX_H && info->thumb.rgb565 != NULL) {
+      memcpy(h->slot_thumb[slot], info->thumb.rgb565, (size_t)info->thumb.w * (size_t)info->thumb.h * 2u);
+      info->thumb.rgb565 = h->slot_thumb[slot];
+    } else {
+      info->thumb.w = info->thumb.h = 0;
+      info->thumb.rgb565 = NULL;
+    }
+  }
+  h->slot_tex_stamp++;  /* the focus texture is rebuilt from the refreshed cache */
+}
+
+/* "Save State", "Load State" and "Rewind" rows on the pause menu. Without an adapter capability they are present but disabled with the reason. */
+static void add_state_rows(SvHost *h, SvPage *p) {
+  char why[96] = "";
+  SvItem *item;
+  const int states_ok = h->has_state && h->state.states_available != NULL && h->state.slot_info != NULL && h->state.states_available(h->state.ctx, why, sizeof why);
+  const char *none = "Save states are not available for this system: only the Genesis has whole-machine states so far.";
+  item = sv_page_add(p, SV_ITEM_BUTTON, I_STATE_SAVE, "Save State");
+  if (item != NULL) {
+    sv_item_set_icon(item, "storage");
+    if (states_ok && h->state.save_slot != NULL) sv_item_set_hint(item, "Saves the whole machine to the quick slot or one of five numbered slots. Quick save: F5.");
+    else sv_item_disable(item, h->has_state ? (why[0] != '\0' ? why : "Save states are not available right now.") : none);
+  }
+  item = sv_page_add(p, SV_ITEM_BUTTON, I_STATE_LOAD, "Load State");
+  if (item != NULL) {
+    sv_item_set_icon(item, "import");
+    if (states_ok && h->state.load_slot != NULL) sv_item_set_hint(item, "Replaces the running game with a saved state after you confirm. Quick load: F8.");
+    else sv_item_disable(item, h->has_state ? (why[0] != '\0' ? why : "Save states are not available right now.") : none);
+  }
+  item = sv_page_add(p, SV_ITEM_BUTTON, I_REWIND, "Rewind");
+  if (item != NULL) {
+    char rewind_why[96] = "";
+    const int ok = h->has_state && h->state.rewind_available != NULL && h->state.history_count != NULL && h->state.rewind_available(h->state.ctx, rewind_why, sizeof rewind_why);
+    sv_item_set_icon(item, "reset");
+    if (ok) sv_item_set_hint(item, "Browse the last moments of play as pictures and resume from one of them. Rewind: F7.");
+    else sv_item_disable(item, h->has_state && rewind_why[0] != '\0' ? rewind_why : "Rewind is not available for this system yet.");
+  }
+}
+
+static void build_slots(SvHost *h, SvPage *p, int saving) {
+  int slot;
+  for (slot = 0; slot < SV_STATE_SLOTS; ++slot) {
+    const SvStateSlotInfo *info = &h->slot_info[slot];
+    char label[24], text[40], hint[200];
+    SvItem *item;
+    slot_name(slot, label, sizeof label);
+    item = sv_page_add(p, SV_ITEM_BUTTON, I_SLOT + slot, label);
+    if (item == NULL) continue;
+    if (info->occupied) {
+      char time_text[24];
+      playtime_text(info->guest_ms, time_text, sizeof time_text);
+      snprintf(text, sizeof text, "%s played", time_text);
+      sv_item_set_text(item, text);
+      snprintf(hint, sizeof hint, saving ? "Overwrites this state (you will be asked first). Played %s when saved." : "Loads this state: the running game is replaced after you confirm. Played %s when saved.", time_text);
+      sv_item_set_hint(item, hint);
+    } else if (info->damaged) {
+      sv_item_set_text(item, "Unusable");
+      if (saving) sv_item_set_hint(item, "A state file is here but cannot be used; saving replaces it after you confirm.");
+      else sv_item_disable(item, info->note[0] != '\0' ? info->note : "This state file is damaged or belongs to another game or build.");
+    } else {
+      sv_item_set_text(item, "Empty");
+      if (saving) sv_item_set_hint(item, "Saves the current game here.");
+      else sv_item_disable(item, "This slot is empty.");
+    }
+  }
+}
+
 void sv_pages_rebuild(SvHost *h) {
   SvPage *p = sv_menu_top(&h->menu);
   char line_buf[64];
@@ -409,6 +496,7 @@ void sv_pages_rebuild(SvHost *h) {
       item = sv_page_add(p, SV_ITEM_BUTTON, I_RESUME, "Resume Game");
       sv_item_set_icon(item, "play");
       sv_item_set_hint(item, "Esc or a gamepad's Back/Select (Nintendo -) opens this menu. Start is a game button.");
+      add_state_rows(h, p);
       sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_GO_QUICK, "Quick Settings"), "settings");
       sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_GO_VIDEO, "Video & Display"), "video");
       sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_GO_CONTROLS, "Controls"), "controller");
@@ -417,7 +505,7 @@ void sv_pages_rebuild(SvHost *h) {
       sv_item_set_icon(sv_page_add(p, SV_ITEM_LABEL, 0, ""), "divider");  /* leaving the game is set apart from the settings pages */
       item = sv_page_add(p, SV_ITEM_BUTTON, I_QUIT, exit_label(h));
       if (item != NULL) sv_item_set_icon(item, "quit");
-      if (item != NULL) sv_item_set_hint(item, "The game is not saved: this viewer has no save states.");
+      if (item != NULL) sv_item_set_hint(item, h->has_state ? "Leaving does not save the game: use Save State first. Cartridge saves (battery memory) are kept." : "The game is not saved: this viewer has no save states for this system.");
       break;
     case PAGE_QUICK: build_video_core(h, p, 0); break;
     case PAGE_VIDEO: build_video_core(h, p, 1); break;
@@ -425,6 +513,16 @@ void sv_pages_rebuild(SvHost *h) {
     case PAGE_PADSTATUS: build_padstatus(h, p); break;
     case PAGE_AUDIO: build_audio(h, p); break;
     case PAGE_SYSTEM: build_system(h, p); break;
+    case PAGE_STATE_SAVE: build_slots(h, p, 1); break;
+    case PAGE_STATE_LOAD: build_slots(h, p, 0); break;
+    case PAGE_CONFIRM_OVERWRITE:
+      sv_page_add(p, SV_ITEM_BUTTON, I_YES, "Yes, Overwrite");
+      sv_page_add(p, SV_ITEM_BUTTON, I_NO, "No, Keep the Old State");
+      break;
+    case PAGE_CONFIRM_LOADSTATE:
+      sv_page_add(p, SV_ITEM_BUTTON, I_YES, "Yes, Load This State");
+      sv_page_add(p, SV_ITEM_BUTTON, I_NO, "No, Keep Playing");
+      break;
     case PAGE_CONFIRM_QUIT:
       snprintf(line_buf, sizeof line_buf, "Yes, %s", exit_label(h));
       sv_page_add(p, SV_ITEM_BUTTON, I_YES, line_buf);
@@ -560,6 +658,17 @@ void sv_pages_listen_pad(SvHost *h, int button) {
 
 /* ---- applying menu events ---- */
 
+/* Saves the running game to `slot`; the outcome is always shown, and the slot list is refreshed so a failure never looks like a save. */
+static void do_save_slot(SvHost *h, int slot) {
+  char name[16], error[96] = "", text[160];
+  slot_name(slot, name, sizeof name);
+  if (h->state.save_slot != NULL && h->state.save_slot(h->state.ctx, slot, error, sizeof error) == 0) snprintf(text, sizeof text, "State saved - %s", name);
+  else snprintf(text, sizeof text, "Save failed: %s", error[0] != '\0' ? error : "unknown error");
+  sv_host_toast(h, text);
+  sv_pages_state_refresh(h);
+  sv_pages_rebuild(h);
+}
+
 void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
   SvVideoSettings *v = &h->settings.video;
   const SvPage *page = sv_menu_top(&h->menu);
@@ -568,6 +677,9 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
   if (ev.kind == SV_EVENT_ACTIVATE) {
     switch (ev.item_id) {
       case I_RESUME: sv_pages_close(h); return;
+      case I_STATE_SAVE: sv_pages_state_refresh(h); open_page(h, PAGE_STATE_SAVE, "SAVE STATE"); return;
+      case I_STATE_LOAD: sv_pages_state_refresh(h); open_page(h, PAGE_STATE_LOAD, "LOAD STATE"); return;
+      case I_REWIND: sv_pages_close(h); h->want_rewind = 1; return;   /* the rewind surface opens when the pause menu has closed (sv_host.c) */
       case I_GO_QUICK: open_page(h, PAGE_QUICK, "QUICK SETTINGS"); return;
       case I_GO_VIDEO: open_page(h, PAGE_VIDEO, "VIDEO & DISPLAY"); return;
       case I_GO_CONTROLS: open_page(h, PAGE_CONTROLS, "CONTROLS"); return;
@@ -589,6 +701,27 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
       case I_YES:
         switch (page->page_id) {
           case PAGE_CONFIRM_QUIT: h->quit = 1; sv_pages_close(h); break;
+          case PAGE_CONFIRM_OVERWRITE:
+            sv_menu_pop(&h->menu);
+            do_save_slot(h, h->pending_slot);
+            break;
+          case PAGE_CONFIRM_LOADSTATE: {
+            char name[16], error[96] = "", text[160];
+            slot_name(h->pending_slot, name, sizeof name);
+            if (h->state.load_slot != NULL && h->state.load_slot(h->state.ctx, h->pending_slot, error, sizeof error) == 0) {
+              snprintf(text, sizeof text, "State loaded - %s", name);
+              sv_host_toast(h, text);
+              sv_host_release_inputs(h);
+              sv_pages_close(h);   /* straight back into the game, not into a settings page */
+            } else {
+              snprintf(text, sizeof text, "Load failed: %s", error[0] != '\0' ? error : "unknown error");
+              sv_host_toast(h, text);
+              sv_menu_pop(&h->menu);   /* the running game is unchanged: stay on the slot list */
+              sv_pages_state_refresh(h);
+              sv_pages_rebuild(h);
+            }
+            break;
+          }
           case PAGE_CONFIRM_RESET: h->reset = 1; sv_pages_close(h); break;
           case PAGE_CONFIRM_VIDEO: {
             SvVideoSettings keep = h->settings.video;
@@ -609,6 +742,26 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
         }
         return;
       default: break;
+    }
+    if (ev.item_id >= I_SLOT && ev.item_id < I_SLOT + SV_STATE_SLOTS) {
+      const int slot = ev.item_id - I_SLOT;
+      char name[16];
+      slot_name(slot, name, sizeof name);
+      h->pending_slot = slot;
+      if (page->page_id == PAGE_STATE_SAVE) {
+        if (h->slot_info[slot].occupied || h->slot_info[slot].damaged) {
+          char title[48];
+          snprintf(title, sizeof title, "Overwrite %s?", name);
+          open_page(h, PAGE_CONFIRM_OVERWRITE, title);
+        } else {
+          do_save_slot(h, slot);
+        }
+      } else if (page->page_id == PAGE_STATE_LOAD && h->slot_info[slot].occupied) {
+        char title[48];
+        snprintf(title, sizeof title, "Load %s?", name);
+        open_page(h, PAGE_CONFIRM_LOADSTATE, title);
+      }
+      return;
     }
     if (ev.item_id >= I_BIND && ev.item_id < I_BIND + SV_ACT_COUNT) {
       if (ev.value == 1 && sv_host_pad_assigned(h, h->bind_player) < 0) sv_host_toast(h, "Connect a gamepad to rebind its buttons");

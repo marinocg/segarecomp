@@ -100,13 +100,7 @@ static int genesis_is_device(uint32_t address) {
               (wrapping at 128), a master NACK (SDA high) ends the read until STOP
    The write-cycle duration (milliseconds on silicon) and the factory contents are NOT modeled as hardware facts: writes are instantaneous and
    the array is filled with 0xFF (project compatibility assumptions). Anything not described here is simply not a transition. */
-enum {
-  GENESIS_EEPROM_PHASE_IDLE = 0,       /* no command (after STOP / power on) */
-  GENESIS_EEPROM_PHASE_WAIT_STOP = 1,  /* read ended by master NACK: ignore everything until STOP */
-  GENESIS_EEPROM_PHASE_ADDRESS = 2,    /* receiving the word address and the R/W bit */
-  GENESIS_EEPROM_PHASE_WRITE = 3,
-  GENESIS_EEPROM_PHASE_READ = 4
-};
+/* The phase enumeration (GENESIS_EEPROM_PHASE_*) lives in runtime.h (SEG-131: the save-state validator bounds the stored phase by it). */
 
 static uint8_t genesis_eeprom_sda_out(const GenesisSerialEepromState *e, const uint8_t *storage) {
   if (e->phase == GENESIS_EEPROM_PHASE_READ) {

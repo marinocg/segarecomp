@@ -1,6 +1,6 @@
 # SEG-058: shared in-game viewer foundation (settings, layout/CRT math and menu model are SDL-free; the host is SDL3).
 # Strict C11 (the same dialect the per-game packaged build compiles with). Never linked by headless targets.
-add_library(segarecomp_viewer_core STATIC src/sv_settings.c src/sv_layout.c src/sv_menu.c src/sv_input_state.c src/sv_font.c src/sv_font_data.c)
+add_library(segarecomp_viewer_core STATIC src/sv_settings.c src/sv_layout.c src/sv_menu.c src/sv_rewind.c src/sv_input_state.c src/sv_font.c src/sv_font_data.c)
 add_library(segarecomp::viewer_core ALIAS segarecomp_viewer_core)
 target_include_directories(segarecomp_viewer_core PUBLIC include)
 set_target_properties(segarecomp_viewer_core PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
@@ -8,6 +8,16 @@ if(NOT WIN32)
   target_link_libraries(segarecomp_viewer_core PUBLIC m)
 endif()
 segarecomp_enable_warnings(segarecomp_viewer_core)
+
+if(BUILD_TESTING)
+  # SEG-131: the SDL-free model and layout of the rewind surface.
+  add_executable(sv_rewind_test test/sv_rewind_test.c)
+  target_link_libraries(sv_rewind_test PRIVATE segarecomp::viewer_core)
+  set_target_properties(sv_rewind_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  segarecomp_enable_warnings(sv_rewind_test)
+  add_test(NAME sv_rewind_test COMMAND sv_rewind_test)
+  set_property(TEST sv_rewind_test APPEND PROPERTY LABELS full fast)
+endif()
 
 # Input diagnostics (SDL3, no window): shared by the launcher and the viewer host so there is one detection engine.
 if(SEGARECOMP_ENABLE_SDL3_VIEWER OR SEGARECOMP_BUILD_LAUNCHER)
@@ -46,6 +56,16 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER AND BUILD_TESTING)
   target_link_libraries(sv_host_test PRIVATE segarecomp::viewer_host)
   set_target_properties(sv_host_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
   segarecomp_enable_warnings(sv_host_test)
+  # SEG-131: review/documentation tool for the save-state and rewind screens (a fictional picture and a fake provider); tests/sv_state_gallery_test.py runs it.
+  add_executable(sv_state_gallery test/sv_state_gallery.c test/sv_gallery_scene.c)
+  target_link_libraries(sv_state_gallery PRIVATE segarecomp::viewer_host)
+  set_target_properties(sv_state_gallery PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  segarecomp_enable_warnings(sv_state_gallery)
+  # SEG-131: measurement tool (not a test): time to open the rewind surface and per-frame cost of switching the preview.
+  add_executable(sv_state_bench test/sv_state_bench.c)
+  target_link_libraries(sv_state_bench PRIVATE segarecomp::viewer_host)
+  set_target_properties(sv_state_bench PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  segarecomp_enable_warnings(sv_state_bench)
   # Documentation/review tool, not a test: renders the viewer's screens from a fictional picture.
   add_executable(sv_gallery test/sv_gallery.c test/sv_gallery_scene.c)  # review art: this tool only, never the library or a package
   target_link_libraries(sv_gallery PRIVATE segarecomp::viewer_host)
@@ -83,6 +103,13 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER AND BUILD_TESTING)
   add_test(NAME sv_perf_overlay_test COMMAND sv_perf_overlay_test)
   set_property(TEST sv_perf_overlay_test APPEND PROPERTY LABELS full fast)
   set_property(TEST sv_perf_overlay_test PROPERTY TIMEOUT 240)
+  add_executable(sv_state_test test/sv_state_test.c)   # SEG-131: the save-state surface against a fake provider
+  target_link_libraries(sv_state_test PRIVATE segarecomp::viewer_host)
+  set_target_properties(sv_state_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  segarecomp_enable_warnings(sv_state_test)
+  add_test(NAME sv_state_test COMMAND sv_state_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set_property(TEST sv_state_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST sv_state_test PROPERTY TIMEOUT 240)
   add_test(NAME sv_host_test COMMAND sv_host_test)
   set_property(TEST sv_host_test APPEND PROPERTY LABELS full fast)
   set_property(TEST sv_host_test PROPERTY TIMEOUT 240)  # a stuck overlay loop must fail with its output, not hang the job

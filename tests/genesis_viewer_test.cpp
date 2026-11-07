@@ -43,7 +43,7 @@ uint8_t f_pad2(void *c) { return (uint8_t)(((Fake *)c)->pad ^ 0xFFu); }  // SEG-
 void f_after(void *c, GenesisRuntime *) { ++((Fake *)c)->after_calls; }
 GenesisViewerHost host(Fake &f) {
   return {&f, f_now, f_sleep, f_present, f_closed, f.use_pad ? f_pad : nullptr, f.use_after ? f_after : nullptr,
-          f.use_pad ? f_pad2 : nullptr};
+          f.use_pad ? f_pad2 : nullptr, nullptr};
 }
 
 void pacer_tests() {
@@ -71,7 +71,7 @@ void pacer_tests() {
   Fake g; auto hg = host(g); GenesisPacer u; genesis_pacer_init(&u, 1);
   for (int i = 0; i < 5; ++i) (void)genesis_pacer_wait(&u, &hg);
   check(g.sleeps.empty() && u.sleep_calls == 0, "unthrottled never sleeps");
-  GenesisViewerHost bad = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+  GenesisViewerHost bad = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
   check(genesis_pacer_wait(&p, &bad) == -1 && genesis_pacer_wait(nullptr, &h) == -1, "null args fail");
 }
 

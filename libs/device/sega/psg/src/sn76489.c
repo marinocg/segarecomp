@@ -139,6 +139,46 @@ void sn76489_state_bytes(const Sn76489 *chip, uint8_t out[SN76489_STATE_BYTES]) 
   for (i = 0; i < 8; ++i) out[n++] = (uint8_t)(chip->ticks >> (8u * i));
 }
 
+int sn76489_load_state_bytes(Sn76489 *chip, const uint8_t in[SN76489_STATE_BYTES]) {
+  uint16_t tone_period[SN76489_TONE_CHANNELS], tone_counter[SN76489_TONE_CHANNELS], noise_counter, lfsr;
+  uint8_t tone_output[SN76489_TONE_CHANNELS], attenuation[SN76489_CHANNELS], noise_control, noise_flip;
+  int8_t latch;
+  uint64_t ticks = 0;
+  size_t n = 0;
+  unsigned i;
+  if (chip == NULL || in == NULL) return 1;
+  for (i = 0; i < SN76489_TONE_CHANNELS; ++i, n += 2) tone_period[i] = (uint16_t)(in[n] | ((unsigned)in[n + 1] << 8));
+  for (i = 0; i < SN76489_TONE_CHANNELS; ++i, n += 2) tone_counter[i] = (uint16_t)(in[n] | ((unsigned)in[n + 1] << 8));
+  for (i = 0; i < SN76489_TONE_CHANNELS; ++i) tone_output[i] = in[n++];
+  for (i = 0; i < SN76489_CHANNELS; ++i) attenuation[i] = in[n++];
+  noise_control = in[n++];
+  noise_counter = (uint16_t)(in[n] | ((unsigned)in[n + 1] << 8));
+  n += 2;
+  noise_flip = in[n++];
+  lfsr = (uint16_t)(in[n] | ((unsigned)in[n + 1] << 8));
+  n += 2;
+  latch = (int8_t)in[n++];
+  for (i = 0; i < 8; ++i) ticks |= (uint64_t)in[n++] << (8u * i);
+  for (i = 0; i < SN76489_TONE_CHANNELS; ++i)
+    if (tone_period[i] > 0x3FFu || tone_counter[i] > 0x3FFu || tone_output[i] > 1u) return 2;
+  for (i = 0; i < SN76489_CHANNELS; ++i)
+    if (attenuation[i] > 15u) return 3;
+  if (noise_control > 7u || noise_counter > 0x3FFu || noise_flip > 1u) return 4;
+  if (chip->config.lfsr_bits < 16u && (lfsr >> chip->config.lfsr_bits) != 0u) return 5;
+  if (latch < -1 || latch > 7) return 6;
+  memcpy(chip->tone_period, tone_period, sizeof tone_period);
+  memcpy(chip->tone_counter, tone_counter, sizeof tone_counter);
+  memcpy(chip->tone_output, tone_output, sizeof tone_output);
+  memcpy(chip->attenuation, attenuation, sizeof attenuation);
+  chip->noise_control = noise_control;
+  chip->noise_counter = noise_counter;
+  chip->noise_flip = noise_flip;
+  chip->lfsr = lfsr;
+  chip->latch = latch;
+  chip->ticks = ticks;
+  return 0;
+}
+
 /* ---- PCM stream ----------------------------------------------------------------------------------------------- */
 
 Sn76489PcmConfig sn76489_pcm_config_44100_sms(void) {

@@ -257,6 +257,18 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
     SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN");
     SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE");
   }
+  {  // SEG-131: the player's data for this game and version; a non-Genesis game (or an invalid identity) gets none, and an inherited value can never leak in
+    const fs::path saves = genesis_save_dir(rom);
+    if (!saves.empty()) {
+      std::error_code ec;
+      fs::create_directories(saves, ec);   // best effort: the viewer creates what is missing and reports a failure
+      SDL_SetEnvironmentVariable(environment, "SEGARECOMP_SAVE_DIR", utf8(saves).c_str(), true);
+      SDL_SetEnvironmentVariable(environment, "SEGARECOMP_SAVE_VARIANT", rom.patched() ? rom.patch_identity.c_str() : "vanilla", true);
+    } else {
+      SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_SAVE_DIR");
+      SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_SAVE_VARIANT");
+    }
+  }
   if (!rom.title.empty()) {  // the window title names the version that runs: a Patched program is never presented as plain Vanilla
     const std::string title = rom.patched() ? rom.title + " (Patched: " + rom.patch_label + ")" : rom.title;
     SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GAME_TITLE", title.c_str(), true);
@@ -1252,6 +1264,43 @@ void BuildJob::run() {
   fs::rename(partial, failed, ec);
   set_message(result_line.empty() ? "The build failed unexpectedly." : result_line);
   finish(false);
+}
+
+// ---- SEG-131: the player's data of a Genesis game ----
+
+namespace {
+bool lowercase_hex(const std::string &text, std::size_t length) {
+  if (text.size() != length) return false;
+  for (const char c : text)
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+  return true;
+}
+}  // namespace
+
+fs::path genesis_save_dir(const RomView &rom) {
+  if (rom.platform_id != "genesis" || !lowercase_hex(rom.sha256, 64)) return {};
+  fs::path dir = library_root() / "saves" / "genesis" / rom.sha256;
+  if (!rom.patched()) return dir / "vanilla";
+  if (!lowercase_hex(rom.patch_identity, 64)) return {};
+  return dir / "patches" / rom.patch_identity;
+}
+
+SaveOutcome read_save_outcome(const fs::path &run_log) {
+  SaveOutcome outcome;
+  std::ifstream in(run_log, std::ios::binary);
+  std::string line;
+  std::size_t scanned = 0;
+  while (in && std::getline(in, line) && ++scanned < 200000) {
+    if (line.rfind("VIEWER_PERSIST ", 0) != 0 || line.size() > 4096) continue;
+    const auto root = json::parse(line.substr(15));
+    if (!root || !root->is_object()) continue;
+    const std::string event = root->str("event"), status = root->str("status");
+    if (event == "load" && status == "refused") { outcome.load_refused = true; outcome.detail = root->str("detail"); }
+    else if (event == "commit" && status == "stored") outcome.committed = true;
+    else if (event == "commit" && status == "not_clean_exit") outcome.not_saved = true;
+    else if (event == "commit" && status == "kept_previous") { outcome.commit_failed = true; outcome.detail = root->str("detail"); }
+  }
+  return outcome;
 }
 
 // ---- GameRun ----

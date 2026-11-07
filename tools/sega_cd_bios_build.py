@@ -67,7 +67,7 @@ GENESIS_RUNTIME = ROOT / "platforms" / "genesis" / "runtime"
 SCD_VIEWER = ROOT / "platforms" / "sega-cd" / "viewer"
 GENESIS_VIEWER = ROOT / "platforms" / "genesis" / "viewer"
 SV_DIR = ROOT / "libs" / "viewer"
-SV_SOURCES = ("sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c",
+SV_SOURCES = ("sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_rewind.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c",
               "sv_host.c", "sv_pages.c", "sv_draw.c")
 CFLAGS = ["-std=c11", "-Wall", "-Wextra", "-pedantic", "-Werror", "-Wno-type-limits", "-O1"]
 MAX_EPOCHS = 4

@@ -107,6 +107,16 @@ typedef struct GenesisCartridgeSramConfig {
   uint8_t kind;           /* SEGARECOMP_GENESIS_CARTRIDGE_KIND_SRAM (0, default) or ..._KIND_EEPROM_X24C01 (ADR 0136) */
 } GenesisCartridgeSramConfig;
 
+/* ADR 0136: the X24C01 protocol phases (SEG-131 moved the enumeration here so a restored phase can be bounded by GENESIS_EEPROM_PHASE_LAST). */
+enum {
+  GENESIS_EEPROM_PHASE_IDLE = 0,       /* no command (after STOP / power on) */
+  GENESIS_EEPROM_PHASE_WAIT_STOP = 1,  /* read ended by master NACK: ignore everything until STOP */
+  GENESIS_EEPROM_PHASE_ADDRESS = 2,    /* receiving the word address and the R/W bit */
+  GENESIS_EEPROM_PHASE_WRITE = 3,
+  GENESIS_EEPROM_PHASE_READ = 4,
+  GENESIS_EEPROM_PHASE_LAST = GENESIS_EEPROM_PHASE_READ
+};
+
 /*
  * ADR 0136: serial EEPROM line/state-machine state (X24C01, mode 1: 7-bit word address + R/W bit). Zero-initialized by
  * genesis_cartridge_sram_install, which then sets both lines high (bus idle). In memory only; never persisted.
