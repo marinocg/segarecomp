@@ -8,6 +8,7 @@
 #include "sv_input_diag.h"
 #include "sv_layout.h"
 #include "sv_menu.h"
+#include "sv_perf.h"
 
 #define SV_MAX_PADS 4
 
@@ -119,6 +120,7 @@ struct SvHost {
   Uint64 event_ts;             /* timestamp of the event being handled (a binding listener ignores anything not strictly newer) */
   int (*hook)(void *ctx, SvHost *host, int iteration); /* test/automation: called with the finished overlay in the back buffer */
   void *hook_ctx;
+  struct SvPerf *perf;         /* SEG-125: the adapter's collector (NULL = none); the host only appends spans and reads it for the overlay */
 };
 
 /* Page and item identifiers shared by the page builder (sv_pages.c) and the drawer (sv_draw.c). */
@@ -127,7 +129,7 @@ enum {
 };
 enum {
   I_RESUME = 1, I_GO_QUICK, I_GO_VIDEO, I_GO_CONTROLS, I_GO_AUDIO, I_GO_SYSTEM, I_QUIT,
-  I_FULLSCREEN, I_SCALE, I_ASPECT, I_WIDESCREEN, I_WS_WIDTH, I_SIDE_STYLE, I_PRESET, I_VSYNC, I_FPS, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
+  I_FULLSCREEN, I_SCALE, I_ASPECT, I_WIDESCREEN, I_WS_WIDTH, I_SIDE_STYLE, I_PRESET, I_VSYNC, I_FPS, I_PERF, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
   I_VOLUME, I_MUTE, I_AUDIO_NOTE, I_AUDIO_DEFAULTS,
   I_SHOT, I_RESET, I_INFO,
   I_PLAYER, I_PAD, I_PAD_ASSIGNED, I_DEADZONE, I_MENUKEY, I_CTRL_DEFAULTS, I_GO_PADSTATUS, I_PAD_RESCAN, I_PAD_HID,

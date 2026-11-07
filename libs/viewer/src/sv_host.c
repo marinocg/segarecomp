@@ -584,6 +584,84 @@ void sv_host_draw_preview(SvHost *h, int x, int y, int w, int hh) {
 
 /* The two always-available overlays: the optional FPS/status box (top left) and the transient notification (top right). Both use the bitmap font and the
  * stepped frames of the menu, scale with the display and never cover more than a small corner of the picture. */
+/* ---- SEG-125 performance overlay: drawn from the adapter's collector, never from the guest ---------------------------------------------- */
+
+/* Switches the collector on while the overlay is shown (a report request keeps it on), off again afterwards: no clock reads when it is not wanted. */
+static void perf_sync(SvHost *h) {
+  SvPerf *p = h->perf;
+  if (p == NULL || p->now == NULL || p->pinned) return;
+  if (h->settings.video.perf_overlay != 0 && !p->active) { p->active = 1; sv_perf_start(p); }
+  else if (h->settings.video.perf_overlay == 0 && p->active) p->active = 0;
+}
+
+static int cmp_u32(const void *a, const void *b) { const uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b; return x < y ? -1 : (x > y ? 1 : 0); }
+
+#define SV_PERF_GRAPH 120
+static void draw_perf_overlay(SvHost *h, int out_w, int out_h, int top) {
+  const SvPerf *p = h->perf;
+  const SDL_Color text = {220, 232, 255, 255}, dim = {169, 183, 221, 255}, box = {5, 12, 30, 224}, edge = {35, 62, 120, 255}, light = {77, 103, 167, 255};
+  const int u = sv_host_ui_scale(out_w, out_h), lh = sv_ui_line_h(SV_FONT_BODY, u), dev = h->settings.video.perf_overlay == 2;
+  uint32_t recent[SV_PERF_GRAPH], sorted[SV_PERF_GRAPH];
+  uint8_t kind[SV_PERF_GRAPH]; /* 0 exact frame, 1 coalesced/partial observation (average only), 2 missed a deadline */
+  uint64_t n, k, sum_us = 0, sum_frames = 0, tgt, exact = 0, missed = 0;
+  char line[3 + 8][72];
+  int lines = 0, w = 0, i, gw = SV_PERF_GRAPH * u, gh = 28 * u, bx = 8 * u, bh, tw;
+  SDL_FRect bar;
+  if (p == NULL || !p->active || h->menu_open) return;
+  n = p->history_total < SV_PERF_GRAPH ? p->history_total : SV_PERF_GRAPH;
+  for (k = 0; k < n; ++k) {   /* one entry per OBSERVATION; a coalesced one has no exact per-frame time, only an average, and is drawn differently */
+    const SvPerfFrame *f = &p->history[(p->history_total - n + k) % SV_PERF_HISTORY];
+    const uint32_t frames = f->frames != 0U ? f->frames : 1U;
+    recent[k] = f->interval_us / frames;
+    kind[k] = f->missed != 0U ? 2U : ((frames > 1U || f->partial) ? 1U : 0U);
+    if (frames == 1U && !f->partial) sorted[exact++] = f->interval_us;
+    sum_us += f->interval_us;
+    sum_frames += frames;
+    missed += f->missed;
+  }
+  tgt = p->target_period_ns / 1000U;
+  if (exact > 0) qsort(sorted, (size_t)exact, sizeof sorted[0], cmp_u32);
+  if (n == 0 || tgt == 0 || sum_us == 0) snprintf(line[lines++], sizeof line[0], "Collecting...");
+  else {
+    snprintf(line[lines++], sizeof line[0], "Speed %.0f%%   Presented %.0f FPS", 100.0 * (double)tgt * (double)sum_frames / (double)sum_us, h->fps);
+    if (exact > 0) snprintf(line[lines++], sizeof line[0], "Frame p95 %.1f ms   Missed %u/%u", (double)sorted[(exact * 95 + 99) / 100 - 1] / 1000.0, (unsigned)missed, (unsigned)sum_frames);
+    else snprintf(line[lines++], sizeof line[0], "Frame p95 n/a   Missed %u/%u", (unsigned)missed, (unsigned)sum_frames);
+    snprintf(line[lines++], sizeof line[0], "Renderer: %s", sv_host_renderer_name(h));
+    if (dev && p->virtual_frames > 0) {
+      const double vf = (double)p->virtual_frames;
+      const SvPerfSpan *s = p->span;
+      snprintf(line[lines++], sizeof line[0], "Emulation %.2f ms (VDP %.2f)", (double)s[SV_SPAN_EMULATION].total_ns / vf / 1e6, (double)s[SV_SPAN_VDP_COMPOSE].total_ns / vf / 1e6);
+      snprintf(line[lines++], sizeof line[0], "Present %.2f ms (upload %.2f)", (double)s[SV_SPAN_PRESENT].total_ns / vf / 1e6, (double)s[SV_SPAN_TEXTURE_UPLOAD].total_ns / vf / 1e6);
+      snprintf(line[lines++], sizeof line[0], "Audio %.2f ms  Pacing wait %.2f ms", (double)s[SV_SPAN_AUDIO_PRESENT].total_ns / vf / 1e6, (double)s[SV_SPAN_PACING_WAIT].total_ns / vf / 1e6);
+    }
+  }
+  for (i = 0; i < lines; ++i) { tw = sv_ui_text_w(SV_FONT_BODY, u, line[i]); if (tw > w) w = tw; }
+  if (gw > w) w = gw;
+  w += 16 * u;
+  gw = w - 16 * u;   /* the graph spans the box (float bar width below) */
+  bh = lines * lh + 12 * u + (n > 0 ? gh + 6 * u : 0);
+  sv_ui_frame(h, bx, top, w, bh, u, box, edge, light, 0);
+  for (i = 0; i < lines; ++i) sv_ui_text_shadow(h, SV_FONT_BODY, u, bx + 8 * u, top + 6 * u + i * lh, i == 0 ? text : dim, line[i]);
+  if (n > 0 && tgt > 0) {   /* recent frame-interval graph: full height = 2x the console's native frame time; the line marks 1x */
+    const int gx = bx + 8 * u, gy = top + 8 * u + lines * lh;
+    for (k = 0; k < n; ++k) {
+      double v = (double)recent[k] / (2.0 * (double)tgt);
+      int ph;
+      if (v > 1.0) v = 1.0;
+      ph = (int)(v * gh);
+      if (ph < 1) ph = 1;
+      bar.x = (float)gx + (float)k * (float)gw / (float)SV_PERF_GRAPH; bar.y = (float)(gy + gh - ph); bar.w = (float)gw / (float)SV_PERF_GRAPH + 0.5f; bar.h = (float)ph;
+      if (kind[k] == 2U || (kind[k] == 0U && recent[k] > tgt + tgt / 8)) SDL_SetRenderDrawColor(h->renderer, 235, 120, 90, 255);   /* missed deadline or slow exact frame */
+      else if (kind[k] == 1U) SDL_SetRenderDrawColor(h->renderer, 125, 145, 185, 255);                                                /* coalesced: an average, not a measured frame */
+      else SDL_SetRenderDrawColor(h->renderer, 110, 200, 140, 255);
+      SDL_RenderFillRect(h->renderer, &bar);
+    }
+    SDL_SetRenderDrawColor(h->renderer, 220, 232, 255, 160);
+    bar.x = (float)gx; bar.y = (float)(gy + gh / 2); bar.w = (float)gw; bar.h = 1.0f;
+    SDL_RenderFillRect(h->renderer, &bar);
+  }
+}
+
 static void draw_hud(SvHost *h, int out_w, int out_h) {
   const SDL_Color text = {220, 232, 255, 255}, dim = {169, 183, 221, 255}, box = {5, 12, 30, 224}, edge = {35, 62, 120, 255}, light = {77, 103, 167, 255};
   const int u = sv_host_ui_scale(out_w, out_h);
@@ -604,6 +682,8 @@ static void draw_hud(SvHost *h, int out_w, int out_h) {
     sv_ui_text_shadow(h, SV_FONT_BODY, u, 16 * u, 14 * u + lh, dim, l2);
     sv_ui_text_shadow(h, SV_FONT_BODY, u, 16 * u, 14 * u + 2 * lh, dim, l3);
   }
+  if (h->perf != NULL && h->settings.video.perf_overlay != 0)   /* below the status box when that is shown too */
+    draw_perf_overlay(h, out_w, out_h, h->settings.video.show_fps && !h->menu_open ? 8 * u + 3 * lh + 20 * u : 8 * u);
   {
     int by = 8 * u, i, live = 0;
     const Uint64 now_ms = SDL_GetTicks();
@@ -1072,7 +1152,7 @@ static void capture_if_requested(SvHost *h) {
     }
 }
 
-static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, const SvExtendedSurface *ext, const SvExtendedSurface *ovl) {
+static int present_frame_impl(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, const SvExtendedSurface *ext, const SvExtendedSurface *ovl) {
   int y;
   const Uint64 now = SDL_GetTicksNS();
   const int side = ext != NULL ? ext->side : 0;
@@ -1099,7 +1179,12 @@ static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitc
     h->ext_source = ext->source == SV_EXTSRC_AUTHORED ? SV_EXTSRC_AUTHORED : SV_EXTSRC_GENERIC;
     h->ext_prod_mode = ext->mode;
   }
-  if (!upload_picture(h)) return -1;
+  {
+    const uint64_t t_upload = sv_perf_span_begin(h->perf);
+    const int uploaded = upload_picture(h);
+    sv_perf_span_end(h->perf, SV_SPAN_TEXTURE_UPLOAD, t_upload);
+    if (!uploaded) return -1;
+  }
   h->frames_presented++;
   if (h->frames_presented == 1) { /* first picture: say once how to reach the pause menu (the keys that actually open it); shown beside any other toast */
     const char *custom = h->settings.menu_key > 0 && h->settings.menu_key != SV_KEY_ESCAPE ? SDL_GetScancodeName((SDL_Scancode)h->settings.menu_key) : NULL;
@@ -1121,6 +1206,18 @@ static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitc
   if (h->capture_count > 0) capture_if_requested(h);
   return SDL_RenderPresent(h->renderer) ? 0 : -1;
 }
+
+/* The timed wrapper: SV_SPAN_PRESENT covers the whole host present (retain, upload, draw, SDL_RenderPresent). It is host submission time; SDL_RenderPresent
+ * returning says nothing about when the GPU finished. */
+static int present_frame(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, const SvExtendedSurface *ext, const SvExtendedSurface *ovl) {
+  const uint64_t t0 = sv_perf_span_begin(h->perf);
+  const int rc = present_frame_impl(h, rgb, w, hgt, pitch, ext, ovl);
+  sv_perf_span_end(h->perf, SV_SPAN_PRESENT, t0);
+  if (rc == 0 && h->perf != NULL && h->perf->active) ++h->perf->frames_presented;
+  return rc;
+}
+
+void sv_host_set_perf(SvHost *h, struct SvPerf *perf) { if (h != NULL) h->perf = perf; }
 
 int sv_host_present(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch) { return present_frame(h, rgb, w, hgt, pitch, NULL, NULL); }
 
@@ -1308,14 +1405,22 @@ void sv_host_service(SvHost *h, SvSample *out) {
         if (sc == SDL_SCANCODE_RETURN) { h->key_held[sc] = 0; h->key_latch[sc] = 0; }
         sv_host_toggle_fullscreen(h);
       } else if (sc == SDL_SCANCODE_F12) sv_host_take_screenshot(h);
+      else if (sc == SDL_SCANCODE_F3 && h->perf != NULL) {   /* SEG-125: cycle the performance overlay without leaving the game */
+        static const char *const names[] = {"Performance overlay: off", "Performance overlay: player", "Performance overlay: developer"};
+        h->settings.video.perf_overlay = (h->settings.video.perf_overlay + 1) % 3;
+        sv_host_toast(h, names[h->settings.video.perf_overlay]);
+      }
     } else if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
       if (e.gbutton.button == SDL_GAMEPAD_BUTTON_BACK || e.gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE) open_menu = 1;
     }
   }
   if (open_menu && !h->quit) {
+    const uint64_t paused_from = sv_perf_span_begin(h->perf);
     run_menu(h);
     out->menu_was_open = 1;
+    sv_perf_resync(h->perf, paused_from);   /* a pause is not a slow frame: the interval clock restarts and the pause is reported separately */
   }
+  perf_sync(h);
   if (h->quit) { out->quit = 1; return; }
   for (p = 0; p < SV_PLAYERS; ++p) out->pad[p] = sample_player(h, p);
   memset(h->key_latch, 0, sizeof h->key_latch);

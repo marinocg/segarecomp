@@ -18,6 +18,7 @@
 #include "runtime.h"
 #include "vdp_render.h"
 #include "viewer.h"
+#include "sv_perf.h"
 #include "viewer_sdl3.h"
 #ifdef SEGARECOMP_NATIVE_PROVIDER_CAPS
 #include "native_compat.h" /* SEG-124: the provider of a verified package is linked only into a program built from it */
@@ -46,6 +47,110 @@ static void viewer_after_slice(void *ctx, GenesisRuntime *runtime) {
 }
 #endif
 
+/* ---- SEG-125 (ADR 0273): the optional performance collector. Host-time observation only: it wraps the host's callbacks around the existing loop
+ * (genesis_viewer_run is unchanged), reads the clock at slice / frame / present boundaries (never per instruction), and feeds nothing back to the guest. It is
+ * idle (one branch per callback) unless SEGARECOMP_PERF_REPORT asks for a report or the player switches the overlay on. ---- */
+static SvPerf g_perf;
+static GenesisViewerHost g_inner;     /* the SDL host's own callbacks, wrapped below */
+static GenesisPacer g_pacer;
+static char g_renderer[48];
+static GenesisRuntime *g_runtime;
+static uint64_t g_slice_t0;
+
+static uint64_t perf_clock(void) { return g_inner.now_ns(g_inner.ctx); }
+
+/* Slice start (the host's once-per-slice poll): the previous boundaries' pacer verdicts are settled, the observation window is established BEFORE the guest runs (so the first
+ * slice is counted, and nothing from while the collector was inactive is attributed), and the emulation clock starts. */
+static int perf_window_closed(void *ctx) {
+  const int closed = g_inner.window_closed(ctx);
+  if (g_perf.active) {
+    sv_perf_pace_settle(&g_perf, g_pacer.sleep_calls, g_pacer.unthrottled);
+    sv_perf_observe_begin(&g_perf, g_runtime->virtual_frame_count);
+    g_slice_t0 = g_perf.now();
+  } else {
+    g_perf.observing = 0;
+    g_slice_t0 = 0U;
+  }
+  return closed;
+}
+
+static void perf_sleep(void *ctx, uint64_t ns) {
+  const uint64_t t = sv_perf_span_begin(&g_perf);
+  g_inner.sleep_ns(ctx, ns);
+  sv_perf_span_end(&g_perf, SV_SPAN_PACING_WAIT, t);
+}
+
+static int perf_raster_producer(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster, GenesisFrameArtifact *out) {
+  const uint64_t t = sv_perf_span_begin(&g_perf);
+  const int rc = genesis_vdp_produce_frame_raster(vram, raster, out);
+  sv_perf_span_end(&g_perf, SV_SPAN_VDP_COMPOSE, t);
+  return rc;
+}
+
+/* End of every guest slice: emulation time of the slice, then the observation (frame boundaries crossed, if any). */
+static void perf_slice_done(GenesisRuntime *runtime) {
+  if (!g_perf.active) { g_perf.observing = 0; return; }
+  if (g_slice_t0 != 0U) sv_perf_span_end(&g_perf, SV_SPAN_EMULATION, g_slice_t0);
+  g_slice_t0 = 0U;
+  g_perf.guest_master_ticks = runtime->scheduler.master_ticks;
+  sv_perf_observe_end(&g_perf, runtime->virtual_frame_count, g_pacer.sleep_calls);
+}
+
+#ifdef SEGARECOMP_GENESIS_SOUND
+static void viewer_after_slice(void *ctx, GenesisRuntime *runtime);
+static void perf_after_slice(void *ctx, GenesisRuntime *runtime) {
+  uint64_t t;
+  perf_slice_done(runtime);
+  t = sv_perf_span_begin(&g_perf);
+  viewer_after_slice(ctx, runtime);
+  sv_perf_span_end(&g_perf, SV_SPAN_AUDIO_PRESENT, t);
+}
+#else
+static void perf_after_slice(void *ctx, GenesisRuntime *runtime) { (void)ctx; perf_slice_done(runtime); }
+#endif
+
+static void perf_write_report(const char *path, const char *status, const char *outcome, const GenesisViewerResult *r, const GenesisRuntime *runtime, const GenesisLiveFrameObserver *observer,
+                              const GenesisRasterCapture *raster, const char *renderer, int unthrottled, uint32_t slice, const char *privacy) {
+  SvPerfMeta meta;
+  memset(&meta, 0, sizeof meta);
+  meta.platform = "genesis";
+  meta.entry = "viewer";
+  meta.status = status;
+  meta.outcome = outcome;
+  meta.renderer = renderer[0] != '\0' ? renderer : NULL;
+  meta.privacy = privacy;
+  meta.paced = !unthrottled;
+  meta.slice_dispatches = slice;
+  if (r != NULL) {
+    g_perf.counters[0] = r->dispatches;
+    g_perf.counters[1] = r->slices;
+    g_perf.resyncs = g_pacer.resyncs;
+  }
+  g_perf.counters[2] = runtime->z80_epoch.epoch_count;
+  g_perf.counters[3] = observer->sequence;
+  g_perf.counters[4] = raster->render_rejections;
+  g_perf.counters[5] = raster->vram_journal_overflows;
+  meta.counter_names[0] = "m68k_dispatches";
+  meta.counter_names[1] = "runner_slices";
+  meta.counter_names[2] = "z80_epochs";
+  meta.counter_names[3] = "frames_published";
+  meta.counter_names[4] = "render_rejections";
+  meta.counter_names[5] = "vram_journal_overflows";
+#ifdef SEGARECOMP_GENESIS_SOUND
+  g_perf.counters[6] = genesis_sound_mixer() != NULL ? genesis_sound_mixer()->frames : 0U;
+  g_perf.counters[7] = g_presenter.underruns;
+  g_perf.counters[8] = g_presenter.overrun_dropped;
+  meta.counter_names[6] = "audio_frames";
+  meta.counter_names[7] = "audio_underruns";
+  meta.counter_names[8] = "audio_overrun_dropped";
+#endif
+  meta.unavailable[0][0] = "m68k_time"; meta.unavailable[0][1] = "aggregated in emulation: timing it would need a clock read per instruction";
+  meta.unavailable[1][0] = "z80_time"; meta.unavailable[1][1] = "aggregated in emulation: the Z80 is synchronized inside M68K retirement";
+  meta.unavailable[2][0] = "dma_interrupt_counts"; meta.unavailable[2][1] = "no existing inexpensive counter";
+  meta.unavailable[3][0] = "gpu_time"; meta.unavailable[3][1] = "present is host submission time, not GPU execution time";
+  (void)sv_perf_write_file(&g_perf, &meta, path);
+}
+
 GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                                uint32_t dispatch_allowance) {
   const char *argv[3];
@@ -53,6 +158,12 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   const char *unthrottled = getenv("SEGARECOMP_VIEWER_UNTHROTTLED");
   const char *slice = getenv("SEGARECOMP_VIEWER_SLICE");
   GenesisViewerOptions options;
+  SvPerfRequest perf_request;
+  if (sv_perf_request_from_env(&perf_request) != 0) {
+    fprintf(stderr, "viewer: malformed SEGARECOMP_PERF_MODE / SEGARECOMP_PERF_PRIVACY\n");
+    exit(3);
+  }
+  const char *perf_path = perf_request.path, *perf_privacy = perf_request.privacy;
   if (unthrottled != NULL && strcmp(unthrottled, "1") == 0) argv[argc++] = "--viewer-unthrottled";
   if (slice != NULL && *slice != '\0') { argv[argc++] = "--viewer-slice"; argv[argc++] = slice; }
   if (genesis_viewer_options_parse(argc, argv, &options) != 0) {
@@ -79,7 +190,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   observer.sequence = 0;
   runtime->live_frame_observer = &observer;
   memset(&g_raster_capture, 0, sizeof(g_raster_capture));
-  g_raster_capture.producer = genesis_vdp_produce_frame_raster; /* SEG-055: scanline-aware frames */
+  g_raster_capture.producer = perf_raster_producer; /* SEG-055: scanline-aware frames (SEG-125: the wrapper times the composition, then calls genesis_vdp_produce_frame_raster) */
   g_raster_capture.extension = genesis_sdl3_viewer_extension(sdl, &observer.sequence); /* SEG-118: Level 2 extended backgrounds (presentation only) */
   runtime->live_raster = &g_raster_capture;
 #ifdef SEGARECOMP_NATIVE_PROVIDER_CAPS
@@ -94,7 +205,6 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
 #endif
 
   GenesisViewerHost host;
-  GenesisPacer pacer;
   genesis_sdl3_viewer_host(sdl, &host);
 #ifdef SEGARECOMP_GENESIS_SOUND
   {
@@ -106,9 +216,24 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
     host.after_slice = viewer_after_slice;
   }
 #endif
-  genesis_pacer_init(&pacer, options.unthrottled);
-  GenesisViewerResult r = genesis_viewer_run(runtime, dispatch, &options, &host, &pacer,
+  genesis_pacer_init(&g_pacer, options.unthrottled);
+  /* SEG-125: the collector wraps the host callbacks (see above); the viewer loop itself is untouched. */
+  g_inner = host;
+  g_runtime = runtime;
+  sv_perf_init(&g_perf, perf_clock, genesis_pacer_period_floor_ns(), perf_request.detailed);
+  host.window_closed = perf_window_closed;
+  if (host.sleep_ns != NULL) host.sleep_ns = perf_sleep; /* NULL is legal only when unthrottled: keep the pacer's own contract */
+  host.after_slice = perf_after_slice;
+  genesis_sdl3_viewer_set_perf(sdl, &g_perf);
+  snprintf(g_renderer, sizeof g_renderer, "%s", genesis_sdl3_viewer_renderer_name(sdl) != NULL ? genesis_sdl3_viewer_renderer_name(sdl) : "");
+  if (perf_path != NULL) {
+    sv_perf_enable(&g_perf);
+    perf_write_report(perf_path, "incomplete", "running", NULL, runtime, &observer, &g_raster_capture, g_renderer, options.unthrottled, options.slice_dispatches, perf_privacy);   /* a killed session still leaves a marked report */
+  }
+  GenesisViewerResult r = genesis_viewer_run(runtime, dispatch, &options, &host, &g_pacer,
                                                 dispatch_allowance == UINT32_MAX ? UINT64_MAX : dispatch_allowance);
+  sv_perf_pace_settle(&g_perf, g_pacer.sleep_calls, g_pacer.unthrottled); /* the last boundaries' pacer verdicts */
+  sv_perf_finish(&g_perf); /* before the window closes: the session ends when the guest does, not when a stop screen is dismissed */
   runtime->live_frame_observer = NULL;
   genesis_runtime_write_notes(runtime, g_raster_capture.render_rejections, g_raster_capture.vram_journal_overflows, stderr);
   runtime->live_raster = NULL;
@@ -161,6 +286,11 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
           "VIEWER_SUMMARY {\"viewer_opened\":true,\"frame_publication_observed\":%s,"
           "\"frame_presented\":%s,\"outcome\":\"%s\",\"execution\":\"generated-native\"}\n",
           observer.sequence > 0 ? "true" : "false", r.frames_presented > 0 ? "true" : "false", name);
+  if (perf_path != NULL) {
+    /* complete: the session ended as requested (window closed, budget reached, guest finished); incomplete: a typed guest stop ended it (the numbers are valid up to it); failed: a host error */
+    const char *status = r.outcome == GENESIS_VIEWER_GUEST_STOP ? "incomplete" : (r.outcome == GENESIS_VIEWER_HOST_ERROR || r.outcome == GENESIS_VIEWER_INVALID_ARGUMENT ? "failed" : "complete");
+    perf_write_report(perf_path, status, name, &r, runtime, &observer, &g_raster_capture, g_renderer, options.unthrottled, options.slice_dispatches, perf_privacy);
+  }
   if (r.outcome == GENESIS_VIEWER_HOST_ERROR || r.outcome == GENESIS_VIEWER_INVALID_ARGUMENT) exit(4);
   if (r.outcome == GENESIS_VIEWER_WINDOW_CLOSED || r.outcome == GENESIS_VIEWER_RUNNER_EXHAUSTED) {
     GenesisControlTransfer t;

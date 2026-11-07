@@ -18,6 +18,10 @@ int sms_sdl3_viewer_attach_extension(SmsSdl3Viewer *viewer, SmsViewerRig *rig);
 SmsExtension *sms_sdl3_viewer_extension(SmsSdl3Viewer *viewer);
 struct SvHost *sms_sdl3_viewer_sv_host(SmsSdl3Viewer *viewer);
 void sms_sdl3_viewer_host(SmsSdl3Viewer *viewer, SmsViewerHost *host);
+/* SEG-125 (ADR 0273): attaches the performance collector (sv_perf.h) to the shared host; NULL detaches. Presentation-side observation only. */
+struct SvPerf;
+void sms_sdl3_viewer_set_perf(SmsSdl3Viewer *viewer, struct SvPerf *perf);
+const char *sms_sdl3_viewer_renderer_name(const SmsSdl3Viewer *viewer);
 /* 1 when an audio stream is open; `overruns` (optional) counts chunks dropped because the queue was full. */
 int sms_sdl3_viewer_audio_active(const SmsSdl3Viewer *viewer, uint64_t *overruns);
 /* Shows why the guest stopped instead of a blank window; blocks until dismissed (no-op on a headless video driver). */

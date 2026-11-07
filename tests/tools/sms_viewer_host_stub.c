@@ -45,4 +45,7 @@ int sms_sdl3_viewer_audio_active(const SmsSdl3Viewer *viewer, uint64_t *overruns
   if (overruns != NULL) *overruns = 0u;
   return 0;
 }
+void sms_sdl3_viewer_set_perf(SmsSdl3Viewer *viewer, struct SvPerf *perf) { (void)viewer; (void)perf; }   /* SEG-125: the stub has no host to time */
+const char *sms_sdl3_viewer_renderer_name(const SmsSdl3Viewer *viewer) { (void)viewer; return "stub"; }
+
 void sms_sdl3_viewer_close(SmsSdl3Viewer *viewer) { free(viewer); }

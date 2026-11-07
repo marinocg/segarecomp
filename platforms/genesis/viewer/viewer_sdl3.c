@@ -8,6 +8,7 @@
 
 #include "genesis_audio_format.h"
 #include "sv_host.h"
+#include "sv_perf.h"
 #include "sv_layout.h"
 #include "vdp_render.h"
 
@@ -15,6 +16,7 @@ struct GenesisSdl3Viewer {
   SvHost *host;            /* the shared viewer host (libs/viewer): window, input, settings, pause overlay, presenter */
   SDL_AudioStream *audio;
   GenesisAudioSink sink;
+  struct SvPerf *perf;     /* SEG-125: the collector (NULL = none) */
   SvSample sample;         /* the input sampled by the latest window_closed() call (once per host slice, as before) */
   const uint64_t *audio_dropped;
   /* SEG-118: Level 2 extension (see viewer_sdl3.h). The surface is preallocated for the widest geometry; no per-frame allocation. */
@@ -129,8 +131,12 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
   const unsigned width = GENESIS_FRAME_ARTIFACT_WIDTH(frame);
   const unsigned height = GENESIS_FRAME_ARTIFACT_HEIGHT(frame);
   if (width == 0U || width > GENESIS_FRAME_MAX_WIDTH || height == 0U || height > GENESIS_FRAME_MAX_HEIGHT) return -1;
-  for (unsigned row = 0; row < height; ++row) {
-    if (genesis_vdp_frame_row_rgb888(frame, row, &rgb[(size_t)row * width * 3U]) != 0) return -1;
+  {
+    const uint64_t t_rgb = sv_perf_span_begin(v->perf);
+    for (unsigned row = 0; row < height; ++row) {
+      if (genesis_vdp_frame_row_rgb888(frame, row, &rgb[(size_t)row * width * 3U]) != 0) return -1;
+    }
+    sv_perf_span_end(v->perf, SV_SPAN_RGB_CONVERT, t_rgb);
   }
   if (v->ext_attached && v->frame_sequence != NULL) {
     const GenesisExtensionResult *r = &v->ext.result;
@@ -338,6 +344,14 @@ void genesis_sdl3_viewer_host(GenesisSdl3Viewer *viewer, GenesisViewerHost *host
   host->pad1 = sdl_pad1;
   host->pad2 = sdl_pad2;
 }
+
+void genesis_sdl3_viewer_set_perf(GenesisSdl3Viewer *v, struct SvPerf *perf) {
+  if (v == NULL) return;
+  v->perf = perf;
+  sv_host_set_perf(v->host, perf);
+}
+
+const char *genesis_sdl3_viewer_renderer_name(const GenesisSdl3Viewer *v) { return v != NULL && v->host != NULL ? sv_host_renderer_name(v->host) : NULL; }
 
 void genesis_sdl3_viewer_close(GenesisSdl3Viewer *v) {
   if (v == NULL) return;

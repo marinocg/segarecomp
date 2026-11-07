@@ -39,6 +39,11 @@ void genesis_sdl3_viewer_native_compat_stats(const GenesisSdl3Viewer *viewer, Ge
 struct SvHost *genesis_sdl3_viewer_sv_host(GenesisSdl3Viewer *viewer);
 /* Fills `host` with SDL3-backed callbacks bound to `viewer`. */
 void genesis_sdl3_viewer_host(GenesisSdl3Viewer *viewer, GenesisViewerHost *host);
+/* SEG-125 (ADR 0273): attaches the performance collector (sv_perf.h) to the shared host and to the RGB conversion of this adapter; NULL detaches.
+ * Presentation-side only: it observes host time and never changes what is shown or what the guest does. */
+struct SvPerf;
+void genesis_sdl3_viewer_set_perf(GenesisSdl3Viewer *viewer, struct SvPerf *perf);
+const char *genesis_sdl3_viewer_renderer_name(const GenesisSdl3Viewer *viewer);
 void genesis_sdl3_viewer_close(GenesisSdl3Viewer *viewer);
 #ifdef __cplusplus
 }
