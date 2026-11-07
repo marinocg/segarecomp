@@ -8,6 +8,7 @@
 #include "segarecomp/machine/genesis/ml_admission.hpp"
 #include "segarecomp/machine/genesis/m68k_copy_alias.hpp"
 #include "segarecomp/machine/genesis/z80_materialization.hpp"
+#include "segarecomp/machine/genesis/z80_static_producer.hpp"
 #include "segarecomp/machine/master_system/emit.hpp"
 #include "segarecomp/machine/master_system/ml_region_z80_producer.hpp"
 #include "segarecomp/patch.hpp"
@@ -107,6 +108,10 @@ struct Options {
   // H-interrupt whose RAM-resident vector has no compiled handler STOPS the pass and ADR 0049 can derive its copy alias / RAM thunk.
   // Default off: the default policy counts and drops such an interrupt. Genesis only; it changes the generated program.
   bool hint_alias_discovery = false;
+  // ADR 0277: reconstruct the Z80 executable images that are provable from the immutable cartridge bytes BEFORE the first Z80 compilation
+  // (static-first). Whatever the producer cannot establish, and any disagreement with the verification run, is left to / retried by the
+  // unchanged build-time materialization fixed point. Genesis only. See z80_static_producer.hpp.
+  bool z80_static = false;
   // SEG-124 (ADR 0267): a trusted native-source package. The build takes a REFERENCE to the package (never source text, paths of source or capability strings from the caller): it reads the
   // package itself, re-verifies it (archive, manifest, source digest, that its identity is the one the user approved, that the image being built is the one it declares), extracts the
   // provider source into a private area of this build and compiles it against the public SDK only. Empty = Vanilla / BPS-only build: no provider code at all.
@@ -205,6 +210,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--admission-plan" && !options.admission_plan) options.admission_plan = fs::path(value);
     else if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) options.aot_policy = value;
     else if (key == "--hint-alias-discovery" && (value == "0" || value == "1")) options.hint_alias_discovery = value == "1";
+    else if (key == "--z80-static" && (value == "0" || value == "1")) options.z80_static = value == "1";
     else if (key == "--patch-package") { if (!options.patch_package.empty()) return std::nullopt; options.patch_package = fs::path(value); }
     else if (key == "--patch-identity") { if (!options.patch_identity.empty()) return std::nullopt; options.patch_identity = value; }
     else if (key == "--performance-report") { if (!options.performance_report.empty() || value.empty()) return std::nullopt; options.performance_report = fs::path(value); }
@@ -339,6 +345,7 @@ struct GenesisSoundBuild {
   // Aggregates (sanitized): the Z80 part of the build.
   std::uint64_t z80_emit_ms = 0, z80_compile_ms = 0, z80_units = 0, z80_generated_bytes = 0, z80_object_bytes = 0;
   std::uint64_t z80_compiled_units = 0, z80_reused_units = 0;
+  std::uint64_t z80_prepares = 0;  // Z80 compilation generations (calls of prepare), over every fixed point of the build
   std::map<std::string, fs::path> z80_objects;  // unit content hash -> object (reused across iterations)
   std::vector<fs::path> z80_current;            // objects of the most recent preparation
   fs::path pass_executable;
@@ -521,6 +528,7 @@ struct GenesisSoundBuild {
     gz80::EmitRequest request;
     request.directory = z80_dir;
     g_profile.count("z80_prepare_iterations");
+    ++z80_prepares;
     const auto emit_started = Clock::now();
     const gz80::EmitOutcome emitted = [&] { segarecomp_cli::ProfileSpan span(&g_profile, "z80_emit"); return gz80::emit_registry(registry, request); }();
     z80_emit_ms += millis_since(emit_started);
@@ -988,6 +996,23 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   build.pass_runtime.insert(build.pass_runtime.end(), pass_only.begin(), pass_only.end());
   build.pass_executable = build.object_dir / "materialize-pass";
   gz80::Registry registry;
+  // ---- ADR 0277: static-first Z80 image production (opt-in). The produced epochs enter the SAME registry before the first emission. ----
+  gz80::StaticProduction static_production;
+  std::size_t static_images = 0;
+  std::uint64_t static_ms = 0;
+  if (options.z80_static) {
+    segarecomp_cli::ProfileSpan span(&g_profile, "z80_static_produce");
+    const auto started = Clock::now();
+    static_production = gz80::produce_static_epochs(*route.rom);
+    static_images = gz80::preload_registry(registry, static_production);
+    static_ms = millis_since(started);
+    std::string refusals;
+    for (const auto &[refusal, count] : static_production.refusals) refusals += std::string(refusals.empty() ? "" : ",") + gz80::static_refusal_name(refusal) + "=" + std::to_string(count);
+    log.line("z80 static: outcome=" + std::string(gz80::static_outcome_name(static_production.outcome)) + " epochs=" + std::to_string(static_production.epochs.size()) +
+             " images=" + std::to_string(static_images) + " copy_loops=" + std::to_string(static_production.copy_loops) + " decoder_calls=" +
+             std::to_string(static_production.decoder_calls) + " steps=" + std::to_string(static_production.steps) + " ms=" + std::to_string(static_ms) +
+             (refusals.empty() ? std::string() : " refusals=" + refusals));
+  }
   ProcessPassRunner runner(build);
   std::uint64_t materialize_ms = 0;
   const auto fixed_point = [&] {
@@ -1020,6 +1045,34 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   };
   log.line("z80 observation region: " + build.pass_region);  // the single console region the Z80 images are observed under
   gz80::MaterializationSummary summary = fixed_point();
+  // ADR 0277: a statically produced registry is a PREDICTION until the bounded verification run agrees with it. The run must activate exactly the
+  // produced images, in the produced (first-activation) order; any disagreement - a failed pass, an unactivated image, a different order - discards
+  // the whole static registry and the build proceeds with the unchanged fixed point. A contradiction is never relabelled as proof.
+  std::string static_fallback = "none";
+  std::size_t static_images_kept = static_images;
+  if (static_images > 0) {
+    std::string contradiction;
+    if (!summary.ok()) {
+      if (summary.failure != gz80::Failure::z80_image_compile_failed && summary.failure != gz80::Failure::materialization_budget_exhausted)
+        contradiction = std::string("pass_failed:") + gz80::failure_name(summary.failure);
+    } else if (summary.activation_order.size() != registry.images().size()) {
+      contradiction = summary.activation_order.size() < registry.images().size() ? "image_never_activated" : "image_unregistered";
+    } else {
+      for (std::size_t i = 0; i < registry.images().size(); ++i)
+        if (summary.activation_order[i] != registry.images()[i].signature) { contradiction = "activation_order_differs"; break; }
+      // An isolated sound CPU (structural mutation) is not verified: the static snapshot differs from the observed one only outside the written
+      // extents, which the activation signature cannot see; the RAM-backed guard may then fault on carry-over bytes the Z80 itself wrote, or a
+      // static image may be one the legacy fixed point never registers. The legacy registry is the only reference for such a run.
+      if (contradiction.empty() && summary.sound_fault) contradiction = "sound_fault_requires_observed_registry";
+    }
+    if (!contradiction.empty()) {
+      log.line("z80 static CONTRADICTED by the verification run (" + contradiction + "): discarding the static registry, running the unchanged fixed point");
+      static_fallback = contradiction;
+      static_images_kept = 0;
+      registry = gz80::Registry{};
+      summary = fixed_point();
+    }
+  }
   if (!summary.ok()) return materialize_failed(summary, "");
   stage("z80-materialize", "done");
 
@@ -1119,7 +1172,20 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
                  ",\"executable_bytes\":" + std::to_string(exe_bytes) +
                  (summary.sound_fault ? ",\"sound_fault_epochs\":" + std::to_string(summary.sound_fault->epochs) +
                                             ",\"sound_fault_frame\":" + std::to_string(summary.sound_fault->master_ticks / (3420U * 262U /* NTSC master ticks per frame */))
-                                      : std::string()) + "}";
+                                      : std::string()) +
+                 ",\"prepare_generations\":" + std::to_string(build.z80_prepares) + ",\"verification_runs\":" + std::to_string(summary.total_runs - summary.discovery_runs) + "}";
+  if (options.z80_static) {
+    // ADR 0277: sanitized aggregates of the static producer (counts and typed classes only; no byte, address or hash).
+    status_extra.pop_back();  // reopen the "z80" object
+    std::string refusals;
+    for (const auto &[refusal, count] : static_production.refusals) refusals += std::string(refusals.empty() ? "" : ",") + "\"" + gz80::static_refusal_name(refusal) + "\":" + std::to_string(count);
+    status_extra += ",\"static\":{\"outcome\":\"" + std::string(gz80::static_outcome_name(static_production.outcome)) + "\",\"epochs\":" + std::to_string(static_production.epochs.size()) +
+                    ",\"images_proven\":" + std::to_string(static_images) + ",\"images_kept\":" + std::to_string(static_images_kept) + ",\"images_final\":" + std::to_string(summary.images) +
+                    ",\"verified\":" + (static_images_kept > 0 ? "true" : "false") + ",\"fallback\":\"" + static_fallback + "\",\"candidates\":" + std::to_string(static_production.candidates) +
+                    ",\"copy_loops\":" + std::to_string(static_production.copy_loops) + ",\"decoder_calls\":" + std::to_string(static_production.decoder_calls) + ",\"staged_decodes\":" + std::to_string(static_production.staged_decodes) +
+                    ",\"steps\":" + std::to_string(static_production.steps) + ",\"nodes\":" + std::to_string(static_production.nodes) + ",\"contexts\":" + std::to_string(static_production.contexts) +
+                    ",\"horizon_paths\":" + std::to_string(static_production.horizon_paths) + ",\"ms\":" + std::to_string(static_ms) + ",\"refusals\":{" + refusals + "}}}";
+  }
   status_extra += prep_extra;  // SEG-028-T005: sanitized aggregates of the alias preparation (counts and the termination only)
   if (options.admission) {
     // SEG-031 (ADR 0080): which admission the final M68K emission used (sanitized: the strategy only).

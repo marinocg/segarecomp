@@ -1185,6 +1185,22 @@ target_link_libraries(genesis_z80_materialization_test PRIVATE segarecomp::machi
 segarecomp_enable_warnings(genesis_z80_materialization_test)
 add_test(NAME genesis_z80_materialization_test COMMAND genesis_z80_materialization_test)
 set_property(TEST genesis_z80_materialization_test APPEND PROPERTY LABELS full fast)
+# ADR 0277: the shared Kosinski decoder, the static-first producer's registry-level properties, its typed outcomes on project-authored
+# fixtures (no compiler), and the build differential against the unchanged materializer.
+add_executable(core_kosinski_test core_kosinski_test.cpp)
+target_link_libraries(core_kosinski_test PRIVATE segarecomp::base)
+segarecomp_enable_warnings(core_kosinski_test)
+add_test(NAME core_kosinski_test COMMAND core_kosinski_test)
+set_property(TEST core_kosinski_test APPEND PROPERTY LABELS full fast)
+add_executable(genesis_z80_static_registry_test genesis_z80_static_registry_test.cpp)
+target_link_libraries(genesis_z80_static_registry_test PRIVATE segarecomp::machine_genesis_z80_static)
+segarecomp_enable_warnings(genesis_z80_static_registry_test)
+add_test(NAME genesis_z80_static_registry_test COMMAND genesis_z80_static_registry_test)
+set_property(TEST genesis_z80_static_registry_test APPEND PROPERTY LABELS full fast)
+add_test(NAME genesis_z80_static_producer_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_static_producer_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_z80_static_producer_test APPEND PROPERTY LABELS full fast)
+set_property(TEST genesis_z80_static_producer_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 add_test(NAME genesis_z80_forbidden_identifiers_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_forbidden_identifiers_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_z80_forbidden_identifiers_test APPEND PROPERTY LABELS full fast)
@@ -1650,6 +1666,15 @@ set(_z80_pipeline_tests genesis_z80_build_pipeline_test genesis_z80_build_pipeli
   genesis_z80_build_pipeline_falsify_test genesis_z80_build_pipeline_prepare_test genesis_z80_build_pipeline_region_test)
 set_property(TEST ${_z80_pipeline_tests} APPEND PROPERTY LABELS full)
 set_property(TEST ${_z80_pipeline_tests} PROPERTY TIMEOUT 3000)
+# ADR 0277: the static-first build against the unchanged fixed point (one CTest entry per group, like the pipeline groups above).
+foreach(_group equivalence fallback determinism)
+  add_test(NAME genesis_z80_static_first_build_${_group}_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_static_first_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR} ${_group})
+  list(APPEND _z80_static_first_tests genesis_z80_static_first_build_${_group}_test)
+endforeach()
+set_property(TEST ${_z80_static_first_tests} APPEND PROPERTY LABELS full)
+set_property(TEST ${_z80_static_first_tests} PROPERTY TIMEOUT 3000)
+set_property(TEST ${_z80_static_first_tests} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST genesis_z80_forbidden_identifiers_test ${_z80_pipeline_tests} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 add_executable(z80_lowering_probe tools/z80_lowering_probe.cpp)
 target_link_libraries(z80_lowering_probe PRIVATE segarecomp::codegen_c11_z80)

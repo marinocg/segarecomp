@@ -32,6 +32,43 @@ SCOPE = [
 ]
 
 
+# ADR 0277 (amends contract section 14 for exactly these files): the static-first producer is the one place that may name the decompressor
+# FORMAT it recognises (the evidence-based loader contract) and carry the digests of the recognised ROUTINE FORMS (an algorithm's code,
+# position independent, shared by several titles - not a title, not a ROM hash). Everything else stays forbidden here: titles, drivers lists,
+# manifests, per-game data, other formats, and any hash literal other than the declared routine-form table entries.
+PRODUCER_SCOPE = [
+    "platforms/genesis/machine/include/segarecomp/machine/genesis/z80_static_producer.hpp",
+    "platforms/genesis/machine/src/z80_static_producer.cpp",
+    "libs/core/include/segarecomp/core/kosinski.hpp",
+]
+PRODUCER_ALLOWED_WORDS = ("kosinski",)
+PRODUCER_MAX_DIGESTS = 2  # the recognised routine forms; each must sit on its table line
+
+
+def producer_failures(pats):
+    failures = []
+    hash_pattern = re.compile(r"(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])", re.I)
+    for entry in PRODUCER_SCOPE:
+        path = root / entry
+        if not path.is_file():
+            raise SystemExit("producer scope entry is missing: " + entry)
+        text = path.read_text(errors="replace")
+        for pattern in pats:
+            if any(word in pattern.pattern for word in PRODUCER_ALLOWED_WORDS) or pattern.pattern == hash_pattern.pattern:
+                continue
+            if pattern.search(text):
+                failures.append("%s: %s" % (entry, pattern.pattern))
+        digests = 0
+        for line in text.splitlines():
+            if hash_pattern.search(line):
+                digests += 1
+                if not re.search(r'\{"(reference|library)",', line):
+                    failures.append("%s: a hash literal outside the routine-form table: %s" % (entry, line.strip()[:60]))
+        if digests > PRODUCER_MAX_DIGESTS:
+            failures.append("%s: more than %d routine-form digests" % (entry, PRODUCER_MAX_DIGESTS))
+    return failures
+
+
 def files():
     for entry in SCOPE:
         path = root / entry
@@ -66,7 +103,7 @@ def main():
         assert scan(planted, pats), "scanner failed to flag: " + planted
     for clean in ("z80_run(rt, deadline);", "static const uint8_t tag[] = \"segarecomp.genesis.z80.image.v1\";", "0x7F11"):
         assert not scan(clean, pats), "scanner flagged a clean line: " + clean
-    scanned, failures = 0, []
+    scanned, failures = 0, producer_failures(pats)
     for path in files():
         scanned += 1
         for pattern in scan(path.read_text(errors="replace"), pats):

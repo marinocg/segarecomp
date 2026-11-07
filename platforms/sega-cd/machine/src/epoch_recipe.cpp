@@ -2,78 +2,24 @@
 
 #include <cstddef>
 
+#include "segarecomp/core/kosinski.hpp"
+
 namespace segarecomp::machine::sega_cd {
 
 namespace {
 
-constexpr std::uint64_t kMaxTokens = 1U << 22;
-
-struct Stop {
-  EpochRecipeError error;
-};
-
-// Kosinski decoder (see tools/sega_cd_epoch_recipe.py for the format). Throws Stop; a copy may only reference bytes this stream produced.
-class Kosinski {
- public:
-  Kosinski(std::span<const std::uint8_t> src, std::size_t pos, std::size_t limit) : src_(src), pos_(pos), limit_(limit) {}
-
-  std::vector<std::uint8_t> run() {
-    refill();
-    for (std::uint64_t n = 0; n < kMaxTokens; ++n) {
-      if (bit()) {
-        if (out_.size() >= limit_) throw Stop{EpochRecipeError::decoded_length_exceeded};
-        out_.push_back(static_cast<std::uint8_t>(byte()));
-      } else if (bit()) {
-        const unsigned lo = byte();
-        const unsigned hi = byte();
-        const int displacement = static_cast<int>(0xE000U | ((hi & 0xF8U) << 5U) | lo) - 0x10000;
-        const unsigned count = hi & 7U;
-        if (count != 0U) {
-          copy(displacement, count + 2U);
-        } else {
-          const unsigned extra = byte();
-          if (extra == 0U) return std::move(out_);
-          if (extra != 1U) copy(displacement, extra + 1U);
-        }
-      } else {
-        unsigned count = bit() << 1U;
-        count |= bit();
-        copy(static_cast<int>(byte()) - 256, count + 2U);
-      }
-    }
-    throw Stop{EpochRecipeError::token_bound_exceeded};
+// The Kosinski decoder is the shared public implementation (libs/core kosinski.hpp; see tools/sega_cd_epoch_recipe.py for the format).
+// A copy may only reference bytes this stream produced.
+EpochRecipeError map_kosinski_error(KosinskiError error) noexcept {
+  switch (error) {
+    case KosinskiError::source_exhausted: return EpochRecipeError::source_exhausted;
+    case KosinskiError::reference_before_stream: return EpochRecipeError::reference_before_stream;
+    case KosinskiError::decoded_length_exceeded: return EpochRecipeError::decoded_length_exceeded;
+    case KosinskiError::token_bound_exceeded: return EpochRecipeError::token_bound_exceeded;
+    case KosinskiError::none: break;
   }
-
- private:
-  unsigned byte() {
-    if (pos_ >= src_.size()) throw Stop{EpochRecipeError::source_exhausted};
-    return src_[pos_++];
-  }
-  void refill() {
-    const unsigned lo = byte();
-    bits_ = lo | (byte() << 8U);
-    left_ = 16U;
-  }
-  unsigned bit() {
-    const unsigned b = bits_ & 1U;
-    bits_ >>= 1U;
-    if (--left_ == 0U) refill();
-    return b;
-  }
-  void copy(int displacement, unsigned count) {
-    const std::size_t back = static_cast<std::size_t>(-displacement);
-    if (back > out_.size()) throw Stop{EpochRecipeError::reference_before_stream};
-    if (out_.size() + count > limit_) throw Stop{EpochRecipeError::decoded_length_exceeded};
-    for (unsigned i = 0; i < count; ++i) out_.push_back(out_[out_.size() - back]);
-  }
-
-  std::span<const std::uint8_t> src_;
-  std::size_t pos_;
-  std::size_t limit_;
-  std::vector<std::uint8_t> out_;
-  unsigned bits_{};
-  unsigned left_{};
-};
+  return EpochRecipeError::none;
+}
 
 bool parse_number(const std::string &text, std::size_t &i, std::uint32_t &value) {
   if (i >= text.size() || text[i] < '0' || text[i] > '9') return false;
@@ -143,12 +89,9 @@ std::optional<std::vector<std::uint8_t>> reconstruct_epoch_image(std::span<const
   std::vector<std::pair<std::uint32_t, std::uint32_t>> covered;
   for (const auto &step : recipe.steps) {
     if (step.source_offset >= bios.size() || step.dest >= recipe.image_length) return fail(EpochRecipeError::recipe_bounds);
-    std::vector<std::uint8_t> data;
-    try {
-      data = Kosinski(bios, step.source_offset, recipe.image_length - step.dest).run();
-    } catch (const Stop &stop) {
-      return fail(stop.error);
-    }
+    KosinskiResult decoded = kosinski_decode(bios, step.source_offset, recipe.image_length - step.dest);
+    if (decoded.error != KosinskiError::none) return fail(map_kosinski_error(decoded.error));
+    std::vector<std::uint8_t> data = std::move(decoded.output);
     const std::uint64_t hi = static_cast<std::uint64_t>(step.dest) + data.size();
     if (data.empty() || hi > recipe.image_length) return fail(EpochRecipeError::step_out_of_bounds);
     for (const auto &[a, b] : covered)

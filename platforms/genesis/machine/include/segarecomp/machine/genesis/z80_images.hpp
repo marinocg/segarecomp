@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "segarecomp/codegen/c11/z80.hpp"
@@ -51,11 +52,19 @@ struct Extent {
 [[nodiscard]] Digest signature_digest(const Epoch& epoch);
 [[nodiscard]] std::string to_hex(const Digest& digest);
 
+// How an image entered the registry (provenance only; it never takes part in the content hash, the signature or the equality proof).
+enum class Derivation : std::uint8_t {
+  runnable_epoch_snapshot,  // observed: the 8 KiB RAM snapshot of a runnable transition of a bounded build-time run (ADR 0073)
+  static_reconstruction,    // reconstructed before any Z80 compilation from immutable cartridge bytes (ADR 0277, authority static_proof)
+};
+
 struct Image {
   std::uint32_t ordinal = 0;  // 1-based, order of first activation; also the generated code-image identity
   Digest content{};
   Digest signature{};
   std::array<std::uint8_t, kRamBytes> ram{};  // the snapshot the image was compiled from
+  Derivation derivation = Derivation::runnable_epoch_snapshot;
+  std::string proof;  // static_reconstruction only: the name of the strongest proof mechanism (static_proof_name of z80_static_producer.hpp)
 };
 
 enum class AddOutcome : std::uint8_t {
@@ -68,7 +77,9 @@ enum class AddOutcome : std::uint8_t {
 class Registry {
  public:
   // Registers the epoch's image. `bound_ordinal` receives the ordinal this epoch binds (0 when none: a restart before any epoch).
-  AddOutcome add(const Epoch& epoch, std::uint32_t& bound_ordinal);
+  // `derivation`/`proof` describe a newly registered image only; a signature already registered keeps the derivation it first had.
+  AddOutcome add(const Epoch& epoch, std::uint32_t& bound_ordinal, Derivation derivation = Derivation::runnable_epoch_snapshot,
+                 std::string_view proof = {});
   [[nodiscard]] const std::vector<Image>& images() const noexcept { return images_; }
   [[nodiscard]] std::uint32_t last_bound() const noexcept { return last_bound_; }
 
@@ -102,6 +113,17 @@ struct AlternativesSummary {
 
 // Registry equality (the replacement proof): the same ordered images with the same ordinal, content hash, signature and snapshot.
 [[nodiscard]] bool registries_equal(const Registry& left, const Registry& right);
+
+// ADR 0277: the relation between a statically produced registry and an observed one. The Z80 may write its own RAM between epochs and the
+// 68K-written extents of an activation signature cover only the bytes the 68K stored, so a static snapshot and an observed snapshot can
+// legitimately differ in bytes OUTSIDE every image's written extents ("carry-over"). Nothing else may differ.
+enum class RegistryRelation : std::uint8_t {
+  identical,                        // registries_equal
+  equivalent_modulo_carry_over,     // same count, ordinals, activation signatures; snapshots equal inside the extents (guaranteed by the signature) and differ only outside them
+  different,                        // a different number, order, ordinal or signature: a contradiction
+};
+[[nodiscard]] RegistryRelation compare_registries(const Registry& left, const Registry& right);
+[[nodiscard]] const char* registry_relation_name(RegistryRelation relation) noexcept;
 
 // One RAM-backed banked image per registered snapshot: window $0000-$3FFF (the snapshot twice), identity = ordinal.
 // = executable_images(registry) projected onto the Z80 emitter input with every image banked.

@@ -98,7 +98,7 @@ std::string to_hex(const Digest& digest) {
   return out;
 }
 
-AddOutcome Registry::add(const Epoch& epoch, std::uint32_t& bound_ordinal) {
+AddOutcome Registry::add(const Epoch& epoch, std::uint32_t& bound_ordinal, Derivation derivation, std::string_view proof) {
   if (extents(epoch.written).empty()) {  // a plain restart: the Z80 runs the code already in RAM, i.e. the previously bound image
     bound_ordinal = last_bound_;
     if (last_bound_ != 0) return AddOutcome::restart;
@@ -118,6 +118,8 @@ AddOutcome Registry::add(const Epoch& epoch, std::uint32_t& bound_ordinal) {
   image.content = content_digest(epoch.ram);
   image.signature = signature;
   image.ram = epoch.ram;
+  image.derivation = derivation;
+  image.proof = std::string(proof);
   images_.push_back(image);
   bound_ordinal = last_bound_ = image.ordinal;
   return AddOutcome::added;
@@ -136,9 +138,11 @@ ExecutableImageSet executable_images(const Registry& registry, const ImageProduc
     out.bytes.assign(image.ram.begin(), image.ram.end());
     out.bytes.insert(out.bytes.end(), image.ram.begin(), image.ram.end());  // the 8 KiB RAM is mirrored at $2000
     out.mappings.push_back({0x0000, 0, static_cast<std::uint32_t>(kWindowBytes)});
-    out.provenance.authority = producer.authority;
-    out.provenance.producer = producer.name;
-    out.provenance.evidence.push_back({"derivation", "runnable_epoch_snapshot"});
+    const bool reconstructed = image.derivation == Derivation::static_reconstruction;
+    out.provenance.authority = reconstructed ? ImageAuthority::static_proof : producer.authority;
+    out.provenance.producer = reconstructed ? "genesis.z80_static_producer" : producer.name;
+    out.provenance.evidence.push_back({"derivation", reconstructed ? "static_reconstruction" : "runnable_epoch_snapshot"});
+    if (reconstructed) out.provenance.evidence.push_back({"proof", image.proof});
     out.provenance.evidence.push_back({"ordinal", std::to_string(image.ordinal)});
     out.provenance.evidence.push_back({"content_digest", to_hex(image.content)});
     out.provenance.evidence.push_back({"signature_digest", to_hex(image.signature)});
@@ -184,6 +188,28 @@ bool registries_equal(const Registry& left, const Registry& right) {
     if (a[i].ordinal != b[i].ordinal || a[i].content != b[i].content || a[i].signature != b[i].signature || a[i].ram != b[i].ram)
       return false;
   return true;
+}
+
+RegistryRelation compare_registries(const Registry& left, const Registry& right) {
+  if (registries_equal(left, right)) return RegistryRelation::identical;
+  const auto& a = left.images();
+  const auto& b = right.images();
+  if (a.size() != b.size()) return RegistryRelation::different;
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    if (a[i].ordinal != b[i].ordinal || a[i].signature != b[i].signature) return RegistryRelation::different;
+    // Equal signatures are equal hashes over the extents' offsets, lengths and content, so the snapshots agree inside the written extents;
+    // whatever else differs is carry-over (bytes the 68K did not write in the window). Content hashes are deliberately not compared.
+  }
+  return RegistryRelation::equivalent_modulo_carry_over;
+}
+
+const char* registry_relation_name(RegistryRelation relation) noexcept {
+  switch (relation) {
+    case RegistryRelation::identical: return "identical";
+    case RegistryRelation::equivalent_modulo_carry_over: return "equivalent_modulo_carry_over";
+    case RegistryRelation::different: return "different";
+  }
+  return "different";
 }
 
 codegen::z80::ImageSet build_image_set(const Registry& registry) {

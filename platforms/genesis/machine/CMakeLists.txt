@@ -47,3 +47,12 @@ target_link_libraries(segarecomp_machine_genesis_z80 PUBLIC segarecomp::codegen_
   segarecomp::machine_genesis_copy_alias segarecomp::cpu_z80)
 target_include_directories(segarecomp_machine_genesis_z80 PUBLIC include)
 segarecomp_enable_warnings(segarecomp_machine_genesis_z80)
+
+# ADR 0277: the static-first Z80 image producer (bounded M68K walk over the immutable cartridge image; typed Epoch records for the
+# registry above). Separate from the registry library: only this one needs the 68000 decoder.
+add_library(segarecomp_machine_genesis_z80_static src/z80_static_producer.cpp)
+add_library(segarecomp::machine_genesis_z80_static ALIAS segarecomp_machine_genesis_z80_static)
+target_link_libraries(segarecomp_machine_genesis_z80_static PUBLIC segarecomp::machine_genesis_z80 segarecomp::cpu_m68k segarecomp::media
+  segarecomp::base)
+target_include_directories(segarecomp_machine_genesis_z80_static PUBLIC include)
+segarecomp_enable_warnings(segarecomp_machine_genesis_z80_static)

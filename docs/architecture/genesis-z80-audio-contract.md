@@ -275,6 +275,12 @@ word list in `tests/fixtures/genesis-z80-forbidden-identifiers.txt` and covers t
 (runtime, machine, YM2612 device, Z80 codegen/CPU libraries, the build command, packaging); the existing per-ROM 68K compat hint files are
 not part of it and must never describe the sound subsystem (the scan checks that too).
 
+*Amendment (ADR 0277, static-first Z80 image production).* The static producer (`z80_static_producer.{hpp,cpp}` and the shared
+`kosinski.hpp`) is the single, separately scanned exception: it may name the decompressor FORMAT whose loader contract it recognises and carry
+the digests of the recognised ROUTINE FORMS (position-independent algorithm code, not a title and not a ROM hash; at most two, each on its table
+line). The scan still forbids titles, driver/image lists, manifests, per-game data and every other format there, and forbids all of it, the
+decompressor name and every hash literal included, everywhere else in the production surface.
+
 ## 15. Fixture plan
 
 `tools/genesis_z80_fixture_rom.py` (T001 introduces the builder, the manifest and the `bus_reset_probe`/`bus_reset_control`

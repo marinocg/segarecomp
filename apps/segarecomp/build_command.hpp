@@ -6,6 +6,7 @@
 inline constexpr const char *segarecomp_build_usage =
     "  segarecomp build --rom <image> --output <dir> --cc <compiler> [--cc-arg <arg>]... [--link-arg <arg>]...\n                   [--cxx <compiler> [--cxx-arg <arg>]...] [--keep-work 1]\n                   --runtime-dir <dir>\n"
     "                   [--sdl3-include <dir> --sdl3-lib <dir>] [--optimize <0|1|2>] [--runtime-optimize <0|1|2>] [--jobs <n>]\n"
+    "                   [--z80-static <0|1>] (Genesis: reconstruct provable Z80 images before the first Z80 compilation, ADR 0277; default 0; the fixed point still verifies and is the fallback)\n"
     "                   [--platform <genesis|master-system>] [--mapper <sega|rom_only|lock_on>] [--mapper-manifest <file>]\n"
     "                   (Genesis: --mapper lock_on declares a lock-on pass-through cartridge, ADR 0268; never inferred)\n"
     "                   [--admission-plan <file>] (Genesis M68K hybrid admission candidate, SEG-031; broad by default)\n"
