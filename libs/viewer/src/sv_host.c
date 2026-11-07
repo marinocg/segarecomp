@@ -14,7 +14,7 @@ SV_PIN(SV_KEY_U, SDL_SCANCODE_U); SV_PIN(SV_KEY_X, SDL_SCANCODE_X); SV_PIN(SV_KE
 SV_PIN(SV_KEY_ESCAPE, SDL_SCANCODE_ESCAPE); SV_PIN(SV_KEY_BACKSPACE, SDL_SCANCODE_BACKSPACE); SV_PIN(SV_KEY_DELETE, SDL_SCANCODE_DELETE);
 SV_PIN(SV_KEY_F11, SDL_SCANCODE_F11); SV_PIN(SV_KEY_F12, SDL_SCANCODE_F12); SV_PIN(SV_KEY_RIGHT, SDL_SCANCODE_RIGHT); SV_PIN(SV_KEY_LEFT, SDL_SCANCODE_LEFT);
 SV_PIN(SV_KEY_DOWN, SDL_SCANCODE_DOWN); SV_PIN(SV_KEY_UP, SDL_SCANCODE_UP); SV_PIN(SV_KEY_RSHIFT, SDL_SCANCODE_RSHIFT); SV_PIN(SV_KEY_F1, SDL_SCANCODE_F1);
-SV_PIN(SV_KEY_F10, SDL_SCANCODE_F10);
+SV_PIN(SV_KEY_F10, SDL_SCANCODE_F10); SV_PIN(SV_KEY_F5, SDL_SCANCODE_F5); SV_PIN(SV_KEY_F7, SDL_SCANCODE_F7); SV_PIN(SV_KEY_F8, SDL_SCANCODE_F8);
 SV_PIN(SV_PAD_SOUTH, SDL_GAMEPAD_BUTTON_SOUTH); SV_PIN(SV_PAD_EAST, SDL_GAMEPAD_BUTTON_EAST); SV_PIN(SV_PAD_WEST, SDL_GAMEPAD_BUTTON_WEST);
 SV_PIN(SV_PAD_NORTH, SDL_GAMEPAD_BUTTON_NORTH); SV_PIN(SV_PAD_BACK, SDL_GAMEPAD_BUTTON_BACK); SV_PIN(SV_PAD_GUIDE, SDL_GAMEPAD_BUTTON_GUIDE);
 SV_PIN(SV_PAD_START, SDL_GAMEPAD_BUTTON_START); SV_PIN(SV_PAD_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_UP); SV_PIN(SV_PAD_DPAD_DOWN, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
@@ -942,6 +942,7 @@ void sv_host_close(SvHost *h) {
   if (h->frame_tex != NULL) SDL_DestroyTexture(h->frame_tex);
   crt_state_destroy(&h->crt);
   crt_state_destroy(&h->crt_preview);
+  if (h->slot_tex != NULL) { SDL_DestroyTexture(h->slot_tex); h->slot_tex = NULL; }
   sv_ui_destroy(h);
   { int k; for (k = 0; k < h->icon_count; ++k) if (h->icons[k] != NULL) SDL_DestroyTexture(h->icons[k]); }
   if (h->renderer != NULL) SDL_DestroyRenderer(h->renderer);
@@ -1392,6 +1393,47 @@ static void run_menu(SvHost *h) {
   sv_host_apply_audio(h);
 }
 
+/* ---- SEG-131: whole-machine save states (the provider is the adapter's; the host only asks at its snapshot barrier) ---- */
+
+void sv_host_set_state_provider(SvHost *h, const SvStateProvider *provider) {
+  if (h == NULL) return;
+  if (provider != NULL) { h->state = *provider; h->has_state = 1; }
+  else { memset(&h->state, 0, sizeof h->state); h->has_state = 0; }
+}
+
+static void slot_label(int slot, char *out, size_t cap) {
+  if (slot == 0) snprintf(out, cap, "Quick Slot");
+  else snprintf(out, cap, "Slot %d", slot);
+}
+
+/* The quick slot is slot 0; every outcome is reported to the player and a failure never claims success. */
+static int quick_action(SvHost *h, int save) {
+  char why[96] = "", error[96] = "", text[128], name[16];
+  if (h == NULL) return -1;
+  if (!h->has_state || h->state.states_available == NULL || (save ? h->state.save_slot == NULL : h->state.load_slot == NULL)) {
+    sv_host_toast(h, "Save states are not available for this system yet");
+    return 0;
+  }
+  if (!h->state.states_available(h->state.ctx, why, sizeof why)) {
+    snprintf(text, sizeof text, "%s", why[0] != '\0' ? why : "Save states are not available right now");
+    sv_host_toast(h, text);
+    return 0;
+  }
+  slot_label(0, name, sizeof name);
+  if (save) {
+    if (h->state.save_slot(h->state.ctx, 0, error, sizeof error) == 0) snprintf(text, sizeof text, "State saved - %s", name);
+    else snprintf(text, sizeof text, "Save failed: %s", error[0] != '\0' ? error : "unknown error");
+  } else {
+    if (h->state.load_slot(h->state.ctx, 0, error, sizeof error) == 0) { sv_host_release_inputs(h); snprintf(text, sizeof text, "State loaded - %s", name); }
+    else snprintf(text, sizeof text, "Load failed: %s", error[0] != '\0' ? error : "unknown error");
+  }
+  sv_host_toast(h, text);
+  return 0;
+}
+
+int sv_host_quick_save(SvHost *h) { return quick_action(h, 1); }
+int sv_host_quick_load(SvHost *h) { return quick_action(h, 0); }
+
 void sv_host_service(SvHost *h, SvSample *out) {
   SDL_Event e;
   int open_menu = 0, p;
@@ -1405,6 +1447,8 @@ void sv_host_service(SvHost *h, SvSample *out) {
         if (sc == SDL_SCANCODE_RETURN) { h->key_held[sc] = 0; h->key_latch[sc] = 0; }
         sv_host_toggle_fullscreen(h);
       } else if (sc == SDL_SCANCODE_F12) sv_host_take_screenshot(h);
+      else if (sc == SDL_SCANCODE_F5) (void)sv_host_quick_save(h);   /* SEG-131: quick save / quick load, at the adapter's snapshot barrier */
+      else if (sc == SDL_SCANCODE_F8) (void)sv_host_quick_load(h);
       else if (sc == SDL_SCANCODE_F3 && h->perf != NULL) {   /* SEG-125: cycle the performance overlay without leaving the game */
         static const char *const names[] = {"Performance overlay: off", "Performance overlay: player", "Performance overlay: developer"};
         h->settings.video.perf_overlay = (h->settings.video.perf_overlay + 1) % 3;

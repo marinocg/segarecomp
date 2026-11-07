@@ -30,6 +30,9 @@ typedef struct GenesisViewerHost {
   void (*after_slice)(void *ctx, GenesisRuntime *runtime);
   /* SEG-055: Player 2 (port 2) GENESIS_PAD_* mask, independent of pad1; NULL == released. */
   uint8_t (*pad2)(void *ctx);
+  /* SEG-131: optional. Returns nonzero once after the host replaced the machine state (save-state load, rewind): the guest clock and frame counters then
+   * jumped, so the loop re-bases its pacing and presentation baselines on the restored machine instead of treating the jump as frames to wait for. */
+  int (*discontinuity)(void *ctx);
 } GenesisViewerHost;
 
 typedef struct GenesisViewerOptions {

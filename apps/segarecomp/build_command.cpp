@@ -962,6 +962,9 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   if (build.play) {
     add(final_only, build.runtime / "vdp_render.c", "vdp-render");
     for (const char *name : {"viewer.c", "viewer_sdl3.c"}) add(final_only, build.viewer / name, std::string("viewer-") + name);
+    add(final_only, build.runtime / "genesis_persistence.c", "genesis-persistence");  // SEG-131: SRAM / EEPROM persistence (plain C11), loaded and committed by the viewer hook
+    add(final_only, build.runtime / "genesis_snapshot.c", "genesis-snapshot", {"-DSEGARECOMP_GENESIS_SOUND"});  // SEG-131: whole-machine snapshots (sound build: Z80, PSG, YM2612, mixer)
+    add(final_only, build.viewer / "genesis_viewer_state.c", "viewer-state", {"-DSEGARECOMP_GENESIS_SOUND"});  // SEG-131: slot files / rewind behind the shared viewer's state provider
     // SEG-058 (ADR 0120): the shared SDL3 viewer foundation (settings, layout/CRT math, menu model, host, pause pages), strict C11 like the rest.
     for (const char *name : kViewerFoundationSources)
       add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name);

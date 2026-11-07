@@ -11,5 +11,8 @@
 extern const uint32_t genesis_z80_image_count;
 extern const uint8_t genesis_z80_image_content_hashes[][32]; /* absent when genesis_z80_image_count == 0 */
 uint32_t genesis_z80_image_for_signature(const uint8_t signature[32]);
+/* SEG-131: the content hash of image `ordinal` (1-based): 1 and 32 bytes in `out`, or 0 when there is no such image (also when the registry is empty, where the
+ * hash table itself does not exist). Save states name the Z80 images they execute by this hash, never by ordinal. */
+int genesis_z80_image_content_hash(uint32_t ordinal, uint8_t out[32]);
 
 #endif

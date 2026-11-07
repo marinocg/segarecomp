@@ -258,7 +258,8 @@ EmitOutcome emit_registry(const Registry& registry, const EmitRequest& request) 
         << "   Z80 code at all. */\n"
         << "#include \"segarecomp/codegen/c11/runtime/z80_runtime.h\"\n"
         << "Z80Outcome z80_run(Z80Runtime *rt, uint64_t deadline) { (void)deadline; return rt->outcome = Z80_ERROR_UNKNOWN_IMAGE_IDENTITY; }\n"
-        << "uint32_t genesis_z80_image_for_signature(const uint8_t signature[32]) { (void)signature; return 0u; }\n";
+        << "uint32_t genesis_z80_image_for_signature(const uint8_t signature[32]) { (void)signature; return 0u; }\n"
+        << "int genesis_z80_image_content_hash(uint32_t ordinal, uint8_t out[32]) { (void)ordinal; (void)out; return 0; }\n";
   } else {
     src << "static const uint8_t genesis_z80_image_signatures[" << n << "][32] = {\n";
     for (const Image& image : registry.images()) c_digest(src, image.signature);
@@ -266,7 +267,9 @@ EmitOutcome emit_registry(const Registry& registry, const EmitRequest& request) 
     for (const Image& image : registry.images()) c_digest(src, image.content);
     src << "};\n\nuint32_t genesis_z80_image_for_signature(const uint8_t signature[32]) {\n"
         << "  uint32_t index;\n  for (index = 0u; index < " << n << "u; ++index)\n"
-        << "    if (memcmp(genesis_z80_image_signatures[index], signature, 32U) == 0) return index + 1u;\n  return 0u;\n}\n";
+        << "    if (memcmp(genesis_z80_image_signatures[index], signature, 32U) == 0) return index + 1u;\n  return 0u;\n}\n"
+        << "\nint genesis_z80_image_content_hash(uint32_t ordinal, uint8_t out[32]) {\n"
+        << "  if (ordinal == 0u || ordinal > " << n << "u) return 0;\n  memcpy(out, genesis_z80_image_content_hashes[ordinal - 1u], 32U);\n  return 1;\n}\n";
   }
   const std::string registry_name = request.stem + "_registry.c";
   if (!write_file(request.directory / registry_name, src.str())) {

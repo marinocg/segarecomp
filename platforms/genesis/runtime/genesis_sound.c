@@ -17,6 +17,8 @@ GenesisZ80Machine *genesis_sound_attach(GenesisRuntime *runtime) {
 
 const GenesisAudio *genesis_sound_audio(void) { return g_attached ? &g_audio : NULL; }
 
+GenesisAudio *genesis_sound_audio_mutable(void) { return g_attached ? &g_audio : NULL; }
+
 GenesisMixer *genesis_sound_mixer(void) { return g_attached ? &g_audio.mixer : NULL; }
 
 void genesis_sound_finish(GenesisRuntime *runtime, int guest_stopped) {

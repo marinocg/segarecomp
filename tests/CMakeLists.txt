@@ -1716,6 +1716,22 @@ add_test(NAME genesis_z80_view_test COMMAND ${Python3_EXECUTABLE}
 # SEG-032-T005 (ADR 0072): BUSREQ/RESET and the deterministic M68K/Z80 scheduling of the attached Z80 machine.
 add_test(NAME genesis_z80_machine_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_machine_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})
+# SEG-131 (ADR 0278): SRAM / X24C01 EEPROM persistence across real viewer processes (skips cleanly without SDL3, like the other generated-viewer tests).
+add_test(NAME genesis_persistence_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_persistence_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_persistence_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_persistence_test PROPERTY TIMEOUT 900)
+# SEG-131 (ADR 0278): manual save states (quick save / quick load) across separate real viewer processes, corrupt / foreign / unwritable slots.
+add_test(NAME genesis_states_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_states_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_states_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_states_test PROPERTY TIMEOUT 900)
+# SEG-131 (ADR 0278): reversible Genesis machine snapshots (save states / rewind): restore reproduces the future (CPU, VDP, Z80, YM2612, PSG, mixer, SRAM/EEPROM), corruption and mismatches are refused without mutation.
+add_test(NAME genesis_snapshot_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_snapshot_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})
+set_property(TEST genesis_snapshot_test APPEND PROPERTY LABELS full fast)
+set_property(TEST genesis_snapshot_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST genesis_snapshot_test APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
 # SEG-032-T006 (ADR 0072): the shared Sega PSG written by both CPUs.
 add_test(NAME genesis_audio_psg_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_psg_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})

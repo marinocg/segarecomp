@@ -111,3 +111,71 @@ uint64_t ym2612_state_digest(const Ym2612 *chip) {
 }
 
 }  // extern "C"
+
+namespace {
+
+void put_u64(uint8_t *out, uint64_t value) {
+  for (unsigned i = 0; i < 8u; ++i) out[i] = static_cast<uint8_t>(value >> (8u * i));
+}
+
+uint64_t get_u64(const uint8_t *in) {
+  uint64_t value = 0;
+  for (unsigned i = 0; i < 8u; ++i) value |= static_cast<uint64_t>(in[i]) << (8u * i);
+  return value;
+}
+
+// ymfm's own blob for the chip (a fixed size for every chip of this build).
+std::vector<uint8_t> chip_blob(const Ym2612 *chip) {
+  std::vector<uint8_t> bytes;
+  ymfm::ymfm_saved_state state(bytes, true);
+  const_cast<Ym2612 *>(chip)->chip.save_restore(state);
+  return bytes;
+}
+
+}  // namespace
+
+extern "C" {
+
+uint32_t ym2612_snapshot_bytes(const Ym2612 *chip) {
+  return static_cast<uint32_t>(YM2612_SNAPSHOT_HOST_BYTES + chip_blob(chip).size());
+}
+
+int ym2612_save(const Ym2612 *chip, uint8_t *out, uint32_t capacity) {
+  const std::vector<uint8_t> blob = chip_blob(chip);
+  if (capacity < YM2612_SNAPSHOT_HOST_BYTES + blob.size()) return 1;
+  put_u64(out + 0, chip->now);
+  put_u64(out + 8, chip->next_sample_clock);
+  put_u64(out + 16, static_cast<uint64_t>(chip->timer_expiry[0]));
+  put_u64(out + 24, static_cast<uint64_t>(chip->timer_expiry[1]));
+  put_u64(out + 32, chip->busy_end);
+  put_u64(out + 40, chip->samples);
+  for (size_t i = 0; i < blob.size(); ++i) out[YM2612_SNAPSHOT_HOST_BYTES + i] = blob[i];
+  return 0;
+}
+
+int ym2612_check(const Ym2612 *chip, const uint8_t *in, uint32_t length) {
+  if (chip == nullptr || in == nullptr || length != ym2612_snapshot_bytes(chip) || length > YM2612_SNAPSHOT_MAX_BYTES) return 1;
+  const uint64_t now = get_u64(in + 0), next = get_u64(in + 8), samples = get_u64(in + 40);
+  if (samples > UINT64_MAX / YM2612_CLOCKS_PER_SAMPLE || next != samples * YM2612_CLOCKS_PER_SAMPLE || next < now) return 2;
+  for (unsigned t = 0; t < 2u; ++t) {
+    const int64_t expiry = static_cast<int64_t>(get_u64(in + 16 + 8u * t));
+    if (expiry != kNoEvent && (expiry < 0 || static_cast<uint64_t>(expiry) < now)) return 3;
+  }
+  return 0;
+}
+
+int ym2612_load(Ym2612 *chip, const uint8_t *in, uint32_t length) {
+  if (ym2612_check(chip, in, length) != 0) return 1;
+  std::vector<uint8_t> blob(in + YM2612_SNAPSHOT_HOST_BYTES, in + length);
+  ymfm::ymfm_saved_state state(blob, false);
+  chip->chip.save_restore(state);
+  chip->now = get_u64(in + 0);
+  chip->next_sample_clock = get_u64(in + 8);
+  chip->timer_expiry[0] = static_cast<int64_t>(get_u64(in + 16));
+  chip->timer_expiry[1] = static_cast<int64_t>(get_u64(in + 24));
+  chip->busy_end = get_u64(in + 32);
+  chip->samples = get_u64(in + 40);
+  return 0;
+}
+
+}  // extern "C"

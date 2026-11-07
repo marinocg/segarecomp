@@ -83,6 +83,13 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER AND BUILD_TESTING)
   add_test(NAME sv_perf_overlay_test COMMAND sv_perf_overlay_test)
   set_property(TEST sv_perf_overlay_test APPEND PROPERTY LABELS full fast)
   set_property(TEST sv_perf_overlay_test PROPERTY TIMEOUT 240)
+  add_executable(sv_state_test test/sv_state_test.c)   # SEG-131: the save-state surface against a fake provider
+  target_link_libraries(sv_state_test PRIVATE segarecomp::viewer_host)
+  set_target_properties(sv_state_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  segarecomp_enable_warnings(sv_state_test)
+  add_test(NAME sv_state_test COMMAND sv_state_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set_property(TEST sv_state_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST sv_state_test PROPERTY TIMEOUT 240)
   add_test(NAME sv_host_test COMMAND sv_host_test)
   set_property(TEST sv_host_test APPEND PROPERTY LABELS full fast)
   set_property(TEST sv_host_test PROPERTY TIMEOUT 240)  # a stuck overlay loop must fail with its output, not hang the job
