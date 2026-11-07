@@ -63,6 +63,10 @@ bin/segarecomp[.exe]  (build driver)  bin/  toolchain/  runtime/  sdl3/  license
 toolchain/  (Zig)   sdl3/{include,lib}  runtime/{platforms,libs}  licenses/  README.txt
 ```
 
+`sdk/` (SEG-129) carries the native patch authoring material beside the installed header (`runtime/platforms/genesis/sdk/segarecomp_genesis_patch.h`): `README.txt`, `native-patch-sdk.md`, `patch-packages.md`
+and the synthetic `sample/provider.c`. `smoke_test.py` requires all of them and compiles the packaged sample with the **bundled** compiler against the **packaged** header as strict C11 (the same flags as a patch build),
+on every host the release workflow packages. That check does not build a patched game; the package-to-executable build test (`genesis_patch_provider_build_test`) runs on Linux only.
+
 `runtime/` mirrors the repository paths the runtime headers include by relative path. It carries the Genesis runtime
 (`platforms/genesis`) and the Master System runtime (`platforms/master-system/{runtime,headless,viewer}` plus
 `libs/device/sega/psg` and the Z80 runtime ABI header under `libs/codegen/c11/include`); `segarecomp build --runtime-dir

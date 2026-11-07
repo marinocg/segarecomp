@@ -69,7 +69,7 @@ One JSON object on stdout (`{"ok":true,...}` or `{"ok":false,"error":"..."}`); e
 ## Authoring
 
 `tools/segapatch.py create --source <original> --target <patched> --id ... --name ... --version ... [--width-max N] [--default-widescreen NAME] [--default-side-style NAME] --out <file>` writes a deterministic package (fixed timestamps and
-entry order). Packages for commercial games are authored in the private harness; no ROM, patched ROM or reconstructable game data is ever committed here.
+entry order). Packages for commercial games are authored and maintained outside this repository; no ROM, patched ROM or reconstructable game data is ever committed here.
 
 ## Schema 2: trusted native-source packages (ADR 0267)
 

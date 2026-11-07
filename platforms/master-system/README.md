@@ -1,5 +1,7 @@
 # Master System
 
+**Current status.** Implemented: generated-native Z80, the SMS machine/runtime, VDP, PSG, controllers with the console Pause button, explicit mapper identity, the SDL3 viewer (with `--viewer-record` input recording) and the launcher library. Several commercial games run well (see the [compatibility ledger](../../docs/product/compatibility-ledger.md)). Limits: the mapper is declared, never guessed; compatibility varies by title; widescreen is always Partial (below). The detailed implementation notes that follow are the engineering record.
+
 Code lives in `machine/` (generation-time C++: cartridge ingestion, mapper identity, ImageSet, SMS generation route
 `emit_cartridge`), `runtime/` (strict C11 compiled with generated programs: memory map, Sega mapper, typed error
 surface, port decode, machine composition, deterministic scheduler, run API, state digest, scripted input) and `headless/`

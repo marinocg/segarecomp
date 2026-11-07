@@ -891,6 +891,12 @@ add_test(
   NAME restricted_files_test
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/restricted_files_test.py
 )
+# SEG-129: public documentation gate. Validates docs/product/compatibility-ledger.json (structure, enumerations, contradictory outcomes,
+# broken references), local links of the status pages and a few facts those pages and the ledger must agree on. Public files only.
+add_test(
+  NAME product_truth_test
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/product_truth_test.py
+)
 # SEG-007-T206 / ADR-0034: structural schema guard for the narrow
 # compat/genesis/<rom-sha256>.json committed-compatibility-metadata
 # surface -- fails the build if a future change widens it beyond the
@@ -1044,7 +1050,7 @@ set(SEGARECOMP_EXTENDED_TESTS ghidra_mcp_smoke_test
 set(SEGARECOMP_FAST_TESTS segarecomp_tests segarecomp_build_command_test moveq_tests direct_flow_tests m68k_timing_tests m68k_dynamic_timing_tests
     genesis_runtime_run_tests genesis_vdp_render_frame_tests genesis_vdp_render_plane_run_differential_tests genesis_raster_display_modes_tests genesis_hint_region_controller_tests genesis_frame_export_tests
     m68k_frontend_rejection_tests genesis_general_startup_cli_test architecture_dependency_test
-    codegen_c11_emitter_ownership_test codegen_c11_translation_units_tests codegen_c11_shard_selection_tests restricted_files_test genesis_viewer_tests sv_perf_test build_profile_test perf_report_test
+    codegen_c11_emitter_ownership_test codegen_c11_translation_units_tests codegen_c11_shard_selection_tests restricted_files_test product_truth_test genesis_viewer_tests sv_perf_test build_profile_test perf_report_test
     cpu_m68k_static_discovery_tests genesis_startup_runtime_c2_test recompiler_fake_cpu_tests recompiler_no_genesis_policy_dependency_test
     genesis_bridge_defaults_test m68k_exception_contract_doc_test
     genesis_execution_coverage_tests reachability_challenger_tests reachability_pc_index_recovery_tests)

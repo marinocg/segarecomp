@@ -12,6 +12,7 @@ import re
 import hashlib
 import os
 import pathlib
+import platform
 import subprocess
 import sys
 import tempfile
@@ -250,6 +251,33 @@ def smoke_sms_optimized(tmp, launch):
     require(status["analysis_contract"] == "segarecomp.z80_admission.v1" and status["cache_reuse"] == "none", f"SMS: status: {status}")
 
 
+def zig_target():
+    """The target the launcher compiles for (mirrors zig_target() in apps/segarecomp-launcher/launcher_core.cpp)."""
+    if sys.platform == "darwin":
+        return "aarch64-macos" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64-macos"
+    if os.name == "nt":
+        return "x86_64-windows-gnu"
+    return ("aarch64" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64") + "-linux-gnu.2.35"
+
+
+def smoke_sdk(package_root, compiler, env, tmp):
+    """SEG-129: the native patch SDK is shipped and usable. The installed header, documents and synthetic sample exist, and the
+    packaged sample provider compiles as strict C11 against the packaged header with the BUNDLED compiler (no host compiler).
+    This proves the shipped SDK compiles on this host; it does not build a patched game (that test runs on Linux CI only)."""
+    header = package_root / "runtime" / "platforms" / "genesis" / "sdk" / "segarecomp_genesis_patch.h"
+    shipped = [header] + [package_root / "sdk" / name for name in ("README.txt", "native-patch-sdk.md", "patch-packages.md", "sample/provider.c")]
+    for path in shipped:
+        require(path.is_file() and path.stat().st_size > 0, f"the package must ship the SDK file {path.relative_to(package_root)}")
+    docs = (package_root / "sdk" / "patch-packages.md").read_text(encoding="utf-8")
+    require("not sandboxed" in docs.lower() or "not a sandbox" in docs.lower(), "the shipped patch documentation must state that native patches are not sandboxed")
+    sdk_env = dict(env, ZIG_GLOBAL_CACHE_DIR=str(tmp / "zig-global"), ZIG_LOCAL_CACHE_DIR=str(tmp / "zig-local"))
+    out = tmp / "sdk-provider.o"
+    command = [str(compiler), "cc", "-std=c11", "-Wall", "-Wextra", "-pedantic", "-target", zig_target(),
+               "-I", str(header.parent), "-c", str(package_root / "sdk" / "sample" / "provider.c"), "-o", str(out)]
+    result = subprocess.run(command, env=sdk_env, text=True, capture_output=True, timeout=300)
+    require(result.returncode == 0 and out.is_file(), f"the packaged SDK sample must compile with the bundled compiler: {result.stderr}")
+
+
 def main():
     launcher = pathlib.Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="segarecomp-smoke-") as directory:
@@ -293,6 +321,7 @@ def main():
         build_log = (entry / "build.log").read_text(encoding="utf-8")
         require(f"cc={compiler}" in build_log, "build.log must show the bundled compiler was configured")
         require(hermetic_compile_lines(build_log, compiler), "every compile command must invoke the bundled compiler")
+        smoke_sdk(package_root, compiler, env, tmp)
         # SEG-058: the launcher's headless `--import` adds a ROM with a recognisable header to the persistent library (a reference, never a copy);
         # the same content again is a duplicate, and a file the classifier does not accept is refused with a reason.
         lib_rom = tmp / "library-game.md"

@@ -27,10 +27,18 @@ Good to know
   computer (several minutes the first time; it can be cancelled). The build finds which code the disc loads by running the console from reset;
   code that does not exist verbatim on the disc (generated or decompressed at run time) is never guessed: the program stops there with a typed
   stop and the build says so. A program built elsewhere with the developer procedure (docs/product/sega-cd-play.md) can still be imported
-  and is verified against your BIOS and disc. No sound is available for Sega CD.
+  and is verified against your BIOS and disc. Sega CD plays CD music, PCM, FM and PSG sound; the internal save RAM persists between sessions.
+* Widescreen and game patches (Genesis, Master System and Sega CD; new since v0.7.0): in a game, Esc > Quick Settings or Video & Display has
+  Widescreen Mode (Original, Extended Backgrounds, Enhanced Widescreen), Widescreen Width (4:3 to 16:9) and Side Presentation (Comfort,
+  Borders, Raw Extension), saved per game. Support is reported honestly and is often "Partial": it never reveals game world the game did
+  not draw. A game's page (Genesis) has a "Patches / Variants" card for .segapatch packages: a separate Patched version is built next to
+  Vanilla and Vanilla is never modified. No game-specific patch is included in this package.
+  SECURITY: a patch with a native provider is executable code and is NOT sandboxed. A hash shows a file is unchanged, not who wrote it
+  or that it is safe. Install such a patch only from a source you trust and read the approval sheet. The SDK for writing one is in
+  the sdk folder (see sdk/README.txt).
 * In a game, Escape (or the gamepad Back button) opens the pause menu: Resume, Quick Settings, Video & Display (scaling,
   aspect, CRT presets), Controls (rebind keys and gamepad buttons, Player 1 and 2), Audio, System & Diagnostics (screenshot,
-  and Reset for Master System) and Return to Launcher. F11 toggles fullscreen, F12 saves a screenshot of the game picture.
+  and Reset for Master System) and Return to Launcher. F11 toggles fullscreen, F12 saves a screenshot of the game picture (source pixels, without effects or the widescreen extension), F3 cycles the performance overlay.
   Default controls (Genesis): arrow keys = D-pad, Z = A, X = B, C = C, Return = Start; Player 2: I/K/J/L, U = A, O = B,
   P = C, Right Shift = Start. Master System: arrow keys = D-pad, Z = button 1, X = button 2, P = the console's Pause button
   (distinct from the pause menu). Gamepads work too (South/East/West = A/B/C or buttons 1/2, Start).

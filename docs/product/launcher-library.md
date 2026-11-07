@@ -191,7 +191,7 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
 * **Side Presentation** (SEG-123, ADR 0265; same places, under Widescreen Mode): how the extra side area of a Level 2 / Level 3 picture looks. *Comfort* (default) shows a soft
   ambient fill taken from the picture's edges instead of the raw extension, *Borders* plain neutral panels, *Raw Extension* the extension exactly as produced. It is
   stored in the same file as `video.widescreen_side_style`, applies at once without a restart or reset, never changes the game picture, the game or a recording, and
-  does not create new gameplay visibility. A verified game-specific widescreen mode (none exists yet) is shown in full under Comfort and Raw.
+  does not create new gameplay visibility. A frame that a verified game-specific native provider (a `.segapatch` schema 2 patch, see `widescreen-and-patches.md`) accepted is shown in full under Comfort and Raw; the product itself ships no game-specific provider.
 * Display presets: **Pixel Perfect** (the untouched nearest-neighbour picture), **CRT Soft** (scanline gaps + glow), **CRT Classic** (adds the RGB
   aperture mask and slight curvature), **CRT Arcade** (stronger everything). Editing a slider makes the preset *Custom*.
 * **Controls**: Player 1 and Player 2 (both consoles), keyboard and SDL3 gamepad bindings, gamepad hot-plug, device choice, analog dead zone (the left
