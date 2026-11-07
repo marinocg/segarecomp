@@ -12,7 +12,6 @@
  *   fullhash | mixer          independent whole-state hash / mixer aggregates
  *   resets                    number of sink resets the after-restore callback performed
  */
-#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -180,7 +179,7 @@ int main(int argc, char **argv) {
       print_hex(digest, 32U);
       printf("\n");
     } else if (strcmp(op, "bench") == 0) {
-      /* measurement only: N captures and N restores of the current machine, timed (host clock; nothing here feeds back into the guest) */
+      /* measurement only: N captures and N restores of the current machine, timed (C11 timespec_get wall time, portable to the Windows UCRT; nothing here feeds back into the guest) */
       enum { MAX_RUNS = 512 };
       static uint64_t cap_ns[MAX_RUNS], res_ns[MAX_RUNS];
       const unsigned runs = a > MAX_RUNS ? MAX_RUNS : (unsigned)a;
@@ -195,14 +194,14 @@ int main(int argc, char **argv) {
       memset(ident.source_sha256, 0xA5, 32U);
       for (i = 0U; i < runs; ++i) {
         struct timespec t0, t1;
-        clock_gettime(CLOCK_MONOTONIC, &t0);
+        timespec_get(&t0, TIME_UTC);
         if (genesis_snapshot_capture(&machine_view, &ident, NULL, &buf) != GENESIS_SNAPSHOT_OK) return 4;
-        clock_gettime(CLOCK_MONOTONIC, &t1);
+        timespec_get(&t1, TIME_UTC);
         cap_ns[i] = (uint64_t)(t1.tv_sec - t0.tv_sec) * 1000000000ULL + (uint64_t)(t1.tv_nsec - t0.tv_nsec);
         size = buf.size;
-        clock_gettime(CLOCK_MONOTONIC, &t0);
+        timespec_get(&t0, TIME_UTC);
         if (genesis_snapshot_restore(&machine_view, &ident, buf.data, buf.size) != GENESIS_SNAPSHOT_OK) return 5;
-        clock_gettime(CLOCK_MONOTONIC, &t1);
+        timespec_get(&t1, TIME_UTC);
         res_ns[i] = (uint64_t)(t1.tv_sec - t0.tv_sec) * 1000000000ULL + (uint64_t)(t1.tv_nsec - t0.tv_nsec);
         genesis_snapshot_buffer_free(&buf);
       }

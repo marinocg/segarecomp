@@ -21,6 +21,13 @@ Releases are published on the [Releases](../../releases) page. This file records
 * Packages are bound to the exact game image and the exact approved package identity. Native patches are **executable code, not sandboxed**; hashes prove integrity, not authorship or safety.
 * Game-specific packages (Sonic 1, Sonic 2, Sonic 3 & Knuckles, Streets of Rage 2) are maintained outside this repository, are **not included in this release**, and are described in the ledger; the maintainer states their extended scenery and widescreen were independently validated in all levels.
 
+### Save states, game saves and rewind (new, Genesis; ADR 0278)
+
+* **Automatic game saves:** a Genesis cartridge's SRAM or X24C01 EEPROM is kept between sessions, written when you end the session (Return to Launcher / Quit / close the window) and never after a crash, a typed stop or an instruction limit. Saves live in the library (`saves/genesis/<image sha256>/vanilla|patches/<id>/`), separate for a patched version, and survive rebuilds, cache cleanup and removing the game from the library.
+* **Save states:** *Save State* / *Load State* in the pause menu (five numbered slots with a picture and play time each, confirmation before overwriting or loading), **F5** / **F8** for a quick slot. A state is the whole machine, including the sound chips; loading continues sample for sample. A failed save never damages the previous state; a failed load never changes the running game; a state from another game, version, region or build is refused with the reason.
+* **Rewind (F7 or the pause menu):** browse the last minute of play as pictures on a timeline (about every half second, in memory only, at most 96 MiB), pick a moment and continue from it; cancelling changes nothing. Gamepad (both triggers held, shoulders, south / east buttons), keyboard and mouse all work.
+* Master System and Sega CD show the new menu rows disabled with the reason; the Sega CD backup RAM behaves as before. See [docs/product/save-states.md](docs/product/save-states.md) for the guarantees and limits.
+
 ### Genesis
 
 * Automatic recognition of the Sonic & Knuckles lock-on cartridge images (exact header contents only; manual override in Advanced build options; `--mapper lock_on` on the command line).
