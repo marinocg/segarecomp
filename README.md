@@ -92,9 +92,13 @@ Everything in this section is merged after v0.7.0 and ships with the next releas
 <td width="50%"><img src="docs/assets/showcase/sonic-3-knuckles-angel-island-patched-16x9.png" alt="Sonic 3 and Knuckles, Angel Island Zone 1, in 16:9 with extended jungle scenery and the relocated HUD"><br><sub><b>Sonic 3 &amp; Knuckles</b>: authored foreground, partly wrapped background, relocated HUD (gameplay-affecting patch).</sub></td>
 <td width="50%"><img src="docs/assets/showcase/streets-of-rage-2-stage-1-patched-16x9.png" alt="Streets of Rage 2, stage 1, in 16:9 with enemies drawn beside the native picture"><br><sub><b>Streets of Rage 2</b>: extra sprites beside the picture from a data-only patch plus generic Level 3; no authored scenery or HUD.</sub></td>
 </tr>
+<tr>
+<td width="50%"><img src="docs/assets/showcase/sonic-cd-palmtree-panic-4x3.png" alt="Sonic CD, Palmtree Panic Zone 1, in the original 4:3 picture with Sonic leaping above the rocky landscape"><br><sub><b>Sonic CD</b> (Sega CD, from your own BIOS and disc): original 4:3. No widescreen patch exists yet.</sub></td>
+<td width="50%"><img src="docs/assets/showcase/earthworm-jim-special-edition-new-junk-city-4x3.png" alt="Earthworm Jim Special Edition, New Junk City, in the original 4:3 picture with Jim swinging on a chain below a crashed bus"><br><sub><b>Earthworm Jim Special Edition</b> (Sega CD): original 4:3. No widescreen patch exists yet.</sub></td>
+</tr>
 </table>
 
-Real frames from generated-native programs (Enhanced Widescreen, 16:9, Raw Extension, first scenes shown; details and attribution in the [showcase notes](docs/assets/showcase/README.md)). The patch packages are
+The four Genesis frames are real frames from generated-native programs (Enhanced Widescreen, 16:9, Raw Extension, first scenes shown); the two Sega CD frames are the original 4:3 picture (generic Sega CD widescreen is always Partial and no game-specific patch exists). Details and attribution in the [showcase notes](docs/assets/showcase/README.md). The patch packages are
 not bundled with any release, results depend on the exact game, revision and package, and native-code patches must come from trusted sources. Game artwork belongs to its owners.
 
 More: [widescreen and patches overview](docs/product/widescreen-and-patches.md), [patch packages](docs/product/patch-packages.md), [native patch SDK](docs/product/native-patch-sdk.md).

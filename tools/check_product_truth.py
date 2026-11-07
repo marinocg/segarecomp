@@ -400,7 +400,7 @@ def check_consistency(ledger, texts):
 SHOWCASE_DIR = "docs/assets/showcase"
 SHOWCASE_MAX_FILES = 6
 SHOWCASE_MAX_BYTES = 512 * 1024
-SHOWCASE_SIZE = (1200, 675)
+SHOWCASE_SIZES = ((1200, 675), (900, 675))  # 16:9 widescreen captures and 4:3 originals
 
 
 def check_showcase(root):
@@ -425,8 +425,8 @@ def check_showcase(root):
             problems.append(f"{SHOWCASE_DIR}/{image.name}: larger than {SHOWCASE_MAX_BYTES // 1024} KiB")
         if image.suffix.lower() == ".png" and image.stat().st_size >= 24:
             width, height = struct.unpack(">II", image.read_bytes()[16:24])
-            if (width, height) != SHOWCASE_SIZE:
-                problems.append(f"{SHOWCASE_DIR}/{image.name}: must be {SHOWCASE_SIZE[0]}x{SHOWCASE_SIZE[1]}, is {width}x{height}")
+            if (width, height) not in SHOWCASE_SIZES:
+                problems.append(f"{SHOWCASE_DIR}/{image.name}: must be one of {', '.join(f'{w}x{h}' for w, h in SHOWCASE_SIZES)}, is {width}x{height}")
         if f"`{image.name}`" not in listing:
             problems.append(f"{SHOWCASE_DIR}/{image.name}: not listed in the showcase README")
     return problems

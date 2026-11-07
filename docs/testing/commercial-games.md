@@ -63,7 +63,7 @@ The prohibition on committing generated commercial-game screenshots above has **
 captures of generated-native gameplay so the project's widescreen and patch capabilities are visible. The exception covers exactly the files listed in [`docs/assets/showcase/README.md`](../assets/showcase/README.md) and nothing else:
 
 - reduced-size captures that are unmodified apart from cropping, uniform resizing and palette quantization from the real viewer output, each with its game, revision, patch, setting and attribution recorded in that README;
-- at most six images, each at most 512 KiB, PNG or WebP, with no overlay, local path or diagnostic text;
+- at most six images (Genesis widescreen captures and Sega CD originals), each at most 512 KiB, PNG or WebP, with no overlay, local path or diagnostic text;
 - **not** permitted under it: ROMs, BIOS files, extracted sprite sheets, textures, tile or palette dumps, complete or sequential gameplay captures, video, framebuffers, RAM dumps, raw traces, disassembly, or any private-corpus
   material; the exception does not extend to the private harness, to CI output or to any other screenshot. Adding an image requires a new individual review and an entry in the showcase README.
 - no upload to an external image host; the images live in this repository only. Game names and artwork remain the property of their owners and are credited there.

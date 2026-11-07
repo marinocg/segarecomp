@@ -126,7 +126,7 @@ class ShowcaseRulesTest(unittest.TestCase):
 
     def test_listed_small_png_is_accepted(self):
         import struct
-        png = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + struct.pack(">II", *gate.SHOWCASE_SIZE)
+        png = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + struct.pack(">II", *gate.SHOWCASE_SIZES[1])
         self.assertEqual(self.run_case({"a.png": png, "README.md": b"| `a.png` |"}), [])
         self.assertTrue(any("must be" in p for p in self.run_case({"a.png": png[:16] + struct.pack(">II", 10, 10), "README.md": b"| `a.png` |"})))
 
