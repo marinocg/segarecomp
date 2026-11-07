@@ -113,6 +113,7 @@ struct MaterializationSummary {
   // The distinct activation signatures of the confirmed run in order of first activation (ADR 0277: the registry's ordinal order, as the
   // legacy fixed point would have produced it, is the verification target of a statically preloaded registry).
   std::vector<Digest> activation_order;
+  std::vector<std::uint32_t> activation_epoch;  // parallel to activation_order: the 1-based epoch ordinal of each first activation
   [[nodiscard]] bool ok() const noexcept { return failure == Failure::none; }
 };
 

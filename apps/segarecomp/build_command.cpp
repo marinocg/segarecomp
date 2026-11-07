@@ -1060,6 +1060,11 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     } else {
       for (std::size_t i = 0; i < registry.images().size(); ++i)
         if (summary.activation_order[i] != registry.images()[i].signature) { contradiction = "activation_order_differs"; break; }
+      // An isolated sound CPU (structural mutation) never looks up an image of a later epoch: the observed registry would not contain it, and a
+      // static image first activated after the fault would be a registry the legacy fixed point never builds.
+      if (contradiction.empty() && summary.sound_fault)
+        for (std::size_t i = 0; i < summary.activation_epoch.size(); ++i)
+          if (summary.activation_epoch[i] > summary.sound_fault->epochs) { contradiction = "image_after_sound_fault"; break; }
     }
     if (!contradiction.empty()) {
       log.line("z80 static CONTRADICTED by the verification run (" + contradiction + "): discarding the static registry, running the unchanged fixed point");

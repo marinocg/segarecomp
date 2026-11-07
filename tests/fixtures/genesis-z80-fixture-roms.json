@@ -47,6 +47,50 @@
     "sound_tone": {
       "sha256": "68cbaa8c06b0c82956961a2f6ee026630141e75fd8503cfd642e7d6b1eab9bf7",
       "size": 16384
+    },
+    "static_kos": {
+      "sha256": "6a24e5f14d65c6e62ad966cd1c64ff09c4993c47cc116bd780c440128ebd07a0",
+      "size": 16384
+    },
+    "static_kos_beyond_ram": {
+      "sha256": "0765e59125a66fdd0d28720526096bae3a94c6e0d2d49d16a5b6f2cb8081df61",
+      "size": 16384
+    },
+    "static_kos_unrecognised": {
+      "sha256": "eba0372267e2183c5fd478cb22c8547b80aa97bb40031db9b72fd0001a928458",
+      "size": 16384
+    },
+    "static_kos_work_ram": {
+      "sha256": "ed8589bd58db91a9eac47403bb5d6564193ad5739f506a5cc5eeaf29c85926b9",
+      "size": 16384
+    },
+    "static_partial": {
+      "sha256": "93eccff06eb6708f5e10fcc0e4666759fa10644ec74089fa26614c3d9a9aa85b",
+      "size": 16384
+    },
+    "static_ram_count": {
+      "sha256": "75523d03ec2dc5ea8973d3b8589cb6d487431deb892676b71a7f3ba5807a75fd",
+      "size": 16384
+    },
+    "static_ram_destination": {
+      "sha256": "820b52746810baf47a272a11b936e78cc2cd6b561159207c7f6d9d2ee5325211",
+      "size": 16384
+    },
+    "static_ram_source": {
+      "sha256": "dc9158635b392a61453d465ad22baa5005895e602242e3414f23167fb0c1f12c",
+      "size": 16384
+    },
+    "static_raw_beyond_ram": {
+      "sha256": "1c805873717c45ef6147804b744e6de5f2d50680a71f785c3870c67695f9dce2",
+      "size": 16384
+    },
+    "static_stub_driver": {
+      "sha256": "8db7bcdd5077f2813a00610524d522b94bbcbf2ab99c934bda8a21b8a7b96803",
+      "size": 16384
+    },
+    "static_two_phase": {
+      "sha256": "2108f05018e63db93995243b936598e4369c6e7848921270924d78c1e033c851",
+      "size": 16384
     }
   },
   "schema": 1

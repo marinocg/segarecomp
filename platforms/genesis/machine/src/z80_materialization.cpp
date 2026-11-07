@@ -115,9 +115,15 @@ MaterializationSummary materialize(Registry& registry, PassRunner& runner) {
     return fail(Failure::materialization_nondeterministic);
   summary.images = registry.images().size();
   summary.epochs = confirmed.epochs.size();
-  for (const PassEpoch& epoch : confirmed.epochs)
-    if (std::find(summary.activation_order.begin(), summary.activation_order.end(), epoch.signature) == summary.activation_order.end())
+  // Registry::add semantics: a plain restart (empty hold window) of an already bound image creates and re-binds nothing.
+  for (std::size_t i = 0; i < confirmed.epochs.size(); ++i) {
+    const PassEpoch& epoch = confirmed.epochs[i];
+    if (epoch.extents == 0 && !summary.activation_order.empty()) continue;
+    if (std::find(summary.activation_order.begin(), summary.activation_order.end(), epoch.signature) == summary.activation_order.end()) {
       summary.activation_order.push_back(epoch.signature);
+      summary.activation_epoch.push_back(static_cast<std::uint32_t>(i + 1));
+    }
+  }
   summary.frames = confirmed.frames;
   summary.end = confirmed.outcome;
   summary.sound_fault = confirmed.sound_fault;

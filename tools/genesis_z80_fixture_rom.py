@@ -238,10 +238,10 @@ def header(size, region=b"U  "):
     return bytes(text)
 
 
-def build_rom(code, size=ROM_SIZE, region=b"U  "):
+def build_rom(code, size=ROM_SIZE, region=b"U  ", ssp=0x00FF0000):
     rom = bytearray([0xFF]) * size
     vectors = bytearray()
-    vectors += struct.pack(">I", 0x00FF0000)  # initial SSP
+    vectors += struct.pack(">I", ssp)  # initial SSP
     vectors += struct.pack(">I", PROGRAM_BASE)  # initial PC
     for _ in range(62):
         vectors += struct.pack(">I", PROGRAM_BASE)  # every other vector: the (spinning) default
@@ -460,7 +460,7 @@ def sound_smc_psg_driver():
                "patch:  nop\n        ld a,0x8A\n        ld (0x7F11),a\nloop:   jr loop\n")
 
 
-def build_sound(plan, programs, domestic_gate=False, region=b"U  ", prelude=None, kos_routine=None, kos_destination=Z80_RAM):
+def build_sound(plan, programs, domestic_gate=False, region=b"U  ", prelude=None, kos_routine=None, kos_destination=Z80_RAM, ssp=0x00FF0000):
     m = M68k()
     # Prologue: MOVEQ #0,D0 / BEQ.W real / RESET. The 68K translator's startup prefix admits only a handful of operations and
     # takes over the whole flow when no instruction it cannot model is reachable; the (never executed) RESET fallthrough is such an
@@ -530,7 +530,7 @@ def build_sound(plan, programs, domestic_gate=False, region=b"U  ", prelude=None
             m.data("kos_" + name, scd_common.kosinski_encode(uploads[name]))
     if kos_used:
         m.data("kos_routine", kos_routine if kos_routine is not None else KOS_REFERENCE_ROUTINE)
-    return build_rom(m.resolve(), region=region)
+    return build_rom(m.resolve(), region=region, ssp=0x00FFFE00 if kos_used else ssp)  # a subroutine call needs a stack inside work RAM
 
 
 MAX_IMAGES_FOR_TESTS = 8  # the production image bound (platforms/genesis/machine z80_images.hpp kMaxImages); the bound test uses it and +1
@@ -624,7 +624,9 @@ def fixture_static_kos_work_ram():
 
 
 def fixture_static_ram_count():
-    return build_sound([("raw_ram_count", "a")], {"a": sound_driver(1)})
+    """A proven upload of the driver, then a re-upload of its first byte whose COUNT is read from work RAM (data dependent): the producer proves the
+    first epoch and refuses the second (length_unknown); the materializer discovers it."""
+    return build_sound([("raw", "a"), ("delay", SOUND_DELAY), ("raw_ram_count", "a")], {"a": sound_driver(1)})
 
 
 def fixture_static_ram_source():
@@ -641,6 +643,23 @@ def fixture_static_two_phase():
                        {"a": sound_driver(1), "b": sound_driver(2)})
 
 
+def fixture_static_partial():
+    """A provable raw image (A) followed by a COMPUTED (XOR-decoded) upload of a different image (B): the producer proves A and refuses B, the
+    materializer discovers B. The registry is A (static) then B (discovered), in activation order."""
+    return build_sound([("raw", "a"), ("delay", SOUND_DELAY), ("decoded", "b")], {"a": sound_driver(1), "b": sound_driver(2)})
+
+
+def fixture_static_raw_beyond_ram():
+    """A raw upload longer than the 8 KiB sound RAM (it runs into the mirror): not a provable single-RAM image (destination_out_of_ram)."""
+    page = sound_driver(1) + bytes(0x100 - len(sound_driver(1)))
+    return build_sound([("raw", "a")], {"a": page * 33})  # the bytes past the 8 KiB RAM wrap onto the same page: the legacy build converges
+
+
+def fixture_static_kos_beyond_ram():
+    """A valid stream whose decoded bytes would end beyond the 8 KiB sound RAM (destination $A01FF0, longer than 16 bytes)."""
+    return build_sound([("kos", "a")], {"a": bytes(16) + sound_driver(2)}, kos_destination=0xA01FF0)  # the tail wraps onto offset 0
+
+
 FIXTURES = {"multi_epoch_dirty": fixture_multi_epoch_dirty, "bus_reset_probe": fixture_bus_reset_probe, "bus_reset_control": fixture_bus_reset_control,
             "sound_raw": fixture_sound_raw, "sound_multi_epoch": fixture_sound_multi_epoch, "sound_decoded": fixture_sound_decoded,
             "sound_smc": fixture_sound_smc, "sound_smc_fault": fixture_sound_smc_fault, "sound_tone": fixture_sound_tone, "sound_late_epoch": fixture_sound_late_epoch,
@@ -648,7 +667,8 @@ FIXTURES = {"multi_epoch_dirty": fixture_multi_epoch_dirty, "bus_reset_probe": f
             "static_kos": fixture_static_kos, "static_stub_driver": fixture_static_stub_driver, "static_kos_unrecognised": fixture_static_kos_unrecognised,
             "static_kos_work_ram": fixture_static_kos_work_ram, "static_ram_count": fixture_static_ram_count,
             "static_ram_source": fixture_static_ram_source, "static_ram_destination": fixture_static_ram_destination,
-            "static_two_phase": fixture_static_two_phase}
+            "static_two_phase": fixture_static_two_phase, "static_raw_beyond_ram": fixture_static_raw_beyond_ram,
+            "static_kos_beyond_ram": fixture_static_kos_beyond_ram, "static_partial": fixture_static_partial}
 
 
 def build(name):
