@@ -1759,7 +1759,7 @@ int genesis_write_checkpoint_evidence_summary(const GenesisCheckpointEvidenceBun
  * (defined in runtime.c) so other translation units (e.g.
  * platforms/genesis/runtime/frame_export.c) can reuse it exactly rather than
  * duplicating a second, potentially divergent all-zero-digest check. Returns
- * nonzero if `frame->frame_digest` is not all-zero bytes. `frame` must be
+ * nonzero if `frame->frame_digest` is not all-zero bytes, or if the artifact was produced digest-free (`digest_omitted`, SEG-127-T003). `frame` must be
  * non-NULL; this function performs no NULL check of its own (callers already
  * NULL-check the enclosing artifact/bundle before reaching this predicate). */
 int genesis_frame_artifact_is_populated(const GenesisFrameArtifact *frame);

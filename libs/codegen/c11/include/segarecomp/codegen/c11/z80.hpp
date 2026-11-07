@@ -130,6 +130,11 @@ struct EmitOptions {
   bool share_bodies = true;  // PC-independent instruction effects are emitted once and called (SEG-033-T005); false = reference
   std::size_t owner_group_entries = kOwnerGroupEntries;  // >= 1; tests and the differential gate pin 1 (reference) vs N
   std::optional<AdmissionPlan> admission;  // selective emission (above); nullopt = broad AOT, the default
+  // SEG-127-T004: assign owners (and shared bodies) to translation units as CONTIGUOUS blocks of 2048 in plan order instead of
+  // interleaved 256-owner pages, so growing the image set (a build-time fixed point may add one image per round)
+  // appends units instead of reshuffling every one. Content-addressed object reuse then keeps the earlier images' units. Only the
+  // physical file layout changes; every function body, symbol and table is byte-identical. false (default) = the interleaved layout.
+  bool stable_unit_layout = false;
 };
 
 // full_/prefix_lock_/stub_owners, variant_owners and bound_successors are legacy names: they count exact entries. `entries` is the

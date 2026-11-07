@@ -203,6 +203,7 @@ EmitOutcome emit_registry(const Registry& registry, const EmitRequest& request) 
     codegen::z80::EmitOptions options = request.codegen;
     options.directory = request.directory;
     options.stem = request.stem;
+    options.stable_unit_layout = true;  // SEG-127-T004: the materialization fixed point re-emits a growing registry every round
     const ExecutableImageSet images = executable_images(registry, {}, request.structural_alternatives, &outcome.alternatives);
     const std::vector<codegen::z80::ImageKind> kinds(images.images.size(), codegen::z80::ImageKind::banked);
     const codegen::z80::ImageProjection projected = codegen::z80::project_executable_images(images, kinds);

@@ -65,7 +65,7 @@ _PROVENANCE = re.compile(
     rb"frontier\.stop\.(?:stop_class|diagnostic_category)|stop\.provenance)")
 _FRONTIER = re.compile(rb"^\s*(?:GenesisControlTransfer frontier\b|frontier\.|return frontier|return genesis_runtime_retire_m68k_instruction_before_stop\()")
 _MEMBERSHIP = re.compile(rb"^\s*(?:if \(runtime->pc == UINT32_C\(|\|\| runtime->pc == )")
-_RETIRE = re.compile(rb"^\s*(?:\{ const uint32_t m68k_retirement_pc\b|if \(retired\.|return retired;|"
+_RETIRE = re.compile(rb"^\s*(?:\{ const uint32_t m68k_retirement_pc\b|if \(retired\.|return retired;|return genesis_runtime_retire_m68k_instruction(?:_at)?\(|"
                      rb"runtime->pc = pc;|uint32_t pc = runtime->pc;|#define pc |#undef pc)")
 _INDIRECT_ARRAY_START = re.compile(rb"static const uint32_t m68k_indirect_targets_\w+\[\]")
 # SEG-022-T009: the compact table is three parallel arrays: sorted guest addresses, owner ids, owner symbols.

@@ -71,6 +71,15 @@ def main():
         check([r[2] for r in rows] == ["added", "existing", "added", "existing", "added", "restart"], "registry outcomes: added existing added existing added restart")
         check([r[3] for r in rows] == ["bound=1", "bound=1", "bound=2", "bound=1", "bound=3", "bound=3"], "bound ordinals follow the activation order; a restart re-binds the previous image")
         check(sorted(images) == [1, 2, 3], "three images in activation order")
+        # SEG-127-T004: the stable unit layout. Growing the registry (the materialization fixed point adds one image per round) appends
+        # translation units instead of reshuffling them, so every owner unit of the one-image emission recurs byte-identically (except the
+        # last, possibly partial, block) in the three-image emission and the content-addressed object reuse keeps it.
+        one, out_one = run_emitter("".join("epoch %s %s\n" % e for e in epochs[:1]), tmp, "one_image")
+        owners_one = sorted(f.name for f in out_one.glob("genesis_z80_owner_*.c"))
+        owners_all = sorted(f.name for f in out1.glob("genesis_z80_owner_*.c"))
+        reused = [n for n in owners_one if n in owners_all and (out_one / n).read_bytes() == (out1 / n).read_bytes()]
+        check(one.returncode == 0 and len(owners_one) >= 2 and len(owners_all) > len(owners_one), "one-image and three-image registries emit owner units (%d -> %d)" % (len(owners_one), len(owners_all)))
+        check(len(reused) >= len(owners_one) - 1, "stable layout: %d of %d owner units of the one-image emission recur byte-identically after two more images" % (len(reused), len(owners_one)))
         # cross-language equality of both keys
         decoded = [(bytes.fromhex(r), bytes.fromhex(w)) for r, w in epochs]
         eff = probe.effective_signatures(decoded)

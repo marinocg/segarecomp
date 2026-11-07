@@ -946,7 +946,13 @@ static void genesis_vdp_plane_run_init(GenesisVdpPlaneRun *run, const GenesisVdp
   run->valid = 0;
 }
 
-static GenesisVdpCandidatePixel genesis_vdp_plane_run_pixel(const GenesisVdpRenderContext *ctx, GenesisVdpPlaneRun *run, unsigned x, unsigned row) {
+/* SEG-127-T007: the per-pixel row-composer helpers are tiny and called twice per pixel; the compiler left plane_run_pixel out of line (struct-returning call per pixel). */
+#if defined(__GNUC__) || defined(__clang__)
+#define GENESIS_VDP_HOT static inline __attribute__((always_inline))
+#else
+#define GENESIS_VDP_HOT static inline
+#endif
+GENESIS_VDP_HOT GenesisVdpCandidatePixel genesis_vdp_plane_run_pixel(const GenesisVdpRenderContext *ctx, GenesisVdpPlaneRun *run, unsigned x, unsigned row) {
   const GenesisVdpRowPlane *plane = run->plane;
   const unsigned width_px = plane->width_px;
   const unsigned cell_h = ctx->geometry.cell_height;
@@ -1090,7 +1096,7 @@ void genesis_vdp_frame_digest(const GenesisFrameArtifact *frame, uint8_t digest_
  * journal, or is NULL with `uniform` describing a single static state for every line (the legacy snapshot producer).
  * Validation happens entirely up front, so a failure leaves `*frame_out` untouched and a success is never partial. */
 static int genesis_vdp_render_frame(const uint8_t *vram, const GenesisRasterFrameState *raster,
-                                    const GenesisRasterLine *uniform, GenesisFrameArtifact *frame_out) {
+                                    const GenesisRasterLine *uniform, GenesisFrameArtifact *frame_out, int with_digest) {
   GenesisVdpRenderContext ctx;
   GenesisVdpDisplayGeometry first;
   unsigned slot_of_line[GENESIS_RASTER_MAX_LINES];
@@ -1157,7 +1163,15 @@ static int genesis_vdp_render_frame(const uint8_t *vram, const GenesisRasterFram
   frame_out->width = (uint16_t)first.width;
   frame_out->height = (uint16_t)first.height;
   frame_out->palette_count = (uint16_t)palette_count;
-  genesis_vdp_frame_digest(frame_out, frame_out->frame_digest);
+  if (with_digest) {
+    frame_out->digest_omitted = 0U;
+    genesis_vdp_frame_digest(frame_out, frame_out->frame_digest);
+  } else {
+    /* SEG-127-T003: the caller asked for a digest-free frame (live presentation). The digest field is explicitly zeroed (never stale,
+     * never uninitialized) and the artifact says so, which keeps genesis_frame_artifact_is_populated() true. */
+    frame_out->digest_omitted = 1U;
+    memset(frame_out->frame_digest, 0, sizeof(frame_out->frame_digest));
+  }
   return 0;
 }
 
@@ -1166,7 +1180,15 @@ int genesis_vdp_produce_frame_raster(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
   if (vram == NULL || raster == NULL || frame_out == NULL) {
     return -1;
   }
-  return genesis_vdp_render_frame(vram, raster, NULL, frame_out);
+  return genesis_vdp_render_frame(vram, raster, NULL, frame_out, 1);
+}
+
+int genesis_vdp_produce_frame_raster_undigested(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
+                                                const GenesisRasterFrameState *raster, GenesisFrameArtifact *frame_out) {
+  if (vram == NULL || raster == NULL || frame_out == NULL) {
+    return -1;
+  }
+  return genesis_vdp_render_frame(vram, raster, NULL, frame_out, 0);
 }
 
 int genesis_vdp_produce_frame(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
@@ -1181,7 +1203,7 @@ int genesis_vdp_produce_frame(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
   memcpy(uniform.registers, registers, sizeof(uniform.registers));
   memcpy(uniform.cram, cram, sizeof(uniform.cram));
   memcpy(uniform.vsram, vsram, sizeof(uniform.vsram));
-  return genesis_vdp_render_frame(vram, NULL, &uniform, frame_out);
+  return genesis_vdp_render_frame(vram, NULL, &uniform, frame_out, 1);
 }
 
 /* --- SEG-118 (ADR 0262): Level 2 extended backgrounds. Presentation only: reads the same raster state/VRAM journal the native render used and the
@@ -1448,14 +1470,24 @@ int genesis_vdp_frame_row_rgb888(const GenesisFrameArtifact *frame, unsigned row
     return -1;
   }
   const uint8_t *pixels = &frame->pixels[(size_t)row * width];
+  /* SEG-127-T002: the palette has only 64 entries but a row has up to 320 pixels, so decode each entry once per row (the same
+   * genesis_vdp_decode_cram_word the per-pixel path used) and convert pixel indices through the resulting table. The table is a
+   * stack local (no persistent cache); an out-of-range index still fails after writing the preceding pixels, exactly as before. */
+  uint8_t lut[GENESIS_VDP_CRAM_ENTRY_COUNT * 3U];
+  for (unsigned i = 0U; i < GENESIS_VDP_CRAM_ENTRY_COUNT; ++i) {
+    const GenesisRgb888 color = genesis_vdp_decode_cram_word((uint16_t)(((uint16_t)palette[i * 2U] << 8) | (uint16_t)palette[i * 2U + 1U]));
+    lut[i * 3U] = color.r;
+    lut[i * 3U + 1U] = color.g;
+    lut[i * 3U + 2U] = color.b;
+  }
   for (unsigned x = 0U; x < width; ++x) {
-    GenesisRgb888 color;
-    if (pixels[x] >= GENESIS_VDP_CRAM_ENTRY_COUNT || genesis_vdp_decode_cram_entry(palette, pixels[x], &color) != 0) {
+    const unsigned index = pixels[x];
+    if (index >= GENESIS_VDP_CRAM_ENTRY_COUNT) {
       return -1;
     }
-    rgb_out[x * 3U] = color.r;
-    rgb_out[x * 3U + 1U] = color.g;
-    rgb_out[x * 3U + 2U] = color.b;
+    rgb_out[x * 3U] = lut[index * 3U];
+    rgb_out[x * 3U + 1U] = lut[index * 3U + 1U];
+    rgb_out[x * 3U + 2U] = lut[index * 3U + 2U];
   }
   return 0;
 }

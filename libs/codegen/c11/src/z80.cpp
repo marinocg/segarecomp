@@ -827,9 +827,10 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
   chunking.chunk_entries = kEntryChunk;
   chunking.declare_owner = [](std::string_view symbol) { return owner_declaration(std::string(symbol)); };
   const bool chunked_entries = plans.size() > kEntryChunk;
-  std::vector<TranslationUnitFamily> families{TranslationUnitFamily{"owner", shards, 8}};
+  const unsigned owner_page_shift = options.stable_unit_layout ? 11U : 8U;  // SEG-127-T004: 2048 contiguous owners per unit when stable
+  std::vector<TranslationUnitFamily> families{TranslationUnitFamily{"owner", shards, owner_page_shift}};
   const std::size_t body_shards = std::clamp<std::size_t>((pool.texts.size() + 2047) / 2048, 1, 32);
-  if (!pool.texts.empty()) families.push_back(TranslationUnitFamily{"body", body_shards, 0});
+  if (!pool.texts.empty()) families.push_back(TranslationUnitFamily{"body", body_shards, options.stable_unit_layout ? 11U : 0U});
   if (chunked_entries) families.push_back(TranslationUnitFamily{"entry", compiled_entry_chunk_count(plans.size(), kEntryChunk), 0});
   TranslationUnitSharder sharder(options.directory, options.stem, std::move(families));
   std::ostream& out = sharder.stream();

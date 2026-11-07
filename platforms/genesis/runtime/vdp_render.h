@@ -1176,6 +1176,15 @@ int genesis_vdp_produce_frame_raster(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
                                      const GenesisRasterFrameState *raster, GenesisFrameArtifact *frame_out);
 
 /*
+ * SEG-127-T003: the same render as `genesis_vdp_produce_frame_raster` (identical pixels, palettes, geometry, failure behavior)
+ * but WITHOUT the per-frame SHA-256. On success `frame_digest` is all-zero and `digest_omitted` is 1; the artifact is still
+ * "populated" for `genesis_frame_artifact_is_populated`. Only for live presentation consumers that never read `frame_digest`
+ * (the SDL viewer); evidence, capture, coverage, recording and export producers keep using the digest-producing functions.
+ */
+int genesis_vdp_produce_frame_raster_undigested(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
+                                                const GenesisRasterFrameState *raster, GenesisFrameArtifact *frame_out);
+
+/*
  * SEG-118 (ADR 0262): Level 2 extended backgrounds. Builds an RGB24 surface `native_w + 2 * side` wide: the native picture in the centre
  * (copied from `native`) and `side` columns of real Plane A/B scenery (and the backdrop) on each side, sampled with the same scroll, wrap,
  * priority and palette rules and the same per-line state/VRAM journal as the native render. `target->plan` chooses `side`; `target->pixels`
