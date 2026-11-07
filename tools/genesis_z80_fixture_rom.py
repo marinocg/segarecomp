@@ -27,6 +27,9 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import sms_fixture_rom as sms  # noqa: E402  (the Z80 assembler only)
 
+sys.path.insert(0, str(HERE.parent / "tests"))
+import sega_cd_epoch_common as scd_common  # noqa: E402  (the project-authored Kosinski encoder only)
+
 SCHEMA = 1
 MANIFEST = HERE.parent / "tests" / "fixtures" / "genesis-z80-fixture-roms.json"
 ROM_SIZE = 0x4000
@@ -37,6 +40,16 @@ DONE = RESULT + 0xFF
 Z80_BUSREQ = 0xA11100
 Z80_RESET = 0xA11200
 Z80_RAM = 0xA00000
+
+
+# ADR 0277: the project-authored reference Kosinski decompressor routine (210 bytes, position independent, one RTS, no subroutines):
+# A0 = stream, A1 = destination, clobbers D0-D6/A2, returns by RTS. It is the recognised "reference" routine form of the static Z80 producer
+# (platforms/genesis/machine/src/z80_static_producer.cpp kKosinskiForms); its source is docs/architecture/genesis-z80-static-first.md.
+KOS_REFERENCE_ROUTINE = bytes.fromhex(
+    "720012187c001c18e14e824674107000e249d1405342660e720012187c001c18e14e824674104a40660000a07000e249d1405342660e72"
+    "0012187c001c18e14e824674104a406700003876001618780018183a04024500f8eb4d8a430445200002440007660000141818670000640c"
+    "4400016700ff9a6000004452446000003e7000e249d1405342660e720012187c001c18e14e824674103800d8447000e249d1405342660e72"
+    "0012187c001c18e14e82467410d84052447aff1a1845f1500012da51ccfffc6000ff4612d86000ff404e75")
 
 
 class M68k:
@@ -131,6 +144,56 @@ class M68k:
         self.w(0x12C2)  # MOVE.B D2,(A1)+
         self.w(0x51C8)  # DBRA D0
         self.fixups.append((len(self.words), loop + ":dbra"))
+        self.w(0)
+
+    def copy_to_z80_from_ram_count(self, program_label, loop, destination=Z80_RAM):
+        """A copy whose count is read from work RAM (a data-dependent length the static producer must refuse)."""
+        self.w(0x41FA)
+        self.fixups.append((len(self.words), program_label + ":pcrel"))
+        self.w(0)
+        self.w(0x43F9)
+        self.l(destination)
+        self.w(0x2039)
+        self.l(0xFF0000)  # MOVE.L (RAM).L,D0
+        self.label(loop)
+        self.w(0x12D8)
+        self.w(0x51C8)
+        self.fixups.append((len(self.words), loop + ":dbra"))
+        self.w(0)
+
+    def copy_to_z80_from_ram_pointer(self, length, loop, destination=Z80_RAM, source_unknown=True, destination_unknown=False):
+        """A copy whose source and/or destination pointer is loaded from work RAM (an ambiguous operand the static producer must refuse)."""
+        if source_unknown:
+            self.w(0x2079)
+            self.l(0xFF0000)  # MOVEA.L (RAM).L,A0
+        else:
+            self.w(0x41F9)
+            self.l(0x300)  # LEA ROM,A0
+        if destination_unknown:
+            self.w(0x23FC)
+            self.l(destination)
+            self.l(0xFF0004)  # MOVE.L #dest,(RAM).L
+            self.w(0x2279)
+            self.l(0xFF0004)  # MOVEA.L (RAM).L,A1
+        else:
+            self.w(0x43F9)
+            self.l(destination)
+        self.w(0x303C, length - 1)
+        self.label(loop)
+        self.w(0x12D8)
+        self.w(0x51C8)
+        self.fixups.append((len(self.words), loop + ":dbra"))
+        self.w(0)
+
+    def kos_call(self, stream_label, routine_label, destination=Z80_RAM):
+        """LEA stream(PC),A0 / LEA destination.L,A1 / BSR.W routine."""
+        self.w(0x41FA)
+        self.fixups.append((len(self.words), stream_label + ":pcrel"))
+        self.w(0)
+        self.w(0x43F9)
+        self.l(destination)
+        self.w(0x6100)
+        self.fixups.append((len(self.words), routine_label))
         self.w(0)
 
     def data(self, program_label, payload):
@@ -397,7 +460,7 @@ def sound_smc_psg_driver():
                "patch:  nop\n        ld a,0x8A\n        ld (0x7F11),a\nloop:   jr loop\n")
 
 
-def build_sound(plan, programs, domestic_gate=False, region=b"U  ", prelude=None):
+def build_sound(plan, programs, domestic_gate=False, region=b"U  ", prelude=None, kos_routine=None, kos_destination=Z80_RAM):
     m = M68k()
     # Prologue: MOVEQ #0,D0 / BEQ.W real / RESET. The 68K translator's startup prefix admits only a handful of operations and
     # takes over the whole flow when no instruction it cannot model is reachable; the (never executed) RESET fallthrough is such an
@@ -417,6 +480,7 @@ def build_sound(plan, programs, domestic_gate=False, region=b"U  ", prelude=None
         m.branch(0x66, "gate_spin")
     waits = 0
     uploads = {}
+    kos_used = False
     for kind, arg in plan:
         if kind == "delay":
             m.delay(arg, "delay_%d" % len(m.words))
@@ -427,11 +491,23 @@ def build_sound(plan, programs, domestic_gate=False, region=b"U  ", prelude=None
         m.label("ack_%d" % waits)
         m.btst0(Z80_BUSREQ)
         m.branch(0x66, "ack_%d" % waits)
-        if kind in ("raw", "decoded"):
+        if kind in ("raw", "decoded", "raw_ram_count", "raw_ram_source", "raw_ram_destination", "kos", "kos_work"):
             program = programs[arg]
             uploads[arg] = program
             if kind == "raw":
                 m.copy_to_z80("prog_" + arg, len(program), "cp_%d" % len(m.words))
+            elif kind == "raw_ram_count":
+                m.copy_to_z80_from_ram_count("prog_" + arg, "cp_%d" % len(m.words))
+            elif kind == "raw_ram_source":
+                m.copy_to_z80_from_ram_pointer(len(program), "cp_%d" % len(m.words), source_unknown=True)
+            elif kind == "raw_ram_destination":
+                m.copy_to_z80_from_ram_pointer(len(program), "cp_%d" % len(m.words), source_unknown=False, destination_unknown=True)
+            elif kind == "kos":
+                m.kos_call("kos_" + arg, "kos_routine", kos_destination)
+                kos_used = True
+            elif kind == "kos_work":  # a valid stream decompressed into WORK RAM: no Z80 effect, the stream is not an executable image
+                m.kos_call("kos_" + arg, "kos_routine", 0xFF8000)
+                kos_used = True
             else:
                 m.copy_decoded_to_z80("enc_" + arg, len(program), "dec_%d" % len(m.words), 0x5A)
         m.move_w_imm(0x0000, Z80_RESET)
@@ -448,6 +524,12 @@ def build_sound(plan, programs, domestic_gate=False, region=b"U  ", prelude=None
             m.data("prog_" + name, uploads[name])
         if "decoded" in kinds:
             m.data("enc_" + name, bytes(b ^ 0x5A for b in uploads[name]))
+        if kinds & {"raw_ram_count", "raw_ram_source", "raw_ram_destination"}:
+            m.data("prog_" + name, uploads[name])
+        if kinds & {"kos", "kos_work"}:
+            m.data("kos_" + name, scd_common.kosinski_encode(uploads[name]))
+    if kos_used:
+        m.data("kos_routine", kos_routine if kos_routine is not None else KOS_REFERENCE_ROUTINE)
     return build_rom(m.resolve(), region=region)
 
 
@@ -514,10 +596,59 @@ def fixture_sound_late_epoch():
     return build_sound([("raw", "a"), ("delay", 0x600000), ("raw", "b")], {"a": sound_driver(1), "b": sound_driver(2)})
 
 
+# --- ADR 0277: static-first Z80 producer fixtures ------------------------------------------------------------------------------
+
+def fixture_static_kos():
+    """A driver stored Kosinski-compressed, expanded into the Z80 RAM by the recognised reference routine."""
+    return build_sound([("kos", "a")], {"a": sound_driver(2)})
+
+
+def fixture_static_stub_driver():
+    """A small stub (epoch 1), then the complete driver decompressed over it (epoch 2), then the driver again (epoch 3, same signature)."""
+    return build_sound([("raw", "stub"), ("delay", SOUND_DELAY), ("kos", "a"), ("delay", SOUND_DELAY), ("kos", "a")],
+                       {"stub": z80(".org 0x0000\n        di\nloop:   jr loop\n"), "a": sound_driver(2)})
+
+
+def fixture_static_kos_unrecognised():
+    """The same stream, expanded by a decompressor that is NOT a recognised form (one immediate of the reference routine changed: it reloads the
+    descriptor every 15 bits, i.e. decodes differently). The producer must refuse decompression_unproven and the materializer discovers the truth."""
+    routine = bytearray(KOS_REFERENCE_ROUTINE)
+    at = routine.index(bytes.fromhex("7410"))  # MOVEQ #16,D2
+    routine[at + 1] = 0x0F
+    return build_sound([("kos", "a")], {"a": sound_driver(2)}, kos_routine=bytes(routine))
+
+
+def fixture_static_kos_work_ram():
+    """A valid Kosinski stream expanded into WORK RAM (not executable authority for the Z80), then a plain raw driver upload."""
+    return build_sound([("kos_work", "k"), ("raw", "a")], {"k": sound_driver(5), "a": sound_driver(1)})
+
+
+def fixture_static_ram_count():
+    return build_sound([("raw_ram_count", "a")], {"a": sound_driver(1)})
+
+
+def fixture_static_ram_source():
+    return build_sound([("raw_ram_source", "a")], {"a": sound_driver(1)})
+
+
+def fixture_static_ram_destination():
+    return build_sound([("raw_ram_destination", "a")], {"a": sound_driver(1)})
+
+
+def fixture_static_two_phase():
+    """Two different images, the first uploaded twice around the second (A, B, A, restart): activation order A, B."""
+    return build_sound([("raw", "a"), ("delay", SOUND_DELAY), ("raw", "b"), ("delay", SOUND_DELAY), ("raw", "a"), ("delay", SOUND_DELAY), ("restart", None)],
+                       {"a": sound_driver(1), "b": sound_driver(2)})
+
+
 FIXTURES = {"multi_epoch_dirty": fixture_multi_epoch_dirty, "bus_reset_probe": fixture_bus_reset_probe, "bus_reset_control": fixture_bus_reset_control,
             "sound_raw": fixture_sound_raw, "sound_multi_epoch": fixture_sound_multi_epoch, "sound_decoded": fixture_sound_decoded,
             "sound_smc": fixture_sound_smc, "sound_smc_fault": fixture_sound_smc_fault, "sound_tone": fixture_sound_tone, "sound_late_epoch": fixture_sound_late_epoch,
-            "sound_domestic_gated": fixture_sound_domestic_gated, "sound_domestic_gated_overseas_header": fixture_sound_domestic_gated_overseas_header}
+            "sound_domestic_gated": fixture_sound_domestic_gated, "sound_domestic_gated_overseas_header": fixture_sound_domestic_gated_overseas_header,
+            "static_kos": fixture_static_kos, "static_stub_driver": fixture_static_stub_driver, "static_kos_unrecognised": fixture_static_kos_unrecognised,
+            "static_kos_work_ram": fixture_static_kos_work_ram, "static_ram_count": fixture_static_ram_count,
+            "static_ram_source": fixture_static_ram_source, "static_ram_destination": fixture_static_ram_destination,
+            "static_two_phase": fixture_static_two_phase}
 
 
 def build(name):

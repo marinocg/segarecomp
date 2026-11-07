@@ -1,5 +1,7 @@
 #include "segarecomp/machine/genesis/z80_materialization.hpp"
 
+#include <algorithm>
+
 namespace segarecomp::machine::genesis::z80 {
 namespace {
 
@@ -113,6 +115,9 @@ MaterializationSummary materialize(Registry& registry, PassRunner& runner) {
     return fail(Failure::materialization_nondeterministic);
   summary.images = registry.images().size();
   summary.epochs = confirmed.epochs.size();
+  for (const PassEpoch& epoch : confirmed.epochs)
+    if (std::find(summary.activation_order.begin(), summary.activation_order.end(), epoch.signature) == summary.activation_order.end())
+      summary.activation_order.push_back(epoch.signature);
   summary.frames = confirmed.frames;
   summary.end = confirmed.outcome;
   summary.sound_fault = confirmed.sound_fault;

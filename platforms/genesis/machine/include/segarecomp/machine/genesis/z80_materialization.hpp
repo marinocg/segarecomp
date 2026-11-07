@@ -110,6 +110,9 @@ struct MaterializationSummary {
   PassOutcome end = PassOutcome::failed;
   std::optional<SoundFault> sound_fault;  // set: Genesis audio degraded (z80_audio_outcome = structural_code_mismatch)
   std::optional<m68k_alias::GuestStopRecord> guest_stop;  // the confirmed run's M68K stop record (end == guest_stop)
+  // The distinct activation signatures of the confirmed run in order of first activation (ADR 0277: the registry's ordinal order, as the
+  // legacy fixed point would have produced it, is the verification target of a statically preloaded registry).
+  std::vector<Digest> activation_order;
   [[nodiscard]] bool ok() const noexcept { return failure == Failure::none; }
 };
 

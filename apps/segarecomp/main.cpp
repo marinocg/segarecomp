@@ -5,6 +5,7 @@
 #include "segarecomp/codegen/c11/provenance_diagnostics.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
 #include "segarecomp/machine/genesis/hybrid_admission.hpp"
+#include "segarecomp/machine/genesis/z80_static_producer.hpp"
 #include "segarecomp/machine/genesis/ml_region_producer.hpp"
 #include "segarecomp/machine/genesis/ml_region_gen2_producer.hpp"
 #include "segarecomp/machine/genesis/ml_admission.hpp"
@@ -47,7 +48,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp m68k-frontend <image> <source-id> <entry> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
-                "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n  segarecomp ml-gen2-cell-logits --rom <image> --output <path>\n  segarecomp ml-gen2-probe-report --synthetic\n  segarecomp patch <inspect|verify|apply> ... (portable .segapatch packages; see docs/product/patch-packages.md)\n  segarecomp aot-policy-identity --aot-policy <compatibility|optimized> [--aot-model <v1|gen2>] [--platform <genesis|master-system|sega-cd>]\n"
+                "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n  segarecomp ml-gen2-cell-logits --rom <image> --output <path>\n  segarecomp ml-gen2-probe-report --synthetic\n  segarecomp genesis-z80-static-report --rom <image>\n  segarecomp patch <inspect|verify|apply> ... (portable .segapatch packages; see docs/product/patch-packages.md)\n  segarecomp aot-policy-identity --aot-policy <compatibility|optimized> [--aot-model <v1|gen2>] [--platform <genesis|master-system|sega-cd>]\n"
                   "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--ml-gen2-region-proposal-output <path> [--ml-gen2-logits-output <path>]] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path> [--region-proposal-closure <prune|close>]] [--genesis-lock-on] [--legacy-aot-entries] [--shared-return-targets] [--aot-operand-sharing] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission | --immutable-rom-aot-ml-gen2-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
@@ -1103,6 +1104,25 @@ int run_cli(int argc, char **argv) {
       std::cerr << "segarecomp: ml gen2 cell logits: cells=" << logits.size() << " ml_selected=" << selection.cells.size()
                 << " boundary_tie_cells=" << selection.boundary_tie_cells << " selected_cells_sha256=" << digest_of(selected_text)
                 << " logits_sha256=" << digest_of(logit_bytes) << '\n';
+      return 0;
+    }
+    if (command == "genesis-z80-static-report") {
+      // ADR 0277: the static-first Z80 image producer's sanitized aggregates for an image: the typed outcome, counts and refusal classes.
+      // Never a byte, address, offset or hash of the image; the producer is deterministic and runs no guest code.
+      if (argc != 4 || std::string_view(argv[2]) != "--rom") { print_usage(std::cerr); return 2; }
+      const auto bytes = segarecomp::read_binary(argv[3]);
+      namespace gz = segarecomp::machine::genesis::z80;
+      const gz::StaticProduction production = gz::produce_static_epochs(bytes);
+      std::cout << "outcome=" << gz::static_outcome_name(production.outcome) << " epochs=" << production.epochs.size()
+                << " candidates=" << production.candidates << " steps=" << production.steps << " nodes=" << production.nodes
+                << " contexts=" << production.contexts << " copy_loops=" << production.copy_loops
+                << " decoder_calls=" << production.decoder_calls << " horizon_paths=" << production.horizon_paths;
+      gz::Registry registry;
+      gz::StaticProduction copy = production;
+      const std::size_t images = gz::preload_registry(registry, copy);
+      std::cout << " images=" << images;
+      for (const auto &[refusal, count] : production.refusals) std::cout << " refusal." << gz::static_refusal_name(refusal) << "=" << count;
+      std::cout << '\n';
       return 0;
     }
     if (command == "ml-gen2-probe-report") {
