@@ -142,6 +142,10 @@ The final executable never sees it. Only generated tables derived from it reach 
    `structural`) (`image_set.cpp` `executable_images`; `frontend.cpp` `genesis_m68k_executable_images`; `z80_images.cpp`
    `executable_images`).
 
+   **Amended by ADR 0277.** The future static producer exists for Genesis Z80 images: `genesis.z80_static_producer` (`static_proof`,
+   `structural`; evidence `derivation=static_reconstruction`, `proof=<mechanism>`), per image, in the same registry and ImageSet as the
+   materializer's images (`Registry::Image::derivation`). A static image never claims `runnable_epoch_snapshot`.
+
 8. **Verification policy.** The generic layer holds only a closed tag: `none` (bytes cannot change while mapped),
    `byte_identity` (every executed instruction's bytes must equal the image bytes), or `structural` (CPU-defined structural bytes
    must be equal; the CPU defines which bytes are live payload). The implementation is CPU/codegen-owned:
