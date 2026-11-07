@@ -166,3 +166,7 @@ Not measured: Windows/macOS, a hardware (non-software) renderer, or a real game;
 - Tests: `sv_perf_test`, `sv_perf_overlay_test`, `build_profile_test`, `perf_report_test`, `perf_integration_test`.
 - Adding a metric: add it to the collector, give it a name in the adapter's `counter_names` (or a span id), list it in the ADR table, and make the reader validate it. If it
   cannot be measured cheaply on some platform, report it under `unavailable` with the reason instead of a zero.
+
+## Benchmarking a change (SEG-126)
+
+`tools/perf_baseline_bench.py` runs the interleaved build / runtime matrices of the SEG-125 reports and compares two result files; `runtime --image LABEL=PATH@ROOT` builds a variant from another checkout so a runtime change can be A/B-measured against `main` with the same CLI, and `equivalence` compares captured frames, the sound summary and the stop class of two programs. Method, baseline and limits: `docs/testing/performance-baseline-seg126.md`.
