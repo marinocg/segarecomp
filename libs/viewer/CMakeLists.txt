@@ -61,6 +61,11 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER AND BUILD_TESTING)
   target_link_libraries(sv_state_gallery PRIVATE segarecomp::viewer_host)
   set_target_properties(sv_state_gallery PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
   segarecomp_enable_warnings(sv_state_gallery)
+  # SEG-131: measurement tool (not a test): time to open the rewind surface and per-frame cost of switching the preview.
+  add_executable(sv_state_bench test/sv_state_bench.c)
+  target_link_libraries(sv_state_bench PRIVATE segarecomp::viewer_host)
+  set_target_properties(sv_state_bench PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  segarecomp_enable_warnings(sv_state_bench)
   # Documentation/review tool, not a test: renders the viewer's screens from a fictional picture.
   add_executable(sv_gallery test/sv_gallery.c test/sv_gallery_scene.c)  # review art: this tool only, never the library or a package
   target_link_libraries(sv_gallery PRIVATE segarecomp::viewer_host)

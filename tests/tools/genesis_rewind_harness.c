@@ -12,9 +12,11 @@
  *   fullhash | mixer          independent whole-state hash / mixer aggregates
  *   resets                    number of sink resets the after-restore callback performed
  */
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "genesis_audio.h"
 #include "genesis_viewer_state.h"
@@ -177,6 +179,41 @@ int main(int argc, char **argv) {
       printf("MIXER frames=%llu sha=", (unsigned long long)audio.mixer.frames);
       print_hex(digest, 32U);
       printf("\n");
+    } else if (strcmp(op, "bench") == 0) {
+      /* measurement only: N captures and N restores of the current machine, timed (host clock; nothing here feeds back into the guest) */
+      enum { MAX_RUNS = 512 };
+      static uint64_t cap_ns[MAX_RUNS], res_ns[MAX_RUNS];
+      const unsigned runs = a > MAX_RUNS ? MAX_RUNS : (unsigned)a;
+      unsigned i, j;
+      GenesisSnapshotMachine machine_view;
+      GenesisSnapshotIdentity ident;
+      GenesisSnapshotBuffer buf;
+      uint32_t size = 0U;
+      memset(&machine_view, 0, sizeof machine_view);
+      machine_view.runtime = &runtime; machine_view.z80 = &machine; machine_view.audio = &audio;
+      memset(&ident, 0, sizeof ident);
+      memset(ident.source_sha256, 0xA5, 32U);
+      for (i = 0U; i < runs; ++i) {
+        struct timespec t0, t1;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        if (genesis_snapshot_capture(&machine_view, &ident, NULL, &buf) != GENESIS_SNAPSHOT_OK) return 4;
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        cap_ns[i] = (uint64_t)(t1.tv_sec - t0.tv_sec) * 1000000000ULL + (uint64_t)(t1.tv_nsec - t0.tv_nsec);
+        size = buf.size;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        if (genesis_snapshot_restore(&machine_view, &ident, buf.data, buf.size) != GENESIS_SNAPSHOT_OK) return 5;
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        res_ns[i] = (uint64_t)(t1.tv_sec - t0.tv_sec) * 1000000000ULL + (uint64_t)(t1.tv_nsec - t0.tv_nsec);
+        genesis_snapshot_buffer_free(&buf);
+      }
+      for (i = 0U; i + 1U < runs; ++i)
+        for (j = 0U; j + 1U < runs - i; ++j) {
+          uint64_t t;
+          if (cap_ns[j] > cap_ns[j + 1U]) { t = cap_ns[j]; cap_ns[j] = cap_ns[j + 1U]; cap_ns[j + 1U] = t; }
+          if (res_ns[j] > res_ns[j + 1U]) { t = res_ns[j]; res_ns[j] = res_ns[j + 1U]; res_ns[j + 1U] = t; }
+        }
+      printf("BENCH runs=%u size=%u capture_us min=%.1f median=%.1f max=%.1f restore_us min=%.1f median=%.1f max=%.1f\n", runs, (unsigned)size, (double)cap_ns[0] / 1000.0,
+             (double)cap_ns[runs / 2U] / 1000.0, (double)cap_ns[runs - 1U] / 1000.0, (double)res_ns[0] / 1000.0, (double)res_ns[runs / 2U] / 1000.0, (double)res_ns[runs - 1U] / 1000.0);
     } else if (strcmp(op, "resets") == 0) {
       printf("RESETS %u\n", sink_resets);
     } else {
