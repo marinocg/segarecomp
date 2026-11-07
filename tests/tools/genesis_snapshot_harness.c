@@ -62,6 +62,8 @@ static void fullhash(uint8_t out[32]) {
   memset(&copy->m68k_checkpoint, 0, sizeof copy->m68k_checkpoint);
   memset(&copy->device_checkpoint, 0, sizeof copy->device_checkpoint);
   copy->pad1 = copy->pad2 = 0U;
+  copy->owned_regions = NULL; copy->cartridge_sram = NULL; copy->cartridge_sram_storage = NULL; copy->live_frame_observer = NULL; copy->live_raster = NULL; copy->execution_coverage = NULL;
+  copy->z80_hooks = NULL; copy->audio_hooks = NULL; copy->z80_epoch.on_epoch = NULL; copy->z80_epoch.context = NULL;   /* host pointers differ per process (ASLR) */
   genesis_sha256_update(&sha, (const uint8_t *)copy, (uint32_t)sizeof *copy);
   free(copy);
   if (runtime.cartridge_sram != NULL && runtime.cartridge_sram_storage != NULL)
@@ -74,6 +76,7 @@ static void fullhash(uint8_t out[32]) {
     uint32_t i, k;
     memset(&z.count_reset_assert, 0, (size_t)((char *)(&z + 1) - (char *)&z.count_reset_assert));
     z.cpu.state.deadline = 0U;
+    z.runtime = NULL; memset(&z.hooks, 0, sizeof z.hooks); memset(&z.cpu.host, 0, sizeof z.cpu.host); z.cpu.observe_pc = NULL; z.cpu.observer = NULL; z.on_unknown_image = NULL; z.unknown_image_context = NULL; z.bank_view = NULL;
     z.cpu.outcome = (Z80Outcome)0;
     memset(z.cpu.live_code, 0, sizeof z.cpu.live_code);
     genesis_sha256_update(&sha, (const uint8_t *)&z, (uint32_t)sizeof z);
@@ -86,7 +89,7 @@ static void fullhash(uint8_t out[32]) {
     a->trace_count = a->ym_trace_count = 0U;
     memset(a->mixer.ring, 0, sizeof a->mixer.ring);
     a->mixer.ring_read = a->mixer.ring_write = a->mixer.ring_dropped = 0U;
-    a->mixer.sink = NULL;
+    a->mixer.sink = NULL; a->mixer.sink_context = NULL; a->ym = NULL; a->runtime = NULL; memset(&a->hooks, 0, sizeof a->hooks); a->psg.config.levels = NULL;
     for (k = 0U; k < 2U; ++k) {
       GenesisMixerSource *s = k == 0U ? &a->mixer.ym : &a->mixer.psg;
       const GenesisMixerSource *o = k == 0U ? &audio.mixer.ym : &audio.mixer.psg;

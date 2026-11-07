@@ -9,10 +9,30 @@
 
 #define SLOT_FILE_MAX 64U
 
+/* One rolling-history entry: a complete snapshot (its own container: the thumbnail rides inside it) plus the guest clock it was taken at. */
+typedef struct RewindEntry {
+  GenesisSnapshotBuffer snapshot;
+  uint64_t guest_frame, guest_ticks;
+  uint16_t thumb_w, thumb_h;
+  const uint8_t *thumb;   /* points into `snapshot` */
+} RewindEntry;
+
+#define REWIND_MAX_ENTRIES 512U
+
 struct GenesisViewerState {
   GenesisViewerStateConfig cfg;
   char state_dir[1024];
   char unavailable[96];
+  /* ---- rewind (Checkpoint E): oldest first; bounded by age AND by the byte budget; in memory only, never on disk ---- */
+  RewindEntry history[REWIND_MAX_ENTRIES];
+  uint32_t history_count;
+  uint64_t history_bytes;
+  uint64_t last_capture_ticks;
+  uint64_t interval_ticks, target_ticks;
+  char rewind_off[120];          /* non-empty: rewind is unavailable and this is why */
+  char history_limit_note[120];  /* non-empty: the retained history is shorter than the target (memory pressure) */
+  uint64_t anchor_ticks, anchor_pc;   /* the live state referenced while the rewind surface is open */
+  int anchor_open;
   /* Thumbnail copies handed to the viewer by slot_info (stable until the next slot_info call for that slot). */
   struct { uint8_t pixels[SV_STATE_THUMB_MAX_W * SV_STATE_THUMB_MAX_H * 2]; } slot_thumb[SV_STATE_SLOTS];
   GenesisViewerStateStats stats;
@@ -86,6 +106,164 @@ static int slot_valid(int slot) { return slot >= 0 && slot < SV_STATE_SLOTS; }
 static int states_ready(const GenesisViewerState *s, char *why, size_t cap) {
   if (s->unavailable[0] != '\0') { set_text(why, cap, s->unavailable); return 0; }
   if (s->state_dir[0] == '\0') { set_text(why, cap, "No save location is configured for this session."); return 0; }
+  return 1;
+}
+
+/* ---- rewind engine ---- */
+
+static uint64_t ms_to_ticks(uint64_t ms) { return ms * (uint64_t)GENESIS_NTSC_MASTER_TICKS_PER_SECOND / 1000U; }
+
+static void history_drop_oldest(GenesisViewerState *s) {
+  uint32_t i;
+  if (s->history_count == 0U) return;
+  s->history_bytes -= s->history[0].snapshot.size;
+  genesis_snapshot_buffer_free(&s->history[0].snapshot);
+  for (i = 1U; i < s->history_count; ++i) s->history[i - 1U] = s->history[i];
+  memset(&s->history[s->history_count - 1U], 0, sizeof(RewindEntry));
+  --s->history_count;
+  ++s->stats.evictions;
+}
+
+static void history_truncate_to(GenesisViewerState *s, uint32_t keep) {   /* drops every entry newer than index keep-1 (the branch point) */
+  while (s->history_count > keep) {
+    RewindEntry *last = &s->history[s->history_count - 1U];
+    s->history_bytes -= last->snapshot.size;
+    genesis_snapshot_buffer_free(&last->snapshot);
+    memset(last, 0, sizeof *last);
+    --s->history_count;
+  }
+}
+
+static void history_clear(GenesisViewerState *s) { history_truncate_to(s, 0U); s->history_limit_note[0] = '\0'; }
+
+static int rewind_enabled(const GenesisViewerState *s) { return s->cfg.rewind_budget_bytes != 0U && s->rewind_off[0] == '\0'; }
+
+static void history_refresh_stats(GenesisViewerState *s) {
+  s->stats.history_entries = s->history_count;
+  s->stats.history_bytes = s->history_bytes;
+}
+
+void genesis_viewer_state_after_slice(GenesisViewerState *s) {
+  const GenesisSnapshotMachine *machine;
+  uint64_t now;
+  GenesisSnapshotThumbnail thumbnail;
+  uint8_t thumb[SV_STATE_THUMB_MAX_W * SV_STATE_THUMB_MAX_H * 2U];
+  GenesisSnapshotBuffer buffer;
+  GenesisSnapshotInfo info;
+  GenesisSnapshotStatus st;
+  RewindEntry *entry;
+  if (s == NULL || !rewind_enabled(s)) return;
+  machine = &s->cfg.machine;
+  now = machine->runtime->scheduler.master_ticks;
+  if (now < s->last_capture_ticks) s->last_capture_ticks = now;               /* the guest clock never runs backwards except through a restore, which re-bases it */
+  if (now - s->last_capture_ticks < s->interval_ticks) return;
+  memset(&thumbnail, 0, sizeof thumbnail);
+  if (genesis_viewer_state_make_thumbnail(s->cfg.latest_frame, thumb, sizeof thumb, &thumbnail.width, &thumbnail.height)) thumbnail.rgb565 = thumb;
+  st = genesis_snapshot_capture(machine, &s->cfg.identity, thumbnail.rgb565 != NULL ? &thumbnail : NULL, &buffer);
+  s->last_capture_ticks = now;   /* a failed attempt is not retried every slice */
+  if (st == GENESIS_SNAPSHOT_NOT_CAPTURABLE) return;   /* a latched stop: the guest is about to fail closed anyway */
+  if (st != GENESIS_SNAPSHOT_OK) {
+    ++s->stats.capture_failures;
+    if (st == GENESIS_SNAPSHOT_NO_MEMORY) {   /* keep the game running; shorten the history and say so */
+      while (s->history_count > s->history_count / 2U + 1U) history_drop_oldest(s);
+      snprintf(s->history_limit_note, sizeof s->history_limit_note, "The computer is short of memory: only the last %u moments are kept.", (unsigned)s->history_count);
+    } else {
+      snprintf(s->rewind_off, sizeof s->rewind_off, "Rewind stopped: %s.", genesis_snapshot_status_text(st));
+      history_clear(s);
+    }
+    history_refresh_stats(s);
+    return;
+  }
+  if (buffer.size > s->cfg.rewind_budget_bytes) {   /* a single snapshot that cannot fit even in an empty history: rewind is unavailable, the game is not affected */
+    snprintf(s->rewind_off, sizeof s->rewind_off, "Rewind is unavailable: one saved moment (%u KB) does not fit the %u MB memory limit.", (unsigned)(buffer.size / 1024U),
+             (unsigned)(s->cfg.rewind_budget_bytes / (1024U * 1024U)));
+    genesis_snapshot_buffer_free(&buffer);
+    history_clear(s);
+    history_refresh_stats(s);
+    return;
+  }
+  while (s->history_count != 0U && (s->history_bytes + buffer.size > s->cfg.rewind_budget_bytes || s->history_count >= REWIND_MAX_ENTRIES)) history_drop_oldest(s);   /* by budget */
+  while (s->history_count != 0U && now - s->history[0].guest_ticks > s->target_ticks) history_drop_oldest(s);                                                       /* by age */
+  if (genesis_snapshot_inspect(buffer.data, buffer.size, &info) != GENESIS_SNAPSHOT_OK) { genesis_snapshot_buffer_free(&buffer); ++s->stats.capture_failures; return; }
+  entry = &s->history[s->history_count++];
+  entry->snapshot = buffer;
+  entry->guest_frame = info.guest_frame;
+  entry->guest_ticks = info.guest_master_ticks;
+  entry->thumb_w = info.thumb_width;
+  entry->thumb_h = info.thumb_height;
+  entry->thumb = info.thumb_rgb565;
+  s->history_bytes += buffer.size;
+  ++s->stats.captures;
+  /* the retained span is shorter than the target only when the budget (not the age) is what evicted: tell the player the real figure */
+  if (s->history_count != 0U && s->stats.evictions != 0U && now - s->history[0].guest_ticks < s->target_ticks - s->target_ticks / 10U &&
+      s->history_bytes + buffer.size > s->cfg.rewind_budget_bytes - buffer.size)
+    snprintf(s->history_limit_note, sizeof s->history_limit_note, "Memory limit reached: the last %u seconds are kept.", (unsigned)((now - s->history[0].guest_ticks) / GENESIS_NTSC_MASTER_TICKS_PER_SECOND));
+  else
+    s->history_limit_note[0] = '\0';
+  history_refresh_stats(s);
+}
+
+static int p_rewind_available(void *ctx, char *why, size_t cap) {
+  GenesisViewerState *s = (GenesisViewerState *)ctx;
+  if (s->cfg.rewind_budget_bytes == 0U) { set_text(why, cap, "Rewind is turned off."); return 0; }
+  if (s->rewind_off[0] != '\0') { set_text(why, cap, s->rewind_off); return 0; }
+  return 1;
+}
+
+static int p_history_count(void *ctx) { return (int)((GenesisViewerState *)ctx)->history_count; }
+
+static int p_history_info(void *ctx, int index, SvRewindEntry *out) {
+  GenesisViewerState *s = (GenesisViewerState *)ctx;
+  const uint64_t now = s->cfg.machine.runtime->scheduler.master_ticks;
+  const RewindEntry *e;
+  if (index < 0 || (uint32_t)index >= s->history_count || out == NULL) return -1;
+  e = &s->history[index];
+  memset(out, 0, sizeof *out);
+  out->age_ms = (int64_t)genesis_viewer_state_ticks_to_ms(now >= e->guest_ticks ? now - e->guest_ticks : 0U);
+  out->thumb.w = e->thumb_w;
+  out->thumb.h = e->thumb_h;
+  out->thumb.rgb565 = e->thumb;
+  return 0;
+}
+
+static int p_restore_entry(void *ctx, int index, char *error, size_t cap) {
+  GenesisViewerState *s = (GenesisViewerState *)ctx;
+  GenesisSnapshotStatus st;
+  if (index < 0 || (uint32_t)index >= s->history_count) { set_text(error, cap, "that moment is no longer available"); return -1; }
+  st = genesis_snapshot_restore(&s->cfg.machine, &s->cfg.identity, s->history[index].snapshot.data, s->history[index].snapshot.size);
+  if (st != GENESIS_SNAPSHOT_OK) {   /* two-phase restore: the running game is unchanged */
+    set_text(error, cap, genesis_snapshot_status_text(st));
+    log_event("rewind", index, "failed", genesis_snapshot_status_text(st));
+    return -1;
+  }
+  history_truncate_to(s, (uint32_t)index + 1U);   /* the new future is a new branch: no entry newer than the chosen one survives */
+  s->last_capture_ticks = s->cfg.machine.runtime->scheduler.master_ticks;
+  s->anchor_open = 0;
+  ++s->stats.restores;
+  history_refresh_stats(s);
+  log_event("rewind", index, "ok", "restored");
+  if (s->cfg.after_restore != NULL) s->cfg.after_restore(s->cfg.after_restore_context);
+  return 0;
+}
+
+static void p_rewind_opened(void *ctx) {
+  GenesisViewerState *s = (GenesisViewerState *)ctx;
+  s->anchor_ticks = s->cfg.machine.runtime->scheduler.master_ticks;   /* the live machine IS the anchor: nothing runs while the surface is open */
+  s->anchor_pc = s->cfg.machine.runtime->pc;
+  s->anchor_open = 1;
+}
+
+static void p_rewind_cancelled(void *ctx) {
+  GenesisViewerState *s = (GenesisViewerState *)ctx;
+  if (s->anchor_open && (s->cfg.machine.runtime->scheduler.master_ticks != s->anchor_ticks || s->cfg.machine.runtime->pc != s->anchor_pc))
+    log_event("rewind", -1, "anchor_moved", "the machine changed while browsing");   /* never expected: reported rather than hidden */
+  s->anchor_open = 0;
+}
+
+static int p_history_note(void *ctx, char *note, size_t cap) {
+  GenesisViewerState *s = (GenesisViewerState *)ctx;
+  if (s->history_limit_note[0] == '\0') return 0;
+  set_text(note, cap, s->history_limit_note);
   return 1;
 }
 
@@ -174,6 +352,9 @@ static int p_load_slot(void *ctx, int slot, char *error, size_t cap) {
   free(data);
   if (st != GENESIS_SNAPSHOT_OK) { set_text(error, cap, genesis_snapshot_status_text(st)); log_event("load", slot, "failed", genesis_snapshot_status_text(st)); return -1; }
   log_event("load", slot, "ok", name);
+  history_clear(s);   /* the rolling history belonged to another timeline */
+  s->last_capture_ticks = s->cfg.machine.runtime->scheduler.master_ticks;
+  history_refresh_stats(s);
   ++s->stats.restores;
   if (s->cfg.after_restore != NULL) s->cfg.after_restore(s->cfg.after_restore_context);
   return 0;
@@ -189,10 +370,21 @@ GenesisViewerState *genesis_viewer_state_create(const GenesisViewerStateConfig *
   s->cfg = *config;
   if (config->state_dir != NULL) snprintf(s->state_dir, sizeof s->state_dir, "%s", config->state_dir);
   if (config->unavailable_reason != NULL) snprintf(s->unavailable, sizeof s->unavailable, "%s", config->unavailable_reason);
+  {
+    const uint32_t interval = config->rewind_interval_ms != 0U ? config->rewind_interval_ms : GENESIS_REWIND_INTERVAL_MS;
+    const uint32_t target = config->rewind_target_ms != 0U ? config->rewind_target_ms : GENESIS_REWIND_TARGET_MS;
+    s->interval_ticks = ms_to_ticks(interval);
+    s->target_ticks = ms_to_ticks(target);
+    s->last_capture_ticks = config->machine.runtime->scheduler.master_ticks;
+  }
   return s;
 }
 
-void genesis_viewer_state_destroy(GenesisViewerState *state) { free(state); }
+void genesis_viewer_state_destroy(GenesisViewerState *state) {
+  if (state == NULL) return;
+  history_clear(state);
+  free(state);
+}
 
 void genesis_viewer_state_provider(GenesisViewerState *state, SvStateProvider *out) {
   memset(out, 0, sizeof *out);
@@ -201,9 +393,14 @@ void genesis_viewer_state_provider(GenesisViewerState *state, SvStateProvider *o
   out->slot_info = p_slot_info;
   out->save_slot = p_save_slot;
   out->load_slot = p_load_slot;
+  out->rewind_available = p_rewind_available;
+  out->history_count = p_history_count;
+  out->history_info = p_history_info;
+  out->restore_entry = p_restore_entry;
+  out->rewind_opened = p_rewind_opened;
+  out->rewind_cancelled = p_rewind_cancelled;
+  out->history_note = p_history_note;
 }
-
-void genesis_viewer_state_after_slice(GenesisViewerState *state) { (void)state; }
 
 void genesis_viewer_state_stats(const GenesisViewerState *state, GenesisViewerStateStats *out) {
   memset(out, 0, sizeof *out);

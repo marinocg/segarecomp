@@ -40,6 +40,7 @@ static GenesisViewerOptions g_options;
 static GenesisLiveFrameObserver *g_observer;
 static GenesisViewerHost g_host;                 /* the final host table (the baseline frame is presented through it) */
 static int g_discontinuity;
+static GenesisViewerState *g_state;              /* SEG-131: slot files and the rewind timeline of this session */
 static GenesisRasterCapture g_raster_capture; /* SEG-055: host-owned per-scanline capture buffer */
 
 #ifdef SEGARECOMP_GENESIS_SOUND
@@ -112,9 +113,10 @@ static void perf_after_slice(void *ctx, GenesisRuntime *runtime) {
   t = sv_perf_span_begin(&g_perf);
   viewer_after_slice(ctx, runtime);
   sv_perf_span_end(&g_perf, SV_SPAN_AUDIO_PRESENT, t);
+  genesis_viewer_state_after_slice(g_state);   /* SEG-131: the rewind cadence (a bounded in-memory snapshot every 500 ms of guest time), at the snapshot barrier */
 }
 #else
-static void perf_after_slice(void *ctx, GenesisRuntime *runtime) { (void)ctx; perf_slice_done(runtime); }
+static void perf_after_slice(void *ctx, GenesisRuntime *runtime) { (void)ctx; perf_slice_done(runtime); genesis_viewer_state_after_slice(g_state); }
 #endif
 
 static void perf_write_report(const char *path, const char *status, const char *outcome, const GenesisViewerResult *r, const GenesisRuntime *runtime, const GenesisLiveFrameObserver *observer,
@@ -163,7 +165,18 @@ static void perf_write_report(const char *path, const char *status, const char *
 
 /* ---- SEG-131 (ADR 0278): whole-machine save states. The service owns the slot files and (from Checkpoint E) the rewind timeline; this hook only supplies what is
  * session-specific: the trusted game identity from the launcher, the state directory, and what must be reset around a restored machine. ---- */
-static GenesisViewerState *g_state;
+/* A bounded numeric knob from the environment: out-of-range or malformed values keep the default. */
+static uint32_t env_u32(const char *name, uint32_t low, uint32_t high, uint32_t fallback) {
+  const char *text = getenv(name);
+  unsigned long value = 0UL;
+  size_t i;
+  if (text == NULL || *text == '\0' || strlen(text) > 9U) return fallback;
+  for (i = 0U; text[i] != '\0'; ++i) {
+    if (text[i] < '0' || text[i] > '9') return fallback;
+    value = value * 10UL + (unsigned long)(text[i] - '0');
+  }
+  return value >= low && value <= high ? (uint32_t)value : fallback;
+}
 
 static int parse_hex32(const char *text, uint8_t out[32]) {
   unsigned i;
@@ -325,6 +338,16 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
     state_config.machine.z80 = genesis_sound_attach(runtime);
     state_config.machine.audio = genesis_sound_audio_mutable();
 #endif
+    state_config.rewind_budget_bytes = GENESIS_REWIND_BUDGET_BYTES;
+    state_config.rewind_interval_ms = GENESIS_REWIND_INTERVAL_MS;
+    state_config.rewind_target_ms = GENESIS_REWIND_TARGET_MS;
+    {  /* SEG-131: rewind is on by default for an interactive session; these knobs bound or turn it off (documented in docs/user/save-states.md) */
+      const char *off = getenv("SEGARECOMP_REWIND");
+      if (off != NULL && (strcmp(off, "0") == 0 || strcmp(off, "off") == 0)) state_config.rewind_budget_bytes = 0U;
+      state_config.rewind_budget_bytes = env_u32("SEGARECOMP_REWIND_BUDGET_MB", 1U, 1024U, state_config.rewind_budget_bytes / (1024U * 1024U)) * 1024U * 1024U * (state_config.rewind_budget_bytes != 0U);
+      state_config.rewind_interval_ms = env_u32("SEGARECOMP_REWIND_INTERVAL_MS", 50U, 5000U, state_config.rewind_interval_ms);
+      state_config.rewind_target_ms = env_u32("SEGARECOMP_REWIND_TARGET_MS", 500U, 600000U, state_config.rewind_target_ms);
+    }
     state_config.latest_frame = &g_latest_frame;
     state_config.after_restore = viewer_after_restore;
     state_config.after_restore_context = runtime;
