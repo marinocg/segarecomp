@@ -231,6 +231,30 @@ def main() -> int:
                 forcing_report.get("frame_state") != "not_ready":
             raise RuntimeError("forced-fail summary did not still report the inert frame placeholder")
 
+        # SEG-127-T003: a digest-free presentation frame (digest_omitted = 1, all-zero digest) is "populated" for the viewer but must NEVER be
+        # evidence-ready: a caller claiming every category matches still gets "fail"; a genuinely digested frame can still pass.
+        def frame_verdict(setup, label):
+            src = path / ("checkpoint_frame_%s.c" % label)
+            src.write_text(HARNESS.replace(
+                "assert(genesis_write_checkpoint_evidence_summary(&bundle, &summary) == 0);",
+                setup + " assert(genesis_write_checkpoint_evidence_summary(&bundle, &lying_summary) == 0);"))
+            exe = path / ("checkpoint_frame_" + label)
+            built = subprocess.run([*common[:-2], str(src), common[-1], "-o", str(exe)], text=True, capture_output=True)
+            if built.returncode:
+                raise RuntimeError(built.stderr)
+            ran = subprocess.run([str(exe)], text=True, capture_output=True)
+            if ran.returncode:
+                raise RuntimeError(ran.stderr)
+            return json.loads(ran.stdout)
+        omitted = frame_verdict("bundle.frame.width = 320U; bundle.frame.height = 224U; bundle.frame.digest_omitted = 1U; "
+                                "memset(bundle.frame.frame_digest, 0, sizeof bundle.frame.frame_digest);", "omitted")
+        if omitted.get("verdict") != "fail" or omitted.get("frame_state") != "not_ready" or omitted.get("present", {}).get("frame") is not False:
+            raise RuntimeError("a digest-free frame (digest_omitted=1) was accepted as checkpoint evidence")
+        digested = frame_verdict("bundle.frame.width = 320U; bundle.frame.height = 224U; bundle.frame.digest_omitted = 0U; "
+                                 "memset(bundle.frame.frame_digest, 0x5A, sizeof bundle.frame.frame_digest);", "digested")
+        if digested.get("verdict") != "pass" or digested.get("frame_state") != "ready":
+            raise RuntimeError("a genuinely digested frame no longer passes checkpoint evidence")
+
         sticky_source = path / "checkpoint_sticky.c"
         sticky_source.write_text(HARNESS.replace(
             "assert(runtime.devices.interrupt.checkpoint_entered == 0U);\n  value =",

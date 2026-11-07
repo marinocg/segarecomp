@@ -3783,7 +3783,8 @@ int genesis_write_checkpoint_evidence_summary(const GenesisCheckpointEvidenceBun
    * presence, exactly as it already does for every other required
    * category's "present" claim implicitly by trusting the caller for those
    * (this task adds no new per-category matching rule). */
-  frame_ready = genesis_frame_artifact_is_populated(&bundle->frame);
+  /* SEG-127: evidence requires a real digest; a digest-free (digest_omitted) presentation frame is never evidence-ready. */
+  frame_ready = genesis_frame_artifact_is_populated(&bundle->frame) && bundle->frame.digest_omitted == 0U;
   all_required_ready = summary->verdict_passed &&
       summary->cpu_present && summary->cpu_matches &&
       summary->ram_present && summary->ram_matches &&
