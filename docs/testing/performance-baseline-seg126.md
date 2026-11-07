@@ -22,6 +22,8 @@ Commit under measurement: product `main` at `132d64b` (SEG-125 merged), built Re
 - **Images** are legally held local images from the ignored `games/` set, referred to only by label: `genesis_512k` (a 512 KiB Genesis image), `sms_256k` (a 256 KiB Master
   System image), and the project-authored `synthetic` spin image from `tools/perf_overhead_bench.py`. No title, path, byte or trace is recorded.
 
+Ranking and the pre-registered experiment: `docs/decisions/0274-seg-126-bottleneck-ranking-and-pre-registration.md`. Candidate vs baseline results and decision: `docs/decisions/0275-seg-126-plane-run-results-and-decision.md`.
+
 ## Environment
 
 | item | value |

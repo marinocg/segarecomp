@@ -1,0 +1,56 @@
+{
+ "image_A_512k_compat": {
+  "frames_compared": 64,
+  "identical": true,
+  "exit_codes": [
+   0,
+   0
+  ],
+  "notes_compared": 3
+ },
+ "image_B_1m_optimized": {
+  "frames_compared": 64,
+  "identical": true,
+  "exit_codes": [
+   0,
+   0
+  ],
+  "notes_compared": 3
+ },
+ "image_C_2m_optimized": {
+  "frames_compared": 64,
+  "identical": true,
+  "exit_codes": [
+   0,
+   0
+  ],
+  "notes_compared": 3
+ },
+ "image_D_1m_optimized": {
+  "frames_compared": 5,
+  "identical": true,
+  "exit_codes": [
+   0,
+   0
+  ],
+  "notes_compared": 3
+ },
+ "image_E_optimized": {
+  "frames_compared": 1,
+  "identical": true,
+  "exit_codes": [
+   0,
+   0
+  ],
+  "notes_compared": 3
+ },
+ "image_F_2m_optimized": {
+  "frames_compared": 64,
+  "identical": true,
+  "exit_codes": [
+   0,
+   0
+  ],
+  "notes_compared": 3
+ }
+}
