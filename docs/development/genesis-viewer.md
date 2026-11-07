@@ -40,6 +40,16 @@ Mechanism: viewer builds compile the unmodified generated C with
 dispatcher and allowance to `platforms/genesis/viewer/viewer_main_hook.c`. Headless builds do not define the
 macro and link no viewer or SDL code.
 
+## Save states, game saves and rewind (SEG-131, ADR 0278)
+
+The viewer hook (`viewer_main_hook.c`) reads, besides the existing `SEGARECOMP_*` variables, only what the launcher passes for an interactive session: `SEGARECOMP_SAVE_DIR` (the game-and-version folder, see
+[docs/product/save-states.md](../product/save-states.md)), `SEGARECOMP_SAVE_VARIANT` (`vanilla` or a 64-hex patch identity) and `SEGARECOMP_ROM_SHA256` (the verified image digest). Without a save
+directory there is no persistence and no slot states; rewind (in memory only) still works. `SEGARECOMP_REWIND=0`, `SEGARECOMP_REWIND_BUDGET_MB`, `SEGARECOMP_REWIND_INTERVAL_MS` and `SEGARECOMP_REWIND_TARGET_MS`
+bound or disable rewind. Each state operation prints one `VIEWER_STATE {...}` line and each persistence step one `VIEWER_PERSIST {...}` line to stderr (what happened, never any state content); the launcher reads
+the latter from the run log. Automation: `SEGARECOMP_VIEWER_PAD_SCRIPT` lines may also press `K` (quick save), `M` (quick load), `Y` (open rewind, go back two moments, confirm) and `Z` (browse three
+back, cancel); they feed the real hotkey / key-event paths at the snapshot barrier. Only a session ended by the player (`window_closed`) commits the cartridge memory; the generated program's exit status
+cannot tell a clean quit from a budget stop or a typed stop (all exit 0), which is why the viewer decides.
+
 ## Keyboard input (SEG-011-T004, SEG-055)
 
 Fixed maps. Player 1: arrow keys = D-pad, Z = A, X = B, C = C, Return = Start. Player 2: I/K/J/L = Up/Down/Left/Right,

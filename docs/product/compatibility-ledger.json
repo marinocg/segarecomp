@@ -16,19 +16,23 @@
         "widescreen Level 2 and Level 3, width control, Comfort/Borders/Raw side treatments, per-game presentation settings",
         ".segapatch schema 1 and 2 patch variants (Vanilla / Patched)",
         "automatic Sonic & Knuckles lock-on cartridge recognition (exact header match only)",
-        "opt-in static-first Z80 image production in the CLI (--z80-static 1)"
+        "opt-in static-first Z80 image production in the CLI (--z80-static 1)",
+        "automatic SRAM / X24C01 EEPROM game saves, five numbered plus a quick whole-machine save-state slot per game version, and in-memory visual rewind (ADR 0278)"
       ],
       "limitations": [
         "two three-button pads; no six-button X/Y/Z/Mode input",
         "execution is 60 Hz; the Europe PAL region choice changes the version register only",
         "the viewer has no Genesis input recording or replay (headless pad scripts exist for development)",
-        "compatibility is incomplete: unlisted games may stop with a typed unsupported-behavior diagnostic or fail to build"
+        "compatibility is incomplete: unlisted games may stop with a typed unsupported-behavior diagnostic or fail to build",
+        "save states and rewind are Genesis only; a state is loaded only by the same game image, version, region and state-format version"
       ],
       "evidence": [
         "platforms/genesis/README.md",
         "docs/product/viewer-ui.md",
         "docs/architecture/genesis-z80-audio-contract.md",
-        "ADR 0277"
+        "ADR 0277",
+        "docs/product/save-states.md",
+        "ADR 0278"
       ]
     },
     {
