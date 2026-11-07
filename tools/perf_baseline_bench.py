@@ -4,6 +4,7 @@
 
   perf_baseline_bench.py build   --cli <segarecomp> --root <product root> --cc cc --image LABEL=PATH[:platform] ... [--synthetic] [--reps 5] [--jobs 8] -o out.json
   perf_baseline_bench.py runtime --cli <segarecomp> --root <product root> --cc cc --image LABEL=PATH ... --sdl3 PREFIX [--reps 5] [-o out.json]
+  perf_baseline_bench.py equivalence --pair LABEL=BEFORE_PROGRAM,AFTER_PROGRAM ... [--budget N]   (frames, sound summary, stop class)
   perf_baseline_bench.py compare before.json after.json            (medians, spread and the relative change per shared variant)
 
 Variants are interleaved round-robin (v1 v2 v3 v1 v2 v3 ...) so host drift hits every variant alike; each result keeps every raw sample, the median,
@@ -237,6 +238,37 @@ def cmd_compare(args):
         print(f"{n:42s} before {x['median']:9.2f} (cv {x['cv_pct']:4.1f}%)  after {y['median']:9.2f} (cv {y['cv_pct']:4.1f}%)  change {(y['median'] / x['median'] - 1) * 100:+6.1f}%")
 
 
+def cmd_equivalence(args):
+    """Baseline vs candidate programs of the same image: byte-identical captured frames, sound summary, stop class and exit code.
+    Each --pair is LABEL=BEFORE_PROGRAM,AFTER_PROGRAM (headless programs; the same environment and budget for both)."""
+    import hashlib
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="perf-equivalence-"))
+    ok = True
+    report = {}
+    for spec in args.pair:
+        label, progs = spec.split("=", 1)
+        before, after = progs.split(",")
+        outs = {}
+        for side, prog in (("before", before), ("after", after)):
+            frames = tmp / f"{label}-{side}"
+            frames.mkdir()
+            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "SEGARECOMP_CAPTURE_DIR": str(frames), "SEGARECOMP_CAPTURE_FIRST": "1",
+                   "SEGARECOMP_CAPTURE_COUNT": str(args.frames), "SEGARECOMP_CAPTURE_STRIDE": str(args.stride)}
+            r = subprocess.run([prog, "--instruction-budget", str(args.budget)], capture_output=True, text=True, env=env, timeout=1800)
+            digests = {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(frames.glob("frame-*.ppm"))}
+            env2 = {"PATH": env["PATH"], "SEGARECOMP_SOUND_SUMMARY": "1"}
+            r2 = subprocess.run([prog, "--instruction-budget", str(args.budget)], capture_output=True, text=True, env=env2, timeout=1800)
+            notes = [l for l in (r.stderr + r2.stderr).splitlines() if l.startswith(("CAPTURE_SUMMARY", "RUNTIME_NOTES", "SOUND_SUMMARY", "AUDIO"))]
+            outs[side] = {"frames": digests, "rc": (r.returncode, r2.returncode), "stdout": r2.stdout, "notes": notes}
+        same = outs["before"] == outs["after"] and len(outs["before"]["frames"]) > 0
+        ok &= same
+        report[label] = {"frames_compared": len(outs["before"]["frames"]), "identical": same, "exit_codes": outs["before"]["rc"], "notes_compared": len(outs["before"]["notes"])}
+        print(f"{label}: {len(outs['before']['frames'])} frames, sound summary / stop class / exit code {'IDENTICAL' if same else 'DIFFERENT'}")
+    if args.output:
+        pathlib.Path(args.output).write_text(json.dumps(report, indent=1))
+    sys.exit(0 if ok else 1)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -262,11 +294,17 @@ def main():
     r.add_argument("--paced-budget", type=int, default=10_000_000)
     r.add_argument("--aot", default="compatibility")
     r.add_argument("--work-dir", help="keep/reuse built programs here (a program already present is not rebuilt: use a fresh directory per CLI)")
+    e = sub.add_parser("equivalence")
+    e.add_argument("--pair", action="append", required=True)
+    e.add_argument("--budget", type=int, default=60_000_000)
+    e.add_argument("--frames", type=int, default=64)
+    e.add_argument("--stride", type=int, default=90)
+    e.add_argument("-o", "--output")
     c = sub.add_parser("compare")
     c.add_argument("before")
     c.add_argument("after")
     args = ap.parse_args()
-    {"build": cmd_build, "runtime": cmd_runtime, "compare": cmd_compare}[args.cmd](args)
+    {"build": cmd_build, "runtime": cmd_runtime, "compare": cmd_compare, "equivalence": cmd_equivalence}[args.cmd](args)
 
 
 if __name__ == "__main__":
