@@ -26,7 +26,9 @@ immutable cartridge bytes. Goal: for fully provable cases one Z80 compilation ge
    at the call site is a ROM routine whose code is shared, byte for byte, by 9 of the 64 local images). Recognition is the SHA-256 of the routine's
    position-independent code from its entry to its first `RTS` (two forms: a project-authored *reference* routine, documented and used by the
    fixtures, and the *library* form, digest only - no title code is stored). The decode uses the shared public decoder extracted from Sega CD
-   (`libs/core/.../kosinski.hpp`; Sega CD behaviour unchanged). A different routine is `decompression_unproven`, not a guess. This is a
+   (`libs/core/.../kosinski.hpp`; Sega CD behaviour unchanged). The destination may be the sound RAM or a constant work-RAM buffer later consumed by a counted copy into the sound RAM (the two-stage
+   loader of the Sega-family drivers, e.g. Streets of Rage); the buffer is discarded by any store that may touch it. A different routine is
+   `decompression_unproven`, not a guess. This is a
    *format-and-loader-contract* recognition (the digest identifies an algorithm used by many titles, not a title); it is deliberately a closed,
    two-entry catalogue, not a signature scanner, and adding a form requires evidence of use as a Z80 loader.
 5. **The prediction is verified by the existing machinery, and a contradiction is never absorbed.** The first fixed point runs with the preloaded

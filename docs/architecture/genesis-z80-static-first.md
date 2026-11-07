@@ -69,7 +69,14 @@ device reads), and anything else is unknown.
   routine** with constant `A0` (ROM stream) and `A1` (RAM destination). Recognition is the SHA-256 of the routine's code bytes from its entry to
   its first `RTS`, position independent by construction (short branches, no absolute operand). Two forms are recognised: the project-authored
   *reference* routine (listing below; the fixture builder assembles it) and the *library* form shared by qualified titles (digest only; no code
-  from any title is stored). The Kosinski decode itself is the shared public decoder.
+  from any title is stored). The Kosinski decode itself is the shared public decoder. The destination is the sound RAM, **or a constant work-RAM
+  range** ("staging", the loader shape of the Sega-family drivers: expand into a work-RAM buffer, then a counted copy into the sound RAM): the
+  decoded bytes are remembered as the context's *staged buffer*, a function of immutable ROM bytes only, and a later counted copy whose source
+  lies wholly inside that buffer is an admitted source (proof class `kosinski`). Any store into the buffer, any store through an unresolvable
+  pointer, any block store and any call of an unrecognised routine discards the buffer first (`Walker::touch`), so a clobbered buffer is
+  `source_not_immutable`, never a guess.
+* **Epoch list.** The walk records every runnable-transition epoch; plain restarts (empty hold window) of a bound image are epochs of the list and
+  re-bind in the registry exactly like observed ones.
 * **Soundness rules inside an open window** (68K owns the bus): a branch or `DBcc` with a non-constant outcome, a store through an unknown pointer,
   a store of an unknown value, a call of an unrecognised routine, or more than 48 individually executed non-constant stores are refusals that end
   that path. A non-constant store inside a backward-branch span the walk observed invalidates its epoch (`loop_unproven`).
