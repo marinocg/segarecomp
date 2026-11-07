@@ -37,35 +37,53 @@ For the detailed pipeline, see [the architecture overview](docs/architecture/pip
 
 ## Project status
 
-segarecomp has **fully playable commercial games** on Genesis / Mega Drive and
-working Master System titles. Compatibility is not universal: games not listed
-below may reach gameplay, encounter unsupported behavior or fail to build.
+segarecomp runs commercial **Genesis / Mega Drive** and **Master System** games, and, experimentally, **Sega CD** games from your own BIOS and disc. Compatibility is not universal: games not listed
+below may reach gameplay, stop at unsupported behavior or fail to build.
+
+**What is in which place.** The latest published release is **v0.7.0** (2026-11-01). Items marked **(main only)** were merged afterwards and are in the source tree and the next release, not in the v0.7.0 archives.
+Per-game evidence and per-feature availability are in the [compatibility ledger](docs/product/compatibility-ledger.md) ([JSON](docs/product/compatibility-ledger.json)); release notes are in the [changelog](CHANGELOG.md).
 
 | Target | What exists today | Important limits |
 | --- | --- | --- |
-| **Genesis / Mega Drive** | Generated-native MC68000, Genesis runtime and video (VDP), device work and an optional SDL3 viewer. Sonic 1 is beatable end-to-end; Sonic 2, Sonic 3 and Streets of Rage 1 and 3 are fully playable. Many more games reach gameplay. | Compatibility is still incomplete for other titles. |
-| **Z80 CPU** | Z80 decode/semantics and generated-C lowering components exist and are used by ongoing platform work. | CPU coverage, hardware integration and game compatibility remain experimental. |
-| **Master System** | Generated-native Z80 path, C11 runtime, VDP/PSG/input components, headless support and optional viewer. Sonic 1 and 2, Wonder Boy III and Alex Kidd in Miracle World play well. | Compatibility varies by title; mapper selection is explicit. |
-| **Game Gear** | Planned platform work. | No general compatibility claim. |
-| **Sega CD** | **Synthetic** project-authored CUE/BIN discs with two generated-native MC68000 CPUs, CD/CDC and Word RAM behavior; **authentic BIOS execution** (your own BIOS image) with the generated-native boot and hand-off; **Sonic CD** (USA) is **playable** in the viewer from your own BIOS and disc, with **live CD music (CD-DA)** and a **deterministic RF5C164 PCM sound-effect stream mixed with it** (SEG-107; not verified by listening); its boot, title, level start, special-stage attract demo and intro sequence are additionally checked frame-for-frame at pre-registered checkpoints against an independent reference (checkpoint evidence of the generated execution; it is not a claim of complete compatibility); a second title has only **experimental observations**. A program can be played **interactively in the shared viewer** (keyboard/gamepad, pause, frame step, input recording and exact replay) and the launcher can **build a program from your own BIOS and disc** (experimental, ADR 0205: the build discovers the disc spans the console loads and executes by itself) or play a **verified prebuilt program** that you import. | **CD music (CD-DA) and the RF5C164 PCM stream are mixed on one timeline and delivered to the audio device** in the viewer (SEG-104, SEG-107; reference-checked, not verified by listening, level against CD-DA not established); **FM and PSG** from the main-side Z80 driver (generated-native, SEG-115) are summed into the same stream with the Genesis devices' own scaling - not reference-checked, not verified by listening, level against CD-DA/PCM not established. **Complete CUE-to-play compilation is not claimed**: the build reaches only the code it proved to come from the disc by running the console from reset with no input (generated, decompressed or later-input code stops with a typed stop, see [the Sega CD notes](docs/product/sega-cd-play.md)). BIOS, disc and programs are yours and are never bundled. |
-| **32X / Saturn** | Roadmap targets. | No working platform implementation claimed. |
+| **Genesis / Mega Drive** | Generated-native MC68000 **and Z80**, Genesis runtime, VDP, YM2612/PSG audio, SDL3 viewer, launcher library. Two three-button pads. Compatibility and Optimized build modes. Opt-in static-first Z80 image production in the CLI, `--z80-static 1` **(main only)**, not a guarantee for any title. | No six-button pad. Execution is 60 Hz even for the Europe region. Compatibility is incomplete for titles not listed here. |
+| **Master System** | Generated-native Z80, C11 runtime, VDP, PSG, controllers with the console Pause button, mapper support (declared explicitly), optional viewer with input recording (`--viewer-record`), launcher library. | The cartridge mapper is declared by you or a sidecar file, never guessed. Compatibility varies by title. |
+| **Sega CD** (experimental) | Authentic BIOS execution (your own BIOS) on generated-native Main and Sub MC68000 plus the main-side Z80; CD-DA, RF5C164 PCM, FM and PSG mixed in the viewer; **persistent internal backup RAM**; launcher import (BIOS + CUE), automatic build (Compatibility or File-first) or a verified prebuilt program; input recording and exact replay. | **Complete CUE-to-play compilation is not claimed.** Code that is generated, decompressed or reached only through input the build never saw stops with a typed stop. FM/PSG output is not reference-checked and the mix level against CD-DA/PCM is not established. No six-button pads or player 2 in the Sega CD viewer. BIOS, disc and programs are yours and never bundled. |
+| **Game Gear** | Planned. | No implementation and no compatibility claim. |
+| **32X / Saturn** | Roadmap targets. | No implementation and no compatibility claim. |
+
+All three implemented targets run CPU code that was **statically compiled to C ahead of time**. There is no interpreter, JIT or runtime opcode decoder.
 
 ### Known working games
 
-The following are concrete examples of games running through segarecomp, not
-just synthetic tests or title-screen demonstrations:
+These are games that were actually run through segarecomp. The **kind of evidence matters**, so each is labelled. "Maintainer-reported" means the maintainer played it and reports the result; it is
+**not** an independently replayed or automated validation, and no session recording is published. Build mode and exact image revision of those runs were not recorded.
 
-- **Genesis / Mega Drive:** **Sonic the Hedgehog** is beatable from start
-  to finish. **Sonic the Hedgehog 2**, **Sonic the Hedgehog 3**,
-  **Streets of Rage** and **Streets of Rage 3** are fully playable.
-  Many additional titles reach gameplay.
-- **Master System:** **Sonic the Hedgehog**, **Sonic the Hedgehog 2**,
-  **Wonder Boy III: The Dragon's Trap** and **Alex Kidd in Miracle World**
-  run well.
+| Platform | Game | Outcome | Evidence |
+| --- | --- | --- | --- |
+| Genesis | Sonic the Hedgehog | completed (beatable start to finish) | maintainer-reported |
+| Genesis | Sonic the Hedgehog 2, Sonic the Hedgehog 3, Streets of Rage, Streets of Rage 3 | fully playable (completion not claimed) | maintainer-reported |
+| Master System | Sonic the Hedgehog, Sonic the Hedgehog 2, Wonder Boy III: The Dragon's Trap, Alex Kidd in Miracle World | run well (completion not claimed) | maintainer-reported |
+| Sega CD | Sonic CD (USA) | completed, **including the special stages** | maintainer-reported; in addition its boot, title, START presses, first level, timed input, special-stage attract demo and intro are checked frame for frame against an independent reference at pre-registered checkpoints |
+| Sega CD | Earthworm Jim Special Edition | completed | maintainer-reported; in addition a deterministic scripted START-then-RIGHT route of 20,000 frames runs without a stop (no reference emulator was available) |
 
-These examples do not imply universal compatibility across all games or ROM
-revisions. See the [platform-by-platform documentation](platforms/README.md)
-for architecture and development details.
+Many more Genesis titles reach gameplay; they are not claimed here. These examples do not imply universal compatibility across games, revisions or regions. See the
+[platform documentation](platforms/README.md), the [ledger](docs/product/compatibility-ledger.md) for what is unknown or untested, and
+[Sega CD play](docs/product/sega-cd-play.md).
+
+## Native widescreen and game patches **(main only)**
+
+Everything in this section is merged after v0.7.0 and ships with the next release.
+
+* **Generic widescreen.** In the pause menu, **Widescreen Mode** is *Original*, *Extended Backgrounds* (Level 2: real background scenery beside the picture) or *Enhanced Widescreen* (Level 3: the
+  sprites the game already places beside it). **Widescreen Width** goes from 4:3 to 16:9; **Side Presentation** is *Comfort*, *Borders* or *Raw Extension*. Settings are per game and apply live.
+  Support is reported honestly, often as **Partial**. On Master System the extra columns only repeat scenery already on screen, and Level 3 does not make a game create objects outside its original window.
+* **Game patches (`.segapatch`, Genesis).** *Schema 1* is a verified data-only BPS delta. *Schema 2* adds a **trusted native C11 provider** written against a small public SDK, which can reconstruct scenery from the
+  game's own level data and redraw its original HUD at the widened picture's edge. A patch creates a separate **Patched** variant beside **Vanilla**, bound to one exact game image and to the exact package you approved.
+* **Game-specific work stays out of the engine.** Packages for Sonic 1, Sonic 2, Sonic 3 & Knuckles and Streets of Rage 2 exist, but they are maintained privately, **not shipped with any release**, and cover only
+  the scenes listed in the [ledger](docs/product/compatibility-ledger.json). Capabilities depend on the exact game, revision and package.
+* **Security.** A schema 2 patch is **executable code and is not sandboxed**. A hash proves the file is unchanged, not who wrote it or that it is safe. Install native patches only from sources you trust.
+
+More: [widescreen and patches overview](docs/product/widescreen-and-patches.md), [patch packages](docs/product/patch-packages.md), [native patch SDK](docs/product/native-patch-sdk.md).
 
 ## Download and try segarecomp
 
@@ -74,12 +92,19 @@ for Windows (`segarecomp-<version>-windows-x86_64.zip`), Linux
 (`-linux-x86_64.tar.gz`), and Apple Silicon macOS (`-macos-arm64.zip`).
 Check the downloaded archive against `SHA256SUMS.txt`.
 
-1. Extract the archive and open **Segarecomp** (`Segarecomp.exe`,
-   `Segarecomp.app` or `./Segarecomp`, depending on your platform).
-2. Drop a ROM into the window or select **Browse...**.
-3. On the game's page, choose the build settings below, then select
-   **Recompile & Play**. The first build can take several minutes for larger
-   images; cached builds are faster to launch.
+### From a game image you own to playing
+
+1. Extract the archive and open **Segarecomp** (`Segarecomp.exe`, `Segarecomp.app` or `./Segarecomp`, depending on your platform).
+2. Drop your ROM into the window or select **Browse...** (Genesis `.md/.bin/.gen/.smd` and Master System `.sms`, or a `.zip` holding exactly one). For Sega CD use **Import ROMs > Add Sega CD game...** with your BIOS image and the disc's CUE file.
+3. Open the game and choose the build settings below, then **Recompile & Play** (for Sega CD, **Build**, then **Play**). The first build can take several minutes (a Sega CD disc, much longer); cached builds start immediately.
+4. Play. **Esc** (or the gamepad's Back button) opens the pause menu: Quick Settings, Video & Display, Controls, Audio, System. Closing the window returns to the launcher.
+   Master System games need their cartridge mapper declared on the game's page.
+
+### Install a verified patch **(main only; Genesis)**
+
+1. Open the game's **Details** page and find the **Patches / Variants** card, then **Install patch...** and choose the `.segapatch` file.
+2. The package is verified against the game's exact image; a package for another game or revision is refused. For a native (schema 2) patch, read the sheet: author, license, source digest and "contains executable source, not sandboxed". **Approve only a patch you trust.**
+3. Select **Patched**, then **Build patched version**, then **Play Patched**. **Vanilla** stays untouched and playable. **Remove patch** returns to Vanilla and keeps your saves, recordings and settings.
 
 **Recommended first try (based on maintainer testing):**
 
@@ -91,6 +116,7 @@ Check the downloaded archive against `SHA256SUMS.txt`.
 - **Master System:** **Optimized** is also the default when the launcher's
   bundled product offers it (otherwise the game builds as Compatibility). This
   mode is still experimental. For headless builds, use `--aot-policy optimized`.
+- **Sega CD:** **Compatibility** is the long-established default; **File-first (structural)** compiles more of the disc ahead of time and helps when a title stops at an uncompiled entry after a menu choice.
 
 **Compatibility** is an explicit choice under **Build mode** and remains the
 conservative fallback if an optimized build fails or a game behaves incorrectly.
@@ -100,9 +126,9 @@ restart in Compatibility for its supported unadmitted-code stop. These are
 recommendations for what to try first, not guarantees for every game.
 
 The packages include the compiler (a pinned Zig toolchain, used to compile generated
-C) and SDL3. **No ROMs are included**; use only software you are legally entitled
+C) and SDL3. **No ROMs, BIOS files or disc images are included**; use only software you are legally entitled
 to analyze. These are experimental builds: the launcher recognizes Genesis/Mega
-Drive and Master System images. Several games already work well (see
+Drive and Master System images, plus Sega CD from your own BIOS and CUE. Several games already work well (see
 [Known working games](#known-working-games)), while others may reach gameplay,
 stop at unsupported behavior or fail to build.
 An image without compatibility metadata may be labelled **Compatibility unknown**;
@@ -110,8 +136,12 @@ An image without compatibility metadata may be labelled **Compatibility unknown*
 
 ### Launcher controls and useful options
 
-- **Controls:** arrow keys, Z/X/C for A/B/C, Return for Start and Escape to quit.
-  There is no key remapping yet.
+- **Controls:** by default arrow keys, Z/X/C for A/B/C and Return for Start (Genesis); Master System uses Z/X for buttons 1/2 and P for the console Pause. **Keys and gamepad buttons can be remapped** on the pause
+  menu's **Controls** page (Player 1 and Player 2, fresh-press capture, duplicate-owner warning, restore defaults), and the menu key is rebindable (Esc always works). Genesis is a **three-button** pad; there is no
+  six-button X/Y/Z/Mode input. Other in-game keys: **F11** fullscreen, **F12** saves a PNG of the **game picture** (source pixels, not the effects or the widescreen extension) to `Pictures/Segarecomp`,
+  **F3** cycles the performance overlay **(main only)**. Audio volume and mute are on the Audio page; the output device follows the OS. Controller trouble: Settings > Input Diagnostics.
+- **Recording and replay:** Sega CD sessions can be recorded and replayed exactly from the game's details page; the Master System viewer records with `--viewer-record`. The Genesis viewer has no input recording.
+- **Sega CD saves:** the internal backup RAM persists between sessions as protected user data that cleanup, rebuilds and removing the game never delete.
 - **Genesis region:** USA NTSC, Japan NTSC or Europe PAL. This currently changes
   the version register only; execution remains **60 Hz** even when Europe is
   selected, and the launcher indicates that 50 Hz is unsupported. The default
