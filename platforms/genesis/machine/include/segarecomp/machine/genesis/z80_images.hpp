@@ -64,7 +64,7 @@ struct Image {
   Digest signature{};
   std::array<std::uint8_t, kRamBytes> ram{};  // the snapshot the image was compiled from
   Derivation derivation = Derivation::runnable_epoch_snapshot;
-  std::string proof;  // static_reconstruction only: the strongest proof mechanism ("rom_stores", "rom_copy", "kosinski")
+  std::string proof;  // static_reconstruction only: the name of the strongest proof mechanism (static_proof_name of z80_static_producer.hpp)
 };
 
 enum class AddOutcome : std::uint8_t {
