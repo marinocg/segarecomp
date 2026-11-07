@@ -1733,6 +1733,17 @@ set_property(TEST genesis_rewind_test APPEND PROPERTY LABELS full)
 set_property(TEST genesis_rewind_test PROPERTY TIMEOUT 900)
 set_property(TEST genesis_rewind_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST genesis_rewind_test APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
+# SEG-131 (ADR 0278): the rewind surface in a real viewer process (keyboard path end to end: confirm restores an earlier moment, cancel changes nothing).
+add_test(NAME genesis_rewind_session_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_rewind_session_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_rewind_session_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_rewind_session_test PROPERTY TIMEOUT 900)
+# SEG-131 (ADR 0278): the save-state and rewind screens at the review window sizes (720x520 .. 2560x1440), synthetic art and a fake provider.
+if(TARGET sv_state_gallery)
+  add_test(NAME sv_state_gallery_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/sv_state_gallery_test.py $<TARGET_FILE:sv_state_gallery>)
+  set_property(TEST sv_state_gallery_test APPEND PROPERTY LABELS full)
+  set_property(TEST sv_state_gallery_test PROPERTY TIMEOUT 600)
+endif()
 # SEG-131 (ADR 0278): reversible Genesis machine snapshots (save states / rewind): restore reproduces the future (CPU, VDP, Z80, YM2612, PSG, mixer, SRAM/EEPROM), corruption and mismatches are refused without mutation.
 add_test(NAME genesis_snapshot_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_snapshot_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})

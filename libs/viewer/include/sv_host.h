@@ -108,6 +108,9 @@ void sv_host_stop_screen(SvHost *host, const char *title, const char *detail);
  * accurate disabled Save State / Load State / Rewind rows. The provider is called only from sv_host_service (the adapter's snapshot barrier). */
 void sv_host_set_state_provider(SvHost *host, const SvStateProvider *provider);
 /* Test/automation seams: run quick save / quick load / the rewind surface as the F5 / F8 / F7 keys do. Return 0 when the action ran (success or a reported failure). */
+/* SEG-131: opens the visual rewind surface (the F7 key, the pause-menu row and the two-trigger shortcut all call this). The guest is frozen while it is open; it
+ * returns 1 when the player confirmed a moment and the adapter restored it (the game then continues from it), 0 when it was cancelled, unavailable or failed. */
+int sv_host_open_rewind(SvHost *host);
 int sv_host_quick_save(SvHost *host);
 int sv_host_quick_load(SvHost *host);
 /* Transient on-screen message (screenshot saved, binding changed, ...). */

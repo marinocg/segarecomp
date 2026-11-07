@@ -433,13 +433,13 @@ static void add_state_rows(SvHost *h, SvPage *p) {
   const char *none = "Save states are not available for this system: only the Genesis has whole-machine states so far.";
   item = sv_page_add(p, SV_ITEM_BUTTON, I_STATE_SAVE, "Save State");
   if (item != NULL) {
-    sv_item_set_icon(item, "save");
+    sv_item_set_icon(item, "storage");
     if (states_ok && h->state.save_slot != NULL) sv_item_set_hint(item, "Saves the whole machine to the quick slot or one of five numbered slots. Quick save: F5.");
     else sv_item_disable(item, h->has_state ? (why[0] != '\0' ? why : "Save states are not available right now.") : none);
   }
   item = sv_page_add(p, SV_ITEM_BUTTON, I_STATE_LOAD, "Load State");
   if (item != NULL) {
-    sv_item_set_icon(item, "load");
+    sv_item_set_icon(item, "import");
     if (states_ok && h->state.load_slot != NULL) sv_item_set_hint(item, "Replaces the running game with a saved state after you confirm. Quick load: F8.");
     else sv_item_disable(item, h->has_state ? (why[0] != '\0' ? why : "Save states are not available right now.") : none);
   }
@@ -447,7 +447,7 @@ static void add_state_rows(SvHost *h, SvPage *p) {
   if (item != NULL) {
     char rewind_why[96] = "";
     const int ok = h->has_state && h->state.rewind_available != NULL && h->state.history_count != NULL && h->state.rewind_available(h->state.ctx, rewind_why, sizeof rewind_why);
-    sv_item_set_icon(item, "rewind");
+    sv_item_set_icon(item, "reset");
     if (ok) sv_item_set_hint(item, "Browse the last moments of play as pictures and resume from one of them. Rewind: F7.");
     else sv_item_disable(item, h->has_state && rewind_why[0] != '\0' ? rewind_why : "Rewind is not available for this system yet.");
   }

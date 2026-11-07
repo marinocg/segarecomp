@@ -334,7 +334,9 @@ static void draw_item(SvHost *h, const SvPage *page, int idx, int x, int y, int 
         }
         break;
       }
-      case SV_ITEM_BUTTON: break;
+      case SV_ITEM_BUTTON:   /* SEG-131: a slot row shows its state ("12:34 played", "Empty") at the right */
+        if (it->id >= I_SLOT && it->id < I_SLOT + SV_STATE_SLOTS && it->text[0] != '\0') text_right(h, u, right, ty, vw + w / 6, enabled ? K_TEXT2 : K_DIM, it->text);
+        break;
     }
   }
 }
@@ -442,6 +444,172 @@ static void draw_slot_preview(SvHost *h, const SvPage *page, int x, int y, int w
   } else if (info->damaged && info->note[0] != '\0') {
     text_in(h, SV_FONT_BODY, u, x, py, w, K_ERR, info->note);
   }
+}
+
+
+/* ---- SEG-131: the visual rewind surface ----
+ * A full-window dark surface in the project's blue/cyan pixel style: the game picture shrinks into a central preview (native aspect, letterboxed, nearest-neighbour
+ * pixels), a horizontally scrolling timeline of real historical pictures runs below it (oldest left, NOW right, the selected card larger), and the footer says how to
+ * navigate. Nothing here reads a machine: pictures are the provider's thumbnails and the host's own last presented frame. */
+
+static SDL_Texture *rewind_thumb(SvHost *h, SvRewindUi *ui, int index) {
+  const SvRewindEntry *e;
+  if (index < 0 || index >= ui->count || ui->tex == NULL) return NULL;
+  e = &ui->entries[index];
+  if (e->thumb.w <= 0 || e->thumb.h <= 0 || e->thumb.rgb565 == NULL) return NULL;
+  if (ui->tex[index] == NULL) {
+    ui->tex[index] = SDL_CreateTexture(h->renderer, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STATIC, e->thumb.w, e->thumb.h);
+    if (ui->tex[index] != NULL) {
+      SDL_SetTextureScaleMode(ui->tex[index], SDL_SCALEMODE_NEAREST);
+      SDL_UpdateTexture(ui->tex[index], NULL, e->thumb.rgb565, e->thumb.w * 2);
+    }
+  }
+  return ui->tex[index];
+}
+
+/* A picture (a moment's thumbnail, or the live NOW picture) fitted and letterboxed inside box (x, y, w, h). */
+static void rewind_picture(SvHost *h, SvRewindUi *ui, int index, int x, int y, int w, int hh) {
+  if (index >= ui->count) { sv_host_draw_picture(h, (float)x, (float)y, (float)w, (float)hh); return; }
+  {
+    SDL_Texture *tex = rewind_thumb(h, ui, index);
+    const SvRewindEntry *e = &ui->entries[index];
+    if (tex != NULL) {
+      const SvRect fit = sv_layout_dest(w, hh, e->thumb.w, e->thumb.h, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+      SDL_FRect d;
+      d.x = (float)(x + fit.x); d.y = (float)(y + fit.y); d.w = (float)fit.w; d.h = (float)fit.h;
+      SDL_RenderTexture(h->renderer, tex, NULL, &d);
+    } else {
+      sv_host_fill(h, x, y, w, hh, K_FIELD);   /* an entry without a thumbnail is a plain dark card, never a stale picture */
+    }
+  }
+}
+
+static void rewind_cues(SvHost *h, const SvRewindLayout *L, int u, int moment) {
+  const int pad_mode = h->last_input_pad, nin = pad_mode && nintendo_pad_present(h);
+  const SDL_Color green = {48, 176, 120, 255}, red = {214, 70, 78, 255};
+  const int cy = L->footer.y + L->footer.h / 2, margin = L->preview_area.x;
+  int x = L->cancel_button.x - 14 * u;
+  char hint[96];
+  /* physical-position meaning of the face buttons: south confirms, east cancels; the printed letter follows the layout (A/B on Xbox, B/A on Nintendo) */
+  x = draw_cue(h, x, cy, u, pad_mode, pad_mode ? (nin ? "A" : "B") : "Esc", red, "Cancel");
+  x = draw_cue(h, x - 14 * u, cy, u, pad_mode, pad_mode ? (nin ? "B" : "A") : "Enter", green, moment ? "Restore" : "Resume");
+  snprintf(hint, sizeof hint, "%s", pad_mode ? "D-Pad Browse    LB/RB Jump" : "Left/Right Browse    PgUp/PgDn Jump");
+  if (x - 14 * u - sv_ui_text_w(SV_FONT_BODY, u, hint) > margin) sv_ui_text(h, SV_FONT_BODY, u, margin, cy - 7 * u, K_TEXT2, hint);
+}
+
+static void rewind_button(SvHost *h, const SvRect *r, int u, const char *label, int primary, int enabled) {
+  const SDL_Color edge = primary ? K_SEL_EDGE : K_ROW_EDGE, fill = primary ? K_SEL : K_ROW;
+  sv_ui_chamfer(h, r->x, r->y, r->w, r->h, 2 * u, enabled ? edge : K_ROW_EDGE);
+  sv_ui_chamfer(h, r->x + u, r->y + u, r->w - 2 * u, r->h - 2 * u, u, enabled ? fill : K_FIELD);
+  sv_ui_text(h, SV_FONT_BODY, u, r->x + (r->w - sv_ui_text_w(SV_FONT_BODY, u, label)) / 2, text_top(r->y, r->h, u), enabled ? K_WHITE : K_DIM, label);
+}
+
+void sv_draw_rewind(SvHost *h, int out_w, int out_h) {
+  SvRewindUi *ui = h->rewind;
+  SvRewindLayout *L;
+  int u, i, lh, moment, pic_w, pic_h, selected;
+  float t, e;
+  char label[24], text[160];
+  if (ui == NULL) return;
+  L = &ui->layout;
+  u = sv_host_ui_scale(out_w, out_h);
+  lh = sv_ui_line_h(SV_FONT_BODY, u);
+  selected = ui->model.selected;
+  pic_w = h->last_w > 0 ? h->last_w : 320;
+  pic_h = h->last_h > 0 ? h->last_h : 224;
+  if (selected < ui->count && ui->entries[selected].thumb.w > 0) { pic_w = ui->entries[selected].thumb.w; pic_h = ui->entries[selected].thumb.h; }
+  sv_rewind_layout(L, out_w, out_h, u, &ui->model, pic_w, pic_h);
+  moment = sv_rewind_selection_is_moment(&ui->model);
+  t = ui->anim < 0.0f ? 0.0f : (ui->anim > 1.0f ? 1.0f : ui->anim);
+  e = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+
+  sv_host_fill(h, 0, 0, out_w, out_h, (SDL_Color){3, 9, 24, (Uint8)(238.0f * e)});
+
+  /* the live picture travels between the full-window picture and the preview; at rest, a historical selection shows its own thumbnail instead */
+  {
+    const SvRect full = sv_layout_dest(out_w, out_h, h->last_w > 0 ? h->last_w : 320, h->last_h > 0 ? h->last_h : 224, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+    const SvRect to = L->preview;
+    const int x = (int)((float)full.x + (float)(to.x - full.x) * e), y = (int)((float)full.y + (float)(to.y - full.y) * e);
+    const int w = (int)((float)full.w + (float)(to.w - full.w) * e), hh = (int)((float)full.h + (float)(to.h - full.h) * e);
+    if (t < 1.0f || !moment || ui->closing == 2) {   /* (after a restore the entries' pictures belong to the discarded future: only the live picture is drawn) */
+      sv_host_draw_picture(h, (float)x, (float)y, (float)w, (float)hh);
+    } else {
+      rewind_picture(h, ui, selected, to.x, to.y, to.w, to.h);
+    }
+    if (t >= 1.0f) {   /* crisp outline of the preview */
+      sv_ui_chamfer(h, to.x - 3 * u, to.y - 3 * u, to.w + 6 * u, 3 * u, u, K_SEL_EDGE);
+      sv_host_fill(h, to.x - 3 * u, to.y + to.h, to.w + 6 * u, 3 * u, K_SEL_EDGE);
+      sv_host_fill(h, to.x - 3 * u, to.y, 3 * u, to.h, K_SEL_EDGE);
+      sv_host_fill(h, to.x + to.w, to.y, 3 * u, to.h, K_SEL_EDGE);
+    }
+  }
+  if (t < 0.9f || ui->closing == 2) return;   /* the chrome appears as the picture settles, and is gone the moment a restore replaced the history it shows */
+
+  /* header */
+  sv_host_fill(h, 0, 0, out_w, L->header.h, K_HEADER);
+  sv_host_fill(h, 0, L->header.h - u, out_w, u, K_RULE);
+  text_bold(h, u + (L->header.h >= 56 ? 1 : 0), L->preview_area.x, text_top(0, L->header.h, u + (L->header.h >= 56 ? 1 : 0)), K_WHITE, "REWIND");
+  {
+    const int title_w = sv_ui_text_w(SV_FONT_BODY, u + (L->header.h >= 56 ? 1 : 0), "REWIND") + 18 * u;
+    const char *sub = moment ? "Enter restores the selected moment" : "Browse back through the last moments";
+    text_in(h, SV_FONT_BODY, u, L->preview_area.x + title_w, text_top(0, L->header.h, u), out_w / 2 - title_w, K_TEXT2, sub);
+    if (ui->count > 0) {
+      sv_rewind_label(ui->span_ms, 0, label, sizeof label);
+      snprintf(text, sizeof text, "%d moments - last %s", ui->count, label + 1);
+      text_right(h, u, out_w - L->preview_area.x, text_top(0, L->header.h, u), out_w / 2, K_FOCUS, text);
+    }
+  }
+  if (ui->note[0] != '\0') text_in(h, SV_FONT_BODY, u, L->preview_area.x, L->header.h + 2 * u, out_w - 2 * L->preview_area.x, K_WARN, ui->note);
+
+  /* what the preview shows */
+  {
+    const int y = L->preview_area.y + L->preview_area.h + 2 * u;
+    if (moment) {
+      sv_rewind_label(ui->entries[selected].age_ms, 0, label, sizeof label);
+      snprintf(text, sizeof text, "%s  -  moment %d of %d", label, selected + 1, ui->count);
+    } else {
+      snprintf(text, sizeof text, "NOW  -  where you are");
+    }
+    text_bold(h, u, (out_w - sv_ui_text_w(SV_FONT_BODY, u, text)) / 2, y, moment ? K_WHITE : K_FOCUS, text);
+    if (ui->count == 0) {
+      const char *none = "No earlier moments yet. Keep playing for a moment, then try again.";
+      sv_ui_text(h, SV_FONT_BODY, u, (out_w - sv_ui_text_w(SV_FONT_BODY, u, none)) / 2, y + lh + 2 * u, K_TEXT2, none);
+    }
+  }
+
+  /* timeline */
+  for (i = 0; i < L->card_count; ++i) {
+    const SvRewindCard *c = &L->cards[i];
+    const int now = c->index >= ui->count, sel = c->selected, hover = c->index == ui->hover;
+    const int b = sel ? 3 * u : u;
+    const SDL_Color edge = sel ? K_SEL_EDGE : (hover ? K_LIGHT : (now ? K_CYAN : K_ROW_EDGE));
+    if (sel) sv_ui_chamfer(h, c->rect.x - b - 2 * u, c->rect.y - b - 2 * u, c->rect.w + 2 * b + 4 * u, c->rect.h + 2 * b + 4 * u, 3 * u, K_SEL_SOFT);
+    sv_ui_chamfer(h, c->rect.x - b, c->rect.y - b, c->rect.w + 2 * b, c->rect.h + 2 * b, 2 * u, edge);
+    sv_host_fill(h, c->rect.x, c->rect.y, c->rect.w, c->rect.h, K_OUTLINE);
+    rewind_picture(h, ui, c->index, c->rect.x, c->rect.y, c->rect.w, c->rect.h);
+    if (now) sv_rewind_label(0, 1, label, sizeof label);
+    else sv_rewind_label(ui->entries[c->index].age_ms, 0, label, sizeof label);
+    {
+      const int lw = sv_ui_text_w(SV_FONT_BODY, u, label);
+      const SDL_Color lc = now ? K_FOCUS : (sel ? K_WHITE : K_TEXT2);
+      if (sel || now) text_bold(h, u, c->rect.x + (c->rect.w - lw) / 2, L->label_y, lc, label);
+      else sv_ui_text(h, SV_FONT_BODY, u, c->rect.x + (c->rect.w - lw) / 2, L->label_y, lc, label);
+    }
+  }
+  if (L->more_left) chevron(h, L->preview_area.x / 2, L->timeline.y + (L->timeline.h - L->label_h) / 2 - 3 * u, -1, u, K_FOCUS);
+  if (L->more_right) chevron(h, out_w - L->preview_area.x / 2 - 4 * u, L->timeline.y + (L->timeline.h - L->label_h) / 2 - 3 * u, 1, u, K_FOCUS);
+
+  /* footer */
+  sv_host_fill(h, 0, L->footer.y, out_w, L->footer.h, K_HEADER);
+  sv_host_fill(h, 0, L->footer.y, out_w, u, K_RULE);
+  if (ui->error[0] != '\0') {
+    const int ew = sv_ui_text_w(SV_FONT_BODY, u, ui->error);
+    sv_host_fill(h, (out_w - ew) / 2 - 8 * u, L->footer.y - lh - 8 * u, ew + 16 * u, lh + 6 * u, K_DANGER_SOFT);
+    sv_ui_text(h, SV_FONT_BODY, u, (out_w - ew) / 2, L->footer.y - lh - 5 * u, K_ERR, ui->error);
+  }
+  rewind_button(h, &L->cancel_button, u, "Cancel", 0, 1);
+  rewind_button(h, &L->restore_button, u, moment ? "Restore" : "Resume", 1, 1);
+  rewind_cues(h, L, u, moment);
 }
 
 /* ---- header ---- */

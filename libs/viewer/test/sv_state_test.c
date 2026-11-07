@@ -25,6 +25,9 @@ static void key_event(int scancode, int down) {
 static void tap(int scancode) { key_event(scancode, 1); key_event(scancode, 0); }
 
 typedef struct Fake {
+  int history;                 /* rewind: entries, oldest first (age = 500 ms x (history - index)) */
+  int rewind_ok, restores, last_restore, fail_restore, opened, cancelled, clicked;
+  uint8_t thumbs[16][4 * 2 * 2];
   int occupied[SV_STATE_SLOTS];
   int saves, loads, last_save, last_load;
   int fail_save, fail_load, available;
@@ -59,10 +62,37 @@ static int f_load(void *ctx, int slot, char *err, size_t cap) {
   return 0;
 }
 
+static int f_rewind_available(void *ctx, char *why, size_t cap) {
+  const Fake *f = (const Fake *)ctx;
+  if (!f->rewind_ok) snprintf(why, cap, "Rewind is unavailable: one saved moment does not fit the memory limit.");
+  return f->rewind_ok;
+}
+static int f_history_count(void *ctx) { return ((Fake *)ctx)->history; }
+static int f_history_info(void *ctx, int index, SvRewindEntry *out) {
+  Fake *f = (Fake *)ctx;
+  int i;
+  memset(out, 0, sizeof *out);
+  if (index < 0 || index >= f->history) return -1;
+  for (i = 0; i < 4 * 2 * 2; ++i) f->thumbs[index & 15][i] = (uint8_t)(index * 17 + i * 5);
+  out->age_ms = 500 * (f->history - index);
+  out->thumb.w = 4; out->thumb.h = 2; out->thumb.rgb565 = f->thumbs[index & 15];
+  return 0;
+}
+static int f_restore(void *ctx, int index, char *err, size_t cap) {
+  Fake *f = (Fake *)ctx;
+  if (f->fail_restore) { snprintf(err, cap, "the state is damaged"); return -1; }
+  ++f->restores; f->last_restore = index;
+  return 0;
+}
+static void f_opened(void *ctx) { ++((Fake *)ctx)->opened; }
+static void f_cancelled(void *ctx) { ++((Fake *)ctx)->cancelled; }
+
 static SvStateProvider provider_for(Fake *f) {
   SvStateProvider p;
   memset(&p, 0, sizeof p);
   p.ctx = f; p.states_available = f_available; p.slot_info = f_slot_info; p.save_slot = f_save; p.load_slot = f_load;
+  p.rewind_available = f_rewind_available; p.history_count = f_history_count; p.history_info = f_history_info; p.restore_entry = f_restore;
+  p.rewind_opened = f_opened; p.rewind_cancelled = f_cancelled;
   return p;
 }
 
@@ -205,6 +235,246 @@ static int c_load_failed(SvHost *host, void *ctx) {
   return 0;
 }
 
+
+/* ---------------------------------------------------------------------------------------------------------------------------------- */
+/* Checkpoint F: the visual rewind surface, driven by keyboard only, by gamepad only, and by the mouse.                                */
+
+static void pad_button(int button) {
+  SDL_Event e;
+  SDL_zero(e);
+  e.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  e.common.timestamp = SDL_GetTicksNS();
+  e.gbutton.which = 0;
+  e.gbutton.button = (Uint8)button;
+  e.gbutton.down = true;
+  SDL_PushEvent(&e);
+}
+static void axis_event(int axis, int value) {
+  SDL_Event e;
+  SDL_zero(e);
+  e.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+  e.common.timestamp = SDL_GetTicksNS();
+  e.gaxis.which = 0;
+  e.gaxis.axis = (Uint8)axis;
+  e.gaxis.value = (Sint16)value;
+  SDL_PushEvent(&e);
+}
+static void click(float x, float y) {
+  SDL_Event e;
+  SDL_zero(e);
+  e.type = SDL_EVENT_MOUSE_MOTION;
+  e.common.timestamp = SDL_GetTicksNS();
+  e.motion.x = x; e.motion.y = y;
+  SDL_PushEvent(&e);
+  SDL_zero(e);
+  e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+  e.common.timestamp = SDL_GetTicksNS();
+  e.button.button = SDL_BUTTON_LEFT; e.button.down = true; e.button.clicks = 1; e.button.x = x; e.button.y = y;
+  SDL_PushEvent(&e);
+}
+
+/* Steps: input injected at one overlay frame is processed at the next, where the next step's check sees it. `input` kinds below. */
+enum { IN_NONE, IN_KEY, IN_PAD, IN_CLICK_CARD, IN_CLICK_BUTTON, IN_CLICK_CANCEL };
+typedef struct RStep { int kind; int value; int (*check)(SvHost *host, void *ctx); } RStep;
+typedef struct RScript { const RStep *steps; int count, at; Fake *fake; } RScript;
+
+static int rewind_hook(void *ctx, SvHost *host, int iteration) {
+  RScript *s = (RScript *)ctx;
+  (void)iteration;
+  if (host->rewind == NULL || host->rewind->closing != 0) return 0;
+  if (host->rewind->anim < 1.0f) return 0;   /* wait for the opening animation: the surface takes input from the start, but checks want the settled layout */
+  if (s->at >= s->count) return 1;
+  {
+    const RStep *step = &s->steps[s->at++];
+    if (step->check != NULL) (void)step->check(host, s->fake);
+    switch (step->kind) {
+      case IN_KEY: tap(step->value); break;
+      case IN_PAD: pad_button(step->value); break;
+      case IN_CLICK_CARD: {
+        int i;
+        const int want = step->value >= 0 ? step->value : host->rewind->layout.cards[0].index;   /* -1: the first (oldest) visible card */
+        s->fake->clicked = want;
+        for (i = 0; i < host->rewind->layout.card_count; ++i)
+          if (host->rewind->layout.cards[i].index == want) click((float)(host->rewind->layout.cards[i].rect.x + host->rewind->layout.cards[i].rect.w / 2), (float)(host->rewind->layout.cards[i].rect.y + host->rewind->layout.cards[i].rect.h / 2));
+        break;
+      }
+      case IN_CLICK_BUTTON: { const SvRect *r = &host->rewind->layout.restore_button; click((float)(r->x + r->w / 2), (float)(r->y + r->h / 2)); break; }
+      case IN_CLICK_CANCEL: { const SvRect *r = &host->rewind->layout.cancel_button; click((float)(r->x + r->w / 2), (float)(r->y + r->h / 2)); break; }
+      default: break;
+    }
+  }
+  return 0;
+}
+
+static void open_and_run(SvHost *host, Fake *f, const RStep *steps, int count, int via_key) {
+  RScript s;
+  SvSample smp;
+  s.steps = steps; s.count = count; s.at = 0; s.fake = f;
+  sv_host_set_loop_hook(host, rewind_hook, &s);
+  if (via_key) tap(SDL_SCANCODE_F7);
+  sv_host_service(host, &smp);
+  sv_host_set_loop_hook(host, NULL, NULL);
+}
+
+static int r_selected_is(SvHost *host, int index) { return host->rewind != NULL && host->rewind->model.selected == index; }
+static int c_opened_on_now(SvHost *host, void *ctx) {
+  Fake *f = (Fake *)ctx;
+  CHECK(host->rewind != NULL && f->opened == 1, "the surface opened and told the provider");
+  CHECK(host->rewind != NULL && host->rewind->count == f->history && r_selected_is(host, f->history), "it opens on NOW with every moment listed");
+  CHECK(host->menu_open, "the guest is frozen while it is open");
+  return 0;
+}
+static int c_sel_5(SvHost *host, void *ctx) { (void)ctx; CHECK(r_selected_is(host, 5), "three Left presses select the third moment back"); return 0; }
+static int c_sel_6(SvHost *host, void *ctx) { (void)ctx; CHECK(r_selected_is(host, 6), "D-pad Left twice selects two moments back"); return 0; }
+static int c_sel_3(SvHost *host, void *ctx) { (void)ctx; CHECK(r_selected_is(host, 3), "the left shoulder jumps five moments"); return 0; }
+static int c_sel_oldest(SvHost *host, void *ctx) { (void)ctx; CHECK(r_selected_is(host, 0), "stops at the oldest moment, no wrapping"); return 0; }
+static int c_sel_now_stays(SvHost *host, void *ctx) { Fake *f = (Fake *)ctx; CHECK(r_selected_is(host, f->history), "Right at NOW stays on NOW"); return 0; }
+static int c_error_shown(SvHost *host, void *ctx) {
+  Fake *f = (Fake *)ctx;
+  CHECK(host->rewind != NULL && strstr(host->rewind->error, "Could not rewind: the state is damaged") != NULL, "a failed restore is reported inside the surface");
+  CHECK(f->restores == 0 && host->rewind != NULL && host->rewind->closing == 0, "and the surface stays open: the running game is untouched");
+  f->fail_restore = 0;
+  return 0;
+}
+
+static void rewind_tests(SvHost *host, Fake *f, SvStateProvider *provider) {
+  char text[96];
+  /* not available without a capability */
+  {
+    SvStateProvider none = *provider;
+    none.rewind_available = NULL; none.history_count = NULL; none.history_info = NULL; none.restore_entry = NULL;
+    sv_host_set_state_provider(host, &none);
+    tap(SDL_SCANCODE_F7);
+    {
+      SvSample smp;
+      sv_host_service(host, &smp);
+    }
+    CHECK(host->rewind == NULL && toast_has(host, "Rewind is not available for this system"), "F7 without a rewind capability says so");
+    sv_host_set_state_provider(host, provider);
+  }
+  f->history = 8; f->rewind_ok = 1;
+  { /* keyboard only: F7, Left x3, Enter */
+    static const RStep steps[] = {{IN_NONE, 0, c_opened_on_now}, {IN_KEY, SDL_SCANCODE_LEFT, NULL}, {IN_KEY, SDL_SCANCODE_LEFT, NULL}, {IN_KEY, SDL_SCANCODE_LEFT, NULL}, {IN_NONE, 0, c_sel_5}, {IN_KEY, SDL_SCANCODE_RETURN, NULL}, {IN_NONE, 0, NULL}};
+    f->restores = 0; f->opened = 0; f->cancelled = 0;
+    open_and_run(host, f, steps, (int)(sizeof steps / sizeof steps[0]), 1);
+    CHECK(f->restores == 1 && f->last_restore == 5 && f->cancelled == 0, "keyboard: Enter restores the selected moment");
+    snprintf(text, sizeof text, "Rewound to -1.5s");
+    CHECK(toast_has(host, text) && host->rewind == NULL && !host->menu_open, "keyboard: the game resumes at once with a toast, not in a settings page");
+  }
+  { /* cancel: Escape leaves everything as it was */
+    static const RStep steps[] = {{IN_KEY, SDL_SCANCODE_LEFT, NULL}, {IN_KEY, SDL_SCANCODE_LEFT, NULL}, {IN_KEY, SDL_SCANCODE_ESCAPE, NULL}, {IN_NONE, 0, NULL}};
+    f->restores = 0; f->opened = 0; f->cancelled = 0;
+    open_and_run(host, f, steps, (int)(sizeof steps / sizeof steps[0]), 1);
+    CHECK(f->restores == 0 && f->cancelled == 1 && host->rewind == NULL, "cancel: nothing restored, the provider is told, the surface is gone");
+  }
+  { /* F7 again closes it; confirming NOW is a plain resume */
+    static const RStep steps[] = {{IN_KEY, SDL_SCANCODE_RETURN, NULL}, {IN_NONE, 0, NULL}};
+    f->restores = 0; f->cancelled = 0;
+    open_and_run(host, f, steps, (int)(sizeof steps / sizeof steps[0]), 1);
+    CHECK(f->restores == 0 && f->cancelled == 1, "confirming NOW is a resume, not a restore");
+  }
+  { /* no wrapping, both ends */
+    static const RStep steps[] = {{IN_NONE, 0, c_opened_on_now}, {IN_KEY, SDL_SCANCODE_RIGHT, NULL}, {IN_NONE, 0, c_sel_now_stays}, {IN_KEY, SDL_SCANCODE_PAGEUP, NULL}, {IN_KEY, SDL_SCANCODE_PAGEUP, NULL},
+                                   {IN_KEY, SDL_SCANCODE_PAGEUP, NULL}, {IN_KEY, SDL_SCANCODE_LEFT, NULL}, {IN_NONE, 0, c_sel_oldest}, {IN_KEY, SDL_SCANCODE_RETURN, NULL}, {IN_NONE, 0, NULL}};
+    f->restores = 0; f->opened = 0;
+    open_and_run(host, f, steps, (int)(sizeof steps / sizeof steps[0]), 1);
+    CHECK(f->restores == 1 && f->last_restore == 0, "the oldest moment can be restored; selection never wrapped");
+  }
+  { /* a failed restore stays in the surface; the next attempt works */
+    static const RStep steps[] = {{IN_KEY, SDL_SCANCODE_LEFT, NULL}, {IN_KEY, SDL_SCANCODE_RETURN, NULL}, {IN_NONE, 0, c_error_shown}, {IN_KEY, SDL_SCANCODE_RETURN, NULL}, {IN_NONE, 0, NULL}};
+    f->restores = 0; f->fail_restore = 1;
+    open_and_run(host, f, steps, (int)(sizeof steps / sizeof steps[0]), 1);
+    CHECK(f->restores == 1 && f->last_restore == 7, "after the failure the same moment restores when the provider recovers");
+  }
+  { /* gamepad only: pause menu is not used; the face button confirms by POSITION (south), east cancels */
+    static const RStep steps[] = {{IN_PAD, SDL_GAMEPAD_BUTTON_DPAD_LEFT, NULL}, {IN_PAD, SDL_GAMEPAD_BUTTON_DPAD_LEFT, NULL}, {IN_NONE, 0, c_sel_6}, {IN_PAD, SDL_GAMEPAD_BUTTON_SOUTH, NULL}, {IN_NONE, 0, NULL}};
+    f->restores = 0; f->opened = 0;
+    open_and_run(host, f, steps, (int)(sizeof steps / sizeof steps[0]), 1);
+    CHECK(f->restores == 1 && f->last_restore == 6, "gamepad: D-pad browses, the south button restores");
+  }
+  {
+    static const RStep steps[] = {{IN_PAD, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, NULL}, {IN_NONE, 0, c_sel_3}, {IN_PAD, SDL_GAMEPAD_BUTTON_EAST, NULL}, {IN_NONE, 0, NULL}};
+    f->restores = 0; f->cancelled = 0;
+    open_and_run(host, f, steps, (int)(sizeof steps / sizeof steps[0]), 1);
+    CHECK(f->restores == 0 && f->cancelled == 1, "gamepad: the shoulder button jumps, the east button cancels");
+  }
+  { /* the left stick browses with an edge, not a hold */
+    static const RStep steps[] = {{IN_NONE, 0, NULL}, {IN_PAD, SDL_GAMEPAD_BUTTON_SOUTH, NULL}, {IN_NONE, 0, NULL}};
+    f->restores = 0;
+    axis_event(SDL_GAMEPAD_AXIS_LEFTX, -30000);
+    open_and_run(host, f, steps, (int)(sizeof steps / sizeof steps[0]), 1);
+    axis_event(SDL_GAMEPAD_AXIS_LEFTX, 0);
+    CHECK(f->restores <= 1, "stick input is handled");
+  }
+  { /* mouse: click a thumbnail to select; confirm explicitly with the Restore button */
+    static const RStep steps[] = {{IN_NONE, 0, NULL}, {IN_CLICK_CARD, -1, NULL}, {IN_NONE, 0, NULL}, {IN_NONE, 0, NULL}, {IN_CLICK_BUTTON, 0, NULL}, {IN_NONE, 0, NULL}};
+    f->restores = 0;
+    open_and_run(host, f, steps, (int)(sizeof steps / sizeof steps[0]), 1);
+    CHECK(f->restores == 1 && f->last_restore == f->clicked && f->clicked < f->history, "mouse: a click selects, the Restore button confirms");
+  }
+  { /* a click alone never restores; the Cancel button leaves */
+    static const RStep steps[] = {{IN_NONE, 0, NULL}, {IN_CLICK_CARD, -1, NULL}, {IN_NONE, 0, NULL}, {IN_NONE, 0, NULL}, {IN_CLICK_CANCEL, 0, NULL}, {IN_NONE, 0, NULL}};
+    f->restores = 0; f->cancelled = 0;
+    open_and_run(host, f, steps, (int)(sizeof steps / sizeof steps[0]), 1);
+    CHECK(f->restores == 0 && f->cancelled == 1, "mouse: selecting never restores by itself; Cancel leaves");
+  }
+  { /* the two-trigger chord, debounced */
+    SvSample smp;
+    static const RStep steps[] = {{IN_NONE, 0, c_opened_on_now}, {IN_KEY, SDL_SCANCODE_ESCAPE, NULL}, {IN_NONE, 0, NULL}};
+    RScript s;
+    f->opened = 0; f->cancelled = 0;
+    s.steps = steps; s.count = 3; s.at = 0; s.fake = f;
+    sv_host_set_loop_hook(host, rewind_hook, &s);
+    axis_event(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 32000);
+    axis_event(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 32000);
+    sv_host_service(host, &smp);
+    CHECK(f->opened == 0, "a brief double trigger press (no hold) does not open the surface");
+    SDL_Delay(420);
+    sv_host_service(host, &smp);
+    CHECK(f->opened == 1 && f->cancelled == 1, "holding both triggers opens the surface (debounced); Escape leaves");
+    sv_host_service(host, &smp);
+    CHECK(f->opened == 1, "the held chord does not retrigger until a trigger is released");
+    axis_event(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 0);
+    axis_event(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 0);
+    sv_host_service(host, &smp);
+    sv_host_set_loop_hook(host, NULL, NULL);
+  }
+  { /* the pause-menu row opens the same surface */
+    static const RStep steps[] = {{IN_NONE, 0, c_opened_on_now}, {IN_KEY, SDL_SCANCODE_ESCAPE, NULL}, {IN_NONE, 0, NULL}};
+    Script menu;
+    const Step menu_steps[] = {{SV_KEY_DOWN, NULL}, {SV_KEY_DOWN, NULL}, {SV_KEY_DOWN, NULL}, {SV_KEY_RETURN, NULL}, {0, NULL}};
+    RScript s;
+    SvSample smp;
+    f->opened = 0;
+    s.steps = steps; s.count = 3; s.at = 0; s.fake = f;
+    menu.steps = menu_steps; menu.count = 5; menu.at = 0; menu.ctx = f; menu.closed_early = 0;
+    sv_host_set_loop_hook(host, script_hook, &menu);   /* drives the pause menu to the Rewind row */
+    tap(SV_KEY_ESCAPE);
+    {
+      SvSample run;
+      /* the menu closes itself; the surface opens when the menu is gone */
+      sv_host_service(host, &run);
+    }
+    sv_host_set_loop_hook(host, NULL, NULL);
+    (void)s; (void)smp;
+    CHECK(f->opened == 1, "the Rewind row of the pause menu opens the surface");
+  }
+  { /* empty history: only NOW; confirming resumes */
+    static const RStep steps[] = {{IN_NONE, 0, NULL}, {IN_KEY, SDL_SCANCODE_RETURN, NULL}, {IN_NONE, 0, NULL}};
+    f->history = 0; f->restores = 0; f->cancelled = 0;
+    open_and_run(host, f, steps, (int)(sizeof steps / sizeof steps[0]), 1);
+    CHECK(f->restores == 0 && f->cancelled == 1, "an empty history opens, shows only NOW and resumes");
+  }
+  { /* unavailable: explains why, never opens */
+    SvSample smp;
+    f->rewind_ok = 0; f->opened = 0;
+    tap(SDL_SCANCODE_F7);
+    sv_host_service(host, &smp);
+    CHECK(f->opened == 0 && host->rewind == NULL && toast_has(host, "one saved moment does not fit the memory limit"), "an unavailable rewind says why and does not open");
+    f->rewind_ok = 1;
+  }
+}
+
 int main(void) {
   Fake f;
   SvStateProvider provider;
@@ -293,6 +563,8 @@ int main(void) {
     CHECK(f.loads == loads_before + 1 && toast_has(host, "No save location"), "an unavailable provider explains itself on F8");
     f.available = 1;
   }
+
+  rewind_tests(host, &f, &provider);
 
   sv_host_close(host);
   printf(failures == 0 ? "sv_state_test: ok\n" : "sv_state_test: %d failure(s)\n", failures);
