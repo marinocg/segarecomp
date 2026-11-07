@@ -57,9 +57,9 @@ immutable cartridge bytes. Goal: for fully provable cases one Z80 compilation ge
 
 ## Falsification actually run (project-authored fixtures; real consumer route)
 
-For 23 fixtures `--z80-static 1` is compared with `--z80-static 0`: generated Z80 C and registry, linked program, bounded-run sound/execution
-summary and audio status are **byte-/value-identical in all 23**, including the fallback cases (never-activated image, region-gated upload,
-image after sound fault) and the refused shapes (unknown count/source/destination pointer, beyond-RAM raw and decompressed output, unrecognised
+For 19 fixtures `--z80-static 1` is compared with `--z80-static 0`: generated Z80 C and registry, linked program, bounded-run sound/execution
+summary and audio status are **byte-/value-identical in all 19**, including the fallback cases (never-activated image, region-gated upload,
+structural mutation) and the refused shapes (unknown count/source/destination pointer, beyond-RAM raw and decompressed output, unrecognised
 decompressor, valid stream into work RAM, computed upload, structural mutation). Fully provable fixtures take exactly one Z80 compilation
 generation, one discovery run, one verification run, zero reused units. The Kosinski fixtures execute the reference routine in the legacy build and
 compare it to the producer's decode of the same stream: equal. Repeated builds with 1/4/8 jobs are byte-identical.

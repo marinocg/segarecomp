@@ -49,7 +49,7 @@ Refusal classes (number of images showing it): decompression_unproven 17, window
 z80_store_value_unknown 3, z80_store_form_unsupported 2, z80_store_unknown_address 2, ambiguous_epoch_order 1. Walk size: at most 19,188 steps;
 per image median 82 ms, maximum 224 ms including process start and a ROM read (the producer alone is 2-104 ms inside a build).
 
-## Synthetic fixtures (CI): 23 project-authored fixtures, legacy vs static
+## Synthetic fixtures (CI): 19 project-authored build-differential fixtures (plus the producer-only fixtures), legacy vs static
 
 Every fixture's generated Z80 C, registry and linked program are byte-identical and the bounded-run sound/execution summary is identical, including
 the fallbacks (never-activated image, region-gated upload, structural mutation) and the refused shapes. Fully provable fixtures: exactly one Z80
