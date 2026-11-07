@@ -363,17 +363,16 @@ static int all_zero(const uint8_t *p, size_t n) { size_t i; for (i = 0; i < n; +
 
 static int image_hash_of(uint32_t ordinal, uint8_t out[32]) {
   if (ordinal == 0U) { memset(out, 0, 32U); return 1; }
-  if (ordinal > genesis_z80_image_count) return 0;
-  memcpy(out, genesis_z80_image_content_hashes[ordinal - 1U], 32U);
-  return 1;
+  return genesis_z80_image_content_hash(ordinal, out);
 }
 
 /* 1 and the ordinal for a stored hash (0 = none); 0 when this program has no such image. */
 static int ordinal_of_hash(const uint8_t hash[32], uint32_t *ordinal) {
   uint32_t i;
+  uint8_t candidate[32];
   if (all_zero(hash, 32U)) { *ordinal = 0U; return 1; }
-  for (i = 0U; i < genesis_z80_image_count; ++i)
-    if (memcmp(genesis_z80_image_content_hashes[i], hash, 32U) == 0) { *ordinal = i + 1U; return 1; }
+  for (i = 1U; i <= genesis_z80_image_count; ++i)
+    if (genesis_z80_image_content_hash(i, candidate) && memcmp(candidate, hash, 32U) == 0) { *ordinal = i; return 1; }
   return 0;
 }
 
@@ -783,6 +782,37 @@ GenesisSnapshotStatus genesis_snapshot_inspect(const uint8_t *data, size_t size,
 /* ---------------------------------------------------------------------------------------------------------------------------------- */
 /* Restore: stage everything, validate everything, then commit with plain copies.                                                     */
 
+/* Everything about a container that can be decided without staging a single device: structure, integrity, identity, region, machine profile and
+ * execution fingerprint. Shared by restore and by the slot lists (which must tell a usable state from a foreign one without mutating anything). */
+static GenesisSnapshotStatus precheck(const GenesisSnapshotMachine *machine, const GenesisSnapshotIdentity *identity, const uint8_t *data, size_t size,
+                                      GenesisSnapshotInfo *info, SectionView views[SEC_LAST + 1U]) {
+  GenesisSnapshotStatus status;
+  uint8_t fp[32];
+  uint16_t flags;
+  if (machine == NULL || machine->runtime == NULL || identity == NULL || data == NULL) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
+  if ((machine->z80 == NULL) != (machine->audio == NULL)) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
+#ifndef SEGARECOMP_GENESIS_SOUND
+  if (machine->z80 != NULL) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
+#endif
+  status = parse_container(data, size, info, views);
+  if (status != GENESIS_SNAPSHOT_OK) return status;
+  if (memcmp(info->source_sha256, identity->source_sha256, 32U) != 0 || memcmp(info->variant_sha256, identity->variant_sha256, 32U) != 0)
+    return GENESIS_SNAPSHOT_WRONG_CARTRIDGE;
+  flags = genesis_snapshot_machine_flags(machine);
+  exec_fingerprint(flags, fp);
+  if (info->machine_flags != flags || info->region_profile != machine->runtime->region_profile || memcmp(info->exec_fingerprint, fp, 32U) != 0)
+    return GENESIS_SNAPSHOT_INCOMPATIBLE;
+  if (info->state_schema != GENESIS_SNAPSHOT_STATE_SCHEMA) return GENESIS_SNAPSHOT_INCOMPATIBLE;
+  return GENESIS_SNAPSHOT_OK;
+}
+
+GenesisSnapshotStatus genesis_snapshot_validate(const GenesisSnapshotMachine *machine, const GenesisSnapshotIdentity *identity, const uint8_t *data, size_t size,
+                                                GenesisSnapshotInfo *info) {
+  GenesisSnapshotInfo local;
+  SectionView views[SEC_LAST + 1U];
+  return precheck(machine, identity, data, size, info != NULL ? info : &local, views);
+}
+
 GenesisSnapshotStatus genesis_snapshot_restore(const GenesisSnapshotMachine *machine, const GenesisSnapshotIdentity *identity,
                                                const uint8_t *data, size_t size) {
   GenesisSnapshotInfo info;
@@ -790,7 +820,6 @@ GenesisSnapshotStatus genesis_snapshot_restore(const GenesisSnapshotMachine *mac
   GenesisSnapshotStatus status;
   GenesisRuntime *stage_rt = NULL;
   uint8_t *stage_storage = NULL;
-  uint8_t fp[32];
   uint16_t flags;
   Reader r;
 #ifdef SEGARECOMP_GENESIS_SOUND
@@ -798,20 +827,9 @@ GenesisSnapshotStatus genesis_snapshot_restore(const GenesisSnapshotMachine *mac
   GenesisAudio *stage_audio = NULL;
 #endif
 
-  if (machine == NULL || machine->runtime == NULL || identity == NULL || data == NULL) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
-  if ((machine->z80 == NULL) != (machine->audio == NULL)) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
-#ifndef SEGARECOMP_GENESIS_SOUND
-  if (machine->z80 != NULL) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
-#endif
-  status = parse_container(data, size, &info, views);
+  status = precheck(machine, identity, data, size, &info, views);
   if (status != GENESIS_SNAPSHOT_OK) return status;
-  if (memcmp(info.source_sha256, identity->source_sha256, 32U) != 0 || memcmp(info.variant_sha256, identity->variant_sha256, 32U) != 0)
-    return GENESIS_SNAPSHOT_WRONG_CARTRIDGE;
   flags = genesis_snapshot_machine_flags(machine);
-  exec_fingerprint(flags, fp);
-  if (info.machine_flags != flags || info.region_profile != machine->runtime->region_profile || memcmp(info.exec_fingerprint, fp, 32U) != 0)
-    return GENESIS_SNAPSHOT_INCOMPATIBLE;
-  if (info.state_schema != GENESIS_SNAPSHOT_STATE_SCHEMA) return GENESIS_SNAPSHOT_INCOMPATIBLE;
 
   stage_rt = (GenesisRuntime *)malloc(sizeof *stage_rt);
   if (stage_rt == NULL) return GENESIS_SNAPSHOT_NO_MEMORY;

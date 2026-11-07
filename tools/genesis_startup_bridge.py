@@ -1192,7 +1192,7 @@ def _compile_viewer_executable(compile_flags: list[str], sdl3: tuple[list[str], 
     viewer_dir = root / "platforms" / "genesis" / "viewer"
     sv_dir = root / "libs" / "viewer"  # SEG-058: the shared SDL3 viewer foundation (strict C11)
     includes = ["-I", str(runtime_dir), "-I", str(viewer_dir), "-I", str(sv_dir / "include"), "-I", str(sv_dir / "src")] + sdl3[0]
-    others = [runtime_dir / "runtime.c", runtime_dir / "vdp_render.c", runtime_dir / "genesis_persistence.c", viewer_dir / "viewer.c",
+    others = [runtime_dir / "runtime.c", runtime_dir / "vdp_render.c", runtime_dir / "genesis_persistence.c", runtime_dir / "genesis_snapshot.c", viewer_dir / "genesis_viewer_state.c", viewer_dir / "viewer.c",
               viewer_dir / "viewer_sdl3.c", viewer_dir / "viewer_main_hook.c"] + \
              [sv_dir / "src" / n for n in ("sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c", "sv_host.c", "sv_pages.c", "sv_draw.c")]
     with tempfile.TemporaryDirectory() as tmp:

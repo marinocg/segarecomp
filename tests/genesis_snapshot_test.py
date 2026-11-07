@@ -264,7 +264,7 @@ def main():
         includes = ["-I", str(rt), "-I", str(root / "libs/device/sega/psg/include"), "-I", str(root / "libs/device/sega/ym2612/include")]
         ym_objects = ymbuild.build_objects(cc, cxx, root, tmp / "ymobj")
         exes = {}
-        for tag, names in (("full", ["X", "Y"]), ("only_y", ["Y"])):
+        for tag, names in (("full", ["X", "Y"]), ("only_y", ["Y"]), ("none", [])):
             spec = tmp / (tag + ".spec")
             spec.write_text(registry_spec(names))
             done = subprocess.run([registry_emitter, str(spec), str(tmp / tag), "genesis_z80"], text=True, capture_output=True)
@@ -344,6 +344,26 @@ def main():
             mx = mixers(out)
             check(len(fh) == 4 and fh[0] == fh[2] and fh[1] == fh[3], label + ": restore then the same upload and run reproduces the straight run")
             check(len(mx) == 2 and mx[0] == mx[1], label + ": identical audio stream")
+
+        # ================= a program whose Z80 registry is EMPTY (no hash table exists in it) =================
+        s = Script()
+        s.vdp_setup()
+        s.advance(3000)
+        s.raw("snap 1")
+        s.raw("fullhash")
+        s.advance(6000)
+        s.w16(VDP_DATA, 0x4321)
+        s.advance(3000)
+        s.raw("fullhash")
+        s.raw("restore 1")
+        s.raw("fullhash")
+        s.advance(6000)
+        s.w16(VDP_DATA, 0x4321)
+        s.advance(3000)
+        s.raw("fullhash")
+        out = run(exes["none"], s, "sram")
+        fh = full(out)
+        check(statuses(out, "SNAP") == [0] and statuses(out, "RESTORE") == [0] and len(fh) == 4 and fh[0] == fh[2] and fh[1] == fh[3], "a program with an empty Z80 registry links and round-trips (no image hash table needed)")
 
         # ================= sound-disabled build =================
         s = Script()

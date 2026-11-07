@@ -65,6 +65,11 @@ static int sdl_closed(void *ctx) {
   const uint64_t clock = v->frame_sequence != NULL ? *v->frame_sequence : v->polls;  /* guest frames: identical input timing in every build */
   while (v->pad_next < v->pad_count && v->pad_script[v->pad_next].poll <= clock) {
     v->sample.pad[0] = v->pad_script[v->pad_next].actions;  /* persists until the next line */
+    /* SEG-131 automation: a line may press the quick-save (K) / quick-load (M) hotkey once, at this snapshot barrier, exactly as F5 / F8 do */
+    if ((v->sample.pad[0] & 0x4000U) != 0U) (void)sv_host_quick_save(v->host);
+    if ((v->sample.pad[0] & 0x2000U) != 0U) (void)sv_host_quick_load(v->host);
+    v->pad_script[v->pad_next].actions = (uint16_t)(v->pad_script[v->pad_next].actions & 0x9FFFU);
+    v->sample.pad[0] = (uint16_t)(v->sample.pad[0] & 0x9FFFU);
     v->pad_next += 1U;
   }
   if (v->pad_count != 0U && v->pad_next > 0U) v->sample.pad[0] = v->pad_script[v->pad_next - 1U].actions;
@@ -99,6 +104,8 @@ static void load_pad_script(GenesisSdl3Viewer *v) {
         case 'B': actions |= SV_ACTION_BIT(SV_ACT_BUTTON2); break;
         case 'C': actions |= SV_ACTION_BIT(SV_ACT_BUTTON3); break;
         case 'S': actions |= SV_ACTION_BIT(SV_ACT_START); break;
+        case 'K': actions |= 0x4000U; break;  /* SEG-131: quick save (F5) */
+        case 'M': actions |= 0x2000U; break;  /* SEG-131: quick load (F8) */
         case 'Q': actions |= 0x8000U; break;  /* end the run (the window's close): lets a scripted capture finish without a wall-clock timeout */
         default: break;
       }
@@ -288,6 +295,10 @@ const GenesisAudioSink *genesis_sdl3_viewer_audio_open(GenesisSdl3Viewer *v) {
   v->sink.queued_frames = sdl_audio_queued;
   v->sink.put = sdl_audio_put;
   return &v->sink;
+}
+
+void genesis_sdl3_viewer_audio_clear(GenesisSdl3Viewer *v) {
+  if (v != NULL && v->audio != NULL) SDL_ClearAudioStream(v->audio);
 }
 
 GenesisSdl3Viewer *genesis_sdl3_viewer_open(const char *title, int scale) { return genesis_sdl3_viewer_open_platform(title, scale, "genesis"); }

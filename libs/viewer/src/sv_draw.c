@@ -46,6 +46,7 @@ static void page_widths(int page_id, int *want, int *least) {
     case PAGE_AUDIO: *want = 600; *least = 400; break;
     case PAGE_SYSTEM: *want = 780; *least = 460; break;
     case PAGE_PADSTATUS: *want = 720; *least = 460; break;
+    case PAGE_STATE_SAVE: case PAGE_STATE_LOAD: *want = 780; *least = 460; break;
     default: *want = 500; *least = 330; break; /* confirmations */
   }
 }
@@ -391,6 +392,58 @@ static void draw_preview_column(SvHost *h, int x, int y, int w, int pic_h, int b
   }
 }
 
+/* ---- SEG-131: the focused save-state slot: its own thumbnail (the frame of the snapshot, never a later window capture) and its facts ---- */
+
+static void slot_playtime(uint64_t ms, char *out, size_t cap) {
+  const uint64_t seconds = ms / 1000u, hours = seconds / 3600u, minutes = (seconds / 60u) % 60u, secs = seconds % 60u;
+  if (hours > 0u) snprintf(out, cap, "%u:%02u:%02u", (unsigned)hours, (unsigned)minutes, (unsigned)secs);
+  else snprintf(out, cap, "%u:%02u", (unsigned)minutes, (unsigned)secs);
+}
+
+static void draw_slot_preview(SvHost *h, const SvPage *page, int x, int y, int w, int pic_h, int u) {
+  const SvItem *cur = page->focus >= 0 && page->focus < page->count ? &page->items[page->focus] : NULL;
+  const int slot = cur != NULL && cur->id >= I_SLOT && cur->id < I_SLOT + SV_STATE_SLOTS ? cur->id - I_SLOT : -1;
+  const SvStateSlotInfo *info = slot >= 0 ? &h->slot_info[slot] : NULL;
+  const int lh = sv_ui_line_h(SV_FONT_BODY, u);
+  char name[24], line[64];
+  int py = y;
+  if (slot < 0) return;
+  if (slot == 0) snprintf(name, sizeof name, "Quick Slot"); else snprintf(name, sizeof name, "Slot %d", slot);
+  text_bold(h, u, x, py, K_FOCUS, name);
+  py += lh + 6 * u;
+  sv_ui_chamfer(h, x, py, w, pic_h, 2 * u, K_SEL_EDGE);
+  sv_ui_chamfer(h, x + u, py + u, w - 2 * u, pic_h - 2 * u, u, K_OUTLINE);
+  if (info->thumb.w > 0 && info->thumb.rgb565 != NULL) {
+    if (h->slot_tex == NULL || h->slot_tex_slot != slot || h->slot_tex_w != info->thumb.w || h->slot_tex_h != info->thumb.h) {
+      if (h->slot_tex != NULL) SDL_DestroyTexture(h->slot_tex);
+      h->slot_tex = SDL_CreateTexture(h->renderer, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STATIC, info->thumb.w, info->thumb.h);
+      h->slot_tex_slot = slot; h->slot_tex_w = info->thumb.w; h->slot_tex_h = info->thumb.h;
+      if (h->slot_tex != NULL) SDL_SetTextureScaleMode(h->slot_tex, SDL_SCALEMODE_NEAREST);
+    }
+    if (h->slot_tex != NULL) {
+      SDL_FRect dst;
+      const float box_w = (float)(w - 6 * u), box_h = (float)(pic_h - 6 * u);
+      const float scale = box_w / (float)info->thumb.w < box_h / (float)info->thumb.h ? box_w / (float)info->thumb.w : box_h / (float)info->thumb.h;
+      SDL_UpdateTexture(h->slot_tex, NULL, info->thumb.rgb565, info->thumb.w * 2);
+      dst.w = (float)info->thumb.w * scale; dst.h = (float)info->thumb.h * scale;
+      dst.x = (float)x + 3.0f * (float)u + (box_w - dst.w) / 2.0f; dst.y = (float)py + 3.0f * (float)u + (box_h - dst.h) / 2.0f;
+      SDL_RenderTexture(h->renderer, h->slot_tex, NULL, &dst);
+    }
+  } else {
+    const char *empty = info->damaged ? "Unusable state" : "Empty";
+    sv_ui_text(h, SV_FONT_BODY, u, x + (w - sv_ui_text_w(SV_FONT_BODY, u, empty)) / 2, py + (pic_h - lh) / 2, K_DIM, empty);
+  }
+  py += pic_h + 8 * u;
+  if (info->occupied) {
+    char time_text[24];
+    slot_playtime(info->guest_ms, time_text, sizeof time_text);
+    snprintf(line, sizeof line, "Played %s", time_text);
+    sv_ui_text(h, SV_FONT_BODY, u, x, py, K_TEXT2, line);
+  } else if (info->damaged && info->note[0] != '\0') {
+    text_in(h, SV_FONT_BODY, u, x, py, w, K_ERR, info->note);
+  }
+}
+
 /* ---- header ---- */
 
 static int header_h(int u) { return 44 * u; }
@@ -437,7 +490,9 @@ static int footer_h(int u, int out_h, int lh) { return out_h < 360 * u ? lh + 34
 
 /* Confirmations: warning icon and bold question, the consequence, then the two answers as full-width rows (No is the default focus). */
 static void draw_confirm(SvHost *h, SvPage *page, int out_w, int out_h, int u) {
-  const char *msg = page->page_id == PAGE_CONFIRM_QUIT ? (SDL_getenv("SEGARECOMP_LAUNCHED") != NULL ? "Any unsaved progress will be lost. Return to the launcher and close the game?" : "Any unsaved progress will be lost: there are no save states.") :
+  const char *msg = page->page_id == PAGE_CONFIRM_OVERWRITE ? "The state saved in this slot is replaced by the current game. The old state cannot be recovered." :
+                    page->page_id == PAGE_CONFIRM_LOADSTATE ? "The running game is replaced by this state. Progress since your last save is lost unless you save it to another slot first." :
+                    page->page_id == PAGE_CONFIRM_QUIT ? (SDL_getenv("SEGARECOMP_LAUNCHED") != NULL ? "Any unsaved progress will be lost. Return to the launcher and close the game?" : "Any unsaved progress will be lost: there are no save states.") :
                     page->page_id == PAGE_CONFIRM_RESET ? "Restart the game from power-on? Progress since the last power-on is lost." : "Reset these settings to their defaults? Your other settings are kept.";
   int want, least, panel_w, panel_h, x, y, pad = 18 * u, n, k, i, ty, title_s, lh = sv_ui_line_h(SV_FONT_BODY, u);
   int start[6], len[6], truncated;
@@ -481,12 +536,13 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
   const int preview = sv_pages_wants_preview(h);
   int u = sv_host_ui_scale(out_w, out_h);
   int want, least, panel_w, panel_h, x, y, pad, head_h, foot_h, body_w, body_y, body_h, i, k, drawn = 0, used = 0, avail_h, banner_h = 0, left_w, lh, gap;
-  int two_col, video, system, pic_h = 0;
+  int two_col, video, system, stateui, pic_h = 0;
   PageClass cls;
   if (page == NULL) return;
   cls = page_class(page->page_id);
   video = page->page_id == PAGE_VIDEO;
   system = page->page_id == PAGE_SYSTEM;
+  stateui = page->page_id == PAGE_STATE_SAVE || page->page_id == PAGE_STATE_LOAD;   /* SEG-131: slot list at the left, the focused slot's thumbnail at the right */
   page_widths(page->page_id, &want, &least);
   while (u > 1 && least * u > out_w - 16 * u) --u;
   s_first_bind = -1;
@@ -515,8 +571,8 @@ layout_retry:
   panel_w = want * u;
   if (panel_w > out_w - 16 * u) panel_w = out_w - 16 * u;
   body_w = panel_w - 2 * pad;
-  two_col = (video || system) && panel_w >= 440 * u;
-  left_w = video ? (body_w - gap) / 2 : (system ? (body_w - gap) * 44 / 100 : body_w);
+  two_col = (video || system || stateui) && panel_w >= 440 * u;
+  left_w = video || stateui ? (body_w - gap) / 2 : (system ? (body_w - gap) * 44 / 100 : body_w);
   if (h->conflict_msg[0] != '\0' && page->page_id == PAGE_CONTROLS) banner_h = 34 * u;
   avail_h = out_h - 12 * u - head_h - foot_h - 2 * pad - banner_h;
   if (avail_h < s_rh) avail_h = s_rh;
@@ -525,8 +581,8 @@ layout_retry:
     const int rw = body_w - left_w - gap;
     for (i = 0; i < page->count; ++i) {
       const SvItem *it = &page->items[i];
-      const int w = (video || !it->column) ? left_w : rw;
-      if (video || !it->column) lh_used += item_height(it, i, u, w); else rh_used += item_height(it, i, u, w);
+      const int w = (video || stateui || !it->column) ? left_w : rw;
+      if (video || stateui || !it->column) lh_used += item_height(it, i, u, w); else rh_used += item_height(it, i, u, w);
     }
     if (video) { /* the preview takes what the column allows: a 4:3-ish picture as wide as the column, smaller when the window is short */
       const int fixed = preview_column_h(u, 0);
@@ -534,6 +590,12 @@ layout_retry:
       if (pic_h + fixed > avail_h) pic_h = avail_h - fixed;
       if (pic_h < 60 * u) pic_h = 60 * u;
       rh_used = pic_h + fixed;
+    }
+    if (stateui) {   /* the slot picture: as wide as its column, in the 160:112 proportion of the stored thumbnails */
+      pic_h = rw * 112 / 160;
+      if (pic_h > avail_h - 2 * sv_ui_line_h(SV_FONT_BODY, u) - 14 * u) pic_h = avail_h - 2 * sv_ui_line_h(SV_FONT_BODY, u) - 14 * u;
+      if (pic_h < 40 * u) pic_h = 40 * u;
+      rh_used = pic_h + 2 * sv_ui_line_h(SV_FONT_BODY, u) + 14 * u;
     }
     used = lh_used > rh_used ? lh_used : rh_used;
     if (used > avail_h && u > 1) { --u; s_ls = u; s_rh = cls == CLASS_STANDARD ? 34 * u : 28 * u; goto layout_retry; }
@@ -563,7 +625,7 @@ layout_retry:
     for (i = 0; i < page->count; ++i) {
       int rect[4];
       const SvItem *it = &page->items[i];
-      if (video || !it->column) {
+      if (video || stateui || !it->column) {
         draw_item(h, page, i, lx, ly, left_w, u, rect);
         ly += item_height(it, i, u, left_w);
       } else {
@@ -574,6 +636,7 @@ layout_retry:
     }
     sv_host_fill(h, rx - gap / 2, body_y, u, body_h, K_RULE);
     if (video) draw_preview_column(h, rx, body_y, rw, pic_h, body_h, u);
+    else if (stateui) draw_slot_preview(h, page, rx, body_y, rw, pic_h, u);
   } else {
     int cy = body_y;
     for (i = 0; i < drawn; ++i) {

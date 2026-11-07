@@ -112,6 +112,11 @@ GenesisSnapshotStatus genesis_snapshot_capture(const GenesisSnapshotMachine *mac
 /* Validates the container structure, bounds and SHA-256 and reports its header. Needs no machine; used to list slots and history. */
 GenesisSnapshotStatus genesis_snapshot_inspect(const uint8_t *data, size_t size, GenesisSnapshotInfo *info);
 
+/* Everything restore checks before it stages anything (structure, integrity, identity, region, machine profile, execution fingerprint). `info` may be NULL.
+ * GENESIS_SNAPSHOT_OK means "restore would be attempted"; the device-level validation still happens in restore itself. */
+GenesisSnapshotStatus genesis_snapshot_validate(const GenesisSnapshotMachine *machine, const GenesisSnapshotIdentity *identity, const uint8_t *data, size_t size,
+                                                GenesisSnapshotInfo *info);
+
 /* Restores a snapshot. On any status other than GENESIS_SNAPSHOT_OK the machine is byte-identical to before the call. */
 GenesisSnapshotStatus genesis_snapshot_restore(const GenesisSnapshotMachine *machine, const GenesisSnapshotIdentity *identity,
                                                const uint8_t *data, size_t size);

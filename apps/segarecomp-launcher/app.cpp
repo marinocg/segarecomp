@@ -979,6 +979,18 @@ void App::finish_run() {
   LibraryEntry *entry = catalog_.find_id(id);
   const std::string verdict = exit_code == 0 ? "clean" : (next.restart ? "unadmitted_pc" : "failed");
   if (entry != nullptr) { catalog_.record_run(*entry, exit_code, verdict, now_seconds()); save_catalog(); }
+  {  // SEG-131: the player's data. Nothing here claims a save that did not happen.
+    const SaveOutcome saved = read_save_outcome((game_dir_.empty() && entry != nullptr ? entry_dir(view_for(*entry), layout_) : game_dir_) / "run.log");
+    trace(std::string("save=") + (saved.load_refused ? "load_refused" : saved.committed ? "stored" : saved.commit_failed ? "kept_previous" : "none"));
+    if (saved.load_refused) {
+      failures_[id] = "The game was not started: its save file was refused (" + saved.detail + "). The file was left untouched.";
+      diagnostics_[id] = "The save data of this game could not be used and was not changed. Fix or move it away: " + saved.detail;
+      request_status_refresh();
+      return;
+    }
+    if (saved.commit_failed) toast("Your game data could not be saved (" + saved.detail + "). The previous save was kept.", true);
+    else if (saved.committed && exit_code == 0) toast("Save data stored.");
+  }
   if (exit_code == 0) { request_status_refresh(); return; }
   if (next.restart && entry != nullptr) {
     // The typed unadmitted_pc stop of an Optimized program: tell the user, switch this game to Compatibility, restart from reset (once).

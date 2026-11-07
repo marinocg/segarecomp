@@ -53,6 +53,8 @@ GenesisPersistStatus genesis_persist_load(GenesisRuntime *runtime, const char *d
 /* Clean-session commit of the current cartridge memory (see above). */
 GenesisPersistStatus genesis_persist_commit(const GenesisRuntime *runtime, const char *dir);
 
+/* Creates `dir` and its missing parents (a directory that exists is fine; anything else in the way is NOT_REGULAR... never replaced). */
+GenesisPersistStatus genesis_persist_ensure_dir(const char *dir);
 /* The shared atomic replace: writes `<dir>/<name>.next`, flushes, validates, optionally keeps `<name>.prev`, renames over `<dir>/<name>`. */
 GenesisPersistStatus genesis_persist_replace_file(const char *dir, const char *name, const uint8_t *data, size_t size, int keep_previous);
 /* Reads a whole regular file of at most `max_bytes` into a malloc'd buffer (caller frees). NOT_REGULAR / BAD_SIZE / IO_ERROR otherwise. */

@@ -1721,6 +1721,11 @@ add_test(NAME genesis_persistence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_persistence_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_persistence_test APPEND PROPERTY LABELS full)
 set_property(TEST genesis_persistence_test PROPERTY TIMEOUT 900)
+# SEG-131 (ADR 0278): manual save states (quick save / quick load) across separate real viewer processes, corrupt / foreign / unwritable slots.
+add_test(NAME genesis_states_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_states_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_states_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_states_test PROPERTY TIMEOUT 900)
 # SEG-131 (ADR 0278): reversible Genesis machine snapshots (save states / rewind): restore reproduces the future (CPU, VDP, Z80, YM2612, PSG, mixer, SRAM/EEPROM), corruption and mismatches are refused without mutation.
 add_test(NAME genesis_snapshot_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_snapshot_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})

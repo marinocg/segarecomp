@@ -106,7 +106,48 @@ static int replace_file(const char *from, const char *to) { return rename(from, 
 static int flush_to_os(FILE *f) { return fflush(f) == 0 && fsync(fileno(f)) == 0; }
 #endif
 
-/* ---------------------------------------------------------------------------------------------------------------------------------- */
+GenesisPersistStatus genesis_persist_ensure_dir(const char *dir) {
+  char path[PATH_CAP];
+  size_t i, length;
+  if (dir == NULL || *dir == '\0') return GENESIS_PERSIST_BAD_ARGUMENT;
+  length = strlen(dir);
+  if (length >= sizeof path) return GENESIS_PERSIST_PATH_TOO_LONG;
+  memcpy(path, dir, length + 1U);
+  for (i = 1U; i <= length; ++i) {
+    if (path[i] != '/' && path[i] != '\\' && path[i] != '\0') continue;
+    {
+      const char saved = path[i];
+      path[i] = '\0';
+      if (i > 1U && !(i == 2U && path[1] == ':')) {  /* a drive prefix "C:" is not a directory to create */
+        const Kind kind = kind_of(path, NULL);
+        if (kind == KIND_OTHER) {
+#if defined(_WIN32)
+          /* a directory is KIND_OTHER on Windows (attributes): accept it only when it is a plain directory */
+          wchar_t wide[PATH_CAP];
+          DWORD attributes;
+          if (!to_wide(path, wide, (int)PATH_CAP)) return GENESIS_PERSIST_IO_ERROR;
+          attributes = GetFileAttributesW(wide);
+          if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0U || (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0U) return GENESIS_PERSIST_NOT_REGULAR;
+#else
+          struct stat st;
+          if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode)) return GENESIS_PERSIST_NOT_REGULAR;  /* a directory (or a link to one) is fine; a file in the way is not */
+#endif
+        } else if (kind == KIND_REGULAR) {
+          return GENESIS_PERSIST_NOT_REGULAR;
+        } else {
+#if defined(_WIN32)
+          wchar_t wide[PATH_CAP];
+          if (!to_wide(path, wide, (int)PATH_CAP) || (!CreateDirectoryW(wide, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)) return GENESIS_PERSIST_IO_ERROR;
+#else
+          if (mkdir(path, 0777) != 0 && errno != EEXIST) return GENESIS_PERSIST_IO_ERROR;
+#endif
+        }
+      }
+      path[i] = saved;
+    }
+  }
+  return GENESIS_PERSIST_OK;
+}
 
 GenesisPersistStatus genesis_persist_read_file(const char *dir, const char *name, size_t max_bytes, uint8_t **data, size_t *size) {
   char path[PATH_CAP];

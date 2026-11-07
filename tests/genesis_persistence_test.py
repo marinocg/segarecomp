@@ -80,7 +80,7 @@ def build_viewers(tmp, sources, sdl3, flags):
   viewer_dir = ROOT.parent / "platforms/genesis/viewer"
   sv_dir = ROOT.parent / "libs/viewer"
   includes = ["-I", str(runtime_dir), "-I", str(viewer_dir), "-I", str(sv_dir / "include"), "-I", str(sv_dir / "src")] + sdl3[0]
-  others = [runtime_dir / "runtime.c", runtime_dir / "vdp_render.c", runtime_dir / "genesis_persistence.c", viewer_dir / "viewer.c", viewer_dir / "viewer_sdl3.c",
+  others = [runtime_dir / "runtime.c", runtime_dir / "vdp_render.c", runtime_dir / "genesis_persistence.c", runtime_dir / "genesis_snapshot.c", viewer_dir / "genesis_viewer_state.c", viewer_dir / "viewer.c", viewer_dir / "viewer_sdl3.c",
             viewer_dir / "viewer_main_hook.c"] + [sv_dir / "src" / n for n in ("sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c",
                                                                                "sv_font_data.c", "sv_ui.c", "sv_host.c", "sv_pages.c", "sv_draw.c")]
   (tmp / "shared").mkdir(exist_ok=True)
@@ -98,17 +98,17 @@ def build_viewers(tmp, sources, sdl3, flags):
   return exes
 
 
-def session(exe, save_dir, work, budget=5000000, quit_frame=3, script=True, timeout=120, extra_env=None):
+def session(exe, save_dir, work, budget=5000000, quit_frame=3, script=True, timeout=120, extra_env=None, script_text=None):
   """One interactive session in its own process. The scripted pad quits at `quit_frame` published frames (a clean player exit)."""
   env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SEGARECOMP_VIEWER_UNTHROTTLED="1", SEGARECOMP_VIEWER_NO_STOP_SCREEN="1",
-             SEGARECOMP_VIEWER_SETTINGS=str(work / "viewer-settings.cfg"))
-  for name in ("SEGARECOMP_SAVE_DIR", "SEGARECOMP_VIEWER_PAD_SCRIPT"):
+             SEGARECOMP_VIEWER_SETTINGS=str(work / "viewer-settings.cfg"), SEGARECOMP_ROM_SHA256="11" * 32)
+  for name in ("SEGARECOMP_SAVE_DIR", "SEGARECOMP_SAVE_VARIANT", "SEGARECOMP_VIEWER_PAD_SCRIPT"):
     env.pop(name, None)
   if save_dir is not None:
     env["SEGARECOMP_SAVE_DIR"] = str(save_dir)
   if script:
     pad = work / "pad.txt"
-    pad.write_text("%d Q\n" % quit_frame)
+    pad.write_text(script_text if script_text is not None else "%d Q\n" % quit_frame)
     env["SEGARECOMP_VIEWER_PAD_SCRIPT"] = str(pad)
   env.update(extra_env or {})
   full = work / "full.json"

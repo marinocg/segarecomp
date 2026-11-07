@@ -140,6 +140,10 @@ GenesisViewerResult genesis_viewer_run(GenesisRuntime *runtime, GenesisDispatchF
   uint64_t paced_boundaries = runtime->virtual_frame_count;
   for (;;) {
     if (host->window_closed(host->ctx)) return finish(r, GENESIS_VIEWER_WINDOW_CLOSED);
+    if (host->discontinuity != NULL && host->discontinuity(host->ctx)) {  /* SEG-131: the machine was replaced at the barrier: re-base on it */
+      paced_boundaries = runtime->virtual_frame_count;
+      presented_seq = obs->sequence;
+    }
     genesis_runtime_set_pad1(runtime, host->pad1 != NULL ? host->pad1(host->ctx) : 0U);
     genesis_runtime_set_pad2(runtime, host->pad2 != NULL ? host->pad2(host->ctx) : 0U);
     uint64_t remaining = total_dispatch_allowance - r.dispatches;
