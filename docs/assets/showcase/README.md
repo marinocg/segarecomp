@@ -1,8 +1,9 @@
 # Widescreen showcase screenshots
 
 Four individually reviewed, reduced-size (1200x675) captures of **generated-native** gameplay, published under the narrow exception in
-[`docs/testing/commercial-games.md`](../../testing/commercial-games.md#promotional-screenshot-exception-seg-129). They are unmodified frames from the real viewer output (the composed 16:9 window, including the
-provider's scenery and relocated HUD) saved by the viewer's existing capture seam, then uniformly resized and palette-quantized for file size. Nothing was painted, extended or composited afterwards.
+[`docs/testing/commercial-games.md`](../../testing/commercial-games.md#promotional-screenshot-exception-seg-129). They are frames from the real viewer output (the composed 16:9 window, including the
+provider's scenery and relocated HUD) saved by the viewer's existing automation capture seam (`SEGARECOMP_VIEWER_CAPTURE_DIR`), **not** the F12 screenshot, which saves only the source game pixels. They were then uniformly resized and palette-quantized for file size. Nothing was painted, extended or composited afterwards.
+The Sonic 2 frame also shows a partial actor at the far left edge and the Sonic 3 & Knuckles background shows the wrapped-plane texture the caption mentions; the Streets of Rage 2 right edge repeats generic wrapped scenery.
 
 | File | Game and image | Patch (maintained outside this repository, not distributed) | Setting | What the frame shows |
 | --- | --- | --- | --- | --- |

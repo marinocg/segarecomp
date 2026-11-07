@@ -18,6 +18,7 @@ import argparse
 import json
 import pathlib
 import re
+import struct
 import sys
 
 LEDGER_PATH = "docs/product/compatibility-ledger.json"
@@ -399,6 +400,7 @@ def check_consistency(ledger, texts):
 SHOWCASE_DIR = "docs/assets/showcase"
 SHOWCASE_MAX_FILES = 6
 SHOWCASE_MAX_BYTES = 512 * 1024
+SHOWCASE_SIZE = (1200, 675)
 
 
 def check_showcase(root):
@@ -408,6 +410,9 @@ def check_showcase(root):
     if not directory.is_dir():
         return problems
     listing = (directory / "README.md").read_text(encoding="utf-8") if (directory / "README.md").exists() else ""
+    for entry in directory.iterdir():
+        if entry.is_dir():
+            problems.append(f"{SHOWCASE_DIR}/{entry.name}: subdirectories are not allowed")
     images = sorted(p for p in directory.iterdir() if p.is_file() and p.name != "README.md")
     if len(images) > SHOWCASE_MAX_FILES:
         problems.append(f"{SHOWCASE_DIR}: more than {SHOWCASE_MAX_FILES} files")
@@ -418,6 +423,10 @@ def check_showcase(root):
             problems.append(f"{SHOWCASE_DIR}/{image.name}: only PNG or WebP is allowed")
         if image.stat().st_size > SHOWCASE_MAX_BYTES:
             problems.append(f"{SHOWCASE_DIR}/{image.name}: larger than {SHOWCASE_MAX_BYTES // 1024} KiB")
+        if image.suffix.lower() == ".png" and image.stat().st_size >= 24:
+            width, height = struct.unpack(">II", image.read_bytes()[16:24])
+            if (width, height) != SHOWCASE_SIZE:
+                problems.append(f"{SHOWCASE_DIR}/{image.name}: must be {SHOWCASE_SIZE[0]}x{SHOWCASE_SIZE[1]}, is {width}x{height}")
         if f"`{image.name}`" not in listing:
             problems.append(f"{SHOWCASE_DIR}/{image.name}: not listed in the showcase README")
     return problems

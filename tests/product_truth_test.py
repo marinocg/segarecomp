@@ -125,7 +125,10 @@ class ShowcaseRulesTest(unittest.TestCase):
             return gate.check_showcase(root)
 
     def test_listed_small_png_is_accepted(self):
-        self.assertEqual(self.run_case({"a.png": b"x", "README.md": b"| `a.png` |"}), [])
+        import struct
+        png = b"\x89PNG\r\n\x1a\n" + b"\0\0\0\rIHDR" + struct.pack(">II", *gate.SHOWCASE_SIZE)
+        self.assertEqual(self.run_case({"a.png": png, "README.md": b"| `a.png` |"}), [])
+        self.assertTrue(any("must be" in p for p in self.run_case({"a.png": png[:16] + struct.pack(">II", 10, 10), "README.md": b"| `a.png` |"})))
 
     def test_unlisted_oversize_and_wrong_type_are_rejected(self):
         problems = self.run_case({"a.png": b"x" * (gate.SHOWCASE_MAX_BYTES + 1), "b.bmp": b"x", "README.md": b"| `a.png` |"})
