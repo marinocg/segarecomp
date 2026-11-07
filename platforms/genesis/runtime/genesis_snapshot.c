@@ -523,6 +523,7 @@ static int get_source(Reader *r, GenesisMixerSource *s) {
     s->fifo[i][0] = r_i32(r);
     s->fifo[i][1] = r_i32(r);
   }
+  if (!r->error && (s->count > 4096U || s->sum[0] > (int64_t)s->count * 65536 || s->sum[0] < -(int64_t)s->count * 65536 || s->sum[1] > (int64_t)s->count * 65536 || s->sum[1] < -(int64_t)s->count * 65536)) return 0;
   return !r->error && s->window_end == genesis_mixer_window_start(s->window + 1U) && s->window < UINT64_MAX / GENESIS_NTSC_MASTER_TICKS_PER_SECOND - 4U;
 }
 
@@ -878,6 +879,18 @@ GenesisSnapshotStatus genesis_snapshot_restore(const GenesisSnapshotMachine *mac
     if (stage_audio->ym_samples != 0U && stage_audio->ym_samples > UINT64_MAX / 2U) goto done;
   }
 #endif
+#ifdef SEGARECOMP_GENESIS_SOUND
+  if (machine->z80 != NULL) {  /* every component clock must sit at or just behind the guest clock: a crafted gap would make the next catch-up loop run for ages */
+    const uint64_t master = stage_rt->scheduler.master_ticks, slack = 4U * GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
+    const uint64_t z80_time = stage_z80->cycle_base_master_ticks + stage_z80->cpu.state.cycles * GENESIS_Z80_CLOCK_DIVIDER;
+    if (z80_time > master + slack || (stage_z80->bound_ordinal != 0U && z80_time + slack < master && stage_rt->devices.z80_bus.reset_released && !stage_rt->devices.z80_bus.bus_requested) ||
+        stage_audio->ym_samples * (uint64_t)YM2612_MASTER_TICKS_PER_SAMPLE > master + slack || stage_audio->ym_samples * (uint64_t)YM2612_MASTER_TICKS_PER_SAMPLE + slack < master ||
+        stage_audio->mixer.ym.watermark > master + slack || stage_audio->mixer.psg.watermark > master + slack ||
+        stage_audio->psg.ticks * (uint64_t)GENESIS_MIXER_PSG_TICK_MASTER > master + slack || stage_audio->psg.ticks * (uint64_t)GENESIS_MIXER_PSG_TICK_MASTER + slack < master)
+      goto done;
+  }
+#endif
+  if (stage_rt->raster.last_line > stage_rt->scheduler.master_ticks / GENESIS_NTSC_MASTER_TICKS_PER_LINE + 2U) goto done;
 #undef SECTION_READER
 
   /* ---- commit: everything above passed; the copies below cannot fail ---- */

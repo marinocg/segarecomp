@@ -398,7 +398,7 @@ def check_consistency(ledger, texts):
 
 
 SHOWCASE_DIR = "docs/assets/showcase"
-SHOWCASE_MAX_FILES = 6
+SHOWCASE_MAX_FILES = 7
 SHOWCASE_MAX_BYTES = 512 * 1024
 SHOWCASE_SIZES = ((1200, 675), (900, 675))  # 16:9 widescreen captures and 4:3 originals
 

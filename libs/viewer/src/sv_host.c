@@ -1423,7 +1423,8 @@ int sv_host_open_rewind(SvHost *h) {
   SvRewindUi *ui;
   SDL_Event e;
   char why[160] = "";
-  int i, restored = 0, done = 0, stick_x = 0, iteration = 0;
+  int i, restored = 0, done = 0, stick_x = 0, iteration = 0, last_shot = -1, settle = 0;
+  const int shots = h->capture_dir[0] != '\0' && SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_OVERLAYS") != NULL;   /* automation: let the surface settle and take one key per frame */
   if (h == NULL || h->quit) return 0;
   if (!h->has_state || h->state.rewind_available == NULL || h->state.history_count == NULL || h->state.history_info == NULL || h->state.restore_entry == NULL) {
     sv_host_toast(h, "Rewind is not available for this system yet");
@@ -1450,8 +1451,9 @@ int sv_host_open_rewind(SvHost *h) {
   if (h->audio != NULL) { SDL_PauseAudioStreamDevice(h->audio); SDL_ClearAudioStream(h->audio); }
   h->menu_open = 1;   /* held-input and pacing code treat the surface like the pause overlay */
   while (!done && !h->quit) {
-    int got = SDL_WaitEventTimeout(&e, 16);
+    int got = shots && settle < 16 ? 0 : SDL_WaitEventTimeout(&e, 16);
     int confirm = 0, cancel = 0;
+    if (shots && settle < 16) SDL_Delay(16);
     while (got) {
       common_event(h, &e);
       if (ui->closing == 0) {
@@ -1502,7 +1504,7 @@ int sv_host_open_rewind(SvHost *h) {
           if (e.wheel.y > 0.0f) sv_rewind_move(&ui->model, -1); else if (e.wheel.y < 0.0f) sv_rewind_move(&ui->model, 1);
         }
       }
-      got = SDL_PollEvent(&e);
+      got = shots && e.type == SDL_EVENT_KEY_DOWN ? 0 : SDL_PollEvent(&e);
     }
     if (ui->closing == 0 && confirm) {
       if (!sv_rewind_selection_is_moment(&ui->model)) {
@@ -1528,6 +1530,7 @@ int sv_host_open_rewind(SvHost *h) {
       ui->closing = 1;
       ui->anim_start = SDL_GetTicks();
     }
+    ++settle;
     rewind_step_anim(ui);
     if (ui->closing != 0 && ui->anim <= 0.0f) done = 1;
     {
@@ -1535,6 +1538,12 @@ int sv_host_open_rewind(SvHost *h) {
       SDL_GetCurrentRenderOutputSize(h->renderer, &out_w, &out_h);
       (void)out_w; (void)out_h;
       draw_scene(h, 0);
+      if (h->capture_dir[0] != '\0' && SDL_getenv("SEGARECOMP_VIEWER_CAPTURE_OVERLAYS") != NULL && ui->closing == 0 && ui->anim >= 1.0f && ui->model.selected != last_shot) {
+        char tag[32];   /* automation seam: the composed rewind surface, once per selection (read-only) */
+        last_shot = ui->model.selected;
+        snprintf(tag, sizeof tag, "-rewind-sel%d", last_shot);
+        capture_save(h, tag);
+      }
       if (h->hook != NULL && h->hook(h->hook_ctx, h, iteration++) != 0 && ui->closing == 0) {   /* automation: close without a restore */
         if (h->state.rewind_cancelled != NULL) h->state.rewind_cancelled(h->state.ctx);
         ui->closing = 1;

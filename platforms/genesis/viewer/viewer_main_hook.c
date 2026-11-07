@@ -341,12 +341,12 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
     state_config.rewind_budget_bytes = GENESIS_REWIND_BUDGET_BYTES;
     state_config.rewind_interval_ms = GENESIS_REWIND_INTERVAL_MS;
     state_config.rewind_target_ms = GENESIS_REWIND_TARGET_MS;
-    {  /* SEG-131: rewind is on by default for an interactive session; these knobs bound or turn it off (documented in docs/user/save-states.md) */
+    {  /* SEG-131: rewind is on by default for an interactive session; these knobs bound or turn it off (documented in docs/product/save-states.md) */
       const char *off = getenv("SEGARECOMP_REWIND");
       if (off != NULL && (strcmp(off, "0") == 0 || strcmp(off, "off") == 0)) state_config.rewind_budget_bytes = 0U;
       state_config.rewind_budget_bytes = env_u32("SEGARECOMP_REWIND_BUDGET_MB", 1U, 1024U, state_config.rewind_budget_bytes / (1024U * 1024U)) * 1024U * 1024U * (state_config.rewind_budget_bytes != 0U);
-      state_config.rewind_interval_ms = env_u32("SEGARECOMP_REWIND_INTERVAL_MS", 50U, 5000U, state_config.rewind_interval_ms);
-      state_config.rewind_target_ms = env_u32("SEGARECOMP_REWIND_TARGET_MS", 500U, 600000U, state_config.rewind_target_ms);
+      state_config.rewind_interval_ms = env_u32("SEGARECOMP_REWIND_INTERVAL_MS", 50U, 60000U, state_config.rewind_interval_ms);
+      state_config.rewind_target_ms = env_u32("SEGARECOMP_REWIND_TARGET_MS", 500U, 3600000U, state_config.rewind_target_ms);
     }
     state_config.latest_frame = &g_latest_frame;
     state_config.after_restore = viewer_after_restore;

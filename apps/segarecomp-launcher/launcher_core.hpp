@@ -123,6 +123,7 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom);
 struct SaveOutcome {
   bool load_refused = false;      // the save file was refused before any guest instruction (wrong size / not a regular file / unreadable)
   bool committed = false;         // the session ended cleanly and the new save replaced the old one
+  bool not_saved = false;         // the session did not end by the player (typed stop, budget, host error): nothing was written, the previous save was kept
   bool commit_failed = false;     // the session ended cleanly but the previous save was kept
   std::string detail;             // the viewer's reason, for the player
 };

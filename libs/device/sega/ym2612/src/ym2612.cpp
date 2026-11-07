@@ -161,6 +161,17 @@ int ym2612_check(const Ym2612 *chip, const uint8_t *in, uint32_t length) {
     const int64_t expiry = static_cast<int64_t>(get_u64(in + 16 + 8u * t));
     if (expiry != kNoEvent && (expiry < 0 || static_cast<uint64_t>(expiry) < now)) return 3;
   }
+  {  // The chip's own blob: restore it into a scratch chip and save it again. A value ymfm had to coerce (an envelope state or register address outside the range
+     // the chip can hold) does not survive the round trip, so a crafted blob is refused here, before the running chip is touched.
+    Ym2612 scratch;
+    std::vector<uint8_t> blob(in + YM2612_SNAPSHOT_HOST_BYTES, in + length);
+    ymfm::ymfm_saved_state state(blob, false);
+    scratch.chip.save_restore(state);
+    const std::vector<uint8_t> again = chip_blob(&scratch);
+    if (again.size() != static_cast<size_t>(length - YM2612_SNAPSHOT_HOST_BYTES)) return 4;
+    for (size_t i = 0; i < again.size(); ++i)
+      if (again[i] != in[YM2612_SNAPSHOT_HOST_BYTES + i]) return 5;
+  }
   return 0;
 }
 

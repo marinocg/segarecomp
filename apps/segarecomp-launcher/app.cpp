@@ -989,6 +989,7 @@ void App::finish_run() {
       return;
     }
     if (saved.commit_failed) toast("Your game data could not be saved (" + saved.detail + "). The previous save was kept.", true);
+    else if (saved.not_saved) toast("This session ended without being saved (the game stopped). Your previous save was kept.", true);
     else if (saved.committed && exit_code == 0) toast("Save data stored.");
   }
   if (exit_code == 0) { request_status_refresh(); return; }

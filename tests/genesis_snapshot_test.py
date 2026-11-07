@@ -468,6 +468,7 @@ def main():
             "VDP DMA phase": ("VDP", 61, 0x07), "VDP DMA kind": ("VDP", 62, 0x07), "CPU interrupt level": ("CPU", 74, 0x09),
             "IO bus_requested": ("IO", 0, 0x05), "CART EEPROM phase": ("CART", 11, 0x0F), "Z80 interrupt mode": ("Z80", 28, 0x07),
             "PSG attenuation": ("PSG", 15, 0x60), "YM sample/clock invariant": ("YM", 40, 0x01), "MIXER window invariant": ("MIXER", 8, 0x01),
+            "YM operator envelope state (ymfm blob)": ("YM", 623, 0xF0), "YM register address (ymfm blob)": ("YM", 49, 0xFF), "MIXER sum overflow": ("MIXER", 39, 0x80),
         }
         s = Script()
         scenario_prefix(s, True)

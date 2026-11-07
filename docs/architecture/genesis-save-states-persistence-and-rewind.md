@@ -219,8 +219,8 @@ file survives any failure. A state is never auto-loaded at boot.
 
 ## 7. Rewind
 
-- Rolling full snapshots (section 4 container without file IO) every 500 ms of **guest** time (`guest_master_ticks`), captured at the section 2
-  barrier; 60 s target; **96 MiB** hard budget for snapshots + thumbnails; oldest-first eviction by age and by budget; no worker thread;
+- Rolling full snapshots (section 4 container without file IO) every 10 s of **guest** time (default; 60 moments) (`guest_master_ticks`), captured at the section 2
+  barrier; 10 min target; **96 MiB** hard budget for snapshots + thumbnails; oldest-first eviction by age and by budget; no worker thread;
   no disk; allocations are bounded by the budget and made at capture time, failure marks rewind unavailable with a reason.
 - Entering rewind freezes guest execution (it runs inside `window_closed()`), captures/references a current-state anchor, and previews
   thumbnails/frames only. Cancel discards the selection and resumes untouched.
@@ -235,6 +235,13 @@ file survives any failure. A state is never auto-loaded at boot.
 slot `save/load/metadata`, `on_cancel`. A platform without whole-machine state (Master System, Sega CD) supplies none: the pause menu
 shows disabled rows with an accurate reason. Reserved host shortcuts: `F3` performance overlay, `F11`/`Alt+Enter` fullscreen, `F12`
 screenshot, `Esc`/menu key. New: `F5` quick save, `F8` quick load, `F7` rewind. Game input actions are never reused.
+
+## 10. As built (supersedes the details above where they differ)
+
+Header offsets: flags 12, platform 14, region 16, header_bytes 20, total_bytes 24, section_count 28, source 32, variant 64, fingerprint 96, guest_frame 128, guest_ticks 136, thumbnail dims 144/146,
+thumbnail bytes 148, reserved 152, section table at 156 (there is no `payload_bytes` field). There are **ten** sections (the audio counters are `AUDIO`). The viewer, not the launcher, validates the
+candidate and performs the rename (`genesis_persist_commit`); states are staged as `<name>.next`. Replays and the build pass simply never receive `SEGARECOMP_SAVE_DIR`; the launcher clears it for every
+non-Genesis or invalid-identity launch. The ymfm blob is validated by a scratch round trip (a value ymfm must coerce is refused) and the per-component clocks must agree with the guest clock. See ADR 0278.
 
 ## 9. Checkpoint map
 

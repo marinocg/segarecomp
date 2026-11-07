@@ -20,8 +20,8 @@ extern "C" {
 #endif
 
 /* Rewind policy defaults (docs: section 7). The interval is GUEST time. */
-#define GENESIS_REWIND_INTERVAL_MS 500U
-#define GENESIS_REWIND_TARGET_MS 60000U
+#define GENESIS_REWIND_INTERVAL_MS 10000U   /* one snapshot every 10 s of guest time ... */
+#define GENESIS_REWIND_TARGET_MS 600000U    /* ... for 10 minutes: 60 moments */
 #define GENESIS_REWIND_BUDGET_BYTES (96U * 1024U * 1024U)
 
 typedef struct GenesisViewerStateConfig {

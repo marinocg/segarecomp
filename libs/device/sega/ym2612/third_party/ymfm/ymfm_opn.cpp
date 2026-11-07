@@ -2223,6 +2223,7 @@ void ym2612::reset()
 void ym2612::save_restore(ymfm_saved_state &state)
 {
 	state.save_restore(m_address);
+	if (!state.saving() && m_address > 0x1ff) m_address = 0x1ff; /* SEG-131: a register address of a crafted state stays inside the register file */
 	state.save_restore(m_dac_data);
 	state.save_restore(m_dac_enable);
 	m_fm.save_restore(state);

@@ -1297,6 +1297,7 @@ SaveOutcome read_save_outcome(const fs::path &run_log) {
     const std::string event = root->str("event"), status = root->str("status");
     if (event == "load" && status == "refused") { outcome.load_refused = true; outcome.detail = root->str("detail"); }
     else if (event == "commit" && status == "stored") outcome.committed = true;
+    else if (event == "commit" && status == "not_clean_exit") outcome.not_saved = true;
     else if (event == "commit" && status == "kept_previous") { outcome.commit_failed = true; outcome.detail = root->str("detail"); }
   }
   return outcome;

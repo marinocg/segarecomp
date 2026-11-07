@@ -103,6 +103,19 @@ not bundled with any release, results depend on the exact game, revision and pac
 
 More: [widescreen and patches overview](docs/product/widescreen-and-patches.md), [patch packages](docs/product/patch-packages.md), [native patch SDK](docs/product/native-patch-sdk.md).
 
+## Save states and rewind **(main only; Genesis)**
+
+![The rewind screen over Sonic the Hedgehog (Green Hill Zone) with a patched widescreen build: a preview of the selected moment, a timeline of real pictures from the last 42 seconds, NOW at the right](docs/assets/showcase/sonic-1-rewind-screen-16x9.png)
+
+*The rewind screen on a widescreen-patched Sonic the Hedgehog (maintainer-authorized showcase image; see [docs/assets/showcase/README.md](docs/assets/showcase/README.md)).*
+
+* **Game saves just work.** A cartridge's own battery memory (SRAM, or the 128-byte EEPROM some cartridges use) is stored automatically when you end the session yourself, per game and per patched version, in your library folder.
+* **Save states.** *Save State* / *Load State* in the pause menu give you five numbered slots, each with the picture and play time of the moment it holds; **F5** / **F8** use a quick slot. A state is the whole machine, sound chips included: loading it
+  continues exactly where you left off. A failed save never damages the old state and a failed load never changes the running game.
+* **Rewind (F7).** The game keeps a moment every 10 seconds for the last 10 minutes (60 moments, in memory only). Open the rewind screen, browse the pictures on the timeline with the arrow keys, the D-pad or the mouse, pick one and play on from there;
+  cancelling changes nothing. The pause menu's *Rewind* row and holding both gamepad triggers open it too.
+* Master System and Sega CD show these rows disabled for now. Everything, including where the files live, what is guaranteed and measured costs, is in [docs/product/save-states.md](docs/product/save-states.md).
+
 ## Download and try segarecomp
 
 The [Releases](../../releases) page provides experimental desktop launcher archives
@@ -117,7 +130,7 @@ Check the downloaded archive against `SHA256SUMS.txt`.
 3. Open the game and choose the build settings below, then **Recompile & Play** (for Sega CD, **Build**, then **Play**). The first build can take several minutes (a Sega CD disc, much longer); cached builds start immediately.
 4. Play. **Esc** (or the gamepad's Back button) opens the pause menu: Save State, Load State, Rewind, Quick Settings, Video & Display, Controls, Audio, System. Closing the window returns to the launcher.
    On Genesis your game's own saves (SRAM / EEPROM) are kept automatically when you quit, and you can save and load whole-machine states (**F5** / **F8** for the quick slot, five numbered slots in the menu) and
-   **rewind** (**F7**) through the last minute of play: see [docs/product/save-states.md](docs/product/save-states.md).
+   **rewind** (**F7**) through the last ten minutes of play: see [docs/product/save-states.md](docs/product/save-states.md).
    Master System games need their cartridge mapper declared on the game's page.
 
 ### Install a verified patch **(main only; Genesis)**
