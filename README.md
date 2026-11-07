@@ -79,8 +79,8 @@ Everything in this section is merged after v0.7.0 and ships with the next releas
   Support is reported honestly, often as **Partial**. On Master System the extra columns only repeat scenery already on screen, and Level 3 does not make a game create objects outside its original window.
 * **Game patches (`.segapatch`, Genesis).** *Schema 1* is a verified data-only BPS delta. *Schema 2* adds a **trusted native C11 provider** written against a small public SDK, which can reconstruct scenery from the
   game's own level data and redraw its original HUD at the widened picture's edge. A patch creates a separate **Patched** variant beside **Vanilla**, bound to one exact game image and to the exact package you approved.
-* **Game-specific work stays out of the engine.** Packages for Sonic 1, Sonic 2, Sonic 3 & Knuckles and Streets of Rage 2 exist, but they are maintained privately, **not shipped with any release**, and cover only
-  the scenes listed in the [ledger](docs/product/compatibility-ledger.json). Capabilities depend on the exact game, revision and package.
+* **Game-specific work stays out of the engine.** Packages for Sonic 1, Sonic 2, Sonic 3 & Knuckles and Streets of Rage 2 exist, but they are maintained outside this repository and **not shipped with any release**. The maintainer states their extended scenery and
+  widescreen were validated in all levels (see the [ledger](docs/product/compatibility-ledger.json)); gameplay-affecting packages say so. Capabilities depend on the exact game, revision and package.
 * **Security.** A schema 2 patch is **executable code and is not sandboxed**. A hash proves the file is unchanged, not who wrote it or that it is safe. Install native patches only from sources you trust.
 
 <table>
@@ -94,7 +94,7 @@ Everything in this section is merged after v0.7.0 and ships with the next releas
 </tr>
 </table>
 
-Real frames from generated-native programs (Enhanced Widescreen, 16:9, Raw Extension, validated first scenes only; details and attribution in the [showcase notes](docs/assets/showcase/README.md)). The patch packages are
+Real frames from generated-native programs (Enhanced Widescreen, 16:9, Raw Extension, first scenes shown; details and attribution in the [showcase notes](docs/assets/showcase/README.md)). The patch packages are
 not bundled with any release, results depend on the exact game, revision and package, and native-code patches must come from trusted sources. Game artwork belongs to its owners.
 
 More: [widescreen and patches overview](docs/product/widescreen-and-patches.md), [patch packages](docs/product/patch-packages.md), [native patch SDK](docs/product/native-patch-sdk.md).

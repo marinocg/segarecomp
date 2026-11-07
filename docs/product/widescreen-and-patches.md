@@ -79,14 +79,14 @@ Details: [native patch SDK](native-patch-sdk.md), [patch packages](patch-package
 ## 3. Game-specific packages that exist today
 
 The product contains **no** game-specific widescreen code. The packages below are authored and maintained **outside this repository** and are **not distributed with any release**; their status is recorded in the ledger
-(`patch_packages`). Each is bound to one exact image.
+(`patch_packages`). The extended scenery and widescreen of these packages were validated in all levels according to the maintainer; that statement is not backed by a published report or recording. Each is bound to one exact image.
 
-| Game | Package | Provides | Gameplay | Validated scope | Not validated |
+| Game | Package | Provides | Gameplay | Validation (maintainer-stated) | Not covered |
 | --- | --- | --- | --- | --- | --- |
-| Sonic the Hedgehog (REV00) | `sonic1-native-widescreen` (schema 2) | authored scenery, relocated HUD | HUD only. A separate `-gameplay` package is **experimental**: it widens object activation and diverges from natural play | running levels of the main zones along scripted routes; special-stage background is the wrapped VDP plane | bosses and transitions outside the routes, ending, other revisions |
-| Sonic the Hedgehog 2 (REV00 and REV01) | `sonic2-native-widescreen` (schema 2) + presentation-only variant | authored scenery, relocated HUD, actors across the widened picture | standard package changes gameplay slightly; presentation-only does not | single-player levels and demo scenes of the campaign inventory | later Wing Fortress, ending, final boss, special stages, two-player, PAL |
-| Sonic 3 & Knuckles (4 MiB lock-on composite) | `sonic3k-native-widescreen` (schema 2) + presentation-only variant | authored foreground, background on some acts (the wrapped VDP plane elsewhere), relocated HUD, actors in the margins | standard package changes gameplay slightly | partial campaign: Sonic-route acts swept | bosses, act transitions, ending, Knuckles and Tails-alone routes |
-| Streets of Rage 2 (USA) | `sor2-widescreen` (schema 1, data only) | additional sprite pieces and objects beside the picture, rendered by generic Level 3 | none intended | stage 1 opening screens and the attract demo | later stages, crowded scenes; provides no authored scenery or HUD |
+| Sonic the Hedgehog (REV00) | `sonic1-native-widescreen` (schema 2) | authored scenery, relocated HUD | HUD only. A separate `-gameplay` package is **experimental**: it widens object activation and diverges from natural play | all levels; the special-stage background is the wrapped VDP plane | other revisions |
+| Sonic the Hedgehog 2 (REV00 and REV01) | `sonic2-native-widescreen` (schema 2) + presentation-only variant | authored scenery, relocated HUD, actors across the widened picture | standard package changes gameplay slightly; presentation-only does not | all levels | other revisions |
+| Sonic 3 & Knuckles (4 MiB lock-on composite) | `sonic3k-native-widescreen` (schema 2) + presentation-only variant | authored foreground, background on some acts (the wrapped VDP plane elsewhere), relocated HUD, actors in the margins | standard package changes gameplay slightly | all levels | standalone Sonic 3 and Sonic & Knuckles images |
+| Streets of Rage 2 (USA) | `sor2-widescreen` (schema 1, data only) | additional sprite pieces and objects beside the picture, rendered by generic Level 3 | none intended | all levels (extra sprites only) | other revisions; provides no authored scenery or HUD |
 
 Sonic 3 & Knuckles needs the lock-on cartridge model. The **launcher recognizes the exact supported images from their header contents and selects it automatically** (Advanced build options can override it);
 command-line builds must pass `--mapper lock_on`. Modified, resized or unidentified images stay ordinary cartridges.

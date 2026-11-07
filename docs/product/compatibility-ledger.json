@@ -24,7 +24,12 @@
         "the viewer has no Genesis input recording or replay (headless pad scripts exist for development)",
         "compatibility is incomplete: unlisted games may stop with a typed unsupported-behavior diagnostic or fail to build"
       ],
-      "evidence": ["platforms/genesis/README.md", "docs/product/viewer-ui.md", "docs/architecture/genesis-z80-audio-contract.md", "ADR 0277"]
+      "evidence": [
+        "platforms/genesis/README.md",
+        "docs/product/viewer-ui.md",
+        "docs/architecture/genesis-z80-audio-contract.md",
+        "ADR 0277"
+      ]
     },
     {
       "id": "master_system",
@@ -42,7 +47,12 @@
         "widescreen cannot reveal more of the game world: the 256-pixel name table wraps and hardware sprite geometry limits Level 3 to a few edge pixels",
         "192- and 224-line modes only"
       ],
-      "evidence": ["platforms/master-system/README.md", "docs/architecture/master-system-machine-contract.md", "docs/decisions/0263-seg-120-m120-master-system-level-2-wrapped-background-extension.md", "ADR 0264"]
+      "evidence": [
+        "platforms/master-system/README.md",
+        "docs/architecture/master-system-machine-contract.md",
+        "docs/decisions/0263-seg-120-m120-master-system-level-2-wrapped-background-extension.md",
+        "ADR 0264"
+      ]
     },
     {
       "id": "sega_cd",
@@ -63,7 +73,14 @@
         "no 6-button pads or player 2 in the Sega CD viewer",
         "no rewind, save states or cartridge-RAM expansion"
       ],
-      "evidence": ["platforms/sega-cd/README.md", "docs/product/sega-cd-play.md", "ADR 0204", "ADR 0205", "ADR 0259", "ADR 0260"]
+      "evidence": [
+        "platforms/sega-cd/README.md",
+        "docs/product/sega-cd-play.md",
+        "ADR 0204",
+        "ADR 0205",
+        "ADR 0259",
+        "ADR 0260"
+      ]
     },
     {
       "id": "game_gear",
@@ -71,8 +88,12 @@
       "status": "planned",
       "cpu_mode": "none",
       "capabilities": [],
-      "limitations": ["no platform implementation; no compatibility claim"],
-      "evidence": ["platforms/game-gear/README.md"]
+      "limitations": [
+        "no platform implementation; no compatibility claim"
+      ],
+      "evidence": [
+        "platforms/game-gear/README.md"
+      ]
     },
     {
       "id": "sega_32x",
@@ -80,8 +101,12 @@
       "status": "planned",
       "cpu_mode": "none",
       "capabilities": [],
-      "limitations": ["no platform implementation; no compatibility claim"],
-      "evidence": ["platforms/32x/README.md"]
+      "limitations": [
+        "no platform implementation; no compatibility claim"
+      ],
+      "evidence": [
+        "platforms/32x/README.md"
+      ]
     },
     {
       "id": "saturn",
@@ -89,8 +114,12 @@
       "status": "planned",
       "cpu_mode": "none",
       "capabilities": [],
-      "limitations": ["no platform implementation; no compatibility claim"],
-      "evidence": ["platforms/saturn/README.md"]
+      "limitations": [
+        "no platform implementation; no compatibility claim"
+      ],
+      "evidence": [
+        "platforms/saturn/README.md"
+      ]
     }
   ],
   "games": [
@@ -104,14 +133,23 @@
         {
           "category": "maintainer_reported_playthrough",
           "scope": "maintainer statement that the game is beatable start to finish; carried from the project README since before v0.7.0; no session recording is published",
-          "refs": ["README.md"]
+          "refs": [
+            "README.md"
+          ]
         }
       ],
       "build_mode": "unknown",
       "input": "original",
-      "unknown_conditions": ["build mode of the reported run", "exact image revision and region", "whether the session was recorded"],
+      "unknown_conditions": [
+        "build mode of the reported run",
+        "exact image revision and region",
+        "whether the session was recorded"
+      ],
       "blockers": [],
-      "untested": ["other revisions and regions", "independent reproduction"]
+      "untested": [
+        "other revisions and regions",
+        "independent reproduction"
+      ]
     },
     {
       "id": "genesis-sonic-2",
@@ -123,13 +161,19 @@
         {
           "category": "maintainer_reported_playthrough",
           "scope": "maintainer statement that the game is fully playable; no completion is claimed; no session recording is published",
-          "refs": ["README.md"]
+          "refs": [
+            "README.md"
+          ]
         }
       ],
       "build_mode": "unknown",
       "input": "original",
       "blockers": [],
-      "untested": ["completion", "other revisions and regions", "independent reproduction"]
+      "untested": [
+        "completion",
+        "other revisions and regions",
+        "independent reproduction"
+      ]
     },
     {
       "id": "genesis-sonic-3",
@@ -141,13 +185,20 @@
         {
           "category": "maintainer_reported_playthrough",
           "scope": "maintainer statement that the game is fully playable; no completion is claimed; no session recording is published",
-          "refs": ["README.md"]
+          "refs": [
+            "README.md"
+          ]
         }
       ],
       "build_mode": "unknown",
       "input": "original",
       "blockers": [],
-      "untested": ["completion", "other revisions and regions", "independent reproduction", "the Sonic 3 & Knuckles lock-on composite is covered by the patch-package entry, not this one"]
+      "untested": [
+        "completion",
+        "other revisions and regions",
+        "independent reproduction",
+        "the Sonic 3 & Knuckles lock-on composite is covered by the patch-package entry, not this one"
+      ]
     },
     {
       "id": "genesis-streets-of-rage",
@@ -159,13 +210,19 @@
         {
           "category": "maintainer_reported_playthrough",
           "scope": "maintainer statement that the game is fully playable; no completion is claimed; no session recording is published",
-          "refs": ["README.md"]
+          "refs": [
+            "README.md"
+          ]
         }
       ],
       "build_mode": "unknown",
       "input": "original",
       "blockers": [],
-      "untested": ["completion", "other revisions and regions", "independent reproduction"]
+      "untested": [
+        "completion",
+        "other revisions and regions",
+        "independent reproduction"
+      ]
     },
     {
       "id": "genesis-streets-of-rage-3",
@@ -177,13 +234,19 @@
         {
           "category": "maintainer_reported_playthrough",
           "scope": "maintainer statement that the game is fully playable; no completion is claimed; no session recording is published",
-          "refs": ["README.md"]
+          "refs": [
+            "README.md"
+          ]
         }
       ],
       "build_mode": "unknown",
       "input": "original",
       "blockers": [],
-      "untested": ["completion", "other revisions and regions", "independent reproduction"]
+      "untested": [
+        "completion",
+        "other revisions and regions",
+        "independent reproduction"
+      ]
     },
     {
       "id": "master_system-sonic-1",
@@ -195,13 +258,19 @@
         {
           "category": "maintainer_reported_playthrough",
           "scope": "maintainer statement that the game runs well; no completion is claimed; no session recording is published",
-          "refs": ["README.md"]
+          "refs": [
+            "README.md"
+          ]
         }
       ],
       "build_mode": "unknown",
       "input": "original",
       "blockers": [],
-      "untested": ["completion", "other revisions and regions", "independent reproduction"]
+      "untested": [
+        "completion",
+        "other revisions and regions",
+        "independent reproduction"
+      ]
     },
     {
       "id": "master_system-sonic-2",
@@ -213,13 +282,19 @@
         {
           "category": "maintainer_reported_playthrough",
           "scope": "maintainer statement that the game runs well; no completion is claimed; no session recording is published",
-          "refs": ["README.md"]
+          "refs": [
+            "README.md"
+          ]
         }
       ],
       "build_mode": "unknown",
       "input": "original",
       "blockers": [],
-      "untested": ["completion", "other revisions and regions", "independent reproduction"]
+      "untested": [
+        "completion",
+        "other revisions and regions",
+        "independent reproduction"
+      ]
     },
     {
       "id": "master_system-wonder-boy-iii",
@@ -231,13 +306,19 @@
         {
           "category": "maintainer_reported_playthrough",
           "scope": "maintainer statement that the game runs well; no completion is claimed; no session recording is published",
-          "refs": ["README.md"]
+          "refs": [
+            "README.md"
+          ]
         }
       ],
       "build_mode": "unknown",
       "input": "original",
       "blockers": [],
-      "untested": ["completion", "other revisions and regions", "independent reproduction"]
+      "untested": [
+        "completion",
+        "other revisions and regions",
+        "independent reproduction"
+      ]
     },
     {
       "id": "master_system-alex-kidd-miracle-world",
@@ -249,13 +330,19 @@
         {
           "category": "maintainer_reported_playthrough",
           "scope": "maintainer statement that the game runs well; no completion is claimed; no session recording is published",
-          "refs": ["README.md"]
+          "refs": [
+            "README.md"
+          ]
         }
       ],
       "build_mode": "unknown",
       "input": "original",
       "blockers": [],
-      "untested": ["completion", "other revisions and regions", "independent reproduction"]
+      "untested": [
+        "completion",
+        "other revisions and regions",
+        "independent reproduction"
+      ]
     },
     {
       "id": "sega_cd-sonic-cd",
@@ -267,19 +354,35 @@
         {
           "category": "maintainer_reported_playthrough",
           "scope": "the maintainer reports having completed the game through segarecomp, including the special stages; this is a human report, not an automated or independently replayed run",
-          "refs": ["docs/product/sega-cd-play.md"]
+          "refs": [
+            "docs/product/sega-cd-play.md"
+          ]
         },
         {
           "category": "reference_comparison",
           "scope": "frame-for-frame checkpoints against an independent reference at pre-registered points: BIOS boot, title, first and second START, first level, a timed RIGHT input, special-stage attract demo and intro; checkpoint evidence only",
-          "refs": ["ADR 0176", "ADR 0177", "ADR 0249"]
+          "refs": [
+            "ADR 0176",
+            "ADR 0177",
+            "ADR 0249"
+          ]
         }
       ],
       "build_mode": "unknown",
       "input": "original",
-      "unknown_conditions": ["build mode of the completed run", "exact BIOS and disc image identity", "whether the session was recorded", "disc revision", "save workflow used"],
+      "unknown_conditions": [
+        "build mode of the completed run",
+        "exact BIOS and disc image identity",
+        "whether the session was recorded",
+        "disc revision",
+        "save workflow used"
+      ],
       "blockers": [],
-      "untested": ["independent reproduction of the full game", "audio level and FM/PSG quality against a reference", "other regions and revisions"]
+      "untested": [
+        "independent reproduction of the full game",
+        "audio level and FM/PSG quality against a reference",
+        "other regions and revisions"
+      ]
     },
     {
       "id": "sega_cd-earthworm-jim-special-edition",
@@ -291,19 +394,34 @@
         {
           "category": "maintainer_reported_playthrough",
           "scope": "the maintainer reports having completed the game through segarecomp; this is a human report, not an automated or independently replayed run",
-          "refs": ["platforms/sega-cd/README.md"]
+          "refs": [
+            "platforms/sega-cd/README.md"
+          ]
         },
         {
           "category": "automated_gameplay_route",
           "scope": "a deterministic scripted START then RIGHT route of 20,000 frames after the main-side Z80 work (SEG-114, SEG-115): the title, loading and first level run without a stop; no reference emulator was available, so this is not a reference comparison and not a completion",
-          "refs": ["ADR 0258", "ADR 0259"]
+          "refs": [
+            "ADR 0258",
+            "ADR 0259"
+          ]
         }
       ],
       "build_mode": "unknown",
       "input": "original",
-      "unknown_conditions": ["build mode of the completed run", "exact BIOS and disc image identity", "whether the session was recorded", "disc revision and region", "save workflow used"],
+      "unknown_conditions": [
+        "build mode of the completed run",
+        "exact BIOS and disc image identity",
+        "whether the session was recorded",
+        "disc revision and region",
+        "save workflow used"
+      ],
       "blockers": [],
-      "untested": ["independent reproduction of the full game", "FM/PSG audio quality against a reference", "other regions and revisions"]
+      "untested": [
+        "independent reproduction of the full game",
+        "FM/PSG audio quality against a reference",
+        "other regions and revisions"
+      ]
     }
   ],
   "patch_packages": [
@@ -314,11 +432,20 @@
       "schema": 2,
       "kind": "native provider plus BPS that moves the original HUD off screen",
       "distribution": "maintained_outside_repository",
-      "provides": ["authored scenery reconstruction", "relocated original HUD"],
+      "provides": [
+        "authored scenery reconstruction",
+        "relocated original HUD"
+      ],
       "gameplay_changes": "none beyond HUD sprites no longer queued; the optional sonic1-native-widescreen-gameplay package (EXPERIMENTAL) also widens object activation, which changes gameplay and diverges from natural play",
-      "validated_scope": "running levels of Green Hill, Labyrinth, Marble, Star Light, Spring Yard, Scrap Brain 1-2 and the Final Zone, along scripted routes; the special stage background is the VDP's own wrapped plane",
-      "untested": ["bosses and transitions outside the routes run", "ending", "other revisions", "completion with the patch"],
-      "evidence": ["ADR 0267", "docs/product/native-patch-sdk.md"]
+      "validated_scope": "all levels (extended scenery and widescreen: maintainer-stated independent validation; no public report or recording is published)",
+      "untested": [
+        "other revisions",
+        "gameplay effects of the optional -gameplay package beyond natural play"
+      ],
+      "evidence": [
+        "ADR 0267",
+        "docs/product/native-patch-sdk.md"
+      ]
     },
     {
       "id": "sonic2-native-widescreen",
@@ -327,11 +454,21 @@
       "schema": 2,
       "kind": "native provider plus BPS; a presentation-only variant leaves game variables identical to Vanilla",
       "distribution": "maintained_outside_repository",
-      "provides": ["authored scenery reconstruction", "relocated original HUD", "actors across the widened picture (standard package only)"],
+      "provides": [
+        "authored scenery reconstruction",
+        "relocated original HUD",
+        "actors across the widened picture (standard package only)"
+      ],
       "gameplay_changes": "the standard package widens actor coverage, which changes gameplay slightly (earlier enemy activation, longer-lived objects); the presentation-only package does not",
-      "validated_scope": "single-player running levels and demo scenes of the campaign inventory; title, special stages, split-screen, bonus screens and other scenes are declined and shown by the generic path",
-      "untested": ["Wing Fortress beyond its first sections", "ending and credits", "final boss", "special-stage presentation", "two-player mode", "PAL 240-line frames", "other revisions"],
-      "evidence": ["ADR 0267", "docs/product/native-patch-sdk.md"]
+      "validated_scope": "all levels (extended scenery and widescreen: maintainer-stated independent validation; no public report or recording is published)",
+      "untested": [
+        "other revisions",
+        "gameplay effects of the standard package beyond the described changes"
+      ],
+      "evidence": [
+        "ADR 0267",
+        "docs/product/native-patch-sdk.md"
+      ]
     },
     {
       "id": "sonic3k-native-widescreen",
@@ -340,11 +477,22 @@
       "schema": 2,
       "kind": "native provider plus BPS; a presentation-only variant exists",
       "distribution": "maintained_outside_repository",
-      "provides": ["authored foreground scenery reconstruction", "background reconstruction on some acts and the VDP's own wrapped plane elsewhere", "relocated original HUD", "actors in the margins (standard package only)"],
+      "provides": [
+        "authored foreground scenery reconstruction",
+        "background reconstruction on some acts and the VDP's own wrapped plane elsewhere",
+        "relocated original HUD",
+        "actors in the margins (standard package only)"
+      ],
       "gameplay_changes": "the standard package widens actor activation, which changes gameplay slightly; the presentation-only package changes only the HUD sprite position",
-      "validated_scope": "partial campaign: the Sonic-route acts were swept with 97.7 to 100 percent of level frames accepted; bosses, act transitions, the ending, Knuckles and Tails-alone routes are not verified",
-      "untested": ["bosses", "act transitions", "ending", "Knuckles route", "Tails-alone route", "standalone Sonic 3 and Sonic & Knuckles images"],
-      "evidence": ["ADR 0267", "ADR 0268"]
+      "validated_scope": "all levels (extended scenery and widescreen: maintainer-stated independent validation; no public report or recording is published)",
+      "untested": [
+        "standalone Sonic 3 and Sonic & Knuckles images",
+        "gameplay effects of the standard package beyond the described changes"
+      ],
+      "evidence": [
+        "ADR 0267",
+        "ADR 0268"
+      ]
     },
     {
       "id": "sor2-widescreen",
@@ -353,157 +501,314 @@
       "schema": 1,
       "kind": "data-only BPS that widens the game's sprite-piece submission window; uses generic Level 3 rendering",
       "distribution": "maintained_outside_repository",
-      "provides": ["additional sprite pieces and objects visible beside the native picture"],
+      "provides": [
+        "additional sprite pieces and objects visible beside the native picture"
+      ],
       "gameplay_changes": "none intended; the native picture was identical to Vanilla in all sampled frames",
-      "validated_scope": "stage 1 opening screens and the attract demo only",
-      "untested": ["later stages and crowded scenes", "authored scenery or HUD (none is provided)", "other revisions"],
-      "evidence": ["ADR 0266", "docs/product/patch-packages.md"]
+      "validated_scope": "all levels (extended scenery and widescreen: maintainer-stated independent validation; no public report or recording is published); the package provides extra sprites only",
+      "untested": [
+        "authored scenery or HUD (none is provided)",
+        "other revisions"
+      ],
+      "evidence": [
+        "ADR 0266",
+        "docs/product/patch-packages.md"
+      ]
     }
   ],
   "features": [
     {
       "id": "widescreen_level2",
       "name": "Extended Backgrounds (Level 2)",
-      "platforms": ["genesis", "master_system", "sega_cd"],
+      "platforms": [
+        "genesis",
+        "master_system",
+        "sega_cd"
+      ],
       "status": "partial",
       "released_in": null,
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "fixture tests per platform", "refs": ["ADR 0262", "ADR 0263"]}
+        {
+          "category": "synthetic_implementation_tests",
+          "scope": "fixture tests per platform",
+          "refs": [
+            "ADR 0262",
+            "ADR 0263"
+          ]
+        }
       ],
-      "limitations": ["generic and presentation-only: it never reveals game world the game did not draw", "Sega CD and Master System are always reported Partial", "a program built before this support needs a rebuild"]
+      "limitations": [
+        "generic and presentation-only: it never reveals game world the game did not draw",
+        "Sega CD and Master System are always reported Partial",
+        "a program built before this support needs a rebuild"
+      ]
     },
     {
       "id": "widescreen_level3",
       "name": "Enhanced Widescreen (Level 3)",
-      "platforms": ["genesis", "master_system", "sega_cd"],
+      "platforms": [
+        "genesis",
+        "master_system",
+        "sega_cd"
+      ],
       "status": "partial",
       "released_in": null,
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "fixture tests per platform", "refs": ["ADR 0264"]}
+        {
+          "category": "synthetic_implementation_tests",
+          "scope": "fixture tests per platform",
+          "refs": [
+            "ADR 0264"
+          ]
+        }
       ],
-      "limitations": ["draws only sprites the game already submits over the extra columns; it does not make a game create or update objects there", "always Partial", "falls back to Level 2 when the sprite layer cannot be produced"]
+      "limitations": [
+        "draws only sprites the game already submits over the extra columns; it does not make a game create or update objects there",
+        "always Partial",
+        "falls back to Level 2 when the sprite layer cannot be produced"
+      ]
     },
     {
       "id": "widescreen_width_and_side_styles",
       "name": "Widescreen Width and side treatments (Comfort, Borders, Raw Extension) with per-game settings",
-      "platforms": ["genesis", "master_system", "sega_cd"],
+      "platforms": [
+        "genesis",
+        "master_system",
+        "sega_cd"
+      ],
       "status": "implemented",
       "released_in": null,
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "viewer settings and launcher GUI tests", "refs": ["ADR 0265", "docs/product/viewer-ui.md"]}
+        {
+          "category": "synthetic_implementation_tests",
+          "scope": "viewer settings and launcher GUI tests",
+          "refs": [
+            "ADR 0265",
+            "docs/product/viewer-ui.md"
+          ]
+        }
       ],
-      "limitations": ["presentation only; Comfort is decorative and creates no gameplay visibility"]
+      "limitations": [
+        "presentation only; Comfort is decorative and creates no gameplay visibility"
+      ]
     },
     {
       "id": "patch_schema1_bps",
       "name": ".segapatch schema 1 (verified BPS data-only patch)",
-      "platforms": ["genesis"],
+      "platforms": [
+        "genesis"
+      ],
       "status": "implemented",
       "released_in": null,
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "package verification, mutation and launcher tests", "refs": ["ADR 0266", "docs/product/patch-packages.md"]}
+        {
+          "category": "synthetic_implementation_tests",
+          "scope": "package verification, mutation and launcher tests",
+          "refs": [
+            "ADR 0266",
+            "docs/product/patch-packages.md"
+          ]
+        }
       ],
-      "limitations": ["exact original image by SHA-256 only; no signatures"]
+      "limitations": [
+        "exact original image by SHA-256 only; no signatures"
+      ]
     },
     {
       "id": "patch_schema2_native",
       "name": ".segapatch schema 2 (trusted native C11 provider, optionally with BPS)",
-      "platforms": ["genesis"],
+      "platforms": [
+        "genesis"
+      ],
       "status": "implemented",
       "released_in": null,
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "SDK sample compiled from a package into a generated-native program; refusal cases; launcher approval flow. The full package-to-executable build test runs on Linux only", "refs": ["ADR 0267", "docs/product/native-patch-sdk.md"]}
+        {
+          "category": "synthetic_implementation_tests",
+          "scope": "SDK sample compiled from a package into a generated-native program; refusal cases; launcher approval flow. The full package-to-executable build test runs on Linux only",
+          "refs": [
+            "ADR 0267",
+            "docs/product/native-patch-sdk.md"
+          ]
+        }
       ],
-      "limitations": ["executable code, NOT sandboxed: hashes prove integrity, not author identity or safety", "end-to-end package build is CI-tested on Linux only; Windows and macOS validate compilation, packaging and launcher tests"]
+      "limitations": [
+        "executable code, NOT sandboxed: hashes prove integrity, not author identity or safety",
+        "end-to-end package build is CI-tested on Linux only; Windows and macOS validate compilation, packaging and launcher tests"
+      ]
     },
     {
       "id": "patch_variants_launcher",
       "name": "Launcher Vanilla / Patched variants with approval, rebuild and removal",
-      "platforms": ["genesis"],
+      "platforms": [
+        "genesis"
+      ],
       "status": "implemented",
       "released_in": null,
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "launcher_patch_gui_test and library catalog tests", "refs": ["ADR 0266", "docs/product/launcher-library.md"]}
+        {
+          "category": "synthetic_implementation_tests",
+          "scope": "launcher_patch_gui_test and library catalog tests",
+          "refs": [
+            "ADR 0266",
+            "docs/product/launcher-library.md"
+          ]
+        }
       ],
-      "limitations": ["Sonic 3 & Knuckles is recognized automatically as a lock-on cartridge only for exact header matches"]
+      "limitations": [
+        "Sonic 3 & Knuckles is recognized automatically as a lock-on cartridge only for exact header matches"
+      ]
     },
     {
       "id": "genesis_lock_on",
       "name": "Genesis lock-on pass-through cartridge",
-      "platforms": ["genesis"],
+      "platforms": [
+        "genesis"
+      ],
       "status": "implemented",
       "released_in": null,
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "lock-on build and launcher recognition tests", "refs": ["ADR 0268"]}
+        {
+          "category": "synthetic_implementation_tests",
+          "scope": "lock-on build and launcher recognition tests",
+          "refs": [
+            "ADR 0268"
+          ]
+        }
       ],
-      "limitations": ["modified, resized or unidentified images stay standard cartridges"]
+      "limitations": [
+        "modified, resized or unidentified images stay standard cartridges"
+      ]
     },
     {
       "id": "performance_overlay",
       "name": "Performance overlay (F3) and profiling reports",
-      "platforms": ["genesis", "master_system", "sega_cd"],
+      "platforms": [
+        "genesis",
+        "master_system",
+        "sega_cd"
+      ],
       "status": "implemented",
       "released_in": null,
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "sv_perf_test and sv_perf_overlay_test", "refs": ["ADR 0273", "docs/testing/performance-profiling.md"]}
+        {
+          "category": "synthetic_implementation_tests",
+          "scope": "sv_perf_test and sv_perf_overlay_test",
+          "refs": [
+            "ADR 0273",
+            "docs/testing/performance-profiling.md"
+          ]
+        }
       ],
-      "limitations": ["diagnostic aid, not a compatibility measure"]
+      "limitations": [
+        "diagnostic aid, not a compatibility measure"
+      ]
     },
     {
       "id": "genesis_z80_static_first",
       "name": "Static-first Genesis Z80 image production (--z80-static 1)",
-      "platforms": ["genesis"],
+      "platforms": [
+        "genesis"
+      ],
       "status": "experimental",
       "released_in": null,
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "producer, fallback and measurement tests", "refs": ["ADR 0277", "docs/testing/genesis-z80-static-first-measurements.md"]}
+        {
+          "category": "synthetic_implementation_tests",
+          "scope": "producer, fallback and measurement tests",
+          "refs": [
+            "ADR 0277",
+            "docs/testing/genesis-z80-static-first-measurements.md"
+          ]
+        }
       ],
-      "limitations": ["opt-in CLI flag, off by default and not exposed in the launcher", "applies only to Z80 images provable from the cartridge alone; the unchanged discovery fixed point runs otherwise", "not a guarantee for any title"]
+      "limitations": [
+        "opt-in CLI flag, off by default and not exposed in the launcher",
+        "applies only to Z80 images provable from the cartridge alone; the unchanged discovery fixed point runs otherwise",
+        "not a guarantee for any title"
+      ]
     },
     {
       "id": "sega_cd_backup_ram",
       "name": "Persistent Sega CD internal backup RAM",
-      "platforms": ["sega_cd"],
+      "platforms": [
+        "sega_cd"
+      ],
       "status": "implemented",
       "released_in": "v0.7.0",
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "launcher_sega_cd_save_test and backup-RAM unit tests", "refs": ["docs/product/launcher-library.md", "ADR 0252"]}
+        {
+          "category": "synthetic_implementation_tests",
+          "scope": "launcher_sega_cd_save_test and backup-RAM unit tests",
+          "refs": [
+            "docs/product/launcher-library.md",
+            "ADR 0252"
+          ]
+        }
       ],
-      "limitations": ["internal 8 KiB backup RAM only; no RAM cartridge; the save workflow of any specific title is not claimed"]
+      "limitations": [
+        "internal 8 KiB backup RAM only; no RAM cartridge; the save workflow of any specific title is not claimed"
+      ]
     },
     {
       "id": "sega_cd_input_recording",
       "name": "Sega CD input recording and exact replay",
-      "platforms": ["sega_cd"],
+      "platforms": [
+        "sega_cd"
+      ],
       "status": "implemented",
       "released_in": "v0.7.0",
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "launcher_sega_cd_flow_test", "refs": ["docs/product/sega-cd-play.md", "ADR 0204"]}
+        {
+          "category": "synthetic_implementation_tests",
+          "scope": "launcher_sega_cd_flow_test",
+          "refs": [
+            "docs/product/sega-cd-play.md",
+            "ADR 0204"
+          ]
+        }
       ],
-      "limitations": ["port-1 input only, about 2,000 button changes per recording", "Genesis has no viewer recording; Master System records with --viewer-record"]
+      "limitations": [
+        "port-1 input only, about 2,000 button changes per recording",
+        "Genesis has no viewer recording; Master System records with --viewer-record"
+      ]
     },
     {
       "id": "viewer_remapping",
       "name": "Keyboard and gamepad remapping with controller diagnostics",
-      "platforms": ["genesis", "master_system", "sega_cd"],
+      "platforms": [
+        "genesis",
+        "master_system",
+        "sega_cd"
+      ],
       "status": "implemented",
       "released_in": "v0.7.0",
       "available_on_main": true,
       "evidence": [
-        {"category": "synthetic_implementation_tests", "scope": "sv_host_test and sv_input_diag_test use SDL virtual devices; no physical-controller validation", "refs": ["docs/product/viewer-ui.md", "docs/testing/input-diagnostics.md"]}
+        {
+          "category": "synthetic_implementation_tests",
+          "scope": "sv_host_test and sv_input_diag_test use SDL virtual devices; no physical-controller validation",
+          "refs": [
+            "docs/product/viewer-ui.md",
+            "docs/testing/input-diagnostics.md"
+          ]
+        }
       ],
-      "limitations": ["Genesis is a three-button pad", "physical controller behavior is not validated; Switch 2 controllers are USB only"]
+      "limitations": [
+        "Genesis is a three-button pad",
+        "physical controller behavior is not validated; Switch 2 controllers are USB only"
+      ]
     }
   ]
 }
