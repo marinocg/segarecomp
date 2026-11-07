@@ -196,6 +196,30 @@ class M68k:
         self.fixups.append((len(self.words), routine_label))
         self.w(0)
 
+    def kos_staged_to_z80(self, stream_label, routine_label, length, clobber=False, destination=Z80_RAM):
+        """The two-stage loader shape of Sega-family drivers: expand the stream into a constant WORK RAM buffer, then copy the buffer into the Z80
+        RAM with a counted byte loop. `clobber` stores through a pointer the walk cannot resolve between the two stages (the buffer is then no
+        longer a proven source, although at run time the store lands outside it)."""
+        self.kos_call(stream_label, routine_label, 0xFF7000)
+        if clobber:
+            self.w(0x23FC)
+            self.l(0xFF9000)
+            self.l(0xFF0004)  # MOVE.L #$FF9000,(RAM).L
+            self.w(0x2679)
+            self.l(0xFF0004)  # MOVEA.L (RAM).L,A3
+            self.w(0x16BC, 0x0001)  # MOVE.B #1,(A3)
+        self.w(0x43F9)
+        self.l(destination)  # LEA destination,A1
+        self.w(0x45F9)
+        self.l(0xFF7000)  # LEA $FF7000,A2
+        self.w(0x343C, length - 1)  # MOVE.W #n-1,D2
+        loop = "stage_%d" % len(self.words)
+        self.label(loop)
+        self.w(0x12DA)  # MOVE.B (A2)+,(A1)+
+        self.w(0x51CA)  # DBRA D2
+        self.fixups.append((len(self.words), loop + ":dbra"))
+        self.w(0)
+
     def data(self, program_label, payload):
         self.label(program_label)
         padded = bytes(payload) + (b"\x00" if len(payload) % 2 else b"")
@@ -491,7 +515,7 @@ def build_sound(plan, programs, domestic_gate=False, region=b"U  ", prelude=None
         m.label("ack_%d" % waits)
         m.btst0(Z80_BUSREQ)
         m.branch(0x66, "ack_%d" % waits)
-        if kind in ("raw", "decoded", "raw_ram_count", "raw_ram_source", "raw_ram_destination", "kos", "kos_work"):
+        if kind in ("raw", "decoded", "raw_ram_count", "raw_ram_source", "raw_ram_destination", "kos", "kos_work", "kos_staged", "kos_staged_clobbered"):
             program = programs[arg]
             uploads[arg] = program
             if kind == "raw":
@@ -504,6 +528,9 @@ def build_sound(plan, programs, domestic_gate=False, region=b"U  ", prelude=None
                 m.copy_to_z80_from_ram_pointer(len(program), "cp_%d" % len(m.words), source_unknown=False, destination_unknown=True)
             elif kind == "kos":
                 m.kos_call("kos_" + arg, "kos_routine", kos_destination)
+                kos_used = True
+            elif kind in ("kos_staged", "kos_staged_clobbered"):
+                m.kos_staged_to_z80("kos_" + arg, "kos_routine", len(program), clobber=kind == "kos_staged_clobbered")
                 kos_used = True
             elif kind == "kos_work":  # a valid stream decompressed into WORK RAM: no Z80 effect, the stream is not an executable image
                 m.kos_call("kos_" + arg, "kos_routine", 0xFF8000)
@@ -526,7 +553,7 @@ def build_sound(plan, programs, domestic_gate=False, region=b"U  ", prelude=None
             m.data("enc_" + name, bytes(b ^ 0x5A for b in uploads[name]))
         if kinds & {"raw_ram_count", "raw_ram_source", "raw_ram_destination"}:
             m.data("prog_" + name, uploads[name])
-        if kinds & {"kos", "kos_work"}:
+        if kinds & {"kos", "kos_work", "kos_staged", "kos_staged_clobbered"}:
             m.data("kos_" + name, scd_common.kosinski_encode(uploads[name]))
     if kos_used:
         m.data("kos_routine", kos_routine if kos_routine is not None else KOS_REFERENCE_ROUTINE)
@@ -649,6 +676,17 @@ def fixture_static_partial():
     return build_sound([("raw", "a"), ("delay", SOUND_DELAY), ("decoded", "b")], {"a": sound_driver(1), "b": sound_driver(2)})
 
 
+def fixture_static_kos_staged():
+    """The Sega-family two-stage loader: a Kosinski stream expanded into a constant work-RAM buffer, then a counted copy into the Z80 RAM."""
+    return build_sound([("kos_staged", "a")], {"a": sound_driver(2)})
+
+
+def fixture_static_kos_staged_clobbered():
+    """The same, with a store through an unresolvable pointer between the stages: the buffer is no longer a proven source (a typed refusal),
+    the materializer discovers the image."""
+    return build_sound([("kos_staged_clobbered", "a")], {"a": sound_driver(2)})
+
+
 def fixture_static_raw_beyond_ram():
     """A raw upload longer than the 8 KiB sound RAM (it runs into the mirror): not a provable single-RAM image (destination_out_of_ram)."""
     page = sound_driver(1) + bytes(0x100 - len(sound_driver(1)))
@@ -668,7 +706,8 @@ FIXTURES = {"multi_epoch_dirty": fixture_multi_epoch_dirty, "bus_reset_probe": f
             "static_kos_work_ram": fixture_static_kos_work_ram, "static_ram_count": fixture_static_ram_count,
             "static_ram_source": fixture_static_ram_source, "static_ram_destination": fixture_static_ram_destination,
             "static_two_phase": fixture_static_two_phase, "static_raw_beyond_ram": fixture_static_raw_beyond_ram,
-            "static_kos_beyond_ram": fixture_static_kos_beyond_ram, "static_partial": fixture_static_partial}
+            "static_kos_beyond_ram": fixture_static_kos_beyond_ram, "static_partial": fixture_static_partial,
+            "static_kos_staged": fixture_static_kos_staged, "static_kos_staged_clobbered": fixture_static_kos_staged_clobbered}
 
 
 def build(name):

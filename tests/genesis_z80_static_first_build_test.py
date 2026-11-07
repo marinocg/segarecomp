@@ -80,6 +80,7 @@ EQUIVALENCE = {
     "sound_multi_epoch": ("complete", "none", 2, 1),     # A, B, restart (empty hold window), A again: stable ordinals
     "static_two_phase": ("complete", "none", 2, 1),      # A, B, A, restart
     "static_kos": ("complete", "none", 1, 1),            # the recognised reference decompressor, stream decoded at generation time
+    "static_kos_staged": ("complete", "none", 1, 1),     # the Sega-family two-stage loader: decode into a work-RAM buffer, counted copy to the Z80 RAM
     "static_stub_driver": ("complete", "none", 2, 1),    # stub, then the driver over it, then the driver again
     "static_partial": ("partial", "none", 1, 2),         # A proven; the computed B is discovered by the unchanged fixed point
     "static_ram_count": ("partial", "none", 1, 2),       # the data-dependent second upload is refused and discovered
@@ -89,6 +90,7 @@ FALLBACK = {
     "sound_domestic_gated_overseas_header": ("complete", "image_never_activated"),     # the region-gated upload is not reached as USA
     "sound_smc_fault": ("complete", "image_after_sound_fault"),                        # the second epoch is after the sound CPU was isolated
     "static_kos_unrecognised": ("none", "none"),                                       # unrecognised decompressor: nothing proven, nothing changed
+    "static_kos_staged_clobbered": ("none", "none"),                                   # the staged buffer is not a proven source after an unresolved store
     "static_ram_source": ("none", "none"),
     "static_ram_destination": ("none", "none"),
     "static_raw_beyond_ram": ("none", "none"),

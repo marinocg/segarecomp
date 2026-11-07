@@ -1183,7 +1183,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     status_extra += ",\"static\":{\"outcome\":\"" + std::string(gz80::static_outcome_name(static_production.outcome)) + "\",\"epochs\":" + std::to_string(static_production.epochs.size()) +
                     ",\"images_proven\":" + std::to_string(static_images) + ",\"images_kept\":" + std::to_string(static_images_kept) + ",\"images_final\":" + std::to_string(summary.images) +
                     ",\"verified\":" + (static_images_kept > 0 ? "true" : "false") + ",\"fallback\":\"" + static_fallback + "\",\"candidates\":" + std::to_string(static_production.candidates) +
-                    ",\"copy_loops\":" + std::to_string(static_production.copy_loops) + ",\"decoder_calls\":" + std::to_string(static_production.decoder_calls) +
+                    ",\"copy_loops\":" + std::to_string(static_production.copy_loops) + ",\"decoder_calls\":" + std::to_string(static_production.decoder_calls) + ",\"staged_decodes\":" + std::to_string(static_production.staged_decodes) +
                     ",\"steps\":" + std::to_string(static_production.steps) + ",\"nodes\":" + std::to_string(static_production.nodes) + ",\"contexts\":" + std::to_string(static_production.contexts) +
                     ",\"horizon_paths\":" + std::to_string(static_production.horizon_paths) + ",\"ms\":" + std::to_string(static_ms) + ",\"refusals\":{" + refusals + "}}}";
   }

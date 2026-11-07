@@ -56,6 +56,14 @@
       "sha256": "0765e59125a66fdd0d28720526096bae3a94c6e0d2d49d16a5b6f2cb8081df61",
       "size": 16384
     },
+    "static_kos_staged": {
+      "sha256": "d3921e09c9084313e54a2c6b4ae57a36ce002ea00bc87c45cbab05aa47fa223c",
+      "size": 16384
+    },
+    "static_kos_staged_clobbered": {
+      "sha256": "a48ad4c01f482fd6d9689e02c7b080732b679845228403ae845264ce6771103d",
+      "size": 16384
+    },
     "static_kos_unrecognised": {
       "sha256": "eba0372267e2183c5fd478cb22c8547b80aa97bb40031db9b72fd0001a928458",
       "size": 16384

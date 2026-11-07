@@ -89,6 +89,9 @@ constexpr std::uint32_t kBusRegionEnd = 0x00A12000U;
 constexpr std::uint32_t kIoBegin = 0x00A10000U;
 constexpr std::uint32_t kIoEnd = 0x00A10020U;
 constexpr std::uint32_t kRomEnd = 0x00400000U;
+constexpr std::uint32_t kWorkRam = 0x00FF0000U;
+constexpr std::uint32_t kWorkRamEnd = 0x01000000U;
+constexpr std::size_t kMaxStageBytes = 0x4000;  // one staged (decoded) work-RAM buffer, see Context::stage
 constexpr std::size_t kMaxRoutineBytes = 384;  // the decoder routine scan: first RTS within this many bytes
 constexpr std::size_t kMaxDecompressedBytes = kRamBytes;
 constexpr std::uint16_t kMaxLooseStores = 48;  // see Flow store()
@@ -153,10 +156,15 @@ struct Context {
   std::uint8_t io_written = 0;             // an I/O-area store was seen: control-register power-on values no longer hold
   std::uint8_t proof = 0;                  // StaticProof of the current window
   std::uint16_t loose_stores = 0;          // non-idiom, non-constant stores applied in the current window (bounded)
+  // A STAGED buffer: the output of a recognised decompressor call whose destination is constant work RAM. It is a function of immutable ROM bytes
+  // only, so a later counted copy out of exactly that range is a proven source - as long as nothing may have written the range since: any store
+  // through an unknown pointer or into the range, and any call of an unrecognised routine, discards it (Walker::touch).
+  std::uint32_t stage_base = 0;
+  std::vector<std::uint8_t> stage;
   std::vector<std::uint32_t> window_stores;  // pcs of non-constant stores in the current window (loop check)
   std::vector<std::uint32_t> epochs;       // epoch ids, activation order
   std::vector<std::uint32_t> calls;        // shadow return stack
-  auto key() const { return std::tie(blob, busreq, released, executed, io_written, proof, loose_stores, window_stores, epochs, calls); }
+  auto key() const { return std::tie(blob, busreq, released, executed, io_written, proof, loose_stores, stage_base, stage, window_stores, epochs, calls); }
   bool operator<(const Context& o) const { return key() < o.key(); }
 };
 
@@ -407,12 +415,25 @@ class Walker {
     c.blob[kRamBytes + (offset >> 3U)] = static_cast<std::uint8_t>(c.blob[kRamBytes + (offset >> 3U)] | (1U << (offset & 7U)));
   }
 
+  // A write of `bytes` bytes to work RAM (or anywhere): discards the staged buffer when it may overlap it. A stack-based store with an unknown
+  // address is assumed to be the 68K stack, which does not overlap a staging buffer (a wrong assumption surfaces as a different image: the
+  // verification run then contradicts the prediction).
+  static void touch(Context& c, std::optional<std::uint32_t> at, std::uint32_t bytes, bool stack_based) {
+    if (c.stage.empty()) return;
+    if (!at) {
+      if (!stack_based) c.stage.clear();
+      return;
+    }
+    if (*at < c.stage_base + c.stage.size() && static_cast<std::uint64_t>(*at) + bytes > c.stage_base) c.stage.clear();
+  }
+
   enum class Flow : std::uint8_t { go, dead };
 
   // One store of `w` bytes of `value` at `address` (runtime route rules). `kind_plain`: a plain MOVE/CLR (the only recognised store);
   // `constant_form`: an immediate stored to an absolute address (idempotent in any loop); `pc`: for the loop check.
   Flow store(Context& c, std::optional<std::uint32_t> address, Width w, std::optional<std::uint32_t> value, bool plain, bool constant_form,
              std::uint32_t pc, bool stack_based) {
+    touch(c, address, nbytes(w), stack_based);
     if (!address) {
       if (stack_based) return Flow::go;
       if (c.busreq == 0U) return Flow::go;  // the 68K does not own the bus: a Z80-area store would stop the runtime, never alter the window
@@ -445,10 +466,6 @@ class Walker {
         c.window_stores.push_back(pc);
         // A bounded number of individually executed non-constant stores: a longer sequence is a loop the walk would unroll store by store
         // (state explosion over an unrecognised mechanism).
-        if (!c.calls.empty()) {  // inside a called routine that is not a recognised decompressor: its stores are not a proven mechanism
-          refuse(StaticRefusal::decompression_unproven);
-          return Flow::dead;
-        }
         if (++c.loose_stores > kMaxLooseStores) {
           refuse(StaticRefusal::loop_unproven);
           return Flow::dead;
@@ -493,13 +510,17 @@ class Walker {
     if (!r.d[idiom.counter].has(0xFFFFU)) { refuse(StaticRefusal::length_unknown); return Copy::dead; }
     const std::uint32_t count = (r.d[idiom.counter].v & 0xFFFFU) + 1U;
     if (dst + count > kZ80RamEnd) { refuse(StaticRefusal::destination_out_of_ram); return Copy::dead; }
-    if (!r.a[idiom.src].full() || r.a[idiom.src].v >= kRomEnd || static_cast<std::uint64_t>(r.a[idiom.src].v) + count > rom_.size()) {
+    const bool src_known = r.a[idiom.src].full();
+    const std::uint32_t src = r.a[idiom.src].v & 0x00FFFFFFU;
+    const bool from_rom = src_known && src < kRomEnd && static_cast<std::uint64_t>(src) + count <= rom_.size();
+    const bool from_stage = src_known && !from_rom && !c.stage.empty() && src >= c.stage_base &&
+                            static_cast<std::uint64_t>(src) + count <= static_cast<std::uint64_t>(c.stage_base) + c.stage.size();
+    if (!from_rom && !from_stage) {
       refuse(StaticRefusal::source_not_immutable);
       return Copy::dead;
     }
-    const std::uint32_t src = r.a[idiom.src].v;
-    for (std::uint32_t i = 0; i < count; ++i) note_ram_write(c, dst - kZ80Ram + i, rom_[src + i]);
-    c.proof = std::max<std::uint8_t>(c.proof, static_cast<std::uint8_t>(StaticProof::rom_copy));
+    for (std::uint32_t i = 0; i < count; ++i) note_ram_write(c, dst - kZ80Ram + i, from_rom ? rom_[src + i] : c.stage[src - c.stage_base + i]);
+    c.proof = std::max<std::uint8_t>(c.proof, static_cast<std::uint8_t>(from_stage ? StaticProof::kosinski : StaticProof::rom_copy));
     ++out_.copy_loops;
     r.a[idiom.src] = K(src + count);
     r.a[idiom.dst] = K(dst + count);
@@ -538,7 +559,20 @@ class Walker {
     consumed = true;
     if (!r.a[0].full() || !r.a[1].full()) { refuse(StaticRefusal::decompression_unproven); live = false; return true; }
     const std::uint32_t src = r.a[0].v & 0x00FFFFFFU, dst = r.a[1].v & 0x00FFFFFFU;
-    if (dst < kZ80Ram || dst >= kZ80Window) return true;  // decompresses elsewhere (work RAM): no Z80 effect; registers clobbered below
+    if (dst < kZ80Ram || dst >= kZ80Window) {
+      // Decompresses elsewhere: no Z80 effect now (registers are clobbered by the caller). A constant work-RAM destination of a constant ROM
+      // stream is remembered as the staged buffer; anything else the routine writes discards the previous one.
+      c.stage.clear();
+      if (dst >= kWorkRam && dst < kWorkRamEnd && src < kRomEnd && src < rom_.size()) {
+        KosinskiResult staged = kosinski_decode(rom_, src, std::min<std::size_t>(kMaxStageBytes, kWorkRamEnd - dst));
+        if (staged.error == KosinskiError::none && !staged.output.empty()) {
+          c.stage_base = dst;
+          c.stage = std::move(staged.output);
+          ++out_.staged_decodes;
+        }
+      }
+      return true;
+    }
     if (c.busreq > 1U || c.released > 1U || !granted(c)) { live = false; return true; }
     if (src >= kRomEnd || src >= rom_.size()) { refuse(StaticRefusal::source_not_immutable); live = false; return true; }
     if (dst >= kZ80RamEnd) { refuse(StaticRefusal::destination_out_of_ram); live = false; return true; }
@@ -672,6 +706,7 @@ class Walker {
         } else if (is_memory(ea)) {
           // a read-modify-write of memory: never a Z80-window store the walk models
           const auto at = address_of(r, ea, w);
+          touch(c, at, nbytes(w), (ea.reg & 7U) == 7U);
           if (at && *at >= kZ80Ram && *at < kZ80Window && !(c.busreq == 0U)) { refuse(StaticRefusal::z80_store_form_unsupported); return; }
           r.f = Flags{};
         } else {
@@ -737,6 +772,7 @@ class Walker {
           const bool stack = (op.destination_ea.reg & 7U) == 7U &&
                              (op.destination_ea.mode == M68kEaMode::address_predec || op.destination_ea.mode == M68kEaMode::address_indirect);
           const auto at = address_of(r, op.destination_ea, w);
+          touch(c, at, 64U, stack);
           if (at && *at >= kZ80Ram && *at < kZ80Window && c.busreq != 0U) { refuse(StaticRefusal::z80_store_form_unsupported); return; }
           if (!at && !stack && c.busreq != 0U) { refuse(StaticRefusal::z80_store_unknown_address); return; }
           if (at && *at >= kIoBegin && *at < kIoEnd) c.io_written = 1;
@@ -787,6 +823,7 @@ class Walker {
             default: {
               Regs probe = r;
               const auto at = address_of(probe, op.destination_ea, w);
+              touch(c, at, 4U, stack);
               if (at) {
                 if (*at >= kIoBegin && *at < kIoEnd) c.io_written = 1;
                 if ((*at >= kZ80Ram && *at < kZ80Window) || (*at >= kBusRegionBegin && *at < kBusRegionEnd)) {
@@ -836,6 +873,7 @@ class Walker {
           continue_to(next, after, c);
           return;
         }
+        c.stage.clear();  // an unrecognised callee may write any RAM
         if (granted(c)) {  // a routine the walk cannot recognise, called while the 68K owns the bus: its writes into the window are not proven
           refuse(StaticRefusal::decompression_unproven);
           return;

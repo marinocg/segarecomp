@@ -16,7 +16,9 @@
 //     destination range is constant inside the 8 KiB sound RAM:
 //       - constant-valued stores, and a counted `MOVE.B (An)+,(Am)+ ; DBRA Dn` copy of constant operands from the ROM image;
 //       - a call of the Kosinski decompressor whose M68K routine (position independent code lying in the ROM image) is one of the
-//         recognised forms, with a constant ROM stream address and a constant RAM destination, decoded by the public Kosinski decoder.
+//         recognised forms, with a constant ROM stream address and a constant RAM destination, decoded by the public Kosinski decoder;
+//         the destination is either the sound RAM or a constant work-RAM range ("staging": a later counted copy out of exactly that
+//         range, with nothing having written it since, is a copy of immutable-derived bytes).
 //     An equal byte sequence is never taken as proof of a causal upload: bytes only enter the model through those mechanisms;
 //   * everything else the walk meets that could change the Z80 window (a store through an unknown pointer while the 68K owns the
 //     bus, an unknown-valued bus write, an unrecognised loop or decompressor feeding the window) is a typed refusal and ends that
@@ -100,7 +102,8 @@ struct StaticProduction {
   std::uint32_t contexts = 0;                       // distinct Z80 contexts
   std::uint32_t candidates = 0;                     // distinct epochs seen on any path (before the common-prefix rule)
   std::uint32_t copy_loops = 0;                     // counted ROM copies recognised
-  std::uint32_t decoder_calls = 0;                  // recognised decompressor calls applied
+  std::uint32_t decoder_calls = 0;                  // recognised decompressor calls applied to the sound RAM
+  std::uint32_t staged_decodes = 0;                 // recognised decompressor calls into constant work RAM (a staged buffer a counted copy may consume)
   std::uint32_t horizon_paths = 0;                  // paths that ended at dynamic control flow, a stop, or a return without caller
   [[nodiscard]] bool proven() const noexcept { return !epochs.empty(); }
 };

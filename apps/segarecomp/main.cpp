@@ -1116,11 +1116,20 @@ int run_cli(int argc, char **argv) {
       std::cout << "outcome=" << gz::static_outcome_name(production.outcome) << " epochs=" << production.epochs.size()
                 << " candidates=" << production.candidates << " steps=" << production.steps << " nodes=" << production.nodes
                 << " contexts=" << production.contexts << " copy_loops=" << production.copy_loops
-                << " decoder_calls=" << production.decoder_calls << " horizon_paths=" << production.horizon_paths;
+                << " decoder_calls=" << production.decoder_calls << " staged_decodes=" << production.staged_decodes << " horizon_paths=" << production.horizon_paths;
       gz::Registry registry;
       gz::StaticProduction copy = production;
       const std::size_t images = gz::preload_registry(registry, copy);
       std::cout << " images=" << images;
+      {
+        // per epoch: the number of 68K-written bytes and extents of its hold window (counts only)
+        std::cout << " window_bytes=";
+        for (std::size_t i = 0; i < production.epochs.size(); ++i) {
+          std::size_t bytes = 0;
+          for (const auto &run : gz::extents(production.epochs[i].epoch.written)) bytes += run.length;
+          std::cout << (i == 0 ? "" : ",") << bytes << "/" << gz::extents(production.epochs[i].epoch.written).size() << gz::static_proof_name(production.epochs[i].proof)[0];
+        }
+      }
       for (const auto &[refusal, count] : production.refusals) std::cout << " refusal." << gz::static_refusal_name(refusal) << "=" << count;
       std::cout << '\n';
       return 0;

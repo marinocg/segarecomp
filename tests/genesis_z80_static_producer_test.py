@@ -50,6 +50,7 @@ EXPECT = {
     "multi_epoch_dirty": ("complete", 6, 3, {}),                                   # carry-over bytes outside every extent; plain restart; repeats
     "static_kos": ("complete", 1, 1, {"decoder_calls": "1", "copy_loops": "0"}),   # the recognised reference decompressor
     "static_stub_driver": ("complete", 3, 2, {"decoder_calls": "2", "copy_loops": "1"}),  # stub, driver, driver again
+    "static_kos_staged": ("complete", 1, 1, {"staged_decodes": "1", "copy_loops": "1", "decoder_calls": "0"}),  # the Sega-family two-stage loader
     "static_kos_work_ram": ("complete", 2, 2, {"decoder_calls": "0"}),             # a valid stream expanded into WORK RAM contributes no image bytes
     "sound_domestic_gated": ("complete", 1, 1, {}),                                # an unknown region branch outside the window does not hide the upload
     # refused shapes: nothing is claimed
@@ -59,6 +60,7 @@ EXPECT = {
     "static_ram_destination": ("none", 0, 0, {"refusal.z80_store_unknown_address": "1"}),
     "static_raw_beyond_ram": ("none", 0, 0, {"refusal.destination_out_of_ram": "1"}),
     "static_kos_beyond_ram": ("none", 0, 0, {"refusal.destination_out_of_ram": "1"}),
+    "static_kos_staged_clobbered": ("none", 0, 0, {"refusal.z80_store_unknown_address": "1", "staged_decodes": "1"}),  # the buffer is no longer a proven source
     "static_kos_unrecognised": ("none", 0, 0, {"refusal.decompression_unproven": "1", "decoder_calls": "0"}),
 }
 
