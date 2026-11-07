@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "genesis_persistence.h"
 #include "runtime.h"
 #include "vdp_render.h"
 #include "viewer.h"
@@ -151,6 +152,20 @@ static void perf_write_report(const char *path, const char *status, const char *
   (void)sv_perf_write_file(&g_perf, &meta, path);
 }
 
+
+/* ---- SEG-131 (ADR 0278): battery-backed SRAM / X24C01 EEPROM persistence. The launcher names the directory of the running cartridge and variant in SEGARECOMP_SAVE_DIR for an
+ * interactive session only; replays, recordings and the build pass never receive it. The load happens after the generated main installed the cartridge memory and
+ * before the first guest instruction; the commit happens only when the player ended the session (Quit, Return to Launcher, window close). A typed guest stop, an
+ * exhausted runner budget, a host error, a crash or a kill never commits. Every outcome is reported on one stderr line the launcher reads from the run log. ---- */
+static void persist_report(const char *event, const char *status, const char *detail) {
+  fprintf(stderr, "VIEWER_PERSIST {\"event\":\"%s\",\"status\":\"%s\",\"detail\":\"%s\"}\n", event, status, detail);
+}
+
+static const char *persist_dir(void) {
+  const char *dir = getenv("SEGARECOMP_SAVE_DIR");
+  return dir != NULL && *dir != '\0' ? dir : NULL;
+}
+
 GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                                uint32_t dispatch_allowance) {
   const char *argv[3];
@@ -173,6 +188,16 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
 #ifdef SEGARECOMP_GENESIS_SOUND
   (void)genesis_sound_attach(runtime); /* the Z80 machine and the shared PSG/YM2612, identical to the headless program */
 #endif
+  if (persist_dir() != NULL && genesis_persist_file_name(runtime) != NULL) {
+    const GenesisPersistStatus loaded = genesis_persist_load(runtime, persist_dir());
+    if (loaded == GENESIS_PERSIST_OK) persist_report("load", "loaded", genesis_persist_file_name(runtime));
+    else if (loaded == GENESIS_PERSIST_FRESH) persist_report("load", "fresh", genesis_persist_file_name(runtime));
+    else {  /* an unreadable / wrong-size / non-regular save is never overwritten and never silently replaced by a blank one: refuse before any guest instruction */
+      persist_report("load", "refused", genesis_persist_status_text(loaded));
+      fprintf(stderr, "viewer: the save file %s was refused (%s); it was left untouched\n", genesis_persist_file_name(runtime), genesis_persist_status_text(loaded));
+      exit(6);
+    }
+  }
   char window_title[160];
   const char *game_title = getenv("SEGARECOMP_GAME_TITLE");
   GenesisSdl3Viewer *sdl;
@@ -286,6 +311,14 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
           "VIEWER_SUMMARY {\"viewer_opened\":true,\"frame_publication_observed\":%s,"
           "\"frame_presented\":%s,\"outcome\":\"%s\",\"execution\":\"generated-native\"}\n",
           observer.sequence > 0 ? "true" : "false", r.frames_presented > 0 ? "true" : "false", name);
+  if (persist_dir() != NULL && genesis_persist_file_name(runtime) != NULL) {
+    if (r.outcome == GENESIS_VIEWER_WINDOW_CLOSED) {
+      const GenesisPersistStatus stored = genesis_persist_commit(runtime, persist_dir());
+      persist_report("commit", stored == GENESIS_PERSIST_OK ? "stored" : "kept_previous", stored == GENESIS_PERSIST_OK ? genesis_persist_file_name(runtime) : genesis_persist_status_text(stored));
+    } else {
+      persist_report("commit", "not_clean_exit", name);  /* typed guest stop, runner budget, host error: the previous save stays as it was */
+    }
+  }
   if (perf_path != NULL) {
     /* complete: the session ended as requested (window closed, budget reached, guest finished); incomplete: a typed guest stop ended it (the numbers are valid up to it); failed: a host error */
     const char *status = r.outcome == GENESIS_VIEWER_GUEST_STOP ? "incomplete" : (r.outcome == GENESIS_VIEWER_HOST_ERROR || r.outcome == GENESIS_VIEWER_INVALID_ARGUMENT ? "failed" : "complete");
