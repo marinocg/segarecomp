@@ -1,0 +1,657 @@
+{
+ "schema": "segarecomp-mod-support-matrix",
+ "schema_version": 1,
+ "as_of": "2026-11-08",
+ "note": "Mod platform support levels, kept alongside the compatibility ledger and checked by tools/check_product_truth.py. A reporting document: it never changes capability detection or build admission. Rules: docs/product/mod-support-matrix.md.",
+ "levels": [
+  "supported-and-tested",
+  "supported-with-limitations",
+  "experimental",
+  "unsupported"
+ ],
+ "beta_targets": [
+  "supported-and-tested",
+  "supported-with-limitations",
+  "experimental",
+  "unsupported",
+  "spike-gated"
+ ],
+ "platforms": [
+  {
+   "id": "genesis",
+   "name": "Genesis / Mega Drive"
+  },
+  {
+   "id": "master_system",
+   "name": "Master System"
+  },
+  {
+   "id": "sega_cd",
+   "name": "Sega CD"
+  }
+ ],
+ "capabilities": [
+  {
+   "id": "package-identity-build",
+   "name": "Package identity and build"
+  },
+  {
+   "id": "guest-data-code-modifications",
+   "name": "Guest data/code modifications"
+  },
+  {
+   "id": "luau-scripting",
+   "name": "Luau lifecycle and gameplay scripting"
+  },
+  {
+   "id": "native-c11-extension",
+   "name": "Native C11 extension support"
+  },
+  {
+   "id": "input-modifications",
+   "name": "Input modifications"
+  },
+  {
+   "id": "memory-access",
+   "name": "Memory access"
+  },
+  {
+   "id": "function-hooks",
+   "name": "Function hooks"
+  },
+  {
+   "id": "asset-authoring",
+   "name": "Asset authoring"
+  },
+  {
+   "id": "graphics-hud",
+   "name": "Graphics and HUD"
+  },
+  {
+   "id": "widescreen-presentation",
+   "name": "Widescreen presentation (16:9 today; up to 32:9 planned)"
+  },
+  {
+   "id": "guest-native-audio",
+   "name": "Guest-native audio"
+  },
+  {
+   "id": "enhanced-audio",
+   "name": "Enhanced audio"
+  },
+  {
+   "id": "mod-composition",
+   "name": "Multiple-mod composition"
+  },
+  {
+   "id": "save-states-rewind-with-mods",
+   "name": "Save states / rewind with mods"
+  },
+  {
+   "id": "developer-tooling",
+   "name": "Developer tooling"
+  },
+  {
+   "id": "public-docs-distribution",
+   "name": "Public docs and patch distribution"
+  }
+ ],
+ "rows": [
+  {
+   "platform": "genesis",
+   "capability": "package-identity-build",
+   "level": "supported-with-limitations",
+   "beta_target": "supported-and-tested",
+   "evidence": [
+    "docs/product/patch-packages.md",
+    "ADR 0266",
+    "ADR 0267"
+   ],
+   "existing_tests": [
+    "tests/segapatch_package_test.py",
+    "tests/segapatch_native_package_test.py"
+   ],
+   "planned_owner": "SEG-135-T006"
+  },
+  {
+   "platform": "master_system",
+   "capability": "package-identity-build",
+   "level": "unsupported",
+   "beta_target": "supported-and-tested",
+   "evidence": [
+    "docs/architecture/modding-platform-gap-inventory.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-147-T001"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "package-identity-build",
+   "level": "unsupported",
+   "beta_target": "experimental",
+   "evidence": [
+    "docs/architecture/modding-platform-gap-inventory.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-148-T002"
+  },
+  {
+   "platform": "genesis",
+   "capability": "guest-data-code-modifications",
+   "level": "supported-with-limitations",
+   "beta_target": "supported-and-tested",
+   "evidence": [
+    "docs/product/patch-packages.md"
+   ],
+   "existing_tests": [
+    "tests/segapatch_package_test.py"
+   ],
+   "planned_owner": "SEG-136-T006"
+  },
+  {
+   "platform": "master_system",
+   "capability": "guest-data-code-modifications",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/modding-platform-gap-inventory.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-147-T002"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "guest-data-code-modifications",
+   "level": "unsupported",
+   "beta_target": "experimental",
+   "evidence": [
+    "docs/architecture/modding-platform-gap-inventory.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-148-T002"
+  },
+  {
+   "platform": "genesis",
+   "capability": "luau-scripting",
+   "level": "unsupported",
+   "beta_target": "supported-and-tested",
+   "evidence": [
+    "docs/architecture/luau-trust-policy.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-137-T006"
+  },
+  {
+   "platform": "master_system",
+   "capability": "luau-scripting",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/luau-trust-policy.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-147-T004"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "luau-scripting",
+   "level": "unsupported",
+   "beta_target": "experimental",
+   "evidence": [
+    "docs/architecture/luau-trust-policy.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-148-T006"
+  },
+  {
+   "platform": "genesis",
+   "capability": "native-c11-extension",
+   "level": "supported-with-limitations",
+   "beta_target": "supported-and-tested",
+   "evidence": [
+    "docs/product/native-patch-sdk.md",
+    "ADR 0267"
+   ],
+   "existing_tests": [
+    "tests/genesis_patch_provider_build_test.py",
+    "tests/segapatch_native_package_test.py"
+   ],
+   "planned_owner": "SEG-135-T003"
+  },
+  {
+   "platform": "master_system",
+   "capability": "native-c11-extension",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/native-sdk-abi-2.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-146-T003"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "native-c11-extension",
+   "level": "unsupported",
+   "beta_target": "experimental",
+   "evidence": [
+    "docs/architecture/native-sdk-abi-2.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-146-T003"
+  },
+  {
+   "platform": "genesis",
+   "capability": "input-modifications",
+   "level": "unsupported",
+   "beta_target": "supported-and-tested",
+   "evidence": [
+    "docs/architecture/mod-execution-phases.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-138-T001"
+  },
+  {
+   "platform": "master_system",
+   "capability": "input-modifications",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/mod-execution-phases.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-147-T004"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "input-modifications",
+   "level": "unsupported",
+   "beta_target": "experimental",
+   "evidence": [
+    "docs/architecture/mod-execution-phases.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-148-T005"
+  },
+  {
+   "platform": "genesis",
+   "capability": "memory-access",
+   "level": "supported-with-limitations",
+   "beta_target": "supported-and-tested",
+   "evidence": [
+    "docs/product/native-patch-sdk.md",
+    "docs/architecture/mod-platform-adapters.md"
+   ],
+   "existing_tests": [
+    "tests/genesis_native_compat_viewer_sdl_test.c"
+   ],
+   "planned_owner": "SEG-138-T002"
+  },
+  {
+   "platform": "master_system",
+   "capability": "memory-access",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/mod-platform-adapters.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-147-T004"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "memory-access",
+   "level": "unsupported",
+   "beta_target": "experimental",
+   "evidence": [
+    "docs/architecture/mod-platform-adapters.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-148-T005"
+  },
+  {
+   "platform": "genesis",
+   "capability": "function-hooks",
+   "level": "unsupported",
+   "beta_target": "spike-gated",
+   "evidence": [
+    "docs/architecture/mod-execution-phases.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-138-T004",
+   "gate": "SEG-138-T003"
+  },
+  {
+   "platform": "master_system",
+   "capability": "function-hooks",
+   "level": "unsupported",
+   "beta_target": "spike-gated",
+   "evidence": [
+    "docs/architecture/mod-execution-phases.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-147-T008",
+   "gate": "SEG-147-T003"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "function-hooks",
+   "level": "unsupported",
+   "beta_target": "spike-gated",
+   "evidence": [
+    "docs/architecture/mod-execution-phases.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-148-T008",
+   "gate": "SEG-148-T004"
+  },
+  {
+   "platform": "genesis",
+   "capability": "asset-authoring",
+   "level": "unsupported",
+   "beta_target": "supported-and-tested",
+   "evidence": [
+    "docs/architecture/segapatch-schema-3.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-135-T003"
+  },
+  {
+   "platform": "master_system",
+   "capability": "asset-authoring",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/segapatch-schema-3.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-147-T007"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "asset-authoring",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/segapatch-schema-3.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-148-T002"
+  },
+  {
+   "platform": "genesis",
+   "capability": "graphics-hud",
+   "level": "supported-with-limitations",
+   "beta_target": "supported-and-tested",
+   "evidence": [
+    "docs/product/native-patch-sdk.md"
+   ],
+   "existing_tests": [
+    "tests/genesis_native_compat_viewer_sdl_test.c"
+   ],
+   "planned_owner": "SEG-140-T004"
+  },
+  {
+   "platform": "master_system",
+   "capability": "graphics-hud",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/modding-platform-gap-inventory.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-147-T006"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "graphics-hud",
+   "level": "unsupported",
+   "beta_target": "experimental",
+   "evidence": [
+    "docs/architecture/modding-platform-gap-inventory.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-148-T009"
+  },
+  {
+   "platform": "genesis",
+   "capability": "widescreen-presentation",
+   "level": "supported-with-limitations",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/product/widescreen-and-patches.md"
+   ],
+   "existing_tests": [
+    "tests/genesis_extension_test.cpp"
+   ],
+   "planned_owner": "SEG-139-T006"
+  },
+  {
+   "platform": "master_system",
+   "capability": "widescreen-presentation",
+   "level": "experimental",
+   "beta_target": "unsupported",
+   "evidence": [
+    "docs/product/widescreen-and-patches.md",
+    "docs/architecture/modding-platform-gap-inventory.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-147-T009"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "widescreen-presentation",
+   "level": "experimental",
+   "beta_target": "unsupported",
+   "evidence": [
+    "docs/product/widescreen-and-patches.md",
+    "docs/architecture/modding-platform-gap-inventory.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-148-T010"
+  },
+  {
+   "platform": "genesis",
+   "capability": "guest-native-audio",
+   "level": "unsupported",
+   "beta_target": "supported-and-tested",
+   "evidence": [
+    "docs/architecture/modding-audio-architecture.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-145-T003"
+  },
+  {
+   "platform": "master_system",
+   "capability": "guest-native-audio",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/modding-audio-architecture.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-145-T004"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "guest-native-audio",
+   "level": "unsupported",
+   "beta_target": "experimental",
+   "evidence": [
+    "docs/architecture/modding-audio-architecture.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-145-T006"
+  },
+  {
+   "platform": "genesis",
+   "capability": "enhanced-audio",
+   "level": "unsupported",
+   "beta_target": "unsupported",
+   "evidence": [
+    "docs/architecture/modding-audio-architecture.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-145-T009"
+  },
+  {
+   "platform": "master_system",
+   "capability": "enhanced-audio",
+   "level": "unsupported",
+   "beta_target": "unsupported",
+   "evidence": [
+    "docs/architecture/modding-audio-architecture.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-145-T009"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "enhanced-audio",
+   "level": "unsupported",
+   "beta_target": "unsupported",
+   "evidence": [
+    "docs/architecture/modding-audio-architecture.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-145-T009"
+  },
+  {
+   "platform": "genesis",
+   "capability": "mod-composition",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/mod-execution-phases.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-141-T006"
+  },
+  {
+   "platform": "master_system",
+   "capability": "mod-composition",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/mod-execution-phases.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-141-T007"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "mod-composition",
+   "level": "unsupported",
+   "beta_target": "unsupported",
+   "evidence": [
+    "docs/architecture/mod-execution-phases.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-141-T008"
+  },
+  {
+   "platform": "genesis",
+   "capability": "save-states-rewind-with-mods",
+   "level": "experimental",
+   "beta_target": "supported-and-tested",
+   "evidence": [
+    "docs/architecture/genesis-save-states-persistence-and-rewind.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-138-T006"
+  },
+  {
+   "platform": "master_system",
+   "capability": "save-states-rewind-with-mods",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/mod-execution-phases.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-147-T005"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "save-states-rewind-with-mods",
+   "level": "unsupported",
+   "beta_target": "experimental",
+   "evidence": [
+    "docs/architecture/mod-execution-phases.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-148-T007"
+  },
+  {
+   "platform": "genesis",
+   "capability": "developer-tooling",
+   "level": "supported-with-limitations",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/product/patch-packages.md"
+   ],
+   "existing_tests": [
+    "tests/segapatch_package_test.py"
+   ],
+   "planned_owner": "SEG-136-T007"
+  },
+  {
+   "platform": "master_system",
+   "capability": "developer-tooling",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/modding-platform-gap-inventory.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-147-T010"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "developer-tooling",
+   "level": "unsupported",
+   "beta_target": "experimental",
+   "evidence": [
+    "docs/architecture/modding-platform-gap-inventory.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-148-T011"
+  },
+  {
+   "platform": "genesis",
+   "capability": "public-docs-distribution",
+   "level": "supported-with-limitations",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/product/patch-packages.md",
+    "docs/product/native-patch-sdk.md"
+   ],
+   "existing_tests": [
+    "tests/product_truth_test.py"
+   ],
+   "planned_owner": "SEG-143-T007"
+  },
+  {
+   "platform": "master_system",
+   "capability": "public-docs-distribution",
+   "level": "unsupported",
+   "beta_target": "supported-with-limitations",
+   "evidence": [
+    "docs/architecture/modding-platform-gap-inventory.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-143-T007"
+  },
+  {
+   "platform": "sega_cd",
+   "capability": "public-docs-distribution",
+   "level": "unsupported",
+   "beta_target": "experimental",
+   "evidence": [
+    "docs/architecture/modding-platform-gap-inventory.md"
+   ],
+   "existing_tests": [],
+   "planned_owner": "SEG-143-T007"
+  }
+ ]
+}

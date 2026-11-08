@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Public documentation gate: validates the compatibility ledger and a few cross-document facts.
 
-usage: check_product_truth.py [--root <repository root>]
+usage: check_product_truth.py [--root <repository root>] [--render-matrix]
 
 Standard library only. It reads public files of this repository: no network, no external repository, no commercial
 image. The ledger (docs/product/compatibility-ledger.json) is a REPORTING document; nothing here changes how the
@@ -11,7 +11,9 @@ Checks:
   1. ledger structure, enumerations, unique ids, contradictory outcomes and broken local evidence references;
   2. local Markdown links of the authoritative status documents;
   3. a few facts that the status documents and the ledger must agree on;
-  4. known contradictory legacy assertions that must not return to the current-status pages.
+  4. known contradictory legacy assertions that must not return to the current-status pages;
+  5. the mod support matrix (docs/product/mod-support-matrix.json): structure, one row per platform x capability,
+     a `supported-*` level only with cited test evidence, an owning test for every row, and the rendered docs page.
 Exit status 0 when clean, 1 with one line per problem.
 """
 import argparse
@@ -22,6 +24,13 @@ import struct
 import sys
 
 LEDGER_PATH = "docs/product/compatibility-ledger.json"
+MATRIX_PATH = "docs/product/mod-support-matrix.json"
+MATRIX_DOC = "docs/product/mod-support-matrix.md"
+MATRIX_BEGIN = "<!-- matrix:begin -->"
+MATRIX_END = "<!-- matrix:end -->"
+MATRIX_LEVELS = ("supported-and-tested", "supported-with-limitations", "experimental", "unsupported")
+MATRIX_GATED = "spike-gated"
+MATRIX_PLANNED = re.compile(r"^SEG-\d{3}-T\d{3}$")
 
 PLATFORM_STATUS = ("implemented", "experimental", "planned")
 EXECUTION_LEVELS = ("unknown", "boot", "title", "gameplay", "playable", "completed")
@@ -71,7 +80,7 @@ STATUS_DOCS = (
     "packaging/README.md",
     "packaging/README.txt",
 )
-LINK_DOCS = STATUS_DOCS + ("docs/product/compatibility-ledger.md", "docs/testing/commercial-games.md", "CHANGELOG.md", "docs/assets/showcase/README.md")
+LINK_DOCS = STATUS_DOCS + ("docs/product/compatibility-ledger.md", "docs/product/mod-support-matrix.md", "docs/testing/commercial-games.md", "CHANGELOG.md", "docs/assets/showcase/README.md")
 
 # Contradictory or superseded assertions that must not reappear in a current-status page.
 FORBIDDEN = (
@@ -94,6 +103,7 @@ FORBIDDEN = (
 def parse_args(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", default=str(pathlib.Path(__file__).resolve().parents[1]))
+    parser.add_argument("--render-matrix", action="store_true", help="print the beta matrix table that docs/product/mod-support-matrix.md must contain")
     return parser.parse_args(argv)
 
 
@@ -305,6 +315,102 @@ def validate_ledger(ledger, root):
     return problems
 
 
+def is_test_ref(ref):
+    """A test reference is an existing repository file under tests/ or an app test directory whose name says it is a test."""
+    path = ref.split("#", 1)[0]
+    return path.startswith("tests/") or (path.startswith("apps/") and "_test" in path.rsplit("/", 1)[-1])
+
+
+def validate_mod_matrix(matrix, root):
+    """The support-level matrix: a row may claim `supported-*` only with cited, existing test evidence."""
+    problems = []
+    if not expect_keys("matrix", matrix, ("schema", "schema_version", "as_of", "note", "levels", "beta_targets", "platforms", "capabilities", "rows"), (), problems):
+        return problems
+    if matrix.get("schema") != "segarecomp-mod-support-matrix":
+        problems.append("matrix: schema must be 'segarecomp-mod-support-matrix'")
+    if matrix.get("schema_version") != 1:
+        problems.append("matrix: schema_version must be 1")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(matrix.get("as_of"))):
+        problems.append("matrix: as_of must be YYYY-MM-DD")
+    if tuple(matrix.get("levels", ())) != MATRIX_LEVELS:
+        problems.append(f"matrix: levels must be exactly {list(MATRIX_LEVELS)}")
+    if tuple(matrix.get("beta_targets", ())) != MATRIX_LEVELS + (MATRIX_GATED,):
+        problems.append(f"matrix: beta_targets must be the levels plus {MATRIX_GATED!r}")
+    platform_ids = [p.get("id") for p in matrix.get("platforms", []) if isinstance(p, dict)]
+    capability_ids = [c.get("id") for c in matrix.get("capabilities", []) if isinstance(c, dict)]
+    if not platform_ids or len(platform_ids) != len(set(platform_ids)):
+        problems.append("matrix: platforms must be a non-empty list of unique ids")
+    if not capability_ids or len(capability_ids) != len(set(capability_ids)):
+        problems.append("matrix: capabilities must be a non-empty list of unique ids")
+    seen = set()
+    for index, row in enumerate(matrix.get("rows", [])):
+        owner = f"matrix.rows[{index}]"
+        if not expect_keys(owner, row, ("platform", "capability", "level", "beta_target", "evidence", "existing_tests", "planned_owner"), ("gate",), problems):
+            continue
+        key = (row.get("platform"), row.get("capability"))
+        owner = f"matrix row {key[0]}/{key[1]}"
+        if key[0] not in platform_ids or key[1] not in capability_ids:
+            problems.append(f"{owner}: unknown platform or capability")
+        if key in seen:
+            problems.append(f"{owner}: duplicate row")
+        seen.add(key)
+        level = row.get("level")
+        if level not in MATRIX_LEVELS:
+            problems.append(f"{owner}: unsupported level {level!r}")
+        target = row.get("beta_target")
+        if target not in MATRIX_LEVELS + (MATRIX_GATED,):
+            problems.append(f"{owner}: unsupported beta_target {target!r}")
+        if target == MATRIX_GATED and not (isinstance(row.get("gate"), str) and MATRIX_PLANNED.match(row["gate"])):
+            problems.append(f"{owner}: a spike-gated target must name its gate task (SEG-NNN-TNNN)")
+        if target != MATRIX_GATED and "gate" in row:
+            problems.append(f"{owner}: 'gate' is only for a spike-gated target")
+        if not isinstance(row.get("planned_owner"), str) or not MATRIX_PLANNED.match(row["planned_owner"]):
+            problems.append(f"{owner}: planned_owner must be a task id (SEG-NNN-TNNN)")
+        check_refs(f"{owner}.evidence", row.get("evidence"), root, problems)
+        tests = row.get("existing_tests")
+        if not isinstance(tests, list) or any(not isinstance(t, str) for t in tests):
+            problems.append(f"{owner}: existing_tests must be a list of paths")
+            continue
+        for ref in tests:
+            if not is_test_ref(ref) or not ref_exists(ref, root):
+                problems.append(f"{owner}: existing_tests entry {ref!r} is not an existing test file")
+        if isinstance(level, str) and level.startswith("supported") and not tests:
+            problems.append(f"{owner}: level {level!r} requires cited test evidence in existing_tests")
+        if level == "unsupported" and tests:
+            problems.append(f"{owner}: an unsupported row must not cite passing tests")
+    for platform in platform_ids:
+        for capability in capability_ids:
+            if (platform, capability) not in seen:
+                problems.append(f"matrix: missing row {platform}/{capability}")
+    return problems
+
+
+def render_mod_matrix(matrix):
+    """The beta test matrix as Markdown: every platform x capability with its owning test."""
+    names = {p["id"]: p["name"] for p in matrix["platforms"]}
+    caps = {c["id"]: c["name"] for c in matrix["capabilities"]}
+    lines = ["| Capability | Platform | Current level | Public-beta target | Owning test |", "| --- | --- | --- | --- | --- |"]
+    for capability in matrix["capabilities"]:
+        for row in (r for r in matrix["rows"] if r["capability"] == capability["id"]):
+            target = row["beta_target"] if row["beta_target"] != MATRIX_GATED else f"spike-gated ({row['gate']})"
+            test = ", ".join(f"`{t}`" for t in row["existing_tests"]) if row["existing_tests"] else f"planned: {row['planned_owner']}"
+            lines.append(f"| {caps[row['capability']]} | {names[row['platform']]} | {row['level']} | {target} | {test} |")
+    return "\n".join(lines)
+
+
+def check_mod_matrix_doc(root, matrix):
+    path = root / MATRIX_DOC
+    if not path.exists():
+        return [f"{MATRIX_DOC}: missing (it renders the support matrix)"]
+    text = path.read_text(encoding="utf-8")
+    if MATRIX_BEGIN not in text or MATRIX_END not in text:
+        return [f"{MATRIX_DOC}: must contain the {MATRIX_BEGIN} / {MATRIX_END} markers around the rendered table"]
+    body = text.split(MATRIX_BEGIN, 1)[1].split(MATRIX_END, 1)[0].strip()
+    if body != render_mod_matrix(matrix):
+        return [f"{MATRIX_DOC}: the table differs from the matrix; regenerate it with tools/check_product_truth.py --render-matrix"]
+    return []
+
+
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
 
@@ -439,6 +545,15 @@ def run(root):
     except (OSError, ValueError) as error:
         return [f"{LEDGER_PATH}: cannot read ledger: {error}"]
     problems = validate_ledger(ledger, root)
+    try:
+        matrix = json.loads((root / MATRIX_PATH).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        problems.append(f"{MATRIX_PATH}: cannot read matrix: {error}")
+    else:
+        matrix_problems = validate_mod_matrix(matrix, root)
+        problems += matrix_problems
+        if not matrix_problems:
+            problems += check_mod_matrix_doc(root, matrix)
     texts = {name: (root / name).read_text(encoding="utf-8") for name in STATUS_DOCS + ("CHANGELOG.md", LEDGER_PATH) if (root / name).exists()}
     problems += check_links(root, LINK_DOCS)
     problems += check_forbidden(texts)
@@ -449,6 +564,10 @@ def run(root):
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.render_matrix:
+        root = pathlib.Path(args.root).resolve()
+        print(render_mod_matrix(json.loads((root / MATRIX_PATH).read_text(encoding="utf-8"))))
+        return 0
     problems = run(pathlib.Path(args.root).resolve())
     for problem in problems:
         print("FAIL:", problem, file=sys.stderr)
