@@ -67,7 +67,7 @@ GENESIS_RUNTIME = ROOT / "platforms" / "genesis" / "runtime"
 SCD_VIEWER = ROOT / "platforms" / "sega-cd" / "viewer"
 GENESIS_VIEWER = ROOT / "platforms" / "genesis" / "viewer"
 SV_DIR = ROOT / "libs" / "viewer"
-SV_SOURCES = ("sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_rewind.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c",
+SV_SOURCES = ("sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_rewind.c", "sv_state_store.c", "sv_state_service.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c",
               "sv_host.c", "sv_pages.c", "sv_draw.c")
 CFLAGS = ["-std=c11", "-Wall", "-Wextra", "-pedantic", "-Werror", "-Wno-type-limits", "-O1"]
 MAX_EPOCHS = 4
@@ -397,13 +397,15 @@ class Driver:
         out = self.work / ("program-viewer" + EXE)
         host_source = self.args.viewer_host_source
         includes = [SCD_RUNTIME, GENESIS_RUNTIME, SCD_VIEWER, GENESIS_VIEWER, SV_DIR / "include", SV_DIR / "src"]
+        # SEG-132 (ADR 0279): the Sega CD state codec and the Genesis section codecs it reuses link with every viewer variant (this driver builds programs without the main-side Z80)
+        snapshot_units = [SCD_VIEWER / "scd_snapshot.c", GENESIS_RUNTIME / "genesis_snapshot.c"]
         if host_source:
-            sdl, sources, host = ([], []), [pathlib.Path(host_source)], "test"
+            sdl, sources, host = ([], []), [pathlib.Path(host_source)] + snapshot_units, "test"
         else:
             sdl = find_sdl3()
             if sdl is None:
                 raise BuildFailure("sdl3_unavailable", "SDL3 headers/library not found (install SDL3 or set SDL3_PREFIX)")
-            sources = [SCD_VIEWER / "scd_viewer.c", GENESIS_VIEWER / "viewer.c", GENESIS_VIEWER / "viewer_sdl3.c"] + [SV_DIR / "src" / n for n in SV_SOURCES]
+            sources = [SCD_VIEWER / "scd_viewer.c", SCD_VIEWER / "scd_viewer_state.c", GENESIS_VIEWER / "viewer.c", GENESIS_VIEWER / "viewer_sdl3.c"] + snapshot_units + [SV_DIR / "src" / n for n in SV_SOURCES]
             host = "sdl3"
         inc_flags = [f for d in includes for f in ("-I", str(d))] + sdl[0]
         with tempfile.TemporaryDirectory(dir=self.objects_dir) as tmp:

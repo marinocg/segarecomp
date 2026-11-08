@@ -194,21 +194,22 @@ namespace {
 
 // SEG-131 (ADR 0278): a Genesis game's player data -- cartridge saves and save states of every version -- lives in <library>/saves/genesis/<original sha256>/.
 // It is measured into EntryUsage::user_data and nothing else: no plan can reach it (plans are built from build folders only, and execute_plan refuses any other path).
-void scan_genesis_saves(StorageReport &report, const Catalog &catalog, const fs::path &library_root, const std::atomic<bool> *cancel) {
+// SEG-132 (ADR 0279): a Master System game's save states live in <library>/saves/master-system/<cartridge sha256>/<mapper>/, protected in exactly the same way.
+void scan_console_saves(StorageReport &report, const Catalog &catalog, const fs::path &library_root, const std::atomic<bool> *cancel) {
   for (std::size_t i = 0; i < catalog.entries().size() && i < report.entries.size(); ++i) {
     const LibraryEntry &entry = catalog.entries()[i];
-    if (entry.platform_id != "genesis" || entry.sha256.size() != 64) continue;
+    if ((entry.platform_id != "genesis" && entry.platform_id != "master-system") || entry.sha256.size() != 64) continue;
     if (cancel != nullptr && cancel->load()) return;
-    const fs::path folder = library_root / "saves" / "genesis" / entry.sha256;
+    const fs::path folder = library_root / "saves" / entry.platform_id / entry.sha256;
     if (!is_dir_real(folder)) continue;
     report.entries[i].user_data += measure_path(folder);
-    report.entries[i].genesis_saves = true;
+    if (entry.platform_id == "genesis") report.entries[i].genesis_saves = true; else report.entries[i].sms_saves = true;
   }
 }
 
 // SEG-109-T004 (ADR 0253): the Sega CD games' folders under <library>/sega-cd/<id16>/. The generated build folders become ordinary BuildDirUsage rows of the
 // owning entry (so every report, rail and plan treats them like a native game's build); the loose generated files are only counted; the player's own
-// data (backup RAM, input recordings) is measured into EntryUsage::user_data and nothing else.
+// data (backup RAM, input recordings, SEG-132 save states) is measured into EntryUsage::user_data and nothing else.
 void scan_sega_cd_games(StorageReport &report, const Catalog &catalog, const fs::path &library_root, const std::atomic<bool> *cancel) {
   for (std::size_t i = 0; i < catalog.entries().size() && i < report.entries.size(); ++i) {
     const LibraryEntry &entry = catalog.entries()[i];
@@ -237,7 +238,7 @@ void scan_sega_cd_games(StorageReport &report, const Catalog &catalog, const fs:
     // Loose generated files of the game's folder: counted (logs / other), not removable here.
     for (const char *name : {"run.log", "last-report.json"}) usage.total.logs += measure_path(folder / name);
     for (const char *name : {"build-backup-ram.bin", "replay-backup-ram.bin", "backup-ram.next"}) usage.total.other += measure_path(folder / name);
-    usage.user_data = measure_path(folder / "backup-ram.bin") + measure_path(folder / "backup-ram.bin.prev") + measure_path(folder / "recordings");
+    usage.user_data = measure_path(folder / "backup-ram.bin") + measure_path(folder / "backup-ram.bin.prev") + measure_path(folder / "recordings") + measure_path(folder / "states");   // SEG-132: save states are the player's data too
   }
   // Folders of games no longer in the library: their generated build folders stay visible (as unlinked rows) so they can still be reclaimed; their user data
   // is left alone and unreported.
@@ -331,7 +332,7 @@ StorageReport scan_storage(const Catalog &catalog, const fs::path &cache_root, c
     report.zig_truncated = m.truncated;
   }
   scan_sega_cd_games(report, catalog, library_root, cancel);
-  scan_genesis_saves(report, catalog, library_root, cancel);
+  scan_console_saves(report, catalog, library_root, cancel);
   {
     const fs::path objects = cache_root / "sega-cd-objects";
     if (is_dir_real(objects)) {
@@ -527,12 +528,19 @@ Plan plan_remove_from_library(const StorageReport &report, const std::vector<std
   std::size_t with_genesis_saves = 0;
   for (const auto &id : plan.entry_ids)
     if (const EntryUsage *entry = report.find(id); entry != nullptr && entry->genesis_saves) { ++with_genesis_saves; if (entry->user_data > 0 && with_user_data > 0) --with_user_data; }
+  std::size_t with_sms_saves = 0;
+  for (const auto &id : plan.entry_ids)
+    if (const EntryUsage *entry = report.find(id); entry != nullptr && entry->sms_saves) { ++with_sms_saves; if (entry->user_data > 0 && with_user_data > 0) --with_user_data; }
+  if (with_sms_saves > 0) {
+    plan.remains.push_back("Save states of " + std::to_string(with_sms_saves) + (with_sms_saves == 1 ? " Master System game" : " Master System games") + " (protected: kept in the library folder under saves/)");
+    plan.notes.push_back("Only generated build files can be deleted here; game saves and save states are never deleted by Segarecomp.");
+  }
   if (with_genesis_saves > 0) {
     plan.remains.push_back("Game saves and save states of " + std::to_string(with_genesis_saves) + (with_genesis_saves == 1 ? " Genesis game" : " Genesis games") + " (protected: kept in the library folder under saves/)");
     plan.notes.push_back("Only generated build files can be deleted here; game saves and save states are never deleted by Segarecomp.");
   }
   if (with_user_data > 0) {
-    plan.remains.push_back("Save data and input recordings of " + std::to_string(with_user_data) + (with_user_data == 1 ? " Sega CD game" : " Sega CD games") + " (protected: kept in the library folder; adding the same BIOS and disc again finds them)");
+    plan.remains.push_back("Save data, save states and input recordings of " + std::to_string(with_user_data) + (with_user_data == 1 ? " Sega CD game" : " Sega CD games") + " (protected: kept in the library folder; adding the same BIOS and disc again finds them)");
     plan.notes.push_back("Only generated build files can be deleted here; saves and recordings are never deleted by Segarecomp.");
   }
   return plan;

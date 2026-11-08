@@ -103,7 +103,7 @@ not bundled with any release, results depend on the exact game, revision and pac
 
 More: [widescreen and patches overview](docs/product/widescreen-and-patches.md), [patch packages](docs/product/patch-packages.md), [native patch SDK](docs/product/native-patch-sdk.md).
 
-## Save states and rewind **(main only; Genesis)**
+## Save states and rewind **(main only; Genesis, Master System, Sega CD)**
 
 ![The rewind screen over Sonic the Hedgehog (Green Hill Zone) with a patched widescreen build: a preview of the selected moment, a timeline of real pictures from the last 42 seconds, NOW at the right](docs/assets/showcase/sonic-1-rewind-screen-16x9.png)
 
@@ -114,7 +114,7 @@ More: [widescreen and patches overview](docs/product/widescreen-and-patches.md),
   continues exactly where you left off. A failed save never damages the old state and a failed load never changes the running game.
 * **Rewind (F7).** The game keeps a moment every half second for the last minute (about 120 moments, in memory only), so you can undo a mistake. Open the rewind screen, browse the pictures on the timeline with the arrow keys, the D-pad or the mouse, pick one and play on from there;
   cancelling changes nothing. The pause menu's *Rewind* row and holding both gamepad triggers open it too.
-* Master System and Sega CD show these rows disabled for now. Everything, including where the files live, what is guaranteed and measured costs, is in [docs/product/save-states.md](docs/product/save-states.md).
+* The same states and rewind work on **Master System** (cartridge RAM is in every state but not saved between sessions) and **Sega CD** (a state is bound to the disc, the BIOS and the program's image set; loading one changes only the backup RAM in memory, and about 43 seconds fit in the default 96 MiB). Everything, including where the files live, what is guaranteed and measured costs, is in [docs/product/save-states.md](docs/product/save-states.md).
 
 ## Download and try segarecomp
 
@@ -129,8 +129,8 @@ Check the downloaded archive against `SHA256SUMS.txt`.
 2. Drop your ROM into the window or select **Browse...** (Genesis `.md/.bin/.gen/.smd` and Master System `.sms`, or a `.zip` holding exactly one). For Sega CD use **Import ROMs > Add Sega CD game...** with your BIOS image and the disc's CUE file.
 3. Open the game and choose the build settings below, then **Recompile & Play** (for Sega CD, **Build**, then **Play**). The first build can take several minutes (a Sega CD disc, much longer); cached builds start immediately.
 4. Play. **Esc** (or the gamepad's Back button) opens the pause menu: Save State, Load State, Rewind, Quick Settings, Video & Display, Controls, Audio, System. Closing the window returns to the launcher.
-   On Genesis your game's own saves (SRAM / EEPROM) are kept automatically when you quit, and you can save and load whole-machine states (**F5** / **F8** for the quick slot, five numbered slots in the menu) and
-   **rewind** (**F7**) through the last minute of play: see [docs/product/save-states.md](docs/product/save-states.md).
+   On Genesis your game's own saves (SRAM / EEPROM) are kept automatically when you quit; on Genesis, Master System and Sega CD you can save and load whole-machine states (**F5** / **F8** for the quick slot, five numbered slots in the menu) and
+   **rewind** (**F7**) through the last minute of play (about 43 seconds on Sega CD): see [docs/product/save-states.md](docs/product/save-states.md).
    Master System games need their cartridge mapper declared on the game's page.
 
 ### Install a verified patch **(main only; Genesis)**
@@ -172,7 +172,7 @@ An image without compatibility metadata may be labelled **Compatibility unknown*
 - **Controls:** by default arrow keys, Z/X/C for A/B/C and Return for Start (Genesis); Master System uses Z/X for buttons 1/2 and P for the console Pause. **Keys and gamepad buttons can be remapped** on the pause
   menu's **Controls** page (Player 1 and Player 2, fresh-press capture, duplicate-owner warning, restore defaults), and the menu key is rebindable (Esc always works). Genesis is a **three-button** pad; there is no
   six-button X/Y/Z/Mode input. Other in-game keys: **F11** fullscreen, **F12** saves a PNG of the **game picture** (source pixels, not the effects or the widescreen extension) to `Pictures/Segarecomp`,
-  **F5** / **F8** quick save / quick load and **F7** rewind (Genesis), **F3** cycles the performance overlay **(main only)**. Audio volume and mute are on the Audio page; the output device follows the OS. Controller trouble: Settings > Input Diagnostics.
+  **F5** / **F8** quick save / quick load and **F7** rewind (Genesis, Master System, Sega CD; the Sega CD frame step is **F9**), **F3** cycles the performance overlay **(main only)**. Audio volume and mute are on the Audio page; the output device follows the OS. Controller trouble: Settings > Input Diagnostics.
 - **Recording and replay:** Sega CD sessions can be recorded and replayed exactly from the game's details page; the Master System viewer records with `--viewer-record`. The Genesis viewer has no input recording.
 - **Sega CD saves:** the internal backup RAM persists between sessions as protected user data that cleanup, rebuilds and removing the game never delete.
 - **Genesis region:** USA NTSC, Japan NTSC or Europe PAL. This currently changes

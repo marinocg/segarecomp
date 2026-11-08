@@ -947,3 +947,85 @@ done:
 GenesisSnapshotStatus genesis_snapshot_restore(const GenesisSnapshotMachine *machine, const GenesisSnapshotIdentity *identity, const uint8_t *data, size_t size) {
   return restore_impl(machine, identity, data, size, 1);
 }
+
+/* ---------------------------------------------------------------------------------------------------------------------------------- */
+/* SEG-132: exported section codecs (see genesis_snapshot.h). Thin wrappers over the static codecs above; the Genesis container is unchanged. */
+
+static uint32_t part_finish(Writer *w, uint8_t *out, uint32_t cap) {
+  uint32_t size = 0U;
+  if (!w->error && w->size <= cap) { memcpy(out, w->data, w->size); size = w->size; }
+  free(w->data);
+  return size;
+}
+
+uint32_t genesis_snapshot_part_vdp_put(const GenesisRuntime *runtime, uint8_t *out, uint32_t cap) {
+  Writer w;
+  memset(&w, 0, sizeof w);
+  put_vdp(&w, &runtime->devices.vdp);
+  return part_finish(&w, out, cap);
+}
+int genesis_snapshot_part_vdp_get(GenesisRuntime *stage, const uint8_t *in, uint32_t length) {
+  Reader r;
+  r.p = in; r.size = length; r.off = 0U; r.error = 0;
+  return get_vdp(&r, &stage->devices.vdp);
+}
+uint32_t genesis_snapshot_part_io_put(const GenesisRuntime *runtime, uint8_t *out, uint32_t cap) {
+  Writer w;
+  memset(&w, 0, sizeof w);
+  put_io(&w, runtime);
+  return part_finish(&w, out, cap);
+}
+int genesis_snapshot_part_io_get(GenesisRuntime *stage, const uint8_t *in, uint32_t length) {
+  Reader r;
+  r.p = in; r.size = length; r.off = 0U; r.error = 0;
+  return get_io(&r, stage);
+}
+
+#ifdef SEGARECOMP_GENESIS_SOUND
+uint32_t genesis_snapshot_part_z80_put(const GenesisZ80Machine *machine, uint8_t *out, uint32_t cap, GenesisSnapshotStatus *status) {
+  Writer w;
+  memset(&w, 0, sizeof w);
+  *status = put_z80(&w, machine);
+  if (*status != GENESIS_SNAPSHOT_OK) { free(w.data); return 0U; }
+  return part_finish(&w, out, cap);
+}
+GenesisSnapshotStatus genesis_snapshot_part_z80_get(GenesisZ80Machine *stage, const uint8_t *in, uint32_t length) {
+  Reader r;
+  r.p = in; r.size = length; r.off = 0U; r.error = 0;
+  return get_z80(&r, stage);
+}
+uint32_t genesis_snapshot_part_psg_put(const GenesisAudio *audio, uint8_t *out, uint32_t cap) {
+  Writer w;
+  memset(&w, 0, sizeof w);
+  put_psg(&w, audio);
+  return part_finish(&w, out, cap);
+}
+int genesis_snapshot_part_psg_get(GenesisAudio *stage, const uint8_t *in, uint32_t length) {
+  Reader r;
+  r.p = in; r.size = length; r.off = 0U; r.error = 0;
+  return get_psg(&r, stage);
+}
+uint32_t genesis_snapshot_part_mixer_put(const GenesisAudio *audio, uint8_t *out, uint32_t cap, GenesisSnapshotStatus *status) {
+  Writer w;
+  memset(&w, 0, sizeof w);
+  *status = put_mixer(&w, &audio->mixer);
+  if (*status != GENESIS_SNAPSHOT_OK) { free(w.data); return 0U; }
+  return part_finish(&w, out, cap);
+}
+int genesis_snapshot_part_mixer_get(GenesisAudio *stage, const uint8_t *in, uint32_t length) {
+  Reader r;
+  r.p = in; r.size = length; r.off = 0U; r.error = 0;
+  return get_mixer(&r, &stage->mixer);
+}
+uint32_t genesis_snapshot_part_audio_put(const GenesisAudio *audio, uint8_t *out, uint32_t cap) {
+  Writer w;
+  memset(&w, 0, sizeof w);
+  put_audio_counters(&w, audio);
+  return part_finish(&w, out, cap);
+}
+int genesis_snapshot_part_audio_get(GenesisAudio *stage, const uint8_t *in, uint32_t length) {
+  Reader r;
+  r.p = in; r.size = length; r.off = 0U; r.error = 0;
+  return get_audio_counters(&r, stage);
+}
+#endif

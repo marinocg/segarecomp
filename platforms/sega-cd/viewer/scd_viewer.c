@@ -8,6 +8,9 @@
 
 #include "genesis_audio_policy.h"
 #include "scd_live.h"
+#include "scd_snapshot.h"
+#include "scd_viewer_state.h"
+#include "sv_host.h"
 #include "sv_perf.h"
 #include "viewer.h"
 #include "viewer_sdl3.h"
@@ -23,6 +26,7 @@ typedef struct KeyLine {
   uint64_t poll;
   SDL_Scancode scancode;
   int down, quit;   /* quit: the window's close button (SDL_EVENT_QUIT) */
+  int rewind;       /* SEG-132: 1 = `<poll> rewind_yes x`: open the rewind surface, go back two moments with Left and confirm with Return; 2 = `rewind_no x`: three moments back, Escape */
 } KeyLine;
 
 typedef struct ScdSdlHost {
@@ -52,6 +56,11 @@ typedef struct ScdSdlHost {
   char renderer[48];
   uint64_t emu_t0, frame;
   int target_set;
+  /* SEG-132 (ADR 0279): whole-machine save states and visual rewind. The service is created when the live driver hands over the machine (`started`) and registered with the
+   * shared host when the window opens; every provider call happens inside the poll, the frame barrier. */
+  ScdMachine *machine;
+  ScdViewerState *state;
+  int unthrottled;
 } ScdSdlHost;
 
 static ScdSdlHost g_host;
@@ -105,22 +114,45 @@ static void load_key_script(ScdSdlHost *h) {
   if (f == NULL) return;
   while (h->key_count < KEY_SCRIPT_MAX && fgets(text, sizeof text, f) != NULL) {
     unsigned long long poll = 0U;
-    char action[8] = "", name[64] = "";
+    char action[16] = "", name[64] = "";
     KeyLine *k = &h->keys[h->key_count];
-    if (sscanf(text, "%llu %7s %63s", &poll, action, name) != 3) continue;
+    if (sscanf(text, "%llu %15s %63s", &poll, action, name) != 3) continue;
     k->poll = (uint64_t)poll;
     k->down = strcmp(action, "down") == 0;
     k->quit = strcmp(action, "quit") == 0;
+    k->rewind = strcmp(action, "rewind_yes") == 0 ? 1 : (strcmp(action, "rewind_no") == 0 ? 2 : 0);
     k->scancode = SDL_GetScancodeFromName(name);
-    if (!k->quit && (k->scancode == SDL_SCANCODE_UNKNOWN || (!k->down && strcmp(action, "up") != 0))) continue;
+    if (!k->quit && !k->rewind && (k->scancode == SDL_SCANCODE_UNKNOWN || (!k->down && strcmp(action, "up") != 0))) continue;
     h->key_count += 1U;
   }
   fclose(f);
 }
 
+static void push_key(SDL_Scancode scancode) {
+  int down;
+  for (down = 1; down >= 0; --down) {
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = (Uint32)(down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP);
+    e.common.timestamp = SDL_GetTicksNS();
+    e.key.scancode = scancode;
+    e.key.down = down != 0;
+    SDL_PushEvent(&e);
+  }
+}
+
 static void push_scripted_keys(ScdSdlHost *h) {
   while (h->key_next < h->key_count && h->keys[h->key_next].poll <= h->polls) {
     SDL_Event e;
+    if (h->keys[h->key_next].rewind != 0) {   /* SEG-132 automation (like the Genesis viewer's pad-script Y / Z): the keys are real queued key events consumed by the real surface loop */
+      push_key(SDL_SCANCODE_LEFT);
+      push_key(SDL_SCANCODE_LEFT);
+      if (h->keys[h->key_next].rewind == 1) push_key(SDL_SCANCODE_RETURN);
+      else { push_key(SDL_SCANCODE_LEFT); push_key(SDL_SCANCODE_ESCAPE); }
+      if (h->opened) (void)sv_host_open_rewind(genesis_sdl3_viewer_sv_host(h->sdl));
+      h->key_next += 1U;
+      continue;
+    }
     SDL_zero(e);
     e.type = (Uint32)(h->keys[h->key_next].quit ? SDL_EVENT_QUIT : h->keys[h->key_next].down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP);
     e.common.timestamp = SDL_GetTicksNS();
@@ -148,6 +180,11 @@ static int ensure_open(ScdSdlHost *h) {
       return -1;
     }
     genesis_sdl3_viewer_host(h->sdl, &h->host);
+    if (h->state != NULL) {   /* SEG-132: F5 / F8 quick save and load, F7 rewind, the pause menu rows and the gamepad shortcut */
+      SvStateProvider provider;
+      scd_viewer_state_provider(h->state, &provider);
+      sv_host_set_state_provider(genesis_sdl3_viewer_sv_host(h->sdl), &provider);
+    }
     h->extension = genesis_sdl3_viewer_extension(h->sdl, &h->frame_sequence); /* NULL: the viewer stays Original, reporting Unavailable */
     genesis_pacer_init(&h->pacer, unthrottled != NULL && strcmp(unthrottled, "1") == 0);
     {
@@ -176,7 +213,7 @@ static int ensure_open(ScdSdlHost *h) {
   return 0;
 }
 
-/* F6 holds / releases the machine, F7 advances one frame while held. Both stop the host loop only. The key presses are PEEKED from the event
+/* F6 holds / releases the machine, F9 advances one frame while held (SEG-132: F7 is the rewind key on every console, F5 / F8 quick save / load). Both stop the host loop only. The key presses are PEEKED from the event
  * queue (the shared host drains the same events for the controller mapping and its own keys). The pause menu (Esc / Back) also blocks inside
  * the shared host's service call, so the guest does not advance meanwhile either. */
 static int sdl_poll(void *ctx, uint64_t boundary, ScdLivePoll *out) {
@@ -185,6 +222,7 @@ static int sdl_poll(void *ctx, uint64_t boundary, ScdLivePoll *out) {
   int i, n;
   (void)boundary;
   if (ensure_open(h) != 0) return -1;
+  scd_viewer_state_after_slice(h->state);   /* SEG-132: the rewind cadence, at the frame barrier: the previous frame is run, presented and paced, the host has not been polled yet */
   push_scripted_keys(h);
   h->polls += 1U;
   SDL_PumpEvents();
@@ -192,7 +230,7 @@ static int sdl_poll(void *ctx, uint64_t boundary, ScdLivePoll *out) {
   for (i = 0; i < n; ++i) {
     if (pending[i].key.repeat) continue;
     if (pending[i].key.scancode == SDL_SCANCODE_F6) h->paused = !h->paused;
-    else if (pending[i].key.scancode == SDL_SCANCODE_F7 && h->paused) out->step = 1U;
+    else if (pending[i].key.scancode == SDL_SCANCODE_F9 && h->paused) out->step = 1U;
   }
   if (h->host.window_closed(h->host.ctx)) {
     out->quit = 1U;
@@ -209,6 +247,7 @@ static int sdl_present(void *ctx, const struct GenesisFrameArtifact *frame, uint
   ScdSdlHost *h = (ScdSdlHost *)ctx;
   if (ensure_open(h) != 0) return -1;
   h->frame_sequence = onset;
+  scd_viewer_state_note_frame(h->state, frame);   /* SEG-132: the picture a state's thumbnail shows (valid until the machine next runs) */
   perf_emulation_done(h);
   return h->host.present(h->host.ctx, frame);
 }
@@ -279,6 +318,38 @@ static void sdl_finished(void *ctx, const struct ScdLiveSummary *summary, const 
     const int failed = summary->outcome == SCD_LIVE_HOST_ERROR || summary->outcome == SCD_LIVE_RECORDING_REFUSED;
     perf_write(h, stopped ? "incomplete" : (failed ? "failed" : "complete"), stopped ? "guest_stop" : scd_live_outcome_name(summary->outcome), summary);
   }
+  if (h->state != NULL) {   /* observed rewind statistics (counts, not estimates) for the measurement tools */
+    SvStateServiceStats st;
+    scd_viewer_state_stats(h->state, &st);
+    fprintf(stderr, "VIEWER_REWIND_STATS {\"captures\":%llu,\"evictions\":%llu,\"failures\":%llu,\"history_entries\":%u,\"history_bytes\":%llu,\"capture_ns_total\":%llu,\"capture_ns_max\":%llu,\"restores\":%llu,\"last_capture_bytes\":%llu,\"retained_span_ms\":%llu}\n",
+            (unsigned long long)st.captures, (unsigned long long)st.evictions, (unsigned long long)st.capture_failures, (unsigned)st.history_entries, (unsigned long long)st.history_bytes,
+            (unsigned long long)st.capture_ns_total, (unsigned long long)st.capture_ns_max, (unsigned long long)st.restores, (unsigned long long)st.last_capture_bytes, (unsigned long long)st.retained_span_ms);
+  }
+  {  /* SEG-132 automation: the final guest state of the session, for the end-to-end tests (unset in every shipped use) */
+    const char *report = getenv("SEGARECOMP_VIEWER_STATE_REPORT");
+    if (report != NULL && *report != '\0') {
+      FILE *f = fopen(report, "wb");
+      if (f != NULL) {
+        uint8_t digest[32];
+        unsigned i;
+        const int have = h->state != NULL && scd_viewer_state_canonical_sha256(h->state, digest) == 0;
+        fprintf(f, "{\"onsets\":%llu,\"ticks\":%llu,\"retired_main\":%llu,\"retired_sub\":%llu,\"canonical_sha256\":\"", (unsigned long long)m->vdp_frames, (unsigned long long)m->now,
+                (unsigned long long)m->cpu[0].retired, (unsigned long long)m->cpu[1].retired);
+        if (have) for (i = 0U; i < 32U; ++i) fprintf(f, "%02x", (unsigned)digest[i]);
+        {  /* the canonical bytes themselves, for a section-by-section comparison of two sessions (tests only) */
+          ScdSnapshotBuffer raw;
+          char path[1100];
+          if (snprintf(path, sizeof path, "%s.bin", report) > 0 && scd_snapshot_capture(m, NULL, &raw) == SCD_SNAPSHOT_OK) {
+            FILE *rf = fopen(path, "wb");
+            if (rf != NULL) { fwrite(raw.data, 1U, raw.size, rf); fclose(rf); }
+            scd_snapshot_buffer_free(&raw);
+          }
+        }
+        fprintf(f, "\",\"result0\":%u}\n", (unsigned)m->work_ram[0xC000U & 0xFFFFU]);
+        fclose(f);
+      }
+    }
+  }
   if (h->extension != NULL && h->extension->produced + h->extension->failed != 0U) /* only a run that requested Level 2 */
     fprintf(stderr, "viewer: level2 extension produced=%llu failed=%llu\n", (unsigned long long)h->extension->produced,
             (unsigned long long)h->extension->failed);
@@ -299,6 +370,72 @@ static void sdl_finished(void *ctx, const struct ScdLiveSummary *summary, const 
   }
 }
 
+/* ---- SEG-132 (ADR 0279): whole-machine save states and visual rewind. The service owns the slot files and the timeline; this file supplies what is session-specific: the save
+ * folder from the launcher, the rewind knobs and what must be reset around a restored machine on the host side. The game's identity is intrinsic: the codec binds the verified
+ * disc, the BIOS image and the executable-image contract, so no identity travels through the environment. ---- */
+static uint32_t env_u32(const char *name, uint32_t low, uint32_t high, uint32_t fallback) {
+  const char *text = getenv(name);
+  unsigned long value = 0UL;
+  size_t i;
+  if (text == NULL || *text == '\0' || strlen(text) > 9U) return fallback;
+  for (i = 0U; text[i] != '\0'; ++i) {
+    if (text[i] < '0' || text[i] > '9') return fallback;
+    value = value * 10UL + (unsigned long)(text[i] - '0');
+  }
+  return value >= low && value <= high ? (uint32_t)value : fallback;
+}
+
+/* Host side of a restore: the audio of the abandoned future (queued in the device, waiting in the CD-DA staging buffer, or counted as an underrun) is dropped, pacing restarts
+ * from the next boundary (the monitoring counters continue) and the performance window re-opens. The guest-time audio state itself (mixer queue, drive, chips) was restored. */
+static void host_after_restore(void *ctx) {
+  ScdSdlHost *h = (ScdSdlHost *)ctx;
+  const uint32_t sleeps = h->pacer.sleep_calls, resyncs = h->pacer.resyncs;
+  if (h->sdl != NULL) genesis_sdl3_viewer_audio_clear(h->sdl);
+  h->pending_frames = 0U;
+  h->held_frames = 0U;
+  h->presenter.started = 0;
+  genesis_pacer_init(&h->pacer, h->unthrottled);
+  h->pacer.sleep_calls = sleeps;
+  h->pacer.resyncs = resyncs;
+  h->perf.observing = 0;
+}
+
+static void sdl_started(void *ctx, ScdMachine *machine) {
+  ScdSdlHost *h = (ScdSdlHost *)ctx;
+  ScdViewerStateConfig cfg;
+  char state_dir[1100];
+  const char *save_dir = getenv("SEGARECOMP_SAVE_DIR");
+  const char *off = getenv("SEGARECOMP_REWIND");
+  const char *refusal = scd_snapshot_refusal(machine);
+  const char *slots_reason = NULL;
+  const char *unthrottled = getenv("SEGARECOMP_VIEWER_UNTHROTTLED");
+  h->machine = machine;
+  h->unthrottled = unthrottled != NULL && strcmp(unthrottled, "1") == 0;
+  memset(&cfg, 0, sizeof cfg);
+  cfg.machine = machine;
+  cfg.rewind_budget_bytes = SV_STATE_REWIND_BUDGET_BYTES;
+  cfg.rewind_interval_ms = SV_STATE_REWIND_INTERVAL_MS;
+  cfg.rewind_target_ms = SV_STATE_REWIND_TARGET_MS;
+  if (off != NULL && (strcmp(off, "0") == 0 || strcmp(off, "off") == 0)) cfg.rewind_budget_bytes = 0U;
+  if (cfg.rewind_budget_bytes != 0U) cfg.rewind_budget_bytes = env_u32("SEGARECOMP_REWIND_BUDGET_MB", 1U, 1024U, cfg.rewind_budget_bytes / (1024U * 1024U)) * 1024U * 1024U;
+  cfg.rewind_interval_ms = env_u32("SEGARECOMP_REWIND_INTERVAL_MS", 50U, 60000U, cfg.rewind_interval_ms);
+  cfg.rewind_target_ms = env_u32("SEGARECOMP_REWIND_TARGET_MS", 500U, 3600000U, cfg.rewind_target_ms);
+  cfg.after_restore = host_after_restore;
+  cfg.after_restore_context = h;
+  if (refusal != NULL) {   /* a configuration whose future cannot be reproduced exactly: no state and no rewind, and the player is told why */
+    slots_reason = refusal;
+    cfg.rewind_unavailable_reason = refusal;
+  } else if (save_dir == NULL || *save_dir == '\0') {
+    slots_reason = "No save location is configured for this session: replays and recordings never use save states.";
+  } else if (snprintf(state_dir, sizeof state_dir, "%s/states", save_dir) <= 0 || strlen(save_dir) + 8U >= sizeof state_dir) {
+    slots_reason = "The save location path is too long.";
+  } else {
+    cfg.state_dir = state_dir;
+  }
+  cfg.unavailable_reason = slots_reason;
+  h->state = scd_viewer_state_create(&cfg);
+}
+
 /* The host this viewer registers with the live driver (a function of its own so the viewer tests drive exactly the registered callbacks). */
 static void fill_live_host(ScdLiveHost *live) {
   memset(live, 0, sizeof *live);
@@ -309,6 +446,7 @@ static void fill_live_host(ScdLiveHost *live) {
   live->finished = sdl_finished;
   live->audio = sdl_audio;
   live->extension = sdl_extension;
+  live->started = sdl_started;
 }
 
 int scd_viewer_main_bios(const ScdProgram *program, const ScdAuthentic *authentic, int argc, char **argv) {
@@ -319,6 +457,8 @@ int scd_viewer_main_bios(const ScdProgram *program, const ScdAuthentic *authenti
   scd_live_host_registered = &live;
   rc = scd_program_main_bios(program, authentic, argc, argv);
   scd_live_host_registered = NULL;
+  scd_viewer_state_destroy(g_host.state);
+  g_host.state = NULL;
   if (g_host.opened) genesis_sdl3_viewer_close(g_host.sdl);
   return rc;
 }

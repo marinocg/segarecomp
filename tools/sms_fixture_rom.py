@@ -1748,10 +1748,41 @@ def fixture_machine_e2e():
     return build_rom(0x20000, image, markers), "sega"
 
 
+# SEG-132: a counting guest for the save-state / rewind tests. Every frame interrupt increments a 16-bit counter at $C100 (little endian), shows its low six bits as the
+# backdrop colour (CRAM[0]: the picture changes every frame) and writes tone channel 0 from it (the audio changes every frame). RAM, VDP, CRAM and PSG are therefore
+# all time-dependent, deterministic and observable.
+STATE_COUNTER_SOURCE = "\n".join([
+    ".org 0x0000", "        di", "        im 1", "        ld sp,0xDFF0", "        jp main",
+    ".org 0x0038",
+    "        push af", "        push hl",
+    "        in a,(0xBF)",                                     # acknowledge the frame interrupt
+    "        ld hl,(0xC100)", "        inc hl", "        ld (0xC100),hl",
+    "        xor a", "        out (0xBF),a", "        ld a,0xC0", "        out (0xBF),a",     # CRAM address 0
+    "        ld a,l", "        and 0x3F", "        out (0xBE),a",                              # backdrop colour from the counter
+    "        ld a,l", "        and 0x0F", "        or 0x80", "        out (0x7F),a",         # tone 0 low period nibble
+    "        ld a,l", "        and 0x3F", "        out (0x7F),a",                                  # tone 0 high period bits
+    "        ld a,0x90", "        out (0x7F),a",                                              # tone 0 at full volume
+    "        pop hl", "        pop af", "        ei", "        reti",
+    ".org 0x0066", "        retn",
+    ".org 0x0100",
+    "main:",
+] + _vdp_reg(0, 0x06) + _vdp_reg(2, 0x0E) + _vdp_reg(5, 0xFF) + _vdp_reg(6, 0xFB) + _vdp_reg(7, 0x00) + _vdp_reg(8, 0x00) + _vdp_reg(9, 0x00) + _vdp_reg(10, 0xFF) + [
+    "        ld a,0x00", "        out (0xBF),a", "        ld a,0x7F", "        out (0xBF),a",      # VRAM write address 0x3F00 (the sprite table)
+    "        ld a,0xD0", "        out (0xBE),a",                                                   # sprite terminator
+] + _vdp_reg(1, 0xE0) + [
+    "        ei",
+    "loop:   halt", "        jr loop",
+]) + "\n"
+
+
+def fixture_state_counter():
+    return _rom_only(STATE_COUNTER_SOURCE)
+
+
 FIXTURES = {"trivial": fixture_trivial, "oracle_smoke": fixture_oracle_smoke, "bank_crossing": fixture_bank_crossing,
             "sched_irq": fixture_sched_irq, "sched_straddle": fixture_sched_straddle, "port_open": fixture_port_open,
             "port_vdp": fixture_port_vdp, "memctl_bad": fixture_memctl_bad, "u11_probe": fixture_u11_probe, **VDP_FIXTURES,
-            **RENDER_FIXTURES, "machine_e2e": fixture_machine_e2e}
+            **RENDER_FIXTURES, "machine_e2e": fixture_machine_e2e, "state_counter": fixture_state_counter}
 
 
 def build(name):

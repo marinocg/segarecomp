@@ -55,6 +55,10 @@ typedef struct ScdLiveHost {
    * poll). The driver attaches the returned target to the machine's presentation path (scd_vdp_present_set_extension); NULL detaches. The host
    * sets `request` between frames only. NULL callback = no extension work at all (an older-style host). Nothing here reaches guest state. */
   struct GenesisFrameExtension *(*extension)(void *ctx);
+  /* SEG-132 (ADR 0279): optional. Called once by scd_live_run, after the machine, its input and its sinks are set up and before the first poll, with the machine the loop
+   * will run. A host that offers save states keeps the pointer; every provider call it later makes happens inside `poll` (the frame barrier: both processors stopped at
+   * an instruction boundary, the stop before a vertical-blank onset, before that onset's input sample and device events). NULL = an older-style host. */
+  void (*started)(void *ctx, ScdMachine *machine);
 } ScdLiveHost;
 
 typedef struct ScdLiveConfig {

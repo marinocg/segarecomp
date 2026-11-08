@@ -170,11 +170,10 @@ static void drain_audio(SmsViewerRig *rig, const SmsViewerHost *host, SmsViewerR
 
 SmsViewerResult sms_viewer_run(SmsViewerRig *rig, const SmsViewerHost *host, SmsPacer *pacer, uint64_t max_frames) {
   SmsViewerResult r;
-  uint64_t presented;
   memset(&r, 0, sizeof r);
   if (rig == NULL || host == NULL || pacer == NULL || host->poll == NULL || host->present == NULL)
     return finish(r, SMS_VIEWER_INVALID_ARGUMENT);
-  presented = rig->renderer.frames_completed;
+  rig->presented = rig->renderer.frames_completed;
   for (;;) {
     SmsViewerInput in;
     SmsInputState want;
@@ -185,7 +184,7 @@ SmsViewerResult sms_viewer_run(SmsViewerRig *rig, const SmsViewerHost *host, Sms
     if (in.quit) return finish(r, SMS_VIEWER_QUIT);
     if (in.reset) {
       sms_viewer_rig_reset(rig);
-      presented = 0;
+      rig->presented = 0;
       r.resets++;
     }
     want.p1 = (uint8_t)(in.p1 & 0x3Fu);
@@ -209,9 +208,9 @@ SmsViewerResult sms_viewer_run(SmsViewerRig *rig, const SmsViewerHost *host, Sms
     sms_psg_sync(&rig->psg, stop.cycles);
     drain_audio(rig, host, &r);
     if (sms_pacer_wait(pacer, host) != 0) return finish(r, SMS_VIEWER_HOST_ERROR);
-    if (rig->renderer.frames_completed != presented && rig->renderer.last_height != 0u) {
+    if (rig->renderer.frames_completed != rig->presented && rig->renderer.last_height != 0u) {
       if (host->present(host->ctx, rig->renderer.last, rig->renderer.last_height) != 0) return finish(r, SMS_VIEWER_HOST_ERROR);
-      presented = rig->renderer.frames_completed;
+      rig->presented = rig->renderer.frames_completed;
       r.frames_presented++;
     }
     if (!sms_stop_is_resumable(stop.kind)) return finish(r, SMS_VIEWER_GUEST_ERROR);

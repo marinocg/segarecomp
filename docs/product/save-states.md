@@ -1,7 +1,8 @@
-# Save states, game saves and rewind (Genesis)
+# Save states, game saves and rewind (Genesis, Master System, Sega CD)
 
-Design: [ADR 0278](../decisions/0278-genesis-save-states-persistence-and-rewind.md); architecture contract:
-[genesis-save-states-persistence-and-rewind.md](../architecture/genesis-save-states-persistence-and-rewind.md).
+Design: [ADR 0278](../decisions/0278-genesis-save-states-persistence-and-rewind.md) (Genesis) and [ADR 0279](../decisions/0279-master-system-and-sega-cd-save-states-and-rewind.md) (Master System and Sega CD); architecture contracts:
+[genesis-save-states-persistence-and-rewind.md](../architecture/genesis-save-states-persistence-and-rewind.md) and
+[sms-sega-cd-save-states-inventory.md](../architecture/sms-sega-cd-save-states-inventory.md).
 
 ## Three different things
 
@@ -17,9 +18,15 @@ choice. **A state is never loaded when a game starts.**
 ## What is supported
 
 * **Genesis / Mega Drive** (generated-native programs started from the launcher): game saves, five numbered states plus a quick slot, rewind.
-* **Master System** and **Sega CD**: no whole-machine states and no rewind yet. The pause menu still shows *Save State*, *Load State* and *Rewind*, greyed out with that reason. A Sega CD game keeps
-  saving its internal backup RAM as before ([ADR 0252](../decisions/0252-seg-108-m12-persistent-sega-cd-backup-ram.md)); nothing about that changed.
-* Cartridge memory is supported for the cartridges Segarecomp already emulates: header-declared byte-wide SRAM and the Sega-board X24C01 serial EEPROM. No new chip is guessed from a title.
+* **Master System** (generated-native programs started from the launcher): five numbered states plus a quick slot and rewind, with the same menu, keys and defaults. **Cartridge RAM is part of every state but
+  is not saved between sessions**: the supported board declarations (the Sega mapper and the plain 32 KiB ROM) cannot tell a battery-backed cartridge from one that simply maps RAM, and a false save is worse than
+  none. A state is bound to the cartridge image **and the mapper you declared**: a state of one mapping never loads under another.
+* **Sega CD** (a game started from the launcher with a normal play session): five numbered states plus a quick slot and rewind. A state is bound to the exact **disc**, the exact **BIOS image** and the
+  generated program's executable-image set; the game's internal backup RAM is part of the state **in memory only** and its file lifecycle ([ADR 0252](../decisions/0252-seg-108-m12-persistent-sega-cd-backup-ram.md)) is unchanged
+  (see "Sega CD" below).
+* Cartridge memory is supported for the cartridges Segarecomp already emulates: header-declared byte-wide SRAM and the Sega-board X24C01 serial EEPROM (Genesis). No new chip is guessed from a title.
+* **Not offered, with the reason shown in the menu:** a session that records input or replays a script (a restore would rewrite the history the recording describes), a session with no save folder
+  (a program started outside the launcher), and a Sega CD program built with the main-side Z80 but without its sound devices, or a diagnostic/build session.
 
 ## How to use it
 
@@ -40,7 +47,38 @@ choice. **A state is never loaded when a game starts.**
   they were (`-3.5s`, `-12s`, `-1:05`; guest time, so a pause in between does not count). The preview follows your selection at once. **Nothing runs and nothing is written to disk while you look.**
   Choosing a moment restores the machine to exactly that state and the game continues from there as a new future; the moments after it are forgotten. Cancelling changes nothing.
 * The two-trigger shortcut is a deliberate chord, held briefly: it never reaches the game. If your controller does not report triggers reliably, use the pause menu.
-* F5, F7 and F8 are host keys like F3, F11 and F12: they cannot be bound to a game button.
+* F5, F7 and F8 are host keys like F3, F11 and F12: they cannot be bound to a game button. **F7 is rewind on every console.** The Sega CD viewer's frame step moved from F7 to **F9** (F6 still holds the
+  machine, F9 steps one frame while it is held); neither key can trigger the other.
+
+## Master System and Sega CD in detail
+
+### Master System
+
+* **What a state holds:** the Z80 (registers, interrupt state, T-state counter), work RAM, cartridge RAM, the mapper and memory-control registers, the scanline scheduler position, the controller and Pause state, the VDP (VRAM, CRAM,
+  registers, the control-port latch, the flags and counters), the renderer's frame in progress and last published frame, and the SN76489 with its sample-clock counters. Loading continues **exactly**: the same game behaviour and the same
+  sound samples (checked from every frame boundary of a fixture run).
+* **Where it lives:** `<library>/saves/master-system/<64-hex SHA-256 of the cartridge image>/<mapper>/states/{quick,slot-1,...,slot-5}.sgstate`. A different mapper declaration of the same image is a different folder, and the state itself
+  also carries the mapper, the ROM size and the PSG variant, so a copied file is refused too.
+* **After a load** queued audio is dropped, pacing restarts, held keys are released, and the widescreen extension is produced again by the next frame (so the first frame after a load is shown in Original).
+* **Limits:** no game save file (see above); `--viewer-record` sessions have no states.
+
+### Sega CD
+
+* **What a state holds:** both MC68000 processors with their timing and interrupt state, main work RAM, sub PRG RAM and Word RAM, the Gate Array (ownership, banks, communication registers, timer), the CD controller (buffer, a transfer
+  in progress), the CD drive (command and status, position, latency), the RF5C164 PCM chip, CD-DA playback and the audio mixer's clocks and queue, the graphics ASIC, the in-memory backup RAM, the live pad, executable-image selection and
+  bindings, the main-side VDP / I-O and, when the program has them, the Z80, YM2612, PSG and mixer. The disc and the BIOS are **not** copied: the open, verified ones stay attached and the state records which they are.
+* **Where it lives:** `<library>/sega-cd/<game id>/states/{quick,slot-1,...,slot-5}.sgstate`, next to the game's backup RAM and recordings, which Segarecomp never deletes.
+* **A state belongs to one disc, one BIOS and one executable-image set.** A state of another disc or BIOS, of a program built from a different set of images, or a damaged or crafted file is refused with the reason, without touching the
+  running game. Rebuilding the same game with compatible code keeps its states.
+* **Heads-up:** loading an older state or rewinding rolls the in-memory backup RAM back too, and a clean exit then stores THAT timeline as the game's save (the previous generation is kept as `.prev`). Save in the game as you normally would before experimenting.
+* **Backup RAM:** a state contains the game's backup RAM as it was; **loading a state or rewinding changes only the copy in memory**. The file in the game's folder is written, as before, only when a normal session **ends cleanly**
+  (through the same candidate-and-rename step and `.prev` generation as ADR 0252), and it then holds the timeline you ended the session on. Browsing and cancelling the rewind screen, a refused state and a failed save never write it.
+  A state saved in a session that has backup RAM is refused by one that does not, so a state can never hand a session memory it could not store.
+* **Rewind span:** a Sega CD moment is about 1.1 MiB (the machine has 832 KiB of RAM and a 64 KiB PCM memory), so the 96 MiB default holds about 86 moments: **about 43 seconds** at the default 500 ms cadence rather than 60. The rewind screen
+  says how many seconds are really kept. Nothing is compressed to reach 60 s.
+* **After a load** the host audio queue and the CD-DA staging buffer are dropped, the audio presenter and pacing restart, and held keys are released; the machine's own audio state (mixer queue, drive, chips) is the restored one, so
+  the music continues from where the state was saved.
+* **Not offered:** replay and "No window" replay sessions, recording sessions, and builds made for diagnostics.
 
 ## Where your data lives
 
@@ -126,3 +164,19 @@ On a synthetic generated-native 68000 + Z80 program (PSG, FM and DAC playing), L
 | One surface frame while the preview switches (software renderer) | median 2.3 / 4.4 / 9.0 / 19.9 ms at 720x520 / 1080x740 / 1440x1040 / 2560x1440 (a GPU renderer is faster) |
 
 Reproduce: `tests/tools/genesis_rewind_harness.c` (`bench`), `tools/genesis_state_perf.py` and `sv_state_bench`.
+
+### Master System and Sega CD (SEG-132)
+
+Observed in the automated tests on Linux x86-64 (software renderer, unthrottled, a shared CI-class machine that was also compiling): values, not guarantees.
+
+| Measure | Master System (`state_counter` fixture) | Sega CD (CD-DA fixture) |
+| --- | --- | --- |
+| One snapshot | 205,675 bytes (with a 149x111 thumbnail) | 1,168,442 bytes (1,141,326 without a thumbnail, with the Z80, YM2612, PSG and mixer) |
+| Capture inside the viewer (state + thumbnail) | mean 0.73 ms, worst 1.3 ms | mean 4.2 ms (9.4 ms while the machine was busy compiling), worst 4.5 ms (37 ms under that load); about 1 % of run time at two per second |
+| History at the defaults (500 ms, 96 MiB) | 120 moments in about 25 MiB: the full 60 s | 86 moments in 95.8 MiB: **42.6 s** retained after 70 s of play, 54 evictions |
+
+Reproduce: `tests/sms_viewer_states_test.py`, `tests/sega_cd_viewer_states_test.py` (the `VIEWER_REWIND_STATS` line) and a long run of the viewer with `SEGARECOMP_REWIND_INTERVAL_MS` unset.
+
+### Real-game smoke test (maintainer-authorized local run, nothing committed)
+
+Sonic CD (USA) with a user-supplied Sega-CD Model 2 BIOS, Compatibility build, real SDL3 viewer under the dummy drivers, 400 frames: a quick save at frame 200 in one process and a quick load in another end in the **identical full machine state** as the uninterrupted run; rewind cancel changes nothing, a confirmed rewind goes back about 6 frames, deterministically, with nothing written to disk. A moment is 1.18 MiB; capture 4-5 ms. (This smoke test found that four report-style counters feed the device log and must be part of the state; the synthetic fixtures had not exercised a transfer in flight.)

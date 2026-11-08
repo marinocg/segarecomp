@@ -4,9 +4,9 @@
 The live fixture (tools/sega_cd_bios_live_fixture.py) is built with its viewer variant (`sega_cd_bios_build.py --viewer`): the unmodified
 generated C linked with platforms/sega-cd/viewer, the Genesis viewer's presenter and pacer and libs/viewer. Keyboard events are pushed onto
 SDL's queue by the viewer's automation seam (SEGARECOMP_VIEWER_KEY_SCRIPT, the launcher GUI-script idea), so the real default key map, the
-shared host's service loop, the F6/F7 pause and step keys and the window close are exercised. Checked: the viewer opens and presents every
+shared host's service loop, the F6/F9 pause and step keys (SEG-132: the step key moved from F7, which is rewind on every console) and the window close are exercised. Checked: the viewer opens and presents every
 frame; the arrow keys reach the pad (the captured frame is the colour of RIGHT); the recording replays headlessly to the identical report;
-F6/F7 hold and step without changing the result; the window close leaves with exit 0 after a recording; the headless program is unchanged.
+F6/F9 hold and step without changing the result; the window close leaves with exit 0 after a recording; the headless program is unchanged.
 
 Skipped (exit 0, "SKIP") when SDL3 is not installed or the host is not Linux (the SDL3 CI job on Linux runs it).
 
@@ -169,10 +169,10 @@ def main():
         check(code == 0 and guest_view(json.loads((tmp / "r2.json").read_text())) == guest_view(replay), "level 2: the recording replays headlessly to the Original report")
         ws_file.unlink()
 
-        # F6 holds, F7 steps: same recording and report as the same keys without the pause
-        pk = "3 down Right\n4 down F6\n4 up F6\n6 down F7\n6 up F7\n8 down F7\n8 up F7\n9 down F6\n9 up F6\n13 up Right\n14 down Up\n18 up Up\n"
+        # F6 holds, F9 steps (SEG-132): same recording and report as the same keys without the pause
+        pk = "3 down Right\n4 down F6\n4 up F6\n6 down F9\n6 up F9\n8 down F9\n8 up F9\n9 down F6\n9 up F6\n13 up Right\n14 down Up\n18 up Up\n"
         code, prep, prec, _ = live("b", pk)
-        check(code == 0 and prep["live"]["steps"] == 2 and prep["live"]["paused_polls"] >= 2, "pause: F6 holds, F7 steps (%s)" % {k: prep["live"][k] for k in ("steps", "paused_polls")})
+        check(code == 0 and prep["live"]["steps"] == 2 and prep["live"]["paused_polls"] >= 2, "pause: F6 holds, F9 steps (%s)" % {k: prep["live"][k] for k in ("steps", "paused_polls")})
         # the held polls advance no frame: 4 -> 9 polls but two frames; compare to the unpaused run of equivalent key schedule
         check(prec is not None and prec.startswith("segarecomp-input-script 1") and prep["result"] == "idle", "pause: the run still ends idle with a valid recording")
 

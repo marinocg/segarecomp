@@ -58,7 +58,7 @@ namespace {
 
 // SEG-058 (ADR 0120): the shared SDL3 viewer foundation, one list for the Genesis and the Master System recipes (settings, layout/CRT math, menu
 // model, input state and diagnostics, host and pause pages), compiled as strict C11 next to the console adapter.
-constexpr const char *kViewerFoundationSources[] = {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_rewind.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c", "sv_host.c", "sv_pages.c", "sv_draw.c"};
+constexpr const char *kViewerFoundationSources[] = {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_rewind.c", "sv_state_store.c", "sv_state_service.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c", "sv_host.c", "sv_pages.c", "sv_draw.c"};
 
 using segarecomp_cli::Environment;
 using segarecomp_cli::kProcessTimedOut;
@@ -1486,7 +1486,7 @@ int run_build(Options options) {
         const fs::path viewer_lib = root / "libs" / "viewer";
         base.insert(base.end(), {"-I", viewer.string(), "-I", (viewer_lib / "include").string(), "-I", (viewer_lib / "src").string(), "-I",
                                  options.sdl3_include->string()});
-        for (const char *name : {"sms_viewer.c", "sms_viewer_sdl3.c", "sms_viewer_main.c"}) compile.push_back({viewer / name, {}});
+        for (const char *name : {"sms_viewer.c", "sms_snapshot.c", "sms_viewer_state.c", "sms_viewer_sdl3.c", "sms_viewer_main.c"}) compile.push_back({viewer / name, {}});
         // SEG-058 (ADR 0120): the shared SDL3 viewer foundation, compiled with the game exactly like the console adapter above.
         for (const char *name : kViewerFoundationSources) compile.push_back({viewer_lib / "src" / name, {}});
       } else {

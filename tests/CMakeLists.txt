@@ -1738,6 +1738,24 @@ add_test(NAME genesis_rewind_session_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_rewind_session_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_rewind_session_test APPEND PROPERTY LABELS full)
 set_property(TEST genesis_rewind_session_test PROPERTY TIMEOUT 900)
+# SEG-132 (ADR 0279): Master System save states and visual rewind in a REAL generated-native viewer process (separate-process save/load, rewind confirm/cancel, refusals, recording sessions).
+add_test(NAME sms_viewer_states_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_viewer_states_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_viewer_states_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_viewer_states_test PROPERTY TIMEOUT 900)
+set_property(TEST sms_viewer_states_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-132 (ADR 0279): reversible Sega CD machine snapshots on generated-native programs (the cdda fixture; the production Z80 + YM2612 + PSG + mixer configuration) linked with a test host instead of the SDL3 viewer.
+add_test(NAME sega_cd_snapshot_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_snapshot_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_snapshot_test APPEND PROPERTY LABELS full)
+set_property(TEST sega_cd_snapshot_test PROPERTY TIMEOUT 1800)
+set_property(TEST sega_cd_snapshot_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-132 (ADR 0279): Sega CD save states, rewind and the relocated frame-step key (F6 hold, F9 step; F7 is rewind on every console) in the REAL SDL3 viewer process, keyboard path end to end (skips cleanly without SDL3).
+add_test(NAME sega_cd_viewer_states_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_viewer_states_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_viewer_states_test APPEND PROPERTY LABELS full)
+set_property(TEST sega_cd_viewer_states_test PROPERTY TIMEOUT 1800)
+set_property(TEST sega_cd_viewer_states_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-131 (ADR 0278): the save-state and rewind screens at the review window sizes (720x520 .. 2560x1440), synthetic art and a fake provider.
 if(TARGET sv_state_gallery)
   add_test(NAME sv_state_gallery_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/sv_state_gallery_test.py $<TARGET_FILE:sv_state_gallery>)
@@ -1968,6 +1986,13 @@ target_link_libraries(sms_image_emitter PRIVATE segarecomp::machine_master_syste
 segarecomp_enable_warnings(sms_image_emitter)
 add_test(NAME sms_bank_crossing_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_bank_crossing_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-132 (ADR 0279): reversible Master System snapshots on the real viewer rig and a generated-native fixture: replay equivalence from every frame boundary (CPU, mapper, VDP, interrupts,
+# pad/pause, PSG sampling), identity / mapper / PSG-variant / input-mode refusals, crafted values, and no mutation on any refusal.
+add_test(NAME sms_snapshot_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_snapshot_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_snapshot_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_snapshot_test PROPERTY TIMEOUT 900)
+set_property(TEST sms_snapshot_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 add_test(NAME sms_emission_budget_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR})
 # The 512 KiB tier emits about 190 MiB of generated C in seconds since SEG-033 (grouped owners, shared bodies), so it is in the

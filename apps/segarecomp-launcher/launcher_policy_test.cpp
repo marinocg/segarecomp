@@ -166,6 +166,37 @@ int main(int argc, char **argv) {
       expect(SDL_GetEnvironmentVariable(env, "SEGARECOMP_SAVE_DIR") == nullptr && SDL_GetEnvironmentVariable(env, "SEGARECOMP_SAVE_VARIANT") == nullptr,
              "an invalid identity clears any inherited save folder: the game gets no persistence");
       SDL_DestroyEnvironment(env);
+      {  // SEG-132 (ADR 0279): a Master System game's save states -- keyed on the cartridge digest AND the declared mapper, in the library, never the build cache
+        RomView one = sms;
+        one.sha256 = sha;
+        one.mapper = "sega";
+        RomView other_mapper = one;
+        other_mapper.mapper = "rom_only";
+        RomView manifest = one;
+        manifest.mapper.clear();
+        manifest.mapper_manifest = "x.mapper.json";
+        manifest.mapper_manifest_sha256 = std::string(64, 'c');
+        RomView undeclared = one;
+        undeclared.mapper.clear();
+        RomView hostile = one;
+        hostile.mapper = "../escape";
+        RomView upper_sha = one;
+        upper_sha.sha256 = std::string(64, 'A');
+        expect(sms_save_dir(one) == library / "saves" / "master-system" / sha / "sega", "SMS states: <library>/saves/master-system/<sha256>/<mapper>");
+        expect(sms_save_dir(one) != sms_save_dir(other_mapper), "a state of one mapping lives apart from another mapping of the same cartridge");
+        expect(sms_save_dir(manifest) == library / "saves" / "master-system" / sha / ("manifest-" + std::string(16, 'c')), "a sidecar mapper manifest keys the folder by its own digest");
+        expect(sms_save_dir(undeclared).empty() && sms_save_dir(hostile).empty() && sms_save_dir(upper_sha).empty() && sms_save_dir(genesis).empty(),
+               "no folder without a declared mapper, for a hostile mapper name, an upper-case digest or a non-SMS game");
+        expect(game_save_dir(one) == sms_save_dir(one) && game_save_dir(vanilla) == genesis_save_dir(vanilla), "game_save_dir dispatches by console");
+        SDL_Environment *senv = SDL_CreateEnvironment(true);
+        SDL_SetEnvironmentVariable(senv, "SEGARECOMP_SAVE_DIR", "/inherited", true);
+        apply_game_environment(senv, one);
+        expect(std::string(SDL_GetEnvironmentVariable(senv, "SEGARECOMP_SAVE_DIR")) == sms_save_dir(one).string() && std::string(SDL_GetEnvironmentVariable(senv, "SEGARECOMP_SAVE_VARIANT")) == "vanilla",
+               "the SMS child receives its folder and the 'vanilla' variant");
+        apply_game_environment(senv, undeclared);
+        expect(SDL_GetEnvironmentVariable(senv, "SEGARECOMP_SAVE_DIR") == nullptr, "an undeclared mapper clears any inherited save folder");
+        SDL_DestroyEnvironment(senv);
+      }
       {  // the viewer's reports in a finished session's run log
         const fs::path log = library / "run.log";
         { std::ofstream out(log); out << "noise\nVIEWER_PERSIST {\"event\":\"load\",\"status\":\"loaded\",\"detail\":\"cartridge.srm\"}\nVIEWER_PERSIST {\"event\":\"commit\",\"status\":\"stored\",\"detail\":\"cartridge.srm\"}\n"; }

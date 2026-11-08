@@ -49,7 +49,7 @@ the launcher persists games as `platform + ROM SHA-256` with a build cache. Sega
    `platforms/sega-cd/viewer` (the SDL3 host registered with the driver), the Genesis viewer's presenter and pacer and `libs/viewer`
    (`sega_cd_bios_build.py --viewer`; typed failure `sdl3_unavailable`, never a silent headless fallback). Every unit object is reused; the program
    identity and the headless `program` are unchanged. Keyboard and gamepad are the Genesis viewer's mapping and settings (`SV_SYSTEM_GENESIS`);
-   Esc / Back opens the shared pause menu, F6 holds the machine and F7 steps one frame while held (peeked from the SDL queue). A test seam
+   Esc / Back opens the shared pause menu, F6 holds the machine and F9 steps one frame while held (it was F7 until SEG-132 made F7 the rewind key on every console, ADR 0279) (peeked from the SDL queue). A test seam
    (`SEGARECOMP_VIEWER_KEY_SCRIPT`, like the launcher's GUI script) pushes key events so the real mapping is exercised without a person.
 8. **Program surface.** `--record-input FILE` exists only in a viewer variant; `--input-script` in a viewer variant is a replay (the host pad is not
    sampled); `--describe` (all Sega CD programs) prints the program's own statement and runs nothing (decision B3). Exit statuses added: 24 host

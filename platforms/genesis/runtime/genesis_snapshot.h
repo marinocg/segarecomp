@@ -121,6 +121,32 @@ GenesisSnapshotStatus genesis_snapshot_validate(const GenesisSnapshotMachine *ma
 GenesisSnapshotStatus genesis_snapshot_restore(const GenesisSnapshotMachine *machine, const GenesisSnapshotIdentity *identity,
                                                const uint8_t *data, size_t size);
 
+/* ---- SEG-132 (ADR 0279): the section codecs another machine that embeds the Genesis devices reuses -----------------------------------------------------
+ * The Sega CD main side is the Genesis VDP, I/O latches, Z80 bus, Z80 machine, YM2612, PSG and mixer behind a different 68000 bus. Its own container (scd_snapshot.c) calls these
+ * wrappers for exactly the sections the Genesis codec already proved; nothing here changes what a Genesis snapshot contains. `*_put` writes into `out` (at most `cap` bytes) and returns
+ * the byte count (0 = does not fit / not capturable); `*_get` decodes into a STAGED copy only and returns 1 when every value is valid. */
+#define GENESIS_SNAPSHOT_PART_VDP_MAX 70000U
+#define GENESIS_SNAPSHOT_PART_IO_MAX 70000U
+uint32_t genesis_snapshot_part_vdp_put(const GenesisRuntime *runtime, uint8_t *out, uint32_t cap);
+int genesis_snapshot_part_vdp_get(GenesisRuntime *stage, const uint8_t *in, uint32_t length);
+uint32_t genesis_snapshot_part_io_put(const GenesisRuntime *runtime, uint8_t *out, uint32_t cap);
+int genesis_snapshot_part_io_get(GenesisRuntime *stage, const uint8_t *in, uint32_t length);
+#ifdef SEGARECOMP_GENESIS_SOUND
+#define GENESIS_SNAPSHOT_PART_Z80_MAX 512U
+#define GENESIS_SNAPSHOT_PART_PSG_MAX 64U
+#define GENESIS_SNAPSHOT_PART_MIXER_MAX 16384U
+#define GENESIS_SNAPSHOT_PART_AUDIO_MAX 256U
+/* The Z80 machine (`status` receives the Genesis status on failure), PSG chip, YM2612 (via ym2612_save/check/load by the caller), mixer and audio counters. */
+uint32_t genesis_snapshot_part_z80_put(const struct GenesisZ80Machine *machine, uint8_t *out, uint32_t cap, GenesisSnapshotStatus *status);
+GenesisSnapshotStatus genesis_snapshot_part_z80_get(struct GenesisZ80Machine *stage, const uint8_t *in, uint32_t length);
+uint32_t genesis_snapshot_part_psg_put(const struct GenesisAudio *audio, uint8_t *out, uint32_t cap);
+int genesis_snapshot_part_psg_get(struct GenesisAudio *stage, const uint8_t *in, uint32_t length);
+uint32_t genesis_snapshot_part_mixer_put(const struct GenesisAudio *audio, uint8_t *out, uint32_t cap, GenesisSnapshotStatus *status);
+int genesis_snapshot_part_mixer_get(struct GenesisAudio *stage, const uint8_t *in, uint32_t length);
+uint32_t genesis_snapshot_part_audio_put(const struct GenesisAudio *audio, uint8_t *out, uint32_t cap);
+int genesis_snapshot_part_audio_get(struct GenesisAudio *stage, const uint8_t *in, uint32_t length);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

@@ -342,6 +342,36 @@ int main() {
     fs::permissions(cache / "games" / key32('6') / "obj", fs::perms::owner_all);
   }
 #endif
+  {  // SEG-132 (ADR 0279): a Master System game's save states (<library>/saves/master-system/<sha256>/<mapper>/...) are protected exactly like Genesis saves
+    const fs::path lib = dir / "sms_library", cch = dir / "sms_cache";
+    fs::remove_all(lib);
+    fs::remove_all(cch);
+    fs::create_directories(cch / "games");
+    Catalog c(lib / "library.json");
+    c.load();
+    LibraryEntry g = entry('b');
+    g.platform_id = "master-system";
+    c.entries() = {g};
+    const fs::path saves = lib / "saves" / "master-system" / digest('b');
+    spit(saves / "sega" / "states" / "quick.sgstate", std::string(3000, 'q'));
+    spit(saves / "rom_only" / "states" / "slot-1.sgstate", std::string(100, 'r'));
+    spit(lib / "saves" / "master-system" / digest('f') / "sega" / "states" / "quick.sgstate", std::string(512, 'x'));   // another game
+    BusyGuard bg;
+    StorageReport r = scan_storage(c, cch, lib);
+    const EntryUsage *u = r.find(g.id());
+    expect(u != nullptr && u->user_data == 3100 && u->sms_saves && !u->genesis_saves, "SMS: the states of every mapping of the game are measured as user data");
+    expect(u != nullptr && u->total.total() == 0, "SMS: player data is not part of the removable total");
+    const Plan removal = plan_remove_from_library(r, {g.id()}, true, bg);
+    bool names_saves = false;
+    for (const auto &line : removal.remains) names_saves = names_saves || line.find("Save states of 1 Master System game") == 0;
+    expect(names_saves, "SMS: removing the game from the library says its states are kept");
+    Plan forged;
+    forged.items = {{saves / "sega" / "states", 3000, true}, {saves, 0, true}, {lib / "saves", 0, true}};
+    expect(bg.try_begin_maintenance(), "maintenance lock");
+    const ExecResult refused = execute_plan(forged, cch, bg, lib);
+    bg.end_maintenance();
+    expect(refused.removed == 0 && fs::exists(saves / "sega" / "states" / "quick.sgstate"), "SMS: no plan can reach the states");
+  }
   {  // SEG-131 (ADR 0278): a Genesis game's cartridge saves and save states (<library>/saves/genesis/<sha256>/...) are the player's data: measured as user data,
      // never part of the removable total, never reachable from a plan, and never deleted by build cleanup, archiving or removing the game from the library.
     const fs::path lib = dir / "gen_library", cch = dir / "gen_cache";
@@ -398,6 +428,7 @@ int main() {
       spit(folder / "build.partial" / "obj" / "x.o", std::string(40, 'p'));
       spit(folder / "backup-ram.bin", std::string(8192, 's'));
       spit(folder / "recordings" / "session-1.txt", std::string(300, 'r'));
+      spit(folder / "states" / "quick.sgstate", std::string(1000, 'q'));   // SEG-132: the game's save states
       spit(folder / "run.log", std::string(50, 'g'));
       spit(folder / "build-backup-ram.bin", std::string(8192, 'b'));
       spit(cch / "sega-cd-objects" / "o1" / "x.o", std::string(600, 'o'));
@@ -407,7 +438,7 @@ int main() {
     StorageReport r = scan_storage(c, cch, lib);
     const EntryUsage *u = r.find(g.id());
     expect(u != nullptr && u->dirs.size() == 3, "Sega CD: the build, failed and partial folders are the entry's build folders");
-    expect(u != nullptr && u->user_data == 8192 + 300, "Sega CD: the backup RAM and the recordings are measured as user data");
+    expect(u != nullptr && u->user_data == 8192 + 300 + 1000, "Sega CD: the backup RAM, the recordings and the save states are measured as user data");
     expect(u != nullptr && u->total.executable == 1500 && u->total.total() > 1500 && u->total.total() < 1500 + 8192 + 300 + 8192 + 1000, "Sega CD: user data is not part of the removable total");
     expect(u != nullptr && !u->dirs.empty() && u->dirs[0].name == "build" && u->dirs[0].kind == DirKind::current && u->dirs[0].valid_build && u->dirs[0].busy_key == "scd-" + id16, "Sega CD: the build folder is the current valid build, guarded by the entry's key");
     expect(r.scd_object_cache == 600 && r.failed_partial == 70 + 40, "Sega CD: the shared object cache and the failed/partial folders are sized");
@@ -421,17 +452,17 @@ int main() {
           only_generated = only_generated && (name == "build" || name == "build.failed" || name == "build.partial" || parent == "build.failed");
         }
       expect(only_generated && !plans[0].items.empty() && plans[1].items.size() == 2, "Sega CD: no plan contains a save, a recording, a log or the game's folder");
-      expect(plans[3].remains.size() > 3 && plans[3].remains.back().find("Save data and input recordings") == 0, "Sega CD: removal states that saves and recordings are kept");
+      expect(plans[3].remains.size() > 3 && plans[3].remains.back().find("Save data, save states and input recordings") == 0, "Sega CD: removal states that saves and recordings are kept");
     }
     {  // a forged plan naming user data or the game's own folder is refused by shape; the files survive
       Plan forged;
-      forged.items = {{folder / "backup-ram.bin", 8192, false}, {folder / "recordings", 300, true}, {folder / "run.log", 50, false}, {folder, 0, true}, {folder / "build" / ".." / "backup-ram.bin", 8192, false},
+      forged.items = {{folder / "backup-ram.bin", 8192, false}, {folder / "recordings", 300, true}, {folder / "states", 1000, true}, {folder / "run.log", 50, false}, {folder, 0, true}, {folder / "build" / ".." / "backup-ram.bin", 8192, false},
                       {folder / "recordings" / "session-1.txt", 300, false}, {lib / "sega-cd", 0, true}, {lib / "library.json", 0, false}};
       expect(bg.try_begin_maintenance(), "maintenance lock");
       const ExecResult refused = execute_plan(forged, cch, bg, lib);
       bg.end_maintenance();
       expect(refused.problems.size() == forged.items.size() && refused.removed == 0, "Sega CD: every forged item is refused");
-      expect(fs::exists(folder / "backup-ram.bin") && fs::exists(folder / "recordings" / "session-1.txt") && fs::exists(folder / "run.log"), "Sega CD: the save, the recording and the log survive a forged plan");
+      expect(fs::exists(folder / "backup-ram.bin") && fs::exists(folder / "recordings" / "session-1.txt") && fs::exists(folder / "run.log") && fs::exists(folder / "states" / "quick.sgstate"), "Sega CD: the save, the recording, the save states and the log survive a forged plan");
     }
     {  // a symlinked build folder or game folder is never followed; a library root that overlaps the cache root does not stop native cleanup
 #if !defined(_WIN32)

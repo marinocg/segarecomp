@@ -47,7 +47,7 @@ constexpr unsigned kMaxStaticExtents = 48;   // SEG-098-T002 (12), T004 (48, ADR
 constexpr unsigned kMaxProduced = 8;   // SEG-111 (ADR 0255): produced-code images admitted from build passes (kMaxProducedImages of the emitter)
 constexpr unsigned kMaxRounds = 1 + kMaxEpochs + kMaxTemplates + kMaxExtents + kMaxProduced;
 constexpr const char *kCacheVersion = "segarecomp.sega_cd_build.objects.v1";
-constexpr const char *kViewerFoundation[] = {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_rewind.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c", "sv_host.c", "sv_pages.c", "sv_draw.c"};
+constexpr const char *kViewerFoundation[] = {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_rewind.c", "sv_state_store.c", "sv_state_service.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c", "sv_host.c", "sv_pages.c", "sv_draw.c"};
 
 struct Options {
   fs::path cue, bios, output, runtime_dir, cache_dir, input_script, backup_ram;
@@ -501,6 +501,8 @@ class Builder {
     for (const fs::path &inc : {rt / "platforms/sega-cd/runtime", rt / "platforms/genesis/runtime", rt / "libs/codegen/c11/include", rt / "libs/device/sega/psg/include",
                                 rt / "libs/device/sega/ym2612/include"}) c.push_back("-I" + inc.string());
     if (source.filename() == "scd_z80.c" && o_.z80_audio) c.push_back("-DSCD_Z80_AUDIO=1");   // SEG-115: the Z80 attach carries the sound devices
+    // SEG-132 (ADR 0279): the snapshot codec and the Genesis section codecs it reuses carry the Z80 / YM2612 / PSG / mixer sections exactly when the program has the main-side Z80 with its sound devices.
+    if ((source.filename() == "scd_snapshot.c" || source.filename() == "genesis_snapshot.c") && o_.main_z80 && o_.z80_audio) c.push_back("-DSEGARECOMP_GENESIS_SOUND");
     if (viewer) {
       for (const fs::path &inc : {rt / "platforms/sega-cd/viewer", rt / "platforms/genesis/viewer", rt / "libs/viewer/include", rt / "libs/viewer/src"}) c.push_back("-I" + inc.string());
       if (!o_.sdl3_include.empty()) c.push_back("-I" + o_.sdl3_include.string());
@@ -515,7 +517,7 @@ class Builder {
     std::string extra_text;
     for (const auto &e : extra) extra_text += e + "\n";
     const std::string key = sha_of(key_base_ + "\n" + (viewer ? "viewer\n" : "") + source.filename().string() + "\n" + extra_text +
-                                   (source.extension() == ".cpp" ? "cxx\n" : "") + (source.filename() == "scd_z80.c" && o_.z80_audio ? "audio\n" : "") +
+                                   (source.extension() == ".cpp" ? "cxx\n" : "") + ((source.filename() == "scd_z80.c" || source.filename() == "scd_snapshot.c" || source.filename() == "genesis_snapshot.c") && o_.z80_audio && (o_.main_z80 || source.filename() == "scd_z80.c") ? "audio\n" : "") +
                                    sha_of(read_text(source, 1ULL << 31U)));
     object = o_.cache_dir / (key + ".o");
     rebuilt = false;
@@ -704,7 +706,12 @@ class Builder {
     std::vector<fs::path> viewer_sources{rt / "platforms/sega-cd/viewer/scd_viewer.c", rt / "platforms/genesis/viewer/viewer.c"};
     if (host) {
       viewer_sources = {o_.viewer_host_source};
+      viewer_sources.push_back(rt / "platforms/sega-cd/viewer/scd_snapshot.c");   // SEG-132: a test host reaches the codec through the same units the viewer links
+      viewer_sources.push_back(rt / "platforms/genesis/runtime/genesis_snapshot.c");
     } else {
+      viewer_sources.push_back(rt / "platforms/sega-cd/viewer/scd_snapshot.c");
+      viewer_sources.push_back(rt / "platforms/sega-cd/viewer/scd_viewer_state.c");
+      viewer_sources.push_back(rt / "platforms/genesis/runtime/genesis_snapshot.c");
       viewer_sources.push_back(rt / "platforms/genesis/viewer/viewer_sdl3.c");
       for (const char *n : kViewerFoundation) viewer_sources.push_back(rt / "libs/viewer/src" / n);
     }

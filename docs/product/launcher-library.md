@@ -175,7 +175,7 @@ credentials).
 
 Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button opens the host pause menu (the guest does not advance):
 
-* Resume; **Save State**, **Load State** and **Rewind** (Genesis: five numbered slots plus a quick slot, and a visual rewind of the last minute; Master System and Sega CD show them disabled with the reason; see [save-states.md](save-states.md)); **Quick Settings** (fullscreen, scaling, aspect, display preset, VSync, FPS counter); **Video & Display** (plus scanline/mask/curvature/bloom/
+* Resume; **Save State**, **Load State** and **Rewind** (Genesis, Master System and Sega CD: five numbered slots plus a quick slot, and a visual rewind; a session that cannot offer them, such as a recording, shows them disabled with the reason; see [save-states.md](save-states.md)); **Quick Settings** (fullscreen, scaling, aspect, display preset, VSync, FPS counter); **Video & Display** (plus scanline/mask/curvature/bloom/
   brightness sliders, a live preview that applies the current settings through the real CRT pipeline, and clickable preset buttons); **Controls** (with a **Controller status & test** page: what SDL sees, live buttons, the reason a pad does not work); **Audio** (volume/mute, gain only); **System & Diagnostics** (system,
   ROM digest when started from the launcher, FPS, renderer, picture/output size, audio queue and dropped chunks, screenshot, Reset on Master System);
   **Return to Launcher** (or Quit outside the launcher), with a confirmation.
@@ -199,7 +199,7 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
   key), a rebindable menu key (Esc always works), restore defaults. The listener waits for a *fresh* press: the press that activated it is ignored.
   Held inputs are released when the window loses focus and when the menu opens or closes.
 * Menu button: **Back/Select** (Nintendo "-"), **Home/Guide** or **Esc** opens the menu. **Start** ("+") is a game button (Genesis Start / Master System Pause), so it does not open the menu. Nintendo controllers show their printed labels in the cues (South is the Nintendo B, East the A).
-* Hotkeys: F5 quick save, F8 quick load and F7 rewind (Genesis; reserved, never bindable to a game button), F11 / Alt+Enter fullscreen, F12 screenshot (the game picture only, PNG, in `Pictures/Segarecomp` or `SEGARECOMP_SCREENSHOT_DIR`).
+* Hotkeys: F5 quick save, F8 quick load and F7 rewind (Genesis, Master System and Sega CD; reserved, never bindable to a game button; the Sega CD frame step is F9), F11 / Alt+Enter fullscreen, F12 screenshot (the game picture only, PNG, in `Pictures/Segarecomp` or `SEGARECOMP_SCREENSHOT_DIR`).
 * Capability matrix: Genesis is a three-button pad (A/B/C/Start; no X/Y/Z/Mode), two ports, no Reset. Master System has two buttons, the console's
   **Pause** button (an NMI edge, distinct from the host menu) and Reset in the System page. Audio device selection follows the OS default.
 * Settings persist in `viewer-settings.cfg` (`SEGARECOMP_VIEWER_SETTINGS`); the launcher's Settings > Video & Controls edits the same file (it re-reads the file when a game exits and when Settings is opened, so a change made in the game's menu is never overwritten by a stale launcher copy).

@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,6 +25,14 @@ struct SmsSdl3Viewer {
   int ext_attached;
   SvAspect plan_aspect;     /* sampled with the requested mode once per guest frame */
   SvWidescreenSupport l2_support; /* the outcome of the latest frame produced under a request */
+  /* SEG-132 automation seam (the other consoles' viewers have the same one): a file of `<poll> <keys>` lines (keys: any of U D L R 1 2 P, or `-` for none; plus the one-shot
+   * commands K quick save, M quick load, Y rewind two moments and confirm, Z browse three moments back and cancel, Q quit) replaces player 1's sampled input from that poll
+   * (one poll = one guest frame) on. The commands run at the frame barrier exactly as F5 / F8 / F7 do, and Y / Z queue real key events consumed by the real surface loop.
+   * Unset in every shipped use. */
+  struct { uint64_t poll; uint16_t actions; uint8_t commands; } script[1024];
+  size_t script_count, script_next;
+  uint16_t script_pad;
+  uint64_t polls;
   SvWidescreenSupport l3_support; /* SEG-121: whether the latest Level 3 request produced the sprite spill (never Available) */
 };
 
@@ -45,11 +54,75 @@ static uint8_t pad_of(uint16_t actions) {
   return sms_viewer_pad_from_keys(&k);
 }
 
+enum { CMD_SAVE = 1, CMD_LOAD = 2, CMD_REWIND_YES = 4, CMD_REWIND_NO = 8, CMD_QUIT = 16 };
+
+static void push_script_key(SDL_Scancode scancode) {   /* a queued key press, exactly what the keyboard would deliver */
+  SDL_Event e;
+  int down;
+  for (down = 1; down >= 0; --down) {
+    SDL_zero(e);
+    e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    e.common.timestamp = SDL_GetTicksNS();
+    e.key.scancode = scancode;
+    e.key.down = down != 0;
+    SDL_PushEvent(&e);
+  }
+}
+
+static void load_pad_script(SmsSdl3Viewer *v) {
+  const char *path = SDL_getenv("SEGARECOMP_VIEWER_PAD_SCRIPT");
+  FILE *f = path != NULL ? fopen(path, "r") : NULL;
+  char text[96];
+  if (f == NULL) return;
+  while (v->script_count < sizeof v->script / sizeof v->script[0] && fgets(text, sizeof text, f) != NULL) {
+    unsigned long long poll = 0U;
+    char keys[32] = "";
+    uint16_t actions = 0U;
+    uint8_t commands = 0U;
+    const char *k;
+    if (sscanf(text, "%llu %31s", &poll, keys) != 2) continue;
+    for (k = keys; *k != '\0'; ++k) {
+      switch (*k) {
+        case 'U': actions |= SV_ACTION_BIT(SV_ACT_UP); break;
+        case 'D': actions |= SV_ACTION_BIT(SV_ACT_DOWN); break;
+        case 'L': actions |= SV_ACTION_BIT(SV_ACT_LEFT); break;
+        case 'R': actions |= SV_ACTION_BIT(SV_ACT_RIGHT); break;
+        case '1': actions |= SV_ACTION_BIT(SV_ACT_BUTTON1); break;
+        case '2': actions |= SV_ACTION_BIT(SV_ACT_BUTTON2); break;
+        case 'P': actions |= SV_ACTION_BIT(SV_ACT_PAUSE); break;
+        case 'K': commands |= CMD_SAVE; break;
+        case 'M': commands |= CMD_LOAD; break;
+        case 'Y': commands |= CMD_REWIND_YES; break;
+        case 'Z': commands |= CMD_REWIND_NO; break;
+        case 'Q': commands |= CMD_QUIT; break;
+        default: break;
+      }
+    }
+    v->script[v->script_count].poll = (uint64_t)poll;
+    v->script[v->script_count].actions = actions;
+    v->script[v->script_count].commands = commands;
+    v->script_count += 1U;
+  }
+  fclose(f);
+}
+
 /* Once per guest frame, before the frame's input is recorded: the pause overlay (if opened) blocks here, so the guest does not advance. */
 static int sdl_poll(void *ctx, SmsViewerInput *in) {
   SmsSdl3Viewer *v = (SmsSdl3Viewer *)ctx;
   SvSample s;
   sv_host_service(v->host, &s);
+  while (v->script_next < v->script_count && v->script[v->script_next].poll <= v->polls) {   /* the automation seam: commands run once, at this barrier */
+    const uint8_t commands = v->script[v->script_next].commands;
+    v->script_pad = v->script[v->script_next].actions;
+    if ((commands & CMD_SAVE) != 0U) (void)sv_host_quick_save(v->host);
+    if ((commands & CMD_LOAD) != 0U) (void)sv_host_quick_load(v->host);
+    if ((commands & CMD_REWIND_YES) != 0U) { push_script_key(SDL_SCANCODE_LEFT); push_script_key(SDL_SCANCODE_LEFT); push_script_key(SDL_SCANCODE_RETURN); (void)sv_host_open_rewind(v->host); }
+    if ((commands & CMD_REWIND_NO) != 0U) { push_script_key(SDL_SCANCODE_LEFT); push_script_key(SDL_SCANCODE_LEFT); push_script_key(SDL_SCANCODE_LEFT); push_script_key(SDL_SCANCODE_ESCAPE); (void)sv_host_open_rewind(v->host); }
+    if ((commands & CMD_QUIT) != 0U) s.quit = 1;
+    v->script_next += 1U;
+  }
+  if (v->script_count != 0U) s.pad[0] = v->script_pad;
+  v->polls += 1U;
   if (v->ext_attached) { /* the requested mode is sampled here, between guest frames: a frame is produced wholly under one value */
     const SvVideoSettings *video = &sv_host_settings(v->host)->video;
     const int on = video->widescreen != SV_WIDESCREEN_ORIGINAL;
@@ -185,6 +258,7 @@ SmsSdl3Viewer *sms_sdl3_viewer_open(const char *title, int scale, int want_audio
   cfg.diagnostics_ctx = v;
   v->host = sv_host_open(&cfg);
   if (v->host == NULL) { free(v); return NULL; }
+  load_pad_script(v);
   if (want_audio && SDL_InitSubSystem(SDL_INIT_AUDIO)) {
     SDL_AudioSpec spec;
     SDL_zero(spec);
@@ -218,6 +292,11 @@ void sms_sdl3_viewer_host(SmsSdl3Viewer *viewer, SmsViewerHost *host) {
   host->poll = sdl_poll;
   host->present = sdl_present;
   host->audio = viewer->audio != NULL ? sdl_audio : NULL; /* muted or no device: the core only drains the ring */
+}
+
+/* SEG-132: a restore drops the audio of the abandoned future (host audio only; the guest-time PCM state is part of the restored machine). */
+void sms_sdl3_viewer_audio_clear(SmsSdl3Viewer *v) {
+  if (v != NULL && v->audio != NULL) (void)SDL_ClearAudioStream(v->audio);
 }
 
 void sms_sdl3_viewer_set_perf(SmsSdl3Viewer *v, struct SvPerf *perf) { if (v != NULL) sv_host_set_perf(v->host, perf); }

@@ -63,6 +63,7 @@ struct EntryUsage {
   // SEG-109-T004 (ADR 0253): the player's own per-game data (a Sega CD game's backup RAM and input recordings). Reported, never part of `total` and never
   // reachable from a Plan: plans are built from `dirs` only, and execute_plan refuses every path that is not a generated build folder.
   std::uintmax_t user_data = 0;
+  bool sms_saves = false;       // SEG-132: user_data includes a Master System game's save states (<library>/saves/master-system/<sha256>/)
   bool genesis_saves = false;   // SEG-131: user_data includes a Genesis game's cartridge saves and save states (<library>/saves/genesis/<sha256>/)
 };
 
