@@ -492,6 +492,7 @@ int sv_patch_defaults_apply(SvSettings *settings, const char *widescreen, const 
   if (ws < 0 && ss < 0) return -1;
   if (ws >= 0) settings->video.widescreen = (SvWidescreenMode)ws;
   if (ss >= 0) settings->video.widescreen_side_style = (SvSideStyle)ss;
+  settings->video.widescreen_width = 100;   /* a widescreen patch defaults to full 16:9 (Level 3); the variant's own profile still overrides */
   return 0;
 }
 
