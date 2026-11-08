@@ -60,6 +60,9 @@ void scd_dynamic_attach(ScdMachine *m) {
 
 static const ScdDynamicProgram *scd_dyn_program(const ScdMachine *m) { (void)m; return scd_dyn_registered; }
 
+/* SEG-132: the registered program (immutable build facts), for the snapshot identity. */
+const ScdDynamicProgram *scd_dynamic_program(const ScdMachine *m) { return scd_dyn_program(m); }
+
 static uint32_t scd_dyn_sectors(const ScdDynamicImage *img) { return (img->length + 2047U) / 2048U; }
 
 static int scd_dyn_delivered(const ScdMachine *m, uint32_t lba) {

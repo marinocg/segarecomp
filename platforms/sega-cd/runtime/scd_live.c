@@ -57,6 +57,7 @@ static ScdLiveSummary scd_live_loop(ScdMachine *m, const ScdLiveHost *host, cons
     s.outcome = SCD_LIVE_HOST_ERROR;
     return s;
   }
+  if (host->started != NULL) host->started(host->ctx, m);
   for (;;) {
     ScdLivePoll poll;
     uint64_t boundary, target, ticks;

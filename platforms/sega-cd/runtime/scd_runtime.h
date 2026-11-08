@@ -742,6 +742,8 @@ void scd_dynamic_note_write(ScdMachine *m, uint32_t memory, uint32_t offset, uin
 void scd_dynamic_note_view_change(ScdMachine *m);
 /* A program with dynamic images registers them before it starts (generated main); the field is not part of ScdProgram so that every other program is unchanged. */
 void scd_dynamic_register(const ScdDynamicProgram *program);
+/* SEG-132: the registered program (NULL when none): immutable build facts a snapshot binds into its identity. */
+const ScdDynamicProgram *scd_dynamic_program(const ScdMachine *m);
 void scd_dynamic_attach(ScdMachine *m);
 void scd_dynamic_release(ScdMachine *m);
 void scd_dynamic_report(const ScdMachine *m, FILE *out);
@@ -771,6 +773,16 @@ void scd_machine_release(ScdMachine *m);
 /* SEG-114 (ADR 0258): the optional main-side Z80. A program built with Z80 images (platforms/sega-cd/runtime/z80/scd_z80.c plus the generated
  * image units) registers these operations from its generated main, exactly like the dynamic-image registry; without a registration every
  * program keeps the legacy rule (once the Z80 has been runnable a main read of the Z80 area is the typed stop main_device_unsupported). */
+/* SEG-132 (ADR 0279): the live pieces of the attached Z80 a snapshot stages and commits. Pointers refer to the live objects; `audio`/`audio_synced`/`audio_stopped` are NULL in a build
+ * without the sound devices. `refuse` is non-zero (with a reason) when the attach is a build pass or has met a typed stop: such a machine is never snapshotted. */
+typedef struct ScdZ80SnapshotView {
+  void *machine;               /* GenesisZ80Machine * */
+  void *audio;                 /* GenesisAudio * */
+  uint64_t *audio_synced;      /* master ticks the sound devices were last synchronised to by the machine */
+  uint8_t *audio_stopped;
+  const char *refuse;
+} ScdZ80SnapshotView;
+
 typedef struct ScdZ80Ops {
   int (*attach)(ScdMachine *m);                           /* 0 = attached; called once, before the first instruction */
   void (*detach)(ScdMachine *m);
@@ -782,6 +794,10 @@ typedef struct ScdZ80Ops {
   /* SEG-115 (ADR 0259): the shared YM2612 and PSG. Both are NULL for a program built without the sound devices (their accesses are then accepted and discarded, as in M18). */
   void (*audio_sync)(ScdMachine *m, uint64_t tick);       /* run the Z80 and the devices to guest time `tick` (never beyond a time a main access can still precede) */
   int (*audio_frame)(ScdMachine *m, uint64_t frame, int32_t out[2]); /* the FM/PSG part of mixed output frame `frame` (L, R); 0 = none yet */
+  /* SEG-132 (ADR 0279): the attached Z80 machine and sound devices for the snapshot codec (scd_snapshot.c stages and commits them with the Genesis section codecs).
+   * Returns 0 and the live GenesisZ80Machine / GenesisAudio (the latter NULL in a build without the sound devices: then the snapshot refuses the configuration); non-zero when no Z80
+   * is attached, or when it is a build pass (`pass`/`unmodelled`/unknown epochs: never snapshotted). Optional (NULL = the program has no snapshot support for its Z80). */
+  int (*snapshot_parts)(ScdMachine *m, struct ScdZ80SnapshotView *view);
 } ScdZ80Ops;
 void scd_z80_register(const ScdZ80Ops *ops);
 const ScdZ80Ops *scd_z80_registered_ops(void);
@@ -891,6 +907,23 @@ const struct GenesisFrameArtifact *scd_vdp_present_take(ScdMachine *m, uint64_t 
 struct GenesisFrameExtension;
 int scd_vdp_present_set_extension(ScdMachine *m, struct GenesisFrameExtension *extension);
 void scd_vdp_present_counts(const ScdMachine *m, uint64_t *rendered, uint64_t *skipped, uint64_t *rejected);
+/* SEG-132 (ADR 0279): the snapshot's view of the main-side Genesis device host (scd_vdp.c owns the type). `scd_vdp_host_access` hands out the live device host (a GenesisRuntime), the
+ * frame-in-progress raster samples and the line-0 VRAM copy as raw memory (the snapshot codec stages copies and commits with memcpy: no pointer inside them is ever changed) and copies
+ * out the execution-affecting scalar fields; `scd_vdp_host_set_fields` is the commit-time inverse (a completed frame awaiting presentation is dropped: it belongs to the abandoned future). */
+typedef struct ScdVdpHostFields {
+  uint32_t fifo_cycles[4];
+  uint32_t fifo_idx;
+  uint64_t fill_end;
+  int32_t capture_line;
+  uint32_t capture_lines_done;
+  uint64_t capture_line_tick;
+  uint8_t dma_armed;
+  uint8_t present;
+  uint8_t present_ready;
+  uint32_t capture_count;      /* diagnostic frame captures requested (a snapshot refuses a machine that has any) */
+} ScdVdpHostFields;
+int scd_vdp_host_access(ScdMachine *m, void **host, size_t *host_bytes, void **raster, size_t *raster_bytes, void **vram_line0, size_t *line0_bytes, ScdVdpHostFields *fields);
+void scd_vdp_host_set_fields(ScdMachine *m, const ScdVdpHostFields *fields);
 /* The canonical frame digest (ADR 0146 decision 5), the same SHA-256 as a capture report's `sha256`. */
 void scd_frame_sha256(const struct GenesisFrameArtifact *frame, char out[65]);
 /* Ticks of one video frame of this machine (the distance between successive vertical-blank onsets). */

@@ -108,6 +108,42 @@ int scd_vdp_init(ScdMachine *m) {
   return 0;
 }
 
+int scd_vdp_host_access(ScdMachine *m, void **host, size_t *host_bytes, void **raster, size_t *raster_bytes, void **vram_line0, size_t *line0_bytes, ScdVdpHostFields *fields) {
+  ScdVdpHost *h = (ScdVdpHost *)m->vdp_host;
+  if (h == NULL) return -1;
+  *host = &h->host;
+  *host_bytes = sizeof h->host;
+  *raster = &h->raster;
+  *raster_bytes = sizeof h->raster;
+  *vram_line0 = h->vram_line0;
+  *line0_bytes = sizeof h->vram_line0;
+  memset(fields, 0, sizeof *fields);
+  memcpy(fields->fifo_cycles, h->fifo_cycles, sizeof fields->fifo_cycles);
+  fields->fifo_idx = h->fifo_idx;
+  fields->fill_end = h->fill_end;
+  fields->capture_line = h->capture_line;
+  fields->capture_lines_done = h->capture_lines_done;
+  fields->capture_line_tick = h->capture_line_tick;
+  fields->dma_armed = h->dma_armed;
+  fields->present = h->present;
+  fields->present_ready = h->present_ready;
+  fields->capture_count = h->capture_count;
+  return 0;
+}
+
+void scd_vdp_host_set_fields(ScdMachine *m, const ScdVdpHostFields *fields) {
+  ScdVdpHost *h = (ScdVdpHost *)m->vdp_host;
+  if (h == NULL) return;
+  memcpy(h->fifo_cycles, fields->fifo_cycles, sizeof h->fifo_cycles);
+  h->fifo_idx = fields->fifo_idx;
+  h->fill_end = fields->fill_end;
+  h->capture_line = fields->capture_line;
+  h->capture_lines_done = fields->capture_lines_done;
+  h->capture_line_tick = fields->capture_line_tick;
+  h->dma_armed = fields->dma_armed;
+  h->present_ready = 0U;   /* a completed frame awaiting presentation belongs to the abandoned future */
+}
+
 void scd_vdp_release(ScdMachine *m) {
   free(m->vdp_host);
   m->vdp_host = NULL;

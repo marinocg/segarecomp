@@ -295,10 +295,27 @@ static void scd_z80_report(const ScdMachine *m, FILE *out) {
   fprintf(out, "]");
 }
 
+/* SEG-132 (ADR 0279): the live Z80 pieces for the snapshot codec (viewer builds link scd_snapshot.c; headless programs never call this). */
+static int scd_z80_snapshot_parts(ScdMachine *m, ScdZ80SnapshotView *view) {
+  ScdZ80 *z = scd_z80_of(m);
+  memset(view, 0, sizeof *view);
+  if (z == NULL) return 1;
+  view->machine = &z->machine;
+  if (z->pass || z->unmodelled || z->unknown_count != 0U || z->unknown_overflow != 0U) view->refuse = "the main-side Z80 is attached for a build pass";
+  else if (z->finish_fault) view->refuse = "the main-side Z80 has met a typed stop";
+#ifdef SCD_Z80_AUDIO
+  view->audio = &z->audio;
+  view->audio_synced = &z->audio_synced;
+  view->audio_stopped = &z->audio_stopped;
+  if (view->refuse == NULL && z->audio_stopped) view->refuse = "the sound devices have met a typed stop";
+#endif
+  return 0;
+}
+
 #ifdef SCD_Z80_AUDIO
 const ScdZ80Ops scd_z80_ops = {scd_z80_attach, scd_z80_detach, scd_z80_readable, scd_z80_classify_stop,
-                               scd_z80_finish, scd_z80_export_epochs, scd_z80_report, scd_z80_audio_sync, scd_z80_audio_frame};
+                               scd_z80_finish, scd_z80_export_epochs, scd_z80_report, scd_z80_audio_sync, scd_z80_audio_frame, scd_z80_snapshot_parts};
 #else
 const ScdZ80Ops scd_z80_ops = {scd_z80_attach, scd_z80_detach, scd_z80_readable, scd_z80_classify_stop,
-                               scd_z80_finish, scd_z80_export_epochs, scd_z80_report, NULL, NULL};
+                               scd_z80_finish, scd_z80_export_epochs, scd_z80_report, NULL, NULL, scd_z80_snapshot_parts};
 #endif
