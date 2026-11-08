@@ -119,6 +119,13 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom);
 // library (never in the cache's disposable build folders), and vanilla and patched versions are separate by default. Empty when the game is not a Genesis cartridge
 // or an identity is not a 64-digit hex digest.
 [[nodiscard]] std::filesystem::path genesis_save_dir(const RomView &rom);
+// SEG-132 (ADR 0279): where a Master System game's save states live -- <library>/saves/master-system/<cartridge sha256>/<mapper>/ holding states/{quick,slot-1..5}.sgstate. The folder is
+// keyed on the cartridge digest AND the declared mapper (a sidecar manifest contributes its own digest), so a state of one mapping is never even listed under another; the viewer's
+// state container carries the same facts and refuses a mismatch regardless of where a file was copied. No cartridge battery memory is persisted (the board contract cannot identify it).
+// Empty when the game is not a Master System cartridge, the digest is not lowercase hex, or no mapper has been declared.
+[[nodiscard]] std::filesystem::path sms_save_dir(const RomView &rom);
+// The player's data folder of whatever console `rom` is (empty for a game with none): genesis_save_dir or sms_save_dir.
+[[nodiscard]] std::filesystem::path game_save_dir(const RomView &rom);
 // What the viewer reported about the player's data in the run log of a finished session (the VIEWER_PERSIST lines).
 struct SaveOutcome {
   bool load_refused = false;      // the save file was refused before any guest instruction (wrong size / not a regular file / unreadable)

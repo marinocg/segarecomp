@@ -258,7 +258,7 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
     SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE");
   }
   {  // SEG-131: the player's data for this game and version; a non-Genesis game (or an invalid identity) gets none, and an inherited value can never leak in
-    const fs::path saves = genesis_save_dir(rom);
+    const fs::path saves = game_save_dir(rom);
     if (!saves.empty()) {
       std::error_code ec;
       fs::create_directories(saves, ec);   // best effort: the viewer creates what is missing and reports a failure
@@ -1284,6 +1284,18 @@ fs::path genesis_save_dir(const RomView &rom) {
   if (!lowercase_hex(rom.patch_identity, 64)) return {};
   return dir / "patches" / rom.patch_identity;
 }
+
+fs::path sms_save_dir(const RomView &rom) {
+  if (rom.platform_id != "master-system" || !lowercase_hex(rom.sha256, 64)) return {};
+  std::string family = rom.mapper;
+  if (family.empty() && !rom.mapper_manifest.empty() && lowercase_hex(rom.mapper_manifest_sha256, 64)) family = "manifest-" + rom.mapper_manifest_sha256.substr(0, 16);
+  if (family.empty() || family.size() > 40) return {};
+  for (const char ch : family)
+    if (!((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-')) return {};   // a path component of a known shape, never user text
+  return library_root() / "saves" / "master-system" / rom.sha256 / family;
+}
+
+fs::path game_save_dir(const RomView &rom) { return rom.platform_id == "master-system" ? sms_save_dir(rom) : genesis_save_dir(rom); }
 
 SaveOutcome read_save_outcome(const fs::path &run_log) {
   SaveOutcome outcome;

@@ -342,6 +342,36 @@ int main() {
     fs::permissions(cache / "games" / key32('6') / "obj", fs::perms::owner_all);
   }
 #endif
+  {  // SEG-132 (ADR 0279): a Master System game's save states (<library>/saves/master-system/<sha256>/<mapper>/...) are protected exactly like Genesis saves
+    const fs::path lib = dir / "sms_library", cch = dir / "sms_cache";
+    fs::remove_all(lib);
+    fs::remove_all(cch);
+    fs::create_directories(cch / "games");
+    Catalog c(lib / "library.json");
+    c.load();
+    LibraryEntry g = entry('b');
+    g.platform_id = "master-system";
+    c.entries() = {g};
+    const fs::path saves = lib / "saves" / "master-system" / digest('b');
+    spit(saves / "sega" / "states" / "quick.sgstate", std::string(3000, 'q'));
+    spit(saves / "rom_only" / "states" / "slot-1.sgstate", std::string(100, 'r'));
+    spit(lib / "saves" / "master-system" / digest('f') / "sega" / "states" / "quick.sgstate", std::string(512, 'x'));   // another game
+    BusyGuard bg;
+    StorageReport r = scan_storage(c, cch, lib);
+    const EntryUsage *u = r.find(g.id());
+    expect(u != nullptr && u->user_data == 3100 && u->sms_saves && !u->genesis_saves, "SMS: the states of every mapping of the game are measured as user data");
+    expect(u != nullptr && u->total.total() == 0, "SMS: player data is not part of the removable total");
+    const Plan removal = plan_remove_from_library(r, {g.id()}, true, bg);
+    bool names_saves = false;
+    for (const auto &line : removal.remains) names_saves = names_saves || line.find("Save states of 1 Master System game") == 0;
+    expect(names_saves, "SMS: removing the game from the library says its states are kept");
+    Plan forged;
+    forged.items = {{saves / "sega" / "states", 3000, true}, {saves, 0, true}, {lib / "saves", 0, true}};
+    expect(bg.try_begin_maintenance(), "maintenance lock");
+    const ExecResult refused = execute_plan(forged, cch, bg, lib);
+    bg.end_maintenance();
+    expect(refused.removed == 0 && fs::exists(saves / "sega" / "states" / "quick.sgstate"), "SMS: no plan can reach the states");
+  }
   {  // SEG-131 (ADR 0278): a Genesis game's cartridge saves and save states (<library>/saves/genesis/<sha256>/...) are the player's data: measured as user data,
      // never part of the removable total, never reachable from a plan, and never deleted by build cleanup, archiving or removing the game from the library.
     const fs::path lib = dir / "gen_library", cch = dir / "gen_cache";
