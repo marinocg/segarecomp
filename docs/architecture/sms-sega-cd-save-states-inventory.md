@@ -1,6 +1,6 @@
 # Master System and Sega CD save states: machine inventory and restoration contracts (SEG-132, Checkpoint A)
 
-Status: reviewed inventory and contract. Gate A: **no implementation of a console codec began before every execution-affecting state owner below had an explicit
+Status: reviewed inventory and contract (Checkpoint A); **implemented** in Checkpoints B-F, with the corrections recorded in "As built" at the end. Gate A: **no implementation of a console codec began before every execution-affecting state owner below had an explicit
 treatment.** Companion to ADR 0278 (Genesis, SEG-131) and ADR 0279 (this work). Product-repository document; no commercial content.
 
 Treatments used throughout:
@@ -209,3 +209,17 @@ the oldest-first eviction applies and the real retained span is reported by the 
 
 Every execution-affecting owner above has a treatment; every **F** has a named refusal; the three questions the brief required answered are: *barrier* (2.1, 3.1),
 *adapter change* (3.1: one optional `started` callback), *identities* (2.4, 3.4). Implementation may proceed: SMS first (Checkpoints B-D), Sega CD afterwards (E-F).
+
+## 8. As built (corrections found by the implementation and its tests)
+
+* **Storage (4.1).** Master System: `<library>/saves/master-system/<cartridge sha256>/<mapper>/states/`; Sega CD: `<library>/sega-cd/<game id>/states/` (beside the game's backup RAM and recordings, which the Storage view already protected). No platform-wide
+  `saves/sega-cd` folder exists. Both are counted as user data and are unreachable from cleanup plans.
+* **Sega CD identity (3.4)** is intrinsic: the codec hashes the verified disc identity and the BIOS image digest itself; no identity travels through the environment, so a copied file is refused wherever it lands. The "Z80 image registry digest" is not in the fingerprint: the
+  Z80 section carries the content hashes of the images it executes and a missing image is refused with its own reason.
+* **Sega CD mixer ring.** The FM/PSG output ring of the Genesis mixer is read by the Sega CD mix by absolute frame index, so its unconsumed frames are state (2 frames of lag before the mix clock up to 8,192 frames); the Genesis codec drops them because it only plays them back. Found by the replay-equivalence test of the production
+  configuration (delivered-audio digests differed after a restore) and fixed in the Z80 section.
+* **Instants that are only compared with the clock** (`vint_at`, `hint_at`, `fill_end`, `main_dma_until`, `main_dma_bank_until`) keep stale past values after the event is over; validation bounds them from above only. Instants a catch-up loop counts toward (timer, drive grid, mixer clock, PCM origin) are bounded from both sides.
+* **Master System frame barrier.** At the barrier the renderer holds a new frame in progress (line 0 already rendered) and the last published frame; both are saved. `SmsViewerRig::presented` moved from a local of `sms_viewer_run` into the rig so a restore can force the next frame to be presented.
+* **Input.** Master System: a live (non-recording) viewer is the default; a scripted-input machine saves its cursor and a digest of the consumed prefix. Sega CD: a live non-recording input is restored (pads, last sampled tick); any other input mode refuses the snapshot.
+* **Measured sizes (6).** Master System 205,675 bytes per moment (120 moments, the full 60 s, in about 25 MiB). Sega CD 1,168,442 bytes (1,141,326 without the thumbnail) per moment: 86 moments in the 96 MiB budget, **42.6 s** retained after 70 s of play. Capture inside the viewer: about 0.7 ms (Master System) and 4-5 ms (Sega CD; the SHA-256 of the 1.1 MiB container dominates).
+  The budget was not changed and nothing is compressed; see ADR 0279 decision 11.

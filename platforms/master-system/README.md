@@ -30,3 +30,9 @@ from each line's own state (scroll, horizontal-scroll lock of the top two tile r
 guest state, the frame records or the SHA-256. Frames whose lines use the left-column mask or the right-hand vertical-scroll lock (off-screen behaviour is undefined) are Unavailable and show the Original
 picture, as does any stale or inconsistent result. 192- and 224-line modes only (240 lines stay the existing typed unsupported stop). **Enhanced Widescreen (Level 3, SEG-121, ADR 0264)** additionally draws the few sprite pixels that cross the screen edge (the 8-bit sprite X reaches at most 8 columns left of the picture with the shift bit and 15 right of it for a zoomed sprite; nothing is wrapped or biased), taken from the native line's own selected sprites over the wrapped background and never touching the sprite flags; it is Partial, needs a Level 2 frame, and does not expand the game world.
 A program built before this support keeps playing in Original mode and needs rebuilding to gain it.
+
+## Save states and rewind (SEG-132)
+
+`viewer/sms_snapshot.{h,c}` is the SMS-owned whole-machine state codec (`SMSSTAT`: Z80, memory and mapper, scheduler and input, VDP, renderer, PSG and its sample clock, pad), `viewer/sms_viewer_state.{h,c}` binds it to the viewer rig and to the shared save-state service
+(`libs/viewer`). Five numbered slots plus a quick slot (F5 / F8) and a visual rewind (F7) with the SEG-131 defaults; a state is bound to the cartridge image and the declared mapper. Cartridge RAM is part of every state and is **not** saved between sessions
+(the mapper contract cannot identify battery backup). See [docs/product/save-states.md](../../docs/product/save-states.md) and ADR 0279.

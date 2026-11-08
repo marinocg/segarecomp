@@ -24,7 +24,7 @@
         "execution is 60 Hz; the Europe PAL region choice changes the version register only",
         "the viewer has no Genesis input recording or replay (headless pad scripts exist for development)",
         "compatibility is incomplete: unlisted games may stop with a typed unsupported-behavior diagnostic or fail to build",
-        "save states and rewind are Genesis only; a state is loaded only by the same game image, version, region and state-format version"
+        "a state is loaded only by the same game image, version, region and state-format version (Master System and Sega CD have their own states, below)"
       ],
       "evidence": [
         "platforms/genesis/README.md",
@@ -44,18 +44,22 @@
         "launcher library, build and play (Compatibility and Optimized build modes)",
         "VDP, PSG, controllers with console Pause, SDL3 viewer with the shared pause menu and remapping",
         "viewer input recording to a headless-replayable script (--viewer-record)",
-        "widescreen Level 2 and Level 3, always reported Partial"
+        "widescreen Level 2 and Level 3, always reported Partial",
+        "five numbered plus a quick whole-machine save-state slot per cartridge and declared mapper, and in-memory visual rewind (ADR 0279)"
       ],
       "limitations": [
         "the cartridge mapper is declared by the user or a sidecar file, never guessed",
         "widescreen cannot reveal more of the game world: the 256-pixel name table wraps and hardware sprite geometry limits Level 3 to a few edge pixels",
-        "192- and 224-line modes only"
+        "192- and 224-line modes only",
+        "cartridge RAM is part of every save state but is not saved between sessions (the board contract cannot identify battery backup); a state is bound to the cartridge image and the declared mapper; sessions that record input offer no states"
       ],
       "evidence": [
         "platforms/master-system/README.md",
         "docs/architecture/master-system-machine-contract.md",
         "docs/decisions/0263-seg-120-m120-master-system-level-2-wrapped-background-extension.md",
-        "ADR 0264"
+        "ADR 0264",
+        "docs/product/save-states.md",
+        "ADR 0279"
       ]
     },
     {
@@ -69,13 +73,15 @@
         "CD-DA, RF5C164 PCM, YM2612 FM and PSG mixed in the viewer",
         "persistent internal backup RAM (v0.7.0)",
         "viewer input recording and exact replay",
-        "widescreen Level 2 and Level 3, always reported Partial"
+        "widescreen Level 2 and Level 3, always reported Partial",
+        "five numbered plus a quick whole-machine save-state slot per game and in-memory visual rewind, bound to the disc, the BIOS and the program's executable-image set (ADR 0279)"
       ],
       "limitations": [
         "complete CUE-to-play compilation is not claimed: code generated, decompressed or reached only through input the build never saw stops with a typed stop",
         "FM/PSG output is not reference-checked and the audio mix level against CD-DA/PCM is not established",
         "no 6-button pads or player 2 in the Sega CD viewer",
-        "no rewind, save states or cartridge-RAM expansion"
+        "no cartridge-RAM expansion; the default 96 MiB rewind history keeps about 43 seconds (a state is about 1.1 MiB), and a state loaded or rewound changes only the in-memory backup RAM",
+        "replay, recording and diagnostic sessions, and a program built with the main-side Z80 but without its sound devices, offer no save states; the single-frame step key moved from F7 to F9"
       ],
       "evidence": [
         "platforms/sega-cd/README.md",
@@ -83,7 +89,9 @@
         "ADR 0204",
         "ADR 0205",
         "ADR 0259",
-        "ADR 0260"
+        "ADR 0260",
+        "docs/product/save-states.md",
+        "ADR 0279"
       ]
     },
     {
