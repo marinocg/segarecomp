@@ -102,6 +102,7 @@ static int op_restore(void *ctx, const uint8_t *data, size_t size, char *why, si
 
 static void op_after_restore(void *ctx) {
   ScdViewerState *s = (ScdViewerState *)ctx;
+  s->latest = NULL;   /* the picture of the abandoned future is not the thumbnail of a state saved next */
   if (s->cfg.after_restore != NULL) s->cfg.after_restore(s->cfg.after_restore_context);
 }
 

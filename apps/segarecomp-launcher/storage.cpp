@@ -540,7 +540,7 @@ Plan plan_remove_from_library(const StorageReport &report, const std::vector<std
     plan.notes.push_back("Only generated build files can be deleted here; game saves and save states are never deleted by Segarecomp.");
   }
   if (with_user_data > 0) {
-    plan.remains.push_back("Save data and input recordings of " + std::to_string(with_user_data) + (with_user_data == 1 ? " Sega CD game" : " Sega CD games") + " (protected: kept in the library folder; adding the same BIOS and disc again finds them)");
+    plan.remains.push_back("Save data, save states and input recordings of " + std::to_string(with_user_data) + (with_user_data == 1 ? " Sega CD game" : " Sega CD games") + " (protected: kept in the library folder; adding the same BIOS and disc again finds them)");
     plan.notes.push_back("Only generated build files can be deleted here; saves and recordings are never deleted by Segarecomp.");
   }
   return plan;

@@ -236,7 +236,8 @@ def main():
         mutate("version", header(8, 2), "incompatible version")
         crafted = [("interrupt level", 1, 74, 0x80), ("machine time", 2, 7, 0x40), ("Gate Array bank", 6, 8, 0x80), ("CDC DMA state", 7, 2, 0x80), ("CDD track index", 8, 33, 0x80),
                    ("PCM channel index", 9, 56, 0x08), ("CD-DA fader", 11, 12, 0x40), ("backup RAM presence", 12, 0, 0x01), ("delivery ledger count", 16, 3, 0x40),
-                   ("device host block length", 17, 3, 0x40)]
+                   ("device host block length", 17, 3, 0x40),
+                   ("catch-up clock: H-interrupt line far from machine time", 2, 91, 0x40), ("catch-up clock: PCM sample count far from machine time", 9, 105, 0x01)]
         for label, sid, off, x in crafted:
             mutate("crafted: " + label, poke(sid, off, x), "values the console cannot have")
         plan = ["3 snap 2"]
@@ -310,6 +311,28 @@ def main():
             check(code == 0 and dobs is not None and dobs["S"] and all(" ok" in x for x in dobs["S"]), "dynamic images: every snapshot and restore succeeded (%d operations)" % (len(dobs["S"]) if dobs else 0))
             if dobs:
                 consistent(dobs, dref, "dynamic images sweep (bindings, loader, DMA, both processors)")
+            # a binding in MAIN-processor RAM (work RAM / Word RAM addresses above 1 MiB) must restore: the fixture binds only the sub CPU, so move one binding of a real state there
+            code, dsave = session(dyn, ["30 snap 1", "30 dump 1 %s" % (tmp / "dyn.scd"), "31 quit"], 0, tmp, "dyndump")
+            blob = bytearray((tmp / "dyn.scd").read_bytes())
+            off, length = sections(bytes(blob))[15]
+            at, found = off + 13, None
+            for cpu in range(2):
+                for j in range(16):
+                    if blob[at] == 0:
+                        at += 1
+                        continue
+                    found = at if found is None else found
+                    at += 1 + 4 * 7 + 8 + 1 + 2 * 1026
+            check(found is not None, "dynamic images: the state at frame 30 holds an active binding to move")
+            if found is not None:
+                base, lo, hi, rlo, rhi = (struct.unpack_from("<I", blob, found + 1 + 4 * i)[0] for i in (1, 2, 3, 4, 5))
+                delta = 0xFF0000 - lo
+                for i, v in zip((1, 2, 3, 4, 5), (base, lo, hi, rlo, rhi)):
+                    struct.pack_into("<I", blob, found + 1 + 4 * i, v + delta)
+                struct.pack_into("<I", blob, found + 1 + 4 * 6, (lo + delta) >> 6)
+                (tmp / "dyn-main.scd").write_bytes(sha_fix(bytes(blob)))
+                code, dm = session(dyn, ["3 slurp 3 %s" % (tmp / "dyn-main.scd"), "4 validate 3", "6 quit"], 0, tmp, "dynmain")
+                check(dm is not None and any("validate 3 ok" in x for x in dm["S"]), "dynamic images: a binding in main work RAM (guest address above 1 MiB) validates: %s" % (dm["S"] if dm else None))
             code, ddirty = session(dyn, ["14 snap 1", "17 dirty", "17 restore 1", "%d quit" % (frames + 40)], 0, tmp, "ddirty")
             consistent(ddirty, dref, "dynamic images dirty: the restore brings back the exact saved machine")
 

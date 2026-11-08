@@ -297,7 +297,11 @@ static int get_psg(SvcReader *r, SmsPsg *p, uint64_t cycles) {
   if (sn76489_load_state_bytes(&p->chip, bytes) != 0) return 0;   /* paired API: validates every field and leaves the (staged) chip untouched on failure */
   if (p->pcm.index >= (UINT64_C(1) << 40) || p->pcm.count > 4U * SN76489_PCM_BATCH || p->pcm.last_mean > SN76489_FULL_SCALE || p->pcm.sum > (uint64_t)p->pcm.count * SN76489_FULL_SCALE) return 0;
   if (p->pcm.boundary != sn76489_pcm_sample_start(&p->pcm.config, p->pcm.index + 1U)) return 0;   /* T_(index+1): the sampling grid is a function of the index */
-  if (p->chip.ticks > cycles / p->chip.config.divider + 1U) return 0;   /* the chip never runs ahead of the guest clock */
+  /* the chip and the PCM sample grid follow the guest clock closely from BOTH sides (the viewer synchronises them at every barrier): a crafted far-behind value would make the next sync
+   * generate every missing sample in one frame */
+  { const uint64_t slack = 4U * SMS_CYCLES_PER_FRAME;
+    if (p->chip.ticks > cycles / p->chip.config.divider + 1U || (cycles > slack && p->chip.ticks < (cycles - slack) / p->chip.config.divider)) return 0;
+    if (p->pcm.boundary > cycles + slack || p->pcm.boundary + slack < cycles) return 0; }
   return 1;
 }
 

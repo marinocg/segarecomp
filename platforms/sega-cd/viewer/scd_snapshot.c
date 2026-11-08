@@ -544,7 +544,10 @@ static int get_dynamic(SvcReader *r, ScdMachine *s) {
       GU64(b->order); GU8(b->stale);
       svc_r_bytes(r, b->dirty, sizeof b->dirty);
       svc_r_bytes(r, b->mutated, sizeof b->mutated);
-      REQ(!r->error && b->image < p->image_count && b->lo < b->hi && b->hi <= SCD_DYN_MAX_IMAGE_BYTES * 2U && b->run_lo <= b->run_hi && b->stale <= 1U);
+      /* lo / hi are GUEST addresses clamped to one executable region of the processor (main work RAM at $FF0000, Word RAM at $200000, PRG-window mirrors; sub PRG RAM windows), so they are bounded by the 24-bit
+       * space and one region's width -- not by the image length -- and inside the image's own extent at `base`. */
+      REQ(!r->error && b->image < p->image_count && b->lo < b->hi && b->hi <= 0x01000000U && b->hi - b->lo <= 0x100000U && b->run_lo <= b->run_hi && b->stale <= 1U);
+      REQ(b->lo >= b->base && (uint64_t)b->hi <= (uint64_t)b->base + p->images[b->image].length);
       REQ(b->granule_first == (b->lo >> SCD_DYN_GRANULE_SHIFT) && b->order <= s->dyn.order);
     }
   memset(s->dyn.cache_valid, 0, sizeof s->dyn.cache_valid);   /* the sector comparison cache is rebuilt from the disc on demand */
@@ -813,6 +816,25 @@ static void z80_stage_free(Z80Stage *st) {
 }
 #endif
 
+/* Every clock a catch-up loop counts toward must sit near guest time from BOTH sides: a crafted far-behind value would make the next slice replay the gap (minutes to days). The digest only
+ * proves integrity, so the bound is semantic. Idle processors (STOP, a held sub) legitimately lag and are not bounded: they do no work for the gap. */
+static int clocks_agree(const ScdMachine *s, const GenesisRuntime *host_rt) {
+  const uint64_t now = s->now;
+  if (!s->cpu[0].irq.stopped && !near_tick(s->cpu[0].next, now, 8U)) return 0;
+  if (!s->cpu[1].irq.stopped && !s->ga.sub_halted && !near_tick(s->cpu[1].next, now, 8U)) return 0;
+  if (!not_far_ahead(s->hint_next * SCD_LINE_TICKS_MACHINE, now, 6U)) return 0;   /* the line counter is advanced lazily (a closed-form skip over whole frames), so it may lag; it is never ahead */
+  if (s->cdc.dma_state == SCD_DMA_RUNNING && !near_tick(s->cdc.dma_base, now, 4U)) return 0;
+  if (s->gfx.busy && !near_tick(s->gfx.base, now, 4U)) return 0;
+  if (host_rt->scheduler.master_ticks > TICKS_LIMIT / 500000U || !near_tick(host_rt->scheduler.master_ticks * 500000U, now, 6U)) return 0;
+  if (s->mix.enabled) {   /* the PCM sample clock is brought up to the mix timeline every frame: at most a few frames of sample events behind */
+    const uint64_t period = SCD_TIMER_UNIT_SUB_CYCLES * scd_sub_cycle_ticks(s);
+    const uint64_t due = (now - s->pcm.origin) / period;
+    const uint64_t slack = 4U * FRAME_TICKS / period + 4U;
+    if (s->pcm.samples > due + 1U || due - s->pcm.samples > slack) return 0;
+  }
+  return 1;
+}
+
 /* ---------------------------------------------------------------------------------------------------------------------------------- */
 /* Capture                                                                                                                            */
 
@@ -1056,6 +1078,7 @@ static ScdSnapshotStatus restore_impl(ScdMachine *machine, const uint8_t *data, 
     if (!ok) goto done;
   }
   if (info.guest_ticks != stage->now || info.guest_onsets != stage->vdp_frames) { status = SCD_SNAPSHOT_BAD_LAYOUT; goto done; }
+  if (!clocks_agree(stage, host.rt)) goto done;
 #ifdef SEGARECOMP_GENESIS_SOUND
   if ((flags & FLAG_Z80) != 0U) {
     SECTION_READER(SEC_Z80);

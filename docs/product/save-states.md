@@ -70,6 +70,7 @@ choice. **A state is never loaded when a game starts.**
 * **Where it lives:** `<library>/sega-cd/<game id>/states/{quick,slot-1,...,slot-5}.sgstate`, next to the game's backup RAM and recordings, which Segarecomp never deletes.
 * **A state belongs to one disc, one BIOS and one executable-image set.** A state of another disc or BIOS, of a program built from a different set of images, or a damaged or crafted file is refused with the reason, without touching the
   running game. Rebuilding the same game with compatible code keeps its states.
+* **Heads-up:** loading an older state or rewinding rolls the in-memory backup RAM back too, and a clean exit then stores THAT timeline as the game's save (the previous generation is kept as `.prev`). Save in the game as you normally would before experimenting.
 * **Backup RAM:** a state contains the game's backup RAM as it was; **loading a state or rewinding changes only the copy in memory**. The file in the game's folder is written, as before, only when a normal session **ends cleanly**
   (through the same candidate-and-rename step and `.prev` generation as ADR 0252), and it then holds the timeline you ended the session on. Browsing and cancelling the rewind screen, a refused state and a failed save never write it.
   A state saved in a session that has backup RAM is refused by one that does not, so a state can never hand a session memory it could not store.

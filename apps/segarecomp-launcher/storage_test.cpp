@@ -452,7 +452,7 @@ int main() {
           only_generated = only_generated && (name == "build" || name == "build.failed" || name == "build.partial" || parent == "build.failed");
         }
       expect(only_generated && !plans[0].items.empty() && plans[1].items.size() == 2, "Sega CD: no plan contains a save, a recording, a log or the game's folder");
-      expect(plans[3].remains.size() > 3 && plans[3].remains.back().find("Save data and input recordings") == 0, "Sega CD: removal states that saves and recordings are kept");
+      expect(plans[3].remains.size() > 3 && plans[3].remains.back().find("Save data, save states and input recordings") == 0, "Sega CD: removal states that saves and recordings are kept");
     }
     {  // a forged plan naming user data or the game's own folder is refused by shape; the files survive
       Plan forged;
