@@ -208,6 +208,51 @@ def main():
         consistent(b, ref, "a separate process loaded the state and reproduced the reference run")
         check(b is not None and 12 in b["H"] and len(b["H"][12]) >= 1 and max(b["H"]) >= FRAMES - 20, "the loading process ran on past the loaded frame")
 
+        # ---- the PCM sample grid: states at many guest-frame phases (CD-DA/PCM mixing on) restore; far-behind or ahead counts are refused atomically ----
+        # runtime grid (scd_pcm_run): events at origin + k x period; `samples` = ceil((tick - origin) / period) at the last synchronisation, period = 384 line-locked sub cycles
+        PERIOD = 384 * 2148241
+        phases = [5, 9, 14, 22, 31, 47, 63, 88]
+        plan = []
+        for i, ph in enumerate(phases):
+            plan += ["%d snap %d" % (ph, i + 1), "%d dump %d %s" % (ph, i + 1, tmp / ("phase%d.scd" % i))]
+        plan.append("%d quit" % (phases[-1] + 2))
+        code, _ = session(prog, plan, 400, tmp, "phase-dump")
+        unaligned = 0
+        facts = []
+        for i, ph in enumerate(phases):
+            d = (tmp / ("phase%d.scd" % i)).read_bytes()
+            sec = sections(d)
+            now = struct.unpack_from("<Q", d, sec[2][0])[0]
+            origin, samples = struct.unpack_from("<QQ", d, sec[9][0] + 93)
+            grid = (now - origin + PERIOD - 1) // PERIOD if now > origin else 0
+            unaligned += (now - origin) % PERIOD != 0
+            facts.append((ph, grid - samples, (now - origin) % PERIOD))
+            check(samples <= grid + 1 and grid - samples <= 2200, "phase frame %d: the captured sample count %d trails the runtime grid %d by %d events" % (ph, samples, grid, grid - samples))
+        check(unaligned == len(phases), "all %d sampled guest-frame phases are non-aligned to the PCM sample period (the grid rounds up there)" % len(phases))
+        restore_plan = []
+        for i, ph in enumerate(phases):
+            restore_plan += ["%d slurp 1 %s" % (3 + 6 * i, tmp / ("phase%d.scd" % i)), "%d restore 1" % (3 + 6 * i)]
+        restore_plan.append("%d quit" % (6 * len(phases) + 10))
+        code, pobs = session(prog, restore_plan, 400, tmp, "phase-restore")
+        check(pobs is not None and len(pobs["S"]) == 2 * len(phases) and all(x.endswith(" ok") or " ok" in x for x in pobs["S"]), "every phase state restores: %s" % (pobs["S"][:2] if pobs else None))
+        if pobs:
+            consistent(pobs, ref, "restoring states of eight frame phases in one session reproduces the reference run")
+        d = bytearray((tmp / "phase7.scd").read_bytes())
+        sec = sections(bytes(d))
+        now = struct.unpack_from("<Q", d, sec[2][0])[0]
+        origin, samples = struct.unpack_from("<QQ", d, sec[9][0] + 93)
+        grid = (now - origin + PERIOD - 1) // PERIOD
+        for label, value, status in (("exactly the runtime grid", grid, "ok"), ("one event ahead of the grid (tolerated)", grid + 1, "ok"), ("two events ahead of the grid", grid + 2, "values the console cannot have"),
+                                     ("far behind (more than a few frames of sample events)", max(0, grid - 20000), "values the console cannot have")):
+            e = bytearray(d)
+            struct.pack_into("<Q", e, sec[9][0] + 101, value)
+            (tmp / "pcmcase.scd").write_bytes(sha_fix(bytes(e)))
+            code, o = session(prog, ["4 slurp 3 %s" % (tmp / "pcmcase.scd"), "5 validate 3", "5 restore 3", "9 quit"], 400, tmp, "pcm-case")
+            texts = [x.split(" ", 4)[4] for x in o["S"] if " validate 3 " in x or " restore 3 " in x] if o else []
+            check(len(texts) == 2 and all(t == "ok" or status in t for t in texts) and (status != "ok" or texts == ["ok", "ok"]) and (status == "ok" or all(status in t for t in texts)), "PCM sample count %s: %s" % (label, texts))
+            if o and status != "ok":
+                check(all(o["H"].get(k, [None])[0] == ref["H"][k][0] for k in o["H"] if k in ref["H"]), "PCM sample count %s: refused atomically (the machine continues as the reference)" % label)
+
         # ---- refusals: the machine is byte-identical afterwards ----
         base = data
         sec = sections(base)
@@ -311,28 +356,45 @@ def main():
             check(code == 0 and dobs is not None and dobs["S"] and all(" ok" in x for x in dobs["S"]), "dynamic images: every snapshot and restore succeeded (%d operations)" % (len(dobs["S"]) if dobs else 0))
             if dobs:
                 consistent(dobs, dref, "dynamic images sweep (bindings, loader, DMA, both processors)")
-            # a binding in MAIN-processor RAM (work RAM / Word RAM addresses above 1 MiB) must restore: the fixture binds only the sub CPU, so move one binding of a real state there
+            # COVERAGE GAP, stated plainly: no available fixture binds a MAIN-processor dynamic image at run time (every binding of these programs is the sub CPU's: cpu 1). This is therefore a FORGED-state
+            # check of the codec's validation, not an execution test: a real state's binding is moved into the MAIN table (slot 0) at main work-RAM addresses (guest address above 1 MiB, the pattern a
+            # real main-side binding has), the container is rebuilt, and validate + restore must accept it. Execution of a main-side binding is covered only by the local Sonic CD smoke test.
             code, dsave = session(dyn, ["30 snap 1", "30 dump 1 %s" % (tmp / "dyn.scd"), "31 quit"], 0, tmp, "dyndump")
-            blob = bytearray((tmp / "dyn.scd").read_bytes())
-            off, length = sections(bytes(blob))[15]
-            at, found = off + 13, None
-            for cpu in range(2):
-                for j in range(16):
-                    if blob[at] == 0:
-                        at += 1
-                        continue
-                    found = at if found is None else found
-                    at += 1 + 4 * 7 + 8 + 1 + 2 * 1026
-            check(found is not None, "dynamic images: the state at frame 30 holds an active binding to move")
-            if found is not None:
-                base, lo, hi, rlo, rhi = (struct.unpack_from("<I", blob, found + 1 + 4 * i)[0] for i in (1, 2, 3, 4, 5))
+            data = (tmp / "dyn.scd").read_bytes()
+            off, length = sections(data)[15]
+            sect = data[off:off + length]
+            at, payload = 13, None
+            BIND = 1 + 4 * 7 + 8 + 1 + 2 * 1026
+            for slot in range(32):
+                if sect[at] == 0:
+                    at += 1
+                    continue
+                payload = bytearray(sect[at:at + BIND])
+                break
+            check(payload is not None and slot >= 16, "dynamic images: the state at frame 30 holds a binding in the SUB table (slot %d), as every fixture binding is" % slot)
+            if payload is not None:
+                base, lo, hi, rlo, rhi = (struct.unpack_from("<I", payload, 1 + 4 * i)[0] for i in (1, 2, 3, 4, 5))
                 delta = 0xFF0000 - lo
                 for i, v in zip((1, 2, 3, 4, 5), (base, lo, hi, rlo, rhi)):
-                    struct.pack_into("<I", blob, found + 1 + 4 * i, v + delta)
-                struct.pack_into("<I", blob, found + 1 + 4 * 6, (lo + delta) >> 6)
-                (tmp / "dyn-main.scd").write_bytes(sha_fix(bytes(blob)))
-                code, dm = session(dyn, ["3 slurp 3 %s" % (tmp / "dyn-main.scd"), "4 validate 3", "6 quit"], 0, tmp, "dynmain")
-                check(dm is not None and any("validate 3 ok" in x for x in dm["S"]), "dynamic images: a binding in main work RAM (guest address above 1 MiB) validates: %s" % (dm["S"] if dm else None))
+                    struct.pack_into("<I", payload, 1 + 4 * i, v + delta)
+                struct.pack_into("<I", payload, 1 + 4 * 6, (lo + delta) >> 6)
+                forged = bytes(sect[:13]) + bytes(payload) + bytes(15) + bytes(16)   # main table: the moved binding + 15 empty slots; sub table: 16 empty slots
+                new = bytearray(data[:off]) + forged + data[off + length:]
+                # rebuild the section table (offsets after this section shift) and the total size, then the digest
+                count = struct.unpack_from("<I", new, 28)[0]
+                shift = len(forged) - length
+                for i in range(count):
+                    e = 156 + 12 * i
+                    sid, _, soff, slen = struct.unpack_from("<HHII", new, e)
+                    if sid == 15:
+                        struct.pack_into("<I", new, e + 8, len(forged))
+                    elif soff > off:
+                        struct.pack_into("<I", new, e + 4, soff + shift)
+                struct.pack_into("<I", new, 24, len(new) + 0)
+                (tmp / "dyn-main.scd").write_bytes(sha_fix(bytes(new)))
+                code, dm = session(dyn, ["3 slurp 3 %s" % (tmp / "dyn-main.scd"), "4 validate 3", "4 restore 3", "9 quit"], 0, tmp, "dynmain")
+                check(dm is not None and any("validate 3 ok" in x for x in dm["S"]) and any("restore 3 ok" in x for x in dm["S"]),
+                      "dynamic images (forged state, main table slot at work RAM): validates and restores: %s" % (dm["S"] if dm else None))
             code, ddirty = session(dyn, ["14 snap 1", "17 dirty", "17 restore 1", "%d quit" % (frames + 40)], 0, tmp, "ddirty")
             consistent(ddirty, dref, "dynamic images dirty: the restore brings back the exact saved machine")
 

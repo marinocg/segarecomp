@@ -40,6 +40,7 @@ the Sega CD showed the same rows disabled. Both consoles run on one guest timeba
 * Same player-facing workflow and defaults on all three consoles; the codecs are independent and individually tested.
 * A Sega CD state is large (about 1.1 MiB); slots are cheap, the rewind history is the only memory consumer and is bounded.
 * The Sega CD snapshot depends on the Genesis section codecs only through the exported part wrappers; a change to a Genesis section is a change to both containers' Z80 sections and is caught by the Sega CD z80+audio test.
+* **Coverage gap, stated plainly:** no available fixture binds a *main*-processor dynamic image at run time (all bindings of the file-first fixtures are the sub CPU's). The codec validates and restores main-table bindings at work-RAM / Word-RAM addresses (checked with a forged state), but their *execution* after a restore is exercised only by the local, uncommitted Sonic CD smoke test. The Sega CD overlay-group section likewise has no fixture.
 * Known limitations are listed in the user guide and the compatibility ledger: no Master System battery persistence, no states for recording/replay/diagnostic sessions, the first frame after a Master System load is shown in Original widescreen, a Sega CD program built with the Z80 but without sound devices is refused.
 
 ## Evidence

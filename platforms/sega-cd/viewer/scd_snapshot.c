@@ -827,10 +827,14 @@ static int clocks_agree(const ScdMachine *s, const GenesisRuntime *host_rt) {
   if (s->gfx.busy && !near_tick(s->gfx.base, now, 4U)) return 0;
   if (host_rt->scheduler.master_ticks > TICKS_LIMIT / 500000U || !near_tick(host_rt->scheduler.master_ticks * 500000U, now, 6U)) return 0;
   if (s->mix.enabled) {   /* the PCM sample clock is brought up to the mix timeline every frame: at most a few frames of sample events behind */
+    /* The runtime's sample grid (scd_pcm_run): events fall at origin + k x period and `samples` counts those strictly before the last synchronised tick, i.e.
+     * ceil((tick - origin) / period) for tick > origin (0 otherwise). The last synchronisation is never later than `now`, so the count is never ahead of the grid at `now`
+     * (one event of slack for the instruction-start/event-time difference) and trails it by at most a few frames of events. Unsigned distances are compared without subtracting the smaller. */
     const uint64_t period = SCD_TIMER_UNIT_SUB_CYCLES * scd_sub_cycle_ticks(s);
-    const uint64_t due = (now - s->pcm.origin) / period;
+    const uint64_t grid = now > s->pcm.origin ? (now - s->pcm.origin + period - 1U) / period : 0U;
     const uint64_t slack = 4U * FRAME_TICKS / period + 4U;
-    if (s->pcm.samples > due + 1U || due - s->pcm.samples > slack) return 0;
+    if (s->pcm.samples > grid + 1U) return 0;
+    if (grid > s->pcm.samples && grid - s->pcm.samples > slack) return 0;
   }
   return 1;
 }
