@@ -552,15 +552,15 @@ static void patch_tests(void) {
   /* a user change while Vanilla does not reach the Patched variant */
   edit_game(SV_SYSTEM_GENESIS, "genesis", kB, van);
   got = patched_prefs(kB, P1, "enhanced_gameplay", "raw", NULL); CHECK(same(got, mine), "patch: a Vanilla edit never overwrites the patched preferences");
-  /* a second patch has its own independent preferences and defaults, and inherits the (new) original width */
+  /* a second patch has its own independent preferences and defaults; a patch's defaults always start at full 16:9 (width 100), whatever the original game's profile says */
   got = patched_prefs(kB, P2, "extended_backgrounds", "borders", &act);
-  CHECK(act == 1 && got.ws == SV_WIDESCREEN_EXTENDED_BACKGROUNDS && got.st == SV_SIDE_BORDERS && got.width == 88, "patch: a second patch starts from its own defaults");
+  CHECK(act == 1 && got.ws == SV_WIDESCREEN_EXTENDED_BACKGROUNDS && got.st == SV_SIDE_BORDERS && got.width == 100, "patch: a second patch starts from its own defaults at full 16:9");
   patched_edit(kB, P2, "extended_backgrounds", "borders", (Prefs){SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_SIDE_RAW, 5});
   got = patched_prefs(kB, P1, "enhanced_gameplay", "raw", NULL); CHECK(same(got, mine), "patch: two patches keep independent preferences");
   CHECK(file_exists(variant2) && file_exists(variant1), "patch: one profile file per variant");
-  /* only one default stated: the other setting is inherited */
+  /* only one default stated: the other style is inherited; the width still starts at full 16:9 */
   got = patched_prefs("9999999999999999999999999999999999999999999999999999999999999999", P1, "enhanced_gameplay", NULL, &act);
-  CHECK(act == 1 && got.ws == SV_WIDESCREEN_ENHANCED_GAMEPLAY && got.st == SV_SIDE_COMFORT && got.width == 77, "patch: a default that is not stated is inherited (global values for a game without a profile)");
+  CHECK(act == 1 && got.ws == SV_WIDESCREEN_ENHANCED_GAMEPLAY && got.st == SV_SIDE_COMFORT && got.width == 100, "patch: a style that is not stated is inherited (global value for a game without a profile); the width starts at full 16:9");
   /* invalid or missing metadata cannot activate anything */
   { static const char *const bad_id[] = {"short", "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ", "", "1111111111111111111111111111111111111111111111111111111111111111/../x"};
     size_t i;

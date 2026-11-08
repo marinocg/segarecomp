@@ -442,17 +442,18 @@
       "game": "Sonic the Hedgehog (Genesis)",
       "revision": "REV00 (exact image, matched by SHA-256)",
       "schema": 2,
-      "kind": "native provider plus BPS that moves the original HUD off screen",
+      "kind": "native provider plus BPS that moves the original HUD off screen and widens the sprite builder's visibility test",
       "distribution": "maintained_outside_repository",
       "provides": [
         "authored scenery reconstruction",
-        "relocated original HUD"
+        "relocated original HUD",
+        "extended actor initialisation (objects reach the sprite table up to 64 px beyond the picture)"
       ],
-      "gameplay_changes": "none beyond HUD sprites no longer queued; the optional sonic1-native-widescreen-gameplay package (EXPERIMENTAL) also widens object activation, which changes gameplay and diverges from natural play",
+      "gameplay_changes": "changes slightly: objects that wait for the on-screen flag act up to 64 px earlier than in the original, and a scripted natural-play route through Green Hill 1 did not reproduce identical play",
       "validated_scope": "all levels (extended scenery and widescreen: maintainer-stated independent validation; no public report or recording is published)",
       "untested": [
         "other revisions",
-        "gameplay effects of the optional -gameplay package beyond natural play"
+        "gameplay effects of the extended actor initialisation beyond the described changes"
       ],
       "evidence": [
         "ADR 0267",
