@@ -246,12 +246,11 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
   if (rom.patched() && rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID", rom.sha256.c_str(), true);
   else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID");
   // SEG-122: the patch's presentation defaults reach the viewer only for a selected Patched variant (the launch path has already required its verified build); Vanilla clears them.
-  if (rom.patched() && (!rom.patch_widescreen.empty() || !rom.patch_side_style.empty())) {
+  // A widescreen patch whose package states no default still gets Enhanced Widescreen + Raw Extension (at full 16:9 width in the viewer): Comfort would hide the patch's effect.
+  if (rom.patched()) {
     SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_ID", rom.patch_identity.c_str(), true);
-    if (!rom.patch_widescreen.empty()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN", rom.patch_widescreen.c_str(), true);
-    else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN");
-    if (!rom.patch_side_style.empty()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE", rom.patch_side_style.c_str(), true);
-    else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE");
+    SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN", rom.patch_widescreen.empty() ? "enhanced_gameplay" : rom.patch_widescreen.c_str(), true);
+    SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PATCH_SIDE_STYLE", rom.patch_side_style.empty() ? "raw" : rom.patch_side_style.c_str(), true);
   } else {
     SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_ID");
     SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_WIDESCREEN");

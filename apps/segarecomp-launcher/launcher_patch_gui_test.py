@@ -285,7 +285,7 @@ def main():
         sp.create(q.source, bytes(patched2), pkg, id_="t", name="T", version="1")
         check("tamper setup", q.run(OPEN + ["build", "wait_idle", "frames 10", f"patch_pick {pkg}", "frames 12", "patch_confirm", "frames 20", "variant patched", "frames 10", "build", "wait_idle", "frames 30", "expect status=Ready", "quit"]))
         q.run(OPEN + ["variant patched", "frames 10", "play", "frames 20", "wait_play_end", "frames 6", "quit"])
-        expect(any("title=" in l and "(Patched: T 1)" in l and "patch=- pws=- pside=-" in l for l in q.lines(q.env_log)), f"a patch that states no presentation defaults sets no override: {q.lines(q.env_log)}")
+        expect(any("title=" in l and "(Patched: T 1)" in l and "pws=enhanced_gameplay pside=raw" in l for l in q.lines(q.env_log)), f"a patch that states no presentation defaults still starts at Level 3 + Raw Extension: {q.lines(q.env_log)}")
         a_dir, b_dir = q.builds()
         pat = next(x for x in (a_dir, b_dir) if "patch_identity" in json.loads((x / "metadata.json").read_text()))
         van = a_dir if pat == b_dir else b_dir

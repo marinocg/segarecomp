@@ -535,7 +535,7 @@ static void patch_tests(void) {
   got = open_prefs(SV_SYSTEM_GENESIS, "genesis", kB, NULL); CHECK(same(got, orig), "patch: Vanilla launches with exactly its previous settings");
   /* the Patched variant starts in Level 3 + Raw at once, the width is inherited from the original game's profile, nothing is written by opening */
   got = patched_prefs(kB, P1, "enhanced_gameplay", "raw", &act);
-  CHECK(act == 1 && got.ws == SV_WIDESCREEN_ENHANCED_GAMEPLAY && got.st == SV_SIDE_RAW && got.width == 55, "patch: Patched starts Level 3 + Raw with the inherited width");
+  CHECK(act == 1 && got.ws == SV_WIDESCREEN_ENHANCED_GAMEPLAY && got.st == SV_SIDE_RAW && got.width == 100, "patch: Patched starts Level 3 + Raw at full 16:9 width");
   CHECK(!file_exists(variant1), "patch: opening a Patched variant creates no profile");
   { SvHost *h = open_patched(kB, P1, "enhanced_gameplay", "raw"); CHECK(h != NULL && sv_host_profile_path(h) != NULL && strstr(sv_host_profile_path(h), P1) != NULL, "patch: the variant profile is keyed by the full patch identity"); if (h != NULL) sv_host_close(h); }
   { char note[300] = "";
