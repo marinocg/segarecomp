@@ -33,7 +33,7 @@ Order within one guest frame `N`: `frame-begin(N)` -> `input(N)` -> `post-input(
 Rules that apply to every phase:
 
 1. **Contradiction check.** Guest memory is writable only in `frame-begin`, `post-input`, `hook-entry`, `hook-exit`, `frame-end`, and only in a declared work-RAM space ([adapters](mod-platform-adapters.md) section 3). `reset` and `render` never mutate guest memory.
-   `input` mutates only the input state. A mod that has not declared the matching capability cannot perform the operation in any phase (`E_CAPABILITY_UNSUPPORTED`/`E_PHASE_ILLEGAL`).
+   `input` mutates only the input state. A mod that has not declared the matching capability cannot perform the operation in any phase (`E_CAPABILITY_UNSUPPORTED`; at run time a fault with cause `phase`).
 2. **Render is read-only and presentation-only.** Its inputs are copies taken after `frame-end`; its outputs never feed back into the guest or into later guest-visible state other than mod-owned state. This preserves ABI 1 semantics: the snapshot a provider sees is the state the game used to prepare the frame.
 3. **Mods in order** means the order declared by the mod set (single mod today; SEG-141 extends: stable, declared, no concurrency).
 4. **No wall-clock, host RNG or host pointers** in any phase (section 7).

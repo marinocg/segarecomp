@@ -35,7 +35,7 @@ Columns: **Owner** (the single party allowed to mutate the space), **Phases** (w
 | Space | Owner | Phases | R/W/H | Endian / width | Rule |
 |---|---|---|---|---|---|
 | `m68k.rom` (cartridge ROM) | image | none at runtime | read: build time only; write: never; hook: M68K sites resolved at build time against the exact digest | big-endian; 8/16/32 | ROM is immutable at runtime; typed edits are build-time (M03) |
-| `m68k.work_ram` (64 KiB) | M68K | read in every phase (in `render` only through the `frame.work_ram` copy); write only in `frame-begin`, `post-input`, `hook-exit`, `frame-end` (T004) | R yes; W yes if `memory.write.m68k.work_ram`; H n/a | big-endian; 8/16/32, 16/32 aligned | the only mod-writable Genesis space |
+| `m68k.work_ram` (64 KiB) | M68K | read in every phase (in `render` only through the `frame.work_ram` copy); write only in `frame-begin`, `post-input`, `hook-entry`, `hook-exit`, `frame-end` (T004) | R yes; W yes if `memory.write.m68k.work_ram`; H n/a | big-endian; 8/16/32, 16/32 aligned | the only mod-writable Genesis space |
 | `z80.ram` (8 KiB window at `$A00000`) | Z80 / bus arbiter | read in `frame-begin`, `frame-end` only while the Z80 is not running a conflicting access | R limited; W **no**; H no | byte-addressed window | static-first Z80 materialization (ADR 0073, 0135) is invalidated by writes, so no mod write |
 | `vdp.vram`, `vdp.cram`, `vdp.vsram` | VDP | `render` read-only (via `frame.vdp` copies) | R yes (copy); W no | VRAM bytes; CRAM/VSRAM words | presentation only; never mutated by a mod |
 | Z80 bus / I/O ports, YM2612, PSG | devices | none | no | - | not accessible; audio is governed by [modding-audio-architecture.md](modding-audio-architecture.md) |

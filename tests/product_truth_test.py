@@ -231,6 +231,12 @@ class ModMatrixRulesTest(unittest.TestCase):
             matrix_row(m, "genesis", "package-identity-build")["existing_tests"] = ["tests/no_such_test.py"]
         self.assertRejected(edit, "not an existing test file")
 
+    def test_cited_file_must_be_a_named_test(self):
+        for bad in ("tests/CMakeLists.txt", "tests/../README.md"):
+            def edit(m, bad=bad):
+                matrix_row(m, "genesis", "package-identity-build")["existing_tests"] = [bad]
+            self.assertRejected(edit, "not an existing test file")
+
     def test_evidence_must_resolve(self):
         def edit(m):
             matrix_row(m, "genesis", "package-identity-build")["evidence"] = ["docs/no/such.md"]

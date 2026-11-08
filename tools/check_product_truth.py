@@ -316,9 +316,11 @@ def validate_ledger(ledger, root):
 
 
 def is_test_ref(ref):
-    """A test reference is an existing repository file under tests/ or an app test directory whose name says it is a test."""
+    """A test reference is a repository file named `*_test.py|cpp|c` under tests/ or apps/, without parent-directory segments."""
     path = ref.split("#", 1)[0]
-    return path.startswith("tests/") or (path.startswith("apps/") and "_test" in path.rsplit("/", 1)[-1])
+    if ".." in path.split("/") or not path.startswith(("tests/", "apps/")):
+        return False
+    return re.search(r"_test\.(py|cpp|c)$", path.rsplit("/", 1)[-1]) is not None
 
 
 def validate_mod_matrix(matrix, root):
