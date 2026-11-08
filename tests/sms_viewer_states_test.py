@@ -27,6 +27,7 @@ import sms_fixture_rom as builder  # noqa: E402
 import genesis_startup_bridge as bridge  # noqa: E402
 
 failures = []
+EXE = ".exe" if os.name == "nt" else ""
 
 
 def check(ok, label):
@@ -46,13 +47,13 @@ def build(cli, cc, tmp, name, mapper):
     if r.returncode != 0:
         print(r.stdout[-1500:], r.stderr[-1500:])
         raise SystemExit("build failed: " + name)
-    return out / "game"
+    return out / ("game" + EXE)
 
 
 def main():
     cli, cc = sys.argv[1], sys.argv[2]
-    if bridge.find_sdl3() is None:
-        print("SKIP: SDL3 not available")
+    if sys.platform != "linux" or bridge.find_sdl3() is None:
+        print("SKIP: SDL3 or a Linux host is not available (the SDL3 CI job on Linux runs this test)")
         return 0
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="sms_viewer_states_"))
     exe = build(cli, cc, tmp, "state_counter", "rom_only")

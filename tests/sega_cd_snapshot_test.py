@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 HOST = ROOT / "tests" / "tools" / "sega_cd_snapshot_host.c"
 DRIVER = ROOT / "tools" / "sega_cd_bios_build.py"
 BUDGET = 400_000_000
+EXE = ".exe" if os.name == "nt" else ""
 failures = []
 
 
@@ -68,7 +69,7 @@ def build_z80_audio(tmp):
     check(done.returncode == 0 and "@result ok" in done.stdout, "z80+audio: the production configuration builds with the test-host viewer variant" + ("" if done.returncode == 0 else ": " + (done.stdout + done.stderr)[-400:]))
     if done.returncode != 0:
         return None
-    return {"exe": out / "out" / "program-viewer", "disc": out / "disc", "bios": out / "fx" / "bios.bin", "dir": out, "args": ["--instruction-budget", "3000000"], "set": "main:d7=18"}
+    return {"exe": out / "out" / ("program-viewer" + EXE), "disc": out / "disc", "bios": out / "fx" / "bios.bin", "dir": out, "args": ["--instruction-budget", "3000000"], "set": "main:d7=18"}
 
 
 def build_dynamic(tmp):
@@ -81,7 +82,7 @@ def build_dynamic(tmp):
     check(done.returncode == 0 and "@result ok" in done.stdout, "dynamic images: the file-first program builds with the test-host viewer variant" + ("" if done.returncode == 0 else ": " + (done.stdout + done.stderr)[-400:]))
     if done.returncode != 0:
         return None
-    return {"exe": out / "out" / "program-viewer", "disc": out / "fx" / "disc", "bios": out / "fx" / "bios.bin", "dir": out, "args": ["--instruction-budget", "3000000"], "set": "main:d7=3"}
+    return {"exe": out / "out" / ("program-viewer" + EXE), "disc": out / "fx" / "disc", "bios": out / "fx" / "bios.bin", "dir": out, "args": ["--instruction-budget", "3000000"], "set": "main:d7=3"}
 
 
 def session(prog, plan, frames, tmp, tag, extra=()):   # extra: extra program arguments

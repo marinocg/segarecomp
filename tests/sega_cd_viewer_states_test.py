@@ -11,7 +11,7 @@ SEGARECOMP_VIEWER_STATE_REPORT (the canonical capture's digest, machine time and
   * F7 rewind: confirming goes back to an earlier moment (a deterministic new branch), cancelling changes nothing, nothing is written to disk;
   * a state of another disc / a corrupt file is refused and the game runs on unchanged; a replay / recording session offers no states;
   * F6 holds the machine and F9 -- not F7 -- advances exactly one frame while held; F7 never steps.
-Skipped (exit 0, "SKIP") when SDL3 is not installed.
+Skipped (exit 0, "SKIP") when SDL3 is not installed or the host is not Linux (the SDL3 CI job on Linux runs it).
 """
 import json
 import os
@@ -49,8 +49,8 @@ def keys(*events):
 
 
 def main():
-    if build_driver.find_sdl3() is None:
-        print("SKIP: SDL3 not available")
+    if sys.platform != "linux" or build_driver.find_sdl3() is None:
+        print("SKIP: SDL3 or a Linux host is not available (the SDL3 CI job on Linux runs this test)")
         return 0
     with tempfile.TemporaryDirectory(prefix="scd-viewer-states-") as tmp:
         tmp = pathlib.Path(tmp)
