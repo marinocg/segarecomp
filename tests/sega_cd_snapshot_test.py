@@ -71,6 +71,19 @@ def build_z80_audio(tmp):
     return {"exe": out / "out" / "program-viewer", "disc": out / "disc", "bios": out / "fx" / "bios.bin", "dir": out, "args": ["--instruction-budget", "3000000"], "set": "main:d7=18"}
 
 
+def build_dynamic(tmp):
+    """A program with dynamic images (file-first structural admission, ADR 0221): the machine binds a precompiled image to the bytes the loader put in RAM at run time."""
+    out = tmp / "dyn"
+    subprocess.run([sys.executable, str(ROOT / "tools" / "sega_cd_bios_unvisited_fixture.py"), "build", "--out", str(out / "fx"), "--case", "base", "--iso"], check=True, capture_output=True, text=True)
+    done = subprocess.run([SEGARECOMP, "sega-cd", "build", "--cue", str(out / "fx" / "disc" / "disc.cue"), "--bios", str(out / "fx" / "bios.bin"), "--output", str(out / "out"), "--runtime-dir", str(ROOT),
+                           "--cc", CC, "--budget", "3000000", "--jobs", "4", "--cache-dir", str(out / "cache"), "--static-discovery", "0", "--file-first", "structural",
+                           "--viewer", "1", "--viewer-host-source", str(HOST)], capture_output=True, text=True, timeout=3000)
+    check(done.returncode == 0 and "@result ok" in done.stdout, "dynamic images: the file-first program builds with the test-host viewer variant" + ("" if done.returncode == 0 else ": " + (done.stdout + done.stderr)[-400:]))
+    if done.returncode != 0:
+        return None
+    return {"exe": out / "out" / "program-viewer", "disc": out / "fx" / "disc", "bios": out / "fx" / "bios.bin", "dir": out, "args": ["--instruction-budget", "3000000"], "set": "main:d7=3"}
+
+
 def session(prog, plan, frames, tmp, tag, extra=()):   # extra: extra program arguments
     plan_file, log = tmp / (tag + ".plan"), tmp / (tag + ".log")
     plan_file.write_text("".join(line + "\n" for line in plan))
@@ -277,6 +290,27 @@ def main():
             check(zsz > 1_000_000, "z80+audio: snapshot size %d" % zsz)
             code, cross = session(prog, ["4 slurp 3 %s" % (tmp / "z.scd"), "5 restore 3", "7 quit"], 400, tmp, "crossz")
             check(cross is not None and any("restore 3" in x and ("different disc or BIOS" in x or "does not match" in x) for x in cross["S"]), "a state of the Z80 program is refused by another program")
+
+        # ---- dynamic images: bindings of precompiled images to run-time bytes, overlay-style selection state ----
+        dyn = build_dynamic(tmp)
+        if dyn is not None:
+            code, dref = session(dyn, ["60 quit"], 0, tmp, "dref")
+            frames = max(dref["H"]) if dref else 0
+            report = json.loads(subprocess.run([str(dyn["exe"]), "--disc-dir", str(dyn["disc"]), "--bios", str(dyn["bios"]), *dyn["args"], "--set", dyn["set"]],
+                                                capture_output=True, text=True, timeout=300, env=dict(os.environ, SCD_SNAP_PLAN=str(tmp / "dref.plan"), SCD_SNAP_LOG=str(tmp / "dref2.log"))).stdout)
+            check(code == 0 and frames >= 20 and report.get("dynamic", {}).get("binds", 0) >= 1, "dynamic images: the reference run binds an image at run time (%d binds over %d frame barriers)" % (report.get("dynamic", {}).get("binds", 0), frames))
+            plan = []
+            t = 2
+            while t + 4 < frames:
+                plan += ["%d snap 1" % t, "%d restore 1" % (t + 3)]
+                t += 4
+            plan.append("%d quit" % (frames + 40))
+            code, dobs = session(dyn, plan, 0, tmp, "dsweep")
+            check(code == 0 and dobs is not None and dobs["S"] and all(" ok" in x for x in dobs["S"]), "dynamic images: every snapshot and restore succeeded (%d operations)" % (len(dobs["S"]) if dobs else 0))
+            if dobs:
+                consistent(dobs, dref, "dynamic images sweep (bindings, loader, DMA, both processors)")
+            code, ddirty = session(dyn, ["14 snap 1", "17 dirty", "17 restore 1", "%d quit" % (frames + 40)], 0, tmp, "ddirty")
+            consistent(ddirty, dref, "dynamic images dirty: the restore brings back the exact saved machine")
 
     print("%d failure(s)" % len(failures))
     return 1 if failures else 0

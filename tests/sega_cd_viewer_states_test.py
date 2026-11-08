@@ -97,6 +97,9 @@ def main():
         r, rep, ev = session(keys((30, "F5"), (100, "quit")), save, tag="save")
         check(rep == plain100 and ev and ev[0]["event"] == "save" and ev[0]["status"] == "ok", "F5 at poll 30 saves without perturbing the run: %s" % ev)
         check((save / "states" / "quick.sgstate").is_file(), "the quick slot file is in the game's folder")
+        head = (save / "states" / "quick.sgstate").read_bytes()[:160]
+        tw, th, tbytes = int.from_bytes(head[144:146], "little"), int.from_bytes(head[146:148], "little"), int.from_bytes(head[148:152], "little")
+        check(head[:8] == b"SCDSTAT\x00" and tw > 0 and th > 0 and tbytes == tw * th * 2, "the state carries a real thumbnail of the game's own picture (%dx%d, %d bytes)" % (tw, th, tbytes))
         r, rep, ev = session(keys((5, "F8"), (75, "quit")), save, tag="load")
         check(ev and ev[0]["event"] == "load" and ev[0]["status"] == "ok", "F8 in a separate process loads the state: %s" % ev)
         check(rep is not None and rep["canonical_sha256"] == plain100["canonical_sha256"] and rep["onsets"] == plain100["onsets"],

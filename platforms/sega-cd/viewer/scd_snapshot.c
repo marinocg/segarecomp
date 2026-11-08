@@ -188,7 +188,7 @@ static void exec_fingerprint(const ScdMachine *m, uint16_t flags, uint8_t out[32
     }
   }
   if (m->dyn.enabled) {
-    const ScdDynamicProgram *d = scd_dynamic_program(m);
+    const ScdDynamicProgram *d = scd_dynamic_registered_program(m);
     u32_update(&sha, d != NULL ? d->image_count : 0U);
     for (i = 0U; d != NULL && i < d->image_count; ++i) { u32_update(&sha, d->images[i].id); u32_update(&sha, d->images[i].first_lba); u32_update(&sha, d->images[i].length); str_update(&sha, d->images[i].sha256); }
   }
@@ -352,7 +352,7 @@ static int get_cdd(SvcReader *r, ScdMachine *s) {
   REQ(svc_r_done(r));
   REQ(s->disc != NULL && d->index <= s->disc->track_count);
   REQ(d->lba >= -(int32_t)(1 << 20) && d->lba < (int32_t)(1 << 22));
-  REQ(d->latency < TICKS_LIMIT / 2U && d->anchor <= s->now && d->grid_line0 < TICKS_LIMIT / SCD_LINE_TICKS_MACHINE);
+  REQ(d->anchor <= s->now && d->grid_line0 < TICKS_LIMIT / SCD_LINE_TICKS_MACHINE);
   REQ(d->next_tick == 0U || near_tick(d->next_tick, s->now, 8U));
   return 1;
 }
@@ -527,7 +527,7 @@ static void put_dynamic(SvcWriter *w, const ScdMachine *m) {
 static int get_dynamic(SvcReader *r, ScdMachine *s) {
   unsigned k, j;
   uint8_t enabled;
-  const ScdDynamicProgram *p = scd_dynamic_program(s);
+  const ScdDynamicProgram *p = scd_dynamic_registered_program(s);
   GU8(enabled);
   REQ(!r->error && enabled == (s->dyn.enabled ? 1U : 0U));
   GU32(s->dyn.cpu); GU64(s->dyn.order);

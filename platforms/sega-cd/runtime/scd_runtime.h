@@ -743,7 +743,7 @@ void scd_dynamic_note_view_change(ScdMachine *m);
 /* A program with dynamic images registers them before it starts (generated main); the field is not part of ScdProgram so that every other program is unchanged. */
 void scd_dynamic_register(const ScdDynamicProgram *program);
 /* SEG-132: the registered program (NULL when none): immutable build facts a snapshot binds into its identity. */
-const ScdDynamicProgram *scd_dynamic_program(const ScdMachine *m);
+const ScdDynamicProgram *scd_dynamic_registered_program(const ScdMachine *m);
 void scd_dynamic_attach(ScdMachine *m);
 void scd_dynamic_release(ScdMachine *m);
 void scd_dynamic_report(const ScdMachine *m, FILE *out);

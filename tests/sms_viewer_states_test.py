@@ -94,6 +94,9 @@ def main():
     r, rep, ev = session(exe, 120, "60 K\n", save)
     check(rep == plain[120] and ev and ev[0]["event"] == "save" and ev[0]["status"] == "ok", "saving at frame 60 does not perturb the run: %s" % ev)
     check((save / "states" / "quick.sgstate").is_file(), "the quick slot file exists in the launcher-managed folder")
+    head = (save / "states" / "quick.sgstate").read_bytes()[:160]
+    tw, th, tbytes = int.from_bytes(head[144:146], "little"), int.from_bytes(head[146:148], "little"), int.from_bytes(head[148:152], "little")
+    check(head[:8] == b"SMSSTAT\x00" and (tw, th) == (149, 111) and tbytes == 149 * 111 * 2, "the state carries a real thumbnail of the game's own 256x192 picture (%dx%d, %d bytes)" % (tw, th, tbytes))
     r, rep, ev = session(exe, 70, "10 M\n", save)
     check(ev and ev[0]["event"] == "load" and ev[0]["status"] == "ok", "a separate process loads the state: %s" % ev)
     check(rep is not None and rep["canonical_sha256"] == plain[120]["canonical_sha256"] and rep["counter"] == plain[120]["counter"],
