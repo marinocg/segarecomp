@@ -148,7 +148,7 @@ def compile_program(emit_dir, work, viewer=False):
     rt, hl, psg = ROOT / "platforms/master-system/runtime", ROOT / "platforms/master-system/headless", ROOT / "libs/device/sega/psg"
     vw = ROOT / "platforms/master-system/viewer"
     sources = units + [rt / n for n in ("sms_memory.c", "sms_sha256.c", "sms_input.c", "sms_machine.c", "sms_psg.c", "sms_pad.c", "sms_vdp.c", "sms_render.c")] + \
-        [psg / "src/sn76489.c"] + ([vw / n for n in ("sms_viewer.c", "sms_viewer_main.c")] + [ROOT / "tests/tools/sms_viewer_host_stub.c"] if viewer else
+        [psg / "src/sn76489.c"] + ([vw / n for n in ("sms_viewer.c", "sms_snapshot.c", "sms_viewer_state.c", "sms_viewer_main.c")] + [ROOT / "libs/viewer/src/sv_state_service.c", ROOT / "libs/viewer/src/sv_state_store.c", ROOT / "tests/tools/sms_viewer_host_stub.c"] if viewer else
                                    [hl / n for n in ("sms_audio.c", "sms_headless.c", "sms_devices_vdp.c")])
     base = [CC, "-std=c11", "-O0", "-w", "-I", str(ROOT / "libs/codegen/c11/include"), "-I", str(rt), "-I", str(psg / "include"), "-I", str(emit_dir),
             *(["-I", str(vw), "-I", str(ROOT / "libs/viewer/include")] if viewer else ["-I", str(hl)])]   # SEG-125: sms_viewer_main.c includes the header-only sv_perf.h

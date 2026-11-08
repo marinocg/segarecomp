@@ -48,4 +48,9 @@ int sms_sdl3_viewer_audio_active(const SmsSdl3Viewer *viewer, uint64_t *overruns
 void sms_sdl3_viewer_set_perf(SmsSdl3Viewer *viewer, struct SvPerf *perf) { (void)viewer; (void)perf; }   /* SEG-125: the stub has no host to time */
 const char *sms_sdl3_viewer_renderer_name(const SmsSdl3Viewer *viewer) { (void)viewer; return "stub"; }
 
+/* SEG-132: the state service registers with the shared host and drops queued audio on a restore; the stub has neither. */
+struct SvHost *sms_sdl3_viewer_sv_host(SmsSdl3Viewer *viewer) { (void)viewer; return NULL; }
+void sms_sdl3_viewer_audio_clear(SmsSdl3Viewer *viewer) { (void)viewer; }
+void sv_host_set_state_provider(struct SvHost *host, const struct SvStateProvider *provider) { (void)host; (void)provider; }
+
 void sms_sdl3_viewer_close(SmsSdl3Viewer *viewer) { free(viewer); }
