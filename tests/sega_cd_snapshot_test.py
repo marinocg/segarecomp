@@ -71,7 +71,7 @@ def build_z80_audio(tmp):
     return {"exe": out / "out" / "program-viewer", "disc": out / "disc", "bios": out / "fx" / "bios.bin", "dir": out, "args": ["--instruction-budget", "3000000"], "set": "main:d7=18"}
 
 
-def session(prog, plan, frames, tmp, tag, extra=()):
+def session(prog, plan, frames, tmp, tag, extra=()):   # extra: extra program arguments
     plan_file, log = tmp / (tag + ".plan"), tmp / (tag + ".log")
     plan_file.write_text("".join(line + "\n" for line in plan))
     env = dict(os.environ, SCD_SNAP_PLAN=str(plan_file), SCD_SNAP_LOG=str(log))
@@ -162,6 +162,23 @@ def main():
         log_x = [l.split()[1] for l in (tmp / "dirty.log").read_text().splitlines() if l.startswith("X ")]
         check(code == 0 and len(log_x) == 2 and all(x not in ref["H"][k] for x in log_x for k in (6, 13)), "dirty: the corruption changes the machine (%d dirty states)" % len(log_x))
         consistent(dirty, ref, "dirty: restore brings back the exact saved machine (every region) and the run continues as the reference")
+        # ---- backup RAM: a restore changes only the in-memory bytes; the canonical file is never touched; the export at the end reflects the timeline the session ends on ----
+        brm = tmp / "formatted.brm"
+        subprocess.run([sys.executable, str(ROOT / "tools" / "sega_cd_backup_ram.py"), "format", str(brm)], check=True, capture_output=True, text=True)
+        pristine = brm.read_bytes()
+        digest_before = hashlib.sha256(pristine).hexdigest()
+        outs = {}
+        for tag, plan in (("control", ["9 dirty", "20 quit"]), ("restored", ["6 snap 1", "9 dirty", "9 restore 1", "20 quit"]), ("cancelled", ["6 snap 1", "20 quit"]), ("invalid", ["3 slurp 3 %s" % (tmp / "case0.scd"), "4 restore 3", "20 quit"])):
+            cand = tmp / ("cand-" + tag + ".bin")
+            code, obs = session(prog, plan, 400, tmp, "brm-" + tag, extra=("--backup-ram", str(brm), "--backup-ram-out", str(cand)))
+            outs[tag] = cand.read_bytes() if cand.exists() else None
+            check(code == 0 and outs[tag] is not None and len(outs[tag]) == 8192, "backup RAM (%s): the session exports its final in-memory backup RAM" % tag)
+        check(hashlib.sha256(brm.read_bytes()).hexdigest() == digest_before, "backup RAM: the canonical file is never written by the session or by a restore")
+        check(outs["control"] != pristine and outs["restored"] == pristine and outs["cancelled"] == pristine and outs["invalid"] == pristine, "backup RAM: a restore returns the in-memory bytes to the saved timeline; the export follows the timeline the session ends on; a refused (invalid) state changes nothing")
+        # a state taken WITH backup RAM cannot be loaded into a session without it (and the reverse), so it can never hand a session RAM it could not export
+        code, with_brm = session(prog, ["5 snap 1", "5 dump 1 %s" % (tmp / "with-brm.scd"), "7 quit"], 400, tmp, "brm-dump", extra=("--backup-ram", str(brm)))
+        code, without = session(prog, ["3 slurp 2 %s" % (tmp / "with-brm.scd"), "4 restore 2", "6 quit"], 400, tmp, "brm-refuse")
+        check(without is not None and any("restore 2" in x and "does not match" in x for x in without["S"]), "backup RAM: a state of a session with backup RAM is refused by a session without it: %s" % (without["S"] if without else None))
         # the state sizes
         code, obs = session(prog, ["3 snap 1", "6 quit"], 400, tmp, "size")
         size = int(next(l for l in obs["S"] if "snap 1" in l).split()[-1])

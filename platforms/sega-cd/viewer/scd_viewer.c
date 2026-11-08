@@ -26,6 +26,7 @@ typedef struct KeyLine {
   uint64_t poll;
   SDL_Scancode scancode;
   int down, quit;   /* quit: the window's close button (SDL_EVENT_QUIT) */
+  int rewind;       /* SEG-132: 1 = `<poll> rewind_yes x`: open the rewind surface, go back two moments with Left and confirm with Return; 2 = `rewind_no x`: three moments back, Escape */
 } KeyLine;
 
 typedef struct ScdSdlHost {
@@ -113,22 +114,45 @@ static void load_key_script(ScdSdlHost *h) {
   if (f == NULL) return;
   while (h->key_count < KEY_SCRIPT_MAX && fgets(text, sizeof text, f) != NULL) {
     unsigned long long poll = 0U;
-    char action[8] = "", name[64] = "";
+    char action[16] = "", name[64] = "";
     KeyLine *k = &h->keys[h->key_count];
-    if (sscanf(text, "%llu %7s %63s", &poll, action, name) != 3) continue;
+    if (sscanf(text, "%llu %15s %63s", &poll, action, name) != 3) continue;
     k->poll = (uint64_t)poll;
     k->down = strcmp(action, "down") == 0;
     k->quit = strcmp(action, "quit") == 0;
+    k->rewind = strcmp(action, "rewind_yes") == 0 ? 1 : (strcmp(action, "rewind_no") == 0 ? 2 : 0);
     k->scancode = SDL_GetScancodeFromName(name);
-    if (!k->quit && (k->scancode == SDL_SCANCODE_UNKNOWN || (!k->down && strcmp(action, "up") != 0))) continue;
+    if (!k->quit && !k->rewind && (k->scancode == SDL_SCANCODE_UNKNOWN || (!k->down && strcmp(action, "up") != 0))) continue;
     h->key_count += 1U;
   }
   fclose(f);
 }
 
+static void push_key(SDL_Scancode scancode) {
+  int down;
+  for (down = 1; down >= 0; --down) {
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = (Uint32)(down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP);
+    e.common.timestamp = SDL_GetTicksNS();
+    e.key.scancode = scancode;
+    e.key.down = down != 0;
+    SDL_PushEvent(&e);
+  }
+}
+
 static void push_scripted_keys(ScdSdlHost *h) {
   while (h->key_next < h->key_count && h->keys[h->key_next].poll <= h->polls) {
     SDL_Event e;
+    if (h->keys[h->key_next].rewind != 0) {   /* SEG-132 automation (like the Genesis viewer's pad-script Y / Z): the keys are real queued key events consumed by the real surface loop */
+      push_key(SDL_SCANCODE_LEFT);
+      push_key(SDL_SCANCODE_LEFT);
+      if (h->keys[h->key_next].rewind == 1) push_key(SDL_SCANCODE_RETURN);
+      else { push_key(SDL_SCANCODE_LEFT); push_key(SDL_SCANCODE_ESCAPE); }
+      if (h->opened) (void)sv_host_open_rewind(genesis_sdl3_viewer_sv_host(h->sdl));
+      h->key_next += 1U;
+      continue;
+    }
     SDL_zero(e);
     e.type = (Uint32)(h->keys[h->key_next].quit ? SDL_EVENT_QUIT : h->keys[h->key_next].down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP);
     e.common.timestamp = SDL_GetTicksNS();

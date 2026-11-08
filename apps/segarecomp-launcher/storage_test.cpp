@@ -428,6 +428,7 @@ int main() {
       spit(folder / "build.partial" / "obj" / "x.o", std::string(40, 'p'));
       spit(folder / "backup-ram.bin", std::string(8192, 's'));
       spit(folder / "recordings" / "session-1.txt", std::string(300, 'r'));
+      spit(folder / "states" / "quick.sgstate", std::string(1000, 'q'));   // SEG-132: the game's save states
       spit(folder / "run.log", std::string(50, 'g'));
       spit(folder / "build-backup-ram.bin", std::string(8192, 'b'));
       spit(cch / "sega-cd-objects" / "o1" / "x.o", std::string(600, 'o'));
@@ -437,7 +438,7 @@ int main() {
     StorageReport r = scan_storage(c, cch, lib);
     const EntryUsage *u = r.find(g.id());
     expect(u != nullptr && u->dirs.size() == 3, "Sega CD: the build, failed and partial folders are the entry's build folders");
-    expect(u != nullptr && u->user_data == 8192 + 300, "Sega CD: the backup RAM and the recordings are measured as user data");
+    expect(u != nullptr && u->user_data == 8192 + 300 + 1000, "Sega CD: the backup RAM, the recordings and the save states are measured as user data");
     expect(u != nullptr && u->total.executable == 1500 && u->total.total() > 1500 && u->total.total() < 1500 + 8192 + 300 + 8192 + 1000, "Sega CD: user data is not part of the removable total");
     expect(u != nullptr && !u->dirs.empty() && u->dirs[0].name == "build" && u->dirs[0].kind == DirKind::current && u->dirs[0].valid_build && u->dirs[0].busy_key == "scd-" + id16, "Sega CD: the build folder is the current valid build, guarded by the entry's key");
     expect(r.scd_object_cache == 600 && r.failed_partial == 70 + 40, "Sega CD: the shared object cache and the failed/partial folders are sized");
@@ -455,13 +456,13 @@ int main() {
     }
     {  // a forged plan naming user data or the game's own folder is refused by shape; the files survive
       Plan forged;
-      forged.items = {{folder / "backup-ram.bin", 8192, false}, {folder / "recordings", 300, true}, {folder / "run.log", 50, false}, {folder, 0, true}, {folder / "build" / ".." / "backup-ram.bin", 8192, false},
+      forged.items = {{folder / "backup-ram.bin", 8192, false}, {folder / "recordings", 300, true}, {folder / "states", 1000, true}, {folder / "run.log", 50, false}, {folder, 0, true}, {folder / "build" / ".." / "backup-ram.bin", 8192, false},
                       {folder / "recordings" / "session-1.txt", 300, false}, {lib / "sega-cd", 0, true}, {lib / "library.json", 0, false}};
       expect(bg.try_begin_maintenance(), "maintenance lock");
       const ExecResult refused = execute_plan(forged, cch, bg, lib);
       bg.end_maintenance();
       expect(refused.problems.size() == forged.items.size() && refused.removed == 0, "Sega CD: every forged item is refused");
-      expect(fs::exists(folder / "backup-ram.bin") && fs::exists(folder / "recordings" / "session-1.txt") && fs::exists(folder / "run.log"), "Sega CD: the save, the recording and the log survive a forged plan");
+      expect(fs::exists(folder / "backup-ram.bin") && fs::exists(folder / "recordings" / "session-1.txt") && fs::exists(folder / "run.log") && fs::exists(folder / "states" / "quick.sgstate"), "Sega CD: the save, the recording, the save states and the log survive a forged plan");
     }
     {  // a symlinked build folder or game folder is never followed; a library root that overlaps the cache root does not stop native cleanup
 #if !defined(_WIN32)

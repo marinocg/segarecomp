@@ -1750,6 +1750,12 @@ add_test(NAME sega_cd_snapshot_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST sega_cd_snapshot_test APPEND PROPERTY LABELS full)
 set_property(TEST sega_cd_snapshot_test PROPERTY TIMEOUT 1800)
 set_property(TEST sega_cd_snapshot_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-132 (ADR 0279): Sega CD save states, rewind and the relocated frame-step key (F6 hold, F9 step; F7 is rewind on every console) in the REAL SDL3 viewer process, keyboard path end to end (skips cleanly without SDL3).
+add_test(NAME sega_cd_viewer_states_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sega_cd_viewer_states_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sega_cd_viewer_states_test APPEND PROPERTY LABELS full)
+set_property(TEST sega_cd_viewer_states_test PROPERTY TIMEOUT 1800)
+set_property(TEST sega_cd_viewer_states_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-131 (ADR 0278): the save-state and rewind screens at the review window sizes (720x520 .. 2560x1440), synthetic art and a fake provider.
 if(TARGET sv_state_gallery)
   add_test(NAME sv_state_gallery_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/sv_state_gallery_test.py $<TARGET_FILE:sv_state_gallery>)

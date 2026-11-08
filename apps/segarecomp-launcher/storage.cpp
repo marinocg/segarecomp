@@ -209,7 +209,7 @@ void scan_console_saves(StorageReport &report, const Catalog &catalog, const fs:
 
 // SEG-109-T004 (ADR 0253): the Sega CD games' folders under <library>/sega-cd/<id16>/. The generated build folders become ordinary BuildDirUsage rows of the
 // owning entry (so every report, rail and plan treats them like a native game's build); the loose generated files are only counted; the player's own
-// data (backup RAM, input recordings) is measured into EntryUsage::user_data and nothing else.
+// data (backup RAM, input recordings, SEG-132 save states) is measured into EntryUsage::user_data and nothing else.
 void scan_sega_cd_games(StorageReport &report, const Catalog &catalog, const fs::path &library_root, const std::atomic<bool> *cancel) {
   for (std::size_t i = 0; i < catalog.entries().size() && i < report.entries.size(); ++i) {
     const LibraryEntry &entry = catalog.entries()[i];
@@ -238,7 +238,7 @@ void scan_sega_cd_games(StorageReport &report, const Catalog &catalog, const fs:
     // Loose generated files of the game's folder: counted (logs / other), not removable here.
     for (const char *name : {"run.log", "last-report.json"}) usage.total.logs += measure_path(folder / name);
     for (const char *name : {"build-backup-ram.bin", "replay-backup-ram.bin", "backup-ram.next"}) usage.total.other += measure_path(folder / name);
-    usage.user_data = measure_path(folder / "backup-ram.bin") + measure_path(folder / "backup-ram.bin.prev") + measure_path(folder / "recordings");
+    usage.user_data = measure_path(folder / "backup-ram.bin") + measure_path(folder / "backup-ram.bin.prev") + measure_path(folder / "recordings") + measure_path(folder / "states");   // SEG-132: save states are the player's data too
   }
   // Folders of games no longer in the library: their generated build folders stay visible (as unlinked rows) so they can still be reclaimed; their user data
   // is left alone and unreported.
