@@ -1968,6 +1968,13 @@ target_link_libraries(sms_image_emitter PRIVATE segarecomp::machine_master_syste
 segarecomp_enable_warnings(sms_image_emitter)
 add_test(NAME sms_bank_crossing_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_bank_crossing_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-132 (ADR 0279): reversible Master System snapshots on the real viewer rig and a generated-native fixture: replay equivalence from every frame boundary (CPU, mapper, VDP, interrupts,
+# pad/pause, PSG sampling), identity / mapper / PSG-variant / input-mode refusals, crafted values, and no mutation on any refusal.
+add_test(NAME sms_snapshot_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_snapshot_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_snapshot_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_snapshot_test PROPERTY TIMEOUT 900)
+set_property(TEST sms_snapshot_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 add_test(NAME sms_emission_budget_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR})
 # The 512 KiB tier emits about 190 MiB of generated C in seconds since SEG-033 (grouped owners, shared bodies), so it is in the
