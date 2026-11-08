@@ -6,12 +6,12 @@
 #include "sv_state_codec.h"
 
 /* ---------------------------------------------------------------------------------------------------------------------------------- */
-/* Format constants (docs/architecture/sms-sega-cd-save-states-inventory.md; the container conventions are the Genesis ones).         */
+/* Format constants (docs/architecture/sms-sega-cd-save-states-inventory.md; the container conventions are those of the other consoles' state files).         */
 
 #define HEADER_FIXED_BYTES 156U
 #define SECTION_ENTRY_BYTES 12U
 #define DIGEST_BYTES 32U
-#define PLATFORM_ID 2U   /* 1 = Genesis (SGSTATE), 2 = Master System */
+#define PLATFORM_ID 2U   /* the container's platform field: 2 = Master System (other consoles use their own value) */
 
 enum { SEC_CPU = 1, SEC_MEM = 2, SEC_MACHINE = 3, SEC_VDP = 4, SEC_RENDER = 5, SEC_PSG = 6, SEC_PAD = 7, SEC_LAST = SEC_PAD };
 #define SECTION_FLAG_REQUIRED 1U

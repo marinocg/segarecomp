@@ -25,7 +25,7 @@ struct SmsSdl3Viewer {
   int ext_attached;
   SvAspect plan_aspect;     /* sampled with the requested mode once per guest frame */
   SvWidescreenSupport l2_support; /* the outcome of the latest frame produced under a request */
-  /* SEG-132 automation seam (like the Genesis viewer's SEGARECOMP_VIEWER_PAD_SCRIPT): a file of `<poll> <keys>` lines (keys: any of U D L R 1 2 P, or `-` for none; plus the one-shot
+  /* SEG-132 automation seam (the other consoles' viewers have the same one): a file of `<poll> <keys>` lines (keys: any of U D L R 1 2 P, or `-` for none; plus the one-shot
    * commands K quick save, M quick load, Y rewind two moments and confirm, Z browse three moments back and cancel, Q quit) replaces player 1's sampled input from that poll
    * (one poll = one guest frame) on. The commands run at the frame barrier exactly as F5 / F8 / F7 do, and Y / Z queue real key events consumed by the real surface loop.
    * Unset in every shipped use. */
