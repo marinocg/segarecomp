@@ -11,7 +11,7 @@
 4. Static hooks are resolved at build time against the exact image digest; unsupported site classes fail at build time with stable classes; there is no runtime opcode decoding.
 5. A callback fault discards its effects, disables the mod for the session and surfaces a diagnostic; the guest continues unmodified.
 6. Mod state is a versioned `MODSTATE` section in the existing save-state and rewind containers; restore is refused on any identity or fingerprint mismatch.
-7. Determinism is a testable guarantee (replay, restore, rewind, no-op-hook equivalence). No hook promise exists for a CPU until its feasibility spike returns GO or PARTIAL.
+7. Determinism (excluding host-timing watchdog faults, which mark the session non-deterministic) is a testable guarantee (replay, restore, rewind, no-op-hook equivalence). No hook promise exists for a CPU until its feasibility spike returns GO or PARTIAL.
 
 ## Consequences
 

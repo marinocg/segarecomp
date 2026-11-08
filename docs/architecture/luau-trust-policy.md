@@ -46,7 +46,7 @@ Approval never transfers between identities; a changed package needs new consent
 | VM memory (all allocations, hard quota) | 4 MiB per mod (`luau_memory_bytes` <= 4194304) | `memory` |
 | Instruction budget per callback, in budget units (one unit per Luau interrupt: function call and loop back-edge) | 100000 per callback (`luau_budget_units` <= 100000) | `budget` |
 | Instruction budget per mod per frame | 400000 units | `budget` |
-| Wall-time watchdog per callback (host time; a backstop, not a determinism mechanism) | 4 ms; per frame total 8 ms | `watchdog` (non-deterministic: marks the session as having a watchdog fault) |
+| Wall-time watchdog per callback (host time; a safety backstop for a hung host, **not** part of the determinism guarantee: see below) | 4 ms; per frame total 8 ms | `watchdog` |
 | Call depth | 200 | `stack` |
 | Source per file / per mod | 128 KiB / 1 MiB (schema 3) | build |
 | Compiled bytecode per mod | 512 KiB | build |
@@ -55,7 +55,8 @@ Approval never transfers between identities; a changed package needs new consent
 | Serialized state | <= 64 KiB per mod, depth <= 8 | `state` |
 
 **Request rule.** A package may declare lower values through the manifest `limits` object (`luau_memory_bytes`, `luau_budget_units`); any value above the policy maximum is `E_LIMIT_EXCEEDS_POLICY`. The host never raises a limit because a package asks. Hosts may ship lower platform maximums; they never ship higher.
-Deterministic limits (memory, budget units, depth) decide faults reproducibly; the watchdog exists to bound a hung host and its occurrence is reported distinctly.
+Deterministic limits (memory, budget units, depth) decide faults reproducibly and are the only limits inside the determinism guarantee.
+**Watchdog rule.** A watchdog fault is host-timing dependent and therefore non-reproducible. It disables the mod like any fault, and it marks the session **non-deterministic**: the diagnostic (`E_MOD_FAULT`, cause `watchdog`) is shown, recordings and replay/restore/rewind runs that contain it are marked *not replay-verifiable*, and every determinism test (`determinism`, replay-, restore- and rewind-equivalence) treats a watchdog fault as a **failure**, never a pass. Budget units are sized so a conforming mod never reaches the watchdog.
 
 ## 5. Host-binding rules
 

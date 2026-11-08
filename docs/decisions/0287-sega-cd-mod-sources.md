@@ -12,6 +12,9 @@
 5. Patched builds embed the effective disc identity in the generated disc check; save states bind to it.
 6. Ownership: SEG-148-T001 owns identity, layout rules and the envelope; SEG-145-T005 owns the CD-DA mechanism: `148-T001 -> 145-T005 -> 145-T006`.
 
+7. This ADR defines the contract only; it implements no adapter. Reserved kinds and the `disc-image` source kind keep failing closed until SEG-148-T002 / SEG-145-T005 implement them.
+8. The schema 3 entry limit (256 archive entries including the manifest) applies to disc packages; only the size caps are independent.
+
 ## Consequences
 
 SEG-148-T002 implements verified extent edits; SEG-145-T005 fills the track kind. Rejected alternatives: carrying a disc in the cartridge model (16 MiB cap, one image); re-layout or resizing of tracks (unverifiable identity); embedding BIOS or disc content.

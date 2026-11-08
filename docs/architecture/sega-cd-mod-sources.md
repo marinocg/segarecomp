@@ -1,6 +1,6 @@
 # Sega CD mod sources: disc identity, BIOS requirement, payload envelope and layout rules
 
-Status: accepted contract (SEG-148-T001, ADR [0287](../decisions/0287-sega-cd-mod-sources.md)). **Not implemented**: verified extent edits are SEG-148-T002; the CD-DA mechanism is SEG-145-T005. It amends [schema 3](segapatch-schema-3.md) only through the discriminator
+Status: accepted contract (SEG-148-T001, ADR [0287](../decisions/0287-sega-cd-mod-sources.md)). **This document defines the Sega CD source-identity and disc-payload contract only; it does not implement the Sega CD adapter.** Reserved kinds (`disc-extent-edit`, `disc-track-replace`) and the `disc-image` source kind continue to fail closed (`E_PAYLOAD_KIND_RESERVED`, `E_SOURCE_KIND_RESERVED`) until the implementing task lands: verified extent edits are SEG-148-T002 are SEG-148-T002; the CD-DA mechanism is SEG-145-T005. It amends [schema 3](segapatch-schema-3.md) only through the discriminator
 and the reserved payload kinds that schema 3 already defines. Inputs: `docs/architecture/sega-cd-machine-contract.md` sections 9a and 15, ADR 0129, ADR 0130, [adapters](mod-platform-adapters.md), [gap inventory](modding-platform-gap-inventory.md).
 
 **Ownership (explicit).** SEG-148-T001 (this document) owns **disc identity, the layout-preservation rules and the versioned disc payload envelope**. SEG-145-T005 owns the **CD-DA replacement mechanism** and fills the reserved kind `disc-track-replace` within this contract.
@@ -56,7 +56,7 @@ Worked example of a valid synthetic envelope (digests are placeholders): `{"kind
 
 ## 5. Size model and caps
 
-Disc payloads have caps independent of the 16 MiB cartridge image cap and the 32 MiB archive cap of schema 1/2: each disc payload at most 128 MiB, a package containing disc payloads at most 512 MiB in total, at most 256 entries. These are contract maxima; SEG-148-T002 and SEG-145-T005 may lower them
+Disc payloads have caps independent of the 16 MiB cartridge image cap and the 32 MiB archive cap of schema 1/2: each disc payload at most 128 MiB, a package containing disc payloads at most 512 MiB in total, and the schema 3 entry limit applies unchanged (256 archive entries including `manifest.json`, so at most 255 payloads; see [schema 3](segapatch-schema-3.md) section 2). The size caps are contract maxima; SEG-148-T002 and SEG-145-T005 may lower them
 with evidence. `size` is enforced while inflating as for all payloads. Large payloads are stored as `stored` ZIP entries (canonical form) of mod-owned bytes or BPS deltas; an archive over 32 MiB is legal only when every payload other than `manifest.json` is a disc kind.
 
 ## 6. Build identity and the generated program's disc check

@@ -111,6 +111,8 @@ On a fault: (1) the callback's staged writes and input changes are discarded; (2
 
 ## 7. Replay and determinism guarantee
 
+The guarantee covers runs in which no host-timing fault occurred. A Luau **watchdog** fault ([Luau policy](luau-trust-policy.md) section 4) is host-timing dependent: it marks the session non-deterministic and not replay-verifiable, and no determinism test may count a run containing one as a success. Deterministic faults (budget units, memory, depth, capability, range) are reproducible and remain inside the guarantee.
+
 For the same build (package identities and order, ABI major, capability sets), the same initial state and the same per-frame input sequence, every frame's guest state digest, framebuffer digest and audio digest are identical across runs and hosts.
 Mods observe no wall-clock time, no host random source, no thread or timer, no filesystem or network, and no host-pointer values; `random` is deterministic (seeded from the package identity and the guest frame counter, [Luau policy](luau-trust-policy.md) section 3).
 

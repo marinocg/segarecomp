@@ -26,7 +26,7 @@ A package is a classic ZIP (no encryption, no ZIP64, no links, no directories, n
   every entry uses method `stored` (so output is independent of any compressor); DOS time `00:00:00`, date `1980-01-01`; no extra
   fields, no comment; "version made by" 20, "version needed" 20, external attributes 0, general-purpose flags 0.
 * **Canonical manifest bytes:** UTF-8/ASCII JSON, keys in the order of section 3, no insignificant whitespace, no trailing newline. The reader hashes the exact bytes it received.
-* **Limits.** Archive <= 32 MiB; manifest <= 64 KiB; entries <= 256 (including `manifest.json`); a `cartridge-image` package keeps the existing caps (`bps-image` payload <= 16 MiB, source/target image <= 16 MiB);
+* **Limits.** Archive <= 32 MiB; manifest <= 64 KiB; entries <= 256 including `manifest.json` (hence at most 255 payload entries; this is the one effective entry limit for every package, disc kinds included); a `cartridge-image` package keeps the existing caps (`bps-image` payload <= 16 MiB, source/target image <= 16 MiB);
   per-kind caps in section 4. Payloads whose kind is a disc kind have per-payload caps independent of the cartridge and archive caps (section 7).
   Sizes are enforced while inflating; a declared size that differs from the actual size is `E_ARCHIVE_SIZE`.
 
@@ -57,7 +57,7 @@ Field order below is the canonical order.
 | `limits` | object | optional | requested resource limits; keys `luau_memory_bytes`, `luau_budget_units` (integers); each MUST be <= the policy default of [luau-trust-policy.md](luau-trust-policy.md) section 4 (a package may request less, never more: `E_LIMIT_EXCEEDS_POLICY`); other keys `E_FIELD_UNKNOWN` |
 | `geometry` | object | optional | geometry declaration: `{"scenes":[...]}`; the content model is SEG-139-T004's; schema 3 only reserves the key and requires `E_FIELD_UNKNOWN` for any other key inside until then |
 | `presentation_defaults` | object | optional | as schema 1/2 (`widescreen`, `side_style`) |
-| `payloads` | array of objects | yes | section 4; 1 to 250 entries |
+| `payloads` | array of objects | yes | section 4; 1 to 255 entries (the archive limit of 256 entries includes `manifest.json`) |
 
 ## 4. Payload envelope and kinds
 
@@ -107,7 +107,7 @@ A platform/source mismatch (`genesis` with `disc-image`, `sega-cd` with `cartrid
 
 ## 6. Capability declaration (consumed by ABI 2 and geometry)
 
-`capabilities` (required) and `capabilities_optional` are sets of names from the [adapter vocabulary](mod-platform-adapters.md) section 2 that the package requires. The product grants exactly the declared set for the platform, and refuses the package at
+`capabilities` and `capabilities_optional` are optional fields; **an absent field means the empty set**, and the two forms are equivalent. They are sets of names from the [adapter vocabulary](mod-platform-adapters.md) section 2 that the package requires. The product grants exactly the declared set for the platform, and refuses the package at
 `mod check` if any name is unknown (`E_CAPABILITY_UNKNOWN`) or unsupported on the platform (`E_CAPABILITY_UNSUPPORTED`). Schema 3 stores **names only**; legality by phase and trust implications are in
 [native-sdk-abi-2.md](native-sdk-abi-2.md) section 4. The schema 1/2 `requires` array is not valid in schema 3 (`E_FIELD_UNKNOWN`); schema 2's native capabilities map 1:1 to schema 3 names (section 8).
 Geometry declarations live in the reserved `geometry` object; SEG-139-T004 defines their content, which MUST be additive to this schema (a reader of this section rejects unknown keys inside it until then).

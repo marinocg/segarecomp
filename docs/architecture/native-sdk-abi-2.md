@@ -99,7 +99,7 @@ ABI 1 providers are read-only (ids 2, 3, 5, 6 only) and unaffected.
 
 ## 5. Negotiation
 
-1. The manifest declares `abi.native` = 2, `capabilities` (required) and `capabilities_optional` ([schema 3](segapatch-schema-3.md) section 3).
+1. The manifest declares `abi.native` = 2, `capabilities` (the required set; absent means empty) and `capabilities_optional` (absent means empty) ([schema 3](segapatch-schema-3.md) section 3).
 2. At build, the host checks, in order: package platform equals the target platform; `abi.native` = 2; the provider source compiles against this header with `SEGA_MOD_ABI_MAJOR` 2; the provider's `required_minor` <= host minor; every required capability is supported on the platform; every optional name is known.
 3. At load, the host fills `granted` with all required capabilities plus the supported optional ones; the provider must tolerate absent optional capabilities.
 4. Struct evolution: the host reads provider fields only below the provider's `size`; a provider reads host fields only below the host's `size`; new fields are appended using the `reserved` slots first; a host never reorders or repurposes a field; a field never changes meaning.
