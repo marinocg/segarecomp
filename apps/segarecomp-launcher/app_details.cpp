@@ -1078,7 +1078,7 @@ float App::draw_scd_recordings(LibraryEntry &entry, const StatusInfo &info, floa
   ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y + ctx_.u(2.0F)));
   paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner,
             "A recording is a small text script of button presses at exact frame boundaries; replaying it reproduces the session exactly. It holds no game data. "
-            "The viewer's Pause menu is Esc; F6 holds the machine and F7 steps one frame while it is held.");
+            "The viewer's Pause menu is Esc; F6 holds the machine and F9 steps one frame while it is held (F7 is rewind, F5 / F8 quick save / load).");
   const auto recordings = scd_recordings(entry);
   if (recordings.empty()) {
     ImGui::SetCursorScreenPos(ImVec2(a.x + pad, ImGui::GetCursorScreenPos().y + ctx_.u(2.0F)));
