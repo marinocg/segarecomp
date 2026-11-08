@@ -336,6 +336,15 @@ static void sdl_finished(void *ctx, const struct ScdLiveSummary *summary, const 
         fprintf(f, "{\"onsets\":%llu,\"ticks\":%llu,\"retired_main\":%llu,\"retired_sub\":%llu,\"canonical_sha256\":\"", (unsigned long long)m->vdp_frames, (unsigned long long)m->now,
                 (unsigned long long)m->cpu[0].retired, (unsigned long long)m->cpu[1].retired);
         if (have) for (i = 0U; i < 32U; ++i) fprintf(f, "%02x", (unsigned)digest[i]);
+        {  /* the canonical bytes themselves, for a section-by-section comparison of two sessions (tests only) */
+          ScdSnapshotBuffer raw;
+          char path[1100];
+          if (snprintf(path, sizeof path, "%s.bin", report) > 0 && scd_snapshot_capture(m, NULL, &raw) == SCD_SNAPSHOT_OK) {
+            FILE *rf = fopen(path, "wb");
+            if (rf != NULL) { fwrite(raw.data, 1U, raw.size, rf); fclose(rf); }
+            scd_snapshot_buffer_free(&raw);
+          }
+        }
         fprintf(f, "\",\"result0\":%u}\n", (unsigned)m->work_ram[0xC000U & 0xFFFFU]);
         fclose(f);
       }

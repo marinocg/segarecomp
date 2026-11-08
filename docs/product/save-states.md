@@ -176,3 +176,7 @@ Observed in the automated tests on Linux x86-64 (software renderer, unthrottled,
 | History at the defaults (500 ms, 96 MiB) | 120 moments in about 25 MiB: the full 60 s | 86 moments in 95.8 MiB: **42.6 s** retained after 70 s of play, 54 evictions |
 
 Reproduce: `tests/sms_viewer_states_test.py`, `tests/sega_cd_viewer_states_test.py` (the `VIEWER_REWIND_STATS` line) and a long run of the viewer with `SEGARECOMP_REWIND_INTERVAL_MS` unset.
+
+### Real-game smoke test (maintainer-authorized local run, nothing committed)
+
+Sonic CD (USA) with a user-supplied Sega-CD Model 2 BIOS, Compatibility build, real SDL3 viewer under the dummy drivers, 400 frames: a quick save at frame 200 in one process and a quick load in another end in the **identical full machine state** as the uninterrupted run; rewind cancel changes nothing, a confirmed rewind goes back about 6 frames, deterministically, with nothing written to disk. A moment is 1.18 MiB; capture 4-5 ms. (This smoke test found that four report-style counters feed the device log and must be part of the state; the synthetic fixtures had not exercised a transfer in flight.)

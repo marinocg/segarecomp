@@ -317,7 +317,7 @@ static void put_cdc(SvcWriter *w, const ScdMachine *m) {
   PU16(c->dbc); PU16(c->dac); PU16(c->pt); PU16(c->wa);
   for (i = 0U; i < 2U; ++i) for (j = 0U; j < 4U; ++j) PU8(c->head[i][j]);
   PU8(c->stat0); PU8(c->stat2); PU8(c->stat3); PU64(c->decoder_end); PU16(c->host_word);
-  PU8(c->dma_state); PU8(c->dma_target); PU64(c->dma_base);
+  PU8(c->dma_state); PU8(c->dma_target); PU64(c->dma_base); PU32(c->dma_total); PU32(c->dma_done);   /* both are folded into device_log */
   svc_w_bytes(w, c->buffer, sizeof c->buffer);
 }
 
@@ -328,7 +328,7 @@ static int get_cdc(SvcReader *r, ScdMachine *s) {
   GU16(c->dbc); GU16(c->dac); GU16(c->pt); GU16(c->wa);
   for (i = 0U; i < 2U; ++i) for (j = 0U; j < 4U; ++j) GU8(c->head[i][j]);
   GU8(c->stat0); GU8(c->stat2); GU8(c->stat3); GU64(c->decoder_end); GU16(c->host_word);
-  GU8(c->dma_state); GU8(c->dma_target); GU64(c->dma_base);
+  GU8(c->dma_state); GU8(c->dma_target); GU64(c->dma_base); GU32(c->dma_total); GU32(c->dma_done);
   svc_r_bytes(r, c->buffer, sizeof c->buffer);
   REQ(svc_r_done(r));
   REQ(c->dma_state <= SCD_DMA_HALTED && c->dma_target <= SCD_DMA_TARGET_BANK1 && c->edt <= 1U && c->dsr <= 1U && c->destination <= 7U);
@@ -391,7 +391,7 @@ static void put_gfx(SvcWriter *w, const ScdMachine *m) {
   PU8(g->busy); PU8(g->ctl);
   PU16(g->map_base); PU16(g->cell_v); PU16(g->buffer_origin); PU16(g->offset); PU16(g->h_dots); PU16(g->trace_base);
   PU32(g->trace_ptr); PU32(g->map_ptr); PU32(g->dot_mask); PU32(g->buffer_offset); PU32(g->buffer_start);
-  PU8(g->stamp_shift); PU8(g->map_shift); PU8(g->lines_left); PU64(g->base); PU64(g->line_ticks);
+  PU8(g->stamp_shift); PU8(g->map_shift); PU8(g->lines_left); PU64(g->base); PU64(g->line_ticks); PU64(g->operations); PU64(g->lines_rendered);   /* both are folded into device_log */
 }
 
 static int get_gfx(SvcReader *r, ScdMachine *s) {
@@ -399,7 +399,7 @@ static int get_gfx(SvcReader *r, ScdMachine *s) {
   GU8(g->busy); GU8(g->ctl);
   GU16(g->map_base); GU16(g->cell_v); GU16(g->buffer_origin); GU16(g->offset); GU16(g->h_dots); GU16(g->trace_base);
   GU32(g->trace_ptr); GU32(g->map_ptr); GU32(g->dot_mask); GU32(g->buffer_offset); GU32(g->buffer_start);
-  GU8(g->stamp_shift); GU8(g->map_shift); GU8(g->lines_left); GU64(g->base); GU64(g->line_ticks);
+  GU8(g->stamp_shift); GU8(g->map_shift); GU8(g->lines_left); GU64(g->base); GU64(g->line_ticks); GU64(g->operations); GU64(g->lines_rendered);
   REQ(svc_r_done(r));
   REQ(g->busy <= 1U && g->stamp_shift <= 32U && g->map_shift <= 32U);
   REQ(g->base < TICKS_LIMIT && g->line_ticks < FRAME_TICKS * 4U && (g->busy == 0U || g->base <= s->now + FRAME_TICKS * 4U));
