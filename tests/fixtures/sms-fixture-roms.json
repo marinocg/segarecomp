@@ -100,6 +100,13 @@
     },
     {
       "declaration_source": "fixture_builder",
+      "fixture": "state_counter",
+      "mapper": "rom_only",
+      "sha256": "5bec9835a8d0be7402002ec0bc7f536b919083e10f8bf578b9d353d17088f1a2",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
       "fixture": "trivial",
       "mapper": "rom_only",
       "sha256": "aa3642138e5d4e1ce17938b80337802a867404a5145e37a8f1899559c305c6b3",

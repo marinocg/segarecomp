@@ -1738,6 +1738,12 @@ add_test(NAME genesis_rewind_session_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_rewind_session_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_rewind_session_test APPEND PROPERTY LABELS full)
 set_property(TEST genesis_rewind_session_test PROPERTY TIMEOUT 900)
+# SEG-132 (ADR 0279): Master System save states and visual rewind in a REAL generated-native viewer process (separate-process save/load, rewind confirm/cancel, refusals, recording sessions).
+add_test(NAME sms_viewer_states_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_viewer_states_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_viewer_states_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_viewer_states_test PROPERTY TIMEOUT 900)
+set_property(TEST sms_viewer_states_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-131 (ADR 0278): the save-state and rewind screens at the review window sizes (720x520 .. 2560x1440), synthetic art and a fake provider.
 if(TARGET sv_state_gallery)
   add_test(NAME sv_state_gallery_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/sv_state_gallery_test.py $<TARGET_FILE:sv_state_gallery>)

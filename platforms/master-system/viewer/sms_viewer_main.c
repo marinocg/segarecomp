@@ -7,9 +7,12 @@
  * input stream the run consumed as a headless `--input` script (the run since the last reset). Exit: 0 quit or frame
  * limit; 3 guest stop; 4 SMS_ERROR at start; 5 viewer/host failure; 64 usage. The ROM is the build-time embedded array. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "sms_viewer_sdl3.h"
+#include "sms_viewer_state.h"
+#include "sv_host.h"
 #include "sv_perf.h"
 
 extern const uint8_t sms_rom_data[];
@@ -26,6 +29,9 @@ static SvPerf g_perf;
 static SmsViewerHost g_inner;
 static SmsPacer g_pacer;
 static uint64_t g_emu_t0, g_frame;
+static SmsViewerState *g_state;   /* SEG-132 (ADR 0279): slot files and the rewind timeline of this session */
+static SmsSdl3Viewer *g_viewer;
+static SmsViewerOptions g_options;
 
 static uint64_t perf_clock(void) { return g_inner.now_ns(g_inner.ctx); }
 static void emulation_done(void) {
@@ -33,7 +39,9 @@ static void emulation_done(void) {
   g_emu_t0 = 0U;
 }
 static int perf_poll(void *ctx, SmsViewerInput *in) {
-  const int rc = g_inner.poll(ctx, in);
+  int rc;
+  sms_viewer_state_after_slice(g_state);   /* SEG-132: the rewind cadence, at the frame barrier: the previous frame is run, drained, paced and presented, the host has not been polled yet */
+  rc = g_inner.poll(ctx, in);
   if (!g_perf.active) { g_perf.observing = 0; g_emu_t0 = 0U; return rc; }
   sv_perf_pace_settle(&g_perf, g_pacer.sleep_calls, g_pacer.unthrottled); /* the previous frame's pacer verdict */
   if (!g_perf.observing) { g_frame = 0U; sv_perf_observe_begin(&g_perf, 0U); }   /* the window starts at this poll: the next poll is one whole frame later */
@@ -89,6 +97,91 @@ static void perf_write(const SvPerfRequest *request, const char *status, const c
   (void)sv_perf_write_file(&g_perf, &meta, request->path);
 }
 
+/* ---- SEG-132 (ADR 0279): whole-machine save states and visual rewind. The service owns the slot files and the timeline; this file only supplies what is session-specific:
+ * the trusted game identity and save folder from the launcher, the rewind knobs, and what must be reset around a restored machine on the host side. ---- */
+static uint32_t env_u32(const char *name, uint32_t low, uint32_t high, uint32_t fallback) {
+  const char *text = getenv(name);
+  unsigned long value = 0UL;
+  size_t i;
+  if (text == NULL || *text == '\0' || strlen(text) > 9U) return fallback;
+  for (i = 0U; text[i] != '\0'; ++i) {
+    if (text[i] < '0' || text[i] > '9') return fallback;
+    value = value * 10UL + (unsigned long)(text[i] - '0');
+  }
+  return value >= low && value <= high ? (uint32_t)value : fallback;
+}
+
+static int hex_digit(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; }
+
+static int parse_hex32(const char *text, uint8_t out[32]) {
+  unsigned i;
+  if (text == NULL || strlen(text) != 64U) return 0;
+  for (i = 0U; i < 32U; ++i) {
+    const int hi = hex_digit(text[2U * i]), lo = hex_digit(text[2U * i + 1U]);
+    if (hi < 0 || lo < 0) return 0;
+    out[i] = (uint8_t)((hi << 4) | lo);
+  }
+  return 1;
+}
+
+/* Host side of a restore: the queued audio of the abandoned future is dropped, pacing restarts from the next frame (the monitoring counters continue) and the performance
+ * window re-opens (a restore is not a slow frame). */
+static void viewer_after_restore(void *context) {
+  const uint32_t sleeps = g_pacer.sleep_calls, resyncs = g_pacer.resyncs;
+  (void)context;
+  sms_sdl3_viewer_audio_clear(g_viewer);
+  sms_pacer_init(&g_pacer, g_options.unthrottled);
+  g_pacer.sleep_calls = sleeps;
+  g_pacer.resyncs = resyncs;
+  g_perf.observing = 0;
+}
+
+static void state_setup(SmsSdl3Viewer *viewer, const SmsViewerOptions *options) {
+  SmsViewerStateConfig cfg;
+  SvStateProvider provider;
+  char state_dir[1100];
+  const char *save_dir = getenv("SEGARECOMP_SAVE_DIR");
+  const char *variant = getenv("SEGARECOMP_SAVE_VARIANT");
+  const char *off = getenv("SEGARECOMP_REWIND");
+  const char *slots_reason = NULL;
+  memset(&cfg, 0, sizeof cfg);
+  cfg.rig = &rig;
+  cfg.rewind_budget_bytes = SV_STATE_REWIND_BUDGET_BYTES;
+  cfg.rewind_interval_ms = SV_STATE_REWIND_INTERVAL_MS;
+  cfg.rewind_target_ms = SV_STATE_REWIND_TARGET_MS;
+  if (off != NULL && (strcmp(off, "0") == 0 || strcmp(off, "off") == 0)) cfg.rewind_budget_bytes = 0U;
+  if (cfg.rewind_budget_bytes != 0U) cfg.rewind_budget_bytes = env_u32("SEGARECOMP_REWIND_BUDGET_MB", 1U, 1024U, cfg.rewind_budget_bytes / (1024U * 1024U)) * 1024U * 1024U;
+  cfg.rewind_interval_ms = env_u32("SEGARECOMP_REWIND_INTERVAL_MS", 50U, 60000U, cfg.rewind_interval_ms);
+  cfg.rewind_target_ms = env_u32("SEGARECOMP_REWIND_TARGET_MS", 500U, 3600000U, cfg.rewind_target_ms);
+  cfg.after_restore = viewer_after_restore;
+  {  /* the identity is the same whether or not a save folder exists: a state taken in memory (rewind) and one on disk describe the same game */
+    const int have_source = parse_hex32(getenv("SEGARECOMP_ROM_SHA256"), cfg.identity.source_sha256);
+    const int have_variant = variant == NULL || *variant == '\0' || strcmp(variant, "vanilla") == 0 || parse_hex32(variant, cfg.identity.variant_sha256);
+    if (options->record != NULL) {   /* a recording describes the run since the last reset: a restore would rewrite the history it describes */
+      slots_reason = "Save states are not available while input is being recorded.";
+      cfg.rewind_unavailable_reason = slots_reason;
+    } else if (save_dir == NULL || *save_dir == '\0') {
+      slots_reason = "No save location is configured for this session: replays and recordings never use save states.";
+    } else if (!have_source) {
+      slots_reason = "This game has no verified identity, so its states cannot be tied to it.";
+    } else if (!have_variant) {
+      slots_reason = "The version of this game has no valid identity, so its states cannot be tied to it.";
+    } else if (snprintf(state_dir, sizeof state_dir, "%s/states", save_dir) <= 0 || strlen(save_dir) + 8U >= sizeof state_dir) {
+      slots_reason = "The save location path is too long.";
+    } else {
+      cfg.state_dir = state_dir;
+    }
+    if (!have_source) memset(cfg.identity.source_sha256, 0, sizeof cfg.identity.source_sha256);
+    if (!have_variant) memset(cfg.identity.variant_sha256, 0, sizeof cfg.identity.variant_sha256);
+  }
+  cfg.unavailable_reason = slots_reason;
+  g_state = sms_viewer_state_create(&cfg);
+  if (g_state != NULL) {
+    sms_viewer_state_provider(g_state, &provider);
+    sv_host_set_state_provider(sms_sdl3_viewer_sv_host(viewer), &provider);
+  }
+}
+
 int main(int argc, char **argv) {
   SmsViewerOptions options;
   SmsViewerResult result;
@@ -125,6 +218,9 @@ int main(int argc, char **argv) {
   host.present = perf_present;
   if (host.audio != NULL) host.audio = perf_audio;
   sms_sdl3_viewer_set_perf(viewer, &g_perf);
+  g_viewer = viewer;
+  g_options = options;
+  state_setup(viewer, &options);
   snprintf(renderer, sizeof renderer, "%s", sms_sdl3_viewer_renderer_name(viewer) != NULL ? sms_sdl3_viewer_renderer_name(viewer) : "");
   if (perf_request.path != NULL) {
     sv_perf_enable(&g_perf);
@@ -141,6 +237,31 @@ int main(int argc, char **argv) {
   }
   if (result.outcome == SMS_VIEWER_GUEST_ERROR && options.frames == SMS_NO_LIMIT && !sms_stop_is_unadmitted_pc(&result.stop))
     sms_sdl3_viewer_stop_screen(viewer, "The game stopped", "The generated program stopped with a typed guest error. The machine fails closed instead of guessing; the run log has the stable error class.");
+  {  /* SEG-132 automation: the final guest state of the session, for the end-to-end tests (unset in every shipped use) */
+    const char *report = getenv("SEGARECOMP_VIEWER_STATE_REPORT");
+    if (report != NULL && *report != '\0') {
+      FILE *f = fopen(report, "wb");
+      if (f != NULL) {
+        uint8_t digest[32];
+        unsigned i;
+        const int have = g_state != NULL && sms_viewer_state_canonical_sha256(g_state, digest) == 0;
+        fprintf(f, "{\"frames\":%llu,\"cycles\":%llu,\"counter\":%u,\"canonical_sha256\":\"", (unsigned long long)result.frames, (unsigned long long)rig.machine.rt.state.cycles,
+                (unsigned)rig.machine.mem.ram[0x100] | ((unsigned)rig.machine.mem.ram[0x101] << 8));
+        if (have) for (i = 0U; i < 32U; ++i) fprintf(f, "%02x", (unsigned)digest[i]);
+        fprintf(f, "\",\"cram0\":%u,\"pcm_index\":%llu}\n", (unsigned)rig.vdp.cram[0], (unsigned long long)rig.psg.pcm.index);
+        fclose(f);
+      }
+    }
+  }
+  if (g_state != NULL) {   /* observed rewind statistics (counts, not estimates) for the measurement tools */
+    SvStateServiceStats st;
+    sms_viewer_state_stats(g_state, &st);
+    fprintf(stderr, "VIEWER_REWIND_STATS {\"captures\":%llu,\"evictions\":%llu,\"failures\":%llu,\"history_entries\":%u,\"history_bytes\":%llu,\"capture_ns_total\":%llu,\"capture_ns_max\":%llu,\"restores\":%llu,\"last_capture_bytes\":%llu,\"retained_span_ms\":%llu}\n",
+            (unsigned long long)st.captures, (unsigned long long)st.evictions, (unsigned long long)st.capture_failures, (unsigned)st.history_entries, (unsigned long long)st.history_bytes,
+            (unsigned long long)st.capture_ns_total, (unsigned long long)st.capture_ns_max, (unsigned long long)st.restores, (unsigned long long)st.last_capture_bytes, (unsigned long long)st.retained_span_ms);
+  }
+  sms_viewer_state_destroy(g_state);
+  g_state = NULL;
   sms_sdl3_viewer_close(viewer);
   printf("viewer outcome %d frames %llu presented %llu audio_samples %llu audio_failures %llu resets %u\n", (int)result.outcome,
          (unsigned long long)result.frames, (unsigned long long)result.frames_presented,

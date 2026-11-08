@@ -22,6 +22,8 @@ void sms_sdl3_viewer_host(SmsSdl3Viewer *viewer, SmsViewerHost *host);
 struct SvPerf;
 void sms_sdl3_viewer_set_perf(SmsSdl3Viewer *viewer, struct SvPerf *perf);
 const char *sms_sdl3_viewer_renderer_name(const SmsSdl3Viewer *viewer);
+/* SEG-132: drops the host audio queued for the abandoned future after a state restore (a no-op without an audio stream). */
+void sms_sdl3_viewer_audio_clear(SmsSdl3Viewer *viewer);
 /* 1 when an audio stream is open; `overruns` (optional) counts chunks dropped because the queue was full. */
 int sms_sdl3_viewer_audio_active(const SmsSdl3Viewer *viewer, uint64_t *overruns);
 /* Shows why the guest stopped instead of a blank window; blocks until dismissed (no-op on a headless video driver). */

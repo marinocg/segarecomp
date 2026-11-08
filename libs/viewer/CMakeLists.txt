@@ -1,6 +1,6 @@
 # SEG-058: shared in-game viewer foundation (settings, layout/CRT math and menu model are SDL-free; the host is SDL3).
 # Strict C11 (the same dialect the per-game packaged build compiles with). Never linked by headless targets.
-add_library(segarecomp_viewer_core STATIC src/sv_settings.c src/sv_layout.c src/sv_menu.c src/sv_rewind.c src/sv_input_state.c src/sv_font.c src/sv_font_data.c)
+add_library(segarecomp_viewer_core STATIC src/sv_settings.c src/sv_layout.c src/sv_menu.c src/sv_rewind.c src/sv_state_store.c src/sv_state_service.c src/sv_input_state.c src/sv_font.c src/sv_font_data.c)
 add_library(segarecomp::viewer_core ALIAS segarecomp_viewer_core)
 target_include_directories(segarecomp_viewer_core PUBLIC include)
 set_target_properties(segarecomp_viewer_core PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
@@ -17,6 +17,13 @@ if(BUILD_TESTING)
   segarecomp_enable_warnings(sv_rewind_test)
   add_test(NAME sv_rewind_test COMMAND sv_rewind_test)
   set_property(TEST sv_rewind_test APPEND PROPERTY LABELS full fast)
+  # SEG-132: the platform-neutral save-state service (slots, atomic files, bounded rewind history) against a fake machine.
+  add_executable(sv_state_service_test test/sv_state_service_test.c)
+  target_link_libraries(sv_state_service_test PRIVATE segarecomp::viewer_core)
+  set_target_properties(sv_state_service_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  segarecomp_enable_warnings(sv_state_service_test)
+  add_test(NAME sv_state_service_test COMMAND sv_state_service_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set_property(TEST sv_state_service_test APPEND PROPERTY LABELS full fast)
 endif()
 
 # Input diagnostics (SDL3, no window): shared by the launcher and the viewer host so there is one detection engine.
