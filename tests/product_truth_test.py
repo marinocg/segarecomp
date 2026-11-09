@@ -187,5 +187,94 @@ class DocumentRulesTest(unittest.TestCase):
             self.assertTrue(any(fragment in p for p in problems), f"{fragment!r} not in {problems}")
 
 
+MATRIX = json.loads((ROOT / gate.MATRIX_PATH).read_text(encoding="utf-8"))
+
+
+def matrix_problems(edit):
+    matrix = copy.deepcopy(MATRIX)
+    edit(matrix)
+    return gate.validate_mod_matrix(matrix, ROOT)
+
+
+def matrix_row(matrix, platform, capability):
+    return next(r for r in matrix["rows"] if r["platform"] == platform and r["capability"] == capability)
+
+
+class ModMatrixRulesTest(unittest.TestCase):
+    def assertRejected(self, edit, fragment):
+        problems = matrix_problems(edit)
+        self.assertTrue(any(fragment in p for p in problems), f"{fragment!r} not in {problems}")
+
+    def test_real_matrix_is_valid_and_complete(self):
+        self.assertEqual(gate.validate_mod_matrix(MATRIX, ROOT), [])
+        self.assertEqual(len(MATRIX["rows"]), len(MATRIX["platforms"]) * len(MATRIX["capabilities"]))
+        self.assertEqual(gate.check_mod_matrix_doc(ROOT, MATRIX), [])
+
+    def test_supported_without_test_evidence_fails(self):
+        def edit(m):
+            row = matrix_row(m, "master_system", "luau-scripting")
+            row["level"] = "supported-with-limitations"
+        self.assertRejected(edit, "requires cited test evidence")
+
+    def test_supported_and_tested_without_test_evidence_fails(self):
+        def edit(m):
+            matrix_row(m, "sega_cd", "mod-composition")["level"] = "supported-and-tested"
+        self.assertRejected(edit, "requires cited test evidence")
+
+    def test_unsupported_row_cannot_cite_a_passing_test(self):
+        def edit(m):
+            matrix_row(m, "sega_cd", "mod-composition")["existing_tests"] = ["tests/segapatch_package_test.py"]
+        self.assertRejected(edit, "unsupported row must not cite")
+
+    def test_cited_test_must_exist(self):
+        def edit(m):
+            matrix_row(m, "genesis", "package-identity-build")["existing_tests"] = ["tests/no_such_test.py"]
+        self.assertRejected(edit, "not an existing test file")
+
+    def test_cited_file_must_be_a_named_test(self):
+        for bad in ("tests/CMakeLists.txt", "tests/../README.md"):
+            def edit(m, bad=bad):
+                matrix_row(m, "genesis", "package-identity-build")["existing_tests"] = [bad]
+            self.assertRejected(edit, "not an existing test file")
+
+    def test_evidence_must_resolve(self):
+        def edit(m):
+            matrix_row(m, "genesis", "package-identity-build")["evidence"] = ["docs/no/such.md"]
+        self.assertRejected(edit, "broken evidence reference")
+
+    def test_missing_row_and_duplicate_row(self):
+        self.assertRejected(lambda m: m["rows"].pop(), "missing row")
+        self.assertRejected(lambda m: m["rows"].append(copy.deepcopy(m["rows"][0])), "duplicate row")
+
+    def test_unknown_level_and_target(self):
+        self.assertRejected(lambda m: m["rows"][0].update(level="shipping"), "unsupported level")
+        self.assertRejected(lambda m: m["rows"][0].update(beta_target="great"), "unsupported beta_target")
+
+    def test_every_row_needs_an_owner(self):
+        self.assertRejected(lambda m: m["rows"][0].update(planned_owner="someone"), "planned_owner")
+
+    def test_spike_gated_names_its_gate(self):
+        def edit(m):
+            del matrix_row(m, "genesis", "function-hooks")["gate"]
+        self.assertRejected(edit, "must name its gate task")
+
+    def test_unknown_key_is_refused(self):
+        self.assertRejected(lambda m: m.update(extra=1), "unknown key 'extra'")
+
+    def test_rendered_page_must_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "docs" / "product").mkdir(parents=True)
+            page = (ROOT / gate.MATRIX_DOC).read_text(encoding="utf-8").replace("unsupported | experimental", "supported-and-tested | experimental", 1)
+            (root / gate.MATRIX_DOC).write_text(page, encoding="utf-8")
+            problems = gate.check_mod_matrix_doc(root, MATRIX)
+            self.assertTrue(any("differs from the matrix" in p for p in problems), problems)
+            (root / gate.MATRIX_DOC).write_text("no markers", encoding="utf-8")
+            self.assertTrue(any("markers" in p for p in gate.check_mod_matrix_doc(root, MATRIX)))
+
+    def test_render_is_deterministic(self):
+        self.assertEqual(gate.render_mod_matrix(MATRIX), gate.render_mod_matrix(copy.deepcopy(MATRIX)))
+
+
 if __name__ == "__main__":
     unittest.main()
