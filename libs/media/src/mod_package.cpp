@@ -449,6 +449,7 @@ Manifest parse_manifest(const Value &root) {
 
   // combination rules (section 4)
   if (std::count_if(m.payloads.begin(), m.payloads.end(), [](const Payload &p) { return p.kind == "bps-image"; }) > 1) fail("E_PAYLOAD_COMBINATION", "at most one bps-image payload");
+  if (std::count_if(m.payloads.begin(), m.payloads.end(), [](const Payload &p) { return p.kind == "rom-edit-set"; }) > 1) fail("E_PAYLOAD_COMBINATION", "at most one rom-edit-set payload (use one edit file; edits of several revisions share it)");
   if (has_kind(m, "bps-image") && (has_kind(m, "rom-edit-set") || has_kind(m, "guest-code"))) fail("E_PAYLOAD_COMBINATION", "bps-image cannot coexist with rom-edit-set or guest-code");
   const bool code = native || has_kind(m, "luau-source");
   for (const std::string &name : m.capabilities) {   // every capability must be consumable by a payload

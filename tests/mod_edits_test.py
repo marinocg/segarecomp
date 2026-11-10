@@ -3,6 +3,7 @@
 symbols with address provenance, through the product CLI (`segarecomp mod check|pack|apply|inspect|install|import-hints`). The expected edited images are computed here independently
 with `struct`/slicing, so the byte-level results are cross-checked on every host. Synthetic images only.
 usage: mod_edits_test.py <segarecomp-cli>"""
+import json
 import struct
 import sys
 
@@ -323,5 +324,60 @@ t = tmp / "tpl"
 doc = ok("init rom-edit template", "mod", "init", t, "--platform", "genesis", "--id", "tpl", "--template", "rom-edit", "--rom-sha256", SHA_A)
 cli.check("edits/main.edits" in doc["created"], f"template files: {doc}")
 ok("the template checks", "mod", "check", t)
+
+# ------------------------------------------------------------------ one edit set per package: every entrypoint refuses a second file (never ignored, never applied alone)
+def multi_project(files):
+    _n[0] += 1
+    d = tmp / f"mp{_n[0]}"
+    base = toml("genesis").replace('\n[[source]]\nkind = "rom-edit-set"\npath = "edits/main.edits"\n', "")
+    for i, (name, _) in enumerate(files):
+        base += f'\n[[source]]\nkind = "rom-edit-set"\npath = "edits/{name}"\n'
+        write(d / "edits" / name, files[i][1])
+    write(d / "mod.toml", base)
+    return d
+
+
+E1 = f"rev-a u8 0x10 {u(IMG_A[0x10], 1)} 0xaa\n"
+CASES = {
+    "two non-overlapping files": [("a.edits", E1), ("b.edits", f"rev-a u8 0x20 {u(IMG_A[0x20], 1)} 0xbb\n")],
+    "two overlapping files": [("a.edits", E1), ("b.edits", f"rev-a u8 0x10 {u(IMG_A[0x10], 1)} 0xbb\n")],
+    "different revision scopes": [("a.edits", E1), ("b.edits", f"rev-b u8 0x10 {u(IMG_B[0x10], 1)} 0xbb\n")],
+    "assertion failure in the second file": [("a.edits", E1), ("b.edits", "rev-a u8 0x20 0xee 0xbb\n" if IMG_A[0x20] != 0xEE else "rev-a u8 0x20 0xef 0xbb\n")],
+}
+for what, files in CASES.items():
+    d = multi_project(files)
+    for sub in ("check",):
+        refused(f"{what}: check", "E_PAYLOAD_COMBINATION", "mod", sub, d)
+    refused(f"{what}: pack", "E_PAYLOAD_COMBINATION", "mod", "pack", d, "--out", tmp / "multi.segapatch")
+    refused(f"{what}: build", "E_PAYLOAD_COMBINATION", "mod", "build", d, "--out", tmp / "multi.segapatch")
+    cli.check(not (tmp / "multi.segapatch").exists(), f"{what}: a refused pack/build writes no package")
+    rc, doc, out = apply(d, IMG_A_PATH, "multi-apply.bin")
+    cli.check(rc == 1 and doc["class"] == "E_PAYLOAD_COMBINATION" and not out.exists(), f"{what}: apply (project) refuses and writes nothing: {doc}")
+    # a hand-built package with two edit sets (independent builder): inspect, apply, install and variant all refuse
+    pa = (payload("rom-edit-set", "a.edits", files[0][1].encode(), edits=1), ("a.edits", files[0][1].encode()))
+    pb = (payload("rom-edit-set", "b.edits", files[1][1].encode(), edits=1), ("b.edits", files[1][1].encode()))
+    manifest = man([pa, pb])
+    pkg_path = write(tmp / "multi2.segapatch", build(manifest, [pa, pb]))
+    refused(f"{what}: inspect package", "E_PAYLOAD_COMBINATION", "mod", "inspect", pkg_path)
+    rc, doc, out = apply(pkg_path, tmp / "a.bin", "multi-apply2.bin")
+    cli.check(rc == 1 and doc["class"] == "E_PAYLOAD_COMBINATION" and not out.exists(), f"{what}: apply (package) refuses: {doc}")
+    mlib = tmp / f"mlib-{_n[0]}"
+    refused(f"{what}: install", "E_PAYLOAD_COMBINATION", "mod", "install", pkg_path, "--rom", write(tmp / "srcimg.bin", SRC_IMAGE), "--library", mlib)
+    cli.check(not mlib.exists(), f"{what}: a refused install creates nothing")
+    ident = sha(canon(manifest))
+    write(mlib / "mods" / f"{ident}.segapatch", pkg_path.read_bytes())   # placed by hand: variant must still refuse it
+    refused(f"{what}: variant", "E_PAYLOAD_COMBINATION", "mod", "variant", "--library", mlib, "--identity", ident, "--rom", tmp / "srcimg.bin")
+    cli.check(not (mlib / "cache").exists(), f"{what}: a refused variant publishes nothing")
+
+# the single-file route stays consistent across apply, install and variant (one digest)
+d = project(good)
+pk1 = tmp / "one.segapatch"
+ok("pack single", "mod", "pack", d, "--out", pk1)
+rc, adoc, out = apply(pk1, IMG_A_PATH, "one-apply.bin")
+lib1 = tmp / "lib1"
+idoc = ok("install single", "mod", "install", pk1, "--rom", IMG_A_PATH, "--library", lib1)
+vdoc = ok("variant single", "mod", "variant", "--library", lib1, "--identity", idoc["package_identity"], "--rom", IMG_A_PATH)
+cli.check(adoc["effective_sha256"] == idoc["effective_image"] == sha(out.read_bytes()), f"apply and install agree on the digest: {adoc} {idoc}")
+cli.check(json.dumps(vdoc).count(adoc["effective_sha256"]) >= 1, f"variant reports the same effective digest: {vdoc}")
 
 cli.done("mod_edits_test")

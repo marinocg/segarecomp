@@ -230,6 +230,7 @@ int apply_edits(const fs::path &target, const fs::path &rom, const fs::path &out
   const std::string original = sha256_hex(image);
   const auto rev = std::find_if(p.manifest.revisions.begin(), p.manifest.revisions.end(), [&](const mod::Revision &r) { return r.sha256 == original; });
   if (rev == p.manifest.revisions.end()) return refuse({"E_IMAGE_MISMATCH", "the original image is not one of the declared target revisions"});
+  if (std::count_if(p.manifest.payloads.begin(), p.manifest.payloads.end(), [](const mod::Payload &y) { return y.kind == "rom-edit-set"; }) > 1) return refuse({"E_PAYLOAD_COMBINATION", "at most one rom-edit-set payload"});
   const auto set = std::find_if(p.manifest.payloads.begin(), p.manifest.payloads.end(), [](const mod::Payload &y) { return y.kind == "rom-edit-set"; });
   if (set == p.manifest.payloads.end()) return refuse({"E_FIELD_MISSING", "the package has no rom-edit-set payload"});
   const mod::EditedImage e = mod::apply_rom_edits(p.manifest, p.files.at(set->path), rev->label, image);

@@ -314,6 +314,7 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
   std::sort(m.symbols.begin(), m.symbols.end(), [](const Symbol &a, const Symbol &b) { return std::tie(a.name, a.revision) < std::tie(b.name, b.revision); });
   for (std::size_t i = 1; i < m.symbols.size(); ++i)
     if (m.symbols[i - 1].name == m.symbols[i].name && m.symbols[i - 1].revision == m.symbols[i].revision) fail("E_SYMBOL_DUPLICATE", "a symbol repeats a (name, revision) pair");
+  if (std::count_if(m.payloads.begin(), m.payloads.end(), [](const Payload &p) { return p.kind == "rom-edit-set"; }) > 1) fail("E_PAYLOAD_COMBINATION", "at most one rom-edit-set source (use one edit file; edits of several revisions share it)");
   for (Payload &p : m.payloads) {   // the informational edit count is the verified count of the edit file; a stated value must agree
     if (p.kind != "rom-edit-set") continue;
     const RomEditSet set = parse_rom_edit_set(project.files[p.path], m);
