@@ -11,7 +11,9 @@
  * and unknown.written (1,024 bytes). pass.report:
  *   outcome <window_complete|guest_stop|guest_complete|budget_exhausted|unknown_image|z80_code_mismatch|z80_stop|io_error>
  *   frames <virtual frames reached>      dispatches <retired dispatches>
- *   sound_fault z80_code_mismatch <epochs seen> <master ticks>     (only when the Z80 was isolated by a structural mutation)
+ *   sound_fault <z80_code_mismatch|z80_native_driver_fault> <epochs seen> <master ticks>     (only when the sound CPU was isolated)
+ *   native <driver> <version> <fault|none> <commands> <sequences> <dac samples> <ticks> <missed ticks> <activations>   (ADR 0291: only when
+ *       a verified native replacement served an image; aggregates only)
  *   epoch <ordinal> <64 hex: activation signature> <extent count>      (one line per epoch, activation order)
  * SEG-028-T005 (ADR 0077): for outcome guest_stop the pass also writes the private stop record stop.ram: 4-byte big-endian stop PC,
  * 4-byte big-endian stop class, then the 64 KiB work RAM (the SEGARECOMP_STOP_WORK_RAM_DUMP layout of frame_capture_main_hook.c).
@@ -135,9 +137,16 @@ static int pass_write_report(const char *outcome, uint64_t frames, uint64_t disp
   file = fopen(path, "wb");
   if (file == NULL) return 1;
   fprintf(file, "outcome %s\nframes %llu\ndispatches %llu\n", outcome, (unsigned long long)frames, (unsigned long long)dispatches);
-  if (genesis_z80_machine_sound_faulted(machine))  /* the Z80 was isolated (contract section 18); the run continued */
-    fprintf(file, "sound_fault z80_code_mismatch %u %llu\n", (unsigned)machine->sound_fault_epoch,
-            (unsigned long long)machine->sound_fault_master_ticks);
+  if (genesis_z80_machine_sound_faulted(machine))  /* the sound CPU was isolated (contract section 18, ADR 0291); the run continued */
+    fprintf(file, "sound_fault %s %u %llu\n", machine->sound_fault == GENESIS_DIAG_Z80_NATIVE_DRIVER_FAULT ? "z80_native_driver_fault" : "z80_code_mismatch",
+            (unsigned)machine->sound_fault_epoch, (unsigned long long)machine->sound_fault_master_ticks);
+  if (machine->native_driver != NULL && machine->native_activations != 0U) {
+    GenesisZ80NativeReport native;
+    machine->native_driver->report(machine->native_driver->context, &native);
+    fprintf(file, "native %s %s %s %llu %llu %llu %llu %llu %u\n", native.driver, native.version[0] != '\0' ? native.version : "unknown", native.fault,
+            (unsigned long long)native.commands, (unsigned long long)native.sequences, (unsigned long long)native.dac_samples,
+            (unsigned long long)native.ticks, (unsigned long long)native.missed_ticks, (unsigned)native.activations);
+  }
   for (index = 0U; index < g_pass.count; ++index) {
     fprintf(file, "epoch %u ", (unsigned)(index + 1U));
     for (byte = 0U; byte < 32U; ++byte) fprintf(file, "%02x", (unsigned)g_pass.epochs[index].signature[byte]);

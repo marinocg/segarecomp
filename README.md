@@ -193,6 +193,14 @@ An image without compatibility metadata may be labelled **Compatibility unknown*
   first Z80 compilation. The build-time verification run must agree, otherwise
   the unchanged discovery fixed point runs; the output is identical either way.
   See [ADR 0277](docs/decisions/0277-seg-128-genesis-z80-static-first-image-production.md).
+- **Native GEMS audio replacement (CLI and launcher, opt-in, experimental, Genesis):** `segarecomp build --sound-driver gems`
+  replaces one verified sound driver (GEMS 2.5, uploaded by several games whose
+  original Z80 driver rewrites its own code) with a native C11 re-implementation of
+  its behaviour; it is never a Z80 emulator, is refused for any unverified driver
+  and has partial, stated coverage (digital sound effects; FM/PSG music is not
+  covered). The build records which audio implementation the executable has and
+  the launcher shows it in Build provenance.
+  See [ADR 0291](docs/decisions/0291-genesis-native-gems-sound-replacement.md).
 - **Master System mapper:** mapper identity must be explicitly selected or
   supplied through the supported sidecar/manifest route; it is not guessed.
   See [Master System details](platforms/master-system/README.md).

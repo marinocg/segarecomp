@@ -7,6 +7,12 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Native GEMS audio replacement (new, experimental, Genesis; ADR 0291)
+
+* Games whose Z80 sound driver rewrites its own code stay silent on the original path. For one verified driver image - **GEMS 2.5**, uploaded by Aladdin, Earthworm Jim, Jurassic Park and Cool Spot - `segarecomp build --sound-driver gems` (or the *Native GEMS audio replacement* option in a game's Advanced build options) now builds a program where a **native C11 re-implementation** of the driver serves the sound commands. It is not a Z80 emulator and never executes the original driver's code.
+* **Partial coverage, stated everywhere:** digital (DAC) sound effects with sequence start / stop, validated operation by operation against an independent reference implementation. FM / PSG music and every other operation fault explicitly and that game's replacement then stays silent. An unverified driver is refused at build time.
+* Build metadata (`status.json` `audio_implementation`) records the requested and actual sound implementation; the launcher's Build provenance has an **Audio implementation** row built from that record only.
+
 ### Widescreen (new)
 
 * A shared, presentation-only widescreen setting for Genesis, Master System and Sega CD: **Original**, **Extended Backgrounds (Level 2)** and **Enhanced Widescreen (Level 3)**, with a **Widescreen Width** slider from 4:3 to 16:9,

@@ -324,7 +324,8 @@ std::string platform_key(const RomView &rom, const Layout *layout_for_key) {
   // Compatibility keeps the historical Genesis key; Optimized adds the policy, so the two never share a cache entry (ADR 0096).
   if (rom.platform_id != "master-system") {
     // SEG-122-T009: a lock-on build never shares an entry with a standard one; a standard key stays exactly the historical key.
-    const std::string discovery = (rom.hint_alias_discovery ? std::string(":hint-alias-discovery=1") : std::string()) + (rom.mapper.empty() ? std::string() : ":mapper=" + rom.mapper);  // both change the generated program
+    const std::string discovery = (rom.hint_alias_discovery ? std::string(":hint-alias-discovery=1") : std::string()) + (rom.mapper.empty() ? std::string() : ":mapper=" + rom.mapper) +
+                                  (rom.supports_native_gems_audio() && rom.native_gems_audio ? std::string(":sound-driver=gems") : std::string());  // all change the generated program
     if (!rom.optimized()) return "genesis" + discovery;
     // The model family and the product-provided policy identity (which binds model, schema, token contract, rank policy and analysis contract) are part
     // of the key: a different request or a changed shipped model can never select the same entry.
@@ -410,6 +411,106 @@ PolicyReport read_policy_report(const fs::path &entry) {
   report.fallback = policy_field(object, "fallback") == "true";
   report.present = !report.requested.empty() && !report.effective.empty();
   return report;
+}
+
+namespace {
+// The text of the object that starts at `at` (the position of its '{'), brace-balanced; empty when it never closes.
+std::string balanced_object(const std::string &text, std::size_t at) {
+  int depth = 0;
+  for (std::size_t i = at; i < text.size(); ++i) {
+    if (text[i] == '{') ++depth;
+    else if (text[i] == '}' && --depth == 0) return text.substr(at, i - at + 1);
+  }
+  return {};
+}
+bool one_of(const std::string &value, std::initializer_list<const char *> allowed) {
+  for (const char *item : allowed)
+    if (value == item) return true;
+  return false;
+}
+}  // namespace
+
+AudioReport read_audio_report(const fs::path &entry) {
+  AudioReport report;
+  const std::string status = read_all(entry / "status.json");
+  const std::string needle = "\"audio_implementation\":{";
+  const auto at = status.find(needle);
+  if (at == std::string::npos) return report;   // an older build, a failed or an imported one: nothing was recorded
+  report.state = AudioReport::State::unknown;
+  const std::string object = balanced_object(status, at + needle.size() - 1);
+  if (object.empty() || policy_field(object, "schema") != "1") return report;
+  const std::string kind = policy_field(object, "kind");
+  const std::string audio_status = policy_field(object, "audio_status");
+  const auto number = [&object](const char *key) {
+    const std::string value = policy_field(object, key);
+    return value.empty() || value.find_first_not_of("0123456789") != std::string::npos || value.size() > 15 ? -1LL : std::atoll(value.c_str());
+  };
+  if (kind == "native_driver") {
+    const std::string driver = policy_field(object, "driver"), verification = policy_field(object, "verification");
+    if (driver != "gems" || !one_of(verification, {"build_qualified", "reference_checked"}) || !one_of(audio_status, {"partial", "degraded"}) ||
+        policy_field(object, "coverage") != "partial")
+      return report;
+    report.driver = driver;
+    report.verification = verification;
+    report.version = policy_field(object, "version");
+    if (report.version.empty() || report.version.size() > 12 || report.version.find_first_not_of("0123456789.") != std::string::npos) report.version = "unknown";
+    const std::string rewrites = policy_field(object, "original_driver_rewrites_own_code");
+    report.rewrites_own_code_known = rewrites == "true" || rewrites == "false";
+    report.rewrites_own_code = rewrites == "true";
+    report.observed_fault = policy_field(object, "fault");
+    if (report.observed_fault.empty() || report.observed_fault.size() > 40 || report.observed_fault.find_first_not_of("abcdefghijklmnopqrstuvwxyz_") != std::string::npos) report.observed_fault = "unknown";
+    report.commands = number("commands");
+    report.sequences = number("sequences");
+    report.dac_samples = number("dac_samples");
+  } else if (kind == "original_z80_aot") {
+    if (!one_of(audio_status, {"supported", "degraded"})) return report;
+    const auto alt = object.find("\"structural_alternatives\":{");
+    if (alt != std::string::npos) report.alternative_forms = [&] {
+      const std::string inner = balanced_object(object, alt + 26);
+      const std::string value = policy_field(inner, "forms");
+      return value.empty() || value.find_first_not_of("0123456789") != std::string::npos || value.size() > 15 ? -1LL : std::atoll(value.c_str());
+    }();
+  } else {
+    return report;
+  }
+  report.kind = kind;
+  report.audio_status = audio_status;
+  report.state = AudioReport::State::known;
+  return report;
+}
+
+std::string audio_headline(const AudioReport &report) {
+  if (report.state == AudioReport::State::unknown) return "Unknown";
+  if (report.state == AudioReport::State::not_recorded) return "Not recorded";
+  if (report.kind == "native_driver") return "Native GEMS replacement";
+  return report.audio_status == "degraded" ? "Original Z80 - degraded" : "Original Z80 - ahead-of-time compiled";
+}
+
+std::string audio_detail(const AudioReport &report) {
+  if (report.state == AudioReport::State::unknown) return "The recorded audio details were not understood; nothing is assumed about this executable.";
+  if (report.state == AudioReport::State::not_recorded) return "No audio details were recorded for this build; nothing is inferred.";
+  if (report.kind == "native_driver") {
+    std::string text = "Driver family GEMS, version " + (report.version == "unknown" ? std::string("unknown") : report.version + " (matched to the published driver's layout and tables)") +
+                       ". Coverage: partial - digital (DAC) sound effects and sequence start / stop only; any other operation stops the replacement. ";
+    if (report.rewrites_own_code_known && report.rewrites_own_code)
+      text += "Reason: the original Z80 sound driver rewrites its own executable code, which the native AOT path does not support. ";
+    else text += "Reason: selected explicitly for this build. ";
+    text += report.verification == "reference_checked"
+                ? "Validation: reference-checked for this driver image (compared against an independent implementation); this executable's playback has not been verified. "
+                : "Validation: build-qualified only, not independently audio-verified. ";
+    if (report.observed_fault == "none") text += "The build's start-up run met no unsupported operation";
+    else text += "The build's start-up run stopped the replacement at an unsupported operation (" + report.observed_fault + "); the rest of that run was silent";
+    if (report.commands >= 0 && report.sequences >= 0) text += " (" + std::to_string(report.commands) + " commands, " + std::to_string(report.sequences) + " sequences";
+    if (report.commands >= 0 && report.sequences >= 0) text += report.dac_samples >= 0 ? ", " + std::to_string(report.dac_samples) + " DAC samples)." : ").";
+    else text += ".";
+    return text;
+  }
+  if (report.audio_status == "degraded")
+    return std::string("Reason: structural code mutation - the sound driver rewrites its own executable code, which is not supported. Music is not supported in this executable.") +
+           (report.alternative_forms > 0 ? " Compiled structural alternatives did not cover it." : "");
+  if (report.alternative_forms > 0)
+    return "The game's own sound driver runs as generated native code, with " + std::to_string(report.alternative_forms) + " compiled structural alternative forms of its self-modifying code. Not a replacement driver.";
+  return "The game's own sound driver runs as generated native code. Not a replacement driver.";
 }
 
 std::string read_observed_region(const fs::path &entry) {
@@ -1143,6 +1244,7 @@ void BuildJob::run() {
     args.insert(args.end(), {"--mapper", rom_.mapper});  // SEG-122-T009: the launcher's selection, explicit to the build tool (ADR 0268); a standard cartridge passes nothing, as ever
   }
   if (rom_.supports_hint_alias_discovery() && rom_.hint_alias_discovery) args.insert(args.end(), {"--hint-alias-discovery", "1"});
+  if (rom_.supports_native_gems_audio() && rom_.native_gems_audio) args.insert(args.end(), {"--sound-driver", "gems"});   // ADR 0291: explicit; the build refuses it unless the driver is a verified GEMS image
   if (rom_.patch_native())   // SEG-124 (ADR 0267): a REFERENCE to the installed package and the identity the user approved; the build re-verifies the package itself and extracts the provider from it
     args.insert(args.end(), {"--patch-package", utf8(rom_.patch_package), "--patch-identity", rom_.patch_identity});
   if (rom_.optimized()) args.insert(args.end(), {"--aot-policy", "optimized"});

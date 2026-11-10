@@ -53,6 +53,7 @@ struct PassEpoch {
 struct SoundFault {
   std::uint32_t epochs = 0;         // image epochs seen when the fault latched
   std::uint64_t master_ticks = 0;   // guest master time of the fault
+  bool native_driver = false;       // ADR 0291: the fault is the native sound-driver replacement meeting an unsupported operation (not a structural mutation)
   friend bool operator==(const SoundFault&, const SoundFault&) = default;
 };
 

@@ -61,6 +61,7 @@ struct LibraryEntry {
   std::string aot_policy = "optimized";
   std::string aot_model = "gen2";
   bool hint_alias_discovery = false;
+  bool native_gems_audio = false;   // ADR 0291: request the verified native GEMS sound replacement for this game
   std::string region = "usa";   // Genesis run-time region
   std::string cover;            // file name inside the covers directory; "" shows the generic placeholder
   bool favorite = false;

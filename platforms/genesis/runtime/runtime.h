@@ -1235,6 +1235,7 @@ typedef enum GenesisDiagnosticCategory {
   GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS = 64, /* SRAM extent access (width/lane) or $A130F1 write the SRAM model does not admit */
   GENESIS_DIAG_UNSUPPORTED_REGION_TIMING = 65, /* SEG-055: an unknown / non-selectable console region name or profile (PAL is selectable; it runs on the 60 Hz schedule) */
   GENESIS_DIAG_HINT_HANDLER_NOT_INSTALLED = 66, /* SEG-055: an enabled H-interrupt fired but no handler was resolved at build time (unadmittable/RAM-resident vector slot) */
+  GENESIS_DIAG_Z80_NATIVE_DRIVER_FAULT = 67,    /* ADR 0291: a verified native sound-driver replacement met an operation outside its verified subset; it is inert for the run (sound fault, not a stop) */
 } GenesisDiagnosticCategory;
 
 typedef struct GenesisProvenance {

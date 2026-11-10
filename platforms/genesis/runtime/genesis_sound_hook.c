@@ -42,6 +42,15 @@ typedef struct PcmFile {
 
 static PcmFile g_pcm;
 
+/* SEGARECOMP_AUDIO_WRITE_LOG=<file>: every YM2612 / PSG access in arrival order, one per line "<Y|P|R> <port> <value hex> <guest master ticks>". An opt-in
+ * validation seam (reference comparison of a sound implementation); it observes the devices only. A failing file never changes the run. */
+static FILE *g_write_log;
+
+static void write_log_tap(void *context, char kind, uint32_t port, uint8_t value, uint64_t master_ticks) {
+  (void)context;
+  if (g_write_log != NULL) fprintf(g_write_log, "%c %u %02X %llu\n", kind, (unsigned)port, (unsigned)value, (unsigned long long)master_ticks);
+}
+
 static void pcm_sink(void *context, uint64_t frame_index, int16_t left, int16_t right) {
   PcmFile *pcm = (PcmFile *)context;
   uint8_t bytes[4];
@@ -184,6 +193,13 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
       }
       genesis_mixer_set_range(mixer, first, count);
     }
+    if (getenv("SEGARECOMP_AUDIO_WRITE_LOG") != NULL && g_write_log == NULL && genesis_sound_audio_mutable() != NULL) {
+      g_write_log = fopen(getenv("SEGARECOMP_AUDIO_WRITE_LOG"), "wb");
+      if (g_write_log != NULL) {
+        genesis_sound_audio_mutable()->write_tap = write_log_tap;
+        genesis_sound_audio_mutable()->write_tap_context = NULL;
+      }
+    }
     if (pcm_path != NULL && g_pcm.file == NULL) {
       g_pcm.file = fopen(pcm_path, "wb");
       if (g_pcm.file == NULL) ++g_pcm.write_errors;  /* an unusable artifact path never perturbs the run */
@@ -199,11 +215,17 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
                                                           : genesis_runtime_run(runtime, dispatch, dispatch_allowance);
   genesis_sound_finish(runtime, transfer.kind == GENESIS_STOP);
   if (g_pcm.file != NULL && fflush(g_pcm.file) != 0) ++g_pcm.write_errors;
+  if (g_write_log != NULL) { (void)fclose(g_write_log); g_write_log = NULL; }
   /* Opt-in aggregate counters (counts only: never a byte, address or identity). */
   if (getenv("SEGARECOMP_SOUND_SUMMARY") != NULL) {
     const GenesisAudio *audio = genesis_sound_audio();
+    GenesisZ80NativeReport native = {"", "", "none", 0U, 0U, 0U, 0U, 0U, 0U};
     char digest_hex[65] = "", range_hex[65] = "";
     uint8_t digest[32];
+    if (machine->native_driver != NULL && machine->native_activations != 0U) {
+      machine->native_driver->report(machine->native_driver->context, &native);
+      if (native.version[0] == '\0') native.version = "unknown";
+    }
     if (mixer != NULL) {
       genesis_mixer_digest(mixer, digest);
       hex(digest, digest_hex);
@@ -214,7 +236,8 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
             "SOUND_SUMMARY {\"epochs\":%u,\"bound_image\":%u,\"sound_fault\":%d,\"sound_fault_epoch\":%u,\"psg_writes\":%llu,\"ym_writes\":%llu,\"virtual_frames\":%llu,\"result_kind\":%d,\"stop_class\":%d,\"diagnostic\":%d,"
             "\"classes\":{\"reset_assert\":%llu,\"reset_release\":%llu,\"busreq_assert\":%llu,\"busreq_release\":%llu,\"bank_writes\":%llu,\"banked_reads\":%llu,\"ym_dac\":%llu,\"ym_dac_enable\":%llu,\"ym_key\":%llu,\"ym_timer\":%llu,\"ym_global\":%llu,\"ym_operator\":%llu,\"ym_address\":%llu},"
             "\"audio\":{\"rate_hz\":%llu,\"channels\":%u,\"frames\":%llu,\"sha256\":\"%s\",\"range_frames\":%llu,\"range_sha256\":\"%s\","
-            "\"clipped\":%llu,\"changes\":%llu,\"span\":%d,\"non_silent\":%s,\"fault\":%d,\"ring_dropped\":%llu,\"pcm_file_errors\":%llu}}\n",
+            "\"clipped\":%llu,\"changes\":%llu,\"span\":%d,\"non_silent\":%s,\"fault\":%d,\"ring_dropped\":%llu,\"pcm_file_errors\":%llu},"
+            "\"native\":{\"bound\":%d,\"driver\":\"%s\",\"version\":\"%s\",\"fault\":\"%s\",\"commands\":%llu,\"sequences\":%llu,\"dac_samples\":%llu,\"ticks\":%llu,\"missed_ticks\":%llu,\"activations\":%u}}\n",
             (unsigned)runtime->z80_epoch.epoch_count, (unsigned)machine->bound_ordinal, (int)machine->sound_fault,
             (unsigned)machine->sound_fault_epoch,
             (unsigned long long)(audio != NULL ? audio->psg_writes : 0U), (unsigned long long)(audio != NULL ? audio->ym_writes : 0U),
@@ -232,7 +255,9 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
             (unsigned long long)(mixer != NULL ? mixer->clipped : 0U), (unsigned long long)(mixer != NULL ? mixer->changes : 0U),
             mixer != NULL ? (int)genesis_mixer_span(mixer) : 0, mixer != NULL && genesis_mixer_non_silent(mixer) ? "true" : "false",
             mixer != NULL ? (int)mixer->fault : 0, (unsigned long long)(mixer != NULL ? mixer->ring_dropped : 0U),
-            (unsigned long long)g_pcm.write_errors);
+            (unsigned long long)g_pcm.write_errors,
+            (int)machine->native_active, native.driver, native.version, native.fault, C(native.commands), C(native.sequences), C(native.dac_samples),
+            C(native.ticks), C(native.missed_ticks), (unsigned)native.activations);
   }
   return transfer;
 }

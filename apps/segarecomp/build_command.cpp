@@ -9,6 +9,7 @@
 #include "segarecomp/machine/genesis/m68k_copy_alias.hpp"
 #include "segarecomp/machine/genesis/z80_materialization.hpp"
 #include "segarecomp/machine/genesis/z80_static_producer.hpp"
+#include "segarecomp/cpu/z80/mutation.hpp"
 #include "segarecomp/machine/master_system/emit.hpp"
 #include "segarecomp/machine/master_system/ml_region_z80_producer.hpp"
 #include "segarecomp/patch.hpp"
@@ -112,6 +113,11 @@ struct Options {
   // (static-first). Whatever the producer cannot establish, and any disagreement with the verification run, is left to / retried by the
   // unchanged build-time materialization fixed point. Genesis only. See z80_static_producer.hpp.
   bool z80_static = false;
+  // Compile the statically justified structural alternatives of RAM-backed Z80 images (ADR 0259 mechanism, Genesis opt-in).
+  bool z80_alternatives = false;
+  // ADR 0291: the sound implementation of the Genesis build. "original" = the generated-native Z80 (default, unchanged); "gems" = the verified native GEMS
+  // replacement, accepted only when the game's uploaded Z80 image is a verified GEMS image (runtime/gems_driver_catalog.inc). Never chosen implicitly.
+  std::string sound_driver = "original";
   // SEG-124 (ADR 0267): a trusted native-source package. The build takes a REFERENCE to the package (never source text, paths of source or capability strings from the caller): it reads the
   // package itself, re-verifies it (archive, manifest, source digest, that its identity is the one the user approved, that the image being built is the one it declares), extracts the
   // provider source into a private area of this build and compiles it against the public SDK only. Empty = Vanilla / BPS-only build: no provider code at all.
@@ -211,6 +217,8 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) options.aot_policy = value;
     else if (key == "--hint-alias-discovery" && (value == "0" || value == "1")) options.hint_alias_discovery = value == "1";
     else if (key == "--z80-static" && (value == "0" || value == "1")) options.z80_static = value == "1";
+    else if (key == "--z80-alternatives" && (value == "0" || value == "1")) options.z80_alternatives = value == "1";
+    else if (key == "--sound-driver" && (value == "original" || value == "gems")) options.sound_driver = value;
     else if (key == "--patch-package") { if (!options.patch_package.empty()) return std::nullopt; options.patch_package = fs::path(value); }
     else if (key == "--patch-identity") { if (!options.patch_identity.empty()) return std::nullopt; options.patch_identity = value; }
     else if (key == "--performance-report") { if (!options.performance_report.empty() || value.empty()) return std::nullopt; options.performance_report = fs::path(value); }
@@ -223,6 +231,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
   if (options.sdl3_include.has_value() != options.sdl3_lib.has_value()) return std::nullopt;
   if (options.aot_model == "gen2" && options.aot_policy != "optimized") return std::nullopt;  // gen2 is an opt-in of Optimized, never a policy
   if (!options.platform.empty() && options.platform != "genesis" && options.platform != "master-system") return std::nullopt;
+  if (options.sound_driver != "original" && options.platform == "master-system") return std::nullopt;   // a Genesis sound driver
   if (options.patch_package.empty() != options.patch_identity.empty()) return std::nullopt;   // a package reference and the identity the user approved travel together
   if (!options.patch_package.empty()) {
     const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
@@ -346,6 +355,15 @@ struct GenesisSoundBuild {
   std::uint64_t z80_emit_ms = 0, z80_compile_ms = 0, z80_units = 0, z80_generated_bytes = 0, z80_object_bytes = 0;
   std::uint64_t z80_compiled_units = 0, z80_reused_units = 0;
   std::uint64_t z80_prepares = 0;  // Z80 compilation generations (calls of prepare), over every fixed point of the build
+  // ADR 0291: what the most recent observation pass reported about the native sound replacement (aggregates only), and the structural-alternative
+  // statistics of the most recent Z80 emission.
+  struct NativeObservation {
+    bool present = false;
+    std::string driver, version, fault = "none";
+    std::uint64_t commands = 0, sequences = 0, dac_samples = 0, ticks = 0, missed_ticks = 0;
+    unsigned activations = 0;
+  } native;
+  std::size_t alt_images = 0, alt_bytes = 0, alt_entries = 0, alt_forms = 0, alt_dropped = 0;
   std::map<std::string, fs::path> z80_objects;  // unit content hash -> object (reused across iterations)
   std::vector<fs::path> z80_current;            // objects of the most recent preparation
   fs::path pass_executable;
@@ -527,11 +545,14 @@ struct GenesisSoundBuild {
     fs::remove_all(z80_dir, ec);
     gz80::EmitRequest request;
     request.directory = z80_dir;
+    request.structural_alternatives = options.z80_alternatives;
     g_profile.count("z80_prepare_iterations");
     ++z80_prepares;
     const auto emit_started = Clock::now();
     const gz80::EmitOutcome emitted = [&] { segarecomp_cli::ProfileSpan span(&g_profile, "z80_emit"); return gz80::emit_registry(registry, request); }();
     z80_emit_ms += millis_since(emit_started);
+    alt_images = emitted.alternatives.images_with; alt_bytes = emitted.alternatives.bytes;
+    alt_entries = emitted.stats.alternative_entries; alt_forms = emitted.stats.alternative_forms; alt_dropped = emitted.stats.alternative_images_dropped;
     if (!emitted.ok()) { log.line("z80 emit diagnostic: " + emitted.error); failure_detail = "The Z80 image code could not be generated."; failure_stage = "emit"; failure_diagnostic = emitted.error; return false; }
     std::vector<fs::path> sources;
     {
@@ -595,6 +616,7 @@ class ProcessPassRunner final : public gz80::PassRunner {
   gz80::PassObservation run() override {
     gz80::PassObservation observed;
     std::error_code ec;
+    build_.native = GenesisSoundBuild::NativeObservation{};
     for (const char *name : {"pass.report", "unknown.ram", "unknown.written", "stop.ram"}) fs::remove(build_.pass_dir / name, ec);
     Environment environment{{"SEGARECOMP_MATERIALIZE_DIR", build_.pass_dir.string()},
                             {"SEGARECOMP_MATERIALIZE_FRAMES", std::to_string(gz80::kObservationFrames)}};
@@ -618,8 +640,16 @@ class ProcessPassRunner final : public gz80::PassRunner {
         std::string kind;
         gz80::SoundFault fault;
         in >> kind >> fault.epochs >> fault.master_ticks;
-        if (!in || kind != "z80_code_mismatch" || observed.sound_fault) { well_formed = false; break; }
+        if (!in || (kind != "z80_code_mismatch" && kind != "z80_native_driver_fault") || observed.sound_fault) { well_formed = false; break; }
+        fault.native_driver = kind == "z80_native_driver_fault";
         observed.sound_fault = fault;
+      }
+      else if (key == "native") {   // ADR 0291: aggregates of the native replacement (counts and stable names only)
+        GenesisSoundBuild::NativeObservation seen;
+        in >> seen.driver >> seen.version >> seen.fault >> seen.commands >> seen.sequences >> seen.dac_samples >> seen.ticks >> seen.missed_ticks >> seen.activations;
+        if (!in || build_.native.present) { well_formed = false; break; }
+        seen.present = true;
+        build_.native = seen;
       }
       else if (key == "epoch") {
         unsigned ordinal = 0;
@@ -883,6 +913,76 @@ std::string alias_preparation_json(const m68k_alias::Summary &prep) {
                                                     std::to_string(thunk_bytes)) + ",\"termination\":\"" + m68k_alias::termination_name(prep.termination) + "\"}";
 }
 
+// ---- ADR 0291: the verified native sound replacement -------------------------------------------------------------------------------------
+// The catalog (runtime/gems_driver_catalog.inc) is the single source of truth shared with the C runtime: this reads the same macro lines.
+struct VerifiedImage {
+  std::string driver, version, verification, signature;
+};
+
+std::vector<VerifiedImage> read_verified_images(const fs::path &catalog) {
+  std::vector<VerifiedImage> images;
+  std::ifstream in(catalog);
+  for (std::string line; std::getline(in, line);) {
+    if (line.rfind("GEMS_VERIFIED_IMAGE(", 0) != 0) continue;
+    std::vector<std::string> fields;
+    for (std::size_t at = 0; (at = line.find('"', at)) != std::string::npos;) {
+      const std::size_t end = line.find('"', at + 1);
+      if (end == std::string::npos) break;
+      fields.push_back(line.substr(at + 1, end - at - 1));
+      at = end + 1;
+    }
+    if (fields.size() == 4 && fields[3].size() == 64) images.push_back({fields[0], fields[1], fields[2], fields[3]});
+  }
+  return images;
+}
+
+unsigned read_native_implementation_version(const fs::path &header) {
+  std::ifstream in(header);
+  for (std::string line; std::getline(in, line);) {
+    const std::string key = "#define GEMS_NATIVE_IMPLEMENTATION_VERSION ";
+    if (line.rfind(key, 0) == 0) return static_cast<unsigned>(std::strtoul(line.c_str() + key.size(), nullptr, 10));
+  }
+  return 0;
+}
+
+// The machine-readable record of the audio implementation of THIS executable (status.json `audio_implementation`). Every value is a build fact:
+// what was requested, what was compiled in, how the driver identity was established, what the build's own start-up run observed. It never says
+// that a play session sounded right.
+struct AudioRecord {
+  std::string requested = "original", kind = "original_z80_aot";
+  std::string driver, version, verification, signature_prefix;
+  unsigned implementation_version = 0;
+  std::size_t native_images = 0, original_images = 0;
+  std::size_t structural_candidates = 0;   // exact static code-write candidates of the replaced image
+  bool analysed = false;
+};
+
+std::string audio_implementation_json(const Options &options, const GenesisSoundBuild &build, const AudioRecord &record, const std::optional<gz80::SoundFault> &fault) {
+  std::ostringstream out;
+  const bool native = record.kind == "native_driver";
+  out << ",\"audio_implementation\":{\"schema\":1,\"requested\":\"" << record.requested << "\",\"kind\":\"" << record.kind << "\",\"selection\":\""
+      << (options.sound_driver == "original" ? "default" : "explicit") << "\"";
+  if (native) {
+    out << ",\"driver\":\"" << record.driver << "\",\"version\":\"" << (record.version.empty() ? "unknown" : record.version)
+        << "\",\"version_evidence\":\"address_map_and_tables\",\"implementation_version\":" << record.implementation_version
+        << ",\"coverage\":\"partial\",\"verification\":\"" << record.verification << "\",\"identity\":\"" << record.signature_prefix
+        << "\",\"native_images\":" << record.native_images << ",\"original_images\":" << record.original_images
+        << ",\"reason\":\"explicit_selection\"";
+    if (record.analysed) out << ",\"original_driver_rewrites_own_code\":" << (record.structural_candidates > 0 ? "true" : "false") << ",\"static_code_write_candidates\":" << record.structural_candidates;
+    out << ",\"audio_status\":\"" << (fault ? "degraded" : "partial") << "\"";
+    out << ",\"observed\":{\"window_frames\":" << gz80::kObservationFrames << ",\"fault\":\"" << (build.native.present ? build.native.fault : "none")
+        << "\",\"commands\":" << build.native.commands << ",\"sequences\":" << build.native.sequences << ",\"dac_samples\":" << build.native.dac_samples
+        << ",\"ticks\":" << build.native.ticks << "}";
+  } else {
+    out << ",\"audio_status\":\"" << (fault ? "degraded" : "supported") << "\"";
+    if (fault) out << ",\"reason\":\"structural_code_mismatch\"";
+    out << ",\"structural_alternatives\":{\"requested\":" << (options.z80_alternatives ? "true" : "false") << ",\"images\":" << build.alt_images << ",\"bytes\":" << build.alt_bytes
+        << ",\"entries\":" << build.alt_entries << ",\"forms\":" << build.alt_forms << ",\"images_dropped\":" << build.alt_dropped << "}";
+  }
+  out << "}";
+  return out.str();
+}
+
 // Builds the Genesis program. Returns 0 and fills `executable`, or the process exit code after recording the failure.
 // `units` is the generate stage's (alias-less) M68K emission; `m68k_images` the sanitized provenance JSON of its executable images.
 //
@@ -893,11 +993,12 @@ std::string alias_preparation_json(const m68k_alias::Summary &prep) {
 // fixed point re-confirms the program it builds), at most m68k_alias::kMaxRounds times. The final program links the last round's
 // M68K units; the last fixed point is its confirming run. Without such a stop no extra round runs and nothing changes.
 int build_genesis_program(Options &options, Log &log, const std::string &sha, const GenesisM68kRoute &route, std::vector<fs::path> units,
-                          std::string m68k_images, fs::path &executable, std::string &status_extra, bool &sound_degraded) {
+                          std::string m68k_images, fs::path &executable, std::string &status_extra, bool &sound_degraded, std::string &sound_result) {
   std::error_code ec;
   fs::path platform_dir = options.runtime_dir;
   if (!platform_dir.has_filename()) platform_dir = platform_dir.parent_path();  // tolerate a trailing separator
   GenesisSoundBuild build(options, log);
+  const bool native_gems = options.sound_driver == "gems";   // ADR 0291
   build.pass_region = genesis_pass_region(*route.rom);
   build.root = platform_dir.parent_path().parent_path();
   build.runtime = options.runtime_dir / "runtime";
@@ -951,7 +1052,9 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     set.push_back(job.object);
   };
   for (const char *name : {"runtime.c", "z80_machine.c", "genesis_audio.c", "genesis_mixer.c", "genesis_audio_present.c", "genesis_sound.c"})
-    add(common, build.runtime / name, std::string("rt-") + std::string(name).substr(0, std::string(name).size() - 2));
+    add(common, build.runtime / name, std::string("rt-") + std::string(name).substr(0, std::string(name).size() - 2),
+        native_gems && std::string_view(name) == "genesis_sound.c" ? std::vector<std::string>{"-DSEGARECOMP_NATIVE_SOUND_GEMS=1"} : std::vector<std::string>{});
+  if (native_gems) add(common, build.runtime / "gems_native.c", "rt-gems_native");   // the replacement exists only in a program that selected it
   add(common, build.psg / "src" / "sn76489.c", "psg");
   add(common, build.ym / "src" / "cxx_runtime_shim.c", "ym-shim");
   for (const char *name : {"ymfm_opn.cpp", "ymfm_adpcm.cpp", "ymfm_ssg.cpp"})
@@ -1079,6 +1182,40 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   if (!summary.ok()) return materialize_failed(summary, "");
   stage("z80-materialize", "done");
 
+  // ---- ADR 0291: the explicitly requested native sound replacement must be backed by a verified driver identity (no guess, no fallback) ----
+  AudioRecord audio_record;
+  audio_record.requested = options.sound_driver;
+  if (native_gems) {
+    const std::vector<VerifiedImage> catalog = read_verified_images(build.runtime / "gems_driver_catalog.inc");
+    audio_record.implementation_version = read_native_implementation_version(build.runtime / "gems_native.h");
+    for (const auto &image : registry.images()) {
+      const std::string hex = gz80::to_hex(image.signature);
+      const auto verified = std::find_if(catalog.begin(), catalog.end(), [&](const VerifiedImage &entry) { return entry.signature == hex; });
+      if (verified == catalog.end()) { ++audio_record.original_images; continue; }
+      if (audio_record.native_images++ == 0) {
+        audio_record.driver = verified->driver;
+        audio_record.version = verified->version;
+        audio_record.verification = verified->verification;
+        audio_record.signature_prefix = hex.substr(0, 16);
+        const std::vector<std::uint8_t> ram(image.ram.begin(), image.ram.end());
+        const auto report = segarecomp::cpu::z80::mutation::analyze(ram, segarecomp::cpu::z80::mutation::hardware_roots());
+        audio_record.analysed = true;
+        for (const auto &candidate : report.candidates)
+          if (candidate.structural()) ++audio_record.structural_candidates;
+      }
+    }
+    if (audio_record.native_images == 0) {
+      log.line("sound driver: --sound-driver gems requested but no uploaded Z80 image is a verified GEMS image");
+      write_status(options, sha, "failed", "sound-driver", "The Z80 sound driver of this game is not a verified GEMS image, so the native GEMS replacement was not used.",
+                   ",\"audio_implementation\":{\"schema\":1,\"requested\":\"gems\",\"kind\":\"none\",\"selection\":\"explicit\",\"reason\":\"sound_driver_unverified\",\"original_images\":" +
+                       std::to_string(audio_record.original_images) + "},\"diagnostic\":\"sound_driver_unverified\"");
+      std::cout << "@result failed stage=sound-driver message=sound_driver_unverified" << std::endl;
+      return 6;
+    }
+    audio_record.kind = "native_driver";
+    log.line("sound driver: native " + audio_record.driver + " " + audio_record.version + " bound to " + std::to_string(audio_record.native_images) + " image(s) (" + audio_record.verification + ")");
+  }
+
   // ---- build-time ADR 0049 alias preparation (SEG-028-T005) ----
   stage("m68k-alias-prepare", "begin");
   const auto observe = [](const gz80::MaterializationSummary &converged) {
@@ -1162,8 +1299,13 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   }
   // Machine-readable audio capability: a structural Z80 code mutation isolates the sound CPU (contract section 18) and the build
   // still succeeds; every other Z80 failure already failed the build above.
-  status_extra = std::string(",\"genesis_audio\":\"") + (summary.sound_fault ? "degraded" : "supported") + "\"";
-  if (summary.sound_fault) status_extra += ",\"z80_audio_outcome\":\"structural_code_mismatch\"";
+  const bool native_fault = summary.sound_fault && summary.sound_fault->native_driver;
+  const char *audio_state = audio_record.kind == "native_driver" ? (summary.sound_fault ? "degraded" : "native_partial") : (summary.sound_fault ? "degraded" : "supported");
+  status_extra = std::string(",\"genesis_audio\":\"") + audio_state + "\"";
+  if (summary.sound_fault) status_extra += std::string(",\"z80_audio_outcome\":\"") + (native_fault ? "native_driver_unsupported_operation" : "structural_code_mismatch") + "\"";
+  status_extra += audio_implementation_json(options, build, audio_record, summary.sound_fault);
+  sound_result = std::string(" genesis_audio=") + audio_state + (summary.sound_fault ? std::string(" z80_audio_outcome=") + (native_fault ? "native_driver_unsupported_operation" : "structural_code_mismatch") : std::string());
+  if (audio_record.kind == "native_driver") sound_result += " sound_driver=gems";
   status_extra += ",\"z80\":{\"outcome\":\"converged\",\"end\":\"" + std::string(gz80::pass_outcome_name(summary.end)) +
                  "\",\"observed_region\":\"" + build.pass_region + "\",\"images\":" + std::to_string(summary.images) + ",\"discovery_runs\":" + std::to_string(summary.discovery_runs) +
                  ",\"runs\":" + std::to_string(summary.total_runs) + ",\"epochs\":" + std::to_string(summary.epochs) +
@@ -1443,10 +1585,10 @@ int run_build(Options options) {
     if (target == Target::genesis) {
       // Genesis: M68K units + Z80 image materialization fixed point + sound devices + final link (SEG-032-T008).
       fs::path executable;
-      std::string status_extra;
+      std::string status_extra, sound_result;
       bool sound_degraded = false;
       const int rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
-                                           m68k_images, executable, status_extra, sound_degraded);
+                                           m68k_images, executable, status_extra, sound_degraded, sound_result);
       if (rc != 0) return rc;
       if (!options.native_source.empty())
         status_extra += ",\"native\":{\"package_identity\":\"" + options.patch_identity + "\",\"provider_sha256\":\"" + options.native_source_sha256 + "\",\"abi\":" + std::to_string(segarecomp::patch::kNativeAbiVersion) +
@@ -1455,7 +1597,7 @@ int run_build(Options options) {
       stage("link", "done");
       write_status(options, sha, "ok", "done", "", sms_provenance + status_extra);   // ADR 0268: a Genesis board declaration (lock_on) is recorded too
       std::cout << "@result ok executable=" << executable.string()
-                << (sound_degraded ? " genesis_audio=degraded z80_audio_outcome=structural_code_mismatch" : "") << std::endl;
+                << (sound_degraded || options.sound_driver != "original" ? sound_result : std::string()) << std::endl;
       return 0;
     }
     const fs::path runtime = options.runtime_dir / "runtime";

@@ -1,0 +1,121 @@
+/*
+ * Native GEMS sound-driver replacement for the Genesis (ADR 0291).
+ *
+ * This is an independently written, portable C11 re-implementation of the observable behaviour of ONE verified original driver
+ * (GEMS 2.5 lineage, identified by the digest of the image the 68000 uploads; see gems_driver_catalog.inc). It is NOT an interpreter,
+ * decoder or emulator of the original Z80 instructions: the original image is never fetched, decoded or executed. It reads the same
+ * RAM-visible mailboxes the 68000 writes (command FIFO, FIFO pointers, mailboxes), resolves its resources from the cartridge exactly
+ * as the original does (a 24-bit pointer table delivered by the 11 "get pointers" command), and schedules real YM2612 / PSG writes on
+ * the guest master clock. Anything outside the verified subset faults explicitly (GemsNativeFault) and the driver then stays silent:
+ * there is no fallback, no guessed behaviour and no fabricated acknowledgement.
+ *
+ * Verified subset (see docs/architecture/genesis-native-gems.md): commands get-pointers (11), start sequence (16), stop sequence (18),
+ * stop all (22); sequence events delay/duration/note, end-of-sequence, no-op, priority, SFX time base, program change and sample rate
+ * on DIGITAL (DAC) patches; one-shot, uncompressed samples at the fast Timer-A rates; the idle FM/PSG clipping that every stop performs.
+ *
+ * The module has no global state, never reads host time and has no dependency on the Z80 machine: its host environment is the small
+ * GemsNativeHost interface below, so it is unit-testable against synthetic cartridge data.
+ */
+#ifndef SEGARECOMP_GENESIS_GEMS_NATIVE_H
+#define SEGARECOMP_GENESIS_GEMS_NATIVE_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#define GEMS_NATIVE_DRIVER "gems"
+#define GEMS_NATIVE_IMPLEMENTATION_VERSION 1u /* bumps whenever the replacement's observable behaviour changes (part of the build identity) */
+
+typedef enum GemsNativeFault {
+  GEMS_FAULT_NONE = 0,
+  GEMS_FAULT_UNSUPPORTED_COMMAND = 1,      /* a command id outside the verified subset */
+  GEMS_FAULT_INVALID_COMMAND_STREAM = 2,   /* FIFO write pointer outside the 64-byte ring */
+  GEMS_FAULT_UNMAPPED_RESOURCE = 3,        /* a pointer-table / sequence / patch / sample read outside the owned cartridge image */
+  GEMS_FAULT_INVALID_RESOURCE = 4,         /* a resource that is structurally invalid (track count, empty offset, ...) */
+  GEMS_FAULT_UNSUPPORTED_SEQUENCE_EVENT = 5, /* a sequence command outside the verified subset */
+  GEMS_FAULT_UNSUPPORTED_PATCH = 6,        /* a note on a non-digital patch (FM / PSG / noise) */
+  GEMS_FAULT_UNSUPPORTED_SAMPLE = 7,       /* looped, compressed or slow-rate sample */
+  GEMS_FAULT_DEVICE_TIMING = 8             /* the YM2612 timer did not expire where the verified rate model requires */
+} GemsNativeFault;
+
+const char *gems_native_fault_name(GemsNativeFault fault);
+
+/* Host interface. `ram` is the 8 KiB Z80 sound RAM the 68000 also writes. */
+typedef struct GemsNativeHost {
+  void *context;
+  uint8_t *ram;
+  /* Reads `count` bytes of the 68000 address space at `address24` (the cartridge). Returns 0 when any byte is not mapped. */
+  int (*rom_read)(void *context, uint32_t address24, uint8_t *destination, uint32_t count);
+  void (*ym_write)(void *context, uint32_t port, uint8_t value, uint64_t master_ticks);
+  uint8_t (*ym_read)(void *context, uint32_t port, uint64_t master_ticks);
+  void (*psg_write)(void *context, uint8_t value, uint64_t master_ticks);
+  /* Optional observer (may be NULL): each command the driver consumes, start byte first, with the time it was consumed. Validation seam only. */
+  void (*command_tap)(void *context, const uint8_t *bytes, unsigned count, uint64_t master_ticks);
+} GemsNativeHost;
+
+typedef struct GemsCcb {
+  uint8_t flags;       /* 0 enabled, 1 muted, 3 SFX time base, 4 running, 5 locked, 6 retrigger, 7 sustain */
+  uint32_t address;    /* absolute 68000 address of the next sequence byte */
+  uint16_t timer;      /* counts up to 0 (two's complement of the pending delay) */
+  uint16_t delay, duration;  /* registered, negated */
+  uint8_t program, sequence, channel, priority;
+  uint8_t patch[39];   /* this channel's patch buffer; patch[0] == 0xFF = undefined */
+} GemsCcb;
+
+typedef struct GemsVoice {
+  uint8_t flags;       /* F R L x x V V V: free, release, locked, voice number */
+  uint8_t priority, note, channel;
+  uint16_t duration;
+  uint8_t release;
+} GemsVoice;
+
+typedef struct GemsNative {
+  GemsNativeHost host;
+  GemsNativeFault fault;
+  /* time */
+  uint64_t floor_ticks;       /* nothing runs earlier than this (the bus was held / the driver was started) */
+  uint64_t boot_ticks;
+  uint8_t booted;
+  uint8_t fifo_check_pending;
+  uint64_t next_tick_index;   /* next VBlank interrupt edge not yet considered */
+  /* tables delivered by the get-pointers command (24-bit absolute addresses) */
+  uint32_t patch_table, envelope_table, sequence_table, sample_table;
+  uint8_t have_pointers;
+  /* sequencer */
+  uint16_t sbpt, sbptacc;     /* sub-beats per tick and its accumulator, 8 fraction bits */
+  GemsCcb ccb[16];
+  GemsVoice dac_voice;        /* FM voice 6 (the digital-capable voice) */
+  /* PSG envelope processor (idle state only: stop commands and their hardware update) */
+  uint8_t psg_command[4], psg_level[4], psg_mode[4], psg_update[4];
+  /* digital voice */
+  uint8_t sample_flags;
+  uint32_t sample_pointer;    /* next ROM byte to load into the FIFO */
+  uint16_t sample_counter;
+  uint8_t fdf_state;          /* 4 = one-shot, 7 = shut down */
+  uint8_t fifo[256];
+  uint8_t fifo_write, fifo_read;
+  uint8_t dac_active;         /* DAC output routine enabled */
+  uint8_t fill_enabled;
+  uint8_t dac_timer_b;        /* value the DAC routine writes to register $27 on every sample (timer reset) */
+  uint32_t dac_period_samples; /* Timer A period in native YM2612 samples */
+  uint64_t dac_due;           /* master tick at which the next sample is due */
+  /* counters (aggregates only) */
+  uint64_t count_commands, count_sequences, count_dac_samples, count_ticks, count_missed_ticks, count_clips;
+} GemsNative;
+
+/* Starts (or restarts) the driver at guest master time `at_ticks`: all driver state is reset (the RAM-visible FIFO bytes and pointers
+ * are not: they belong to the 68000 and to the previous run of the driver). */
+void gems_native_start(GemsNative *g, const GemsNativeHost *host, uint64_t at_ticks);
+
+/* The Z80 bus came back to the driver at `at_ticks` (BUSREQ released): work due earlier happens now; a VBlank interrupt edge that
+ * passed while the bus was held is lost exactly like the real Z80's. The command FIFO is looked at again. */
+void gems_native_resume(GemsNative *g, uint64_t at_ticks);
+
+/* Runs every event due up to and including `master_ticks`. Returns the fault (GEMS_FAULT_NONE when healthy). A faulted driver
+ * does nothing further. */
+GemsNativeFault gems_native_run_to(GemsNative *g, uint64_t master_ticks);
+
+/* Identity: 1 when `signature` (the 32-byte activation signature of the uploaded image) is a verified GEMS image of the catalog.
+ * `version` receives the catalog's version text. */
+int gems_native_identity_lookup(const uint8_t signature[32], const char **version);
+
+#endif

@@ -3870,6 +3870,7 @@ static const char *genesis_diagnostic_name(GenesisDiagnosticCategory value) {
   case GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS: return "unsupported_cartridge_sram_access";
   case GENESIS_DIAG_UNSUPPORTED_REGION_TIMING: return "unsupported_region_timing";
   case GENESIS_DIAG_HINT_HANDLER_NOT_INSTALLED: return "hint_handler_not_installed";
+  case GENESIS_DIAG_Z80_NATIVE_DRIVER_FAULT: return "z80_native_driver_fault";
   case GENESIS_DIAG_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT: return "unsupported_interrupt_or_scheduling_event";
   default: return 0;
   }

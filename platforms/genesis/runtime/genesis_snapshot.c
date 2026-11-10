@@ -380,6 +380,7 @@ static GenesisSnapshotStatus put_z80(Writer *w, const GenesisZ80Machine *m) {
   const Z80State *s = &m->cpu.state;
   uint8_t hash[32];
   if (m->view_stop != (GenesisDiagnosticCategory)0) return GENESIS_SNAPSHOT_NOT_CAPTURABLE;
+  if (m->native_active) return GENESIS_SNAPSHOT_NOT_CAPTURABLE;   /* ADR 0291: the native sound replacement's state is not part of the snapshot format */
   w_u8(w, s->a); w_u8(w, s->f); w_u8(w, s->b); w_u8(w, s->c); w_u8(w, s->d); w_u8(w, s->e); w_u8(w, s->h); w_u8(w, s->l);
   w_u8(w, s->a2); w_u8(w, s->f2); w_u8(w, s->b2); w_u8(w, s->c2); w_u8(w, s->d2); w_u8(w, s->e2); w_u8(w, s->h2); w_u8(w, s->l2);
   w_u16(w, s->ix); w_u16(w, s->iy); w_u16(w, s->sp); w_u16(w, s->pc); w_u16(w, s->wz);
