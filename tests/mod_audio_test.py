@@ -287,6 +287,20 @@ ew[4:8] = struct.pack("<I", 36 + len(extreme)); ew[40:44] = struct.pack("<I", le
 write(tmp / "extreme.wav", bytes(ew))
 rc, doc, _ = cli.run("mod", "convert-audio", tmp / "extreme.wav", "--out", tmp / "extreme.u8")
 cli.check(rc == 0 and (tmp / "extreme.u8").read_bytes() == reference_u8_mono(extreme, 2), "conversion at sample extremes matches the reference")
+def conv(what, data, code):
+    rc, doc, _ = cli.run("mod", "convert-audio", write(tmp / "c.wav", data), "--out", tmp / "c.u8")
+    cli.check(rc == 1 and doc["class"] == code and not (tmp / "c.u8").exists(), f"convert-audio {what}: expected {code}, got {doc}")
+
+
+conv("zero sample rate", wav(0, 1, 16), "E_FIELD_VALUE")
+conv("rate below 8000", wav(7999, 1, 16), "E_FIELD_VALUE")
+conv("rate above 48000", wav(48001, 1, 16), "E_FIELD_VALUE")
+conv("three channels", wav(8000, 1, 16, header_patch=lambda b: b.__setitem__(slice(22, 24), struct.pack("<H", 3))), "E_FIELD_VALUE")
+conv("8-bit PCM", wav(8000, 1, 16, header_patch=lambda b: b.__setitem__(slice(34, 36), struct.pack("<H", 8))), "E_FIELD_VALUE")
+conv("excessive duration", wav(8000, 1, 8000 * 600 + 8), "E_FIELD_VALUE")
+conv("an over-size asset within the duration limit", wav(8000, 1, 8000 * 540), "E_PAYLOAD_CAP")
+rc, doc, _ = cli.run("mod", "convert-audio", write(tmp / "maxdur.wav", wav(8000, 1, 8000 * 600 - 0)), "--out", tmp / "maxdur.u8")
+cli.check(rc == 1 and doc["class"] == "E_PAYLOAD_CAP", "the 600 s limit itself is within the duration rule (only the size cap refuses it)")
 rc, doc, _ = cli.run("mod", "convert-audio", write(tmp / "bad.wav", b"not a wav"), "--out", tmp / "bad.u8")
 cli.check(rc == 1 and doc["class"] == "E_FIELD_VALUE" and not (tmp / "bad.u8").exists(), "an invalid file converts to nothing")
 

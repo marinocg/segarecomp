@@ -180,6 +180,18 @@ except (OSError, NotImplementedError, AttributeError):
 if linked is not None:
     expect("a source reached through a link is refused", ("mod", "check", linked), "E_ARCHIVE_ENTRY")
 
+# reserved geometry: the empty declaration round-trips, any content stays rejected
+GEO = FULL.replace("[abi]", "[geometry]\nscenes = []\n\n[abi]")
+gp = project("geo", GEO)
+gout = tmp / "geo.segapatch"
+expect_ok("an empty geometry declaration builds", ("mod", "build", gp, "--out", gout, "--cc", CC, "--sdk-dir", SDK))
+with zipfile.ZipFile(gout) as z:
+    cli.check(b'"geometry":{"scenes":[]}' in z.read("manifest.json"), "the empty geometry declaration is carried into the manifest")
+expect_ok("the geometry package re-reads (round trip)", ("mod", "inspect", gout))
+broken("geometry with a scene", lambda t: GEO.replace("scenes = []", 'scenes = ["main"]'), "E_FIELD_UNKNOWN")
+broken("geometry with another key", lambda t: GEO.replace("scenes = []", "width = 4"), "E_FIELD_UNKNOWN")
+broken("geometry written as an array table", lambda t: GEO.replace("[geometry]", "[[geometry]]"), "E_MANIFEST_SYNTAX")
+
 # target platform fields: platform-specific target fields (cartridge digest + mapper config; disc-image reserved)
 SMS = FULL.split("[capabilities]")[0].replace('platform = "genesis"', 'platform = "master-system"').replace(f'sha256 = "{REV_B}"', f'sha256 = "{REV_B}"\nmapper = "rom_only"').replace(f'sha256 = "{SRC_SHA}"', f'sha256 = "{SRC_SHA}"\nmapper = "sega"')
 expect_ok("a master-system project with mappers", ("mod", "check", project("sms-ok", SMS + '[[source]]\nkind = "luau-source"\npath = "scripts/main.luau"\n', {"scripts/main.luau": LUAU})))

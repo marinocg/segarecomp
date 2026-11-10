@@ -84,7 +84,7 @@ std::vector<Section> parse_toml(std::string_view text) {
       if (i < line.size() && line[i] != '#') fail("E_MANIFEST_SYNTAX", "mod.toml has text after a table header");
       if (!bare_key(name)) fail("E_MANIFEST_SYNTAX", "a mod.toml table name is invalid");
       const bool repeated = name == "target.revision" || name == "source" || name == "audio.mapping" || name == "audio.mapping.value";
-      if (repeated != array && (repeated || name == "mod" || name == "target" || name == "capabilities" || name == "abi" || name == "state" || name == "limits" || name == "presentation"))
+      if (repeated != array && (repeated || name == "mod" || name == "target" || name == "capabilities" || name == "abi" || name == "state" || name == "limits" || name == "geometry" || name == "presentation"))
         fail("E_MANIFEST_SYNTAX", "the table [" + name + "] must be written " + (repeated ? "as [[" + name + "]]" : "as [" + name + "]"));
       if (!array) for (const Section &s : sections) if (s.name == name) fail("E_MANIFEST_SYNTAX", "mod.toml repeats the table [" + name + "]");
       sections.push_back(Section{name, array, {}});
@@ -229,6 +229,10 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
     } else if (s.name == "limits") {
       only(s, {"luau_memory_bytes", "luau_budget_units"});
       m.has_limits = true; m.luau_memory_bytes = number_of(s, "luau_memory_bytes", false); m.luau_budget_units = number_of(s, "luau_budget_units", false);
+    } else if (s.name == "geometry") {   // reserved schema 3 key: only the empty declaration is representable until the geometry task defines scenes
+      only(s, {"scenes"});
+      if (s.find("scenes") != nullptr && (s.find("scenes")->kind != Val::Kind::strings || !s.find("scenes")->list.empty())) fail("E_FIELD_UNKNOWN", "geometry scenes are not defined yet; only an empty declaration is accepted");
+      m.has_geometry = true;
     } else if (s.name == "presentation") {
       only(s, {"widescreen", "side_style"});
       m.default_widescreen = text_of(s, "widescreen", false); m.default_side_style = text_of(s, "side_style", false);

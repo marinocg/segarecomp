@@ -238,4 +238,4 @@ SEG-139-T004 (geometry key), SEG-141-T001 (set identity), SEG-145-T002 (audio as
 * **Zip-bomb ratio.** A deflated entry may expand to at most 256 times its compressed size plus 4 KiB (`E_ARCHIVE_SIZE`); the uncompressed total is capped at 48 MiB and each entry at 16 MiB before the per-kind caps of section 4.
 * **Native source set.** `native-c11` payloads are `.c` and `.h` files (a package needs at least one `.c`); Luau payloads end in `.luau`. Include policy and host compile: ADR 0288 decision 8.
 * **Audio mappings (SEG-145-T002).** The reserved `mappings` array now has its content model: see [modding-audio-architecture.md](modding-audio-architecture.md) section 5. A package with an `audio` asset must carry `license`. The content model of `hooks` and `geometry` is still reserved (empty only).
-* **Added classes** beyond section 9: `E_INCLUDE_FORBIDDEN`, `E_COMPILE_FAILED`, and the adapter/space classes `E_SPACE_*`, `E_ACCESS_*` for audio mailboxes.
+* **Added classes** beyond section 9: `E_INCLUDE_FORBIDDEN`, `E_COMPILE_FAILED`, `E_LINK_FAILED`, and the adapter/space classes `E_SPACE_*`, `E_ACCESS_*` for audio mailboxes.

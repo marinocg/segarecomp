@@ -24,6 +24,9 @@ Wav parse_wav_pcm_s16le(std::span<const std::uint8_t> b) {
   if ((w.channels != 1 && w.channels != 2) || block != w.channels * 2U || le32(b, 28) != w.sample_rate * block) return bad("the WAV format fields are inconsistent");
   if (le32(b, 4) != b.size() - 8 || data_size != b.size() - 44 || data_size % block != 0 || data_size == 0) return bad("the WAV sizes are inconsistent");
   w.frames = data_size / block;
+  // The same constraints the schema 3 audio-asset declaration enforces (one place): rate 8000..48000, at most kMaxAudioSeconds.
+  if (w.sample_rate < 8000 || w.sample_rate > 48000) return bad("the sample rate must be 8000..48000 Hz");
+  if (static_cast<std::uint64_t>(w.frames) > static_cast<std::uint64_t>(kMaxAudioSeconds) * w.sample_rate) return bad("the audio is longer than allowed");
   w.data = b.subspan(44);
   w.ok = true;
   return w;

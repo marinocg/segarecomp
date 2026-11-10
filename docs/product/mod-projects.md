@@ -25,6 +25,7 @@ A closed TOML subset: tables, arrays of tables, strings, non-negative integers a
 | `[capabilities]` | `required`, `optional` (names from `mod inspect --json`) |
 | `[abi]` | `native = 2` (required with native sources) |
 | `[state]`, `[limits]`, `[presentation]` | `schema`; `luau_memory_bytes`, `luau_budget_units`; `widescreen`, `side_style` |
+| `[geometry]` | `scenes = []` only (reserved; any content is refused) |
 | `[[source]]` | `kind` (`native-c11`, `luau-source`, `asset`, `bps-image`, `rom-edit-set`, `guest-code`), `path` (project-relative: lower-case, at most 3 segments, no `..`), plus kind fields (`target_sha256`, `cpu`, `asset_class`, audio fields, ...) |
 | `[[audio.mapping]]`, `[[audio.mapping.value]]` | declared audio mappings: [audio architecture](../architecture/modding-audio-architecture.md) sections 5 and 9 |
 
@@ -33,7 +34,7 @@ The manifest is derived only from these fields and the bytes of the named files,
 ## Native sources
 
 `native-c11` sources (`.c` and `.h`, at most 64 files, 256 KiB each, 2 MiB total) may include only `<segarecomp_mod.h>`, the platform's own SDK header, `<stdint.h>`, `<stddef.h>` and package files by their package path. Anything else is refused. `mod build` compiles every `.c` unit in path order with
-strict C11 flags the **host** owns (`-std=c11 -Wall -Wextra -pedantic -Werror`) and the SDK headers under `platforms/` (`--sdk-dir`). This preview checks and packages ABI 2 providers; running them is not part of this release. Luau sources and assets are stored as opaque, digest-listed payloads.
+strict C11 flags the **host** owns (`-std=c11 -Wall -Wextra -pedantic -Werror`) and the SDK headers under `platforms/` (`--sdk-dir`). `mod build` also links all units into a throwaway probe to prove they resolve and export `segarecomp_mod_provider`. This preview checks and packages ABI 2 providers; running them is not part of this release. Luau sources and assets are stored as opaque, digest-listed payloads.
 
 ## Support today
 

@@ -97,12 +97,19 @@ for what, line in (("parent directory", b'#include "../secret.h"'), ("absolute p
     expected = "E_ABI_PLATFORM" if "platform's header" in what else "E_ABI_MIXED" if "ABI 1" in what else "E_INCLUDE_FORBIDDEN"
     refused(f"include escape: {what}", project("inc-" + what.replace(" ", "-").replace("#", "").replace("'", ""), with_include(line)), expected)
 ok("allowlisted includes (SDK headers, <stdint.h>, <stddef.h>, a package-local file)", project("inc-ok", {"src/provider.c": b'#include <stdint.h>\n#include <stddef.h>\n#include <segarecomp_mod.h>\n#include <segarecomp_mod_genesis.h>\n#include "src/util.h"\n'
-                                                           b'const SegaModProvider *segarecomp_mod_provider(void **s) { (void)s; (void)util_zero; return 0; }\n', "src/util.h": UTIL_H}))
+                                                           b'const SegaModProvider *segarecomp_mod_provider(void **s) { (void)s; (void)util_zero; return 0; }\n', "src/util.h": UTIL_H, "src/util.c": UTIL_C}))
 
 # the host compiler is host-owned: strict flags catch warnings; a failing unit is reported with the first failing path
 refused("a warning is an error", project("warn", {"src/a.c": b"#include <segarecomp_mod_genesis.h>\nstatic int unused_function(void) { return 1; }\nconst SegaModProvider *segarecomp_mod_provider(void **s) { (void)s; return 0; }\n"}), "E_COMPILE_FAILED")
 rc, doc, _ = build(project("order", {"src/b.c": b"int b(void) { return ; }\n", "src/a.c": b"int a(void) { return ; }\n"}), "order.segapatch")
 cli.check(rc == 1 and doc["class"] == "E_COMPILE_FAILED" and doc["error"].startswith("src/a.c"), f"units are compiled in path order ({doc})")
+# link validation: every unit is kept and linked together with a probe that requires segarecomp_mod_provider (linked, never run)
+ENTRY = b'#include <segarecomp_mod_genesis.h>\n'
+refused("an unresolved cross-unit reference", project("link-unres", {"src/provider.c": ENTRY + b"int missing_elsewhere(void);\nconst SegaModProvider *segarecomp_mod_provider(void **s) { return missing_elsewhere() ? (const SegaModProvider *)s : (const SegaModProvider *)0; }\n"}), "E_LINK_FAILED")
+refused("a symbol defined in two units", project("link-dup", {"src/provider.c": ENTRY + b"int dup(void) { return 1; }\nconst SegaModProvider *segarecomp_mod_provider(void **s) { (void)s; return 0; }\n", "src/other.c": b"int dup(void) { return 2; }\n"}), "E_LINK_FAILED")
+refused("two entry symbols", project("link-twoentry", {"src/provider.c": ENTRY + b"const SegaModProvider *segarecomp_mod_provider(void **s) { (void)s; return 0; }\n", "src/other.c": ENTRY + b"const SegaModProvider *segarecomp_mod_provider(void **s) { (void)s; return 0; }\n"}), "E_LINK_FAILED")
+refused("no provider entry point", project("link-noentry", {"src/provider.c": ENTRY + b"int helper(void) { return 0; }\n"}), "E_ABI_ENTRY_MISSING")
+ok("a cross-unit reference that resolves links", project("link-ok", {"src/provider.c": ENTRY + b"int helper(void);\nconst SegaModProvider *segarecomp_mod_provider(void **s) { return helper() ? (const SegaModProvider *)s : (const SegaModProvider *)0; }\n", "src/helper.c": b"int helper(void) { return 0; }\n"}))
 refused("header-only native package", project("hdr", {"src/util.h": UTIL_H}), "E_FIELD_VALUE")
 rc, doc, _ = cli.run("mod", "build", project("nocc", FILES), "--out", tmp / "nocc.segapatch")
 cli.check(rc == 1 and doc["class"] == "E_COMPILE_FAILED", "a native package cannot be built without a compiler and SDK directory (no silent skip)")

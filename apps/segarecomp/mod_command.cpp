@@ -113,29 +113,46 @@ int compile_natives(const mod::Checked &checked, const std::string &cc, const fs
     if (!f) { class_out = "E_COMPILE_FAILED"; detail = "the sources could not be staged"; fs::remove_all(work, ec); return 1; }
   }
   int rc = 0;
+  std::vector<std::string> objects;
+  std::vector<std::string> base = {cc};
+  for (const std::string_view flag : mod::kNativeCompileFlags) base.emplace_back(flag);
+  base.push_back("-DSEGA_MOD_TARGET_PLATFORM=" + std::to_string(adapter.platform_id));
+  base.push_back("-DSEGA_MOD_TARGET_ABI_MAJOR=" + std::to_string(m.abi_native) + "U");
+  for (const fs::path &inc : {sdk_root / "sdk", sdk_root / std::string(m.platform) / "sdk", work / "src"}) { base.push_back("-I"); base.push_back(inc.string()); }
+  const fs::path log = work / "compile.log";
+  const auto fail_with = [&](const std::string &where, bool link) {
+    std::ifstream in(log);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto has = [&](const char *needle) { return text.find(needle) != std::string::npos; };
+    // The entry is missing only when the linker reports THAT symbol as undefined (GNU ld, Apple ld, lld spellings); any other link error is E_LINK_FAILED.
+    if (link) class_out = has("undefined reference to `segarecomp_mod_provider'") || has("\"_segarecomp_mod_provider\"") || has("undefined symbol: segarecomp_mod_provider") || has("undefined symbol: _segarecomp_mod_provider") ? "E_ABI_ENTRY_MISSING" : "E_LINK_FAILED";
+    else class_out = text.find("E_ABI_PLATFORM") != std::string::npos ? "E_ABI_PLATFORM" : text.find("E_ABI_HEADER_MISMATCH") != std::string::npos ? "E_ABI_HEADER_MISMATCH" : "E_COMPILE_FAILED";
+    detail = where + ": " + text.substr(0, 1500);
+  };
   for (const auto &[path, bytes] : checked.reread.files) {   // std::map order: deterministic compile order
     (void)bytes;
     if (path.size() < 3 || path.compare(path.size() - 2, 2, ".c") != 0) continue;
     const mod::Payload *p = nullptr;
     for (const mod::Payload &q : m.payloads) if (q.path == path) p = &q;
     if (p == nullptr || p->kind != "native-c11") continue;
-    std::vector<std::string> argv = {cc};
-    for (const std::string_view flag : mod::kNativeCompileFlags) argv.emplace_back(flag);
-    argv.push_back("-DSEGA_MOD_TARGET_PLATFORM=" + std::to_string(adapter.platform_id));
-    argv.push_back("-DSEGA_MOD_TARGET_ABI_MAJOR=" + std::to_string(m.abi_native) + "U");
-    for (const fs::path &inc : {sdk_root / "sdk", sdk_root / std::string(m.platform) / "sdk", work / "src"}) { argv.push_back("-I"); argv.push_back(inc.string()); }
+    std::vector<std::string> argv = base;
     argv.push_back((work / "src" / path).string());
     argv.push_back("-o");
-    argv.push_back((work / "obj.o").string());
-    const fs::path log = work / "compile.log";
+    argv.push_back((work / ("unit" + std::to_string(objects.size()) + ".o")).string());
+    objects.push_back(argv.back());
     rc = segarecomp_cli::run_process(argv, log, {}, 120);
-    if (rc != 0) {
-      std::ifstream in(log);
-      std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-      class_out = text.find("E_ABI_PLATFORM") != std::string::npos ? "E_ABI_PLATFORM" : text.find("E_ABI_HEADER_MISMATCH") != std::string::npos ? "E_ABI_HEADER_MISMATCH" : "E_COMPILE_FAILED";
-      detail = path + ": " + text.substr(0, 1500);
-      break;
-    }
+    if (rc != 0) { fail_with(path, false); break; }
+  }
+  if (rc == 0) {   // disposable link validation: every unit together plus a driver that REQUIRES the ABI 2 entry symbol. The probe is linked, never run.
+    { std::ofstream d(work / "driver.c"); d << "extern const void *segarecomp_mod_provider(void **);\nint main(void) { void *state = 0; return segarecomp_mod_provider(&state) != 0 ? 0 : 1; }\n"; }
+    std::vector<std::string> argv = base;
+    argv.push_back((work / "driver.c").string());
+    argv.erase(std::remove(argv.begin(), argv.end(), std::string("-c")), argv.end());
+    argv.insert(argv.end(), objects.begin(), objects.end());
+    argv.push_back("-o");
+    argv.push_back((work / "probe").string());
+    rc = segarecomp_cli::run_process(argv, log, {}, 120);
+    if (rc != 0) fail_with("link", true);
   }
   fs::remove_all(work, ec);
   return rc;
@@ -233,9 +250,10 @@ int segarecomp_mod_command(int argc, char **argv) {
   }
   if (sub == "convert-audio" && !target.empty() && !out.empty()) {
     std::vector<std::uint8_t> bytes;
-    if (!read_all(target, mod::kMaxAssetBytes, bytes)) return refuse({"E_ARCHIVE_ENTRY", "the audio file cannot be read"});
+    if (!read_all(target, mod::kMaxArchiveBytes, bytes)) return refuse({"E_ARCHIVE_ENTRY", "the audio file cannot be read"});
     const mod::Wav w = mod::parse_wav_pcm_s16le(bytes);
     if (!w.ok) return refuse({"E_FIELD_VALUE", w.error});
+    if (bytes.size() > mod::kMaxAssetBytes) return refuse({"E_PAYLOAD_CAP", "the audio file exceeds the asset size limit"});
     const std::vector<std::uint8_t> raw = mod::convert_pcm_u8_mono(w);
     if (!write_atomic(out, raw)) return refuse({"E_ARCHIVE_ENTRY", "the converted audio cannot be written"});
     std::cout << "{\"ok\":true,\"target\":\"u8-mono\",\"sample_rate\":" << w.sample_rate << ",\"frames\":" << w.frames << ",\"output_sha256\":\"" << sha256_hex(raw) << "\"}\n";
