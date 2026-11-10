@@ -1,0 +1,15 @@
+# ADR 0289: Mod CLI workflow, single-mod variant identity and synthetic templates
+
+- Status: accepted (combined delivery F03: SEG-135-T004, SEG-135-T005, SEG-135-T006).
+- Builds on: ADR 0288 (schema 3 host side), ADR 0266/0267 (schema 1/2 variants and approval), ADR 0281.
+
+## Decisions
+
+1. **`pack` vs `build`.** `pack` emits the canonical schema 3 package without invoking a compiler; `build` emits the identical bytes after compiling native units with host-owned strict C11 flags. Both go through the one `check_project` pipeline, so there is a single truth about what a project is. Output is one JSON object with stable keys and stable `E_*` classes; usage errors exit 2, refusals exit 1.
+2. **Variant identity is a list of named components**, not an opaque hash: `original_image`, `effective_image`, `package_identity`, `source_digest`, `abi`, `capabilities`. The key is the SHA-256 of the `name=value` lines. The package identity already covers every payload digest; the explicit components exist so a rebuild reason can name what changed. Single mod only: composite identities of mod sets are a later contract.
+3. **Cache layout.** `<library>/cache/variants/<key>/{variant.txt,package.segapatch}` is published by directory rename; `<library>/cache/variants/index/<id>-<image16>.txt` records the last built components for reason reporting. Nothing outside `cache/variants` is written, so Vanilla, saves and earlier variants are untouched by success or failure; a failed build publishes nothing. A hit requires the stored components to equal the current ones.
+4. **Install and approval** reuse the schema 1/2 model: the user approves one exact package identity; approval is a marker keyed by identity and is required only for the `native` trust class.
+5. **Templates are embedded in the CLI**, not located on disk, so an installed binary needs no data directory. `c11-provider` is Genesis only (the one platform with ABI 2 services); `rom-edit` is a placeholder until edit sets are accepted.
+6. **Schema 1/2 launcher variants are not modified.** The launcher cache key and `install_patch` stay as they are; integrating schema 3 packages into the launcher library UI and linking ABI 2 providers into a Patched program are later work.
+
+Rejected: a separate manifest/cache format per tool; hashing only the package identity (no nameable rebuild reason); templates read from a shipped directory.
