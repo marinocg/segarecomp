@@ -2237,7 +2237,8 @@ add_test(NAME mod_project_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOU
 add_test(NAME mod_sources_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_sources_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER}
   ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mod_sdk ${PROJECT_SOURCE_DIR}/docs/product/sdk-sample/provider.c)
 add_test(NAME mod_audio_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_audio_test.py $<TARGET_FILE:segarecomp>)
-foreach(_mod_test mod_package_test mod_project_test mod_sources_test mod_audio_test)
+add_test(NAME mod_workflow_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_workflow_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER})
+foreach(_mod_test mod_package_test mod_project_test mod_sources_test mod_audio_test mod_workflow_test)
   set_property(TEST ${_mod_test} APPEND PROPERTY LABELS full fast)
   set_property(TEST ${_mod_test} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 endforeach()

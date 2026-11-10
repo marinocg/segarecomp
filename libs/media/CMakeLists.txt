@@ -5,6 +5,7 @@ add_library(segarecomp_media
   src/mod_audio.cpp
   src/mod_package.cpp
   src/mod_project.cpp
+  src/mod_variant.cpp
   src/patch_archive.cpp
   src/patch_bps.cpp
   src/patch_package.cpp

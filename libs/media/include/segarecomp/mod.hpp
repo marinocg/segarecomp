@@ -190,4 +190,30 @@ struct Checked {
 [[nodiscard]] Checked check_project(const std::filesystem::path &dir);
 [[nodiscard]] std::string init_project_text(std::string_view platform, std::string_view id);
 
+// ---- variant identity and cache decision (SEG-135-T005) ----
+// What a built mod variant depends on, as named components in a FIXED order (a change of any one selects a different key). The package identity already covers every payload digest; the
+// explicit source, ABI and capability components exist so a rebuild reason can NAME what changed. Single-mod only: composite identities of mod sets are a later contract.
+struct VariantComponent {
+  std::string name, value;
+  bool operator==(const VariantComponent &) const = default;
+};
+struct VariantIdentity {
+  std::vector<VariantComponent> components;   // original_image, effective_image, package_identity, source_digest, abi, capabilities
+  std::string key;                             // SHA-256 over "name=value\n" lines of the components
+};
+// `package` must come from read_package (its `identity` is SHA-256 of the exact manifest bytes received). `original_sha256` is the exact original image; `effective_sha256` the image that is compiled and run (the bps-image target, else the original).
+[[nodiscard]] VariantIdentity variant_identity(const Package &package, std::string_view original_sha256, std::string_view effective_sha256);
+// Names of the components whose value differs (empty = identical). A component present in only one list counts as changed.
+[[nodiscard]] std::vector<std::string> changed_components(const std::vector<VariantComponent> &previous, const std::vector<VariantComponent> &current);
+// "name=value\n" text of the components (the stored variant record) and its inverse; the parser fails closed (empty result) on any malformed line.
+[[nodiscard]] std::string serialize_components(const std::vector<VariantComponent> &components);
+[[nodiscard]] std::vector<VariantComponent> parse_components(std::string_view text);
+// The effective image of a package applied to `original`: a bps-image payload is applied and its target digest verified; otherwise the original. On failure `rejection` is set.
+struct EffectiveImage {
+  bool ok = false;
+  Rejection rejection;
+  std::string original_sha256, effective_sha256;
+};
+[[nodiscard]] EffectiveImage effective_image(const Package &package, std::span<const std::uint8_t> original);
+
 }  // namespace segarecomp::mod
