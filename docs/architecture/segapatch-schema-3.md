@@ -1,6 +1,6 @@
 # `.segapatch` schema 3 (normative)
 
-Status: accepted contract (SEG-133-T002, ADR [0281](../decisions/0281-segapatch-schema-3.md)). **Nothing here is implemented**: the parser is SEG-135-T001. Inputs: the
+Status: accepted contract (SEG-133-T002, ADR [0281](../decisions/0281-segapatch-schema-3.md)). **Reader, canonical packer and `mod.toml` mapping are implemented** (F02, ADR [0288](../decisions/0288-modding-platform-host-implementation.md); `libs/media/src/mod_package.cpp`); identity/cache use (SEG-135-T005), edits, Luau, geometry and disc kinds are not. Inputs: the
 [gap inventory](modding-platform-gap-inventory.md) (existing limits) and [adapter vocabulary](mod-platform-adapters.md). Consumers: SEG-135-T001/T002/T003, SEG-136-T001,
 SEG-139/SEG-133-T004 (geometry declarations), SEG-145-T002 (audio assets), SEG-148-T001 (disc payloads), SEG-141 (identities).
 Section numbers below are stable citation targets ("schema 3 section N").
@@ -230,3 +230,12 @@ reader never mistakes SMS or Sega CD packages for Genesis (both behaviors exist 
 
 SEG-135-T001 (parser), SEG-135-T002 (`mod.toml` model, revisions), SEG-135-T003 (multi-file sources and assets), SEG-135-T005 (identity/cache), SEG-136-T001/T002 (edits, symbols),
 SEG-139-T004 (geometry key), SEG-141-T001 (set identity), SEG-145-T002 (audio assets), SEG-146-T002 (adapter plumbing), SEG-148-T001 (disc kinds).
+
+## 14. Implementation notes (F02, ADR 0288)
+
+* **Entry points.** `segarecomp::mod::read_package` (reader), `pack_package` (canonical packer), `serialize_manifest`, `content_digest` in `libs/media/include/segarecomp/mod.hpp`; the CLI is `segarecomp mod inspect <package>`. Schema 1/2 packages stay with `segarecomp::patch::read_package`.
+* **Strictness fixed by the implementation** (these resolve latitude in the text above): the reader refuses insignificant whitespace in the manifest; key order is not enforced (the packer always emits the canonical order, and identity is the hash of the exact bytes received); the payload `role` field is required; a `native-c11` payload without `author`/`abi` is `E_TRUST_UNDECLARED` before any other payload field is judged; archive and payload paths are lower-case, so a case-folded duplicate can only come from a name the path rule already refuses.
+* **Zip-bomb ratio.** A deflated entry may expand to at most 256 times its compressed size plus 4 KiB (`E_ARCHIVE_SIZE`); the uncompressed total is capped at 48 MiB and each entry at 16 MiB before the per-kind caps of section 4.
+* **Native source set.** `native-c11` payloads are `.c` and `.h` files (a package needs at least one `.c`); Luau payloads end in `.luau`. Include policy and host compile: ADR 0288 decision 8.
+* **Audio mappings (SEG-145-T002).** The reserved `mappings` array now has its content model: see [modding-audio-architecture.md](modding-audio-architecture.md) section 5. A package with an `audio` asset must carry `license`. The content model of `hooks` and `geometry` is still reserved (empty only).
+* **Added classes** beyond section 9: `E_INCLUDE_FORBIDDEN`, `E_COMPILE_FAILED`, and the adapter/space classes `E_SPACE_*`, `E_ACCESS_*` for audio mailboxes.

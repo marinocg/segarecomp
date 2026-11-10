@@ -2231,6 +2231,16 @@ set_property(TEST segapatch_package_test APPEND PROPERTY ENVIRONMENT_MODIFICATIO
 add_test(NAME segapatch_native_package_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segapatch_native_package_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/tools/segapatch.py ${PROJECT_SOURCE_DIR}/docs/product/sdk-sample/provider.c)
 set_property(TEST segapatch_native_package_test APPEND PROPERTY LABELS full fast)
 set_property(TEST segapatch_native_package_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-135 (ADR 0288, delivery F02): the modding platform host side through the product CLI (`segarecomp mod ...`), cross-checked by independent Python builders. Synthetic data only.
+add_test(NAME mod_package_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_package_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/tools/segapatch.py)
+add_test(NAME mod_project_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_project_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER})
+add_test(NAME mod_sources_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_sources_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER}
+  ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mod_sdk ${PROJECT_SOURCE_DIR}/docs/product/sdk-sample/provider.c)
+add_test(NAME mod_audio_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_audio_test.py $<TARGET_FILE:segarecomp>)
+foreach(_mod_test mod_package_test mod_project_test mod_sources_test mod_audio_test)
+  set_property(TEST ${_mod_test} APPEND PROPERTY LABELS full fast)
+  set_property(TEST ${_mod_test} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+endforeach()
 add_test(NAME segarecomp_native_build_args_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_native_build_args_test.py $<TARGET_FILE:segarecomp>)
 set_property(TEST segarecomp_native_build_args_test APPEND PROPERTY LABELS full fast)
 set_property(TEST segarecomp_native_build_args_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

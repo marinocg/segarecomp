@@ -41,8 +41,8 @@ The plan behind it is the Modding Platform contract set: [gap inventory](../arch
 | Luau lifecycle and gameplay scripting | Master System | unsupported | supported-with-limitations | planned: SEG-147-T004 |
 | Luau lifecycle and gameplay scripting | Sega CD | unsupported | experimental | planned: SEG-148-T006 |
 | Native C11 extension support | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/genesis_patch_provider_build_test.py`, `tests/segapatch_native_package_test.py` |
-| Native C11 extension support | Master System | unsupported | supported-with-limitations | planned: SEG-146-T003 |
-| Native C11 extension support | Sega CD | unsupported | experimental | planned: SEG-146-T003 |
+| Native C11 extension support | Master System | experimental | supported-with-limitations | `tests/mod_sources_test.py` |
+| Native C11 extension support | Sega CD | experimental | experimental | `tests/mod_sources_test.py` |
 | Input modifications | Genesis / Mega Drive | unsupported | supported-and-tested | planned: SEG-138-T001 |
 | Input modifications | Master System | unsupported | supported-with-limitations | planned: SEG-147-T004 |
 | Input modifications | Sega CD | unsupported | experimental | planned: SEG-148-T005 |
@@ -52,7 +52,7 @@ The plan behind it is the Modding Platform contract set: [gap inventory](../arch
 | Function hooks | Genesis / Mega Drive | unsupported | spike-gated (SEG-138-T003) | planned: SEG-138-T004 |
 | Function hooks | Master System | unsupported | spike-gated (SEG-147-T003) | planned: SEG-147-T008 |
 | Function hooks | Sega CD | unsupported | spike-gated (SEG-148-T004) | planned: SEG-148-T008 |
-| Asset authoring | Genesis / Mega Drive | unsupported | supported-and-tested | planned: SEG-135-T003 |
+| Asset authoring | Genesis / Mega Drive | experimental | supported-and-tested | `tests/mod_sources_test.py`, `tests/mod_audio_test.py` |
 | Asset authoring | Master System | unsupported | supported-with-limitations | planned: SEG-147-T007 |
 | Asset authoring | Sega CD | unsupported | supported-with-limitations | planned: SEG-148-T002 |
 | Graphics and HUD | Genesis / Mega Drive | supported-with-limitations | supported-and-tested | `tests/genesis_native_compat_viewer_sdl_test.c` |

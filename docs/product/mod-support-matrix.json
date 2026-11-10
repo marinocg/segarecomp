@@ -221,24 +221,30 @@
   {
    "platform": "master_system",
    "capability": "native-c11-extension",
-   "level": "unsupported",
+   "level": "experimental",
    "beta_target": "supported-with-limitations",
    "evidence": [
-    "docs/architecture/native-sdk-abi-2.md"
+    "docs/architecture/native-sdk-abi-2.md",
+    "ADR 0288"
    ],
-   "existing_tests": [],
-   "planned_owner": "SEG-146-T003"
+   "existing_tests": [
+    "tests/mod_sources_test.py"
+   ],
+   "planned_owner": "SEG-147-T004"
   },
   {
    "platform": "sega_cd",
    "capability": "native-c11-extension",
-   "level": "unsupported",
+   "level": "experimental",
    "beta_target": "experimental",
    "evidence": [
-    "docs/architecture/native-sdk-abi-2.md"
+    "docs/architecture/native-sdk-abi-2.md",
+    "ADR 0288"
    ],
-   "existing_tests": [],
-   "planned_owner": "SEG-146-T003"
+   "existing_tests": [
+    "tests/mod_sources_test.py"
+   ],
+   "planned_owner": "SEG-148-T005"
   },
   {
    "platform": "genesis",
@@ -348,12 +354,16 @@
   {
    "platform": "genesis",
    "capability": "asset-authoring",
-   "level": "unsupported",
+   "level": "experimental",
    "beta_target": "supported-and-tested",
    "evidence": [
-    "docs/architecture/segapatch-schema-3.md"
+    "docs/architecture/segapatch-schema-3.md",
+    "ADR 0288"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/mod_sources_test.py",
+    "tests/mod_audio_test.py"
+   ],
    "planned_owner": "SEG-135-T003"
   },
   {

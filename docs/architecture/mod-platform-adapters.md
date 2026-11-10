@@ -4,6 +4,8 @@ Status: accepted contract (SEG-146-T001, ADR [0280](../decisions/0280-mod-platfo
 SEG-133-T004 (phases), SEG-146-T002/T003/T004, SEG-147, SEG-148. Baseline facts: [gap inventory](modding-platform-gap-inventory.md).
 This document defines **vocabulary and ownership only**. It introduces no bus, CPU or device interface.
 
+Implemented (F02, ADR [0288](../decisions/0288-modding-platform-host-implementation.md)): the registry is `libs/media/src/mod_adapter.cpp` (a table of capability support levels per platform, never a class hierarchy), reported by `segarecomp mod inspect --json`; `mod check`/`mod build` dispatch on the declared platform and refuse an unsupported capability with `E_CAPABILITY_UNSUPPORTED`. Genesis is the fully supported adapter; Master System and Sega CD register `host.log` only (`experimental`).
+
 ## 1. What an adapter is
 
 An adapter is the pair *(an existing platform runtime, a capability table)*. The runtimes already exist and are not changed by this contract:
