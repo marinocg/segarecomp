@@ -74,7 +74,20 @@ EffectiveImage effective_image(const Package &package, std::span<const std::uint
   const bool declared = std::any_of(package.manifest.revisions.begin(), package.manifest.revisions.end(), [&](const Revision &r) { return r.sha256 == e.original_sha256; });
   if (!declared) { e.rejection = {"E_IMAGE_MISMATCH", "the original image is not one of the declared target revisions"}; return e; }
   e.effective_sha256 = e.original_sha256;
+  if (std::count_if(package.manifest.payloads.begin(), package.manifest.payloads.end(), [](const Payload &p) { return p.kind == "rom-edit-set"; }) > 1) {   // the reader refuses this; never apply a subset
+    e.rejection = {"E_PAYLOAD_COMBINATION", "at most one rom-edit-set payload"};
+    return e;
+  }
   for (const Payload &p : package.manifest.payloads) {
+    if (p.kind == "rom-edit-set") {   // typed edits: asserted against this exact revision's image, then applied (SEG-136-T001)
+      const auto it = package.files.find(p.path);
+      const auto rev = std::find_if(package.manifest.revisions.begin(), package.manifest.revisions.end(), [&](const Revision &r) { return r.sha256 == e.original_sha256; });
+      if (it == package.files.end()) { e.rejection = {"E_IMAGE_MISMATCH", "the rom-edit-set payload is missing"}; return e; }
+      const EditedImage edited = apply_rom_edits(package.manifest, it->second, rev->label, original);
+      if (!edited.ok) { e.rejection = edited.rejection; return e; }
+      e.effective_sha256 = sha256_hex(edited.image);
+      continue;
+    }
     if (p.kind != "bps-image") continue;
     const auto it = package.files.find(p.path);
     if (it == package.files.end()) { e.rejection = {"E_IMAGE_MISMATCH", "the bps-image payload is missing"}; return e; }

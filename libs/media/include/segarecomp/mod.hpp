@@ -36,6 +36,7 @@ inline constexpr std::size_t kMaxNativeFiles = 64, kMaxNativeFileBytes = 256U <<
 inline constexpr std::size_t kMaxLuauFiles = 64, kMaxLuauFileBytes = 128U << 10U, kMaxLuauTotalBytes = 1U << 20U;
 inline constexpr std::size_t kMaxAssets = 128, kMaxAssetBytes = 8U << 20U;
 inline constexpr std::size_t kMaxCapabilities = 32, kMaxRevisions = 16, kMaxMappings = 64;
+inline constexpr std::size_t kMaxSymbols = 255;   // manifest `symbols` entries (ADR 0290)
 inline constexpr std::uint32_t kMaxAudioSeconds = 600;
 inline constexpr std::uint64_t kLuauMemoryPolicyMax = 4194304, kLuauBudgetPolicyMax = 100000;
 inline constexpr unsigned kNativeAbiMajor = 2;
@@ -53,6 +54,7 @@ struct Adapter {
   std::span<const std::string_view> readable_spaces;
   std::span<const std::string_view> audio_conversions;   // deterministic PCM targets this platform's adapter provides (empty = none)
   std::size_t index;                // column of the capability table
+  bool rom_big_endian;              // default byte order of a typed `u16`/`u32` ROM edit: the main CPU's data order (genesis 68000 = big, master-system Z80 = little)
 };
 [[nodiscard]] const Adapter *find_adapter(std::string_view platform);   // nullptr for an unknown platform: never guessed
 [[nodiscard]] std::span<const Adapter> adapters();
@@ -107,6 +109,15 @@ struct Mapping {                    // modding-audio-architecture.md section 5 (
   bool operator==(const Mapping &) const = default;
 };
 
+// A per-revision guest symbol (ADR 0290): a NAME (a token, never disassembly) mapped to an address in one declared revision, with how that address was established. Only `verified`
+// entries may be a patch site; `manual` (author-entered, unchecked) and `imported-hint` (tool output) entries are recorded and shown but never resolved for an edit.
+struct Symbol {
+  std::string name, revision, provenance;   // provenance in kSymbolProvenance
+  std::uint32_t address = 0;
+  bool operator==(const Symbol &) const = default;
+};
+inline constexpr std::string_view kSymbolProvenance[] = {"manual", "verified", "imported-hint"};
+
 struct Manifest {
   std::string id, version, name, platform, author, license, purpose;
   std::string source_kind;                       // cartridge-image | disc-image (reserved)
@@ -121,6 +132,7 @@ struct Manifest {
   std::string default_widescreen, default_side_style;
   std::vector<Payload> payloads;
   std::vector<Mapping> mappings;
+  std::vector<Symbol> symbols;                   // sorted by (name, revision) in a canonical manifest
   bool operator==(const Manifest &) const = default;
 };
 
@@ -149,6 +161,49 @@ struct Package {
 [[nodiscard]] std::optional<Rejection> check_adapter(const Manifest &manifest);
 // Canonical stored ZIP (schema 3 section 2): path order, manifest first, fixed times and attributes. Deterministic for equal inputs.
 [[nodiscard]] std::vector<std::uint8_t> pack_package(const Manifest &manifest, const std::map<std::string, std::vector<std::uint8_t>> &files);
+
+// ---- typed ROM edits (SEG-136-T001) and symbol resolution (SEG-136-T002) ----
+// A `rom-edit-set` payload is ASCII text, LF-separated, one edit per line (blank lines and `#` comment lines allowed):
+//   <revision|*> <type> <site> <expected> <value>
+// type: u8 | u16 | u32 (the platform's default byte order, Adapter::rom_big_endian) | u16be u16le u32be u32le | bytes.
+// site: `0x` + 1..8 lower-case hex digits (a literal image offset), or `@name` / `@name+0xN` (a verified symbol of the revision plus an addend).
+// expected, value: integer types `0x` + exactly 2*width lower-case hex digits; `bytes` plain hex of equal even length. `expected` is asserted against the exact original image before `value` replaces it.
+// Stable classes: E_EDIT_SYNTAX, E_EDIT_REVISION, E_EDIT_COUNT, E_EDIT_OVERLAP, E_EDIT_RANGE, E_EDIT_EXPECTED_MISMATCH, E_SYMBOL_UNKNOWN, E_SYMBOL_NOT_VERIFIED, E_SYMBOL_DUPLICATE, E_SYMBOL_REVISION.
+struct RomEdit {
+  std::string revision;             // "" = every declared revision (`*`)
+  std::string symbol;               // "" = literal site
+  std::uint32_t site = 0;           // literal image offset, or the addend of `symbol`
+  std::vector<std::uint8_t> expected, value;   // already in image byte order; equal length >= 1
+  std::size_t line = 0;             // 1-based source line (diagnostics only)
+};
+struct RomEditSet {
+  bool ok = false;
+  Rejection rejection;
+  std::vector<RomEdit> edits;
+};
+// Syntax and revision labels only (no symbols, no image).
+[[nodiscard]] RomEditSet parse_rom_edit_set(std::span<const std::uint8_t> text, const Manifest &manifest);
+// The package-level check run by the reader and `mod check`: syntax, the informational `edits` count, and for EVERY declared revision independently: symbol resolution (verified only) and overlap.
+[[nodiscard]] std::optional<Rejection> check_rom_edit_set(const Manifest &manifest, std::span<const std::uint8_t> text, unsigned declared_edits);
+struct EditedImage {
+  bool ok = false;
+  Rejection rejection;
+  std::vector<std::uint8_t> image;
+  unsigned applied = 0;
+};
+// Applies the edits of one declared revision to `original` (which must be that revision's exact image: the caller selected `revision` by digest). Every `expected` is asserted first; any mismatch or range
+// error fails closed and yields no image. Edits of other revisions are not looked at.
+[[nodiscard]] EditedImage apply_rom_edits(const Manifest &manifest, std::span<const std::uint8_t> text, std::string_view revision, std::span<const std::uint8_t> original);
+// Parses a symbol-hint list (`name address` or CSV `name,address[,...]`, `0x` hex or decimal, `#` comments, quoted CSV fields) into imported-hint symbols for `revision`. Names are lower-cased and
+// folded to the token alphabet; an unparsable line rejects the whole input. Never produces `verified`.
+struct SymbolHints {
+  bool ok = false;
+  Rejection rejection;
+  std::vector<Symbol> symbols;
+};
+[[nodiscard]] SymbolHints parse_symbol_hints(std::string_view text, std::string_view revision);
+// Token alphabet and size of a symbol name (lower-case a-z 0-9 `_` `-` `.`, 1..64).
+[[nodiscard]] bool symbol_name_ok(std::string_view name);
 
 // ---- native C11 source policy (SEG-135-T003) ----
 // Include allowlist: the ABI 2 SDK headers, <stdint.h>/<stddef.h>, and package-local files named by their package path. Anything else (`../`, absolute, other system headers, computed

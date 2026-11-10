@@ -56,13 +56,23 @@ std::string adapter_json(const mod::Adapter &a) {
 std::string package_json(const mod::Manifest &m, const std::string &identity, const std::string &content) {
   std::size_t native = 0, luau = 0, assets = 0, other = 0;
   for (const mod::Payload &p : m.payloads) (p.kind == "native-c11" ? native : p.kind == "luau-source" ? luau : p.kind == "asset" ? assets : other)++;
+  std::size_t edits = 0;
+  for (const mod::Payload &p : m.payloads) if (p.kind == "rom-edit-set") edits += p.edits;
+  std::string symbols = "[";   // provenance is part of the package and always shown (ADR 0290)
+  for (std::size_t i = 0; i < m.symbols.size(); ++i) {
+    const mod::Symbol &y = m.symbols[i];
+    char addr[16];
+    std::snprintf(addr, sizeof addr, "0x%08x", static_cast<unsigned>(y.address));
+    symbols += std::string(i ? "," : "") + "{\"name\":\"" + esc(y.name) + "\",\"revision\":\"" + esc(y.revision) + "\",\"address\":\"" + addr + "\",\"provenance\":\"" + y.provenance + "\"}";
+  }
+  symbols += "]";
   std::string revs = "[";
   for (std::size_t i = 0; i < m.revisions.size(); ++i) revs += std::string(i ? "," : "") + "{\"label\":\"" + esc(m.revisions[i].label) + "\",\"sha256\":\"" + m.revisions[i].sha256 + "\"}";
   revs += "]";
   return "\"id\":\"" + esc(m.id) + "\",\"version\":\"" + esc(m.version) + "\",\"name\":\"" + esc(m.name) + "\",\"platform\":\"" + m.platform + "\",\"source_identity_kind\":\"" + m.source_kind +
          "\",\"revisions\":" + revs + ",\"trust_class\":\"" + mod::trust_class(m) + "\",\"capabilities\":" + json_list(m.capabilities) + ",\"capabilities_optional\":" + json_list(m.capabilities_optional) +
          ",\"abi_native\":" + std::to_string(m.abi_native) + ",\"payloads\":{\"native\":" + std::to_string(native) + ",\"luau\":" + std::to_string(luau) + ",\"assets\":" + std::to_string(assets) +
-         ",\"other\":" + std::to_string(other) + "},\"package_identity\":\"" + identity + "\",\"content_digest\":\"" + content + "\"";
+         ",\"other\":" + std::to_string(other) + "},\"rom_edits\":" + std::to_string(edits) + ",\"symbols\":" + symbols + ",\"package_identity\":\"" + identity + "\",\"content_digest\":\"" + content + "\"";
 }
 
 bool read_all(const fs::path &path, std::size_t limit, std::vector<std::uint8_t> &out) {
@@ -202,6 +212,60 @@ int install(const fs::path &package_path, const fs::path &rom, const fs::path &l
   return 0;
 }
 
+// `mod apply`: the typed ROM edits of a project or package applied to the exact original image of ONE declared revision (selected by the image's digest). Every expected value is asserted first;
+// a mismatch, an overlap or an unverified symbol refuses and writes nothing.
+int apply_edits(const fs::path &target, const fs::path &rom, const fs::path &out) {
+  std::error_code ec;
+  mod::Package p;
+  if (fs::is_directory(target, ec)) {
+    const mod::Checked c = mod::check_project(target);
+    if (!c.ok) return refuse(c.rejection);
+    p = c.reread;
+  } else {
+    p = mod::read_package_file(target);
+    if (!p.ok) return refuse(p.rejection);
+  }
+  std::vector<std::uint8_t> image;
+  if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
+  const std::string original = sha256_hex(image);
+  const auto rev = std::find_if(p.manifest.revisions.begin(), p.manifest.revisions.end(), [&](const mod::Revision &r) { return r.sha256 == original; });
+  if (rev == p.manifest.revisions.end()) return refuse({"E_IMAGE_MISMATCH", "the original image is not one of the declared target revisions"});
+  if (std::count_if(p.manifest.payloads.begin(), p.manifest.payloads.end(), [](const mod::Payload &y) { return y.kind == "rom-edit-set"; }) > 1) return refuse({"E_PAYLOAD_COMBINATION", "at most one rom-edit-set payload"});
+  const auto set = std::find_if(p.manifest.payloads.begin(), p.manifest.payloads.end(), [](const mod::Payload &y) { return y.kind == "rom-edit-set"; });
+  if (set == p.manifest.payloads.end()) return refuse({"E_FIELD_MISSING", "the package has no rom-edit-set payload"});
+  const mod::EditedImage e = mod::apply_rom_edits(p.manifest, p.files.at(set->path), rev->label, image);
+  if (!e.ok) return refuse(e.rejection);
+  if (!write_atomic(out, e.image)) return refuse({"E_ARCHIVE_ENTRY", "the edited image cannot be written"});
+  std::cout << "{\"ok\":true,\"revision\":\"" << esc(rev->label) << "\",\"edits_applied\":" << e.applied << ",\"original_sha256\":\"" << original << "\",\"effective_sha256\":\"" << sha256_hex(e.image) << "\"}\n";
+  return 0;
+}
+
+// `mod import-hints`: tool output (Ghidra/discovery symbol lists) becomes `imported-hint` [[symbol]] blocks appended to mod.toml. Hints are never verified: they cannot be patch sites until the author
+// promotes an entry to `verified` by editing it. An existing (name, revision) entry is never overwritten.
+int import_hints(const fs::path &dir, const std::string &revision, const fs::path &list) {
+  const mod::Project project = mod::load_project(dir);
+  if (!project.ok) return refuse(project.rejection);
+  const mod::Manifest &m = project.manifest;
+  if (std::none_of(m.revisions.begin(), m.revisions.end(), [&](const mod::Revision &r) { return r.label == revision; })) return refuse({"E_SYMBOL_REVISION", "the revision is not declared by the project"});
+  std::vector<std::uint8_t> raw;
+  if (!read_all(list, 1U << 20U, raw)) return refuse({"E_SYMBOL_HINT", "the hint file cannot be read (or exceeds 1 MiB)"});
+  const mod::SymbolHints h = mod::parse_symbol_hints(std::string_view(reinterpret_cast<const char *>(raw.data()), raw.size()), revision);
+  if (!h.ok) return refuse(h.rejection);
+  if (m.symbols.size() + h.symbols.size() > mod::kMaxSymbols) return refuse({"E_SYMBOL_HINT", "the project would exceed 255 symbols"});
+  for (const mod::Symbol &y : h.symbols)
+    if (std::any_of(m.symbols.begin(), m.symbols.end(), [&](const mod::Symbol &o) { return o.name == y.name && o.revision == y.revision; })) return refuse({"E_SYMBOL_DUPLICATE", "the project already has an entry for a hinted symbol"});
+  std::string text = slurp(dir / "mod.toml");
+  if (!text.empty() && text.back() != '\n') text += '\n';
+  for (const mod::Symbol &y : h.symbols) {
+    char addr[16];
+    std::snprintf(addr, sizeof addr, "0x%08x", static_cast<unsigned>(y.address));
+    text += "\n[[symbol]]\nname = \"" + y.name + "\"\nrevision = \"" + revision + "\"\naddress = \"" + addr + "\"\nprovenance = \"imported-hint\"\n";
+  }
+  if (!write_text(dir / "mod.toml", text)) return refuse({"E_ARCHIVE_ENTRY", "mod.toml cannot be written"});
+  std::cout << "{\"ok\":true,\"imported\":" << h.symbols.size() << ",\"provenance\":\"imported-hint\",\"revision\":\"" << esc(revision) << "\"}\n";
+  return 0;
+}
+
 // `mod variant`: key the single-mod variant by its full identity; reuse an identical build, otherwise (re)build and publish it atomically. Only <library>/cache/variants is ever written, so
 // the original image, Vanilla builds, saves and earlier variants are untouched, and a failed build publishes nothing.
 int variant(const fs::path &library, const std::string &identity, const fs::path &rom, const std::string &cc, const fs::path &sdk) {
@@ -254,6 +318,14 @@ int variant(const fs::path &library, const std::string &identity, const fs::path
   return 0;
 }
 
+constexpr const char *kEditTemplate =
+    "# Typed ROM edits (docs/product/mod-projects.md). One edit per line:\n"
+    "#   <revision|*> <type> <site> <expected> <value>\n"
+    "# type: u8 u16 u32 (the platform's byte order) u16be u16le u32be u32le bytes\n"
+    "# site: 0x<hex offset> or @symbol[+0xN] (a verified [[symbol]] of that revision)\n"
+    "# Example (replace the revision label, offset and values with your own):\n"
+    "#   rev-a u16 0x00000200 0x1234 0x5678\n";
+
 int usage() {
   std::cerr << "usage: segarecomp mod init <dir> --platform <genesis|master-system|sega-cd> --id <id> [--template <c11-provider|luau|rom-edit>] [--rom-sha256 <hex>]\n"
                "       segarecomp mod check <dir>\n"
@@ -262,7 +334,9 @@ int usage() {
                "       segarecomp mod install <package.segapatch> --rom <original-image> --library <dir> [--approve <package-identity>]\n"
                "       segarecomp mod variant --library <dir> --identity <package-identity> --rom <original-image> [--cc <compiler> --sdk-dir <platforms-dir>]\n"
                "       segarecomp mod inspect [--json] [<dir|package.segapatch>]\n"
-               "       segarecomp mod convert-audio <file.wav> --out <file.u8>\n";
+               "       segarecomp mod convert-audio <file.wav> --out <file.u8>\n"
+               "       segarecomp mod apply <dir|package.segapatch> --rom <original-image> --out <edited-image>\n"
+               "       segarecomp mod import-hints <dir> --revision <label> --from <hint-file>\n";
   return 2;
 }
 
@@ -270,7 +344,8 @@ int usage() {
 
 int segarecomp_mod_command(int argc, char **argv) {
   const std::string_view sub = argc >= 3 ? argv[2] : "";
-  std::string cc, platform, id, tmpl, rom_sha, approve, identity;
+  std::string cc, platform, id, tmpl, rom_sha, approve, identity, revision;
+  fs::path hints;
   fs::path out, sdk, rom, library;
   std::string target;
   for (int i = 3; i < argc; ++i) {
@@ -286,6 +361,8 @@ int segarecomp_mod_command(int argc, char **argv) {
     else if (a == "--rom-sha256") { if (!value(rom_sha)) return usage(); }
     else if (a == "--approve") { if (!value(approve)) return usage(); }
     else if (a == "--identity") { if (!value(identity)) return usage(); }
+    else if (a == "--revision") { if (!value(revision)) return usage(); }
+    else if (a == "--from") { if (!value(tmp)) return usage(); hints = tmp; }
     else if (a == "--rom") { if (!value(tmp)) return usage(); rom = tmp; }
     else if (a == "--library") { if (!value(tmp)) return usage(); library = tmp; }
     else if (a == "--json") continue;   // output is always JSON
@@ -324,6 +401,7 @@ int segarecomp_mod_command(int argc, char **argv) {
     const fs::path toml = fs::path(target) / "mod.toml";
     if (fs::exists(toml, ec)) return refuse({"E_ARCHIVE_ENTRY", "mod.toml already exists"});
     std::string text = mod::init_project_text(platform, id);
+    if (tmpl == "rom-edit") text += "\n[[source]]\nkind = \"rom-edit-set\"\npath = \"edits/main.edits\"\n";
     if (!rom_sha.empty()) {
       const bool hex = rom_sha.size() == 64 && rom_sha.find_first_not_of("0123456789abcdef") == std::string::npos;
       if (!hex) return refuse({"E_FIELD_VALUE", "--rom-sha256 must be 64 lowercase hex digits"});
@@ -355,10 +433,12 @@ int segarecomp_mod_command(int argc, char **argv) {
       pf << kProviderTemplate;
       if (!pf) return refuse({"E_ARCHIVE_ENTRY", "the template cannot be written"});
       created += ",\"src/provider.c\"";
-    } else if (tmpl == "rom-edit") {   // placeholder: ROM edits arrive with the edit-set milestone; nothing is declared yet
-      std::ofstream nf(fs::path(target) / "NOTES.txt", std::ios::binary);
-      nf << "Placeholder: rom-edit-set payloads are reserved and not accepted by this release. Keep the revision digest above; add an edit source when it ships.\n";
-      created += ",\"NOTES.txt\"";
+    } else if (tmpl == "rom-edit") {   // a commented edit file; add edit lines, then `mod check` and `mod apply`
+      fs::create_directories(fs::path(target) / "edits", ec);
+      std::ofstream nf(fs::path(target) / "edits" / "main.edits", std::ios::binary);
+      nf << kEditTemplate;
+      if (!nf) return refuse({"E_ARCHIVE_ENTRY", "the template cannot be written"});
+      created += ",\"edits/main.edits\"";
     }
     std::cout << "{\"ok\":true,\"created\":[" << created << "]}\n";
     return 0;
@@ -384,6 +464,8 @@ int segarecomp_mod_command(int argc, char **argv) {
     std::cout << "{\"ok\":true," << package_json(m, c.reread.identity, c.reread.content_digest) << ",\"package_bytes\":" << c.package.size() << (sub == "build" ? ",\"built\":true" : sub == "pack" ? ",\"packed\":true" : "") << "}\n";
     return 0;
   }
+  if (sub == "apply" && !target.empty() && !rom.empty() && !out.empty()) return apply_edits(target, rom, out);
+  if (sub == "import-hints" && !target.empty() && !revision.empty() && !hints.empty()) return import_hints(target, revision, hints);
   if (sub == "convert-audio" && !target.empty() && !out.empty()) {
     std::vector<std::uint8_t> bytes;
     if (!read_all(target, mod::kMaxArchiveBytes, bytes)) return refuse({"E_ARCHIVE_ENTRY", "the audio file cannot be read"});

@@ -1,6 +1,6 @@
 # `.segapatch` schema 3 (normative)
 
-Status: accepted contract (SEG-133-T002, ADR [0281](../decisions/0281-segapatch-schema-3.md)). **Reader, canonical packer and `mod.toml` mapping are implemented** (F02, ADR [0288](../decisions/0288-modding-platform-host-implementation.md); `libs/media/src/mod_package.cpp`); identity/cache use (SEG-135-T005), edits, Luau, geometry and disc kinds are not. Inputs: the
+Status: accepted contract (SEG-133-T002, ADR [0281](../decisions/0281-segapatch-schema-3.md)). **Reader, canonical packer and `mod.toml` mapping are implemented** (F02, ADR [0288](../decisions/0288-modding-platform-host-implementation.md); `libs/media/src/mod_package.cpp`); identity/cache use (SEG-135-T005), typed edits and symbols (SEG-136-T001/T002, ADR 0290), Luau, geometry and disc kinds are not. Inputs: the
 [gap inventory](modding-platform-gap-inventory.md) (existing limits) and [adapter vocabulary](mod-platform-adapters.md). Consumers: SEG-135-T001/T002/T003, SEG-136-T001,
 SEG-139/SEG-133-T004 (geometry declarations), SEG-145-T002 (audio assets), SEG-148-T001 (disc payloads), SEG-141 (identities).
 Section numbers below are stable citation targets ("schema 3 section N").
@@ -54,6 +54,7 @@ Field order below is the canonical order.
 | `state_schema` | integer | required iff `state.mod` is declared, else forbidden | 1 to 2147483647; the version of the mod's serialized state ([phases](mod-execution-phases.md) section 6.2) |
 | `hooks` | array | optional; requires capability `hook.function` | **reserved key**: the content model (site, class, mode, replacement contract) is defined by SEG-138-T004 consistently with [phases](mod-execution-phases.md) section 5; until then any element is `E_FIELD_UNKNOWN` |
 | `mappings` | array | optional | **reserved key**: audio declared mappings, content model defined by SEG-145-T002 within [modding-audio-architecture.md](modding-audio-architecture.md) section 5; until then any element is `E_FIELD_UNKNOWN` |
+| `symbols` | array of objects | optional | per-revision guest symbols with address provenance (ADR [0290](../decisions/0290-typed-rom-edits-and-revision-symbols.md)): `{"name","revision","address","provenance"}`; at most 255, strictly sorted by (name, revision); `name` a token of at most 64 characters, `revision` declared, `address` an image offset below 16 MiB, `provenance` `manual` \| `verified` \| `imported-hint`; only `verified` entries may be an edit site |
 | `limits` | object | optional | requested resource limits; keys `luau_memory_bytes`, `luau_budget_units` (integers); each MUST be <= the policy default of [luau-trust-policy.md](luau-trust-policy.md) section 4 (a package may request less, never more: `E_LIMIT_EXCEEDS_POLICY`); other keys `E_FIELD_UNKNOWN` |
 | `geometry` | object | optional | geometry declaration: `{"scenes":[...]}`; the content model is SEG-139-T004's; schema 3 only reserves the key and requires `E_FIELD_UNKNOWN` for any other key inside until then |
 | `presentation_defaults` | object | optional | as schema 1/2 (`widescreen`, `side_style`) |
@@ -67,7 +68,7 @@ A package MAY contain any set of payloads that is legal for its platform, subjec
 | `kind` (v) | Platforms | Meaning | Trust class | Kind fields | Caps |
 |---|---|---|---|---|---|
 | `bps-image` (1) | genesis, master-system | standard BPS1 delta producing a patched cartridge image | data | `target_sha256` | <= 16 MiB; image <= 16 MiB |
-| `rom-edit-set` (1) | genesis, master-system | typed ROM edits with expected-value assertions (SEG-136-T001 defines entries) | data | `edits` count (informational, verified) | <= 1 MiB; <= 4096 edits |
+| `rom-edit-set` (1) | genesis, master-system | typed ROM edits with expected-value assertions: ASCII text, one edit per line `<revision\|*> <type> <site> <expected> <value>` (ADR [0290](../decisions/0290-typed-rom-edits-and-revision-symbols.md)); checked by the reader | data | `edits` count (informational, verified) | <= 1 MiB; <= 4096 edits |
 | `guest-code` (1) | genesis, master-system | pre-assembled guest machine code with placement and expected original bytes (assembly source is a different, reserved kind `guest-asm`) | data | `cpu` (`m68k` \| `z80`) | <= 1 MiB total |
 | `native-c11` (1) | genesis (ABI 2), master-system and sega-cd (typed feature tables, SEG-146-T003) | portable C11 source files compiled by the product into the Patched program | **native** | `role` (`provider`) | <= 64 files, each <= 256 KiB, total <= 2 MiB |
 | `luau-source` (1) | genesis, master-system, sega-cd | Luau source; bytecode is produced only by the pinned trusted compiler at build (Luau policy) | luau | `role` (`script`) | <= 64 files, each <= 128 KiB, total <= 1 MiB |
@@ -80,7 +81,7 @@ A reserved kind is **parseable** (its envelope is validated) and **rejected** wi
 `kind_version` is `E_PAYLOAD_VERSION_UNKNOWN`. Platform-scoped means: a kind used on a platform not listed for it is `E_PAYLOAD_PLATFORM`. Examples: `guest-code` with `cpu` `z80` is legal on `genesis` and `master-system` only
 for the CPUs those machines have; `m68k` guest code on `master-system` is `E_PAYLOAD_PLATFORM`. Per-CPU Sega CD payloads are reserved kinds (above), never `guest-code`.
 
-**Combination rules.** (a) At most one `bps-image`; schema 3 v1 allows one image-producing mechanism per package: `bps-image` cannot coexist with `rom-edit-set` or `guest-code` (`E_PAYLOAD_COMBINATION`); `rom-edit-set` and `guest-code` may coexist and are applied in that order. (b) `native-c11` requires `abi` and `author`; `abi` without `native-c11` is `E_FIELD_UNKNOWN`. (c) Duplicate `path` is `E_PAYLOAD_DUPLICATE`. (d) Every `capabilities` entry MUST be consistent with the payloads
+**Combination rules.** (a) At most one `bps-image` and at most one `rom-edit-set` (`E_PAYLOAD_COMBINATION`; one edit file carries the edits of every revision, so overlap, assertions and the effective digest are judged over one set, ADR 0290); schema 3 v1 allows one image-producing mechanism per package: `bps-image` cannot coexist with `rom-edit-set` or `guest-code` (`E_PAYLOAD_COMBINATION`); `rom-edit-set` and `guest-code` may coexist and are applied in that order. (b) `native-c11` requires `abi` and `author`; `abi` without `native-c11` is `E_FIELD_UNKNOWN`. (c) Duplicate `path` is `E_PAYLOAD_DUPLICATE`. (d) Every `capabilities` entry MUST be consistent with the payloads
 (for example `memory.write.*` requires `native-c11` or `luau-source`); an inconsistent declaration is `E_CAPABILITY_INCONSISTENT`.
 
 **Asset classes** (`asset_class`): `image` (fields: `width`, `height`, `format` `rgba8`), `data` (opaque; `format` token), `audio` (fields below). Assets are declared and size/digest checked; the product never decodes game formats.
@@ -147,6 +148,8 @@ Schema 3 fixes only the envelope: `kind`, `kind_version`, `path`, `size`, `sha25
 | `E_SOURCE_PLATFORM`, `E_SOURCE_KIND_RESERVED`, `E_SOURCE_DIGEST` | section 5 |
 | `E_PAYLOAD_KIND_UNKNOWN`, `E_PAYLOAD_KIND_RESERVED`, `E_PAYLOAD_VERSION_UNKNOWN`, `E_PAYLOAD_PLATFORM`, `E_PAYLOAD_COMBINATION`, `E_PAYLOAD_DUPLICATE`, `E_PAYLOAD_DIGEST`, `E_PAYLOAD_CAP` | section 4 |
 | `E_CAPABILITY_UNKNOWN`, `E_CAPABILITY_UNSUPPORTED`, `E_CAPABILITY_INCONSISTENT` | section 6 |
+| `E_EDIT_SYNTAX`, `E_EDIT_REVISION`, `E_EDIT_COUNT`, `E_EDIT_OVERLAP`, `E_EDIT_RANGE`, `E_EDIT_EXPECTED_MISMATCH` | a `rom-edit-set` payload (ADR 0290); the last two are raised when edits are applied to an image |
+| `E_SYMBOL_UNKNOWN`, `E_SYMBOL_NOT_VERIFIED`, `E_SYMBOL_DUPLICATE`, `E_SYMBOL_REVISION` | the `symbols` key and symbol edit sites (ADR 0290) |
 | `E_TRUST_UNDECLARED` | a `native-c11` payload without `author`/`abi` |
 | `E_LIMIT_EXCEEDS_POLICY`, `E_LUAU_BYTECODE` | requested limit above policy; a `luau-source` payload that is not Luau text (section 4, Luau policy section 2) |
 

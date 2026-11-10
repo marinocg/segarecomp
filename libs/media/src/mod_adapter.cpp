@@ -14,9 +14,9 @@ constexpr std::array<std::string_view, 1> kU8Mono = {"u8-mono"};
 
 // The adapter table (mod-platform-adapters.md sections 2 and 3). Master System has no PCM channel in this milestone (PSG only), hence no audio conversion.
 constexpr std::array<Adapter, 3> kAdapters = {{
-    {"genesis", "cartridge-image", 1U, "segarecomp_mod_genesis.h", "m68k.work_ram", kGenesisRead, kU8Mono, 0},
-    {"master-system", "cartridge-image", 2U, "segarecomp_mod_sms.h", "z80.work_ram", kSmsRead, {}, 1},
-    {"sega-cd", "disc-image", 3U, "segarecomp_mod_scd.h", "main.work_ram", kScdRead, kU8Mono, 2},
+    {"genesis", "cartridge-image", 1U, "segarecomp_mod_genesis.h", "m68k.work_ram", kGenesisRead, kU8Mono, 0, true},
+    {"master-system", "cartridge-image", 2U, "segarecomp_mod_sms.h", "z80.work_ram", kSmsRead, {}, 1, false},
+    {"sega-cd", "disc-image", 3U, "segarecomp_mod_scd.h", "main.work_ram", kScdRead, kU8Mono, 2, true},
 }};
 
 constexpr Support U = Support::unsupported, E = Support::experimental, L = Support::supported_with_limitations;

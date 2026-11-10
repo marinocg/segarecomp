@@ -27,7 +27,7 @@ segarecomp mod install demo.segapatch --rom <original image> --library <dir> --a
 segarecomp mod variant --library <dir> --identity <package_identity> --rom <original image> --cc cc --sdk-dir <platforms-dir>
 ```
 
-* **Templates** (`init --template`): `c11-provider` (Genesis; a minimal ABI 2 provider that touches no guest state), `luau` (the default example script, any platform) and `rom-edit` (a placeholder: ROM edits are reserved, so it only keeps the revision declaration and a note). Without `--rom-sha256` the revision digest is zeros and must be replaced.
+* **Templates** (`init --template`): `c11-provider` (Genesis; a minimal ABI 2 provider that touches no guest state), `luau` (the default example script, any platform) and `rom-edit` (a commented `edits/main.edits` declared as a `rom-edit-set` source). Without `--rom-sha256` the revision digest is zeros and must be replaced.
 * **`pack` and `build`** produce byte-identical packages from the same project, independent of working directory or location; `build` additionally compiles the native units with the host's strict C11 flags.
 * **`install`** verifies the package against the exact original image (one of the declared revisions) and copies the verified bytes to `<library>/mods/<identity>.segapatch`. `--approve` records the approval of that exact identity; it is required before a package with native code can be turned into a variant and never transfers to another identity (`E_APPROVAL_MISMATCH`, `E_NOT_APPROVED`).
 * **`variant`** computes the single-mod variant key from the original image digest, the effective image digest (the `bps-image` target, else the original), the package identity, the digest of the native and Luau sources, the ABI and the capabilities, and prints those components. Equal inputs report `"cache":"hit"`; otherwise `"cache":"miss"` with `reasons` naming the components that changed against the previous build of that mod on that image (`no_previous_build` for the first). A build that fails (for example a broken C11 unit, `E_COMPILE_FAILED`) publishes nothing: earlier variants, the original image, Vanilla builds and saves are never written. Only `<library>/cache/variants` is ever created or changed.
@@ -48,9 +48,35 @@ A closed TOML subset: tables, arrays of tables, strings, non-negative integers a
 | `[state]`, `[limits]`, `[presentation]` | `schema`; `luau_memory_bytes`, `luau_budget_units`; `widescreen`, `side_style` |
 | `[geometry]` | `scenes = []` only (reserved; any content is refused) |
 | `[[source]]` | `kind` (`native-c11`, `luau-source`, `asset`, `bps-image`, `rom-edit-set`, `guest-code`), `path` (project-relative: lower-case, at most 3 segments, no `..`), plus kind fields (`target_sha256`, `cpu`, `asset_class`, audio fields, ...) |
+| `[[symbol]]` | `name` (token), `revision` (a declared label), `address` (string `"0x..."`, below `0x01000000`), `provenance` (`manual`, `verified`, `imported-hint`); one per (name, revision). Only `verified` entries may be an edit site |
 | `[[audio.mapping]]`, `[[audio.mapping.value]]` | declared audio mappings: [audio architecture](../architecture/modding-audio-architecture.md) sections 5 and 9 |
 
 The manifest is derived only from these fields and the bytes of the named files, so two loads of the same project on different machines, folders or working directories produce byte-identical packages.
+
+## ROM edits and symbols
+
+A `rom-edit-set` source is a text file, one edit per line (`#` comments and blank lines allowed):
+
+```text
+# <revision|*> <type> <site> <expected> <value>      (comments only on their own lines)
+# 16-bit in the platform's byte order (Genesis: big-endian, Master System: little-endian)
+rev-a u16 0x00000200 0x1234 0x5678
+# explicit little-endian; the site is the verified symbol "title" plus 4
+rev-a u32le @title+0x4 0x00000001 0x00000002
+rev-b bytes 0x00000300 aabbcc ddeeff
+# every declared revision, asserted against each
+* u8 0x00000010 0x00 0x01
+```
+
+`expected` is checked against the exact original image before `value` replaces it; a mismatch, an overlap within one revision, an unverified symbol or an edit beyond the image refuses the build and writes nothing. Revisions resolve independently. Integers are `0x` plus exactly `2 x width` lower-case hex digits. Details and stable classes: ADR [0290](../decisions/0290-typed-rom-edits-and-revision-symbols.md).
+
+```sh
+segarecomp mod check <dir>                                            # syntax, count, symbols, overlap for every revision
+segarecomp mod apply <dir|package.segapatch> --rom <original-image> --out <edited-image>   # one revision, selected by the image digest
+segarecomp mod import-hints <dir> --revision <label> --from <symbols.csv>                 # imported-hint entries only
+```
+
+Symbols (`[[symbol]]`) name a location per revision: `@name` or `@name+0xN` in a site resolves to that revision's `verified` address. `manual` and `imported-hint` entries are recorded in the package and printed by `mod inspect` (`symbols` with `provenance`) but are refused as edit sites. Public symbol maps hold names only (lower-case tokens), never disassembly.
 
 ## Native sources
 
