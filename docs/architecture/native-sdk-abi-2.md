@@ -1,7 +1,6 @@
 # Native SDK ABI 2
 
-Status: accepted contract (SEG-133-T003, ADR [0283](../decisions/0283-native-sdk-abi-2.md)). **Not implemented** (SEG-135-T003 and SEG-138 implement it). The header skeleton below is documentation only and is
-**not** committed to `platforms/genesis/sdk/segarecomp_genesis_patch.h` (ABI 1 stays untouched).
+Status: accepted contract (SEG-133-T003, ADR [0283](../decisions/0283-native-sdk-abi-2.md)). **Headers, typed feature tables, negotiation and the multi-file host compile are implemented** (F02, ADR [0288](../decisions/0288-modding-platform-host-implementation.md)); the runtime services, phase dispatch and linking of an ABI 2 provider into a Patched program are SEG-138. The header skeleton below is the contract; the committed headers are `platforms/sdk/segarecomp_mod.h` (core, negotiation), `platforms/genesis/sdk/segarecomp_mod_genesis.h`, `platforms/master-system/sdk/segarecomp_mod_sms.h` and `platforms/sega-cd/sdk/segarecomp_mod_scd.h`. ABI 1 (`platforms/genesis/sdk/segarecomp_genesis_patch.h`) is untouched.
 Inputs: [schema 3](segapatch-schema-3.md), [phases](mod-execution-phases.md), [adapters](mod-platform-adapters.md), [gap inventory](modding-platform-gap-inventory.md).
 Named consumers: SEG-135-T003 (multi-file C11 packages), SEG-146-T002/T003 (adapter plumbing, typed feature tables), SEG-137-T004 (Luau bindings), SEG-138-T001/T002/T004 (phases, memory, hooks), SEG-145-T001/T008 (audio).
 
@@ -153,3 +152,9 @@ No function exposes a raw runtime pointer; pointers in render views are valid on
 ## 9. Named later consumers
 
 SEG-135-T003 (build integration, multi-file sources), SEG-146-T002 and T003 (adapter plumbing and typed tables), SEG-137-T004 (bindings), SEG-138-T001/T002 (phases and memory services), SEG-138-T004 (hooks), SEG-145-T008 (audio capabilities 13/14).
+
+## 10. Implementation notes (F02, ADR 0288)
+
+* The core header adds the preprocessor ids `SEGA_MOD_PLATFORM_ID_*`, the capability id constants `SEGA_MOD_CAP_*`, and the host-side `sega_mod_negotiate(provider, host, required)` with `sega_mod_negotiation_class` (the stable class names of the table in section 5 for the load-time classes). Platform feature tables are `SegaGenesisFeatures`, `SegaMasterSystemFeatures` and `SegaCdFeatures` (lifecycle and capability reporting only for Master System and Sega CD until SEG-147-T004 / SEG-148-T005).
+* Build-time rejection: the host compiles each unit with `-DSEGA_MOD_TARGET_PLATFORM=<id> -DSEGA_MOD_TARGET_ABI_MAJOR=2U`; a platform header for another platform fails with `E_ABI_PLATFORM` in its `#error` text, a mismatched ABI major with `E_ABI_HEADER_MISMATCH`. The include scan reports another platform's header as `E_ABI_PLATFORM` and the ABI 1 header as `E_ABI_MIXED` before compiling.
+* Test: `tests/mod_sources_test.py` with the synthetic providers and `negotiate_harness.c` under `tests/fixtures/mod_sdk/`.

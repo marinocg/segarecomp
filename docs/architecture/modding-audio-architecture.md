@@ -1,6 +1,6 @@
 # Audio modding architecture and verified capability matrix
 
-Status: accepted contract (SEG-145-T001, ADR [0286](../decisions/0286-audio-modding-architecture.md)). **Nothing here is implemented**; it records what already exists so no task re-implements hardware, and fixes the shared vocabulary.
+Status: accepted contract (SEG-145-T001, ADR [0286](../decisions/0286-audio-modding-architecture.md)). **Audio asset and mapping declarations are implemented** (SEG-145-T002, ADR [0288](../decisions/0288-modding-platform-host-implementation.md)); the runtime audio API, host audio and platform integrations are not. It records what already exists so no task re-implements hardware, and fixes the shared vocabulary.
 Verified against this tree. Inputs: [gap inventory](modding-platform-gap-inventory.md) section 4, [schema 3](segapatch-schema-3.md), [ABI 2](native-sdk-abi-2.md), [phases](mod-execution-phases.md), [adapters](mod-platform-adapters.md).
 Consumers: SEG-145-T002 (audio asset declarations), SEG-145-T008 (audio API), SEG-145-T009 (host-audio spike), SEG-145-T012/T013, SEG-145-T005 (CD-DA decision).
 
@@ -75,3 +75,13 @@ The Master System YM2413 FM unit is **unsupported hardware, outside this SDK mil
 
 Checked against [segapatch-schema-3.md](segapatch-schema-3.md) and [native-sdk-abi-2.md](native-sdk-abi-2.md) in this delivery: the `audio` asset class and platform-scoped payload table exist in schema 3 section 4; the reserved `mappings` key points here; ABI 2 capabilities 13-15 and their phases equal section 5 above;
 the Sega CD CD-DA mechanism is chosen by SEG-145-T005 inside the disc envelope owned by SEG-148-T001 ([sega-cd-mod-sources.md](sega-cd-mod-sources.md)). No clarification beyond the text of those documents is required; no incompatible later schema is needed.
+
+## 9. Implemented declarations (SEG-145-T002, ADR 0288)
+
+The `asset-binding` mapping of section 5 carries these additional **additive** fields (all validated at `mod check`): `use` (required: `music-sequence`, `instrument`, `sfx`, `pcm-sample`, `enhanced-soundtrack`),
+`revision` (optional label of a declared source revision; absent = every declared revision; an undeclared label is `E_SOURCE_DIGEST`), `offset` + `length` (optional patch site/range, together), `bank` and `track` (optional integers).
+`pcm-sample` and `enhanced-soundtrack` bind an `audio` asset; the other uses bind a `data` asset (an opaque, token-labelled blob). `enhanced-soundtrack` additionally needs `audio.host.play` (required or optional) declared. `command` and `event` mailboxes are checked against the adapter space tables
+(`E_SPACE_READONLY`, `E_SPACE_UNKNOWN`, `E_ACCESS_RANGE`, `E_ACCESS_ALIGNMENT`); every value must fit its width. Limits: 128 assets, 8 MiB each, at most 600 s and 8000..48000 Hz per audio asset, 64 mappings; a package with an audio asset states its `license`.
+The `audio` asset file must be a canonical 44-byte-header RIFF/WAVE PCM s16le file whose rate, channels and frame count equal the declaration. The one product conversion is the deterministic reference **`u8-mono`** (`segarecomp mod convert-audio`):
+frames are averaged across channels with floor division, then `(sample + 32768) >> 8`; the sample rate is unchanged. Genesis and Sega CD adapters provide it; Master System provides none (PSG only), so a `pcm-sample` binding there is `E_CAPABILITY_UNSUPPORTED`.
+Platform authoring adapters that produce a game's own formats remain mod-supplied; the product never interprets those formats.
