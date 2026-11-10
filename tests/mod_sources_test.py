@@ -63,7 +63,7 @@ def refused(what, root, code, name="out.segapatch"):
     cli.check(rc == 1 and doc and doc.get("class") == code, f"{what}: expected {code}, got {doc and (doc.get('class'), (doc.get('error') or '')[:200])}")
 
 
-PROVIDER = b'#include <segarecomp_mod_genesis.h>\n#include "src/util.h"\nconst SegaModProvider *segarecomp_mod_provider(void **s) { (void)s; return (const SegaModProvider *)0 + util_zero(); }\n'
+PROVIDER = b'#include <segarecomp_mod_genesis.h>\n#include "src/util.h"\nconst SegaModProvider *segarecomp_mod_provider(void **s) { (void)s; return util_zero() ? (const SegaModProvider *)s : (const SegaModProvider *)0; }\n'
 UTIL_H = b"int util_zero(void);\n"
 UTIL_C = b'#include "src/util.h"\nint util_zero(void) { return 0; }\n'
 FILES = {"src/provider.c": PROVIDER, "src/util.h": UTIL_H, "src/util.c": UTIL_C}
