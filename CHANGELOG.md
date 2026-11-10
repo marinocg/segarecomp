@@ -9,8 +9,8 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 ### Native GEMS audio replacement (new, experimental, Genesis; ADR 0291)
 
-* Games whose Z80 sound driver rewrites its own code stay silent on the original path. For one verified driver image - **GEMS 2.5**, uploaded by Aladdin, Earthworm Jim, Jurassic Park and Cool Spot - `segarecomp build --sound-driver gems` (or the *Native GEMS audio replacement* option in a game's Advanced build options) now builds a program where a **native C11 re-implementation** of the driver serves the sound commands. It is not a Z80 emulator and never executes the original driver's code.
-* **Partial coverage, stated everywhere:** digital (DAC) sound effects with sequence start / stop, validated operation by operation against an independent reference implementation. FM / PSG music and every other operation fault explicitly and that game's replacement then stays silent. An unverified driver is refused at build time.
+* Games whose Z80 sound driver rewrites its own code are silent on the original path. For one verified driver image - **GEMS 2.5**, uploaded by Aladdin, Earthworm Jim, Jurassic Park and Cool Spot - `segarecomp build --sound-driver gems` (or the *Native GEMS audio replacement* option in a game's Advanced build options) now builds a program where a **native C11 re-implementation** of the driver plays the game's music and effects. It is not a Z80 emulator and never executes the original driver's code.
+* **The driver's whole command and sequence-event set** (FM, PSG, noise and digital patches, envelopes, tempo, loops, pitch bend, looped / slow / compressed samples), compared operation by operation with an independent reference implementation over long runs of all four games. Only malformed data stops it (explicit fault, silent afterwards); an unverified driver is refused at build time. Save states are unavailable while it is active.
 * Build metadata (`status.json` `audio_implementation`) records the requested and actual sound implementation; the launcher's Build provenance has an **Audio implementation** row built from that record only.
 
 ### Widescreen (new)

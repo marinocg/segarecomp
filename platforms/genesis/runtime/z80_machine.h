@@ -51,6 +51,7 @@ typedef struct GenesisZ80NativeDriver {
   void *context;
   int (*identify)(void *context, const uint8_t signature[32], const char **version);   /* 1 = verified image */
   void (*start)(void *context, struct GenesisZ80Machine *machine, uint64_t master_ticks);
+  void (*suspend)(void *context, uint64_t master_ticks);   /* BUSREQ or /RESET asserted: the Z80 stops (optional, may be NULL) */
   void (*resume)(void *context, uint64_t master_ticks);
   int (*run_to)(void *context, uint64_t master_ticks);                                  /* 0 healthy, else a fault; the driver stays inert */
   void (*report)(const void *context, GenesisZ80NativeReport *out);

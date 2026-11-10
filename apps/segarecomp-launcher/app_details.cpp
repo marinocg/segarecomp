@@ -753,7 +753,7 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
         ImGui::EndDisabled();
         y = ImGui::GetCursorScreenPos().y + ctx_.u(2.0F);
         ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-        y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner, "Default off. Replaces the game's own GEMS sound driver by a verified native implementation, only when the game uses exactly a driver image it was verified for; otherwise the build fails and nothing changes. Coverage is partial. It changes the build.") + ctx_.u(4.0F);
+        y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner, "Default off. Replaces the game's own GEMS sound driver by a verified native implementation, only when the game uses exactly a driver image it was verified for; otherwise the build fails and nothing changes. Save states are unavailable while it is active. It changes the build.") + ctx_.u(4.0F);
       }
       ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
       y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, scd_game ? "The BIOS, the disc and the build mode are part of the build identity: changing the mode needs a new build, and the current program is kept until the new one is verified. Saves and recordings are never touched by a build."

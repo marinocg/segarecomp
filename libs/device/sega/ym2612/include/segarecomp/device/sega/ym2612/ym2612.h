@@ -49,6 +49,11 @@ void ym2612_advance(Ym2612 *chip, uint64_t master_ticks);
 uint8_t ym2612_read(Ym2612 *chip, uint32_t port, uint64_t master_ticks);
 void ym2612_write(Ym2612 *chip, uint32_t port, uint8_t value, uint64_t master_ticks);
 
+/* The guest master tick at which Timer A next overflows (UINT64_MAX when it is stopped), as of the device's current time (the time of the last access): a
+ * free-running schedule, so a write that only clears the overflow flag does not move it. A sound driver that paces itself on Timer A asks this right after the
+ * write that (re)arms the timer. */
+uint64_t ym2612_timer_a_expiry(const Ym2612 *chip);
+
 /* Number of native samples generated so far, and a deterministic 64-bit digest of the complete device state (ymfm registers and
  * internal phase/envelope state, host timers, busy end and clock). */
 uint64_t ym2612_samples_generated(const Ym2612 *chip);

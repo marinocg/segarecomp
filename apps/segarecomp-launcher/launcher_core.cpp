@@ -447,8 +447,8 @@ AudioReport read_audio_report(const fs::path &entry) {
   };
   if (kind == "native_driver") {
     const std::string driver = policy_field(object, "driver"), verification = policy_field(object, "verification");
-    if (driver != "gems" || !one_of(verification, {"build_qualified", "reference_checked"}) || !one_of(audio_status, {"partial", "degraded"}) ||
-        policy_field(object, "coverage") != "partial")
+    if (driver != "gems" || !one_of(verification, {"build_qualified", "reference_checked"}) || !one_of(audio_status, {"supported", "degraded"}) ||
+        policy_field(object, "coverage") != "complete")
       return report;
     report.driver = driver;
     report.verification = verification;
@@ -491,15 +491,15 @@ std::string audio_detail(const AudioReport &report) {
   if (report.state == AudioReport::State::not_recorded) return "No audio details were recorded for this build; nothing is inferred.";
   if (report.kind == "native_driver") {
     std::string text = "Driver family GEMS, version " + (report.version == "unknown" ? std::string("unknown") : report.version + " (matched to the published driver's layout and tables)") +
-                       ". Coverage: partial - digital (DAC) sound effects and sequence start / stop only; any other operation stops the replacement. ";
+                       ". Coverage: the driver's complete command and sequence-event set (FM, PSG, noise and digital patches, envelopes, tempo, loops); timing is event-accurate, not cycle-accurate. ";
     if (report.rewrites_own_code_known && report.rewrites_own_code)
       text += "Reason: the original Z80 sound driver rewrites its own executable code, which the native AOT path does not support. ";
     else text += "Reason: selected explicitly for this build. ";
     text += report.verification == "reference_checked"
-                ? "Validation: reference-checked for this driver image (compared against an independent implementation); this executable's playback has not been verified. "
+                ? "Validation: reference-checked for this driver image (compared with an independent implementation); this executable's playback has not been verified. "
                 : "Validation: build-qualified only, not independently audio-verified. ";
     if (report.observed_fault == "none") text += "The build's start-up run met no unsupported operation";
-    else text += "The build's start-up run stopped the replacement at an unsupported operation (" + report.observed_fault + "); the rest of that run was silent";
+    else text += "The build's start-up run stopped the replacement at a malformed or unreadable resource (" + report.observed_fault + "); the rest of that run was silent";
     if (report.commands >= 0 && report.sequences >= 0) text += " (" + std::to_string(report.commands) + " commands, " + std::to_string(report.sequences) + " sequences";
     if (report.commands >= 0 && report.sequences >= 0) text += report.dac_samples >= 0 ? ", " + std::to_string(report.dac_samples) + " DAC samples)." : ").";
     else text += ".";

@@ -33,7 +33,9 @@ static int gems_rom_read(void *context, uint32_t address, uint8_t *destination, 
 
 static void gems_ym_write(void *context, uint32_t port, uint8_t value, uint64_t ticks) {
   ++g_gems_machine->count_ym_writes;
+  g_audio.tap_native = 1U;
   (void)genesis_ym2612_port_write((GenesisRuntime *)context, port, value, ticks);
+  g_audio.tap_native = 0U;
 }
 
 static uint8_t gems_ym_read(void *context, uint32_t port, uint64_t ticks) {
@@ -43,9 +45,13 @@ static uint8_t gems_ym_read(void *context, uint32_t port, uint64_t ticks) {
   return value;
 }
 
+static uint64_t gems_timer_a_expiry(void *context) { (void)context; return ym2612_timer_a_expiry(g_audio.ym); }
+
 static void gems_psg_write(void *context, uint8_t value, uint64_t ticks) {
   ++g_gems_machine->count_psg_writes;
+  g_audio.tap_native = 1U;
   (void)genesis_psg_port_write((GenesisRuntime *)context, value, ticks);
+  g_audio.tap_native = 0U;
 }
 
 static void gems_command_tap(void *context, const uint8_t *bytes, unsigned count, uint64_t ticks) {
@@ -68,11 +74,20 @@ static void native_start(void *context, GenesisZ80Machine *machine, uint64_t tic
   host.ym_write = gems_ym_write;
   host.ym_read = gems_ym_read;
   host.psg_write = gems_psg_write;
+  host.ym_timer_a_expiry = gems_timer_a_expiry;
   host.command_tap = gems_command_tap;
   gems_native_start(&g_gems, &host, ticks);
 }
 
-static void native_resume(void *context, uint64_t ticks) { (void)context; gems_native_resume(&g_gems, ticks); }
+static void native_suspend(void *context, uint64_t ticks) {   /* validation seam: where the Z80 bus was taken from the driver */
+  (void)context;
+  if (g_audio.write_tap != NULL) g_audio.write_tap(g_audio.write_tap_context, 'S', 0U, 0U, ticks);
+}
+static void native_resume(void *context, uint64_t ticks) {
+  (void)context;
+  if (g_audio.write_tap != NULL) g_audio.write_tap(g_audio.write_tap_context, 'U', 0U, 0U, ticks);
+  gems_native_resume(&g_gems, ticks);
+}
 static int native_run_to(void *context, uint64_t ticks) { (void)context; return (int)gems_native_run_to(&g_gems, ticks); }
 
 static void native_report(const void *context, GenesisZ80NativeReport *out) {
@@ -97,7 +112,7 @@ static void native_digest(const void *context, uint8_t out[32]) {
   values[0] = g_gems.count_commands; values[1] = g_gems.count_sequences; values[2] = g_gems.count_dac_samples; values[3] = g_gems.count_ticks;
   values[4] = g_gems.count_missed_ticks; values[5] = g_gems.dac_due; values[6] = (uint64_t)g_gems.fault; values[7] = g_gems.sample_pointer;
   values[8] = g_gems.sample_counter; values[9] = ((uint64_t)g_gems.fifo_read << 8) | g_gems.fifo_write; values[10] = g_gems.dac_active;
-  values[11] = ((uint64_t)g_gems.dac_voice.flags << 8) | g_gems.fdf_state;
+  values[11] = ((uint64_t)g_gems.fm[4].flags << 8) | g_gems.fdf_state;
   genesis_sha256_init(&sha);
   for (i = 0U; i < 12U; ++i) {
     for (b = 0U; b < 8U; ++b) word[b] = (uint8_t)(values[i] >> (8U * b));
@@ -112,7 +127,7 @@ static void native_digest(const void *context, uint8_t out[32]) {
   genesis_sha256_final(&sha, out);
 }
 
-static const GenesisZ80NativeDriver g_gems_ops = {NULL, native_identify, native_start, native_resume, native_run_to, native_report, native_digest};
+static const GenesisZ80NativeDriver g_gems_ops = {NULL, native_identify, native_start, native_suspend, native_resume, native_run_to, native_report, native_digest};
 #endif
 
 GenesisZ80Machine *genesis_sound_attach(GenesisRuntime *runtime) {

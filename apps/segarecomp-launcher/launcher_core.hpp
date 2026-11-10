@@ -182,7 +182,7 @@ struct AudioReport {
   State state = State::not_recorded;
   std::string kind;                // native_driver | original_z80_aot
   std::string driver, version, verification;   // native: "gems", "2.5" or "unknown", build_qualified | reference_checked
-  std::string audio_status;        // partial | supported | degraded
+  std::string audio_status;        // supported | degraded
   std::string observed_fault;      // the first unsupported operation the build's own start-up run met ("none" when none)
   long long commands = -1, sequences = -1, dac_samples = -1, alternative_forms = -1;
   bool rewrites_own_code_known = false, rewrites_own_code = false;

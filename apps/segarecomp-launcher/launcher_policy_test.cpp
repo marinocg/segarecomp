@@ -353,17 +353,17 @@ int main(int argc, char **argv) {
 
   // ADR 0291: the audio implementation of a build comes only from its own recorded `audio_implementation` member.
   {
-    const std::string native_status = R"({"status":"ok","genesis_audio":"native_partial","audio_implementation":{"schema":1,"requested":"gems","kind":"native_driver","selection":"explicit",)"
-        R"("driver":"gems","version":"2.5","version_evidence":"address_map_and_tables","implementation_version":1,"coverage":"partial","verification":"reference_checked",)"
+    const std::string native_status = R"({"status":"ok","genesis_audio":"native","audio_implementation":{"schema":1,"requested":"gems","kind":"native_driver","selection":"explicit",)"
+        R"("driver":"gems","version":"2.5","version_evidence":"address_map_and_tables","implementation_version":1,"coverage":"complete","verification":"reference_checked",)"
         R"("identity":"f68e547d7dec54d2","native_images":1,"original_images":1,"reason":"explicit_selection","original_driver_rewrites_own_code":true,)"
-        R"("static_code_write_candidates":9,"audio_status":"partial","observed":{"window_frames":600,"fault":"none","commands":17,"sequences":7,"dac_samples":19615,"ticks":571}}})";
+        R"("static_code_write_candidates":9,"audio_status":"supported","observed":{"window_frames":600,"fault":"none","commands":17,"sequences":7,"dac_samples":19615,"ticks":571}}})";
     const auto native = read_audio_report(write_status(dir, "audio_native", native_status));
     expect(native.state == AudioReport::State::known && native.kind == "native_driver" && native.driver == "gems" && native.version == "2.5" &&
                native.verification == "reference_checked" && native.observed_fault == "none" && native.commands == 17 && native.sequences == 7 && native.rewrites_own_code,
            "a native GEMS record is read field by field");
     expect(audio_headline(native) == "Native GEMS replacement", "native headline");
     const std::string native_text = audio_detail(native);
-    expect(native_text.find("GEMS") != std::string::npos && native_text.find("version 2.5") != std::string::npos && native_text.find("partial") != std::string::npos &&
+    expect(native_text.find("GEMS") != std::string::npos && native_text.find("version 2.5") != std::string::npos && native_text.find("complete command and sequence-event set") != std::string::npos &&
                native_text.find("rewrites its own executable code") != std::string::npos && native_text.find("reference-checked") != std::string::npos &&
                native_text.find("has not been verified") != std::string::npos && native_text.find("met no unsupported operation") != std::string::npos,
            "native detail states driver, version, coverage, reason, validation tier and that playback is not verified: " + native_text);
@@ -371,7 +371,7 @@ int main(int argc, char **argv) {
     std::string qualified = native_status;
     qualified.replace(qualified.find("reference_checked"), 17, "build_qualified");
     qualified.replace(qualified.find("\"fault\":\"none\""), 14, "\"fault\":\"unsupported_sample\"");
-    qualified.replace(qualified.find("\"partial\",\"observed\""), 9, "\"degraded\"");
+    qualified.replace(qualified.find("\"supported\",\"observed\""), 11, "\"degraded\"");
     const auto qualified_report = read_audio_report(write_status(dir, "audio_qualified", qualified));
     expect(qualified_report.state == AudioReport::State::known && qualified_report.audio_status == "degraded" &&
                audio_detail(qualified_report).find("build-qualified only, not independently audio-verified") != std::string::npos &&
@@ -396,10 +396,10 @@ int main(int argc, char **argv) {
     expect(none.state == AudioReport::State::not_recorded && audio_headline(none) == "Not recorded", "an older build without the member says Not recorded");
     expect(read_audio_report(dir / "audio_missing").state == AudioReport::State::not_recorded, "no status file at all says Not recorded");
     for (const char *bad : {
-             R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"other","verification":"reference_checked","coverage":"partial","audio_status":"partial"}})",
-             R"({"audio_implementation":{"schema":2,"kind":"native_driver","driver":"gems","verification":"reference_checked","coverage":"partial","audio_status":"partial"}})",
-             R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"gems","verification":"exact","coverage":"partial","audio_status":"partial"}})",
-             R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"gems","verification":"reference_checked","coverage":"full","audio_status":"partial"}})",
+             R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"other","verification":"reference_checked","coverage":"complete","audio_status":"supported"}})",
+             R"({"audio_implementation":{"schema":2,"kind":"native_driver","driver":"gems","verification":"reference_checked","coverage":"complete","audio_status":"supported"}})",
+             R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"gems","verification":"exact","coverage":"complete","audio_status":"supported"}})",
+             R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"gems","verification":"reference_checked","coverage":"full","audio_status":"supported"}})",
              R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"gems","verification":"reference_checked","coverage":"partial","audio_status":"supported"}})",
              R"({"audio_implementation":{"schema":1,"kind":"mystery","audio_status":"supported"}})",
              R"({"audio_implementation":{"schema":1,"kind":"original_z80_aot","audio_status":"partial"}})",
@@ -411,7 +411,7 @@ int main(int argc, char **argv) {
              std::string("a record that is not understood is never a claim: ") + bad);
     }
     const auto weird_fault = read_audio_report(write_status(dir, "audio_weird",
-        R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"gems","version":"<script>","verification":"build_qualified","coverage":"partial","audio_status":"partial","observed":{"fault":"Bad Value!","commands":-3}}})"));
+        R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"gems","version":"<script>","verification":"build_qualified","coverage":"complete","audio_status":"supported","observed":{"fault":"Bad Value!","commands":-3}}})"));
     expect(weird_fault.version == "unknown" && weird_fault.observed_fault == "unknown" && weird_fault.commands == -1, "free text in the record is never displayed as-is");
     // switching the implementation of a rebuilt entry changes what is shown (the same entry directory, a new status)
     write_status(dir, "audio_rebuilt", native_status);

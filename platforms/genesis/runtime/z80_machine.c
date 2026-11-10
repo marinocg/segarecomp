@@ -322,6 +322,8 @@ static int hook_bus_event(void *context, GenesisRuntime *runtime, GenesisZ80Even
                           int epoch, const uint8_t *written, GenesisRuntimeStop *stop) {
   GenesisZ80Machine *machine = (GenesisZ80Machine *)context;
   const uint64_t aligned = ceil_to_z80_clock(master_ticks);
+  if ((event == GENESIS_Z80_EVENT_BUSREQ_ASSERT || event == GENESIS_Z80_EVENT_RESET_ASSERT) && machine->native_active && machine->native_driver->suspend != NULL)
+    machine->native_driver->suspend(machine->native_driver->context, master_ticks);
   switch (event) {
     case GENESIS_Z80_EVENT_RESET_ASSERT:
       ++machine->count_reset_assert;

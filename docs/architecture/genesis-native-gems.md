@@ -24,37 +24,35 @@ Unknown images: `--sound-driver gems` fails the build (`sound_driver_unverified`
 
 | Aspect | Behaviour |
 | --- | --- |
-| Command mailbox | The 68000 appends bytes to a 64-byte ring in the sound RAM (`$1B40`) and publishes its write pointer (`$36`) after each byte; the driver publishes its read pointer (`$37`). A command is `$FF`, an id and its arguments. Bytes that do not start a command are discarded; a write pointer outside the ring is a fault. A command whose arguments are not all written yet waits. |
+| Command mailbox | The 68000 appends bytes to a 64-byte ring in the sound RAM (`$1B40`) and publishes its write pointer (`$36`) after each byte; the driver publishes its read pointer (`$37`). A command is `$FF`, an id and its arguments. Bytes that do not start a command are discarded; an unknown id is consumed and ignored (as the original does); a write pointer outside the ring, or a control-block number above 15, is a fault. A command whose arguments are not all written yet waits. |
 | Ownership / delivery | The 68000 writes only while it holds the Z80 bus, so the driver looks at the ring when the bus is returned (and at boot). |
-| Acknowledgement | The driver's only visible acknowledgement is the read pointer, advanced exactly when a command is consumed. An unsupported command is **not** consumed (no fabricated acknowledgement). The transfer-in-progress mailbox (`$1B21` bit 0) stays 0: the replacement reads the cartridge atomically and never holds the bus; the 68000's block flag (`$1B20`) therefore has nothing to hold off. |
+| Acknowledgement | The driver's only visible acknowledgement is the read pointer, advanced exactly when a command is consumed. The transfer-in-progress mailbox (`$1B21` bit 0) stays 0: the replacement reads the cartridge atomically and never holds the bus; the 68000's block flag (`$1B20`) therefore has nothing to hold off. Mailboxes `[2..31]` are the sequences' `store`/`if` variables and are read and written in the sound RAM the 68000 sees. |
 | Initialisation / reset | Boot silences the four PSG voices. A `/RESET` restart re-boots the driver and clears its state; the ring bytes and pointers (owned by the 68000) are not touched. While the 68000 holds the bus the driver does nothing, work due earlier happens when the bus returns, and a VBlank interrupt edge that falls entirely inside a hold is lost (as on the real Z80). |
-| Tick | One tick per VBlank interrupt. Sub-beat accumulator (default 204 / 256 per tick) selects music-time-base sequencers; SFX-time-base sequencers run every tick. |
-| Resources | The "get pointers" command (11) delivers four 24-bit little-endian pointers (patches, envelopes, sequences, samples). Patches, sequence headers and tracks, sample headers and sample bytes are read from the cartridge image the runtime owns, never from anywhere else; an unmapped read is a fault. |
-| Sequences | start (16) / stop (18) / stop all (22). Track events: delay, duration, note, end, no-op, priority, SFX time base, program change, sample rate. |
-| Digital voice | One-shot, uncompressed samples at the fast Timer A rates: Timer A programmed from the rate, DAC enabled, channel 6 panned centre, one 8-bit write to the DAC register per Timer A expiry (the expiry is confirmed on the YM2612 itself - a mismatch is a fault, never an assumption), 128-byte refills of a two-half FIFO exactly as the original (including its refill-time shutdown that cuts the tail of a non-looped sample), priority-based voice preemption, note-off semantics. |
-| Idle clipping | Every stop clips all FM voices (clamp the four operator levels, key off) and queues the PSG stop that the next tick writes, as the original does. |
+| Tick | One tick per VBlank interrupt. The sub-beat accumulator (tempo-scaled) selects music-time-base work; at fast tempos a tick carries several beats and each is a pass of its own, as in the original's main loop. SFX-time-base work runs every tick. |
+| Resources | The "get pointers" command delivers four 24-bit little-endian pointers (patches, envelopes, sequences, samples). Patches, envelopes, sequence headers and tracks, sample headers and sample bytes are read from the cartridge image the runtime owns, never from anywhere else; an unmapped read is a fault. Offsets are 8-bit-wrapped where the original wraps them. |
+| Commands | note on / off, program change / update, pitch bend, tempo, envelope, retrigger, get pointers, pause, resume, sustain, start / stop sequence, priority, stop all, mute, sample rate, mailbox store, lock / unlock, bend by sequence, volume, master attenuation. |
+| Sequences | delay, duration, note, end, program change, envelope, no-op, loop start / end (a four-deep stack, endless loops), retrigger, sustain, tempo, mute, priority, start song, pitch bend, SFX time base, sample rate, goto, mailbox store / if, special codes (stop, pause, resume, attenuation). |
+| Voices | Six FM voices (voice 6 shared with the digital voice, voice 3 of the table for channel-3 mode), three PSG tone voices, one noise voice; the original's allocation by priority and release timer, voice timers, release phases, and the clipping every stop performs. FM patches write the full operator map with carrier levels attenuated per note; frequencies come from the original's tables with pitch bend and pitch-envelope interpolation. PSG voices follow the original's attack / decay / sustain / release emulation. |
+| Digital voice | One-shot, looped, slow-rate and 4-bit compressed samples: Timer A programmed from the rate, DAC enabled, channel 6 panned centre, one 8-bit write to the DAC register per Timer A overflow - the overflow time is taken from the chip's own schedule and confirmed on it, never assumed - 128-byte refills of a two-half FIFO exactly as the original (including its refill-time shutdown that cuts the tail of a non-looped sample), priority preemption, note-off semantics. |
 
-## Coverage (what is verified) and what is not
+## Coverage and limits
 
-Verified and reference-compared: the commands above; sequences made only of the events above; one-shot uncompressed digital samples at rate codes 1-9 longer than one
-refill half.
+Implemented and reference-compared: everything in the table above. A fault means malformed or unreadable data, after which the replacement is silent for the run.
 
-Not covered - each is an explicit fault (`gems_native.h: GemsNativeFault`), after which the replacement is silent for the run: FM and PSG patches (music), envelopes,
-loops / goto / conditionals / mailbox stores, pitch bend, tempo / mute / start-song events, looped, compressed or slow-rate samples, shorter samples, and every other
-command. Not modelled: the real driver's polling latency (events are placed on exact chip / interrupt times), stalls while the 68000 is mid-command, the
-`$1B20` block flag. Save states are unavailable while the replacement is active.
+Not modelled: the real driver's polling latency (events are placed on exact chip / interrupt times), stalls while the 68000 is mid-command, the `$1B20` block flag, one command per pass of
+the original's main loop (the replacement drains the ring at once). Save states are unavailable while the replacement is active. A different driver image or version is not covered until it is
+added to the catalog and validated.
 
 ## Build and disclosure
 
 `segarecomp build ... --sound-driver gems` compiles `gems_native.c` and the adapter into the program (and into the build-time observation pass, so the 600-frame start-up
 run reports what the replacement did). `status.json` `audio_implementation` records requested vs actual implementation, driver / version / evidence tier,
-implementation version, coverage, verification tier, reason, audio status and the observation (commands / sequences / DAC samples / first fault); an original build records
-`original_z80_aot` with its audio status and any compiled structural alternatives. `genesis_audio` is `native_partial` (or `degraded` if the start-up run met an unsupported
-operation, with `z80_audio_outcome = native_driver_unsupported_operation`). The headless run summary (`SOUND_SUMMARY`) gains a `native` object, and
+implementation version, coverage (`complete`), verification tier, reason, audio status and the observation (commands / sequences / DAC samples / first fault); an original build records
+`original_z80_aot` with its audio status and any compiled structural alternatives. `genesis_audio` is `native` (or `degraded` if the start-up run met malformed data, with `z80_audio_outcome = native_driver_unsupported_operation`). The headless run summary (`SOUND_SUMMARY`) gains a `native` object, and
 `SEGARECOMP_AUDIO_WRITE_LOG=<file>` logs every chip access (validation seam). The launcher shows the record in Build provenance and can request the replacement from the
 game's Advanced build options; the request is part of its cache identity.
 
 ## Path forward (not part of this change)
 
-Extend the verified subset operation by operation (FM patch load and key-on, PSG tone, envelopes, tempo, loops), each with a reference comparison; add the next driver
-images / versions as catalog lines with their own validation; reuse the module's scheduler for other drivers only when a concrete second driver needs it.
+Add the next driver images / versions as catalog lines with their own validation; if a game needs behaviour the reference comparison cannot reach (cycle-exact DAC / FM timing), extend the model
+with evidence. Reuse the module's scheduler for another driver family only when a concrete second driver needs it.

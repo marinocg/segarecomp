@@ -160,7 +160,7 @@ int main(int argc, char **argv) {
     if (platform != "master-system" && env("FAKE_AUDIO") != "none") {   // ADR 0291: what a current product records about the audio implementation
       const bool gems = option("--sound-driver") == "gems";
       const std::string record = !env("FAKE_AUDIO").empty() ? env("FAKE_AUDIO")
-          : gems ? R"({"schema":1,"requested":"gems","kind":"native_driver","selection":"explicit","driver":"gems","version":"2.5","coverage":"partial","verification":"reference_checked","reason":"explicit_selection","original_driver_rewrites_own_code":true,"audio_status":"partial","observed":{"fault":"none","commands":17,"sequences":7,"dac_samples":100,"ticks":571}})"
+          : gems ? R"({"schema":1,"requested":"gems","kind":"native_driver","selection":"explicit","driver":"gems","version":"2.5","coverage":"complete","verification":"reference_checked","reason":"explicit_selection","original_driver_rewrites_own_code":true,"audio_status":"supported","observed":{"fault":"none","commands":17,"sequences":7,"dac_samples":100,"ticks":571}})"
                  : R"({"schema":1,"requested":"original","kind":"original_z80_aot","selection":"default","audio_status":"supported","structural_alternatives":{"requested":false,"forms":0}})";
       std::ofstream(out / "status.json", std::ios::app) << ",\"audio_implementation\":" << record;
     }

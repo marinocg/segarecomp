@@ -965,11 +965,11 @@ std::string audio_implementation_json(const Options &options, const GenesisSound
   if (native) {
     out << ",\"driver\":\"" << record.driver << "\",\"version\":\"" << (record.version.empty() ? "unknown" : record.version)
         << "\",\"version_evidence\":\"address_map_and_tables\",\"implementation_version\":" << record.implementation_version
-        << ",\"coverage\":\"partial\",\"verification\":\"" << record.verification << "\",\"identity\":\"" << record.signature_prefix
+        << ",\"coverage\":\"complete\",\"verification\":\"" << record.verification << "\",\"identity\":\"" << record.signature_prefix
         << "\",\"native_images\":" << record.native_images << ",\"original_images\":" << record.original_images
         << ",\"reason\":\"explicit_selection\"";
     if (record.analysed) out << ",\"original_driver_rewrites_own_code\":" << (record.structural_candidates > 0 ? "true" : "false") << ",\"static_code_write_candidates\":" << record.structural_candidates;
-    out << ",\"audio_status\":\"" << (fault ? "degraded" : "partial") << "\"";
+    out << ",\"audio_status\":\"" << (fault ? "degraded" : "supported") << "\"";
     out << ",\"observed\":{\"window_frames\":" << gz80::kObservationFrames << ",\"fault\":\"" << (build.native.present ? build.native.fault : "none")
         << "\",\"commands\":" << build.native.commands << ",\"sequences\":" << build.native.sequences << ",\"dac_samples\":" << build.native.dac_samples
         << ",\"ticks\":" << build.native.ticks << "}";
@@ -1300,7 +1300,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   // Machine-readable audio capability: a structural Z80 code mutation isolates the sound CPU (contract section 18) and the build
   // still succeeds; every other Z80 failure already failed the build above.
   const bool native_fault = summary.sound_fault && summary.sound_fault->native_driver;
-  const char *audio_state = audio_record.kind == "native_driver" ? (summary.sound_fault ? "degraded" : "native_partial") : (summary.sound_fault ? "degraded" : "supported");
+  const char *audio_state = audio_record.kind == "native_driver" ? (summary.sound_fault ? "degraded" : "native") : (summary.sound_fault ? "degraded" : "supported");
   status_extra = std::string(",\"genesis_audio\":\"") + audio_state + "\"";
   if (summary.sound_fault) status_extra += std::string(",\"z80_audio_outcome\":\"") + (native_fault ? "native_driver_unsupported_operation" : "structural_code_mismatch") + "\"";
   status_extra += audio_implementation_json(options, build, audio_record, summary.sound_fault);

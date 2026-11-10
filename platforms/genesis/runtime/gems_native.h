@@ -9,9 +9,8 @@
  * the guest master clock. Anything outside the verified subset faults explicitly (GemsNativeFault) and the driver then stays silent:
  * there is no fallback, no guessed behaviour and no fabricated acknowledgement.
  *
- * Verified subset (see docs/architecture/genesis-native-gems.md): commands get-pointers (11), start sequence (16), stop sequence (18),
- * stop all (22); sequence events delay/duration/note, end-of-sequence, no-op, priority, SFX time base, program change and sample rate
- * on DIGITAL (DAC) patches; one-shot, uncompressed samples at the fast Timer-A rates; the idle FM/PSG clipping that every stop performs.
+ * Scope (see docs/architecture/genesis-native-gems.md): the whole command set of the verified driver, every sequence event, FM / PSG tone / PSG noise / digital
+ * patches (voice allocation, envelopes, pitch bend, tempo, loops, mailboxes), one-shot, looped, slow-rate and 4-bit compressed samples.
  *
  * The module has no global state, never reads host time and has no dependency on the Z80 machine: its host environment is the small
  * GemsNativeHost interface below, so it is unit-testable against synthetic cartridge data.
@@ -27,13 +26,13 @@
 
 typedef enum GemsNativeFault {
   GEMS_FAULT_NONE = 0,
-  GEMS_FAULT_UNSUPPORTED_COMMAND = 1,      /* a command id outside the verified subset */
-  GEMS_FAULT_INVALID_COMMAND_STREAM = 2,   /* FIFO write pointer outside the 64-byte ring */
-  GEMS_FAULT_UNMAPPED_RESOURCE = 3,        /* a pointer-table / sequence / patch / sample read outside the owned cartridge image */
-  GEMS_FAULT_INVALID_RESOURCE = 4,         /* a resource that is structurally invalid (track count, empty offset, ...) */
-  GEMS_FAULT_UNSUPPORTED_SEQUENCE_EVENT = 5, /* a sequence command outside the verified subset */
-  GEMS_FAULT_UNSUPPORTED_PATCH = 6,        /* a note on a non-digital patch (FM / PSG / noise) */
-  GEMS_FAULT_UNSUPPORTED_SAMPLE = 7,       /* looped, compressed or slow-rate sample */
+  GEMS_FAULT_UNSUPPORTED_COMMAND = 1,      /* reserved: every command id of the verified driver is implemented; an unknown id is ignored exactly as the original ignores it */
+  GEMS_FAULT_INVALID_COMMAND_STREAM = 2,   /* FIFO write pointer outside the 64-byte ring, or a channel number outside 0..15 */
+  GEMS_FAULT_UNMAPPED_RESOURCE = 3,        /* a pointer-table / sequence / patch / envelope / sample read outside the owned cartridge image */
+  GEMS_FAULT_INVALID_RESOURCE = 4,         /* a resource that is structurally invalid (track count, mailbox index, a sequence that never yields, ...) */
+  GEMS_FAULT_UNSUPPORTED_SEQUENCE_EVENT = 5, /* reserved (see UNSUPPORTED_COMMAND) */
+  GEMS_FAULT_UNSUPPORTED_PATCH = 6,        /* reserved */
+  GEMS_FAULT_UNSUPPORTED_SAMPLE = 7,       /* reserved */
   GEMS_FAULT_DEVICE_TIMING = 8             /* the YM2612 timer did not expire where the verified rate model requires */
 } GemsNativeFault;
 
@@ -48,6 +47,8 @@ typedef struct GemsNativeHost {
   void (*ym_write)(void *context, uint32_t port, uint8_t value, uint64_t master_ticks);
   uint8_t (*ym_read)(void *context, uint32_t port, uint64_t master_ticks);
   void (*psg_write)(void *context, uint8_t value, uint64_t master_ticks);
+  /* The guest master tick at which the YM2612's Timer A next overflows (UINT64_MAX when it is stopped), as of the last access made through `ym_write`/`ym_read`. */
+  uint64_t (*ym_timer_a_expiry)(void *context);
   /* Optional observer (may be NULL): each command the driver consumes, start byte first, with the time it was consumed. Validation seam only. */
   void (*command_tap)(void *context, const uint8_t *bytes, unsigned count, uint64_t master_ticks);
 } GemsNativeHost;
@@ -57,16 +58,25 @@ typedef struct GemsCcb {
   uint32_t address;    /* absolute 68000 address of the next sequence byte */
   uint16_t timer;      /* counts up to 0 (two's complement of the pending delay) */
   uint16_t delay, duration;  /* registered, negated */
-  uint8_t program, sequence, channel, priority;
+  uint8_t program, sequence, channel, priority, envelope, attenuation;
+  uint8_t loops[4][3]; /* loop stack: count (0 = free, 127 = endless), address low, address middle */
   uint8_t patch[39];   /* this channel's patch buffer; patch[0] == 0xFF = undefined */
 } GemsCcb;
 
 typedef struct GemsVoice {
-  uint8_t flags;       /* F R L x x V V V: free, release, locked, voice number */
+  uint8_t flags;       /* F R L T S V V V: free, release, locked, self-timed, SFX time base, voice number */
   uint8_t priority, note, channel;
   uint16_t duration;
   uint8_t release;
 } GemsVoice;
+
+typedef struct GemsEcb {
+  uint8_t channel;     /* bit 7 end of list, bit 6 free, bit 5 SFX time base, low bits: channel */
+  uint8_t counter;
+  uint16_t delta;
+  uint16_t pointer;    /* offset of the next segment in the 128-byte envelope buffer area (it may run on into the DAC FIFO, as in the original) */
+  uint8_t buffer;      /* offset of this block's 32-byte envelope buffer */
+} GemsEcb;
 
 typedef struct GemsNative {
   GemsNativeHost host;
@@ -82,24 +92,37 @@ typedef struct GemsNative {
   uint8_t have_pointers;
   /* sequencer */
   uint16_t sbpt, sbptacc;     /* sub-beats per tick and its accumulator, 8 fraction bits */
+  uint8_t tick_flags;         /* bit 0: a tick passed, bit 1: a sub-beat passed (the flags of the tick being processed) */
+  uint8_t master_attenuation;
   GemsCcb ccb[16];
-  GemsVoice dac_voice;        /* FM voice 6 (the digital-capable voice) */
-  /* PSG envelope processor (idle state only: stop commands and their hardware update) */
-  uint8_t psg_command[4], psg_level[4], psg_mode[4], psg_update[4];
+  /* voices: FM voices in table order {0,1,4,5,6,2} (index 4 is the digital-capable voice 6, index 5 the channel-3 mode voice), three PSG tone voices, one noise voice */
+  GemsVoice fm[6], psg[3], noise[1];
+  uint8_t note_voice, note_attenuation, note_number, note_channel;   /* the voice, attenuation, note and channel of the note being started */
+  uint8_t carriers;
+  /* PSG envelope processor */
+  uint8_t psg_command[4], psg_level[4], psg_attack[4], psg_decay[4], psg_sustain[4], psg_release[4], psg_mode[4], psg_low[4], psg_high[4], psg_attack_level[4], psg_update[4];
+  /* pitch / envelope bend */
+  GemsEcb ecb[4];
+  uint8_t envelope_buffer[128];
+  int16_t pitch_bend[16], envelope_bend[16];
+  uint8_t bend_changed[16], need_bend;
   /* digital voice */
   uint8_t sample_flags;
+  uint8_t sample_pointer_header[3];
+  uint16_t sample_skip, sample_first, sample_loop, sample_end;
   uint32_t sample_pointer;    /* next ROM byte to load into the FIFO */
   uint16_t sample_counter;
-  uint8_t fdf_state;          /* 4 = one-shot, 7 = shut down */
+  uint8_t fdf_state;          /* 4 = one-shot, 5 = looped, 6 = loop released, 7 = shut down */
   uint8_t fifo[256];
   uint8_t fifo_write, fifo_read;
   uint8_t dac_active;         /* DAC output routine enabled */
   uint8_t fill_enabled;
-  uint8_t dac_timer_b;        /* value the DAC routine writes to register $27 on every sample (timer reset) */
+  uint8_t dac_compressed, dac_pattern;
+  uint8_t dac_timer_b;        /* value the DAC routine writes to register $27 on every sample (timer reset; carries the channel-3 mode bits) */
   uint32_t dac_period_samples; /* Timer A period in native YM2612 samples */
   uint64_t dac_due;           /* master tick at which the next sample is due */
   /* counters (aggregates only) */
-  uint64_t count_commands, count_sequences, count_dac_samples, count_ticks, count_missed_ticks, count_clips;
+  uint64_t count_commands, count_sequences, count_dac_samples, count_ticks, count_missed_ticks, count_clips, count_notes_fm, count_notes_psg, count_notes_digital;
 } GemsNative;
 
 /* Starts (or restarts) the driver at guest master time `at_ticks`: all driver state is reset (the RAM-visible FIFO bytes and pointers

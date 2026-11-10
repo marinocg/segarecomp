@@ -11,7 +11,9 @@
  * The optional start is the guest time the driver was booted at (the native driver's activation): the reference's VBlank ticks, and with them its
  * sub-beat accumulator, begin there, exactly as the real driver's do.
  *
- * Command script, one line per completed command: "<master ticks> <hex bytes of the FIFO command, start byte first>". The harness schedules, on the
+ * Command script, one line per completed command: "<master ticks> <hex bytes of the FIFO command, start byte first>", and one line per window in which the 68000
+ * held the Z80 bus: "H <start> <end>" (the Z80 does not run in it: work due inside waits for <end>, and a VBlank interrupt edge that falls inside it by at least one
+ * scanline is lost, like the real Z80's). The harness schedules, on the
  * guest master clock: the VBlank interrupt, the commands, and the DAC routine at every YM2612 Timer A expiry (a minimal timer model of its own: it is the
  * reference side of the comparison, so it deliberately shares nothing with the native device).
  */
@@ -31,13 +33,17 @@ static FILE *g_log;
 static uint64_t g_now;
 static uint8_t g_latched[2];
 static uint16_t g_timer_a;
-static uint64_t g_expiry;      /* 0 = timer stopped */
+static uint64_t g_expiry;      /* the next Timer A overflow, 0 = stopped; the timer free-runs: clearing its flag does not move it */
 static int g_flag;
+static int g_dac_idle;         /* the DAC routine left the flag set twice in a row: nothing paces on it until the timer / DAC registers are written again */
 
 static void log_line(char kind, unsigned port, unsigned value) { fprintf(g_log, "%c %u %02X %llu\n", kind, port, value, (unsigned long long)g_now); }
+static uint64_t timer_period(void) { return (uint64_t)(1024U - g_timer_a) * SAMPLE_TICKS; }
+static void timer_advance(void) { while (g_expiry != 0 && g_now >= g_expiry) { g_flag = 1; g_expiry += timer_period(); } }
 
 void YM2612_Write(UINT8 addr, UINT8 data) {
   const unsigned side = (addr >> 1) & 1U;
+  timer_advance();
   log_line('Y', addr & 3U, data);
   if ((addr & 1U) == 0U) { g_latched[side] = data; return; }
   if (side == 0U) {
@@ -46,14 +52,16 @@ void YM2612_Write(UINT8 addr, UINT8 data) {
     else if (reg == 0x25) g_timer_a = (uint16_t)((g_timer_a & ~3U) | (data & 3U));
     else if (reg == 0x27) {
       if (data & 0x10U) g_flag = 0;
-      if (data & 0x01U) g_expiry = g_now + (uint64_t)(1024U - g_timer_a) * SAMPLE_TICKS; else g_expiry = 0;
-    }
+      if (!(data & 0x01U)) g_expiry = 0;
+      else if (g_expiry == 0) g_expiry = (g_now / 7) * 7 + timer_period();   /* the chip counts in YM clocks (7 master ticks) */   /* the load bit going 0 -> 1 starts the count; a write while it runs does not restart it */
+      g_dac_idle = 0;
+    } else if (reg == 0x2B) g_dac_idle = 0;
   }
 }
 void YM2612_WriteA(UINT8 addr, UINT8 data) { YM2612_Write(addr, data); }
 UINT8 YM2612_Read(UINT8 addr) {
   (void)addr;
-  if (g_expiry != 0 && g_now >= g_expiry) g_flag = 1;
+  timer_advance();
   return (UINT8)g_flag;
 }
 void PSG_Write(UINT8 data) { log_line('P', 0, data); }
@@ -66,13 +74,26 @@ void StopSignal(void) {}
 static void run_loop(int passes) { int i; for (i = 0; i < passes; ++i) gems_loop(); }
 
 typedef struct Command { uint64_t at; uint8_t bytes[32]; unsigned count; } Command;
+typedef struct Hold { uint64_t start, end; } Hold;
+#define LINE_TICKS 3420ULL
+
+/* the end of the hold that contains t (0 when the Z80 is running at t) */
+static uint64_t held_until(const Hold *holds, unsigned count, uint64_t t) {
+  unsigned low = 0, high = count;   /* the last hold that starts at or before t (the windows are ordered and disjoint) */
+  while (low < high) {
+    const unsigned middle = low + (high - low) / 2;
+    if (holds[middle].start <= t) low = middle + 1; else high = middle;
+  }
+  return low > 0 && t < holds[low - 1].end ? holds[low - 1].end : 0;
+}
 
 int main(int argc, char **argv) {
   FILE *rom_file, *script;
   uint8_t *rom;
   long rom_size;
   Command commands[4096];
-  unsigned command_count = 0, next_command = 0;
+  static Hold holds[400000];
+  unsigned command_count = 0, next_command = 0, hold_count = 0;
   uint64_t end, next_vblank_index = 0;
   char line[512];
   if (argc != 5 && argc != 6) { fprintf(stderr, "usage: harness <rom> <script> <end master ticks> <log>\n"); return 2; }
@@ -87,7 +108,13 @@ int main(int argc, char **argv) {
   if (script == NULL) return 3;
   while (fgets(line, sizeof line, script) != NULL && command_count < 4096U) {
     char *cursor = line;
-    unsigned long long at = strtoull(cursor, &cursor, 10);
+    unsigned long long at;
+    if (line[0] == 'H') {
+      unsigned long long a = 0, b = 0;
+      if (sscanf(line + 1, "%llu %llu", &a, &b) == 2 && hold_count < 400000U) { holds[hold_count].start = a; holds[hold_count].end = b; ++hold_count; }
+      continue;
+    }
+    at = strtoull(cursor, &cursor, 10);
     Command *c = &commands[command_count];
     c->at = at; c->count = 0;
     while (*cursor != '\0' && c->count < 32U) {
@@ -109,13 +136,22 @@ int main(int argc, char **argv) {
   for (;;) {
     uint64_t vblank = next_vblank_index * FRAME + ONSET;
     uint64_t command = next_command < command_count ? commands[next_command].at : UINT64_MAX;
-    uint64_t dac = g_expiry != 0 ? g_expiry : UINT64_MAX;
-    uint64_t t = vblank;
-    int kind = 0;
+    uint64_t dac = (g_expiry != 0 && !g_dac_idle) ? g_expiry : UINT64_MAX;
+    uint64_t t;
+    int kind;
+    if (held_until(holds, hold_count, vblank) != 0) {   /* the Z80 does not run while the 68000 holds its bus */
+      const uint64_t resume = held_until(holds, hold_count, vblank);
+      if (resume >= vblank + LINE_TICKS) { ++next_vblank_index; continue; }   /* the interrupt line fell inside the hold: lost */
+      vblank = resume;
+    }
+    if (dac != UINT64_MAX && held_until(holds, hold_count, dac) != 0) dac = held_until(holds, hold_count, dac);
+    /* at one instant: the DAC routine, then the tick, then a command (the driver's order) */
+    t = dac; kind = 2;
+    if (vblank < t) { t = vblank; kind = 0; }
     if (command < t) { t = command; kind = 1; }
-    if (dac < t) { t = dac; kind = 2; }
-    if (t > end) break;
+    if (t == UINT64_MAX || t > end) break;
     g_now = t;
+    timer_advance();
     if (kind == 0) { VBLINT(); ++next_vblank_index; run_loop(40); }
     else if (kind == 1) {
       unsigned i;
@@ -125,7 +161,8 @@ int main(int argc, char **argv) {
       run_loop(40);
     } else {
       DACME();
-      if (g_expiry != 0 && g_expiry <= g_now) g_expiry = 0;   /* the routine did not restart the timer: the DAC was shut down */
+      if (g_flag) DACME();   /* at slow rates the routine skips every other call (it toggles itself); the main loop calls it again at once */
+      if (g_flag) g_dac_idle = 1;
       run_loop(2);
     }
   }

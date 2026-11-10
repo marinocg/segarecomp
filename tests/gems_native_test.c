@@ -21,16 +21,23 @@ typedef struct Fixture {
   uint8_t ram[8192];
   Access log[200000];
   size_t count;
-  /* a minimal Timer A model: the device side of the Timer-A-paced DAC */
+  /* a minimal free-running Timer A: the device side of the Timer-A-paced DAC */
   uint8_t latched;
   uint16_t timer_a;
-  uint64_t expiry;
+  uint64_t expiry;   /* next overflow, 0 = stopped */
   int flag;
   GemsNative driver;
 } Fixture;
 
+static uint64_t fx_period(const Fixture *f) { return (uint64_t)(1024u - f->timer_a) * YM2612_MASTER_TICKS_PER_SAMPLE; }
+
+static void fx_advance(Fixture *f, uint64_t ticks) {   /* overflows up to `ticks` set the flag and re-arm the timer (it free-runs) */
+  while (f->expiry != 0u && ticks >= f->expiry) { f->flag = 1; f->expiry += fx_period(f); }
+}
+
 static void fx_ym_write(void *context, uint32_t port, uint8_t value, uint64_t ticks) {
   Fixture *f = (Fixture *)context;
+  fx_advance(f, ticks);
   f->log[f->count].kind = 'Y'; f->log[f->count].port = port; f->log[f->count].value = value; f->log[f->count++].ticks = ticks;
   if ((port & 1u) == 0u) { if (port == 0u) f->latched = value; return; }
   if (port != 1u) return;
@@ -38,15 +45,17 @@ static void fx_ym_write(void *context, uint32_t port, uint8_t value, uint64_t ti
   else if (f->latched == 0x25) f->timer_a = (uint16_t)((f->timer_a & ~3u) | (value & 3u));
   else if (f->latched == 0x27) {
     if (value & 0x10u) f->flag = 0;
-    f->expiry = (value & 1u) ? ticks + (uint64_t)(1024u - f->timer_a) * YM2612_MASTER_TICKS_PER_SAMPLE : 0u;
+    if ((value & 1u) == 0u) f->expiry = 0u;
+    else if (f->expiry == 0u) f->expiry = ticks + fx_period(f);   /* the load bit going 0 -> 1 starts the count; a write while it runs does not restart it */
   }
 }
 static uint8_t fx_ym_read(void *context, uint32_t port, uint64_t ticks) {
   Fixture *f = (Fixture *)context;
   (void)port;
-  if (f->expiry != 0u && ticks >= f->expiry) f->flag = 1;
+  fx_advance(f, ticks);
   return (uint8_t)f->flag;
 }
+static uint64_t fx_timer_a_expiry(void *context) { const Fixture *f = (const Fixture *)context; return f->expiry == 0u ? UINT64_MAX : f->expiry; }
 static void fx_psg_write(void *context, uint8_t value, uint64_t ticks) {
   Fixture *f = (Fixture *)context;
   f->log[f->count].kind = 'P'; f->log[f->count].port = 0; f->log[f->count].value = value; f->log[f->count++].ticks = ticks;
@@ -68,24 +77,35 @@ static void build_cartridge(Fixture *f) {
   uint8_t *p;
   unsigned i;
   memset(f->rom, 0, sizeof f->rom);
-  le16(f->rom + PATCH_TABLE, 4);
-  le16(f->rom + PATCH_TABLE + 2, 4 + 39);
-  f->rom[PATCH_TABLE + 4] = 1; f->rom[PATCH_TABLE + 5] = 4;          /* patch 0: digital, no rate override */
-  f->rom[PATCH_TABLE + 4 + 39] = 0;                                  /* patch 1: FM */
+  for (i = 0; i < 4; ++i) le16(f->rom + PATCH_TABLE + 2 * i, 8 + 39 * i);
+  f->rom[PATCH_TABLE + 8] = 1; f->rom[PATCH_TABLE + 9] = 4;          /* patch 0: digital, no rate override */
+  f->rom[PATCH_TABLE + 8 + 39] = 0;                                  /* patch 1: FM (all registers zero) */
+  {  /* patch 2: PSG tone: attack 0x10, sustain level 2, attack level 0, decay 0x10, release 0x10 */
+    uint8_t *tone = f->rom + PATCH_TABLE + 8 + 78;
+    tone[0] = 2; tone[2] = 0x10; tone[3] = 2; tone[4] = 0; tone[5] = 0x10; tone[6] = 0x10;
+  }
   /* sequence table: offsets of the sequence headers */
-  le16(f->rom + SEQ_TABLE + 0, 8); le16(f->rom + SEQ_TABLE + 2, 8 + 3); le16(f->rom + SEQ_TABLE + 4, 8 + 6); le16(f->rom + SEQ_TABLE + 6, 8 + 9);
-  p = f->rom + SEQ_TABLE + 8;
+  for (i = 0; i < 6; ++i) le16(f->rom + SEQ_TABLE + 2 * i, 16 + 3 * i);
+  p = f->rom + SEQ_TABLE + 16;
   p[0] = 1; le16(p + 1, 0x40);                                       /* seq 0: one track at +0x40 */
   p[3] = 1; le16(p + 4, 0x60);                                       /* seq 1 */
-  p[6] = 1; le16(p + 7, 0x80);                                       /* seq 2 */
+  p[6] = 1; le16(p + 7, 0xDFF0);                                       /* seq 2 */
   p[9] = 0;                                                          /* seq 3: empty */
+  p[12] = 1; le16(p + 13, 0xA0);                                     /* seq 4: one PSG note */
+  p[15] = 1; le16(p + 16, 0xC0);                                     /* seq 5: a PSG note in a two-pass loop */
   {
     static const uint8_t t0[] = {0xC0, 0x6A, 100, 0x6D, 0x61, 0x00, 0xC2, 0x30, 0x60};   /* delay 0, prio 100, SFX base, patch 0, delay 2, note 48, eos */
     static const uint8_t t1[] = {0xC0, 0x6A, 100, 0x6D, 0x61, 0x01, 0xC2, 0x30, 0x60};   /* the same with the FM patch */
-    static const uint8_t t2[] = {0xC0, 0x64, 3};                                           /* a loop start: outside the verified subset */
+    static const uint8_t t2[] = {0xC0, 0x64, 3};                                           /* a loop start, at the very end of the cartridge */
     memcpy(f->rom + SEQ_TABLE + 0x40, t0, sizeof t0);
     memcpy(f->rom + SEQ_TABLE + 0x60, t1, sizeof t1);
-    memcpy(f->rom + SEQ_TABLE + 0x80, t2, sizeof t2);
+    memcpy(f->rom + SEQ_TABLE + 0xDFF0, t2, sizeof t2);
+    {
+      static const uint8_t t4[] = {0xC0, 0x6A, 100, 0x6D, 0x61, 0x02, 0xC1, 0x3C, 0x60};                          /* PSG patch, note 60, eos */
+      static const uint8_t t5[] = {0xC0, 0x6A, 100, 0x6D, 0x61, 0x02, 0x64, 0x02, 0xC1, 0x3C, 0x65, 0x60};      /* loop twice: note 60, delay 1 */
+      memcpy(f->rom + SEQ_TABLE + 0xA0, t4, sizeof t4);
+      memcpy(f->rom + SEQ_TABLE + 0xC0, t5, sizeof t5);
+    }
   }
   /* sample table: 12-byte headers; sample 0: rate 5, data at +0x1000 from the table, 3000 bytes */
   f->rom[SAMPLE_TABLE + 0] = 0x05;
@@ -97,7 +117,7 @@ static void build_cartridge(Fixture *f) {
 static void fx_start(Fixture *f, uint64_t at) {
   GemsNativeHost host;
   memset(&host, 0, sizeof host);
-  host.context = f; host.ram = f->ram; host.rom_read = fx_rom_read; host.ym_write = fx_ym_write; host.ym_read = fx_ym_read; host.psg_write = fx_psg_write;
+  host.context = f; host.ram = f->ram; host.rom_read = fx_rom_read; host.ym_write = fx_ym_write; host.ym_read = fx_ym_read; host.ym_timer_a_expiry = fx_timer_a_expiry; host.psg_write = fx_psg_write;
   f->count = 0; f->expiry = 0; f->flag = 0; f->timer_a = 0;
   gems_native_start(&f->driver, &host, at);
 }
@@ -176,6 +196,31 @@ static void test_boot_and_digital_sequence(Fixture *f) {
   CHECK(count_if(f, 'Y', 0, 1, 0x2B) >= 2, "DAC enable then disable");
 }
 
+/* Notes below 48 select samples 48..95 (the original subtracts 48 and adds 96 on a borrow): note 15 is sample 63, not sample 111. */
+static void test_low_note_sample_mapping(Fixture *f) {
+  uint8_t *header;
+  unsigned i;
+  size_t dac = 0, k;
+  build_cartridge(f);
+  f->rom[SEQ_TABLE + 0x40 + 7] = 0x0F;                                 /* the note of sequence 0's track */
+  header = f->rom + SAMPLE_TABLE + 12 * 63;
+  header[0] = 0x06;                                                    /* rate 6 */
+  header[1] = (uint8_t)((SAMPLE_DATA + 0x800 - SAMPLE_TABLE) & 0xFF); header[2] = (uint8_t)((SAMPLE_DATA + 0x800 - SAMPLE_TABLE) >> 8);
+  le16(header + 6, 1000);
+  for (i = 0; i < 1100; ++i) f->rom[SAMPLE_DATA + 0x800 + i] = (uint8_t)(i * 5u + 1u);
+  /* a sample 111 (the wrong mapping) is left as zeros: a driver that used it would fault on an empty or unsupported header */
+  memset(f->ram, 0, sizeof f->ram);
+  fx_start(f, 1000);
+  send_pointers(f); send_start(f, 0);
+  CHECK(gems_native_run_to(&f->driver, 40 * FRAME) == GEMS_FAULT_NONE, "a low note plays (%s)", gems_native_fault_name(f->driver.fault));
+  for (k = 0; k + 1 < f->count; ++k)
+    if (f->log[k].kind == 'Y' && f->log[k].port == 0 && f->log[k].value == 0x2A) {
+      CHECK(f->log[k + 1].value == (uint8_t)(dac * 5u + 1u), "DAC byte %zu comes from sample 63", dac);
+      ++dac;
+    }
+  CHECK(dac == 768, "1000 samples in 128-byte fills: fill 7 finds 104 left and cuts the tail after 768 played (got %zu)", dac);
+}
+
 static void test_cadence_invariance(Fixture *a, Fixture *b) {
   uint64_t t;
   size_t i;
@@ -217,41 +262,94 @@ static void test_stop_cuts_sample(Fixture *f) {
 }
 
 static void test_faults(Fixture *f) {
-  const uint8_t bad_command[] = {0xFF, 5, 1};
   size_t after;
-  /* unsupported command */
+  /* an unknown command id is ignored exactly as the original ignores it: consumed, no fault, nothing written */
   build_cartridge(f); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
-  fifo_put(f, bad_command, 3);
-  CHECK(gems_native_run_to(&f->driver, 3 * FRAME) == GEMS_FAULT_UNSUPPORTED_COMMAND, "an unsupported command faults explicitly");
-  after = f->count;
-  gems_native_run_to(&f->driver, 10 * FRAME);
-  CHECK(f->count == after, "a faulted driver writes nothing further");
-  CHECK(f->ram[0x37] == 0, "no acknowledgement (read pointer advance) is fabricated for an unsupported command");
-  /* FM patch */
+  { const uint8_t unknown[] = {0xFF, 99}; fifo_put(f, unknown, 2); }
+  CHECK(gems_native_run_to(&f->driver, 3 * FRAME) == GEMS_FAULT_NONE && f->ram[0x37] == f->ram[0x36] && f->count == 4, "an unknown command id is ignored and consumed");
+  /* a start byte with the command byte still missing waits; non-start bytes are discarded */
   build_cartridge(f); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
-  send_pointers(f); send_start(f, 1);
-  CHECK(gems_native_run_to(&f->driver, 10 * FRAME) == GEMS_FAULT_UNSUPPORTED_PATCH, "a note on an FM patch faults");
-  /* unsupported sequence event */
+  { const uint8_t garbage[] = {0x12, 0x34, 0xFF}; fifo_put(f, garbage, 3); }
+  gems_native_run_to(&f->driver, 3 * FRAME);
+  CHECK(f->ram[0x37] == 2 && f->driver.fault == GEMS_FAULT_NONE, "stray bytes are discarded, an incomplete command waits (read pointer %u)", f->ram[0x37]);
+  /* a sequence that runs off the cartridge: explicit fault, nothing further is written */
   build_cartridge(f); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
   send_pointers(f); send_start(f, 2);
-  CHECK(gems_native_run_to(&f->driver, 10 * FRAME) == GEMS_FAULT_UNSUPPORTED_SEQUENCE_EVENT, "an event outside the subset faults");
+  CHECK(gems_native_run_to(&f->driver, 10 * FRAME) == GEMS_FAULT_UNMAPPED_RESOURCE, "a sequence that runs off the cartridge faults (%s)", gems_native_fault_name(f->driver.fault));
+  after = f->count;
+  gems_native_run_to(&f->driver, 20 * FRAME);
+  CHECK(f->count == after, "a faulted driver writes nothing further");
   /* unmapped resource: pointers into the void */
   build_cartridge(f); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
   { const uint8_t c[] = {0xFF, 11, 0, 0, 0, 0, 0, 0, 0xFE, 0xFF, 0, 0, 0, 0}; fifo_put(f, c, 14); }   /* sequence table at $FFFE: its header is not inside the cartridge */
   send_start(f, 0);
   CHECK(gems_native_run_to(&f->driver, 3 * FRAME) == GEMS_FAULT_UNMAPPED_RESOURCE, "a resource outside the cartridge faults");
   /* invalid resource: more than 16 tracks */
-  build_cartridge(f); f->rom[SEQ_TABLE + 8 + 9] = 17; memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
+  build_cartridge(f); f->rom[SEQ_TABLE + 16 + 9] = 17; memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
   send_pointers(f); send_start(f, 3);
   CHECK(gems_native_run_to(&f->driver, 3 * FRAME) == GEMS_FAULT_INVALID_RESOURCE, "a track count above 16 is an invalid resource");
-  /* invalid FIFO pointer */
+  /* invalid FIFO pointer, invalid channel */
   build_cartridge(f); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
   f->ram[0x36] = 0x41;
   CHECK(gems_native_run_to(&f->driver, 3 * FRAME) == GEMS_FAULT_INVALID_COMMAND_STREAM, "a write pointer outside the ring is rejected");
+  build_cartridge(f); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
+  { const uint8_t c[] = {0xFF, 28, 200}; fifo_put(f, c, 3); }
+  CHECK(gems_native_run_to(&f->driver, 3 * FRAME) == GEMS_FAULT_INVALID_COMMAND_STREAM, "a control-block number above 15 is rejected");
   /* an empty sequence is accepted and starts nothing */
-  build_cartridge(f); f->rom[SEQ_TABLE + 8 + 9] = 0; memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
+  build_cartridge(f); f->rom[SEQ_TABLE + 16 + 9] = 0; memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
   send_pointers(f); send_start(f, 3);
   CHECK(gems_native_run_to(&f->driver, 3 * FRAME) == GEMS_FAULT_NONE && f->driver.count_sequences == 0, "an empty sequence starts nothing");
+}
+
+static int find_write(const Fixture *f, size_t from, char kind, uint32_t port, uint8_t value) {
+  size_t i;
+  for (i = from; i < f->count; ++i) if (f->log[i].kind == kind && f->log[i].port == port && f->log[i].value == value) return (int)i;
+  return -1;
+}
+
+/* FM, PSG, loops, tempo, mailboxes: behaviours that need no commercial data */
+static void test_fm_psg_and_sequencer_features(Fixture *f) {
+  int at;
+  /* an FM note: the whole register map is written, the frequency from the table, then key on with the voice number */
+  build_cartridge(f); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
+  send_pointers(f); send_start(f, 1);
+  CHECK(gems_native_run_to(&f->driver, 10 * FRAME) == GEMS_FAULT_NONE && f->driver.count_notes_fm == 1, "an FM note plays (%s)", gems_native_fault_name(f->driver.fault));
+  /* note 48 = C4: octave 4 (block bits 4 << 3 = 0x20), table entry 0 = 644 = 0x284 -> 0xA4 = 0x22 | ..., 0xA0 = 0x84 */
+  at = find_write(f, 0, 'Y', 1, 0x2C);   /* 0x284 | (4 << 11) = 0x2284 -> msb 0x22? computed below */
+  (void)at;
+  at = find_write(f, 0, 'Y', 0, 0xA4);
+  CHECK(at >= 0 && f->log[at + 1].value == (uint8_t)(((644u | (4u << 11)) >> 8) & 0xFF), "FM frequency MSB: block 4 and the table's F-number");
+  at = find_write(f, (size_t)at, 'Y', 0, 0xA0);
+  CHECK(at >= 0 && f->log[at + 1].value == (uint8_t)(644u & 0xFF), "FM frequency LSB");
+  at = find_write(f, 0, 'Y', 0, 0x28);
+  CHECK(at >= 0 && f->log[at + 1].value == 0x00, "key on of voice 0 with the patch's operator mask");
+  /* a PSG tone note: at the next tick the tone is written (low nibble | 0x80, then the high part) followed by the level */
+  build_cartridge(f); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
+  send_pointers(f); send_start(f, 4);
+  CHECK(gems_native_run_to(&f->driver, 10 * FRAME) == GEMS_FAULT_NONE && f->driver.count_notes_psg == 1, "a PSG tone note plays");
+  at = find_write(f, 4, 'P', 0, 0x86);
+  CHECK(at >= 0 && f->log[at + 1].kind == 'P' && f->log[at + 1].value == 0x0D, "PSG tone: note 60 is wavelength $0D6");
+  /* loops: a two-pass loop plays its body twice, the second note on the next free voice */
+  build_cartridge(f); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
+  send_pointers(f); send_start(f, 5);
+  CHECK(gems_native_run_to(&f->driver, 10 * FRAME) == GEMS_FAULT_NONE && f->driver.count_notes_psg == 2, "a loop of count 2 plays two notes (got %llu)", (unsigned long long)f->driver.count_notes_psg);
+  CHECK(find_write(f, 4, 'P', 0, 0xA6) >= 0, "the second pass uses the next tone voice");
+  /* tempo command and mailbox store */
+  build_cartridge(f); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
+  { const uint8_t tempo[] = {0xFF, 5, 90}; const uint8_t store[] = {0xFF, 27, 3, 0x5A}; fifo_put(f, tempo, 3); fifo_put(f, store, 4); }
+  gems_native_run_to(&f->driver, 3 * FRAME);
+  CHECK(f->driver.sbpt == (90u * 218u) >> 7, "tempo 90 sets the sub-beat increment (%u)", f->driver.sbpt);
+  CHECK(f->ram[0x1B20 + 2 + 3] == 0x5A, "a mailbox store reaches the RAM the 68000 reads");
+  /* a fast tempo carries more than one sub-beat per tick; every beat is processed, none piles up in the accumulator */
+  build_cartridge(f); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
+  { const uint8_t fast[] = {0xFF, 5, 255}; fifo_put(f, fast, 3); }
+  gems_native_run_to(&f->driver, 200 * FRAME);
+  CHECK(f->driver.sbpt == (255u * 218u) >> 7 && f->driver.sbpt > 256u && f->driver.sbptacc < 0x100u, "at a tempo above one beat per tick the accumulator is drained (sbpt %u, left %u)", f->driver.sbpt, f->driver.sbptacc);
+  /* a looped sample keeps playing past its first part */
+  build_cartridge(f); f->rom[SAMPLE_TABLE] = 0x15; le16(f->rom + SAMPLE_TABLE + 8, 100); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
+  send_pointers(f); send_start(f, 0);
+  gems_native_run_to(&f->driver, 60 * FRAME);
+  CHECK(f->driver.fault == GEMS_FAULT_NONE && f->driver.dac_active == 1 && f->driver.count_dac_samples > 2 * SAMPLE_LENGTH, "a looped sample plays on past its first part (%llu)", (unsigned long long)f->driver.count_dac_samples);
 }
 
 static void test_restart_and_bus_hold(Fixture *f) {
@@ -277,9 +375,11 @@ int main(void) {
   if (a == NULL || b == NULL) return 2;
   test_identity();
   test_boot_and_digital_sequence(a);
+  test_low_note_sample_mapping(a);
   test_cadence_invariance(a, b);
   test_stop_cuts_sample(a);
   test_faults(a);
+  test_fm_psg_and_sequencer_features(a);
   test_restart_and_bus_hold(a);
   free(a); free(b);
   if (g_failures != 0) { fprintf(stderr, "%d failure(s)\n", g_failures); return 1; }

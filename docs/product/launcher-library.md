@@ -79,7 +79,7 @@ and nothing else - never from the title, the file name or the current selection:
 
 | Row | Meaning |
 | --- | --- |
-| Native GEMS replacement | The build was asked for, and contains, the verified native GEMS driver. The text states driver family and version, **partial** coverage, why (the original Z80 driver rewrites its own code), the validation tier (*reference-checked* for this driver image, or *build-qualified only*), and what the build's own start-up run did (commands, sequences, DAC samples, the first unsupported operation if any). It never says that this game's music works. |
+| Native GEMS replacement | The build was asked for, and contains, the verified native GEMS driver. The text states driver family and version, coverage (the driver's complete command and sequence-event set; event-accurate timing), why (the original Z80 driver rewrites its own code), the validation tier (*reference-checked* for this driver image, or *build-qualified only*), and what the build's own start-up run did (commands, sequences, DAC samples, a stop on malformed data if any). It never says that this executable's playback was verified. |
 | Original Z80 - ahead-of-time compiled | The game's own sound driver runs as generated native code. Compiled structural alternatives, if any, are counted. Not a replacement. |
 | Original Z80 - degraded | The driver rewrites its own code and the Z80 is isolated: no music support is claimed. |
 | Not recorded | No playable build of the selection, or a build that recorded nothing (an older release, an imported executable). |

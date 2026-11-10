@@ -25,10 +25,13 @@
 /* Opt-in observer of every chip access in arrival order (a test and validation seam: `kind` is 'Y' for a YM2612 port write, 'P' for a PSG byte, 'R' for a
  * YM2612 reset). It never feeds anything back into the devices or the guest. */
 typedef void (*GenesisAudioWriteTap)(void *context, char kind, uint32_t port, uint8_t value, uint64_t master_ticks);
+/* `tap_native` is set by a native sound-driver replacement around the accesses IT makes, so a log can tell them from the 68000's: the tap then reports 'y' / 'p'
+ * (lower case) instead of 'Y' / 'P'. */
 
 typedef struct GenesisAudio {
   GenesisAudioWriteTap write_tap;
   void *write_tap_context;
+  uint8_t tap_native;
   Sn76489 psg;
   Ym2612 *ym;                    /* the YM2612 (NULL only if creation failed) */
   GenesisAudioHooks hooks;       /* installed into runtime->audio_hooks by genesis_audio_attach */

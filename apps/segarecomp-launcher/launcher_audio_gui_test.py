@@ -117,7 +117,7 @@ def main():
         # 3. the other cases, one record each (each is a build made by the product double that records exactly that)
         for name, record, shown in (("structural alternatives", ALTERNATIVES, AOT), ("degraded", BROKEN, DEGRADED),
                                     ("malformed", '{"schema":1,"kind":"native_dri', "Unknown"),
-                                    ("unrecognised driver", {"schema": 1, "kind": "native_driver", "driver": "other", "verification": "reference_checked", "coverage": "partial", "audio_status": "partial"}, "Unknown"),
+                                    ("unrecognised driver", {"schema": 1, "kind": "native_driver", "driver": "other", "verification": "reference_checked", "coverage": "complete", "audio_status": "supported"}, "Unknown"),
                                     ("unrecognised kind", {"schema": 1, "kind": "mystery", "audio_status": "supported"}, "Unknown"),
                                     ("future schema", dict(ORIGINAL, schema=2), "Unknown")):
             q = Profile(tmp, "case-" + name.replace(" ", "-"), exe, fake_cli, fake_game)
