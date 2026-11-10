@@ -51,7 +51,7 @@ def template(name, kind, platform="genesis", sha_hex=SRC_SHA):
 # ------------------------------------------------------------------ T004: golden output per subcommand
 proj, init_doc = template("proj", "c11-provider")
 cli.check(init_doc == {"ok": True, "created": ["mod.toml", "scripts/main.luau", "src/provider.c"]}, f"init golden: {init_doc}")
-GOLDEN_FIELDS = '"id":"tpl","version":"0.1.0","name":"tpl","platform":"genesis","source_identity_kind":"cartridge-image","revisions":[{"label":"rev-a","sha256":"%s"}],"trust_class":"native","capabilities":[],"capabilities_optional":[],"abi_native":2,"payloads":{"native":1,"luau":1,"assets":0,"other":0},"package_identity":"%s","content_digest":"%s"' % (SRC_SHA, PINNED_IDENTITY, PINNED_CONTENT)
+GOLDEN_FIELDS = '"id":"tpl","version":"0.1.0","name":"tpl","platform":"genesis","source_identity_kind":"cartridge-image","revisions":[{"label":"rev-a","sha256":"%s"}],"trust_class":"native","capabilities":[],"capabilities_optional":[],"abi_native":2,"payloads":{"native":1,"luau":1,"assets":0,"other":0},"rom_edits":0,"symbols":[],"package_identity":"%s","content_digest":"%s"' % (SRC_SHA, PINNED_IDENTITY, PINNED_CONTENT)
 
 
 def raw(*args, cwd=None):
@@ -96,8 +96,8 @@ for bad in (("mod",), ("mod", "frobnicate"), ("mod", "pack", proj), ("mod", "ins
 luau_dir, _ = template("luau-proj", "luau")
 ok("luau template checks", "mod", "check", luau_dir)
 edit_dir, doc = template("edit-proj", "rom-edit")
-cli.check("NOTES.txt" in doc["created"], "rom-edit placeholder explains itself")
-ok("rom-edit placeholder checks", "mod", "check", edit_dir)
+cli.check("edits/main.edits" in doc["created"], "rom-edit template creates a commented edit file")
+ok("rom-edit template checks", "mod", "check", edit_dir)
 sms_dir, _ = template("sms-proj", "luau", platform="master-system")
 ok("master-system luau template checks", "mod", "check", sms_dir)
 # a template with a deliberate warning fails the strict host flags (the flags are real)

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <fstream>
 #include <set>
+#include <tuple>
 
 namespace segarecomp::mod {
 
@@ -274,7 +275,7 @@ Mapping parse_mapping(const Value &v) {
 Manifest parse_manifest(const Value &root) {
   object(root, "the manifest");
   only(root, {"format", "schema_version", "id", "version", "name", "platform", "author", "license", "purpose", "source", "bios", "capabilities", "capabilities_optional", "abi", "state_schema",
-              "hooks", "mappings", "limits", "geometry", "presentation_defaults", "payloads"}, "the manifest");
+              "hooks", "mappings", "symbols", "limits", "geometry", "presentation_defaults", "payloads"}, "the manifest");
   if (need(root, "format").kind != Value::Kind::string || str(root, "format") != "segarecomp-patch") fail("E_FIELD_VALUE", "the manifest is not a segarecomp patch manifest");
   if (need(root, "schema_version").kind != Value::Kind::number) fail("E_FIELD_VALUE", "schema_version must be an integer");
   if (num(root, "schema_version") != 3) fail("E_SCHEMA_VERSION", "the manifest is not schema 3");
@@ -424,6 +425,28 @@ Manifest parse_manifest(const Value &root) {
     }
   }
 
+  if (const Value *sv = root.find("symbols"); sv != nullptr) {   // ADR 0290: per-revision symbols with provenance; strictly sorted by (name, revision)
+    array(*sv, "symbols");
+    if (sv->items.empty() || sv->items.size() > kMaxSymbols) fail("E_FIELD_VALUE", "symbols holds 1 to 255 entries");
+    for (const Value &e : sv->items) {
+      object(e, "a symbol");
+      only(e, {"name", "revision", "address", "provenance"}, "a symbol");
+      Symbol sym;
+      sym.name = str(e, "name"); sym.revision = str(e, "revision"); sym.provenance = str(e, "provenance");
+      sym.address = static_cast<std::uint32_t>(num(e, "address"));
+      if (sym.address >= kMaxImageBytes) fail("E_FIELD_VALUE", "a symbol address must lie inside the largest supported image");
+      if (!symbol_name_ok(sym.name)) fail("E_FIELD_VALUE", "a symbol name must be a token of 1 to 64 characters");
+      if (labels.count(sym.revision) == 0) fail("E_SYMBOL_REVISION", "a symbol names a revision that is not declared");
+      if (std::none_of(std::begin(kSymbolProvenance), std::end(kSymbolProvenance), [&](std::string_view v) { return v == sym.provenance; })) fail("E_FIELD_VALUE", "the symbol provenance is not manual, verified or imported-hint");
+      if (!m.symbols.empty()) {
+        const Symbol &prev = m.symbols.back();
+        if (prev.name == sym.name && prev.revision == sym.revision) fail("E_SYMBOL_DUPLICATE", "a symbol repeats a (name, revision) pair");
+        if (std::tie(sym.name, sym.revision) < std::tie(prev.name, prev.revision)) fail("E_FIELD_VALUE", "symbols must be sorted by name, then revision");
+      }
+      m.symbols.push_back(std::move(sym));
+    }
+  }
+
   // combination rules (section 4)
   if (std::count_if(m.payloads.begin(), m.payloads.end(), [](const Payload &p) { return p.kind == "bps-image"; }) > 1) fail("E_PAYLOAD_COMBINATION", "at most one bps-image payload");
   if (has_kind(m, "bps-image") && (has_kind(m, "rom-edit-set") || has_kind(m, "guest-code"))) fail("E_PAYLOAD_COMBINATION", "bps-image cannot coexist with rom-edit-set or guest-code");
@@ -563,6 +586,15 @@ std::string serialize_manifest(const Manifest &m) {
     for (std::size_t i = 0; i < m.mappings.size(); ++i) { if (i) o += ','; emit_mapping(o, m.mappings[i]); }
     o += ']';
   }
+  if (!m.symbols.empty()) {
+    o += ','; key(o, "symbols"); o += '[';
+    for (std::size_t i = 0; i < m.symbols.size(); ++i) {
+      const Symbol &y = m.symbols[i];
+      if (i) o += ',';
+      o += '{'; kv(o, "name", y.name, true); kv(o, "revision", y.revision); kn(o, "address", y.address); o += ','; key(o, "provenance"); put_string(o, y.provenance); o += '}';
+    }
+    o += ']';
+  }
   if (m.has_limits) {
     o += ','; key(o, "limits"); o += '{';
     bool first = true;
@@ -590,6 +622,7 @@ std::string content_digest(const Manifest &m) {
   std::string text = "segarecomp.mod.content.v1\nplatform " + m.platform + "\n";
   for (const Payload *p : sorted)
     text += "payload " + p->kind + " " + std::to_string(p->kind_version) + " " + p->path + " size " + std::to_string(p->size) + " sha256 " + p->sha256 + "\n";
+  for (const Symbol &y : m.symbols) text += "symbol " + y.name + " " + y.revision + " " + std::to_string(y.address) + " " + y.provenance + "\n";   // symbols decide where edits land
   return sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(text.data()), text.size()));
 }
 
@@ -636,7 +669,10 @@ Package read_package(std::span<const std::uint8_t> zip) {
       const std::size_t n = it->second.data.size();
       const auto cap = [&](bool ok) { if (!ok) fail("E_PAYLOAD_CAP", "the payload \"" + p.path + "\" exceeds its kind cap"); };
       if (p.kind == "bps-image") cap(n <= kMaxImageBytes);
-      else if (p.kind == "rom-edit-set") { cap(n <= kMaxRomEditBytes && p.edits <= kMaxRomEdits); }
+      else if (p.kind == "rom-edit-set") {
+        cap(n <= kMaxRomEditBytes && p.edits <= kMaxRomEdits);
+        if (auto r = check_rom_edit_set(m, it->second.data, p.edits)) fail(r->code, r->message);   // syntax, count, per-revision symbols and overlap
+      }
       else if (p.kind == "guest-code") { guest_total += n; cap(guest_total <= kMaxGuestCodeBytes); }
       else if (p.kind == "native-c11") { native_total += n; cap(++native_n <= kMaxNativeFiles && n <= kMaxNativeFileBytes && native_total <= kMaxNativeTotalBytes); }
       else if (p.kind == "luau-source") {

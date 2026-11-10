@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <fstream>
+#include <map>
 #include <set>
+#include <tuple>
 
 namespace segarecomp::mod {
 
@@ -83,7 +85,7 @@ std::vector<Section> parse_toml(std::string_view text) {
       skip();
       if (i < line.size() && line[i] != '#') fail("E_MANIFEST_SYNTAX", "mod.toml has text after a table header");
       if (!bare_key(name)) fail("E_MANIFEST_SYNTAX", "a mod.toml table name is invalid");
-      const bool repeated = name == "target.revision" || name == "source" || name == "audio.mapping" || name == "audio.mapping.value";
+      const bool repeated = name == "target.revision" || name == "source" || name == "audio.mapping" || name == "audio.mapping.value" || name == "symbol";
       if (repeated != array && (repeated || name == "mod" || name == "target" || name == "capabilities" || name == "abi" || name == "state" || name == "limits" || name == "geometry" || name == "presentation"))
         fail("E_MANIFEST_SYNTAX", "the table [" + name + "] must be written " + (repeated ? "as [[" + name + "]]" : "as [" + name + "]"));
       if (!array) for (const Section &s : sections) if (s.name == name) fail("E_MANIFEST_SYNTAX", "mod.toml repeats the table [" + name + "]");
@@ -189,6 +191,7 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
   const Section *last_mapping = nullptr;
   std::vector<Mapping> mappings;
   std::size_t sources = 0;
+  std::map<std::string, unsigned> declared_edits;
   if (!sections.front().entries.empty()) fail("E_FIELD_UNKNOWN", "mod.toml keys must be inside a table");
   std::string previous;
   for (const Section &s : sections) {
@@ -248,7 +251,7 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
       if (bytes->size() > limit) fail("E_PAYLOAD_CAP", "the source file \"" + p.path + "\" exceeds its kind cap");
       p.size = bytes->size();
       p.sha256 = sha256_hex(*bytes);
-      p.target_sha256 = text_of(s, "target_sha256", false); p.edits = number_of(s, "edits", false); p.cpu = text_of(s, "cpu", false);
+      p.target_sha256 = text_of(s, "target_sha256", false); if (s.find("edits") != nullptr) declared_edits[p.path] = number_of(s, "edits"); p.cpu = text_of(s, "cpu", false);
       p.role = s.find("role") != nullptr ? text_of(s, "role") : (p.kind == "native-c11" ? "provider" : p.kind == "luau-source" ? "script" : "");
       p.asset_class = text_of(s, "asset_class", false); p.format = text_of(s, "format", false);
       p.width = number_of(s, "width", false); p.height = number_of(s, "height", false); p.audio_format = text_of(s, "audio_format", false);
@@ -275,6 +278,24 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
       }
       mappings.push_back(std::move(mp));
       last_mapping = &s;
+    } else if (s.name == "symbol") {   // ADR 0290: one [[symbol]] per (name, revision); the address is a hex string because mod.toml integers are 31-bit decimal
+      only(s, {"name", "revision", "address", "provenance"});
+      if (m.symbols.size() >= kMaxSymbols) fail("E_FIELD_VALUE", "a project declares too many symbols");
+      Symbol y;
+      y.name = text_of(s, "name"); y.revision = text_of(s, "revision"); y.provenance = text_of(s, "provenance");
+      const std::string address = text_of(s, "address");
+      bool hex = address.size() > 2 && address.size() <= 10 && address.compare(0, 2, "0x") == 0;
+      std::uint64_t value = 0;
+      for (std::size_t i = 2; hex && i < address.size(); ++i) {
+        const char c = address[i];
+        hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+        if (hex) value = value * 16 + static_cast<std::uint64_t>(c <= '9' ? c - '0' : c - 'a' + 10);
+      }
+      if (!hex) fail("E_FIELD_VALUE", "a symbol address is a string \"0x\" followed by 1 to 8 lower-case hex digits");
+      if (value >= kMaxImageBytes) fail("E_FIELD_VALUE", "a symbol address must lie inside the largest supported image (below 0x01000000)");
+      y.address = static_cast<std::uint32_t>(value);
+      if (!symbol_name_ok(y.name)) fail("E_FIELD_VALUE", "a symbol name must be a token of 1 to 64 characters");
+      m.symbols.push_back(std::move(y));
     } else if (s.name == "audio.mapping.value") {
       only(s, {"name", "value"});
       if (last_mapping == nullptr) fail("E_FIELD_UNKNOWN", "[[audio.mapping.value]] needs a preceding [[audio.mapping]]");
@@ -290,6 +311,16 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
   if (m.source_kind == "disc-image" && !m.revisions.empty()) fail("E_FIELD_UNKNOWN", "a disc-image target has no revisions");
   std::sort(m.payloads.begin(), m.payloads.end(), [](const Payload &a, const Payload &b) { return a.path < b.path; });
   m.mappings = std::move(mappings);
+  std::sort(m.symbols.begin(), m.symbols.end(), [](const Symbol &a, const Symbol &b) { return std::tie(a.name, a.revision) < std::tie(b.name, b.revision); });
+  for (std::size_t i = 1; i < m.symbols.size(); ++i)
+    if (m.symbols[i - 1].name == m.symbols[i].name && m.symbols[i - 1].revision == m.symbols[i].revision) fail("E_SYMBOL_DUPLICATE", "a symbol repeats a (name, revision) pair");
+  for (Payload &p : m.payloads) {   // the informational edit count is the verified count of the edit file; a stated value must agree
+    if (p.kind != "rom-edit-set") continue;
+    const RomEditSet set = parse_rom_edit_set(project.files[p.path], m);
+    if (!set.ok) fail(set.rejection.code, set.rejection.message);
+    if (declared_edits.count(p.path) != 0 && declared_edits[p.path] != set.edits.size()) fail("E_EDIT_COUNT", "the source \"" + p.path + "\" declares another edit count than it holds");
+    p.edits = static_cast<unsigned>(set.edits.size());
+  }
   project.ok = true;
   return project;
 }
