@@ -16,7 +16,8 @@ std::string join(const std::vector<std::string> &v) {
 }
 }  // namespace
 
-VariantIdentity variant_identity(const Manifest &m, std::string_view original_sha256, std::string_view effective_sha256) {
+VariantIdentity variant_identity(const Package &package, std::string_view original_sha256, std::string_view effective_sha256) {
+  const Manifest &m = package.manifest;
   VariantIdentity v;
   // Source digest: the digests of the executable-class payloads (native C11 and Luau) in path order, each bound to its path.
   std::vector<std::string> sources;
@@ -28,7 +29,7 @@ VariantIdentity variant_identity(const Manifest &m, std::string_view original_sh
   std::sort(optional.begin(), optional.end());
   v.components = {{"original_image", std::string(original_sha256)},
                   {"effective_image", std::string(effective_sha256)},
-                  {"package_identity", digest_of(serialize_manifest(m))},
+                  {"package_identity", package.identity},   // the verified SHA-256 of the exact received manifest bytes (a reordered but valid manifest is another identity)
                   {"source_digest", digest_of(join(sources))},
                   {"abi", std::to_string(m.abi_native)},
                   {"capabilities", digest_of(join(caps) + "|" + join(optional))}};

@@ -201,8 +201,8 @@ struct VariantIdentity {
   std::vector<VariantComponent> components;   // original_image, effective_image, package_identity, source_digest, abi, capabilities
   std::string key;                             // SHA-256 over "name=value\n" lines of the components
 };
-// `original_sha256` is the exact original image; `effective_sha256` the image that is compiled and run (the bps-image target, else the original).
-[[nodiscard]] VariantIdentity variant_identity(const Manifest &manifest, std::string_view original_sha256, std::string_view effective_sha256);
+// `package` must come from read_package (its `identity` is SHA-256 of the exact manifest bytes received). `original_sha256` is the exact original image; `effective_sha256` the image that is compiled and run (the bps-image target, else the original).
+[[nodiscard]] VariantIdentity variant_identity(const Package &package, std::string_view original_sha256, std::string_view effective_sha256);
 // Names of the components whose value differs (empty = identical). A component present in only one list counts as changed.
 [[nodiscard]] std::vector<std::string> changed_components(const std::vector<VariantComponent> &previous, const std::vector<VariantComponent> &current);
 // "name=value\n" text of the components (the stored variant record) and its inverse; the parser fails closed (empty result) on any malformed line.

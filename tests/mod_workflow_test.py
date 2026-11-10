@@ -180,4 +180,27 @@ cli.check(not any(".partial" in k for k in after), "no partial variant remains")
 rc, doc, _ = variant_of(ident)
 cli.check(rc == 0 and doc["variant_key"] == PINNED_VARIANT_KEY, "the earlier variant is still addressable after the failure")
 
+# ------------------------------------------------------------------ regression: variant identity follows the exact received manifest bytes, not a re-serialisation
+lp, lf = luau()
+m1 = base_manifest(payloads=[(lp, lf)])
+m2 = {k: m1[k] for k in ("format", "schema_version", "version", "id", "name", "platform", "source", "payloads")}   # same semantics, different key order
+cli.check(m1 != list(m2.items()) and canon(m1) != canon(m2) and json.loads(canon(m1)) == json.loads(canon(m2)), "fixture: semantically equal manifests with different key order")
+order_pkgs = []
+for tag, m in (("canonical", m1), ("reordered", m2)):
+    path = tmp / f"order-{tag}.segapatch"
+    path.write_bytes(build(m, [(lp, lf)]))
+    doc = ok(f"inspect the {tag} manifest order", "mod", "inspect", path)
+    cli.check(doc["package_identity"] == sha(canon(m)), f"{tag}: identity is the SHA-256 of the exact received manifest bytes")
+    inst = ok(f"install the {tag} order", "mod", "install", path, "--rom", rom_a, "--library", lib)
+    order_pkgs.append(inst["package_identity"])
+cli.check(order_pkgs[0] != order_pkgs[1], "different key order -> different package identities")
+results = []
+for identity in order_pkgs:
+    results.append(ok("variant of a luau-only package", "mod", "variant", "--library", lib, "--identity", identity, "--rom", rom_a))
+cli.check(results[0]["variant_key"] != results[1]["variant_key"] and all(r["cache"] == "miss" for r in results), f"different identities -> different variant keys and cache misses: {[r['variant_key'] for r in results]}")
+cli.check(results[0]["components"]["package_identity"] == order_pkgs[0] and results[1]["components"]["package_identity"] == order_pkgs[1], "the package_identity component is the verified Package.identity")
+cli.check(results[0]["components"]["source_digest"] == results[1]["components"]["source_digest"], "identical payloads keep an identical source_digest")
+repeat = ok("repeat the reordered variant", "mod", "variant", "--library", lib, "--identity", order_pkgs[1], "--rom", rom_a)
+cli.check(repeat["cache"] == "hit", "each order is reused on its own")
+
 cli.done("mod_workflow_test")

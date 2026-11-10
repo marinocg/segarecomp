@@ -218,7 +218,7 @@ int variant(const fs::path &library, const std::string &identity, const fs::path
   if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
   const mod::EffectiveImage e = mod::effective_image(p, image);
   if (!e.ok) return refuse(e.rejection);
-  const mod::VariantIdentity v = mod::variant_identity(p.manifest, e.original_sha256, e.effective_sha256);
+  const mod::VariantIdentity v = mod::variant_identity(p, e.original_sha256, e.effective_sha256);
   const fs::path root = library / "cache" / "variants";
   const fs::path entry = root / v.key;
   const fs::path index = root / "index" / (p.manifest.id + "-" + e.original_sha256.substr(0, 16) + ".txt");
