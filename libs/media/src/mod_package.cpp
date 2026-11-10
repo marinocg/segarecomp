@@ -641,7 +641,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
       else if (p.kind == "native-c11") { native_total += n; cap(++native_n <= kMaxNativeFiles && n <= kMaxNativeFileBytes && native_total <= kMaxNativeTotalBytes); }
       else if (p.kind == "luau-source") {
         luau_total += n; cap(++luau_n <= kMaxLuauFiles && n <= kMaxLuauFileBytes && luau_total <= kMaxLuauTotalBytes);
-        for (const std::uint8_t b : it->second.data) if (b == 0 || (b < 0x20 && b != '\t' && b != '\n' && b != '\r') || b >= 0x80) fail("E_LUAU_BYTECODE", "a luau-source payload is not Luau text");
+        for (const std::uint8_t b : it->second.data) if (b == 0 || (b < 0x20 && b != '\t' && b != '\n' && b != '\r') || b == 0x7F) fail("E_LUAU_BYTECODE", "a luau-source payload is not Luau text");
       } else { cap(++asset_n <= kMaxAssets && n <= kMaxAssetBytes); }
       if (p.kind == "asset" && p.asset_class == "audio") {
         const Wav w = parse_wav_pcm_s16le(it->second.data);

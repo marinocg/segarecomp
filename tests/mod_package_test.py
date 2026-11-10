@@ -214,6 +214,7 @@ accept("rom-edit-set + guest-code", mutate(lambda m: None, payloads=[(payload("r
 reject("m68k guest-code on master-system", mutate(lambda m: None, platform="master-system", payloads=[gc]), "E_PAYLOAD_PLATFORM")
 reject("bps-image on sega-cd (source is judged first)", mutate(lambda m: None, platform="sega-cd", payloads=[bp]), "E_SOURCE_PLATFORM")
 reject("bad guest-code cpu", mutate(lambda m: None, payloads=[(payload("guest-code", "code.bin", b"\x00", cpu="sh2"), ("code.bin", b"\x00"))]), "E_FIELD_VALUE")
+accept("luau source with UTF-8 text", mutate(lambda m: None, payloads=[luau("u.luau", "-- caf\u00e9\n".encode("utf-8"))]))
 reject("luau bytecode", mutate(lambda m: None, payloads=[luau("b.luau", b"\x03\x06binary\x00")]), "E_LUAU_BYTECODE")
 
 # archive-level rules
