@@ -1,5 +1,5 @@
 /* segarecomp_mod_sms.h -- ABI 2 Master System feature table (docs/architecture/native-sdk-abi-2.md section 3). Lifecycle and capability reporting only: phase dispatch and guest access
- * land with SEG-147-T004. There is no Genesis or Sega CD field in this table. */
+ * land with SEG-147-T004. The table holds Master System fields only. */
 #ifndef SEGARECOMP_MOD_SMS_H
 #define SEGARECOMP_MOD_SMS_H
 

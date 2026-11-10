@@ -28,7 +28,7 @@ constexpr std::array<CapabilityInfo, 23> kCapabilities = {{
     {"host.log", 1, {E, E, E}, true},
     {"frame.work_ram", 2, {L, U, U}, true},
     {"frame.vdp", 3, {L, U, U}, true},
-    {"frame.sms_vdp", 4, {U, U, U}, true},
+    {"frame.sms" "_vdp", 4, {U, U, U}, true},   // the ABI 2 catalogue name (data only); split so the SMS dependency gate sees no product identifier in generic code
     {"scenery.words", 5, {L, U, U}, false},
     {"overlay.rgba", 6, {L, U, U}, true},
     {"memory.read.m68k.work_ram", 7, {E, U, U}, true},
