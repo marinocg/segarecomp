@@ -304,6 +304,7 @@ cli.check(got == {"main_loop": ("0x00000200", "imported-hint"), "fun_00001234": 
 refused("re-import is a duplicate", "E_SYMBOL_DUPLICATE", "mod", "import-hints", d, "--revision", "rev-a", "--from", hints)
 refused("unknown revision", "E_SYMBOL_REVISION", "mod", "import-hints", d, "--revision", "rev-z", "--from", hints)
 refused("unparsable address", "E_SYMBOL_HINT", "mod", "import-hints", d, "--revision", "rev-b", "--from", write(tmp / "badh.txt", "name 0x200\nother 00ff\n"))
+refused("a bad first row is not mistaken for a header", "E_SYMBOL_HINT", "mod", "import-hints", d, "--revision", "rev-b", "--from", write(tmp / "badh3.txt", "foo bar\nx 0x10\n"))
 refused("missing hint file", "E_SYMBOL_HINT", "mod", "import-hints", d, "--revision", "rev-b", "--from", tmp / "nope.txt")
 before = (d / "mod.toml").read_bytes()
 refused("a failed import changes nothing", "E_SYMBOL_HINT", "mod", "import-hints", d, "--revision", "rev-b", "--from", write(tmp / "badh2.txt", "good 0x10\nbad\n"))

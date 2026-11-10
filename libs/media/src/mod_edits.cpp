@@ -275,7 +275,7 @@ SymbolHints parse_symbol_hints(std::string_view text, std::string_view revision)
     }
     if (ok && v >= kMaxImageBytes) return bad("E_SYMBOL_HINT", at(line_no) + "the address lies beyond the largest supported image");
     if (!ok) {
-      if (first_data) { first_data = false; continue; }   // a header row such as `Name,Location,...`
+      if (first_data && (tok[0] == "Name" || tok[0] == "name" || tok[0] == "Symbol" || tok[0] == "symbol")) { first_data = false; continue; }   // only a header row such as `Name,Location,...`
       return bad("E_SYMBOL_HINT", at(line_no) + "the address is not 0x hex, $ hex or plain decimal");
     }
     first_data = false;
