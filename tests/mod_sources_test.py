@@ -91,7 +91,8 @@ for what, line in (("parent directory", b'#include "../secret.h"'), ("absolute p
                    ("a file that is not in the package", b'#include "src/missing.h"'), ("a bare local name", b'#include "util.h"'), ("computed include", b"#define H <stdlib.h>\n#include H"),
                    ("#import", b"#import <stdlib.h>"), ("#include_next", b"#include_next <stdlib.h>"), ("#embed", b'#embed "src/util.h"'), ("digraph", b"%:include <stdlib.h>"),
                    ("trigraph hash", b"??=include <stdlib.h>"), ("line continuation", b"#inc\\\nlude <stdlib.h>"), ("comment between # and include", b"# /* x */ include <stdlib.h>"),
-                   ("include after a block comment", b"/* x */ #include <stdlib.h>"), ("windows backslash", b'#include "src\\\\util.h"'),
+                   ("include after a block comment", b"/* x */ #include <stdlib.h>"), ("lone CR splice", b"#inc\\\rlude <stdlib.h>"), ("splice with trailing space", b"#inc\\ \nlude <stdlib.h>"), ("form feed", b"#\x0cinclude <stdlib.h>"), ("vertical tab", b"#\x0binclude <stdlib.h>"), ("NUL byte", b"#\x00include <stdlib.h>"),
+                   ("incbin", b'__asm__(".incbin \\"x\\"");'), ("_Pragma", b'_Pragma("GCC dependency \\"x\\"")'), ("windows backslash", b'#include "src\\\\util.h"'),
                    ("another platform's header", b"#include <segarecomp_mod_sms.h>"), ("the ABI 1 header", b"#include <segarecomp_genesis_patch.h>")):
     expected = "E_ABI_PLATFORM" if "platform's header" in what else "E_ABI_MIXED" if "ABI 1" in what else "E_INCLUDE_FORBIDDEN"
     refused(f"include escape: {what}", project("inc-" + what.replace(" ", "-").replace("#", "").replace("'", ""), with_include(line)), expected)

@@ -650,6 +650,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
       }
       out.files.emplace(p.path, it->second.data);
     }
+    if (auto r = check_native_sources(m, out.files, *find_adapter(m.platform))) return rejected(r->code, r->message);   // the package itself must satisfy the source policy
     out.identity = sha256_hex(man->second.data);
     out.content_digest = content_digest(m);
     out.ok = true;

@@ -110,7 +110,7 @@ int compile_natives(const mod::Checked &checked, const std::string &cc, const fs
     fs::create_directories(at.parent_path(), ec);
     std::ofstream f(at, std::ios::binary | std::ios::trunc);
     f.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    if (!f) { class_out = "E_COMPILE_FAILED"; detail = "the sources could not be staged"; return 1; }
+    if (!f) { class_out = "E_COMPILE_FAILED"; detail = "the sources could not be staged"; fs::remove_all(work, ec); return 1; }
   }
   int rc = 0;
   for (const auto &[path, bytes] : checked.reread.files) {   // std::map order: deterministic compile order

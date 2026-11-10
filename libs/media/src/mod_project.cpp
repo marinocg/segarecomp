@@ -83,6 +83,9 @@ std::vector<Section> parse_toml(std::string_view text) {
       skip();
       if (i < line.size() && line[i] != '#') fail("E_MANIFEST_SYNTAX", "mod.toml has text after a table header");
       if (!bare_key(name)) fail("E_MANIFEST_SYNTAX", "a mod.toml table name is invalid");
+      const bool repeated = name == "target.revision" || name == "source" || name == "audio.mapping" || name == "audio.mapping.value";
+      if (repeated != array && (repeated || name == "mod" || name == "target" || name == "capabilities" || name == "abi" || name == "state" || name == "limits" || name == "presentation"))
+        fail("E_MANIFEST_SYNTAX", "the table [" + name + "] must be written " + (repeated ? "as [[" + name + "]]" : "as [" + name + "]"));
       if (!array) for (const Section &s : sections) if (s.name == name) fail("E_MANIFEST_SYNTAX", "mod.toml repeats the table [" + name + "]");
       sections.push_back(Section{name, array, {}});
       continue;
@@ -187,8 +190,11 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
   std::vector<Mapping> mappings;
   std::size_t sources = 0;
   if (!sections.front().entries.empty()) fail("E_FIELD_UNKNOWN", "mod.toml keys must be inside a table");
+  std::string previous;
   for (const Section &s : sections) {
     if (s.name.empty()) continue;
+    if (s.name == "audio.mapping.value" && previous != "audio.mapping" && previous != "audio.mapping.value") fail("E_FIELD_UNKNOWN", "[[audio.mapping.value]] must directly follow its [[audio.mapping]]");
+    previous = s.name;
     if (s.name == "mod") {
       only(s, {"id", "version", "name", "author", "license", "purpose"});
       m.id = text_of(s, "id"); m.version = text_of(s, "version"); m.name = text_of(s, "name");
@@ -302,8 +308,21 @@ std::string joined_text(const std::vector<std::uint8_t> &bytes) {
   return out;
 }
 
-std::optional<Rejection> scan_includes(const std::string &path, const std::string &t, const Adapter &adapter, const std::set<std::string> &local) {
+std::optional<Rejection> scan_includes(const std::string &path, const std::string &raw, const Adapter &adapter, const std::set<std::string> &local) {
   const auto forbid = [&](const std::string &why) { return Rejection{"E_INCLUDE_FORBIDDEN", path + ": " + why}; };
+  // Spellings that compilers treat as splices or whitespace in ways the scan below does not model are refused outright.
+  for (std::size_t i = 0; i < raw.size(); ++i) {
+    const char c = raw[i];
+    if (c == '\0' || c == '\f' || c == '\v') return forbid("NUL, form-feed and vertical-tab bytes are not allowed");
+    if (c == '\r' && !(i + 1 < raw.size() && raw[i + 1] == '\n')) return forbid("a lone carriage return is not allowed");
+    if (c == '\\') {
+      std::size_t j = i + 1;
+      while (j < raw.size() && (raw[j] == ' ' || raw[j] == '\t')) ++j;
+      if (j > i + 1 && j < raw.size() && (raw[j] == '\n' || raw[j] == '\r')) return forbid("whitespace after a line-continuation backslash is not allowed");
+    }
+  }
+  if (raw.find("incbin") != std::string::npos || raw.find("_Pragma") != std::string::npos || raw.find("GCC dependency") != std::string::npos) return forbid("assembler file inclusion and _Pragma are not allowed");
+  const std::string &t = raw;
   if (t.find("%:") != std::string::npos) return forbid("digraph spellings are not allowed");
   for (std::size_t q = t.find("??"); q != std::string::npos; q = t.find("??", q + 1))
     if (q + 2 < t.size() && std::string_view("=()/'<>!-").find(t[q + 2]) != std::string_view::npos) return forbid("trigraphs are not allowed");
@@ -358,6 +377,8 @@ std::optional<Rejection> check_native_sources(const Manifest &m, const std::map<
   for (const std::string &path : local) {   // std::set order = deterministic
     const auto it = files.find(path);
     if (it == files.end()) return Rejection{"E_ARCHIVE_ENTRY", "a native source is missing"};
+    const std::string raw(it->second.begin(), it->second.end());
+    if (auto r = scan_includes(path, raw, adapter, local)) return r;
     if (auto r = scan_includes(path, joined_text(it->second), adapter, local)) return r;
   }
   return std::nullopt;
