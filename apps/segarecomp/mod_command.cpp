@@ -125,7 +125,7 @@ int compile_natives(const mod::Checked &checked, const std::string &cc, const fs
     std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     const auto has = [&](const char *needle) { return text.find(needle) != std::string::npos; };
     // The entry is missing only when the linker reports THAT symbol as undefined (GNU ld, Apple ld, lld spellings); any other link error is E_LINK_FAILED.
-    if (link) class_out = has("undefined reference to `segarecomp_mod_provider'") || has("\"_segarecomp_mod_provider\"") || has("undefined symbol: segarecomp_mod_provider") || has("undefined symbol: _segarecomp_mod_provider") ? "E_ABI_ENTRY_MISSING" : "E_LINK_FAILED";
+    if (link) class_out = has("undefined reference to `segarecomp_mod_provider'") || has("\"_segarecomp_mod_provider\"") || has("undefined symbol: segarecomp_mod_provider") || has("undefined symbol: _segarecomp_mod_provider") || has("unresolved external symbol segarecomp_mod_provider") || has("unresolved external symbol _segarecomp_mod_provider") ? "E_ABI_ENTRY_MISSING" : "E_LINK_FAILED";
     else class_out = text.find("E_ABI_PLATFORM") != std::string::npos ? "E_ABI_PLATFORM" : text.find("E_ABI_HEADER_MISMATCH") != std::string::npos ? "E_ABI_HEADER_MISMATCH" : "E_COMPILE_FAILED";
     detail = where + ": " + text.substr(0, 1500);
   };
