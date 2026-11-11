@@ -128,12 +128,12 @@ def main():
                                     ("unrecognised selection", dict(ORIGINAL, selection="guessed"), "Unknown"),
                                     ("future schema", dict(ORIGINAL, schema=3), "Unknown")):
             q = Profile(tmp, "case-" + name.replace(" ", "-"), exe, fake_cli, fake_game)
-            build_and_show(q, name, record if isinstance(record, str) else json.dumps(record), shown)
+            build_and_show(q, name, record if isinstance(record, str) else json.dumps(record, separators=(",", ":")), shown)
         q = Profile(tmp, "case-degraded-detail", exe, fake_cli, fake_game)
-        build_and_show(q, "degraded detail", json.dumps(BROKEN), DEGRADED)
+        build_and_show(q, "degraded detail", json.dumps(BROKEN, separators=(",", ":")), DEGRADED)
         check("degraded is disclosed separately", q.run(OPEN + ["expect audio_has=Degraded: structural code mutation", "expect audio_has=Music is not supported", "quit"]), 3)
         q = Profile(tmp, "case-old-native-detail", exe, fake_cli, fake_game)
-        build_and_show(q, "old native detail", json.dumps(OLD_NATIVE), NATIVE)
+        build_and_show(q, "old native detail", json.dumps(OLD_NATIVE, separators=(",", ":")), NATIVE)
         check("an older native record does not claim save states", q.run(OPEN + ["expect audio_has=Save states are not available in this older build", "quit"]), 2)
 
         # 4. an older build without any record
