@@ -76,7 +76,8 @@ class Profile:
         script_path.write_text("\n".join(script) + "\n")
         trace_path.unlink(missing_ok=True)
         e = dict(self.env, SEGARECOMP_GUI_SCRIPT=str(script_path), SEGARECOMP_GUI_TRACE=str(trace_path), **(extra_env or {}))
-        subprocess.run([self.exe], env=e, timeout=180, check=True, capture_output=True)
+        # no pipes: a build tool or game the launcher started must never keep a pipe of this test open (a timeout would then hang instead of fail)
+        subprocess.run([self.exe], env=e, timeout=240, check=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return trace_path.read_text().splitlines() if trace_path.exists() else []
 
 
