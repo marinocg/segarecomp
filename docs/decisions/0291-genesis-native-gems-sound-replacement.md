@@ -94,7 +94,7 @@ technical sound option, and the build already holds the evidence. `segarecomp bu
    original stays (`reason: original_supported`); if it is isolated and **no** uploaded image is a verified GEMS image, the original stays and the record says so
    (`no_verified_replacement`, audio `degraded`).
 2. If the original AOT isolated the sound CPU by a **structural code mismatch** *and* an uploaded image's activation signature is in the catalog, the build records that evidence and
-   runs **pass 2**: the same program built with the replacement (`reason: original_aot_failure_verified_replacement`). A pass 2 whose image identity is not verified, or that
+   runs **pass 2**: the same program built with the replacement (`reason: original_aot_failure_verified_replacement`). The failing image must be the verified one: the materialization result records the image bound when the sound CPU was isolated (the latest code-uploading epoch at or before the fault), and a fault of a different image of the same program, with a verified image merely present, selects nothing. A pass 2 whose image identity is not verified, or that
    was reached without the recorded evidence, fails closed (`sound_driver_unverified`); there is no third pass and no heuristic.
 
 The user's choice of nothing is the product: no checkbox, no per-game preference, no persistence and no cache-key effect of a *choice*. The cache identity of a build does include
@@ -114,7 +114,7 @@ version, the payload schema, the activation signature of the bound image and the
 Restore keeps the ADR 0278 model: stage, validate, then commit. The driver payload is decoded into private storage and validated against the guest clock and the staged YM2612's Timer A
 schedule (`gems_native_state_get`: every cursor and index in range, every time within the clock slack, the DAC due time not after the chip's next overflow, structural invariants of
 the voices and blocks); identity (driver, version, implementation version, schema, activation signature of the image) must equal what this program carries and must match the
-bound image of the staged Z80. Nothing live is touched until every section has passed; commit installs the staged state and rebinds the host, **writes to no chip** (the chip
+bound image of the staged Z80. The converse is enforced too: a state that says the replacement does not serve the bound image is refused when that image is one this executable must serve through it (identified from the image's activation signature), so a modified state cannot turn a verified image into ordinary generated Z80 execution. Nothing live is touched until every section has passed; commit installs the staged state and rebinds the host, **writes to no chip** (the chip
 state came with the snapshot) and cannot fail. A faulted replacement is recorded as such (identity only, no payload) and restores inert.
 
 The save-state tests are in `docs/testing/genesis-native-gems-validation.md` (driver-level deterministic continuation and refusals, machine-level snapshot test on the real

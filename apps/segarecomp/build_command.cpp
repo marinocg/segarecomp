@@ -1228,6 +1228,13 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       if (verified == catalog.end()) { ++audio_record.original_images; continue; }
       if (audio_record.native_images++ == 0) { first_verified = &*verified; first_image = &image; audio_record.signature_prefix = hex.substr(0, 16); }
     }
+    if (summary.sound_fault_image && options.sound_driver == "auto") {   // describe (and later analyse) the image that actually faulted when it is a verified one
+      const std::string faulting = gz80::to_hex(*summary.sound_fault_image);
+      for (const auto &image : registry.images()) {
+        const auto verified = std::find_if(catalog.begin(), catalog.end(), [&](const VerifiedImage &entry) { return entry.signature == faulting; });
+        if (verified != catalog.end() && gz80::to_hex(image.signature) == faulting) { first_verified = &*verified; first_image = &image; audio_record.signature_prefix = faulting.substr(0, 16); break; }
+      }
+    }
     audio_record.replacement_available = audio_record.native_images != 0;
     if (first_verified != nullptr) {
       audio_record.driver = first_verified->driver;
@@ -1237,7 +1244,11 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       audio_record.structural_candidates = gz80::structural_code_write_candidates(*first_image);
     }
     if (options.sound_driver == "auto") {
-      if (summary.sound_fault && !summary.sound_fault->native_driver && first_verified != nullptr) {
+      // The fault must come from the catalog-qualified image itself: a program with several Z80 images, one of them verified and a different one faulting, is not evidence for it.
+      const bool fault_from_verified_image = summary.sound_fault_image.has_value() && std::any_of(catalog.begin(), catalog.end(), [&](const VerifiedImage &entry) {
+        return entry.signature == gz80::to_hex(*summary.sound_fault_image);
+      });
+      if (summary.sound_fault && !summary.sound_fault->native_driver && first_verified != nullptr && fault_from_verified_image) {
         // The evidence: the original AOT of this very game isolated its sound CPU (a structural code mismatch), and the uploaded image is a verified GEMS image.
         options.sound_auto_evidence.present = true;
         options.sound_auto_evidence.original_outcome = "structural_code_mismatch";

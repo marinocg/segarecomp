@@ -120,6 +120,31 @@ def main():
               audio.get("original_aot", {}).get("outcome") == "structural_code_mismatch" and status.get("genesis_audio") in ("native", "degraded"),
               "a self-modifying driver with a verified image identity is built a second time with the replacement, automatically and with the original's failure as evidence")
         check("sound_driver=gems" in done.stdout and executable(tmp / "auto_native") is not None, "the build result names the replacement and produced an executable")
+        # two images, the SECOND one faults: only a catalog line for the FAULTING image selects the replacement
+        second = fx.build("sound_smc_second_image")
+        done, status = build(second, tmp / "two_default")
+        audio = status.get("audio_implementation", {})
+        registry = (tmp / "two_default" / "generated-z80" / "genesis_z80_registry.c").read_text()
+        block = registry[registry.index("genesis_z80_image_signatures"):registry.index("const uint8_t genesis_z80_image_content_hashes")]
+        pair = ["".join("%02x" % int(b, 16) for b in row.split(",")) for row in re.findall(r"\{((?:0x[0-9A-F]{2},?){32})\}", block)]
+        check(done.returncode == 0 and len(pair) == 2 and audio.get("audio_status") == "degraded" and audio.get("kind") == "original_z80_aot",
+              "the two-image fixture faults the sound CPU on the original path and registers both images")
+        def with_catalog(name, signature):
+            copy = tmp / name
+            shutil.copytree(tree, copy)
+            file = copy / "platforms" / "genesis" / "runtime" / "gems_driver_catalog.inc"
+            lines = [l for l in file.read_text().splitlines() if not l.startswith('GEMS_VERIFIED_IMAGE("gems", "2.5", "build_qualified"')]
+            file.write_text("\n".join(lines) + '\nGEMS_VERIFIED_IMAGE("gems", "2.5", "build_qualified", "%s")\n' % signature)
+            return copy / "platforms" / "genesis"
+        done, status = build(second, tmp / "two_other", runtime=with_catalog("tree_other", pair[0]))
+        audio = status.get("audio_implementation", {})
+        check(done.returncode == 0 and audio.get("kind") == "original_z80_aot" and audio.get("reason") == "no_verified_replacement" and audio.get("audio_status") == "degraded",
+              "a verified image that did NOT fault is no evidence: a different image's fault keeps the original path (degraded, no verified replacement)")
+        done, status = build(second, tmp / "two_faulting", runtime=with_catalog("tree_faulting", pair[1]))
+        audio = status.get("audio_implementation", {})
+        check(done.returncode == 0 and audio.get("kind") == "native_driver" and audio.get("reason") == "original_aot_failure_verified_replacement" and audio.get("identity") == pair[1][:16],
+              "the replacement is selected when the verified image is the one that faulted, and the record names that image")
+
         done, status = build(multi, tmp / "auto_original", runtime=tree / "platforms" / "genesis")
         audio = status.get("audio_implementation", {})
         check(done.returncode == 0 and audio.get("kind") == "original_z80_aot" and audio.get("reason") == "original_supported",

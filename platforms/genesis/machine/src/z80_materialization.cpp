@@ -127,6 +127,11 @@ MaterializationSummary materialize(Registry& registry, PassRunner& runner) {
   summary.frames = confirmed.frames;
   summary.end = confirmed.outcome;
   summary.sound_fault = confirmed.sound_fault;
+  if (confirmed.sound_fault && confirmed.sound_fault->epochs >= 1 && confirmed.sound_fault->epochs <= confirmed.epochs.size()) {
+    for (std::size_t i = confirmed.sound_fault->epochs; i-- > 0;) {   // the latest epoch at or before the fault that uploaded code binds the image
+      if (confirmed.epochs[i].extents != 0 || i == 0) { summary.sound_fault_image = confirmed.epochs[i].signature; break; }
+    }
+  }
   summary.guest_stop = confirmed.guest_stop;
   return summary;
 }

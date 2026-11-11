@@ -506,6 +506,16 @@ static GenesisSnapshotStatus get_z80(Reader *r, GenesisZ80Machine *m, NativeStag
     if (m->native_driver == NULL) return GENESIS_SNAPSHOT_INCOMPATIBLE;
     if (native_tag != 2U) return GENESIS_SNAPSHOT_INVALID_STATE;
   }
+  if (m->native_driver != NULL && native_tag == 0U) {
+    /* ADR 0291, the converse of the identity checks below: an executable that serves a verified image through the replacement must never restore that image as ordinary Z80
+     * execution. A bound image that the replacement identifies is only legal when the state says the replacement serves it (tag 1); the image a plain restart would re-bind
+     * (`last_bound`) is only legal while the replacement is not meant to serve it, i.e. when the sound CPU is faulted (tag 2 covers that case). */
+    const GenesisZ80NativeDriver *d = m->native_driver;
+    uint8_t signature[32];
+    const char *version = NULL;
+    if (m->bound_ordinal != 0U && genesis_z80_image_signature(m->bound_ordinal, signature) && d->identify(d->context, signature, &version)) return GENESIS_SNAPSHOT_INVALID_STATE;
+    if (m->last_bound != 0U && m->sound_fault == (GenesisDiagnosticCategory)0 && genesis_z80_image_signature(m->last_bound, signature) && d->identify(d->context, signature, &version)) return GENESIS_SNAPSHOT_INVALID_STATE;
+  }
   if (native_tag == 1U || native_tag == 2U) {   /* the backend named by the state must be exactly the one this program carries, bound to the image the state says is running */
     const GenesisZ80NativeDriver *d = m->native_driver;
     const char *version = NULL;

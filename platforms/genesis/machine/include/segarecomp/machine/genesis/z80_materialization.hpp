@@ -110,6 +110,10 @@ struct MaterializationSummary {
   std::uint32_t frames = 0;         // virtual frames reached by the confirmed run
   PassOutcome end = PassOutcome::failed;
   std::optional<SoundFault> sound_fault;  // set: Genesis audio degraded (z80_audio_outcome = structural_code_mismatch)
+  // ADR 0291: the activation signature of the image that was bound when the sound CPU was isolated (set exactly when `sound_fault` is, and the epoch record allows it): the image
+  // of the latest epoch that uploaded code at or before `sound_fault->epochs` (a plain restart re-binds the previous image). The automatic sound selection requires THIS image
+  // to be the catalog-qualified one, not merely some image of the program.
+  std::optional<Digest> sound_fault_image;
   std::optional<m68k_alias::GuestStopRecord> guest_stop;  // the confirmed run's M68K stop record (end == guest_stop)
   // The distinct activation signatures of the confirmed run in order of first activation (ADR 0277: the registry's ordinal order, as the
   // legacy fixed point would have produced it, is the verification target of a statically preloaded registry).

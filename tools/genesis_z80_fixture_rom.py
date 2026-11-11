@@ -617,6 +617,12 @@ def fixture_sound_smc_fault():
     return build_sound([("raw", "s"), ("delay", SOUND_DELAY), ("raw", "a")], {"s": sound_smc_psg_driver(), "a": sound_driver(1)})
 
 
+def fixture_sound_smc_second_image():
+    """Two images: a well-behaved driver in the first epoch, then, after a delay, a structurally self-modifying one that isolates the sound CPU: the faulting image is the SECOND one
+    (ADR 0291: the automatic sound selection must tie the fault to the catalog-qualified image, not to any image of the program)."""
+    return build_sound([("raw", "a"), ("delay", SOUND_DELAY), ("raw", "s")], {"a": sound_driver(1), "s": sound_smc_psg_driver()})
+
+
 def fixture_sound_late_epoch():
     """A second, different driver is uploaded only after the observation window: the build sees one image, the second epoch
     surfaces at run time as the typed z80_unknown_image."""
@@ -700,7 +706,7 @@ def fixture_static_kos_beyond_ram():
 
 FIXTURES = {"multi_epoch_dirty": fixture_multi_epoch_dirty, "bus_reset_probe": fixture_bus_reset_probe, "bus_reset_control": fixture_bus_reset_control,
             "sound_raw": fixture_sound_raw, "sound_multi_epoch": fixture_sound_multi_epoch, "sound_decoded": fixture_sound_decoded,
-            "sound_smc": fixture_sound_smc, "sound_smc_fault": fixture_sound_smc_fault, "sound_tone": fixture_sound_tone, "sound_late_epoch": fixture_sound_late_epoch,
+            "sound_smc": fixture_sound_smc, "sound_smc_fault": fixture_sound_smc_fault, "sound_smc_second_image": fixture_sound_smc_second_image, "sound_tone": fixture_sound_tone, "sound_late_epoch": fixture_sound_late_epoch,
             "sound_domestic_gated": fixture_sound_domestic_gated, "sound_domestic_gated_overseas_header": fixture_sound_domestic_gated_overseas_header,
             "static_kos": fixture_static_kos, "static_stub_driver": fixture_static_stub_driver, "static_kos_unrecognised": fixture_static_kos_unrecognised,
             "static_kos_work_ram": fixture_static_kos_work_ram, "static_ram_count": fixture_static_ram_count,

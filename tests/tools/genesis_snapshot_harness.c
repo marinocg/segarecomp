@@ -214,6 +214,8 @@ int main(int argc, char **argv) {
 #ifdef SEGARECOMP_SNAPSHOT_NATIVE
     } else if (strcmp(op, "cart") == 0) {
       cart_install((int)a);
+    } else if (strcmp(op, "denative") == 0) {   /* test only: the machine keeps the verified image bound but no longer says the replacement serves it (an inconsistent live state, to be captured) */
+      g_machine.native_active = 0U;
     } else if (strcmp(op, "native") == 0) {
       GenesisZ80NativeReport rep;
       memset(&rep, 0, sizeof rep);
