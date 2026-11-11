@@ -2,7 +2,7 @@
 
 ADR 0291. Code: `platforms/genesis/runtime/gems_native.{h,c}` (driver core, no dependency on the Z80 machine), `gems_driver_catalog.inc` (verified images),
 `z80_machine.{h,c}` (the binding), `genesis_sound.c` (the program-side adapter, compiled with `SEGARECOMP_NATIVE_SOUND_GEMS` only when selected),
-`apps/segarecomp/build_command.cpp` (`--sound-driver`, identity check, `audio_implementation` record). Evidence: `docs/testing/genesis-native-gems-validation.md`.
+`apps/segarecomp/build_command.cpp` (automatic selection, identity check, `audio_implementation` record), `genesis_snapshot.{h,c}` (the driver's state in save states and rewind). Evidence: `docs/testing/genesis-native-gems-validation.md`.
 
 ## What it is - and is not
 
@@ -10,15 +10,15 @@ GEMS (Genesis Editor for Music and Sound Effects) is a Z80 sound driver that gam
 executable bytes (its DAC pump), which the generated-native Z80 cannot execute (ADR 0134): the Z80 is isolated and the game is silent.
 
 The replacement is **original C11 code that reproduces the observable behaviour of that one verified driver image**. It never fetches, decodes, interprets or executes
-a Z80 byte of the original, has no runtime compilation, no learning and no fallback. It is used only when (1) the build was asked for it and (2) the image the game
-uploaded is in the catalog. Everything else about the machine (68000, VDP, bus arbitration, YM2612, PSG, mixer, save data) is unchanged and shared.
+a Z80 byte of the original, has no runtime compilation, no learning and no fallback. It is used only when the build selects it by itself: (1) the image the game
+uploaded is in the catalog **and** (2) the original generated-native Z80 of that very game was recorded as failing (isolated by a structural code mismatch). Everything else about the machine (68000, VDP, bus arbitration, YM2612, PSG, mixer, save data) is unchanged and shared.
 
 ## Driver identity and version
 
 The catalog line is the **activation signature** the runtime already computes for every Z80 image epoch (SHA-256 over the 68000-written extents of the sound RAM and their
 bytes). It identifies the exact bytes uploaded; no title, header, file name or ROM digest takes part. Aladdin, Earthworm Jim, Jurassic Park and Cool Spot upload the
 same image. Its version is 2.5, established by the address map and the data tables (not by a title); ADR 0291 states the evidence and its limit.
-Unknown images: `--sound-driver gems` fails the build (`sound_driver_unverified`); at run time an unlisted image simply stays generated-native Z80.
+Unknown images: the automatic policy keeps the original generated-native Z80 (and says `degraded` when it failed); the developer override `--sound-driver gems` fails the build (`sound_driver_unverified`); at run time an unlisted image simply stays generated-native Z80.
 
 ## Protocol reproduced
 
@@ -40,17 +40,25 @@ Unknown images: `--sound-driver gems` fails the build (`sound_driver_unverified`
 Implemented and reference-compared: everything in the table above. A fault means malformed or unreadable data, after which the replacement is silent for the run.
 
 Not modelled: the real driver's polling latency (events are placed on exact chip / interrupt times), stalls while the 68000 is mid-command, the `$1B20` block flag, one command per pass of
-the original's main loop (the replacement drains the ring at once). Save states are unavailable while the replacement is active. A different driver image or version is not covered until it is
+the original's main loop (the replacement drains the ring at once). Save states and rewind work while it is active (see below). A different driver image or version is not covered until it is
 added to the catalog and validated.
 
 ## Build and disclosure
 
-`segarecomp build ... --sound-driver gems` compiles `gems_native.c` and the adapter into the program (and into the build-time observation pass, so the 600-frame start-up
-run reports what the replacement did). `status.json` `audio_implementation` records requested vs actual implementation, driver / version / evidence tier,
-implementation version, coverage (`complete`), verification tier, reason, audio status and the observation (commands / sequences / DAC samples / first fault); an original build records
+When the build selects the replacement (a second, deterministic pass; `--sound-driver auto`, the default) it compiles `gems_native.c` and the adapter into the program (and into the build-time observation pass, so the 600-frame start-up
+run reports what the replacement did). `status.json` `audio_implementation` (schema 2) records requested vs actual implementation, `selection` (`automatic` | `developer_override`), `reason`, driver / version / evidence tier,
+implementation version, catalog revision, `save_states`, the original AOT's failure evidence, coverage (`complete`), verification tier, reason, audio status and the observation (commands / sequences / DAC samples / first fault); an original build records
 `original_z80_aot` with its audio status and any compiled structural alternatives. `genesis_audio` is `native` (or `degraded` if the start-up run met malformed data, with `z80_audio_outcome = native_driver_unsupported_operation`). The headless run summary (`SOUND_SUMMARY`) gains a `native` object, and
-`SEGARECOMP_AUDIO_WRITE_LOG=<file>` logs every chip access (validation seam). The launcher shows the record in Build provenance and can request the replacement from the
-game's Advanced build options; the request is part of its cache identity.
+`SEGARECOMP_AUDIO_WRITE_LOG=<file>` logs every chip access (validation seam). The launcher shows the record in Build provenance (there is no option to request or refuse the replacement); the shipped implementation version and catalog revision are part of a build's cache identity, a choice is not.
+
+## Save states and rewind
+
+The driver's complete state is serialised by `gems_native_state_put` / `gems_native_state_get` (canonical, versioned, little-endian, no pointer or struct layout) and carried in a
+trailer of the Genesis snapshot's Z80 section together with the driver identity and the activation signature of the bound image. A program with the replacement sets the
+`NATIVE_SOUND` machine flag, so its states and those of a program without it never load into each other; a program without the replacement writes exactly the container it always did.
+Restore stages and validates everything (clock, Timer A schedule, structural invariants, identity against the bound image), then commits atomically without a single chip write; any refusal
+leaves the live machine untouched. A faulted driver is recorded as faulted and restores inert. The viewer's save/load slots and rewind use the same service, so nothing viewer-specific exists.
+Evidence and limits: `docs/testing/genesis-native-gems-validation.md`.
 
 ## Path forward (not part of this change)
 

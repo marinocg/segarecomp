@@ -1,6 +1,6 @@
 # ADR 0291: Native GEMS sound-driver replacement for Genesis games whose Z80 driver rewrites its own code
 
-- Status: Accepted (opt-in, explicit selection).
+- Status: Accepted. Amended by PR #216 review: the replacement is selected **automatically** by the build (never by a user option) and it takes part in save states and rewind.
 - Builds on: ADR 0072/0073 (Genesis Z80 platform integration, RAM-backed images), 0134 (structural variants NO-GO), 0135 (static mutation analysis), 0259 (Sega CD
   compiled structural alternatives), 0277 (static-first Z80 production). Changes none of their conclusions and adds no Z80 mechanism.
 - Architecture, coverage and limits: `docs/architecture/genesis-native-gems.md`. Evidence: `docs/testing/genesis-native-gems-validation.md`.
@@ -48,9 +48,10 @@ pitch envelopes, pitch bend, PSG envelope emulation, the channel-3 special mode,
 compressed) through its two-half FIFO and Timer A pacing. Where the published C port of the driver deviates from the 2.5 assembly (the SFX flag of envelopes, the target of
 the mute event, a sub-beat reset at every sequence start, a refill call inside the DAC routine) the assembly is followed.
 
-- **Selection** is explicit: `segarecomp build --sound-driver gems` (default `original`). The build refuses it (exit 6, stage `sound-driver`, `sound_driver_unverified`,
-  no executable) unless at least one uploaded image's activation signature is in `runtime/gems_driver_catalog.inc`. The catalog keys on driver bytes, never on a title; the
-  runtime consults the same catalog, and images that are not in it keep running as generated-native Z80. No fallback build, no mid-run switch, no learning.
+- **Selection is automatic** (see "Decision 4"): `segarecomp build` defaults to `--sound-driver auto`. `--sound-driver original|gems` are developer overrides that the launcher
+  never uses: `gems` is refused (exit 6, stage `sound-driver`, `sound_driver_unverified`, no executable) unless at least one uploaded image's activation signature is in
+  `runtime/gems_driver_catalog.inc`. The catalog keys on driver bytes, never on a title; the runtime consults the same catalog, and images that are not in it keep running as
+  generated-native Z80. No fallback build, no mid-run switch, no learning.
 - **Identity in the build:** the program is compiled with the replacement only when selected; the status record names the driver, version, evidence tier, the
   replacement's implementation version (`GEMS_NATIVE_IMPLEMENTATION_VERSION`), how it was validated and what the build's own start-up run observed.
 - **Faults are explicit and now exceptional.** Only malformed or unreadable data stops the replacement: a read outside the cartridge, a track count above 16, a mailbox
@@ -60,13 +61,13 @@ the mute event, a sub-beat reset at every sequence start, a refill call inside t
 - **Timing model.** Work is placed on exact guest times (VBlank interrupt edges, Timer A overflows asked of the chip itself, command-FIFO checks when the Z80 bus is
   returned), not on a Z80 poll phase: it is event-accurate, not cycle-accurate. Not modelled: the original's polling latency, its stalls while a command is half written, the
   68000's DMA block flag (the replacement reads the cartridge atomically).
-- **Save states** are unavailable while the replacement is active (`NOT_CAPTURABLE`), because its state is not part of the snapshot format; a faulted replacement is
-  inert and snapshots normally.
+- **Save states and rewind are supported** (see "Decision 5"). The earlier `NOT_CAPTURABLE` refusal is gone.
 
 ## Decision 3 - disclosure
 
-`status.json` gains `audio_implementation` (schema 1; requested vs actual implementation, driver / version / evidence, coverage, verification tier, reason, audio
-status, and the start-up run's observation). The launcher shows one row, "Audio implementation", in the existing Build provenance section, from that record only: it never
+`status.json` gains `audio_implementation` (schema 2; schema 1 records of the first iteration of this PR are still read: requested vs actual implementation, `selection`
+`automatic | developer_override`, `reason`, driver / version / evidence, the replacement's implementation version and the catalog revision, `save_states`, coverage,
+verification tier, audio status, the original AOT's failure evidence for an automatic selection, and the start-up run's observation). The launcher shows one row, "Audio implementation", in the existing Build provenance section, from that record only: it never
 infers a backend from the title, the file name or the current selection; a missing record is "Not recorded" and an unrecognised one "Unknown". `verification` is the
 evidence tier of the replacement for that driver image (`build_qualified` / `reference_checked`); it never claims that a play session sounded right.
 
@@ -75,9 +76,46 @@ evidence tier of the replacement for that driver image (`build_qualified` / `ref
 - Cool Spot, Aladdin, Earthworm Jim and Jurassic Park get their sound back - music and effects - from the first command to the end of a long reference run, and each
   operation is compared with an independent implementation (`docs/testing/genesis-native-gems-validation.md`).
 - Another driver image or version lands as one catalog line plus its own validation against the reference; a different driver family is a different module. Nothing here constrains the general mod runtime.
-- The default build, its generated code and every other platform are byte-for-byte unchanged (`gems_native.c` is not compiled without the option).
+- A game whose original generated-native Z80 works, and every other platform, is built exactly as before (`gems_native.c` is compiled only into a program the build selected it for). The
+  player never sets a sound option.
 
 ## Rejected
 
-A Z80 interpreter or audio-only emulator; a JIT; copying or porting either third-party reference; accepting a driver by title, file name or header; an automatic
-(unrequested) replacement; weakening ADR 0134 / 0259's closure arguments to make the family pass; a hard-coded or sample-substituted "demonstration".
+A Z80 interpreter or audio-only emulator; a JIT; copying or porting either third-party reference; accepting a driver by title, file name or header; a replacement chosen by
+any evidence other than a verified catalog identity plus the original AOT's own recorded failure; a per-game user option, preference or cache-key effect for the choice; a runtime
+fallback between implementations; weakening ADR 0134 / 0259's closure arguments to make the family pass; a hard-coded or sample-substituted "demonstration".
+
+## Decision 4 - automatic selection (amendment)
+
+The first iteration asked the player to tick an experimental option. That is the wrong place for the decision: a supported game must play correctly without anyone changing a
+technical sound option, and the build already holds the evidence. `segarecomp build` therefore decides, deterministically, in at most two passes:
+
+1. **Pass 1** is the ordinary build with the original generated-native Z80 (`--sound-driver auto`). If the build's own verification run ends with the sound CPU **not** isolated, the
+   original stays (`reason: original_supported`); if it is isolated and **no** uploaded image is a verified GEMS image, the original stays and the record says so
+   (`no_verified_replacement`, audio `degraded`).
+2. If the original AOT isolated the sound CPU by a **structural code mismatch** *and* an uploaded image's activation signature is in the catalog, the build records that evidence and
+   runs **pass 2**: the same program built with the replacement (`reason: original_aot_failure_verified_replacement`). A pass 2 whose image identity is not verified, or that
+   was reached without the recorded evidence, fails closed (`sound_driver_unverified`); there is no third pass and no heuristic.
+
+The user's choice of nothing is the product: no checkbox, no per-game preference, no persistence and no cache-key effect of a *choice*. The cache identity of a build does include
+what the build may choose from - the replacement's implementation version and the catalog revision - so a product that ships a changed replacement or catalog never reuses an
+older program, and a build record is never relabelled after the fact. `--sound-driver original` and `gems` exist for developers (forcing a comparison, or reproducing a result);
+they are recorded as `developer_override` and are not reachable from the launcher.
+
+## Decision 5 - save states and rewind with the replacement
+
+The replacement's complete execution state is a canonical, versioned (`GEMS_NATIVE_STATE_SCHEMA`), pointer-free, explicit little-endian payload (`gems_native_state_put`): time and
+event cursors, the pointer tables, every control block, voice, envelope block and pitch-bend slot, the PSG envelope processor, the digital voice (sample cursor, FIFO halves, rate),
+Timer A pacing and the counters. The 8 KiB sound RAM with the command FIFO and the mailboxes belongs to the machine snapshot and is not repeated. The Genesis snapshot container
+is unchanged for programs without the replacement (byte-identical); a program with one sets the `NATIVE_SOUND` machine flag, which changes the execution fingerprint, so states
+never cross the boundary in either direction. The Z80 section gains a trailer: the backend tag (not serving / serving / faulted), the driver name and version text, the implementation
+version, the payload schema, the activation signature of the bound image and the payload.
+
+Restore keeps the ADR 0278 model: stage, validate, then commit. The driver payload is decoded into private storage and validated against the guest clock and the staged YM2612's Timer A
+schedule (`gems_native_state_get`: every cursor and index in range, every time within the clock slack, the DAC due time not after the chip's next overflow, structural invariants of
+the voices and blocks); identity (driver, version, implementation version, schema, activation signature of the image) must equal what this program carries and must match the
+bound image of the staged Z80. Nothing live is touched until every section has passed; commit installs the staged state and rebinds the host, **writes to no chip** (the chip
+state came with the snapshot) and cannot fail. A faulted replacement is recorded as such (identity only, no payload) and restores inert.
+
+The save-state tests are in `docs/testing/genesis-native-gems-validation.md` (driver-level deterministic continuation and refusals, machine-level snapshot test on the real
+runtime, local reference demonstration).

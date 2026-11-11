@@ -371,7 +371,7 @@ construction (later epochs are never looked up). The confirming run must reprodu
 
 Measured class (SEG-068-T003, ADR 0134): on the five faulting authorized workloads the structural mutation is the sound driver rewriting its own executable bytes
 (Z80-written; opcode and length change; before or after earlier executions), never an unseen image, an S1\* collision, a missed epoch or an operand-only change.
-Compiled structural variants were evaluated against a pre-registered bound and are **not** adopted; the fault isolation above remains the behaviour. ADR 0291 adds an explicit, opt-in route for one verified driver family (GEMS 2.5): a native replacement selected with `--sound-driver gems`, with a partial verified coverage (`docs/architecture/genesis-native-gems.md`); the default build and this contract are unchanged.
+Compiled structural variants were evaluated against a pre-registered bound and are **not** adopted; the fault isolation above remains the behaviour. ADR 0291 adds one route for one verified driver family (GEMS 2.5): when the original path isolated the sound CPU and the uploaded image is a verified GEMS image, the build itself selects a native replacement of the driver (no user option; `docs/architecture/genesis-native-gems.md`), which takes part in save states and rewind; every other build, and this contract for it, is unchanged.
 
 Product status distinction: a title in this state is "game execution supported through the observed route; Genesis audio degraded / Z80 structural mutation
 unsupported", never "fully supported audio".

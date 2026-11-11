@@ -79,14 +79,16 @@ and nothing else - never from the title, the file name or the current selection:
 
 | Row | Meaning |
 | --- | --- |
-| Native GEMS replacement | The build was asked for, and contains, the verified native GEMS driver. The text states driver family and version, coverage (the driver's complete command and sequence-event set; event-accurate timing), why (the original Z80 driver rewrites its own code), the validation tier (*reference-checked* for this driver image, or *build-qualified only*), and what the build's own start-up run did (commands, sequences, DAC samples, a stop on malformed data if any). It never says that this executable's playback was verified. |
-| Original Z80 - ahead-of-time compiled | The game's own sound driver runs as generated native code. Compiled structural alternatives, if any, are counted. Not a replacement. |
-| Original Z80 - degraded | The driver rewrites its own code and the Z80 is isolated: no music support is claimed. |
+| Native GEMS 2.5 (the driver's version) | The build **selected the verified native GEMS driver by itself**: the game uploads a verified GEMS driver image and the original generated-native Z80 of that game could not run it. The detail lists: automatically selected for a verified GEMS driver image (and why); independently reimplemented in native C11; verified against the original driver's command and chip-access behavior (*reference-checked*; or *build-qualified only*); the original Z80 not executed for that driver; save states and rewind supported (an older build that predates them says so); timing event-accurate rather than instruction-cycle-accurate; the coverage and implementation version; and what the build's own start-up run did (commands, sequences, DAC samples, a stop on malformed data if any). It never says that a play session sounded right. A developer override is worded as such. |
+| Original Z80 (generated-native) | The game's own sound driver runs as generated native code. Compiled structural alternatives, if any, are counted. Not a replacement. If that driver could not run (the Z80 is isolated, no music support) and no verified replacement applies, the detail starts with **Degraded:** and says so separately. |
 | Not recorded | No playable build of the selection, or a build that recorded nothing (an older release, an imported executable). |
 | Unknown | The record was malformed or not recognised; nothing is assumed. |
 
-The experimental option **Native GEMS audio replacement** (Advanced build options) passes `--sound-driver gems`; it is part of the cache identity, so it never reuses or
-replaces the build without it, and the build fails (nothing changes) when the game's driver is not a verified GEMS image.
+There is **no option** for any of this. The build decides: it keeps the original Z80 unless a verified GEMS image is uploaded *and* the original is recorded as failing, in which case it
+builds the same program with the replacement (a second, deterministic pass; ADR 0291 "Decision 4"). The launcher passes no sound argument to the build, an older catalog's
+`native_gems_audio` key is ignored (and dropped on the next save), and the choice is not part of a cache identity - only what the product ships to choose from is (the
+replacement's implementation version and the verified-driver catalog revision), so an updated product rebuilds rather than reuses an older program. Older records (schema 1) are
+still read: they show what they recorded and nothing more (an older native record says save states are not available in that build).
 
 ## Cartridge hardware (Genesis)
 
