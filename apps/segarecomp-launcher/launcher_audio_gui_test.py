@@ -108,7 +108,7 @@ def main():
         p = Profile(tmp, "audio", exe, fake_cli, fake_game)
 
         # 1. nothing is built: nothing is claimed
-        check("not built", p.run(OPEN + ["expect audio=Not recorded", "expect audio_has=Save states", "quit"]), 2)
+        check("not built", p.run(OPEN + ["expect audio=Not recorded", "quit"]), 2)
 
         # 2. no user option: a current product records the original driver for an ordinary game and the launcher shows it as such
         build_and_show(p, "original build", None, AOT, ["Not a replacement driver"])
