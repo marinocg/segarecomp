@@ -118,7 +118,7 @@ def main():
                        ["Automatically selected for a verified GEMS driver image", "Independently reimplemented in native C11", "Verified against the original driver's command and chip-access behavior",
                         "Original Z80 not executed for that driver", "Save states and rewind supported", "Timing is event-accurate rather than instruction-cycle-accurate"])
         check("optimized not built", p.run(OPEN + ["mode optimized", "frames 12", "expect audio=Not recorded", "mode compatibility", "frames 12", f"expect audio={NATIVE}", "advanced 1", "frames 6",
-                                                  f"expect audio={NATIVE}", "quit"]), 5)
+                                                  f"expect audio={NATIVE}", "quit"]), 4)
 
         # 4. a degraded original is disclosed separately, with the structural alternatives counted
         build_and_show(p, "degraded", json.dumps(dict(BROKEN, structural_alternatives={"requested": True, "forms": 13}), separators=(",", ":")), DEGRADED,
