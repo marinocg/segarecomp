@@ -53,7 +53,6 @@ json::Value to_json(const LibraryEntry &e) {
   v.set("aot_policy", json::Value::make_string(e.aot_policy));
   v.set("aot_model", json::Value::make_string(e.aot_model));
   v.set("hint_alias_discovery", json::Value::make_bool(e.hint_alias_discovery));
-  if (e.native_gems_audio) v.set("native_gems_audio", json::Value::make_bool(true));   // absent when off, so an existing catalog is byte-for-byte what it was
   v.set("region", json::Value::make_string(e.region));
   v.set("cover", json::Value::make_string(e.cover));
   v.set("favorite", json::Value::make_bool(e.favorite));
@@ -228,7 +227,8 @@ bool entry_from_json(const json::Value &v, LibraryEntry &e) {
   // reused, while a legacy Optimized/gen2 build keeps its identity.
   e.aot_model = e.platform_id == "genesis" ? "gen2" : "v1";
   e.hint_alias_discovery = v.flag("hint_alias_discovery");
-  e.native_gems_audio = v.flag("native_gems_audio");
+  // ADR 0291: an earlier build of this feature stored a per-game "native_gems_audio" request. The sound implementation is now chosen automatically by the build, so the key is
+  // neither read nor written (an old catalog stays readable; the key disappears on its next save).
   const std::string region = v.str("region");
   e.region = region == "japan" || region == "europe" ? region : "usa";
   e.cover = v.str("cover");
@@ -688,7 +688,6 @@ RomView view_from_entry_vanilla(const LibraryEntry &entry) {
   view.aot_policy = entry.aot_policy;
   view.aot_model = entry.platform_id == "genesis" && entry.aot_policy == "optimized" ? "gen2" : entry.aot_model;  // Genesis Optimized is always gen2
   view.hint_alias_discovery = entry.hint_alias_discovery && entry.platform_id == "genesis";
-  view.native_gems_audio = entry.native_gems_audio && entry.platform_id == "genesis";
   view.region = entry.region;
   // The experimental SMS Optimized policy is only valid when the product states it; a stored request is honoured by the caller.
   view.sms_optimized_available = entry.platform_id == "master-system" && entry.aot_policy == "optimized";

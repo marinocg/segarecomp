@@ -201,7 +201,9 @@ int gems_native_state_get(GemsNative *stage, const uint8_t *in, uint32_t length,
 typedef struct CatalogEntry { const char *name, *version, *verification, *signature_hex; } CatalogEntry;
 static const CatalogEntry k_catalog[] = {
 #define GEMS_VERIFIED_IMAGE(name, version, verification, signature) {name, version, verification, signature},
+#define GEMS_CATALOG_REVISION(n) /* read by the build tool only */
 #include "gems_driver_catalog.inc"
+#undef GEMS_CATALOG_REVISION
 #undef GEMS_VERIFIED_IMAGE
 };
 

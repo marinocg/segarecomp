@@ -73,8 +73,6 @@ struct RomView {
   [[nodiscard]] bool supports_hint_alias_discovery() const { return platform_id == "genesis"; }
   // ADR 0291: ask the build for the verified native GEMS sound replacement (`segarecomp build --sound-driver gems`). Default off (the original Z80 driver as generated native
   // code). It changes the generated program, so it is part of the cache identity; the build refuses it unless the game's driver is a verified GEMS image.
-  bool native_gems_audio = false;
-  [[nodiscard]] bool supports_native_gems_audio() const { return platform_id == "genesis"; }
   // SEG-122 (ADR 0266): the selected VARIANT of this library game. Vanilla (`patch_identity` empty) behaves exactly as before. For a Patched variant
   // `path` and `sha256` still name the ORIGINAL game (library identity, per-game widescreen preferences; the file is never modified); the build
   // materializes the verified patched image from `patch_package` into its own partial folder and compiles THAT, and the identity of what was compiled
@@ -186,6 +184,12 @@ struct AudioReport {
   std::string observed_fault;      // the first unsupported operation the build's own start-up run met ("none" when none)
   long long commands = -1, sequences = -1, dac_samples = -1, alternative_forms = -1;
   bool rewrites_own_code_known = false, rewrites_own_code = false;
+  // ADR 0291 (record schema 2; schema 1 records leave these at their defaults, which read as "not recorded / automatic unknown")
+  int schema = 0;
+  std::string selection;           // automatic | developer_override | "" (schema 1: explicit)
+  std::string reason;              // original_supported | no_verified_replacement | original_aot_failure_verified_replacement | developer_override | explicit_selection
+  std::string save_states;         // supported | "" (not recorded: a build from before native save states)
+  long long implementation_version = -1;
 };
 [[nodiscard]] AudioReport read_audio_report(const std::filesystem::path &entry);
 // Primary row value and explanatory text of a report (human wording lives here, identifiers stay machine-readable in the record).

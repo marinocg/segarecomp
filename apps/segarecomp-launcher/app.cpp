@@ -765,7 +765,6 @@ bool App::start_build(const std::string &id, bool restart_after) {
     view.mapper = entry->mapper;
   }
   if (view.supports_hint_alias_discovery()) view.hint_alias_discovery = entry->hint_alias_discovery;
-  if (view.supports_native_gems_audio()) view.native_gems_audio = entry->native_gems_audio;
   if (view.supports_region()) view.region = entry->region;
   {  // SEG-122: the selected variant. The ROM file itself stays the original; a Patched variant is materialized by the build from the installed package.
     const RomView variant = view_from_entry(*entry);
@@ -1269,8 +1268,6 @@ void App::run_script() {
       save_catalog();
       request_status_refresh();
     }
-  } else if (cmd == "native_gems") {   // ADR 0291: request (1) or stop requesting (0) the native GEMS audio replacement for the open game, as its Advanced checkbox would
-    if (LibraryEntry *e = catalog_.find_id(detail_id_)) { e->native_gems_audio = arg == "1" && e->platform_id == "genesis"; save_catalog(); request_status_refresh(); }
   } else if (cmd == "advanced") {      // SEG-122-T009: open or close the Advanced build options expander of the open game: 1 | 0
     show_advanced_ = arg == "1";
   } else if (cmd == "cartridge") {     // SEG-122-T009: select the cartridge hardware of the open game as its tile would: auto | standard | lock_on
@@ -1525,6 +1522,14 @@ void App::run_script() {
         const StatusInfo &si = status_of(detail_id_);
         const bool launchable = si.status == GameStatus::ready || si.status == GameStatus::playable_older;
         actual = audio_headline(launchable ? si.audio : AudioReport{});
+      }
+    }
+    else if (key == "audio_has") {   // ADR 0291: the explanatory text under the Audio implementation row contains this phrase (prints the phrase when it does, "-" otherwise)
+      actual = "-";
+      if (!detail_id_.empty()) {
+        const StatusInfo &si = status_of(detail_id_);
+        const bool launchable = si.status == GameStatus::ready || si.status == GameStatus::playable_older;
+        if (launchable && audio_detail(si.audio).find(value) != std::string::npos) actual = value;
       }
     }
     else if (key == "storage_bytes") actual = !detail_id_.empty() && report_valid_ && report_.find(detail_id_) != nullptr ? std::to_string(report_.find(detail_id_)->total.total()) : "-";

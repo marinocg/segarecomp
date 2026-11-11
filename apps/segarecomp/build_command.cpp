@@ -114,9 +114,18 @@ struct Options {
   bool z80_static = false;
   // Compile the statically justified structural alternatives of RAM-backed Z80 images (ADR 0259 mechanism, Genesis opt-in).
   bool z80_alternatives = false;
-  // ADR 0291: the sound implementation of the Genesis build. "original" = the generated-native Z80 (default, unchanged); "gems" = the verified native GEMS
-  // replacement, accepted only when the game's uploaded Z80 image is a verified GEMS image (runtime/gems_driver_catalog.inc). Never chosen implicitly.
-  std::string sound_driver = "original";
+  // ADR 0291: the sound implementation of the Genesis build. "auto" (default) = the generated-native Z80 of the game's own driver, unless the build's own bounded evidence
+  // shows that the original AOT cannot serve a driver whose activation signature is a verified GEMS image (runtime/gems_driver_catalog.inc): then, and only then, a second
+  // deterministic pass builds the same program with the native replacement. "original" and "gems" are developer overrides (never offered by the launcher): "original" never
+  // selects the replacement, "gems" requires it and fails when the uploaded image is not a verified GEMS image. There is no runtime fallback in any mode.
+  std::string sound_driver = "auto";
+  bool sound_auto_second_pass = false;   // set by the build itself when the automatic policy re-runs as "gems" (the evidence below is why)
+  struct AutoEvidence {
+    bool present = false;
+    std::string original_outcome;         // "structural_code_mismatch"
+    std::uint64_t fault_frame = 0;        // virtual frame at which the original AOT's sound CPU was isolated
+    std::size_t static_candidates = 0;    // exact static code-write candidates of the verified image
+  } sound_auto_evidence;
   // SEG-124 (ADR 0267): a trusted native-source package. The build takes a REFERENCE to the package (never source text, paths of source or capability strings from the caller): it reads the
   // package itself, re-verifies it (archive, manifest, source digest, that its identity is the one the user approved, that the image being built is the one it declares), extracts the
   // provider source into a private area of this build and compiles it against the public SDK only. Empty = Vanilla / BPS-only build: no provider code at all.
@@ -217,7 +226,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--hint-alias-discovery" && (value == "0" || value == "1")) options.hint_alias_discovery = value == "1";
     else if (key == "--z80-static" && (value == "0" || value == "1")) options.z80_static = value == "1";
     else if (key == "--z80-alternatives" && (value == "0" || value == "1")) options.z80_alternatives = value == "1";
-    else if (key == "--sound-driver" && (value == "original" || value == "gems")) options.sound_driver = value;
+    else if (key == "--sound-driver" && (value == "auto" || value == "original" || value == "gems")) options.sound_driver = value;
     else if (key == "--patch-package") { if (!options.patch_package.empty()) return std::nullopt; options.patch_package = fs::path(value); }
     else if (key == "--patch-identity") { if (!options.patch_identity.empty()) return std::nullopt; options.patch_identity = value; }
     else if (key == "--performance-report") { if (!options.performance_report.empty() || value.empty()) return std::nullopt; options.performance_report = fs::path(value); }
@@ -230,7 +239,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
   if (options.sdl3_include.has_value() != options.sdl3_lib.has_value()) return std::nullopt;
   if (options.aot_model == "gen2" && options.aot_policy != "optimized") return std::nullopt;  // gen2 is an opt-in of Optimized, never a policy
   if (!options.platform.empty() && options.platform != "genesis" && options.platform != "master-system") return std::nullopt;
-  if (options.sound_driver != "original" && options.platform == "master-system") return std::nullopt;   // a Genesis sound driver
+  if (options.sound_driver == "gems" && options.platform == "master-system") return std::nullopt;   // a Genesis sound driver
   if (options.patch_package.empty() != options.patch_identity.empty()) return std::nullopt;   // a package reference and the identity the user approved travel together
   if (!options.patch_package.empty()) {
     const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
@@ -935,6 +944,16 @@ std::vector<VerifiedImage> read_verified_images(const fs::path &catalog) {
   return images;
 }
 
+// The catalog's revision (GEMS_CATALOG_REVISION(n)): part of the build's audio identity, so a changed set of verified images or of their evidence can never be mistaken for the old one.
+unsigned read_catalog_revision(const fs::path &catalog) {
+  std::ifstream in(catalog);
+  for (std::string line; std::getline(in, line);) {
+    const std::string key = "GEMS_CATALOG_REVISION(";
+    if (line.rfind(key, 0) == 0) return static_cast<unsigned>(std::strtoul(line.c_str() + key.size(), nullptr, 10));
+  }
+  return 0;
+}
+
 unsigned read_native_implementation_version(const fs::path &header) {
   std::ifstream in(header);
   for (std::string line; std::getline(in, line);) {
@@ -944,11 +963,18 @@ unsigned read_native_implementation_version(const fs::path &header) {
   return 0;
 }
 
+// Returned by build_genesis_program in the automatic mode when its first pass produced the evidence that selects the native replacement; the caller runs the one second pass.
+constexpr int kRetryWithNativeSound = 1000;
+
 // The machine-readable record of the audio implementation of THIS executable (status.json `audio_implementation`). Every value is a build fact:
 // what was requested, what was compiled in, how the driver identity was established, what the build's own start-up run observed. It never says
 // that a play session sounded right.
 struct AudioRecord {
-  std::string requested = "original", kind = "original_z80_aot";
+  std::string requested = "auto", kind = "original_z80_aot";
+  std::string reason = "original_supported";   // why this implementation: original_supported | no_verified_replacement | original_aot_failure_verified_replacement | developer_override
+  bool automatic = true;                       // false for a developer override (--sound-driver original|gems)
+  unsigned catalog_revision = 0;
+  bool replacement_available = false;          // a verified replacement exists for an uploaded image (whether or not it was selected)
   std::string driver, version, verification, signature_prefix;
   unsigned implementation_version = 0;
   std::size_t native_images = 0, original_images = 0;
@@ -959,22 +985,25 @@ struct AudioRecord {
 std::string audio_implementation_json(const Options &options, const GenesisSoundBuild &build, const AudioRecord &record, const std::optional<gz80::SoundFault> &fault) {
   std::ostringstream out;
   const bool native = record.kind == "native_driver";
-  out << ",\"audio_implementation\":{\"schema\":1,\"requested\":\"" << record.requested << "\",\"kind\":\"" << record.kind << "\",\"selection\":\""
-      << (options.sound_driver == "original" ? "default" : "explicit") << "\"";
+  out << ",\"audio_implementation\":{\"schema\":2,\"requested\":\"" << record.requested << "\",\"kind\":\"" << record.kind << "\",\"selection\":\""
+      << (record.automatic ? "automatic" : "developer_override") << "\",\"reason\":\"" << record.reason << "\",\"catalog_revision\":" << record.catalog_revision
+      << ",\"native_implementation_version\":" << record.implementation_version << ",\"replacement_available\":" << (record.replacement_available ? "true" : "false")
+      << ",\"save_states\":\"supported\"";
   if (native) {
     out << ",\"driver\":\"" << record.driver << "\",\"version\":\"" << (record.version.empty() ? "unknown" : record.version)
         << "\",\"version_evidence\":\"address_map_and_tables\",\"implementation_version\":" << record.implementation_version
         << ",\"coverage\":\"complete\",\"verification\":\"" << record.verification << "\",\"identity\":\"" << record.signature_prefix
-        << "\",\"native_images\":" << record.native_images << ",\"original_images\":" << record.original_images
-        << ",\"reason\":\"explicit_selection\"";
+        << "\",\"native_images\":" << record.native_images << ",\"original_images\":" << record.original_images;
     if (record.analysed) out << ",\"original_driver_rewrites_own_code\":" << (record.structural_candidates > 0 ? "true" : "false") << ",\"static_code_write_candidates\":" << record.structural_candidates;
+    if (options.sound_auto_evidence.present)
+      out << ",\"original_aot\":{\"outcome\":\"" << options.sound_auto_evidence.original_outcome << "\",\"fault_frame\":" << options.sound_auto_evidence.fault_frame << "}";
     out << ",\"audio_status\":\"" << (fault ? "degraded" : "supported") << "\"";
     out << ",\"observed\":{\"window_frames\":" << gz80::kObservationFrames << ",\"fault\":\"" << (build.native.present ? build.native.fault : "none")
         << "\",\"commands\":" << build.native.commands << ",\"sequences\":" << build.native.sequences << ",\"dac_samples\":" << build.native.dac_samples
         << ",\"ticks\":" << build.native.ticks << "}";
   } else {
     out << ",\"audio_status\":\"" << (fault ? "degraded" : "supported") << "\"";
-    if (fault) out << ",\"reason\":\"structural_code_mismatch\"";
+    if (fault) out << ",\"degraded_reason\":\"structural_code_mismatch\"";
     out << ",\"structural_alternatives\":{\"requested\":" << (options.z80_alternatives ? "true" : "false") << ",\"images\":" << build.alt_images << ",\"bytes\":" << build.alt_bytes
         << ",\"entries\":" << build.alt_entries << ",\"forms\":" << build.alt_forms << ",\"images_dropped\":" << build.alt_dropped << "}";
   }
@@ -1181,35 +1210,60 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   if (!summary.ok()) return materialize_failed(summary, "");
   stage("z80-materialize", "done");
 
-  // ---- ADR 0291: the explicitly requested native sound replacement must be backed by a verified driver identity (no guess, no fallback) ----
+  // ---- ADR 0291: the sound implementation. The native replacement is used only when a verified GEMS identity is established by the build itself:
+  // "auto": the original AOT's own evidence (its sound CPU isolated by a structural code mismatch) plus a verified catalog identity of an uploaded image selects a second,
+  // deterministic pass with the replacement; any other outcome keeps the original and records why. "gems" (developer override) requires the identity; "original" never selects it. ----
   AudioRecord audio_record;
-  audio_record.requested = options.sound_driver;
-  if (native_gems) {
+  audio_record.requested = options.sound_auto_second_pass ? "auto" : options.sound_driver;
+  audio_record.automatic = options.sound_auto_second_pass || options.sound_driver == "auto";
+  audio_record.implementation_version = read_native_implementation_version(build.runtime / "gems_native.h");
+  audio_record.catalog_revision = read_catalog_revision(build.runtime / "gems_driver_catalog.inc");
+  if (options.sound_driver != "original") {
     const std::vector<VerifiedImage> catalog = read_verified_images(build.runtime / "gems_driver_catalog.inc");
-    audio_record.implementation_version = read_native_implementation_version(build.runtime / "gems_native.h");
+    const VerifiedImage *first_verified = nullptr;
+    const gz80::Image *first_image = nullptr;
     for (const auto &image : registry.images()) {
       const std::string hex = gz80::to_hex(image.signature);
       const auto verified = std::find_if(catalog.begin(), catalog.end(), [&](const VerifiedImage &entry) { return entry.signature == hex; });
       if (verified == catalog.end()) { ++audio_record.original_images; continue; }
-      if (audio_record.native_images++ == 0) {
-        audio_record.driver = verified->driver;
-        audio_record.version = verified->version;
-        audio_record.verification = verified->verification;
-        audio_record.signature_prefix = hex.substr(0, 16);
-        audio_record.analysed = true;
-        audio_record.structural_candidates = gz80::structural_code_write_candidates(image);
+      if (audio_record.native_images++ == 0) { first_verified = &*verified; first_image = &image; audio_record.signature_prefix = hex.substr(0, 16); }
+    }
+    audio_record.replacement_available = audio_record.native_images != 0;
+    if (first_verified != nullptr) {
+      audio_record.driver = first_verified->driver;
+      audio_record.version = first_verified->version;
+      audio_record.verification = first_verified->verification;
+      audio_record.analysed = true;
+      audio_record.structural_candidates = gz80::structural_code_write_candidates(*first_image);
+    }
+    if (options.sound_driver == "auto") {
+      if (summary.sound_fault && !summary.sound_fault->native_driver && first_verified != nullptr) {
+        // The evidence: the original AOT of this very game isolated its sound CPU (a structural code mismatch), and the uploaded image is a verified GEMS image.
+        options.sound_auto_evidence.present = true;
+        options.sound_auto_evidence.original_outcome = "structural_code_mismatch";
+        options.sound_auto_evidence.fault_frame = summary.sound_fault->master_ticks / (3420U * 262U /* NTSC master ticks per frame */);
+        options.sound_auto_evidence.static_candidates = audio_record.structural_candidates;
+        log.line("sound driver: the original AOT isolated the sound CPU (structural_code_mismatch) and the uploaded image is a verified " + audio_record.driver + " " + audio_record.version +
+                 " image: second pass with the native replacement");
+        return kRetryWithNativeSound;
       }
+      audio_record.reason = summary.sound_fault ? "no_verified_replacement" : "original_supported";
+    } else if (options.sound_driver == "gems") {
+      if (audio_record.native_images == 0 || (options.sound_auto_second_pass && !options.sound_auto_evidence.present)) {
+        log.line("sound driver: the native replacement was required but no uploaded Z80 image is a verified GEMS image");
+        write_status(options, sha, "failed", "sound-driver", "The Z80 sound driver of this game is not a verified GEMS image, so the native GEMS replacement was not used.",
+                     std::string(",\"audio_implementation\":{\"schema\":2,\"requested\":\"") + audio_record.requested + "\",\"kind\":\"none\",\"selection\":\"" +
+                         (audio_record.automatic ? "automatic" : "developer_override") + "\",\"reason\":\"sound_driver_unverified\",\"original_images\":" +
+                         std::to_string(audio_record.original_images) + "},\"diagnostic\":\"sound_driver_unverified\"");
+        std::cout << "@result failed stage=sound-driver message=sound_driver_unverified" << std::endl;
+        return 6;
+      }
+      audio_record.kind = "native_driver";
+      audio_record.reason = options.sound_auto_second_pass ? "original_aot_failure_verified_replacement" : "developer_override";
+      log.line("sound driver: native " + audio_record.driver + " " + audio_record.version + " bound to " + std::to_string(audio_record.native_images) + " image(s) (" + audio_record.verification + ")");
     }
-    if (audio_record.native_images == 0) {
-      log.line("sound driver: --sound-driver gems requested but no uploaded Z80 image is a verified GEMS image");
-      write_status(options, sha, "failed", "sound-driver", "The Z80 sound driver of this game is not a verified GEMS image, so the native GEMS replacement was not used.",
-                   ",\"audio_implementation\":{\"schema\":1,\"requested\":\"gems\",\"kind\":\"none\",\"selection\":\"explicit\",\"reason\":\"sound_driver_unverified\",\"original_images\":" +
-                       std::to_string(audio_record.original_images) + "},\"diagnostic\":\"sound_driver_unverified\"");
-      std::cout << "@result failed stage=sound-driver message=sound_driver_unverified" << std::endl;
-      return 6;
-    }
-    audio_record.kind = "native_driver";
-    log.line("sound driver: native " + audio_record.driver + " " + audio_record.version + " bound to " + std::to_string(audio_record.native_images) + " image(s) (" + audio_record.verification + ")");
+  } else {
+    audio_record.reason = "developer_override";
   }
 
   // ---- build-time ADR 0049 alias preparation (SEG-028-T005) ----
@@ -1583,8 +1637,15 @@ int run_build(Options options) {
       fs::path executable;
       std::string status_extra, sound_result;
       bool sound_degraded = false;
-      const int rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
-                                           m68k_images, executable, status_extra, sound_degraded, sound_result);
+      int rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
+                                     m68k_images, executable, status_extra, sound_degraded, sound_result);
+      if (rc == kRetryWithNativeSound) {   // the bounded, deterministic second pass: the same program with the replacement the first pass's evidence selected
+        options.sound_driver = "gems";
+        options.sound_auto_second_pass = true;
+        status_extra.clear(); sound_result.clear(); sound_degraded = false;
+        rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
+                                   m68k_images, executable, status_extra, sound_degraded, sound_result);
+      }
       if (rc != 0) return rc;
       if (!options.native_source.empty())
         status_extra += ",\"native\":{\"package_identity\":\"" + options.patch_identity + "\",\"provider_sha256\":\"" + options.native_source_sha256 + "\",\"abi\":" + std::to_string(segarecomp::patch::kNativeAbiVersion) +
@@ -1593,7 +1654,7 @@ int run_build(Options options) {
       stage("link", "done");
       write_status(options, sha, "ok", "done", "", sms_provenance + status_extra);   // ADR 0268: a Genesis board declaration (lock_on) is recorded too
       std::cout << "@result ok executable=" << executable.string()
-                << (sound_degraded || options.sound_driver != "original" ? sound_result : std::string()) << std::endl;
+                << (sound_degraded || sound_result.find("sound_driver=gems") != std::string::npos ? sound_result : std::string()) << std::endl;
       return 0;
     }
     const fs::path runtime = options.runtime_dir / "runtime";

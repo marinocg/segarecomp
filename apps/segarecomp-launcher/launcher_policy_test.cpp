@@ -37,6 +37,7 @@ int main(int argc, char **argv) {
 
   Layout layout;
   layout.root = dir / "pkg";
+  layout.runtime = layout.root / "runtime" / "platforms" / "genesis";   // the shipped replacement and catalog files (absent here) are part of a build's identity (ADR 0291)
   const bool have_cli = argc > 1;  // optional: the real `segarecomp` binary (product-provided policy identity)
   if (have_cli) layout.cli = argv[1];
   RomView genesis;
@@ -353,20 +354,22 @@ int main(int argc, char **argv) {
 
   // ADR 0291: the audio implementation of a build comes only from its own recorded `audio_implementation` member.
   {
-    const std::string native_status = R"({"status":"ok","genesis_audio":"native","audio_implementation":{"schema":1,"requested":"gems","kind":"native_driver","selection":"explicit",)"
+    const std::string native_status = R"({"status":"ok","genesis_audio":"native","audio_implementation":{"schema":2,"requested":"auto","kind":"native_driver","selection":"automatic",)"
+        R"("reason":"original_aot_failure_verified_replacement","catalog_revision":1,"native_implementation_version":1,"replacement_available":true,"save_states":"supported",)"
         R"("driver":"gems","version":"2.5","version_evidence":"address_map_and_tables","implementation_version":1,"coverage":"complete","verification":"reference_checked",)"
-        R"("identity":"f68e547d7dec54d2","native_images":1,"original_images":1,"reason":"explicit_selection","original_driver_rewrites_own_code":true,)"
-        R"("static_code_write_candidates":9,"audio_status":"supported","observed":{"window_frames":600,"fault":"none","commands":17,"sequences":7,"dac_samples":19615,"ticks":571}}})";
+        R"("identity":"f68e547d7dec54d2","native_images":1,"original_images":1,"original_driver_rewrites_own_code":true,)"
+        R"("static_code_write_candidates":9,"original_aot":{"outcome":"structural_code_mismatch","fault_frame":4},"audio_status":"supported","observed":{"window_frames":600,"fault":"none","commands":17,"sequences":7,"dac_samples":19615,"ticks":571}}})";
     const auto native = read_audio_report(write_status(dir, "audio_native", native_status));
-    expect(native.state == AudioReport::State::known && native.kind == "native_driver" && native.driver == "gems" && native.version == "2.5" &&
-               native.verification == "reference_checked" && native.observed_fault == "none" && native.commands == 17 && native.sequences == 7 && native.rewrites_own_code,
+    expect(native.state == AudioReport::State::known && native.kind == "native_driver" && native.driver == "gems" && native.version == "2.5" && native.selection == "automatic" &&
+               native.save_states == "supported" && native.implementation_version == 1 && native.verification == "reference_checked" && native.observed_fault == "none" &&
+               native.commands == 17 && native.sequences == 7 && native.rewrites_own_code,
            "a native GEMS record is read field by field");
-    expect(audio_headline(native) == "Native GEMS replacement", "native headline");
+    expect(audio_headline(native) == "Native GEMS 2.5", "native headline names the driver and version");
     const std::string native_text = audio_detail(native);
-    expect(native_text.find("GEMS") != std::string::npos && native_text.find("version 2.5") != std::string::npos && native_text.find("complete command and sequence-event set") != std::string::npos &&
-               native_text.find("rewrites its own executable code") != std::string::npos && native_text.find("reference-checked") != std::string::npos &&
-               native_text.find("has not been verified") != std::string::npos && native_text.find("met no unsupported operation") != std::string::npos,
-           "native detail states driver, version, coverage, reason, validation tier and that playback is not verified: " + native_text);
+    for (const char *phrase : {"Automatically selected for a verified GEMS driver image", "Independently reimplemented in native C11", "Verified against the original driver's command and chip-access behavior",
+                               "Original Z80 not executed for that driver", "Save states and rewind supported", "Timing is event-accurate rather than instruction-cycle-accurate",
+                               "rewrites its own executable code", "this executable's playback has not itself been verified", "met no unsupported operation", "Implementation version 1"})
+      expect(native_text.find(phrase) != std::string::npos, std::string("native detail states: ") + phrase + " in: " + native_text);
     // build-qualified is worded differently from independently verified, and a fault in the start-up run is stated
     std::string qualified = native_status;
     qualified.replace(qualified.find("reference_checked"), 17, "build_qualified");
@@ -374,60 +377,88 @@ int main(int argc, char **argv) {
     qualified.replace(qualified.find("\"supported\",\"observed\""), 11, "\"degraded\"");
     const auto qualified_report = read_audio_report(write_status(dir, "audio_qualified", qualified));
     expect(qualified_report.state == AudioReport::State::known && qualified_report.audio_status == "degraded" &&
-               audio_detail(qualified_report).find("build-qualified only, not independently audio-verified") != std::string::npos &&
-               audio_detail(qualified_report).find("unsupported_sample") != std::string::npos,
+               audio_detail(qualified_report).find("Build-qualified only") != std::string::npos && audio_detail(qualified_report).find("unsupported_sample") != std::string::npos &&
+               audio_detail(qualified_report).find("Verified against") == std::string::npos,
            "build-qualified and a recorded fault are stated plainly");
+    // a developer override is disclosed as such, never as automatic
+    std::string overridden = native_status;
+    overridden.replace(overridden.find("\"selection\":\"automatic\""), 24, "\"selection\":\"developer_override\"");
+    overridden.replace(overridden.find("original_aot_failure_verified_replacement"), 41, "developer_override");
+    const auto override_report = read_audio_report(write_status(dir, "audio_override", overridden));
+    expect(override_report.state == AudioReport::State::known && audio_detail(override_report).find("developer override") != std::string::npos &&
+               audio_detail(override_report).find("Automatically selected") == std::string::npos,
+           "a developer override is not presented as automatic selection");
+    // an earlier-schema native record (an explicit option of an earlier build) is read, and does not claim save states
+    const auto old_native = read_audio_report(write_status(dir, "audio_old_native",
+        R"({"audio_implementation":{"schema":1,"requested":"gems","kind":"native_driver","selection":"explicit","driver":"gems","version":"2.5","coverage":"complete","verification":"reference_checked","audio_status":"supported","observed":{"fault":"none"}}})"));
+    expect(old_native.state == AudioReport::State::known && audio_headline(old_native) == "Native GEMS 2.5" && audio_detail(old_native).find("Save states are not available in this older build") != std::string::npos &&
+               audio_detail(old_native).find("Automatically selected") == std::string::npos && audio_detail(old_native).find("Save states and rewind supported") == std::string::npos,
+           "an older native record is read without claiming what it never recorded");
     const auto aot = read_audio_report(write_status(dir, "audio_aot",
-        R"({"audio_implementation":{"schema":1,"requested":"original","kind":"original_z80_aot","selection":"default","audio_status":"supported","structural_alternatives":{"requested":false,"images":0,"bytes":0,"entries":0,"forms":0,"images_dropped":0}}})"));
-    expect(audio_headline(aot) == "Original Z80 - ahead-of-time compiled" && audio_detail(aot).find("Not a replacement driver") != std::string::npos &&
-               audio_detail(aot).find("alternative") == std::string::npos,
+        R"({"audio_implementation":{"schema":2,"requested":"auto","kind":"original_z80_aot","selection":"automatic","reason":"original_supported","save_states":"supported","audio_status":"supported","structural_alternatives":{"requested":false,"images":0,"bytes":0,"entries":0,"forms":0,"images_dropped":0}}})"));
+    expect(audio_headline(aot) == "Original Z80 (generated-native)" && audio_detail(aot).find("Not a replacement driver") != std::string::npos && audio_detail(aot).find("alternative") == std::string::npos &&
+               audio_detail(aot).find("Degraded") == std::string::npos,
            "original AOT Z80 is not described as a replacement");
+    const auto old_aot = read_audio_report(write_status(dir, "audio_old_aot",
+        R"({"audio_implementation":{"schema":1,"requested":"original","kind":"original_z80_aot","selection":"default","audio_status":"supported","structural_alternatives":{"requested":false,"forms":0}}})"));
+    expect(old_aot.state == AudioReport::State::known && audio_headline(old_aot) == "Original Z80 (generated-native)", "an older original record is still read");
     const auto alternatives = read_audio_report(write_status(dir, "audio_alt",
-        R"({"audio_implementation":{"schema":1,"requested":"original","kind":"original_z80_aot","selection":"default","audio_status":"supported","structural_alternatives":{"requested":true,"images":1,"bytes":11,"entries":7,"forms":13,"images_dropped":0}}})"));
-    expect(audio_headline(alternatives) == "Original Z80 - ahead-of-time compiled" && audio_detail(alternatives).find("13 compiled structural alternative forms") != std::string::npos,
+        R"({"audio_implementation":{"schema":2,"requested":"auto","kind":"original_z80_aot","selection":"automatic","reason":"original_supported","audio_status":"supported","structural_alternatives":{"requested":true,"images":1,"bytes":11,"entries":7,"forms":13,"images_dropped":0}}})"));
+    expect(audio_headline(alternatives) == "Original Z80 (generated-native)" && audio_detail(alternatives).find("13 compiled structural alternative forms") != std::string::npos,
            "compiled structural alternatives are disclosed on the original path");
     const auto degraded = read_audio_report(write_status(dir, "audio_degraded",
-        R"({"audio_implementation":{"schema":1,"requested":"original","kind":"original_z80_aot","selection":"default","audio_status":"degraded","reason":"structural_code_mismatch","structural_alternatives":{"requested":false,"forms":0}}})"));
-    expect(audio_headline(degraded) == "Original Z80 - degraded" && audio_detail(degraded).find("Music is not supported") != std::string::npos &&
-               audio_detail(degraded).find("replacement driver") == std::string::npos,
-           "degraded original audio claims no music support");
+        R"({"audio_implementation":{"schema":2,"requested":"auto","kind":"original_z80_aot","selection":"automatic","reason":"no_verified_replacement","audio_status":"degraded","degraded_reason":"structural_code_mismatch","structural_alternatives":{"requested":false,"forms":0}}})"));
+    expect(audio_headline(degraded) == "Original Z80 (generated-native)" && audio_detail(degraded).find("Degraded: structural code mutation") != std::string::npos &&
+               audio_detail(degraded).find("Music is not supported") != std::string::npos && audio_detail(degraded).find("Independently reimplemented") == std::string::npos,
+           "a degraded original is disclosed separately and claims no music support");
     // fail closed
     const auto none = read_audio_report(write_status(dir, "audio_none", R"({"status":"ok","aot_policy":{"requested":"compatibility","effective":"broad"}})"));
     expect(none.state == AudioReport::State::not_recorded && audio_headline(none) == "Not recorded", "an older build without the member says Not recorded");
     expect(read_audio_report(dir / "audio_missing").state == AudioReport::State::not_recorded, "no status file at all says Not recorded");
     for (const char *bad : {
-             R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"other","verification":"reference_checked","coverage":"complete","audio_status":"supported"}})",
-             R"({"audio_implementation":{"schema":2,"kind":"native_driver","driver":"gems","verification":"reference_checked","coverage":"complete","audio_status":"supported"}})",
-             R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"gems","verification":"exact","coverage":"complete","audio_status":"supported"}})",
-             R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"gems","verification":"reference_checked","coverage":"full","audio_status":"supported"}})",
-             R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"gems","verification":"reference_checked","coverage":"partial","audio_status":"supported"}})",
-             R"({"audio_implementation":{"schema":1,"kind":"mystery","audio_status":"supported"}})",
-             R"({"audio_implementation":{"schema":1,"kind":"original_z80_aot","audio_status":"partial"}})",
-             R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"gems","verif)",
+             R"({"audio_implementation":{"schema":2,"selection":"automatic","reason":"original_aot_failure_verified_replacement","kind":"native_driver","driver":"other","verification":"reference_checked","coverage":"complete","audio_status":"supported"}})",
+             R"({"audio_implementation":{"schema":3,"selection":"automatic","reason":"original_supported","kind":"native_driver","driver":"gems","verification":"reference_checked","coverage":"complete","audio_status":"supported"}})",
+             R"({"audio_implementation":{"schema":2,"selection":"automatic","reason":"original_aot_failure_verified_replacement","kind":"native_driver","driver":"gems","verification":"exact","coverage":"complete","audio_status":"supported"}})",
+             R"({"audio_implementation":{"schema":2,"selection":"automatic","reason":"original_aot_failure_verified_replacement","kind":"native_driver","driver":"gems","verification":"reference_checked","coverage":"full","audio_status":"supported"}})",
+             R"({"audio_implementation":{"schema":2,"selection":"automatic","reason":"original_aot_failure_verified_replacement","kind":"native_driver","driver":"gems","verification":"reference_checked","coverage":"partial","audio_status":"supported"}})",
+             R"({"audio_implementation":{"schema":2,"selection":"guessed","reason":"original_supported","kind":"original_z80_aot","audio_status":"supported"}})",
+             R"({"audio_implementation":{"schema":2,"selection":"automatic","reason":"because","kind":"original_z80_aot","audio_status":"supported"}})",
+             R"({"audio_implementation":{"schema":2,"selection":"automatic","reason":"original_supported","save_states":"yes","kind":"original_z80_aot","audio_status":"supported"}})",
+             R"({"audio_implementation":{"schema":2,"selection":"automatic","reason":"original_supported","kind":"mystery","audio_status":"supported"}})",
+             R"({"audio_implementation":{"schema":2,"selection":"automatic","reason":"original_supported","kind":"original_z80_aot","audio_status":"partial"}})",
+             R"({"audio_implementation":{"schema":2,"kind":"native_driver","driver":"gems","verif)",
              R"({"audio_implementation":[1,2,3]})"}) {
       const auto report = read_audio_report(write_status(dir, "audio_bad", bad));
-      expect(report.state != AudioReport::State::known && report.kind.empty() && audio_headline(report) != "Native GEMS replacement" &&
+      expect(report.state != AudioReport::State::known && report.kind.empty() && audio_headline(report) != "Native GEMS 2.5" &&
                  (audio_detail(report).find("nothing is assumed") != std::string::npos || audio_detail(report).find("nothing is inferred") != std::string::npos),
              std::string("a record that is not understood is never a claim: ") + bad);
     }
     const auto weird_fault = read_audio_report(write_status(dir, "audio_weird",
-        R"({"audio_implementation":{"schema":1,"kind":"native_driver","driver":"gems","version":"<script>","verification":"build_qualified","coverage":"complete","audio_status":"supported","observed":{"fault":"Bad Value!","commands":-3}}})"));
+        R"({"audio_implementation":{"schema":2,"selection":"automatic","reason":"original_aot_failure_verified_replacement","kind":"native_driver","driver":"gems","version":"<script>","verification":"build_qualified","coverage":"complete","audio_status":"supported","observed":{"fault":"Bad Value!","commands":-3}}})"));
     expect(weird_fault.version == "unknown" && weird_fault.observed_fault == "unknown" && weird_fault.commands == -1, "free text in the record is never displayed as-is");
     // switching the implementation of a rebuilt entry changes what is shown (the same entry directory, a new status)
     write_status(dir, "audio_rebuilt", native_status);
-    expect(audio_headline(read_audio_report(dir / "audio_rebuilt")) == "Native GEMS replacement", "before the rebuild");
-    write_status(dir, "audio_rebuilt", R"({"audio_implementation":{"schema":1,"requested":"original","kind":"original_z80_aot","selection":"default","audio_status":"supported"}})");
-    expect(audio_headline(read_audio_report(dir / "audio_rebuilt")) == "Original Z80 - ahead-of-time compiled", "after a rebuild with the original driver");
-    // the request is part of the cache identity: it changes the program, so it never shares an entry with a build without it
-    RomView gems = genesis;
-    gems.native_gems_audio = true;
-    expect(genesis.supports_native_gems_audio() && !sms.supports_native_gems_audio(), "native GEMS audio is a Genesis option");
-    expect(entry_dir(gems, layout) != compat_entry, "requesting native GEMS audio selects its own cache entry");
-    expect(entry_dir(gems, layout) == entry_dir(gems, layout), "its identity is deterministic");
-    RomView sms_gems = sms;
-    sms_gems.native_gems_audio = true;
-    expect(entry_dir(sms_gems, layout) == entry_dir(sms, layout), "Master System builds are unaffected");
-    expect(entry_dir(genesis, layout) == compat_entry, "a build without the request keeps exactly the historical identity");
+    expect(audio_headline(read_audio_report(dir / "audio_rebuilt")) == "Native GEMS 2.5", "before the rebuild");
+    write_status(dir, "audio_rebuilt", R"({"audio_implementation":{"schema":2,"requested":"auto","kind":"original_z80_aot","selection":"automatic","reason":"original_supported","audio_status":"supported"}})");
+    expect(audio_headline(read_audio_report(dir / "audio_rebuilt")) == "Original Z80 (generated-native)", "after a rebuild with the original driver");
+    // there is no per-game option: nothing about the sound implementation is part of a game's selection, and the cache identity of a Genesis build is the historical one plus the
+    // identity of what the build may choose from (the replacement's implementation version and the catalog revision), so a product that ships a changed replacement never reuses an older program
+    expect(entry_dir(genesis, layout) == compat_entry, "a Genesis build's identity depends on its selection only (and the shipped replacement/catalog versions)");
+    expect(entry_dir(sms, layout) == entry_dir(sms, layout), "Master System builds are unaffected");
+    {
+      const fs::path runtime_files = layout.runtime / "runtime";
+      fs::create_directories(runtime_files);
+      const auto write_file = [](const fs::path &p, const std::string &text) { std::ofstream(p) << text; };
+      write_file(runtime_files / "gems_native.h", "#define GEMS_NATIVE_IMPLEMENTATION_VERSION 1u\n");
+      write_file(runtime_files / "gems_driver_catalog.inc", "GEMS_CATALOG_REVISION(1)\n");
+      const fs::path first = entry_dir(genesis, layout);
+      write_file(runtime_files / "gems_native.h", "#define GEMS_NATIVE_IMPLEMENTATION_VERSION 2u\n");
+      const fs::path new_implementation = entry_dir(genesis, layout);
+      write_file(runtime_files / "gems_driver_catalog.inc", "GEMS_CATALOG_REVISION(2)\n");
+      const fs::path new_catalog = entry_dir(genesis, layout);
+      expect(first != new_implementation && new_implementation != new_catalog && first != new_catalog, "a changed native implementation version or catalog revision selects a fresh cache entry");
+      expect(entry_dir(sms, layout) == entry_dir(sms, layout) && entry_dir(genesis, layout) == new_catalog, "and the identity is deterministic");
+    }
   }
 
   fs::remove_all(dir);

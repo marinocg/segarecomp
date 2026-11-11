@@ -4,7 +4,7 @@
 Everything shown comes from the `audio_implementation` member of the status.json of the build Play would launch. Checks: a native GEMS build, an original
 ahead-of-time Z80 build, one with compiled structural alternatives, a degraded one, a game that is not built, an older build without the member, malformed
 and unrecognised records (Unknown, never a claim), a rebuild with a different sound implementation, build-mode switches (each entry shows its own record),
-and that requesting the native replacement passes `--sound-driver gems` to the product and selects a cache entry of its own.
+and that the launcher offers no sound option and passes none to the product (ADR 0291: the build selects the implementation itself).
 
 usage: launcher_audio_gui_test.py <Segarecomp> <fake_segarecomp> <fake_game>
 """
@@ -18,14 +18,17 @@ import tempfile
 
 EXE_SUFFIX = ".exe" if os.name == "nt" else ""
 
-NATIVE = "Native GEMS replacement"
-AOT = "Original Z80 - ahead-of-time compiled"
-DEGRADED = "Original Z80 - degraded"
+NATIVE = "Native GEMS 2.5"
+ORIGINAL_HEADLINE = "Original Z80 (generated-native)"
+AOT = DEGRADED = ORIGINAL_HEADLINE   # a degraded original is disclosed in the detail text, not by another headline
 
-ORIGINAL = {"schema": 1, "requested": "original", "kind": "original_z80_aot", "selection": "default", "audio_status": "supported",
-            "structural_alternatives": {"requested": False, "forms": 0}}
+ORIGINAL = {"schema": 2, "requested": "auto", "kind": "original_z80_aot", "selection": "automatic", "reason": "original_supported", "audio_status": "supported",
+            "save_states": "supported", "structural_alternatives": {"requested": False, "forms": 0}}
 ALTERNATIVES = dict(ORIGINAL, structural_alternatives={"requested": True, "images": 1, "bytes": 11, "entries": 7, "forms": 13, "images_dropped": 0})
-BROKEN = dict(ORIGINAL, audio_status="degraded", reason="structural_code_mismatch")
+BROKEN = dict(ORIGINAL, audio_status="degraded", reason="no_verified_replacement", degraded_reason="structural_code_mismatch")
+OLD_ORIGINAL = {"schema": 1, "requested": "original", "kind": "original_z80_aot", "selection": "default", "audio_status": "supported", "structural_alternatives": {"requested": False, "forms": 0}}
+OLD_NATIVE = {"schema": 1, "requested": "gems", "kind": "native_driver", "selection": "explicit", "driver": "gems", "version": "2.5", "coverage": "complete", "verification": "reference_checked",
+              "reason": "explicit_selection", "original_driver_rewrites_own_code": True, "audio_status": "supported", "observed": {"fault": "none", "commands": 17, "sequences": 7, "dac_samples": 100}}
 
 
 def make_package(root, fake_cli):
@@ -102,26 +105,36 @@ def main():
         p = Profile(tmp, "unbuilt", exe, fake_cli, fake_game)
         check("not built", p.run(OPEN + ["expect audio=Not recorded", "quit"]), 2)
 
-        # 2. a current product records the original driver by default; a rebuild with the native replacement replaces the record; a rebuild without it restores it
+        # 2. there is no user option: a current product records the original driver for an ordinary game and the native replacement for a verified one, chosen by the build
+        #    itself, and the launcher never passes a sound option to the product. A rebuild that selects another implementation replaces the record.
         p = Profile(tmp, "rebuild", exe, fake_cli, fake_game)
         build_and_show(p, "original build", None, AOT)
-        check("native requested and built", p.run(OPEN + ["native_gems 1", "frames 4", "build", "wait_idle", "frames 40", "expect build_outcome=ok", f"expect audio={NATIVE}", "quit"]), 3)
+        check("original detail", p.run(OPEN + [f"expect audio={AOT}", "expect audio_has=Not a replacement driver", "expect audio_has=Save states", "quit"]), 4)
+        check("rebuilt natively", p.run(OPEN + ["build", "wait_idle", "frames 40", "expect build_outcome=ok", f"expect audio={NATIVE}", "quit"], {"FAKE_AUDIO": "native"}), 3)
+        for phrase in ("Automatically selected for a verified GEMS driver image", "Independently reimplemented in native C11", "Verified against the original driver's command and chip-access behavior",
+                       "Original Z80 not executed for that driver", "Save states and rewind supported", "Timing is event-accurate rather than instruction-cycle-accurate"):
+            check("native detail: " + phrase, p.run(OPEN + [f"expect audio_has={phrase}", "quit"]), 2)
         args = p.args_log.read_text().splitlines()
-        if sum(1 for l in args if "--sound-driver gems" in l) != 1 or "--sound-driver" in args[0]:
-            failures.append(f"only the request for the native replacement passes --sound-driver gems to the product: {args!r}")
-        entries = p.builds()
-        if len(entries) != 2:
-            failures.append(f"the native request must select a cache entry of its own: {[e.name for e in entries]}")
-        check("back to original", p.run(OPEN + ["native_gems 0", "frames 10", f"expect audio={AOT}", "quit"]), 2)   # the first entry is still there and still Ready
+        if any("--sound-driver" in line for line in args):
+            failures.append(f"the launcher never passes a sound option to the product: {args!r}")
+        check("no checkbox command exists", p.run(OPEN + ["advanced 1", "frames 6", "expect audio=" + NATIVE, "quit"]), 2)
 
         # 3. the other cases, one record each (each is a build made by the product double that records exactly that)
         for name, record, shown in (("structural alternatives", ALTERNATIVES, AOT), ("degraded", BROKEN, DEGRADED),
-                                    ("malformed", '{"schema":1,"kind":"native_dri', "Unknown"),
-                                    ("unrecognised driver", {"schema": 1, "kind": "native_driver", "driver": "other", "verification": "reference_checked", "coverage": "complete", "audio_status": "supported"}, "Unknown"),
-                                    ("unrecognised kind", {"schema": 1, "kind": "mystery", "audio_status": "supported"}, "Unknown"),
-                                    ("future schema", dict(ORIGINAL, schema=2), "Unknown")):
+                                    ("old original record", OLD_ORIGINAL, AOT), ("old native record", OLD_NATIVE, NATIVE),
+                                    ("malformed", '{"schema":2,"kind":"native_dri', "Unknown"),
+                                    ("unrecognised driver", {"schema": 2, "selection": "automatic", "reason": "original_aot_failure_verified_replacement", "kind": "native_driver", "driver": "other", "verification": "reference_checked", "coverage": "complete", "audio_status": "supported"}, "Unknown"),
+                                    ("unrecognised kind", {"schema": 2, "selection": "automatic", "reason": "original_supported", "kind": "mystery", "audio_status": "supported"}, "Unknown"),
+                                    ("unrecognised selection", dict(ORIGINAL, selection="guessed"), "Unknown"),
+                                    ("future schema", dict(ORIGINAL, schema=3), "Unknown")):
             q = Profile(tmp, "case-" + name.replace(" ", "-"), exe, fake_cli, fake_game)
             build_and_show(q, name, record if isinstance(record, str) else json.dumps(record), shown)
+        q = Profile(tmp, "case-degraded-detail", exe, fake_cli, fake_game)
+        build_and_show(q, "degraded detail", json.dumps(BROKEN), DEGRADED)
+        check("degraded is disclosed separately", q.run(OPEN + ["expect audio_has=Degraded: structural code mutation", "expect audio_has=Music is not supported", "quit"]), 3)
+        q = Profile(tmp, "case-old-native-detail", exe, fake_cli, fake_game)
+        build_and_show(q, "old native detail", json.dumps(OLD_NATIVE), NATIVE)
+        check("an older native record does not claim save states", q.run(OPEN + ["expect audio_has=Save states are not available in this older build", "quit"]), 2)
 
         # 4. an older build without any record
         q = Profile(tmp, "older", exe, fake_cli, fake_game)
@@ -129,7 +142,7 @@ def main():
 
         # 5. a build mode switch shows the record of the build of THAT mode: Compatibility has the native build, Optimized is not built
         q = Profile(tmp, "modes", exe, fake_cli, fake_game)
-        check("native in compatibility", q.run(OPEN + ["native_gems 1", "frames 4", "build", "wait_idle", "frames 40", f"expect audio={NATIVE}", "quit"]), 2)
+        build_and_show(q, "native in compatibility", "native", NATIVE)
         check("optimized not built", q.run(OPEN + ["mode optimized", "frames 12", "expect audio=Not recorded", "mode compatibility", "frames 12", f"expect audio={NATIVE}", "quit"]), 3)
 
     if failures:

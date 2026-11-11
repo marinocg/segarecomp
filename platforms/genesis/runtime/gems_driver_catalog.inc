@@ -8,6 +8,9 @@
  * (genesis_z80_activation_signature: the 68000-written extents of the sound RAM and their bytes). It identifies the exact driver bytes the
  * game uploads; it is not title information and no title is compared anywhere. An image is added only after its address map, tables and
  * protocol were checked against the published driver source and the replacement was validated on it (docs/architecture/genesis-native-gems.md).
+ * GEMS_CATALOG_REVISION(n) is the revision of this list and of the evidence behind it: bump it whenever an image is added, removed or re-classified. It is part of the build's audio
+ * identity (status.json, launcher cache key), so a build made against an older catalog is never taken for one made against this one.
  * This file is read by the C runtime (compiled in) and by the build tool (the `--sound-driver gems` identity check): one source of truth.
  */
+GEMS_CATALOG_REVISION(1)
 GEMS_VERIFIED_IMAGE("gems", "2.5", "reference_checked", "f68e547d7dec54d2e00a4f292c1986a07d6bc8de14cc417e5e376b93a9f86cf7")

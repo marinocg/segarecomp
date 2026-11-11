@@ -699,7 +699,7 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     draw_text(dl, ctx_.bold, ctx_.u(12.5F), col::text, ImVec2(ra.x + ctx_.u(24.0F), c.y - ctx_.u(7.5F)), "Advanced build options");
     std::string summary;
     if (scd_game) summary = entry.sega_cd.program.path.empty() ? "no program imported" : "program: " + file_name_text(entry.sega_cd.program.path);
-    else if (!sms) summary = std::string(entry.hint_alias_discovery ? "H-int discovery on" : "H-int discovery off") + (entry.mapper.empty() ? "" : ", lock-on cartridge") + (entry.native_gems_audio ? ", native GEMS audio" : "");
+    else if (!sms) summary = std::string(entry.hint_alias_discovery ? "H-int discovery on" : "H-int discovery off") + (entry.mapper.empty() ? "" : ", lock-on cartridge");
     else summary = "none for this console";
     const std::string sum_shown = ellipsize(ctx_.regular, ctx_.u(11.5F), inner * 0.5F, summary);
     draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::dim, ImVec2(rb.x - ctx_.u(8.0F) - text_width(ctx_.regular, ctx_.u(11.5F), sum_shown.c_str()), c.y - ctx_.u(7.0F)), sum_shown.c_str());
@@ -746,14 +746,6 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
         y = ImGui::GetCursorScreenPos().y + ctx_.u(2.0F);
         ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
         y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner, "Default off. For games whose raster / H-interrupt effects fail otherwise: the build stops on a RAM-resident H-interrupt vector to derive its alias. Builds may take longer. It changes the build.") + ctx_.u(4.0F);
-        ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-        bool native_gems = entry.native_gems_audio;
-        ImGui::BeginDisabled(busy_now);
-        if (checkbox(ctx_, "gemsaudio", "Native GEMS audio replacement (experimental)", &native_gems)) { entry.native_gems_audio = native_gems; changed = true; }
-        ImGui::EndDisabled();
-        y = ImGui::GetCursorScreenPos().y + ctx_.u(2.0F);
-        ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-        y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner, "Default off. Replaces the game's own GEMS sound driver by a verified native implementation, only when the game uses exactly a driver image it was verified for; otherwise the build fails and nothing changes. Save states are unavailable while it is active. It changes the build.") + ctx_.u(4.0F);
       }
       ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
       y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, scd_game ? "The BIOS, the disc and the build mode are part of the build identity: changing the mode needs a new build, and the current program is kept until the new one is verified. Saves and recordings are never touched by a build."
@@ -968,7 +960,6 @@ void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) 
     std::string identity = info.key.empty() ? std::string("-") : info.key.substr(0, 16) + "...";
     std::string detail = selected_mode_label(entry) + " selected";
     if (entry.platform_id == "genesis") detail += entry.hint_alias_discovery ? ", H-int discovery on" : ", H-int discovery off";
-    if (entry.platform_id == "genesis" && entry.native_gems_audio) detail += ", native GEMS audio requested";
     if (entry.platform_id == "genesis" && !entry.mapper.empty()) detail += ", lock-on cartridge";
     if (entry.platform_id == "master-system") detail += ", mapper " + (entry.mapper.empty() ? (entry.mapper_manifest_sha256.empty() ? std::string("undeclared") : std::string("from manifest")) : entry.mapper);
     std::error_code ec;
