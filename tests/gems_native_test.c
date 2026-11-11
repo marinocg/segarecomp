@@ -480,7 +480,7 @@ static void tweak_looped_sample(Fixture *f) { f->rom[SAMPLE_TABLE] = 0x15; le16(
 static void test_state_continuation(void) {
   continuation("mid-sample", 0, 4 * FRAME + 12345, 40 * FRAME, TAIL_PLAIN, NULL);
   continuation("looped sample", 0, 9 * FRAME + 777, 60 * FRAME, TAIL_PLAIN, tweak_looped_sample);
-  continuation("FM note", 1, 2 * FRAME + 5, 30 * FRAME, TAIL_PLAIN, NULL);
+  continuation("FM note", 1, FRAME / 2, 30 * FRAME, TAIL_PLAIN, NULL);
   continuation("PSG loop", 5, 3 * FRAME + 99, 30 * FRAME, TAIL_PLAIN, NULL);
   continuation("pending command", 0, 5 * FRAME + 321, 40 * FRAME, TAIL_PENDING_COMMAND, NULL);
   continuation("bus hold", 0, 6 * FRAME + 4242, 50 * FRAME, TAIL_BUS_HOLD, NULL);
