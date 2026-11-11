@@ -137,6 +137,17 @@ void gems_native_resume(GemsNative *g, uint64_t at_ticks);
  * does nothing further. */
 GemsNativeFault gems_native_run_to(GemsNative *g, uint64_t master_ticks);
 
+/* ---- save states ------------------------------------------------------------------------------------------------------------------------------------
+ * The complete execution state of a running driver as a canonical, versioned, pointer-free payload (fixed-width little-endian fields; no host pointer, no struct layout,
+ * no padding). The 8 KiB sound RAM that holds the command FIFO and the mailboxes belongs to the machine snapshot and is not repeated here. `put` returns the byte count (0 =
+ * it does not fit, or the driver is faulted: a faulted driver is inert and is recorded by the machine's fault latch instead). `get` decodes into `stage` - a private copy whose
+ * `host` is NOT touched - and validates it against the guest clock (`master_ticks`) and the chip's Timer A schedule (`chip_timer_a_expiry`, UINT64_MAX = stopped); it returns 1 only
+ * for a state this implementation could have produced. Nothing here writes to a chip. */
+#define GEMS_NATIVE_STATE_SCHEMA 1u
+#define GEMS_NATIVE_STATE_MAX_BYTES 4096u
+uint32_t gems_native_state_put(const GemsNative *g, uint8_t *out, uint32_t capacity);
+int gems_native_state_get(GemsNative *stage, const uint8_t *in, uint32_t length, uint64_t master_ticks, uint64_t chip_timer_a_expiry);
+
 /* Identity: 1 when `signature` (the 32-byte activation signature of the uploaded image) is a verified GEMS image of the catalog.
  * `version` receives the catalog's version text. */
 int gems_native_identity_lookup(const uint8_t signature[32], const char **version);

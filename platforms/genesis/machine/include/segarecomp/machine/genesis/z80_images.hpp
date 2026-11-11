@@ -129,6 +129,11 @@ enum class RegistryRelation : std::uint8_t {
 // = executable_images(registry) projected onto the Z80 emitter input with every image banked.
 [[nodiscard]] codegen::z80::ImageSet build_image_set(const Registry& registry);
 
+// ADR 0291: evidence, by static analysis of the image's own bytes (nothing is executed), that a RAM-backed Z80 image can rewrite its own instructions: the number of
+// exact (destination, value) code-write candidates that change the decoded form of some instruction. It lives here, with the other users of the CPU's mutation analysis,
+// so that applications never depend on the CPU library directly.
+[[nodiscard]] std::size_t structural_code_write_candidates(const Image& image);
+
 struct EmitRequest {
   std::filesystem::path directory;
   std::string stem = "genesis_z80";

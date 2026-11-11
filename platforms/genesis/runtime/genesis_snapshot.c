@@ -125,6 +125,9 @@ uint16_t genesis_snapshot_machine_flags(const GenesisSnapshotMachine *machine) {
   uint16_t flags = 0U;
   if (machine == NULL || machine->runtime == NULL) return 0U;
   if (machine->z80 != NULL && machine->audio != NULL) flags |= GENESIS_SNAPSHOT_FLAG_SOUND;
+#ifdef SEGARECOMP_GENESIS_SOUND
+  if (machine->z80 != NULL && machine->z80->native_driver != NULL) flags |= GENESIS_SNAPSHOT_FLAG_NATIVE_SOUND;   /* ADR 0291: the sound backend is part of a state's identity */
+#endif
   if (machine->runtime->cartridge_sram != NULL && machine->runtime->cartridge_sram->layout_supported != 0U &&
       machine->runtime->cartridge_sram_storage != NULL && machine->runtime->cartridge_sram->storage_bytes != 0U) {
     flags |= GENESIS_SNAPSHOT_FLAG_SRAM;
@@ -380,7 +383,6 @@ static GenesisSnapshotStatus put_z80(Writer *w, const GenesisZ80Machine *m) {
   const Z80State *s = &m->cpu.state;
   uint8_t hash[32];
   if (m->view_stop != (GenesisDiagnosticCategory)0) return GENESIS_SNAPSHOT_NOT_CAPTURABLE;
-  if (m->native_active) return GENESIS_SNAPSHOT_NOT_CAPTURABLE;   /* ADR 0291: the native sound replacement's state is not part of the snapshot format */
   w_u8(w, s->a); w_u8(w, s->f); w_u8(w, s->b); w_u8(w, s->c); w_u8(w, s->d); w_u8(w, s->e); w_u8(w, s->h); w_u8(w, s->l);
   w_u8(w, s->a2); w_u8(w, s->f2); w_u8(w, s->b2); w_u8(w, s->c2); w_u8(w, s->d2); w_u8(w, s->e2); w_u8(w, s->h2); w_u8(w, s->l2);
   w_u16(w, s->ix); w_u16(w, s->iy); w_u16(w, s->sp); w_u16(w, s->pc); w_u16(w, s->wz);
@@ -397,13 +399,53 @@ static GenesisSnapshotStatus put_z80(Writer *w, const GenesisZ80Machine *m) {
   w_u32(w, m->sound_fault_epoch);
   w_u64(w, m->sound_fault_master_ticks);
   w_u32(w, m->sound_recoveries);
+  if (m->native_driver != NULL) {   /* ADR 0291: which backend serves the sound CPU and, when native, the driver's complete state */
+    const GenesisZ80NativeDriver *d = m->native_driver;
+    w_u8(w, m->native_active ? 1U : 0U);
+    w_u32(w, m->native_activations);
+    if (m->native_active) {
+      uint8_t name[4], version[8], payload[GENESIS_Z80_NATIVE_STATE_MAX];
+      size_t n;
+      uint32_t length;
+      memset(name, 0, sizeof name);
+      memset(version, 0, sizeof version);
+      n = strlen(d->driver);
+      memcpy(name, d->driver, n < sizeof name ? n : sizeof name);
+      n = m->native_version != NULL ? strlen(m->native_version) : 0U;
+      if (n > sizeof version) return GENESIS_SNAPSHOT_NOT_CAPTURABLE;
+      if (n != 0U) memcpy(version, m->native_version, n);
+      length = d->state_put(d->context, payload, (uint32_t)sizeof payload);
+      if (length == 0U) return GENESIS_SNAPSHOT_NOT_CAPTURABLE;
+      w_bytes(w, name, 4U);
+      w_bytes(w, version, 8U);
+      w_u32(w, d->implementation_version);
+      w_u32(w, d->state_schema);
+      w_bytes(w, m->native_signature, 32U);
+      w_u32(w, length);
+      w_bytes(w, payload, length);
+    }
+  }
   return GENESIS_SNAPSHOT_OK;
 }
 
-static GenesisSnapshotStatus get_z80(Reader *r, GenesisZ80Machine *m) {
+/* The native driver payload inside a Z80 section being decoded (valid while the section bytes are). */
+typedef struct NativeStage {
+  int present;
+  const uint8_t *payload;
+  uint32_t length;
+} NativeStage;
+
+static GenesisSnapshotStatus get_z80(Reader *r, GenesisZ80Machine *m, NativeStage *native) {
   Z80State *s = &m->cpu.state;
   uint8_t bound[32], last[32];
   uint32_t fault;
+  uint8_t native_tag = 0U;
+  uint8_t id_name[4], id_version[8], id_signature[32];
+  uint32_t id_implementation = 0U, id_schema = 0U;
+  memset(id_name, 0, sizeof id_name);
+  memset(id_version, 0, sizeof id_version);
+  memset(id_signature, 0, sizeof id_signature);
+  if (native != NULL) memset(native, 0, sizeof *native);
   s->a = r_u8(r); s->f = r_u8(r); s->b = r_u8(r); s->c = r_u8(r); s->d = r_u8(r); s->e = r_u8(r); s->h = r_u8(r); s->l = r_u8(r);
   s->a2 = r_u8(r); s->f2 = r_u8(r); s->b2 = r_u8(r); s->c2 = r_u8(r); s->d2 = r_u8(r); s->e2 = r_u8(r); s->h2 = r_u8(r); s->l2 = r_u8(r);
   s->ix = r_u16(r); s->iy = r_u16(r); s->sp = r_u16(r); s->pc = r_u16(r); s->wz = r_u16(r);
@@ -418,6 +460,29 @@ static GenesisSnapshotStatus get_z80(Reader *r, GenesisZ80Machine *m) {
   m->sound_fault_epoch = r_u32(r);
   m->sound_fault_master_ticks = r_u64(r);
   m->sound_recoveries = r_u32(r);
+  m->native_active = 0U;
+  memset(m->native_signature, 0, sizeof m->native_signature);
+  if (m->native_driver != NULL) {   /* the backend trailer (a state of a program without a native driver carries none and is refused by the machine flags) */
+    native_tag = r_u8(r);
+    m->native_activations = r_u32(r);
+    if (native_tag == 1U) {
+      uint32_t length;
+      const uint8_t *payload;
+      r_bytes(r, id_name, 4U);
+      r_bytes(r, id_version, 8U);
+      id_implementation = r_u32(r);
+      id_schema = r_u32(r);
+      r_bytes(r, id_signature, 32U);
+      length = r_u32(r);
+      payload = r_take(r, length);
+      if (r->error || payload == NULL || length == 0U || length > GENESIS_Z80_NATIVE_STATE_MAX || native == NULL) return GENESIS_SNAPSHOT_BAD_LAYOUT;
+      native->present = 1;
+      native->payload = payload;
+      native->length = length;
+    } else if (native_tag != 0U) {
+      return GENESIS_SNAPSHOT_INVALID_STATE;
+    }
+  }
   if (!r_done(r)) return GENESIS_SNAPSHOT_BAD_LAYOUT;
   if (s->im > 2U || s->iff1 > 1U || s->iff2 > 1U || s->halted > 1U || s->int_deferral > 1U || s->ld_a_ir > 1U || s->in_prefix_run > 1U ||
       s->int_line > 1U || s->nmi_pending > 1U || s->nmi_reject > 1U)
@@ -427,6 +492,28 @@ static GenesisSnapshotStatus get_z80(Reader *r, GenesisZ80Machine *m) {
   m->sound_fault = (GenesisDiagnosticCategory)fault;
   m->view_stop = (GenesisDiagnosticCategory)0;
   s->deadline = 0U;
+  if (m->sound_fault == GENESIS_DIAG_Z80_NATIVE_DRIVER_FAULT && m->native_driver == NULL) return GENESIS_SNAPSHOT_INCOMPATIBLE;   /* a fault only a native driver can have */
+  if (native_tag == 1U) {   /* the backend named by the state must be exactly the one this program carries, bound to the image the state says is running */
+    const GenesisZ80NativeDriver *d = m->native_driver;
+    const char *version = NULL;
+    uint8_t expected_name[4], expected_version[8];
+    size_t n;
+    memset(expected_name, 0, sizeof expected_name);
+    memset(expected_version, 0, sizeof expected_version);
+    n = strlen(d->driver);
+    memcpy(expected_name, d->driver, n < sizeof expected_name ? n : sizeof expected_name);
+    if (m->bound_ordinal == 0U || fault != 0U) return GENESIS_SNAPSHOT_INVALID_STATE;
+    if (memcmp(id_name, expected_name, 4U) != 0 || id_implementation != d->implementation_version || id_schema != d->state_schema) return GENESIS_SNAPSHOT_INCOMPATIBLE;
+    if (!d->identify(d->context, id_signature, &version) || version == NULL) return GENESIS_SNAPSHOT_INCOMPATIBLE;
+    n = strlen(version);
+    if (n > sizeof expected_version) return GENESIS_SNAPSHOT_INCOMPATIBLE;
+    memcpy(expected_version, version, n);
+    if (memcmp(expected_version, id_version, 8U) != 0) return GENESIS_SNAPSHOT_INCOMPATIBLE;
+    if (genesis_z80_image_for_signature(id_signature) != m->bound_ordinal) return GENESIS_SNAPSHOT_IMAGE_MISSING;
+    m->native_active = 1U;
+    m->native_version = version;
+    memcpy(m->native_signature, id_signature, 32U);
+  }
   return GENESIS_SNAPSHOT_OK;
 }
 
@@ -831,6 +918,8 @@ static GenesisSnapshotStatus restore_impl(const GenesisSnapshotMachine *machine,
 #ifdef SEGARECOMP_GENESIS_SOUND
   GenesisZ80Machine *stage_z80 = NULL;
   GenesisAudio *stage_audio = NULL;
+  NativeStage native_payload;
+  void *native_staged = NULL;
 #endif
 
   status = precheck(machine, identity, data, size, &info, views);
@@ -871,7 +960,7 @@ static GenesisSnapshotStatus restore_impl(const GenesisSnapshotMachine *machine,
 #ifdef SEGARECOMP_GENESIS_SOUND
   if (machine->z80 != NULL) {
     SECTION_READER(SEC_Z80);
-    status = get_z80(&r, stage_z80);
+    status = get_z80(&r, stage_z80, &native_payload);
     if (status != GENESIS_SNAPSHOT_OK) goto done;
     status = GENESIS_SNAPSHOT_INVALID_STATE;
     SECTION_READER(SEC_PSG);
@@ -903,7 +992,7 @@ static GenesisSnapshotStatus restore_impl(const GenesisSnapshotMachine *machine,
       const uint64_t ym = stage_audio->ym_samples, psg = stage_audio->psg.ticks;
       const int runnable = stage_z80->bound_ordinal != 0U && stage_rt->devices.z80_bus.reset_released && !stage_rt->devices.z80_bus.bus_requested;
       if (base > master + slack || cycles > (master + slack - base) / GENESIS_Z80_CLOCK_DIVIDER) goto done;
-      if (runnable && master > slack + base && cycles < (master - slack - base) / GENESIS_Z80_CLOCK_DIVIDER) goto done;
+      if (runnable && !stage_z80->native_active && master > slack + base && cycles < (master - slack - base) / GENESIS_Z80_CLOCK_DIVIDER) goto done;
       if (ym > (master + slack) / YM2612_MASTER_TICKS_PER_SAMPLE || (master > slack && ym < (master - slack) / YM2612_MASTER_TICKS_PER_SAMPLE)) goto done;
       if (psg > (master + slack) / GENESIS_MIXER_PSG_TICK_MASTER || (master > slack && psg < (master - slack) / GENESIS_MIXER_PSG_TICK_MASTER)) goto done;
       {  /* the YM2612's own clock and every mixer source sit at the guest clock (within the slack) from BOTH sides: a far-behind clock would make the next catch-up run for ages */
@@ -920,6 +1009,14 @@ static GenesisSnapshotStatus restore_impl(const GenesisSnapshotMachine *machine,
     }
 #endif
   }
+#ifdef SEGARECOMP_GENESIS_SOUND
+  if (machine->z80 != NULL && stage_z80->native_active) {   /* the driver's own state, validated against the guest clock and the staged chip's Timer A schedule; private until commit */
+    const GenesisZ80NativeDriver *d = machine->z80->native_driver;
+    native_staged = d->state_stage(d->context, native_payload.payload, native_payload.length, stage_rt->scheduler.master_ticks,
+                                   ym2612_image_timer_a_expiry(views[SEC_YM].data, views[SEC_YM].length));
+    if (native_staged == NULL) goto done;
+  }
+#endif
 #undef SECTION_READER
 
   if (!commit) { status = GENESIS_SNAPSHOT_OK; goto done; }   /* validation only: the staged copies are dropped, the machine is never touched */
@@ -931,12 +1028,14 @@ static GenesisSnapshotStatus restore_impl(const GenesisSnapshotMachine *machine,
     memcpy(machine->z80, stage_z80, sizeof *stage_z80);
     memcpy(machine->audio, stage_audio, sizeof *stage_audio);
     (void)ym2612_load(machine->audio->ym, views[SEC_YM].data, views[SEC_YM].length);
+    if (native_staged != NULL) { machine->z80->native_driver->state_commit(machine->z80->native_driver->context, native_staged); native_staged = NULL; }
   }
 #endif
   status = GENESIS_SNAPSHOT_OK;
 
 done:
 #ifdef SEGARECOMP_GENESIS_SOUND
+  if (native_staged != NULL) machine->z80->native_driver->state_discard(machine->z80->native_driver->context, native_staged);
   free(stage_z80);
   free(stage_audio);
 #endif
@@ -993,7 +1092,7 @@ uint32_t genesis_snapshot_part_z80_put(const GenesisZ80Machine *machine, uint8_t
 GenesisSnapshotStatus genesis_snapshot_part_z80_get(GenesisZ80Machine *stage, const uint8_t *in, uint32_t length) {
   Reader r;
   r.p = in; r.size = length; r.off = 0U; r.error = 0;
-  return get_z80(&r, stage);
+  return get_z80(&r, stage, NULL);
 }
 uint32_t genesis_snapshot_part_psg_put(const GenesisAudio *audio, uint8_t *out, uint32_t cap) {
   Writer w;

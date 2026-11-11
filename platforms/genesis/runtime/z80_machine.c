@@ -282,6 +282,7 @@ static void bind_native_if_verified(GenesisZ80Machine *machine, const uint8_t si
   if (machine->native_driver == NULL || !machine->native_driver->identify(machine->native_driver->context, signature, &version)) return;
   machine->native_active = 1U;
   machine->native_version = version;
+  memcpy(machine->native_signature, signature, 32U);
   ++machine->native_activations;
   machine->native_driver->start(machine->native_driver->context, machine, ceil_to_z80_clock(master_ticks));
 }

@@ -9,7 +9,6 @@
 #include "segarecomp/machine/genesis/m68k_copy_alias.hpp"
 #include "segarecomp/machine/genesis/z80_materialization.hpp"
 #include "segarecomp/machine/genesis/z80_static_producer.hpp"
-#include "segarecomp/cpu/z80/mutation.hpp"
 #include "segarecomp/machine/master_system/emit.hpp"
 #include "segarecomp/machine/master_system/ml_region_z80_producer.hpp"
 #include "segarecomp/patch.hpp"
@@ -1197,11 +1196,8 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
         audio_record.version = verified->version;
         audio_record.verification = verified->verification;
         audio_record.signature_prefix = hex.substr(0, 16);
-        const std::vector<std::uint8_t> ram(image.ram.begin(), image.ram.end());
-        const auto report = segarecomp::cpu::z80::mutation::analyze(ram, segarecomp::cpu::z80::mutation::hardware_roots());
         audio_record.analysed = true;
-        for (const auto &candidate : report.candidates)
-          if (candidate.structural()) ++audio_record.structural_candidates;
+        audio_record.structural_candidates = gz80::structural_code_write_candidates(image);
       }
     }
     if (audio_record.native_images == 0) {

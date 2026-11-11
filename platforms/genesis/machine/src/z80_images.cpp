@@ -287,3 +287,16 @@ EmitOutcome emit_registry(const Registry& registry, const EmitRequest& request) 
 }
 
 }  // namespace segarecomp::machine::genesis::z80
+
+namespace segarecomp::machine::genesis::z80 {
+
+std::size_t structural_code_write_candidates(const Image& image) {
+  const std::vector<std::uint8_t> ram(image.ram.begin(), image.ram.end());
+  const auto report = segarecomp::cpu::z80::mutation::analyze(ram, segarecomp::cpu::z80::mutation::hardware_roots());
+  std::size_t structural = 0;
+  for (const auto& candidate : report.candidates)
+    if (candidate.structural()) ++structural;
+  return structural;
+}
+
+}  // namespace segarecomp::machine::genesis::z80

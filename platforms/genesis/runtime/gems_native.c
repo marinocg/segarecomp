@@ -58,6 +58,145 @@ const char *gems_native_fault_name(GemsNativeFault fault) {
   return "unknown";
 }
 
+/* ---- save states ---- */
+static uint64_t tick_time(uint64_t index);
+typedef struct StateWriter { uint8_t *data; uint32_t capacity, size; int error; } StateWriter;
+typedef struct StateReader { const uint8_t *data; uint32_t size, offset; int error; } StateReader;
+
+static void w8(StateWriter *w, uint8_t v) { if (w->size < w->capacity) w->data[w->size++] = v; else w->error = 1; }
+static void w16(StateWriter *w, uint16_t v) { w8(w, (uint8_t)v); w8(w, (uint8_t)(v >> 8)); }
+static void w32(StateWriter *w, uint32_t v) { w16(w, (uint16_t)v); w16(w, (uint16_t)(v >> 16)); }
+static void w64(StateWriter *w, uint64_t v) { w32(w, (uint32_t)v); w32(w, (uint32_t)(v >> 32)); }
+static void wbytes(StateWriter *w, const uint8_t *p, uint32_t n) { uint32_t i; for (i = 0; i < n; ++i) w8(w, p[i]); }
+static uint8_t r8(StateReader *r) { if (r->offset < r->size) return r->data[r->offset++]; r->error = 1; return 0u; }
+static uint16_t r16(StateReader *r) { const uint16_t lo = r8(r); return (uint16_t)(lo | (uint16_t)((unsigned)r8(r) << 8)); }
+static uint32_t r32(StateReader *r) { const uint32_t lo = r16(r); return lo | ((uint32_t)r16(r) << 16); }
+static uint64_t r64(StateReader *r) { const uint64_t lo = r32(r); return lo | ((uint64_t)r32(r) << 32); }
+static void rbytes(StateReader *r, uint8_t *p, uint32_t n) { uint32_t i; for (i = 0; i < n; ++i) p[i] = r8(r); }
+
+static void state_voice_put(StateWriter *w, const GemsVoice *v) { w8(w, v->flags); w8(w, v->priority); w8(w, v->note); w8(w, v->channel); w16(w, v->duration); w8(w, v->release); }
+static void state_voice_get(StateReader *r, GemsVoice *v) { v->flags = r8(r); v->priority = r8(r); v->note = r8(r); v->channel = r8(r); v->duration = r16(r); v->release = r8(r); }
+
+uint32_t gems_native_state_put(const GemsNative *g, uint8_t *out, uint32_t capacity) {
+  StateWriter w;
+  unsigned i, k;
+  w.data = out; w.capacity = capacity; w.size = 0u; w.error = 0;
+  if (g->fault != GEMS_FAULT_NONE) return 0u;
+  w32(&w, GEMS_NATIVE_STATE_SCHEMA);
+  w64(&w, g->floor_ticks); w64(&w, g->boot_ticks); w8(&w, g->booted); w8(&w, g->fifo_check_pending); w64(&w, g->next_tick_index);
+  w32(&w, g->patch_table); w32(&w, g->envelope_table); w32(&w, g->sequence_table); w32(&w, g->sample_table); w8(&w, g->have_pointers);
+  w16(&w, g->sbpt); w16(&w, g->sbptacc); w8(&w, g->tick_flags); w8(&w, g->master_attenuation);
+  for (i = 0; i < 16u; ++i) {
+    const GemsCcb *c = &g->ccb[i];
+    w8(&w, c->flags); w32(&w, c->address); w16(&w, c->timer); w16(&w, c->delay); w16(&w, c->duration);
+    w8(&w, c->program); w8(&w, c->sequence); w8(&w, c->channel); w8(&w, c->priority); w8(&w, c->envelope); w8(&w, c->attenuation);
+    for (k = 0; k < 4u; ++k) { w8(&w, c->loops[k][0]); w8(&w, c->loops[k][1]); w8(&w, c->loops[k][2]); }
+    wbytes(&w, c->patch, 39u);
+  }
+  for (i = 0; i < 6u; ++i) state_voice_put(&w, &g->fm[i]);
+  for (i = 0; i < 3u; ++i) state_voice_put(&w, &g->psg[i]);
+  state_voice_put(&w, &g->noise[0]);
+  w8(&w, g->note_voice); w8(&w, g->note_attenuation); w8(&w, g->note_number); w8(&w, g->note_channel); w8(&w, g->carriers);
+  wbytes(&w, g->psg_command, 4u); wbytes(&w, g->psg_level, 4u); wbytes(&w, g->psg_attack, 4u); wbytes(&w, g->psg_decay, 4u); wbytes(&w, g->psg_sustain, 4u);
+  wbytes(&w, g->psg_release, 4u); wbytes(&w, g->psg_mode, 4u); wbytes(&w, g->psg_low, 4u); wbytes(&w, g->psg_high, 4u); wbytes(&w, g->psg_attack_level, 4u);
+  wbytes(&w, g->psg_update, 4u);
+  for (i = 0; i < 4u; ++i) { w8(&w, g->ecb[i].channel); w8(&w, g->ecb[i].counter); w16(&w, g->ecb[i].delta); w16(&w, g->ecb[i].pointer); w8(&w, g->ecb[i].buffer); }
+  wbytes(&w, g->envelope_buffer, 128u);
+  for (i = 0; i < 16u; ++i) w16(&w, (uint16_t)g->pitch_bend[i]);
+  for (i = 0; i < 16u; ++i) w16(&w, (uint16_t)g->envelope_bend[i]);
+  wbytes(&w, g->bend_changed, 16u); w8(&w, g->need_bend);
+  w8(&w, g->sample_flags); wbytes(&w, g->sample_pointer_header, 3u); w16(&w, g->sample_skip); w16(&w, g->sample_first); w16(&w, g->sample_loop); w16(&w, g->sample_end);
+  w32(&w, g->sample_pointer); w16(&w, g->sample_counter); w8(&w, g->fdf_state); wbytes(&w, g->fifo, 256u); w8(&w, g->fifo_write); w8(&w, g->fifo_read);
+  w8(&w, g->dac_active); w8(&w, g->fill_enabled); w8(&w, g->dac_compressed); w8(&w, g->dac_pattern); w8(&w, g->dac_timer_b); w32(&w, g->dac_period_samples); w64(&w, g->dac_due);
+  w64(&w, g->count_commands); w64(&w, g->count_sequences); w64(&w, g->count_dac_samples); w64(&w, g->count_ticks); w64(&w, g->count_missed_ticks); w64(&w, g->count_clips);
+  w64(&w, g->count_notes_fm); w64(&w, g->count_notes_psg); w64(&w, g->count_notes_digital);
+  return w.error ? 0u : w.size;
+}
+
+static int state_voice_ok(const GemsVoice *v, unsigned voice_number) { return (v->flags & 7u) == voice_number; }
+
+int gems_native_state_get(GemsNative *stage, const uint8_t *in, uint32_t length, uint64_t master_ticks, uint64_t chip_timer_a_expiry) {
+  static const uint8_t k_fm_voice[6] = {0, 1, 4, 5, 6, 2};
+  const uint64_t slack = 4u * GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
+  StateReader r;
+  GemsNativeHost host;
+  unsigned i, k;
+  r.data = in; r.size = length; r.offset = 0u; r.error = 0;
+  host = stage->host;
+  memset(stage, 0, sizeof *stage);
+  stage->host = host;
+  if (r32(&r) != GEMS_NATIVE_STATE_SCHEMA) return 0;
+  stage->floor_ticks = r64(&r); stage->boot_ticks = r64(&r); stage->booted = r8(&r); stage->fifo_check_pending = r8(&r); stage->next_tick_index = r64(&r);
+  stage->patch_table = r32(&r); stage->envelope_table = r32(&r); stage->sequence_table = r32(&r); stage->sample_table = r32(&r); stage->have_pointers = r8(&r);
+  stage->sbpt = r16(&r); stage->sbptacc = r16(&r); stage->tick_flags = r8(&r); stage->master_attenuation = r8(&r);
+  for (i = 0; i < 16u; ++i) {
+    GemsCcb *c = &stage->ccb[i];
+    c->flags = r8(&r); c->address = r32(&r); c->timer = r16(&r); c->delay = r16(&r); c->duration = r16(&r);
+    c->program = r8(&r); c->sequence = r8(&r); c->channel = r8(&r); c->priority = r8(&r); c->envelope = r8(&r); c->attenuation = r8(&r);
+    for (k = 0; k < 4u; ++k) { c->loops[k][0] = r8(&r); c->loops[k][1] = r8(&r); c->loops[k][2] = r8(&r); }
+    rbytes(&r, c->patch, 39u);
+  }
+  for (i = 0; i < 6u; ++i) state_voice_get(&r, &stage->fm[i]);
+  for (i = 0; i < 3u; ++i) state_voice_get(&r, &stage->psg[i]);
+  state_voice_get(&r, &stage->noise[0]);
+  stage->note_voice = r8(&r); stage->note_attenuation = r8(&r); stage->note_number = r8(&r); stage->note_channel = r8(&r); stage->carriers = r8(&r);
+  rbytes(&r, stage->psg_command, 4u); rbytes(&r, stage->psg_level, 4u); rbytes(&r, stage->psg_attack, 4u); rbytes(&r, stage->psg_decay, 4u); rbytes(&r, stage->psg_sustain, 4u);
+  rbytes(&r, stage->psg_release, 4u); rbytes(&r, stage->psg_mode, 4u); rbytes(&r, stage->psg_low, 4u); rbytes(&r, stage->psg_high, 4u); rbytes(&r, stage->psg_attack_level, 4u);
+  rbytes(&r, stage->psg_update, 4u);
+  for (i = 0; i < 4u; ++i) { stage->ecb[i].channel = r8(&r); stage->ecb[i].counter = r8(&r); stage->ecb[i].delta = r16(&r); stage->ecb[i].pointer = r16(&r); stage->ecb[i].buffer = r8(&r); }
+  rbytes(&r, stage->envelope_buffer, 128u);
+  for (i = 0; i < 16u; ++i) stage->pitch_bend[i] = (int16_t)r16(&r);
+  for (i = 0; i < 16u; ++i) stage->envelope_bend[i] = (int16_t)r16(&r);
+  rbytes(&r, stage->bend_changed, 16u); stage->need_bend = r8(&r);
+  stage->sample_flags = r8(&r); rbytes(&r, stage->sample_pointer_header, 3u); stage->sample_skip = r16(&r); stage->sample_first = r16(&r); stage->sample_loop = r16(&r); stage->sample_end = r16(&r);
+  stage->sample_pointer = r32(&r); stage->sample_counter = r16(&r); stage->fdf_state = r8(&r); rbytes(&r, stage->fifo, 256u); stage->fifo_write = r8(&r); stage->fifo_read = r8(&r);
+  stage->dac_active = r8(&r); stage->fill_enabled = r8(&r); stage->dac_compressed = r8(&r); stage->dac_pattern = r8(&r); stage->dac_timer_b = r8(&r);
+  stage->dac_period_samples = r32(&r); stage->dac_due = r64(&r);
+  stage->count_commands = r64(&r); stage->count_sequences = r64(&r); stage->count_dac_samples = r64(&r); stage->count_ticks = r64(&r); stage->count_missed_ticks = r64(&r);
+  stage->count_clips = r64(&r); stage->count_notes_fm = r64(&r); stage->count_notes_psg = r64(&r); stage->count_notes_digital = r64(&r);
+  if (r.error || r.offset != r.size) return 0;   /* truncated, or trailing bytes */
+
+  /* ---- values the implementation can hold ---- */
+  if (stage->booted > 1u || stage->fifo_check_pending > 1u || stage->have_pointers > 1u || stage->need_bend > 1u || stage->dac_active > 1u || stage->fill_enabled > 1u ||
+      stage->dac_compressed > 1u)
+    return 0;
+  if (stage->patch_table > 0xFFFFFFu || stage->envelope_table > 0xFFFFFFu || stage->sequence_table > 0xFFFFFFu || stage->sample_table > 0xFFFFFFu ||
+      stage->sample_pointer > 0xFFFFFFu)
+    return 0;
+  if (stage->tick_flags > 3u || stage->note_voice > 7u || stage->carriers > 0x0Fu || stage->sbpt > 434u) return 0;   /* 434: the largest tempo's sub-beats per tick */
+  if (stage->fdf_state != 0u && (stage->fdf_state < 4u || stage->fdf_state > 7u)) return 0;
+  if (stage->dac_period_samples != 0u && stage->dac_period_samples > 1024u) return 0;
+  for (i = 0; i < 16u; ++i) {
+    const GemsCcb *c = &stage->ccb[i];
+    if (c->address > 0xFFFFFFu) return 0;
+    if (stage->bend_changed[i] > 1u) return 0;
+    if ((c->flags & CCB_RUNNING) != 0u && (c->flags & CCB_ENABLED) == 0u) return 0;   /* running implies enabled */
+  }
+  for (i = 0; i < 6u; ++i) if (!state_voice_ok(&stage->fm[i], k_fm_voice[i])) return 0;
+  for (i = 0; i < 3u; ++i) if (!state_voice_ok(&stage->psg[i], i)) return 0;
+  if (!state_voice_ok(&stage->noise[0], 3u)) return 0;
+  for (i = 0; i < 4u; ++i) {
+    const GemsEcb *e = &stage->ecb[i];
+    if (stage->psg_update[i] > 1u || stage->psg_mode[i] > 4u) return 0;
+    if (e->buffer != 32u * i || e->pointer > 128u + 256u) return 0;
+    if ((e->channel & 0x80u) != 0u) return 0;                                       /* the end-of-list marker is not a block */
+    if ((e->channel & 0x40u) == 0u && (e->channel & 0x0Fu) != (e->channel & 0x1Fu)) return 0;   /* an active block: channel 0..15 with at most the SFX flag */
+  }
+  /* ---- the guest clock and the chip ---- */
+  if (stage->floor_ticks > master_ticks + slack || stage->boot_ticks > master_ticks + slack) return 0;
+  {
+    const uint64_t next_tick = tick_time(stage->next_tick_index);
+    if (stage->next_tick_index > (UINT64_C(1) << 40) || next_tick + slack < master_ticks || next_tick > master_ticks + slack) return 0;
+  }
+  if (stage->dac_active && stage->dac_due != UINT64_MAX) {
+    if (stage->dac_due + slack < master_ticks || stage->dac_due > master_ticks + (1025u * YM2612_MASTER_TICKS_PER_SAMPLE) + slack) return 0;
+    if (chip_timer_a_expiry != UINT64_MAX && stage->dac_due > chip_timer_a_expiry) return 0;   /* the chip's schedule only moves forward */
+  }
+  if (stage->dac_active && stage->dac_period_samples == 0u) return 0;
+  if (stage->fault != GEMS_FAULT_NONE) return 0;
+  return 1;
+}
+
 /* ---- the catalog of verified images (activation signature -> driver version) ---- */
 typedef struct CatalogEntry { const char *name, *version, *verification, *signature_hex; } CatalogEntry;
 static const CatalogEntry k_catalog[] = {
@@ -883,7 +1022,7 @@ static int sequencer(Cursor *c, unsigned index) {
       for (;;) {
         uint8_t next;
         if (getsbyte(g, ccb, &next)) return 1;
-        if ((next & 0x80u) != 0u && (((next & 0x40u) != 0u) == is_delay)) value = (uint16_t)((value << 6) | (next & 0x3Fu));
+        if ((next & 0x80u) != 0u && (((next & 0x40u) != 0u) == is_delay)) value = (uint16_t)(((unsigned)value << 6) | (unsigned)(next & 0x3Fu));
         else { byte = next; break; }
       }
       if (is_delay) ccb->delay = (uint16_t)(0u - value);

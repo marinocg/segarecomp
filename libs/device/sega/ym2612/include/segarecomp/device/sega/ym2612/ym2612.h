@@ -54,6 +54,10 @@ void ym2612_write(Ym2612 *chip, uint32_t port, uint8_t value, uint64_t master_ti
  * write that (re)arms the timer. */
 uint64_t ym2612_timer_a_expiry(const Ym2612 *chip);
 
+/* The same question asked of a saved image (ym2612_save) without loading it: the guest master tick at which its Timer A next overflows (UINT64_MAX = stopped or the image is too
+ * short). Used to validate a sound driver's own timeline against the chip it is restored together with. */
+uint64_t ym2612_image_timer_a_expiry(const uint8_t *image, uint32_t length);
+
 /* Number of native samples generated so far, and a deterministic 64-bit digest of the complete device state (ymfm registers and
  * internal phase/envelope state, host timers, busy end and clock). */
 uint64_t ym2612_samples_generated(const Ym2612 *chip);

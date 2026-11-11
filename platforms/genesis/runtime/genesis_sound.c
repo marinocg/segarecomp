@@ -1,5 +1,6 @@
 #include "genesis_sound.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 static GenesisZ80Machine g_machine;
@@ -63,19 +64,23 @@ static void gems_command_tap(void *context, const uint8_t *bytes, unsigned count
 
 static int native_identify(void *context, const uint8_t signature[32], const char **version) { (void)context; return gems_native_identity_lookup(signature, version); }
 
+static void native_bind_host(GemsNativeHost *host, GenesisZ80Machine *machine) {
+  memset(host, 0, sizeof *host);
+  host->context = machine->runtime;
+  host->ram = machine->runtime->devices.z80_bus.z80_ram;
+  host->rom_read = gems_rom_read;
+  host->ym_write = gems_ym_write;
+  host->ym_read = gems_ym_read;
+  host->psg_write = gems_psg_write;
+  host->ym_timer_a_expiry = gems_timer_a_expiry;
+  host->command_tap = gems_command_tap;
+}
+
 static void native_start(void *context, GenesisZ80Machine *machine, uint64_t ticks) {
   GemsNativeHost host;
   (void)context;
   g_gems_machine = machine;
-  memset(&host, 0, sizeof host);
-  host.context = machine->runtime;
-  host.ram = machine->runtime->devices.z80_bus.z80_ram;
-  host.rom_read = gems_rom_read;
-  host.ym_write = gems_ym_write;
-  host.ym_read = gems_ym_read;
-  host.psg_write = gems_psg_write;
-  host.ym_timer_a_expiry = gems_timer_a_expiry;
-  host.command_tap = gems_command_tap;
+  native_bind_host(&host, machine);
   gems_native_start(&g_gems, &host, ticks);
 }
 
@@ -103,31 +108,48 @@ static void native_report(const void *context, GenesisZ80NativeReport *out) {
   out->activations = g_gems_machine != NULL ? g_gems_machine->native_activations : 0U;
 }
 
+/* The driver digest is the SHA-256 of the canonical state payload: it covers every field a save state carries, so two runs are equal exactly when their drivers are. */
 static void native_digest(const void *context, uint8_t out[32]) {
   GenesisSha256 sha;
-  uint8_t word[8];
-  unsigned i, b;
-  uint64_t values[12];
+  uint8_t payload[GEMS_NATIVE_STATE_MAX_BYTES];
+  uint32_t length;
   (void)context;
-  values[0] = g_gems.count_commands; values[1] = g_gems.count_sequences; values[2] = g_gems.count_dac_samples; values[3] = g_gems.count_ticks;
-  values[4] = g_gems.count_missed_ticks; values[5] = g_gems.dac_due; values[6] = (uint64_t)g_gems.fault; values[7] = g_gems.sample_pointer;
-  values[8] = g_gems.sample_counter; values[9] = ((uint64_t)g_gems.fifo_read << 8) | g_gems.fifo_write; values[10] = g_gems.dac_active;
-  values[11] = ((uint64_t)g_gems.fm[4].flags << 8) | g_gems.fdf_state;
+  length = gems_native_state_put(&g_gems, payload, (uint32_t)sizeof payload);
   genesis_sha256_init(&sha);
-  for (i = 0U; i < 12U; ++i) {
-    for (b = 0U; b < 8U; ++b) word[b] = (uint8_t)(values[i] >> (8U * b));
-    genesis_sha256_update(&sha, word, 8U);
-  }
-  for (i = 0U; i < 16U; ++i) {
-    genesis_sha256_update(&sha, &g_gems.ccb[i].flags, 1U);
-    word[0] = (uint8_t)g_gems.ccb[i].timer; word[1] = (uint8_t)(g_gems.ccb[i].timer >> 8);
-    word[2] = (uint8_t)g_gems.ccb[i].address; word[3] = (uint8_t)(g_gems.ccb[i].address >> 8); word[4] = (uint8_t)(g_gems.ccb[i].address >> 16);
-    genesis_sha256_update(&sha, word, 5U);
-  }
+  genesis_sha256_update(&sha, payload, length);   /* a faulted driver (length 0) digests as the empty payload; the fault itself is in the machine digest */
   genesis_sha256_final(&sha, out);
 }
 
-static const GenesisZ80NativeDriver g_gems_ops = {NULL, native_identify, native_start, native_suspend, native_resume, native_run_to, native_report, native_digest};
+static uint32_t native_state_put(const void *context, uint8_t *out, uint32_t capacity) {
+  (void)context;
+  return gems_native_state_put(&g_gems, out, capacity);
+}
+
+/* Decodes into a private copy of the live driver (the host stays the live one); nothing live changes until commit. */
+static void *native_state_stage(void *context, const uint8_t *in, uint32_t length, uint64_t master_ticks, uint64_t chip_timer_a_expiry) {
+  GemsNative *stage = (GemsNative *)malloc(sizeof *stage);
+  (void)context;
+  if (stage == NULL) return NULL;
+  *stage = g_gems;
+  if (!gems_native_state_get(stage, in, length, master_ticks, chip_timer_a_expiry)) { free(stage); return NULL; }
+  return stage;
+}
+
+static void native_state_commit(void *context, void *staged) {
+  GemsNativeHost host;
+  (void)context;
+  g_gems_machine = &g_machine;
+  native_bind_host(&host, &g_machine);
+  g_gems = *(GemsNative *)staged;
+  g_gems.host = host;   /* no chip is written: the restored chip state came with the snapshot */
+  free(staged);
+}
+
+static void native_state_discard(void *context, void *staged) { (void)context; free(staged); }
+
+static const GenesisZ80NativeDriver g_gems_ops = {NULL, native_identify, native_start, native_suspend, native_resume, native_run_to, native_report, native_digest,
+                                              native_state_put, native_state_stage, native_state_commit, native_state_discard, GEMS_NATIVE_DRIVER,
+                                              GEMS_NATIVE_IMPLEMENTATION_VERSION, GEMS_NATIVE_STATE_SCHEMA};
 #endif
 
 GenesisZ80Machine *genesis_sound_attach(GenesisRuntime *runtime) {

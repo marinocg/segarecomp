@@ -99,6 +99,12 @@ uint64_t ym2612_timer_a_expiry(const Ym2612 *chip) {
   return expiry == kNoEvent ? UINT64_MAX : static_cast<uint64_t>(expiry) * YM2612_MASTER_TICKS_PER_CLOCK;
 }
 
+uint64_t ym2612_image_timer_a_expiry(const uint8_t *image, uint32_t length) {
+  if (image == nullptr || length < 24) return UINT64_MAX;
+  const int64_t expiry = static_cast<int64_t>(get_u64(image + 16));
+  return expiry == kNoEvent || expiry < 0 ? UINT64_MAX : static_cast<uint64_t>(expiry) * YM2612_MASTER_TICKS_PER_CLOCK;
+}
+
 uint64_t ym2612_samples_generated(const Ym2612 *chip) { return chip->samples; }
 
 uint64_t ym2612_state_digest(const Ym2612 *chip) {
