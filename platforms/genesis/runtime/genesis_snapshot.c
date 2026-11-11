@@ -23,7 +23,9 @@ enum {
 #define SECTION_FLAG_REQUIRED 1U
 
 /* Fixed per-section maxima: an allocation or read is never sized by a file length. */
-static const uint32_t k_section_max[SEC_LAST + 1] = {0U, 256U, 65536U, 70000U, 16384U, 65536U + 64U, 8192U /* the Z80 CPU + the native driver trailer (genesis_snapshot.h GENESIS_SNAPSHOT_PART_Z80_MAX) */, 64U, 16384U, 80000U, 256U};
+/* The Z80 section: the CPU (< 512 bytes) and, in a program with the native GEMS replacement (ADR 0291), the backend trailer with the replacement's state (<= 4 KiB + identity). */
+#define GENESIS_SNAPSHOT_SECTION_Z80_MAX 8192U
+static const uint32_t k_section_max[SEC_LAST + 1] = {0U, 256U, 65536U, 70000U, 16384U, 65536U + 64U, GENESIS_SNAPSHOT_SECTION_Z80_MAX, 64U, 16384U, 80000U, 256U};
 
 static const char k_exec_tag[] = "segarecomp.genesis.sgstate.exec.v1";
 

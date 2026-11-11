@@ -78,6 +78,7 @@ Classes: **R** restore (execution-affecting), **B** rebind (pointer/callback/imm
 | `view_stop` | R | must be 0 at capture (a latched stop refuses capture) |
 | `sound_fault`, `sound_fault_epoch`, `sound_fault_master_ticks`, `sound_recoveries` | R | |
 | `on_unknown_image`, `unknown_image_context`, `bank_view`, `quiesce_unknown_image`, `isolate_view_stops`, `rearm_faulted_on_epoch` | B | configuration of the initialized machine |
+| `native_driver`, `native_active`, `native_activations`, `native_version`, `native_signature` | B / R | ADR 0291. Only in a program with the native GEMS replacement (machine flag `NATIVE_SOUND`, part of the execution fingerprint): the Z80 section carries a trailer - tag (0 not serving, 1 serving, 2 faulted), activations, and for 1 and 2 the driver name, version text, implementation version, payload schema and the activation signature of the bound image; for 1 the replacement's complete canonical state (`gems_native_state_put`, <= 4 KiB, validated against the clock and the staged chip's Timer A schedule, committed without any chip write). A program without the replacement writes the section exactly as before. |
 | `count_*` | X | opt-in aggregate evidence, not guest-visible |
 
 ### 3.3 Audio (`genesis_audio.h`, `genesis_mixer.h`, ym2612, sn76489)
@@ -154,7 +155,7 @@ that lacks one of them is refused with a reason.
 ### 4.3 Limits
 
 Total file <= 4 MiB; thumbnail <= 160x112 RGB565; per-section maxima are constants next to the parser (RAM 64 KiB, VDP < 80 KiB, Z80 <
-16 KiB, YM2612 blob <= 16 KiB, MIXER < 128 KiB, CART <= 64 KiB + 16). Read through a bounded reader; allocation sizes come from constants,
+16 KiB (8 KiB; a program with the native GEMS replacement adds its <= 4 KiB state), YM2612 blob <= 16 KiB, MIXER < 128 KiB, CART <= 64 KiB + 16). Read through a bounded reader; allocation sizes come from constants,
 never from file lengths.
 
 ### 4.4 Integrity is not authenticity

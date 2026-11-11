@@ -133,7 +133,7 @@ int genesis_snapshot_part_vdp_get(GenesisRuntime *stage, const uint8_t *in, uint
 uint32_t genesis_snapshot_part_io_put(const GenesisRuntime *runtime, uint8_t *out, uint32_t cap);
 int genesis_snapshot_part_io_get(GenesisRuntime *stage, const uint8_t *in, uint32_t length);
 #ifdef SEGARECOMP_GENESIS_SOUND
-#define GENESIS_SNAPSHOT_PART_Z80_MAX 8192U   /* the Z80 CPU and, in a program with a native sound driver, that driver's identity and state */
+#define GENESIS_SNAPSHOT_PART_Z80_MAX 512U
 #define GENESIS_SNAPSHOT_PART_PSG_MAX 64U
 #define GENESIS_SNAPSHOT_PART_MIXER_MAX 16384U
 #define GENESIS_SNAPSHOT_PART_AUDIO_MAX 256U

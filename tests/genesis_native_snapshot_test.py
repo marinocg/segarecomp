@@ -120,6 +120,7 @@ def main():
         s.raw("fullhash")
         suffix(s)
         s.raw("restore 1")
+        s.raw("native")            # straight after the restore: the replacement and the chip writes are exactly as at S (a restore writes nothing to a chip)
         s.raw("fullhash")
         suffix(s)
         s.raw("restore 1")
@@ -127,13 +128,14 @@ def main():
         out = base.run(exes["native"], s, "-")
         fh, st, mx = base.full(out), native(out), base.mixers(out)
         check(base.statuses(out, "SNAP") == [OK] and base.statuses(out, "RESTORE") == [OK, OK], "the native machine captures and restores (status ok)")
-        check(len(st) == 4 and st[0]["active"] == "1" and st[0]["fault"] == "none" and int(st[0]["dac"]) > 0 and int(st[0]["commands"]) >= 2,
+        check(len(st) == 5 and st[0]["active"] == "1" and st[0]["fault"] == "none" and int(st[0]["dac"]) > 0 and int(st[0]["commands"]) >= 2,
               "at S the replacement is bound, healthy, and in the middle of a sample (%s)" % (st[0] if st else None))
         check(len(fh) == 6 and fh[0] == fh[1], "capture does not modify the machine (including the replacement's state)")
         check(len(fh) == 6 and fh[3] == fh[0], "the restored machine, driver included, is bit-identical to the machine at S")
+        check(len(st) == 5 and st[2] == st[0], "a restore writes nothing to a chip and leaves the replacement's counters as they were at S (%s)" % (st[2] if len(st) > 2 else None))
         check(len(fh) == 6 and fh[2] == fh[4] == fh[5] and fh[2] != fh[0], "the future after every restore is identical to the straight future")
         check(len(mx) == 3 and mx[0] == mx[1] == mx[2] and "nonsilent=1" in mx[0], "the mixed audio stream (SHA-256 over every sample) is identical and non-silent")
-        check(len(st) == 4 and st[1] == st[2] == st[3] and st[1]["active"] == "1" and int(st[1]["activations"]) == 2, "the driver ran through the /RESET restart in every future and ended healthy (%s)" % (st[1] if len(st) > 1 else None))
+        check(len(st) == 5 and st[1] == st[3] == st[4] and st[1]["active"] == "1" and int(st[1]["activations"]) == 2, "the driver ran through the /RESET restart in every future and ended healthy (%s)" % (st[1] if len(st) > 1 else None))
 
         # ================= a fresh process restores a state saved by another =================
         path, path2, again, again2 = (tmp / n for n in ("native.sgstate", "native2.sgstate", "native.restored", "native2.restored"))
