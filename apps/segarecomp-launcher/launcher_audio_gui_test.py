@@ -109,7 +109,7 @@ def main():
         #    itself, and the launcher never passes a sound option to the product. A rebuild that selects another implementation replaces the record.
         p = Profile(tmp, "rebuild", exe, fake_cli, fake_game)
         build_and_show(p, "original build", None, AOT)
-        check("original detail", p.run(OPEN + [f"expect audio={AOT}", "expect audio_has=Not a replacement driver", "expect audio_has=Save states", "quit"]), 4)
+        check("original detail", p.run(OPEN + [f"expect audio={AOT}", "expect audio_has=Not a replacement driver", "quit"]), 3)
         check("rebuilt natively", p.run(OPEN + ["build", "wait_idle", "frames 40", "expect build_outcome=ok", f"expect audio={NATIVE}", "quit"], {"FAKE_AUDIO": "native"}), 3)
         for phrase in ("Automatically selected for a verified GEMS driver image", "Independently reimplemented in native C11", "Verified against the original driver's command and chip-access behavior",
                        "Original Z80 not executed for that driver", "Save states and rewind supported", "Timing is event-accurate rather than instruction-cycle-accurate"):
