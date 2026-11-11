@@ -1785,6 +1785,12 @@ add_test(NAME genesis_snapshot_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST genesis_snapshot_test APPEND PROPERTY LABELS full fast)
 set_property(TEST genesis_snapshot_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST genesis_snapshot_test APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
+# ADR 0291: the same save states / rewind with the native GEMS sound-driver replacement bound (production adapter, project-authored resources and one test-only trusted signature).
+add_test(NAME genesis_native_snapshot_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_native_snapshot_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})
+set_property(TEST genesis_native_snapshot_test APPEND PROPERTY LABELS full fast)
+set_property(TEST genesis_native_snapshot_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST genesis_native_snapshot_test APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
 # SEG-032-T006 (ADR 0072): the shared Sega PSG written by both CPUs.
 add_test(NAME genesis_audio_psg_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_psg_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})

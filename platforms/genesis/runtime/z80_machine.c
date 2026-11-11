@@ -276,9 +276,16 @@ void genesis_z80_activation_signature(const uint8_t *ram, const uint8_t *written
 }
 
 /* Contract section 5 / ADR 0073: the image epoch activates a compiled image, or stops fail closed. */
+/* The replacement does not serve the image (none verified, or none bound): the binding it had is forgotten, so that a state carries an identity only while it means something. */
+static void clear_native_binding(GenesisZ80Machine *machine) {
+  machine->native_active = 0U;
+  machine->native_version = NULL;
+  memset(machine->native_signature, 0, sizeof machine->native_signature);
+}
+
 static void bind_native_if_verified(GenesisZ80Machine *machine, const uint8_t signature[32], uint64_t master_ticks) {
   const char *version = NULL;
-  machine->native_active = 0U;
+  clear_native_binding(machine);
   if (machine->native_driver == NULL || !machine->native_driver->identify(machine->native_driver->context, signature, &version)) return;
   machine->native_active = 1U;
   machine->native_version = version;
@@ -303,7 +310,7 @@ static int activate_image(GenesisZ80Machine *machine, const uint8_t *written, ui
       machine->on_unknown_image(machine->unknown_image_context, machine->runtime->z80_epoch.epoch_count,
                                 machine->runtime->devices.z80_bus.z80_ram, written);
     machine->bound_ordinal = 0U;
-    machine->native_active = 0U;
+    clear_native_binding(machine);
     if (machine->quiesce_unknown_image) return 0; /* SEG-114: recorded by the callback; the host keeps the Z80 unexecuted */
     return stop_with(stop, GENESIS_STOP_UNSUPPORTED_Z80_EXECUTION, GENESIS_DIAG_Z80_UNKNOWN_IMAGE);
   }

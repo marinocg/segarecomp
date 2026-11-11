@@ -213,6 +213,17 @@ static int hex_nibble(char c) {
 
 int gems_native_identity_lookup(const uint8_t signature[32], const char **version) {
   size_t entry, i;
+#ifdef SEGARECOMP_GEMS_TEST_SIGNATURE_HEX
+  { /* TEST BUILDS ONLY (the machine-level save-state test, which cannot own a commercial driver image): one extra project-authored signature. Never defined by the product build. */
+    static const char k_test_signature[] = SEGARECOMP_GEMS_TEST_SIGNATURE_HEX;
+    int same = 1;
+    for (i = 0; i < 32 && same; ++i) {
+      const int hi = hex_nibble(k_test_signature[2 * i]), lo = hex_nibble(k_test_signature[2 * i + 1]);
+      if (hi < 0 || lo < 0 || (uint8_t)((hi << 4) | lo) != signature[i]) same = 0;
+    }
+    if (same) { if (version != NULL) *version = "test"; return 1; }
+  }
+#endif
   for (entry = 0; entry < sizeof k_catalog / sizeof k_catalog[0]; ++entry) {
     const char *hex = k_catalog[entry].signature_hex;
     int same = 1;
