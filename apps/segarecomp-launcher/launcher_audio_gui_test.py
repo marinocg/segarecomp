@@ -98,8 +98,12 @@ def main():
         """One window run: rebuild the open game with the product double recording `audio_env`, then check the headline and every phrase in `has` (the real window is slow, so one run does it all)."""
         env = {"FAKE_AUDIO": audio_env} if audio_env is not None else {}
         env.update(extra or {})
-        check(name, p.run(OPEN + ["build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", f"expect audio={shown}",
-                                  *[f"expect audio_has={phrase}" for phrase in has], "quit"], env), 4 + len(has))
+        script = OPEN + ["build", "wait_idle", "frames 40", "expect build_outcome=ok", "expect status=Ready", f"expect audio={shown}",
+                         *[f"expect audio_has={phrase}" for phrase in has], "quit"]
+        trace = p.run(script, env)
+        if any("build=failed" in line and "Could not start the Segarecomp build tool" in line for line in trace):   # a loaded CI host occasionally cannot spawn the product double: once more, nothing else is retried
+            trace = p.run(script, env)
+        check(name, trace, 4 + len(has))
 
     with tempfile.TemporaryDirectory() as d:
         tmp = pathlib.Path(d)
