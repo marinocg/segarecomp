@@ -71,7 +71,7 @@ def main():
         commands = [(derived[offset + k][0], consumed[k][1]) for k in range(len(consumed)) if offset + k < len(derived)]
         script, reference_log = work / ("life%d.script" % life), work / ("life%d.ref.log" % life)
         script.write_text("\n".join(reference_script(commands, [tuple(map(int, line.split()[1:3])) for line in compare.hold_script(raw)])) + "\n")
-        subprocess.run([args.harness, args.rom, str(script), str(until), str(reference_log), str(compare.boot_ticks(raw))], check=True, stdout=subprocess.DEVNULL, timeout=3600)
+        subprocess.run([*([sys.executable] if args.harness.endswith(".py") else []), args.harness, args.rom, str(script), str(until), str(reference_log), str(compare.boot_ticks(raw))], check=True, stdout=subprocess.DEVNULL, timeout=3600)
         native = compare.native_driver_events(events, life)
         reference = [e for e in compare.parse(str(reference_log)) if e[0] in "YP"]
         life_problems, result = compare.compare_to_horizon(native, reference, until)
