@@ -190,7 +190,7 @@ int gems_native_state_get(GemsNative *stage, const uint8_t *in, uint32_t length,
   }
   if (stage->dac_active && stage->dac_due != UINT64_MAX) {
     if (stage->dac_due + slack < master_ticks || stage->dac_due > master_ticks + (1025u * YM2612_MASTER_TICKS_PER_SAMPLE) + slack) return 0;
-    if (chip_timer_a_expiry != UINT64_MAX && stage->dac_due > chip_timer_a_expiry) return 0;   /* the chip's schedule only moves forward */
+    if (chip_timer_a_expiry == UINT64_MAX || stage->dac_due > chip_timer_a_expiry) return 0;   /* a pacing DAC needs the chip's free-running Timer A, whose next overflow is not before the DAC's due time */
   }
   if (stage->dac_active && stage->dac_period_samples == 0u) return 0;
   if (stage->fault != GEMS_FAULT_NONE) return 0;

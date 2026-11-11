@@ -370,6 +370,169 @@ static void test_restart_and_bus_hold(Fixture *f) {
   CHECK(f->driver.count_missed_ticks >= 10, "interrupts during a bus hold are lost like the real Z80's (%llu)", (unsigned long long)f->driver.count_missed_ticks);
 }
 
+/* ---- save states (ADR 0291): a driver restored from its canonical payload continues exactly like the uninterrupted one ---- */
+typedef struct Snapshot {
+  uint8_t payload[GEMS_NATIVE_STATE_MAX_BYTES];
+  uint32_t length;
+  uint8_t ram[8192];
+  uint8_t latched;
+  uint16_t timer_a;
+  uint64_t expiry;
+  int flag;
+  uint64_t at;
+  size_t count;
+} Snapshot;
+
+static void fx_bind(Fixture *f, GemsNativeHost *host) {
+  memset(host, 0, sizeof *host);
+  host->context = f; host->ram = f->ram; host->rom_read = fx_rom_read; host->ym_write = fx_ym_write; host->ym_read = fx_ym_read; host->ym_timer_a_expiry = fx_timer_a_expiry; host->psg_write = fx_psg_write;
+}
+
+static int snapshot_take(const Fixture *f, uint64_t at, Snapshot *s) {
+  s->length = gems_native_state_put(&f->driver, s->payload, sizeof s->payload);
+  memcpy(s->ram, f->ram, sizeof s->ram);
+  s->latched = f->latched; s->timer_a = f->timer_a; s->expiry = f->expiry; s->flag = f->flag; s->at = at; s->count = f->count;
+  return s->length != 0u;
+}
+
+/* The machine's order: stage privately (validated against the clock and the chip's schedule), then commit. Returns 0 for a refused payload and leaves `f` untouched. */
+static int snapshot_restore(Fixture *f, const Snapshot *s, const uint8_t *payload, uint32_t length, uint64_t at) {
+  GemsNative *stage = (GemsNative *)malloc(sizeof *stage);
+  GemsNativeHost host;
+  if (stage == NULL) return 0;
+  *stage = f->driver;
+  if (!gems_native_state_get(stage, payload, length, at, s->expiry == 0u ? UINT64_MAX : s->expiry)) { free(stage); return 0; }
+  f->driver = *stage;
+  free(stage);
+  fx_bind(f, &host);
+  f->driver.host = host;
+  memcpy(f->ram, s->ram, sizeof f->ram);
+  f->latched = s->latched; f->timer_a = s->timer_a; f->expiry = s->expiry; f->flag = s->flag; f->count = 0;
+  return 1;
+}
+
+static void run_sliced(Fixture *f, uint64_t from, uint64_t to, uint64_t slice) {
+  uint64_t t;
+  for (t = from + slice; t < to; t += slice) gems_native_run_to(&f->driver, t);
+  gems_native_run_to(&f->driver, to);
+}
+
+static int same_accesses(const Fixture *ref, size_t from, const Fixture *got) {
+  size_t i;
+  if (ref->count - from != got->count) return 0;
+  for (i = 0; i < got->count; ++i) {
+    const Access *x = &ref->log[from + i], *y = &got->log[i];
+    if (x->kind != y->kind || x->port != y->port || x->value != y->value || x->ticks != y->ticks) return 0;
+  }
+  return 1;
+}
+
+static int same_end_state(const Fixture *a, const Fixture *b) {
+  uint8_t pa[GEMS_NATIVE_STATE_MAX_BYTES], pb[GEMS_NATIVE_STATE_MAX_BYTES];
+  const uint32_t la = gems_native_state_put(&a->driver, pa, sizeof pa), lb = gems_native_state_put(&b->driver, pb, sizeof pb);
+  return la == lb && la != 0u && memcmp(pa, pb, la) == 0 && memcmp(a->ram, b->ram, sizeof a->ram) == 0 && a->latched == b->latched && a->timer_a == b->timer_a &&
+         a->expiry == b->expiry && a->flag == b->flag;
+}
+
+typedef enum Tail { TAIL_PLAIN, TAIL_PENDING_COMMAND, TAIL_BUS_HOLD, TAIL_RESET_REACTIVATION } Tail;
+
+/* One scenario: play to `snap_at`, snapshot, finish uninterrupted (the reference), then restore twice into other fixtures (different slicing; a rewind of one of them) and compare. */
+static void continuation(const char *name, uint8_t sequence, uint64_t snap_at, uint64_t end_at, Tail tail, void (*tweak)(Fixture *)) {
+  Fixture *ref = (Fixture *)calloc(1, sizeof(Fixture)), *one = (Fixture *)calloc(1, sizeof(Fixture));
+  Snapshot *snap = (Snapshot *)calloc(1, sizeof(Snapshot));
+  size_t from;
+  int pass;
+  if (ref == NULL || one == NULL || snap == NULL) { ++g_failures; return; }
+  build_cartridge(ref); build_cartridge(one);
+  if (tweak != NULL) { tweak(ref); tweak(one); }
+  memset(ref->ram, 0, sizeof ref->ram);
+  fx_start(ref, 1000);
+  send_pointers(ref); send_start(ref, sequence);
+  gems_native_run_to(&ref->driver, snap_at);
+  CHECK(ref->driver.fault == GEMS_FAULT_NONE, "%s: healthy at the snapshot point", name);
+  if (tail == TAIL_PENDING_COMMAND) { const uint8_t tempo[] = {0xFF, 5, 120}; fifo_put(ref, tempo, 3); }   /* unconsumed at the snapshot */
+  CHECK(snapshot_take(ref, snap_at, snap), "%s: the state serialises", name);
+  from = ref->count;
+  { /* the uninterrupted continuation */
+    if (tail == TAIL_BUS_HOLD) gems_native_resume(&ref->driver, snap_at + 9 * FRAME);
+    if (tail == TAIL_RESET_REACTIVATION) { fx_start(ref, snap_at + FRAME); ref->count = from; send_pointers(ref); send_start(ref, sequence); }
+    gems_native_run_to(&ref->driver, end_at);
+  }
+  CHECK(ref->count - from > 20u && ref->driver.fault == GEMS_FAULT_NONE, "%s: the continuation is not trivial (%zu operations)", name, ref->count - from);
+  for (pass = 0; pass < 3; ++pass) {   /* pass 2 rewinds a fixture that already ran past the snapshot */
+    Fixture *c = one;
+    GemsNative live_before;
+    if (pass != 2) { memset(c->ram, 0xA5, sizeof c->ram); fx_start(c, 5000); }   /* a different, running driver: the restore replaces everything */
+    live_before = c->driver;
+    CHECK(snapshot_restore(c, snap, snap->payload, snap->length, snap_at), "%s pass %d: the state restores", name, pass);
+    (void)live_before;
+    if (tail == TAIL_BUS_HOLD) gems_native_resume(&c->driver, snap_at + 9 * FRAME);
+    if (tail == TAIL_RESET_REACTIVATION) { fx_start(c, snap_at + FRAME); c->count = 0; send_pointers(c); send_start(c, sequence); }
+    run_sliced(c, snap_at, end_at, pass == 0 ? 777u : 100003u);
+    CHECK(same_accesses(ref, from, c), "%s pass %d: identical chip operations after the restore (%zu vs %zu)", name, pass, ref->count - from, c->count);
+    CHECK(same_end_state(ref, c), "%s pass %d: identical driver state, RAM, mailboxes and chip timer at the end", name, pass);
+  }
+  free(ref); free(one); free(snap);
+}
+
+static void tweak_looped_sample(Fixture *f) { f->rom[SAMPLE_TABLE] = 0x15; le16(f->rom + SAMPLE_TABLE + 8, 100); }
+
+static void test_state_continuation(void) {
+  continuation("mid-sample", 0, 4 * FRAME + 12345, 40 * FRAME, TAIL_PLAIN, NULL);
+  continuation("looped sample", 0, 9 * FRAME + 777, 60 * FRAME, TAIL_PLAIN, tweak_looped_sample);
+  continuation("FM note", 1, 2 * FRAME + 5, 30 * FRAME, TAIL_PLAIN, NULL);
+  continuation("PSG loop", 5, 3 * FRAME + 99, 30 * FRAME, TAIL_PLAIN, NULL);
+  continuation("pending command", 0, 5 * FRAME + 321, 40 * FRAME, TAIL_PENDING_COMMAND, NULL);
+  continuation("bus hold", 0, 6 * FRAME + 4242, 50 * FRAME, TAIL_BUS_HOLD, NULL);
+  continuation("reset and reactivation", 0, 7 * FRAME + 11, 60 * FRAME, TAIL_RESET_REACTIVATION, NULL);
+}
+
+/* A payload that this implementation could not have produced is refused, whatever the damage, and refusing never touches the live driver. */
+static void test_state_refusals(void) {
+  Fixture *f = (Fixture *)calloc(1, sizeof(Fixture));
+  Snapshot *s = (Snapshot *)calloc(1, sizeof(Snapshot));
+  GemsNative *stage = (GemsNative *)malloc(sizeof(GemsNative));
+  uint8_t damaged[GEMS_NATIVE_STATE_MAX_BYTES];
+  uint32_t i, accepted = 0u;
+  const uint64_t at = 4 * FRAME + 12345;
+  if (f == NULL || s == NULL || stage == NULL) { ++g_failures; return; }
+  build_cartridge(f); memset(f->ram, 0, sizeof f->ram); fx_start(f, 1000);
+  send_pointers(f); send_start(f, 0);
+  gems_native_run_to(&f->driver, at);
+  CHECK(snapshot_take(f, at, s) && s->length > 0u && s->length <= GEMS_NATIVE_STATE_MAX_BYTES, "a running driver serialises (%u bytes)", s->length);
+  { uint8_t again[GEMS_NATIVE_STATE_MAX_BYTES]; CHECK(gems_native_state_put(&f->driver, again, sizeof again) == s->length && memcmp(again, s->payload, s->length) == 0, "serialisation is canonical (identical bytes twice)"); }
+  CHECK(gems_native_state_put(&f->driver, damaged, s->length - 1u) == 0u, "a destination that is too small is refused, not truncated");
+  *stage = f->driver;
+  CHECK(gems_native_state_get(stage, s->payload, s->length, at, s->expiry == 0u ? UINT64_MAX : s->expiry) == 1, "the genuine payload validates");
+  CHECK(gems_native_state_get(stage, s->payload, 0u, at, s->expiry) == 0, "an empty payload is refused");
+  for (i = 0u; i < s->length; i += 1u) {   /* every truncation */
+    *stage = f->driver;
+    if (gems_native_state_get(stage, s->payload, i, at, s->expiry == 0u ? UINT64_MAX : s->expiry)) { ++accepted; break; }
+  }
+  CHECK(accepted == 0u, "no truncated payload is accepted");
+  memcpy(damaged, s->payload, s->length); damaged[s->length] = 0;
+  *stage = f->driver;
+  CHECK(gems_native_state_get(stage, damaged, s->length + 1u, at, s->expiry == 0u ? UINT64_MAX : s->expiry) == 0, "trailing bytes are refused");
+  *stage = f->driver;
+  CHECK(gems_native_state_get(stage, s->payload, s->length, at + 40u * FRAME, s->expiry == 0u ? UINT64_MAX : s->expiry) == 0, "a payload from another point of the guest clock is refused");
+  *stage = f->driver;
+  CHECK(gems_native_state_get(stage, s->payload, s->length, at, UINT64_MAX) == 0, "a chip whose Timer A schedule contradicts a pacing DAC is refused");
+  *stage = f->driver;
+  CHECK(gems_native_state_get(stage, s->payload, s->length, at, 1u) == 0, "a chip whose next overflow is before the DAC's due time is refused");
+  for (i = 0u; i < s->length; ++i) {   /* a corrupted byte: refused, or (when it is a legal value) still a state that continues without faulting the process */
+    unsigned bit;
+    for (bit = 0u; bit < 8u; bit += 7u) {
+      const GemsNative before = f->driver;
+      memcpy(damaged, s->payload, s->length);
+      damaged[i] = (uint8_t)(damaged[i] ^ (1u << bit));
+      *stage = f->driver;
+      (void)gems_native_state_get(stage, damaged, s->length, at, s->expiry == 0u ? UINT64_MAX : s->expiry);
+      CHECK(memcmp(&before, &f->driver, sizeof before) == 0, "decoding never touches the live driver (byte %u)", i);
+    }
+  }
+  free(f); free(s); free(stage);
+}
+
 int main(void) {
   Fixture *a = (Fixture *)calloc(1, sizeof(Fixture)), *b = (Fixture *)calloc(1, sizeof(Fixture));
   if (a == NULL || b == NULL) return 2;
@@ -381,6 +544,8 @@ int main(void) {
   test_faults(a);
   test_fm_psg_and_sequencer_features(a);
   test_restart_and_bus_hold(a);
+  test_state_continuation();
+  test_state_refusals();
   free(a); free(b);
   if (g_failures != 0) { fprintf(stderr, "%d failure(s)\n", g_failures); return 1; }
   puts("gems_native_tests: ok");
