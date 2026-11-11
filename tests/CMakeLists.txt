@@ -99,6 +99,9 @@ target_include_directories(gems_native_tests PRIVATE ${PROJECT_SOURCE_DIR}/platf
 segarecomp_enable_warnings(gems_native_tests)
 add_test(NAME gems_native_tests COMMAND gems_native_tests)
 set_property(TEST gems_native_tests APPEND PROPERTY LABELS full fast)
+# ADR 0291: the detection power of the reference-validation tooling (a missed command, a premature stop and an extra operation must fail), on synthetic logs.
+add_test(NAME gems_reference_check_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/gems_reference_check_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST gems_reference_check_test APPEND PROPERTY LABELS full fast)
 add_executable(genesis_runtime_run_no_wallclock_tests
   genesis_runtime_run_no_wallclock_test.cpp
 )

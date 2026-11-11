@@ -26,6 +26,22 @@ def parse(path):
     return events
 
 
+def chip_events(events):
+    """Everything except the 68000's stores into the driver's windows ('W') and the end-of-observation marker ('E')."""
+    return [e for e in events if e[0] not in "WE"]
+
+
+def observed_writes(events):
+    """The 68000's own stores into the sound RAM windows the driver reads ('W <offset> <value> <ticks>'): what the game wrote, independent of the driver."""
+    return [e for e in events if e[0] == "W"]
+
+
+def observation_end(events):
+    """The guest time at which the native observation ended ('E' line), or None for a log that has none."""
+    ends = [e[3] for e in events if e[0] == "E"]
+    return ends[-1] if ends else None
+
+
 def normalize(events):
     """Native logs mark the accesses the replacement itself made with lower-case kinds ('y', 'p'); the 68000's own accesses to the chips are not part of the
     comparison. A log without lower-case kinds (an older program) is taken as it is."""
@@ -37,13 +53,22 @@ def normalize(events):
 def lives(events):
     """One list per run of the driver. A /RESET restarts it: its boot is the four PSG silence writes (one instant) that directly follow a chip reset ('R');
     the same four bytes after a stop are the idle clipping, not a boot. The reference harness models one life, so each life is compared on its own."""
-    events = normalize(events)
+    events = normalize(chip_events(events))
     starts = []
     for index in range(1, len(events) - 3):
         window = events[index:index + 4]
         if events[index - 1][0] == "R" and [e[0] for e in window] == ["P"] * 4 and [e[2] for e in window] == [0x9F, 0xBF, 0xDF, 0xFF] and len({e[3] for e in window}) == 1:
             starts.append(index)
     return [events[start:(starts[i + 1] if i + 1 < len(starts) else len(events))] for i, start in enumerate(starts)]
+
+
+def life_end(events, life, horizon):
+    """The guest time at which a life ends: the /RESET that starts the next one (the last 'R' before its boot), or the common horizon for the last life."""
+    chosen = lives(events)
+    if life + 1 >= len(chosen):
+        return horizon
+    resets = [e[3] for e in chosen[life] if e[0] == "R"]
+    return resets[-1] if resets else chosen[life + 1][0][3]
 
 
 def life_events(events, life):
@@ -142,3 +167,142 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ---- independent command observation (docs/testing/genesis-native-gems-validation.md, section 4) --------------------------------------------------------------------------
+# The reference is fed commands derived from what the 68000 itself wrote into the driver's FIFO ('W' lines), never from what the native driver says it consumed;
+# the two are then compared. Argument counts are the reference implementation's (GEMSPlay's command switch); an id outside it is reported, never skipped silently.
+KNOWN_ARGUMENTS = {0: 2, 1: 2, 2: 2, 3: 1, 4: 3, 5: 1, 6: 2, 7: 2, 11: 12, 12: 0, 13: 0, 14: 2, 16: 1, 18: 1, 20: 2, 22: 0, 23: 3, 26: 2, 27: 2, 28: 1, 29: 1, 30: 4, 31: 2, 32: 1}
+FIFO_BASE, FIFO_SIZE, WRITE_POINTER, READ_POINTER = 0x1B40, 64, 0x36, 0x37
+FRAME_TICKS = 896040
+MAX_CONSUME_LAG = 2 * FRAME_TICKS   # the driver looks at its FIFO at every frame tick and whenever the Z80 gets its bus back
+
+
+def committed_bytes(writes):
+    """The byte stream the game committed to the driver: ring bytes between the previous pointer and each new write pointer, with the time of the commit. The 68000's write to the
+    read pointer ($37) re-bases the unread data (a game initialising the driver)."""
+    ring, base, stream, overruns = [0] * FIFO_SIZE, 0, [], 0
+    for _, offset, value, ticks in writes:
+        if FIFO_BASE <= offset < FIFO_BASE + FIFO_SIZE:
+            ring[offset - FIFO_BASE] = value
+        elif offset == READ_POINTER:
+            base = value & (FIFO_SIZE - 1)
+        elif offset == WRITE_POINTER:
+            new = value & (FIFO_SIZE - 1)
+            count = (new - base) % FIFO_SIZE
+            stream.extend((ring[(base + k) % FIFO_SIZE], ticks) for k in range(count))
+            base = new
+    return stream, overruns
+
+
+def derive_commands(writes):
+    """Splits the committed stream into commands the way the driver does: a command starts with $FF; any other byte between commands is skipped. Returns
+    (commands as (bytes, commit ticks of the last byte), stray byte count, unknown command ids)."""
+    stream, _ = committed_bytes(writes)
+    commands, stray, unknown, index = [], 0, [], 0
+    while index < len(stream):
+        if stream[index][0] != 0xFF:
+            stray += 1
+            index += 1
+            continue
+        if index + 1 >= len(stream):
+            break   # an incomplete command at the end of the stream
+        command_id = stream[index + 1][0]
+        arguments = KNOWN_ARGUMENTS.get(command_id)
+        if arguments is None:
+            unknown.append(command_id)
+            commands.append((bytes([0xFF, command_id]), stream[index + 1][1]))
+            index += 2
+            continue
+        if index + 2 + arguments > len(stream):
+            break
+        chunk = stream[index:index + 2 + arguments]
+        commands.append((bytes(b for b, _ in chunk), chunk[-1][1]))
+        index += 2 + arguments
+    return commands, stray, unknown
+
+
+def consumed_commands(events):
+    """The commands the native driver says it consumed: ('C' lines, one per byte, command start at index 0) as (bytes, ticks)."""
+    commands, current, when = [], [], None
+    for kind, index, value, ticks in chip_events(events):
+        if kind != "C":
+            continue
+        if index == 0 and current:
+            commands.append((bytes(current), when))
+            current = []
+        current.append(value)
+        when = ticks
+    if current:
+        commands.append((bytes(current), when))
+    return commands
+
+
+def hold_windows(events):
+    windows, start = [], None
+    for kind, _, _, ticks in chip_events(events):
+        if kind == "S" and start is None:
+            start = ticks
+        elif kind == "U" and start is not None:
+            windows.append((start, ticks))
+            start = None
+    return windows
+
+
+def held_ticks(windows, begin, end):
+    return sum(max(0, min(end, b) - max(begin, a)) for a, b in windows)
+
+
+def check_commands(events, horizon, max_lag=MAX_CONSUME_LAG, allow_unknown=False):
+    """Compares the commands the game wrote with the commands the driver consumed. Returns (problems, summary). Every discrepancy is reported: a command the driver
+    never consumed, one it consumed that the game did not write, a different order or content, a consumption before the write, a consumption later than the bound
+    (excluding the time the 68000 held the Z80 bus), an unknown command id, and bytes the driver would skip."""
+    problems = []
+    derived, stray, unknown = derive_commands(observed_writes(events))
+    consumed = consumed_commands(events)
+    holds = hold_windows(events)
+    if unknown and not allow_unknown:
+        problems.append("unknown command ids written by the game: %s" % sorted(set(unknown)))
+    if stray:
+        problems.append("%d byte(s) written between commands that the driver skips" % stray)
+    matched, worst = 0, 0
+    for index, ((want, written), (got, taken)) in enumerate(zip(derived, consumed)):
+        if want != got:
+            problems.append("command %d differs: the game wrote %s, the driver consumed %s" % (index, want.hex(), got.hex()))
+            break
+        matched += 1
+        if taken < written:
+            problems.append("command %d was consumed at %d, before the game finished writing it at %d" % (index, taken, written))
+        lag = taken - written - held_ticks(holds, written, taken)
+        worst = max(worst, lag)
+        if lag > max_lag:
+            problems.append("command %d was consumed %d ticks after it was written (bound %d, bus holds excluded)" % (index, lag, max_lag))
+    pending = [c for c in derived[len(consumed):]] if matched == len(consumed) else []
+    if len(consumed) > len(derived):
+        problems.append("the driver consumed %d command(s) the game never wrote" % (len(consumed) - len(derived)))
+    for want, written in pending:
+        if written + max_lag <= horizon:
+            problems.append("a command written at %d (%s) was never consumed by the horizon %d: the driver missed it" % (written, want.hex(), horizon))
+    summary = {"commands_written": len(derived), "commands_consumed": len(consumed), "matched": matched, "pending_at_horizon": sum(1 for _, w in pending if w + max_lag > horizon),
+               "unknown_ids": sorted(set(unknown)), "stray_bytes": stray, "worst_consume_lag_ticks": worst}
+    return problems, summary
+
+
+def compare_to_horizon(native, reference, until):
+    """Exact comparison of the driver's chip operations with the reference's up to a shared guest-time horizon: operation order, port and value must be identical, and
+    neither side may have an extra operation or stop early inside the window. Returns (problems, result)."""
+    native = [e for e in native if e[3] <= until]
+    reference = [e for e in reference if e[3] <= until]
+    problems = []
+    compared = min(len(native), len(reference))
+    first = next((i for i in range(compared) if native[i][:3] != reference[i][:3]), None)
+    if first is not None:
+        problems.append("operation %d differs: native %s, reference %s" % (first, native[first], reference[first]))
+    elif len(native) < len(reference):
+        problems.append("the native driver stopped early: %d operation(s) of the reference between its last (%s) and the horizon %d are missing" %
+                        (len(reference) - len(native), native[-1][3] if native else "none", until))
+    elif len(native) > len(reference):
+        problems.append("the native driver made %d operation(s) the reference did not" % (len(native) - len(reference)))
+    skews = [native[i][3] - reference[i][3] for i in range(compared if first is None else first)]
+    return problems, {"native_operations": len(native), "reference_operations": len(reference), "first_difference_index": first,
+                      "skew_ticks_min": min(skews) if skews else None, "skew_ticks_max": max(skews) if skews else None}

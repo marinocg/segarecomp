@@ -42,13 +42,22 @@ typedef struct PcmFile {
 
 static PcmFile g_pcm;
 
-/* SEGARECOMP_AUDIO_WRITE_LOG=<file>: every YM2612 / PSG access in arrival order, one per line "<Y|P|R> <port> <value hex> <guest master ticks>". An opt-in
+/* SEGARECOMP_AUDIO_WRITE_LOG=<file>: every YM2612 / PSG access in arrival order, one per line "<Y|P|R> <port> <value hex> <guest master ticks>", the commands a native driver consumes ('C'), its
+ * bus-hold windows ('S' / 'U'), the 68000's stores into the driver's communication windows ('W') and the end of the observation ('E'). An opt-in
  * validation seam (reference comparison of a sound implementation); it observes the devices only. A failing file never changes the run. */
 static FILE *g_write_log;
 
 static void write_log_tap(void *context, char kind, uint32_t port, uint8_t value, uint64_t master_ticks) {
   (void)context;
   if (g_write_log != NULL) fprintf(g_write_log, "%c %u %02X %llu\n", kind, (unsigned)port, (unsigned)value, (unsigned long long)master_ticks);
+}
+
+/* The 68000's own stores into the driver's communication windows (the mailboxes and the command FIFO at $1B20..$1B7F, the FIFO pointers at $36 and $37): "W <offset> <value hex> <ticks>".
+ * It is what a game really wrote, observed at the bus and independent of whichever implementation reads it. */
+static void ram_write_tap(void *context, uint32_t offset, uint8_t value, uint64_t master_ticks) {
+  (void)context;
+  if (g_write_log != NULL && (offset == 0x36U || offset == 0x37U || (offset >= 0x1B20U && offset < 0x1B80U)))
+    fprintf(g_write_log, "W %u %02X %llu\n", (unsigned)offset, (unsigned)value, (unsigned long long)master_ticks);
 }
 
 static void pcm_sink(void *context, uint64_t frame_index, int16_t left, int16_t right) {
@@ -198,6 +207,8 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
       if (g_write_log != NULL) {
         genesis_sound_audio_mutable()->write_tap = write_log_tap;
         genesis_sound_audio_mutable()->write_tap_context = NULL;
+        runtime->z80_epoch.on_ram_write = ram_write_tap;
+        runtime->z80_epoch.ram_write_context = NULL;
       }
     }
     if (pcm_path != NULL && g_pcm.file == NULL) {
@@ -215,7 +226,11 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
                                                           : genesis_runtime_run(runtime, dispatch, dispatch_allowance);
   genesis_sound_finish(runtime, transfer.kind == GENESIS_STOP);
   if (g_pcm.file != NULL && fflush(g_pcm.file) != 0) ++g_pcm.write_errors;
-  if (g_write_log != NULL) { (void)fclose(g_write_log); g_write_log = NULL; }
+  if (g_write_log != NULL) {   /* "E 0 00 <ticks>": the guest time at which the observation ended - the common horizon of a reference comparison */
+    fprintf(g_write_log, "E 0 00 %llu\n", (unsigned long long)runtime->scheduler.master_ticks);
+    (void)fclose(g_write_log);
+    g_write_log = NULL;
+  }
   /* Opt-in aggregate counters (counts only: never a byte, address or identity). */
   if (getenv("SEGARECOMP_SOUND_SUMMARY") != NULL) {
     const GenesisAudio *audio = genesis_sound_audio();

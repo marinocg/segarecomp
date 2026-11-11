@@ -1597,6 +1597,8 @@ void genesis_ym2612_port_reset(GenesisRuntime *runtime, uint64_t master_ticks) {
 static void genesis_z80_epoch_note_ram_write(GenesisRuntime *runtime, uint32_t address) {
   const uint32_t offset = (address - UINT32_C(0x00A00000)) & (GENESIS_Z80_RAM_BYTES - 1U);
   runtime->z80_epoch.written[offset >> 3] |= (uint8_t)(1U << (offset & 7U));
+  if (runtime->z80_epoch.on_ram_write != 0)
+    runtime->z80_epoch.on_ram_write(runtime->z80_epoch.ram_write_context, offset, runtime->devices.z80_bus.z80_ram[offset], runtime->scheduler.master_ticks);
 }
 
 static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *runtime, uint32_t address,
