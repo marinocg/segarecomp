@@ -186,6 +186,15 @@ bool parse_size(const std::string &s, std::size_t &v) {
 
 }  // namespace
 
+std::string stored_digest(std::span<const std::uint8_t> stored) {
+  Reader in{stored};
+  std::string l, digest;
+  if (stored.size() < kMagic.size() || std::memcmp(stored.data(), kMagic.data(), kMagic.size()) != 0) return {};
+  in.pos = kMagic.size();
+  if (!in.line(l) || !in.line(digest) || !take_prefix(digest, "digest ") || !hex64(digest)) return {};
+  return digest;
+}
+
 CompileResult verify_compiled(const mod::Package &package, std::span<const std::uint8_t> stored, std::string_view expected_digest) {
   CompileResult r;
   const auto fail = [&r](std::string why) { r.rejection = mismatch(std::move(why)); return std::move(r); };

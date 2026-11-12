@@ -2,14 +2,14 @@
 """SEG-137-T001 (ADR 0294): the vendored, pinned Luau build.
 Checks: the pin record and the digest of every vendored file; license notices and the package contents; no network in the build; native code generation (JIT) is not vendored, not built and
 absent from the built archive and from every executable that links the VM; the disallowed standard libraries (os, debug, coroutine) are not built either.
-usage: luau_build_test.py <source-root> <libsegarecomp_luau> <luau_host_test> <segarecomp-cli>"""
+usage: luau_build_test.py <source-root> <libsegarecomp_luau> <luau_host_test> <segarecomp-cli> <segarecomp-luau-compile>"""
 import hashlib
 import re
 import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
-archive, host_test, cli_exe = (Path(a) for a in sys.argv[2:5])
+archive, host_test, cli_exe, child_exe = (Path(a) for a in sys.argv[2:6])
 failures = []
 
 
@@ -55,6 +55,7 @@ check(re.search(r"Luau 0\.746", notices) and "Luau.txt" in notices and "Lua.txt"
 install = (root / "packaging" / "install.cmake").read_text()
 check("third_party/luau/LICENSE.txt" in install and "RENAME Luau.txt" in install and "third_party/luau/lua_LICENSE.txt" in install and "RENAME Lua.txt" in install, "the product package installs both license texts")
 readme = (root / "packaging" / "README.txt").read_text()
+check("segarecomp-luau-compile" in install, "the package installs the compile child next to the CLI")
 check("Luau" in readme, "the package README lists Luau")
 
 # native code generation and the disallowed libraries are absent from the build outputs
@@ -63,7 +64,7 @@ check("Luau" in readme, "the package README lists Luau")
 for needle in (b"CodeGen", b"codegen", b"luau_codegen", b"luacodegen", b"AssemblyBuilderX64", b"AssemblyBuilderA64"):
     check(needle not in archive.read_bytes(), f"the built archive contains no {needle.decode()}")
 for needle in (b"Luau::CodeGen", b"luau_codegen", b"luacodegen", b"AssemblyBuilderX64", b"AssemblyBuilderA64", b"NativeContext", b"luau_codegen_create", b"CodeGenCompilationResult"):
-    for exe in (host_test, cli_exe):
+    for exe in (host_test, cli_exe, child_exe):
         check(needle not in exe.read_bytes(), f"{exe.name} contains no {needle.decode()}")
 for needle in (b"luaopen_os", b"luaopen_debug", b"luaopen_coroutine", b"luaL_openlibs"):
     check(needle not in archive.read_bytes(), f"the built archive has no {needle.decode()}")

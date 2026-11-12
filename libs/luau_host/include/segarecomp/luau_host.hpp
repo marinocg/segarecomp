@@ -28,6 +28,9 @@ namespace segarecomp::luau {
 // Fixed compile options: optimization level 1, debug level 0, no type info, no coverage (policy section 2.5).
 inline constexpr std::size_t kMaxBytecodeBytes = 512U << 10U;   // per mod (policy section 4)
 inline constexpr unsigned kCompileSecondsMax = 5;               // per mod; exceeding it is E_LUAU_COMPILE_LIMIT
+inline constexpr std::uint64_t kCompileMemoryBytesMax = 256ULL << 20U;   // per mod, live C++ heap bytes of the compile
+// compile_mod itself runs IN THIS PROCESS and meters nothing. The two bounds above are enforced by the product's compile child (apps/segarecomp/luau_compile_main.cpp, run by `mod build`/`mod variant`
+// with a hard kill timeout and a metered allocator); compile_mod's own elapsed-time check is a second line for in-process callers (tests), not the enforcement.
 
 // A compile diagnostic: always `<package path>:<line>: <message>`, the line 1-based, the message the compiler's first error, bounded.
 struct Diagnostic {
@@ -78,6 +81,10 @@ struct SourceCompile {
 // Accepts previously stored compiled bytes ONLY if they are exactly what compile_mod produced for `package`: well-formed, the same package identity, one entry per luau-source payload with the payload's
 // source digest, every bytecode digest recomputed, and the overall digest equal to `expected_digest` (the value recorded at build time, held outside the artifact). Anything else is E_LUAU_COMPILED_MISMATCH.
 [[nodiscard]] CompileResult verify_compiled(const mod::Package &package, std::span<const std::uint8_t> stored, std::string_view expected_digest);
+
+// The digest line of a stored compiled output ("" when the header is malformed). Used by the parent of the compile child, which then calls verify_compiled with it: that re-derives every bytecode and
+// total digest, so a child that returned inconsistent bytes is rejected.
+[[nodiscard]] std::string stored_digest(std::span<const std::uint8_t> stored);
 
 // ---- restricted VM ----
 struct Limits {

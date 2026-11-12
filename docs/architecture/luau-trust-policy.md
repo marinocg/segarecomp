@@ -109,7 +109,7 @@ Promised (each backed by a test category): scripts have no file, network, proces
 | deterministic `math.random` | `luau::Vm` | `luau_host_test`, `luau_host_golden_test` |
 | leak-free teardown | `Vm::close()` | `luau_host_test` (also under ASan/UBSan in CI) |
 
-Known limits of this implementation: the compile step's 256 MiB bound is not metered (see ADR 0294); budget units count VM safepoints, not machine instructions, and C library functions that never reach a safepoint are bounded by the memory quota and the watchdog only. These are statements for SEG-144-T003 to attack, not safety claims.
+The compile limits of section 2.4 are enforced by the bounded compile child (5 s kill, metered C++ allocator ending at 256 MiB; ADR 0294, tests in `mod_luau_test`). Known limits of this implementation: the meter counts C++ heap requests, not process RSS or stack; budget units count VM safepoints, not machine instructions, and C library functions that never reach a safepoint are bounded by the memory quota and the watchdog only. These are statements for SEG-144-T003 to attack, not safety claims.
 
 ## 10. Non-goals
 

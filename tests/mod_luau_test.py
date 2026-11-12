@@ -5,6 +5,7 @@ directories, packages carrying bytecode are rejected by schema validation, and t
 The compiled-artifact format and digest are re-derived here by an independent Python implementation.
 usage: mod_luau_test.py <segarecomp-cli>"""
 import hashlib
+import json
 import sys
 
 from mod_test_support import *  # noqa: F401,F403
@@ -149,5 +150,105 @@ nxt = toml.find("[[source]]", cut + 5)
 write(plain / "mod.toml", toml[:cut] + (toml[nxt:] if nxt != -1 else ""))
 pb = ok("build without luau", "mod", "build", plain, "--out", tmp / "plain.segapatch")
 cli.check("luau" not in pb, "no Luau, no compile step output")
+
+# ---- resource contract of the compile step (policy section 2.4): 5 s hard limit and 256 MiB ceiling, enforced by the bounded child
+import os
+import shutil
+import subprocess
+import time
+
+EXE = ".exe" if sys.platform == "win32" else ""
+HELPER = Path(cli.exe).parent / ("segarecomp-luau-compile" + EXE)
+
+
+def big_project(name, files, per_file_bytes):
+    d = project(name, {"scripts/main.luau": "x = 0\n"})
+    toml = (d / "mod.toml").read_text()
+    for i in range(files):
+        lines, size, n = [], 0, 0
+        while size < per_file_bytes:
+            line = f'g{i}_{n} = {{ {n}, "string-{n}", function(a, b) return a * {n} + b end, {{ {n + 1}, {n + 2} }} }}\n'
+            lines.append(line)
+            size += len(line)
+            n += 1
+        write(d / "scripts" / f"big{i}.luau", "".join(lines))
+        toml += f'\n[[source]]\nkind = "luau-source"\npath = "scripts/big{i}.luau"\n'
+    write(d / "mod.toml", toml)
+    return d
+
+
+def with_env(**env):
+    old = {k: os.environ.get(k) for k in env}
+    os.environ.update(env)
+    return old
+
+
+def restore_env(old):
+    for k, v in old.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+
+cli.check(HELPER.is_file(), "the compile child sits next to the CLI")
+# a mod near the 512 KiB bytecode limit (8 x 40 KB of dense tables and closures): measure the child's metered peak directly
+huge = big_project("huge", 8, 40000)
+huge_pkg = tmp / "huge.segapatch"
+ok("pack the large mod", "mod", "pack", huge, "--out", huge_pkg)
+
+
+def run_child(pkg, env_extra=None, tag="c"):
+    out = tmp / f"child-{tag}"
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir()
+    env = dict(os.environ, **(env_extra or {}))
+    p = subprocess.run([str(HELPER), str(pkg), str(out)], env=env, capture_output=True, timeout=120)
+    result = (out / "result.txt").read_text() if (out / "result.txt").exists() else ""
+    return p.returncode, result
+
+
+rc, result = run_child(huge_pkg, tag="pk")
+cli.check(rc == 0 and result.startswith("ok "), f"the large mod compiles under the default ceiling: {rc} {result[:80]}")
+peak = int(result.split()[1]) if result.startswith("ok ") else 0
+print(f"metered compile peak for the large mod: {peak} bytes (ceiling {256 << 20})")
+cli.check(0 < peak < (256 << 20), "its measured peak is below the 256 MiB ceiling")
+# (equal-length scratch names: the peak includes the path strings)
+# the meter is exact and the ceiling is a real stop: a limit equal to the peak passes, one byte less ends the process with the memory exit code
+rc_eq, res_eq = run_child(huge_pkg, {"SEGARECOMP_LUAU_COMPILE_MEMORY_BYTES": str(peak)}, "eq")
+rc_lo, res_lo = run_child(huge_pkg, {"SEGARECOMP_LUAU_COMPILE_MEMORY_BYTES": str(peak - 1)}, "lo")
+cli.check(rc_eq == 0, f"a ceiling equal to the measured peak is enough (rc {rc_eq})")
+cli.check(rc_lo == 87 and res_lo == "", f"a ceiling one byte under the peak stops the compile with the memory exit code (rc {rc_lo})")
+rc_hi, _ = run_child(huge_pkg, {"SEGARECOMP_LUAU_COMPILE_MEMORY_BYTES": str(10 << 30)}, "hi")
+cli.check(rc_hi == 0, "the test seam can only lower the limit, never raise it")
+
+# through the CLI: memory ceiling (lowered by the seam) and time limit (lowered + stalled) are E_LUAU_COMPILE_LIMIT; nothing is written; default limits pass
+out = tmp / "huge-built.segapatch"
+old = with_env(SEGARECOMP_LUAU_COMPILE_MEMORY_BYTES=str(peak // 2))
+rc, doc, _ = cli.run("mod", "build", huge, "--out", out)
+restore_env(old)
+cli.check(rc == 1 and doc["class"] == "E_LUAU_COMPILE_LIMIT" and "memory" in doc["error"] and not out.exists(), f"memory ceiling through mod build: {doc}")
+old = with_env(SEGARECOMP_LUAU_COMPILE_SECONDS="1", SEGARECOMP_LUAU_COMPILE_STALL_MS="30000")
+started = time.monotonic()
+rc, doc, _ = cli.run("mod", "build", proj, "--out", tmp / "slow.segapatch")
+elapsed = time.monotonic() - started
+restore_env(old)
+cli.check(rc == 1 and doc["class"] == "E_LUAU_COMPILE_LIMIT" and "time" in doc["error"] and not (tmp / "slow.segapatch").exists(), f"time limit through mod build: {doc}")
+cli.check(elapsed < 10, f"the stalled compile was killed, not waited for ({elapsed:.1f}s)")
+rc, doc, _ = cli.run("mod", "build", huge, "--out", out)
+cli.check(rc == 0 and doc["ok"] and doc["luau"]["scripts"] == 9, f"the large mod builds under the default limits: {doc}")
+# the same limits through the variant path
+big_inst = ok("install huge", "mod", "install", out, "--rom", rom, "--library", lib)
+old = with_env(SEGARECOMP_LUAU_COMPILE_MEMORY_BYTES=str(peak // 2))
+rc, doc, _ = cli.run("mod", "variant", "--library", lib, "--identity", big_inst["package_identity"], "--rom", rom)
+restore_env(old)
+cli.check(rc == 1 and doc["class"] == "E_LUAU_COMPILE_LIMIT", f"variant enforces the ceiling too: {doc}")
+# fail closed without the child
+lone = tmp / "lone"
+lone.mkdir()
+shutil.copy(cli.exe, lone / ("segarecomp" + EXE))
+rc, doc, _ = subprocess.run([str(lone / ("segarecomp" + EXE)), "mod", "build", str(proj), "--out", str(tmp / "lone.segapatch")], capture_output=True, text=True), None, None
+doc = json.loads(rc.stdout)
+cli.check(rc.returncode == 1 and doc["class"] == "E_COMPILE_FAILED" and not (tmp / "lone.segapatch").exists(), f"without the compile child the build fails closed: {doc}")
 
 cli.done("mod_luau_test")

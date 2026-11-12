@@ -19,6 +19,7 @@ endif()
 
 install(TARGETS segarecomp-launcher RUNTIME DESTINATION ${_exe_dest})
 install(TARGETS segarecomp RUNTIME DESTINATION ${_res}/bin)
+install(TARGETS segarecomp-luau-compile RUNTIME DESTINATION ${_res}/bin)   # SEG-137-T003: the bounded Luau compile child, found next to segarecomp
 
 # Stable runtime sources compiled together with the generated program by the bundled compiler. The tree
 # mirrors the repository because the runtime headers include their contract headers by relative path.

@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <cstdlib>
 #include <random>
 #include <string>
 #include <string_view>
@@ -42,24 +43,89 @@ std::string json_list(const std::vector<std::string> &v) {
   return o + "]";
 }
 
-// The trusted compile step for a package with Luau; "" for none. On failure fills `rejection` (E_LUAU_SYNTAX carries `file:line: message`).
+// The trusted compile step for a package with Luau; the JSON is "" for none. The compile runs in the bounded child `segarecomp-luau-compile` next to this executable: run_process kills it after the policy's
+// 5 seconds, and the child's metered allocator ends it at 256 MiB (exit 87). Either is E_LUAU_COMPILE_LIMIT. The child's output is re-verified here (verify_compiled) before it is used.
 struct LuauBuild {
   bool ok = true;
   mod::Rejection rejection;
   luau::CompiledMod compiled;
   std::string json;   // `,"luau":{...}` or ""
 };
-LuauBuild build_luau(const mod::Package &package) {
-  LuauBuild b;
-  const luau::CompileResult c = luau::compile_mod(package);
-  if (!c.ok) {
-    b.ok = false;
-    b.rejection = c.rejection;
-    return b;
+
+std::string g_self;   // argv[0] of this process
+bool write_atomic(const fs::path &out, std::span<const std::uint8_t> bytes);
+std::string slurp(const fs::path &p);
+
+fs::path luau_helper_path() {
+#ifdef _WIN32
+  const std::string name = "segarecomp-luau-compile.exe";
+#else
+  const std::string name = "segarecomp-luau-compile";
+#endif
+  fs::path self = g_self;
+  if (self.has_parent_path()) return self.parent_path() / name;
+  if (const char *path = std::getenv("PATH")) {   // started by name: find ourselves on PATH
+    const std::string list = path;
+#ifdef _WIN32
+    const char sep = ';';
+#else
+    const char sep = ':';
+#endif
+    for (std::size_t from = 0; from <= list.size();) {
+      std::size_t to = list.find(sep, from);
+      if (to == std::string::npos) to = list.size();
+      const fs::path dir = list.substr(from, to - from);
+      std::error_code ec;
+      for (const char *candidate : {"segarecomp", "segarecomp.exe"})
+        if (!dir.empty() && fs::is_regular_file(dir / candidate, ec)) return dir / name;
+      from = to + 1;
+    }
   }
-  if (c.compiled.empty()) return b;
-  b.compiled = c.compiled;
-  b.json = ",\"luau\":{\"compiler\":\"luau-" + std::string(luau::compiler_pin()) + "\",\"scripts\":" + std::to_string(c.compiled.scripts().size()) + ",\"bytecode_digest\":\"" + c.compiled.digest() + "\"}";
+  return fs::path(name);
+}
+
+unsigned luau_compile_seconds() {   // test seam: may only lower the policy limit
+  unsigned seconds = luau::kCompileSecondsMax;
+  if (const char *v = std::getenv("SEGARECOMP_LUAU_COMPILE_SECONDS")) {
+    const unsigned long n = std::strtoul(v, nullptr, 10);
+    if (n >= 1 && n < seconds) seconds = static_cast<unsigned>(n);
+  }
+  return seconds;
+}
+
+LuauBuild build_luau(const mod::Package &package, std::span<const std::uint8_t> package_bytes) {
+  LuauBuild b;
+  const auto fail = [&b](std::string code, std::string message) { b.ok = false; b.rejection = {std::move(code), std::move(message)}; return std::move(b); };
+  bool has_luau = false;
+  for (const mod::Payload &p : package.manifest.payloads) has_luau = has_luau || p.kind == "luau-source";
+  if (!has_luau) return b;
+  std::random_device entropy;   // a private scratch folder; its name never reaches an output
+  char suffix[17];
+  std::snprintf(suffix, sizeof suffix, "%08x%08x", entropy(), entropy());
+  std::error_code ec;
+  const fs::path work = fs::temp_directory_path() / ("segarecomp-luau-" + std::string(suffix));
+  fs::remove_all(work, ec);
+  fs::create_directories(work, ec);
+  struct Cleanup { const fs::path &dir; ~Cleanup() { std::error_code e; fs::remove_all(dir, e); } } cleanup{work};
+  if (ec || !write_atomic(work / "package.segapatch", package_bytes)) return fail("E_COMPILE_FAILED", "the Luau sources could not be staged");
+  const fs::path helper = luau_helper_path();
+  const int rc = segarecomp_cli::run_process({helper.string(), (work / "package.segapatch").string(), work.string()}, work / "child.log", {}, luau_compile_seconds());
+  if (rc == segarecomp_cli::kProcessTimedOut) return fail("E_LUAU_COMPILE_LIMIT", "compiling the mod exceeded the per-mod time limit");
+  if (rc == 87) return fail("E_LUAU_COMPILE_LIMIT", "compiling the mod exceeded the per-mod memory limit");
+  const std::string result = slurp(work / "result.txt");
+  if (rc == 1 && result.rfind("reject ", 0) == 0) {   // `reject <class> <message>`
+    const std::size_t sp = result.find(' ', 7);
+    std::string message = sp == std::string::npos ? "" : result.substr(sp + 1);
+    while (!message.empty() && (message.back() == '\n' || message.back() == '\r')) message.pop_back();
+    return fail(result.substr(7, sp == std::string::npos ? std::string::npos : sp - 7), message);
+  }
+  const std::string stored = slurp(work / "compiled.bin");
+  const std::span<const std::uint8_t> bytes{reinterpret_cast<const std::uint8_t *>(stored.data()), stored.size()};
+  if (rc != 0 || result.rfind("ok ", 0) != 0) return fail("E_COMPILE_FAILED", rc < 0 ? "the Luau compile helper could not be started" : "the Luau compile helper stopped unexpectedly");
+  const luau::CompileResult v = luau::verify_compiled(package, bytes, luau::stored_digest(bytes));
+  if (!v.ok) return fail("E_COMPILE_FAILED", "the Luau compile helper returned output that does not verify");
+  b.compiled = v.compiled;
+  b.json = ",\"luau\":{\"compiler\":\"luau-" + std::string(luau::compiler_pin()) + "\",\"scripts\":" + std::to_string(v.compiled.scripts().size()) + ",\"bytecode_digest\":\"" + v.compiled.digest() + "\"}";
   return b;
 }
 
@@ -364,7 +430,9 @@ int variant(const fs::path &library, const std::string &identity, const fs::path
   if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
   const mod::EffectiveImage e = mod::effective_image(p, image);
   if (!e.ok) return refuse(e.rejection);
-  const LuauBuild lb = build_luau(p);   // the trusted compile step: its digest is part of the variant identity
+  std::vector<std::uint8_t> installed_bytes;
+  if (!read_all(installed, mod::kMaxArchiveBytes, installed_bytes)) return refuse({"E_ARCHIVE_ENTRY", "the installed package cannot be read"});
+  const LuauBuild lb = build_luau(p, installed_bytes);   // the trusted compile step: its digest is part of the variant identity
   if (!lb.ok) return refuse(lb.rejection);
   const mod::VariantIdentity v = mod::variant_identity(p, e.original_sha256, e.effective_sha256, lb.compiled.empty() ? std::string_view{} : std::string_view(lb.compiled.digest()));
   const fs::path root = library / "cache" / "variants";
@@ -436,6 +504,7 @@ int usage() {
 }  // namespace
 
 int segarecomp_mod_command(int argc, char **argv) {
+  g_self = argc > 0 ? argv[0] : "";
   const std::string_view sub = argc >= 3 ? argv[2] : "";
   std::string cc, platform, id, tmpl, rom_sha, approve, identity, revision;
   fs::path hints;
@@ -571,7 +640,7 @@ int segarecomp_mod_command(int argc, char **argv) {
         if (compile_natives(c.reread, cc, sdk, klass, detail) != 0) return refuse({klass, detail});
       }
       if (sub == "build") {
-        const LuauBuild lb = build_luau(c.reread);
+        const LuauBuild lb = build_luau(c.reread, c.package);
         if (!lb.ok) return refuse(lb.rejection);
         luau_json = lb.json;
       }
