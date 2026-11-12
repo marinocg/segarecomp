@@ -11,6 +11,16 @@ on:
 permissions:
   contents: read
 
+# Only a superseded run of the SAME pull request is cancelled. Every other event (a push to main, a tag validated through release.yml's
+# workflow_call, a manual dry run) gets a group made unique by its run id, so it is neither cancelled nor queued behind another run.
+# `github.event_name` and `github.run_id` are the caller's when this workflow is called, and the literal `ci-` prefix keeps the group
+# distinct from any caller group (a called workflow whose group equals its caller's would be cancelled by it), so a reusable invocation can
+# never cancel its caller. A draft promoted with `ready_for_review` starts a new run for the same head; the older run of that PR was
+# draft-skipped and has nothing to lose. The newest run of a PR head always runs to completion, so the required checks of the final head exist.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-test:
     # Save Actions quota: draft PRs do not run the matrix (pushes to main always do).
