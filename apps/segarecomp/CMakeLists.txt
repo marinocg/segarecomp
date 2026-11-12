@@ -1,5 +1,5 @@
 add_executable(segarecomp main.cpp build_command.cpp sega_cd_command.cpp sega_cd_build.cpp sega_cd_aot.cpp process_run.cpp patch_command.cpp mod_command.cpp)
 find_package(Threads REQUIRED)
-target_link_libraries(segarecomp PRIVATE segarecomp::media segarecomp::machine_genesis segarecomp::machine_genesis_z80 segarecomp::machine_genesis_z80_static segarecomp::machine_master_system segarecomp::machine_sega_cd
+target_link_libraries(segarecomp PRIVATE segarecomp::media segarecomp::luau_host segarecomp::machine_genesis segarecomp::machine_genesis_z80 segarecomp::machine_genesis_z80_static segarecomp::machine_master_system segarecomp::machine_sega_cd
   segarecomp::codegen_c11_genesis segarecomp::legacy_compat Threads::Threads)
 segarecomp_enable_warnings(segarecomp)

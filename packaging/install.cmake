@@ -66,6 +66,8 @@ install(FILES ${PROJECT_SOURCE_DIR}/LICENSE DESTINATION ${_res}/licenses RENAME 
 install(FILES ${PROJECT_SOURCE_DIR}/apps/segarecomp-launcher/assets/fonts/Silkscreen-OFL.txt DESTINATION ${_res}/licenses RENAME Silkscreen-OFL.txt)
 install(FILES ${PROJECT_SOURCE_DIR}/packaging/THIRD-PARTY-NOTICES.txt DESTINATION ${_res}/licenses)
 install(FILES ${PROJECT_SOURCE_DIR}/third_party/zlib/LICENSE DESTINATION ${_res}/licenses RENAME zlib.txt)
+install(FILES ${PROJECT_SOURCE_DIR}/third_party/luau/LICENSE.txt DESTINATION ${_res}/licenses RENAME Luau.txt)
+install(FILES ${PROJECT_SOURCE_DIR}/third_party/luau/lua_LICENSE.txt DESTINATION ${_res}/licenses RENAME Lua.txt)
 install(FILES ${imgui_SOURCE_DIR}/LICENSE.txt DESTINATION ${_res}/licenses RENAME DearImGui.txt)
 if(APPLE)
   set(SEGARECOMP_BUNDLE_VERSION "${PROJECT_VERSION}")

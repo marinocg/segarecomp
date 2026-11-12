@@ -1,6 +1,8 @@
 // `segarecomp mod init|check|pack|build|inspect|install|variant|convert-audio`: the CLI seam of the modding platform (ADR 0280/0281/0283/0286). One JSON object on stdout; the launcher links the same libs/media
-// implementation. `check` and `build` never execute a payload; `build` runs the HOST's C compiler (flags owned by the host, kNativeCompileFlags) over the package's own C11 units only.
+// implementation. `check` and `build` never execute a payload; `build` runs the HOST's C compiler (flags owned by the host, kNativeCompileFlags) over the package's own C11 units only, and the pinned
+// trusted Luau compiler over its Luau sources (SEG-137-T003; the bytecode is never packaged and never run by `build`).
 #include "process_run.hpp"
+#include "segarecomp/luau_host.hpp"
 #include "segarecomp/mod.hpp"
 #include "segarecomp/patch.hpp"
 #include "segarecomp/sha256.hpp"
@@ -38,6 +40,27 @@ std::string json_list(const std::vector<std::string> &v) {
   std::string o = "[";
   for (std::size_t i = 0; i < v.size(); ++i) o += (i ? ",\"" : "\"") + esc(v[i]) + "\"";
   return o + "]";
+}
+
+// The trusted compile step for a package with Luau; "" for none. On failure fills `rejection` (E_LUAU_SYNTAX carries `file:line: message`).
+struct LuauBuild {
+  bool ok = true;
+  mod::Rejection rejection;
+  luau::CompiledMod compiled;
+  std::string json;   // `,"luau":{...}` or ""
+};
+LuauBuild build_luau(const mod::Package &package) {
+  LuauBuild b;
+  const luau::CompileResult c = luau::compile_mod(package);
+  if (!c.ok) {
+    b.ok = false;
+    b.rejection = c.rejection;
+    return b;
+  }
+  if (c.compiled.empty()) return b;
+  b.compiled = c.compiled;
+  b.json = ",\"luau\":{\"compiler\":\"luau-" + std::string(luau::compiler_pin()) + "\",\"scripts\":" + std::to_string(c.compiled.scripts().size()) + ",\"bytecode_digest\":\"" + c.compiled.digest() + "\"}";
+  return b;
 }
 
 std::string capability_report(const mod::Adapter &a) {
@@ -341,13 +364,21 @@ int variant(const fs::path &library, const std::string &identity, const fs::path
   if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
   const mod::EffectiveImage e = mod::effective_image(p, image);
   if (!e.ok) return refuse(e.rejection);
-  const mod::VariantIdentity v = mod::variant_identity(p, e.original_sha256, e.effective_sha256);
+  const LuauBuild lb = build_luau(p);   // the trusted compile step: its digest is part of the variant identity
+  if (!lb.ok) return refuse(lb.rejection);
+  const mod::VariantIdentity v = mod::variant_identity(p, e.original_sha256, e.effective_sha256, lb.compiled.empty() ? std::string_view{} : std::string_view(lb.compiled.digest()));
   const fs::path root = library / "cache" / "variants";
   const fs::path entry = root / v.key;
   const fs::path index = root / "index" / (p.manifest.id + "-" + e.original_sha256.substr(0, 16) + ".txt");
   std::string cache = "miss";
   std::vector<std::string> reasons;
-  if (mod::parse_components(slurp(entry / "variant.txt")) == v.components && fs::is_regular_file(entry / "package.segapatch", ec)) {
+  // A hit also needs the stored compiled Luau to verify against the digest recorded in the variant (a modified compiled output is a miss and is rebuilt, never loaded).
+  bool luau_ok = true;
+  if (!lb.compiled.empty()) {
+    const std::string stored = slurp(entry / "luau.bin");
+    luau_ok = luau::verify_compiled(p, {reinterpret_cast<const std::uint8_t *>(stored.data()), stored.size()}, lb.compiled.digest()).ok;
+  }
+  if (luau_ok && mod::parse_components(slurp(entry / "variant.txt")) == v.components && fs::is_regular_file(entry / "package.segapatch", ec)) {
     cache = "hit";
   } else {
     const std::vector<mod::VariantComponent> previous = mod::parse_components(slurp(index));
@@ -361,7 +392,8 @@ int variant(const fs::path &library, const std::string &identity, const fs::path
     fs::remove_all(partial, ec);
     fs::create_directories(partial, ec);
     std::vector<std::uint8_t> raw;
-    if (!read_all(installed, mod::kMaxArchiveBytes, raw) || !write_atomic(partial / "package.segapatch", raw) || !write_text(partial / "variant.txt", mod::serialize_components(v.components))) {
+    if (!read_all(installed, mod::kMaxArchiveBytes, raw) || !write_atomic(partial / "package.segapatch", raw) || !write_text(partial / "variant.txt", mod::serialize_components(v.components)) ||
+        (!lb.compiled.empty() && !write_atomic(partial / "luau.bin", lb.compiled.serialize()))) {
       fs::remove_all(partial, ec);
       return refuse({"E_ARCHIVE_ENTRY", "the variant cannot be published"});
     }
@@ -517,6 +549,7 @@ int segarecomp_mod_command(int argc, char **argv) {
     for (const mod::Payload &p : m.payloads) native = native || p.kind == "native-c11";
     if ((sub == "pack" || sub == "build") && !roms.empty() && !out.empty())
       if (const auto g = output_clobbers_input(out, roms)) return refuse(*g);
+    std::string luau_json;
     std::string verified = "[";   // SEG-136-T006: with --rom, every named image is built, BPS-encoded and round-trip verified BEFORE the package is written
     if ((sub == "pack" || sub == "build") && !roms.empty()) {
       if (!mod::has_target_edits(m)) return refuse({"E_FIELD_MISSING", "--rom verification needs a rom-edit-set or guest-asm payload"});
@@ -537,9 +570,14 @@ int segarecomp_mod_command(int argc, char **argv) {
         std::string klass, detail;
         if (compile_natives(c.reread, cc, sdk, klass, detail) != 0) return refuse({klass, detail});
       }
+      if (sub == "build") {
+        const LuauBuild lb = build_luau(c.reread);
+        if (!lb.ok) return refuse(lb.rejection);
+        luau_json = lb.json;
+      }
       if (!write_atomic(out, c.package)) return refuse({"E_ARCHIVE_ENTRY", "the package cannot be written"});
     }
-    std::cout << "{\"ok\":true," << package_json(m, c.reread.identity, c.reread.content_digest) << ",\"package_bytes\":" << c.package.size() << (sub == "build" ? ",\"built\":true" : sub == "pack" ? ",\"packed\":true" : "") << (roms.empty() ? "" : ",\"verified_images\":" + verified) << "}\n";
+    std::cout << "{\"ok\":true," << package_json(m, c.reread.identity, c.reread.content_digest) << ",\"package_bytes\":" << c.package.size() << (sub == "build" ? ",\"built\":true" : sub == "pack" ? ",\"packed\":true" : "") << (roms.empty() ? "" : ",\"verified_images\":" + verified) << luau_json << "}\n";
     return 0;
   }
   if (sub == "apply" && !target.empty() && roms.size() == 1 && !out.empty()) return apply_edits(target, rom, out);

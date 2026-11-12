@@ -490,7 +490,7 @@ std::string init_project_text(std::string_view platform, std::string_view id) {
     t += "# One block per exact original image this mod supports. Replace the digest with the SHA-256 of that image.\n[[target.revision]]\nlabel = \"rev-a\"\nsha256 = \"" + std::string(64, '0') + "\"\n";
     if (a->platform == "master-system") t += "mapper = \"sega\"\n";
   }
-  t += "\n# Sources are project-relative files; each is size-limited and digest-listed in the package. Luau is stored, never compiled or run by this release.\n[[source]]\nkind = \"luau-source\"\npath = \"scripts/main.luau\"\n";
+  t += "\n# Sources are project-relative files; each is size-limited and digest-listed in the package. Luau sources are packaged as source only and compiled by `mod build` with the pinned trusted compiler.\n[[source]]\nkind = \"luau-source\"\npath = \"scripts/main.luau\"\n";
   return t;
 }
 

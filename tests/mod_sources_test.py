@@ -117,8 +117,8 @@ cli.check(not (tmp / "nocc.segapatch").exists(), "a failed build leaves no packa
 many = {f"src/f{i:02d}.c": b"int f%d(void) { return 0; }\n" % i for i in range(65)}
 refused("65 native files", project("many", many), "E_PAYLOAD_CAP")
 
-# Luau and assets are stored as opaque, digest-listed payloads (never compiled or executed here)
-mixed_files = {"src/provider.c": b'#include <segarecomp_mod_genesis.h>\nconst SegaModProvider *segarecomp_mod_provider(void **s) { (void)s; return 0; }\n', "scripts/a.luau": b"this is not valid luau at all ((( \n",
+# Luau and assets are stored as digest-listed payloads; Luau must compile under `mod build` (SEG-137-T003, tests/mod_luau_test.py), assets are opaque
+mixed_files = {"src/provider.c": b'#include <segarecomp_mod_genesis.h>\nconst SegaModProvider *segarecomp_mod_provider(void **s) { (void)s; return 0; }\n', "scripts/a.luau": b"local value = 1 + 2\n",
                "assets/img.bin": bytes(range(64)) * 4, "assets/pic.rgba": b"\x00" * (2 * 2 * 4)}
 MIXED_EXTRA = '''
 [[source]]

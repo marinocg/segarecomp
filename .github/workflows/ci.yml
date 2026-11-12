@@ -177,3 +177,26 @@ jobs:
             gui)  ctest --test-dir build/sdl3 -j 4 -R "$heavy" --no-tests=error --output-on-failure ;;
             rest) ctest --test-dir build/sdl3 -j 4 -R "$selection" -E "$heavy" --no-tests=error --output-on-failure ;;
           esac
+
+  luau-sanitizers:
+    # SEG-137-T002 (ADR 0294): the Luau host (restricted VM, trusted compile step) under AddressSanitizer + UndefinedBehaviorSanitizer, incl. leak detection: teardown must be leak free and the memory,
+    # budget, stack and fault paths must not touch freed or invalid memory. Linux only; builds just the Luau test and the CLI the Python Luau tests drive.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: Luau sanitizers (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Configure with ASan + UBSan
+        run: cmake -S . -B build/luau-san -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSEGARECOMP_WARNINGS_AS_ERRORS=ON -DBUILD_TESTING=ON -DSEGARECOMP_SANITIZE=ON
+      - name: Build the Luau host test and the CLI
+        run: cmake --build build/luau-san --target luau_host_test segarecomp
+      - name: Luau tests under the sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=0
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: ctest --test-dir build/luau-san -R '^(luau_host_test|mod_luau_test)$' --no-tests=error --output-on-failure

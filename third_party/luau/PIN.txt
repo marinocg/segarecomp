@@ -1,0 +1,14 @@
+Luau, pinned (SEG-137-T001, delivery F06)
+
+release:        0.746
+tag:            https://github.com/luau-lang/luau/releases/tag/0.746
+commit:         12a6ba75883272c79b66b59815efef4c574196f6
+archive:        https://github.com/luau-lang/luau/archive/refs/tags/0.746.tar.gz
+archive sha256: 5bdfb1fb6f5bbd0af7056ba07f4e91043dd5615a7a9a61ed1498f8f67b991ac1
+license:        MIT (LICENSE.txt, Roblox Corporation) and the Lua license (lua_LICENSE.txt, Lua.org, PUC-Rio)
+
+Retained unmodified from the archive: Common/, Ast/, Bytecode/, Compiler/, VM/, LICENSE.txt, lua_LICENSE.txt.
+Not vendored: CodeGen/ (native code generation / JIT), Analysis/, Config/, Require/, Inliner/, CLI/, bench/, fuzz/, tests/, extern/, tools/ and every other file of the archive.
+Built (see CMakeLists.txt): all .cpp of the retained directories except VM/src/linit.cpp, loslib.cpp, ldblib.cpp and lcorolib.cpp (the `os`, `debug` and `coroutine` libraries and luaL_openlibs).
+No source file was modified: SHA256SUMS lists the digest of every retained file and tests/luau_build_test.py recomputes them. To update: replace the retained directories from the new archive, update this file and tests/luau_build_test.py's expected pin, and re-run the F06 suites.
+Network: none at configure or build time; the sources are in the repository.
