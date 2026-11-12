@@ -243,7 +243,7 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
   // digest passed off as patched bytes). The viewer keys the per-game widescreen profile on SEGARECOMP_PROFILE_ID when present (the existing explicit identity
   // field, also used for Sega CD): a Patched variant sets it to the ORIGINAL library game, so Vanilla and Patched share one set of preferences.
   if (rom.effective_sha256().size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ROM_SHA256", rom.effective_sha256().c_str(), true);
-  if (rom.patched() && rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID", rom.sha256.c_str(), true);
+  if ((rom.patched() || rom.luau_mod()) && rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID", rom.sha256.c_str(), true);
   else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID");
   // SEG-122: the patch's presentation defaults reach the viewer only for a selected Patched variant (the launch path has already required its verified build); Vanilla clears them.
   // A widescreen patch whose package states no default still gets Enhanced Widescreen + Raw Extension (at full 16:9 width in the viewer): Comfort would hide the patch's effect.
@@ -262,7 +262,7 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
       std::error_code ec;
       fs::create_directories(saves, ec);   // best effort: the viewer creates what is missing and reports a failure
       SDL_SetEnvironmentVariable(environment, "SEGARECOMP_SAVE_DIR", utf8(saves).c_str(), true);
-      SDL_SetEnvironmentVariable(environment, "SEGARECOMP_SAVE_VARIANT", rom.patched() ? rom.patch_identity.c_str() : "vanilla", true);
+      SDL_SetEnvironmentVariable(environment, "SEGARECOMP_SAVE_VARIANT", rom.patched() ? rom.patch_identity.c_str() : rom.luau_mod() ? rom.luau_identity.c_str() : "vanilla", true);
     } else {
       SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_SAVE_DIR");
       SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_SAVE_VARIANT");
@@ -375,6 +375,9 @@ fs::path entry_dir(const RomView &rom, const Layout &layout) {
     variant += "|native=" + rom.patch_native_source_sha256 + "@abi" + std::to_string(rom.patch_native_abi) + "/" + std::to_string(rom.patch_native_caps);
   // ADR 0291: the sound implementation is chosen by the build itself (no user option), so the identity of what it may choose from is part of the key: the native
   // replacement's implementation version and the revision of the verified-driver catalog. A product that ships a changed replacement or catalog never reuses an older program.
+  // SEG-137-T007 (ADR 0296): a Luau-only mod adds its package identity (which names every payload digest, the capabilities and the ABI), the digest of the image that is compiled and the pinned compiler (with
+  // the fixed compile options it determines the bytecode). Absent for Vanilla and schema 1/2 variants: their keys are what they always were.
+  if (rom.luau_mod()) variant += "|luau=" + rom.luau_identity + ":" + rom.luau_effective_sha256 + ":luau-" + rom.luau_pin;
   if (rom.platform_id != "master-system") variant += "|audio=" + native_audio_identity(layout);
   const std::string key = rom.sha256 + variant + "|cli-" + std::to_string(static_cast<unsigned long long>(cli_size)) + "-" + std::to_string(static_cast<long long>(cli_time)) + "|" SEGARECOMP_LAUNCHER_VERSION "|" + platform_key(rom, &layout) + "|" + host_arch() + "|" +
                           SDL_GetPlatform() + "|zig-" SEGARECOMP_ZIG_VERSION "|O2|" + utf8(layout.root);
@@ -740,6 +743,13 @@ std::string recorded_cartridge_mapper(const fs::path &entry) {
   return meta && meta->is_object() ? meta->str("mapper") : std::string();
 }
 
+bool lowercase_hex_64(const std::string &text) {
+  if (text.size() != 64U) return false;
+  for (const char c : text)
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+  return true;
+}
+
 std::string read_variant_identity(const fs::path &entry) {
   std::error_code ec;
   const fs::path file = entry / "metadata.json";
@@ -768,8 +778,28 @@ bool native_record_matches(const fs::path &entry, const RomView &rom) {
   return source == rom.patch_native_source_sha256 && abi == static_cast<long long>(rom.patch_native_abi) && caps == static_cast<long long>(rom.patch_native_caps);
 }
 
+// SEG-137-T007: a Luau variant's recorded package identity, image digest, compiler pin and bytecode digest must be exactly the requested ones; any other build (Vanilla, BPS-only, another mod) is not
+// reusable for it, and a request without a mod never accepts a program that records one.
+bool luau_record_matches(const fs::path &entry, const RomView &rom) {
+  std::error_code ec;
+  const fs::path file = entry / "metadata.json";
+  std::string identity, effective, pin, digest;
+  if (fs::is_regular_file(file, ec) && fs::file_size(file, ec) <= 16384U) {
+    const auto meta = json::parse(read_all(file));
+    if (meta && meta->is_object()) {
+      identity = meta->str("luau_identity");
+      effective = meta->str("luau_effective_sha256");
+      pin = meta->str("luau_pin");
+      digest = meta->str("luau_bytecode_digest");
+    }
+  }
+  if (!rom.luau_mod()) return identity.empty();
+  return identity == rom.luau_identity && effective == rom.luau_effective_sha256 && pin == rom.luau_pin && lowercase_hex_64(digest);
+}
+
 bool entry_ready_for(const fs::path &entry, const RomView &rom, const Layout &layout) {
   if (!entry_ready(entry)) return false;
+  if (!luau_record_matches(entry, rom)) return false;
   // SEG-122: defence in depth on top of the cache key. A build is reusable only for the variant it records: a Vanilla request never accepts a patched
   // program and a Patched request accepts only the program of exactly this package.
   if (read_variant_identity(entry) != rom.patch_identity) return false;
@@ -1292,6 +1322,8 @@ void BuildJob::run() {
   if (rom_.supports_hint_alias_discovery() && rom_.hint_alias_discovery) args.insert(args.end(), {"--hint-alias-discovery", "1"});
   if (rom_.patch_native())   // SEG-124 (ADR 0267): a REFERENCE to the installed package and the identity the user approved; the build re-verifies the package itself and extracts the provider from it
     args.insert(args.end(), {"--patch-package", utf8(rom_.patch_package), "--patch-identity", rom_.patch_identity});
+  if (rom_.luau_mod())       // SEG-137-T007: a REFERENCE to the installed package and its identity; the build re-verifies it, derives the effective image and compiles the scripts itself
+    args.insert(args.end(), {"--luau-package", utf8(rom_.luau_package), "--luau-identity", rom_.luau_identity});
   if (rom_.optimized()) args.insert(args.end(), {"--aot-policy", "optimized"});
   if (rom_.optimized_gen2()) args.insert(args.end(), {"--aot-model", "gen2"});
 #if defined(_WIN32)
@@ -1394,6 +1426,14 @@ void BuildJob::run() {
       meta << "\"patch_identity\":\"" << rom_.patch_identity << "\",\"patch_target_sha256\":\"" << rom_.patch_target_sha256 << "\",\"patch_label\":\"" << json_safe(rom_.patch_label) << "\",";
     if (rom_.patch_native())   // SEG-124: what native capability this program was built with (checked again by entry_ready_for)
       meta << "\"native_source_sha256\":\"" << rom_.patch_native_source_sha256 << "\",\"native_abi\":" << rom_.patch_native_abi << ",\"native_caps\":" << rom_.patch_native_caps << ",";
+    if (rom_.luau_mod()) {   // SEG-137-T007: what this program was built for (checked again by entry_ready_for); the digest is the one the build recorded after it compiled and verified the scripts
+      const std::string status_text = read_all(partial / "status.json");
+      const std::string key = "\"bytecode_digest\":\"";
+      const std::size_t at = status_text.find(key);
+      const std::string digest = at == std::string::npos ? std::string() : status_text.substr(at + key.size(), 64U);
+      meta << "\"luau_identity\":\"" << rom_.luau_identity << "\",\"luau_effective_sha256\":\"" << rom_.luau_effective_sha256 << "\",\"luau_pin\":\"" << json_safe(rom_.luau_pin)
+           << "\",\"luau_bytecode_digest\":\"" << digest << "\",\"luau_label\":\"" << json_safe(rom_.luau_label) << "\",";
+    }
     meta << "\"host\":\"" << host_description() << "\",\"toolchain\":\"zig " SEGARECOMP_ZIG_VERSION "\",\"rom_path\":\"referenced, not copied\"}\n";
     meta.close();
     fs::remove_all(partial / "input", ec);  // the materialized patched image is derivative game data: it never outlives the build
@@ -1426,6 +1466,7 @@ bool lowercase_hex(const std::string &text, std::size_t length) {
 fs::path genesis_save_dir(const RomView &rom) {
   if (rom.platform_id != "genesis" || !lowercase_hex(rom.sha256, 64)) return {};
   fs::path dir = library_root() / "saves" / "genesis" / rom.sha256;
+  if (rom.luau_mod()) return lowercase_hex(rom.luau_identity, 64) ? dir / "mods" / rom.luau_identity : fs::path();   // SEG-137-T007: a mod has its own data, never Vanilla's
   if (!rom.patched()) return dir / "vanilla";
   if (!lowercase_hex(rom.patch_identity, 64)) return {};
   return dir / "patches" / rom.patch_identity;
