@@ -71,4 +71,5 @@ Good to know
   --cc toolchain/zig --cc-arg cc --cc-arg -target --cc-arg <your target> --runtime-dir runtime/platforms/genesis`,
   then run the produced `<dir>/game`.
 
-Licenses and third-party notices are in the licenses folder.
+Licenses and third-party notices are in the licenses folder (THIRD-PARTY-NOTICES.txt names every component, including Luau 0.746, the restricted scripting
+VM used by `segarecomp mod build`; its license texts are Luau.txt and Lua.txt).

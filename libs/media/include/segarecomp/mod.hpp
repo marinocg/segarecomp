@@ -311,7 +311,8 @@ struct VariantIdentity {
   std::string key;                             // SHA-256 over "name=value\n" lines of the components
 };
 // `package` must come from read_package (its `identity` is SHA-256 of the exact manifest bytes received). `original_sha256` is the exact original image; `effective_sha256` the image that is compiled and run (the bps-image target, else the original).
-[[nodiscard]] VariantIdentity variant_identity(const Package &package, std::string_view original_sha256, std::string_view effective_sha256);
+// `luau_bytecode_digest` (SEG-137-T003, Luau policy section 2.5): the digest of the trusted compile step's output, appended as the `luau_bytecode` component when the package has Luau (empty = none, no component).
+[[nodiscard]] VariantIdentity variant_identity(const Package &package, std::string_view original_sha256, std::string_view effective_sha256, std::string_view luau_bytecode_digest = {});
 // Names of the components whose value differs (empty = identical). A component present in only one list counts as changed.
 [[nodiscard]] std::vector<std::string> changed_components(const std::vector<VariantComponent> &previous, const std::vector<VariantComponent> &current);
 // "name=value\n" text of the components (the stored variant record) and its inverse; the parser fails closed (empty result) on any malformed line.

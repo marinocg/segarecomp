@@ -23,7 +23,9 @@ rom_b = write(tmp / "fixture" / "b.bin", ROM_B)
 # Pinned digests of the c11-provider template project below (id "tpl", fixture revision A). A change to a template, the manifest writer or the packer changes these on purpose.
 PINNED_IDENTITY = "845ace166357d5fc6faf1c9bfd268a5d68fe7458a07850a9bebfa2116d8915db"
 PINNED_CONTENT = "af196077cfa7d62176a5a8db5ca881d475f0375919e57b5c2e3efdcddb1677ab"
-PINNED_VARIANT_KEY = "2b2f374b1123947811b0c807bf51639dbc2848d3c4a7564b8709a2461bf5bf54"
+# SEG-137-T003: a package with Luau adds the trusted compiler's bytecode digest (pinned Luau 0.746, optimization 1, debug 0) as the `luau_bytecode` identity component, so the variant key changed on purpose.
+PINNED_LUAU_DIGEST = "5ff61a46524fd522b406d0479d4c56dbbf3a33e08a8de8ae380df80f66f02f70"
+PINNED_VARIANT_KEY = "e9c12e2f9694974db6cb9d3386bfe130ffa5dec1527e663e61c2a110dc4354b3"
 
 
 def ok(what, *args, cwd=None):
@@ -61,7 +63,7 @@ def raw(*args, cwd=None):
 pkg_a, pkg_b, pkg_c = tmp / "a.segapatch", tmp / "b.segapatch", tmp / "c.segapatch"
 cli.check(raw("mod", "check", proj) == '{"ok":true,' + GOLDEN_FIELDS + ',"package_bytes":1829}\n', "check golden output")
 cli.check(raw("mod", "pack", proj, "--out", pkg_a) == '{"ok":true,' + GOLDEN_FIELDS + ',"package_bytes":1829,"packed":true}\n', "pack golden output")
-cli.check(raw("mod", "build", proj, "--out", pkg_b, "--cc", CC, "--sdk-dir", SDK) == '{"ok":true,' + GOLDEN_FIELDS + ',"package_bytes":1829,"built":true}\n', "build golden output")
+cli.check(raw("mod", "build", proj, "--out", pkg_b, "--cc", CC, "--sdk-dir", SDK) == '{"ok":true,' + GOLDEN_FIELDS + ',"package_bytes":1829,"built":true,"luau":{"compiler":"luau-0.746","scripts":1,"bytecode_digest":"%s"}}\n' % PINNED_LUAU_DIGEST, "build golden output")
 cli.check(pkg_a.read_bytes() == pkg_b.read_bytes(), "pack and build emit the identical package")
 inspect_golden = raw("mod", "inspect", pkg_a)
 cli.check(inspect_golden.startswith('{"ok":true,' + GOLDEN_FIELDS + ',"adapter":{"platform":"genesis","source_identity_kind":"cartridge-image"'), "inspect golden prefix")
@@ -153,7 +155,7 @@ def variant_of(identity, rom=rom_a):
 # each identity component change misses, and the reason NAMES it
 luau_id = edited("v-luau", lambda d: write(d / "scripts" / "main.luau", "-- changed\n"))
 rc, doc, _ = variant_of(luau_id)
-cli.check(rc == 0 and doc["cache"] == "miss" and sorted(doc["reasons"]) == ["package_identity", "source_digest"], f"a source change misses naming package_identity + source_digest: {doc}")
+cli.check(rc == 0 and doc["cache"] == "miss" and sorted(doc["reasons"]) == ["luau_bytecode", "package_identity", "source_digest"], f"a source change misses naming package_identity + source_digest + luau_bytecode: {doc}")
 cap_id = edited("v-cap", lambda d: write(d / "mod.toml", (d / "mod.toml").read_text() + '\n[capabilities]\nrequired = ["host.log"]\n'))
 rc, doc, _ = variant_of(cap_id)
 cli.check(rc == 0 and doc["cache"] == "miss" and "capabilities" in doc["reasons"] and "package_identity" in doc["reasons"], f"a capability change misses naming capabilities: {doc}")

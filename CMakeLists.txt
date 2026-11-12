@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.25)
 project(segarecomp VERSION 0.1.0 LANGUAGES C CXX)
 
 option(SEGARECOMP_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+# SEG-137-T002: build the Luau host library and its tests with AddressSanitizer + UndefinedBehaviorSanitizer (GCC/Clang only; CI job `luau-sanitizers`).
+option(SEGARECOMP_SANITIZE "Build the Luau VM host with ASan+UBSan" OFF)
 
 if(WIN32)
   # The MSVC CRT flags standard fopen/getenv/etc. as deprecated ("unsafe"); the
@@ -16,6 +18,11 @@ if(WIN32)
   else()
     add_link_options(-Wl,/STACK:8388608)
   endif()
+endif()
+
+if(SEGARECOMP_SANITIZE AND NOT MSVC)
+  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
+  add_link_options(-fsanitize=address,undefined)
 endif()
 
 function(segarecomp_enable_warnings target)
@@ -38,6 +45,7 @@ endfunction()
 # CTest must be included before the subdirectories so that tests registered by apps/ (the launcher policy test) are not silently dropped.
 include(CTest)
 add_subdirectory(third_party/zlib)
+add_subdirectory(third_party/luau)
 add_subdirectory(libs)
 add_subdirectory(platforms)
 add_subdirectory(apps)

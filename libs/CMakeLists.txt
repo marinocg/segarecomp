@@ -10,6 +10,7 @@ add_subdirectory(device/sega/genesis)
 add_subdirectory(device/sega/psg)
 add_subdirectory(device/sega/ym2612)
 add_subdirectory(media)
+add_subdirectory(luau_host)
 add_subdirectory(codegen/c11)
 add_subdirectory(legacy_compat)
 # SEG-058: option must exist before libs/viewer (declared again, harmlessly, by platforms/genesis/viewer).

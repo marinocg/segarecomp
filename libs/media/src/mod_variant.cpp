@@ -16,7 +16,7 @@ std::string join(const std::vector<std::string> &v) {
 }
 }  // namespace
 
-VariantIdentity variant_identity(const Package &package, std::string_view original_sha256, std::string_view effective_sha256) {
+VariantIdentity variant_identity(const Package &package, std::string_view original_sha256, std::string_view effective_sha256, std::string_view luau_bytecode_digest) {
   const Manifest &m = package.manifest;
   VariantIdentity v;
   // Source digest: the digests of the executable-class payloads (native C11 and Luau) in path order, each bound to its path.
@@ -33,6 +33,7 @@ VariantIdentity variant_identity(const Package &package, std::string_view origin
                   {"source_digest", digest_of(join(sources))},
                   {"abi", std::to_string(m.abi_native)},
                   {"capabilities", digest_of(join(caps) + "|" + join(optional))}};
+  if (!luau_bytecode_digest.empty()) v.components.push_back({"luau_bytecode", std::string(luau_bytecode_digest)});
   v.key = digest_of(serialize_components(v.components));
   return v;
 }

@@ -1,6 +1,6 @@
 # Luau security and trust policy
 
-Status: accepted contract (SEG-133-T005, ADR [0284](../decisions/0284-luau-trust-policy.md)). **Not implemented**: vendoring and the VM are SEG-137. Inputs: [schema 3](segapatch-schema-3.md), [ABI 2 capability catalogue](native-sdk-abi-2.md), [phases](mod-execution-phases.md).
+Status: accepted contract (SEG-133-T005, ADR [0284](../decisions/0284-luau-trust-policy.md)). **Implemented in part**: the pinned build, the trusted compile step and the restricted VM lifecycle (SEG-137-T001..T003, ADR [0294](../decisions/0294-luau-vendoring-vm-and-trusted-compile.md)); the `sega.*` bindings, callbacks, analysis and the adversarial test suite are later SEG-137/SEG-144 tasks. Inputs: [schema 3](segapatch-schema-3.md), [ABI 2 capability catalogue](native-sdk-abi-2.md), [phases](mod-execution-phases.md).
 Consumers: SEG-137-T001..T007, SEG-138-T005, SEG-144-T003 (adversarial testing), the launcher approval text (SEG-143, SEG-135).
 
 **Safety is determined by bindings, configuration and adversarial tests, not by language sandboxing alone.** Luau is a language designed for embedding with a restricted standard library; that reduces attack surface and does not by itself make a script safe.
@@ -97,6 +97,20 @@ Promised (each backed by a test category): scripts have no file, network, proces
 | `compiler-input`: adversarial Luau source (deep nesting, huge literals) against the trusted compiler under its bounds | section 2 compile limits |
 | `approval-semantics`: the install flow distinguishes BPS-only, Luau-only (consent) and native/mixed (native approval) | section 1, section 6 |
 
-## 9. Non-goals
+## 9. Implementation status (F06)
+
+| Rule | Where | Test |
+|---|---|---|
+| pinned compiler, JIT absent, no network | `third_party/luau` (`PIN.txt`, `SHA256SUMS`) | `luau_build_test` |
+| source only; bytecode from the trusted compiler; deterministic digest in the build identity | `luau::compile_mod`, variant component `luau_bytecode` | `luau_host_test`, `mod_luau_test` |
+| no package or stored bytecode is loaded unless it matches the digest recorded at build | `luau::verify_compiled`, `Vm::load(CompiledMod)` | `luau_host_test`, `mod_luau_test` |
+| whitelist, read-only libraries, string metatable unreachable, per-mod globals | `luau::Vm` | `luau_host_test` (`library-surface`, `mod-isolation`) |
+| memory quota, budget units, frame budget, call depth, sticky faults, watchdog | `luau::Vm` | `luau_host_test` (`memory-exhaustion`, `cpu-exhaustion`) |
+| deterministic `math.random` | `luau::Vm` | `luau_host_test`, `luau_host_golden_test` |
+| leak-free teardown | `Vm::close()` | `luau_host_test` (also under ASan/UBSan in CI) |
+
+The compile limits of section 2.4 are enforced by the bounded compile child (5 s kill, metered C++ allocator ending at 256 MiB; ADR 0294, tests in `mod_luau_test`). Known limits of this implementation: the meter counts C++ heap requests, not process RSS or stack; budget units count VM safepoints, not machine instructions, and C library functions that never reach a safepoint are bounded by the memory quota and the watchdog only. These are statements for SEG-144-T003 to attack, not safety claims.
+
+## 10. Non-goals
 
 Vendoring Luau (SEG-137-T001); claiming Luau-only packages are safe; sandboxing native code; network, filesystem or process APIs for scripts.
