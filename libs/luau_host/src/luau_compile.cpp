@@ -36,7 +36,7 @@ struct CompiledAccess {
   static std::string digest(const std::string &identity, const std::vector<CompiledScript> &scripts) {
     std::string t = "segarecomp-luau-bytecode-1\ncompiler luau ";
     t += compiler_pin();
-    t += " O1 g0 no-fastcall:getmetatable,math.random,math.randomseed\nidentity " + identity + "\n";
+    t += " O1 g0 no-fastcall:getmetatable,tostring,math.random,math.randomseed\nidentity " + identity + "\n";
     for (const CompiledScript &s : scripts) t += "script " + s.path + " " + s.source_sha256 + " " + s.bytecode_sha256 + "\n";
     return digest_of(as_bytes(t));
   }
@@ -55,7 +55,7 @@ std::string Diagnostic::text() const { return file + ":" + std::to_string(line) 
 SourceCompile compile_source(std::string_view path, std::string_view source) {
   SourceCompile out;
   // Builtins the host replaces must not be compiled into fastcalls, which would bypass the replacement (getmetatable is restricted; math.random is deterministic).
-  static const char *const disabled_builtins[] = {"getmetatable", "math.random", "math.randomseed", nullptr};
+  static const char *const disabled_builtins[] = {"getmetatable", "tostring", "math.random", "math.randomseed", nullptr};
   lua_CompileOptions options{};
   options.disabledBuiltins = disabled_builtins;
   options.optimizationLevel = 1;

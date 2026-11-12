@@ -13,7 +13,7 @@ cli = Cli(sys.argv[1])
 tmp = temp()
 rom = write(tmp / "fixture" / "a.bin", SRC_IMAGE)
 PIN = "0.746"
-OPTIONS = "O1 g0 no-fastcall:getmetatable,math.random,math.randomseed"
+OPTIONS = "O1 g0 no-fastcall:getmetatable,tostring,math.random,math.randomseed"
 
 
 def ok(what, *args, cwd=None):

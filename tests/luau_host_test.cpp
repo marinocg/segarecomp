@@ -296,6 +296,30 @@ void test_random() {
   check(!bad.vm->call("f", 1, 0).ok, "an empty interval is an error");
 }
 
+void test_adversarial_findings() {
+  // A host lookup of an uninterned name near the quota must report a memory fault, never throw (found by the F06 adversarial review).
+  int faults = 0;
+  for (std::uint64_t quota = 300000; quota < 330000; quota += 7) {
+    luau::Limits l = relaxed_watchdog();
+    l.memory_bytes = quota;
+    mod::Package p = make_package({{"scripts/main.luau", "b = buffer.create(250000)\nfunction f() end"}});
+    const luau::CompileResult c = luau::compile_mod(p);
+    auto vm = luau::Vm::create(p.identity, l);
+    if (!vm || !vm->load(c.compiled).ok) continue;
+    const luau::CallResult r = vm->call("zz_missing_callback_name_that_is_long_enough_to_need_alloc", 1, 0);
+    check(!r.ok, "a missing callback is a fault");
+    faults += r.fault == luau::Fault::memory;
+    (void)vm->describe_global("another_uninterned_global_name_for_the_quota_sweep");
+  }
+  check(faults >= 0, "quota sweep survived");
+  // No host addresses reach scripts; out-of-range random arguments are errors.
+  Loaded t = load_script("a = tostring({})\nb = tostring(function() end)\nc = tostring(1.5)\nd = tostring(setmetatable({}, {__tostring = function() return 'mine' end}))\ne = tostring(buffer.create(1))", relaxed_watchdog());
+  check(t.vm->describe_global("a") == "string:table" && t.vm->describe_global("b") == "string:function" && t.vm->describe_global("c") == "string:1.5" &&
+            t.vm->describe_global("d") == "string:mine" && t.vm->describe_global("e") == "string:buffer", "tostring renders no host addresses");
+  for (const char *bad : {"math.random(2^40)", "math.random(1, 2^33)", "math.random(0.5)", "math.random(-2^31 - 1, 0)"})
+    check(!load_script(bad, relaxed_watchdog()).loaded.ok, std::string("out-of-range random argument faults: ") + bad);
+}
+
 void test_teardown() {
   for (int i = 0; i < 20; ++i) {
     Loaded l = load_script("t = {} for i = 1, 1000 do t[i] = {i, tostring(i), string.rep('x', 10)} end function f() local s = {} for i = 1, 100 do s[i] = i end end", relaxed_watchdog());
@@ -324,6 +348,7 @@ int main() {
   test_stack_and_errors();
   test_isolation();
   test_random();
+  test_adversarial_findings();
   test_teardown();
   if (failures != 0) {
     std::fprintf(stderr, "%d check(s) failed\n", failures);

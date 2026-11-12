@@ -24,8 +24,8 @@ rom_b = write(tmp / "fixture" / "b.bin", ROM_B)
 PINNED_IDENTITY = "845ace166357d5fc6faf1c9bfd268a5d68fe7458a07850a9bebfa2116d8915db"
 PINNED_CONTENT = "af196077cfa7d62176a5a8db5ca881d475f0375919e57b5c2e3efdcddb1677ab"
 # SEG-137-T003: a package with Luau adds the trusted compiler's bytecode digest (pinned Luau 0.746, optimization 1, debug 0) as the `luau_bytecode` identity component, so the variant key changed on purpose.
-PINNED_LUAU_DIGEST = "cf6722a198a4912ecf5e253c5727cb6e102b254baee46079e4f4badd542e239a"
-PINNED_VARIANT_KEY = "c83ae6ee347a9975514d959f54a8c5f58d812580eb16c700f2415bf05db68f37"
+PINNED_LUAU_DIGEST = "5ff61a46524fd522b406d0479d4c56dbbf3a33e08a8de8ae380df80f66f02f70"
+PINNED_VARIANT_KEY = "e9c12e2f9694974db6cb9d3386bfe130ffa5dec1527e663e61c2a110dc4354b3"
 
 
 def ok(what, *args, cwd=None):

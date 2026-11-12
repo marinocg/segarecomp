@@ -147,19 +147,48 @@ std::uint64_t seed_for(const std::array<std::uint8_t, 32> &identity, std::uint64
   return seed;
 }
 
+// An integer argument of math.random, range-checked so the result never depends on the host's out-of-range conversion.
+int random_arg(lua_State *L, int n) {
+  const double v = luaL_checknumber(L, n);
+  if (!(v >= -2147483648.0 && v <= 2147483647.0) || v != std::floor(v)) luaL_argerror(L, n, "number has no integer representation");
+  return static_cast<int>(v);
+}
+
+// tostring without host addresses: tables, functions, userdata, buffers and threads render as their type name (unless the user's own __tostring decides).
+int safe_tostring(lua_State *L) {
+  luaL_checkany(L, 1);
+  switch (lua_type(L, 1)) {
+    case LUA_TTABLE:
+    case LUA_TUSERDATA:
+      if (luaL_getmetafield(L, 1, "__tostring") != 0) {
+        lua_pop(L, 1);
+        luaL_tolstring(L, 1, nullptr);
+        return 1;
+      }
+      [[fallthrough]];
+    case LUA_TFUNCTION:
+    case LUA_TLIGHTUSERDATA:
+    case LUA_TTHREAD:
+    case LUA_TBUFFER:
+      lua_pushstring(L, luaL_typename(L, 1));
+      return 1;
+    default: luaL_tolstring(L, 1, nullptr); return 1;
+  }
+}
+
 int math_random(lua_State *L) {
   VmImpl *im = impl_of(L);
   const double r = static_cast<double>(next_random(im) >> 11U) * (1.0 / 9007199254740992.0);   // [0, 1)
   switch (lua_gettop(L)) {
     case 0: lua_pushnumber(L, r); return 1;
     case 1: {
-      const int hi = luaL_checkinteger(L, 1);
+      const int hi = random_arg(L, 1);
       luaL_argcheck(L, 1 <= hi, 1, "interval is empty");
       lua_pushnumber(L, std::floor(r * hi) + 1);
       return 1;
     }
     case 2: {
-      const int lo = luaL_checkinteger(L, 1), hi = luaL_checkinteger(L, 2);
+      const int lo = random_arg(L, 1), hi = random_arg(L, 2);
       luaL_argcheck(L, lo <= hi, 2, "interval is empty");
       lua_pushnumber(L, std::floor(r * (static_cast<double>(hi) - lo + 1)) + lo);
       return 1;
@@ -250,6 +279,8 @@ void build_globals(lua_State *L) {
     lua_pushnil(L);
     lua_setfield(L, LUA_GLOBALSINDEX, name.c_str());
   }
+  lua_pushcfunction(L, safe_tostring, "tostring");
+  lua_setfield(L, LUA_GLOBALSINDEX, "tostring");
   lua_pushcfunction(L, safe_getmetatable, "getmetatable");
   lua_setfield(L, LUA_GLOBALSINDEX, "getmetatable");
   lua_getfield(L, LUA_GLOBALSINDEX, "math");
@@ -361,7 +392,12 @@ CallResult Vm::call(std::string_view name, std::uint64_t frame, std::uint32_t ca
   if (im == nullptr || im->closed) return {false, Fault::error, "the VM is closed", 0};
   if (im->fault != Fault::none) return {false, im->fault, im->fault_message, 0};
   const std::string key(name);
-  lua_getglobal(im->env, key.c_str());
+  try {
+    lua_getglobal(im->env, key.c_str());   // interns the name: may allocate, so it may hit the quota outside any protected call
+  } catch (...) {
+    set_fault(im, Fault::memory, "memory quota exceeded");
+    return {false, Fault::memory, im->fault_message, 0};
+  }
   if (lua_type(im->env, -1) != LUA_TFUNCTION) {
     lua_pop(im->env, 1);
     set_fault(im, Fault::error, "the callback is not a function");
@@ -379,7 +415,11 @@ std::string Vm::describe_global(std::string_view name) const {
   VmImpl *im = impl_.get();
   if (im == nullptr || im->closed) return "closed";
   const std::string key(name);
-  lua_getglobal(im->env, key.c_str());
+  try {
+    lua_getglobal(im->env, key.c_str());
+  } catch (...) {
+    return "memory";
+  }
   std::string out;
   switch (lua_type(im->env, -1)) {
     case LUA_TNIL: out = "nil"; break;
