@@ -123,7 +123,14 @@ def main():
             return run(program, disc, bios, "--set", "main:d7=%d" % case, "--set", "sub:a6=%d" % case, *extra, budget=budget)
 
         STATE_KEYS = ("cpus", "digests", "ga", "device_log", "ticks", "result_block", "sub_devices", "cdc", "cdd")
-        budget_program = build(tmp, "w_budget", disc, bios, images)["program"]  # the same images, no boundary and no verification path
+        # The same images, no boundary and no verification path. This one build serves three purposes below (the plain-budget reference,
+        # the F check on the generated text, and the "without --application-entry" run): their inputs are identical (images, no
+        # --application-entry), so building it three times only repeated the same emit + compile.
+        open_summary = build(tmp, "w_open", disc, bios, images)
+        check(open_summary.get("ok") is True, "the program without --application-entry builds")
+        if open_summary.get("ok") is not True:
+            return 1
+        budget_program = open_summary["program"]
 
         def stops_like_a_budget(label, case, r):
             """The machine state equals that of an ordinary run stopped by the instruction budget at the same boundary: the check that
@@ -201,12 +208,10 @@ def main():
         # F: without the boundary the generated dispatch carries no verification path
         def generated_text(work):
             return "".join(path.read_text() for path in sorted((tmp / work / "src").glob("*.c")))
-        check("verify_only" in generated_text("w") and "verify_only" not in generated_text("w_open_probe") if build(tmp, "w_open_probe", disc, bios, images).get("ok") else False,
+        check("verify_only" in generated_text("w") and "verify_only" not in generated_text("w_open"),
               "F: the verification path exists only in programs that declare an application entry")
 
         # the same images without the entry boundary: the IP runs through its entry
-        open_summary = build(tmp, "w_open", disc, bios, images)
-        check(open_summary.get("ok") is True, "the program without --application-entry builds")
         if open_summary.get("ok"):
             code, open_run = run(open_summary["program"], disc, bios, "--set", "main:d7=12", "--set", "sub:a6=12")
             oblock = bytes.fromhex(open_run["result_block"])
