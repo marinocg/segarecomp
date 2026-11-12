@@ -46,8 +46,9 @@ A closed TOML subset: tables, arrays of tables, strings, non-negative integers a
 | `[capabilities]` | `required`, `optional` (names from `mod inspect --json`) |
 | `[abi]` | `native = 2` (required with native sources) |
 | `[state]`, `[limits]`, `[presentation]` | `schema`; `luau_memory_bytes`, `luau_budget_units`; `widescreen`, `side_style` |
+| `[build]` | `header_repair` = `genesis-checksum` \| `none` (ADR 0293; absent = repair only a verifying original that the build changed) |
 | `[geometry]` | `scenes = []` only (reserved; any content is refused) |
-| `[[source]]` | `kind` (`native-c11`, `luau-source`, `asset`, `bps-image`, `rom-edit-set`, `guest-code`), `path` (project-relative: lower-case, at most 3 segments, no `..`), plus kind fields (`target_sha256`, `cpu`, `asset_class`, audio fields, ...) |
+| `[[source]]` | `kind` (`native-c11`, `luau-source`, `asset`, `bps-image`, `rom-edit-set`, `guest-code`, `guest-asm`), `path` (project-relative: lower-case, at most 3 segments, no `..`), plus kind fields (`target_sha256`, `cpu`, `asset_class`, audio fields, ...) |
 | `[[symbol]]` | `name` (token), `revision` (a declared label), `address` (string `"0x..."`, below `0x01000000`), `provenance` (`manual`, `verified`, `imported-hint`); one per (name, revision). Only `verified` entries may be an edit site |
 | `[[audio.mapping]]`, `[[audio.mapping.value]]` | declared audio mappings: [audio architecture](../architecture/modding-audio-architecture.md) sections 5 and 9 |
 
@@ -77,6 +78,29 @@ segarecomp mod import-hints <dir> --revision <label> --from <symbols.csv>       
 ```
 
 Symbols (`[[symbol]]`) name a location per revision: `@name` or `@name+0xN` in a site resolves to that revision's `verified` address. `manual` and `imported-hint` entries are recorded in the package and printed by `mod inspect` (`symbols` with `provenance`) but are refused as edit sites. Public symbol maps hold names only (lower-case tokens), never disassembly.
+
+## Guest code injection, header repair and BPS (ADR 0292, ADR 0293)
+
+A `guest-asm` source (`cpu = "m68k"` on Genesis, `"z80"` on Genesis or Master System) is assembled by a small in-tree assembler, lower-case, no includes or macros. Routines go into declared free ranges whose original bytes must equal the stated fill:
+
+```
+free * 0x00001000 0x00000100 0xff     ; revision (or *), start, length, expected original fill
+org * 0x00001000                      ; a block at that image offset (Genesis Z80: `org * 0x1000 at 0x0100`)
+entry:
+  moveq #9,d1
+  move.w d1,0xff0010                  ; absolute stores must be in work RAM
+  jsr @helper                         ; a verified symbol of the revision
+  rts
+```
+
+The emitted bytes are validated before an image exists: privileged/system instructions, `trap`, port I/O, `halt`, interrupt control, non-label branch targets, out-of-range branches and absolute stores outside RAM are refused with `E_GUEST_*` classes; overlapping blocks, free ranges and edits are `E_GUEST_COLLISION` (adjacent is fine); bank-switched mappers are `E_MAPPER_UNSUPPORTED`. For Genesis the header checksum is repaired per the `[build]` declaration.
+
+```sh
+segarecomp mod apply <dir|package> --rom <original> --out <target>        # edits + injected code + header repair for that revision
+segarecomp mod bps <dir|package> --rom <original> --out <patch.bps>       # deterministic BPS, proved by applying it back
+segarecomp mod verify-bps <dir|package> --rom <original> --bps <patch.bps>  # refuses a corrupted or stale BPS
+segarecomp mod pack <dir> --out <package> --rom <image-a> --rom <image-b> # round-trip verifies every named image first
+```
 
 ## Native sources
 

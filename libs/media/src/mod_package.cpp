@@ -134,7 +134,7 @@ struct KindRow {
 constexpr KindRow kKinds[] = {
     {"bps-image", false, KindClass::data}, {"rom-edit-set", false, KindClass::data}, {"guest-code", false, KindClass::data}, {"native-c11", false, KindClass::native},
     {"luau-source", false, KindClass::luau}, {"asset", false, KindClass::data}, {"disc-extent-edit", true, KindClass::data}, {"disc-track-replace", true, KindClass::data},
-    {"guest-asm", true, KindClass::data},
+    {"guest-asm", false, KindClass::data},
 };
 
 const KindRow *find_kind(const std::string &kind) {
@@ -172,7 +172,7 @@ Payload parse_payload(const Value &v, const std::string &platform) {
   if (version != 1) fail("E_PAYLOAD_VERSION_UNKNOWN", "the payload kind \"" + p.kind + "\" has no version " + std::to_string(version));
   p.kind_version = 1;
   if (row->reserved) fail("E_PAYLOAD_KIND_RESERVED", "the payload kind \"" + p.kind + "\" is reserved and not implemented");
-  const bool cartridge_only = p.kind == "bps-image" || p.kind == "rom-edit-set" || p.kind == "guest-code";
+  const bool cartridge_only = p.kind == "bps-image" || p.kind == "rom-edit-set" || p.kind == "guest-code" || p.kind == "guest-asm";
   if (cartridge_only && platform == "sega-cd") fail("E_PAYLOAD_PLATFORM", "the payload kind \"" + p.kind + "\" does not exist on sega-cd");
   if (p.kind == "bps-image") {
     only(v, {"kind", "kind_version", "path", "size", "sha256", "target_sha256"}, "a bps-image payload");
@@ -185,6 +185,11 @@ Payload parse_payload(const Value &v, const std::string &platform) {
     only(v, {"kind", "kind_version", "path", "size", "sha256", "cpu"}, "a guest-code payload");
     p.cpu = str(v, "cpu");
     if (p.cpu != "m68k" && p.cpu != "z80") fail("E_FIELD_VALUE", "guest-code cpu must be m68k or z80");
+    if (p.cpu == "m68k" && platform != "genesis") fail("E_PAYLOAD_PLATFORM", "m68k guest code exists only on genesis");
+  } else if (p.kind == "guest-asm") {   // ADR 0292: assembly source text, assembled at build time by the in-tree bounded assembler
+    only(v, {"kind", "kind_version", "path", "size", "sha256", "cpu"}, "a guest-asm payload");
+    p.cpu = str(v, "cpu");
+    if (p.cpu != "m68k" && p.cpu != "z80") fail("E_FIELD_VALUE", "guest-asm cpu must be m68k or z80");
     if (p.cpu == "m68k" && platform != "genesis") fail("E_PAYLOAD_PLATFORM", "m68k guest code exists only on genesis");
   } else if (p.kind == "native-c11" || p.kind == "luau-source") {
     only(v, {"kind", "kind_version", "path", "size", "sha256", "role"}, "a source payload");
@@ -275,7 +280,7 @@ Mapping parse_mapping(const Value &v) {
 Manifest parse_manifest(const Value &root) {
   object(root, "the manifest");
   only(root, {"format", "schema_version", "id", "version", "name", "platform", "author", "license", "purpose", "source", "bios", "capabilities", "capabilities_optional", "abi", "state_schema",
-              "hooks", "mappings", "symbols", "limits", "geometry", "presentation_defaults", "payloads"}, "the manifest");
+              "hooks", "mappings", "symbols", "header_repair", "limits", "geometry", "presentation_defaults", "payloads"}, "the manifest");
   if (need(root, "format").kind != Value::Kind::string || str(root, "format") != "segarecomp-patch") fail("E_FIELD_VALUE", "the manifest is not a segarecomp patch manifest");
   if (need(root, "schema_version").kind != Value::Kind::number) fail("E_FIELD_VALUE", "schema_version must be an integer");
   if (num(root, "schema_version") != 3) fail("E_SCHEMA_VERSION", "the manifest is not schema 3");
@@ -447,10 +452,17 @@ Manifest parse_manifest(const Value &root) {
     }
   }
 
+  if (root.find("header_repair") != nullptr) {   // ADR 0293: explicit header-repair declaration
+    m.header_repair = str(root, "header_repair");
+    if (m.header_repair != "genesis-checksum" && m.header_repair != "none") fail("E_FIELD_VALUE", "header_repair must be genesis-checksum or none");
+    if (m.header_repair == "genesis-checksum" && m.platform != "genesis") fail("E_HEADER_UNSUPPORTED", "header repair exists only for the Genesis header");
+  }
+
   // combination rules (section 4)
   if (std::count_if(m.payloads.begin(), m.payloads.end(), [](const Payload &p) { return p.kind == "bps-image"; }) > 1) fail("E_PAYLOAD_COMBINATION", "at most one bps-image payload");
   if (std::count_if(m.payloads.begin(), m.payloads.end(), [](const Payload &p) { return p.kind == "rom-edit-set"; }) > 1) fail("E_PAYLOAD_COMBINATION", "at most one rom-edit-set payload (use one edit file; edits of several revisions share it)");
-  if (has_kind(m, "bps-image") && (has_kind(m, "rom-edit-set") || has_kind(m, "guest-code"))) fail("E_PAYLOAD_COMBINATION", "bps-image cannot coexist with rom-edit-set or guest-code");
+  if (std::count_if(m.payloads.begin(), m.payloads.end(), [](const Payload &p) { return p.kind == "guest-asm"; }) > 1) fail("E_PAYLOAD_COMBINATION", "at most one guest-asm payload (one CPU per package)");
+  if (has_kind(m, "bps-image") && (has_kind(m, "rom-edit-set") || has_kind(m, "guest-code") || has_kind(m, "guest-asm"))) fail("E_PAYLOAD_COMBINATION", "bps-image cannot coexist with rom-edit-set, guest-code or guest-asm");
   const bool code = native || has_kind(m, "luau-source");
   for (const std::string &name : m.capabilities) {   // every capability must be consumable by a payload
     const CapabilityInfo *c = find_capability(name);
@@ -502,7 +514,7 @@ void emit_payload(std::string &out, const Payload &p) {
   kv(out, "sha256", p.sha256);
   if (p.kind == "bps-image") kv(out, "target_sha256", p.target_sha256);
   else if (p.kind == "rom-edit-set") kn(out, "edits", p.edits);
-  else if (p.kind == "guest-code") kv(out, "cpu", p.cpu);
+  else if (p.kind == "guest-code" || p.kind == "guest-asm") kv(out, "cpu", p.cpu);
   else if (p.kind == "native-c11" || p.kind == "luau-source") kv(out, "role", p.role);
   else {
     kv(out, "asset_class", p.asset_class);
@@ -596,6 +608,7 @@ std::string serialize_manifest(const Manifest &m) {
     }
     o += ']';
   }
+  if (!m.header_repair.empty()) { o += ','; key(o, "header_repair"); put_string(o, m.header_repair); }
   if (m.has_limits) {
     o += ','; key(o, "limits"); o += '{';
     bool first = true;
@@ -623,6 +636,7 @@ std::string content_digest(const Manifest &m) {
   std::string text = "segarecomp.mod.content.v1\nplatform " + m.platform + "\n";
   for (const Payload *p : sorted)
     text += "payload " + p->kind + " " + std::to_string(p->kind_version) + " " + p->path + " size " + std::to_string(p->size) + " sha256 " + p->sha256 + "\n";
+  if (!m.header_repair.empty()) text += "header_repair " + m.header_repair + "\n";   // decides which bytes the build writes
   for (const Symbol &y : m.symbols) text += "symbol " + y.name + " " + y.revision + " " + std::to_string(y.address) + " " + y.provenance + "\n";   // symbols decide where edits land
   return sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(text.data()), text.size()));
 }
@@ -674,7 +688,7 @@ Package read_package(std::span<const std::uint8_t> zip) {
         cap(n <= kMaxRomEditBytes && p.edits <= kMaxRomEdits);
         if (auto r = check_rom_edit_set(m, it->second.data, p.edits)) fail(r->code, r->message);   // syntax, count, per-revision symbols and overlap
       }
-      else if (p.kind == "guest-code") { guest_total += n; cap(guest_total <= kMaxGuestCodeBytes); }
+      else if (p.kind == "guest-code" || p.kind == "guest-asm") { guest_total += n; cap(guest_total <= kMaxGuestCodeBytes); }
       else if (p.kind == "native-c11") { native_total += n; cap(++native_n <= kMaxNativeFiles && n <= kMaxNativeFileBytes && native_total <= kMaxNativeTotalBytes); }
       else if (p.kind == "luau-source") {
         luau_total += n; cap(++luau_n <= kMaxLuauFiles && n <= kMaxLuauFileBytes && luau_total <= kMaxLuauTotalBytes);
@@ -686,6 +700,12 @@ Package read_package(std::span<const std::uint8_t> zip) {
         if (w.sample_rate != p.sample_rate || w.channels != p.channels || w.frames != p.frames) fail("E_FIELD_VALUE", "an audio asset does not match its declared rate, channels or frames");
       }
       out.files.emplace(p.path, it->second.data);
+    }
+    for (const Payload &p : m.payloads) {   // guest assembly: syntax, assembly, static validation, placement and collisions for EVERY declared revision (ADR 0292)
+      if (p.kind != "guest-asm") continue;
+      const auto edit = std::find_if(m.payloads.begin(), m.payloads.end(), [](const Payload &q) { return q.kind == "rom-edit-set"; });
+      const std::span<const std::uint8_t> edit_text = edit == m.payloads.end() ? std::span<const std::uint8_t>{} : std::span<const std::uint8_t>(out.files.at(edit->path));
+      if (auto r = check_guest_asm(m, p.cpu, out.files.at(p.path), edit_text)) return rejected(r->code, r->message);
     }
     if (auto r = check_native_sources(m, out.files, *find_adapter(m.platform))) return rejected(r->code, r->message);   // the package itself must satisfy the source policy
     out.identity = sha256_hex(man->second.data);

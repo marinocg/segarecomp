@@ -2,6 +2,7 @@
 // implementation. `check` and `build` never execute a payload; `build` runs the HOST's C compiler (flags owned by the host, kNativeCompileFlags) over the package's own C11 units only.
 #include "process_run.hpp"
 #include "segarecomp/mod.hpp"
+#include "segarecomp/patch.hpp"
 #include "segarecomp/sha256.hpp"
 
 #include <algorithm>
@@ -212,31 +213,73 @@ int install(const fs::path &package_path, const fs::path &rom, const fs::path &l
   return 0;
 }
 
-// `mod apply`: the typed ROM edits of a project or package applied to the exact original image of ONE declared revision (selected by the image's digest). Every expected value is asserted first;
-// a mismatch, an overlap or an unverified symbol refuses and writes nothing.
-int apply_edits(const fs::path &target, const fs::path &rom, const fs::path &out) {
+// Loads a project directory (through the full check pipeline) or a package file.
+std::optional<mod::Rejection> load_package(const fs::path &target, mod::Package &p) {
   std::error_code ec;
-  mod::Package p;
   if (fs::is_directory(target, ec)) {
     const mod::Checked c = mod::check_project(target);
-    if (!c.ok) return refuse(c.rejection);
+    if (!c.ok) return c.rejection;
     p = c.reread;
   } else {
     p = mod::read_package_file(target);
-    if (!p.ok) return refuse(p.rejection);
+    if (!p.ok) return p.rejection;
   }
+  return std::nullopt;
+}
+
+std::string warnings_json(const std::vector<std::string> &w) {
+  std::string out = "[";
+  for (std::size_t i = 0; i < w.size(); ++i) out += (i ? ",\"" : "\"") + w[i] + "\"";
+  return out + "]";
+}
+
+// `mod apply`: the verified target image of a project or package (typed ROM edits, injected guest code, header repair; ADR 0290/0292/0293) built from the exact original image of ONE declared
+// revision (selected by the image's digest). Every assertion is made first; a mismatch, collision, forbidden instruction or unsupported header refuses and writes nothing.
+int apply_edits(const fs::path &target, const fs::path &rom, const fs::path &out) {
+  mod::Package p;
+  if (const auto r = load_package(target, p)) return refuse(*r);
   std::vector<std::uint8_t> image;
   if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
   const std::string original = sha256_hex(image);
-  const auto rev = std::find_if(p.manifest.revisions.begin(), p.manifest.revisions.end(), [&](const mod::Revision &r) { return r.sha256 == original; });
-  if (rev == p.manifest.revisions.end()) return refuse({"E_IMAGE_MISMATCH", "the original image is not one of the declared target revisions"});
-  if (std::count_if(p.manifest.payloads.begin(), p.manifest.payloads.end(), [](const mod::Payload &y) { return y.kind == "rom-edit-set"; }) > 1) return refuse({"E_PAYLOAD_COMBINATION", "at most one rom-edit-set payload"});
-  const auto set = std::find_if(p.manifest.payloads.begin(), p.manifest.payloads.end(), [](const mod::Payload &y) { return y.kind == "rom-edit-set"; });
-  if (set == p.manifest.payloads.end()) return refuse({"E_FIELD_MISSING", "the package has no rom-edit-set payload"});
-  const mod::EditedImage e = mod::apply_rom_edits(p.manifest, p.files.at(set->path), rev->label, image);
-  if (!e.ok) return refuse(e.rejection);
-  if (!write_atomic(out, e.image)) return refuse({"E_ARCHIVE_ENTRY", "the edited image cannot be written"});
-  std::cout << "{\"ok\":true,\"revision\":\"" << esc(rev->label) << "\",\"edits_applied\":" << e.applied << ",\"original_sha256\":\"" << original << "\",\"effective_sha256\":\"" << sha256_hex(e.image) << "\"}\n";
+  if (std::none_of(p.manifest.revisions.begin(), p.manifest.revisions.end(), [&](const mod::Revision &r) { return r.sha256 == original; })) return refuse({"E_IMAGE_MISMATCH", "the original image is not one of the declared target revisions"});
+  if (!mod::has_target_edits(p.manifest)) return refuse({"E_FIELD_MISSING", "the package has no rom-edit-set or guest-asm payload"});
+  const mod::TargetImage t = mod::build_target_image(p.manifest, p.files, image);
+  if (!t.ok) return refuse(t.rejection);
+  if (!write_atomic(out, t.image)) return refuse({"E_ARCHIVE_ENTRY", "the edited image cannot be written"});
+  std::cout << "{\"ok\":true,\"revision\":\"" << esc(t.revision) << "\",\"edits_applied\":" << t.edits_applied << ",\"blocks_injected\":" << t.blocks_injected << ",\"injected_bytes\":" << t.injected_bytes
+            << ",\"header_repaired\":" << (t.header_repaired ? "true" : "false") << ",\"warnings\":" << warnings_json(t.warnings) << ",\"original_sha256\":\"" << original << "\",\"effective_sha256\":\""
+            << sha256_hex(t.image) << "\"}\n";
+  return 0;
+}
+
+// `mod bps`: the deterministic BPS of original -> verified target (SEG-136-T006), proved by applying it back before it is written.
+int build_bps_file(const fs::path &target, const fs::path &rom, const fs::path &out) {
+  mod::Package p;
+  if (const auto r = load_package(target, p)) return refuse(*r);
+  std::vector<std::uint8_t> image;
+  if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
+  if (!mod::has_target_edits(p.manifest)) return refuse({"E_FIELD_MISSING", "the package has no rom-edit-set or guest-asm payload"});
+  const mod::TargetBps b = mod::build_target_bps(p.manifest, p.files, image);
+  if (!b.ok) return refuse(b.rejection);
+  if (!write_atomic(out, b.patch)) return refuse({"E_ARCHIVE_ENTRY", "the BPS cannot be written"});
+  std::cout << "{\"ok\":true,\"revision\":\"" << esc(b.revision) << "\",\"source_sha256\":\"" << b.source_sha256 << "\",\"target_sha256\":\"" << b.target_sha256 << "\",\"bps_sha256\":\"" << b.patch_sha256
+            << "\",\"bps_bytes\":" << b.patch.size() << ",\"warnings\":" << warnings_json(b.target.warnings) << "}\n";
+  return 0;
+}
+
+// `mod verify-bps`: applies a BPS to an original image and confirms the result is exactly the verified target the mod builds; a corrupted BPS or a stale source/target digest is refused.
+int verify_bps_file(const fs::path &target, const fs::path &rom, const fs::path &bps) {
+  mod::Package p;
+  if (const auto r = load_package(target, p)) return refuse(*r);
+  std::vector<std::uint8_t> image, patch_bytes;
+  if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the original image cannot be read"});
+  if (!read_all(bps, patch::kMaxPatchBytes, patch_bytes)) return refuse({"E_IMAGE_MISMATCH", "the BPS cannot be read"});
+  const mod::TargetImage t = mod::build_target_image(p.manifest, p.files, image);
+  if (!t.ok) return refuse(t.rejection);
+  const patch::BpsResult applied = patch::apply_bps(patch_bytes, image);
+  if (!applied.ok) return refuse({"E_BPS_INVALID", applied.error});
+  if (sha256_hex(applied.output) != sha256_hex(t.image)) return refuse({"E_BPS_STALE", "the BPS does not produce the verified target image of this mod"});
+  std::cout << "{\"ok\":true,\"revision\":\"" << esc(t.revision) << "\",\"source_sha256\":\"" << sha256_hex(image) << "\",\"target_sha256\":\"" << sha256_hex(t.image) << "\"}\n";
   return 0;
 }
 
@@ -329,13 +372,15 @@ constexpr const char *kEditTemplate =
 int usage() {
   std::cerr << "usage: segarecomp mod init <dir> --platform <genesis|master-system|sega-cd> --id <id> [--template <c11-provider|luau|rom-edit>] [--rom-sha256 <hex>]\n"
                "       segarecomp mod check <dir>\n"
-               "       segarecomp mod pack <dir> --out <package.segapatch>\n"
+               "       segarecomp mod pack <dir> --out <package.segapatch> [--rom <declared-image>]...\n"
                "       segarecomp mod build <dir> --out <package.segapatch> [--cc <compiler> --sdk-dir <platforms-dir>]\n"
                "       segarecomp mod install <package.segapatch> --rom <original-image> --library <dir> [--approve <package-identity>]\n"
                "       segarecomp mod variant --library <dir> --identity <package-identity> --rom <original-image> [--cc <compiler> --sdk-dir <platforms-dir>]\n"
                "       segarecomp mod inspect [--json] [<dir|package.segapatch>]\n"
                "       segarecomp mod convert-audio <file.wav> --out <file.u8>\n"
                "       segarecomp mod apply <dir|package.segapatch> --rom <original-image> --out <edited-image>\n"
+               "       segarecomp mod bps <dir|package.segapatch> --rom <original-image> --out <patch.bps>\n"
+               "       segarecomp mod verify-bps <dir|package.segapatch> --rom <original-image> --bps <patch.bps>\n"
                "       segarecomp mod import-hints <dir> --revision <label> --from <hint-file>\n";
   return 2;
 }
@@ -346,7 +391,8 @@ int segarecomp_mod_command(int argc, char **argv) {
   const std::string_view sub = argc >= 3 ? argv[2] : "";
   std::string cc, platform, id, tmpl, rom_sha, approve, identity, revision;
   fs::path hints;
-  fs::path out, sdk, rom, library;
+  fs::path out, sdk, rom, library, bps;
+  std::vector<fs::path> roms;
   std::string target;
   for (int i = 3; i < argc; ++i) {
     const std::string_view a = argv[i];
@@ -363,7 +409,8 @@ int segarecomp_mod_command(int argc, char **argv) {
     else if (a == "--identity") { if (!value(identity)) return usage(); }
     else if (a == "--revision") { if (!value(revision)) return usage(); }
     else if (a == "--from") { if (!value(tmp)) return usage(); hints = tmp; }
-    else if (a == "--rom") { if (!value(tmp)) return usage(); rom = tmp; }
+    else if (a == "--rom") { if (!value(tmp)) return usage(); rom = tmp; roms.push_back(tmp); }
+    else if (a == "--bps") { if (!value(tmp)) return usage(); bps = tmp; }
     else if (a == "--library") { if (!value(tmp)) return usage(); library = tmp; }
     else if (a == "--json") continue;   // output is always JSON
     else if (a.substr(0, 2) == "--" || !target.empty()) return usage();
@@ -452,6 +499,19 @@ int segarecomp_mod_command(int argc, char **argv) {
     if (c.package.size() > mod::kMaxArchiveBytes) return refuse({"E_ARCHIVE_SIZE", "the package would exceed the archive limit"});
     bool native = false;
     for (const mod::Payload &p : m.payloads) native = native || p.kind == "native-c11";
+    std::string verified = "[";   // SEG-136-T006: with --rom, every named image is built, BPS-encoded and round-trip verified BEFORE the package is written
+    if ((sub == "pack" || sub == "build") && !roms.empty()) {
+      if (!mod::has_target_edits(m)) return refuse({"E_FIELD_MISSING", "--rom verification needs a rom-edit-set or guest-asm payload"});
+      for (const fs::path &r : roms) {
+        std::vector<std::uint8_t> image;
+        if (!read_all(r, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "a --rom image cannot be read"});
+        const mod::TargetBps b = mod::build_target_bps(m, c.reread.files, image);
+        if (!b.ok) return refuse(b.rejection);
+        verified += std::string(verified.size() > 1 ? "," : "") + "{\"revision\":\"" + esc(b.revision) + "\",\"source_sha256\":\"" + b.source_sha256 + "\",\"target_sha256\":\"" + b.target_sha256 +
+                    "\",\"bps_sha256\":\"" + b.patch_sha256 + "\",\"warnings\":" + warnings_json(b.target.warnings) + "}";
+      }
+    }
+    verified += "]";
     if (sub == "pack" || sub == "build") {
       if (out.empty()) return usage();
       if (native && sub == "build") {
@@ -461,10 +521,12 @@ int segarecomp_mod_command(int argc, char **argv) {
       }
       if (!write_atomic(out, c.package)) return refuse({"E_ARCHIVE_ENTRY", "the package cannot be written"});
     }
-    std::cout << "{\"ok\":true," << package_json(m, c.reread.identity, c.reread.content_digest) << ",\"package_bytes\":" << c.package.size() << (sub == "build" ? ",\"built\":true" : sub == "pack" ? ",\"packed\":true" : "") << "}\n";
+    std::cout << "{\"ok\":true," << package_json(m, c.reread.identity, c.reread.content_digest) << ",\"package_bytes\":" << c.package.size() << (sub == "build" ? ",\"built\":true" : sub == "pack" ? ",\"packed\":true" : "") << (roms.empty() ? "" : ",\"verified_images\":" + verified) << "}\n";
     return 0;
   }
-  if (sub == "apply" && !target.empty() && !rom.empty() && !out.empty()) return apply_edits(target, rom, out);
+  if (sub == "apply" && !target.empty() && roms.size() == 1 && !out.empty()) return apply_edits(target, rom, out);
+  if (sub == "bps" && !target.empty() && roms.size() == 1 && !out.empty()) return build_bps_file(target, rom, out);
+  if (sub == "verify-bps" && !target.empty() && roms.size() == 1 && !bps.empty()) return verify_bps_file(target, rom, bps);
   if (sub == "import-hints" && !target.empty() && !revision.empty() && !hints.empty()) return import_hints(target, revision, hints);
   if (sub == "convert-audio" && !target.empty() && !out.empty()) {
     std::vector<std::uint8_t> bytes;

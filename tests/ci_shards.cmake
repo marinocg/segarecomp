@@ -38,7 +38,7 @@ set(SEGARECOMP_CI_TEST_COSTS
   sms_emission_budget_test=40 genesis_audio_artifact_test=39 segarecomp_build_command_test=34 genesis_audio_equivalence_test=20
   genesis_z80_build_pipeline_falsify_test=20 sms_machine_tests=19 cpu_z80_decode_tests=18 genesis_audio_ym_test=18 z80_control_stack_dispatch_test=17
   genesis_z80_images_test=16 m68k_batch_c_static_slice_test=16 genesis_z80_build_pipeline_prepare_test=10 sms_native_build_failclosed_test=9
-  sms_psg_differential_test=7 ci_shard_guard_test=1 mod_edits_test=1
+  sms_psg_differential_test=7 ci_shard_guard_test=1 mod_edits_test=1 mod_guest_test=1 mod_guest_exec_test=6 patch_bps_writer_test=1
   sega_cd_bios_partition_test=110 sega_cd_bios_hardware_test=15 sega_cd_epoch_recipe_test=17 sega_cd_epoch_recipe_build_test=45 sega_cd_template_run_test=40
   sega_cd_experimental_m3_test=90 sega_cd_source_relative_test=45 genesis_source_relative_reuse_test=40 sega_cd_unvisited_discovery_test=15 sega_cd_loader_survey_test=12 sega_cd_bios_unvisited_test=200 sega_cd_loader_dispatch_test=15 sega_cd_services_loader_test=200 sega_cd_state_convergence_test=28 sega_cd_recursive_discovery_test=200 sega_cd_bios_scale_test=420 sega_cd_file_first_test=240 sega_cd_dynamic_binding_test=3 sega_cd_dynamic_body_test=2  # SEG-097 (local fast-tier 30/14/12/4 s; SEG-098-T001 survey 12 s estimate, x3 for a 4-core runner)
   sega_cd_dual_cpu_test=79 genesis_cartridge_sram_generated_test=92  # measured on the Linux GCC shard runner (PR #128 runs 39210640179, 39214882993); unlisted they

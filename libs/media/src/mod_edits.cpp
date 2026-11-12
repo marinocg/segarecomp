@@ -128,6 +128,16 @@ RomEdit parse_line(const Manifest &m, std::size_t line_no, std::string_view line
   return e;
 }
 
+// Verified-symbol lookup shared by edit sites and guest code (ADR 0290 section 7). `where` prefixes the diagnostic.
+std::uint32_t symbol_address(const Manifest &m, const std::string &name, const std::string &revision, const std::string &where) {
+  const Symbol *found = nullptr;
+  for (const Symbol &s : m.symbols) if (s.name == name && s.revision == revision) found = &s;
+  if (found == nullptr) fail("E_SYMBOL_UNKNOWN", where + "the symbol \"" + name + "\" has no entry for the revision \"" + revision + "\"");
+  if (found->provenance != "verified")
+    fail("E_SYMBOL_NOT_VERIFIED", where + "the symbol \"" + name + "\" is " + found->provenance + " for the revision \"" + revision + "\" and cannot be a patch site");
+  return found->address;
+}
+
 struct Resolved {
   std::uint64_t offset;
   const RomEdit *edit;
@@ -139,14 +149,7 @@ std::vector<Resolved> resolve(const Manifest &m, const RomEditSet &set, const st
   for (const RomEdit &e : set.edits) {
     if (!e.revision.empty() && e.revision != revision) continue;
     std::uint64_t offset = e.site;
-    if (!e.symbol.empty()) {
-      const Symbol *found = nullptr;
-      for (const Symbol &s : m.symbols) if (s.name == e.symbol && s.revision == revision) found = &s;
-      if (found == nullptr) fail("E_SYMBOL_UNKNOWN", at(e.line) + "the symbol \"" + e.symbol + "\" has no entry for the revision \"" + revision + "\"");
-      if (found->provenance != "verified")
-        fail("E_SYMBOL_NOT_VERIFIED", at(e.line) + "the symbol \"" + e.symbol + "\" is " + found->provenance + " for the revision \"" + revision + "\" and cannot be a patch site");
-      offset = static_cast<std::uint64_t>(found->address) + e.site;
-    }
+    if (!e.symbol.empty()) offset = static_cast<std::uint64_t>(symbol_address(m, e.symbol, revision, at(e.line))) + e.site;
     if (offset + e.value.size() > kMaxImageBytes) fail("E_EDIT_RANGE", at(e.line) + "the edit lies beyond the largest supported image");
     out.push_back({offset, &e});
   }
@@ -235,6 +238,27 @@ EditedImage apply_rom_edits(const Manifest &m, std::span<const std::uint8_t> tex
     out.image.clear();
   }
   return out;
+}
+
+EditRanges rom_edit_ranges(const Manifest &m, std::span<const std::uint8_t> text, std::string_view revision) {
+  EditRanges out;
+  try {
+    const RomEditSet set = parse_set(text, m);
+    for (const Resolved &r : resolve(m, set, std::string(revision))) out.ranges.push_back({r.offset, r.offset + r.edit->value.size()});
+    out.ok = true;
+  } catch (const Fail &f) {
+    out.rejection = {f.code, f.message};
+  }
+  return out;
+}
+
+std::optional<std::uint32_t> verified_symbol(const Manifest &m, const std::string &name, const std::string &revision, Rejection &why) {
+  try {
+    return symbol_address(m, name, revision, "");
+  } catch (const Fail &f) {
+    why = {f.code, f.message};
+    return std::nullopt;
+  }
 }
 
 SymbolHints parse_symbol_hints(std::string_view text, std::string_view revision) {
