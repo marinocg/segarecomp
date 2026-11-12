@@ -8,7 +8,7 @@ function reset()
   sega.log("hud example ready")
 end
 
-function render(frame)
+function render(frame: number)
   sega.overlay.rect(0, 0, 76, 24, PANEL)
   sega.overlay.text(4, 3, "LUAU HUD", WHITE)
   sega.overlay.text(4, 12, "FRAME " .. frame % 1000, GOLD)

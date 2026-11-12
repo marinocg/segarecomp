@@ -190,7 +190,7 @@ def main():
         check(frame_c.read_bytes() != frame_a.read_bytes() and read_bmp(frame_c)[100][700] == v[100][700], "a modified script renders a different HUD frame")
 
         # ---- failure isolation: a script fault disables only the mod; the guest runs on to the Vanilla end state ----
-        script3 = (example / "scripts/main.luau").read_text().replace("function render(frame)\n", "function render(frame)\n  if frame == 30 then error('boom') end\n")
+        script3 = (example / "scripts/main.luau").read_text().replace("function render(frame: number)\n", "function render(frame: number)\n  if frame == 30 then error('boom') end\n")
         pkg3, built3 = pack(project("luau-hud-fault", script=script3), build=True)
         hud3 = tmp / "hud3"
         r = game_build(hud3, pkg3, built3["package_identity"])

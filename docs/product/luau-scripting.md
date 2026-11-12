@@ -1,6 +1,8 @@
 # Luau scripting for mods (restricted API, developer preview)
 
-A mod can carry Luau scripts (`kind = "luau-source"`). Scripts are **restricted and limited**, not sandboxed or safe: see the [trust policy](../architecture/luau-trust-policy.md) and [ADR 0295](../decisions/0295-luau-host-api-static-check-and-fixture-session.md). In this release scripts are checked, compiled and run by the **deterministic fixture session** (`segarecomp mod session`); they are not yet run inside a game.
+A mod can carry Luau scripts (`kind = "luau-source"`). Scripts are **restricted and limited**, not sandboxed or safe: see the [trust policy](../architecture/luau-trust-policy.md), [ADR 0295](../decisions/0295-luau-host-api-static-check-and-fixture-session.md) and [ADR 0296](../decisions/0296-luau-only-mod-executable-integration.md).
+
+**Where scripts run.** A Luau-only package is linked into a Genesis program by `segarecomp build --luau-package` (the launcher's executable cache uses the same build): the played program runs `reset()` once and `render(frame)` for every presented frame and draws the overlay your script requests over the picture. That live path grants exactly `host.log` and `overlay.rgba`; a package that requires anything else is refused at build, never run with parts missing. `segarecomp mod session` is a separate, **diagnostic** tool: a synthetic picture, not the Genesis machine, and the only place `sega.frame.value` has values.
 
 ## The API (generated)
 
@@ -9,7 +11,7 @@ The complete list is [`api.json`](luau/api.json); the type declarations are [`se
 | Name | Capability | Phase | What it does |
 | --- | --- | --- | --- |
 | `sega.log(message)` | `host.log` | any | one log line (256 bytes, 16 lines per callback) |
-| `sega.frame.value(name)` | `frame.work_ram` | render | a read-only copy of a named integer the host published for this frame, or nil |
+| `sega.frame.value(name)` | `frame.work_ram` | render | a read-only copy of a named integer the host published for this frame, or nil. **Diagnostic session only**: the played program publishes no values, so it refuses a package that requires `frame.work_ram` |
 | `sega.overlay.rect(x, y, w, h, rgba)` | `overlay.rgba` | render | filled rectangle in the 128x256 HUD overlay; `rgba` is `0xRRGGBBAA` |
 | `sega.overlay.text(x, y, text, rgba)` | `overlay.rgba` | render | text in the host's bitmap font (printable ASCII, 64 bytes) |
 | `sega.overlay.width` / `.height` | `overlay.rgba` | render | 128 / 256 |
@@ -30,13 +32,18 @@ segarecomp mod init my-hud --platform genesis --id my-hud --template luau --rom-
 segarecomp mod check my-hud
 ```
 
-`init --template luau` writes `types/segarecomp.d.luau` (the generated declarations), `.luaurc` (strict mode) and `.vscode/settings.json` pointing `luau-lsp.types.definitionFiles` at the declarations. Install the [Luau Language Server](https://github.com/JohnnyMorganz/luau-lsp) extension yourself; nothing is shipped here. `mod check` is the checker that gates your package; the language server gives you full type inference as an extra. The same declarations work with the command line analyzer if you have it installed:
+`init --template luau` writes `types/segarecomp.d.luau` (the generated declarations), `.luaurc` (strict mode) and `.vscode/settings.json` pointing `luau-lsp.types.definitionFiles` at the declarations. Install the [Luau Language Server](https://github.com/JohnnyMorganz/luau-lsp) extension yourself; nothing is shipped here. `mod check` is the checker that gates your package; the language server gives you full type inference as an extra. `luau-analyze` (the Luau command line analyzer) of release 0.746 has **no option to load definition files**, so it cannot use `segarecomp.d.luau`; the declarations are for `luau-lsp` (and any host of the Luau analysis library that loads a definitions file).
+
+**What has and has not been exercised.** `segarecomp mod check` (the checker that gates a package), the generated declarations' drift and the template files are exercised in CI by `mod_luau_api_test`. In addition, once, locally (Linux aarch64, not part of CI, not committed): Luau 0.746 was built with its analysis library and a throwaway harness loaded the generated `segarecomp.d.luau` through `Frontend::loadDefinitionFile` (strict mode): it loaded with no parse errors, the `luau` template script type-checked with **0 errors**, and a script with `sega.log(42)`, `sega.overlay.rect("a", ...)`, `sega.teleport()` and a number assigned to a string was reported with exactly those four type errors. That is the analysis engine `luau-lsp` is built on. `luau-lsp` itself, the VS Code extension and the `.vscode/settings.json` key `luau-lsp.types.definitionFiles` were **not** run; they are documented configuration, unverified here.
+
+## Play it: the generated-native program
 
 ```sh
-luau-analyze --definitions=types/segarecomp.d.luau scripts/main.luau
+segarecomp build --rom fixture.rom --output out --cc <compiler> --runtime-dir <platforms>/genesis --sdl3-include <SDL3>/include --sdl3-lib <SDL3>/lib \
+                 --luau-package luau-hud.segapatch --luau-identity <package_identity>
 ```
 
-(The Luau analysis module is not part of this product, so this command is documentation: no CI job installs `luau-analyze`.)
+`--rom` is the original image; the build derives the package's effective image, compiles the scripts with the pinned trusted compiler in the bounded child, and links the verified result into the program (`status.json` records `luau.package_identity`, `bytecode_digest`, `effective_sha256`). The program prints `LUAU_MOD_LOADED {...}` (the identity and digest it verified before the VM saw a byte), and a faulting script one `LUAU_MOD_FAULT {...}`: the mod is then disabled and the game carries on. The launcher uses the same build through its executable cache; the entry key adds the package identity, the effective image digest and the compiler pin only for a mod, so Vanilla and schema 1/2 entries are untouched.
 
 ## The HUD example, end to end
 
@@ -48,7 +55,7 @@ segarecomp mod install luau-hud.segapatch --rom fixture.rom --library lib
 segarecomp mod session lib/mods/<package_identity>.segapatch --rom fixture.rom --frames 60 --bmp last.bmp
 ```
 
-`install` classifies the package **Luau-only** (`"approval_kind":"consent"`): no native-code approval is asked, and the install sheet states "includes scripts that run while you play ... not a security guarantee" with the capabilities listed. `session` prints a SHA-256 for the first frame, the last frame and the whole session; CI pins them (`tests/fixtures/mod_luau/hud_session.json`) and an independent Python implementation re-derives the frame hash of a rect-only script. The session is a **fixture**: a synthetic 320x224 picture seeded by the fixture image, not the Genesis machine.
+`install` classifies the package **Luau-only** (`"approval_kind":"consent"`): no native-code approval is asked, and the install sheet states "includes scripts that run while you play ... not a security guarantee" with the capabilities listed. The example's image is a tiny **runnable** Genesis program written for this repository (`fixture_rom.py`), so the real generated-native program renders genuine VDP frames and the HUD appears on them: `tests/mod_luau_executable_test.py` builds Vanilla and the Luau program, runs both under the SDL3 viewer with an instruction budget, and checks the HUD region of the rendered frame (pinned hash, independent pixel derivation, determinism, script change, fault isolation, refusals). `session` is the isolated **diagnostic** tool (synthetic picture seeded by the image, pinned in `tests/fixtures/mod_luau/hud_session.json`); it is not that proof.
 
 ## Test coverage of the policy categories (SEG-133-T005 section 8)
 
@@ -63,4 +70,4 @@ segarecomp mod session lib/mods/<package_identity>.segapatch --rom fixture.rom -
 | `compiler-input` | `luau_api_test` (deep nesting, 100 KB literal, 300 live locals), `mod_luau_test` (compile limits) |
 | `approval-semantics` | `mod_luau_api_test` (data / Luau-only / native and mixed install classes) |
 
-Portability: the pipeline is integer-only; `mod_luau_api_test` asserts the same pinned session hash on every platform in the CI matrix (Linux, Windows, macOS). Platforms not exercised by CI (and anything not run by the maintainer locally: only Linux aarch64) are **not validated**.
+Portability: the diagnostic session pipeline is integer-only and `mod_luau_api_test` asserts its pinned hash on every platform in the CI matrix (Linux, Windows, macOS). The generated-native program tests (`mod_luau_executable_test`, `launcher_mod_variant_test`) run on Linux only; building such a program on Windows and macOS is **not validated** by CI, and locally the work was run on Linux aarch64 only.

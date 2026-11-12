@@ -442,7 +442,7 @@ constexpr const char *kLuauHudScript =
     "  sega.log(\"hud example ready\")\n"
     "end\n"
     "\n"
-    "function render(frame)\n"
+    "function render(frame: number)\n"
     "  sega.overlay.rect(0, 0, 76, 24, PANEL)\n"
     "  sega.overlay.text(4, 3, \"LUAU HUD\", WHITE)\n"
     "  sega.overlay.text(4, 12, \"FRAME \" .. frame % 1000, GOLD)\n"
