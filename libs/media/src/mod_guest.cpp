@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <set>
 
 namespace segarecomp::mod {
 
@@ -186,6 +187,7 @@ struct Ctx {
   Cpu cpu;
   std::string rev;
   const std::map<std::string, std::int64_t> &labels;
+  const std::set<std::string> &data_labels;   // labels defined after a `data` statement: never a control-transfer target
   bool final = false;   // pass 2: unknown labels and value ranges are real errors
   std::int64_t pc = 0;
   std::size_t line = 0;
@@ -233,9 +235,17 @@ Ev eval(const Ctx &c, std::string_view expr) {
   return r;
 }
 
-Ev target_of(const Ctx &c, std::string_view expr) {   // a control-transfer destination must be a label or a verified @symbol: never a raw number
+Ev target_of(const Ctx &c, std::string_view expr) {   // a control-transfer destination is a CODE label or a verified @symbol (+ a small offset): never a number, data or label arithmetic
   const Ev e = eval(c, expr);
   if (!e.symbolic) fail("E_GUEST_BRANCH_TARGET", at(c.line) + "a branch target is a label of the injected code or a verified @symbol, not a number");
+  const std::size_t op = expr.find_first_of("+-", 1);
+  const std::string_view base = expr.substr(0, op);
+  if (base[0] != '@') {
+    if (op != std::string_view::npos) fail("E_GUEST_BRANCH_TARGET", at(c.line) + "a branch target is a bare label; offsets are only allowed on @symbols");
+    if (c.data_labels.count(std::string(base)) != 0) fail("E_GUEST_BRANCH_TARGET", at(c.line) + "the branch target is a data label; data is never executed");
+  } else if (op != std::string_view::npos && (e.value < 0 || e.value > 0xFFFFFF)) {
+    fail("E_GUEST_BRANCH_TARGET", at(c.line) + "the @symbol offset leaves the image");
+  }
   return e;
 }
 
@@ -701,6 +711,7 @@ Assembled assemble_revision(const Manifest &m, Cpu cpu, const Source &src, const
   std::vector<const Block *> blocks;
   for (const Block &b : src.blocks) if (b.rev == "*" || b.rev == rev.label) blocks.push_back(&b);
   std::map<std::string, std::int64_t> labels;
+  std::set<std::string> data_labels;
   for (int pass = 0; pass < 2; ++pass) {
     const bool final = pass == 1;
     if (final) out.blocks.clear();
@@ -711,16 +722,26 @@ Assembled assemble_revision(const Manifest &m, Cpu cpu, const Source &src, const
       ob.has_at = b->has_at;
       ob.line = b->line;
       bool data_mode = false;
+      std::string last_op;
+      std::size_t last_args = 0;
       for (const Stmt &s : b->stmts) {
         const auto pc = static_cast<std::int64_t>(b->address + ob.bytes.size());
-        Ctx c{m, cpu, rev.label, labels, final, pc, s.line};
+        Ctx c{m, cpu, rev.label, labels, data_labels, final, pc, s.line};
         if (!s.label.empty()) {
           if (!final && !labels.emplace(s.label, pc).second) fail("E_GUEST_LABEL_DUPLICATE", at(s.line) + "the label \"" + s.label + "\" is defined twice for the revision \"" + rev.label + "\"");
+          if (!final && data_mode) data_labels.insert(s.label);
         }
         if (s.op.empty()) continue;
         if (s.op == "data" || s.op == "code") {
           if (!s.args.empty() || !s.size.empty()) fail("E_GUEST_SYNTAX", at(s.line) + "data/code take no operands");
+          if (s.op == "data" && !last_op.empty()) {   // execution must not run into data: the instruction before it ends the control flow
+            const bool m = cpu == Cpu::m68k;
+            const bool ends = m ? (last_op == "rts" || last_op == "rtr" || last_op == "jmp" || last_op == "bra")
+                                : ((last_op == "ret" && last_args == 0) || (last_op == "jp" && last_args == 1) || (last_op == "jr" && last_args == 1));
+            if (!ends) fail("E_GUEST_SYNTAX", at(s.line) + "`data` must follow an unconditional transfer (rts, jmp, bra / ret, jp, jr): code may not fall into data");
+          }
           data_mode = s.op == "data";
+          last_op.clear();
           continue;
         }
         if (s.op == "even") {
@@ -734,16 +755,14 @@ Assembled assemble_revision(const Manifest &m, Cpu cpu, const Source &src, const
         if (is_data_op(s.op)) {
           if (cpu == Cpu::m68k ? s.op != "dc" : s.op == "dc") fail("E_GUEST_SYNTAX", at(s.line) + "\"" + s.op + "\" does not exist for this CPU");
           bytes = data_encode(c, s);
-          if (!data_mode) {   // data in the code stream is validated as opcodes: only whole M68K words are accepted, nothing for the Z80
-            if (cpu != Cpu::m68k || s.size != "w") fail("E_GUEST_SYNTAX", at(s.line) + "raw data belongs after a `data` statement (only dc.w is accepted in code)");
-            meta.code = true;
-          } else {
-            meta.code = false;
-          }
+          if (!data_mode) fail("E_GUEST_SYNTAX", at(s.line) + "raw data belongs after a `data` statement; the code stream holds instructions only");
+          meta.code = false;
         } else {
           if (data_mode) fail("E_GUEST_SYNTAX", at(s.line) + "an instruction after `data` needs a `code` statement first");
           if (cpu == Cpu::m68k && (pc & 1) != 0) fail("E_GUEST_ALIGN", at(s.line) + "an M68K instruction starts at an odd address");
           bytes = cpu == Cpu::m68k ? m68k_encode(c, s, meta) : z80_encode(c, s, meta);
+          last_op = s.op;
+          last_args = s.args.size();
         }
         meta.len = bytes.size();
         ob.bytes.insert(ob.bytes.end(), bytes.begin(), bytes.end());

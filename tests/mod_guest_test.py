@@ -169,8 +169,13 @@ asm_case("trap is forbidden", "  trap #0\n", "E_GUEST_FORBIDDEN_INSTRUCTION")
 asm_case("rte is forbidden", "  rte\n", "E_GUEST_FORBIDDEN_INSTRUCTION")
 asm_case("reset is forbidden", "  reset\n", "E_GUEST_FORBIDDEN_INSTRUCTION")
 asm_case("move to sr is forbidden", "  move.w d0,sr\n", "E_GUEST_FORBIDDEN_INSTRUCTION")
-asm_case("forbidden opcode smuggled as dc.w", "  dc.w 0x4e72\n", "E_GUEST_FORBIDDEN_INSTRUCTION")
-asm_case("line-F smuggled as dc.w", "  dc.w 0xf000\n", "E_GUEST_FORBIDDEN_INSTRUCTION")
+asm_case("raw opcode words in the code stream", "  dc.w 0x4e71,0x4e72\n", "E_GUEST_SYNTAX")
+asm_case("single raw opcode word in the code stream", "  dc.w 0x4e72\n", "E_GUEST_SYNTAX")
+asm_case("jump into data holding a stop", "  jmp l\ndata\nl:\n  dc.w 0x4e72,0x2700\n", "E_GUEST_BRANCH_TARGET")
+asm_case("branch into data", "  bra.w l\ndata\nl:\n  dc.w 0x4e71\n", "E_GUEST_BRANCH_TARGET")
+asm_case("code falling into data", "  nop\ndata\n  dc.w 0x4e72\n", "E_GUEST_SYNTAX")
+asm_case("label arithmetic in a target", "s:\n  jmp s+0x7ffff000\n", "E_GUEST_BRANCH_TARGET")
+ok("data after an unconditional transfer is fine", "mod", "check", project(FREE + "org * 0x1000\n  rts\ndata\nt:\n  dc.w 0x4e72\ncode\n  lea t(pc),a0\n  rts\n"))
 asm_case("write to ROM", "  move.w d1,0x001000\n", "E_GUEST_WRITE_OUTSIDE_RAM")
 asm_case("write straddling the RAM window", "  move.l d1,0xfeffff\n", "E_GUEST_WRITE_OUTSIDE_RAM")
 asm_case("write to the VDP is not RAM", "  clr.w 0xc00004\n", "E_GUEST_WRITE_OUTSIDE_RAM")
@@ -181,7 +186,7 @@ asm_case("upper case is refused", "  NOP\n", "E_GUEST_SYNTAX")
 asm_case("raw bytes in code", "  dc.b 1,2\n", "E_GUEST_SYNTAX")
 asm_case("missing size suffix", "  clr d0\n", "E_GUEST_SYNTAX")
 asm_case("immediate out of range", "  moveq #200,d0\n", "E_GUEST_VALUE_RANGE")
-asm_case("odd instruction address", "  nop\ndata\n  dc.b 1\ncode\n  nop\n", "E_GUEST_ALIGN")
+asm_case("odd instruction address", "  rts\ndata\n  dc.b 1\ncode\n  nop\n", "E_GUEST_ALIGN")
 asm_case("unverified symbol", "  jsr @helper\n", "E_SYMBOL_UNKNOWN")
 asm_case("m68k org with at", "", "E_GUEST_ADDRESS", prefix=FREE + "org * 0x1000 at 0x2000\n  nop\n")
 asm_case("odd org offset", "", "E_GUEST_ALIGN", prefix=FREE + "org * 0x1001\n  nop\n")
@@ -227,7 +232,8 @@ for what, line, code in [("halt", "  halt\n", "E_GUEST_FORBIDDEN_INSTRUCTION"), 
                          ("rst", "  rst 0x38\n", "E_GUEST_FORBIDDEN_INSTRUCTION"), ("im", "  im 1\n", "E_GUEST_FORBIDDEN_INSTRUCTION"), ("reti", "  reti\n", "E_GUEST_FORBIDDEN_INSTRUCTION"),
                          ("ld i,a", "  ld i,a\n", "E_GUEST_FORBIDDEN_INSTRUCTION"), ("write to ROM", "  ld (0x3000),a\n", "E_GUEST_WRITE_OUTSIDE_RAM"),
                          ("write to a port-mapped mirror", "  ld (0xfffe),a\n", "E_GUEST_WRITE_OUTSIDE_RAM"), ("relative range", "start:\n  jr far\n" + "  nop\n" * 200 + "far:\n  ret\n", "E_GUEST_BRANCH_RANGE"),
-                         ("numeric jp", "  jp 0x0038\n", "E_GUEST_BRANCH_TARGET")]:
+                         ("numeric jp", "  jp 0x0038\n", "E_GUEST_BRANCH_TARGET"), ("jp to data", "  jp l\ndata\nl:\n  db 0x76\n", "E_GUEST_BRANCH_TARGET"),
+                         ("label arithmetic", "s:\n  jp s+0x4000\n", "E_GUEST_BRANCH_TARGET"), ("falling into data", "  nop\ndata\n  db 0x76\n", "E_GUEST_SYNTAX")]:
     refused("Z80 " + what, code, "mod", "check", project("free * 0x3000 0x80 0x00\norg * 0x3000\n" + line, platform="master-system", cpu="z80", revs=[("rev-a", sha(SMS), "rom_only")]))
 refused("a bank-switched mapper is rejected", "E_MAPPER_UNSUPPORTED", "mod", "check", project(Z_ASM, platform="master-system", cpu="z80", revs=[("rev-a", sha(SMS), "sega")]))
 refused("Z80 beyond the unmapped window", "E_GUEST_ADDRESS", "mod", "check", project("free * 0xc000 0x80 0x00\norg * 0xc000\n  nop\n", platform="master-system", cpu="z80", revs=[("rev-a", sha(SMS), "rom_only")]))
