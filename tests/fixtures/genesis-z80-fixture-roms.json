@@ -44,6 +44,10 @@
       "sha256": "fb8d4ca5984a2dba9c0ba41cd3460ae3a8aa425597f27f7531dd9f8d0532aefd",
       "size": 16384
     },
+    "sound_smc_second_image": {
+      "sha256": "56f64a1238ccf193cbd0ee61e0bed9b6756521f0207c5fef1062d3d458a5499e",
+      "size": 16384
+    },
     "sound_tone": {
       "sha256": "68cbaa8c06b0c82956961a2f6ee026630141e75fd8503cfd642e7d6b1eab9bf7",
       "size": 16384
