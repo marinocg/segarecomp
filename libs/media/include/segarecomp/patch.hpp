@@ -31,6 +31,12 @@ struct BpsResult {
 // and the exact end of the command stream. The output never exceeds `max_output`.
 [[nodiscard]] BpsResult apply_bps(std::span<const std::uint8_t> patch, std::span<const std::uint8_t> source, std::size_t max_output = kMaxImageBytes);
 
+// Deterministic BPS1 writer (SEG-136-T006, ADR 0293): the canonical command order is a single left-to-right scan. A run of at least kBpsMinCopyRun positions where target[i] == source[i]
+// becomes one SourceRead; every other position is TargetRead literal bytes (adjacent literals merge). No SourceCopy/TargetCopy and no metadata, so equal inputs give equal bytes on every host.
+// The result is verified by applying it back; `ok` is false (with `error`) if the patch would exceed kMaxPatchBytes or an image exceeds kMaxImageBytes.
+inline constexpr std::size_t kBpsMinCopyRun = 4;
+[[nodiscard]] BpsResult build_bps(std::span<const std::uint8_t> source, std::span<const std::uint8_t> target);   // BpsResult::output holds the PATCH bytes
+
 // Host capabilities of the native patch ABI (equal to the SDK's GENESIS_CAP_*) and the ABI version this release provides. A package declares what its provider needs; a release
 // refuses a package that needs an unknown capability or another ABI version. Capabilities describe what the host can do, never which game is patched.
 inline constexpr unsigned kNativeAbiVersion = 1U;

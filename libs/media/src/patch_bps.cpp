@@ -1,5 +1,6 @@
 #include "segarecomp/patch.hpp"
 
+#include <algorithm>
 #include <array>
 
 namespace segarecomp::patch {
@@ -122,6 +123,62 @@ BpsResult apply_bps(std::span<const std::uint8_t> patch, std::span<const std::ui
   if (crc32(out) != le32(patch, footer + 4)) return fail("the BPS target checksum does not match the patched image");
   result.ok = true;
   return result;
+}
+
+namespace {
+
+void put_number(std::vector<std::uint8_t> &out, std::uint64_t n) {   // byuu variable-length number (the inverse of read_number)
+  for (;;) {
+    const std::uint8_t x = static_cast<std::uint8_t>(n & 0x7FU);
+    n >>= 7U;
+    if (n == 0) { out.push_back(static_cast<std::uint8_t>(0x80U | x)); return; }
+    out.push_back(x);
+    --n;
+  }
+}
+
+void put_le32(std::vector<std::uint8_t> &out, std::uint32_t v) {
+  for (unsigned i = 0; i < 4; ++i) out.push_back(static_cast<std::uint8_t>(v >> (8U * i)));
+}
+
+}  // namespace
+
+BpsResult build_bps(std::span<const std::uint8_t> source, std::span<const std::uint8_t> target) {
+  if (source.size() > kMaxImageBytes || target.size() > kMaxImageBytes) return fail("an image exceeds the supported image size");
+  std::vector<std::uint8_t> p = {'B', 'P', 'S', '1'};
+  put_number(p, source.size());
+  put_number(p, target.size());
+  put_number(p, 0);   // no metadata
+  const auto same = [&](std::size_t i) { return i < source.size() && source[i] == target[i]; };
+  std::size_t i = 0, literal_start = 0;
+  const auto flush_literal = [&](std::size_t end) {
+    if (end > literal_start) {
+      put_number(p, (static_cast<std::uint64_t>(end - literal_start - 1) << 2U) | 1U);
+      p.insert(p.end(), target.begin() + static_cast<std::ptrdiff_t>(literal_start), target.begin() + static_cast<std::ptrdiff_t>(end));
+    }
+  };
+  while (i < target.size()) {
+    if (!same(i)) { ++i; continue; }
+    std::size_t j = i;
+    while (j < target.size() && same(j)) ++j;
+    if (j - i >= kBpsMinCopyRun || j == target.size()) {   // a long run (or the tail) is a SourceRead; short interior runs stay in the literal
+      flush_literal(i);
+      put_number(p, static_cast<std::uint64_t>(j - i - 1) << 2U);
+      literal_start = j;
+    }
+    i = j;
+  }
+  flush_literal(target.size());
+  put_le32(p, crc32(source));
+  put_le32(p, crc32(target));
+  put_le32(p, crc32(p));
+  if (p.size() > kMaxPatchBytes) return fail("the BPS patch exceeds the supported patch size");
+  const BpsResult back = apply_bps(p, source, target.size());   // round trip: the writer is only trusted through the reader
+  if (!back.ok || back.output.size() != target.size() || !std::equal(back.output.begin(), back.output.end(), target.begin())) return fail("the constructed BPS does not reproduce the target");
+  BpsResult r;
+  r.ok = true;
+  r.output = std::move(p);
+  return r;
 }
 
 }  // namespace segarecomp::patch

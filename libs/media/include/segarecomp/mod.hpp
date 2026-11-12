@@ -133,6 +133,7 @@ struct Manifest {
   std::vector<Payload> payloads;
   std::vector<Mapping> mappings;
   std::vector<Symbol> symbols;                   // sorted by (name, revision) in a canonical manifest
+  std::string header_repair;                     // "" (default), "genesis-checksum" or "none" (ADR 0293)
   bool operator==(const Manifest &) const = default;
 };
 
@@ -204,6 +205,59 @@ struct SymbolHints {
 [[nodiscard]] SymbolHints parse_symbol_hints(std::string_view text, std::string_view revision);
 // Token alphabet and size of a symbol name (lower-case a-z 0-9 `_` `-` `.`, 1..64).
 [[nodiscard]] bool symbol_name_ok(std::string_view name);
+
+// Resolved byte ranges ([start, end)) of the edits that apply to one declared revision, already checked for overlap; and the lookup of a VERIFIED symbol (others never resolve).
+struct Range {
+  std::uint64_t start = 0, end = 0;
+};
+struct EditRanges {
+  bool ok = false;
+  Rejection rejection;
+  std::vector<Range> ranges;
+};
+[[nodiscard]] EditRanges rom_edit_ranges(const Manifest &manifest, std::span<const std::uint8_t> text, std::string_view revision);
+[[nodiscard]] std::optional<std::uint32_t> verified_symbol(const Manifest &manifest, const std::string &name, const std::string &revision, Rejection &why);
+
+// ---- guest assembly, bounded injection, collisions, header repair (SEG-136-T003..T005, ADR 0292/0293) ----
+// A `guest-asm` payload (kind_version 1, `cpu` m68k | z80) is ASCII text assembled by the in-tree bounded assembler (no includes, macros, host paths or clock). Statements, one per line, `;` comments:
+//   free <revision|*> <start> <length> <fill>   a free range of image offsets (0x lower-case hex); its ORIGINAL bytes must all equal <fill> when an image is built
+//   org <revision|*> <offset> [at <address>]    starts a block placed at that image offset (execution address = offset, or `at` where the CPU address differs)
+//   <label>:  <mnemonic>[.size] <operands>      instructions of the supported subset; dc.b/dc.w/dc.l (m68k) or db/dw (z80); `even`; `data` / `code` mode switches
+// Operands may use `@symbol[+N]` (a verified symbol of the revision). Stable classes: E_GUEST_SYNTAX, E_GUEST_REVISION, E_GUEST_OPERAND, E_GUEST_LABEL_UNKNOWN, E_GUEST_LABEL_DUPLICATE,
+// E_GUEST_VALUE_RANGE, E_GUEST_ALIGN, E_GUEST_ADDRESS, E_GUEST_BRANCH_RANGE, E_GUEST_BRANCH_TARGET, E_GUEST_FORBIDDEN_INSTRUCTION, E_GUEST_WRITE_OUTSIDE_RAM, E_GUEST_OUTSIDE_FREE_RANGE,
+// E_GUEST_RANGE_NOT_FREE, E_GUEST_COLLISION, E_GUEST_RANGE, E_MAPPER_UNSUPPORTED, E_HEADER_UNSUPPORTED.
+inline constexpr std::size_t kMaxGuestBlocks = 64, kMaxGuestFreeRanges = 64, kMaxGuestLines = 8192;
+// Image-independent check run by the reader for EVERY declared revision: syntax, assembly, static validation, free-range membership and collisions with the revision's ROM edits.
+// `edit_set` is the rom-edit-set payload text (empty when the package has none).
+[[nodiscard]] std::optional<Rejection> check_guest_asm(const Manifest &manifest, std::string_view cpu, std::span<const std::uint8_t> text, std::span<const std::uint8_t> edit_set);
+
+// Header repair of a Genesis image (documented header: ROM start 0x1A0, ROM end 0x1A4, checksum 0x18E over the big-endian words from 0x200 to ROM end).
+[[nodiscard]] bool genesis_header_verifies(std::span<const std::uint8_t> image);
+[[nodiscard]] std::uint16_t genesis_checksum(std::span<const std::uint8_t> image, std::uint32_t end_exclusive);
+
+// The verified target image of one declared revision: typed edits, then injected guest code, then header repair. `original` must be that revision's exact image (selected by digest).
+struct TargetImage {
+  bool ok = false;
+  Rejection rejection;
+  std::string revision;
+  std::vector<std::uint8_t> image;
+  unsigned edits_applied = 0, blocks_injected = 0;
+  std::size_t injected_bytes = 0;
+  bool header_repaired = false;
+  std::vector<std::string> warnings;   // stable warning classes, e.g. W_CHECKSUM_NOT_REPAIRED
+};
+[[nodiscard]] TargetImage build_target_image(const Manifest &manifest, const std::map<std::string, std::vector<std::uint8_t>> &files, std::span<const std::uint8_t> original);
+[[nodiscard]] bool has_target_edits(const Manifest &manifest);   // a rom-edit-set or guest-asm payload exists
+
+// Deterministic BPS of `original` -> that target, verified by applying it back (SEG-136-T006).
+struct TargetBps {
+  bool ok = false;
+  Rejection rejection;
+  std::string revision, source_sha256, target_sha256, patch_sha256;
+  std::vector<std::uint8_t> patch;
+  TargetImage target;
+};
+[[nodiscard]] TargetBps build_target_bps(const Manifest &manifest, const std::map<std::string, std::vector<std::uint8_t>> &files, std::span<const std::uint8_t> original);
 
 // ---- native C11 source policy (SEG-135-T003) ----
 // Include allowlist: the ABI 2 SDK headers, <stdint.h>/<stddef.h>, and package-local files named by their package path. Anything else (`../`, absolute, other system headers, computed

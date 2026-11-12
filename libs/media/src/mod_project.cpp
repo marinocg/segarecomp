@@ -86,7 +86,7 @@ std::vector<Section> parse_toml(std::string_view text) {
       if (i < line.size() && line[i] != '#') fail("E_MANIFEST_SYNTAX", "mod.toml has text after a table header");
       if (!bare_key(name)) fail("E_MANIFEST_SYNTAX", "a mod.toml table name is invalid");
       const bool repeated = name == "target.revision" || name == "source" || name == "audio.mapping" || name == "audio.mapping.value" || name == "symbol";
-      if (repeated != array && (repeated || name == "mod" || name == "target" || name == "capabilities" || name == "abi" || name == "state" || name == "limits" || name == "geometry" || name == "presentation"))
+      if (repeated != array && (repeated || name == "mod" || name == "target" || name == "capabilities" || name == "abi" || name == "state" || name == "limits" || name == "build" || name == "geometry" || name == "presentation"))
         fail("E_MANIFEST_SYNTAX", "the table [" + name + "] must be written " + (repeated ? "as [[" + name + "]]" : "as [" + name + "]"));
       if (!array) for (const Section &s : sections) if (s.name == name) fail("E_MANIFEST_SYNTAX", "mod.toml repeats the table [" + name + "]");
       sections.push_back(Section{name, array, {}});
@@ -164,7 +164,7 @@ std::vector<std::string> list_of(const Section &s, const char *k) {
 std::size_t source_limit(const std::string &kind) {
   if (kind == "bps-image") return kMaxImageBytes;
   if (kind == "rom-edit-set") return kMaxRomEditBytes;
-  if (kind == "guest-code") return kMaxGuestCodeBytes;
+  if (kind == "guest-code" || kind == "guest-asm") return kMaxGuestCodeBytes;
   if (kind == "native-c11") return kMaxNativeFileBytes;
   if (kind == "luau-source") return kMaxLuauFileBytes;
   return kMaxAssetBytes;
@@ -216,6 +216,9 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
       Revision r;
       r.label = text_of(s, "label"); r.sha256 = text_of(s, "sha256", true, "E_SOURCE_DIGEST"); r.mapper = text_of(s, "mapper", false);
       m.revisions.push_back(std::move(r));
+    } else if (s.name == "build") {   // ADR 0293: the explicit header-repair declaration
+      only(s, {"header_repair"});
+      m.header_repair = text_of(s, "header_repair");
     } else if (s.name == "capabilities") {
       only(s, {"required", "optional"});
       m.capabilities = list_of(s, "required"); m.capabilities_optional = list_of(s, "optional");

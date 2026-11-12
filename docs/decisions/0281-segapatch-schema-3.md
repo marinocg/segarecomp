@@ -11,7 +11,7 @@ Schema 1/2 carry one BPS image and one C11 provider for Genesis only, with caps 
 
 1. Schema 3 is opt-in and additive. Schema 1/2 packages are read by the existing reader with unchanged semantics forever.
 2. A closed, versioned, discriminated payload envelope (`kind`, `kind_version`) replaces the schema 2 `payloads` object; unknown kinds, versions, fields and sources fail closed.
-3. Payload kinds: `bps-image`, `rom-edit-set`, `guest-code`, `native-c11`, `luau-source`, `asset`; reserved: `disc-extent-edit`, `disc-track-replace`, `guest-asm`. Reserved kinds parse and are rejected.
+3. Payload kinds: `bps-image`, `rom-edit-set`, `guest-code`, `native-c11`, `luau-source`, `asset`; reserved: `disc-extent-edit`, `disc-track-replace` (`guest-asm` was reserved here and became a real kind in ADR 0292). Reserved kinds parse and are rejected.
 4. Trust class is the highest payload class (`data` < `luau` < `native`); any native source makes the package native.
 5. `platform` is mandatory and exact; source identity is discriminated (`cartridge-image` with exact revision digests, `disc-image` reserved); a BIOS is declared by digest or class and never packaged.
 6. Identity: package identity stays SHA-256 of the manifest bytes; a content digest over the payload listing is added; the Patched cache key appends package identity, content digest, revision digest, effective image digest and ABI major.

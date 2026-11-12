@@ -181,9 +181,10 @@ reject("native with abi 1", mutate(lambda m: m.update(author="A", abi={"native":
 reject("native with abi 3", mutate(lambda m: m.update(author="A", abi={"native": 3}), payloads=[n_good]), "E_ABI_UNSUPPORTED")
 reject("abi without native", mutate(lambda m: m.__setitem__("abi", {"native": 2})), "E_FIELD_UNKNOWN")
 reject("native kind_version 2", mutate(lambda m: (m["payloads"][0].__setitem__("kind_version", 2), m.update(author="A", abi={"native": 2})), payloads=[n_good]), "E_PAYLOAD_VERSION_UNKNOWN")
-for kind in ("disc-extent-edit", "disc-track-replace", "guest-asm"):
+for kind in ("disc-extent-edit", "disc-track-replace"):   # guest-asm became a real kind in ADR 0292 (tests/mod_guest_test.py)
     d = b"reserved"
     reject(f"reserved kind {kind}", mutate(lambda m: None, payloads=[(payload(kind, "x/r.bin", d), ("x/r.bin", d))]), "E_PAYLOAD_KIND_RESERVED")
+reject("guest-asm needs its cpu field", mutate(lambda m: None, payloads=[(payload("guest-asm", "x/g.asm", b"org"), ("x/g.asm", b"org"))]), "E_FIELD_MISSING")
 reject("reserved kind with an unknown version", mutate(lambda m: None, payloads=[(dict(payload("disc-extent-edit", "x/r.bin", b"r"), kind_version=9), ("x/r.bin", b"r"))]), "E_PAYLOAD_VERSION_UNKNOWN")
 reject("unknown kind", mutate(lambda m: None, payloads=[(payload("firmware", "x/f.bin", b"r"), ("x/f.bin", b"r"))]), "E_PAYLOAD_KIND_UNKNOWN")
 reject("bios payload", mutate(lambda m: None, payloads=[(payload("bios", "bios.bin", b"r"), ("bios.bin", b"r"))]), "E_PAYLOAD_KIND_UNKNOWN")

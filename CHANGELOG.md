@@ -7,6 +7,11 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Guest code injection, header repair and BPS construction for mods (ADR 0292, ADR 0293)
+
+* A mod can now carry `guest-asm`: lower-case M68K or Z80 assembly assembled by a small built-in assembler (no external tool, no includes) and injected into declared, asserted-free ranges of the exact original image. The emitted code is validated first - privileged instructions, traps, port I/O, interrupt control, raw numeric branch targets and stores outside RAM are refused with stable `E_GUEST_*` classes - and overlapping blocks, free ranges and edits are refused.
+* `segarecomp mod apply` builds the verified target image (edits, injected code, Genesis checksum repair per an explicit `[build] header_repair` declaration); `mod bps` writes a deterministic BPS proved by applying it back; `mod verify-bps` and `mod pack --rom` verify a BPS or every declared image.
+
 ### Native GEMS audio replacement (new, automatic, Genesis; ADR 0291)
 
 * Games whose Z80 sound driver rewrites its own code are silent on the original path. For one verified driver image - **GEMS 2.5**, uploaded by Aladdin, Earthworm Jim, Jurassic Park and Cool Spot - `segarecomp build` now **selects by itself** (no option, nothing to tick) a program where a **native C11 re-implementation** of the driver plays the game's music and effects - when the build's own verification run shows that the original generated-native Z80 cannot run that driver and the uploaded image is a verified GEMS image. Every other game is built exactly as before. It is not a Z80 emulator and never executes the original driver's code.
