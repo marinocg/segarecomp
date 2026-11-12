@@ -29,7 +29,7 @@ sums = {}
 for ln in (luau / "SHA256SUMS").read_text().splitlines():
     digest, name = ln.split("  ", 1)
     sums[name] = digest
-files = {str(p.relative_to(luau)) for d in ("Common", "Ast", "Bytecode", "Compiler", "VM") for p in (luau / d).rglob("*") if p.is_file()} | {"LICENSE.txt", "lua_LICENSE.txt"}
+files = {p.relative_to(luau).as_posix() for d in ("Common", "Ast", "Bytecode", "Compiler", "VM") for p in (luau / d).rglob("*") if p.is_file()} | {"LICENSE.txt", "lua_LICENSE.txt"}
 check(set(sums) == files, f"SHA256SUMS lists exactly the vendored files (diff: {sorted(set(sums) ^ files)[:5]})")
 bad = [n for n in sums if n in files and hashlib.sha256((luau / n).read_bytes()).hexdigest() != sums[n]]
 check(not bad, f"vendored files are unmodified: {bad[:5]}")

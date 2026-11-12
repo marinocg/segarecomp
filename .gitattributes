@@ -57,3 +57,6 @@ tools/segarecomp_seg084_*.py text eol=lf
 tools/segarecomp_seg084_*.json text eol=lf
 tests/segarecomp_seg084_test.py text eol=lf
 tests/segarecomp_seg085_test.py text eol=lf
+
+# SEG-137-T001: the vendored Luau sources are byte-exact (SHA256SUMS); never rewrite their line endings.
+third_party/luau/** -text
