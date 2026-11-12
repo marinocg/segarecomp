@@ -35,6 +35,9 @@ std::optional<mod::Rejection> live_support(const mod::Package &package) {
   bool has_luau = false;
   for (const mod::Payload &p : m.payloads) has_luau = has_luau || p.kind == "luau-source";
   if (!has_luau) return mod::Rejection{"E_LIVE_TRUST", "the package has no Luau source"};
+  for (const mod::Payload &p : m.payloads)   // nothing the live path does not use may be silently dropped: only the scripts and the data that make the effective image
+    if (p.kind != "luau-source" && p.kind != "rom-edit-set" && p.kind != "guest-code" && p.kind != "bps-image")
+      return mod::Rejection{"E_LIVE_PAYLOAD", "the payload " + p.path + " (" + p.kind + ") is not used by the live path; remove it or use a package without it"};
   if (m.abi_native != 0) return mod::Rejection{"E_LIVE_ABI", "a native ABI 2 provider does not run here"};
   const std::vector<std::string> live = live_capabilities();
   for (const std::string &c : m.capabilities)

@@ -77,7 +77,7 @@ struct HostConfig {
 // The minimal read-only seam of a played Genesis program grants exactly these capabilities; a package that REQUIRES anything else (or is not Luau-only, not Genesis, or carries a native ABI 2 provider)
 // is refused by the build with the class below, never run with parts missing. An optional capability outside the list is simply not granted.
 [[nodiscard]] std::vector<std::string> live_capabilities();
-[[nodiscard]] std::optional<mod::Rejection> live_support(const mod::Package &package);   // E_LIVE_PLATFORM | E_LIVE_TRUST | E_LIVE_ABI | E_LIVE_CAPABILITY
+[[nodiscard]] std::optional<mod::Rejection> live_support(const mod::Package &package);   // E_LIVE_PLATFORM | E_LIVE_TRUST | E_LIVE_ABI | E_LIVE_CAPABILITY | E_LIVE_PAYLOAD
 [[nodiscard]] HostConfig live_host_config(const mod::Manifest &manifest);
 
 // ---- overlay rasterization (the fixed HUD overlay path) ----

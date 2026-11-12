@@ -138,6 +138,7 @@ struct Options {
   // (typed edits / injected guest code / BPS), compiles THAT, compiles the scripts with the pinned trusted compiler in the bounded child and links the verified result into the program as a constant.
   fs::path luau_package;
   std::string luau_identity;
+  bool frame_seam = false;   // `--test-frame-seam`: compiles the final-frame automation seam into the viewer program (tests only; never set by the launcher)
   // resolved by the verification step
   bool luau = false;
   std::string luau_original_sha256, luau_effective_sha256, luau_bytecode_digest, luau_mod_id, luau_capabilities;
@@ -240,6 +241,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--sound-driver" && (value == "auto" || value == "original" || value == "gems")) options.sound_driver = value;
     else if (key == "--patch-package") { if (!options.patch_package.empty()) return std::nullopt; options.patch_package = fs::path(value); }
     else if (key == "--patch-identity") { if (!options.patch_identity.empty()) return std::nullopt; options.patch_identity = value; }
+    else if (key == "--test-frame-seam" && value == "1") options.frame_seam = true;
     else if (key == "--luau-package") { if (!options.luau_package.empty()) return std::nullopt; options.luau_package = fs::path(value); }
     else if (key == "--luau-identity") { if (!options.luau_identity.empty()) return std::nullopt; options.luau_identity = value; }
     else if (key == "--performance-report") { if (!options.performance_report.empty() || value.empty()) return std::nullopt; options.performance_report = fs::path(value); }
@@ -1129,6 +1131,10 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     stable.push_back(job);
     set.push_back(job.object);
   };
+  const auto seam_flags = [&](std::vector<std::string> flags) {
+    if (options.frame_seam) flags.push_back("-DSEGARECOMP_VIEWER_FINAL_FRAME_SEAM=1");
+    return flags;
+  };
   for (const char *name : {"runtime.c", "z80_machine.c", "genesis_audio.c", "genesis_mixer.c", "genesis_audio_present.c", "genesis_sound.c"})
     add(common, build.runtime / name, std::string("rt-") + std::string(name).substr(0, std::string(name).size() - 2),
         native_gems && std::string_view(name) == "genesis_sound.c" ? std::vector<std::string>{"-DSEGARECOMP_NATIVE_SOUND_GEMS=1"} : std::vector<std::string>{});
@@ -1170,14 +1176,14 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
       add(final_only, build.root / "libs" / "media" / "src" / "sha256.cpp", "luau-sha256", flags, true);
       add(final_only, build.viewer / "luau_provider.cpp", "luau-provider", flags, true);
       add(final_only, options.luau_artifact_source, "luau-artifact");
-      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=8U", "-I", (options.runtime_dir / "sdk").string()});
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=8U", "-I", (options.runtime_dir / "sdk").string()}));
     } else if (!options.native_source.empty()) {
       // SEG-124: the provider of the verified package, compiled from the private copy extracted for THIS build and linked into this program only.
       add(final_only, options.native_source, "native-provider");
       stable.back().isolated = true;
-      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::to_string(options.native_caps) + "U"});
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::to_string(options.native_caps) + "U"}));
     } else {
-      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND"});
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND"}));
     }
   } else {
     add(final_only, build.runtime / "genesis_sound_hook.c", "hook-sound");
@@ -1535,7 +1541,9 @@ int run_build(Options options) {
   if (ec) { std::cerr << "segarecomp: cannot create output directory\n"; return 2; }
   Log log;
   log.file.open(options.output / "build.log", std::ios::binary | std::ios::trunc);
-  struct InputCleanup { fs::path dir; ~InputCleanup() { std::error_code e; fs::remove_all(dir, e); } } input_cleanup{options.luau_package.empty() ? fs::path() : options.output / "input"};   // the effective image is derivative game data: it never outlives the build
+  // The effective image is derivative game data: removed when the build ends (and a stale one of a killed attempt is removed at the start). Only the file this build writes is removed, then the folder if empty.
+  struct InputCleanup { fs::path file; ~InputCleanup() { if (file.empty()) return; std::error_code e; fs::remove(file, e); fs::remove(file.parent_path(), e); } } input_cleanup{options.luau_package.empty() ? fs::path() : options.output / "input" / "effective.rom"};
+  if (!input_cleanup.file.empty()) { std::error_code stale; fs::remove(input_cleanup.file, stale); }
   if (options.admission_plan) {
     std::ifstream in(*options.admission_plan, std::ios::binary);
     std::string text;

@@ -91,7 +91,7 @@ def main():
 
         def game_build(out, package=None, identity=None, rom_path=rom, extra=()):
             args = ["build", "--rom", rom_path, "--output", out, "--cc", compiler, "--runtime-dir", root / "platforms/genesis", "--optimize", "0", "--runtime-optimize", "1",
-                    "--sdl3-include", sdl / "include", "--sdl3-lib", sdl / "lib"]
+                    "--sdl3-include", sdl / "include", "--sdl3-lib", sdl / "lib", "--test-frame-seam", "1"]
             if package is not None:
                 args += ["--luau-package", package, "--luau-identity", identity]
             return run_cli(*args, *extra, timeout=900)
@@ -204,6 +204,24 @@ def main():
         check(n3["hud_frames"] == 30 and n3["declined"][5] > 80, f"the overlay stopped at the fault and the frames were presented without it: {n3}")
         check(read_bmp(frame_d) == v, "after the fault the final frame is exactly the Vanilla frame")
 
+        # ---- the effective image is what is compiled: a package whose typed edit shortens the busy wait runs a visibly shorter program ----
+        rom_bytes = rom.read_bytes()
+        site = rom_bytes.index(bytes.fromhex("323c0017")) + 3          # the outer loop count of the fixture (24 -> 3)
+        edit_dir = project("luau-hud-edit")
+        (edit_dir / "mod.toml").write_text((edit_dir / "mod.toml").read_text() + '\n[[source]]\nkind = "rom-edit-set"\npath = "edits/main.edits"\n')
+        (edit_dir / "edits").mkdir()
+        (edit_dir / "edits/main.edits").write_text(f"* u8 0x{site:08x} 0x17 0x02\n")
+        pkg_e, doc_e = pack(edit_dir)
+        hud_e = tmp / "hud-edit"
+        r = game_build(hud_e, pkg_e, doc_e["package_identity"])
+        check(r.returncode == 0, "a package with a typed ROM edit builds: " + r.stdout[-300:])
+        st_e = status(hud_e)["luau"]
+        check(st_e["original_sha256"] == rom_sha and st_e["effective_sha256"] != rom_sha, "the build derived an effective image that differs from the original")
+        check(not (hud_e / "input").exists(), "the effective image does not outlive the build")
+        run_e, lines_e = run_game(hud_e, tmp / "hud-edit.bmp")
+        check(lines_e["RUNTIME_NOTES"][0]["virtual_frames"] < van_frames // 2 and lines_e.get("LUAU_MOD_LOADED", [{}])[0].get("package_identity") == doc_e["package_identity"],
+              f"the program that runs is the edited one ({lines_e['RUNTIME_NOTES'][0]['virtual_frames']} frames vs {van_frames})")
+
         # ---- fail closed: nothing unsupported is ignored; a refusal leaves no executable ----
         before = {p.name: hashlib.sha256((hud / p.name).read_bytes()).hexdigest() for p in (hud / "game", hud / "status.json")}
 
@@ -225,6 +243,12 @@ def main():
         refused("capability", "E_LIVE_CAPABILITY", wram_pkg, wram_doc["package_identity"])
         ms_pkg, ms_doc = pack(project("ms", template="luau", platform_id="master-system"))
         refused("platform", "E_LIVE_PLATFORM", ms_pkg, ms_doc["package_identity"])
+        asset_dir = project("asset-mod")
+        (asset_dir / "mod.toml").write_text((asset_dir / "mod.toml").read_text() + '\n[[source]]\nkind = "asset"\npath = "assets/d.bin"\nasset_class = "data"\nformat = "blob"\n')
+        (asset_dir / "assets").mkdir()
+        (asset_dir / "assets/d.bin").write_bytes(b"unused")
+        asset_pkg, asset_doc = pack(asset_dir)
+        refused("payload", "E_LIVE_PAYLOAD", asset_pkg, asset_doc["package_identity"])
         refused("identity", "LUAU_IDENTITY_CHANGED", pkg, "0" * 64)
         other_rom = tmp / "other.rom"
         other_rom.write_bytes(rom.read_bytes() + b"\x60\xfe")

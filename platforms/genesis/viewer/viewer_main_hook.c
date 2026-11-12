@@ -381,7 +381,8 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
                                                 dispatch_allowance == UINT32_MAX ? UINT64_MAX : dispatch_allowance);
   sv_perf_pace_settle(&g_perf, g_pacer.sleep_calls, g_pacer.unthrottled); /* the last boundaries' pacer verdicts */
   sv_perf_finish(&g_perf); /* before the window closes: the session ends when the guest does, not when a stop screen is dismissed */
-  {   /* Automation seam (tests, SEG-137-T007): SEGARECOMP_VIEWER_FINAL_FRAME=<file.bmp> saves the last presented frame exactly as composed for the window (picture, HUD overlay, no menus). */
+#ifdef SEGARECOMP_VIEWER_FINAL_FRAME_SEAM
+  {   /* Automation seam (tests, SEG-137-T007), compiled in only by `segarecomp build --test-frame-seam 1`: SEGARECOMP_VIEWER_FINAL_FRAME=<file.bmp> saves the last presented frame exactly as composed for the window (picture, HUD overlay, no menus). */
     const char *dump = getenv("SEGARECOMP_VIEWER_FINAL_FRAME");
     if (dump != NULL && *dump != '\0') {
       SDL_Surface *shot = sv_host_capture_output(genesis_sdl3_viewer_sv_host(sdl));
@@ -390,6 +391,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
       if (shot != NULL) SDL_DestroySurface(shot);
     }
   }
+#endif
   runtime->live_frame_observer = NULL;
   genesis_runtime_write_notes(runtime, g_raster_capture.render_rejections, g_raster_capture.vram_journal_overflows, stderr);
   runtime->live_raster = NULL;
