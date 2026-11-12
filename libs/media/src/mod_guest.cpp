@@ -914,11 +914,15 @@ TargetImage build_target_image(const Manifest &m, const std::map<std::string, st
     if (rev == m.revisions.end()) fail("E_IMAGE_MISMATCH", "the original image is not one of the declared target revisions");
     out.revision = rev->label;
     out.image.assign(original.begin(), original.end());
+    std::vector<Range> authored;   // every byte range this mod writes (edits and injected blocks)
     if (const Payload *edits = payload_of(m, "rom-edit-set")) {
       const EditedImage e = apply_rom_edits(m, file_of(files, edits), rev->label, original);
       if (!e.ok) { out.rejection = e.rejection; out.image.clear(); return out; }
       out.image = e.image;
       out.edits_applied = e.applied;
+      const EditRanges er = rom_edit_ranges(m, file_of(files, edits), rev->label);
+      if (!er.ok) { out.rejection = er.rejection; out.image.clear(); return out; }
+      authored = er.ranges;
     }
     if (const Payload *gp = payload_of(m, "guest-asm")) {
       const Cpu cpu = cpu_of(m, gp->cpu);
@@ -940,6 +944,7 @@ TargetImage build_target_image(const Manifest &m, const std::map<std::string, st
       }
       for (const OutBlock &b : a.blocks) {
         std::copy(b.bytes.begin(), b.bytes.end(), out.image.begin() + static_cast<std::ptrdiff_t>(b.offset));
+        authored.push_back({b.offset, b.offset + b.bytes.size()});
         ++out.blocks_injected;
         out.injected_bytes += b.bytes.size();
       }
@@ -947,6 +952,13 @@ TargetImage build_target_image(const Manifest &m, const std::map<std::string, st
     // header repair (ADR 0293): only the documented Genesis header; `none` is an explicit opt-out; absent = repair when the original verifies and the image changed
     const bool changed = !std::equal(out.image.begin(), out.image.end(), original.begin(), original.end());
     const bool original_ok = m.platform == "genesis" && genesis_header_verifies(original);
+    // Header fields the selected policy will rewrite must not also be authored: the repair would silently discard that write (ADR 0293 section 5).
+    const bool repairs_checksum = m.header_repair == "genesis-checksum" || (m.header_repair.empty() && changed && original_ok);
+    const bool repairs_end = m.header_repair == "genesis-checksum";
+    for (const Range &a : authored) {
+      if ((repairs_checksum && a.start < 0x190 && 0x18E < a.end) || (repairs_end && a.start < 0x1A8 && 0x1A4 < a.end))
+        fail("E_HEADER_FIELD_COLLISION", "an edit or injected block overlaps a header field that the selected header repair rewrites (checksum 0x18E-0x18F" + std::string(repairs_end ? ", ROM end 0x1A4-0x1A7" : "") + "); declare header_repair = \"none\" to write it yourself");
+    }
     if (m.header_repair == "genesis-checksum") {
       if (m.platform != "genesis") fail("E_HEADER_UNSUPPORTED", "header repair exists only for the Genesis header");
       if (out.image.size() < 0x200 || (out.image.size() & 1) != 0 || out.image.size() > 0x400000 || be32(out.image, 0x1A0) != 0) fail("E_HEADER_UNSUPPORTED", "the image does not carry a supported Genesis header (even size 0x200..4 MiB, ROM start 0)");

@@ -314,6 +314,69 @@ cli.check(rc == 1 and doc["class"] == "E_MAPPER_UNSUPPORTED", f"an SSF cartridge
 refused("header repair on another platform", "E_HEADER_UNSUPPORTED", "mod", "check", project(Z_ASM, platform="master-system", cpu="z80", revs=[("rev-a", sha(SMS), "rom_only")], extra='[build]\nheader_repair = "genesis-checksum"\n'))
 refused("unknown header_repair value", "E_FIELD_VALUE", "mod", "check", hproject('[build]\nheader_repair = "crc"\n'))
 
+# ---- header fields managed by the selected repair policy cannot also be authored (checksum 0x18E-0x18F; ROM end 0x1A4-0x1A7 for explicit repair)
+def edit_at(img, off, n, new_hex):
+    return "* bytes 0x%08x %s %s\n" % (off, img[off:off + n].hex(), new_hex)
+
+
+def hdr_apply(img, edits, extra="", asm=None):
+    return apply(project(asm or "free * 0x300 0x40 0xff\norg * 0x300\n  nop\n", revs=[("rev-a", sha(img), None)], edits=edits, extra=extra), img)
+
+
+STRICT, NONE = '[build]\nheader_repair = "genesis-checksum"\n', '[build]\nheader_repair = "none"\n'
+for what, extra, off, n, expect in [
+    ("automatic repair: edit on the checksum", "", 0x18E, 2, "E_HEADER_FIELD_COLLISION"),
+    ("automatic repair: edit straddling the checksum start", "", 0x18D, 2, "E_HEADER_FIELD_COLLISION"),
+    ("automatic repair: ROM end is not managed", "", 0x1A4, 4, None),
+    ("explicit repair: edit on the checksum", STRICT, 0x18F, 1, "E_HEADER_FIELD_COLLISION"),
+    ("explicit repair: edit on the ROM end", STRICT, 0x1A6, 2, "E_HEADER_FIELD_COLLISION"),
+    ("explicit repair: edit adjacent below the checksum", STRICT, 0x18C, 2, None),
+    ("explicit repair: edit adjacent between the fields", STRICT, 0x190, 4, None),
+    ("explicit repair: edit adjacent above the ROM end", STRICT, 0x1A8, 4, None),
+    ("no repair: edit on the checksum is the author's", NONE, 0x18E, 2, None),
+    ("no repair: edit on the ROM end is the author's", NONE, 0x1A4, 4, None),
+]:
+    rc, doc, out = hdr_apply(HDR, edit_at(HDR, off, n, "ab" * n), extra)
+    if expect:
+        cli.check(rc == 1 and doc["class"] == expect, f"{what}: expected {expect}, got {doc}")
+    else:
+        cli.check(rc == 0 and out[off:off + n] == bytes([0xAB]) * n or (what.startswith("automatic repair: ROM end") and rc == 0 and out[off:off + n] == bytes([0xAB]) * n), f"{what}: the authored bytes survive: {doc}")
+# default repair does not apply to a header that never verified, so there nothing is managed
+rc, doc, out = hdr_apply(BAD, edit_at(BAD, 0x18E, 2, "abab"))
+cli.check(rc == 0 and out[0x18E:0x190] == b"\xab\xab", f"unverified original, default policy: the checksum edit stands: {doc}")
+# injected blocks follow the same rule
+Z = bytearray(HDR)
+Z[0x188:0x198] = bytes(16)
+Z = bytes(Z)
+Z_FREE = lambda start, length: "free * 0x%x 0x%x 0x00\norg * 0x%x\n  nop\n" % (start, length, start)
+rc, doc, _ = hdr_apply(Z, "", STRICT, Z_FREE(0x18E, 8))
+cli.check(rc == 1 and doc["class"] == "E_HEADER_FIELD_COLLISION", f"explicit repair: a block over the checksum is refused: {doc}")
+rc, doc, out = hdr_apply(Z, "", STRICT, Z_FREE(0x190, 8))
+cli.check(rc == 0 and out[0x190:0x192] == bytes.fromhex("4e71") and doc["header_repaired"] is True, f"explicit repair: an adjacent block is kept and the header repaired: {doc}")
+rc, doc, out = hdr_apply(Z, "", NONE, Z_FREE(0x18E, 8))
+cli.check(rc == 0 and out[0x18E:0x190] == bytes.fromhex("4e71"), f"no repair: a block over the header is the author's: {doc}")
+
+# ---- the output must never be an input image (path, equivalent path, symlink, hard link); an unrelated artifact is still replaced
+import os
+src = write(tmp / "guard" / "src.bin", A)
+gd = project(ASM, extra=syms)
+for what, outp in [("same path", src), ("equivalent path", tmp / "guard" / ".." / "guard" / "src.bin")]:
+    for cmd in (("mod", "apply", gd, "--rom", src, "--out", outp), ("mod", "bps", gd, "--rom", src, "--out", outp), ("mod", "pack", gd, "--rom", src, "--out", outp)):
+        refused(f"{cmd[1]} --out {what}", "E_OUTPUT_IS_INPUT", *cmd)
+        cli.check(src.read_bytes() == A, f"{cmd[1]} --out {what}: the original image is byte-identical after rejection")
+link = tmp / "guard" / "hard.bin"
+os.link(src, link)
+sym = tmp / "guard" / "sym.bin"
+os.symlink(src, sym)
+for what, outp in [("hard link", link), ("symlink", sym)]:
+    for cmd in (("mod", "apply", gd, "--rom", src, "--out", outp), ("mod", "bps", gd, "--rom", src, "--out", outp), ("mod", "pack", gd, "--rom", src, "--out", outp)):
+        refused(f"{cmd[1]} --out {what}", "E_OUTPUT_IS_INPUT", *cmd)
+        cli.check(src.read_bytes() == A and link.read_bytes() == A, f"{cmd[1]} --out {what}: the original image is byte-identical after rejection")
+other = write(tmp / "guard" / "old-artifact.bin", b"stale artifact")
+ok("an unrelated existing output is replaced", "mod", "apply", gd, "--rom", src, "--out", other)
+cli.check(other.read_bytes() == apply(gd, A)[2] and src.read_bytes() == A, "the unrelated artifact was replaced and the source untouched")
+ok("a new output path", "mod", "bps", gd, "--rom", src, "--out", tmp / "guard" / "fresh.bps")
+
 # the declaration decides identity: two packages differing only in header_repair are different packages
 da, db = hproject(), hproject('[build]\nheader_repair = "none"\n')
 ia, ib = ok("check default", "mod", "check", da), ok("check none", "mod", "check", db)

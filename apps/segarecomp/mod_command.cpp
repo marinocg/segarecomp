@@ -213,6 +213,18 @@ int install(const fs::path &package_path, const fs::path &rom, const fs::path &l
   return 0;
 }
 
+// Fail-closed guard shared by every command that writes an output next to input images: the output must not be the same file as any input (same path, equivalent path, symlink or hard link).
+// Checked before anything is written; an unrelated existing output is still replaced as before.
+std::optional<mod::Rejection> output_clobbers_input(const fs::path &out, const std::vector<fs::path> &inputs) {
+  std::error_code ec;
+  if (!fs::exists(out, ec)) return std::nullopt;   // a new file cannot be an existing input
+  for (const fs::path &in : inputs) {
+    std::error_code e2;
+    if (fs::exists(in, e2) && fs::equivalent(out, in, e2) && !e2) return mod::Rejection{"E_OUTPUT_IS_INPUT", "--out is the same file as an input; refusing to overwrite it"};
+  }
+  return std::nullopt;
+}
+
 // Loads a project directory (through the full check pipeline) or a package file.
 std::optional<mod::Rejection> load_package(const fs::path &target, mod::Package &p) {
   std::error_code ec;
@@ -236,6 +248,7 @@ std::string warnings_json(const std::vector<std::string> &w) {
 // `mod apply`: the verified target image of a project or package (typed ROM edits, injected guest code, header repair; ADR 0290/0292/0293) built from the exact original image of ONE declared
 // revision (selected by the image's digest). Every assertion is made first; a mismatch, collision, forbidden instruction or unsupported header refuses and writes nothing.
 int apply_edits(const fs::path &target, const fs::path &rom, const fs::path &out) {
+  if (const auto g = output_clobbers_input(out, {rom, target})) return refuse(*g);
   mod::Package p;
   if (const auto r = load_package(target, p)) return refuse(*r);
   std::vector<std::uint8_t> image;
@@ -254,6 +267,7 @@ int apply_edits(const fs::path &target, const fs::path &rom, const fs::path &out
 
 // `mod bps`: the deterministic BPS of original -> verified target (SEG-136-T006), proved by applying it back before it is written.
 int build_bps_file(const fs::path &target, const fs::path &rom, const fs::path &out) {
+  if (const auto g = output_clobbers_input(out, {rom, target})) return refuse(*g);
   mod::Package p;
   if (const auto r = load_package(target, p)) return refuse(*r);
   std::vector<std::uint8_t> image;
@@ -499,6 +513,8 @@ int segarecomp_mod_command(int argc, char **argv) {
     if (c.package.size() > mod::kMaxArchiveBytes) return refuse({"E_ARCHIVE_SIZE", "the package would exceed the archive limit"});
     bool native = false;
     for (const mod::Payload &p : m.payloads) native = native || p.kind == "native-c11";
+    if ((sub == "pack" || sub == "build") && !roms.empty() && !out.empty())
+      if (const auto g = output_clobbers_input(out, roms)) return refuse(*g);
     std::string verified = "[";   // SEG-136-T006: with --rom, every named image is built, BPS-encoded and round-trip verified BEFORE the package is written
     if ((sub == "pack" || sub == "build") && !roms.empty()) {
       if (!mod::has_target_edits(m)) return refuse({"E_FIELD_MISSING", "--rom verification needs a rom-edit-set or guest-asm payload"});

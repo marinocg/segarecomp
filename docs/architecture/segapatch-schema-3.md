@@ -154,7 +154,7 @@ Schema 3 fixes only the envelope: `kind`, `kind_version`, `path`, `size`, `sha25
 | `E_GUEST_SYNTAX`, `E_GUEST_REVISION`, `E_GUEST_OPERAND`, `E_GUEST_LABEL_UNKNOWN`, `E_GUEST_LABEL_DUPLICATE`, `E_GUEST_VALUE_RANGE`, `E_GUEST_ALIGN`, `E_GUEST_ADDRESS` | `guest-asm` source and placement (ADR 0292) |
 | `E_GUEST_BRANCH_RANGE`, `E_GUEST_BRANCH_TARGET`, `E_GUEST_FORBIDDEN_INSTRUCTION`, `E_GUEST_WRITE_OUTSIDE_RAM` | static validation of the emitted code (ADR 0292) |
 | `E_GUEST_OUTSIDE_FREE_RANGE`, `E_GUEST_COLLISION`, `E_GUEST_RANGE`, `E_GUEST_RANGE_NOT_FREE`, `E_MAPPER_UNSUPPORTED`, `E_HEADER_UNSUPPORTED` | free ranges, collisions, image-dependent range checks, mappers and header repair (ADR 0293) |
-| `E_BPS_BUILD`, `E_BPS_INVALID`, `E_BPS_STALE` | `mod bps`, `mod verify-bps` (ADR 0293) |
+| `E_BPS_BUILD`, `E_BPS_INVALID`, `E_BPS_STALE`, `E_HEADER_FIELD_COLLISION`, `E_OUTPUT_IS_INPUT` | `mod bps`, `mod verify-bps` (ADR 0293) |
 | `E_TRUST_UNDECLARED` | a `native-c11` payload without `author`/`abi` |
 | `E_LIMIT_EXCEEDS_POLICY`, `E_LUAU_BYTECODE` | requested limit above policy; a `luau-source` payload that is not Luau text (section 4, Luau policy section 2) |
 
