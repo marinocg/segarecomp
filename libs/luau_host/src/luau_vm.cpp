@@ -574,7 +574,9 @@ bool serialize_value(lua_State *L, int index, unsigned depth, std::vector<std::u
             return false;
           }
         } else if (kt == LUA_TSTRING) {
-          k.text = lua_tostring(L, -2);
+          std::size_t klen = 0;
+          const char *kp = lua_tolstring(L, -2, &klen);   // length-aware: a key may contain NUL bytes
+          k.text.assign(kp, klen);
         } else {
           error = "state contains a key that is neither a number nor a string";
           return false;

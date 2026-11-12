@@ -378,6 +378,12 @@ void test_state() {
     Mod b = start("function save() local t = {} t[1] = 'a' t[3] = 'c' t.a = 1 t.b = 2 return t end");
     check(a.vm->save_state().blob == b.vm->save_state().blob, "state bytes do not depend on insertion order");
   }
+  {   // string keys may contain NUL bytes: they survive the round trip and stay distinct
+    const std::string nul = "function save() return { ['a\\0b'] = 1, ['a\\0c'] = 2, a = 3 } end\nfunction load(v) got = v['a\\0b'] .. ':' .. v['a\\0c'] .. ':' .. v.a end";
+    Mod a = start(nul), b = start(nul);
+    const luau::StateResult r = a.vm->save_state();
+    check(r.ok && b.vm->load_state(r.blob).ok && b.vm->describe_global("got") == "string:1:2:3", "NUL bytes in state keys round-trip");
+  }
   {   // a mod without save() has empty state; an empty blob restores nothing
     Mod a = start("x = 1");
     const luau::StateResult e = a.vm->save_state();
