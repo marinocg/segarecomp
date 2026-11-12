@@ -33,6 +33,42 @@ typedef struct GenesisZ80BankView {
   int (*write)(void *context, uint32_t address24, uint8_t value);
 } GenesisZ80BankView;
 
+/* ADR 0291: a verified native replacement of one sound driver (a plain C11 re-implementation of its observable behaviour, never an interpreter of the
+ * original Z80 bytes). Opt-in: a machine without it (the default, every other program) behaves exactly as before. When the image an epoch activates is
+ * identified by `identify` (a catalog of verified activation signatures), the machine does not run the compiled Z80 image: `run_to` drives the
+ * replacement on the same guest clock, `start` is called at every activation (a /RESET restart included), `resume` when the bus comes back. A fault
+ * latches the sound CPU as faulted (GENESIS_DIAG_Z80_NATIVE_DRIVER_FAULT): the replacement then stays silent for the run. There is no fallback. */
+typedef struct GenesisZ80NativeReport {
+  const char *driver;    /* "gems" */
+  const char *version;   /* verified catalog version of the bound image */
+  const char *fault;     /* stable fault name, "none" when healthy */
+  uint64_t commands, sequences, dac_samples, ticks, missed_ticks;
+  uint32_t activations;  /* images bound to the replacement during the run */
+} GenesisZ80NativeReport;
+
+struct GenesisZ80Machine;
+typedef struct GenesisZ80NativeDriver {
+  void *context;
+  int (*identify)(void *context, const uint8_t signature[32], const char **version);   /* 1 = verified image */
+  void (*start)(void *context, struct GenesisZ80Machine *machine, uint64_t master_ticks);
+  void (*suspend)(void *context, uint64_t master_ticks);   /* BUSREQ or /RESET asserted: the Z80 stops (optional, may be NULL) */
+  void (*resume)(void *context, uint64_t master_ticks);
+  int (*run_to)(void *context, uint64_t master_ticks);                                  /* 0 healthy, else a fault; the driver stays inert */
+  void (*report)(const void *context, GenesisZ80NativeReport *out);
+  void (*digest)(const void *context, uint8_t out[32]);
+  /* Save states (ADR 0291). `state_put` writes the driver's complete canonical state (0 = it does not fit); `state_stage` decodes and validates a payload into PRIVATE storage
+   * against the guest clock and the chip's Timer A schedule and returns it (NULL = refused; nothing live is touched); `state_commit` installs staged state and rebinds the live host
+   * (it cannot fail and writes to no chip); `state_discard` drops staged state that was not committed. */
+  uint32_t (*state_put)(const void *context, uint8_t *out, uint32_t capacity);
+  void *(*state_stage)(void *context, const uint8_t *in, uint32_t length, uint64_t master_ticks, uint64_t chip_timer_a_expiry);
+  void (*state_commit)(void *context, void *staged);
+  void (*state_discard)(void *context, void *staged);
+  const char *driver;               /* "gems" */
+  uint32_t implementation_version;  /* the replacement's behaviour version (part of the build identity and of a state's identity) */
+  uint32_t state_schema;            /* the layout of the payload `state_put` writes */
+} GenesisZ80NativeDriver;
+#define GENESIS_Z80_NATIVE_STATE_MAX 4096U
+
 typedef struct GenesisZ80Machine {
   Z80Runtime cpu;
   GenesisRuntime *runtime;
@@ -49,6 +85,11 @@ typedef struct GenesisZ80Machine {
   GenesisZ80UnknownImageFunction on_unknown_image;
   void *unknown_image_context;
   const GenesisZ80BankView *bank_view;    /* SEG-114: NULL = the Genesis cartridge/work-RAM view */
+  const GenesisZ80NativeDriver *native_driver;  /* ADR 0291: NULL = no native replacement is available to this program */
+  uint8_t native_active;                  /* the bound image is served by the replacement (never by compiled Z80 code) */
+  uint32_t native_activations;
+  const char *native_version;             /* version text of the last bound verified image */
+  uint8_t native_signature[32];           /* the activation signature of the image the replacement is bound to (all zero while it is not) */
   /* SEG-114: a build pass records an unknown image (on_unknown_image) and goes on with the Z80 quiesced instead of stopping; the host owns
    * the consequence (it must not let the 68K observe the unexecuted Z80). 0 = the Genesis behaviour (typed stop z80_unknown_image). */
   uint8_t quiesce_unknown_image;

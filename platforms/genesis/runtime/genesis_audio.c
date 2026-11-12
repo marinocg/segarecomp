@@ -17,6 +17,7 @@ static int audio_psg_write(void *context, GenesisRuntime *runtime, uint8_t value
   (void)runtime;
   psg_advance(audio, master_ticks);
   if (sn76489_write(&audio->psg, value) == SN76489_WRITE_DATA_BEFORE_LATCH) ++audio->psg_data_before_latch;
+  if (audio->write_tap != NULL) audio->write_tap(audio->write_tap_context, audio->tap_native ? 'p' : 'P', 0U, value, master_ticks);
   if (audio->trace_count < GENESIS_AUDIO_TRACE_CAPACITY) {
     audio->trace_ticks[audio->trace_count] = master_ticks;
     audio->trace_bytes[audio->trace_count] = value;
@@ -56,6 +57,7 @@ static int audio_ym_write(void *context, GenesisRuntime *runtime, uint32_t port,
   GenesisAudio *audio = (GenesisAudio *)context;
   (void)runtime;
   ym2612_write(audio->ym, port, value, master_ticks);
+  if (audio->write_tap != NULL) audio->write_tap(audio->write_tap_context, audio->tap_native ? 'y' : 'Y', port, value, master_ticks);
   ym_trace(audio, master_ticks, (uint8_t)port, value);
   ++audio->ym_writes;
   if ((port & 1U) == 0U) {
@@ -77,6 +79,7 @@ static void audio_ym_reset(void *context, GenesisRuntime *runtime, uint64_t mast
   GenesisAudio *audio = (GenesisAudio *)context;
   (void)runtime;
   ym2612_reset(audio->ym, master_ticks);
+  if (audio->write_tap != NULL) audio->write_tap(audio->write_tap_context, 'R', 0U, 0U, master_ticks);
   ym_trace(audio, master_ticks, 0xFFU, 0U);
 }
 

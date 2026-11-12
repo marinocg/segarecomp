@@ -14,5 +14,8 @@ uint32_t genesis_z80_image_for_signature(const uint8_t signature[32]);
 /* SEG-131: the content hash of image `ordinal` (1-based): 1 and 32 bytes in `out`, or 0 when there is no such image (also when the registry is empty, where the
  * hash table itself does not exist). Save states name the Z80 images they execute by this hash, never by ordinal. */
 int genesis_z80_image_content_hash(uint32_t ordinal, uint8_t out[32]);
+/* ADR 0291: the activation signature of image `ordinal` (1-based): 1 and 32 bytes in `out`, or 0 when there is no such image. A program with a native sound driver uses it to decide, from the
+ * image alone, whether this executable must serve that image through the replacement. */
+int genesis_z80_image_signature(uint32_t ordinal, uint8_t out[32]);
 
 #endif

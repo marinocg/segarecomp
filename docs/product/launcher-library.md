@@ -46,8 +46,8 @@ file, the build cache or the product: no placeholder values.
   (USA NTSC | Japan NTSC | Europe PAL, applied at launch, never a rebuild; PAL still runs on the 60 Hz schedule), or for Master System the **cartridge
   mapper** (nothing preselected, never guessed; a sidecar manifest declares it) and the one console profile. A state line says what the executable on disk
   actually is (from `status.json`: effective policy and any Optimized fallback), whether the selection matches it, and when a mode switch left the other
-  mode's executable on disk ("switch back to play it"). **Advanced build options** (H-interrupt alias discovery) sit behind an expander with their consequences. Below: **Build provenance** (SHA-256 with Copy, ROM file and folder, last recompiled, last
-  played and last run result, build version and toolchain, build identity with the selected options, effective policy details, diagnostics) and the build
+  mode's executable on disk ("switch back to play it"). **Advanced build options** (H-interrupt alias discovery; the experimental **native GEMS audio replacement**, ADR 0291) sit behind an expander with their consequences. Below: **Build provenance** (SHA-256 with Copy, ROM file and folder, last recompiled, last
+  played and last run result, build version and toolchain, build identity with the selected options, effective policy details, **Audio implementation**, diagnostics) and the build
   log. A **storage** rail shows the game's measured footprint (native executable, generated C, objects, logs, metadata, other build files) with *Clean
   intermediates* and *Manage storage*; for a metadata-only game it says the history is kept and a new build is needed to play.
 * **Status** is computed from the build identity, never from a title: *Ready*, *Not built*, *Metadata only* (you removed the build on purpose; "rebuild
@@ -71,6 +71,24 @@ file, the build cache or the product: no placeholder values.
   arrives after the build has been published or has failed is refused (that outcome stands). A *queued* game is removed with **Unqueue** / *Remove from build queue*; it has
   started nothing. Closing the window still waits for a running build.
 
+
+## Audio implementation (Genesis, ADR 0291)
+
+The **Audio implementation** row of Build provenance says how the executable Play will launch implements sound, from that build's own `status.json` (`audio_implementation`)
+and nothing else - never from the title, the file name or the current selection:
+
+| Row | Meaning |
+| --- | --- |
+| Native GEMS 2.5 (the driver's version) | The build **selected the verified native GEMS driver by itself**: the game uploads a verified GEMS driver image and the original generated-native Z80 of that game could not run it. The detail lists: automatically selected for a verified GEMS driver image (and why); independently reimplemented in native C11; verified against the original driver's command and chip-access behavior (*reference-checked*; or *build-qualified only*); the original Z80 not executed for that driver; save states and rewind supported (an older build that predates them says so); timing event-accurate rather than instruction-cycle-accurate; the coverage and implementation version; and what the build's own start-up run did (commands, sequences, DAC samples, a stop on malformed data if any). It never says that a play session sounded right. A developer override is worded as such. |
+| Original Z80 (generated-native) | The game's own sound driver runs as generated native code. Compiled structural alternatives, if any, are counted. Not a replacement. If that driver could not run (the Z80 is isolated, no music support) and no verified replacement applies, the detail starts with **Degraded:** and says so separately. |
+| Not recorded | No playable build of the selection, or a build that recorded nothing (an older release, an imported executable). |
+| Unknown | The record was malformed or not recognised; nothing is assumed. |
+
+There is **no option** for any of this. The build decides: it keeps the original Z80 unless a verified GEMS image is uploaded *and* the original is recorded as failing, in which case it
+builds the same program with the replacement (a second, deterministic pass; ADR 0291 "Decision 4"). The launcher passes no sound argument to the build, an older catalog's
+`native_gems_audio` key is ignored (and dropped on the next save), and the choice is not part of a cache identity - only what the product ships to choose from is (the
+replacement's implementation version and the verified-driver catalog revision), so an updated product rebuilds rather than reuses an older program. Older records (schema 1) are
+still read: they show what they recorded and nothing more (an older native record says save states are not available in that build).
 
 ## Cartridge hardware (Genesis)
 

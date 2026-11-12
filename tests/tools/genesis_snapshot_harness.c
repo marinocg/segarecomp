@@ -29,8 +29,46 @@
 
 static GenesisRuntime runtime;
 #ifdef SEGARECOMP_GENESIS_SOUND
-static GenesisZ80Machine machine;
-static GenesisAudio audio;
+#ifdef SEGARECOMP_SNAPSHOT_NATIVE   /* the machine and devices are the production sound subsystem's, with the native GEMS replacement bound (ADR 0291) */
+#include "genesis_sound.h"
+static GenesisZ80Machine *machine_ptr;
+static GenesisAudio *audio_ptr;
+#define g_machine (*machine_ptr)
+#define g_audio (*audio_ptr)
+static uint8_t cart_data[0x10000];
+static GenesisOwnedCartridgeRegion cart_region;
+
+/* Project-authored cartridge resources of the same shape the driver unit tests use: patches {0 digital, 1 FM, 2 PSG}, sequences {0 digital note, 1 FM note, 2 off the cartridge, 4 PSG note,
+ * 5 PSG loop}, sample 0 (3000 bytes, rate 5). No commercial data. */
+static void put16(uint8_t *q, unsigned v) { q[0] = (uint8_t)v; q[1] = (uint8_t)(v >> 8); }
+static void cart_install(int digital_long_loop) {
+  static const uint8_t t0[] = {0xC0, 0x6A, 100, 0x6D, 0x61, 0x00, 0xC2, 0x30, 0x60};
+  static const uint8_t t1[] = {0xC0, 0x6A, 100, 0x6D, 0x61, 0x01, 0xC2, 0x30, 0x60};
+  static const uint8_t t2[] = {0xC0, 0x64, 3};
+  static const uint8_t t4[] = {0xC0, 0x6A, 100, 0x6D, 0x61, 0x02, 0xC1, 0x3C, 0x60};
+  static const uint8_t t5[] = {0xC0, 0x6A, 100, 0x6D, 0x61, 0x02, 0x64, 0x02, 0xC1, 0x3C, 0x65, 0x60};
+  uint8_t *p;
+  unsigned i;
+  memset(cart_data, 0, sizeof cart_data);
+  for (i = 0; i < 4U; ++i) put16(cart_data + 0x1000 + 2U * i, 8U + 39U * i);
+  cart_data[0x1008] = 1; cart_data[0x1009] = 4;
+  cart_data[0x1000 + 8 + 78] = 2; cart_data[0x1000 + 8 + 78 + 2] = 0x10; cart_data[0x1000 + 8 + 78 + 3] = 2; cart_data[0x1000 + 8 + 78 + 5] = 0x10; cart_data[0x1000 + 8 + 78 + 6] = 0x10;
+  for (i = 0; i < 6U; ++i) put16(cart_data + 0x2000 + 2U * i, 16U + 3U * i);
+  p = cart_data + 0x2000 + 16;
+  p[0] = 1; put16(p + 1, 0x40); p[3] = 1; put16(p + 4, 0x60); p[6] = 1; put16(p + 7, 0xDFF0); p[12] = 1; put16(p + 13, 0xA0); p[15] = 1; put16(p + 16, 0xC0);
+  memcpy(cart_data + 0x2040, t0, sizeof t0); memcpy(cart_data + 0x2060, t1, sizeof t1); memcpy(cart_data + 0x2000 + 0xDFF0, t2, sizeof t2);
+  memcpy(cart_data + 0x20A0, t4, sizeof t4); memcpy(cart_data + 0x20C0, t5, sizeof t5);
+  cart_data[0x3000] = digital_long_loop ? 0x15 : 0x05; cart_data[0x3001] = 0x00; cart_data[0x3002] = 0x10; put16(cart_data + 0x3006, 3000U);
+  if (digital_long_loop) put16(cart_data + 0x3008, 100U);
+  for (i = 0; i < 3000U + 256U; ++i) cart_data[0x4000 + i] = (uint8_t)(i * 7U + 3U);
+  cart_region.begin = 0x100000U; cart_region.end = 0x100000U + (uint32_t)sizeof cart_data; cart_region.data = cart_data; cart_region.length = (uint32_t)sizeof cart_data;
+  runtime.owned_regions = &cart_region;
+  runtime.owned_region_count = 1U;
+}
+#else
+static GenesisZ80Machine g_machine;
+static GenesisAudio g_audio;
+#endif
 #endif
 static GenesisSnapshotBuffer slots[SLOTS];
 static GenesisSnapshotIdentity identity;
@@ -42,8 +80,8 @@ static GenesisSnapshotMachine snap_machine(void) {
   memset(&m, 0, sizeof m);
   m.runtime = &runtime;
 #ifdef SEGARECOMP_GENESIS_SOUND
-  m.z80 = &machine;
-  m.audio = &audio;
+  m.z80 = &g_machine;
+  m.audio = &g_audio;
 #endif
   return m;
 }
@@ -70,9 +108,9 @@ static void fullhash(uint8_t out[32]) {
     genesis_sha256_update(&sha, runtime.cartridge_sram_storage, runtime.cartridge_sram->storage_bytes);
 #ifdef SEGARECOMP_GENESIS_SOUND
   {
-    GenesisZ80Machine z = machine;
+    GenesisZ80Machine z = g_machine;
     GenesisAudio *a = (GenesisAudio *)malloc(sizeof *a);
-    uint64_t ym = ym2612_state_digest(audio.ym);
+    uint64_t ym = ym2612_state_digest(g_audio.ym);
     uint32_t i, k;
     memset(&z.count_reset_assert, 0, (size_t)((char *)(&z + 1) - (char *)&z.count_reset_assert));
     z.cpu.state.deadline = 0U;
@@ -80,7 +118,17 @@ static void fullhash(uint8_t out[32]) {
     z.cpu.outcome = (Z80Outcome)0;
     memset(z.cpu.live_code, 0, sizeof z.cpu.live_code);
     genesis_sha256_update(&sha, (const uint8_t *)&z, (uint32_t)sizeof z);
-    memcpy(a, &audio, sizeof *a);
+#ifdef SEGARECOMP_SNAPSHOT_NATIVE
+    {  /* the replacement's complete canonical state, and whether it serves the image */
+      uint8_t native[32];
+      genesis_sha256_update(&sha, &g_machine.native_active, 1U);
+      if (g_machine.native_driver != NULL && g_machine.native_activations != 0U) {
+        g_machine.native_driver->digest(g_machine.native_driver->context, native);
+        genesis_sha256_update(&sha, native, 32U);
+      }
+    }
+#endif
+    memcpy(a, &g_audio, sizeof *a);
     memset(a->trace_ticks, 0, sizeof a->trace_ticks);
     memset(a->trace_bytes, 0, sizeof a->trace_bytes);
     memset(a->ym_trace_ticks, 0, sizeof a->ym_trace_ticks);
@@ -92,7 +140,7 @@ static void fullhash(uint8_t out[32]) {
     a->mixer.sink = NULL; a->mixer.sink_context = NULL; a->ym = NULL; a->runtime = NULL; memset(&a->hooks, 0, sizeof a->hooks); a->psg.config.levels = NULL;
     for (k = 0U; k < 2U; ++k) {
       GenesisMixerSource *s = k == 0U ? &a->mixer.ym : &a->mixer.psg;
-      const GenesisMixerSource *o = k == 0U ? &audio.mixer.ym : &audio.mixer.psg;
+      const GenesisMixerSource *o = k == 0U ? &g_audio.mixer.ym : &g_audio.mixer.psg;
       uint8_t word[4];
       memset(s->fifo, 0, sizeof s->fifo);
       s->fifo_head = 0U;
@@ -136,8 +184,13 @@ int main(int argc, char **argv) {
   runtime.sr = 0x2700U;
   runtime.pc = 0x00000200U;
 #ifdef SEGARECOMP_GENESIS_SOUND
-  genesis_z80_machine_attach(&machine, &runtime);
-  genesis_audio_attach(&audio, &runtime);
+#ifdef SEGARECOMP_SNAPSHOT_NATIVE
+  machine_ptr = genesis_sound_attach(&runtime);
+  audio_ptr = genesis_sound_audio_mutable();
+#else
+  genesis_z80_machine_attach(&g_machine, &runtime);
+  genesis_audio_attach(&g_audio, &runtime);
+#endif
 #endif
   if (argc > 2 && (strcmp(argv[2], "sram") == 0 || strcmp(argv[2], "eeprom") == 0)) {
     const int eeprom = strcmp(argv[2], "eeprom") == 0;
@@ -158,6 +211,19 @@ int main(int argc, char **argv) {
     if (strcmp(op, "retire") == 0) {
       GenesisControlTransfer t = genesis_runtime_retire_m68k_instruction(&runtime, (uint32_t)strtoul(line + 7, NULL, 10), 0U);
       if (t.kind == GENESIS_STOP) { printf("STOP %d %d\n", (int)t.stop.stop_class, (int)t.stop.diagnostic_category); return 0; }
+#ifdef SEGARECOMP_SNAPSHOT_NATIVE
+    } else if (strcmp(op, "cart") == 0) {
+      cart_install((int)a);
+    } else if (strcmp(op, "denative") == 0) {   /* test only: the machine keeps the verified image bound but no longer says the replacement serves it (an inconsistent live state, to be captured) */
+      g_machine.native_active = 0U;
+    } else if (strcmp(op, "native") == 0) {
+      GenesisZ80NativeReport rep;
+      memset(&rep, 0, sizeof rep);
+      if (g_machine.native_driver != NULL) g_machine.native_driver->report(g_machine.native_driver->context, &rep);
+      printf("NATIVE active=%u activations=%u fault=%s commands=%llu sequences=%llu dac=%llu ticks=%llu sound_fault=%d ym_writes=%llu psg_writes=%llu\n", (unsigned)g_machine.native_active,
+             (unsigned)g_machine.native_activations, rep.fault != NULL ? rep.fault : "-", (unsigned long long)rep.commands, (unsigned long long)rep.sequences,
+             (unsigned long long)rep.dac_samples, (unsigned long long)rep.ticks, (int)g_machine.sound_fault, (unsigned long long)g_audio.ym_writes, (unsigned long long)g_audio.psg_writes);
+#endif
     } else if (strcmp(op, "quantum") == 0) {
       runtime.z80_sync_quantum = (uint32_t)strtoul(line + 8, NULL, 10);
     } else if (strcmp(op, "snap") == 0) {
@@ -242,12 +308,12 @@ int main(int argc, char **argv) {
       uint8_t digest[32];
       GenesisRuntimeStop stop;
       memset(&stop, 0, sizeof stop);
-      (void)genesis_z80_machine_run_to(&machine, runtime.scheduler.master_ticks, &stop);
-      genesis_audio_sync(&audio, runtime.scheduler.master_ticks);
-      genesis_mixer_digest(&audio.mixer, digest);
-      printf("MIXER frames=%llu clipped=%llu changes=%llu nonsilent=%d ring=%u sha=", (unsigned long long)audio.mixer.frames,
-             (unsigned long long)audio.mixer.clipped, (unsigned long long)audio.mixer.changes, genesis_mixer_non_silent(&audio.mixer),
-             (unsigned)genesis_mixer_ring_available(&audio.mixer));
+      (void)genesis_z80_machine_run_to(&g_machine, runtime.scheduler.master_ticks, &stop);
+      genesis_audio_sync(&g_audio, runtime.scheduler.master_ticks);
+      genesis_mixer_digest(&g_audio.mixer, digest);
+      printf("MIXER frames=%llu clipped=%llu changes=%llu nonsilent=%d ring=%u sha=", (unsigned long long)g_audio.mixer.frames,
+             (unsigned long long)g_audio.mixer.clipped, (unsigned long long)g_audio.mixer.changes, genesis_mixer_non_silent(&g_audio.mixer),
+             (unsigned)genesis_mixer_ring_available(&g_audio.mixer));
       print_hex(digest, 32U);
       printf("\n");
 #endif
@@ -257,9 +323,9 @@ int main(int argc, char **argv) {
              (unsigned)runtime.devices.interrupt.vblank_pending, (unsigned)runtime.raster.hint_pending, (int)runtime.devices.vdp.dma.phase,
              (unsigned)runtime.devices.vdp.dma.remaining_length, (unsigned)runtime.cartridge_eeprom.phase, (unsigned)runtime.cartridge_eeprom.cycles);
 #ifdef SEGARECOMP_GENESIS_SOUND
-      printf(" z80_pc=%04x z80_cycles=%llu bound=%u reset_released=%u ym_samples=%llu", (unsigned)machine.cpu.state.pc,
-             (unsigned long long)machine.cpu.state.cycles, (unsigned)machine.bound_ordinal, (unsigned)runtime.devices.z80_bus.reset_released,
-             (unsigned long long)audio.ym_samples);
+      printf(" z80_pc=%04x z80_cycles=%llu bound=%u reset_released=%u ym_samples=%llu", (unsigned)g_machine.cpu.state.pc,
+             (unsigned long long)g_machine.cpu.state.cycles, (unsigned)g_machine.bound_ordinal, (unsigned)runtime.devices.z80_bus.reset_released,
+             (unsigned long long)g_audio.ym_samples);
 #endif
       printf("\n");
     } else {

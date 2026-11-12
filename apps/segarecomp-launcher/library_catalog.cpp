@@ -227,6 +227,8 @@ bool entry_from_json(const json::Value &v, LibraryEntry &e) {
   // reused, while a legacy Optimized/gen2 build keeps its identity.
   e.aot_model = e.platform_id == "genesis" ? "gen2" : "v1";
   e.hint_alias_discovery = v.flag("hint_alias_discovery");
+  // ADR 0291: an earlier build of this feature stored a per-game "native_gems_audio" request. The sound implementation is now chosen automatically by the build, so the key is
+  // neither read nor written (an old catalog stays readable; the key disappears on its next save).
   const std::string region = v.str("region");
   e.region = region == "japan" || region == "europe" ? region : "usa";
   e.cover = v.str("cover");

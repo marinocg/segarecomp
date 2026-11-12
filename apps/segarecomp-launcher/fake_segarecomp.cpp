@@ -13,6 +13,8 @@
 //   FAKE_SCD_PROGRAM=<path> / FAKE_SCD_DESCRIBE=<path>  (SEG-109-T005) `sega-cd build`: installs <output>/program-viewer (a copy of the Sega CD program double) and its
 //                         `.describe` statement; FAKE_BUILD_HOLD and FAKE_BUILD_FAIL=sega-cd behave as for a native build.
 //   FAKE_ROM_LOG=<file>   (SEG-122) one line is appended per `build`: "<size> <FNV-1a 64 of the bytes of --rom>" (what image the build was asked to compile)
+//   FAKE_AUDIO=<json>      (ADR 0291) the `audio_implementation` member the build records; "none" records nothing (an older product). Without it, a
+//                         build records the original-Z80 one; "native" records what a build records after it selected the verified native GEMS replacement by itself. The launcher passes no sound option.
 //   FAKE_BUILD_HOLD=<hb>  (SEG-069-T001) the build never finishes by itself: it starts a grandchild (this binary as `--sleeper <hb>`) that appends one
 //                         byte to <hb> every 20 ms, writes <output>/hold_started and <hb>.started, and then idles. Cancel tests assert the whole tree stops.
 #include <chrono>
@@ -154,7 +156,15 @@ int main(int argc, char **argv) {
                                        << "\",\"fallback\":" << (fallback ? "true" : "false") << ",\"reason\":\"" << (fallback ? "inference" : "none")
                                        << "\",\"fallback_class\":\"" << (fallback ? "producer_failed" : "none") << "\",\"model_family\":\""
                                        << (effective == "ml_region_z80" ? "sms_z80_d512hp" : "none") << "\",\"validator\":\"not_run\",\"selected_ppm\":650000,\"admitted_ppm\":650000"
-                                       << ",\"policy_identity\":\"" << identity(policy, platform) << "\",\"identity\":\"" << hex64("b|" + out.string()) << "\"}}\n";
+                                       << ",\"policy_identity\":\"" << identity(policy, platform) << "\",\"identity\":\"" << hex64("b|" + out.string()) << "\"}";
+    if (platform != "master-system" && env("FAKE_AUDIO") != "none") {   // ADR 0291: what a current product records about the audio implementation
+      const bool gems = env("FAKE_AUDIO") == "native";
+      const std::string record = !env("FAKE_AUDIO").empty() && !gems ? env("FAKE_AUDIO")
+          : gems ? R"({"schema":2,"requested":"auto","kind":"native_driver","selection":"automatic","reason":"original_aot_failure_verified_replacement","catalog_revision":1,"native_implementation_version":1,"replacement_available":true,"save_states":"supported","driver":"gems","version":"2.5","version_evidence":"address_map_and_tables","implementation_version":1,"coverage":"complete","verification":"reference_checked","identity":"f68e547d7dec54d2","native_images":1,"original_images":0,"original_driver_rewrites_own_code":true,"static_code_write_candidates":9,"original_aot":{"outcome":"structural_code_mismatch","fault_frame":4},"audio_status":"supported","observed":{"window_frames":600,"fault":"none","commands":17,"sequences":7,"dac_samples":100,"ticks":571}})"
+                 : R"({"schema":2,"requested":"auto","kind":"original_z80_aot","selection":"automatic","reason":"original_supported","catalog_revision":1,"native_implementation_version":1,"replacement_available":false,"save_states":"supported","audio_status":"supported","structural_alternatives":{"requested":false,"forms":0}})";
+      std::ofstream(out / "status.json", std::ios::app) << ",\"audio_implementation\":" << record;
+    }
+    std::ofstream(out / "status.json", std::ios::app) << "}\n";
     if (env("FAKE_BUILD_INTERMEDIATES") == "1") {
       std::ofstream(out / "generated.c") << "/* synthetic */";
       fs::create_directories(out / "obj");

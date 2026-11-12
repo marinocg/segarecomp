@@ -618,6 +618,10 @@ typedef struct GenesisZ80EpochObserver {
    * resumes) since the previous epoch are all part of the next epoch's window (an upload made while the Z80 is still being resumed).
    * 0 (zero-init) = the Genesis rule: the window ends at every runnable transition. */
   uint8_t accumulate_until_epoch;
+  /* Optional validation seam (NULL = absent; never part of any serialization): each byte the 68000 stores into the sound RAM window, with the stored value and the guest time. It lets a
+   * reference check observe the commands a game really wrote, independently of the sound driver that reads them (docs/testing/genesis-native-gems-validation.md). */
+  void (*on_ram_write)(void *context, uint32_t offset, uint8_t value, uint64_t master_ticks);
+  void *ram_write_context;
   uint8_t written[GENESIS_Z80_RAM_BYTES / 8U];
 } GenesisZ80EpochObserver;
 
@@ -1235,6 +1239,7 @@ typedef enum GenesisDiagnosticCategory {
   GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS = 64, /* SRAM extent access (width/lane) or $A130F1 write the SRAM model does not admit */
   GENESIS_DIAG_UNSUPPORTED_REGION_TIMING = 65, /* SEG-055: an unknown / non-selectable console region name or profile (PAL is selectable; it runs on the 60 Hz schedule) */
   GENESIS_DIAG_HINT_HANDLER_NOT_INSTALLED = 66, /* SEG-055: an enabled H-interrupt fired but no handler was resolved at build time (unadmittable/RAM-resident vector slot) */
+  GENESIS_DIAG_Z80_NATIVE_DRIVER_FAULT = 67,    /* ADR 0291: a verified native sound-driver replacement met an operation outside its verified subset; it is inert for the run (sound fault, not a stop) */
 } GenesisDiagnosticCategory;
 
 typedef struct GenesisProvenance {

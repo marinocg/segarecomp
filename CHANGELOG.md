@@ -7,6 +7,13 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Native GEMS audio replacement (new, automatic, Genesis; ADR 0291)
+
+* Games whose Z80 sound driver rewrites its own code are silent on the original path. For one verified driver image - **GEMS 2.5**, uploaded by Aladdin, Earthworm Jim, Jurassic Park and Cool Spot - `segarecomp build` now **selects by itself** (no option, nothing to tick) a program where a **native C11 re-implementation** of the driver plays the game's music and effects - when the build's own verification run shows that the original generated-native Z80 cannot run that driver and the uploaded image is a verified GEMS image. Every other game is built exactly as before. It is not a Z80 emulator and never executes the original driver's code.
+* **The driver's whole command and sequence-event set** (FM, PSG, noise and digital patches, envelopes, tempo, loops, pitch bend, looped / slow / compressed samples), compared operation by operation with an independent reference implementation over long runs of all four games. Only malformed data stops it (explicit fault, silent afterwards); an unverified driver is never replaced. **Save states and rewind work while it plays**, with an exact continuation of the music and samples.
+* Build metadata (`status.json` `audio_implementation`, schema 2) records the requested and actual sound implementation, that the selection was automatic and why, the replacement's implementation version and catalog revision and that save states are supported; the launcher's Build provenance has an **Audio implementation** row built from that record only (*Native GEMS 2.5* with its details, or *Original Z80 (generated-native)*, with a degraded original disclosed separately).
+* Developer overrides `--sound-driver original|gems` exist for comparison; the launcher offers none.
+
 ### Widescreen (new)
 
 * A shared, presentation-only widescreen setting for Genesis, Master System and Sega CD: **Original**, **Extended Backgrounds (Level 2)** and **Enhanced Widescreen (Level 3)**, with a **Widescreen Width** slider from 4:3 to 16:9,

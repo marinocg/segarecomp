@@ -981,6 +981,14 @@ void App::draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w) 
   } else if (info.status == GameStatus::stale && info.older.candidate_seen) {
     row("Earlier build", "cannot be played", col::warn, "Rebuild required: " + info.older.reason + ".");
   }
+  if (entry.platform_id == "genesis") {
+    // ADR 0291: the audio implementation of the build Play will launch, from its own recorded metadata only (never from the title, the file name or the selection).
+    const bool launchable = info.status == GameStatus::ready || info.status == GameStatus::playable_older;
+    AudioReport audio = launchable ? info.audio : AudioReport{};
+    std::string detail = audio_detail(audio);
+    if (!launchable) detail = "There is no playable build of this selection, so no audio implementation is recorded for it.";
+    row("Audio implementation", audio_headline(audio), col::text, detail);
+  }
   row("Last run status", entry.last_played_at > 0 ? std::string(run_label(entry.last_run)) : "never played", entry.last_run == "failed" ? col::err : col::text,
       scd_game && scd_last_outcome_.count(entry.id()) != 0 ? scd_last_outcome_.at(entry.id()) : std::string());
   if (scd_game)

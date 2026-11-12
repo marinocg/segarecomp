@@ -94,6 +94,17 @@ void ym2612_write(Ym2612 *chip, uint32_t port, uint8_t value, uint64_t master_ti
   chip->chip.write(port & 3u, value);
 }
 
+uint64_t ym2612_timer_a_expiry(const Ym2612 *chip) {
+  const int64_t expiry = chip->timer_expiry[0];
+  return expiry == kNoEvent ? UINT64_MAX : static_cast<uint64_t>(expiry) * YM2612_MASTER_TICKS_PER_CLOCK;
+}
+
+uint64_t ym2612_image_timer_a_expiry(const uint8_t *image, uint32_t length) {
+  if (image == nullptr || length < 24) return UINT64_MAX;
+  const int64_t expiry = static_cast<int64_t>([image] { uint64_t v = 0; for (unsigned k = 0; k < 8u; ++k) v |= static_cast<uint64_t>(image[16 + k]) << (8u * k); return v; }());
+  return expiry == kNoEvent || expiry < 0 ? UINT64_MAX : static_cast<uint64_t>(expiry) * YM2612_MASTER_TICKS_PER_CLOCK;
+}
+
 uint64_t ym2612_samples_generated(const Ym2612 *chip) { return chip->samples; }
 
 uint64_t ym2612_state_digest(const Ym2612 *chip) {

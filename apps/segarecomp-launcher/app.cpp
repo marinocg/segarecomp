@@ -80,6 +80,7 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
     if (!mapper_needed && entry_ready_for(info.entry, view, layout)) {
       info.status = GameStatus::ready;
       info.policy = read_policy_report(info.entry);
+      info.audio = read_audio_report(info.entry);
       info.observed_region = read_observed_region(info.entry);
       if (!info.build_known) {
         info.adopt = true;
@@ -100,6 +101,7 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
     if (!mapper_needed && !e.archived && info.status != GameStatus::ready && !e.builds.empty()) {
       info.older = find_playable_older_build(e, info.key, view.optimized() ? "optimized" : "compatibility", layout, cache_root() / "games", view.patch_identity);
       if (info.older.playable && info.status == GameStatus::stale) info.status = GameStatus::playable_older;
+      if (info.older.playable) info.audio = read_audio_report(info.older.dir);   // the build Play will launch is that one
     }
     if (e.platform_id == "genesis" && (info.status == GameStatus::stale || info.status == GameStatus::playable_older)) {
       // SEG-122-T009: say so when the reason a build no longer counts is the cartridge hardware.
@@ -1514,6 +1516,22 @@ void App::run_script() {
     else if (key == "queued") actual = !detail_id_.empty() && is_queued(detail_id_) ? "1" : "0";
     else if (key == "build_count") actual = std::to_string(build_count());
     else if (key == "build_outcome") actual = last_build_outcome_;
+    else if (key == "audio") {   // ADR 0291: the primary Audio implementation row of the open game's Build provenance (only a launchable build has one)
+      if (detail_id_.empty()) actual = "-";
+      else {
+        const StatusInfo &si = status_of(detail_id_);
+        const bool launchable = si.status == GameStatus::ready || si.status == GameStatus::playable_older;
+        actual = audio_headline(launchable ? si.audio : AudioReport{});
+      }
+    }
+    else if (key == "audio_has") {   // ADR 0291: the explanatory text under the Audio implementation row contains this phrase (prints the phrase when it does, "-" otherwise)
+      actual = "-";
+      if (!detail_id_.empty()) {
+        const StatusInfo &si = status_of(detail_id_);
+        const bool launchable = si.status == GameStatus::ready || si.status == GameStatus::playable_older;
+        if (launchable && audio_detail(si.audio).find(value) != std::string::npos) actual = value;
+      }
+    }
     else if (key == "storage_bytes") actual = !detail_id_.empty() && report_valid_ && report_.find(detail_id_) != nullptr ? std::to_string(report_.find(detail_id_)->total.total()) : "-";
     else if (key == "user_data_bytes") actual = !detail_id_.empty() && report_valid_ && report_.find(detail_id_) != nullptr ? std::to_string(report_.find(detail_id_)->user_data) : "-";
     else if (key == "failure") actual = failures_.count(detail_id_) != 0 ? "1" : "0";

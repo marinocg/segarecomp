@@ -40,6 +40,7 @@ struct GenesisAudio;
 #define GENESIS_SNAPSHOT_FLAG_SOUND 0x0001U
 #define GENESIS_SNAPSHOT_FLAG_SRAM 0x0002U
 #define GENESIS_SNAPSHOT_FLAG_EEPROM 0x0004U
+#define GENESIS_SNAPSHOT_FLAG_NATIVE_SOUND 0x0008U   /* the program carries a native sound-driver replacement (ADR 0291): its states are bound to that backend and cannot cross to a program without it */
 
 typedef enum GenesisSnapshotStatus {
   GENESIS_SNAPSHOT_OK = 0,

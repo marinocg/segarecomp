@@ -209,6 +209,16 @@ static int machine_runnable(const GenesisZ80Machine *machine) {
 int genesis_z80_machine_run_to(GenesisZ80Machine *machine, uint64_t master_ticks, GenesisRuntimeStop *stop) {
   /* A faulted sound CPU executes nothing and answers nothing: it is quiesced (time is not advanced, no device write, no INT). */
   if (genesis_z80_machine_sound_faulted(machine) || !machine_runnable(machine)) return 0;
+  if (machine->native_active) {  /* ADR 0291: the verified native replacement serves this image; no Z80 instruction exists to run */
+    if (machine->native_driver->run_to(machine->native_driver->context, master_ticks) != 0) {
+      machine->sound_fault = GENESIS_DIAG_Z80_NATIVE_DRIVER_FAULT;
+      machine->sound_fault_epoch = machine->runtime->z80_epoch.epoch_count;
+      machine->sound_fault_master_ticks = master_ticks;
+      machine->bound_ordinal = 0U;
+      machine->native_active = 0U;
+    }
+    return 0;
+  }
   for (;;) {
     const uint64_t now = access_master_ticks(machine);
     uint64_t segment_end, steps;
@@ -266,13 +276,32 @@ void genesis_z80_activation_signature(const uint8_t *ram, const uint8_t *written
 }
 
 /* Contract section 5 / ADR 0073: the image epoch activates a compiled image, or stops fail closed. */
-static int activate_image(GenesisZ80Machine *machine, const uint8_t *written, GenesisRuntimeStop *stop) {
+/* The replacement does not serve the image (none verified, or none bound): the binding it had is forgotten, so that a state carries an identity only while it means something. */
+static void clear_native_binding(GenesisZ80Machine *machine) {
+  machine->native_active = 0U;
+  machine->native_version = NULL;
+  memset(machine->native_signature, 0, sizeof machine->native_signature);
+}
+
+static void bind_native_if_verified(GenesisZ80Machine *machine, const uint8_t signature[32], uint64_t master_ticks) {
+  const char *version = NULL;
+  clear_native_binding(machine);
+  if (machine->native_driver == NULL || !machine->native_driver->identify(machine->native_driver->context, signature, &version)) return;
+  machine->native_active = 1U;
+  machine->native_version = version;
+  memcpy(machine->native_signature, signature, 32U);
+  ++machine->native_activations;
+  machine->native_driver->start(machine->native_driver->context, machine, ceil_to_z80_clock(master_ticks));
+}
+
+static int activate_image(GenesisZ80Machine *machine, const uint8_t *written, uint64_t master_ticks, GenesisRuntimeStop *stop) {
   uint8_t signature[32];
   uint32_t extents, ordinal;
   if (genesis_z80_machine_sound_faulted(machine)) return 0;  /* a fault is permanent unless re-armed by the epoch (hook_bus_event): no image lookup */
   genesis_z80_activation_signature(machine->runtime->devices.z80_bus.z80_ram, written, &extents, signature);
   if (extents == 0U && machine->last_bound != 0U) {  /* a plain restart: the code already in RAM, i.e. the previously bound image */
     machine->bound_ordinal = machine->last_bound;
+    if (machine->native_active) machine->native_driver->start(machine->native_driver->context, machine, ceil_to_z80_clock(master_ticks));
     return 0;
   }
   ordinal = genesis_z80_image_for_signature(signature);
@@ -281,10 +310,12 @@ static int activate_image(GenesisZ80Machine *machine, const uint8_t *written, Ge
       machine->on_unknown_image(machine->unknown_image_context, machine->runtime->z80_epoch.epoch_count,
                                 machine->runtime->devices.z80_bus.z80_ram, written);
     machine->bound_ordinal = 0U;
+    clear_native_binding(machine);
     if (machine->quiesce_unknown_image) return 0; /* SEG-114: recorded by the callback; the host keeps the Z80 unexecuted */
     return stop_with(stop, GENESIS_STOP_UNSUPPORTED_Z80_EXECUTION, GENESIS_DIAG_Z80_UNKNOWN_IMAGE);
   }
   machine->bound_ordinal = machine->last_bound = ordinal;
+  bind_native_if_verified(machine, signature, master_ticks);
   return 0;
 }
 
@@ -299,6 +330,8 @@ static int hook_bus_event(void *context, GenesisRuntime *runtime, GenesisZ80Even
                           int epoch, const uint8_t *written, GenesisRuntimeStop *stop) {
   GenesisZ80Machine *machine = (GenesisZ80Machine *)context;
   const uint64_t aligned = ceil_to_z80_clock(master_ticks);
+  if ((event == GENESIS_Z80_EVENT_BUSREQ_ASSERT || event == GENESIS_Z80_EVENT_RESET_ASSERT) && machine->native_active && machine->native_driver->suspend != NULL)
+    machine->native_driver->suspend(machine->native_driver->context, master_ticks);
   switch (event) {
     case GENESIS_Z80_EVENT_RESET_ASSERT:
       ++machine->count_reset_assert;
@@ -327,8 +360,9 @@ static int hook_bus_event(void *context, GenesisRuntime *runtime, GenesisZ80Even
   if (transition && !genesis_z80_machine_sound_faulted(machine)) {  /* resume: time held on the bus is not made up (GPGX: the Z80 restarts at the next multiple of 15 ticks) */
     const uint64_t z80_time = access_master_ticks(machine);
     if (z80_time < aligned) machine->cycle_base_master_ticks += aligned - z80_time;
+    if (machine->native_active && !epoch) machine->native_driver->resume(machine->native_driver->context, aligned);
   }
-  if (epoch) return activate_image(machine, written, stop);
+  if (epoch) return activate_image(machine, written, master_ticks, stop);
   return 0;
 }
 
@@ -367,6 +401,11 @@ void genesis_z80_machine_state_digest(const GenesisZ80Machine *machine, uint8_t 
     word[0] = (uint8_t)machine->sound_recoveries; word[1] = (uint8_t)(machine->sound_recoveries >> 8);
     word[2] = (uint8_t)(machine->sound_recoveries >> 16); word[3] = (uint8_t)(machine->sound_recoveries >> 24);
     genesis_sha256_update(&sha, word, 4U);
+  }
+  if (machine->native_activations != 0U) {  /* ADR 0291: only a run that bound the replacement differs from the pre-existing digest */
+    uint8_t native[32];
+    machine->native_driver->digest(machine->native_driver->context, native);
+    genesis_sha256_update(&sha, native, 32U);
   }
   genesis_sha256_final(&sha, out);
 }

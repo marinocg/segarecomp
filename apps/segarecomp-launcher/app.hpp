@@ -51,6 +51,7 @@ struct StatusInfo {
   BuildRecord build;              // the record of `key` when the catalog knows it (built_at == 0 && version empty when unknown)
   bool build_known = false;
   PolicyReport policy;            // of a ready build
+  AudioReport audio;              // ADR 0291: the audio implementation of the build Play will launch (not_recorded when there is none or it recorded nothing)
   std::string observed_region;    // of a ready build
   bool adopt = false;             // a ready build the catalog does not know yet (recorded by the UI thread)
   long long file_time = 0;        // modification time of its status.json (unix seconds), 0 when unknown

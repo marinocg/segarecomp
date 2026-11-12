@@ -92,6 +92,16 @@ add_test(NAME genesis_device_checkpoint_tests COMMAND genesis_device_checkpoint_
 # SEG-007-T252 / ADR-0040: asserts this runtime translation unit references
 # no wall-clock/sleep symbol -- headless/automated execution is full-speed
 # by construction.
+# ADR 0291: the native GEMS sound-driver replacement core against synthetic cartridge data (no commercial data, no original driver code).
+add_executable(gems_native_tests gems_native_test.c ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/gems_native.c)
+target_include_directories(gems_native_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime
+  ${PROJECT_SOURCE_DIR}/libs/device/sega/ym2612/include ${PROJECT_SOURCE_DIR}/libs/codegen/c11/include)
+segarecomp_enable_warnings(gems_native_tests)
+add_test(NAME gems_native_tests COMMAND gems_native_tests)
+set_property(TEST gems_native_tests APPEND PROPERTY LABELS full fast)
+# ADR 0291: the detection power of the reference-validation tooling (a missed command, a premature stop and an extra operation must fail), on synthetic logs.
+add_test(NAME gems_reference_check_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/gems_reference_check_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST gems_reference_check_test APPEND PROPERTY LABELS full fast)
 add_executable(genesis_runtime_run_no_wallclock_tests
   genesis_runtime_run_no_wallclock_test.cpp
 )
@@ -1672,6 +1682,11 @@ set(_z80_pipeline_tests genesis_z80_build_pipeline_test genesis_z80_build_pipeli
   genesis_z80_build_pipeline_falsify_test genesis_z80_build_pipeline_prepare_test genesis_z80_build_pipeline_region_test)
 set_property(TEST ${_z80_pipeline_tests} APPEND PROPERTY LABELS full)
 set_property(TEST ${_z80_pipeline_tests} PROPERTY TIMEOUT 3000)
+# ADR 0291: the sound-implementation record and the refusal of an unverified driver identity, on synthetic fixtures.
+add_test(NAME genesis_native_gems_build_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_native_gems_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_native_gems_build_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_native_gems_build_test PROPERTY TIMEOUT 3000)
 # ADR 0277: the static-first build against the unchanged fixed point (one CTest entry per group, like the pipeline groups above).
 foreach(_group equivalence fallback determinism)
   add_test(NAME genesis_z80_static_first_build_${_group}_test COMMAND ${Python3_EXECUTABLE}
@@ -1773,6 +1788,12 @@ add_test(NAME genesis_snapshot_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST genesis_snapshot_test APPEND PROPERTY LABELS full fast)
 set_property(TEST genesis_snapshot_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST genesis_snapshot_test APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
+# ADR 0291: the same save states / rewind with the native GEMS sound-driver replacement bound (production adapter, project-authored resources and one test-only trusted signature).
+add_test(NAME genesis_native_snapshot_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_native_snapshot_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})
+set_property(TEST genesis_native_snapshot_test APPEND PROPERTY LABELS full fast)
+set_property(TEST genesis_native_snapshot_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST genesis_native_snapshot_test APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
 # SEG-032-T006 (ADR 0072): the shared Sega PSG written by both CPUs.
 add_test(NAME genesis_audio_psg_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_psg_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})
