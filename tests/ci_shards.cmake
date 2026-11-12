@@ -18,11 +18,10 @@
 # 2026-11 re-measurement (PR #216): see the entries marked below. The budget is unchanged: it is the estimate of what a shard may cost, not something to move when a test is added.
 #
 # Shard count: the shards are the unit of balance, not of scheduling. A CI job runs a strided selection of them (job j/J runs shards j, j+J, ... in ci.yml), so
-# the number of jobs per host is a workflow decision: a free-plan account runs at most 20 jobs at once and 5 on macOS, a Linux (GCC) job is
-# ~1.5x slower than the same tests on Windows or macOS, and each job costs ~2.5 min of checkout/setup/build. 35 shards of ~530 s each allow
-# 7 x 5 (Linux), 5 x 7 (Windows) and 4 x ~9 (macOS) with selections that carry equal estimated cost. The budget below is per shard (it was 2800 for
+# the number of jobs per host is a workflow decision: a free-plan account runs at most 20 jobs at once and 5 on macOS, and each job costs 2-3.5 min of checkout/setup/build (more on Windows). 36 shards of ~520 s each allow
+# 6 x 6 (Linux), 6 x 6 (Windows) and 4 x 9 (macOS) with selections that carry equal estimated cost. The budget below is per shard (it was 2800 for
 # the earlier six shards of 2400 s): a job's estimate is the sum of its shards.
-set(SEGARECOMP_CI_SHARD_COUNT 35)
+set(SEGARECOMP_CI_SHARD_COUNT 36)
 set(SEGARECOMP_CI_SHARD_BUDGET_SECONDS 700)   # per shard (~530 s expected, ~585 s in the SDL3-enabled configuration, which also registers the launcher suites); was 2800 for six shards
 set(SEGARECOMP_CI_MAX_TEST_SECONDS 600)
 set(SEGARECOMP_CI_DEFAULT_COST 3)

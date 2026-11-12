@@ -267,8 +267,8 @@ For the optional authorized-local Genesis viewer add `--viewer` (needs SDL3; see
 ### Supported hosts
 
 `.github/workflows/ci.yml` builds and tests every change on all three hosts (configure with the
-`dev` preset, build, then one cost-balanced selection of the hermetic suite's 35 cost-balanced shards per matrix job (seven Linux, five Windows and four macOS jobs fit the 20 concurrent jobs, 5 on macOS, of a free
-plan; job `j/J` runs shards `j, j+J, ...`), labelled `shard-1`..`shard-35` by `tests/ci_shards.cmake`, whose union is the `full` tier that contains `fast`; run one locally with
+`dev` preset, build, then one cost-balanced selection of the hermetic suite's 36 cost-balanced shards per matrix job (six Linux, six Windows and four macOS jobs fit the 20 concurrent jobs, 5 on macOS, of a free
+plan; job `j/J` runs shards `j, j+J, ...`), labelled `shard-1`..`shard-36` by `tests/ci_shards.cmake`, whose union is the `full` tier that contains `fast`; run one locally with
 `ctest --preset dev -L '^shard-3$'`, and the whole partition is checked by `ci_shard_guard_test`); Ninja is the generator everywhere.
 
 | Host | Primary toolchain (CI-tested) | Generated-C compiler (`$CC`) |
