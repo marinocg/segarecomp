@@ -21,7 +21,8 @@ segarecomp mod build   platforms/genesis/sdk/examples/luau-hud --out luau-hud.se
 segarecomp mod install luau-hud.segapatch --rom fixture.rom --library lib          # prints "approval_kind":"consent" and the install sheet
 segarecomp build --rom fixture.rom --output out --cc <compiler> --runtime-dir <platforms>/genesis --sdl3-include <SDL3>/include --sdl3-lib <SDL3>/lib \
                  --luau-package lib/mods/<package_identity>.segapatch --luau-identity <package_identity>
-SEGARECOMP_VIEWER_FINAL_FRAME=last.bmp out/game --instruction-budget 4000000       # a window; the HUD is drawn over the VDP picture
+out/game --instruction-budget 4000000       # a window; the HUD is drawn over the VDP picture
+# (build with `--test-frame-seam 1` to be able to save the final frame with SEGARECOMP_VIEWER_FINAL_FRAME=last.bmp, as the test does)
 ```
 
 `tests/mod_luau_executable_test.py` does exactly this headless (dummy video driver) against the Vanilla build of the same image and checks the HUD in the rendered frame.

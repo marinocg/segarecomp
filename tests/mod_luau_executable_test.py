@@ -7,7 +7,7 @@ Proves: (1) the package resolves to an actual executable and the verified compil
 program); (2) the overlay is visible in a genuinely rendered frame: the frames differ only inside the HUD region, the HUD pixels equal an independent derivation from the Vanilla frame, and the
 crop's hash is pinned; (3) the run is deterministic; (4) a changed script is a different build with a different frame; (5) a script fault disables only the mod and the program runs on to the same guest
 stop as Vanilla and ends on the exact Vanilla frame; (6) every unsupported combination (native, unsupported capability, another platform, wrong identity or image, syntax error, two packages,
-a native patch beside it) is refused with a typed class and leaves no executable; a failed build changes nothing else; (7) Vanilla builds contain no Luau.
+a native patch beside it) is refused with a typed class and leaves no executable; a failed build changes nothing else; (7) Vanilla builds contain no Luau; (8) a package with a payload the live path would ignore (an asset) is refused, and a package whose typed edit changes the image is compiled from the EDITED image.
 usage: mod_luau_executable_test.py <segarecomp-cli> <C compiler> <source root> <SDL3 prefix>"""
 import hashlib
 import importlib.util

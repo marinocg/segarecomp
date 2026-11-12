@@ -43,7 +43,7 @@ segarecomp build --rom fixture.rom --output out --cc <compiler> --runtime-dir <p
                  --luau-package luau-hud.segapatch --luau-identity <package_identity>
 ```
 
-`--rom` is the original image; the build derives the package's effective image, compiles the scripts with the pinned trusted compiler in the bounded child, and links the verified result into the program (`status.json` records `luau.package_identity`, `bytecode_digest`, `effective_sha256`). The program prints `LUAU_MOD_LOADED {...}` (the identity and digest it verified before the VM saw a byte), and a faulting script one `LUAU_MOD_FAULT {...}`: the mod is then disabled and the game carries on. The launcher uses the same build through its executable cache; the entry key adds the package identity, the effective image digest and the compiler pin only for a mod, so Vanilla and schema 1/2 entries are untouched.
+`--rom` is the original image; the build derives the package's effective image, compiles the scripts with the pinned trusted compiler in the bounded child, and links the verified result into the program (`status.json` records `luau.package_identity`, `bytecode_digest`, `effective_sha256`). The program prints `LUAU_MOD_LOADED {...}` (the identity and digest it verified before the VM saw a byte), and a faulting script one `LUAU_MOD_FAULT {...}`: the mod is then disabled and the game carries on. The launcher's build job and executable cache use the same build (there is no launcher screen to select a mod version yet); the entry key adds the package identity, the effective image digest and the compiler pin only for a mod, so Vanilla and schema 1/2 entries are untouched.
 
 ## The HUD example, end to end
 
