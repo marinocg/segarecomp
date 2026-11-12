@@ -31,8 +31,9 @@ jobs:
     # contains `fast`); the guard test `ci_shard_guard_test` (in `fast` and `full`) fails if a test has no shard, a shard is over budget, or a
     # host's jobs below do not cover the 36 shards exactly once.
     # Job count per host is chosen against two hosted-runner limits that a measured run exposed: a free-plan account runs at most 20 jobs at
-    # once (the 21st waits for a free runner) and at most 5 of them on macOS, so a run is sized to fit (6 Linux + 6 Windows + 4 macOS shard jobs
-    # and 4 viewer jobs = 20). A pull request that also triggers packaging adds 3 jobs and may queue some.
+    # once (the 21st waits for a free runner) and at most 5 of them on macOS, so a run is sized to fit: 6 Linux + 5 Windows + 4 macOS shard jobs
+    # and 4 viewer jobs = 19, leaving one slot; a pull request that also triggers packaging (3 more jobs) queues the surplus briefly. Sized by replaying the
+    # measured per-test durations of five complete runs through a 20-slot scheduler: 21+ jobs cost ~5 min, 19 cost ~0.2 min more than 20 but queue less.
     name: ${{ matrix.name }} job ${{ matrix.job }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -45,12 +46,11 @@ jobs:
           - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "4/6" }
           - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "5/6" }
           - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "6/6" }
-          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "1/6" }
-          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "2/6" }
-          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "3/6" }
-          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "4/6" }
-          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "5/6" }
-          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "6/6" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "1/5" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "2/5" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "3/5" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "4/5" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "5/5" }
           - { name: "macOS (AppleClang + Ninja)", os: macos-latest, host: macos, job: "1/4" }
           - { name: "macOS (AppleClang + Ninja)", os: macos-latest, host: macos, job: "2/4" }
           - { name: "macOS (AppleClang + Ninja)", os: macos-latest, host: macos, job: "3/4" }
