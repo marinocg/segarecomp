@@ -1,6 +1,6 @@
 # Mod execution phases, guest writes, input interception and static hooks
 
-Status: accepted contract (SEG-133-T004, ADR [0282](../decisions/0282-mod-execution-phases.md)). **Not implemented**: the scheduler and hooks are M05 (SEG-138); per-platform realizations are SEG-147/148.
+Status: accepted contract (SEG-133-T004, ADR [0282](../decisions/0282-mod-execution-phases.md)). **Not implemented**: the scheduler and hooks are M05 (SEG-138); per-platform realizations are SEG-147/148. **Luau side, implemented (F07, ADR [0295](../decisions/0295-luau-host-api-static-check-and-fixture-session.md))**: the `reset` and `render(frame)` callbacks with copy-in frame values and staged, transactional output, run by the deterministic fixture session only; the `state` seam (`save`/`load` serialization, section 6.2). The other phases and the `MODSTATE` container are not.
 Inputs: [adapters](mod-platform-adapters.md) (space and phase names), [gap inventory](modding-platform-gap-inventory.md) (the generated-native execution model and save-state barriers).
 Consumers: SEG-133-T003 (ABI 2), SEG-133-T005 (Luau), SEG-137-T004, SEG-138-T001/T002/T003/T004/T005/T006/T007, SEG-145-T001, SEG-147-T004, SEG-148-T005, SEG-141-T003.
 

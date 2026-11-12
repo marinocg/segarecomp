@@ -100,8 +100,8 @@ inline constexpr unsigned kCallDepthPolicyMax = 200;
 // The policy limits lowered by a package's `limits` request (never raised: the reader already rejected a request above policy).
 [[nodiscard]] Limits limits_for(const mod::Manifest &manifest);
 
-// `capability`, `range` and `phase` are the binding faults of policy section 5 (an ungranted binding, a bad argument, a binding called outside its phase); like every fault they are sticky.
-enum class Fault { none, error, budget, memory, stack, watchdog, capability, range, phase };
+// `state` is a state value that cannot be saved or restored (phases section 6.2). `capability`, `range` and `phase` are the binding faults of policy section 5 (an ungranted binding, a bad argument, a binding called outside its phase); like every fault they are sticky.
+enum class Fault { none, error, budget, memory, stack, watchdog, capability, range, phase, state };
 [[nodiscard]] const char *fault_name(Fault fault);
 
 struct CallResult {
@@ -109,6 +109,17 @@ struct CallResult {
   Fault fault = Fault::none;
   std::string message;          // bounded, no host paths or addresses
   std::uint64_t units = 0;      // budget units consumed by this call (deterministic)
+};
+
+// The serialized mod state (phases section 6.2, policy section 4): the one value a script's `save()` returns, canonical bytes, at most kStateBytesMax, depth at most kStateDepthMax, numbers/strings/
+// booleans and tables of those keyed by numbers or strings only. No function, userdata, buffer, thread, NaN, infinity or cycle can be represented.
+inline constexpr std::size_t kStateBytesMax = 64U << 10U;
+inline constexpr unsigned kStateDepthMax = 8;
+struct StateResult {
+  bool ok = false;
+  Fault fault = Fault::none;
+  std::string message;
+  std::vector<std::uint8_t> blob;   // empty = the mod has no state
 };
 
 struct VmImpl;
@@ -134,6 +145,11 @@ class Vm {
   // Runs the lifecycle callback `name` ("reset" or "render") of the host API: copy-in `input` (render: the frame number is the first argument and the frame values are readable), copy-out into `out`.
   // A callback the script does not define is skipped (ok). On a fault `out` is left empty: the callback's staged output is discarded. Requires a VM created with a HostConfig.
   CallResult run_callback(std::string_view name, const FrameInput &input, std::uint32_t callback_index, Output &out);
+
+  // The state seam. save_state calls the global `save()` (absent = empty state) and serializes its result canonically; load_state parses `blob` strictly and calls the global `load(value)` (a non-empty
+  // blob for a mod without `load` is refused). Any failure is a `state` fault: the mod is disabled and the caller refuses the whole restore (phases section 6.2).
+  StateResult save_state();
+  CallResult load_state(std::span<const std::uint8_t> blob);
 
   // A fault disables the mod for the rest of the VM's life (no pcall can clear it); every later load/call fails with the original fault.
   [[nodiscard]] bool disabled() const;

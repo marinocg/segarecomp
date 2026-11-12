@@ -156,6 +156,7 @@ Schema 3 fixes only the envelope: `kind`, `kind_version`, `path`, `size`, `sha25
 | `E_GUEST_OUTSIDE_FREE_RANGE`, `E_GUEST_COLLISION`, `E_GUEST_RANGE`, `E_GUEST_RANGE_NOT_FREE`, `E_MAPPER_UNSUPPORTED`, `E_HEADER_UNSUPPORTED` | free ranges, collisions, image-dependent range checks, mappers and header repair (ADR 0293) |
 | `E_BPS_BUILD`, `E_BPS_INVALID`, `E_BPS_STALE`, `E_HEADER_FIELD_COLLISION`, `E_OUTPUT_IS_INPUT` | `mod bps`, `mod verify-bps` (ADR 0293) |
 | `E_LUAU_SYNTAX`, `E_LUAU_COMPILE_LIMIT`, `E_LUAU_COMPILED_MISMATCH` | NOT reader classes: raised by the host's trusted Luau compile step (`mod build`, `mod variant`; ADR 0294): a compile error as `<path>:<line>: <message>`, a compile bound, stored compiled output that is not what the build produced |
+| `E_LUAU_API`, `E_LUAU_CAPABILITY`, `E_LUAU_TYPE`, `E_TRUST_CLASS`, `E_SESSION` | NOT reader classes: raised by the host's static check of Luau sources against the API list (`mod check`/`pack`/`build`; an unknown `sega.*` name, a name whose capability is not declared, an argument error visible statically; ADR 0295) and by `mod session` (a package that is not Luau-only; a refused frame count) |
 | `E_TRUST_UNDECLARED` | a `native-c11` payload without `author`/`abi` |
 | `E_LIMIT_EXCEEDS_POLICY`, `E_LUAU_BYTECODE` | requested limit above policy; a `luau-source` payload that is not Luau text (section 4, Luau policy section 2) |
 

@@ -34,6 +34,7 @@ const char *fault_name(Fault fault) {
     case Fault::capability: return "capability";
     case Fault::range: return "range";
     case Fault::phase: return "phase";
+    case Fault::state: return "state";
   }
   return "error";
 }
@@ -492,6 +493,210 @@ void install_host(lua_State *L, VmImpl *im) {
   lua_setfield(L, LUA_GLOBALSINDEX, "sega");
 }
 
+// ---- mod state: canonical serialization of the one value save() returns (phases section 6.2) ----
+// bytes: 1 false | 2 true | 3 number (f64 LE) | 4 string (u32 LE length, bytes) | 5 table (u32 LE entries, then key/value pairs; keys are numbers ascending, then strings bytewise ascending)
+struct StateKey {
+  bool is_number = false;
+  double number = 0;
+  std::string text;
+  std::vector<std::uint8_t> value;   // serialized value
+  bool operator<(const StateKey &o) const {
+    if (is_number != o.is_number) return is_number;
+    return is_number ? number < o.number : text < o.text;
+  }
+};
+
+void put_u32(std::vector<std::uint8_t> &out, std::uint32_t v) {
+  for (unsigned i = 0; i < 4; ++i) out.push_back(static_cast<std::uint8_t>(v >> (8U * i)));
+}
+void put_number(std::vector<std::uint8_t> &out, double v) {
+  std::uint64_t bits = 0;
+  std::memcpy(&bits, &v, sizeof bits);
+  for (unsigned i = 0; i < 8; ++i) out.push_back(static_cast<std::uint8_t>(bits >> (8U * i)));
+}
+void put_key(std::vector<std::uint8_t> &out, const StateKey &k) {
+  if (k.is_number) {
+    out.push_back(3);
+    put_number(out, k.number);
+  } else {
+    out.push_back(4);
+    put_u32(out, static_cast<std::uint32_t>(k.text.size()));
+    out.insert(out.end(), k.text.begin(), k.text.end());
+  }
+}
+
+bool serialize_value(lua_State *L, int index, unsigned depth, std::vector<std::uint8_t> &out, std::string &error) {
+  index = lua_absindex(L, index);
+  if (out.size() > kStateBytesMax) {
+    error = "state exceeds the size limit";
+    return false;
+  }
+  switch (lua_type(L, index)) {
+    case LUA_TBOOLEAN: out.push_back(lua_toboolean(L, index) != 0 ? 2 : 1); return true;
+    case LUA_TNUMBER: {
+      const double v = lua_tonumber(L, index);
+      if (!std::isfinite(v)) {
+        error = "state contains a number that is not finite";
+        return false;
+      }
+      out.push_back(3);
+      put_number(out, v);
+      return true;
+    }
+    case LUA_TSTRING: {
+      std::size_t len = 0;
+      const char *p = lua_tolstring(L, index, &len);
+      if (len > kStateBytesMax) {
+        error = "state exceeds the size limit";
+        return false;
+      }
+      out.push_back(4);
+      put_u32(out, static_cast<std::uint32_t>(len));
+      out.insert(out.end(), p, p + len);
+      return true;
+    }
+    case LUA_TTABLE: {
+      if (depth >= kStateDepthMax) {
+        error = "state is nested too deeply (or cyclic)";
+        return false;
+      }
+      std::vector<StateKey> entries;
+      std::size_t pending = 0;
+      lua_pushnil(L);
+      while (lua_next(L, index) != 0) {
+        StateKey k;
+        const int kt = lua_type(L, -2);
+        if (kt == LUA_TNUMBER) {
+          k.is_number = true;
+          k.number = lua_tonumber(L, -2);
+          if (!std::isfinite(k.number)) {
+            error = "state contains a key that is not finite";
+            return false;
+          }
+        } else if (kt == LUA_TSTRING) {
+          k.text = lua_tostring(L, -2);
+        } else {
+          error = "state contains a key that is neither a number nor a string";
+          return false;
+        }
+        if (!serialize_value(L, -1, depth + 1, k.value, error)) return false;
+        pending += k.value.size() + k.text.size() + 9;
+        if (pending > kStateBytesMax) {
+          error = "state exceeds the size limit";
+          return false;
+        }
+        entries.push_back(std::move(k));
+        lua_pop(L, 1);
+      }
+      std::sort(entries.begin(), entries.end());
+      out.push_back(5);
+      put_u32(out, static_cast<std::uint32_t>(entries.size()));
+      for (const StateKey &k : entries) {
+        put_key(out, k);
+        out.insert(out.end(), k.value.begin(), k.value.end());
+      }
+      return true;
+    }
+    default: error = std::string("state contains a ") + luaL_typename(L, index); return false;
+  }
+}
+
+struct StateReader {
+  std::span<const std::uint8_t> data;
+  std::size_t pos = 0;
+  std::string error;
+  bool fail(const char *why) {
+    if (error.empty()) error = why;
+    return false;
+  }
+  bool u8(std::uint8_t &v) {
+    if (pos >= data.size()) return fail("state is truncated");
+    v = data[pos++];
+    return true;
+  }
+  bool u32(std::uint32_t &v) {
+    if (data.size() - pos < 4) return fail("state is truncated");
+    v = 0;
+    for (unsigned i = 0; i < 4; ++i) v |= static_cast<std::uint32_t>(data[pos + i]) << (8U * i);
+    pos += 4;
+    return true;
+  }
+  bool f64(double &v) {
+    if (data.size() - pos < 8) return fail("state is truncated");
+    std::uint64_t bits = 0;
+    for (unsigned i = 0; i < 8; ++i) bits |= static_cast<std::uint64_t>(data[pos + i]) << (8U * i);
+    pos += 8;
+    std::memcpy(&v, &bits, sizeof v);
+    if (!std::isfinite(v)) return fail("state contains a number that is not finite");
+    return true;
+  }
+  bool str(std::string &s) {
+    std::uint32_t len = 0;
+    if (!u32(len)) return false;
+    if (len > data.size() - pos) return fail("state is truncated");
+    s.assign(reinterpret_cast<const char *>(data.data() + pos), len);
+    pos += len;
+    return true;
+  }
+};
+
+// Parses one value and pushes it. Keys must be strictly increasing in the canonical order, which also rejects duplicates and makes the encoding unique.
+bool deserialize_value(lua_State *L, StateReader &in, unsigned depth) {
+  std::uint8_t tag = 0;
+  if (!in.u8(tag)) return false;
+  switch (tag) {
+    case 1: lua_pushboolean(L, 0); return true;
+    case 2: lua_pushboolean(L, 1); return true;
+    case 3: {
+      double v = 0;
+      if (!in.f64(v)) return false;
+      lua_pushnumber(L, v);
+      return true;
+    }
+    case 4: {
+      std::string s;
+      if (!in.str(s)) return false;
+      lua_pushlstring(L, s.data(), s.size());
+      return true;
+    }
+    case 5: {
+      if (depth >= kStateDepthMax) return in.fail("state is nested too deeply");
+      std::uint32_t count = 0;
+      if (!in.u32(count)) return false;
+      if (count > (in.data.size() - in.pos) / 2U) return in.fail("state is truncated");
+      lua_createtable(L, 0, static_cast<int>(std::min<std::uint32_t>(count, 64U)));
+      StateKey previous;
+      for (std::uint32_t i = 0; i < count; ++i) {
+        StateKey k;
+        std::uint8_t kt = 0;
+        if (!in.u8(kt)) return false;
+        if (kt == 3) {
+          k.is_number = true;
+          if (!in.f64(k.number)) return false;
+        } else if (kt == 4) {
+          if (!in.str(k.text)) return false;
+        } else {
+          return in.fail("state contains a key that is neither a number nor a string");
+        }
+        if (i > 0 && !(previous < k)) return in.fail("state keys are not in canonical order");
+        if (!lua_checkstack(L, 4)) return in.fail("state is too large");
+        if (k.is_number) lua_pushnumber(L, k.number);
+        else lua_pushlstring(L, k.text.data(), k.text.size());
+        if (!deserialize_value(L, in, depth + 1)) return false;
+        lua_settable(L, -3);
+        previous = std::move(k);
+      }
+      return true;
+    }
+    default: return in.fail("state contains an unknown value tag");
+  }
+}
+
+CallResult state_fault(VmImpl *im, const std::string &message) {
+  set_fault(im, Fault::state, message);
+  return {false, im->fault, im->fault_message, 0};
+}
+
 std::string bounded_message(lua_State *L) {
   const char *m = lua_tostring(L, -1);
   std::string s = m != nullptr ? m : "error";
@@ -502,7 +707,7 @@ std::string bounded_message(lua_State *L) {
 }
 
 // Runs the function on top of `T` (already pushed) under the budget; classifies the outcome.
-CallResult run(VmImpl *im, std::uint64_t frame, std::uint32_t index, int nargs = 0, Phase phase = Phase::none) {
+CallResult run(VmImpl *im, std::uint64_t frame, std::uint32_t index, int nargs = 0, Phase phase = Phase::none, int nresults = 0) {
   CallResult r;
   im->phase = phase;
   im->staged = Output{};
@@ -518,7 +723,7 @@ CallResult run(VmImpl *im, std::uint64_t frame, std::uint32_t index, int nargs =
   im->rng = seed_for(im->identity, frame, index);
   const std::uint64_t units_before = im->frame_units;
   im->running = true;
-  const int status = lua_pcall(im->env, nargs, 0, 0);
+  const int status = lua_pcall(im->env, nargs, nresults, 0);
   im->running = false;
   im->phase = Phase::none;
   im->frame_ms += std::chrono::duration<double, std::milli>(Clock::now() - im->frame_start).count();
@@ -644,6 +849,77 @@ CallResult Vm::run_callback(std::string_view name, const FrameInput &input, std:
   if (r.ok) out = std::move(im->staged);
   im->staged = Output{};
   return r;
+}
+
+StateResult Vm::save_state() {
+  VmImpl *im = impl_.get();
+  StateResult r;
+  if (im == nullptr || im->closed) {
+    r.fault = Fault::error;
+    r.message = "the VM is closed";
+    return r;
+  }
+  if (im->fault != Fault::none) {
+    r.fault = im->fault;
+    r.message = im->fault_message;
+    return r;
+  }
+  try {
+    lua_getglobal(im->env, "save");
+  } catch (...) {
+    r.fault = Fault::memory;
+    set_fault(im, Fault::memory, "memory quota exceeded");
+    r.message = im->fault_message;
+    return r;
+  }
+  if (lua_type(im->env, -1) != LUA_TFUNCTION) {   // no save(): the mod has no state
+    lua_pop(im->env, 1);
+    r.ok = true;
+    return r;
+  }
+  const CallResult c = run(im, im->frame, 2, 0, Phase::none, 1);
+  if (!c.ok) {
+    r.fault = c.fault;
+    r.message = c.message;
+    return r;
+  }
+  std::string error;
+  std::vector<std::uint8_t> blob;
+  const bool serialized = lua_type(im->env, -1) != LUA_TNIL ? serialize_value(im->env, -1, 0, blob, error) : (error = "save() returned nil", false);
+  lua_pop(im->env, 1);
+  if (!serialized || blob.size() > kStateBytesMax) {
+    set_fault(im, Fault::state, serialized ? "state exceeds the size limit" : error);
+    r.fault = Fault::state;
+    r.message = im->fault_message;
+    return r;
+  }
+  r.ok = true;
+  r.blob = std::move(blob);
+  return r;
+}
+
+CallResult Vm::load_state(std::span<const std::uint8_t> blob) {
+  VmImpl *im = impl_.get();
+  if (im == nullptr || im->closed) return {false, Fault::error, "the VM is closed", 0};
+  if (im->fault != Fault::none) return {false, im->fault, im->fault_message, 0};
+  if (blob.empty()) return {true, Fault::none, "", 0};
+  if (blob.size() > kStateBytesMax) return state_fault(im, "state exceeds the size limit");
+  try {
+    lua_getglobal(im->env, "load");
+    if (lua_type(im->env, -1) != LUA_TFUNCTION) {
+      lua_pop(im->env, 1);
+      return state_fault(im, "the mod has no load() for the saved state");
+    }
+    StateReader in;
+    in.data = blob;
+    if (!lua_checkstack(im->env, 16) || !deserialize_value(im->env, in, 0) || in.pos != blob.size()) {
+      lua_settop(im->env, 0);
+      return state_fault(im, in.error.empty() ? "state has trailing bytes" : in.error);
+    }
+  } catch (...) {
+    return state_fault(im, "memory quota exceeded");
+  }
+  return run(im, im->frame, 3, 1, Phase::none);
 }
 
 bool Vm::disabled() const { return impl_ == nullptr || impl_->closed || impl_->fault != Fault::none; }

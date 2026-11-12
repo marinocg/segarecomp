@@ -179,7 +179,7 @@ jobs:
           esac
 
   luau-sanitizers:
-    # SEG-137-T002 (ADR 0294): the Luau host (restricted VM, trusted compile step) under AddressSanitizer + UndefinedBehaviorSanitizer, incl. leak detection: teardown must be leak free and the memory,
+    # SEG-137-T002/T004 (ADR 0294/0295): the Luau host (restricted VM, trusted compile step, host API, state seam, adversarial corpus) under AddressSanitizer + UndefinedBehaviorSanitizer, incl. leak detection: teardown must be leak free and the memory,
     # budget, stack and fault paths must not touch freed or invalid memory. Linux only; builds just the Luau test and the CLI the Python Luau tests drive.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: Luau sanitizers (Linux)
@@ -195,9 +195,9 @@ jobs:
       - name: Configure with ASan + UBSan
         run: cmake -S . -B build/luau-san -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSEGARECOMP_WARNINGS_AS_ERRORS=OFF -DBUILD_TESTING=ON -DSEGARECOMP_SANITIZE=ON
       - name: Build the Luau host test and the CLI
-        run: cmake --build build/luau-san --target luau_host_test segarecomp
+        run: cmake --build build/luau-san --target luau_host_test luau_api_test segarecomp
       - name: Luau tests under the sanitizers
         env:
           ASAN_OPTIONS: detect_leaks=1:abort_on_error=0
           UBSAN_OPTIONS: print_stacktrace=1
-        run: ctest --test-dir build/luau-san -R '^(luau_host_test|mod_luau_test)$' --no-tests=error --output-on-failure
+        run: ctest --test-dir build/luau-san -R '^(luau_host_test|luau_api_test|mod_luau_test|mod_luau_api_test)$' --no-tests=error --output-on-failure

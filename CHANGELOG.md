@@ -7,6 +7,13 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Luau for mods: read-only API, static check, error diagnostics, a Luau-only HUD example (ADR 0295)
+
+* A deliberately small, **read-only** Luau API: `sega.log`, `sega.frame.value` (values the host publishes for a frame, copied in), `sega.overlay.rect/text` (requests drawn into the fixed 128x256 HUD overlay) and the optional `reset()` / `render(frame)` callbacks. Every binding is gated by the capability the package declares (`host.log`, `frame.work_ram`, `overlay.rgba`); arguments are validated, geometry is clamped, rates are limited, and a script that misbehaves **faults and disables only itself** (stable `E_MOD_FAULT cause=...` diagnostic, nothing it staged is kept). There is no memory access, input, clock, file or network.
+* `segarecomp mod check/pack/build` reject an undeclared capability, an unknown API name and visible argument errors as `<file>:<line>: <message>`. `segarecomp mod api` prints the machine-readable API list and the generated `.d.luau`; `mod init --template luau` adds the declarations and VS Code (luau-lsp) settings.
+* `segarecomp mod session` runs a Luau-only package in a deterministic **fixture session** (synthetic picture, published values, overlay composited, SHA-256 per frame). The committed example `platforms/genesis/sdk/examples/luau-hud` is built, installed (consent sheet, no native approval) and run end to end by CI against pinned hashes. It does not run a game yet.
+* A bounded, canonical state seam (`save`/`load`) and an adversarial test corpus (memory/CPU bombs, metatable and global escapes, coroutine and loader abuse, malformed state, determinism, isolation). Restricted and limited, **not** "safe".
+
 ### Luau for mods: pinned build, restricted per-mod VM, trusted bytecode compile (ADR 0294)
 
 * Luau 0.746 is vendored unmodified (VM, compiler, AST; **no native code generation / JIT** is in the repository or the binary) with its license texts shipped in the package. Mod scripts are still **source only**: `segarecomp mod build` and `mod variant` now compile them with the pinned compiler, report a syntax error as `<file>:<line>: <message>` (`E_LUAU_SYNTAX`) and print the bytecode digest, which is part of the variant identity. A package that carries bytecode is rejected, and compiled output that is not what the build produced is never loaded (it is rebuilt from source).

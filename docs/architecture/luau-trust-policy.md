@@ -1,6 +1,6 @@
 # Luau security and trust policy
 
-Status: accepted contract (SEG-133-T005, ADR [0284](../decisions/0284-luau-trust-policy.md)). **Implemented in part**: the pinned build, the trusted compile step and the restricted VM lifecycle (SEG-137-T001..T003, ADR [0294](../decisions/0294-luau-vendoring-vm-and-trusted-compile.md)); the `sega.*` bindings, callbacks, analysis and the adversarial test suite are later SEG-137/SEG-144 tasks. Inputs: [schema 3](segapatch-schema-3.md), [ABI 2 capability catalogue](native-sdk-abi-2.md), [phases](mod-execution-phases.md).
+Status: accepted contract (SEG-133-T005, ADR [0284](../decisions/0284-luau-trust-policy.md)). **Implemented in part**: the pinned build, the trusted compile step and the restricted VM lifecycle (SEG-137-T001..T003, ADR [0294](../decisions/0294-luau-vendoring-vm-and-trusted-compile.md)); the capability-gated `sega.*` read-only API, the static check, the state seam, the fixture session and the adversarial test corpus (SEG-137-T004..T007, ADR [0295](../decisions/0295-luau-host-api-static-check-and-fixture-session.md)). Running scripts inside a live game, guest-memory services and the `MODSTATE` container are M05/M07; the independent adversarial review is SEG-144-T003. Inputs: [schema 3](segapatch-schema-3.md), [ABI 2 capability catalogue](native-sdk-abi-2.md), [phases](mod-execution-phases.md).
 Consumers: SEG-137-T001..T007, SEG-138-T005, SEG-144-T003 (adversarial testing), the launcher approval text (SEG-143, SEG-135).
 
 **Safety is determined by bindings, configuration and adversarial tests, not by language sandboxing alone.** Luau is a language designed for embedding with a restricted standard library; that reduces attack surface and does not by itself make a script safe.
@@ -110,6 +110,21 @@ Promised (each backed by a test category): scripts have no file, network, proces
 | leak-free teardown | `Vm::close()` | `luau_host_test` (also under ASan/UBSan in CI) |
 
 The compile limits of section 2.4 are enforced by the bounded compile child (5 s kill, metered C++ allocator ending at 256 MiB; ADR 0294, tests in `mod_luau_test`). Known limits of this implementation: the meter counts C++ heap requests, not process RSS or stack; budget units count VM safepoints, not machine instructions, and C library functions that never reach a safepoint are bounded by the memory quota and the watchdog only. These are statements for SEG-144-T003 to attack, not safety claims.
+
+## 9.1 Implementation status (F07)
+
+| Rule | Where | Test |
+|---|---|---|
+| bindings exist only for declared, supported capabilities; an ungranted one is a sticky `capability` fault | `luau::Vm` with `HostConfig`, `sega_missing` | `luau_api_test` (`binding-abuse`) |
+| argument validation (type, NaN, fraction, range, count) = `range`; wrong phase = `phase`; log/overlay rate = `budget`; staged output discarded on any fault | `luau_vm.cpp` bindings | `luau_api_test` |
+| copy-in/copy-out only, read-only `sega`, no host handle, bounded and printable diagnostics | `luau_vm.cpp` | `luau_api_test` (`diagnostic-hygiene`) |
+| API enumerated in one machine-readable list; declaration file generated from it | `luau::api_entries()`, `mod api` | `mod_luau_api_test` (committed copies cannot drift) |
+| static check of declared capabilities and API use | `luau::analyze_mod` in `mod check/pack/build` | `luau_api_test`, `mod_luau_api_test` |
+| state value: canonical, bounded, no function/cycle/NaN, strict restore | `Vm::save_state`/`load_state` | `luau_api_test` (`state-integrity`) |
+| error taxonomy and per-mod disablement with a stable diagnostic | `luau::run_fixture_session` | `luau_api_test`, `mod_luau_api_test` |
+| install sheet per trust class | `mod install` | `mod_luau_api_test` (`approval-semantics`) |
+
+Not implemented: the `pairs` lint of section 3 (needs type inference; the Analysis module is not vendored), `sega.mem.*`, `sega.input.*`, `sega.hook`, `sega.state`, `sega.audio.*` (M05/SEG-141/SEG-145), feature detection of optional capabilities by a script.
 
 ## 10. Non-goals
 

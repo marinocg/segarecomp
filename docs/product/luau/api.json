@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "api": [
+    {"name": "sega.log", "capability": "host.log", "kind": "function", "signature": "(message: string) -> ()", "phases": "all", "doc": "Appends one line to the host log (at most 256 bytes, 16 lines per callback; printable ASCII)."},
+    {"name": "sega.frame.value", "capability": "frame.work_ram", "kind": "function", "signature": "(name: string) -> number?", "phases": "render", "doc": "Reads one named integer the host published for this frame (a read-only copy; nil when the host publishes no such value)."},
+    {"name": "sega.overlay.width", "capability": "overlay.rgba", "kind": "value", "signature": "number", "phases": "render", "doc": "Width of the HUD overlay in pixels (128)."},
+    {"name": "sega.overlay.height", "capability": "overlay.rgba", "kind": "value", "signature": "number", "phases": "render", "doc": "Height of the HUD overlay in pixels (256)."},
+    {"name": "sega.overlay.rect", "capability": "overlay.rgba", "kind": "function", "signature": "(x: number, y: number, w: number, h: number, rgba: number) -> ()", "phases": "render", "doc": "Requests a filled rectangle; integers only, clamped to the overlay, rgba is 0xRRGGBBAA, at most 64 requests per callback."},
+    {"name": "sega.overlay.text", "capability": "overlay.rgba", "kind": "function", "signature": "(x: number, y: number, text: string, rgba: number) -> ()", "phases": "render", "doc": "Requests text in the host's bitmap font (printable ASCII, at most 64 bytes); the origin is clamped to the overlay."},
+    {"name": "reset", "capability": "", "kind": "callback", "signature": "() -> ()", "phases": "reset", "doc": "Optional. Called once before the first frame."},
+    {"name": "render", "capability": "", "kind": "callback", "signature": "(frame: number) -> ()", "phases": "render", "doc": "Optional. Called once per frame after its snapshot; `frame` is the frame counter."}
+  ],
+  "limits": {"log_line_bytes": 256, "log_lines_per_callback": 16, "overlay_ops_per_callback": 64, "overlay_text_bytes": 64, "overlay_width": 128, "overlay_height": 256, "frame_value_name_bytes": 32}
+}
