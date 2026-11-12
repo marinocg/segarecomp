@@ -216,11 +216,13 @@ int install(const fs::path &package_path, const fs::path &rom, const fs::path &l
 // Fail-closed guard shared by every command that writes an output next to input images: the output must not be the same file as any input (same path, equivalent path, symlink or hard link).
 // Checked before anything is written; an unrelated existing output is still replaced as before.
 std::optional<mod::Rejection> output_clobbers_input(const fs::path &out, const std::vector<fs::path> &inputs) {
-  std::error_code ec;
-  if (!fs::exists(out, ec)) return std::nullopt;   // a new file cannot be an existing input
+  fs::path staging = out;
+  staging += ".partial";   // write_atomic() deletes and recreates this path first, so it is protected like the output itself
   for (const fs::path &in : inputs) {
-    std::error_code e2;
-    if (fs::exists(in, e2) && fs::equivalent(out, in, e2) && !e2) return mod::Rejection{"E_OUTPUT_IS_INPUT", "--out is the same file as an input; refusing to overwrite it"};
+    std::error_code e1, e2, e3;
+    if (!fs::exists(in, e1)) continue;
+    if ((fs::exists(out, e2) && fs::equivalent(out, in, e2) && !e2) || (fs::exists(staging, e3) && fs::equivalent(staging, in, e3) && !e3))
+      return mod::Rejection{"E_OUTPUT_IS_INPUT", "--out (or its .partial staging file) is the same file as an input; refusing to overwrite it"};
   }
   return std::nullopt;
 }

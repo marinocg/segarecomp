@@ -372,6 +372,12 @@ for what, outp in [("hard link", link), ("symlink", sym)]:
     for cmd in (("mod", "apply", gd, "--rom", src, "--out", outp), ("mod", "bps", gd, "--rom", src, "--out", outp), ("mod", "pack", gd, "--rom", src, "--out", outp)):
         refused(f"{cmd[1]} --out {what}", "E_OUTPUT_IS_INPUT", *cmd)
         cli.check(src.read_bytes() == A and link.read_bytes() == A, f"{cmd[1]} --out {what}: the original image is byte-identical after rejection")
+# the writer's staging file: an input named <out>.partial is deleted by the atomic writer, even though <out> itself does not exist
+for cmd_name in ("apply", "bps", "pack"):
+    stage_in = write(tmp / "guard" / f"orig-{cmd_name}.bin.partial", A)
+    target_out = tmp / "guard" / f"orig-{cmd_name}.bin"
+    refused(f"{cmd_name}: input is the output's .partial staging path", "E_OUTPUT_IS_INPUT", "mod", cmd_name, gd, "--rom", stage_in, "--out", target_out)
+    cli.check(stage_in.read_bytes() == A and not target_out.exists(), f"{cmd_name}: the .partial input survives and no output appears")
 other = write(tmp / "guard" / "old-artifact.bin", b"stale artifact")
 ok("an unrelated existing output is replaced", "mod", "apply", gd, "--rom", src, "--out", other)
 cli.check(other.read_bytes() == apply(gd, A)[2] and src.read_bytes() == A, "the unrelated artifact was replaced and the source untouched")
