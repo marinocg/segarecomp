@@ -191,8 +191,9 @@ jobs:
           python-version: "3.12"
       - name: Install Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
+      # Warnings are not errors here: the sanitizer instrumentation changes GCC's diagnostics in unrelated product code; the warning gate is the build-test matrix.
       - name: Configure with ASan + UBSan
-        run: cmake -S . -B build/luau-san -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSEGARECOMP_WARNINGS_AS_ERRORS=ON -DBUILD_TESTING=ON -DSEGARECOMP_SANITIZE=ON
+        run: cmake -S . -B build/luau-san -G Ninja -DCMAKE_BUILD_TYPE=Debug -DSEGARECOMP_WARNINGS_AS_ERRORS=OFF -DBUILD_TESTING=ON -DSEGARECOMP_SANITIZE=ON
       - name: Build the Luau host test and the CLI
         run: cmake --build build/luau-san --target luau_host_test segarecomp
       - name: Luau tests under the sanitizers
