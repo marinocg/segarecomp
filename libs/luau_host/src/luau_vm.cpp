@@ -1,4 +1,5 @@
 // SEG-137-T002 (ADR 0294): the restricted per-mod Luau VM. See luau_host.hpp and docs/architecture/luau-trust-policy.md.
+#include "segarecomp/luau_api.hpp"
 #include "segarecomp/luau_host.hpp"
 
 #include "segarecomp/sha256.hpp"
@@ -13,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 
 // Native code generation is not built (third_party/luau/CMakeLists.txt); this makes the claim a compile-time fact for every translation unit that includes the VM.
 static_assert(SEGARECOMP_LUAU_CODEGEN == 0, "Luau native code generation must not be built");
@@ -29,6 +31,9 @@ const char *fault_name(Fault fault) {
     case Fault::memory: return "memory";
     case Fault::stack: return "stack";
     case Fault::watchdog: return "watchdog";
+    case Fault::capability: return "capability";
+    case Fault::range: return "range";
+    case Fault::phase: return "phase";
   }
   return "error";
 }
@@ -41,6 +46,8 @@ Limits limits_for(const mod::Manifest &manifest) {
   if (manifest.luau_budget_units != 0) l.callback_units = std::min(l.callback_units, manifest.luau_budget_units);
   return l;
 }
+
+enum class Phase { none, load, reset, render };
 
 struct VmImpl {
   Limits limits;
@@ -59,6 +66,12 @@ struct VmImpl {
   std::uint64_t rng = 0;
   bool closed = false;
   std::uint64_t leaked = 0;
+  // host API (luau_api.hpp); `granted` empty and `has_host` false = no `sega` table
+  bool has_host = false;
+  std::set<std::string> granted;
+  Phase phase = Phase::none;
+  const FrameInput *input = nullptr;   // valid only inside run_callback
+  Output staged;                       // discarded unless the callback succeeds
 };
 
 namespace {
@@ -260,8 +273,10 @@ void sandbox_thread(lua_State *L) {
   lua_setsafeenv(L, LUA_GLOBALSINDEX, true);
 }
 
+void install_host(lua_State *L, VmImpl *im);   // defined below with the bindings
+
 // Builds the restricted globals on the main state: only the whitelisted libraries are opened, everything else the base library registered is removed, then the library tables are frozen.
-void build_globals(lua_State *L) {
+void build_globals(lua_State *L, VmImpl *im) {
   open_library(L, luaopen_base, "");
   open_library(L, luaopen_math, LUA_MATHLIBNAME);
   open_library(L, luaopen_string, LUA_STRLIBNAME);
@@ -289,7 +304,192 @@ void build_globals(lua_State *L) {
   lua_pushcfunction(L, math_randomseed, "randomseed");
   lua_setfield(L, -2, "randomseed");
   lua_pop(L, 1);
+  if (im->has_host) install_host(L, im);
   freeze_globals(L);
+}
+
+
+// ---- the `sega` host API (luau_api.hpp, policy section 5) ----
+// Every binding validates its own arguments and answers a violation with a sticky fault (range / phase / budget / capability): a script cannot catch it with pcall and continue.
+[[noreturn]] void binding_fault(lua_State *L, Fault f, const std::string &message) {
+  set_fault(impl_of(L), f, message);
+  raise(L, message.c_str());
+}
+
+void require_phase(lua_State *L, Phase want, const char *name) {
+  if (impl_of(L)->phase != want) binding_fault(L, Fault::phase, std::string(name) + " is not available in this phase");
+}
+
+void require_args(lua_State *L, int count, const char *name) {
+  if (lua_gettop(L) != count) binding_fault(L, Fault::range, std::string(name) + " takes " + std::to_string(count) + " argument(s)");
+}
+
+// An integer argument in [lo, hi]: a non-number, NaN, infinity, fraction or out-of-range value is a range fault (never silently converted).
+std::int64_t int_arg(lua_State *L, int n, std::int64_t lo, std::int64_t hi, const char *name) {
+  if (lua_type(L, n) != LUA_TNUMBER) binding_fault(L, Fault::range, std::string("argument ") + std::to_string(n) + " of " + name + " must be a number");
+  const double v = lua_tonumber(L, n);
+  if (!std::isfinite(v) || v != std::floor(v) || v < static_cast<double>(lo) || v > static_cast<double>(hi))
+    binding_fault(L, Fault::range, std::string("argument ") + std::to_string(n) + " of " + name + " is out of range");
+  return static_cast<std::int64_t>(v);
+}
+
+std::string_view str_arg(lua_State *L, int n, const char *name) {
+  if (lua_type(L, n) != LUA_TSTRING) binding_fault(L, Fault::range, std::string("argument ") + std::to_string(n) + " of " + name + " must be a string");
+  std::size_t len = 0;
+  const char *p = lua_tolstring(L, n, &len);
+  return {p, len};
+}
+
+void note(VmImpl *im, const char *cause, std::string message) {
+  if (im->staged.notes.size() < kNotesMax) im->staged.notes.push_back({cause, std::move(message)});
+}
+
+// Printable ASCII only: control bytes and non-ASCII become '?', so a diagnostic or an overlay never carries raw script bytes.
+std::string printable(std::string_view text, std::size_t limit, bool &truncated) {
+  truncated = text.size() > limit;
+  std::string out(text.substr(0, limit));
+  for (char &c : out)
+    if (static_cast<unsigned char>(c) < 0x20 || static_cast<unsigned char>(c) > 0x7E) c = '?';
+  return out;
+}
+
+int sega_log(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  require_args(L, 1, "sega.log");
+  const std::string_view text = str_arg(L, 1, "sega.log");
+  if (im->staged.log.size() >= kLogLinesPerCallback) binding_fault(L, Fault::budget, "sega.log line limit exceeded");
+  bool truncated = false;
+  im->staged.log.push_back(printable(text, kLogLineBytes, truncated));
+  if (truncated) note(im, "log_truncated", "a sega.log line was cut to 256 bytes");
+  return 0;
+}
+
+int sega_frame_value(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  require_phase(L, Phase::render, "sega.frame.value");
+  require_args(L, 1, "sega.frame.value");
+  const std::string_view name = str_arg(L, 1, "sega.frame.value");
+  if (name.empty() || name.size() > kFrameValueNameBytes) binding_fault(L, Fault::range, "argument 1 of sega.frame.value is not a valid value name");
+  if (im->input != nullptr)
+    for (const FrameValue &v : im->input->values)
+      if (v.name == name) {
+        lua_pushnumber(L, static_cast<double>(v.value));
+        return 1;
+      }
+  lua_pushnil(L);
+  return 1;
+}
+
+void add_op(lua_State *L, OverlayOp op) {
+  VmImpl *im = impl_of(L);
+  if (im->staged.overlay.size() >= kOverlayOpsPerCallback) binding_fault(L, Fault::budget, "sega.overlay request limit exceeded");
+  im->staged.overlay.push_back(std::move(op));
+}
+
+constexpr std::int64_t kCoord = 1 << 20;
+
+int sega_overlay_rect(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  require_phase(L, Phase::render, "sega.overlay.rect");
+  require_args(L, 5, "sega.overlay.rect");
+  const std::int64_t x = int_arg(L, 1, -kCoord, kCoord, "sega.overlay.rect"), y = int_arg(L, 2, -kCoord, kCoord, "sega.overlay.rect");
+  const std::int64_t w = int_arg(L, 3, 0, kCoord, "sega.overlay.rect"), h = int_arg(L, 4, 0, kCoord, "sega.overlay.rect");
+  const std::int64_t rgba = int_arg(L, 5, 0, 4294967295LL, "sega.overlay.rect");
+  const std::int64_t x0 = std::max<std::int64_t>(x, 0), y0 = std::max<std::int64_t>(y, 0);
+  const std::int64_t x1 = std::min<std::int64_t>(x + w, kOverlayWidth), y1 = std::min<std::int64_t>(y + h, kOverlayHeight);
+  if (x1 <= x0 || y1 <= y0) {
+    note(im, "overlay_clipped", "a sega.overlay.rect has no visible area");
+    return 0;
+  }
+  if (x0 != x || y0 != y || x1 - x0 != w || y1 - y0 != h) note(im, "overlay_clamped", "a sega.overlay.rect was clamped to the overlay");
+  OverlayOp op;
+  op.kind = OverlayOp::Kind::rect;
+  op.x = static_cast<int>(x0);
+  op.y = static_cast<int>(y0);
+  op.w = static_cast<int>(x1 - x0);
+  op.h = static_cast<int>(y1 - y0);
+  op.rgba = static_cast<std::uint32_t>(rgba);
+  add_op(L, std::move(op));
+  return 0;
+}
+
+int sega_overlay_text(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  require_phase(L, Phase::render, "sega.overlay.text");
+  require_args(L, 4, "sega.overlay.text");
+  const std::int64_t x = int_arg(L, 1, -kCoord, kCoord, "sega.overlay.text"), y = int_arg(L, 2, -kCoord, kCoord, "sega.overlay.text");
+  const std::string_view text = str_arg(L, 3, "sega.overlay.text");
+  const std::int64_t rgba = int_arg(L, 4, 0, 4294967295LL, "sega.overlay.text");
+  const std::int64_t cx = std::clamp<std::int64_t>(x, 0, kOverlayWidth - 1), cy = std::clamp<std::int64_t>(y, 0, kOverlayHeight - 1);
+  if (cx != x || cy != y) note(im, "overlay_clamped", "a sega.overlay.text origin was clamped to the overlay");
+  OverlayOp op;
+  op.kind = OverlayOp::Kind::text;
+  op.x = static_cast<int>(cx);
+  op.y = static_cast<int>(cy);
+  bool truncated = false;
+  op.text = printable(text, kOverlayTextBytes, truncated);
+  if (truncated) note(im, "text_truncated", "a sega.overlay.text string was cut to 64 bytes");
+  op.rgba = static_cast<std::uint32_t>(rgba);
+  add_op(L, std::move(op));
+  return 0;
+}
+
+// __index of every `sega` namespace table: a name that exists in the API list but whose capability was not declared is a capability fault the moment the script reaches for it (the binding is absent);
+// any other missing key is plain nil. The upvalue is the namespace prefix.
+int sega_missing(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  const char *prefix = lua_tostring(L, lua_upvalueindex(1));
+  if (lua_type(L, 2) == LUA_TSTRING && prefix != nullptr) {
+    const ApiEntry *e = find_api(std::string(prefix) + "." + lua_tostring(L, 2));
+    if (e != nullptr && !e->capability.empty() && im->granted.count(std::string(e->capability)) == 0)
+      binding_fault(L, Fault::capability, "capability not declared: " + std::string(e->capability));
+  }
+  lua_pushnil(L);
+  return 1;
+}
+
+void guard_namespace(lua_State *L, const char *prefix) {   // table on top of the stack
+  lua_newtable(L);
+  lua_pushstring(L, prefix);
+  lua_pushcclosurek(L, sega_missing, "index", 1, nullptr);
+  lua_setfield(L, -2, "__index");
+  lua_pushliteral(L, "locked");
+  lua_setfield(L, -2, "__metatable");
+  lua_setreadonly(L, -1, true);
+  lua_setmetatable(L, -2);
+}
+
+void bind(lua_State *L, VmImpl *im, std::string_view name, lua_CFunction fn) {   // `sega.<name>` leaf on the table on top of the stack, only when its capability is granted
+  const ApiEntry *e = find_api(name);
+  if (e == nullptr || (!e->capability.empty() && im->granted.count(std::string(e->capability)) == 0)) return;
+  const std::string leaf(name.substr(name.rfind('.') + 1));
+  lua_pushcfunction(L, fn, leaf.c_str());
+  lua_setfield(L, -2, leaf.c_str());
+}
+
+void install_host(lua_State *L, VmImpl *im) {
+  lua_newtable(L);   // sega
+  bind(L, im, "sega.log", sega_log);
+  lua_newtable(L);   // sega.frame
+  bind(L, im, "sega.frame.value", sega_frame_value);
+  guard_namespace(L, "sega.frame");
+  lua_setreadonly(L, -1, true);
+  lua_setfield(L, -2, "frame");
+  lua_newtable(L);   // sega.overlay
+  bind(L, im, "sega.overlay.rect", sega_overlay_rect);
+  bind(L, im, "sega.overlay.text", sega_overlay_text);
+  if (im->granted.count("overlay.rgba") != 0) {
+    lua_pushnumber(L, kOverlayWidth);
+    lua_setfield(L, -2, "width");
+    lua_pushnumber(L, kOverlayHeight);
+    lua_setfield(L, -2, "height");
+  }
+  guard_namespace(L, "sega.overlay");
+  lua_setreadonly(L, -1, true);
+  lua_setfield(L, -2, "overlay");
+  guard_namespace(L, "sega");
+  lua_setreadonly(L, -1, true);
+  lua_setfield(L, LUA_GLOBALSINDEX, "sega");
 }
 
 std::string bounded_message(lua_State *L) {
@@ -302,8 +502,10 @@ std::string bounded_message(lua_State *L) {
 }
 
 // Runs the function on top of `T` (already pushed) under the budget; classifies the outcome.
-CallResult run(VmImpl *im, std::uint64_t frame, std::uint32_t index) {
+CallResult run(VmImpl *im, std::uint64_t frame, std::uint32_t index, int nargs = 0, Phase phase = Phase::none) {
   CallResult r;
+  im->phase = phase;
+  im->staged = Output{};
   const auto now = Clock::now();
   if (im->frame != frame) {
     im->frame = frame;
@@ -316,8 +518,9 @@ CallResult run(VmImpl *im, std::uint64_t frame, std::uint32_t index) {
   im->rng = seed_for(im->identity, frame, index);
   const std::uint64_t units_before = im->frame_units;
   im->running = true;
-  const int status = lua_pcall(im->env, 0, 0, 0);
+  const int status = lua_pcall(im->env, nargs, 0, 0);
   im->running = false;
+  im->phase = Phase::none;
   im->frame_ms += std::chrono::duration<double, std::milli>(Clock::now() - im->frame_start).count();
   r.units = im->frame_units - units_before;
   if (im->out_of_memory) set_fault(im, Fault::memory, "memory quota exceeded");
@@ -338,10 +541,18 @@ Vm::Vm(std::unique_ptr<VmImpl> impl) : impl_(std::move(impl)) {}
 
 Vm::~Vm() { (void)close(); }
 
-std::unique_ptr<Vm> Vm::create(std::string_view package_identity, const Limits &limits) {
+std::unique_ptr<Vm> Vm::create(std::string_view package_identity, const Limits &limits) { return create_vm(package_identity, limits, nullptr); }
+
+std::unique_ptr<Vm> Vm::create(std::string_view package_identity, const Limits &limits, const HostConfig &host) { return create_vm(package_identity, limits, &host); }
+
+std::unique_ptr<Vm> Vm::create_vm(std::string_view package_identity, const Limits &limits, const HostConfig *host) {
   if (package_identity.size() != 64) return nullptr;
   auto im = std::make_unique<VmImpl>();
   im->limits = limits;
+  if (host != nullptr) {
+    im->has_host = true;
+    im->granted.insert(host->capabilities.begin(), host->capabilities.end());
+  }
   im->identity_hex = std::string(package_identity);
   for (std::size_t i = 0; i < 32; ++i) {
     const auto nib = [&](char c) -> int { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1; };
@@ -354,7 +565,7 @@ std::unique_ptr<Vm> Vm::create(std::string_view package_identity, const Limits &
   lua_callbacks(im->main)->userdata = im.get();
   lua_callbacks(im->main)->interrupt = interrupt;
   try {
-    build_globals(im->main);
+    build_globals(im->main, im.get());
     im->env = lua_newthread(im->main);   // anchored on the main stack for the life of the VM
     sandbox_thread(im->env);
   } catch (...) {   // quota too small to even open the libraries
@@ -381,7 +592,7 @@ CallResult Vm::load(const CompiledMod &compiled) {
       else set_fault(im, Fault::error, message);
       return {false, im->fault, im->fault_message, 0};
     }
-    last = run(im, 0, 0xFFFFFFFFU);
+    last = run(im, 0, 0xFFFFFFFFU, 0, Phase::load);
     if (!last.ok) return last;
   }
   return last;
@@ -404,6 +615,35 @@ CallResult Vm::call(std::string_view name, std::uint64_t frame, std::uint32_t ca
     return {false, Fault::error, im->fault_message, 0};
   }
   return run(im, frame, callback_index);
+}
+
+CallResult Vm::run_callback(std::string_view name, const FrameInput &input, std::uint32_t callback_index, Output &out) {
+  VmImpl *im = impl_.get();
+  out = Output{};
+  if (im == nullptr || im->closed || !im->has_host) return {false, Fault::error, "the VM has no host API", 0};
+  if (im->fault != Fault::none) return {false, im->fault, im->fault_message, 0};
+  const bool render = name == "render";
+  if (!render && name != "reset") return {false, Fault::error, "unknown lifecycle callback", 0};
+  const std::string key(name);
+  try {
+    lua_getglobal(im->env, key.c_str());
+  } catch (...) {
+    set_fault(im, Fault::memory, "memory quota exceeded");
+    return {false, Fault::memory, im->fault_message, 0};
+  }
+  if (lua_type(im->env, -1) != LUA_TFUNCTION) {   // an undefined callback is skipped
+    lua_pop(im->env, 1);
+    CallResult skipped;
+    skipped.ok = true;
+    return skipped;
+  }
+  if (render) lua_pushnumber(im->env, static_cast<double>(input.number));
+  im->input = &input;
+  CallResult r = run(im, render ? input.number : 0, callback_index, render ? 1 : 0, render ? Phase::render : Phase::reset);
+  im->input = nullptr;
+  if (r.ok) out = std::move(im->staged);
+  im->staged = Output{};
+  return r;
 }
 
 bool Vm::disabled() const { return impl_ == nullptr || impl_->closed || impl_->fault != Fault::none; }

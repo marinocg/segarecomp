@@ -1,7 +1,8 @@
-// `segarecomp mod init|check|pack|build|inspect|install|variant|convert-audio`: the CLI seam of the modding platform (ADR 0280/0281/0283/0286). One JSON object on stdout; the launcher links the same libs/media
+// `segarecomp mod init|check|pack|build|inspect|install|variant|convert-audio|api|session`: the CLI seam of the modding platform (ADR 0280/0281/0283/0286). One JSON object on stdout; the launcher links the same libs/media
 // implementation. `check` and `build` never execute a payload; `build` runs the HOST's C compiler (flags owned by the host, kNativeCompileFlags) over the package's own C11 units only, and the pinned
 // trusted Luau compiler over its Luau sources (SEG-137-T003; the bytecode is never packaged and never run by `build`).
 #include "process_run.hpp"
+#include "segarecomp/luau_api.hpp"
 #include "segarecomp/luau_host.hpp"
 #include "segarecomp/mod.hpp"
 #include "segarecomp/patch.hpp"
@@ -280,6 +281,19 @@ bool write_text(const fs::path &p, const std::string &text) {
 }
 
 // `mod install`: verify the package against the exact original image, copy the verified bytes into the library, and record the user's approval of that exact identity (native packages only).
+// The install sheet statement of the package's trust class (Luau policy section 6): shown by `install`, recorded nowhere else.
+std::string consent_text(const mod::Manifest &m) {
+  const std::string klass = mod::trust_class(m);
+  if (klass == "data") return "modifies the game image; no code runs";
+  std::string caps;
+  for (const std::string &c : m.capabilities) caps += (caps.empty() ? "" : ", ") + c;
+  for (const std::string &c : m.capabilities_optional) caps += (caps.empty() ? "" : ", ") + c + " (optional)";
+  if (klass == "luau")
+    return "includes scripts that run while you play; they can change gameplay and draw overlays within the capabilities listed (" + (caps.empty() ? std::string("none") : caps) +
+           "); they cannot access your files or network; not a security guarantee";
+  return "includes native code that can do anything on your computer; install only from a source you trust";
+}
+
 int install(const fs::path &package_path, const fs::path &rom, const fs::path &library, const std::string &approve) {
   const mod::Package p = mod::read_package_file(package_path);
   if (!p.ok) return refuse(p.rejection);
@@ -298,7 +312,8 @@ int install(const fs::path &package_path, const fs::path &rom, const fs::path &l
   if (!approve.empty() && !write_text(dir / (p.identity + ".approved"), p.identity + "\n")) return refuse({"E_ARCHIVE_ENTRY", "the approval cannot be recorded"});
   const bool approved = fs::exists(dir / (p.identity + ".approved"), ec);
   std::cout << "{\"ok\":true,\"installed\":true,\"added\":" << (added ? "true" : "false") << ",\"package_identity\":\"" << p.identity << "\",\"trust_class\":\"" << mod::trust_class(p.manifest)
-            << "\",\"approved\":" << (approved ? "true" : "false") << ",\"effective_image\":\"" << e.effective_sha256 << "\"}\n";
+            << "\",\"approved\":" << (approved ? "true" : "false") << ",\"approval_kind\":\"" << (mod::trust_class(p.manifest) == "data" ? "none" : mod::trust_class(p.manifest) == "luau" ? "consent" : "native")
+            << "\",\"install_sheet\":\"" << esc(consent_text(p.manifest)) << "\",\"effective_image\":\"" << e.effective_sha256 << "\"}\n";
   return 0;
 }
 
@@ -485,6 +500,97 @@ constexpr const char *kEditTemplate =
     "# Example (replace the revision label, offset and values with your own):\n"
     "#   rev-a u16 0x00000200 0x1234 0x5678\n";
 
+// SEG-137-T005: the static check of a package's Luau sources against the API list; a refusal names the FIRST issue as the class and lists every issue.
+int refuse_analysis(const std::vector<luau::AnalysisIssue> &issues) {
+  std::string list = "[";
+  for (std::size_t i = 0; i < issues.size(); ++i)
+    list += std::string(i ? "," : "") + "{\"class\":\"" + esc(issues[i].cls) + "\",\"file\":\"" + esc(issues[i].where.file) + "\",\"line\":" + std::to_string(issues[i].where.line) + ",\"message\":\"" + esc(issues[i].where.message) + "\"}";
+  std::cout << "{\"ok\":false,\"class\":\"" << esc(issues.front().cls) << "\",\"error\":\"" << esc(issues.front().where.text()) << "\",\"issues\":" << list << "]}\n";
+  return 1;
+}
+
+// The starter project of `init --template luau`. The Genesis template is the committed SDK example (platforms/genesis/sdk/examples/luau-hud/scripts/main.luau; a test keeps them equal).
+constexpr const char *kLuauHudScript =
+    "-- Luau-only HUD example (restricted scripting: ADR 0295). Runs while you play; it can only read the values the host publishes and request overlay drawing.\n"
+    "-- The capabilities it uses are declared in mod.toml; `segarecomp mod check` rejects any other `sega.*` use.\n"
+    "local PANEL = 0x000000A0     -- 0xRRGGBBAA\n"
+    "local WHITE = 0xFFFFFFFF\n"
+    "local GOLD = 0xFFD040FF\n"
+    "\n"
+    "function reset()\n"
+    "  sega.log(\"hud example ready\")\n"
+    "end\n"
+    "\n"
+    "function render(frame)\n"
+    "  sega.overlay.rect(0, 0, 96, 28, PANEL)\n"
+    "  local score = sega.frame.value(\"score\") or 0\n"
+    "  local lives = sega.frame.value(\"lives\") or 0\n"
+    "  sega.overlay.text(4, 3, \"SCORE \" .. string.format(\"%06d\", score), WHITE)\n"
+    "  sega.overlay.text(4, 15, \"LIVES \" .. lives .. \" F\" .. frame % 100, GOLD)\n"
+    "end\n";
+constexpr const char *kLuauLogScript =
+    "-- Luau-only example (restricted scripting: ADR 0295). This platform grants the log binding only.\n"
+    "function reset()\n"
+    "  sega.log(\"ready\")\n"
+    "end\n";
+constexpr const char *kLuauRc = "{\n  \"languageMode\": \"strict\"\n}\n";
+constexpr const char *kVsCodeSettings =
+    "{\n  \"luau-lsp.types.definitionFiles\": [\"types/segarecomp.d.luau\"],\n  \"luau-lsp.platform.type\": \"standard\",\n  \"luau-lsp.sourcemap.enabled\": false\n}\n";
+
+int run_api(bool declarations_only) {
+  if (declarations_only) std::cout << luau::declarations();
+  else std::cout << luau::api_json();
+  return 0;
+}
+
+// SEG-137-T007: runs the deterministic fixture session of a Luau-only package (see luau_api.hpp). The scripts are compiled by the trusted compile child, never loaded from the package.
+int run_session(const fs::path &target, const fs::path &rom, std::uint64_t frames, const fs::path &bmp) {
+  mod::Package p;
+  if (const auto r = load_package(target, p)) return refuse(*r);
+  std::vector<std::uint8_t> image;
+  if (!read_all(rom, mod::kMaxImageBytes, image)) return refuse({"E_IMAGE_MISMATCH", "the image cannot be read"});
+  const mod::EffectiveImage e = mod::effective_image(p, image);
+  if (!e.ok) return refuse(e.rejection);
+  if (mod::trust_class(p.manifest) != "luau") return refuse({"E_TRUST_CLASS", "a fixture session runs Luau-only packages"});
+  const std::vector<luau::AnalysisIssue> issues = luau::analyze_mod(p);
+  if (!issues.empty()) return refuse_analysis(issues);
+  std::vector<std::uint8_t> raw;
+  if (fs::is_directory(target)) {
+    const mod::Checked c = mod::check_project(target);
+    if (!c.ok) return refuse(c.rejection);
+    raw = c.package;
+  } else if (!read_all(target, mod::kMaxArchiveBytes, raw)) {
+    return refuse({"E_ARCHIVE_ENTRY", "the package cannot be read"});
+  }
+  const LuauBuild lb = build_luau(p, raw);
+  if (!lb.ok) return refuse(lb.rejection);
+  const luau::SessionResult s = luau::run_fixture_session(p, lb.compiled, sha256_hex(image), frames);
+  if (!s.ok) return refuse({"E_SESSION", s.refusal});
+  if (!bmp.empty()) {   // the last frame as a 24-bit BMP, for looking at
+    std::vector<std::uint8_t> f(54);
+    const std::uint32_t row = static_cast<std::uint32_t>(luau::kFixtureWidth) * 3U, size = row * static_cast<std::uint32_t>(luau::kFixtureHeight);
+    const auto put32 = [&f](std::size_t at, std::uint32_t v) { for (unsigned i = 0; i < 4; ++i) f[at + i] = static_cast<std::uint8_t>(v >> (8U * i)); };
+    f[0] = 'B'; f[1] = 'M'; put32(2, 54 + size); put32(10, 54); put32(14, 40); put32(18, luau::kFixtureWidth); put32(22, luau::kFixtureHeight); f[26] = 1; f[28] = 24; put32(34, size);
+    for (int y = luau::kFixtureHeight - 1; y >= 0; --y)
+      for (int x = 0; x < luau::kFixtureWidth; ++x) {
+        const std::uint8_t *px = &s.last_frame[(static_cast<std::size_t>(y) * luau::kFixtureWidth + static_cast<std::size_t>(x)) * 3U];
+        f.push_back(px[2]); f.push_back(px[1]); f.push_back(px[0]);
+      }
+    if (!write_atomic(bmp, f)) return refuse({"E_ARCHIVE_ENTRY", "the frame cannot be written"});
+  }
+  std::string log = "[";
+  for (std::size_t i = 0; i < s.log.size(); ++i) log += (i ? ",\"" : "\"") + esc(s.log[i]) + "\"";
+  log += "]";
+  std::string notes = "[";
+  for (std::size_t i = 0; i < s.notes.size(); ++i) notes += std::string(i ? "," : "") + "{\"cause\":\"" + esc(s.notes[i].cause) + "\",\"message\":\"" + esc(s.notes[i].message) + "\"}";
+  notes += "]";
+  std::cout << "{\"ok\":true,\"trust_class\":\"luau\",\"package_identity\":\"" << p.identity << "\",\"image_sha256\":\"" << sha256_hex(image) << "\",\"frames\":" << s.frames << ",\"overlay_frames\":" << s.overlay_frames
+            << ",\"first_frame_sha256\":\"" << s.frame_sha256.front() << "\",\"last_frame_sha256\":\"" << s.frame_sha256.back() << "\",\"session_sha256\":\"" << s.session_sha256
+            << "\",\"faulted\":" << (s.fault != luau::Fault::none ? "true" : "false") << ",\"fault\":\"" << luau::fault_name(s.fault) << "\",\"diagnostic\":\"" << esc(s.diagnostic) << "\",\"nondeterministic\":"
+            << (s.nondeterministic ? "true" : "false") << ",\"leaked_bytes\":" << s.leaked_bytes << ",\"log\":" << log << ",\"notes\":" << notes << "}\n";
+  return 0;
+}
+
 int usage() {
   std::cerr << "usage: segarecomp mod init <dir> --platform <genesis|master-system|sega-cd> --id <id> [--template <c11-provider|luau|rom-edit>] [--rom-sha256 <hex>]\n"
                "       segarecomp mod check <dir>\n"
@@ -497,7 +603,9 @@ int usage() {
                "       segarecomp mod apply <dir|package.segapatch> --rom <original-image> --out <edited-image>\n"
                "       segarecomp mod bps <dir|package.segapatch> --rom <original-image> --out <patch.bps>\n"
                "       segarecomp mod verify-bps <dir|package.segapatch> --rom <original-image> --bps <patch.bps>\n"
-               "       segarecomp mod import-hints <dir> --revision <label> --from <hint-file>\n";
+               "       segarecomp mod import-hints <dir> --revision <label> --from <hint-file>\n"
+               "       segarecomp mod api [--declarations]\n"
+               "       segarecomp mod session <dir|package.segapatch> --rom <image> [--frames <n>] [--bmp <last-frame.bmp>]\n";
   return 2;
 }
 
@@ -511,6 +619,9 @@ int segarecomp_mod_command(int argc, char **argv) {
   fs::path out, sdk, rom, library, bps;
   std::vector<fs::path> roms;
   std::string target;
+  bool declarations_only = false;
+  std::uint64_t frames = 60;
+  fs::path bmp;
   for (int i = 3; i < argc; ++i) {
     const std::string_view a = argv[i];
     const auto value = [&](std::string &dst) { if (i + 1 >= argc) return false; dst = argv[++i]; return true; };
@@ -529,10 +640,15 @@ int segarecomp_mod_command(int argc, char **argv) {
     else if (a == "--rom") { if (!value(tmp)) return usage(); rom = tmp; roms.push_back(tmp); }
     else if (a == "--bps") { if (!value(tmp)) return usage(); bps = tmp; }
     else if (a == "--library") { if (!value(tmp)) return usage(); library = tmp; }
+    else if (a == "--declarations") declarations_only = true;
+    else if (a == "--frames") { if (!value(tmp) || tmp.empty() || tmp.size() > 5 || tmp.find_first_not_of("0123456789") != std::string::npos) return usage(); frames = std::stoull(tmp); }
+    else if (a == "--bmp") { if (!value(tmp)) return usage(); bmp = tmp; }
     else if (a == "--json") continue;   // output is always JSON
     else if (a.substr(0, 2) == "--" || !target.empty()) return usage();
     else target = std::string(a);
   }
+  if (sub == "api" && target.empty()) return run_api(declarations_only);
+  if (sub == "session" && !target.empty() && roms.size() == 1) return run_session(target, rom, frames, bmp);
   if (sub == "inspect") {
     if (target.empty()) {
       std::string o = "{\"ok\":true,\"adapters\":[";
@@ -583,14 +699,24 @@ int segarecomp_mod_command(int argc, char **argv) {
       if (at != std::string::npos) text.insert(at + head.size(), "author = \"you\"\n");
       text += "\n[abi]\nnative = 2\n";
     }
+    const bool luau_template = tmpl == "luau";
+    const bool hud = luau_template && platform == "genesis";
+    if (luau_template) text += hud ? "\n[capabilities]\nrequired = [\"host.log\", \"frame.work_ram\", \"overlay.rgba\"]\n" : "\n[capabilities]\nrequired = [\"host.log\"]\n";
     std::ofstream f(toml, std::ios::binary);
     f.write(text.data(), static_cast<std::streamsize>(text.size()));
     if (!f) return refuse({"E_ARCHIVE_ENTRY", "mod.toml cannot be written"});
     f.close();
     fs::create_directories(fs::path(target) / "scripts", ec);
     const fs::path script = fs::path(target) / "scripts" / "main.luau";
-    if (!fs::exists(script, ec)) { std::ofstream sf(script, std::ios::binary); sf << "-- entry point of " << id << "\n"; }
+    if (!fs::exists(script, ec)) { std::ofstream sf(script, std::ios::binary); if (luau_template) sf << (hud ? kLuauHudScript : kLuauLogScript); else sf << "-- entry point of " << id << "\n"; }
     std::string created = "\"mod.toml\",\"scripts/main.luau\"";
+    if (luau_template) {   // SEG-137-T005: the generated declarations and the editor configuration (VS Code with luau-lsp; nothing is shipped or installed)
+      fs::create_directories(fs::path(target) / "types", ec);
+      fs::create_directories(fs::path(target) / ".vscode", ec);
+      if (!write_text(fs::path(target) / "types" / "segarecomp.d.luau", luau::declarations()) || !write_text(fs::path(target) / ".luaurc", kLuauRc) || !write_text(fs::path(target) / ".vscode" / "settings.json", kVsCodeSettings))
+        return refuse({"E_ARCHIVE_ENTRY", "the template cannot be written"});
+      created += ",\"types/segarecomp.d.luau\",\".luaurc\",\".vscode/settings.json\"";
+    }
     if (tmpl == "c11-provider") {
       fs::create_directories(fs::path(target) / "src", ec);
       std::ofstream pf(fs::path(target) / "src" / "provider.c", std::ios::binary);
@@ -616,6 +742,7 @@ int segarecomp_mod_command(int argc, char **argv) {
     if (c.package.size() > mod::kMaxArchiveBytes) return refuse({"E_ARCHIVE_SIZE", "the package would exceed the archive limit"});
     bool native = false;
     for (const mod::Payload &p : m.payloads) native = native || p.kind == "native-c11";
+    if (const std::vector<luau::AnalysisIssue> issues = luau::analyze_mod(c.reread); !issues.empty()) return refuse_analysis(issues);
     if ((sub == "pack" || sub == "build") && !roms.empty() && !out.empty())
       if (const auto g = output_clobbers_input(out, roms)) return refuse(*g);
     std::string luau_json;

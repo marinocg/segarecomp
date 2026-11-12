@@ -2,9 +2,12 @@
 add_library(segarecomp_luau_host
   src/luau_compile.cpp
   src/luau_vm.cpp
+  src/luau_api.cpp
+  src/luau_analysis.cpp
+  src/luau_session.cpp
 )
 add_library(segarecomp::luau_host ALIAS segarecomp_luau_host)
-target_link_libraries(segarecomp_luau_host PUBLIC segarecomp::media PRIVATE segarecomp::luau)
+target_link_libraries(segarecomp_luau_host PUBLIC segarecomp::media PRIVATE segarecomp::luau segarecomp::viewer_core)
 target_include_directories(segarecomp_luau_host PUBLIC include)
 target_compile_definitions(segarecomp_luau_host PRIVATE SEGARECOMP_LUAU_PIN="0.746")
 segarecomp_enable_warnings(segarecomp_luau_host)

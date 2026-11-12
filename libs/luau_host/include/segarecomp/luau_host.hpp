@@ -8,7 +8,7 @@
 //  * The RESTRICTED VM (luau_vm.cpp). One VM per mod: whitelisted libraries, read-only globals, deterministic `math.random`, a hard memory quota, a deterministic instruction budget enforced from the
 //    interrupt callback, a call-depth limit, a wall-time watchdog that is only a hang backstop (a watchdog fault marks the session non-deterministic), fault isolation and leak-checked teardown.
 //
-// No host API (`sega.*`) exists yet (SEG-137-T004). The VM is "restricted", never claimed "safe" (policy section 7).
+// The host API (`sega.*`, luau_api.hpp, SEG-137-T004) is installed only when a HostConfig is given; each binding is gated by its capability. The VM is "restricted", never claimed "safe" (policy section 7).
 
 #include "segarecomp/mod.hpp"
 
@@ -100,7 +100,8 @@ inline constexpr unsigned kCallDepthPolicyMax = 200;
 // The policy limits lowered by a package's `limits` request (never raised: the reader already rejected a request above policy).
 [[nodiscard]] Limits limits_for(const mod::Manifest &manifest);
 
-enum class Fault { none, error, budget, memory, stack, watchdog };
+// `capability`, `range` and `phase` are the binding faults of policy section 5 (an ungranted binding, a bad argument, a binding called outside its phase); like every fault they are sticky.
+enum class Fault { none, error, budget, memory, stack, watchdog, capability, range, phase };
 [[nodiscard]] const char *fault_name(Fault fault);
 
 struct CallResult {
@@ -111,11 +112,16 @@ struct CallResult {
 };
 
 struct VmImpl;
+struct HostConfig;
+struct FrameInput;
+struct Output;
 
 class Vm {
  public:
   // `package_identity` is the 64 hex digit identity (seeds math.random). Null when the VM cannot be created.
   [[nodiscard]] static std::unique_ptr<Vm> create(std::string_view package_identity, const Limits &limits);
+  // The same with the `sega` host API installed for the capabilities in `host`.
+  [[nodiscard]] static std::unique_ptr<Vm> create(std::string_view package_identity, const Limits &limits, const HostConfig &host);
   Vm(const Vm &) = delete;
   Vm &operator=(const Vm &) = delete;
   ~Vm();
@@ -124,6 +130,10 @@ class Vm {
   CallResult load(const CompiledMod &compiled);
   // Calls the global function `name` (no arguments, results dropped) as callback `callback_index` of `frame`. The deterministic budget restarts per call; the frame budget restarts when `frame` changes.
   CallResult call(std::string_view name, std::uint64_t frame, std::uint32_t callback_index);
+
+  // Runs the lifecycle callback `name` ("reset" or "render") of the host API: copy-in `input` (render: the frame number is the first argument and the frame values are readable), copy-out into `out`.
+  // A callback the script does not define is skipped (ok). On a fault `out` is left empty: the callback's staged output is discarded. Requires a VM created with a HostConfig.
+  CallResult run_callback(std::string_view name, const FrameInput &input, std::uint32_t callback_index, Output &out);
 
   // A fault disables the mod for the rest of the VM's life (no pcall can clear it); every later load/call fails with the original fault.
   [[nodiscard]] bool disabled() const;
@@ -137,6 +147,7 @@ class Vm {
   std::uint64_t close();
 
  private:
+  static std::unique_ptr<Vm> create_vm(std::string_view package_identity, const Limits &limits, const HostConfig *host);
   explicit Vm(std::unique_ptr<VmImpl> impl);
   std::unique_ptr<VmImpl> impl_;
 };
