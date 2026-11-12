@@ -1,8 +1,8 @@
 {
-  "comment": "Pinned results of the Luau HUD example (platforms/genesis/sdk/examples/luau-hud) on the deterministic fixture image; integer pipeline, identical on every platform. Regenerate with: mod session <package> --rom <fixture> --frames 60",
+  "comment": "Pinned results of the DIAGNOSTIC synthetic fixture session (mod session) of the Luau HUD example on its fixture image; NOT the Genesis machine. Integer pipeline, identical on every platform. Regenerate with: mod session <package> --rom <fixture> --frames 60",
   "frames": 60,
-  "image_sha256": "ea70e3d7f81f91e58c184c4194fe605ed67d87ab1bab90900a9b3ee8a9c3dcb5",
-  "first_frame_sha256": "a08367063115c2e3636172c4047a3becca80cbadfdf53a78e20c71cf2056411c",
-  "last_frame_sha256": "86ebbe079a0d42b62033d44a23ec2893479d7afab46b0430852215506c319897",
-  "session_sha256": "88b5854b75199d661df753991969e9c339c5898c596b5d56218ea1fb5b424d75"
+  "image_sha256": "414c6dd3d6335db563f44627453ca5f9d464722dfd2d67c128d47586cfbef2cf",
+  "first_frame_sha256": "ef460c71ac77dbe757c12039083b774160946b10fecf5338514f3380e05fffe5",
+  "last_frame_sha256": "b0385c429c55bcc57f649148d20111751e05fb1544e555fdc2b8fbd1ff09b4e9",
+  "session_sha256": "5af73bb21d4aa14dceb2b37b4ccfd8eeb8e598f3015260da2b00a8e181dd0968"
 }

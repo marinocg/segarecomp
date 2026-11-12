@@ -26,7 +26,7 @@ install(TARGETS segarecomp-luau-compile RUNTIME DESTINATION ${_res}/bin)   # SEG
 set(_src ${PROJECT_SOURCE_DIR})
 set(_rt ${_res}/runtime)
 install(DIRECTORY ${_src}/platforms/genesis/runtime/ DESTINATION ${_rt}/platforms/genesis/runtime FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
-install(DIRECTORY ${_src}/platforms/genesis/viewer/ DESTINATION ${_rt}/platforms/genesis/viewer FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
+install(DIRECTORY ${_src}/platforms/genesis/viewer/ DESTINATION ${_rt}/platforms/genesis/viewer FILES_MATCHING PATTERN "*.c" PATTERN "*.cpp" PATTERN "*.h")
 install(DIRECTORY ${_src}/platforms/genesis/sdk/ DESTINATION ${_rt}/platforms/genesis/sdk FILES_MATCHING PATTERN "*.h")   # the public native patch SDK (ADR 0267): the only headers a package provider is compiled against
 # SEG-129: the SDK a native-patch author needs, installed beside the header: the two format documents, a complete synthetic sample provider and a short guide.
 # Documentation and a synthetic sample only; no game-specific provider or package is ever staged.
@@ -54,6 +54,19 @@ foreach(_sms_dir runtime headless viewer)
 endforeach()
 install(DIRECTORY ${_src}/libs/device/sega/psg/ DESTINATION ${_rt}/libs/device/sega/psg FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
 install(DIRECTORY ${_src}/libs/codegen/c11/include/ DESTINATION ${_rt}/libs/codegen/c11/include FILES_MATCHING PATTERN "*.h")
+
+# SEG-137-T007 (ADR 0296): a game program with a Luau-only mod links the pinned Luau VM and the host API sources (never the compiler or analysis), compiled by the bundled compiler next to the generated
+# program. Sources only: the VM sources of third_party/luau, the runtime-side files of libs/luau_host, the headers they include and the sha256 helper.
+install(DIRECTORY ${_src}/third_party/luau/VM/ DESTINATION ${_rt}/third_party/luau/VM FILES_MATCHING PATTERN "*.cpp" PATTERN "*.h")
+install(DIRECTORY ${_src}/third_party/luau/Common/include/ DESTINATION ${_rt}/third_party/luau/Common/include FILES_MATCHING PATTERN "*.h")
+install(DIRECTORY ${_src}/third_party/luau/Bytecode/ DESTINATION ${_rt}/third_party/luau/Bytecode FILES_MATCHING PATTERN "*.h")
+install(DIRECTORY ${_src}/third_party/luau/Ast/include/ DESTINATION ${_rt}/third_party/luau/Ast/include FILES_MATCHING PATTERN "*.h")
+install(DIRECTORY ${_src}/third_party/luau/Compiler/include/ DESTINATION ${_rt}/third_party/luau/Compiler/include FILES_MATCHING PATTERN "*.h")
+install(DIRECTORY ${_src}/libs/luau_host/include/ DESTINATION ${_rt}/libs/luau_host/include FILES_MATCHING PATTERN "*.hpp")
+install(FILES ${_src}/libs/luau_host/src/luau_vm.cpp ${_src}/libs/luau_host/src/luau_api.cpp ${_src}/libs/luau_host/src/luau_stored.cpp ${_src}/libs/luau_host/src/luau_internal.hpp DESTINATION ${_rt}/libs/luau_host/src)
+install(FILES ${_src}/libs/media/src/sha256.cpp DESTINATION ${_rt}/libs/media/src)
+install(DIRECTORY ${_src}/libs/media/include/ DESTINATION ${_rt}/libs/media/include FILES_MATCHING PATTERN "*.hpp")
+install(DIRECTORY ${_src}/libs/core/include/ DESTINATION ${_rt}/libs/core/include FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h")
 
 # Genesis sound (SEG-032-T008, ADR 0073/0074): `segarecomp build --runtime-dir <...>/platforms/genesis` compiles the vendored ymfm YM2612
 # core (C++14, no exceptions/RTTI, header-only libc++ from the bundled Zig), its C ABI and the C++-runtime shim with the generated program.

@@ -504,7 +504,7 @@ int run_session(const fs::path &target, const fs::path &rom, std::uint64_t frame
   std::string notes = "[";
   for (std::size_t i = 0; i < s.notes.size(); ++i) notes += std::string(i ? "," : "") + "{\"cause\":\"" + esc(s.notes[i].cause) + "\",\"message\":\"" + esc(s.notes[i].message) + "\"}";
   notes += "]";
-  std::cout << "{\"ok\":true,\"trust_class\":\"luau\",\"package_identity\":\"" << p.identity << "\",\"image_sha256\":\"" << sha256_hex(image) << "\",\"frames\":" << s.frames << ",\"overlay_frames\":" << s.overlay_frames
+  std::cout << "{\"ok\":true,\"tool\":\"diagnostic synthetic fixture session (not the Genesis machine)\",\"synthetic_picture\":true,\"trust_class\":\"luau\",\"package_identity\":\"" << p.identity << "\",\"image_sha256\":\"" << sha256_hex(image) << "\",\"frames\":" << s.frames << ",\"overlay_frames\":" << s.overlay_frames
             << ",\"first_frame_sha256\":\"" << s.frame_sha256.front() << "\",\"last_frame_sha256\":\"" << s.frame_sha256.back() << "\",\"session_sha256\":\"" << s.session_sha256
             << "\",\"faulted\":" << (s.fault != luau::Fault::none ? "true" : "false") << ",\"fault\":\"" << luau::fault_name(s.fault) << "\",\"diagnostic\":\"" << esc(s.diagnostic) << "\",\"nondeterministic\":"
             << (s.nondeterministic ? "true" : "false") << ",\"leaked_bytes\":" << s.leaked_bytes << ",\"log\":" << log << ",\"notes\":" << notes << "}\n";
@@ -525,7 +525,7 @@ int usage() {
                "       segarecomp mod verify-bps <dir|package.segapatch> --rom <original-image> --bps <patch.bps>\n"
                "       segarecomp mod import-hints <dir> --revision <label> --from <hint-file>\n"
                "       segarecomp mod api [--declarations]\n"
-               "       segarecomp mod session <dir|package.segapatch> --rom <image> [--frames <n>] [--bmp <last-frame.bmp>]\n";
+               "       segarecomp mod session <dir|package.segapatch> --rom <image> [--frames <n>] [--bmp <last-frame.bmp>]   (DIAGNOSTIC: synthetic picture, not the Genesis machine)\n";
   return 2;
 }
 

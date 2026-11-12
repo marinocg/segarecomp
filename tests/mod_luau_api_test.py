@@ -3,8 +3,9 @@
   T004  the API list (`mod api`) is committed and cannot drift; an undeclared capability is rejected by check/pack/build; the install sheet distinguishes data, Luau-only (consent) and native.
   T005  the generated `.d.luau`, the template's editor files, `mod check` flagging a type error / an undeclared / an unknown API use in fixture scripts.
   T006  a failing script never stops the host (fixture session), the diagnostic has its stable shape, the golden session hash is identical on every platform that runs this test.
-  T007  the committed SDK example is built, packed, installed and run end to end; its session hash is pinned in tests/fixtures/mod_luau/hud_session.json. An independent Python oracle re-derives
-        the frame hash of a rect-only script (picture pattern, overlay raster, composite) so the C++ pipeline is cross-checked.
+  T007  the committed SDK example is built, packed and installed through the CLI (Luau-only trust, consent, no native approval). The `mod session` runs here are the DIAGNOSTIC synthetic fixture
+        session (a synthetic picture, NOT the Genesis machine): they pin the script -> overlay -> raster -> composite chain (an independent Python oracle re-derives a rect-only frame hash). They are NOT the
+        T007 end-to-end proof: that is tests/mod_luau_executable_test.py, which builds and runs a real generated-native program.
 usage: mod_luau_api_test.py <segarecomp-cli>"""
 import hashlib
 import json
@@ -20,13 +21,12 @@ repo = Path(__file__).resolve().parent.parent
 tmp = temp()
 
 
-def fixture_rom():
-    rom = bytearray(((i * 131 + 17) ^ (i >> 8)) & 0xFF for i in range(0x4000))
-    rom[0x100:0x110] = b"SEGA MEGA DRIVE "
-    return bytes(rom)
+import importlib.util
 
-
-ROM = fixture_rom()
+_spec = importlib.util.spec_from_file_location("luau_hud_fixture_rom", repo / "platforms/genesis/sdk/examples/luau-hud/fixture_rom.py")
+_fixture = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_fixture)
+ROM = _fixture.make_rom()   # the example's runnable fixture image
 ROM_SHA = hashlib.sha256(ROM).hexdigest()
 rom = write(tmp / "fixture.rom", ROM)
 
@@ -76,7 +76,7 @@ cli.check(settings.get("luau-lsp.types.definitionFiles") == ["types/segarecomp.d
 cli.check(json.loads((tpl / ".luaurc").read_text()) == {"languageMode": "strict"}, "strict mode in .luaurc")
 cli.check((tpl / "scripts/main.luau").read_text() == (repo / "platforms/genesis/sdk/examples/luau-hud/scripts/main.luau").read_text(), "the Genesis template script is the committed SDK example")
 doc = ok("the documented editor-setup command: init then check", "mod", "check", tpl)
-cli.check(doc["trust_class"] == "luau" and doc["capabilities"] == ["frame.work_ram", "host.log", "overlay.rgba"], "a fresh template checks clean")
+cli.check(doc["trust_class"] == "luau" and doc["capabilities"] == ["host.log", "overlay.rgba"], "a fresh template checks clean")
 ms = tmp / "ms"
 ok("init luau template (master-system)", "mod", "init", ms, "--platform", "master-system", "--id", "ms", "--template", "luau", "--rom-sha256", ROM_SHA)
 ok("the master-system template checks (log only)", "mod", "check", ms)
@@ -111,7 +111,7 @@ refused("a syntax error fails the build", "E_LUAU_SYNTAX", "mod", "build", d, "-
 # ---- T007: the committed SDK example, end to end ----
 example = tmp / "luau-hud"
 shutil.copytree(repo / "platforms/genesis/sdk/examples/luau-hud", example)
-cli.check('sha256 = "' + ROM_SHA + '"' in (example / "mod.toml").read_text(), "the example's revision is the deterministic fixture image")
+cli.check('sha256 = "' + ROM_SHA + '"' in (example / "mod.toml").read_text(), "the example's revision is the deterministic runnable fixture image")
 ok("check the example", "mod", "check", example)
 built = ok("build the example", "mod", "build", example, "--out", tmp / "hud.segapatch")
 cli.check(built["trust_class"] == "luau" and built["payloads"]["native"] == 0 and built["luau"]["scripts"] == 1, "the example is Luau-only")
@@ -136,7 +136,7 @@ s2 = ok("session on the project directory", "mod", "session", example, "--rom", 
 for key in ("first_frame_sha256", "last_frame_sha256", "session_sha256"):
     cli.check(s1[key] == golden[key], f"golden {key} on {platform.system()} {platform.machine()}: {s1[key]} != {golden[key]}")
 cli.check(s1["session_sha256"] == s2["session_sha256"] and s1["package_identity"] == ident, "package and project give the same session")
-cli.check(s1["frames"] == golden["frames"] == s1["overlay_frames"] and s1["faulted"] is False and s1["leaked_bytes"] == 0 and s1["nondeterministic"] is False and s1["log"] == ["hud example ready"], f"clean session: {s1}")
+cli.check(s1["frames"] == golden["frames"] == s1["overlay_frames"] and s1["faulted"] is False and s1["leaked_bytes"] == 0 and s1["nondeterministic"] is False and s1["log"] == ["hud example ready"] and s1["synthetic_picture"] is True, f"clean session: {s1}")
 data = bmp.read_bytes()
 cli.check(data[:2] == b"BM" and int.from_bytes(data[18:22], "little") == 320 and int.from_bytes(data[22:26], "little") == 224 and len(data) == 54 + 320 * 224 * 3, "the last frame is a 320x224 24-bit BMP")
 other = ok("a different frame count", "mod", "session", installed, "--rom", rom, "--frames", golden["frames"] - 1)
@@ -144,7 +144,7 @@ cli.check(other["session_sha256"] != s1["session_sha256"] and other["first_frame
 refused("zero frames", "E_SESSION", "mod", "session", installed, "--rom", rom, "--frames", "0")
 refused("too many frames", "E_SESSION", "mod", "session", installed, "--rom", rom, "--frames", "3601")
 refused("the wrong image", "E_IMAGE_MISMATCH", "mod", "session", installed, "--rom", write(tmp / "wrong.rom", b"not the fixture"), "--frames", "1")
-print(f"portability: golden HUD session hash {s1['session_sha256'][:16]}... matched on {platform.system()} {platform.machine()}")
+print(f"portability (diagnostic synthetic session only): golden HUD session hash {s1['session_sha256'][:16]}... matched on {platform.system()} {platform.machine()}")
 
 
 # ---- independent oracle for a rect-only script: picture pattern, overlay raster and composite re-derived in Python ----

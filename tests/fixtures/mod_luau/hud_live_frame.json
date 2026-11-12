@@ -1,0 +1,1 @@
+{"hud_crop_sha256": "21ac1555cdefb74b7bb9758fdd979bb678986239b7fa573cc5fa8a84e571053a", "comment": "SHA-256 of the top-left 240x90 pixels (RGB) of the rendered final frame of the Luau HUD example running in the generated-native viewer program on the runnable fixture ROM (picture scale 3, HUD only; the Vanilla pixels under it are constants of the fixture)."}
