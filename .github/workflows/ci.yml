@@ -87,7 +87,7 @@ jobs:
         run: cmake --preset dev
       - name: Build
         run: cmake --build --preset dev -- -k 0
-      - name: Hermetic tests (job ${{ matrix.job }}: shards j, j+J, ... of 35)
+      - name: Hermetic tests (job ${{ matrix.job }}, shards j, j+J, ... of 35)
         # Run without the developer preset's stop-on-failure so CI reports every failing test of the job. The shard labels cover
         # `fast` and `full` together (`fast` is a subset of `full`), so no test runs twice and none is skipped.
         shell: bash
