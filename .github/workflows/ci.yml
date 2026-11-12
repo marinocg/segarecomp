@@ -28,17 +28,26 @@ jobs:
     # Wall-clock: every job (host x shard) builds once and runs one deterministic, cost-balanced partition of the hermetic tests
     # (`shard-N` CTest labels, tests/ci_shards.cmake). The union of the shards is the `full` tier (which contains `fast`); the guard test
     # `ci_shard_guard_test` (in `fast` and `full`) fails if a test has no shard, a shard is over budget, or this matrix is out of date.
-    name: ${{ matrix.name }} shard ${{ matrix.shard }}/6
+    # macOS: hosted runners for a public repository allow only 5 concurrent macOS jobs. With one job per shard (plus the SDL3 viewer) seven
+    # were requested, so two always waited ~8-10 min for a free runner. macOS therefore runs the eight shards as four pairs (1+2, 3+4, 5+6,
+    # 7+8; the even shards are excluded below and picked up by the preceding job), which with its viewer job is exactly five.
+    name: ${{ matrix.name }} shard ${{ matrix.shard }}${{ matrix.pair && '+' || '' }}/8
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         host: [macos, linux, windows]
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        exclude:
+          - { host: macos, shard: 2 }
+          - { host: macos, shard: 4 }
+          - { host: macos, shard: 6 }
+          - { host: macos, shard: 8 }
         include:
           - host: macos
             name: macOS (AppleClang + Ninja)
             os: macos-latest
+            pair: true
           - host: linux
             name: Linux (GCC + Ninja)
             os: ubuntu-24.04
@@ -77,17 +86,27 @@ jobs:
         run: cmake --preset dev
       - name: Build
         run: cmake --build --preset dev -- -k 0
-      - name: Hermetic tests (shard ${{ matrix.shard }}/6)
+      - name: Hermetic tests (shard ${{ matrix.shard }}${{ matrix.pair && ' and the next one' || '' }} of 8)
         # Run without the developer preset's stop-on-failure so CI reports every failing test of the shard. The shard labels cover
         # `fast` and `full` together (`fast` is a subset of `full`), so no test runs twice and none is skipped.
-        run: ctest --test-dir build/dev -L "^shard-${{ matrix.shard }}$" -j 4 --output-on-failure --no-tests=error
+        shell: bash
+        run: |
+          shard=${{ matrix.shard }}
+          labels="^shard-${shard}$"
+          if [ "${{ matrix.pair || 'false' }}" = "true" ]; then labels="^shard-(${shard}|$((shard + 1)))$"; fi
+          echo "ctest label selection: $labels"
+          ctest --test-dir build/dev -L "$labels" -j 4 --output-on-failure --no-tests=error
 
   sdl3-viewer:
     # Save Actions quota: draft PRs do not run the matrix (pushes to main always do).
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     # The optional SDL3 presenter must configure and build on every host; SDL3 is
     # provisioned through vcpkg (preinstalled on hosted runners), never vendored.
-    name: SDL3 viewer (${{ matrix.name }})
+    # The viewer/launcher suites were the longest single job (Linux ~19 min: the GUI journeys alone are ~9 min each under contention). Linux and
+    # Windows run them in two parts: `gui` is the four longest tests, `rest` is the same selection minus those (ctest -E), so the union is
+    # exactly the original selection and a mistyped `gui` name can only run fewer extra tests, never drop one. macOS stays a single job to
+    # keep its total at the 5 concurrent runners a public repository gets (see build-test).
+    name: SDL3 viewer (${{ matrix.name }}${{ matrix.part && format(', {0}', matrix.part) || '' }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -97,8 +116,16 @@ jobs:
             os: macos-latest
           - name: Linux
             os: ubuntu-24.04
+            part: gui
+          - name: Linux
+            os: ubuntu-24.04
+            part: rest
           - name: Windows
             os: windows-latest
+            part: gui
+          - name: Windows
+            os: windows-latest
+            part: rest
     steps:
       - uses: actions/checkout@v4
       - name: Install Ninja and SDL3 build prerequisites (macOS)
@@ -147,4 +174,10 @@ jobs:
         run: |
           # SDL3 runtime libraries from vcpkg must be findable by the test binary on Windows (a plain test step, never POST_BUILD).
           for d in "$VCPKG_INSTALLATION_ROOT"/installed/*/bin; do [ -d "$d" ] && export PATH="$d:$PATH"; done
-          ctest --test-dir build/sdl3 -j 4 -R '^(launcher_(sms_)?policy_test|cartridge_recognition_test|launcher_lock_on_[a-z]*_test|launcher_sega_cd(_flow|_gui)?_test|sega_cd_viewer_sdl_test|packaging_no_game_content_test|launcher_build_cancel(_gui)?_test|launcher_default_mode_test|older_build_test|file_picker_test|launcher_gamepad_journey_[a-z_]*_narrow_test|launcher_parity_gui_[a-z_]*_narrow_test|library_catalog_test|storage_test|launcher_ui_support_test|sv_host_test|sv_state_test|sv_state_service_test|sms_viewer_states_test|sega_cd_viewer_states_test|sv_viewer_core_test|sv_input_diag_test|launcher_gui_navigation_test|launcher_audio_gui_test|launcher_input_diagnostics_test|viewer_foundation_layout_test|ci_shard_guard_test)$' --no-tests=error --output-on-failure
+          selection='^(launcher_(sms_)?policy_test|cartridge_recognition_test|launcher_lock_on_[a-z]*_test|launcher_sega_cd(_flow|_gui)?_test|sega_cd_viewer_sdl_test|packaging_no_game_content_test|launcher_build_cancel(_gui)?_test|launcher_default_mode_test|older_build_test|file_picker_test|launcher_gamepad_journey_[a-z_]*_narrow_test|launcher_parity_gui_[a-z_]*_narrow_test|library_catalog_test|storage_test|launcher_ui_support_test|sv_host_test|sv_state_test|sv_state_service_test|sms_viewer_states_test|sega_cd_viewer_states_test|sv_viewer_core_test|sv_input_diag_test|launcher_gui_navigation_test|launcher_audio_gui_test|launcher_input_diagnostics_test|viewer_foundation_layout_test|ci_shard_guard_test)$'
+          heavy='^(launcher_sega_cd_gui_test|launcher_parity_gui_journey_narrow_test|launcher_parity_gui_persist_narrow_test|launcher_gui_navigation_test)$'
+          case "${{ matrix.part || 'all' }}" in
+            all)  ctest --test-dir build/sdl3 -j 4 -R "$selection" --no-tests=error --output-on-failure ;;
+            gui)  ctest --test-dir build/sdl3 -j 4 -R "$heavy" --no-tests=error --output-on-failure ;;
+            rest) ctest --test-dir build/sdl3 -j 4 -R "$selection" -E "$heavy" --no-tests=error --output-on-failure ;;
+          esac

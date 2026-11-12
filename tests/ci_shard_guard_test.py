@@ -11,7 +11,7 @@ this guard fails only when that mechanism is bypassed or the estimated cost no l
   * every test labelled `full` carries exactly one `shard-N` label, N in 1..count, and nothing else carries a shard label;
   * `fast` is a subset of `full`; every test has a tier label (`full` or `extended`) except the documented exceptions;
   * the estimated cost of each shard (the CTest COST property) is within the budget and no single test is above the per-test limit;
-  * the CI workflow's shard matrix lists exactly the shards 1..count.
+  * the CI workflow's shard matrix lists exactly the shards 1..count, and macOS's paired jobs (shards s and s+1 in one job) cover each exactly once.
 """
 import json
 import pathlib
@@ -64,6 +64,15 @@ def main():
     match = re.search(r"^\s*shard:\s*\[([0-9,\s]+)\]", workflow, re.M)
     check(match is not None and [int(x) for x in match.group(1).split(",")] == list(range(1, COUNT + 1)),
           "the .github/workflows/ci.yml shard matrix must list exactly 1..%d" % COUNT)
+    # macOS runs the shards in adjacent pairs (a public repository gets only 5 concurrent macOS jobs): the job for shard s also runs shard
+    # s+1. Every shard must be covered by exactly one macOS job, so the shards the matrix excludes must be exactly the second of each pair.
+    excluded = sorted(int(x) for x in re.findall(r"^\s*-\s*\{\s*host:\s*macos,\s*shard:\s*([0-9]+)\s*\}", workflow, re.M))
+    mac_jobs = [n for n in range(1, COUNT + 1) if n not in excluded]
+    covered = sorted(c for n in mac_jobs for c in (n, n + 1))
+    paired = "pair: true" in workflow
+    check(not paired or covered == list(range(1, COUNT + 1)),
+          "the macOS matrix pairs shard s with s+1: the excluded shards %s leave jobs %s covering %s, not exactly 1..%d" % (excluded, mac_jobs, covered, COUNT))
+    check(paired or not excluded, "the macOS matrix excludes shards %s without `pair: true`: they would not run" % excluded)
     if FAILED:
         print("\n".join(FAILED[:20]))
         return 1

@@ -17,8 +17,8 @@
 #
 # 2026-11 re-measurement (PR #216): see the entries marked below. The budget is unchanged: it is the estimate of what a shard may cost, not something to move when a test is added.
 #
-# Shard count: wall time of one CI job ~ setup/build (~2 min) + shard cost / 4 cores. Six shards keep the slowest host under ~7 min.
-set(SEGARECOMP_CI_SHARD_COUNT 6)
+# Shard count: wall time of one CI job ~ setup/build (~2.5 min) + shard cost / 4 cores. Eight shards keep the slowest host (Linux, GCC) near 12 min; macOS runs them in four pairs (see ci.yml).
+set(SEGARECOMP_CI_SHARD_COUNT 8)
 set(SEGARECOMP_CI_SHARD_BUDGET_SECONDS 2800)   # SEG-122-T009: 2750 -> 2800, the launcher_lock_on_* parts add ~40 s per shard; SEG-109-T005: 2600 -> 2750; the SDL3 job registers every launcher/viewer suite, and the five launcher parity tests (~680 s contended) add ~110 s per shard there
 set(SEGARECOMP_CI_MAX_TEST_SECONDS 600)
 set(SEGARECOMP_CI_DEFAULT_COST 3)
@@ -47,7 +47,24 @@ set(SEGARECOMP_CI_TEST_COSTS
   # duration are lowered to it, tests that were never listed (default cost) but run >= 100 s are priced, and the new tests are priced (launcher_audio_gui_test is estimated: it has not run on a runner yet).
   genesis_rewind_test=140 genesis_z80_static_first_build_determinism_test=113 genesis_z80_static_first_build_equivalence_test=192 genesis_z80_static_first_build_fallback_test=256 sega_cd_main_z80_test=177 sega_cd_reconstruction_test=200 sega_cd_snapshot_test=135 sega_cd_static_boot_test=479 sega_cd_static_producer_test=131 genesis_native_snapshot_test=12 gems_reference_check_test=2 launcher_audio_gui_test=150 genesis_native_gems_build_test=140 gems_native_tests=1
   launcher_input_diagnostics_test=25 launcher_sms_policy_test=20 launcher_gui_navigation_test=12 launcher_patch_gui_test=330 launcher_lock_on_headless_test=15 launcher_lock_on_window_test=45 launcher_lock_on_library_test=50 launcher_lock_on_patch_test=50 launcher_lock_on_gamepad_test=80 segapatch_package_test=3 segapatch_native_package_test=3 segarecomp_native_build_args_test=3 genesis_patch_provider_build_test=120
-  launcher_parity_gui_journey_wide_test=220 launcher_parity_gui_journey_narrow_test=120 launcher_parity_gui_persist_wide_test=180 launcher_parity_gui_persist_narrow_test=100 launcher_parity_gui_input_wide_test=170 launcher_parity_gui_input_narrow_test=90)  # SEG-109-T005: measured locally (150-170 s alone), x2-3 for a contended 4-core runner  # SDL3 viewer/launcher suites (only registered when SDL3 is enabled)  # RUN_SERIAL: sonic_startup_inventory_adapter_failure_test runs alone, so it occupies all four cores
+  launcher_parity_gui_journey_wide_test=220 launcher_parity_gui_journey_narrow_test=120 launcher_parity_gui_persist_wide_test=180 launcher_parity_gui_persist_narrow_test=100 launcher_parity_gui_input_wide_test=170 launcher_parity_gui_input_narrow_test=90  # SEG-109-T005: measured locally (150-170 s alone), x2-3 for a contended 4-core runner  # SDL3 viewer/launcher suites (only registered when SDL3 is enabled)  # RUN_SERIAL: sonic_startup_inventory_adapter_failure_test runs alone, so it occupies all four cores
+  # CI-latency re-measurement (Linux GCC, the slowest host; contended 4-wide; mean of CI runs 43124200056 and 42865573591, capped at the per-test
+  # maximum; sega_cd_bios_bootarea_test is scaled by the ~0.79 measured gain of building its no-boundary program once). Only entries that moved by more than
+  # 30 % and 20 s are listed: the earlier values were up to 4x too low, which is why shards with equal estimates took 9-16 min. The SDL3-only launcher/viewer
+  # tests (which run in the viewer job, never in a shard job) keep their estimates: re-pricing them would only add to the SDL3-configured partition the guard also checks.
+  sega_cd_bios_posthandoff_test=600 sega_cd_extent_discovery_test=600 sega_cd_derived_image_test=577 genesis_z80_static_first_build_fallback_test=555
+  m68k_capability_ratchet_test=472 sega_cd_bios_wordram_extent_test=417 sega_cd_bios_sub_wordram_extent_test=411 m68k_pipeline_tests=360
+  genesis_native_gems_build_test=350 genesis_z80_static_first_build_equivalence_test=348 z80_owner_group_differential_test_slice2=311
+  z80_owner_group_differential_test_slice3=289 sega_cd_reconstruction_test=262 genesis_generated_c_compaction_differential_test=252
+  sega_cd_main_z80_test=231 sega_cd_recursive_discovery_test=201 sega_cd_snapshot_test=186 sms_ml_region_z80_test=186
+  sega_cd_static_producer_test=174 sms_machine_scheduler_test=161 z80_selective_admission_test_slice2=145 genesis_z80_build_pipeline_bound_test=112
+  sega_cd_dual_cpu_test=111 sms_native_build_failclosed_test=110 sms_machine_e2e_test=101 sms_vdp_native_test=100 genesis_lock_on_cartridge_test=94
+  z80_generated_pipeline_test=87 z80_conformance_harness_test=83 sms_owner_group_equivalence_vdp_test=80 genesis_hint_ram_jmp_reference_test=73
+  sms_optimized_policy_test_runtime=68 genesis_cartridge_eeprom_generated_test=66 z80_live_guard_test=59 sega_cd_pcm_audio_native_test=47
+  sms_snapshot_test=46 perf_integration_test=41 sega_cd_cdda_native_test=40 sega_cd_m5_routes_test=40 genesis_static_ram_jmp_thunk_generated_test=38
+  z80_live_alternatives_test=37 sega_cd_disc_to_frame_test=34 genesis_ml_gen2_identity_mutation_test=31 genesis_compat_driver_test=30
+  segarecomp_aot_model_lifecycle_test=30 genesis_startup_runtime_c4_test=28 genesis_z80_build_pipeline_region_test=28 genesis_z80_machine_test=28
+  genesis_hint_raster_reference_test=27 sega_cd_overlay_test=26 sega_cd_bios_profile_test=24)
 
 # The guard runs inside the shard it is assigned to (it only lists tests, so it is cheap) and must exist before the partition below.
 add_test(NAME ci_shard_guard_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/ci_shard_guard_test.py
