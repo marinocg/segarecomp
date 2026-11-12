@@ -142,19 +142,6 @@ std::string api_json() {
   return o;
 }
 
-HostConfig host_config_for(const mod::Manifest &manifest) {
-  HostConfig h;
-  const mod::Adapter *adapter = mod::find_adapter(manifest.platform);
-  const auto grant = [&](const std::string &name) {
-    const mod::CapabilityInfo *c = mod::find_capability(name);
-    if (adapter != nullptr && c != nullptr && mod::capability_support(*adapter, *c) != mod::Support::unsupported && std::find(h.capabilities.begin(), h.capabilities.end(), name) == h.capabilities.end())
-      h.capabilities.push_back(name);
-  };
-  for (const std::string &n : manifest.capabilities) grant(n);
-  for (const std::string &n : manifest.capabilities_optional) grant(n);
-  return h;
-}
-
 namespace {
 
 // Straight-alpha source-over in integers: identical on every host.

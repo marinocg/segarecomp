@@ -75,6 +75,7 @@ EffectiveImage effective_image(const Package &package, std::span<const std::uint
   const bool declared = std::any_of(package.manifest.revisions.begin(), package.manifest.revisions.end(), [&](const Revision &r) { return r.sha256 == e.original_sha256; });
   if (!declared) { e.rejection = {"E_IMAGE_MISMATCH", "the original image is not one of the declared target revisions"}; return e; }
   e.effective_sha256 = e.original_sha256;
+  e.image.assign(original.begin(), original.end());
   if (std::count_if(package.manifest.payloads.begin(), package.manifest.payloads.end(), [](const Payload &p) { return p.kind == "rom-edit-set"; }) > 1) {   // the reader refuses this; never apply a subset
     e.rejection = {"E_PAYLOAD_COMBINATION", "at most one rom-edit-set payload"};
     return e;
@@ -83,6 +84,7 @@ EffectiveImage effective_image(const Package &package, std::span<const std::uint
     const TargetImage t = build_target_image(package.manifest, package.files, original);
     if (!t.ok) { e.rejection = t.rejection; return e; }
     e.effective_sha256 = sha256_hex(t.image);
+    e.image = t.image;
   }
   for (const Payload &p : package.manifest.payloads) {
     if (p.kind != "bps-image") continue;
@@ -91,6 +93,7 @@ EffectiveImage effective_image(const Package &package, std::span<const std::uint
     const patch::BpsResult r = patch::apply_bps(it->second, original);
     if (!r.ok || sha256_hex(r.output) != p.target_sha256) { e.rejection = {"E_IMAGE_MISMATCH", "the bps-image payload does not produce its declared target"}; return e; }
     e.effective_sha256 = p.target_sha256;
+    e.image = r.output;
   }
   e.ok = true;
   return e;

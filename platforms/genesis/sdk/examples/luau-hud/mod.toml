@@ -10,11 +10,11 @@ platform = "genesis"
 
 [[target.revision]]
 label = "fixture"
-sha256 = "ea70e3d7f81f91e58c184c4194fe605ed67d87ab1bab90900a9b3ee8a9c3dcb5"
+sha256 = "414c6dd3d6335db563f44627453ca5f9d464722dfd2d67c128d47586cfbef2cf"
 
 [[source]]
 kind = "luau-source"
 path = "scripts/main.luau"
 
 [capabilities]
-required = ["host.log", "frame.work_ram", "overlay.rgba"]
+required = ["host.log", "overlay.rgba"]

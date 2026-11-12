@@ -323,6 +323,7 @@ struct EffectiveImage {
   bool ok = false;
   Rejection rejection;
   std::string original_sha256, effective_sha256;
+  std::vector<std::uint8_t> image;   // the effective image bytes (SEG-137-T007: what a generated-native build compiles); equals the original when the package changes nothing
 };
 [[nodiscard]] EffectiveImage effective_image(const Package &package, std::span<const std::uint8_t> original);
 

@@ -1,8 +1,10 @@
 # SEG-137-T002/T003 (ADR 0284/0294): the host side of Luau scripting: the trusted bytecode compile step, the provenance check and the restricted per-mod VM. Links the pinned vendored Luau (third_party/luau).
 add_library(segarecomp_luau_host
   src/luau_compile.cpp
+  src/luau_stored.cpp
   src/luau_vm.cpp
   src/luau_api.cpp
+  src/luau_config.cpp
   src/luau_analysis.cpp
   src/luau_session.cpp
 )

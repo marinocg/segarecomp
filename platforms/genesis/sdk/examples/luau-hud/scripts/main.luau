@@ -1,6 +1,6 @@
--- Luau-only HUD example (restricted scripting: ADR 0295). Runs while you play; it can only read the values the host publishes and request overlay drawing.
+-- Luau-only HUD example (restricted scripting: ADR 0295/0296). It runs while the game plays; it can only request overlay drawing and write log lines.
 -- The capabilities it uses are declared in mod.toml; `segarecomp mod check` rejects any other `sega.*` use.
-local PANEL = 0x000000A0     -- 0xRRGGBBAA
+local PANEL = 0x000000C0     -- 0xRRGGBBAA
 local WHITE = 0xFFFFFFFF
 local GOLD = 0xFFD040FF
 
@@ -9,9 +9,8 @@ function reset()
 end
 
 function render(frame)
-  sega.overlay.rect(0, 0, 96, 28, PANEL)
-  local score = sega.frame.value("score") or 0
-  local lives = sega.frame.value("lives") or 0
-  sega.overlay.text(4, 3, "SCORE " .. string.format("%06d", score), WHITE)
-  sega.overlay.text(4, 15, "LIVES " .. lives .. " F" .. frame % 100, GOLD)
+  sega.overlay.rect(0, 0, 76, 24, PANEL)
+  sega.overlay.text(4, 3, "LUAU HUD", WHITE)
+  sega.overlay.text(4, 12, "FRAME " .. frame % 1000, GOLD)
+  sega.overlay.rect(0, 24, frame % 76 + 1, 3, GOLD)   -- a bar that grows with the frame counter
 end

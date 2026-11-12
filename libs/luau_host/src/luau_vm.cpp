@@ -41,12 +41,6 @@ const char *fault_name(Fault fault) {
 
 Limits policy_limits() { return Limits{}; }
 
-Limits limits_for(const mod::Manifest &manifest) {
-  Limits l = policy_limits();
-  if (manifest.luau_memory_bytes != 0) l.memory_bytes = std::min(l.memory_bytes, manifest.luau_memory_bytes);
-  if (manifest.luau_budget_units != 0) l.callback_units = std::min(l.callback_units, manifest.luau_budget_units);
-  return l;
-}
 
 enum class Phase { none, load, reset, render };
 

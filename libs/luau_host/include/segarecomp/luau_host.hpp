@@ -82,6 +82,10 @@ struct SourceCompile {
 // source digest, every bytecode digest recomputed, and the overall digest equal to `expected_digest` (the value recorded at build time, held outside the artifact). Anything else is E_LUAU_COMPILED_MISMATCH.
 [[nodiscard]] CompileResult verify_compiled(const mod::Package &package, std::span<const std::uint8_t> stored, std::string_view expected_digest);
 
+// The runtime-side counterpart (the generated-native game program links this, not the compiler): accepts stored compiled bytes ONLY if they are well formed, name `expected_identity` and hash to
+// `expected_digest`, the value the build recorded after it compiled and `verify_compiled` accepted them. Anything else is E_LUAU_COMPILED_MISMATCH.
+[[nodiscard]] CompileResult load_stored(std::string_view expected_identity, std::span<const std::uint8_t> stored, std::string_view expected_digest);
+
 // The digest line of a stored compiled output ("" when the header is malformed). Used by the parent of the compile child, which then calls verify_compiled with it: that re-derives every bytecode and
 // total digest, so a child that returned inconsistent bytes is rejected.
 [[nodiscard]] std::string stored_digest(std::span<const std::uint8_t> stored);
