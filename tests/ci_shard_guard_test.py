@@ -11,7 +11,8 @@ this guard fails only when that mechanism is bypassed or the estimated cost no l
   * every test labelled `full` carries exactly one `shard-N` label, N in 1..count, and nothing else carries a shard label;
   * `fast` is a subset of `full`; every test has a tier label (`full` or `extended`) except the documented exceptions;
   * the estimated cost of each shard (the CTest COST property) is within the budget and no single test is above the per-test limit;
-  * the CI workflow's shard matrix lists exactly the shards 1..count.
+  * for each host (linux, macos, windows) the CI workflow's build-test matrix runs jobs j/J that together select every shard 1..count exactly once,
+    and macOS runs at most 4 shard jobs (its concurrency limit is 5 including the SDL3 viewer).
 """
 import json
 import pathlib
@@ -61,9 +62,21 @@ def main():
         check(bool(names), "shard-%d is empty" % n)
         check(cost[n] <= BUDGET, "shard-%d estimated cost %.0f s exceeds the %.0f s budget" % (n, cost[n], BUDGET))
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    match = re.search(r"^\s*shard:\s*\[([0-9,\s]+)\]", workflow, re.M)
-    check(match is not None and [int(x) for x in match.group(1).split(",")] == list(range(1, COUNT + 1)),
-          "the .github/workflows/ci.yml shard matrix must list exactly 1..%d" % COUNT)
+    # Every CI job runs a strided selection of shards: job `j/J` of a host runs shards j, j+J, j+2J, ... <= count (`host: H, job: "j/J"`
+    # entries of the build-test matrix). For each host the jobs 1..J must all be present exactly once, so that together they select every
+    # shard exactly once; otherwise a shard would be skipped (or run twice) on that host while the labels above still look complete.
+    jobs = {}
+    for host, j, total in re.findall(r"host:\s*(\w+),\s*job:\s*\"([0-9]+)/([0-9]+)\"", workflow):
+        jobs.setdefault(host, []).append((int(j), int(total)))
+    check(sorted(jobs) == ["linux", "macos", "windows"], "the .github/workflows/ci.yml build-test matrix must list jobs for linux, macos and windows (has %s)" % sorted(jobs))
+    for host, entries in sorted(jobs.items()):
+        total = entries[0][1]
+        selected = sorted(n for j, _ in entries for n in range(j, COUNT + 1, total))
+        check(all(t == total for _, t in entries) and sorted(j for j, _ in entries) == list(range(1, total + 1)) and 1 <= total <= COUNT
+              and selected == list(range(1, COUNT + 1)),
+              "the %s jobs %s must be exactly 1..J of one J <= %d and together select each of the shards 1..%d once" % (host, entries, COUNT, COUNT))
+    # A free-plan account runs 5 macOS jobs at once (the viewer job is the fifth); more would queue for ~10 min behind the first.
+    check(len(jobs.get("macos", [])) <= 4, "macOS may run at most 4 shard jobs (plus its viewer job): a hosted free plan allows 5 concurrent macOS jobs")
     if FAILED:
         print("\n".join(FAILED[:20]))
         return 1

@@ -9,6 +9,8 @@ on:
   # (Also triggered by changes to this file, e.g. CI infrastructure fixes.)
   # Packaging changes are exercised (build + package + smoke test, never published) on pull requests.
   pull_request:
+    # ready_for_review re-runs packaging when a draft (which skips it, see the package job) is promoted.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - ".github/workflows/release.yml"
       - "packaging/**"
@@ -19,6 +21,13 @@ on:
 
 permissions:
   contents: read
+
+# Only a superseded packaging run of the SAME pull request is cancelled. A tag release, a manual dry run and anything else get a group made
+# unique by the run id (never cancelled, never queued), and the `release-` prefix differs from ci.yml's `ci-` group that the `tests` job
+# (workflow_call) declares, so neither workflow can cancel the other.
+concurrency:
+  group: release-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   ZIG_VERSION: "0.15.2"
@@ -33,7 +42,8 @@ jobs:
 
   package:
     needs: tests
-    if: ${{ !cancelled() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
+    # Save Actions quota: a draft PR does not package (a tag or manual run always does); promoting it re-triggers this workflow.
+    if: ${{ !cancelled() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     name: package (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:

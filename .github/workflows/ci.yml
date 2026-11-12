@@ -11,30 +11,50 @@ on:
 permissions:
   contents: read
 
+# Only a superseded run of the SAME pull request is cancelled. Every other event (a push to main, a tag validated through release.yml's
+# workflow_call, a manual dry run) gets a group made unique by its run id, so it is neither cancelled nor queued behind another run.
+# `github.event_name` and `github.run_id` are the caller's when this workflow is called, and the literal `ci-` prefix keeps the group
+# distinct from any caller group (a called workflow whose group equals its caller's would be cancelled by it), so a reusable invocation can
+# never cancel its caller. A draft promoted with `ready_for_review` starts a new run for the same head; the older run of that PR was
+# draft-skipped and has nothing to lose. The newest run of a PR head always runs to completion, so the required checks of the final head exist.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-test:
     # Save Actions quota: draft PRs do not run the matrix (pushes to main always do).
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    # Wall-clock: every job (host x shard) builds once and runs one deterministic, cost-balanced partition of the hermetic tests
-    # (`shard-N` CTest labels, tests/ci_shards.cmake). The union of the shards is the `full` tier (which contains `fast`); the guard test
-    # `ci_shard_guard_test` (in `fast` and `full`) fails if a test has no shard, a shard is over budget, or this matrix is out of date.
-    name: ${{ matrix.name }} shard ${{ matrix.shard }}/6
+    # Wall-clock: every job builds once and runs one deterministic, cost-balanced selection of the hermetic tests' shards (`shard-N` CTest
+    # labels, tests/ci_shards.cmake): job `j/J` of a host runs the shards j, j+J, j+2J, ... of the 36. A stride (not a consecutive range) because
+    # the cost balance fills the lowest-numbered shards with the heaviest tests first. The union of the shards is the `full` tier (which
+    # contains `fast`); the guard test `ci_shard_guard_test` (in `fast` and `full`) fails if a test has no shard, a shard is over budget, or a
+    # host's jobs below do not cover the 36 shards exactly once.
+    # Job count per host is chosen against two hosted-runner limits that a measured run exposed: a free-plan account runs at most 20 jobs at
+    # once (the 21st waits for a free runner) and at most 5 of them on macOS, so a run is sized to fit: 6 Linux + 5 Windows + 4 macOS shard jobs
+    # and 4 viewer jobs = 19, leaving one slot; a pull request that also triggers packaging (3 more jobs) queues the surplus briefly. Sized by replaying the
+    # measured per-test durations of five complete runs through a 20-slot scheduler: 21+ jobs cost ~5 min, 19 cost ~0.2 min more than 20 but queue less.
+    name: ${{ matrix.name }} job ${{ matrix.job }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        host: [macos, linux, windows]
-        shard: [1, 2, 3, 4, 5, 6]
         include:
-          - host: macos
-            name: macOS (AppleClang + Ninja)
-            os: macos-latest
-          - host: linux
-            name: Linux (GCC + Ninja)
-            os: ubuntu-24.04
-          - host: windows
-            name: Windows (LLVM/Clang + Ninja)
-            os: windows-latest
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "1/6" }
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "2/6" }
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "3/6" }
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "4/6" }
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "5/6" }
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "6/6" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "1/5" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "2/5" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "3/5" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "4/5" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "5/5" }
+          - { name: "macOS (AppleClang + Ninja)", os: macos-latest, host: macos, job: "1/4" }
+          - { name: "macOS (AppleClang + Ninja)", os: macos-latest, host: macos, job: "2/4" }
+          - { name: "macOS (AppleClang + Ninja)", os: macos-latest, host: macos, job: "3/4" }
+          - { name: "macOS (AppleClang + Ninja)", os: macos-latest, host: macos, job: "4/4" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -67,17 +87,26 @@ jobs:
         run: cmake --preset dev
       - name: Build
         run: cmake --build --preset dev -- -k 0
-      - name: Hermetic tests (shard ${{ matrix.shard }}/6)
-        # Run without the developer preset's stop-on-failure so CI reports every failing test of the shard. The shard labels cover
+      - name: Hermetic tests (job ${{ matrix.job }}, shards j, j+J, ... of 36)
+        # Run without the developer preset's stop-on-failure so CI reports every failing test of the job. The shard labels cover
         # `fast` and `full` together (`fast` is a subset of `full`), so no test runs twice and none is skipped.
-        run: ctest --test-dir build/dev -L "^shard-${{ matrix.shard }}$" -j 4 --output-on-failure --no-tests=error
+        shell: bash
+        run: |
+          job="${{ matrix.job }}"
+          labels="^shard-($(seq -s '|' "${job%/*}" "${job#*/}" 36))$"
+          echo "ctest label selection: $labels"
+          ctest --test-dir build/dev -L "$labels" -j 4 --output-on-failure --no-tests=error
 
   sdl3-viewer:
     # Save Actions quota: draft PRs do not run the matrix (pushes to main always do).
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     # The optional SDL3 presenter must configure and build on every host; SDL3 is
     # provisioned through vcpkg (preinstalled on hosted runners), never vendored.
-    name: SDL3 viewer (${{ matrix.name }})
+    # The viewer/launcher suites were the longest single job on Linux (~19 min: the four GUI journeys alone are ~8 min each under contention).
+    # Linux therefore runs them in two parts: `gui` is those four tests, `rest` is the same selection minus them (ctest -E), so the union is
+    # exactly the original selection and a mistyped `gui` name can only run extra tests, never drop one. Windows (~17 min) and macOS (~13 min)
+    # stay one job each: the run is sized to the 20 concurrent jobs (5 on macOS) of a free-plan account, see build-test.
+    name: SDL3 viewer (${{ matrix.name }}${{ matrix.part && format(', {0}', matrix.part) || '' }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -87,6 +116,10 @@ jobs:
             os: macos-latest
           - name: Linux
             os: ubuntu-24.04
+            part: gui
+          - name: Linux
+            os: ubuntu-24.04
+            part: rest
           - name: Windows
             os: windows-latest
     steps:
@@ -137,4 +170,10 @@ jobs:
         run: |
           # SDL3 runtime libraries from vcpkg must be findable by the test binary on Windows (a plain test step, never POST_BUILD).
           for d in "$VCPKG_INSTALLATION_ROOT"/installed/*/bin; do [ -d "$d" ] && export PATH="$d:$PATH"; done
-          ctest --test-dir build/sdl3 -j 4 -R '^(launcher_(sms_)?policy_test|cartridge_recognition_test|launcher_lock_on_[a-z]*_test|launcher_sega_cd(_flow|_gui)?_test|sega_cd_viewer_sdl_test|packaging_no_game_content_test|launcher_build_cancel(_gui)?_test|launcher_default_mode_test|older_build_test|file_picker_test|launcher_gamepad_journey_[a-z_]*_narrow_test|launcher_parity_gui_[a-z_]*_narrow_test|library_catalog_test|storage_test|launcher_ui_support_test|sv_host_test|sv_state_test|sv_state_service_test|sms_viewer_states_test|sega_cd_viewer_states_test|sv_viewer_core_test|sv_input_diag_test|launcher_gui_navigation_test|launcher_audio_gui_test|launcher_input_diagnostics_test|viewer_foundation_layout_test|ci_shard_guard_test)$' --no-tests=error --output-on-failure
+          selection='^(launcher_(sms_)?policy_test|cartridge_recognition_test|launcher_lock_on_[a-z]*_test|launcher_sega_cd(_flow|_gui)?_test|sega_cd_viewer_sdl_test|packaging_no_game_content_test|launcher_build_cancel(_gui)?_test|launcher_default_mode_test|older_build_test|file_picker_test|launcher_gamepad_journey_[a-z_]*_narrow_test|launcher_parity_gui_[a-z_]*_narrow_test|library_catalog_test|storage_test|launcher_ui_support_test|sv_host_test|sv_state_test|sv_state_service_test|sms_viewer_states_test|sega_cd_viewer_states_test|sv_viewer_core_test|sv_input_diag_test|launcher_gui_navigation_test|launcher_audio_gui_test|launcher_input_diagnostics_test|viewer_foundation_layout_test|ci_shard_guard_test)$'
+          heavy='^(launcher_sega_cd_gui_test|launcher_parity_gui_journey_narrow_test|launcher_parity_gui_persist_narrow_test|launcher_gui_navigation_test)$'
+          case "${{ matrix.part || 'all' }}" in
+            all)  ctest --test-dir build/sdl3 -j 4 -R "$selection" --no-tests=error --output-on-failure ;;
+            gui)  ctest --test-dir build/sdl3 -j 4 -R "$heavy" --no-tests=error --output-on-failure ;;
+            rest) ctest --test-dir build/sdl3 -j 4 -R "$selection" -E "$heavy" --no-tests=error --output-on-failure ;;
+          esac

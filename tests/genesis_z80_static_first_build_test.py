@@ -159,9 +159,12 @@ def main():
                     check(z["discovery_runs"] == 1 and z["verification_runs"] == 1 and z["units_reused"] == 0,
                           "%s: no discovery recompilation: one discovery run, one verification run, no reused unit" % name)
         if "fallback" in GROUPS:
+            results = {}
             for name, (outcome, fallback) in sorted(FALLBACK.items()):
-                compare(name, tmp, outcome, fallback)
-            smc = build(fx.build("sound_smc"), tmp / "smc-check", True)[1]
+                results[name] = compare(name, tmp, outcome, fallback)
+            # The `sound_smc` static build is the one compare() just made (same ROM, same flags): its status is checked here instead of building
+            # the identical program a second time.
+            smc = results["sound_smc"][1] if results["sound_smc"] else {}
             check(smc.get("genesis_audio") == "degraded" and smc.get("z80_audio_outcome") == "structural_code_mismatch",
                   "a structural Z80 mutation still isolates only the sound CPU (typed degraded outcome, build succeeds)")
         if "determinism" in GROUPS:
