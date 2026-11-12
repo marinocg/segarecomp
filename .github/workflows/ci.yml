@@ -25,35 +25,36 @@ jobs:
   build-test:
     # Save Actions quota: draft PRs do not run the matrix (pushes to main always do).
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    # Wall-clock: every job (host x shard) builds once and runs one deterministic, cost-balanced partition of the hermetic tests
-    # (`shard-N` CTest labels, tests/ci_shards.cmake). The union of the shards is the `full` tier (which contains `fast`); the guard test
-    # `ci_shard_guard_test` (in `fast` and `full`) fails if a test has no shard, a shard is over budget, or this matrix is out of date.
-    # macOS: hosted runners for a public repository allow only 5 concurrent macOS jobs. With one job per shard (plus the SDL3 viewer) seven
-    # were requested, so two always waited ~8-10 min for a free runner. macOS therefore runs the eight shards as four pairs (1+2, 3+4, 5+6,
-    # 7+8; the even shards are excluded below and picked up by the preceding job), which with its viewer job is exactly five.
-    name: ${{ matrix.name }} shard ${{ matrix.shard }}${{ matrix.pair && '+' || '' }}/8
+    # Wall-clock: every job builds once and runs one deterministic, cost-balanced selection of the hermetic tests' shards (`shard-N` CTest
+    # labels, tests/ci_shards.cmake): job `j/J` of a host runs the shards j, j+J, j+2J, ... of the 35. A stride (not a consecutive range) because
+    # the cost balance fills the lowest-numbered shards with the heaviest tests first. The union of the shards is the `full` tier (which
+    # contains `fast`); the guard test `ci_shard_guard_test` (in `fast` and `full`) fails if a test has no shard, a shard is over budget, or a
+    # host's jobs below do not cover the 35 shards exactly once.
+    # Job count per host is chosen against two hosted-runner limits that a measured run exposed: a free-plan account runs at most 20 jobs at
+    # once (the 21st waits for a free runner) and at most 5 of them on macOS, so a run is sized to fit (7 Linux + 5 Windows + 4 macOS shard jobs
+    # and 4 viewer jobs = 20). Linux (GCC) tests are ~1.5x slower than the same tests on Windows or macOS, hence the most jobs.
+    name: ${{ matrix.name }} job ${{ matrix.job }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        host: [macos, linux, windows]
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
-        exclude:
-          - { host: macos, shard: 2 }
-          - { host: macos, shard: 4 }
-          - { host: macos, shard: 6 }
-          - { host: macos, shard: 8 }
         include:
-          - host: macos
-            name: macOS (AppleClang + Ninja)
-            os: macos-latest
-            pair: true
-          - host: linux
-            name: Linux (GCC + Ninja)
-            os: ubuntu-24.04
-          - host: windows
-            name: Windows (LLVM/Clang + Ninja)
-            os: windows-latest
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "1/7" }
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "2/7" }
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "3/7" }
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "4/7" }
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "5/7" }
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "6/7" }
+          - { name: "Linux (GCC + Ninja)", os: ubuntu-24.04, host: linux, job: "7/7" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "1/5" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "2/5" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "3/5" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "4/5" }
+          - { name: "Windows (LLVM/Clang + Ninja)", os: windows-latest, host: windows, job: "5/5" }
+          - { name: "macOS (AppleClang + Ninja)", os: macos-latest, host: macos, job: "1/4" }
+          - { name: "macOS (AppleClang + Ninja)", os: macos-latest, host: macos, job: "2/4" }
+          - { name: "macOS (AppleClang + Ninja)", os: macos-latest, host: macos, job: "3/4" }
+          - { name: "macOS (AppleClang + Ninja)", os: macos-latest, host: macos, job: "4/4" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -86,14 +87,13 @@ jobs:
         run: cmake --preset dev
       - name: Build
         run: cmake --build --preset dev -- -k 0
-      - name: Hermetic tests (shard ${{ matrix.shard }}${{ matrix.pair && ' and the next one' || '' }} of 8)
-        # Run without the developer preset's stop-on-failure so CI reports every failing test of the shard. The shard labels cover
+      - name: Hermetic tests (job ${{ matrix.job }}: shards j, j+J, ... of 35)
+        # Run without the developer preset's stop-on-failure so CI reports every failing test of the job. The shard labels cover
         # `fast` and `full` together (`fast` is a subset of `full`), so no test runs twice and none is skipped.
         shell: bash
         run: |
-          shard=${{ matrix.shard }}
-          labels="^shard-${shard}$"
-          if [ "${{ matrix.pair || 'false' }}" = "true" ]; then labels="^shard-(${shard}|$((shard + 1)))$"; fi
+          job="${{ matrix.job }}"
+          labels="^shard-($(seq -s '|' "${job%/*}" "${job#*/}" 35))$"
           echo "ctest label selection: $labels"
           ctest --test-dir build/dev -L "$labels" -j 4 --output-on-failure --no-tests=error
 
@@ -102,10 +102,10 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     # The optional SDL3 presenter must configure and build on every host; SDL3 is
     # provisioned through vcpkg (preinstalled on hosted runners), never vendored.
-    # The viewer/launcher suites were the longest single job (Linux ~19 min: the GUI journeys alone are ~9 min each under contention). Linux and
-    # Windows run them in two parts: `gui` is the four longest tests, `rest` is the same selection minus those (ctest -E), so the union is
-    # exactly the original selection and a mistyped `gui` name can only run fewer extra tests, never drop one. macOS stays a single job to
-    # keep its total at the 5 concurrent runners a public repository gets (see build-test).
+    # The viewer/launcher suites were the longest single job on Linux (~19 min: the four GUI journeys alone are ~8 min each under contention).
+    # Linux therefore runs them in two parts: `gui` is those four tests, `rest` is the same selection minus them (ctest -E), so the union is
+    # exactly the original selection and a mistyped `gui` name can only run extra tests, never drop one. Windows (~17 min) and macOS (~13 min)
+    # stay one job each: the run is sized to the 20 concurrent jobs (5 on macOS) of a free-plan account, see build-test.
     name: SDL3 viewer (${{ matrix.name }}${{ matrix.part && format(', {0}', matrix.part) || '' }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -122,10 +122,6 @@ jobs:
             part: rest
           - name: Windows
             os: windows-latest
-            part: gui
-          - name: Windows
-            os: windows-latest
-            part: rest
     steps:
       - uses: actions/checkout@v4
       - name: Install Ninja and SDL3 build prerequisites (macOS)
