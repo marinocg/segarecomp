@@ -863,6 +863,7 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
   h = (SvHost *)calloc(1, sizeof *h);
   if (h == NULL) return NULL;
   h->cfg = *cfg;
+  { SvGeomDecl decl; (void)sv_geomdecl_parse(cfg->geometry_declaration, &decl); sv_cov_init(&h->cov, &decl); h->cfg.geometry_declaration = NULL; } /* parsed once; the caller's text is not retained */
   sv_settings_defaults(&h->settings);
   resolve_settings_path(h);
   (void)sv_settings_load(&h->settings, h->settings_path);
@@ -1225,7 +1226,51 @@ void sv_host_set_perf(SvHost *h, struct SvPerf *perf) { if (h != NULL) h->perf =
 
 int sv_host_present(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch) { return present_frame(h, rgb, w, hgt, pitch, NULL, NULL); }
 
+/* SEG-139-T004: the aspect the user asked for (exact ratio when set, else the legacy width as the exact rational (300+width)/225). */
+static SvDisplayRatio requested_ratio(const SvHost *h) {
+  SvDisplayRatio r = h->settings.video.widescreen_ratio;
+  if (!sv_ratio_valid(r)) sv_widescreen_width_ratio(h->settings.video.widescreen_width, &r.num, &r.den);
+  return r;
+}
+
+void sv_host_set_scene(SvHost *h, const char *scene) {
+  if (h == NULL) return;
+  if (scene == NULL || strlen(scene) > SV_COV_ID_MAX) scene = "";
+  snprintf(h->cov_scene, sizeof h->cov_scene, "%s", scene);
+}
+size_t sv_host_coverage_json(const SvHost *h, char *buf, size_t cap) { return h != NULL ? sv_cov_report_json(&h->cov, buf, cap) : 0u; }
+int sv_host_geometry_fallback(const SvHost *h) { return h != NULL ? h->cov_fallback : 0; }
+
 int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, uint64_t sequence, const SvExtendedSurface *ext) {
+  SvExtendedSurface generic;
+  if (ext != NULL && ext->status != SV_WS_UNAVAILABLE && ext->sequence == sequence) {
+    /* what the provider delivered for THIS frame, accounted against the declaration; only then may it be dropped */
+    const SvDisplayRatio req = requested_ratio(h);
+    unsigned delivered = 0;
+    int in_range;
+    if (ext->source == SV_EXTSRC_AUTHORED && ext->side > 0) delivered |= SV_COV_BIT(SV_COV_SCENERY);
+    if (ext->overlay_rgba != NULL && ext->overlay_w > 0 && ext->overlay_h > 0) delivered |= SV_COV_BIT(SV_COV_HUD);
+    if (ext->mode == SV_WIDESCREEN_ENHANCED_GAMEPLAY && ext->side > 0) delivered |= SV_COV_BIT(SV_COV_ACTORS);
+    in_range = sv_cov_frame(&h->cov, req, h->cov_scene[0] != '\0' ? h->cov_scene : NULL, delivered);
+    if (!in_range) {
+      /* outside the declared range: the generic presentation, with a visible diagnostic once per entry. Nothing a provider supplied is shown as authored. */
+      char lo[24], hi[24], text[96];
+      generic = *ext;
+      generic.source = SV_EXTSRC_GENERIC;
+      generic.overlay_rgba = NULL;
+      generic.overlay_w = generic.overlay_h = 0;
+      ext = &generic;
+      if (!h->cov_fallback) {
+        (void)sv_ratio_format(h->cov.decl.min, lo, sizeof lo);
+        (void)sv_ratio_format(h->cov.decl.max, hi, sizeof hi);
+        snprintf(text, sizeof text, h->cov.decl.invalid ? "Geometry declaration invalid: generic widescreen" : "Geometry: outside declared range %s-%s, generic widescreen", lo, hi);
+        push_toast(h, text, 4000u);
+      }
+      h->cov_fallback = 1;
+    } else {
+      h->cov_fallback = 0;
+    }
+  }
   if (ext != NULL) {
     /* SEG-121: a surface produced under a higher level than the one now requested (the user stepped down while a frame was pending) is stale
      * for presentation: the picture shown must never contain Level 3 sprites once Level 2 or Original is selected. */

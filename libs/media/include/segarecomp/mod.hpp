@@ -141,6 +141,16 @@ struct MemoryRange {
 inline constexpr std::string_view kMemoryAccess[] = {"read", "write", "read-write"};
 inline constexpr std::size_t kMaxMemoryRanges = 16;   // per manifest (the scheduler holds at most 16 per mod)
 
+// Geometry declaration (SEG-139-T004, ADR 0302): the display-aspect range a package supports and, per named scene, the components it covers. A declaration is a CLAIM the host checks against what a
+// frame actually delivered; it never grants anything. `aspect_min` (default 4:3 when empty) and `aspect_max` are "N:M" ratios inside 4:3..32:9; scenes require `aspect_max`.
+struct GeometryScene {
+  std::string id;                        // a token [a-z0-9_-], at most 32
+  std::vector<std::string> components;   // kGeometryComponents, strictly ascending, at least one
+  bool operator==(const GeometryScene &) const = default;
+};
+inline constexpr std::string_view kGeometryComponents[] = {"actors", "hud", "scenery"};
+inline constexpr std::size_t kMaxGeometryScenes = 32;
+
 struct Manifest {
   std::string id, version, name, platform, author, license, purpose;
   std::string source_kind;                       // cartridge-image | disc-image (reserved)
@@ -152,6 +162,8 @@ struct Manifest {
   bool has_limits = false;
   std::uint64_t luau_memory_bytes = 0, luau_budget_units = 0;   // 0 = not requested
   bool has_geometry = false, has_hooks = false;  // `geometry` is a reserved key (present but empty); `hooks` holds the declarations below
+  std::string aspect_min, aspect_max;           // geometry declaration ("" = not declared); see GeometryScene
+  std::vector<GeometryScene> geometry_scenes;    // strictly sorted by id in a canonical manifest
   std::string default_widescreen, default_side_style;
   std::vector<Payload> payloads;
   std::vector<Mapping> mappings;
@@ -247,6 +259,12 @@ struct EditRanges {
 // no exact duplicate, and an access backed by the declared `memory.read.<space>` / `memory.write.<space>` capability. Stable classes: E_MEMORY_RANGE, E_MEMORY_SPACE, E_MEMORY_ACCESS, E_MEMORY_REVISION,
 // E_MEMORY_DUPLICATE, E_MEMORY_COUNT, E_CAPABILITY_INCONSISTENT.
 [[nodiscard]] std::optional<Rejection> check_memory(const Manifest &manifest);
+// Declaration check run by the reader and `mod check` (SEG-139-T004): ratios are canonical decimal "N:M" (no leading zeros, terms 1..4096) inside 4:3..32:9 with min <= max; scenes require
+// `aspect_max`, are at most 32, have token ids in strictly ascending order and at least one component each, components from kGeometryComponents strictly ascending. A geometry object that
+// declares nothing (`{"scenes":[]}`) stays legal and means "no claim". Stable classes: E_GEOMETRY_ASPECT, E_GEOMETRY_SCENE.
+[[nodiscard]] std::optional<Rejection> check_geometry(const Manifest &manifest);
+// The compact text the viewer host reads (`min=4:3;max=16:9;scene=id:comp+comp`, see libs/viewer sv_geomdecl_parse), or "" when no range is declared. Pure.
+[[nodiscard]] std::string geometry_declaration_text(const Manifest &manifest);
 // The ranges that apply to one revision label (its own plus those declared for every revision), in canonical order.
 [[nodiscard]] std::vector<MemoryRange> memory_for_revision(const Manifest &manifest, std::string_view revision);
 

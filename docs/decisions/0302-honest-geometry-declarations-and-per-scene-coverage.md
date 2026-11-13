@@ -1,0 +1,34 @@
+# ADR 0302: honest geometry declarations, per-scene and per-component coverage, and a repeatable aspect matrix
+
+- Status: accepted (combined delivery F13: SEG-139-T004, SEG-139-T006). Builds on [ADR 0301](0301-widescreen-geometry-rational-aspect-planner-and-bounded-surfaces.md) (the planner and bounded surfaces), [ADR 0267](0267-seg-124-native-widescreen-compatibility-provider.md) (providers) and the schema 3 reservation of the `geometry` key ([segapatch-schema-3.md](../architecture/segapatch-schema-3.md)).
+- Presentation only: nothing here reaches guest state, the native picture or a save state.
+- Not in scope: a launcher/menu surface for the report, Master System and Sega CD coverage (SEG-147-T009, SEG-148-T010), declaring scenes automatically, any title-specific table.
+
+## Decision 1: a package declares a range and per-scene components; the declaration is a claim, not a grant
+
+Schema 3 `geometry` (and `mod.toml` `[geometry]` + `[[scene]]`) gains `aspect_max`, optional `aspect_min` (default 4:3) and `scenes: [{id, components}]` with components from `actors`, `hud`, `scenery`. The rules are in the schema document; the essentials are: canonical `N:M` ratios inside 4:3..32:9, `min <= max`, scenes need `aspect_max` (a coverage claim without a supported range claims nothing checkable), at most 32 scenes, tokens and strict ordering so a manifest has one spelling. `{"scenes":[]}` stays legal and means "no claim", so every existing package keeps its bytes and identity. The declaration is in the **package identity** (a different claim is a different package) and **not** in the content digest (it is metadata about presentation; two packages with the same payloads still share a build). A declaration never widens what the host does: it can only restrict (Decision 3) and be compared (Decision 2).
+
+It reaches the viewer as one compact text, `min=N:M;max=N:M;scene=ID:comp+comp`, produced by `mod inspect` (`geometry.declaration`) and read by `sv_geomdecl_parse` (pure C in `sv_layout.c`; the host config field is `geometry_declaration`, the Genesis viewer reads `SEGARECOMP_PATCH_GEOMETRY`). The text is parsed once at open; an unreadable text **fails closed** (every frame is outside the range, the diagnostic says the declaration is invalid) instead of being ignored.
+
+## Decision 2: the host measures declared versus delivered, per scene and component
+
+For every extended frame the host accounts, per scene (declared ones, then the unscoped scene `*`) and per component, one of `covered` (declared, inside the range, delivered), `missing` (declared, inside, not delivered), `undeclared` (delivered, never declared: not support), or `outside_range`. What "delivered" means is fixed and generic: `scenery` = the accepted surface carries provenance AUTHORED with a side; `hud` = the frame carries a relocated HUD overlay; `actors` = Level 3 content was produced (the sprites the game's own sprite table placed in the margins). The scene is named by the adapter/provider through `sv_host_set_scene`, never inferred; an unknown or unset scene is accounted in `*` where nothing is declared, so it can only ever be `undeclared`. This keeps the non-goal: **background coverage is never reported as gameplay support** (`actors` must be declared and delivered on its own).
+
+The requested aspect compared with the range is exact: the saved exact ratio when set, else the legacy width as the rational `(300 + width) / 225` (so width 100 is exactly 16:9 and the comparison needs no tolerance).
+
+The report is stable JSON (`sv_cov_report_json`; schema string `segarecomp.geometry-coverage/1`; fixed key order, integers only, declared scenes in order then `*`, `last_aspect`, `last_status`), asserted byte for byte in `sv_coverage_test`. The Genesis viewer writes it to `SEGARECOMP_COVERAGE_REPORT` when it closes. Counters saturate; the report is bounded (at most 33 scenes x 3 components).
+
+## Decision 3: outside the declared range the generic presentation is shown, visibly
+
+When the requested aspect is outside the declared range (or the declaration is invalid) the host presents the frame through the generic path: provenance becomes GENERIC (so the normal Comfort/Borders/Raw treatment applies) and the provider's relocated HUD is not drawn; a toast says `Geometry: outside declared range <min>-<max>, generic widescreen`, once on entering the state (not every frame). The extension itself (generic hardware scenery) is still shown; nothing is shown that the package did not claim. A package with no declaration is unrestricted and reported `declared:false` (behaviour unchanged for every existing package). A provider declaring 16:9 and shown at 32:9 reports `outside declared range` (`sv_geometry_decl_test`).
+
+## Decision 4: the aspect matrix is synthetic in CI and aggregate on real games
+
+`sv_widescreen_matrix_test` plans, produces and presents one fictional scene at 4:3, 16:9, 21:9 and 32:9 through the shared host in an integer 2x window (a pixel replication, independent of renderer filtering). Each row's composed output is compared with an independent construction **and** a committed golden hash; coverage uses a fictional provider declaring `max=21:9`, so the rows are `pass`, `pass`, `pass`, `partial` (32:9 is correct but not authored); host time has a coarse absolute budget; surface memory is checked against the single fixed allocation. `genesis_extension_test` gains a coarse producer budget per aspect and a guard against super-linear growth. The table, deltas against 16:9, limitations and the local real-game runbook are in [widescreen-aspect-matrix.md](../architecture/widescreen-aspect-matrix.md). Real-game results are aggregate numbers recorded only in the private harness (never frames, captures or traces); this repository never claims support the synthetic evidence does not show.
+
+## Consequences
+
+- No behaviour changes without a declaration; a declaration can only make the host more conservative.
+- The package-to-viewer path is: schema 3 -> `mod inspect geometry.declaration` -> `SEGARECOMP_PATCH_GEOMETRY`. The launcher does not set the variable yet (a limitation recorded in the matrix document); until it does, a mod played through the launcher is reported `declared:false` and is unrestricted. Setting the variable by hand is supported.
+- Scene names are supplied by a provider through `sv_host_set_scene`; no current provider calls it, so real packages account in `*` until one does.
+- The coverage report has no on-screen view yet; the toast is the only live diagnostic.

@@ -145,6 +145,57 @@ int sv_geom_resolve_visible(const SvVideoSettings *video, int native_w, int nati
 
 const char *sv_geom_status_name(SvGeomStatus status); /* stable lowercase diagnostic name */
 
+/* ---- SEG-139-T004: a package's geometry declaration and the host's per-scene, per-component coverage accounting (pure, SDL-free, no allocation) ----
+ * A package declares the display-aspect range it supports and, per named scene, which components it covers (scenery, hud, actors). The host compares that
+ * declaration with what a frame actually delivered and reports the result; it never infers support. The declaration reaches the host as one compact text,
+ * `min=N:M;max=N:M;scene=ID:comp+comp;scene=...` (every part optional, `max` required when `min` or a scene is given; components `scenery`, `hud`, `actors`),
+ * produced by the package tooling from the schema 3 `geometry` object. Nothing here knows a platform or a title. */
+#define SV_COV_MAX_SCENES 32
+#define SV_COV_ID_MAX 32
+typedef enum SvCovComponent { SV_COV_SCENERY = 0, SV_COV_HUD = 1, SV_COV_ACTORS = 2, SV_COV_COMPONENTS = 3 } SvCovComponent;
+#define SV_COV_BIT(c) (1u << (unsigned)(c))
+const char *sv_cov_component_name(SvCovComponent component); /* "scenery", "hud", "actors" */
+
+typedef struct SvGeomScene { char id[SV_COV_ID_MAX + 1]; unsigned declared; /* mask of SV_COV_BIT */ } SvGeomScene;
+typedef struct SvGeomDecl {
+  int present;        /* a declaration was given (even an invalid one) */
+  int invalid;        /* the text could not be read: fail closed, no frame is in range */
+  int has_range;      /* min/max declared */
+  SvDisplayRatio min, max;
+  int scene_count;
+  SvGeomScene scenes[SV_COV_MAX_SCENES];
+} SvGeomDecl;
+/* Parses the compact text. 0 on success; -1 on anything malformed (out is then present = 1, invalid = 1). NULL or an empty text is present = 0 (no declaration: nothing is claimed
+ * and nothing is restricted). Ids are tokens of [a-z0-9_-], at most SV_COV_ID_MAX, strictly ascending, unique; ratios use sv_ratio_parse; min <= max. */
+int sv_geomdecl_parse(const char *text, SvGeomDecl *out);
+/* 1 when `requested` lies inside the declared range, or when nothing is declared (an undeclared package is not restricted). 0 for an invalid declaration or an out-of-range ratio. */
+int sv_geomdecl_in_range(const SvGeomDecl *decl, SvDisplayRatio requested);
+
+typedef enum SvCovStatus {
+  SV_COV_ABSENT = 0,        /* neither declared nor delivered */
+  SV_COV_COVERED = 1,       /* declared for this scene, inside the range, and delivered this frame */
+  SV_COV_MISSING = 2,       /* declared for this scene, inside the range, but not delivered this frame */
+  SV_COV_UNDECLARED = 3,    /* delivered without being declared for this scene (never counted as support) */
+  SV_COV_OUTSIDE_RANGE = 4  /* the requested aspect is outside the declared range: the generic presentation is shown instead */
+} SvCovStatus;
+const char *sv_cov_status_name(SvCovStatus status); /* "absent", "covered", "missing", "undeclared", "outside declared range" */
+/* The status of one component of one frame. `scene` NULL or not declared = the unscoped bucket (nothing declared). */
+SvCovStatus sv_geomdecl_check(const SvGeomDecl *decl, SvDisplayRatio requested, const char *scene, SvCovComponent component, int delivered);
+
+typedef struct SvCovAccount {
+  SvGeomDecl decl;
+  uint64_t frames, outside_frames;
+  SvDisplayRatio last;
+  /* [scene (declared ones, then the unscoped bucket)][component][covered, missing, undeclared, outside_range] */
+  uint64_t count[SV_COV_MAX_SCENES + 1][SV_COV_COMPONENTS][4];
+} SvCovAccount;
+void sv_cov_init(SvCovAccount *account, const SvGeomDecl *decl);
+/* Accounts one frame: `delivered` is a mask of SV_COV_BIT components the producer/provider actually supplied for it. Returns 1 when the frame is inside the declared range (or nothing is declared). */
+int sv_cov_frame(SvCovAccount *account, SvDisplayRatio requested, const char *scene, unsigned delivered);
+/* Stable JSON (fixed key order, integers only, declared scenes in declaration order then the unscoped scene "*"), schema "segarecomp.geometry-coverage/1". Writes at most `cap` bytes
+ * including the terminator and returns the length it needs (like snprintf), so a result >= cap was truncated. */
+size_t sv_cov_report_json(const SvCovAccount *account, char *buf, size_t cap);
+
 /* Barrel distortion of a normalized coordinate pair in [-1, 1] (curvature 0..100). Maps the undistorted position of a mesh vertex to its
  * position on the curved tube; 0 is the identity. `vignette` receives a 0..1 brightness factor for the corner falloff. */
 void sv_crt_warp(float nx, float ny, int curvature, float *out_x, float *out_y, float *vignette);

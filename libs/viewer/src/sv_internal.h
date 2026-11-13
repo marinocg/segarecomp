@@ -63,6 +63,9 @@ struct SvHost {
   int tex_w, tex_h;
   int ext_side;                /* SEG-118: the frame texture holds an extended picture (native + ext_side px each side); 0 = the original picture */
   uint32_t ext_accepted, ext_rejected, tex_creations; /* saturating, bounded diagnostics */
+  SvCovAccount cov;            /* SEG-139-T004: the package's geometry declaration and the per-scene, per-component accounting */
+  char cov_scene[SV_COV_ID_MAX + 1];
+  int cov_fallback;            /* the last extended frame was outside the declared range and used the generic presentation */
   /* SEG-123: host-owned buffers allocated once at open (never per frame): the retained RAW accepted extension (so a style change in the paused menu is
    * applied at once and Raw is exact), the two treated side strips and the pure helper's scratch. */
   uint8_t *ext_raw;            /* (max_w + 2*SV_EXT_MAX_SIDE) x max_h RGB24, tightly packed at (last_w + 2*ext_side) * 3 */

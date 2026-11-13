@@ -89,6 +89,25 @@ caps = {k: caps[k] for k in order if k in caps}
 caps["capabilities"] = ["frame.vdp", "hook.function", "host.log", "state.mod"]   # hook.function declared: `hooks` then has its capability (unsupported on the platform is a check-time concern)
 accept("capabilities + reserved empty keys", build(caps, [nat]))
 
+# SEG-139-T004: a declared aspect range with per-scene component coverage; identity includes it, the content digest does not, the compact text reaches the host
+def with_geometry(g):
+    manifest, files = good()
+    base_doc = accept("geometry baseline", build(manifest, files))
+    manifest["geometry"] = g
+    return base_doc, accept("geometry " + json.dumps(g, sort_keys=True), build(manifest, files))
+
+
+base_doc, gdoc = with_geometry({"aspect_max": "16:9", "scenes": [{"id": "stage-1", "components": ["hud", "scenery"]}, {"id": "title", "components": ["scenery"]}]})
+cli.check(gdoc["geometry"] == {"aspect_min": "4:3", "aspect_max": "16:9", "scenes": [{"id": "stage-1", "components": ["hud", "scenery"]}, {"id": "title", "components": ["scenery"]}],
+                               "declaration": "max=16:9;scene=stage-1:hud+scenery;scene=title:scenery"}, f"the report carries the declaration and the host text ({gdoc.get('geometry')})")
+cli.check("geometry" not in base_doc, "a package without a declaration reports no geometry")
+cli.check(gdoc["package_identity"] != base_doc["package_identity"], "the declaration is part of the package identity")
+cli.check(gdoc["content_digest"] == base_doc["content_digest"], "the declaration is not part of the content digest (it is metadata)")
+_, g2 = with_geometry({"aspect_min": "16:9", "aspect_max": "32:9", "scenes": []})
+cli.check(g2["geometry"]["declaration"] == "min=16:9;max=32:9" and g2["geometry"]["scenes"] == [], "a range without scenes")
+_, g3 = with_geometry({"scenes": []})
+cli.check("geometry" not in g3, "the empty declaration still claims nothing (and is accepted as before)")
+
 # ---------------------------------------------------------------- schema 1/2 regression: pinned identities (byte-for-byte unaffected)
 def rom(n=0x4000, seed=7):
     out = bytearray()
@@ -165,8 +184,25 @@ reject("capability on a data-only package", mutate(lambda m: m.__setitem__("capa
 reject("scenery.words needs native", mutate(lambda m: m.__setitem__("capabilities", ["scenery.words"])), "E_CAPABILITY_INCONSISTENT")
 reject("hooks without capability", mutate(lambda m: m.__setitem__("hooks", [])), "E_CAPABILITY_INCONSISTENT")
 reject("hooks entry is not defined", mutate(lambda m: m.update(capabilities=["hook.function"], hooks=[{"site": "x"}])), "E_FIELD_UNKNOWN")
-reject("geometry content is not defined", mutate(lambda m: m.__setitem__("geometry", {"scenes": [{"id": "x"}]})), "E_FIELD_UNKNOWN")
+# SEG-139-T004 (ADR 0302): the geometry declaration content model
+def geo(**g):
+    return mutate(lambda m: m.__setitem__("geometry", g))
+
+
 reject("geometry other key", mutate(lambda m: m.__setitem__("geometry", {"x": 1})), "E_FIELD_UNKNOWN")
+reject("geometry scene other key", geo(aspect_max="16:9", scenes=[{"id": "a", "components": ["hud"], "x": 1}]), "E_FIELD_UNKNOWN")
+reject("geometry scene without components", geo(aspect_max="16:9", scenes=[{"id": "a"}]), "E_FIELD_MISSING")
+reject("geometry scenes without a range", geo(scenes=[{"id": "a", "components": ["hud"]}]), "E_GEOMETRY_ASPECT")
+reject("geometry min without max", geo(aspect_min="16:9"), "E_GEOMETRY_ASPECT")
+for label, value in (("below 4:3", "5:4"), ("above 32:9", "33:9"), ("leading zero", "16:09"), ("slash", "16/9"), ("zero term", "0:9"), ("five digits", "16:00009"), ("float", "1.77:1"), ("empty", ""), ("space", "16: 9")):
+    reject("geometry aspect_max " + label, geo(aspect_max=value), "E_GEOMETRY_ASPECT")
+reject("geometry min above max", geo(aspect_min="21:9", aspect_max="16:9"), "E_GEOMETRY_ASPECT")
+reject("geometry aspect is not a string", geo(aspect_max=16), "E_FIELD_VALUE")
+for label, scenes in (("upper-case id", [{"id": "A", "components": ["hud"]}]), ("empty id", [{"id": "", "components": ["hud"]}]), ("unsorted ids", [{"id": "b", "components": ["hud"]}, {"id": "a", "components": ["hud"]}]),
+                      ("duplicate ids", [{"id": "a", "components": ["hud"]}, {"id": "a", "components": ["hud"]}]), ("no components", [{"id": "a", "components": []}]),
+                      ("unknown component", [{"id": "a", "components": ["sky"]}]), ("unsorted components", [{"id": "a", "components": ["scenery", "hud"]}]),
+                      ("duplicate components", [{"id": "a", "components": ["hud", "hud"]}]), ("33 scenes", [{"id": "s%02d" % i, "components": ["hud"]} for i in range(33)])):
+    reject("geometry scene " + label, geo(aspect_max="16:9", scenes=scenes), "E_GEOMETRY_SCENE")
 reject("state.mod without state_schema", mutate(lambda m: m.__setitem__("capabilities", ["state.mod"])), "E_FIELD_MISSING")
 reject("state_schema without state.mod", mutate(lambda m: m.__setitem__("state_schema", 1)), "E_FIELD_UNKNOWN")
 reject("limits above policy (memory)", mutate(lambda m: m.__setitem__("limits", {"luau_memory_bytes": 4194305})), "E_LIMIT_EXCEEDS_POLICY")

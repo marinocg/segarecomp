@@ -89,13 +89,19 @@ std::string package_json(const mod::Manifest &m, const std::string &identity, co
     }
     hooks += "]";
   }
+  std::string geometry;   // ADR 0302: shown only when a range is declared, so every other inspect output is unchanged; `declaration` is the compact text the viewer host reads (SEGARECOMP_PATCH_GEOMETRY)
+  if (!m.aspect_max.empty()) {
+    geometry = ",\"geometry\":{\"aspect_min\":\"" + esc(m.aspect_min.empty() ? std::string("4:3") : m.aspect_min) + "\",\"aspect_max\":\"" + esc(m.aspect_max) + "\",\"scenes\":[";
+    for (std::size_t i = 0; i < m.geometry_scenes.size(); ++i) geometry += std::string(i ? "," : "") + "{\"id\":\"" + esc(m.geometry_scenes[i].id) + "\",\"components\":" + json_list(m.geometry_scenes[i].components) + "}";
+    geometry += "],\"declaration\":\"" + esc(mod::geometry_declaration_text(m)) + "\"}";
+  }
   std::string revs = "[";
   for (std::size_t i = 0; i < m.revisions.size(); ++i) revs += std::string(i ? "," : "") + "{\"label\":\"" + esc(m.revisions[i].label) + "\",\"sha256\":\"" + m.revisions[i].sha256 + "\"}";
   revs += "]";
   return "\"id\":\"" + esc(m.id) + "\",\"version\":\"" + esc(m.version) + "\",\"name\":\"" + esc(m.name) + "\",\"platform\":\"" + m.platform + "\",\"source_identity_kind\":\"" + m.source_kind +
          "\",\"revisions\":" + revs + ",\"trust_class\":\"" + mod::trust_class(m) + "\",\"capabilities\":" + json_list(m.capabilities) + ",\"capabilities_optional\":" + json_list(m.capabilities_optional) +
          ",\"abi_native\":" + std::to_string(m.abi_native) + ",\"payloads\":{\"native\":" + std::to_string(native) + ",\"luau\":" + std::to_string(luau) + ",\"assets\":" + std::to_string(assets) +
-         ",\"other\":" + std::to_string(other) + "},\"rom_edits\":" + std::to_string(edits) + ",\"symbols\":" + symbols + hooks + ",\"package_identity\":\"" + identity + "\",\"content_digest\":\"" + content + "\"";
+         ",\"other\":" + std::to_string(other) + "},\"rom_edits\":" + std::to_string(edits) + ",\"symbols\":" + symbols + hooks + geometry + ",\"package_identity\":\"" + identity + "\",\"content_digest\":\"" + content + "\"";
 }
 
 bool read_all(const fs::path &path, std::size_t limit, std::vector<std::uint8_t> &out) {

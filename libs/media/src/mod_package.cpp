@@ -413,11 +413,28 @@ Manifest parse_manifest(const Value &root) {
       m.memory.push_back(std::move(r));
     }
   }
-  if (const Value *g = root.find("geometry"); g != nullptr) {
+  if (const Value *g = root.find("geometry"); g != nullptr) {   // SEG-139-T004 (ADR 0302): the supported aspect range and per-scene component coverage claims
     object(*g, "geometry");
-    only(*g, {"scenes"}, "geometry");
-    if (g->find("scenes") != nullptr && !array(g->at("scenes"), "scenes").items.empty()) fail("E_FIELD_UNKNOWN", "geometry scenes are not defined yet");
+    only(*g, {"aspect_min", "aspect_max", "scenes"}, "geometry");
+    for (const char *k : {"aspect_min", "aspect_max"})
+      if (g->find(k) != nullptr) {
+        (std::string(k) == "aspect_min" ? m.aspect_min : m.aspect_max) = str(*g, k);
+        if ((std::string(k) == "aspect_min" ? m.aspect_min : m.aspect_max).empty()) fail("E_GEOMETRY_ASPECT", std::string("geometry ") + k + " is empty");
+      }
+    if (g->find("scenes") != nullptr) {
+      const Value &scenes = array(g->at("scenes"), "scenes");
+      if (scenes.items.size() > kMaxGeometryScenes) fail("E_GEOMETRY_SCENE", "a package declares at most 32 geometry scenes");
+      for (const Value &sv : scenes.items) {
+        object(sv, "a geometry scene");
+        only(sv, {"id", "components"}, "a geometry scene");
+        GeometryScene sc;
+        sc.id = str(sv, "id");
+        sc.components = string_list(need(sv, "components"), "components");
+        m.geometry_scenes.push_back(std::move(sc));
+      }
+    }
     m.has_geometry = true;
+    if (auto r = check_geometry(m)) fail(r->code, r->message);
   }
   if (const Value *l = root.find("limits"); l != nullptr) {
     object(*l, "limits");
@@ -675,7 +692,21 @@ std::string serialize_manifest(const Manifest &m) {
     if (m.luau_budget_units != 0) { if (!first) o += ','; key(o, "luau_budget_units"); o += std::to_string(m.luau_budget_units); }
     o += '}';
   }
-  if (m.has_geometry) { o += ','; key(o, "geometry"); o += "{\"scenes\":[]}"; }
+  if (m.has_geometry) {
+    o += ','; key(o, "geometry"); o += '{';
+    if (!m.aspect_min.empty()) { kv(o, "aspect_min", m.aspect_min, true); }
+    if (!m.aspect_max.empty()) { kv(o, "aspect_max", m.aspect_max, m.aspect_min.empty()); }
+    if (!m.aspect_min.empty() || !m.aspect_max.empty()) o += ',';
+    key(o, "scenes"); o += '[';
+    for (std::size_t i = 0; i < m.geometry_scenes.size(); ++i) {
+      const GeometryScene &sc = m.geometry_scenes[i];
+      if (i) o += ',';
+      o += '{'; kv(o, "id", sc.id, true); o += ','; key(o, "components"); o += '[';
+      for (std::size_t j = 0; j < sc.components.size(); ++j) { if (j) o += ','; put_string(o, sc.components[j]); }
+      o += "]}";
+    }
+    o += "]}";
+  }
   if (!m.default_widescreen.empty() || !m.default_side_style.empty()) {
     o += ','; key(o, "presentation_defaults"); o += '{';
     if (!m.default_widescreen.empty()) kv(o, "widescreen", m.default_widescreen, true);

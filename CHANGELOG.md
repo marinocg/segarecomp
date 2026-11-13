@@ -13,6 +13,12 @@ Releases are published on the [Releases](../../releases) page. This file records
 * The maximum extension per side rises from 256 to 672 source pixels (1664 x 448 surface at most); a latent scratch-size overflow in the side treatment that the larger bound would have exposed is fixed.
 * Measured, not optimized: the 32:9 producer costs about 10.6% of a 60 Hz frame on the reference host; the pre-registered lookup-optimization criterion was not met, so no cache was added ([measurement](docs/architecture/widescreen-scenery-lookup-measurement.md)). There is no menu control for the exact ratio yet.
 
+### Honest geometry declarations, per-scene coverage, and the aspect matrix (ADR 0302)
+
+* A schema 3 package (and `mod.toml`) can declare the aspect range it supports (`aspect_min`/`aspect_max`, inside 4:3 to 32:9) and per-scene components (`scenery`, `hud`, `actors`). The declaration is a claim, never a grant: it is part of the package identity, not the content digest; packages without one are byte-identical to before.
+* The viewer compares declared with delivered per scene and component and reports it as stable JSON (`SEGARECOMP_COVERAGE_REPORT`). A provider that declares 16:9 and is shown at 32:9 reports `outside declared range`: the generic presentation is shown (nothing authored, no relocated HUD) with a visible notice. Background coverage is never reported as gameplay support. The launcher does not yet hand the declaration to the viewer.
+* A synthetic 4:3 / 16:9 / 21:9 / 32:9 matrix runs in CI (golden frame hashes, declared-range coverage, coarse time and memory budgets, a producer-cost guard); the table, the cost against 16:9 and what 32:9 does and does not cover are in [the matrix document](docs/architecture/widescreen-aspect-matrix.md).
+
 ### Gameplay mods in a built program, `mod diff-run` / `mod test`, a synthetic gameplay example (ADR 0300, Genesis)
 
 * A Luau mod can now run all of its phases (including bounded work-RAM reads/writes, input reads and its own saved state) inside a **built, generated-native program**: `segarecomp build --luau-package` without a viewer links the one mod scheduler. The memory a mod may touch is declared in the manifest (`[[memory]]`, per revision, part of the package identity) and is the only memory it can touch; a build with a memory capability but no range for the exact image is refused. The played viewer window still runs only the HUD seam, and function hooks / native providers are not linked yet.

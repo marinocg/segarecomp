@@ -345,6 +345,7 @@ GenesisSdl3Viewer *genesis_sdl3_viewer_open_platform(const char *title, int scal
   cfg.patch_id = SDL_getenv("SEGARECOMP_PATCH_ID");
   cfg.patch_widescreen = SDL_getenv("SEGARECOMP_PATCH_WIDESCREEN");
   cfg.patch_side_style = SDL_getenv("SEGARECOMP_PATCH_SIDE_STYLE");
+  cfg.geometry_declaration = SDL_getenv("SEGARECOMP_PATCH_GEOMETRY"); /* SEG-139-T004: the package's geometry declaration (compact text), NULL = none */
   /* SEG-122: an explicit identity wins over the image digest: a Patched program was built from a different image than the library game its preferences belong to */
   cfg.profile_id = profile != NULL && strlen(profile) == 64U ? profile : cfg.rom_sha256;
   cfg.diagnostics = sdl_diagnostics;
@@ -387,6 +388,15 @@ const char *genesis_sdl3_viewer_renderer_name(const GenesisSdl3Viewer *v) { retu
 void genesis_sdl3_viewer_close(GenesisSdl3Viewer *v) {
   if (v == NULL) return;
   if (v->audio) { sv_host_set_audio(v->host, NULL); SDL_DestroyAudioStream(v->audio); }
+  { /* SEG-139-T004: SEGARECOMP_COVERAGE_REPORT=<file> writes the declared-versus-delivered coverage report (stable JSON, aggregate counters only) when the viewer closes */
+    const char *path = SDL_getenv("SEGARECOMP_COVERAGE_REPORT");
+    if (path != NULL && *path != '\0') {
+      char json[4096];
+      const size_t n = sv_host_coverage_json(v->host, json, sizeof json);
+      FILE *f = n > 0 && n < sizeof json ? fopen(path, "wb") : NULL;
+      if (f != NULL) { (void)fwrite(json, 1, n, f); (void)fputc('\n', f); (void)fclose(f); }
+    }
+  }
   sv_host_close(v->host); /* includes SDL_Quit */
   free(v);
 }

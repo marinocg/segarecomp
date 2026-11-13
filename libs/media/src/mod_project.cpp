@@ -85,7 +85,7 @@ std::vector<Section> parse_toml(std::string_view text) {
       skip();
       if (i < line.size() && line[i] != '#') fail("E_MANIFEST_SYNTAX", "mod.toml has text after a table header");
       if (!bare_key(name)) fail("E_MANIFEST_SYNTAX", "a mod.toml table name is invalid");
-      const bool repeated = name == "target.revision" || name == "source" || name == "audio.mapping" || name == "audio.mapping.value" || name == "symbol" || name == "hook";
+      const bool repeated = name == "target.revision" || name == "source" || name == "audio.mapping" || name == "audio.mapping.value" || name == "symbol" || name == "hook" || name == "scene";
       if (repeated != array && (repeated || name == "mod" || name == "target" || name == "capabilities" || name == "abi" || name == "state" || name == "limits" || name == "build" || name == "geometry" || name == "presentation"))
         fail("E_MANIFEST_SYNTAX", "the table [" + name + "] must be written " + (repeated ? "as [[" + name + "]]" : "as [" + name + "]"));
       if (!array) for (const Section &s : sections) if (s.name == name) fail("E_MANIFEST_SYNTAX", "mod.toml repeats the table [" + name + "]");
@@ -235,9 +235,17 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
     } else if (s.name == "limits") {
       only(s, {"luau_memory_bytes", "luau_budget_units"});
       m.has_limits = true; m.luau_memory_bytes = number_of(s, "luau_memory_bytes", false); m.luau_budget_units = number_of(s, "luau_budget_units", false);
-    } else if (s.name == "geometry") {   // reserved schema 3 key: only the empty declaration is representable until the geometry task defines scenes
-      only(s, {"scenes"});
-      if (s.find("scenes") != nullptr && (s.find("scenes")->kind != Val::Kind::strings || !s.find("scenes")->list.empty())) fail("E_FIELD_UNKNOWN", "geometry scenes are not defined yet; only an empty declaration is accepted");
+    } else if (s.name == "geometry") {   // SEG-139-T004 (ADR 0302): the supported aspect range; scenes are written as [[scene]] tables (a `scenes` key stays accepted only when empty)
+      only(s, {"aspect_min", "aspect_max", "scenes"});
+      if (s.find("scenes") != nullptr && (s.find("scenes")->kind != Val::Kind::strings || !s.find("scenes")->list.empty())) fail("E_FIELD_VALUE", "geometry scenes are written as [[scene]] tables");
+      m.aspect_min = text_of(s, "aspect_min", false); m.aspect_max = text_of(s, "aspect_max", false);
+      m.has_geometry = true;
+    } else if (s.name == "scene") {
+      only(s, {"id", "components"});
+      if (m.geometry_scenes.size() >= kMaxGeometryScenes) fail("E_GEOMETRY_SCENE", "a project declares too many geometry scenes");
+      GeometryScene sc;
+      sc.id = text_of(s, "id"); sc.components = list_of(s, "components");
+      m.geometry_scenes.push_back(std::move(sc));
       m.has_geometry = true;
     } else if (s.name == "presentation") {
       only(s, {"widescreen", "side_style"});
@@ -338,6 +346,8 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
   m.mappings = std::move(mappings);
   std::sort(m.symbols.begin(), m.symbols.end(), [](const Symbol &a, const Symbol &b) { return std::tie(a.name, a.revision) < std::tie(b.name, b.revision); });
   std::sort(m.memory.begin(), m.memory.end(), [](const MemoryRange &a, const MemoryRange &b) { return std::tie(a.revision, a.space, a.offset, a.length, a.access) < std::tie(b.revision, b.space, b.offset, b.length, b.access); });
+  std::sort(m.geometry_scenes.begin(), m.geometry_scenes.end(), [](const GeometryScene &a, const GeometryScene &b) { return a.id < b.id; });   // canonical manifest form
+  for (GeometryScene &sc : m.geometry_scenes) std::sort(sc.components.begin(), sc.components.end());
   std::sort(m.hooks.begin(), m.hooks.end(), [](const Hook &a, const Hook &b) { return a.id < b.id; });   // canonical manifest form: sorted by id
   for (std::size_t i = 1; i < m.hooks.size(); ++i)
     if (m.hooks[i - 1].id == m.hooks[i].id) fail("E_HOOK_OVERLAP", "the hook id \"" + m.hooks[i].id + "\" is declared twice");
@@ -356,6 +366,7 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
     if (declared_edits.count(p.path) != 0 && declared_edits[p.path] != set.edits.size()) fail("E_EDIT_COUNT", "the source \"" + p.path + "\" declares another edit count than it holds");
     p.edits = static_cast<unsigned>(set.edits.size());
   }
+  if (auto r = check_geometry(m)) fail(r->code, r->message);   // ADR 0302: the same declaration check the package reader runs
   if (auto r = check_memory(m)) fail(r->code, r->message);   // ADR 0300: the same declaration check the package reader runs
   if (auto r = check_hooks(m)) fail(r->code, r->message);   // ADR 0298: the same declaration check the package reader runs, so `mod check` fails before packing
   project.ok = true;
