@@ -25,9 +25,9 @@ target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
 # The launcher's non-UI core (layout, cache identity, `segarecomp build` orchestration, status reading) is a separate target so its
 # policy/cache-identity contract is unit-testable without a window.
-add_library(segarecomp_launcher_core STATIC launcher_core.cpp cartridge_recognition.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp patch_library.cpp storage.cpp launcher_settings.cpp sega_cd.cpp)
+add_library(segarecomp_launcher_core STATIC launcher_core.cpp cartridge_recognition.cpp older_build.cpp file_picker.cpp process_tree.cpp json_lite.cpp library_catalog.cpp patch_library.cpp luau_variant.cpp storage.cpp launcher_settings.cpp sega_cd.cpp)
 target_include_directories(segarecomp_launcher_core PUBLIC .)
-target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media)
+target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media segarecomp::luau_host)
 # Linux only: the glibc the generated programs link against (release default 2.35 = the bundled SDL3's baseline; a developer who built SDL3 on a
 # newer distribution overrides it so a locally staged package links).
 set(SEGARECOMP_ZIG_GLIBC "2.35" CACHE STRING "Linux glibc version the generated programs target")
@@ -160,6 +160,26 @@ if(BUILD_TESTING)
 endif()
 
 # SEG-069-T005: the playability predicate for builds of an earlier release (fail-closed, separate from the exact reuse identity).
+# SEG-137-T007 (ADR 0296): the launcher's executable cache and BuildJob with a Luau-only mod, against the real build driver (Linux; the driver script skips elsewhere).
+add_executable(launcher_mod_variant_test launcher_mod_variant_test.cpp)
+target_link_libraries(launcher_mod_variant_test PRIVATE segarecomp_launcher_core)
+target_compile_features(launcher_mod_variant_test PRIVATE cxx_std_20)
+segarecomp_enable_warnings(launcher_mod_variant_test)
+if(BUILD_TESTING)
+  find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+  get_filename_component(_lmv_sdl_dir "${SDL3_DIR}" ABSOLUTE)
+  if(_lmv_sdl_dir MATCHES "/share/sdl3$")
+    get_filename_component(_lmv_sdl_prefix "${_lmv_sdl_dir}/../.." ABSOLUTE)
+  else()
+    get_filename_component(_lmv_sdl_prefix "${_lmv_sdl_dir}/../../.." ABSOLUTE)
+  endif()
+  add_dependencies(launcher_mod_variant_test segarecomp)
+  add_test(NAME launcher_mod_variant_test COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/launcher_mod_variant_test.py $<TARGET_FILE:launcher_mod_variant_test> $<TARGET_FILE:segarecomp>
+           ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_lmv_sdl_prefix})
+  set_property(TEST launcher_mod_variant_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_mod_variant_test PROPERTY TIMEOUT 1500)
+endif()
+
 add_executable(older_build_test older_build_test.cpp)
 target_link_libraries(older_build_test PRIVATE segarecomp_launcher_core)
 target_compile_features(older_build_test PRIVATE cxx_std_20)

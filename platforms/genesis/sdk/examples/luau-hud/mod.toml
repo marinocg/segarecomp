@@ -1,0 +1,20 @@
+# Luau-only HUD example (SEG-137-T007, ADR 0295). Created from `segarecomp mod init --template luau`; the revision is the deterministic FIXTURE image described in README.md (not a game).
+[mod]
+id = "luau-hud"
+version = "0.1.0"
+name = "Luau HUD example"
+license = "CC0-1.0"
+
+[target]
+platform = "genesis"
+
+[[target.revision]]
+label = "fixture"
+sha256 = "414c6dd3d6335db563f44627453ca5f9d464722dfd2d67c128d47586cfbef2cf"
+
+[[source]]
+kind = "luau-source"
+path = "scripts/main.luau"
+
+[capabilities]
+required = ["host.log", "overlay.rgba"]

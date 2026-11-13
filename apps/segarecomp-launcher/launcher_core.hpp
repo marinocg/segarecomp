@@ -89,8 +89,17 @@ struct RomView {
   std::string patch_label;                     // "<name> <version>" (UI and logs only)
   std::string patch_widescreen, patch_side_style;   // the verified package's typed presentation defaults ("" = none); handed to the viewer, never provenance
   [[nodiscard]] bool patched() const { return !patch_identity.empty(); }
+  // SEG-137-T007 (ADR 0296): a single-mod Luau-only schema 3 package selected as this game's version (mutually exclusive with a schema 1/2 patch). `path` and `sha256` stay the ORIGINAL game; the
+  // build (`segarecomp build --luau-package`) derives the package's effective image itself and links the verified scripts into the program. Empty identity = no mod: every Vanilla and schema 1/2 key
+  // stays byte-for-byte what it was. Fill it with select_luau_mod; never by hand.
+  std::string luau_identity;                   // package identity (64 hex)
+  std::filesystem::path luau_package;          // the installed copy of the .segapatch
+  std::string luau_effective_sha256;           // digest of the image that is compiled and run
+  std::string luau_pin;                        // the pinned Luau compiler (it determines the bytecode, so it is part of the executable identity)
+  std::string luau_label;                      // "<name> <version>" (UI and logs only)
+  [[nodiscard]] bool luau_mod() const { return !luau_identity.empty(); }
   // The digest of the image that is actually compiled and run: the verified patched image for a Patched variant, else the original.
-  [[nodiscard]] const std::string &effective_sha256() const { return patched() ? patch_target_sha256 : sha256; }
+  [[nodiscard]] const std::string &effective_sha256() const { return patched() ? patch_target_sha256 : luau_mod() ? luau_effective_sha256 : sha256; }
   bool compat_known = false;          // ROM-hash-bound analysis metadata ships with this release
   std::string error;                  // non-empty: unreadable/too large
 };
@@ -219,6 +228,11 @@ void reset_policy_identity_memo_for_tests();
 // A finished entry is reusable only when it exists AND its recorded request/identity still equal the current request (a stale or foreign
 // entry that somehow shares a directory is rebuilt, never reused).
 [[nodiscard]] bool entry_ready_for(const std::filesystem::path &entry, const RomView &rom, const Layout &layout);
+
+// SEG-137-T007: selects the verified Luau-only package at `package` as the version of `rom` (a Genesis game whose original image is `rom.path`). Everything the product's build re-verifies is checked
+// here first so the user gets a plain-language refusal instead of a failed build: a valid schema 3 package, Luau-only, Genesis, only the capabilities the live path grants, no native ABI 2 provider,
+// and an original image the package declares. Returns "" on success (fields filled) or the refusal (`rom` untouched). A package never replaces a selected schema 1/2 patch: that is refused too.
+[[nodiscard]] std::string select_luau_mod(RomView &rom, const std::filesystem::path &package);
 // SEG-122: the package identity a finished build recorded in metadata.json ("" for a Vanilla build).
 [[nodiscard]] std::string read_variant_identity(const std::filesystem::path &entry);
 // ---- SEG-057-T002 (ADR 0119): the Optimized -> Compatibility restart contract (shared by the window and the headless `--run`) ----

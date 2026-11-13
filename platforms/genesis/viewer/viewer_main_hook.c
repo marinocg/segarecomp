@@ -22,6 +22,7 @@
 #include "viewer.h"
 #include "sv_host.h"
 #include "sv_perf.h"
+#include <SDL3/SDL.h>
 #include "viewer_sdl3.h"
 #ifdef SEGARECOMP_NATIVE_PROVIDER_CAPS
 #include "native_compat.h" /* SEG-124: the provider of a verified package is linked only into a program built from it */
@@ -380,6 +381,17 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
                                                 dispatch_allowance == UINT32_MAX ? UINT64_MAX : dispatch_allowance);
   sv_perf_pace_settle(&g_perf, g_pacer.sleep_calls, g_pacer.unthrottled); /* the last boundaries' pacer verdicts */
   sv_perf_finish(&g_perf); /* before the window closes: the session ends when the guest does, not when a stop screen is dismissed */
+#ifdef SEGARECOMP_VIEWER_FINAL_FRAME_SEAM
+  {   /* Automation seam (tests, SEG-137-T007), compiled in only by `segarecomp build --test-frame-seam 1`: SEGARECOMP_VIEWER_FINAL_FRAME=<file.bmp> saves the last presented frame exactly as composed for the window (picture, HUD overlay, no menus). */
+    const char *dump = getenv("SEGARECOMP_VIEWER_FINAL_FRAME");
+    if (dump != NULL && *dump != '\0') {
+      SDL_Surface *shot = sv_host_capture_output(genesis_sdl3_viewer_sv_host(sdl));
+      if (shot != NULL && SDL_SaveBMP(shot, dump)) fprintf(stderr, "VIEWER_FINAL_FRAME {\"width\":%d,\"height\":%d}\n", shot->w, shot->h);
+      else fprintf(stderr, "VIEWER_FINAL_FRAME {\"error\":true}\n");
+      if (shot != NULL) SDL_DestroySurface(shot);
+    }
+  }
+#endif
   runtime->live_frame_observer = NULL;
   genesis_runtime_write_notes(runtime, g_raster_capture.render_rejections, g_raster_capture.vram_journal_overflows, stderr);
   runtime->live_raster = NULL;

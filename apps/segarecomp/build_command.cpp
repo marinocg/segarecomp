@@ -1,4 +1,7 @@
 #include "build_command.hpp"
+#include "luau_build.hpp"
+#include "segarecomp/luau_api.hpp"
+#include "segarecomp/mod.hpp"
 #include "build_profile.hpp"
 #include "process_run.hpp"
 
@@ -131,6 +134,15 @@ struct Options {
   // provider source into a private area of this build and compiles it against the public SDK only. Empty = Vanilla / BPS-only build: no provider code at all.
   fs::path patch_package;
   std::string patch_identity;
+  // SEG-137-T007 (ADR 0296): a verified single-mod schema 3 LUAU-ONLY package linked into the played program. `--rom` stays the ORIGINAL image: the build derives the package's effective image itself
+  // (typed edits / injected guest code / BPS), compiles THAT, compiles the scripts with the pinned trusted compiler in the bounded child and links the verified result into the program as a constant.
+  fs::path luau_package;
+  std::string luau_identity;
+  bool frame_seam = false;   // `--test-frame-seam`: compiles the final-frame automation seam into the viewer program (tests only; never set by the launcher)
+  // resolved by the verification step
+  bool luau = false;
+  std::string luau_original_sha256, luau_effective_sha256, luau_bytecode_digest, luau_mod_id, luau_capabilities;
+  fs::path luau_artifact_source;     // <output>/luau/luau_artifact.c
   // SEG-125 (ADR 0273): write a versioned build performance report here (empty = profiling off: no collector is enabled and nothing changes).
   fs::path performance_report;
   // resolved by the verification step
@@ -229,6 +241,9 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--sound-driver" && (value == "auto" || value == "original" || value == "gems")) options.sound_driver = value;
     else if (key == "--patch-package") { if (!options.patch_package.empty()) return std::nullopt; options.patch_package = fs::path(value); }
     else if (key == "--patch-identity") { if (!options.patch_identity.empty()) return std::nullopt; options.patch_identity = value; }
+    else if (key == "--test-frame-seam" && value == "1") options.frame_seam = true;
+    else if (key == "--luau-package") { if (!options.luau_package.empty()) return std::nullopt; options.luau_package = fs::path(value); }
+    else if (key == "--luau-identity") { if (!options.luau_identity.empty()) return std::nullopt; options.luau_identity = value; }
     else if (key == "--performance-report") { if (!options.performance_report.empty() || value.empty()) return std::nullopt; options.performance_report = fs::path(value); }
     else if (key == "--aot-model" && !aot_model_given && (value == "v1" || value == "gen2")) { options.aot_model = value; aot_model_given = true; }
     else return std::nullopt;
@@ -244,6 +259,11 @@ std::optional<Options> parse_options(int argc, char **argv) {
   if (!options.patch_package.empty()) {
     const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
     if (!hex64(options.patch_identity) || options.platform == "master-system" || !options.sdl3_include.has_value()) return std::nullopt;   // a presentation provider needs the Genesis viewer build
+  }
+  if (options.luau_package.empty() != options.luau_identity.empty()) return std::nullopt;   // a package reference and its identity travel together
+  if (!options.luau_package.empty()) {
+    const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
+    if (!hex64(options.luau_identity) || !options.patch_package.empty() || options.platform == "master-system" || !options.sdl3_include.has_value()) return std::nullopt;   // one mod, Genesis viewer build
   }
   return options;
 }
@@ -457,9 +477,17 @@ struct GenesisSoundBuild {
     return failed;
   }
 
+  bool cxx_link = false;   // SEG-137-T007: a program with the Luau VM links with the C++ driver (the platform's C++ runtime; exceptions)
   bool link(const fs::path &executable, const std::vector<fs::path> &objects, bool with_sdl) {
     std::vector<std::string> command{options.cc};
     command.insert(command.end(), options.cc_args.begin(), options.cc_args.end());
+    if (cxx_link) {
+      command = {options.cxx};
+      for (std::size_t i = 0; i < options.cxx_args.size(); ++i) {
+        if (options.cxx_args[i] == "-x" && i + 1 < options.cxx_args.size() && options.cxx_args[i + 1] == "c++") { ++i; command = {options.cc}; command.insert(command.end(), options.cc_args.begin(), options.cc_args.end()); command.push_back("-lstdc++"); continue; }
+        if (command.front() == options.cxx) command.push_back(options.cxx_args[i]);
+      }
+    }
     command.insert(command.end(), {"-o", executable.string()});
     for (const auto &object : objects) command.push_back(object.string());
     if (with_sdl) { command.push_back("-L" + options.sdl3_lib->string()); command.push_back("-lSDL3"); command.push_back("-lm"); }
@@ -1015,6 +1043,30 @@ std::string audio_implementation_json(const Options &options, const GenesisSound
 // `units` is the generate stage's (alias-less) M68K emission; `m68k_images` the sanitized provenance JSON of its executable images.
 //
 // SEG-028-T005 (ADR 0077, ADR 0049, ADR 0076): after the Z80 fixed point converges, the build-time ADR 0049 alias preparation runs.
+// SEG-137-T007: `luau_artifact.c`, the verified compiled scripts as constants of the played program, bound to the package identity, the bytecode digest and the capabilities the live path grants.
+bool write_luau_artifact(Options &options, const std::vector<std::uint8_t> &stored, const segarecomp::mod::Manifest &manifest, const std::vector<std::string> &granted) {
+  std::error_code ec;
+  const fs::path dir = options.output / "luau";
+  fs::create_directories(dir, ec);
+  if (ec) return false;
+  std::string caps;
+  for (const std::string &c : granted) caps += (caps.empty() ? "" : ",") + c;
+  std::ostringstream c;
+  c << "/* GENERATED by `segarecomp build --luau-package` (SEG-137-T007) from a verified package; do not edit. */\n#include <stddef.h>\n\n";
+  c << "const unsigned long segarecomp_luau_artifact_size = " << stored.size() << "UL;\nconst unsigned char segarecomp_luau_artifact[] = {";
+  for (std::size_t i = 0; i < stored.size(); ++i) c << (i % 24 == 0 ? "\n  " : "") << static_cast<unsigned>(stored[i]) << ",";
+  c << "0};\n";
+  c << "const char segarecomp_luau_identity[] = \"" << options.luau_identity << "\";\nconst char segarecomp_luau_bytecode_digest[] = \"" << options.luau_bytecode_digest << "\";\n";
+  c << "const char segarecomp_luau_capabilities[] = \"" << caps << "\";\nconst char segarecomp_luau_mod_id[] = \"" << manifest.id << "\";\n";
+  c << "const unsigned long segarecomp_luau_memory_bytes = " << manifest.luau_memory_bytes << "UL, segarecomp_luau_budget_units = " << manifest.luau_budget_units << "UL;\n";
+  options.luau_artifact_source = dir / "luau_artifact.c";
+  std::ofstream out(options.luau_artifact_source, std::ios::binary | std::ios::trunc);
+  out << c.str();
+  out.flush();
+  options.luau_capabilities = caps;
+  return static_cast<bool>(out);
+}
+
 // When the confirmed run ended with an M68K guest stop that a verbatim cartridge copy in work RAM explains, the M68K C is re-emitted
 // with the merged immutable-copy aliases, only the changed M68K units are recompiled, the pass program is relinked and the fixed
 // point runs again (the Z80 registry is kept: its images are activation-keyed facts already proven by an observed run, and the new
@@ -1079,6 +1131,10 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     stable.push_back(job);
     set.push_back(job.object);
   };
+  const auto seam_flags = [&](std::vector<std::string> flags) {
+    if (options.frame_seam) flags.push_back("-DSEGARECOMP_VIEWER_FINAL_FRAME_SEAM=1");
+    return flags;
+  };
   for (const char *name : {"runtime.c", "z80_machine.c", "genesis_audio.c", "genesis_mixer.c", "genesis_audio_present.c", "genesis_sound.c"})
     add(common, build.runtime / name, std::string("rt-") + std::string(name).substr(0, std::string(name).size() - 2),
         native_gems && std::string_view(name) == "genesis_sound.c" ? std::vector<std::string>{"-DSEGARECOMP_NATIVE_SOUND_GEMS=1"} : std::vector<std::string>{});
@@ -1099,13 +1155,35 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     // SEG-058 (ADR 0120): the shared SDL3 viewer foundation (settings, layout/CRT math, menu model, host, pause pages), strict C11 like the rest.
     for (const char *name : kViewerFoundationSources)
       add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name);
-    if (!options.native_source.empty()) {
+    if (options.luau) {
+      // SEG-137-T007: the Luau VM, its host API, the stored-artifact reader and the overlay provider, compiled as C++20 with exceptions (the VM raises script errors with them) and linked with the platform's
+      // C++ runtime. The viewer's existing provider seam (ADR 0267) calls the provider; only the HUD overlay component is requested.
+      const fs::path luau = build.root / "third_party" / "luau", host = build.root / "libs" / "luau_host" / "src";
+      std::vector<std::string> flags{"-std=c++20", "-fexceptions", "-frtti", "-DSEGARECOMP_LUAU_CODEGEN=0", "-DSEGARECOMP_LUAU_PIN=\"" + std::string(segarecomp::luau::compiler_pin()) + "\"",
+                                     "-I", (luau / "Common" / "include").string(), "-I", (luau / "Ast" / "include").string(), "-I", (luau / "Bytecode" / "include").string(), "-I", (luau / "Compiler" / "include").string(),
+                                     "-I", (luau / "VM" / "include").string(), "-I", (build.root / "libs" / "luau_host" / "include").string(), "-I", host.string(), "-I", (build.root / "libs" / "media" / "include").string(),
+                                     "-I", (build.root / "libs" / "core" / "include").string(), "-I", (build.root / "libs" / "viewer" / "include").string(), "-I", (options.runtime_dir / "sdk").string()};
+      std::vector<std::string> vm_flags = flags;
+      vm_flags.insert(vm_flags.end(), {"-w", "-I", (luau / "VM" / "src").string(), "-I", (luau / "Bytecode" / "src").string()});
+      std::vector<fs::path> vm_sources;
+      for (const auto &entry : fs::directory_iterator(luau / "VM" / "src", ec)) {
+        const std::string name = entry.path().filename().string();
+        if (entry.path().extension() == ".cpp" && name != "linit.cpp" && name != "loslib.cpp" && name != "ldblib.cpp" && name != "lcorolib.cpp") vm_sources.push_back(entry.path());   // the libraries the policy does not allow are not compiled
+      }
+      std::sort(vm_sources.begin(), vm_sources.end());
+      for (const fs::path &source : vm_sources) add(final_only, source, "luau-vm-" + source.stem().string(), vm_flags, true);
+      for (const char *name : {"luau_vm.cpp", "luau_api.cpp", "luau_stored.cpp"}) add(final_only, host / name, std::string("luau-host-") + std::string(name).substr(0, std::string(name).size() - 4), flags, true);
+      add(final_only, build.root / "libs" / "media" / "src" / "sha256.cpp", "luau-sha256", flags, true);
+      add(final_only, build.viewer / "luau_provider.cpp", "luau-provider", flags, true);
+      add(final_only, options.luau_artifact_source, "luau-artifact");
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=8U", "-I", (options.runtime_dir / "sdk").string()}));
+    } else if (!options.native_source.empty()) {
       // SEG-124: the provider of the verified package, compiled from the private copy extracted for THIS build and linked into this program only.
       add(final_only, options.native_source, "native-provider");
       stable.back().isolated = true;
-      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::to_string(options.native_caps) + "U"});
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=" + std::to_string(options.native_caps) + "U"}));
     } else {
-      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND"});
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND"}));
     }
   } else {
     add(final_only, build.runtime / "genesis_sound_hook.c", "hook-sound");
@@ -1336,6 +1414,8 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   objects.insert(objects.end(), common.begin(), common.end());
   objects.insert(objects.end(), final_only.begin(), final_only.end());
   objects.insert(objects.end(), build.z80_current.begin(), build.z80_current.end());
+  if (options.luau)   // the final program links the platform's C++ runtime (the Luau VM needs it), which defines operator new itself: the shim of the C-driver pass links must not be there too
+    objects.erase(std::remove(objects.begin(), objects.end(), build.object_dir / "ym-shim.o"), objects.end());
   stage("compile", "done");
   stage("link", "begin");
 #if defined(_WIN32)
@@ -1343,6 +1423,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
 #else
   executable = options.output / "game";
 #endif
+  build.cxx_link = options.luau;
   if (!build.link(executable, objects, build.play)) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
   const std::uint64_t exe_bytes = fs::file_size(executable, ec);
   if (g_profile.enabled()) {
@@ -1460,6 +1541,9 @@ int run_build(Options options) {
   if (ec) { std::cerr << "segarecomp: cannot create output directory\n"; return 2; }
   Log log;
   log.file.open(options.output / "build.log", std::ios::binary | std::ios::trunc);
+  // The effective image is derivative game data: removed when the build ends (and a stale one of a killed attempt is removed at the start). Only the file this build writes is removed, then the folder if empty.
+  struct InputCleanup { fs::path file; ~InputCleanup() { if (file.empty()) return; std::error_code e; fs::remove(file, e); fs::remove(file.parent_path(), e); } } input_cleanup{options.luau_package.empty() ? fs::path() : options.output / "input" / "effective.rom"};
+  if (!input_cleanup.file.empty()) { std::error_code stale; fs::remove(input_cleanup.file, stale); }
   if (options.admission_plan) {
     std::ifstream in(*options.admission_plan, std::ios::binary);
     std::string text;
@@ -1483,6 +1567,38 @@ int run_build(Options options) {
   try {
     // ---- analyze ----
     stage("analyze", "begin");
+    if (!options.luau_package.empty()) {   // SEG-137-T007: verify the package, derive its effective image, compile its scripts; `--rom` is replaced by the effective image for the rest of the build
+      const auto original = segarecomp::read_binary(options.rom);
+      const std::string original_sha = segarecomp::sha256_hex(original);
+      const auto package = segarecomp::mod::read_package_file(options.luau_package);
+      if (!package.ok) return fail(options, log, original_sha, "analyze", 1, "The Luau package is not valid: " + package.rejection.message, "LUAU_PACKAGE_INVALID");
+      if (package.identity != options.luau_identity) return fail(options, log, original_sha, "analyze", 1, "The Luau package changed after it was selected.", "LUAU_IDENTITY_CHANGED");
+      if (const auto refusal = segarecomp::luau::live_support(package)) return fail(options, log, original_sha, "analyze", 1, refusal->message, refusal->code);
+      const auto effective = segarecomp::mod::effective_image(package, original);
+      if (!effective.ok) return fail(options, log, original_sha, "analyze", 1, "The image is not the one the Luau package declares: " + effective.rejection.message, "LUAU_IMAGE_MISMATCH");
+      if (const auto issues = segarecomp::luau::analyze_mod(package); !issues.empty())
+        return fail(options, log, original_sha, "analyze", 1, "The Luau scripts use the API wrongly: " + issues.front().where.text(), issues.front().cls);
+      std::ifstream package_in(options.luau_package, std::ios::binary);
+      const std::vector<std::uint8_t> package_bytes((std::istreambuf_iterator<char>(package_in)), std::istreambuf_iterator<char>());
+      const segarecomp_cli::LuauBuild compiled = segarecomp_cli::build_luau(package, package_bytes);
+      if (!compiled.ok) return fail(options, log, original_sha, "analyze", 1, "The Luau scripts do not compile: " + compiled.rejection.message, compiled.rejection.code);
+      options.luau_bytecode_digest = compiled.compiled.digest();
+      options.luau_original_sha256 = original_sha;
+      options.luau_effective_sha256 = effective.effective_sha256;
+      options.luau_mod_id = package.manifest.id;
+      if (!write_luau_artifact(options, compiled.compiled.serialize(), package.manifest, segarecomp::luau::live_host_config(package.manifest).capabilities))
+        return fail(options, log, original_sha, "analyze", 1, "The Luau artifact could not be written.", "LUAU_ARTIFACT_WRITE");
+      const fs::path input = options.output / "input";
+      std::error_code input_ec;
+      fs::create_directories(input, input_ec);
+      std::ofstream image_out(input / "effective.rom", std::ios::binary | std::ios::trunc);
+      image_out.write(reinterpret_cast<const char *>(effective.image.data()), static_cast<std::streamsize>(effective.image.size()));
+      image_out.close();
+      if (input_ec || !image_out) return fail(options, log, original_sha, "analyze", 1, "The effective image could not be written.", "LUAU_ARTIFACT_WRITE");
+      options.rom = input / "effective.rom";
+      options.luau = true;
+      log.line("luau mod: package=" + options.luau_identity + " original_sha256=" + original_sha + " effective_sha256=" + effective.effective_sha256 + " bytecode_digest=" + options.luau_bytecode_digest + " capabilities=" + options.luau_capabilities);
+    }
     const auto bytes = segarecomp::read_binary(options.rom);
     sha = segarecomp::sha256_hex(bytes);
     log.line("rom_sha256=" + sha);
@@ -1661,6 +1777,9 @@ int run_build(Options options) {
       if (!options.native_source.empty())
         status_extra += ",\"native\":{\"package_identity\":\"" + options.patch_identity + "\",\"provider_sha256\":\"" + options.native_source_sha256 + "\",\"abi\":" + std::to_string(segarecomp::patch::kNativeAbiVersion) +
                         ",\"capabilities\":" + std::to_string(options.native_caps) + "}";
+      if (options.luau)
+        status_extra += ",\"luau\":{\"package_identity\":\"" + options.luau_identity + "\",\"original_sha256\":\"" + options.luau_original_sha256 + "\",\"effective_sha256\":\"" + options.luau_effective_sha256 +
+                        "\",\"bytecode_digest\":\"" + options.luau_bytecode_digest + "\",\"compiler\":\"luau-" + std::string(segarecomp::luau::compiler_pin()) + "\",\"capabilities\":\"" + options.luau_capabilities + "\"}";
       if (!options.keep_work) fs::remove_all(options.output / "obj", ec);
       stage("link", "done");
       write_status(options, sha, "ok", "done", "", sms_provenance + status_extra);   // ADR 0268: a Genesis board declaration (lock_on) is recorded too

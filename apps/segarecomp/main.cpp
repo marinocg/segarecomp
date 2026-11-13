@@ -12,6 +12,7 @@
 #include "segarecomp/sha256.hpp"
 #include "segarecomp/machine/genesis/reachability_challenger.hpp"
 #include "build_command.hpp"
+#include "luau_build.hpp"
 #include "sega_cd_aot.hpp"
 #include "sega_cd_command.hpp"
 #include "segarecomp/machine/master_system/ml_region_z80_producer.hpp"
@@ -1347,7 +1348,10 @@ int segarecomp_mod_command(int argc, char **argv);
 int main(int argc, char **argv) {
   if (argc >= 2 && std::string_view(argv[1]) == "patch") return segarecomp_patch_command(argc, argv);
   if (argc >= 2 && std::string_view(argv[1]) == "mod") return segarecomp_mod_command(argc, argv);
-  if (argc >= 2 && std::string_view(argv[1]) == "build") return segarecomp_build_command(argc, argv);
+  if (argc >= 2 && std::string_view(argv[1]) == "build") {
+    segarecomp_cli::set_self_path(argv[0]);   // the Luau compile helper of `build --luau-package` sits beside this executable
+    return segarecomp_build_command(argc, argv);
+  }
   if (argc >= 2 && std::string_view(argv[1]) == "sega-cd") return segarecomp_sega_cd_command(argc, argv);
   return run_cli(argc, argv);
 }

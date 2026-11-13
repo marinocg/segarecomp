@@ -7,10 +7,18 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Luau for mods: read-only API, static check, error diagnostics, a Luau-only HUD example (ADR 0295)
+
+* A deliberately small, **read-only** Luau API: `sega.log`, `sega.frame.value` (values the host publishes for a frame, copied in), `sega.overlay.rect/text` (requests drawn into the fixed 128x256 HUD overlay) and the optional `reset()` / `render(frame)` callbacks. Every binding is gated by the capability the package declares (`host.log`, `frame.work_ram`, `overlay.rgba`); arguments are validated, geometry is clamped, rates are limited, and a script that misbehaves **faults and disables only itself** (stable `E_MOD_FAULT cause=...` diagnostic, nothing it staged is kept). There is no memory access, input, clock, file or network.
+* `segarecomp mod check/pack/build` reject an undeclared capability, an unknown API name and visible argument errors as `<file>:<line>: <message>`. `segarecomp mod api` prints the machine-readable API list and the generated `.d.luau`; `mod init --template luau` adds the declarations and VS Code (luau-lsp) settings.
+* A Luau-only package now runs **in the played game** (ADR 0296): `segarecomp build --luau-package` (and the launcher's executable cache, which keys the program on the package identity, the effective image and the compiler pin) links the verified compiled scripts into the generated-native Genesis program, which calls `render(frame)` every presented frame and draws the requested HUD over the picture. The live path grants `host.log` and `overlay.rgba`; anything else is refused at build. A script fault disables only the mod. The committed example `platforms/genesis/sdk/examples/luau-hud` (with a tiny runnable fixture ROM written for the repository) is built, installed (consent sheet, no native approval) and run end to end by CI on Linux, with the overlay checked in a genuinely rendered frame.
+* `segarecomp mod session` remains as an isolated **diagnostic** (synthetic picture; not the Genesis machine).
+* A bounded, canonical state seam (`save`/`load`) and an adversarial test corpus (memory/CPU bombs, metatable and global escapes, coroutine and loader abuse, malformed state, determinism, isolation). Restricted and limited, **not** "safe".
+
 ### Luau for mods: pinned build, restricted per-mod VM, trusted bytecode compile (ADR 0294)
 
 * Luau 0.746 is vendored unmodified (VM, compiler, AST; **no native code generation / JIT** is in the repository or the binary) with its license texts shipped in the package. Mod scripts are still **source only**: `segarecomp mod build` and `mod variant` now compile them with the pinned compiler, report a syntax error as `<file>:<line>: <message>` (`E_LUAU_SYNTAX`) and print the bytecode digest, which is part of the variant identity. A package that carries bytecode is rejected, and compiled output that is not what the build produced is never loaded (it is rebuilt from source).
-* A restricted VM per mod (library whitelist, read-only globals, deterministic `math.random`, a hard memory quota, a deterministic instruction budget, a call-depth limit, a hang watchdog, one disabled mod never affecting another) exists in the host library. Scripts do not run in games yet: the `sega.*` API and callbacks come later. It is "restricted", not "safe".
+* A restricted VM per mod (library whitelist, read-only globals, deterministic `math.random`, a hard memory quota, a deterministic instruction budget, a call-depth limit, a hang watchdog, one disabled mod never affecting another) exists in the host library. It is "restricted", not "safe".
 
 ### Guest code injection, header repair and BPS construction for mods (ADR 0292, ADR 0293)
 

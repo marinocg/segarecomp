@@ -8,7 +8,7 @@
 //  * The RESTRICTED VM (luau_vm.cpp). One VM per mod: whitelisted libraries, read-only globals, deterministic `math.random`, a hard memory quota, a deterministic instruction budget enforced from the
 //    interrupt callback, a call-depth limit, a wall-time watchdog that is only a hang backstop (a watchdog fault marks the session non-deterministic), fault isolation and leak-checked teardown.
 //
-// No host API (`sega.*`) exists yet (SEG-137-T004). The VM is "restricted", never claimed "safe" (policy section 7).
+// The host API (`sega.*`, luau_api.hpp, SEG-137-T004) is installed only when a HostConfig is given; each binding is gated by its capability. The VM is "restricted", never claimed "safe" (policy section 7).
 
 #include "segarecomp/mod.hpp"
 
@@ -82,6 +82,10 @@ struct SourceCompile {
 // source digest, every bytecode digest recomputed, and the overall digest equal to `expected_digest` (the value recorded at build time, held outside the artifact). Anything else is E_LUAU_COMPILED_MISMATCH.
 [[nodiscard]] CompileResult verify_compiled(const mod::Package &package, std::span<const std::uint8_t> stored, std::string_view expected_digest);
 
+// The runtime-side counterpart (the generated-native game program links this, not the compiler): accepts stored compiled bytes ONLY if they are well formed, name `expected_identity` and hash to
+// `expected_digest`, the value the build recorded after it compiled and `verify_compiled` accepted them. Anything else is E_LUAU_COMPILED_MISMATCH.
+[[nodiscard]] CompileResult load_stored(std::string_view expected_identity, std::span<const std::uint8_t> stored, std::string_view expected_digest);
+
 // The digest line of a stored compiled output ("" when the header is malformed). Used by the parent of the compile child, which then calls verify_compiled with it: that re-derives every bytecode and
 // total digest, so a child that returned inconsistent bytes is rejected.
 [[nodiscard]] std::string stored_digest(std::span<const std::uint8_t> stored);
@@ -100,7 +104,8 @@ inline constexpr unsigned kCallDepthPolicyMax = 200;
 // The policy limits lowered by a package's `limits` request (never raised: the reader already rejected a request above policy).
 [[nodiscard]] Limits limits_for(const mod::Manifest &manifest);
 
-enum class Fault { none, error, budget, memory, stack, watchdog };
+// `state` is a state value that cannot be saved or restored (phases section 6.2). `capability`, `range` and `phase` are the binding faults of policy section 5 (an ungranted binding, a bad argument, a binding called outside its phase); like every fault they are sticky.
+enum class Fault { none, error, budget, memory, stack, watchdog, capability, range, phase, state };
 [[nodiscard]] const char *fault_name(Fault fault);
 
 struct CallResult {
@@ -110,12 +115,28 @@ struct CallResult {
   std::uint64_t units = 0;      // budget units consumed by this call (deterministic)
 };
 
+// The serialized mod state (phases section 6.2, policy section 4): the one value a script's `save()` returns, canonical bytes, at most kStateBytesMax, depth at most kStateDepthMax, numbers/strings/
+// booleans and tables of those keyed by numbers or strings only. No function, userdata, buffer, thread, NaN, infinity or cycle can be represented.
+inline constexpr std::size_t kStateBytesMax = 64U << 10U;
+inline constexpr unsigned kStateDepthMax = 8;
+struct StateResult {
+  bool ok = false;
+  Fault fault = Fault::none;
+  std::string message;
+  std::vector<std::uint8_t> blob;   // empty = the mod has no state
+};
+
 struct VmImpl;
+struct HostConfig;
+struct FrameInput;
+struct Output;
 
 class Vm {
  public:
   // `package_identity` is the 64 hex digit identity (seeds math.random). Null when the VM cannot be created.
   [[nodiscard]] static std::unique_ptr<Vm> create(std::string_view package_identity, const Limits &limits);
+  // The same with the `sega` host API installed for the capabilities in `host`.
+  [[nodiscard]] static std::unique_ptr<Vm> create(std::string_view package_identity, const Limits &limits, const HostConfig &host);
   Vm(const Vm &) = delete;
   Vm &operator=(const Vm &) = delete;
   ~Vm();
@@ -124,6 +145,15 @@ class Vm {
   CallResult load(const CompiledMod &compiled);
   // Calls the global function `name` (no arguments, results dropped) as callback `callback_index` of `frame`. The deterministic budget restarts per call; the frame budget restarts when `frame` changes.
   CallResult call(std::string_view name, std::uint64_t frame, std::uint32_t callback_index);
+
+  // Runs the lifecycle callback `name` ("reset" or "render") of the host API: copy-in `input` (render: the frame number is the first argument and the frame values are readable), copy-out into `out`.
+  // A callback the script does not define is skipped (ok). On a fault `out` is left empty: the callback's staged output is discarded. Requires a VM created with a HostConfig.
+  CallResult run_callback(std::string_view name, const FrameInput &input, std::uint32_t callback_index, Output &out);
+
+  // The state seam. save_state calls the global `save()` (absent = empty state) and serializes its result canonically; load_state parses `blob` strictly and calls the global `load(value)` (a non-empty
+  // blob for a mod without `load` is refused). Any failure is a `state` fault: the mod is disabled and the caller refuses the whole restore (phases section 6.2).
+  StateResult save_state();
+  CallResult load_state(std::span<const std::uint8_t> blob);
 
   // A fault disables the mod for the rest of the VM's life (no pcall can clear it); every later load/call fails with the original fault.
   [[nodiscard]] bool disabled() const;
@@ -137,6 +167,7 @@ class Vm {
   std::uint64_t close();
 
  private:
+  static std::unique_ptr<Vm> create_vm(std::string_view package_identity, const Limits &limits, const HostConfig *host);
   explicit Vm(std::unique_ptr<VmImpl> impl);
   std::unique_ptr<VmImpl> impl_;
 };
