@@ -231,15 +231,13 @@ std::optional<Refusal> run_program(const fs::path &out, const RunSpec &spec, con
   const fs::path exe = out / "game";
 #endif
   Environment env{{"SEGARECOMP_CAPTURE_DIR", frames_dir.string()}, {"SEGARECOMP_CAPTURE_FIRST", std::to_string(spec.first)}, {"SEGARECOMP_CAPTURE_COUNT", std::to_string(spec.frames)},
-                  {"SEGARECOMP_CAPTURE_SLICE", std::to_string(kSliceDispatches)}};
-  if (!spec.input.empty()) env.emplace_back("SEGARECOMP_PAD_SCRIPT", spec.input);
+                  {"SEGARECOMP_CAPTURE_SLICE", std::to_string(kSliceDispatches)}, {"SEGARECOMP_CAPTURE_STRIDE", "1"}, {"SEGARECOMP_PAD_SCRIPT", spec.input},
+                  {"SEGARECOMP_MOD_LOAD", ""}, {"SEGARECOMP_MOD_SAVE", ""}, {"SEGARECOMP_MOD_CHECKPOINT", spec.checkpoint != 0 ? std::to_string(spec.checkpoint) : std::string()}, {"SEGARECOMP_SOUND_SUMMARY", "1"}};   // every observation variable is set: the caller's environment never reaches the guest
   if (!spec.regions.empty()) {
     std::string ram;
     for (const Region &r : spec.regions) ram += (ram.empty() ? "" : ",") + std::to_string(r.offset) + ":" + std::to_string(r.length);
     env.emplace_back("SEGARECOMP_CAPTURE_RAM", ram);
   }
-  if (spec.checkpoint != 0) env.emplace_back("SEGARECOMP_MOD_CHECKPOINT", std::to_string(spec.checkpoint));
-  if (spec.want_pcm) env.emplace_back("SEGARECOMP_SOUND_SUMMARY", "1");
   const fs::path log = out / "run.log";
   const int rc = run_process({exe.string(), "--instruction-budget", std::to_string(spec.budget)}, log, env, spec.timeout);
   if (rc == kProcessTimedOut) return Refusal{"E_RUN_TIMEOUT", "the program run exceeded its " + std::to_string(spec.timeout) + " second timeout"};
@@ -471,10 +469,10 @@ int run_diff(const RunOptions &o) {
   codes += "]";
   const bool state_differs = vanilla.final_state != modded.final_state;
   const bool pcm_differs = vanilla.pcm != modded.pcm;
-  std::cout << "{\"ok\":true,\"command\":\"diff-run\",\"identical\":" << (!d.any && !state_differs && !pcm_differs ? "true" : "false") << ",\"package_identity\":\"" << t.package.identity
+  std::cout << "{\"ok\":true,\"command\":\"diff-run\",\"identical\":" << (!d.any && !state_differs && !pcm_differs && !modded.mod.faulted ? "true" : "false") << ",\"package_identity\":\"" << t.package.identity
             << "\",\"first_frame\":" << o.first << ",\"frames\":" << o.frames << ",\"bounds\":{\"budget\":" << o.budget << ",\"timeout_seconds\":" << o.timeout << ",\"build_timeout_seconds\":" << kBuildTimeoutSeconds
             << ",\"slice_dispatches\":" << kSliceDispatches << "},\"input\":\"" << esc(o.input) << "\",\"aggregate\":" << (o.aggregate ? "true" : "false") << ",\"vanilla\":" << observed_json(vanilla, o.aggregate)
-            << ",\"modded\":" << observed_json(modded, o.aggregate) << ",\"diverged_frames\":" << d.diverged_frames << ",\"final_state_differs\":" << (state_differs ? "true" : "false")
+            << ",\"modded\":" << observed_json(modded, o.aggregate) << ",\"diverged_frames\":" << d.diverged_frames << ",\"mod_faulted\":" << (modded.mod.faulted ? "true" : "false") << ",\"final_state_differs\":" << (state_differs ? "true" : "false")
             << ",\"pcm_differs\":" << (pcm_differs ? "true" : "false") << ",\"first_divergence\":";
   if (d.any) std::cout << "{\"frame\":" << d.frame << "," << d.detail << "}";
   else std::cout << "null";

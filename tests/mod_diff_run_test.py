@@ -109,6 +109,16 @@ cli.check(agg["frame"] == 11 and agg["ram"][0]["changed_byte_count"] == 1 and "c
 rc, doc, p = cli.run("mod", "diff-run", gp, "--rom", ROM, "--cc", CC, "--sdk-dir", SDK, "--frames", "30", "--budget", "1000", "--timeout", "60")
 cli.check(rc == 1 and doc and doc["class"] == "E_RUN_INCOMPLETE" and "vanilla" in doc["error"], f"an exhausted instruction budget is refused: {doc}")
 
+# the caller's environment never reaches the guest, and a faulted mod is never reported as identical
+os.environ.update(SEGARECOMP_CAPTURE_STRIDE="2", SEGARECOMP_MOD_LOAD="/nonexistent", SEGARECOMP_PAD_SCRIPT="1:1:0xff")
+rc, d5 = diff(gp, *BOUNDS, "--input", INPUT, *RAM)
+for k in ("SEGARECOMP_CAPTURE_STRIDE", "SEGARECOMP_MOD_LOAD", "SEGARECOMP_PAD_SCRIPT"):
+    del os.environ[k]
+cli.check(d5 == d1, "ambient SEGARECOMP_* variables do not change the report")
+rogue = project("rogue", script='function post_input(frame: number)\n  sega.mem.write("m68k.work_ram", 0x20, 2, 99)\nend\nfunction save() return {} end\nfunction load(s) end\n')
+rc, rg = diff(rogue, *BOUNDS, "--input", INPUT, *RAM)
+cli.check(rg is not None and rg["mod_faulted"] is True and rg["identical"] is False and "cause=range" in rg["modded"]["mod"]["fault"], f"a faulted mod is not 'identical': {rg and (rg['identical'], rg['mod_faulted'])}")
+
 # ---------------------------------------------------------------- identical variants
 quiet = project("quiet", script='function reset() sega.log("quiet") end\n', caps=["host.log"])
 rc, q = diff(quiet, *BOUNDS, "--input", INPUT, *RAM)
