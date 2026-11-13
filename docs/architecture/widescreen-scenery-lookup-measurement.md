@@ -1,7 +1,7 @@
 # Widescreen scenery lookup: pre-registered measurement (SEG-139-T005)
 
-Status: **criterion pre-registered** (this section was committed before any measurement of the widescreen producer was taken; the results
-section is added by a later commit, so `git log -p` shows the order).
+Status: **measured; no production change**. The success criterion (thresholds) was committed in `ceed3fa`, before any measurement of the widescreen
+producer; the metric correction and the results were committed together afterwards (`ffd6335`), so git shows the thresholds' order but the correction's timing is self-reported.
 
 ## Question
 
@@ -42,7 +42,7 @@ name the measured dominant cost without implementing it in this task.
 If an optimization is implemented, success additionally requires: producer cost at 32:9 reduced by **at least 25%** (median of 5), golden hashes of the
 producer tests (`genesis_extension_test`, which compares every pixel to an independent reference) unchanged, and no 16:9 regression greater than 3%.
 
-## Correction to the metric (recorded before any threshold was evaluated)
+## Correction to the metric (self-reported: made after the first run, before any threshold was evaluated)
 
 The first run showed the `vdp_compose` span does not contain the extension producer: it times only the native raster producer
 (`perf_raster_producer`, `platforms/genesis/viewer/viewer_main_hook.c`), while the extension runs in `genesis_run_frame_extension` inside the guest slice. The
