@@ -96,7 +96,7 @@ M68kHookResolution classify_m68k_function_hooks(const std::vector<M68kHookCodeIn
   for (std::size_t i = 0; i < sites.size(); ++i) {
     const M68kHookSite &s = sites[i];
     if (!m68k_hook_id_ok(s.id)) return reject("E_HOOK_ID", i, "a hook id is a token of 1 to 64 characters");
-    if (s.cpu != "m68k") return reject("E_HOOK_CPU_UNSUPPORTED", i, "function hooks exist only for the Genesis M68K (" + s.cpu + " has no succeeded feasibility spike)");
+    if (s.cpu != "m68k") return reject("E_HOOK_CPU_UNSUPPORTED", i, "function hooks exist only for the M68K (" + s.cpu + " has no succeeded feasibility spike)");
     for (std::size_t j = 0; j < i; ++j)
       if (sites[j].entry == s.entry) return reject("E_HOOK_OVERLAP", i, "two hooks claim the same site");
     if ((s.reads & ~kM68kHookReadableMask) != 0U) return reject("E_HOOK_REPLACE_CONTRACT", i, "a hook reads a register-view slot that does not exist");

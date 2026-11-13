@@ -33,7 +33,7 @@ inline constexpr std::uint32_t kM68kHookMaxReplaceCycles = 65535;
 
 struct M68kHookSite {
   std::string id;                  // stable mod-chosen identifier (token)
-  std::string cpu{"m68k"};         // the CPU the declaration targets; only "m68k" on Genesis is supported
+  std::string cpu{"m68k"};         // the CPU the declaration targets; only "m68k" is supported
   std::uint32_t entry{};           // resolved image address (from a verified symbol)
   M68kHookMode mode{M68kHookMode::before};
   std::uint32_t reads{};           // register-view bits the callback may read
