@@ -60,7 +60,11 @@ void setup(GenesisRuntime &r) {
 
 // Runs until `frames` virtual frame boundaries were crossed (checked after every slice of dispatches).
 void run_frames(GenesisRuntime &r, uint64_t frames) {
-  while (r.virtual_frame_count < frames) {
+  for (uint32_t slices = 0; r.virtual_frame_count < frames; ++slices) {
+    if (slices > 40U * static_cast<uint32_t>(frames) + 64U) {   // a frame is about 32 slices of 997 dispatches: anything else is a hang, reported instead of waiting for the harness timeout
+      check(false, "run_frames: the virtual frame counter does not advance (" + std::to_string(r.virtual_frame_count) + " of " + std::to_string(frames) + ")");
+      return;
+    }
     const GenesisControlTransfer t = genesis_runtime_run(&r, synthetic_dispatch, 997U);
     if (t.kind != GENESIS_RUNNER_RESOURCE_LIMIT) {
       check(false, "the synthetic program stopped unexpectedly");
@@ -710,19 +714,20 @@ void overhead_without_mods() {
 
 }  // namespace
 
+#define STEP(fn) do { std::printf("STEP " #fn "\n"); std::fflush(stdout); fn(); } while (0)
 int main() {
-  phase_order_and_zero_guest_time();
-  phase_registration();
-  render_phase_is_read_only();
-  vanilla_is_bit_identical();
-  input_interception();
-  wram_endianness_and_staging();
-  wram_matrix();
-  wram_budgets_and_atomicity();
-  replay_is_byte_identical();
-  digest_covers_dropped_records();
-  logging_budget();
-  overhead_without_mods();
+  STEP(phase_order_and_zero_guest_time);
+  STEP(phase_registration);
+  STEP(render_phase_is_read_only);
+  STEP(vanilla_is_bit_identical);
+  STEP(input_interception);
+  STEP(wram_endianness_and_staging);
+  STEP(wram_matrix);
+  STEP(wram_budgets_and_atomicity);
+  STEP(replay_is_byte_identical);
+  STEP(digest_covers_dropped_records);
+  STEP(logging_budget);
+  STEP(overhead_without_mods);
   if (failures != 0) {
     std::printf("%d failure(s)\n", failures);
     return 1;

@@ -228,6 +228,7 @@ target_link_libraries(genesis_mod_scheduler_tests PRIVATE segarecomp::runtime_ge
 target_compile_features(genesis_mod_scheduler_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(genesis_mod_scheduler_tests)
 add_test(NAME genesis_mod_scheduler_tests COMMAND genesis_mod_scheduler_tests)
+set_tests_properties(genesis_mod_scheduler_tests PROPERTIES TIMEOUT 300)
 # SEG-021-T031: headless bounded live-frame capture core (host tool; not linked by runtime_genesis).
 add_executable(genesis_frame_capture_tests genesis_frame_capture_test.cpp
   ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/frame_capture.c)

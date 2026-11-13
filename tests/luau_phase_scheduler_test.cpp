@@ -56,7 +56,11 @@ void setup(GenesisRuntime &r) {
 }
 
 void run_frames(GenesisRuntime &r, uint64_t frames) {
-  while (r.virtual_frame_count < frames) {
+  for (uint32_t slices = 0; r.virtual_frame_count < frames; ++slices) {
+    if (slices > 40U * static_cast<uint32_t>(frames) + 64U) {
+      check(false, "run_frames: the virtual frame counter does not advance");
+      return;
+    }
     const GenesisControlTransfer t = genesis_runtime_run(&r, synthetic_dispatch, 997U);
     if (t.kind != GENESIS_RUNNER_RESOURCE_LIMIT) {
       check(false, "the synthetic program stopped unexpectedly");
