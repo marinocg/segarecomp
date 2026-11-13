@@ -151,13 +151,13 @@ void reseal(std::vector<uint8_t> &bytes) {
   genesis_sha256_update(&sha, bytes.data(), static_cast<uint32_t>(bytes.size() - 32U));
   genesis_sha256_final(&sha, bytes.data() + bytes.size() - 32U);
 }
-uint32_t le32(const uint8_t *b) { return b[0] | (static_cast<uint32_t>(b[1]) << 8U) | (static_cast<uint32_t>(b[2]) << 16U) | (static_cast<uint32_t>(b[3]) << 24U); }
+uint32_t le32(const uint8_t *b) { return static_cast<uint32_t>(b[0]) | (static_cast<uint32_t>(b[1]) << 8U) | (static_cast<uint32_t>(b[2]) << 16U) | (static_cast<uint32_t>(b[3]) << 24U); }
 // The MODSTATE section (id 11) of a container: offset and length.
 bool find_modstate(const std::vector<uint8_t> &bytes, uint32_t &offset, uint32_t &length) {
   const uint32_t count = le32(bytes.data() + 28);
   for (uint32_t i = 0; i < count; ++i) {
     const uint8_t *e = bytes.data() + 156U + i * 12U;
-    if ((e[0] | (e[1] << 8U)) == 11) { offset = le32(e + 4); length = le32(e + 8); return true; }
+    if ((static_cast<uint32_t>(e[0]) | (static_cast<uint32_t>(e[1]) << 8U)) == 11U) { offset = le32(e + 4); length = le32(e + 8); return true; }
   }
   return false;
 }

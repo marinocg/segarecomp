@@ -26,6 +26,8 @@ using namespace segarecomp;
 
 namespace {
 
+uint32_t rd_le(const uint8_t *b, unsigned n) { uint32_t v = 0; for (unsigned i = 0; i < n; ++i) v |= static_cast<uint32_t>(b[i]) << (8U * i); return v; }
+
 int failures = 0;
 void check(bool value, const std::string &message) {
   if (!value) {
@@ -266,7 +268,7 @@ struct Session {
     }
   }
   uint32_t mod_counter() const { return native.n; }
-  uint32_t ram_u32(uint32_t off) const { return (static_cast<uint32_t>(rt->work_ram[off]) << 24U) | (static_cast<uint32_t>(rt->work_ram[off + 1U]) << 16U) | (static_cast<uint32_t>(rt->work_ram[off + 2U]) << 8U) | rt->work_ram[off + 3U]; }
+  uint32_t ram_u32(uint32_t off) const { return (static_cast<uint32_t>(rt->work_ram[off]) << 24U) | (static_cast<uint32_t>(rt->work_ram[off + 1U]) << 16U) | (static_cast<uint32_t>(rt->work_ram[off + 2U]) << 8U) | static_cast<uint32_t>(rt->work_ram[off + 3U]); }
   uint64_t write_digest_total() const { return sched->write_total; }
   std::string write_digest() const { uint8_t d[32]; genesis_mod_write_log_digest(sched.get(), d); return hex(d, 32); }
 };
@@ -473,11 +475,11 @@ void incompatible_state() {
   }
   check(a.hash() == live && a.native.loads == loads && rejected > 60U, "corrupted states change nothing (" + std::to_string(rejected) + " flips)");
   {   // sealed edits of every MODSTATE byte: either rejected with the machine untouched, or accepted as a (self-consistent) state that the next good restore fully replaces
-    const uint32_t count = bytes[28] | (bytes[29] << 8U);
+    const uint32_t count = rd_le(bytes.data() + 28, 2U);
     uint32_t off = 0, len = 0;
     for (uint32_t i = 0; i < count; ++i) {
       const uint8_t *e = bytes.data() + 156U + i * 12U;
-      if ((e[0] | (e[1] << 8U)) == 11) { off = e[4] | (e[5] << 8U) | (e[6] << 16U); len = e[8] | (e[9] << 8U) | (e[10] << 16U); }
+      if (rd_le(e, 2U) == 11U) { off = rd_le(e + 4, 4U); len = rd_le(e + 8, 4U); }
     }
     check(len > 76U, "MODSTATE found");
     const std::string saved_hash = [&] { Session t(spec); t.run_to(10U, nullptr); return t.hash(); }();

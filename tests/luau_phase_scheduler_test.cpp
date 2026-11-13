@@ -21,6 +21,8 @@ using namespace segarecomp;
 
 namespace {
 
+uint32_t rd_le(const uint8_t *b, unsigned n) { uint32_t v = 0; for (unsigned i = 0; i < n; ++i) v |= static_cast<uint32_t>(b[i]) << (8U * i); return v; }
+
 int failures = 0;
 void check(bool value, const std::string &message) {
   if (!value) {
@@ -551,17 +553,17 @@ void luau_state_round_trip() {
   check(genesis_snapshot_restore(&other_schema.machine, &other_schema.id, s1.data, s1.size) == GENESIS_SNAPSHOT_MOD_MISMATCH && other_schema.hash() == before, "a Luau restore with another state schema is E_STATE_MOD_MISMATCH and changes nothing");
   // a crafted blob that the strict deserializer refuses: the whole restore is refused, the guest is untouched, the (now faulted) VM is disabled with cause `state`
   std::vector<uint8_t> bad(s1.data, s1.data + s1.size);
-  const uint32_t count = bad[28] | (bad[29] << 8U);
+  const uint32_t count = rd_le(bad.data() + 28, 2U);
   uint32_t off = 0, len = 0;
   for (uint32_t i = 0; i < count; ++i) {
     const uint8_t *e = bad.data() + 156U + i * 12U;
-    if ((e[0] | (e[1] << 8U)) == 11) { off = e[4] | (e[5] << 8U) | (e[6] << 16U); len = e[8] | (e[9] << 8U) | (e[10] << 16U); }
+    if (rd_le(e, 2U) == 11U) { off = rd_le(e + 4, 4U); len = rd_le(e + 8, 4U); }
   }
   check(len > 76U, "MODSTATE found");
   // the blob is the tail of the section: its length is the u32 that precedes it; the first blob byte is the root type tag, which no deserializer accepts as 0xFF
   uint32_t blob_len = 0;
   for (uint32_t k = 1; k < 200U && blob_len == 0U; ++k) {
-    const uint32_t cand = bad[off + len - k - 4U] | (bad[off + len - k - 3U] << 8U) | (bad[off + len - k - 2U] << 16U) | (bad[off + len - k - 1U] << 24U);
+    const uint32_t cand = rd_le(&bad[off + len - k - 4U], 4U);
     if (cand == k) blob_len = k;
   }
   check(blob_len != 0U, "the Luau blob was located");
