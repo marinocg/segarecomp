@@ -2,6 +2,7 @@
 #include "mod_scheduler.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The ABI 2 service functions carry no context pointer, so the scheduler whose callback is running is reachable through this single pointer, set only for the duration of a callback. */
@@ -19,7 +20,7 @@ static uint64_t cap_bit(unsigned id) { return UINT64_C(1) << (id % 64U); }
 
 void genesis_mod_scheduler_supported(uint64_t out[2]) {
   out[0] = cap_bit(SEGA_MOD_CAP_HOST_LOG) | cap_bit(SEGA_MOD_CAP_FRAME_WORK_RAM) | cap_bit(SEGA_MOD_CAP_MEMORY_READ) | cap_bit(SEGA_MOD_CAP_MEMORY_WRITE) | cap_bit(SEGA_MOD_CAP_INPUT_READ) |
-           cap_bit(SEGA_MOD_CAP_INPUT_INTERCEPT) | cap_bit(SEGA_MOD_CAP_HOOK_FUNCTION) |
+           cap_bit(SEGA_MOD_CAP_INPUT_INTERCEPT) | cap_bit(SEGA_MOD_CAP_HOOK_FUNCTION) | cap_bit(SEGA_MOD_CAP_STATE_MOD) |
            cap_bit(SEGA_MOD_CAP_OVERLAY_RGBA); /* presentation output of `render`: collected by the provider adapter and presented by the host, not a scheduler service */
   out[1] = 0;
 }
@@ -508,6 +509,23 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
       }
     s->bindings[i] = config->hooks[i];
   }
+  if (sega_mod_is_granted(&s->host, SEGA_MOD_CAP_STATE_MOD)) { /* ADR 0299: a mod with state must supply both entries and declare its schema */
+    if (config->provider->save_state == NULL || config->provider->load_state == NULL) {
+      *rejection = "E_PROVIDER_ENTRY";
+      return 1;
+    }
+    if (config->state_schema == 0U || config->state_schema > 2147483647U) {
+      *rejection = "E_STATE_SCHEMA";
+      return 1;
+    }
+  } else if (config->state_schema != 0U) {
+    *rejection = "E_STATE_SCHEMA";
+    return 1;
+  }
+  if (config->site_count > GENESIS_MOD_HOOKS_MAX || (config->site_count != 0U && config->sites == NULL)) { /* the existing static hook limit bounds the generated site table too */
+    *rejection = "E_HOOK_BINDING";
+    return 1;
+  }
   if (config->range_count > GENESIS_MOD_RANGES_MAX) {
     *rejection = "E_RANGE_DECLARATION";
     return 1;
@@ -539,6 +557,20 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
   s->host.input_get = service_input_get;
   s->host.input_set = service_input_set;
   s->runtime = rt;
+  {
+    uint32_t any = 0U;
+    for (i = 0; i < 32U; ++i) any |= config->identity_sha256[i];
+    if (any != 0U) {
+      memcpy(s->identity, config->identity_sha256, 32U);
+    } else { /* a hand-built mod: the identity is the digest of its id, never empty */
+      GenesisSha256 sha;
+      static const char tag[] = "segarecomp.genesis.mod.identity.v0:";
+      genesis_sha256_init(&sha);
+      genesis_sha256_update(&sha, (const uint8_t *)tag, (uint32_t)(sizeof tag - 1U));
+      genesis_sha256_update(&sha, (const uint8_t *)config->mod_id, (uint32_t)strlen(config->mod_id));
+      genesis_sha256_final(&sha, s->identity);
+    }
+  }
   s->config.hooks = s->bindings; /* the scheduler owns copies: the caller's array need not outlive attach */
   if ((config->phase_mask & HOOK_PHASES) != 0U) {
     s->function_hooks.ctx = s;
@@ -568,4 +600,316 @@ void genesis_mod_write_log_digest(const GenesisModScheduler *s, uint8_t out[32])
   sha_u32(&sha, (uint32_t)(s->write_total >> 32U));
   sha_u32(&sha, (uint32_t)s->write_total);
   genesis_sha256_final(&sha, out);
+}
+
+/* ------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ * SEG-138-T006 (ADR 0299): mod state in the Genesis save-state / rewind container. The container (genesis_snapshot.c) owns identity, schema and framing; this is the body codec.
+ * Body, little-endian: flags u8 x4 (disabled, started, faulted, pad_active) | pads u8 x8 (sampled, final, previous, mod_pad) | callbacks_run u64 | hook_calls u64 x2 | hook_skips u64 x4 |
+ * hook_skip_logged u32 | [fault: phase u32, frame u64, cause_len u8, cause, text_len u16, text] | write stream (h u32 x8, length u64, used u32, block x64) | write_total u64 |
+ * hook depth u32, abandoned/unproven/overflowed u64 x3, frames (site index, return pc, entry sp) u32 x3 each | blob_len u32 | blob.
+ * Not saved: the retained diagnostic write log (the streamed digest is exact and continues), staged data (none exists at the barrier), the render copy.
+ * ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ */
+typedef struct StateOut {
+  uint8_t *p;
+  uint32_t cap, n;
+  int error;
+} StateOut;
+static void so_bytes(StateOut *o, const void *src, uint32_t count) {
+  if (o->error || count > o->cap - o->n) { o->error = 1; return; }
+  if (count != 0U) memcpy(o->p + o->n, src, count);
+  o->n += count;
+}
+static void so_u8(StateOut *o, uint8_t v) { so_bytes(o, &v, 1U); }
+static void so_u16(StateOut *o, uint16_t v) { const uint8_t b[2] = {(uint8_t)v, (uint8_t)(v >> 8U)}; so_bytes(o, b, 2U); }
+static void so_u32(StateOut *o, uint32_t v) { uint8_t b[4]; unsigned i; for (i = 0; i < 4U; ++i) b[i] = (uint8_t)(v >> (8U * i)); so_bytes(o, b, 4U); }
+static void so_u64(StateOut *o, uint64_t v) { uint8_t b[8]; unsigned i; for (i = 0; i < 8U; ++i) b[i] = (uint8_t)(v >> (8U * i)); so_bytes(o, b, 8U); }
+
+typedef struct StateIn {
+  const uint8_t *p;
+  uint32_t size, off;
+  int error;
+} StateIn;
+static const uint8_t *si_take(StateIn *in, uint32_t count) {
+  const uint8_t *at;
+  if (in->error || count > in->size - in->off) { in->error = 1; return NULL; }
+  at = in->p + in->off;
+  in->off += count;
+  return at;
+}
+static uint8_t si_u8(StateIn *in) { const uint8_t *b = si_take(in, 1U); return b != NULL ? b[0] : 0U; }
+static uint16_t si_u16(StateIn *in) { const uint8_t *b = si_take(in, 2U); return b != NULL ? (uint16_t)(b[0] | ((unsigned)b[1] << 8U)) : 0U; }
+static uint32_t si_u32(StateIn *in) { const uint8_t *b = si_take(in, 4U); uint32_t v = 0U; unsigned i; if (b == NULL) return 0U; for (i = 0; i < 4U; ++i) v |= (uint32_t)b[i] << (8U * i); return v; }
+static uint64_t si_u64(StateIn *in) { const uint8_t *b = si_take(in, 8U); uint64_t v = 0U; unsigned i; if (b == NULL) return 0U; for (i = 0; i < 8U; ++i) v |= (uint64_t)b[i] << (8U * i); return v; }
+
+typedef struct StagedModState {
+  uint8_t disabled, started, faulted, pad_active;
+  uint8_t sampled[2], final_pad[2], previous_final[2], mod_pad[2];
+  uint64_t callbacks_run, hook_calls[2], hook_skips[4];
+  uint32_t hook_skip_logged;
+  uint32_t fault_phase;
+  uint64_t fault_frame;
+  char fault_cause[32];
+  char fault_text[192];
+  GenesisSha256 stream;
+  uint64_t write_total;
+  uint32_t depth;
+  uint64_t abandoned, unproven, overflowed;
+  struct { uint32_t site, return_pc, entry_sp; } frames[GENESIS_HOOK_FRAMES_MAX];
+  uint32_t blob_len;
+  uint8_t blob[GENESIS_SNAPSHOT_MOD_BLOB_MAX];
+} StagedModState;
+
+static int guest_affecting(const GenesisModScheduler *s) {
+  return granted(s, SEGA_MOD_CAP_MEMORY_WRITE) || granted(s, SEGA_MOD_CAP_INPUT_INTERCEPT) || granted(s, SEGA_MOD_CAP_HOOK_FUNCTION) || granted(s, SEGA_MOD_CAP_AUDIO_COMMAND_SEND);
+}
+
+static uint32_t state_put(void *ctx, uint8_t *out, uint32_t cap, GenesisSnapshotStatus *status) {
+  GenesisModScheduler *s = (GenesisModScheduler *)ctx;
+  StateOut o;
+  uint32_t i, depth = 0U, blob_len = 0U, blob_at;
+  const uint32_t fail = UINT32_MAX;
+  o.p = out; o.cap = cap; o.n = 0U; o.error = 0;
+  *status = GENESIS_SNAPSHOT_NOT_CAPTURABLE;
+  if (s->runtime == NULL || s->in_callback) return fail;
+  if (guest_affecting(s) && !granted(s, SEGA_MOD_CAP_STATE_MOD)) { *status = GENESIS_SNAPSHOT_MOD_UNAVAILABLE; return fail; } /* E_STATE_UNAVAILABLE: never a state that silently drops the mod's effect */
+  if (s->runtime->function_hooks == &s->function_hooks) depth = s->function_hooks.depth;
+  if (depth > GENESIS_HOOK_FRAMES_MAX || (depth != 0U && s->config.site_count == 0U)) return fail;
+  so_u8(&o, s->disabled); so_u8(&o, s->started); so_u8(&o, s->fault.faulted); so_u8(&o, s->runtime->mod_pad_active);
+  so_u8(&o, s->sampled[0]); so_u8(&o, s->sampled[1]); so_u8(&o, s->final_pad[0]); so_u8(&o, s->final_pad[1]);
+  so_u8(&o, s->previous_final[0]); so_u8(&o, s->previous_final[1]);
+  so_u8(&o, s->runtime->mod_pad_active ? s->runtime->mod_pad1 : 0U); so_u8(&o, s->runtime->mod_pad_active ? s->runtime->mod_pad2 : 0U); /* a stale latch behind an inactive interception is not state */
+  so_u64(&o, s->callbacks_run);
+  for (i = 0; i < 2U; ++i) so_u64(&o, s->hook_calls[i]);
+  for (i = 0; i < 4U; ++i) so_u64(&o, s->hook_skips[i]);
+  so_u32(&o, s->hook_skip_logged);
+  if (s->fault.faulted) {
+    const uint32_t cause_len = s->fault.cause != NULL ? (uint32_t)strlen(s->fault.cause) : 0U, text_len = (uint32_t)strlen(s->fault.text);
+    if (cause_len == 0U || cause_len > 31U || text_len > 191U) return fail;
+    so_u32(&o, s->fault.phase);
+    so_u64(&o, s->fault.frame);
+    so_u8(&o, (uint8_t)cause_len);
+    so_bytes(&o, s->fault.cause, cause_len);
+    so_u16(&o, (uint16_t)text_len);
+    so_bytes(&o, s->fault.text, text_len);
+  }
+  for (i = 0; i < 8U; ++i) so_u32(&o, s->write_stream.h[i]);
+  so_u64(&o, s->write_stream.length);
+  so_u32(&o, s->write_stream.used);
+  so_bytes(&o, s->write_stream.block, 64U);
+  so_u64(&o, s->write_total);
+  so_u32(&o, depth);
+  so_u64(&o, s->function_hooks.abandoned); so_u64(&o, s->function_hooks.unproven_callers); so_u64(&o, s->function_hooks.overflowed);
+  for (i = 0; i < depth; ++i) {
+    const GenesisHookFrame *f = &s->function_hooks.frames[i];
+    uint32_t index = 0U;
+    while (index < s->config.site_count && f->site != &s->config.sites[index]) ++index; /* pointer equality only: no relational comparison of unrelated objects */
+    if (index == s->config.site_count) return fail;
+    so_u32(&o, index);
+    so_u32(&o, f->return_pc);
+    so_u32(&o, f->entry_sp);
+  }
+  /* the mod's own blob: only an enabled mod with `state.mod` has one (a disabled mod is inert; its flag is the whole state) */
+  if (granted(s, SEGA_MOD_CAP_STATE_MOD) && !s->disabled) {
+    uint32_t len = 0U;
+    if (o.error || o.cap - o.n < GENESIS_SNAPSHOT_MOD_BLOB_MAX + 4U) return fail;
+    blob_at = o.n + 4U;
+    if (s->config.provider->save_state(s->config.provider_state, o.p + blob_at, GENESIS_SNAPSHOT_MOD_BLOB_MAX, &len) != 0 || len > GENESIS_SNAPSHOT_MOD_BLOB_MAX) { *status = GENESIS_SNAPSHOT_MOD_UNAVAILABLE; return fail; }
+    blob_len = len;
+    so_u32(&o, blob_len);
+    o.n += blob_len;
+  } else {
+    so_u32(&o, 0U);
+  }
+  if (o.error) return fail;
+  *status = GENESIS_SNAPSHOT_OK;
+  return o.n;
+}
+
+static void *state_stage(void *ctx, const uint8_t *body, uint32_t length) {
+  const GenesisModScheduler *s = (const GenesisModScheduler *)ctx;
+  StagedModState *st;
+  StateIn in;
+  uint32_t i, cause_len, text_len;
+  const uint8_t *text;
+  if (s->runtime == NULL || s->in_callback) return NULL;
+  st = (StagedModState *)malloc(sizeof *st);
+  if (st == NULL) return NULL;
+  memset(st, 0, sizeof *st);
+  in.p = body; in.size = length; in.off = 0U; in.error = 0;
+  st->disabled = si_u8(&in); st->started = si_u8(&in); st->faulted = si_u8(&in); st->pad_active = si_u8(&in);
+  for (i = 0; i < 2U; ++i) st->sampled[i] = si_u8(&in);
+  for (i = 0; i < 2U; ++i) st->final_pad[i] = si_u8(&in);
+  for (i = 0; i < 2U; ++i) st->previous_final[i] = si_u8(&in);
+  for (i = 0; i < 2U; ++i) st->mod_pad[i] = si_u8(&in);
+  st->callbacks_run = si_u64(&in);
+  for (i = 0; i < 2U; ++i) st->hook_calls[i] = si_u64(&in);
+  for (i = 0; i < 4U; ++i) st->hook_skips[i] = si_u64(&in);
+  st->hook_skip_logged = si_u32(&in);
+  if (in.error || st->disabled > 1U || st->started > 1U || st->faulted > 1U || st->pad_active > 1U || st->disabled != st->faulted || (st->faulted != 0U && st->started == 0U) ||
+      (st->hook_skip_logged & ~0xEU) != 0U || st->hook_skips[0] != 0U)
+    goto bad;
+  if (st->pad_active != 0U && (st->disabled != 0U || st->started == 0U || (s->config.phase_mask & PHASE_BIT(SEGA_MOD_PHASE_INPUT)) == 0U)) goto bad; /* only a live `input` mod latches the pad */
+  if (st->pad_active == 0U && (st->mod_pad[0] != 0U || st->mod_pad[1] != 0U)) goto bad;
+  if (st->started == 0U && (st->callbacks_run != 0U || st->pad_active != 0U)) goto bad;
+  if (st->faulted != 0U) {
+    st->fault_phase = si_u32(&in);
+    st->fault_frame = si_u64(&in);
+    cause_len = si_u8(&in);
+    if (in.error || cause_len == 0U || cause_len > 31U || genesis_mod_phase_name(st->fault_phase)[0] == '\0') goto bad;
+    text = si_take(&in, cause_len);
+    if (text == NULL) goto bad;
+    memcpy(st->fault_cause, text, cause_len);
+    text_len = si_u16(&in);
+    if (in.error || text_len == 0U || text_len > 191U) goto bad;
+    text = si_take(&in, text_len);
+    if (text == NULL) goto bad;
+    memcpy(st->fault_text, text, text_len);
+    for (i = 0; i < cause_len; ++i) if ((uint8_t)st->fault_cause[i] < 0x21U || (uint8_t)st->fault_cause[i] > 0x7EU) goto bad;
+    for (i = 0; i < text_len; ++i) if ((uint8_t)st->fault_text[i] < 0x20U || (uint8_t)st->fault_text[i] > 0x7EU) goto bad;
+    if (strncmp(st->fault_text, "E_MOD_FAULT cause=", 18U) != 0) goto bad;
+  }
+  for (i = 0; i < 8U; ++i) st->stream.h[i] = si_u32(&in);
+  st->stream.length = si_u64(&in);
+  st->stream.used = si_u32(&in);
+  { const uint8_t *b = si_take(&in, 64U); if (b != NULL) memcpy(st->stream.block, b, 64U); }
+  st->write_total = si_u64(&in);
+  if (in.error || st->stream.used >= 64U || (st->stream.length & 63U) != st->stream.used || st->write_total > UINT64_MAX / 28U || st->stream.length != st->write_total * 28U) goto bad; /* 7 big-endian u32 per committed write */
+  st->depth = si_u32(&in);
+  st->abandoned = si_u64(&in); st->unproven = si_u64(&in); st->overflowed = si_u64(&in);
+  if (in.error || st->depth > GENESIS_HOOK_FRAMES_MAX) goto bad;
+  if (s->runtime->function_hooks != &s->function_hooks && (st->depth != 0U || st->abandoned != 0U || st->unproven != 0U || st->overflowed != 0U)) goto bad; /* no hook phases: no frames, no counters */
+  for (i = 0; i < st->depth; ++i) {
+    st->frames[i].site = si_u32(&in); st->frames[i].return_pc = si_u32(&in); st->frames[i].entry_sp = si_u32(&in);
+    if (in.error || st->frames[i].site >= s->config.site_count || (s->config.sites[st->frames[i].site].mode & GENESIS_HOOK_MODE_AFTER) == 0U) goto bad; /* only `after` sites keep a frame */
+  }
+  st->blob_len = si_u32(&in);
+  if (in.error || st->blob_len > GENESIS_SNAPSHOT_MOD_BLOB_MAX || st->blob_len != in.size - in.off) goto bad;     /* exact: no trailing bytes */
+  if (st->blob_len != 0U && (!granted(s, SEGA_MOD_CAP_STATE_MOD) || st->disabled != 0U)) goto bad;               /* a mod without state, or a disabled one, has none */
+  if (st->blob_len != 0U) memcpy(st->blob, in.p + in.off, st->blob_len);
+  return st;
+bad:
+  free(st);
+  return NULL;
+}
+
+/* The only fallible step: the mod's own load. A mod that refuses (or a Luau VM whose load faults) must not leave a half-restored session: the previous blob is put back when the mod can take it,
+ * otherwise the mod is disabled with cause `state` -- in both cases the guest state is not touched, because the container runs this before replacing anything. */
+static int state_apply(void *ctx, void *staged) {
+  GenesisModScheduler *s = (GenesisModScheduler *)ctx;
+  const StagedModState *st = (const StagedModState *)staged;
+  uint8_t *prior;
+  uint32_t prior_len = 0U;
+  int have_prior = 0, ok;
+  if (!granted(s, SEGA_MOD_CAP_STATE_MOD) || st->disabled != 0U) return 0;
+  prior = (uint8_t *)malloc(GENESIS_SNAPSHOT_MOD_BLOB_MAX);
+  if (prior == NULL) return 1;
+  if (!s->disabled && s->config.provider->save_state(s->config.provider_state, prior, GENESIS_SNAPSHOT_MOD_BLOB_MAX, &prior_len) == 0 && prior_len <= GENESIS_SNAPSHOT_MOD_BLOB_MAX) have_prior = 1;
+  ok = s->config.provider->load_state(s->config.provider_state, st->blob, st->blob_len) == 0;
+  if (!ok) {
+    if (!have_prior || s->config.provider->load_state(s->config.provider_state, prior, prior_len) != 0) {
+      s->phase = SEGA_MOD_PHASE_RESET; /* the diagnostic names the restore moment: the guest frame the machine is at */
+      s->frame = s->runtime->virtual_frame_count;
+      record_fault(s, "state");
+    }
+  }
+  free(prior);
+  return ok ? 0 : 1;
+}
+
+static void state_commit(void *ctx, void *staged, GenesisRuntime *runtime) {
+  GenesisModScheduler *s = (GenesisModScheduler *)ctx;
+  StagedModState *st = (StagedModState *)staged;
+  uint32_t i;
+  s->started = st->started;
+  s->disabled = st->disabled;
+  s->callbacks_run = st->callbacks_run;
+  memcpy(s->sampled, st->sampled, 2U);
+  memcpy(s->final_pad, st->final_pad, 2U);
+  memcpy(s->previous_final, st->previous_final, 2U);
+  runtime->mod_pad_active = st->pad_active;
+  runtime->mod_pad1 = st->mod_pad[0];
+  runtime->mod_pad2 = st->mod_pad[1];
+  memcpy(s->hook_calls, st->hook_calls, sizeof s->hook_calls);
+  memcpy(s->hook_skips, st->hook_skips, sizeof s->hook_skips);
+  s->hook_skip_logged = st->hook_skip_logged;
+  memset(&s->fault, 0, sizeof s->fault);
+  s->fault_cause_store[0] = '\0';
+  if (st->faulted != 0U) {
+    s->fault.faulted = 1U;
+    memcpy(s->fault_cause_store, st->fault_cause, sizeof s->fault_cause_store);
+    s->fault.cause = s->fault_cause_store;
+    s->fault.phase = st->fault_phase;
+    s->fault.frame = st->fault_frame;
+    memcpy(s->fault.text, st->fault_text, sizeof s->fault.text);
+  }
+  s->write_stream = st->stream;
+  s->write_total = st->write_total;
+  s->write_log_count = 0U; /* the retained diagnostic log restarts empty; every earlier write counts as not retained (the digest above is exact) */
+  s->write_log_dropped = st->write_total;
+  s->render_copy_valid = 0U;
+  s->hook_site = NULL;
+  if (runtime->function_hooks == &s->function_hooks) {
+    s->function_hooks.depth = st->depth;
+    s->function_hooks.abandoned = st->abandoned;
+    s->function_hooks.unproven_callers = st->unproven;
+    s->function_hooks.overflowed = st->overflowed;
+    for (i = 0; i < st->depth; ++i) {
+      s->function_hooks.frames[i].site = &s->config.sites[st->frames[i].site];
+      s->function_hooks.frames[i].return_pc = st->frames[i].return_pc;
+      s->function_hooks.frames[i].entry_sp = st->frames[i].entry_sp;
+    }
+  }
+  free(st);
+}
+
+static void state_discard(void *ctx, void *staged) {
+  (void)ctx;
+  free(staged);
+}
+
+static void compat_digest(const GenesisModScheduler *s, uint8_t out[32]) {
+  GenesisSha256 sha;
+  uint32_t i, site_count;
+  static const char tag[] = "segarecomp.genesis.mod.compat.v1";
+  genesis_sha256_init(&sha);
+  genesis_sha256_update(&sha, (const uint8_t *)tag, (uint32_t)(sizeof tag - 1U));
+  sha_u32(&sha, s->host.abi_major);
+  sha_u32(&sha, (uint32_t)(s->host.granted[0] >> 32U)); sha_u32(&sha, (uint32_t)s->host.granted[0]);
+  sha_u32(&sha, (uint32_t)(s->host.granted[1] >> 32U)); sha_u32(&sha, (uint32_t)s->host.granted[1]);
+  sha_u32(&sha, s->config.phase_mask);
+  sha_u32(&sha, s->config.provider != NULL ? s->config.provider->implementation_version : 0U);
+  sha_u32(&sha, s->config.range_count);
+  for (i = 0; i < s->config.range_count; ++i) { sha_u32(&sha, s->ranges[i].space); sha_u32(&sha, s->ranges[i].offset); sha_u32(&sha, s->ranges[i].length); sha_u32(&sha, s->ranges[i].modes); }
+  sha_u32(&sha, s->config.hook_count);
+  for (i = 0; i < s->config.hook_count; ++i) {
+    const uint32_t n = (uint32_t)strlen(s->bindings[i].id);
+    sha_u32(&sha, n);
+    genesis_sha256_update(&sha, (const uint8_t *)s->bindings[i].id, n);
+    sha_u32(&sha, s->bindings[i].hook_id);
+  }
+  /* The generated hook site table decides how saved hook-frame indices are read: its size and, in table order, each site's entry, id and mode. */
+  site_count = s->config.sites != NULL && s->config.site_count <= GENESIS_MOD_HOOKS_MAX ? s->config.site_count : 0U; /* an unattached/rejected config contributes nothing */
+  sha_u32(&sha, site_count);
+  for (i = 0; i < site_count; ++i) {
+    const GenesisHookSiteInfo *site = &s->config.sites[i];
+    const uint32_t n = site->id != NULL ? (uint32_t)strlen(site->id) : 0U;
+    sha_u32(&sha, site->entry);
+    sha_u32(&sha, site->mode);
+    sha_u32(&sha, n);
+    if (n != 0U) genesis_sha256_update(&sha, (const uint8_t *)site->id, n);
+  }
+  genesis_sha256_final(&sha, out);
+}
+
+void genesis_mod_snapshot_state(GenesisModScheduler *s, GenesisSnapshotModState *out) {
+  memset(out, 0, sizeof *out);
+  out->ctx = s;
+  memcpy(out->identity, s->identity, 32U);
+  out->state_schema = s->config.state_schema;
+  compat_digest(s, out->compat);
+  out->put = state_put;
+  out->stage = state_stage;
+  out->apply = state_apply;
+  out->commit = state_commit;
+  out->discard = state_discard;
 }

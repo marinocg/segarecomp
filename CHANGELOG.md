@@ -7,6 +7,12 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Mod state in save states and rewind, replay regression suite, platform conformance suite (ADR 0299, Genesis)
+
+* A mod's own state now travels with Genesis save states and rewind history: the new `MODSTATE` section holds the mod's identity, state schema, disabled/fault state, input latch, replay witness, any hook call in flight and the mod's bounded blob (native `save_state`/`load_state`, or the Luau `save()`/`load()` value). A state saved with other mods, another version/schema/capability set, or no mod is refused (`E_STATE_MOD_MISMATCH`) and the game is untouched; a mod that refuses its saved state refuses the whole restore (`E_STATE_MOD_REJECTED`); a mod that changes the game without declaring `state.mod` makes saving unavailable (`E_STATE_UNAVAILABLE`) instead of saving something wrong.
+* New regression suites: recorded-input replay produces identical state hashes (native and Luau), sandbox failures during replay (range, Luau budget, script error) are deterministic and replay identically across a restore, and incompatible or corrupted states are rejected without partial application. One table-driven conformance suite runs the same lifecycle, capability, state and failure scenarios for every registered platform and asserts each platform's declared support or its exact fail-closed diagnostic (Master System and Sega CD assert `unsupported` until their milestones flip them).
+* Still not in a built program (SEG-138-T009); Master System / Sega CD containers are later milestones.
+
 ### Static function hooks, deterministic callback ordering and transactional failure (ADR 0298, Genesis)
 
 * A mod can now declare hooks on verified symbols (`[[hook]]`: `before`, `after`, `before-after`, `replace` with a declared register/flag/cost contract). The build resolves them against the exact ROM digest and classifies every site against the compiled program; anything it cannot prove fails the build with a stable `E_HOOK_*` class (mid-instruction, not a function entry, tail jumps / RTE / computed returns, computed targets, work-RAM code, interrupt context, overlap, bad contract, unsupported CPU).
