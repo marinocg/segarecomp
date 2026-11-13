@@ -557,7 +557,7 @@ void luau_state_round_trip() {
     const uint8_t *e = bad.data() + 156U + i * 12U;
     if ((e[0] | (e[1] << 8U)) == 11) { off = e[4] | (e[5] << 8U) | (e[6] << 16U); len = e[8] | (e[9] << 8U) | (e[10] << 16U); }
   }
-  check(len > 48U, "MODSTATE found");
+  check(len > 76U, "MODSTATE found");
   // the blob is the tail of the section: its length is the u32 that precedes it; the first blob byte is the root type tag, which no deserializer accepts as 0xFF
   uint32_t blob_len = 0;
   for (uint32_t k = 1; k < 200U && blob_len == 0U; ++k) {

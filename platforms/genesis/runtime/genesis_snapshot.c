@@ -24,7 +24,7 @@ enum {
 #define SEC_BASE_LAST_NO_SOUND SEC_CART
 #define SEC_BASE_LAST_SOUND SEC_AUDIO
 #define MODSTATE_PAYLOAD_VERSION 1U
-#define MODSTATE_HEADER_BYTES 44U   /* version u32, identity[32], state_schema u32, body length u32 */
+#define MODSTATE_HEADER_BYTES 76U   /* version u32, identity[32], state_schema u32, compat[32], body length u32 */
 /* Is section `id` part of the profile `flags`? (sections 1..5 always, 6..10 with sound, MODSTATE with a mod) */
 static int section_in_profile(uint16_t flags, uint32_t id) {
   if (id == SEC_MOD) return (flags & GENESIS_SNAPSHOT_FLAG_MOD) != 0U;
@@ -710,7 +710,7 @@ static int get_mixer(Reader *r, GenesisMixer *m) {
 
 #endif /* SEGARECOMP_GENESIS_SOUND */
 
-/* MODSTATE (ADR 0299): { version u32, identity[32], state_schema u32, body length u32, body }. The body belongs to the mod codec. */
+/* MODSTATE (ADR 0299): { version u32, identity[32], state_schema u32, compat[32], body length u32, body }. The body belongs to the mod codec. */
 static GenesisSnapshotStatus put_mod(Writer *w, const GenesisSnapshotModState *mod) {
   uint32_t length_at, length;
   GenesisSnapshotStatus status = GENESIS_SNAPSHOT_NOT_CAPTURABLE;
@@ -718,6 +718,7 @@ static GenesisSnapshotStatus put_mod(Writer *w, const GenesisSnapshotModState *m
   w_u32(w, MODSTATE_PAYLOAD_VERSION);
   w_bytes(w, mod->identity, 32U);
   w_u32(w, mod->state_schema);
+  w_bytes(w, mod->compat, 32U);
   length_at = w->size;
   w_u32(w, 0U);
   w_reserve(w, GENESIS_SNAPSHOT_MOD_BODY_MAX);
@@ -960,7 +961,7 @@ static GenesisSnapshotStatus precheck(const GenesisSnapshotMachine *machine, con
   if (info->machine_flags == flags && (flags & GENESIS_SNAPSHOT_FLAG_MOD) != 0U) {
     const SectionView *m = &views[SEC_MOD];   /* the mod identity and schema decide first, so the diagnostic names the mod rather than the generic fingerprint */
     if (m->length < MODSTATE_HEADER_BYTES || le32(m->data) != MODSTATE_PAYLOAD_VERSION || memcmp(m->data + 4, machine->mod->identity, 32U) != 0 ||
-        le32(m->data + 36) != machine->mod->state_schema)
+        le32(m->data + 36) != machine->mod->state_schema || memcmp(m->data + 40, machine->mod->compat, 32U) != 0)
       return GENESIS_SNAPSHOT_MOD_MISMATCH;
   }
   if (info->machine_flags != flags || info->region_profile != machine->runtime->region_profile || memcmp(info->exec_fingerprint, fp, 32U) != 0)
@@ -1094,7 +1095,7 @@ static GenesisSnapshotStatus restore_impl(const GenesisSnapshotMachine *machine,
 #undef SECTION_READER
   if ((flags & GENESIS_SNAPSHOT_FLAG_MOD) != 0U) {   /* ADR 0299: the mod's own state is validated into private storage like every other section */
     const SectionView *m = &views[SEC_MOD];
-    const uint32_t body = le32(m->data + 40);
+    const uint32_t body = le32(m->data + 72);
     if (m->length < MODSTATE_HEADER_BYTES || body > GENESIS_SNAPSHOT_MOD_BODY_MAX || body != m->length - MODSTATE_HEADER_BYTES || machine->mod->stage == NULL) { status = GENESIS_SNAPSHOT_MOD_REJECTED; goto done; }
     mod_staged = machine->mod->stage(machine->mod->ctx, m->data + MODSTATE_HEADER_BYTES, body);
     if (mod_staged == NULL) { status = GENESIS_SNAPSHOT_MOD_REJECTED; goto done; }

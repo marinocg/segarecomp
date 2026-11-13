@@ -676,7 +676,8 @@ static uint32_t state_put(void *ctx, uint8_t *out, uint32_t cap, GenesisSnapshot
   if (depth > GENESIS_HOOK_FRAMES_MAX || (depth != 0U && s->config.site_count == 0U)) return fail;
   so_u8(&o, s->disabled); so_u8(&o, s->started); so_u8(&o, s->fault.faulted); so_u8(&o, s->runtime->mod_pad_active);
   so_u8(&o, s->sampled[0]); so_u8(&o, s->sampled[1]); so_u8(&o, s->final_pad[0]); so_u8(&o, s->final_pad[1]);
-  so_u8(&o, s->previous_final[0]); so_u8(&o, s->previous_final[1]); so_u8(&o, s->runtime->mod_pad1); so_u8(&o, s->runtime->mod_pad2);
+  so_u8(&o, s->previous_final[0]); so_u8(&o, s->previous_final[1]);
+  so_u8(&o, s->runtime->mod_pad_active ? s->runtime->mod_pad1 : 0U); so_u8(&o, s->runtime->mod_pad_active ? s->runtime->mod_pad2 : 0U); /* a stale latch behind an inactive interception is not state */
   so_u64(&o, s->callbacks_run);
   for (i = 0; i < 2U; ++i) so_u64(&o, s->hook_calls[i]);
   for (i = 0; i < 4U; ++i) so_u64(&o, s->hook_skips[i]);

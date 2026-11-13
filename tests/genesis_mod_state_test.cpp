@@ -237,8 +237,8 @@ void identity_and_schema() {
   // other execution compatibility: different declared ranges are another build
   {
     Rig d(0x11, 7);
-    d.snap.compat[0] ^= 1U;   // a different capability/phase/range declaration (the compat digest is part of the fingerprint)
-    check(genesis_snapshot_restore(&d.machine, &d.id, s.buf.data, s.buf.size) != GENESIS_SNAPSHOT_OK, "a different compatibility digest is refused");
+    d.snap.compat[0] ^= 1U;   // a different capability/phase/range declaration (the compat digest is part of the fingerprint and of the section)
+    check(genesis_snapshot_restore(&d.machine, &d.id, s.buf.data, s.buf.size) == GENESIS_SNAPSHOT_MOD_MISMATCH, "a different compatibility digest (capabilities, phases, ranges, hooks) is E_STATE_MOD_MISMATCH");
   }
 }
 
@@ -287,13 +287,13 @@ void malformed_and_rejected() {
   check(s.take(a), "capture");
   std::vector<uint8_t> good(s.buf.data, s.buf.data + s.buf.size);
   uint32_t off = 0, len = 0;
-  check(find_modstate(good, off, len) && len > 44U, "the container has a MODSTATE section");
+  check(find_modstate(good, off, len) && len > 76U, "the container has a MODSTATE section");
   const std::string hash = machine_hash(a);
   const uint32_t counter = a.mem.counter;
   struct Edit { const char *what; uint32_t at; uint8_t value; };
   const Edit edits[] = {
-      {"disabled flag without a fault", 44U + 0U, 1U},   {"started flag out of range", 44U + 1U, 7U},         {"pad latch without an input mod", 44U + 3U, 1U},
-      {"hook skip bit out of range", 44U + 12U + 8U + 16U + 32U, 0xF0U},
+      {"disabled flag without a fault", 76U + 0U, 1U},   {"started flag out of range", 76U + 1U, 7U},         {"pad latch without an input mod", 76U + 3U, 1U},
+      {"hook skip bit out of range", 76U + 12U + 8U + 16U + 32U, 0xF0U},
   };
   for (const Edit &e : edits) {
     std::vector<uint8_t> bad = good;
