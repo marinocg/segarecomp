@@ -794,7 +794,12 @@ bool luau_record_matches(const fs::path &entry, const RomView &rom) {
     }
   }
   if (!rom.luau_mod()) return identity.empty();
-  return identity == rom.luau_identity && effective == rom.luau_effective_sha256 && pin == rom.luau_pin && lowercase_hex_64(digest);
+  if (!(identity == rom.luau_identity && effective == rom.luau_effective_sha256 && pin == rom.luau_pin && lowercase_hex_64(digest))) return false;
+  // The digest in the metadata must be the one the build itself recorded in status.json (the key already determines it; this catches a record that was altered or mixed up).
+  const std::string status = read_all(entry / "status.json");
+  const std::string key = "\"bytecode_digest\":\"";
+  const std::size_t at = status.find(key);
+  return at != std::string::npos && status.compare(at + key.size(), 64U, digest) == 0;
 }
 
 bool entry_ready_for(const fs::path &entry, const RomView &rom, const Layout &layout) {

@@ -40,6 +40,16 @@ struct State {
 
 State g_state;
 
+// Script text is printable ASCII (the VM guarantees it) but may contain a quotation mark or a backslash: escape both so the line stays valid JSON.
+std::string json_escaped(const std::string &text) {
+  std::string out;
+  for (const char c : text) {
+    if (c == '"' || c == '\\') out += '\\';
+    out += c;
+  }
+  return out;
+}
+
 void report_fault(const char *callback, const luau::CallResult &r, std::uint64_t frame) {
   std::fprintf(stderr, "LUAU_MOD_FAULT {\"cause\":\"%s\",\"mod\":\"%s\",\"callback\":\"%s\",\"frame\":%llu,\"message\":\"", luau::fault_name(r.fault), segarecomp_luau_mod_id, callback,
                static_cast<unsigned long long>(frame));
@@ -84,7 +94,7 @@ bool start(State &s) {
     report_fault("reset", reset, 0);
     return false;
   }
-  for (const std::string &line : out.log) std::fprintf(stderr, "LUAU_MOD_LOG {\"line\":\"%s\"}\n", line.c_str());
+  for (const std::string &line : out.log) std::fprintf(stderr, "LUAU_MOD_LOG {\"line\":\"%s\"}\n", json_escaped(line).c_str());
   return true;
 }
 
@@ -112,7 +122,7 @@ void prepare(void *state, const GenesisCompatFrame *frame, GenesisCompatDecision
     out->reason = GENESIS_COMPAT_FAULT;
     return;
   }
-  for (const std::string &line : result.log) std::fprintf(stderr, "LUAU_MOD_LOG {\"line\":\"%s\"}\n", line.c_str());
+  for (const std::string &line : result.log) std::fprintf(stderr, "LUAU_MOD_LOG {\"line\":\"%s\"}\n", json_escaped(line).c_str());
   if (result.overlay.empty()) return;
   s.image = luau::rasterize_overlay(result.overlay);
   s.have_image = true;

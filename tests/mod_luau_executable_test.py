@@ -89,8 +89,8 @@ def main():
             check(r.returncode == 0 and doc["ok"], f"{'build' if build else 'pack'} {d.name}: {r.stdout}")
             return out, doc
 
-        def game_build(out, package=None, identity=None, rom_path=rom, extra=()):
-            args = ["build", "--rom", rom_path, "--output", out, "--cc", compiler, "--runtime-dir", root / "platforms/genesis", "--optimize", "0", "--runtime-optimize", "1",
+        def game_build(out, package=None, identity=None, rom_path=rom, extra=(), cc=None):
+            args = ["build", "--rom", rom_path, "--output", out, "--cc", cc or compiler, "--runtime-dir", root / "platforms/genesis", "--optimize", "0", "--runtime-optimize", "1",
                     "--sdl3-include", sdl / "include", "--sdl3-lib", sdl / "lib", "--test-frame-seam", "1"]
             if package is not None:
                 args += ["--luau-package", package, "--luau-identity", identity]
@@ -104,7 +104,7 @@ def main():
             lines = {}
             for line in run.stderr.splitlines():
                 tag, _, rest = line.partition(" ")
-                if tag in ("VIEWER_SUMMARY", "VIEWER_NATIVE_SUMMARY", "LUAU_MOD_LOADED", "LUAU_MOD_FAULT", "RUNTIME_NOTES", "VIEWER_FINAL_FRAME"):
+                if tag in ("VIEWER_SUMMARY", "VIEWER_NATIVE_SUMMARY", "LUAU_MOD_LOADED", "LUAU_MOD_FAULT", "LUAU_MOD_LOG", "RUNTIME_NOTES", "VIEWER_FINAL_FRAME"):
                     lines.setdefault(tag, []).append(json.loads(rest))
             return run, lines
 
@@ -133,6 +133,25 @@ def main():
         hud = tmp / "hud"
         r = game_build(hud, pkg, ident)
         check(r.returncode == 0 and (hud / "game").is_file(), "the package builds into a generated-native executable: " + r.stdout[-400:] + r.stderr[-400:])
+
+        # ---- SEG-138 (inherited F07 fix): an unknown C driver name is asked to compile C++ with `-x c++` and the C++ runtime library must come AFTER the objects at link time ----
+        wrapper = tmp / "customdriver"
+        wrapper.write_text(f'#!/bin/sh\nexec "{compiler}" "$@"\n')
+        wrapper.chmod(0o755)
+        custom = tmp / "hud-custom-driver"
+        r = game_build(custom, pkg, ident, cc=str(wrapper))
+        check(r.returncode == 0 and (custom / "game").is_file(), "a program with the Luau VM links through a custom C driver (libstdc++ after the objects): " + r.stdout[-400:] + r.stderr[-400:])
+        # ---- SEG-138 (inherited F07 fix): a log line with a quotation mark and a backslash stays valid JSON and round-trips ----
+        log_pkg, log_built = pack(project("luau-log", script='function reset() sega.log("say \\"hi\\" back\\\\slash plain") end\nfunction render(f) end\n'), build=True)
+        logd = tmp / "hud-log"
+        r = game_build(logd, log_pkg, log_built["package_identity"])
+        check(r.returncode == 0 and (logd / "game").is_file(), "the log-escaping package builds: " + r.stdout[-300:] + r.stderr[-300:])
+        if (logd / "game").is_file():
+            _, log_lines = run_game(logd, tmp / "log.bmp")
+            check([x.get("line") for x in log_lines.get("LUAU_MOD_LOG", [])] == ['say "hi" back\\slash plain'], f"the log line round-trips through JSON: {log_lines.get('LUAU_MOD_LOG')}")
+        if (custom / "game").is_file():
+            _, custom_lines = run_game(custom, tmp / "custom.bmp")
+            check(custom_lines.get("LUAU_MOD_LOADED") is not None, "the custom-driver program runs the Luau mod")
         st = status(hud)["luau"]
         check(st["package_identity"] == ident and st["bytecode_digest"] == digest and st["original_sha256"] == rom_sha and st["effective_sha256"] == rom_sha and st["capabilities"] == "host.log,overlay.rgba",
               f"status.json records package, image, compiler/bytecode digest and capabilities: {st}")

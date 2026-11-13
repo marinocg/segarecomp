@@ -149,6 +149,17 @@ int main(int argc, char **argv) {
   expect(slurp(entry_a / "status.json").find("\"bytecode_digest\":\"") != std::string::npos && !fs::exists(entry_a / "input"), "the build recorded the verified bytecode digest and left no derivative image");
   expect(!entry_ready_for(entry_a, vanilla, layout) && !entry_ready_for(vanilla_entry, a, layout), "an entry is reusable only for the variant it records (a Vanilla program is never a mod's, nor the reverse)");
   expect(!entry_ready_for(entry_a, b, layout) && !entry_ready_for(entry_a, pin, layout) && !entry_ready_for(entry_a, eff, layout), "another package, compiler pin or image never accepts this program");
+  {   // a syntactically valid but DIFFERENT bytecode digest in the cached metadata is refused (it must agree with the build's own status.json); restoring it makes the entry ready again
+    const std::string at = "\"luau_bytecode_digest\":\"";
+    std::string altered = meta_a;
+    const std::size_t pos = altered.find(at) + at.size();
+    const std::string original = altered.substr(pos, 64U);
+    altered.replace(pos, 64U, std::string(64U, original[0] == 'a' ? 'b' : 'a'));
+    { std::ofstream out(entry_a / "metadata.json", std::ios::binary | std::ios::trunc); out << altered; }
+    expect(!entry_ready_for(entry_a, a, layout), "a metadata bytecode digest that differs from status.json refuses the entry");
+    { std::ofstream out(entry_a / "metadata.json", std::ios::binary | std::ios::trunc); out << meta_a; }
+    expect(entry_ready_for(entry_a, a, layout), "the unaltered record is accepted again");
+  }
   const std::string game_a = digest_of_file(entry_executable(entry_a));
   // the second identical request: the entry is ready for it, so the launcher reuses it and starts no build
   RomView a3 = vanilla;
