@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -166,7 +167,8 @@ const GenesisModRange kRanges[] = {
 };
 
 struct Harness {
-  GenesisRuntime rt;
+  std::unique_ptr<GenesisRuntime> rt_heap{new GenesisRuntime};   // 150 KB: never on the (1 MB on Windows) stack
+  GenesisRuntime &rt = *rt_heap;
   GenesisModScheduler *sched = new GenesisModScheduler;
   SegaModProvider provider = make_provider();
   std::vector<std::string> sink;
@@ -325,7 +327,8 @@ void render_phase_is_read_only() {
     check(got == c.cause, "render snapshot read at " + std::to_string(c.offset) + " w" + std::to_string(c.width) + ": '" + got + "' want '" + c.cause + "'");
     if (got.empty()) continue;
     // the fault disables the mod and the guest continues exactly as Vanilla
-    GenesisRuntime vanilla;
+    auto vanilla_heap = std::make_unique<GenesisRuntime>();   // 150 KB: never on the (1 MB on Windows) stack
+    GenesisRuntime &vanilla = *vanilla_heap;
     setup(vanilla);
     run_frames(vanilla, 2U);
     check(x.sched->disabled && guest_digest(x.rt) == guest_digest(vanilla), "a faulted render read leaves the guest equal to Vanilla");
@@ -334,7 +337,8 @@ void render_phase_is_read_only() {
 
 // ---- T001: vanilla runs are bit-identical with a scheduler attached ----
 void vanilla_is_bit_identical() {
-  GenesisRuntime vanilla;
+  auto vanilla_heap = std::make_unique<GenesisRuntime>();   // 150 KB: never on the (1 MB on Windows) stack
+  GenesisRuntime &vanilla = *vanilla_heap;
   setup(vanilla);
   run_frames(vanilla, 4U);
   const std::string base = guest_digest(vanilla);
@@ -517,7 +521,8 @@ void wram_matrix() {
     c.ranges = decl.data();
     c.range_count = static_cast<uint32_t>(decl.size());
     GenesisModScheduler *s = new GenesisModScheduler;
-    GenesisRuntime r;
+    auto r_heap = std::make_unique<GenesisRuntime>();   // 150 KB: never on the (1 MB on Windows) stack
+    GenesisRuntime &r = *r_heap;
     setup(r);
     const char *why = "";
     check(genesis_mod_scheduler_attach(s, &r, &c, &why) == 1 && std::string(why) == "E_RANGE_DECLARATION", "an invalid declared range is refused at load");
@@ -531,7 +536,8 @@ void wram_matrix() {
   c.ranges = write_without_cap;
   c.range_count = 1;
   GenesisModScheduler *s = new GenesisModScheduler;
-  GenesisRuntime r;
+  auto r_heap = std::make_unique<GenesisRuntime>();   // 150 KB: never on the (1 MB on Windows) stack
+  GenesisRuntime &r = *r_heap;
   setup(r);
   const char *why = "";
   check(genesis_mod_scheduler_attach(s, &r, &c, &why) == 1 && std::string(why) == "E_RANGE_DECLARATION", "a write range without memory.write is refused at load");
@@ -567,7 +573,8 @@ void wram_budgets_and_atomicity() {
     g_probe.script.ops = {{Op::write, 1, 0x100, 4, 0xDEADBEEFU}, {Op::write, 1, 0x300, 1, 1}};
     run_frames(h.rt, 3U);
     check(h.sched->fault.faulted && h.rt.work_ram[0x100] == 0U, "staged writes before the violation are discarded");
-    GenesisRuntime vanilla;
+    auto vanilla_heap = std::make_unique<GenesisRuntime>();   // 150 KB: never on the (1 MB on Windows) stack
+    GenesisRuntime &vanilla = *vanilla_heap;
     setup(vanilla);
     run_frames(vanilla, 3U);
     // The mod made no committed change, so the guest is bit-identical to Vanilla from the fault on.
@@ -580,7 +587,8 @@ void wram_budgets_and_atomicity() {
     g_probe.script.frame = 0;
     g_probe.script.ops = {{Op::write, 1, 0x120, 1, 0x40}};
     run_frames(h.rt, 2U);
-    GenesisRuntime vanilla;
+    auto vanilla_heap = std::make_unique<GenesisRuntime>();   // 150 KB: never on the (1 MB on Windows) stack
+    GenesisRuntime &vanilla = *vanilla_heap;
     setup(vanilla);
     run_frames(vanilla, 2U);
     check(guest_digest(h.rt) != guest_digest(vanilla), "a committed mod write changes the guest");

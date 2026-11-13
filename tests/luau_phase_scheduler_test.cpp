@@ -163,7 +163,8 @@ struct LogCollector {
 Outcome run(const SegaModProvider *provider, void *state, uint32_t mask, uint64_t required[2], const GenesisModRange *ranges, uint32_t range_count, uint64_t frames, uint8_t pad1,
             const std::vector<std::pair<uint32_t, uint64_t>> *trace_out = nullptr) {
   (void)trace_out;
-  GenesisRuntime rt;
+  auto rt_heap = std::make_unique<GenesisRuntime>();   // 150 KB: never on the (1 MB on Windows) stack
+  GenesisRuntime &rt = *rt_heap;
   setup(rt);
   rt.pad1 = pad1;
   auto *sched = new GenesisModScheduler;
@@ -276,7 +277,8 @@ void parity_of_the_same_behavior() {
   check(luau.write_log == nat.write_log && luau.write_records == nat.write_records && nat.write_records >= 10U, "C11 and Luau commit the same writes (" + std::to_string(nat.write_records) + " records)");
   check(luau.lines == nat.lines && !nat.lines.empty(), "C11 and Luau log the same lines");
   // The mod really changed the guest: it differs from Vanilla.
-  GenesisRuntime vanilla;
+  auto vanilla_heap = std::make_unique<GenesisRuntime>();   // 150 KB: never on the (1 MB on Windows) stack
+  GenesisRuntime &vanilla = *vanilla_heap;
   setup(vanilla);
   vanilla.pad1 = GENESIS_PAD_RIGHT;
   run_frames(vanilla, 4U);
@@ -417,7 +419,8 @@ void luau_fault_isolation() {
   const Outcome o = run(lm.provider->provider(), lm.provider->state(), lm.provider->phase_mask(), req, kRanges, 2U, 4U, 0U);
   check(o.faulted && o.fault_cause == "error" && o.fault_text == "E_MOD_FAULT cause=error mod=parity phase=frame-end frame=1", "a script error faults the callback: " + o.fault_text);
   check(o.write_records == 1U, "frame 0's write committed; frame 1's staged write was discarded with the faulting callback");
-  GenesisRuntime vanilla;
+  auto vanilla_heap = std::make_unique<GenesisRuntime>();   // 150 KB: never on the (1 MB on Windows) stack
+  GenesisRuntime &vanilla = *vanilla_heap;
   setup(vanilla);
   run_frames(vanilla, 4U);
   check(o.guest != guest_digest(vanilla), "the committed frame-0 write is the only residue (documented fault-isolation boundary)");
@@ -427,7 +430,8 @@ void luau_fault_isolation() {
   uint64_t none[2] = {cap(SEGA_MOD_CAP_HOST_LOG), 0};
   const Outcome b = run(loop.provider->provider(), loop.provider->state(), loop.provider->phase_mask(), none, nullptr, 0U, 2U, 0U);
   check(b.faulted && b.fault_cause == "budget" && b.fault_text.find("phase=frame-begin frame=0") != std::string::npos, "an infinite loop is a deterministic budget fault: " + b.fault_text);
-  GenesisRuntime vanilla2;
+  auto vanilla2_heap = std::make_unique<GenesisRuntime>();   // 150 KB: never on the (1 MB on Windows) stack
+  GenesisRuntime &vanilla2 = *vanilla2_heap;
   setup(vanilla2);
   run_frames(vanilla2, 2U);
   check(b.guest == guest_digest(vanilla2), "after a fault with no committed effect the guest equals Vanilla");
@@ -444,7 +448,8 @@ void luau_render_read_is_a_phase_fault() {
   check((req[0] & cap(SEGA_MOD_CAP_FRAME_WORK_RAM)) != 0U && (req[0] & cap(SEGA_MOD_CAP_MEMORY_READ)) != 0U, "both capabilities are granted");
   const Outcome o = run(lm.provider->provider(), lm.provider->state(), lm.provider->phase_mask(), req, kReadRange, 1U, 3U, 0U);
   check(o.faulted && o.fault_cause == "phase" && o.fault_text == "E_MOD_FAULT cause=phase mod=parity phase=render frame=0", "deterministic phase fault: " + o.fault_text);
-  GenesisRuntime vanilla;
+  auto vanilla_heap = std::make_unique<GenesisRuntime>();   // 150 KB: never on the (1 MB on Windows) stack
+  GenesisRuntime &vanilla = *vanilla_heap;
   setup(vanilla);
   run_frames(vanilla, 3U);
   check(o.guest == guest_digest(vanilla), "the guest continues unmodified");
@@ -460,7 +465,8 @@ void luau_observer_is_bit_identical() {
   uint64_t req[2];
   lm.provider->capabilities(req);
   const Outcome o = run(lm.provider->provider(), lm.provider->state(), lm.provider->phase_mask(), req, nullptr, 0U, 4U, GENESIS_PAD_LEFT);
-  GenesisRuntime vanilla;
+  auto vanilla_heap = std::make_unique<GenesisRuntime>();   // 150 KB: never on the (1 MB on Windows) stack
+  GenesisRuntime &vanilla = *vanilla_heap;
   setup(vanilla);
   vanilla.pad1 = GENESIS_PAD_LEFT;
   run_frames(vanilla, 4U);
