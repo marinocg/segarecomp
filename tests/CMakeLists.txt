@@ -422,6 +422,18 @@ add_test(NAME genesis_push_then_rts_computed_jump_generated_test COMMAND ${Pytho
 add_test(NAME genesis_hint_root_push_then_rts_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_hint_root_push_then_rts_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-138-T003/T004 (ADR 0298, delivery F09): statically resolved function hooks - no-op equivalence over 600 frames, callback order, replacement, call forms, unhooked-text identity, the
+# dispatch-boundary step (generated-native, strict C11) and one negative build test per rejected site class.
+add_test(NAME genesis_function_hook_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_function_hook_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME genesis_function_hook_reject_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_function_hook_reject_test.py $<TARGET_FILE:m68k_pipeline_tests>)
+# SEG-138-T005: callback ordering, cycle visibility and transactional failure of one mod's hooks through the real scheduler driving a generated hooked program.
+add_test(NAME genesis_mod_hook_scheduler_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_mod_hook_scheduler_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_function_hook_generated_test genesis_function_hook_reject_test genesis_mod_hook_scheduler_test APPEND PROPERTY LABELS full fast)
 # SEG-021-T041 / ADR 0049: immutable-copy alias (verbatim ROM-to-work-RAM copy executed at RAM-relative
 # semantics, guarded by a runtime byte-identity comparison; strict-C11 compile/execute proof).
 add_test(NAME genesis_pea_static_return_generated_test COMMAND ${Python3_EXECUTABLE}
@@ -2272,16 +2284,22 @@ add_test(NAME mod_sources_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOU
   ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/mod_sdk ${PROJECT_SOURCE_DIR}/docs/product/sdk-sample/provider.c)
 add_test(NAME mod_audio_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_audio_test.py $<TARGET_FILE:segarecomp>)
 add_test(NAME mod_workflow_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_workflow_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER})
+add_test(NAME mod_hooks_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_hooks_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR}/platforms ${CMAKE_C_COMPILER})
 add_test(NAME mod_edits_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_edits_test.py $<TARGET_FILE:segarecomp>)
 # SEG-136-T003..T006 (ADR 0292/0293, delivery F05): bounded guest assembly/injection, collisions, header repair, deterministic BPS; the injected routine is then run through the generated-native path.
 add_test(NAME mod_guest_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_guest_test.py $<TARGET_FILE:segarecomp>)
 add_test(NAME mod_guest_exec_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_guest_exec_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_executable(mod_hooks_resolve_test mod_hooks_resolve_test.cpp)
+target_link_libraries(mod_hooks_resolve_test PRIVATE segarecomp::media)
+segarecomp_enable_warnings(mod_hooks_resolve_test)
+add_test(NAME mod_hooks_resolve_test COMMAND mod_hooks_resolve_test)
+set_property(TEST mod_hooks_resolve_test APPEND PROPERTY LABELS full fast)
 add_executable(patch_bps_writer_test patch_bps_writer_test.cpp)
 target_link_libraries(patch_bps_writer_test PRIVATE segarecomp::media)
 segarecomp_enable_warnings(patch_bps_writer_test)
 add_test(NAME patch_bps_writer_test COMMAND patch_bps_writer_test)
 set_property(TEST patch_bps_writer_test APPEND PROPERTY LABELS full fast)
-foreach(_mod_test mod_package_test mod_project_test mod_sources_test mod_audio_test mod_workflow_test mod_edits_test mod_guest_test mod_guest_exec_test)
+foreach(_mod_test mod_package_test mod_project_test mod_sources_test mod_audio_test mod_workflow_test mod_edits_test mod_hooks_test mod_guest_test mod_guest_exec_test)
   set_property(TEST ${_mod_test} APPEND PROPERTY LABELS full fast)
   set_property(TEST ${_mod_test} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 endforeach()

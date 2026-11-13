@@ -3219,7 +3219,8 @@ M68kC4Preflight preflight_m68k_general_startup_c4(const FrontendPartialProgram &
 }
 
 std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::string_view header,
-                                                       const FrontendPartialProgram &partial) {
+                                                       const FrontendPartialProgram &partial,
+                                                       const M68kFunctionHookPlan *hook_plan) {
   const auto preflight = preflight_m68k_general_startup_c4(partial);
   if (!preflight.valid) return "/* translation rejected: invalid C4 retained prefix */\n";
   const auto aot_entries = validated_immutable_rom_aot_entries(partial.accepted_prefix);
@@ -6603,7 +6604,18 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     if (auto rejection = emit_compiled_entry_table(out, compiled_entry_bindings); !rejection.empty()) return rejection;
     if (sharded) shard_end_unit(out);
   }
-  out << "\nstatic GenesisControlTransfer genesis_dispatch(GenesisRuntime *runtime) {\n";
+  // SEG-138-T004 (ADR 0298): a program with hook sites resolves them against the compiled program and routes `genesis_dispatch` through the hook step first; the ordinary dispatch keeps
+  // its exact text under the name `genesis_dispatch_unhooked`. A program without a plan emits the original text, byte for byte.
+  std::string hook_wrapper;
+  if (hook_plan != nullptr && !hook_plan->sites.empty()) {
+    const auto resolution = resolve_m68k_function_hooks(partial, *hook_plan);
+    if (!resolution.ok)
+      return "/* translation rejected: " + resolution.rejection.code + ": " + resolution.rejection.message + " (hook " +
+             (resolution.rejection.site < hook_plan->sites.size() ? hook_plan->sites[resolution.rejection.site].id : std::string("-")) + ") */\n";
+    hook_wrapper = emit_m68k_function_hook_wrapper(*hook_plan, resolution);
+  }
+  if (!hook_wrapper.empty()) out << "\n#include \"function_hooks.h\"\n";
+  out << "\nstatic GenesisControlTransfer " << (hook_wrapper.empty() ? "genesis_dispatch" : "genesis_dispatch_unhooked") << "(GenesisRuntime *runtime) {\n";
   if (any_direct_binding)
     out << "  { const size_t entry_index = genesis_compiled_entry_find(runtime->pc);\n"
         << "    if (entry_index != GENESIS_NO_COMPILED_ENTRY) return genesis_compiled_entry_invoke(runtime, entry_index);\n"
@@ -6624,20 +6636,71 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   for (const auto &[address, suffix] : frontier_stop_names)
     out << "  if (runtime->pc == UINT32_C(" << hex(address, 8) << ")) return genesis_frontier_stop_" << suffix
         << "(runtime);\n";
-  out << "  return genesis_internal_dispatch_inconsistency_stop(runtime);\n}\n\n"
+  out << "  return genesis_internal_dispatch_inconsistency_stop(runtime);\n}\n\n" << hook_wrapper
       << "GenesisControlTransfer genesis_bridge_dispatch(GenesisRuntime *runtime) {\n"
       << "  return genesis_dispatch(runtime);\n}\n";
   return {};  // success: text was streamed to `out`; non-empty return is a rejection
 }
 
-std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &partial) {
+M68kHookResolution resolve_m68k_function_hooks(const FrontendPartialProgram &partial, const M68kFunctionHookPlan &plan) {
+  const auto aot_entries = validated_immutable_rom_aot_entries(partial.accepted_prefix);
+  if (!aot_entries) {
+    M68kHookResolution rejected;
+    rejected.ok = false;
+    rejected.rejection = {"E_HOOK_NOT_COMPILED", 0U, "the compiled program has no valid immutable-ROM instruction set"};
+    return rejected;
+  }
+  std::vector<M68kHookCodeInsn> code;
+  for (const auto &[address, entry] : *aot_entries) code.push_back({&entry->operation, entry->execution_alias || entry->materialized_ram_thunk});
+  std::vector<std::uint32_t> roots;
+  if (partial.accepted_prefix.startup_ingress) roots.push_back(partial.accepted_prefix.startup_ingress->entry.value);
+  std::vector<std::uint32_t> vectors = plan.vectors;
+  if (partial.accepted_prefix.irq6_handler_entry) vectors.push_back(partial.accepted_prefix.irq6_handler_entry->value);
+  return classify_m68k_function_hooks(code, roots, vectors, plan.sites);
+}
+
+std::string emit_m68k_function_hook_wrapper(const M68kFunctionHookPlan &plan, const M68kHookResolution &resolution) {
+  // Sites sorted by entry (the runtime binary-searches them); ids are tokens, so a plain C string literal is safe.
+  std::vector<std::size_t> order(plan.sites.size());
+  for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+  std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) { return plan.sites[a].entry < plan.sites[b].entry; });
+  std::ostringstream continuations, table;
+  std::size_t continuation_count = 0U;
+  for (const std::size_t index : order) {
+    const auto &site = plan.sites[index];
+    const auto &resolved = resolution.sites[index];
+    const std::size_t begin = continuation_count;
+    for (const auto address : resolved.continuations) {
+      continuations << (continuation_count == 0U ? "" : ", ") << "UINT32_C(" << hex(address, 8) << ")";
+      ++continuation_count;
+    }
+    const char *mode = site.mode == M68kHookMode::replace ? "GENESIS_HOOK_MODE_REPLACE"
+                       : site.mode == M68kHookMode::before ? "GENESIS_HOOK_MODE_BEFORE"
+                       : site.mode == M68kHookMode::after  ? "GENESIS_HOOK_MODE_AFTER"
+                                                           : "GENESIS_HOOK_MODE_BEFORE | GENESIS_HOOK_MODE_AFTER";
+    table << "  { UINT32_C(" << hex(site.entry, 8) << "), \"" << site.id << "\", " << mode << ", UINT32_C(" << hex(site.reads, 8) << "), UINT32_C(" << hex(site.writes, 8)
+          << "), UINT32_C(" << site.cost << "), UINT32_C(" << begin << "), UINT32_C(" << resolved.continuations.size() << ") },\n";
+  }
   std::ostringstream out;
-  auto rejection = emit_m68k_general_startup_runtime_c_to(out, emit_genesis_runtime_c11_include(), partial);
+  out << "/* SEG-138-T004: statically resolved function hooks (ADR 0298): sites sorted by entry, then the call continuations each site accepts. */\n"
+      << "static const uint32_t genesis_hook_continuations[] = { " << continuations.str() << " };\n"
+      << "static const GenesisHookSiteInfo genesis_hook_sites[] = {\n" << table.str() << "};\n"
+      << "static GenesisControlTransfer genesis_dispatch(GenesisRuntime *runtime) {\n"
+      << "  GenesisControlTransfer hooked = {0};\n"
+      << "  if (genesis_function_hook_step(runtime, genesis_hook_sites, sizeof genesis_hook_sites / sizeof genesis_hook_sites[0], genesis_hook_continuations, &hooked) != 0) return hooked;\n"
+      << "  return genesis_dispatch_unhooked(runtime);\n}\n\n";
+  return out.str();
+}
+
+std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &partial, const M68kFunctionHookPlan *hook_plan) {
+  std::ostringstream out;
+  auto rejection = emit_m68k_general_startup_runtime_c_to(out, emit_genesis_runtime_c11_include(), partial, hook_plan);
   return rejection.empty() ? out.str() : rejection;
 }
 
 std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const FrontendPartialProgram &partial,
-                                                   std::string_view rom_sha256, bool execution_history_hooks) {
+                                                   std::string_view rom_sha256, bool execution_history_hooks,
+                                                   const M68kFunctionHookPlan *hook_plan) {
   const ExecutionHistoryHooksScope hooks_scope(execution_history_hooks);
   if (!valid_bridge_rom_sha256(rom_sha256))
     return "/* translation rejected: invalid bridge ROM SHA-256 */\n";
@@ -6728,7 +6791,7 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
   } else {
     prelude = emit_genesis_bridge_c11_prelude(rom_sha256, *cpu_dimensions);
   }
-  if (auto rejection = emit_m68k_general_startup_runtime_c_to(sink, prelude, partial); !rejection.empty())
+  if (auto rejection = emit_m68k_general_startup_runtime_c_to(sink, prelude, partial, hook_plan); !rejection.empty())
     return rejection;
   if (owned_region_count != 0U) {
     sink << owned_region_data.str() << "static const GenesisOwnedCartridgeRegion genesis_owned_cartridge_regions[] = {\n"
@@ -6839,9 +6902,10 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
 }
 
 std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &partial,
-                                                   std::string_view rom_sha256, bool execution_history_hooks) {
+                                                   std::string_view rom_sha256, bool execution_history_hooks,
+                                                   const M68kFunctionHookPlan *hook_plan) {
   std::ostringstream out;
-  auto rejection = emit_m68k_general_startup_bridge_c_to(out, partial, rom_sha256, execution_history_hooks);
+  auto rejection = emit_m68k_general_startup_bridge_c_to(out, partial, rom_sha256, execution_history_hooks, hook_plan);
   return rejection.empty() ? out.str() : rejection;
 }
 

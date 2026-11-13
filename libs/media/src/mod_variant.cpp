@@ -33,6 +33,10 @@ VariantIdentity variant_identity(const Package &package, std::string_view origin
                   {"source_digest", digest_of(join(sources))},
                   {"abi", std::to_string(m.abi_native)},
                   {"capabilities", digest_of(join(caps) + "|" + join(optional))}};
+  if (!m.hooks.empty()) {   // ADR 0298: the resolved hook table (ids, addresses, modes, register masks, costs) selects the generated program, so it keys the variant and the build cache
+    const auto revision = std::find_if(m.revisions.begin(), m.revisions.end(), [&](const Revision &r) { return r.sha256 == original_sha256; });
+    if (revision != m.revisions.end()) v.components.push_back({"hooks", digest_of(hook_table_text(resolve_hooks(m, revision->label)))});
+  }
   if (!luau_bytecode_digest.empty()) v.components.push_back({"luau_bytecode", std::string(luau_bytecode_digest)});
   v.key = digest_of(serialize_components(v.components));
   return v;

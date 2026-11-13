@@ -36,6 +36,7 @@ Columns: **Owner** (the single party allowed to mutate the space), **Phases** (w
 
 | Space | Owner | Phases | R/W/H | Endian / width | Rule |
 |---|---|---|---|---|---|
+| `m68k.hook_regs` (register view of the hook in flight) | M68K | `hook-entry`/`hook-exit` only (the `cycles` slot in every live phase); writes only in `hook-entry` of a `replace` hook, declared slots | R declared slots; W declared D0-D7/A0-A6/CCR; H n/a | 32-bit slots | not memory: slot numbers, ADR [0298](../decisions/0298-genesis-static-function-hooks.md) |
 | `m68k.rom` (cartridge ROM) | image | none at runtime | read: build time only; write: never; hook: M68K sites resolved at build time against the exact digest | big-endian; 8/16/32 | ROM is immutable at runtime; typed edits are build-time, ADR [0290](../decisions/0290-typed-rom-edits-and-revision-symbols.md) |
 | `m68k.work_ram` (64 KiB) | M68K | read in every phase (in `render` only through the `frame.work_ram` copy); write only in `frame-begin`, `post-input`, `hook-entry`, `hook-exit`, `frame-end` (T004) | R yes; W yes if `memory.write.m68k.work_ram`; H n/a | big-endian; 8/16/32, 16/32 aligned | the only mod-writable Genesis space |
 | `z80.ram` (8 KiB window at `$A00000`) | Z80 / bus arbiter | read in `frame-begin`, `frame-end` only while the Z80 is not running a conflicting access | R limited; W **no**; H no | byte-addressed window | static-first Z80 materialization (ADR 0073, 0135) is invalidated by writes, so no mod write |

@@ -37,6 +37,7 @@ inline constexpr std::size_t kMaxLuauFiles = 64, kMaxLuauFileBytes = 128U << 10U
 inline constexpr std::size_t kMaxAssets = 128, kMaxAssetBytes = 8U << 20U;
 inline constexpr std::size_t kMaxCapabilities = 32, kMaxRevisions = 16, kMaxMappings = 64;
 inline constexpr std::size_t kMaxSymbols = 255;   // manifest `symbols` entries (ADR 0290)
+inline constexpr std::size_t kMaxHooks = 64;      // manifest `hooks` entries (ADR 0298)
 inline constexpr std::uint32_t kMaxAudioSeconds = 600;
 inline constexpr std::uint64_t kLuauMemoryPolicyMax = 4194304, kLuauBudgetPolicyMax = 100000;
 inline constexpr unsigned kNativeAbiMajor = 2;
@@ -118,6 +119,18 @@ struct Symbol {
 };
 inline constexpr std::string_view kSymbolProvenance[] = {"manual", "verified", "imported-hint"};
 
+// A statically resolved guest-function hook declaration (ADR 0298, mod-execution-phases.md section 5). `symbol` names a VERIFIED symbol of the revision (`revision` empty = every declared revision);
+// `mode` is before | after | before-after | replace. `reads` are register-view names the callback may read (d0..d7, a0..a7, ccr, cycles, stack0..stack7); a replace hook additionally declares
+// `writes` (d0..d7, a0..a6, ccr) and the guest `cost` in cycles charged for the replaced function. Names are sorted ascending without duplicates (a canonical manifest).
+struct Hook {
+  std::string id, symbol, revision, cpu, mode;
+  std::vector<std::string> reads, writes;
+  bool has_replace = false;
+  std::uint32_t cost = 0;
+  bool operator==(const Hook &) const = default;
+};
+inline constexpr std::string_view kHookModes[] = {"before", "after", "before-after", "replace"};
+
 struct Manifest {
   std::string id, version, name, platform, author, license, purpose;
   std::string source_kind;                       // cartridge-image | disc-image (reserved)
@@ -128,11 +141,12 @@ struct Manifest {
   unsigned state_schema = 0;                     // 0 = none
   bool has_limits = false;
   std::uint64_t luau_memory_bytes = 0, luau_budget_units = 0;   // 0 = not requested
-  bool has_geometry = false, has_hooks = false;  // reserved keys, present but empty
+  bool has_geometry = false, has_hooks = false;  // `geometry` is a reserved key (present but empty); `hooks` holds the declarations below
   std::string default_widescreen, default_side_style;
   std::vector<Payload> payloads;
   std::vector<Mapping> mappings;
   std::vector<Symbol> symbols;                   // sorted by (name, revision) in a canonical manifest
+  std::vector<Hook> hooks;                       // sorted by id in a canonical manifest (ADR 0298)
   std::string header_repair;                     // "" (default), "genesis-checksum" or "none" (ADR 0293)
   bool operator==(const Manifest &) const = default;
 };
@@ -217,6 +231,31 @@ struct EditRanges {
 };
 [[nodiscard]] EditRanges rom_edit_ranges(const Manifest &manifest, std::span<const std::uint8_t> text, std::string_view revision);
 [[nodiscard]] std::optional<std::uint32_t> verified_symbol(const Manifest &manifest, const std::string &name, const std::string &revision, Rejection &why);
+
+// ---- function hooks (SEG-138-T004, ADR 0298) ----
+// Register-view bit of a name (mod-execution-phases.md 5.3): d0..d7 = 0..7, a0..a7 = 8..15, ccr = 16, cycles = 17, stack0..stack7 = 24..31. Writable names are d0..d7, a0..a6, ccr.
+[[nodiscard]] std::optional<std::uint32_t> hook_register_bit(std::string_view name, bool writable);
+// One hook resolved for one revision: symbol -> image address through a VERIFIED symbol, masks from the names.
+struct ResolvedHook {
+  std::string id, cpu, mode;
+  std::uint32_t entry = 0, reads = 0, writes = 0, cost = 0;
+  bool replace_declared = false, flags_written = false;
+};
+struct ResolvedHooks {
+  bool ok = false;
+  Rejection rejection;
+  std::string revision;
+  std::vector<ResolvedHook> hooks;   // in manifest (id) order
+};
+// Declaration-level check run by the reader and `mod check` for EVERY declared revision: platform/CPU, ids, modes, register names, replacement contract, revision labels, verified symbols (E_SYMBOL_*)
+// and per-revision site overlap. Stable classes: E_HOOK_COUNT, E_HOOK_ID, E_HOOK_MODE, E_HOOK_CPU_UNSUPPORTED, E_HOOK_OVERLAY_UNRESOLVED, E_HOOK_REGISTER, E_HOOK_REPLACE_CONTRACT, E_HOOK_REVISION,
+// E_HOOK_MID_INSTRUCTION (odd address), E_HOOK_OVERLAP.
+[[nodiscard]] std::optional<Rejection> check_hooks(const Manifest &manifest);
+[[nodiscard]] ResolvedHooks resolve_hooks(const Manifest &manifest, std::string_view revision);
+// The revision is selected by the image's SHA-256 (as everywhere in schema 3); another image is E_HOOK_DIGEST.
+[[nodiscard]] ResolvedHooks resolve_hooks_for_image(const Manifest &manifest, std::span<const std::uint8_t> image);
+// Canonical text of the resolved hook table (the hook identity: ids, addresses, modes, masks, costs), "" when there is none.
+[[nodiscard]] std::string hook_table_text(const ResolvedHooks &resolved);
 
 // ---- guest assembly, bounded injection, collisions, header repair (SEG-136-T003..T005, ADR 0292/0293) ----
 // A `guest-asm` payload (kind_version 1, `cpu` m68k | z80) is ASCII text assembled by the in-tree bounded assembler (no includes, macros, host paths or clock). Statements, one per line, `;` comments:

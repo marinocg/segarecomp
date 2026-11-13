@@ -814,6 +814,47 @@ typedef struct GenesisFrameHooks {
   void (*after_snapshot)(void *ctx, struct GenesisRuntime *runtime);
 } GenesisFrameHooks;
 
+/*
+ * SEG-138-T003/T004 (ADR 0298): static function hooks. A program built with hook sites carries a const site table (GenesisHookSiteInfo, generated, sorted by entry) and routes its dispatch
+ * through `genesis_function_hook_step` (function_hooks.h) BEFORE the ordinary dispatch; a program without sites contains none of this. `GenesisRuntime::function_hooks` is the optional,
+ * host-owned (mod scheduler) callback set and call-frame stack; NULL (every ordinary program, and a hooked program with no mod) means every hook is skipped and guest state is bit-identical.
+ * The callbacks take zero guest time; a replacement is charged its declared constant. Never serialized.
+ */
+#define GENESIS_HOOK_MODE_BEFORE 1U
+#define GENESIS_HOOK_MODE_AFTER 2U
+#define GENESIS_HOOK_MODE_REPLACE 4U
+#define GENESIS_HOOK_FRAMES_MAX 32U
+
+typedef struct GenesisHookSiteInfo {
+  uint32_t entry;          /* image address of the hooked function's first instruction */
+  const char *id;          /* the declaration's id (printable ASCII token) */
+  uint32_t mode;           /* GENESIS_HOOK_MODE_* (before|after, or replace alone) */
+  uint32_t reads;          /* register-view bits the callback may read (function_hooks.h) */
+  uint32_t writes;         /* register-view bits a replacement may write */
+  uint32_t cost;           /* guest cycles charged when the function is replaced */
+  uint32_t continuation_begin, continuation_count; /* slice of the generated continuation table: the return addresses of every static direct call */
+} GenesisHookSiteInfo;
+
+typedef struct GenesisHookFrame {
+  const GenesisHookSiteInfo *site;
+  uint32_t return_pc;
+  uint32_t entry_sp; /* A7 at the first instruction of the function (it points at the return address) */
+} GenesisHookFrame;
+
+struct GenesisRuntime;
+typedef struct GenesisFunctionHooks {
+  void *ctx;
+  /* mode before / replace at the entry boundary. Returns 1 only when the site is `replace` and the replacement committed (the original function must not run); otherwise 0. */
+  int (*enter)(void *ctx, struct GenesisRuntime *runtime, const GenesisHookSiteInfo *site, uint32_t entry_sp);
+  /* mode after: the function returned through its original return address and stack pointer. */
+  void (*leave)(void *ctx, struct GenesisRuntime *runtime, const GenesisHookSiteInfo *site, uint32_t entry_sp);
+  /* optional diagnostics: `kind` is 1 = frame abandoned (the function did not return through its original address/SP), 2 = call from an unproven caller (hook skipped), 3 = frame stack full (hook skipped). */
+  void (*skipped)(void *ctx, struct GenesisRuntime *runtime, const GenesisHookSiteInfo *site, uint32_t kind);
+  GenesisHookFrame frames[GENESIS_HOOK_FRAMES_MAX];
+  uint32_t depth;
+  uint64_t abandoned, unproven_callers, overflowed; /* deterministic counters */
+} GenesisFunctionHooks;
+
 typedef struct GenesisRuntime {
   uint32_t d[8];
   uint32_t a[8];
@@ -962,6 +1003,8 @@ typedef struct GenesisRuntime {
   GenesisLiveFrameObserver *live_frame_observer;
   /* SEG-138-T001: optional host-owned frame-phase hooks of the mod scheduler (NULL = absent = exactly today's behaviour). Non-semantic when absent; never serialized. */
   const GenesisFrameHooks *frame_hooks;
+  /* SEG-138-T004: optional host-owned static function-hook callbacks and frame stack (NULL = absent). Never serialized. */
+  GenesisFunctionHooks *function_hooks;
   /* SEG-055: optional host-owned scanline capture for the observer above (NULL == the observer's own `producer` renders
      the final snapshot). Non-semantic, never serialized. */
   GenesisRasterCapture *live_raster;

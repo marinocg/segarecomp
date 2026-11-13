@@ -4,8 +4,7 @@
 /*
  * SEG-138-T001/T002 (ADR 0297): the ONE Genesis mod phase scheduler, shared by native C11 (ABI 2) providers and the Luau adapter.
  *
- * It implements docs/architecture/mod-execution-phases.md for the phases `reset`, `frame-begin`, `input`, `post-input`, `frame-end` and `render` (the hook phases are SEG-138-T004
- * and are refused). Callbacks run only on the dispatch boundaries the runtime exposes through `GenesisFrameHooks`, take zero guest time and never change the guest clock. Every host
+ * It implements docs/architecture/mod-execution-phases.md for the phases `reset`, `frame-begin`, `input`, `post-input`, `frame-end` and `render` (the hook phases `hook-entry`/`hook-exit` are the dispatch-boundary phases of the static function hooks, ADR 0298). Callbacks run only on the dispatch boundaries the runtime exposes through `GenesisFrameHooks`, take zero guest time and never change the guest clock. Every host
  * service is checked against the capability granted, the phase and the declared range; a violation is a fault: the callback's staged writes/input/log are discarded, the mod is disabled
  * for the rest of the session, a stable `E_MOD_FAULT` diagnostic is surfaced and the guest continues unmodified.
  *
@@ -16,6 +15,7 @@
 #include <stdint.h>
 
 #include "runtime.h"
+#include "function_hooks.h"
 #include <segarecomp_mod_genesis.h>
 
 #ifdef __cplusplus
@@ -44,15 +44,24 @@ typedef struct GenesisModRange {
 
 typedef void (*GenesisModLogSink)(void *ctx, const char *line, uint32_t length);
 
+/* A hook site the mod implements: the generated site `id` (GenesisHookSiteInfo::id) and the `hook_id` the provider's `hook` entry is called with. A site no binding names is not this mod's. */
+typedef struct GenesisModHookBinding {
+  const char *id;
+  uint32_t hook_id;
+} GenesisModHookBinding;
+#define GENESIS_MOD_HOOKS_MAX 64U
+
 typedef struct GenesisModConfig {
   const char *mod_id; /* printable ASCII, used in diagnostics */
   const SegaModProvider *provider;
   void *provider_state;
-  uint32_t phase_mask;  /* registered phases: bit (1u << SegaModPhase); hook phases are refused */
+  uint32_t phase_mask;  /* registered phases: bit (1u << SegaModPhase); hook-entry/hook-exit need hook.function and at least one binding */
   uint64_t required[2]; /* capability ids (bitset); a required capability the scheduler does not support is refused, never dropped */
   uint64_t optional[2]; /* granted only when supported */
   const GenesisModRange *ranges;
   uint32_t range_count;
+  const GenesisModHookBinding *hooks; /* function hooks this mod implements (T004); NULL/0 = none */
+  uint32_t hook_count;
   GenesisModLogSink log_sink; /* host.log lines and fault diagnostics; NULL = discarded */
   void *log_ctx;
 } GenesisModConfig;
@@ -78,6 +87,8 @@ typedef struct GenesisModScheduler {
   SegaGenesisFeatures features;
   GenesisModRange ranges[GENESIS_MOD_RANGES_MAX];
   GenesisRuntime *runtime;
+  GenesisFunctionHooks function_hooks; /* the callback set and call-frame stack of the static function hooks (runtime->function_hooks points here when hook phases are registered) */
+  GenesisModHookBinding bindings[GENESIS_MOD_HOOKS_MAX];
   /* ---- session ---- */
   uint8_t started, disabled;
   uint64_t callbacks_run;
@@ -99,6 +110,15 @@ typedef struct GenesisModScheduler {
   char staged_log[GENESIS_MOD_LOG_LINES_MAX][GENESIS_MOD_LOG_LINE_BYTES + 1U];
   uint32_t staged_log_count;
   int fault_status; /* SegaModStatus of the first violation (SEGA_MOD_OK = none) */
+  /* ---- the function hook in flight (hook-entry / hook-exit callbacks) ---- */
+  const GenesisHookSiteInfo *hook_site;
+  uint32_t hook_entry_sp;
+  uint8_t hook_replaced;       /* the in-flight hook-entry callback asked to replace the function (decided when the callback returns) */
+  uint32_t staged_reg_set;     /* register-view slots a replacement staged (bit per slot) */
+  uint32_t staged_reg[32];
+  uint64_t hook_calls[2];      /* callbacks delivered: [0] hook-entry, [1] hook-exit */
+  uint64_t hook_skips[4];      /* by GenesisFunctionHooks::skipped kind (1 abandoned, 2 unproven caller, 3 frame stack full) */
+  uint32_t hook_skip_logged;   /* one diagnostic line per kind (bit per kind), counters count them all */
   const char *external_cause; /* a fault reported by a host-side adapter (genesis_mod_fault_current), NULL = none */
   /* ---- render copy (only when frame.work_ram is granted) ---- */
   uint8_t render_copy[GENESIS_MOD_WORK_RAM_BYTES];
@@ -112,7 +132,7 @@ typedef struct GenesisModScheduler {
 } GenesisModScheduler;
 
 /* Attaches `scheduler` to `runtime` (sets runtime->frame_hooks). Returns 0, or 1 with *rejection set to a stable class: the SegaModNegotiation classes (E_ABI_*, E_CAPABILITY_UNSUPPORTED),
- * E_PHASE_UNSUPPORTED (no phase, an unknown phase, or a hook phase), E_RANGE_DECLARATION (a declared range outside the space, empty, or with a mode whose capability is not granted) and
+ * E_PHASE_UNSUPPORTED (no phase, an unknown phase, or a hook phase without bindings), E_HOOK_BINDING (a bad or repeated hook id), E_RANGE_DECLARATION (a declared range outside the space, empty, or with a mode whose capability is not granted) and
  * E_PROVIDER_ENTRY (a provider without a `phase` entry or an invalid config). Nothing is attached on rejection. The runtime must not be running. */
 int genesis_mod_scheduler_attach(GenesisModScheduler *scheduler, GenesisRuntime *runtime, const GenesisModConfig *config, const char **rejection);
 /* Detaches: clears the hooks and the pad interception. The scheduler may then be discarded. */

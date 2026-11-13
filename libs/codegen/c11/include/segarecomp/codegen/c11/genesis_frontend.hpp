@@ -3,6 +3,7 @@
 // Genesis-wrapper C11 emitters: M68k lowering composed with the Genesis machine frontend and
 // runtime glue. Depends on codegen_c11_m68k; the reverse edge is forbidden (mechanically tested).
 #include "segarecomp/codegen/c11/m68k.hpp"
+#include "segarecomp/cpu/m68k/function_hooks.hpp"
 #include "segarecomp/codegen/c11/translation_units.hpp"
 #include "segarecomp/machine/genesis/address_space.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
@@ -14,6 +15,18 @@
 #include <vector>
 
 namespace segarecomp {
+
+// SEG-138-T004 (ADR 0298): the statically resolved function hooks of one build. `sites` hold resolved image addresses (the media layer resolves verified symbols; the generator never sees a
+// name); `vectors` are the exception/interrupt vector targets of the image (reset excluded). A null or empty plan emits the exact unhooked program.
+struct M68kFunctionHookPlan {
+  std::vector<M68kHookSite> sites;
+  std::vector<std::uint32_t> vectors;
+};
+// The classification the emitter performs, exposed so a caller (and the tests) can obtain the stable E_HOOK_* class without parsing generated text. The emitter returns the same rejection as
+// "/* translation rejected: E_HOOK_...: ... */".
+[[nodiscard]] M68kHookResolution resolve_m68k_function_hooks(const FrontendPartialProgram &partial, const M68kFunctionHookPlan &plan);
+// The generated text of the hook table and the `genesis_dispatch` wrapper for an accepted resolution.
+[[nodiscard]] std::string emit_m68k_function_hook_wrapper(const M68kFunctionHookPlan &plan, const M68kHookResolution &resolution);
 
 // The Genesis machine owns address classification. The M68k lowering receives only how an
 // operand access is to be emitted.
@@ -57,7 +70,7 @@ struct GenesisM68kEmissionContext : M68kMemoryEmissionContext {
 
 [[nodiscard]] std::string emit_m68k_general_startup_runtime_block_c(const FrontendAnalysis &analysis);
 [[nodiscard]] std::string emit_m68k_general_startup_runtime_c(const FrontendAnalysis &analysis);
-[[nodiscard]] std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &partial);
+[[nodiscard]] std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &partial, const M68kFunctionHookPlan *hook_plan = nullptr);
 [[nodiscard]] M68kC4Preflight preflight_m68k_general_startup_c4(const FrontendPartialProgram &partial);
 // SEG-022-T003: deterministic single-file-vs-sharded selection for the CLI. The compiled-unit count is
 // the same quantity for both accepted result shapes: ordinary static blocks + immutable-ROM AOT entries.
@@ -139,11 +152,13 @@ class ImmutableRomAotOperandSharingScope {
 // materialized as one string. The return value is empty on success; a non-empty return is the
 // "/* translation rejected: ... */" text and any bytes already written to `sink` MUST be discarded.
 [[nodiscard]] std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const FrontendPartialProgram &partial,
-                                                                std::string_view rom_sha256, bool execution_history_hooks = false);
+                                                                std::string_view rom_sha256, bool execution_history_hooks = false,
+                                                                const M68kFunctionHookPlan *hook_plan = nullptr);
 [[nodiscard]] std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const FrontendAnalysis &analysis,
                                                                 std::string_view rom_sha256, bool execution_history_hooks = false);
 [[nodiscard]] std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &partial, std::string_view rom_sha256,
-                                                                    bool execution_history_hooks = false);
+                                                                    bool execution_history_hooks = false,
+                                                                    const M68kFunctionHookPlan *hook_plan = nullptr);
 [[nodiscard]] std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis, std::string_view rom_sha256,
                                                                     bool execution_history_hooks = false);
 [[nodiscard]] std::string emit_m68k_frontend_c(const FrontendAnalysis &analysis, const DirectFlowState &initial, std::uint64_t budget);

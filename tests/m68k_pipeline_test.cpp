@@ -10235,6 +10235,82 @@ int emit_synthetic_vector_aot_bridge(std::size_t vector_offset, const char *hand
   return 0;
 }
 
+
+// SEG-138-T003/T004 (ADR 0298): synthetic hooked bridge emitter (`--emit-synthetic-hooked-bridge <hooks> <vectors> <code-hex>`). The image is a 0x200-byte vector table (SSP $00FF8000, reset PC
+// $200, the listed `offset:target` vector slots in hex) followed by project-authored code at $200, whole-image immutable-ROM AOT. `hooks` is `-` or `;`-separated
+// `id:entry:mode[:reads:writes:cost:flags:contract:cpu]` (mode before|after|both|replace; masks hex; contract 0 = omit the replacement contract). `-` hooks emits the unhooked program. A hook
+// rejection prints `REJECTED <class> <site>` on stdout and returns 3.
+int emit_synthetic_hooked_bridge(const char *hook_text, const char *vector_text, const char *code_hex) {
+  using namespace segarecomp;
+  const std::string text = code_hex;
+  if (text.empty() || text.size() % 2U != 0U) return 2;
+  std::vector<std::uint8_t> img(0x200U, 0x00U);
+  for (std::size_t i = 0; i < text.size(); i += 2U) img.push_back(static_cast<std::uint8_t>(std::stoul(text.substr(i, 2U), nullptr, 16)));
+  const auto be32 = [&](std::size_t off, std::uint32_t v) {
+    for (unsigned b = 0; b < 4U; ++b) img[off + b] = static_cast<std::uint8_t>(v >> (24U - 8U * b));
+  };
+  be32(0x0U, 0x00FF8000U);
+  be32(0x4U, 0x200U);
+  const auto split = [](const std::string &value, char separator) {
+    std::vector<std::string> parts;
+    std::size_t begin = 0U;
+    while (begin <= value.size()) {
+      const auto end = value.find(separator, begin);
+      parts.push_back(value.substr(begin, end == std::string::npos ? std::string::npos : end - begin));
+      if (end == std::string::npos) break;
+      begin = end + 1U;
+    }
+    return parts;
+  };
+  M68kFunctionHookPlan plan;
+  if (std::string_view(vector_text) != "-")
+    for (const auto &item : split(vector_text, ',')) {
+      const auto parts = split(item, ':');
+      if (parts.size() != 2U) return 2;
+      const auto offset = static_cast<std::size_t>(std::stoul(parts[0], nullptr, 16));
+      const auto target = static_cast<std::uint32_t>(std::stoul(parts[1], nullptr, 16));
+      if (offset + 4U > 0x200U) return 2;
+      be32(offset, target);
+      plan.vectors.push_back(target);
+    }
+  if (std::string_view(hook_text) != "-")
+    for (const auto &item : split(hook_text, ';')) {
+      const auto f = split(item, ':');
+      if (f.size() < 3U) return 2;
+      M68kHookSite site;
+      site.id = f[0];
+      site.entry = static_cast<std::uint32_t>(std::stoul(f[1], nullptr, 16));
+      site.mode = f[2] == "before" ? M68kHookMode::before : f[2] == "after" ? M68kHookMode::after : f[2] == "both" ? M68kHookMode::before_after : M68kHookMode::replace;
+      if (f.size() > 3U) site.reads = static_cast<std::uint32_t>(std::stoul(f[3], nullptr, 16));
+      if (f.size() > 4U) site.writes = static_cast<std::uint32_t>(std::stoul(f[4], nullptr, 16));
+      if (f.size() > 5U) site.cost = static_cast<std::uint32_t>(std::stoul(f[5]));
+      if (f.size() > 6U) site.flags_written = f[6] == "1";
+      site.replace_declared = site.mode == M68kHookMode::replace && !(f.size() > 7U && f[7] == "0");
+      if (f.size() > 8U) site.cpu = f[8];
+      plan.sites.push_back(std::move(site));
+    }
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-138/hooks", img, img.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, 0U}, {{}, static_cast<std::uint32_t>(img.size())}, {0U}, {img.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0x200U}, 0x00FF8000U};
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  if (!plan.sites.empty()) {
+    const auto resolution = resolve_m68k_function_hooks(*partial, plan);
+    if (!resolution.ok) {
+      std::cout << "REJECTED " << resolution.rejection.code << " " << resolution.rejection.site << "\n";
+      return 3;
+    }
+  }
+  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'), false, plan.sites.empty() ? nullptr : &plan);
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
 int emit_push_then_rts_source() {
   using namespace segarecomp;
   auto program = push_then_rts_fixture::program_with();
@@ -31296,6 +31372,8 @@ int main(int argc, char **argv) {
     return emit_jmp_pc_indexed_word_aot_source();
   if (argc == 4 && std::string_view(argv[1]) == "--emit-synthetic-irq6-aot-bridge")
     return emit_synthetic_irq6_aot_bridge(argv[2], argv[3]);
+  if (argc == 5 && std::string_view(argv[1]) == "--emit-synthetic-hooked-bridge")
+    return emit_synthetic_hooked_bridge(argv[2], argv[3], argv[4]);
   if (argc == 4 && std::string_view(argv[1]) == "--emit-synthetic-hint-aot-bridge")
     return emit_synthetic_hint_aot_bridge(argv[2], argv[3]);
   if (argc == 4 && std::string_view(argv[1]) == "--emit-synthetic-aot-source")

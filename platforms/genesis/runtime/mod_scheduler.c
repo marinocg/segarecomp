@@ -8,17 +8,18 @@
 static GenesisModScheduler *g_current = NULL;
 
 #define PHASE_BIT(p) (UINT32_C(1) << (p))
+#define HOOK_PHASES (PHASE_BIT(SEGA_MOD_PHASE_HOOK_ENTRY) | PHASE_BIT(SEGA_MOD_PHASE_HOOK_EXIT))
 #define VALID_PHASES (PHASE_BIT(SEGA_MOD_PHASE_RESET) | PHASE_BIT(SEGA_MOD_PHASE_FRAME_BEGIN) | PHASE_BIT(SEGA_MOD_PHASE_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_POST_INPUT) | \
-                      PHASE_BIT(SEGA_MOD_PHASE_FRAME_END) | PHASE_BIT(SEGA_MOD_PHASE_RENDER))
-#define READ_PHASES (PHASE_BIT(SEGA_MOD_PHASE_RESET) | PHASE_BIT(SEGA_MOD_PHASE_FRAME_BEGIN) | PHASE_BIT(SEGA_MOD_PHASE_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_POST_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_FRAME_END))
-#define WRITE_PHASES (PHASE_BIT(SEGA_MOD_PHASE_FRAME_BEGIN) | PHASE_BIT(SEGA_MOD_PHASE_POST_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_FRAME_END))
+                      PHASE_BIT(SEGA_MOD_PHASE_FRAME_END) | PHASE_BIT(SEGA_MOD_PHASE_RENDER) | HOOK_PHASES)
+#define READ_PHASES (PHASE_BIT(SEGA_MOD_PHASE_RESET) | PHASE_BIT(SEGA_MOD_PHASE_FRAME_BEGIN) | PHASE_BIT(SEGA_MOD_PHASE_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_POST_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_FRAME_END) | HOOK_PHASES)
+#define WRITE_PHASES (PHASE_BIT(SEGA_MOD_PHASE_FRAME_BEGIN) | PHASE_BIT(SEGA_MOD_PHASE_POST_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_FRAME_END) | HOOK_PHASES)
 #define INPUT_READ_PHASES (PHASE_BIT(SEGA_MOD_PHASE_FRAME_BEGIN) | PHASE_BIT(SEGA_MOD_PHASE_INPUT) | PHASE_BIT(SEGA_MOD_PHASE_POST_INPUT))
 
 static uint64_t cap_bit(unsigned id) { return UINT64_C(1) << (id % 64U); }
 
 void genesis_mod_scheduler_supported(uint64_t out[2]) {
   out[0] = cap_bit(SEGA_MOD_CAP_HOST_LOG) | cap_bit(SEGA_MOD_CAP_FRAME_WORK_RAM) | cap_bit(SEGA_MOD_CAP_MEMORY_READ) | cap_bit(SEGA_MOD_CAP_MEMORY_WRITE) | cap_bit(SEGA_MOD_CAP_INPUT_READ) |
-           cap_bit(SEGA_MOD_CAP_INPUT_INTERCEPT) |
+           cap_bit(SEGA_MOD_CAP_INPUT_INTERCEPT) | cap_bit(SEGA_MOD_CAP_HOOK_FUNCTION) |
            cap_bit(SEGA_MOD_CAP_OVERLAY_RGBA); /* presentation output of `render`: collected by the provider adapter and presented by the host, not a scheduler service */
   out[1] = 0;
 }
@@ -92,11 +93,41 @@ static uint8_t byte_at(const GenesisModScheduler *s, const uint8_t *base, uint32
   return value;
 }
 
+/* ---- the register view of the function hook in flight (space SEGA_GEN_SPACE_M68K_HOOK_REGS, mod-execution-phases.md 5.3) ---- */
+static int in_hook_phase(const GenesisModScheduler *s) { return (HOOK_PHASES & PHASE_BIT(s->phase)) != 0U && s->hook_site != NULL; }
+
+static int service_reg_read(GenesisModScheduler *s, uint32_t slot, uint32_t width, uint32_t *value) {
+  if (value == NULL || width != 4U || slot > 31U) return violation(s, SEGA_MOD_E_RANGE);
+  if (slot == GENESIS_HOOK_REG_CYCLES) { /* the deterministic M68K cycle counter: guest time, visible in every live phase (never in render, which is outside guest time) */
+    if (s->phase == SEGA_MOD_PHASE_RENDER) return violation(s, SEGA_MOD_E_PHASE);
+    *value = (uint32_t)(s->runtime->scheduler.master_ticks / 7U);
+    return SEGA_MOD_OK;
+  }
+  if (!granted(s, SEGA_MOD_CAP_HOOK_FUNCTION)) return violation(s, SEGA_MOD_E_CAPABILITY);
+  if (!in_hook_phase(s)) return violation(s, SEGA_MOD_E_PHASE);
+  if (((s->hook_site->reads >> slot) & 1U) == 0U) return violation(s, SEGA_MOD_E_RANGE); /* only the slots the declaration named */
+  if (s->staged_reg_set >> slot & 1U) { *value = s->staged_reg[slot]; return SEGA_MOD_OK; } /* reads observe this callback's staged results */
+  if (!genesis_hook_reg_read(s->runtime, s->hook_entry_sp, slot, value)) return violation(s, SEGA_MOD_E_RANGE);
+  return SEGA_MOD_OK;
+}
+
+static int service_reg_write(GenesisModScheduler *s, uint32_t slot, uint32_t width, uint32_t value) {
+  if (width != 4U || slot > 31U) return violation(s, SEGA_MOD_E_RANGE);
+  if (!granted(s, SEGA_MOD_CAP_HOOK_FUNCTION)) return violation(s, SEGA_MOD_E_CAPABILITY);
+  if (!in_hook_phase(s) || s->phase != SEGA_MOD_PHASE_HOOK_ENTRY) return violation(s, SEGA_MOD_E_PHASE);
+  if ((s->hook_site->mode & GENESIS_HOOK_MODE_REPLACE) == 0U) return violation(s, SEGA_MOD_E_READONLY); /* only a replacement produces results */
+  if (((s->hook_site->writes >> slot) & 1U) == 0U || ((GENESIS_HOOK_WRITABLE_MASK >> slot) & 1U) == 0U) return violation(s, SEGA_MOD_E_RANGE);
+  s->staged_reg[slot] = value;
+  s->staged_reg_set |= UINT32_C(1) << slot;
+  return SEGA_MOD_OK;
+}
+
 static int service_read(uint32_t space, uint32_t offset, uint32_t width, uint32_t *value) {
   GenesisModScheduler *s = g_current;
   const int render = s != NULL && s->phase == SEGA_MOD_PHASE_RENDER;
   uint32_t i, result = 0;
   if (s == NULL || !s->in_callback) return SEGA_MOD_E_PHASE;
+  if (space == SEGA_GEN_SPACE_M68K_HOOK_REGS) return service_reg_read(s, offset, width, value);
   if (render ? !granted(s, SEGA_MOD_CAP_FRAME_WORK_RAM) : !granted(s, SEGA_MOD_CAP_MEMORY_READ)) return violation(s, SEGA_MOD_E_CAPABILITY);
   if (!render && (READ_PHASES & PHASE_BIT(s->phase)) == 0U) return violation(s, SEGA_MOD_E_PHASE);
   if (value == NULL || !width_ok(width)) return violation(s, SEGA_MOD_E_RANGE);
@@ -116,6 +147,7 @@ static int service_write(uint32_t space, uint32_t offset, uint32_t width, uint32
   GenesisModScheduler *s = g_current;
   GenesisModStagedWrite *w;
   if (s == NULL || !s->in_callback) return SEGA_MOD_E_PHASE;
+  if (space == SEGA_GEN_SPACE_M68K_HOOK_REGS) return service_reg_write(s, offset, width, value);
   if (!granted(s, SEGA_MOD_CAP_MEMORY_WRITE)) return violation(s, SEGA_MOD_E_CAPABILITY);
   if ((WRITE_PHASES & PHASE_BIT(s->phase)) == 0U) return violation(s, SEGA_MOD_E_PHASE);
   if (known_read_only_space(space)) return violation(s, SEGA_MOD_E_READONLY);
@@ -190,6 +222,8 @@ static void begin_callback(GenesisModScheduler *s, uint32_t phase, uint64_t fram
   s->staged_count = 0U;
   s->staged_bytes = 0U;
   s->staged_log_count = 0U;
+  s->staged_reg_set = 0U;
+  if ((HOOK_PHASES & PHASE_BIT(phase)) == 0U) s->hook_site = NULL;
   s->staged_pad_set[0] = s->staged_pad_set[1] = 0U;
   s->fault_status = SEGA_MOD_OK;
   s->external_cause = NULL;
@@ -203,7 +237,11 @@ static void record_fault(GenesisModScheduler *s, const char *cause) {
   s->fault.cause = cause;
   s->fault.phase = s->phase;
   s->fault.frame = s->frame;
-  (void)snprintf(s->fault.text, sizeof(s->fault.text), "E_MOD_FAULT cause=%s mod=%s phase=%s frame=%llu", cause, s->config.mod_id, genesis_mod_phase_name(s->phase), (unsigned long long)s->frame);
+  if (s->hook_site != NULL && (HOOK_PHASES & PHASE_BIT(s->phase)) != 0U)
+    (void)snprintf(s->fault.text, sizeof(s->fault.text), "E_MOD_FAULT cause=%s mod=%s phase=%s frame=%llu hook=%s", cause, s->config.mod_id, genesis_mod_phase_name(s->phase), (unsigned long long)s->frame,
+                   s->hook_site->id);
+  else
+    (void)snprintf(s->fault.text, sizeof(s->fault.text), "E_MOD_FAULT cause=%s mod=%s phase=%s frame=%llu", cause, s->config.mod_id, genesis_mod_phase_name(s->phase), (unsigned long long)s->frame);
   emit(s, s->fault.text, (uint32_t)strlen(s->fault.text));
   if (s->runtime != NULL) s->runtime->mod_pad_active = 0U; /* the guest goes on with the physical pad */
 }
@@ -213,15 +251,30 @@ static void sha_u32(GenesisSha256 *state, uint32_t v) {
   genesis_sha256_update(state, b, 4U);
 }
 
-static void stream_write(GenesisModScheduler *s, uint64_t frame, uint32_t phase, const GenesisModStagedWrite *w) {
+static void stream_write(GenesisModScheduler *s, uint64_t frame, uint32_t phase, uint32_t space, const GenesisModStagedWrite *w) {
   sha_u32(&s->write_stream, (uint32_t)(frame >> 32U));
   sha_u32(&s->write_stream, (uint32_t)frame);
   sha_u32(&s->write_stream, phase);
-  sha_u32(&s->write_stream, SEGA_GEN_SPACE_M68K_WORK_RAM);
+  sha_u32(&s->write_stream, space);
   sha_u32(&s->write_stream, w->offset);
   sha_u32(&s->write_stream, w->width);
   sha_u32(&s->write_stream, w->value);
   ++s->write_total;
+}
+
+static void log_commit(GenesisModScheduler *s, uint32_t space, const GenesisModStagedWrite *w) {
+  stream_write(s, s->frame, s->phase, space, w);
+  if (s->write_log_count < GENESIS_MOD_WRITE_LOG_MAX) {
+    GenesisModWriteRecord *r = &s->write_log[s->write_log_count++];
+    r->frame = s->frame;
+    r->phase = s->phase;
+    r->space = space;
+    r->offset = w->offset;
+    r->width = w->width;
+    r->value = w->value;
+  } else {
+    ++s->write_log_dropped;
+  }
 }
 
 static void finish_callback(GenesisModScheduler *s, int provider_failed) {
@@ -237,17 +290,17 @@ static void finish_callback(GenesisModScheduler *s, int provider_failed) {
     const GenesisModStagedWrite *w = &s->staged[i];
     uint32_t b;
     for (b = 0; b < w->width; ++b) s->runtime->work_ram[w->offset + b] = (uint8_t)(w->value >> (8U * (w->width - 1U - b)));
-    stream_write(s, s->frame, s->phase, w);
-    if (s->write_log_count < GENESIS_MOD_WRITE_LOG_MAX) {
-      GenesisModWriteRecord *r = &s->write_log[s->write_log_count++];
-      r->frame = s->frame;
-      r->phase = s->phase;
-      r->space = SEGA_GEN_SPACE_M68K_WORK_RAM;
-      r->offset = w->offset;
-      r->width = w->width;
-      r->value = w->value;
-    } else {
-      ++s->write_log_dropped;
+    log_commit(s, SEGA_GEN_SPACE_M68K_WORK_RAM, w);
+  }
+  if (s->phase == SEGA_MOD_PHASE_HOOK_ENTRY && s->hook_replaced) { /* a committed replacement: its register results, in slot order */
+    for (i = 0; i < 32U; ++i) {
+      GenesisModStagedWrite w;
+      if (((s->staged_reg_set >> i) & 1U) == 0U) continue;
+      (void)genesis_hook_reg_write(s->runtime, i, s->staged_reg[i]);
+      w.offset = i;
+      w.width = 4U;
+      w.value = s->staged_reg[i];
+      log_commit(s, SEGA_GEN_SPACE_M68K_HOOK_REGS, &w);
     }
   }
   for (i = 0; i < 2U; ++i)
@@ -294,6 +347,65 @@ static void hook_start(void *ctx, GenesisRuntime *rt) {
   }
   run_phase(s, SEGA_MOD_PHASE_RESET, rt->virtual_frame_count);
   open_frame(s, rt);
+}
+
+/* ---- static function hooks (ADR 0298): dispatch-boundary callbacks installed in GenesisRuntime::function_hooks ---- */
+static const GenesisModHookBinding *find_binding(const GenesisModScheduler *s, const GenesisHookSiteInfo *site) {
+  uint32_t i;
+  for (i = 0; i < s->config.hook_count; ++i)
+    if (strcmp(s->bindings[i].id, site->id) == 0) return &s->bindings[i];
+  return NULL;
+}
+
+static int hook_enter(void *ctx, GenesisRuntime *rt, const GenesisHookSiteInfo *site, uint32_t entry_sp) {
+  GenesisModScheduler *s = (GenesisModScheduler *)ctx;
+  const GenesisModHookBinding *binding;
+  int result, replaced_requested;
+  if (!s->started || s->disabled || (s->config.phase_mask & PHASE_BIT(SEGA_MOD_PHASE_HOOK_ENTRY)) == 0U) return 0;
+  binding = find_binding(s, site);
+  if (binding == NULL) return 0;
+  begin_callback(s, SEGA_MOD_PHASE_HOOK_ENTRY, rt->virtual_frame_count);
+  s->hook_site = site;
+  s->hook_entry_sp = entry_sp;
+  s->hook_replaced = 0U;
+  ++s->hook_calls[0];
+  result = s->config.provider->hook != NULL ? s->config.provider->hook(s->config.provider_state, &s->host, binding->hook_id) : 0;
+  replaced_requested = result == 1;
+  if (result != 0 && result != 1) s->external_cause = s->external_cause != NULL ? s->external_cause : "value";                                  /* only 0 (proceed) and 1 (replaced) exist */
+  else if (replaced_requested && (site->mode & GENESIS_HOOK_MODE_REPLACE) == 0U) s->external_cause = s->external_cause != NULL ? s->external_cause : "value";   /* before/after cannot replace */
+  else if (replaced_requested && (s->staged_reg_set & site->writes) != site->writes) s->external_cause = s->external_cause != NULL ? s->external_cause : "contract"; /* every declared result must be produced */
+  s->hook_replaced = replaced_requested ? 1U : 0U;
+  finish_callback(s, result != 0 && result != 1 ? 1 : 0);
+  return s->disabled ? 0 : replaced_requested;   /* a faulted replacement never committed: the ORIGINAL function runs */
+}
+
+static void hook_leave(void *ctx, GenesisRuntime *rt, const GenesisHookSiteInfo *site, uint32_t entry_sp) {
+  GenesisModScheduler *s = (GenesisModScheduler *)ctx;
+  const GenesisModHookBinding *binding;
+  int result;
+  if (!s->started || s->disabled || (s->config.phase_mask & PHASE_BIT(SEGA_MOD_PHASE_HOOK_EXIT)) == 0U) return;
+  binding = find_binding(s, site);
+  if (binding == NULL) return;
+  begin_callback(s, SEGA_MOD_PHASE_HOOK_EXIT, rt->virtual_frame_count);
+  s->hook_site = site;
+  s->hook_entry_sp = entry_sp;
+  s->hook_replaced = 0U;
+  ++s->hook_calls[1];
+  result = s->config.provider->hook != NULL ? s->config.provider->hook(s->config.provider_state, &s->host, binding->hook_id) : 0;
+  if (result != 0) s->external_cause = s->external_cause != NULL ? s->external_cause : "value";
+  finish_callback(s, result != 0 ? 1 : 0);
+}
+
+static void hook_skipped(void *ctx, GenesisRuntime *rt, const GenesisHookSiteInfo *site, uint32_t kind) {
+  GenesisModScheduler *s = (GenesisModScheduler *)ctx;
+  static const char *const names[4] = {"", "E_HOOK_FRAME_ABANDONED", "E_HOOK_UNPROVEN_CALLER", "E_HOOK_FRAME_OVERFLOW"};
+  char line[160];
+  if (kind < 1U || kind > 3U) return;
+  ++s->hook_skips[kind];
+  if ((s->hook_skip_logged >> kind & 1U) != 0U) return; /* the counters count every occurrence; one diagnostic line per class keeps the log bounded */
+  s->hook_skip_logged |= UINT32_C(1) << kind;
+  (void)snprintf(line, sizeof line, "%s mod=%s hook=%s frame=%llu", names[kind], s->config.mod_id, site->id, (unsigned long long)rt->virtual_frame_count);
+  emit(s, line, (uint32_t)strlen(line));
 }
 
 static void hook_frame_end(void *ctx, GenesisRuntime *rt) {
@@ -357,9 +469,37 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
     *rejection = "E_PROVIDER_ENTRY";
     return 1;
   }
-  if (config->phase_mask == 0U || (config->phase_mask & ~VALID_PHASES) != 0U) { /* none, unknown, bit 0 or a hook phase (SEG-138-T004) */
+  if (config->phase_mask == 0U || (config->phase_mask & ~VALID_PHASES) != 0U) { /* none, unknown or bit 0 */
     *rejection = "E_PHASE_UNSUPPORTED";
     return 1;
+  }
+  if ((config->phase_mask & HOOK_PHASES) != 0U) { /* ADR 0298: hook phases need the capability and at least one binding; bindings need a hook phase */
+    if (!sega_mod_is_granted(&s->host, SEGA_MOD_CAP_HOOK_FUNCTION)) {
+      *rejection = "E_CAPABILITY_UNSUPPORTED";
+      return 1;
+    }
+    if (config->hook_count == 0U || config->hooks == NULL || config->provider->hook == NULL) {
+      *rejection = "E_PHASE_UNSUPPORTED";
+      return 1;
+    }
+  }
+  if (config->hook_count != 0U && ((config->phase_mask & HOOK_PHASES) == 0U || config->hooks == NULL || config->hook_count > GENESIS_MOD_HOOKS_MAX)) {
+    *rejection = "E_HOOK_BINDING";
+    return 1;
+  }
+  for (i = 0; i < config->hook_count; ++i) {
+    uint32_t j;
+    const char *id = config->hooks[i].id;
+    if (id == NULL || id[0] == '\0' || strlen(id) > 64U) {
+      *rejection = "E_HOOK_BINDING";
+      return 1;
+    }
+    for (j = 0; j < i; ++j)
+      if (strcmp(config->hooks[j].id, id) == 0 || config->hooks[j].hook_id == config->hooks[i].hook_id) {
+        *rejection = "E_HOOK_BINDING";
+        return 1;
+      }
+    s->bindings[i] = config->hooks[i];
   }
   if (config->range_count > GENESIS_MOD_RANGES_MAX) {
     *rejection = "E_RANGE_DECLARATION";
@@ -392,6 +532,14 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
   s->host.input_get = service_input_get;
   s->host.input_set = service_input_set;
   s->runtime = rt;
+  s->config.hooks = s->bindings; /* the scheduler owns copies: the caller's array need not outlive attach */
+  if ((config->phase_mask & HOOK_PHASES) != 0U) {
+    s->function_hooks.ctx = s;
+    s->function_hooks.enter = hook_enter;
+    s->function_hooks.leave = hook_leave;
+    s->function_hooks.skipped = hook_skipped;
+    rt->function_hooks = &s->function_hooks;
+  }
   s->hooks.ctx = s;
   s->hooks.start = hook_start;
   s->hooks.frame_end = hook_frame_end;
@@ -403,6 +551,7 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
 void genesis_mod_scheduler_detach(GenesisModScheduler *s) {
   if (s == NULL || s->runtime == NULL) return;
   if (s->runtime->frame_hooks == &s->hooks) s->runtime->frame_hooks = NULL;
+  if (s->runtime->function_hooks == &s->function_hooks) s->runtime->function_hooks = NULL;
   s->runtime->mod_pad_active = 0U;
   s->runtime = NULL;
 }
