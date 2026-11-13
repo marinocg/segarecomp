@@ -14,6 +14,9 @@ segarecomp mod variant --library <dir> --identity <package-identity> --rom <orig
 segarecomp mod inspect [--json] [<dir|package.segapatch>]                          without an argument: every platform adapter and its capability support
 segarecomp mod convert-audio <file.wav> --out <file.u8>                            the deterministic reference PCM conversion (u8-mono)
 segarecomp mod api [--declarations]                                                the Luau API list (JSON) or its generated `.d.luau` declarations
+segarecomp mod diff-run <dir|package> --rom <original> --cc <compiler> --sdk-dir <platforms-dir> --frames <n> --budget <instructions> --timeout <seconds> [--input <pad-script>] [--ram <offset:length>]... [--code <offset:length|@symbol[+0xN]:length>]... [--first <frame>] [--aggregate]
+                                                                                   Vanilla versus Modded, bounded: the first divergence, the changed guest bytes (gameplay example page)
+segarecomp mod test <dir> --rom <original> --cc <compiler> --sdk-dir <platforms-dir> [--scenario <name>]   the project's tests.toml scenarios, each bounded by its own budget and timeout
 segarecomp mod session <dir|package.segapatch> --rom <image> [--frames <n>] [--bmp <file>]   DIAGNOSTIC: run a Luau-only package in the synthetic fixture session (not the Genesis machine)
 ```
 
@@ -51,6 +54,7 @@ A closed TOML subset: tables, arrays of tables, strings, non-negative integers a
 | `[build]` | `header_repair` = `genesis-checksum` \| `none` (ADR 0293; absent = repair only a verifying original that the build changed) |
 | `[geometry]` | `scenes = []` only (reserved; any content is refused) |
 | `[[source]]` | `kind` (`native-c11`, `luau-source`, `asset`, `bps-image`, `rom-edit-set`, `guest-code`, `guest-asm`), `path` (project-relative: lower-case, at most 3 segments, no `..`), plus kind fields (`target_sha256`, `cpu`, `asset_class`, audio fields, ...) |
+| `[[memory]]` | `revision` (a declared label; absent = every revision), `space` (`m68k.work_ram`), `offset`, `length` (decimal), `access` (`read`, `write` or `read-write`, backed by the matching `memory.*` capability). The ONLY guest memory a scheduled mod may touch; part of the package identity ([gameplay example](gameplay-example.md), ADR 0300) |
 | `[[symbol]]` | `name` (token), `revision` (a declared label), `address` (string `"0x..."`, below `0x01000000`), `provenance` (`manual`, `verified`, `imported-hint`); one per (name, revision). Only `verified` entries may be an edit site |
 | `[[audio.mapping]]`, `[[audio.mapping.value]]` | declared audio mappings: [audio architecture](../architecture/modding-audio-architecture.md) sections 5 and 9 |
 

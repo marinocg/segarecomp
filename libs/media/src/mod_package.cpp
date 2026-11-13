@@ -280,7 +280,7 @@ Mapping parse_mapping(const Value &v) {
 Manifest parse_manifest(const Value &root) {
   object(root, "the manifest");
   only(root, {"format", "schema_version", "id", "version", "name", "platform", "author", "license", "purpose", "source", "bios", "capabilities", "capabilities_optional", "abi", "state_schema",
-              "hooks", "mappings", "symbols", "header_repair", "limits", "geometry", "presentation_defaults", "payloads"}, "the manifest");
+              "hooks", "memory", "mappings", "symbols", "header_repair", "limits", "geometry", "presentation_defaults", "payloads"}, "the manifest");
   if (need(root, "format").kind != Value::Kind::string || str(root, "format") != "segarecomp-patch") fail("E_FIELD_VALUE", "the manifest is not a segarecomp patch manifest");
   if (need(root, "schema_version").kind != Value::Kind::number) fail("E_FIELD_VALUE", "schema_version must be an integer");
   if (num(root, "schema_version") != 3) fail("E_SCHEMA_VERSION", "the manifest is not schema 3");
@@ -401,6 +401,18 @@ Manifest parse_manifest(const Value &root) {
     }
     m.has_hooks = true;
   }
+  if (const Value *mv = root.find("memory"); mv != nullptr) {   // ADR 0300: declared guest-memory ranges, strictly sorted (canonical)
+    array(*mv, "memory");
+    if (mv->items.size() > kMaxMemoryRanges) fail("E_MEMORY_COUNT", "a package declares at most 16 memory ranges");
+    for (const Value &e : mv->items) {
+      object(e, "a memory range");
+      only(e, {"revision", "space", "offset", "length", "access"}, "a memory range");
+      MemoryRange r;
+      if (e.find("revision") != nullptr) r.revision = str(e, "revision");
+      r.space = str(e, "space"); r.access = str(e, "access"); r.offset = num32(e, "offset"); r.length = num32(e, "length");
+      m.memory.push_back(std::move(r));
+    }
+  }
   if (const Value *g = root.find("geometry"); g != nullptr) {
     object(*g, "geometry");
     only(*g, {"scenes"}, "geometry");
@@ -476,6 +488,7 @@ Manifest parse_manifest(const Value &root) {
     if (m.header_repair == "genesis-checksum" && m.platform != "genesis") fail("E_HEADER_UNSUPPORTED", "header repair exists only for the Genesis header");
   }
 
+  if (auto r = check_memory(m)) fail(r->code, r->message);   // ADR 0300: space, bounds, revision, capability backing and canonical order
   if (auto r = check_hooks(m)) fail(r->code, r->message);   // ADR 0298: platform/CPU, contract, verified symbols and overlap, for every declared revision
 
   // combination rules (section 4)
@@ -627,6 +640,19 @@ std::string serialize_manifest(const Manifest &m) {
     }
     o += ']';
   }
+  if (!m.memory.empty()) {
+    o += ','; key(o, "memory"); o += '[';
+    for (std::size_t i = 0; i < m.memory.size(); ++i) {
+      const MemoryRange &r = m.memory[i];
+      if (i) o += ',';
+      o += '{';
+      bool first = true;
+      if (!r.revision.empty()) { kv(o, "revision", r.revision, true); first = false; }
+      kv(o, "space", r.space, first); kn(o, "offset", r.offset); kn(o, "length", r.length); kv(o, "access", r.access);
+      o += '}';
+    }
+    o += ']';
+  }
   if (!m.mappings.empty()) {
     o += ','; key(o, "mappings"); o += '[';
     for (std::size_t i = 0; i < m.mappings.size(); ++i) { if (i) o += ','; emit_mapping(o, m.mappings[i]); }
@@ -677,6 +703,7 @@ std::string content_digest(const Manifest &m) {
     for (const std::string &n : h.writes) text += " " + n;
     text += " cost " + std::to_string(h.cost) + "\n";
   }
+  for (const MemoryRange &r : m.memory) text += "memory " + r.revision + " " + r.space + " " + std::to_string(r.offset) + " " + std::to_string(r.length) + " " + r.access + "\n";   // ranges decide what a scheduled mod may touch
   for (const Symbol &y : m.symbols) text += "symbol " + y.name + " " + y.revision + " " + std::to_string(y.address) + " " + y.provenance + "\n";   // symbols decide where edits land
   return sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(text.data()), text.size()));
 }

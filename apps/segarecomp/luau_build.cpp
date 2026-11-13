@@ -117,6 +117,33 @@ LuauBuild build_luau_impl(const mod::Package &package, std::span<const std::uint
 
 void set_self_path(const std::string &argv0) { g_self = argv0; }
 
+fs::path self_executable() {
+  std::error_code ec;
+#if defined(__linux__)
+  const fs::path proc = fs::read_symlink("/proc/self/exe", ec);
+  if (!ec && !proc.empty()) return proc;
+#endif
+  const fs::path self = g_self;
+  if (self.has_parent_path()) return fs::absolute(self, ec);
+  if (const char *path = std::getenv("PATH")) {   // started by name: find ourselves on PATH
+    const std::string list = path;
+#ifdef _WIN32
+    const char sep = ';';
+#else
+    const char sep = ':';
+#endif
+    for (std::size_t from = 0; from <= list.size();) {
+      std::size_t to = list.find(sep, from);
+      if (to == std::string::npos) to = list.size();
+      const fs::path dir = list.substr(from, to - from);
+      for (const char *candidate : {"segarecomp", "segarecomp.exe"})
+        if (!dir.empty() && fs::is_regular_file(dir / candidate, ec)) return dir / candidate;
+      from = to + 1;
+    }
+  }
+  return self;
+}
+
 LuauBuild build_luau(const mod::Package &package, std::span<const std::uint8_t> package_bytes) { return build_luau_impl(package, package_bytes); }
 
 }  // namespace segarecomp_cli

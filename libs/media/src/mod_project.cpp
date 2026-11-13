@@ -314,6 +314,13 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
       }
       m.hooks.push_back(std::move(h));
       m.has_hooks = true;
+    } else if (s.name == "memory") {   // ADR 0300: one [[memory]] per declared guest range (offset and length are decimal integers)
+      only(s, {"revision", "space", "offset", "length", "access"});
+      if (m.memory.size() >= kMaxMemoryRanges) fail("E_MEMORY_COUNT", "a project declares too many memory ranges");
+      MemoryRange r;
+      r.revision = text_of(s, "revision", false); r.space = text_of(s, "space"); r.access = text_of(s, "access");
+      r.offset = number_of(s, "offset"); r.length = number_of(s, "length");
+      m.memory.push_back(std::move(r));
     } else if (s.name == "audio.mapping.value") {
       only(s, {"name", "value"});
       if (last_mapping == nullptr) fail("E_FIELD_UNKNOWN", "[[audio.mapping.value]] needs a preceding [[audio.mapping]]");
@@ -330,6 +337,7 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
   std::sort(m.payloads.begin(), m.payloads.end(), [](const Payload &a, const Payload &b) { return a.path < b.path; });
   m.mappings = std::move(mappings);
   std::sort(m.symbols.begin(), m.symbols.end(), [](const Symbol &a, const Symbol &b) { return std::tie(a.name, a.revision) < std::tie(b.name, b.revision); });
+  std::sort(m.memory.begin(), m.memory.end(), [](const MemoryRange &a, const MemoryRange &b) { return std::tie(a.revision, a.space, a.offset, a.length, a.access) < std::tie(b.revision, b.space, b.offset, b.length, b.access); });
   std::sort(m.hooks.begin(), m.hooks.end(), [](const Hook &a, const Hook &b) { return a.id < b.id; });   // canonical manifest form: sorted by id
   for (std::size_t i = 1; i < m.hooks.size(); ++i)
     if (m.hooks[i - 1].id == m.hooks[i].id) fail("E_HOOK_OVERLAP", "the hook id \"" + m.hooks[i].id + "\" is declared twice");
@@ -348,6 +356,7 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
     if (declared_edits.count(p.path) != 0 && declared_edits[p.path] != set.edits.size()) fail("E_EDIT_COUNT", "the source \"" + p.path + "\" declares another edit count than it holds");
     p.edits = static_cast<unsigned>(set.edits.size());
   }
+  if (auto r = check_memory(m)) fail(r->code, r->message);   // ADR 0300: the same declaration check the package reader runs
   if (auto r = check_hooks(m)) fail(r->code, r->message);   // ADR 0298: the same declaration check the package reader runs, so `mod check` fails before packing
   project.ok = true;
   return project;

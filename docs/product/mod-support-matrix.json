@@ -601,7 +601,9 @@
     "docs/product/patch-packages.md"
    ],
    "existing_tests": [
-    "tests/segapatch_package_test.py"
+    "tests/segapatch_package_test.py",
+    "tests/mod_diff_run_test.py",
+    "tests/mod_gameplay_example_test.py"
    ],
    "planned_owner": "SEG-136-T007"
   },
