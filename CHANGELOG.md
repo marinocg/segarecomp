@@ -7,6 +7,12 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Widescreen through 32:9: rational aspect planning, bounded surfaces (ADR 0301, Genesis)
+
+* New optional setting `video.widescreen_ratio=N:M` (4:3 through 32:9; presets 4:3, 16:9, 21:9, 32:9, or any custom ratio in range) makes the Genesis Level 2/3 extension produce and show exactly that aspect. A request that does not fit the supported surface is **rejected** (nothing extra is shown), never silently reduced. Unset (the default) leaves every existing setting, saved file and 16:9 picture unchanged; a previous release simply ignores the new line.
+* The maximum extension per side rises from 256 to 672 source pixels (1664 x 448 surface at most); a latent scratch-size overflow in the side treatment that the larger bound would have exposed is fixed.
+* Measured, not optimized: the 32:9 producer costs about 10.6% of a 60 Hz frame on the reference host; the pre-registered lookup-optimization criterion was not met, so no cache was added ([measurement](docs/architecture/widescreen-scenery-lookup-measurement.md)). There is no menu control for the exact ratio yet.
+
 ### Gameplay mods in a built program, `mod diff-run` / `mod test`, a synthetic gameplay example (ADR 0300, Genesis)
 
 * A Luau mod can now run all of its phases (including bounded work-RAM reads/writes, input reads and its own saved state) inside a **built, generated-native program**: `segarecomp build --luau-package` without a viewer links the one mod scheduler. The memory a mod may touch is declared in the manifest (`[[memory]]`, per revision, part of the package identity) and is the only memory it can touch; a build with a memory capability but no range for the exact image is refused. The played viewer window still runs only the HUD seam, and function hooks / native providers are not linked yet.

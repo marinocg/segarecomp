@@ -147,7 +147,7 @@ The full matrix and the two audio mechanisms are in [modding-audio-architecture.
 |---|---|---|
 | Archive / manifest / BPS payload / image / provider source | 32 MiB / 16 KiB / 16 MiB / 16 MiB / 256 KiB | `patch.hpp` |
 | Archive entries | 8 | `patch.hpp` |
-| Side extension | 256 source pixels per side | `sv_layout.h` (`SV_EXT_MAX_SIDE`) |
+| Side extension | 672 source pixels per side (legacy 4:3..16:9 clamp 256); ratios 4:3 through 32:9, rejected not clamped beyond | `sv_layout.h` (`SV_EXT_MAX_SIDE`, `SV_EXT_LEGACY_SIDE`, `sv_geom_plan`) |
 | Overlay | 128 x 256 RGBA | SDK header |
 | ABI 1 frame state | 64 KiB work RAM, 64 KiB VRAM, 224 lines | SDK header |
 | Save-state file | 4 MiB; rewind 96 MiB | Genesis contract sections 4.3 and 7 |
