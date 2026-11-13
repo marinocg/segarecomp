@@ -42,9 +42,15 @@ STACK = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "2E7C00FF8000" + "4E75")]    
 COMPUTED = [(0x200, JSR_A + "2050" + "4E90" + "4E70"), (0x220, "5280" + "4E75"), (0x260, "5281" + "4E75")]   # $260 is never called directly; the program has JSR (A0)
 IRQ = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "5280" + "4E75"), (0x280, JSR_A + "4E73")]            # the level-6 handler ($280) also calls A
 BRANCH = [(0x200, JSR_A + "6600" + "0018" + "4E70"), (0x220, "5280" + "4E75")]                          # A is also the target of a conditional branch
+SELF = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "4E71" + "60FE")]                                            # A is BRA.S to itself
+CLOSED = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "4E71" + "5280" + "66FC" + "60FA")]                      # a closed conditional graph, no RTS
+LOOPRTS = [(0x200, JSR_A + "66F6" + "4E70"), (0x220, "4E71" + "5280" + "66FC" + "4E75")]                    # a loop with a reachable RTS
 BSR = [(0x200, "6100001E" + "66FA" + "4E70"), (0x220, "5280" + "4E75")]
 
 CASES = [
+    ("function branching to itself, no RTS", SELF, "a:220:before", "-", "E_HOOK_UNCLASSIFIED_RETURN", 0),
+    ("closed conditional graph, no RTS", CLOSED, "a:220:before", "-", "E_HOOK_UNCLASSIFIED_RETURN", 0),
+    ("supported: loop with a reachable RTS", LOOPRTS, "a:220:before", "-", "OK", None),
     # (what, parts, hooks, vectors, expected class, expected site)
     ("supported: JSR-called subroutine, before", MAIN, "a:220:before", "-", "OK", None),
     ("supported: nested callee, after", MAIN, "b:240:after:3", "-", "OK", None),

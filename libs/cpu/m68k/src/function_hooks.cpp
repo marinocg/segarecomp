@@ -50,6 +50,7 @@ std::set<std::uint32_t> reachable(const std::map<std::uint32_t, Node> &nodes, co
 // The body of a function: instructions reachable from `entry` without entering a callee. Returns "" on success or the reason the body cannot be classified.
 std::string body_of(const std::map<std::uint32_t, Node> &nodes, std::uint32_t entry, std::set<std::uint32_t> &body) {
   std::vector<std::uint32_t> work{entry};
+  bool returns = false;   // the contract: a supported body returns through a statically reachable RTS
   while (!work.empty()) {
     const std::uint32_t at = work.back();
     work.pop_back();
@@ -60,6 +61,7 @@ std::string body_of(const std::map<std::uint32_t, Node> &nodes, std::uint32_t en
     body.insert(at);
     const Node &n = it->second;
     const auto &op = *n.operation;
+    returns = returns || n.flow.dynamic == M68kDynamicControlFamily::return_from_subroutine;
     if (op.kind == M68kIrKind::jump_general) return "the body contains a JMP (tail jump or jump table)";
     if (n.flow.always_raises_exception) return "the body contains an instruction that always raises an exception";
     if (n.flow.stacked == M68kStackedContinuationKind::exception_continuation) return "the body contains a TRAP form";
@@ -77,6 +79,7 @@ std::string body_of(const std::map<std::uint32_t, Node> &nodes, std::uint32_t en
     }
     if (n.flow.stacked == M68kStackedContinuationKind::call_continuation) work.push_back(n.flow.stacked_address);
   }
+  if (!returns) return "the body has no statically reachable RTS";
   return {};
 }
 

@@ -375,6 +375,12 @@ static int hook_enter(void *ctx, GenesisRuntime *rt, const GenesisHookSiteInfo *
   else if (replaced_requested && (site->mode & GENESIS_HOOK_MODE_REPLACE) == 0U) s->external_cause = s->external_cause != NULL ? s->external_cause : "value";   /* before/after cannot replace */
   else if (replaced_requested && (s->staged_reg_set & site->writes) != site->writes) s->external_cause = s->external_cause != NULL ? s->external_cause : "contract"; /* every declared result must be produced */
   s->hook_replaced = replaced_requested ? 1U : 0U;
+  if ((site->mode & GENESIS_HOOK_MODE_REPLACE) != 0U && result == 0) { /* a declined replacement has no effects (ADR 0298): the original runs, and nothing the callback staged is committed */
+    s->staged_count = 0U;
+    s->staged_bytes = 0U;
+    s->staged_log_count = 0U;
+    s->staged_reg_set = 0U;
+  }
   finish_callback(s, result != 0 && result != 1 ? 1 : 0);
   return s->disabled ? 0 : replaced_requested;   /* a faulted replacement never committed: the ORIGINAL function runs */
 }
@@ -402,6 +408,7 @@ static void hook_skipped(void *ctx, GenesisRuntime *rt, const GenesisHookSiteInf
   char line[160];
   if (kind < 1U || kind > 3U) return;
   ++s->hook_skips[kind];
+  if (s->disabled) return; /* a disabled mod is inert: counters keep counting, no further diagnostic */
   if ((s->hook_skip_logged >> kind & 1U) != 0U) return; /* the counters count every occurrence; one diagnostic line per class keeps the log bounded */
   s->hook_skip_logged |= UINT32_C(1) << kind;
   (void)snprintf(line, sizeof line, "%s mod=%s hook=%s frame=%llu", names[kind], s->config.mod_id, site->id, (unsigned long long)rt->virtual_frame_count);

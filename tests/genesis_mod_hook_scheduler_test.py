@@ -34,11 +34,13 @@ def build(parts, base=0x200):
 MAIN = [(0x200, "4EB900000220" + "4EB900000240" + "66F2" + "4E70"), (0x220, "5280" + "4E75"), (0x240, "4EB900000220" + "5281" + "4E75")]
 HOOKS = "a:220:replace:1:10001:24:1;b:240:both:20003"
 HOOKS_TRACE = "a:220:both:20003;b:240:both:20003"
+INDIRECT = [(0x200, "4EB900000220" + "41F900000220" + "4E90" + "66F0" + "4E70"), (0x220, "5280" + "4E75")]
+HOOKS_A = "a:220:replace:1:10001:24:1"
 HOOKS_AFTER = "a:220:both:20003;b:240:after:20003"
 
 
-def emit(hooks):
-    run = subprocess.run([emitter, "--emit-synthetic-hooked-bridge", hooks, "-", build(MAIN)], text=True, capture_output=True)
+def emit(hooks, parts=None):
+    run = subprocess.run([emitter, "--emit-synthetic-hooked-bridge", hooks, "-", build(parts or MAIN)], text=True, capture_output=True)
     assert run.returncode == 0, (hooks, run.stdout[:200], run.stderr[:200])
     return run.stdout
 
@@ -54,7 +56,7 @@ HARNESS = r'''
 #include "generated.c"
 #undef main
 
-enum { M_TRACE = 1, M_REPLACE = 2, M_AFTER_FAULT = 3, M_RENDER_CYCLES = 4, M_FRAME_WRITE = 5 };
+enum { M_TRACE = 1, M_REPLACE = 2, M_AFTER_FAULT = 3, M_RENDER_CYCLES = 4, M_FRAME_WRITE = 5, M_DECLINE = 6 };
 enum { K_NONE = 0, K_RANGE = 1, K_SLOT = 2, K_BUDGET = 3, K_RET2 = 4, K_CONTRACT = 5, K_EXIT_RET = 6, K_EXIT_RANGE = 7 };
 
 static GenesisRuntime *g_rt;
@@ -111,6 +113,12 @@ static int hook(void *state, const SegaModHost *h, uint32_t id) {
       }
     }
     return 1;
+  }
+  if (g_mode == M_DECLINE && id == 1U && h->phase == SEGA_MOD_PHASE_HOOK_ENTRY) {      /* stages a valid RAM write, a register result and a log line, then declines */
+    (void)h->write(SEGA_GEN_SPACE_M68K_WORK_RAM, 0x0100U, 4U, 77U);
+    (void)wr(h, 0U, 12345U);
+    h->log("declined", 8U);
+    return 0;
   }
   if (g_mode == M_AFTER_FAULT && id == 2U && h->phase == SEGA_MOD_PHASE_HOOK_EXIT) {
     ++g_b_exits;
@@ -173,6 +181,7 @@ int main(int argc, char **argv) {
   cfg.phase_mask = (1U << SEGA_MOD_PHASE_RESET) | (1U << SEGA_MOD_PHASE_FRAME_BEGIN) | (1U << SEGA_MOD_PHASE_INPUT) | (1U << SEGA_MOD_PHASE_POST_INPUT) | (1U << SEGA_MOD_PHASE_HOOK_ENTRY) |
                   (1U << SEGA_MOD_PHASE_HOOK_EXIT) | (1U << SEGA_MOD_PHASE_FRAME_END) | (1U << SEGA_MOD_PHASE_RENDER);
   cfg.required[SEGA_MOD_CAP_HOOK_FUNCTION / 64U] |= UINT64_C(1) << (SEGA_MOD_CAP_HOOK_FUNCTION % 64U);
+  cfg.required[SEGA_MOD_CAP_HOST_LOG / 64U] |= UINT64_C(1) << (SEGA_MOD_CAP_HOST_LOG % 64U);
   cfg.required[SEGA_MOD_CAP_MEMORY_READ / 64U] |= UINT64_C(1) << (SEGA_MOD_CAP_MEMORY_READ % 64U);
   cfg.required[SEGA_MOD_CAP_MEMORY_WRITE / 64U] |= UINT64_C(1) << (SEGA_MOD_CAP_MEMORY_WRITE % 64U);
   if (attach) {
@@ -200,7 +209,7 @@ int main(int argc, char **argv) {
 }
 '''
 
-MODES = {"trace": 1, "replace": 2, "after_fault": 3, "render_cycles": 4, "frame_write": 5}
+MODES = {"trace": 1, "replace": 2, "after_fault": 3, "render_cycles": 4, "frame_write": 5, "decline": 6}
 KINDS = {"none": 0, "range": 1, "slot": 2, "budget": 3, "ret2": 4, "contract": 5, "exit_ret": 6, "exit_range": 7}
 
 
@@ -226,21 +235,22 @@ with tempfile.TemporaryDirectory() as temporary:
     tmp = pathlib.Path(temporary)
     programs = {}
 
-    def program(hooks):
-        if hooks not in programs:
+    def program(hooks, parts=None):
+        key = (hooks, build(parts or MAIN))
+        if key not in programs:
             d = tmp / f"prog{len(programs)}"
             d.mkdir()
-            (d / "generated.c").write_text(emit(hooks), encoding="utf-8")
+            (d / "generated.c").write_text(emit(hooks, parts), encoding="utf-8")
             (d / "harness.c").write_text(HARNESS, encoding="utf-8")
             inc = ["-I", str(RT), "-I", str(d)] + [x for p in SDK for x in ("-I", str(p))]
             built = subprocess.run([compiler, "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-O1", "-Wall", "-Wextra", "-Werror", "-pedantic", *os.environ.get("SEGARECOMP_TEST_CFLAGS", "").split(), *inc, str(d / "harness.c"), str(RT / "runtime.c"),
                                     str(RT / "vdp_render.c"), str(RT / "frame_export.c"), str(RT / "mod_scheduler.c"), "-o", str(d / "prog")], text=True, capture_output=True)
             assert built.returncode == 0, built.stderr[-3000:]
-            programs[hooks] = d / "prog"
-        return programs[hooks]
+            programs[key] = d / "prog"
+        return programs[key]
 
-    def run(hooks, frames=600, attach=1, mode="trace", kind="none", fault_at=0, clean_until=0):
-        ran = subprocess.run([str(program(hooks)), str(frames), str(attach), str(MODES[mode]), str(KINDS[kind]), str(fault_at), str(clean_until)], text=True, capture_output=True, timeout=300)
+    def run(hooks, frames=600, attach=1, mode="trace", kind="none", fault_at=0, clean_until=0, parts=None):
+        ran = subprocess.run([str(program(hooks, parts)), str(frames), str(attach), str(MODES[mode]), str(KINDS[kind]), str(fault_at), str(clean_until)], text=True, capture_output=True, timeout=300)
         assert ran.returncode == 0, (hooks, mode, kind, ran.returncode, ran.stdout[-600:], ran.stderr[-300:])
         return parse(ran.stdout)
 
@@ -290,6 +300,23 @@ with tempfile.TemporaryDirectory() as temporary:
     # guest time is not visible from `render`
     cyc = run(HOOKS, mode="render_cycles")
     assert cyc["cause"] == "phase" and cyc["disabled"] == "1" and cyc["fault_text"].startswith("E_MOD_FAULT cause=phase mod=hook-test phase=render frame=2"), cyc
+
+    # ---------------------------------------------------------------- a declined replacement has NO effects (ADR 0298): the original runs, nothing staged is committed
+    declined = run(HOOKS, mode="decline")
+    assert declined["faulted"] == "0" and declined["bad"] == "0" and int(declined["hook_entry"]) > 100000, declined
+    assert declined["ram0100"] == "0" and declined["writes"] == "0" and declined["log"] == "0", declined          # no RAM write, no committed write, no log line
+    assert declined["state"] == plain["state"] and declined["d0"] == plain["d0"], (declined, plain)               # guest bit-identical to the unhooked program
+    empty = run(HOOKS, mode="replace", clean_until=0, fault_at=0, kind="none")
+    assert declined["writes_digest"] != empty["writes_digest"] and declined["writes"] == "0"
+    # a fault after earlier committed writes keeps those writes; the declined/faulted callback's are gone (covered above by ram0100 == N-1)
+
+    # ---------------------------------------------------------------- a disabled mod is inert: an unproven call AFTER the fault is counted but emits nothing
+    ind = run(HOOKS_A, mode="replace", kind="range", fault_at=1, parts=INDIRECT)
+    assert ind["faulted"] == "1" and ind["cause"] == "range" and ind["hook_entry"] == "1" and ind["after_fault_calls"] == "0", ind
+    assert int(ind["skips"].split("/")[1]) > 100000, ind                      # the indirect JSR (A0) kept being skipped and counted
+    assert ind["log"].split("|")[0] == "1", ind["log"]                         # exactly one line: the fault; no skip diagnostic after disablement
+    ok_ind = run(HOOKS_A, mode="trace", parts=INDIRECT, frames=2)
+    assert ok_ind["log"].split("|")[0] == "1" and "E_HOOK_UNPROVEN_CALLER" in ok_ind["log"], ok_ind["log"]   # while enabled the first skip IS logged, once
 
     # ---------------------------------------------------------------- frame-phase writes and hook callbacks share one transactional model
     fw = run(HOOKS_TRACE, mode="frame_write")
