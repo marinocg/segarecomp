@@ -522,7 +522,7 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
     *rejection = "E_STATE_SCHEMA";
     return 1;
   }
-  if (config->site_count != 0U && config->sites == NULL) {
+  if (config->site_count > GENESIS_MOD_HOOKS_MAX || (config->site_count != 0U && config->sites == NULL)) { /* the existing static hook limit bounds the generated site table too */
     *rejection = "E_HOOK_BINDING";
     return 1;
   }
@@ -701,8 +701,10 @@ static uint32_t state_put(void *ctx, uint8_t *out, uint32_t cap, GenesisSnapshot
   so_u64(&o, s->function_hooks.abandoned); so_u64(&o, s->function_hooks.unproven_callers); so_u64(&o, s->function_hooks.overflowed);
   for (i = 0; i < depth; ++i) {
     const GenesisHookFrame *f = &s->function_hooks.frames[i];
-    if (f->site < s->config.sites || f->site >= s->config.sites + s->config.site_count) return fail;
-    so_u32(&o, (uint32_t)(f->site - s->config.sites));
+    uint32_t index = 0U;
+    while (index < s->config.site_count && f->site != &s->config.sites[index]) ++index; /* pointer equality only: no relational comparison of unrelated objects */
+    if (index == s->config.site_count) return fail;
+    so_u32(&o, index);
     so_u32(&o, f->return_pc);
     so_u32(&o, f->entry_sp);
   }
@@ -867,7 +869,7 @@ static void state_discard(void *ctx, void *staged) {
 
 static void compat_digest(const GenesisModScheduler *s, uint8_t out[32]) {
   GenesisSha256 sha;
-  uint32_t i;
+  uint32_t i, site_count;
   static const char tag[] = "segarecomp.genesis.mod.compat.v1";
   genesis_sha256_init(&sha);
   genesis_sha256_update(&sha, (const uint8_t *)tag, (uint32_t)(sizeof tag - 1U));
@@ -884,6 +886,17 @@ static void compat_digest(const GenesisModScheduler *s, uint8_t out[32]) {
     sha_u32(&sha, n);
     genesis_sha256_update(&sha, (const uint8_t *)s->bindings[i].id, n);
     sha_u32(&sha, s->bindings[i].hook_id);
+  }
+  /* The generated hook site table decides how saved hook-frame indices are read: its size and, in table order, each site's entry, id and mode. */
+  site_count = s->config.sites != NULL && s->config.site_count <= GENESIS_MOD_HOOKS_MAX ? s->config.site_count : 0U; /* an unattached/rejected config contributes nothing */
+  sha_u32(&sha, site_count);
+  for (i = 0; i < site_count; ++i) {
+    const GenesisHookSiteInfo *site = &s->config.sites[i];
+    const uint32_t n = site->id != NULL ? (uint32_t)strlen(site->id) : 0U;
+    sha_u32(&sha, site->entry);
+    sha_u32(&sha, site->mode);
+    sha_u32(&sha, n);
+    if (n != 0U) genesis_sha256_update(&sha, (const uint8_t *)site->id, n);
   }
   genesis_sha256_final(&sha, out);
 }

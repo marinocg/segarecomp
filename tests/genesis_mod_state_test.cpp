@@ -391,6 +391,102 @@ void hook_frames_round_trip() {
   genesis_mod_scheduler_detach(sched.get());
 }
 
+
+// ---- the generated hook site table: bounded, pointer-equality indexed, and part of the compatibility identity ----
+struct HookRig {
+  std::unique_ptr<GenesisRuntime> rt = std::make_unique<GenesisRuntime>();
+  std::unique_ptr<GenesisModScheduler> sched = std::make_unique<GenesisModScheduler>();
+  ModMem mem;
+  SegaModProvider p = make_provider(true);
+  GenesisSnapshotModState snap{};
+  GenesisSnapshotMachine m{};
+  GenesisSnapshotIdentity id{};
+  std::string why;
+  bool ok = false;
+  HookRig(const GenesisHookSiteInfo *sites, uint32_t count) {
+    static const GenesisModHookBinding bindings[1] = {{"b", 1U}};
+    setup(*rt);
+    p.hook = [](void *, const SegaModHost *, uint32_t) { return 0; };
+    GenesisModConfig c{};
+    c.mod_id = "hook-state";
+    c.provider = &p;
+    c.provider_state = &mem;
+    c.phase_mask = bit(SEGA_MOD_PHASE_HOOK_EXIT);
+    c.required[0] = cap(SEGA_MOD_CAP_HOOK_FUNCTION) | cap(SEGA_MOD_CAP_STATE_MOD);
+    c.state_schema = 1U;
+    c.hooks = bindings;
+    c.hook_count = 1U;
+    c.sites = sites;
+    c.site_count = count;
+    const char *w = "";
+    ok = genesis_mod_scheduler_attach(sched.get(), rt.get(), &c, &w) == 0;
+    why = w;
+    genesis_mod_snapshot_state(sched.get(), &snap);
+    m.runtime = rt.get();
+    m.mod = &snap;
+  }
+  ~HookRig() { genesis_mod_scheduler_detach(sched.get()); }
+};
+
+void hook_table_bounds_and_identity() {
+  static GenesisHookSiteInfo table[2] = {{0x400U, "a", GENESIS_HOOK_MODE_BEFORE, 0U, 0U, 0U, 0U, 0U}, {0x500U, "b", GENESIS_HOOK_MODE_AFTER, 0U, 0U, 0U, 0U, 0U}};
+  static GenesisHookSiteInfo changed[2] = {{0x400U, "a", GENESIS_HOOK_MODE_BEFORE, 0U, 0U, 0U, 0U, 0U}, {0x504U, "b", GENESIS_HOOK_MODE_AFTER, 0U, 0U, 0U, 0U, 0U}};   // same binding names, another entry
+  static GenesisHookSiteInfo big[GENESIS_MOD_HOOKS_MAX + 1U];
+  static GenesisHookSiteInfo other[2] = {{0x400U, "a", GENESIS_HOOK_MODE_BEFORE, 0U, 0U, 0U, 0U, 0U}, {0x500U, "b", GENESIS_HOOK_MODE_AFTER, 0U, 0U, 0U, 0U, 0U}};   // equal contents, a different object
+  for (uint32_t i = 0; i < GENESIS_MOD_HOOKS_MAX + 1U; ++i) { big[i] = {0x1000U + 4U * i, "b", GENESIS_HOOK_MODE_AFTER, 0U, 0U, 0U, 0U, 0U}; }
+  { HookRig r(big, GENESIS_MOD_HOOKS_MAX + 1U); check(!r.ok && r.why == "E_HOOK_BINDING", "a site table above the static hook limit is E_HOOK_BINDING: " + r.why); }
+  { HookRig r(nullptr, 2U); check(!r.ok && r.why == "E_HOOK_BINDING", "a nonzero site count with a null table is E_HOOK_BINDING: " + r.why); }
+  {
+    HookRig r(big, GENESIS_MOD_HOOKS_MAX);
+    check(r.ok, "a table of exactly the maximum size attaches: " + r.why);
+    r.sched->function_hooks.depth = 1U;
+    r.sched->function_hooks.frames[0] = {&big[GENESIS_MOD_HOOKS_MAX - 1U], 0x10U, 0xFFFE00U};
+    GenesisSnapshotBuffer b{nullptr, 0};
+    check(genesis_snapshot_capture(&r.m, &r.id, nullptr, &b) == GENESIS_SNAPSHOT_OK, "a frame on the last site of a maximum table captures");
+    r.sched->function_hooks.depth = 0U;
+    check(genesis_snapshot_restore(&r.m, &r.id, b.data, b.size) == GENESIS_SNAPSHOT_OK && r.sched->function_hooks.frames[0].site == &big[GENESIS_MOD_HOOKS_MAX - 1U], "and restores onto the same site");
+    genesis_snapshot_buffer_free(&b);
+  }
+  HookRig a(table, 2U);
+  check(a.ok, "hook rig attaches");
+  // a frame whose site is not an element of THIS table (an unrelated table with equal contents) is not capturable, whatever its address compares like
+  a.sched->function_hooks.depth = 1U;
+  a.sched->function_hooks.frames[0] = {&other[1], 0x1234U, 0xFFFE00U};
+  GenesisSnapshotBuffer b{nullptr, 0};
+  check(genesis_snapshot_capture(&a.m, &a.id, nullptr, &b) == GENESIS_SNAPSHOT_NOT_CAPTURABLE && b.data == nullptr, "a frame pointing into an unrelated table is NOT_CAPTURABLE and yields no buffer");
+  a.sched->function_hooks.frames[0] = {&table[1], 0x1234U, 0xFFFE00U};
+  check(genesis_snapshot_capture(&a.m, &a.id, nullptr, &b) == GENESIS_SNAPSHOT_OK, "a frame pointing into the table captures");
+  const std::vector<uint8_t> good(b.data, b.data + b.size);
+  genesis_snapshot_buffer_free(&b);
+  // a restored frame with an out-of-range (or non-`after`) site index is refused and nothing changes
+  uint32_t off = 0, len = 0;
+  check(find_modstate(good, off, len), "MODSTATE found");
+  uint32_t at = 0;
+  for (uint32_t k = off + 76U; k + 8U <= off + len; ++k)
+    if (le32(good.data() + k) == 1U && le32(good.data() + k + 4U) == 0x1234U) { at = k; break; }
+  check(at != 0U, "the saved frame (index 1, return pc 0x1234) was located");
+  for (const uint32_t bad_index : {2U, 64U, 0xFFFFFFFFU, 0U}) {   // 0 is site "a": a `before` site never keeps a frame
+    std::vector<uint8_t> bad = good;
+    for (unsigned i = 0; i < 4U; ++i) bad[at + i] = static_cast<uint8_t>(bad_index >> (8U * i));
+    reseal(bad);
+    a.sched->function_hooks.depth = 0U;
+    check(genesis_snapshot_restore(&a.m, &a.id, bad.data(), bad.size()) == GENESIS_SNAPSHOT_MOD_REJECTED && a.sched->function_hooks.depth == 0U, "a restored frame with site index " + std::to_string(bad_index) + " is refused");
+  }
+  // the same binding names over a DIFFERENT generated table cannot reinterpret saved frames
+  HookRig c(changed, 2U);
+  check(c.ok && std::memcmp(c.snap.compat, a.snap.compat, 32U) != 0, "another site table (same binding names) has another compatibility digest");
+  check(genesis_snapshot_restore(&c.m, &c.id, good.data(), good.size()) == GENESIS_SNAPSHOT_MOD_MISMATCH && c.sched->function_hooks.depth == 0U, "an old state with hook frames cannot restore over a changed site table (E_STATE_MOD_MISMATCH)");
+  HookRig same(other, 2U);
+  check(same.ok && std::memcmp(same.snap.compat, a.snap.compat, 32U) == 0, "an identical table in another object has the same digest (canonical, no addresses)");
+  check(genesis_snapshot_restore(&same.m, &same.id, good.data(), good.size()) == GENESIS_SNAPSHOT_OK && same.sched->function_hooks.frames[0].site == &other[1], "and it restores onto that table's site");
+  // no site table at all, with a frame pending
+  HookRig none(nullptr, 0U);
+  none.sched->function_hooks.depth = 1U;
+  none.sched->function_hooks.frames[0] = {&table[1], 1U, 2U};
+  check(genesis_snapshot_capture(&none.m, &none.id, nullptr, &b) == GENESIS_SNAPSHOT_NOT_CAPTURABLE, "a pending frame without a site table is NOT_CAPTURABLE");
+  none.sched->function_hooks.depth = 0U;
+}
+
 // ---- rewind through the viewer state service (the SEG-131 engine) ----
 struct RewindHost {
   int restored = 0;
@@ -489,6 +585,7 @@ int main() {
   unavailable_and_disabled();
   malformed_and_rejected();
   hook_frames_round_trip();
+  hook_table_bounds_and_identity();
   rewind_through_a_mod_state_change();
   limits_and_negative_attach();
   if (failures != 0) {
