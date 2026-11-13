@@ -25,7 +25,8 @@ struct ProcessUsage {
 };
 
 // `usage` (optional) receives the child's resource usage after it was reaped; it is left untouched when the process could not be started.
+// `scrub_prefix` (optional): inherited variables whose name starts with it, and that `environment` does not set, are NOT passed to the child (the caller's own environment is left as it was).
 int run_process(const std::vector<std::string> &argv, const std::filesystem::path &log, const Environment &environment = {}, unsigned timeout_seconds = 0,
-                ProcessUsage *usage = nullptr);
+                ProcessUsage *usage = nullptr, const char *scrub_prefix = nullptr);
 
 }  // namespace segarecomp_cli

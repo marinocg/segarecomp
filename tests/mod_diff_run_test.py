@@ -110,11 +110,19 @@ rc, doc, p = cli.run("mod", "diff-run", gp, "--rom", ROM, "--cc", CC, "--sdk-dir
 cli.check(rc == 1 and doc and doc["class"] == "E_RUN_INCOMPLETE" and "vanilla" in doc["error"], f"an exhausted instruction budget is refused: {doc}")
 
 # the caller's environment never reaches the guest, and a faulted mod is never reported as identical
-os.environ.update(SEGARECOMP_CAPTURE_STRIDE="2", SEGARECOMP_MOD_LOAD="/nonexistent", SEGARECOMP_PAD_SCRIPT="1:1:0xff")
+rc, base_noram = diff(gp, *BOUNDS, "--input", INPUT)   # no --ram: RAM observation is off whatever the caller's environment says
+dump = tmp / "must-not-exist.bin"
+os.environ.update(SEGARECOMP_CAPTURE_STRIDE="2", SEGARECOMP_MOD_LOAD="/nonexistent", SEGARECOMP_PAD_SCRIPT="1:1:0xff", SEGARECOMP_CAPTURE_RAM="0:8", SEGARECOMP_STOP_WORK_RAM_DUMP=str(dump),
+                  SEGARECOMP_CAPTURE_FIRST="40", SEGARECOMP_CAPTURE_COUNT="2", SEGARECOMP_GENESIS_REGION="japan", SEGARECOMP_AUDIO_WRITE_LOG=str(tmp / "must-not-exist.log"), SEGARECOMP_MOD_CHECKPOINT="3")
+rc, polluted = diff(gp, *BOUNDS, "--input", INPUT)
+cli.check(polluted == base_noram and not dump.exists() and not (tmp / "must-not-exist.log").exists(), "conflicting capture/mod/region variables in the caller's environment change nothing and create no file")
+before = dict(os.environ)
 rc, d5 = diff(gp, *BOUNDS, "--input", INPUT, *RAM)
-for k in ("SEGARECOMP_CAPTURE_STRIDE", "SEGARECOMP_MOD_LOAD", "SEGARECOMP_PAD_SCRIPT"):
+cli.check(d5 == d1, "ambient SEGARECOMP_* variables do not change the report with --ram either")
+cli.check(dict(os.environ) == before, "the caller's own environment is left as it was")
+for k in ("SEGARECOMP_CAPTURE_STRIDE", "SEGARECOMP_MOD_LOAD", "SEGARECOMP_PAD_SCRIPT", "SEGARECOMP_CAPTURE_RAM", "SEGARECOMP_STOP_WORK_RAM_DUMP", "SEGARECOMP_CAPTURE_FIRST", "SEGARECOMP_CAPTURE_COUNT",
+          "SEGARECOMP_GENESIS_REGION", "SEGARECOMP_AUDIO_WRITE_LOG", "SEGARECOMP_MOD_CHECKPOINT"):
     del os.environ[k]
-cli.check(d5 == d1, "ambient SEGARECOMP_* variables do not change the report")
 rogue = project("rogue", script='function post_input(frame: number)\n  sega.mem.write("m68k.work_ram", 0x20, 2, 99)\nend\nfunction save() return {} end\nfunction load(s) end\n')
 rc, rg = diff(rogue, *BOUNDS, "--input", INPUT, *RAM)
 cli.check(rg is not None and rg["mod_faulted"] is True and rg["identical"] is False and "cause=range" in rg["modded"]["mod"]["fault"], f"a faulted mod is not 'identical': {rg and (rg['identical'], rg['mod_faulted'])}")
@@ -133,6 +141,18 @@ write(edit / "edits/main.edits", "fixture u8 0x000003f0 0x60 0x62\n")
 rc, e = diff(edit, *BOUNDS, "--input", INPUT, *RAM, "--code", "1008:4")
 cli.check(e is not None and e["identical"] is True and e["modded"].get("mod") is None, f"an edit in unreachable image bytes does not change behaviour: {e and e['first_divergence']}")
 cli.check(e["code"] == [{"offset": 1008, "length": 4, "changed_byte_count": 1, "changed_bytes": [{"offset": 1008, "vanilla": 96, "modded": 98}]}], f"--code reports the edited image bytes: {e['code']}")
+# symbol-based code regions: only a VERIFIED symbol of the exact revision resolves; the numeric form is unchanged
+sym = tmp / "sym"
+shutil.copytree(edit, sym)
+toml = (sym / "mod.toml").read_text()
+(sym / "mod.toml").write_text(toml + '\n[[symbol]]\nname = "filler"\nrevision = "fixture"\naddress = "0x000003f0"\nprovenance = "verified"\n\n[[symbol]]\nname = "guess"\nrevision = "fixture"\naddress = "0x000003f0"\nprovenance = "manual"\n')
+rc, sy = diff(sym, *BOUNDS, "--input", INPUT, "--code", "@filler:4", "--code", "@filler+0x2:2", "--code", "1008:4")
+cli.check(sy is not None and sy["code"][0] == e["code"][0] and sy["code"][1] == {"offset": 1010, "length": 2, "changed_byte_count": 0, "changed_bytes": []} and sy["code"][2] == e["code"][0], f"a verified symbol names the same bytes as its address (+ addend): {sy and sy['code']}")
+for text, klass in (("@nope:4", "E_SYMBOL_UNKNOWN"), ("@guess:4", "E_SYMBOL_NOT_VERIFIED"), ("@filler:0", "E_REGION"), ("@filler+0xzz:4", "E_REGION"), ("@filler", "E_REGION")):
+    rc, doc, p = cli.run("mod", "diff-run", sym, "--rom", ROM, "--cc", CC, "--sdk-dir", SDK, *BOUNDS, "--code", text)
+    cli.check(rc == 1 and doc and doc["class"] == klass, f"--code {text}: expected {klass}, got {doc and doc.get('class')}")
+rc, doc, p = cli.run("mod", "diff-run", sym, "--rom", ROM, "--cc", CC, "--sdk-dir", SDK, *BOUNDS, "--ram", "@filler:4")
+cli.check(rc == 1 and doc["class"] == "E_SYMBOL_SPACE", f"a ROM symbol is never a work-RAM region: {doc}")
 # an edit the program reads: the fixture's score rule `addq.w #1` becomes `addq.w #2`, a behavioural divergence found at the first turn that holds B
 edit2 = tmp / "edit2"
 shutil.copytree(edit, edit2)
@@ -144,6 +164,50 @@ fd2 = e2["first_divergence"] if e2 else None
 cli.check(e2 is not None and e2["identical"] is False and fd2["frame"] <= 3 and fd2["ram"][0]["changed_bytes"][0]["offset"] == 17, f"a changed rule is a behavioural divergence at the first scoring turn: {fd2}")
 change = fd2["ram"][0]["changed_bytes"][0]
 cli.check(change["modded"] == 2 * change["vanilla"] and change["vanilla"] >= 1, f"the edited program scores twice as much: {change}")
+
+# ---------------------------------------------------------------- the child's own report is verified: exit status, completeness, the mod's summary
+# A compiler wrapper builds the real programs, then replaces the linked `game` with a script that prints a chosen report, so the verdicts on a crashing or incomplete child are exercised
+# without a flawed product build. The vanilla script is always well formed; the modded one follows FAKE_MODE.
+wrapdir = tmp / "wrap"
+wrapdir.mkdir()
+wrapper = wrapdir / "fake-cc"   # a `*-cc` driver name makes the build derive the C++ driver `fake-c++` (looked up on PATH below)
+wrapper.write_text("""#!%s
+import os, subprocess, sys
+args = sys.argv[1:]
+rc = subprocess.call([("c++" if sys.argv[0].endswith("c++") else %r)] + args)
+out = args[args.index("-o") + 1] if "-o" in args else ""
+if rc == 0 and os.path.basename(out) == "game" and "/modded/" in out + "/" or (rc == 0 and os.path.basename(out) == "game"):
+    mode = os.environ.get("FAKE_MODE", "") if "/modded/" in out else "vanilla"
+    digests = ",".join('"%%064x"' %% i for i in range(3 if mode != "short" else 2))
+    lines = ['CAPTURE_SUMMARY {"outcome":"window_complete","first_frame":1,"frame_count":3,"frame_stride":1,"frames_captured":3,"frames_published":3,"dispatches":1,"pad_entries_applied":0,"digests":[%%s]}' %% digests,
+             'SOUND_SUMMARY {"audio":{"rate_hz":1,"sha256":"%%s"}}' %% ("a" * 64)]
+    if mode in ("good", "crash", "short", "exit3"):
+        lines.insert(0, 'MOD_LOADED {"mod":"x"}')
+        lines.append('MOD_SUMMARY {"mod":"x","faulted":false,"fault":"","callbacks":1,"committed_writes":0,"write_digest":"","overlay_ops":0,"overlay_sha256":"","nondeterministic":false,"roundtrip":{"requested":false,"frame":0,"status":"none","state_sha256":""}}')
+    code = {"crash": 139, "exit3": 3}.get(mode, 1)
+    open(out, "w").write("#!/bin/sh\\n" + "".join("echo '%%s' >&2\\n" %% l for l in lines) + "exit %%d\\n" %% code)
+    os.chmod(out, 0o755)
+sys.exit(rc)
+""" % (sys.executable, CC))
+wrapper.chmod(0o755)
+shutil.copy(wrapper, wrapdir / "fake-c++")
+
+
+def fake(mode):
+    os.environ["FAKE_MODE"] = mode
+    saved_path = os.environ["PATH"]
+    os.environ["PATH"] = str(wrapdir) + os.pathsep + saved_path
+    rc, doc, p = cli.run("mod", "diff-run", gp, "--rom", ROM, "--cc", wrapper, "--sdk-dir", SDK, "--frames", "3", "--budget", "1000", "--timeout", "30", "--input", INPUT)
+    del os.environ["FAKE_MODE"]
+    os.environ["PATH"] = saved_path
+    return rc, doc
+
+
+rc, doc = fake("good")
+cli.check(rc == 0 and doc and doc["ok"] is True, f"control: a well formed report (exit 1 after a completed window) is accepted: {doc}")
+for mode, why in (("crash", "status 139"), ("exit3", "status 3"), ("short", "the requested 3 frame digests"), ("no_mod", "did not report")):
+    rc, doc = fake(mode)
+    cli.check(rc == 1 and doc and doc["class"] == "E_RUN_FAILED" and why in doc["error"], f"{mode}: a failing or incomplete child is never a successful run: {doc}")
 
 # ---------------------------------------------------------------- mod test: declared scenarios, bounded, first divergence on a broken expectation
 rc, t1, p = cli.run("mod", "test", EXAMPLE, "--rom", ROM, "--cc", CC, "--sdk-dir", SDK)
@@ -162,6 +226,17 @@ rc, t3, p = cli.run("mod", "test", broken, "--rom", ROM, "--cc", CC, "--sdk-dir"
 cli.check(rc == 0 and [s["name"] for s in t3["scenarios"]] == ["no-bonus-without-c"], "--scenario selects one scenario")
 rc, t4, p = cli.run("mod", "test", EXAMPLE, "--rom", ROM, "--cc", CC, "--sdk-dir", SDK, "--scenario", "nope")
 cli.check(rc == 1 and t4["class"] == "E_TEST_SCENARIO", "an unknown scenario is refused")
+# a checkpoint cannot silently pass: it needs a scheduled mod (a data-only project is refused explicitly), and a scheduled one must report an executed, lossless round trip
+cp = tmp / "cp"
+shutil.copytree(edit, cp)
+write(cp / "tests.toml", '[[scenario]]\nname = "c"\nframes = 8\nbudget = 4000000\ntimeout = 30\ncheckpoint = 4\n')
+rc, tc, p = cli.run("mod", "test", cp, "--rom", ROM, "--cc", CC, "--sdk-dir", SDK)
+cli.check(rc == 1 and tc["class"] == "E_TEST_CHECKPOINT_UNSUPPORTED", f"a checkpoint on a data-only project is refused: {tc}")
+cp2 = tmp / "cp2"
+shutil.copytree(gp, cp2)
+write(cp2 / "tests.toml", '[[scenario]]\nname = "c"\nframes = 8\nbudget = 4000000\ntimeout = 30\ncheckpoint = 4\nram = ["16:4"]\n')
+rc, tc2, p = cli.run("mod", "test", cp2, "--rom", ROM, "--cc", CC, "--sdk-dir", SDK)
+cli.check(rc == 0 and tc2["ok"] is True, f"an executed checkpoint passes: {tc2}")
 # a scenario without an explicit budget or timeout is refused: tests are bounded or they do not run
 unbounded = tmp / "unbounded"
 shutil.copytree(EXAMPLE, unbounded, ignore=shutil.ignore_patterns("fixture_rom.py", "README.md", "__pycache__"))

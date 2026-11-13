@@ -219,6 +219,7 @@ struct RunSpec {
   std::uint64_t checkpoint = 0;
   bool want_pcm = false;
   std::uint64_t first = 1;
+  bool expect_mod = false;   // the program was built with a scheduled package: its MOD_LOADED and MOD_SUMMARY lines are required
 };
 
 // Runs a built program under the capture and parses what it reported.
@@ -239,11 +240,15 @@ std::optional<Refusal> run_program(const fs::path &out, const RunSpec &spec, con
     env.emplace_back("SEGARECOMP_CAPTURE_RAM", ram);
   }
   const fs::path log = out / "run.log";
-  const int rc = run_process({exe.string(), "--instruction-budget", std::to_string(spec.budget)}, log, env, spec.timeout);
+  // Every inherited SEGARECOMP_* variable that is not set above is withheld from the guest: the observation depends on the flags alone.
+  const int rc = run_process({exe.string(), "--instruction-budget", std::to_string(spec.budget)}, log, env, spec.timeout, nullptr, "SEGARECOMP_");
   if (rc == kProcessTimedOut) return Refusal{"E_RUN_TIMEOUT", "the program run exceeded its " + std::to_string(spec.timeout) + " second timeout"};
   std::ifstream in(log, std::ios::binary);
   const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
   if (const auto refused = line_with(text, "MOD_REFUSED")) return Refusal{"E_MOD_REFUSED", "the program refused the mod: " + str_field(*refused, "class")};
+  // Exit semantics of the capture seam (frame_capture.c): a completed window or an exhausted allowance returns the runner's resource-limit transfer (exit 1), a typed guest stop or guest completion
+  // exits 0; 3 (malformed option), 4 (I/O), 5 (mod refused) and anything from a signal (128+) are failures, whatever the program printed before.
+  if (rc != 0 && rc != 1) return Refusal{"E_RUN_FAILED", "the program exited with status " + std::to_string(rc) + " (expected 0 or 1)"};
   const auto summary = line_with(text, "CAPTURE_SUMMARY");
   if (!summary) return Refusal{"E_RUN_FAILED", "the program produced no capture summary (exit " + std::to_string(rc) + ")"};
   obs.outcome = str_field(*summary, "outcome");
@@ -268,6 +273,8 @@ std::optional<Refusal> run_program(const fs::path &out, const RunSpec &spec, con
     obs.mod.roundtrip_status = rt == std::string::npos ? std::string() : str_field(*m, "status", rt);
     obs.mod.state_sha256 = rt == std::string::npos ? std::string() : str_field(*m, "state_sha256", rt);
   }
+  if (spec.expect_mod && (!obs.mod.present || !line_with(text, "MOD_LOADED"))) return Refusal{"E_RUN_FAILED", "the program was built with a mod but did not report it (no MOD_LOADED / MOD_SUMMARY)"};
+  if (!spec.expect_mod && obs.mod.present) return Refusal{"E_RUN_FAILED", "a program built without a mod reported one"};
   if (spec.want_pcm) {
     if (const auto s = line_with(text, "SOUND_SUMMARY")) {
       const std::size_t audio = s->find("\"audio\":{");
@@ -277,6 +284,13 @@ std::optional<Refusal> run_program(const fs::path &out, const RunSpec &spec, con
   if (obs.outcome != "window_complete" && obs.outcome != "incomplete_guest_stop" && obs.outcome != "incomplete_guest_complete")
     return Refusal{"E_RUN_INCOMPLETE", "the run ended with outcome " + obs.outcome + " before the requested frames (raise the budget or lower --frames)"};
   if (obs.frames_captured < spec.frames) return Refusal{"E_RUN_INCOMPLETE", "the program stopped (" + obs.outcome + ") after " + std::to_string(obs.frames_captured) + " of " + std::to_string(spec.frames) + " frames"};
+  std::uint64_t ram_bytes = 0;
+  for (const Region &r : spec.regions) ram_bytes += r.length;
+  if (obs.digests.size() != spec.frames || obs.frames_captured != spec.frames || (ram_bytes != 0 && obs.ram_frames.size() != spec.frames) || (ram_bytes != 0 && obs.final_state.size() != 64))
+    return Refusal{"E_RUN_FAILED", "the capture report does not hold the requested " + std::to_string(spec.frames) + " frame digests and RAM samples"};
+  for (const std::string &f : obs.ram_frames)
+    if (f.size() != ram_bytes * 2) return Refusal{"E_RUN_FAILED", "a RAM sample has the wrong length"};
+  if (spec.want_pcm && obs.pcm.size() != 64) return Refusal{"E_RUN_FAILED", "the program reported no PCM digest"};
   return std::nullopt;
 }
 
@@ -432,24 +446,57 @@ int run_diff(const RunOptions &o) {
   if (const auto r = common_args(o)) return refuse(*r);
   if (const auto r = bounds(o.frames, o.budget, o.timeout, o.has_frames, o.has_budget, o.has_timeout)) return refuse(*r);
   if (!pad_script_ok(o.input)) return refuse({"E_INPUT_SCRIPT", "--input is \"<frame>:<player 1|2>:<mask 0..255>[,...]\" with non-decreasing frames"});
+  for (const std::string &r : o.ram) if (!r.empty() && r[0] == '@') return refuse({"E_SYMBOL_SPACE", "work-RAM regions are numeric: a symbol names an image address and is never reinterpreted as work RAM"});
   const auto regions = parse_regions(o.ram, 65536);
   if (!regions) return refuse({"E_REGION", "--ram is \"<offset>:<length>\" inside the 64 KiB work RAM, at most 8 regions and 1024 bytes in total"});
-  const auto code = parse_regions(o.code, 0xFFFFFF);
-  if (!code) return refuse({"E_REGION", "--code is \"<offset>:<length>\" inside the image, at most 8 regions and 1024 bytes in total"});
+  std::vector<std::string> code_texts = o.code;
+  const auto code_probe = [&] { return parse_regions(code_texts, 0xFFFFFF); };
+  bool have_symbols = false;
+  for (const std::string &c : o.code) have_symbols = have_symbols || (!c.empty() && c[0] == '@');
+  if (have_symbols) {   // resolved after the package is loaded (below)
+  } else if (!code_probe()) return refuse({"E_REGION", "--code is \"<offset>:<length>\" or \"@<verified-symbol>[+0xN]:<length>\" inside the image, at most 8 regions and 1024 bytes in total"});
+  std::optional<std::vector<Region>> code;
+  if (!have_symbols) code = code_probe();
   Target t;
   if (const auto r = load_target(o.target, t)) return refuse(*r);
   Workspace ws;
   ws.dir = make_work(o, ws.keep);
   Prepared p;
   if (const auto r = prepare(o, t, ws.dir, p)) return refuse(*r);
+  if (have_symbols) {   // `@name[+0xN]:length`: the VERIFIED symbol of the exact revision this image is (never a manual or imported-hint entry), an image address; numeric regions pass through unchanged
+    std::string label;
+    for (const auto &rev : t.package.manifest.revisions) if (rev.sha256 == sha256_hex(p.original)) label = rev.label;
+    if (label.empty()) return refuse({"E_SYMBOL_REVISION", "the image is not a revision the package declares, so no symbol applies"});
+    for (std::string &text : code_texts) {
+      if (text.empty() || text[0] != '@') continue;
+      const std::size_t colon = text.find(':');
+      if (colon == std::string::npos || colon < 2) return refuse({"E_REGION", "a symbol region is \"@<name>[+0xN]:<length>\""});
+      std::string name = text.substr(1, colon - 1);
+      std::uint64_t addend = 0;
+      if (const std::size_t plus = name.find('+'); plus != std::string::npos) {
+        const std::string hex = name.substr(plus + 1);
+        name.resize(plus);
+        if (hex.size() < 3 || hex.size() > 10 || hex.compare(0, 2, "0x") != 0 || hex.find_first_not_of("0123456789abcdef", 2) != std::string::npos) return refuse({"E_REGION", "the symbol addend is \"+0x\" and lower-case hex digits"});
+        addend = std::stoull(hex.substr(2), nullptr, 16);
+      }
+      mod::Rejection why;
+      const auto address = mod::verified_symbol(t.package.manifest, name, label, why);
+      if (!address) return refuse({why.code, why.message});
+      text = std::to_string(*address + addend) + text.substr(colon);
+    }
+  }
+  code = code_probe();
+  if (!code) return refuse({"E_REGION", "--code is \"<offset>:<length>\" or \"@<verified-symbol>[+0xN]:<length>\" inside the image, at most 8 regions and 1024 bytes in total"});
 
   if (o.first == 0 || o.first > 2000000) return refuse({"E_FRAMES", "--first must be from 1 to 2000000"});
-  RunSpec spec{o.frames, o.budget, o.timeout, o.input, *regions, 0, true, o.first};
+  RunSpec spec{o.frames, o.budget, o.timeout, o.input, *regions, 0, true, o.first, false};
+  RunSpec modded_spec = spec;
+  modded_spec.expect_mod = p.luau;
   Observed vanilla, modded;
   if (const auto r = build_program(o, p.original_path, ws.dir / "vanilla", {}, {})) return refuse(*r);
   if (const auto r = p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity) : build_program(o, p.modded_input, ws.dir / "modded", {}, {})) return refuse(*r);
   if (const auto r = run_program(ws.dir / "vanilla", spec, ws.dir / "vanilla-frames", vanilla)) return refuse({r->code, "vanilla: " + r->message});
-  if (const auto r = run_program(ws.dir / "modded", spec, ws.dir / "modded-frames", modded)) return refuse({r->code, "modded: " + r->message});
+  if (const auto r = run_program(ws.dir / "modded", modded_spec, ws.dir / "modded-frames", modded)) return refuse({r->code, "modded: " + r->message});
   const Divergence d = compare(vanilla, modded, o.aggregate, o.first);
   std::string codes = "[";
   for (std::size_t i = 0; i < code->size(); ++i) {
@@ -588,6 +635,9 @@ int run_test(const RunOptions &o) {
   ws.dir = make_work(o, ws.keep);
   Prepared p;
   if (const auto r = prepare(o, t, ws.dir, p)) return refuse(*r);
+  for (const Scenario &sc : scenarios)   // a checkpoint needs a scheduled mod (the MODSTATE round trip): refuse explicitly rather than let a scenario appear to pass
+    if (sc.checkpoint != 0 && !p.luau && (o.scenario.empty() || o.scenario == sc.name))
+      return refuse({"E_TEST_CHECKPOINT_UNSUPPORTED", "scenario \"" + sc.name + "\" requests a checkpoint, which needs a Luau mod linked into the program (this package is data-only)"});
   if (const auto r = p.luau ? build_program(o, p.original_path, ws.dir / "modded", p.package_path, p.identity) : build_program(o, p.modded_input, ws.dir / "modded", {}, {})) return refuse(*r);
 
   bool all = true;
@@ -595,7 +645,7 @@ int run_test(const RunOptions &o) {
   bool first = true;
   for (const Scenario &s : scenarios) {
     if (!o.scenario.empty() && s.name != o.scenario) continue;
-    RunSpec spec{s.frames, s.budget, static_cast<unsigned>(s.timeout), s.input, *parse_regions(s.ram, 65536), s.checkpoint, !s.expect_pcm.empty()};
+    RunSpec spec{s.frames, s.budget, static_cast<unsigned>(s.timeout), s.input, *parse_regions(s.ram, 65536), s.checkpoint, !s.expect_pcm.empty(), 1, p.luau};
     Observed obs;
     std::string failure;   // the first divergence, as JSON members
     if (const auto r = run_program(ws.dir / "modded", spec, ws.dir / ("frames-" + s.name), obs)) {
@@ -612,7 +662,9 @@ int run_test(const RunOptions &o) {
       if (failure.empty() && !s.expect_state.empty() && obs.final_state != s.expect_state)
         failure = "\"field\":\"state\",\"expected\":\"" + s.expect_state + "\",\"actual\":\"" + obs.final_state + "\"";
       if (failure.empty() && !s.expect_pcm.empty() && obs.pcm != s.expect_pcm) failure = "\"field\":\"pcm\",\"expected\":\"" + s.expect_pcm + "\",\"actual\":\"" + obs.pcm + "\"";
-      if (failure.empty() && s.checkpoint != 0 && obs.mod.present && obs.mod.roundtrip_status != "ok") failure = "\"field\":\"checkpoint\",\"status\":\"" + esc(obs.mod.roundtrip_status) + "\"";
+      // A requested checkpoint passes only with evidence that the capture/restore ran and was lossless: an executed round trip with status ok and the digest of the state it carried.
+      if (failure.empty() && s.checkpoint != 0 && !(obs.mod.present && obs.mod.roundtrip_status == "ok" && obs.mod.state_sha256.size() == 64))
+        failure = "\"field\":\"checkpoint\",\"status\":\"" + esc(obs.mod.present ? (obs.mod.roundtrip_status.empty() ? std::string("none") : obs.mod.roundtrip_status) : std::string("no_mod")) + "\"";
     }
     all = all && failure.empty();
     results += std::string(first ? "" : ",") + "{\"name\":\"" + s.name + "\",\"passed\":" + (failure.empty() ? "true" : "false") + ",\"frames\":" + std::to_string(s.frames) + ",\"budget\":" + std::to_string(s.budget) +

@@ -14,7 +14,7 @@ segarecomp mod variant --library <dir> --identity <package-identity> --rom <orig
 segarecomp mod inspect [--json] [<dir|package.segapatch>]                          without an argument: every platform adapter and its capability support
 segarecomp mod convert-audio <file.wav> --out <file.u8>                            the deterministic reference PCM conversion (u8-mono)
 segarecomp mod api [--declarations]                                                the Luau API list (JSON) or its generated `.d.luau` declarations
-segarecomp mod diff-run <dir|package> --rom <original> --cc <compiler> --sdk-dir <platforms-dir> --frames <n> --budget <instructions> --timeout <seconds> [--input <pad-script>] [--ram <offset:length>]... [--code <offset:length>]... [--aggregate]
+segarecomp mod diff-run <dir|package> --rom <original> --cc <compiler> --sdk-dir <platforms-dir> --frames <n> --budget <instructions> --timeout <seconds> [--input <pad-script>] [--ram <offset:length>]... [--code <offset:length|@symbol[+0xN]:length>]... [--first <frame>] [--aggregate]
                                                                                    Vanilla versus Modded, bounded: the first divergence, the changed guest bytes (gameplay example page)
 segarecomp mod test <dir> --rom <original> --cc <compiler> --sdk-dir <platforms-dir> [--scenario <name>]   the project's tests.toml scenarios, each bounded by its own budget and timeout
 segarecomp mod session <dir|package.segapatch> --rom <image> [--frames <n>] [--bmp <file>]   DIAGNOSTIC: run a Luau-only package in the synthetic fixture session (not the Genesis machine)

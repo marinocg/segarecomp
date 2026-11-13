@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -55,8 +56,33 @@ std::wstring quote_argument(const std::wstring &arg) {
 
 // `timeout_seconds` 0 = wait forever; on expiry the process is killed and kProcessTimedOut returned. `environment` entries are
 // added to the child's environment.
-int run_process(const std::vector<std::string> &argv, const fs::path &log, const Environment &environment, unsigned timeout_seconds, ProcessUsage *usage) {
-  for (const auto &entry : environment) SetEnvironmentVariableA(entry.first.c_str(), entry.second.c_str());
+int run_process(const std::vector<std::string> &argv, const fs::path &log, const Environment &environment, unsigned timeout_seconds, ProcessUsage *usage, const char *scrub_prefix) {
+  // The child inherits this process's environment, so the overlay (and the scrub) is applied here and the caller's values are restored afterwards, never left deleted or changed.
+  std::vector<std::pair<std::string, std::optional<std::string>>> saved;
+  const auto remember = [&](const std::string &name) {
+    if (std::any_of(saved.begin(), saved.end(), [&](const auto &e) { return e.first == name; })) return;
+    char probe[2];
+    const DWORD n = GetEnvironmentVariableA(name.c_str(), probe, sizeof probe);
+    if (n == 0) { saved.emplace_back(name, GetLastError() == ERROR_ENVVAR_NOT_FOUND ? std::nullopt : std::optional<std::string>(std::string())); return; }
+    std::string value(n + 1U, '\0');
+    value.resize(GetEnvironmentVariableA(name.c_str(), value.data(), static_cast<DWORD>(value.size())));
+    saved.emplace_back(name, value);
+  };
+  if (scrub_prefix != nullptr) {
+    if (char *block = GetEnvironmentStringsA()) {
+      std::vector<std::string> names;
+      for (const char *at = block; *at != '\0'; at += std::strlen(at) + 1U) {
+        const std::string text = at;
+        const std::size_t eq = text.find('=', 1);
+        const std::string name = text.substr(0, eq);
+        if (eq != std::string::npos && name.rfind(scrub_prefix, 0) == 0 && std::none_of(environment.begin(), environment.end(), [&](const auto &e) { return e.first == name; })) names.push_back(name);
+      }
+      FreeEnvironmentStringsA(block);
+      for (const std::string &name : names) { remember(name); SetEnvironmentVariableA(name.c_str(), nullptr); }
+    }
+  }
+  for (const auto &entry : environment) { remember(entry.first); SetEnvironmentVariableA(entry.first.c_str(), entry.second.c_str()); }
+  const auto restore = [&] { for (const auto &e : saved) SetEnvironmentVariableA(e.first.c_str(), e.second ? e.second->c_str() : nullptr); };
   std::wstring command;
   for (const auto &arg : argv) {
     if (!command.empty()) command.push_back(L' ');
@@ -65,7 +91,7 @@ int run_process(const std::vector<std::string> &argv, const fs::path &log, const
   SECURITY_ATTRIBUTES attributes{sizeof(attributes), nullptr, TRUE};
   HANDLE sink = CreateFileW(log.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &attributes, CREATE_ALWAYS,
                             FILE_ATTRIBUTE_NORMAL, nullptr);
-  if (sink == INVALID_HANDLE_VALUE) return -1;
+  if (sink == INVALID_HANDLE_VALUE) { restore(); return -1; }
   STARTUPINFOW startup{};
   startup.cb = sizeof(startup);
   startup.dwFlags = STARTF_USESTDHANDLES;
@@ -76,14 +102,14 @@ int run_process(const std::vector<std::string> &argv, const fs::path &log, const
   const BOOL started = CreateProcessW(nullptr, command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
                                       nullptr, nullptr, &startup, &info);
   CloseHandle(sink);
-  if (!started) return -1;
+  if (!started) { restore(); return -1; }
   int timed_out = 0;
   if (WaitForSingleObject(info.hProcess, timeout_seconds == 0 ? INFINITE : timeout_seconds * 1000U) == WAIT_TIMEOUT) {
     TerminateProcess(info.hProcess, 1);
     WaitForSingleObject(info.hProcess, INFINITE);
     timed_out = 1;
   }
-  for (const auto &entry : environment) SetEnvironmentVariableA(entry.first.c_str(), nullptr);
+  restore();
   DWORD code = 1;
   GetExitCodeProcess(info.hProcess, &code);
   if (usage != nullptr) {   // SEG-125: CPU time is available; the peak resident set would need psapi, so it is reported unavailable
@@ -100,11 +126,12 @@ int run_process(const std::vector<std::string> &argv, const fs::path &log, const
 }
 #else
 
-int run_process(const std::vector<std::string> &argv, const fs::path &log, const Environment &environment, unsigned timeout_seconds, ProcessUsage *usage) {
+int run_process(const std::vector<std::string> &argv, const fs::path &log, const Environment &environment, unsigned timeout_seconds, ProcessUsage *usage, const char *scrub_prefix) {
   std::vector<std::string> env_storage;
   for (char **entry = environ; *entry != nullptr; ++entry) {
     const std::string text = *entry;
     const std::string name = text.substr(0, text.find('='));
+    if (scrub_prefix != nullptr && name.rfind(scrub_prefix, 0) == 0 && std::none_of(environment.begin(), environment.end(), [&](const auto &e) { return e.first == name; })) continue;
     if (std::none_of(environment.begin(), environment.end(), [&](const auto &e) { return e.first == name; })) env_storage.push_back(text);
   }
   for (const auto &entry : environment) env_storage.push_back(entry.first + "=" + entry.second);
