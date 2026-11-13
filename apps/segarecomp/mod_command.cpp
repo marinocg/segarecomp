@@ -2,6 +2,7 @@
 // implementation. `check` and `build` never execute a payload; `build` runs the HOST's C compiler (flags owned by the host, kNativeCompileFlags) over the package's own C11 units only, and the pinned
 // trusted Luau compiler over its Luau sources (SEG-137-T003; the bytecode is never packaged and never run by `build`).
 #include "luau_build.hpp"
+#include "mod_run.hpp"
 #include "process_run.hpp"
 #include "segarecomp/luau_api.hpp"
 #include "segarecomp/luau_host.hpp"
@@ -529,6 +530,8 @@ int usage() {
                "       segarecomp mod install <package.segapatch> --rom <original-image> --library <dir> [--approve <package-identity>]\n"
                "       segarecomp mod variant --library <dir> --identity <package-identity> --rom <original-image> [--cc <compiler> --sdk-dir <platforms-dir>]\n"
                "       segarecomp mod inspect [--json] [<dir|package.segapatch>]\n"
+               "       segarecomp mod diff-run <dir|package> --rom <original-image> --cc <compiler> --sdk-dir <platforms-dir> --frames <n> --budget <instructions> --timeout <seconds> [--first <frame>] [--input <pad-script>] [--ram <offset:length>]... [--code <offset:length>]... [--aggregate] [--work <dir>]\n"
+               "       segarecomp mod test <dir> --rom <original-image> --cc <compiler> --sdk-dir <platforms-dir> [--scenario <name>] [--aggregate] [--work <dir>]\n"
                "       segarecomp mod convert-audio <file.wav> --out <file.u8>\n"
                "       segarecomp mod apply <dir|package.segapatch> --rom <original-image> --out <edited-image>\n"
                "       segarecomp mod bps <dir|package.segapatch> --rom <original-image> --out <patch.bps>\n"
@@ -552,6 +555,7 @@ int segarecomp_mod_command(int argc, char **argv) {
   bool declarations_only = false;
   std::uint64_t frames = 60;
   fs::path bmp;
+  segarecomp_cli::RunOptions run;   // diff-run / test (SEG-136-T007)
   for (int i = 3; i < argc; ++i) {
     const std::string_view a = argv[i];
     const auto value = [&](std::string &dst) { if (i + 1 >= argc) return false; dst = argv[++i]; return true; };
@@ -571,13 +575,30 @@ int segarecomp_mod_command(int argc, char **argv) {
     else if (a == "--bps") { if (!value(tmp)) return usage(); bps = tmp; }
     else if (a == "--library") { if (!value(tmp)) return usage(); library = tmp; }
     else if (a == "--declarations") declarations_only = true;
-    else if (a == "--frames") { if (!value(tmp) || tmp.empty() || tmp.size() > 5 || tmp.find_first_not_of("0123456789") != std::string::npos) return usage(); frames = std::stoull(tmp); }
+    else if (a == "--frames") { if (!value(tmp) || tmp.empty() || tmp.size() > 5 || tmp.find_first_not_of("0123456789") != std::string::npos) return usage(); frames = std::stoull(tmp); run.has_frames = true; }
+    else if (a == "--first") { if (!value(tmp) || tmp.empty() || tmp.size() > 8 || tmp.find_first_not_of("0123456789") != std::string::npos) return usage(); run.first = std::stoull(tmp); }
+    else if (a == "--budget") { if (!value(tmp) || tmp.empty() || tmp.size() > 12 || tmp.find_first_not_of("0123456789") != std::string::npos) return usage(); run.budget = std::stoull(tmp); run.has_budget = true; }
+    else if (a == "--timeout") { if (!value(tmp) || tmp.empty() || tmp.size() > 6 || tmp.find_first_not_of("0123456789") != std::string::npos) return usage(); run.timeout = static_cast<unsigned>(std::stoul(tmp)); run.has_timeout = true; }
+    else if (a == "--input") { if (!value(run.input)) return usage(); }
+    else if (a == "--ram") { if (!value(tmp)) return usage(); run.ram.push_back(tmp); }
+    else if (a == "--code") { if (!value(tmp)) return usage(); run.code.push_back(tmp); }
+    else if (a == "--scenario") { if (!value(run.scenario)) return usage(); }
+    else if (a == "--work") { if (!value(tmp)) return usage(); run.work = tmp; }
+    else if (a == "--aggregate") run.aggregate = true;
     else if (a == "--bmp") { if (!value(tmp)) return usage(); bmp = tmp; }
     else if (a == "--json") continue;   // output is always JSON
     else if (a.substr(0, 2) == "--" || !target.empty()) return usage();
     else target = std::string(a);
   }
   if (sub == "api" && target.empty()) return run_api(declarations_only);
+  if (sub == "diff-run" || sub == "test") {   // SEG-136-T007 (ADR 0300): bounded Vanilla-versus-Modded workflow; always explicit budgets and timeouts
+    run.target = target;
+    run.rom = rom;
+    run.cc = cc;
+    run.sdk = sdk;
+    run.frames = frames;
+    return sub == "diff-run" ? segarecomp_cli::run_diff(run) : segarecomp_cli::run_test(run);
+  }
   if (sub == "session" && !target.empty() && roms.size() == 1) return run_session(target, rom, frames, bmp);
   if (sub == "inspect") {
     if (target.empty()) {

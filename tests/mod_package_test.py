@@ -277,4 +277,39 @@ mix = pl(128) + [luau(f"s/{i:02d}.luau", b"-- " + bytes([48 + i % 10])) for i in
 accept("255 payloads (256 entries)", mutate(lambda m: None, payloads=mix))
 
 # canonical key order is what the packer emits; a reader accepts the manifest it re-serialises (round trip through the C++ packer is tested in mod_project_test.py)
+# ---------------------------------------------------------------- SEG-138-T009 (ADR 0300): declared guest-memory ranges
+MEM_CAPS = ["host.log", "memory.read.m68k.work_ram", "memory.write.m68k.work_ram"]
+
+
+def memory_manifest(*ranges, caps=MEM_CAPS):
+    return mutate(lambda m: m.update(capabilities=list(caps), memory=list(ranges)))
+
+
+def mem(offset=16, length=2, access="read-write", revision="rev-a", space="m68k.work_ram"):
+    r = {"revision": revision} if revision else {}
+    r.update(space=space, offset=offset, length=length, access=access)
+    return r
+
+
+ranges_a = [mem(), mem(offset=32, length=4, access="read", revision="")]
+ranges_a.sort(key=lambda r: (r.get("revision", ""), r["space"], r["offset"], r["length"], r["access"]))
+doc_a = accept("a package with declared memory ranges", memory_manifest(*ranges_a))
+doc_b = accept("a different declared range", memory_manifest(mem(offset=18)))
+doc_plain = accept("the same package without a range", mutate(lambda m: m.update(capabilities=list(MEM_CAPS))))
+cli.check(len({doc_a["content_digest"], doc_b["content_digest"], doc_plain["content_digest"]}) == 3, "the declared ranges are part of the content digest")
+cli.check(len({doc_a["package_identity"], doc_b["package_identity"], doc_plain["package_identity"]}) == 3, "and of the package identity")
+reject("a range for an undeclared revision", memory_manifest(mem(revision="rev-z")), "E_MEMORY_REVISION")
+reject("a range past the end of the work RAM", memory_manifest(mem(offset=65535, length=2)), "E_MEMORY_RANGE")
+reject("an empty range", memory_manifest(mem(length=0)), "E_MEMORY_RANGE")
+reject("an offset beyond the reader's number cap is not valid JSON for it", memory_manifest(mem(offset=2**33)), "E_MANIFEST_SYNTAX")
+reject("a space the platform does not expose", memory_manifest(mem(space="m68k.rom")), "E_MEMORY_SPACE")
+reject("an unknown access", memory_manifest(mem(access="rw")), "E_MEMORY_ACCESS")
+reject("a duplicated range", memory_manifest(mem(), mem()), "E_MEMORY_DUPLICATE")
+reject("ranges out of canonical order", memory_manifest(mem(offset=32), mem(offset=16)), "E_FIELD_VALUE")
+reject("write access without memory.write", memory_manifest(mem(), caps=["host.log", "memory.read.m68k.work_ram"]), "E_CAPABILITY_INCONSISTENT")
+reject("read access without memory.read", memory_manifest(mem(), caps=["host.log", "memory.write.m68k.work_ram"]), "E_CAPABILITY_INCONSISTENT")
+reject("a range key that is not defined", mutate(lambda m: m.update(capabilities=list(MEM_CAPS), memory=[dict(mem(), mode="x")])), "E_FIELD_UNKNOWN")
+reject("more than sixteen ranges", memory_manifest(*[mem(offset=i * 4, length=2) for i in range(17)]), "E_MEMORY_COUNT")
+reject("memory ranges on Master System", mutate(lambda m: m.update(capabilities=["host.log"], memory=[mem(space="z80.work_ram")]), platform="master-system"), "E_MEMORY_SPACE")
+
 cli.done("mod_package_test")

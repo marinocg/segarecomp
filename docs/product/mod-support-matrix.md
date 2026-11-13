@@ -73,7 +73,7 @@ The plan behind it is the Modding Platform contract set: [gap inventory](../arch
 | Save states / rewind with mods | Genesis / Mega Drive | experimental | supported-and-tested | planned: SEG-138-T006 |
 | Save states / rewind with mods | Master System | unsupported | supported-with-limitations | planned: SEG-147-T005 |
 | Save states / rewind with mods | Sega CD | unsupported | experimental | planned: SEG-148-T007 |
-| Developer tooling | Genesis / Mega Drive | supported-with-limitations | supported-with-limitations | `tests/segapatch_package_test.py` |
+| Developer tooling | Genesis / Mega Drive | supported-with-limitations | supported-with-limitations | `tests/segapatch_package_test.py`, `tests/mod_diff_run_test.py`, `tests/mod_gameplay_example_test.py` |
 | Developer tooling | Master System | unsupported | supported-with-limitations | planned: SEG-147-T010 |
 | Developer tooling | Sega CD | unsupported | experimental | planned: SEG-148-T011 |
 | Public docs and patch distribution | Genesis / Mega Drive | supported-with-limitations | supported-with-limitations | `tests/product_truth_test.py` |
