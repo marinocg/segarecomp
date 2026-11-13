@@ -1,0 +1,31 @@
+# Gameplay example (SEG-138-T009, ADR 0300). Created from `segarecomp mod init --template luau`; the revision is the deterministic FIXTURE image described in README.md (not a game).
+[mod]
+id = "gameplay-example"
+version = "0.1.0"
+name = "Gameplay example"
+license = "CC0-1.0"
+
+[target]
+platform = "genesis"
+
+[[target.revision]]
+label = "fixture"
+sha256 = "fc7126ee2497cfbc7e1e3337c230a967d21c4c98e44493a4dfd01ae3ff6a5a34"
+
+[[source]]
+kind = "luau-source"
+path = "scripts/main.luau"
+
+[capabilities]
+required = ["host.log", "input.read", "memory.read.m68k.work_ram", "memory.write.m68k.work_ram", "overlay.rgba", "state.mod"]
+
+[state]
+schema = 1
+
+# The score word of the fixture program. This is the ONLY guest memory the mod may touch.
+[[memory]]
+revision = "fixture"
+space = "m68k.work_ram"
+offset = 16
+length = 2
+access = "read-write"

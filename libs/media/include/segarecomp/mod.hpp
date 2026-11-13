@@ -131,6 +131,16 @@ struct Hook {
 };
 inline constexpr std::string_view kHookModes[] = {"before", "after", "before-after", "replace"};
 
+// A declared guest-memory range a mod's scheduled callbacks may touch (SEG-138-T009, ADR 0300). `revision` empty = every declared revision. `space` is one of the platform's writable/readable spaces
+// (Genesis: `m68k.work_ram`); `access` is `read`, `write` or `read-write` and must be backed by the matching declared capability. The scheduler denies every access outside a declared range.
+struct MemoryRange {
+  std::string revision, space, access;
+  std::uint32_t offset = 0, length = 0;
+  bool operator==(const MemoryRange &) const = default;
+};
+inline constexpr std::string_view kMemoryAccess[] = {"read", "write", "read-write"};
+inline constexpr std::size_t kMaxMemoryRanges = 16;   // per manifest (the scheduler holds at most 16 per mod)
+
 struct Manifest {
   std::string id, version, name, platform, author, license, purpose;
   std::string source_kind;                       // cartridge-image | disc-image (reserved)
@@ -147,6 +157,7 @@ struct Manifest {
   std::vector<Mapping> mappings;
   std::vector<Symbol> symbols;                   // sorted by (name, revision) in a canonical manifest
   std::vector<Hook> hooks;                       // sorted by id in a canonical manifest (ADR 0298)
+  std::vector<MemoryRange> memory;               // sorted by (revision, space, offset, length, access) in a canonical manifest (ADR 0300)
   std::string header_repair;                     // "" (default), "genesis-checksum" or "none" (ADR 0293)
   bool operator==(const Manifest &) const = default;
 };
@@ -231,6 +242,13 @@ struct EditRanges {
 };
 [[nodiscard]] EditRanges rom_edit_ranges(const Manifest &manifest, std::span<const std::uint8_t> text, std::string_view revision);
 [[nodiscard]] std::optional<std::uint32_t> verified_symbol(const Manifest &manifest, const std::string &name, const std::string &revision, Rejection &why);
+
+// Declaration check run by the reader and `mod check`: known space of the platform, non-empty and inside the space, 16/32-bit friendly (no alignment is imposed on the range itself), a declared revision label,
+// no exact duplicate, and an access backed by the declared `memory.read.<space>` / `memory.write.<space>` capability. Stable classes: E_MEMORY_RANGE, E_MEMORY_SPACE, E_MEMORY_ACCESS, E_MEMORY_REVISION,
+// E_MEMORY_DUPLICATE, E_MEMORY_COUNT, E_CAPABILITY_INCONSISTENT.
+[[nodiscard]] std::optional<Rejection> check_memory(const Manifest &manifest);
+// The ranges that apply to one revision label (its own plus those declared for every revision), in canonical order.
+[[nodiscard]] std::vector<MemoryRange> memory_for_revision(const Manifest &manifest, std::string_view revision);
 
 // ---- function hooks (SEG-138-T004, ADR 0298) ----
 // Register-view bit of a name (mod-execution-phases.md 5.3): d0..d7 = 0..7, a0..a7 = 8..15, ccr = 16, cycles = 17, stack0..stack7 = 24..31. Writable names are d0..d7, a0..a6, ccr.

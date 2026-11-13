@@ -10,6 +10,7 @@
 #include "vdp_render.h"
 
 typedef struct GenesisFrameCaptureSession {
+  GenesisRuntime *runtime;
   const GenesisFrameCaptureOptions *options;
   GenesisFrameCaptureResult *result;
   uint64_t produced;
@@ -17,6 +18,14 @@ typedef struct GenesisFrameCaptureSession {
 } GenesisFrameCaptureSession;
 
 static GenesisFrameCaptureSession *g_capture_session;
+static uint8_t g_ram_samples[GENESIS_FRAME_CAPTURE_MAX_FRAMES][GENESIS_CAPTURE_RAM_BYTES_MAX];
+static uint32_t g_ram_sample_length;
+
+const uint8_t *genesis_frame_capture_ram_sample(uint32_t index, uint32_t *length_out) {
+  if (length_out != NULL) *length_out = g_ram_sample_length;
+  if (g_ram_sample_length == 0U || index >= GENESIS_FRAME_CAPTURE_MAX_FRAMES) return NULL;
+  return g_ram_samples[index];
+}
 
 /* Records the frame when its publication ordinal is inside the window. The runtime publishes (and increments its
    sequence) only after a successful render, so `produced` equals the publication ordinal. */
@@ -36,6 +45,14 @@ static int genesis_frame_capture_record(int status, GenesisFrameArtifact *frame_
       session->io_error = 1;
     } else {
       memcpy(session->result->digests[session->result->frames_captured], frame_out->frame_digest, 32U);
+      if (session->options->ram_region_count != 0U && session->runtime != NULL) {
+        uint32_t at = 0U, region;
+        for (region = 0U; region < session->options->ram_region_count; ++region) {
+          const GenesisCaptureRamRegion *r = &session->options->ram_regions[region];
+          memcpy(&g_ram_samples[session->result->frames_captured][at], &session->runtime->work_ram[r->offset], r->length);
+          at += r->length;
+        }
+      }
       session->result->frames_captured++;
     }
   }
@@ -121,8 +138,26 @@ GenesisFrameCaptureResult genesis_frame_capture_run(GenesisRuntime *runtime, Gen
     r.outcome = GENESIS_FRAME_CAPTURE_INVALID_ARGUMENT;
     return r;
   }
+  {
+    uint32_t region, total = 0U;
+    if ((options->ram_region_count != 0U && options->ram_regions == NULL) || options->ram_region_count > GENESIS_CAPTURE_RAM_REGIONS_MAX) {
+      r.outcome = GENESIS_FRAME_CAPTURE_INVALID_ARGUMENT;
+      return r;
+    }
+    for (region = 0U; region < options->ram_region_count; ++region) {
+      const GenesisCaptureRamRegion *rr = &options->ram_regions[region];
+      if (rr->length == 0U || rr->offset > sizeof(runtime->work_ram) || rr->length > sizeof(runtime->work_ram) - rr->offset ||
+          rr->length > GENESIS_CAPTURE_RAM_BYTES_MAX - total) {
+        r.outcome = GENESIS_FRAME_CAPTURE_INVALID_ARGUMENT;
+        return r;
+      }
+      total += rr->length;
+    }
+    g_ram_sample_length = total;
+  }
   memset(&latest, 0, sizeof(latest));
   memset(&session, 0, sizeof(session));
+  session.runtime = runtime;
   memset(&raster_capture, 0, sizeof(raster_capture));
   raster_capture.producer = genesis_frame_capture_raster_producer;
   session.options = options;
@@ -144,6 +179,9 @@ GenesisFrameCaptureResult genesis_frame_capture_run(GenesisRuntime *runtime, Gen
       return genesis_frame_capture_finish(runtime, r, GENESIS_FRAME_CAPTURE_INCOMPLETE_RUNNER_EXHAUSTED, &observer);
     slice = remaining < options->slice_dispatches ? (uint32_t)remaining : options->slice_dispatches;
     genesis_pad_script_apply(runtime, options, &pad_cursor, &r);
+#ifdef SEGARECOMP_CAPTURE_MOD
+    segarecomp_capture_mod_checkpoint(runtime);
+#endif
     t = genesis_runtime_run(runtime, dispatch, slice);
     r.transfer = t;
     if (t.kind == GENESIS_RUNNER_RESOURCE_LIMIT) {
@@ -216,6 +254,31 @@ static int genesis_pad_script_parse(const char *text, GenesisPadScriptEntry *out
   return genesis_pad_script_valid(out, count) ? (int)count : -1;
 }
 
+/* Parses "<offset>:<length>[,<offset>:<length>...]" (decimal, work-RAM offsets). Returns the region count or -1 when malformed / out of bounds. */
+static int genesis_capture_ram_parse(const char *text, GenesisCaptureRamRegion *out) {
+  uint32_t count = 0U, total = 0U;
+  const char *cursor = text;
+  while (*cursor != '\0') {
+    char *end = NULL;
+    unsigned long long offset, length;
+    if (count == GENESIS_CAPTURE_RAM_REGIONS_MAX || *cursor < '0' || *cursor > '9') return -1;
+    errno = 0;
+    offset = strtoull(cursor, &end, 10);
+    if (errno != 0 || end == cursor || *end != ':' || end[1] < '0' || end[1] > '9') return -1;
+    cursor = end + 1;
+    length = strtoull(cursor, &end, 10);
+    if (errno != 0 || end == cursor || length == 0U || offset > 65536U || length > 65536U - offset || length > GENESIS_CAPTURE_RAM_BYTES_MAX - total) return -1;
+    total += (uint32_t)length;
+    cursor = end;
+    if (*cursor == ',') ++cursor;
+    else if (*cursor != '\0') return -1;
+    out[count].offset = (uint32_t)offset;
+    out[count].length = (uint32_t)length;
+    ++count;
+  }
+  return (int)count;
+}
+
 int genesis_frame_capture_requested(void) {
   return getenv("SEGARECOMP_CAPTURE_DIR") != NULL;
 }
@@ -223,19 +286,25 @@ int genesis_frame_capture_requested(void) {
 GenesisControlTransfer genesis_frame_capture_run_from_environment(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                                                   uint32_t dispatch_allowance) {
   static GenesisPadScriptEntry pad_script[GENESIS_PAD_SCRIPT_MAX_ENTRIES];
+  GenesisCaptureRamRegion ram_regions[GENESIS_CAPTURE_RAM_REGIONS_MAX];
   GenesisFrameCaptureOptions options;
   GenesisFrameCaptureResult r;
   uint64_t first = 0U, count = 0U, slice = 65536U, stride = 1U;
   const char *slice_text = getenv("SEGARECOMP_CAPTURE_SLICE");
   const char *stride_text = getenv("SEGARECOMP_CAPTURE_STRIDE");
   const char *script_text = getenv("SEGARECOMP_PAD_SCRIPT");
+  const char *ram_text = getenv("SEGARECOMP_CAPTURE_RAM");   /* SEG-136-T007: "<offset>:<length>[,...]" work-RAM regions sampled with every captured frame */
   const char *name;
   uint32_t index;
-  int script_count = 0;
+  int script_count = 0, ram_count = 0;
   memset(&options, 0, sizeof(options));
   options.out_dir = getenv("SEGARECOMP_CAPTURE_DIR");
   if (script_text != NULL && (script_count = genesis_pad_script_parse(script_text, pad_script)) < 0) {
     fprintf(stderr, "capture: malformed SEGARECOMP_PAD_SCRIPT\n");
+    exit(3);
+  }
+  if (ram_text != NULL && (ram_count = genesis_capture_ram_parse(ram_text, ram_regions)) <= 0) {
+    fprintf(stderr, "capture: malformed SEGARECOMP_CAPTURE_RAM\n");
     exit(3);
   }
   if (options.out_dir == NULL || genesis_capture_parse_u64(getenv("SEGARECOMP_CAPTURE_FIRST"), &first) != 0 ||
@@ -253,6 +322,11 @@ GenesisControlTransfer genesis_frame_capture_run_from_environment(GenesisRuntime
   options.frame_stride = (uint32_t)stride;
   options.pad_script = script_count > 0 ? pad_script : NULL;
   options.pad_script_count = (uint32_t)script_count;
+  options.ram_regions = ram_count > 0 ? ram_regions : NULL;
+  options.ram_region_count = (uint32_t)(ram_count > 0 ? ram_count : 0);
+#ifdef SEGARECOMP_CAPTURE_MOD
+  if (segarecomp_capture_mod_begin(runtime) != 0) exit(5);
+#endif
   r = genesis_frame_capture_run(runtime, dispatch, &options, dispatch_allowance);
   name = r.outcome == GENESIS_FRAME_CAPTURE_WINDOW_COMPLETE                ? "window_complete"
          : r.outcome == GENESIS_FRAME_CAPTURE_INCOMPLETE_RUNNER_EXHAUSTED ? "incomplete_runner_resource_limit"
@@ -286,7 +360,32 @@ GenesisControlTransfer genesis_frame_capture_run_from_environment(GenesisRuntime
     for (byte = 0; byte < 32U; ++byte) fprintf(stderr, "%02x", (unsigned)r.digests[index][byte]);
     fprintf(stderr, "\"");
   }
-  fprintf(stderr, "]}\n");
+  fprintf(stderr, "]");
+  if (ram_count > 0) {
+    GenesisSha256 sha;
+    uint8_t final_digest[32];
+    uint32_t region, length = 0U, at;
+    fprintf(stderr, ",\"ram_regions\":[");
+    for (region = 0U; region < (uint32_t)ram_count; ++region)
+      fprintf(stderr, "%s{\"offset\":%u,\"length\":%u}", region == 0U ? "" : ",", (unsigned)ram_regions[region].offset, (unsigned)ram_regions[region].length);
+    fprintf(stderr, "],\"ram_frames\":[");
+    for (index = 0; index < r.frames_captured; ++index) {
+      const uint8_t *sample = genesis_frame_capture_ram_sample(index, &length);
+      fprintf(stderr, "%s\"", index == 0U ? "" : ",");
+      for (at = 0U; sample != NULL && at < length; ++at) fprintf(stderr, "%02x", (unsigned)sample[at]);
+      fprintf(stderr, "\"");
+    }
+    genesis_sha256_init(&sha);
+    genesis_sha256_update(&sha, runtime->work_ram, sizeof(runtime->work_ram));
+    genesis_sha256_final(&sha, final_digest);
+    fprintf(stderr, "],\"final_work_ram_sha256\":\"");
+    for (at = 0U; at < 32U; ++at) fprintf(stderr, "%02x", (unsigned)final_digest[at]);
+    fprintf(stderr, "\"");
+  }
+  fprintf(stderr, "}\n");
+#ifdef SEGARECOMP_CAPTURE_MOD
+  segarecomp_capture_mod_end(runtime);
+#endif
   genesis_runtime_write_notes(runtime, r.render_rejections, r.vram_journal_overflows, stderr); /* SEG-055: region / undelivered H-interrupts / rejected frames, when notable */
   if (r.outcome == GENESIS_FRAME_CAPTURE_INVALID_ARGUMENT || r.outcome == GENESIS_FRAME_CAPTURE_IO_ERROR) exit(4);
   if (r.outcome == GENESIS_FRAME_CAPTURE_WINDOW_COMPLETE ||

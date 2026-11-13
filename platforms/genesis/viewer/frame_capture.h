@@ -61,6 +61,14 @@ typedef struct GenesisPadScriptEntry {
   uint8_t mask;    /* GENESIS_PAD_* bits */
 } GenesisPadScriptEntry;
 
+/* SEG-136-T007 (ADR 0300): optional work-RAM region sampling. Each captured frame also records the bytes of the requested regions, read when the frame is published (after the frame-end phase of a
+   scheduled mod, before the next frame's input), so two builds of the same program can be compared byte for byte. Bounded: at most 8 regions and 1024 bytes in total per frame. */
+#define GENESIS_CAPTURE_RAM_REGIONS_MAX 8U
+#define GENESIS_CAPTURE_RAM_BYTES_MAX 1024U
+typedef struct GenesisCaptureRamRegion {
+  uint32_t offset, length;  /* inside the 64 KiB work RAM */
+} GenesisCaptureRamRegion;
+
 typedef struct GenesisFrameCaptureOptions {
   uint64_t first_frame;       /* 1-based publication ordinal of the first captured frame (> 0) */
   uint32_t frame_count;       /* 1..GENESIS_FRAME_CAPTURE_MAX_FRAMES */
@@ -69,6 +77,8 @@ typedef struct GenesisFrameCaptureOptions {
   const char *out_dir;        /* existing directory receiving frame-<ordinal>.ppm */
   const GenesisPadScriptEntry *pad_script; /* optional (NULL = none): non-decreasing `frame`, see the header comment */
   uint32_t pad_script_count;               /* <= GENESIS_PAD_SCRIPT_MAX_ENTRIES */
+  const GenesisCaptureRamRegion *ram_regions; /* optional (NULL = none) */
+  uint32_t ram_region_count;                  /* <= GENESIS_CAPTURE_RAM_REGIONS_MAX */
 } GenesisFrameCaptureOptions;
 
 typedef struct GenesisFrameCaptureResult {
@@ -82,6 +92,17 @@ typedef struct GenesisFrameCaptureResult {
   uint32_t pad_entries_applied;    /* SEG-068-T007: pad-script entries applied before the run ended */
   uint8_t digests[GENESIS_FRAME_CAPTURE_MAX_FRAMES][32]; /* frame_digest of each captured frame */
 } GenesisFrameCaptureResult;
+
+/* The region bytes sampled with captured frame `index` (concatenated in region order), or NULL when no regions were requested / the index is out of range. Valid until the next capture run. */
+const uint8_t *genesis_frame_capture_ram_sample(uint32_t index, uint32_t *length_out);
+
+#ifdef SEGARECOMP_CAPTURE_MOD
+/* SEG-138-T009 (ADR 0300): the scheduled-mod seam of the headless program (platforms/genesis/viewer/mod_capture.cpp). `begin` attaches the mod before the first dispatch (nonzero = refused, the program
+   exits 5), `checkpoint` runs between runner slices, `end` prints MOD_SUMMARY and detaches. Present only in a program built with `--luau-package`. */
+int segarecomp_capture_mod_begin(GenesisRuntime *runtime);
+void segarecomp_capture_mod_checkpoint(GenesisRuntime *runtime);
+void segarecomp_capture_mod_end(GenesisRuntime *runtime);
+#endif
 
 /* Runs until the window is complete, the allowance is exhausted, or the guest stops.
    `runtime->live_frame_observer` must be NULL on entry; it is restored to NULL on return. */

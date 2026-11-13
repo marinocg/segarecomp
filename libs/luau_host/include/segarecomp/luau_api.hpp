@@ -90,6 +90,10 @@ struct HostConfig {
 [[nodiscard]] std::vector<std::string> live_capabilities();
 [[nodiscard]] std::optional<mod::Rejection> live_support(const mod::Package &package);   // E_LIVE_PLATFORM | E_LIVE_TRUST | E_LIVE_ABI | E_LIVE_CAPABILITY | E_LIVE_PAYLOAD
 [[nodiscard]] HostConfig live_host_config(const mod::Manifest &manifest);
+// SEG-138-T009 (ADR 0300): the headless scheduled path (the ONE mod scheduler, phases + bounded work-RAM/input services); same rejection classes as live_support.
+[[nodiscard]] std::vector<std::string> scheduled_capabilities();
+[[nodiscard]] std::optional<mod::Rejection> scheduled_support(const mod::Package &package);
+[[nodiscard]] HostConfig scheduled_host_config(const mod::Manifest &manifest);
 
 // ---- overlay rasterization (the fixed HUD overlay path) ----
 struct OverlayImage {
