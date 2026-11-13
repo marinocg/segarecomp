@@ -7,6 +7,12 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Mod phase scheduler, input interception and bounded work-RAM access (ADR 0297, Genesis)
+
+* The Genesis runtime can now run mod callbacks at the documented phases (`reset`, `frame-begin`, `input`, `post-input`, `frame-end`, `render`) through one deterministic scheduler used by native ABI 2 providers and by Luau. Callbacks run only between dispatches, take zero guest time and `frame-end` runs before the frame is rendered; `render` is read-only. The `input` phase can replace the pad the game reads; the physical pad stays what recordings store.
+* Mods can read and write declared work-RAM ranges (1/2/4 bytes, big-endian, even-aligned for words) in the legal phases only; writes are staged and committed atomically, every committed write is logged. Any violation (undeclared capability, illegal phase, out-of-range, odd word access, budget) faults only that mod with a stable `E_MOD_FAULT cause=...` diagnostic and the game continues unmodified. Luau gained `frame_begin/input/post_input/frame_end` callbacks, `sega.mem.read/write` and `sega.input.get/set` with results identical to a native provider.
+* Not yet in a built program: linking the scheduler into a generated-native executable, function hooks and mod state in save states are later steps. Without a scheduler the runtime is unchanged.
+
 ### Luau for mods: read-only API, static check, error diagnostics, a Luau-only HUD example (ADR 0295)
 
 * A deliberately small, **read-only** Luau API: `sega.log`, `sega.frame.value` (values the host publishes for a frame, copied in), `sega.overlay.rect/text` (requests drawn into the fixed 128x256 HUD overlay) and the optional `reset()` / `render(frame)` callbacks. Every binding is gated by the capability the package declares (`host.log`, `frame.work_ram`, `overlay.rgba`); arguments are validated, geometry is clamped, rates are limited, and a script that misbehaves **faults and disables only itself** (stable `E_MOD_FAULT cause=...` diagnostic, nothing it staged is kept). There is no memory access, input, clock, file or network.

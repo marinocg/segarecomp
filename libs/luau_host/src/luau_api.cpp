@@ -12,7 +12,7 @@ namespace segarecomp::luau {
 namespace {
 
 // The ONLY list of host names a script can reach. A name is added here, in a new ABI minor if it needs a capability the catalogue does not have (native-sdk-abi-2.md section 7).
-constexpr std::array<ApiEntry, 8> kApi = {{
+constexpr std::array<ApiEntry, 16> kApi = {{
     {"sega.log", "host.log", "function", "message:string", "", "all", "Appends one line to the host log (at most 256 bytes, 16 lines per callback; printable ASCII)."},
     {"sega.frame.value", "frame.work_ram", "function", "name:string", "number?", "render",
      "Reads one named integer the host published for this frame (a read-only copy; nil when the host publishes no such value)."},
@@ -22,7 +22,19 @@ constexpr std::array<ApiEntry, 8> kApi = {{
      "Requests a filled rectangle; integers only, clamped to the overlay, rgba is 0xRRGGBBAA, at most 64 requests per callback."},
     {"sega.overlay.text", "overlay.rgba", "function", "x:number,y:number,text:string,rgba:number", "", "render",
      "Requests text in the host's bitmap font (printable ASCII, at most 64 bytes); the origin is clamped to the overlay."},
+    {"sega.mem.read", "memory.read.m68k.work_ram", "function", "space:string,offset:number,width:number", "number", "reset,frame-begin,input,post-input,frame-end",
+     "Reads 1, 2 or 4 bytes (big-endian) of a declared work-RAM range; the space is named (\"m68k.work_ram\"); sees this callback's own staged writes; a violation is a fault."},
+    {"sega.mem.write", "memory.write.m68k.work_ram", "function", "space:string,offset:number,width:number,value:number", "", "frame-begin,post-input,frame-end",
+     "Stages a 1, 2 or 4 byte big-endian write to a declared work-RAM range; committed atomically when the callback returns without a fault (at most 1024 writes, 16384 bytes); a violation is a fault."},
+    {"sega.input.get", "input.read", "function", "port:number", "number", "frame-begin,input,post-input",
+     "Reads the pad (button bits) of port 1 or 2: the previous frame's final input in frame-begin, the sample (with your staged change) in input, the final input in post-input."},
+    {"sega.input.set", "input.intercept", "function", "port:number,buttons:number", "", "input",
+     "Replaces the pad (button bits 0-255) the guest will read this frame; only in input; a violation is a fault."},
     {"reset", "", "callback", "", "", "reset", "Optional. Called once before the first frame."},
+    {"frame_begin", "", "callback", "frame:number", "", "frame-begin", "Optional. Called at the start of each guest frame, before its input sample."},
+    {"input", "", "callback", "frame:number", "", "input", "Optional. Called after the pad was sampled for the frame and before the guest can read it."},
+    {"post_input", "", "callback", "frame:number", "", "post-input", "Optional. Called after the input phase, before the guest runs the frame."},
+    {"frame_end", "", "callback", "frame:number", "", "frame-end", "Optional. Called when the guest finished the frame, before its render snapshot."},
     {"render", "", "callback", "frame:number", "", "render", "Optional. Called once per frame after its snapshot; `frame` is the frame counter."},
 }};
 
@@ -121,8 +133,11 @@ std::string declarations() {
   emit(root, 1, out);
   out += "}\n\n-- Lifecycle callbacks: define any of these as a global function; the host calls them.\n";
   for (const ApiEntry *c : callbacks) {
-    std::string name(c->name);
-    name[0] = static_cast<char>(name[0] - 'a' + 'A');
+    std::string name;   // snake_case -> PascalCase
+    for (std::size_t i = 0; i < c->name.size(); ++i) {
+      if (c->name[i] == '_') continue;
+      name += (i == 0 || c->name[i - 1] == '_') ? static_cast<char>(c->name[i] - 'a' + 'A') : c->name[i];
+    }
     out += "-- " + std::string(c->doc) + "\n";
     out += "type " + name + "Callback = " + api_signature(*c) + "\n";
   }

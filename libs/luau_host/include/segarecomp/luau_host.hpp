@@ -146,9 +146,11 @@ class Vm {
   // Calls the global function `name` (no arguments, results dropped) as callback `callback_index` of `frame`. The deterministic budget restarts per call; the frame budget restarts when `frame` changes.
   CallResult call(std::string_view name, std::uint64_t frame, std::uint32_t callback_index);
 
-  // Runs the lifecycle callback `name` ("reset" or "render") of the host API: copy-in `input` (render: the frame number is the first argument and the frame values are readable), copy-out into `out`.
+  // Runs the lifecycle callback `name` ("reset", "frame_begin", "input", "post_input", "frame_end" or "render") of the host API: copy-in `input` (render: the frame number is the first argument and the frame values are readable), copy-out into `out`.
   // A callback the script does not define is skipped (ok). On a fault `out` is left empty: the callback's staged output is discarded. Requires a VM created with a HostConfig.
   CallResult run_callback(std::string_view name, const FrameInput &input, std::uint32_t callback_index, Output &out);
+  // Does the script define the lifecycle callback `name` ("reset", "frame_begin", "input", "post_input", "frame_end" or "render") as a global function? (The scheduler registers phases from this.)
+  [[nodiscard]] bool defines(std::string_view name);
 
   // The state seam. save_state calls the global `save()` (absent = empty state) and serializes its result canonically; load_state parses `blob` strictly and calls the global `load(value)` (a non-empty
   // blob for a mod without `load` is refused). Any failure is a `state` fault: the mod is disabled and the caller refuses the whole restore (phases section 6.2).

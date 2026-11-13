@@ -6,8 +6,20 @@ declare sega: {
     -- frame.work_ram (render): Reads one named integer the host published for this frame (a read-only copy; nil when the host publishes no such value).
     value: (name: string) -> number?,
   },
+  input: {
+    -- input.read (frame-begin,input,post-input): Reads the pad (button bits) of port 1 or 2: the previous frame's final input in frame-begin, the sample (with your staged change) in input, the final input in post-input.
+    get: (port: number) -> number,
+    -- input.intercept (input): Replaces the pad (button bits 0-255) the guest will read this frame; only in input; a violation is a fault.
+    set: (port: number, buttons: number) -> (),
+  },
   -- host.log (all): Appends one line to the host log (at most 256 bytes, 16 lines per callback; printable ASCII).
   log: (message: string) -> (),
+  mem: {
+    -- memory.read.m68k.work_ram (reset,frame-begin,input,post-input,frame-end): Reads 1, 2 or 4 bytes (big-endian) of a declared work-RAM range; the space is named ("m68k.work_ram"); sees this callback's own staged writes; a violation is a fault.
+    read: (space: string, offset: number, width: number) -> number,
+    -- memory.write.m68k.work_ram (frame-begin,post-input,frame-end): Stages a 1, 2 or 4 byte big-endian write to a declared work-RAM range; committed atomically when the callback returns without a fault (at most 1024 writes, 16384 bytes); a violation is a fault.
+    write: (space: string, offset: number, width: number, value: number) -> (),
+  },
   overlay: {
     -- overlay.rgba (render): Height of the HUD overlay in pixels (256).
     height: number,
@@ -23,5 +35,13 @@ declare sega: {
 -- Lifecycle callbacks: define any of these as a global function; the host calls them.
 -- Optional. Called once before the first frame.
 type ResetCallback = () -> ()
+-- Optional. Called at the start of each guest frame, before its input sample.
+type FrameBeginCallback = (frame: number) -> ()
+-- Optional. Called after the pad was sampled for the frame and before the guest can read it.
+type InputCallback = (frame: number) -> ()
+-- Optional. Called after the input phase, before the guest runs the frame.
+type PostInputCallback = (frame: number) -> ()
+-- Optional. Called when the guest finished the frame, before its render snapshot.
+type FrameEndCallback = (frame: number) -> ()
 -- Optional. Called once per frame after its snapshot; `frame` is the frame counter.
 type RenderCallback = (frame: number) -> ()

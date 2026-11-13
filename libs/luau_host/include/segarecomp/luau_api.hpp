@@ -45,9 +45,20 @@ struct FrameValue {
   std::string name;        // [a-z0-9_.], at most 32 bytes
   std::int64_t value = 0;  // |value| <= 2^53 (an integer a script can hold exactly)
 };
+// The guest-facing services of the phase scheduler (SEG-138-T001/T002), as plain function pointers so this library and the generated-native program never depend on the native SDK header.
+// The status codes are the SegaModStatus values (0 ok, 1 capability, 2 space, 3 range, 4 alignment, 5 readonly, 6 not_owner, 7 budget, 8 phase); the scheduler is the single authority for phase, range,
+// alignment and budget rules, so a Luau script and a native provider get identical results. `space` is the SegaGenesisSpace id (0 = unknown name).
+struct HostServices {
+  void *ctx = nullptr;
+  int (*read)(void *ctx, std::uint32_t space, std::uint32_t offset, std::uint32_t width, std::uint32_t *value) = nullptr;
+  int (*write)(void *ctx, std::uint32_t space, std::uint32_t offset, std::uint32_t width, std::uint32_t value) = nullptr;
+  int (*input_get)(void *ctx, std::uint32_t port, std::uint32_t *buttons) = nullptr;
+  int (*input_set)(void *ctx, std::uint32_t port, std::uint32_t buttons) = nullptr;
+};
 struct FrameInput {
   std::uint64_t number = 0;
   std::vector<FrameValue> values;   // the read-only values the host publishes for this frame (at most 32)
+  const HostServices *services = nullptr;   // valid for the call only; null = the sega.mem / sega.input bindings fault with cause `phase`
 };
 struct OverlayOp {
   enum class Kind { rect, text } kind = Kind::rect;

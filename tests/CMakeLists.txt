@@ -222,6 +222,12 @@ add_executable(genesis_live_frame_tests genesis_live_frame_test.cpp)
 target_link_libraries(genesis_live_frame_tests PRIVATE segarecomp::runtime_genesis)
 segarecomp_enable_warnings(genesis_live_frame_tests)
 add_test(NAME genesis_live_frame_tests COMMAND genesis_live_frame_tests)
+# SEG-138-T001/T002 (ADR 0297): the Genesis mod phase scheduler (phases, input interception, bounded work-RAM access) with a native ABI 2 trace provider on a synthetic program.
+add_executable(genesis_mod_scheduler_tests genesis_mod_scheduler_test.cpp)
+target_link_libraries(genesis_mod_scheduler_tests PRIVATE segarecomp::runtime_genesis_mod segarecomp::runtime_genesis)
+target_compile_features(genesis_mod_scheduler_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_mod_scheduler_tests)
+add_test(NAME genesis_mod_scheduler_tests COMMAND genesis_mod_scheduler_tests)
 # SEG-021-T031: headless bounded live-frame capture core (host tool; not linked by runtime_genesis).
 add_executable(genesis_frame_capture_tests genesis_frame_capture_test.cpp
   ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/frame_capture.c)
@@ -2283,6 +2289,11 @@ add_executable(luau_host_test luau_host_test.cpp)
 target_link_libraries(luau_host_test PRIVATE segarecomp::luau_host segarecomp::luau)
 segarecomp_enable_warnings(luau_host_test)
 add_test(NAME luau_host_test COMMAND luau_host_test)
+# SEG-138-T001/T002 (ADR 0297): the Luau binding of the mod phase scheduler, checked against a native ABI 2 provider under the same scheduler.
+add_executable(luau_phase_scheduler_test luau_phase_scheduler_test.cpp)
+target_link_libraries(luau_phase_scheduler_test PRIVATE segarecomp::luau_host segarecomp::luau segarecomp::runtime_genesis_mod segarecomp::runtime_genesis)
+segarecomp_enable_warnings(luau_phase_scheduler_test)
+add_test(NAME luau_phase_scheduler_test COMMAND luau_phase_scheduler_test)
 # SEG-137-T004..T006 (ADR 0295, delivery F07): the capability-gated host API, its static check, the overlay raster, the state seam, the fixture session and the adversarial corpus.
 add_executable(luau_api_test luau_api_test.cpp)
 target_link_libraries(luau_api_test PRIVATE segarecomp::luau_host segarecomp::luau)
