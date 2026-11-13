@@ -18,16 +18,27 @@
 
 enum {
   SEC_CPU = 1, SEC_RAM = 2, SEC_VDP = 3, SEC_IO = 4, SEC_CART = 5, SEC_Z80 = 6, SEC_PSG = 7, SEC_YM = 8, SEC_MIXER = 9, SEC_AUDIO = 10,
-  SEC_LAST = SEC_AUDIO
+  SEC_MOD = 11,   /* SEG-138-T006 (ADR 0299): MODSTATE, present iff the machine profile carries a mod (GENESIS_SNAPSHOT_FLAG_MOD) */
+  SEC_LAST = SEC_MOD
 };
+#define SEC_BASE_LAST_NO_SOUND SEC_CART
+#define SEC_BASE_LAST_SOUND SEC_AUDIO
+#define MODSTATE_PAYLOAD_VERSION 1U
+#define MODSTATE_HEADER_BYTES 44U   /* version u32, identity[32], state_schema u32, body length u32 */
+/* Is section `id` part of the profile `flags`? (sections 1..5 always, 6..10 with sound, MODSTATE with a mod) */
+static int section_in_profile(uint16_t flags, uint32_t id) {
+  if (id == SEC_MOD) return (flags & GENESIS_SNAPSHOT_FLAG_MOD) != 0U;
+  return id <= ((flags & GENESIS_SNAPSHOT_FLAG_SOUND) != 0U ? (uint32_t)SEC_BASE_LAST_SOUND : (uint32_t)SEC_BASE_LAST_NO_SOUND);
+}
 #define SECTION_FLAG_REQUIRED 1U
 
 /* Fixed per-section maxima: an allocation or read is never sized by a file length. */
 /* The Z80 section: the CPU (< 512 bytes) and, in a program with the native GEMS replacement (ADR 0291), the backend trailer with the replacement's state (<= 4 KiB + identity). */
 #define GENESIS_SNAPSHOT_SECTION_Z80_MAX 8192U
-static const uint32_t k_section_max[SEC_LAST + 1] = {0U, 256U, 65536U, 70000U, 16384U, 65536U + 64U, GENESIS_SNAPSHOT_SECTION_Z80_MAX, 64U, 16384U, 80000U, 256U};
+static const uint32_t k_section_max[SEC_LAST + 1] = {0U, 256U, 65536U, 70000U, 16384U, 65536U + 64U, GENESIS_SNAPSHOT_SECTION_Z80_MAX, 64U, 16384U, 80000U, 256U, GENESIS_SNAPSHOT_MOD_BODY_MAX + MODSTATE_HEADER_BYTES};
 
 static const char k_exec_tag[] = "segarecomp.genesis.sgstate.exec.v1";
+static const char k_exec_mod_tag[] = "segarecomp.genesis.sgstate.exec.mod.v1";
 
 const char *genesis_snapshot_status_text(GenesisSnapshotStatus status) {
   switch (status) {
@@ -46,6 +57,9 @@ const char *genesis_snapshot_status_text(GenesisSnapshotStatus status) {
     case GENESIS_SNAPSHOT_INVALID_STATE: return "the state holds values the console cannot have";
     case GENESIS_SNAPSHOT_IMAGE_MISSING: return "the state needs sound code this build does not contain";
     case GENESIS_SNAPSHOT_NOT_CAPTURABLE: return "the game is in a state that cannot be saved";
+    case GENESIS_SNAPSHOT_MOD_MISMATCH: return "E_STATE_MOD_MISMATCH: the state was saved with different mods";
+    case GENESIS_SNAPSHOT_MOD_UNAVAILABLE: return "E_STATE_UNAVAILABLE: a mod in this game cannot save its state";
+    case GENESIS_SNAPSHOT_MOD_REJECTED: return "E_STATE_MOD_REJECTED: a mod did not accept the saved state";
   }
   return "unknown error";
 }
@@ -127,6 +141,7 @@ uint16_t genesis_snapshot_machine_flags(const GenesisSnapshotMachine *machine) {
   uint16_t flags = 0U;
   if (machine == NULL || machine->runtime == NULL) return 0U;
   if (machine->z80 != NULL && machine->audio != NULL) flags |= GENESIS_SNAPSHOT_FLAG_SOUND;
+  if (machine->mod != NULL) flags |= GENESIS_SNAPSHOT_FLAG_MOD;
 #ifdef SEGARECOMP_GENESIS_SOUND
   if (machine->z80 != NULL && machine->z80->native_driver != NULL) flags |= GENESIS_SNAPSHOT_FLAG_NATIVE_SOUND;   /* ADR 0291: the sound backend is part of a state's identity */
 #endif
@@ -140,7 +155,7 @@ uint16_t genesis_snapshot_machine_flags(const GenesisSnapshotMachine *machine) {
 
 /* The execution-compatibility fingerprint: independent of build directories, compiler paths and emitter versions. It binds the state schema
  * and the sizes/constants the serialized sections depend on, so a runtime whose state layout would not accept the data is refused. */
-static void exec_fingerprint(uint16_t flags, uint8_t out[32]) {
+static void exec_fingerprint(uint16_t flags, const GenesisSnapshotModState *mod, uint8_t out[32]) {
   GenesisSha256 sha;
   uint8_t word[8];
   const uint32_t values[] = {GENESIS_SNAPSHOT_STATE_SCHEMA, flags, 65536U, GENESIS_VDP_VRAM_BYTES, GENESIS_VDP_CRAM_BYTES, GENESIS_VDP_VSRAM_BYTES,
@@ -152,6 +167,13 @@ static void exec_fingerprint(uint16_t flags, uint8_t out[32]) {
   for (i = 0; i < sizeof values / sizeof values[0]; ++i) {
     put_le32(word, values[i]);
     genesis_sha256_update(&sha, word, 4U);
+  }
+  if ((flags & GENESIS_SNAPSHOT_FLAG_MOD) != 0U && mod != NULL) {   /* ADR 0299: the mod's identity, state schema and compatibility digest (ABI major, capabilities, phases, hook bindings) */
+    genesis_sha256_update(&sha, (const uint8_t *)k_exec_mod_tag, (uint32_t)(sizeof k_exec_mod_tag - 1U));
+    genesis_sha256_update(&sha, mod->identity, 32U);
+    put_le32(word, mod->state_schema);
+    genesis_sha256_update(&sha, word, 4U);
+    genesis_sha256_update(&sha, mod->compat, 32U);
   }
   genesis_sha256_final(&sha, out);
 }
@@ -688,6 +710,25 @@ static int get_mixer(Reader *r, GenesisMixer *m) {
 
 #endif /* SEGARECOMP_GENESIS_SOUND */
 
+/* MODSTATE (ADR 0299): { version u32, identity[32], state_schema u32, body length u32, body }. The body belongs to the mod codec. */
+static GenesisSnapshotStatus put_mod(Writer *w, const GenesisSnapshotModState *mod) {
+  uint32_t length_at, length;
+  GenesisSnapshotStatus status = GENESIS_SNAPSHOT_NOT_CAPTURABLE;
+  if (mod == NULL || mod->put == NULL) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
+  w_u32(w, MODSTATE_PAYLOAD_VERSION);
+  w_bytes(w, mod->identity, 32U);
+  w_u32(w, mod->state_schema);
+  length_at = w->size;
+  w_u32(w, 0U);
+  w_reserve(w, GENESIS_SNAPSHOT_MOD_BODY_MAX);
+  if (w->error) return GENESIS_SNAPSHOT_NO_MEMORY;
+  length = mod->put(mod->ctx, w->data + w->size, GENESIS_SNAPSHOT_MOD_BODY_MAX, &status);
+  if (length > GENESIS_SNAPSHOT_MOD_BODY_MAX) return status == GENESIS_SNAPSHOT_OK ? GENESIS_SNAPSHOT_NOT_CAPTURABLE : status;
+  put_le32(w->data + length_at, length);
+  w->size += length;
+  return GENESIS_SNAPSHOT_OK;
+}
+
 /* ---------------------------------------------------------------------------------------------------------------------------------- */
 /* Capture                                                                                                                            */
 
@@ -708,6 +749,8 @@ GenesisSnapshotStatus genesis_snapshot_capture(const GenesisSnapshotMachine *mac
   if (out != NULL) { out->data = NULL; out->size = 0U; }
   if (machine == NULL || machine->runtime == NULL || identity == NULL || out == NULL) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
   if ((machine->z80 == NULL) != (machine->audio == NULL)) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
+  if (machine->mod != NULL && (machine->mod->put == NULL || machine->mod->stage == NULL || machine->mod->apply == NULL || machine->mod->commit == NULL || machine->mod->discard == NULL))
+    return GENESIS_SNAPSHOT_BAD_ARGUMENT;
 #ifndef SEGARECOMP_GENESIS_SOUND
   if (machine->z80 != NULL) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
 #endif
@@ -718,7 +761,7 @@ GenesisSnapshotStatus genesis_snapshot_capture(const GenesisSnapshotMachine *mac
   }
   rt = machine->runtime;
   flags = genesis_snapshot_machine_flags(machine);
-  exec_fingerprint(flags, fp);
+  exec_fingerprint(flags, machine->mod, fp);
 
   memset(&w, 0, sizeof w);
   /* header (the variable fields are patched after the layout is known) */
@@ -742,10 +785,8 @@ GenesisSnapshotStatus genesis_snapshot_capture(const GenesisSnapshotMachine *mac
   w_u32(&w, 0U);  /* reserved */
 
   /* section table: reserve for the maximum, shrink by writing only `sections` entries below */
-  {
-    const uint32_t wanted = (flags & GENESIS_SNAPSHOT_FLAG_SOUND) != 0U ? SEC_LAST : SEC_CART;
-    for (i = 1U; i <= wanted; ++i) ids[sections++] = i;
-  }
+  for (i = 1U; i <= SEC_LAST; ++i)
+    if (section_in_profile(flags, i)) ids[sections++] = i;
   table_at = w.size;
   for (i = 0U; i < sections; ++i) { w_u16(&w, 0U); w_u16(&w, 0U); w_u32(&w, 0U); w_u32(&w, 0U); }
   if (thumb_bytes != 0U) w_bytes(&w, thumbnail->rgb565, thumb_bytes);
@@ -776,6 +817,7 @@ GenesisSnapshotStatus genesis_snapshot_capture(const GenesisSnapshotMachine *mac
       case SEC_MIXER: status = put_mixer(&w, &machine->audio->mixer); break;
       case SEC_AUDIO: put_audio_counters(&w, machine->audio); break;
 #endif
+      case SEC_MOD: status = put_mod(&w, machine->mod); break;
       default: status = GENESIS_SNAPSHOT_BAD_ARGUMENT; break;
     }
   }
@@ -836,7 +878,7 @@ static GenesisSnapshotStatus parse_container(const uint8_t *data, size_t size, G
   header_bytes = le32(data + 20);
   total = le32(data + 24);
   count = le32(data + 28);
-  if (platform != 1U || header_bytes != HEADER_FIXED_BYTES || (flags & ~(GENESIS_SNAPSHOT_FLAG_SOUND | GENESIS_SNAPSHOT_FLAG_SRAM | GENESIS_SNAPSHOT_FLAG_EEPROM | GENESIS_SNAPSHOT_FLAG_NATIVE_SOUND)) != 0U ||
+  if (platform != 1U || header_bytes != HEADER_FIXED_BYTES || (flags & ~(GENESIS_SNAPSHOT_FLAG_SOUND | GENESIS_SNAPSHOT_FLAG_SRAM | GENESIS_SNAPSHOT_FLAG_EEPROM | GENESIS_SNAPSHOT_FLAG_NATIVE_SOUND | GENESIS_SNAPSHOT_FLAG_MOD)) != 0U ||
       ((flags & GENESIS_SNAPSHOT_FLAG_EEPROM) != 0U && (flags & GENESIS_SNAPSHOT_FLAG_SRAM) == 0U))
     return GENESIS_SNAPSHOT_BAD_LAYOUT;
   if (total != size) return total > size ? GENESIS_SNAPSHOT_TRUNCATED : GENESIS_SNAPSHOT_BAD_LAYOUT;
@@ -880,9 +922,8 @@ static GenesisSnapshotStatus parse_container(const uint8_t *data, size_t size, G
   if (cursor != size - DIGEST_BYTES) return GENESIS_SNAPSHOT_BAD_LAYOUT;  /* no gaps or trailing bytes */
   info->size = (uint32_t)size;
   if (views != NULL) {
-    const uint32_t wanted = (flags & GENESIS_SNAPSHOT_FLAG_SOUND) != 0U ? SEC_LAST : SEC_CART;
     for (i = 1U; i <= SEC_LAST; ++i)
-      if (views[i].present != (i <= wanted)) return GENESIS_SNAPSHOT_UNKNOWN_SECTION;  /* a required section missing, or one the profile does not carry */
+      if (views[i].present != section_in_profile(flags, i)) return GENESIS_SNAPSHOT_UNKNOWN_SECTION;  /* a required section missing, or one the profile does not carry */
   }
   return GENESIS_SNAPSHOT_OK;
 }
@@ -904,6 +945,8 @@ static GenesisSnapshotStatus precheck(const GenesisSnapshotMachine *machine, con
   uint16_t flags;
   if (machine == NULL || machine->runtime == NULL || identity == NULL || data == NULL) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
   if ((machine->z80 == NULL) != (machine->audio == NULL)) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
+  if (machine->mod != NULL && (machine->mod->put == NULL || machine->mod->stage == NULL || machine->mod->apply == NULL || machine->mod->commit == NULL || machine->mod->discard == NULL))
+    return GENESIS_SNAPSHOT_BAD_ARGUMENT;
 #ifndef SEGARECOMP_GENESIS_SOUND
   if (machine->z80 != NULL) return GENESIS_SNAPSHOT_BAD_ARGUMENT;
 #endif
@@ -912,7 +955,14 @@ static GenesisSnapshotStatus precheck(const GenesisSnapshotMachine *machine, con
   if (memcmp(info->source_sha256, identity->source_sha256, 32U) != 0 || memcmp(info->variant_sha256, identity->variant_sha256, 32U) != 0)
     return GENESIS_SNAPSHOT_WRONG_CARTRIDGE;
   flags = genesis_snapshot_machine_flags(machine);
-  exec_fingerprint(flags, fp);
+  exec_fingerprint(flags, machine->mod, fp);
+  if ((info->machine_flags ^ flags) == GENESIS_SNAPSHOT_FLAG_MOD) return GENESIS_SNAPSHOT_MOD_MISMATCH;   /* the state has a mod and this build has none, or the other way round */
+  if (info->machine_flags == flags && (flags & GENESIS_SNAPSHOT_FLAG_MOD) != 0U) {
+    const SectionView *m = &views[SEC_MOD];   /* the mod identity and schema decide first, so the diagnostic names the mod rather than the generic fingerprint */
+    if (m->length < MODSTATE_HEADER_BYTES || le32(m->data) != MODSTATE_PAYLOAD_VERSION || memcmp(m->data + 4, machine->mod->identity, 32U) != 0 ||
+        le32(m->data + 36) != machine->mod->state_schema)
+      return GENESIS_SNAPSHOT_MOD_MISMATCH;
+  }
   if (info->machine_flags != flags || info->region_profile != machine->runtime->region_profile || memcmp(info->exec_fingerprint, fp, 32U) != 0)
     return GENESIS_SNAPSHOT_INCOMPATIBLE;
   if (info->state_schema != GENESIS_SNAPSHOT_STATE_SCHEMA) return GENESIS_SNAPSHOT_INCOMPATIBLE;
@@ -936,6 +986,7 @@ static GenesisSnapshotStatus restore_impl(const GenesisSnapshotMachine *machine,
   GenesisSnapshotStatus status;
   GenesisRuntime *stage_rt = NULL;
   uint8_t *stage_storage = NULL;
+  void *mod_staged = NULL;
   uint16_t flags;
   Reader r;
 #ifdef SEGARECOMP_GENESIS_SOUND
@@ -1041,10 +1092,19 @@ static GenesisSnapshotStatus restore_impl(const GenesisSnapshotMachine *machine,
   }
 #endif
 #undef SECTION_READER
+  if ((flags & GENESIS_SNAPSHOT_FLAG_MOD) != 0U) {   /* ADR 0299: the mod's own state is validated into private storage like every other section */
+    const SectionView *m = &views[SEC_MOD];
+    const uint32_t body = le32(m->data + 40);
+    if (m->length < MODSTATE_HEADER_BYTES || body > GENESIS_SNAPSHOT_MOD_BODY_MAX || body != m->length - MODSTATE_HEADER_BYTES || machine->mod->stage == NULL) { status = GENESIS_SNAPSHOT_MOD_REJECTED; goto done; }
+    mod_staged = machine->mod->stage(machine->mod->ctx, m->data + MODSTATE_HEADER_BYTES, body);
+    if (mod_staged == NULL) { status = GENESIS_SNAPSHOT_MOD_REJECTED; goto done; }
+  }
 
   if (!commit) { status = GENESIS_SNAPSHOT_OK; goto done; }   /* validation only: the staged copies are dropped, the machine is never touched */
   /* ---- commit: everything above passed; the copies below cannot fail ---- */
+  if (mod_staged != NULL && machine->mod->apply(machine->mod->ctx, mod_staged) != 0) { status = GENESIS_SNAPSHOT_MOD_REJECTED; goto done; }   /* the one fallible step runs first: nothing of the guest was replaced */
   memcpy(machine->runtime, stage_rt, sizeof *stage_rt);
+  if (mod_staged != NULL) { machine->mod->commit(machine->mod->ctx, mod_staged, machine->runtime); mod_staged = NULL; }
   if (stage_storage != NULL) memcpy(machine->runtime->cartridge_sram_storage, stage_storage, machine->runtime->cartridge_sram->storage_bytes);
 #ifdef SEGARECOMP_GENESIS_SOUND
   if (machine->z80 != NULL) {
@@ -1057,6 +1117,7 @@ static GenesisSnapshotStatus restore_impl(const GenesisSnapshotMachine *machine,
   status = GENESIS_SNAPSHOT_OK;
 
 done:
+  if (mod_staged != NULL) machine->mod->discard(machine->mod->ctx, mod_staged);
 #ifdef SEGARECOMP_GENESIS_SOUND
   if (native_staged != NULL) machine->z80->native_driver->state_discard(machine->z80->native_driver->context, native_staged);
   free(stage_z80);

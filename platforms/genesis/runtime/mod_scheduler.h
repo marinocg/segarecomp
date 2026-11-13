@@ -16,6 +16,7 @@
 
 #include "runtime.h"
 #include "function_hooks.h"
+#include "genesis_snapshot.h"
 #include <segarecomp_mod_genesis.h>
 
 #ifdef __cplusplus
@@ -64,6 +65,11 @@ typedef struct GenesisModConfig {
   uint32_t hook_count;
   GenesisModLogSink log_sink; /* host.log lines and fault diagnostics; NULL = discarded */
   void *log_ctx;
+  /* ---- mod state (SEG-138-T006, ADR 0299) ---- */
+  uint8_t identity_sha256[32]; /* the package identity the state is tagged with; all zero = derived from mod_id (a test/hand-built mod) */
+  uint32_t state_schema;       /* the mod's declared state schema, required (>= 1) when `state.mod` is granted; 0 otherwise */
+  const GenesisHookSiteInfo *sites; /* the program's generated hook site table: lets hook call frames in flight be saved (by index) and restored; NULL = a state with a frame in flight is not capturable */
+  uint32_t site_count;
 } GenesisModConfig;
 
 typedef struct GenesisModWriteRecord {
@@ -89,6 +95,8 @@ typedef struct GenesisModScheduler {
   GenesisRuntime *runtime;
   GenesisFunctionHooks function_hooks; /* the callback set and call-frame stack of the static function hooks (runtime->function_hooks points here when hook phases are registered) */
   GenesisModHookBinding bindings[GENESIS_MOD_HOOKS_MAX];
+  uint8_t identity[32];     /* the effective identity (config or derived) */
+  char fault_cause_store[32]; /* backing storage of fault.cause after a restore (the live value otherwise points at a static string) */
   /* ---- session ---- */
   uint8_t started, disabled;
   uint64_t callbacks_run;
@@ -153,6 +161,13 @@ const char *genesis_mod_status_cause(int status);
 /* The replay witness of T002: SHA-256 over EVERY committed write in commit order (frame u64, phase, space, offset, width, value as big-endian u32s), streamed as each write commits so it also covers
  * records the bounded diagnostic log no longer retains, followed by the total count. Staged writes of a faulted callback never enter it. */
 void genesis_mod_write_log_digest(const GenesisModScheduler *scheduler, uint8_t out[32]);
+
+/* SEG-138-T006 (ADR 0299): fills the snapshot seam so the mod's state joins the Genesis save-state / rewind container (`MODSTATE`, GENESIS_SNAPSHOT_FLAG_MOD). Point
+ * GenesisSnapshotMachine::mod at `*out`; `*out` references `scheduler` and must not outlive it. What is saved: the disabled/fault state, the input latch and the interception the
+ * guest reads through, callback and hook counters, the replay witness (the running write digest), function-hook frames in flight, and -- with `state.mod` -- the mod's own bounded blob
+ * (`save_state`, <= 64 KiB). A guest-affecting mod (memory.write, input.intercept, hook.function, audio.command.send) without `state.mod` makes capture fail with
+ * GENESIS_SNAPSHOT_MOD_UNAVAILABLE (E_STATE_UNAVAILABLE). Restore fails closed with MOD_MISMATCH (other identity/schema/capabilities/phases) or MOD_REJECTED (malformed or refused state). */
+void genesis_mod_snapshot_state(GenesisModScheduler *scheduler, GenesisSnapshotModState *out);
 
 #ifdef __cplusplus
 }

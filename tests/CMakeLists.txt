@@ -229,6 +229,16 @@ target_compile_features(genesis_mod_scheduler_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(genesis_mod_scheduler_tests)
 add_test(NAME genesis_mod_scheduler_tests COMMAND genesis_mod_scheduler_tests)
 set_tests_properties(genesis_mod_scheduler_tests PROPERTIES TIMEOUT 300)
+# SEG-138-T006 (ADR 0299): mod-owned state (MODSTATE) in the Genesis save-state / rewind container, with the shared snapshot codec and the rewind engine compiled in (as programs do).
+add_executable(genesis_mod_state_tests genesis_mod_state_test.cpp
+  ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_persistence.c
+  ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/genesis_viewer_state.c)
+target_include_directories(genesis_mod_state_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer ${PROJECT_SOURCE_DIR}/libs/viewer/include)
+target_link_libraries(genesis_mod_state_tests PRIVATE segarecomp::runtime_genesis_mod segarecomp::runtime_genesis)
+target_compile_features(genesis_mod_state_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_mod_state_tests)
+add_test(NAME genesis_mod_state_tests COMMAND genesis_mod_state_tests)
+set_tests_properties(genesis_mod_state_tests PROPERTIES TIMEOUT 300)
 # SEG-021-T031: headless bounded live-frame capture core (host tool; not linked by runtime_genesis).
 add_executable(genesis_frame_capture_tests genesis_frame_capture_test.cpp
   ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/frame_capture.c)
@@ -2309,7 +2319,7 @@ target_link_libraries(luau_host_test PRIVATE segarecomp::luau_host segarecomp::l
 segarecomp_enable_warnings(luau_host_test)
 add_test(NAME luau_host_test COMMAND luau_host_test)
 # SEG-138-T001/T002 (ADR 0297): the Luau binding of the mod phase scheduler, checked against a native ABI 2 provider under the same scheduler.
-add_executable(luau_phase_scheduler_test luau_phase_scheduler_test.cpp)
+add_executable(luau_phase_scheduler_test luau_phase_scheduler_test.cpp ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime/genesis_snapshot.c)
 target_link_libraries(luau_phase_scheduler_test PRIVATE segarecomp::luau_host segarecomp::luau segarecomp::runtime_genesis_mod segarecomp::runtime_genesis)
 segarecomp_enable_warnings(luau_phase_scheduler_test)
 add_test(NAME luau_phase_scheduler_test COMMAND luau_phase_scheduler_test)
@@ -2322,7 +2332,7 @@ add_test(NAME luau_build_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOUR
 add_test(NAME luau_host_golden_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/luau_host_golden_test.py)
 add_test(NAME mod_luau_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_luau_test.py $<TARGET_FILE:segarecomp>)
 add_test(NAME mod_luau_api_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/mod_luau_api_test.py $<TARGET_FILE:segarecomp>)
-foreach(_luau_test luau_phase_scheduler_test genesis_mod_scheduler_tests luau_host_test luau_api_test luau_build_test luau_host_golden_test mod_luau_test mod_luau_api_test)
+foreach(_luau_test luau_phase_scheduler_test genesis_mod_scheduler_tests genesis_mod_state_tests luau_host_test luau_api_test luau_build_test luau_host_golden_test mod_luau_test mod_luau_api_test)
   set_property(TEST ${_luau_test} APPEND PROPERTY LABELS full fast)
   set_property(TEST ${_luau_test} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 endforeach()

@@ -1,5 +1,6 @@
 // SEG-138-T001/T002 (ADR 0297): the Luau binding of the Genesis mod phase scheduler. The same scripted behavior is run as a native ABI 2 provider and as a Luau mod under ONE scheduler on a
 // project-authored synthetic program; the phase trace, the guest state, the committed write log, the log lines and every violation class must be identical. Synthetic scripts only.
+#include "genesis_snapshot.h"
 #include "mod_scheduler.h"
 #include "runtime.h"
 #include "segarecomp/luau_api.hpp"
@@ -111,7 +112,7 @@ struct LuauMod {
   std::vector<std::string> caps;
 };
 
-LuauMod make_luau(const std::string &source, std::vector<std::string> caps) {
+LuauMod make_luau(const std::string &source, std::vector<std::string> caps, unsigned state_schema = 0) {
   LuauMod m;
   mod::Manifest man;
   man.id = "parity";
@@ -122,6 +123,7 @@ LuauMod make_luau(const std::string &source, std::vector<std::string> caps) {
   man.revisions.push_back({"rev-a", std::string(64, 'a'), ""});
   std::sort(caps.begin(), caps.end());
   man.capabilities = caps;
+  man.state_schema = state_schema;
   mod::Payload p;
   p.kind = "luau-source";
   p.path = "scripts/main.luau";
@@ -477,9 +479,110 @@ void luau_observer_is_bit_identical() {
   check(!o.faulted && o.guest == guest_digest(vanilla), "an observer mod leaves the guest bit-identical to Vanilla");
 }
 
+// ---- SEG-138-T006 (ADR 0299): the Luau mod's one serialized value is its state in the save-state container, through the same scheduler seam as a native provider's blob ----
+const char *kStateScript =
+    "local n = 0\n"
+    "local log = {}\n"
+    "function frame_begin(f)\n"
+    "  n = n + 1\n"
+    "  log[#log + 1] = n\n"
+    "  sega.mem.write(\"m68k.work_ram\", 0x100, 4, n)\n"
+    "end\n"
+    "function save() return { n = n, tail = log[#log] } end\n"
+    "function load(v) n = v.n; log = { v.tail } end\n";
+const std::vector<std::string> kStateCaps = {"host.log", "memory.read.m68k.work_ram", "memory.write.m68k.work_ram", "state.mod"};
+
+void luau_state_round_trip() {
+  struct Machine {
+    LuauMod mod;
+    std::unique_ptr<GenesisRuntime> rt = std::make_unique<GenesisRuntime>();
+    std::unique_ptr<GenesisModScheduler> sched = std::make_unique<GenesisModScheduler>();
+    GenesisSnapshotModState snap{};
+    GenesisSnapshotMachine machine{};
+    GenesisSnapshotIdentity id{};
+    uint64_t req[2] = {0, 0};
+    explicit Machine(unsigned schema) : mod(make_luau(kStateScript, kStateCaps, schema)) {
+      if (!mod.provider) { check(false, "state script loads: " + mod.error); return; }
+      setup(*rt);
+      mod.provider->capabilities(req);
+      GenesisModConfig c{};
+      c.mod_id = "parity";
+      c.provider = mod.provider->provider();
+      c.provider_state = mod.provider->state();
+      c.phase_mask = mod.provider->phase_mask();
+      c.required[0] = req[0];
+      c.ranges = kRanges;
+      c.range_count = 1U;
+      c.state_schema = schema;
+      for (unsigned i = 0; i < 32U; ++i) c.identity_sha256[i] = static_cast<uint8_t>(std::strtoul(mod.package.identity.substr(i * 2U, 2U).c_str(), nullptr, 16));
+      const char *why = "";
+      check(genesis_mod_scheduler_attach(sched.get(), rt.get(), &c, &why) == 0, std::string("the Luau state mod attaches: ") + why);
+      genesis_mod_snapshot_state(sched.get(), &snap);
+      machine.runtime = rt.get();
+      machine.mod = &snap;
+      std::memset(id.source_sha256, 0x33, 32U);
+    }
+    ~Machine() { genesis_mod_scheduler_detach(sched.get()); }
+    std::string hash() {
+      GenesisSnapshotBuffer b{nullptr, 0};
+      if (genesis_snapshot_capture(&machine, &id, nullptr, &b) != GENESIS_SNAPSHOT_OK) return "capture-failed";
+      const std::string h = hex(b.data + b.size - 32U, 32U);
+      genesis_snapshot_buffer_free(&b);
+      return h;
+    }
+  };
+  Machine a(3);
+  if (!a.mod.provider) return;
+  run_frames(*a.rt, 6U);
+  GenesisSnapshotBuffer s1{nullptr, 0};
+  check(genesis_snapshot_capture(&a.machine, &a.id, nullptr, &s1) == GENESIS_SNAPSHOT_OK, "a Luau mod's state captures");
+  const std::string saved = a.hash();
+  run_frames(*a.rt, 14U);
+  const std::string straight = a.hash();
+  check(straight != saved, "the Luau state advanced");
+  check(genesis_snapshot_restore(&a.machine, &a.id, s1.data, s1.size) == GENESIS_SNAPSHOT_OK, "restore of the Luau mod's saved state");
+  check(a.hash() == saved, "save -> run -> restore => identical state hash including the Luau value");
+  run_frames(*a.rt, 14U);
+  check(a.hash() == straight, "the restored Luau mod continues exactly as the straight run (its restored counter drives the RAM it writes)");
+  // another package identity or schema is refused before anything is loaded
+  Machine other_schema(4);
+  run_frames(*other_schema.rt, 3U);
+  const std::string before = other_schema.hash();
+  check(genesis_snapshot_restore(&other_schema.machine, &other_schema.id, s1.data, s1.size) == GENESIS_SNAPSHOT_MOD_MISMATCH && other_schema.hash() == before, "a Luau restore with another state schema is E_STATE_MOD_MISMATCH and changes nothing");
+  // a crafted blob that the strict deserializer refuses: the whole restore is refused, the guest is untouched, the (now faulted) VM is disabled with cause `state`
+  std::vector<uint8_t> bad(s1.data, s1.data + s1.size);
+  const uint32_t count = bad[28] | (bad[29] << 8U);
+  uint32_t off = 0, len = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    const uint8_t *e = bad.data() + 156U + i * 12U;
+    if ((e[0] | (e[1] << 8U)) == 11) { off = e[4] | (e[5] << 8U) | (e[6] << 16U); len = e[8] | (e[9] << 8U) | (e[10] << 16U); }
+  }
+  check(len > 48U, "MODSTATE found");
+  // the blob is the tail of the section: its length is the u32 that precedes it; the first blob byte is the root type tag, which no deserializer accepts as 0xFF
+  uint32_t blob_len = 0;
+  for (uint32_t k = 1; k < 200U && blob_len == 0U; ++k) {
+    const uint32_t cand = bad[off + len - k - 4U] | (bad[off + len - k - 3U] << 8U) | (bad[off + len - k - 2U] << 16U) | (bad[off + len - k - 1U] << 24U);
+    if (cand == k) blob_len = k;
+  }
+  check(blob_len != 0U, "the Luau blob was located");
+  bad[off + len - blob_len] = 0xFFU;
+  GenesisSha256 sha;
+  genesis_sha256_init(&sha);
+  genesis_sha256_update(&sha, bad.data(), static_cast<uint32_t>(bad.size() - 32U));
+  genesis_sha256_final(&sha, bad.data() + bad.size() - 32U);
+  uint8_t ram_before[65536];
+  std::memcpy(ram_before, a.rt->work_ram, sizeof ram_before);
+  const uint64_t frame_before = a.rt->virtual_frame_count;
+  const GenesisSnapshotStatus st = genesis_snapshot_restore(&a.machine, &a.id, bad.data(), bad.size());
+  check(st == GENESIS_SNAPSHOT_MOD_REJECTED, "a malformed Luau state is E_STATE_MOD_REJECTED (got " + std::to_string(st) + ")");
+  check(std::memcmp(ram_before, a.rt->work_ram, sizeof ram_before) == 0 && a.rt->virtual_frame_count == frame_before, "the guest is untouched by the refused Luau state");
+  genesis_snapshot_buffer_free(&s1);
+}
+
 }  // namespace
 
 int main() {
+  luau_state_round_trip();
   parity_of_the_same_behavior();
   matrix_parity();
   luau_fault_isolation();

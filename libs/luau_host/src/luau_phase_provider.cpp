@@ -72,6 +72,23 @@ void phase_entry(void *state, const SegaModHost *host) {
   if (host->phase == SEGA_MOD_PHASE_RENDER) impl->overlay = std::move(out.overlay);
 }
 
+// SEG-138-T006 (ADR 0299): the mod-state entries of the provider table. The state is the VM's one canonical serialized value (`save()` / `load(value)`); both entries return 0 on success.
+// A failing save or load is a `state` fault of the VM (it stays disabled); the scheduler turns a refused restore into E_STATE_MOD_REJECTED and leaves the guest untouched.
+int state_save(void *state, std::uint8_t *out, std::uint32_t cap, std::uint32_t *len) {
+  auto *impl = static_cast<PhaseProvider::Impl *>(state);
+  if (impl->vm == nullptr || out == nullptr || len == nullptr) return 1;
+  const StateResult r = impl->vm->save_state();
+  if (!r.ok || r.blob.size() > cap) return 1;
+  if (!r.blob.empty()) std::memcpy(out, r.blob.data(), r.blob.size());
+  *len = static_cast<std::uint32_t>(r.blob.size());
+  return 0;
+}
+int state_load(void *state, const std::uint8_t *in, std::uint32_t len) {
+  auto *impl = static_cast<PhaseProvider::Impl *>(state);
+  if (impl->vm == nullptr || (in == nullptr && len != 0)) return 1;
+  return impl->vm->load_state(std::span<const std::uint8_t>(in, len)).ok ? 0 : 1;
+}
+
 }  // namespace
 
 PhaseProvider::PhaseProvider(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
@@ -101,6 +118,8 @@ std::unique_ptr<PhaseProvider> PhaseProvider::create(std::string_view identity, 
   impl->table.name = "luau";
   impl->table.implementation_version = 1;
   impl->table.phase = phase_entry;
+  impl->table.save_state = state_save;
+  impl->table.load_state = state_load;
   return std::unique_ptr<PhaseProvider>(new PhaseProvider(std::move(impl)));
 }
 

@@ -40,6 +40,7 @@ struct GenesisAudio;
 #define GENESIS_SNAPSHOT_FLAG_SOUND 0x0001U
 #define GENESIS_SNAPSHOT_FLAG_SRAM 0x0002U
 #define GENESIS_SNAPSHOT_FLAG_EEPROM 0x0004U
+#define GENESIS_SNAPSHOT_FLAG_MOD 0x0010U            /* SEG-138-T006 (ADR 0299): the machine carries a mod (GenesisSnapshotModState): the state has a MODSTATE section and is bound to that mod's identity */
 #define GENESIS_SNAPSHOT_FLAG_NATIVE_SOUND 0x0008U   /* the program carries a native sound-driver replacement (ADR 0291): its states are bound to that backend and cannot cross to a program without it */
 
 typedef enum GenesisSnapshotStatus {
@@ -57,17 +58,44 @@ typedef enum GenesisSnapshotStatus {
   GENESIS_SNAPSHOT_INCOMPATIBLE,      /* region, machine profile (sound/SRAM/EEPROM) or execution fingerprint differs */
   GENESIS_SNAPSHOT_INVALID_STATE,     /* a value is outside what the device can hold */
   GENESIS_SNAPSHOT_IMAGE_MISSING,     /* a Z80 image the state executes is not in this program's registry */
-  GENESIS_SNAPSHOT_NOT_CAPTURABLE     /* the machine is in a latched stop (Z80 view stop, mixer fault, ...): never snapshot it */
+  GENESIS_SNAPSHOT_NOT_CAPTURABLE,    /* the machine is in a latched stop (Z80 view stop, mixer fault, ...): never snapshot it */
+  GENESIS_SNAPSHOT_MOD_MISMATCH,      /* E_STATE_MOD_MISMATCH: the state was written with another mod set/version/schema (or with none, or this build has none) */
+  GENESIS_SNAPSHOT_MOD_UNAVAILABLE,   /* E_STATE_UNAVAILABLE: a guest-affecting mod without `state.mod` (or whose state cannot be saved): no state is ever produced */
+  GENESIS_SNAPSHOT_MOD_REJECTED       /* E_STATE_MOD_REJECTED: the mod refused its own saved state (malformed blob, failing load); the machine's guest state is unchanged */
 } GenesisSnapshotStatus;
 
 /* A short, user-presentable reason for a status. Never NULL. */
 const char *genesis_snapshot_status_text(GenesisSnapshotStatus status);
+
+/* SEG-138-T006 (ADR 0299): the seam through which a mod's own state joins the container (`MODSTATE` section). The snapshot module never links a scheduler: the mod scheduler
+ * (mod_scheduler.h, genesis_mod_snapshot_state) fills this table. The section holds { payload version, `identity`, `state_schema`, an opaque body }; the body is produced and
+ * understood only by the codec, bounded by GENESIS_SNAPSHOT_MOD_BODY_MAX. */
+#define GENESIS_SNAPSHOT_MOD_BLOB_MAX 65536U                       /* the mod's own state (phases section 6.2) */
+#define GENESIS_SNAPSHOT_MOD_BODY_MAX (GENESIS_SNAPSHOT_MOD_BLOB_MAX + 2048U)
+typedef struct GenesisSnapshotModState {
+  void *ctx;
+  uint8_t identity[32];     /* the mod's package identity (an exact match is required to restore) */
+  uint32_t state_schema;    /* the mod's declared state schema (an exact match is required) */
+  uint8_t compat[32];       /* digest of everything else that decides whether a state is usable (ABI major, granted capability sets, registered phases, hook bindings): folded into the execution fingerprint */
+  /* Writes the body into out[0..cap). Returns its length, or a value greater than `cap` on failure (`*status` then says why: MOD_UNAVAILABLE or NOT_CAPTURABLE). Does not modify the mod. */
+  uint32_t (*put)(void *ctx, uint8_t *out, uint32_t cap, GenesisSnapshotStatus *status);
+  /* Validates a body into private staged storage; nothing the mod or the machine owns is touched. NULL = invalid (malformed, out-of-range value). */
+  void *(*stage)(void *ctx, const uint8_t *body, uint32_t length);
+  /* The only step that can still fail: hands the mod its blob. Called before any guest state is replaced; on failure the mod is back to (or disabled from) its previous state and
+   * the guest state is untouched. Returns 0 on success. */
+  int (*apply)(void *ctx, void *staged);
+  /* Cannot fail: installs the scheduler-side state into the (already restored) machine. Consumes `staged`. */
+  void (*commit)(void *ctx, void *staged, GenesisRuntime *runtime);
+  /* Drops `staged` without effect. */
+  void (*discard)(void *ctx, void *staged);
+} GenesisSnapshotModState;
 
 /* The parts of one initialized machine. `z80` and `audio` are both NULL (no sound) or both set. */
 typedef struct GenesisSnapshotMachine {
   GenesisRuntime *runtime;
   struct GenesisZ80Machine *z80;
   struct GenesisAudio *audio;
+  const GenesisSnapshotModState *mod;   /* NULL = no mod (the container is byte-for-byte what it was before SEG-138-T006) */
 } GenesisSnapshotMachine;
 
 /* Who the state belongs to: the digest of the image the program was built from (the effective, possibly patched, image) and the variant
