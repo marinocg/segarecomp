@@ -1,6 +1,6 @@
 /* SEG-139-T006: the repeatable synthetic widescreen matrix. One deterministic fictional scene (no commercial content) is planned, produced and presented through the shared
  * host at 4:3, 16:9, 21:9 and 32:9. Per aspect it records frame correctness (the composed output is compared with an independent construction AND with a committed golden hash),
- * coverage (a fictional provider declares `max=21:9`, so 32:9 is honestly PARTIAL: generic presentation, not authored), the host's per-frame time against a coarse budget, and the
+ * coverage (a fictional provider declares `max=21:9`, so 32:9 is honestly PARTIAL: native picture only), the host's per-frame time against a coarse budget, and the
  * surface memory. Integer 2x scale in a window of exactly twice the surface makes the composed output a pixel replication, so the hash does not depend on the renderer's filtering.
  * It prints one `WIDESCREEN_MATRIX {json}` line per aspect for the record. Strict C11. */
 #include <SDL3/SDL.h>
@@ -34,7 +34,7 @@ static const Row rows[4] = {
   {"4:3", {4, 3}, 0, 320, 320u * 224u * 3u, 0xa659fbcb2bce5a83ull},
   {"16:9", {16, 9}, 39, 398, 398u * 224u * 3u, 0x2125da0c004f6f63ull},
   {"21:9", {21, 9}, 101, 522, 522u * 224u * 3u, 0xe86edf64ba877763ull},
-  {"32:9", {32, 9}, 238, 796, 796u * 224u * 3u, 0x1be6033adcd46e43ull},
+  {"32:9", {32, 9}, 238, 796, 796u * 224u * 3u, 0x9a168ef87d987283ull},
 };
 
 static uint8_t g_native[NW * NH * 3];
@@ -55,13 +55,14 @@ static void build(int side) {
 }
 
 /* the expected composed output, built without the host: every surface pixel replicated 2 x 2 */
-static uint64_t expected_hash(int surface_w, int hud) {
+static uint64_t expected_hash(int surface_w, int hud, int native_only) {
   uint64_t h = 1469598103934665603ull;
   int x, y, k;
   for (y = 0; y < NH * 2; ++y)
     for (x = 0; x < surface_w * 2; ++x) {
       uint8_t px[3];
       const int sx = x / 2, sy = y / 2, side = (surface_w - NW) / 2;
+      if (native_only) { const int nx = x - (surface_w * 2 - NW * 2) / 2; if (nx >= 0 && nx < NW * 2) native_px(nx / 2, sy, px); else px[0] = px[1] = px[2] = 0; for (k = 0; k < 3; ++k) h = (h ^ px[k]) * 1099511628211ull; continue; }
       if (hud && sx < 8 && sy < 8) { px[0] = px[1] = px[2] = 255; }   /* the opaque 8 x 8 HUD at the left edge of the visible side */
       else if (sx >= side && sx < side + NW) native_px(sx - side, sy, px); else ext_px(sx < side ? side - 1 - sx : sx - side - NW, sy, px);
       for (k = 0; k < 3; ++k) h = (h ^ px[k]) * 1099511628211ull;
@@ -148,13 +149,13 @@ int main(void) {
       SDL_DestroySurface(out);
     }
     fallback = sv_host_geometry_fallback(h);
-    want = expected_hash(r->surface_w, r->side > 0 && !fallback);
-    /* inside the declared range the relocated HUD is part of the frame; outside it the generic path drops it (and the HUD is then absent from the expected construction too) */
+    want = expected_hash(r->surface_w, r->side > 0 && !fallback, fallback);
+    /* inside the declared range the relocated HUD is part of the frame; outside it the host shows only the native picture (and the HUD is then absent from the expected construction too) */
     correct = got == want;
     hit_golden = got == r->golden;
     CHECK(correct, "the composed frame equals the independent construction");
     CHECK(hit_golden, "the composed frame equals the committed golden hash");
-    CHECK(sv_host_extension_side(h) == r->side && sv_host_visible_side(h) == r->side, "the planned side is the side shown");
+    CHECK(sv_host_extension_side(h) == (fallback ? 0 : r->side), "the planned side is shown inside the declared range, nothing outside it");
     CHECK((i < 3 && !fallback) || (i == 3 && fallback), "coverage: 4:3, 16:9 and 21:9 are inside the declared 21:9, 32:9 is outside");
     verdict = !correct || !hit_golden ? "fail" : fallback ? "partial" : "pass";
     CHECK((i < 3 && strcmp(verdict, "pass") == 0) || (i == 3 && strcmp(verdict, "partial") == 0), "the matrix verdict is pass, pass, pass, partial");

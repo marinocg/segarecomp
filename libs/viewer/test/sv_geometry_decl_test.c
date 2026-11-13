@@ -82,11 +82,18 @@ int main(void) {
   sv_host_toast(h, "");
   CHECK(present(h, ++seq, 1) == 0, "frame at 32:9");
   CHECK(sv_host_geometry_fallback(h), "shown at 32:9: outside the declared range");
-  CHECK(sv_host_side_treatment(h) == SV_TREAT_COMFORT && sv_host_extension_source(h) == SV_EXTSRC_GENERIC && h->ovl_w == 0, "fallback: the generic presentation, nothing authored, no relocated HUD");
-  CHECK(sv_host_extension_side(h) == SIDE, "the extension itself is still shown (generic), not removed");
+  CHECK(sv_host_extension_side(h) == 0 && sv_host_extension_source(h) == SV_EXTSRC_GENERIC && h->ovl_w == 0, "fallback: only the native picture, nothing authored, no relocated HUD");
+  { /* the Raw style passes an extension through untouched, so the fallback must not rely on the side treatment */
+    SvSettings raw = *sv_host_settings(h);
+    raw.video.widescreen_side_style = SV_SIDE_RAW;
+    sv_host_apply_settings(h, &raw);
+    CHECK(present(h, ++seq, 1) == 0 && sv_host_geometry_fallback(h) && sv_host_extension_side(h) == 0 && h->ovl_w == 0, "fallback under Raw: no provider column is shown");
+    raw.video.widescreen_side_style = SV_SIDE_COMFORT;
+    sv_host_apply_settings(h, &raw);
+  }
   CHECK(toast_has(h, "outside declared range"), "a visible diagnostic names the reason");
-  CHECK(strstr(json(h), "\"last_status\":\"outside declared range\"") != NULL && strstr(json(h), "\"outside_range_frames\":1") != NULL && strstr(json(h), "\"last_aspect\":\"32:9\"") != NULL, "the report says outside declared range");
-  CHECK(strstr(json(h), "\"scenery\":{\"declared\":true,\"covered\":1,\"missing\":0,\"undeclared\":0,\"outside_range\":1}") != NULL, "the outside frame is not counted as covered");
+  CHECK(strstr(json(h), "\"last_status\":\"outside declared range\"") != NULL && strstr(json(h), "\"outside_range_frames\":2") != NULL && strstr(json(h), "\"last_aspect\":\"32:9\"") != NULL, "the report says outside declared range");
+  CHECK(strstr(json(h), "\"scenery\":{\"declared\":true,\"covered\":1,\"missing\":0,\"undeclared\":0,\"outside_range\":2}") != NULL, "the outside frames is not counted as covered");
 
   sv_host_toast(h, "");
   CHECK(present(h, ++seq, 1) == 0 && h->toast_count == 0, "the diagnostic is raised on entering the state, not on every frame");
@@ -111,7 +118,7 @@ int main(void) {
   /* an unreadable declaration fails closed; no declaration restricts nothing */
   h = open_host("max=16:9;scene=Bad Id:hud");
   set(h, R(16, 9), 100);
-  CHECK(present(h, ++seq, 1) == 0 && sv_host_geometry_fallback(h) && h->ovl_w == 0 && toast_has(h, "invalid") && sv_host_extension_source(h) == SV_EXTSRC_GENERIC, "an invalid declaration never shows provider content as authored");
+  CHECK(present(h, ++seq, 1) == 0 && sv_host_geometry_fallback(h) && h->ovl_w == 0 && toast_has(h, "invalid") && sv_host_extension_side(h) == 0, "an invalid declaration never shows provider content");
   CHECK(strstr(json(h), "\"declared\":false") != NULL, "an invalid declaration is not reported as declared");
   sv_host_close(h);
   remove(g_settings);

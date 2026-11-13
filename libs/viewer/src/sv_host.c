@@ -1242,7 +1242,6 @@ size_t sv_host_coverage_json(const SvHost *h, char *buf, size_t cap) { return h 
 int sv_host_geometry_fallback(const SvHost *h) { return h != NULL ? h->cov_fallback : 0; }
 
 int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, uint64_t sequence, const SvExtendedSurface *ext) {
-  SvExtendedSurface generic;
   if (ext != NULL && ext->status != SV_WS_UNAVAILABLE && ext->sequence == sequence) {
     /* what the provider delivered for THIS frame, accounted against the declaration; only then may it be dropped */
     const SvDisplayRatio req = requested_ratio(h);
@@ -1253,17 +1252,14 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     if (ext->mode == SV_WIDESCREEN_ENHANCED_GAMEPLAY && ext->side > 0) delivered |= SV_COV_BIT(SV_COV_ACTORS);
     in_range = sv_cov_frame(&h->cov, req, h->cov_scene[0] != '\0' ? h->cov_scene : NULL, delivered);
     if (!in_range) {
-      /* outside the declared range: the generic presentation, with a visible diagnostic once per entry. Nothing a provider supplied is shown as authored. */
+      /* outside the declared range: nothing the provider supplied may be shown (the surface mixes its own columns, which Raw would pass through untouched), so only the native
+       * picture is presented, with a visible diagnostic once per entry. */
       char lo[24], hi[24], text[96];
-      generic = *ext;
-      generic.source = SV_EXTSRC_GENERIC;
-      generic.overlay_rgba = NULL;
-      generic.overlay_w = generic.overlay_h = 0;
-      ext = &generic;
+      ext = NULL;
       if (!h->cov_fallback) {
         (void)sv_ratio_format(h->cov.decl.min, lo, sizeof lo);
         (void)sv_ratio_format(h->cov.decl.max, hi, sizeof hi);
-        snprintf(text, sizeof text, h->cov.decl.invalid ? "Geometry declaration invalid: generic widescreen" : "Geometry: outside declared range %s-%s, generic widescreen", lo, hi);
+        snprintf(text, sizeof text, h->cov.decl.invalid ? "Geometry declaration invalid: native picture only" : "Geometry: outside declared range %s-%s, native picture only", lo, hi);
         push_toast(h, text, 4000u);
       }
       h->cov_fallback = 1;
@@ -1282,7 +1278,7 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     /* An UNAVAILABLE surface that was not even requested is the normal Original case; anything else offered and refused is a rejection. */
     if (ext->status != SV_WS_UNAVAILABLE && (ext->overlay_rgba == NULL || (int)ext->mode <= (int)h->settings.video.widescreen) && h->ext_rejected != UINT32_MAX) h->ext_rejected++;   /* a surface that only carries the HUD in Original is expected, not a refusal */
   }
-  /* the extension is not shown (Original, a stale surface, a refusal): the overlay of a surface that is otherwise about THIS frame is still the HUD that replaces the game's own */
+  /* the extension is not shown (Original, a stale surface, a refusal, a fallback): the overlay of a surface that is otherwise about THIS frame is still the HUD that replaces the game's own */
   return present_frame(h, rgb, w, hgt, pitch, NULL, ext != NULL && ext->status != SV_WS_UNAVAILABLE && ext->sequence == sequence ? ext : NULL);
 }
 

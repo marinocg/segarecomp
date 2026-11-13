@@ -391,7 +391,7 @@ void genesis_sdl3_viewer_close(GenesisSdl3Viewer *v) {
   { /* SEG-139-T004: SEGARECOMP_COVERAGE_REPORT=<file> writes the declared-versus-delivered coverage report (stable JSON, aggregate counters only) when the viewer closes */
     const char *path = SDL_getenv("SEGARECOMP_COVERAGE_REPORT");
     if (path != NULL && *path != '\0') {
-      char json[4096];
+      char json[12288]; /* 32 scenes need about 9.4 KB */
       const size_t n = sv_host_coverage_json(v->host, json, sizeof json);
       FILE *f = n > 0 && n < sizeof json ? fopen(path, "wb") : NULL;
       if (f != NULL) { (void)fwrite(json, 1, n, f); (void)fputc('\n', f); (void)fclose(f); }

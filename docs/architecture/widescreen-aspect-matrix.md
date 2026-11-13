@@ -6,14 +6,14 @@ Status: synthetic matrix committed and run in CI; real-game aggregates are recor
 
 One fictional 320 x 224 square-pixel scene; the planner, a fictional provider declaring `max=21:9;scene=synthetic:hud+scenery`, the shared host, an integer 2x window. Verdicts:
 **pass** = composed frame equals the independent construction and the committed golden hash, and the declared coverage holds; **partial** = the frame is correct but the host fell back to the
-generic presentation because the aspect is outside the declared range; **fail** = any mismatch or an exceeded budget.
+native picture only because the aspect is outside the declared range; **fail** = any mismatch or an exceeded budget.
 
 | Aspect | Side / surface | Surface bytes | Composed frame (golden FNV-1a) | Coverage (declared 21:9) | Verdict |
 | --- | ---: | ---: | --- | --- | --- |
 | 4:3 | 0 / 320 | 215,040 | `a659fbcb2bce5a83` | native picture, nothing to extend | pass |
 | 16:9 | 39 / 398 | 267,456 | `2125da0c004f6f63` | scenery + hud covered | pass |
 | 21:9 | 101 / 522 | 350,784 | `e86edf64ba877763` | scenery + hud covered | pass |
-| 32:9 | 238 / 796 | 534,912 | `1be6033adcd46e43` | **outside declared range**: generic presentation, no authored scenery, no relocated HUD | partial |
+| 32:9 | 238 / 796 | 534,912 | `9a168ef87d987283` | **outside declared range**: native picture only (no provider scenery, no relocated HUD) | partial |
 
 The report that backs the coverage column is asserted in the test (30 covered scenery frames for 16:9 and 21:9, 15 outside-range frames for 32:9). The scene generator is part of the test, so the
 hashes pin it; they are only meaningful together with the independent construction, which is why both checks exist.
@@ -42,12 +42,12 @@ Covers (Genesis, the reference path):
 
 - A planned, bounded surface up to 672 source pixels per side (ADR 0301), rejected rather than clamped; the producer, composer, texture and presentation modes (fit, integer, letterbox, centred crop) at 4:3 through 32:9, with pixel-exact producer output at 101, 238, 266, 636, 668 and 672 pixels per side.
 - The generic Level 2/3 extension: the VDP's own plane scenery and the sprites the game already submitted over the extra columns.
-- Honest declared-versus-delivered reporting per scene and component, and a visible fallback to the generic presentation outside a package's declared range.
+- Honest declared-versus-delivered reporting per scene and component, and a visible fallback to the native picture outside a package's declared range.
 
 Does not cover:
 
 - **Gameplay.** Background coverage is not gameplay support. A game that does not create or update objects outside its original window does not gain them at 32:9; only a package that declares and delivers `actors` is reported as covering them, and the host measures that, it does not infer it.
-- **Scenery the game never prepared.** Beyond the VDP's bounded plane window the extension is wrapped or stale scenery, wider at 32:9 than at 16:9. An authored provider covers only what it supports: a provider declaring 16:9 is shown the generic presentation at 32:9.
+- **Scenery the game never prepared.** Beyond the VDP's bounded plane window the extension is wrapped or stale scenery, wider at 32:9 than at 16:9. An authored provider covers only what it supports: a provider declaring 16:9 is shown only the native picture at 32:9.
 - Master System (80-pixel producer bound) and Sega CD coverage declarations (SEG-147-T009, SEG-148-T010); the matrix is Genesis.
 - Any real-game claim: the synthetic scene proves geometry, hashing, declaration and fallback behaviour, not that a title looks right at 32:9. Real-game evidence is the harness aggregate below and is reported as such.
 - A menu or launcher control for the exact ratio and an on-screen coverage view; the launcher does not yet pass the declaration to the viewer (`SEGARECOMP_PATCH_GEOMETRY`), so a mod played through it is reported `declared:false` and unrestricted (ADR 0302 consequences).
