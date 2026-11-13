@@ -52,6 +52,8 @@ run is kept in the results for transparency.
 
 ## Results
 
+> **Reading note.** "Producer cost" below is a **proxy**: the difference in the per-frame `emulation` span (all guest execution of a slice) between a configuration with the extension and the one without. It includes other emulation work the extension perturbs (for example cache effects) and is not an isolated timer around `genesis_vdp_produce_extension`. The `vdp_compose` span does not contain the extension producer. The two attribution methods below (gprof 40.4%, ablation up to 69%) disagree and are both kept with their limits; the pre-registered rule, with its thresholds unrevised, decides: no lookup optimization is warranted.
+
 Host: Linux 6.6 aarch64 (4 cores), GCC 14.2.0, `-O2`; viewer build of this delivery (`tools/widescreen_perf_matrix.py --runs 7`, 156 virtual frames per run,
 median of 7 interleaved runs). All figures are `[measured]` host times in nanoseconds per virtual frame; the frame budget is 16,666,667 ns.
 

@@ -141,7 +141,7 @@ build list changes).
 | Genesis producer plan callback (`viewer_sdl3.c`) | calls `sv_geom_resolve_production`; a rejected plan produces nothing | `genesis_extension_test` (pixel-exact references at 101, 238, 266, 636, 668 and 672), `sv_aspect_matrix_test` |
 | Producer bound / row scratch | `GENESIS_EXT_MAX_SIDE` 672; scratch is 1664 candidate pixels (6.6 KB) | same tests; strict-C11 packaged build compiles |
 | Host buffers and side fill | sized from `SV_EXT_MAX_SIDE`; fade table sized from the same constant | `sv_viewer_core_test geometry` under ASan/UBSan |
-| Host visible side / presentation | `sv_geom_resolve_visible`; `sv_layout_extended_dest` unchanged | `sv_aspect_matrix_test` (4 aspects x 3 pictures x 4 windows) |
+| Host visible side / presentation | `sv_geom_resolve_visible`; `sv_layout_extended_dest` unchanged | `sv_aspect_matrix_test` (4 presets + one custom ratio x 3 pictures x 4 windows, fit; integer scale in 1920x1080) |
 | Legacy settings | production and visible side unchanged | fixture hash of 352 values recorded from the unmodified functions at `ce49e73` |
 
 ## 7. Out of scope (recorded, not hidden)
