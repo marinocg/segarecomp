@@ -309,8 +309,12 @@ void render_phase_is_read_only() {
   g_probe.script.phase = SEGA_MOD_PHASE_RENDER;
   g_probe.script.ops = {{Op::read, SEGA_GEN_SPACE_M68K_WORK_RAM, 0x10, 1, 0}};
   run_frames(copy.rt, 1U);
-  for (const Trace &t : g_probe.trace)
-    if (t.phase == SEGA_MOD_PHASE_RENDER) g_probe.trace.assign(1, t);
+  {   // keep only the first render entry (copy it first: assigning a vector from its own element while iterating is undefined)
+    std::vector<Trace> render_only;
+    for (const Trace &t : g_probe.trace)
+      if (t.phase == SEGA_MOD_PHASE_RENDER && render_only.empty()) render_only.push_back(t);
+    g_probe.trace = render_only;
+  }
   check(!copy.sched->fault.faulted && g_probe.status.size() == 1 && g_probe.status[0] == SEGA_MOD_OK && g_probe.values[0] == (g_probe.trace.back().dispatches & 0xFFU), "render reads the frame copy taken at the boundary");
   // The frame.work_ram grant is the complete 64 KiB copy (ABI 2 section 4), independent of declared ranges; the copy bound and alignment still hold.
   struct SnapshotCase { uint32_t offset, width; const char *cause; } snapshot[] = {
