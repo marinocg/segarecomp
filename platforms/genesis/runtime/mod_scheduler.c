@@ -771,7 +771,7 @@ static void *state_stage(void *ctx, const uint8_t *body, uint32_t length) {
   st->stream.used = si_u32(&in);
   { const uint8_t *b = si_take(&in, 64U); if (b != NULL) memcpy(st->stream.block, b, 64U); }
   st->write_total = si_u64(&in);
-  if (in.error || st->stream.used >= 64U || (st->stream.length & 63U) != st->stream.used || st->stream.length != st->write_total * 28U) goto bad; /* 7 big-endian u32 per committed write */
+  if (in.error || st->stream.used >= 64U || (st->stream.length & 63U) != st->stream.used || st->write_total > UINT64_MAX / 28U || st->stream.length != st->write_total * 28U) goto bad; /* 7 big-endian u32 per committed write */
   st->depth = si_u32(&in);
   st->abandoned = si_u64(&in); st->unproven = si_u64(&in); st->overflowed = si_u64(&in);
   if (in.error || st->depth > GENESIS_HOOK_FRAMES_MAX) goto bad;
