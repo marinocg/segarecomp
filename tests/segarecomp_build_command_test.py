@@ -135,12 +135,14 @@ def main():
             '  if (calls > 1) { fputs("RESTARTED\\n", stderr); exit(9); }\n'
             '  t.kind = GENESIS_RUNNER_RESOURCE_LIMIT; t.next_pc = r->pc; t.runner_dispatch_count = 7U; return t; }\n')
         hooked = tmp / "hooked"
+        # `-include proto.h` pulls <stdio.h> in through runtime.h BEFORE the generated file's own `#define _POSIX_C_SOURCE`, so fdopen (declared only under that
+        # feature macro on glibc with strict -std=c11) is hidden; select the same POSIX level the generated bridge declares (an identical redefinition is legal).
         # Only the generated main is compiled with the rename; runtime.c and the stub keep their own definitions.
         objects = []
         for name, src, extra in (("gen", gen, ["-include", str(tmp / "proto.h"), "-Dgenesis_runtime_run=test_hook"]),
                                  ("hook", tmp / "hook.c", []), ("rt", runtime_dir / "runtime.c", [])):
             obj = tmp / (name + ".o")
-            built = subprocess.run([compiler, "-std=c11", "-I", str(runtime_dir), "-I", str(tmp), *extra, "-c", str(src),
+            built = subprocess.run([compiler, "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-I", str(runtime_dir), "-I", str(tmp), *extra, "-c", str(src),
                                     "-o", str(obj)], text=True, capture_output=True)
             require(built.returncode == 0, f"hook build ({name}) must succeed: " + built.stderr)
             objects.append(str(obj))
