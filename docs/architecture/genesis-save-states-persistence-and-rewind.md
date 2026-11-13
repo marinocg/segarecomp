@@ -113,6 +113,10 @@ restore, and a thumbnail never claims that the enhanced extension is available. 
 effect, the build must refuse state features (the viewer capability probe reads `GENESIS_NATIVE_COMPAT_ABI`). No incomplete composite is
 ever restored silently.
 
+### 3.6 Mod state (`MODSTATE`, ADR 0299)
+
+A machine that carries a mod (`GenesisSnapshotMachine::mod`) sets machine flag bit 4 (`0x0010`) and has an eleventh, required section `MODSTATE` (id 11): `{ version u32 = 1, mod identity[32], state_schema u32, compat[32], body length u32, body }`, body at most 64 KiB + 2 KiB. The execution fingerprint folds in the identity, schema and compat digest. A state with a mod is refused by a build without one and vice versa (`E_STATE_MOD_MISMATCH`), as is a state of another identity/schema/compat. The body is owned by the mod scheduler (`mod_scheduler.c`): class **R** for the mod's disabled/fault state, pad latch (`mod_pad_*`), counters, replay write-digest context, function-hook frames in flight and the mod's own bounded blob; the retained diagnostic write log is **X**. Restore stages the body, then runs the mod's `load_state` first in the commit (the only fallible step), so a refusal leaves the guest byte-identical. Rewind carries the same section. Without a mod nothing changes.
+
 ## 4. Identity, versioning, integrity
 
 ### 4.1 Container (`SGSTATE`, all integers little-endian)

@@ -67,7 +67,7 @@ segarecomp mod session lib/mods/<package_identity>.segapatch --rom fixture.rom -
 | `escape-metatable` | `luau_api_test` (string metatable, library and global edits, `rawset`, `setmetatable`/`getmetatable` on `sega`) |
 | `binding-abuse` | `luau_api_test` (22 bad calls, phases, read-only surface, no host handles), `mod_luau_api_test` |
 | `bytecode-injection` | `luau_host_test` (provenance), `mod_luau_test`, `luau_api_test` (`loadstring`/`load` of bytecode are absent) |
-| `state-integrity` | `luau_api_test` (canonical serialization, 12 save refusals, 12 restore refusals (10 malformed blobs, a mod without `load()`, an error in `load()`); the `MODSTATE` container is M05) |
+| `state-integrity` | `luau_api_test` (canonical serialization, 12 save refusals, 12 restore refusals (10 malformed blobs, a mod without `load()`, an error in `load()`); the `MODSTATE` container: `genesis_mod_state_tests`, `luau_phase_scheduler_test` and `genesis_mod_replay_tests`, ADR 0299) |
 | `diagnostic-hygiene` | `luau_api_test`, `mod_luau_api_test` (bounded, no path/address) |
 | `compiler-input` | `luau_api_test` (deep nesting, 100 KB literal, 300 live locals), `mod_luau_test` (compile limits) |
 | `approval-semantics` | `mod_luau_api_test` (data / Luau-only / native and mixed install classes) |
