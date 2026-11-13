@@ -15,7 +15,9 @@ The complete list is [`api.json`](luau/api.json); the type declarations are [`se
 | `sega.overlay.rect(x, y, w, h, rgba)` | `overlay.rgba` | render | filled rectangle in the 128x256 HUD overlay; `rgba` is `0xRRGGBBAA` |
 | `sega.overlay.text(x, y, text, rgba)` | `overlay.rgba` | render | text in the host's bitmap font (printable ASCII, 64 bytes) |
 | `sega.overlay.width` / `.height` | `overlay.rgba` | render | 128 / 256 |
-| `reset()`, `render(frame)` | - | reset / render | optional callbacks you define as globals; `frame` is the frame counter |
+| `reset()`, `frame_begin(frame)`, `input(frame)`, `post_input(frame)`, `frame_end(frame)`, `render(frame)` | - | one per phase | optional callbacks you define as globals; `frame` is the guest frame counter. The played Genesis program (above) still runs only `reset`/`render`; the other phases and the next two rows run under the phase scheduler (ADR 0297: library and tests; not yet in a built program) |
+| `sega.mem.read(space, offset, width)` / `sega.mem.write(space, offset, width, value)` | `memory.read.m68k.work_ram` / `memory.write.m68k.work_ram` | read: reset, frame-begin, input, post-input, frame-end; write: frame-begin, post-input, frame-end | big-endian 1/2/4 bytes inside a declared range; writes are staged and committed when the callback returns without a fault; a violation is a fault |
+| `sega.input.get(port)` / `sega.input.set(port, buttons)` | `input.read` / `input.intercept` | get: frame-begin, input, post-input; set: input | pad button bits (ports 1 and 2); `set` changes only what the guest reads this frame |
 
 Rules: integers only (a fraction, NaN, infinity or negative size is a `range` fault); coordinates are clamped to the overlay and reported as notes; at most 64 overlay requests per callback; a binding outside its phase is a `phase` fault. Values cross by copy; nothing aliases host memory. There is no guest-memory access, input, clock, file, network or randomness other than the deterministic `math.random`.
 

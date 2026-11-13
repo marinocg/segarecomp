@@ -481,16 +481,18 @@ struct GenesisSoundBuild {
   bool link(const fs::path &executable, const std::vector<fs::path> &objects, bool with_sdl) {
     std::vector<std::string> command{options.cc};
     command.insert(command.end(), options.cc_args.begin(), options.cc_args.end());
+    bool stdcxx_after_objects = false;   // the custom C driver fallback: the C++ runtime library must FOLLOW the objects that need it (GNU-style one-pass link order)
     if (cxx_link) {
       command = {options.cxx};
       for (std::size_t i = 0; i < options.cxx_args.size(); ++i) {
-        if (options.cxx_args[i] == "-x" && i + 1 < options.cxx_args.size() && options.cxx_args[i + 1] == "c++") { ++i; command = {options.cc}; command.insert(command.end(), options.cc_args.begin(), options.cc_args.end()); command.push_back("-lstdc++"); continue; }
+        if (options.cxx_args[i] == "-x" && i + 1 < options.cxx_args.size() && options.cxx_args[i + 1] == "c++") { ++i; command = {options.cc}; command.insert(command.end(), options.cc_args.begin(), options.cc_args.end()); stdcxx_after_objects = true; continue; }
         if (command.front() == options.cxx) command.push_back(options.cxx_args[i]);
       }
     }
     command.insert(command.end(), {"-o", executable.string()});
     for (const auto &object : objects) command.push_back(object.string());
     if (with_sdl) { command.push_back("-L" + options.sdl3_lib->string()); command.push_back("-lSDL3"); command.push_back("-lm"); }
+    if (stdcxx_after_objects) command.push_back("-lstdc++");
     command.insert(command.end(), options.link_args.begin(), options.link_args.end());
     const fs::path link_log = object_dir / (executable.filename().string() + ".link.log");
     segarecomp_cli::ProcessUsage link_usage;

@@ -799,6 +799,21 @@ typedef enum GenesisDeviceCheckpointComparison {
 #define GENESIS_PAD_A 0x40U
 #define GENESIS_PAD_START 0x80U
 
+struct GenesisRuntime;
+/*
+ * SEG-138-T001 (ADR 0297): the optional, host-owned frame-phase seam of the mod scheduler (mod_scheduler.h). NULL in `GenesisRuntime::frame_hooks` (the value in every
+ * ordinary program) means exactly today's behaviour. The runtime calls these only on a dispatch boundary: `start` at the head of genesis_runtime_run (the scheduler runs its
+ * `reset` once and the opening frame phases), `frame_end` at a virtual frame boundary after the instruction retired and BEFORE the frame is rendered and published, and
+ * `after_snapshot` after the frame was published (the scheduler runs `render` from copies and the next frame's opening phases). Callbacks take zero guest time; the runtime's
+ * own state is touched by the hooks only through the work-RAM commit and the intercepted pad (`mod_pad_*`). Never serialized.
+ */
+typedef struct GenesisFrameHooks {
+  void *ctx;
+  void (*start)(void *ctx, struct GenesisRuntime *runtime);
+  void (*frame_end)(void *ctx, struct GenesisRuntime *runtime);
+  void (*after_snapshot)(void *ctx, struct GenesisRuntime *runtime);
+} GenesisFrameHooks;
+
 typedef struct GenesisRuntime {
   uint32_t d[8];
   uint32_t a[8];
@@ -819,6 +834,11 @@ typedef struct GenesisRuntime {
      checkpoint and first-divergence digest. */
   uint8_t pad1;
   uint8_t pad2; /* SEG-055: Player 2 (port 2) host input mask, independent of pad1 */
+  /* SEG-138-T001: the pad state the GUEST reads while `mod_pad_active != 0` (set by the mod scheduler's `input` phase, one sample per frame); `pad1`/`pad2` stay the
+     physical state and keep being what a recording stores. Zero (the default) = the guest reads pad1/pad2 exactly as before. */
+  uint8_t mod_pad_active;
+  uint8_t mod_pad1;
+  uint8_t mod_pad2;
   /* SEG-055: the configured console region (SegarecompGenesisRegionProfile in controller_io_contract.h; 0 == USA NTSC,
      the historical default of every zero-initialized runtime). Guest-visible through the version register only; fixed
      for the whole run (set once before the first step, by the host or from SEGARECOMP_GENESIS_REGION by the runner).
@@ -940,6 +960,8 @@ typedef struct GenesisRuntime {
   GenesisDeviceCheckpoint device_checkpoint;
   /* SEG-007-T255: host-owned optional observer (NULL = absent); non-semantic. */
   GenesisLiveFrameObserver *live_frame_observer;
+  /* SEG-138-T001: optional host-owned frame-phase hooks of the mod scheduler (NULL = absent = exactly today's behaviour). Non-semantic when absent; never serialized. */
+  const GenesisFrameHooks *frame_hooks;
   /* SEG-055: optional host-owned scanline capture for the observer above (NULL == the observer's own `producer` renders
      the final snapshot). Non-semantic, never serialized. */
   GenesisRasterCapture *live_raster;

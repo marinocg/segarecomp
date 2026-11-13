@@ -42,7 +42,7 @@ const char *fault_name(Fault fault) {
 Limits policy_limits() { return Limits{}; }
 
 
-enum class Phase { none, load, reset, render };
+enum class Phase { none, load, reset, frame_begin, input, post_input, frame_end, render };
 
 struct VmImpl {
   Limits limits;
@@ -359,6 +359,75 @@ int sega_log(lua_State *L) {
   return 0;
 }
 
+// ---- guest memory and input (SEG-138-T001/T002): thin copies of the scheduler's services; the scheduler decides phase, range, alignment and budget ----
+std::uint32_t space_id(std::string_view name) {   // SegaGenesisSpace ids; 0 = unknown (the scheduler answers "space")
+  if (name == "m68k.work_ram") return 1;
+  if (name == "m68k.rom") return 2;
+  if (name == "z80.ram") return 3;
+  if (name == "vdp.vram") return 4;
+  if (name == "vdp.cram") return 5;
+  if (name == "vdp.vsram") return 6;
+  return 0;
+}
+
+const HostServices *services_of(lua_State *L, const char *name) {
+  VmImpl *im = impl_of(L);
+  if (im->input == nullptr || im->input->services == nullptr) binding_fault(L, Fault::phase, std::string(name) + " is not available in this phase");
+  return im->input->services;
+}
+
+[[noreturn]] void service_fault(lua_State *L, int status, const char *name) {
+  const Fault f = status == 1 ? Fault::capability : status == 8 ? Fault::phase : status == 7 ? Fault::budget : Fault::range;
+  static const char *const kClass[] = {"ok", "capability", "space", "range", "alignment", "readonly", "owner", "budget", "phase"};
+  binding_fault(L, f, std::string(name) + ": " + (status >= 0 && status <= 8 ? kClass[status] : "range") + " violation");
+}
+
+int sega_mem_read(lua_State *L) {
+  // The documented phases of sega.mem.read (api table): NOT render. A native provider may read the render-phase frame copy (frame.work_ram); the Luau binding for it is sega.frame.value, so a
+  // script that reaches for sega.mem.read in render (or load) is a deterministic phase fault no matter which capabilities it holds.
+  const Phase now = impl_of(L)->phase;
+  if (now != Phase::reset && now != Phase::frame_begin && now != Phase::input && now != Phase::post_input && now != Phase::frame_end) binding_fault(L, Fault::phase, "sega.mem.read is not available in this phase");
+  const HostServices *sv = services_of(L, "sega.mem.read");
+  require_args(L, 3, "sega.mem.read");
+  const std::string_view space = str_arg(L, 1, "sega.mem.read");
+  const std::int64_t offset = int_arg(L, 2, 0, 0xFFFFFFFFLL, "sega.mem.read"), width = int_arg(L, 3, 0, 255, "sega.mem.read");
+  std::uint32_t value = 0;
+  const int st = sv->read(sv->ctx, space_id(space), static_cast<std::uint32_t>(offset), static_cast<std::uint32_t>(width), &value);
+  if (st != 0) service_fault(L, st, "sega.mem.read");
+  lua_pushnumber(L, static_cast<double>(value));
+  return 1;
+}
+
+int sega_mem_write(lua_State *L) {
+  const HostServices *sv = services_of(L, "sega.mem.write");
+  require_args(L, 4, "sega.mem.write");
+  const std::string_view space = str_arg(L, 1, "sega.mem.write");
+  const std::int64_t offset = int_arg(L, 2, 0, 0xFFFFFFFFLL, "sega.mem.write"), width = int_arg(L, 3, 0, 255, "sega.mem.write"), value = int_arg(L, 4, 0, 0xFFFFFFFFLL, "sega.mem.write");
+  const int st = sv->write(sv->ctx, space_id(space), static_cast<std::uint32_t>(offset), static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(value));
+  if (st != 0) service_fault(L, st, "sega.mem.write");
+  return 0;
+}
+
+int sega_input_get(lua_State *L) {
+  const HostServices *sv = services_of(L, "sega.input.get");
+  require_args(L, 1, "sega.input.get");
+  const std::int64_t port = int_arg(L, 1, 0, 255, "sega.input.get");
+  std::uint32_t buttons = 0;
+  const int st = sv->input_get(sv->ctx, static_cast<std::uint32_t>(port), &buttons);
+  if (st != 0) service_fault(L, st, "sega.input.get");
+  lua_pushnumber(L, static_cast<double>(buttons));
+  return 1;
+}
+
+int sega_input_set(lua_State *L) {
+  const HostServices *sv = services_of(L, "sega.input.set");
+  require_args(L, 2, "sega.input.set");
+  const std::int64_t port = int_arg(L, 1, 0, 255, "sega.input.set"), buttons = int_arg(L, 2, 0, 0xFFFFFFFFLL, "sega.input.set");
+  const int st = sv->input_set(sv->ctx, static_cast<std::uint32_t>(port), static_cast<std::uint32_t>(buttons));
+  if (st != 0) service_fault(L, st, "sega.input.set");
+  return 0;
+}
+
 int sega_frame_value(lua_State *L) {
   VmImpl *im = impl_of(L);
   require_phase(L, Phase::render, "sega.frame.value");
@@ -470,6 +539,18 @@ void install_host(lua_State *L, VmImpl *im) {
   guard_namespace(L, "sega.frame");
   lua_setreadonly(L, -1, true);
   lua_setfield(L, -2, "frame");
+  lua_newtable(L);   // sega.mem
+  bind(L, im, "sega.mem.read", sega_mem_read);
+  bind(L, im, "sega.mem.write", sega_mem_write);
+  guard_namespace(L, "sega.mem");
+  lua_setreadonly(L, -1, true);
+  lua_setfield(L, -2, "mem");
+  lua_newtable(L);   // sega.input
+  bind(L, im, "sega.input.get", sega_input_get);
+  bind(L, im, "sega.input.set", sega_input_set);
+  guard_namespace(L, "sega.input");
+  lua_setreadonly(L, -1, true);
+  lua_setfield(L, -2, "input");
   lua_newtable(L);   // sega.overlay
   bind(L, im, "sega.overlay.rect", sega_overlay_rect);
   bind(L, im, "sega.overlay.text", sega_overlay_text);
@@ -818,13 +899,45 @@ CallResult Vm::call(std::string_view name, std::uint64_t frame, std::uint32_t ca
   return run(im, frame, callback_index);
 }
 
+namespace {
+struct LifecycleCallback {
+  std::string_view name;
+  Phase phase;
+  bool takes_frame;
+};
+constexpr LifecycleCallback kLifecycle[] = {
+    {"reset", Phase::reset, false},       {"frame_begin", Phase::frame_begin, true}, {"input", Phase::input, true},
+    {"post_input", Phase::post_input, true}, {"frame_end", Phase::frame_end, true}, {"render", Phase::render, true},
+};
+const LifecycleCallback *find_lifecycle(std::string_view name) {
+  for (const LifecycleCallback &c : kLifecycle)
+    if (c.name == name) return &c;
+  return nullptr;
+}
+}  // namespace
+
+bool Vm::defines(std::string_view name) {
+  VmImpl *im = impl_.get();
+  if (im == nullptr || im->closed || !im->has_host || im->fault != Fault::none || find_lifecycle(name) == nullptr) return false;
+  const std::string key(name);
+  bool function = false;
+  try {
+    lua_getglobal(im->env, key.c_str());
+    function = lua_type(im->env, -1) == LUA_TFUNCTION;
+    lua_pop(im->env, 1);
+  } catch (...) {
+    set_fault(im, Fault::memory, "memory quota exceeded");
+  }
+  return function;
+}
+
 CallResult Vm::run_callback(std::string_view name, const FrameInput &input, std::uint32_t callback_index, Output &out) {
   VmImpl *im = impl_.get();
   out = Output{};
   if (im == nullptr || im->closed || !im->has_host) return {false, Fault::error, "the VM has no host API", 0};
   if (im->fault != Fault::none) return {false, im->fault, im->fault_message, 0};
-  const bool render = name == "render";
-  if (!render && name != "reset") return {false, Fault::error, "unknown lifecycle callback", 0};
+  const LifecycleCallback *cb = find_lifecycle(name);
+  if (cb == nullptr) return {false, Fault::error, "unknown lifecycle callback", 0};
   const std::string key(name);
   try {
     lua_getglobal(im->env, key.c_str());
@@ -838,9 +951,9 @@ CallResult Vm::run_callback(std::string_view name, const FrameInput &input, std:
     skipped.ok = true;
     return skipped;
   }
-  if (render) lua_pushnumber(im->env, static_cast<double>(input.number));
+  if (cb->takes_frame) lua_pushnumber(im->env, static_cast<double>(input.number));
   im->input = &input;
-  CallResult r = run(im, render ? input.number : 0, callback_index, render ? 1 : 0, render ? Phase::render : Phase::reset);
+  CallResult r = run(im, cb->takes_frame ? input.number : 0, callback_index, cb->takes_frame ? 1 : 0, cb->phase);
   im->input = nullptr;
   if (r.ok) out = std::move(im->staged);
   im->staged = Output{};

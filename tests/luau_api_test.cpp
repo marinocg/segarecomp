@@ -27,7 +27,7 @@ void check(bool ok, const std::string &what) {
 
 std::vector<std::uint8_t> bytes_of(const std::string &s) { return {s.begin(), s.end()}; }
 
-const std::vector<std::string> kAllCaps = {"host.log", "frame.work_ram", "overlay.rgba"};
+const std::vector<std::string> kAllCaps = {"host.log", "frame.work_ram", "overlay.rgba", "memory.read.m68k.work_ram", "memory.write.m68k.work_ram", "input.read", "input.intercept"};
 
 mod::Package make_package(const std::map<std::string, std::string> &scripts, const std::vector<std::string> &caps = kAllCaps, const std::string &id = "api-test") {
   mod::Manifest m;
@@ -243,12 +243,19 @@ void test_overlay_validation() {
     const luau::CallResult r = render(m, 0, out);
     check(!r.ok && r.fault == luau::Fault::error && out.overlay.empty() && out.log.empty(), "a faulted callback leaves no staged output behind");
   }
+  {   // the guest services exist only inside a scheduler phase: without them the bindings fault with cause phase (never a silent no-op)
+    Mod m = start("function frame_end() local v = sega.mem.read('m68k.work_ram', 0, 1) end");
+    luau::Output out;
+    luau::FrameInput in;
+    const luau::CallResult r = m.vm->run_callback("frame_end", in, 7, out);
+    check(!r.ok && r.fault == luau::Fault::phase, "sega.mem.read without scheduler services faults with cause phase");
+  }
   {   // callbacks that are not defined are skipped; an unknown callback name is refused
     Mod m = start("x = 1");
     luau::Output out;
     check(render(m, 0, out).ok, "an undefined render callback is skipped");
     luau::FrameInput in;
-    check(!m.vm->run_callback("input", in, 0, out).ok, "only reset and render are lifecycle callbacks");
+    check(!m.vm->run_callback("bogus", in, 0, out).ok, "only the documented lifecycle callbacks (reset, frame_begin, input, post_input, frame_end, render) can be run");
   }
 }
 

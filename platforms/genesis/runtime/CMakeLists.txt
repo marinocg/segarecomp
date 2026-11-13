@@ -32,6 +32,15 @@ target_include_directories(segarecomp_runtime_genesis_audio PUBLIC ${CMAKE_CURRE
   ${PROJECT_SOURCE_DIR}/libs/device/sega/psg/include ${PROJECT_SOURCE_DIR}/libs/device/sega/ym2612/include)
 segarecomp_enable_warnings(segarecomp_runtime_genesis_audio)
 
+# SEG-138-T001/T002 (ADR 0297): the Genesis mod phase scheduler (ABI 2 host services, phase enforcement, input interception, bounded work-RAM access). Compiled only into programs that carry a
+# mod provider; the runtime library itself only has the NULL-by-default `frame_hooks` seam. A consumer links segarecomp::runtime_genesis next to it (it uses the runtime's SHA-256).
+add_library(segarecomp_runtime_genesis_mod STATIC mod_scheduler.c)
+add_library(segarecomp::runtime_genesis_mod ALIAS segarecomp_runtime_genesis_mod)
+set_target_properties(segarecomp_runtime_genesis_mod PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_include_directories(segarecomp_runtime_genesis_mod PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+  ${PROJECT_SOURCE_DIR}/platforms/genesis/sdk ${PROJECT_SOURCE_DIR}/platforms/sdk)
+segarecomp_enable_warnings(segarecomp_runtime_genesis_mod)
+
 # SEG-032-T008 (ADR 0073): the sound subsystem attach point and the two hook seams `segarecomp build` links (the final program's
 # hook and the build-time materialization pass hook define the same entry symbol; a program links exactly one of them, so the
 # pass hook is only compiled here as an object library to keep it under the project warning set).

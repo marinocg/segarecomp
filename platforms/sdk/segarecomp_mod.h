@@ -82,6 +82,8 @@ typedef struct SegaModHost {
   uint32_t phase;                                /* SegaModPhase of the current callback */
   uint64_t frame;                                /* guest frame counter, deterministic */
   void (*log)(const char *ascii, uint32_t len);  /* host.log: <= 256 bytes per line, <= 16 lines per callback */
+  /* `width` is in BYTES (1, 2 or 4), values are in the guest's byte order semantics (big-endian on Genesis); `port` is 1 or 2; `buttons` are the platform's pad bits. Every call is checked against the
+   * capability granted, the current phase, the declared range and alignment; a violation returns a SegaModStatus AND faults the callback (docs/architecture/mod-execution-phases.md section 6). */
   int (*read)(uint32_t space, uint32_t offset, uint32_t width, uint32_t *value);
   int (*write)(uint32_t space, uint32_t offset, uint32_t width, uint32_t value);
   int (*input_get)(uint32_t port, uint32_t *buttons);

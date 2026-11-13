@@ -1746,7 +1746,8 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
   }
   if (genesis_is_device(address)) {
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
-    if (genesis_controller_io_access(&runtime->devices, runtime->pad1, runtime->pad2, runtime->region_profile, address, width, direction, &routed_value)) {
+    if (genesis_controller_io_access(&runtime->devices, runtime->mod_pad_active != 0U ? runtime->mod_pad1 : runtime->pad1,
+                                    runtime->mod_pad_active != 0U ? runtime->mod_pad2 : runtime->pad2, runtime->region_profile, address, width, direction, &routed_value)) {
       if (direction == GENESIS_ACCESS_READ) *value = routed_value;
       return GENESIS_ACCESS_OK;
     }
@@ -3056,9 +3057,13 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
        dependent). Render the frame that just ended and publish it atomically;
        failure publishes nothing and mutates nothing. SEG-055: the virtual frame counter advances regardless of the
        render outcome -- it, not publication, is what a host paces on. */
+    /* SEG-138-T001: `frame-end` of the frame that just ended runs on this dispatch boundary, before the render snapshot (mod-execution-phases.md section 2). */
+    if (runtime->frame_hooks != 0 && runtime->frame_hooks->frame_end != 0) runtime->frame_hooks->frame_end(runtime->frame_hooks->ctx, runtime);
     ++runtime->virtual_frame_count;
     genesis_publish_live_frame(runtime);
     genesis_compat_snapshot(runtime);
+    /* SEG-138-T001: `render` (from copies, outside guest time) and the next frame's opening phases, after the snapshot. */
+    if (runtime->frame_hooks != 0 && runtime->frame_hooks->after_snapshot != 0) runtime->frame_hooks->after_snapshot(runtime->frame_hooks->ctx, runtime);
     /* §3: VDP register #1 bit 5 (IE0) gating -- the real, already-persisted
        register state, mirroring the existing DMA-enable (bit 4) precedent. */
     if ((runtime->devices.vdp.registers[1] & UINT16_C(0x0020)) != 0U &&
@@ -3575,6 +3580,7 @@ GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispa
   if (runtime == 0 || dispatch == 0 || dispatch_allowance == 0U)
     return genesis_internal_dispatch_inconsistency_stop(runtime);
   if (genesis_runtime_configure_run(runtime, &result) != 0) return result;
+  if (runtime->frame_hooks != 0 && runtime->frame_hooks->start != 0) runtime->frame_hooks->start(runtime->frame_hooks->ctx, runtime); /* SEG-138-T001: idempotent per machine start */
   for (step = 0U; step < dispatch_allowance; ++step) {
     result = genesis_runtime_step(runtime, dispatch);
     if (result.kind != GENESIS_CONTINUE_AT_PC) return result;
