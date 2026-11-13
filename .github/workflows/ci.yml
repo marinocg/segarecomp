@@ -164,7 +164,7 @@ jobs:
           cmake -S . -B build/sdl3 -G Ninja -DCMAKE_BUILD_TYPE=Debug \
             -DSEGARECOMP_WARNINGS_AS_ERRORS=ON -DSEGARECOMP_ENABLE_SDL3_VIEWER=ON -DSEGARECOMP_BUILD_LAUNCHER=ON -DBUILD_TESTING=ON $hint
       - name: Build the SDL3 viewer targets (Genesis, Master System) and the consumer launcher
-        run: cmake --build build/sdl3 --target segarecomp_viewer_genesis_sdl3 segarecomp_viewer_sega_cd_sdl3 segarecomp_viewer_master_system_sdl3 segarecomp_viewer_master_system_main_check segarecomp-launcher launcher_policy_test launcher_sms_policy_test library_catalog_test cartridge_recognition_test storage_test launcher_ui_support_test launcher_build_cancel_test older_build_test file_picker_test sv_host_test sv_state_test sv_state_service_test sv_viewer_core_test sv_input_diag_test fake_segarecomp fake_game fake_scd_program launcher_sega_cd_test segarecomp
+        run: cmake --build build/sdl3 --target segarecomp_viewer_genesis_sdl3 segarecomp_viewer_sega_cd_sdl3 segarecomp_viewer_master_system_sdl3 segarecomp_viewer_master_system_main_check segarecomp-launcher launcher_policy_test launcher_sms_policy_test launcher_mod_variant_test library_catalog_test cartridge_recognition_test storage_test launcher_ui_support_test launcher_build_cancel_test older_build_test file_picker_test sv_host_test sv_state_test sv_state_service_test sv_viewer_core_test sv_input_diag_test fake_segarecomp fake_game fake_scd_program launcher_sega_cd_test segarecomp
       - name: Run the launcher AOT-policy test and the SEG-058 library, storage and viewer-host tests (CTest; dummy video driver, no packaging dependency)
         shell: bash
         run: |
