@@ -372,6 +372,7 @@ void matrix_parity() {
     for (const uint32_t width : {1U, 2U, 4U})
       for (const bool write : {false, true})
         for (const auto *caps : {&rw, &ro, &wo}) {
+          if (phase == SEGA_MOD_PHASE_RENDER && !write) continue;   // render reads: a native provider reads the frame copy; Luau uses sega.frame.value (see luau_render_read_is_a_phase_fault)
           Case c{"matrix", phase, write, 1U, 0x108U, width, 0x7FU, *caps};
           const auto [native, luau] = both(c);
           check(native.rfind("E_", 0) != 0, "matrix attach was accepted (a refusal would make the comparison vacuous)");
@@ -379,7 +380,7 @@ void matrix_parity() {
                                     "' Luau '" + luau + "'");
           ++compared;
         }
-  check(compared == 108, "matrix size (phase x width x direction x capability set)");
+  check(compared == 99, "matrix size (phase x width x direction x capability set, minus the 9 render reads that are native-only by contract)");
   const std::vector<Case> bad = {
       {"below the range", SEGA_MOD_PHASE_FRAME_END, false, 1, 0x0FE, 2, 0, rw},      {"above the range", SEGA_MOD_PHASE_FRAME_END, false, 1, 0x200, 1, 0, rw},
       {"straddles the end", SEGA_MOD_PHASE_FRAME_END, false, 1, 0x1FE, 4, 0, rw},     {"write to a read-only range", SEGA_MOD_PHASE_FRAME_END, true, 1, 0x400, 1, 1, rw},
@@ -432,6 +433,26 @@ void luau_fault_isolation() {
   check(b.guest == guest_digest(vanilla2), "after a fault with no committed effect the guest equals Vanilla");
 }
 
+// ---- Luau: sega.mem.read in render is a phase fault even with memory.read AND frame.work_ram (the native snapshot read does not authorize the Luau binding) ----
+void luau_render_read_is_a_phase_fault() {
+  LuauMod lm = make_luau("function render(f) local v = sega.mem.read(\"m68k.work_ram\", 0x108, 2) end\n", {"host.log", "memory.read.m68k.work_ram", "frame.work_ram"});
+  check(lm.provider != nullptr, "render-read script loads: " + lm.error);
+  if (!lm.provider) return;
+  const GenesisModRange kReadRange[] = {{SEGA_GEN_SPACE_M68K_WORK_RAM, 0x100U, 0x100U, GENESIS_MOD_ACCESS_READ}};
+  uint64_t req[2];
+  lm.provider->capabilities(req);
+  check((req[0] & cap(SEGA_MOD_CAP_FRAME_WORK_RAM)) != 0U && (req[0] & cap(SEGA_MOD_CAP_MEMORY_READ)) != 0U, "both capabilities are granted");
+  const Outcome o = run(lm.provider->provider(), lm.provider->state(), lm.provider->phase_mask(), req, kReadRange, 1U, 3U, 0U);
+  check(o.faulted && o.fault_cause == "phase" && o.fault_text == "E_MOD_FAULT cause=phase mod=parity phase=render frame=0", "deterministic phase fault: " + o.fault_text);
+  GenesisRuntime vanilla;
+  setup(vanilla);
+  run_frames(vanilla, 3U);
+  check(o.guest == guest_digest(vanilla), "the guest continues unmodified");
+  LuauMod again = make_luau("function render(f) local v = sega.mem.read(\"m68k.work_ram\", 0x108, 2) end\n", {"host.log", "memory.read.m68k.work_ram", "frame.work_ram"});
+  const Outcome o2 = run(again.provider->provider(), again.provider->state(), again.provider->phase_mask(), req, kReadRange, 1U, 3U, 0U);
+  check(o2.fault_text == o.fault_text && o2.guest == o.guest, "the fault is reproducible");
+}
+
 // ---- the Luau mod that only observes (render overlay) leaves the guest bit-identical to Vanilla ----
 void luau_observer_is_bit_identical() {
   LuauMod lm = make_luau("function render(f) sega.overlay.text(0, 0, \"F\" .. f, 0xFFFFFFFF) end\nfunction frame_end(f) sega.log(\"e\") end\n", {"host.log", "overlay.rgba"});
@@ -452,6 +473,7 @@ int main() {
   parity_of_the_same_behavior();
   matrix_parity();
   luau_fault_isolation();
+  luau_render_read_is_a_phase_fault();
   luau_observer_is_bit_identical();
   if (failures != 0) {
     std::printf("%d failure(s)\n", failures);

@@ -306,6 +306,30 @@ void render_phase_is_read_only() {
   for (const Trace &t : g_probe.trace)
     if (t.phase == SEGA_MOD_PHASE_RENDER) g_probe.trace.assign(1, t);
   check(!copy.sched->fault.faulted && g_probe.status.size() == 1 && g_probe.status[0] == SEGA_MOD_OK && g_probe.values[0] == (g_probe.trace.back().dispatches & 0xFFU), "render reads the frame copy taken at the boundary");
+  // The frame.work_ram grant is the complete 64 KiB copy (ABI 2 section 4), independent of declared ranges; the copy bound and alignment still hold.
+  struct SnapshotCase { uint32_t offset, width; const char *cause; } snapshot[] = {
+      {0xFFFC, 4, ""},            // inside the copy, outside every declared range
+      {0x0200, 2, ""},            // just above the declared range
+      {0xFFFE, 4, "range"},       // straddles the end of the copy
+      {0x10000, 1, "range"},      // beyond the copy
+      {0xFFFFFFFE, 4, "range"},   // overflow
+      {0x0101, 2, "alignment"},   // odd word
+  };
+  for (const SnapshotCase &c : snapshot) {
+    Harness x;
+    x.init(kAllPhases, kMemCaps | cap(SEGA_MOD_CAP_FRAME_WORK_RAM));
+    g_probe.script.phase = SEGA_MOD_PHASE_RENDER;
+    g_probe.script.ops = {{Op::read, SEGA_GEN_SPACE_M68K_WORK_RAM, c.offset, c.width, 0}};
+    run_frames(x.rt, 2U);
+    const std::string got = x.sched->fault.faulted ? x.sched->fault.cause : "";
+    check(got == c.cause, "render snapshot read at " + std::to_string(c.offset) + " w" + std::to_string(c.width) + ": '" + got + "' want '" + c.cause + "'");
+    if (got.empty()) continue;
+    // the fault disables the mod and the guest continues exactly as Vanilla
+    GenesisRuntime vanilla;
+    setup(vanilla);
+    run_frames(vanilla, 2U);
+    check(x.sched->disabled && guest_digest(x.rt) == guest_digest(vanilla), "a faulted render read leaves the guest equal to Vanilla");
+  }
 }
 
 // ---- T001: vanilla runs are bit-identical with a scheduler attached ----
@@ -586,12 +610,59 @@ void replay_is_byte_identical() {
   h.init(kAllPhases);
   uint8_t empty[32];
   genesis_mod_write_log_digest(h.sched, empty);
-  uint8_t digest[32];
-  GenesisModScheduler *s = h.sched;
-  s->write_log_count = 1;
-  s->write_log[0] = {1, 5, 1, 0x10, 2, 7};
-  genesis_mod_write_log_digest(s, digest);
-  check(std::memcmp(empty, digest, 32) != 0, "the write-log digest covers the records");
+  uint8_t after[32];
+  g_probe.script.phase = SEGA_MOD_PHASE_FRAME_BEGIN;
+  g_probe.script.ops = {{Op::write, 1, 0x100, 2, 7}};
+  genesis_runtime_run(&h.rt, synthetic_dispatch, 1U);
+  genesis_mod_write_log_digest(h.sched, after);
+  check(std::memcmp(empty, after, 32) != 0, "a committed write changes the digest");
+  uint8_t again[32];
+  genesis_mod_write_log_digest(h.sched, again);
+  check(std::memcmp(after, again, 32) == 0, "reading the digest does not disturb the stream");
+  // a faulted callback's staged writes never enter the digest
+  Harness f;
+  f.init(kAllPhases);
+  g_probe.script.phase = SEGA_MOD_PHASE_FRAME_BEGIN;
+  g_probe.script.ops = {{Op::write, 1, 0x100, 2, 7}, {Op::write, 1, 0x300, 1, 1}};
+  genesis_runtime_run(&f.rt, synthetic_dispatch, 1U);
+  uint8_t faulted[32];
+  genesis_mod_write_log_digest(f.sched, faulted);
+  check(f.sched->fault.faulted && std::memcmp(faulted, empty, 32) == 0, "uncommitted writes do not affect the digest");
+}
+
+// ---- T002: the digest covers EVERY committed write, also those the bounded diagnostic log no longer retains ----
+int g_variant = 0;
+void many_writes_phase(void *, const SegaModHost *h) {
+  if (h->phase != SEGA_MOD_PHASE_FRAME_END) return;
+  for (uint32_t i = 0; i < 1024U; ++i) h->write(1, 0x100 + (i % 64U) * 2U, 2, (i + (g_variant != 0 && h->frame >= 4U ? 1U : 0U)) & 0xFFFFU);
+}
+
+std::string overflow_digest(int variant, uint32_t &dropped, uint32_t &retained) {
+  g_variant = variant;
+  Harness h;
+  h.init(bit(SEGA_MOD_PHASE_FRAME_END));
+  h.provider.phase = many_writes_phase;
+  GenesisModConfig c = h.sched->config;
+  genesis_mod_scheduler_detach(h.sched);
+  c.provider = &h.provider;
+  const char *why = "";
+  check(genesis_mod_scheduler_attach(h.sched, &h.rt, &c, &why) == 0, "re-attach for the overflow run");
+  run_frames(h.rt, 6U);
+  dropped = static_cast<uint32_t>(h.sched->write_log_dropped);
+  retained = h.sched->write_log_count;
+  uint8_t d[32];
+  genesis_mod_write_log_digest(h.sched, d);
+  char hex[65];
+  for (int i = 0; i < 32; ++i) std::snprintf(hex + 2 * i, 3, "%02x", d[i]);
+  return hex;
+}
+
+void digest_covers_dropped_records() {
+  uint32_t d0 = 0, r0 = 0, d1 = 0, r1 = 0, d2 = 0, r2 = 0;
+  const std::string a = overflow_digest(0, d0, r0), b = overflow_digest(1, d1, r1), a2 = overflow_digest(0, d2, r2);
+  check(r0 == GENESIS_MOD_WRITE_LOG_MAX && d0 == 6U * 1024U - GENESIS_MOD_WRITE_LOG_MAX && r1 == r0 && d1 == d0, "both histories overflow the bounded log identically (retained " + std::to_string(r0) + ", dropped " + std::to_string(d0) + ")");
+  check(a != b, "histories identical in the first 4096 records and in the dropped count, different afterwards, have different digests");
+  check(a == a2, "identical complete histories have identical digests");
 }
 
 void logging_budget() {
@@ -641,6 +712,7 @@ int main() {
   wram_matrix();
   wram_budgets_and_atomicity();
   replay_is_byte_identical();
+  digest_covers_dropped_records();
   logging_budget();
   overhead_without_mods();
   if (failures != 0) {

@@ -107,6 +107,8 @@ typedef struct GenesisModScheduler {
   GenesisModWriteRecord write_log[GENESIS_MOD_WRITE_LOG_MAX];
   uint32_t write_log_count;
   uint64_t write_log_dropped;
+  GenesisSha256 write_stream; /* streaming SHA-256 over EVERY committed write (retained or not), see genesis_mod_write_log_digest */
+  uint64_t write_total;       /* committed writes, retained + dropped */
 } GenesisModScheduler;
 
 /* Attaches `scheduler` to `runtime` (sets runtime->frame_hooks). Returns 0, or 1 with *rejection set to a stable class: the SegaModNegotiation classes (E_ABI_*, E_CAPABILITY_UNSUPPORTED),
@@ -128,7 +130,8 @@ const char *genesis_mod_phase_name(uint32_t phase);
 /* The stable fault cause of a SegaModStatus ("capability", "phase", ...). */
 const char *genesis_mod_status_cause(int status);
 
-/* SHA-256 over the committed write log (frame, phase, space, offset, width, value for each record, big-endian) plus the dropped count: the replay witness of T002. */
+/* The replay witness of T002: SHA-256 over EVERY committed write in commit order (frame u64, phase, space, offset, width, value as big-endian u32s), streamed as each write commits so it also covers
+ * records the bounded diagnostic log no longer retains, followed by the total count. Staged writes of a faulted callback never enter it. */
 void genesis_mod_write_log_digest(const GenesisModScheduler *scheduler, uint8_t out[32]);
 
 #ifdef __cplusplus

@@ -383,6 +383,10 @@ const HostServices *services_of(lua_State *L, const char *name) {
 }
 
 int sega_mem_read(lua_State *L) {
+  // The documented phases of sega.mem.read (api table): NOT render. A native provider may read the render-phase frame copy (frame.work_ram); the Luau binding for it is sega.frame.value, so a
+  // script that reaches for sega.mem.read in render (or load) is a deterministic phase fault no matter which capabilities it holds.
+  const Phase now = impl_of(L)->phase;
+  if (now != Phase::reset && now != Phase::frame_begin && now != Phase::input && now != Phase::post_input && now != Phase::frame_end) binding_fault(L, Fault::phase, "sega.mem.read is not available in this phase");
   const HostServices *sv = services_of(L, "sega.mem.read");
   require_args(L, 3, "sega.mem.read");
   const std::string_view space = str_arg(L, 1, "sega.mem.read");

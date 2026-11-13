@@ -103,6 +103,8 @@ static int service_read(uint32_t space, uint32_t offset, uint32_t width, uint32_
   if (space != SEGA_GEN_SPACE_M68K_WORK_RAM) return violation(s, SEGA_MOD_E_SPACE);
   if (width > 1U && (offset & 1U) != 0U) return violation(s, SEGA_MOD_E_ALIGNMENT); /* the M68K faults on an odd word/long access */
   if ((uint64_t)offset + width > GENESIS_MOD_WORK_RAM_BYTES) return violation(s, SEGA_MOD_E_RANGE);
+  /* render: `frame.work_ram` grants the complete 64 KiB frame copy by contract (native-sdk-abi-2.md section 4: "copy of the platform's work RAM"), independent of declared ranges; the copy bound,
+     width and alignment still apply. Declared ranges bound the LIVE memory a mod may read or write in the other phases. */
   if (!render && !in_declared_range(s, space, offset, width, GENESIS_MOD_ACCESS_READ)) return violation(s, SEGA_MOD_E_RANGE);
   if (render && !s->render_copy_valid) return violation(s, SEGA_MOD_E_PHASE);
   for (i = 0; i < width; ++i) result = (result << 8U) | (render ? s->render_copy[offset + i] : byte_at(s, s->runtime->work_ram, offset + i));
@@ -206,6 +208,22 @@ static void record_fault(GenesisModScheduler *s, const char *cause) {
   if (s->runtime != NULL) s->runtime->mod_pad_active = 0U; /* the guest goes on with the physical pad */
 }
 
+static void sha_u32(GenesisSha256 *state, uint32_t v) {
+  const uint8_t b[4] = {(uint8_t)(v >> 24U), (uint8_t)(v >> 16U), (uint8_t)(v >> 8U), (uint8_t)v};
+  genesis_sha256_update(state, b, 4U);
+}
+
+static void stream_write(GenesisModScheduler *s, uint64_t frame, uint32_t phase, const GenesisModStagedWrite *w) {
+  sha_u32(&s->write_stream, (uint32_t)(frame >> 32U));
+  sha_u32(&s->write_stream, (uint32_t)frame);
+  sha_u32(&s->write_stream, phase);
+  sha_u32(&s->write_stream, SEGA_GEN_SPACE_M68K_WORK_RAM);
+  sha_u32(&s->write_stream, w->offset);
+  sha_u32(&s->write_stream, w->width);
+  sha_u32(&s->write_stream, w->value);
+  ++s->write_total;
+}
+
 static void finish_callback(GenesisModScheduler *s, int provider_failed) {
   uint32_t i;
   s->in_callback = 0U;
@@ -219,6 +237,7 @@ static void finish_callback(GenesisModScheduler *s, int provider_failed) {
     const GenesisModStagedWrite *w = &s->staged[i];
     uint32_t b;
     for (b = 0; b < w->width; ++b) s->runtime->work_ram[w->offset + b] = (uint8_t)(w->value >> (8U * (w->width - 1U - b)));
+    stream_write(s, s->frame, s->phase, w);
     if (s->write_log_count < GENESIS_MOD_WRITE_LOG_MAX) {
       GenesisModWriteRecord *r = &s->write_log[s->write_log_count++];
       r->frame = s->frame;
@@ -318,6 +337,7 @@ int genesis_mod_scheduler_attach(GenesisModScheduler *s, GenesisRuntime *rt, con
       return 1;
     }
   memset(s, 0, sizeof(*s));
+  genesis_sha256_init(&s->write_stream);
   s->config = *config;
   genesis_mod_scheduler_supported(supported);
   s->host.size = (uint32_t)sizeof(SegaModHost);
@@ -387,26 +407,9 @@ void genesis_mod_scheduler_detach(GenesisModScheduler *s) {
   s->runtime = NULL;
 }
 
-static void sha_u32(GenesisSha256 *state, uint32_t v) {
-  const uint8_t b[4] = {(uint8_t)(v >> 24U), (uint8_t)(v >> 16U), (uint8_t)(v >> 8U), (uint8_t)v};
-  genesis_sha256_update(state, b, 4U);
-}
-
 void genesis_mod_write_log_digest(const GenesisModScheduler *s, uint8_t out[32]) {
-  GenesisSha256 sha;
-  uint32_t i;
-  genesis_sha256_init(&sha);
-  for (i = 0; i < s->write_log_count; ++i) {
-    const GenesisModWriteRecord *r = &s->write_log[i];
-    sha_u32(&sha, (uint32_t)(r->frame >> 32U));
-    sha_u32(&sha, (uint32_t)r->frame);
-    sha_u32(&sha, r->phase);
-    sha_u32(&sha, r->space);
-    sha_u32(&sha, r->offset);
-    sha_u32(&sha, r->width);
-    sha_u32(&sha, r->value);
-  }
-  sha_u32(&sha, (uint32_t)(s->write_log_dropped >> 32U));
-  sha_u32(&sha, (uint32_t)s->write_log_dropped);
+  GenesisSha256 sha = s->write_stream; /* finalize a copy: the stream keeps running */
+  sha_u32(&sha, (uint32_t)(s->write_total >> 32U));
+  sha_u32(&sha, (uint32_t)s->write_total);
   genesis_sha256_final(&sha, out);
 }
