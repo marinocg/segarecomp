@@ -24,14 +24,15 @@ SvRect sv_layout_dest(int win_w, int win_h, int src_w, int src_h, SvAspect aspec
  * The extended surface is the native picture plus `side` source pixels of extra scenery on EACH side (always symmetric, so the native picture is
  * exactly centred). The display aspect is 16:9; a window of another shape only letterboxes it. Native pixels keep the aspect policy: SV_ASPECT_ORIGINAL
  * shows square pixels, SV_ASPECT_4_3 stretches the native picture to 4:3 and the extension gets the same pixel shape (4:3 content is never stretched to 16:9). */
-#define SV_EXT_MAX_SIDE 256 /* hard bound of one side's extension in source pixels (documents the maximum allocation) */
+#define SV_EXT_LEGACY_SIDE 256 /* SEG-139: the clamp the original 4:3..16:9 functions below always applied (kept bit-for-bit for existing settings) */
+#define SV_EXT_MAX_SIDE 672    /* SEG-139: hard bound of one side's extension in source pixels = SV_GEOM_MAX_SIDE (the planner below); documents the maximum allocation */
 
-/* Source pixels of extension per side for a `src_w` x `src_h` native picture so the whole surface displays at 16:9, clamped to [0, SV_EXT_MAX_SIDE].
+/* Source pixels of extension per side for a `src_w` x `src_h` native picture so the whole surface displays at 16:9, clamped to [0, SV_EXT_LEGACY_SIDE].
  * 0 for an invalid size or a native picture already at least as wide as 16:9 (extension adds nothing). Depends only on the native geometry and the
  * aspect policy, never on the window, so a window resize does not change what the producer must make. */
 int sv_layout_extension_side(int src_w, int src_h, SvAspect aspect);
 /* SEG-123 amendment: VISIBLE side width per side in source pixels for the user's target aspect `width_pct` (0 = 4:3 .. 100 = 16:9, sv_widescreen_width_ratio),
- * never more than `produced_side` (what the validated producer supplied) and never more than SV_EXT_MAX_SIDE. 0 when the native display aspect is already at least as
+ * never more than `produced_side` (what the validated producer supplied) and never more than SV_EXT_LEGACY_SIDE. 0 when the native display aspect is already at least as
  * wide as the target (the picture is never shrunk or stretched; report the effective aspect with sv_ratio_milli). At width 100 and produced_side >= the 16:9 side this is
  * exactly sv_layout_extension_side. Symmetric by construction. */
 int sv_layout_visible_side(int src_w, int src_h, SvAspect aspect, int width_pct, int produced_side);
@@ -105,6 +106,44 @@ size_t sv_side_scratch_bytes(int h);
 /* Fills `left` and `right` (each `side` x `h` RGB24 pixels, tightly packed, pitch side*3) for the COMFORT or BORDERS treatment from the native picture.
  * `scratch` must hold sv_side_scratch_bytes(h) bytes (suitably aligned for int32). Returns 0, or -1 for invalid input or SV_TREAT_PASSTHROUGH. */
 int sv_side_fill(SvSideTreatment treatment, const uint8_t *native, int w, int h, int pitch, int side, uint8_t *left, uint8_t *right, void *scratch);
+
+/* ---- SEG-139: the checked widescreen surface planner (pure, SDL-free, no platform knowledge, no allocation) ----
+ * One function turns the native picture, its pixel-aspect policy and a requested rational display aspect into the number of extra source pixels per side and
+ * the size of the resulting surface, or into a typed rejection. It NEVER clamps: a request that does not fit the supported surface is rejected so no producer,
+ * composer buffer or texture is ever sized from a silently reduced value. Legacy 4:3..16:9 settings keep their historical meaning through
+ * sv_geom_resolve_production / sv_geom_resolve_visible (the legacy functions above, bit-for-bit). */
+#define SV_GEOM_MAX_NATIVE 4096
+#define SV_GEOM_MAX_SIDE SV_EXT_MAX_SIDE
+/* Largest surface of the supported Genesis frame (320 x 448 plus 2 * SV_GEOM_MAX_SIDE): 1664 x 448 RGB24. */
+#define SV_GEOM_GENESIS_MAX_SURFACE_BYTES ((size_t)(320 + 2 * SV_GEOM_MAX_SIDE) * 448u * 3u)
+
+typedef enum SvGeomStatus {
+  SV_GEOM_OK = 0,
+  SV_GEOM_BAD_NATIVE = 1,   /* native size not in 1..SV_GEOM_MAX_NATIVE */
+  SV_GEOM_BAD_ASPECT = 2,   /* ratio unset, a term out of 1..SV_RATIO_MAX_TERM, or outside 4:3 .. 32:9 */
+  SV_GEOM_TOO_WIDE = 3      /* the required side exceeds SV_GEOM_MAX_SIDE: rejected, never clamped */
+} SvGeomStatus;
+
+typedef struct SvGeomPlan {
+  SvGeomStatus status;
+  int native_w, native_h;
+  int side;            /* extra source pixels on EACH side (0 = nothing to add: the native picture is already at least as wide as the request) */
+  int surface_w;       /* native_w + 2 * side */
+  size_t surface_bytes; /* surface_w * native_h * 3 (RGB24), 0 unless OK */
+} SvGeomPlan;
+
+/* Plans the surface so the whole surface displays at `target` for a `native_w` x `native_h` picture with the pixel policy `aspect`. Always fills `out`
+ * (non-OK plans have side 0, surface_w 0 and surface_bytes 0). Exact integer arithmetic; deterministic; monotonic: a wider target never needs a smaller side. */
+SvGeomStatus sv_geom_plan(int native_w, int native_h, SvAspect aspect, SvDisplayRatio target, SvGeomPlan *out);
+
+/* Side the PRODUCER must make for the user's video settings: the legacy rule when no exact ratio is set (16:9, clamped as before, rejection-free), else the
+ * planner at the exact ratio. Returns the plan status; `*side_out` is 0 on any non-OK status. */
+SvGeomStatus sv_geom_resolve_production(const SvVideoSettings *video, int native_w, int native_h, int *side_out);
+/* Side the HOST may show of a frame whose producer supplied `produced_side` per side: legacy sv_layout_visible_side without an exact ratio, else the planner's
+ * side limited by what was produced (a rejected plan shows nothing). */
+int sv_geom_resolve_visible(const SvVideoSettings *video, int native_w, int native_h, int produced_side);
+
+const char *sv_geom_status_name(SvGeomStatus status); /* stable lowercase diagnostic name */
 
 /* Barrel distortion of a normalized coordinate pair in [-1, 1] (curvature 0..100). Maps the undistorted position of a mesh vertex to its
  * position on the curved tube; 0 is the identity. `vignette` receives a 0..1 brightness factor for the corner falloff. */

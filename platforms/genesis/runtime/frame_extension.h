@@ -25,7 +25,7 @@
 extern "C" {
 #endif
 
-#define GENESIS_EXT_MAX_SIDE 256U /* equals SV_EXT_MAX_SIDE in libs/viewer/sv_layout.h (the runtime does not depend on the viewer) */
+#define GENESIS_EXT_MAX_SIDE 672U /* SEG-139: equals SV_EXT_MAX_SIDE in libs/viewer/sv_layout.h (the runtime does not depend on the viewer); 32:9 of the widest Genesis picture needs 668 */
 #define GENESIS_EXT_MAX_WIDTH (GENESIS_FRAME_MAX_WIDTH + 2U * GENESIS_EXT_MAX_SIDE)
 #define GENESIS_EXT_SURFACE_BYTES ((size_t)GENESIS_EXT_MAX_WIDTH * GENESIS_FRAME_MAX_HEIGHT * 3U)
 

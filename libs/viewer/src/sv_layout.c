@@ -41,7 +41,7 @@ int sv_layout_extension_side(int src_w, int src_h, SvAspect aspect) {
   extra = total - src_w;
   if (extra <= 1) return 0;
   extra /= 2;
-  return extra > SV_EXT_MAX_SIDE ? SV_EXT_MAX_SIDE : (int)extra;
+  return extra > SV_EXT_LEGACY_SIDE ? SV_EXT_LEGACY_SIDE : (int)extra;
 }
 
 int sv_layout_visible_side(int src_w, int src_h, SvAspect aspect, int width_pct, int produced_side) {
@@ -56,7 +56,7 @@ int sv_layout_visible_side(int src_w, int src_h, SvAspect aspect, int width_pct,
   extra = total - src_w;
   if (extra <= 1) return 0;
   extra /= 2;
-  side = extra > SV_EXT_MAX_SIDE ? SV_EXT_MAX_SIDE : (int)extra;
+  side = extra > SV_EXT_LEGACY_SIDE ? SV_EXT_LEGACY_SIDE : (int)extra;
   return side > produced_side ? produced_side : side;
 }
 
@@ -168,7 +168,7 @@ SvSideTreatment sv_side_treatment(SvSideStyle style, SvExtSource source) {
 
 #define SV_SIDE_EDGE_COLS 8   /* native columns averaged along each edge */
 #define SV_SIDE_BLUR_RADIUS 12 /* vertical smoothing radius in rows */
-#define SV_SIDE_MAX_FADE 257
+#define SV_SIDE_MAX_FADE (SV_EXT_MAX_SIDE + 1) /* one fade weight per side column: sized from the hard bound so scratch can never be overrun */
 
 size_t sv_side_scratch_bytes(int h) {
   if (h <= 0 || h > SV_SIDE_MAX_ROWS) return 0;
@@ -232,4 +232,73 @@ int sv_side_fill(SvSideTreatment treatment, const uint8_t *native, int w, int h,
       }
     }
   return 0;
+}
+
+/* ---- SEG-139: checked widescreen surface planner ---- */
+
+SvGeomStatus sv_geom_plan(int native_w, int native_h, SvAspect aspect, SvDisplayRatio target, SvGeomPlan *out) {
+  SvGeomPlan plan;
+  int64_t total, extra, side;
+  plan.status = SV_GEOM_OK;
+  plan.native_w = native_w;
+  plan.native_h = native_h;
+  plan.side = 0;
+  plan.surface_w = 0;
+  plan.surface_bytes = 0;
+  if (native_w < 1 || native_h < 1 || native_w > SV_GEOM_MAX_NATIVE || native_h > SV_GEOM_MAX_NATIVE) {
+    plan.status = SV_GEOM_BAD_NATIVE;
+  } else if (!sv_ratio_valid(target)) {
+    plan.status = SV_GEOM_BAD_ASPECT;
+  } else {
+    /* The surface must display at num:den at the native height. Width in source pixels = native_h * num / den * native_w / native display width, where the display
+     * width of the native picture is native_w (square pixels) or native_h * 4 / 3 (4:3-corrected). Every product is below 2^40. */
+    if (aspect == SV_ASPECT_4_3) total = ((int64_t)native_w * 3 * target.num) / (4 * (int64_t)target.den);
+    else total = ((int64_t)native_h * target.num) / (int64_t)target.den;
+    extra = total - native_w;
+    side = extra <= 1 ? 0 : extra / 2;
+    if (side > SV_GEOM_MAX_SIDE) {
+      plan.status = SV_GEOM_TOO_WIDE;
+    } else {
+      plan.side = (int)side;
+      plan.surface_w = native_w + 2 * plan.side;
+      plan.surface_bytes = (size_t)plan.surface_w * (size_t)native_h * 3u;
+    }
+  }
+  if (out != NULL) *out = plan;
+  return plan.status;
+}
+
+SvGeomStatus sv_geom_resolve_production(const SvVideoSettings *video, int native_w, int native_h, int *side_out) {
+  SvGeomStatus status = SV_GEOM_OK;
+  int side = 0;
+  if (video == NULL) {
+    status = SV_GEOM_BAD_ASPECT;
+  } else if (!sv_ratio_valid(video->widescreen_ratio)) {
+    side = sv_layout_extension_side(native_w, native_h, video->aspect); /* legacy: 16:9, clamped at SV_EXT_LEGACY_SIDE exactly as before */
+  } else {
+    SvGeomPlan plan;
+    status = sv_geom_plan(native_w, native_h, video->aspect, video->widescreen_ratio, &plan);
+    side = plan.side;
+  }
+  if (side_out != NULL) *side_out = status == SV_GEOM_OK ? side : 0;
+  return status;
+}
+
+int sv_geom_resolve_visible(const SvVideoSettings *video, int native_w, int native_h, int produced_side) {
+  SvGeomPlan plan;
+  if (video == NULL) return 0;
+  if (!sv_ratio_valid(video->widescreen_ratio))
+    return sv_layout_visible_side(native_w, native_h, video->aspect, video->widescreen_width, produced_side);
+  if (produced_side <= 0 || sv_geom_plan(native_w, native_h, video->aspect, video->widescreen_ratio, &plan) != SV_GEOM_OK) return 0;
+  return plan.side > produced_side ? produced_side : plan.side;
+}
+
+const char *sv_geom_status_name(SvGeomStatus status) {
+  switch (status) {
+    case SV_GEOM_OK: return "ok";
+    case SV_GEOM_BAD_NATIVE: return "bad-native";
+    case SV_GEOM_BAD_ASPECT: return "bad-aspect";
+    case SV_GEOM_TOO_WIDE: return "too-wide";
+    default: return "unknown";
+  }
 }

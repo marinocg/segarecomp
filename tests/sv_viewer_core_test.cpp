@@ -1,6 +1,7 @@
 // SEG-058: the SDL-free logic of the shared viewer foundation (libs/viewer): settings persistence, bindings and conflicts, layout math,
 // CRT profiles and the menu model. Everything is driven by synthetic values; no window, no clock.
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
@@ -795,7 +796,212 @@ void width_and_profile_tests() {
   std::remove((file + ".tmp").c_str());
 }
 
-int main() {
+// SEG-139: the checked surface planner, the exact ratio setting and presentation of every supported aspect.
+SvDisplayRatio R(int n, int d) { SvDisplayRatio r = {n, d}; return r; }
+
+void geometry_planner_tests() {
+  const SvDisplayRatio r43 = R(4, 3), r169 = R(16, 9), r219 = R(21, 9), r329 = R(32, 9);
+  // Independent hand calculation (source pixels per side): 320x224 square pixels: 16:9 -> 398-320 = 78 -> 39; 21:9 -> 522 -> 101; 32:9 -> 796 -> 238.
+  struct Row { int w, h; SvAspect a; SvDisplayRatio r; int side; } rows[] = {
+    {320, 224, SV_ASPECT_ORIGINAL, r43, 0}, {320, 224, SV_ASPECT_ORIGINAL, r169, 39}, {320, 224, SV_ASPECT_ORIGINAL, r219, 101}, {320, 224, SV_ASPECT_ORIGINAL, r329, 238},
+    {320, 224, SV_ASPECT_4_3, r43, 0}, {320, 224, SV_ASPECT_4_3, r169, 53}, {320, 224, SV_ASPECT_4_3, r219, 120}, {320, 224, SV_ASPECT_4_3, r329, 266},
+    {256, 224, SV_ASPECT_ORIGINAL, r43, 21}, {256, 224, SV_ASPECT_ORIGINAL, r169, 71}, {256, 224, SV_ASPECT_ORIGINAL, r329, 270},
+    {320, 448, SV_ASPECT_ORIGINAL, r329, 636}, {256, 448, SV_ASPECT_ORIGINAL, r329, 668}, {256, 448, SV_ASPECT_4_3, r329, 213},
+    {256, 192, SV_ASPECT_ORIGINAL, r43, 0}, {256, 192, SV_ASPECT_ORIGINAL, r329, 213},
+  };
+  for (const Row &row : rows) {
+    SvGeomPlan p;
+    const SvGeomStatus st = sv_geom_plan(row.w, row.h, row.a, row.r, &p);
+    const std::string name = std::to_string(row.w) + "x" + std::to_string(row.h) + " aspect " + std::to_string((int)row.a) + " " + std::to_string(row.r.num) + ":" + std::to_string(row.r.den);
+    check(st == SV_GEOM_OK && p.status == SV_GEOM_OK && p.side == row.side, "SEG-139: planned side for " + name + " is " + std::to_string(row.side) + " (got " + std::to_string(p.side) + ")");
+    check(p.surface_w == row.w + 2 * row.side && p.surface_bytes == (size_t)p.surface_w * (size_t)row.h * 3u && p.native_w == row.w && p.native_h == row.h, "SEG-139: surface arithmetic for " + name);
+  }
+  // Every Genesis/SMS geometry plans through 32:9 inside the bound; the surface never exceeds the documented Genesis maximum.
+  for (int w : {256, 320}) for (int h : {192, 224, 240, 448}) for (int a = 0; a < 2; ++a) {
+    SvGeomPlan p;
+    check(sv_geom_plan(w, h, (SvAspect)a, r329, &p) == SV_GEOM_OK && p.side <= SV_GEOM_MAX_SIDE && p.surface_bytes <= SV_GEOM_GENESIS_MAX_SURFACE_BYTES, "SEG-139: every console geometry plans at 32:9 within the bound");
+  }
+  check(SV_GEOM_MAX_SIDE == SV_EXT_MAX_SIDE && SV_GEOM_GENESIS_MAX_SURFACE_BYTES == (size_t)1664 * 448 * 3, "SEG-139: the maximum surface is 1664 x 448 RGB24");
+  // Rejection, never clamping.
+  { SvGeomPlan p; // 200 x 448 square pixels at 32:9 would need 696 per side
+    check(sv_geom_plan(200, 448, SV_ASPECT_ORIGINAL, r329, &p) == SV_GEOM_TOO_WIDE && p.side == 0 && p.surface_w == 0 && p.surface_bytes == 0, "SEG-139: a side above the maximum is rejected (TOO_WIDE), not clamped");
+    check(sv_geom_plan(200, 448, SV_ASPECT_ORIGINAL, R(31, 9), &p) == SV_GEOM_OK && p.side == 671, "SEG-139: a narrower request for the same picture plans (671 per side, inside the bound)");
+    check(sv_geom_plan(256, 448, SV_ASPECT_ORIGINAL, r329, &p) == SV_GEOM_OK && p.side == 668, "SEG-139: the widest Genesis need (668) is inside the bound");
+    check(std::string(sv_geom_status_name(SV_GEOM_TOO_WIDE)) == "too-wide" && std::string(sv_geom_status_name(SV_GEOM_OK)) == "ok", "SEG-139: stable status names"); }
+  { SvGeomPlan p;
+    const SvDisplayRatio bad[] = {R(0, 0), R(0, 9), R(16, 0), R(-16, 9), R(16, -9), R(33, 9), R(32, 8), R(5, 4), R(1, 1), R(4, 4), R(SV_RATIO_MAX_TERM + 1, 1000), R(INT_MAX, 1), R(1, INT_MAX), R(INT_MAX, INT_MAX), R(INT_MIN, 9)};
+    for (const SvDisplayRatio &b : bad) {
+      check(sv_geom_plan(320, 224, SV_ASPECT_ORIGINAL, b, &p) == SV_GEOM_BAD_ASPECT && p.side == 0 && p.surface_bytes == 0, "SEG-139: unsupported ratio " + std::to_string(b.num) + ":" + std::to_string(b.den) + " is rejected");
+      check(!sv_ratio_valid(b), "SEG-139: sv_ratio_valid agrees with the planner");
+    }
+    const int badn[] = {0, -1, INT_MIN, SV_GEOM_MAX_NATIVE + 1, INT_MAX};
+    for (int n : badn) {
+      check(sv_geom_plan(n, 224, SV_ASPECT_ORIGINAL, r169, &p) == SV_GEOM_BAD_NATIVE && p.side == 0, "SEG-139: native width " + std::to_string(n) + " is rejected");
+      check(sv_geom_plan(320, n, SV_ASPECT_4_3, r169, &p) == SV_GEOM_BAD_NATIVE && p.side == 0, "SEG-139: native height " + std::to_string(n) + " is rejected");
+    }
+    check(sv_geom_plan(320, 224, SV_ASPECT_ORIGINAL, r169, nullptr) == SV_GEOM_OK, "SEG-139: a null output is tolerated"); }
+  // Property: no overflow at the extremes, deterministic, monotonic in the ratio, side bounded whenever OK.
+  {
+    std::vector<SvDisplayRatio> ratios;
+    for (int den = 1; den <= SV_RATIO_MAX_TERM; den = den * 3 / 2 + 1)
+      for (int num = den * 4 / 3; num <= den * 32 / 9 + 1 && num <= SV_RATIO_MAX_TERM; num += (num / 7) + 1) if (sv_ratio_valid(R(num, den))) ratios.push_back(R(num, den));
+    std::sort(ratios.begin(), ratios.end(), [](const SvDisplayRatio &a, const SvDisplayRatio &b) { return (long long)a.num * b.den < (long long)b.num * a.den; });
+    check(ratios.size() > 100, "SEG-139: the property sweep covers many ratios");
+    const int sizes[][2] = {{1, 1}, {8, 8}, {256, 192}, {320, 224}, {320, 448}, {4096, 4096}, {4096, 1}, {1, 4096}};
+    for (const auto &sz : sizes) for (int a = 0; a < 2; ++a) {
+      int prev = -1;
+      bool prev_rejected = false;
+      for (const SvDisplayRatio &r : ratios) {
+        SvGeomPlan p1, p2;
+        const SvGeomStatus s1 = sv_geom_plan(sz[0], sz[1], (SvAspect)a, r, &p1), s2 = sv_geom_plan(sz[0], sz[1], (SvAspect)a, r, &p2);
+        check(s1 == s2 && p1.side == p2.side && p1.surface_bytes == p2.surface_bytes && p1.surface_w == p2.surface_w, "SEG-139: planning is deterministic");
+        if (s1 == SV_GEOM_OK) {
+          check(!prev_rejected, "SEG-139: once a ratio is rejected as too wide no wider one plans");
+          check(p1.side >= 0 && p1.side <= SV_GEOM_MAX_SIDE && p1.surface_w == sz[0] + 2 * p1.side && p1.surface_bytes == (size_t)p1.surface_w * (size_t)sz[1] * 3u, "SEG-139: OK plans are bounded and exact");
+          check(p1.side >= prev, "SEG-139: a wider target never needs a smaller side (monotonic)");
+          prev = p1.side;
+        } else {
+          check(s1 == SV_GEOM_TOO_WIDE && p1.side == 0 && p1.surface_bytes == 0, "SEG-139: the only property rejection inside the range is TOO_WIDE");
+          prev_rejected = true;
+        }
+      }
+    }
+  }
+  // The exact ratio parser: only N:M inside the supported range; presets.
+  {
+    SvDisplayRatio r = R(7, 7);
+    check(sv_ratio_parse("21:9", &r) == 0 && r.num == 21 && r.den == 9, "SEG-139: 21:9 parses");
+    check(sv_ratio_parse("32:9", &r) == 0 && r.num == 32 && r.den == 9 && sv_ratio_parse("4:3", &r) == 0 && r.num == 4 && r.den == 3, "SEG-139: the range ends parse");
+    check(sv_ratio_parse("2560:1080", &r) == 0 && r.num == 2560 && r.den == 1080, "SEG-139: a custom rational parses");
+    r = R(7, 7);
+    const char *badt[] = {"", ":", "21", "21:", ":9", "21:9:1", " 21:9", "21:9 ", "21/9", "21.5:9", "-21:9", "+21:9", "33:9", "5:4", "9:16", "0:0", "0:9", "21:0", "12345:1", "1:12345", "21:9x", "\xef\xbc\x92\xef\xbc\x91:9"};
+    for (const char *t : badt) check(sv_ratio_parse(t, &r) == -1 && r.num == 7 && r.den == 7, std::string("SEG-139: ratio text is rejected without touching the output: '") + t + "'");
+    check(sv_ratio_parse(nullptr, &r) == -1 && sv_ratio_parse("21:9", nullptr) == -1, "SEG-139: null arguments are rejected");
+    char buf[24];
+    check(std::string(sv_ratio_format(R(21, 9), buf, sizeof buf)) == "21:9" && std::string(sv_ratio_format(R(0, 0), buf, sizeof buf)).empty() && std::string(sv_ratio_format(R(99, 1), buf, sizeof buf)).empty(), "SEG-139: ratio text");
+    const int expect[SV_RATIO_PRESET_COUNT][2] = {{4, 3}, {16, 9}, {21, 9}, {32, 9}};
+    for (int i = 0; i < SV_RATIO_PRESET_COUNT; ++i) check(sv_ratio_preset(i).num == expect[i][0] && sv_ratio_preset(i).den == expect[i][1] && sv_ratio_valid(sv_ratio_preset(i)), "SEG-139: preset " + std::to_string(i));
+    check(sv_ratio_preset(-1).num == 0 && sv_ratio_preset(SV_RATIO_PRESET_COUNT).den == 0, "SEG-139: no preset out of range");
+  }
+  // Settings: the exact ratio is optional; legacy files and the legacy format are unchanged; a previous release only sees an unknown key it ignores.
+  {
+    SvSettings d = defaults();
+    char legacy[8192], with[8192];
+    check(d.video.widescreen_ratio.num == 0 && d.video.widescreen_ratio.den == 0, "SEG-139: the default has no exact ratio (legacy width applies)");
+    check(sv_settings_format(&d, legacy, sizeof legacy) > 0 && std::strstr(legacy, "widescreen_ratio") == nullptr, "SEG-139: the legacy settings text has no new key (byte-identical to before)");
+    SvSettings w = d; w.video.widescreen_ratio = r219;
+    check(sv_settings_format(&w, with, sizeof with) > 0 && std::strstr(with, "video.widescreen_ratio=21:9\n") != nullptr, "SEG-139: a set ratio is stored as N:M");
+    std::string stripped(with);
+    const std::string line = "video.widescreen_ratio=21:9\n";
+    const size_t at = stripped.find(line);
+    check(at != std::string::npos, "SEG-139: ratio line present");
+    if (at != std::string::npos) stripped.erase(at, line.size());
+    check(stripped == legacy, "SEG-139: removing the single new line yields exactly the legacy file (what a previous release reads)");
+    SvSettings back = defaults();
+    sv_settings_parse(&back, with, std::strlen(with));
+    check(back.video.widescreen_ratio.num == 21 && back.video.widescreen_ratio.den == 9 && back.video.widescreen_width == 100, "SEG-139: the ratio round-trips and keeps the legacy width value");
+    for (const char *t : {"video.widescreen_ratio=33:9\n", "video.widescreen_ratio=banana\n", "video.widescreen_ratio=\n", "video.widescreen_ratio=1:0\n"}) {
+      SvSettings u = defaults(); u.video.widescreen_ratio = r329;
+      sv_settings_parse(&u, t, std::strlen(t));
+      check(u.video.widescreen_ratio.num == 0 && u.video.widescreen_ratio.den == 0, std::string("SEG-139: unsupported stored ratio falls back to the legacy width: ") + t);
+    }
+    SvSettings dmg = defaults(); dmg.video.widescreen_ratio = R(1000, 1); sv_settings_sanitize(&dmg);
+    check(dmg.video.widescreen_ratio.num == 0, "SEG-139: sanitize drops an out-of-range in-memory ratio");
+  }
+  // Legacy fixtures: the production side and the visible side of every legacy setting are identical to the pre-SEG-139 values (FNV-1a over the whole fixture grid,
+  // recorded from the unmodified functions at commit ce49e73), including the 256 clamp of the legacy rule and the 16:9 production size.
+  {
+    static const int ws[] = {256, 320}, hs[] = {192, 224, 240, 448};
+    uint64_t hash = 1469598103934665603ULL;
+    int count = 0;
+    SvSettings st = defaults();
+    for (int wi = 0; wi < 2; ++wi) for (int hi = 0; hi < 4; ++hi) for (int a = 0; a < 2; ++a) {
+      int produced = -1;
+      st.video.aspect = (SvAspect)a;
+      st.video.widescreen_ratio = R(0, 0);
+      check(sv_geom_resolve_production(&st.video, ws[wi], hs[hi], &produced) == SV_GEOM_OK && produced == sv_layout_extension_side(ws[wi], hs[hi], (SvAspect)a), "SEG-139: legacy production side is the legacy rule");
+      for (int width = 0; width <= 100; width += 5) {
+        st.video.widescreen_width = width;
+        hash ^= (uint32_t)sv_geom_resolve_visible(&st.video, ws[wi], hs[hi], produced); hash *= 1099511628211ULL; ++count;
+      }
+      hash ^= (uint32_t)produced; hash *= 1099511628211ULL; ++count;
+    }
+    check(count == 352 && hash == 0x280777620b7a74c4ULL, "SEG-139: legacy settings produce the same plans as before (fixture hash)");
+    check(sv_layout_extension_side(256, 448, SV_ASPECT_ORIGINAL) == SV_EXT_LEGACY_SIDE, "SEG-139: the legacy rule keeps its 256 clamp");
+    SvGeomPlan p;
+    check(sv_geom_plan(256, 448, SV_ASPECT_ORIGINAL, r169, &p) == SV_GEOM_OK && p.side == 270, "SEG-139: the exact planner states the true 16:9 need (270) instead of the legacy clamp");
+    // An exact ratio takes over from the legacy width entirely.
+    st = defaults(); st.video.widescreen_ratio = r329; st.video.widescreen_width = 0;
+    int side = 0;
+    check(sv_geom_resolve_production(&st.video, 320, 224, &side) == SV_GEOM_OK && side == 238, "SEG-139: an exact ratio is produced at its own width");
+    check(sv_geom_resolve_visible(&st.video, 320, 224, 238) == 238 && sv_geom_resolve_visible(&st.video, 320, 224, 100) == 100 && sv_geom_resolve_visible(&st.video, 320, 224, 0) == 0, "SEG-139: the visible side never exceeds what was produced");
+    st.video.widescreen_ratio = R(200, 9); // 22.2:1 is outside the range and cannot be set through sanitize, but a direct caller is still rejected
+    check(sv_geom_resolve_production(&st.video, 320, 224, &side) == SV_GEOM_BAD_ASPECT || side == sv_layout_extension_side(320, 224, st.video.aspect), "SEG-139: an invalid ratio never produces a clamped surface");
+    st.video.widescreen_ratio = r329;
+    check(sv_geom_resolve_production(&st.video, 200, 448, &side) == SV_GEOM_TOO_WIDE && side == 0 && sv_geom_resolve_visible(&st.video, 200, 448, 400) == 0, "SEG-139: a rejected plan produces and shows nothing");
+    check(sv_geom_resolve_production(nullptr, 320, 224, &side) != SV_GEOM_OK && side == 0 && sv_geom_resolve_visible(nullptr, 320, 224, 10) == 0, "SEG-139: null settings are rejected");
+  }
+  // Presentation of every supported aspect in windows of several shapes (Fit and Integer): the surface stays inside the window, centred, the native picture is centred
+  // on it, the surface displays at the requested aspect when the window has that shape, and a differently shaped window only letterboxes (never stretches).
+  {
+    const struct { int w, h; } wins[] = {{1920, 1080}, {1024, 768}, {2560, 1080}, {3840, 1080}, {1280, 1024}, {800, 300}};
+    for (int a = 0; a < 2; ++a) for (int pi = 0; pi < SV_RATIO_PRESET_COUNT; ++pi) for (int sc = 0; sc < 2; ++sc) for (const auto &win : wins) {
+      SvGeomPlan p;
+      const SvDisplayRatio pr = sv_ratio_preset(pi);
+      if (sv_geom_plan(320, 224, (SvAspect)a, pr, &p) != SV_GEOM_OK) { check(false, "SEG-139: preset plans for the presentation sweep"); continue; }
+      SvExtendedLayout el;
+      const std::string name = " preset " + std::to_string(pi) + " aspect " + std::to_string(a) + " scale " + std::to_string(sc) + " window " + std::to_string(win.w) + "x" + std::to_string(win.h);
+      if (p.side == 0) { check(sv_layout_extended_dest(win.w, win.h, 320, 224, 0, (SvAspect)a, (SvScaleMode)sc, &el) == 0 && el.surface.w == el.native.w, "SEG-139: no extension: the surface is the native picture" + name); continue; }
+      check(sv_layout_extended_dest(win.w, win.h, 320, 224, p.side, (SvAspect)a, (SvScaleMode)sc, &el) == 0, "SEG-139: extended placement" + name);
+      check(el.surface.x >= 0 && el.surface.y >= 0 && el.surface.x + el.surface.w <= win.w && el.surface.y + el.surface.h <= win.h, "SEG-139: the surface stays inside the window" + name);
+      check(std::abs((win.w - el.surface.w) - 2 * el.surface.x) <= 1 && std::abs((win.h - el.surface.h) - 2 * el.surface.y) <= 1, "SEG-139: the surface is centred" + name);
+      check(el.native.x >= el.surface.x && el.native.x + el.native.w <= el.surface.x + el.surface.w && std::abs((el.native.x - el.surface.x) - (el.surface.x + el.surface.w - el.native.x - el.native.w)) <= 1, "SEG-139: the native picture is centred on the surface" + name);
+      if (sc == SV_SCALE_FIT) {
+        // the displayed surface aspect equals the plan's (side rounding aside) whatever the window; a matching window shape fills it
+        const double want = (double)(320 + 2 * p.side) / 224.0 * (a == SV_ASPECT_4_3 ? (4.0 / 3.0) * 224.0 / 320.0 : 1.0);
+        const double got = (double)el.surface.w / (double)el.surface.h;
+        check(std::fabs(got - want) / want < 0.02, "SEG-139: letterboxing keeps the surface aspect" + name);
+      }
+    }
+  }
+  // The side treatment works at the largest side with exactly sized scratch (an out-of-bounds write is an AddressSanitizer failure in the sanitizer build).
+  {
+    const int w = 256, h = 448, side = SV_EXT_MAX_SIDE;
+    std::vector<uint8_t> native((size_t)w * h * 3u, 77), left((size_t)side * h * 3u), right((size_t)side * h * 3u);
+    const size_t need = sv_side_scratch_bytes(h);
+    check(need > 0, "SEG-139: scratch is sized for the tallest picture");
+    std::vector<int32_t> scratch(need / sizeof(int32_t));
+    check(need == scratch.size() * sizeof(int32_t), "SEG-139: scratch size is a whole number of words");
+    check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, h, w * 3, side, left.data(), right.data(), scratch.data()) == 0, "SEG-139: comfort fill at the maximum side");
+    check(sv_side_fill(SV_TREAT_BORDERS, native.data(), w, h, w * 3, side, left.data(), right.data(), scratch.data()) == 0, "SEG-139: borders fill at the maximum side");
+    check(sv_side_fill(SV_TREAT_COMFORT, native.data(), w, h, w * 3, side + 1, left.data(), right.data(), scratch.data()) == -1, "SEG-139: one more than the maximum side is rejected");
+    SvExtendedSurface e;
+    std::memset(&e, 0, sizeof e);
+    std::vector<uint8_t> px((size_t)(w + 2 * side) * h * 3u);
+    e.rgb24 = px.data(); e.size = px.size(); e.width = w + 2 * side; e.height = h; e.pitch = e.width * 3; e.side = side; e.sequence = 5; e.mode = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; e.status = SV_WS_AVAILABLE;
+    check(sv_extended_surface_check(&e, w, h, 5, 320) == SV_EXT_OK, "SEG-139: a surface of the maximum side is accepted");
+    e.side = side + 1; e.width = w + 2 * e.side; e.pitch = e.width * 3; e.size = (size_t)e.pitch * h;
+    check(sv_extended_surface_check(&e, w, h, 5, 320) == SV_EXT_GEOMETRY, "SEG-139: a surface beyond the maximum side is rejected");
+  }
+  // Memory per aspect (recorded, informational): RGB24 surface bytes of the producer surface for the reference pictures.
+  for (const char *label : {"320x224", "320x448"}) {
+    const int h = std::strcmp(label, "320x224") == 0 ? 224 : 448;
+    for (int pi = 0; pi < SV_RATIO_PRESET_COUNT; ++pi) {
+      SvGeomPlan p;
+      (void)sv_geom_plan(320, h, SV_ASPECT_ORIGINAL, sv_ratio_preset(pi), &p);
+      std::printf("SEG-139 memory: %s square pixels %d:%d -> side %d surface %dx%d = %zu bytes\n", label, sv_ratio_preset(pi).num, sv_ratio_preset(pi).den, p.side, p.surface_w, h, p.surface_bytes);
+    }
+  }
+}
+
+// `sv_viewer_core_test geometry` runs only the SEG-139 planner section (the sanitizer build uses it: the SEG-123 raw_mode() test deliberately forms an invalid enum value).
+int main(int argc, char **argv) {
+  if (argc > 1 && std::strcmp(argv[1], "geometry") == 0) {
+    geometry_planner_tests();
+    if (failures != 0) return 1;
+    std::printf("sv_viewer_core_test geometry: ok\n");
+    return 0;
+  }
   settings_tests();
   widescreen_tests();
   binding_tests();
@@ -804,6 +1010,7 @@ int main() {
   extension_surface_check_tests();
   side_style_tests();
   width_and_profile_tests();
+  geometry_planner_tests();
   crt_tests();
   menu_tests();
   font_tests();

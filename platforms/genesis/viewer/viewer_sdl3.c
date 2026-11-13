@@ -23,7 +23,7 @@ struct GenesisSdl3Viewer {
   GenesisFrameExtension ext;
   const uint64_t *frame_sequence;
   int ext_attached;
-  SvAspect plan_aspect;               /* sampled with the requested mode once per host slice */
+  SvVideoSettings plan_video;         /* SEG-139: the geometry-relevant video settings (pixel aspect, exact ratio, legacy width), sampled with the requested mode once per host slice */
   SvWidescreenSupport l2_support;     /* the outcome of the latest frame produced under a request */
   /* SEG-122 automation seam (like the Sega CD viewer's SEGARECOMP_VIEWER_KEY_SCRIPT): SEGARECOMP_VIEWER_PAD_SCRIPT names a file of `<frame> <buttons>` lines (buttons: any of
    * U D L R A B C S, or `-` for none) that replaces player 1's sampled pad from that guest frame on (the published frame number). Deterministic input for repeatable real-game comparisons; unset in every shipped use. */
@@ -97,7 +97,7 @@ static int sdl_closed(void *ctx) {
     const SvVideoSettings *video = &sv_host_settings(v->host)->video;
     v->ext.request = request_of_compat(video->widescreen, v->compat_enabled & GENESIS_COMPAT_HUD);
     if (v->ext.compat != NULL) v->ext.compat_components = video->widescreen == SV_WIDESCREEN_ORIGINAL ? (v->compat_enabled & GENESIS_COMPAT_HUD) : v->compat_enabled;   /* Original: the HUD only */
-    v->plan_aspect = video->aspect;
+    v->plan_video = *video;
   }
   return v->sample.quit;
 }
@@ -221,8 +221,8 @@ static void sdl_widescreen_caps(void *ctx, SvWidescreenCaps *out) {
 
 static int sdl_extension_plan(void *ctx, unsigned native_w, unsigned native_h, unsigned *side_out) {
   const GenesisSdl3Viewer *v = (const GenesisSdl3Viewer *)ctx;
-  const int side = sv_layout_extension_side((int)native_w, (int)native_h, v->plan_aspect);
-  if (side <= 0) return -1;
+  int side = 0;
+  if (sv_geom_resolve_production(&v->plan_video, (int)native_w, (int)native_h, &side) != SV_GEOM_OK || side <= 0) return -1; /* a rejected plan produces nothing (never a clamped surface) */
   *side_out = (unsigned)side;
   return 0;
 }
@@ -242,7 +242,7 @@ GenesisFrameExtension *genesis_sdl3_viewer_extension(GenesisSdl3Viewer *v, const
   v->ext_attached = 1;
   v->l2_support = SV_WS_AVAILABLE; /* capable until a produced frame says otherwise */
   v->l3_support = SV_WS_PARTIAL;
-  v->plan_aspect = sv_host_settings(v->host)->video.aspect;
+  v->plan_video = sv_host_settings(v->host)->video;
   v->ext.request = request_of(sv_host_settings(v->host)->video.widescreen);
   return &v->ext;
 }

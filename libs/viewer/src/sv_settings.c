@@ -96,6 +96,7 @@ void sv_settings_sanitize(SvSettings *s) {
   if ((unsigned)v->widescreen >= SV_WIDESCREEN_COUNT) v->widescreen = SV_WIDESCREEN_ORIGINAL;
   if ((unsigned)v->widescreen_side_style >= SV_SIDE_COUNT) v->widescreen_side_style = SV_SIDE_COMFORT;
   v->widescreen_width = clampi(v->widescreen_width, 0, 100);
+  if (!sv_ratio_valid(v->widescreen_ratio)) { v->widescreen_ratio.num = 0; v->widescreen_ratio.den = 0; } /* an unsupported ratio is dropped, never clamped: the legacy width applies */
   if ((unsigned)v->preset >= SV_CRT_COUNT) v->preset = SV_CRT_PIXEL_PERFECT;
   v->scanlines = clampi(v->scanlines, 0, 100);
   v->mask = clampi(v->mask, 0, 100);
@@ -179,6 +180,13 @@ static int apply_pair(SvSettings *s, const char *key, const char *value) {
     for (m = 0; m < SV_SIDE_COUNT; ++m) if (strcmp(value, side_style_keys[m]) == 0) s->video.widescreen_side_style = (SvSideStyle)m;
     return 1;
   }
+  if (strcmp(key, "video.widescreen_ratio") == 0) { /* SEG-139: an unreadable or unsupported value leaves the ratio unset (legacy width applies) */
+    SvDisplayRatio r;
+    s->video.widescreen_ratio.num = 0;
+    s->video.widescreen_ratio.den = 0;
+    if (sv_ratio_parse(value, &r) == 0) s->video.widescreen_ratio = r;
+    return 1;
+  }
   if (strcmp(key, "pad_name") == 0) { strncpy(s->pad_name, value, sizeof s->pad_name - 1u); s->pad_name[sizeof s->pad_name - 1u] = '\0'; return 1; }
   if (!parse_int(value, &v)) return 0;
   if (strcmp(key, "video.fullscreen") == 0) s->video.fullscreen = v;
@@ -241,6 +249,7 @@ size_t sv_settings_format(const SvSettings *s, char *out, size_t cap) {
   EMIT("video.widescreen=%s\n", widescreen_keys[(unsigned)s->video.widescreen < SV_WIDESCREEN_COUNT ? s->video.widescreen : SV_WIDESCREEN_ORIGINAL]);
   EMIT("video.widescreen_side_style=%s\n", side_style_keys[(unsigned)s->video.widescreen_side_style < SV_SIDE_COUNT ? s->video.widescreen_side_style : SV_SIDE_COMFORT]);
   EMIT("video.widescreen_width=%d\n", s->video.widescreen_width);
+  if (sv_ratio_valid(s->video.widescreen_ratio)) { char r_[24]; EMIT("video.widescreen_ratio=%s\n", sv_ratio_format(s->video.widescreen_ratio, r_, sizeof r_)); } /* SEG-139: written only when set, so existing files stay byte-identical and a previous release ignores the unknown key */
   EMIT("audio.volume=%d\naudio.muted=%d\ninput.deadzone=%d\ninput.menu_key=%d\n", s->audio.volume, s->audio.muted, s->deadzone, s->menu_key);
   if (s->pad_name[0] != '\0') EMIT("pad_name=%s\n", s->pad_name);
   for (sys = 0; sys < SV_SYSTEM_COUNT; ++sys)
@@ -405,6 +414,48 @@ void sv_widescreen_width_ratio(int width, int *num, int *den) {
   if (width > 100) width = 100;
   if (num != NULL) *num = 300 + width;
   if (den != NULL) *den = 225;
+}
+
+/* ---- SEG-139: exact rational display aspect ---- */
+
+int sv_ratio_valid(SvDisplayRatio r) {
+  if (r.num < 1 || r.den < 1 || r.num > SV_RATIO_MAX_TERM || r.den > SV_RATIO_MAX_TERM) return 0;
+  /* 4:3 <= num/den <= 32:9 in exact integer arithmetic (the products are below 2^26) */
+  return (int64_t)r.num * 3 >= (int64_t)r.den * 4 && (int64_t)r.num * 9 <= (int64_t)r.den * 32;
+}
+
+int sv_ratio_parse(const char *text, SvDisplayRatio *out) {
+  SvDisplayRatio r = {0, 0};
+  int *term = &r.num, digits = 0;
+  const char *c;
+  if (text == NULL || out == NULL) return -1;
+  for (c = text; *c != '\0'; ++c) {
+    if (*c >= '0' && *c <= '9') {
+      if (++digits > 4) return -1;
+      *term = *term * 10 + (*c - '0');
+    } else if (*c == ':' && term == &r.num && digits > 0) {
+      term = &r.den;
+      digits = 0;
+    } else {
+      return -1;
+    }
+  }
+  if (term != &r.den || digits == 0 || !sv_ratio_valid(r)) return -1;
+  *out = r;
+  return 0;
+}
+
+const char *sv_ratio_format(SvDisplayRatio r, char *buf, size_t cap) {
+  if (buf == NULL || cap == 0) return "";
+  if (!sv_ratio_valid(r)) buf[0] = '\0';
+  else snprintf(buf, cap, "%d:%d", r.num, r.den);
+  return buf;
+}
+
+SvDisplayRatio sv_ratio_preset(int index) {
+  static const SvDisplayRatio presets[SV_RATIO_PRESET_COUNT] = {{4, 3}, {16, 9}, {21, 9}, {32, 9}};
+  const SvDisplayRatio none = {0, 0};
+  return index >= 0 && index < SV_RATIO_PRESET_COUNT ? presets[index] : none;
 }
 
 int sv_ratio_milli(int w, int h, SvAspect aspect) {
