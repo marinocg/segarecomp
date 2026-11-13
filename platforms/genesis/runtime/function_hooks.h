@@ -87,6 +87,13 @@ static inline int genesis_function_hook_step(GenesisRuntime *runtime, const Gene
     return_pc &= UINT32_C(0x00FFFFFF);
     for (index = 0U; index < site->continuation_count; ++index) if (continuations[site->continuation_begin + index] == return_pc) known = 1U;
     if (!known) { ++hooks->unproven_callers; if (hooks->skipped != 0) hooks->skipped(hooks->ctx, runtime, site, 2U); return 0; }
+    while (hooks->depth != 0U && hooks->frames[hooks->depth - 1U].entry_sp <= runtime->a[7]) {   /* a new call at an SP at or above a pending frame: that function cannot still be running (it left without its original return) */
+      const GenesisHookSiteInfo *stale = hooks->frames[hooks->depth - 1U].site;
+      --hooks->depth;
+      ++hooks->abandoned;
+      if (hooks->skipped != 0) hooks->skipped(hooks->ctx, runtime, stale, 1U);
+    }
+    if ((site->mode & GENESIS_HOOK_MODE_AFTER) != 0U && hooks->depth >= GENESIS_HOOK_FRAMES_MAX) { ++hooks->overflowed; if (hooks->skipped != 0) hooks->skipped(hooks->ctx, runtime, site, 3U); return 0; }   /* skipped as a whole: no entry callback without its exit */
     if ((site->mode & GENESIS_HOOK_MODE_BEFORE) != 0U && hooks->enter != 0) (void)hooks->enter(hooks->ctx, runtime, site, runtime->a[7]);
     if ((site->mode & GENESIS_HOOK_MODE_REPLACE) != 0U && hooks->enter != 0) {
       const uint32_t entry_sp = runtime->a[7];
@@ -98,7 +105,6 @@ static inline int genesis_function_hook_step(GenesisRuntime *runtime, const Gene
       }
     }
     if ((site->mode & GENESIS_HOOK_MODE_AFTER) != 0U) {
-      if (hooks->depth >= GENESIS_HOOK_FRAMES_MAX) { ++hooks->overflowed; if (hooks->skipped != 0) hooks->skipped(hooks->ctx, runtime, site, 3U); return 0; }
       hooks->frames[hooks->depth].site = site;
       hooks->frames[hooks->depth].return_pc = return_pc;
       hooks->frames[hooks->depth].entry_sp = runtime->a[7];

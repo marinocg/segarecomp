@@ -27,7 +27,7 @@ Mechanism (what the spike prototyped and T004 ships): `emit_m68k_function_hook_w
 | `JMP` / `Bcc` / fallthrough into the entry | rejected | `E_HOOK_NOT_FUNCTION_ENTRY` |
 | `RTS` | **supported** return: the exit boundary is the dispatch where PC == the frame's return address and A7 == entry A7 + 4 | after-hook order test |
 | `RTE`, `RTR`, `TRAP`, `JMP` in the body (tail jump, jump table), `PEA` of a code address (push-then-RTS), `MOVEA` into A7 | rejected | `E_HOOK_UNCLASSIFIED_RETURN` |
-| stack unwound without the return (unbalanced `ADDQ`/`LEA` to A7, longjmp-like) | allowed at build (not decidable); detected at run time: the frame is **abandoned** (A7 above entry A7 + 4), counted, logged once (`E_HOOK_FRAME_ABANDONED`), no exit callback | step test |
+| return address overwritten in place (`MOVE.L #x,(A7)` / `-(A7)` then RTS), stack unwound without the return (unbalanced `ADDQ`/`LEA` to A7, longjmp-like) | **not decidable at build** (only `PEA` of a code address and `MOVEA` into A7 are rejected); detected at run time: a frame is **abandoned** when A7 rises above entry A7 + 4, or when a later call enters a site at an SP at or above the pending frame's entry SP; counted, logged once (`E_HOOK_FRAME_ABANDONED`), no exit callback and never a duplicate exit | step test |
 
 State at the boundary: **entry** is the dispatch after the call instruction retired: D0-D7/A0-A6/CCR as the call left them, A7 points at the return address, stack slot k is the long at A7+4+4k. **Exit** is the dispatch after the RTS retired: registers and CCR are the function's results, A7 = entry A7 + 4. Callbacks take zero guest time.
 
@@ -87,7 +87,11 @@ Each rejection is raised at build time (`resolve_m68k_function_hooks` / the emit
 - Hooks are not yet reachable from `segarecomp build`: the ABI 2 provider link, the manifest-to-plan wiring (including the vector list from the ROM) and the per-revision binding of declared ranges are SEG-138-T009. The evidence here is generated-native programs built from project-authored synthetic images.
 - Call frames are not part of save states: a state taken while a hooked function is running loses its pending exit callback on restore (SEG-138-T006 owns `MODSTATE` and the restore rule).
 - Calls to a hooked function through computed `JSR` forms are not hooked (skipped and counted); a hooked function reached by `JMP` from unanalysed code is the same case.
-- Unbalanced stack adjustment inside a hooked function abandons its frame (no exit callback).
+- Unbalanced stack adjustment or an overwritten return address inside a hooked function abandons its frame (no exit callback); the build cannot decide these, so "push-then-RTS" is rejected only for `PEA` of a code address.
+- Interrupts are admitted inside instruction retirement: if one is admitted when a hooked call or return retires, the boundary is the handler's first dispatch, so an exit callback may run after the handler returned and observe its RAM changes (deterministic).
+- Bindings are matched by id at run time; a binding naming no generated site, or a site whose mode needs a phase the mod did not register, never fires (attach cannot see the generated table; SEG-138-T009 cross-checks). Binding id strings must outlive the scheduler.
+- The `cycles` slot is readable in every live phase, declared or not (guest time, not guest memory).
+- A before-after site with a full frame stack is skipped as a whole (no entry callback without its exit).
 - Luau has no hook callbacks yet; native ABI 2 only.
 - Single mod: ordering across mods is SEG-141.
 

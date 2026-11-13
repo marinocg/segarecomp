@@ -192,6 +192,13 @@ int main(void) {
   for (i = 0; i < GENESIS_HOOK_FRAMES_MAX; ++i) { rt.pc = 0x220; rt.a[7] = 0x00FF1000U - 8U * i; put32(&rt, rt.a[7], 0x206U); assert(step(&rt) == 0); }
   assert(fh.depth == GENESIS_HOOK_FRAMES_MAX);
   rt.pc = 0x220; rt.a[7] = 0x00FF0800U; put32(&rt, rt.a[7], 0x206U); assert(step(&rt) == 0 && fh.overflowed == 1U && skipped_kind[3] == 1U && fh.depth == GENESIS_HOOK_FRAMES_MAX);
+  /* a stale frame (function left without its original return, A7 left at entry + 4) is retired by the next call at that SP: no duplicate exit */
+  fh.depth = 0U; log_n = 0U; memset(log_text, 0, sizeof log_text); fh.abandoned = 0U;
+  rt.pc = 0x220; rt.a[7] = 0x00FF0400U; put32(&rt, 0x00FF0400U, 0x206U); assert(step(&rt) == 0 && fh.depth == 1U);
+  rt.pc = 0x1000; rt.a[7] = 0x00FF0404U; assert(step(&rt) == 0 && fh.depth == 1U);              /* left through another PC, same SP: still pending */
+  rt.pc = 0x220; rt.a[7] = 0x00FF0400U; assert(step(&rt) == 0 && fh.depth == 1U && fh.abandoned == 1U);   /* the new call retires it */
+  rt.pc = 0x206; rt.a[7] = 0x00FF0404U; assert(step(&rt) == 0 && fh.depth == 0U); assert(strcmp(log_text, "EaEaLa") == 0);   /* exactly one exit for the one real return */
+  fh.depth = 0U;
   /* the register view */
   rt.d[3] = 0xAABBCCDDU; rt.a[2] = 0x1234U; rt.sr = 0x271FU;
   { uint32_t v = 0; assert(genesis_hook_reg_read(&rt, 0x00FF0100U, 3U, &v) && v == 0xAABBCCDDU); assert(genesis_hook_reg_read(&rt, 0x00FF0100U, 10U, &v) && v == 0x1234U); assert(genesis_hook_reg_read(&rt, 0x00FF0100U, GENESIS_HOOK_REG_CCR, &v) && v == 0x1FU);
