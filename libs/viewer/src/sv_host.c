@@ -1072,7 +1072,7 @@ int sv_host_visible_side(const SvHost *h) {
   if (h == NULL || h->ext_side <= 0 || h->last_w <= 0 || h->side_blocked) return 0;
   /* a retained surface produced above the currently requested level is never shown (stepping down to Level 2 or Original hides the extension at once) */
   if ((int)h->ext_prod_mode > (int)h->settings.video.widescreen) return 0;
-  return sv_layout_visible_side(h->last_w, h->last_h, h->settings.video.aspect, h->settings.video.widescreen_width, h->ext_side);
+  return sv_geom_resolve_visible(&h->settings.video, h->last_w, h->last_h, h->ext_side); /* SEG-139: legacy width unless an exact ratio is set */
 }
 int sv_host_patch_defaults_active(const SvHost *h) { return h != NULL && h->patch_defaults != 0; }
 int sv_host_profile_active(const SvHost *h) { return h != NULL && h->profile_path[0] != '\0'; }

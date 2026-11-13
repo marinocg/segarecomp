@@ -417,6 +417,14 @@ void synthetic_fixtures() {
   { Cfg c = base; c.midframe = true; c.journal = false; add("no VRAM journal (partial)", c); }
   { Cfg c = base; c.side = 1; add("one-pixel extension", c); }
   { Cfg c = base; c.side = GENESIS_EXT_MAX_SIDE; c.hmode = 3; add("maximum extension", c); }
+  // SEG-139: the planned extents of the wider targets (expected sides are the independent hand calculation checked against the planner in sv_viewer_core_test):
+  // 320 x 224 square pixels: 21:9 -> floor(224*21/9)=522 -> 101 per side; 32:9 -> floor(224*32/9)=796 -> 238; 4:3-corrected 32:9 -> 853 -> 266 (above the old 256 bound);
+  // interlaced 320 x 448 at 32:9 -> 636; interlaced H32 (256 x 448, square pixels) at 32:9 -> 668, the widest supported need.
+  { Cfg c = base; c.side = 101; c.hmode = 3; add("21:9 extent (101 per side)", c); }
+  { Cfg c = base; c.side = 238; add("32:9 extent (238 per side)", c); }
+  { Cfg c = base; c.side = 266; c.hmode = 3; add("32:9 4:3-corrected extent (266 per side, above the legacy 256)", c); }
+  { Cfg c = base; c.im2 = true; c.side = 636; add("interlaced 32:9 extent (636 per side)", c); }
+  { Cfg c = base; c.im2 = true; c.h40 = false; c.side = 668; c.hmode = 3; add("H32 interlaced 32:9 extent (668 per side, the widest planned)", c); }
   for (uint32_t seed = 2; seed < 14; ++seed) {
     Cfg c = base;
     c.seed = seed;

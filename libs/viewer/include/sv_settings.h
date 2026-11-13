@@ -51,6 +51,15 @@ const char *sv_side_style_description(SvSideStyle style); /* one-sentence explan
 /* SEG-123 amendment: the widescreen width is the target display aspect (300 + width) / 225: 0 = 4:3, 100 = 16:9, linear between (bounded integer arithmetic). */
 #define SV_WS_WIDTH_DEFAULT 100
 void sv_widescreen_width_ratio(int width, int *num, int *den);
+/* SEG-139: an exact rational display aspect `num`:`den` (reduced is not required). {0, 0} means "not set" (the legacy width above decides). A SET ratio is valid only
+ * inside [4:3, 32:9] with both terms in 1..SV_RATIO_MAX_TERM; anything else is rejected, never clamped. Presets: 4:3, 16:9, 21:9, 32:9; any other N:M is "custom". */
+#define SV_RATIO_MAX_TERM 4096
+typedef struct SvDisplayRatio { int num, den; } SvDisplayRatio;
+int sv_ratio_valid(SvDisplayRatio ratio);                          /* 1 when set and inside the supported range */
+int sv_ratio_parse(const char *text, SvDisplayRatio *out);          /* "N:M" (decimal digits only); 0 ok, -1 not a valid supported ratio (out untouched) */
+const char *sv_ratio_format(SvDisplayRatio ratio, char *buf, size_t cap); /* "N:M" (a preset keeps its name, e.g. "21:9"); "" for an unset/invalid ratio */
+#define SV_RATIO_PRESET_COUNT 4
+SvDisplayRatio sv_ratio_preset(int index);                          /* 0: 4:3, 1: 16:9, 2: 21:9, 3: 32:9; {0,0} out of range */
 /* "4:3", "16:9" or "1.50:1" for the target aspect of `width` (readable value for the menu/launcher). Returns `buf`. */
 const char *sv_widescreen_width_text(int width, char *buf, size_t cap);
 /* Display aspect times 1000 of a picture `w` x `h` source pixels (pixel aspect `aspect`), for reporting the effective aspect. */
@@ -76,6 +85,7 @@ typedef struct SvVideoSettings {
   SvWidescreenMode widescreen;  /* requested mode, default Original */
   SvSideStyle widescreen_side_style; /* SEG-123: side-area presentation of a generic extension, default Comfort */
   int widescreen_width;         /* SEG-123: target presentation aspect 0 (4:3) .. 100 (16:9), linear in the ratio; default 100 */
+  SvDisplayRatio widescreen_ratio; /* SEG-139: exact target aspect (4:3 .. 32:9); {0, 0} (default) = unset: the legacy widescreen_width above applies unchanged. Global file only, never in a per-game profile */
   int window_w, window_h;                /* last windowed size in points, 0 = default */
 } SvVideoSettings;
 
