@@ -43,7 +43,7 @@ constexpr std::array<CapabilityInfo, 23> kCapabilities = {{
     {"memory.write.main.work_ram", 8, {U, U, U}, true},
     {"input.read", 9, {E, U, U}, true},
     {"input.intercept", 10, {E, U, U}, true},
-    {"hook.function", 11, {U, U, U}, true},
+    {"hook.function", 11, {E, U, U}, true},
     {"state.mod", 12, {E, U, U}, true},
     {"audio.event.read", 13, {E, U, U}, true},
     {"audio.command.send", 14, {E, U, U}, true},

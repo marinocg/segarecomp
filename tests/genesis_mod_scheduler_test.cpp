@@ -237,12 +237,14 @@ void phase_registration() {
   check(only && g_probe.trace.size() == 4U, "only the registered phases run");
   Harness bad;
   bad.init(bit(SEGA_MOD_PHASE_HOOK_ENTRY));
-  check(bad.attach_result == 1 && std::string(bad.rejection) == "E_PHASE_UNSUPPORTED", "a hook phase is refused (SEG-138-T004)");
+  check(bad.attach_result == 1 && std::string(bad.rejection) == "E_CAPABILITY_UNSUPPORTED", "a hook phase without the hook.function capability is refused (ADR 0298)");
+  bad.init(bit(SEGA_MOD_PHASE_HOOK_ENTRY), cap(SEGA_MOD_CAP_HOOK_FUNCTION));
+  check(bad.attach_result == 1 && std::string(bad.rejection) == "E_PHASE_UNSUPPORTED", "a hook phase without any hook binding is refused (ADR 0298)");
   bad.init(0U);
   check(bad.attach_result == 1 && std::string(bad.rejection) == "E_PHASE_UNSUPPORTED", "an empty phase set is refused");
   bad.init(bit(0));
   check(bad.attach_result == 1 && std::string(bad.rejection) == "E_PHASE_UNSUPPORTED", "phase bit 0 is refused");
-  bad.init(kAllPhases, cap(SEGA_MOD_CAP_HOOK_FUNCTION));
+  bad.init(kAllPhases, cap(SEGA_MOD_CAP_AUDIO_HOST_PLAY));
   check(bad.attach_result == 1 && std::string(bad.rejection) == "E_CAPABILITY_UNSUPPORTED", "a required capability the scheduler cannot grant is never dropped");
   check(bad.rt.frame_hooks == nullptr, "a rejected attach leaves the runtime untouched");
   bad.provider.platform = SEGA_MOD_PLATFORM_MASTER_SYSTEM;

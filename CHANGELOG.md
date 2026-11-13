@@ -7,6 +7,12 @@ Releases are published on the [Releases](../../releases) page. This file records
 
 > Draft for the next release. The version number and the publication are the operator's decision; nothing here has been tagged or published.
 
+### Static function hooks, deterministic callback ordering and transactional failure (ADR 0298, Genesis)
+
+* A mod can now declare hooks on verified symbols (`[[hook]]`: `before`, `after`, `before-after`, `replace` with a declared register/flag/cost contract). The build resolves them against the exact ROM digest and classifies every site against the compiled program; anything it cannot prove fails the build with a stable `E_HOOK_*` class (mid-instruction, not a function entry, tail jumps / RTE / computed returns, computed targets, work-RAM code, interrupt context, overlap, bad contract, unsupported CPU).
+* The feasibility spike returned **GO** for the Genesis M68K: a no-op hook leaves the guest bit-identical to the unhooked program over 600 frames (including nested calls), ten active hooks with trivial callbacks cost within about 5 % of the frame time, and a program without hooks is unchanged byte for byte. Hooks are not yet reachable from `segarecomp build` (SEG-138-T009), so the user-facing support level is unchanged.
+* One mod's callbacks run in a defined order (`frame-begin`, `input`, `post-input`, hook entries in call order and exits in reverse, `frame-end`, `render`), see the deterministic cycle counter, and fail transactionally: a faulting callback's writes are discarded, a faulting replacement runs the original function, the mod is disabled and the guest continues unmodified.
+
 ### Mod phase scheduler, input interception and bounded work-RAM access (ADR 0297, Genesis)
 
 * The Genesis runtime can now run mod callbacks at the documented phases (`reset`, `frame-begin`, `input`, `post-input`, `frame-end`, `render`) through one deterministic scheduler used by native ABI 2 providers and by Luau. Callbacks run only between dispatches, take zero guest time and `frame-end` runs before the frame is rendered; `render` is read-only. The `input` phase can replace the pad the game reads; the physical pad stays what recordings store.

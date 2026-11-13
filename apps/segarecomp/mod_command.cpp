@@ -78,13 +78,23 @@ std::string package_json(const mod::Manifest &m, const std::string &identity, co
     symbols += std::string(i ? "," : "") + "{\"name\":\"" + esc(y.name) + "\",\"revision\":\"" + esc(y.revision) + "\",\"address\":\"" + addr + "\",\"provenance\":\"" + y.provenance + "\"}";
   }
   symbols += "]";
+  std::string hooks;   // ADR 0298: shown only when the package declares hooks, so every other inspect output is unchanged
+  if (!m.hooks.empty()) {
+    hooks = ",\"hooks\":[";
+    for (std::size_t i = 0; i < m.hooks.size(); ++i) {
+      const mod::Hook &h = m.hooks[i];
+      hooks += std::string(i ? "," : "") + "{\"id\":\"" + esc(h.id) + "\",\"symbol\":\"" + esc(h.symbol) + "\",\"revision\":\"" + esc(h.revision) + "\",\"cpu\":\"" + esc(h.cpu) + "\",\"mode\":\"" + h.mode +
+               "\",\"reads\":" + json_list(h.reads) + ",\"writes\":" + json_list(h.writes) + ",\"cost\":" + std::to_string(h.cost) + "}";
+    }
+    hooks += "]";
+  }
   std::string revs = "[";
   for (std::size_t i = 0; i < m.revisions.size(); ++i) revs += std::string(i ? "," : "") + "{\"label\":\"" + esc(m.revisions[i].label) + "\",\"sha256\":\"" + m.revisions[i].sha256 + "\"}";
   revs += "]";
   return "\"id\":\"" + esc(m.id) + "\",\"version\":\"" + esc(m.version) + "\",\"name\":\"" + esc(m.name) + "\",\"platform\":\"" + m.platform + "\",\"source_identity_kind\":\"" + m.source_kind +
          "\",\"revisions\":" + revs + ",\"trust_class\":\"" + mod::trust_class(m) + "\",\"capabilities\":" + json_list(m.capabilities) + ",\"capabilities_optional\":" + json_list(m.capabilities_optional) +
          ",\"abi_native\":" + std::to_string(m.abi_native) + ",\"payloads\":{\"native\":" + std::to_string(native) + ",\"luau\":" + std::to_string(luau) + ",\"assets\":" + std::to_string(assets) +
-         ",\"other\":" + std::to_string(other) + "},\"rom_edits\":" + std::to_string(edits) + ",\"symbols\":" + symbols + ",\"package_identity\":\"" + identity + "\",\"content_digest\":\"" + content + "\"";
+         ",\"other\":" + std::to_string(other) + "},\"rom_edits\":" + std::to_string(edits) + ",\"symbols\":" + symbols + hooks + ",\"package_identity\":\"" + identity + "\",\"content_digest\":\"" + content + "\"";
 }
 
 bool read_all(const fs::path &path, std::size_t limit, std::vector<std::uint8_t> &out) {

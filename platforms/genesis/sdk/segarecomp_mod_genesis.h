@@ -16,7 +16,8 @@ typedef enum SegaGenesisSpace {
   SEGA_GEN_SPACE_Z80_RAM,           /* limited read */
   SEGA_GEN_SPACE_VDP_VRAM,
   SEGA_GEN_SPACE_VDP_CRAM,
-  SEGA_GEN_SPACE_VDP_VSRAM
+  SEGA_GEN_SPACE_VDP_VSRAM,
+  SEGA_GEN_SPACE_M68K_HOOK_REGS /* the register view of the function hook in flight: offset = slot (0..7 D0-D7, 8..15 A0-A7, 16 CCR, 17 cycle counter, 24..31 stack slot 0..7), width 4; mod-execution-phases.md 5.3 */
 } SegaGenesisSpace;
 
 typedef struct SegaGenesisFeatures {

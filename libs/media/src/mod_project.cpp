@@ -85,7 +85,7 @@ std::vector<Section> parse_toml(std::string_view text) {
       skip();
       if (i < line.size() && line[i] != '#') fail("E_MANIFEST_SYNTAX", "mod.toml has text after a table header");
       if (!bare_key(name)) fail("E_MANIFEST_SYNTAX", "a mod.toml table name is invalid");
-      const bool repeated = name == "target.revision" || name == "source" || name == "audio.mapping" || name == "audio.mapping.value" || name == "symbol";
+      const bool repeated = name == "target.revision" || name == "source" || name == "audio.mapping" || name == "audio.mapping.value" || name == "symbol" || name == "hook";
       if (repeated != array && (repeated || name == "mod" || name == "target" || name == "capabilities" || name == "abi" || name == "state" || name == "limits" || name == "build" || name == "geometry" || name == "presentation"))
         fail("E_MANIFEST_SYNTAX", "the table [" + name + "] must be written " + (repeated ? "as [[" + name + "]]" : "as [" + name + "]"));
       if (!array) for (const Section &s : sections) if (s.name == name) fail("E_MANIFEST_SYNTAX", "mod.toml repeats the table [" + name + "]");
@@ -299,6 +299,21 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
       y.address = static_cast<std::uint32_t>(value);
       if (!symbol_name_ok(y.name)) fail("E_FIELD_VALUE", "a symbol name must be a token of 1 to 64 characters");
       m.symbols.push_back(std::move(y));
+    } else if (s.name == "hook") {   // ADR 0298: one [[hook]] per declaration; `writes` and `cost` form the replacement contract of a replace hook
+      only(s, {"id", "symbol", "revision", "cpu", "mode", "reads", "writes", "cost"});
+      if (m.hooks.size() >= kMaxHooks) fail("E_HOOK_COUNT", "a project declares too many hooks");
+      Hook h;
+      h.id = text_of(s, "id"); h.symbol = text_of(s, "symbol"); h.mode = text_of(s, "mode");
+      h.cpu = s.find("cpu") != nullptr ? text_of(s, "cpu") : "m68k";
+      h.revision = text_of(s, "revision", false);
+      if (s.find("reads") != nullptr) h.reads = list_of(s, "reads");
+      if (s.find("writes") != nullptr || s.find("cost") != nullptr) {
+        h.has_replace = true;
+        if (s.find("writes") != nullptr) h.writes = list_of(s, "writes");
+        if (s.find("cost") != nullptr) h.cost = number_of(s, "cost");
+      }
+      m.hooks.push_back(std::move(h));
+      m.has_hooks = true;
     } else if (s.name == "audio.mapping.value") {
       only(s, {"name", "value"});
       if (last_mapping == nullptr) fail("E_FIELD_UNKNOWN", "[[audio.mapping.value]] needs a preceding [[audio.mapping]]");
@@ -315,6 +330,14 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
   std::sort(m.payloads.begin(), m.payloads.end(), [](const Payload &a, const Payload &b) { return a.path < b.path; });
   m.mappings = std::move(mappings);
   std::sort(m.symbols.begin(), m.symbols.end(), [](const Symbol &a, const Symbol &b) { return std::tie(a.name, a.revision) < std::tie(b.name, b.revision); });
+  std::sort(m.hooks.begin(), m.hooks.end(), [](const Hook &a, const Hook &b) { return a.id < b.id; });   // canonical manifest form: sorted by id
+  for (std::size_t i = 1; i < m.hooks.size(); ++i)
+    if (m.hooks[i - 1].id == m.hooks[i].id) fail("E_HOOK_OVERLAP", "the hook id \"" + m.hooks[i].id + "\" is declared twice");
+  for (Hook &h : m.hooks) {   // register names in register-view order, as a canonical manifest requires
+    const auto order = [](const std::string &a, const std::string &b) { return hook_register_bit(a, false).value_or(99U) < hook_register_bit(b, false).value_or(99U); };
+    std::sort(h.reads.begin(), h.reads.end(), order);
+    std::sort(h.writes.begin(), h.writes.end(), order);
+  }
   for (std::size_t i = 1; i < m.symbols.size(); ++i)
     if (m.symbols[i - 1].name == m.symbols[i].name && m.symbols[i - 1].revision == m.symbols[i].revision) fail("E_SYMBOL_DUPLICATE", "a symbol repeats a (name, revision) pair");
   if (std::count_if(m.payloads.begin(), m.payloads.end(), [](const Payload &p) { return p.kind == "rom-edit-set"; }) > 1) fail("E_PAYLOAD_COMBINATION", "at most one rom-edit-set source (use one edit file; edits of several revisions share it)");
@@ -325,6 +348,7 @@ Project build_project(const std::vector<Section> &sections, FileReader read, voi
     if (declared_edits.count(p.path) != 0 && declared_edits[p.path] != set.edits.size()) fail("E_EDIT_COUNT", "the source \"" + p.path + "\" declares another edit count than it holds");
     p.edits = static_cast<unsigned>(set.edits.size());
   }
+  if (auto r = check_hooks(m)) fail(r->code, r->message);   // ADR 0298: the same declaration check the package reader runs, so `mod check` fails before packing
   project.ok = true;
   return project;
 }

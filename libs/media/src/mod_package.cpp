@@ -379,8 +379,26 @@ Manifest parse_manifest(const Value &root) {
   }
 
   // reserved keys: present but empty only
-  if (const Value *h = root.find("hooks"); h != nullptr) {
-    if (!array(*h, "hooks").items.empty()) fail("E_FIELD_UNKNOWN", "hooks entries are not defined yet");
+  if (const Value *h = root.find("hooks"); h != nullptr) {   // ADR 0298: statically resolved function hooks, strictly sorted by id
+    array(*h, "hooks");
+    if (h->items.size() > kMaxHooks) fail("E_HOOK_COUNT", "a package declares at most 64 hooks");
+    for (const Value &e : h->items) {
+      object(e, "a hook");
+      only(e, {"id", "symbol", "revision", "cpu", "mode", "reads", "replace"}, "a hook");
+      Hook hk;
+      hk.id = str(e, "id"); hk.symbol = str(e, "symbol"); hk.mode = str(e, "mode");
+      hk.cpu = e.find("cpu") != nullptr ? str(e, "cpu") : "m68k";
+      if (e.find("revision") != nullptr) hk.revision = str(e, "revision");
+      if (e.find("reads") != nullptr) hk.reads = string_list(e.at("reads"), "reads");
+      if (const Value *rv = e.find("replace"); rv != nullptr) {
+        object(*rv, "a hook replace contract");
+        only(*rv, {"writes", "cost"}, "a hook replace contract");
+        hk.has_replace = true;
+        if (rv->find("writes") != nullptr) hk.writes = string_list(rv->at("writes"), "writes");
+        hk.cost = num32(*rv, "cost");
+      }
+      m.hooks.push_back(std::move(hk));
+    }
     m.has_hooks = true;
   }
   if (const Value *g = root.find("geometry"); g != nullptr) {
@@ -457,6 +475,8 @@ Manifest parse_manifest(const Value &root) {
     if (m.header_repair != "genesis-checksum" && m.header_repair != "none") fail("E_FIELD_VALUE", "header_repair must be genesis-checksum or none");
     if (m.header_repair == "genesis-checksum" && m.platform != "genesis") fail("E_HEADER_UNSUPPORTED", "header repair exists only for the Genesis header");
   }
+
+  if (auto r = check_hooks(m)) fail(r->code, r->message);   // ADR 0298: platform/CPU, contract, verified symbols and overlap, for every declared revision
 
   // combination rules (section 4)
   if (std::count_if(m.payloads.begin(), m.payloads.end(), [](const Payload &p) { return p.kind == "bps-image"; }) > 1) fail("E_PAYLOAD_COMBINATION", "at most one bps-image payload");
@@ -593,7 +613,20 @@ std::string serialize_manifest(const Manifest &m) {
   if (!m.capabilities_optional.empty()) { o += ','; key(o, "capabilities_optional"); string_array(o, m.capabilities_optional); }
   if (m.abi_native != 0) { o += ','; key(o, "abi"); o += "{\"native\":" + std::to_string(m.abi_native) + "}"; }
   if (m.state_schema != 0) kn(o, "state_schema", m.state_schema);
-  if (m.has_hooks) { o += ','; key(o, "hooks"); o += "[]"; }
+  if (m.has_hooks) {
+    o += ','; key(o, "hooks"); o += '[';
+    for (std::size_t i = 0; i < m.hooks.size(); ++i) {
+      const Hook &h = m.hooks[i];
+      if (i) o += ',';
+      o += '{'; kv(o, "id", h.id, true); kv(o, "symbol", h.symbol);
+      if (!h.revision.empty()) kv(o, "revision", h.revision);
+      kv(o, "cpu", h.cpu.empty() ? "m68k" : h.cpu); kv(o, "mode", h.mode);
+      if (!h.reads.empty()) { o += ','; key(o, "reads"); string_array(o, h.reads); }
+      if (h.has_replace) { o += ','; key(o, "replace"); o += '{'; key(o, "writes"); string_array(o, h.writes); o += ','; key(o, "cost"); o += std::to_string(h.cost); o += '}'; }
+      o += '}';
+    }
+    o += ']';
+  }
   if (!m.mappings.empty()) {
     o += ','; key(o, "mappings"); o += '[';
     for (std::size_t i = 0; i < m.mappings.size(); ++i) { if (i) o += ','; emit_mapping(o, m.mappings[i]); }
@@ -637,6 +670,13 @@ std::string content_digest(const Manifest &m) {
   for (const Payload *p : sorted)
     text += "payload " + p->kind + " " + std::to_string(p->kind_version) + " " + p->path + " size " + std::to_string(p->size) + " sha256 " + p->sha256 + "\n";
   if (!m.header_repair.empty()) text += "header_repair " + m.header_repair + "\n";   // decides which bytes the build writes
+  for (const Hook &h : m.hooks) {   // hooks decide which generated code runs
+    text += "hook " + h.id + " " + h.symbol + " " + h.revision + " " + (h.cpu.empty() ? "m68k" : h.cpu) + " " + h.mode + " reads";
+    for (const std::string &n : h.reads) text += " " + n;
+    text += " writes";
+    for (const std::string &n : h.writes) text += " " + n;
+    text += " cost " + std::to_string(h.cost) + "\n";
+  }
   for (const Symbol &y : m.symbols) text += "symbol " + y.name + " " + y.revision + " " + std::to_string(y.address) + " " + y.provenance + "\n";   // symbols decide where edits land
   return sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(text.data()), text.size()));
 }

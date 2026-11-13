@@ -235,7 +235,7 @@ REV = f'\n[[target.revision]]\nlabel = "rev-a"\nsha256 = "{SRC_SHA}"\n%s'
 sms_rev = REV % 'mapper = "sega"\n'
 gen_rev = REV % ""
 for platform, rev, cap in (("master-system", sms_rev, "frame.vdp"), ("master-system", sms_rev, "memory.write.z80.work_ram"), ("master-system", sms_rev, "frame.sms_vdp"),
-                           ("genesis", gen_rev, "hook.function"), ("genesis", gen_rev, "audio.host.play"), ("genesis", gen_rev, "frame.sms_vdp")):
+                           ("genesis", gen_rev, "audio.host.play"), ("genesis", gen_rev, "frame.sms_vdp")):
     expect(f"{platform} with {cap}", ("mod", "check", project(f"cap-{platform}-{cap}", LUAU_PROJECT % (platform, rev, cap), {"scripts/main.luau": LUAU})), "E_CAPABILITY_UNSUPPORTED")
 d = '[target]\nplatform = "sega-cd"\ndisc_identity = "%s"\n' % ("b" * 64)
 expect("sega-cd with an unsupported capability", ("mod", "check", project("cap-scd", LUAU_PROJECT.replace('[target]\nplatform = "%s"\n%s', d).replace("%s", "frame.vdp"), {"scripts/main.luau": LUAU})), "E_CAPABILITY_UNSUPPORTED")
@@ -252,7 +252,7 @@ cli.check(rc == 0 and adapters["ok"], "mod inspect --json succeeds")
 by = {a["platform"]: a for a in adapters["adapters"]}
 cli.check(sorted(by) == ["genesis", "master-system", "sega-cd"], "all three adapters are registered")
 cli.check(by["genesis"]["source_identity_kind"] == "cartridge-image" and by["master-system"]["source_identity_kind"] == "cartridge-image" and by["sega-cd"]["source_identity_kind"] == "disc-image", "source-identity kind per platform")
-cli.check(by["genesis"]["capabilities"]["frame.vdp"] == "supported-with-limitations" and by["genesis"]["capabilities"]["hook.function"] == "unsupported", "genesis capability levels")
+cli.check(by["genesis"]["capabilities"]["frame.vdp"] == "supported-with-limitations" and by["genesis"]["capabilities"]["hook.function"] == "experimental" and by["master-system"]["capabilities"]["hook.function"] == "unsupported", "genesis capability levels (hook.function is experimental from SEG-138-T004)")
 cli.check(all(v == "unsupported" for k, v in by["master-system"]["capabilities"].items() if k != "host.log") and by["master-system"]["capabilities"]["host.log"] == "experimental", "master-system registers a mostly unsupported set")
 cli.check(all(v == "unsupported" for k, v in by["sega-cd"]["capabilities"].items() if k != "host.log") and by["sega-cd"]["capabilities"]["host.log"] == "experimental", "sega-cd registers a mostly unsupported set")
 cli.check(by["genesis"]["sdk_header"] == "segarecomp_mod_genesis.h" and by["master-system"]["sdk_header"] == "segarecomp_mod_sms.h" and by["sega-cd"]["sdk_header"] == "segarecomp_mod_scd.h", "per-platform SDK header names")

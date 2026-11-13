@@ -1,6 +1,6 @@
 # Mod execution phases, guest writes, input interception and static hooks
 
-Status: accepted contract (SEG-133-T004, ADR [0282](../decisions/0282-mod-execution-phases.md)). **Scheduler implemented for Genesis (F08, ADR [0297](../decisions/0297-genesis-mod-phase-scheduler-and-work-ram-services.md))**: the phases `reset`, `frame-begin`, `input`, `post-input`, `frame-end`, `render`, input interception and the bounded work-RAM services of section 4, shared by native ABI 2 providers and Luau (`platforms/genesis/runtime/mod_scheduler.c`). **Not implemented**: hooks (`hook-entry`/`hook-exit`, SEG-138-T004), multi-mod ordering, `MODSTATE`; per-platform realizations are SEG-147/148. **Luau side, implemented (F07, ADR [0295](../decisions/0295-luau-host-api-static-check-and-fixture-session.md))**: the `reset` and `render(frame)` callbacks with copy-in frame values and staged, transactional output, run by the deterministic fixture session and, for `render` only, by the minimal live seam of a played Genesis program (ADR 0296; one call per presented frame, no phases); the `state` seam (`save`/`load` serialization, section 6.2). The container `MODSTATE` is not.
+Status: accepted contract (SEG-133-T004, ADR [0282](../decisions/0282-mod-execution-phases.md)). **Scheduler implemented for Genesis (F08, ADR [0297](../decisions/0297-genesis-mod-phase-scheduler-and-work-ram-services.md))**: the phases `reset`, `frame-begin`, `input`, `post-input`, `frame-end`, `render`, input interception and the bounded work-RAM services of section 4, shared by native ABI 2 providers and Luau (`platforms/genesis/runtime/mod_scheduler.c`). **Function hooks implemented for the Genesis M68K (F09, ADR [0298](../decisions/0298-genesis-static-function-hooks.md); spike result GO)**: `hook-entry`/`hook-exit`, the `hooks` manifest content model, the register view, build-time classification with the stable `E_HOOK_*` classes, callback ordering, cycle visibility and transactional failure for a single mod. **Not implemented**: linking hooks into a CLI-built program (SEG-138-T009), hook frames in save states, multi-mod ordering, `MODSTATE`; per-platform realizations are SEG-147/148. **Luau side, implemented (F07, ADR [0295](../decisions/0295-luau-host-api-static-check-and-fixture-session.md))**: the `reset` and `render(frame)` callbacks with copy-in frame values and staged, transactional output, run by the deterministic fixture session and, for `render` only, by the minimal live seam of a played Genesis program (ADR 0296; one call per presented frame, no phases); the `state` seam (`save`/`load` serialization, section 6.2). The container `MODSTATE` is not.
 Inputs: [adapters](mod-platform-adapters.md) (space and phase names), [gap inventory](modding-platform-gap-inventory.md) (the generated-native execution model and save-state barriers).
 Consumers: SEG-133-T003 (ABI 2), SEG-133-T005 (Luau), SEG-137-T004, SEG-138-T001/T002/T003/T004/T005/T006/T007, SEG-145-T001, SEG-147-T004, SEG-148-T005, SEG-141-T003.
 
@@ -44,7 +44,7 @@ Rules that apply to every phase:
 
 | Platform / CPU | Phase availability | Writes | Function hooks |
 |---|---|---|---|
-| Genesis M68K (reference) | all phases | `m68k.work_ram` | per spike SEG-138-T003; **no promise until GO** |
+| Genesis M68K (reference) | all phases | `m68k.work_ram` | **GO** (SEG-138-T003, ADR 0298): statically called subroutines in immutable ROM |
 | Genesis Z80 (sound) | none of its own; frame phases are driven from the M68K timeline | none (`z80.ram` not writable) | none |
 | Master System Z80 | all phases at frame boundaries (SEG-147-T004) | `z80.work_ram` (mirror is one space) | per spike SEG-147-T003 |
 | Sega CD main M68K | all phases at the Sega CD barrier (stop strictly before VBlank onset, before the input sample) | `main.work_ram` | per spike SEG-148-T004 |
@@ -72,7 +72,7 @@ decoding, no patching of running code and no runtime site discovery. CPU-defined
 
 | Site class | Supported | Rejection for the unsupported variant (stable class) |
 |---|---|---|
-| Entry of a function that is a statically known call target (subroutine entry) in code the build compiled | yes (after SEG-138-T003 GO) | address mid-instruction: `E_HOOK_MID_INSTRUCTION`; address not a function entry the build knows: `E_HOOK_NOT_FUNCTION_ENTRY` |
+| Entry of a function that is a statically known call target (subroutine entry) in code the build compiled | yes (SEG-138-T003 GO; the exact checks and a negative test per class are in ADR 0298) | address mid-instruction: `E_HOOK_MID_INSTRUCTION`; address not a function entry the build knows: `E_HOOK_NOT_FUNCTION_ENTRY` |
 | Exit: the return of such a function to its caller | yes | function with non-standard returns (computed return, stack manipulation, tail jumps the build cannot classify): `E_HOOK_UNCLASSIFIED_RETURN` |
 | Replacement of such a function (entry hook with `replace`) | yes, with a declared contract (5.3) | contract absent or inconsistent: `E_HOOK_REPLACE_CONTRACT` |
 | Computed/indirect target not statically resolved | no | `E_HOOK_COMPUTED_TARGET` |
@@ -87,7 +87,7 @@ decoding, no patching of running code and no runtime site discovery. CPU-defined
 ### 5.3 Replacement contract
 
 A replacing hook declares: arguments it reads (register and stack slot names for the CPU), results it writes (register set and declared work-RAM effects), flags effect, and an integer **cost in guest cycles** charged for the replaced function.
-The callback must produce the declared results; the declared cost keeps timing deterministic. Missing or undeclared effects are rejected at build time. Replacement and entry/exit hooks never run original code partially.
+The callback must produce the declared results; the declared cost keeps timing deterministic. **Register view (implemented, ADR 0298):** slots 0-7 D0-D7, 8-15 A0-A7, 16 CCR (low 5 bits of SR), 17 the deterministic M68K cycle counter (read only, guest clock / 7 master ticks), 24-31 the stack slot k at entry (the long at A7+4+4k, read only); writable slots are D0-D7, A0-A6 and CCR, only when declared by a replace hook. ABI 2 reaches it as the space `SEGA_GEN_SPACE_M68K_HOOK_REGS` (offset = slot, width 4). Missing or undeclared effects are rejected at build time. Replacement and entry/exit hooks never run original code partially.
 
 ### 5.4 Callback ordering
 
@@ -125,7 +125,7 @@ Tests (to be implemented by SEG-138-T007, SEG-138-T006 and SEG-144-T004, paramet
 5. `fault-isolation`: an induced fault disables the mod, the guest continues; the digests equal the unmodded build from the fault boundary only for guest state not written by the mod before the fault (documented), and the diagnostic is stable.
 6. `incompatible-state`: a state from a different mod set, ABI or capability set is refused with `E_STATE_MOD_MISMATCH`, machine unchanged.
 
-## 8. Evidence required before hooks are implemented (SEG-138-T003 must produce; SEG-138-T004 may not start without a GO or PARTIAL)
+## 8. Evidence required before hooks are implemented (SEG-138-T003 produced it: **GO**, ADR 0298 "Decision 1")
 
 1. How the generated C represents function entry and exit boundaries: whether every statically known call target of the synthetic fixture has a dispatchable entry and a classifiable return.
 2. A synthetic fixture (no commercial data) with entry, exit and replacement hooks proving `noop-hook-equivalence` bit-for-bit over at least 600 frames, including nested calls.
