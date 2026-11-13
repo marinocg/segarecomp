@@ -43,4 +43,4 @@ The pre-registered criterion was not met (the 32:9 producer costs 10.57% of a 60
 - 21:9 and 32:9 (and custom ratios) work wherever the producer exists, with pixel-exact producer output verified against an independent reference at 101, 238, 266, 636, 668 and 672 pixels per side; a sanitizer run is clean on the planner, the producer fixtures and the host matrix.
 - Memory grows only through the fixed maximum allocation; there is no per-frame allocation.
 - Master System keeps its own 80-pixel producer bound and the Sega CD path inherits the Genesis producer's new bound; their coverage declarations stay with their own tasks.
-- No user interface exists yet for the exact ratio; it is a settings-file value (limitation recorded in the audit).
+- No user interface exists yet for the exact ratio; it is a settings-file value (limitation recorded in the audit). While a ratio is set the "Widescreen Width" slider (viewer and launcher) and any profile/patch width are still editable but have no effect, and a rejected plan or an invalid stored ratio gives no user-visible reason (the viewer only shows no extension). Both belong to the follow-up that adds the control.
