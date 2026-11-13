@@ -28,6 +28,10 @@
 
 Dispatching from the viewer (frame boundaries are inside `genesis_runtime_run`, and headless runs must behave identically); a second Luau-specific scheduler (the contract demands one capability model and one order); running callbacks in the middle of a slice without `frame_end` before the snapshot (would break the "state the game used" rule of ABI 1); immediate (unstaged) writes (no transactional rollback).
 
+## Verification (F08 final head)
+
+Local, container: `genesis_mod_scheduler_tests`, `luau_phase_scheduler_test`, `luau_api_test`, the mod/Luau suites, `ci_shard_guard_test` pass; with SDL3 enabled `launcher_mod_variant_test`, `genesis_patch_provider_build_test` and `mod_luau_executable_test` (generated-native F07 HUD, custom-driver link, log JSON round trip) pass. The canonical fast gate (242 tests) had three failures that are not caused by this delivery: `segarecomp_build_command_test` (a generated hook file using `fdopen` under `-std=c11`; code untouched here), `m68k_conformance_harness_test` (subprocess killed after 300 s on the shared host), and a wall-clock assertion of `genesis_mod_scheduler_tests` that flaked under load and was removed (timing is evidence only). The authoritative gate is the exact-head CI of PR #224. An independent adversarial review returned VALID (two low-severity limitations, documented below).
+
 ## Limitations
 
 - `PhaseProvider::overlay()` holds the last render output the Luau callback produced; a host must present it only while the scheduler reports no fault (`GenesisModScheduler::fault.faulted == 0`), because a violation the scheduler alone detects does not clear it.
