@@ -12,7 +12,7 @@ namespace segarecomp::luau {
 namespace {
 
 // The ONLY list of host names a script can reach. A name is added here, in a new ABI minor if it needs a capability the catalogue does not have (native-sdk-abi-2.md section 7).
-constexpr std::array<ApiEntry, 16> kApi = {{
+constexpr std::array<ApiEntry, 17> kApi = {{
     {"sega.log", "host.log", "function", "message:string", "", "all", "Appends one line to the host log (at most 256 bytes, 16 lines per callback; printable ASCII)."},
     {"sega.frame.value", "frame.work_ram", "function", "name:string", "number?", "render",
      "Reads one named integer the host published for this frame (a read-only copy; nil when the host publishes no such value)."},
@@ -22,6 +22,8 @@ constexpr std::array<ApiEntry, 16> kApi = {{
      "Requests a filled rectangle; integers only, clamped to the overlay, rgba is 0xRRGGBBAA, at most 64 requests per callback."},
     {"sega.overlay.text", "overlay.rgba", "function", "x:number,y:number,text:string,rgba:number", "", "render",
      "Requests text in the host's bitmap font (printable ASCII, at most 64 bytes); the origin is clamped to the overlay."},
+    {"sega.scene", "overlay.rgba", "function", "id:string", "", "render",
+     "Names the scene this frame belongs to (a token [a-z0-9_-], at most 32 characters; the last call wins). The host uses it only to count what was delivered per scene against the package's declared geometry; it is a claim, never inferred, and grants nothing."},
     {"sega.mem.read", "memory.read.m68k.work_ram", "function", "space:string,offset:number,width:number", "number", "reset,frame-begin,input,post-input,frame-end",
      "Reads 1, 2 or 4 bytes (big-endian) of a declared work-RAM range; the space is named (\"m68k.work_ram\"); sees this callback's own staged writes; a violation is a fault."},
     {"sega.mem.write", "memory.write.m68k.work_ram", "function", "space:string,offset:number,width:number,value:number", "", "frame-begin,post-input,frame-end",

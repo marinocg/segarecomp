@@ -205,6 +205,7 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
           v->compat_stats.declined[r->compat_reason] += 1U;
         }
       }
+      sv_host_set_scene(v->host, v->ext.compat != NULL && r->sequence == sequence && r->compat_accepted != 0U ? r->scene : ""); /* SEG-139-T004: the provider's own scene name for THIS frame, never inferred */
       return sv_host_present_extended(v->host, rgb, (int)width, (int)height, (int)(width * 3U), sequence, &surface);
     }
   }

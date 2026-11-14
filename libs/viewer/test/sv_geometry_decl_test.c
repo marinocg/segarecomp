@@ -170,6 +170,15 @@ int main(void) {
     CHECK(h->settings.video.widescreen_ratio.num == 21 && h->settings.video.widescreen_ratio.den == 9, "choosing 21:9 stores the exact ratio");
     sv_pages_apply(h, (SvMenuEvent){SV_EVENT_CHANGED, I_WS_RATIO, 4});
     CHECK(h->settings.video.widescreen_ratio.num == 32 && h->settings.video.widescreen_ratio.den == 9, "choosing 32:9 stores the exact ratio");
+    sv_pages_apply(h, (SvMenuEvent){SV_EVENT_CHANGED, I_WS_RATIO, 5});
+    CHECK(h->settings.video.widescreen_ratio.den == 100 && h->settings.video.widescreen_ratio.num == 355, "Custom starts from the ratio in effect (32:9 = 3.56 rounds into the 3.55 bound)");
+    { SvPage *pg = sv_menu_top(&h->menu); int i, slider = 0; for (i = 0; pg != NULL && i < pg->count; ++i) if (pg->items[i].id == I_WS_CUSTOM) slider = 1; CHECK(slider, "Custom shows its own Custom Aspect slider"); }
+    sv_pages_apply(h, (SvMenuEvent){SV_EVENT_CHANGED, I_WS_CUSTOM, 210});
+    CHECK(h->settings.video.widescreen_ratio.num == 210 && h->settings.video.widescreen_ratio.den == 100 && sv_ratio_valid(h->settings.video.widescreen_ratio), "the Custom Aspect slider stores N:100");
+    sv_pages_apply(h, (SvMenuEvent){SV_EVENT_CHANGED, I_WS_CUSTOM, 5000});
+    CHECK(h->settings.video.widescreen_ratio.num == SV_RATIO_CUSTOM_MAX && sv_ratio_valid(h->settings.video.widescreen_ratio), "the slider can never produce an invalid ratio");
+    sv_pages_apply(h, (SvMenuEvent){SV_EVENT_CHANGED, I_WS_CUSTOM, 1});
+    CHECK(h->settings.video.widescreen_ratio.num == SV_RATIO_CUSTOM_MIN && sv_ratio_valid(h->settings.video.widescreen_ratio), "nor below 4:3");
     sv_pages_apply(h, (SvMenuEvent){SV_EVENT_CHANGED, I_WS_RATIO, 0});
     CHECK(h->settings.video.widescreen_ratio.num == 0 && h->settings.video.widescreen_ratio.den == 0, "Slider clears the exact ratio so Widescreen Width applies again");
     sv_pages_close(h);
@@ -181,6 +190,39 @@ int main(void) {
   h = open_host("max=4:3");
   { SvSettings o = *sv_host_settings(h); o.video.widescreen = SV_WIDESCREEN_ORIGINAL; o.video.widescreen_ratio = R(32, 9); sv_host_apply_settings(h, &o); }
   CHECK(present(h, ++seq, 1) == 0 && !sv_host_geometry_fallback(h) && h->ovl_w == 8, "Original with a saved 32:9 ratio does not trip a 4:3 declaration; the HUD stays");
+  sv_host_close(h);
+  remove(g_settings);
+
+  /* an invalid saved ratio is dropped, never clamped, and the viewer says so */
+  { FILE *f = fopen(g_settings, "wb"); if (f != NULL) { fputs("video.widescreen=enhanced_gameplay\nvideo.widescreen_ratio=40:9\n", f); fclose(f); } }
+  h = open_host(NULL);
+  { char note[480];
+    CHECK(h->settings.ratio_rejected && !sv_ratio_valid(h->settings.video.widescreen_ratio), "the invalid saved ratio was dropped and remembered as rejected");
+    sv_host_geometry_note(h, note, sizeof note);
+    CHECK(strstr(note, "was ignored") != NULL && strstr(note, "between 4:3 and 32:9") != NULL, "the Video-page note says the saved aspect was ignored");
+    sv_host_toast(h, "");
+    CHECK(present(h, ++seq, 0) == 0 && toast_has(h, "Saved widescreen aspect ignored"), "the first frame shows a notice about the ignored saved aspect");
+    sv_pages_open_main(h);
+    sv_pages_apply(h, (SvMenuEvent){SV_EVENT_ACTIVATE, I_GO_VIDEO, 0});
+    sv_pages_apply(h, (SvMenuEvent){SV_EVENT_CHANGED, I_WS_RATIO, 2});
+    sv_pages_close(h);
+    CHECK(!h->settings.ratio_rejected, "choosing an aspect clears the rejected state");
+  }
+  sv_host_close(h);
+  remove(g_settings);
+  /* a planner rejection: 32:9 for a 160 x 448 picture needs 716 > 672 pixels per side */
+  h = open_host(NULL);
+  set(h, R(32, 9), 100);
+  { char note[480];
+    sv_host_toast(h, "");
+    CHECK(sv_host_present_extended(h, g_native, 160, 448, 160 * 3, ++seq, NULL) == 0 && h->geom_status == SV_GEOM_TOO_WIDE, "the planner rejects 32:9 for a 160 x 448 picture");
+    CHECK(toast_has(h, "native picture only"), "a planner rejection raises a visible notice");
+    sv_host_geometry_note(h, note, sizeof note);
+    CHECK(strstr(note, "requested 32:9") != NULL && strstr(note, "672") != NULL && strstr(note, "only the native picture is shown") != NULL, "the note explains the rejection");
+    sv_host_toast(h, "");
+    CHECK(sv_host_present_extended(h, g_native, 160, 448, 160 * 3, ++seq, NULL) == 0 && h->toast_count == 0, "the notice is raised on entering the state, not every frame");
+    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, ++seq, NULL) == 0 && h->geom_status == SV_GEOM_OK, "a picture the ratio fits clears the rejection");
+  }
   sv_host_close(h);
   remove(g_settings);
   printf(failures == 0 ? "sv_geometry_decl_test: all checks passed\n" : "sv_geometry_decl_test: %d FAILED\n", failures);

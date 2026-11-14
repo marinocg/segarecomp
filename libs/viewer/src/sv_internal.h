@@ -65,6 +65,7 @@ struct SvHost {
   uint32_t ext_accepted, ext_rejected, tex_creations; /* saturating, bounded diagnostics */
   SvCovAccount cov;            /* SEG-139-T004: the package's geometry declaration and the per-scene, per-component accounting */
   char cov_scene[SV_COV_ID_MAX + 1];
+  SvGeomStatus geom_status;    /* SEG-139: the planner's verdict for the exact ratio on the last extended frame (SV_GEOM_OK when none is set) */
   int cov_fallback;            /* the last extended frame was outside the declared range and used the generic presentation */
   /* SEG-123: host-owned buffers allocated once at open (never per frame): the retained RAW accepted extension (so a style change in the paused menu is
    * applied at once and Raw is exact), the two treated side strips and the pure helper's scratch. */
@@ -165,7 +166,7 @@ enum {
 };
 enum {
   I_RESUME = 1, I_GO_QUICK, I_GO_VIDEO, I_GO_CONTROLS, I_GO_AUDIO, I_GO_SYSTEM, I_QUIT,
-  I_FULLSCREEN, I_SCALE, I_ASPECT, I_WIDESCREEN, I_WS_WIDTH, I_WS_RATIO, I_SIDE_STYLE, I_PRESET, I_VSYNC, I_FPS, I_PERF, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
+  I_FULLSCREEN, I_SCALE, I_ASPECT, I_WIDESCREEN, I_WS_WIDTH, I_WS_RATIO, I_WS_CUSTOM, I_SIDE_STYLE, I_PRESET, I_VSYNC, I_FPS, I_PERF, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
   I_VOLUME, I_MUTE, I_AUDIO_NOTE, I_AUDIO_DEFAULTS,
   I_SHOT, I_RESET, I_INFO,
   I_PLAYER, I_PAD, I_PAD_ASSIGNED, I_DEADZONE, I_MENUKEY, I_CTRL_DEFAULTS, I_GO_PADSTATUS, I_PAD_RESCAN, I_PAD_HID,

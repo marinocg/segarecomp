@@ -1197,6 +1197,7 @@ static int present_frame_impl(SvHost *h, const uint8_t *rgb, int w, int hgt, int
     if (custom != NULL && *custom != '\0') snprintf(hint, sizeof hint, "Pause menu: Esc, %.24s or the gamepad's Back button", custom);
     else snprintf(hint, sizeof hint, "Pause menu: Esc or the gamepad's Back button");
     push_toast(h, hint, 6000u);
+    if (h->settings.ratio_rejected) push_toast(h, "Saved widescreen aspect ignored: not a ratio from 4:3 to 32:9", 6000u);   /* SEG-139: a dropped ratio is said, not silent */
   }
   if (h->last_present_ns != 0) h->frame_ms = h->frame_ms * 0.9 + (double)(now - h->last_present_ns) / 1.0e6 * 0.1;
   h->last_present_ns = now;
@@ -1242,34 +1243,71 @@ void sv_host_set_scene(SvHost *h, const char *scene) {
 size_t sv_host_coverage_json(const SvHost *h, char *buf, size_t cap) { return h != NULL ? sv_cov_report_json(&h->cov, buf, cap) : 0u; }
 int sv_host_geometry_fallback(const SvHost *h) { return h != NULL ? h->cov_fallback : 0; }
 
+static const char *geom_reason(SvGeomStatus st) {
+  switch (st) {
+    case SV_GEOM_TOO_WIDE: return "needs more than 672 extra pixels per side for this picture";
+    case SV_GEOM_BAD_NATIVE: return "does not fit this picture size";
+    case SV_GEOM_BAD_ASPECT: return "is not a supported aspect";
+    default: return "";
+  }
+}
+
 void sv_host_geometry_note(const SvHost *h, char *buf, size_t cap) {
-  char lo[24], hi[24], req[24];
+  char lo[24], hi[24], req[24], part[240];
   const SvCovAccount *a;
   uint64_t cov[SV_COV_COMPONENTS] = {0, 0, 0}, in_frames;
   int si, c;
   if (buf == NULL || cap == 0) return;
   buf[0] = '\0';
-  if (h == NULL || !h->cov.decl.present) return;
+  if (h == NULL) return;
+  /* 1. what happened to the saved ratio and to the planner (F12 acceptance: every rejection is visible) */
+  if (h->settings.ratio_rejected) {
+    snprintf(part, sizeof part, "The saved Widescreen Aspect is not a ratio between 4:3 and 32:9 and was ignored; the width slider applies. ");
+    strncat(buf, part, cap - strlen(buf) - 1u);
+  }
+  if (h->geom_status != SV_GEOM_OK) {
+    (void)sv_ratio_format(h->settings.video.widescreen_ratio, req, sizeof req);
+    snprintf(part, sizeof part, "The requested %s %s, so only the native picture is shown. ", req[0] != '\0' ? req : "aspect", geom_reason(h->geom_status));
+    strncat(buf, part, cap - strlen(buf) - 1u);
+  }
+  /* 2. the package's declaration */
+  if (!h->cov.decl.present) return;
   a = &h->cov;
-  if (a->decl.invalid) { snprintf(buf, cap, "This package's geometry declaration is unreadable: only the native picture is shown."); return; }
+  if (a->decl.invalid) { snprintf(part, sizeof part, "This package's geometry declaration is unreadable: only the native picture is shown."); strncat(buf, part, cap - strlen(buf) - 1u); return; }
   (void)sv_ratio_format(a->decl.min, lo, sizeof lo);
   (void)sv_ratio_format(a->decl.max, hi, sizeof hi);
   if (!sv_geomdecl_in_range(&a->decl, requested_ratio(h))) {
     (void)sv_ratio_format(requested_ratio(h), req, sizeof req);
-    snprintf(buf, cap, "This package supports %s to %s. At the requested %s only the native picture is shown.", lo, hi, req[0] != '\0' ? req : "aspect");
+    snprintf(part, sizeof part, "This package supports %s to %s. At the requested %s only the native picture is shown.", lo, hi, req[0] != '\0' ? req : "aspect");
+    strncat(buf, part, cap - strlen(buf) - 1u);
     return;
   }
   for (si = 0; si <= a->decl.scene_count; ++si)
     for (c = 0; c < SV_COV_COMPONENTS; ++c) cov[c] += a->count[si][c][0];
   in_frames = a->frames - a->outside_frames;
-  snprintf(buf, cap, "This package supports %s to %s. Delivered so far (%llu frames): scenery %llu, HUD %llu, actors %llu.", lo, hi, (unsigned long long)in_frames,
+  snprintf(part, sizeof part, "This package supports %s to %s. Delivered so far (%llu frames): scenery %llu, HUD %llu, actors %llu.", lo, hi, (unsigned long long)in_frames,
            (unsigned long long)cov[SV_COV_SCENERY], (unsigned long long)cov[SV_COV_HUD], (unsigned long long)cov[SV_COV_ACTORS]);
+  strncat(buf, part, cap - strlen(buf) - 1u);
 }
 
 int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, uint64_t sequence, const SvExtendedSurface *ext) {
   /* SEG-121: a surface produced under a higher level than the one now requested (the user stepped down while a frame was pending) is stale for presentation: the picture shown
    * must never contain Level 3 sprites once Level 2 or Original is selected. */
   const int offered = ext != NULL && ext->status != SV_WS_UNAVAILABLE && ext->sequence == sequence;
+  {   /* SEG-139: a planner rejection of the exact ratio (for example needing more than the 672-pixel bound) is shown, once per entry, instead of silently showing the native picture */
+    SvGeomStatus st = SV_GEOM_OK;
+    if (h->settings.video.widescreen != SV_WIDESCREEN_ORIGINAL && sv_ratio_valid(h->settings.video.widescreen_ratio)) {
+      SvGeomPlan plan;
+      st = sv_geom_plan(w, hgt, h->settings.video.aspect, h->settings.video.widescreen_ratio, &plan);
+    }
+    if (st != SV_GEOM_OK && h->geom_status == SV_GEOM_OK) {
+      char r[24], text[96];
+      (void)sv_ratio_format(h->settings.video.widescreen_ratio, r, sizeof r);
+      snprintf(text, sizeof text, "Aspect %s %s: native picture only", r, geom_reason(st));
+      push_toast(h, text, 4000u);
+    }
+    h->geom_status = st;
+  }
   const int accepted = ext != NULL && (int)ext->mode <= (int)h->settings.video.widescreen && sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK;
   if (offered) {
     /* SEG-139-T004: only what the host ACCEPTED counts as delivered (a surface the checks refuse, or one older than the requested level, delivers nothing). Actors = an accepted AUTHORED

@@ -477,6 +477,17 @@ int sega_overlay_rect(lua_State *L) {
   return 0;
 }
 
+int sega_scene(lua_State *L) {   // SEG-139-T004: names the frame's scene; a malformed name is a script error (range), never repaired
+  VmImpl *im = impl_of(L);
+  require_phase(L, Phase::render, "sega.scene");
+  require_args(L, 1, "sega.scene");
+  const std::string_view id = str_arg(L, 1, "sega.scene");
+  const bool token = !id.empty() && id.size() <= 32 && std::all_of(id.begin(), id.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'; });
+  if (!token) binding_fault(L, Fault::range, "sega.scene takes a token of [a-z0-9_-], at most 32 characters");
+  im->staged.scene = std::string(id);
+  return 0;
+}
+
 int sega_overlay_text(lua_State *L) {
   VmImpl *im = impl_of(L);
   require_phase(L, Phase::render, "sega.overlay.text");
@@ -534,6 +545,7 @@ void bind(lua_State *L, VmImpl *im, std::string_view name, lua_CFunction fn) {  
 void install_host(lua_State *L, VmImpl *im) {
   lua_newtable(L);   // sega
   bind(L, im, "sega.log", sega_log);
+  bind(L, im, "sega.scene", sega_scene);
   lua_newtable(L);   // sega.frame
   bind(L, im, "sega.frame.value", sega_frame_value);
   guard_namespace(L, "sega.frame");
