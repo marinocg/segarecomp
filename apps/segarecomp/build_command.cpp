@@ -452,6 +452,17 @@ struct GenesisSoundBuild {
           return static_cast<int>(&job - batch.data());
         }
       }
+      if (job.native_mod) {   // every staged file of the package (headers included, they are on the include path) must still be the verified payload
+        for (const auto &[path, digest] : options.native_mod_units) {
+          std::ifstream staged(path, std::ios::binary);
+          const std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(staged)), std::istreambuf_iterator<char>());
+          if (segarecomp::sha256_hex(bytes) != digest) {
+            failure_detail = "A native source changed after it was verified.";
+            failure_diagnostic = "NATIVE_SOURCE_DIGEST";
+            return static_cast<int>(&job - batch.data());
+          }
+        }
+      }
       if (!job.verify_sha256.empty()) {
         std::ifstream check(job.source, std::ios::binary);
         std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());

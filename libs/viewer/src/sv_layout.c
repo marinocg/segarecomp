@@ -541,7 +541,7 @@ void sv_cov_vsprite(SvCovAccount *a, const SvExtendedSurface *ext, int credit_pi
   else if (ext->actor_stage == SV_ACT_VALIDATED) cov_bump(&a->vs_validated_empty);
   if (credit_picture || credit_left || credit_right) cov_bump(&a->vs_presented);
   if (credit_picture) {
-    const uint32_t pv = ext->actor_pixels_verified - lv - rv, pa = ext->actor_pixels_authored - la - ra;   /* the picture holds what the extension columns do not */
+    const uint32_t pv = ext->actor_pixels_verified > lv + rv ? ext->actor_pixels_verified - lv - rv : 0u, pa = ext->actor_pixels_authored > la + ra ? ext->actor_pixels_authored - la - ra : 0u;   /* the picture holds what the extension columns do not */
     a->vs_pixels_verified += pv;
     a->vs_pixels_authored += pa;
     a->vs_pixels_picture += (uint64_t)pv + pa;
