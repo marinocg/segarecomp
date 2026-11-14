@@ -67,10 +67,10 @@ The 4 MiB Sonic 3 & Knuckles lock-on image is not part of the local `games/` set
 
 Source of truth: [`docs/product/widescreen-32x9-classification.json`](../product/widescreen-32x9-classification.json), checked by `tests/widescreen_classification_test.py` (every studied scene class has a result for each of 4:3, 16:9, 21:9 and 32:9; no presentation-only claim without submitted actors, resident art, a verified-scope scenery source and an observed run; every NOT RUN names its blocker; no address-, digest- or byte-like text). This section is a reading aid and must agree with it.
 
-**Method (private, bounded, repeatable).** Images: the exact Sonic 1 REV00 and Sonic 2 World REV00 images held locally (matched by digest). The Sonic 2 REV01 image and the Sonic 3 & Knuckles lock-on composite are **not in the local set: NOT RUN, nothing is substituted**. The existing 16:9 packages (`sonic1-native-widescreen`, `sonic2-native-widescreen`) are the baseline and were not changed; they were rebuilt from the maintained sources into generated-native viewer programs. Each class was entered by a scripted pad route (`SEGARECOMP_VIEWER_PAD_SCRIPT`: title, the game's own level-select entry for Sonic 1, hold right with a periodic jump for about 40 s), always with `--instruction-budget 45000000`, a 420 s wall timeout, dummy video and audio, and the runbook of section 4. Three kinds of run, all on the same route:
+**Method (private, bounded, repeatable).** Images: the exact Sonic 1 REV00, Sonic 2 World REV00 and Sonic 3 & Knuckles lock-on composite images (matched by digest to the packages). The Sonic 2 REV01 image is **not in the local set: NOT RUN, nothing is substituted**. The existing 16:9 packages (`sonic1-native-widescreen`, `sonic2-native-widescreen`) are the baseline and were not changed; they were rebuilt from the maintained sources into generated-native viewer programs. Each class was entered by a scripted pad route (`SEGARECOMP_VIEWER_PAD_SCRIPT`: title, the game's own level-select entry for Sonic 1, hold right with a periodic jump for about 40 s), always with `--instruction-budget 45000000`, a 420 s wall timeout, dummy video and audio, and the runbook of section 4. Three kinds of run, all on the same route:
 
 1. the *real package* at 16:9, 21:9 and 32:9 (and 4:3 for the cost table): provider acceptance, the coverage report and the performance report;
-2. a *measurement provider on the vanilla image* and 3. the same on the *16:9-package image*: a private, never-published read-only provider (`frame.work_ram`, `frame.vdp`, it declines every frame) that only aggregates, per scene class, the live object-table entries by distance from the picture and their on-screen flag, and the hardware sprite table (sprites fully beside the picture, patterns that are all zero, per-line sprite counts by Y exactly as the hardware limit counts them). The object-table study covers Sonic 1 only; the Sonic 2 object-table layout is not verified here, so Sonic 2 actors are `unverified`, never guessed.
+2. a *measurement provider on the vanilla image* and 3. the same on the *16:9-package image*: a private, never-published read-only provider (`frame.work_ram`, `frame.vdp`, it declines every frame) that only aggregates, per scene class, the live object-table entries by distance from the picture and their on-screen flag, and the hardware sprite table (sprites fully beside the picture, patterns that are all zero, per-line sprite counts by Y exactly as the hardware limit counts them). The object-table study covers Sonic 1 only; the Sonic 2 and Sonic 3 & Knuckles object-table layouts are not verified here, and the Sonic 3 & Knuckles sprite table is a permanently full chain that this probe cannot read meaningfully, so their actors, art and budget are `unverified`, never guessed. The Sonic 3 & Knuckles program had to be built unoptimized (`-O0`, one job) because the sandbox ran out of memory otherwise, so its timings are not comparable with the other two.
 
 Repeatability: the 32:9 run of each title was repeated and gave identical frame, authored, declined and coverage counters; the counters are identical at 16:9, 21:9 and 32:9 because the schema 2 packages accept frames independently of the aspect.
 
@@ -92,6 +92,7 @@ Per scene class (aggregates of the runs above; each pair is vanilla -> 16:9 pack
 | `sonic-1-syz` | 5364 | 4246 | 2.22 / 6.13 | 12.7 -> 47.8 | 0.0 -> 30.9 | 0.0 -> 0.0 | 0.46 -> 1.94 | 0.0 | 16 -> 18 | 65 / 0 |
 | `sonic-1-sbz` | 4856 | 3717 | 2.27 / 8.39 | 2.8 -> 9.4 | 0.7 -> 11.1 | 0.1 -> 0.4 | 0.84 -> 2.98 | 0.4 | 14 -> 14 | 0 / 0 |
 | `sonic-2-ehz1` | 4893 | 3722 | not measured | not measured | not measured | not measured | 0.68 -> 2.51 | 1.2 | 23 -> 23 | 168 / 16 |
+| `sonic-3-and-knuckles-aiz1` | 7691 | 6704 | not measured | not measured | not measured | not measured | invalid probe | invalid probe | invalid probe | invalid probe |
 
 Per class and aspect (T007; 4:3 is the native picture for every class and is `native-only`). `kind` is the feasibility of the claimed component: `gameplay-changing-required` = the margin actors exist, or must exist, beyond what the game submits and widening it changes activation or the sprite budget; `inconclusive` = the evidence cannot name the cause; `unsupported` = the provider declines the scene and only the generic path exists:
 
@@ -127,8 +128,14 @@ Per class and aspect (T007; 4:3 is the native picture for every class and is `na
 | `sonic-2-non-running-screens` | 16:9 | generic-declined | none | unverified | unverified | unverified | **unsupported** | provider_declined_scene |
 | `sonic-2-non-running-screens` | 21:9 | generic-declined | none | unverified | unverified | unverified | **unsupported** | provider_declined_scene, no_virtual_sprite_consumer |
 | `sonic-2-non-running-screens` | 32:9 | generic-declined | none | unverified | unverified | unverified | **unsupported** | provider_declined_scene, no_virtual_sprite_consumer |
+| `sonic-3-and-knuckles-aiz1` | 16:9 | authored-verified-scope | none | unverified | unverified | unverified | **inconclusive** | - |
+| `sonic-3-and-knuckles-aiz1` | 21:9 | authored-unverified | none | unverified | unverified | unverified | **inconclusive** | no_virtual_sprite_consumer |
+| `sonic-3-and-knuckles-aiz1` | 32:9 | authored-unverified | none | unverified | unverified | unverified | **inconclusive** | no_virtual_sprite_consumer |
+| `sonic-3-and-knuckles-non-running-screens` | 16:9 | generic-declined | none | unverified | unverified | unverified | **unsupported** | provider_declined_scene |
+| `sonic-3-and-knuckles-non-running-screens` | 21:9 | generic-declined | none | unverified | unverified | unverified | **unsupported** | provider_declined_scene, no_virtual_sprite_consumer |
+| `sonic-3-and-knuckles-non-running-screens` | 32:9 | generic-declined | none | unverified | unverified | unverified | **unsupported** | provider_declined_scene, no_virtual_sprite_consumer |
 
-`no_virtual_sprite_consumer` is not a runtime rejection: it records that no virtual-sprite path could contribute to that row (section 6). Not run (explicit, with blockers in the JSON): `sonic-1-bosses-final-zone-ending`, `sonic-1-later-acts`, `sonic-2-other-zones-and-special-stage`, `sonic-2-presentation-only-variant`, the REV01 image of Sonic 2, and `sonic-3-and-knuckles-all-scene-classes` (image absent). **T006 cannot be accepted in full until the Sonic 3 & Knuckles image is available.**
+`no_virtual_sprite_consumer` is not a runtime rejection: it records that no virtual-sprite path could contribute to that row (section 6). Not run (explicit, with blockers in the JSON): `sonic-1-bosses-final-zone-ending`, `sonic-1-later-acts`, `sonic-2-other-zones-and-special-stage`, `sonic-2-presentation-only-variant`, `sonic-3-and-knuckles-other-zones-and-bosses`, `sonic-3-and-knuckles-object-table-and-sprite-study`, and the REV01 image of Sonic 2 (image absent). **T006 is not fully performed: the Sonic 3 & Knuckles object, art and budget study is NOT RUN, so its actors are unverified.**
 
 **Findings that follow from the numbers.**
 
@@ -136,6 +143,7 @@ Per class and aspect (T007; 4:3 is the native picture for every class and is `na
 - **Art.** Sprites the game did submit beside the picture are drawn from resident patterns (blank-pattern share at most 1.2% across classes). That is the only residency evidence; it proves nothing about the art of objects the game never submitted (`unverified` at 21:9 and 32:9), and drawing never proves artwork correct.
 - **Budget.** The 64 px widening already raises the peak per-line sprite count (Marble 16 -> 19 of 20, Spring Yard 16 -> 18); the Sonic 2 package exceeds 20 on 16 frames of Emerald Hill (vanilla: 5). A wider window adds more sprites to lines already near the cap, so the budget constrains 21:9/32:9 actors wherever it was measured near the limit.
 - **Scenery.** Authored scenery is accepted on running levels only (the provider declines the title, level select, title card and fades by design) and the Sonic 1 special stage uses the VDP's own wrapped plane. Nothing here shows the authored columns are right at 21:9 or 32:9.
+- **Sonic 3 & Knuckles (Angel Island act 1).** The provider accepts 6,704 of 7,691 route frames at 16:9, 21:9 and 32:9 alike and serves foreground scenery (unverified beyond 16:9), but offered **no HUD on this route** (cause not diagnosed). Its actors, art and budget are unverified (see method), so the class is `inconclusive`, not a gameplay-changing finding.
 - **No virtual-sprite path exists end to end** (section 6).
 
 **Cost (same route, four aspects run in sequence with no other load; host: Linux aarch64, 4 cores, dummy video, software renderer, optimized generated program).** Emulation span per virtual frame (the producer cost is the difference to 4:3) and process CPU for about 4,900 frames:
@@ -144,8 +152,9 @@ Per class and aspect (T007; 4:3 is the native picture for every class and is `na
 | --- | ---: | ---: | ---: | ---: | --- | ---: |
 | Sonic 1 Green Hill 1 | 3.58 ms | 4.07 ms (+0.49) | 4.86 ms (+1.28) | 6.32 ms (+2.74) | 24.2 / 26.2 / 29.1 / 35.8 | 44-51 MB |
 | Sonic 2 Emerald Hill 1 | 3.59 ms | 4.15 ms (+0.56) | 4.81 ms (+1.22) | 6.35 ms (+2.76) | 23.9 / 26.3 / 28.7 / 35.6 | 50-57 MB |
+| Sonic 3 & Knuckles Angel Island 1 (`-O0`, not comparable) | 5.99 ms | 9.68 ms (+3.69) | 13.34 ms (+7.35) | 21.34 ms (+15.35) | 53.9 / 82.9 / 110.6 / 173.2 | 56-63 MB |
 
-The producer delta at 32:9 is 5.6x the 16:9 delta (the lookup measurement gave 5.2x) and the 32:9 frame stays well inside the 60 Hz budget. One timed run per configuration: indicative, not a benchmark.
+The producer delta at 32:9 is 5.6x the 16:9 delta (the lookup measurement gave 5.2x) and the 32:9 frame stays well inside the 60 Hz budget. One timed run per configuration: indicative, not a benchmark. The unoptimized Sonic 3 & Knuckles program exceeds the 16.7 ms frame budget at 32:9 (p99 frame interval 28.5 ms); that is a property of the `-O0` build, not a finding about an optimized one.
 
 ## 6. What the current system supports and refuses (limitation summary)
 
@@ -156,8 +165,8 @@ The producer delta at 32:9 is 5.6x the 16:9 delta (the lookup measurement gave 5
 | Can a mod author virtual sprites through a supported executable path? | **No.** Neither Luau nor a native provider can submit them. | ADR 0303 Limitations |
 | Side-column sprite drawing? | **No.** The compositor works in native-picture coordinates only. | ADR 0303 decision 3 |
 | Which actor-coverage claims are available? | **None.** A declared `actors` component reports `missing` in every shipped program; the accounting contract (ADR 0304) exists and is tested with synthetic fixtures, which prove nothing about gameplay. | `sv_scene_rejection_test`, `sv_coverage_test` |
-| Which Sonic scenes need game-specific gameplay changes? | Actor visibility beyond 64 px at 21:9/32:9 in every studied Sonic 1 running class (Green Hill, Labyrinth, Marble, Star Light, Spring Yard, Scrap Brain, act 1 each). Sonic 2 and Sonic 3 & Knuckles: not established (the Sonic 2 object table is unverified, Sonic 3 & Knuckles is NOT RUN). | section 5 |
-| Findings needing follow-up | A and B below; per-title window/object-loading changes in `segarecomp-patches` only if wider actor visibility is wanted; the Sonic 3 & Knuckles and Sonic 2 REV01 runs; routes for other zones, acts and special stages; a verified Sonic 2 object table; a left-moving object-loading measurement. | section 7 |
+| Which Sonic scenes need game-specific gameplay changes? | Actor visibility beyond 64 px at 21:9/32:9 in every studied Sonic 1 running class (Green Hill, Labyrinth, Marble, Star Light, Spring Yard, Scrap Brain, act 1 each). Sonic 2 and Sonic 3 & Knuckles: not established (their object tables are unverified). | section 5 |
+| Findings needing follow-up | A and B below; per-title window/object-loading changes in `segarecomp-patches` only if wider actor visibility is wanted; the Sonic 2 REV01 run, the Sonic 3 & Knuckles object/art/budget study and its missing HUD on the route; routes for other zones, acts and special stages; a verified Sonic 2 object table; a left-moving object-loading measurement. | section 7 |
 
 ## 7. Post-F15 handoff: missing product capabilities (not tasks created by F15)
 

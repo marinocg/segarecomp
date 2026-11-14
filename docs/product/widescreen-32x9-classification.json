@@ -1033,17 +1033,175 @@
       "images": [
         {
           "id": "lock-on-composite-jue",
-          "revision": "lock-on composite (JUE)",
-          "status": "NOT RUN",
-          "blocker": "the 4 MiB lock-on composite image is not in the local games set; no other title's evidence is substituted"
+          "revision": "lock-on composite (JUE), 4 MiB",
+          "status": "studied"
         }
       ],
-      "scene_classes": [],
+      "scene_classes": [
+        {
+          "id": "sonic-3-and-knuckles-aiz1",
+          "name": "Angel Island act 1 (running level, including the opening sequence)",
+          "image": "lock-on-composite-jue",
+          "route": "bounded scripted pad route (title, save menu and character select by repeated start, hold right with periodic jump), 90 M instruction budget, 420 s wall timeout, dummy video/audio",
+          "observations": {
+            "route_frames": 7691,
+            "provider_authored_frames": 6704,
+            "provider_hud_frames": 0,
+            "provider_declined_frames": 987,
+            "authored_identical_at_16_9_21_9_32_9": true,
+            "repeat_32_9_identical": true,
+            "running_frames": 6778,
+            "object_table_measured": false,
+            "sprite_table_probe_valid": false,
+            "probe_note": "the sprite table is a permanently full 80-entry chain, so used and parked entries cannot be separated"
+          },
+          "classification": {
+            "scenery": "authored-unverified",
+            "actors": "unverified",
+            "art": "unverified",
+            "budget": "unverified",
+            "feasibility_32x9": "inconclusive",
+            "rationale": "The provider accepts most frames and serves foreground scenery, but it supplied no HUD on this route (cause not diagnosed) and nothing established whether objects exist, are submitted or have resident art beyond the picture, so no cause can be named."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "authored-verified-scope",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "authored-verified-scope",
+              "kind": "inconclusive",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": []
+            },
+            "21:9": {
+              "scenery": "authored-unverified",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "authored-unverified",
+              "kind": "inconclusive",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "authored-unverified",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "authored-unverified",
+              "kind": "inconclusive",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run+source-analysis",
+          "repeatable": true
+        },
+        {
+          "id": "sonic-3-and-knuckles-non-running-screens",
+          "name": "Non-running screens (logos, title, menus, fades)",
+          "image": "lock-on-composite-jue",
+          "route": "the first frames of the route above",
+          "observations": {
+            "declined_frames_in_aiz_route": 987,
+            "route_frames": 7691,
+            "declined_reason": "unsupported scene"
+          },
+          "classification": {
+            "scenery": "generic-declined",
+            "actors": "unverified",
+            "art": "unverified",
+            "budget": "unverified",
+            "feasibility_32x9": "unsupported",
+            "rationale": "The provider declines these frames by design, so the host serves the generic path; no authored content exists for them."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "generic-declined",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "unsupported",
+              "evidence": "observed-run",
+              "fallback_reasons": [
+                "provider_declined_scene"
+              ]
+            },
+            "21:9": {
+              "scenery": "generic-declined",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "unsupported",
+              "evidence": "observed-run",
+              "fallback_reasons": [
+                "provider_declined_scene",
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "generic-declined",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "unsupported",
+              "evidence": "observed-run",
+              "fallback_reasons": [
+                "provider_declined_scene",
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run",
+          "repeatable": true
+        }
+      ],
       "not_run": [
         {
-          "id": "sonic-3-and-knuckles-all-scene-classes",
+          "id": "sonic-3-and-knuckles-other-zones-and-bosses",
           "result": "NOT RUN",
-          "blocker": "the required image is unavailable, so no scene class, object, art or scenery study could be performed; a missing required title prevents full T006 acceptance"
+          "blocker": "only the first act of the first zone was entered; no bounded route to other zones, bosses, special stages or other character routes was established"
+        },
+        {
+          "id": "sonic-3-and-knuckles-object-table-and-sprite-study",
+          "result": "NOT RUN",
+          "blocker": "the object table layout is not verified and the hardware sprite table is a permanently full chain, so the probe used for the other titles cannot separate used from parked entries; actors, art and budget stay unverified"
         }
       ]
     }
