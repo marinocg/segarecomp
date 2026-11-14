@@ -98,6 +98,8 @@ struct Mock {
   bool bad_overlay = false;
   unsigned layers_n = 0;           // SEG-140-T004: positioned layers the mock supplies
   bool bad_layer_offset = false;
+  int bad_layer_index = -1;        // only this descriptor's image leaves the buffer
+  unsigned over_count = 0;         // report this many layers (more than the descriptor array holds)
   bool no_fixed = false;           // a layers-only provider
 } g_mock;
 std::vector<uint8_t> g_layer_buf(GENESIS_COMPAT_LAYER_BYTES);
@@ -139,10 +141,11 @@ int mock_hud(void *state, GenesisCompatOverlay *o) {
       GenesisCompatLayer &l = o->layers[i];
       l = GenesisCompatLayer{};
       l.width = 4; l.height = 4; l.anchor = (uint8_t)(i % 9); l.reference = (uint8_t)(i % 2); l.z = (uint8_t)i; l.dx = (int16_t)(i + 1); l.dy = (int16_t)-(int)i;
-      l.offset = m->bad_layer_offset ? GENESIS_COMPAT_LAYER_BYTES - 8U : i * 64U;
-      for (unsigned p = 0; p < 16; ++p) if (!m->bad_layer_offset) { o->layer_rgba[l.offset + p * 4] = (uint8_t)(50 + i); o->layer_rgba[l.offset + p * 4 + 3] = 255; }
+      const bool bad = m->bad_layer_offset || (int)i == m->bad_layer_index;
+      l.offset = bad ? GENESIS_COMPAT_LAYER_BYTES - 8U : i * 64U;
+      for (unsigned p = 0; p < 16; ++p) if (!bad) { o->layer_rgba[l.offset + p * 4] = (uint8_t)(50 + i); o->layer_rgba[l.offset + p * 4 + 3] = 255; }
     }
-    o->layer_count = m->layers_n;
+    o->layer_count = m->over_count != 0 ? m->over_count : m->layers_n;
   }
   return 1;
 }
@@ -281,7 +284,14 @@ void generic_hook() {
     check(lo.rc == 0 && lo.res.overlay_w == 0 && lo.res.layer_count == 3, "a layers-only provider delivers its layers without a fixed overlay");
     g_mock.no_fixed = false; g_mock.bad_layer_offset = true;
     const Out bo = produce(sc, ext);
-    check(bo.rc == 0 && bo.res.layer_count == 0 && bo.res.overlay_w == 12 && bo.res.authored == 1, "a layer whose pixels would leave the host's buffer drops every layer; the HUD and the frame are unaffected");
+    check(bo.rc == 0 && bo.res.layer_count == 3 && bo.res.layer_bad == 7U && bo.res.overlay_w == 12 && bo.res.authored == 1, "bad_layer_offset: all three descriptors are flagged; the HUD and the frame are unaffected");
+    g_mock.bad_layer_offset = false; g_mock.bad_layer_index = 1;
+    const Out mid = produce(sc, ext);
+    check(mid.rc == 0 && mid.res.layer_count == 3 && mid.res.layer_bad == 2U && mid.res.layers[0].offset == 0 && mid.res.layers[2].offset == 128 && mid.res.layers[0].z == 0 && mid.res.layers[2].z == 2, "one bad descriptor between two valid ones: only it is flagged; its siblings keep their slots, offsets and z");
+    g_mock.bad_layer_index = -1; g_mock.over_count = 9;
+    const Out ov = produce(sc, ext);
+    check(ov.rc == 0 && ov.res.layer_count == 9 && ov.res.layer_bad == 0U && ov.res.layers[2].offset == 128, "more than four submitted: the count is reported, only four descriptors are read");
+    g_mock.over_count = 0; g_mock.bad_layer_offset = true;
     ext.layer_rgba = nullptr; g_mock.bad_layer_offset = false;
     const Out nb = produce(sc, ext);
     check(nb.rc == 0 && nb.res.layer_count == 0 && nb.res.overlay_w == 12, "an adapter without a layer buffer receives no layers (the provider is not even offered a buffer)");

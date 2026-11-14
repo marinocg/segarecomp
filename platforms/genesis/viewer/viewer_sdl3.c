@@ -203,17 +203,17 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
             surface.overlay_fy = (int)r->overlay_fy;
             v->compat_stats.hud_frames += 1U;
           }
-          if (r->layer_count > 0U && r->layer_count <= GENESIS_COMPAT_LAYERS_MAX) {   /* SEG-140-T004: the host validates each layer against the live geometry; this only maps the transport */
-            for (unsigned i = 0U; i < r->layer_count; ++i) {
+          if (r->layer_count > 0U) {   /* SEG-140-T004: the host validates each layer against the live geometry; this only maps the transport */
+            for (unsigned i = 0U; i < r->layer_count && i < GENESIS_COMPAT_LAYERS_MAX; ++i) {
               const GenesisCompatLayer *l = &r->layers[i];
               SvOverlayLayer *d = &g_layer_desc[i];
               memset(d, 0, sizeof *d);
-              d->rgba = g_compat_layers + l->offset;   /* the runtime already checked offset + size against the buffer */
+              d->rgba = (r->layer_bad >> i & 1U) != 0U ? NULL : g_compat_layers + l->offset;   /* a flagged descriptor never forms a pointer: the host rejects it (no_image / size) */
               d->w = (int)l->width; d->h = (int)l->height; d->anchor = (int)l->anchor; d->reference = (int)l->reference; d->z = (int)l->z; d->dx = (int)l->dx; d->dy = (int)l->dy;
               d->has_clip = l->has_clip != 0U; d->clip_x = (int)l->clip_x; d->clip_y = (int)l->clip_y; d->clip_w = (int)l->clip_w; d->clip_h = (int)l->clip_h;
             }
             surface.layers = g_layer_desc;
-            surface.layer_count = (int)r->layer_count;
+            surface.layer_count = (int)r->layer_count;   /* beyond four: the host reports the extras as rejected by count */
           }
         } else if (r->compat_reason < 8U) {
           v->compat_stats.declined[r->compat_reason] += 1U;

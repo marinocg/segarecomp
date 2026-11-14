@@ -1362,7 +1362,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   uint8_t compat_reason = 0U;
   uint32_t compat_faults = 0U;
   uint16_t compat_overlay_w = 0U, compat_overlay_h = 0U, compat_overlay_fx = 0U, compat_overlay_fy = 0U;
-  uint32_t compat_layer_count = 0U;
+  uint32_t compat_layer_count = 0U, compat_layer_bad = 0U;
   GenesisCompatLayer compat_layers[GENESIS_COMPAT_LAYERS_MAX] = {{0}};
   GenesisVdpCandidatePixel sprite_row[GENESIS_EXT_MAX_WIDTH]; /* Level 3: the row's sprite layer over columns -side .. width + side - 1 */
   if (out == NULL) return -1;
@@ -1539,17 +1539,17 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
         overlay.width = 0U;
         overlay.height = 0U;
       }
-      /* The layer transport is checked here (count, and that every image lies inside the host's buffer); whether a layer fits the live geometry is the host's decision, with a diagnostic. */
-      if (drew && target->layer_rgba != NULL && overlay.layer_count <= GENESIS_COMPAT_LAYERS_MAX) {
-        unsigned ok = 1U;
-        for (uint32_t i = 0U; i < overlay.layer_count; ++i) {
+      /* The layer transport is checked PER LAYER (SEG-140-T004, ADR 0303): a descriptor whose image would leave the host's buffer is flagged (bit i of `compat_layer_bad`) and keeps its
+       * slot, so the presenter rejects exactly that layer with a diagnostic and never forms a pointer to it; its valid siblings keep their order and z. Descriptors beyond the four
+       * the host holds are only counted (the presenter reports them as rejected by count). */
+      if (drew && target->layer_rgba != NULL) {
+        const uint32_t n = overlay.layer_count < GENESIS_COMPAT_LAYERS_MAX ? overlay.layer_count : GENESIS_COMPAT_LAYERS_MAX;
+        compat_layer_count = overlay.layer_count < 255U ? overlay.layer_count : 255U;
+        for (uint32_t i = 0U; i < n; ++i) {
           const GenesisCompatLayer *l = &overlay.layers[i];
-          if ((uint64_t)l->offset + (uint64_t)l->width * (uint64_t)l->height * 4U > GENESIS_COMPAT_LAYER_BYTES || l->width == 0U || l->height == 0U) ok = 0U;
+          if (l->width == 0U || l->height == 0U || (uint64_t)l->offset + (uint64_t)l->width * (uint64_t)l->height * 4U > GENESIS_COMPAT_LAYER_BYTES) compat_layer_bad |= 1U << i;
         }
-        if (ok) {
-          compat_layer_count = overlay.layer_count;
-          memcpy(compat_layers, overlay.layers, sizeof compat_layers);
-        }
+        memcpy(compat_layers, overlay.layers, sizeof compat_layers);
       }
     }
     compat_overlay_w = overlay.width;
@@ -1573,6 +1573,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   out->overlay_fx = compat_overlay_fx;
   out->overlay_fy = compat_overlay_fy;
   out->layer_count = (uint8_t)compat_layer_count;
+  out->layer_bad = (uint8_t)compat_layer_bad;
   memcpy(out->layers, compat_layers, sizeof out->layers);
   out->native_w = (uint16_t)width;
   out->native_h = (uint16_t)height;
