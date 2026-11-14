@@ -1,3 +1,6 @@
+// SEG-138-T011 (ADR 0305): the same file serves a NATIVE ABI 2 provider (-DSEGARECOMP_MOD_NATIVE: no Luau VM; the provider is the package's compiled C11 source, wrapped so its render output is committed only
+// when the callback did not fault) and, with -DSEGARECOMP_MOD_VIEWER, the played SDL3 program (SEG-138-T010) -- one scheduler adapter for every route, never a second lifecycle.
+//
 // SEG-138-T009 (ADR 0300): the scheduled-mod seam of a HEADLESS generated-native program. `segarecomp build --luau-package` (without a viewer) links this file, the Luau VM, the ONE mod scheduler
 // (mod_scheduler.c) and a constant artifact (luau_artifact.c: compiled scripts, identity, granted capabilities, the declared memory ranges of the exact source revision) into the program. The headless
 // frame capture (frame_capture.c, built with -DSEGARECOMP_CAPTURE_MOD) calls begin/checkpoint/end around its own run loop, so `mod diff-run` and `mod test` observe the SAME guest execution the
@@ -7,8 +10,10 @@
 // no clock, no host RNG. The optional SEGARECOMP_MOD_CHECKPOINT=<frame> performs a save/restore round trip (capture, restore into the same machine, capture again) at the first slice boundary at or
 // after that guest frame; the run then continues, so equal final digests with and without it prove the restore lost nothing.
 #include "segarecomp/luau_api.hpp"
-#include "segarecomp/luau_phase_provider.hpp"
 #include "segarecomp/sha256.hpp"
+#ifndef SEGARECOMP_MOD_NATIVE
+#include "segarecomp/luau_phase_provider.hpp"
+#endif
 
 #ifdef SEGARECOMP_MOD_VIEWER
 #include "luau_hud_pack.hpp"   // SEG-138-T010: the viewer presents the scheduled mod's render output through the existing compatibility seam
@@ -32,6 +37,16 @@ extern "C" {
 #include <vector>
 
 extern "C" {
+#ifdef SEGARECOMP_MOD_NATIVE
+extern const char segarecomp_mod_identity[];             // package identity (64 hex)
+extern const char segarecomp_mod_capabilities[];         // comma separated catalogue names the build granted
+extern const char segarecomp_mod_id[];
+extern const unsigned long long segarecomp_mod_caps_required[2], segarecomp_mod_caps_optional[2];   // bitsets by capability id
+const SegaModProvider *segarecomp_mod_provider(void **state_out);                                    // the package's ABI 2 entry symbol
+#define MOD_IDENTITY segarecomp_mod_identity
+#define MOD_CAPABILITIES segarecomp_mod_capabilities
+#define MOD_ID segarecomp_mod_id
+#else
 extern const unsigned char segarecomp_luau_artifact[];
 extern const unsigned long segarecomp_luau_artifact_size;
 extern const char segarecomp_luau_identity[];
@@ -39,6 +54,10 @@ extern const char segarecomp_luau_bytecode_digest[];
 extern const char segarecomp_luau_capabilities[];
 extern const unsigned long segarecomp_luau_memory_bytes, segarecomp_luau_budget_units;
 extern const char segarecomp_luau_mod_id[];
+#define MOD_IDENTITY segarecomp_luau_identity
+#define MOD_CAPABILITIES segarecomp_luau_capabilities
+#define MOD_ID segarecomp_luau_mod_id
+#endif
 // The scheduled-path constants (written by the build next to the artifact).
 extern const char segarecomp_mod_effective_sha256[];
 extern const unsigned long segarecomp_mod_state_schema;
@@ -51,7 +70,14 @@ namespace {
 using namespace segarecomp;
 
 struct Mod {
+#ifndef SEGARECOMP_MOD_NATIVE
   std::unique_ptr<luau::PhaseProvider> provider;
+#else
+  SegaModProvider wrapper{};                 // the package's provider table with `phase` replaced (render output commit)
+  void (*native_phase_entry)(void *, const SegaModHost *) = nullptr;
+  luau::Output staged, visible;              // the render callback in flight / the last committed render output
+  int target = 0;
+#endif
   std::unique_ptr<GenesisModScheduler> scheduler;
   GenesisSnapshotModState snapshot{};
   GenesisModRange ranges[GENESIS_MOD_RANGES_MAX]{};
@@ -92,7 +118,7 @@ void log_sink(void *, const char *line, std::uint32_t length) {
 }
 
 void identity_bytes(std::uint8_t out[32]) {
-  for (unsigned i = 0; i < 32U; ++i) out[i] = static_cast<std::uint8_t>(std::strtoul(std::string(segarecomp_luau_identity + i * 2U, 2U).c_str(), nullptr, 16));
+  for (unsigned i = 0; i < 32U; ++i) out[i] = static_cast<std::uint8_t>(std::strtoul(std::string(MOD_IDENTITY + i * 2U, 2U).c_str(), nullptr, 16));
 }
 
 void snapshot_identity(GenesisSnapshotIdentity &id) {
@@ -101,12 +127,93 @@ void snapshot_identity(GenesisSnapshotIdentity &id) {
   identity_bytes(id.variant_sha256);
 }
 
+
+// The last committed render output of the attached mod, whichever route produced it.
+struct RenderView {
+  const std::vector<luau::OverlayOp> *ops;
+  const std::vector<luau::OverlayLayerDecl> *layers;
+  const std::string *scene;
+};
+RenderView render_view() {
+#ifdef SEGARECOMP_MOD_NATIVE
+  return {&g.visible.overlay, &g.visible.layers, &g.visible.scene};
+#else
+  return {&g.provider->overlay(), &g.provider->layers(), &g.provider->scene()};
+#endif
+}
+
+#ifdef SEGARECOMP_MOD_NATIVE
+// ---- SEG-138-T011: the typed ABI 2 render API (SegaGenesisRenderApi). The rules are luau_api.cpp's (shared with the Luau bindings); a refusal is a fault of the callback with the scheduler's stable cause. ----
+bool in_render() { return g.scheduler != nullptr && g.scheduler->in_callback != 0U && g.scheduler->phase == SEGA_MOD_PHASE_RENDER; }
+int refused_phase() { genesis_mod_fault_current("phase"); return SEGA_MOD_E_PHASE; }
+int answer(const luau::OverlayCall &r) {
+  if (r.status == luau::OverlayCall::Status::ok) return SEGA_MOD_OK;
+  const bool budget = r.status == luau::OverlayCall::Status::budget;
+  genesis_mod_fault_current(budget ? "budget" : "range");
+  return budget ? SEGA_MOD_E_BUDGET : SEGA_MOD_E_RANGE;
+}
+int api_overlay_layer(std::uint32_t index, std::uint32_t anchor, std::uint32_t reference, std::int32_t dx, std::int32_t dy, std::uint32_t w, std::uint32_t h, std::uint32_t z) {
+  if (!in_render()) return refused_phase();
+  luau::OverlayLayerDecl d;
+  d.index = static_cast<int>(index > 1000U ? 1000U : index);
+  d.anchor = static_cast<int>(anchor > 1000U ? 1000U : anchor);
+  d.reference = static_cast<int>(reference > 1000U ? 1000U : reference);
+  d.dx = dx;
+  d.dy = dy;
+  d.w = static_cast<int>(w > 100000U ? 100000U : w);
+  d.h = static_cast<int>(h > 100000U ? 100000U : h);
+  d.z = static_cast<int>(z > 1000U ? 1000U : z);
+  return answer(luau::overlay_declare_layer(g.staged, d));
+}
+int api_overlay_target(std::uint32_t index) { return in_render() ? answer(luau::overlay_select_target(g.staged, g.target, index)) : refused_phase(); }
+int api_overlay_rect(std::int32_t x, std::int32_t y, std::int32_t w, std::int32_t h, std::uint32_t rgba) {
+  return in_render() ? answer(luau::overlay_rect(g.staged, g.target, x, y, w, h, rgba)) : refused_phase();
+}
+int api_overlay_text(std::int32_t x, std::int32_t y, const char *ascii, std::uint32_t len, std::uint32_t rgba) {
+  if (!in_render()) return refused_phase();
+  if (ascii == nullptr && len != 0U) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }
+  return answer(luau::overlay_text(g.staged, g.target, x, y, std::string_view(ascii != nullptr ? ascii : "", len), rgba));
+}
+int api_scene(const char *id, std::uint32_t len) {
+  if (!in_render()) return refused_phase();
+  if (id == nullptr) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }
+  return answer(luau::overlay_scene(g.staged, std::string_view(id, len)));
+}
+SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr}};
+
+// The provider's `phase` entry, wrapped: a render callback starts from an empty staging area, and what it staged becomes visible only if the callback finished without a fault (a faulted callback leaves nothing).
+void wrapped_phase(void *state, const SegaModHost *host) {
+  const bool render = host->phase == SEGA_MOD_PHASE_RENDER;
+  if (render) { g.staged = luau::Output{}; g.target = 0; g.visible = luau::Output{}; }
+  g.native_phase_entry(state, host);
+  if (render && g.scheduler->fault_status == SEGA_MOD_OK && g.scheduler->external_cause == nullptr) g.visible = std::move(g.staged);
+  if (render) g.staged = luau::Output{};
+}
+#endif
+
 }  // namespace
 
 extern "C" {
 
 // 0 = the mod is attached (or there is none to attach); nonzero = refused (the program must not run a half-configured mod: the caller exits).
 int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
+  g.scheduler = std::make_unique<GenesisModScheduler>();
+  GenesisModConfig c{};
+  c.mod_id = MOD_ID;
+#ifdef SEGARECOMP_MOD_NATIVE
+  void *native_state = nullptr;
+  const SegaModProvider *native = segarecomp_mod_provider(&native_state);
+  if (native == nullptr || native->phase == nullptr) { g.refused = true; g.refusal = "E_ABI_ENTRY_MISSING"; std::fprintf(stderr, "MOD_REFUSED {\"class\":\"E_ABI_ENTRY_MISSING\"}\n"); return 1; }
+  std::memcpy(&g.wrapper, native, native->size < sizeof g.wrapper ? native->size : sizeof g.wrapper);   // a table smaller than the ABI's is refused by the scheduler's negotiation (E_ABI_TABLE_SIZE), never read past
+  g.native_phase_entry = native->phase;
+  g.wrapper.phase = wrapped_phase;
+  c.provider = &g.wrapper;
+  c.provider_state = native_state;
+  c.phase_mask = (1U << SEGA_MOD_PHASE_RESET) | (1U << SEGA_MOD_PHASE_FRAME_BEGIN) | (1U << SEGA_MOD_PHASE_INPUT) | (1U << SEGA_MOD_PHASE_POST_INPUT) | (1U << SEGA_MOD_PHASE_FRAME_END) | (1U << SEGA_MOD_PHASE_RENDER);
+  c.required[0] = segarecomp_mod_caps_required[0]; c.required[1] = segarecomp_mod_caps_required[1];
+  c.optional[0] = segarecomp_mod_caps_optional[0]; c.optional[1] = segarecomp_mod_caps_optional[1];
+  c.render_api = &g_render_api;
+#else
   const std::span<const std::uint8_t> stored(segarecomp_luau_artifact, static_cast<std::size_t>(segarecomp_luau_artifact_size));
   const luau::CompileResult loaded = luau::load_stored(segarecomp_luau_identity, stored, segarecomp_luau_bytecode_digest);
   if (!loaded.ok) { g.refused = true; g.refusal = loaded.rejection.code; std::fprintf(stderr, "MOD_REFUSED {\"class\":\"%s\"}\n", loaded.rejection.code.c_str()); return 1; }
@@ -124,13 +231,11 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
   std::string error;
   g.provider = luau::PhaseProvider::create(segarecomp_luau_identity, loaded.compiled, limits, host, [](const char *cause) { genesis_mod_fault_current(cause); }, error);
   if (!g.provider) { g.refused = true; g.refusal = error; std::fprintf(stderr, "MOD_REFUSED {\"class\":\"%s\"}\n", error.c_str()); return 1; }
-  g.scheduler = std::make_unique<GenesisModScheduler>();
-  GenesisModConfig c{};
-  c.mod_id = segarecomp_luau_mod_id;
   c.provider = g.provider->provider();
   c.provider_state = g.provider->state();
   c.phase_mask = g.provider->phase_mask();
   g.provider->capabilities(c.required);
+#endif
   for (unsigned long i = 0; i < segarecomp_mod_range_count && i < GENESIS_MOD_RANGES_MAX; ++i)
     g.ranges[i] = GenesisModRange{static_cast<std::uint32_t>(segarecomp_mod_ranges[i][0]), static_cast<std::uint32_t>(segarecomp_mod_ranges[i][1]), static_cast<std::uint32_t>(segarecomp_mod_ranges[i][2]), static_cast<std::uint32_t>(segarecomp_mod_ranges[i][3])};
   c.ranges = g.ranges;
@@ -171,8 +276,12 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
     g.loaded_digest = hex(bytes.data() + bytes.size() - 32U, 32U);
   }
 #endif
-  std::fprintf(stderr, "MOD_LOADED {\"mod\":\"%s\",\"package_identity\":\"%s\",\"bytecode_digest\":\"%s\",\"capabilities\":\"%s\",\"ranges\":%lu}\n", segarecomp_luau_mod_id, segarecomp_luau_identity,
-               segarecomp_luau_bytecode_digest, segarecomp_luau_capabilities, segarecomp_mod_range_count);
+#ifdef SEGARECOMP_MOD_NATIVE
+  std::fprintf(stderr, "MOD_LOADED {\"mod\":\"%s\",\"kind\":\"native\",\"package_identity\":\"%s\",\"capabilities\":\"%s\",\"ranges\":%lu}\n", MOD_ID, MOD_IDENTITY, MOD_CAPABILITIES, segarecomp_mod_range_count);
+#else
+  std::fprintf(stderr, "MOD_LOADED {\"mod\":\"%s\",\"package_identity\":\"%s\",\"bytecode_digest\":\"%s\",\"capabilities\":\"%s\",\"ranges\":%lu}\n", MOD_ID, MOD_IDENTITY,
+               segarecomp_luau_bytecode_digest, MOD_CAPABILITIES, segarecomp_mod_range_count);
+#endif
   return 0;
 }
 
@@ -196,21 +305,22 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
     out->reason = GENESIS_COMPAT_FAULT;
     return;
   }
-  const std::vector<luau::OverlayOp> &ops = g.provider->overlay();
+  const RenderView view = render_view();
+  const std::vector<luau::OverlayOp> &ops = *view.ops;
   if (ops.empty()) return;
   p.image = luau::rasterize_overlay(ops);
   p.fixed = false;
   for (const luau::OverlayOp &op : ops) p.fixed = p.fixed || op.layer == 0;
   p.layers.clear();
-  for (const luau::OverlayLayerDecl &d : g.provider->layers()) p.layers.emplace_back(d, luau::rasterize_layer(d, ops));
+  for (const luau::OverlayLayerDecl &d : *view.layers) p.layers.emplace_back(d, luau::rasterize_layer(d, ops));
   p.have = true;
   out->accepted = GENESIS_COMPAT_HUD;
-  const std::string &scene = g.provider->scene();
+  const std::string &scene = *view.scene;
   if (!scene.empty() && scene.size() <= GENESIS_COMPAT_SCENE_MAX) std::memcpy(out->scene, scene.c_str(), scene.size() + 1U);
 }
 int scenery_word(void *, unsigned, unsigned, int, int, int, uint16_t *) { return 0; }
 int hud(void *, GenesisCompatOverlay *out) { return luau::pack_hud(p.have, p.fixed, p.image, p.layers, out); }
-const GenesisNativeCompat kTable = {GENESIS_NATIVE_COMPAT_ABI, "luau-scheduled-host", 1, GENESIS_COMPAT_HUD, prepare, scenery_word, hud};
+const GenesisNativeCompat kTable = {GENESIS_NATIVE_COMPAT_ABI, "scheduled-mod-host", 1, GENESIS_COMPAT_HUD, prepare, scenery_word, hud};
 }  // namespace
 
 const GenesisNativeCompat *segarecomp_patch_provider(void **state_out) {
@@ -254,14 +364,20 @@ void segarecomp_capture_mod_end(GenesisRuntime *runtime) {
   GenesisModScheduler &s = *g.scheduler;
   std::uint8_t digest[32];
   genesis_mod_write_log_digest(&s, digest);
-  const luau::OverlayImage image = luau::rasterize_overlay(g.provider->overlay());
-  const std::string overlay_hex = g.provider->overlay().empty() ? std::string() : (sha256_hex(std::span<const std::uint8_t>(image.rgba.data(), image.rgba.size())));
+  const RenderView view = render_view();
+  const luau::OverlayImage image = luau::rasterize_overlay(*view.ops);
+  const std::string overlay_hex = view.ops->empty() ? std::string() : (sha256_hex(std::span<const std::uint8_t>(image.rgba.data(), image.rgba.size())));
   std::fprintf(stderr,
                "MOD_SUMMARY {\"mod\":\"%s\",\"faulted\":%s,\"fault\":\"%s\",\"callbacks\":%llu,\"committed_writes\":%llu,\"write_digest\":\"%s\",\"overlay_ops\":%llu,\"overlay_sha256\":\"%s\","
                "\"nondeterministic\":%s,\"roundtrip\":{\"requested\":%s,\"frame\":%llu,\"status\":\"%s\",\"state_sha256\":\"%s\"},\"loaded_state_sha256\":\"%s\"}\n",
-               segarecomp_luau_mod_id, s.fault.faulted != 0U ? "true" : "false", s.fault.faulted != 0U ? json_escaped(s.fault.text).c_str() : "", static_cast<unsigned long long>(s.callbacks_run),
-               static_cast<unsigned long long>(s.write_total), hex(digest, 32).c_str(), static_cast<unsigned long long>(g.provider->overlay().size()), overlay_hex.c_str(),
-               g.provider->nondeterministic() ? "true" : "false", g.checkpoint_wanted ? "true" : "false", static_cast<unsigned long long>(g.checkpoint_frame),
+               MOD_ID, s.fault.faulted != 0U ? "true" : "false", s.fault.faulted != 0U ? json_escaped(s.fault.text).c_str() : "", static_cast<unsigned long long>(s.callbacks_run),
+               static_cast<unsigned long long>(s.write_total), hex(digest, 32).c_str(), static_cast<unsigned long long>(view.ops->size()), overlay_hex.c_str(),
+#ifdef SEGARECOMP_MOD_NATIVE
+               "false",
+#else
+               g.provider->nondeterministic() ? "true" : "false",
+#endif
+               g.checkpoint_wanted ? "true" : "false", static_cast<unsigned long long>(g.checkpoint_frame),
                g.checkpoint_wanted ? (g.checkpoint_done ? g.checkpoint_status.c_str() : "not_reached") : "none", g.checkpoint_digest.c_str(), g.loaded_digest.c_str());
   genesis_mod_scheduler_detach(&s);
 }

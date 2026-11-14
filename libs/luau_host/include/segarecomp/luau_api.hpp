@@ -88,6 +88,20 @@ struct Output {
   std::vector<Note> notes;
 };
 
+// SEG-138-T011 (ADR 0305): the ONE implementation of the overlay request rules (validation, clamping, notes, budgets), shared by the Luau `sega.overlay.*` bindings and the native ABI 2 render API so a
+// native provider and a script that make the same calls stage identical output. `target` is the layer the following rect/text calls draw into (0 = the fixed HUD overlay).
+struct OverlayCall {
+  enum class Status { ok, range, budget } status = Status::ok;
+  std::string message;   // empty when ok
+};
+[[nodiscard]] OverlayCall overlay_declare_layer(Output &out, const OverlayLayerDecl &layer);   // index 1..4, anchor 0..8, reference 0..1, |dx|,|dy| <= 2048, 1 <= w,h <= 128, z 0..3, not declared twice
+[[nodiscard]] OverlayCall overlay_select_target(Output &out, int &target, std::int64_t index);   // 0 or a layer declared earlier in the callback
+[[nodiscard]] OverlayCall overlay_rect(Output &out, int target, std::int64_t x, std::int64_t y, std::int64_t w, std::int64_t h, std::uint32_t rgba);
+[[nodiscard]] OverlayCall overlay_text(Output &out, int target, std::int64_t x, std::int64_t y, std::string_view text, std::uint32_t rgba);
+[[nodiscard]] OverlayCall overlay_scene(Output &out, std::string_view id);   // a token [a-z0-9_-], at most 32 characters
+// Printable ASCII only: control bytes and non-ASCII become '?'; `truncated` is set when `text` was longer than `limit`.
+[[nodiscard]] std::string printable_ascii(std::string_view text, std::size_t limit, bool &truncated);
+
 // The capabilities a VM grants (catalogue names). A binding whose capability is not here exists as a stub that faults with cause `capability`.
 struct HostConfig {
   std::vector<std::string> capabilities;
@@ -105,6 +119,8 @@ struct HostConfig {
 [[nodiscard]] std::vector<std::string> scheduled_capabilities();
 [[nodiscard]] std::optional<mod::Rejection> scheduled_support(const mod::Package &package);
 [[nodiscard]] HostConfig scheduled_host_config(const mod::Manifest &manifest);
+// SEG-138-T011 (ADR 0305): the same scheduled path for a NATIVE ABI 2 package (trust class native, `abi.native` 2, Genesis, native-c11 sources, no Luau, no hooks); same rejection classes.
+[[nodiscard]] std::optional<mod::Rejection> native_scheduled_support(const mod::Package &package);
 
 // ---- overlay rasterization (the fixed HUD overlay path) ----
 struct OverlayImage {

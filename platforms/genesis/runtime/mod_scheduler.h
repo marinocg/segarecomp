@@ -70,6 +70,7 @@ typedef struct GenesisModConfig {
   uint32_t state_schema;       /* the mod's declared state schema, required (>= 1) when `state.mod` is granted; 0 otherwise */
   const GenesisHookSiteInfo *sites; /* the program's generated hook site table: lets hook call frames in flight be saved (by index) and restored; NULL = a state with a frame in flight is not capturable */
   uint32_t site_count;
+  const SegaGenesisRenderApi *render_api; /* SEG-138-T011: the host adapter's render-phase output API (typed ABI 2 feature); published as SegaGenesisFeatures::render only when overlay.rgba is granted; NULL = none */
 } GenesisModConfig;
 
 typedef struct GenesisModWriteRecord {

@@ -1,0 +1,36 @@
+# Native gameplay example (SEG-138-T011, ADR 0305): the NATIVE ABI 2 twin of the Luau gameplay example (../gameplay): the same rule, the same declared range, the same HUD, written as C11.
+# The revision is the deterministic FIXTURE image described in README.md (not a game). Native code is host code: installing it asks for the approval of this exact package identity.
+[mod]
+id = "gameplay-example-native"
+author = "segarecomp examples"
+version = "0.1.0"
+name = "Gameplay example (native)"
+license = "CC0-1.0"
+
+[target]
+platform = "genesis"
+
+[[target.revision]]
+label = "fixture"
+sha256 = "fc7126ee2497cfbc7e1e3337c230a967d21c4c98e44493a4dfd01ae3ff6a5a34"
+
+[[source]]
+kind = "native-c11"
+path = "src/provider.c"
+
+[abi]
+native = 2
+
+[capabilities]
+required = ["host.log", "input.read", "memory.read.m68k.work_ram", "memory.write.m68k.work_ram", "overlay.rgba", "state.mod"]
+
+[state]
+schema = 1
+
+# The score word of the fixture program. This is the ONLY guest memory the mod may touch.
+[[memory]]
+revision = "fixture"
+space = "m68k.work_ram"
+offset = 16
+length = 2
+access = "read-write"

@@ -77,8 +77,8 @@ def main():
         st = h.status(tmp / "modded")["luau"]
         check(st["package_identity"] == ident and st["effective_sha256"] == FIXTURE_SHA and "memory.write.m68k.work_ram" in st["capabilities"], f"status.json records the verified package and its capabilities: {st}")
         vbytes = (tmp / "vanilla/game").read_bytes()
-        check(b"luau-scheduled-host" not in vbytes and b"E_MOD_FAULT" not in vbytes and b"lua_newstate" not in vbytes, "a Vanilla viewer program contains no scheduler, no mod adapter and no Luau VM")
-        check(b"luau-scheduled-host" in (tmp / "modded/game").read_bytes(), "the modded viewer program links the scheduled-mod presenter")
+        check(b"scheduled-mod-host" not in vbytes and b"E_MOD_FAULT" not in vbytes and b"lua_newstate" not in vbytes, "a Vanilla viewer program contains no scheduler, no mod adapter and no Luau VM")
+        check(b"scheduled-mod-host" in (tmp / "modded/game").read_bytes(), "the modded viewer program links the scheduled-mod presenter")
 
         HOLD_C = "0 C\n"
         # ---- the played gameplay effect ----

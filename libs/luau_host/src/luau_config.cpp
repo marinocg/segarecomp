@@ -71,6 +71,25 @@ std::optional<mod::Rejection> scheduled_support(const mod::Package &package) {
   return std::nullopt;
 }
 
+std::optional<mod::Rejection> native_scheduled_support(const mod::Package &package) {
+  const mod::Manifest &m = package.manifest;
+  if (m.platform != "genesis") return mod::Rejection{"E_LIVE_PLATFORM", "native providers run in the generated-native path of Genesis programs only"};
+  if (mod::trust_class(m) != "native") return mod::Rejection{"E_LIVE_TRUST", "only a native ABI 2 package runs here; Luau-only and data-only packages use their own paths"};
+  if (m.abi_native != 2) return mod::Rejection{"E_LIVE_ABI", "only the native ABI 2 provider is linked into a built program"};
+  bool has_native = false;
+  for (const mod::Payload &p : m.payloads) has_native = has_native || p.kind == "native-c11";
+  if (!has_native) return mod::Rejection{"E_LIVE_TRUST", "the package has no native-c11 source"};
+  for (const mod::Payload &p : m.payloads)   // nothing the program does not use may be silently dropped: the native units and the data that make the effective image
+    if (p.kind != "native-c11" && p.kind != "rom-edit-set" && p.kind != "guest-code" && p.kind != "guest-asm" && p.kind != "bps-image")
+      return mod::Rejection{"E_LIVE_PAYLOAD", "the payload " + p.path + " (" + p.kind + ") is not used by the scheduled path; remove it or use a package without it"};
+  if (m.has_hooks) return mod::Rejection{"E_LIVE_CAPABILITY", "function hooks are not linked into a built program yet"};
+  const std::vector<std::string> live = scheduled_capabilities();
+  for (const std::string &c : m.capabilities)
+    if (std::find(live.begin(), live.end(), c) == live.end())
+      return mod::Rejection{"E_LIVE_CAPABILITY", "the capability " + c + " is not supported by the scheduled path (supported: host.log, overlay.rgba, memory.read/write.m68k.work_ram, input.read, input.intercept, state.mod)"};
+  return std::nullopt;
+}
+
 HostConfig scheduled_host_config(const mod::Manifest &manifest) {
   HostConfig h = host_config_for(manifest);
   const std::vector<std::string> live = scheduled_capabilities();

@@ -221,6 +221,99 @@ static OverlayImage raster_ops(int width, int height, int layer, std::span<const
   return img;
 }
 
+namespace {
+constexpr std::int64_t kCoord = 1 << 20;   // the largest coordinate a call may name
+OverlayCall bad(OverlayCall::Status status, std::string message) { return OverlayCall{status, std::move(message)}; }
+void note_to(Output &out, const char *cause, std::string message) {
+  if (out.notes.size() < kNotesMax) out.notes.push_back({cause, std::move(message)});
+}
+const OverlayLayerDecl *layer_of(const Output &out, int index) {
+  for (const OverlayLayerDecl &d : out.layers)
+    if (d.index == index) return &d;
+  return nullptr;
+}
+int width_of(const Output &out, int target) { const OverlayLayerDecl *d = target != 0 ? layer_of(out, target) : nullptr; return d != nullptr ? d->w : kOverlayWidth; }
+int height_of(const Output &out, int target) { const OverlayLayerDecl *d = target != 0 ? layer_of(out, target) : nullptr; return d != nullptr ? d->h : kOverlayHeight; }
+OverlayCall add_op(Output &out, OverlayOp op) {
+  if (out.overlay.size() >= kOverlayOpsPerCallback) return bad(OverlayCall::Status::budget, "sega.overlay request limit exceeded");
+  out.overlay.push_back(std::move(op));
+  return {};
+}
+}  // namespace
+
+std::string printable_ascii(std::string_view text, std::size_t limit, bool &truncated) {
+  truncated = text.size() > limit;
+  std::string out(text.substr(0, limit));
+  for (char &c : out)
+    if (static_cast<unsigned char>(c) < 0x20 || static_cast<unsigned char>(c) > 0x7E) c = '?';
+  return out;
+}
+
+OverlayCall overlay_declare_layer(Output &out, const OverlayLayerDecl &d) {
+  if (d.index < 1 || d.index > kOverlayLayersMax) return bad(OverlayCall::Status::range, "the layer index of sega.overlay.layer is out of range");
+  if (d.anchor < 0 || d.anchor > 8) return bad(OverlayCall::Status::range, "argument 2 of sega.overlay.layer is not a known anchor");
+  if (d.reference < 0 || d.reference > 1) return bad(OverlayCall::Status::range, "argument 3 of sega.overlay.layer must be \"picture\" or \"presentation\"");
+  if (d.dx < -2048 || d.dx > 2048 || d.dy < -2048 || d.dy > 2048 || d.w < 1 || d.w > kOverlayLayerSide || d.h < 1 || d.h > kOverlayLayerSide || d.z < 0 || d.z > kOverlayLayersMax - 1)
+    return bad(OverlayCall::Status::range, "an argument of sega.overlay.layer is out of range");
+  if (layer_of(out, d.index) != nullptr) return bad(OverlayCall::Status::range, "sega.overlay.layer declares a layer that was already declared in this callback");
+  out.layers.push_back(d);
+  return {};
+}
+
+OverlayCall overlay_select_target(Output &out, int &target, std::int64_t index) {
+  if (index < 0 || index > kOverlayLayersMax) return bad(OverlayCall::Status::range, "argument 1 of sega.overlay.target is out of range");
+  target = static_cast<int>(index);
+  if (index != 0 && layer_of(out, target) == nullptr) {
+    target = 0;
+    return bad(OverlayCall::Status::range, "sega.overlay.target selects a layer that has not been declared");
+  }
+  return {};
+}
+
+OverlayCall overlay_rect(Output &out, int target, std::int64_t x, std::int64_t y, std::int64_t w, std::int64_t h, std::uint32_t rgba) {
+  if (x < -kCoord || x > kCoord || y < -kCoord || y > kCoord || w < 0 || w > kCoord || h < 0 || h > kCoord) return bad(OverlayCall::Status::range, "an argument of sega.overlay.rect is out of range");
+  const int target_w = width_of(out, target), target_h = height_of(out, target);
+  const std::int64_t x0 = std::max<std::int64_t>(x, 0), y0 = std::max<std::int64_t>(y, 0);
+  const std::int64_t x1 = std::min<std::int64_t>(x + w, target_w), y1 = std::min<std::int64_t>(y + h, target_h);
+  if (x1 <= x0 || y1 <= y0) {
+    note_to(out, "overlay_clipped", "a sega.overlay.rect has no visible area");
+    return {};
+  }
+  if (x0 != x || y0 != y || x1 - x0 != w || y1 - y0 != h) note_to(out, "overlay_clamped", "a sega.overlay.rect was clamped to the overlay");
+  OverlayOp op;
+  op.layer = target;
+  op.kind = OverlayOp::Kind::rect;
+  op.x = static_cast<int>(x0);
+  op.y = static_cast<int>(y0);
+  op.w = static_cast<int>(x1 - x0);
+  op.h = static_cast<int>(y1 - y0);
+  op.rgba = rgba;
+  return add_op(out, std::move(op));
+}
+
+OverlayCall overlay_text(Output &out, int target, std::int64_t x, std::int64_t y, std::string_view text, std::uint32_t rgba) {
+  if (x < -kCoord || x > kCoord || y < -kCoord || y > kCoord) return bad(OverlayCall::Status::range, "an argument of sega.overlay.text is out of range");
+  const std::int64_t cx = std::clamp<std::int64_t>(x, 0, width_of(out, target) - 1), cy = std::clamp<std::int64_t>(y, 0, height_of(out, target) - 1);
+  if (cx != x || cy != y) note_to(out, "overlay_clamped", "a sega.overlay.text origin was clamped to the overlay");
+  OverlayOp op;
+  op.layer = target;
+  op.kind = OverlayOp::Kind::text;
+  op.x = static_cast<int>(cx);
+  op.y = static_cast<int>(cy);
+  bool truncated = false;
+  op.text = printable_ascii(text, kOverlayTextBytes, truncated);
+  if (truncated) note_to(out, "text_truncated", "a sega.overlay.text string was cut to 64 bytes");
+  op.rgba = rgba;
+  return add_op(out, std::move(op));
+}
+
+OverlayCall overlay_scene(Output &out, std::string_view id) {
+  const bool token = !id.empty() && id.size() <= 32 && std::all_of(id.begin(), id.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'; });
+  if (!token) return bad(OverlayCall::Status::range, "sega.scene takes a token of [a-z0-9_-], at most 32 characters");
+  out.scene = std::string(id);
+  return {};
+}
+
 OverlayImage rasterize_overlay(std::span<const OverlayOp> ops) { return raster_ops(kOverlayWidth, kOverlayHeight, 0, ops); }
 
 OverlayImage rasterize_layer(const OverlayLayerDecl &decl, std::span<const OverlayOp> ops) { return raster_ops(decl.w, decl.h, decl.index, ops); }

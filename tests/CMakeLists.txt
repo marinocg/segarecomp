@@ -1485,6 +1485,12 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST mod_viewer_gameplay_test APPEND PROPERTY LABELS full fast)
   set_property(TEST mod_viewer_gameplay_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_viewer_gameplay_test PROPERTY TIMEOUT 1200)
+  # SEG-138-T011 (ADR 0305): a native ABI 2 provider in built headless and SDL3 programs: the native-versus-Luau twin, mod test / diff-run, state, typed overlay layers, containment and build refusals.
+  add_test(NAME mod_native_viewer_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_native_viewer_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_native_viewer_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST mod_native_viewer_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_native_viewer_test PROPERTY TIMEOUT 1500)
   add_test(NAME genesis_viewer_extension_sdl_test COMMAND genesis_viewer_extension_sdl_test)
   set_property(TEST genesis_viewer_extension_sdl_test APPEND PROPERTY LABELS full fast)
   set_property(TEST genesis_viewer_extension_sdl_test PROPERTY TIMEOUT 240)

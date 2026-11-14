@@ -46,12 +46,12 @@ class Harness:
     def run_cli(self, *args, timeout=900):
         return subprocess.run([self.cli, *map(str, args)], text=True, capture_output=True, timeout=timeout)
 
-    def build(self, rom, out, package=None, identity=None, viewer=True, extra=(), cc=None):
+    def build(self, rom, out, package=None, identity=None, viewer=True, extra=(), cc=None, native=False):
         args = ["build", "--rom", rom, "--output", out, "--cc", cc or self.compiler, "--runtime-dir", self.root / "platforms/genesis", "--optimize", "0", "--runtime-optimize", "1"]
         if viewer:
             args += ["--sdl3-include", self.sdl / "include", "--sdl3-lib", self.sdl / "lib", "--test-frame-seam", "1"]
         if package is not None:
-            args += ["--luau-package", package, "--luau-identity", identity]
+            args += ["--native-package" if native else "--luau-package", package, "--native-identity" if native else "--luau-identity", identity]
         return self.run_cli(*args, *extra)
 
     def status(self, out):
@@ -63,6 +63,23 @@ class Harness:
                  LD_LIBRARY_PATH=str(self.sdl / "lib") + os.pathsep + os.environ.get("LD_LIBRARY_PATH", ""), SEGARECOMP_VIEWER_SETTINGS=str(self.tmp / "viewer-settings.cfg"))
         e.update(more)
         return e
+
+    def headless(self, out, name, pad, frames="64", first="1", ram="16:4", extra=None, budget=4_000_000):
+        """Runs a HEADLESS program under the frame capture (the scripted pad is `<frame>:<port>:<mask>,...`). Returns (process, parsed tagged lines)."""
+        work = self.tmp / ("cap-" + name)
+        work.mkdir(exist_ok=True)
+        env = self.env(SEGARECOMP_CAPTURE_DIR=str(work), SEGARECOMP_CAPTURE_FIRST=first, SEGARECOMP_CAPTURE_COUNT=frames, SEGARECOMP_CAPTURE_SLICE="16", SEGARECOMP_CAPTURE_RAM=ram, SEGARECOMP_PAD_SCRIPT=pad)
+        env.update(extra or {})
+        run = subprocess.run([str(pathlib.Path(out) / "game"), "--instruction-budget", str(budget)], text=True, capture_output=True, env=env, timeout=180)
+        lines = {}
+        for line in run.stderr.splitlines():
+            tag, _, rest = line.partition(" ")
+            if tag in ("CAPTURE_SUMMARY",) + TAGS:
+                try:
+                    lines.setdefault(tag, []).append(json.loads(rest))
+                except ValueError:
+                    lines.setdefault(tag, []).append({"raw": rest})
+        return run, lines
 
     def play(self, out, name, pad=None, save=None, identity=None, rom_sha=None, budget=4_000_000, extra=None):
         """Runs the viewer program once. `pad` = text of SEGARECOMP_VIEWER_PAD_SCRIPT ("<poll> <keys>" lines). Returns (process, parsed tagged lines, frame bmp path, ram bin path)."""
@@ -76,10 +93,7 @@ class Harness:
             extras["SEGARECOMP_VIEWER_PAD_SCRIPT"] = str(pad_file)
         if save is not None:
             pathlib.Path(save).mkdir(parents=True, exist_ok=True)
-            extras.update(SEGARECOMP_SAVE_DIR=str(save), SEGARECOMP_ROM_SHA256=rom_sha, REWIND_INTERVAL="100")
-            extras["SEGARECOMP_REWIND_INTERVAL_MS"] = "100"
-            extras.pop("REWIND_INTERVAL")
-            extras["SEGARECOMP_REWIND"] = "on"
+            extras.update(SEGARECOMP_SAVE_DIR=str(save), SEGARECOMP_ROM_SHA256=rom_sha, SEGARECOMP_REWIND_INTERVAL_MS="100", SEGARECOMP_REWIND="on")
             if identity:
                 extras["SEGARECOMP_SAVE_VARIANT"] = identity
         extras.update(extra or {})

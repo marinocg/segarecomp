@@ -340,14 +340,7 @@ void note(VmImpl *im, const char *cause, std::string message) {
   if (im->staged.notes.size() < kNotesMax) im->staged.notes.push_back({cause, std::move(message)});
 }
 
-// Printable ASCII only: control bytes and non-ASCII become '?', so a diagnostic or an overlay never carries raw script bytes.
-std::string printable(std::string_view text, std::size_t limit, bool &truncated) {
-  truncated = text.size() > limit;
-  std::string out(text.substr(0, limit));
-  for (char &c : out)
-    if (static_cast<unsigned char>(c) < 0x20 || static_cast<unsigned char>(c) > 0x7E) c = '?';
-  return out;
-}
+std::string printable(std::string_view text, std::size_t limit, bool &truncated) { return printable_ascii(text, limit, truncated); }
 
 int sega_log(lua_State *L) {
   VmImpl *im = impl_of(L);
@@ -445,22 +438,10 @@ int sega_frame_value(lua_State *L) {
   return 1;
 }
 
-void add_op(lua_State *L, OverlayOp op) {
-  VmImpl *im = impl_of(L);
-  if (im->staged.overlay.size() >= kOverlayOpsPerCallback) binding_fault(L, Fault::budget, "sega.overlay request limit exceeded");
-  im->staged.overlay.push_back(std::move(op));
+// SEG-138-T011: the overlay rules live in luau_api.cpp (shared with the native ABI 2 render API); the bindings only convert arguments and map a refusal to the callback's fault.
+void overlay_result(lua_State *L, const OverlayCall &r) {
+  if (r.status != OverlayCall::Status::ok) binding_fault(L, r.status == OverlayCall::Status::budget ? Fault::budget : Fault::range, r.message);
 }
-
-constexpr std::int64_t kCoord = 1 << 20;
-
-// SEG-140-T004: the size of the layer the overlay calls currently draw into.
-const OverlayLayerDecl *target_layer(const VmImpl *im) {
-  for (const OverlayLayerDecl &d : im->staged.layers)
-    if (d.index == im->overlay_target) return &d;
-  return nullptr;
-}
-int target_width(const VmImpl *im) { const OverlayLayerDecl *d = im->overlay_target != 0 ? target_layer(im) : nullptr; return d != nullptr ? d->w : kOverlayWidth; }
-int target_height(const VmImpl *im) { const OverlayLayerDecl *d = im->overlay_target != 0 ? target_layer(im) : nullptr; return d != nullptr ? d->h : kOverlayHeight; }
 
 int anchor_index(std::string_view name) {   // the viewer's SvOvAnchor order
   static constexpr std::array<std::string_view, 9> names = {"top_left", "top_center", "top_right", "middle_left", "center", "middle_right", "bottom_left", "bottom_center", "bottom_right"};
@@ -486,9 +467,7 @@ int sega_overlay_layer(lua_State *L) {
   d.w = static_cast<int>(int_arg(L, 6, 1, kOverlayLayerSide, "sega.overlay.layer"));
   d.h = static_cast<int>(int_arg(L, 7, 1, kOverlayLayerSide, "sega.overlay.layer"));
   d.z = static_cast<int>(int_arg(L, 8, 0, kOverlayLayersMax - 1, "sega.overlay.layer"));
-  for (const OverlayLayerDecl &e : im->staged.layers)
-    if (e.index == d.index) binding_fault(L, Fault::range, "sega.overlay.layer declares a layer that was already declared in this callback");
-  im->staged.layers.push_back(d);
+  overlay_result(L, overlay_declare_layer(im->staged, d));
   return 0;
 }
 
@@ -496,12 +475,8 @@ int sega_overlay_target(lua_State *L) {
   VmImpl *im = impl_of(L);
   require_phase(L, Phase::render, "sega.overlay.target");
   require_args(L, 1, "sega.overlay.target");
-  const int index = static_cast<int>(int_arg(L, 1, 0, kOverlayLayersMax, "sega.overlay.target"));
-  im->overlay_target = index;
-  if (index != 0 && target_layer(im) == nullptr) {
-    im->overlay_target = 0;
-    binding_fault(L, Fault::range, "sega.overlay.target selects a layer that has not been declared");
-  }
+  const std::int64_t index = int_arg(L, 1, 0, kOverlayLayersMax, "sega.overlay.target");
+  overlay_result(L, overlay_select_target(im->staged, im->overlay_target, index));
   return 0;
 }
 
@@ -509,26 +484,11 @@ int sega_overlay_rect(lua_State *L) {
   VmImpl *im = impl_of(L);
   require_phase(L, Phase::render, "sega.overlay.rect");
   require_args(L, 5, "sega.overlay.rect");
+  constexpr std::int64_t kCoord = 1 << 20;
   const std::int64_t x = int_arg(L, 1, -kCoord, kCoord, "sega.overlay.rect"), y = int_arg(L, 2, -kCoord, kCoord, "sega.overlay.rect");
   const std::int64_t w = int_arg(L, 3, 0, kCoord, "sega.overlay.rect"), h = int_arg(L, 4, 0, kCoord, "sega.overlay.rect");
   const std::int64_t rgba = int_arg(L, 5, 0, 4294967295LL, "sega.overlay.rect");
-  const int target_w = target_width(im), target_h = target_height(im);
-  const std::int64_t x0 = std::max<std::int64_t>(x, 0), y0 = std::max<std::int64_t>(y, 0);
-  const std::int64_t x1 = std::min<std::int64_t>(x + w, target_w), y1 = std::min<std::int64_t>(y + h, target_h);
-  if (x1 <= x0 || y1 <= y0) {
-    note(im, "overlay_clipped", "a sega.overlay.rect has no visible area");
-    return 0;
-  }
-  if (x0 != x || y0 != y || x1 - x0 != w || y1 - y0 != h) note(im, "overlay_clamped", "a sega.overlay.rect was clamped to the overlay");
-  OverlayOp op;
-  op.layer = im->overlay_target;
-  op.kind = OverlayOp::Kind::rect;
-  op.x = static_cast<int>(x0);
-  op.y = static_cast<int>(y0);
-  op.w = static_cast<int>(x1 - x0);
-  op.h = static_cast<int>(y1 - y0);
-  op.rgba = static_cast<std::uint32_t>(rgba);
-  add_op(L, std::move(op));
+  overlay_result(L, overlay_rect(im->staged, im->overlay_target, x, y, w, h, static_cast<std::uint32_t>(rgba)));
   return 0;
 }
 
@@ -536,10 +496,7 @@ int sega_scene(lua_State *L) {   // SEG-139-T004: names the frame's scene; a mal
   VmImpl *im = impl_of(L);
   require_phase(L, Phase::render, "sega.scene");
   require_args(L, 1, "sega.scene");
-  const std::string_view id = str_arg(L, 1, "sega.scene");
-  const bool token = !id.empty() && id.size() <= 32 && std::all_of(id.begin(), id.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'; });
-  if (!token) binding_fault(L, Fault::range, "sega.scene takes a token of [a-z0-9_-], at most 32 characters");
-  im->staged.scene = std::string(id);
+  overlay_result(L, overlay_scene(im->staged, str_arg(L, 1, "sega.scene")));
   return 0;
 }
 
@@ -547,21 +504,11 @@ int sega_overlay_text(lua_State *L) {
   VmImpl *im = impl_of(L);
   require_phase(L, Phase::render, "sega.overlay.text");
   require_args(L, 4, "sega.overlay.text");
+  constexpr std::int64_t kCoord = 1 << 20;
   const std::int64_t x = int_arg(L, 1, -kCoord, kCoord, "sega.overlay.text"), y = int_arg(L, 2, -kCoord, kCoord, "sega.overlay.text");
   const std::string_view text = str_arg(L, 3, "sega.overlay.text");
   const std::int64_t rgba = int_arg(L, 4, 0, 4294967295LL, "sega.overlay.text");
-  const std::int64_t cx = std::clamp<std::int64_t>(x, 0, target_width(im) - 1), cy = std::clamp<std::int64_t>(y, 0, target_height(im) - 1);
-  if (cx != x || cy != y) note(im, "overlay_clamped", "a sega.overlay.text origin was clamped to the overlay");
-  OverlayOp op;
-  op.layer = im->overlay_target;
-  op.kind = OverlayOp::Kind::text;
-  op.x = static_cast<int>(cx);
-  op.y = static_cast<int>(cy);
-  bool truncated = false;
-  op.text = printable(text, kOverlayTextBytes, truncated);
-  if (truncated) note(im, "text_truncated", "a sega.overlay.text string was cut to 64 bytes");
-  op.rgba = static_cast<std::uint32_t>(rgba);
-  add_op(L, std::move(op));
+  overlay_result(L, overlay_text(im->staged, im->overlay_target, x, y, text, static_cast<std::uint32_t>(rgba)));
   return 0;
 }
 

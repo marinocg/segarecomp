@@ -138,9 +138,16 @@ struct Options {
   // (typed edits / injected guest code / BPS), compiles THAT, compiles the scripts with the pinned trusted compiler in the bounded child and links the verified result into the program as a constant.
   fs::path luau_package;
   std::string luau_identity;
+  // SEG-138-T011 (ADR 0305): a verified single-mod schema 3 NATIVE ABI 2 package (trust class native) linked into the program: its `native-c11` units are compiled by the host with the SDK-only strict C11 flags
+  // and driven by the same scheduler. `--native-identity` is the exact identity the user approved; a package whose identity differs is refused (`NATIVE_IDENTITY_CHANGED`). Native code is host code: approval is the boundary.
+  fs::path native_package;
+  std::string native_identity;
   bool frame_seam = false;   // `--test-frame-seam`: compiles the final-frame automation seam into the viewer program (tests only; never set by the launcher)
   // resolved by the verification step
   bool luau = false;
+  bool native_mod = false;           // SEG-138-T011: the scheduled mod is a native ABI 2 provider (no Luau VM)
+  std::vector<std::pair<fs::path, std::string>> native_mod_units;   // the staged native-c11 files (path, sha256 of the verified package payload); every .c is a compile unit
+  fs::path native_mod_dir;           // <output>/native-mod: staged sources and the constant artifact
   bool luau_scheduled = false;       // SEG-138-T009/T010: the scheduled-mod path (phases, memory ranges): always headless; in a viewer build when the package needs more than the HUD-only ABI 1 seam
   std::string luau_ranges_c;         // the declared ranges of the exact source revision, as C constants
   std::string luau_original_sha256, luau_effective_sha256, luau_bytecode_digest, luau_mod_id, luau_capabilities;
@@ -247,6 +254,8 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--test-frame-seam" && value == "1") options.frame_seam = true;
     else if (key == "--luau-package") { if (!options.luau_package.empty()) return std::nullopt; options.luau_package = fs::path(value); }
     else if (key == "--luau-identity") { if (!options.luau_identity.empty()) return std::nullopt; options.luau_identity = value; }
+    else if (key == "--native-package") { if (!options.native_package.empty()) return std::nullopt; options.native_package = fs::path(value); }
+    else if (key == "--native-identity") { if (!options.native_identity.empty()) return std::nullopt; options.native_identity = value; }
     else if (key == "--performance-report") { if (!options.performance_report.empty() || value.empty()) return std::nullopt; options.performance_report = fs::path(value); }
     else if (key == "--aot-model" && !aot_model_given && (value == "v1" || value == "gen2")) { options.aot_model = value; aot_model_given = true; }
     else return std::nullopt;
@@ -267,6 +276,11 @@ std::optional<Options> parse_options(int argc, char **argv) {
   if (!options.luau_package.empty()) {
     const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
     if (!hex64(options.luau_identity) || !options.patch_package.empty() || options.platform == "master-system") return std::nullopt;   // one mod, Genesis view (a viewer build = the HUD seam, otherwise the scheduled headless path)
+  }
+  if (options.native_package.empty() != options.native_identity.empty()) return std::nullopt;   // a native package reference and the identity the user approved travel together
+  if (!options.native_package.empty()) {
+    const auto hex64 = [](const std::string &v) { return v.size() == 64 && std::all_of(v.begin(), v.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }); };
+    if (!hex64(options.native_identity) || !options.luau_package.empty() || !options.patch_package.empty() || options.platform == "master-system") return std::nullopt;   // one mod, Genesis
   }
   return options;
 }
@@ -317,6 +331,8 @@ struct CompileJob {
   fs::path object;
   std::vector<std::string> extra;
   bool cxx = false;
+  bool native_mod = false;           // SEG-138-T011: a native ABI 2 package unit: compiled with c_native_mod (the SDK headers and the host-owned strict flags ONLY)
+  std::string verify_sha256;         // re-hashed immediately before the compile (a staged source must still be the verified payload)
   bool isolated = false;   // a package's provider source: compiled with the SDK include directory ONLY (never the runtime's or the viewer's private headers)
 };
 
@@ -379,7 +395,7 @@ struct GenesisSoundBuild {
   Log &log;
   std::string pass_region = "usa";  // SEGARECOMP_GENESIS_REGION of every observation pass (genesis_pass_region)
   fs::path root, runtime, viewer, psg, ym, object_dir, pass_dir, z80_dir;
-  std::vector<std::string> c_base, cxx_base, c_isolated;   // c_isolated: the compiler and the SDK-only flags of a package provider
+  std::vector<std::string> c_base, cxx_base, c_isolated, c_native_mod;   // c_isolated: the compiler and the SDK-only flags of a package provider
   unsigned jobs = 1;
   bool play = false;
   // Aggregates (sanitized): the Z80 part of the build.
@@ -436,7 +452,16 @@ struct GenesisSoundBuild {
           return static_cast<int>(&job - batch.data());
         }
       }
-      auto command = job.isolated ? c_isolated : (job.cxx ? cxx_base : c_base);
+      if (!job.verify_sha256.empty()) {
+        std::ifstream check(job.source, std::ios::binary);
+        std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
+        if (segarecomp::sha256_hex(bytes) != job.verify_sha256) {
+          failure_detail = "A native source changed after it was verified.";
+          failure_diagnostic = "NATIVE_SOURCE_DIGEST";
+          return static_cast<int>(&job - batch.data());
+        }
+      }
+      auto command = job.native_mod ? c_native_mod : job.isolated ? c_isolated : (job.cxx ? cxx_base : c_base);
       command.insert(command.end(), job.extra.begin(), job.extra.end());
       command.insert(command.end(), {"-c", "-o", job.object.string(), job.source.string()});
       commands.push_back(std::move(command));
@@ -1080,6 +1105,37 @@ bool write_luau_artifact(Options &options, const std::vector<std::uint8_t> &stor
   return static_cast<bool>(out);
 }
 
+// SEG-138-T011 (ADR 0305): `native_artifact.c`, the constants the native scheduled-mod seam needs (the Luau artifact's counterpart without scripts): identity, capabilities (names and the required/optional bitsets by catalogue id),
+// state schema and the declared ranges of the exact source revision.
+bool write_native_artifact(Options &options, const segarecomp::mod::Manifest &manifest, const std::vector<std::string> &granted, const std::vector<segarecomp::mod::MemoryRange> &ranges) {
+  std::error_code ec;
+  fs::create_directories(options.native_mod_dir, ec);
+  if (ec) return false;
+  std::string caps;
+  for (const std::string &c : granted) caps += (caps.empty() ? "" : ",") + c;
+  unsigned long long required[2] = {0, 0}, optional[2] = {0, 0};
+  const auto in = [&](const std::vector<std::string> &names, const std::string &name) { return std::find(names.begin(), names.end(), name) != names.end(); };
+  for (const std::string &name : granted) {
+    const segarecomp::mod::CapabilityInfo *info = segarecomp::mod::find_capability(name);
+    if (info == nullptr) return false;
+    (in(manifest.capabilities, name) ? required : optional)[info->id / 64U] |= 1ULL << (info->id % 64U);
+  }
+  std::ostringstream c;
+  c << "/* GENERATED by `segarecomp build --native-package` (SEG-138-T011) from a verified package; do not edit. */\n#include <stddef.h>\n\n#define SEGARECOMP_GEN_SPACE_WORK_RAM 1UL   /* SEGA_GEN_SPACE_M68K_WORK_RAM */\n\n";
+  c << "const char segarecomp_mod_identity[] = \"" << options.native_identity << "\";\nconst char segarecomp_mod_capabilities[] = \"" << caps << "\";\nconst char segarecomp_mod_id[] = \"" << manifest.id << "\";\n";
+  c << "const unsigned long long segarecomp_mod_caps_required[2] = {" << required[0] << "ULL, " << required[1] << "ULL}, segarecomp_mod_caps_optional[2] = {" << optional[0] << "ULL, " << optional[1] << "ULL};\n";
+  c << "const char segarecomp_mod_effective_sha256[] = \"" << options.luau_effective_sha256 << "\";\nconst unsigned long segarecomp_mod_state_schema = " << manifest.state_schema << "UL;\n";
+  c << "const unsigned long segarecomp_mod_range_count = " << ranges.size() << "UL;\nconst unsigned long segarecomp_mod_ranges[][4] = {";
+  for (const auto &r : ranges) c << "\n  {SEGARECOMP_GEN_SPACE_WORK_RAM, " << r.offset << "UL, " << r.length << "UL, " << (r.access == "read" ? 1 : r.access == "write" ? 2 : 3) << "UL},";
+  c << "\n  {0, 0, 0, 0}};\n";
+  options.luau_artifact_source = options.native_mod_dir / "native_artifact.c";
+  std::ofstream out(options.luau_artifact_source, std::ios::binary | std::ios::trunc);
+  out << c.str();
+  out.flush();
+  options.luau_capabilities = caps;
+  return static_cast<bool>(out);
+}
+
 // When the confirmed run ended with an M68K guest stop that a verbatim cartridge copy in work RAM explains, the M68K C is re-emitted
 // with the merged immutable-copy aliases, only the changed M68K units are recompiled, the pass program is relinked and the fixed
 // point runs again (the Z80 registry is kept: its images are activation-keyed facts already proven by an observed run, and the new
@@ -1124,6 +1180,14 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     build.c_isolated = {options.cc};
     build.c_isolated.insert(build.c_isolated.end(), options.cc_args.begin(), options.cc_args.end());
     build.c_isolated.insert(build.c_isolated.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", opt, "-I", (options.runtime_dir / "sdk").string()});
+  }
+  if (options.native_mod) {   // SEG-138-T011: the SAME host-owned flags `mod check` / `mod build` validate with (-c is added per job), the target defines of the package's platform, the SDK headers and the package's own tree
+    build.c_native_mod = {options.cc};
+    build.c_native_mod.insert(build.c_native_mod.end(), options.cc_args.begin(), options.cc_args.end());
+    for (const std::string_view flag : segarecomp::mod::kNativeCompileFlags)
+      if (flag != "-c") build.c_native_mod.emplace_back(flag);
+    build.c_native_mod.insert(build.c_native_mod.end(), {"-DSEGA_MOD_TARGET_PLATFORM=1", "-DSEGA_MOD_TARGET_ABI_MAJOR=2U", "-I", (options.runtime_dir / "sdk").string(),
+                                                         "-I", (build.root / "platforms" / "sdk").string(), "-I", (options.native_mod_dir / "src").string()});
   }
   build.cxx_base = {options.cxx};
   build.cxx_base.insert(build.cxx_base.end(), options.cxx_args.begin(), options.cxx_args.end());
@@ -1180,6 +1244,38 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     add(final_only, build.root / "libs" / "media" / "src" / "sha256.cpp", "luau-sha256", flags, true);
     return flags;
   };
+  // SEG-138-T011: what a native-provider program links besides the scheduler: the overlay rules and rasterizer (luau_api.cpp, no VM), the font they draw with, the host adapter, the verified artifact and the package's own units.
+  const auto native_mod_cxx_flags = [&]() {
+    const fs::path host = build.root / "libs" / "luau_host" / "src";
+    return std::vector<std::string>{"-std=c++20", "-fexceptions", "-frtti", "-I", (build.root / "libs" / "luau_host" / "include").string(), "-I", host.string(), "-I", (build.root / "libs" / "media" / "include").string(),
+                                    "-I", (build.root / "libs" / "core" / "include").string(), "-I", (build.root / "libs" / "viewer" / "include").string(), "-I", (options.runtime_dir / "sdk").string(),
+                                    "-I", (build.root / "platforms" / "sdk").string(), "-I", (build.root / "third_party" / "luau" / "Common" / "include").string(), "-I", (build.root / "third_party" / "luau" / "VM" / "include").string(),
+                                    "-I", (build.root / "third_party" / "luau" / "Compiler" / "include").string(), "-I", (build.root / "third_party" / "luau" / "Ast" / "include").string(),
+                                    "-I", (build.root / "third_party" / "luau" / "Bytecode" / "include").string(), "-DSEGARECOMP_LUAU_CODEGEN=0", "-DSEGARECOMP_LUAU_PIN=\"" + std::string(segarecomp::luau::compiler_pin()) + "\""};
+  };
+  const auto add_native_mod_common = [&](const std::vector<std::string> &flags, const std::string &extra_define) {
+    add(final_only, build.root / "libs" / "luau_host" / "src" / "luau_api.cpp", "mod-overlay-rules", flags, true);
+    add(final_only, build.root / "libs" / "media" / "src" / "sha256.cpp", "mod-sha256", flags, true);
+    for (const char *name : {"sv_font.c", "sv_font_data.c"}) {
+      if (build.play) continue;   // the viewer foundation already links them
+      add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name, {"-I", (build.root / "libs" / "viewer" / "src").string()});
+    }
+    add(final_only, build.viewer / "mod_capture.cpp", "mod-native-host", [&] { auto f = flags; f.insert(f.end(), {"-DSEGARECOMP_MOD_NATIVE=1", "-I", build.runtime.string(), "-I", build.viewer.string()}); if (!extra_define.empty()) f.push_back(extra_define); return f; }(), true);
+    add(final_only, build.runtime / "mod_scheduler.c", "mod-scheduler", {"-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()});
+    if (!build.play) add(final_only, build.runtime / "genesis_snapshot.c", "genesis-snapshot", {"-DSEGARECOMP_GENESIS_SOUND"});
+    add(final_only, options.luau_artifact_source, "mod-native-artifact");
+    std::size_t index = 0;
+    for (const auto &[path, digest] : options.native_mod_units) {   // every .c unit, in package-path order (the staging order), compiled by the host with its own flags
+      if (path.extension() != ".c") continue;
+      CompileJob job;
+      job.source = path;
+      job.object = build.object_dir / ("native-mod-unit" + std::to_string(index++) + ".o");
+      job.native_mod = true;
+      job.verify_sha256 = digest;
+      stable.push_back(job);
+      final_only.push_back(job.object);
+    }
+  };
   if (build.play) {
     add(final_only, build.runtime / "vdp_render.c", "vdp-render");
     for (const char *name : {"viewer.c", "viewer_sdl3.c"})
@@ -1191,7 +1287,12 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     // SEG-058 (ADR 0120): the shared SDL3 viewer foundation (settings, layout/CRT math, menu model, host, pause pages), strict C11 like the rest.
     for (const char *name : kViewerFoundationSources)
       add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name);
-    if (options.luau && options.luau_scheduled) {
+    if (options.native_mod) {
+      // SEG-138-T011 (ADR 0305): the played program drives a native ABI 2 provider through the SAME scheduler and presenter seam; no Luau VM is linked, only the overlay rasterizer and rules it shares.
+      const std::vector<std::string> flags = native_mod_cxx_flags();
+      add_native_mod_common(flags, "-DSEGARECOMP_MOD_VIEWER=1");
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=8U", "-DSEGARECOMP_MOD_VIEWER=1", "-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()}));
+    } else if (options.luau && options.luau_scheduled) {
       // SEG-138-T010 (ADR 0305): the played program runs the ONE mod scheduler (the headless program's adapter, compiled for the viewer) and presents its render output through the existing provider seam.
       const std::vector<std::string> flags = add_luau_runtime();
       add(final_only, build.root / "libs" / "luau_host" / "src" / "luau_phase_provider.cpp", "luau-phase-provider", flags, true);
@@ -1220,7 +1321,12 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     // set (one guest execution for frames and the sound summary), so the existing renderer/exporter/capture objects are linked.
     add(final_only, build.runtime / "vdp_render.c", "vdp-render");
     add(final_only, build.runtime / "frame_export.c", "frame-export");
-    if (options.luau) {
+    if (options.native_mod) {
+      // SEG-138-T011: the headless program drives the native provider through the same capture seam as a Luau mod.
+      const std::vector<std::string> flags = native_mod_cxx_flags();
+      add_native_mod_common(flags, "");
+      add(final_only, build.viewer / "frame_capture.c", "frame-capture", {"-DSEGARECOMP_CAPTURE_MOD=1"});
+    } else if (options.luau) {
       // SEG-138-T009 (ADR 0300): the headless scheduled-mod path. The ONE mod scheduler, the Luau phase adapter, the artifact with the declared ranges and the capture seam that drives them.
       const std::vector<std::string> flags = add_luau_runtime();
       add(final_only, build.root / "libs" / "luau_host" / "src" / "luau_phase_provider.cpp", "luau-phase-provider", flags, true);
@@ -1457,7 +1563,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   objects.insert(objects.end(), common.begin(), common.end());
   objects.insert(objects.end(), final_only.begin(), final_only.end());
   objects.insert(objects.end(), build.z80_current.begin(), build.z80_current.end());
-  if (options.luau)   // the final program links the platform's C++ runtime (the Luau VM needs it), which defines operator new itself: the shim of the C-driver pass links must not be there too
+  if (options.luau || options.native_mod)   // the final program links the platform's C++ runtime (the Luau VM needs it), which defines operator new itself: the shim of the C-driver pass links must not be there too
     objects.erase(std::remove(objects.begin(), objects.end(), build.object_dir / "ym-shim.o"), objects.end());
   stage("compile", "done");
   stage("link", "begin");
@@ -1466,7 +1572,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
 #else
   executable = options.output / "game";
 #endif
-  build.cxx_link = options.luau;
+  build.cxx_link = options.luau || options.native_mod;
   if (!build.link(executable, objects, build.play)) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
   const std::uint64_t exe_bytes = fs::file_size(executable, ec);
   if (g_profile.enabled()) {
@@ -1585,7 +1691,7 @@ int run_build(Options options) {
   Log log;
   log.file.open(options.output / "build.log", std::ios::binary | std::ios::trunc);
   // The effective image is derivative game data: removed when the build ends (and a stale one of a killed attempt is removed at the start). Only the file this build writes is removed, then the folder if empty.
-  struct InputCleanup { fs::path file; ~InputCleanup() { if (file.empty()) return; std::error_code e; fs::remove(file, e); fs::remove(file.parent_path(), e); } } input_cleanup{options.luau_package.empty() ? fs::path() : options.output / "input" / "effective.rom"};
+  struct InputCleanup { fs::path file; ~InputCleanup() { if (file.empty()) return; std::error_code e; fs::remove(file, e); fs::remove(file.parent_path(), e); } } input_cleanup{options.luau_package.empty() && options.native_package.empty() ? fs::path() : options.output / "input" / "effective.rom"};
   if (!input_cleanup.file.empty()) { std::error_code stale; fs::remove(input_cleanup.file, stale); }
   if (options.admission_plan) {
     std::ifstream in(*options.admission_plan, std::ios::binary);
@@ -1610,6 +1716,58 @@ int run_build(Options options) {
   try {
     // ---- analyze ----
     stage("analyze", "begin");
+    if (!options.native_package.empty()) {   // SEG-138-T011 (ADR 0305): a native ABI 2 package: the same verification chain as a Luau mod, then its native-c11 units are staged for the host's own compile
+      const auto original = segarecomp::read_binary(options.rom);
+      const std::string original_sha = segarecomp::sha256_hex(original);
+      const auto package = segarecomp::mod::read_package_file(options.native_package);
+      if (!package.ok) return fail(options, log, original_sha, "analyze", 1, "The native package is not valid: " + package.rejection.message, "NATIVE_PACKAGE_INVALID");
+      if (package.identity != options.native_identity) return fail(options, log, original_sha, "analyze", 1, "The native package is not the one that was approved.", "NATIVE_IDENTITY_CHANGED");
+      if (const auto refusal = segarecomp::luau::native_scheduled_support(package)) return fail(options, log, original_sha, "analyze", 1, refusal->message, refusal->code);
+      const auto effective = segarecomp::mod::effective_image(package, original);
+      if (!effective.ok) return fail(options, log, original_sha, "analyze", 1, "The image is not the one the native package declares: " + effective.rejection.message, "NATIVE_IMAGE_MISMATCH");
+      std::string label;
+      for (const auto &revision : package.manifest.revisions) if (revision.sha256 == original_sha) label = revision.label;
+      if (label.empty()) return fail(options, log, original_sha, "analyze", 1, "The image is not a revision the package declares.", "NATIVE_IMAGE_MISMATCH");
+      const std::vector<segarecomp::mod::MemoryRange> ranges = segarecomp::mod::memory_for_revision(package.manifest, label);
+      const auto granted_caps = segarecomp::luau::scheduled_host_config(package.manifest).capabilities;   // required + supported optional names, restricted to the scheduled set
+      const auto granted = [&](const char *name) { return std::find(granted_caps.begin(), granted_caps.end(), name) != granted_caps.end(); };
+      bool reads = false, writes = false;
+      for (const auto &r : ranges) { reads = reads || r.access != "write"; writes = writes || r.access != "read"; }
+      if ((granted("memory.read.m68k.work_ram") && !reads) || (granted("memory.write.m68k.work_ram") && !writes))
+        return fail(options, log, original_sha, "analyze", 1, "The package declares a memory capability but no memory range with that access for this revision.", "E_RANGE_DECLARATION");
+      options.native_mod = true;
+      options.luau_identity = options.native_identity;
+      options.luau_original_sha256 = original_sha;
+      options.luau_effective_sha256 = effective.effective_sha256;
+      options.luau_mod_id = package.manifest.id;
+      options.native_mod_dir = options.output / "native-mod";
+      options.geometry_declaration = segarecomp::mod::geometry_declaration_text(package.manifest);
+      std::error_code stage_ec;
+      fs::remove_all(options.native_mod_dir, stage_ec);
+      for (const auto &payload : package.manifest.payloads) {   // stage every native-c11 file under its package path (private to this build); the re-hash happens immediately before each compile
+        if (payload.kind != "native-c11") continue;
+        const auto found = package.files.find(payload.path);
+        if (found == package.files.end() || payload.path.empty() || payload.path.front() == '/' || payload.path.find("..") != std::string::npos)
+          return fail(options, log, original_sha, "analyze", 1, "A native source of the package is missing or has an unsafe path.", "NATIVE_PACKAGE_INVALID");
+        const fs::path at = options.native_mod_dir / "src" / payload.path;
+        fs::create_directories(at.parent_path(), stage_ec);
+        std::ofstream staged(at, std::ios::binary | std::ios::trunc);
+        staged.write(reinterpret_cast<const char *>(found->second.data()), static_cast<std::streamsize>(found->second.size()));
+        staged.close();
+        if (stage_ec || !staged) return fail(options, log, original_sha, "analyze", 1, "The native sources could not be staged.", "NATIVE_ARTIFACT_WRITE");
+        options.native_mod_units.emplace_back(at, segarecomp::sha256_hex(found->second));
+      }
+      if (!write_native_artifact(options, package.manifest, granted_caps, ranges)) return fail(options, log, original_sha, "analyze", 1, "The native artifact could not be written.", "NATIVE_ARTIFACT_WRITE");
+      const fs::path input = options.output / "input";
+      std::error_code input_ec;
+      fs::create_directories(input, input_ec);
+      std::ofstream image_out(input / "effective.rom", std::ios::binary | std::ios::trunc);
+      image_out.write(reinterpret_cast<const char *>(effective.image.data()), static_cast<std::streamsize>(effective.image.size()));
+      image_out.close();
+      if (input_ec || !image_out) return fail(options, log, original_sha, "analyze", 1, "The effective image could not be written.", "NATIVE_ARTIFACT_WRITE");
+      options.rom = input / "effective.rom";
+      log.line("native mod: package=" + options.native_identity + " original_sha256=" + original_sha + " effective_sha256=" + effective.effective_sha256 + " capabilities=" + options.luau_capabilities);
+    }
     if (!options.luau_package.empty()) {   // SEG-137-T007: verify the package, derive its effective image, compile its scripts; `--rom` is replaced by the effective image for the rest of the build
       const auto original = segarecomp::read_binary(options.rom);
       const std::string original_sha = segarecomp::sha256_hex(original);
@@ -1838,6 +1996,16 @@ int run_build(Options options) {
       if (!options.native_source.empty())
         status_extra += ",\"native\":{\"package_identity\":\"" + options.patch_identity + "\",\"provider_sha256\":\"" + options.native_source_sha256 + "\",\"abi\":" + std::to_string(segarecomp::patch::kNativeAbiVersion) +
                         ",\"capabilities\":" + std::to_string(options.native_caps) + "}";
+      if (options.native_mod) {
+        status_extra += ",\"native_mod\":{\"package_identity\":\"" + options.native_identity + "\",\"original_sha256\":\"" + options.luau_original_sha256 + "\",\"effective_sha256\":\"" + options.luau_effective_sha256 +
+                        "\",\"abi\":2,\"capabilities\":\"" + options.luau_capabilities + "\",\"sources\":[";
+        bool first_unit = true;
+        for (const auto &[path, digest] : options.native_mod_units) {
+          status_extra += std::string(first_unit ? "" : ",") + "{\"path\":\"" + fs::relative(path, options.native_mod_dir / "src").generic_string() + "\",\"sha256\":\"" + digest + "\"}";
+          first_unit = false;
+        }
+        status_extra += "]" + (options.geometry_declaration.empty() ? std::string() : ",\"geometry_declaration\":\"" + options.geometry_declaration + "\"") + "}";
+      }
       if (options.luau)
         status_extra += ",\"luau\":{\"package_identity\":\"" + options.luau_identity + "\",\"original_sha256\":\"" + options.luau_original_sha256 + "\",\"effective_sha256\":\"" + options.luau_effective_sha256 +
                         "\",\"bytecode_digest\":\"" + options.luau_bytecode_digest + "\",\"compiler\":\"luau-" + std::string(segarecomp::luau::compiler_pin()) + "\",\"capabilities\":\"" + options.luau_capabilities + "\"" + (options.geometry_declaration.empty() ? std::string() : ",\"geometry_declaration\":\"" + options.geometry_declaration + "\"") + "}";
