@@ -42,7 +42,7 @@ Outside the declared range the host still shows only the native picture (ADR 030
 
 ## T006/T007 evidence (summary)
 
-The real-game classification of the existing Sonic packages at 16:9, 21:9 and 32:9, its method and its limits are in [widescreen-aspect-matrix.md](../architecture/widescreen-aspect-matrix.md) section 5 and `docs/product/widescreen-32x9-classification.json` (checked by `widescreen_classification_test`). It found no scene class that a presentation-only change can extend with actors, left Sonic 3 & Knuckles and Sonic 2 REV01 NOT RUN (images unavailable) and recorded the missing live virtual-sprite consumer as the post-F15 handoff (section 7 there).
+The real-game classification of the existing Sonic packages at 16:9, 21:9 and 32:9, its method and its limits are in [widescreen-aspect-matrix.md](../architecture/widescreen-aspect-matrix.md) section 5 and `docs/product/widescreen-32x9-classification.json` (checked by `widescreen_classification_test`). It found no scene class that a presentation-only change can extend with actors, left Sonic 2 REV01 NOT RUN (image unavailable) and recorded the missing live virtual-sprite consumer as the post-F15 handoff (section 7 there).
 
 ## Limitations
 

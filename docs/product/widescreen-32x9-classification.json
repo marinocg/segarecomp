@@ -857,11 +857,25 @@
             "provider_declined_frames": 1171,
             "authored_identical_at_16_9_21_9_32_9": true,
             "running_frames_patched": 3862,
-            "sprites_fully_beside_picture_per_frame_vanilla_patched": [
-              0.68,
-              2.51
+            "objects_per_frame_beyond_64px_left": 1.31,
+            "objects_per_frame_beyond_64px_right": 2.22,
+            "flagged_pct_margin_to_39px_vanilla_patched": [
+              18.7,
+              37.1
             ],
-            "blank_pattern_share_pct_of_those_patched": 1.2,
+            "flagged_pct_margin_40_101px_vanilla_patched": [
+              0.6,
+              23.6
+            ],
+            "flagged_pct_margin_102_238px_vanilla_patched": [
+              0.0,
+              0.6
+            ],
+            "sprites_fully_beside_picture_per_frame_vanilla_patched": [
+              0.51,
+              1.93
+            ],
+            "blank_pattern_share_pct_of_those_patched": 0.0,
             "peak_sprites_on_a_line_vanilla_patched": [
               23,
               23
@@ -874,15 +888,16 @@
               5,
               16
             ],
-            "object_table_measured": false
+            "object_table_layout_verified_by_ram_dump": true,
+            "sprite_probe_counts_only_vertically_visible_sprites": true
           },
           "classification": {
             "scenery": "authored-unverified",
-            "actors": "unverified",
+            "actors": "present-not-submitted",
             "art": "unverified",
             "budget": "constrained",
-            "feasibility_32x9": "inconclusive",
-            "rationale": "The package widens the sprite builder by 64 px and the original budget is already exceeded (peak above 20 sprites on a line); whether objects exist beyond 64 px was not established because the object table layout is not verified for this image, so no cause can be named."
+            "feasibility_32x9": "gameplay-changing-required",
+            "rationale": "Object-table entries exist beyond the 64 px the package submits while their on-screen flag stays clear, and the package documents that its wider actor coverage makes enemies activate earlier, so submitting them out to 238 px is needed to show them and it is a gameplay-changing change; the original budget is already exceeded (peak above 20 sprites on a line), so presentation-only support is insufficient."
           },
           "rows": {
             "4:3": {
@@ -910,11 +925,11 @@
             "21:9": {
               "scenery": "authored-unverified",
               "hud": "relocated",
-              "actors": "unverified",
+              "actors": "present-not-submitted",
               "art": "unverified",
               "budget": "constrained",
               "background_extension": "authored-unverified",
-              "kind": "inconclusive",
+              "kind": "gameplay-changing-required",
               "evidence": "observed-run+source-analysis",
               "fallback_reasons": [
                 "no_virtual_sprite_consumer"
@@ -923,11 +938,11 @@
             "32:9": {
               "scenery": "authored-unverified",
               "hud": "relocated",
-              "actors": "unverified",
+              "actors": "present-not-submitted",
               "art": "unverified",
               "budget": "constrained",
               "background_extension": "authored-unverified",
-              "kind": "inconclusive",
+              "kind": "gameplay-changing-required",
               "evidence": "observed-run+source-analysis",
               "fallback_reasons": [
                 "no_virtual_sprite_consumer"
@@ -1040,28 +1055,58 @@
       "scene_classes": [
         {
           "id": "sonic-3-and-knuckles-aiz1",
-          "name": "Angel Island act 1 (running level, including the opening sequence)",
+          "name": "Angel Island act 1 (running level, right-moving route)",
           "image": "lock-on-composite-jue",
-          "route": "bounded scripted pad route (title, save menu and character select by repeated start, hold right with periodic jump), 90 M instruction budget, 420 s wall timeout, dummy video/audio",
+          "route": "bounded scripted pad route (title and menus by four start presses, hold right with periodic jump), 90 M instruction budget, 420 s wall timeout, dummy video/audio",
           "observations": {
-            "route_frames": 7691,
-            "provider_authored_frames": 6704,
-            "provider_hud_frames": 0,
+            "route_frames": 7351,
+            "provider_authored_frames": 6364,
+            "provider_hud_frames": 5056,
             "provider_declined_frames": 987,
             "authored_identical_at_16_9_21_9_32_9": true,
             "repeat_32_9_identical": true,
-            "running_frames": 6778,
-            "object_table_measured": false,
-            "sprite_table_probe_valid": false,
-            "probe_note": "the sprite table is a permanently full 80-entry chain, so used and parked entries cannot be separated"
+            "running_frames_patched": 6394,
+            "objects_per_frame_beyond_64px_left": 1.37,
+            "objects_per_frame_beyond_64px_right": 2.41,
+            "flagged_pct_margin_to_39px_vanilla_patched": [
+              29.9,
+              54.5
+            ],
+            "flagged_pct_margin_40_101px_vanilla_patched": [
+              1.8,
+              32.3
+            ],
+            "flagged_pct_margin_102_238px_vanilla_patched": [
+              0.6,
+              1.4
+            ],
+            "sprites_fully_beside_picture_per_frame_vanilla_patched": [
+              0.93,
+              5.01
+            ],
+            "blank_pattern_share_pct_of_those_patched": 0.0,
+            "peak_sprites_on_a_line_vanilla_patched": [
+              20,
+              24
+            ],
+            "frames_line_ge16_vanilla_patched": [
+              2,
+              5
+            ],
+            "frames_line_ge20_vanilla_patched": [
+              1,
+              2
+            ],
+            "object_table_layout_verified_by_ram_dump": true,
+            "sprite_probe_counts_only_vertically_visible_sprites": true
           },
           "classification": {
             "scenery": "authored-unverified",
-            "actors": "unverified",
+            "actors": "present-not-submitted",
             "art": "unverified",
-            "budget": "unverified",
-            "feasibility_32x9": "inconclusive",
-            "rationale": "The provider accepts most frames and serves foreground scenery, but it supplied no HUD on this route (cause not diagnosed) and nothing established whether objects exist, are submitted or have resident art beyond the picture, so no cause can be named."
+            "budget": "constrained",
+            "feasibility_32x9": "gameplay-changing-required",
+            "rationale": "Object-table entries exist beyond the 64 px the package submits while their on-screen flag stays clear, and the package documents that margin objects activate earlier, so submitting them out to 238 px is needed to show them and it is a gameplay-changing change; the package already reaches 24 sprites on a line at 16:9 (hardware limit 20), so a wider window is also budget-limited and presentation-only support is insufficient."
           },
           "rows": {
             "4:3": {
@@ -1077,23 +1122,23 @@
             },
             "16:9": {
               "scenery": "authored-verified-scope",
-              "hud": "none",
-              "actors": "unverified",
-              "art": "unverified",
-              "budget": "unverified",
+              "hud": "relocated",
+              "actors": "submitted-partial",
+              "art": "resident-for-submitted",
+              "budget": "constrained",
               "background_extension": "authored-verified-scope",
-              "kind": "inconclusive",
+              "kind": "gameplay-changing-required",
               "evidence": "observed-run+source-analysis",
               "fallback_reasons": []
             },
             "21:9": {
               "scenery": "authored-unverified",
-              "hud": "none",
-              "actors": "unverified",
+              "hud": "relocated",
+              "actors": "submitted-partial",
               "art": "unverified",
-              "budget": "unverified",
+              "budget": "constrained",
               "background_extension": "authored-unverified",
-              "kind": "inconclusive",
+              "kind": "gameplay-changing-required",
               "evidence": "observed-run+source-analysis",
               "fallback_reasons": [
                 "no_virtual_sprite_consumer"
@@ -1101,12 +1146,12 @@
             },
             "32:9": {
               "scenery": "authored-unverified",
-              "hud": "none",
-              "actors": "unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
               "art": "unverified",
-              "budget": "unverified",
+              "budget": "constrained",
               "background_extension": "authored-unverified",
-              "kind": "inconclusive",
+              "kind": "gameplay-changing-required",
               "evidence": "observed-run+source-analysis",
               "fallback_reasons": [
                 "no_virtual_sprite_consumer"
@@ -1123,7 +1168,7 @@
           "route": "the first frames of the route above",
           "observations": {
             "declined_frames_in_aiz_route": 987,
-            "route_frames": 7691,
+            "route_frames": 7351,
             "declined_reason": "unsupported scene"
           },
           "classification": {
@@ -1199,9 +1244,9 @@
           "blocker": "only the first act of the first zone was entered; no bounded route to other zones, bosses, special stages or other character routes was established"
         },
         {
-          "id": "sonic-3-and-knuckles-object-table-and-sprite-study",
+          "id": "sonic-3-and-knuckles-left-moving-and-ring-manager",
           "result": "NOT RUN",
-          "blocker": "the object table layout is not verified and the hardware sprite table is a permanently full chain, so the probe used for the other titles cannot separate used from parked entries; actors, art and budget stay unverified"
+          "blocker": "the route moves right only, and the ring manager's own window was not measured separately from the object table"
         }
       ]
     }
