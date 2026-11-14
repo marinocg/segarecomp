@@ -453,7 +453,8 @@
       "validated_scope": "all levels (extended scenery and widescreen: maintainer-stated independent validation; no public report or recording is published)",
       "untested": [
         "other revisions",
-        "gameplay effects of the extended actor initialisation beyond the described changes"
+        "gameplay effects of the extended actor initialisation beyond the described changes",
+        "21:9 and 32:9: actor visibility beyond 64 px, scenery correctness and art residency are not established (see widescreen-32x9-classification.json); validated scope is 16:9"
       ],
       "evidence": [
         "ADR 0267",
@@ -476,7 +477,8 @@
       "validated_scope": "all levels (extended scenery and widescreen: maintainer-stated independent validation; no public report or recording is published)",
       "untested": [
         "other revisions",
-        "gameplay effects of the standard package beyond the described changes"
+        "gameplay effects of the standard package beyond the described changes",
+        "21:9 and 32:9: actor visibility beyond 64 px, scenery correctness and art residency are not established (see widescreen-32x9-classification.json); validated scope is 16:9"
       ],
       "evidence": [
         "ADR 0267",
@@ -500,7 +502,8 @@
       "validated_scope": "all levels (extended scenery and widescreen: maintainer-stated independent validation; no public report or recording is published)",
       "untested": [
         "standalone Sonic 3 and Sonic & Knuckles images",
-        "gameplay effects of the standard package beyond the described changes"
+        "gameplay effects of the standard package beyond the described changes",
+        "21:9 and 32:9: actor visibility beyond 64 px, scenery correctness and art residency are not established (see widescreen-32x9-classification.json); validated scope is 16:9"
       ],
       "evidence": [
         "ADR 0267",

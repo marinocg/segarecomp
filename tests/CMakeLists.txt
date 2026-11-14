@@ -955,6 +955,12 @@ add_test(
   NAME compat_genesis_schema_test
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/compat_genesis_schema_test.py
 )
+# SEG-140-T006/T007: the aggregate-only 32:9 classification is complete (every studied scene class has a result for each of the four aspects), consistent and non-reconstructable.
+add_test(
+  NAME widescreen_classification_test
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/widescreen_classification_test.py
+)
+set_property(TEST widescreen_classification_test APPEND PROPERTY LABELS full fast)
 # SEG-021-T017 / ADR-0043: MC68000 Group 1/2 exception-frame contract guard (six-byte
 # SR-at-SP, PC-at-SP+2 frame; no 68010 format word) in the ADR and the runtime primitive.
 add_test(

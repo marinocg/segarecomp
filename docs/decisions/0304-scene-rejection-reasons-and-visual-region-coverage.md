@@ -40,6 +40,10 @@ Outside the declared range the host still shows only the native picture (ADR 030
 
 `sv_scene_rejection_test` runs 4 aspects x 3 scenes x 18 variants through the real host and compares every counter, every reason and the rendered output with a reference model written in the test from the rules above, twice (byte-identical reports). `sv_coverage_test` pins the exact JSON, the actor-signal table and the worst-case size. `sv_geometry_decl_test`, `sv_widescreen_matrix_test` and the F14 suites stay green with only the `outside_range` assertions made prefix-based.
 
+## T006/T007 evidence (summary)
+
+The real-game classification of the existing Sonic packages at 16:9, 21:9 and 32:9, its method and its limits are in [widescreen-aspect-matrix.md](../architecture/widescreen-aspect-matrix.md) section 5 and `docs/product/widescreen-32x9-classification.json` (checked by `widescreen_classification_test`). It found no scene class that a presentation-only change can extend with actors, left Sonic 3 & Knuckles and Sonic 2 REV01 NOT RUN (images unavailable) and recorded the missing live virtual-sprite consumer as the post-F15 handoff (section 7 there).
+
 ## Limitations
 
 - Virtual sprites are not consumed by the live Genesis viewer, cannot be authored from Luau or a native provider through a supported path, and do not draw in the widescreen side columns (ADR 0303). The signal above is the accounting contract a future presenter would feed; it is exercised by synthetic fixtures only and proves nothing about gameplay.
