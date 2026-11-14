@@ -164,6 +164,8 @@ The native picture is never changed, and the choice applies immediately without 
 (only Borders, which you explicitly choose, replaces it).
 
 **Widescreen Width** (SEG-123) sits under Widescreen Mode: a slider for the target aspect from 4:3 to 16:9 (shown as, for example, `1.50:1 (37%)`). It is applied at once to the picture
+
+**Widescreen Aspect** (SEG-139, ADR 0302) follows the width: Slider (use the width above), 4:3, 16:9, 21:9 or 32:9 (a hand-edited custom ratio shows as Custom and is kept until a preset is chosen). A fixed aspect replaces the width and is a global setting. When the running patch declares a supported aspect range, one line under it says the range, what was delivered so far (scenery, HUD, actors) or that only the native picture is shown at the requested aspect. Widescreen Original asks for no extension, so a saved ratio never counts against a declared range.
 behind the pause menu, works with all three side styles, never stretches or crops the game picture, and keeps its value when Original is selected. **Widescreen Mode, Side
 Presentation and Width are saved per game** (platform + the game's SHA-256, in `viewer-widescreen/` next to the settings file); everything else stays global, and a game with no
 profile uses the launcher's defaults.

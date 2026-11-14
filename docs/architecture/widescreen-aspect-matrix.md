@@ -50,7 +50,7 @@ Does not cover:
 - **Scenery the game never prepared.** Beyond the VDP's bounded plane window the extension is wrapped or stale scenery, wider at 32:9 than at 16:9. An authored provider covers only what it supports: a provider declaring 16:9 is shown only the native picture at 32:9.
 - Master System (80-pixel producer bound) and Sega CD coverage declarations (SEG-147-T009, SEG-148-T010); the matrix is Genesis.
 - Any real-game claim: the synthetic scene proves geometry, hashing, declaration and fallback behaviour, not that a title looks right at 32:9. Real-game evidence is the harness aggregate below and is reported as such.
-- A menu or launcher control for the exact ratio and an on-screen coverage view; the launcher does not yet pass the declaration to the viewer (`SEGARECOMP_PATCH_GEOMETRY`), so a mod played through it is reported `declared:false` and unrestricted (ADR 0302 consequences).
+- Per-scene observation of a real program: no provider or Luau API reports a scene yet (ADR 0302 consequences), so a shipped mod's frames account in the unscoped scene; only the synthetic tests drive named scenes. The Luau HUD path is the only schema 3 build that reaches a viewer, so only `hud` is observable end to end (`mod_luau_executable_test`).
 
 ## 4. Local real-game runbook (aggregate results only)
 

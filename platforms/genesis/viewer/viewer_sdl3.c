@@ -345,7 +345,11 @@ GenesisSdl3Viewer *genesis_sdl3_viewer_open_platform(const char *title, int scal
   cfg.patch_id = SDL_getenv("SEGARECOMP_PATCH_ID");
   cfg.patch_widescreen = SDL_getenv("SEGARECOMP_PATCH_WIDESCREEN");
   cfg.patch_side_style = SDL_getenv("SEGARECOMP_PATCH_SIDE_STYLE");
-  cfg.geometry_declaration = SDL_getenv("SEGARECOMP_PATCH_GEOMETRY"); /* SEG-139-T004: the package's geometry declaration (compact text), NULL = none */
+#ifdef SEGARECOMP_GEOMETRY_DECLARATION
+  cfg.geometry_declaration = SEGARECOMP_GEOMETRY_DECLARATION; /* SEG-139-T004: compiled in by the build from the verified package; the environment cannot loosen it */
+#else
+  cfg.geometry_declaration = SDL_getenv("SEGARECOMP_PATCH_GEOMETRY"); /* development override for a program built without a declaration */
+#endif
   /* SEG-122: an explicit identity wins over the image digest: a Patched program was built from a different image than the library game its preferences belong to */
   cfg.profile_id = profile != NULL && strlen(profile) == 64U ? profile : cfg.rom_sha256;
   cfg.diagnostics = sdl_diagnostics;

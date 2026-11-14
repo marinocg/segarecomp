@@ -144,6 +144,7 @@ struct Options {
   bool luau_scheduled = false;       // SEG-138-T009: no viewer -> the headless scheduled-mod path (phases, memory ranges); with SDL3 the HUD-only ABI 1 seam
   std::string luau_ranges_c;         // the declared ranges of the exact source revision, as C constants
   std::string luau_original_sha256, luau_effective_sha256, luau_bytecode_digest, luau_mod_id, luau_capabilities;
+  std::string geometry_declaration;  // SEG-139-T004 (ADR 0302): the verified package's geometry claim as the compact text the viewer host reads; "" = none declared
   fs::path luau_artifact_source;     // <output>/luau/luau_artifact.c
   // SEG-125 (ADR 0273): write a versioned build performance report here (empty = profiling off: no collector is enabled and nothing changes).
   fs::path performance_report;
@@ -1181,7 +1182,9 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   };
   if (build.play) {
     add(final_only, build.runtime / "vdp_render.c", "vdp-render");
-    for (const char *name : {"viewer.c", "viewer_sdl3.c"}) add(final_only, build.viewer / name, std::string("viewer-") + name);
+    for (const char *name : {"viewer.c", "viewer_sdl3.c"})
+      add(final_only, build.viewer / name, std::string("viewer-") + name,
+          options.geometry_declaration.empty() || std::string_view(name) != "viewer_sdl3.c" ? std::vector<std::string>{} : std::vector<std::string>{"-DSEGARECOMP_GEOMETRY_DECLARATION=\"" + options.geometry_declaration + "\""});
     add(final_only, build.runtime / "genesis_persistence.c", "genesis-persistence");  // SEG-131: SRAM / EEPROM persistence (plain C11), loaded and committed by the viewer hook
     add(final_only, build.runtime / "genesis_snapshot.c", "genesis-snapshot", {"-DSEGARECOMP_GENESIS_SOUND"});  // SEG-131: whole-machine snapshots (sound build: Z80, PSG, YM2612, mixer)
     add(final_only, build.viewer / "genesis_viewer_state.c", "viewer-state", {"-DSEGARECOMP_GENESIS_SOUND"});  // SEG-131: slot files / rewind behind the shared viewer's state provider
@@ -1618,6 +1621,7 @@ int run_build(Options options) {
       options.luau_original_sha256 = original_sha;
       options.luau_effective_sha256 = effective.effective_sha256;
       options.luau_mod_id = package.manifest.id;
+      options.geometry_declaration = segarecomp::mod::geometry_declaration_text(package.manifest);   // from the same verified manifest as the scripts; compiled into the viewer, never read from the environment
       std::vector<segarecomp::mod::MemoryRange> ranges;
       if (options.luau_scheduled) {   // ADR 0297/0300: the ranges come ONLY from the package's declaration for the exact image digest being run; a memory capability without one for this revision is refused here
         std::string label;
@@ -1825,7 +1829,7 @@ int run_build(Options options) {
                         ",\"capabilities\":" + std::to_string(options.native_caps) + "}";
       if (options.luau)
         status_extra += ",\"luau\":{\"package_identity\":\"" + options.luau_identity + "\",\"original_sha256\":\"" + options.luau_original_sha256 + "\",\"effective_sha256\":\"" + options.luau_effective_sha256 +
-                        "\",\"bytecode_digest\":\"" + options.luau_bytecode_digest + "\",\"compiler\":\"luau-" + std::string(segarecomp::luau::compiler_pin()) + "\",\"capabilities\":\"" + options.luau_capabilities + "\"}";
+                        "\",\"bytecode_digest\":\"" + options.luau_bytecode_digest + "\",\"compiler\":\"luau-" + std::string(segarecomp::luau::compiler_pin()) + "\",\"capabilities\":\"" + options.luau_capabilities + "\"" + (options.geometry_declaration.empty() ? std::string() : ",\"geometry_declaration\":\"" + options.geometry_declaration + "\"") + "}";
       if (!options.keep_work) fs::remove_all(options.output / "obj", ec);
       stage("link", "done");
       write_status(options, sha, "ok", "done", "", sms_provenance + status_extra);   // ADR 0268: a Genesis board declaration (lock_on) is recorded too

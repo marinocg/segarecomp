@@ -166,7 +166,7 @@ typedef struct SvGeomDecl {
   SvGeomScene scenes[SV_COV_MAX_SCENES];
 } SvGeomDecl;
 /* Parses the compact text. 0 on success; -1 on anything malformed (out is then present = 1, invalid = 1). NULL or an empty text is present = 0 (no declaration: nothing is claimed
- * and nothing is restricted). Ids are tokens of [a-z0-9_-], at most SV_COV_ID_MAX, strictly ascending, unique; ratios use sv_ratio_parse; min <= max. */
+ * and nothing is restricted). Ids are tokens of [a-z0-9_-], at most SV_COV_ID_MAX, strictly ascending, unique; at most 2048 characters (the longest legal declaration is 1884); ratios use sv_ratio_parse; min <= max. */
 int sv_geomdecl_parse(const char *text, SvGeomDecl *out);
 /* 1 when `requested` lies inside the declared range, or when nothing is declared (an undeclared package is not restricted). 0 for an invalid declaration or an out-of-range ratio. */
 int sv_geomdecl_in_range(const SvGeomDecl *decl, SvDisplayRatio requested);

@@ -208,6 +208,57 @@ def main():
         run_game(hud2, frame_c)
         check(frame_c.read_bytes() != frame_a.read_bytes() and read_bmp(frame_c)[100][700] == v[100][700], "a modified script renders a different HUD frame")
 
+        # ---- SEG-139-T004 (ADR 0302): the package's geometry declaration is bound by the verified build and restricts the running program, end to end ----
+        def geo_project(name, aspect_max, extra_toml=""):
+            d = project(name)
+            toml = (d / "mod.toml").read_text()
+            (d / "mod.toml").write_text(toml + f'\n[geometry]\naspect_max = "{aspect_max}"\n\n[[scene]]\nid = "main"\ncomponents = ["hud"]\n' + extra_toml)
+            return d
+
+        def geo_run(out, name, ratio, mode="enhanced_gameplay", env_extra=None):
+            cfg = tmp / (name + ".cfg")
+            cfg.write_text(f"video.widescreen={mode}\nvideo.widescreen_side_style=raw\n" + (f"video.widescreen_ratio={ratio}\n" if ratio else ""))
+            report = tmp / (name + ".coverage.json")
+            frame = tmp / (name + ".bmp")
+            e = dict(env, SEGARECOMP_VIEWER_FINAL_FRAME=str(frame), SEGARECOMP_VIEWER_SETTINGS=str(cfg), SEGARECOMP_COVERAGE_REPORT=str(report), **(env_extra or {}))
+            subprocess.run([str(out / "game"), "--instruction-budget", "4000000"], text=True, capture_output=True, env=e, timeout=240, cwd=tmp)
+            return (json.loads(report.read_text()) if report.is_file() else None), (read_bmp(frame) if frame.is_file() else None)
+
+        narrow_pkg, narrow_built = pack(geo_project("geo-narrow", "4:3"), build=True)
+        wide_pkg, wide_built = pack(geo_project("geo-wide", "32:9"), build=True)
+        check(narrow_built["geometry"]["declaration"] == "max=4:3;scene=main:hud" and narrow_built["package_identity"] != ident, "the declaration is in the package and its identity")
+        narrow, wide = tmp / "geo-narrow-game", tmp / "geo-wide-game"
+        r1, r2 = game_build(narrow, narrow_pkg, narrow_built["package_identity"]), game_build(wide, wide_pkg, wide_built["package_identity"])
+        check(r1.returncode == 0 and r2.returncode == 0, "packages with a geometry declaration build: " + r1.stdout[-300:] + r2.stdout[-300:])
+        if r1.returncode == 0 and r2.returncode == 0:
+            check(status(narrow)["luau"].get("geometry_declaration") == "max=4:3;scene=main:hud" and "geometry_declaration" not in status(hud)["luau"], "status.json records the verified declaration (and a package without one records none)")
+            check(b"max=4:3;scene=main:hud" in (narrow / "game").read_bytes() and b"max=4:3;scene=main:hud" not in (van / "game").read_bytes(), "the declaration is compiled into the program, not into a Vanilla one")
+            rep_n, fr_n = geo_run(narrow, "narrow-169", "16:9")
+            rep_w, fr_w = geo_run(wide, "wide-169", "16:9")
+            check(rep_n is not None and rep_n["declared"] is True and rep_n["last_status"] == "outside declared range" and rep_n["outside_range_frames"] > 100 and rep_n["frames"] == rep_n["outside_range_frames"],
+                  f"a package declaring 4:3 and run at 16:9 reports outside declared range on every frame: {rep_n and {k: rep_n[k] for k in ('declared', 'last_status', 'frames', 'outside_range_frames')}}")
+            check(rep_w is not None and rep_w["last_status"] == "inside declared range" and rep_w["outside_range_frames"] == 0 and rep_w["scenes"][0]["components"]["hud"]["covered"] == 0 and rep_w["scenes"][-1]["components"]["hud"]["undeclared"] > 100,
+                  f"a package declaring 32:9 is inside at 16:9; its HUD is delivered but the scene was never observed, so it is accounted unscoped and undeclared, never covered: {rep_w and rep_w['scenes']}")
+            check(fr_n is not None and fr_w is not None and fr_n != fr_w, "the outside-range run shows only the native picture: its frame differs from the in-range run (no relocated HUD, no extension)")
+            # the environment cannot loosen a compiled declaration
+            rep_e, fr_e = geo_run(narrow, "narrow-env", "16:9", env_extra={"SEGARECOMP_PATCH_GEOMETRY": "max=32:9"})
+            check(rep_e is not None and rep_e["last_status"] == "outside declared range" and fr_e == fr_n, "SEGARECOMP_PATCH_GEOMETRY cannot loosen a declaration compiled in by the verified build")
+            # Original asks for no extension: the same program is inside its range and draws its HUD
+            rep_o, fr_o = geo_run(narrow, "narrow-original", "16:9", mode="original")
+            check(rep_o is not None and rep_o["outside_range_frames"] == 0 and fr_o != fr_n, "Widescreen Original with a saved wide ratio is not a violation: the HUD is drawn")
+        # negative: a malformed or contradictory declaration never reaches a program
+        for label, extra, bad_cls in (("scene-without-range", None, "E_GEOMETRY_ASPECT"), ("range-out-of-bounds", "64:9", "E_GEOMETRY_ASPECT")):
+            d = project("geo-bad-" + label)
+            toml = (d / "mod.toml").read_text()
+            (d / "mod.toml").write_text(toml + ('\n[[scene]]\nid = "main"\ncomponents = ["hud"]\n' if extra is None else f'\n[geometry]\naspect_max = "{extra}"\n'))
+            rb = run_cli("mod", "pack", d, "--out", tmp / ("bad-" + label + ".segapatch"))
+            check(rb.returncode != 0 and bad_cls in rb.stdout and not (tmp / ("bad-" + label + ".segapatch")).exists(), f"{label}: refused at pack with {bad_cls}: {rb.stdout[-200:]}")
+        # negative: a package edited after approval is refused by the build (identity), so a tampered declaration never compiles
+        tampered = tmp / "geo-tampered.segapatch"
+        tampered.write_bytes(narrow_pkg.read_bytes().replace(b'"aspect_max":"4:3"', b'"aspect_max":"9:3"'))
+        rt = game_build(tmp / "geo-tampered-game", tampered, narrow_built["package_identity"])
+        check(rt.returncode != 0 and not (tmp / "geo-tampered-game" / "game").exists(), "a package whose declaration was edited after approval is refused and leaves no executable")
+
         # ---- failure isolation: a script fault disables only the mod; the guest runs on to the Vanilla end state ----
         script3 = (example / "scripts/main.luau").read_text().replace("function render(frame: number)\n", "function render(frame: number)\n  if frame == 30 then error('boom') end\n")
         pkg3, built3 = pack(project("luau-hud-fault", script=script3), build=True)

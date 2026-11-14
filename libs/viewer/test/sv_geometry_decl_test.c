@@ -128,6 +128,61 @@ int main(void) {
   CHECK(strstr(json(h), "\"declared\":false") != NULL && strstr(json(h), "\"last_status\":\"no declaration\"") != NULL && strstr(json(h), "\"outside_range_frames\":0") != NULL, "no declaration is reported as such");
   sv_host_close(h);
   remove(g_settings);
+
+  /* only what the host ACCEPTED counts as delivered; actors need an accepted AUTHORED Level 3 surface */
+  h = open_host("max=16:9;scene=stage-1:actors+hud+scenery");
+  sv_host_set_scene(h, "stage-1");
+  set(h, R(16, 9), 100);
+  { /* a surface with a wrong sequence is not even offered: nothing is accounted */
+    SvExtendedSurface e;
+    memset(&e, 0, sizeof e);
+    e.rgb24 = g_ext; e.size = sizeof g_ext; e.width = W + 2 * SIDE; e.height = H; e.pitch = (W + 2 * SIDE) * 3; e.side = SIDE; e.sequence = 5;
+    e.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY; e.status = SV_WS_PARTIAL; e.source = SV_EXTSRC_AUTHORED;
+    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 999, &e) == 0 && strstr(json(h), "\"frames\":0") != NULL, "a stale (wrong-sequence) surface is not accounted");
+    e.sequence = 1000; e.pitch = 7; /* geometry the host refuses */
+    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 1000, &e) == 0 && sv_host_extension_side(h) == 0 && strstr(json(h), "\"scenery\":{\"declared\":true,\"covered\":0,\"missing\":1,") != NULL &&
+          strstr(json(h), "\"actors\":{\"declared\":true,\"covered\":0,\"missing\":1,") != NULL, "a refused surface delivers nothing: declared scenery and actors are missing, not covered");
+    e.pitch = (W + 2 * SIDE) * 3; e.sequence = 1001; e.source = SV_EXTSRC_GENERIC; /* generic Level 3 sprites are not a provider's actors */
+    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 1001, &e) == 0 && strstr(json(h), "\"actors\":{\"declared\":true,\"covered\":0,\"missing\":2,") != NULL, "generic hardware sprites never count as covered actors");
+    e.sequence = 1002; e.source = SV_EXTSRC_AUTHORED;
+    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 1002, &e) == 0 && strstr(json(h), "\"actors\":{\"declared\":true,\"covered\":1,\"missing\":2,") != NULL, "an accepted authored Level 3 surface covers scenery and actors");
+    { SvSettings lo = *sv_host_settings(h); lo.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; sv_host_apply_settings(h, &lo); }
+    e.sequence = 1003; /* produced at Level 3, only Level 2 requested now: stale for presentation, delivers nothing */
+    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 1003, &e) == 0 && sv_host_extension_side(h) == 0 && strstr(json(h), "\"actors\":{\"declared\":true,\"covered\":1,\"missing\":3,") != NULL, "a surface older than the requested level delivers nothing");
+  }
+  { /* the Video-page sentence */
+    char note[400];
+    sv_host_geometry_note(h, note, sizeof note);
+    CHECK(strstr(note, "supports 4:3 to 16:9") != NULL && strstr(note, "Delivered so far") != NULL, "the note states the range and what was delivered");
+    set(h, R(32, 9), 100);
+    sv_host_geometry_note(h, note, sizeof note);
+    CHECK(strstr(note, "At the requested 32:9 only the native picture is shown") != NULL, "the note says what happens outside the range");
+    sv_host_geometry_note(h, note, 8);
+    CHECK(strlen(note) == 7, "the note is bounded by the buffer");
+  }
+  { /* the menu: Widescreen Aspect selects the exact ratio, Slider returns to the width */
+    int i, found = 0;
+    sv_pages_open_main(h);
+    sv_pages_apply(h, (SvMenuEvent){SV_EVENT_ACTIVATE, I_GO_VIDEO, 0});
+    { SvPage *pg = sv_menu_top(&h->menu); for (i = 0; pg != NULL && i < pg->count; ++i) if (pg->items[i].id == I_WS_RATIO) found = 1; }
+    CHECK(found, "the Video page offers Widescreen Aspect");
+    sv_pages_apply(h, (SvMenuEvent){SV_EVENT_CHANGED, I_WS_RATIO, 3});
+    CHECK(h->settings.video.widescreen_ratio.num == 21 && h->settings.video.widescreen_ratio.den == 9, "choosing 21:9 stores the exact ratio");
+    sv_pages_apply(h, (SvMenuEvent){SV_EVENT_CHANGED, I_WS_RATIO, 4});
+    CHECK(h->settings.video.widescreen_ratio.num == 32 && h->settings.video.widescreen_ratio.den == 9, "choosing 32:9 stores the exact ratio");
+    sv_pages_apply(h, (SvMenuEvent){SV_EVENT_CHANGED, I_WS_RATIO, 0});
+    CHECK(h->settings.video.widescreen_ratio.num == 0 && h->settings.video.widescreen_ratio.den == 0, "Slider clears the exact ratio so Widescreen Width applies again");
+    sv_pages_close(h);
+  }
+  sv_host_close(h);
+  remove(g_settings);
+
+  /* Widescreen Original asks for no extension: a saved ratio is not a request while it is off, so the declared range is not violated */
+  h = open_host("max=4:3");
+  { SvSettings o = *sv_host_settings(h); o.video.widescreen = SV_WIDESCREEN_ORIGINAL; o.video.widescreen_ratio = R(32, 9); sv_host_apply_settings(h, &o); }
+  CHECK(present(h, ++seq, 1) == 0 && !sv_host_geometry_fallback(h) && h->ovl_w == 8, "Original with a saved 32:9 ratio does not trip a 4:3 declaration; the HUD stays");
+  sv_host_close(h);
+  remove(g_settings);
   printf(failures == 0 ? "sv_geometry_decl_test: all checks passed\n" : "sv_geometry_decl_test: %d FAILED\n", failures);
   return failures == 0 ? 0 : 1;
 }

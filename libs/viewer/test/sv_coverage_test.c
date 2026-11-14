@@ -49,9 +49,20 @@ int main(void) {
       CHECK(!sv_geomdecl_in_range(&d, R(16, 9)) && sv_geomdecl_check(&d, R(16, 9), NULL, SV_COV_SCENERY, 1) == SV_COV_OUTSIDE_RANGE, "an invalid declaration puts every frame outside");
     }
     {
-      char longtext[1100];
+      char longtext[2100];
       memset(longtext, 'a', sizeof longtext - 1u); longtext[sizeof longtext - 1u] = '\0';
       CHECK(sv_geomdecl_parse(longtext, &d) == -1 && d.invalid, "an over-long text is rejected");
+    }
+    {   /* the longest LEGAL declaration (what the schema allows: min, max, 32 scenes with 32-character ids and all three components) must parse */
+      char big[2200] = "min=4:3;max=32:9";
+      int k;
+      for (k = 0; k < SV_COV_MAX_SCENES; ++k) {
+        char one[80];
+        snprintf(one, sizeof one, ";scene=%c%c%030d:actors+hud+scenery", 'a' + k / 10, 'a' + k % 10, 0);
+        strcat(big, one);
+      }
+      CHECK(strlen(big) > 1024 && strlen(big) <= 1884 + 4, "the maximal declaration is longer than the old 1024 limit");
+      CHECK(sv_geomdecl_parse(big, &d) == 0 && d.scene_count == SV_COV_MAX_SCENES && d.scenes[31].declared == (SV_COV_BIT(0) | SV_COV_BIT(1) | SV_COV_BIT(2)), "the maximal legal declaration parses");
     }
     {
       char many[SV_COV_MAX_SCENES * 24 + 64] = "max=16:9";

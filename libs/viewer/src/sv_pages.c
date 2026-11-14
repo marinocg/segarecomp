@@ -119,8 +119,25 @@ static void build_video_core(SvHost *h, SvPage *p, int full) {
     else
       snprintf(hint, sizeof hint, "Target %s: how much of the wider picture is shown, 4:3 to 16:9. Imperfect edges are expected at in-between widths. %s", ratio,
                sv_host_profile_active(h) ? "Saved for this game." : "This program has no game identity: saved for all games.");
+    if (sv_ratio_valid(v->widescreen_ratio)) snprintf(hint, sizeof hint, "Not used while Widescreen Aspect is a fixed ratio (below); choose Slider there to use it again.");
     w = add_slider(p, I_WS_WIDTH, "Widescreen Width", v->widescreen_width, 0, 100, 1, "%", hint);
     if (w != NULL) { char t[48]; snprintf(t, sizeof t, "%s (%d%%)", ratio, v->widescreen_width); sv_item_set_text(w, t); }
+  }
+  /* Widescreen Aspect (SEG-139): the exact display aspect, 4:3 through 32:9. The Width slider above keeps its 4:3..16:9 meaning and applies while this stays on "Slider". */
+  {
+    static const char *const rname[] = {"Slider", "4:3", "16:9", "21:9", "32:9", "Custom"};
+    char note[320];
+    int idx = 0, i, count = 5;
+    const SvDisplayRatio cur = v->widescreen_ratio;
+    if (sv_ratio_valid(cur)) {
+      idx = 5;
+      for (i = 0; i < SV_RATIO_PRESET_COUNT; ++i) if (cur.num == sv_ratio_preset(i).num && cur.den == sv_ratio_preset(i).den) idx = i + 1;
+      if (idx == 5) count = 6;
+    }
+    add_choice(p, I_WS_RATIO, "Widescreen Aspect", idx, count, rname,
+               "Slider uses Widescreen Width above. A fixed aspect (4:3 to 32:9) replaces it. Presentation only; wider than 16:9 shows more of the game's own background, never new gameplay.");
+    sv_host_geometry_note(h, note, sizeof note);
+    if (note[0] != '\0') add_note(p, note);
   }
   /* Side Presentation: how the extra side area looks, separate from what the platform can produce. A treated side is decorative, never game content. */
   {
@@ -162,7 +179,7 @@ static void build_video_core(SvHost *h, SvPage *p, int full) {
   add_toggle(p, I_FPS, "Show FPS Counter", v->show_fps, "Shows the presentation rate on the game screen.");
   for (k = 0; k < p->count; ++k) {
     const int id = p->items[k].id;
-    sv_item_set_icon(&p->items[k], id == I_FULLSCREEN ? "fullscreen" : (id == I_SCALE || id == I_ASPECT || id == I_WIDESCREEN || id == I_WS_WIDTH || id == I_SIDE_STYLE ? "video" : (id == I_PRESET ? "settings" : (id == I_VSYNC ? "reset" : "info"))));
+    sv_item_set_icon(&p->items[k], id == I_FULLSCREEN ? "fullscreen" : (id == I_SCALE || id == I_ASPECT || id == I_WIDESCREEN || id == I_WS_WIDTH || id == I_WS_RATIO || id == I_SIDE_STYLE ? "video" : (id == I_PRESET ? "settings" : (id == I_VSYNC ? "reset" : "info"))));
   }
 }
 
@@ -776,6 +793,14 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
     case I_ASPECT: v->aspect = (SvAspect)ev.value; sv_host_restyle(h); break;
     case I_WS_WIDTH: /* presentation only: re-lays out and re-treats the retained frame at once; no guest frame is needed or advanced */
       v->widescreen_width = ev.value;
+      sv_settings_sanitize(&h->settings);
+      sv_host_restyle(h);
+      sv_host_mark_dirty(h);
+      sv_pages_rebuild(h);
+      return;
+    case I_WS_RATIO: /* an exact display aspect; index 0 returns to the Width slider, 5 (Custom, from a hand-edited file) keeps the stored ratio */
+      if (ev.value == 0) { v->widescreen_ratio.num = 0; v->widescreen_ratio.den = 0; }
+      else if (ev.value >= 1 && ev.value <= SV_RATIO_PRESET_COUNT) v->widescreen_ratio = sv_ratio_preset(ev.value - 1);
       sv_settings_sanitize(&h->settings);
       sv_host_restyle(h);
       sv_host_mark_dirty(h);

@@ -307,7 +307,8 @@ const char *sv_geom_status_name(SvGeomStatus status) {
 
 /* ---- SEG-139-T004: geometry declaration and coverage accounting ---- */
 
-#define SV_COV_TEXT_MAX 1024
+/* the longest legal declaration: min + max (28) + 32 scenes of ";scene=" + a 32-character id + ":" + "actors+hud+scenery" (58 each) = 1884 */
+#define SV_COV_TEXT_MAX 2048
 
 const char *sv_cov_component_name(SvCovComponent component) {
   switch (component) {

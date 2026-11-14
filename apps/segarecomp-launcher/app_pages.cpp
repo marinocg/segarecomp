@@ -507,6 +507,19 @@ void App::draw_settings(float full_w, float h) {
     if (button(ctx_, "wsw_plus", "+", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { v.widescreen_width = std::min(100, v.widescreen_width + 5); v_changed = true; }
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Target aspect between 4:3 and 16:9 when a widescreen mode is on. This is the default for games without their own setting; each game keeps its own Widescreen Mode, Side Presentation and Width from its in-game Video & Display page.");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    row_label("Widescreen aspect");
+    {   // SEG-139: the exact display aspect, 4:3 through 32:9; "Slider" keeps the width above. A hand-edited custom ratio shows as Slider-off with its text and is kept until a preset is chosen.
+      int ratio_choice = 0;
+      for (int i = 0; i < SV_RATIO_PRESET_COUNT; ++i) if (v.widescreen_ratio.num == sv_ratio_preset(i).num && v.widescreen_ratio.den == sv_ratio_preset(i).den && sv_ratio_valid(v.widescreen_ratio)) ratio_choice = i + 1;
+      const bool custom = sv_ratio_valid(v.widescreen_ratio) && ratio_choice == 0;
+      if (segmented(ctx_, "wsr", {"Slider", "4:3", "16:9", "21:9", "32:9"}, &ratio_choice, 0.0F) && !(custom && ratio_choice == 0)) {
+        v.widescreen_ratio = ratio_choice == 0 ? SvDisplayRatio{0, 0} : sv_ratio_preset(ratio_choice - 1);
+        v_changed = true;
+      }
+      if (custom) { char r[24]; paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, (std::string("A custom ratio ") + sv_ratio_format(v.widescreen_ratio, r, sizeof r) + " is set in the settings file; choose a preset to replace it.").c_str()); }
+    }
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "A fixed aspect (4:3 to 32:9) replaces the width above. Beyond 16:9 the extra area shows more of the game's own background and sprites, never new gameplay. A patch that declares a narrower supported range is shown the native picture only outside it (the in-game Video page says so).");
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Side presentation");
     int side_style = static_cast<int>(v.widescreen_side_style);
     if (segmented(ctx_, "ss", {"Comfort", "Borders", "Raw Extension"}, &side_style, 0.0F)) { v.widescreen_side_style = static_cast<SvSideStyle>(side_style); v_changed = true; }
