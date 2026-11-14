@@ -74,6 +74,10 @@ typedef struct SvExtendedSurface {
   const uint8_t *overlay_rgba;
   int overlay_w, overlay_h;
   int overlay_fx, overlay_fy;
+  /* SEG-140-T004 (ADR 0303): optional positioned, layered overlays (see SvOverlayLayer below), drawn after the fixed HUD above. The array and the pixels are read during the present call and
+   * copied; NULL / 0 = none (a zero-initialised surface presents exactly as before). Like the HUD they are independent of `source` and also drawn when the extension itself is not shown. */
+  const struct SvOverlayLayer *layers;
+  int layer_count;
 } SvExtendedSurface;
 #define SV_OVERLAY_MAX 256
 
@@ -195,6 +199,69 @@ int sv_cov_frame(SvCovAccount *account, SvDisplayRatio requested, const char *sc
 /* Stable JSON (fixed key order, integers only, declared scenes in declaration order then the unscoped scene "*"), schema "segarecomp.geometry-coverage/1". Writes at most `cap` bytes
  * including the terminator and returns the length it needs (like snprintf), so a result >= cap was truncated. */
 size_t sv_cov_report_json(const SvCovAccount *account, char *buf, size_t cap);
+
+/* ---- SEG-140-T004 (ADR 0303): bounded, positioned, layered overlays (pure, SDL-free, deterministic, no allocation) ----
+ * A generalisation of the fixed HUD overlay above: up to SV_OVL_LAYERS_MAX RGBA images, each anchored to a named point of a reference rectangle of the PRESENTATION geometry
+ * (the native picture, or the whole visible surface: picture plus the visible side on both sides) with a signed offset, ordered by `z`, optionally clipped to a rectangle of its own
+ * image. The fixed HUD path is NOT one of these layers: it is drawn first, exactly as before, and a surface that supplies no layers is presented bit for bit as it always was.
+ * Rules (each violation rejects that LAYER only, with a stable reason; the others are still drawn): each image must be 1..SV_OVERLAY_MAX per side; the running total of SUBMITTED image
+ * pixels (every image of valid size counts, accepted or not) must stay within SV_OVL_BUDGET_PIXELS; the image must be present; anchor, reference and z must be known; |offset| <= SV_OVL_OFFSET_MAX; the placed rectangle must lie WHOLLY inside its reference rectangle
+ * (never silently moved or clipped to fit); a clip rectangle must lie inside the image. Layers beyond SV_OVL_LAYERS_MAX are rejected as COUNT. */
+#define SV_OVL_LAYERS_MAX 4
+#define SV_OVL_BUDGET_PIXELS 65536
+#define SV_OVL_OFFSET_MAX 2048
+typedef enum SvOvAnchor {
+  SV_OVA_TOP_LEFT = 0, SV_OVA_TOP_CENTER, SV_OVA_TOP_RIGHT,
+  SV_OVA_MIDDLE_LEFT, SV_OVA_CENTER, SV_OVA_MIDDLE_RIGHT,
+  SV_OVA_BOTTOM_LEFT, SV_OVA_BOTTOM_CENTER, SV_OVA_BOTTOM_RIGHT,
+  SV_OVA_COUNT
+} SvOvAnchor;
+typedef enum SvOvReference { SV_OVREF_PICTURE = 0, SV_OVREF_PRESENTATION = 1, SV_OVREF_COUNT } SvOvReference;
+typedef enum SvOvReject {
+  SV_OVR_OK = 0,
+  SV_OVR_COUNT,         /* more than SV_OVL_LAYERS_MAX layers */
+  SV_OVR_NO_IMAGE,      /* no pixel data */
+  SV_OVR_SIZE,          /* a side is outside 1..SV_OVERLAY_MAX */
+  SV_OVR_BUDGET,        /* the running pixel total would exceed SV_OVL_BUDGET_PIXELS */
+  SV_OVR_ANCHOR,
+  SV_OVR_REFERENCE,
+  SV_OVR_Z,             /* z outside 0..SV_OVL_LAYERS_MAX - 1 */
+  SV_OVR_OFFSET,
+  SV_OVR_OUT_OF_BOUNDS, /* the placed rectangle is not wholly inside the reference rectangle */
+  SV_OVR_CLIP           /* the clip rectangle is empty or not inside the image */
+} SvOvReject;
+const char *sv_ovl_reject_name(SvOvReject reason); /* "ok", "count", "no_image", "size", "budget", "anchor", "reference", "z", "offset", "out_of_bounds", "clip" */
+typedef struct SvOverlayLayer {
+  const uint8_t *rgba;      /* w * h * 4, tightly packed, straight alpha */
+  int w, h;
+  int anchor;               /* SvOvAnchor */
+  int reference;            /* SvOvReference */
+  int z;                    /* draw order, 0 first (lowest) */
+  int dx, dy;               /* added to the anchored position (positive = right / down) */
+  int has_clip;
+  int clip_x, clip_y, clip_w, clip_h;   /* image pixels */
+} SvOverlayLayer;
+typedef struct SvOverlayPlacement {
+  int index;                /* index in the submitted array */
+  int x, y;                 /* top-left in presentation coordinates (0,0 = the left edge of the visible surface) */
+  int w, h;
+  int cx0, cy0, cx1, cy1;   /* the drawn part of the image: [cx0, cx1) x [cy0, cy1) in image pixels */
+} SvOverlayPlacement;
+typedef struct SvOverlayPlan {
+  int placed;
+  SvOverlayPlacement place[SV_OVL_LAYERS_MAX];   /* in draw order (z ascending, then submission order) */
+  int rejected;
+  struct { int index; SvOvReject reason; } reject[SV_OVL_LAYERS_MAX + 1];   /* the first SV_OVL_LAYERS_MAX + 1 rejections; `rejected` is the exact total */
+  int pixels;               /* image pixels of the accepted (placed) layers */
+} SvOverlayPlan;
+/* True when a further image of w x h pixels fits the budget after `used` pixels. Shared by the host's copy and the planner so they cannot disagree. */
+int sv_ovl_budget_ok(int used, int w, int h);
+/* Plans `count` layers (a negative or NULL input plans nothing) for a native picture of pic_w x pic_h with `visible_side` columns of surface on each side (0 at 4:3 / Original).
+ * Pure; never reads image pixels. */
+void sv_overlay_plan(const SvOverlayLayer *layers, int count, int pic_w, int pic_h, int visible_side, SvOverlayPlan *out);
+/* Blends the planned layers, in plan order, over the RGB24 presentation surface `rgb` (width x height, row pitch `pitch` bytes) whose width is pic_w + 2 * visible_side. Source-over with
+ * the same rounding as the fixed overlay; fully transparent pixels leave the surface unchanged. */
+void sv_overlay_compose(uint8_t *rgb, int width, int height, int pitch, const SvOverlayLayer *layers, const SvOverlayPlan *plan);
 
 /* Barrel distortion of a normalized coordinate pair in [-1, 1] (curvature 0..100). Maps the undistorted position of a mesh vertex to its
  * position on the curved tube; 0 is the identity. `vignette` receives a 0..1 brightness factor for the corner falloff. */

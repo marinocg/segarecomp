@@ -79,6 +79,15 @@ struct SvHost {
   uint8_t ovl_scratch[SV_OVERLAY_MAX * SV_OVERLAY_MAX * 3];
   int ovl_w, ovl_h;                                         /* 0 = none */
   int ovl_fx, ovl_fy;                                       /* in-picture position when the visible side cannot hold it */
+  /* SEG-140-T004 (ADR 0303): the retained positioned/layered overlays of the accepted surface (private copy; descriptors point into lay_pixels), the working buffer they are composed in,
+   * and the bounded diagnostics of the planner (a rejection never stops the others). */
+  SvOverlayLayer lay[SV_OVL_LAYERS_MAX];
+  int lay_count, lay_overflow;                              /* layers retained / submitted beyond SV_OVL_LAYERS_MAX */
+  uint8_t lay_pixels[SV_OVL_BUDGET_PIXELS * 4];
+  uint8_t *lay_scratch;                                     /* (max_w + 2 * SV_EXT_MAX_SIDE) x max_h RGB24 */
+  uint32_t lay_rejected;                                    /* saturating count of rejected layers over the session */
+  int lay_last_index; SvOvReject lay_last_reason;           /* the most recent rejection (index -1 = none yet) */
+  int lay_counted, lay_toasted;
   uint64_t capture_frames[SV_CAPTURE_MAX];  /* automation seam: 1-based presented-frame numbers whose composed output is saved (SEGARECOMP_VIEWER_CAPTURE_FRAMES) */
   int capture_count, capture_all_styles;
   char capture_dir[512];

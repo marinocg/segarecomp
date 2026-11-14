@@ -507,3 +507,102 @@ size_t sv_cov_report_json(const SvCovAccount *a, char *buf, size_t cap) {
   cov_put(&b, "]}");
   return b.need;
 }
+
+/* ---- SEG-140-T004 (ADR 0303): layered overlays ---- */
+const char *sv_ovl_reject_name(SvOvReject reason) {
+  switch (reason) {
+    case SV_OVR_OK: return "ok";
+    case SV_OVR_COUNT: return "count";
+    case SV_OVR_NO_IMAGE: return "no_image";
+    case SV_OVR_SIZE: return "size";
+    case SV_OVR_BUDGET: return "budget";
+    case SV_OVR_ANCHOR: return "anchor";
+    case SV_OVR_REFERENCE: return "reference";
+    case SV_OVR_Z: return "z";
+    case SV_OVR_OFFSET: return "offset";
+    case SV_OVR_OUT_OF_BOUNDS: return "out_of_bounds";
+    case SV_OVR_CLIP: return "clip";
+  }
+  return "unknown";
+}
+
+int sv_ovl_budget_ok(int used, int w, int h) {
+  if (used < 0 || w < 1 || h < 1 || w > SV_OVERLAY_MAX || h > SV_OVERLAY_MAX) return 0;
+  return used <= SV_OVL_BUDGET_PIXELS - w * h;   /* w * h <= 65536: no overflow */
+}
+
+static void ovl_reject(SvOverlayPlan *plan, int index, SvOvReject reason) {
+  if (plan->rejected < SV_OVL_LAYERS_MAX + 1) { plan->reject[plan->rejected].index = index; plan->reject[plan->rejected].reason = reason; }
+  if (plan->rejected < 1 << 30) ++plan->rejected;
+}
+
+void sv_overlay_plan(const SvOverlayLayer *layers, int count, int pic_w, int pic_h, int visible_side, SvOverlayPlan *out) {
+  int i, used = 0;
+  struct { SvOverlayPlacement p; int z; } tmp[SV_OVL_LAYERS_MAX];
+  int n = 0;
+  if (out == NULL) return;
+  memset(out, 0, sizeof *out);
+  if (layers == NULL || count <= 0 || pic_w <= 0 || pic_h <= 0 || visible_side < 0) return;
+  for (i = 0; i < count; ++i) {
+    const SvOverlayLayer *l = &layers[i];
+    int rx, ry, rw, rh, x, y, cx0 = 0, cy0 = 0, cx1, cy1;
+    if (i >= SV_OVL_LAYERS_MAX) { ovl_reject(out, i, SV_OVR_COUNT); continue; }
+    if (l->w < 1 || l->h < 1 || l->w > SV_OVERLAY_MAX || l->h > SV_OVERLAY_MAX) { ovl_reject(out, i, SV_OVR_SIZE); continue; }
+    if (!sv_ovl_budget_ok(used, l->w, l->h)) { ovl_reject(out, i, SV_OVR_BUDGET); continue; }
+    used += l->w * l->h;   /* the budget counts every submitted image of valid size, whether or not a later rule rejects it (the host copies exactly these) */
+    if (l->rgba == NULL) { ovl_reject(out, i, SV_OVR_NO_IMAGE); continue; }
+    if (l->anchor < 0 || l->anchor >= SV_OVA_COUNT) { ovl_reject(out, i, SV_OVR_ANCHOR); continue; }
+    if (l->reference < 0 || l->reference >= SV_OVREF_COUNT) { ovl_reject(out, i, SV_OVR_REFERENCE); continue; }
+    if (l->z < 0 || l->z >= SV_OVL_LAYERS_MAX) { ovl_reject(out, i, SV_OVR_Z); continue; }
+    if (l->dx < -SV_OVL_OFFSET_MAX || l->dx > SV_OVL_OFFSET_MAX || l->dy < -SV_OVL_OFFSET_MAX || l->dy > SV_OVL_OFFSET_MAX) { ovl_reject(out, i, SV_OVR_OFFSET); continue; }
+    if (l->reference == SV_OVREF_PICTURE) { rx = visible_side; rw = pic_w; } else { rx = 0; rw = pic_w + 2 * visible_side; }
+    ry = 0; rh = pic_h;
+    if (l->w > rw || l->h > rh) { ovl_reject(out, i, SV_OVR_OUT_OF_BOUNDS); continue; }
+    switch (l->anchor % 3) { case 0: x = rx; break; case 1: x = rx + (rw - l->w) / 2; break; default: x = rx + rw - l->w; break; }
+    switch (l->anchor / 3) { case 0: y = ry; break; case 1: y = ry + (rh - l->h) / 2; break; default: y = ry + rh - l->h; break; }
+    x += l->dx;
+    y += l->dy;
+    if (x < rx || y < ry || x + l->w > rx + rw || y + l->h > ry + rh) { ovl_reject(out, i, SV_OVR_OUT_OF_BOUNDS); continue; }
+    cx1 = l->w;
+    cy1 = l->h;
+    if (l->has_clip) {
+      if (l->clip_w < 1 || l->clip_h < 1 || l->clip_x < 0 || l->clip_y < 0 || l->clip_x > l->w - l->clip_w || l->clip_y > l->h - l->clip_h) { ovl_reject(out, i, SV_OVR_CLIP); continue; }
+      cx0 = l->clip_x; cy0 = l->clip_y; cx1 = cx0 + l->clip_w; cy1 = cy0 + l->clip_h;
+    }
+    tmp[n].p.index = i; tmp[n].p.x = x; tmp[n].p.y = y; tmp[n].p.w = l->w; tmp[n].p.h = l->h;
+    tmp[n].p.cx0 = cx0; tmp[n].p.cy0 = cy0; tmp[n].p.cx1 = cx1; tmp[n].p.cy1 = cy1;
+    tmp[n].z = l->z;
+    ++n;
+  }
+  /* stable insertion by z (equal z keeps submission order) */
+  for (i = 1; i < n; ++i) {
+    int j = i;
+    while (j > 0 && tmp[j - 1].z > tmp[j].z) { const SvOverlayPlacement p = tmp[j - 1].p; const int z = tmp[j - 1].z; tmp[j - 1] = tmp[j]; tmp[j].p = p; tmp[j].z = z; --j; }
+  }
+  for (i = 0; i < n; ++i) out->place[i] = tmp[i].p;
+  out->placed = n;
+  out->pixels = 0;
+  for (i = 0; i < n; ++i) out->pixels += tmp[i].p.w * tmp[i].p.h;
+}
+
+void sv_overlay_compose(uint8_t *rgb, int width, int height, int pitch, const SvOverlayLayer *layers, const SvOverlayPlan *plan) {
+  int k, i, j;
+  if (rgb == NULL || layers == NULL || plan == NULL || width <= 0 || height <= 0 || pitch < width * 3) return;
+  for (k = 0; k < plan->placed; ++k) {
+    const SvOverlayPlacement *p = &plan->place[k];
+    const SvOverlayLayer *l = &layers[p->index];
+    if (l->rgba == NULL) continue;
+    for (j = p->cy0; j < p->cy1; ++j)
+      for (i = p->cx0; i < p->cx1; ++i) {
+        const int tx = p->x + i, ty = p->y + j;
+        const uint8_t *c = l->rgba + ((size_t)j * (size_t)l->w + (size_t)i) * 4u;
+        uint8_t *d;
+        if (tx < 0 || ty < 0 || tx >= width || ty >= height || c[3] == 0u) continue;
+        d = rgb + (size_t)ty * (size_t)pitch + (size_t)tx * 3u;
+        { const unsigned a = c[3];
+          d[0] = (uint8_t)((d[0] * (255u - a) + c[0] * a + 127u) / 255u);
+          d[1] = (uint8_t)((d[1] * (255u - a) + c[1] * a + 127u) / 255u);
+          d[2] = (uint8_t)((d[2] * (255u - a) + c[2] * a + 127u) / 255u); }
+      }
+  }
+}

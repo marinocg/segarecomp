@@ -924,7 +924,9 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
     h->side_buf_cap = 2u * SV_EXT_MAX_SIDE * mh * 3u;
     h->side_buf = (uint8_t *)malloc(h->side_buf_cap);
     h->side_scratch = malloc(sv_side_scratch_bytes((int)mh) > 0 ? sv_side_scratch_bytes((int)mh) : 1u);
-    if (h->ext_raw == NULL || h->side_buf == NULL || h->side_scratch == NULL) { sv_host_close(h); return NULL; }
+    h->lay_scratch = (uint8_t *)malloc((mw + 2u * SV_EXT_MAX_SIDE) * mh * 3u);
+    h->lay_last_index = -1;
+    if (h->ext_raw == NULL || h->side_buf == NULL || h->side_scratch == NULL || h->lay_scratch == NULL) { sv_host_close(h); return NULL; }
   }
   sv_host_apply_video(h);
   capture_parse(h);
@@ -953,6 +955,7 @@ void sv_host_close(SvHost *h) {
   if (h->window != NULL) SDL_DestroyWindow(h->window);
   free(h->last_rgb);
   free(h->ext_raw);
+  free(h->lay_scratch);
   free(h->side_buf);
   free(h->side_scratch);
   SDL_Quit();
@@ -999,32 +1002,112 @@ SDL_Surface *sv_host_capture_output(SvHost *h) {
 
 /* SEG-124: draws the retained overlay (the relocated HUD) into the frame texture after the side treatment: left edge at the left edge of the visible side, or, with no visible side, inside the
  * picture at the place of the HUD it replaces; clipped to the texture; fully transparent pixels keep what is there. Returns 0 only on a texture failure. */
-static int draw_overlay(SvHost *h, SvSideTreatment t, int vis, int side, int w, int hgt) {
+/* Where the fixed HUD overlay lands in the frame texture (and how much of it fits); 0 when there is none or nothing of it is inside. */
+static int legacy_overlay_rect(const SvHost *h, int vis, int side, int w, int hgt, int *ox_out, int *oy_out, int *cw_out, int *ch_out) {
   const int tex_w = w + 2 * side;
-  int ox, oy, cw, ch, i, j;
-  SDL_Rect o;
-  if (h->ovl_w <= 0 || h->ovl_h <= 0) return 1;
+  int ox, oy;
+  if (h->ovl_w <= 0 || h->ovl_h <= 0) return 0;
   if (side > 0 && vis > 0) { ox = side - vis; oy = 0; }
   else { ox = side + h->ovl_fx; oy = h->ovl_fy; }
-  if (ox < 0 || oy < 0 || ox >= tex_w || oy >= hgt) return 1;
-  cw = h->ovl_w < tex_w - ox ? h->ovl_w : tex_w - ox;
-  ch = h->ovl_h < hgt - oy ? h->ovl_h : hgt - oy;
+  if (ox < 0 || oy < 0 || ox >= tex_w || oy >= hgt) return 0;
+  *ox_out = ox;
+  *oy_out = oy;
+  *cw_out = h->ovl_w < tex_w - ox ? h->ovl_w : tex_w - ox;
+  *ch_out = h->ovl_h < hgt - oy ? h->ovl_h : hgt - oy;
+  return 1;
+}
+
+/* The pixel below the overlays at texture position (tx, ty): the native picture, or the (treated or raw) side. */
+static const uint8_t *overlay_bg(const SvHost *h, SvSideTreatment t, int vis, int side, int w, int hgt, int tx, int ty) {
+  const int tex_w = w + 2 * side;
+  if (tx < side) return (t == SV_TREAT_PASSTHROUGH || vis <= 0) ? h->ext_raw + ((size_t)ty * (size_t)tex_w + (size_t)tx) * 3u
+                                                                 : h->side_buf + ((size_t)ty * (size_t)vis + (size_t)(tx - (side - vis))) * 3u;
+  if (tx < side + w) return h->last_rgb + ((size_t)ty * (size_t)w + (size_t)(tx - side)) * 3u;
+  return (t == SV_TREAT_PASSTHROUGH || vis <= 0) ? h->ext_raw + ((size_t)ty * (size_t)tex_w + (size_t)tx) * 3u
+                                                 : h->side_buf + (size_t)vis * (size_t)hgt * 3u + ((size_t)ty * (size_t)vis + (size_t)(tx - side - w)) * 3u;
+}
+
+static int draw_overlay(SvHost *h, SvSideTreatment t, int vis, int side, int w, int hgt) {
+  int ox, oy, cw, ch, i, j;
+  SDL_Rect o;
+  if (!legacy_overlay_rect(h, vis, side, w, hgt, &ox, &oy, &cw, &ch)) return 1;
   for (j = 0; j < ch; ++j)
     for (i = 0; i < cw; ++i) {
       const int tx = ox + i, ty = oy + j;
       const uint8_t *c = h->ovl_rgba + ((size_t)j * (size_t)h->ovl_w + (size_t)i) * 4u;
-      const uint8_t *bg;
       uint8_t *d = h->ovl_scratch + ((size_t)j * (size_t)cw + (size_t)i) * 3u;
-      if (tx < side) bg = (t == SV_TREAT_PASSTHROUGH || vis <= 0) ? h->ext_raw + ((size_t)ty * (size_t)tex_w + (size_t)tx) * 3u
-                                                                   : h->side_buf + ((size_t)ty * (size_t)vis + (size_t)(tx - (side - vis))) * 3u;
-      else if (tx < side + w) bg = h->last_rgb + ((size_t)ty * (size_t)w + (size_t)(tx - side)) * 3u;
-      else bg = (t == SV_TREAT_PASSTHROUGH || vis <= 0) ? h->ext_raw + ((size_t)ty * (size_t)tex_w + (size_t)tx) * 3u
-                                                         : h->side_buf + (size_t)vis * (size_t)hgt * 3u + ((size_t)ty * (size_t)vis + (size_t)(tx - side - w)) * 3u;
+      const uint8_t *bg = overlay_bg(h, t, vis, side, w, hgt, tx, ty);
       if (c[3] == 0u) { d[0] = bg[0]; d[1] = bg[1]; d[2] = bg[2]; }
       else { const unsigned a = c[3]; d[0] = (uint8_t)((bg[0] * (255u - a) + c[0] * a + 127u) / 255u); d[1] = (uint8_t)((bg[1] * (255u - a) + c[1] * a + 127u) / 255u); d[2] = (uint8_t)((bg[2] * (255u - a) + c[2] * a + 127u) / 255u); }
     }
   o.x = ox; o.y = oy; o.w = cw; o.h = ch;
   return SDL_UpdateTexture(h->frame_tex, &o, h->ovl_scratch, cw * 3) ? 1 : 0;
+}
+
+/* SEG-140-T004: the positioned/layered overlays. They are planned against the CURRENT presentation geometry (the native picture and the visible side), composed in the working buffer over
+ * what the texture shows (side or picture, then the fixed HUD), and uploaded as one rectangle. Rejected layers are counted and reported; the others are drawn. Returns 0 only on a texture failure. */
+static int draw_layers(SvHost *h, SvSideTreatment t, int vis, int side, int w, int hgt) {
+  SvOverlayPlan plan;
+  int k, x0 = 1 << 30, y0 = 1 << 30, x1 = 0, y1 = 0, bw, bh, i, j, hx, hy, hw, hh, px0;
+  const int origin = side - vis;   /* texture column of the left edge of the visible surface */
+  SDL_Rect r;
+  if (h->lay_count <= 0 && h->lay_overflow <= 0) return 1;
+  sv_overlay_plan(h->lay, h->lay_count, w, hgt, vis, &plan);
+  if (!h->lay_counted) {
+    int n = plan.rejected + h->lay_overflow;
+    h->lay_counted = 1;
+    if (h->lay_overflow > 0) { h->lay_last_index = SV_OVL_LAYERS_MAX; h->lay_last_reason = SV_OVR_COUNT; }
+    if (plan.rejected > 0) { h->lay_last_index = plan.reject[plan.rejected < SV_OVL_LAYERS_MAX + 1 ? plan.rejected - 1 : SV_OVL_LAYERS_MAX].index; h->lay_last_reason = plan.reject[plan.rejected < SV_OVL_LAYERS_MAX + 1 ? plan.rejected - 1 : SV_OVL_LAYERS_MAX].reason; }
+    if (n > 0 && h->lay_rejected <= UINT32_MAX - (uint32_t)n) h->lay_rejected += (uint32_t)n; else if (n > 0) h->lay_rejected = UINT32_MAX;
+    if (n > 0 && !h->lay_toasted) {
+      char text[96];
+      snprintf(text, sizeof text, "Overlay layer %d rejected: %s", h->lay_last_index, sv_ovl_reject_name(h->lay_last_reason));
+      push_toast(h, text, 4000u);
+      h->lay_toasted = 1;
+    } else if (n == 0) h->lay_toasted = 0;
+  }
+  if (plan.placed == 0) return 1;
+  for (k = 0; k < plan.placed; ++k) {
+    const SvOverlayPlacement *p = &plan.place[k];
+    if (p->x < x0) x0 = p->x;
+    if (p->y < y0) y0 = p->y;
+    if (p->x + p->w > x1) x1 = p->x + p->w;
+    if (p->y + p->h > y1) y1 = p->y + p->h;
+  }
+  bw = x1 - x0;
+  bh = y1 - y0;
+  px0 = x0;          /* the working rectangle's left edge in presentation coordinates */
+  x0 += origin;      /* to texture coordinates */
+  for (j = 0; j < bh; ++j)
+    for (i = 0; i < bw; ++i) {
+      const uint8_t *bg = overlay_bg(h, t, vis, side, w, hgt, x0 + i, y0 + j);
+      uint8_t *d = h->lay_scratch + ((size_t)j * (size_t)bw + (size_t)i) * 3u;
+      d[0] = bg[0]; d[1] = bg[1]; d[2] = bg[2];
+    }
+  /* the fixed HUD is below the layers: apply it inside the working rectangle first, with the same placement and blend as draw_overlay */
+  if (legacy_overlay_rect(h, vis, side, w, hgt, &hx, &hy, &hw, &hh)) {
+    for (j = 0; j < hh; ++j)
+      for (i = 0; i < hw; ++i) {
+        const int tx = hx + i, ty = hy + j;
+        const uint8_t *c = h->ovl_rgba + ((size_t)j * (size_t)h->ovl_w + (size_t)i) * 4u;
+        uint8_t *d;
+        if (tx < x0 || tx >= x0 + bw || ty < y0 || ty >= y0 + bh || c[3] == 0u) continue;
+        d = h->lay_scratch + ((size_t)(ty - y0) * (size_t)bw + (size_t)(tx - x0)) * 3u;
+        { const unsigned a = c[3]; d[0] = (uint8_t)((d[0] * (255u - a) + c[0] * a + 127u) / 255u); d[1] = (uint8_t)((d[1] * (255u - a) + c[1] * a + 127u) / 255u); d[2] = (uint8_t)((d[2] * (255u - a) + c[2] * a + 127u) / 255u); }
+      }
+  }
+  {   /* compose the planned layers with their placements moved into working-buffer coordinates */
+    SvOverlayPlan local = plan;
+    for (k = 0; k < local.placed; ++k) { local.place[k].x = plan.place[k].x - px0; local.place[k].y = plan.place[k].y - y0; }
+    sv_overlay_compose(h->lay_scratch, bw, bh, bw * 3, h->lay, &local);
+  }
+  r.x = x0; r.y = y0; r.w = bw; r.h = bh;
+  return SDL_UpdateTexture(h->frame_tex, &r, h->lay_scratch, bw * 3) ? 1 : 0;
+}
+
+static int draw_overlays(SvHost *h, SvSideTreatment t, int vis, int side, int w, int hgt) {
+  if (!draw_overlay(h, t, vis, side, w, hgt)) return 0;
+  return draw_layers(h, t, vis, side, w, hgt);
 }
 
 /* SEG-123: builds the frame texture from the retained native picture (+ retained raw extension). Deterministic in (style, source, native pixels, raw
@@ -1038,7 +1121,7 @@ static int upload_picture(SvHost *h) {
   if (side <= 0) {
     h->side_applied = SV_TREAT_PASSTHROUGH;
     if (!SDL_UpdateTexture(h->frame_tex, NULL, h->last_rgb, w * 3)) return 0;
-    return draw_overlay(h, SV_TREAT_PASSTHROUGH, 0, 0, w, hgt);
+    return draw_overlays(h, SV_TREAT_PASSTHROUGH, 0, 0, w, hgt);
   }
   centre.x = side; centre.y = 0; centre.w = w; centre.h = hgt;
   t = sv_side_treatment(h->settings.video.widescreen_side_style, h->ext_source);
@@ -1058,7 +1141,7 @@ static int upload_picture(SvHost *h) {
     if (!SDL_UpdateTexture(h->frame_tex, &r, h->side_buf + (size_t)vis * (size_t)hgt * 3u, vis * 3)) return 0;
   }
   if (!SDL_UpdateTexture(h->frame_tex, &centre, h->last_rgb, w * 3)) return 0; /* the native pixels always come from the native picture */
-  if (!draw_overlay(h, t, vis, side, w, hgt)) return 0;
+  if (!draw_overlays(h, t, vis, side, w, hgt)) return 0;
   h->side_applied = t;
   return 1;
 }
@@ -1177,6 +1260,27 @@ static int present_frame_impl(SvHost *h, const uint8_t *rgb, int w, int hgt, int
     h->ovl_h = ovl->overlay_h;
     h->ovl_fx = ovl->overlay_fx;
     h->ovl_fy = ovl->overlay_fy;
+  }
+  h->lay_count = 0;
+  h->lay_overflow = 0;
+  h->lay_counted = 0;
+  if (ovl != NULL && ovl->layers != NULL && ovl->layer_count > 0) {
+    int used = 0, i;
+    h->lay_overflow = ovl->layer_count > SV_OVL_LAYERS_MAX ? ovl->layer_count - SV_OVL_LAYERS_MAX : 0;
+    for (i = 0; i < ovl->layer_count && i < SV_OVL_LAYERS_MAX; ++i) {
+      SvOverlayLayer d = ovl->layers[i];
+      const int valid = d.w >= 1 && d.h >= 1 && d.w <= SV_OVERLAY_MAX && d.h <= SV_OVERLAY_MAX;
+      if (valid && sv_ovl_budget_ok(used, d.w, d.h)) {   /* exactly the pixels the planner counts: every valid-size image that still fits */
+        if (d.rgba != NULL) {
+          memcpy(h->lay_pixels + (size_t)used * 4u, d.rgba, (size_t)d.w * (size_t)d.h * 4u);
+          d.rgba = h->lay_pixels + (size_t)used * 4u;
+        }
+        used += d.w * d.h;
+      } else {
+        d.rgba = NULL;   /* the planner reports SIZE or BUDGET for it */
+      }
+      h->lay[h->lay_count++] = d;
+    }
   }
   if (ext != NULL) {
     const size_t row = (size_t)(w + 2 * side) * 3u;
@@ -1345,6 +1449,11 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
   return present_frame(h, rgb, w, hgt, pitch, NULL, offered ? ext : NULL);
 }
 
+void sv_host_overlay_diag(const SvHost *h, uint32_t *rejected, int *last_index, int *last_reason) {
+  if (rejected != NULL) *rejected = h != NULL ? h->lay_rejected : 0u;
+  if (last_index != NULL) *last_index = h != NULL ? h->lay_last_index : -1;
+  if (last_reason != NULL) *last_reason = h != NULL ? (int)h->lay_last_reason : 0;
+}
 int sv_host_extension_side(const SvHost *h) { return h != NULL ? h->ext_side : 0; }
 void sv_host_extension_stats(const SvHost *h, uint32_t *accepted, uint32_t *rejected, uint32_t *texture_creations) {
   if (accepted != NULL) *accepted = h != NULL ? h->ext_accepted : 0u;
