@@ -83,3 +83,4 @@ A pixel takes the first opaque candidate in (layer high to low, then command ord
 - Virtual sprites do not reach the widescreen side columns; positions are picture pixels.
 - Layered overlays are not counted as `hud` coverage delivered (they are not a declared component yet; T005 decides); a mod that draws only into layers is reported `missing` for a declared `hud`.
 - A verified sprite's position depicts the author's reading of the game state; the host verifies the gate (frame state valid) and the art source, not the semantics.
+- The additive provider fields are compatible in one direction: a provider built before them runs unchanged on a new host. A provider built against the new header must run on a host of the same build (providers are compiled into the program with the host today); there is no struct-size guard for the reverse pairing.

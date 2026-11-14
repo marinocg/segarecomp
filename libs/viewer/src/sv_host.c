@@ -1051,7 +1051,7 @@ static int draw_layers(SvHost *h, SvSideTreatment t, int vis, int side, int w, i
   int k, x0 = 1 << 30, y0 = 1 << 30, x1 = 0, y1 = 0, bw, bh, i, j, hx, hy, hw, hh, px0;
   const int origin = side - vis;   /* texture column of the left edge of the visible surface */
   SDL_Rect r;
-  if (h->lay_count <= 0 && h->lay_overflow <= 0) return 1;
+  if (h->lay_count <= 0 && h->lay_overflow <= 0) { h->lay_toasted = 0; return 1; }
   sv_overlay_plan(h->lay, h->lay_count, w, hgt, vis, &plan);
   if (!h->lay_counted) {
     int n = plan.rejected + h->lay_overflow;

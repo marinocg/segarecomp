@@ -542,7 +542,7 @@ void sv_overlay_plan(const SvOverlayLayer *layers, int count, int pic_w, int pic
   int n = 0;
   if (out == NULL) return;
   memset(out, 0, sizeof *out);
-  if (layers == NULL || count <= 0 || pic_w <= 0 || pic_h <= 0 || visible_side < 0) return;
+  if (layers == NULL || count <= 0 || pic_w <= 0 || pic_h <= 0 || pic_w > 4096 || pic_h > 4096 || visible_side < 0 || visible_side > 4096) return;   /* bounded inputs: no overflow below */
   for (i = 0; i < count; ++i) {
     const SvOverlayLayer *l = &layers[i];
     int rx, ry, rw, rh, x, y, cx0 = 0, cy0 = 0, cx1, cy1;
@@ -590,8 +590,10 @@ void sv_overlay_compose(uint8_t *rgb, int width, int height, int pitch, const Sv
   if (rgb == NULL || layers == NULL || plan == NULL || width <= 0 || height <= 0 || pitch < width * 3) return;
   for (k = 0; k < plan->placed; ++k) {
     const SvOverlayPlacement *p = &plan->place[k];
-    const SvOverlayLayer *l = &layers[p->index];
-    if (l->rgba == NULL) continue;
+    const SvOverlayLayer *l;
+    if (p->index < 0 || p->index >= SV_OVL_LAYERS_MAX || p->cx0 < 0 || p->cy0 < 0 || p->cx1 > p->w || p->cy1 > p->h) continue;   /* a hand-built plan cannot reach outside the layer array or its image */
+    l = &layers[p->index];
+    if (l->rgba == NULL || l->w != p->w || l->h != p->h) continue;
     for (j = p->cy0; j < p->cy1; ++j)
       for (i = p->cx0; i < p->cx1; ++i) {
         const int tx = p->x + i, ty = p->y + j;
