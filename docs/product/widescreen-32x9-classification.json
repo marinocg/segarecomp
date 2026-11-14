@@ -1,0 +1,1254 @@
+{
+  "schema": "segarecomp.widescreen-classification",
+  "schema_version": 1,
+  "as_of": "2026-11-14",
+  "basis": "Aggregate classes from bounded private runs (delivery F15, SEG-140-T006/T007). Contains no addresses, frames, captures, traces, tables or image bytes. The 16:9 packages are the baseline, not evidence for 21:9 or 32:9.",
+  "aspects": [
+    "4:3",
+    "16:9",
+    "21:9",
+    "32:9"
+  ],
+  "limitations": {
+    "virtual_sprite_compositor": "tested C11 module only (ADR 0303): command model, VDP decode, priority, clip and budget; consumed by no shipped program",
+    "live_viewer_presents_virtual_sprites": false,
+    "mod_can_author_virtual_sprites": false,
+    "side_column_sprite_drawing": false,
+    "actor_coverage_claims_available": [],
+    "actors_coverage_in_reports": "a declared actors component reports missing in every shipped program: nothing sets the actor signal outside the synthetic test fixtures (ADR 0304)",
+    "layered_overlays_count_as_hud": false,
+    "scene_names_are_provider_claims": true,
+    "follow_ups": [
+      "live virtual-sprite consumer and mod-authoring integration",
+      "virtual-sprite presentation in the widescreen side columns",
+      "per-title gameplay-changing window and object-loading changes in segarecomp-patches, only if the maintainer wants wider actor visibility"
+    ]
+  },
+  "titles": [
+    {
+      "id": "sonic-1",
+      "name": "Sonic the Hedgehog",
+      "package": "sonic1-native-widescreen",
+      "images": [
+        {
+          "id": "rev00-usa-eu",
+          "revision": "REV00 (USA, Europe)",
+          "status": "studied"
+        }
+      ],
+      "scene_classes": [
+        {
+          "id": "sonic-1-ghz",
+          "name": "Green Hill act 1 (running level)",
+          "image": "rev00-usa-eu",
+          "route": "bounded scripted pad route (title, level-select entry, hold right with periodic jump, about 40 s of play), 45 M instruction budget, 420 s wall timeout, dummy video/audio",
+          "observations": {
+            "route_frames": 4933,
+            "provider_authored_frames": 3767,
+            "provider_declined_frames": 1166,
+            "authored_identical_at_16_9_21_9_32_9": true,
+            "running_frames_patched": 4226,
+            "objects_per_frame_beyond_64px_left": 1.95,
+            "objects_per_frame_beyond_64px_right": 3.99,
+            "flagged_pct_margin_to_39px_vanilla_patched": [
+              28.1,
+              81.1
+            ],
+            "flagged_pct_margin_40_101px_vanilla_patched": [
+              3.6,
+              48.0
+            ],
+            "flagged_pct_margin_102_238px_vanilla_patched": [
+              0.2,
+              2.1
+            ],
+            "sprites_fully_beside_picture_per_frame_vanilla_patched": [
+              1.07,
+              3.93
+            ],
+            "blank_pattern_share_pct_of_those_patched": 0.1,
+            "peak_sprites_on_a_line_vanilla_patched": [
+              14,
+              16
+            ],
+            "frames_line_ge16_vanilla_patched": [
+              0,
+              5
+            ],
+            "frames_line_ge20_vanilla_patched": [
+              0,
+              0
+            ]
+          },
+          "classification": {
+            "scenery": "authored-unverified",
+            "actors": "present-not-submitted",
+            "art": "unverified",
+            "budget": "unverified",
+            "feasibility_32x9": "gameplay-changing-required",
+            "rationale": "Object-table entries (some of them non-drawing) exist beyond the 64 px the package submits while their on-screen flag stays clear (see observations); the package documents that this flag is also what lets objects act, so submitting them out to 238 px is needed to show them and it is a gameplay-changing change; presentation-only support is insufficient because the host cannot draw objects the game never submitted."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "authored-verified-scope",
+              "hud": "relocated",
+              "actors": "submitted-partial",
+              "art": "resident-for-submitted",
+              "budget": "within",
+              "background_extension": "authored-verified-scope",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": []
+            },
+            "21:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "submitted-partial",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run+source-analysis",
+          "repeatable": true
+        },
+        {
+          "id": "sonic-1-lz",
+          "name": "Labyrinth act 1 (running level, water)",
+          "image": "rev00-usa-eu",
+          "route": "bounded scripted pad route (title, level-select entry, hold right with periodic jump, about 40 s of play), 45 M instruction budget, 420 s wall timeout, dummy video/audio",
+          "observations": {
+            "route_frames": 5052,
+            "provider_authored_frames": 4037,
+            "provider_declined_frames": 1015,
+            "authored_identical_at_16_9_21_9_32_9": true,
+            "running_frames_patched": 4190,
+            "objects_per_frame_beyond_64px_left": 0.82,
+            "objects_per_frame_beyond_64px_right": 6.14,
+            "flagged_pct_margin_to_39px_vanilla_patched": [
+              11.2,
+              38.9
+            ],
+            "flagged_pct_margin_40_101px_vanilla_patched": [
+              0.0,
+              23.7
+            ],
+            "flagged_pct_margin_102_238px_vanilla_patched": [
+              0.0,
+              0.0
+            ],
+            "sprites_fully_beside_picture_per_frame_vanilla_patched": [
+              0.83,
+              1.86
+            ],
+            "blank_pattern_share_pct_of_those_patched": 0.0,
+            "peak_sprites_on_a_line_vanilla_patched": [
+              14,
+              13
+            ],
+            "frames_line_ge16_vanilla_patched": [
+              0,
+              0
+            ],
+            "frames_line_ge20_vanilla_patched": [
+              0,
+              0
+            ]
+          },
+          "classification": {
+            "scenery": "authored-unverified",
+            "actors": "present-not-submitted",
+            "art": "unverified",
+            "budget": "unverified",
+            "feasibility_32x9": "gameplay-changing-required",
+            "rationale": "Object-table entries (some of them non-drawing) exist beyond the 64 px the package submits while their on-screen flag stays clear (see observations); the package documents that this flag is also what lets objects act, so submitting them out to 238 px is needed to show them and it is a gameplay-changing change; presentation-only support is insufficient because the host cannot draw objects the game never submitted."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "authored-verified-scope",
+              "hud": "relocated",
+              "actors": "submitted-partial",
+              "art": "resident-for-submitted",
+              "budget": "within",
+              "background_extension": "authored-verified-scope",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": []
+            },
+            "21:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run+source-analysis",
+          "repeatable": true
+        },
+        {
+          "id": "sonic-1-mz",
+          "name": "Marble act 1 (running level)",
+          "image": "rev00-usa-eu",
+          "route": "bounded scripted pad route (title, level-select entry, hold right with periodic jump, about 40 s of play), 45 M instruction budget, 420 s wall timeout, dummy video/audio",
+          "observations": {
+            "route_frames": 4809,
+            "provider_authored_frames": 2872,
+            "provider_declined_frames": 1937,
+            "authored_identical_at_16_9_21_9_32_9": true,
+            "running_frames_patched": 3550,
+            "objects_per_frame_beyond_64px_left": 0.55,
+            "objects_per_frame_beyond_64px_right": 3.59,
+            "flagged_pct_margin_to_39px_vanilla_patched": [
+              44.9,
+              92.0
+            ],
+            "flagged_pct_margin_40_101px_vanilla_patched": [
+              14.7,
+              60.7
+            ],
+            "flagged_pct_margin_102_238px_vanilla_patched": [
+              4.9,
+              5.8
+            ],
+            "sprites_fully_beside_picture_per_frame_vanilla_patched": [
+              3.8,
+              7.65
+            ],
+            "blank_pattern_share_pct_of_those_patched": 0.0,
+            "peak_sprites_on_a_line_vanilla_patched": [
+              16,
+              19
+            ],
+            "frames_line_ge16_vanilla_patched": [
+              14,
+              103
+            ],
+            "frames_line_ge20_vanilla_patched": [
+              0,
+              0
+            ]
+          },
+          "classification": {
+            "scenery": "authored-unverified",
+            "actors": "present-not-submitted",
+            "art": "unverified",
+            "budget": "constrained",
+            "feasibility_32x9": "gameplay-changing-required",
+            "rationale": "Object-table entries (some of them non-drawing) exist beyond the 64 px the package submits while their on-screen flag stays clear (see observations); the package documents that this flag is also what lets objects act, so submitting them out to 238 px is needed to show them and it is a gameplay-changing change; presentation-only support is insufficient because the host cannot draw objects the game never submitted."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "authored-verified-scope",
+              "hud": "relocated",
+              "actors": "submitted-partial",
+              "art": "resident-for-submitted",
+              "budget": "within",
+              "background_extension": "authored-verified-scope",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": []
+            },
+            "21:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "submitted-partial",
+              "art": "unverified",
+              "budget": "constrained",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "unverified",
+              "budget": "constrained",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run+source-analysis",
+          "repeatable": true
+        },
+        {
+          "id": "sonic-1-slz",
+          "name": "Star Light act 1 (running level)",
+          "image": "rev00-usa-eu",
+          "route": "bounded scripted pad route (title, level-select entry, hold right with periodic jump, about 40 s of play), 45 M instruction budget, 420 s wall timeout, dummy video/audio",
+          "observations": {
+            "route_frames": 4934,
+            "provider_authored_frames": 3855,
+            "provider_declined_frames": 1079,
+            "authored_identical_at_16_9_21_9_32_9": true,
+            "running_frames_patched": 4066,
+            "objects_per_frame_beyond_64px_left": 0.88,
+            "objects_per_frame_beyond_64px_right": 4.74,
+            "flagged_pct_margin_to_39px_vanilla_patched": [
+              0.5,
+              1.4
+            ],
+            "flagged_pct_margin_40_101px_vanilla_patched": [
+              0.0,
+              0.4
+            ],
+            "flagged_pct_margin_102_238px_vanilla_patched": [
+              0.1,
+              0.1
+            ],
+            "sprites_fully_beside_picture_per_frame_vanilla_patched": [
+              0.97,
+              1.08
+            ],
+            "blank_pattern_share_pct_of_those_patched": 0.0,
+            "peak_sprites_on_a_line_vanilla_patched": [
+              15,
+              15
+            ],
+            "frames_line_ge16_vanilla_patched": [
+              0,
+              0
+            ],
+            "frames_line_ge20_vanilla_patched": [
+              0,
+              0
+            ]
+          },
+          "classification": {
+            "scenery": "authored-unverified",
+            "actors": "present-not-submitted",
+            "art": "unverified",
+            "budget": "unverified",
+            "feasibility_32x9": "gameplay-changing-required",
+            "rationale": "Object-table entries (some of them non-drawing) exist beyond the 64 px the package submits while their on-screen flag stays clear (see observations); the package documents that this flag is also what lets objects act, so submitting them out to 238 px is needed to show them and it is a gameplay-changing change; presentation-only support is insufficient because the host cannot draw objects the game never submitted."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "authored-verified-scope",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "resident-for-submitted",
+              "budget": "within",
+              "background_extension": "authored-verified-scope",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": []
+            },
+            "21:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run+source-analysis",
+          "repeatable": true
+        },
+        {
+          "id": "sonic-1-syz",
+          "name": "Spring Yard act 1 (running level)",
+          "image": "rev00-usa-eu",
+          "route": "bounded scripted pad route (title, level-select entry, hold right with periodic jump, about 40 s of play), 45 M instruction budget, 420 s wall timeout, dummy video/audio",
+          "observations": {
+            "route_frames": 5364,
+            "provider_authored_frames": 4246,
+            "provider_declined_frames": 1118,
+            "authored_identical_at_16_9_21_9_32_9": true,
+            "running_frames_patched": 4420,
+            "objects_per_frame_beyond_64px_left": 2.22,
+            "objects_per_frame_beyond_64px_right": 6.13,
+            "flagged_pct_margin_to_39px_vanilla_patched": [
+              12.7,
+              47.8
+            ],
+            "flagged_pct_margin_40_101px_vanilla_patched": [
+              0.0,
+              30.9
+            ],
+            "flagged_pct_margin_102_238px_vanilla_patched": [
+              0.0,
+              0.0
+            ],
+            "sprites_fully_beside_picture_per_frame_vanilla_patched": [
+              0.46,
+              1.94
+            ],
+            "blank_pattern_share_pct_of_those_patched": 0.0,
+            "peak_sprites_on_a_line_vanilla_patched": [
+              16,
+              18
+            ],
+            "frames_line_ge16_vanilla_patched": [
+              65,
+              65
+            ],
+            "frames_line_ge20_vanilla_patched": [
+              0,
+              0
+            ]
+          },
+          "classification": {
+            "scenery": "authored-unverified",
+            "actors": "present-not-submitted",
+            "art": "unverified",
+            "budget": "unverified",
+            "feasibility_32x9": "gameplay-changing-required",
+            "rationale": "Object-table entries (some of them non-drawing) exist beyond the 64 px the package submits while their on-screen flag stays clear (see observations); the package documents that this flag is also what lets objects act, so submitting them out to 238 px is needed to show them and it is a gameplay-changing change; presentation-only support is insufficient because the host cannot draw objects the game never submitted."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "authored-verified-scope",
+              "hud": "relocated",
+              "actors": "submitted-partial",
+              "art": "resident-for-submitted",
+              "budget": "within",
+              "background_extension": "authored-verified-scope",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": []
+            },
+            "21:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "submitted-partial",
+              "art": "unverified",
+              "budget": "constrained",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run+source-analysis",
+          "repeatable": true
+        },
+        {
+          "id": "sonic-1-sbz",
+          "name": "Scrap Brain act 1 (running level)",
+          "image": "rev00-usa-eu",
+          "route": "bounded scripted pad route (title, level-select entry, hold right with periodic jump, about 40 s of play), 45 M instruction budget, 420 s wall timeout, dummy video/audio",
+          "observations": {
+            "route_frames": 4856,
+            "provider_authored_frames": 3717,
+            "provider_declined_frames": 1139,
+            "authored_identical_at_16_9_21_9_32_9": true,
+            "running_frames_patched": 3878,
+            "objects_per_frame_beyond_64px_left": 2.27,
+            "objects_per_frame_beyond_64px_right": 8.39,
+            "flagged_pct_margin_to_39px_vanilla_patched": [
+              2.8,
+              9.4
+            ],
+            "flagged_pct_margin_40_101px_vanilla_patched": [
+              0.7,
+              11.1
+            ],
+            "flagged_pct_margin_102_238px_vanilla_patched": [
+              0.1,
+              0.4
+            ],
+            "sprites_fully_beside_picture_per_frame_vanilla_patched": [
+              0.84,
+              2.98
+            ],
+            "blank_pattern_share_pct_of_those_patched": 0.4,
+            "peak_sprites_on_a_line_vanilla_patched": [
+              14,
+              14
+            ],
+            "frames_line_ge16_vanilla_patched": [
+              0,
+              0
+            ],
+            "frames_line_ge20_vanilla_patched": [
+              0,
+              0
+            ]
+          },
+          "classification": {
+            "scenery": "authored-unverified",
+            "actors": "present-not-submitted",
+            "art": "unverified",
+            "budget": "unverified",
+            "feasibility_32x9": "gameplay-changing-required",
+            "rationale": "Object-table entries (some of them non-drawing) exist beyond the 64 px the package submits while their on-screen flag stays clear (see observations); the package documents that this flag is also what lets objects act, so submitting them out to 238 px is needed to show them and it is a gameplay-changing change; presentation-only support is insufficient because the host cannot draw objects the game never submitted."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "authored-verified-scope",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "resident-for-submitted",
+              "budget": "within",
+              "background_extension": "authored-verified-scope",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": []
+            },
+            "21:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run+source-analysis",
+          "repeatable": true
+        },
+        {
+          "id": "sonic-1-special-stage",
+          "name": "Special stage",
+          "image": "rev00-usa-eu",
+          "route": "bounded scripted pad route (title, level-select entry, level-select special-stage entry), 45 M instruction budget, 420 s wall timeout, dummy video/audio",
+          "observations": {
+            "route_frames": 4952,
+            "provider_authored_frames_whole_route": 2581,
+            "special_stage_frames": 581,
+            "peak_sprites_on_a_line_vanilla_patched": [
+              15,
+              15
+            ],
+            "level_objects_in_table_max": 0,
+            "sprites_fully_beside_picture_per_frame": 4.37
+          },
+          "classification": {
+            "scenery": "generic-wrapped",
+            "actors": "unverified",
+            "art": "unverified",
+            "budget": "unverified",
+            "feasibility_32x9": "inconclusive",
+            "rationale": "The provider serves the stage background from the VDP's own wrapped plane, no level object table exists to measure, and no run established what the extra columns show; so only a generic background extension is available and nothing about actors is established."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "generic-wrapped",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "within",
+              "background_extension": "generic-available",
+              "kind": "inconclusive",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": []
+            },
+            "21:9": {
+              "scenery": "generic-wrapped",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "inconclusive",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "generic-wrapped",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "inconclusive",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run+source-analysis",
+          "repeatable": true
+        },
+        {
+          "id": "sonic-1-non-running-screens",
+          "name": "Non-running screens (Sega logo, title, level select, title card, fades)",
+          "image": "rev00-usa-eu",
+          "route": "the first frames of every route above",
+          "observations": {
+            "declined_frames_in_ghz_route": 1166,
+            "route_frames": 4933,
+            "declined_reason": "unsupported scene (title, level select, title card, fades)"
+          },
+          "classification": {
+            "scenery": "generic-declined",
+            "actors": "unverified",
+            "art": "unverified",
+            "budget": "unverified",
+            "feasibility_32x9": "unsupported",
+            "rationale": "The provider declines these frames by design (reason unsupported scene), so the host serves the generic path; no authored content exists for them."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "generic-declined",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "unsupported",
+              "evidence": "observed-run",
+              "fallback_reasons": [
+                "provider_declined_scene"
+              ]
+            },
+            "21:9": {
+              "scenery": "generic-declined",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "unsupported",
+              "evidence": "observed-run",
+              "fallback_reasons": [
+                "provider_declined_scene",
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "generic-declined",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "unsupported",
+              "evidence": "observed-run",
+              "fallback_reasons": [
+                "provider_declined_scene",
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run+source-analysis",
+          "repeatable": true
+        }
+      ],
+      "not_run": [
+        {
+          "id": "sonic-1-bosses-final-zone-ending",
+          "result": "NOT RUN",
+          "blocker": "no bounded route or state-entry mechanism was established for bosses, the Final Zone or the ending in this delivery"
+        },
+        {
+          "id": "sonic-1-later-acts",
+          "result": "NOT RUN",
+          "blocker": "only act 1 of each zone was entered; acts 2 and 3 need their own bounded routes and were not run"
+        }
+      ]
+    },
+    {
+      "id": "sonic-2",
+      "name": "Sonic the Hedgehog 2",
+      "package": "sonic2-native-widescreen",
+      "images": [
+        {
+          "id": "world-rev00",
+          "revision": "World REV00",
+          "status": "studied"
+        },
+        {
+          "id": "jue-rev01",
+          "revision": "JUE REV01",
+          "status": "NOT RUN",
+          "blocker": "the REV01 image is not in the local games set; no other image's evidence is substituted"
+        }
+      ],
+      "scene_classes": [
+        {
+          "id": "sonic-2-ehz1",
+          "name": "Emerald Hill act 1 (running level)",
+          "image": "world-rev00",
+          "route": "bounded scripted pad route (title, 1-player start, hold right with periodic jump, about 40 s of play), 45 M instruction budget, 420 s wall timeout, dummy video/audio",
+          "observations": {
+            "route_frames": 4893,
+            "provider_authored_frames": 3722,
+            "provider_hud_frames": 3721,
+            "provider_declined_frames": 1171,
+            "authored_identical_at_16_9_21_9_32_9": true,
+            "running_frames_patched": 3862,
+            "objects_per_frame_beyond_64px_left": 1.31,
+            "objects_per_frame_beyond_64px_right": 2.22,
+            "flagged_pct_margin_to_39px_vanilla_patched": [
+              18.7,
+              37.1
+            ],
+            "flagged_pct_margin_40_101px_vanilla_patched": [
+              0.6,
+              23.6
+            ],
+            "flagged_pct_margin_102_238px_vanilla_patched": [
+              0.0,
+              0.6
+            ],
+            "sprites_fully_beside_picture_per_frame_vanilla_patched": [
+              0.51,
+              1.93
+            ],
+            "blank_pattern_share_pct_of_those_patched": 0.0,
+            "peak_sprites_on_a_line_vanilla_patched": [
+              23,
+              23
+            ],
+            "frames_line_ge16_vanilla_patched": [
+              105,
+              168
+            ],
+            "frames_line_ge20_vanilla_patched": [
+              5,
+              16
+            ],
+            "object_table_layout_verified_by_ram_dump": true,
+            "sprite_probe_counts_only_vertically_visible_sprites": true
+          },
+          "classification": {
+            "scenery": "authored-unverified",
+            "actors": "present-not-submitted",
+            "art": "unverified",
+            "budget": "constrained",
+            "feasibility_32x9": "gameplay-changing-required",
+            "rationale": "Object-table entries exist beyond the 64 px the package submits while their on-screen flag stays clear, and the package documents that its wider actor coverage makes enemies activate earlier, so submitting them out to 238 px is needed to show them and it is a gameplay-changing change; the original budget is already exceeded (peak above 20 sprites on a line), so presentation-only support is insufficient."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "authored-verified-scope",
+              "hud": "relocated",
+              "actors": "submitted-partial",
+              "art": "resident-for-submitted",
+              "budget": "constrained",
+              "background_extension": "authored-verified-scope",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": []
+            },
+            "21:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "unverified",
+              "budget": "constrained",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "unverified",
+              "budget": "constrained",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run+source-analysis",
+          "repeatable": true
+        },
+        {
+          "id": "sonic-2-non-running-screens",
+          "name": "Non-running screens (Sega logo, title, menus, title card, fades)",
+          "image": "world-rev00",
+          "route": "the first frames of the route above",
+          "observations": {
+            "declined_frames_in_ehz_route": 1171,
+            "route_frames": 4893,
+            "declined_reason": "unsupported scene"
+          },
+          "classification": {
+            "scenery": "generic-declined",
+            "actors": "unverified",
+            "art": "unverified",
+            "budget": "unverified",
+            "feasibility_32x9": "unsupported",
+            "rationale": "The provider declines these frames by design, so the host serves the generic path; no authored content exists for them."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "generic-declined",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "unsupported",
+              "evidence": "observed-run",
+              "fallback_reasons": [
+                "provider_declined_scene"
+              ]
+            },
+            "21:9": {
+              "scenery": "generic-declined",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "unsupported",
+              "evidence": "observed-run",
+              "fallback_reasons": [
+                "provider_declined_scene",
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "generic-declined",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "unsupported",
+              "evidence": "observed-run",
+              "fallback_reasons": [
+                "provider_declined_scene",
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run",
+          "repeatable": true
+        }
+      ],
+      "not_run": [
+        {
+          "id": "sonic-2-other-zones-and-special-stage",
+          "result": "NOT RUN",
+          "blocker": "no bounded route to a zone other than the first act of the first zone, or to a special stage, was established in this delivery"
+        },
+        {
+          "id": "sonic-2-presentation-only-variant",
+          "result": "NOT RUN",
+          "blocker": "the packages available to this study are the standard packages; the presentation-only variant is not among the reconstructed package files"
+        }
+      ]
+    },
+    {
+      "id": "sonic-3-and-knuckles",
+      "name": "Sonic 3 & Knuckles (4 MiB lock-on composite)",
+      "package": "sonic3k-native-widescreen",
+      "images": [
+        {
+          "id": "lock-on-composite-jue",
+          "revision": "lock-on composite (JUE), 4 MiB",
+          "status": "studied"
+        }
+      ],
+      "scene_classes": [
+        {
+          "id": "sonic-3-and-knuckles-aiz1",
+          "name": "Angel Island act 1 (running level, right-moving route)",
+          "image": "lock-on-composite-jue",
+          "route": "bounded scripted pad route (title and menus by four start presses, hold right with periodic jump), 90 M instruction budget, 420 s wall timeout, dummy video/audio",
+          "observations": {
+            "route_frames": 7351,
+            "provider_authored_frames": 6364,
+            "provider_hud_frames": 5056,
+            "provider_declined_frames": 987,
+            "authored_identical_at_16_9_21_9_32_9": true,
+            "repeat_32_9_identical": true,
+            "running_frames_patched": 6394,
+            "objects_per_frame_beyond_64px_left": 1.37,
+            "objects_per_frame_beyond_64px_right": 2.41,
+            "flagged_pct_margin_to_39px_vanilla_patched": [
+              29.9,
+              54.5
+            ],
+            "flagged_pct_margin_40_101px_vanilla_patched": [
+              1.8,
+              32.3
+            ],
+            "flagged_pct_margin_102_238px_vanilla_patched": [
+              0.6,
+              1.4
+            ],
+            "sprites_fully_beside_picture_per_frame_vanilla_patched": [
+              0.93,
+              5.01
+            ],
+            "blank_pattern_share_pct_of_those_patched": 0.0,
+            "peak_sprites_on_a_line_vanilla_patched": [
+              20,
+              24
+            ],
+            "frames_line_ge16_vanilla_patched": [
+              2,
+              5
+            ],
+            "frames_line_ge20_vanilla_patched": [
+              1,
+              2
+            ],
+            "object_table_layout_verified_by_ram_dump": true,
+            "sprite_probe_counts_only_vertically_visible_sprites": true
+          },
+          "classification": {
+            "scenery": "authored-unverified",
+            "actors": "present-not-submitted",
+            "art": "unverified",
+            "budget": "constrained",
+            "feasibility_32x9": "gameplay-changing-required",
+            "rationale": "Object-table entries exist beyond the 64 px the package submits while their on-screen flag stays clear, and the package documents that margin objects activate earlier, so submitting them out to 238 px is needed to show them and it is a gameplay-changing change; the package already reaches 24 sprites on a line at 16:9 (hardware limit 20), so a wider window is also budget-limited and presentation-only support is insufficient."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "authored-verified-scope",
+              "hud": "relocated",
+              "actors": "submitted-partial",
+              "art": "resident-for-submitted",
+              "budget": "constrained",
+              "background_extension": "authored-verified-scope",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": []
+            },
+            "21:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "submitted-partial",
+              "art": "unverified",
+              "budget": "constrained",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "authored-unverified",
+              "hud": "relocated",
+              "actors": "present-not-submitted",
+              "art": "unverified",
+              "budget": "constrained",
+              "background_extension": "authored-unverified",
+              "kind": "gameplay-changing-required",
+              "evidence": "observed-run+source-analysis",
+              "fallback_reasons": [
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run+source-analysis",
+          "repeatable": true
+        },
+        {
+          "id": "sonic-3-and-knuckles-non-running-screens",
+          "name": "Non-running screens (logos, title, menus, fades)",
+          "image": "lock-on-composite-jue",
+          "route": "the first frames of the route above",
+          "observations": {
+            "declined_frames_in_aiz_route": 987,
+            "route_frames": 7351,
+            "declined_reason": "unsupported scene"
+          },
+          "classification": {
+            "scenery": "generic-declined",
+            "actors": "unverified",
+            "art": "unverified",
+            "budget": "unverified",
+            "feasibility_32x9": "unsupported",
+            "rationale": "The provider declines these frames by design, so the host serves the generic path; no authored content exists for them."
+          },
+          "rows": {
+            "4:3": {
+              "scenery": "native",
+              "hud": "native",
+              "actors": "native",
+              "art": "native",
+              "budget": "within",
+              "background_extension": "native",
+              "kind": "native-only",
+              "evidence": "observed-run",
+              "fallback_reasons": []
+            },
+            "16:9": {
+              "scenery": "generic-declined",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "unsupported",
+              "evidence": "observed-run",
+              "fallback_reasons": [
+                "provider_declined_scene"
+              ]
+            },
+            "21:9": {
+              "scenery": "generic-declined",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "unsupported",
+              "evidence": "observed-run",
+              "fallback_reasons": [
+                "provider_declined_scene",
+                "no_virtual_sprite_consumer"
+              ]
+            },
+            "32:9": {
+              "scenery": "generic-declined",
+              "hud": "none",
+              "actors": "unverified",
+              "art": "unverified",
+              "budget": "unverified",
+              "background_extension": "generic-available",
+              "kind": "unsupported",
+              "evidence": "observed-run",
+              "fallback_reasons": [
+                "provider_declined_scene",
+                "no_virtual_sprite_consumer"
+              ]
+            }
+          },
+          "evidence": "observed-run",
+          "repeatable": true
+        }
+      ],
+      "not_run": [
+        {
+          "id": "sonic-3-and-knuckles-other-zones-and-bosses",
+          "result": "NOT RUN",
+          "blocker": "only the first act of the first zone was entered; no bounded route to other zones, bosses, special stages or other character routes was established"
+        },
+        {
+          "id": "sonic-3-and-knuckles-left-moving-and-ring-manager",
+          "result": "NOT RUN",
+          "blocker": "the route moves right only, and the ring manager's own window was not measured separately from the object table"
+        }
+      ]
+    }
+  ]
+}

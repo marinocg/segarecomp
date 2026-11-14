@@ -66,6 +66,7 @@ struct SvHost {
   SvCovAccount cov;            /* SEG-139-T004: the package's geometry declaration and the per-scene, per-component accounting */
   char cov_scene[SV_COV_ID_MAX + 1];
   SvGeomStatus geom_status;    /* SEG-139: the planner's verdict for the exact ratio on the last extended frame (SV_GEOM_OK when none is set) */
+  uint8_t cov_reason_notified; /* SEG-140-T005: the SvRejectReason last announced (a notice is raised only when it changes) */
   int cov_fallback;            /* the last extended frame was outside the declared range and used the generic presentation */
   /* SEG-123: host-owned buffers allocated once at open (never per frame): the retained RAW accepted extension (so a style change in the paused menu is
    * applied at once and Raw is exact), the two treated side strips and the pure helper's scratch. */

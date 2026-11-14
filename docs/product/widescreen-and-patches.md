@@ -93,6 +93,17 @@ The product contains **no** game-specific widescreen code. The packages below ar
 Sonic 3 & Knuckles needs the lock-on cartridge model. The **launcher recognizes the exact supported images from their header contents and selects it automatically** (Advanced build options can override it);
 command-line builds must pass `--mapper lock_on`. Modified, resized or unidentified images stay ordinary cartridges.
 
+### What 21:9 and 32:9 mean for these packages (F15 classification)
+
+Four different statements must not be confused; the table in the [aspect matrix](../architecture/widescreen-aspect-matrix.md#5-real-game-classification-seg-140-t006--t007-aggregate-only) and [`widescreen-32x9-classification.json`](widescreen-32x9-classification.json) say which of them was actually shown, per scene class:
+
+1. **Generic 32:9 rendering capability** exists and is tested (planner, producer, host; synthetic and real-game cost aggregates). It shows the VDP's own scenery and the sprites the game already submitted.
+2. **Authored scenery at 32:9.** The existing Sonic 1 and Sonic 2 packages are validated for 16:9. Their providers still accept the same frames at 21:9 and 32:9 (observed), but no evidence shows the reconstructed columns are correct that far out: classified `authored-unverified`, not supported.
+3. **Actual 32:9 gameplay visibility.** Not established for any title. In every studied running class (Sonic 1 act 1 of six zones, Sonic 2 Emerald Hill 1, Sonic 3 & Knuckles Angel Island 1), objects exist beyond the 64 px the package makes visible and are not submitted; Sonic 2 REV01 was **not run** (image not available).
+4. **Gameplay-changing modifications.** The packages' 64 px actor visibility is itself a gameplay-changing modification (objects act earlier). Wider actor visibility would need a wider, equally gameplay-changing change in `segarecomp-patches`; this repository does not make it and does not claim it. A presentation-only statement requires submitted actors, resident art and a verified scenery source together, and no 21:9 or 32:9 class has them.
+
+Virtual sprites (ADR 0303) do not change this: they are a tested compositor that no shipped program uses, they cannot be authored by a mod, and they do not draw in the side columns. A declared `actors` component therefore reports `missing`; layered overlays are not counted as HUD delivery; every refusal has a stable reason (ADR 0304).
+
 ### Installing a verified patch
 
 See [From install to a patched game](../../README.md#install-a-verified-patch-main-only-genesis) in the README for the short walk-through.

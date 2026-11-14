@@ -78,7 +78,21 @@ typedef struct SvExtendedSurface {
    * copied; NULL / 0 = none (a zero-initialised surface presents exactly as before). Like the HUD they are independent of `source` and also drawn when the extension itself is not shown. */
   const struct SvOverlayLayer *layers;
   int layer_count;
+  /* SEG-140-T005: an optional, additive report of an authored virtual-sprite contribution (ADR 0303) for THIS frame. Zero-initialised = none (a surface that predates the field presents and is
+   * accounted exactly as before). Only the stage reached is reported: a submitted or validated command, or a set the compositor merely accepted, is NOT delivered coverage. The host counts an
+   * `actors` delivery only for SV_ACT_COMPOSED when it also presented this frame inside the declared range (sv_cov_frame_ex). Drawing never proves the game object exists or its art is resident. */
+  uint8_t actor_stage;          /* SvActorStage */
+  uint8_t actor_provenance;     /* 1 = game-state verified, 2 = mod authored (GenesisVirtualProvenance); anything else is refused */
+  uint8_t actor_state_verified; /* the frame's guest-state snapshot was valid and exactly current (required for provenance 1) */
+  uint8_t actor_reject;         /* GenesisVirtualReason of a rejected set (stage SV_ACT_REJECTED); carried into the report verbatim */
 } SvExtendedSurface;
+typedef enum SvActorStage {
+  SV_ACT_NONE = 0,       /* no virtual-sprite contribution */
+  SV_ACT_SUBMITTED = 1,  /* commands were handed in; nothing is established */
+  SV_ACT_VALIDATED = 2,  /* the set passed validation but was not composed into a frame */
+  SV_ACT_COMPOSED = 3,   /* the compositor produced the frame from the set */
+  SV_ACT_REJECTED = 4    /* validation rejected the set (actor_reject): nothing is drawn */
+} SvActorStage;
 #define SV_OVERLAY_MAX 256
 
 typedef enum SvExtCheck {
@@ -186,16 +200,43 @@ const char *sv_cov_status_name(SvCovStatus status); /* "absent", "covered", "mis
 /* The status of one component of one frame. `scene` NULL or not declared = the unscoped bucket (nothing declared). */
 SvCovStatus sv_geomdecl_check(const SvGeomDecl *decl, SvDisplayRatio requested, const char *scene, SvCovComponent component, int delivered);
 
+/* SEG-140-T005: why a frame's contribution was not (fully) presented. Stable names; a frame counts once per applicable reason (not per component). Reasons never raise a coverage counter. */
+typedef enum SvRejectReason {
+  SV_REJ_NONE = 0,
+  SV_REJ_UNVERIFIED_STATE = 1,   /* the surface is not the current frame, or a game-state sprite set lacks a verified current snapshot */
+  SV_REJ_UNSUPPORTED_MODE = 2,   /* produced above the requested widescreen level, or a mode/provenance the host cannot present */
+  SV_REJ_OVER_DECLARED = 3,      /* requested aspect outside the declared range, an unreadable declaration, or a planner rejection */
+  SV_REJ_UNDECLARED = 4,         /* delivered for a scene/component the package never declared */
+  SV_REJ_VSPRITE_REJECTED = 5,   /* the virtual-sprite set failed validation (the GenesisVirtualReason is kept) */
+  SV_REJ_VSPRITE_UNPRESENTED = 6,/* a virtual-sprite contribution that was submitted/validated but never composed and presented */
+  SV_REJ_INVALID_SURFACE = 7,    /* size, pitch or geometry of the surface is inconsistent */
+  SV_REJ_COUNT = 8
+} SvRejectReason;
+#define SV_REJ_BIT(r) (1u << (unsigned)(r))
+const char *sv_reject_reason_name(SvRejectReason reason); /* "none", "unverified_state", "unsupported_mode", "over_declared_geometry", "undeclared", "virtual_sprite_rejected", "virtual_sprite_unpresented", "invalid_surface" */
+
+/* Per scene and component: [0..3] covered, missing, undeclared, outside_range (unchanged); [4] requested (declared, inside the range), [5] offered (the provider supplied it),
+ * [6] accepted (the host's checks passed), [7] presented (accepted and shown inside the declared range), [8] rejected (offered but not accepted). covered == presented for a declared component. */
+#define SV_COV_COUNTERS 9
 typedef struct SvCovAccount {
   SvGeomDecl decl;
   uint64_t frames, outside_frames;
   SvDisplayRatio last;
-  /* [scene (declared ones, then the unscoped bucket)][component][covered, missing, undeclared, outside_range] */
-  uint64_t count[SV_COV_MAX_SCENES + 1][SV_COV_COMPONENTS][4];
+  uint64_t count[SV_COV_MAX_SCENES + 1][SV_COV_COMPONENTS][SV_COV_COUNTERS];
+  uint64_t reason_frames[SV_REJ_COUNT]; /* frames in which each reason applied */
+  uint8_t last_reason, last_vsprite_reason;
 } SvCovAccount;
 void sv_cov_init(SvCovAccount *account, const SvGeomDecl *decl);
 /* Accounts one frame: `delivered` is a mask of SV_COV_BIT components the producer/provider actually supplied for it. Returns 1 when the frame is inside the declared range (or nothing is declared). */
 int sv_cov_frame(SvCovAccount *account, SvDisplayRatio requested, const char *scene, unsigned delivered);
+/* SEG-140-T005: the same accounting with the offered / accepted split and the reasons (masks of SV_COV_BIT / SV_REJ_BIT). `accepted` must be a subset of `offered`; anything accepted but outside the
+ * declared range is never presented. `vsprite_reason` is the GenesisVirtualReason of a rejected set (0 = none). Returns 1 when the frame is inside the declared range. */
+int sv_cov_frame_ex(SvCovAccount *account, SvDisplayRatio requested, const char *scene, unsigned offered, unsigned accepted, unsigned reasons, unsigned vsprite_reason);
+/* A frame that was refused before it could be accounted (a stale or mismatched surface): records the reasons only; no frame and no coverage counter changes. */
+void sv_cov_reject(SvCovAccount *account, unsigned reasons);
+/* The actors component of one surface: the components of `ext` the host can credit for the actor signal, in two steps. Returns the stage-derived masks: *offered is set when any stage is reported,
+ * *accepted only for a validated/composed set with a known provenance (a game-state set additionally needs a verified current snapshot). Adds the reasons that apply. Pure. */
+void sv_actor_signal(const SvExtendedSurface *ext, unsigned *offered, unsigned *accepted, unsigned *reasons);
 /* Stable JSON (fixed key order, integers only, declared scenes in declaration order then the unscoped scene "*"), schema "segarecomp.geometry-coverage/1". Writes at most `cap` bytes
  * including the terminator and returns the length it needs (like snprintf), so a result >= cap was truncated. */
 size_t sv_cov_report_json(const SvCovAccount *account, char *buf, size_t cap);
