@@ -29,7 +29,7 @@ typedef struct Frame {
   int level;              /* the requested widescreen level (1 or 2) */
   int surf_level;         /* the level the surface was produced as */
   int stale;              /* the surface is for another frame */
-  int bad_pitch;
+  int bad_pitch, bad_geom;
   int scenery, hud;       /* the provider supplies authored scenery / a HUD overlay */
   int stage, prov, state_ok, reject;   /* the virtual-sprite contribution */
   int hud_only;           /* the surface carries no extension at all (the normal HUD-only surface) */
@@ -59,7 +59,7 @@ static int present(SvHost *h, const Frame *f, uint64_t seq) {
   SvExtendedSurface e;
   const int side = side_for(f->num, f->den);
   memset(&e, 0, sizeof e);
-  e.rgb24 = f->hud_only ? NULL : g_ext; e.size = f->hud_only ? 0u : sizeof g_ext; e.width = W + 2 * side; e.height = H; e.pitch = (W + 2 * side) * 3 - (f->bad_pitch ? 1 : 0); e.side = f->hud_only ? 0 : side; e.sequence = f->stale ? seq - 1u : seq;
+  e.rgb24 = f->hud_only ? NULL : g_ext; e.size = f->hud_only ? 0u : sizeof g_ext; e.width = W + 2 * side + (f->bad_geom ? 2 : 0); e.height = H; e.pitch = (W + 2 * side) * 3 - (f->bad_pitch ? 1 : 0); e.side = f->hud_only ? 0 : side; e.sequence = f->stale ? seq - 1u : seq;
   e.mode = (SvWidescreenMode)f->surf_level; e.status = SV_WS_PARTIAL; e.source = f->scenery ? SV_EXTSRC_AUTHORED : SV_EXTSRC_GENERIC;
   if (f->hud) { e.overlay_rgba = g_ovl; e.overlay_w = 8; e.overlay_h = 8; }
   e.actor_stage = (uint8_t)f->stage; e.actor_provenance = (uint8_t)f->prov; e.actor_state_verified = (uint8_t)f->state_ok; e.actor_reject = (uint8_t)f->reject;
@@ -75,16 +75,19 @@ static void model_apply(Truth *g, const Frame *f) {
   const int sc = model_scene(f->scene), in = model_in_range(f->num, f->den), side = side_for(f->num, f->den);
   int off[3], acc[3], c;
   unsigned why = 0;
-  int claim;
+  int claim, surface_ok;
   if (f->stale) { g->reason[SV_REJ_UNVERIFIED_STATE]++; return; }   /* refused before accounting: reasons only */
   if (f->hud_only) { off[0] = 0; } else off[0] = f->scenery && side > 0; off[1] = f->hud; off[2] = f->stage != 0;
-  acc[0] = off[0] && f->surf_level <= f->level && !f->bad_pitch;
-  claim = !f->hud_only && side > 0 && f->surf_level != 0;   /* a surface without side columns claims no extension: never refused as one */
+  claim = !f->hud_only && side > 0 && f->surf_level != 0;
+  /* the host presents a surface only when it is a real extension of this frame at no more than the requested level and structurally valid: nothing riding on a refused surface is delivered */
+  surface_ok = claim && f->surf_level <= f->level && !f->bad_pitch && !f->bad_geom;
+  acc[0] = off[0] && surface_ok;   /* a surface without side columns claims no extension: never refused as one */
   acc[1] = f->hud;
-  acc[2] = f->stage == SV_ACT_COMPOSED && (f->prov == 2 || (f->prov == 1 && f->state_ok));
-  if (claim && f->surf_level > f->level) why |= 1u << SV_REJ_UNSUPPORTED_MODE; else if (claim && f->bad_pitch) why |= 1u << SV_REJ_INVALID_SURFACE;
+  acc[2] = f->stage == SV_ACT_COMPOSED && (f->prov == 2 || (f->prov == 1 && f->state_ok)) && surface_ok;
+  if (claim && f->surf_level > f->level) why |= 1u << SV_REJ_UNSUPPORTED_MODE; else if (claim && (f->bad_pitch || f->bad_geom)) why |= 1u << SV_REJ_INVALID_SURFACE;
   if (f->stage == SV_ACT_SUBMITTED || f->stage == SV_ACT_VALIDATED) why |= 1u << SV_REJ_VSPRITE_UNPRESENTED;
   if (f->stage == SV_ACT_REJECTED) why |= 1u << SV_REJ_VSPRITE_REJECTED;
+  if (f->stage == SV_ACT_COMPOSED && (f->prov == 2 || (f->prov == 1 && f->state_ok)) && !surface_ok) why |= 1u << SV_REJ_VSPRITE_UNPRESENTED;
   if (f->stage > SV_ACT_REJECTED || (f->stage == SV_ACT_COMPOSED && f->prov != 1 && f->prov != 2)) why |= 1u << SV_REJ_UNSUPPORTED_MODE;
   if (f->stage == SV_ACT_COMPOSED && f->prov == 1 && !f->state_ok) why |= 1u << SV_REJ_UNVERIFIED_STATE;
   if (!in) why |= 1u << SV_REJ_OVER_DECLARED;
@@ -133,7 +136,7 @@ static uint64_t out_hash(SvHost *h) {
 }
 
 /* the script: every aspect x scene x variant (deterministic) */
-enum { VARIANTS = 19 };
+enum { VARIANTS = 22 };
 static Frame make(int ratio_i, int scene_i, int v) {
   static const int nums[4] = {4, 16, 21, 32}, dens[4] = {3, 9, 9, 9};
   static const char *scenes[3] = {"a", "b", "zz"};
@@ -160,6 +163,9 @@ static Frame make(int ratio_i, int scene_i, int v) {
     case 15: f.scenery = 1; f.hud = 0; break;                   /* scenery alone proves nothing about actors or HUD */
     case 16: f.stage = 77; f.prov = 2; break;                   /* an unknown stage is refused */
     case 17: f.hud_only = 1; f.scenery = 0; break;              /* a HUD-only surface without a pixel buffer: no extension, no refusal */
+    case 19: f.level = 1; f.surf_level = 2; f.stage = SV_ACT_COMPOSED; f.prov = 2; break;   /* a composed set on a surface produced above the requested level */
+    case 20: f.bad_pitch = 1; f.stage = SV_ACT_COMPOSED; f.prov = 2; break;                  /* ... on a surface with an invalid pitch */
+    case 21: f.bad_geom = 1; f.stage = SV_ACT_COMPOSED; f.prov = 1; f.state_ok = 1; break;   /* ... on a surface whose geometry is wrong */
     default: f.surf_level = 0; f.scenery = 0; f.bad_pitch = 1; break;   /* what the live viewer hands over in Original: a pixel buffer, produced as Original, plus the HUD: never refused */
   }
   return f;
@@ -314,17 +320,81 @@ int main(void) {
   sv_host_close(h);
   remove(g_settings);
 
-  /* 3. a planner rejection (32:9 for a 160 x 448 picture) is an over-declared reason and a native-only frame */
-  h = open_host(NULL);
+  /* 3. a planner rejection (32:9 for a 160 x 448 picture needs 716 > 672 pixels per side) refuses the WHOLE extension presentation even though the supplied surface is structurally valid:
+   * native picture only, no columns, no HUD, no composed-sprite credit, output equal to the native-only reference, and a valid aspect restores normal presentation. */
+  h = open_host("max=32:9;scene=p:actors+hud+scenery");
   if (h != NULL) {
-    SvExtendedSurface e;
     static uint8_t nat[160 * 448 * 3];
     static uint8_t big[(160 + 2 * 672) * 448 * 3];
-    memset(&e, 0, sizeof e);
+    SvExtendedSurface e;
+    uint64_t native_ref, got;
+    uint64_t sq = 9;
+    size_t k;
+    for (k = 0; k < sizeof nat; ++k) nat[k] = (uint8_t)(k * 11u + 3u);
+    for (k = 0; k < sizeof big; ++k) big[k] = (uint8_t)(k * 29u + 7u);
+    sv_host_set_scene(h, "p");
     set(h, 32, 9, 2, SV_SIDE_RAW);
-    e.rgb24 = big; e.size = sizeof big; e.width = 160 + 2 * 100; e.height = 448; e.pitch = (160 + 2 * 100) * 3; e.side = 100; e.sequence = 9; e.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY; e.status = SV_WS_PARTIAL; e.source = SV_EXTSRC_AUTHORED;
-    (void)sv_host_present_extended(h, nat, 160, 448, 160 * 3, 9, &e);
-    CHECK(strstr(json_of(h), "\"over_declared_geometry\":1") != NULL, "a planner rejection is an over-declared-geometry reason");
+    (void)sv_host_present(h, nat, 160, 448, 160 * 3);
+    sv_host_toast(h, "");   /* the first frame's one-time hint is not part of the reference */
+    (void)sv_host_present(h, nat, 160, 448, 160 * 3);
+    native_ref = out_hash(h);
+    memset(&e, 0, sizeof e);
+    e.rgb24 = big; e.size = sizeof big; e.width = 160 + 2 * 100; e.height = 448; e.pitch = (160 + 2 * 100) * 3; e.side = 100; e.sequence = ++sq; e.mode = SV_WIDESCREEN_ENHANCED_GAMEPLAY; e.status = SV_WS_PARTIAL; e.source = SV_EXTSRC_AUTHORED;
+    e.overlay_rgba = g_ovl; e.overlay_w = 8; e.overlay_h = 8;
+    e.actor_stage = SV_ACT_COMPOSED; e.actor_provenance = 2;
+    CHECK(sv_extended_surface_check(&e, 160, 448, sq, 320) == SV_EXT_OK, "the fixture surface is structurally valid");
+    sv_host_toast(h, "");
+    CHECK(sv_host_present_extended(h, nat, 160, 448, 160 * 3, sq, &e) == 0, "the frame is presented");
+    CHECK(sv_host_extension_side(h) == 0 && h->ovl_w == 0 && h->ext_side == 0, "planner rejection: zero visible extension side width and no retained HUD");
+    CHECK(toast_has(h, "does not fit this picture"), "planner rejection: the user diagnostic names the reason");
+    { const char *j = json_of(h);
+      CHECK(strstr(j, "\"last_reason\":\"over_declared_geometry\"") != NULL && strstr(j, "\"over_declared_geometry\":1") != NULL, "planner rejection: the stable reason is recorded");
+      CHECK(jnum(j, "p", "scenery", "presented") == 0 && jnum(j, "p", "hud", "presented") == 0 && jnum(j, "p", "actors", "presented") == 0 &&
+            jnum(j, "p", "scenery", "covered") == 0 && jnum(j, "p", "hud", "covered") == 0 && jnum(j, "p", "actors", "covered") == 0 &&
+            jnum(j, "p", "scenery", "missing") == 1 && jnum(j, "p", "hud", "missing") == 1 && jnum(j, "p", "actors", "missing") == 1 &&
+            jnum(j, "p", "actors", "offered") == 1 && jnum(j, "p", "actors", "accepted") == 0 && jnum(j, "p", "actors", "rejected") == 1, "planner rejection: nothing presented or covered, every offered component rejected"); }
+    { char note[512]; sv_host_geometry_note(h, note, sizeof note);
+      CHECK(strstr(note, "so only the native picture is shown") != NULL && strstr(note, "Last frame") == NULL, "planner rejection: the Video-page note states the planner reason once"); }
+    /* the same refused frame again (the notice is gone: it is raised once per entry): the pixels are exactly the native-only reference */
+    sv_host_toast(h, "");
+    e.sequence = ++sq;
+    (void)sv_host_present_extended(h, nat, 160, 448, 160 * 3, sq, &e);
+    got = out_hash(h);
+    CHECK(got == native_ref, "planner rejection: output pixels equal the native-only reference");
+    CHECK(h->toast_count == 0, "planner rejection: no repeated notice");
+    /* a valid aspect restores normal presentation at once */
+    set(h, 16, 9, 2, SV_SIDE_RAW);
+    e.width = 160 + 2 * 318; e.pitch = e.width * 3; e.side = 318; e.sequence = ++sq; e.size = (size_t)e.pitch * 448u;
+    CHECK(sv_extended_surface_check(&e, 160, 448, sq, 320) == SV_EXT_OK, "the 16:9 surface is valid");
+    CHECK(sv_host_present_extended(h, nat, 160, 448, 160 * 3, sq, &e) == 0 && sv_host_extension_side(h) == 318 && h->ovl_w == 8, "a valid aspect: the extension and the HUD are shown again");
+    { const char *j = json_of(h);
+      CHECK(strstr(j, "\"last_reason\":\"none\"") != NULL && jnum(j, "p", "scenery", "covered") == 1 && jnum(j, "p", "hud", "covered") == 1 && jnum(j, "p", "actors", "covered") == 1, "a valid aspect: coverage resumes and the reason clears"); }
+    sv_host_close(h);
+    remove(g_settings);
+  }
+
+  /* 4. a package that declares nothing still gets a meaningful reason, never a stale one, and normal HUD-only presentation raises nothing */
+  h = open_host(NULL);
+  if (h != NULL) {
+    char note[512];
+    Frame f = make(1, 0, 17);   /* a HUD-only surface at a requested 16:9 */
+    set(h, 16, 9, 2, SV_SIDE_RAW);
+    sv_host_toast(h, "");
+    CHECK(present(h, &f, 1) == 0, "legacy: a HUD-only frame is presented");
+    sv_host_geometry_note(h, note, sizeof note);
+    CHECK(strstr(note, "Last frame") == NULL, "legacy: a HUD-only frame has no rejection reason");
+    sv_host_toast(h, "");   /* the one-time pause-menu hint of a first frame is not a rejection */
+    CHECK(present(h, &f, 1) == 0 && h->toast_count == 0, "legacy: normal HUD-only presentation raises no notice");
+    f = make(1, 0, 19);   /* a surface produced above the requested level */
+    set(h, 16, 9, 1, SV_SIDE_RAW);
+    CHECK(present(h, &f, 2) == 0, "legacy: a refused frame is presented as the native picture");
+    sv_host_geometry_note(h, note, sizeof note);
+    CHECK(strstr(note, "Last frame: mode or provenance not supported") != NULL, "legacy: the note explains a real rejection");
+    f = make(1, 0, 0);
+    set(h, 16, 9, 2, SV_SIDE_RAW);
+    CHECK(present(h, &f, 3) == 0, "legacy: a clean frame is presented");
+    sv_host_geometry_note(h, note, sizeof note);
+    CHECK(strstr(note, "Last frame") == NULL, "legacy: a clean frame shows no stale reason");
     sv_host_close(h);
     remove(g_settings);
   }

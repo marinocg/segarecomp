@@ -1375,8 +1375,14 @@ void sv_host_geometry_note(const SvHost *h, char *buf, size_t cap) {
     snprintf(part, sizeof part, "The requested %s %s, so only the native picture is shown. ", req[0] != '\0' ? req : "aspect", geom_reason(h->geom_status));
     strncat(buf, part, cap - strlen(buf) - 1u);
   }
-  /* 2. the package's declaration */
-  if (!h->cov.decl.present) return;
+  /* 2. the package's declaration. A package that declares nothing still gets the reason the last frame was not fully presented (the geometry reasons are already stated above or below) */
+  if (!h->cov.decl.present) {
+    if (h->cov.last_reason != SV_REJ_NONE && h->cov.last_reason != SV_REJ_OVER_DECLARED) {
+      snprintf(part, sizeof part, "Last frame: %s.", reason_text(h->cov.last_reason));
+      strncat(buf, part, cap - strlen(buf) - 1u);
+    }
+    return;
+  }
   a = &h->cov;
   if (a->decl.invalid) { snprintf(part, sizeof part, "This package's geometry declaration is unreadable: only the native picture is shown."); strncat(buf, part, cap - strlen(buf) - 1u); return; }
   (void)sv_ratio_format(a->decl.min, lo, sizeof lo);
@@ -1393,7 +1399,7 @@ void sv_host_geometry_note(const SvHost *h, char *buf, size_t cap) {
   snprintf(part, sizeof part, "This package supports %s to %s. Delivered so far (%llu frames): scenery %llu, HUD %llu, actors %llu.", lo, hi, (unsigned long long)in_frames,
            (unsigned long long)cov[SV_COV_SCENERY], (unsigned long long)cov[SV_COV_HUD], (unsigned long long)cov[SV_COV_ACTORS]);
   strncat(buf, part, cap - strlen(buf) - 1u);
-  if (a->last_reason != SV_REJ_NONE) {   /* SEG-140-T005: why the last frame was not fully presented */
+  if (a->last_reason != SV_REJ_NONE && a->last_reason != SV_REJ_OVER_DECLARED) {   /* SEG-140-T005: why the last frame was not fully presented */
     snprintf(part, sizeof part, " Last frame: %s.", reason_text(a->last_reason));
     strncat(buf, part, cap - strlen(buf) - 1u);
   }
@@ -1441,7 +1447,9 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     }
     h->geom_status = st;
   }
-  const int accepted = ext != NULL && (int)ext->mode <= (int)h->settings.video.widescreen && sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK;
+  /* SEG-140-T005 (review): a rejected planner verdict refuses the whole extension presentation, so nothing the provider supplied (columns, HUD, virtual-sprite contribution) is shown or counted */
+  const int geom_ok = h->geom_status == SV_GEOM_OK;
+  const int accepted = ext != NULL && geom_ok && (int)ext->mode <= (int)h->settings.video.widescreen && sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK;
   if (ext != NULL && ext->status != SV_WS_UNAVAILABLE && !offered) {
     /* SEG-140-T005: a surface for another frame is stale: it is never shown, never counted, and the reason is visible (no stale content may masquerade as current) */
     sv_cov_reject(&h->cov, SV_REJ_BIT(SV_REJ_UNVERIFIED_STATE));
@@ -1458,9 +1466,10 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     if (ext->source == SV_EXTSRC_AUTHORED && ext->side > 0) { off |= SV_COV_BIT(SV_COV_SCENERY); if (accepted) acc |= SV_COV_BIT(SV_COV_SCENERY); }
     if (ext->overlay_rgba != NULL) {
       off |= SV_COV_BIT(SV_COV_HUD);
-      if (ext->overlay_w > 0 && ext->overlay_w <= SV_OVERLAY_MAX && ext->overlay_h > 0 && ext->overlay_h <= SV_OVERLAY_MAX) acc |= SV_COV_BIT(SV_COV_HUD);
+      if (geom_ok && ext->overlay_w > 0 && ext->overlay_w <= SV_OVERLAY_MAX && ext->overlay_h > 0 && ext->overlay_h <= SV_OVERLAY_MAX) acc |= SV_COV_BIT(SV_COV_HUD);
     }
     sv_actor_signal(ext, &a_off, &a_acc, &a_why);
+    if (a_acc != 0u && !accepted) { a_acc = 0u; a_why |= SV_REJ_BIT(SV_REJ_VSPRITE_UNPRESENTED); }   /* a composed set rides on the surface: if the host refused that frame nothing was presented, so nothing is delivered */
     off |= a_off; acc |= a_acc; why |= a_why;
     if (!accepted && ext->status != SV_WS_UNAVAILABLE && ext->side > 0 && ext->mode != SV_WIDESCREEN_ORIGINAL && h->settings.video.widescreen != SV_WIDESCREEN_ORIGINAL) {   /* only a requested extension can be refused: in Original nothing is asked for, the viewer always hands over its pixel buffer, and a HUD-only surface is the normal case */
       if ((int)ext->mode > (int)h->settings.video.widescreen) why |= SV_REJ_BIT(SV_REJ_UNSUPPORTED_MODE);
@@ -1494,7 +1503,7 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     if (ext->status != SV_WS_UNAVAILABLE && (ext->overlay_rgba == NULL || (int)ext->mode <= (int)h->settings.video.widescreen) && h->ext_rejected != UINT32_MAX) h->ext_rejected++;   /* a surface that only carries the HUD in Original is expected, not a refusal */
   }
   /* the extension is not shown (Original, a stale surface, a refusal): the overlay of a surface that is otherwise about THIS frame is still the HUD that replaces the game's own */
-  return present_frame(h, rgb, w, hgt, pitch, NULL, offered ? ext : NULL);
+  return present_frame(h, rgb, w, hgt, pitch, NULL, offered && geom_ok ? ext : NULL);
 }
 
 void sv_host_overlay_diag(const SvHost *h, uint32_t *rejected, int *last_index, int *last_reason) {
