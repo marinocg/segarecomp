@@ -288,10 +288,10 @@ void generic_hook() {
     g_mock.bad_layer_offset = false; g_mock.bad_layer_index = 1;
     const Out mid = produce(sc, ext);
     check(mid.rc == 0 && mid.res.layer_count == 3 && mid.res.layer_bad == 2U && mid.res.layers[0].offset == 0 && mid.res.layers[2].offset == 128 && mid.res.layers[0].z == 0 && mid.res.layers[2].z == 2, "one bad descriptor between two valid ones: only it is flagged; its siblings keep their slots, offsets and z");
-    g_mock.bad_layer_index = -1; g_mock.over_count = 9;
+    g_mock.bad_layer_index = -1; g_mock.over_count = 9; g_mock.layers_n = 4;
     const Out ov = produce(sc, ext);
     check(ov.rc == 0 && ov.res.layer_count == 9 && ov.res.layer_bad == 0U && ov.res.layers[2].offset == 128, "more than four submitted: the count is reported, only four descriptors are read");
-    g_mock.over_count = 0; g_mock.bad_layer_offset = true;
+    g_mock.over_count = 0; g_mock.layers_n = 3; g_mock.bad_layer_offset = true;
     ext.layer_rgba = nullptr; g_mock.bad_layer_offset = false;
     const Out nb = produce(sc, ext);
     check(nb.rc == 0 && nb.res.layer_count == 0 && nb.res.overlay_w == 12, "an adapter without a layer buffer receives no layers (the provider is not even offered a buffer)");
