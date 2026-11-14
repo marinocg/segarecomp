@@ -1303,7 +1303,7 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     if (st != SV_GEOM_OK && h->geom_status == SV_GEOM_OK) {
       char r[24], text[96];
       (void)sv_ratio_format(h->settings.video.widescreen_ratio, r, sizeof r);
-      snprintf(text, sizeof text, "Aspect %s %s: native picture only", r, geom_reason(st));
+      snprintf(text, sizeof text, "Aspect %.12s does not fit this picture: native picture only", r);
       push_toast(h, text, 4000u);
     }
     h->geom_status = st;
@@ -1327,7 +1327,7 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
       if (!h->cov_fallback) {
         (void)sv_ratio_format(h->cov.decl.min, lo, sizeof lo);
         (void)sv_ratio_format(h->cov.decl.max, hi, sizeof hi);
-        snprintf(text, sizeof text, h->cov.decl.invalid ? "Geometry declaration invalid: native picture only" : "Geometry: outside declared range %s-%s, native picture only", lo, hi);
+        snprintf(text, sizeof text, h->cov.decl.invalid ? "Geometry declaration invalid: native picture only" : "Geometry: outside declared range %.10s-%.10s, native picture only", lo, hi);
         push_toast(h, text, 4000u);
       }
       h->cov_fallback = 1;
