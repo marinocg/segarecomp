@@ -77,6 +77,9 @@ struct Mod {
   void (*native_phase_entry)(void *, const SegaModHost *) = nullptr;
   luau::Output staged, visible;              // the render callback in flight / the last committed render output
   int target = 0;
+  // SEG-140-T010: the typed virtual_sprites feature submits a whole GenesisVirtualSpriteSet (the one transport every route ends in); staged during the callback, committed with the overlay when it did not fault
+  std::unique_ptr<GenesisVirtualSpriteSet> staged_set, visible_set;
+  bool have_staged_set = false, have_visible_set = false;
 #endif
   std::unique_ptr<GenesisModScheduler> scheduler;
   GenesisSnapshotModState snapshot{};
@@ -134,12 +137,13 @@ struct RenderView {
   const std::vector<luau::OverlayLayerDecl> *layers;
   const std::string *scene;
   const luau::SpriteSubmission *sprites;
+  const GenesisVirtualSpriteSet *set;   // SEG-140-T010: the native route's submission, already in the shared transport (null for the Luau route and when none was submitted)
 };
 RenderView render_view() {
 #ifdef SEGARECOMP_MOD_NATIVE
-  return {&g.visible.overlay, &g.visible.layers, &g.visible.scene, &g.visible.sprites};
+  return {&g.visible.overlay, &g.visible.layers, &g.visible.scene, &g.visible.sprites, g.have_visible_set ? g.visible_set.get() : nullptr};
 #else
-  return {&g.provider->overlay(), &g.provider->layers(), &g.provider->scene(), &g.provider->sprites()};
+  return {&g.provider->overlay(), &g.provider->layers(), &g.provider->scene(), &g.provider->sprites(), nullptr};
 #endif
 }
 
@@ -180,15 +184,26 @@ int api_scene(const char *id, std::uint32_t len) {
   if (id == nullptr) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }
   return answer(luau::overlay_scene(g.staged, std::string_view(id, len)));
 }
-SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr}};
+int api_virtual_sprites(const GenesisVirtualSpriteSet *set) {
+  if (!in_render()) return refused_phase();
+  if (set == nullptr || g.have_staged_set) { genesis_mod_fault_current("range"); return SEGA_MOD_E_RANGE; }   // one set per callback, and a set is required
+  if (!g.staged_set) g.staged_set = std::make_unique<GenesisVirtualSpriteSet>();
+  std::memcpy(g.staged_set.get(), set, sizeof *set);
+  g.have_staged_set = true;
+  return SEGA_MOD_OK;
+}
+SegaGenesisRenderApi g_render_api = {sizeof(SegaGenesisRenderApi), api_overlay_layer, api_overlay_target, api_overlay_rect, api_overlay_text, api_scene, api_virtual_sprites, {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr}};
 
 // The provider's `phase` entry, wrapped: a render callback starts from an empty staging area, and what it staged becomes visible only if the callback finished without a fault (a faulted callback leaves nothing).
 void wrapped_phase(void *state, const SegaModHost *host) {
   const bool render = host->phase == SEGA_MOD_PHASE_RENDER;
-  if (render) { g.staged = luau::Output{}; g.target = 0; g.visible = luau::Output{}; }
+  if (render) { g.staged = luau::Output{}; g.target = 0; g.visible = luau::Output{}; g.have_staged_set = false; g.have_visible_set = false; }
   g.native_phase_entry(state, host);
-  if (render && g.scheduler->fault_status == SEGA_MOD_OK && g.scheduler->external_cause == nullptr) g.visible = std::move(g.staged);
-  if (render) g.staged = luau::Output{};
+  if (render && g.scheduler->fault_status == SEGA_MOD_OK && g.scheduler->external_cause == nullptr) {
+    g.visible = std::move(g.staged);
+    if (g.have_staged_set) { std::swap(g.visible_set, g.staged_set); g.have_visible_set = true; }
+  }
+  if (render) { g.staged = luau::Output{}; g.have_staged_set = false; }
 }
 #endif
 
@@ -295,7 +310,8 @@ struct Presented {
   luau::OverlayImage image;
   luau::RasterizedLayers layers;
   luau::SpriteSubmission sprites;   // SEG-140-T008: the virtual sprites committed by the last successful render callback
-  bool fixed = false, have = false, have_sprites = false;
+  const GenesisVirtualSpriteSet *set = nullptr;   // SEG-140-T010: the native route's committed set (owned by the adapter, valid until the next render callback)
+  bool fixed = false, have = false, have_sprites = false, have_set = false;
 } p;
 
 void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out) {
@@ -303,6 +319,7 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   out->reason = GENESIS_COMPAT_OK;
   p.have = false;
   p.have_sprites = false;
+  p.have_set = false;
   if ((frame->requested & GENESIS_COMPAT_HUD) == 0) return;
   if (!g.attached || g.scheduler->fault.faulted != 0U || g.scheduler->disabled != 0U) {   // a faulted mod presents nothing; the guest and the picture go on
     out->reason = GENESIS_COMPAT_FAULT;
@@ -312,7 +329,9 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   const std::vector<luau::OverlayOp> &ops = *view.ops;
   p.have_sprites = view.sprites->total > 0;
   if (p.have_sprites) p.sprites = *view.sprites;
-  if (ops.empty() && !p.have_sprites) return;
+  p.set = view.set;
+  p.have_set = view.set != nullptr && view.set->count > 0;
+  if (ops.empty() && !p.have_sprites && !p.have_set) return;
   p.image = luau::rasterize_overlay(ops);
   p.fixed = false;
   for (const luau::OverlayOp &op : ops) p.fixed = p.fixed || op.layer == 0;
@@ -326,7 +345,11 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
 int scenery_word(void *, unsigned, unsigned, int, int, int, uint16_t *) { return 0; }
 int hud(void *, GenesisCompatOverlay *out) {
   const int hud_drawn = luau::pack_hud(p.have, p.fixed, p.image, p.layers, out);
-  const bool sprites = p.have_sprites && luau::pack_sprites(p.sprites, out->vsprites);
+  bool sprites = p.have_sprites && luau::pack_sprites(p.sprites, out->vsprites);
+  if (p.have_set && out->vsprites != nullptr) {   // the native route's set is already the shared transport: copied as submitted
+    std::memcpy(out->vsprites, p.set, sizeof *out->vsprites);
+    sprites = true;
+  }
   return hud_drawn != 0 || sprites ? 1 : 0;
 }
 const GenesisNativeCompat kTable = {GENESIS_NATIVE_COMPAT_ABI, "scheduled-mod-host", 1, GENESIS_COMPAT_HUD | GENESIS_COMPAT_SPRITES, prepare, scenery_word, hud};

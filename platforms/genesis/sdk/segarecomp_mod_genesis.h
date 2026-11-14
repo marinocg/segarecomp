@@ -4,6 +4,8 @@
 
 #include <segarecomp_mod.h>
 
+#include "segarecomp_genesis_vsprite.h" /* SEG-140-T010 (ADR 0306): the per-frame virtual-sprite set, one transport shared by the ABI 1 seam, Luau and this feature */
+
 #define SEGA_MOD_PLATFORM SEGA_MOD_PLATFORM_GENESIS
 #if defined(SEGA_MOD_TARGET_PLATFORM) && (SEGA_MOD_TARGET_PLATFORM != SEGA_MOD_PLATFORM_ID_GENESIS)
 #error "E_ABI_PLATFORM: this provider includes the Genesis header but the target platform is different"
@@ -32,7 +34,12 @@ typedef struct SegaGenesisRenderApi {
   int (*overlay_rect)(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t rgba);
   int (*overlay_text)(int32_t x, int32_t y, const char *ascii, uint32_t len, uint32_t rgba);
   int (*scene)(const char *id, uint32_t len); /* the frame's scene token [a-z0-9_-], at most 32 characters (a claim; grants nothing) */
-  void *reserved[8];                          /* NULL */
+  /* SEG-140-T010 (ADR 0306): submits this frame's virtual sprites (authored pattern pool included) as ONE GenesisVirtualSpriteSet, at most once per render callback (a second call is a range fault); the host copies
+   * it. It needs only overlay.rgba (output only: it grants no read access). The host validates the whole set against the frame with the same rules and stable reasons as every other route (a rejected set
+   * draws nothing and is reported); GAME_STATE_VERIFIED commands are accepted only when the host established a current verified snapshot, which the scheduled path does not (UNVERIFIED_STATE). A set lives
+   * for one frame. `set` must not be NULL (a range fault). Replaces the first reserved slot of the table: its size and the others are unchanged. */
+  int (*virtual_sprites)(const GenesisVirtualSpriteSet *set);
+  void *reserved[7];                          /* NULL */
 } SegaGenesisRenderApi;
 
 typedef struct SegaGenesisFeatures {

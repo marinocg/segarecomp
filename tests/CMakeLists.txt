@@ -1503,6 +1503,12 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST mod_vsprite_wide_test APPEND PROPERTY LABELS full fast)
   set_property(TEST mod_vsprite_wide_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_vsprite_wide_test PROPERTY TIMEOUT 1500)
+  # SEG-140-T010 (ADR 0306): the typed ABI 2 virtual_sprites feature and the ABI 1 / Luau / ABI 2 three-route conformance (pixels, F15 accounting, rejections), in the picture and the 32:9 side columns.
+  add_test(NAME mod_vsprite_abi2_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_vsprite_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_vsprite_abi2_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST mod_vsprite_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_vsprite_abi2_test PROPERTY TIMEOUT 1800)
   add_test(NAME genesis_viewer_extension_sdl_test COMMAND genesis_viewer_extension_sdl_test)
   set_property(TEST genesis_viewer_extension_sdl_test APPEND PROPERTY LABELS full fast)
   set_property(TEST genesis_viewer_extension_sdl_test PROPERTY TIMEOUT 240)
