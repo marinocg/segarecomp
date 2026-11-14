@@ -1482,37 +1482,37 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   # SEG-138-T010 (ADR 0305, delivery F28): the scheduled Luau gameplay mod in the played SDL3 program (guest RAM effect, HUD, save/restore/rewind, fail-closed refusals).
   add_test(NAME mod_viewer_gameplay_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/mod_viewer_gameplay_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
-  set_property(TEST mod_viewer_gameplay_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST mod_viewer_gameplay_test APPEND PROPERTY LABELS full)   # multi-minute generated-native viewer test: CI full tier and --focus, not the local fast preset
   set_property(TEST mod_viewer_gameplay_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_viewer_gameplay_test PROPERTY TIMEOUT 1200)
   # SEG-138-T011 (ADR 0305): a native ABI 2 provider in built headless and SDL3 programs: the native-versus-Luau twin, mod test / diff-run, state, typed overlay layers, containment and build refusals.
   add_test(NAME mod_native_viewer_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/mod_native_viewer_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
-  set_property(TEST mod_native_viewer_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST mod_native_viewer_test APPEND PROPERTY LABELS full)   # multi-minute generated-native viewer test: CI full tier and --focus, not the local fast preset
   set_property(TEST mod_native_viewer_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_native_viewer_test PROPERTY TIMEOUT 1500)
   # SEG-140-T008 (ADR 0306): live virtual sprites in the played SDL3 program through the ABI 1 provider seam and both Luau routes, against an independent golden model.
   add_test(NAME mod_vsprite_viewer_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/mod_vsprite_viewer_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
-  set_property(TEST mod_vsprite_viewer_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST mod_vsprite_viewer_test APPEND PROPERTY LABELS full)   # multi-minute generated-native viewer test: CI full tier and --focus, not the local fast preset
   set_property(TEST mod_vsprite_viewer_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_vsprite_viewer_test PROPERTY TIMEOUT 1500)
   # SEG-140-T009 (ADR 0307): virtual sprites in the widescreen side columns (4:3 / 16:9 / 21:9 / 32:9), per-region coverage, side treatments, the declaration; ABI 1 and Luau demonstrations at 32:9.
   add_test(NAME mod_vsprite_wide_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/mod_vsprite_wide_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
-  set_property(TEST mod_vsprite_wide_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST mod_vsprite_wide_test APPEND PROPERTY LABELS full)   # multi-minute generated-native viewer test: CI full tier and --focus, not the local fast preset
   set_property(TEST mod_vsprite_wide_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_vsprite_wide_test PROPERTY TIMEOUT 1500)
   # SEG-140-T010 (ADR 0306): the typed ABI 2 virtual_sprites feature and the ABI 1 / Luau / ABI 2 three-route conformance (pixels, F15 accounting, rejections), in the picture and the 32:9 side columns.
   add_test(NAME mod_vsprite_abi2_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/mod_vsprite_abi2_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
-  set_property(TEST mod_vsprite_abi2_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST mod_vsprite_abi2_test APPEND PROPERTY LABELS full)   # multi-minute generated-native viewer test: CI full tier and --focus, not the local fast preset
   set_property(TEST mod_vsprite_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_vsprite_abi2_test PROPERTY TIMEOUT 1800)
   # F28 (SEG-138-T010/T011, SEG-140-T008/T009/T010): the integrated acceptance: scheduled gameplay + HUD + 32:9 side-column sprites through the Luau and the native ABI 2 route, state/replay/rewind, negatives.
   add_test(NAME mod_f28_integration_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/mod_f28_integration_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
-  set_property(TEST mod_f28_integration_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST mod_f28_integration_test APPEND PROPERTY LABELS full)   # multi-minute generated-native viewer test: CI full tier and --focus, not the local fast preset
   set_property(TEST mod_f28_integration_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_f28_integration_test PROPERTY TIMEOUT 1500)
   add_test(NAME genesis_viewer_extension_sdl_test COMMAND genesis_viewer_extension_sdl_test)
