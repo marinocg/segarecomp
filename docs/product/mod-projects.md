@@ -116,3 +116,7 @@ strict C11 flags the **host** owns (`-std=c11 -Wall -Wextra -pedantic -Werror`) 
 ## Support today
 
 Genesis is the supported adapter. Master System and Sega CD register `host.log` only; a package that needs any other capability, or a Sega CD disc source, is refused (`E_CAPABILITY_UNSUPPORTED`, `E_SOURCE_KIND_RESERVED`). Commercial ROMs, discs, BIOS images and game audio never belong in a project that is committed or shared.
+
+## Linking a native ABI 2 package into a program (SEG-138-T011, ADR 0305)
+
+`segarecomp build --rom <original image> --output <dir> --native-package <pkg.segapatch> --native-identity <approved package identity> ...` compiles the package's `native-c11` units with the host-owned flags, links them with the one mod scheduler into the headless program, or into the played program with `--sdl3-include/--sdl3-lib`, and refuses a package that is not the approved identity (`NATIVE_IDENTITY_CHANGED`), another image (`NATIVE_IMAGE_MISMATCH`) or one outside the scheduled support set (`E_LIVE_*`). `mod test` and `mod diff-run` accept a native project. Native code is host code; approval of the exact identity is the boundary.

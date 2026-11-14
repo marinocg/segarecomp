@@ -160,15 +160,17 @@ The producer delta at 32:9 is 5.6x the 16:9 delta (the lookup measurement gave 5
 
 | Question | Answer | Evidence |
 | --- | --- | --- |
-| Virtual-sprite compositor status | A tested C11 module (command model, VDP decode, priority, clip, original budget), linked by no shipped program. | ADR 0303; `genesis_vsprite_decode_tests`, `genesis_vsprite_layers_tests` |
-| Presented in the live viewer? | **No.** The viewer never calls the compositor and sets no `actor_*` field. | ADR 0303 Limitations; `viewer_sdl3.c` builds `SvExtendedSurface` without them; only `sv_scene_rejection_test` fixtures set them |
-| Can a mod author virtual sprites through a supported executable path? | **No.** Neither Luau nor a native provider can submit them. | ADR 0303 Limitations |
-| Side-column sprite drawing? | **No.** The compositor works in native-picture coordinates only. | ADR 0303 decision 3 |
-| Which actor-coverage claims are available? | **None.** A declared `actors` component reports `missing` in every shipped program; the accounting contract (ADR 0304) exists and is tested with synthetic fixtures, which prove nothing about gameplay. | `sv_scene_rejection_test`, `sv_coverage_test` |
+| Virtual-sprite compositor status | A tested C11 module (command model, VDP decode, priority, clip, original budget), consumed by the live Genesis viewer (F28). | ADR 0303, 0306; `genesis_vsprite_decode_tests`, `genesis_vsprite_layers_tests`, `mod_vsprite_viewer_test` |
+| Presented in the live viewer? | **Yes, synthetic.** The viewer composes a provider's set and sets the `actor_*` fields from the compositor's own drawn pixels. No shipped game package submits one. | ADR 0306; `mod_vsprite_viewer_test`, `mod_vsprite_wide_test` |
+| Can a mod author virtual sprites through a supported executable path? | **Yes**: Luau, an ABI 1 provider and a native ABI 2 provider, with pixel-identical results. | ADR 0306; `mod_vsprite_abi2_test` |
+| Side-column sprite drawing? | **Yes**, in the `presentation` coordinate space, over the columns the viewer presents (Raw): `ABOVE_ALL` draws, `BEHIND_PLANES`/`BETWEEN` reaching a column reject the set. | ADR 0307; `mod_vsprite_wide_test`, `genesis_vsprite_wide_tests` |
+| Which actor-coverage claims are available? | **None for any game.** A declared `actors` component is covered only by sprites that reached the presented frame; no shipped Sonic package submits any, so it still reports `missing`; the synthetic fixtures prove the mechanism, not gameplay. | `sv_scene_rejection_test`, `sv_coverage_test` |
 | Which Sonic scenes need game-specific gameplay changes? | Actor visibility beyond 64 px at 21:9/32:9 in every studied Sonic 1 running class (Green Hill, Labyrinth, Marble, Star Light, Spring Yard, Scrap Brain, act 1 each) and in Sonic 2 Emerald Hill act 1 and Sonic 3 & Knuckles Angel Island act 1. Sonic 3 & Knuckles Angel Island act 1 and Sonic 2 Emerald Hill act 1 show the same pattern. | section 5 |
 | Findings needing follow-up | A and B below; per-title window/object-loading changes in `segarecomp-patches` only if wider actor visibility is wanted; the Sonic 2 REV01 run, other Sonic 2 and Sonic 3 & Knuckles zones and the ring manager's window; routes for other zones, acts and special stages; a left-moving object-loading measurement. | section 7 |
 
 ## 7. Post-F15 handoff: missing product capabilities (not tasks created by F15)
+
+> **Update (F28):** items A (the live consumer and authoring routes, through Luau, ABI 1 and ABI 2) and the side-column drawing have since been delivered as generic, synthetic-tested capabilities (ADR 0305-0307). The game-specific object, art and loading work below is unchanged and remains patch work.
 
 Recommended for a post-F15 harness refinement; F15 deliberately builds neither.
 

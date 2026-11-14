@@ -173,12 +173,18 @@
   {
    "platform": "genesis",
    "capability": "luau-scripting",
-   "level": "unsupported",
+   "level": "supported-with-limitations",
    "beta_target": "supported-and-tested",
    "evidence": [
-    "docs/architecture/luau-trust-policy.md"
+    "docs/architecture/luau-trust-policy.md",
+    "docs/decisions/0305-live-scheduled-mods-and-native-abi2-providers-in-built-programs.md",
+    "docs/product/luau-scripting.md"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/mod_luau_executable_test.py",
+    "tests/mod_viewer_gameplay_test.py",
+    "tests/mod_gameplay_example_test.py"
+   ],
    "planned_owner": "SEG-137-T006"
   },
   {
@@ -210,11 +216,13 @@
    "beta_target": "supported-and-tested",
    "evidence": [
     "docs/product/native-patch-sdk.md",
-    "ADR 0267"
+    "ADR 0267",
+    "docs/decisions/0305-live-scheduled-mods-and-native-abi2-providers-in-built-programs.md"
    ],
    "existing_tests": [
     "tests/genesis_patch_provider_build_test.py",
-    "tests/segapatch_native_package_test.py"
+    "tests/segapatch_native_package_test.py",
+    "tests/mod_native_viewer_test.py"
    ],
    "planned_owner": "SEG-135-T003"
   },
@@ -249,12 +257,16 @@
   {
    "platform": "genesis",
    "capability": "input-modifications",
-   "level": "unsupported",
+   "level": "supported-with-limitations",
    "beta_target": "supported-and-tested",
    "evidence": [
-    "docs/architecture/mod-execution-phases.md"
+    "docs/architecture/mod-execution-phases.md",
+    "docs/decisions/0305-live-scheduled-mods-and-native-abi2-providers-in-built-programs.md"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/mod_viewer_gameplay_test.py",
+    "tests/mod_gameplay_example_test.py"
+   ],
    "planned_owner": "SEG-138-T001"
   },
   {
@@ -289,7 +301,9 @@
     "docs/architecture/mod-platform-adapters.md"
    ],
    "existing_tests": [
-    "tests/genesis_native_compat_viewer_sdl_test.c"
+    "tests/genesis_native_compat_viewer_sdl_test.c",
+    "tests/mod_viewer_gameplay_test.py",
+    "tests/mod_native_viewer_test.py"
    ],
    "planned_owner": "SEG-138-T002"
   },
@@ -394,10 +408,15 @@
    "level": "supported-with-limitations",
    "beta_target": "supported-and-tested",
    "evidence": [
-    "docs/product/native-patch-sdk.md"
+    "docs/product/native-patch-sdk.md",
+    "docs/decisions/0306-virtual-sprite-authoring-transport-and-coverage.md",
+    "docs/decisions/0307-virtual-sprites-in-the-widescreen-side-columns.md"
    ],
    "existing_tests": [
-    "tests/genesis_native_compat_viewer_sdl_test.c"
+    "tests/genesis_native_compat_viewer_sdl_test.c",
+    "tests/mod_vsprite_viewer_test.py",
+    "tests/mod_vsprite_wide_test.py",
+    "tests/mod_vsprite_abi2_test.py"
    ],
    "planned_owner": "SEG-140-T004"
   },
@@ -432,7 +451,8 @@
     "docs/product/widescreen-and-patches.md"
    ],
    "existing_tests": [
-    "tests/genesis_extension_test.cpp"
+    "tests/genesis_extension_test.cpp",
+    "tests/mod_vsprite_wide_test.py"
    ],
    "planned_owner": "SEG-139-T006"
   },
@@ -562,12 +582,16 @@
   {
    "platform": "genesis",
    "capability": "save-states-rewind-with-mods",
-   "level": "experimental",
+   "level": "supported-with-limitations",
    "beta_target": "supported-and-tested",
    "evidence": [
-    "docs/architecture/genesis-save-states-persistence-and-rewind.md"
+    "docs/architecture/genesis-save-states-persistence-and-rewind.md",
+    "docs/decisions/0305-live-scheduled-mods-and-native-abi2-providers-in-built-programs.md"
    ],
-   "existing_tests": [],
+   "existing_tests": [
+    "tests/mod_viewer_gameplay_test.py",
+    "tests/mod_native_viewer_test.py"
+   ],
    "planned_owner": "SEG-138-T006"
   },
   {

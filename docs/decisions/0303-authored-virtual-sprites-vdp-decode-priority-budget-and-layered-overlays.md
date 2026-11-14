@@ -4,6 +4,8 @@
 - Presentation only: nothing here reaches guest state, VRAM, the sprite attribute table, VDP status, a save state or the native picture.
 - Not in scope (SEG-140-T005..T007): scene rejection and per-component coverage of virtual sprites, the Sonic actor-art and object-loading study, per-scene 32:9 results. Also not in scope: attaching virtual sprites to the live viewer or exposing them to Luau/native providers (this delivery ships the command model, the compositor and the rules as a tested C11 module; the presenter hookup is the consumer's work and is named below), sprites drawn into the widescreen side columns, Master System / Sega CD (SEG-147-T006, SEG-148-T009), an emulation of sprite DMA or per-line timing.
 
+> **Update (F28):** the live viewer, the Luau and native authoring routes and the side columns are delivered by [ADR 0306](0306-virtual-sprite-authoring-transport-and-coverage.md) and [ADR 0307](0307-virtual-sprites-in-the-widescreen-side-columns.md); the Limitations below describe the state at F14.
+
 ## Decision 1 (T001): the virtual-sprite command, its two data origins and what drawing does NOT mean
 
 A **virtual sprite** is one bounded per-frame command asking the presenter to draw a sprite-shaped pattern block over the finished native picture. A frame's commands are a `GenesisVirtualSpriteSet` (`platforms/genesis/runtime/virtual_sprite.{h,c}`, strict C11, library `segarecomp::runtime_genesis_vsprite`, linked only by a consumer that presents them; it adds no symbol to the runtime every generated program links).
