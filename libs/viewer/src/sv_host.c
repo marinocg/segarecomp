@@ -1310,14 +1310,12 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
   }
   const int accepted = ext != NULL && (int)ext->mode <= (int)h->settings.video.widescreen && sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK;
   if (offered) {
-    /* SEG-139-T004: only what the host ACCEPTED counts as delivered (a surface the checks refuse, or one older than the requested level, delivers nothing). Actors = an accepted AUTHORED
-     * surface produced at Level 3: the provider's claim that the margins carry actors, never inferred from hardware sprites or background pixels. */
+    /* SEG-139-T004: only what the host ACCEPTED counts as delivered (a surface the checks refuse, or one older than the requested level, delivers nothing). ACTORS are never counted
+     * here: the provider ABI has no independently accepted actor component (only HUD and SCENERY), and an AUTHORED Level 3 surface can be established by scenery alone, so it proves
+     * nothing about actors. A declared actors component therefore reports `missing` (fail closed) until an explicit actor-delivery signal exists. */
     const SvDisplayRatio req = requested_ratio(h);
     unsigned delivered = 0;
-    if (accepted && ext->source == SV_EXTSRC_AUTHORED && ext->side > 0) {
-      delivered |= SV_COV_BIT(SV_COV_SCENERY);
-      if (ext->mode == SV_WIDESCREEN_ENHANCED_GAMEPLAY) delivered |= SV_COV_BIT(SV_COV_ACTORS);
-    }
+    if (accepted && ext->source == SV_EXTSRC_AUTHORED && ext->side > 0) delivered |= SV_COV_BIT(SV_COV_SCENERY);
     if (ext->overlay_rgba != NULL && ext->overlay_w > 0 && ext->overlay_w <= SV_OVERLAY_MAX && ext->overlay_h > 0 && ext->overlay_h <= SV_OVERLAY_MAX) delivered |= SV_COV_BIT(SV_COV_HUD);
     if (!sv_cov_frame(&h->cov, req, h->cov_scene[0] != '\0' ? h->cov_scene : NULL, delivered)) {
       /* outside the declared range: nothing the provider supplied may be shown (the surface mixes its own columns, which Raw would pass through untouched), so only the native

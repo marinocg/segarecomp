@@ -76,7 +76,7 @@ int main(void) {
   CHECK(present(h, ++seq, 1) == 0, "frame at 16:9");
   CHECK(!sv_host_geometry_fallback(h) && sv_host_side_treatment(h) == SV_TREAT_PASSTHROUGH && sv_host_extension_source(h) == SV_EXTSRC_AUTHORED && h->ovl_w == 8, "inside the range: authored scenery and the relocated HUD are shown as supplied");
   CHECK(strstr(json(h), "\"last_status\":\"inside declared range\"") != NULL && strstr(json(h), "\"scenery\":{\"declared\":true,\"covered\":1,") != NULL && strstr(json(h), "\"hud\":{\"declared\":true,\"covered\":1,") != NULL, "covered scenery and hud are counted");
-  CHECK(strstr(json(h), "\"actors\":{\"declared\":false,\"covered\":0,\"missing\":0,\"undeclared\":1,") != NULL, "Level 3 actors delivered but never declared are not support");
+  CHECK(strstr(json(h), "\"actors\":{\"declared\":false,\"covered\":0,\"missing\":0,\"undeclared\":0,") != NULL, "an undeclared actors component is never reported, even at Level 3");
 
   set(h, R(32, 9), 100);
   sv_host_toast(h, "");
@@ -143,12 +143,12 @@ int main(void) {
     CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 1000, &e) == 0 && sv_host_extension_side(h) == 0 && strstr(json(h), "\"scenery\":{\"declared\":true,\"covered\":0,\"missing\":1,") != NULL &&
           strstr(json(h), "\"actors\":{\"declared\":true,\"covered\":0,\"missing\":1,") != NULL, "a refused surface delivers nothing: declared scenery and actors are missing, not covered");
     e.pitch = (W + 2 * SIDE) * 3; e.sequence = 1001; e.source = SV_EXTSRC_GENERIC; /* generic Level 3 sprites are not a provider's actors */
-    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 1001, &e) == 0 && strstr(json(h), "\"actors\":{\"declared\":true,\"covered\":0,\"missing\":2,") != NULL, "generic hardware sprites never count as covered actors");
+    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 1001, &e) == 0 && strstr(json(h), "\"actors\":{\"declared\":true,\"covered\":0,\"missing\":2,") != NULL, "Level 3 never counts as covered actors, generic or authored");
     e.sequence = 1002; e.source = SV_EXTSRC_AUTHORED;
-    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 1002, &e) == 0 && strstr(json(h), "\"actors\":{\"declared\":true,\"covered\":1,\"missing\":2,") != NULL, "an accepted authored Level 3 surface covers scenery and actors");
+    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 1002, &e) == 0 && strstr(json(h), "\"scenery\":{\"declared\":true,\"covered\":1,") != NULL && strstr(json(h), "\"actors\":{\"declared\":true,\"covered\":0,\"missing\":3,") != NULL, "an accepted authored Level 3 surface covers scenery only: actors stay missing (no provider signal for them)");
     { SvSettings lo = *sv_host_settings(h); lo.video.widescreen = SV_WIDESCREEN_EXTENDED_BACKGROUNDS; sv_host_apply_settings(h, &lo); }
     e.sequence = 1003; /* produced at Level 3, only Level 2 requested now: stale for presentation, delivers nothing */
-    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 1003, &e) == 0 && sv_host_extension_side(h) == 0 && strstr(json(h), "\"actors\":{\"declared\":true,\"covered\":1,\"missing\":3,") != NULL, "a surface older than the requested level delivers nothing");
+    CHECK(sv_host_present_extended(h, g_native, W, H, W * 3, 1003, &e) == 0 && sv_host_extension_side(h) == 0 && strstr(json(h), "\"actors\":{\"declared\":true,\"covered\":0,\"missing\":4,") != NULL, "a surface older than the requested level delivers nothing");
   }
   { /* the Video-page sentence */
     char note[400];
