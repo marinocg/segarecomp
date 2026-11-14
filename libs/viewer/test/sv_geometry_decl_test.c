@@ -93,7 +93,7 @@ int main(void) {
   }
   CHECK(toast_has(h, "outside declared range"), "a visible diagnostic names the reason");
   CHECK(strstr(json(h), "\"last_status\":\"outside declared range\"") != NULL && strstr(json(h), "\"outside_range_frames\":2") != NULL && strstr(json(h), "\"last_aspect\":\"32:9\"") != NULL, "the report says outside declared range");
-  CHECK(strstr(json(h), "\"scenery\":{\"declared\":true,\"covered\":1,\"missing\":0,\"undeclared\":0,\"outside_range\":2}") != NULL, "the outside frames is not counted as covered");
+  CHECK(strstr(json(h), "\"scenery\":{\"declared\":true,\"covered\":1,\"missing\":0,\"undeclared\":0,\"outside_range\":2,") != NULL, "the outside frames is not counted as covered");
 
   sv_host_toast(h, "");
   CHECK(present(h, ++seq, 1) == 0 && h->toast_count == 0, "the diagnostic is raised on entering the state, not on every frame");

@@ -452,23 +452,88 @@ void sv_cov_init(SvCovAccount *a, const SvGeomDecl *decl) {
 
 static void cov_bump(uint64_t *v) { if (*v != UINT64_MAX) ++*v; }
 
-int sv_cov_frame(SvCovAccount *a, SvDisplayRatio requested, const char *scene, unsigned delivered) {
-  int si, c, in_range;
+const char *sv_reject_reason_name(SvRejectReason reason) {
+  switch (reason) {
+    case SV_REJ_NONE: return "none";
+    case SV_REJ_UNVERIFIED_STATE: return "unverified_state";
+    case SV_REJ_UNSUPPORTED_MODE: return "unsupported_mode";
+    case SV_REJ_OVER_DECLARED: return "over_declared_geometry";
+    case SV_REJ_UNDECLARED: return "undeclared";
+    case SV_REJ_VSPRITE_REJECTED: return "virtual_sprite_rejected";
+    case SV_REJ_VSPRITE_UNPRESENTED: return "virtual_sprite_unpresented";
+    case SV_REJ_INVALID_SURFACE: return "invalid_surface";
+    case SV_REJ_COUNT: break;
+  }
+  return "none";
+}
+
+void sv_actor_signal(const SvExtendedSurface *ext, unsigned *offered, unsigned *accepted, unsigned *reasons) {
+  /* Only a COMPOSED set can be delivered; every earlier stage is evidence of nothing. A game-state set needs the verified current snapshot (the same gate the compositor applies), an authored set needs none
+   * (it asserts nothing about the game). An unknown stage or provenance is refused, never guessed. */
+  const unsigned bit = SV_COV_BIT(SV_COV_ACTORS);
+  unsigned off = 0, acc = 0, why = 0;
+  if (ext != NULL && ext->actor_stage != SV_ACT_NONE) {
+    off = bit;
+    switch (ext->actor_stage) {
+      case SV_ACT_SUBMITTED:
+      case SV_ACT_VALIDATED: why |= SV_REJ_BIT(SV_REJ_VSPRITE_UNPRESENTED); break;
+      case SV_ACT_REJECTED: why |= SV_REJ_BIT(SV_REJ_VSPRITE_REJECTED); break;
+      case SV_ACT_COMPOSED:
+        if (ext->actor_provenance != 1 && ext->actor_provenance != 2) why |= SV_REJ_BIT(SV_REJ_UNSUPPORTED_MODE);
+        else if (ext->actor_provenance == 1 && !ext->actor_state_verified) why |= SV_REJ_BIT(SV_REJ_UNVERIFIED_STATE);
+        else acc = bit;
+        break;
+      default: why |= SV_REJ_BIT(SV_REJ_UNSUPPORTED_MODE); break;
+    }
+  }
+  if (offered != NULL) *offered = off;
+  if (accepted != NULL) *accepted = acc;
+  if (reasons != NULL) *reasons = why;
+}
+
+int sv_cov_frame_ex(SvCovAccount *a, SvDisplayRatio requested, const char *scene, unsigned offered, unsigned accepted, unsigned reasons, unsigned vsprite_reason) {
+  int si, c, in_range, r;
   if (a == NULL) return 1;
   si = cov_scene_index(&a->decl, scene);
   if (si < 0) si = a->decl.scene_count;   /* the unscoped bucket */
   in_range = sv_geomdecl_in_range(&a->decl, requested);
+  accepted &= offered;                      /* nothing is accepted that was not offered */
   cov_bump(&a->frames);
-  if (!in_range) cov_bump(&a->outside_frames);
+  if (!in_range) { cov_bump(&a->outside_frames); reasons |= SV_REJ_BIT(SV_REJ_OVER_DECLARED); }
   a->last = requested;
   for (c = 0; c < SV_COV_COMPONENTS; ++c) {
-    const SvCovStatus st = sv_geomdecl_check(&a->decl, requested, si < a->decl.scene_count ? a->decl.scenes[si].id : NULL, (SvCovComponent)c, (delivered & SV_COV_BIT(c)) != 0);
-    if (st == SV_COV_COVERED) cov_bump(&a->count[si][c][0]);
-    else if (st == SV_COV_MISSING) cov_bump(&a->count[si][c][1]);
-    else if (st == SV_COV_UNDECLARED) cov_bump(&a->count[si][c][2]);
-    else if (st == SV_COV_OUTSIDE_RANGE) cov_bump(&a->count[si][c][3]);
+    const int off = (offered & SV_COV_BIT(c)) != 0, acc = (accepted & SV_COV_BIT(c)) != 0;
+    const char *id = si < a->decl.scene_count ? a->decl.scenes[si].id : NULL;
+    const SvCovStatus st = sv_geomdecl_check(&a->decl, requested, id, (SvCovComponent)c, acc);
+    uint64_t *n = a->count[si][c];
+    if (st == SV_COV_COVERED) cov_bump(&n[0]);
+    else if (st == SV_COV_MISSING) cov_bump(&n[1]);
+    else if (st == SV_COV_UNDECLARED) { cov_bump(&n[2]); reasons |= SV_REJ_BIT(SV_REJ_UNDECLARED); }
+    else if (st == SV_COV_OUTSIDE_RANGE) cov_bump(&n[3]);
+    if (in_range && si < a->decl.scene_count && (a->decl.scenes[si].declared & SV_COV_BIT(c)) != 0) cov_bump(&n[4]);   /* requested */
+    if (off) cov_bump(&n[5]);
+    if (acc) cov_bump(&n[6]);
+    if (acc && in_range) cov_bump(&n[7]);                                                                              /* presented */
+    if (off && !acc) cov_bump(&n[8]);
   }
+  a->last_reason = SV_REJ_NONE;
+  for (r = SV_REJ_COUNT - 1; r >= 1; --r)
+    if ((reasons & SV_REJ_BIT(r)) != 0) { cov_bump(&a->reason_frames[r]); a->last_reason = (uint8_t)r; }   /* ends at the lowest (most fundamental) reason */
+  a->last_vsprite_reason = (uint8_t)((reasons & SV_REJ_BIT(SV_REJ_VSPRITE_REJECTED)) != 0 ? vsprite_reason & 0xffu : 0u);
   return in_range;
+}
+
+void sv_cov_reject(SvCovAccount *a, unsigned reasons) {
+  int r;
+  if (a == NULL) return;
+  a->last_reason = SV_REJ_NONE;
+  for (r = SV_REJ_COUNT - 1; r >= 1; --r)
+    if ((reasons & SV_REJ_BIT(r)) != 0) { cov_bump(&a->reason_frames[r]); a->last_reason = (uint8_t)r; }
+  a->last_vsprite_reason = 0;
+}
+
+int sv_cov_frame(SvCovAccount *a, SvDisplayRatio requested, const char *scene, unsigned delivered) {
+  return sv_cov_frame_ex(a, requested, scene, delivered, delivered, 0u, 0u);
 }
 
 typedef struct CovBuf { char *p; size_t cap, need; } CovBuf;
@@ -491,17 +556,22 @@ size_t sv_cov_report_json(const SvCovAccount *a, char *buf, size_t cap) {
   r1[0] = r2[0] = r3[0] = '\0';
   if (a->decl.has_range) { (void)sv_ratio_format(a->decl.min, r1, sizeof r1); (void)sv_ratio_format(a->decl.max, r2, sizeof r2); }
   (void)sv_ratio_format(a->last, r3, sizeof r3);
-  cov_put(&b, "{\"schema\":\"segarecomp.geometry-coverage/1\",\"declared\":%s,\"aspect_min\":\"%s\",\"aspect_max\":\"%s\",\"frames\":%llu,\"outside_range_frames\":%llu,\"last_aspect\":\"%s\",\"last_status\":\"%s\",\"scenes\":[",
+  cov_put(&b, "{\"schema\":\"segarecomp.geometry-coverage/1\",\"declared\":%s,\"aspect_min\":\"%s\",\"aspect_max\":\"%s\",\"frames\":%llu,\"outside_range_frames\":%llu,\"last_aspect\":\"%s\",\"last_status\":\"%s\",",
           a->decl.present && !a->decl.invalid ? "true" : "false", r1, r2, (unsigned long long)a->frames, (unsigned long long)a->outside_frames, r3,
           a->frames == 0 ? "no frames" : !a->decl.present ? "no declaration" : sv_geomdecl_in_range(&a->decl, a->last) ? "inside declared range" : "outside declared range");
+  /* SEG-140-T005 (additive): the reason the last frame was not fully presented, the GenesisVirtualReason of a rejected virtual-sprite set, and the number of frames each reason applied to */
+  cov_put(&b, "\"last_reason\":\"%s\",\"last_vsprite_reason\":%u,\"reason_frames\":{", sv_reject_reason_name((SvRejectReason)a->last_reason), (unsigned)a->last_vsprite_reason);
+  for (c = 1; c < SV_REJ_COUNT; ++c) cov_put(&b, "%s\"%s\":%llu", c > 1 ? "," : "", sv_reject_reason_name((SvRejectReason)c), (unsigned long long)a->reason_frames[c]);
+  cov_put(&b, "},\"scenes\":[");
   nscenes = a->decl.scene_count + 1;
   for (si = 0; si < nscenes; ++si) {
     const int unscoped = si == a->decl.scene_count;
     cov_put(&b, "%s{\"id\":\"%s\",\"components\":{", si > 0 ? "," : "", unscoped ? "*" : a->decl.scenes[si].id);
     for (c = 0; c < SV_COV_COMPONENTS; ++c)
-      cov_put(&b, "%s\"%s\":{\"declared\":%s,\"covered\":%llu,\"missing\":%llu,\"undeclared\":%llu,\"outside_range\":%llu}", c > 0 ? "," : "", sv_cov_component_name((SvCovComponent)c),
+      cov_put(&b, "%s\"%s\":{\"declared\":%s,\"covered\":%llu,\"missing\":%llu,\"undeclared\":%llu,\"outside_range\":%llu,\"requested\":%llu,\"offered\":%llu,\"accepted\":%llu,\"presented\":%llu,\"rejected\":%llu}", c > 0 ? "," : "", sv_cov_component_name((SvCovComponent)c),
               !unscoped && (a->decl.scenes[si].declared & SV_COV_BIT(c)) != 0 ? "true" : "false",
-              (unsigned long long)a->count[si][c][0], (unsigned long long)a->count[si][c][1], (unsigned long long)a->count[si][c][2], (unsigned long long)a->count[si][c][3]);
+              (unsigned long long)a->count[si][c][0], (unsigned long long)a->count[si][c][1], (unsigned long long)a->count[si][c][2], (unsigned long long)a->count[si][c][3],
+              (unsigned long long)a->count[si][c][4], (unsigned long long)a->count[si][c][5], (unsigned long long)a->count[si][c][6], (unsigned long long)a->count[si][c][7], (unsigned long long)a->count[si][c][8]);
     cov_put(&b, "}}");
   }
   cov_put(&b, "]}");

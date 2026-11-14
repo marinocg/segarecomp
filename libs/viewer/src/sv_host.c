@@ -1356,6 +1356,7 @@ static const char *geom_reason(SvGeomStatus st) {
   }
 }
 
+static const char *reason_text(unsigned reason);
 void sv_host_geometry_note(const SvHost *h, char *buf, size_t cap) {
   char lo[24], hi[24], req[24], part[240];
   const SvCovAccount *a;
@@ -1392,6 +1393,34 @@ void sv_host_geometry_note(const SvHost *h, char *buf, size_t cap) {
   snprintf(part, sizeof part, "This package supports %s to %s. Delivered so far (%llu frames): scenery %llu, HUD %llu, actors %llu.", lo, hi, (unsigned long long)in_frames,
            (unsigned long long)cov[SV_COV_SCENERY], (unsigned long long)cov[SV_COV_HUD], (unsigned long long)cov[SV_COV_ACTORS]);
   strncat(buf, part, cap - strlen(buf) - 1u);
+  if (a->last_reason != SV_REJ_NONE) {   /* SEG-140-T005: why the last frame was not fully presented */
+    snprintf(part, sizeof part, " Last frame: %s.", reason_text(a->last_reason));
+    strncat(buf, part, cap - strlen(buf) - 1u);
+  }
+}
+
+/* SEG-140-T005: a visible diagnostic when the reason a frame was not fully presented CHANGES (never per frame; returning to a valid state clears it) */
+static const char *reason_text(unsigned reason) {
+  switch (reason) {
+    case SV_REJ_UNVERIFIED_STATE: return "current game state not verified, contribution not counted";
+    case SV_REJ_UNSUPPORTED_MODE: return "mode or provenance not supported, contribution not counted";
+    case SV_REJ_OVER_DECLARED: return "requested geometry exceeds what the package declares or the planner allows";
+    case SV_REJ_UNDECLARED: return "content for an undeclared scene or component, not counted as supported";
+    case SV_REJ_VSPRITE_REJECTED: return "virtual sprites rejected, nothing drawn";
+    case SV_REJ_VSPRITE_UNPRESENTED: return "virtual sprites not presented, not counted";
+    case SV_REJ_INVALID_SURFACE: return "extension surface invalid, refused";
+    default: return "";
+  }
+}
+static void note_reason_transition(SvHost *h) {
+  const unsigned now = h->cov.last_reason;
+  if (now == h->cov_reason_notified) return;
+  h->cov_reason_notified = (uint8_t)now;
+  if (now != SV_REJ_NONE && now != SV_REJ_OVER_DECLARED) {   /* the geometry reasons already have their own once-per-entry notices */
+    char text[120];
+    snprintf(text, sizeof text, "Presentation: %s", reason_text(now));
+    push_toast(h, text, 4000u);
+  }
 }
 
 int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch, uint64_t sequence, const SvExtendedSurface *ext) {
@@ -1413,15 +1442,32 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     h->geom_status = st;
   }
   const int accepted = ext != NULL && (int)ext->mode <= (int)h->settings.video.widescreen && sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) == SV_EXT_OK;
+  if (ext != NULL && ext->status != SV_WS_UNAVAILABLE && !offered) {
+    /* SEG-140-T005: a surface for another frame is stale: it is never shown, never counted, and the reason is visible (no stale content may masquerade as current) */
+    sv_cov_reject(&h->cov, SV_REJ_BIT(SV_REJ_UNVERIFIED_STATE));
+    note_reason_transition(h);
+  }
   if (offered) {
-    /* SEG-139-T004: only what the host ACCEPTED counts as delivered (a surface the checks refuse, or one older than the requested level, delivers nothing). ACTORS are never counted
-     * here: the provider ABI has no independently accepted actor component (only HUD and SCENERY), and an AUTHORED Level 3 surface can be established by scenery alone, so it proves
-     * nothing about actors. A declared actors component therefore reports `missing` (fail closed) until an explicit actor-delivery signal exists. */
+    /* SEG-139-T004: only what the host ACCEPTED counts as delivered (a surface the checks refuse, or one older than the requested level, delivers nothing). SEG-140-T005 adds the offered/accepted/presented
+     * split and the reasons. ACTORS are credited only through an explicit virtual-sprite signal (sv_actor_signal): a set the compositor COMPOSED, with a verified snapshot when it reads the game's art. A
+     * scenery surface proves nothing about actors, and a HUD or layered overlay proves nothing about scenery or actors. Layered overlays are not counted as HUD (their per-layer accounting is
+     * the overlay diagnostic); an AUTHORED Level 3 surface can be established by scenery alone. */
     const SvDisplayRatio req = requested_ratio(h);
-    unsigned delivered = 0;
-    if (accepted && ext->source == SV_EXTSRC_AUTHORED && ext->side > 0) delivered |= SV_COV_BIT(SV_COV_SCENERY);
-    if (ext->overlay_rgba != NULL && ext->overlay_w > 0 && ext->overlay_w <= SV_OVERLAY_MAX && ext->overlay_h > 0 && ext->overlay_h <= SV_OVERLAY_MAX) delivered |= SV_COV_BIT(SV_COV_HUD);
-    if (!sv_cov_frame(&h->cov, req, h->cov_scene[0] != '\0' ? h->cov_scene : NULL, delivered)) {
+    const SvExtCheck chk = (int)ext->mode <= (int)h->settings.video.widescreen ? sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) : SV_EXT_MODE;
+    unsigned off = 0, acc = 0, why = 0, a_off = 0, a_acc = 0, a_why = 0;
+    if (ext->source == SV_EXTSRC_AUTHORED && ext->side > 0) { off |= SV_COV_BIT(SV_COV_SCENERY); if (accepted) acc |= SV_COV_BIT(SV_COV_SCENERY); }
+    if (ext->overlay_rgba != NULL) {
+      off |= SV_COV_BIT(SV_COV_HUD);
+      if (ext->overlay_w > 0 && ext->overlay_w <= SV_OVERLAY_MAX && ext->overlay_h > 0 && ext->overlay_h <= SV_OVERLAY_MAX) acc |= SV_COV_BIT(SV_COV_HUD);
+    }
+    sv_actor_signal(ext, &a_off, &a_acc, &a_why);
+    off |= a_off; acc |= a_acc; why |= a_why;
+    if (!accepted && ext->status != SV_WS_UNAVAILABLE && (ext->rgb24 != NULL || ext->side > 0)) {   /* only a surface that claims an extension can be refused as one (a HUD-only surface is normal) */
+      if (chk == SV_EXT_MODE) why |= SV_REJ_BIT(SV_REJ_UNSUPPORTED_MODE);
+      else if (chk != SV_EXT_OK) why |= SV_REJ_BIT(SV_REJ_INVALID_SURFACE);
+    }
+    if (h->geom_status != SV_GEOM_OK) why |= SV_REJ_BIT(SV_REJ_OVER_DECLARED);
+    if (!sv_cov_frame_ex(&h->cov, req, h->cov_scene[0] != '\0' ? h->cov_scene : NULL, off, acc, why, ext->actor_reject)) {
       /* outside the declared range: nothing the provider supplied may be shown (the surface mixes its own columns, which Raw would pass through untouched), so only the native
        * picture is presented, with a visible diagnostic once per entry. */
       char lo[24], hi[24], text[96];
@@ -1433,8 +1479,10 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
         push_toast(h, text, 4000u);
       }
       h->cov_fallback = 1;
+      h->cov_reason_notified = SV_REJ_OVER_DECLARED;
       return present_frame(h, rgb, w, hgt, pitch, NULL, NULL);
     }
+    note_reason_transition(h);
     h->cov_fallback = 0;
   }
   if (ext != NULL) {

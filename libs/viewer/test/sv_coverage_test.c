@@ -10,8 +10,8 @@ static SvDisplayRatio R(int n, int d) { SvDisplayRatio r; r.num = n; r.den = d; 
 
 int main(void) {
   SvGeomDecl d;
-  SvCovAccount acc;
-  char json[4096], tiny[16];
+  SvCovAccount acc, acc_t;
+  char json[40960], tiny[16];
   size_t need;
   int i;
 
@@ -82,19 +82,20 @@ int main(void) {
   need = sv_cov_report_json(&acc, json, sizeof json);
   CHECK(need > 0 && need < sizeof json && strlen(json) == need, "the report fits and its length is exact");
   CHECK(strcmp(json,
-      "{\"schema\":\"segarecomp.geometry-coverage/1\",\"declared\":true,\"aspect_min\":\"4:3\",\"aspect_max\":\"16:9\",\"frames\":4,\"outside_range_frames\":1,\"last_aspect\":\"16:9\",\"last_status\":\"inside declared range\",\"scenes\":["
+      "{\"schema\":\"segarecomp.geometry-coverage/1\",\"declared\":true,\"aspect_min\":\"4:3\",\"aspect_max\":\"16:9\",\"frames\":4,\"outside_range_frames\":1,\"last_aspect\":\"16:9\",\"last_status\":\"inside declared range\","
+      "\"last_reason\":\"undeclared\",\"last_vsprite_reason\":0,\"reason_frames\":{\"unverified_state\":0,\"unsupported_mode\":0,\"over_declared_geometry\":1,\"undeclared\":2,\"virtual_sprite_rejected\":0,\"virtual_sprite_unpresented\":0,\"invalid_surface\":0},\"scenes\":["
       "{\"id\":\"stage-1\",\"components\":{"
-      "\"scenery\":{\"declared\":true,\"covered\":2,\"missing\":0,\"undeclared\":0,\"outside_range\":1},"
-      "\"hud\":{\"declared\":true,\"covered\":1,\"missing\":1,\"undeclared\":0,\"outside_range\":1},"
-      "\"actors\":{\"declared\":false,\"covered\":0,\"missing\":0,\"undeclared\":1,\"outside_range\":1}}},"
+      "\"scenery\":{\"declared\":true,\"covered\":2,\"missing\":0,\"undeclared\":0,\"outside_range\":1,\"requested\":2,\"offered\":3,\"accepted\":3,\"presented\":2,\"rejected\":0},"
+      "\"hud\":{\"declared\":true,\"covered\":1,\"missing\":1,\"undeclared\":0,\"outside_range\":1,\"requested\":2,\"offered\":1,\"accepted\":1,\"presented\":1,\"rejected\":0},"
+      "\"actors\":{\"declared\":false,\"covered\":0,\"missing\":0,\"undeclared\":1,\"outside_range\":1,\"requested\":0,\"offered\":1,\"accepted\":1,\"presented\":1,\"rejected\":0}}},"
       "{\"id\":\"*\",\"components\":{"
-      "\"scenery\":{\"declared\":false,\"covered\":0,\"missing\":0,\"undeclared\":0,\"outside_range\":0},"
-      "\"hud\":{\"declared\":false,\"covered\":0,\"missing\":0,\"undeclared\":1,\"outside_range\":0},"
-      "\"actors\":{\"declared\":false,\"covered\":0,\"missing\":0,\"undeclared\":0,\"outside_range\":0}}}]}") == 0, "the exact stable JSON shape");
+      "\"scenery\":{\"declared\":false,\"covered\":0,\"missing\":0,\"undeclared\":0,\"outside_range\":0,\"requested\":0,\"offered\":0,\"accepted\":0,\"presented\":0,\"rejected\":0},"
+      "\"hud\":{\"declared\":false,\"covered\":0,\"missing\":0,\"undeclared\":1,\"outside_range\":0,\"requested\":0,\"offered\":1,\"accepted\":1,\"presented\":1,\"rejected\":0},"
+      "\"actors\":{\"declared\":false,\"covered\":0,\"missing\":0,\"undeclared\":0,\"outside_range\":0,\"requested\":0,\"offered\":0,\"accepted\":0,\"presented\":0,\"rejected\":0}}}]}") == 0, "the exact stable JSON shape");
   /* snprintf-like truncation and determinism */
   CHECK(sv_cov_report_json(&acc, tiny, sizeof tiny) == need && strlen(tiny) == sizeof tiny - 1u, "a short buffer is truncated and the needed length returned");
   CHECK(sv_cov_report_json(&acc, NULL, 0) == need, "a NULL buffer measures");
-  { char again[4096]; (void)sv_cov_report_json(&acc, again, sizeof again); CHECK(strcmp(again, json) == 0, "the report is deterministic"); }
+  { char again[40960]; (void)sv_cov_report_json(&acc, again, sizeof again); CHECK(strcmp(again, json) == 0, "the report is deterministic"); }
   /* empty account: the same shape */
   sv_cov_init(&acc, NULL);
   (void)sv_cov_report_json(&acc, json, sizeof json);
@@ -102,6 +103,56 @@ int main(void) {
   (void)sv_cov_frame(&acc, R(32, 9), NULL, SV_COV_BIT(SV_COV_SCENERY));
   (void)sv_cov_report_json(&acc, json, sizeof json);
   CHECK(strstr(json, "\"last_status\":\"no declaration\"") != NULL && strstr(json, "\"undeclared\":1") != NULL && strstr(json, "\"outside_range_frames\":0") != NULL, "no declaration: counted as undeclared, never outside");
+  /* SEG-140-T005: the actor signal. Only a COMPOSED set with a known provenance (and a verified snapshot for game-state art) is a delivery; every earlier stage is evidence of nothing. */
+  {
+    SvExtendedSurface e;
+    unsigned off, acc, why;
+    const unsigned A = SV_COV_BIT(SV_COV_ACTORS);
+    static const struct { int stage, prov, state; unsigned off, acc, why; } T[] = {
+      {SV_ACT_NONE, 0, 0, 0, 0, 0},
+      {SV_ACT_SUBMITTED, 2, 0, 1, 0, 1u << SV_REJ_VSPRITE_UNPRESENTED},
+      {SV_ACT_VALIDATED, 2, 1, 1, 0, 1u << SV_REJ_VSPRITE_UNPRESENTED},
+      {SV_ACT_REJECTED, 2, 1, 1, 0, 1u << SV_REJ_VSPRITE_REJECTED},
+      {SV_ACT_COMPOSED, 2, 0, 1, 1, 0},
+      {SV_ACT_COMPOSED, 1, 1, 1, 1, 0},
+      {SV_ACT_COMPOSED, 1, 0, 1, 0, 1u << SV_REJ_UNVERIFIED_STATE},
+      {SV_ACT_COMPOSED, 0, 1, 1, 0, 1u << SV_REJ_UNSUPPORTED_MODE},
+      {SV_ACT_COMPOSED, 3, 1, 1, 0, 1u << SV_REJ_UNSUPPORTED_MODE},
+      {99, 2, 1, 1, 0, 1u << SV_REJ_UNSUPPORTED_MODE},
+    };
+    for (i = 0; i < (int)(sizeof T / sizeof T[0]); ++i) {
+      memset(&e, 0, sizeof e);
+      e.actor_stage = (uint8_t)T[i].stage; e.actor_provenance = (uint8_t)T[i].prov; e.actor_state_verified = (uint8_t)T[i].state;
+      sv_actor_signal(&e, &off, &acc, &why);
+      CHECK(off == (T[i].off ? A : 0u) && acc == (T[i].acc ? A : 0u) && why == T[i].why, "the actor signal credits only a composed set with its required provenance gate");
+    }
+    sv_actor_signal(NULL, &off, &acc, &why);
+    CHECK(off == 0 && acc == 0 && why == 0, "no surface, no actor signal");
+  }
+  /* accepted is a subset of offered; a refused frame records reasons without a frame or a counter; a frame with no reason clears the last reason */
+  (void)sv_geomdecl_parse("max=16:9;scene=s:actors+hud", &d);
+  sv_cov_init(&acc_t, &d);
+  CHECK(sv_cov_frame_ex(&acc_t, R(16, 9), "s", 0u, SV_COV_BIT(SV_COV_HUD), 0u, 0u) == 1 && acc_t.count[0][SV_COV_HUD][6] == 0 && acc_t.count[0][SV_COV_HUD][1] == 1, "accepted without offered is nothing");
+  sv_cov_reject(&acc_t, 1u << SV_REJ_UNVERIFIED_STATE);
+  CHECK(acc_t.frames == 1 && acc_t.last_reason == SV_REJ_UNVERIFIED_STATE && acc_t.reason_frames[SV_REJ_UNVERIFIED_STATE] == 1, "a refused frame records a reason only");
+  (void)sv_cov_frame_ex(&acc_t, R(16, 9), "s", SV_COV_BIT(SV_COV_HUD), SV_COV_BIT(SV_COV_HUD), 0u, 0u);
+  CHECK(acc_t.last_reason == SV_REJ_NONE && acc_t.count[0][SV_COV_HUD][0] == 1, "a clean frame clears the last reason");
+  CHECK(strcmp(sv_reject_reason_name(SV_REJ_OVER_DECLARED), "over_declared_geometry") == 0 && strcmp(sv_reject_reason_name(SV_REJ_COUNT), "none") == 0, "stable reason names");
+  /* the longest legal declaration with saturated counters still fits the viewer's 36,864-byte report buffer */
+  {
+    static char big[2100], rep[40960];
+    int k, c, n;
+    SvCovAccount full;
+    strcpy(big, "max=32:9");
+    for (k = 0; k < SV_COV_MAX_SCENES; ++k) { char one[64]; snprintf(one, sizeof one, ";scene=s%030d:actors+hud+scenery", k); strcat(big, one); }
+    CHECK(sv_geomdecl_parse(big, &d) == 0, "the longest legal declaration parses");
+    sv_cov_init(&full, &d);
+    for (k = 0; k <= SV_COV_MAX_SCENES; ++k) for (c = 0; c < SV_COV_COMPONENTS; ++c) for (n = 0; n < SV_COV_COUNTERS; ++n) full.count[k][c][n] = UINT64_MAX;
+    for (k = 1; k < SV_REJ_COUNT; ++k) full.reason_frames[k] = UINT64_MAX;
+    full.frames = full.outside_frames = UINT64_MAX; full.last = R(32, 9);
+    need = sv_cov_report_json(&full, rep, sizeof rep);
+    CHECK(need < 36864u && strlen(rep) == need, "the worst-case report fits the viewer buffer");
+  }
   printf(failures == 0 ? "sv_coverage_test: all checks passed\n" : "sv_coverage_test: %d FAILED\n", failures);
   return failures == 0 ? 0 : 1;
 }

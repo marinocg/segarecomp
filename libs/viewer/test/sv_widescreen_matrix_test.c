@@ -164,7 +164,7 @@ int main(void) {
            r->name, r->side, r->surface_w, r->surface_bytes, (unsigned long long)got, verdict, fallback ? "true" : "false", med[i]);
   }
   (void)sv_host_coverage_json(h, json, sizeof json);
-  CHECK(strstr(json, "\"outside_range_frames\":15") != NULL && strstr(json, "\"scenery\":{\"declared\":true,\"covered\":30,\"missing\":0,\"undeclared\":0,\"outside_range\":15}") != NULL,
+  CHECK(strstr(json, "\"outside_range_frames\":15") != NULL && strstr(json, "\"scenery\":{\"declared\":true,\"covered\":30,\"missing\":0,\"undeclared\":0,\"outside_range\":15,") != NULL,
         "the coverage report counts 30 covered scenery frames (16:9, 21:9) and 15 outside frames (32:9); the native 4:3 frames deliver no extension");
   printf("WIDESCREEN_MATRIX_DELTA {\"16:9_ms\":%.3f,\"21:9_ms\":%.3f,\"32:9_ms\":%.3f}\n", med[1], med[2], med[3]);
   sv_host_close(h);
