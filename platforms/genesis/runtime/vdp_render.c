@@ -1362,6 +1362,8 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   uint8_t compat_reason = 0U;
   uint32_t compat_faults = 0U;
   uint16_t compat_overlay_w = 0U, compat_overlay_h = 0U, compat_overlay_fx = 0U, compat_overlay_fy = 0U;
+  uint32_t compat_layer_count = 0U;
+  GenesisCompatLayer compat_layers[GENESIS_COMPAT_LAYERS_MAX] = {{0}};
   GenesisVdpCandidatePixel sprite_row[GENESIS_EXT_MAX_WIDTH]; /* Level 3: the row's sprite layer over columns -side .. width + side - 1 */
   if (out == NULL) return -1;
   if (vram == NULL || raster == NULL || native == NULL || target == NULL || target->pixels == NULL) {
@@ -1518,18 +1520,36 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
     }
   }
   if (sprites) flags |= GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT;
-  /* SEG-124: the provider's HUD overlay (a separate layer the host draws after side treatment; it never enters the extension surface). */
+  /* SEG-124: the provider's HUD overlay (a separate layer the host draws after side treatment; it never enters the extension surface). SEG-140-T004: plus its positioned layers. */
   {
     GenesisCompatOverlay overlay;
     memset(&overlay, 0, sizeof(overlay));
     if ((compat_accepted & GENESIS_COMPAT_HUD) != 0U && target->overlay_rgba != NULL) {
+      int drew;
       overlay.rgba = target->overlay_rgba;
       overlay.capacity = GENESIS_COMPAT_OVERLAY_BYTES;
       memset(overlay.rgba, 0, GENESIS_COMPAT_OVERLAY_BYTES);
-      if (target->compat->hud == NULL || target->compat->hud(target->compat_state, &overlay) == 0 || overlay.width == 0U || overlay.height == 0U ||
-          overlay.width > GENESIS_COMPAT_OVERLAY_MAX_W || overlay.height > GENESIS_COMPAT_OVERLAY_MAX_H) {
+      if (target->layer_rgba != NULL) {
+        overlay.layer_rgba = target->layer_rgba;
+        overlay.layer_capacity = GENESIS_COMPAT_LAYER_BYTES;
+        memset(overlay.layer_rgba, 0, GENESIS_COMPAT_LAYER_BYTES);
+      }
+      drew = target->compat->hud != NULL && target->compat->hud(target->compat_state, &overlay) != 0;
+      if (!drew || overlay.width == 0U || overlay.height == 0U || overlay.width > GENESIS_COMPAT_OVERLAY_MAX_W || overlay.height > GENESIS_COMPAT_OVERLAY_MAX_H) {
         overlay.width = 0U;
         overlay.height = 0U;
+      }
+      /* The layer transport is checked here (count, and that every image lies inside the host's buffer); whether a layer fits the live geometry is the host's decision, with a diagnostic. */
+      if (drew && target->layer_rgba != NULL && overlay.layer_count <= GENESIS_COMPAT_LAYERS_MAX) {
+        unsigned ok = 1U;
+        for (uint32_t i = 0U; i < overlay.layer_count; ++i) {
+          const GenesisCompatLayer *l = &overlay.layers[i];
+          if ((uint64_t)l->offset + (uint64_t)l->width * (uint64_t)l->height * 4U > GENESIS_COMPAT_LAYER_BYTES || l->width == 0U || l->height == 0U) ok = 0U;
+        }
+        if (ok) {
+          compat_layer_count = overlay.layer_count;
+          memcpy(compat_layers, overlay.layers, sizeof compat_layers);
+        }
       }
     }
     compat_overlay_w = overlay.width;
@@ -1552,6 +1572,8 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   out->overlay_h = compat_overlay_h;
   out->overlay_fx = compat_overlay_fx;
   out->overlay_fy = compat_overlay_fy;
+  out->layer_count = (uint8_t)compat_layer_count;
+  memcpy(out->layers, compat_layers, sizeof out->layers);
   out->native_w = (uint16_t)width;
   out->native_h = (uint16_t)height;
   out->side = (uint16_t)side;

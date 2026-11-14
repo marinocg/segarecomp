@@ -79,6 +79,8 @@ typedef struct GenesisExtensionResult {
   uint8_t reserved2;
   uint16_t overlay_w, overlay_h; /* HUD overlay in the adapter's overlay buffer (0 = none) */
   uint16_t overlay_fx, overlay_fy; /* where the host draws it inside the native picture when the visible side cannot hold it */
+  uint8_t layer_count;             /* SEG-140-T004: positioned/layered overlays the provider supplied for THIS frame (images are in the adapter's `layer_rgba`; 0 = none) */
+  GenesisCompatLayer layers[GENESIS_COMPAT_LAYERS_MAX];
   char scene[GENESIS_COMPAT_SCENE_MAX + 1]; /* SEG-139-T004: the scene name the provider reported for this frame ("" = none); only valid tokens are ever copied here */
 } GenesisExtensionResult;
 
@@ -109,6 +111,7 @@ typedef struct GenesisFrameExtension {
   uint64_t compat_ram_stamp;
   uint8_t compat_ram_valid;
   uint8_t *overlay_rgba;
+  uint8_t *layer_rgba;              /* SEG-140-T004: GENESIS_COMPAT_LAYER_BYTES, adapter-owned: receives the provider's layer images (NULL = layers are not delivered) */
   /* Runtime-written. */
   GenesisExtensionResult result;    /* the latest publication's result */
   uint64_t produced;                /* AVAILABLE/PARTIAL results */

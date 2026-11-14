@@ -104,11 +104,33 @@ typedef struct GenesisCompatDecision {
   char scene[GENESIS_COMPAT_SCENE_MAX + 1];
 } GenesisCompatDecision;
 
+/* SEG-140-T004 (ADR 0303): positioned, layered overlays, additive to ABI 1 (the host zero-initialises GenesisCompatOverlay, so a provider that predates these fields leaves them empty and is presented
+ * exactly as before). Up to GENESIS_COMPAT_LAYERS_MAX images, each anchored to a named point of a reference rectangle of the presentation geometry, ordered by `z`. `anchor` is 0..8 =
+ * top_left, top_center, top_right, middle_left, center, middle_right, bottom_left, bottom_center, bottom_right; `reference` is 0 = the native picture, 1 = the whole visible surface (picture plus
+ * the visible widescreen side); `dx`/`dy` are added to the anchored position. The host validates every layer against the live geometry (wholly inside its reference, size, budget of
+ * GENESIS_COMPAT_LAYER_PIXELS submitted pixels in total) and reports a rejection; it never moves, clips or resizes a layer to make it fit. Not drawing anything is not an error. */
+#define GENESIS_COMPAT_LAYERS_MAX 4U
+#define GENESIS_COMPAT_LAYER_PIXELS 65536U
+#define GENESIS_COMPAT_LAYER_BYTES (GENESIS_COMPAT_LAYER_PIXELS * 4U)
+typedef struct GenesisCompatLayer {
+  uint16_t width, height;               /* 1..256 each */
+  uint8_t anchor, reference, z;         /* see above; z 0..3 */
+  uint8_t has_clip;                     /* 1 = only the clip rectangle of the image is drawn */
+  int16_t dx, dy;
+  uint16_t clip_x, clip_y, clip_w, clip_h;
+  uint32_t offset;                      /* byte offset of this image's RGBA8 pixels (width * height * 4, tightly packed) inside the host's layer buffer */
+} GenesisCompatLayer;
+
 typedef struct GenesisCompatOverlay {
   uint8_t *rgba;                        /* host-owned, GENESIS_COMPAT_OVERLAY_BYTES; rows are picture rows 1:1, left edge anchored by the host */
   size_t capacity;
   uint16_t width, height;               /* written by the provider; 0 = nothing to draw */
   uint16_t fallback_x, fallback_y;      /* picture pixels where the overlay's top-left sits when the host draws it inside the picture (no visible side) */
+  /* SEG-140-T004: appended fields; every one of them is zero for a provider that does not use layers. */
+  uint8_t *layer_rgba;                  /* host-owned, GENESIS_COMPAT_LAYER_BYTES (NULL = this host build carries no layers) */
+  size_t layer_capacity;
+  uint32_t layer_count;                 /* written by the provider: 0..GENESIS_COMPAT_LAYERS_MAX */
+  GenesisCompatLayer layers[GENESIS_COMPAT_LAYERS_MAX];
 } GenesisCompatOverlay;
 
 typedef struct GenesisNativeCompat {

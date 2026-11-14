@@ -61,7 +61,7 @@ Classification vocabulary used throughout:
 | Scenery lookup, HUD overlay from a native provider | exists | ABI 1 `scenery_word`, `hud` | `tests/genesis_native_compat_viewer_sdl_test.c` | one fixed overlay at most 128 x 256; no authored sprites |
 | Master System extension | exists, partial | `tests/sms_extension_test.cpp`, `tests/sms_viewer_extension_sdl_test.c` | the tests | Mode 4 name table is 32 columns and wraps, so extension repeats scenery (`docs/product/widescreen-and-patches.md`) |
 | Sega CD extension | exists, partial | `tests/sega_cd_viewer_extension_sdl_test.c` | the test | always Partial: no VRAM write journal on the Sega CD presentation path |
-| Authored sprites, layered overlays, wider than 16:9 | missing | - | scheduled in SEG-139/140 |
+| Authored sprites, layered overlays, wider than 16:9 | partly exists | wider than 16:9: ADR 0301/0302. Layered overlays: `sv_overlay_plan`/`sv_overlay_compose` and `sega.overlay.layer` (ADR 0303). Virtual sprites: `platforms/genesis/runtime/virtual_sprite.{h,c}` (a tested module; not yet attached to the viewer or to mods) | `libs/viewer/test/sv_overlay_layers_test.c`, `tests/genesis_vsprite_*_test.cpp` | SEG-140-T005..T007 (scene rejection, real-game study) |
 
 ### 1.5 Save states, rewind, replay, capture, profiling, tooling, CI
 
@@ -118,7 +118,7 @@ Class per cell; the cited evidence is in the section named in the last column.
 | M05 | function hooks | missing | generated C emitter (`libs/codegen/c11`), spike first |
 | M05 | mod state in save states/rewind | extend narrowly | container section list (Genesis contract section 4.1/10) |
 | M06 SEG-139 | geometry through 32:9 (planner, declarations ADR 0302, matrix) | extend narrowly | `libs/viewer/include/sv_layout.h`, `platforms/genesis/runtime/frame_extension.h` |
-| M07 SEG-140 | authored sprites, pattern decoding, layered overlays | extend narrowly | existing VDP decoding is reused; one fixed overlay today |
+| M07 SEG-140 | authored sprites, pattern decoding, layered overlays | extend narrowly | existing VDP decoding is reused (ADR 0303); the fixed overlay stays and layers sit above it |
 | M08 SEG-141 | mod sets, composite identity | missing | single package per variant today |
 | M09 SEG-142 | Developer Workshop | missing | launcher exists; no developer-mode panels |
 | M10 SEG-143 | catalog, provenance, update/rollback | missing | launcher library exists (`patch_library.*`) |

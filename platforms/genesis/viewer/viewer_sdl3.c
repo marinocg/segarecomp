@@ -41,6 +41,8 @@ typedef char genesis_ext_side_bound_matches_layout[(GENESIS_EXT_MAX_SIDE == (uns
 static uint8_t g_extension_surface[GENESIS_EXT_SURFACE_BYTES];
 static uint8_t g_compat_ram[GENESIS_COMPAT_RAM_BYTES];          /* SEG-124: work-RAM snapshot for the verified provider (written by the runtime at each publication) */
 static uint8_t g_compat_overlay[GENESIS_COMPAT_OVERLAY_BYTES];  /* SEG-124: the provider's HUD overlay for the frame being presented */
+static uint8_t g_compat_layers[GENESIS_COMPAT_LAYER_BYTES];     /* SEG-140-T004: the provider's positioned overlay images for the frame being presented */
+static SvOverlayLayer g_layer_desc[GENESIS_COMPAT_LAYERS_MAX];
 
 /* The saved mode as the typed producer request (0 none, 1 Level 2, 2 Level 3); sampled once per host slice. */
 static uint8_t request_of_compat(SvWidescreenMode mode, unsigned compat_hud) {
@@ -201,6 +203,18 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
             surface.overlay_fy = (int)r->overlay_fy;
             v->compat_stats.hud_frames += 1U;
           }
+          if (r->layer_count > 0U && r->layer_count <= GENESIS_COMPAT_LAYERS_MAX) {   /* SEG-140-T004: the host validates each layer against the live geometry; this only maps the transport */
+            for (unsigned i = 0U; i < r->layer_count; ++i) {
+              const GenesisCompatLayer *l = &r->layers[i];
+              SvOverlayLayer *d = &g_layer_desc[i];
+              memset(d, 0, sizeof *d);
+              d->rgba = g_compat_layers + l->offset;   /* the runtime already checked offset + size against the buffer */
+              d->w = (int)l->width; d->h = (int)l->height; d->anchor = (int)l->anchor; d->reference = (int)l->reference; d->z = (int)l->z; d->dx = (int)l->dx; d->dy = (int)l->dy;
+              d->has_clip = l->has_clip != 0U; d->clip_x = (int)l->clip_x; d->clip_y = (int)l->clip_y; d->clip_w = (int)l->clip_w; d->clip_h = (int)l->clip_h;
+            }
+            surface.layers = g_layer_desc;
+            surface.layer_count = (int)r->layer_count;
+          }
         } else if (r->compat_reason < 8U) {
           v->compat_stats.declined[r->compat_reason] += 1U;
         }
@@ -265,6 +279,7 @@ int genesis_sdl3_viewer_attach_native_compat(GenesisSdl3Viewer *v, GenesisFrameE
   ext->compat_ram = g_compat_ram;
   ext->compat_ram_stamp = 0U;
   ext->overlay_rgba = g_compat_overlay;
+  ext->layer_rgba = g_compat_layers;
   return 0;
 }
 

@@ -96,7 +96,11 @@ struct Mock {
   const GenesisCompatHost *seen_host = nullptr;
   unsigned ovl_w = 12, ovl_h = 9;
   bool bad_overlay = false;
+  unsigned layers_n = 0;           // SEG-140-T004: positioned layers the mock supplies
+  bool bad_layer_offset = false;
+  bool no_fixed = false;           // a layers-only provider
 } g_mock;
+std::vector<uint8_t> g_layer_buf(GENESIS_COMPAT_LAYER_BYTES);
 
 void mock_prepare(void *state, const GenesisCompatFrame *f, GenesisCompatDecision *out) {
   Mock *m = static_cast<Mock *>(state);
@@ -125,9 +129,21 @@ int mock_word(void *state, unsigned plane, unsigned row, int x, int hscroll, int
 int mock_hud(void *state, GenesisCompatOverlay *o) {
   Mock *m = static_cast<Mock *>(state);
   ++m->huds;
-  o->width = (uint16_t)(m->bad_overlay ? GENESIS_COMPAT_OVERLAY_MAX_W + 1 : m->ovl_w);
-  o->height = (uint16_t)m->ovl_h;
-  if (!m->bad_overlay) for (unsigned i = 0; i < m->ovl_w * m->ovl_h; ++i) { o->rgba[i * 4] = 200; o->rgba[i * 4 + 3] = 255; }
+  if (!m->no_fixed) {
+    o->width = (uint16_t)(m->bad_overlay ? GENESIS_COMPAT_OVERLAY_MAX_W + 1 : m->ovl_w);
+    o->height = (uint16_t)m->ovl_h;
+    if (!m->bad_overlay) for (unsigned i = 0; i < m->ovl_w * m->ovl_h; ++i) { o->rgba[i * 4] = 200; o->rgba[i * 4 + 3] = 255; }
+  }
+  if (m->layers_n != 0 && o->layer_rgba != nullptr) {   // each layer is 4 x 4 pixels filled with (50 + index)
+    for (unsigned i = 0; i < m->layers_n; ++i) {
+      GenesisCompatLayer &l = o->layers[i];
+      l = GenesisCompatLayer{};
+      l.width = 4; l.height = 4; l.anchor = (uint8_t)(i % 9); l.reference = (uint8_t)(i % 2); l.z = (uint8_t)i; l.dx = (int16_t)(i + 1); l.dy = (int16_t)-(int)i;
+      l.offset = m->bad_layer_offset ? GENESIS_COMPAT_LAYER_BYTES - 8U : i * 64U;
+      for (unsigned p = 0; p < 16; ++p) if (!m->bad_layer_offset) { o->layer_rgba[l.offset + p * 4] = (uint8_t)(50 + i); o->layer_rgba[l.offset + p * 4 + 3] = 255; }
+    }
+    o->layer_count = m->layers_n;
+  }
   return 1;
 }
 GenesisNativeCompat g_provider = {GENESIS_NATIVE_COMPAT_ABI, "synthetic.mock", 1, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD, mock_prepare, mock_word, mock_hud};
@@ -154,6 +170,7 @@ void attach(GenesisFrameExtension &ext, bool valid = true) {
   ext.compat_ram = g_ram.data();
   ext.compat_ram_valid = valid ? 1 : 0;
   ext.overlay_rgba = g_overlay.data();
+  ext.layer_rgba = nullptr;   // layers are opt-in per adapter (SEG-140-T004)
 }
 
 void generic_hook() {
@@ -250,6 +267,27 @@ void generic_hook() {
     GenesisFrameExtension ext{}; attach(ext); g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.bad_overlay = true;
     const Out o = produce(sc, ext);
     check(o.rc == 0 && o.res.overlay_w == 0 && o.res.overlay_h == 0 && o.res.authored == 1, "an oversize overlay is dropped, the frame stays valid");
+  }
+  // SEG-140-T004 (ADR 0303): positioned layers are transported; a provider that supplies none, an adapter that has no layer buffer, and a bad descriptor all leave the frame otherwise intact
+  {
+    GenesisFrameExtension ext{}; attach(ext); ext.layer_rgba = g_layer_buf.data(); g_mock = Mock{}; g_mock.vram = sc.vram.data(); g_mock.layers_n = 3;
+    const Out o = produce(sc, ext);
+    check(o.rc == 0 && o.res.layer_count == 3 && o.res.overlay_w == 12 && o.res.authored == 1, "three layers are reported next to the fixed HUD");
+    check(o.res.layers[2].anchor == 2 && o.res.layers[2].reference == 0 && o.res.layers[2].z == 2 && o.res.layers[2].dx == 3 && o.res.layers[2].dy == -2 && o.res.layers[2].offset == 128 && o.res.layers[2].width == 4,
+          "the descriptors cross unchanged");
+    check(g_layer_buf[2 * 64] == 52 && g_layer_buf[2 * 64 + 3] == 255 && g_layer_buf[64] == 51, "the layer pixels are in the adapter's buffer at their offsets");
+    g_mock.no_fixed = true;   // a layers-only provider: nothing for the fixed overlay, layers still delivered
+    const Out lo = produce(sc, ext);
+    check(lo.rc == 0 && lo.res.overlay_w == 0 && lo.res.layer_count == 3, "a layers-only provider delivers its layers without a fixed overlay");
+    g_mock.no_fixed = false; g_mock.bad_layer_offset = true;
+    const Out bo = produce(sc, ext);
+    check(bo.rc == 0 && bo.res.layer_count == 0 && bo.res.overlay_w == 12 && bo.res.authored == 1, "a layer whose pixels would leave the host's buffer drops every layer; the HUD and the frame are unaffected");
+    ext.layer_rgba = nullptr; g_mock.bad_layer_offset = false;
+    const Out nb = produce(sc, ext);
+    check(nb.rc == 0 && nb.res.layer_count == 0 && nb.res.overlay_w == 12, "an adapter without a layer buffer receives no layers (the provider is not even offered a buffer)");
+    g_mock = Mock{}; g_mock.vram = sc.vram.data(); ext.layer_rgba = g_layer_buf.data();
+    const Out pl = produce(sc, ext);
+    check(pl.rc == 0 && pl.res.layer_count == 0 && pl.res.overlay_w == 12, "a provider that supplies no layers is presented as before");
   }
   // not requested: no provider call at all
   {

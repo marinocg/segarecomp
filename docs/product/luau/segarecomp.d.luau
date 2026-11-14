@@ -23,8 +23,12 @@ declare sega: {
   overlay: {
     -- overlay.rgba (render): Height of the HUD overlay in pixels (256).
     height: number,
+    -- overlay.rgba (render): Declares positioned overlay layer 1-4 (at most 128 x 128): anchor is top_left, top_center, top_right, middle_left, center, middle_right, bottom_left, bottom_center or bottom_right; reference is picture or presentation (the picture plus the visible widescreen side); dx, dy are added to the anchored position; z 0-3 orders the layers. The host rejects a layer that does not lie wholly inside its reference or exceeds the overlay budget, with a diagnostic; it never moves or clips it.
+    layer: (index: number, anchor: string, reference: string, dx: number, dy: number, w: number, h: number, z: number) -> (),
     -- overlay.rgba (render): Requests a filled rectangle; integers only, clamped to the overlay, rgba is 0xRRGGBBAA, at most 64 requests per callback.
     rect: (x: number, y: number, w: number, h: number, rgba: number) -> (),
+    -- overlay.rgba (render): Selects the layer the following sega.overlay.rect and sega.overlay.text draw into: 0 is the fixed HUD overlay (the default at the start of every callback), 1-4 a layer declared earlier in the same callback.
+    target: (index: number) -> (),
     -- overlay.rgba (render): Requests text in the host's bitmap font (printable ASCII, at most 64 bytes); the origin is clamped to the overlay.
     text: (x: number, y: number, text: string, rgba: number) -> (),
     -- overlay.rgba (render): Width of the HUD overlay in pixels (128).
