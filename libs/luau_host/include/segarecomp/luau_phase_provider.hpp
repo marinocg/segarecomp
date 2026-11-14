@@ -36,6 +36,9 @@ class PhaseProvider {
   void capabilities(std::uint64_t out[2]) const;
   // The overlay requests of the last successful `render` callback (cleared when a render faults or is not defined).
   [[nodiscard]] const std::vector<OverlayOp> &overlay() const;
+  // The declared positioned layers and the scene claim of the same render callback (empty when none).
+  [[nodiscard]] const std::vector<OverlayLayerDecl> &layers() const;
+  [[nodiscard]] const std::string &scene() const;
   // True once a watchdog fault happened: the run is host-timing dependent and not replay-verifiable (phases section 7).
   [[nodiscard]] bool nondeterministic() const;
   [[nodiscard]] Fault fault() const;

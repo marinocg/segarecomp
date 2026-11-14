@@ -141,7 +141,7 @@ struct Options {
   bool frame_seam = false;   // `--test-frame-seam`: compiles the final-frame automation seam into the viewer program (tests only; never set by the launcher)
   // resolved by the verification step
   bool luau = false;
-  bool luau_scheduled = false;       // SEG-138-T009: no viewer -> the headless scheduled-mod path (phases, memory ranges); with SDL3 the HUD-only ABI 1 seam
+  bool luau_scheduled = false;       // SEG-138-T009/T010: the scheduled-mod path (phases, memory ranges): always headless; in a viewer build when the package needs more than the HUD-only ABI 1 seam
   std::string luau_ranges_c;         // the declared ranges of the exact source revision, as C constants
   std::string luau_original_sha256, luau_effective_sha256, luau_bytecode_digest, luau_mod_id, luau_capabilities;
   std::string geometry_declaration;  // SEG-139-T004 (ADR 0302): the verified package's geometry claim as the compact text the viewer host reads; "" = none declared
@@ -1191,7 +1191,16 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     // SEG-058 (ADR 0120): the shared SDL3 viewer foundation (settings, layout/CRT math, menu model, host, pause pages), strict C11 like the rest.
     for (const char *name : kViewerFoundationSources)
       add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name);
-    if (options.luau) {
+    if (options.luau && options.luau_scheduled) {
+      // SEG-138-T010 (ADR 0305): the played program runs the ONE mod scheduler (the headless program's adapter, compiled for the viewer) and presents its render output through the existing provider seam.
+      const std::vector<std::string> flags = add_luau_runtime();
+      add(final_only, build.root / "libs" / "luau_host" / "src" / "luau_phase_provider.cpp", "luau-phase-provider", flags, true);
+      add(final_only, build.root / "libs" / "media" / "src" / "mod_adapter.cpp", "luau-mod-adapter", flags, true);
+      add(final_only, build.viewer / "mod_capture.cpp", "mod-viewer", [&] { auto f = flags; f.insert(f.end(), {"-DSEGARECOMP_MOD_VIEWER=1", "-I", build.runtime.string(), "-I", build.viewer.string(), "-I", (options.runtime_dir / "sdk").string()}); return f; }(), true);
+      add(final_only, build.runtime / "mod_scheduler.c", "mod-scheduler", {"-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()});
+      add(final_only, options.luau_artifact_source, "luau-artifact");
+      add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", seam_flags({"-DSEGARECOMP_GENESIS_SOUND", "-DSEGARECOMP_NATIVE_PROVIDER_CAPS=8U", "-DSEGARECOMP_MOD_VIEWER=1", "-I", (options.runtime_dir / "sdk").string(), "-I", (build.root / "platforms" / "sdk").string()}));
+    } else if (options.luau) {
       // The viewer's existing provider seam (ADR 0267) calls the provider; only the HUD overlay component is requested.
       const std::vector<std::string> flags = add_luau_runtime();
       add(final_only, build.viewer / "luau_provider.cpp", "luau-provider", flags, true);
@@ -1607,7 +1616,9 @@ int run_build(Options options) {
       const auto package = segarecomp::mod::read_package_file(options.luau_package);
       if (!package.ok) return fail(options, log, original_sha, "analyze", 1, "The Luau package is not valid: " + package.rejection.message, "LUAU_PACKAGE_INVALID");
       if (package.identity != options.luau_identity) return fail(options, log, original_sha, "analyze", 1, "The Luau package changed after it was selected.", "LUAU_IDENTITY_CHANGED");
-      options.luau_scheduled = !options.sdl3_include.has_value();   // ADR 0300: the headless build runs the scheduler's phases; a viewer build keeps the HUD-only seam
+      // ADR 0300/0305: the headless build runs the scheduler's phases; a viewer build keeps the HUD-only ABI 1 seam for a package that stays inside it and runs the SAME scheduler (one scheduler, no second Luau runner)
+      // for a package that needs more (phases, bounded work-RAM, input, mod state).
+      options.luau_scheduled = !options.sdl3_include.has_value() || segarecomp::luau::live_support(package).has_value();
       if (const auto refusal = options.luau_scheduled ? segarecomp::luau::scheduled_support(package) : segarecomp::luau::live_support(package)) return fail(options, log, original_sha, "analyze", 1, refusal->message, refusal->code);
       const auto effective = segarecomp::mod::effective_image(package, original);
       if (!effective.ok) return fail(options, log, original_sha, "analyze", 1, "The image is not the one the Luau package declares: " + effective.rejection.message, "LUAU_IMAGE_MISMATCH");

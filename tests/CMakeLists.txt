@@ -1479,6 +1479,12 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST mod_luau_executable_test APPEND PROPERTY LABELS full fast)
   set_property(TEST mod_luau_executable_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_luau_executable_test PROPERTY TIMEOUT 1200)
+  # SEG-138-T010 (ADR 0305, delivery F28): the scheduled Luau gameplay mod in the played SDL3 program (guest RAM effect, HUD, save/restore/rewind, fail-closed refusals).
+  add_test(NAME mod_viewer_gameplay_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_viewer_gameplay_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_viewer_gameplay_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST mod_viewer_gameplay_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_viewer_gameplay_test PROPERTY TIMEOUT 1200)
   add_test(NAME genesis_viewer_extension_sdl_test COMMAND genesis_viewer_extension_sdl_test)
   set_property(TEST genesis_viewer_extension_sdl_test APPEND PROPERTY LABELS full fast)
   set_property(TEST genesis_viewer_extension_sdl_test PROPERTY TIMEOUT 240)

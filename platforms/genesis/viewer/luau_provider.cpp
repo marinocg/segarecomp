@@ -8,6 +8,7 @@
 // one `LUAU_MOD_FAULT` line names the cause. A VM that cannot be created or an artifact that does not verify declines every frame the same way. Nothing here ever stops the guest.
 #include "segarecomp/luau_api.hpp"
 
+#include "luau_hud_pack.hpp"
 #include "segarecomp_genesis_patch.h"
 
 #include <algorithm>
@@ -38,7 +39,7 @@ struct State {
   std::uint64_t frame = 0;
   luau::OverlayImage image;
   bool fixed = false;   // some request drew into the fixed HUD overlay (layer 0)
-  std::vector<std::pair<luau::OverlayLayerDecl, luau::OverlayImage>> layers;   // SEG-140-T004: positioned layers of the frame (declaration order)
+  luau::RasterizedLayers layers;   // SEG-140-T004: positioned layers of the frame (declaration order)
   bool have_image = false;
 };
 
@@ -141,36 +142,7 @@ int scenery_word(void *, unsigned, unsigned, int, int, int, uint16_t *) { return
 
 int hud(void *state, GenesisCompatOverlay *out) {
   State &s = *static_cast<State *>(state);
-  if (!s.have_image || out->capacity < s.image.rgba.size()) return 0;
-  const bool fixed = s.fixed;   // only a request that drew into the fixed overlay makes the legacy path show anything
-  if (fixed) {
-    std::memcpy(out->rgba, s.image.rgba.data(), s.image.rgba.size());
-    out->width = static_cast<std::uint16_t>(s.image.width);
-    out->height = static_cast<std::uint16_t>(s.image.height);
-  }
-  out->fallback_x = 0;
-  out->fallback_y = 0;
-  if (out->layer_rgba != nullptr) {   // SEG-140-T004: the declared layers, packed one after another into the host's buffer
-    std::size_t offset = 0;
-    out->layer_count = 0;
-    for (const auto &entry : s.layers) {
-      const std::size_t bytes = entry.second.rgba.size();
-      if (out->layer_count >= GENESIS_COMPAT_LAYERS_MAX || offset + bytes > out->layer_capacity) break;
-      std::memcpy(out->layer_rgba + offset, entry.second.rgba.data(), bytes);
-      GenesisCompatLayer &l = out->layers[out->layer_count++];
-      std::memset(&l, 0, sizeof l);
-      l.width = static_cast<std::uint16_t>(entry.first.w);
-      l.height = static_cast<std::uint16_t>(entry.first.h);
-      l.anchor = static_cast<std::uint8_t>(entry.first.anchor);
-      l.reference = static_cast<std::uint8_t>(entry.first.reference);
-      l.z = static_cast<std::uint8_t>(entry.first.z);
-      l.dx = static_cast<std::int16_t>(entry.first.dx);
-      l.dy = static_cast<std::int16_t>(entry.first.dy);
-      l.offset = static_cast<std::uint32_t>(offset);
-      offset += bytes;
-    }
-  }
-  return fixed || out->layer_count > 0 ? 1 : 0;
+  return luau::pack_hud(s.have_image, s.fixed, s.image, s.layers, out);
 }
 
 const GenesisNativeCompat kTable = {GENESIS_NATIVE_COMPAT_ABI, "luau-hud-host", 1, GENESIS_COMPAT_HUD, prepare, scenery_word, hud};

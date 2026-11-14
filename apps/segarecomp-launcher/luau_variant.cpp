@@ -15,7 +15,9 @@ std::string select_luau_mod(RomView &rom, const std::filesystem::path &package) 
   if (rom.patched()) return "A Luau mod cannot be combined with a selected patch: select one version.";
   const segarecomp::mod::Package p = segarecomp::mod::read_package_file(package);
   if (!p.ok) return "The mod package is not valid: " + p.rejection.message + ".";
-  if (const auto refusal = segarecomp::luau::live_support(p)) return refusal->message + ".";
+  // ADR 0305: the played program runs a package that stays inside the HUD-only seam through it and anything else the scheduled path supports through the one mod scheduler; the build re-checks both.
+  if (segarecomp::luau::live_support(p))
+    if (const auto refusal = segarecomp::luau::scheduled_support(p)) return refusal->message + ".";
   std::ifstream in(rom.path, std::ios::binary);
   const std::vector<std::uint8_t> original((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
   if (original.empty()) return "The original game file cannot be read.";

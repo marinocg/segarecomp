@@ -10,6 +10,10 @@
 #include "segarecomp/luau_phase_provider.hpp"
 #include "segarecomp/sha256.hpp"
 
+#ifdef SEGARECOMP_MOD_VIEWER
+#include "luau_hud_pack.hpp"   // SEG-138-T010: the viewer presents the scheduled mod's render output through the existing compatibility seam
+#endif
+
 extern "C" {
 #include "frame_capture.h"
 #include "genesis_snapshot.h"
@@ -142,6 +146,7 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
   }
   g.attached = true;
   genesis_mod_snapshot_state(g.scheduler.get(), &g.snapshot);
+#ifndef SEGARECOMP_MOD_VIEWER   // the played program has the viewer's own save-state / rewind service; these seams are the headless capture's
   if (const char *text = std::getenv("SEGARECOMP_MOD_CHECKPOINT"); text != nullptr && *text != '\0') {
     char *end = nullptr;
     g.checkpoint_frame = std::strtoull(text, &end, 10);
@@ -165,10 +170,54 @@ int segarecomp_capture_mod_begin(GenesisRuntime *runtime) {
     g.loaded = true;
     g.loaded_digest = hex(bytes.data() + bytes.size() - 32U, 32U);
   }
+#endif
   std::fprintf(stderr, "MOD_LOADED {\"mod\":\"%s\",\"package_identity\":\"%s\",\"bytecode_digest\":\"%s\",\"capabilities\":\"%s\",\"ranges\":%lu}\n", segarecomp_luau_mod_id, segarecomp_luau_identity,
                segarecomp_luau_bytecode_digest, segarecomp_luau_capabilities, segarecomp_mod_range_count);
   return 0;
 }
+
+#ifdef SEGARECOMP_MOD_VIEWER
+// SEG-138-T010: the snapshot seam of the attached scheduler (the viewer's state service points GenesisSnapshotMachine::mod at it) and the compatibility table that presents the mod's render output.
+const GenesisSnapshotModState *segarecomp_scheduled_mod_snapshot(void) { return g.attached ? &g.snapshot : nullptr; }
+
+namespace {
+struct Presented {
+  luau::OverlayImage image;
+  luau::RasterizedLayers layers;
+  bool fixed = false, have = false;
+} p;
+
+void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out) {
+  out->accepted = 0;
+  out->reason = GENESIS_COMPAT_OK;
+  p.have = false;
+  if ((frame->requested & GENESIS_COMPAT_HUD) == 0) return;
+  if (!g.attached || g.scheduler->fault.faulted != 0U || g.scheduler->disabled != 0U) {   // a faulted mod presents nothing; the guest and the picture go on
+    out->reason = GENESIS_COMPAT_FAULT;
+    return;
+  }
+  const std::vector<luau::OverlayOp> &ops = g.provider->overlay();
+  if (ops.empty()) return;
+  p.image = luau::rasterize_overlay(ops);
+  p.fixed = false;
+  for (const luau::OverlayOp &op : ops) p.fixed = p.fixed || op.layer == 0;
+  p.layers.clear();
+  for (const luau::OverlayLayerDecl &d : g.provider->layers()) p.layers.emplace_back(d, luau::rasterize_layer(d, ops));
+  p.have = true;
+  out->accepted = GENESIS_COMPAT_HUD;
+  const std::string &scene = g.provider->scene();
+  if (!scene.empty() && scene.size() <= GENESIS_COMPAT_SCENE_MAX) std::memcpy(out->scene, scene.c_str(), scene.size() + 1U);
+}
+int scenery_word(void *, unsigned, unsigned, int, int, int, uint16_t *) { return 0; }
+int hud(void *, GenesisCompatOverlay *out) { return luau::pack_hud(p.have, p.fixed, p.image, p.layers, out); }
+const GenesisNativeCompat kTable = {GENESIS_NATIVE_COMPAT_ABI, "luau-scheduled-host", 1, GENESIS_COMPAT_HUD, prepare, scenery_word, hud};
+}  // namespace
+
+const GenesisNativeCompat *segarecomp_patch_provider(void **state_out) {
+  *state_out = nullptr;
+  return &kTable;
+}
+#endif
 
 // Between runner slices: the optional save/restore round trip.
 void segarecomp_capture_mod_checkpoint(GenesisRuntime *runtime) {
