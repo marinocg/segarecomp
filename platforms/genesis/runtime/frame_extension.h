@@ -79,6 +79,7 @@ typedef struct GenesisExtensionResult {
   uint8_t reserved2;
   uint16_t overlay_w, overlay_h; /* HUD overlay in the adapter's overlay buffer (0 = none) */
   uint16_t overlay_fx, overlay_fy; /* where the host draws it inside the native picture when the visible side cannot hold it */
+  char scene[GENESIS_COMPAT_SCENE_MAX + 1]; /* SEG-139-T004: the scene name the provider reported for this frame ("" = none); only valid tokens are ever copied here */
 } GenesisExtensionResult;
 
 struct GenesisFrameExtension;

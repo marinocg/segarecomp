@@ -94,9 +94,14 @@ typedef struct GenesisCompatFrame {
   unsigned requested;                   /* GENESIS_COMPAT_* components the host will use if accepted */
 } GenesisCompatFrame;
 
+#define GENESIS_COMPAT_SCENE_MAX 32
 typedef struct GenesisCompatDecision {
   unsigned accepted;                    /* GENESIS_COMPAT_* components the provider serves for THIS frame (subset of `requested`; 0 = decline the whole frame) */
   uint8_t reason;                       /* GenesisCompatReason when nothing was accepted */
+  /* Optional (SEG-139-T004, additive to ABI 1: the host zero-initialises the whole struct, so a provider built before this field existed simply leaves it empty): the NAME of the scene this frame
+   * belongs to, `[a-z0-9_-]`, at most GENESIS_COMPAT_SCENE_MAX characters, NUL-terminated. The host never infers a scene; it uses this one only to account declared-versus-delivered coverage
+   * per scene against the package's geometry declaration. A scene the declaration does not list is accounted as undeclared, never as covered. It grants nothing. */
+  char scene[GENESIS_COMPAT_SCENE_MAX + 1];
 } GenesisCompatDecision;
 
 typedef struct GenesisCompatOverlay {

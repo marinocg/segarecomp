@@ -184,7 +184,9 @@ static int apply_pair(SvSettings *s, const char *key, const char *value) {
     SvDisplayRatio r;
     s->video.widescreen_ratio.num = 0;
     s->video.widescreen_ratio.den = 0;
+    s->ratio_rejected = 0;
     if (sv_ratio_parse(value, &r) == 0) s->video.widescreen_ratio = r;
+    else s->ratio_rejected = 1; /* SEG-139: dropped, never clamped, and now said so (the viewer shows a notice) */
     return 1;
   }
   if (strcmp(key, "pad_name") == 0) { strncpy(s->pad_name, value, sizeof s->pad_name - 1u); s->pad_name[sizeof s->pad_name - 1u] = '\0'; return 1; }

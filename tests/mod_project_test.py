@@ -180,7 +180,7 @@ except (OSError, NotImplementedError, AttributeError):
 if linked is not None:
     expect("a source reached through a link is refused", ("mod", "check", linked), "E_ARCHIVE_ENTRY")
 
-# reserved geometry: the empty declaration round-trips, any content stays rejected
+# geometry (SEG-139-T004, ADR 0302): the empty declaration still round-trips; an aspect range and [[scene]] tables are declared, sorted into canonical order and carried into the manifest
 GEO = FULL.replace("[abi]", "[geometry]\nscenes = []\n\n[abi]")
 gp = project("geo", GEO)
 gout = tmp / "geo.segapatch"
@@ -188,9 +188,24 @@ expect_ok("an empty geometry declaration builds", ("mod", "build", gp, "--out", 
 with zipfile.ZipFile(gout) as z:
     cli.check(b'"geometry":{"scenes":[]}' in z.read("manifest.json"), "the empty geometry declaration is carried into the manifest")
 expect_ok("the geometry package re-reads (round trip)", ("mod", "inspect", gout))
-broken("geometry with a scene", lambda t: GEO.replace("scenes = []", 'scenes = ["main"]'), "E_FIELD_UNKNOWN")
+RANGE = FULL.replace("[abi]", '[geometry]\naspect_max = "21:9"\n\n[[scene]]\nid = "title"\ncomponents = ["scenery"]\n\n[[scene]]\nid = "stage-1"\ncomponents = ["scenery", "hud", "actors"]\n\n[abi]')
+rp = project("geo-range", RANGE)
+rout = tmp / "geo-range.segapatch"
+expect_ok("a range with scenes builds", ("mod", "build", rp, "--out", rout, "--cc", CC, "--sdk-dir", SDK))
+with zipfile.ZipFile(rout) as z:
+    mtext = z.read("manifest.json")
+    cli.check(b'"geometry":{"aspect_max":"21:9","scenes":[{"id":"stage-1","components":["actors","hud","scenery"]},{"id":"title","components":["scenery"]}]}' in mtext, "scenes and components are written in canonical (sorted) order")
+rc, d, _ = cli.run("mod", "inspect", rout)
+cli.check(rc == 0 and d["geometry"]["declaration"] == "max=21:9;scene=stage-1:actors+hud+scenery;scene=title:scenery", f"inspect shows the host text ({d.get('geometry')})")
+broken("geometry with a scenes entry", lambda t: GEO.replace("scenes = []", 'scenes = ["main"]'), "E_FIELD_VALUE")
 broken("geometry with another key", lambda t: GEO.replace("scenes = []", "width = 4"), "E_FIELD_UNKNOWN")
 broken("geometry written as an array table", lambda t: GEO.replace("[geometry]", "[[geometry]]"), "E_MANIFEST_SYNTAX")
+broken("a scene without a range", lambda t: RANGE.replace('aspect_max = "21:9"\n', ""), "E_GEOMETRY_ASPECT")
+broken("an aspect outside the supported range", lambda t: RANGE.replace("21:9", "64:9"), "E_GEOMETRY_ASPECT")
+broken("a duplicate scene id", lambda t: RANGE.replace('id = "title"', 'id = "stage-1"'), "E_GEOMETRY_SCENE")
+broken("an unknown component", lambda t: RANGE.replace('["scenery"]', '["sky"]'), "E_GEOMETRY_SCENE")
+broken("a scene written as a single table", lambda t: RANGE.replace("[[scene]]", "[scene]", 1), "E_MANIFEST_SYNTAX")
+broken("a scene with another key", lambda t: RANGE.replace('id = "title"', 'id = "title"\nname = "x"'), "E_FIELD_UNKNOWN")
 
 # target platform fields: platform-specific target fields (cartridge digest + mapper config; disc-image reserved)
 SMS = FULL.split("[capabilities]")[0].replace('platform = "genesis"', 'platform = "master-system"').replace(f'sha256 = "{REV_B}"', f'sha256 = "{REV_B}"\nmapper = "rom_only"').replace(f'sha256 = "{SRC_SHA}"', f'sha256 = "{SRC_SHA}"\nmapper = "sega"')

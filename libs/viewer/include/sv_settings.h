@@ -59,6 +59,9 @@ int sv_ratio_valid(SvDisplayRatio ratio);                          /* 1 when set
 int sv_ratio_parse(const char *text, SvDisplayRatio *out);          /* "N:M" (decimal digits only); 0 ok, -1 not a valid supported ratio (out untouched) */
 const char *sv_ratio_format(SvDisplayRatio ratio, char *buf, size_t cap); /* "N:M" (a preset keeps its name, e.g. "21:9"); "" for an unset/invalid ratio */
 #define SV_RATIO_PRESET_COUNT 4
+/* A custom ratio chosen in the UI is `value`:100 with value in SV_RATIO_CUSTOM_MIN..SV_RATIO_CUSTOM_MAX (1.34 to 3.55, always inside 4:3..32:9). */
+#define SV_RATIO_CUSTOM_MIN 134
+#define SV_RATIO_CUSTOM_MAX 355
 SvDisplayRatio sv_ratio_preset(int index);                          /* 0: 4:3, 1: 16:9, 2: 21:9, 3: 32:9; {0,0} out of range */
 /* "4:3", "16:9" or "1.50:1" for the target aspect of `width` (readable value for the menu/launcher). Returns `buf`. */
 const char *sv_widescreen_width_text(int width, char *buf, size_t cap);
@@ -107,6 +110,7 @@ typedef struct SvSettings {
   int menu_key;      /* scancode of the pause-menu key; Escape always works too */
   SvBindings bind[SV_SYSTEM_COUNT];
   char pad_name[64]; /* preferred gamepad name for Player 1, empty = first connected */
+  int ratio_rejected; /* SEG-139: transient, never saved: 1 when the loaded file held a video.widescreen_ratio that is not a valid 4:3..32:9 ratio and was ignored (the legacy width applies); cleared when the user picks an aspect */
 } SvSettings;
 
 /* Scancodes (USB HID) and buttons used by the defaults and by host hotkeys; sv_host.c static-asserts them against SDL. */

@@ -1,6 +1,6 @@
 # `.segapatch` schema 3 (normative)
 
-Status: accepted contract (SEG-133-T002, ADR [0281](../decisions/0281-segapatch-schema-3.md)). **Reader, canonical packer and `mod.toml` mapping are implemented** (F02, ADR [0288](../decisions/0288-modding-platform-host-implementation.md); `libs/media/src/mod_package.cpp`); identity/cache use (SEG-135-T005), typed edits and symbols (SEG-136-T001/T002, ADR 0290), Luau, geometry and disc kinds are not. Inputs: the
+Status: accepted contract (SEG-133-T002, ADR [0281](../decisions/0281-segapatch-schema-3.md)). **Reader, canonical packer and `mod.toml` mapping are implemented** (F02, ADR [0288](../decisions/0288-modding-platform-host-implementation.md); `libs/media/src/mod_package.cpp`); identity/cache use (SEG-135-T005), typed edits and symbols (SEG-136-T001/T002, ADR 0290), Luau and disc kinds are not (the geometry declaration is: SEG-139-T004, ADR 0302). Inputs: the
 [gap inventory](modding-platform-gap-inventory.md) (existing limits) and [adapter vocabulary](mod-platform-adapters.md). Consumers: SEG-135-T001/T002/T003, SEG-136-T001,
 SEG-139/SEG-133-T004 (geometry declarations), SEG-145-T002 (audio assets), SEG-148-T001 (disc payloads), SEG-141 (identities).
 Section numbers below are stable citation targets ("schema 3 section N").
@@ -58,7 +58,7 @@ Field order below is the canonical order.
 | `symbols` | array of objects | optional | per-revision guest symbols with address provenance (ADR [0290](../decisions/0290-typed-rom-edits-and-revision-symbols.md)): `{"name","revision","address","provenance"}`; at most 255, strictly sorted by (name, revision); `name` a token of at most 64 characters, `revision` declared, `address` an image offset below 16 MiB, `provenance` `manual` \| `verified` \| `imported-hint`; only `verified` entries may be an edit site |
 | `header_repair` | string | optional | explicit header-repair declaration (ADR [0293](../decisions/0293-guest-injection-collisions-header-repair-bps.md)): `genesis-checksum` (strict: rewrite the Genesis ROM-end field and checksum; fail closed on an unsupported header) or `none` (opt-out). Absent: the checksum is repaired only when the original image verifies it and the build changed the image. `genesis-checksum` on another platform is `E_HEADER_UNSUPPORTED` |
 | `limits` | object | optional | requested resource limits; keys `luau_memory_bytes`, `luau_budget_units` (integers); each MUST be <= the policy default of [luau-trust-policy.md](luau-trust-policy.md) section 4 (a package may request less, never more: `E_LIMIT_EXCEEDS_POLICY`); other keys `E_FIELD_UNKNOWN` |
-| `geometry` | object | optional | geometry declaration: `{"scenes":[...]}`; the content model is SEG-139-T004's; schema 3 only reserves the key and requires `E_FIELD_UNKNOWN` for any other key inside until then |
+| `geometry` | object | optional | geometry declaration (SEG-139-T004, ADR [0302](../decisions/0302-honest-geometry-declarations-and-per-scene-coverage.md)): `{"aspect_min"?, "aspect_max"?, "scenes"?}`. `aspect_max` (and optional `aspect_min`, default 4:3) are canonical `N:M` ratios (no leading zeros, terms 1 to 4096) inside 4:3 to 32:9 with min <= max; `scenes` is at most 32 `{id, components}` entries strictly sorted by `id` (a token `[a-z0-9_-]`, at most 32), `components` a non-empty strictly sorted subset of `actors`, `hud`, `scenery`. Scenes or `aspect_min` without `aspect_max` are refused (a coverage claim without a range claims nothing checkable). `{"scenes":[]}` stays legal and claims nothing. The declaration is a **claim** the host checks against what a frame delivers; it grants nothing. It is in the package identity and **not** in the content digest. Stable classes: `E_GEOMETRY_ASPECT`, `E_GEOMETRY_SCENE` (+ `E_FIELD_UNKNOWN`, `E_FIELD_VALUE`) |
 | `presentation_defaults` | object | optional | as schema 1/2 (`widescreen`, `side_style`) |
 | `payloads` | array of objects | yes | section 4; 1 to 255 entries (the archive limit of 256 entries includes `manifest.json`) |
 
@@ -113,7 +113,7 @@ A platform/source mismatch (`genesis` with `disc-image`, `sega-cd` with `cartrid
 `capabilities` and `capabilities_optional` are optional fields; **an absent field means the empty set**, and the two forms are equivalent. They are sets of names from the [adapter vocabulary](mod-platform-adapters.md) section 2 that the package requires. The product grants exactly the declared set for the platform, and refuses the package at
 `mod check` if any name is unknown (`E_CAPABILITY_UNKNOWN`) or unsupported on the platform (`E_CAPABILITY_UNSUPPORTED`). Schema 3 stores **names only**; legality by phase and trust implications are in
 [native-sdk-abi-2.md](native-sdk-abi-2.md) section 4. The schema 1/2 `requires` array is not valid in schema 3 (`E_FIELD_UNKNOWN`); schema 2's native capabilities map 1:1 to schema 3 names (section 8).
-Geometry declarations live in the reserved `geometry` object; SEG-139-T004 defines their content, which MUST be additive to this schema (a reader of this section rejects unknown keys inside it until then).
+Geometry declarations live in the `geometry` object (section 3; ADR 0302): the supported aspect range and per-scene component coverage. They are additive to this schema: a package without them is unchanged.
 
 ## 7. Disc payload rules (reserved kinds)
 
@@ -181,7 +181,7 @@ Behavior under a schema 3-capable reader: **unchanged** (a schema 1/2 package is
 | `purpose` (`widescreen` only) | schema 1/2: unchanged and still required; schema 3: optional informational token |
 | `source_sha256` | superseded by `source.revisions[]` in schema 3 (single digest = one revision labelled by the author); unchanged in 1/2 |
 | `requires` (always empty) | unchanged in 1/2 (non-empty refused); not valid in schema 3 (`capabilities` replaces it) |
-| `widescreen_width_max` | read-only in 1/2; **not valid** in schema 3 - geometry declarations (SEG-139-T004) supersede it |
+| `widescreen_width_max` | read-only in 1/2; **not valid** in schema 3 - the `geometry` declaration (`aspect_max`, ADR 0302) supersedes it |
 | `presentation_defaults` | unchanged (valid in both) |
 | `author`, `license` (schema 2) | unchanged |
 | `payloads.rom` (`format: bps`, `file`, `sha256`, `target_sha256`) | unchanged in 1/2; schema 3: `bps-image` v1 payload with `path`, `size`, `sha256`, `target_sha256` |
@@ -248,5 +248,5 @@ SEG-139-T004 (geometry key), SEG-141-T001 (set identity), SEG-145-T002 (audio as
 * **Strictness fixed by the implementation** (these resolve latitude in the text above): the reader refuses insignificant whitespace in the manifest; key order is not enforced (the packer always emits the canonical order, and identity is the hash of the exact bytes received); the payload `role` field is required; a `native-c11` payload without `author`/`abi` is `E_TRUST_UNDECLARED` before any other payload field is judged; archive and payload paths are lower-case, so a case-folded duplicate can only come from a name the path rule already refuses.
 * **Zip-bomb ratio.** A deflated entry may expand to at most 256 times its compressed size plus 4 KiB (`E_ARCHIVE_SIZE`); the uncompressed total is capped at 48 MiB and each entry at 16 MiB before the per-kind caps of section 4.
 * **Native source set.** `native-c11` payloads are `.c` and `.h` files (a package needs at least one `.c`); Luau payloads end in `.luau`. Include policy and host compile: ADR 0288 decision 8.
-* **Audio mappings (SEG-145-T002).** The reserved `mappings` array now has its content model: see [modding-audio-architecture.md](modding-audio-architecture.md) section 5. A package with an `audio` asset must carry `license`. The content model of `hooks` is defined by ADR 0298 (SEG-138-T004); `geometry` is still reserved (empty only).
+* **Audio mappings (SEG-145-T002).** The reserved `mappings` array now has its content model: see [modding-audio-architecture.md](modding-audio-architecture.md) section 5. A package with an `audio` asset must carry `license`. The content model of `hooks` is defined by ADR 0298 (SEG-138-T004); `geometry` has its content model since SEG-139-T004 (ADR 0302).
 * **Added classes** beyond section 9: `E_INCLUDE_FORBIDDEN`, `E_COMPILE_FAILED`, `E_LINK_FAILED`, and the adapter/space classes `E_SPACE_*`, `E_ACCESS_*` for audio mailboxes.

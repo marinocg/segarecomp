@@ -117,7 +117,7 @@ Class per cell; the cited evidence is in the section named in the last column.
 | M05 | guest work-RAM writes | missing | ABI 1 is read-only by construction |
 | M05 | function hooks | missing | generated C emitter (`libs/codegen/c11`), spike first |
 | M05 | mod state in save states/rewind | extend narrowly | container section list (Genesis contract section 4.1/10) |
-| M06 SEG-139 | geometry through 32:9 | extend narrowly | `libs/viewer/include/sv_layout.h`, `platforms/genesis/runtime/frame_extension.h` |
+| M06 SEG-139 | geometry through 32:9 (planner, declarations ADR 0302, matrix) | extend narrowly | `libs/viewer/include/sv_layout.h`, `platforms/genesis/runtime/frame_extension.h` |
 | M07 SEG-140 | authored sprites, pattern decoding, layered overlays | extend narrowly | existing VDP decoding is reused; one fixed overlay today |
 | M08 SEG-141 | mod sets, composite identity | missing | single package per variant today |
 | M09 SEG-142 | Developer Workshop | missing | launcher exists; no developer-mode panels |

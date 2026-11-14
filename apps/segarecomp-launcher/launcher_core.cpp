@@ -243,6 +243,7 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
   // digest passed off as patched bytes). The viewer keys the per-game widescreen profile on SEGARECOMP_PROFILE_ID when present (the existing explicit identity
   // field, also used for Sega CD): a Patched variant sets it to the ORIGINAL library game, so Vanilla and Patched share one set of preferences.
   if (rom.effective_sha256().size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ROM_SHA256", rom.effective_sha256().c_str(), true);
+  SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PATCH_GEOMETRY");   // SEG-139-T004: a package's geometry declaration is compiled into its own program; an inherited value can never restrict another game
   if ((rom.patched() || rom.luau_mod()) && rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID", rom.sha256.c_str(), true);
   else SDL_UnsetEnvironmentVariable(environment, "SEGARECOMP_PROFILE_ID");
   // SEG-122: the patch's presentation defaults reach the viewer only for a selected Patched variant (the launch path has already required its verified build); Vanilla clears them.

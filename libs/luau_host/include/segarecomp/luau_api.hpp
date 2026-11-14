@@ -72,6 +72,7 @@ struct Note {
 };
 // What one successful callback produced. A faulted callback produces nothing (staged output is discarded, phases section 6.1).
 struct Output {
+  std::string scene;                  // sega.scene: the scene the frame belongs to (a validated token, "" = none; SEG-139-T004)
   std::vector<std::string> log;
   std::vector<OverlayOp> overlay;
   std::vector<Note> notes;

@@ -291,11 +291,11 @@ static int menu_hook(void *ctx, SvHost *host, int iteration) {
         for (i = 0; i < p->count; ++i)
           if (p->items[i].id == I_WIDESCREEN) {
             for (j = i + 1; j < p->count && p->items[j].kind == SV_ITEM_LABEL; ++j) {}
-            if (j < p->count && p->items[j].id == I_WS_WIDTH && p->items[j + 1].id == I_SIDE_STYLE) m->row_after_widescreen = 1;
+            if (j < p->count && p->items[j].id == I_WS_WIDTH && p->items[j + 1].id == I_WS_RATIO && p->items[j + 2].id == I_SIDE_STYLE) m->row_after_widescreen = 1;
           }
       }
       tap(SV_KEY_DOWN); break;
-    case 7: tap(SV_KEY_DOWN); break; /* Widescreen Width -> Side Presentation */
+    case 7: tap(SV_KEY_DOWN); tap(SV_KEY_DOWN); break; /* Widescreen Width -> Widescreen Aspect -> Side Presentation */
     case 8: case 9: break; /* let focus settle */
     case 10: menu_record(m, host, 0); tap(SV_KEY_RIGHT); break;
     case 11: case 12: break;
@@ -328,7 +328,7 @@ static void menu_tests(const char *settings_file) {
   tap(SV_KEY_ESCAPE);
   sv_host_service(host, &smp);
   sv_host_set_loop_hook(host, NULL, NULL);
-  CHECK(m.row_after_widescreen, "the Video page offers Widescreen Width, then Side Presentation, directly after Widescreen Mode");
+  CHECK(m.row_after_widescreen, "the Video page offers Widescreen Width, Widescreen Aspect, then Side Presentation, directly after Widescreen Mode");
   CHECK(strcmp(m.label[0], "Side Presentation") == 0 && strcmp(m.text[0], "Comfort") == 0 && m.style_seen[0] == SV_SIDE_COMFORT && m.treat_seen[0] == SV_TREAT_COMFORT, "Comfort is selected by default");
   CHECK(strstr(m.hint[0], "does not create new gameplay visibility") != NULL && strstr(m.hint[0], "decorative fill, not extra game content") != NULL, "Comfort help: hides extra data, creates no gameplay visibility");
   CHECK(strcmp(m.text[1], "Borders") == 0 && m.style_seen[1] == SV_SIDE_BORDERS && m.treat_seen[1] == SV_TREAT_BORDERS, "Right selects Borders and applies it at once");

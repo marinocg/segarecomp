@@ -205,6 +205,7 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
           v->compat_stats.declined[r->compat_reason] += 1U;
         }
       }
+      sv_host_set_scene(v->host, v->ext.compat != NULL && r->sequence == sequence && r->compat_accepted != 0U ? r->scene : ""); /* SEG-139-T004: the provider's own scene name for THIS frame, never inferred */
       return sv_host_present_extended(v->host, rgb, (int)width, (int)height, (int)(width * 3U), sequence, &surface);
     }
   }
@@ -345,6 +346,11 @@ GenesisSdl3Viewer *genesis_sdl3_viewer_open_platform(const char *title, int scal
   cfg.patch_id = SDL_getenv("SEGARECOMP_PATCH_ID");
   cfg.patch_widescreen = SDL_getenv("SEGARECOMP_PATCH_WIDESCREEN");
   cfg.patch_side_style = SDL_getenv("SEGARECOMP_PATCH_SIDE_STYLE");
+#ifdef SEGARECOMP_GEOMETRY_DECLARATION
+  cfg.geometry_declaration = SEGARECOMP_GEOMETRY_DECLARATION; /* SEG-139-T004: compiled in by the build from the verified package; the environment cannot loosen it */
+#else
+  cfg.geometry_declaration = SDL_getenv("SEGARECOMP_PATCH_GEOMETRY"); /* development override for a program built without a declaration */
+#endif
   /* SEG-122: an explicit identity wins over the image digest: a Patched program was built from a different image than the library game its preferences belong to */
   cfg.profile_id = profile != NULL && strlen(profile) == 64U ? profile : cfg.rom_sha256;
   cfg.diagnostics = sdl_diagnostics;
@@ -387,6 +393,15 @@ const char *genesis_sdl3_viewer_renderer_name(const GenesisSdl3Viewer *v) { retu
 void genesis_sdl3_viewer_close(GenesisSdl3Viewer *v) {
   if (v == NULL) return;
   if (v->audio) { sv_host_set_audio(v->host, NULL); SDL_DestroyAudioStream(v->audio); }
+  { /* SEG-139-T004: SEGARECOMP_COVERAGE_REPORT=<file> writes the declared-versus-delivered coverage report (stable JSON, aggregate counters only) when the viewer closes */
+    const char *path = SDL_getenv("SEGARECOMP_COVERAGE_REPORT");
+    if (path != NULL && *path != '\0') {
+      char json[12288]; /* 32 scenes need about 9.4 KB */
+      const size_t n = sv_host_coverage_json(v->host, json, sizeof json);
+      FILE *f = n > 0 && n < sizeof json ? fopen(path, "wb") : NULL;
+      if (f != NULL) { (void)fwrite(json, 1, n, f); (void)fputc('\n', f); (void)fclose(f); }
+    }
+  }
   sv_host_close(v->host); /* includes SDL_Quit */
   free(v);
 }

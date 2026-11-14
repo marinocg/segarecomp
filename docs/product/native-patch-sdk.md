@@ -21,6 +21,7 @@ and fills a `GenesisNativeCompat` table: `abi_version` (`GENESIS_NATIVE_COMPAT_A
   `vram`/`lines` (the frame's VRAM and per-line registers/CRAM/VSRAM), the picture geometry, and the `host` helper table.
 * `scenery_word(state, plane, row, x, hscroll, vscroll, &word)` returns the name-table word of the world cell under an off-screen column (the host still decodes patterns, palettes, flips, priority and sprites).
 * `hud(state, overlay)` fills a bounded RGBA overlay (at most 128x256) that the viewer draws after side treatment.
+* `prepare` may also fill the optional `decision->scene` (a token `[a-z0-9_-]`, at most 32 characters) to name the scene the frame belongs to. It is additive to ABI 1 (the host zero-initialises it; older providers leave it empty), is used only to count delivered components per scene against a declared geometry (ADR 0302), is the provider's own claim, and grants nothing.
 
 Helpers (`GenesisCompatHost`): `read_hscroll`, `read_vscroll`, `vscroll_is_per_column`, `cram_rgb` - the runtime's own VDP functions, so a provider never clones VDP decoding.
 

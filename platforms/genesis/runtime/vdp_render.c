@@ -1259,6 +1259,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   uint32_t sprite_pixels = 0U;
   int journaled, sprites;
   unsigned compat_accepted = 0U;
+  char compat_scene[GENESIS_COMPAT_SCENE_MAX + 1] = {0};
   uint8_t compat_reason = 0U;
   uint32_t compat_faults = 0U;
   uint16_t compat_overlay_w = 0U, compat_overlay_h = 0U, compat_overlay_fx = 0U, compat_overlay_fy = 0U;
@@ -1328,6 +1329,18 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
       target->compat->prepare(target->compat_state, &cf, &decision);
       compat_accepted = decision.accepted & cf.requested;
       compat_reason = compat_accepted != 0U ? (uint8_t)GENESIS_COMPAT_OK : decision.reason;
+      if (compat_accepted != 0U) {   /* a scene name is accepted only as a bounded token; anything else is dropped, never repaired */
+        size_t n = 0U;
+        while (n <= GENESIS_COMPAT_SCENE_MAX && decision.scene[n] != '\0') ++n;
+        if (n >= 1U && n <= GENESIS_COMPAT_SCENE_MAX) {
+          size_t i;
+          for (i = 0U; i < n; ++i) {
+            const char c = decision.scene[i];
+            if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-')) break;
+          }
+          if (i == n) memcpy(compat_scene, decision.scene, n);
+        }
+      }
     }
   }
   groups = width / 16U;
@@ -1432,6 +1445,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
   out->sprite_reason = sprite_reason;
   out->sprite_pixels = sprite_pixels;
   out->compat_accepted = (uint8_t)compat_accepted;
+  memcpy(out->scene, compat_scene, sizeof out->scene);
   out->compat_reason = compat_faults != 0U ? (uint8_t)GENESIS_COMPAT_FAULT : compat_reason;
   /* Authored provenance: scenery came from the provider on every off-screen cell AND nothing degraded the frame. The sprite layer is whatever the game submitted (Level 3 stays Partial). */
   out->authored = (uint8_t)((compat_accepted & GENESIS_COMPAT_SCENERY) != 0U && compat_faults == 0U && (flags & (GENESIS_EXT_FLAG_WINDOW_EDGE | GENESIS_EXT_FLAG_COLUMN_VSCROLL | GENESIS_EXT_FLAG_NO_VRAM_JOURNAL)) == 0U);

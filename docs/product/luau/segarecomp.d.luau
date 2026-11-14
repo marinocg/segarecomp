@@ -30,6 +30,8 @@ declare sega: {
     -- overlay.rgba (render): Width of the HUD overlay in pixels (128).
     width: number,
   },
+  -- overlay.rgba (render): Names the scene this frame belongs to (a token [a-z0-9_-], at most 32 characters; the last call wins). The host uses it only to count what was delivered per scene against the package's declared geometry; it is a claim, never inferred, and grants nothing.
+  scene: (id: string) -> (),
 }
 
 -- Lifecycle callbacks: define any of these as a global function; the host calls them.

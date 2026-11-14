@@ -52,7 +52,7 @@ A closed TOML subset: tables, arrays of tables, strings, non-negative integers a
 | `[abi]` | `native = 2` (required with native sources) |
 | `[state]`, `[limits]`, `[presentation]` | `schema`; `luau_memory_bytes`, `luau_budget_units`; `widescreen`, `side_style` |
 | `[build]` | `header_repair` = `genesis-checksum` \| `none` (ADR 0293; absent = repair only a verifying original that the build changed) |
-| `[geometry]` | `scenes = []` only (reserved; any content is refused) |
+| `[geometry]`, `[[scene]]` | `aspect_max` (and optional `aspect_min`, default `"4:3"`): the aspect range the package claims, `N:M` inside 4:3 to 32:9; one `[[scene]]` per named scene with `id` (token) and `components` (`actors`, `hud`, `scenery`). A scene needs `aspect_max`. A claim the viewer checks per frame, never a grant; part of the package identity (ADR 0302). `scenes = []` alone stays accepted and claims nothing |
 | `[[source]]` | `kind` (`native-c11`, `luau-source`, `asset`, `bps-image`, `rom-edit-set`, `guest-code`, `guest-asm`), `path` (project-relative: lower-case, at most 3 segments, no `..`), plus kind fields (`target_sha256`, `cpu`, `asset_class`, audio fields, ...) |
 | `[[memory]]` | `revision` (a declared label; absent = every revision), `space` (`m68k.work_ram`), `offset`, `length` (decimal), `access` (`read`, `write` or `read-write`, backed by the matching `memory.*` capability). The ONLY guest memory a scheduled mod may touch; part of the package identity ([gameplay example](gameplay-example.md), ADR 0300) |
 | `[[symbol]]` | `name` (token), `revision` (a declared label), `address` (string `"0x..."`, below `0x01000000`), `provenance` (`manual`, `verified`, `imported-hint`); one per (name, revision). Only `verified` entries may be an edit site |

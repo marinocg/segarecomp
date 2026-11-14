@@ -1,8 +1,10 @@
 #include "sv_layout.h"
 
 #include <math.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 SvRect sv_layout_dest(int win_w, int win_h, int src_w, int src_h, SvAspect aspect, SvScaleMode scale) {
@@ -301,4 +303,207 @@ const char *sv_geom_status_name(SvGeomStatus status) {
     case SV_GEOM_TOO_WIDE: return "too-wide";
     default: return "unknown";
   }
+}
+
+/* ---- SEG-139-T004: geometry declaration and coverage accounting ---- */
+
+/* the longest legal declaration: min + max (28) + 32 scenes of ";scene=" + a 32-character id + ":" + "actors+hud+scenery" (58 each) = 1884 */
+#define SV_COV_TEXT_MAX 2048
+
+const char *sv_cov_component_name(SvCovComponent component) {
+  switch (component) {
+    case SV_COV_SCENERY: return "scenery";
+    case SV_COV_HUD: return "hud";
+    case SV_COV_ACTORS: return "actors";
+    default: return "unknown";
+  }
+}
+
+const char *sv_cov_status_name(SvCovStatus status) {
+  switch (status) {
+    case SV_COV_ABSENT: return "absent";
+    case SV_COV_COVERED: return "covered";
+    case SV_COV_MISSING: return "missing";
+    case SV_COV_UNDECLARED: return "undeclared";
+    case SV_COV_OUTSIDE_RANGE: return "outside declared range";
+    default: return "unknown";
+  }
+}
+
+static int cov_token_ok(const char *s, size_t n) {
+  size_t i;
+  if (n == 0 || n > SV_COV_ID_MAX) return 0;
+  for (i = 0; i < n; ++i) {
+    const char c = s[i];
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-')) return 0;
+  }
+  return 1;
+}
+
+static int cov_ratio_le(SvDisplayRatio a, SvDisplayRatio b) { return (int64_t)a.num * b.den <= (int64_t)b.num * a.den; }
+
+static int cov_parse_ratio(const char *s, size_t n, SvDisplayRatio *out) {
+  char buf[24];
+  if (n == 0 || n >= sizeof buf) return -1;
+  memcpy(buf, s, n);
+  buf[n] = '\0';
+  return sv_ratio_parse(buf, out);
+}
+
+static int cov_parse_components(const char *s, size_t n, unsigned *mask) {
+  size_t i = 0;
+  *mask = 0;
+  while (i <= n) {
+    size_t j = i;
+    int c = -1, k;
+    while (j < n && s[j] != '+') ++j;
+    for (k = 0; k < SV_COV_COMPONENTS; ++k) {
+      const char *name = sv_cov_component_name((SvCovComponent)k);
+      if (strlen(name) == j - i && memcmp(name, s + i, j - i) == 0) c = k;
+    }
+    if (c < 0 || (*mask & SV_COV_BIT(c)) != 0) return -1;
+    *mask |= SV_COV_BIT(c);
+    if (j >= n) return 0;
+    i = j + 1;
+  }
+  return -1;
+}
+
+int sv_geomdecl_parse(const char *text, SvGeomDecl *out) {
+  SvGeomDecl d;
+  size_t len, pos = 0;
+  int seen_min = 0, seen_max = 0;
+  memset(&d, 0, sizeof d);
+  if (out == NULL) return -1;
+  if (text == NULL || *text == '\0') { *out = d; return 0; }
+  d.present = 1;
+  len = strlen(text);
+  if (len > SV_COV_TEXT_MAX) goto bad;
+  while (pos <= len) {
+    const char *part = text + pos;
+    size_t n = 0, eq;
+    while (pos + n < len && part[n] != ';') ++n;
+    for (eq = 0; eq < n && part[eq] != '='; ++eq) {}
+    if (eq == n) goto bad;
+    if (eq == 3 && memcmp(part, "min", 3) == 0 && !seen_min && !seen_max && d.scene_count == 0) {
+      if (cov_parse_ratio(part + 4, n - 4, &d.min) != 0) goto bad;
+      seen_min = 1;
+    } else if (eq == 3 && memcmp(part, "max", 3) == 0 && !seen_max && d.scene_count == 0) {
+      if (cov_parse_ratio(part + 4, n - 4, &d.max) != 0) goto bad;
+      seen_max = 1;
+    } else if (eq == 5 && memcmp(part, "scene", 5) == 0) {
+      const char *v = part + 6;
+      size_t vn = n - 6, colon;
+      SvGeomScene *sc;
+      for (colon = 0; colon < vn && v[colon] != ':'; ++colon) {}
+      if (colon == vn || !cov_token_ok(v, colon) || d.scene_count >= SV_COV_MAX_SCENES) goto bad;
+      sc = &d.scenes[d.scene_count];
+      memcpy(sc->id, v, colon);
+      sc->id[colon] = '\0';
+      if (d.scene_count > 0 && strcmp(d.scenes[d.scene_count - 1].id, sc->id) >= 0) goto bad;   /* strictly ascending: canonical and duplicate-free */
+      if (cov_parse_components(v + colon + 1, vn - colon - 1, &sc->declared) != 0) goto bad;
+      d.scene_count++;
+    } else {
+      goto bad;
+    }
+    pos += n + 1;
+  }
+  if (!seen_max) goto bad;   /* a lower bound or a scene without an upper bound would claim more than was declared */
+  if (!seen_min) { d.min.num = 4; d.min.den = 3; }
+  if (!cov_ratio_le(d.min, d.max)) goto bad;
+  d.has_range = 1;
+  *out = d;
+  return 0;
+bad:
+  memset(out, 0, sizeof *out);
+  out->present = 1;
+  out->invalid = 1;
+  return -1;
+}
+
+int sv_geomdecl_in_range(const SvGeomDecl *decl, SvDisplayRatio requested) {
+  if (decl == NULL || !decl->present) return 1;
+  if (decl->invalid || !decl->has_range) return !decl->invalid;
+  if (requested.num < 1 || requested.den < 1) return 0;
+  return cov_ratio_le(decl->min, requested) && cov_ratio_le(requested, decl->max);
+}
+
+static int cov_scene_index(const SvGeomDecl *decl, const char *scene) {
+  int i;
+  if (decl == NULL || scene == NULL) return -1;
+  for (i = 0; i < decl->scene_count; ++i)
+    if (strcmp(decl->scenes[i].id, scene) == 0) return i;
+  return -1;
+}
+
+SvCovStatus sv_geomdecl_check(const SvGeomDecl *decl, SvDisplayRatio requested, const char *scene, SvCovComponent component, int delivered) {
+  const int si = cov_scene_index(decl, scene);
+  const int declared = si >= 0 && (decl->scenes[si].declared & SV_COV_BIT(component)) != 0;
+  if (decl != NULL && decl->present && !sv_geomdecl_in_range(decl, requested)) return SV_COV_OUTSIDE_RANGE;
+  if (declared) return delivered ? SV_COV_COVERED : SV_COV_MISSING;
+  return delivered ? SV_COV_UNDECLARED : SV_COV_ABSENT;
+}
+
+void sv_cov_init(SvCovAccount *a, const SvGeomDecl *decl) {
+  if (a == NULL) return;
+  memset(a, 0, sizeof *a);
+  if (decl != NULL) a->decl = *decl;
+}
+
+static void cov_bump(uint64_t *v) { if (*v != UINT64_MAX) ++*v; }
+
+int sv_cov_frame(SvCovAccount *a, SvDisplayRatio requested, const char *scene, unsigned delivered) {
+  int si, c, in_range;
+  if (a == NULL) return 1;
+  si = cov_scene_index(&a->decl, scene);
+  if (si < 0) si = a->decl.scene_count;   /* the unscoped bucket */
+  in_range = sv_geomdecl_in_range(&a->decl, requested);
+  cov_bump(&a->frames);
+  if (!in_range) cov_bump(&a->outside_frames);
+  a->last = requested;
+  for (c = 0; c < SV_COV_COMPONENTS; ++c) {
+    const SvCovStatus st = sv_geomdecl_check(&a->decl, requested, si < a->decl.scene_count ? a->decl.scenes[si].id : NULL, (SvCovComponent)c, (delivered & SV_COV_BIT(c)) != 0);
+    if (st == SV_COV_COVERED) cov_bump(&a->count[si][c][0]);
+    else if (st == SV_COV_MISSING) cov_bump(&a->count[si][c][1]);
+    else if (st == SV_COV_UNDECLARED) cov_bump(&a->count[si][c][2]);
+    else if (st == SV_COV_OUTSIDE_RANGE) cov_bump(&a->count[si][c][3]);
+  }
+  return in_range;
+}
+
+typedef struct CovBuf { char *p; size_t cap, need; } CovBuf;
+static void cov_put(CovBuf *b, const char *fmt, ...) {
+  va_list ap;
+  int n;
+  va_start(ap, fmt);
+  n = vsnprintf(b->p != NULL && b->need < b->cap ? b->p + b->need : NULL, b->p != NULL && b->need < b->cap ? b->cap - b->need : 0, fmt, ap);
+  va_end(ap);
+  if (n > 0) b->need += (size_t)n;
+}
+
+size_t sv_cov_report_json(const SvCovAccount *a, char *buf, size_t cap) {
+  CovBuf b;
+  char r1[24], r2[24], r3[24];
+  int si, c, nscenes;
+  b.p = buf; b.cap = cap; b.need = 0;
+  if (buf != NULL && cap > 0) buf[0] = '\0';
+  if (a == NULL) return 0;
+  r1[0] = r2[0] = r3[0] = '\0';
+  if (a->decl.has_range) { (void)sv_ratio_format(a->decl.min, r1, sizeof r1); (void)sv_ratio_format(a->decl.max, r2, sizeof r2); }
+  (void)sv_ratio_format(a->last, r3, sizeof r3);
+  cov_put(&b, "{\"schema\":\"segarecomp.geometry-coverage/1\",\"declared\":%s,\"aspect_min\":\"%s\",\"aspect_max\":\"%s\",\"frames\":%llu,\"outside_range_frames\":%llu,\"last_aspect\":\"%s\",\"last_status\":\"%s\",\"scenes\":[",
+          a->decl.present && !a->decl.invalid ? "true" : "false", r1, r2, (unsigned long long)a->frames, (unsigned long long)a->outside_frames, r3,
+          a->frames == 0 ? "no frames" : !a->decl.present ? "no declaration" : sv_geomdecl_in_range(&a->decl, a->last) ? "inside declared range" : "outside declared range");
+  nscenes = a->decl.scene_count + 1;
+  for (si = 0; si < nscenes; ++si) {
+    const int unscoped = si == a->decl.scene_count;
+    cov_put(&b, "%s{\"id\":\"%s\",\"components\":{", si > 0 ? "," : "", unscoped ? "*" : a->decl.scenes[si].id);
+    for (c = 0; c < SV_COV_COMPONENTS; ++c)
+      cov_put(&b, "%s\"%s\":{\"declared\":%s,\"covered\":%llu,\"missing\":%llu,\"undeclared\":%llu,\"outside_range\":%llu}", c > 0 ? "," : "", sv_cov_component_name((SvCovComponent)c),
+              !unscoped && (a->decl.scenes[si].declared & SV_COV_BIT(c)) != 0 ? "true" : "false",
+              (unsigned long long)a->count[si][c][0], (unsigned long long)a->count[si][c][1], (unsigned long long)a->count[si][c][2], (unsigned long long)a->count[si][c][3]);
+    cov_put(&b, "}}");
+  }
+  cov_put(&b, "]}");
+  return b.need;
 }

@@ -51,6 +51,9 @@ typedef struct SvHostConfig {
   const char *patch_id;
   const char *patch_widescreen;
   const char *patch_side_style;
+  /* SEG-139-T004: the verified package's geometry declaration as the compact text of sv_geomdecl_parse (NULL/empty = the package declares nothing: nothing is claimed
+   * and nothing is restricted). Anything unreadable fails closed: no provider content is shown as authored. */
+  const char *geometry_declaration;
   SvDiagnosticsFn diagnostics; /* optional */
   void *diagnostics_ctx;
   /* Optional (NULL = the platform extends nothing: both enhanced levels are Unavailable and the picture stays Original). Called from the
@@ -97,6 +100,16 @@ const char *sv_host_profile_path(const SvHost *host);
 /* SEG-122: 1 when a verified patch's presentation defaults are active for this run (the Video menu says so). */
 int sv_host_patch_defaults_active(const SvHost *host);
 SvExtSource sv_host_extension_source(const SvHost *host);
+/* SEG-139-T004: names the scene the following frames belong to (a declared scene id; NULL or "" = unscoped). Bounded copy; a scene the package did not declare is accounted
+ * in the unscoped bucket. Provider/adapter-supplied, never inferred by the host. */
+void sv_host_set_scene(SvHost *host, const char *scene);
+/* Coverage report of the frames presented through sv_host_present_extended: stable JSON (sv_cov_report_json); returns the length needed (snprintf-like). */
+size_t sv_host_coverage_json(const SvHost *host, char *buf, size_t cap);
+/* 1 when the last extended frame was outside the declared aspect range and was therefore presented through the generic path (provider content dropped). */
+int sv_host_geometry_fallback(const SvHost *host);
+/* SEG-139-T004: one honest sentence about the package's declared aspect range for the Video page ("" when the package declares nothing): the range, whether the aspect now requested is
+ * inside it, and (when frames have been accounted) how many scenery/hud/actors frames were delivered inside the range. Pure text, bounded by `cap`. */
+void sv_host_geometry_note(const SvHost *host, char *buf, size_t cap);
 /* Re-applies the side style to the frame already shown (also done by sv_host_apply_settings and by the menu). */
 void sv_host_restyle(SvHost *host);
 /* Registers the adapter's playback stream so volume/mute (gain only) and pause apply; NULL unregisters. */

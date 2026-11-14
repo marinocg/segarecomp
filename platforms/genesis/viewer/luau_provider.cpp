@@ -127,6 +127,7 @@ void prepare(void *state, const GenesisCompatFrame *frame, GenesisCompatDecision
   s.image = luau::rasterize_overlay(result.overlay);
   s.have_image = true;
   out->accepted = GENESIS_COMPAT_HUD;
+  if (!result.scene.empty() && result.scene.size() <= GENESIS_COMPAT_SCENE_MAX) std::memcpy(out->scene, result.scene.c_str(), result.scene.size() + 1U);   // SEG-139-T004: the mod's own scene claim (validated token)
 }
 
 int scenery_word(void *, unsigned, unsigned, int, int, int, uint16_t *) { return 0; }

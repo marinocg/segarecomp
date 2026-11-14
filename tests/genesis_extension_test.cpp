@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -876,8 +878,51 @@ void runtime_level3() {
 
 }  // namespace
 
+// SEG-139-T006: a COARSE performance and memory budget for the producer at each planned aspect (320 x 224 square pixels: 4:3 -> 0, 16:9 -> 39, 21:9 -> 101, 32:9 -> 238 per side).
+// It is a regression tripwire, not a benchmark: the absolute bound is far above a Debug build on a slow CI host, and the growth bound (cost per frame may not grow faster than ~6x the
+// extra pixels) catches a quadratic mistake. The measured figures are printed for the record; the optimized-build deltas are in docs/architecture/widescreen-aspect-matrix.md.
+void producer_budget() {
+  static const unsigned sides[] = {39, 101, 238};
+  static const char *names[] = {"16:9", "21:9", "32:9"};
+  double median_ms[3] = {0, 0, 0};
+  for (int k = 0; k < 3; ++k) {
+    Cfg c;
+    c.side = sides[k];
+    Scene sc;
+    build_scene(c, sc);
+    auto native = std::make_unique<GenesisFrameArtifact>();
+    std::memset(native.get(), 0, sizeof(*native));
+    check(genesis_vdp_produce_frame_raster(sc.vram.data(), sc.raster.get(), native.get()) == 0, "budget scene renders");
+    PlanCtx pc{c.side};
+    GenesisFrameExtension ext{};
+    ext.request = 1;
+    ext.plan = plan_fn;
+    ext.plan_ctx = &pc;
+    ext.pixels = g_surface.data();
+    ext.capacity = g_surface.size();
+    std::vector<double> ms;
+    for (int i = 0; i < 15; ++i) {
+      GenesisExtensionResult res{};
+      const auto t0 = std::chrono::steady_clock::now();
+      const int rc = genesis_vdp_produce_extension(sc.vram.data(), sc.raster.get(), native.get(), &ext, &res);
+      const auto t1 = std::chrono::steady_clock::now();
+      check(rc == 0 && res.side == c.side, "budget frame produced at the planned side");
+      ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+    }
+    std::sort(ms.begin(), ms.end());
+    median_ms[k] = ms[ms.size() / 2];
+    const size_t surface_bytes = (size_t)(320 + 2 * c.side) * 224 * 3;
+    std::printf("  producer %s: side %u, surface %zu bytes, median %.3f ms/frame (budget 250 ms)\n", names[k], c.side, surface_bytes, median_ms[k]);
+    check(surface_bytes <= GENESIS_EXT_SURFACE_BYTES, "the planned surface fits the single fixed allocation (no per-aspect allocation)");
+    checkf(median_ms[k] < 250.0, "the producer meets the coarse absolute budget", (unsigned)median_ms[k]);
+  }
+  /* 238 / 39 is 6.1x the extra pixels; 40x leaves room for noise yet fails a quadratic cost */
+  check(median_ms[2] < std::max(median_ms[0], 0.05) * 40.0, "producer cost does not grow faster than linearly in the planned side");
+}
+
 int main() {
   synthetic_fixtures();
+  producer_budget();
   level3_fixtures();
   mode_contract();
   failures_and_edges();

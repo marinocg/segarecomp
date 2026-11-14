@@ -507,6 +507,43 @@ void App::draw_settings(float full_w, float h) {
     if (button(ctx_, "wsw_plus", "+", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { v.widescreen_width = std::min(100, v.widescreen_width + 5); v_changed = true; }
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Target aspect between 4:3 and 16:9 when a widescreen mode is on. This is the default for games without their own setting; each game keeps its own Widescreen Mode, Side Presentation and Width from its in-game Video & Display page.");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+    row_label("Widescreen aspect");
+    {   // SEG-139: the exact display aspect, 4:3 through 32:9. "Slider" keeps the width above; "Custom" is any ratio in between (hundredths, stored as N:100), with its own stepper.
+      int ratio_choice = 0;
+      const bool set = sv_ratio_valid(v.widescreen_ratio);
+      if (set) {
+        ratio_choice = 5;
+        for (int i = 0; i < SV_RATIO_PRESET_COUNT; ++i) if (v.widescreen_ratio.num == sv_ratio_preset(i).num && v.widescreen_ratio.den == sv_ratio_preset(i).den) ratio_choice = i + 1;
+      }
+      const auto hundredths = [](SvDisplayRatio r) { return static_cast<int>((static_cast<long long>(r.num) * 100 + r.den / 2) / r.den); };
+      const auto clamp_custom = [](int h) { return std::clamp(h, SV_RATIO_CUSTOM_MIN, SV_RATIO_CUSTOM_MAX); };
+      const int before = ratio_choice;
+      if (segmented(ctx_, "wsr", {"Slider", "4:3", "16:9", "21:9", "32:9", "Custom"}, &ratio_choice, 0.0F) && ratio_choice != before) {
+        if (ratio_choice == 0) v.widescreen_ratio = SvDisplayRatio{0, 0};
+        else if (ratio_choice <= SV_RATIO_PRESET_COUNT) v.widescreen_ratio = sv_ratio_preset(ratio_choice - 1);
+        else {   // Custom starts from what is in effect now
+          int num = 0, den = 1;
+          if (set) { num = v.widescreen_ratio.num; den = v.widescreen_ratio.den; } else sv_widescreen_width_ratio(v.widescreen_width, &num, &den);
+          v.widescreen_ratio = SvDisplayRatio{clamp_custom(hundredths(SvDisplayRatio{num, den})), 100};
+        }
+        viewer_settings_.ratio_rejected = 0;
+        v_changed = true;
+      }
+      if (set && ratio_choice == 5) {
+        const int hv = clamp_custom(hundredths(v.widescreen_ratio));
+        if (button(ctx_, "wsr_minus", "-", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { v.widescreen_ratio = SvDisplayRatio{clamp_custom(hv - 5), 100}; v_changed = true; }
+        ImGui::SameLine(0.0F, ctx_.u(6.0F));
+        { char r[24]; const ImVec2 p = ImGui::GetCursorScreenPos(); sv_ratio_format(v.widescreen_ratio, r, sizeof r);
+          draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(p.x, p.y + ctx_.u(7.0F)), (std::string(r) + " (" + std::to_string(hv / 100) + "." + (hv % 100 < 10 ? "0" : "") + std::to_string(hv % 100) + ":1)").c_str());
+          ImGui::SetCursorScreenPos(ImVec2(p.x + ctx_.u(150.0F), p.y)); }
+        ImGui::SameLine(0.0F, ctx_.u(6.0F));
+        if (button(ctx_, "wsr_plus", "+", ImVec2(ctx_.u(34.0F), ctx_.u(28.0F)), Style::secondary)) { v.widescreen_ratio = SvDisplayRatio{clamp_custom(hv + 5), 100}; v_changed = true; }
+        paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Custom aspect in steps of 0.05, from 1.34:1 to 3.55:1.");
+      }
+      if (viewer_settings_.ratio_rejected) paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "The saved widescreen aspect was not a ratio between 4:3 and 32:9 and was ignored; pick one above to replace it.");
+    }
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "A fixed aspect (4:3 to 32:9) replaces the width above. Beyond 16:9 the extra area shows more of the game's own background and sprites, never new gameplay. A patch that declares a narrower supported range is shown the native picture only outside it (the in-game Video page says so).");
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Side presentation");
     int side_style = static_cast<int>(v.widescreen_side_style);
     if (segmented(ctx_, "ss", {"Comfort", "Borders", "Raw Extension"}, &side_style, 0.0F)) { v.widescreen_side_style = static_cast<SvSideStyle>(side_style); v_changed = true; }

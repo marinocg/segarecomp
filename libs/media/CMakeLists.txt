@@ -6,6 +6,7 @@ add_library(segarecomp_media
   src/mod_edits.cpp
   src/mod_guest.cpp
   src/mod_hooks.cpp
+  src/mod_geometry.cpp
   src/mod_memory.cpp
   src/mod_package.cpp
   src/mod_project.cpp
