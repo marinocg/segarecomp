@@ -133,12 +133,13 @@ struct RenderView {
   const std::vector<luau::OverlayOp> *ops;
   const std::vector<luau::OverlayLayerDecl> *layers;
   const std::string *scene;
+  const luau::SpriteSubmission *sprites;
 };
 RenderView render_view() {
 #ifdef SEGARECOMP_MOD_NATIVE
-  return {&g.visible.overlay, &g.visible.layers, &g.visible.scene};
+  return {&g.visible.overlay, &g.visible.layers, &g.visible.scene, &g.visible.sprites};
 #else
-  return {&g.provider->overlay(), &g.provider->layers(), &g.provider->scene()};
+  return {&g.provider->overlay(), &g.provider->layers(), &g.provider->scene(), &g.provider->sprites()};
 #endif
 }
 
@@ -293,13 +294,15 @@ namespace {
 struct Presented {
   luau::OverlayImage image;
   luau::RasterizedLayers layers;
-  bool fixed = false, have = false;
+  luau::SpriteSubmission sprites;   // SEG-140-T008: the virtual sprites committed by the last successful render callback
+  bool fixed = false, have = false, have_sprites = false;
 } p;
 
 void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out) {
   out->accepted = 0;
   out->reason = GENESIS_COMPAT_OK;
   p.have = false;
+  p.have_sprites = false;
   if ((frame->requested & GENESIS_COMPAT_HUD) == 0) return;
   if (!g.attached || g.scheduler->fault.faulted != 0U || g.scheduler->disabled != 0U) {   // a faulted mod presents nothing; the guest and the picture go on
     out->reason = GENESIS_COMPAT_FAULT;
@@ -307,7 +310,9 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   }
   const RenderView view = render_view();
   const std::vector<luau::OverlayOp> &ops = *view.ops;
-  if (ops.empty()) return;
+  p.have_sprites = view.sprites->total > 0;
+  if (p.have_sprites) p.sprites = *view.sprites;
+  if (ops.empty() && !p.have_sprites) return;
   p.image = luau::rasterize_overlay(ops);
   p.fixed = false;
   for (const luau::OverlayOp &op : ops) p.fixed = p.fixed || op.layer == 0;
@@ -319,8 +324,12 @@ void prepare(void *, const GenesisCompatFrame *frame, GenesisCompatDecision *out
   if (!scene.empty() && scene.size() <= GENESIS_COMPAT_SCENE_MAX) std::memcpy(out->scene, scene.c_str(), scene.size() + 1U);
 }
 int scenery_word(void *, unsigned, unsigned, int, int, int, uint16_t *) { return 0; }
-int hud(void *, GenesisCompatOverlay *out) { return luau::pack_hud(p.have, p.fixed, p.image, p.layers, out); }
-const GenesisNativeCompat kTable = {GENESIS_NATIVE_COMPAT_ABI, "scheduled-mod-host", 1, GENESIS_COMPAT_HUD, prepare, scenery_word, hud};
+int hud(void *, GenesisCompatOverlay *out) {
+  const int hud_drawn = luau::pack_hud(p.have, p.fixed, p.image, p.layers, out);
+  const bool sprites = p.have_sprites && luau::pack_sprites(p.sprites, out->vsprites);
+  return hud_drawn != 0 || sprites ? 1 : 0;
+}
+const GenesisNativeCompat kTable = {GENESIS_NATIVE_COMPAT_ABI, "scheduled-mod-host", 1, GENESIS_COMPAT_HUD | GENESIS_COMPAT_SPRITES, prepare, scenery_word, hud};
 }  // namespace
 
 const GenesisNativeCompat *segarecomp_patch_provider(void **state_out) {

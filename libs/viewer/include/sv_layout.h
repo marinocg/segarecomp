@@ -85,6 +85,13 @@ typedef struct SvExtendedSurface {
   uint8_t actor_provenance;     /* 1 = game-state verified, 2 = mod authored (GenesisVirtualProvenance); anything else is refused */
   uint8_t actor_state_verified; /* the frame's guest-state snapshot was valid and exactly current (required for provenance 1) */
   uint8_t actor_reject;         /* GenesisVirtualReason of a rejected set (stage SV_ACT_REJECTED); carried into the report verbatim */
+  /* SEG-140-T008 (ADR 0306): the compositor's own drawn-pixel diagnostics for THIS frame's set, the pixels it actually replaced, by origin (zero in a surface that predates them: the SEG-140-T005 rule
+   * then applies unchanged). A set composed with ZERO drawn pixels is reported by the producer as stage SV_ACT_VALIDATED (never composed-and-delivered). The total is split by region: the left/right
+   * counts are the part drawn in the extension columns (SEG-140-T009); the rest is in the picture. `actor_picture` is the composed picture (RGB24, w * h * 3, same pitch as the native one); the host
+   * presents it INSTEAD of the native picture only when this frame's contribution is credited (geometry admitted, inside the declared range), so every refusal falls back to the native picture. */
+  uint32_t actor_pixels_verified, actor_pixels_authored;
+  uint32_t actor_pixels_left, actor_pixels_right;
+  const uint8_t *actor_picture;
 } SvExtendedSurface;
 typedef enum SvActorStage {
   SV_ACT_NONE = 0,       /* no virtual-sprite contribution */
@@ -225,7 +232,12 @@ typedef struct SvCovAccount {
   uint64_t count[SV_COV_MAX_SCENES + 1][SV_COV_COMPONENTS][SV_COV_COUNTERS];
   uint64_t reason_frames[SV_REJ_COUNT]; /* frames in which each reason applied */
   uint8_t last_reason, last_vsprite_reason;
+  /* SEG-140-T008 (additive, reported only once a set was ever submitted): virtual-sprite stages and the pixels actually PRESENTED, by origin. */
+  uint64_t vs_sets, vs_composed, vs_rejected, vs_validated_empty, vs_presented, vs_pixels_verified, vs_pixels_authored;
 } SvCovAccount;
+/* Accounts the virtual-sprite part of one frame (call once per frame that reached the accounting): `presented_pixels_*` are the pixels of this frame's set that were actually shown inside the declared range, 0 when the
+ * contribution was not credited. */
+void sv_cov_vsprite(SvCovAccount *account, const SvExtendedSurface *ext, int credited, uint32_t presented_pixels_verified, uint32_t presented_pixels_authored);
 void sv_cov_init(SvCovAccount *account, const SvGeomDecl *decl);
 /* Accounts one frame: `delivered` is a mask of SV_COV_BIT components the producer/provider actually supplied for it. Returns 1 when the frame is inside the declared range (or nothing is declared). */
 int sv_cov_frame(SvCovAccount *account, SvDisplayRatio requested, const char *scene, unsigned delivered);

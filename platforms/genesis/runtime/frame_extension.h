@@ -20,6 +20,7 @@
 
 #include "checkpoint_evidence.h"
 #include "native_compat.h"
+#include "../sdk/segarecomp_genesis_vsprite.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -60,6 +61,17 @@ typedef enum GenesisExtensionReason {
 #define GENESIS_EXT_FLAG_NO_VRAM_JOURNAL 0x04U /* no VRAM journal: mid-frame VRAM changes cannot be replayed (same limit as the native render) */
 #define GENESIS_EXT_FLAG_SPRITES_BEST_EFFORT 0x08U /* Level 3: sprites appear only where the game's own SAT places them; a generic producer never reports Available */
 
+/* What the adapter's compositor reports for the frame it just produced (a plain data record; the compositor itself lives in the adapter, never in the runtime library). */
+typedef struct GenesisVirtualSpriteOutcome {
+  uint8_t status;               /* GenesisVirtualStatus: 0 none, 1 composed (the adapter holds the composed picture of this frame), 2 rejected (nothing was drawn) */
+  uint8_t reason;               /* GenesisVirtualReason when rejected */
+  uint8_t provenance;           /* composed: bit 0 = the set holds game-state-verified commands, bit 1 = mod-authored commands */
+  uint8_t state_verified;       /* the host established the exactly-current guest-state snapshot for this frame (the gate GAME_STATE_VERIFIED needs) */
+  uint32_t index, commands;     /* rejected: the first offending command; composed: the accepted commands */
+  uint32_t pixels_verified, pixels_authored; /* native pixels actually replaced, by origin (the compositor's own drawn-pixel diagnostics) */
+  uint32_t rows_over_sprite_limit, rows_over_cell_budget, rows_dropped, rows_truncated;
+} GenesisVirtualSpriteOutcome;
+
 typedef struct GenesisExtensionResult {
   uint64_t sequence;   /* the frame sequence this result belongs to (stamped by the runtime at publication) */
   uint8_t status;      /* GenesisExtensionStatus */
@@ -83,6 +95,8 @@ typedef struct GenesisExtensionResult {
   uint8_t layer_bad;               /* bit i: descriptor i failed the transport check (empty, or its image leaves the host buffer): the presenter must not read its pixels and reports it rejected */
   GenesisCompatLayer layers[GENESIS_COMPAT_LAYERS_MAX];
   char scene[GENESIS_COMPAT_SCENE_MAX + 1]; /* SEG-139-T004: the scene name the provider reported for this frame ("" = none); only valid tokens are ever copied here */
+  /* SEG-140-T008 (ADR 0306): the virtual-sprite contribution of THIS frame, from the adapter's compositor (the F14 compositor). All zero when the provider submitted no commands (the common case). */
+  GenesisVirtualSpriteOutcome vsprite;
 } GenesisExtensionResult;
 
 struct GenesisFrameExtension;
@@ -113,6 +127,14 @@ typedef struct GenesisFrameExtension {
   uint8_t compat_ram_valid;
   uint8_t *overlay_rgba;
   uint8_t *layer_rgba;              /* SEG-140-T004: GENESIS_COMPAT_LAYER_BYTES, adapter-owned: receives the provider's layer images (NULL = layers are not delivered) */
+  /* SEG-140-T008 (ADR 0306): virtual sprites. `vsprite_set` NULL = this adapter carries none (exactly the previous behaviour). The adapter owns the storage; the producer fills the set only for a
+   * provider that declared GENESIS_COMPAT_SPRITES and zeroes it before every request (a set of frame N never survives into frame N+1). For a set with at least one command the producer calls
+   * `vsprite_compose` WHILE the frame's raster state and VRAM are valid; the adapter runs the VDP's auxiliary render and the F14 compositor and keeps the composed picture (the compositor is
+   * not part of the runtime library). Zero commands: neither runs. */
+  GenesisVirtualSpriteSet *vsprite_set;
+  int (*vsprite_compose)(void *ctx, const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
+                         const GenesisFrameArtifact *native, GenesisVirtualSpriteOutcome *out);
+  void *vsprite_ctx;
   /* Runtime-written. */
   GenesisExtensionResult result;    /* the latest publication's result */
   uint64_t produced;                /* AVAILABLE/PARTIAL results */

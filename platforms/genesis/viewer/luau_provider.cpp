@@ -41,6 +41,8 @@ struct State {
   bool fixed = false;   // some request drew into the fixed HUD overlay (layer 0)
   luau::RasterizedLayers layers;   // SEG-140-T004: positioned layers of the frame (declaration order)
   bool have_image = false;
+  luau::SpriteSubmission sprites;   // SEG-140-T008: the virtual sprites of the frame (the same submission model every route uses)
+  bool have_sprites = false;
 };
 
 State g_state;
@@ -108,6 +110,7 @@ void prepare(void *state, const GenesisCompatFrame *frame, GenesisCompatDecision
   out->accepted = 0;
   out->reason = GENESIS_COMPAT_OK;
   s.have_image = false;
+  s.have_sprites = false;
   if ((frame->requested & GENESIS_COMPAT_HUD) == 0 || s.failed) {
     if (s.failed) out->reason = GENESIS_COMPAT_FAULT;
     return;
@@ -128,8 +131,10 @@ void prepare(void *state, const GenesisCompatFrame *frame, GenesisCompatDecision
     return;
   }
   for (const std::string &line : result.log) std::fprintf(stderr, "LUAU_MOD_LOG {\"line\":\"%s\"}\n", json_escaped(line).c_str());
-  if (result.overlay.empty()) return;
-  s.image = luau::rasterize_overlay(result.overlay);
+  s.sprites = std::move(result.sprites);
+  s.have_sprites = s.sprites.total > 0;
+  if (result.overlay.empty() && !s.have_sprites) return;
+  s.image = luau::rasterize_overlay(result.overlay);   // (an empty request list rasterizes an empty image: nothing is drawn for a sprite-only frame)
   s.fixed = std::any_of(result.overlay.begin(), result.overlay.end(), [](const luau::OverlayOp &op) { return op.layer == 0; });
   s.layers.clear();
   for (const luau::OverlayLayerDecl &d : result.layers) s.layers.emplace_back(d, luau::rasterize_layer(d, result.overlay));
@@ -142,10 +147,12 @@ int scenery_word(void *, unsigned, unsigned, int, int, int, uint16_t *) { return
 
 int hud(void *state, GenesisCompatOverlay *out) {
   State &s = *static_cast<State *>(state);
-  return luau::pack_hud(s.have_image, s.fixed, s.image, s.layers, out);
+  const int hud_drawn = luau::pack_hud(s.have_image, s.fixed, s.image, s.layers, out);
+  const bool sprites = s.have_sprites && luau::pack_sprites(s.sprites, out->vsprites);
+  return hud_drawn != 0 || sprites ? 1 : 0;
 }
 
-const GenesisNativeCompat kTable = {GENESIS_NATIVE_COMPAT_ABI, "luau-hud-host", 1, GENESIS_COMPAT_HUD, prepare, scenery_word, hud};
+const GenesisNativeCompat kTable = {GENESIS_NATIVE_COMPAT_ABI, "luau-hud-host", 1, GENESIS_COMPAT_HUD | GENESIS_COMPAT_SPRITES, prepare, scenery_word, hud};
 
 }  // namespace
 

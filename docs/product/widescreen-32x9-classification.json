@@ -10,12 +10,12 @@
     "32:9"
   ],
   "limitations": {
-    "virtual_sprite_compositor": "tested C11 module only (ADR 0303): command model, VDP decode, priority, clip and budget; consumed by no shipped program",
-    "live_viewer_presents_virtual_sprites": false,
-    "mod_can_author_virtual_sprites": false,
+    "virtual_sprite_compositor": "tested C11 module (ADR 0303): command model, VDP decode, priority, clip and budget; consumed by the live Genesis viewer for the NATIVE PICTURE only (ADR 0306, F28); not drawn into the widescreen side columns",
+    "live_viewer_presents_virtual_sprites": true,
+    "mod_can_author_virtual_sprites": true,
     "side_column_sprite_drawing": false,
     "actor_coverage_claims_available": [],
-    "actors_coverage_in_reports": "a declared actors component reports missing in every shipped program: nothing sets the actor signal outside the synthetic test fixtures (ADR 0304)",
+    "actors_coverage_in_reports": "a declared actors component is covered only by a composed virtual-sprite set that actually drew pixels into the presented frame (ADR 0304, ADR 0306); no shipped Sonic package submits one, so a declared actors component still reports missing there",
     "layered_overlays_count_as_hud": false,
     "scene_names_are_provider_claims": true,
     "follow_ups": [

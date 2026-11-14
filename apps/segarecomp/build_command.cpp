@@ -1278,6 +1278,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   };
   if (build.play) {
     add(final_only, build.runtime / "vdp_render.c", "vdp-render");
+    add(final_only, build.runtime / "virtual_sprite.c", "virtual-sprite");   // SEG-140-T008: the F14 compositor the played program's viewer adapter runs for a provider's virtual sprites
     for (const char *name : {"viewer.c", "viewer_sdl3.c"})
       add(final_only, build.viewer / name, std::string("viewer-") + name,
           options.geometry_declaration.empty() || std::string_view(name) != "viewer_sdl3.c" ? std::vector<std::string>{} : std::vector<std::string>{"-DSEGARECOMP_GEOMETRY_DECLARATION=\"" + options.geometry_declaration + "\""});

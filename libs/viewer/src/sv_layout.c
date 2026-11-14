@@ -532,6 +532,19 @@ void sv_cov_reject(SvCovAccount *a, unsigned reasons) {
   a->last_vsprite_reason = 0;
 }
 
+void sv_cov_vsprite(SvCovAccount *a, const SvExtendedSurface *ext, int credited, uint32_t pv, uint32_t pa) {
+  if (a == NULL || ext == NULL || ext->actor_stage == SV_ACT_NONE) return;
+  cov_bump(&a->vs_sets);
+  if (ext->actor_stage == SV_ACT_COMPOSED) cov_bump(&a->vs_composed);
+  else if (ext->actor_stage == SV_ACT_REJECTED) cov_bump(&a->vs_rejected);
+  else if (ext->actor_stage == SV_ACT_VALIDATED) cov_bump(&a->vs_validated_empty);
+  if (credited) {
+    cov_bump(&a->vs_presented);
+    a->vs_pixels_verified += pv;
+    a->vs_pixels_authored += pa;
+  }
+}
+
 int sv_cov_frame(SvCovAccount *a, SvDisplayRatio requested, const char *scene, unsigned delivered) {
   return sv_cov_frame_ex(a, requested, scene, delivered, delivered, 0u, 0u);
 }
@@ -574,7 +587,12 @@ size_t sv_cov_report_json(const SvCovAccount *a, char *buf, size_t cap) {
               (unsigned long long)a->count[si][c][4], (unsigned long long)a->count[si][c][5], (unsigned long long)a->count[si][c][6], (unsigned long long)a->count[si][c][7], (unsigned long long)a->count[si][c][8]);
     cov_put(&b, "}}");
   }
-  cov_put(&b, "]}");
+  cov_put(&b, "]");
+  if (a->vs_sets > 0)   /* SEG-140-T008: bounded, additive, and absent until a set was ever submitted (every earlier report is byte-identical) */
+    cov_put(&b, ",\"virtual_sprites\":{\"sets\":%llu,\"composed\":%llu,\"rejected\":%llu,\"composed_without_pixels\":%llu,\"presented\":%llu,\"pixels_verified\":%llu,\"pixels_authored\":%llu}",
+            (unsigned long long)a->vs_sets, (unsigned long long)a->vs_composed, (unsigned long long)a->vs_rejected, (unsigned long long)a->vs_validated_empty, (unsigned long long)a->vs_presented,
+            (unsigned long long)a->vs_pixels_verified, (unsigned long long)a->vs_pixels_authored);
+  cov_put(&b, "}");
   return b.need;
 }
 

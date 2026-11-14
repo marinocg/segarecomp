@@ -48,4 +48,34 @@ inline int pack_hud(bool have_image, bool fixed, const OverlayImage &image, cons
   return fixed || out->layer_count > 0 ? 1 : 0;
 }
 
+// SEG-140-T008 (ADR 0306): maps one callback's sega.sprite submission onto the shared GenesisVirtualSpriteSet transport (the host zeroed `*out`). Returns true when the script submitted any sprite command; the
+// host's whole-set validation then decides everything else. `count` is the number of commands the script ADDED, so a set larger than the transport holds is rejected as TOO_MANY, never truncated.
+inline bool pack_sprites(const SpriteSubmission &s, GenesisVirtualSpriteSet *out) {
+  if (out == nullptr || s.total == 0) return false;
+  out->budget_mode = static_cast<std::uint8_t>(s.budget_mode);
+  out->count = s.total;
+  for (std::size_t i = 0; i < s.commands.size() && i < GENESIS_VSPRITE_MAX; ++i) {
+    const SpriteCommand &c = s.commands[i];
+    GenesisVirtualSprite &d = out->sprites[i];
+    d.provenance = static_cast<std::uint8_t>(c.provenance);
+    d.layer = static_cast<std::uint8_t>(c.layer);
+    d.width_cells = static_cast<std::uint8_t>(c.w_cells);
+    d.height_cells = static_cast<std::uint8_t>(c.h_cells);
+    d.palette = static_cast<std::uint8_t>(c.palette);
+    d.h_flip = static_cast<std::uint8_t>(c.h_flip);
+    d.v_flip = static_cast<std::uint8_t>(c.v_flip);
+    d.has_clip = c.has_clip ? 1U : 0U;
+    d.tile_index = static_cast<std::uint16_t>(c.tile);
+    d.x = static_cast<std::int16_t>(c.x);
+    d.y = static_cast<std::int16_t>(c.y);
+    d.clip_x = static_cast<std::int16_t>(c.clip_x);
+    d.clip_y = static_cast<std::int16_t>(c.clip_y);
+    d.clip_w = static_cast<std::uint16_t>(c.clip_w);
+    d.clip_h = static_cast<std::uint16_t>(c.clip_h);
+  }
+  if (!s.vram.empty()) std::memcpy(out->authored_vram, s.vram.data(), s.vram.size() < sizeof out->authored_vram ? s.vram.size() : sizeof out->authored_vram);
+  if (!s.cram.empty()) std::memcpy(out->authored_cram, s.cram.data(), s.cram.size() < sizeof out->authored_cram ? s.cram.size() : sizeof out->authored_cram);
+  return true;
+}
+
 }  // namespace segarecomp::luau

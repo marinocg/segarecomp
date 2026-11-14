@@ -39,6 +39,8 @@ class PhaseProvider {
   // The declared positioned layers and the scene claim of the same render callback (empty when none).
   [[nodiscard]] const std::vector<OverlayLayerDecl> &layers() const;
   [[nodiscard]] const std::string &scene() const;
+  // SEG-140-T008: the virtual-sprite submission of the same render callback (empty when the script submitted none).
+  [[nodiscard]] const SpriteSubmission &sprites() const;
   // True once a watchdog fault happened: the run is host-timing dependent and not replay-verifiable (phases section 7).
   [[nodiscard]] bool nondeterministic() const;
   [[nodiscard]] Fault fault() const;

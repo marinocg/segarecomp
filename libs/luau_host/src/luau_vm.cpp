@@ -500,6 +500,51 @@ int sega_scene(lua_State *L) {   // SEG-139-T004: names the frame's scene; a mal
   return 0;
 }
 
+// SEG-140-T008: the typed virtual-sprite submission; every rule is luau_api.cpp's (the host's whole-set validation decides what a command means).
+int sega_sprite_budget(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  require_phase(L, Phase::render, "sega.sprite.budget");
+  require_args(L, 1, "sega.sprite.budget");
+  overlay_result(L, sprite_budget(im->staged, str_arg(L, 1, "sega.sprite.budget")));
+  return 0;
+}
+int sega_sprite_tile(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  require_phase(L, Phase::render, "sega.sprite.tile");
+  require_args(L, 2, "sega.sprite.tile");
+  const std::int64_t index = int_arg(L, 1, -1, 1 << 20, "sega.sprite.tile");
+  overlay_result(L, sprite_tile(im->staged, index, str_arg(L, 2, "sega.sprite.tile")));
+  return 0;
+}
+int sega_sprite_palette(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  require_phase(L, Phase::render, "sega.sprite.palette");
+  require_args(L, 2, "sega.sprite.palette");
+  const std::int64_t line = int_arg(L, 1, -1, 1 << 20, "sega.sprite.palette");
+  overlay_result(L, sprite_palette(im->staged, line, str_arg(L, 2, "sega.sprite.palette")));
+  return 0;
+}
+int sega_sprite_add(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  require_phase(L, Phase::render, "sega.sprite.add");
+  require_args(L, 9, "sega.sprite.add");
+  const std::string_view provenance = str_arg(L, 1, "sega.sprite.add"), layer = str_arg(L, 2, "sega.sprite.add");
+  constexpr std::int64_t kBig = 1 << 20;
+  const std::int64_t x = int_arg(L, 3, -kBig, kBig, "sega.sprite.add"), y = int_arg(L, 4, -kBig, kBig, "sega.sprite.add"), w = int_arg(L, 5, -kBig, kBig, "sega.sprite.add"), h = int_arg(L, 6, -kBig, kBig, "sega.sprite.add");
+  const std::int64_t tile = int_arg(L, 7, -kBig, kBig, "sega.sprite.add"), palette = int_arg(L, 8, -kBig, kBig, "sega.sprite.add"), flags = int_arg(L, 9, -kBig, kBig, "sega.sprite.add");
+  overlay_result(L, sprite_add(im->staged, provenance, layer, x, y, w, h, tile, palette, flags));
+  return 0;
+}
+int sega_sprite_clip(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  require_phase(L, Phase::render, "sega.sprite.clip");
+  require_args(L, 4, "sega.sprite.clip");
+  constexpr std::int64_t kBig = 1 << 20;
+  const std::int64_t x = int_arg(L, 1, -kBig, kBig, "sega.sprite.clip"), y = int_arg(L, 2, -kBig, kBig, "sega.sprite.clip"), w = int_arg(L, 3, -kBig, kBig, "sega.sprite.clip"), h = int_arg(L, 4, -kBig, kBig, "sega.sprite.clip");
+  overlay_result(L, sprite_clip(im->staged, x, y, w, h));
+  return 0;
+}
+
 int sega_overlay_text(lua_State *L) {
   VmImpl *im = impl_of(L);
   require_phase(L, Phase::render, "sega.overlay.text");
@@ -580,6 +625,15 @@ void install_host(lua_State *L, VmImpl *im) {
   guard_namespace(L, "sega.overlay");
   lua_setreadonly(L, -1, true);
   lua_setfield(L, -2, "overlay");
+  lua_newtable(L);   // sega.sprite (SEG-140-T008; the same overlay.rgba output capability: it grants no read access)
+  bind(L, im, "sega.sprite.budget", sega_sprite_budget);
+  bind(L, im, "sega.sprite.tile", sega_sprite_tile);
+  bind(L, im, "sega.sprite.palette", sega_sprite_palette);
+  bind(L, im, "sega.sprite.add", sega_sprite_add);
+  bind(L, im, "sega.sprite.clip", sega_sprite_clip);
+  guard_namespace(L, "sega.sprite");
+  lua_setreadonly(L, -1, true);
+  lua_setfield(L, -2, "sprite");
   guard_namespace(L, "sega");
   lua_setreadonly(L, -1, true);
   lua_setfield(L, LUA_GLOBALSINDEX, "sega");
