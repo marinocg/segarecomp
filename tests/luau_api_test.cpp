@@ -266,6 +266,63 @@ void collect(Mod &m, std::vector<std::string> &names) {
   names = out.log;
 }
 
+// SEG-140-T004 (ADR 0303): positioned overlay layers declared from Luau.
+void test_overlay_layers() {
+  {   // a declared layer takes the following requests, clamped to ITS size; the fixed overlay keeps the default target
+    Mod m = start("function render()\n  sega.overlay.rect(0, 0, 2, 2, 0x11111111)\n  sega.overlay.layer(2, 'top_right', 'presentation', 3, 4, 20, 10, 1)\n  sega.overlay.target(2)\n"
+                  "  sega.overlay.rect(0, 0, 50, 50, 0x22222222)\n  sega.overlay.text(500, 500, 'hi', 0x33333333)\n  sega.overlay.target(0)\n  sega.overlay.rect(5, 5, 1, 1, 0x44444444)\nend");
+    luau::Output out;
+    check(render(m, 0, out).ok, "layers are declared and drawn in the render phase");
+    check(out.layers.size() == 1 && out.layers[0].index == 2 && out.layers[0].anchor == 2 && out.layers[0].reference == 1 && out.layers[0].dx == 3 && out.layers[0].dy == 4 && out.layers[0].w == 20 &&
+              out.layers[0].h == 10 && out.layers[0].z == 1,
+          "the declaration is reported with the viewer's anchor/reference numbering");
+    check(out.overlay.size() == 4 && out.overlay[0].layer == 0 && out.overlay[1].layer == 2 && out.overlay[2].layer == 2 && out.overlay[3].layer == 0, "each request is tagged with the layer it was drawn into");
+    check(out.overlay[1].w == 20 && out.overlay[1].h == 10, "a rect is clamped to the layer's own size, not the fixed overlay's");
+    check(out.overlay[2].kind == luau::OverlayOp::Kind::text && out.overlay[2].x == 19 && out.overlay[2].y == 9, "a text origin is clamped into the layer");
+    const luau::OverlayImage fixed = luau::rasterize_overlay(out.overlay);
+    const luau::OverlayImage layer = luau::rasterize_layer(out.layers[0], out.overlay);
+    check(fixed.width == luau::kOverlayWidth && fixed.height == luau::kOverlayHeight && layer.width == 20 && layer.height == 10 && layer.rgba.size() == 20U * 10U * 4U, "the layer image has the declared size");
+    auto at = [](const luau::OverlayImage &img, int x, int y) { return &img.rgba[(static_cast<std::size_t>(y) * static_cast<std::size_t>(img.width) + static_cast<std::size_t>(x)) * 4U]; };
+    check(at(fixed, 0, 0)[0] == 0x11 && at(fixed, 5, 5)[0] == 0x44 && at(fixed, 10, 10)[3] == 0, "the fixed overlay only holds the layer-0 requests (the layer's rect is not in it)");
+    check(at(layer, 0, 0)[0] == 0x22 && at(layer, 19, 9)[3] != 0 && at(layer, 5, 5)[0] == 0x22, "the layer holds its own requests (rect 0x22 and the text)");
+  }
+  {   // a script that never touches layers produces exactly what it did before (no layers, layer-0 requests only)
+    Mod m = start("function render() sega.overlay.rect(1, 2, 3, 4, 0xAABBCCDD) end");
+    luau::Output out;
+    check(render(m, 0, out).ok && out.layers.empty() && out.overlay.size() == 1 && out.overlay[0].layer == 0, "no layer calls, no layers");
+  }
+  {   // the target resets at the start of every callback
+    Mod m = start("local n = 0\nfunction render()\n  n = n + 1\n  if n == 1 then sega.overlay.layer(1, 'center', 'picture', 0, 0, 8, 8, 0)\n  sega.overlay.target(1) end\n  sega.overlay.rect(0, 0, 1, 1, 7)\nend");
+    luau::Output a, b;
+    check(render(m, 0, a).ok && a.overlay.size() == 1 && a.overlay[0].layer == 1, "the first frame draws into layer 1");
+    check(render(m, 1, b).ok && b.overlay.size() == 1 && b.overlay[0].layer == 0 && b.layers.empty(), "the next callback starts at the fixed overlay again, with no layer declared");
+  }
+  {   // malformed use is a script error that disables the mod, with no partial output (range)
+    const char *bad[] = {"sega.overlay.layer(0, 'center', 'picture', 0, 0, 8, 8, 0)", "sega.overlay.layer(5, 'center', 'picture', 0, 0, 8, 8, 0)", "sega.overlay.layer(1, 'middle', 'picture', 0, 0, 8, 8, 0)",
+                         "sega.overlay.layer(1, 'center', 'screen', 0, 0, 8, 8, 0)", "sega.overlay.layer(1, 'center', 'picture', 2049, 0, 8, 8, 0)", "sega.overlay.layer(1, 'center', 'picture', 0, 0, 129, 8, 0)",
+                         "sega.overlay.layer(1, 'center', 'picture', 0, 0, 8, 0, 0)", "sega.overlay.layer(1, 'center', 'picture', 0, 0, 8, 8, 4)", "sega.overlay.layer(1, 'center', 'picture', 0.5, 0, 8, 8, 0)",
+                         "sega.overlay.layer(1, 'center', 'picture', 0, 0, 8, 8)", "sega.overlay.layer(1, 5, 'picture', 0, 0, 8, 8, 0)",
+                         "sega.overlay.layer(1, 'center', 'picture', 0, 0, 8, 8, 0) sega.overlay.layer(1, 'center', 'picture', 0, 0, 8, 8, 0)", "sega.overlay.target(3)", "sega.overlay.target(-1)", "sega.overlay.target(5)"};
+    for (const char *call : bad) {
+      Mod m = start(std::string("function render() ") + call + " end");
+      luau::Output out;
+      const luau::CallResult r = render(m, 0, out);
+      check(!r.ok && r.fault == luau::Fault::range && out.overlay.empty() && out.layers.empty() && m.vm->disabled(), std::string("a malformed layer call is a range fault: ") + call);
+    }
+  }
+  {   // capability and phase: layers need overlay.rgba and the render phase like every other overlay call
+    Mod m = start("function render() sega.overlay.layer(1, 'center', 'picture', 0, 0, 8, 8, 0) end", {"host.log"});
+    luau::Output out;
+    const luau::CallResult r = render(m, 0, out);
+    check(!r.ok && r.fault == luau::Fault::capability && out.layers.empty(), "sega.overlay.layer without overlay.rgba is a capability fault");
+    Mod p = start("sega.overlay.target(0)");
+    check(!p.loaded.ok && p.loaded.fault == luau::Fault::phase, "sega.overlay.target outside render is a phase fault");
+  }
+  {   // the four-layer total is exactly the host's overlay budget
+    check(luau::kOverlayLayersMax * luau::kOverlayLayerSide * luau::kOverlayLayerSide == 65536, "four 128 x 128 layers are the host's 65,536-pixel budget");
+  }
+}
+
 void test_api_list() {
   const std::string enumerate =
       "local names = {}\n"
@@ -611,6 +668,7 @@ void test_session() {
 }  // namespace
 
 int main() {
+  test_overlay_layers();
   test_capability_gating();
   test_binding_abuse();
   test_overlay_validation();

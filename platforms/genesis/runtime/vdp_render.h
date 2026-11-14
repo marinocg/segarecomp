@@ -66,6 +66,7 @@
  * documented default silently.
  */
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "runtime.h" /* GENESIS_VDP_CRAM_BYTES */
@@ -1183,6 +1184,42 @@ int genesis_vdp_produce_frame_raster(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
  */
 int genesis_vdp_produce_frame_raster_undigested(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
                                                 const GenesisRasterFrameState *raster, GenesisFrameArtifact *frame_out);
+
+/*
+ * SEG-140 (ADR 0303): side data of a normal render for presentation-only consumers (the virtual-sprite compositor). `layer` classifies the NATIVE pixel of the
+ * rendered frame by what produced it, so a presentation layer can be ordered against it without re-deriving priority; `row_hw_sprites`/`row_hw_cells` are the
+ * hardware sprites and sprite cells the VDP itself selected for each output row (the same selection the row composer draws, so the numbers cannot drift);
+ * `sprite_limit`/`cell_budget` are the original per-line limits for the frame's width (20/40 in H40, 16/32 in H32). Producing it never changes the artifact.
+ */
+#define GENESIS_VDP_LAYER_BACKDROP 0U /* the backdrop colour (no plane or sprite pixel) */
+#define GENESIS_VDP_LAYER_LOW 1U      /* a low-priority plane or sprite pixel */
+#define GENESIS_VDP_LAYER_HIGH 2U     /* a high-priority plane or sprite pixel */
+typedef struct GenesisVdpFrameAux {
+  uint16_t width, height;
+  uint8_t sprite_limit, cell_budget, cell_height, im2;
+  uint8_t row_hw_sprites[GENESIS_FRAME_MAX_HEIGHT];
+  uint8_t row_hw_cells[GENESIS_FRAME_MAX_HEIGHT];
+  uint8_t layer[GENESIS_FRAME_MAX_WIDTH * GENESIS_FRAME_MAX_HEIGHT];
+} GenesisVdpFrameAux;
+
+/* Exactly `genesis_vdp_produce_frame` / `genesis_vdp_produce_frame_raster_undigested` (identical artifact bytes; the raster variant omits the digest) plus the side data above. */
+int genesis_vdp_produce_frame_aux(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const uint8_t vsram[GENESIS_VDP_VSRAM_BYTES],
+                                  const uint8_t cram[GENESIS_VDP_CRAM_BYTES], const uint16_t registers[GENESIS_VDP_REGISTER_COUNT],
+                                  GenesisFrameArtifact *frame_out, GenesisVdpFrameAux *aux_out);
+int genesis_vdp_produce_frame_raster_aux(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
+                                         GenesisFrameArtifact *frame_out, GenesisVdpFrameAux *aux_out);
+
+/*
+ * Decodes a whole sprite-shaped pattern block (`width_cells` x `height_cells`, flips, 4 bpp column-major cell order, palette line, interlace-2 cell height) to RGBA8,
+ * row-major, `width_px * height_px * 4` bytes. It is the VDP's own pattern/flip resolution (`genesis_vdp_resolve_sprite_pixel`) followed by its own CRAM decode
+ * (`genesis_vdp_decode_cram_entry`); pattern index 0 is alpha 0, every other pixel alpha 255. `sprite->x`/`y` are ignored. Returns nonzero for NULL, an out-of-range
+ * size/palette, or too small a capacity. Read-only: VRAM/CRAM are never modified.
+ */
+int genesis_vdp_decode_sprite_rgba(const GenesisVdpSpriteEntry *sprite, const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
+                                   const uint8_t cram[GENESIS_VDP_CRAM_BYTES], uint8_t *rgba_out, size_t capacity);
+
+/* The 128-byte CRAM image of the palette slot an output row of a produced frame used (NULL for an out-of-range row or inconsistent artifact). */
+const uint8_t *genesis_vdp_frame_row_cram(const GenesisFrameArtifact *frame, unsigned row);
 
 /*
  * SEG-118 (ADR 0262): Level 2 extended backgrounds. Builds an RGB24 surface `native_w + 2 * side` wide: the native picture in the centre

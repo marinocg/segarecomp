@@ -62,7 +62,7 @@ One header, [`platforms/genesis/sdk/segarecomp_genesis_patch.h`](../../platforms
 `segarecomp_patch_provider()` and may serve:
 
 * **`scenery.words`**: name-table words for the world cells under an off-screen column (the host still decodes patterns, palettes, flips, priority and sprites), so scenery comes from the **game's own level model** instead of wrapped VRAM;
-* **`overlay.rgba`**: a bounded RGBA overlay, used to **redraw the game's original HUD** at the edge of the widened picture;
+* **`overlay.rgba`**: a bounded RGBA overlay, used to **redraw the game's original HUD** at the edge of the widened picture; it can also supply up to four positioned layers anchored to the picture or to the whole widened surface (ADR 0303);
 * read-only inputs `frame.work_ram` (a work-RAM snapshot) and `frame.vdp` (per-line VDP state and the frame's VRAM). There is no API to write guest memory or to reach the host.
 
 Every frame is validated by the provider; a frame it declines is shown by the generic path and is never labelled authored. A complete synthetic example is [`sdk-sample/provider.c`](sdk-sample/provider.c).

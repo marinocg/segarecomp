@@ -67,6 +67,7 @@ struct VmImpl {
   Phase phase = Phase::none;
   const FrameInput *input = nullptr;   // valid only inside run_callback
   Output staged;                       // discarded unless the callback succeeds
+  int overlay_target = 0;              // SEG-140-T004: the layer sega.overlay.rect/text draw into (0 = the fixed overlay)
 };
 
 namespace {
@@ -452,6 +453,58 @@ void add_op(lua_State *L, OverlayOp op) {
 
 constexpr std::int64_t kCoord = 1 << 20;
 
+// SEG-140-T004: the size of the layer the overlay calls currently draw into.
+const OverlayLayerDecl *target_layer(const VmImpl *im) {
+  for (const OverlayLayerDecl &d : im->staged.layers)
+    if (d.index == im->overlay_target) return &d;
+  return nullptr;
+}
+int target_width(const VmImpl *im) { const OverlayLayerDecl *d = im->overlay_target != 0 ? target_layer(im) : nullptr; return d != nullptr ? d->w : kOverlayWidth; }
+int target_height(const VmImpl *im) { const OverlayLayerDecl *d = im->overlay_target != 0 ? target_layer(im) : nullptr; return d != nullptr ? d->h : kOverlayHeight; }
+
+int anchor_index(std::string_view name) {   // the viewer's SvOvAnchor order
+  static constexpr std::array<std::string_view, 9> names = {"top_left", "top_center", "top_right", "middle_left", "center", "middle_right", "bottom_left", "bottom_center", "bottom_right"};
+  for (std::size_t i = 0; i < names.size(); ++i)
+    if (names[i] == name) return static_cast<int>(i);
+  return -1;
+}
+
+int sega_overlay_layer(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  require_phase(L, Phase::render, "sega.overlay.layer");
+  require_args(L, 8, "sega.overlay.layer");
+  OverlayLayerDecl d;
+  d.index = static_cast<int>(int_arg(L, 1, 1, kOverlayLayersMax, "sega.overlay.layer"));
+  const int anchor = anchor_index(str_arg(L, 2, "sega.overlay.layer"));
+  if (anchor < 0) binding_fault(L, Fault::range, "argument 2 of sega.overlay.layer is not a known anchor");
+  d.anchor = anchor;
+  const std::string_view reference = str_arg(L, 3, "sega.overlay.layer");
+  if (reference != "picture" && reference != "presentation") binding_fault(L, Fault::range, "argument 3 of sega.overlay.layer must be \"picture\" or \"presentation\"");
+  d.reference = reference == "picture" ? 0 : 1;
+  d.dx = static_cast<int>(int_arg(L, 4, -2048, 2048, "sega.overlay.layer"));
+  d.dy = static_cast<int>(int_arg(L, 5, -2048, 2048, "sega.overlay.layer"));
+  d.w = static_cast<int>(int_arg(L, 6, 1, kOverlayLayerSide, "sega.overlay.layer"));
+  d.h = static_cast<int>(int_arg(L, 7, 1, kOverlayLayerSide, "sega.overlay.layer"));
+  d.z = static_cast<int>(int_arg(L, 8, 0, kOverlayLayersMax - 1, "sega.overlay.layer"));
+  for (const OverlayLayerDecl &e : im->staged.layers)
+    if (e.index == d.index) binding_fault(L, Fault::range, "sega.overlay.layer declares a layer that was already declared in this callback");
+  im->staged.layers.push_back(d);
+  return 0;
+}
+
+int sega_overlay_target(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  require_phase(L, Phase::render, "sega.overlay.target");
+  require_args(L, 1, "sega.overlay.target");
+  const int index = static_cast<int>(int_arg(L, 1, 0, kOverlayLayersMax, "sega.overlay.target"));
+  im->overlay_target = index;
+  if (index != 0 && target_layer(im) == nullptr) {
+    im->overlay_target = 0;
+    binding_fault(L, Fault::range, "sega.overlay.target selects a layer that has not been declared");
+  }
+  return 0;
+}
+
 int sega_overlay_rect(lua_State *L) {
   VmImpl *im = impl_of(L);
   require_phase(L, Phase::render, "sega.overlay.rect");
@@ -459,14 +512,16 @@ int sega_overlay_rect(lua_State *L) {
   const std::int64_t x = int_arg(L, 1, -kCoord, kCoord, "sega.overlay.rect"), y = int_arg(L, 2, -kCoord, kCoord, "sega.overlay.rect");
   const std::int64_t w = int_arg(L, 3, 0, kCoord, "sega.overlay.rect"), h = int_arg(L, 4, 0, kCoord, "sega.overlay.rect");
   const std::int64_t rgba = int_arg(L, 5, 0, 4294967295LL, "sega.overlay.rect");
+  const int target_w = target_width(im), target_h = target_height(im);
   const std::int64_t x0 = std::max<std::int64_t>(x, 0), y0 = std::max<std::int64_t>(y, 0);
-  const std::int64_t x1 = std::min<std::int64_t>(x + w, kOverlayWidth), y1 = std::min<std::int64_t>(y + h, kOverlayHeight);
+  const std::int64_t x1 = std::min<std::int64_t>(x + w, target_w), y1 = std::min<std::int64_t>(y + h, target_h);
   if (x1 <= x0 || y1 <= y0) {
     note(im, "overlay_clipped", "a sega.overlay.rect has no visible area");
     return 0;
   }
   if (x0 != x || y0 != y || x1 - x0 != w || y1 - y0 != h) note(im, "overlay_clamped", "a sega.overlay.rect was clamped to the overlay");
   OverlayOp op;
+  op.layer = im->overlay_target;
   op.kind = OverlayOp::Kind::rect;
   op.x = static_cast<int>(x0);
   op.y = static_cast<int>(y0);
@@ -495,9 +550,10 @@ int sega_overlay_text(lua_State *L) {
   const std::int64_t x = int_arg(L, 1, -kCoord, kCoord, "sega.overlay.text"), y = int_arg(L, 2, -kCoord, kCoord, "sega.overlay.text");
   const std::string_view text = str_arg(L, 3, "sega.overlay.text");
   const std::int64_t rgba = int_arg(L, 4, 0, 4294967295LL, "sega.overlay.text");
-  const std::int64_t cx = std::clamp<std::int64_t>(x, 0, kOverlayWidth - 1), cy = std::clamp<std::int64_t>(y, 0, kOverlayHeight - 1);
+  const std::int64_t cx = std::clamp<std::int64_t>(x, 0, target_width(im) - 1), cy = std::clamp<std::int64_t>(y, 0, target_height(im) - 1);
   if (cx != x || cy != y) note(im, "overlay_clamped", "a sega.overlay.text origin was clamped to the overlay");
   OverlayOp op;
+  op.layer = im->overlay_target;
   op.kind = OverlayOp::Kind::text;
   op.x = static_cast<int>(cx);
   op.y = static_cast<int>(cy);
@@ -566,6 +622,8 @@ void install_host(lua_State *L, VmImpl *im) {
   lua_newtable(L);   // sega.overlay
   bind(L, im, "sega.overlay.rect", sega_overlay_rect);
   bind(L, im, "sega.overlay.text", sega_overlay_text);
+  bind(L, im, "sega.overlay.layer", sega_overlay_layer);
+  bind(L, im, "sega.overlay.target", sega_overlay_target);
   if (im->granted.count("overlay.rgba") != 0) {
     lua_pushnumber(L, kOverlayWidth);
     lua_setfield(L, -2, "width");
@@ -800,6 +858,7 @@ CallResult run(VmImpl *im, std::uint64_t frame, std::uint32_t index, int nargs =
   CallResult r;
   im->phase = phase;
   im->staged = Output{};
+  im->overlay_target = 0;
   const auto now = Clock::now();
   if (im->frame != frame) {
     im->frame = frame;
@@ -969,6 +1028,7 @@ CallResult Vm::run_callback(std::string_view name, const FrameInput &input, std:
   im->input = nullptr;
   if (r.ok) out = std::move(im->staged);
   im->staged = Output{};
+  im->overlay_target = 0;
   return r;
 }
 

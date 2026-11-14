@@ -39,6 +39,8 @@ inline constexpr std::size_t kLogLineBytes = 256, kLogLinesPerCallback = 16;
 inline constexpr std::size_t kOverlayOpsPerCallback = 64, kOverlayTextBytes = 64, kFrameValueNameBytes = 32, kFrameValuesMax = 32, kNotesMax = 16;
 // The fixed HUD overlay path (platforms/genesis/sdk/segarecomp_genesis_patch.h: GENESIS_COMPAT_OVERLAY_MAX_W/H): one RGBA8 image, fully transparent where nothing is drawn.
 inline constexpr int kOverlayWidth = 128, kOverlayHeight = 256;
+// SEG-140-T004: positioned layers: at most four, each at most 128 x 128 (four of them are exactly the host's 65,536-pixel overlay budget).
+inline constexpr int kOverlayLayersMax = 4, kOverlayLayerSide = 128;
 
 // ---- copy-in / copy-out records ----
 struct FrameValue {
@@ -62,7 +64,8 @@ struct FrameInput {
 };
 struct OverlayOp {
   enum class Kind { rect, text } kind = Kind::rect;
-  int x = 0, y = 0, w = 0, h = 0;   // already clamped to the overlay
+  int layer = 0;                     // 0 = the fixed HUD overlay; 1..kOverlayLayersMax = a positioned layer (SEG-140-T004)
+  int x = 0, y = 0, w = 0, h = 0;   // already clamped to the overlay / layer
   std::uint32_t rgba = 0;            // 0xRRGGBBAA
   std::string text;                  // printable ASCII, at most 64 bytes
 };
@@ -71,8 +74,15 @@ struct Note {
   std::string cause, message;
 };
 // What one successful callback produced. A faulted callback produces nothing (staged output is discarded, phases section 6.1).
+// SEG-140-T004 (ADR 0303): a positioned, layered overlay declared with sega.overlay.layer. `anchor` and `reference` are the viewer's SvOvAnchor / SvOvReference values (0..8 / 0..1); the host validates
+// them against the live geometry (out-of-bounds, budget) and reports a rejection, it never repairs one.
+struct OverlayLayerDecl {
+  int index = 0;                     // 1..kOverlayLayersMax
+  int anchor = 0, reference = 0, dx = 0, dy = 0, w = 0, h = 0, z = 0;
+};
 struct Output {
-  std::string scene;                  // sega.scene: the scene the frame belongs to (a validated token, "" = none; SEG-139-T004)
+  std::string scene;
+  std::vector<OverlayLayerDecl> layers;                  // sega.scene: the scene the frame belongs to (a validated token, "" = none; SEG-139-T004)
   std::vector<std::string> log;
   std::vector<OverlayOp> overlay;
   std::vector<Note> notes;
@@ -102,7 +112,9 @@ struct OverlayImage {
   std::vector<std::uint8_t> rgba;   // width * height * 4, tightly packed
 };
 // Source-over compositing of the operations in order, integer arithmetic only: identical on every host. Text uses the viewer's body bitmap font (sv_font.h), left aligned at (x, y).
-[[nodiscard]] OverlayImage rasterize_overlay(std::span<const OverlayOp> ops);
+[[nodiscard]] OverlayImage rasterize_overlay(std::span<const OverlayOp> ops);   // only the ops of layer 0 (the fixed overlay), exactly as before layers existed
+// The ops of one declared layer, rasterized onto its own w x h image (SEG-140-T004).
+[[nodiscard]] OverlayImage rasterize_layer(const OverlayLayerDecl &decl, std::span<const OverlayOp> ops);
 
 // ---- static check against the API list (mod check / pack / build) ----
 struct AnalysisIssue {

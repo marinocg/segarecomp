@@ -88,7 +88,9 @@ static void set_mode(Rig *g, SvWidescreenMode m, SvSideStyle style, int width) {
 }
 
 /* ---- the mock provider ---- */
-typedef struct Mock { unsigned accept; uint8_t reason; unsigned prepared; } Mock;
+typedef struct Mock { unsigned accept; uint8_t reason; unsigned prepared; int layer_mode; int no_fixed; } Mock;
+/* layer modes (SEG-140-T004): 0 none; 1 valid A, bad offset, valid C; 2 nine submitted (four descriptors, all valid); 3 every descriptor has a bad offset */
+enum { LAYER_A_RGB_R = 200, LAYER_C_RGB_B = 200 };
 static void mock_prepare(void *state, const GenesisCompatFrame *f, GenesisCompatDecision *out) {
   Mock *m = (Mock *)state;
   ++m->prepared;
@@ -100,11 +102,41 @@ static int mock_word(void *state, unsigned plane, unsigned row, int x, int hscro
   *word = plane == 0U ? 0U : 2U;   /* Plane A blank, Plane B: solid tile 2 */
   return 1;
 }
+static void put_layer(GenesisCompatOverlay *o, unsigned i, unsigned anchor, int dy, unsigned offset, int valid_pixels, uint8_t r, uint8_t g, uint8_t b) {
+  GenesisCompatLayer *l = &o->layers[i];
+  unsigned p;
+  memset(l, 0, sizeof *l);
+  l->width = 8; l->height = 8; l->anchor = (uint8_t)anchor; l->reference = 1; l->z = (uint8_t)i; l->dy = (int16_t)dy; l->offset = offset;
+  if (valid_pixels) for (p = 0; p < 64U; ++p) { uint8_t *px = o->layer_rgba + offset + p * 4U; px[0] = r; px[1] = g; px[2] = b; px[3] = 255; }
+}
 static int mock_hud(void *state, GenesisCompatOverlay *o) {
+  Mock *m = (Mock *)state;
   unsigned i;
-  (void)state;
-  o->width = 12; o->height = 9;
-  for (i = 0; i < 12U * 9U; ++i) { o->rgba[i * 4] = 10; o->rgba[i * 4 + 1] = 200; o->rgba[i * 4 + 2] = 233; o->rgba[i * 4 + 3] = 255; }
+  const unsigned bad = GENESIS_COMPAT_LAYER_BYTES - 8U;   /* an 8 x 8 image here would run 248 bytes past the host buffer */
+  if (!m->no_fixed) {
+    o->width = 12; o->height = 9;
+    for (i = 0; i < 12U * 9U; ++i) { o->rgba[i * 4] = 10; o->rgba[i * 4 + 1] = 200; o->rgba[i * 4 + 2] = 233; o->rgba[i * 4 + 3] = 255; }
+  }
+  if (m->layer_mode != 0 && o->layer_rgba != NULL) {
+    /* a trap just past the authorised images: if a rejected layer's pixels were ever read they would show as magenta */
+    for (i = 0; i < 2U; ++i) { uint8_t *px = o->layer_rgba + bad + i * 4U; px[0] = 255; px[1] = 0; px[2] = 255; px[3] = 255; }
+    if (m->layer_mode == 1) {
+      put_layer(o, 0, 0, 60, 0, 1, LAYER_A_RGB_R, 10, 10);            /* top-left of the presentation */
+      put_layer(o, 1, 4, 0, bad, 0, 0, 0, 0);                         /* centre, image leaves the buffer */
+      put_layer(o, 2, 8, 0, 256, 1, 10, 10, LAYER_C_RGB_B);           /* bottom-right of the presentation */
+      o->layer_count = 3;
+    } else if (m->layer_mode == 2) {
+      put_layer(o, 0, 0, 60, 0, 1, LAYER_A_RGB_R, 10, 10);
+      put_layer(o, 1, 8, 0, 256, 1, 10, 10, LAYER_C_RGB_B);
+      put_layer(o, 2, 2, 100, 512, 1, 30, 30, 30);
+      put_layer(o, 3, 6, -20, 768, 1, 30, 30, 30);
+      o->layer_count = 9;   /* more than the four the host holds: only four descriptors exist */
+    } else {
+      put_layer(o, 0, 0, 60, bad, 0, 0, 0, 0);
+      put_layer(o, 1, 8, 0, bad - 4U, 0, 0, 0, 0);
+      o->layer_count = 2;
+    }
+  }
   return 1;
 }
 static const GenesisNativeCompat k_mock = {GENESIS_NATIVE_COMPAT_ABI, "synthetic.mock", 1, GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD, mock_prepare, mock_word, mock_hud};
@@ -210,6 +242,56 @@ int main(void) {
     CHECK(g.ext->request == 1 && g.ext->compat_components == GENESIS_COMPAT_HUD, "Original with a native HUD: the producer still runs, for the HUD only");
     CHECK(a != NULL && sv_host_extension_side(host) == 0 && count_colour(a, 0, 0, a->w, a->h, 10, 200, 233) > 0 && count_colour(a, 0, 0, a->w, a->h, 0, 255, 0) == 0, "Original shows no extra scenery but keeps the HUD");
     if (a != NULL) SDL_DestroySurface(a); }
+
+  /* SEG-140-T004 (ADR 0303): positioned layers through the real runtime -> viewer path, rejected one by one */
+  {
+    uint32_t rej0 = 0, rej1 = 0;
+    int last_index = -9, last_reason = -9;
+    SvExtendedLayout lt;
+    set_mode(&g, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_SIDE_RAW, 100);
+    mock.accept = GENESIS_COMPAT_SCENERY | GENESIS_COMPAT_HUD; mock.reason = 0; mock.layer_mode = 0;
+    CHECK(run_frame(&g) == 0 && run_frame(&g) == 0 && g.ext->layer_rgba != NULL && g.ext->result.layer_count == 0, "no layers: the frame is served as before");
+    mock.layer_mode = 1;
+    CHECK(run_frame(&g) == 0, "layer frame");
+    sv_host_overlay_diag(host, &rej0, NULL, NULL);
+    CHECK(run_frame(&g) == 0, "layer frame 2");
+    sv_host_overlay_diag(host, &rej1, &last_index, &last_reason);
+    CHECK(g.ext->result.layer_count == 3 && g.ext->result.layer_bad == 2U, "runtime: three submitted, only the descriptor whose image leaves the buffer is flagged");
+    CHECK(rej1 == rej0 + 1 && last_index == 1 && last_reason == SV_OVR_NO_IMAGE && strcmp(sv_ovl_reject_name((SvOvReject)last_reason), "no_image") == 0, "viewer: exactly the invalid layer is rejected, with a stable diagnostic");
+    sv_host_toast(host, ""); a = sv_host_capture_output(host);
+    if (a != NULL && sv_layout_extended_dest(a->w, a->h, 320, 224, 39, SV_ASPECT_ORIGINAL, SV_SCALE_INTEGER, &lt) == 0) {
+      const int kk = lt.native.w / 320;
+      CHECK(count_colour(a, lt.surface.x, lt.native.y + 60 * kk, 8 * kk, 8 * kk, LAYER_A_RGB_R, 10, 10) == 64 * kk * kk, "valid layer before the bad one is drawn at its anchor");
+      CHECK(count_colour(a, lt.surface.x + lt.surface.w - 8 * kk, lt.native.y + lt.native.h - 8 * kk, 8 * kk, 8 * kk, 10, 10, LAYER_C_RGB_B) == 64 * kk * kk, "valid layer after the bad one is drawn at its anchor");
+      CHECK(count_colour(a, 0, 0, a->w, a->h, 255, 0, 255) == 0, "the rejected layer exposed no pixel outside its authorised buffer (no trap colour anywhere)");
+      CHECK(count_colour(a, lt.surface.x, lt.native.y, 12 * kk, 9 * kk, 10, 200, 233) == 12 * kk * 9 * kk, "the fixed HUD is still drawn");
+    } else CHECK(0, "layer capture");
+    if (a != NULL) SDL_DestroySurface(a);
+    mock.layer_mode = 2;
+    CHECK(run_frame(&g) == 0, "overflow frame");
+    sv_host_overlay_diag(host, &rej0, NULL, NULL);
+    CHECK(run_frame(&g) == 0, "overflow frame 2");
+    sv_host_overlay_diag(host, &rej1, &last_index, &last_reason);
+    CHECK(g.ext->result.layer_count == 9 && g.ext->result.layer_bad == 0U && rej1 == rej0 + 5 && last_reason == SV_OVR_COUNT, "nine submitted: the five beyond the host's four are rejected by count, safely (no descriptor beyond the array is read)");
+    sv_host_toast(host, ""); a = sv_host_capture_output(host);
+    CHECK(a != NULL && count_colour(a, 0, 0, a->w, a->h, LAYER_A_RGB_R, 10, 10) == 64 * k * k && count_colour(a, 0, 0, a->w, a->h, 10, 10, LAYER_C_RGB_B) == 64 * k * k, "the four kept layers are drawn");
+    if (a != NULL) SDL_DestroySurface(a);
+    mock.layer_mode = 3;
+    CHECK(run_frame(&g) == 0, "all-bad frame");
+    sv_host_overlay_diag(host, &rej0, NULL, NULL);
+    CHECK(run_frame(&g) == 0, "all-bad frame 2");
+    sv_host_overlay_diag(host, &rej1, NULL, NULL);
+    sv_host_toast(host, ""); a = sv_host_capture_output(host);
+    CHECK(g.ext->result.layer_bad == 3U && rej1 == rej0 + 2 && a != NULL && count_colour(a, 0, 0, a->w, a->h, 255, 0, 255) == 0 && count_colour(a, 0, 0, a->w, a->h, 10, 200, 233) > 0,
+          "every layer rejected: both reported, the fixed HUD is still drawn, no trap pixel");
+    if (a != NULL) SDL_DestroySurface(a);
+    mock.layer_mode = 1; mock.no_fixed = 1;
+    CHECK(run_frame(&g) == 0 && run_frame(&g) == 0, "layers-only frames");
+    sv_host_toast(host, ""); a = sv_host_capture_output(host);
+    CHECK(a != NULL && count_colour(a, 0, 0, a->w, a->h, 10, 200, 233) == 0 && count_colour(a, 0, 0, a->w, a->h, LAYER_A_RGB_R, 10, 10) == 64 * k * k, "a layers-only provider draws its layers and no fixed HUD");
+    if (a != NULL) SDL_DestroySurface(a);
+    mock.layer_mode = 0; mock.no_fixed = 0;
+  }
 
   /* a provider that declines: the generic frame with Comfort, no HUD, and the verdict reason is counted */
   set_mode(&g, SV_WIDESCREEN_ENHANCED_GAMEPLAY, SV_SIDE_COMFORT, 100);

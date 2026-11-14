@@ -287,6 +287,41 @@ def main():
         rc = game_build(tmp / "geo-corrupt-game", corrupt, narrow_built["package_identity"])
         check(rc.returncode != 0 and "The Luau package is not valid" in rc.stdout + rc.stderr and "changed after" not in rc.stdout + rc.stderr and not (tmp / "geo-corrupt-game" / "game").exists(), f"a corrupted archive is refused as an invalid package: {rc.stdout[-200:]}")
 
+        # ---- SEG-140-T004 (ADR 0303): a positioned layer declared by the mod is anchored to the presentation geometry, end to end through the played program ----
+        layer_script = (example / "scripts/main.luau").read_text().replace(
+            "function render(frame: number)\n",
+            'function render(frame: number)\n  sega.overlay.layer(1, "bottom_right", "presentation", 0, 0, 16, 8, 3)\n  sega.overlay.target(1)\n  sega.overlay.rect(0, 0, 16, 8, 0xFF00FFFF)\n  sega.overlay.target(0)\n', 1)
+        check(layer_script != (example / "scripts/main.luau").read_text(), "the layer calls were injected into render")
+        lay_pkg, lay_built = pack(project("luau-layer", script=layer_script), build=True)
+        lay = tmp / "layer-game"
+        r = game_build(lay, lay_pkg, lay_built["package_identity"])
+        check(r.returncode == 0 and (lay / "game").is_file(), "a package that declares a positioned layer builds: " + r.stdout[-300:] + r.stderr[-300:])
+        if r.returncode == 0:
+            def magenta(frame):
+                px = [(x, y) for y, row in enumerate(frame) for x, c in enumerate(row) if c == (255, 0, 255)]
+                return px, (min(p[0] for p in px), max(p[0] for p in px), min(p[1] for p in px), max(p[1] for p in px)) if px else None
+            res = {}
+            for name, mode, ratio in (("43", "original", None), ("169", "enhanced_gameplay", "16:9"), ("329", "enhanced_gameplay", "32:9")):
+                cfg = tmp / f"layer-{name}.cfg"
+                cfg.write_text(f"video.widescreen={mode}\nvideo.widescreen_side_style=raw\nvideo.scale=integer\nvideo.aspect=original\n" + (f"video.widescreen_ratio={ratio}\n" if ratio else ""))
+                fr = tmp / f"layer-{name}.bmp"
+                subprocess.run([str(lay / "game"), "--instruction-budget", "4000000"], text=True, capture_output=True, env=dict(env, SEGARECOMP_VIEWER_FINAL_FRAME=str(fr), SEGARECOMP_VIEWER_SETTINGS=str(cfg)), timeout=240, cwd=tmp)
+                frame = read_bmp(fr) if fr.is_file() else None
+                res[name] = (frame, magenta(frame) if frame else (None, None))
+            for name, (frame, (px, box)) in res.items():
+                check(frame is not None and px, f"{name}: the mod's layer is drawn: {len(px) if px else 0} pixels")
+            f43, (p43, b43) = res["43"]
+            f169, (p169, b169) = res["169"]
+            f329, (p329, b329) = res["329"]
+            if p43 and p169 and p329:
+                # 4:3 is an exact 3x picture: the layer is the 16 x 8 block (x3) against the picture's bottom-right corner. The wider surfaces are scaled to the 960-wide window (hand arithmetic: 398 and 796 pixels
+                # wide, 224 high, letterboxed vertically), so the layer must be flush with the RIGHT edge of the window and end where the scaled surface ends, not where the picture ends.
+                check(len(p43) == 16 * 8 * 9 and b43 == (912, 959, 648, 671), f"4:3: the layer is the exact block at the picture's bottom-right corner: {b43} ({len(p43)} px)")
+                for name, sw, box in (("16:9", 398, b169), ("32:9", 796, b329)):
+                    bottom = int((672 + 224 * 960 / sw) / 2) - 1
+                    check(box[1] == 959 and abs(box[3] - bottom) <= 2, f"{name}: the layer is flush with the right edge and the bottom of the WIDER surface (expected bottom {bottom}): {box}")
+                    check(box[0] > 960 * (sw - 40) // sw - 4, f"{name}: the layer is inside the far-right 40 surface pixels (it is anchored to the presentation, not the picture): {box}")
+
         # ---- failure isolation: a script fault disables only the mod; the guest runs on to the Vanilla end state ----
         script3 = (example / "scripts/main.luau").read_text().replace("function render(frame: number)\n", "function render(frame: number)\n  if frame == 30 then error('boom') end\n")
         pkg3, built3 = pack(project("luau-hud-fault", script=script3), build=True)

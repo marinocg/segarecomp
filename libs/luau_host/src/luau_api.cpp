@@ -12,7 +12,7 @@ namespace segarecomp::luau {
 namespace {
 
 // The ONLY list of host names a script can reach. A name is added here, in a new ABI minor if it needs a capability the catalogue does not have (native-sdk-abi-2.md section 7).
-constexpr std::array<ApiEntry, 17> kApi = {{
+constexpr std::array<ApiEntry, 19> kApi = {{
     {"sega.log", "host.log", "function", "message:string", "", "all", "Appends one line to the host log (at most 256 bytes, 16 lines per callback; printable ASCII)."},
     {"sega.frame.value", "frame.work_ram", "function", "name:string", "number?", "render",
      "Reads one named integer the host published for this frame (a read-only copy; nil when the host publishes no such value)."},
@@ -22,6 +22,10 @@ constexpr std::array<ApiEntry, 17> kApi = {{
      "Requests a filled rectangle; integers only, clamped to the overlay, rgba is 0xRRGGBBAA, at most 64 requests per callback."},
     {"sega.overlay.text", "overlay.rgba", "function", "x:number,y:number,text:string,rgba:number", "", "render",
      "Requests text in the host's bitmap font (printable ASCII, at most 64 bytes); the origin is clamped to the overlay."},
+    {"sega.overlay.layer", "overlay.rgba", "function", "index:number,anchor:string,reference:string,dx:number,dy:number,w:number,h:number,z:number", "", "render",
+     "Declares positioned overlay layer 1-4 (at most 128 x 128): anchor is top_left, top_center, top_right, middle_left, center, middle_right, bottom_left, bottom_center or bottom_right; reference is picture or presentation (the picture plus the visible widescreen side); dx, dy are added to the anchored position; z 0-3 orders the layers. The host rejects a layer that does not lie wholly inside its reference or exceeds the overlay budget, with a diagnostic; it never moves or clips it."},
+    {"sega.overlay.target", "overlay.rgba", "function", "index:number", "", "render",
+     "Selects the layer the following sega.overlay.rect and sega.overlay.text draw into: 0 is the fixed HUD overlay (the default at the start of every callback), 1-4 a layer declared earlier in the same callback."},
     {"sega.scene", "overlay.rgba", "function", "id:string", "", "render",
      "Names the scene this frame belongs to (a token [a-z0-9_-], at most 32 characters; the last call wins). The host uses it only to count what was delivered per scene against the package's declared geometry; it is a claim, never inferred, and grants nothing."},
     {"sega.mem.read", "memory.read.m68k.work_ram", "function", "space:string,offset:number,width:number", "number", "reset,frame-begin,input,post-input,frame-end",
@@ -186,8 +190,10 @@ bool atlas_on(int x, int y) {
 
 }  // namespace
 
-OverlayImage rasterize_overlay(std::span<const OverlayOp> ops) {
+static OverlayImage raster_ops(int width, int height, int layer, std::span<const OverlayOp> ops) {
   OverlayImage img;
+  img.width = width;
+  img.height = height;
   img.rgba.assign(static_cast<std::size_t>(img.width) * static_cast<std::size_t>(img.height) * 4U, 0);
   const auto pixel = [&](int x, int y) -> std::uint8_t * {
     if (x < 0 || y < 0 || x >= img.width || y >= img.height) return nullptr;
@@ -195,6 +201,7 @@ OverlayImage rasterize_overlay(std::span<const OverlayOp> ops) {
   };
   const SvFontFace &face = sv_font_faces[SV_FONT_BODY];
   for (const OverlayOp &op : ops) {
+    if (op.layer != layer) continue;
     if (op.kind == OverlayOp::Kind::rect) {
       for (int y = op.y; y < op.y + op.h; ++y)
         for (int x = op.x; x < op.x + op.w; ++x)
@@ -213,5 +220,9 @@ OverlayImage rasterize_overlay(std::span<const OverlayOp> ops) {
   }
   return img;
 }
+
+OverlayImage rasterize_overlay(std::span<const OverlayOp> ops) { return raster_ops(kOverlayWidth, kOverlayHeight, 0, ops); }
+
+OverlayImage rasterize_layer(const OverlayLayerDecl &decl, std::span<const OverlayOp> ops) { return raster_ops(decl.w, decl.h, decl.index, ops); }
 
 }  // namespace segarecomp::luau

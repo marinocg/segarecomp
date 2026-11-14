@@ -103,6 +103,10 @@ SvExtSource sv_host_extension_source(const SvHost *host);
 /* SEG-139-T004: names the scene the following frames belong to (a declared scene id; NULL or "" = unscoped). Bounded copy; a scene the package did not declare is accounted
  * in the unscoped bucket. Provider/adapter-supplied, never inferred by the host. */
 void sv_host_set_scene(SvHost *host, const char *scene);
+
+/* SEG-140-T004 (ADR 0303): diagnostics of the positioned/layered overlays. `rejected` is the saturating count of layers the planner rejected over the session (planned per presented frame
+ * against that frame's geometry); `last_index`/`last_reason` (an SvOvReject, see sv_ovl_reject_name) describe the most recent rejection (-1 / 0 = none yet). Any pointer may be NULL. */
+void sv_host_overlay_diag(const SvHost *host, uint32_t *rejected, int *last_index, int *last_reason);
 /* Coverage report of the frames presented through sv_host_present_extended: stable JSON (sv_cov_report_json); returns the length needed (snprintf-like). */
 size_t sv_host_coverage_json(const SvHost *host, char *buf, size_t cap);
 /* 1 when the last extended frame was outside the declared aspect range and was therefore presented through the generic path (provider content dropped). */

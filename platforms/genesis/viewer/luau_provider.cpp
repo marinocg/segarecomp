@@ -10,10 +10,12 @@
 
 #include "segarecomp_genesis_patch.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 extern "C" {
@@ -35,6 +37,8 @@ struct State {
   bool started = false, failed = false;
   std::uint64_t frame = 0;
   luau::OverlayImage image;
+  bool fixed = false;   // some request drew into the fixed HUD overlay (layer 0)
+  std::vector<std::pair<luau::OverlayLayerDecl, luau::OverlayImage>> layers;   // SEG-140-T004: positioned layers of the frame (declaration order)
   bool have_image = false;
 };
 
@@ -125,6 +129,9 @@ void prepare(void *state, const GenesisCompatFrame *frame, GenesisCompatDecision
   for (const std::string &line : result.log) std::fprintf(stderr, "LUAU_MOD_LOG {\"line\":\"%s\"}\n", json_escaped(line).c_str());
   if (result.overlay.empty()) return;
   s.image = luau::rasterize_overlay(result.overlay);
+  s.fixed = std::any_of(result.overlay.begin(), result.overlay.end(), [](const luau::OverlayOp &op) { return op.layer == 0; });
+  s.layers.clear();
+  for (const luau::OverlayLayerDecl &d : result.layers) s.layers.emplace_back(d, luau::rasterize_layer(d, result.overlay));
   s.have_image = true;
   out->accepted = GENESIS_COMPAT_HUD;
   if (!result.scene.empty() && result.scene.size() <= GENESIS_COMPAT_SCENE_MAX) std::memcpy(out->scene, result.scene.c_str(), result.scene.size() + 1U);   // SEG-139-T004: the mod's own scene claim (validated token)
@@ -135,12 +142,35 @@ int scenery_word(void *, unsigned, unsigned, int, int, int, uint16_t *) { return
 int hud(void *state, GenesisCompatOverlay *out) {
   State &s = *static_cast<State *>(state);
   if (!s.have_image || out->capacity < s.image.rgba.size()) return 0;
-  std::memcpy(out->rgba, s.image.rgba.data(), s.image.rgba.size());
-  out->width = static_cast<std::uint16_t>(s.image.width);
-  out->height = static_cast<std::uint16_t>(s.image.height);
+  const bool fixed = s.fixed;   // only a request that drew into the fixed overlay makes the legacy path show anything
+  if (fixed) {
+    std::memcpy(out->rgba, s.image.rgba.data(), s.image.rgba.size());
+    out->width = static_cast<std::uint16_t>(s.image.width);
+    out->height = static_cast<std::uint16_t>(s.image.height);
+  }
   out->fallback_x = 0;
   out->fallback_y = 0;
-  return 1;
+  if (out->layer_rgba != nullptr) {   // SEG-140-T004: the declared layers, packed one after another into the host's buffer
+    std::size_t offset = 0;
+    out->layer_count = 0;
+    for (const auto &entry : s.layers) {
+      const std::size_t bytes = entry.second.rgba.size();
+      if (out->layer_count >= GENESIS_COMPAT_LAYERS_MAX || offset + bytes > out->layer_capacity) break;
+      std::memcpy(out->layer_rgba + offset, entry.second.rgba.data(), bytes);
+      GenesisCompatLayer &l = out->layers[out->layer_count++];
+      std::memset(&l, 0, sizeof l);
+      l.width = static_cast<std::uint16_t>(entry.first.w);
+      l.height = static_cast<std::uint16_t>(entry.first.h);
+      l.anchor = static_cast<std::uint8_t>(entry.first.anchor);
+      l.reference = static_cast<std::uint8_t>(entry.first.reference);
+      l.z = static_cast<std::uint8_t>(entry.first.z);
+      l.dx = static_cast<std::int16_t>(entry.first.dx);
+      l.dy = static_cast<std::int16_t>(entry.first.dy);
+      l.offset = static_cast<std::uint32_t>(offset);
+      offset += bytes;
+    }
+  }
+  return fixed || out->layer_count > 0 ? 1 : 0;
 }
 
 const GenesisNativeCompat kTable = {GENESIS_NATIVE_COMPAT_ABI, "luau-hud-host", 1, GENESIS_COMPAT_HUD, prepare, scenery_word, hud};
