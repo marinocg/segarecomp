@@ -508,7 +508,7 @@ int sv_cov_frame_ex(SvCovAccount *a, SvDisplayRatio requested, const char *scene
     uint64_t *n = a->count[si][c];
     if (st == SV_COV_COVERED) cov_bump(&n[0]);
     else if (st == SV_COV_MISSING) cov_bump(&n[1]);
-    else if (st == SV_COV_UNDECLARED) { cov_bump(&n[2]); reasons |= SV_REJ_BIT(SV_REJ_UNDECLARED); }
+    else if (st == SV_COV_UNDECLARED) { cov_bump(&n[2]); if (a->decl.present) reasons |= SV_REJ_BIT(SV_REJ_UNDECLARED); }   /* a package that declares nothing claims nothing: counted, never announced */
     else if (st == SV_COV_OUTSIDE_RANGE) cov_bump(&n[3]);
     if (in_range && si < a->decl.scene_count && (a->decl.scenes[si].declared & SV_COV_BIT(c)) != 0) cov_bump(&n[4]);   /* requested */
     if (off) cov_bump(&n[5]);

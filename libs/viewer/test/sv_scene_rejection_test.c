@@ -79,10 +79,10 @@ static void model_apply(Truth *g, const Frame *f) {
   if (f->stale) { g->reason[SV_REJ_UNVERIFIED_STATE]++; return; }   /* refused before accounting: reasons only */
   if (f->hud_only) { off[0] = 0; } else off[0] = f->scenery && side > 0; off[1] = f->hud; off[2] = f->stage != 0;
   acc[0] = off[0] && f->surf_level <= f->level && !f->bad_pitch;
-  claim = !f->hud_only;
+  claim = !f->hud_only && side > 0 && f->surf_level != 0;   /* a surface without side columns claims no extension: never refused as one */
   acc[1] = f->hud;
   acc[2] = f->stage == SV_ACT_COMPOSED && (f->prov == 2 || (f->prov == 1 && f->state_ok));
-  if (claim && f->surf_level > f->level) why |= 1u << SV_REJ_UNSUPPORTED_MODE; else if (claim && (f->bad_pitch || side == 0)) why |= 1u << SV_REJ_INVALID_SURFACE;
+  if (claim && f->surf_level > f->level) why |= 1u << SV_REJ_UNSUPPORTED_MODE; else if (claim && f->bad_pitch) why |= 1u << SV_REJ_INVALID_SURFACE;
   if (f->stage == SV_ACT_SUBMITTED || f->stage == SV_ACT_VALIDATED) why |= 1u << SV_REJ_VSPRITE_UNPRESENTED;
   if (f->stage == SV_ACT_REJECTED) why |= 1u << SV_REJ_VSPRITE_REJECTED;
   if (f->stage > SV_ACT_REJECTED || (f->stage == SV_ACT_COMPOSED && f->prov != 1 && f->prov != 2)) why |= 1u << SV_REJ_UNSUPPORTED_MODE;
@@ -133,7 +133,7 @@ static uint64_t out_hash(SvHost *h) {
 }
 
 /* the script: every aspect x scene x variant (deterministic) */
-enum { VARIANTS = 18 };
+enum { VARIANTS = 19 };
 static Frame make(int ratio_i, int scene_i, int v) {
   static const int nums[4] = {4, 16, 21, 32}, dens[4] = {3, 9, 9, 9};
   static const char *scenes[3] = {"a", "b", "zz"};
@@ -159,7 +159,8 @@ static Frame make(int ratio_i, int scene_i, int v) {
     case 14: f.scenery = 0; f.hud = 1; break;                   /* a HUD alone proves nothing about scenery or actors */
     case 15: f.scenery = 1; f.hud = 0; break;                   /* scenery alone proves nothing about actors or HUD */
     case 16: f.stage = 77; f.prov = 2; break;                   /* an unknown stage is refused */
-    default: f.hud_only = 1; f.scenery = 0; break;              /* the normal HUD-only surface: no extension, no refusal */
+    case 17: f.hud_only = 1; f.scenery = 0; break;              /* a HUD-only surface without a pixel buffer: no extension, no refusal */
+    default: f.surf_level = 0; f.scenery = 0; f.bad_pitch = 1; break;   /* what the live viewer hands over in Original: a pixel buffer, produced as Original, plus the HUD: never refused */
   }
   return f;
 }
@@ -286,6 +287,11 @@ int main(void) {
     CHECK(present(h, &f, ++base) == 0 && sv_host_extension_side(h) == 0 && strstr(json_of(h), "\"last_reason\":\"unsupported_mode\"") != NULL && toast_has(h, "not supported"), "a surface produced above the requested level is refused with a reason");
     sv_host_toast(h, "");
     CHECK(present(h, &f, ++base) == 0 && h->toast_count == 0, "the notice is raised on the transition, not on every frame");
+    /* Original asks for no extension: a surface produced above it (the normal HUD carrier) is never refused and raises no notice */
+    set(h, 4, 3, 0, SV_SIDE_RAW);
+    f = make(1, 0, 0);
+    sv_host_toast(h, "");
+    CHECK(present(h, &f, ++base) == 0 && strstr(json_of(h), "\"last_reason\":\"none\"") != NULL && h->toast_count == 0, "in Original no extension is requested, so none is refused");
     /* undeclared scene: shown content is never support */
     set(h, 16, 9, 2, SV_SIDE_RAW);
     f = make(1, 2, 0);

@@ -1462,9 +1462,9 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     }
     sv_actor_signal(ext, &a_off, &a_acc, &a_why);
     off |= a_off; acc |= a_acc; why |= a_why;
-    if (!accepted && ext->status != SV_WS_UNAVAILABLE && (ext->rgb24 != NULL || ext->side > 0)) {   /* only a surface that claims an extension can be refused as one (a HUD-only surface is normal) */
-      if (chk == SV_EXT_MODE) why |= SV_REJ_BIT(SV_REJ_UNSUPPORTED_MODE);
-      else if (chk != SV_EXT_OK) why |= SV_REJ_BIT(SV_REJ_INVALID_SURFACE);
+    if (!accepted && ext->status != SV_WS_UNAVAILABLE && ext->side > 0 && ext->mode != SV_WIDESCREEN_ORIGINAL && h->settings.video.widescreen != SV_WIDESCREEN_ORIGINAL) {   /* only a requested extension can be refused: in Original nothing is asked for, the viewer always hands over its pixel buffer, and a HUD-only surface is the normal case */
+      if ((int)ext->mode > (int)h->settings.video.widescreen) why |= SV_REJ_BIT(SV_REJ_UNSUPPORTED_MODE);
+      else if (chk == SV_EXT_GEOMETRY || chk == SV_EXT_PITCH || chk == SV_EXT_SIZE) why |= SV_REJ_BIT(SV_REJ_INVALID_SURFACE);
     }
     if (h->geom_status != SV_GEOM_OK) why |= SV_REJ_BIT(SV_REJ_OVER_DECLARED);
     if (!sv_cov_frame_ex(&h->cov, req, h->cov_scene[0] != '\0' ? h->cov_scene : NULL, off, acc, why, ext->actor_reject)) {

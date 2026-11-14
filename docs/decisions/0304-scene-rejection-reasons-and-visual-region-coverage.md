@@ -18,7 +18,7 @@
 | `virtual_sprite_unpresented` | a set was submitted or validated but never composed and presented |
 | `invalid_surface` | a surface that claims an extension has an inconsistent size, pitch or geometry |
 
-Existing failure classes are reused (`SvExtCheck`, `SvGeomStatus`, the declaration range check, `GenesisVirtualReason`); only the grouping and the two virtual-sprite stage reasons are new. A HUD-only surface (no extension claimed) is the normal case and is never refused as `invalid_surface` or `unsupported_mode`.
+Existing failure classes are reused (`SvExtCheck`, `SvGeomStatus`, the declaration range check, `GenesisVirtualReason`); only the grouping and the two virtual-sprite stage reasons are new. A surface is refused as `invalid_surface` or `unsupported_mode` only when the user actually requested an extension (Widescreen Mode above Original) and the surface claims produced side columns (side > 0, produced above Original). The live viewer hands over its pixel buffer on every frame and a HUD-only/Original surface is the normal case, so none of those is ever a refusal or a notice; `undeclared` is a reason only for a package that declares something (a package with no declaration claims nothing and keeps counting `undeclared` silently, as before). This was found by `mod_luau_executable_test` and is part of the evidence.
 
 ## Decision 2: offered, accepted, presented (additive report keys)
 

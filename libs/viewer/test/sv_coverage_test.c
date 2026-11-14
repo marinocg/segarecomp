@@ -102,6 +102,7 @@ int main(void) {
   CHECK(strstr(json, "\"declared\":false") != NULL && strstr(json, "\"last_status\":\"no frames\"") != NULL && strstr(json, "{\"id\":\"*\"") != NULL, "an empty undeclared account keeps the shape");
   (void)sv_cov_frame(&acc, R(32, 9), NULL, SV_COV_BIT(SV_COV_SCENERY));
   (void)sv_cov_report_json(&acc, json, sizeof json);
+  CHECK(acc.last_reason == SV_REJ_NONE && acc.reason_frames[SV_REJ_UNDECLARED] == 0, "no declaration: undeclared delivery is counted but never a rejection reason (existing packages unchanged)");
   CHECK(strstr(json, "\"last_status\":\"no declaration\"") != NULL && strstr(json, "\"undeclared\":1") != NULL && strstr(json, "\"outside_range_frames\":0") != NULL, "no declaration: counted as undeclared, never outside");
   /* SEG-140-T005: the actor signal. Only a COMPOSED set with a known provenance (and a verified snapshot for game-state art) is a delivery; every earlier stage is evidence of nothing. */
   {
