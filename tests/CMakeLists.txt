@@ -1509,6 +1509,12 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER)
   set_property(TEST mod_vsprite_abi2_test APPEND PROPERTY LABELS full fast)
   set_property(TEST mod_vsprite_abi2_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
   set_property(TEST mod_vsprite_abi2_test PROPERTY TIMEOUT 1800)
+  # F28 (SEG-138-T010/T011, SEG-140-T008/T009/T010): the integrated acceptance: scheduled gameplay + HUD + 32:9 side-column sprites through the Luau and the native ABI 2 route, state/replay/rewind, negatives.
+  add_test(NAME mod_f28_integration_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_f28_integration_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${_scd_sdl_prefix})
+  set_property(TEST mod_f28_integration_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST mod_f28_integration_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST mod_f28_integration_test PROPERTY TIMEOUT 1500)
   add_test(NAME genesis_viewer_extension_sdl_test COMMAND genesis_viewer_extension_sdl_test)
   set_property(TEST genesis_viewer_extension_sdl_test APPEND PROPERTY LABELS full fast)
   set_property(TEST genesis_viewer_extension_sdl_test PROPERTY TIMEOUT 240)
