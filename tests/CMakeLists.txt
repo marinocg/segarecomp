@@ -283,6 +283,15 @@ segarecomp_enable_warnings(genesis_native_compat_tests)
 add_test(NAME genesis_native_compat_tests COMMAND genesis_native_compat_tests)
 set_property(TEST genesis_native_compat_tests APPEND PROPERTY LABELS full fast)
 
+# SEG-140 (ADR 0303): authored virtual sprites. T002 differential decode against the VDP's own output; T003 layers, clipping and the original per-line budget.
+foreach(_vs genesis_vsprite_decode genesis_vsprite_layers)
+  add_executable(${_vs}_tests ${_vs}_test.cpp)
+  target_link_libraries(${_vs}_tests PRIVATE segarecomp::runtime_genesis_vsprite segarecomp::runtime_genesis)
+  segarecomp_enable_warnings(${_vs}_tests)
+  add_test(NAME ${_vs}_tests COMMAND ${_vs}_tests)
+  set_property(TEST ${_vs}_tests APPEND PROPERTY LABELS full fast)
+endforeach()
+
 add_executable(genesis_viewer_tests genesis_viewer_test.cpp ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/viewer.c)
 target_include_directories(genesis_viewer_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer)
 target_link_libraries(genesis_viewer_tests PRIVATE segarecomp::runtime_genesis)

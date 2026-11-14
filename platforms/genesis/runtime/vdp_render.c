@@ -844,18 +844,17 @@ static GenesisVdpCandidatePixel genesis_vdp_plane_candidate_from_word(const Gene
  * SEG-121: the evaluation (SAT walk, per-line sprite limit, cell budget, flips, priority) does not depend on x, so the SAME code serves the native row
  * (`x_origin` 0, `span` = picture width) and the Level 3 extension (`x_origin` = -side, `span` = picture width + 2 * side): `out[i]` is screen column
  * `x_origin + i`. Selection and budget are identical in both, so the extension can never show a sprite the native line's evaluation would drop. */
-static int genesis_vdp_build_sprite_row(const GenesisVdpRenderContext *ctx, const GenesisRasterLine *line,
-                                        unsigned row, int x_origin, unsigned span, GenesisVdpCandidatePixel *out) {
+/* SEG-140-T003: the per-line SAT walk (link order, per-line limit, overflow stop) shared by the row composer and the budget accounting, so the number a
+ * diagnostic reports is by construction the number the VDP evaluates. Writes up to 20 selected entries; returns -1 only when the SAT base cannot be decoded. */
+static int genesis_vdp_select_row_sprites(const GenesisVdpRenderContext *ctx, const GenesisRasterLine *line, unsigned row,
+                                          GenesisVdpSpriteEntry selected[20], unsigned *selected_count_out) {
   const unsigned max_sprites = ctx->geometry.h40 ? GENESIS_VDP_SAT_H40_MAX_SPRITES : GENESIS_VDP_SAT_H32_MAX_SPRITES;
   const unsigned per_line_limit = ctx->geometry.h40 ? 20U : 16U;
-  const unsigned cell_budget_start = ctx->geometry.h40 ? 40U : 32U;
-  GenesisVdpSpriteEntry selected[20];
   unsigned selected_count = 0U;
   unsigned visited[GENESIS_VDP_SAT_H40_MAX_SPRITES] = {0};
   uint32_t sat_base = 0U;
   unsigned current = 0U;
-  unsigned cell_budget = cell_budget_start;
-  memset(out, 0, (size_t)span * sizeof(out[0]));
+  *selected_count_out = 0U;
   if (genesis_vdp_sat_base_address(line->registers, &sat_base) != 0) return -1;
   for (unsigned step = 0U; step < max_sprites; ++step) {
     GenesisVdpSpriteEntry entry;
@@ -874,6 +873,18 @@ static int genesis_vdp_build_sprite_row(const GenesisVdpRenderContext *ctx, cons
     if (entry.link == 0U || entry.link >= max_sprites) break;
     current = entry.link;
   }
+  *selected_count_out = selected_count;
+  return 0;
+}
+
+static int genesis_vdp_build_sprite_row(const GenesisVdpRenderContext *ctx, const GenesisRasterLine *line,
+                                        unsigned row, int x_origin, unsigned span, GenesisVdpCandidatePixel *out) {
+  const unsigned cell_budget_start = ctx->geometry.h40 ? 40U : 32U;
+  GenesisVdpSpriteEntry selected[20];
+  unsigned selected_count = 0U;
+  unsigned cell_budget = cell_budget_start;
+  memset(out, 0, (size_t)span * sizeof(out[0]));
+  if (genesis_vdp_select_row_sprites(ctx, line, row, selected, &selected_count) != 0) return -1;
   for (unsigned s = 0U; s < selected_count && cell_budget != 0U; ++s) {
     const GenesisVdpSpriteEntry *sprite = &selected[s];
     const unsigned width_px = sprite->width_cells * GENESIS_VDP_TILE_WIDTH;
@@ -901,9 +912,10 @@ static int genesis_vdp_build_sprite_row(const GenesisVdpRenderContext *ctx, cons
 
 /* Six-layer priority order, highest to lowest: sprite-high, planeA/window-high, planeB-high, sprite-low,
  * planeA/window-low, planeB-low, then the backdrop -- see the priority citation in vdp_render.h. */
-static unsigned genesis_vdp_select_cram_index(const GenesisVdpCandidatePixel *plane_a,
+/* SEG-140-T003: `layer_out` (may be NULL, then folded away) reports which class of native content produced the pixel: backdrop, low-priority or high-priority. */
+static inline unsigned genesis_vdp_select_cram_index(const GenesisVdpCandidatePixel *plane_a,
                                               const GenesisVdpCandidatePixel *plane_b,
-                                              const GenesisVdpCandidatePixel *sprite, unsigned backdrop) {
+                                              const GenesisVdpCandidatePixel *sprite, unsigned backdrop, uint8_t *layer_out) {
   const GenesisVdpCandidatePixel *winner = NULL;
   if (sprite->opaque && sprite->priority) {
     winner = sprite;
@@ -918,6 +930,7 @@ static unsigned genesis_vdp_select_cram_index(const GenesisVdpCandidatePixel *pl
   } else if (plane_b->opaque && !plane_b->priority) {
     winner = plane_b;
   }
+  if (layer_out != NULL) *layer_out = winner == NULL ? (uint8_t)GENESIS_VDP_LAYER_BACKDROP : (winner->priority ? (uint8_t)GENESIS_VDP_LAYER_HIGH : (uint8_t)GENESIS_VDP_LAYER_LOW);
   if (winner != NULL) return genesis_vdp_cram_index(winner->palette, winner->index);
   return backdrop;
 }
@@ -998,8 +1011,8 @@ GENESIS_VDP_HOT GenesisVdpCandidatePixel genesis_vdp_plane_run_pixel(const Genes
 
 /* Renders one output row of CRAM indices from the scanline state `line`. The state must have passed
  * genesis_vdp_validate_line. */
-static void genesis_vdp_render_row(const GenesisVdpRenderContext *ctx, const GenesisRasterLine *line, unsigned row,
-                                   uint8_t *pixels_out) {
+GENESIS_VDP_HOT void genesis_vdp_render_row_impl(const GenesisVdpRenderContext *ctx, const GenesisRasterLine *line, unsigned row,
+                                   uint8_t *pixels_out, uint8_t *layers_out) {
   GenesisVdpCandidatePixel sprites[GENESIS_FRAME_MAX_WIDTH];
   GenesisVdpRowPlane plane_a_state;
   GenesisVdpRowPlane plane_b_state;
@@ -1018,6 +1031,7 @@ static void genesis_vdp_render_row(const GenesisVdpRenderContext *ctx, const Gen
     GenesisVdpCandidatePixel plane_b;
     if ((line->registers[0] & GENESIS_VDP_REG0_LEFT_BLANK_BIT) != 0U && x < GENESIS_VDP_TILE_WIDTH) {
       pixels_out[x] = (uint8_t)backdrop; /* left 8 pixels masked to the backdrop color */
+      if (layers_out != NULL) layers_out[x] = (uint8_t)GENESIS_VDP_LAYER_BACKDROP;
       continue;
     }
     if (genesis_vdp_window_covers(line->registers, &ctx->geometry, x, row)) {
@@ -1027,8 +1041,12 @@ static void genesis_vdp_render_row(const GenesisVdpRenderContext *ctx, const Gen
       plane_a = genesis_vdp_plane_run_pixel(ctx, &run_a, x, row);
     }
     plane_b = genesis_vdp_plane_run_pixel(ctx, &run_b, x, row);
-    pixels_out[x] = (uint8_t)genesis_vdp_select_cram_index(&plane_a, &plane_b, &sprites[x], backdrop);
+    pixels_out[x] = (uint8_t)genesis_vdp_select_cram_index(&plane_a, &plane_b, &sprites[x], backdrop, layers_out != NULL ? &layers_out[x] : NULL);
   }
+}
+
+static void genesis_vdp_render_row(const GenesisVdpRenderContext *ctx, const GenesisRasterLine *line, unsigned row, uint8_t *pixels_out) {
+  genesis_vdp_render_row_impl(ctx, line, row, pixels_out, NULL);
 }
 
 int genesis_vdp_compose_pixel(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
@@ -1096,7 +1114,8 @@ void genesis_vdp_frame_digest(const GenesisFrameArtifact *frame, uint8_t digest_
  * journal, or is NULL with `uniform` describing a single static state for every line (the legacy snapshot producer).
  * Validation happens entirely up front, so a failure leaves `*frame_out` untouched and a success is never partial. */
 static int genesis_vdp_render_frame(const uint8_t *vram, const GenesisRasterFrameState *raster,
-                                    const GenesisRasterLine *uniform, GenesisFrameArtifact *frame_out, int with_digest) {
+                                    const GenesisRasterLine *uniform, GenesisFrameArtifact *frame_out, int with_digest,
+                                    GenesisVdpFrameAux *aux) {
   GenesisVdpRenderContext ctx;
   GenesisVdpDisplayGeometry first;
   unsigned slot_of_line[GENESIS_RASTER_MAX_LINES];
@@ -1157,12 +1176,32 @@ static int genesis_vdp_render_frame(const uint8_t *vram, const GenesisRasterFram
         ++applied;
       }
     }
-    genesis_vdp_render_row(&ctx, line, row, &frame_out->pixels[(size_t)row * first.width]);
+    if (aux != NULL) {
+      GenesisVdpSpriteEntry selected[20];
+      unsigned count = 0U;
+      unsigned cells = 0U;
+      genesis_vdp_render_row_impl(&ctx, line, row, &frame_out->pixels[(size_t)row * first.width], &aux->layer[(size_t)row * first.width]);
+      /* the budget the VDP itself evaluates for this line (the SAME selection the row composer used) */
+      if (genesis_vdp_select_row_sprites(&ctx, line, row, selected, &count) != 0) count = 0U;
+      for (unsigned i = 0U; i < count; ++i) cells += selected[i].width_cells;
+      aux->row_hw_sprites[row] = (uint8_t)count;
+      aux->row_hw_cells[row] = (uint8_t)cells;
+    } else {
+      genesis_vdp_render_row(&ctx, line, row, &frame_out->pixels[(size_t)row * first.width]);
+    }
     frame_out->row_palette[row] = (uint8_t)(lines != NULL ? slot_of_line[field_line] : 0U);
   }
   frame_out->width = (uint16_t)first.width;
   frame_out->height = (uint16_t)first.height;
   frame_out->palette_count = (uint16_t)palette_count;
+  if (aux != NULL) {
+    aux->width = (uint16_t)first.width;
+    aux->height = (uint16_t)first.height;
+    aux->sprite_limit = (uint8_t)(first.h40 ? 20U : 16U);
+    aux->cell_budget = (uint8_t)(first.h40 ? 40U : 32U);
+    aux->cell_height = (uint8_t)first.cell_height;
+    aux->im2 = (uint8_t)(first.im2 ? 1U : 0U);
+  }
   if (with_digest) {
     frame_out->digest_omitted = 0U;
     genesis_vdp_frame_digest(frame_out, frame_out->frame_digest);
@@ -1180,7 +1219,7 @@ int genesis_vdp_produce_frame_raster(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
   if (vram == NULL || raster == NULL || frame_out == NULL) {
     return -1;
   }
-  return genesis_vdp_render_frame(vram, raster, NULL, frame_out, 1);
+  return genesis_vdp_render_frame(vram, raster, NULL, frame_out, 1, NULL);
 }
 
 int genesis_vdp_produce_frame_raster_undigested(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
@@ -1188,7 +1227,7 @@ int genesis_vdp_produce_frame_raster_undigested(const uint8_t vram[GENESIS_VDP_V
   if (vram == NULL || raster == NULL || frame_out == NULL) {
     return -1;
   }
-  return genesis_vdp_render_frame(vram, raster, NULL, frame_out, 0);
+  return genesis_vdp_render_frame(vram, raster, NULL, frame_out, 0, NULL);
 }
 
 int genesis_vdp_produce_frame(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
@@ -1203,7 +1242,67 @@ int genesis_vdp_produce_frame(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
   memcpy(uniform.registers, registers, sizeof(uniform.registers));
   memcpy(uniform.cram, cram, sizeof(uniform.cram));
   memcpy(uniform.vsram, vsram, sizeof(uniform.vsram));
-  return genesis_vdp_render_frame(vram, NULL, &uniform, frame_out, 1);
+  return genesis_vdp_render_frame(vram, NULL, &uniform, frame_out, 1, NULL);
+}
+
+static const uint8_t *genesis_vdp_frame_row_palette(const GenesisFrameArtifact *frame, unsigned row);
+
+/* --- SEG-140 (ADR 0303): read-only decode helpers for authored virtual sprites and the frame's layer/budget side data. Nothing here changes a normal render. --- */
+
+int genesis_vdp_produce_frame_aux(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const uint8_t vsram[GENESIS_VDP_VSRAM_BYTES],
+                                  const uint8_t cram[GENESIS_VDP_CRAM_BYTES], const uint16_t registers[GENESIS_VDP_REGISTER_COUNT],
+                                  GenesisFrameArtifact *frame_out, GenesisVdpFrameAux *aux_out) {
+  GenesisRasterLine uniform;
+  if (vram == NULL || vsram == NULL || cram == NULL || registers == NULL || frame_out == NULL || aux_out == NULL) return -1;
+  memcpy(uniform.registers, registers, sizeof(uniform.registers));
+  memcpy(uniform.cram, cram, sizeof(uniform.cram));
+  memcpy(uniform.vsram, vsram, sizeof(uniform.vsram));
+  memset(aux_out, 0, sizeof(*aux_out));
+  return genesis_vdp_render_frame(vram, NULL, &uniform, frame_out, 1, aux_out);
+}
+
+int genesis_vdp_produce_frame_raster_aux(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
+                                         GenesisFrameArtifact *frame_out, GenesisVdpFrameAux *aux_out) {
+  if (vram == NULL || raster == NULL || frame_out == NULL || aux_out == NULL) return -1;
+  memset(aux_out, 0, sizeof(*aux_out));
+  return genesis_vdp_render_frame(vram, raster, NULL, frame_out, 0, aux_out);
+}
+
+int genesis_vdp_decode_sprite_rgba(const GenesisVdpSpriteEntry *sprite, const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
+                                   const uint8_t cram[GENESIS_VDP_CRAM_BYTES], uint8_t *rgba_out, size_t capacity) {
+  unsigned width_px;
+  unsigned height_px;
+  if (sprite == NULL || vram == NULL || cram == NULL || rgba_out == NULL) return -1;
+  if (sprite->width_cells < 1U || sprite->width_cells > 4U || sprite->height_cells < 1U || sprite->height_cells > 4U || sprite->palette > 3U) return -1;
+  width_px = sprite->width_cells * GENESIS_VDP_TILE_WIDTH;
+  height_px = sprite->height_cells * genesis_vdp_sprite_cell_height_px(sprite);
+  if (capacity < (size_t)width_px * height_px * 4U) return -1;
+  for (unsigned y = 0U; y < height_px; ++y) {
+    for (unsigned x = 0U; x < width_px; ++x) {
+      uint8_t index = 0U;
+      uint8_t *out = &rgba_out[((size_t)y * width_px + x) * 4U];
+      GenesisRgb888 color = {0, 0, 0};
+      /* the VDP's own pattern/flip resolution: the sprite is positioned at the origin so (x, y) is sprite-local */
+      GenesisVdpSpriteEntry local = *sprite;
+      local.x = 0;
+      local.y = 0;
+      if (genesis_vdp_resolve_sprite_pixel(&local, vram, x, y, &index) != 0) return -1;
+      if (index == GENESIS_VDP_TRANSPARENT_PALETTE_INDEX) {
+        out[0] = out[1] = out[2] = out[3] = 0U;
+        continue;
+      }
+      if (genesis_vdp_decode_cram_entry(cram, genesis_vdp_cram_index(sprite->palette, index), &color) != 0) return -1;
+      out[0] = color.r;
+      out[1] = color.g;
+      out[2] = color.b;
+      out[3] = 255U;
+    }
+  }
+  return 0;
+}
+
+const uint8_t *genesis_vdp_frame_row_cram(const GenesisFrameArtifact *frame, unsigned row) {
+  return frame == NULL ? NULL : genesis_vdp_frame_row_palette(frame, row);
 }
 
 /* --- SEG-118 (ADR 0262): Level 2 extended backgrounds. Presentation only: reads the same raster state/VRAM journal the native render used and the
@@ -1405,7 +1504,7 @@ int genesis_vdp_produce_extension(const uint8_t vram[GENESIS_VDP_VRAM_BYTES], co
         {
           const GenesisVdpCandidatePixel *spr = sprites ? &sprite_row[left ? i : (size_t)side + width + i] : &none;
           if (genesis_ext_sprite_wins(&a, &b, spr)) ++sprite_pixels;
-          index = genesis_vdp_select_cram_index(&a, &b, spr, backdrop);
+          index = genesis_vdp_select_cram_index(&a, &b, spr, backdrop, NULL);
         }
         if (genesis_vdp_decode_cram_entry(line->cram, index, &color) != 0) {
           genesis_ext_unavailable(out, GENESIS_EXT_REASON_NATIVE_GEOMETRY);
