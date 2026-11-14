@@ -201,7 +201,7 @@ broken("geometry with a scenes entry", lambda t: GEO.replace("scenes = []", 'sce
 broken("geometry with another key", lambda t: GEO.replace("scenes = []", "width = 4"), "E_FIELD_UNKNOWN")
 broken("geometry written as an array table", lambda t: GEO.replace("[geometry]", "[[geometry]]"), "E_MANIFEST_SYNTAX")
 broken("a scene without a range", lambda t: RANGE.replace('aspect_max = "21:9"\n', ""), "E_GEOMETRY_ASPECT")
-broken("an aspect outside 4:3 to 32:9", lambda t: RANGE.replace("21:9", "64:9"), "E_GEOMETRY_ASPECT")
+broken("an aspect outside the supported range", lambda t: RANGE.replace("21:9", "64:9"), "E_GEOMETRY_ASPECT")
 broken("a duplicate scene id", lambda t: RANGE.replace('id = "title"', 'id = "stage-1"'), "E_GEOMETRY_SCENE")
 broken("an unknown component", lambda t: RANGE.replace('["scenery"]', '["sky"]'), "E_GEOMETRY_SCENE")
 broken("a scene written as a single table", lambda t: RANGE.replace("[[scene]]", "[scene]", 1), "E_MANIFEST_SYNTAX")
