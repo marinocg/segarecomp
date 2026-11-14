@@ -12,7 +12,7 @@
 
 namespace vsfx {
 
-inline int failures = 0;
+static int failures = 0;
 inline void check(bool ok, const char *what) {
   if (!ok) {
     std::printf("FAIL: %s\n", what);
