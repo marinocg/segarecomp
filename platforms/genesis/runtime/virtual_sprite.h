@@ -46,7 +46,8 @@ typedef enum GenesisVirtualReason {
   GENESIS_VSPRITE_REJ_CLIP = 9,
   GENESIS_VSPRITE_REJ_RESERVED = 10,
   GENESIS_VSPRITE_REJ_BUDGET_MODE = 11,
-  GENESIS_VSPRITE_REJ_ARGUMENTS = 12 /* compose: a missing/inconsistent frame or side data */
+  GENESIS_VSPRITE_REJ_ARGUMENTS = 12, /* compose: a missing/inconsistent frame or side data */
+  GENESIS_VSPRITE_REJ_SIDE_PRIORITY = 13 /* SEG-140-T009 (ADR 0307): a BEHIND_PLANES / BETWEEN command reaches into a presented extension column, where no native priority class exists */
 } GenesisVirtualReason;
 
 typedef struct GenesisVirtualSpriteDiag {
@@ -70,6 +71,8 @@ typedef struct GenesisVirtualSpriteReport {
   uint32_t commands;              /* accepted commands */
   uint32_t pixels_drawn_verified; /* native pixels replaced by a game-state-verified sprite */
   uint32_t pixels_drawn_authored; /* native pixels replaced by a mod-authored sprite */
+  /* SEG-140-T009: of the pixels above, those drawn in the left / right extension columns (the rest are in the picture); zero unless the set used the PRESENTATION space on a presented extension. */
+  uint32_t pixels_left_verified, pixels_left_authored, pixels_right_verified, pixels_right_authored;
   /* Original-budget accounting (hardware sprites the VDP selected for the row + the virtual sprites that touch it), whatever the mode: */
   uint32_t rows_over_sprite_limit; /* rows whose total sprite demand exceeds the original per-line sprite limit */
   uint32_t rows_over_cell_budget;  /* rows whose total sprite-cell demand exceeds the original per-line cell budget */
@@ -89,6 +92,17 @@ typedef struct GenesisVirtualSpriteReport {
 int genesis_virtual_sprites_compose(const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
                                     const GenesisFrameArtifact *native, const GenesisVdpFrameAux *aux, uint8_t *rgb_out, size_t rgb_capacity,
                                     GenesisVirtualSpriteReport *report);
+
+/* SEG-140-T009 (ADR 0307): the presented extension surface a set in the PRESENTATION space is composed onto. `rgb` is the produced surface ((width + 2 * side) x height RGB24, its centre the native picture), `side` the
+ * produced columns per side and `visible` how many of them (per side, <= side) the host actually presents: the only extension pixels that are ever drawn. The output is a surface of the SAME layout (the base is
+ * `rgb`, the centre re-derived from the native artifact), so the host can present it unchanged. BEHIND_PLANES and BETWEEN commands cannot reach an extension column (no native priority class exists there): such a
+ * set is rejected as a whole with GENESIS_VSPRITE_REJ_SIDE_PRIORITY. A NULL surface, `side` 0 or the PICTURE space is exactly genesis_virtual_sprites_compose (picture-sized output). */
+typedef struct GenesisVirtualSpriteSurface {
+  const uint8_t *rgb;
+  unsigned side, visible;
+} GenesisVirtualSpriteSurface;
+int genesis_virtual_sprites_compose_wide(const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisFrameArtifact *native,
+                                         const GenesisVdpFrameAux *aux, const GenesisVirtualSpriteSurface *surface, uint8_t *rgb_out, size_t rgb_capacity, GenesisVirtualSpriteReport *report);
 
 #ifdef __cplusplus
 }

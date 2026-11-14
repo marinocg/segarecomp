@@ -93,6 +93,7 @@ struct SpriteCommand {
 struct SpriteSubmission {
   bool used = false;                      // some sega.sprite call ran in the callback
   int budget_mode = 0;                    // 0 = limit (the original per-line budgets), 1 = extended
+  int space = 0;                          // SEG-140-T009: 0 = picture (draws inside the native picture only), 1 = presentation (may also draw into the presented widescreen columns; same origin)
   std::uint32_t total = 0;                // sega.sprite.add calls, saturating at 255; `commands` keeps the first kSpriteCommandsMax (a larger total is the host's whole-set rejection, never a truncation)
   std::uint32_t calls = 0;                // all sega.sprite calls (bounded by kSpriteCallsMax)
   std::vector<SpriteCommand> commands;
@@ -119,6 +120,7 @@ struct OverlayCall {
 [[nodiscard]] OverlayCall overlay_text(Output &out, int target, std::int64_t x, std::int64_t y, std::string_view text, std::uint32_t rgba);
 [[nodiscard]] OverlayCall overlay_scene(Output &out, std::string_view id);
 // The virtual-sprite calls of the same render callback (same result type): shared by the Luau `sega.sprite.*` bindings and any host-side recorder.
+[[nodiscard]] OverlayCall sprite_space(Output &out, std::string_view mode);                                    // "picture" (default) | "presentation"
 [[nodiscard]] OverlayCall sprite_budget(Output &out, std::string_view mode);                                  // "limit" | "extended"
 [[nodiscard]] OverlayCall sprite_tile(Output &out, std::int64_t index, std::string_view hex);                // 64 hex digits per 8x8 4bpp pattern, consecutive patterns from `index` (0..2047)
 [[nodiscard]] OverlayCall sprite_palette(Output &out, std::int64_t line, std::string_view hex);              // 4 hex digits per CRAM word (0BGR), at most 16 colours, palette line 0..3

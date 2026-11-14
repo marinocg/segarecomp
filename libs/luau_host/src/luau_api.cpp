@@ -12,7 +12,7 @@ namespace segarecomp::luau {
 namespace {
 
 // The ONLY list of host names a script can reach. A name is added here, in a new ABI minor if it needs a capability the catalogue does not have (native-sdk-abi-2.md section 7).
-constexpr std::array<ApiEntry, 24> kApi = {{
+constexpr std::array<ApiEntry, 25> kApi = {{
     {"sega.log", "host.log", "function", "message:string", "", "all", "Appends one line to the host log (at most 256 bytes, 16 lines per callback; printable ASCII)."},
     {"sega.frame.value", "frame.work_ram", "function", "name:string", "number?", "render",
      "Reads one named integer the host published for this frame (a read-only copy; nil when the host publishes no such value)."},
@@ -28,6 +28,8 @@ constexpr std::array<ApiEntry, 24> kApi = {{
      "Selects the layer the following sega.overlay.rect and sega.overlay.text draw into: 0 is the fixed HUD overlay (the default at the start of every callback), 1-4 a layer declared earlier in the same callback."},
     {"sega.sprite.budget", "overlay.rgba", "function", "mode:string", "", "render",
      "Selects the original per-line sprite budget for this frame's virtual sprites (\"limit\", the default) or an explicit \"extended\" budget with no per-line limit; over-budget lines are still reported. Presentation only: the game's own sprites and the VDP status are never touched."},
+    {"sega.sprite.space", "overlay.rgba", "function", "mode:string", "", "render",
+     "Selects the coordinate space of this frame's virtual sprites. Both have the same origin, the top-left pixel of the native picture. \"picture\" (the default) draws inside the native picture only; \"presentation\" may also draw into the widescreen columns the viewer actually presents for the current aspect and side style, at x < 0 (left) and x >= 320 (right). A pixel in a column that is not presented is never drawn or counted; a behind_planes or between sprite that reaches a column rejects the whole set (no native priority exists there)."},
     {"sega.sprite.tile", "overlay.rgba", "function", "index:number,patterns:string", "", "render",
      "Writes your OWN pattern pool for mod-authored sprites: 64 hexadecimal digits per 8x8 pattern (4 bits per pixel, the VDP layout), consecutive patterns from `index` (0-2047). The pool is yours and one frame long; it never touches VRAM."},
     {"sega.sprite.palette", "overlay.rgba", "function", "line:number,colours:string", "", "render",
@@ -329,6 +331,14 @@ bool counted(Output &out) { return ++out.sprites.calls <= kSpriteCallsMax; }
 int hex_value(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; }
 bool hex_digits(std::string_view text) { return std::all_of(text.begin(), text.end(), [](char c) { return hex_value(c) >= 0; }); }
 }  // namespace
+
+OverlayCall sprite_space(Output &out, std::string_view mode) {
+  out.sprites.used = true;
+  if (!counted(out)) return bad(OverlayCall::Status::budget, "sega.sprite call limit exceeded");
+  if (mode != "picture" && mode != "presentation") return bad(OverlayCall::Status::range, "sega.sprite.space takes \"picture\" or \"presentation\"");
+  out.sprites.space = mode == "presentation" ? 1 : 0;
+  return {};
+}
 
 OverlayCall sprite_budget(Output &out, std::string_view mode) {
   out.sprites.used = true;

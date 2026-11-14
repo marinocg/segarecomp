@@ -53,6 +53,7 @@ inline int pack_hud(bool have_image, bool fixed, const OverlayImage &image, cons
 inline bool pack_sprites(const SpriteSubmission &s, GenesisVirtualSpriteSet *out) {
   if (out == nullptr || s.total == 0) return false;
   out->budget_mode = static_cast<std::uint8_t>(s.budget_mode);
+  out->space = static_cast<std::uint8_t>(s.space);
   out->count = s.total;
   for (std::size_t i = 0; i < s.commands.size() && i < GENESIS_VSPRITE_MAX; ++i) {
     const SpriteCommand &c = s.commands[i];

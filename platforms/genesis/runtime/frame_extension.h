@@ -69,6 +69,8 @@ typedef struct GenesisVirtualSpriteOutcome {
   uint8_t state_verified;       /* the host established the exactly-current guest-state snapshot for this frame (the gate GAME_STATE_VERIFIED needs) */
   uint32_t index, commands;     /* rejected: the first offending command; composed: the accepted commands */
   uint32_t pixels_verified, pixels_authored; /* native pixels actually replaced, by origin (the compositor's own drawn-pixel diagnostics) */
+  uint32_t pixels_left_verified, pixels_left_authored, pixels_right_verified, pixels_right_authored; /* SEG-140-T009: of those, the part drawn in the left / right extension columns */
+  uint8_t space;                /* the set's coordinate space (GenesisVirtualSpace) */
   uint32_t rows_over_sprite_limit, rows_over_cell_budget, rows_dropped, rows_truncated;
 } GenesisVirtualSpriteOutcome;
 
@@ -133,7 +135,7 @@ typedef struct GenesisFrameExtension {
    * not part of the runtime library). Zero commands: neither runs. */
   GenesisVirtualSpriteSet *vsprite_set;
   int (*vsprite_compose)(void *ctx, const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
-                         const GenesisFrameArtifact *native, GenesisVirtualSpriteOutcome *out);
+                         const GenesisFrameArtifact *native, const uint8_t *surface, unsigned side, GenesisVirtualSpriteOutcome *out);   /* surface: the produced extension, (native width + 2 * side) x height RGB24 */
   void *vsprite_ctx;
   /* Runtime-written. */
   GenesisExtensionResult result;    /* the latest publication's result */

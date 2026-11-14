@@ -349,6 +349,14 @@ void test_sprite_api() {
     check(s.vram.size() == luau::kSpritePoolVramBytes && s.vram[3 * 32] == 0x11 && s.vram[3 * 32 + 31] == 0x11 && s.vram[2 * 32] == 0, "the authored pool holds the written pattern and nothing else");
     check(s.cram.size() == luau::kSpritePoolCramBytes && s.cram[32] == 0x0E && s.cram[33] == 0x0E && s.cram[34] == 0x00 && s.cram[35] == 0xEE, "palette line 1 holds the written CRAM words");
   }
+  {   // SEG-140-T009: the coordinate space is staged with the submission (default picture)
+    Mod m = start("function render()\n  sega.sprite.space('presentation')\n  sega.sprite.add('authored', 'above_all', -10, 0, 1, 1, 1, 0, 0)\nend");
+    luau::Output out;
+    check(render(m, 0, out).ok && out.sprites.space == 1 && out.sprites.commands[0].x == -10, "sega.sprite.space('presentation') is part of the submission");
+    Mod d = start("function render() sega.sprite.add('authored', 'above_all', 0, 0, 1, 1, 1, 0, 0) end");
+    luau::Output other;
+    check(render(d, 0, other).ok && other.sprites.space == 0, "the default space is the picture");
+  }
   {   // no submission, no allocation: the pool stays empty unless it is written
     Mod m = start("function render() sega.sprite.add('authored', 'above_all', 0, 0, 1, 1, 1, 0, 0) end");
     luau::Output out;
@@ -366,11 +374,11 @@ void test_sprite_api() {
     check(render(m, 0, out).ok && out.sprites.total == 70 && out.sprites.commands.size() == luau::kSpriteCommandsMax, "70 commands are all counted while the transport keeps 64 (the host rejects the set as too many)");
   }
   {   // every malformed argument is a script error (range), never repaired; the callback's staged output is discarded
-    const char *bad[] = {"sega.sprite.add('mine', 'above_all', 0, 0, 1, 1, 1, 0, 0)", "sega.sprite.add('authored', 'top', 0, 0, 1, 1, 1, 0, 0)", "sega.sprite.add('authored', 'above_all', 0, 0, 1, 1, 1, 0, 4)",
+    const std::string bad[] = {"sega.sprite.add('mine', 'above_all', 0, 0, 1, 1, 1, 0, 0)", "sega.sprite.add('authored', 'top', 0, 0, 1, 1, 1, 0, 0)", "sega.sprite.add('authored', 'above_all', 0, 0, 1, 1, 1, 0, 4)",
                          "sega.sprite.add('authored', 'above_all', 40000, 0, 1, 1, 1, 0, 0)", "sega.sprite.add('authored', 'above_all', 0.5, 0, 1, 1, 1, 0, 0)", "sega.sprite.tile(2048, '" + solid + "')",
                          "sega.sprite.tile(0, 'zz')", "sega.sprite.tile(0, '" + solid + "1')", "sega.sprite.tile(2047, '" + solid + solid + "')", "sega.sprite.palette(4, '0000')", "sega.sprite.palette(0, '000')",
-                         "sega.sprite.budget('unlimited')", "sega.sprite.clip(0, 0, 1, 1)"};
-    for (const char *call : bad) {
+                         "sega.sprite.budget('unlimited')", "sega.sprite.space('side')", "sega.sprite.clip(0, 0, 1, 1)"};
+    for (const std::string &call : bad) {
       Mod m = start(std::string("function render() sega.sprite.add('authored', 'above_all', 0, 0, 1, 1, 1, 0, 0) ") + call + " end");
       luau::Output out;
       const luau::CallResult r = render(m, 0, out);

@@ -45,6 +45,8 @@ declare sega: {
     clip: (x: number, y: number, width: number, height: number) -> (),
     -- overlay.rgba (render): Writes your OWN palette line 0-3 for mod-authored sprites: 4 hexadecimal digits per colour (the VDP 0BGR word), at most 16 colours.
     palette: (line: number, colours: string) -> (),
+    -- overlay.rgba (render): Selects the coordinate space of this frame's virtual sprites. Both have the same origin, the top-left pixel of the native picture. "picture" (the default) draws inside the native picture only; "presentation" may also draw into the widescreen columns the viewer actually presents for the current aspect and side style, at x < 0 (left) and x >= 320 (right). A pixel in a column that is not presented is never drawn or counted; a behind_planes or between sprite that reaches a column rejects the whole set (no native priority exists there).
+    space: (mode: string) -> (),
     -- overlay.rgba (render): Writes your OWN pattern pool for mod-authored sprites: 64 hexadecimal digits per 8x8 pattern (4 bits per pixel, the VDP layout), consecutive patterns from `index` (0-2047). The pool is yours and one frame long; it never touches VRAM.
     tile: (index: number, patterns: string) -> (),
   },

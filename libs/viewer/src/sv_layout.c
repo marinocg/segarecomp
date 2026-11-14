@@ -532,17 +532,22 @@ void sv_cov_reject(SvCovAccount *a, unsigned reasons) {
   a->last_vsprite_reason = 0;
 }
 
-void sv_cov_vsprite(SvCovAccount *a, const SvExtendedSurface *ext, int credited, uint32_t pv, uint32_t pa) {
+void sv_cov_vsprite(SvCovAccount *a, const SvExtendedSurface *ext, int credit_picture, int credit_left, int credit_right) {
+  const uint32_t lv = ext != NULL ? ext->actor_left_verified : 0u, la = ext != NULL ? ext->actor_left_authored : 0u, rv = ext != NULL ? ext->actor_right_verified : 0u, ra = ext != NULL ? ext->actor_right_authored : 0u;
   if (a == NULL || ext == NULL || ext->actor_stage == SV_ACT_NONE) return;
   cov_bump(&a->vs_sets);
   if (ext->actor_stage == SV_ACT_COMPOSED) cov_bump(&a->vs_composed);
   else if (ext->actor_stage == SV_ACT_REJECTED) cov_bump(&a->vs_rejected);
   else if (ext->actor_stage == SV_ACT_VALIDATED) cov_bump(&a->vs_validated_empty);
-  if (credited) {
-    cov_bump(&a->vs_presented);
+  if (credit_picture || credit_left || credit_right) cov_bump(&a->vs_presented);
+  if (credit_picture) {
+    const uint32_t pv = ext->actor_pixels_verified - lv - rv, pa = ext->actor_pixels_authored - la - ra;   /* the picture holds what the extension columns do not */
     a->vs_pixels_verified += pv;
     a->vs_pixels_authored += pa;
+    a->vs_pixels_picture += (uint64_t)pv + pa;
   }
+  if (credit_left) { a->vs_pixels_verified += lv; a->vs_pixels_authored += la; a->vs_pixels_left += (uint64_t)lv + la; }
+  if (credit_right) { a->vs_pixels_verified += rv; a->vs_pixels_authored += ra; a->vs_pixels_right += (uint64_t)rv + ra; }
 }
 
 int sv_cov_frame(SvCovAccount *a, SvDisplayRatio requested, const char *scene, unsigned delivered) {
@@ -589,9 +594,9 @@ size_t sv_cov_report_json(const SvCovAccount *a, char *buf, size_t cap) {
   }
   cov_put(&b, "]");
   if (a->vs_sets > 0)   /* SEG-140-T008: bounded, additive, and absent until a set was ever submitted (every earlier report is byte-identical) */
-    cov_put(&b, ",\"virtual_sprites\":{\"sets\":%llu,\"composed\":%llu,\"rejected\":%llu,\"composed_without_pixels\":%llu,\"presented\":%llu,\"pixels_verified\":%llu,\"pixels_authored\":%llu}",
+    cov_put(&b, ",\"virtual_sprites\":{\"sets\":%llu,\"composed\":%llu,\"rejected\":%llu,\"composed_without_pixels\":%llu,\"presented\":%llu,\"pixels_verified\":%llu,\"pixels_authored\":%llu,\"pixels_picture\":%llu,\"pixels_left\":%llu,\"pixels_right\":%llu}",
             (unsigned long long)a->vs_sets, (unsigned long long)a->vs_composed, (unsigned long long)a->vs_rejected, (unsigned long long)a->vs_validated_empty, (unsigned long long)a->vs_presented,
-            (unsigned long long)a->vs_pixels_verified, (unsigned long long)a->vs_pixels_authored);
+            (unsigned long long)a->vs_pixels_verified, (unsigned long long)a->vs_pixels_authored, (unsigned long long)a->vs_pixels_picture, (unsigned long long)a->vs_pixels_left, (unsigned long long)a->vs_pixels_right);
   cov_put(&b, "}");
   return b.need;
 }

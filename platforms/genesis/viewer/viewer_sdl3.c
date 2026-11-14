@@ -49,18 +49,42 @@ static SvOverlayLayer g_layer_desc[GENESIS_COMPAT_LAYERS_MAX];
 static GenesisVirtualSpriteSet g_vsprite_set;
 static GenesisVdpFrameAux g_vsprite_aux;
 static GenesisFrameArtifact g_vsprite_scratch;
-static uint8_t g_vsprite_rgb[GENESIS_FRAME_MAX_WIDTH * GENESIS_FRAME_MAX_HEIGHT * 3U];
+static uint8_t g_vsprite_rgb[GENESIS_FRAME_MAX_WIDTH * GENESIS_FRAME_MAX_HEIGHT * 3U];   /* the composed native picture */
+static uint8_t g_vsprite_wide[GENESIS_EXT_SURFACE_BYTES];                               /* the composed extension surface (picture and presented columns), SEG-140-T009 */
+static uint8_t g_vsprite_wide_valid;                                                     /* the wide buffer holds THIS frame's composition (extension pixels were drawn) */
 
 /* SEG-140-T008 (ADR 0306): the adapter's compositor, called by the producer for a frame whose provider submitted at least one command, while the frame's raster state and VRAM are valid. It runs the VDP's
  * own auxiliary render (identical artifact, plus per-pixel layer classes and per-row sprite demand) and the F14 compositor, and keeps the composed picture in a static buffer the presenter reads. */
 static int viewer_vsprite_compose(void *ctx, const GenesisVirtualSpriteSet *set, unsigned host_flags, const uint8_t vram[GENESIS_VDP_VRAM_BYTES], const GenesisRasterFrameState *raster,
-                                  const GenesisFrameArtifact *native, GenesisVirtualSpriteOutcome *out) {
+                                  const GenesisFrameArtifact *native, const uint8_t *surface, unsigned side, GenesisVirtualSpriteOutcome *out) {
+  GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
   GenesisVirtualSpriteReport report;
+  GenesisVirtualSpriteSurface target;
   const unsigned width = GENESIS_FRAME_ARTIFACT_WIDTH(native), height = GENESIS_FRAME_ARTIFACT_HEIGHT(native);
-  (void)ctx;
+  const SvSettings *settings = sv_host_settings(v->host);
+  unsigned visible = 0U;
+  g_vsprite_wide_valid = 0U;
   if (width == 0U || width > GENESIS_FRAME_MAX_WIDTH || height == 0U || height > GENESIS_FRAME_MAX_HEIGHT) return -1;
+  if (surface != NULL && side > 0U && settings->video.widescreen != SV_WIDESCREEN_ORIGINAL) {   /* ADR 0307: only the columns the host will present for the CURRENT aspect are ever drawn */
+    const int vis = sv_geom_resolve_visible(&settings->video, (int)width, (int)height, (int)side);
+    visible = vis > 0 ? (unsigned)vis : 0U;
+  }
+  target.rgb = surface;
+  target.side = side;
+  target.visible = visible;
   if (genesis_vdp_produce_frame_raster_aux(vram, raster, &g_vsprite_scratch, &g_vsprite_aux) != 0) return -1;
-  if (genesis_virtual_sprites_compose(set, host_flags, vram, native, &g_vsprite_aux, g_vsprite_rgb, sizeof g_vsprite_rgb, &report) != 0) return -1;
+  if (side > 0U && surface != NULL) {   /* the composition keeps the extension's layout; the native picture is its centre */
+    if (genesis_virtual_sprites_compose_wide(set, host_flags, vram, native, &g_vsprite_aux, &target, g_vsprite_wide, sizeof g_vsprite_wide, &report) != 0) return -1;
+    for (unsigned row = 0U; row < height; ++row) memcpy(&g_vsprite_rgb[(size_t)row * width * 3U], &g_vsprite_wide[((size_t)row * (width + 2U * side) + side) * 3U], (size_t)width * 3U);
+    g_vsprite_wide_valid = (uint8_t)(report.pixels_left_verified + report.pixels_left_authored + report.pixels_right_verified + report.pixels_right_authored > 0U);
+  } else if (genesis_virtual_sprites_compose(set, host_flags, vram, native, &g_vsprite_aux, g_vsprite_rgb, sizeof g_vsprite_rgb, &report) != 0) {
+    return -1;
+  }
+  out->space = set->space;
+  out->pixels_left_verified = report.pixels_left_verified;
+  out->pixels_left_authored = report.pixels_left_authored;
+  out->pixels_right_verified = report.pixels_right_verified;
+  out->pixels_right_authored = report.pixels_right_authored;
   out->status = report.status;
   out->reason = report.reason;
   out->index = report.reject_index;
@@ -245,7 +269,12 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
               surface.actor_state_verified = r->vsprite.state_verified;
               surface.actor_pixels_verified = r->vsprite.pixels_verified;
               surface.actor_pixels_authored = r->vsprite.pixels_authored;
+              surface.actor_left_verified = r->vsprite.pixels_left_verified;
+              surface.actor_left_authored = r->vsprite.pixels_left_authored;
+              surface.actor_right_verified = r->vsprite.pixels_right_verified;
+              surface.actor_right_authored = r->vsprite.pixels_right_authored;
               if (drawn > 0U) surface.actor_picture = g_vsprite_rgb;
+              if (g_vsprite_wide_valid != 0U) surface.rgb24 = g_vsprite_wide;   /* the extension columns THIS frame will show carry the sprites (composed over the surface that is displayed) */
             } else {
               surface.actor_stage = (uint8_t)SV_ACT_REJECTED;
               surface.actor_reject = r->vsprite.reason;

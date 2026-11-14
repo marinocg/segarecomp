@@ -57,9 +57,18 @@ typedef struct GenesisVirtualSprite {
   uint16_t clip_w, clip_h;          /* 1..picture size */
 } GenesisVirtualSprite;
 
+/* The coordinate space of a set (SEG-140-T009, ADR 0307). Both spaces have the SAME origin: x, y are measured from the top-left pixel of the native picture. PICTURE (0, the default and every set that
+ * predates the field) draws only inside the native picture, exactly as before. PRESENTATION (1) may also draw into the widescreen extension columns the host actually presents, at x < 0 (left) and
+ * x >= picture width (right): a pixel beyond the columns presented for the current aspect and side style is never drawn, and never counted. */
+typedef enum GenesisVirtualSpace {
+  GENESIS_VSPRITE_SPACE_PICTURE = 0,
+  GENESIS_VSPRITE_SPACE_PRESENTATION = 1
+} GenesisVirtualSpace;
+
 typedef struct GenesisVirtualSpriteSet {
   uint8_t budget_mode;              /* GenesisVirtualBudgetMode (0 = LIMIT) */
-  uint8_t reserved[3];              /* must be 0 */
+  uint8_t space;                    /* GenesisVirtualSpace (0 = PICTURE); anything else is rejected as RESERVED */
+  uint8_t reserved[2];              /* must be 0 */
   uint32_t count;                   /* commands used, at most GENESIS_VSPRITE_MAX; order is priority within a layer (the first command wins, as in the hardware table) */
   GenesisVirtualSprite sprites[GENESIS_VSPRITE_MAX];
   uint8_t authored_vram[GENESIS_VSPRITE_VRAM_BYTES]; /* the authored pattern pool: the same layout/addressing as VRAM */

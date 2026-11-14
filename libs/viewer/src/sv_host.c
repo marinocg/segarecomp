@@ -1465,7 +1465,7 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     const SvExtCheck chk = (int)ext->mode <= (int)h->settings.video.widescreen ? sv_extended_surface_check(ext, w, hgt, sequence, h->cfg.max_w > 0 ? h->cfg.max_w : 320) : SV_EXT_MODE;
     unsigned off = 0, acc = 0, why = 0, a_off = 0, a_acc = 0, a_why = 0;
     const uint32_t vs_total = ext->actor_pixels_verified + ext->actor_pixels_authored;
-    int vs_picture = 0, vs_side = 0;
+    int vs_picture = 0, vs_left = 0, vs_right = 0;
     if (ext->source == SV_EXTSRC_AUTHORED && ext->side > 0) { off |= SV_COV_BIT(SV_COV_SCENERY); if (accepted) acc |= SV_COV_BIT(SV_COV_SCENERY); }
     if (ext->overlay_rgba != NULL) {
       off |= SV_COV_BIT(SV_COV_HUD);
@@ -1475,12 +1475,18 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     if (a_acc != 0u && vs_total > 0u) {
       /* SEG-140-T008: a set the real compositor drew. Its picture pixels are presented through the picture the host shows (they do not depend on the extension surface), its extension-column pixels only
        * when the surface itself was accepted. Nothing is credited when no region that holds pixels was actually presented. */
-      const uint32_t side_px = ext->actor_pixels_left + ext->actor_pixels_right;
+      const uint32_t left_px = ext->actor_left_verified + ext->actor_left_authored, right_px = ext->actor_right_verified + ext->actor_right_authored;
+      const uint32_t side_px = left_px + right_px;
       const uint32_t pic_px = vs_total > side_px ? vs_total - side_px : 0u;
+      /* an extension column is credited only when it is really displayed: the surface accepted, and a side treatment that shows the supplied columns (Comfort and Borders replace them with a fill, so a sprite
+       * drawn there is discarded and counts for nothing) */
+      const int shown = accepted && sv_side_treatment(h->settings.video.widescreen_side_style, ext->source) == SV_TREAT_PASSTHROUGH;
       vs_picture = pic_px > 0u && geom_ok && ext->actor_picture != NULL;
-      vs_side = side_px > 0u && accepted;
-      if (!vs_picture && !vs_side) { a_acc = 0u; a_why |= SV_REJ_BIT(SV_REJ_VSPRITE_UNPRESENTED); }
+      vs_left = left_px > 0u && shown;
+      vs_right = right_px > 0u && shown;
+      if (!vs_picture && !vs_left && !vs_right) { a_acc = 0u; a_why |= SV_REJ_BIT(SV_REJ_VSPRITE_UNPRESENTED); }
     } else if (a_acc != 0u && !accepted) { a_acc = 0u; a_why |= SV_REJ_BIT(SV_REJ_VSPRITE_UNPRESENTED); }   /* a composed set rides on the surface: if the host refused that frame nothing was presented, so nothing is delivered */
+    if (a_acc != 0u && vs_total == 0u) vs_picture = 1;   /* a surface that carries no pixel counts (the SEG-140-T005 fixtures): its credit is the picture's, with no pixels to add */
     off |= a_off; acc |= a_acc; why |= a_why;
     if (!accepted && ext->status != SV_WS_UNAVAILABLE && ext->side > 0 && ext->mode != SV_WIDESCREEN_ORIGINAL && h->settings.video.widescreen != SV_WIDESCREEN_ORIGINAL) {   /* only a requested extension can be refused: in Original nothing is asked for, the viewer always hands over its pixel buffer, and a HUD-only surface is the normal case */
       if ((int)ext->mode > (int)h->settings.video.widescreen) why |= SV_REJ_BIT(SV_REJ_UNSUPPORTED_MODE);
@@ -1488,7 +1494,7 @@ int sv_host_present_extended(SvHost *h, const uint8_t *rgb, int w, int hgt, int 
     }
     if (h->geom_status != SV_GEOM_OK) why |= SV_REJ_BIT(SV_REJ_OVER_DECLARED);
     const int in_range = sv_cov_frame_ex(&h->cov, req, h->cov_scene[0] != '\0' ? h->cov_scene : NULL, off, acc, why, ext->actor_reject);
-    sv_cov_vsprite(&h->cov, ext, a_acc != 0u && in_range, a_acc != 0u && in_range ? ext->actor_pixels_verified : 0u, a_acc != 0u && in_range ? ext->actor_pixels_authored : 0u);
+    sv_cov_vsprite(&h->cov, ext, a_acc != 0u && in_range && vs_picture, a_acc != 0u && in_range && vs_left, a_acc != 0u && in_range && vs_right);
     if (a_acc != 0u && in_range && vs_picture && ext->actor_picture != NULL) pic = ext->actor_picture;   /* only a CREDITED composed picture is shown; every refusal below presents the native picture */
     if (!in_range) {
       /* outside the declared range: nothing the provider supplied may be shown (the surface mixes its own columns, which Raw would pass through untouched), so only the native

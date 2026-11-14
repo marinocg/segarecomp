@@ -64,6 +64,40 @@ class Harness:
         e.update(more)
         return e
 
+    def luau_program(self, rom, image_sha, name, script, scheduled=False, geometry="", viewer=True):
+        """Packs a one-script Luau package for the fixture image (overlay.rgba only, or plus input.read to take the scheduled route) and builds it into a viewer (or headless) program. Returns (program dir, identity)."""
+        d = self.tmp / (name + "-src")
+        (d / "scripts").mkdir(parents=True)
+        caps = '"input.read", "overlay.rgba"' if scheduled else '"overlay.rgba"'
+        (d / "mod.toml").write_text(f"""[mod]
+id = "vsprite-luau"
+version = "0.1.0"
+name = "VSprite"
+license = "CC0-1.0"
+
+[target]
+platform = "genesis"
+
+[[target.revision]]
+label = "fixture"
+sha256 = "{image_sha}"
+
+[[source]]
+kind = "luau-source"
+path = "scripts/main.luau"
+
+[capabilities]
+required = [{caps}]
+""" + geometry)
+        (d / "scripts/main.luau").write_text(script)
+        out = self.tmp / (name + ".segapatch")
+        r = self.run_cli("mod", "pack", d, "--out", out)
+        doc = json.loads(r.stdout)
+        self.check(r.returncode == 0 and doc.get("ok"), f"pack {name}: {r.stdout[:300]}")
+        r = self.build(rom, self.tmp / name, out, doc.get("package_identity"), viewer=viewer)
+        self.check(r.returncode == 0, f"{name} builds: {r.stdout[-300:]}{r.stderr[-300:]}")
+        return self.tmp / name, doc.get("package_identity")
+
     def headless(self, out, name, pad, frames="64", first="1", ram="16:4", extra=None, budget=4_000_000):
         """Runs a HEADLESS program under the frame capture (the scripted pad is `<frame>:<port>:<mask>,...`). Returns (process, parsed tagged lines)."""
         work = self.tmp / ("cap-" + name)

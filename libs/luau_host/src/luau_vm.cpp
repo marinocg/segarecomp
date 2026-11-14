@@ -501,6 +501,13 @@ int sega_scene(lua_State *L) {   // SEG-139-T004: names the frame's scene; a mal
 }
 
 // SEG-140-T008: the typed virtual-sprite submission; every rule is luau_api.cpp's (the host's whole-set validation decides what a command means).
+int sega_sprite_space(lua_State *L) {
+  VmImpl *im = impl_of(L);
+  require_phase(L, Phase::render, "sega.sprite.space");
+  require_args(L, 1, "sega.sprite.space");
+  overlay_result(L, sprite_space(im->staged, str_arg(L, 1, "sega.sprite.space")));
+  return 0;
+}
 int sega_sprite_budget(lua_State *L) {
   VmImpl *im = impl_of(L);
   require_phase(L, Phase::render, "sega.sprite.budget");
@@ -626,6 +633,7 @@ void install_host(lua_State *L, VmImpl *im) {
   lua_setreadonly(L, -1, true);
   lua_setfield(L, -2, "overlay");
   lua_newtable(L);   // sega.sprite (SEG-140-T008; the same overlay.rgba output capability: it grants no read access)
+  bind(L, im, "sega.sprite.space", sega_sprite_space);
   bind(L, im, "sega.sprite.budget", sega_sprite_budget);
   bind(L, im, "sega.sprite.tile", sega_sprite_tile);
   bind(L, im, "sega.sprite.palette", sega_sprite_palette);

@@ -8,6 +8,7 @@
 
 static const char *kase;
 static unsigned frame;
+static int side; /* the extension width per side the test run expects (VSPRITE_SIDE): positions at the outer boundaries are derived from it */
 
 static void pattern_solid(GenesisVirtualSpriteSet *s, unsigned tile, unsigned colour) {
   unsigned i;
@@ -49,8 +50,10 @@ static void prepare(void *state, const GenesisCompatFrame *f, GenesisCompatDecis
   (void)state;
   out->accepted = (f->requested & GENESIS_COMPAT_HUD) != 0U ? GENESIS_COMPAT_HUD : 0U;
   if (kase == NULL) {
+    const char *e = getenv("VSPRITE_SIDE");
     kase = getenv("VSPRITE_CASE");
     if (kase == NULL) kase = "none";
+    side = e != NULL ? atoi(e) : 0;
   }
 }
 
@@ -103,6 +106,29 @@ static int hud(void *state, GenesisCompatOverlay *out) {
     add(s, AUTH, ABOVE, 200, 96, 1, 1, 1U, 0);
   } else if (strcmp(kase, "lifetime") == 0) {
     if (n % 2U == 0U) add(s, AUTH, ABOVE, 200, 150, 1, 1, 1U, 0);
+  } else if (strncmp(kase, "wide_", 5) == 0) {   /* SEG-140-T009: the PRESENTATION space, positions in the native picture's coordinates (x < 0 left of it, x >= 320 right of it) */
+    s->space = (uint8_t)GENESIS_VSPRITE_SPACE_PRESENTATION;
+    if (strcmp(kase, "wide_left") == 0) add(s, AUTH, ABOVE, -24, 150, 1, 1, 1U, 0);
+    else if (strcmp(kase, "wide_right") == 0) add(s, AUTH, ABOVE, 336, 150, 1, 1, 2U, 0);
+    else if (strcmp(kase, "wide_straddle") == 0) { add(s, AUTH, ABOVE, -4, 150, 1, 1, 1U, 0); add(s, AUTH, ABOVE, 316, 170, 1, 1, 2U, 0); }
+    else if (strcmp(kase, "wide_outer") == 0) {   /* flush with the outer boundary of the presented surface, and partly beyond it (clipped there, never moved) */
+      add(s, AUTH, ABOVE, -side, 150, 1, 1, 1U, 0);
+      add(s, AUTH, ABOVE, 320 + side - 8, 150, 1, 1, 2U, 0);
+      add(s, AUTH, ABOVE, -side - 4, 180, 1, 1, 1U, 0);
+      add(s, AUTH, ABOVE, 320 + side - 4, 180, 1, 1, 2U, 0);
+    } else if (strcmp(kase, "wide_layers_above") == 0) { add(s, AUTH, ABOVE, -4, 150, 1, 1, 1U, 0); }
+    else if (strcmp(kase, "wide_layers_between") == 0) { add(s, AUTH, ABOVE, 100, 150, 1, 1, 1U, 0); add(s, AUTH, BETWEEN, -4, 150, 1, 1, 1U, 0); }
+    else if (strcmp(kase, "wide_layers_behind") == 0) { add(s, AUTH, BEHIND, 316, 150, 1, 1, 1U, 0); }
+    else if (strcmp(kase, "wide_layers_inside") == 0) { add(s, AUTH, BEHIND, 20, 150, 1, 1, 1U, 0); add(s, AUTH, BETWEEN, 60, 150, 1, 1, 2U, 0); add(s, AUTH, ABOVE, -8, 150, 1, 1, 1U, 0); }
+    else if (strcmp(kase, "wide_picture_space") == 0) { s->space = (uint8_t)GENESIS_VSPRITE_SPACE_PICTURE; add(s, AUTH, ABOVE, -4, 150, 1, 1, 1U, 0); add(s, AUTH, ABOVE, 316, 170, 1, 1, 2U, 0); }
+    else if (strcmp(kase, "wide_budget_limit") == 0 || strcmp(kase, "wide_budget_extended") == 0) {
+      s->budget_mode = strcmp(kase, "wide_budget_extended") == 0 ? (uint8_t)GENESIS_VSPRITE_BUDGET_EXTENDED : (uint8_t)GENESIS_VSPRITE_BUDGET_LIMIT;
+      add(s, AUTH, ABOVE, -24, 96, 1, 1, 1U, 0);    /* rows 96-103 carry the 20 hardware sprites: no slot is left whether the sprite is in the picture or beside it */
+      add(s, AUTH, ABOVE, 336, 150, 1, 1, 1U, 0);
+    } else if (strcmp(kase, "wide_verified") == 0) { add(s, VERIF, ABOVE, 330, 150, 1, 1, 2U, 0); add(s, AUTH, ABOVE, -24, 150, 1, 1, 1U, 0); }
+    else if (strcmp(kase, "wide_clip") == 0) { GenesisVirtualSprite *c = add(s, AUTH, ABOVE, -12, 150, 2, 1, 1U, 0); c->has_clip = 1U; c->clip_x = -6; c->clip_y = 150; c->clip_w = 10U; c->clip_h = 4U; }
+    else if (strcmp(kase, "wide_bad_space") == 0) { s->space = 2U; add(s, AUTH, ABOVE, -24, 150, 1, 1, 1U, 0); }
+    else if (strcmp(kase, "wide_lifetime") == 0) { if (n % 2U == 0U) add(s, AUTH, ABOVE, -24, 150, 1, 1, 1U, 0); }
   } else if (strncmp(kase, "bad_", 4) == 0) {
     GenesisVirtualSprite *c;
     add(s, AUTH, ABOVE, 100, 150, 1, 1, 1U, 0);   /* a valid command first: it must not be drawn when the set is rejected */
